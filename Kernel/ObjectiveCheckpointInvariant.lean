@@ -20,7 +20,8 @@ A step is one of three things (`Step`), and the node commits nothing else:
 
 1. an admitted kernel turn (`ObjectiveActivity.AdmittedTurn`: `publish`,
    `create`, `birth`, `resolve`, `deliver`, `topUp`, `exhaust`,
-   `abandon`), executed under any schedule and any receiver's sealing, with its
+   `abandon`, `invoke`, `deliverMessage`, and the upgrade turns `adopt`, `migrate`,
+   `abortDrained`, `rebirth`), executed under any schedule and any receiver's sealing, with its
    final posts (`ActivitySeatEnd.finalize`: an ending turn also closes the seats
    its activity holds);
 2. a seat turn: an intent whose posts the seat kernel checked inert
@@ -162,6 +163,17 @@ theorem readObject_none_payload {rootBytes : Bytes → Digest} {config : Config}
   | none =>
     cases present : payloadOf (snapshot.canonicalBytes (objectCell config.domain object)) with
     | none => rfl
+    | some payload => simp [readObject, found, present] at read
+
+/-- A cell `readObject` reads a record from holds no package. -/
+theorem readObject_package {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {object : CellId} {record : ObjectRecord.ObjectRecord} (read : readObject config snapshot object = .ok (some record)) :
+    bodyOf .package (snapshot.canonicalBytes (objectCell config.domain object)) = none := by
+  cases found : bodyOf .object (snapshot.canonicalBytes (objectCell config.domain object)) with
+  | some body => exact bodyOf_other found (by decide)
+  | none =>
+    cases present : payloadOf (snapshot.canonicalBytes (objectCell config.domain object)) with
+    | none => exact bodyOf_of_payload_none present
     | some payload => simp [readObject, found, present] at read
 
 theorem readSlot_package {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -522,13 +534,22 @@ theorem Delivery.prior {rootBytes : Bytes → Digest} {config : Config} {snapsho
   subst programs states
   exact types
 
+/-- The counters' post of a turn (the object record image) is safe. -/
+theorem countPosts_safe {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {object : CellId} {record : ObjectRecord.ObjectRecord} (read : readObject config snapshot object = .ok (some record))
+    (pin activity : Digest) (before after : Bool) :
+    ∀ post ∈ countPosts config snapshot object record pin activity before after, PostSafe config snapshot post := by
+  intro post member
+  rw [mem_countPosts member]
+  exact postSafe_inert (readObject_package read) (recordIn_image_other _ _ (by decide))
+
 theorem birth_safe {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : BirthRequest} (born : Birth config snapshot height request) :
     ∀ post ∈ born.posts, PostSafe config snapshot post := by
   rw [born.postsExact]
   intro post member
   simp only [List.mem_cons, List.mem_append, List.not_mem_nil, or_false] at member
-  rcases member with isRecord | (inYield | isBook)
+  rcases member with isRecord | ((inYield | isBook) | inCount)
   · subst isRecord
     refine ⟨bodyOf_of_payload_none born.fresh, fun found read _ => ?_⟩
     obtain ⟨same, await, awaiting⟩ := recordIn_recordImage read
@@ -554,6 +575,8 @@ theorem birth_safe {rootBytes : Bytes → Digest} {config : Config} {snapshot : 
       exact segmentCommit_safe born.currentExact commit post inYield
   · subst isBook
     exact book_post_safe born.bookExact born.posted
+  · rw [mem_objectPost inCount]
+    exact postSafe_inert (readObject_package born.objectExact) (recordIn_image_other _ _ (by decide))
 
 theorem delivery_safe {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : DeliverRequest} (typed : RecordCellsTyped config snapshot)
@@ -563,7 +586,7 @@ theorem delivery_safe {rootBytes : Bytes → Digest} {config : Config} {snapshot
   rw [delivery.postsExact]
   intro post member
   simp only [List.mem_cons, List.mem_append, List.not_mem_nil, or_false] at member
-  rcases member with isRecord | ((inSettlement | inYield) | isBook)
+  rcases member with isRecord | (((inSettlement | inYield) | isBook) | inCount)
   · subst isRecord
     refine ⟨readRecord_package delivery.recordExact, fun found read _ => ?_⟩
     obtain ⟨same, await, awaiting⟩ := recordIn_recordImage read
@@ -593,6 +616,7 @@ theorem delivery_safe {rootBytes : Bytes → Digest} {config : Config} {snapshot
       exact segmentCommit_safe delivery.viewExact (resumedSegment_committed ended).2 post inYield
   · subst isBook
     exact book_post_safe delivery.bookExact delivery.posted
+  · exact countPosts_safe delivery.objectExact _ _ _ _ post inCount
 
 theorem exhaustion_safe {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : ExhaustRequest} (typed : RecordCellsTyped config snapshot)
@@ -618,12 +642,13 @@ theorem abandonment_safe {rootBytes : Bytes → Digest} {config : Config} {snaps
   rw [abandoned.postsExact]
   intro post member
   simp only [List.mem_cons, List.mem_append, List.not_mem_nil, or_false] at member
-  rcases member with isRecord | (inSlot | isBook)
+  rcases member with isRecord | ((inSlot | isBook) | inCount)
   · subst isRecord
     exact postSafe_inert (readRecord_package abandoned.recordExact) (recordIn_retired)
   · exact abandonSlot_safe abandoned.slotExact post inSlot
   · subst isBook
     exact book_post_safe abandoned.bookExact abandoned.posted
+  · exact countPosts_safe abandoned.objectExact _ _ _ _ post inCount
 
 theorem resolution_safe {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : ResolveRequest} (resolution : Resolution config snapshot height request) :
@@ -733,6 +758,73 @@ theorem messageDelivery_safe {rootBytes : Bytes → Digest} {config : Config} {s
       exact slot_post_safe (readSlot_package delivered.slotExact) _
     · subst isBook; exact book_post_safe delivered.bookExact delivered.posted
 
+/-! ### The upgrade turns -/
+
+/-- An ADOPT writes the object record and the Book. -/
+theorem adoption_safe {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : AdoptRequest} (adopted : Adoption config snapshot height request) :
+    ∀ post ∈ adopted.posts, PostSafe config snapshot post := by
+  rw [adopted.postsExact]
+  intro post member
+  simp only [List.mem_cons, List.not_mem_nil, or_false] at member
+  rcases member with isObject | isBook
+  · subst isObject
+    exact postSafe_inert (readObject_package adopted.recordExact) (recordIn_image_other _ _ (by decide))
+  · subst isBook
+    exact book_post_safe adopted.bookExact adopted.posted
+
+/-- A MIGRATE writes the object record, the migrated state and the Book. -/
+theorem migration_safe {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : MigrateRequest} (migrated : Migrated config snapshot height request) :
+    ∀ post ∈ migrated.posts, PostSafe config snapshot post := by
+  rw [migrated.postsExact]
+  intro post member
+  simp only [List.mem_cons, List.mem_append, List.not_mem_nil, or_false] at member
+  rcases member with isObject | inState | isBook
+  · subst isObject
+    exact postSafe_inert (readObject_package migrated.recordExact) (recordIn_image_other _ _ (by decide))
+  · unfold migratedStatePosts at inState
+    split at inState
+    · simp only [List.mem_singleton] at inState
+      subst inState
+      exact state_post_safe migrated.currentExact _
+    · cases inState
+  · subst isBook
+    exact book_post_safe migrated.bookExact migrated.posted
+
+/-- An abort retires the record, reclaims the slot, writes the Book and the counters. -/
+theorem abort_safe {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : AbortRequest} (aborted : Abort config snapshot height request) :
+    ∀ post ∈ aborted.posts, PostSafe config snapshot post := by
+  rw [aborted.postsExact]
+  intro post member
+  simp only [List.mem_cons, List.mem_append, List.not_mem_nil, or_false] at member
+  rcases member with isRecord | ((inSlot | isBook) | inCount)
+  · subst isRecord
+    have ended : ∀ await, aborted.ended.phase ≠ .awaiting await := by
+      rw [aborted.endedExact]
+      exact nextRecord_ended _ _ _ _ (abortSegment_ends aborted.segmentExact)
+    refine postSafe_inert (readRecord_package aborted.recordExact) ?_
+    simp only [recordPost, postAt, recordImage_ended _ ended]
+    exact recordIn_retired
+  · exact abandonSlot_safe aborted.slotExact post inSlot
+  · subst isBook
+    exact book_post_safe aborted.bookExact aborted.posted
+  · exact countPosts_safe aborted.objectExact _ _ _ _ post inCount
+
+/-- A rebirth is a birth, plus the old record retired and its slot reclaimed. -/
+theorem rebirth_safe {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : RebirthRequest} (reborn : Rebirth config snapshot height request) :
+    ∀ post ∈ reborn.posts, PostSafe config snapshot post := by
+  rw [reborn.postsExact]
+  intro post member
+  rcases List.mem_append.mp member with inBirth | inOld
+  · exact birth_safe reborn.born post inBirth
+  · rcases List.mem_cons.mp inOld with isOld | inSlot
+    · subst isOld
+      exact postSafe_inert (readRecord_package reborn.oldExact) recordIn_retired
+    · exact abandonSlot_safe reborn.slotExact post inSlot
+
 /-- **Every admitted kernel turn's posts are safe** on a typed snapshot. -/
 theorem AdmittedTurn.safe {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} (typed : RecordCellsTyped config snapshot) (turn : AdmittedTurn config snapshot height) :
@@ -752,6 +844,10 @@ theorem AdmittedTurn.safe {rootBytes : Bytes → Digest} {config : Config} {snap
   | abandon _ abandoned => exact abandonment_safe abandoned
   | invoke _ invoked => exact invocation_safe invoked
   | deliverMessage _ delivered => exact messageDelivery_safe delivered
+  | adopt _ adopted => exact adoption_safe adopted
+  | migrate _ migrated => exact migration_safe migrated
+  | abortDrained _ aborted => exact abort_safe aborted
+  | rebirth _ reborn => exact rebirth_safe reborn
 
 /-! ## An ending turn's final posts are safe
 
@@ -779,6 +875,10 @@ theorem finalIntent_writes {rootBytes : Bytes → Digest} {config : Config} {sna
   | invoke _ _ => simp [ActivitySeatEnd.finalize, ActivitySeatEnd.AdmittedTurn.ending] at final; rw [← final.1]; rfl
   | deliverMessage _ _ =>
     simp [ActivitySeatEnd.finalize, ActivitySeatEnd.AdmittedTurn.ending] at final; rw [← final.1]; rfl
+  | adopt _ _ => simp [ActivitySeatEnd.finalize, ActivitySeatEnd.AdmittedTurn.ending] at final; rw [← final.1]; rfl
+  | migrate _ _ => simp [ActivitySeatEnd.finalize, ActivitySeatEnd.AdmittedTurn.ending] at final; rw [← final.1]; rfl
+  | abortDrained _ _ => rfl
+  | rebirth _ _ => rfl
 
 /-- **Posts the seat kernel checked inert are safe**: they sit on no package and
 write no record. -/
@@ -965,10 +1065,11 @@ theorem birth_quiet {rootBytes : Bytes → Digest} {config : Config} {snapshot :
   rw [born.postsExact]
   intro post member
   simp only [List.mem_cons, List.mem_append, List.not_mem_nil, or_false] at member
-  rcases member with isRecord | (inYield | isBook)
+  rcases member with isRecord | ((inYield | isBook) | inCount)
   · subst isRecord; exact quiet_recordPost config snapshot born.cell born.record
   · exact yielded_posts_quiet born.yieldedExact post inYield
   · subst isBook; exact quiet_of_payload_none (Postings.write_payload config snapshot born.posted)
+  · rw [mem_objectPost inCount]; exact quiet_image (role := .object) rfl (by decide) (by decide)
 
 theorem delivery_quiet {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request) :
@@ -977,11 +1078,12 @@ theorem delivery_quiet {rootBytes : Bytes → Digest} {config : Config} {snapsho
   rw [delivery.postsExact]
   intro post member
   simp only [List.mem_cons, List.mem_append, List.not_mem_nil, or_false] at member
-  rcases member with isRecord | ((inSettlement | inYield) | isBook)
+  rcases member with isRecord | (((inSettlement | inYield) | isBook) | inCount)
   · subst isRecord; exact quiet_recordPost config snapshot request.record delivery.next
   · exact quiet_of_payload_none (by rw [retired post inSettlement]; exact payloadOf_retired)
   · exact yielded_posts_quiet (resumedSegment_commit delivery.endExact) post inYield
   · subst isBook; exact quiet_of_payload_none (Postings.write_payload config snapshot delivery.posted)
+  · rw [mem_countPosts inCount]; exact quiet_image (role := .object) rfl (by decide) (by decide)
 
 theorem exhaustion_quiet {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : ExhaustRequest} (exhausted : Exhaustion config snapshot height request) :
@@ -1021,10 +1123,11 @@ theorem abandonment_quiet {rootBytes : Bytes → Digest} {config : Config} {snap
   rw [abandoned.postsExact]
   intro post member
   simp only [List.mem_cons, List.mem_append, List.not_mem_nil, or_false] at member
-  rcases member with isRecord | (inSlot | isBook)
+  rcases member with isRecord | ((inSlot | isBook) | inCount)
   · subst isRecord; exact quiet_of_payload_none payloadOf_retired
   · exact abandonSlot_quiet abandoned.slotExact post inSlot
   · subst isBook; exact quiet_of_payload_none (Postings.write_payload config snapshot abandoned.posted)
+  · rw [mem_countPosts inCount]; exact quiet_image (role := .object) rfl (by decide) (by decide)
 
 /-- A resolution decides a SUBJECT slot (`AnswerSlot.decide_single_decider`): its
 decided slot keeps the decider `subject`, never `delivery`. -/
@@ -1067,6 +1170,55 @@ theorem creation_quiet {rootBytes : Bytes → Digest} {config : Config} {snapsho
       simp only [seeded, Option.map_some, Option.toList_some, List.mem_singleton] at tail
       subst tail
       exact quiet_image (role := .state) rfl (by decide) (by decide)
+
+theorem adoption_quiet {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : AdoptRequest} (adopted : Adoption config snapshot height request) :
+    ∀ post ∈ adopted.posts, Quiet post.bytes := by
+  rw [adopted.postsExact]
+  intro post member
+  simp only [List.mem_cons, List.not_mem_nil, or_false] at member
+  rcases member with isObject | isBook
+  · subst isObject; exact quiet_image (role := .object) rfl (by decide) (by decide)
+  · subst isBook; exact quiet_of_payload_none (Postings.write_payload config snapshot adopted.posted)
+
+theorem migration_quiet {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : MigrateRequest} (migrated : Migrated config snapshot height request) :
+    ∀ post ∈ migrated.posts, Quiet post.bytes := by
+  rw [migrated.postsExact]
+  intro post member
+  simp only [List.mem_cons, List.mem_append, List.not_mem_nil, or_false] at member
+  rcases member with isObject | inState | isBook
+  · subst isObject; exact quiet_image (role := .object) rfl (by decide) (by decide)
+  · unfold migratedStatePosts at inState
+    split at inState
+    · simp only [List.mem_singleton] at inState
+      subst inState
+      exact quiet_image (role := .state) rfl (by decide) (by decide)
+    · cases inState
+  · subst isBook; exact quiet_of_payload_none (Postings.write_payload config snapshot migrated.posted)
+
+theorem abort_quiet {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : AbortRequest} (aborted : Abort config snapshot height request) :
+    ∀ post ∈ aborted.posts, Quiet post.bytes := by
+  rw [aborted.postsExact]
+  intro post member
+  simp only [List.mem_cons, List.mem_append, List.not_mem_nil, or_false] at member
+  rcases member with isRecord | ((inSlot | isBook) | inCount)
+  · subst isRecord; exact quiet_recordPost config snapshot request.record aborted.ended
+  · exact abandonSlot_quiet aborted.slotExact post inSlot
+  · subst isBook; exact quiet_of_payload_none (Postings.write_payload config snapshot aborted.posted)
+  · rw [mem_countPosts inCount]; exact quiet_image (role := .object) rfl (by decide) (by decide)
+
+theorem rebirth_quiet {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : RebirthRequest} (reborn : Rebirth config snapshot height request) :
+    ∀ post ∈ reborn.posts, Quiet post.bytes := by
+  rw [reborn.postsExact]
+  intro post member
+  rcases List.mem_append.mp member with inBirth | inOld
+  · exact birth_quiet reborn.born post inBirth
+  · rcases List.mem_cons.mp inOld with isOld | inSlot
+    · subst isOld; exact quiet_of_payload_none payloadOf_retired
+    · exact abandonSlot_quiet reborn.slotExact post inSlot
 
 /-- What an invocation posts, by payload: the Book, a state image, or its mail. -/
 theorem invocation_posts_cases {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -1153,6 +1305,10 @@ def AdmittedTurn.Sends {rootBytes : Bytes → Digest} {config : Config} {snapsho
   | .abandon _ _ => False
   | .invoke _ invoked => invoked.journal.outbox ≠ []
   | .deliverMessage _ _ => True
+  | .adopt _ _ => False
+  | .migrate _ _ => False
+  | .abortDrained _ _ => False
+  | .rebirth _ _ => False
 
 /-- **The turn that may decide a delivery slot**: `deliverMessage`, and no other.
 Every constructor is listed. -/
@@ -1168,6 +1324,10 @@ def AdmittedTurn.DeliversMessage {rootBytes : Bytes → Digest} {config : Config
   | .abandon _ _ => False
   | .invoke _ _ => False
   | .deliverMessage _ _ => True
+  | .adopt _ _ => False
+  | .migrate _ _ => False
+  | .abortDrained _ _ => False
+  | .rebirth _ _ => False
 
 /-- Every turn but the sending ones posts no inbox: by cases over the whole sum. -/
 theorem AdmittedTurn.posts_hold_no_inbox {rootBytes : Bytes → Digest} {config : Config}
@@ -1189,6 +1349,10 @@ theorem AdmittedTurn.posts_hold_no_inbox {rootBytes : Bytes → Digest} {config 
   | invoke _ invoked =>
     exact invocation_silent_holds_no_inbox invoked (Classical.byContradiction fun sends => silent sends)
   | deliverMessage _ delivered => exact (silent trivial).elim
+  | adopt _ adopted => exact fun post member => (adoption_quiet adopted post member).1
+  | migrate _ migrated => exact fun post member => (migration_quiet migrated post member).1
+  | abortDrained _ aborted => exact fun post member => (abort_quiet aborted post member).1
+  | rebirth _ reborn => exact fun post member => (rebirth_quiet reborn post member).1
 
 /-- Every turn but `deliverMessage` decides no delivery slot: by cases over the whole sum. -/
 theorem AdmittedTurn.posts_decide_no_delivery {rootBytes : Bytes → Digest} {config : Config}
@@ -1209,6 +1373,10 @@ theorem AdmittedTurn.posts_decide_no_delivery {rootBytes : Bytes → Digest} {co
   | abandon _ abandoned => exact fun post member => (abandonment_quiet abandoned post member).2
   | invoke _ invoked => exact invocation_decides_nothing invoked
   | deliverMessage _ delivered => exact (other trivial).elim
+  | adopt _ adopted => exact fun post member => (adoption_quiet adopted post member).2
+  | migrate _ migrated => exact fun post member => (migration_quiet migrated post member).2
+  | abortDrained _ aborted => exact fun post member => (abort_quiet aborted post member).2
+  | rebirth _ reborn => exact fun post member => (rebirth_quiet reborn post member).2
 
 /-- **An ending turn's final posts are as quiet as its own** (a Book post or a seat
 closing post holds no activity payload). -/
@@ -1422,6 +1590,8 @@ theorem reachable_delivery_stored_complete {rootBytes : Bytes → Digest} {confi
 #assert_axioms readState_package
 #assert_axioms readObject_none_payload
 #assert_axioms readSlot_package
+#assert_axioms readObject_package
+#assert_axioms countPosts_safe
 #assert_axioms readRecord_package
 #assert_axioms recordIn_recordImage
 #assert_axioms recordIn_retired
@@ -1456,6 +1626,10 @@ theorem reachable_delivery_stored_complete {rootBytes : Bytes → Digest} {confi
 #assert_axioms publication_safe
 #assert_axioms creation_safe
 #assert_axioms invocation_safe
+#assert_axioms adoption_safe
+#assert_axioms migration_safe
+#assert_axioms abort_safe
+#assert_axioms rebirth_safe
 #assert_axioms AdmittedTurn.safe
 #assert_axioms finalIntent_writes
 #assert_axioms finalize_safe
@@ -1483,6 +1657,10 @@ theorem reachable_delivery_stored_complete {rootBytes : Bytes → Digest} {confi
 #assert_axioms resolution_quiet
 #assert_axioms publication_quiet
 #assert_axioms creation_quiet
+#assert_axioms adoption_quiet
+#assert_axioms migration_quiet
+#assert_axioms abort_quiet
+#assert_axioms rebirth_quiet
 #assert_axioms invocation_posts_cases
 #assert_axioms invocation_mail_nil
 #assert_axioms mail_decides_nothing

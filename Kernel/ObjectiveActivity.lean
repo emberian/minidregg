@@ -51,12 +51,20 @@ not at all (`DurableDataIntent.execute_no_partial_data_commit`):
   the Book postings commit together.
 * `topUp`: anyone funds an activity's purse on the Book.
 * `create`: a holder of the object resource installs its `ObjectRecord`
-  (`Kernel.ObjectRecord`: pin, law, upgrade policy, payer) at its own protected
-  coordinate (`objectCell`), and optionally the object's INITIAL declared state (`seed`),
-  the state cell's first and only write of the creation, judged by the creator's law alone
+  (`Kernel.ObjectRecord`: pin, declared state type, law, upgrade policy, payer, live
+  counters, phase) at its own protected coordinate (`objectCell`), and optionally the
+  object's INITIAL declared state (`seed`), the state cell's first and only write of the
+  creation, judged by the creator's law alone and typed at the declared state type
   (`create_seed_judged`, `create_seed_refused_names_clause`). There is no direct write of
   declared state after that: it changes only by the object's own package (a birth, a
   delivery, a call frame, a delivered message), under the pin.
+
+Counters. The object record counts its awaiting activities (`ObjectRecord.live`,
+`rebirths`, by `ObjectRecord.classOf`): a birth that leaves its activity awaiting
+writes the record with `retain`, a turn that ends an awaiting activity (an ending
+delivery, an abandonment) writes it with `release` (`recount`, `countPosts`); a
+delivery that yields again leaves the record unwritten. The upgrade turns read
+these counters (the kernel cannot enumerate the record cells of an object).
 
 Objects. A cell is an object to the kernel exactly when it has a record. A
 birth on any other cell is refused by name (`birth_refuses_non_object`), and a
@@ -123,6 +131,7 @@ open Minidregg.Kernel.ObjectState (encodeObjectState decodeObjectState)
 open Minidregg.Kernel.ObjectRecord (ObjectRecord Facts WriteRefusal admitWrite)
 open Minidregg.Kernel.ObjectiveTariff (Tariff zeroCapacity addCapacity)
 open Minidregg.Compiler.ObjectiveInvocationClaim (Capacity capacityStream)
+open Minidregg.Kernel.ObjectStateType (typedAt)
 set_option autoImplicit false
 
 abbrev Role := ObjectiveActivityCell.Role
@@ -476,6 +485,50 @@ inductive Refusal where
   | pinUnpublished
   /-- A creation seeds the declared state of an object whose state cell already exists. -/
   | stateExists
+
+  /-- A creation declares a state type that is not first-order data (`Ty.isData`). -/
+  | stateTypeNotData
+  /-- The object drains toward an upgrade whose migration is not the identity (or
+  whose old state type is not a value subtype of the new): no new birth or call
+  until MIGRATE; a message to it waits in its inbox. -/
+  | draining
+  /-- The activity is pinned to a package the object no longer runs: it was chosen
+  for REBIRTH and waits for its rebirth turn. -/
+  | awaitingRebirth
+  /-- The migration declaration does not lower, check, or is not `old -> new`. -/
+  | migrationShape (reason : String)
+  /-- The migration did not run to a value within its declared envelope. -/
+  | migrationFault (reason : String)
+  /-- An ADOPT on a `frozen` object. -/
+  | frozen
+  /-- An ADOPT whose request facts the policy's authority does not admit. -/
+  | notUpgradeAuthority
+  /-- An ADOPT whose next policy loosens the current one (`UpgradePolicy.permits`). -/
+  | policyLoosened
+  /-- A floor the next law does not provably entail (the index of the floor): the
+  satisfiability decision of `law ∧ ¬floor` returned no checked certificate. -/
+  | floorNotEntailed (index : Nat)
+  /-- An ADOPT naming the package the object already pins. -/
+  | samePin
+  /-- An ADOPT while an earlier upgrade's rebirths are still awaiting, or while one drains. -/
+  | upgradeUnderWay
+  /-- MIGRATE, an abort or a rebirth on an object that is not draining (or not
+  migrated, for a rebirth). -/
+  | notDraining
+  /-- A drain patience outside `1..maxPatience`. -/
+  | drainPatience (patience maximum : Nat)
+  /-- The identity migration needs the old state type to be a value subtype of the new. -/
+  | notSubtype
+  /-- Linearity: old fields neither read by the migration nor dropped. -/
+  | fieldsForgotten (fields : List String)
+  /-- MIGRATE while activities pinned to the old package (and not chosen for rebirth) await. -/
+  | liveActivities (count : Nat)
+  /-- An abort before the drain deadline. -/
+  | notYetDeadline (deadline height : Nat)
+  /-- An abort of an activity chosen for rebirth, or a rebirth of one not chosen. -/
+  | rebirthDisposition
+  /-- A rebirth candidate that is not an awaiting activity of the object on its pin. -/
+  | rebirthTarget (reason : String)
   deriving Repr
 
 /-! ## Typing data against declared types
@@ -1016,6 +1069,51 @@ def readInbox {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (ce
 def objectImage (object : CellId) (record : ObjectRecord) : Bytes :=
   image .object (objectKey object) (ObjectRecord.encodeRecord record)
 
+/-- Whether a phase is still awaiting (an activity the counters count). -/
+def Phase.awaits : Phase → Bool
+  | .awaiting _ => true
+  | _ => false
+
+/-- **The object record after a turn took one of its activities** from awaiting
+(`before`) to awaiting (`after`): `retain` when it starts awaiting, `release` when
+it stops, unchanged otherwise. -/
+def recount (object : ObjectRecord) (pin activity : Digest) (before after : Bool) : ObjectRecord :=
+  if after && !before then object.retain pin activity
+  else if before && !after then object.release pin activity
+  else object
+
+/-- The post of the object record's counters, when they move: none when the
+activity awaited before and after (or neither), so a delivery that yields again
+does not write the object record. -/
+def countPosts {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (object : CellId)
+    (record : ObjectRecord) (pin activity : Digest) (before after : Bool) : List Post :=
+  if before = after then []
+  else [postAt snapshot (objectCell config.domain object) (objectImage object (recount record pin activity before after))]
+
+theorem mem_countPosts {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {object : CellId} {record : ObjectRecord} {pin activity : Digest} {before after : Bool} {post : Post}
+    (member : post ∈ countPosts config snapshot object record pin activity before after) :
+    post = postAt snapshot (objectCell config.domain object) (objectImage object (recount record pin activity before after)) := by
+  unfold countPosts at member
+  split at member
+  · cases member
+  · simpa using member
+
+/-- The post of an object record a turn moved from `before` to `after` (none when
+unchanged). -/
+def objectPost {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (object : CellId)
+    (before after : ObjectRecord) : List Post :=
+  if after = before then [] else [postAt snapshot (objectCell config.domain object) (objectImage object after)]
+
+theorem mem_objectPost {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {object : CellId} {before after : ObjectRecord} {post : Post}
+    (member : post ∈ objectPost config snapshot object before after) :
+    post = postAt snapshot (objectCell config.domain object) (objectImage object after) := by
+  unfold objectPost at member
+  split at member
+  · cases member
+  · simpa using member
+
 /-- The object's record: `none` when the cell has none (not an object), refused
 when the cell holds anything else. -/
 def readObject {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (object : CellId) :
@@ -1502,7 +1600,137 @@ def Publication.intent {rootBytes : Bytes → Digest} {config : Config} {snapsho
     DataIntent rootBytes :=
   intentOf rootBytes (publishTransaction publication.pin) publication.posts publication.guards [] sealing
 
+/-! ### Upgrades: the migration and the drained-write judgment
+
+A migration is a declaration of the NEXT package (`Pending.migration`), lowered
+by this kernel's own front end from that package's stored sources with the
+declaration selected (as a call method is, `ObjectiveCall.loadMethod`): the
+term it runs is the elaborator's output, never an offered core. Its checked type
+is a function `old -> new`; it is applied to the state datum (typed at its
+domain by the checker) and run to a value within the upgrade's declared
+envelope. `none` is the identity. -/
+
+/-- A migration declaration of a stored package: replayed, lowered with the
+declaration selected, accepted by the checker, and a function. -/
+structure Migration (config : Config) (pin : Digest) (name : String) where
+  private mk ::
+  definition : Replay config pin
+  lowering : ObjectiveBendFrontEnd.Lowering
+  replayExact : ObjectiveBendPublication.replay { definition.package with entryDefinition := name } = .ok lowering
+  accepted : ObjectiveBendFrontEnd.Accepted lowering
+  fuelWithin : accepted.packet.fuel ≤ config.typeFuel
+  reuse : Reuse
+  quantity : Quantity
+  domain : Ty
+  codomain : Ty
+  arrowExact : callable accepted.typed.type = .arrow reuse quantity domain codomain
+
+def loadMigration (config : Config) (bytes : Bytes) (pin : Digest) (name : String) :
+    Except Refusal (Migration config pin name) :=
+  match decodeStored bytes with
+  | none => .error .packageMissing
+  | some stored =>
+  match replayPackage config stored pin with
+  | .error reason => .error reason
+  | .ok definition =>
+  match replayExact : ObjectiveBendPublication.replay { definition.package with entryDefinition := name } with
+  | .error d => .error (.migrationShape d.message)
+  | .ok lowering =>
+  match ObjectiveBendFrontEnd.accept lowering with
+  | .error d => .error (.migrationShape d.message)
+  | .ok accepted =>
+  if fuelWithin : accepted.packet.fuel ≤ config.typeFuel then
+    match arrowExact : callable accepted.typed.type with
+    | .arrow reuse quantity domain codomain =>
+      .ok ⟨definition, lowering, replayExact, accepted, fuelWithin, reuse, quantity, domain, codomain, arrowExact⟩
+    | _ => .error (.migrationShape "the migration is not a function of the state")
+  else .error (.migrationShape "typed core checker fuel exceeds the kernel's capacity")
+
+/-- The migration applied to a state datum, annotated at its domain. -/
+def Migration.applied {config : Config} {pin : Digest} {name : String} (migration : Migration config pin name)
+    (value : Data) : AnnotatedTerm :=
+  ⟨.app migration.accepted.source.term value.term,
+    fun path => match path with
+      | 0 :: rest => migration.accepted.source.annotations rest
+      | 1 :: rest => annotationsOf (dataAnnotations migration.accepted.source.assumptions.bounds 64 value
+          migration.domain []) rest
+      | _ => none,
+    migration.accepted.source.assumptions⟩
+
+/-- Run a migration on a state datum within `ticks`, under the segment limits every run
+gets (`segmentLimits`, from the fresh start): the application must check, and the run must
+finish with a value. -/
+def runMigration (config : Config) {pin : Digest} {name : String} (migration : Migration config pin name)
+    (ticks : Nat) (value : Data) : Except Refusal Data :=
+  match check (migration.applied value) [] config.typeFuel with
+  | none => .error (.migrationFault "the state does not type at the migration's domain")
+  | some _ =>
+    let start := initial (migration.applied value).erase
+    match runBounded (segmentLimits config start) ticks start with
+    | .finished _ finished =>
+      match ObjectiveBendDemandData.complete (segmentLimits config start) config.planBudget finished with
+      | .ok result => .ok result.value
+      | .error (failure, _) => .error (.migrationFault s!"result extraction: {reprStr failure}")
+    | .suspended _ _ => .error (.migrationFault "it exhausted its declared envelope")
+    | _ => .error (.migrationFault "it did not finish with a value")
+
+/-- The migrated state: the migration's result, or the state itself under the identity. -/
+def migrateValue (config : Config) (bytes : Bytes) (next : ObjectRecord.Pending) (value : Data) :
+    Except Refusal Data :=
+  match next.migration with
+  | none => .ok value
+  | some name =>
+    match loadMigration config bytes next.pin name with
+    | .error reason => .error reason
+    | .ok migration => runMigration config migration next.envelope.sourceTicks value
+
+/-- **The drained judgment of one state** while `record` drains toward `next`:
+the state, migrated, is admitted by the record MIGRATE will install
+(`ObjectRecord.successor`), under the migration's facts (`migrateFacts`): exactly
+the judgment MIGRATE makes. Typing at the next state type is part of it
+(`admitWrite`). Returns the migrated state. -/
+def judgeMigrated {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (record : ObjectRecord) (object : CellId) (next : ObjectRecord.Pending) (value : Data) : Except Refusal Data :=
+  match migrateValue config (packageBytes config snapshot next.pin) next value with
+  | .error reason => .error reason
+  | .ok migrated =>
+    match admitWrite (record.successor next) (ObjectRecord.migrateFacts object.value next) (some migrated) migrated with
+    | .ok () => .ok migrated
+    | .error reason => .error (.objectWrite (.upgradeConflict reason))
+
+/-- **The drained-write judgment**: while the object drains, the state a write
+installs must pass `judgeMigrated` (on top of the object's own law, judged as
+before by `judgeWritten`); steady, nothing more. -/
+def judgeDrained {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (record : ObjectRecord) (object : CellId) : Option StateWritten → Except Refusal Unit
+  | none => .ok ()
+  | some written =>
+    match record.phase with
+    | .steady => .ok ()
+    | .draining next _ =>
+      match judgeMigrated config snapshot record object next written.after.value with
+      | .ok _ => .ok ()
+      | .error reason => .error reason
+
+/-- The price of the migration run a drained write costs: the public price of the
+upgrade's declared migration envelope, when the write ran a migration term. -/
+def drainFee (config : Config) (record : ObjectRecord) (written : Option StateWritten) : Nat :=
+  match written, record.phase with
+  | some _, .draining next _ => if next.migration.isSome then config.tariff.workOf next.envelope else 0
+  | _, _ => 0
+
 /-! ### birth -/
+
+/-- The activity a birth RE-BIRTHS (`ObjectiveActivityUpgrade.rebirth`): in the
+birth's own posts and batch, its counter is released and its purse is swept into
+the new purse and closed. -/
+structure Predecessor where
+  pin : Digest
+  activity : Digest
+  purse : AccountId
+  /-- The predecessor's escrow account: the new purse returns there at the end. -/
+  refund : AccountId
+  deriving DecidableEq, Repr
 
 structure BirthRequest where
   subject : SubjectId
@@ -1520,6 +1748,8 @@ structure BirthRequest where
   account : AccountId
   /-- Moved into the activity's purse; must reserve the first await's fee pair. -/
   deposit : Nat
+  /-- The activity this birth re-births, if any (`none` for every signed birth). -/
+  predecessor : Option Predecessor
 
 def birthTransaction (request : BirthRequest) : TransactionId :=
   tagged "DREGG/OBJECTIVE/ACTIVITY/TX/BIRTH/v2"
@@ -1532,10 +1762,36 @@ to the collector, move the deposit into the purse; then the purse settles
 (`settlePurse`). -/
 def birthBatch (config : Config) (book : Book) (held : AccountId) (request : BirthRequest)
     (escrow : Escrow) (deposit : Nat) (segment : Segment) : Except Refusal Batch :=
-  settlePurse config (Batch.apply ⟨[held], [], []⟩ book) held escrow deposit
-    ⟨[], [.fee request.account config.collector config.asset (config.tariff.workOf request.envelope)] ++
-      (if request.deposit = 0 then [] else [.transfer request.account held config.asset request.deposit]), []⟩ segment
+  let registered := Batch.apply ⟨[held], [], []⟩ book
+  let own : List Operation :=
+    [.fee request.account config.collector config.asset (config.tariff.workOf request.envelope)] ++
+      (if request.deposit = 0 then [] else [.transfer request.account held config.asset request.deposit])
+  -- A rebirth sweeps what is left of its predecessor's purse into the new purse and closes it.
+  let closing : List Operation := match request.predecessor with
+    | none => []
+    | some predecessor => sweep (applyOperations registered own) predecessor.purse held
+  settlePurse config registered held escrow deposit
+    ⟨[], own ++ closing, (request.predecessor.map Predecessor.purse).toList⟩ segment
   |>.map fun settled => ⟨held :: settled.registrations, settled.operations, settled.deregistrations⟩
+
+/-- The account the activity's purse is returned to at its end: the payer's, or
+for a rebirth the predecessor's (the request's account is the old purse, closed
+by the rebirth). -/
+def BirthRequest.escrowAccount (request : BirthRequest) : AccountId :=
+  match request.predecessor with
+  | some predecessor => predecessor.refund
+  | none => request.account
+
+/-- The turn code a birth's write is judged under: 1, or 9 for a rebirth. -/
+def BirthRequest.factsTurn (request : BirthRequest) : Nat :=
+  if request.predecessor.isSome then 9 else 1
+
+/-- The object record after a birth: its predecessor (if any) released, the new
+activity retained when it awaits. -/
+def birthCount (object : ObjectRecord) (request : BirthRequest) (activity : Digest) (awaits : Bool) : ObjectRecord :=
+  recount (match request.predecessor with
+    | none => object
+    | some predecessor => object.release predecessor.pin predecessor.activity) request.pin activity false awaits
 
 /-- An admitted birth: the program, its first segment from its initial state,
 and the posts that commit the record, the yield and the Book postings. -/
@@ -1562,30 +1818,39 @@ structure Birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
   recordExact : record = nextRecord
     ⟨request.object, activityId request.object (birthTransaction request), request.pin, dataBytes request.input,
       0, [], checkpointDigest [],
-      escrowOf config.tariff request.subject request.account request.resume request.timeout,
+      escrowOf config.tariff request.subject request.escrowAccount request.resume request.timeout,
       0, .faulted "unborn"⟩ 0 segment yielded
+  /-- The object's record: the birth is on an object, and runs the package it pins. -/
+  object : ObjectRecord
+  objectExact : readObject config snapshot request.object = .ok (some object)
+  /-- The object admits new activities (steady, or draining under the identity). -/
+  admits : object.admitsNew = true
+  /-- ... of the package it runs for them (its pin; while draining, the next pin). -/
+  pinned : object.activePin = request.pin
   book : BookCell
   bookExact : loadBook config snapshot = .ok book
   posted : Postings book
   posts : List Post
   recordFirst : posts.head? = some (recordPost config snapshot cell record)
+  /-- The record, the yield's posts, the Book, and (when the birth leaves the
+  activity awaiting) the object record with the activity counted (`retain`). -/
   postsExact : posts = recordPost config snapshot cell record ::
-    ((yielded.map YieldCommit.posts).getD [] ++ [posted.write config snapshot])
+    ((yielded.map YieldCommit.posts).getD [] ++ [posted.write config snapshot] ++
+      objectPost config snapshot request.object object
+        (birthCount object request (activityId request.object (birthTransaction request)) record.phase.awaits))
   guards : List ReadGuard
   guardsExact : guards = [guardAt snapshot (objectCell config.domain request.object),
     guardAt snapshot (packageCell config.domain request.pin),
     guardAt snapshot (stateCell config.domain request.object)]
-  /-- The object's record: the birth is on an object, and runs the package it pins. -/
-  object : ObjectRecord
-  objectExact : readObject config snapshot request.object = .ok (some object)
-  pinned : object.pin = request.pin
   /-- The object's law admitted the first segment's write (if it wrote). -/
-  judged : judgeWritten object (factsOf request.subject height request.object 1 (some request.pin))
+  judged : judgeWritten object (factsOf request.subject height request.object request.factsTurn (some request.pin))
     (yielded.bind YieldCommit.written) = .ok ()
+  /-- While the object drains, the write's state passes the next record's judgment. -/
+  drained : judgeDrained config snapshot object request.object (yielded.bind YieldCommit.written) = .ok ()
   /-- A yielding birth's deposit reserves the first await's fee pair and its
   record's storage deposit. -/
   funded : ¬ (segment.yields ∧ request.deposit <
-    (escrowOf config.tariff request.subject request.account request.resume request.timeout).pair +
+    (escrowOf config.tariff request.subject request.escrowAccount request.resume request.timeout).pair +
       storageDeposit config record)
 
 def birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
@@ -1594,7 +1859,8 @@ def birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot 
   | .error reason => throw reason
   | .ok none => throw .notAnObject
   | .ok (some object) =>
-    if pinned : object.pin = request.pin then
+    if admits : object.admitsNew = true then
+    if pinned : object.activePin = request.pin then
       if !config.covers request.envelope then throw (.uncovered request.envelope)
       if !config.covers request.resume then throw (.uncovered request.resume)
       if !config.covers request.timeout then throw (.uncovered request.timeout)
@@ -1626,8 +1892,11 @@ def birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot 
                 current false segment with
             | .error reason => throw reason
             | .ok yielded =>
-              match judged : judgeWritten object (factsOf request.subject height request.object 1 (some request.pin))
+              match judged : judgeWritten object (factsOf request.subject height request.object request.factsTurn (some request.pin))
                   (yielded.bind YieldCommit.written) with
+              | .error reason => throw reason
+              | .ok () =>
+              match drained : judgeDrained config snapshot object request.object (yielded.bind YieldCommit.written) with
               | .error reason => throw reason
               | .ok () =>
                 match yielded with
@@ -1636,7 +1905,7 @@ def birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot 
                   | some view => viewProtocol program view
                   | none => throw .stateMissing
                 | none => pure ()
-                let escrow := escrowOf config.tariff request.subject request.account request.resume request.timeout
+                let escrow := escrowOf config.tariff request.subject request.escrowAccount request.resume request.timeout
                 let base : Record := ⟨request.object, activity, request.pin, dataBytes request.input, 0, [],
                   checkpointDigest [], escrow, 0, .faulted "unborn"⟩
                 let record := nextRecord base 0 segment yielded
@@ -1647,14 +1916,16 @@ def birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot 
                     (storageDeposit config record) segment
                   let posted ← postings book batch
                   let posts := recordPost config snapshot cell record ::
-                    ((yielded.map YieldCommit.posts).getD [] ++ [posted.write config snapshot])
+                    ((yielded.map YieldCommit.posts).getD [] ++ [posted.write config snapshot] ++
+                      objectPost config snapshot request.object object (birthCount object request activity record.phase.awaits))
                   pure ⟨program, programExact, cell, rfl, fresh, current, currentExact, segment, segmentExact, yielded,
-                    yieldedExact, record, rfl, book, bookExact, posted, posts, rfl, rfl,
+                    yieldedExact, record, rfl, object, objectExact, admits, pinned, book, bookExact, posted, posts, rfl, rfl,
                     [guardAt snapshot (objectCell config.domain request.object),
                       guardAt snapshot (packageCell config.domain request.pin),
                       guardAt snapshot (stateCell config.domain request.object)], rfl,
-                    object, objectExact, pinned, judged, short⟩
-    else throw (.pinMismatch object.pin request.pin)
+                    judged, drained, short⟩
+    else throw (.pinMismatch object.activePin request.pin)
+    else throw .draining
 
 def Birth.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : BirthRequest} (born : Birth config snapshot height request) (sealing : Seal) :
@@ -1793,10 +2064,11 @@ structure DeliverRequest where
 /-- The ending turn's own postings: the used fee from the purse, and the
 submitter's added envelope from its account, both to the collector. -/
 def deliveryCharges (config : Config) (record : Record) (cell : CellId) (path : Path)
-    (request : DeliverRequest) : Batch :=
+    (request : DeliverRequest) (migration : Nat) : Batch :=
   ⟨[], [.fee (heldAccount cell) config.collector config.asset (record.escrow.used path)] ++
     (if request.extra = zeroCapacity then []
-     else [.fee request.account config.collector config.asset (config.tariff.workOf request.extra)]), []⟩
+     else [.fee request.account config.collector config.asset (config.tariff.workOf request.extra)]) ++
+    (if migration = 0 then [] else [.fee (heldAccount cell) config.collector config.asset migration]), []⟩
 
 structure Delivery {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : DeliverRequest) where
@@ -1834,31 +2106,40 @@ structure Delivery {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
     (record.generation + 1) envelope.sourceTicks view resumed = .ok (segment, yielded)
   next : Record
   nextExact : next = nextRecord record (record.generation + 1) segment yielded
+  /-- The object's record, read in this turn. -/
+  object : ObjectRecord
+  objectExact : readObject config snapshot record.object = .ok (some object)
+  /-- The object still runs the activity's package (not frozen for rebirth). -/
+  runsPin : object.runs record.pin = true
   book : BookCell
   bookExact : loadBook config snapshot = .ok book
   batch : Batch
   batchExact : settlePurse config (logicalBook book.logical) (heldAccount request.record) record.escrow
-    (storageDeposit config next) (deliveryCharges config record request.record settlement.path request) segment =
+    (storageDeposit config next)
+    (deliveryCharges config record request.record settlement.path request
+      (drainFee config object (yielded.bind YieldCommit.written))) segment =
       .ok batch
   posted : Postings book
   postedBatch : posted.batch = batch
   posts : List Post
   recordFirst : posts.head? = some (recordPost config snapshot request.record next)
+  /-- ... and, when the activity ends, the object record with it uncounted (`release`). -/
   postsExact : posts = recordPost config snapshot request.record next ::
-    (settlement.posts ++ (yielded.map YieldCommit.posts).getD [] ++ [posted.write config snapshot])
+    (settlement.posts ++ (yielded.map YieldCommit.posts).getD [] ++ [posted.write config snapshot] ++
+      countPosts config snapshot record.object object record.pin record.activity true next.phase.awaits)
   guards : List ReadGuard
   guardsExact : guards = guardAt snapshot (objectCell config.domain record.object) ::
     guardAt snapshot (packageCell config.domain record.pin) ::
     guardAt snapshot (stateCell config.domain record.object) :: settlement.guards
   claims : List StableNullifier
   claimsExact : claims = awaitClaim await.id :: settlement.claims
-  /-- The object's record, read in this turn. -/
-  object : ObjectRecord
-  objectExact : readObject config snapshot record.object = .ok (some object)
   /-- The object's law admitted the segment's write (if it wrote), judged with
   the activity's principal as subject. -/
   judged : judgeWritten object (factsOf record.escrow.payer height record.object 2 (some record.pin))
     (yielded.bind YieldCommit.written) = .ok ()
+  /-- While the object drains, the write's state, migrated, passes the next
+  record's judgment (the drained-write judgment). -/
+  drained : judgeDrained config snapshot object record.object (yielded.bind YieldCommit.written) = .ok ()
 
 def deliver {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : DeliverRequest) : Except Refusal (Delivery config snapshot height request) :=
@@ -1881,6 +2162,7 @@ def deliver {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
   | .error reason => .error reason
   | .ok none => .error .notAnObject
   | .ok (some object) =>
+  if runsPin : object.runs record.pin = true then
   match settled : settle config snapshot height request.record await with
   | .error reason => .error reason
   | .ok settlement =>
@@ -1909,12 +2191,17 @@ def deliver {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
       (yielded.bind YieldCommit.written) with
   | .error reason => .error reason
   | .ok () =>
+  match drained : judgeDrained config snapshot object record.object (yielded.bind YieldCommit.written) with
+  | .error reason => .error reason
+  | .ok () =>
   let next := nextRecord record (record.generation + 1) segment yielded
   match bookExact : loadBook config snapshot with
   | .error reason => .error reason
   | .ok book =>
   match batchExact : settlePurse config (logicalBook book.logical) (heldAccount request.record) record.escrow
-      (storageDeposit config next) (deliveryCharges config record request.record settlement.path request) segment with
+      (storageDeposit config next)
+      (deliveryCharges config record request.record settlement.path request
+        (drainFee config object (yielded.bind YieldCommit.written))) segment with
   | .error reason => .error reason
   | .ok batch =>
   match postings book batch with
@@ -1922,17 +2209,20 @@ def deliver {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
   | .ok posted =>
   if postedBatch : posted.batch = batch then
   let posts := recordPost config snapshot request.record next ::
-    (settlement.posts ++ (yielded.map YieldCommit.posts).getD [] ++ [posted.write config snapshot])
+    (settlement.posts ++ (yielded.map YieldCommit.posts).getD [] ++ [posted.write config snapshot] ++
+      countPosts config snapshot record.object object record.pin record.activity true next.phase.awaits)
   let guards := guardAt snapshot (objectCell config.domain record.object) ::
     guardAt snapshot (packageCell config.domain record.pin) ::
     guardAt snapshot (stateCell config.domain record.object) :: settlement.guards
   .ok ⟨record, recordExact, located, await, awaiting, idExact, digestExact, input, inputExact, program, programExact,
     settlement, settled, view, viewExact, response, state, stateExact, resumed, resumeExact, envelope, rfl,
-    heapCovered, segment, yielded, endExact, next, rfl, book, bookExact, batch, batchExact, posted,
+    heapCovered, segment, yielded, endExact, next, rfl, object, objectExact, runsPin, book, bookExact, batch,
+    batchExact, posted,
     postedBatch, posts, rfl, rfl, guards, rfl, awaitClaim await.id :: settlement.claims, rfl,
-    object, objectExact, judged⟩
+    judged, drained⟩
   else .error .bookRefused
   else .error (.heapUncovered (segmentLimits config resumed).heap envelope.heap)
+  else .error .awaitingRebirth
   else .error .checkpointDigest
   else .error .awaitMismatch
   else .error .recordMisplaced
@@ -2182,13 +2472,17 @@ structure Abandonment {rootBytes : Bytes → Digest} (config : Config) (snapshot
   slotPosts : List Post
   slotClaims : List StableNullifier
   slotExact : abandonSlot config snapshot await = .ok (slotPosts, slotClaims)
+  /-- The object's record, read to uncount the activity. -/
+  object : ObjectRecord
+  objectExact : readObject config snapshot record.object = .ok (some object)
   book : BookCell
   bookExact : loadBook config snapshot = .ok book
   posted : Postings book
   postedBatch : posted.batch = abandonCharges config (logicalBook book.logical) request.record record.escrow
   posts : List Post
   postsExact : posts = postAt snapshot request.record retiredImage ::
-    (slotPosts ++ [posted.write config snapshot])
+    (slotPosts ++ [posted.write config snapshot] ++
+      countPosts config snapshot record.object object record.pin record.activity true false)
   claims : List StableNullifier
   claimsExact : claims = awaitClaim await.id :: slotClaims
 
@@ -2206,6 +2500,10 @@ def abandon {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
   match slotExact : abandonSlot config snapshot await with
   | .error reason => .error reason
   | .ok (slotPosts, slotClaims) =>
+  match objectExact : readObject config snapshot record.object with
+  | .error reason => .error reason
+  | .ok none => .error .notAnObject
+  | .ok (some object) =>
   match bookExact : loadBook config snapshot with
   | .error reason => .error reason
   | .ok book =>
@@ -2213,8 +2511,8 @@ def abandon {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
   | .error reason => .error reason
   | .ok posted =>
   if postedBatch : posted.batch = abandonCharges config (logicalBook book.logical) request.record record.escrow then
-    .ok ⟨record, recordExact, located, await, awaiting, idExact, due, slotPosts, slotClaims, slotExact, book,
-      bookExact, posted, postedBatch, _, rfl, _, rfl⟩
+    .ok ⟨record, recordExact, located, await, awaiting, idExact, due, slotPosts, slotClaims, slotExact, object,
+      objectExact, book, bookExact, posted, postedBatch, _, rfl, _, rfl⟩
   else .error .bookRefused
   else .error (.notYetAbandonable await.deadline config.abandonGrace height)
   else .error .awaitMismatch
@@ -2294,6 +2592,8 @@ structure CreateRequest where
   /-- The object resource (a cell the authority layer issues capabilities on). -/
   object : CellId
   pin : Digest
+  /-- The declared state type: every write of the object's state is typed at it. -/
+  stateType : Ty
   law : Minidregg.Pred.Pred
   upgrade : ObjectRecord.UpgradePolicy
   /-- The object's initial declared state, if any. It is the first and only state write of the
@@ -2309,9 +2609,10 @@ def createTransaction (request : CreateRequest) : TransactionId :=
   tagged "DREGG/OBJECTIVE/OBJECT/TX/CREATE/v2" (subjectStream.encode request.subject ++
     digestStream.encode request.object ++ (StreamCodec.option bytesStream).encode (request.seed.map dataBytes))
 
-/-- The record a creation installs: schema version 1, continuity 0. -/
+/-- The record a creation installs: schema version 1, continuity 0, no live
+activity, steady. -/
 def CreateRequest.record (request : CreateRequest) : ObjectRecord :=
-  ⟨request.object, request.pin, 1, request.law, request.upgrade, 0, request.payer⟩
+  ⟨request.object, request.pin, request.stateType, 1, request.law, request.upgrade, 0, request.payer, 0, 0, .steady⟩
 
 /-- The request facts a seed is judged under: turn 4, and no package writes (the artifact slot
 reads `-1`; the creator's law, not the pin, judges it). -/
@@ -2337,6 +2638,9 @@ structure Creation {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
   /-- A seed is admitted by the creator's law, over no old state. -/
   seedJudged : ∀ seed, request.seed = some seed →
     ObjectRecord.admitSeed request.record (seedFacts request height) seed = .ok ()
+
+  /-- The declared state type is first-order data. -/
+  data : request.stateType.isData = true
   posts : List Post
   postsExact : posts = postAt snapshot (objectCell config.domain request.object)
       (objectImage request.object request.record) ::
@@ -2349,10 +2653,11 @@ def create {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot
   | .ok (some _) => .error .objectExists
   | .ok none =>
     if published : (bodyOf .package (snapshot.canonicalBytes (packageCell config.domain request.pin))).isSome = true then
+      if data : request.stateType.isData = true then
       match seedPlan : request.seed with
       | none =>
         .ok ⟨absent, published, (fun _ h => by rw [seedPlan] at h; cases h),
-          (fun _ h => by rw [seedPlan] at h; cases h), _, rfl⟩
+          (fun _ h => by rw [seedPlan] at h; cases h), data, _, rfl⟩
       | some seed =>
         match stateRead : readState config snapshot request.object with
         | .error reason => .error reason
@@ -2363,7 +2668,8 @@ def create {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot
           | .ok () =>
             .ok ⟨absent, published,
               (fun _ h => by rw [seedPlan] at h; cases h; exact stateRead),
-              (fun _ h => by rw [seedPlan] at h; cases h; exact judged), _, rfl⟩
+              (fun _ h => by rw [seedPlan] at h; cases h; exact judged), data, _, rfl⟩
+      else .error .stateTypeNotData
     else .error .pinUnpublished
 
 def Creation.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -2595,7 +2901,7 @@ theorem Delivery.posts_current {rootBytes : Bytes → Digest} {config : Config} 
   intro post member
   rw [delivery.postsExact] at member
   simp only [List.mem_cons, List.mem_append] at member
-  rcases member with isRecord | (inSettlement | inYield) | isBook
+  rcases member with isRecord | ((inSettlement | inYield) | isBook) | inCount
   · subst isRecord; simp only [recordPost, postAt]
   · exact settle_posts_current delivery.settled post inSettlement
   · cases yielded : delivery.yielded with
@@ -2610,6 +2916,7 @@ theorem Delivery.posts_current {rootBytes : Bytes → Digest} {config : Config} 
   · rcases isBook with isBook | none
     · subst isBook; simp only [Postings.write, postAt]
     · simp at none
+  · rw [mem_countPosts inCount]; simp only [postAt]
 
 /-- An accepted intent found every post's pre-root current. -/
 theorem accepted_posts_current {rootBytes : Bytes → Digest} {snapshot after : Snapshot rootBytes}
@@ -2747,7 +3054,7 @@ theorem yield_write_from_current_read {rootBytes : Bytes → Digest} {config : C
   have member : written.post ∈ delivery.posts := by
     rw [delivery.postsExact, yielded]
     simp only [List.mem_cons, List.mem_append, Option.map_some, Option.getD_some]
-    exact Or.inr (Or.inl (Or.inr (inPosts written writes)))
+    exact Or.inr (Or.inl (Or.inl (Or.inr (inPosts written writes))))
   subst exact
   refine ⟨member, rfl, rfl, rfl, rfl, state, plan, edits, segmentIs, decoded, ?_⟩
   simpa using applied
@@ -2976,7 +3283,8 @@ theorem refund_measurement_free {rootBytes : Bytes → Digest} {config : Config}
     have a := one.settled; have b := two.settled
     rw [sameRecord, awaits, b] at a; exact (Except.ok.inj a).symm
   have posted : one.posted.batch.operations.head? =
-      (deliveryCharges config one.record first.record one.settlement.path first).operations.head? := by
+      (deliveryCharges config one.record first.record one.settlement.path first
+        (drainFee config one.object (one.yielded.bind YieldCommit.written))).operations.head? := by
     rw [one.postedBatch]
     obtain ⟨rest, prefix_⟩ := settlePurse_prefix one.batchExact
     rw [prefix_]
@@ -2986,9 +3294,9 @@ theorem refund_measurement_free {rootBytes : Bytes → Digest} {config : Config}
 /-- The submitter's charge for added envelope is the public price of what it
 DECLARED, never of what ran. -/
 theorem submitter_charge_declared (config : Config) (record : Record) (cell : CellId) (path : Path)
-    (request : DeliverRequest) (extra : request.extra ≠ zeroCapacity) :
+    (request : DeliverRequest) (migration : Nat) (extra : request.extra ≠ zeroCapacity) :
     Operation.fee request.account config.collector config.asset (config.tariff.workOf request.extra) ∈
-      (deliveryCharges config record cell path request).operations := by
+      (deliveryCharges config record cell path request migration).operations := by
   simp [deliveryCharges, extra]
 
 /-- A yield never leaves its purse short: the postings a yielding segment
@@ -3065,7 +3373,8 @@ theorem Delivery.yield_reserves_deposit {rootBytes : Bytes → Digest} {config :
     {snapshot : Snapshot rootBytes} {height : Nat} {request : DeliverRequest}
     (delivery : Delivery config snapshot height request) (yields : delivery.segment.yields = true) :
     delivery.record.escrow.pair + storageDeposit config delivery.next ≤
-      purse ((deliveryCharges config delivery.record request.record delivery.settlement.path request).apply
+      purse ((deliveryCharges config delivery.record request.record delivery.settlement.path request
+        (drainFee config delivery.object (delivery.yielded.bind YieldCommit.written))).apply
         (logicalBook delivery.book.logical)) config.asset (heldAccount request.record) :=
   (settlePurse_yields _ _ _ _ _ _ _ _ yields delivery.batchExact).2
 
@@ -3073,7 +3382,7 @@ theorem Delivery.yield_reserves_deposit {rootBytes : Bytes → Digest} {config :
 theorem Birth.yield_reserves_deposit {rootBytes : Bytes → Digest} {config : Config}
     {snapshot : Snapshot rootBytes} {height : Nat} {request : BirthRequest}
     (born : Birth config snapshot height request) (yields : born.segment.yields = true) :
-    (escrowOf config.tariff request.subject request.account request.resume request.timeout).pair +
+    (escrowOf config.tariff request.subject request.escrowAccount request.resume request.timeout).pair +
         storageDeposit config born.record ≤ request.deposit := by
   have checked := born.funded
   simp only [yields, true_and, Nat.not_lt] at checked
@@ -3439,8 +3748,8 @@ birth's posts) is admitted by the object's law. -/
 theorem Birth.write_judged {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : BirthRequest} (born : Birth config snapshot height request)
     (written : StateWritten) (wrote : born.yielded.bind YieldCommit.written = some written) :
-    ∃ object, readObject config snapshot request.object = .ok (some object) ∧ object.pin = request.pin ∧
-      admitWrite object (factsOf request.subject height request.object 1 (some request.pin))
+    ∃ object, readObject config snapshot request.object = .ok (some object) ∧ object.activePin = request.pin ∧
+      admitWrite object (factsOf request.subject height request.object request.factsTurn (some request.pin))
         (written.before.map ObjectState.value) written.after.value = .ok () :=
   ⟨born.object, born.objectExact, born.pinned, judgeWritten_ok born.judged written wrote⟩
 
@@ -3469,8 +3778,9 @@ theorem birth_refuses_non_object {rootBytes : Bytes → Digest} {config : Config
 /-- **A birth runs only the package the object pins**, refused by name otherwise. -/
 theorem birth_refuses_other_pin {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : BirthRequest} {object : ObjectRecord}
-    (found : readObject config snapshot request.object = .ok (some object)) (other : object.pin ≠ request.pin) :
-    birth config snapshot height request = .error (.pinMismatch object.pin request.pin) := by
+    (found : readObject config snapshot request.object = .ok (some object)) (admits : object.admitsNew = true)
+    (other : object.activePin ≠ request.pin) :
+    birth config snapshot height request = .error (.pinMismatch object.activePin request.pin) := by
   unfold birth
   split
   · rename_i reason found'; rw [found] at found'; cases found'
@@ -3478,8 +3788,34 @@ theorem birth_refuses_other_pin {rootBytes : Bytes → Digest} {config : Config}
   · rename_i object' found'
     rw [found] at found'
     cases found'
-    simp [other]
-    rfl
+    simp [admits, other]
+    try rfl
+
+/-- **`draining_refuses_births`** (brief §2, theorem 4). On an object draining
+toward a state type its old one is not a value subtype of, a birth is refused
+`draining`, whatever it names. -/
+theorem draining_refuses_births {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : BirthRequest} {object : ObjectRecord} {next : ObjectRecord.Pending} {deadline : Nat}
+    (found : readObject config snapshot request.object = .ok (some object))
+    (draining : object.phase = .draining next deadline)
+    (notSubtype : ObjectStateType.stateSubtype object.stateType next.stateType = false) :
+    birth config snapshot height request = .error .draining := by
+  have refused : object.admitsNew = false := by simp [ObjectRecord.admitsNew, draining, notSubtype]
+  unfold birth
+  split
+  · rename_i reason found'; rw [found] at found'; cases found'
+  · rename_i found'; rw [found] at found'; cases found'
+  · rename_i object' found'
+    rw [found] at found'
+    cases found'
+    simp [refused]
+    try rfl
+
+/-- A delivery of an activity the object no longer runs (left on the old package
+after a migration, chosen for rebirth) is refused before anything runs. -/
+theorem Delivery.runs_pin {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request) :
+    delivery.object.runs delivery.record.pin = true := delivery.runsPin
 
 /-- **A second record is refused.** -/
 theorem create_refuses_existing {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -3503,9 +3839,13 @@ artifact each makes its write under:
 
 | turn | artifact slot (`factsOf`) |
 |---|---|
-| `birth` | `request.pin`, which is `object.pin` (`birth_refuses_other_pin`) |
-| `deliver` | the activity record's `pin`, which is the object's pin for every activity a birth made (`Birth.record_pin`) |
-| `invoke` call frames, `deliverMessage` frames | the frame's own object's record pin (`ObjectiveCall.Ctx.facts`) |
+| `birth` | `request.pin`, which is `object.activePin` (`birth_refuses_other_pin`) |
+| `deliver` | the activity record's `pin`, one the object still runs (`Delivery.runs_pin`) |
+| `invoke` call frames, `deliverMessage` frames | the frame's own object's `activePin` (`ObjectiveCall.Ctx.facts`) |
+
+The judged clause is `objectivePin record.pins`: the pin, and while the object drains toward an
+upgrade also the next pin (`ObjectRecord.pins`), so old activities and identity-migration
+births both pass it; MIGRATE re-pins by writing the record's `pin`.
 | `create` seed | none, and not judged by the pin: the creator's law only (turn 4); nothing has run |
 -/
 
@@ -3513,10 +3853,10 @@ theorem nextRecord_pin (base : Record) (generation : Nat) (segment : Segment) (y
     (nextRecord base generation segment yielded).pin = base.pin := by
   cases segment <;> cases yielded <;> rfl
 
-/-- The record an admitted birth installs pins the object's package. -/
+/-- The record an admitted birth installs pins the package the object runs for it. -/
 theorem Birth.record_pin {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : BirthRequest} (born : Birth config snapshot height request) :
-    born.record.pin = born.object.pin := by
+    born.record.pin = born.object.activePin := by
   rw [born.recordExact, nextRecord_pin]
   exact born.pinned.symm
 
@@ -3527,36 +3867,38 @@ theorem Birth.write_passes_pin {rootBytes : Bytes → Digest} {config : Config} 
     {height : Nat} {request : BirthRequest} (born : Birth config snapshot height request)
     (written : StateWritten) (wrote : born.yielded.bind YieldCommit.written = some written) :
     ∃ before after,
-      ObjectRecord.views (factsOf request.subject height request.object 1 (some request.pin))
+      ObjectRecord.views (factsOf request.subject height request.object request.factsTurn (some request.pin))
         (written.before.map ObjectState.value) written.after.value = some (before, after) ∧
-      Minidregg.Pred.eval (ObjectRecord.pinClause born.object.pin) before after = true := by
+      Minidregg.Pred.eval (Minidregg.Pred.objectivePin born.object.pins) before after = true := by
   have admitted := judgeWritten_ok born.judged written wrote
-  obtain ⟨before, after, viewed, _⟩ := (ObjectRecord.admitWrite_ok_iff _ _ _ _).mp admitted
-  refine ⟨before, after, viewed, ObjectRecord.pinClause_accepts_run born.object.pin _ _ _ ?_ before after viewed⟩
-  simp [factsOf, born.pinned]
+  obtain ⟨⟨before, after, viewed, _⟩, _⟩ := (ObjectRecord.admitWrite_ok_iff _ _ _ _).mp admitted
+  refine ⟨before, after, viewed,
+    ObjectRecord.objectivePin_accepts_run _ _ _ _ request.pin.value (by simp [factsOf]) ?_ before after viewed⟩
+  rw [← born.pinned]
+  exact ObjectRecord.activePin_mem_pins born.object
 
 /-- **`objective_turns_pass_pin`, delivery.** The write of an admitted delivery is judged under
 the artifact of the activity record's pin; where that is the object's pin (every activity a
 birth made: `Birth.record_pin`), the object's pin clause accepts it. -/
 theorem Delivery.write_passes_pin {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request)
-    (samePin : delivery.record.pin = delivery.object.pin)
     (written : StateWritten) (wrote : delivery.yielded.bind YieldCommit.written = some written) :
     ∃ before after,
       ObjectRecord.views (factsOf delivery.record.escrow.payer height delivery.record.object 2
           (some delivery.record.pin))
         (written.before.map ObjectState.value) written.after.value = some (before, after) ∧
-      Minidregg.Pred.eval (ObjectRecord.pinClause delivery.object.pin) before after = true := by
+      Minidregg.Pred.eval (Minidregg.Pred.objectivePin delivery.object.pins) before after = true := by
   have admitted := judgeWritten_ok delivery.judged written wrote
-  obtain ⟨before, after, viewed, _⟩ := (ObjectRecord.admitWrite_ok_iff _ _ _ _).mp admitted
-  refine ⟨before, after, viewed, ObjectRecord.pinClause_accepts_run delivery.object.pin _ _ _ ?_ before after viewed⟩
-  simp [factsOf, samePin]
+  obtain ⟨⟨before, after, viewed, _⟩, _⟩ := (ObjectRecord.admitWrite_ok_iff _ _ _ _).mp admitted
+  exact ⟨before, after, viewed,
+    ObjectRecord.objectivePin_accepts_run _ _ _ _ delivery.record.pin.value (by simp [factsOf])
+      (ObjectRecord.runs_mem_pins delivery.runsPin) before after viewed⟩
 
 /-- **No creator law removes the pin**: for every record, a view the judged law accepts is one
 the pin clause accepts. -/
 theorem pin_in_every_judged_law (record : ObjectRecord) (old new : Minidregg.Pred.State)
     (admitted : Minidregg.Pred.eval record.effectiveLaw old new = true) :
-    Minidregg.Pred.eval (ObjectRecord.pinClause record.pin) old new = true :=
+    Minidregg.Pred.eval (Minidregg.Pred.objectivePin record.pins) old new = true :=
   ((ObjectRecord.effectiveLaw_accepts_iff record old new).mp admitted).1
 
 #assert_axioms nextRecord_pin
@@ -3647,6 +3989,7 @@ theorem pin_in_every_judged_law (record : ObjectRecord) (old new : Minidregg.Pre
 #assert_axioms Delivery.write_judged
 #assert_axioms birth_refuses_non_object
 #assert_axioms birth_refuses_other_pin
+#assert_axioms draining_refuses_births
 #assert_axioms create_refuses_existing
 
 /-! ## Retention: every retained activity cell names its payer
@@ -3674,8 +4017,8 @@ every cell the turn writes that holds a payload afterwards resolves to a payer
 (`Birth.retention_cells_have_payer`, `Delivery.retention_cells_have_payer`,
 `Exhaustion.retention_cells_have_payer`, `Publication.retention_cells_have_payer`,
 `Creation.retention_cells_have_payer`,
-`Resolution.retention_cells_have_payer`; an abandonment and a top-up leave no live
-activity cell). The Book side of the accounting is `Batch.deregistrations`: an
+`Resolution.retention_cells_have_payer`; a top-up leaves no live activity cell, an
+abandonment only the object record, whose route is its own payer). The Book side of the accounting is `Batch.deregistrations`: an
 ending turn closes the purse it emptied (`Delivery.end_closes_purse`,
 `Abandonment.closes_purse`). -/
 
@@ -3972,12 +4315,49 @@ theorem slotImage_live (slot : AnswerSlot.Slot) :
     (payloadOf (image .slot (AnswerSlot.key slot.name) (AnswerSlot.encode slot))).isSome = true := by
   simp [payloadOf_image]
 
-/-- What a post of a turn is, for the census. -/
+/-- What a post of a turn is, for the census: a state image of the object, a
+slot image for the record cell, a retired image, no activity cell (the Book), or
+the object's record (its counters moved). -/
 def CensusPost (object cell : CellId) (post : Post) : Prop :=
   (∃ state, post.bytes = stateImage object state) ∨
     (∃ slot : AnswerSlot.Slot, slot.activity = cell ∧
       post.bytes = image .slot (AnswerSlot.key slot.name) (AnswerSlot.encode slot)) ∨
-    post.bytes = retiredImage ∨ payloadOf post.bytes = none
+    post.bytes = retiredImage ∨ payloadOf post.bytes = none ∨ (∃ record, post.bytes = objectImage object record)
+
+/-- The payer of an object record image: the record's own payer. -/
+theorem payer_object_image (config : Config) (bytesAt : CellId → Bytes) (object : CellId) (record : ObjectRecord) :
+    payerOfBytes config bytesAt (objectImage object record) = some record.payer := by
+  simp [payerOfBytes, objectImage, payloadOf_image, payerRoute, routePayer, ObjectRecord.record_roundTrip]
+
+/-- An object image is no slot image. -/
+theorem objectImage_ne_slot (object : CellId) (record : ObjectRecord) (slot : AnswerSlot.Slot) :
+    objectImage object record ≠ image .slot (AnswerSlot.key slot.name) (AnswerSlot.encode slot) := by
+  intro same
+  have roles := congrArg (fun bytes => (payloadOf bytes).map (·.role)) same
+  simp [objectImage, payloadOf_image] at roles
+
+/-- The object record a byte map holds after posts that write the object cell only
+with object images: the snapshot's (unwritten), or the first one posted. -/
+theorem objectAt_afterPosts {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {posts : List Post} {object : CellId} {objectRecord : ObjectRecord}
+    (objectRead : readObject config snapshot object = .ok (some objectRecord))
+    (objectOnly : ∀ post ∈ posts, post.cell = objectCell config.domain object →
+      ∃ record, post.bytes = objectImage object record) :
+    ∃ record, objectAt config (afterPosts snapshot posts) object = some record := by
+  unfold afterPosts
+  cases found : posts.find? (fun post => post.cell = objectCell config.domain object) with
+  | none =>
+    refine ⟨objectRecord, ?_⟩
+    have read := objectAt_of_read objectRead
+    unfold objectAt at read ⊢
+    simpa [found] using read
+  | some post =>
+    have member := List.mem_of_find?_eq_some found
+    have at_ : post.cell = objectCell config.domain object := by simpa using List.find?_some found
+    obtain ⟨record, bytes⟩ := objectOnly post member at_
+    refine ⟨record, ?_⟩
+    unfold objectAt
+    simp [found, bytes, objectImage, bodyOf_image, ObjectRecord.record_roundTrip]
 
 /-- The census of a record-first turn: the record post heads the turn's posts;
 the rest are the yield's state images (of `object`) and slot images (for this
@@ -3990,17 +4370,12 @@ theorem recordFirst_cells_paid {rootBytes : Bytes → Digest} (config : Config) 
     (slotsNeedRecord : (∃ post ∈ rest, ∃ slot : AnswerSlot.Slot, slot.activity = cell ∧
         post.bytes = image .slot (AnswerSlot.key slot.name) (AnswerSlot.encode slot)) →
       ∃ await, record.phase = .awaiting await)
-    (objectUnwritten : ∀ post ∈ recordPost config snapshot cell record :: rest,
-      post.cell ≠ objectCell config.domain object) :
+    (objectOnly : ∀ post ∈ recordPost config snapshot cell record :: rest,
+      post.cell = objectCell config.domain object → ∃ held, post.bytes = objectImage object held) :
     CellsPaid config (afterPosts snapshot (recordPost config snapshot cell record :: rest))
       ((recordPost config snapshot cell record :: rest).map Post.cell) := by
   apply cellsPaid_of_posts
-  have objectHeld : objectAt config (afterPosts snapshot (recordPost config snapshot cell record :: rest)) object =
-      some objectRecord := by
-    have unwritten := afterPosts_unwritten snapshot _ _ objectUnwritten
-    unfold objectAt
-    rw [unwritten]
-    exact objectAt_of_read objectRead
+  obtain ⟨objectHeldRecord, objectHeld⟩ := objectAt_afterPosts objectRead objectOnly
   have headBytes : afterPosts snapshot (recordPost config snapshot cell record :: rest) cell = recordImage record :=
     afterPosts_first snapshot (recordPost config snapshot cell record) rest
   intro post member live
@@ -4010,8 +4385,8 @@ theorem recordFirst_cells_paid {rootBytes : Bytes → Digest} (config : Config) 
     show (payerOfBytes config _ (recordImage record)).isSome = true
     rw [payer_record_image config _ record await awaiting]
     rfl
-  · rcases shape post inRest with ⟨state, isState⟩ | ⟨slot, activity, isSlot⟩ | retired | none
-    · rw [isState, payer_state_image config _ object state objectRecord objectHeld]
+  · rcases shape post inRest with ⟨state, isState⟩ | ⟨slot, activity, isSlot⟩ | retired | none | ⟨held, isObject⟩
+    · rw [isState, payer_state_image config _ object state objectHeldRecord objectHeld]
       rfl
     · obtain ⟨await, awaiting⟩ := slotsNeedRecord ⟨post, inRest, slot, activity, isSlot⟩
       have held := recordAt_recordImage (afterPosts snapshot (recordPost config snapshot cell record :: rest))
@@ -4020,6 +4395,8 @@ theorem recordFirst_cells_paid {rootBytes : Bytes → Digest} (config : Config) 
       rfl
     · rw [retired, payloadOf_retired] at live; cases live
     · rw [none] at live; cases live
+    · rw [isObject, payer_object_image]
+      rfl
 
 /-- A yield commit's posts are census posts of its object and record cell. -/
 theorem segmentCommit_census {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -4058,31 +4435,39 @@ theorem slotPosted_live {post : Post} {slot : AnswerSlot.Slot}
 /-- **`retention_cells_have_payer`, birth.** Every cell an admitted birth leaves
 holding an activity payload names its payer in the installed state: the record
 its escrow account, the opened slot that record's, the state cell its object's
-`ObjectRecord.payer`. (Premise: no post of the birth lands on the object's
-record cell, which it only guards: a coordinate collision.) -/
+`ObjectRecord.payer`, the object record (its counters moved) its own payer.
+(Premise: a post of the birth lands on the object's record cell only as an
+object image, i.e. no other coordinate collides with it.) -/
 theorem Birth.retention_cells_have_payer {rootBytes : Bytes → Digest} {config : Config}
     {snapshot : Snapshot rootBytes} {height : Nat} {request : BirthRequest} (born : Birth config snapshot height request)
-    (objectUnwritten : ∀ post ∈ born.posts, post.cell ≠ objectCell config.domain request.object) :
+    (objectOnly : ∀ post ∈ born.posts, post.cell = objectCell config.domain request.object →
+      ∃ held, post.bytes = objectImage request.object held) :
     CellsPaid config (afterPosts snapshot born.posts) (born.posts.map Post.cell) := by
   have commits := segmentCommit_census born.yieldedExact
-  rw [born.postsExact] at objectUnwritten ⊢
+  rw [born.postsExact] at objectOnly ⊢
   apply recordFirst_cells_paid config snapshot born.cell request.object born.record born.object born.objectExact
   · intro post member
-    rcases List.mem_append.mp member with inYield | isBook
-    · exact commits post inYield
-    · simp only [List.mem_singleton] at isBook
-      subst isBook
-      exact .inr (.inr (.inr (Postings.write_payload config snapshot born.posted)))
+    rcases List.mem_append.mp member with inFront | inCount
+    · rcases List.mem_append.mp inFront with inYield | isBook
+      · exact commits post inYield
+      · simp only [List.mem_singleton] at isBook
+        subst isBook
+        exact .inr (.inr (.inr (.inl (Postings.write_payload config snapshot born.posted))))
+    · rw [mem_objectPost inCount]
+      exact .inr (.inr (.inr (.inr ⟨_, rfl⟩)))
   · rintro ⟨post, inRest, slot, _, isSlot⟩
-    rcases List.mem_append.mp inRest with inYield | isBook
-    · rw [born.recordExact]
-      exact segmentCommit_awaiting born.yieldedExact _ 0 ⟨post, inYield, slotPosted_live isSlot⟩
-    · simp only [List.mem_singleton] at isBook
-      subst isBook
-      have live := slotPosted_live isSlot
-      rw [Postings.write_payload] at live
-      cases live
-  · exact objectUnwritten
+    rcases List.mem_append.mp inRest with inFront | inCount
+    · rcases List.mem_append.mp inFront with inYield | isBook
+      · rw [born.recordExact]
+        exact segmentCommit_awaiting born.yieldedExact _ 0 ⟨post, inYield, slotPosted_live isSlot⟩
+      · simp only [List.mem_singleton] at isBook
+        subst isBook
+        have live := slotPosted_live isSlot
+        rw [Postings.write_payload] at live
+        cases live
+    · rw [mem_objectPost inCount] at isSlot
+      exact absurd isSlot (objectImage_ne_slot _ _ slot)
+  · exact objectOnly
 
 /-- A settlement's posts retire the settled slot. -/
 theorem settle_posts_retired {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -4112,33 +4497,40 @@ settled slot is retired. -/
 theorem Delivery.retention_cells_have_payer {rootBytes : Bytes → Digest} {config : Config}
     {snapshot : Snapshot rootBytes} {height : Nat} {request : DeliverRequest}
     (delivery : Delivery config snapshot height request)
-    (objectUnwritten : ∀ post ∈ delivery.posts, post.cell ≠ objectCell config.domain delivery.record.object) :
+    (objectOnly : ∀ post ∈ delivery.posts, post.cell = objectCell config.domain delivery.record.object →
+      ∃ held, post.bytes = objectImage delivery.record.object held) :
     CellsPaid config (afterPosts snapshot delivery.posts) (delivery.posts.map Post.cell) := by
   have commits := segmentCommit_census (resumedSegment_commit delivery.endExact)
   have retired := settle_posts_retired delivery.settled
-  rw [delivery.postsExact] at objectUnwritten ⊢
+  rw [delivery.postsExact] at objectOnly ⊢
   apply recordFirst_cells_paid config snapshot request.record delivery.record.object delivery.next delivery.object
     delivery.objectExact
   · intro post member
-    rcases List.mem_append.mp member with inFront | isBook
-    · rcases List.mem_append.mp inFront with inSettle | inYield
-      · exact .inr (.inr (.inl (retired post inSettle)))
-      · exact commits post inYield
-    · simp only [List.mem_singleton] at isBook
-      subst isBook
-      exact .inr (.inr (.inr (Postings.write_payload config snapshot delivery.posted)))
+    rcases List.mem_append.mp member with inFront | inCount
+    · rcases List.mem_append.mp inFront with inFront | isBook
+      · rcases List.mem_append.mp inFront with inSettle | inYield
+        · exact .inr (.inr (.inl (retired post inSettle)))
+        · exact commits post inYield
+      · simp only [List.mem_singleton] at isBook
+        subst isBook
+        exact .inr (.inr (.inr (.inl (Postings.write_payload config snapshot delivery.posted))))
+    · rw [mem_countPosts inCount]
+      exact .inr (.inr (.inr (.inr ⟨_, rfl⟩)))
   · rintro ⟨post, inRest, slot, _, isSlot⟩
     have live := slotPosted_live isSlot
-    rcases List.mem_append.mp inRest with inFront | isBook
-    · rcases List.mem_append.mp inFront with inSettle | inYield
-      · rw [retired post inSettle, payloadOf_retired] at live; cases live
-      · rw [delivery.nextExact]
-        exact segmentCommit_awaiting (resumedSegment_commit delivery.endExact) _ _ ⟨post, inYield, live⟩
-    · simp only [List.mem_singleton] at isBook
-      subst isBook
-      rw [Postings.write_payload] at live
-      cases live
-  · exact objectUnwritten
+    rcases List.mem_append.mp inRest with inFront | inCount
+    · rcases List.mem_append.mp inFront with inFront | isBook
+      · rcases List.mem_append.mp inFront with inSettle | inYield
+        · rw [retired post inSettle, payloadOf_retired] at live; cases live
+        · rw [delivery.nextExact]
+          exact segmentCommit_awaiting (resumedSegment_commit delivery.endExact) _ _ ⟨post, inYield, live⟩
+      · simp only [List.mem_singleton] at isBook
+        subst isBook
+        rw [Postings.write_payload] at live
+        cases live
+    · rw [mem_countPosts inCount] at isSlot
+      exact absurd isSlot (objectImage_ne_slot _ _ slot)
+  · exact objectOnly
 
 /-- **`retention_cells_have_payer`, exhaustion**: it rewrites the awaiting
 record (its escrow pays) and the Book. -/
@@ -4216,7 +4608,7 @@ theorem create_seed_judged {rootBytes : Bytes → Digest} {config : Config} {sna
         Minidregg.Pred.eval request.law before after = true ∧
         readState config snapshot request.object = .ok none ∧
         seedPost config snapshot request seed ∈ created.posts := by
-  obtain ⟨before, after, viewed, accepted⟩ :=
+  obtain ⟨⟨before, after, viewed, accepted⟩, _⟩ :=
     (ObjectRecord.admitSeed_ok_iff _ _ _).mp (created.seedJudged seed seeded)
   refine ⟨before, after, viewed, accepted, created.stateFresh seed seeded, ?_⟩
   rw [created.postsExact, seeded]
@@ -4229,6 +4621,7 @@ theorem create_seed_refused_names_clause {rootBytes : Bytes → Digest} {config 
     {reason : ObjectRecord.WriteRefusal}
     (absent : readObject config snapshot request.object = .ok none)
     (published : (bodyOf .package (snapshot.canonicalBytes (packageCell config.domain request.pin))).isSome = true)
+    (data : request.stateType.isData = true)
     (seeded : request.seed = some seed)
     (fresh : readState config snapshot request.object = .ok none)
     (refused : ObjectRecord.admitSeed request.record (seedFacts request height) seed = .error reason) :
@@ -4238,7 +4631,7 @@ theorem create_seed_refused_names_clause {rootBytes : Bytes → Digest} {config 
   · rename_i reason' found; rw [absent] at found; cases found
   · rename_i found; rw [absent] at found; cases found
   · rename_i found
-    rw [dif_pos published]
+    rw [dif_pos published, dif_pos data]
     split
     next plan => rw [seeded] at plan; cases plan
     next seed2 plan =>
@@ -4254,17 +4647,16 @@ theorem create_seed_refused_names_clause {rootBytes : Bytes → Digest} {config 
 /-- **`pin_not_removable`.** Whatever turn commits `posts` on a snapshot where the object's
 record reads as `record`, if no post lands on the object's record coordinate the record reads
 the same afterwards, so the law that judges the object's writes still leads with the pin clause
-of `record.pin`. The only post that lands on an object record coordinate is `create`'s
-(`Creation.postsExact`); every other turn's posts name other cells, and the `unwritten` premise
-is the coordinate-separation premise every theorem about these posts carries
-(`Birth.retention_cells_have_payer`). The future upgrade turn is the one turn that rewrites
-the record, through `ObjectRecord.pinClause`. -/
+of the record's pins (`ObjectRecord.pins`). Posts that land on an object record coordinate are
+`create`'s, the counters' (`countPosts`, `objectPost`: they keep the pins, `ObjectRecord.bump_pins`)
+and the upgrade turns' (ADOPT adds the next pin, MIGRATE re-pins); the `unwritten` premise is the
+coordinate-separation premise every theorem about other posts carries. -/
 theorem pin_not_removable {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     (posts : List Post) {object : CellId} {record : ObjectRecord}
     (read : readObject config snapshot object = .ok (some record))
     (unwritten : ∀ post ∈ posts, post.cell ≠ objectCell config.domain object) :
     objectAt config (afterPosts snapshot posts) object = some record ∧
-      record.effectiveLaw = Minidregg.Pred.Pred.all [ObjectRecord.pinClause record.pin, record.law] := by
+      record.effectiveLaw = Minidregg.Pred.Pred.all [Minidregg.Pred.objectivePin record.pins, record.law] := by
   refine ⟨?_, rfl⟩
   unfold objectAt
   rw [afterPosts_unwritten snapshot _ _ unwritten]
@@ -4335,6 +4727,11 @@ theorem Resolution.retention_cells_have_payer {rootBytes : Bytes → Digest} {co
 #assert_axioms payloadOf_image
 #assert_axioms payloadOf_book
 #assert_axioms recordFirst_cells_paid
+#assert_axioms payer_object_image
+#assert_axioms objectImage_ne_slot
+#assert_axioms objectAt_afterPosts
+#assert_axioms mem_countPosts
+#assert_axioms mem_objectPost
 #assert_axioms Birth.retention_cells_have_payer
 #assert_axioms Delivery.retention_cells_have_payer
 #assert_axioms Exhaustion.retention_cells_have_payer

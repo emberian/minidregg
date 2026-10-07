@@ -34,6 +34,13 @@ function whose body is its `{result, write}` record.
   scoped, counted capabilities). `request/caller` names the calling object, so
   a callee's law can admit chosen callers (an object's facet, as a clause).
 
+**Upgrades.** A frame enters an object only while it admits new frames
+(`ObjectRecord.admitsNew`: steady, or draining under the identity migration,
+else `draining`); it runs the package the object runs for new frames
+(`activePin`); and its write is judged by `ObjectRecord.judge`: the object's law,
+and while draining, the next record's judgment of the new state under the
+migration's facts, so a draining object's state stays one MIGRATE admits.
+
 **Writes are applied at frame return** (the root's ruling on OPEN 1): the
 returned `write` (per field: keep, set or add, `ObjectiveActivity.applyWrite`) is
 applied to the frame's own object only, judged THEN by that object's law on
@@ -439,13 +446,14 @@ structure Ctx where
 
 /-- **The request facts a frame's write is judged under**, derived from the frame itself:
 the frame is for `ctx.object` and runs `ctx.method` of the package its record pins
-(`loadMethod` on `record.pin`), so the artifact slot reads that pin and nothing else. The
+(`loadMethod` on `record.activePin`: the pin, or while draining under the identity the next
+pin), so the artifact slot reads that package and nothing else. The
 facts are not a field: no frame can be built that claims another package. -/
 def Ctx.facts (ctx : Ctx) : Facts :=
-  ⟨ctx.subject, ctx.height, ctx.object.value, callTurn, ctx.caller, some ctx.record.pin.value⟩
+  ⟨ctx.subject, ctx.height, ctx.object.value, callTurn, ctx.caller, some ctx.record.activePin.value⟩
 
 /-- A frame's write is made by its object's pinned package: the slot names it. -/
-theorem Ctx.facts_artifact (ctx : Ctx) : ctx.facts.artifact = some ctx.record.pin.value := rfl
+theorem Ctx.facts_artifact (ctx : Ctx) : ctx.facts.artifact = some ctx.record.activePin.value := rfl
 
 /-- `request/caller` of a frame entered on `stack`: the calling frame's object,
 or the root's origin. -/
@@ -471,7 +479,7 @@ def frameReturn (ctx : Ctx) (write : Data) (journal : Journal) : Except CallRefu
       | .error reason => .error (.frameFault ctx.object.value ctx.method (reprStr reason))
       | .ok none => .ok journal
       | .ok (some value) =>
-        match admitWrite ctx.record ctx.facts (some before.value) value with
+        match ctx.record.judge ctx.facts (some before.value) value with
         | .error reason => .error (.lawDenied ctx.object.value ctx.method reason)
         | .ok () =>
           let after : ObjectState := ⟨before.version + 1, value⟩
@@ -502,9 +510,11 @@ def exec {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot r
     match touch config snapshot journal call.target with
     | .error reason => .error reason
     | .ok (entry, journal) =>
-    match entry.current with
-    | none => .error (.stateMissing call.target.value)
-    | some view =>
+    match entry.current, entry.record.admitsNew with
+    | none, _ => .error (.stateMissing call.target.value)
+    -- A draining object admits no new frame unless its upgrade's migration is the identity.
+    | some _, false => .error (.kernel .draining)
+    | some view, true =>
     let granted : Except CallRefusal (Option SubjectId × List Grant) :=
       match stack with
       | [] => .ok (authority.signer, journal.grants)
@@ -515,7 +525,7 @@ def exec {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot r
     match granted with
     | .error reason => .error reason
     | .ok (subject, grants) =>
-    match loadMethod config call.target.value (packageBytes config snapshot entry.record.pin) entry.record.pin
+    match loadMethod config call.target.value (packageBytes config snapshot entry.record.activePin) entry.record.activePin
         call.method (viewData view) call.args with
     | .error reason => .error reason
     | .ok program =>
@@ -811,7 +821,7 @@ def Journal.guards {rootBytes : Bytes → Digest} (journal : Journal) (config : 
     (snapshot : Snapshot rootBytes) : List ReadGuard :=
   journal.entries.flatMap fun entry =>
     [guardAt snapshot (objectCell config.domain entry.object),
-     guardAt snapshot (packageCell config.domain entry.record.pin),
+     guardAt snapshot (packageCell config.domain entry.record.activePin),
      guardAt snapshot (stateCell config.domain entry.object)]
 
 /-- The root authority of an invocation: the signer, no caller. -/
@@ -1022,7 +1032,7 @@ theorem frameReturn_spec {ctx : Ctx} {write : Data} {journal journal' : Journal}
       ∃ new, journal'.writes = journal.writes ++ new ∧ ∀ w ∈ new,
         journal.lookup ctx.object = some (some w.before) ∧ w.viewed = ctx.view ∧ w.object = ctx.object ∧
           w.record = ctx.record ∧ w.facts = ctx.facts ∧
-          admitWrite w.record w.facts (some w.before.value) w.after.value = .ok () := by
+          w.record.judge w.facts (some w.before.value) w.after.value = .ok () := by
   unfold frameReturn at returned
   split at returned
   · cases returned
@@ -1077,8 +1087,8 @@ theorem exec_invariant {rootBytes : Bytes → Digest} (config : Config) (snapsho
     (∀ ctx ∈ task.below stack,
         journal'.lookup ctx.object = journal.lookup ctx.object) ∧
       (∃ new, journal'.writes = journal.writes ++ new ∧ ∀ w ∈ new, w.before = w.viewed ∧
-        admitWrite w.record w.facts (some w.before.value) w.after.value = .ok () ∧
-        w.facts.artifact = some w.record.pin.value) ∧
+        w.record.judge w.facts (some w.before.value) w.after.value = .ok () ∧
+        w.facts.artifact = some w.record.activePin.value) ∧
       (∃ new, journal'.frames = journal.frames ++ new ∧ ∀ frame ∈ new, frame.Nodup) := by
   intro fuel
   induction fuel with
@@ -1099,7 +1109,8 @@ theorem exec_invariant {rootBytes : Bytes → Digest} (config : Config) (snapsho
             obtain ⟨others, here, writes1, frames1, _⟩ := touch_spec touched
             split at ran
             · cases ran
-            · rename_i view current
+            · cases ran
+            · rename_i view current _
               split at ran
               · cases ran
               · rename_i subject grants _
@@ -1252,7 +1263,7 @@ frame-conflict abort of decision D1 has nothing left to catch (Scribe note D4). 
 theorem invocation_writes_from_view {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : InvokeRequest} (invoked : Invocation config snapshot height request) :
     ∀ w ∈ invoked.journal.writes, w.before = w.viewed ∧
-      admitWrite w.record w.facts (some w.before.value) w.after.value = .ok () := by
+      w.record.judge w.facts (some w.before.value) w.after.value = .ok () := by
   obtain ⟨_, _, ⟨new, writes, fresh⟩, _⟩ :=
     exec_invariant config snapshot height request.authority (invokeTransaction request) _ [] _ _ _ _ _ _ invoked.execExact (by simp)
       (by intro _ _ h; cases h) (by intro _ h; cases h)
@@ -1268,7 +1279,7 @@ frame of another package would be refused there. The artifact is derived from th
 (`Ctx.facts`), carried through the executor by `exec_invariant`. -/
 theorem invocation_writes_pinned {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : InvokeRequest} (invoked : Invocation config snapshot height request) :
-    ∀ w ∈ invoked.journal.writes, w.facts.artifact = some w.record.pin.value := by
+    ∀ w ∈ invoked.journal.writes, w.facts.artifact = some w.record.activePin.value := by
   obtain ⟨_, _, ⟨new, writes, fresh⟩, _⟩ :=
     exec_invariant config snapshot height request.authority (invokeTransaction request) _ [] _ _ _ _ _ _ invoked.execExact (by simp)
       (by intro _ _ h; cases h) (by intro _ h; cases h)

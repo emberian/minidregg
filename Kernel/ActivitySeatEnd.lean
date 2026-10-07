@@ -152,8 +152,9 @@ definition. -/
 open Minidregg.Kernel.ObjectiveActivity (AdmittedTurn)
 
 /-- The activity a turn ENDS, with its loaded Book and its postings: a birth or a
-delivery whose record is no longer awaiting (done or faulted), and every
-abandonment. Other turns end nothing. -/
+delivery whose record is no longer awaiting (done or faulted), every
+abandonment, every abort after a drain deadline, and the old activity of every
+rebirth. Other turns end nothing. -/
 def AdmittedTurn.ending {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} :
     AdmittedTurn config snapshot height → Option (Nat × Σ pre : BookCell, Postings pre)
@@ -164,6 +165,8 @@ def AdmittedTurn.ending {rootBytes : Bytes → Digest} {config : Config} {snapsh
     | .awaiting _ => none
     | _ => some (request.record.value, ⟨delivery.book, delivery.posted⟩)
   | .abandon request abandoned => some (request.record.value, ⟨abandoned.book, abandoned.posted⟩)
+  | .abortDrained request aborted => some (request.record.value, ⟨aborted.book, aborted.posted⟩)
+  | .rebirth request reborn => some (request.record.value, ⟨reborn.born.book, reborn.born.posted⟩)
   | _ => none
 
 /-- The turn's final posts and extra guards: the kernel's own, or, when the turn
@@ -193,6 +196,14 @@ def AdmittedTurn.finalIntent {rootBytes : Bytes → Digest} {config : Config} {s
   | .abandon _ abandoned =>
       intentOf rootBytes (ObjectiveActivity.abandonTransaction abandoned.await.id) posts extra
         abandoned.claims sealing
+  | .abortDrained _ aborted =>
+      intentOf rootBytes (ObjectiveActivity.abortTransaction aborted.await.id) posts
+        ([ObjectiveActivity.guardAt snapshot (ObjectiveActivity.packageCell config.domain aborted.record.pin),
+          ObjectiveActivity.guardAt snapshot (ObjectiveActivity.stateCell config.domain aborted.record.object)] ++ extra)
+        aborted.claims sealing
+  | .rebirth _ reborn =>
+      intentOf rootBytes (ObjectiveActivity.rebirthTransaction reborn.await.id) posts
+        (reborn.born.guards ++ extra) reborn.claims sealing
   | turn => turn.intent sealing
 
 #assert_axioms joint_admission Joined.conserves Joined.closes Joined.deregisters Joined.retires join_none

@@ -190,8 +190,19 @@ def seedMail {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsh
   ⟨[⟨sender, target, some inbox, readExact, clean, remaining, .step step (.refl _),
       ⟨keeps.1.trans ends.1, keeps.2.1.trans ends.2⟩⟩], [], [], []⟩
 
+/-- **A message to a draining object waits.** The target object drains toward an
+upgrade that admits no new frame (`ObjectRecord.admitsNew`): delivering now would
+fail the message (`broken`) for a reason that ends at MIGRATE, so the turn is
+refused instead and the message stays queued (back-pressure is the inbox bound). -/
+def waitsForUpgrade {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (target : Nat) :
+    Bool :=
+  match readObject config snapshot ⟨target⟩ with
+  | .ok (some record) => !record.admitsNew
+  | _ => false
+
 def deliverMessage {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : MessageRequest) : Except MessageRefusal (MessageDelivery config snapshot height request) :=
+  if waitsForUpgrade config snapshot request.target then .error (.kernel .draining) else
   match readExact : readInbox snapshot (Inbox.cell config.domain request.sender request.target) with
   | none | some none => .error (.noInbox request.sender request.target)
   | some (some inbox) =>
@@ -356,11 +367,11 @@ theorem MessageDelivery.failed_delivery_pops {rootBytes : Bytes → Digest} {con
 
 /-- **Every frame write of a delivered message's call tree is made under the pin of its own
 object**: the facts it was judged under name the package that object's record pins, so the
-object's pin clause accepts it (`ObjectRecord.pinClause_accepts_run`). -/
+object's pin clause accepts it (`ObjectRecord.objectivePin_accepts_run`). -/
 theorem runMessage_writes_pinned {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height target : Nat} {message : Inbox.Message} {result : Data} {journal : Journal}
     (ran : runMessage config snapshot height target message = .replied result journal) :
-    ∀ w ∈ journal.writes, w.facts.artifact = some w.record.pin.value := by
+    ∀ w ∈ journal.writes, w.facts.artifact = some w.record.activePin.value := by
   unfold runMessage at ran
   split at ran
   · cases ran
@@ -383,7 +394,7 @@ theorem MessageDelivery.writes_pinned {rootBytes : Bytes → Digest} {config : C
     {snapshot : Snapshot rootBytes} {height : Nat} {request : MessageRequest}
     (delivered : MessageDelivery config snapshot height request) {result : Data} {journal : Journal}
     (replied : delivered.outcome = .replied result journal) :
-    ∀ w ∈ journal.writes, w.facts.artifact = some w.record.pin.value :=
+    ∀ w ∈ journal.writes, w.facts.artifact = some w.record.activePin.value :=
   runMessage_writes_pinned (delivered.outcomeExact.trans replied)
 
 #assert_axioms runMessage_writes_pinned
@@ -1036,5 +1047,18 @@ theorem MessageDelivery.retention_cells_have_payer {rootBytes : Bytes → Digest
 #assert_axioms forward_none
 #assert_axioms MessageDelivery.failed_mail
 #assert_axioms MessageDelivery.failed_delivery_posts
+
+/-- **A message waits while its target drains**: the delivery is refused (the
+message stays at the head of its inbox) when the target's upgrade admits no new
+frame. -/
+theorem message_waits_while_draining {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : MessageRequest} {record : ObjectRecord.ObjectRecord}
+    (found : readObject config snapshot ⟨request.target⟩ = .ok (some record)) (closed : record.admitsNew = false) :
+    deliverMessage config snapshot height request = .error (.kernel .draining) := by
+  have waits : waitsForUpgrade config snapshot request.target = true := by
+    simp [waitsForUpgrade, found, closed]
+  simp [deliverMessage, waits]
+
+#assert_axioms message_waits_while_draining
 
 end Minidregg.Kernel.ObjectiveSend

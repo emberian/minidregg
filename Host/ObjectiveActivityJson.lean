@@ -103,6 +103,13 @@ def grants (path : String) (json : Json) : Result (List ObjectiveCall.Grant) :=
       pure ⟨← nat (path ++ ".grants") item "object", ← str (path ++ ".grants") item "method",
         ← nat (path ++ ".grants") item "uses"⟩
 
+/-- A declared Core4 type, in the checker's own type JSON
+(`ObjectiveBendTyping.decodeType`, no table). -/
+def tyField (path : String) (json : Json) (name : String) : Result Minidregg.Theory.ObjectiveBendTypes.Ty := do
+  match ObjectiveBendTyping.decodeType #[] (← field path json name) with
+  | .ok type => pure type
+  | .error reason => throw s!"{path}.{name}: {reason}"
+
 /-- The turn of a command. `law` reads a predicate (the Host's `predicate` JSON
 reader), for a creation's law and upgrade policy. -/
 def turn (law : String → Json → Result Minidregg.Pred.Pred) (json : Json) : Result Turn := do
@@ -111,7 +118,8 @@ def turn (law : String → Json → Result Minidregg.Pred.Pred) (json : Json) : 
   | "publish" => pure (.publish (← unhex (← str p json "artifact")) (← unhex (← str p json "package"))
       (← nat p json "payer") ⟨← nat p json "payerCapability"⟩)
   | "create" => pure (.create (← nat p json "object") ⟨← nat p json "objectCapability"⟩ ⟨← nat p json "pin"⟩
-      (← law (p ++ ".law") (← field p json "law")) (← upgrade law (p ++ ".upgrade") (← field p json "upgrade"))
+      (← tyField p json "stateType") (← law (p ++ ".law") (← field p json "law"))
+      (← upgrade law (p ++ ".upgrade") (← field p json "upgrade"))
       (← seed p json) (← nat p json "payer") ⟨← nat p json "payerCapability"⟩)
   | "birth" => pure (.birth (← nat p json "object") ⟨← nat p json "objectCapability"⟩
       (← nat p json "account") ⟨← nat p json "accountCapability"⟩ ⟨← nat p json "pin"⟩
@@ -161,9 +169,10 @@ def upgradeJson : ObjectRecord.UpgradePolicy → Json
 def turnJson : Turn → Json
   | .publish artifact package payer pc => .mkObj [("kind", "publish"), ("artifactBytes", decimal artifact.length),
       ("packageBytes", decimal package.length), ("payer", decimal payer), ("payerCapability", decimal pc.value)]
-  | .create object oc pin law policy seed payer pc => .mkObj
+  | .create object oc pin stateType law policy seed payer pc => .mkObj
       (([("kind", "create"), ("object", decimal object), ("objectCapability", decimal oc.value),
-       ("pin", decimal pin.value), ("law", toJson (reprStr law)), ("upgrade", upgradeJson policy)] :
+       ("pin", decimal pin.value), ("stateType", ObjectiveBendTyping.typeJson stateType),
+       ("law", toJson (reprStr law)), ("upgrade", upgradeJson policy)] :
           List (String × Json)) ++
        (match seed with | some bytes => [("seed", dataOf bytes)] | none => []) ++
        [("payer", decimal payer), ("payerCapability", decimal pc.value)])

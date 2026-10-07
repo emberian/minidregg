@@ -16,10 +16,23 @@ capabilities on; never a package hash). Its record names:
 * `upgrade`: who may re-pin the object, as a policy that may only tighten;
 * `continuity`: bumped by every re-pin and every law change;
 * `payer`: the Book account that funds the record and the state cell. The payer
-  is never authority: no function here reads it to decide anything.
+  is never authority: no function here reads it to decide anything;
+* `stateType`: the declared state type (a first-order `Ty`, its bytes by
+  `ObjectStateType.tyStream`): every write is typed at it (`admitWrite`);
+* `live`, `rebirths`: the COUNTERS of the object's awaiting activities, by class
+  (`classOf`): `live` those pinned to `pin` (while draining, minus the ones chosen
+  for rebirth), `rebirths` the ones chosen for REBIRTH (after a migration, every
+  awaiting activity pinned to another package: only chosen ones can be). While
+  draining, `Pending.live` counts the activities born on the next package. Every
+  turn that starts an awaiting activity calls `retain`, every turn that ends one
+  `release` (the ONE pair of functions; `Kernel.ObjectiveActivity` calls them);
+* `phase`: `steady`, or `draining next deadline` after an ADOPT: the next pin,
+  state type, migration, law and policy (`Pending`) wait for the old activities
+  to end (or be aborted at `deadline`) and for the MIGRATE turn.
 
 There is no list of activities: an object's activities are the record cells
-keyed by it, so nothing here goes stale when an activity is disposed of.
+keyed by it, so nothing here goes stale when an activity is disposed of; the
+counters are what the upgrade turns read (the kernel cannot enumerate cells).
 
 The judgment (`admitWrite`). A write of declared state from `old` to `new` is
 admitted exactly when both values project to law views (`project`) and the
@@ -42,6 +55,8 @@ import Compiler.RefusalReason
 import Kernel.ObjectiveActivityWire
 import Theory.CanonicalResourceKernel
 import Theory.AssertAxioms
+import Kernel.ObjectStateType
+import Compiler.ObjectiveInvocationClaim
 
 namespace Minidregg.Kernel.ObjectRecord
 open Minidregg.Compiler
@@ -50,6 +65,9 @@ open Minidregg.Theory.TypedAuthorization (Digest SubjectId)
 open Minidregg.Kernel.ObjectiveActivityWire (Bytes framed framed_roundTrip)
 open Minidregg.Theory.ObjectiveBendDemandData (Data)
 open Minidregg.Pred (Pred State Slot eval)
+open Minidregg.Theory.ObjectiveBendTypes (Ty)
+open Minidregg.Kernel.ObjectStateType (typedAt tyStream)
+open Minidregg.Compiler.ObjectiveInvocationClaim (Capacity capacityStream)
 set_option autoImplicit false
 
 /-! ## The record -/
@@ -62,15 +80,184 @@ inductive UpgradePolicy where
   | governed (authority : Pred) (floors : List Pred)
   deriving DecidableEq, Repr
 
+/-- An adopted upgrade that has not migrated yet: what the object becomes at
+MIGRATE. -/
+structure Pending where
+  /-- The next package (never the current pin: activities are told apart by pin). -/
+  pin : Digest
+  /-- The next declared state type. -/
+  stateType : Ty
+  /-- The migration: a declaration of the next package (`old -> new`), or `none`
+  for the identity, which ADOPT admits only when the old state type is a value
+  subtype of the new (`ObjectStateType.stateSubtype`). -/
+  migration : Option String
+  /-- The old state's fields the migration drops on purpose (linearity, trap 3). -/
+  dropped : List String
+  law : Pred
+  upgrade : UpgradePolicy
+  /-- The activities chosen at ADOPT to be ended and re-born on the next package. -/
+  rebirth : List Digest
+  /-- The declared envelope of ONE run of the migration (covered at ADOPT); every
+  drained write that runs it, and MIGRATE, pays its public price. -/
+  envelope : Capacity
+  /-- The height of the ADOPT: the `request/height` of the migration's judgment. -/
+  adoptedAt : Nat
+  /-- Awaiting activities born on `pin` while draining. -/
+  live : Nat
+  deriving DecidableEq, Repr
+
+/-- Where an object stands in an upgrade. -/
+inductive UpgradePhase where
+  /-- No upgrade under way. -/
+  | steady
+  /-- ADOPTed: `next` waits for the old activities to end (or be aborted at
+  `deadline`) and for MIGRATE. -/
+  | draining (next : Pending) (deadline : Nat)
+  deriving DecidableEq, Repr
+
 structure ObjectRecord where
   id : Digest
   pin : Digest
+  stateType : Ty
   schemaVersion : Nat
   law : Pred
   upgrade : UpgradePolicy
   continuity : Nat
   payer : Minidregg.Theory.CanonicalResourceKernel.AccountId
+  live : Nat
+  rebirths : Nat
+  phase : UpgradePhase
   deriving DecidableEq, Repr
+
+/-- The package new activities and calls of the object run: the pin, or, while
+draining, the next pin (only an identity migration admits them then). -/
+def ObjectRecord.activePin (record : ObjectRecord) : Digest :=
+  match record.phase with
+  | .steady => record.pin
+  | .draining next _ => next.pin
+
+/-- The package identities whose code may write the object's state: the pin, and while
+draining the next pin too (old activities write as the old package, identity-migration
+births and calls as the next one). -/
+def ObjectRecord.pins (record : ObjectRecord) : List Nat :=
+  match record.phase with
+  | .steady => [record.pin.value]
+  | .draining next _ => [record.pin.value, next.pin.value]
+
+/-! ## Live counters -/
+
+/-- The counter an awaiting activity (its pin, its id) is counted in. -/
+inductive LiveClass where
+  | live
+  | rebirth
+  | pending
+  deriving DecidableEq, Repr
+
+/-- **The class of an activity** under an object record. While draining: born on
+the next pin, `pending`; chosen for rebirth, `rebirth`; otherwise `live`. Steady:
+pinned to the record's pin, `live`; otherwise (left over from a migration, so
+chosen for rebirth) `rebirth`. -/
+def ObjectRecord.classOf (record : ObjectRecord) (pin activity : Digest) : LiveClass :=
+  match record.phase with
+  | .draining next _ =>
+      if pin = next.pin then .pending else if activity ∈ next.rebirth then .rebirth else .live
+  | .steady => if pin = record.pin then .live else .rebirth
+
+/-- The value of one counter. -/
+def ObjectRecord.count (record : ObjectRecord) : LiveClass → Nat
+  | .live => record.live
+  | .rebirth => record.rebirths
+  | .pending => match record.phase with
+    | .draining next _ => next.live
+    | .steady => 0
+
+/-- Apply `f` to one counter (a steady record has no pending counter). -/
+def ObjectRecord.bump (record : ObjectRecord) (f : Nat → Nat) : LiveClass → ObjectRecord
+  | .live => { record with live := f record.live }
+  | .rebirth => { record with rebirths := f record.rebirths }
+  | .pending => match record.phase with
+    | .draining next deadline => { record with phase := .draining { next with live := f next.live } deadline }
+    | .steady => record
+
+/-- **The one retain**: a turn that leaves a new activity awaiting counts it. -/
+def ObjectRecord.retain (record : ObjectRecord) (pin activity : Digest) : ObjectRecord :=
+  record.bump (· + 1) (record.classOf pin activity)
+
+/-- **The one release**: a turn that ends an awaiting activity (an ending delivery,
+an abandonment, an abort, a rebirth of the old one) uncounts it. -/
+def ObjectRecord.release (record : ObjectRecord) (pin activity : Digest) : ObjectRecord :=
+  record.bump (· - 1) (record.classOf pin activity)
+
+theorem bump_pin (record : ObjectRecord) (f : Nat → Nat) (c : LiveClass) :
+    (record.bump f c).pin = record.pin := by
+  cases c <;> simp only [ObjectRecord.bump] <;> (try split) <;> rfl
+
+theorem bump_classOf (record : ObjectRecord) (f : Nat → Nat) (c : LiveClass) :
+    (record.bump f c).classOf = record.classOf := by
+  funext pin activity
+  cases c with
+  | live => rfl
+  | rebirth => rfl
+  | pending =>
+    unfold ObjectRecord.bump
+    cases phase : record.phase with
+    | steady => simp only
+    | draining next deadline => simp [ObjectRecord.classOf, phase]
+
+/-- A bump changes exactly its own counter. -/
+theorem bump_count (record : ObjectRecord) (f : Nat → Nat) (c : LiveClass)
+    (draining : c = .pending → ∃ next deadline, record.phase = .draining next deadline) (other : LiveClass) :
+    (record.bump f c).count other = if other = c then f (record.count other) else record.count other := by
+  cases c with
+  | live => cases other <;> simp [ObjectRecord.bump, ObjectRecord.count]
+  | rebirth => cases other <;> simp [ObjectRecord.bump, ObjectRecord.count]
+  | pending =>
+    obtain ⟨next, deadline, phase⟩ := draining rfl
+    cases other <;> simp [ObjectRecord.bump, ObjectRecord.count, phase]
+
+/-- Every counter but the bumped one, and every field the judgment reads, is
+kept: the pin, the law, the state type, the policy, the payer. -/
+theorem bump_keeps (record : ObjectRecord) (f : Nat → Nat) (c : LiveClass) :
+    (record.bump f c).pin = record.pin ∧ (record.bump f c).law = record.law ∧
+      (record.bump f c).stateType = record.stateType ∧ (record.bump f c).upgrade = record.upgrade ∧
+      (record.bump f c).payer = record.payer ∧ (record.bump f c).activePin = record.activePin := by
+  cases c <;> simp only [ObjectRecord.bump] <;> (try split) <;>
+    simp_all [ObjectRecord.activePin]
+
+/-- A bump keeps the pins. -/
+theorem bump_pins (record : ObjectRecord) (f : Nat → Nat) (c : LiveClass) :
+    (record.bump f c).pins = record.pins := by
+  cases c <;> simp only [ObjectRecord.bump] <;> (try split) <;> simp_all [ObjectRecord.pins]
+
+/-- A steady record never counts an activity `pending`. -/
+theorem classOf_steady_ne_pending (record : ObjectRecord) (steady : record.phase = .steady)
+    (pin activity : Digest) : record.classOf pin activity ≠ .pending := by
+  unfold ObjectRecord.classOf
+  rw [steady]
+  dsimp only
+  split <;> simp
+
+/-- **`retain` counts the activity in its class**, by one, and nothing else. -/
+theorem retain_count (record : ObjectRecord) (pin activity : Digest) (c : LiveClass) :
+    (record.retain pin activity).count c =
+      if c = record.classOf pin activity then record.count c + 1 else record.count c := by
+  unfold ObjectRecord.retain
+  apply bump_count
+  intro pending
+  cases phase : record.phase with
+  | steady => exact absurd pending (classOf_steady_ne_pending record phase pin activity)
+  | draining next deadline => exact ⟨next, deadline, rfl⟩
+
+/-- **`release` uncounts the activity in its class**, by one, and nothing else. -/
+theorem release_count (record : ObjectRecord) (pin activity : Digest) (c : LiveClass) :
+    (record.release pin activity).count c =
+      if c = record.classOf pin activity then record.count c - 1 else record.count c := by
+  unfold ObjectRecord.release
+  apply bump_count
+  intro pending
+  cases phase : record.phase with
+  | steady => exact absurd pending (classOf_steady_ne_pending record phase pin activity)
+  | draining next deadline => exact ⟨next, deadline, rfl⟩
 
 /-! ## The package pin: a kernel clause no creator law can remove -/
 
@@ -87,17 +274,23 @@ not a stored field a creator or a later turn could omit or rewrite, it is a func
 record's `pin`, and the judge (`admitWrite`) reads only this. A refusal by the pin is the
 leaf at path `[0]` (`unpinned_write_names_pin`). -/
 def ObjectRecord.effectiveLaw (record : ObjectRecord) : Pred :=
-  Pred.all [pinClause record.pin, record.law]
+  Pred.all [Minidregg.Pred.objectivePin record.pins, record.law]
 
-/-- The effective law leads with the pin clause of exactly the pinned package. -/
+/-- The effective law leads with the pin clause of exactly the pinned packages
+(`pins`: the pin; while draining also the next pin). -/
 theorem effectiveLaw_leads_with_pin (record : ObjectRecord) :
-    record.effectiveLaw = Pred.all (pinClause record.pin :: [record.law]) := rfl
+    record.effectiveLaw = Pred.all (Minidregg.Pred.objectivePin record.pins :: [record.law]) := rfl
+
+/-- Steady, the clause is exactly `pinClause record.pin`. -/
+theorem effectiveLaw_steady (record : ObjectRecord) (steady : record.phase = .steady) :
+    record.effectiveLaw = Pred.all [pinClause record.pin, record.law] := by
+  simp [ObjectRecord.effectiveLaw, ObjectRecord.pins, steady, pinClause]
 
 /-- **No creator law removes the pin**: whatever `law` an object is created with, a view
 the effective law accepts is one the pin clause accepts (and the creator's law accepts). -/
 theorem effectiveLaw_accepts_iff (record : ObjectRecord) (old new : State) :
     eval record.effectiveLaw old new = true ↔
-      eval (pinClause record.pin) old new = true ∧ eval record.law old new = true := by
+      eval (Minidregg.Pred.objectivePin record.pins) old new = true ∧ eval record.law old new = true := by
   unfold ObjectRecord.effectiveLaw
   rw [Minidregg.Pred.eval_all]
   simp
@@ -207,8 +400,10 @@ structure Facts where
   height : Nat
   /-- The object the write is about (its id's value). -/
   target : Nat
-  /-- Which kernel turn writes: 1 birth, 2 delivery, 3 (unused: there is no direct write of
-  declared state), 4 creation (the seed), 5 a call frame. -/
+  /-- Which kernel turn writes (or, for an ADOPT, asks): 1 birth, 2 delivery, 3 (unused:
+  there is no direct write of declared state), 4 creation (the seed), 5 a call frame,
+  6 MIGRATE (the migration's judgment, `migrateFacts`), 7 ADOPT (the upgrade authority's
+  facts), 8 an abort after the drain deadline, 9 a rebirth's first segment. -/
   turn : Nat
   /-- The object whose frame called the writing frame (`request/caller`); `none`
   (slot absent) when the write is not a nested call frame's. A callee's law
@@ -253,10 +448,18 @@ def views (facts : Facts) (old : Option Data) (new : Data) : Option (State × St
 /-! ## The judgment -/
 
 inductive WriteRefusal where
+  /-- The new value is not typed at the object's declared state type. -/
+  | illTyped
   /-- A value does not project (a name that is not plain). -/
   | unprojectable
   /-- The object's law rejects the write; the first failing clause. -/
   | lawDenied (leaf : LawLeaf)
+  /-- While draining: the write's state, migrated, is refused by the NEXT record's
+  judgment (the one MIGRATE will make): its reason. -/
+  | upgradeConflict (reason : WriteRefusal)
+  /-- While draining under a migration term, a write judged without running it
+  (a call frame): never admitted (`ObjectRecord.admitsNew` refuses such frames first). -/
+  | unmigrated
   deriving DecidableEq, Repr
 
 /-- Judge a write by `law` on its views: the one judgment, parameterised by which law. -/
@@ -269,17 +472,22 @@ def judgeLaw (law : Pred) (facts : Facts) (old : Option Data) (new : Data) : Exc
       | some leaf => .error (.lawDenied leaf)
 
 /-- The judgment every write of an object's declared state passes after the object exists:
-its effective law (the kernel's pin clause, then the creator's law). -/
+its effective law (the kernel's pin clause, then the creator's law), then the new value is
+typed at the declared state type. -/
 def admitWrite (record : ObjectRecord) (facts : Facts) (old : Option Data) (new : Data) :
     Except WriteRefusal Unit :=
-  judgeLaw record.effectiveLaw facts old new
+  match judgeLaw record.effectiveLaw facts old new with
+  | .error reason => .error reason
+  | .ok () => if typedAt record.stateType new then .ok () else .error .illTyped
 
 /-- The judgment of an object's INITIAL state, at its creation: the creator's law alone. The pin
 governs the writes after the object exists; at creation no package has run, so the pin clause
 would refuse every seed. The seed is judged over `old = none`, so an object cannot be born
-violating its own state clauses. -/
+violating its own state clauses; and it is typed at the declared state type. -/
 def admitSeed (record : ObjectRecord) (facts : Facts) (seed : Data) : Except WriteRefusal Unit :=
-  judgeLaw record.law facts none seed
+  match judgeLaw record.law facts none seed with
+  | .error reason => .error reason
+  | .ok () => if typedAt record.stateType seed then .ok () else .error .illTyped
 
 /-- **A write is admitted exactly when the law accepts its views.** -/
 theorem judgeLaw_ok_iff (law : Pred) (facts : Facts) (old : Option Data) (new : Data) :
@@ -320,34 +528,79 @@ theorem judgeLaw_lawDenied_fails (law : Pred) (facts : Facts) (old : Option Data
           obtain ⟨at_, _, fails⟩ := LawLeaf.of_fails law before after found named
           exact ⟨before, after, rfl, at_, fails⟩
 
+theorem typedAfter_ok {law : Except WriteRefusal Unit} {type : Ty} {new : Data} :
+    (match law with
+      | .error reason => .error reason
+      | .ok () => if typedAt type new then .ok () else .error .illTyped : Except WriteRefusal Unit) = .ok () ↔
+      law = .ok () ∧ typedAt type new = true := by
+  cases law with
+  | error reason => simp
+  | ok u => cases u; by_cases typed : typedAt type new = true <;> simp [typed]
+
 /-- **A write is admitted exactly when the effective law (the pin clause, then the
-creator's law) accepts its views.** -/
+creator's law) accepts its views and the new value is typed at the declared state type.** -/
 theorem admitWrite_ok_iff (record : ObjectRecord) (facts : Facts) (old : Option Data) (new : Data) :
     admitWrite record facts old new = .ok () ↔
-      ∃ before after, views facts old new = some (before, after) ∧
-        eval record.effectiveLaw before after = true :=
-  judgeLaw_ok_iff record.effectiveLaw facts old new
+      (∃ before after, views facts old new = some (before, after) ∧
+        eval record.effectiveLaw before after = true) ∧ typedAt record.stateType new = true := by
+  unfold admitWrite
+  rw [typedAfter_ok, judgeLaw_ok_iff]
 
 /-- **A refusal names a clause of the effective law that is false on the same views.** -/
 theorem admitWrite_lawDenied_fails (record : ObjectRecord) (facts : Facts) (old : Option Data) (new : Data)
     (leaf : LawLeaf) (refused : admitWrite record facts old new = .error (.lawDenied leaf)) :
     ∃ before after, views facts old new = some (before, after) ∧
-      record.effectiveLaw.subterm leaf.path = some leaf.clause ∧ eval leaf.clause before after = false :=
-  judgeLaw_lawDenied_fails record.effectiveLaw facts old new leaf refused
+      record.effectiveLaw.subterm leaf.path = some leaf.clause ∧ eval leaf.clause before after = false := by
+  unfold admitWrite at refused
+  cases judged : judgeLaw record.effectiveLaw facts old new with
+  | error reason =>
+    rw [judged] at refused
+    cases refused
+    exact judgeLaw_lawDenied_fails record.effectiveLaw facts old new leaf judged
+  | ok u =>
+    cases u
+    rw [judged] at refused
+    simp only at refused
+    split at refused <;> cases refused
 
 /-- **A seed is admitted exactly when the CREATOR'S law accepts its views** (no pin clause:
-nothing has run yet). -/
+nothing has run yet) and it is typed at the declared state type. -/
 theorem admitSeed_ok_iff (record : ObjectRecord) (facts : Facts) (seed : Data) :
     admitSeed record facts seed = .ok () ↔
-      ∃ before after, views facts none seed = some (before, after) ∧ eval record.law before after = true :=
-  judgeLaw_ok_iff record.law facts none seed
+      (∃ before after, views facts none seed = some (before, after) ∧ eval record.law before after = true) ∧
+        typedAt record.stateType seed = true := by
+  unfold admitSeed
+  rw [typedAfter_ok, judgeLaw_ok_iff]
 
 /-- **A refused seed names the creator's clause that is false on the seed's views.** -/
 theorem admitSeed_lawDenied_fails (record : ObjectRecord) (facts : Facts) (seed : Data) (leaf : LawLeaf)
     (refused : admitSeed record facts seed = .error (.lawDenied leaf)) :
     ∃ before after, views facts none seed = some (before, after) ∧
-      record.law.subterm leaf.path = some leaf.clause ∧ eval leaf.clause before after = false :=
-  judgeLaw_lawDenied_fails record.law facts none seed leaf refused
+      record.law.subterm leaf.path = some leaf.clause ∧ eval leaf.clause before after = false := by
+  unfold admitSeed at refused
+  cases judged : judgeLaw record.law facts none seed with
+  | error reason =>
+    rw [judged] at refused
+    cases refused
+    exact judgeLaw_lawDenied_fails record.law facts none seed leaf judged
+  | ok u =>
+    cases u
+    rw [judged] at refused
+    simp only at refused
+    split at refused <;> cases refused
+
+/-- An admitted write is typed at the declared state type. -/
+theorem admitWrite_typed {record : ObjectRecord} {facts : Facts} {old : Option Data} {new : Data}
+    (admitted : admitWrite record facts old new = .ok ()) : typedAt record.stateType new = true :=
+  ((admitWrite_ok_iff record facts old new).mp admitted).2
+
+/-- The judgment reads the law, the pins and the state type only: counters and the payer
+are not read. -/
+theorem admitWrite_bump (record : ObjectRecord) (f : Nat → Nat) (c : LiveClass) (facts : Facts)
+    (old : Option Data) (new : Data) :
+    admitWrite (record.bump f c) facts old new = admitWrite record facts old new := by
+  obtain ⟨_, law, stateType, _⟩ := bump_keeps record f c
+  simp only [admitWrite, ObjectRecord.effectiveLaw, bump_pins, law, stateType]
 
 /-- **The payer is not authority**: the judgment does not read it. -/
 theorem admitWrite_payer_irrelevant (record : ObjectRecord) (payer : Minidregg.Theory.CanonicalResourceKernel.AccountId)
@@ -399,6 +652,21 @@ theorem pinClause_accepts_run (pin : Digest) (facts : Facts) (old : Option Data)
   rw [Minidregg.Pred.eval_objectivePin]
   exact ⟨pin.value, List.mem_singleton_self _, by rw [slotAfter]; simp [Facts.artifactValue, ran]⟩
 
+/-- **A write made by one of the object's packages passes its pins** (`ObjectRecord.pins`):
+its artifact is one of them, so the clause accepts every view of it. -/
+theorem objectivePin_accepts_run (pins : List Nat) (facts : Facts) (old : Option Data) (new : Data)
+    (artifact : Nat) (ran : facts.artifact = some artifact) (member : artifact ∈ pins) (before after : State)
+    (viewed : views facts old new = some (before, after)) :
+    eval (Minidregg.Pred.objectivePin pins) before after = true := by
+  obtain ⟨_, slotAfter⟩ := views_artifact_slot facts old new before after viewed
+  rw [Minidregg.Pred.eval_objectivePin]
+  exact ⟨artifact, member, by rw [slotAfter]; simp [Facts.artifactValue, ran]⟩
+
+/-- The package an object runs for new activities is one of its pins. -/
+theorem activePin_mem_pins (record : ObjectRecord) : record.activePin.value ∈ record.pins := by
+  unfold ObjectRecord.activePin ObjectRecord.pins
+  split <;> simp
+
 /-- A pin clause leading an `all` names itself, at path `[0]`, when the step reads `-1`. -/
 theorem all_pin_names_pin (artifacts : List Nat) (rest : List Pred) (old new : State)
     (unclaimed : new.get Minidregg.Pred.objectiveArtifactSlot = some (-1)) :
@@ -426,20 +694,20 @@ theorem unpinned_write_names_pin (record : ObjectRecord) (facts : Facts) (old : 
     (unpinned : facts.artifact = none) (before after : State)
     (viewed : views facts old new = some (before, after)) :
     admitWrite record facts old new = .error (.lawDenied
-      ⟨[0], pinClause record.pin, before.get Minidregg.Pred.objectiveArtifactSlot, some (-1)⟩) := by
+      ⟨[0], Minidregg.Pred.objectivePin record.pins, before.get Minidregg.Pred.objectiveArtifactSlot, some (-1)⟩) := by
   obtain ⟨_, slotAfter⟩ := views_artifact_slot facts old new before after viewed
   have unclaimed : after.get Minidregg.Pred.objectiveArtifactSlot = some (-1) := by
     rw [slotAfter]; simp [Facts.artifactValue, unpinned]
   have named : LawLeaf.of record.effectiveLaw before after =
-      some ⟨[0], pinClause record.pin, before.get Minidregg.Pred.objectiveArtifactSlot, some (-1)⟩ :=
-    all_pin_names_pin [record.pin.value] [record.law] before after unclaimed
+      some ⟨[0], Minidregg.Pred.objectivePin record.pins, before.get Minidregg.Pred.objectiveArtifactSlot, some (-1)⟩ :=
+    all_pin_names_pin record.pins [record.law] before after unclaimed
   simp only [admitWrite, judgeLaw, viewed, named]
 
 /-- A write no package code made is never admitted, for every object and value. -/
 theorem unpinned_write_refused (record : ObjectRecord) (facts : Facts) (old : Option Data) (new : Data)
     (unpinned : facts.artifact = none) : admitWrite record facts old new ≠ .ok () := by
   intro admitted
-  obtain ⟨before, after, viewed, _⟩ := (admitWrite_ok_iff record facts old new).mp admitted
+  obtain ⟨⟨before, after, viewed, _⟩, _⟩ := (admitWrite_ok_iff record facts old new).mp admitted
   have named := unpinned_write_names_pin record facts old new unpinned before after viewed
   rw [named] at admitted
   cases admitted
@@ -449,7 +717,7 @@ theorem unpinned_write_refused (record : ObjectRecord) (facts : Facts) (old : Op
 An object pinned to package 7 whose creator's law is the empty conjunction (the most
 permissive law there is). `leafOf` / `accepted` read the verdict of `admitWrite`. -/
 
-def teethRecord : ObjectRecord := ⟨⟨1⟩, ⟨7⟩, 1, Pred.all [], .frozen, 0, 0⟩
+def teethRecord : ObjectRecord := ⟨⟨1⟩, ⟨7⟩, .natural, 1, Pred.all [], .frozen, 0, 0, 0, 0, .steady⟩
 
 def teethFacts (artifact : Option Nat) : Facts := ⟨some ⟨40⟩, 5, 1, 3, none, artifact⟩
 
@@ -487,6 +755,121 @@ theorem seed_teeth :
         some ⟨[], Pred.eq "state" 5, none, some 6⟩ := by
   decide +kernel
 
+/-! ## The upgrade: the next record, the migration's facts, the drained judgment -/
+
+/-- **The record MIGRATE installs**: the next pin, state type, law and policy;
+the schema version and the continuity each one higher; the pending activities
+become the live ones; steady. The rebirth counter is kept (those activities are
+re-born on the new pin by their own turns). -/
+def ObjectRecord.successor (record : ObjectRecord) (next : Pending) : ObjectRecord :=
+  { record with
+    pin := next.pin
+    stateType := next.stateType
+    schemaVersion := record.schemaVersion + 1
+    law := next.law
+    upgrade := next.upgrade
+    continuity := record.continuity + 1
+    live := next.live
+    phase := .steady }
+
+/-- **The facts of the migration's judgment** (turn 6): a function of the object
+and the pending upgrade only (no subject, the ADOPT height, no caller), so a
+drained write judged under them is judged exactly as MIGRATE will judge the same
+state. The artifact is the next package: the migrated state is the next package's (its
+migration declaration, or the identity it adopted), so the next record's pin clause admits it. -/
+def migrateFacts (target : Nat) (next : Pending) : Facts :=
+  ⟨none, next.adoptedAt, target, 6, none, some next.pin.value⟩
+
+/-- New births and calls are admitted: always when steady; while draining only
+under the identity migration, which requires the old state type to be a value
+subtype of the new (so a new-package activity never has its state rewritten
+under it at MIGRATE). -/
+def ObjectRecord.admitsNew (record : ObjectRecord) : Bool :=
+  match record.phase with
+  | .steady => true
+  | .draining next _ => next.migration.isNone && ObjectStateType.stateSubtype record.stateType next.stateType
+
+/-- An activity pinned to `pin` may run (be delivered, exhausted): steady, only
+the record's pin (an activity left on another pin waits for its REBIRTH); while
+draining, the old pin and the next one. -/
+def ObjectRecord.runs (record : ObjectRecord) (pin : Digest) : Bool :=
+  match record.phase with
+  | .steady => pin == record.pin
+  | .draining next _ => pin == record.pin || pin == next.pin
+
+/-- **The judgment of a write that runs no migration** (a call frame's, a
+delivered message's): `admitWrite`, and while draining under the identity, the
+next record's judgment of the new state under the migration's facts. Under a
+migration term it refuses (`unmigrated`): such writes are refused before they run. -/
+def ObjectRecord.judge (record : ObjectRecord) (facts : Facts) (old : Option Data) (new : Data) :
+    Except WriteRefusal Unit :=
+  match admitWrite record facts old new with
+  | .error reason => .error reason
+  | .ok () =>
+    match record.phase with
+    | .steady => .ok ()
+    | .draining next _ =>
+      match next.migration with
+      | some _ => .error .unmigrated
+      | none =>
+        match admitWrite (record.successor next) (migrateFacts facts.target next) (some new) new with
+        | .ok () => .ok ()
+        | .error reason => .error (.upgradeConflict reason)
+
+/-- A judged write is admitted by the record's own law. -/
+theorem judge_admits {record : ObjectRecord} {facts : Facts} {old : Option Data} {new : Data}
+    (judged : record.judge facts old new = .ok ()) : admitWrite record facts old new = .ok () := by
+  unfold ObjectRecord.judge at judged
+  split at judged
+  · cases judged
+  · assumption
+
+/-- A steady record's judgment is `admitWrite`. -/
+theorem judge_steady {record : ObjectRecord} (steady : record.phase = .steady) (facts : Facts) (old : Option Data)
+    (new : Data) : record.judge facts old new = admitWrite record facts old new := by
+  unfold ObjectRecord.judge
+  cases admitted : admitWrite record facts old new with
+  | error reason => rfl
+  | ok u => cases u; simp [steady]
+
+/-- While draining, a judged write's state is one MIGRATE (under the identity)
+admits. -/
+theorem judge_draining {record : ObjectRecord} {next : Pending} {deadline : Nat}
+    (draining : record.phase = .draining next deadline) {facts : Facts} {old : Option Data} {new : Data}
+    (judged : record.judge facts old new = .ok ()) :
+    next.migration = none ∧
+      admitWrite (record.successor next) (migrateFacts facts.target next) (some new) new = .ok () := by
+  unfold ObjectRecord.judge at judged
+  split at judged
+  · cases judged
+  · rw [draining] at judged
+    simp only at judged
+    split at judged
+    · cases judged
+    · rename_i none_
+      refine ⟨none_, ?_⟩
+      split at judged
+      · assumption
+      · cases judged
+
+/-- The judgment of a write that runs no migration: everything it reads but the
+payer, so the payer is never authority. -/
+theorem judge_payer_irrelevant (record : ObjectRecord) (payer : Minidregg.Theory.CanonicalResourceKernel.AccountId)
+    (facts : Facts) (old : Option Data) (new : Data) :
+    ({ record with payer := payer } : ObjectRecord).judge facts old new = record.judge facts old new := rfl
+
+/-- A package the object still runs is one of its pins. -/
+theorem runs_mem_pins {record : ObjectRecord} {pin : Digest} (runs : record.runs pin = true) :
+    pin.value ∈ record.pins := by
+  unfold ObjectRecord.runs at runs
+  unfold ObjectRecord.pins
+  split at runs
+  · rename_i steady
+    simp at runs; simp [runs]
+  · rename_i next deadline draining
+    simp at runs
+    rcases runs with same | same <;> simp [same]
+
 /-! ## The record's bytes -/
 
 def upgradeStream : StreamCodec UpgradePolicy :=
@@ -501,16 +884,49 @@ def upgradeStream : StreamCodec UpgradePolicy :=
       | .inr (authority, floors) => .governed authority floors)
     (by intro policy; cases policy <;> rfl)
 
+def pendingStream : StreamCodec Pending :=
+  StreamCodec.xmap
+    (StreamCodec.product digestStream (StreamCodec.product tyStream
+      (StreamCodec.product (StreamCodec.option ObjectiveActivityWire.stringStream)
+      (StreamCodec.product (StreamCodec.list ObjectiveActivityWire.stringStream)
+      (StreamCodec.product LawLeaf.predStream (StreamCodec.product upgradeStream
+      (StreamCodec.product (StreamCodec.list digestStream) (StreamCodec.product capacityStream
+      (StreamCodec.product StreamCodec.nat StreamCodec.nat)))))))))
+    (fun p => (p.pin, p.stateType, p.migration, p.dropped, p.law, p.upgrade, p.rebirth, p.envelope,
+      p.adoptedAt, p.live))
+    (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2.1, w.2.2.2.2.1, w.2.2.2.2.2.1, w.2.2.2.2.2.2.1,
+      w.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.2⟩)
+    (by intro p; cases p; rfl)
+
+def phaseStream : StreamCodec UpgradePhase :=
+  StreamCodec.xmap
+    (StreamCodec.sum ObjectiveActivityWire.unitStream (StreamCodec.product pendingStream StreamCodec.nat))
+    (fun phase => match phase with
+      | .steady => .inl ()
+      | .draining next deadline => .inr (next, deadline))
+    (fun wire => match wire with
+      | .inl () => .steady
+      | .inr (next, deadline) => .draining next deadline)
+    (by intro phase; cases phase <;> rfl)
+
 def recordStream : StreamCodec ObjectRecord :=
   StreamCodec.xmap
     (StreamCodec.product digestStream (StreamCodec.product digestStream
+      (StreamCodec.product tyStream
       (StreamCodec.product StreamCodec.nat (StreamCodec.product LawLeaf.predStream
-      (StreamCodec.product upgradeStream (StreamCodec.product StreamCodec.nat StreamCodec.nat))))))
-    (fun r => (r.id, r.pin, r.schemaVersion, r.law, r.upgrade, r.continuity, r.payer))
-    (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2.1, w.2.2.2.2.1, w.2.2.2.2.2.1, w.2.2.2.2.2.2⟩)
+      (StreamCodec.product upgradeStream (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product StreamCodec.nat phaseStream))))))))))
+    (fun r => (r.id, r.pin, r.stateType, r.schemaVersion, r.law, r.upgrade, r.continuity, r.payer,
+      r.live, r.rebirths, r.phase))
+    (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2.1, w.2.2.2.2.1, w.2.2.2.2.2.1, w.2.2.2.2.2.2.1,
+      w.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.2.2⟩)
     (by intro r; cases r; rfl)
 
-def recordFrame : Bytes := "DREGG/OBJECTIVE/OBJECT-RECORD/v1".toUTF8.toList
+/-- v2: the record carries the declared state type, the live counters and the
+upgrade phase. A v1 record does not decode (its frame differs): `readObject`
+refuses it `objectCodec`, so a v1 world is re-genesised, never reinterpreted. -/
+def recordFrame : Bytes := "DREGG/OBJECTIVE/OBJECT-RECORD/v2".toUTF8.toList
 def recordCodec := framed recordFrame recordStream
 def encodeRecord (record : ObjectRecord) : Bytes := recordCodec.encode record
 def decodeRecord (bytes : Bytes) : Option ObjectRecord := recordCodec.decode bytes
@@ -538,5 +954,25 @@ theorem record_roundTrip (record : ObjectRecord) : decodeRecord (encodeRecord re
 #assert_axioms unpinned_write_refused
 #assert_axioms pin_teeth
 #assert_axioms seed_teeth
+
+#assert_axioms admitWrite_typed
+#assert_axioms typedAfter_ok
+#assert_axioms bump_pins
+#assert_axioms objectivePin_accepts_run
+#assert_axioms activePin_mem_pins
+#assert_axioms runs_mem_pins
+#assert_axioms effectiveLaw_steady
+#assert_axioms admitWrite_bump
+#assert_axioms bump_pin
+#assert_axioms bump_classOf
+#assert_axioms bump_count
+#assert_axioms bump_keeps
+#assert_axioms classOf_steady_ne_pending
+#assert_axioms retain_count
+#assert_axioms release_count
+#assert_axioms judge_admits
+#assert_axioms judge_steady
+#assert_axioms judge_draining
+#assert_axioms judge_payer_irrelevant
 #assert_axioms record_roundTrip
 end Minidregg.Kernel.ObjectRecord
