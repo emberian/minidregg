@@ -406,7 +406,9 @@ def cmd_expect(a, pins, admitted):
         failures.append(f"only {compared} rows compared (floor {a.floor})")
     for f in failures:
         print(f"expect: FAIL {f}")
-    print(f"expect: {compared} rows compared, {len(changes)} differ, {len(failures)} failure(s)")
+    # a scratch copy's rows carry module `<local>`: that alone is `rerendered`, not a contract change
+    differ = sum(1 for c in changes.values() if c[0] != "rerendered")
+    print(f"expect: {compared} rows compared, {differ} differ in contract, {len(failures)} failure(s)")
     return 1 if failures else 0
 
 
