@@ -1966,6 +1966,53 @@ def admitAuthority [DecidableEq F] {m : Type → Type} [Monad m] (native : Crede
     else return .error .wrongEnvelopeCount
   else return .error .malformedCommand
 
+/-- **Refusal by name: a read target's target envelope.** An observe-only read
+target that carries a target envelope is refused `readTargetEnvelope`, before
+any signature is checked: its one signature is its observe envelope. -/
+theorem admitAuthority_refuses_read_target_envelope [DecidableEq F] {m : Type → Type} [Monad m]
+    (native : CredentialSignatureIO.Oracle m)
+    (prepared : PreparedInvocation deployment profile ambient durable command) (signed : SignedCommand)
+    (ingress : commandCodec.encode command = signed.commandBytes)
+    (count : signed.targetEnvelopes.length = command.targets.length)
+    (readCount : signed.observeEnvelopes.length =
+      (if command.requiresObservation then command.targets.length else 0))
+    (i : TargetIndex command) (read : command.targets[i].observeOnly = true)
+    (carried : signed.envelope command (some i) ≠ []) :
+    admitAuthority native prepared signed = pure (.error .readTargetEnvelope) := by
+  have refused : ¬ ReadEnvelopesEmpty command signed := fun empty => carried (empty i read)
+  simp only [admitAuthority, dif_pos ingress, dif_pos count, dif_pos readCount, dif_neg refused]
+
+/-- **Refusal by name: a lone read without its observe envelope.** A command
+whose only target is an observe-only read requires its observe envelope; without
+one it is refused `wrongEnvelopeCount`. -/
+theorem admitAuthority_refuses_lone_read_without_observation [DecidableEq F] {m : Type → Type} [Monad m]
+    (native : CredentialSignatureIO.Oracle m)
+    (prepared : PreparedInvocation deployment profile ambient durable command) (signed : SignedCommand)
+    (ingress : commandCodec.encode command = signed.commandBytes)
+    (count : signed.targetEnvelopes.length = command.targets.length)
+    (i : TargetIndex command) (read : command.targets[i].observeOnly = true)
+    (unobserved : signed.observeEnvelopes = []) :
+    admitAuthority native prepared signed = pure (.error .wrongEnvelopeCount) := by
+  have required := requiresObservation_of_observeOnly i read
+  have refused : ¬ signed.observeEnvelopes.length =
+      (if command.requiresObservation then command.targets.length else 0) := by
+    rw [unobserved, required, if_pos rfl]
+    exact fun zero => absurd zero.symm (Nat.ne_of_gt (Nat.lt_of_le_of_lt (Nat.zero_le _) i.isLt))
+  simp only [admitAuthority, dif_pos ingress, dif_pos count, dif_neg refused]
+
+/-- No accepted invocation exists in which an observe-only read target carries a
+target envelope, or lacks its `ReadLeg`. -/
+theorem no_accepted_read_target_envelope [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
+    (i : TargetIndex command) (read : command.targets[i].observeOnly = true)
+    (carried : signed.envelope command (some i) ≠ []) :
+    ¬ Nonempty (AuthorityInvocation prepared signed) :=
+  fun ⟨accepted⟩ => carried (accepted.readEnvelopes i read)
+
+#assert_axioms admitAuthority_refuses_read_target_envelope
+#assert_axioms admitAuthority_refuses_lone_read_without_observation
+#assert_axioms no_accepted_read_target_envelope
+
 private def finishAdmission [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command) (signed : SignedCommand)
     (authority : AuthorityInvocation prepared signed) (route : InvocationRouteAdmission prepared signed)

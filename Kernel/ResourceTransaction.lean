@@ -873,6 +873,37 @@ structure PreparedTarget (deployment : Deployment) (directory : Directory Nat Re
     (snapshot.authState.policyAddress ⟨target.target⟩ (snapshot.authState.policyRevision ⟨target.target⟩))
   audienceFresh : ObjectAudience.checkFresh source.record.audience target.target target.audienceEpoch = .ok ()
 
+/-- An observe-only content read computes only when its named capability is its
+observe capability: the read's one authorization is its observation. -/
+theorem computeTarget_read_observe (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
+    (command : Command) (target : Target) (pre : TargetCell target) (post : target.Outcome)
+    (read : target.payload = .read)
+    (computed : computeTarget snapshot semantics ambient command target pre = .ok post) :
+    target.observeCapability = some target.capability := by
+  cases target with
+  | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
+    simp only at read
+    subst read
+    simp only [computeTarget] at computed
+    revert computed
+    repeat' (first | split | skip)
+    all_goals first
+      | (intro computed; cases computed)
+      | (intro _; simp_all)
+      | (intro _; assumption)
+
+/-- **A prepared read target names its observe capability.** No observe-only
+content read is prepared, hence none accepted, whose `capability` is not its
+observe capability (refused `observationRequired` otherwise). -/
+theorem PreparedTarget.read_names_observe_capability {deployment : Deployment}
+    {directory : Directory Nat Registry} {snapshot : AuthoritySnapshot} {semantics : Digest}
+    {ambient : Ambient} {command : Command} {target : Target}
+    (prepared : PreparedTarget deployment directory snapshot semantics ambient command target)
+    (read : target.payload = .read) :
+    target.observeCapability = some target.capability :=
+  computeTarget_read_observe snapshot semantics ambient command target prepared.pre prepared.post read
+    prepared.candidate.modeEvidence.down
+
 def prepareTarget (deployment : Deployment) (directory : Directory Nat Registry)
     (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
     (command : Command) (target : Target) :
