@@ -85,22 +85,22 @@ structure Reserved {F : Type} [Field F] [DecidableEq F]
   sourceCurrent : source.promise.declaration.sourceImageBytes = DurableReceiverCodec.imageStream.encode durable.image
   selectedExact : reservation.intent = IntentRecord.ofIntent selected
   allDependencies : ∀ g ∈ dependencies selected, g ∈ intent.readGuards
-  beforeExact : JointControlFrame.readControl pin (durable.snapshot.canonicalBytes pin.cell) = some before
+  beforeExact : JointControlFrame.readControl pin (ground.view.canonicalBytes pin.cell) = some before
   controlWrite : ∃ w ∈ intent.writes, w.cellId = pin.cell ∧
     JointControlFrame.readControl pin w.canonicalPostBytes = some after
   funded : Charge.fundedCheck
     (heldCharge reservation.domain after.reservations + after.maintenanceReserve + intent.exactCharge)
-    durable.snapshot.model.available = true
+    ground.view.model.available = true
   currentPermission : ∃ (command : Command) (selected : SignedCommand)
-    (prepared : PreparedInvocation deployment profile ambient durable command),
+    (prepared : PreparedInvocation deployment profile ambient ground command),
     ∃ accepted : JointPromiseAuthorization.Accepted prepared selected source.promise,
       IntentRecord.ofIntent original = IntentRecord.ofIntent (accepted.ordinary.dataIntent accepted.shape)
 
 variable {Custody F : Type} [Field F] [DecidableEq F]
   {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
-  {ambient : Ambient} {durable : Durable} {command controlCommand : Command}
-  {prepared : PreparedInvocation deployment profile ambient durable command}
-  {controlPrepared : PreparedInvocation deployment profile ambient durable controlCommand}
+  {ambient : Ambient} {ground : Ground deployment} {command controlCommand : Command}
+  {prepared : PreparedInvocation deployment profile ambient ground command}
+  {controlPrepared : PreparedInvocation deployment profile ambient ground controlCommand}
   {selected controlSigned : SignedCommand} {promise : JointPromiseAuthorization.Signed}
 
 def buildReserve (codec : StreamCodec Custody) (pin : JointControlFrame.Pin)
@@ -120,14 +120,14 @@ def buildReserve (codec : StreamCodec Custody) (pin : JointControlFrame.Pin)
         if promise.declaration.epoch != epoch || p.epoch != epoch ||
             promise.declaration.generation != p.generation then none else
         if (p.footprint.contains pin.cell) then none else
-        match beforeExact : JointControlFrame.readControl pin (durable.snapshot.canonicalBytes pin.cell) with
+        match beforeExact : JointControlFrame.readControl pin (ground.view.canonicalBytes pin.cell) with
         | none => none
         | some before =>
           if !(before.wellFormed deployment.domain pin.cell) then none else
           if before.reservations.any (fun r => r.domain == p.domain &&
               (r.lineage == plan.candidate.lineage || r.candidateBytes == exact)) then none else
           if before.decisions.any (fun entry => entry.1 == decisionKey exact i.val) then none else
-          if !(allowed p.domain before.reservations p.intent durable.snapshot.model.available) then none else
+          if !(allowed p.domain before.reservations p.intent ground.view.model.available) then none else
           let control := controlAccepted.dataIntent controlShape
           let extra := control.readGuards.filter (fun g =>
             !(decide (g.cellId ∈ effect.writes.map DataWrite.cellId)))
@@ -141,7 +141,7 @@ def buildReserve (codec : StreamCodec Custody) (pin : JointControlFrame.Pin)
                 · have permitted := (List.mem_filter.mp added).2
                   simpa using permitted }
           if !(allowed p.domain before.reservations (IntentRecord.ofIntent installation)
-              durable.snapshot.model.available) then none else
+              ground.view.model.available) then none else
           let held : Reservation := ⟨p.domain,exact,plan.candidate.lineage,IntentRecord.ofIntent installation,
             promise.declaration.sourceImageBytes,p.generation⟩
           let after : Control :=
@@ -176,9 +176,9 @@ def buildReserve (codec : StreamCodec Custody) (pin : JointControlFrame.Pin)
                         guardsReadOnly := disjoint }
                     if funded : Charge.fundedCheck
                         (heldCharge held.domain after.reservations + after.maintenanceReserve + intent.exactCharge)
-                        durable.snapshot.model.available = true then
-                      if intent.preflight durable.snapshot != .ok () then none else
-                      if effect.preflight durable.snapshot != .ok () then none else
+                        ground.view.model.available = true then
+                      if intent.preflight ground.view != .ok () then none else
+                      if effect.preflight ground.view != .ok () then none else
                       let controlPost : ∃ w ∈ intent.writes, w.cellId = pin.cell ∧
                           JointControlFrame.readControl pin w.canonicalPostBytes = some after := by
                         refine ⟨write,?_,?_,?_⟩

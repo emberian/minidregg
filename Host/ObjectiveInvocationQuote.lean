@@ -194,7 +194,7 @@ def derive (config : Config) (opened : Opened config) (request : Request) :
     { subject := request.subject, nonce := request.nonce, targets := targets,
       family := some (ObjectiveInvocationClaim.family claim) }
   let ambient : Ambient := ⟨config.federation,logicalHeight config opened.durable⟩
-  match prepareFrom config.deployment config.profile ambient opened.durable (some opened.directory) command with
+  match prepare config.deployment config.profile ambient opened.ground command with
   | .error reason => return .error s!"final command preparation refused: {repr reason}"
   | .ok prepared =>
     match ← ObjectiveBendNativeAdmission.select config.signature ObjectiveBendAuthenticatedInputs.oracle prepared with

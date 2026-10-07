@@ -160,6 +160,36 @@ def prepareRevokeOn (config : Config) (ground : ServedBasis.Ground config.deploy
   let signature ← slot ground.authority marker 7 0 ⟨.program, wanted⟩
   pure ⟨config.deployment.domain, profile.semantics, ground.worldRoot, height, .revoke bytes, [signature]⟩
 
+/-- The keys an invocation draft consults beyond the state
+(`DeclaredResourceController.invocationKeys`). -/
+def invokeKeys (config : Config) (bytes : List UInt8) : Option DurableView.Keys := do
+  let command ← DeclaredResourceController.commandCodec.decode bytes
+  some (DeclaredResourceController.invocationKeys config.deployment.domain config.profile.semantics command)
+
+/-- An invocation's signing plan on a ground: the target, observation and authority
+slots of the transaction prepared on it (`DeclaredResourceController.prepare`). -/
+def prepareInvokeOn (config : Config) (ground : ServedBasis.Ground config.deployment) (height : Nat)
+    (bytes : List UInt8) : Except String SigningPlan := do
+  let profile := config.profile
+  let command ← need "noncanonical invocation command" (DeclaredResourceController.commandCodec.decode bytes)
+  let prepared ← (DeclaredResourceController.prepare config.deployment profile
+    ⟨config.federation, height⟩ ground command).mapError
+      (fun reason => s!"invocation preparation: {repr reason}")
+  let tuple ← need "invocation incidence collision" (DeclaredResourceController.prepareTuple prepared)
+  let marker := DeclaredResourceController.operationMarker config.deployment.domain profile.semantics command
+  -- An observe-only read target signs only its observation slot.
+  let targets ← (List.finRange command.targets.length).filterMapM fun index =>
+    if command.targets[index].observeOnly then pure none
+    else some <$> slot ground.authority marker 4 index.val (tuple.request (some index))
+  let observations ← if command.requiresObservation then
+    (List.finRange command.targets.length).mapM fun index =>
+      slot ground.authority marker 8 index.val
+        ⟨command.targets[index].kind, DeclaredResourceController.readRequest prepared index⟩
+    else pure []
+  let authority ← slot ground.authority marker 1 0 (tuple.request none)
+  pure ⟨config.deployment.domain, profile.semantics, ground.worldRoot, height, .invoke bytes,
+    targets ++ observations ++ [authority]⟩
+
 def prepareLoaded (config : Config) (opened : Opened config) (draft : Draft) :
     Except String SigningPlan := do
   let height := logicalHeight config opened.durable
@@ -191,23 +221,10 @@ def prepareLoaded (config : Config) (opened : Opened config) (draft : Draft) :
           pure (.birth (CanonicalCellRegistry.sourceEncoding.codec.encode prepared.descriptor) capabilities,
             factory :: authority :: allocations ++ sources)
     | .invoke bytes => do
-        let command ← need "noncanonical invocation command" (DeclaredResourceController.commandCodec.decode bytes)
-        let prepared ← (DeclaredResourceController.prepareFrom config.deployment profile
-          ⟨config.federation, height⟩ opened.durable (some opened.directory) command).mapError
-            (fun reason => s!"invocation preparation: {repr reason}")
-        let tuple ← need "invocation incidence collision" (DeclaredResourceController.prepareTuple prepared)
-        let marker := DeclaredResourceController.operationMarker config.deployment.domain profile.semantics command
-        -- An observe-only read target signs only its observation slot.
-        let targets ← (List.finRange command.targets.length).filterMapM fun index =>
-          if command.targets[index].observeOnly then pure none
-          else some <$> slot prepared.authority.snapshot marker 4 index.val (tuple.request (some index))
-        let observations ← if command.requiresObservation then
-          (List.finRange command.targets.length).mapM fun index =>
-            slot prepared.authority.snapshot marker 8 index.val
-              ⟨command.targets[index].kind, DeclaredResourceController.readRequest prepared index⟩
-          else pure []
-        let authority ← slot prepared.authority.snapshot marker 1 0 (tuple.request none)
-        pure (.invoke bytes, targets ++ observations ++ [authority])
+        -- The full shape's plan (ratchet-listed: the consent provider's local re-derivation).
+        -- The served Host plans an invocation on its light basis (`prepareAuthorizedLoaded`).
+        let plan ← prepareInvokeOn config opened.ground height bytes
+        pure (plan.finalizedDraft, plan.slots)
     | .install subject control bytes => do
         let declaration ← need "noncanonical install declaration" (PolicyInstallController.decodeDeclaration bytes)
         let context : PolicyInstallController.RequestContext :=
@@ -632,8 +649,8 @@ state it may already read. -/
 def invokeLawLeaf (config : Config) (opened : Opened config) : Draft → Option LawLeaf
   | .invoke bytes => do
       let command ← DeclaredResourceController.commandCodec.decode bytes
-      let prepared ← (DeclaredResourceController.prepareFrom config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable (some opened.directory)
+      let prepared ← (DeclaredResourceController.prepare config.deployment config.profile
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground
         command).toOption
       let tuple ← DeclaredResourceController.prepareTuple prepared
       DeclaredResourceController.firstLawLeaf prepared tuple
@@ -647,7 +664,7 @@ def invokeRangeLeaf (config : Config) (opened : Opened config) : Draft → Optio
   | .invoke bytes => do
       let command ← DeclaredResourceController.commandCodec.decode bytes
       let prepared ← (DeclaredResourceController.prepare config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable command).toOption
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground command).toOption
       let tuple ← DeclaredResourceController.prepareTuple prepared
       DeclaredResourceController.firstRangeLeaf prepared tuple
   | _ => none
@@ -659,7 +676,7 @@ def invokeCastAlias (config : Config) (opened : Opened config) : Draft → Optio
   | .invoke bytes => do
       let command ← DeclaredResourceController.commandCodec.decode bytes
       let prepared ← (DeclaredResourceController.prepare config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable command).toOption
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground command).toOption
       let tuple ← DeclaredResourceController.prepareTuple prepared
       DeclaredResourceController.firstCastAlias prepared tuple
   | _ => none
@@ -703,9 +720,8 @@ def invokeRefusal (config : Config) (opened : Opened config)
     (grants : List NativeObservationCodec.GrantRef) : Draft → Option Refusal
   | .invoke bytes => do
       let command ← DeclaredResourceController.commandCodec.decode bytes
-      let prepared ← (DeclaredResourceController.prepareFrom config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable
-        (some opened.directory) command).toOption
+      let prepared ← (DeclaredResourceController.prepare config.deployment config.profile
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground command).toOption
       let tuple ← DeclaredResourceController.prepareTuple prepared
       let legs := DeclaredResourceController.preparePolicyLegs prepared tuple
       let fieldsOf := fun incidence => match incidence with
@@ -744,6 +760,17 @@ def prepareAuthorizedLoaded (config : Config) (opened : Opened config) (light : 
                   | .ok basis =>
                       return ((prepareRevokeOn config (.ofBasis basis)
                           (config.genesisHeight + basis.height) revokeBytes).mapError
+                        fun detail => ⟨.operationRejected, detail, none⟩)
+              | .invoke invokeBytes =>
+                  -- The invocation's transaction id and marker are read from the authenticated
+                  -- history (its basis); the plan is prepared on that light ground.
+                  let some keys := invokeKeys config invokeBytes
+                    | return .error ⟨.operationRejected, "noncanonical invocation command", none⟩
+                  match ← light.basis keys with
+                  | .error detail => return .error ⟨.operationRejected, detail, none⟩
+                  | .ok basis =>
+                      return ((prepareInvokeOn config (.ofBasis basis)
+                          (config.genesisHeight + basis.height) invokeBytes).mapError
                         fun detail => ⟨.operationRejected, detail, none⟩)
               | _ => return ((prepareLoaded config opened draft).mapError
                   fun detail => ⟨.operationRejected, detail, none⟩)
@@ -2607,6 +2634,54 @@ def submitRevokeLight {F : Type} [Field F] [DecidableEq F] (transport : DurableR
               | .unavailable detail => return .unavailable detail.toUTF8.toList
               | .uncertain detail => return .uncertain detail.toUTF8.toList
 
+/-- An invocation on the light route: its keys (`DeclaredResourceController.invocationKeys`:
+the transaction id and the operation marker's replay nullifier) read from the
+authenticated history into a basis, the replay check, preparation and admission on
+`Ground.ofBasis` (`withAcceptedOn`), the commit by `DurableServed.receiveServed` on the
+light opening. -/
+def submitInvokeLight (transport : DurableReceiverIO.Transport) (config : Config)
+    (opening : DurableServed.Opening ResourceBirthCodec.rootBytes)
+    (basisOf : DurableView.Keys → IO (Except String (ServedBasis.Basis config.deployment opening.store)))
+    (opened : Opened config) (signed : DeclaredResourceController.SignedCommand)
+    (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) : IO Outcome := do
+  match DeclaredResourceController.commandCodec.decode signed.commandBytes with
+  | none => return refused .malformed "invoke" "noncanonical command"
+  | some command =>
+      -- The operator's synchronous budget, before the referee re-executes the claim.
+      if let some steps := overSyncBudget config command then
+        return refused .operationRejected "overSyncBudget" (overSyncBudgetDetail config steps)
+      let domain := config.deployment.domain
+      let semantics := config.profile.semantics
+      match ← basisOf (DeclaredResourceController.invocationKeys domain semantics command) with
+      | .error detail => return .unavailable detail.toUTF8.toList
+      | .ok basis =>
+          let ground : ServedBasis.Ground config.deployment := .ofBasis basis
+          let transactionId := DeclaredResourceController.transactionId domain semantics command
+          let eventId := (DeclaredResourceController.invocationEvent domain semantics command signed).eventId
+          DeclaredResourceController.withAcceptedOn config.deployment config.profile
+            ⟨config.federation, config.genesisHeight + basis.height⟩ config.signature ground signed
+            (fun _ shape accepted => do
+              let intent := accepted.dataIntent shape
+              if (FnConsumerProgress.recognizedLegacyIntentAnyGateway? domain semantics intent).isSome then
+                return staleOutcome config opened command .physicalPreparation
+              match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes opening intent with
+              | .appended kind .. => confirm kind transactionId eventId
+              | .replayed _ => confirm .replayed transactionId eventId
+              | .rejected (.durable .insufficientBudget) =>
+                  return refused .operationRejected "durable"
+                    (meterShortfallDetail (basis.view.model.available .proofWork)
+                      ((command.run.map fun claim => claim.steps).getD 0))
+              | .rejected reason => return durableRefusal reason
+              | .contention => return .contention
+              | .unavailable detail => return .unavailable detail.toUTF8.toList
+              | .uncertain detail => return .uncertain detail.toUTF8.toList)
+            (fun
+              | .replayed record => confirm .replayed record.transactionId record.event.event.eventId
+              | .rejected reason => return staleOutcome config opened command reason
+              | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
+              | .unavailable detail => return .unavailable detail.toUTF8.toList)
+            ObjectiveBendAuthenticatedInputs.oracle
+
 /-- The submission path, over the Store writer it is handed. The served path
 passes `config.transport` (`submitLoadedWith`); the dry run (`Host.DryRun`,
 op 130) passes a writer that never appends, so both run this one program. -/
@@ -2659,40 +2734,7 @@ def submitLoadedVia (transport : DurableReceiverIO.Transport) (config : Config)
       | .unavailable detail => return .unavailable detail.toUTF8.toList
       | .uncertain detail => return .uncertain detail.toUTF8.toList
   | .invoke signed =>
-      match DeclaredResourceController.commandCodec.decode signed.commandBytes with
-      | none => return refused .malformed "invoke" "noncanonical command"
-      | some command =>
-          -- The operator's synchronous budget, before the referee re-executes the claim.
-          if let some steps := overSyncBudget config command then
-            return refused .operationRejected "overSyncBudget" (overSyncBudgetDetail config steps)
-          match ← DeclaredResourceController.withAcceptedLoadedFrom config.deployment config.profile
-              ⟨config.federation, height⟩ config.signature opened.durable (some opened.directory) signed
-              (fun _ shape accepted => do
-                let intent := accepted.dataIntent shape
-                if (FnConsumerProgress.recognizedLegacyIntentAnyGateway?
-                    config.deployment.domain config.profile.semantics intent).isSome then
-                  return .rejected .physicalPreparation
-                return .settlement (← DurableReceiverIO.receiveLoaded
-                  transport ResourceBirthCodec.rootBytes opened.durable intent))
-              pure ObjectiveBendAuthenticatedInputs.oracle with
-          | .replayed record => confirm .replayed record.transactionId record.event.event.eventId
-          | .rejected reason => return staleOutcome config opened command reason
-          | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
-          | .unavailable detail => return .unavailable detail.toUTF8.toList
-          | .settlement result =>
-              match result with
-              | .confirmed kind _ =>
-                  confirm kind
-                    (DeclaredResourceController.transactionId config.deployment.domain config.profile.semantics command)
-                    (DeclaredResourceController.invocationEvent config.deployment.domain config.profile.semantics command signed).eventId
-              | .rejected (.durable .insufficientBudget) =>
-                  return refused .operationRejected "durable"
-                    (meterShortfallDetail (opened.durable.snapshot.model.available .proofWork)
-                      ((command.run.map fun claim => claim.steps).getD 0))
-              | .rejected reason => return durableRefusal reason
-              | .contention => return .contention
-              | .unavailable detail => return .unavailable detail.toUTF8.toList
-              | .uncertain detail => return .uncertain detail.toUTF8.toList
+      submitInvokeLight transport config light.opening (light.basisVia transport) opened signed confirm
 
 def submitLoadedWith (config : Config) (opened : Opened config) (light : NativeHostLight.Light config)
     (call : SignedCall)
