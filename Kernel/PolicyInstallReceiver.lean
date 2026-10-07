@@ -684,6 +684,19 @@ theorem replay_only_original (domain : Digest) (ground : Ground deployment) (ing
   simp only [exactRecord, decide_eq_true_eq] at isExact
   exact ⟨same, recorded, found, isExact.2⟩
 
+/-- **A changed ingress under a recorded transaction id is refused as a conflict**:
+the ground's journal answer for this ingress's transaction id is an intent whose
+event differs from this ingress's event, so the verdict is `conflict` — never
+`fresh` (a second admission) and never `original` (a receipt). -/
+theorem replay_changed_ingress_refused (domain : Digest) (ground : Ground deployment) (ingress : DecodedIngress)
+    {recorded : DurableCommitProtocol.Intent Digest Digest StableNullifier ReplayEnvelope}
+    (found : ground.recorded (transactionId domain ingress) = some (some recorded))
+    (different : recorded.event.event ≠ event domain ingress) :
+    replay domain ground ingress = .conflict :=
+  ServedBasis.Ground.replayOf_conflict ground _ _ _ found (by simp [exactRecord, different])
+
+#assert_axioms replay_changed_ingress_refused
+
 /-- **An undeclared transaction id is refused by name** (the plant's pole): on a
 light basis that did not declare it, the verdict is `undeclared`, never "not
 recorded". -/
