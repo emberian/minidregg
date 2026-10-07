@@ -43,6 +43,9 @@ run exe-roots env LEAN_NUM_THREADS=${THREADS:-6} $LAKE_WRAP lake build $exes
 run host-closure    bash scripts/check-host-closure.sh
 # KN2 ratchet: callers of the full verified materialization may only shrink (a text ratchet, not a call-graph proof)
 run full-loaded-ratchet bash scripts/ports/check-full-loaded-callers.sh
+# Every standalone Lean script elaborates, except the shrink-only list scripts/gates/scripts-elab.tsv
+# (ROOT 10-07: the fixture generator replay.lean sat uncompilable b21..b25 unseen).
+run scripts-elab    bash scripts/check-scripts-elab.sh
 run import-boundary bash scripts/check-import-boundary.sh
 run proof-hygiene   bash scripts/check-proof-hygiene.sh
 run build-surfaces  python3 scripts/lean-build-surfaces.py check

@@ -1,0 +1,33 @@
+# scripts/gates/scripts-elab.tsv -- SHRINK-ONLY exceptions to scripts/check-scripts-elab.sh (read its header).
+# path	class	owner	env	reason
+scripts/HypothesisLedger.lean	covered	MERGE-KEEPER	-	run over the research umbrella by scripts/check-hypothesis-ledger.sh (gate row hyp-ledger)
+scripts/ObjectiveManifest.lean	covered	MERGE-KEEPER	-	needs OBJECTIVE_MANIFEST_OUT; run by scripts/check-objective-proofs.sh (gate row objective-proofs)
+scripts/ObjectiveManifestMathlib.lean	covered	MERGE-KEEPER	-	needs OBJECTIVE_MANIFEST_OUT; run by scripts/check-objective-proofs.sh (gate row objective-proofs)
+scripts/native-accepted-fixture/replay.lean	stale	DEPUTY-KERNEL	-	FIRST: the fixture generator; prepareFrom deleted in b21 (port to the light route in flight, lane/kn2-fixture-replay)
+scripts/kn2/planted-api-faults.lean	stale	DEPUTY-KERNEL	-	PRIORITY: an executed plant that no longer runs (application type mismatch :17); KN2-TRIE restores it
+scripts/kn2/planted-token-forges.lean	stale	DEPUTY-KERNEL	-	PRIORITY: an executed plant that no longer runs (type mismatch :21); KN2-TRIE restores it
+scripts/kn2/neutral-birth.lean	unbuilt	DEPUTY-KERNEL	-	imports Verify.ResourceReserveBirthFixture, built by no target: add it to a target
+scripts/NativeTranscripts.lean	stale	DEPUTY-KERNEL	-	census RED on main: Transcript.mk inside a non-Transcript constant (local-gates native-transcripts, no merge-gate row)
+scripts/report-simplex-qualification.lean	unbuilt	DEPUTY-KERNEL	-	unknown module prefix SimplexQualification: build it or delete the report
+scripts/probe-grain-birth-factory-law.lean	stale	DEPUTY-KERNEL	-	#guard_msgs docstring no longer matches (births changed)
+scripts/probe-stack-safe-codecs.lean	stale	DEPUTY-KERNEL	-	DeclaredResourceController.Command.expectedAuthorityRoot removed (b21)
+scripts/provider-services/Check.lean	stale	DEPUTY-KERNEL	-	DeclaredResourceController.Command.expectedAuthorityRoot removed (b21)
+scripts/fn-b3/forge_history.lean	env	DEPUTY-PLATFORM	-	needs MINI_B3_FORGE_CONFIG at elaboration: move the work into main, or state the value here
+scripts/probe-fn-accepted-history-selectors.lean	env	DEPUTY-PLATFORM	-	needs FN_B_CONFIG at elaboration: move the work into main, or state the value here
+scripts/probe-fn-accepted-skip.lean	env	DEPUTY-PLATFORM	-	needs FN_B_SKIP_CONFIG at elaboration: move the work into main, or state the value here
+scripts/probe-fn-own-r-injection.lean	env	DEPUTY-PLATFORM	-	needs FN_OWNR_RECEIVED at elaboration: move the work into main, or state the value here
+scripts/probe-grain-origin-preparation.lean	env	DEPUTY-PLATFORM	-	reads a file absent from the tree at elaboration (error code 4294967294)
+scripts/fn-e1e2/check_reply_consumption.lean	stale	DEPUTY-PLATFORM	-	anonymous constructor at a Nat (field became a number)
+scripts/fn-e1e2/probe_gateway_direct_submit.lean	stale	DEPUTY-PLATFORM	-	failed to synthesize instance :80
+scripts/probe-canonical-cell-registry.lean	stale	DEPUTY-PLATFORM	-	DurableReceiverIO.NativeConfig constructor arity
+scripts/probe-exact-readback-receiver.lean	stale	DEPUTY-PLATFORM	-	DurableReceiverIO.Loaded constructor arity
+scripts/probe-fn-catalog-own-r-progress.lean	stale	DEPUTY-PLATFORM	-	DurableReceiver.IntentRecord constructor arity
+scripts/probe-fn-consumer-max-envelope.lean	stale	DEPUTY-PLATFORM	-	Report.expectedAuthorityRoot removed
+scripts/probe-fn-consumer-progress.lean	stale	DEPUTY-PLATFORM	-	anonymous constructor at a Nat
+scripts/probe-fn-historical-command-shape.lean	stale	DEPUTY-PLATFORM	-	DurableReceiver.IntentRecord constructor arity
+scripts/probe-fn-origin-outbox.lean	stale	DEPUTY-PLATFORM	-	anonymous constructor at a Bool
+scripts/probe-fn-origin-outbox-max.lean	stale	DEPUTY-PLATFORM	-	anonymous constructor at a Bool
+scripts/probe-fn-origin-outbox-op16-frame.lean	stale	DEPUTY-PLATFORM	-	anonymous constructor at a Bool
+scripts/probe-native-host-genesis.lean	stale	DEPUTY-PLATFORM	-	CanonicalRuntimeProfile constructor arity
+scripts/probe-participant-key-enrollment.lean	stale	DEPUTY-PLATFORM	-	DurableReceiverIO.NativeConfig constructor arity
+scripts/probe-policy-source-cell.lean	stale	DEPUTY-PLATFORM	-	DurableReceiverIO.NativeConfig constructor arity
