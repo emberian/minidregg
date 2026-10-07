@@ -629,6 +629,7 @@ def tallyConfig : Config where
   limits := ⟨100000, 100000⟩
   planBudget := ⟨10000, 100000, 1048576⟩
   maxTicks := 200000
+  maxExtractTicks := 1600000
   maxPatience := 16
   typeFuel := 16384
   maxArtifactBytes := 4194304
@@ -1150,7 +1151,7 @@ theorem spendDeclared_of {config : Config} {resumed : State} {envelope : Capacit
     (covered : config.covers envelope = true) (heapCovered : (segmentLimits config resumed).heap ≤ envelope.heap)
     (extractCovered : config.planBudget.ticks ≤ envelope.extractTicks) : SpendDeclared config resumed envelope := by
   simp only [Config.covers, Bool.and_eq_true, decide_eq_true_eq] at covered
-  obtain ⟨⟨⟨⟨⟨ticks, _⟩, stack⟩, _⟩, nodes⟩, bytes⟩ := covered
+  obtain ⟨⟨⟨⟨⟨⟨ticks, _⟩, stack⟩, _⟩, nodes⟩, bytes⟩, _⟩ := covered
   exact ⟨heapCovered, by simpa [segmentLimits, ObjectiveBendDemandCollect.limitsPast] using stack, ticks, nodes, bytes,
     extractCovered⟩
 

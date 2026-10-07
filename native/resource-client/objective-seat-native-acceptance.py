@@ -141,7 +141,7 @@ constants = json.loads(sh('constants', host, '/dev/null', 'objective-constants')
 tariff = {'version': '2', 'base': '1', 'typeFuel': '0', 'sourceTicks': '1', 'heap': '0', 'stack': '0',
           'outputNodes': '0', 'outputBytes': '0', 'extractTicks': '0', 'inputBytes': '0'}
 policy = {'schema': 'dregg.objective-bend.policy.v1', 'sourceBytes': '4194304',
-          'maximum': {k: str(v) for k, v in MAXIMUM.items()}, 'outputs': [constants['genericCodec']],
+          'maximum': {k: str(v) for k, v in MAXIMUM.items()}, 'extractTicksPerTurn': str(16 * MAXIMUM['extractTicks']), 'outputs': [constants['genericCodec']],
           'clearAudience': '01ff', 'frontEnd': constants['frontEnd'], 'tariff': tariff}
 (root / 'policy.json').write_text(json.dumps(policy, indent=1))
 sh('policy', host, '/dev/null', 'author', 'objective-policy', root / 'policy.json', root / 'policy.hex')

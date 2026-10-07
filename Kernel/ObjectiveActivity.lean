@@ -566,6 +566,10 @@ structure Config where
   limits : Limits
   planBudget : Budget
   maxTicks : Nat
+  /-- The cumulative extraction tick ceiling of one turn (the policy's `extractTicksPerTurn`):
+  an envelope declares at most this many extraction ticks (`Config.covers`); `planBudget.ticks`
+  is the per-extraction ceiling. -/
+  maxExtractTicks : Nat
   maxPatience : Nat
   typeFuel : Nat
   maxArtifactBytes : Nat
@@ -584,7 +588,8 @@ tick budget is checked by name right after (`extractUncovered`). -/
 def Config.covers (config : Config) (envelope : Capacity) : Bool :=
   decide (envelope.sourceTicks ≤ config.maxTicks) && decide (config.limits.heap ≤ envelope.heap) &&
     decide (config.limits.stack ≤ envelope.stack) && decide (config.typeFuel ≤ envelope.typeFuel) &&
-    decide (config.planBudget.nodes ≤ envelope.outputNodes) && decide (config.planBudget.bytes ≤ envelope.outputBytes)
+    decide (config.planBudget.nodes ≤ envelope.outputNodes) && decide (config.planBudget.bytes ≤ envelope.outputBytes) &&
+    decide (envelope.extractTicks ≤ config.maxExtractTicks)
 
 def Config.domain (config : Config) : Digest := config.deployment.domain
 def Config.bookCell (config : Config) : CellId := ⟨config.deployment.resourceBookId⟩

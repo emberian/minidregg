@@ -375,7 +375,7 @@ def authorPolicy (json : Json) : Except String String := do
   if !tariff.valid then
     throw s!"tariff must be version {ObjectiveTariff.tariffVersion} with a positive base"
   let policy : ObjectiveBendNativeAdmission.Policy := ⟨ObjectiveBendNativeAdmission.semanticsId,← natOf json "sourceBytes",
-    ← CapacityJson.capacity "maximum" (← field json "maximum"),outputs,← digestOf json "clearAudience",
+    ← CapacityJson.capacity "maximum" (← field json "maximum"),← natOf json "extractTicksPerTurn",outputs,← digestOf json "clearAudience",
     frontEnd,tariff⟩
   let encoded := ObjectiveBendNativeAdmission.encodePolicy policy
   if ObjectiveBendNativeAdmission.decodePolicy encoded != some policy then throw "policy does not round-trip"

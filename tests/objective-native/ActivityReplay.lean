@@ -22,7 +22,7 @@ open Minidregg.Kernel.ObjectiveActivity (Config Stored Refusal replayPackage loa
 
 def config : Config :=
   { deployment := ⟨⟨0⟩, 1, 2, 3⟩, asset := 0, collector := 4, limits := ⟨100000, 100000⟩,
-    planBudget := { nodes := 20000, ticks := 100000, bytes := 200000 }, maxTicks := 100000,
+    planBudget := { nodes := 20000, ticks := 100000, bytes := 200000 }, maxTicks := 100000, maxExtractTicks := 1600000,
     maxPatience := 1000, typeFuel := 16384, maxArtifactBytes := 4194304,
     tariff := Minidregg.Kernel.ObjectiveTariff.Tariff.unit, abandonGrace := 16, storageRate := 1 }
 
