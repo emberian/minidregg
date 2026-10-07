@@ -80,6 +80,32 @@ def upgrade (law : String → Json → Result Minidregg.Pred.Pred) (path : Strin
       | .error _ => throw s!"{path}.governed.floors must be an array"
     pure (.governed authority (← floors.mapM (law (path ++ ".governed.floors"))))
 
+/-- An array of strings (absent: none). -/
+def strings (path : String) (json : Json) (name : String) : Result (List String) :=
+  match json.getObjVal? name with
+  | .error _ => .ok []
+  | .ok value => match value.getArr? with
+    | .error _ => .error s!"{path}.{name} must be an array"
+    | .ok items => items.toList.mapM fun item => match item.getStr? with
+      | .ok text => .ok text
+      | .error _ => .error s!"{path}.{name} must hold strings"
+
+/-- An array of decimal digests (absent: none). -/
+def digests (path : String) (json : Json) (name : String) : Result (List Digest) :=
+  match json.getObjVal? name with
+  | .error _ => .ok []
+  | .ok value => match value.getArr? with
+    | .error _ => .error s!"{path}.{name} must be an array"
+    | .ok items => items.toList.mapM fun item => match item.getStr?.toOption.bind String.toNat? with
+      | some n => .ok ⟨n⟩
+      | none => .error s!"{path}.{name} must hold decimal strings"
+
+/-- An optional string (absent: none). -/
+def optString (path : String) (json : Json) (name : String) : Result (Option String) :=
+  match json.getObjVal? name with
+  | .error _ => .ok none
+  | .ok _ => do pure (some (← str path json name))
+
 /-- An added envelope: `extra` (a `Capacity`), or none (the zero envelope). -/
 def extra (path : String) (json : Json) : Result Capacity :=
   match json.getObjVal? "extra" with
@@ -139,8 +165,18 @@ def turn (law : String → Json → Result Minidregg.Pred.Pred) (json : Json) : 
       (← postage p json) (← nat p json "account") ⟨← nat p json "accountCapability"⟩)
   | "deliverMessage" => pure (.deliverMessage (← nat p json "sender") (← nat p json "target")
       ⟨← nat p json "message"⟩)
+  | "adopt" => pure (.adopt (← nat p json "object") ⟨← nat p json "objectCapability"⟩ ⟨← nat p json "pin"⟩
+      (← tyField p json "stateType") (← optString p json "migration") (← strings p json "dropped")
+      (← law (p ++ ".law") (← field p json "law")) (← upgrade law (p ++ ".upgrade") (← field p json "upgrade"))
+      (← digests p json "rebirth") (← capacity (p ++ ".envelope") (← field p json "envelope"))
+      (← nat p json "patience") (← nat p json "account") ⟨← nat p json "accountCapability"⟩)
+  | "migrate" => pure (.migrate (← nat p json "object") (← nat p json "account") ⟨← nat p json "accountCapability"⟩)
+  | "abortDrained" => pure (.abortDrained ⟨← nat p json "record"⟩ ⟨← nat p json "await"⟩ (← extra p json)
+      (← nat p json "account") ⟨← nat p json "accountCapability"⟩)
+  | "rebirth" => pure (.rebirth ⟨← nat p json "record"⟩ ⟨← nat p json "await"⟩
+      (← capacity (p ++ ".envelope") (← field p json "envelope")))
   | other => throw s!"$.turn.kind {other} is not publish, create, birth, resolve, deliver, topUp, \
-      exhaust, abandon, invoke or deliverMessage"
+      exhaust, abandon, invoke, deliverMessage, adopt, migrate, abortDrained or rebirth"
 
 /-- `author objective-activity`: `{subject, nonce, expectedAuthorityRoot, turn}`. -/
 def author (law : String → Json → Result Minidregg.Pred.Pred) (json : Json) : Result (List UInt8) := do
@@ -203,6 +239,23 @@ def turnJson : Turn → Json
   | .deliverMessage sender target message => .mkObj
       [("kind", "deliverMessage"), ("sender", decimal sender), ("target", decimal target),
        ("message", decimal message.value)]
+  | .adopt object oc pin stateType migration dropped law policy chosen envelope patience account ac => .mkObj
+      [("kind", "adopt"), ("object", decimal object), ("objectCapability", decimal oc.value),
+       ("pin", decimal pin.value), ("stateType", ObjectiveBendTyping.typeJson stateType),
+       ("migration", match migration with | some name => toJson name | none => .null),
+       ("dropped", toJson dropped), ("law", toJson (reprStr law)), ("upgrade", upgradeJson policy),
+       ("rebirth", .arr (chosen.map fun activity => decimal activity.value).toArray),
+       ("envelope", capacityJson envelope), ("patience", decimal patience), ("account", decimal account),
+       ("accountCapability", decimal ac.value)]
+  | .migrate object account ac => .mkObj
+      [("kind", "migrate"), ("object", decimal object), ("account", decimal account),
+       ("accountCapability", decimal ac.value)]
+  | .abortDrained record await extra account ac => .mkObj
+      [("kind", "abortDrained"), ("record", decimal record.value), ("await", decimal await.value),
+       ("extra", capacityJson extra), ("account", decimal account), ("accountCapability", decimal ac.value)]
+  | .rebirth record await envelope => .mkObj
+      [("kind", "rebirth"), ("record", decimal record.value), ("await", decimal await.value),
+       ("envelope", capacityJson envelope)]
 
 def commandJson (command : Command) : Json := .mkObj
   [("type", "objective-activity-command-v4"),

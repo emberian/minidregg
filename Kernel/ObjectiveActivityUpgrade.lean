@@ -432,10 +432,13 @@ structure MigrateRequest where
   object : CellId
   /-- Pays the public price of the migration envelope (when the migration is a term). -/
   account : AccountId
+  nonce : Nat
 
-/-- One MIGRATE per ADOPT: the object and the continuity the ADOPT left. -/
-def migrateTransaction (object : CellId) (continuity : Nat) : TransactionId :=
-  tagged "DREGG/OBJECTIVE/OBJECT/TX/MIGRATE/v1" (digestStream.encode object ++ StreamCodec.nat.encode continuity)
+/-- The transaction of a MIGRATE, from the request alone (a retry finds its record by it). A
+second MIGRATE of one upgrade is refused by the kernel (`notDraining`), not by the id. -/
+def migrateTransaction (request : MigrateRequest) : TransactionId :=
+  tagged "DREGG/OBJECTIVE/OBJECT/TX/MIGRATE/v1"
+    (digestStream.encode request.object ++ subjectStream.encode request.subject ++ StreamCodec.nat.encode request.nonce)
 
 /-- The MIGRATE's fee: the migration envelope's public price when a term runs. -/
 def migrateFee (config : Config) (next : Pending) : Nat :=
@@ -503,7 +506,7 @@ def migrate {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
 def Migrated.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : MigrateRequest} (migrated : Migrated config snapshot height request) (sealing : Seal) :
     DataIntent rootBytes :=
-  intentOf rootBytes (migrateTransaction request.object migrated.record.continuity) migrated.posts
+  intentOf rootBytes (migrateTransaction request) migrated.posts
     [guardAt snapshot (packageCell config.domain migrated.next.pin)] [] sealing
 
 /-! ## ABORT after the drain deadline -/

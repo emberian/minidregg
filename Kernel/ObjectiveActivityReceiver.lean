@@ -171,6 +171,24 @@ inductive Turn where
   /-- Deliver the head `message` of the inbox (sender, target)
   (`Kernel.ObjectiveSend`): anyone may; paid from the inbox's purse. -/
   | deliverMessage (sender target : Nat) (message : Digest)
+  /-- ADOPT an upgrade of `object` (`ObjectiveActivityUpgrade.adopt`): the next package `pin`, its
+  state type, its migration (a declaration of `pin`, or none for the identity), the old fields it
+  drops, the next law and policy, the activities to re-birth, the migration's declared envelope
+  (whose price `account` pays) and the drain patience. Only a holder of a capability on the
+  object, spending an account it owns; the object's policy then judges the request. -/
+  | adopt (object : Nat) (objectCapability : CapabilityId) (pin : Digest)
+      (stateType : Minidregg.Theory.ObjectiveBendTypes.Ty) (migration : Option String) (dropped : List String)
+      (law : Minidregg.Pred.Pred) (upgrade : ObjectRecord.UpgradePolicy) (rebirth : List Digest)
+      (envelope : Capacity) (patience : Nat) (account : Nat) (accountCapability : CapabilityId)
+  /-- MIGRATE a drained object (anyone, paying the migration's price from `account`). -/
+  | migrate (object : Nat) (account : Nat) (accountCapability : CapabilityId)
+  /-- Abort the await `await` of an old activity at `record` after the drain deadline: it is
+  resumed with `upgraded` for one ending segment (anyone; `extra` from `account`). -/
+  | abortDrained (record : Digest) (await : Digest) (extra : Capacity) (account : Nat)
+      (accountCapability : CapabilityId)
+  /-- Re-birth the activity at `record` (left on the old package by a migration) on the
+  object's package from its stored input (anyone; paid from its own purse). -/
+  | rebirth (record : Digest) (await : Digest) (envelope : Capacity)
   deriving DecidableEq, Repr
 
 abbrev CreateWire :=
@@ -182,11 +200,15 @@ abbrev BirthWire :=
 abbrev EndWire := Digest × Digest × Capacity × Nat × CapabilityId
 abbrev InvokeWire :=
   Nat × CapabilityId × String × List UInt8 × List ObjectiveCall.Grant × Capacity × Capacity × Nat × CapabilityId
+abbrev AdoptWire :=
+  Nat × CapabilityId × Digest × Minidregg.Theory.ObjectiveBendTypes.Ty × Option String × List String ×
+    Minidregg.Pred.Pred × ObjectRecord.UpgradePolicy × List Digest × Capacity × Nat × Nat × CapabilityId
 
 abbrev TurnWire :=
   Sum PublishWire (Sum CreateWire (Sum BirthWire (Sum (Digest × AnswerWire) (Sum EndWire
     (Sum (Digest × Nat × CapabilityId × Nat)
-      (Sum EndWire (Sum (Digest × Digest) (Sum InvokeWire (Nat × Nat × Digest)))))))))
+      (Sum EndWire (Sum (Digest × Digest) (Sum InvokeWire (Sum (Nat × Nat × Digest)
+        (Sum AdoptWire (Sum (Nat × Nat × CapabilityId) (Sum EndWire (Digest × Digest × Capacity)))))))))))))
 
 def Turn.toWire : Turn → TurnWire
   | .publish artifact package p pc => .inl (artifact, package, p, pc)
@@ -201,7 +223,12 @@ def Turn.toWire : Turn → TurnWire
   | .invoke o oc method args grants envelope postage a ac =>
       .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (o, oc, method, args, grants, envelope, postage, a, ac)))))))))
   | .deliverMessage sender target message =>
-      .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (sender, target, message)))))))))
+      .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (sender, target, message))))))))))
+  | .adopt o oc pin st mig dropped law upgrade chosen envelope patience a ac =>
+      .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (o, oc, pin, st, mig, dropped, law, upgrade, chosen, envelope, patience, a, ac)))))))))))
+  | .migrate o a ac => .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (o, a, ac))))))))))))
+  | .abortDrained record await extra a ac => .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (record, await, extra, a, ac)))))))))))))
+  | .rebirth record await envelope => .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr ((record, await, envelope))))))))))))))
 
 def Turn.ofWire : TurnWire → Turn
   | .inl (artifact, package, p, pc) => .publish artifact package p pc
@@ -215,8 +242,13 @@ def Turn.ofWire : TurnWire → Turn
   | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (record, await)))))))) => .abandon record await
   | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (o, oc, method, args, grants, envelope, postage, a, ac))))))))) =>
       .invoke o oc method args grants envelope postage a ac
-  | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (sender, target, message))))))))) =>
+  | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (sender, target, message)))))))))) =>
       .deliverMessage sender target message
+  | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (o, oc, pin, st, mig, dropped, law, upgrade, chosen, envelope, patience, a, ac))))))))))) =>
+      .adopt o oc pin st mig dropped law upgrade chosen envelope patience a ac
+  | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (o, a, ac)))))))))))) => .migrate o a ac
+  | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (record, await, extra, a, ac))))))))))))) => .abortDrained record await extra a ac
+  | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr ((record, await, envelope)))))))))))))) => .rebirth record await envelope
 
 def createStream : StreamCodec CreateWire :=
   StreamCodec.product StreamCodec.nat (StreamCodec.product capabilityIdStream
@@ -246,6 +278,14 @@ def invokeStream : StreamCodec InvokeWire :=
       (StreamCodec.product (StreamCodec.list ObjectiveCall.grantStream) (StreamCodec.product capacityStream
         (StreamCodec.product capacityStream (StreamCodec.product StreamCodec.nat capabilityIdStream)))))))
 
+def adoptStream : StreamCodec AdoptWire :=
+  StreamCodec.product StreamCodec.nat (StreamCodec.product capabilityIdStream
+    (StreamCodec.product digestStream (StreamCodec.product ObjectStateType.tyStream
+      (StreamCodec.product (StreamCodec.option stringStream) (StreamCodec.product (StreamCodec.list stringStream)
+        (StreamCodec.product LawLeaf.predStream (StreamCodec.product ObjectRecord.upgradeStream
+          (StreamCodec.product (StreamCodec.list digestStream) (StreamCodec.product capacityStream
+            (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat capabilityIdStream)))))))))))
+
 def turnStream : StreamCodec Turn :=
   StreamCodec.xmap
     (StreamCodec.sum publishStream (StreamCodec.sum createStream (StreamCodec.sum birthStream
@@ -255,7 +295,12 @@ def turnStream : StreamCodec Turn :=
             (StreamCodec.product capabilityIdStream StreamCodec.nat)))
           (StreamCodec.sum endStream (StreamCodec.sum (StreamCodec.product digestStream digestStream)
             (StreamCodec.sum invokeStream
-              (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat digestStream)))))))))))
+              (StreamCodec.sum (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat digestStream))
+                (StreamCodec.sum adoptStream
+                  (StreamCodec.sum (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
+                      capabilityIdStream))
+                    (StreamCodec.sum endStream
+                      (StreamCodec.product digestStream (StreamCodec.product digestStream capacityStream)))))))))))))))
     Turn.toWire Turn.ofWire (by intro turn; cases turn <;> rfl)
 
 structure Command where
@@ -273,7 +318,8 @@ def commandStream : StreamCodec Command :=
     (fun (subject, nonce, root, turn) => ⟨subject, nonce, root, turn⟩)
     (by intro c; cases c; rfl)
 
-/-- v6: `create` declares the object's state type (`ObjectStateType.tyStream`); v5: `create`
+/-- v6: the upgrade turns (`adopt`, `migrate`, `abortDrained`, `rebirth`) join the sum, and
+`create` declares the object's state type (`ObjectStateType.tyStream`); v5: `create`
 carries an optional initial declared state, and the turn sum has no `writeState` (a direct write
 of declared state is no turn: only the object's package writes it, under its pin); v5 (and
 older) commands refuse to decode. -/
@@ -363,6 +409,16 @@ def invokeRequest (command : Command) (object : Nat) (method : String) (args : D
 def messageRequest (command : Command) (sender target : Nat) (message : Digest) : ObjectiveSend.MessageRequest :=
   ⟨command.subject, sender, target, message⟩
 
+def adoptRequest (command : Command) (object : Nat) (pin : Digest) (stateType : Minidregg.Theory.ObjectiveBendTypes.Ty)
+    (migration : Option String) (dropped : List String) (law : Minidregg.Pred.Pred)
+    (upgrade : ObjectRecord.UpgradePolicy) (rebirth : List Digest) (envelope : Capacity) (patience account : Nat) :
+    ObjectiveActivity.AdoptRequest :=
+  ⟨command.subject, ⟨object⟩, pin, stateType, migration, dropped, law, upgrade, rebirth, envelope, patience, account,
+    command.nonce⟩
+
+def migrateRequest (command : Command) (object account : Nat) : ObjectiveActivity.MigrateRequest :=
+  ⟨command.subject, ⟨object⟩, account, command.nonce⟩
+
 /-- The kernel turn a command decided: one `ObjectiveActivity.AdmittedTurn`
 (the command fixes which admission function ran). -/
 abbrev Decided {rootBytes : List UInt8 → Digest} (config : Config) (snapshot : DataSnapshot rootBytes)
@@ -394,6 +450,12 @@ def transactionOf (command : Command) : Option TransactionId :=
       (decodeDataBytes args).map fun value =>
         ObjectiveCall.invokeTransaction (invokeRequest command object method value grants envelope postage account)
   | .deliverMessage _ _ message => some (ObjectiveSend.messageTransaction message)
+  | .adopt object _ pin stateType migration dropped law upgrade chosen envelope patience account _ =>
+      some (ObjectiveActivity.adoptTransaction
+        (adoptRequest command object pin stateType migration dropped law upgrade chosen envelope patience account))
+  | .migrate object account _ => some (ObjectiveActivity.migrateTransaction (migrateRequest command object account))
+  | .abortDrained _ await _ _ _ => some (ObjectiveActivity.abortTransaction await)
+  | .rebirth _ await _ => some (ObjectiveActivity.rebirthTransaction await)
 
 /-- Refusals of this receiver: the kernel's, the authority's, the ingress's. -/
 inductive Reject where
@@ -466,6 +528,23 @@ def decideTurn {rootBytes : List UInt8 → Digest} (config : Config) (snapshot :
       match ObjectiveSend.deliverMessage config snapshot height request with
       | .ok delivered => pure (.deliverMessage request delivered)
       | .error reason => throw (.message reason)
+  | .adopt object _ pin stateType migration dropped law upgrade chosen envelope patience account _ => do
+      let request := adoptRequest command object pin stateType migration dropped law upgrade chosen envelope patience
+        account
+      pure (.adopt request (← kernel (ObjectiveActivity.adopt config snapshot height request)))
+  | .migrate object account _ => do
+      let request := migrateRequest command object account
+      pure (.migrate request (← kernel (ObjectiveActivity.migrate config snapshot height request)))
+  | .abortDrained record await extra account _ => do
+      let request : ObjectiveActivity.AbortRequest := ⟨command.subject, record, extra, account⟩
+      let aborted ← kernel (ObjectiveActivity.abortDrained config snapshot height request)
+      if aborted.await.id ≠ await then throw .staleAwait
+      pure (.abortDrained request aborted)
+  | .rebirth record await envelope => do
+      let request : ObjectiveActivity.RebirthRequest := ⟨command.subject, record, envelope⟩
+      let reborn ← kernel (ObjectiveActivity.rebirth config snapshot height request)
+      if reborn.await.id ≠ await then throw .staleAwait
+      pure (.rebirth request reborn)
 
 def postStream : StreamCodec Post :=
   StreamCodec.xmap (StreamCodec.product digestStream (StreamCodec.product digestStream bytesStream))
@@ -516,6 +595,10 @@ def signedTarget (domain : Digest) (command : Command) : ResourceKind × Nat :=
   | .abandon record _ => (.object, record.value)
   | .invoke object _ _ _ _ _ _ _ _ => (.object, object)
   | .deliverMessage sender target _ => (.object, (Inbox.cell domain sender target).value)
+  | .adopt object _ _ _ _ _ _ _ _ _ _ _ _ => (.object, object)
+  | .migrate object _ _ => (.object, object)
+  | .abortDrained record _ _ _ _ => (.object, record.value)
+  | .rebirth record _ _ => (.object, record.value)
 
 def verbFor : (kind : ResourceKind) → Verb kind
   | .object => .mutateObject
@@ -588,7 +671,10 @@ def authorized (snapshot : Snapshot) (semantics : Digest) (ambient : Ambient) (c
   let account (a : Nat) (c : CapabilityId) : Except Reject Unit :=
     if accountHolder snapshot semantics ambient command a c preRoot outcome then .ok () else .error .notAccountOwner
   match command.turn with
-  | .resolve _ _ | .abandon _ _ | .deliverMessage _ _ _ => .ok ()
+  | .resolve _ _ | .abandon _ _ | .deliverMessage _ _ _ | .rebirth _ _ _ => .ok ()
+  | .adopt o oc _ _ _ _ _ _ _ _ _ a ac => do object o oc; account a ac
+  | .migrate _ a ac => account a ac
+  | .abortDrained _ _ extra a ac => if extra = zeroCapacity then .ok () else account a ac
   | .publish _ _ p pc => account p pc
   | .create o oc _ _ _ _ _ p pc => do object o oc; account p pc
   | .birth o oc a ac _ _ _ _ _ _ => do object o oc; account a ac
