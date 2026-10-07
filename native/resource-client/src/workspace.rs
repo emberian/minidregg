@@ -5263,6 +5263,33 @@ fn line_argument(action: &Value) -> Result<usize> {
         .ok_or_else(|| "document line must be 1 or more".to_owned())
 }
 
+/// An append: the new text line, then each run in `runs` extended by it at the end.
+fn append_actions<'a>(atom: &str, payload: String, runs: impl Iterator<Item = &'a String>) -> Vec<Value> {
+    let mut actions = vec![json!({"type":"createAtom","atom":atom,"kind":{"type":"text"},"payload":payload})];
+    actions.extend(runs.map(|run| json!({"type":"insertRun","run":run,"anchor":null,"atoms":[atom]})));
+    actions
+}
+
+/// The runs of the document view that end at its last live line: an append
+/// extends each of them, so the line it adds is a slot of every run its
+/// predecessor closed.
+fn runs_at_tail(document: &Value) -> Result<Vec<String>> {
+    let lines = live_lines(document)?;
+    let Some(last) = lines.last().filter(|line| line["kind"] == "atom") else {
+        return Ok(Vec::new());
+    };
+    let atom = member(last, "atom")?;
+    document["runs"]
+        .as_array()
+        .ok_or("document view has no runs")?
+        .iter()
+        .filter(|run| {
+            run["atoms"].as_array().and_then(|atoms| atoms.last()).and_then(Value::as_str) == Some(atom)
+        })
+        .map(|run| member(run, "id").map(str::to_owned))
+        .collect()
+}
+
 /// Lower line-level document actions into the Host's content grammar.
 /// `append {text}` · `edit {line,text}` · `link {to,relation}`.
 fn document_actions(
@@ -5281,6 +5308,8 @@ fn document_actions(
     }
     content_page(view, name)?;
     let mut lowered = Vec::new();
+    // The runs an append extends, read once from the document as it stands.
+    let mut tail_runs: Option<Vec<String>> = None;
     for action in actions {
         let obj = action
             .as_object()
@@ -5300,12 +5329,23 @@ fn document_actions(
             let seen = seen_for(root, workspace, name, view, fresh, "a push is a diff against your last read")?;
             let file = crate::decode_hex(member(action, "bytes")?)?;
             lowered.extend(push_actions(&seen, &file)?.actions);
+            // A push may change which line ends the document: no run is extended by a later append.
+            tail_runs = Some(Vec::new());
+            continue;
+        }
+        if member(action, "type")? == "append" {
+            // A created atom joins the end of the document's root (K-ELEMENT-TREE), and
+            // every run that ends at the line before it grows by it (`insertRun`), so the
+            // new line can be named by a range of a run that already covered its neighbour.
+            let atom = random_nonce()?;
+            if tail_runs.is_none() {
+                let reference = reference(root, name)?;
+                tail_runs = Some(runs_at_tail(&host_document(root, workspace, &reference)?)?);
+            }
+            lowered.extend(append_actions(&atom, text_argument(action)?, tail_runs.iter().flatten()));
             continue;
         }
         lowered.push(match member(action, "type")? {
-            // A created atom joins the end of the document's root (K-ELEMENT-TREE).
-            "append" => json!({"type":"createAtom","atom":random_nonce()?,
-                "kind":{"type":"text"},"payload":text_argument(action)?}),
             "edit" => {
                 let line = line_argument(action)?;
                 let seen = seen_for(root, workspace, name, view, fresh, "an edit names a line as you last read it")?;
@@ -7660,6 +7700,37 @@ mod tests {
             "payload":"61"}]), true).is_ok());
         assert!(content_actions(&json!([{"type":"transclude","id":"1"}]), false).is_err());
         assert!(content_actions(&json!([{"type":"editAtom","atom":"1"}]), false).is_err());
+    }
+
+    #[test]
+    fn an_append_extends_the_runs_that_end_at_the_last_line() {
+        let document = json!({"order":[
+            {"kind":"atom","element":"3001","atom":"1001"},
+            {"kind":"atom","element":"3002","atom":"1002"},
+            {"kind":"atom","element":"3003","atom":"1003","struck":true}],
+            "runs":[{"id":"2000","atoms":["1001","1002"]},
+                    {"id":"2001","atoms":["1002"]},
+                    {"id":"2002","atoms":["1001"]},
+                    {"id":"2003","atoms":["1001","1002","1003"]}]});
+        // The last live line is 1002 (1003 is struck): the runs closing at 1002 grow, the others do not.
+        let runs = runs_at_tail(&document).unwrap();
+        assert_eq!(runs, ["2000", "2001"]);
+        let lowered = append_actions("9", "6869".into(), runs.iter());
+        assert_eq!(lowered[0]["type"], "createAtom");
+        assert_eq!(lowered[1], json!({"type":"insertRun","run":"2000","anchor":null,"atoms":["9"]}));
+        assert_eq!(lowered[2]["run"], "2001");
+        assert!(content_actions(&json!(lowered), false).is_ok());
+        assert!(content_actions(&json!(lowered), true).is_ok());
+        // A document whose last line is a transclusion, or with no lines, extends no run.
+        let embed = json!({"order":[{"kind":"embed","element":"3001"}],"runs":[{"id":"2000","atoms":["1001"]}]});
+        assert!(runs_at_tail(&embed).unwrap().is_empty());
+        assert!(runs_at_tail(&json!({"order":[],"runs":[]})).unwrap().is_empty());
+        assert!(runs_at_tail(&json!({"order":[]})).is_ok());
+        // A malformed anchor or run member is refused by the shape check.
+        assert!(content_actions(&json!([{"type":"insertRun","run":"1","anchor":{"run":"1"},"atoms":["2"]}]), false).is_err());
+        assert!(content_actions(&json!([{"type":"insertRun","run":"1","anchor":null,"atoms":["x"]}]), false).is_err());
+        assert!(content_actions(&json!([{"type":"insertRun","run":"1","anchor":{"run":"1","neighbor":"2",
+            "bias":"after","death":"keepTombstone"},"atoms":["3"]}]), false).is_ok());
     }
 
     #[test]

@@ -278,6 +278,10 @@ inductive Action where
   /-- Retire a live mark, and a link mark's link; its author or the document's
   owner only. -/
   | unmark (mark : MarkId)
+  /-- Insert existing atoms of this document into the committed slot order of
+  run `runId`, at the cut `anchor` names (`none`: after the last slot).  This is
+  `Theory.StableRanges.Edit.insert`: no endpoint changes, only the order grows. -/
+  | insertRun (runId : RunId) (anchor : Option StablePoint) (atoms : List AtomId)
   deriving DecidableEq
 
 abbrev OriginalActionWire := Sum (ElementId × Digest)
@@ -288,7 +292,8 @@ abbrev OriginalActionWire := Sum (ElementId × Digest)
           (Sum (AnnotationId × AtomId × OperationId × AnnotationBody)
             (Sum (TransclusionId × LinkId × TranscludeRequest)
               (Sum EditElement (Sum ElementId (Sum LinkId
-                (Sum (MarkId × MarkRequest) MarkId))))))))))
+                (Sum (MarkId × MarkRequest)
+                  (Sum MarkId (RunId × Option StablePoint × List AtomId))))))))))))
 
 def originalActionWireStream : StreamCodec OriginalActionWire :=
   StreamCodec.sum
@@ -316,7 +321,10 @@ def originalActionWireStream : StreamCodec OriginalActionWire :=
                     (StreamCodec.sum (identifierStream .v1 .link)
                       (StreamCodec.sum
                         (StreamCodec.product (identifierStream .v1 .mark) markRequestStream)
-                        (identifierStream .v1 .mark)))))))))))
+                        (StreamCodec.sum (identifierStream .v1 .mark)
+                          (StreamCodec.product (identifierStream .v1 .run)
+                            (StreamCodec.product (StreamCodec.option stablePointStream)
+                              (StreamCodec.list (identifierStream .v1 .atom)))))))))))))))
 
 abbrev ActionWire := Sum OriginalActionWire
   (Sum (AnnotationId × AnnotationRecord × List UInt8) (AtomId × AtomRecord × List UInt8))
@@ -345,7 +353,9 @@ def Action.toWire : Action → ActionWire
   | .unlink linkId => .inl (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl linkId))))))))))
   | .mark markId request =>
       .inl (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (markId, request))))))))))))
-  | .unmark markId => .inl (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (markId))))))))))))
+  | .unmark markId => .inl (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl markId))))))))))))
+  | .insertRun runId anchor atoms =>
+      .inl (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (runId, anchor, atoms)))))))))))))
   | .rewrapAnnotation annotation before wrapping => .inr (.inl (annotation, before, wrapping))
   | .rewrapAtom atom before wrapping => .inr (.inr (atom, before, wrapping))
 
@@ -365,7 +375,9 @@ def Action.ofWire : ActionWire → Action
   | .inl (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl linkId)))))))))) => .unlink linkId
   | .inl (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (markId, request)))))))))))) =>
       .mark markId request
-  | .inl (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (markId)))))))))))) => .unmark markId
+  | .inl (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl markId)))))))))))) => .unmark markId
+  | .inl (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (runId, anchor, atoms))))))))))))) =>
+      .insertRun runId anchor atoms
   | .inr (.inl (annotation, before, wrapping)) => .rewrapAnnotation annotation before wrapping
   | .inr (.inr (atom, before, wrapping)) => .rewrapAtom atom before wrapping
 
@@ -384,7 +396,7 @@ def commandStream : StreamCodec Command :=
     (fun actions => ⟨actions⟩) (by intro command; rfl)
 
 /-- Action grammar version; independent of the content cell's storage wire. -/
-def commandVersion : Nat := 9
+def commandVersion : Nat := 10
 
 def commandFrame : List UInt8 := "DREGG/CONTENT/MUTATE".toUTF8.toList ++
   [UInt8.ofNatLT commandVersion (by decide)]
@@ -412,16 +424,16 @@ theorem command_canonical {bytes : List UInt8} {command : Command}
     commandCodec.encode command = bytes :=
   ResourceBirthCodec.strictCodec_canonical rawCommandCodec accepted
 
-/-- Version-1 through version-8 command frames refuse to decode. -/
+/-- Version-1 through version-9 command frames refuse to decode. -/
 theorem retired_command_refused (version : UInt8)
-    (retired : version = 1 ∨ version = 2 ∨ version = 3 ∨ version = 4 ∨ version = 5 ∨ version = 6 ∨ version = 7 ∨ version = 8)
+    (retired : version = 1 ∨ version = 2 ∨ version = 3 ∨ version = 4 ∨ version = 5 ∨ version = 6 ∨ version = 7 ∨ version = 8 ∨ version = 9)
     (payload : List UInt8) :
     rawCommandCodec.decode ("DREGG/CONTENT/MUTATE".toUTF8.toList ++ version :: payload) = none := by
   let oldFrame : List UInt8 := "DREGG/CONTENT/MUTATE".toUTF8.toList ++ [version]
   have lengthExact : commandFrame.length = oldFrame.length := by
     simp [commandFrame, oldFrame]
   have different : oldFrame ≠ commandFrame := by
-    rcases retired with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;> decide +kernel
+    rcases retired with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;> decide +kernel
   have refused : rawCommandCodec.decode (oldFrame ++ payload) = none := by
     simp [rawCommandCodec, lengthExact, different]
   simpa only [oldFrame, List.append_assoc, List.singleton_append] using refused
@@ -600,6 +612,55 @@ def runAtomsCheck (pre : ContentStore) (document : DocumentId) (atoms : List Ato
     match Hyperdocument.lookup pre .atoms atomId with
     | none => false
     | some atom => decide (atom.document = document))
+
+/-- The cut a stable endpoint denotes in a slot order: immediately before or
+after the slot at `position`. -/
+def cutAt (bias : AnchorBias) (position : Nat) : Nat :=
+  match bias with
+  | .before => position
+  | .after => position + 1
+
+/-- The slot cut of run `runId`'s committed order where an insertion lands:
+`none` is the end of the run; a point names the cut beside its neighbor's slot
+(live or tombstoned, a slot is a slot), and a point of another run, or of no
+atom, names no cut. -/
+def insertionCut (runId : RunId) (run : RunRecord) : Option StablePoint → Option Nat
+  | none => some run.atoms.length
+  | some point =>
+      if point.run = runId then
+        match point.neighbor with
+        | none => none
+        | some atom => (run.atoms.findIdx? (· == atom)).map (cutAt point.bias)
+      else none
+
+/-- The run is not empty, and the inserted atoms are existing atoms of this
+document, distinct, and not yet slots of the run: the run's order stays a list
+without repeats.  An empty run is the anchor of the stored points that name no
+atom (`pointCheck`: such a point is present exactly while its run is empty), so
+filling one would invalidate points stored in other records; it is refused. -/
+def insertRunCheck (pre : ContentStore) (document : DocumentId) (run : RunRecord)
+    (atoms : List AtomId) : Bool :=
+  decide (run.atoms ≠ []) && runAtomsCheck pre document atoms &&
+    atoms.all fun atom => decide (atom ∉ run.atoms)
+
+/-- Insert `atoms` into the committed slot order of an existing run of this
+document at the cut `anchor` names.  The exact stored record guards the write. -/
+def insertRunStep (document : DocumentId) (progress : Progress) (runId : RunId)
+    (anchor : Option StablePoint) (atoms : List AtomId) : Except Reject Progress :=
+  match (show Option RunRecord from progress.1 ⟨.runs, runId⟩) with
+  | none => .error .invalidRun
+  | some before =>
+      if before.document = document ∧ before.tombstonedAt = none then
+        match insertionCut runId before anchor with
+        | none => .error .invalidRun
+        | some cut =>
+            if insertRunCheck progress.1 document before atoms = true then
+              let after := { before with
+                atoms := before.atoms.take cut ++ atoms ++ before.atoms.drop cut }
+              .ok (progress.1.set ⟨.runs, runId⟩ (some after),
+                progress.2 ++ [.write .runs runId before after])
+            else .error .invalidRun
+      else .error .invalidRun
 
 /-- The annotated atom is in this document and still at the revision the
 annotator read.  A revision equal to this operation names a write of this same
@@ -1004,6 +1065,7 @@ def step (author : PrincipalRef) (operation : OperationId) (document : DocumentI
   | .unlink link => retireLink document operation progress link
   | .mark mark request => markStep author operation document progress mark request
   | .unmark mark => unmarkStep author operation document progress mark
+  | .insertRun runId anchor atoms => insertRunStep document progress runId anchor atoms
 
 def run (author : PrincipalRef) (operation : OperationId) (document : DocumentId) (context : Context)
     (pre : ContentStore) (command : Command) : Except Reject Progress :=
@@ -1071,6 +1133,32 @@ theorem allocate_ok {progress next : Progress} {space : Namespace} {key : Key sp
     cases accepted
     exact ⟨fresh, rfl⟩
   · cases accepted
+
+theorem insertRunStep_ok {document : DocumentId} {progress next : Progress} {runId : RunId}
+    {anchor : Option StablePoint} {atoms : List AtomId}
+    (accepted : insertRunStep document progress runId anchor atoms = .ok next) :
+    ∃ before cut, progress.1 ⟨.runs, runId⟩ = some before ∧ before.document = document ∧
+      before.tombstonedAt = none ∧ insertionCut runId before anchor = some cut ∧
+      insertRunCheck progress.1 document before atoms = true ∧
+      next = (progress.1.set ⟨.runs, runId⟩ (some { before with
+          atoms := before.atoms.take cut ++ atoms ++ before.atoms.drop cut }),
+        progress.2 ++ [.write .runs runId before { before with
+          atoms := before.atoms.take cut ++ atoms ++ before.atoms.drop cut }]) := by
+  unfold insertRunStep at accepted
+  split at accepted
+  · cases accepted
+  · rename_i before found
+    split at accepted
+    · rename_i held
+      split at accepted
+      · cases accepted
+      · rename_i cut inserted
+        split at accepted
+        · rename_i checked
+          cases accepted
+          exact ⟨before, cut, found, held.1, held.2, inserted, checked, rfl⟩
+        · cases accepted
+    · cases accepted
 
 theorem rewriteElement_ok {progress next : Progress} {element : ElementId} {after : ElementRecord}
     (accepted : rewriteElement progress element after = .ok next) :
@@ -1450,6 +1538,10 @@ theorem step_executes (author : PrincipalRef) (operation : OperationId) (documen
   | unmark mark =>
       simp only [step] at accepted
       exact (unmarkStep_markStep accepted).1 pre holds
+  | insertRun runId anchor atoms =>
+      simp only [step] at accepted
+      obtain ⟨before, cut, found, _, _, _, _, rfl⟩ := insertRunStep_ok accepted
+      exact executes_append pre progress _ holds ⟨rfl, found⟩
 
 theorem foldlM_executes (author : PrincipalRef) (operation : OperationId) (document : DocumentId) (context : Context)
     (pre : ContentStore) (actions : List Action) (progress next : Progress)
@@ -1620,6 +1712,7 @@ def Action.tag : Action → Nat
   | .unlink .. => 9
   | .mark .. => 10
   | .unmark .. => 11
+  | .insertRun .. => 14
   | .rewrapAnnotation .. => 12
   | .rewrapAtom .. => 13
 
@@ -1715,6 +1808,7 @@ def project (before' after' : ContentStore) (command : Command) : List (String �
    ("content/unlinks", actionCount command 9),
    ("content/marks", actionCount command 10),
    ("content/unmarks", actionCount command 11),
+   ("content/run-inserts", actionCount command 14),
    ("content/writes/body", bodyWrites before after),
    ("content/writes/annotations", annotationWrites before after),
    ("content/tombstones", (command.actions.filter fun action => match action with
@@ -1956,11 +2050,6 @@ def slotLive (store : ContentStore) (document : DocumentId) (atom : AtomId) : Bo
   match Hyperdocument.lookup store .atoms atom with
   | some record => decide (record.document = document) && record.tombstonedAt.isNone
   | none => false
-
-def cutAt (bias : AnchorBias) (position : Nat) : Nat :=
-  match bias with
-  | .before => position
-  | .after => position + 1
 
 /-- The nearest live slot strictly before `position`. -/
 def previousLive (alive : List Bool) (position : Nat) : Option Nat :=
@@ -2387,6 +2476,10 @@ theorem step_keepsAt (author : PrincipalRef) (operation : OperationId) (document
   | unmark mark =>
       simp only [step] at accepted
       exact keepsAt_of_markStep revision (unmarkStep_markStep accepted)
+  | insertRun runId anchor atoms =>
+      simp only [step] at accepted
+      obtain ⟨before, cut, _, _, _, _, _, rfl⟩ := insertRunStep_ok accepted
+      exact keepsAt_set_other revision progress.1 .runs runId _ (by decide)
 
 theorem run_keepsAt (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
     (context : Context) (pre : ContentStore) (command : Command) (next : Progress)

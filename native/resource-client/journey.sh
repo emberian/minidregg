@@ -188,7 +188,7 @@ cap_s() {
   echo "$want"
 }
 
-STEPS=(J0 J1 J2 J3 J12X J4 P7KR THIN JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K11 KCH KCHR KCHC KIX KF KH K12C JMKT K12I K12T K12E K12M K12R K12H WEB KW K10C JLI KTPL J15 J17 J14 JPRIV1 JN2 JN3 JN3P JN5 JSYNC M3 M4 M5 M6 M7 M8 BD J12 J12W JNAMES JDV JPD J13 JJOB1 JJOB JJOBM KCL J12A JCHAT JINSPECT JLS JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JROTL JRLANE JDISCLOSE)
+STEPS=(J0 J1 J2 J3 J12X J4 P7KR THIN JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K11 KCH KCHR KCHC KIX KF KH K12C JMKT K12I K12T K12N K12E K12M K12R K12H WEB KW K10C JLI KTPL J15 J17 J14 JPRIV1 JN2 JN3 JN3P JN5 JSYNC M3 M4 M5 M6 M7 M8 BD J12 J12W JNAMES JDV JPD J13 JJOB1 JJOB JJOBM KCL J12A JCHAT JINSPECT JLS JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JROTL JRLANE JDISCLOSE)
 if [ -n "${JOURNEY_STEPS:-}" ]; then
   SELECTED=()
   for id in "${STEPS[@]}"; do
@@ -223,6 +223,7 @@ TITLE[K12I]="link index: backlinks cut to the reader's standing grants; unlink; 
 TITLE[K12T]="range transclusion: disclosure at transclusion time, snapshot pinned, live follows, a late joiner sees the placeholder"
 TITLE[K12E]="element tree: order is the tree walk, a transclusion at line 3, 100 nested inserts, cycle and stale refused"
 TITLE[K12M]="marks on lines: bold/italic/code/heading/link, pinned by revision, stale after edit, unmark by author or owner"
+TITLE[K12N]="run edits: a line doc append adds is range-transcludable, an earlier range does not move"
 TITLE[K12R]="the rendered document: one renderer, golden text, raw atoms, json, outline, html, the reader's placeholder"
 TITLE[K12H]="document history: history / show --at / diff over the element-tree order, coverage at the asked height"
 TITLE[WEB]="mini web: loopback-only, read-only; view-document pages, index backlinks, history / at / diff pages"
@@ -1013,6 +1014,7 @@ step_K12I() { hook j12i-links "K-DOC-INDEX rows: backlinks cut to the reader's s
 step_K12T() { hook j12t-kernel "K-TRANSCLUDE rows: disclosure checked at transclusion time, a snapshot pinned by revision, a live transclusion follows, a late joiner sees the moved placeholder (lane k-transclude)"; }
 step_K12E() { hook j12e "K-ELEMENT-TREE rows: the order is the tree walk, a transclusion placed at line 3, 100 nested inserts, a cycle and a stale container refused (lane k-element-tree)"; }
 step_K12M() { hook j12m "K-MARKS rows: bold/italic/code/heading/link marks pinned by revision, stale after an edit, unmark by author or owner, a reviewer under fields={annotations} marks and cannot edit (lane k-marks)"; }
+step_K12N() { hook j12n-runs "K-RUNS-RANGES rows: doc append extends the run that ends at the last line (insertRun); a range from an old line to an appended line renders for a covered reader; a range ending before a later append does not move; a range of the newest line alone"; }
 step_K12R() { hook j12r "P-DOC-RENDER rows: A's doc show equals the golden byte for byte; raw is the atoms; json agrees with the text; outline; html; a reader without the source's grant sees the placeholder and no bytes; a backlink names its line (lane p-doc-render)"; }
 step_K12H() { hook j12h-history "K-DOC-HISTORY rows: history, show --at and diff over the element-tree order, moves named, coverage at the asked height (lane k-doc-history)"; }
 step_WEB() { hook jweb "WEB rows: loopback-only, read-only mini web; view-document pages, index backlinks, history / at / diff pages; refused requests make no read (lanes web-entrance, docuverse-braid)"; }
@@ -1079,6 +1081,7 @@ run_step K12C J5
 run_step JMKT J4
 run_step K12I J5
 run_step K12T J5
+run_step K12N J5
 run_step K12E J5
 run_step K12M J5
 run_step K12R J5

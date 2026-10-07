@@ -102,6 +102,7 @@ import Kernel.ContentResourceAudit
 import Kernel.ContentElementTree
 import Kernel.ContentResourceForestInstances  -- both poles of View.Forest (hypothesis ledger)
 import Kernel.ContentMarks
+import Kernel.ContentRunEdit
 import Kernel.AgentGrain
 import Kernel.AgentGrainAudit
 import Kernel.CapabilityRevocationReceiver
