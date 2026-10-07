@@ -293,7 +293,13 @@ def reloadSource {config : SourceConfig} (p : Participant config) :
       Minidregg.Compiler.ResourceBirthCodec.rootBytes with
   | .error detail => return (p,"source reload: " ++ detail)
   | .ok target =>
-    match ← Minidregg.Kernel.NativeHostReplay.extendVerified config p.source.verified target with
+    -- The extension's history reads go through the Reader of the Store just loaded
+    -- (its MAC-bound head); an unavailable Reader is reported, never read as absent.
+    match ← Minidregg.Compiler.DurableHistoryStore.readerOf config.physicalTransport
+        Minidregg.Compiler.ResourceBirthCodec.rootBytes target with
+    | .error detail => return (p,"source history reader: " ++ detail)
+    | .ok ⟨_, reader⟩ =>
+    match ← Minidregg.Kernel.NativeHostReplay.extendVerified config reader p.source.verified target with
     | .error failure => return (p,"source replay: " ++ failure.detail)
     | .ok verified => return ({p with source := ⟨target,verified⟩},"source reloaded and verified")
 
@@ -317,6 +323,7 @@ def applyNext {config : SourceConfig} (p : Participant config)
     return ({p with source := ⟨_,verified⟩},"applied")
   | .refused detail => return (p,detail)
   | .ordinary _ => reloadSource p
+  | .uncertain _ => reloadSource p
 
 def certificateSlice {config : SourceConfig} (p : Participant config) :
     IO (Participant config × List (Nat × Bytes) × String) := do

@@ -33,12 +33,20 @@ structure Applied (config : Config) {target : Durable}
   contextPinned : config.jointConsensus = some expected
   readback : ExactReadback config old
   ordered : JointReceiver.Ordered expected old.opened.durable readback.derived.intent
+  /-- The Store the record was appended to, and its history Reader at the appended
+  head (`DurableHistoryStore.readerOf`): the extension's history reads go through it. -/
+  store : DurableHistory.StoreIdentity
+  reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store
 
 inductive Result (config : Config) {target : Durable}
     (old : Verified config target) (expected : Context) where
   | applied (receipt : Applied config old expected)
   | refused (detail : String)
   | ordinary (result : DurableReceiverIO.Result ResourceBirthCodec.rootBytes)
+  /-- The record was appended and read back, but the Store's history Reader at the
+  new head is unavailable: not a refusal (the record is durable); the caller
+  re-reads the Store. -/
+  | uncertain (detail : String)
 
 /-- Typed ingress from the fixed deployment-native certificate verifier. The
 request supplies only source bytes; expected/context/helper are controller
@@ -66,7 +74,10 @@ def apply {config : Config} {target : Durable} (old : Verified config target)
         | .ok readback =>
           have sourceOrder : JointReceiver.Ordered expected old.opened.durable readback.val.derived.intent :=
             readback.property.symm ▸ ordered
-          return .applied ⟨contextPinned,readback.val,sourceOrder⟩
+          match ← DurableHistoryStore.readerOf (orderedTransport derived) ResourceBirthCodec.rootBytes
+              appended.next with
+          | .error detail => return .uncertain s!"post-append history reader: {detail}"
+          | .ok ⟨store, reader⟩ => return .applied ⟨contextPinned,readback.val,sourceOrder,store,reader⟩
   else return .refused "source consensus context not deployment pinned"
 
 /-- The actual source history extension reuses the same admitted intent and
@@ -74,7 +85,7 @@ exact physical source readback; engine journal flags cannot construct it. -/
 def Applied.verified {config : Config} {target : Durable}
     {old : Verified config target} {expected : Context} (applied : Applied config old expected) :
     Verified config (exactCandidate old applied.readback.derived applied.readback.ready) :=
-  extendExact old applied.readback
+  extendExact applied.reader old applied.readback
 
 theorem applied_exact_source_record {config : Config} {target : Durable}
     {old : Verified config target} {expected : Context} (applied : Applied config old expected) :
