@@ -55,7 +55,12 @@ private def auditWithTiming (config : Config) (timing : AuditTiming.Handle) :
       (DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes) with
   | .error detail => return .error detail
   | .ok durable =>
-      match ← NativeHostReplay.verifyLoaded config durable timing with
+      -- The walk reads lifecycle history through the Store's own verified Reader.
+      let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf config.transport
+          ResourceBirthCodec.rootBytes durable with
+        | .error detail => return .error s!"audit history reader: {detail}"
+        | .ok sealed => pure sealed
+      match ← NativeHostReplay.verifyLoaded config reader durable timing with
       | .error failure =>
           return .error s!"audit refused history at entry {failure.index}: {failure.detail}"
       | .ok verified => return .ok (verified.receipts, verified.opened.durable.index,
@@ -469,7 +474,7 @@ def provisionAssemble (plan : ParticipantFactoryProvisioning.SigningPlan)
   pure (ParticipantFactoryProvisioning.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
 
 def observationContext (config : Config) (opened : Opened config) :
-    NativeObservationController.Context config.deployment opened.durable :=
+    NativeObservationController.Context config.deployment :=
   (Minidregg.Compiler.ServedBasis.Ground.full _ opened.directory opened.authority)
 
 /-- The answer to an observation request, given the subject's selected key and the native
@@ -599,29 +604,29 @@ def challenge (config : Config) (intentBytes intentSignature : List UInt8) :
   challengeLoaded config opened intentBytes intentSignature
 
 /-- The steps a command's run claim names, when they exceed the operator's
-synchronous budget `config.nockFSync`; `none` when the command claims no run or
-claims at most the budget (`overSyncBudget_admits`, `overSyncBudget_refuses`). -/
-def overSyncBudget (config : Config) (command : DeclaredResourceController.Command) : Option Nat :=
+synchronous budget `nockFSync` (`Config.nockFSync`); `none` when the command claims
+no run or claims at most the budget (`overSyncBudget_admits`, `overSyncBudget_refuses`). -/
+def overSyncBudget (nockFSync : Nat) (command : DeclaredResourceController.Command) : Option Nat :=
   match command.run with
-  | some claim => if config.nockFSync < claim.steps then some claim.steps else none
+  | some claim => if nockFSync < claim.steps then some claim.steps else none
   | none => none
 
-theorem overSyncBudget_admits (config : Config) (command : DeclaredResourceController.Command)
+theorem overSyncBudget_admits (nockFSync : Nat) (command : DeclaredResourceController.Command)
     (claim : Run.RunClaim) (run : command.run = some claim)
-    (within : claim.steps ≤ config.nockFSync) : overSyncBudget config command = none := by
+    (within : claim.steps ≤ nockFSync) : overSyncBudget nockFSync command = none := by
   simp [overSyncBudget, run, Nat.not_lt.mpr within]
 
-theorem overSyncBudget_refuses (config : Config) (command : DeclaredResourceController.Command)
+theorem overSyncBudget_refuses (nockFSync : Nat) (command : DeclaredResourceController.Command)
     (claim : Run.RunClaim) (run : command.run = some claim)
-    (exceeds : config.nockFSync < claim.steps) : overSyncBudget config command = some claim.steps := by
+    (exceeds : nockFSync < claim.steps) : overSyncBudget nockFSync command = some claim.steps := by
   simp [overSyncBudget, run, exceeds]
 
-theorem overSyncBudget_unclaimed (config : Config) (command : DeclaredResourceController.Command)
-    (run : command.run = none) : overSyncBudget config command = none := by
+theorem overSyncBudget_unclaimed (nockFSync : Nat) (command : DeclaredResourceController.Command)
+    (run : command.run = none) : overSyncBudget nockFSync command = none := by
   simp [overSyncBudget, run]
 
-def overSyncBudgetDetail (config : Config) (steps : Nat) : String :=
-  s!"overSyncBudget: run claim of {steps} Lean steps exceeds the operator's synchronous budget nockFSync {config.nockFSync}"
+def overSyncBudgetDetail (nockFSync : Nat) (steps : Nat) : String :=
+  s!"overSyncBudget: run claim of {steps} Lean steps exceeds the operator's synchronous budget nockFSync {nockFSync}"
 
 /-- The operator-log detail of an invocation's `insufficientBudget`. The
 durable meter is the genesis `meterAllowance` less every admitted charge
@@ -637,7 +642,7 @@ def meterShortfallDetail (proofWorkLeft claimed : Nat) : String :=
 
 /-- The sync gate on a preparation draft: only an invocation carries a run claim. -/
 def draftOverSyncBudget (config : Config) : Draft → Option Nat
-  | .invoke bytes => (DeclaredResourceController.commandCodec.decode bytes).bind (overSyncBudget config)
+  | .invoke bytes => (DeclaredResourceController.commandCodec.decode bytes).bind (overSyncBudget config.nockFSync)
   | _ => none
 
 /-- The clause of a target's committed law that an invocation draft would fail,
@@ -746,7 +751,7 @@ def prepareAuthorizedLoaded (config : Config) (opened : Opened config) (light : 
       match signed.challenge.intent.purpose with
       | .prepare draft =>
           if let some steps := draftOverSyncBudget config draft then
-            return .error ⟨.operationRejected, overSyncBudgetDetail config steps, none⟩
+            return .error ⟨.operationRejected, overSyncBudgetDetail config.nockFSync steps, none⟩
           match invokeRefusal config opened signed.challenge.intent.grants draft with
           | some refusal => return .error refusal
           | none =>
@@ -792,7 +797,8 @@ def queryLoaded (config : Config) (opened : Opened config)
       config.profile config.federation config.genesisHeight signed with
   | .error refusal => return .error refusal
   | .ok token =>
-      match token.queryResult with
+      -- History queries read the opening's own image (the context's source image).
+      match token.queryResult opened.durable rfl with
       | .ok view => return .ok view
       | .error reason => return .error (.of reason)
 
@@ -2639,31 +2645,35 @@ the transaction id and the operation marker's replay nullifier) read from the
 authenticated history into a basis, the replay check, preparation and admission on
 `Ground.ofBasis` (`withAcceptedOn`), the commit by `DurableServed.receiveServed` on the
 light opening. -/
-def submitInvokeLight (transport : DurableReceiverIO.Transport) (config : Config)
+def submitInvokeLight {F : Type} [Field F] [DecidableEq F] (transport : DurableReceiverIO.Transport)
+    (deployment : CanonicalCellRegistry.Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (federation : FederationId) (genesisHeight : Nat) (signature : CredentialSignatureIO.NativeConfig)
+    (nockFSync : Nat)
+    (stale : DeclaredResourceController.Command → DeclaredResourceController.Reject → Outcome)
     (opening : DurableServed.Opening ResourceBirthCodec.rootBytes)
-    (basisOf : DurableView.Keys → IO (Except String (ServedBasis.Basis config.deployment opening.store)))
-    (opened : Opened config) (signed : DeclaredResourceController.SignedCommand)
+    (basisOf : DurableView.Keys → IO (Except String (ServedBasis.Basis deployment opening.store)))
+    (signed : DeclaredResourceController.SignedCommand)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) : IO Outcome := do
   match DeclaredResourceController.commandCodec.decode signed.commandBytes with
   | none => return refused .malformed "invoke" "noncanonical command"
   | some command =>
       -- The operator's synchronous budget, before the referee re-executes the claim.
-      if let some steps := overSyncBudget config command then
-        return refused .operationRejected "overSyncBudget" (overSyncBudgetDetail config steps)
-      let domain := config.deployment.domain
-      let semantics := config.profile.semantics
+      if let some steps := overSyncBudget nockFSync command then
+        return refused .operationRejected "overSyncBudget" (overSyncBudgetDetail nockFSync steps)
+      let domain := deployment.domain
+      let semantics := profile.semantics
       match ← basisOf (DeclaredResourceController.invocationKeys domain semantics command) with
       | .error detail => return .unavailable detail.toUTF8.toList
       | .ok basis =>
-          let ground : ServedBasis.Ground config.deployment := .ofBasis basis
+          let ground : ServedBasis.Ground deployment := .ofBasis basis
           let transactionId := DeclaredResourceController.transactionId domain semantics command
           let eventId := (DeclaredResourceController.invocationEvent domain semantics command signed).eventId
-          DeclaredResourceController.withAcceptedOn config.deployment config.profile
-            ⟨config.federation, config.genesisHeight + basis.height⟩ config.signature ground signed
+          DeclaredResourceController.withAcceptedOn deployment profile
+            ⟨federation, genesisHeight + basis.height⟩ signature ground signed
             (fun _ shape accepted => do
               let intent := accepted.dataIntent shape
               if (FnConsumerProgress.recognizedLegacyIntentAnyGateway? domain semantics intent).isSome then
-                return staleOutcome config opened command .physicalPreparation
+                return stale command .physicalPreparation
               match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes opening intent with
               | .appended kind .. => confirm kind transactionId eventId
               | .replayed _ => confirm .replayed transactionId eventId
@@ -2677,7 +2687,7 @@ def submitInvokeLight (transport : DurableReceiverIO.Transport) (config : Config
               | .uncertain detail => return .uncertain detail.toUTF8.toList)
             (fun
               | .replayed record => confirm .replayed record.transactionId record.event.event.eventId
-              | .rejected reason => return staleOutcome config opened command reason
+              | .rejected reason => return stale command reason
               | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
               | .unavailable detail => return .unavailable detail.toUTF8.toList)
             ObjectiveBendAuthenticatedInputs.oracle
@@ -2734,7 +2744,9 @@ def submitLoadedVia (transport : DurableReceiverIO.Transport) (config : Config)
       | .unavailable detail => return .unavailable detail.toUTF8.toList
       | .uncertain detail => return .uncertain detail.toUTF8.toList
   | .invoke signed =>
-      submitInvokeLight transport config light.opening (light.basisVia transport) opened signed confirm
+      submitInvokeLight transport config.deployment config.profile config.federation config.genesisHeight
+        config.signature config.nockFSync (staleOutcome config opened) light.opening (light.basisVia transport)
+        signed confirm
 
 def submitLoadedWith (config : Config) (opened : Opened config) (light : NativeHostLight.Light config)
     (call : SignedCall)
@@ -2916,7 +2928,7 @@ def lookupLoaded (config : Config) (opened : Opened config) (call : SignedCall) 
       | none => refused .malformed "invoke" "noncanonical command"
       | some command =>
           match DeclaredResourceController.recordedInvocation config.deployment.domain config.profile.semantics
-              command signed opened.durable with
+              command signed opened.ground with
           | .error _ => refused .conflict "replay" "transaction identity conflict"
           | .ok none => .absent
           | .ok (some record) => finish record.transactionId record.event.event.eventId

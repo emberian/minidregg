@@ -56,53 +56,69 @@ calls `refresh` to read any concurrent suffix and current authority.
 A delayed historical readback cannot move a newer session backward. Candidates,
 ordinary confirmations and uncertain responses do not supply this witness. -/
 def Session.rememberReadback {config : Config} (session : Session config)
+    {store : DurableHistory.StoreIdentity} (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)
     {oldTarget : Durable} (old : NativeHostReplay.Verified config oldTarget)
     (readback : NativeHostReplay.ExactReadback config old) : Session config :=
   if session.durable.image = old.opened.durable.image then
     { session with
       opened := readback.after
       walked := some ⟨NativeHostReplay.exactCandidate old readback.derived readback.ready,
-        NativeHostReplay.extendExact old readback⟩ }
+        NativeHostReplay.extendExact reader old readback⟩ }
   else session
+
+/-- `rememberReadback` with the Reader of the Store at the readback's head (the walk
+reads lifecycle history through it). A readback whose Reader cannot be minted is not
+adopted: the session keeps its image and the next request's refresh reads the suffix. -/
+def Session.rememberReadbackVia {config : Config} (session : Session config)
+    {store : DurableHistory.StoreIdentity} (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)
+    {oldTarget : Durable} (old : NativeHostReplay.Verified config oldTarget)
+    (readback : NativeHostReplay.ExactReadback config old) : IO (Session config) := do
+  match ← DurableHistoryStore.readerOf config.transport ResourceBirthCodec.rootBytes readback.after.durable with
+  | .error _ => return session
+  | .ok ⟨_, reader⟩ => return session.rememberReadback reader old readback
 
 /-- The matched predecessor starts the next physical refresh at the exact
 successor which the receiver already validated; it cannot reconstruct its own
 just-committed entry a second time. -/
 theorem Session.rememberReadback_opened {config : Config} (session : Session config)
+    {store : DurableHistory.StoreIdentity} (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)
     {oldTarget : Durable} (old : NativeHostReplay.Verified config oldTarget)
     (readback : NativeHostReplay.ExactReadback config old)
     (current : session.durable.image = old.opened.durable.image) :
-    (session.rememberReadback old readback).opened = readback.after := by
+    (session.rememberReadback reader old readback).opened = readback.after := by
   simp only [Session.rememberReadback, if_pos current]
 
 /-- The adoption is the exact receiver-created canonical successor, rather
 than a cached root, projected state or independently provided candidate. -/
 theorem Session.rememberReadback_image {config : Config} (session : Session config)
+    {store : DurableHistory.StoreIdentity} (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)
     {oldTarget : Durable} (old : NativeHostReplay.Verified config oldTarget)
     (readback : NativeHostReplay.ExactReadback config old)
     (current : session.durable.image = old.opened.durable.image) :
-    (session.rememberReadback old readback).durable.image =
+    (session.rememberReadback reader old readback).durable.image =
       (NativeHostReplay.exactCandidate old readback.derived readback.ready).image := by
   unfold Session.durable
-  rw [Session.rememberReadback_opened session old readback current]
-  exact (NativeHostReplay.extendExact old readback).image_exact
+  rw [Session.rememberReadback_opened session reader old readback current]
+  exact (NativeHostReplay.extendExact reader old readback).image_exact
 
 /-- Every stale/forked predecessor leaves the entire newer session intact,
 including current authority, chronology, and exact-byte opening cache. -/
 theorem Session.rememberReadback_stale {config : Config} (session : Session config)
+    {store : DurableHistory.StoreIdentity} (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)
     {oldTarget : Durable} (old : NativeHostReplay.Verified config oldTarget)
     (readback : NativeHostReplay.ExactReadback config old)
     (stale : session.durable.image ≠ old.opened.durable.image) :
-    session.rememberReadback old readback = session := by
+    session.rememberReadback reader old readback = session := by
   simp only [Session.rememberReadback, if_neg stale]
 
 /-- In particular a concurrent newer image defeats delayed historical
 readback adoption. This regression ranges over every admitted readback. -/
 theorem Session.rememberReadback_newer {config : Config} (session : Session config)
+    {store : DurableHistory.StoreIdentity} (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)
     {oldTarget : Durable} (old : NativeHostReplay.Verified config oldTarget)
     (readback : NativeHostReplay.ExactReadback config old)
     (newer : old.opened.durable.height < session.durable.height) :
-    session.rememberReadback old readback = session := by
+    session.rememberReadback reader old readback = session := by
   apply Session.rememberReadback_stale
   intro same
   have heights := congrArg (fun image : DurableReceiver.Image => image.accepted.length) same
@@ -113,9 +129,10 @@ theorem Session.rememberReadback_newer {config : Config} (session : Session conf
 /-- Rendering facts remain representation-only; all per-query scope/current
 law checks still execute against the retained current validated opening. -/
 theorem Session.rememberReadback_openingCache {config : Config} (session : Session config)
+    {store : DurableHistory.StoreIdentity} (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)
     {oldTarget : Durable} (old : NativeHostReplay.Verified config oldTarget)
     (readback : NativeHostReplay.ExactReadback config old) :
-    (session.rememberReadback old readback).openingCache = session.openingCache := by
+    (session.rememberReadback reader old readback).openingCache = session.openingCache := by
   unfold Session.rememberReadback
   split <;> rfl
 
@@ -167,15 +184,20 @@ def refresh (config : Config) (session : Session config) :
 new authenticated suffix; a first provenance read starts at pinned genesis. -/
 private def walkPhysical (config : Config) (prior : Option (Walked config))
     (physical : Durable) : IO (Except String (Walked config)) := do
+  if let some retained := prior then
+    if retained.target.height = physical.height then return .ok retained
+  -- The walk reads lifecycle history through the Store's Reader at the physical head.
+  let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf config.transport ResourceBirthCodec.rootBytes physical with
+    | .error detail => return .error s!"semantic history reader: {detail}"
+    | .ok sealed => pure sealed
   match prior with
   | some retained =>
-      if retained.target.height = physical.height then return .ok retained
-      match ← NativeHostReplay.extendVerified config retained.verified physical with
+      match ← NativeHostReplay.extendVerified config reader retained.verified physical with
       | .error failure =>
           return .error s!"semantic history refused at entry {failure.index}: {failure.detail}"
       | .ok verified => return .ok ⟨physical, verified⟩
   | none =>
-      match ← NativeHostReplay.verifyLoaded config physical with
+      match ← NativeHostReplay.verifyLoaded config reader physical with
       | .error failure =>
           return .error s!"semantic history refused at entry {failure.index}: {failure.detail}"
       | .ok verified => return .ok ⟨physical, verified⟩

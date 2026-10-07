@@ -1236,7 +1236,7 @@ def sessionSetWalked {config : NativeHost.Config}
     {oldTarget : NativeHost.Durable} (old : NativeHostReplay.Verified config oldTarget)
     (readback : NativeHostReplay.ExactReadback config old) : IO Unit := do
   if let some current ← state.get then
-    state.set (some (current.rememberReadback old readback))
+    state.set (some (← current.rememberReadbackVia old readback))
 
 def sessionOpened (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config))) :
@@ -1288,7 +1288,7 @@ def sessionExactConfirmed (config : NativeHost.Config)
     (readback : NativeHostReplay.ExactReadback config old)
     (receipt : NativeHostCodec.Receipt) : IO NativeHostCodec.Outcome := do
   if let some current ← state.get then
-    state.set (some (current.rememberReadback old readback))
+    state.set (some (← current.rememberReadbackVia old readback))
   return .confirmed kind receipt
 
 /-- The special receiver accepts raw strict selected-release ingress, not a

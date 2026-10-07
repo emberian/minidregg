@@ -49,13 +49,4 @@ def lookupVerified {config : Config} {target : Durable}
     .ok (some receipt)
   else .error .transactionConflict
 
-/-- A cold caller must first verify the complete image even when this
-transaction marker is absent. The warm Host route should call `lookupVerified`
-on its refreshed persistent session to avoid replaying the image again. -/
-def lookupOriginal (config : Config) (target : Durable) (bytes : List UInt8) :
-    IO (Except Error (Option NativeHostCodec.Receipt)) := do
-  let .ok verified ← NativeHostReplay.verifyLoaded config target
-    | return .error .nativeHistoryUnavailable
-  return lookupVerified verified bytes
-
 end Minidregg.Kernel.ApplicationDispatchLookup
