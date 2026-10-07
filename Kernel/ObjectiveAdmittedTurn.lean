@@ -17,7 +17,7 @@ set_option autoImplicit false
 /-- **One admitted kernel turn** on a snapshot at a height: the witness of
 exactly one of the kernel's admission functions (each `private mk`, so built
 only by `publish`, `create`, `birth`, `resolve`, `deliver`, `topUp`,
-`exhaust`, `abandon`, `ObjectiveCall.invoke`, `ObjectiveSend.deliverMessage`, or the
+`exhaust`, `abandon`, `ObjectiveCall.invoke`, `ObjectiveSend.deliverMessage`, `chargeFailure`, or the
 upgrade turns `adopt`, `migrate`, `abortDrained`, `rebirth` of `Kernel.ObjectiveActivityUpgrade`). Every write the kernel activity commits
 is `AdmittedTurn.intent` of one (the native receiver's decided turn is this
 type, `ObjectiveActivityReceiver.Decided`), and the invariant
@@ -43,6 +43,9 @@ inductive AdmittedTurn {rootBytes : Bytes → Digest} (config : Config) (snapsho
   | rebirth (request : RebirthRequest) (reborn : Rebirth config snapshot height request)
   /-- Register an invariant domain over member objects (`Kernel.ObjectiveDomain`). -/
   | registerDomain (request : RegisterRequest) (registered : Registration config snapshot height request)
+  /-- A CHARGED FAILURE (GPT-6 row E): a signed, authorized, funded turn whose decision failed
+  after the validator's work. It posts the Book only (the price of the declared envelope). -/
+  | failed (request : FailureRequest) (charged : ChargedFailure config snapshot request)
 
 /-- The posts a turn commits. -/
 def AdmittedTurn.posts {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -62,6 +65,7 @@ def AdmittedTurn.posts {rootBytes : Bytes → Digest} {config : Config} {snapsho
   | .abortDrained _ aborted => aborted.posts
   | .rebirth _ reborn => reborn.posts
   | .registerDomain _ registered => registered.posts
+  | .failed _ charged => charged.posts
 
 /-- The one intent a turn commits under a receiver's sealing. -/
 def AdmittedTurn.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -81,6 +85,7 @@ def AdmittedTurn.intent {rootBytes : Bytes → Digest} {config : Config} {snapsh
   | .abortDrained _ aborted => aborted.intent sealing
   | .rebirth _ reborn => reborn.intent sealing
   | .registerDomain _ registered => registered.intent sealing
+  | .failed _ charged => charged.intent sealing
 
 /-- Every turn's intent is `intentOf` its posts: its writes are exactly the
 post images, nothing else. -/

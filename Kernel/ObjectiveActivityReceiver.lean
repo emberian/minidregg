@@ -374,18 +374,27 @@ theorem command_canonical {bytes : List UInt8} {command : Command}
     (accepted : commandCodec.decode bytes = some command) : commandCodec.encode command = bytes :=
   ObjectiveActivityWire.framed_canonical accepted
 
+/-- The signed ingress: the command, the OUTCOME the signer signed (the digest of the decided
+turn's posts at its plan, `outcomeDigest`), and the signed envelope. The outcome travels with
+the ingress so that the signature is checked BEFORE the turn is decided (GPT-6 row E): the
+receiver rebuilds the signed request from the command and this claim, verifies it, and only
+then decides; a decided outcome other than the claim commits a charged failure
+(`Reject.outcomeMoved`), never the claim's effects. -/
 structure Ingress where
   commandBytes : List UInt8
+  outcome : Digest
   envelope : List UInt8
   deriving DecidableEq, Repr
 
 def ingressStream : StreamCodec Ingress :=
-  StreamCodec.xmap (StreamCodec.product bytesStream bytesStream)
-    (fun ingress => (ingress.commandBytes, ingress.envelope))
-    (fun (command, envelope) => ⟨command, envelope⟩)
+  StreamCodec.xmap (StreamCodec.product bytesStream (StreamCodec.product digestStream bytesStream))
+    (fun ingress => (ingress.commandBytes, ingress.outcome, ingress.envelope))
+    (fun (command, outcome, envelope) => ⟨command, outcome, envelope⟩)
     (by intro ingress; cases ingress; rfl)
 
-def ingressFrame : List UInt8 := "DREGG/OBJECTIVE/ACTIVITY/SIGNED/v1".toUTF8.toList
+/-- v2: the ingress carries the signed outcome (GPT-6 row E: signature before decision); a v1
+ingress does not decode. -/
+def ingressFrame : List UInt8 := "DREGG/OBJECTIVE/ACTIVITY/SIGNED/v2".toUTF8.toList
 
 def ingressCodec : LawfulCodec Ingress := ObjectiveActivityWire.framed ingressFrame ingressStream
 
@@ -521,6 +530,10 @@ inductive Reject where
   | notObjectHolder
   /-- The signer does not own the Book account the turn spends or names as payer. -/
   | notAccountOwner
+  /-- The turn decided an outcome other than the one its signer signed (`claimed`): its plan went
+  stale. Like a reverted transaction's gas, a paying turn is CHARGED for the attempt (a
+  charged failure, `Failed`); the signer re-plans on that receipt. -/
+  | outcomeMoved (claimed decided : Digest)
   | signature (reason : CredentialSignatureAdmission.Reject)
   deriving Repr
 
@@ -745,6 +758,91 @@ def requireSome {A : Type} (reason : Reject) : Option A → Except Reject A
   | none => .error reason
   | some value => .ok value
 
+/-! ## The gate: authority, capability and funding, BEFORE anything is decided (GPT-6 row E)
+
+Until row E the receiver decided the turn (the front end's replay, the type check, the run, the
+extraction, the law) and only then checked the signature: the signed effect digest committed to
+the decided outcome, so the outcome had to exist first, and a forged or unauthorized birth cost
+the validator a whole turn for free. Now the ingress carries the outcome its signer signed
+(`Ingress.outcome`), and the order is: decode; the authority image, the marker and the
+configuration; the capabilities over the CLAIMED outcome (`authorized`); the payer's funds
+(`funding`); the signature; and only then the decision. -/
+
+/-- What a paying turn must be able to pay before it runs: the payer account and the public
+price of its declared envelope plus what the turn moves out of the account (a birth's deposit). -/
+def payment (config : Config) (command : Command) : Option (Nat × Nat) :=
+  match command.turn with
+  | .birth _ _ account _ _ _ envelope _ _ deposit => some (account, config.tariff.workOf envelope + deposit)
+  | .invoke _ _ _ _ _ envelope _ _ account _ => some (account, config.tariff.workOf envelope)
+  | _ => none
+
+/-- **Funding before the run.** A paying turn whose account cannot pay is refused `unfunded`
+before it is decided. -/
+def funding (config : Config) (durable : Durable) (command : Command) : Except Reject Unit :=
+  match payment config command with
+  | none => .ok ()
+  | some (account, price) =>
+    match ObjectiveActivity.loadBook config durable.snapshot with
+    | .error reason => .error (.kernel reason)
+    | .ok book =>
+      let available := (Theory.CanonicalResourceKernel.logicalBook book.logical).balance account config.asset
+      if (price : Int) ≤ available then .ok () else .error (.kernel (.unfunded available price))
+
+/-- A command that passed the gate, for the outcome its signer claims: the loaded authority,
+the configuration, the capabilities over the claim, and the funds. Built only by `gate`; the
+decision (`prepare`) takes one, so nothing is decided for a command that did not pass it. -/
+structure Gated {F : Type} [Field F] (deployment : Deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
+    (command : Command) (claimed : Digest) where
+  private mk ::
+  directory : LoadedDirectory durable
+  authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot
+  config : Config
+  configExact : configOf deployment profile ambient = .ok config
+  preRoot : Digest
+  preRootExact : preRoot = durable.snapshot.model.roots ⟨(signedTarget deployment.domain command).2⟩
+  authorizedExact : authorized authority.snapshot profile.semantics ambient command preRoot claimed = .ok ()
+  funded : funding config durable command = .ok ()
+
+def gate {F : Type} [Field F] (deployment : Deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
+    (command : Command) (claimed : Digest) : Except Reject (Gated deployment profile ambient durable command claimed) := do
+  let directory ← requireSome .directoryUnavailable (loadDirectory durable)
+  let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable.snapshot)
+  let snapshot := authority.snapshot
+  if command.expectedAuthorityRoot ≠ snapshot.cell.root then throw .staleAuthority
+  if snapshot.spent (marker snapshot.domain profile.semantics command) then throw .replayedMarker
+  match configExact : configOf deployment profile ambient with
+  | .error reason => throw (.kernel reason)
+  | .ok config =>
+    let preRoot := durable.snapshot.model.roots ⟨(signedTarget deployment.domain command).2⟩
+    match authorizedExact : authorized snapshot profile.semantics ambient command preRoot claimed with
+    | .error reason => throw reason
+    | .ok () =>
+      match funded : funding config durable command with
+      | .error reason => throw reason
+      | .ok () => pure ⟨directory, authority, config, configExact, preRoot, rfl, authorizedExact, funded⟩
+
+/-- The signed request a gated command's signature must cover: over the CLAIMED outcome. -/
+def Gated.request {F : Type} [Field F] {deployment : Deployment}
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
+    {command : Command} {claimed : Digest} (gated : Gated deployment profile ambient durable command claimed) :
+    PackedEffectRequest :=
+  signedRequest gated.authority.snapshot profile.semantics ambient command gated.preRoot claimed
+
+/-- **An unfunded request has no gate**, so nothing is decided for it (`prepare` takes a
+`Gated`). -/
+theorem unfunded_not_gated {F : Type} [Field F] {deployment : Deployment}
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
+    {command : Command} {claimed : Digest} {config : Config} {reason : Reject}
+    (configured : configOf deployment profile ambient = .ok config)
+    (unfunded : funding config durable command = .error reason) :
+    ¬ Nonempty (Gated deployment profile ambient durable command claimed) := fun ⟨gated⟩ => by
+  have same : gated.config = config := Except.ok.inj (gated.configExact.symm.trans configured)
+  have funded := gated.funded
+  rw [same, unfunded] at funded
+  cases funded
+
 structure Prepared {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
     (command : Command) where
@@ -763,31 +861,23 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
   outcomeExact : outcome = outcomeDigest final.1
   authorizedExact : authorized authority.snapshot profile.semantics ambient command preRoot outcome = .ok ()
 
-def prepare {F : Type} [Field F] (deployment : Deployment)
-    (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
-    (command : Command) : Except Reject (Prepared deployment profile ambient durable command) := do
-  let directory ← requireSome .directoryUnavailable (loadDirectory durable)
-  let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable.snapshot)
-  let snapshot := authority.snapshot
-  if command.expectedAuthorityRoot ≠ snapshot.cell.root then throw .staleAuthority
-  if snapshot.spent (marker snapshot.domain profile.semantics command) then throw .replayedMarker
-  match configExact : configOf deployment profile ambient with
-  | .error reason => throw (.kernel reason)
-  | .ok config =>
-    match decidedExact : decideTurn config durable.snapshot ambient.height command with
-    | .error reason => throw reason
-    | .ok decided =>
-      match finalExact : ActivitySeatEnd.finish config durable.snapshot ambient.height decided with
-      | .error (.seats reason) => throw (.seats reason)
-      | .error (.kernel reason) => throw (.kernel reason)
-      | .ok final =>
-      let preRoot := durable.snapshot.model.roots ⟨(signedTarget deployment.domain command).2⟩
-      let outcome := outcomeDigest final.1
-      match authorizedExact : authorized snapshot profile.semantics ambient command preRoot outcome with
-      | .error reason => throw reason
-      | .ok () =>
-        pure ⟨directory, authority, config, configExact, decided, decidedExact, preRoot, rfl, final, finalExact,
-          outcome, rfl, authorizedExact⟩
+/-- The decision of a gated command (after its signature verified): the kernel turn, the seat
+and domain end, and the outcome, which must be the one the signer claimed. -/
+def prepare {F : Type} [Field F] {deployment : Deployment}
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
+    {command : Command} {claimed : Digest} (gated : Gated deployment profile ambient durable command claimed) :
+    Except Reject (Prepared deployment profile ambient durable command) :=
+  match decidedExact : decideTurn gated.config durable.snapshot ambient.height command with
+  | .error reason => .error reason
+  | .ok decided =>
+    match finalExact : ActivitySeatEnd.finish gated.config durable.snapshot ambient.height decided with
+    | .error (.seats reason) => .error (.seats reason)
+    | .error (.kernel reason) => .error (.kernel reason)
+    | .ok final =>
+      if same : claimed = outcomeDigest final.1 then
+        .ok ⟨gated.directory, gated.authority, gated.config, gated.configExact, decided, decidedExact,
+          gated.preRoot, gated.preRootExact, final, finalExact, claimed, same, gated.authorizedExact⟩
+      else .error (.outcomeMoved claimed (outcomeDigest final.1))
 
 variable {F : Type} [Field F] {deployment : Deployment}
   {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
@@ -797,17 +887,17 @@ def Prepared.request (prepared : Prepared deployment profile ambient durable com
   signedRequest prepared.authority.snapshot profile.semantics ambient command prepared.preRoot prepared.outcome
 
 /-- **A claimed operation never admits again**: once the signer's marker (for
-an invocation, `(subject, opId)`) is spent, admission refuses `replayedMarker`
-before deciding anything, whatever the command's content. The same op id with
-a different call is refused here; the same call is answered first by `replay`. -/
-theorem prepare_spent_refused {directory : LoadedDirectory durable}
-    {authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot}
+an invocation, `(subject, opId)`) is spent, the GATE refuses `replayedMarker`
+before verifying or deciding anything, whatever the command's content or the outcome it claims.
+The same op id with a different call is refused here; the same call is answered first by `replay`. -/
+theorem gate_spent_refused {directory : LoadedDirectory durable}
+    {authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot} {claimed : Digest}
     (dir : loadDirectory durable = some directory)
     (auth : loadDeployment deployment durable.snapshot = some authority)
     (current : command.expectedAuthorityRoot = authority.snapshot.cell.root)
     (spent : authority.snapshot.spent (marker authority.snapshot.domain profile.semantics command) = true) :
-    prepare deployment profile ambient durable command = .error .replayedMarker := by
-  simp only [prepare, requireSome, dir, auth]
+    gate deployment profile ambient durable command claimed = .error .replayedMarker := by
+  simp only [gate, requireSome, dir, auth]
   simp [bind, Except.bind, current, spent]
   rfl
 
@@ -835,11 +925,52 @@ def charge (ingress : DecodedIngress) (posts : List Post) (guards : List ReadGua
   | .proofWork => 2
   | .feeDebit | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0
 
-/-- This receiver's sealing on the kernel turn: the authority guard, the signed
-marker, the replay event carrying the signed ingress, the signer. -/
-def admissionSeal (prepared : Prepared deployment profile ambient durable command) (ingress : DecodedIngress) : Seal :=
-  ⟨prepared.authority.readGuards, [nullifier deployment.domain profile.semantics command],
+/-- This receiver's sealing on a turn: the authority guard, the signed marker, the replay event
+carrying the signed ingress, the signer. -/
+def sealAt (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot) (command : Command)
+    (ingress : DecodedIngress) : Seal :=
+  ⟨authority.readGuards, [nullifier deployment.domain profile.semantics command],
     event deployment.domain profile.semantics ingress, some command.subject, charge ingress⟩
+
+/-- This receiver's sealing on the kernel turn (`sealAt` its authority). -/
+def admissionSeal (prepared : Prepared deployment profile ambient durable command) (ingress : DecodedIngress) : Seal :=
+  sealAt (profile := profile) prepared.authority command ingress
+
+/-- The refusals of a call tree that arise while it runs (after the root's front-end replay):
+every one but a kernel refusal decided cheaply and an absent object. -/
+def callAfterWork : ObjectiveCall.CallRefusal → Bool
+  | .kernel reason => reason.afterWork
+  | .notAnObject _ => false
+  | .reentry _ _ | .depth _ | .stateMissing _ | .notCallable _ _ _ | .notDeliverable _ _ _ | .continuationDepth _
+  | .fanOut _ | .allowanceExceeded _ _ | .messageWide _ | .argumentType _ _ | .callShape _ _ _ | .frameFault _ _ _
+  | .resultType _ _ | .grantSpent _ _ | .grantMismatch _ _ _ | .notControllable _ | .notSender _ _ | .slotInbox _ _
+  | .lawDenied _ _ _ | .exhausted | .queueFull _ _ | .slotQueueFull _ | .notPipelinable _ | .slotTaken _
+  | .inboxCodec _ _ | .packageCell _ | .drainConflict _ => true
+
+/-- **The refusals a signed, authorized, funded turn is CHARGED for**: the ones it meets after
+the validator's work (`ObjectiveActivity.Refusal.afterWork`, a call tree's own, the seat end),
+and an outcome other than the signed one (`outcomeMoved`, a stale plan: like a revert's gas).
+Every other refusal is decided cheaply and charges nothing. -/
+def chargedCause : Reject → Bool
+  | .kernel reason => reason.afterWork
+  | .call reason => callAfterWork reason
+  | .seats _ => true
+  | .outcomeMoved _ _ => true
+  -- decided before anything runs (decoding, authority, capabilities, the signature)
+  | .malformedIngress | .directoryUnavailable | .authorityUnavailable | .staleAuthority | .replayedMarker
+  | .physicalPreparation | .inputUndecodable | .staleAwait | .notObjectHolder | .notAccountOwner | .signature _ => false
+  -- a message delivery is not yet a paying turn (`failureRequest`; cv 01a11680-f2a6)
+  | .message _ => false
+
+/-- The charge of a paying turn's failure: the turn's payer account, its declared envelope, and the
+transaction the turn would have committed under (so a retry of the same ingress replays it). -/
+def failureRequest (domain semantics : Digest) (command : Command) : Option ObjectiveActivity.FailureRequest :=
+  match command.turn with
+  | .birth _ _ account _ _ _ envelope _ _ _ =>
+      some ⟨account, envelope, (transactionOf command).getD ⟨marker domain semantics command⟩⟩
+  | .invoke _ _ _ _ _ envelope _ _ account _ =>
+      some ⟨account, envelope, (transactionOf command).getD ⟨marker domain semantics command⟩⟩
+  | _ => none
 
 def Prepared.intent (prepared : Prepared deployment profile ambient durable command) (ingress : DecodedIngress) :
     DataIntent rootBytes :=
@@ -896,6 +1027,19 @@ theorem activityOrBook_iff (deployment : Deployment) (write : DataWrite) :
 instance (deployment : Deployment) (write : DataWrite) : Decidable (ActivityOrBook deployment write) :=
   decidable_of_iff _ (activityOrBook_iff deployment write).symm
 
+/-- The physical shape every committed activity intent has. -/
+def IntentShape (deployment : Deployment) (durable : Durable) (intent : DataIntent rootBytes) : Prop :=
+  (intent.writes.map DataWrite.cellId).Nodup ∧
+    (∀ write ∈ intent.writes, write.expectedPre = durable.snapshot.model.roots write.cellId) ∧
+    (∀ write ∈ intent.writes, ResourceBirthController.Concrete.PhysicalPostLaw deployment write) ∧
+    (∀ write ∈ intent.writes, ActivityOrBook deployment write) ∧
+    (∀ guard ∈ intent.readGuards, guard.expectedRoot = durable.snapshot.model.roots guard.cellId)
+
+instance intentShapeDecidable (deployment : Deployment) (durable : Durable) (intent : DataIntent rootBytes) :
+    Decidable (IntentShape deployment durable intent) := by
+  unfold IntentShape
+  infer_instance
+
 def PhysicalShape (prepared : Prepared deployment profile ambient durable command) (ingress : DecodedIngress) :
     Prop :=
   let intent := prepared.intent ingress
@@ -910,38 +1054,145 @@ instance physicalShapeDecidable (prepared : Prepared deployment profile ambient 
   unfold PhysicalShape
   infer_instance
 
+/-- An accepted turn: gated, its signature verified over the claimed outcome, decided to exactly
+that outcome. -/
 structure Accepted [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
     (ingress : DecodedIngress) where
   private mk ::
-  prepared : Prepared deployment profile ambient durable ingress.command
-  receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
+  gated : Gated deployment profile ambient durable ingress.command ingress.ingress.outcome
+  receipt : CredentialSignatureAdmission.CheckedSignature gated.authority.snapshot
   envelopeExact : receipt.envelopeBytes = ingress.ingress.envelope
+  prepared : Prepared deployment profile ambient durable ingress.command
+  preparedExact : prepare gated = .ok prepared
   physical : PhysicalShape prepared ingress
 
+/-- The intent of a charged failure: the kernel's `failed` turn (the Book only) under this
+receiver's seal. -/
+def failedIntent (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
+    (config : Config) (ingress : DecodedIngress) (request : ObjectiveActivity.FailureRequest)
+    (failure : ObjectiveActivity.ChargedFailure config durable.snapshot request)
+    (final : List Post × List ReadGuard) : DataIntent rootBytes :=
+  ActivitySeatEnd.AdmittedTurn.finalIntent (sealAt (profile := profile) authority ingress.command ingress)
+    final.1 final.2 (ObjectiveActivity.AdmittedTurn.failed (height := ambient.height) request failure)
+
+/-- **A CHARGED FAILURE** (GPT-6 row E): gated (authority, capabilities, funds), its signature
+verified, and its decision refused for a charged cause (`chargedCause`: after the validator's
+work, or an outcome other than the signed one). It commits the kernel's `failed` turn: the
+public price of the declared envelope, payer to collector, and nothing else; the marker is spent. -/
+structure Failed [DecidableEq F] (deployment : Deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
+    (ingress : DecodedIngress) where
+  private mk ::
+  gated : Gated deployment profile ambient durable ingress.command ingress.ingress.outcome
+  receipt : CredentialSignatureAdmission.CheckedSignature gated.authority.snapshot
+  envelopeExact : receipt.envelopeBytes = ingress.ingress.envelope
+  cause : Reject
+  causeExact : prepare gated = .error cause
+  charged : chargedCause cause = true
+  request : ObjectiveActivity.FailureRequest
+  requestExact : failureRequest deployment.domain profile.semantics ingress.command = some request
+  failure : ObjectiveActivity.ChargedFailure gated.config durable.snapshot request
+  final : List Post × List ReadGuard
+  finalExact : ActivitySeatEnd.finish gated.config durable.snapshot ambient.height
+    (ObjectiveActivity.AdmittedTurn.failed request failure) = .ok final
+  physical : IntentShape deployment durable
+    (failedIntent (profile := profile) (ambient := ambient) gated.authority gated.config ingress request failure final)
+
+/-- What admission decides for a signed ingress: an accepted turn, or a charged failure. -/
+inductive Verdict [DecidableEq F] (deployment : Deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
+    (ingress : DecodedIngress) where
+  | accepted (accepted : Accepted deployment profile ambient durable ingress)
+  | failed (failed : Failed deployment profile ambient durable ingress)
+
+/-- Admission: the gate, the signature, then the decision. A refusal before the decision (the
+gate, the signature) commits nothing and charges nothing. A decision refused for a charged
+cause commits a charged failure; any other refusal commits nothing. -/
 def admitDecodedNative [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
     (native : CredentialSignatureIO.NativeConfig) (ingress : DecodedIngress) :
-    IO (Except Reject (Accepted deployment profile ambient durable ingress)) := do
-  match prepare deployment profile ambient durable ingress.command with
+    IO (Except Reject (Verdict deployment profile ambient durable ingress)) := do
+  match gate deployment profile ambient durable ingress.command ingress.ingress.outcome with
   | .error reason => return .error reason
-  | .ok prepared =>
-    if physical : PhysicalShape prepared ingress then
-      let ⟨kind, request⟩ := prepared.request
-      match ← CredentialSignatureAdmission.verifyNative native prepared.authority.snapshot
-          (marker prepared.authority.snapshot.domain profile.semantics ingress.command)
-          request ingress.ingress.envelope with
-      | .error reason => return .error (.signature reason)
-      | .ok receipt =>
-          if same : receipt.envelopeBytes = ingress.ingress.envelope then
-            return .ok ⟨prepared, receipt, same, physical⟩
-          else return .error (.signature (.envelope .invalidSignature))
-    else return .error .physicalPreparation
+  | .ok gated =>
+    let ⟨_, request⟩ := gated.request
+    match ← CredentialSignatureAdmission.verifyNative native gated.authority.snapshot
+        (marker gated.authority.snapshot.domain profile.semantics ingress.command)
+        request ingress.ingress.envelope with
+    | .error reason => return .error (.signature reason)
+    | .ok receipt =>
+      if same : receipt.envelopeBytes = ingress.ingress.envelope then
+        match preparedExact : prepare gated with
+        | .ok prepared =>
+          if physical : PhysicalShape prepared ingress then
+            return .ok (.accepted ⟨gated, receipt, same, prepared, preparedExact, physical⟩)
+          else return .error .physicalPreparation
+        | .error cause =>
+          if charged : chargedCause cause = true then
+            match requestExact : failureRequest deployment.domain profile.semantics ingress.command with
+            | none => return .error cause
+            | some failing =>
+              match ObjectiveActivity.chargeFailure gated.config durable.snapshot failing with
+              | .error _ => return .error cause
+              | .ok failure =>
+                match finalExact : ActivitySeatEnd.finish gated.config durable.snapshot ambient.height
+                    (ObjectiveActivity.AdmittedTurn.failed failing failure) with
+                | .error _ => return .error cause
+                | .ok final =>
+                  if physical : IntentShape deployment durable
+                      (failedIntent (profile := profile) (ambient := ambient) gated.authority gated.config ingress
+                        failing failure final) then
+                    return .ok (.failed ⟨gated, receipt, same, cause, preparedExact, charged, failing, requestExact,
+                      failure, final, finalExact, physical⟩)
+                  else return .error .physicalPreparation
+          else return .error cause
+      else return .error (.signature (.envelope .invalidSignature))
+
+/-- **A refusal at the gate decides, verifies and commits nothing.** -/
+theorem gate_refusal_runs_nothing [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
+    {ingress : DecodedIngress} {reason : Reject}
+    (refused : gate deployment profile ambient durable ingress.command ingress.ingress.outcome = .error reason) :
+    admitDecodedNative deployment profile ambient durable native ingress = pure (.error reason) := by
+  unfold admitDecodedNative
+  rw [refused]
 
 variable [DecidableEq F] {ingress : DecodedIngress}
 
 def intent (accepted : Accepted deployment profile ambient durable ingress) : DataIntent rootBytes :=
   accepted.prepared.intent ingress
+
+def Failed.intent (failed : Failed deployment profile ambient durable ingress) : DataIntent rootBytes :=
+  failedIntent (profile := profile) (ambient := ambient) failed.gated.authority failed.gated.config ingress
+    failed.request failed.failure failed.final
+
+def Verdict.intent : Verdict deployment profile ambient durable ingress → DataIntent rootBytes
+  | .accepted admitted => Minidregg.Kernel.ObjectiveActivityReceiver.intent admitted
+  | .failed charged => charged.intent
+
+/-- **A charged failure charges and rolls back.** Every write of a charged failure's intent is the
+Book cell, there is exactly one, and the batch it posts is exactly the fee of the declared
+envelope's public price from the payer to the collector: no record, state, slot, purse, seat or
+object cell is written. -/
+theorem failed_charges_and_rolls_back (failed : Failed deployment profile ambient durable ingress) :
+    failed.intent.writes.length = 1 ∧
+    (∀ write ∈ failed.intent.writes, write.cellId = failed.gated.config.bookCell) ∧
+    failed.failure.posted.batch =
+      ⟨[], [.fee failed.request.account failed.gated.config.collector failed.gated.config.asset
+        (failed.gated.config.tariff.workOf failed.request.envelope)], []⟩ := by
+  obtain ⟨seats, domains, units, finalized, _, _, _⟩ := ActivitySeatEnd.finish_finalize failed.finalExact
+  unfold ActivitySeatEnd.finalize at finalized
+  simp only [ActivitySeatEnd.AdmittedTurn.ending] at finalized
+  have posts : failed.final.1 = failed.failure.posts := by
+    have := congrArg Prod.fst (Except.ok.inj finalized)
+    simpa [ObjectiveActivity.AdmittedTurn.posts] using this.symm
+  have writes : failed.intent.writes = failed.failure.posts.map (Post.write rootBytes) := by
+    simp [Failed.intent, failedIntent, ActivitySeatEnd.AdmittedTurn.finalIntent, intentOf, posts]
+  obtain ⟨cells, batch⟩ := ObjectiveActivity.ChargedFailure.charges_only_the_book failed.failure
+  refine ⟨by simp [writes, ObjectiveActivity.ChargedFailure.posts], fun write member => ?_, batch⟩
+  rw [writes] at member
+  obtain ⟨post, inPosts, rfl⟩ := List.mem_map.mp member
+  exact cells post inPosts
 
 /-- **Protected coordinates.** Every cell an accepted activity turn writes is
 an activity cell at its own coordinate, the deployment's Book, or a retirement
@@ -1169,6 +1420,9 @@ theorem replay_exact {domain semantics : Digest} {durable : Durable} {ingress : 
 
 inductive Result where
   | confirmed (kind : DurableReceiverIO.Confirmation) (receipt : Receipt)
+  /-- A CHARGED FAILURE committed: the price of the declared envelope was posted, nothing else
+  was written, the marker is spent; `cause` is why the decision failed. -/
+  | charged (kind : DurableReceiverIO.Confirmation) (receipt : Receipt) (cause : Reject)
   | rejected (reason : Reject)
   | transactionConflict
   | durableRejected (reason : DurableDataIntent.RejectReason)
@@ -1199,7 +1453,7 @@ def retrySnapshot (snapshot : CredentialAuthorityDomain.Snapshot) (claimed : Nat
 
 /-- **A retry is answered only under the operation's own authority**: its
 signature must verify, by the command subject's current key, over the header
-its plan showed at this state. This is the same `verifyNative` admission runs.
+its plan showed (the outcome its ingress carries). This is the same `verifyNative` admission runs.
 Without the check, anyone holding the content could use the replay answer as
 an existence oracle for another subject's operation. Nothing commits either
 way. -/
@@ -1211,8 +1465,9 @@ def verifyRetry (deployment : Deployment) (profile : CanonicalRuntimeProfile.Pro
   let command := ingress.command
   let claimed := marker authority.snapshot.domain profile.semantics command
   let preRoot := durable.snapshot.model.roots ⟨(signedTarget deployment.domain command).2⟩
+  -- the outcome the signer signed travels with the ingress (row E): the retry is checked over exactly it
   let ⟨_, request⟩ := signedRequest authority.snapshot profile.semantics ambient command preRoot
-    (planOutcome deployment profile ambient durable command)
+    ingress.ingress.outcome
   match ← CredentialSignatureAdmission.verifyNative native (retrySnapshot authority.snapshot claimed) claimed
       request ingress.ingress.envelope with
   | .error reason => return .error (.signature reason)
@@ -1246,19 +1501,64 @@ def receiveLoaded (deployment : Deployment) (profile : CanonicalRuntimeProfile.P
   | none =>
     match ← admitDecodedNative deployment profile ambient durable native ingress with
     | .error reason => return .rejected reason
-    | .ok accepted =>
-      match ← DurableReceiverIO.receiveLoaded transport rootBytes durable (intent accepted) with
-      | .confirmed kind _ => return .confirmed kind (receipt deployment.domain profile.semantics ingress)
+    | .ok verdict =>
+      match ← DurableReceiverIO.receiveLoaded transport rootBytes durable verdict.intent with
+      | .confirmed kind _ => return (match verdict with
+        | .accepted _ => .confirmed kind (receipt deployment.domain profile.semantics ingress)
+        | .failed failed => .charged kind (receipt deployment.domain profile.semantics ingress) failed.cause)
       | .rejected reason => return .durableRejected reason
       | .contention => return .contention
       | .unavailable detail => return .unavailable detail
       | .uncertain detail => return .uncertain detail
 
+/-- **A malformed request is rejected cheaply, with no state change and no charge**: bytes that
+are not a canonical signed ingress are refused `malformedIngress` before anything is read,
+decided or verified, and nothing reaches the durable layer. -/
+theorem malformed_no_charge (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig)
+    (transport : DurableReceiverIO.Transport) (durable : Durable) {bytes : List UInt8}
+    (malformed : decodeIngress bytes = none) :
+    receiveLoaded deployment profile ambient native transport durable bytes = pure (.rejected .malformedIngress) := by
+  unfold receiveLoaded
+  rw [malformed]
+
+/-- **An unauthorized or unfunded request is refused with no state change and no charge**: a
+gate refusal (authority, capability over the claimed outcome, funds) reaches neither the
+decision, the signature check nor the durable layer. -/
+theorem gate_refusal_no_charge (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig)
+    (transport : DurableReceiverIO.Transport) (durable : Durable) {bytes : List UInt8}
+    {ingress : DecodedIngress} {reason : Reject}
+    (decoded : decodeIngress bytes = some ingress)
+    (fresh : replay deployment.domain profile.semantics durable ingress = none)
+    (refused : gate deployment profile ambient durable ingress.command ingress.ingress.outcome = .error reason) :
+    receiveLoaded deployment profile ambient native transport durable bytes = pure (.rejected reason) := by
+  unfold receiveLoaded
+  rw [decoded]
+  simp only [fresh]
+  rw [gate_refusal_runs_nothing native refused]
+  rfl
+
 /-! ## Signing plan -/
 
-/-- The exact header the signer signs. When the kernel refuses the command, the
-header is built over the empty outcome and the submission is refused with the
-named reason. -/
+/-- What a plan tells its signer a submission at this snapshot would commit: empty when the turn
+is admitted; `charged failure: <reason>` when it would be a charged failure (the price of its
+envelope, nothing else); `refused: <reason>` when it would be refused with no charge. -/
+def planVerdict (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (ambient : Ambient) (durable : Durable) (command : Command) : String :=
+  let refusal (reason : Reject) : String :=
+    if chargedCause reason && (failureRequest deployment.domain profile.semantics command).isSome then
+      s!"charged failure: {repr reason}" else s!"refused: {repr reason}"
+  match configOf deployment profile ambient with
+  | .error reason => refusal (.kernel reason)
+  | .ok config => match decideTurn config durable.snapshot ambient.height command with
+    | .error reason => refusal reason
+    | .ok decided => match ActivitySeatEnd.finish config durable.snapshot ambient.height decided with
+      | .ok _ => ""
+      | .error (.seats reason) => refusal (.seats reason)
+      | .error (.kernel reason) => refusal (.kernel reason)
+
+/-- The exact header the signer signs: the signed request over the planned outcome (`planOutcome`). -/
 def signingHeader (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (durable : Durable) (command : Command) :
     Except String CredentialSignedEnvelopeController.SignedHeader := do
@@ -1300,20 +1600,32 @@ structure SigningPlan where
   /-- `Decided.report`: what the turn returns (an invocation's result). Not signed:
   the header binds the turn's posts, and the report is recomputed from them. -/
   report : List UInt8
+  /-- The outcome the header signs (`planOutcome`); the assembled ingress carries it. -/
+  outcome : Digest
+  /-- `planVerdict` (UTF-8): empty, `charged failure: ...` or `refused: ...`. -/
+  verdict : List UInt8
   deriving DecidableEq, Repr
 
 def signingPlanStream : StreamCodec SigningPlan :=
   StreamCodec.xmap (StreamCodec.product digestStream
-    (StreamCodec.product digestStream (StreamCodec.product bytesStream (StreamCodec.product bytesStream bytesStream))))
-    (fun plan => (plan.domain, plan.semantics, plan.commandBytes, plan.header, plan.report))
-    (fun (domain, semantics, command, header, report) => ⟨domain, semantics, command, header, report⟩)
+    (StreamCodec.product digestStream (StreamCodec.product bytesStream (StreamCodec.product bytesStream
+      (StreamCodec.product bytesStream (StreamCodec.product digestStream bytesStream))))))
+    (fun plan => (plan.domain, plan.semantics, plan.commandBytes, plan.header, plan.report, plan.outcome, plan.verdict))
+    (fun (domain, semantics, command, header, report, outcome, verdict) =>
+      ⟨domain, semantics, command, header, report, outcome, verdict⟩)
     (by intro plan; cases plan; rfl)
 
-/-- v2 carries the report; a v1 plan refuses to decode. -/
+/-- v3 carries the signed outcome and the verdict (GPT-6 row E); v2 carried the report; an
+earlier plan refuses to decode. -/
 def signingPlanCodec : LawfulCodec SigningPlan :=
-  ObjectiveActivityWire.framed "DREGG/OBJECTIVE/ACTIVITY/PLAN/v2".toUTF8.toList signingPlanStream
+  ObjectiveActivityWire.framed "DREGG/OBJECTIVE/ACTIVITY/PLAN/v3".toUTF8.toList signingPlanStream
 
 #assert_axioms command_roundtrip
+#assert_axioms unfunded_not_gated
+#assert_axioms gate_refusal_runs_nothing
+#assert_axioms failed_charges_and_rolls_back
+#assert_axioms malformed_no_charge
+#assert_axioms gate_refusal_no_charge
 #assert_axioms command_canonical
 #assert_axioms intent_writes_activity_or_book
 #assert_axioms intent_writes_lawful
@@ -1324,7 +1636,7 @@ def signingPlanCodec : LawfulCodec SigningPlan :=
 #assert_axioms native_delivery_consumes_once
 #assert_axioms native_delivery_fields_bind_checkpoint
 #assert_axioms native_end_closes_held_seats
-#assert_axioms prepare_spent_refused
+#assert_axioms gate_spent_refused
 #assert_axioms command_v9_refuses
 #assert_axioms replay_invoke_recorded
 #assert_axioms replay_exact

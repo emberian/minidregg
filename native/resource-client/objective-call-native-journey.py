@@ -56,7 +56,7 @@ import argparse, json, pathlib, sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from activity_world import World, PERMIT_ALL, TICKS, nat, record, variant, eq, any_of, cap, op_id  # noqa: E402
+from activity_world import World, PERMIT_ALL, TICKS, nat, record, variant, eq, any_of, cap, op_id, price  # noqa: E402
 
 PLANTS = {'honest-thief': {'C5-dao'}, 'vault-permit-all': {'C6-authority'}, 'gate-open': {'C7-facet'},
           'args-blind-grant': {'C9-grant-args'}}
@@ -149,13 +149,15 @@ try:
         before = snapshot_of(['counter', 'relayA', 'relayB'], 'c4-before')
         fee_before = w.watched('c4-fee-before')
         invoke('c4-relay-back', 'relayA', 'relay',
-               record(via=nat(O['relayB']), target=nat(O['relayA']), amount=nat(1)), 'refused',
+               record(via=nat(O['relayB']), target=nat(O['relayA']), amount=nat(1)), 'charged',
                ['reentry', str(O['relayA'])])
         after = snapshot_of(['counter', 'relayA', 'relayB'], 'c4-after')
         fee_after = w.watched('c4-fee-after')
         w.check('c4-nothing-commits', before == after, {'before': before, 'after': after})
-        w.check('c4-no-fee', w.balance(fee_before, w.SPONSOR_ACCOUNT) == w.balance(fee_after, w.SPONSOR_ACCOUNT),
-                None)
+        # Re-entry is refused after the call tree ran: a CHARGED FAILURE (row E), the envelope's price and nothing else.
+        w.check('c4-charged-the-price-only', w.balance(fee_before, w.SPONSOR_ACCOUNT) - w.balance(fee_after, w.SPONSOR_ACCOUNT)
+                == price(cap(TICKS)), {'paid': w.balance(fee_before, w.SPONSOR_ACCOUNT) - w.balance(fee_after, w.SPONSOR_ACCOUNT),
+                                       'price': price(cap(TICKS))})
 
     with w.group('C5-dao'):
         def pay(to, hook):
@@ -165,51 +167,51 @@ try:
         mid = snapshot_of(['bank', 'payee'], 'c5-mid')
         w.check('c5-honest-paid', mid == {'bank': 70, 'payee': 30}, mid)
         thief_hook = 'receive' if 'honest-thief' in plants else 'drain'
-        invoke('c5-thief', 'bank', 'withdraw', pay('thief', thief_hook), 'refused', ['reentry', str(O['bank'])])
+        invoke('c5-thief', 'bank', 'withdraw', pay('thief', thief_hook), 'charged', ['reentry', str(O['bank'])])
         after = snapshot_of(['bank', 'thief'], 'c5-after')
         w.check('c5-bank-kept', after == {'bank': 70, 'thief': 0}, after)
 
     with w.group('C6-authority'):
         invoke('c6-direct', 'vault', 'deposit', nat(1), 'installed')
-        invoke('c6-no-grant', 'relayA', 'forward', hop('vault', 4), 'refused',
+        invoke('c6-no-grant', 'relayA', 'forward', hop('vault', 4), 'charged',
                ['lawDenied', str(O['vault']), 'deposit'])
         w.check('c6-no-grant-kept', total('vault', 'c6-a') == 1, None)
         invoke('c6-granted', 'relayA', 'forward', hop('vault', 4), 'installed',
                grants=[grant('vault', 'deposit', {'exact': nat(4)})])
         w.check('c6-granted-landed', total('vault', 'c6-b') == 5, None)
-        invoke('c6-spent', 'relayA', 'forward', hop('vault', 4), 'refused', ['grantSpent', str(O['vault'])],
+        invoke('c6-spent', 'relayA', 'forward', hop('vault', 4), 'charged', ['grantSpent', str(O['vault'])],
                grants=[grant('vault', 'deposit', {'exact': nat(4)}, uses=0)])
         # A stranger's call on an object it holds no capability on (its law would admit anyone):
         invoke('c6-stranger', 'counter', 'deposit', nat(1), 'refused', 'notObjectHolder', workspace=w.second)
         w.check('c6-vault-final', total('vault', 'c6-c') == 5, None)
 
     with w.group('C7-facet'):
-        invoke('c7-wrong-caller', 'relayB', 'forward', hop('gated', 2), 'refused',
+        invoke('c7-wrong-caller', 'relayB', 'forward', hop('gated', 2), 'charged',
                ['lawDenied', str(O['gated'])])
         invoke('c7-right-caller', 'relayA', 'forward', hop('gated', 2), 'installed')
         w.check('c7-gated-2', total('gated', 'c7') == 2, None)
 
     with w.group('C9-grant-args'):
         v0 = total('vault', 'c9-before')
-        invoke('c9-over-cap', 'relayA', 'forward', hop('vault', 20), 'refused',
+        invoke('c9-over-cap', 'relayA', 'forward', hop('vault', 20), 'charged',
                ['grantMismatch', str(O['vault']), 'deposit', 'cap'], grants=[grant('vault', 'deposit', capped(10))])
         w.check('c9-over-cap-kept', total('vault', 'c9-a') == v0, None)
         invoke('c9-within-cap', 'relayA', 'forward', hop('vault', 10), 'installed',
                grants=[grant('vault', 'deposit', capped(10))])
         w.check('c9-within-cap-landed', total('vault', 'c9-b') == v0 + 10, None)
-        invoke('c9-cumulative', 'relayA', 'twice', hop('vault', 6), 'refused',
+        invoke('c9-cumulative', 'relayA', 'twice', hop('vault', 6), 'charged',
                ['grantMismatch', str(O['vault']), 'cap'], grants=[grant('vault', 'deposit', capped(10), uses=2)])
         w.check('c9-cumulative-co-fails', total('vault', 'c9-c') == v0 + 10, None)
-        invoke('c9-exact-mismatch', 'relayA', 'forward', hop('vault', 5), 'refused',
+        invoke('c9-exact-mismatch', 'relayA', 'forward', hop('vault', 5), 'charged',
                ['grantMismatch', str(O['vault']), 'args'], grants=[grant('vault', 'deposit', {'exact': nat(4)})])
         w.check('c9-vault-final', total('vault', 'c9-d') == v0 + 10, None)
 
     with w.group('C10-grant-who'):
         v0 = total('vault', 'c10-before')
-        invoke('c10-wrong-code', 'relayA', 'forward', hop('vault', 1), 'refused',
+        invoke('c10-wrong-code', 'relayA', 'forward', hop('vault', 1), 'charged',
                ['grantMismatch', str(O['vault']), 'code'],
                grants=[grant('vault', 'deposit', {'exact': nat(1)}, code=str(int(w.PIN) ^ 1))])
-        invoke('c10-wrong-caller', 'relayA', 'forward', hop('vault', 1), 'refused',
+        invoke('c10-wrong-caller', 'relayA', 'forward', hop('vault', 1), 'charged',
                ['grantMismatch', str(O['vault']), 'caller'],
                grants=[grant('vault', 'deposit', {'exact': nat(1)}, caller='relayB')])
         w.check('c10-nothing-landed', total('vault', 'c10-a') == v0, None)
@@ -219,11 +221,11 @@ try:
 
     with w.group('C8-shape'):
         before = snapshot_of(['counter'], 'c8-before')
-        invoke('c8-awaits', 'counter', 'waits', nat(1), 'refused', ['notCallable', 'await'])
-        invoke('c8-unknown', 'counter', 'nothing', nat(1), 'refused', 'notCallable')
+        invoke('c8-awaits', 'counter', 'waits', nat(1), 'charged', ['notCallable', 'await'])
+        invoke('c8-unknown', 'counter', 'nothing', nat(1), 'charged', 'notCallable')
         invoke('c8-not-object', 'relayA', 'forward', hop('bare', 1), 'refused', ['notAnObject', str(O['bare'])])
         invoke('c8-exhausted', 'relayA', 'relay',
-               record(via=nat(O['relayB']), target=nat(O['counter']), amount=nat(1)), 'refused', 'exhausted',
+               record(via=nat(O['relayB']), target=nat(O['counter']), amount=nat(1)), 'charged', 'exhausted',
                ticks=20)
         w.check('c8-nothing-commits', snapshot_of(['counter'], 'c8-after') == before, before)
 finally:

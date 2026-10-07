@@ -81,7 +81,9 @@ MAXIMUM={'typeFuel':16384,'sourceTicks':200000,'heap':200000,'stack':200000,'out
 ENVELOPE={'typeFuel':16384,'sourceTicks':100000,'heap':100000,'stack':100000,'outputNodes':10000,
   'outputBytes':100000, 'extractTicks': 100000,'inputBytes':100000,'scalarBits':512,'memoryTouches':1000000,'feeDebit':0,
   'turnBytes':2000000,'witnessBytes':2000000,'storageBytes':2000000,'sideEffectCount':8,
-  'networkBytes':0,'leaseByteBlocks':0,'incidences':8,'replayBytes':4194304,'coreBytes':4194304,'domainWork':0}
+  'networkBytes':0,'leaseByteBlocks':0,'incidences':8,'replayBytes':0,'coreBytes':0,'domainWork':0}
+# The native invocation route does not yet gate or account the front end's replay (cv 01a11620-bc96, at
+# KN2-STORE-OPEN's DRC re-type): its envelope declares none of it.
 TARIFF_KEYS=['typeFuel','sourceTicks','heap','stack','outputNodes','outputBytes','extractTicks','inputBytes','replayBytes','coreBytes','domainWork']
 def price(tariff,c):return int(tariff['base'])+sum(int(tariff[k])*int(c[k]) for k in TARIFF_KEYS)
 
@@ -162,7 +164,9 @@ elif a.verb=='world':
     root.mkdir(mode=0o700);T.mkdir()
     constants=json.loads(sh('constants',host,'/dev/null','objective-constants').stdout)
     tariff={'version':'4','base':a.tariff_base or '1','typeFuel':'0','sourceTicks':a.tariff_tick or '1','heap':'0',
-        'stack':'0','outputNodes':'0','outputBytes':'0', 'extractTicks': '0','inputBytes':'0','replayBytes':'0','coreBytes':'0','domainWork':'0'}
+        'stack':'0','outputNodes':'0','outputBytes':'0', 'extractTicks': '0','inputBytes':'0',
+        # Edition 4 (as edition 3) refuses a zero front-end rate; the measured rates (activity_world.TARIFF).
+        'replayBytes':'61','coreBytes':'16','domainWork':'0'}
     policy={'schema':'dregg.objective-bend.policy.v1','sourceBytes':'4194304',
         'maximum':{k:str(v) for k,v in MAXIMUM.items()}, 'extractTicksPerTurn': str(16 * MAXIMUM['extractTicks']),'outputs':[constants['genericCodec']],
         'clearAudience':digest_hex(1),'frontEnd':constants['frontEnd'],'tariff':tariff}

@@ -131,6 +131,14 @@ theorem decodePolicy_extract_within {bytes : List UInt8} {p : Policy}
         exact ok.2
       · cases decoded
 
+/-- **Every deployed policy charges the front end**: the tariff of any policy that decodes prices
+one more declared source byte and one more declared typed-core byte strictly higher. -/
+theorem decodePolicy_prices_front_end {bytes : List UInt8} {p : Policy}
+    (decoded : decodePolicy bytes = some p) (c : ObjectiveInvocationClaim.Capacity) :
+    p.tariff.workOf c < p.tariff.workOf { c with replayBytes := c.replayBytes + 1 } ∧
+      p.tariff.workOf c < p.tariff.workOf { c with coreBytes := c.coreBytes + 1 } :=
+  Tariff.valid_prices_front_end (decodePolicy_tariff_valid decoded) c
+
 instance chargeLeDecidable (a b : ResourceCost.Charge) : Decidable (a ≤ b) :=
   decidable_of_iff (ResourceCost.Lane.allCheck (fun lane => decide (a lane ≤ b lane)) = true)
     (by simpa only [ResourceCost.Charge.le_iff,decide_eq_true_eq] using
@@ -713,6 +721,7 @@ def admit {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
 #assert_axioms Authenticated.sound
 #assert_axioms ReadOracle.refuse_refuses
 #assert_axioms decodePolicy_tariff_valid
+#assert_axioms decodePolicy_prices_front_end
 #assert_axioms decodePolicy_extract_within
 #assert_axioms Core.proofWork_pos
 #assert_axioms methodSemanticId_provenance_free

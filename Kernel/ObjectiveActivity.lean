@@ -661,6 +661,10 @@ inductive Refusal where
   generate): refused from the stored sizes alone, BEFORE the front end replays it
   (`frontEndPaid`). -/
   | workUncovered (stage : ObjectiveWorkAccount.Stage) (needed declared : Nat)
+  /-- The paying account cannot pay the turn's price before anything runs: its balance in the
+  credit asset (`available`) is below the public price of the declared envelope plus what the turn
+  moves out of it (`price`). Judged BEFORE the turn is decided (`ObjectiveActivityReceiver`). -/
+  | unfunded (available : Int) (price : Nat)
   | plan (reason : String) | messageAwaitNeedsInbox
   | planExtraction (reason : String) | resultExtraction (reason : String)
   | exhausted
@@ -3250,6 +3254,107 @@ theorem TopUp.conserves {rootBytes : Bytes → Digest} {config : Config} {snapsh
     {request : TopUpRequest} (topped : TopUp config snapshot request) (asset : AssetId) :
     (logicalBook topped.posted.post.logical).totalAsset asset = (logicalBook topped.book.logical).totalAsset asset :=
   topped.posted.conserves asset
+
+/-! ### charged failure (GPT-6 row E)
+
+A signed, authorized and funded turn whose decision fails AFTER the validator did the work
+(the front end replayed, the run ran: `Refusal.afterWork`, or the decided outcome is not the
+one the signer signed) commits a CHARGED FAILURE: the payer pays the public price of the
+declared envelope to the collector, and NOTHING else is written. No record, no state, no slot,
+no purse, no object counter moves; the turn's single-use marker is spent by the receiver's seal,
+so the same signed ingress cannot be run twice. A malformed or unauthenticated request never
+reaches here: it is refused before anything is decided, and nothing is written or charged. -/
+
+/-- What a charged failure charges: the payer's Book account, the declared envelope it is
+priced at, and the transaction id the failed turn would have committed under. -/
+structure FailureRequest where
+  account : AccountId
+  envelope : Capacity
+  transaction : TransactionId
+  deriving DecidableEq, Repr
+
+/-- The failure's one posting: the public price of the declared envelope, payer to collector. -/
+def failureBatch (config : Config) (request : FailureRequest) : Batch :=
+  ⟨[], [.fee request.account config.collector config.asset (config.tariff.workOf request.envelope)], []⟩
+
+/-- An admitted charged failure: the loaded Book and the fee posted on it. -/
+structure ChargedFailure {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (request : FailureRequest) where
+  private mk ::
+  book : BookCell
+  bookExact : loadBook config snapshot = .ok book
+  posted : Postings book
+  postedBatch : posted.batch = failureBatch config request
+
+def chargeFailure {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (request : FailureRequest) : Except Refusal (ChargedFailure config snapshot request) :=
+  if request.account = config.asset ∨ request.account = config.collector then .error .payerInvalid else
+  match bookExact : loadBook config snapshot with
+  | .error reason => .error reason
+  | .ok book =>
+    match postings book (failureBatch config request) with
+    | .error reason => .error reason
+    | .ok posted =>
+      if postedBatch : posted.batch = failureBatch config request then
+        .ok ⟨book, bookExact, posted, postedBatch⟩
+      else .error .bookRefused
+
+/-- The posts of a charged failure: the Book, and nothing else. -/
+def ChargedFailure.posts {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {request : FailureRequest} (charged : ChargedFailure config snapshot request) : List Post :=
+  [charged.posted.write config snapshot]
+
+def ChargedFailure.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {request : FailureRequest} (charged : ChargedFailure config snapshot request) (sealing : Seal) :
+    DataIntent rootBytes :=
+  intentOf rootBytes request.transaction charged.posts [] [] sealing
+
+/-- **A charged failure conserves every asset.** -/
+theorem ChargedFailure.conserves {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {request : FailureRequest} (charged : ChargedFailure config snapshot request) (asset : AssetId) :
+    (logicalBook charged.posted.post.logical).totalAsset asset = (logicalBook charged.book.logical).totalAsset asset :=
+  charged.posted.conserves asset
+
+/-- **A charged failure charges the price and writes only the Book.** Its one post is the Book
+cell's, and the batch admitted there is exactly the fee of the declared envelope's public price,
+payer to collector. -/
+theorem ChargedFailure.charges_only_the_book {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {request : FailureRequest} (charged : ChargedFailure config snapshot request) :
+    (∀ post ∈ charged.posts, post.cell = config.bookCell) ∧
+      charged.posted.batch =
+        ⟨[], [.fee request.account config.collector config.asset (config.tariff.workOf request.envelope)], []⟩ := by
+  refine ⟨fun post member => ?_, charged.postedBatch⟩
+  simp only [ChargedFailure.posts, List.mem_singleton] at member
+  subst member
+  rfl
+
+/-- The refusals a turn meets only AFTER the validator did its expensive work: the front end
+replayed the package (`packageReplay` and everything typed after it), the run ran, the
+extraction or the judgment of the run's write, the funding of the next await, a migration's run, or
+the turn-end domain judgment (`domainLawDenied`, `domainUnprojectable`, `domainMissing`,
+`domainCodec`, `domainsDropped`, `domainUnindexed`, `domainUncovered`). Every constructor is listed (no wildcard): a new refusal must say which it is. A signed, authorized, funded turn refused for one
+of these is charged (`ChargedFailure`); every other refusal (decoding, authority, coverage, the
+work account, the object's shape) is decided cheaply and charges nothing. -/
+def Refusal.afterWork : Refusal → Bool
+  | .packageType _ | .packageReplay _ | .inputType | .outcomeProtocol _ | .patience _ _ | .heightWide _ _
+  | .plan _ | .messageAwaitNeedsInbox | .planExtraction _ | .resultExtraction _ | .exhausted | .responseType _
+  | .underfunded _ _ | .awaitsFunding _ _ | .blindWrite | .writeShape _ | .stateMissing | .objectWrite _
+  | .migrationShape _ | .migrationFault _ | .domainLawDenied _ _ | .domainUnprojectable _ | .domainMissing _
+  | .domainCodec _ | .domainsDropped _ | .domainUnindexed _ _ | .domainUncovered _ _ => true
+  | .packageMissing | .packageIdentity | .packageExists | .packageSource _ | .recordExists | .recordMissing
+  | .recordMisplaced | .notAwaiting | .awaitMismatch | .checkpointDigest | .checkpointCodec | .recordRetired
+  | .digestWide _ _ | .uncovered _ | .heapUncovered _ _ | .extractUncovered _ _ | .workUncovered _ _ _
+  | .unfunded _ _ | .slotMissing | .slotFresh | .slotMismatch | .slot _ | .slotRetired | .notYetDecided _ _
+  | .notYetDue _ _ | .bookUnavailable | .purseTaken | .payerInvalid | .bookRefused | .zeroAmount | .stateCodec
+  | .alreadyExhausted _ _ | .notYetAbandonable _ _ _ | .notExhausted | .notAnObject | .objectCodec
+  | .objectExists | .pinMismatch _ _ | .pinUnpublished | .stateExists | .stateTypeNotData | .lawField _
+  | .draining | .awaitingRebirth | .frozen | .notUpgradeAuthority | .policyLoosened | .floorNotEntailed _
+  | .samePin | .upgradeUnderWay | .notDraining | .drainPatience _ _ | .notSubtype | .fieldsForgotten _
+  | .liveActivities _ | .notYetDeadline _ _ | .rebirthDisposition | .rebirthTarget _ | .domainExists _
+  | .domainShape _ | .domainMember _ | .memberFrozen _ | .memberDenied _ | .memberDomainsFull _ => false
+
+#assert_axioms ChargedFailure.conserves
+#assert_axioms ChargedFailure.charges_only_the_book
 
 /-! ### create: an object's record, and its initial declared state -/
 

@@ -210,6 +210,8 @@ def AdmittedTurn.domainAllowance {rootBytes : Bytes → Digest} {config : Config
   | .abortDrained _ aborted => aborted.envelope.domainWork
   | .rebirth request _ => request.envelope.domainWork
   | .registerDomain request _ => request.envelope.domainWork
+  -- a charged failure posts the Book only: no member state is written, so no domain is judged
+  | .failed _ _ => 0
 
 /-- **A turn's end**: the seat join (`finalize`), then the invariant-domain judgment on the
 final posts (`ObjectiveActivity.judgeDomains`): every domain of every object whose state the
@@ -308,6 +310,8 @@ def AdmittedTurn.finalIntent {rootBytes : Bytes → Digest} {config : Config} {s
   | .registerDomain request registered =>
       intentOf rootBytes (ObjectiveActivity.registerTransaction request) posts
         (registered.guards ++ extra) [] sealing
+  | .failed request _ =>
+      intentOf rootBytes request.transaction posts extra [] sealing
 
 /-- A cell an intent GUARDS: a read guard on it at the snapshot's root, or the intent writes it. -/
 def Guarded {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (intent : DataIntent rootBytes)

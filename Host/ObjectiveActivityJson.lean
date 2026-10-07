@@ -359,8 +359,13 @@ def inspectPlan (bytes : List UInt8) : Result Json :=
   match ObjectiveActivityReceiver.signingPlanCodec.decode bytes with
   | none => .error "noncanonical activity plan"
   | some plan => .ok (.mkObj
-      [("type", "objective-activity-plan-v2"), ("canonical", toJson (hex bytes)),
+      [("type", "objective-activity-plan-v3"), ("canonical", toJson (hex bytes)),
        ("report", if plan.report.isEmpty then .null else dataOf plan.report),
+       -- What a submission at the planning snapshot commits (GPT-6 row E): null when admitted,
+       -- `charged failure: ...` (the price of the envelope, nothing else) or `refused: ...`.
+       ("verdict", match String.fromUTF8? ⟨plan.verdict.toArray⟩ with
+         | some "" => .null | some text => toJson text | none => .null),
+       ("outcome", decimal plan.outcome.value),
        ("domain", decimal plan.domain.value), ("semantics", decimal plan.semantics.value),
        ("command", match ObjectiveActivityReceiver.commandCodec.decode plan.commandBytes with
          | some command => commandJson command | none => .null),

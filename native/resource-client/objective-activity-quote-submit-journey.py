@@ -13,7 +13,8 @@ import argparse, json, pathlib, re, sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from activity_world import World, PAIR, record, variant  # noqa: E402
+import activity_world as AW  # noqa: E402
+from activity_world import World, record, variant  # noqa: E402
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--bin', required=True)
@@ -34,11 +35,14 @@ try:
         for i in range(a.births):
             # the first birth creates the object's declared state; later ones join it (a `set` of existing state is blindWrite)
             init = None if i == 0 else variant('keep', record())
-            q = w.birth(f'quote-{i:02d}', w.sponsor, 'tally', PAIR, 'refused', 'underfunded', init=init)
+            # The quote: the plan of a birth at the bare fee pair reports, before anything is submitted or charged,
+            # that it would be a charged failure `underfunded D R` (a submitted one would charge its price).
+            q = w.birth(f'quote-{i:02d}', w.sponsor, 'tally', AW.PAIR, 'prepared', 'underfunded', init=init,
+                        prepare=True)
             row = w.results[-1]
             m = QUOTE.search(row.get('detail', ''))
             need = int(m.group(2)) if m else None
-            w.check(f'quote-{i:02d}-parsed', m is not None and int(m.group(1)) == PAIR and need > PAIR,
+            w.check(f'quote-{i:02d}-parsed', m is not None and int(m.group(1)) == AW.PAIR and need > AW.PAIR,
                     {'quote': m.groups() if m else None})
             if need is None:
                 continue

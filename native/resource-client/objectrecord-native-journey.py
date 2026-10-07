@@ -47,6 +47,7 @@ import argparse, pathlib, sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import activity_world as AW  # noqa: E402
 from activity_world import World, PERMIT_ALL, nat, record, variant, eq, le, monotone, all_of, any_of  # noqa: E402
 
 # the plant -> the journey rows (groups) that must go red under it
@@ -94,7 +95,7 @@ try:
     with w.group('OR1-no-record'):
         if 'record-present' in plants:
             w.create('plant-record-on-bare', w.sponsor, 'bare', PERMIT_ALL, 'installed')
-        w.birth('birth-without-record-refused', w.sponsor, 'bare', 20000, 'refused', 'notAnObject')
+        w.birth('birth-without-record-refused', w.sponsor, 'bare', 7 * AW.PRICE, 'refused', 'notAnObject')
         bare = w.state('bare', 'bare-after')
         w.check('bare-has-no-record-and-no-state', bare['objectRecord'].get('kind') == 'absent'
                 and bare['stateKind'] == 'absent', {'object': bare['objectRecord'].get('kind'),
@@ -123,8 +124,9 @@ try:
 
     # --- OR3: a birth joins the seeded state -------------------------------------------------------------------
     with w.group('OR3-write-law'):
-        tx = w.birth('ledger-birth', w.sponsor, 'ledger', 20000, 'refused', 'blindWrite')
-        tx = w.birth('ledger-birth-keep', w.sponsor, 'ledger', 20000, 'installed', init=variant('keep', record()))
+        # a blind write found after the run is a CHARGED FAILURE (row E): the price, nothing else
+        tx = w.birth('ledger-birth', w.sponsor, 'ledger', 7 * AW.PRICE, 'charged', 'blindWrite')
+        tx = w.birth('ledger-birth-keep', w.sponsor, 'ledger', 7 * AW.PRICE, 'installed', init=variant('keep', record()))
         s0 = w.state('ledger', 'ledger-born', tx)
         REC, SLOT1, AWAIT1 = s0['recordCell'], w.await_of(s0)['source']['slot'], w.await_of(s0)['id']
         w.check('birth-joined-the-seeded-state', total_state(s0, 50, 1), {'state': s0.get('state'),
@@ -134,17 +136,18 @@ try:
     with w.group('OR4-birth-law'):
         w.create('create-ledger-b', w.sponsor, 'ledger-b', ledger_law, 'installed')
         before = w.watched('before-bad-birth')
-        w.over_extract_plant('birth-one-tick-over-extract-refused', w.sponsor, 'ledger-b', 20000)
-        w.birth('birth-set-500-refused', w.sponsor, 'ledger-b', 20000, 'refused',
+        w.over_extract_plant('birth-one-tick-over-extract-refused', w.sponsor, 'ledger-b', 7 * AW.PRICE)
+        w.birth('birth-set-500-charged', w.sponsor, 'ledger-b', 7 * AW.PRICE, 'charged',
                 ['lawDenied', 'le "state/total" 100', 'before := none', 'after := some 500'],
                 init=variant('set', nat(500)))
         after = w.watched('after-bad-birth')
         lb = w.state('ledger-b', 'ledger-b-after-refusal')
+        # the law's refusal comes after the run: a charged failure posts the envelope's price and nothing else
         w.check('refused-birth-committed-nothing', lb['stateKind'] == 'absent'
-                and w.balance(after, w.SPONSOR_ACCOUNT) == w.balance(before, w.SPONSOR_ACCOUNT),
+                and w.balance(before, w.SPONSOR_ACCOUNT) - w.balance(after, w.SPONSOR_ACCOUNT) == AW.PRICE,
                 {'state': lb['stateKind'], 'sponsor': [w.balance(before, w.SPONSOR_ACCOUNT),
                                                        w.balance(after, w.SPONSOR_ACCOUNT)]})
-        txb = w.birth('birth-set-0-installed', w.sponsor, 'ledger-b', 20000, 'installed')
+        txb = w.birth('birth-set-0-installed', w.sponsor, 'ledger-b', 7 * AW.PRICE, 'installed')
         lb2 = w.state('ledger-b', 'ledger-b-born', txb)
         w.check('lawful-birth-created-the-state', total_state(lb2, 0, 1), {'state': lb2.get('state'),
                                                                           'version': lb2.get('stateVersion')})
@@ -178,7 +181,7 @@ try:
         w.create('create-owned-stranger', w.sponsor, 'owned-stranger', stranger_law, 'installed')
         born = {}
         for name in ['owned-sponsor', 'owned-stranger']:
-            t = w.birth(f'birth-{name}', w.sponsor, name, 12000, 'installed')
+            t = w.birth(f'birth-{name}', w.sponsor, name, 7 * AW.PRICE, 'installed')
             v = w.state(name, f'{name}-born', t)
             w.turn(f'resolve-{name}', w.second, {'kind': 'resolve', 'slot': w.await_of(v)['source']['slot'],
                                                  'answer': {'reply': record(amount=nat(5))}}, 'installed')

@@ -927,6 +927,11 @@ theorem AdmittedTurn.safe {rootBytes : Bytes → Digest} {config : Config} {snap
   | abortDrained _ aborted => exact abort_safe aborted
   | rebirth _ reborn => exact rebirth_safe reborn
   | registerDomain _ registered => exact registration_safe registered
+  | failed _ charged =>
+    intro post member
+    simp only [AdmittedTurn.posts, ChargedFailure.posts, List.mem_singleton] at member
+    subst member
+    exact book_post_safe charged.bookExact charged.posted
 
 /-! ## An ending turn's final posts are safe
 
@@ -1445,6 +1450,7 @@ def AdmittedTurn.Sends {rootBytes : Bytes → Digest} {config : Config} {snapsho
   | .abortDrained _ _ => False
   | .rebirth _ _ => False
   | .registerDomain _ _ => False
+  | .failed _ _ => False
 
 /-- **The turn that may decide a delivery slot**: `deliverMessage`, and no other.
 Every constructor is listed. -/
@@ -1465,6 +1471,7 @@ def AdmittedTurn.DeliversMessage {rootBytes : Bytes → Digest} {config : Config
   | .abortDrained _ _ => False
   | .rebirth _ _ => False
   | .registerDomain _ _ => False
+  | .failed _ _ => False
 
 /-- **The turn that may CANCEL a message**, deciding its delivery slot `cancelled`: an
 invocation whose call tree yielded a `cancel` (row F). Every constructor is listed. -/
@@ -1485,6 +1492,7 @@ def AdmittedTurn.CancelsMessage {rootBytes : Bytes → Digest} {config : Config}
   | .abortDrained _ _ => False
   | .rebirth _ _ => False
   | .registerDomain _ _ => False
+  | .failed _ _ => False
 
 /-- Every turn but the sending ones posts no inbox: by cases over the whole sum. -/
 theorem AdmittedTurn.posts_hold_no_inbox {rootBytes : Bytes → Digest} {config : Config}
@@ -1512,6 +1520,11 @@ theorem AdmittedTurn.posts_hold_no_inbox {rootBytes : Bytes → Digest} {config 
   | abortDrained _ aborted => exact fun post member => (abort_quiet aborted post member).1
   | rebirth _ reborn => exact fun post member => (rebirth_quiet reborn post member).1
   | registerDomain _ registered => exact fun post member => (registration_quiet registered post member).1
+  | failed _ charged =>
+    intro post member
+    simp only [AdmittedTurn.posts, ChargedFailure.posts, List.mem_singleton] at member
+    subst member
+    exact not_holdsInbox_of_payload_none (Postings.write_payload config snapshot charged.posted)
 
 /-- Every turn but `deliverMessage` and a cancelling invocation decides no delivery slot: by
 cases over the whole sum. -/
@@ -1540,6 +1553,11 @@ theorem AdmittedTurn.posts_decide_no_delivery {rootBytes : Bytes → Digest} {co
   | abortDrained _ aborted => exact fun post member => (abort_quiet aborted post member).2
   | rebirth _ reborn => exact fun post member => (rebirth_quiet reborn post member).2
   | registerDomain _ registered => exact fun post member => (registration_quiet registered post member).2
+  | failed _ charged =>
+    intro post member
+    simp only [AdmittedTurn.posts, ChargedFailure.posts, List.mem_singleton] at member
+    subst member
+    exact not_decidesDelivery_of_payload_none (Postings.write_payload config snapshot charged.posted)
 
 /-- **An ending turn's final posts are as quiet as its own** (a Book post or a seat
 closing post holds no activity payload). -/
