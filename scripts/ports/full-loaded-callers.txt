@@ -3,7 +3,6 @@
 # Includes the fleet head/incoming ops (Kernel/NativeHost.lean, cv 01a114aa-6780).
 Assurance/HyperdocumentLinkFramedRecovery.lean
 Assurance/NativeAcceptedFixture.lean
-Compiler/CarriedApplicationProvenance.lean
 Compiler/CarriedSegmentIO.lean
 Compiler/DurableCheckpointCodec.lean
 Compiler/DurableLogTags.lean

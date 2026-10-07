@@ -88,7 +88,10 @@ def selectIssue {config : Config} {current : Durable}
               match ← reader.atHeight (index + 1) with
               | .error refusal => return .error refusal.message
               | .ok original =>
-                if originalExact : original.record = record then
+                if sameBytes : DurableReceiverCodec.intentStream.encode original.record =
+                    DurableReceiverCodec.intentStream.encode record then
+                  have originalExact : original.record = record :=
+                    lawful_encode_injective DurableReceiverCodec.intentStream.toLawful sameBytes
                   return .ok ⟨custody, index, beforeCut, record, sourcePresent,
                     current_record_exact current index record bytes, ingress, decoded,
                     eventExact, store, reader.head, original, originalExact⟩
