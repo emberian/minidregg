@@ -45,6 +45,10 @@ run website         python3 website/gen-status.py --check
 # tree-wide axiom census is what turns it red. Deployed is built by the umbrella, so this elaborates
 # Deployed + the census module only.
 run axiom-census    ${LAKE_WRAP:-nice -n 10} lake build AxiomCensus
+# Every private constructor is listed in TokenCensus/Table.lean and minted only in its home
+# module (a `private mk` stops names, not `by constructor`); a planted forgery per row must be
+# detected. Elaborates TokenCensus over the research umbrella.
+run token-census    ${LAKE_WRAP:-nice -n 10} lake build TokenCensus
 run objective-proofs bash scripts/check-objective-proofs.sh proofs
 # The hypothesis ledger over AxiomCensusResearch. Its [RED] families on main are a known
 # baseline (hyp-ledger-baseline.txt next to this script, ROOT 10-05: six toothless rows red on

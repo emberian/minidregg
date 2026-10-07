@@ -1699,7 +1699,7 @@
     {
       "module": "Compiler.CredentialSignatureAdmission",
       "path": "Compiler/CredentialSignatureAdmission.lean",
-      "sha256": "395f77e56ba964e0dc4a61693616c35b1c27a5f40b70bb81afdda5c7a3aafe9f",
+      "sha256": "3f1c83e3fafe4993427fae79dd59b73f99f762403d907a8655930124fe80806a",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -3330,7 +3330,7 @@
     {
       "module": "Host",
       "path": "Host.lean",
-      "sha256": "709933cf7adf3a30721845f100bae9e6b739a5073198a987cdb60fc65992ad01",
+      "sha256": "f534c86b77bc9fb76a138864169b0f0aa2dded61cbfece484d8de7b93299e73a",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -4066,13 +4066,6 @@
       "module": "Host.ReceiptContinuityCheck",
       "path": "Host/ReceiptContinuityCheck.lean",
       "sha256": "a06b4d1bf885a8a43539af82c6840d40badb1dc8fe37985b6f28a750ce86fa37",
-      "surface": "default",
-      "ownerReportedStatus": "No matching owner source report"
-    },
-    {
-      "module": "Host.ReceiverTokenAudit",
-      "path": "Host/ReceiverTokenAudit.lean",
-      "sha256": "f3f1c216aa3dea32f98e460e1a1a9c472c12b7641c5b7a2c6bb53731890c513a",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -10064,7 +10057,7 @@
     {
       "module": "Theory.Receiving",
       "path": "Theory/Receiving.lean",
-      "sha256": "7514160fe1d725b295c8c0b1454e1cd336b21341a95661a859752797d36f8669",
+      "sha256": "f46e6887944204f9be875eac441fe8bf5b0540f8e9aa6de42cf413447244f255",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -10212,6 +10205,13 @@
       "module": "Theory.ZkmlTensorOps",
       "path": "Theory/ZkmlTensorOps.lean",
       "sha256": "c189f9e264f5cd20dc5475881ca41f0d690170e3ad84943300ef6695dc44b22d",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "TokenCensus",
+      "path": "TokenCensus.lean",
+      "sha256": "c7c0f9e234b49f76872a78651f5331bff419ec11490c1778b1bcc8933cc7fb1e",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
