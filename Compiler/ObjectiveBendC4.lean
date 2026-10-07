@@ -5,6 +5,25 @@ import Std.Data.HashMap
 namespace Minidregg.Compiler.ObjectiveBendC4
 set_option autoImplicit false
 
+/-- Why a linearization refuses. Running out of fuel is NOT an inconsistency of the graph
+(GPT-6 row E): `fuelExhausted` names the bounded loop that stopped, `inconsistent` a graph that
+has no C4 linearization. Every fuel is derived from the size of the input it walks
+(`suffixFuel`, `mergeFuel`), never a constant. -/
+inductive Refusal where
+  | inconsistent (head : List String) (detail : String)
+  | fuelExhausted (loop : String) (head : List String)
+  deriving DecidableEq, Repr
+
+def Refusal.message : Refusal → String
+  | .inconsistent head detail => "inconsistent precedence graph at " ++ String.intercalate "," head ++ ": " ++ detail
+  | .fuelExhausted loop head => "C4 fuel exhausted in the " ++ loop ++ " at " ++ String.intercalate "," head
+
+/-- A suffix merge's failure: its chain walk ran out of fuel, or the suffixes are incompatible. -/
+inductive SuffixFailure where
+  | fuel
+  | incompatible (detail : String)
+  deriving DecidableEq, Repr
+
 /-- A precedence oracle: `precedence x` starts with `x` itself. -/
 structure Graph where
   precedence : String → List String
@@ -21,22 +40,32 @@ def isSuperSuffix (g : Graph) : Nat → Option String → Option String → Bool
   | fuel + 1, some s, some target => s == target || isSuperSuffix g fuel (superSuffix g s) (some target)
 
 def mergeSuffixFrom (g : Graph) (a b : String) (fuel : Nat) :
-    Nat → Option String → Option String → Except String (Option String)
-  | 0, _, _ => .error "suffix chain fuel"
+    Nat → Option String → Option String → Except SuffixFailure (Option String)
+  | 0, _, _ => .error .fuel
   | steps + 1, t1, t2 =>
     if t1 == some b then .ok (some a)
     else if t2 == some a then .ok (some b)
     else match t1, t2 with
       | none, _ => if isSuperSuffix g fuel t2 (some a) then .ok (some b)
-          else .error ("suffix incompatibility " ++ a ++ " " ++ b)
+          else .error (.incompatible ("suffix incompatibility " ++ a ++ " " ++ b))
       | _, none => if isSuperSuffix g fuel t1 (some b) then .ok (some a)
-          else .error ("suffix incompatibility " ++ a ++ " " ++ b)
+          else .error (.incompatible ("suffix incompatibility " ++ a ++ " " ++ b))
       | some x, some y => mergeSuffixFrom g a b fuel steps (superSuffix g x) (superSuffix g y)
 
-def mergeSuffix (g : Graph) (fuel : Nat) : Option String → Option String → Except String (Option String)
+def mergeSuffix (g : Graph) (fuel : Nat) : Option String → Option String → Except SuffixFailure (Option String)
   | s1, none => .ok s1
   | none, s2 => .ok s2
   | some a, some b => mergeSuffixFrom g a b fuel fuel (some a) (some b)
+
+/-- A super-suffix chain from a parent's suffix runs along that parent's precedence list, so it is
+no longer than the parents' precedence lists together: the fuel of every chain walk. -/
+def suffixFuel (g : Graph) (parents : List (List String)) : Nat :=
+  ((parents.flatten.map fun p => (g.precedence p).length).sum) + 1
+
+/-- Each step of the merge loop removes the head of at least one candidate list (the winner's),
+so it ends within the candidates' total length: the merge loop's fuel. -/
+def mergeFuel (candidates : List (List String)) : Nat :=
+  (candidates.map List.length).sum + 1
 
 /-- Re-reverse a reversed candidate list, dropping suffix-tail members, which
 must appear in increasing tail-index order. -/
@@ -54,19 +83,24 @@ def removeSuffixTailAndReverse (tailIndex : Std.HashMap String Nat) : List Strin
       if (p : Int) > suffixPos then removeSuffixTailAndReverse tailIndex rest p
       else .error ("ancestor out of order versus suffix tail " ++ c)
 
-def inconsistent {α : Type} (head : List String) (detail : String) : Except String α :=
-  .error ("inconsistent precedence graph at " ++ String.intercalate "," head ++ ": " ++ detail)
+def inconsistent {α : Type} (head : List String) (detail : String) : Except Refusal α :=
+  .error (.inconsistent head detail)
+
+/-- A suffix merge failure, named: fuel is fuel, incompatibility is an inconsistency. -/
+def suffixRefusal {α : Type} (head : List String) : SuffixFailure → Except Refusal α
+  | .fuel => .error (.fuelExhausted "suffix chain" head)
+  | .incompatible detail => inconsistent head detail
 
 /-- `head` is prepended (usually `[x]`); `parents` are local precedence chains. -/
 def linearize (g : Graph) (head : List String) (parentsIn : List (List String)) :
-    Except String (List String × Option String) := do
+    Except Refusal (List String × Option String) := do
   let parents := parentsIn.filter (fun chain => !chain.isEmpty)
   match parents with
   | [] => return (head, none)
   | [[parent]] => return (head ++ g.precedence parent,
       if g.isSuffix parent then some parent else superSuffix g parent)
   | _ =>
-  let fuel := 1000000
+  let fuel := suffixFuel g parents
   let mut rcandidates : List (List String) := []
   let mut ss : Option String := none
   let mut ssTail : List String := []
@@ -83,7 +117,7 @@ def linearize (g : Graph) (head : List String) (parentsIn : List (List String)) 
       | s :: _ =>
         let merged ← match mergeSuffix g fuel (some s) ss with
           | .ok v => pure v
-          | .error e => inconsistent head e
+          | .error e => suffixRefusal head e
         if merged != ss then
           for t in (rest.takeWhile (fun t => some t != ss)) do
             counts := counts.insert t (counts.getD t 0 + 1)
@@ -111,7 +145,7 @@ def linearize (g : Graph) (head : List String) (parentsIn : List (List String)) 
     | [] => pure ()
   let mut out := head
   let mut tails := candidates
-  for _ in List.range fuel do
+  for _ in List.range (mergeFuel candidates) do
     match tails with
     | [] => return (out ++ ssTail, ss)
     | [only] => return (out ++ only ++ ssTail, ss)
@@ -132,7 +166,7 @@ def linearize (g : Graph) (head : List String) (parentsIn : List (List String)) 
           else updated := updated ++ [t]
         | [] => pure ()
       tails := updated
-  inconsistent head "linearization fuel"
+  .error (.fuelExhausted "merge loop" head)
 
 /-- Renaming a graph along a bijection (`to`, with inverse `back`). -/
 def Graph.rename (g : Graph) (to back : String → String) : Graph :=

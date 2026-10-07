@@ -968,7 +968,8 @@ v3: the record (and a pending upgrade) carries the pinned package's enforced law
 the declared state type, the live counters and the upgrade phase). An older record does not
 decode (its frame differs): `readObject` refuses it `objectCodec`, so an older world is
 re-genesised, never reinterpreted. -/
-def recordFrame : Bytes := "DREGG/OBJECTIVE/OBJECT-RECORD/v4".toUTF8.toList
+-- v5: the rebirth envelope carries `replayBytes`, `coreBytes` (GPT-6 row E); a v4 record does not decode.
+def recordFrame : Bytes := "DREGG/OBJECTIVE/OBJECT-RECORD/v5".toUTF8.toList
 def recordCodec := framed recordFrame recordStream
 def encodeRecord (record : ObjectRecord) : Bytes := recordCodec.encode record
 def decodeRecord (bytes : Bytes) : Option ObjectRecord := recordCodec.decode bytes

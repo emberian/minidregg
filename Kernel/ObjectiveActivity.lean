@@ -112,6 +112,7 @@ import Theory.ObjectiveBendDemandCollect
 import Kernel.ObjectState
 import Kernel.ObjectRecord
 import Kernel.ObjectiveTariff
+import Kernel.ObjectiveWorkAccount
 
 namespace Minidregg.Kernel.ObjectiveActivity
 open Minidregg.Theory Minidregg.Compiler
@@ -302,12 +303,13 @@ def recordWire : StreamCodec RecordWire :=
     (StreamCodec.product digest256Stream
     (StreamCodec.product escrowStream (StreamCodec.product StreamCodec.nat phaseWire))))))))
 
-/-- v6: the record is FIXED-WIDTH where it is charged (digests 32 octets, heights 8:
+/-- v7: the escrowed envelopes carry the front end's work (`replayBytes`, `coreBytes`, GPT-6 row E);
+v6: the record is FIXED-WIDTH where it is charged (digests 32 octets, heights 8:
 `digest256Stream`, `height64Stream`), so `|encodeRecord|`, hence the storage deposit,
 does not depend on the digests or heights (`encodeRecord_length_mask`); v5: the escrow holds declared envelopes (`Capacity`), not tick counts; v4: the record carries `tried` (the envelope its exhausted attempts at the
 current await reached); v3: no recorded reads (resume with view reads the state
 in the resuming turn); v2: the escrow names the payer's Book account. -/
-def recordFrame : Bytes := "DREGG/OBJECTIVE/ACTIVITY-RECORD/v6".toUTF8.toList
+def recordFrame : Bytes := "DREGG/OBJECTIVE/ACTIVITY-RECORD/v7".toUTF8.toList
 
 /-- The record's bytes: the frame, then the fixed-width wire. A record that does not fit has NO
 encoding (`[]`, which `decodeRecord` refuses): nothing is reduced into a different record. `[]` is
@@ -653,6 +655,11 @@ inductive Refusal where
   (`planBudget.ticks`): the forcing a Plan or result extraction may do is validator work,
   declared (`Capacity.extractTicks`) and priced by the tariff like the run's own ticks. -/
   | extractUncovered (needed declared : Nat)
+  /-- A paying envelope does not cover a front-end stage of the stored package
+  (`ObjectiveWorkAccount.uncovered`: its source bytes, or the typed core the replay must
+  generate): refused from the stored sizes alone, BEFORE the front end replays it
+  (`frontEndPaid`). -/
+  | workUncovered (stage : ObjectiveWorkAccount.Stage) (needed declared : Nat)
   | plan (reason : String) | messageAwaitNeedsInbox
   | planExtraction (reason : String) | resultExtraction (reason : String)
   | exhausted
@@ -926,6 +933,101 @@ def replayPackage (config : Config) (stored : Stored) (pin : Digest) : Except Re
     else throw (.packageSource "the artifact names another package")
   else throw .packageIdentity
 
+/-- **The front-end work account of a package cell** for the envelopes that pay for its replay
+(`payers`): every payer covers the stored package's source bytes and the typed core its replay
+must generate (`ObjectiveWorkAccount.uncovered`), or the turn is refused `workUncovered`. It reads
+only the stored pair, so a turn calls it BEFORE the loader replays the package. A cell that does
+not hold a canonical pair within the size cap is not judged here: the loader refuses it by name
+before any replay (`replayPackage`). -/
+def frontEndPaid (config : Config) (bytes : Bytes) (payers : List Capacity) : Except Refusal Unit :=
+  match decodeStored bytes with
+  | none => .ok ()
+  | some stored =>
+    if stored.artifact.length > config.maxArtifactBytes ∨ stored.package.length > config.maxArtifactBytes then .ok ()
+    else
+      match ObjectiveBendSourceArtifact.decode stored.artifact, ObjectiveSourcePackage.decode stored.package with
+      | some artifact, some package =>
+        match payers.findSome? (ObjectiveWorkAccount.uncovered package artifact) with
+        | some (stage, needed, declared) => .error (.workUncovered stage needed declared)
+        | none => .ok ()
+      | _, _ => .ok ()
+
+/-- **The front-end quote of a package cell body**: the source bytes and the typed-core bytes a
+paying envelope must declare (`replayBytes`, `coreBytes`), read from the stored pair exactly as
+`frontEndPaid` reads them. The Host publishes it per pin (op 214, `frontEnd`), so a client
+declares it and never probes (`frontEndPaid_at_quote`). -/
+def frontEndQuote (bytes : Bytes) : Option (Nat × Nat) := do
+  let stored ← decodeStored bytes
+  let artifact ← ObjectiveBendSourceArtifact.decode stored.artifact
+  let package ← ObjectiveSourcePackage.decode stored.package
+  pure (ObjectiveWorkAccount.sourceBytes package, artifact.typedCore.length)
+
+/-- An envelope declaring at least the quote passes the front-end account. -/
+theorem frontEndPaid_at_quote {config : Config} {bytes : Bytes} {payers : List Capacity} {source core : Nat}
+    (quoted : frontEndQuote bytes = some (source, core))
+    (declares : ∀ envelope ∈ payers, source ≤ envelope.replayBytes ∧ core ≤ envelope.coreBytes) :
+    frontEndPaid config bytes payers = .ok () := by
+  unfold frontEndQuote at quoted
+  unfold frontEndPaid
+  cases ds : decodeStored bytes with
+  | none => rfl
+  | some stored =>
+    simp only [ds, bind, Option.bind] at quoted ⊢
+    split
+    · rfl
+    · cases da : ObjectiveBendSourceArtifact.decode stored.artifact with
+      | none => simp [da]
+      | some artifact =>
+        cases dp : ObjectiveSourcePackage.decode stored.package with
+        | none => simp [da, dp]
+        | some package =>
+          simp only [da, dp, pure, Option.some.injEq, Prod.mk.injEq] at quoted ⊢
+          obtain ⟨rfl, rfl⟩ := quoted
+          have none_ : payers.findSome? (ObjectiveWorkAccount.uncovered package artifact) = none := by
+            apply List.findSome?_eq_none_iff.mpr
+            intro envelope member
+            obtain ⟨s, c⟩ := declares envelope member
+            unfold ObjectiveWorkAccount.uncovered
+            simp [ObjectiveWorkAccount.frontEndNeeds, ObjectiveWorkAccount.declared, s, c]
+          simp only [none_]
+
+/-- The typed core a replay generated: the rendering of the front end's lowering. -/
+def Replay.generatedCore {config : Config} {pin : Digest} (r : Replay config pin) : Bytes :=
+  r.replayed.lowering.packet.compress.toUTF8.toList
+
+theorem replayPackage_decoded {config : Config} {stored : Stored} {pin : Digest} {r : Replay config pin}
+    (replayed : replayPackage config stored pin = .ok r) :
+    ObjectiveBendSourceArtifact.decode stored.artifact = some r.artifact ∧
+      ObjectiveSourcePackage.decode stored.package = some r.package ∧
+      stored.artifact.length ≤ config.maxArtifactBytes ∧ stored.package.length ≤ config.maxArtifactBytes := by
+  unfold replayPackage at replayed
+  simp only [bind, Except.bind, pure, Except.pure] at replayed
+  by_cases a : stored.artifact.length > config.maxArtifactBytes
+  · rw [if_pos a] at replayed; cases replayed
+  rw [if_neg a] at replayed
+  by_cases b : stored.package.length > config.maxArtifactBytes
+  · rw [if_pos b] at replayed; cases replayed
+  rw [if_neg b] at replayed
+  cases da : ObjectiveBendSourceArtifact.decode stored.artifact with
+  | none => simp only [da] at replayed; simp [throw, throwThe, MonadExceptOf.throw] at replayed
+  | some artifact =>
+    simp only [da] at replayed
+    split at replayed
+    · cases dp : ObjectiveSourcePackage.decode stored.package with
+      | none => simp only [dp] at replayed; simp [throw, throwThe, MonadExceptOf.throw] at replayed
+      | some package =>
+        simp only [dp] at replayed
+        split at replayed
+        · split at replayed
+          · split at replayed
+            · split at replayed
+              · cases replayed; exact ⟨rfl, rfl, by omega, by omega⟩
+              · simp [throw, throwThe, MonadExceptOf.throw] at replayed
+            · simp [throw, throwThe, MonadExceptOf.throw] at replayed
+          · simp [throw, throwThe, MonadExceptOf.throw] at replayed
+        · simp [throw, throwThe, MonadExceptOf.throw] at replayed
+    · simp [throw, throwThe, MonadExceptOf.throw] at replayed
+
 /-- The replayed package of an activity and its instantiation with its input. -/
 structure Program (config : Config) (pin : Digest) (input : Data) where
   private mk ::
@@ -1018,6 +1120,92 @@ def loadProgram (config : Config) (bytes : Bytes) (pin : Digest) (input : Data) 
         planType, responseType, resultType, typeExact, reply, replyExact⟩
     | none => throw (.outcomeProtocol "reply")
   | _ => throw (.packageType "the definition does not return an Activity")
+
+theorem instantiate_replayed {config : Config} {bytes : Bytes} {pin : Digest} {input : Data}
+    {instance_ : Instantiated config pin input} (ok : instantiate config bytes pin input = .ok instance_) :
+    ∃ stored, decodeStored bytes = some stored ∧ replayPackage config stored pin = .ok instance_.definition := by
+  unfold instantiate at ok
+  cases ds : decodeStored bytes with
+  | none => (simp [ds] at ok) <;> cases ok
+  | some stored =>
+    cases rp : replayPackage config stored pin with
+    | error e => (simp [ds, rp, bind, Except.bind] at ok) <;> cases ok
+    | ok definition =>
+      refine ⟨stored, rfl, ?_⟩
+      simp only [ds, rp, bind, Except.bind] at ok
+      split at ok
+      all_goals (try split at ok)
+      all_goals (first | (cases ok; exact rp) | cases ok | simp [throw, throwThe, MonadExceptOf.throw] at ok)
+
+theorem loadProgram_instantiated {config : Config} {bytes : Bytes} {pin : Digest} {input : Data}
+    {program : Program config pin input} (ok : loadProgram config bytes pin input = .ok program) :
+    ∃ instance_ : Instantiated config pin input, instantiate config bytes pin input = .ok instance_ ∧
+      program.definition = instance_.definition := by
+  unfold loadProgram at ok
+  cases inst : instantiate config bytes pin input with
+  | error e => simp [inst, bind, Except.bind] at ok
+  | ok instance_ =>
+    refine ⟨instance_, rfl, ?_⟩
+    simp only [inst, bind, Except.bind] at ok
+    split at ok
+    · split at ok
+      · cases ok; rfl
+      · cases ok
+    · cases ok
+
+/-- **The front-end account bounds the front end's work.** A turn whose stored package passed
+`frontEndPaid` for `payers`, and whose loader then replayed it, replayed a package of at most each
+payer's declared `replayBytes` source bytes, generated a typed core of at most its declared
+`coreBytes`, and type-checked within the kernel's checker fuel. -/
+theorem frontEnd_work_within {config : Config} {bytes : Bytes} {pin : Digest} {input : Data}
+    {payers : List Capacity} {program : Program config pin input}
+    (paid : frontEndPaid config bytes payers = .ok ()) (loaded : loadProgram config bytes pin input = .ok program)
+    (envelope : Capacity) (payer : envelope ∈ payers) :
+    ObjectiveWorkAccount.sourceBytes program.definition.package ≤ envelope.replayBytes ∧
+      program.definition.generatedCore.length ≤ envelope.coreBytes ∧
+      program.definition.replayed.accepted.packet.fuel ≤ config.typeFuel := by
+  obtain ⟨instance_, instantiated, same⟩ := loadProgram_instantiated loaded
+  obtain ⟨stored, ds, replayed⟩ := instantiate_replayed instantiated
+  obtain ⟨da, dp, sa, sp⟩ := replayPackage_decoded replayed
+  rw [← same] at replayed
+  unfold frontEndPaid at paid
+  simp only [ds] at paid
+  have small : ¬ (stored.artifact.length > config.maxArtifactBytes ∨ stored.package.length > config.maxArtifactBytes) := by
+    omega
+  rw [if_neg small] at paid
+  rw [← same] at da dp
+  rw [da, dp] at paid
+  simp only at paid
+  cases found : payers.findSome? (ObjectiveWorkAccount.uncovered program.definition.package program.definition.artifact) with
+  | some hit => rw [found] at paid; cases paid
+  | none =>
+    have each := List.findSome?_eq_none_iff.mp found envelope payer
+    obtain ⟨sourceOk, coreOk⟩ := ObjectiveWorkAccount.uncovered_none each
+    refine ⟨sourceOk, ?_, program.definition.replayed.fuelWithin⟩
+    have core := program.definition.replayed.coreExact
+    unfold Replay.generatedCore
+    rw [core]
+    exact coreOk
+
+/-- **A refusal of the front-end account precedes the replay.** `frontEndPaid` names an
+uncovered stage from the stored pair alone: whatever the loader would do with the package
+(replay, refuse, or run long), a turn that consults it first never reaches it. Instance:
+`frontEnd_refuses_oversized`. -/
+theorem frontEndPaid_refuses {config : Config} {bytes : Bytes} {payers : List Capacity} {stored : Stored}
+    {artifact : ObjectiveBendSourceArtifact.Artifact} {package : ObjectiveSourcePackage.Package}
+    {stage : ObjectiveWorkAccount.Stage} {needed declared : Nat}
+    (ds : decodeStored bytes = some stored)
+    (small : stored.artifact.length ≤ config.maxArtifactBytes ∧ stored.package.length ≤ config.maxArtifactBytes)
+    (da : ObjectiveBendSourceArtifact.decode stored.artifact = some artifact)
+    (dp : ObjectiveSourcePackage.decode stored.package = some package)
+    (hit : payers.findSome? (ObjectiveWorkAccount.uncovered package artifact) = some (stage, needed, declared)) :
+    frontEndPaid config bytes payers = .error (.workUncovered stage needed declared) := by
+  unfold frontEndPaid
+  simp only [ds]
+  have small' : ¬ (stored.artifact.length > config.maxArtifactBytes ∨ stored.package.length > config.maxArtifactBytes) := by
+    omega
+  rw [if_neg small', da, dp]
+  simp only [hit]
 
 /-- What a seat contract's method runs is the front end's output on the package
 stored with its artifact (as `Program.runs_front_end_output` for an activity). -/
@@ -2080,6 +2268,10 @@ request, whatever deposit it carries; the deposit is judged next (`birth`). -/
 structure BirthPrefix {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : BirthRequest) where
   private mk ::
+  /-- The birth's envelope and both escrowed envelopes (every later delivery replays the package
+  under one of them) cover the front-end stages of the pinned package, judged before the replay. -/
+  paid : frontEndPaid config (packageBytes config snapshot request.pin)
+    [request.envelope, request.resume, request.timeout] = .ok ()
   program : Program config request.pin request.input
   programExact : loadProgram config (packageBytes config snapshot request.pin) request.pin request.input =
     .ok program
@@ -2121,6 +2313,8 @@ structure BirthPrefix {rootBytes : Bytes → Digest} (config : Config) (snapshot
   narrow : request.object.value < 256 ^ 32 ∧ request.pin.value < 256 ^ 32
   /-- The birth's envelope declares the extraction tick budget its segment may spend. -/
   extractCovered : config.planBudget.ticks ≤ request.envelope.extractTicks
+  /-- The deployment covers the birth's envelope (`Config.covers`), judged before the replay. -/
+  covered : config.covers request.envelope = true
 
 
 /-- An admitted birth: its prefix, and the posts that commit the record, the yield and the Book
@@ -2156,7 +2350,8 @@ def birthPrefix {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
     | .ok (some object) =>
       if admits : object.admitsNew = true then
       if pinned : object.activePin = request.pin then
-        if !config.covers request.envelope then throw (.uncovered request.envelope)
+        let ⟨covered⟩ ← (if h : config.covers request.envelope = true then pure ⟨h⟩
+          else throw (.uncovered request.envelope) : Except Refusal (PLift (config.covers request.envelope = true)))
         if !config.covers request.resume then throw (.uncovered request.resume)
         if !config.covers request.timeout then throw (.uncovered request.timeout)
         let ⟨extractCovered⟩ ← (if h : config.planBudget.ticks ≤ request.envelope.extractTicks then pure ⟨h⟩
@@ -2166,6 +2361,10 @@ def birthPrefix {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
           throw (.extractUncovered config.planBudget.ticks request.resume.extractTicks)
         if request.timeout.extractTicks < config.planBudget.ticks then
           throw (.extractUncovered config.planBudget.ticks request.timeout.extractTicks)
+        match paid : frontEndPaid config (packageBytes config snapshot request.pin)
+            [request.envelope, request.resume, request.timeout] with
+        | .error reason => throw reason
+        | .ok () =>
         match programExact : loadProgram config (packageBytes config snapshot request.pin) request.pin request.input with
         | .error reason => throw reason
         | .ok program =>
@@ -2211,9 +2410,9 @@ def birthPrefix {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
                   let base : Record := ⟨request.object, activity, request.pin, dataBytes request.input, 0, [],
                     checkpointDigest [], escrow, 0, .faulted "unborn"⟩
                   let record := nextRecord base 0 segment yielded
-                  pure ⟨program, programExact, cell, rfl, fresh, current, currentExact, segment, segmentExact, yielded,
+                  pure ⟨paid, program, programExact, cell, rfl, fresh, current, currentExact, segment, segmentExact, yielded,
                     yieldedExact, record, rfl, object, objectExact, admits, pinned, book, bookExact,
-                    judged, drained, narrow, extractCovered⟩
+                    judged, drained, narrow, extractCovered, covered⟩
       else throw (.pinMismatch object.activePin request.pin)
       else throw .draining
   else throw (.digestWide request.object request.pin)
@@ -2240,6 +2439,47 @@ def birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot 
       [guardAt snapshot (objectCell config.domain request.object),
         guardAt snapshot (packageCell config.domain request.pin),
         guardAt snapshot (stateCell config.domain request.object)], rfl, short⟩
+
+/-- What each stage of a birth may spend: the front end's input and output (the replayed
+package's source bytes, the generated typed core), the checker fuel, the run's tick budget, the
+extraction's tick budget and the extracted output's byte budget. -/
+def BirthPrefix.spent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : BirthRequest} (pre : BirthPrefix config snapshot height request) :
+    ObjectiveWorkAccount.Stage → Nat
+  | .frontEnd => ObjectiveWorkAccount.sourceBytes pre.program.definition.package
+  | .core => pre.program.definition.generatedCore.length
+  | .check => config.typeFuel
+  | .execution => request.envelope.sourceTicks
+  | .extraction => config.planBudget.ticks
+  | .output => config.planBudget.bytes
+
+/-- The run of an admitted birth is the bounded machine under exactly the declared tick budget
+(`segmentExact`); its extraction under the deployment's Plan budget. -/
+theorem BirthPrefix.runs_within {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : BirthRequest} (pre : BirthPrefix config snapshot height request) :
+    runSegment config (pre.spent .execution) (initial pre.program.applied.erase) = .ok pre.segment :=
+  pre.segmentExact
+
+/-- **THE WHOLE-REQUEST WORK ACCOUNT OF A BIRTH.** Every stage an admitted birth spends is within
+what its signed envelope declares, and so within what the tariff priced
+(`ObjectiveWorkAccount.workOf_stage_step`): the front end's input and output by the account
+judged from the stored pair before the replay (`frontEnd_work_within`), the checker fuel, the
+extraction and the output by `Config.covers` and `extractUncovered`, and the run by its budget
+(`runs_within`). -/
+theorem BirthPrefix.work_within {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : BirthRequest} (pre : BirthPrefix config snapshot height request)
+    (stage : ObjectiveWorkAccount.Stage) :
+    pre.spent stage ≤ ObjectiveWorkAccount.declared request.envelope stage := by
+  have front := frontEnd_work_within pre.paid pre.programExact request.envelope (by simp)
+  have covers := pre.covered
+  simp only [Config.covers, Bool.and_eq_true, decide_eq_true_eq] at covers
+  cases stage with
+  | frontEnd => exact front.1
+  | core => exact front.2.1
+  | check => exact covers.1.1.1.2
+  | execution => exact Nat.le_refl _
+  | extraction => exact pre.extractCovered
+  | output => exact covers.1.2
 
 def Birth.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : BirthRequest} (born : Birth config snapshot height request) (sealing : Seal) :
@@ -2285,6 +2525,7 @@ def replyTyped {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snap
     let .reply named _ := await.source | throw .slotMismatch
     if named ≠ slot then throw .slotMismatch
     let some input := decodeDataBytes record.input | throw .inputType
+    frontEndPaid config (packageBytes config snapshot record.pin) [record.escrow.resume, record.escrow.timeout]
     let program ← loadProgram config (packageBytes config snapshot record.pin) record.pin input
     match typeData program.assumptions config.typeFuel value program.reply with
     | some _ => pure ()
@@ -2407,6 +2648,9 @@ structure ResumeHead {rootBytes : Bytes → Digest} (config : Config) (snapshot 
   digestExact : checkpointDigest record.checkpoint = record.checkpointDigest
   input : Data
   inputExact : decodeDataBytes record.input = some input
+  /-- Both escrowed envelopes cover the front-end stages of the pinned package, judged before the
+  replay; the turn's envelope (one of them plus any extra) covers them too. -/
+  paid : frontEndPaid config (packageBytes config snapshot record.pin) [record.escrow.resume, record.escrow.timeout] = .ok ()
   program : Program config record.pin input
   programExact : loadProgram config (packageBytes config snapshot record.pin) record.pin input = .ok program
 
@@ -2424,10 +2668,14 @@ def resumeHead {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snap
   match inputExact : decodeDataBytes record.input with
   | none => .error .inputType
   | some input =>
+  match paid : frontEndPaid config (packageBytes config snapshot record.pin)
+      [record.escrow.resume, record.escrow.timeout] with
+  | .error reason => .error reason
+  | .ok () =>
   match programExact : loadProgram config (packageBytes config snapshot record.pin) record.pin input with
   | .error reason => .error reason
   | .ok program =>
-  .ok ⟨record, recordExact, located, await, awaiting, idExact, digestExact, input, inputExact, program,
+  .ok ⟨record, recordExact, located, await, awaiting, idExact, digestExact, input, inputExact, paid, program,
     programExact⟩
   else .error .checkpointDigest
   else .error .awaitMismatch
@@ -2507,6 +2755,9 @@ structure Delivery {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
   digestExact : checkpointDigest record.checkpoint = record.checkpointDigest
   input : Data
   inputExact : decodeDataBytes record.input = some input
+  /-- Both escrowed envelopes cover the front-end stages of the pinned package, judged before the
+  replay; the turn's envelope (one of them plus any extra) covers them too. -/
+  paid : frontEndPaid config (packageBytes config snapshot record.pin) [record.escrow.resume, record.escrow.timeout] = .ok ()
   program : Program config record.pin input
   programExact : loadProgram config (packageBytes config snapshot record.pin) record.pin input = .ok program
   settlement : Settlement
@@ -2626,7 +2877,7 @@ def deliver {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
     guardAt snapshot (packageCell config.domain record.pin) ::
     guardAt snapshot (stateCell config.domain record.object) :: settlement.guards
   .ok ⟨record, head.recordExact, head.located, await, head.awaiting, head.idExact, head.digestExact, head.input,
-    head.inputExact, program, head.programExact,
+    head.inputExact, head.paid, program, head.programExact,
     settlement, tail.settled, view, tail.viewExact, tail.response, tail.state, tail.stateExact, resumed,
     tail.resumeExact, envelope, rfl,
     covered, heapCovered, extractCovered, segment, yielded, endExact, next, rfl, object, objectExact, runsPin, book,
@@ -2711,6 +2962,9 @@ structure Exhaustion {rootBytes : Bytes → Digest} (config : Config) (snapshot 
   digestExact : checkpointDigest record.checkpoint = record.checkpointDigest
   input : Data
   inputExact : decodeDataBytes record.input = some input
+  /-- Both escrowed envelopes cover the front-end stages of the pinned package, judged before the
+  replay; the turn's envelope (one of them plus any extra) covers them too. -/
+  paid : frontEndPaid config (packageBytes config snapshot record.pin) [record.escrow.resume, record.escrow.timeout] = .ok ()
   program : Program config record.pin input
   programExact : loadProgram config (packageBytes config snapshot record.pin) record.pin input = .ok program
   settlement : Settlement
@@ -2784,7 +3038,7 @@ def exhaust {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
     let guards := guardAt snapshot (packageCell config.domain record.pin) ::
       guardAt snapshot (stateCell config.domain record.object) :: settlementGuards settlement
     .ok ⟨record, head.recordExact, head.located, await, head.awaiting, head.idExact, head.digestExact, head.input,
-      head.inputExact, program, head.programExact, settlement, tail.settled, view, tail.viewExact, tail.response,
+      head.inputExact, head.paid, program, head.programExact, settlement, tail.settled, view, tail.viewExact, tail.response,
       tail.state, tail.stateExact, resumed, tail.resumeExact,
       envelope, rfl, covered, heapCovered, extractCovered, raises, belowCap, ran, next, rfl, book, bookExact, posted, postedBatch, posts, rfl,
       guards, rfl⟩
@@ -5667,5 +5921,13 @@ theorem Resolution.retention_cells_have_payer {rootBytes : Bytes → Digest} {co
 #assert_axioms BirthPrefix.record_fits
 #assert_axioms birth_of_prefix_error
 #assert_axioms Birth.demand_le_deposit
+#assert_axioms replayPackage_decoded
+#assert_axioms instantiate_replayed
+#assert_axioms loadProgram_instantiated
+#assert_axioms frontEnd_work_within
+#assert_axioms frontEndPaid_refuses
+#assert_axioms frontEndPaid_at_quote
+#assert_axioms BirthPrefix.runs_within
+#assert_axioms BirthPrefix.work_within
 
 end Minidregg.Kernel.ObjectiveActivity

@@ -1211,7 +1211,7 @@ def precedence (c : Ctx) : Nat → String → M (List String)
       fun k => match specOf c k with | some (s', _) => s'.suffix | none => false⟩
     let list ← match ObjectiveBendC4.linearize graph [key] [parents] with
       | .ok (l, _) => pure l
-      | .error e => fail ("C4 linearization of " ++ key ++ " refused: " ++ e)
+      | .error e => fail ("C4 linearization of " ++ key ++ " refused: " ++ e.message)
     modify fun st => { st with linearizing := st.linearizing.erase key, precedence := st.precedence ++ [(key, list)] }
     return list
 

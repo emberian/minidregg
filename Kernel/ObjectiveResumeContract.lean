@@ -633,7 +633,7 @@ def tallyConfig : Config where
   maxPatience := 16
   typeFuel := 16384
   maxArtifactBytes := 4194304
-  tariff := ⟨Minidregg.Kernel.ObjectiveTariff.tariffVersion, 10, 0, 1, 0, 0, 0, 0, 0, 0⟩
+  tariff := ⟨Minidregg.Kernel.ObjectiveTariff.tariffVersion, 10, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0⟩
   abandonGrace := 16
   storageRate := 1
 
@@ -1213,7 +1213,7 @@ theorem not_spendDeclared_noExtract {config : Config} {resumed : State} {envelop
 envelope declaring exactly the deployment's ceilings. -/
 theorem spendDeclared_tally :
     SpendDeclared tallyConfig (initial (.nat 0))
-      ⟨0, 200000, 100000, 100000, 10000, 1048576, 100000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0⟩ := by
+      ⟨0, 200000, 100000, 100000, 10000, 1048576, 100000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0⟩ := by
   refine ⟨?_, ?_, ?_, ?_, ?_, ?_⟩ <;> decide
 
 /-! ## A delivery advances the record

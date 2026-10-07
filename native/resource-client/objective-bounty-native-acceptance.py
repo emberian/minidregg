@@ -116,10 +116,11 @@ MAXIMUM = {'typeFuel': 16384, 'sourceTicks': 200000, 'heap': 200000, 'stack': 20
            'outputBytes': 200000, 'extractTicks': 200000, 'inputBytes': 200000, 'scalarBits': 512, 'memoryTouches': 2000000,
            'proofWork': 900000, 'feeDebit': 1000000, 'turnBytes': 4000000, 'witnessBytes': 4000000,
            'storageBytes': 4000000, 'sideEffectCount': 16, 'networkBytes': 0, 'leaseByteBlocks': 0,
-           'incidences': 16}
+           'incidences': 16, 'replayBytes': 4194304, 'coreBytes': 4194304}
 constants = json.loads(sh('constants', host, '/dev/null', 'objective-constants').stdout)
-tariff = {'version': '2', 'base': '1', 'typeFuel': '0', 'sourceTicks': '1', 'heap': '0', 'stack': '0',
-          'outputNodes': '0', 'outputBytes': '0', 'extractTicks': '0', 'inputBytes': '0'}
+tariff = {'version': '3', 'base': '1', 'typeFuel': '0', 'sourceTicks': '1', 'heap': '0', 'stack': '0',
+          'outputNodes': '0', 'outputBytes': '0', 'extractTicks': '0', 'inputBytes': '0',
+          'replayBytes': '0', 'coreBytes': '0'}
 policy = {'schema': 'dregg.objective-bend.policy.v1', 'sourceBytes': '4194304',
           'maximum': {k: str(v) for k, v in MAXIMUM.items()}, 'extractTicksPerTurn': str(16 * MAXIMUM['extractTicks']), 'outputs': [constants['genericCodec']],
           'clearAudience': '01ff', 'frontEnd': constants['frontEnd'], 'tariff': tariff}
@@ -281,7 +282,7 @@ def activity_cap(ticks):  # (the Order helpers recurse once per height: the enve
     """A declared envelope (Capacity): `ticks` source ticks, the kernel's fixed heap, stack,
     type fuel and Plan budget, priced at 0 (as the activity driver's `cap`)."""
     c = {k: '0' for k in MAXIMUM}
-    for k in ['heap', 'stack', 'typeFuel', 'outputNodes', 'outputBytes', 'extractTicks']:
+    for k in ['heap', 'stack', 'typeFuel', 'outputNodes', 'outputBytes', 'extractTicks', 'replayBytes', 'coreBytes']:
         c[k] = str(MAXIMUM[k])
     c['sourceTicks'] = str(ticks)
     return c

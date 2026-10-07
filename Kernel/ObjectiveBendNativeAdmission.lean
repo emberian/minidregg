@@ -86,11 +86,12 @@ def policyStream : StreamCodec Policy := StreamCodec.xmap
   (fun p => ⟨p.1,p.2.1,p.2.2.1,p.2.2.2.1,p.2.2.2.2.1,p.2.2.2.2.2.1,p.2.2.2.2.2.2.1,p.2.2.2.2.2.2.2⟩)
   (by intro p; cases p; rfl)
 
-/-- Edition 5: the per-turn extraction tick ceiling (`extractTicksPerTurn`), and a policy whose
+/-- Edition 6: the tariff and the maximum envelope carry the front end's work (`replayBytes`,
+`coreBytes`; tariff edition 3). Edition 5: the per-turn extraction tick ceiling (`extractTicksPerTurn`), and a policy whose
 per-turn ceiling is below its per-extraction ceiling does not decode. Edition 4: one front-end identity replaced the parser/frontend/elaborator pins
 (edition 3 joined the tariff). A policy of an earlier frame does not decode; neither
 does one whose tariff is not valid. -/
-def policyFrame : List UInt8 := "DREGG/OBJECTIVE-BEND/NATIVE-POLICY".toUTF8.toList ++ [5]
+def policyFrame : List UInt8 := "DREGG/OBJECTIVE-BEND/NATIVE-POLICY".toUTF8.toList ++ [6]
 def encodePolicy (p : Policy) : List UInt8 := policyFrame ++ policyStream.encode p
 def decodePolicy (bytes : List UInt8) : Option Policy :=
   if bytes.take policyFrame.length != policyFrame then none else
@@ -142,7 +143,8 @@ def capacityWithin (a b : ObjectiveInvocationClaim.Capacity) : Bool :=
   decide (a.sourceTicks ≤ b.sourceTicks) && decide (a.heap ≤ b.heap) &&
   decide (a.stack ≤ b.stack) && decide (a.outputNodes ≤ b.outputNodes) &&
   decide (a.outputBytes ≤ b.outputBytes) && decide (a.inputBytes ≤ b.inputBytes) &&
-  decide (a.scalarBits ≤ b.scalarBits)
+  decide (a.scalarBits ≤ b.scalarBits) && decide (a.replayBytes ≤ b.replayBytes) &&
+  decide (a.coreBytes ≤ b.coreBytes)
 
 def readContext {F : Type} [Field F] {deployment : Deployment}
     {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable} {command : Command}

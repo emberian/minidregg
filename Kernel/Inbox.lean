@@ -316,7 +316,7 @@ theorem fifoAccount_nil_iff {a b : Inbox} {popped pushed : List Message} :
 
 /-! Inhabitants and teeth (closed values, no hashing). -/
 
-def sampleMessage (n : Nat) : Message := ⟨⟨n⟩, 1, "m", [], ⟨0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0⟩, 1, 9, 0, 0, 0⟩
+def sampleMessage (n : Nat) : Message := ⟨⟨n⟩, 1, "m", [], ⟨0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0⟩, 1, 9, 0, 0, 0⟩
 
 def sampleInbox : Inbox := ⟨1, 2, 0, [sampleMessage 10, sampleMessage 11]⟩
 
@@ -389,9 +389,10 @@ def inboxStream : StreamCodec Inbox :=
     (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2⟩)
     (by intro i; cases i; rfl)
 
-/-- v3: a message carries its storage `deposit` (v2 added the continuation `allowance` and
-`depth`, GPT-6 row F); v1 and v2 inboxes refuse to decode (`v1_refuses`, `v2_refuses`). -/
-def frame : Bytes := "DREGG/OBJECTIVE/INBOX/v3".toUTF8.toList
+/-- v4: a message envelope carries `replayBytes`, `coreBytes` (GPT-6 row E work account); v3: a message
+carries its storage `deposit` (v2 added the continuation `allowance` and `depth`, GPT-6 row F); v1, v2 and v3
+inboxes refuse to decode (`v1_refuses`, `v2_refuses`). -/
+def frame : Bytes := "DREGG/OBJECTIVE/INBOX/v4".toUTF8.toList
 def codec := framed frame inboxStream
 def encode (inbox : Inbox) : Bytes := codec.encode inbox
 def decode (bytes : Bytes) : Option Inbox := codec.decode bytes
@@ -411,7 +412,7 @@ theorem v1_refuses (body : Bytes) :
     rw [List.take_left' rfl, List.take_left' (by decide +kernel)] at cut
     exact absurd cut (by decide +kernel)
 
-/-- The v2 frame (messages without a storage deposit) refuses to decode as v3. -/
+/-- The v2 frame (messages without a storage deposit) refuses to decode. -/
 theorem v2_refuses (body : Bytes) :
     decode ("DREGG/OBJECTIVE/INBOX/v2".toUTF8.toList ++ body) = none := by
   cases found : decode ("DREGG/OBJECTIVE/INBOX/v2".toUTF8.toList ++ body) with
@@ -421,6 +422,19 @@ theorem v2_refuses (body : Bytes) :
     have cut := congrArg (List.take frame.length) canon
     change (frame ++ inboxStream.encode inbox).take frame.length =
       ("DREGG/OBJECTIVE/INBOX/v2".toUTF8.toList ++ body).take frame.length at cut
+    rw [List.take_left' rfl, List.take_left' (by decide +kernel)] at cut
+    exact absurd cut (by decide +kernel)
+
+/-- The v3 frame (envelopes without the front end's lanes, GPT-6 row E) refuses to decode as v4. -/
+theorem v3_refuses (body : Bytes) :
+    decode ("DREGG/OBJECTIVE/INBOX/v3".toUTF8.toList ++ body) = none := by
+  cases found : decode ("DREGG/OBJECTIVE/INBOX/v3".toUTF8.toList ++ body) with
+  | none => rfl
+  | some inbox =>
+    have canon := framed_canonical found
+    have cut := congrArg (List.take frame.length) canon
+    change (frame ++ inboxStream.encode inbox).take frame.length =
+      ("DREGG/OBJECTIVE/INBOX/v3".toUTF8.toList ++ body).take frame.length at cut
     rw [List.take_left' rfl, List.take_left' (by decide +kernel)] at cut
     exact absurd cut (by decide +kernel)
 
@@ -516,6 +530,7 @@ def sendId (turn : TransactionId) (index : Nat) : Digest :=
 #assert_axioms roundTrip
 #assert_axioms v1_refuses
 #assert_axioms v2_refuses
+#assert_axioms v3_refuses
 #assert_axioms chargedBytes_independent
 #assert_axioms chargedBytes_covers
 #assert_axioms sample_continues

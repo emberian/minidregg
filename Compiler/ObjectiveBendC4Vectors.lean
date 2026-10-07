@@ -20,7 +20,7 @@ def ancestry (supers : String → List String) (isSuffix : String → Bool) :
       for entry in ← ancestry supers isSuffix fuel p do
         if !(known.any (·.1 == entry.1)) then known := known ++ [entry]
     let graph : Graph := ⟨fun y => (known.lookup y).getD [], isSuffix⟩
-    let (list, _) ← linearize graph [x] [supers x]
+    let (list, _) ← (linearize graph [x] [supers x]).mapError Refusal.message
     return known ++ [(x, list)]
 
 def precedenceOf (supers : String → List String) (isSuffix : String → Bool) (x : String) : Option (List String) :=
@@ -64,6 +64,27 @@ theorem pommette_refusals :
   native_decide
 
 def precedenceGraph : Graph := ⟨fun x => (precedenceOf supers isStruct x).getD [], isStruct⟩
+
+/-- **Fuel exhaustion is not inconsistency.** A cyclic local order (A before B before C before A)
+is refused `inconsistent`; SBc's incompatible suffix parents are refused `inconsistent`; and a
+suffix chain that cannot end within its derived fuel (a suffix oracle whose chain cycles,
+`cyclicSuffix`) is refused `fuelExhausted`, never reported as an inconsistent graph. -/
+def cyclicTable : List (String × List String) :=
+  [("P", ["P", "S1"]), ("Q", ["Q", "S2"]), ("S1", ["S1", "U"]), ("U", ["U", "V"]), ("V", ["V", "U"]),
+   ("S2", ["S2", "W"]), ("W", ["W", "X"]), ("X", ["X", "W"])]
+def cyclicSuffix : Graph := ⟨fun x => (cyclicTable.lookup x).getD [x], fun x => x != "P" && x != "Q"⟩
+
+def refusalKind : Except Refusal (List String × Option String) → String
+  | .error (.inconsistent _ _) => "inconsistent"
+  | .error (.fuelExhausted _ _) => "fuel"
+  | .ok _ => "ok"
+
+theorem fuel_is_not_inconsistency :
+    refusalKind (linearize precedenceGraph [] [["A", "B"], ["B", "C"], ["C", "A"]]) = "inconsistent" ∧
+    refusalKind (linearize (⟨fun x => if x == "SBc" then ["SBc", "sBs", "SBB"] else (precedenceOf supers isStruct x).getD [x],
+      isStruct⟩ : Graph) ["SBc"] [["sBs", "SBB"]]) = "inconsistent" ∧
+    refusalKind (linearize cyclicSuffix ["X"] [["P", "Q"]]) = "fuel" := by
+  native_decide
 def dag (order : List (List String)) : Option (List String) := (linearize precedenceGraph [] order).toOption.map (·.1)
 
 theorem dag_local_orders :
@@ -162,6 +183,7 @@ theorem ordered_presentation_invariance_4000 :
 #assert_compiled pommette_vectors
 #assert_compiled pommette_refusals
 #assert_compiled dag_local_orders
+#assert_compiled fuel_is_not_inconsistency
 #assert_compiled ordered_presentation_invariance_4000
 
 /-- The gate's marker line, computed from the same checks. -/
