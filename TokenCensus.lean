@@ -12,7 +12,9 @@ that way compiles).
 
 This module is the guarantee that `private mk` is not.  It imports the research
 umbrella (`Minidregg`: every library module, including Host, Selvage and Assurance)
-and `#assert_token_census` checks, over the ELABORATED TERM of every constant:
+-- the census imports `AxiomCensusResearch` (Minidregg and every Host module but the
+other exe roots) and `ObjectiveProofs` -- and `#assert_token_census` checks, over the
+ELABORATED TERM of every constant:
 
 1. **No foreign mint.**  No constant outside a private constructor's home module
    that can carry a value (anything but a theorem or a proof) mentions that
@@ -24,6 +26,19 @@ and `#assert_token_census` checks, over the ELABORATED TERM of every constant:
 3. **Layer-1 rows are backed.**  A row marked `L1 <theorem>` (the type carries the
    proposition it asserts, and the named theorem states the guarantee for every
    inhabitant) names a theorem that exists.
+5. **No mint that does not name the constructor**, for an `L2` evidence type: no instance of
+   a value-producing class (`Inhabited`, `Nonempty`, `Zero`, `One`, `OfNat`,
+   `EmptyCollection`) whose conclusion is about the type (a foreign module could mint
+   with `default` or `Classical.choice`); no `cast`, `unsafeCast`, `Eq.mp` or
+   `Eq.mpr` INTO the type in a value-carrying constant outside its home; and no
+   home-module definition (not a projection, not a generated auxiliary) that returns
+   the bare type with no proposition and no census token among its arguments (no
+   verification step, no evidence it derives from), unless the row's note names it
+   under `mints:`.
+6. **Restricted minting functions.**  A `restrict | function | modules | note` row
+   names a public function that mints a token (a genesis head, an identity from an
+   open) and the only modules that may call it; any other value-carrying caller
+   fails the build, and a planted call is required to be detected.
 4. **The detector detects (a plant per row).**  For EVERY row, a forgery (a
    definition exporting the bare private constructor) is added to a scratch copy of
    the environment and the foreign-mint check must flag it; the scratch environment
@@ -36,7 +51,8 @@ proving it) or `L2` (the guarantee rests on a runtime fact no proof can express,
 an oracle or IO verdict, or is not yet stated as one: it is opaque and protected
 by check 1 alone).
 -/
-import Minidregg
+import AxiomCensusResearch
+import ObjectiveProofs
 import TokenCensus.Table
 import Lean
 
@@ -52,17 +68,31 @@ structure Row where
   layer : String
   note : String
 
-/-- Parse `ctor | home | kind | layer | note` lines; `#` starts a comment line. -/
-def parseCensus (text : String) : Except String (Array Row) := do
+/-- A restricted minting function: only the listed modules (and its home) may
+name it in a value-carrying constant. -/
+structure Restriction where
+  function : Name
+  allowed : List Name
+  note : String
+
+/-- Parse `ctor | home | kind | layer | note` rows and
+`restrict | function | module, module | note` rows; `#` starts a comment line. -/
+def parseCensus (text : String) : Except String (Array Row × Array Restriction) := do
   let mut rows := #[]
+  let mut restrictions := #[]
   for raw in text.splitOn "\n" do
     let line := raw.trim
     if line.isEmpty || line.startsWith "#" then continue
     match (line.splitOn "|").map String.trim with
+    | ["restrict", function, allowed, note] =>
+        restrictions := restrictions.push
+          ⟨function.toName, (allowed.splitOn ",").map (·.trim.toName), note⟩
     | [ctor, home, kind, layer, note] =>
-        rows := rows.push ⟨ctor.toName, home.toName, kind, layer, note⟩
+        -- `[anonymous]` is the home of a declaration elaborated outside any module (a plant)
+        let home := if home == "[anonymous]" then Name.anonymous else home.toName
+        rows := rows.push ⟨ctor.toName, home, kind, layer, note⟩
     | _ => throw s!"token census: malformed row: {line}"
-  return rows
+  return (rows, restrictions)
 
 /-- The module a constant was declared in (the current module for a local one). -/
 def moduleOf (env : Environment) (constant : Name) : Name :=
@@ -103,6 +133,44 @@ def foreignMints (privates : NameMap (Name × Name)) (name : Name) (info : Const
   return (mints.filter fun (_, home) => home != module).map fun (ctor, home) =>
     (name, module, ctor, home)
 
+
+/-- Value-producing classes: an instance of one about a token mints it without
+naming its constructor. -/
+def mintingClasses : List Name :=
+  [``Inhabited, ``Nonempty, ``Zero, ``One, ``OfNat, ``EmptyCollection]
+
+/-- The head constant of a type's conclusion (binders stripped syntactically). -/
+def conclusionHead (type : Expr) : Option Name :=
+  type.getForallBody.getAppFn.constName?
+
+/-- The `L2` census types mentioned as arguments of a type's conclusion. -/
+def conclusionArgs (type : Expr) : List Name :=
+  type.getForallBody.getAppArgs.toList.filterMap fun arg => arg.getAppFn.constName?
+
+/-- The `cast`-like constants: each produces a value of a type it is told. -/
+def castLike : List Name := [``cast, ``unsafeCast, ``Eq.mp, ``Eq.mpr]
+
+/-- `cast`-like applications in an expression and the head of the type each
+produces (visited once per shared subterm). -/
+def castTargets (expr : Expr) : MetaM (Array Name) := do
+  let found ← IO.mkRef (#[] : Array Name)
+  expr.forEach fun sub => do
+    let target? := match sub.getAppFn.constName?, sub.getAppArgs with
+      | some ``cast, args => args[1]?
+      | some ``unsafeCast, args => args[1]?
+      | some ``Eq.mp, args => args[1]?
+      | some ``Eq.mpr, args => args[0]?
+      | _, _ => none
+    if let some target := target? then
+      if let some head := target.getAppFn.constName? then found.modify (·.push head)
+  found.get
+
+/-- The names a row's note justifies as bare minters (`mints: a, b`). -/
+def justifiedMinters (note : String) : List Name :=
+  match note.splitOn "mints:" with
+  | [_, rest] => ((rest.splitOn ";").headD "").splitOn "," |>.map (·.trim.toName)
+  | _ => []
+
 /-- The plant: a definition exporting the bare private constructor, added to the
 current (scratch) environment. -/
 def plantForge (ctor : Name) : MetaM Name := do
@@ -121,8 +189,8 @@ elab "#assert_token_census " table:ident : command => do
         | some (.lit (.strVal text)) => pure text
         | _ => throwError "token census: {table.getId} is not a string literal definition"
     | none => throwError "token census: unknown table {table.getId}"
-  let rows ← match parseCensus text with
-    | .ok rows => pure rows
+  let (rows, restrictions) ← match parseCensus text with
+    | .ok parsed => pure parsed
     | .error message => throwError message
   liftTermElabM do
     let env ← getEnv
@@ -156,6 +224,84 @@ elab "#assert_token_census " table:ident : command => do
         if moduleOf env name == home then homeUses := homeUses.insert ctor
       for (minter, module, ctor, home) in ← foreignMints privates name info do
         faults := faults.push s!"{ctor} (home {home}) is minted by {minter} in {module}"
+    -- 5. no mint that does not name the constructor (L2 types)
+    let l2Types : NameMap Row := present.foldl (fun map (name, user, _) =>
+      match rowMap.find? user, env.find? name with
+      | some row, some (.ctorInfo ctor) =>
+          if row.layer == "L2" && row.kind == "evidence" then map.insert ctor.induct row else map
+      | _, _ => map) {}
+    let l2Home : Name → Option Name := fun type => (l2Types.find? type).map (·.home)
+    let tokenTypes : NameMap Unit := present.foldl (fun map (name, _, _) =>
+      match env.find? name with
+      | some (.ctorInfo ctor) => map.insert ctor.induct ()
+      | _ => map) {}
+    for (name, info) in env.constants.toList do
+      if name.isInternal && !(isPrivateName name) then continue
+      let module := moduleOf env name
+      -- minting instances
+      if isInstanceCore env name then
+        if let some cls := conclusionHead info.type then
+          if mintingClasses.contains cls then
+            for type in conclusionArgs info.type do
+              if (l2Types.find? type).isSome then
+                faults := faults.push s!"{name} in {module}: a {cls} instance mints the L2 token {type} without its constructor"
+      -- casts into an L2 type
+      if let some value := info.value? then
+        let used := info.getUsedConstantsAsSet
+        if castLike.any used.contains && (used.toList.any fun c => (l2Types.find? c).isSome) then
+          let targets := (← castTargets value).toList.filter fun type => (l2Types.find? type).isSome
+          unless targets.isEmpty do
+            unless info matches .thmInfo _ do
+              unless ← isProp info.type do
+                for type in targets.eraseDups do
+                  if l2Home type != some module then
+                    faults := faults.push s!"{name} in {module} casts into the L2 token {type}"
+      -- bare minters at home
+      -- (a projection reads a token another value holds; an argument that is itself a census
+      -- token, or a proposition, is the verification step a derivation needs)
+      if let .defnInfo _ := info then
+        unless isInstanceCore env name || (env.getProjectionFnInfo? name).isSome ||
+            name.components.any (fun part => part.toString.startsWith "_") do
+          if let some type := conclusionHead info.type then
+            if let some row := l2Types.find? type then
+              if row.home == module then
+                let bare ← forallTelescopeReducing info.type fun binders _ => do
+                  for binder in binders do
+                    let binderType ← inferType binder
+                    if ← isProp binderType then return false
+                    if let some head := conclusionHead binderType then
+                      if (tokenTypes.find? head).isSome then return false
+                  return true
+                let user := (privateToUserName? name).getD name
+                if bare && !((justifiedMinters row.note).any fun listed => listed.isSuffixOf user) then
+                  faults := faults.push s!"{name} in {module} returns the bare L2 token {type} with no proposition among its arguments (justify it under `mints:` in the row's note)"
+    -- 6. restricted minting functions are called only where the census allows
+    for restriction in restrictions do
+      match env.find? restriction.function with
+      | none => faults := faults.push s!"stale restriction: {restriction.function} does not exist"
+      | some _ =>
+          let home := moduleOf env restriction.function
+          let allowed := home :: restriction.allowed
+          let check (name : Name) (info : ConstantInfo) : MetaM Bool := do
+            if name == restriction.function then return false
+            unless info.getUsedConstantsAsSet.contains restriction.function do return false
+            if info matches .thmInfo _ then return false
+            if ← isProp info.type then return false
+            return !allowed.contains (moduleOf (← getEnv) name)
+          for (name, info) in env.constants.toList do
+            if ← check name info then
+              faults := faults.push s!"restricted {restriction.function} is called by {name} in {moduleOf env name} (allowed: {allowed})"
+          -- its plant
+          let detected ← withoutModifyingEnv do
+            let fnInfo ← getConstInfo restriction.function
+            let forge := `Minidregg.TokenCensus.plantedCall ++ restriction.function
+            addDecl <| .defnDecl
+              { name := forge, levelParams := fnInfo.levelParams, type := fnInfo.type
+                value := mkConst restriction.function (fnInfo.levelParams.map mkLevelParam)
+                hints := .opaque, safety := .safe }
+            check forge (← getConstInfo forge)
+          unless detected do
+            faults := faults.push s!"restricted {restriction.function}: a planted call was NOT detected"
     -- 4. the detector detects: a plant per row
     let mut planted := 0
     for (name, user, _) in present do
@@ -171,7 +317,8 @@ elab "#assert_token_census " table:ident : command => do
     unless faults.isEmpty do
       throwError m!"token census failed ({faults.size}):\n{String.intercalate "\n" faults.toList}"
     logInfo m!"token census: {present.size} private constructors, all listed, none minted \
-      abroad; {planted} planted forgeries detected; {homeUses.size} constructors used at home"
+      abroad; {planted} planted forgeries detected; {homeUses.size} constructors used at home; \
+      {restrictions.size} restricted minting functions"
 
 -- A scan of every constant: its cost is the size of the tree, not a proof search.
 set_option maxHeartbeats 0 in
