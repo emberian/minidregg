@@ -7,7 +7,8 @@ A fixture family `bypass` over the deployed `Kernel.Receiving` pipeline (the rea
 step it is told to project.  The fixture law source (`laws`) classifies cell 1
 as a `declaredObject` whose committed law is `all [objectivePin [7]]`, cell 2 as
 a `streamEntry`, cell 4 as the `system` cell, cell 5 as a law-bearing birth, and
-nothing else.  It runs at `Id` with the pure verifier and an exact-append token.
+nothing else.  It runs at `Id` under an empty-transcript oracle (the bypass family makes
+no signature claims) and an exact-append token.
 
 * `bypass_refused_names_pin` -- a non-Objective write (artifact `-1`) to cell 1
   is refused `law (lawDenied 1 ⟨[0], objectivePin [7], -1, -1⟩)`: the clause.
@@ -36,7 +37,7 @@ open Minidregg.Compiler.CanonicalPolicyAdmission (PolicyStepContext)
 open Minidregg.Kernel.DurableDataIntent
 open Minidregg.Kernel.Receiving
 open Minidregg.Kernel.ReceivingLaw (Laws ResolvedLaw LawFault Unavailable Lawful)
-open Minidregg.Theory.Receiving (SigQuery Receiver)
+open Minidregg.Theory.Receiving (SigQuery Receiver Vouchers)
 open Minidregg.Theory.TypedAuthorization (Digest)
 
 set_option autoImplicit false
@@ -129,7 +130,7 @@ def bypass (id : FamilyId) (cells : List Nat) (stepFor : Nat → Option PolicySt
   bytes := fun _ => []
   command := fun _ => ()
   claims := fun _ _ _ => .ok []
-  prepare := fun _ _ _ => .ok ()
+  prepare := fun _ _ _ _ => .ok ()
   writes := fun {_} {durable} {_} _ => cells.map (write durable)
   writes_bound := by
     intro _ durable _ _ written member
@@ -144,17 +145,22 @@ def bypass (id : FamilyId) (cells : List Nat) (stepFor : Nat → Option PolicySt
   subject := fun _ => none
   witnessBytes := fun _ => 0
 
+/-- The fixture's oracle: an empty transcript (the fixture families make no
+signature claims, so it is never consulted). -/
+def oracle : CredentialSignatureIO.Oracle Id := .recorded ⟨[]⟩
+
+/-- The fixture family's receiver, judged by the fixture laws. -/
+abbrev judged (F : Family) := F.receiver laws oracle
+
 /-- The same receiver with the law judgement REMOVED: the mutation the tooth runs. -/
-def unjudged (F : Family) : Receiver journal :=
-  { F.receiver laws with lawFault := fun _ => none }
+def unjudged (F : Family) : Receiver journal (CredentialSignatureAdmission.receiverVerify oracle) :=
+  { F.receiver laws oracle with lawFault := fun _ => none }
 
 abbrev Exact : Durable → DataIntent rootBytes → Type := fun _ _ => Unit
 
 def append : (state : Durable) → (intent : DataIntent rootBytes) →
     Id (Receiver.Commit (Exact state intent) Unit) :=
   fun _ _ => pure (.exact ())
-
-def verifier : SigQuery → Id (Except String Bool) := Receiver.pureVerifier fun _ => true
 
 /-- An object write under `artifact`, beside a stream entry (no step). -/
 noncomputable def objectStep (artifact : Int) : Nat → Option PolicyStepContext :=
@@ -213,13 +219,13 @@ theorem fault_pin :
 
 section Pipeline
 
-variable (R : Receiver journal) {env : R.Env} {ingress : R.Ingress}
-  {prepared : R.Prepared env durable (R.command ingress)}
+variable {verify : SigQuery → Id (Except String Bool)} (R : Receiver journal verify)
+  {env : R.Env} {ingress : R.Ingress} {prepared : R.Prepared env durable (R.command ingress)}
 
 theorem admitVia_error {reason : Theory.Receiving.Refusal R.Reject R.Fault}
     (noClaims : R.claims env durable ingress = .ok [])
-    (refused : R.admit env durable ingress (Receiver.vouches []) = .error reason) :
-    R.admitVia verifier env durable ingress = pure (.error reason) := by
+    (refused : R.admit env durable ingress Vouchers.empty = .error reason) :
+    R.admitVia env durable ingress = pure (.error reason) := by
   unfold Receiver.admitVia
   simp only [noClaims, Receiver.verifyAll, pure_bind]
   split
@@ -233,9 +239,9 @@ theorem admitVia_error {reason : Theory.Receiving.Refusal R.Reject R.Fault}
 
 theorem admitVia_ok
     (noClaims : R.claims env durable ingress = .ok [])
-    (prepares : R.prepare env durable (R.command ingress) = .ok prepared)
+    (prepares : R.prepare Vouchers.empty env durable (R.command ingress) = .ok prepared)
     (shaped : R.shape prepared = true) (lawful : R.lawFault prepared = none) :
-    ∃ admission, R.admitVia verifier env durable ingress = pure (.ok admission) := by
+    ∃ admission, R.admitVia env durable ingress = pure (.ok admission) := by
   unfold Receiver.admitVia
   simp only [noClaims, Receiver.verifyAll, pure_bind]
   split
@@ -250,10 +256,10 @@ refused naming the fault ... -/
 theorem receive_faulted {fault : R.Fault}
     (decoded : R.decode [] = some ingress) (isFresh : R.replay env durable ingress = none)
     (noClaims : R.claims env durable ingress = .ok [])
-    (prepares : R.prepare env durable (R.command ingress) = .ok prepared)
+    (prepares : R.prepare Vouchers.empty env durable (R.command ingress) = .ok prepared)
     (shaped : R.shape prepared = true) (faulted : R.lawFault prepared = some fault) :
-    R.receive verifier append env durable [] = pure (.refused (.law fault)) := by
-  have refused := R.admit_law_refused (ok := Receiver.vouches []) noClaims (by simp) prepares
+    R.receive append env durable [] = pure (.refused (.law fault)) := by
+  have refused := R.admit_law_refused (vouchers := Vouchers.empty) noClaims (by simp) prepares
     shaped faulted
   unfold Receiver.receive
   simp only [decoded, isFresh, admitVia_error R noClaims refused]
@@ -263,10 +269,10 @@ theorem receive_faulted {fault : R.Fault}
 theorem receive_lawful
     (decoded : R.decode [] = some ingress) (isFresh : R.replay env durable ingress = none)
     (noClaims : R.claims env durable ingress = .ok [])
-    (prepares : R.prepare env durable (R.command ingress) = .ok prepared)
+    (prepares : R.prepare Vouchers.empty env durable (R.command ingress) = .ok prepared)
     (shaped : R.shape prepared = true) (lawful : R.lawFault prepared = none) :
     ∃ admission witness,
-      R.receive verifier append env durable [] = pure (.committed ingress admission witness) := by
+      R.receive append env durable [] = pure (.committed ingress admission witness) := by
   obtain ⟨admission, admitted⟩ := admitVia_ok R noClaims prepares shaped lawful
   refine ⟨admission, (), ?_⟩
   unfold Receiver.receive
@@ -276,11 +282,11 @@ theorem receive_lawful
 end Pipeline
 
 theorem bypass_fresh' (id : FamilyId) (stepFor : Nat → Option PolicyStepContext) (a b : Nat) :
-    ((bypass id [a, b] stepFor).receiver laws).replay () durable () = none := by
+    ((bypass id [a, b] stepFor).receiver laws oracle).replay () durable () = none := by
   simp [Receiver.replay, Family.receiver, journal, bypass, fresh]
 
 theorem bypass_fresh (id : FamilyId) (stepFor : Nat → Option PolicyStepContext) :
-    ((bypass id [1, 2] stepFor).receiver laws).replay () durable () = none :=
+    ((bypass id [1, 2] stepFor).receiver laws oracle).replay () durable () = none :=
   bypass_fresh' id stepFor 1 2
 
 /-! ## The teeth -/
@@ -289,8 +295,8 @@ theorem bypass_fresh (id : FamilyId) (stepFor : Nat → Option PolicyStepContext
 law-bearing cell 1 under a non-Objective step and judges nothing in `prepare`
 is refused by the Receiver: `lawDenied` at the pin, path `[0]`, reading `-1`. -/
 theorem bypass_refused_names_pin :
-    ((bypass .declaredResourceController [1, 2] (objectStep (-1))).receiver laws).receive
-        verifier append () durable [] =
+    ((bypass .declaredResourceController [1, 2] (objectStep (-1))).receiver laws oracle).receive
+        append () durable [] =
       pure (.refused (.law (.lawDenied 1
         ⟨[0], Minidregg.Pred.objectivePin [pinned], some (-1), some (-1)⟩))) :=
   receive_faulted _ rfl (bypass_fresh .declaredResourceController (objectStep (-1))) rfl rfl
@@ -303,7 +309,7 @@ the refusal above is the Receiver's law judgement and nothing else. -/
 theorem bypass_commits_without_judgement :
     ∃ admission witness,
       (unjudged (bypass .declaredResourceController [1, 2] (objectStep (-1)))).receive
-          verifier append () durable [] = pure (.committed () admission witness) :=
+          append () durable [] = pure (.committed () admission witness) :=
   receive_lawful _ rfl (bypass_fresh .declaredResourceController (objectStep (-1))) rfl rfl
     (shape_ok .declaredResourceController (objectStep (-1))) rfl
 
@@ -319,8 +325,8 @@ theorem fault_lawful :
 the kernel-only stream entry (cell 2) is written by a family its row names. -/
 theorem lawful_commits :
     ∃ admission witness,
-      ((bypass .declaredResourceController [1, 2] (objectStep pinned)).receiver laws).receive
-          verifier append () durable [] = pure (.committed () admission witness) :=
+      ((bypass .declaredResourceController [1, 2] (objectStep pinned)).receiver laws oracle).receive
+          append () durable [] = pure (.committed () admission witness) :=
   receive_lawful _ rfl (bypass_fresh .declaredResourceController (objectStep pinned)) rfl rfl
     (shape_ok .declaredResourceController (objectStep pinned)) fault_lawful
 
@@ -328,8 +334,8 @@ theorem lawful_commits :
 the committed fixture: their premise is inhabited. -/
 theorem lawful_commits_judged :
     ∃ admission witness,
-      ((bypass .declaredResourceController [1, 2] (objectStep pinned)).receiver laws).receive
-          verifier append () durable [] = pure (.committed () admission witness) ∧
+      ((bypass .declaredResourceController [1, 2] (objectStep pinned)).receiver laws oracle).receive
+          append () durable [] = pure (.committed () admission witness) ∧
       (∀ written (member : written ∈ (bypass .declaredResourceController [1, 2]
           (objectStep pinned)).writes (env := ()) (durable := durable) (command := ())
             admission.accepted.prepared),
@@ -353,8 +359,8 @@ theorem lawful_commits_judged :
 
 /-- A law-bearing write with no step is refused, not admitted. -/
 theorem noStep_refused :
-    ((bypass .declaredResourceController [1, 2] (fun _ => none)).receiver laws).receive
-        verifier append () durable [] = pure (.refused (.law (.lawUnavailable 1 .noStep))) := by
+    ((bypass .declaredResourceController [1, 2] (fun _ => none)).receiver laws oracle).receive
+        append () durable [] = pure (.refused (.law (.lawUnavailable 1 .noStep))) := by
   refine receive_faulted _ rfl (bypass_fresh .declaredResourceController (fun _ => none)) rfl rfl
     (shape_ok .declaredResourceController (fun _ => none)) ?_
   change Family.lawFault (F := bypass .declaredResourceController [1, 2] (fun _ => none))
@@ -366,8 +372,8 @@ theorem noStep_refused :
 
 /-- A family not named in the `streamEntry` row writing one is refused. -/
 theorem foreignWriter_refused :
-    ((bypass .clockTick [1, 2] (objectStep pinned)).receiver laws).receive
-        verifier append () durable [] =
+    ((bypass .clockTick [1, 2] (objectStep pinned)).receiver laws oracle).receive
+        append () durable [] =
       pure (.refused (.law (.kernelOnlyForeignWriter 2 .streamEntry .clockTick))) := by
   refine receive_faulted _ rfl (bypass_fresh .clockTick (objectStep pinned)) rfl rfl
     (shape_ok .clockTick (objectStep pinned)) ?_
@@ -381,8 +387,8 @@ theorem foreignWriter_refused :
 
 /-- A step offered for a kernel-only cell is a registry mismatch. -/
 theorem registryMismatch_refused :
-    ((bypass .declaredResourceController [1, 2] (fun _ => some (stepAt pinned))).receiver laws).receive
-        verifier append () durable [] =
+    ((bypass .declaredResourceController [1, 2] (fun _ => some (stepAt pinned))).receiver laws oracle).receive
+        append () durable [] =
       pure (.refused (.law (.registryMismatch 2 .streamEntry))) := by
   refine receive_faulted _ rfl (bypass_fresh .declaredResourceController (fun _ => some (stepAt pinned))) rfl rfl
     (shape_ok .declaredResourceController (fun _ => some (stepAt pinned))) ?_
@@ -396,8 +402,8 @@ theorem registryMismatch_refused :
 
 /-- A write to a cell no registry row classifies is refused (fail-closed). -/
 theorem unclassified_refused :
-    ((bypass .declaredResourceController [9, 2] (fun _ => none)).receiver laws).receive
-        verifier append () durable [] = pure (.refused (.law (.unclassified 9))) := by
+    ((bypass .declaredResourceController [9, 2] (fun _ => none)).receiver laws oracle).receive
+        append () durable [] = pure (.refused (.law (.unclassified 9))) := by
   refine receive_faulted _ rfl (bypass_fresh' .declaredResourceController (fun _ => none) 9 2) rfl rfl
     (shape_ok .declaredResourceController (fun _ => none) 9 2) ?_
   change Family.lawFault (F := bypass .declaredResourceController [9, 2] (fun _ => none))
@@ -410,8 +416,8 @@ theorem unclassified_refused :
 /-- A law-bearing birth is refused until the registry names its parent's law,
 whatever step the family offers: the birth is read from the write itself. -/
 theorem birth_refused :
-    ((bypass .declaredResourceController [5, 2] (objectStep pinned)).receiver laws).receive
-        verifier append () durable [] = pure (.refused (.law (.lawUnavailable 5 .birth))) := by
+    ((bypass .declaredResourceController [5, 2] (objectStep pinned)).receiver laws oracle).receive
+        append () durable [] = pure (.refused (.law (.lawUnavailable 5 .birth))) := by
   refine receive_faulted _ rfl (bypass_fresh' .declaredResourceController (objectStep pinned) 5 2) rfl
     rfl (shape_ok .declaredResourceController (objectStep pinned) 5 2) ?_
   change Family.lawFault (F := bypass .declaredResourceController [5, 2] (objectStep pinned))
