@@ -122,22 +122,27 @@ Boolean. The physical image equality is checked by the agreement adapter before
 recording the reservation. This does not itself implement a reservation law. -/
 structure CurrentAdmission {Custody F : Type} [Field F] [DecidableEq F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
-    (ambient : Ambient) (ground : Ground deployment) (command : Command)
+    (ambient : Ambient) (durable : Durable) (command : Command)
     (signed : SignedCommand) (projection : Projection Custody) where
-  prepared : PreparedInvocation deployment profile ambient ground command
+  /-- The joint candidate is admitted on the full shape (its YES proposal records the
+  source image): the ground of its preparation is the image's own loads. -/
+  directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable
+  authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot
+  prepared : PreparedInvocation deployment profile ambient
+    (Minidregg.Compiler.ServedBasis.Ground.full durable directory authority) command
   accepted : AcceptedInvocation prepared signed
   shape : PhysicalShape prepared
   domain_exact : projection.domain = deployment.domain
   record_exact : projection.intent = IntentRecord.ofIntent (accepted.dataIntent shape)
-  ready : (accepted.dataIntent shape).preflight ground.view = .ok ()
+  ready : (accepted.dataIntent shape).preflight durable.snapshot = .ok ()
 
 /-- Every authority/clock/audience guard of the existing receiver belongs to
 what the reservation must protect. No submitter-declared footprint is used. -/
 theorem admitted_guard_in_footprint {Custody F : Type} [Field F] [DecidableEq F]
     {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
-    {ambient : Ambient} {ground : Ground deployment} {command : Command}
+    {ambient : Ambient} {durable : Durable} {command : Command}
     {signed : SignedCommand} {projection : Projection Custody}
-    (admission : CurrentAdmission deployment profile ambient ground command signed projection)
+    (admission : CurrentAdmission deployment profile ambient durable command signed projection)
     (guard : ReadGuard) (member : guard ∈ (admission.accepted.dataIntent admission.shape).readGuards) :
     guard.cellId ∈ projection.footprint := by
   unfold Projection.footprint
