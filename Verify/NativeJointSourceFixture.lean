@@ -189,7 +189,9 @@ def openReplica (root : System.FilePath) (helpers : Helpers) (index : Nat) (writ
   let config := {baseConfig root helpers context index with
     expectedSeed := NativeHost.seedIdentity built.image.seed}
   let loaded ← IO.ofExcept (← DurableReceiverIO.load config.physicalTransport ResourceBirthCodec.rootBytes)
-  let verified ← IO.ofExcept ((← NativeHostReplay.verifyLoaded config loaded).mapError
+  let ⟨_, reader⟩ ← IO.ofExcept ((← DurableHistoryStore.readerOf config.physicalTransport
+    ResourceBirthCodec.rootBytes loaded).mapError (fun detail => s!"source fixture history reader: {detail}"))
+  let verified ← IO.ofExcept ((← NativeHostReplay.verifyLoaded config reader loaded).mapError
     (fun failure => s!"source fixture replay refused: {failure.detail}"))
   let runtime ← openRuntime (replicaSpec root helpers index listen peers)
     (journalPath root index) context writable
