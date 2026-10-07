@@ -60,7 +60,7 @@ theorem readGuards_exact (accepted : Accepted profile config pins durable height
   · exact accepted.appChecked.guardsCurrent guard app
 
 /-- The writes the issue commits: `finalWrites`, the admitted birth's own; its
-naming check ran over exactly these (`Accepted.births_named`). -/
+naming check ran over exactly these (`Accepted.named`). -/
 def writes (accepted : Accepted profile config pins durable height ingress) :
     List DataWrite := finalWrites accepted.birth
 
@@ -132,7 +132,7 @@ factory law admitted.  The intent commits exactly `finalWrites`. -/
 theorem intent_births_named (accepted : Accepted profile config pins durable height ingress) :
     ∀ write ∈ (intent accepted).writes, ResourceBirthController.Concrete.bornIn write = true →
       ReceivingLaw.namesBirth accepted.birth.factoryStep write = true :=
-  accepted.births_named
+  accepted.named
 
 #assert_axioms intent_births_named
 
