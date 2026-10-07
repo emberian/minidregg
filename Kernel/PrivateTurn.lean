@@ -275,7 +275,7 @@ What this file does NOT claim, named:
      `step` owes it (`hblind` — and `leaky_step_leaks` shows the obligation is real).
 -/
 
-/-- info: 'Minidregg.Kernel.privateTurn_public_indistinguishable' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.privateTurn_public_indistinguishable' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms privateTurn_public_indistinguishable
 
 /-- info: 'Minidregg.Kernel.NoteTransfer.witness_hidden' depends on axioms: [propext, Classical.choice, Quot.sound] -/

@@ -286,7 +286,7 @@ honest transitive footprint, not a claim of axiom-free proofs. -/
 /-- info: 'Minidregg.Kernel.create_conserves' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms create_conserves
 
-/-- info: 'Minidregg.Kernel.create_unbacked_breaks' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.create_unbacked_breaks' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms create_unbacked_breaks
 
 /-- info: 'Minidregg.Kernel.gwrite_conserves' depends on axioms: [propext, Quot.sound] -/
@@ -295,10 +295,10 @@ honest transitive footprint, not a claim of axiom-free proofs. -/
 /-- info: 'Minidregg.Kernel.gwrite_umap_frame' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms gwrite_umap_frame
 
-/-- info: 'Minidregg.Kernel.uproj_create' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.uproj_create' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms uproj_create
 
-/-- info: 'Minidregg.Kernel.uproj_gwrite_frame' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.uproj_gwrite_frame' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms uproj_gwrite_frame
 
 end Minidregg.Kernel

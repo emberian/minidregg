@@ -421,7 +421,7 @@ theorem stated_soundness_term_never_negligible
 #guard_msgs (whitespace := lax) in #print axioms Row.holdsMod_iff_dvd_residual
 /-- info: 'Minidregg.Theory.IntegerFingerprint.Row.fingerprint_complete' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Row.fingerprint_complete
-/-- info: 'Minidregg.Theory.IntegerFingerprint.mem_undetected' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.IntegerFingerprint.mem_undetected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms mem_undetected
 /-- info: 'Minidregg.Theory.IntegerFingerprint.pow_card_undetected_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms pow_card_undetected_le
@@ -453,9 +453,9 @@ theorem stated_soundness_term_never_negligible
 #guard_msgs (whitespace := lax) in #print axioms adaptive_quotient_defeats_fingerprint_zmod
 /-- info: 'Minidregg.Theory.IntegerFingerprint.exampleSpace_prime' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms exampleSpace_prime
-/-- info: 'Minidregg.Theory.IntegerFingerprint.exampleSpace_floor' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.IntegerFingerprint.exampleSpace_floor' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms exampleSpace_floor
-/-- info: 'Minidregg.Theory.IntegerFingerprint.undetected_nonempty' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.IntegerFingerprint.undetected_nonempty' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms undetected_nonempty
 /-- info: 'Minidregg.Theory.IntegerFingerprint.undetected_card_eq_one' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms undetected_card_eq_one
@@ -463,7 +463,7 @@ theorem stated_soundness_term_never_negligible
 #guard_msgs (whitespace := lax) in #print axioms forgedRow_counting_bound
 /-- info: 'Minidregg.Theory.IntegerFingerprint.babybear_excluded_from_six_variables' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms babybear_excluded_from_six_variables
-/-- info: 'Minidregg.Theory.IntegerFingerprint.goldilocks_clears_limber_min' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Theory.IntegerFingerprint.goldilocks_clears_limber_min' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms goldilocks_clears_limber_min
 
 /-- info: 'Minidregg.Theory.IntegerFingerprint.babybear_quartic_extension_below_lambda' depends on axioms: [propext, Classical.choice, Quot.sound] -/
