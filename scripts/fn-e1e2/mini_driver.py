@@ -146,7 +146,11 @@ assert bytes.fromhex(projected[15]) == r_carrier.read_bytes()
 assert projected[12] == r_verified[2]
 assert bytes.fromhex(projected[13]).decode("ascii") == READY["r_message_id"]
 assert registered.read_bytes() != preview_cursor.read_bytes()
-scope = {"history": projected[1], "incarnation": projected[2],
+run("b-identity", [BRIDGE, "--fn", "identity", READY["b_control"]])
+identity = dict(w.split("=", 1) for w in
+                (OUT / "b-identity.stdout").read_text("ascii").split() if "=" in w)
+scope = {"node": identity["node"], "schema": identity["schema"],
+         "history": projected[1], "incarnation": projected[2],
          "consumer": projected[3], "principal": projected[4],
          "query": projected[5], "queryVersion": int(projected[6]),
          "viewVersion": int(projected[7]), "registrationEpoch": int(projected[8])}

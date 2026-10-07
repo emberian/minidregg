@@ -30,6 +30,8 @@
 # updated 2026-10-04: Kernel.ClockLaw (the clock law and the clock write law step) enters with the pay receivers that judge the clock write (kn-law-bypass)  [counts: Minidregg 0 1, Theory 74 161, Kernel 359 504, Pred 7 11, Effects 0 3, Compiler 141 311, Selvage 12 153, Assurance 0 153, Host 77 110, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 12, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-05: batch n3 (ob-ltuo x5 + rollup-1 + rollup-2 + ob-roadmap + protocol-night rooms/pd53/rotpub on 5d0b452d)  [counts: Minidregg 0 1, Theory 74 162, Kernel 369 514, Pred 7 11, Effects 0 3, Compiler 141 312, Selvage 12 153, Assurance 0 153, Host 78 111, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-05: batch n4 (ob-ltuo-s4 + ob-lt2-parser + ob8 + protocol-night w04b on 47487ee4)  [counts: Minidregg 0 1, Theory 74 162, Kernel 389 534, Pred 7 11, Effects 0 3, Compiler 141 312, Selvage 12 153, Assurance 0 153, Host 86 119, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-07: P1b-FN-FRAMES: Host.Main now reaches the pinned fn wire grammar (Compiler.FnWirePinned and its closure: Sized, Consumer, Json, Blake3 KATs) to read --frame replies and bind fn identity  [counts: Minidregg 0 1, Theory 75 162, Kernel 389 534, Pred 7 11, Effects 0 3, Compiler 144 313, Selvage 12 153, Assurance 0 153, Host 86 119, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-07: P1d-FN-FRAMES: Host.Main reaches the pinned fn wire grammar (FnWirePinned, FnWireSized, FnWireConsumer) to read --frame replies and bind fn identity  [counts: Minidregg 0 1, Theory 75 162, Kernel 389 534, Pred 7 11, Effects 0 3, Compiler 145 314, Selvage 12 153, Assurance 0 153, Host 86 119, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 Compiler.Air
 Compiler.AirBignum
 Compiler.AirFlatten
@@ -79,9 +81,13 @@ Compiler.Evaluator
 Compiler.FiniteDependentMapCachedOrdering
 Compiler.FiniteDependentMapCodec
 Compiler.FnEvidenceCodec
+Compiler.FnWireConsumer
 Compiler.FnWireFncu
 Compiler.FnWireGrammar
+Compiler.FnWireJson
+Compiler.FnWirePinned
 Compiler.FnWireRoundTrip
+Compiler.FnWireSized
 Compiler.GenericSimplexCodec
 Compiler.GenericSimplexIO
 Compiler.GenericSimplexSourceAnchor
@@ -667,6 +673,7 @@ Selvage.Sumcheck
 Selvage.SumcheckReduction
 Theory.AcceptedCellEffect
 Theory.AssertAxioms
+Theory.AssertCompiled
 Theory.AuthMap
 Theory.AuthorizationDeclaration
 Theory.AxiomPin
