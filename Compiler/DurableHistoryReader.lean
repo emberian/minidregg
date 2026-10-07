@@ -30,7 +30,7 @@ Rules for port lanes:
   `byTx`/`spent` for the keys it means.
 * A `Refusal` is surfaced by its `message` (it names the height); never mapped
   to "absent". Absence is `TxAnswer.absent` / a `Spent` answer with `value = none`,
-  each carrying the spent map's opening.
+  each carrying the index's opening.
 * Nothing here can be built by a port: `Head store` is indexed by the opened
   Store's identity and has a private constructor (only the open's `Head.verify`
   / `Head.genesis` make one; both, and `StoreIdentity.ofOpen`, are on the token
@@ -39,7 +39,7 @@ Rules for port lanes:
   `scripts/kn2/check-planted-api-faults.sh` keeps that true.
 -/
 import Compiler.DurableHistory
-import Compiler.DurableSpent
+import Compiler.DurableIndex
 import Compiler.DurableReceiverCodec
 import Compiler.DurableCheckpointCodec
 import Kernel.DurableView
@@ -64,24 +64,27 @@ structure Record {store : StoreIdentity} (head : Head store) (height : Nat) wher
   record : IntentRecord
   decoded : recordFrame.decode verified.record = some record
 
-/-- A transaction id's record: the spent map's opening names its height, the
-record read there carries that id. -/
+/-- A transaction id's record: the index's opening (family 1) names its height,
+the record read there carries that id. -/
 structure ByTx {store : StoreIdentity} (head : Head store) (transactionId : TransactionId) where
   height : Nat
-  answer : DurableSpent.Opens head.spentRoot (DurableSpent.transactionKey transactionId) (some height)
+  answer : DurableIndex.Opens head.indexRoot (DurableIndex.transactionKey transactionId)
+    (some (DurableIndex.heightValue height))
   read : Record head height
   carries : read.record.transactionId = transactionId
 
 /-- A transaction id's answer. ABSENCE IS A VALUE THAT CARRIES ITS OPENING: a
-reader cannot report "not accepted" without the spent map's verified absence. -/
+reader cannot report "not accepted" without the index's verified absence. -/
 inductive TxAnswer {store : StoreIdentity} (head : Head store) (transactionId : TransactionId) where
   | present (found : ByTx head transactionId)
-  | absent (opens : DurableSpent.Opens head.spentRoot (DurableSpent.transactionKey transactionId) none)
+  | absent (opens : DurableIndex.Opens head.indexRoot (DurableIndex.transactionKey transactionId) none)
 
 /-- The spent bit of a nullifier: the inserting height or absence, opened
-against the head's spent root. -/
-abbrev Spent {store : StoreIdentity} (head : Head store) (nullifier : StableNullifier) :=
-  DurableSpent.Answer head.spentRoot (DurableSpent.nullifierKey nullifier)
+against the head's index root (family 0). -/
+structure Spent {store : StoreIdentity} (head : Head store) (nullifier : StableNullifier) where
+  value : Option Nat
+  opens : DurableIndex.Opens head.indexRoot (DurableIndex.nullifierKey nullifier)
+    (value.map DurableIndex.heightValue)
 
 /-- The state after `height` records, with what makes it authentic:
 * the base is the seed (height 0, the pinned genesis) or a checkpoint whose
@@ -161,7 +164,7 @@ theorem lookup_answers_none {store : StoreIdentity} {head : Head store} (transac
       Snapshot.lookupRecorded transactionId
           (answers.filterMap fun answer => answer.2.recorded.map (answer.1, ·)) = none →
       ∀ answer ∈ answers, answer.1 = transactionId →
-        ∃ opens : DurableSpent.Opens head.spentRoot (DurableSpent.transactionKey answer.1) none,
+        ∃ opens : DurableIndex.Opens head.indexRoot (DurableIndex.transactionKey answer.1) none,
           answer.2 = .absent opens
   | [], _, _, member, _ => by cases member
   | ⟨id, reply⟩ :: rest, miss, answer, member, same => by
@@ -184,14 +187,14 @@ theorem lookup_answers_none {store : StoreIdentity} {head : Head store} (transac
         exact lookup_answers_none transactionId rest missRest answer inRest same
 
 /-- **A miss on a declared key is a verified absence**: if a declared id is
-not in the view's added journal, every answer for it carries the spent map's
-absence opening. -/
+not in the view's added journal, every answer for it carries the index's
+absence opening (family 1). -/
 theorem toFootprint_lookup_none {store : StoreIdentity} {head : Head store} {keys : Keys} (footprint : VerifiedFootprint head keys)
     (transactionId : TransactionId)
     (miss : Snapshot.lookupRecorded transactionId footprint.toFootprint.recorded = none)
     (answer : (id : TransactionId) × TxAnswer head id) (member : answer ∈ footprint.transactions)
     (same : answer.1 = transactionId) :
-    ∃ opens : DurableSpent.Opens head.spentRoot (DurableSpent.transactionKey answer.1) none,
+    ∃ opens : DurableIndex.Opens head.indexRoot (DurableIndex.transactionKey answer.1) none,
       answer.2 = .absent opens :=
   lookup_answers_none transactionId footprint.transactions miss answer member same
 

@@ -135,7 +135,7 @@ theorem view_lookup_declared (basis : Basis deployment store) (transactionId : T
       intent = Kernel.DurableCheckpoint.IntentRecord.erase found.read.record :=
   Served.recordedAt_some basis.footprint basis.served.height transactionId hit
 
-/-- **A consumed bit of a basis is the spent map's verified answer at the
+/-- **A consumed bit of a basis is the index's verified answer at the
 served height** (`Served.spentAt_true`). -/
 theorem view_consumed_declared (basis : Basis deployment store) (nullifier : StableNullifier)
     (consumed : basis.view.model.consumed nullifier = true) :
@@ -351,13 +351,13 @@ theorem recorded_light_some {store : StoreIdentity} (basis : Basis deployment st
   · cases answered
 
 /-- **A light answer of "not recorded" is a verified absence at the served
-height**: the spent map opens the transaction id as absent, or the transaction
+height**: the index opens the transaction id as absent, or the transaction
 was accepted above the served height (`Served.recordedAt_none`). -/
 theorem recorded_light_none {store : StoreIdentity} (basis : Basis deployment store)
     (transactionId : TransactionId)
     (answered : (Ground.ofBasis basis).recorded transactionId = some none) :
     ∃ answer ∈ basis.footprint.transactions, answer.1 = transactionId ∧
-      ((∃ opens : DurableSpent.Opens basis.head.spentRoot (DurableSpent.transactionKey answer.1) none,
+      ((∃ opens : DurableIndex.Opens basis.head.indexRoot (DurableIndex.transactionKey answer.1) none,
           answer.2 = .absent opens) ∨
         ∃ found : ByTx basis.head answer.1, answer.2 = .present found ∧ basis.height < found.height) := by
   unfold recorded at answered
@@ -465,7 +465,7 @@ def markerSpent (ground : Ground deployment) (marker : Nat) : Option Bool :=
   else none
 
 /-- **A marker answer is the authority's spent bit**, and on the light route the
-spent map's verified answer at the served height (`Basis.view_consumed_declared`). -/
+index's verified answer at the served height (`Basis.view_consumed_declared`). -/
 theorem markerSpent_some (ground : Ground deployment) {marker : Nat} {spent : Bool}
     (answered : ground.markerSpent marker = some spent) : spent = ground.authority.spent marker := by
   unfold markerSpent at answered

@@ -97,7 +97,7 @@ def loadExact (transport : Transport) : IO (Loaded rootBytes) := do
   | .error detail => throw (IO.userError s!"FAIL reopen: {detail}")
 
 /-- The height that consumed `nullifier`, through the Store-backed Reader: the
-spent map's verified answer, never the opened snapshot's suffix-only `consumed`. -/
+index's verified answer, never the opened snapshot's suffix-only `consumed`. -/
 def spentHeight (transport : Transport) (n : Nat) : IO (Option Nat) := do
   let loaded ← loadExact transport
   let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf transport rootBytes loaded with
@@ -306,9 +306,9 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   let .ok key ← transport.key | throw (IO.userError "FAIL key")
   let loadedSecond ← loadExact secondTransport
   let secondFrontier := loadedSecond.frontier.getD []
-  let secondSpent ← match ← loadedSecond.headSpentRoot secondTransport key with
+  let secondSpent ← match ← loadedSecond.headIndexRoot secondTransport key with
     | .ok root => pure root
-    | .error message => throw (IO.userError s!"FAIL spent root: {message}")
+    | .error message => throw (IO.userError s!"FAIL index root: {message}")
   let honest := sealCheckpoint key rootBytes 1 loadedSecond.chain secondFrontier secondSpent
     (DurableCheckpoint.State.ofSnapshot loadedSecond.image loadedSecond.snapshot)
   let forgedMac := { honest with mac := List.replicate 32 7 }

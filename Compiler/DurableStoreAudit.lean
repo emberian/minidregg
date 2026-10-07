@@ -9,11 +9,12 @@ seed, everything the Store holds:
 1. the log chain over every record and every tag's MAC (`verifyTags`);
 2. the accumulator: every tag's carried frontier digest (`walkFrontier`) and
    every stored accumulator node row (space 1) against the honest node;
-3. the spent map: the root after every record (each tag's carried spent root)
-   and every stored row version (space 2), by inserting each record's keys in
-   order over an in-memory row map;
+3. the index trie: the root after every record (each tag's carried index root)
+   and every stored row (space 3, newest version at the head), by applying each
+   record's rows (`IndexRows.apply`) in order over an in-memory row map — a row
+   missing from the Store, or a different one, is refused naming its prefix;
 4. every retained checkpoint: its body equals the genesis replay at its height
-   (state, chain, frontier, spent root);
+   (state, chain, frontier, index root);
 5. the head root against the replayed root.
 
 The Host's `store-audit` arm runs this, then `NativeHost.audit` (every signed
@@ -89,13 +90,13 @@ theorem walkFrontier_ok :
 structure Report where
   records : Nat
   accumulatorNodes : Nat
-  spentKeys : Nat
-  spentRows : Nat
+  indexKeys : Nat
+  indexRows : Nat
   checkpoints : Nat
   deriving Repr
 
 def Report.line (report : Report) : String :=
-  s!"store audit: {report.records} records; chain, tags, accumulator ({report.accumulatorNodes} nodes), spent map ({report.spentKeys} keys, {report.spentRows} node versions), {report.checkpoints} checkpoints and the head root re-derived from genesis"
+  s!"store audit: {report.records} records; chain, tags, accumulator ({report.accumulatorNodes} nodes), index ({report.indexKeys} keys, {report.indexRows} nodes), {report.checkpoints} checkpoints and the head root re-derived from genesis"
 
 def refused {α : Type} (name : String) : Except String α := .error s!"store audit refused: {name}"
 
@@ -110,26 +111,27 @@ def honestNodes (entries : List Entry) (chains : List Digest) : List ((Nat × Na
           go (height + 1) (DurableHistory.Frontier.push frontier leaf) rest
   go 0 [] (entries.zip (chains.drop 1))
 
-/-- Insert every record's keys from the empty map, checking each tag's carried
-spent root; the final rows (newest version per prefix) and the key count. -/
-def rebuildSpent (records : List IntentRecord) (entries : List Entry) :
-    Except String (List (List Bool × DurableSpent.Row) × Nat) := do
-  let mut rows : List (List Bool × DurableSpent.Row) := []
-  let mut root := DurableSpent.emptyDigest
+/-- Apply every record's rows from the empty trie, checking each tag's carried
+index root; the final rows (newest version per prefix) and the key count. -/
+def rebuildIndex (records : List IntentRecord) (entries : List Entry) :
+    Except String (List (List Bool × DurableIndex.Row) × Nat) := do
+  let mut rows : List (List Bool × DurableIndex.Row) := []
+  let mut root := DurableIndex.emptyDigest
   let mut keys := 0
   for (height, record, entry) in (List.range' 1 records.length).zip (records.zip entries) do
-    let recordKeys := DurableSpent.recordKeys record.transactionId record.nullifiers
-    let store := DurableSpent.overlay (fun _ => none) rows
-    let (root', written) ← (DurableSpent.insertAll store root height recordKeys).mapError
-      fun message => s!"store audit refused: spent map at height {height}: {message}"
+    let recordKeys := DurableIndex.IndexRows.keys record.transactionId record.nullifiers
+    let store := DurableIndex.overlay (fun _ => none) rows
+    let (root', written) ← (DurableIndex.IndexRows.apply store root height record.transactionId
+        record.nullifiers).mapError
+      fun message => s!"store audit refused: index at height {height}: {message}"
     rows := written ++ rows.filter fun row => !written.any (·.1 = row.1)
     root := root'
     keys := keys + recordKeys.length
     match trailerCarried entry.tag with
     | some carried =>
-        if carried.spentRoot ≠ root then
-          throw s!"store audit refused: the tag at height {height} carries a spent root the log does not reach"
-    | none => throw s!"store audit refused: the tag at height {height} is not a v3 trailer"
+        if carried.indexRoot ≠ root then
+          throw s!"store audit refused: the tag at height {height} carries an index root the log does not reach"
+    | none => throw s!"store audit refused: the tag at height {height} is not a v4 trailer"
   return (rows, keys)
 
 /-- Every retained checkpoint, oldest first (walked down from the head). -/
@@ -174,23 +176,23 @@ def audit (transport : Transport) (rootBytes : List UInt8 → Digest) : IO (Exce
     return refused message
   let nodes := honestNodes stored.entries chains
   match ← transport.history ⟨stored.head, [],
-      nodes.map fun node => (DurableSpent.accumulatorSpace, nodeKey node.1.1 node.1.2)⟩ with
+      nodes.map fun node => (DurableIndex.accumulatorSpace, nodeKey node.1.1 node.1.2)⟩ with
   | .error message => return .error message
   | .ok read =>
       for (node, found) in nodes.zip read.nodes do
         if found.2.2.map (·.2) ≠ some (Tower256ConcreteBackend.digestStream.encode node.2) then
           return refused s!"accumulator node (level {node.1.1}, end {node.1.2}) differs from the log"
-  -- 3. spent map: carried roots, then every stored row (newest version at the head)
-  let (rows, keys) ← match rebuildSpent records stored.entries with
+  -- 3. index: carried roots, then every stored row (newest version at the head)
+  let (rows, keys) ← match rebuildIndex records stored.entries with
     | .error message => return .error message
     | .ok result => pure result
   match ← transport.history ⟨stored.head, [],
-      rows.map fun row => (DurableSpent.spentSpace, DurableSpent.rowKey row.1)⟩ with
+      rows.map fun row => (DurableIndex.indexSpace, DurableIndex.rowKey row.1)⟩ with
   | .error message => return .error message
   | .ok read =>
       for (row, found) in rows.zip read.nodes do
-        if found.2.2.map (·.2) ≠ some (DurableSpent.rowStream.encode row.2) then
-          return refused s!"spent map node at prefix of length {row.1.length} differs from the log"
+        if found.2.2.map (·.2) ≠ some (DurableIndex.rowStream.encode row.2) then
+          return refused s!"index node at prefix of length {row.1.length} differs from the log (missing or altered)"
   -- 4 + 5. replay from the seed; every retained checkpoint equals the replay at its height
   let checkpointHeights ← match ← retainedCheckpoints transport stored.head with
     | .error message => return .error message
@@ -199,7 +201,7 @@ def audit (transport : Transport) (rootBytes : List UInt8 → Digest) : IO (Exce
     | .error message => return .error message
     | .ok loaded => pure loaded
   let mut current := initial
-  let mut spentAt : Digest := DurableSpent.emptyDigest
+  let mut indexAt : Digest := DurableIndex.emptyDigest
   for (height, record, entry) in (List.range' 1 records.length).zip (records.zip stored.entries) do
     let some intent := record.bind? rootBytes
       | return refused s!"the record at height {height} does not bind its roots"
@@ -207,10 +209,10 @@ def audit (transport : Transport) (rootBytes : List UInt8 → Digest) : IO (Exce
         current.withinLog current.resumed intent with
     | .inl ready => current := current.extend ready
     | .inr _ => return refused s!"the record at height {height} does not replay through the canonical executor"
-    spentAt := (trailerCarried entry.tag).map (·.spentRoot) |>.getD spentAt
+    indexAt := (trailerCarried entry.tag).map (·.indexRoot) |>.getD indexAt
     if let some bytes := (checkpointHeights.find? (·.1 = height)).map (·.2) then
       let expected := checkpointFrame.encode (sealAt key height current.chain (current.frontier.getD [])
-        spentAt (State.ofSnapshot current.image current.snapshot) current.worldRoot)
+        indexAt (State.ofSnapshot current.image current.snapshot) current.worldRoot)
       if bytes ≠ expected then
         return refused s!"checkpoint at height {height} differs from the genesis replay"
   match stored.entries.getLast?.bind (trailerCarried ·.tag) with

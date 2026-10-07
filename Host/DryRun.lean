@@ -200,8 +200,8 @@ theorem dryTransport_prepareAppend (t : DurableReceiverIO.Transport) (reached : 
       loaded.snapshot intent) (key : DurableCheckpointCodec.MacKey) :
     DurableReceiverIO.prepareAppend (dryTransport t reached) loaded ready key =
       DurableReceiverIO.prepareAppend t loaded ready key := by
-  unfold DurableReceiverIO.prepareAppend DurableReceiverIO.Loaded.headSpentRoot
-    DurableReceiverIO.withSpentRows DurableReceiverIO.spentRows dryTransport
+  unfold DurableReceiverIO.prepareAppend DurableReceiverIO.Loaded.headIndexRoot
+    DurableReceiverIO.withIndexRows DurableReceiverIO.indexRows dryTransport
   rfl
 
 /-- **At the Store writer, the dry run agrees with submission on a tail-bound
@@ -230,7 +230,7 @@ theorem dryTransport_publish (t : DurableReceiverIO.Transport) (reached : IO.Ref
 
 /-- **At the Store writer, admission is exactly reaching the writer.** Where the
 durable admission accepts and the tail law admits, the real path appends; the
-dry run instead marks `reached` (after the same MAC-key read and the same Store reads: the head tag's spent root, the spent-map rows) and publishes through the dry transport, whose only
+dry run instead marks `reached` (after the same MAC-key read and the same Store reads: the head tag's index root, the index rows) and publishes through the dry transport, whose only
 write marks `reached` and observes a conflict: contention (`dryTransport_publish`,
 `DurableReceiverIO.publishAfter_conflict`). -/
 theorem dryReceive_admission_reaches_append (t : DurableReceiverIO.Transport)

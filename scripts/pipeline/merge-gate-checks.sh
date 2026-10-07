@@ -46,6 +46,9 @@ run full-loaded-ratchet bash scripts/ports/check-full-loaded-callers.sh
 # Every standalone Lean script elaborates, except the shrink-only list scripts/gates/scripts-elab.tsv
 # (ROOT 10-07: the fixture generator replay.lean sat uncompilable b21..b25 unseen).
 run scripts-elab    bash scripts/check-scripts-elab.sh
+# Each planted fault against the pinned history API is refused by the guard it plants
+# (a per-fault expected error, not "any error": API drift does not pass it).
+run api-faults     bash scripts/kn2/check-planted-api-faults.sh
 run import-boundary bash scripts/check-import-boundary.sh
 run proof-hygiene   bash scripts/check-proof-hygiene.sh
 run build-surfaces  python3 scripts/lean-build-surfaces.py check
