@@ -31,6 +31,7 @@
 # updated 2026-10-05: batch n3 (ob-ltuo x5 + rollup-1 + rollup-2 + ob-roadmap + protocol-night rooms/pd53/rotpub on 5d0b452d)  [counts: Minidregg 0 1, Theory 74 162, Kernel 369 514, Pred 7 11, Effects 0 3, Compiler 141 312, Selvage 12 153, Assurance 0 153, Host 78 111, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-05: batch n4 (ob-ltuo-s4 + ob-lt2-parser + ob8 + protocol-night w04b on 47487ee4)  [counts: Minidregg 0 1, Theory 74 162, Kernel 389 534, Pred 7 11, Effects 0 3, Compiler 141 312, Selvage 12 153, Assurance 0 153, Host 86 119, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-07: seat-retention: Host.CapacityJson (the one Capacity envelope decoder SeatJson and ObjectiveActivityJson share) enters the Host closure  [counts: Minidregg 0 1, Theory 74 162, Kernel 389 534, Pred 7 11, Effects 0 3, Compiler 141 312, Selvage 12 153, Assurance 0 153, Host 87 120, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-07: batch b5: kn2-store-open-2a, P4-JP2, P3-JOURNEYS, P5-RUN-EDITS, P3-FLEET-MIGRATION  [counts: Minidregg 0 1, Theory 75 173, Kernel 389 537, Pred 7 11, Effects 0 3, Compiler 143 318, Selvage 12 153, Assurance 0 153, Host 87 121, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 Compiler.Air
 Compiler.AirBignum
 Compiler.AirFlatten
@@ -71,9 +72,11 @@ Compiler.CredentialSigningKeyCodec
 Compiler.DeclaredEffectArtifact
 Compiler.DeclaredEffectCell
 Compiler.DurableCheckpointCodec
+Compiler.DurableHistory
 Compiler.DurableLogTags
 Compiler.DurableReceiverCodec
 Compiler.DurableReceiverIO
+Compiler.DurableSpent
 Compiler.Emit
 Compiler.EmitSerialize
 Compiler.Evaluator
@@ -707,6 +710,7 @@ Theory.HyperdocumentOperations
 Theory.IndexedProgram
 Theory.KeyCommitmentAdoption
 Theory.KeyPreRotation
+Theory.LogAccumulator
 Theory.Nock
 Theory.NockCost.Shape
 Theory.Noun
