@@ -11,12 +11,13 @@ fi
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 REPO=$(CDPATH='' cd -- "$HERE/../.." && pwd)
 HOST=$1
-EVIDENCE=$2
+# The provisioner writes absolute paths into the configs it emits (mini refuses relative consent paths).
+EVIDENCE=$(realpath -m -- "$2")
 MINI=${MINI:-"$REPO/native/resource-client/target/debug/mini"}
 STORE_BINARY=${STORE_BINARY:-"$REPO/native/hyperdocument-link-sqlite-store/target/debug/minidregg-link-sqlite-store"}
 SIGNATURE_BINARY=${SIGNATURE_BINARY:-"$REPO/native/credential-signature-verifier/target/debug/minidregg-credential-signature-verifier"}
 SOURCE="$REPO/scripts/workroom/provision.sh"
-SOURCE_SHA=9abee2b9f84cd0ab3b4dc228684bceba7b8134f41609b6ab857698dfbba76509
+SOURCE_SHA=b6281928df02b79fd79825d1b391e33e244900394f9d7ddf02bcea17952827a3
 test "$(sha256sum "$SOURCE" | cut -d ' ' -f 1)" = "$SOURCE_SHA" || {
   echo "workroom source changed; review overlay before use" >&2; exit 2;
 }
