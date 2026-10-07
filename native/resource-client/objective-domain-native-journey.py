@@ -66,7 +66,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import re  # noqa: E402
 import activity_world  # noqa: E402
-from activity_world import World, PERMIT_ALL, TICKS, nat, record, eq, any_of, eq_slots, cap, unhex  # noqa: E402
+from activity_world import World, PERMIT_ALL, TICKS, nat, record, eq, any_of, eq_slots, cap, unhex, op_id  # noqa: E402
 
 PLANTS = {'domain-blind': {'D1-joint', 'D3-stale', 'D4-bank', 'D5-keep', 'D6-priced'}, 'member-permit': {'D1-joint'},
           'joined-drops': {'D5-keep'}, 'keep-blind': {'D5-keep'}, 'judge-free': {'D6-priced'}}
@@ -112,7 +112,7 @@ try:
     def invoke(label, name, method, args, expect, detail=None, prepare=False, domain=DOMAIN):
         body = {'kind': 'invoke', 'object': O[name], 'objectCapability': w.objects[name]['capability'],
                 'method': method, 'args': args, 'envelope': cap(TICKS, domain=domain), 'account': w.SPONSOR_ACCOUNT,
-                'accountCapability': w.SPONSOR_SPEND}
+                'accountCapability': w.SPONSOR_SPEND, 'opId': op_id()}
         return w.turn(label, w.sponsor, body, expect, detail, prepare=prepare)
 
     def register(label, names, law, expect, detail=None, workspace=None, caps=None):
