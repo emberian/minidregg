@@ -1594,6 +1594,25 @@ def planReport (deployment : Deployment) (profile : CanonicalRuntimeProfile.Prof
     | .error _ => []
   | .error _ => []
 
+/-- The front-end work a decided turn drew from its meter, summed over every replay (source bytes,
+typed-core bytes): what an invocation's envelope must declare (`Invocation.frontEnd_within`), and a
+bound on what its postage must (each send's delivery replays a load the invocation's meter drew).
+Zero for a turn that replays nothing through a meter. -/
+def Decided.frontEnd {rootBytes : List UInt8 → Digest} {config : Config} {snapshot : DataSnapshot rootBytes}
+    {height : Nat} {command : Command} : Decided config snapshot height command → Nat × Nat
+  | .invoke _ invoked => (invoked.sent.meter.source, invoked.sent.meter.core)
+  | _ => (0, 0)
+
+/-- The front-end work a command drew at a durable snapshot, when it is decided (`Decided.frontEnd`):
+a signer plans once over a generous envelope, declares exactly this, and plans again. -/
+def planFrontEnd (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (ambient : Ambient) (durable : Durable) (command : Command) : Nat × Nat :=
+  match configOf deployment profile ambient with
+  | .ok config => match decideTurn config durable.snapshot ambient.height command with
+    | .ok decided => decided.frontEnd
+    | .error _ => (0, 0)
+  | .error _ => (0, 0)
+
 structure SigningPlan where
   domain : Digest
   semantics : Digest
@@ -1606,21 +1625,26 @@ structure SigningPlan where
   outcome : Digest
   /-- `planVerdict` (UTF-8): empty, `charged failure: ...` or `refused: ...`. -/
   verdict : List UInt8
+  /-- `planFrontEnd`: the source and typed-core bytes the decided turn's replays drew. -/
+  frontEndSource : Nat
+  frontEndCore : Nat
   deriving DecidableEq, Repr
 
 def signingPlanStream : StreamCodec SigningPlan :=
   StreamCodec.xmap (StreamCodec.product digestStream
     (StreamCodec.product digestStream (StreamCodec.product bytesStream (StreamCodec.product bytesStream
-      (StreamCodec.product bytesStream (StreamCodec.product digestStream bytesStream))))))
-    (fun plan => (plan.domain, plan.semantics, plan.commandBytes, plan.header, plan.report, plan.outcome, plan.verdict))
-    (fun (domain, semantics, command, header, report, outcome, verdict) =>
-      ⟨domain, semantics, command, header, report, outcome, verdict⟩)
+      (StreamCodec.product bytesStream (StreamCodec.product digestStream (StreamCodec.product bytesStream
+        (StreamCodec.product StreamCodec.nat StreamCodec.nat))))))))
+    (fun plan => (plan.domain, plan.semantics, plan.commandBytes, plan.header, plan.report, plan.outcome, plan.verdict,
+      plan.frontEndSource, plan.frontEndCore))
+    (fun (domain, semantics, command, header, report, outcome, verdict, source, core) =>
+      ⟨domain, semantics, command, header, report, outcome, verdict, source, core⟩)
     (by intro plan; cases plan; rfl)
 
-/-- v3 carries the signed outcome and the verdict (GPT-6 row E); v2 carried the report; an
-earlier plan refuses to decode. -/
+/-- v4 carries the front-end work the decided turn drew (GPT-6 row E, the turn's meter); v3 carried
+the signed outcome and the verdict; an earlier plan refuses to decode. -/
 def signingPlanCodec : LawfulCodec SigningPlan :=
-  ObjectiveActivityWire.framed "DREGG/OBJECTIVE/ACTIVITY/PLAN/v3".toUTF8.toList signingPlanStream
+  ObjectiveActivityWire.framed "DREGG/OBJECTIVE/ACTIVITY/PLAN/v4".toUTF8.toList signingPlanStream
 
 #assert_axioms command_roundtrip
 #assert_axioms unfunded_not_gated

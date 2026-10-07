@@ -145,6 +145,25 @@ try:
         w.check('c3-second-sees-first', reported(out) == 12, out.get('report'))
         w.check('c3-both-land', total('counter', 'c3-after') == 12, None)
 
+    with w.group('C11-front-end-meter'):
+        # GPT-6 row E: one front-end meter per turn. Every frame's method load draws its replay's work (source
+        # bytes, typed-core bytes) from the envelope's budget; a three-frame tree declared one byte short of
+        # what its replays draw is refused by name (a charged call-tree refusal: the frames before it ran).
+        def metered(label, name, method, args, short):
+            body = {'kind': 'invoke', 'object': O[name], 'objectCapability': w.objects[name]['capability'],
+                    'method': method, 'args': args, 'envelope': cap(TICKS), 'account': w.SPONSOR_ACCOUNT,
+                    'accountCapability': w.SPONSOR_SPEND, 'opId': op_id()}
+            w.quote_front_end(f'{label}-quote', w.sponsor, body)
+            drawn = (int(body['envelope']['replayBytes']), int(body['envelope']['coreBytes']))
+            if short:
+                body['envelope']['replayBytes'] = str(drawn[0] - 1)
+            return drawn, w.turn(label, w.sponsor, body, 'charged' if short else 'installed',
+                                 ['frontEndExhausted'] if short else None)
+        one, _ = metered('c11-one-frame', 'counter', 'deposit', nat(1), False)
+        three, _ = metered('c11-three-frames', 'relayA', 'twice', hop('counter', 1), False)
+        w.check('c11-three-frames-draw-more', three[0] > one[0] and three[1] > one[1], [one, three])
+        metered('c11-one-byte-short', 'relayA', 'twice', hop('counter', 1), True)
+
     with w.group('C4-reentry'):
         before = snapshot_of(['counter', 'relayA', 'relayB'], 'c4-before')
         fee_before = w.watched('c4-fee-before')
