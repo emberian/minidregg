@@ -675,6 +675,9 @@ usage:
   mini describe --host HOST --config CONFIG.json [--socket SOCKET]
   mini bootstrap --host HOST --config OPERATOR.json --source GENESIS.json --dir DEPLOYMENT
   mini audit --host HOST --config PINNED.json
+  mini store audit --host HOST --config PINNED.json [--receipts FILE]
+    re-derive the Store from genesis (chain, tags, accumulator, spent map, checkpoints, head root), then re-admit
+    every signed ingress (the audit above); the Host's stdout, stderr and exit status pass through unchanged
   mini author --host HOST --config CONFIG.json --kind KIND --input INPUT.json --output OUTPUT.bin
   mini current-application-intent --host HOST --config CONFIG.json --socket SOCKET --source SOURCE.json --dir NEW-PRIVATE-DIR
   mini current-session-intent --host HOST --config CONFIG.json --socket SOCKET --source SOURCE.json --dir NEW-PRIVATE-DIR
@@ -813,7 +816,7 @@ impl Args {
         }
         let mut raw = raw.peekable();
         // `mini pay ACTION ...` (PAY.md §5 spells the verbs this way) is `mini pay --action ACTION ...`.
-        if command == OsStr::new("pay") {
+        if command == OsStr::new("pay") || command == OsStr::new("store") {
             if let Some(action) = raw.next_if(|next| !next.to_string_lossy().starts_with("--")) {
                 values.push((OsString::from("--action"), action));
             }
@@ -1127,6 +1130,44 @@ fn generate_key(
         }
     }
     Ok(signing.verifying_key().to_bytes())
+}
+
+/// The Host argv of `mini store audit`: `PINNED.json store-audit [--receipts FILE]`.
+fn store_audit_argv(config: &Path, receipts: Option<&Path>) -> Vec<OsString> {
+    let mut argv = vec![config.as_os_str().to_owned(), OsString::from("store-audit")];
+    if let Some(receipts) = receipts {
+        argv.push(OsString::from("--receipts"));
+        argv.push(receipts.as_os_str().to_owned());
+    }
+    argv
+}
+
+/// `mini store audit --host HOST --config PINNED.json [--receipts FILE]`: runs the Host's
+/// `store-audit` arm with the Host's own stdout and stderr, and ends with its exit status
+/// (0 clean, 1 a named refusal, 2 usage). Nothing is captured or reworded.
+fn store_run(mut args: Args) -> Result<()> {
+    const STORE_USAGE: &str = "usage: mini store audit --host HOST --config PINNED.json [--receipts FILE]";
+    if args.optional("action").as_deref() != Some(OsStr::new("audit")) {
+        return Err(STORE_USAGE.to_owned());
+    }
+    if SOCKET.get().is_some() {
+        return Err("store audit requires direct Host/Main CLI".to_owned());
+    }
+    let host = path(args.required("host")?);
+    let config = path(args.required("config")?);
+    let receipts = args.optional("receipts").map(path);
+    args.finish()?;
+    let status = Command::new(&host)
+        .args(store_audit_argv(&config, receipts.as_deref()))
+        .status()
+        .map_err(|error| format!("cannot run {}: {error}", host.display()))?;
+    match status.code() {
+        Some(code) => {
+            set_exit(u8::try_from(code).unwrap_or(1));
+            Ok(())
+        }
+        None => Err(format!("{} ended by signal: {status}", host.display())),
+    }
 }
 
 fn process(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<Output> {
@@ -3531,6 +3572,7 @@ fn run(mut args: Args) -> Result<()> {
                 Err("consumer-worker requires Unix sockets".to_owned())
             }
         }
+        "store" => store_run(args),
         "audit" => {
             if SOCKET.get().is_some() {
                 return Err("audit requires direct Host/Main CLI".to_owned());
@@ -4452,6 +4494,23 @@ pub(crate) fn swap_exit_status(value: u8) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn store_audit_argv_is_the_host_arm_and_optional_receipts() {
+        assert_eq!(
+            store_audit_argv(Path::new("/c.json"), None),
+            [OsString::from("/c.json"), OsString::from("store-audit")]
+        );
+        assert_eq!(
+            store_audit_argv(Path::new("/c.json"), Some(Path::new("/r.bin"))),
+            [
+                OsString::from("/c.json"),
+                OsString::from("store-audit"),
+                OsString::from("--receipts"),
+                OsString::from("/r.bin"),
+            ]
+        );
+    }
     use ed25519_dalek::{Verifier, VerifyingKey};
     use std::time::{SystemTime, UNIX_EPOCH};
 

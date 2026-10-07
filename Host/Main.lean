@@ -95,6 +95,7 @@ import Host.ObjectiveActivityJson
 import Host.SeatJson
 import Compiler.GenericSimplexSourceAnchor
 import Compiler.FnWireFncu
+import Compiler.DurableStoreAudit
 import Kernel.NativeHostObjectAudience
 import Kernel.NativeHostSession
 import Kernel.NativeReserveContinuity
@@ -6104,6 +6105,38 @@ def launchLifecycleOperatorOp (pinnedConfig : NativeHost.Config)
       return ((71 : UInt8), ingress)
   | _ => throw (IO.userError s!"operation {op} is not a launch lifecycle operation")
 
+/-- `audit [--receipts FILE]` / `store-audit [--receipts FILE]` options. -/
+def auditOptions : List String → Option (Option String)
+  | [] => some none
+  | ["--receipts", path] => some (some path)
+  | _ => none
+
+/-- The body of the `audit` arm, shared with `store-audit`: `--receipts FILE` writes
+every receipt the re-admission recomputed, in order, each in the canonical receipt
+codec: the control that an audit-path change left every original-ingress receipt
+byte-identical. -/
+def auditBody (settings : Settings) (pinnedConfig : NativeHost.Config)
+    (receiptsOut : Option String) : IO UInt32 := do
+  if settings.carryRegistry.isSome && receiptsOut.isSome then
+    throw (IO.userError "audit --receipts is not available for a carried registry")
+  let (count, index, links) ← if settings.carryRegistry.isSome then do
+    let opened ← IO.ofExcept (← NativeHost.openExisting pinnedConfig)
+    let registry ← loadCarryRegistry settings
+    let custody ← IO.ofExcept (← RetainedSegmentInspection.validate pinnedConfig
+      opened.durable registry)
+    let walked ← IO.ofExcept (← CarriedNativeHostSession.start pinnedConfig opened.durable custody)
+    pure (walked.verified.opened.durable.height, walked.verified.opened.durable.index,
+       walked.verified.opened.durable.links)
+  else do
+    let (receipts, index, links) ← IO.ofExcept (← NativeHost.audit pinnedConfig)
+    if let some path := receiptsOut then
+      writeBytes path (receipts.flatMap NativeHostCodec.receiptStream.encode)
+    pure (receipts.length, index, links)
+  IO.println s!"audited {count} accepted records: every signed ingress re-admitted at its original prefix"
+  IO.println s!"index {(presenceIndexJson index).compress}"
+  IO.println s!"links {(linkIndexJson links).compress}"
+  pure 0
+
 def run (arguments : List String) : IO UInt32 := do
   match arguments with
   -- Pure operator authoring before any Store exists: the policy a genesis pins
@@ -7691,33 +7724,29 @@ def run (arguments : List String) : IO UInt32 := do
             writeJson output (objectAudienceJson view)
             pure 0
       | "audit", options =>
-          -- `--receipts FILE` writes every receipt the re-admission recomputed,
-          -- in order, each in the canonical receipt codec: the control that an
-          -- audit-path change left every original-ingress receipt byte-identical.
-          let receiptsOut ← match options with
-            | [] => pure none
-            | ["--receipts", path] => pure (some path)
-            | _ => throw (IO.userError "usage: audit [--receipts FILE]")
-          withPinnedSignature config fun pinnedConfig => do
-            if settings.carryRegistry.isSome && receiptsOut.isSome then
-              throw (IO.userError "audit --receipts is not available for a carried registry")
-            let (count, index, links) ← if settings.carryRegistry.isSome then do
-              let opened ← IO.ofExcept (← NativeHost.openExisting pinnedConfig)
-              let registry ← loadCarryRegistry settings
-              let custody ← IO.ofExcept (← RetainedSegmentInspection.validate pinnedConfig
-                opened.durable registry)
-              let walked ← IO.ofExcept (← CarriedNativeHostSession.start pinnedConfig opened.durable custody)
-              pure (walked.verified.opened.durable.height, walked.verified.opened.durable.index,
-                 walked.verified.opened.durable.links)
-            else do
-              let (receipts, index, links) ← IO.ofExcept (← NativeHost.audit pinnedConfig)
-              if let some path := receiptsOut then
-                writeBytes path (receipts.flatMap NativeHostCodec.receiptStream.encode)
-              pure (receipts.length, index, links)
-            IO.println s!"audited {count} accepted records: every signed ingress re-admitted at its original prefix"
-            IO.println s!"index {(presenceIndexJson index).compress}"
-            IO.println s!"links {(linkIndexJson links).compress}"
-            pure 0
+          match auditOptions options with
+          | none => throw (IO.userError "usage: audit [--receipts FILE]")
+          | some receiptsOut =>
+              withPinnedSignature config fun pinnedConfig =>
+                auditBody settings pinnedConfig receiptsOut
+      | "store-audit", options =>
+          -- The Store re-derived from genesis (`Compiler.DurableStoreAudit`), then
+          -- exactly the `audit` body: every signed ingress re-admitted at its
+          -- original prefix. A failure of the first is the verdict; the second
+          -- never runs behind a refused store.
+          match auditOptions options with
+          | none =>
+              (← IO.getStderr).putStrLn "usage: store-audit [--receipts FILE]"
+              pure 2
+          | some receiptsOut =>
+              withPinnedSignature config fun pinnedConfig => do
+                match ← DurableStoreAudit.audit pinnedConfig.transport ResourceBirthCodec.rootBytes with
+                | .error message =>
+                    (← IO.getStderr).putStrLn message
+                    pure 1
+                | .ok report =>
+                    IO.println report.line
+                    auditBody settings pinnedConfig receiptsOut
       | "checkpoint-differential", [height] =>
           let some h := height.toNat? | throw (IO.userError "checkpoint-differential: HEIGHT must be decimal")
           let (cached, full, stored) ← IO.ofExcept

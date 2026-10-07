@@ -14,12 +14,12 @@
 # ever reaches the box. OWNER hints: OUT/owner (a lane name) when the row can tell.
 JOURNEY_ROWS=(journey objective rooms activity seats bounty call send objectrecord welcomecontinuity sshe2e)
 
-# J0-J8 + the rotation rows (JROT, JROTL, and JRLANE and any *SEAT* step when the tip's journey.sh
+# J0-J8 + the rotation rows (JROT, JROTL, and JRLANE, JAUDIT and any *SEAT* step when the tip's journey.sh
 # has them), one fresh Store, through native/resource-client/journey.sh.
 row_journey() {
   local js=$SRC/native/resource-client/journey.sh steps extra
   [ -f "$js" ] || return 99
-  extra=$(sed -n 's/^STEPS=(\(.*\))$/\1/p' "$js" | tr ' ' '\n' | grep -E '^(JRLANE|.*SEAT.*)$' | paste -sd' ')
+  extra=$(sed -n 's/^STEPS=(\(.*\))$/\1/p' "$js" | tr ' ' '\n' | grep -E '^(JRLANE|JAUDIT|.*SEAT.*)$' | paste -sd' ')
   steps="J0 J1 J2 J3 J4 J5 J6 J7 J8 JROT JROTL${extra:+ $extra}"
   JOURNEY_STEPS="$steps" JOURNEY_GROWTH_LEVELS=10 bash "$js" "$MANIFEST" "$RUN/j" >"$OUT/journey.out" 2>"$OUT/journey.err"
   local rc=$?
