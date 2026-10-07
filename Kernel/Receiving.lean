@@ -145,6 +145,11 @@ structure Family where
   command : Ingress → Command
   /-- The signature claims, from the decoded ingress and a key lookup. -/
   claims : Env → Durable → Ingress → Except Reject (List SigQuery)
+  /-- The OBSERVED signatures: the Receiver asks its verifier about each before
+  `prepare`, and hands the true/false answers to it (`Received.answer?`); an error
+  refuses.  A family that decides on a signature's verdict rather than requiring it
+  names it here. -/
+  observations : Env → Durable → Ingress → Except Reject (List SigQuery) := fun _ _ _ => .ok []
   /-- The gate: authority, freshness, validation of the per-cell patch.  It is
   handed the Receiver's verdict on `claims` (`Received`: the oracle and the
   vouchers of the claims it accepted) and may read a signature only from it
@@ -247,9 +252,12 @@ def charge (laws : Laws Durable) (env : F.Env) (durable : Durable) (ingress : F.
   | .storageBytes => ((F.writes prepared).map fun write => write.canonicalPostBytes.length).sum
   | .witnessBytes => F.witnessBytes ingress
   | .proofWork =>
-      match F.claims env durable ingress with
-      | .ok claims => claims.length
-      | .error _ => 0
+      (match F.claims env durable ingress with
+        | .ok claims => claims.length
+        | .error _ => 0) +
+      (match F.observations env durable ingress with
+        | .ok queries => queries.length
+        | .error _ => 0)
   | .feeDebit | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0
 
 def payload (laws : Laws Durable) {env : F.Env} {durable : Durable} (ingress : F.Ingress)
@@ -273,6 +281,7 @@ def receiver (laws : Laws Durable) {m : Type → Type} (oracle : CredentialSigna
   decode := F.decode
   command := F.command
   claims := F.claims
+  observations := F.observations
   prepare := fun vouchers => F.prepare ⟨oracle, vouchers⟩
   shape := fun prepared => shape laws prepared
   Fault := LawFault

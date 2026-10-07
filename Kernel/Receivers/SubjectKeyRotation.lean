@@ -161,7 +161,7 @@ structure Env where
 
 /-- The one claim: the new key signed the possession frame of this command. -/
 def claim (env : Env) (ingress : DecodedIngress) : SigQuery :=
-  ⟨ingress.command.key.publicKey,
+  ⟨.ed25519, ingress.command.key.publicKey,
     possessionFrame env.deployment.domain env.semantics ingress.command,
     ingress.ingress.possessionSignature⟩
 
@@ -277,7 +277,7 @@ def prepare (received : CredentialSignatureAdmission.Received) (env : Env) (dura
       | .error reason => .error reason
       | .ok checked =>
           have signed := CredentialSignatureAdmission.Received.signed?_some found
-          .ok ⟨possession, signed.2.1, signed.2.2.1, checked⟩
+          .ok ⟨possession, signed.2.2.1, signed.2.2.2.1, checked⟩
 
 variable {env : Env} {durable : Durable} {command : Command}
 
@@ -433,7 +433,7 @@ theorem refused_possession_before_gate {transcript : CredentialSignatureIO.Trans
         (receiver laws (.recorded transcript)).admitVia env durable ingress =
           (pure (.error (.unauthenticated selected)) : Id _) :=
   (receiver laws (.recorded transcript)).admitVia_refused_before_prepare (claims := [claim env ingress])
-    rfl (List.mem_singleton_self _) refused
+    (queries := []) rfl rfl (List.mem_singleton_self _) refused
 
 /-- **No voucher, no rotation**: `prepare` handed vouchers that hold no
 signature by the new key over the possession frame refuses `unvouched`, whatever
