@@ -14,7 +14,7 @@
 #
 # Census (2026-10-07, lane kn2-token-sound): `git log --name-only` since 2026-09-25 over commits
 # that regenerate, re-emit or re-pin, for *Fixture*, *fixture*, *Vectors*, golden/, *.snapshot, expect*.
-Assurance/NativeAcceptedFixtureData.lean | scripts/native-accepted-fixture/generate.sh | Assurance/NativeAcceptedFixture.expect | checked
+Assurance/NativeAcceptedFixtureData.lean | scripts/native-accepted-fixture/generate.sh | Assurance/NativeAcceptedFixtureAuthority.lean | checked
 scripts/gates/objective-statements.snapshot | scripts/check-objective-proofs.sh (scripts/ObjectiveSnapshot.lean) | - | PENDING (H-MANIFEST: the contract-change ledger becomes its authority)
 scripts/gates/objective-statements-mathlib.snapshot | scripts/check-objective-proofs.sh (scripts/ObjectiveSnapshot.lean) | - | PENDING (H-MANIFEST: the contract-change ledger becomes its authority)
 native/mini-sdk/golden/lean-intents.json | Kernel/Contracts/IntentVectors.lean (vector emitter) | - | PENDING

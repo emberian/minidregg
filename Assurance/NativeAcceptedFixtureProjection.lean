@@ -11,7 +11,7 @@ This module is the other half: a small, pure projection of an accepted
 invocation's record onto what the acceptance DRIVER asked for
 (`native/resource-client/objective-native-acceptance.py`, `objective-first`), as
 `key = value` lines.  The expected lines are the hand-written authority file
-`Assurance/NativeAcceptedFixture.expect`, which no generator writes.  The
+`Assurance/NativeAcceptedFixtureAuthority.lean`, which no generator writes.  The
 fixture module checks the projection of its re-run against that file
 (`first_projection`), and `scripts/native-accepted-fixture/generate.sh` refuses to
 write data whose projection differs from it (`replay.lean` prints the same

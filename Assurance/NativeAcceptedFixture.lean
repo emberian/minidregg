@@ -29,7 +29,7 @@ or the deployed hash -- only the compiled evaluator runs them):
 * `first_projection`: the re-run's SEMANTIC PROJECTION (who signed, which cells it
   writes by kind and role, what it guards and spends, what it is charged, and the
   refused call's verdict and reason) is the hand-written authority
-  `NativeAcceptedFixture.expect`, read from the acceptance driver's intent.  The
+  `Assurance.NativeAcceptedFixtureAuthority`, read from the acceptance driver's intent.  The
   bytes above are regenerated from a run; this is what a regeneration cannot move
   without an authority change (`Assurance.NativeAcceptedFixtureProjection`);
 * `refused_admission`: the same admission refuses the dishonest call `r01`
@@ -50,6 +50,7 @@ on a fresh world with this tree's binaries.
 import Assurance.PrivateEvaluatorCustodyJoin
 import Assurance.NativeAcceptedFixtureData
 import Assurance.NativeAcceptedFixtureProjection
+import Assurance.NativeAcceptedFixtureAuthority
 import Kernel.NativeHostContext
 import Kernel.ObjectiveBendAuthenticatedInputs
 import Compiler.NativeHostCodec
@@ -236,7 +237,7 @@ open Minidregg.Assurance.NativeAcceptedFixtureProjection in
 /-- The authority: hand-written, read from the acceptance driver's intent; no
 generator writes it. -/
 def authority : List NativeAcceptedFixtureProjection.Line :=
-  parseAuthority (include_str "NativeAcceptedFixture.expect")
+  parseAuthority NativeAcceptedFixtureAuthority.text
 
 open Minidregg.Assurance.NativeAcceptedFixtureProjection in
 /-- The re-run's projection: the accepted call's record and receipts, then the

@@ -1,3 +1,19 @@
+/-
+# Assurance.NativeAcceptedFixtureAuthority -- the HAND-WRITTEN authority of the native accepted fixture
+
+No generator writes this module.  It states what the acceptance driver ASKED FOR
+(`native/resource-client/objective-native-acceptance.py`), as `key = value` lines,
+never what a run produced.  `Assurance.NativeAcceptedFixture.first_projection` checks
+the re-run's projection (`Assurance.NativeAcceptedFixtureProjection`) against it, and
+`scripts/native-accepted-fixture/generate.sh` refuses to write data whose projection
+differs.  It is a Lean module (not a loose file) so that Lake rebuilds the check
+whenever a line changes.  Changing it is its own commit with an
+`Authority-Change: <reason>` trailer (`scripts/pipeline/check-fixture-authority.sh`).
+-/
+namespace Minidregg.Assurance.NativeAcceptedFixtureAuthority
+
+/-- The authority lines. -/
+def text : String := "
 # AUTHORITY for Assurance.NativeAcceptedFixture -- HAND-WRITTEN. No generator writes this file.
 # It states what the acceptance driver ASKED FOR, read from
 # native/resource-client/objective-native-acceptance.py (`all`: world, publish, invoke --label first,
@@ -44,3 +60,6 @@ first.charge.leaseByteBlocks = 0
 # r01-source-is-package: a validly signed command naming the package as its source
 refused.verdict = refused
 refused.reason = objectiveSource
+"
+
+end Minidregg.Assurance.NativeAcceptedFixtureAuthority

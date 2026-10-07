@@ -86,8 +86,9 @@ def parse(text):
         parts = line.split(" = ")
         out.append((parts[0].strip(), parts[1].strip()) if len(parts) == 2 else ("malformed", line))
     return out
-authority_path = pathlib.Path(out).with_name("NativeAcceptedFixture.expect")
-authority = parse(authority_path.read_text())
+authority_path = pathlib.Path(out).with_name("NativeAcceptedFixtureAuthority.lean")
+authority_module = authority_path.read_text()
+authority = parse(authority_module[authority_module.index('def text : String := "') + len('def text : String := "'):authority_module.rindex('"')])
 projection = [tuple(l[len("PROJECTION "):].split(" = ", 1)) for l in first_lines + refused_lines if l.startswith("PROJECTION ")]
 keys = list(dict.fromkeys([k for k, _ in authority] + [k for k, _ in projection]))
 a, p = dict(authority), dict(projection)
