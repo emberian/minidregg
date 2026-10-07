@@ -16222,6 +16222,7 @@ A Minidregg.Kernel.ObjectiveCheckpointInvariant.publication_safe : Classical.cho
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.quiet_image : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.quiet_of_payload_none : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.quiet_recordPost : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.reachable_delivery_stored_complete : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.reachable_delivery_typed : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.readObject_none_payload : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.readRecord_eq : Classical.choice, Quot.sound, propext
@@ -16260,7 +16261,9 @@ A Minidregg.Kernel.ObjectiveResumeContract.Segment.Agrees : propext
 A Minidregg.Kernel.ObjectiveResumeContract.Segment.Agrees.trans : propext
 A Minidregg.Kernel.ObjectiveResumeContract.Segment.agreesB : propext
 A Minidregg.Kernel.ObjectiveResumeContract.Segment.agreesB_iff : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveResumeContract.StoredComplete : Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.birth_checkpoint_typed : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveResumeContract.birth_stored_complete : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.danglingConfig : -
 A Minidregg.Kernel.ObjectiveResumeContract.danglingResponse : -
 A Minidregg.Kernel.ObjectiveResumeContract.danglingYield : -
@@ -16272,6 +16275,7 @@ A Minidregg.Kernel.ObjectiveResumeContract.dataBeq_sound : Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.decodeCheckpoint_checkpointBytes : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.delivery_advances_generation : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.delivery_checkpoint_typed : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveResumeContract.delivery_stored_complete : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.encodeRecord_ne_nil : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.fieldsBeq : propext
 A Minidregg.Kernel.ObjectiveResumeContract.fieldsBeq_refl : Classical.choice, Quot.sound, propext
@@ -16280,8 +16284,10 @@ A Minidregg.Kernel.ObjectiveResumeContract.forcingOpaqueCheck : Quot.sound, prop
 A Minidregg.Kernel.ObjectiveResumeContract.forcingTransparentCheck : Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.forcingTransparent_not_of_extraction : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.forcingTransparent_of_check : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveResumeContract.forcingTransparent_of_yieldedPlan : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.forcingTransparent_tally : Classical.choice, Minidregg.Kernel.ObjectiveResumeContract.forcingTransparent_tally._native.native_decide.ax_1_1, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.headroom : -
+A Minidregg.Kernel.ObjectiveResumeContract.lexicalInvariant_initialNat : propext
 A Minidregg.Kernel.ObjectiveResumeContract.nextRecord_checkpoint : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.nextRecord_generation : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.not_forcingTransparent_dangling : Classical.choice, Quot.sound, propext
@@ -16294,6 +16300,7 @@ A Minidregg.Kernel.ObjectiveResumeContract.runSegment_transfer : Quot.sound, pro
 A Minidregg.Kernel.ObjectiveResumeContract.runSegment_yielded : Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.second_same_await_is_collision : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.segmentCommit_yielded : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveResumeContract.storedComplete_of_typed : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.tallyConfig : -
 A Minidregg.Kernel.ObjectiveResumeContract.tallyCore : -
 A Minidregg.Kernel.ObjectiveResumeContract.tallyForced : Classical.choice, Quot.sound, propext
@@ -25743,6 +25750,208 @@ A Minidregg.Theory.ObjectAudienceRoster.Roster.epoch : -
 A Minidregg.Theory.ObjectAudienceRoster.Roster.object : -
 A Minidregg.Theory.ObjectAudienceRoster.Roster.transition : -
 A Minidregg.Theory.ObjectAudienceRoster.Valid : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.AddrValid.control : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.AddrValid.heap : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.AddrValid.stack : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.AgreeRel.agree : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.AgreeRel.valid : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.Avoids : propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.Bounded : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.Covers : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.Demand.final : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.Demand.halts : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.FitsFrom : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.Footprint : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.ForcesBy.image : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.ForcesBy.lazyValid : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.ForcesBy.mono : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.ForcesBy.reenter : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.ForcesBy.renames : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.FrameSafe : propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.Halts : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.HeapAgree.beyond : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.HeapAgree.cellIn : propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.HeapAgree.cells : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.HeapAgree.image_lt : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.HeapAgree.image_size : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.HeapAgree.image_size_succ : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.HeapAgree.lookup : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.HeapAgree.push : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.HeapAgree.set : propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.HeapForces : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.HeapValid : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.NoPreEntry : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.PendHeap.agree : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.PendHeap.block : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.PendHeap.cached : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.PendHeap.cachedKept : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.PendHeap.cellKept : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.PendHeap.f_eq_cell : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.PendHeap.grows : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.PendHeap.mapNew : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.PendHeap.mapOld : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.PendHeap.not_block : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.PendHeap.sizes : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.PendHeap.valid : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.PendRel.control : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.PendRel.heap : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.PendRel.stack : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.PendRel.stateAgree : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.PendRel.valid : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.Pending.Valid.baseValid : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.Pending.Valid.demand : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.Pending.Valid.shallow : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.Pending.Valid.susp : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.Pending.base : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.Pending.cell : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.Pending.cell_lt : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.Pending.final : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.Pending.final_ge : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.Pending.gap : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.Pending.origin : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.Pending.steps : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.Pending.value : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.PreShallow : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.PrefixExt : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.StateAgree.active_eq : propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.StateAgree.control : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.StateAgree.controlIn : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.StateAgree.heap : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.StateAgree.readsAt_eq : propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.StateAgree.readsIn : propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.StateAgree.stack : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.StateAgree.stackIn : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.StateAgree.stack_length : propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.StripInv : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.TicksLe : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.addrValid_demandStart : propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.addrValid_exec : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.addrValid_of_lexical : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.addrValid_stepRaw : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.agreeRel_refl : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.agree_covers_step : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.agree_exec : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.agree_inverse : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.agree_sizes : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.agree_stepRaw : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.agree_transfer : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.allBelow_mono : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.allIn_cons_iff : propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.allIn_everywhere : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.allIn_mono : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.allIn_nil_iff : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.allocateFields_agree : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.allocateFields_foldl_agree : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.allocateFields_valid' : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.backMap : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.bounded_mono : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.bounded_trans : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.cellValid_allIn : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.controlValid_allIn : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.demandStart : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.demand_cell_lt : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.demand_forces : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.demand_props : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.everywhere : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.exec : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.exec_add : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.exec_heap_keep : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.exec_one : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.exec_preservesCached : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.exec_size_mono : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.exec_succ : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.exec_zero : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.exists_first_fail : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.fitsFrom_tail : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.foldlM_forces : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.foldlM_invariant : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.forceWith_demand : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.forceWith_finished : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.forceWith_of_halts : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.forces_complete : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.forces_fits : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.forces_forceWith : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.forces_materializeWith : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.forces_runBounded : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.forces_segment : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.forces_transfer : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.forces_yieldedPlan : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.forcingShared_append_true : propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.frameSafe_enter : propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.frameSafe_of_update : propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.frameValid_allIn : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.frame_run : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.frames_mono : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.halts_drop : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.halts_succ : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.halts_succ.exec_succ' : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.halts_tail : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.halts_unique : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.heapForces_demand : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.heapForces_refl : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.heapForces_trans : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.heapValid_exec : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.heapValid_push : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.heapValid_set : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.liftMap : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.materializeWith_heapForces : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.materializeWith_record : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.nested_demand : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.nested_pop : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.pendRel_start : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.pend_step : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.pend_switch : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.pend_transfer : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.pend_update_read : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.pending_within : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.persist_step : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.preShallow_keeps : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.prefixExt_alloc : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.prefixExt_push : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.prefixExt_refl : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.prefixExt_trans : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.readsAt : propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.recordStep : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.renameCell_congr : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.renameCell_id : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.renameClosure_id : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.renameControl_congr : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.renameControl_id : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.renameFrame_congr : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.renameFrame_id : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.renameStack_id : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.renameValue_congr : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.renameValue_id : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.runBounded_halts : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.runBounded_of_halts : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.runBounded_zero_forces : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.state_ext : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.stepRaw_complete_stack : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.stepRaw_consumes_returned : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.stepRaw_enter_cached : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.stepRaw_enter_cases : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.stepRaw_enter_evaluating : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.stepRaw_enter_suspended : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.stepRaw_heap_cases : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.stepRaw_heap_keep : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.stepRaw_pop_update : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.stepRaw_push_update : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.stepRaw_size_mono : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.stepRaw_stack_grows : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.stepRaw_stack_shape : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.stepRaw_top_update : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.stepRaw_update_not_evaluating : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.stepRaw_withStack : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.stripInv_run : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.stripInv_step : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.switchMap : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.ticksLe_with : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.valueValid_allIn : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.withStack : -
+A Minidregg.Theory.ObjectiveBendDemandForcing.withStack_inj : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.withStack_nil : propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.yieldedPlan_forces : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandForcing.yieldedPlan_heapForces : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.OpeningSemantics.opens : -
 A Minidregg.Theory.PackedEffectRequest : -
 A Minidregg.Theory.PlanBinding.AgreesOn : Quot.sound, propext
