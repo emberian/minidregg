@@ -19,7 +19,7 @@ pub const PAYLOAD_TYPES: &[&str] = &["scalar", "content", "append", "world", "ki
 /// Content actions the native author reads (`contentAction`).
 pub const CONTENT_ACTIONS: &[&str] = &[
     "createDocument", "createContainer", "editElement", "createAtom", "createRun", "editAtom", "link",
-    "annotate", "rewrapAtom", "rewrapAnnotation", "unlink", "mark", "unmark", "transclude",
+    "annotate", "rewrapAtom", "rewrapAnnotation", "unlink", "mark", "unmark", "transclude", "insertRun",
 ];
 const HEX_FIELDS: &[&str] = &["payload", "wrapping", "topic", "contextBytes"];
 const UNKNOWN: &str = "UNKNOWN";

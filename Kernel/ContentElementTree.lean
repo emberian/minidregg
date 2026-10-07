@@ -966,6 +966,10 @@ theorem step_tree (author : PrincipalRef) (operation : OperationId) (document : 
   | unmark mark =>
       simp only [step] at accepted
       exact tree.of_markStep (unmarkStep_markStep accepted)
+  | insertRun runId anchor atoms =>
+      simp only [step] at accepted
+      obtain ⟨before, cut, _, _, _, _, _, rfl⟩ := insertRunStep_ok accepted
+      exact tree.set_other _ _ (by simp) (by simp)
   | unlink link =>
       simp only [step, retireLink] at accepted
       split at accepted

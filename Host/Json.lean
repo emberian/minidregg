@@ -957,6 +957,11 @@ private def contentAction (path : String) (json : Lean.Json) : Result ContentRes
   | "unmark" =>
       let obj ← exactObject path ["type", "mark"] json
       pure (.unmark (← identifier (path ++ ".mark") (← field path "mark" obj)))
+  | "insertRun" =>
+      let obj ← exactObject path ["type", "run", "anchor", "atoms"] json
+      pure (.insertRun (← identifier (path ++ ".run") (← field path "run" obj))
+        (← optional (path ++ ".anchor") stablePoint (← field path "anchor" obj))
+        (← list (path ++ ".atoms") identifier (← field path "atoms" obj)))
   | "transclude" =>
       let obj ← exactObject path ["type", "transclusion", "link", "request"] json
       pure (.transclude (← identifier (path ++ ".transclusion") (← field path "transclusion" obj))
@@ -5273,6 +5278,18 @@ private def orderEntryJson (store : ContentResource.ContentStore)
         | none => .null)]
     | _ => []
 
+/-- The page's runs: each run's identifier and its atoms in the committed slot
+order, the unit a transclusion range is cut from and `insertRun` extends. -/
+private def runsJson (store : ContentResource.ContentStore) : Lean.Json :=
+  .arr <| ((StoreCodec.entries HyperdocumentCell.contentWire store).filterMap fun entry =>
+    match entry with
+    | ⟨⟨.runs, identifier⟩, record⟩ =>
+        let identifier : Hyperdocument.RunId := identifier
+        let record : Hyperdocument.RunRecord := record
+        some (Lean.Json.mkObj [("id", decimal identifier.digest.value),
+          ("atoms", .arr <| record.atoms.toArray.map fun atom => decimal atom.digest.value)])
+    | _ => none).toArray
+
 private def pageJson (page : Option Nat × String × Option Digest × ContentResource.ContentStore) :
     List (String × Lean.Json) :=
   let store := page.2.2.2
@@ -5283,7 +5300,8 @@ private def pageJson (page : Option Nat × String × Option Digest × ContentRes
     ("rootRevision", match root.bind (ContentResource.elementAt store) with
       | some record => decimal record.revision.digest.value
       | none => .null),
-    ("order", .arr <| (pageLines store).toArray.map (orderEntryJson store))]
+    ("order", .arr <| (pageLines store).toArray.map (orderEntryJson store)),
+    ("runs", runsJson store)]
 
 private def jsonInput (kind : String) (bytes : List UInt8) : Result Lean.Json := do
   let text ← match String.fromUTF8? (ByteArray.mk bytes.toArray) with
