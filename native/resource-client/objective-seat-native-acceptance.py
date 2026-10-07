@@ -525,7 +525,8 @@ sh('create-object-held', mini, 'workspace', '--action', 'create', '--dir', alice
 href = json.loads((alice_ws / 'refs' / 'held-tally.json').read_text())
 HELD = {'object': href['target'], 'capability': href['operationCapability']}
 activity('E8-create-tally', alice_ws, {'kind': 'create', 'object': HELD['object'], 'objectCapability': HELD['capability'],
-         'pin': TALLY_PIN, 'law': {'type': 'all', 'predicates': []}, 'upgrade': {'frozen': {}},
+         'pin': TALLY_PIN, 'stateType': {'tag': 'field', 'name': 'total', 'member': {'tag': 'natural'}, 'tail': {'tag': 'emptyRow'}},
+         'law': {'type': 'all', 'predicates': []}, 'upgrade': {'frozen': {}},
          'payer': ALICE_ACCOUNT, 'payerCapability': ALICE_SPEND}, 'installed')
 TICKS = 3000
 born = activity('E8-birth-tally', alice_ws, {'kind': 'birth', 'object': HELD['object'],
