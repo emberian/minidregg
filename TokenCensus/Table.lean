@@ -61,6 +61,7 @@ Minidregg.Compiler.GenericSimplexIO.VerifiedCommit.mk | Compiler.GenericSimplexI
 Minidregg.Compiler.GrainResourceBirthAuthority.Prepared.mk | Compiler.GrainResourceBirthAuthority | evidence | L2 | 3 proof / 2 data fields; layer-1 review pending
 Minidregg.Compiler.GrainResourceBirthController.PreparedSourceAuthority.mk | Compiler.GrainResourceBirthController | evidence | L2 | 1 proof / 1 data fields; layer-1 review pending
 Minidregg.Compiler.GrainResourceBirthController.PreparedSourceBirth.mk | Compiler.GrainResourceBirthController | evidence | L2 | 1 proof / 1 data fields; layer-1 review pending
+Minidregg.Compiler.NativeCoprocess.Reader.mk | Compiler.NativeCoprocess | encapsulation | L2 | 0 proof / 2 data fields; a coprocess reply pipe and the bytes read from it so far (byte counts for Failure messages); no admission rests on it
 Minidregg.Compiler.NeutralPolicyCarry.Plan.mk | Compiler.NeutralPolicyCarry | evidence | L2 | 0 proof / 5 data fields; layer-1 review pending
 Minidregg.Compiler.ObjectiveBendCombinedResult.Prepared.mk | Compiler.ObjectiveBendCombinedResult | evidence | L2 | 10 proof / 14 data fields; layer-1 review pending
 Minidregg.Compiler.ObjectiveBendFrontEnd.Accepted.mk | Compiler.ObjectiveBendFrontEnd | evidence | L2 | 7 proof / 5 data fields; layer-1 review pending
