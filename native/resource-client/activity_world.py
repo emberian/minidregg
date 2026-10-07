@@ -21,17 +21,39 @@ MAXIMUM = {'typeFuel': 16384, 'sourceTicks': 200000, 'heap': 200000, 'stack': 20
            'outputBytes': 200000, 'extractTicks': 200000, 'inputBytes': 200000, 'scalarBits': 512, 'memoryTouches': 2000000,
            'proofWork': 900000, 'feeDebit': 1000000, 'turnBytes': 4000000, 'witnessBytes': 4000000,
            'storageBytes': 4000000, 'sideEffectCount': 16, 'networkBytes': 0, 'leaseByteBlocks': 0,
-           'incidences': 16, 'replayBytes': 4194304, 'coreBytes': 4194304, 'domainWork': 256}
+           'incidences': 16, 'replayBytes': 262144, 'coreBytes': 262144, 'domainWork': 256}
+# The policy's source bound (`sourceBytes`): the largest stored package (and so the largest typed core) a turn
+# replays. The front-end rates below are MEASURED against it and are valid only up to it.
+SOURCE_BYTES = 262144
+# Tariff edition 4 (row E front-end rates; row A3 `domainWork`, priced 0 here). `replayBytes` and `coreBytes` are
+# priced in source ticks per byte, at the WORST
+# per-byte cost the front end showed for an input at this world's source bound (the front end is superlinear:
+# 0.78 us/byte at 91 KB, 1.9 us/byte at 256 KiB, 11.7 us/byte at 2 MB of source; a typed core 0.48 us/byte at
+# 256 KiB, 1.8 us/byte at 4.2 MB), divided by the cost of one machine tick (31 ns: 100000 ticks in 3.1 ms).
+# Measured 2026-10-07 on burst2-b with the lane Host (`objective-front preview`/`elaborate`, best of 3;
+# KN2-ROW-E STATUS.txt): replay 1.877 us/byte at 258753 source bytes -> 61 ticks/byte; core 0.482 us/byte at
+# 266491 core bytes -> 16 ticks/byte. A world with a larger source bound must re-measure (the rate rises).
 TARIFF = {'version': '4', 'base': '1', 'typeFuel': '0', 'sourceTicks': '1', 'heap': '0', 'stack': '0',
           'outputNodes': '0', 'outputBytes': '0', 'extractTicks': '0', 'inputBytes': '0',
-          'replayBytes': '0', 'coreBytes': '0', 'domainWork': '0'}
+          'replayBytes': '61', 'coreBytes': '16', 'domainWork': '0'}
+RATE_KEYS = [k for k in TARIFF if k not in ('version', 'base')]
+
+
+def price(c):
+    """The public price of a declared envelope (`Tariff.workOf`)."""
+    return int(TARIFF['base']) + sum(int(TARIFF[k]) * int(c.get(k, '0')) for k in RATE_KEYS)
 PERMIT_ALL = {'type': 'all', 'predicates': []}
 
-# A declared envelope of TICKS source ticks is priced base + ticks (TARIFF); an await escrows one
-# resume envelope and one timeout envelope, the activity's purse must hold the pair.
+# A full envelope of TICKS source ticks is priced by `price` (TARIFF): base + ticks + the front end's quote; an
+# await escrows one resume envelope and one timeout envelope, the activity's purse must hold the pair. PRICE and
+# PAIR are set when the world learns the front end's quote of what it published (`World.learn_front_end`): read
+# them as `activity_world.PRICE` after a publication, never as values imported before it.
 TICKS = 3000
-PRICE = 1 + TICKS
-PAIR = 2 * PRICE
+PRICE = None
+PAIR = None
+# The front end's quote (op 214 `pins[].frontEnd`): the largest over every package this world published, so a full
+# envelope covers whichever package a turn replays. Learned from the Host, never authored.
+FRONT = {'replayBytes': None, 'coreBytes': None}
 
 
 def op_id():
@@ -76,9 +98,13 @@ def cap(ticks, full=True, domain=0):
     if full:
         if EXTRACT['ticks'] is None:
             raise RuntimeError('cap() before the Host\'s extraction budget was learned (World.bring_up)')
-        for k in ['heap', 'stack', 'typeFuel', 'outputNodes', 'outputBytes', 'replayBytes', 'coreBytes']:
+        if FRONT['replayBytes'] is None:
+            raise RuntimeError('cap() before the front end\'s quote was learned (World.learn_front_end, after a publish)')
+        for k in ['heap', 'stack', 'typeFuel', 'outputNodes', 'outputBytes']:
             c[k] = str(MAXIMUM[k])
         c['extractTicks'] = str(EXTRACT['ticks'])
+        c['replayBytes'] = str(FRONT['replayBytes'])
+        c['coreBytes'] = str(FRONT['coreBytes'])
     c['sourceTicks'] = str(ticks)
     c['domainWork'] = str(domain)
     return c
@@ -186,6 +212,7 @@ class World:
         self.attempts = self.root / 'attempts'
         self.attempts.mkdir()
         self.objects = {}
+        self.published = {}
 
     # --- commands -------------------------------------------------------------------
     def sh(self, label, *cmd, ok=(0,), env=None):
@@ -213,12 +240,12 @@ class World:
             return {'unparsed': text[-800:]}
 
     # --- the world -------------------------------------------------------------------
-    def bring_up(self, object_names, sponsor_balance='1000000'):
+    def bring_up(self, object_names, sponsor_balance='1000000000'):
         """Genesis with the Objective policy and a second enrolled subject, then one native resource
         (object cell + operation capability) per name, none of them an object yet (no record)."""
         root = self.root
         constants = json.loads(self.sh('constants', self.host, '/dev/null', 'objective-constants').stdout)
-        policy = {'schema': 'dregg.objective-bend.policy.v1', 'sourceBytes': '4194304',
+        policy = {'schema': 'dregg.objective-bend.policy.v1', 'sourceBytes': str(SOURCE_BYTES),
                   'maximum': {k: str(v) for k, v in MAXIMUM.items()}, 'extractTicksPerTurn': str(16 * MAXIMUM['extractTicks']), 'outputs': [constants['genericCodec']],
                   'clearAudience': '01ff', 'frontEnd': constants['frontEnd'], 'tariff': TARIFF}
         (root / 'policy.json').write_text(json.dumps(policy, indent=1))
@@ -231,7 +258,7 @@ class World:
                                'publicKey': public, 'activeFrom': '0', 'activeUntil': '1000000',
                                'nextKeyDigest': None},
                        'accountId': self.SECOND, 'spendCapabilityId': self.SECOND_SPEND, 'controlCapabilityId': '4003',
-                       'factoryObserveCapabilityId': '4004', 'initialBalance': '100000',
+                       'factoryObserveCapabilityId': '4004', 'initialBalance': '100000000000',
                        'accountPredicate': {'type': 'all', 'predicates': []}}]
         (root / 'enrollment-second.json').write_text(json.dumps(enrollment))
         self.W = root / 'w'
@@ -315,7 +342,10 @@ class World:
         A `deliver`/`exhaust` first asks the Host's quote for the heap its checkpoint needs and declares it."""
         if body.get('kind') in RESUME_KINDS:
             body = covering_body(body, self.quote_heap(label, workspace, body), self.payer_of(workspace))
-        return self.judge(label, self.submit(label, workspace, body, prepare), expect, detail)
+        value = self.judge(label, self.submit(label, workspace, body, prepare), expect, detail)
+        if body.get('kind') == 'publish' and value.get('type') == 'confirmed':
+            self.learn_front_end(f'{label}-front-end')
+        return value
 
     def short_heap_plant(self, label, workspace, body):
         """The PLANT of the heap declaration: the same `deliver`/`exhaust` declaring ONE cell fewer than the
@@ -340,9 +370,20 @@ class World:
         kind = value.get('type')
         reason = value.get('reason', '')
         text = unhex(value.get('detail', '')) if 'detail' in value else value.get('error', '')
+        if expect in ('charged', 'prepared') and value.get('verdict'):
+            # A charged failure commits (the price, nothing else) and confirms; what it failed for is the plan's
+            # verdict (`charged failure: <reason>`), which a prepared turn also reports before it is submitted.
+            text = value.get('verdict')
         text = ' '.join(str(text).split())  # the Host prints refusals pretty-wrapped
-        if expect == 'installed':
-            ok = kind == 'confirmed' and value.get('confirmation') == 'installed'
+        if expect == 'charged':
+            # A resubmitted ingress carries no plan, so no verdict: its charge is judged by the row's own balance checks.
+            ok = kind == 'confirmed' and value.get('confirmation') == 'installed' and (
+                text.startswith('charged failure') or 'verdict' not in value)
+            if ok and 'verdict' not in value:
+                detail = None
+        elif expect == 'installed':
+            # a charged failure also confirms: it is installed only when its plan's verdict is not a failure
+            ok = kind == 'confirmed' and value.get('confirmation') == 'installed' and not value.get('verdict')
         elif expect == 'replayed':
             ok = kind == 'confirmed' and value.get('confirmation') == 'replayed'
         elif expect == 'prepared':
@@ -415,8 +456,24 @@ class World:
         (pub / 'spec.json').write_text(json.dumps(spec))
         out = self.last_json(self.sh(label, self.host, self.config, 'objective-publication', pub / 'spec.json',
                                      'activity', pub / 'out'))
-        return out['artifactId'], {'artifact': (pub / 'out' / 'artifact.bin').read_bytes().hex(),
-                                   'package': (pub / 'out' / 'package.bin').read_bytes().hex()}
+        artifact = (pub / 'out' / 'artifact.bin').read_bytes().hex()
+        self.published[artifact] = out['artifactId']
+        return out['artifactId'], {'artifact': artifact, 'package': (pub / 'out' / 'package.bin').read_bytes().hex()}
+
+    def learn_front_end(self, label='front-end-quote'):
+        """The front end's quote of every package this world published (op 214), its maximum into FRONT, and the
+        price of a full envelope into PRICE / PAIR."""
+        global PRICE, PAIR
+        pins = sorted(set(self.published.values()))
+        v = self.view(label, {'pins': [str(p) for p in pins]})
+        quotes = [q.get('frontEnd') for q in v.get('pins', []) if q.get('frontEnd') is not None]
+        if not quotes:
+            raise RuntimeError(f'the Host published no front-end quote for {pins}: {v}')
+        FRONT['replayBytes'] = max(int(q['replayBytes']) for q in quotes)
+        FRONT['coreBytes'] = max(int(q['coreBytes']) for q in quotes)
+        PRICE = price(cap(TICKS))
+        PAIR = 2 * PRICE
+        return FRONT
 
     # The declared state type `{total: Nat}` (the checker's type JSON): every package these journeys pin
     # (Tally, Calls, Sends) keeps a record with one natural field `total`.
@@ -437,7 +494,7 @@ class World:
         return self.turn(label, workspace, body, expect, detail)
 
     def birth(self, label, workspace, name, deposit, expect, detail=None, init=None, decider=None, ticks=TICKS,
-              pin=None, extract_ticks=None):
+              pin=None, extract_ticks=None, prepare=False):
         """`extract_ticks`: declare that many extraction ticks in the birth envelope instead of the published
         budget (the plant: one over)."""
         o = self.objects[name]
@@ -447,7 +504,7 @@ class World:
                 'envelope': cap(ticks), 'resume': cap(ticks), 'timeout': cap(ticks), 'deposit': str(deposit)}
         if extract_ticks is not None:
             body['envelope'] = dict(body['envelope'], extractTicks=str(extract_ticks))
-        return self.turn(label, workspace, body, expect, detail).get('transaction')
+        return self.turn(label, workspace, body, expect, detail, prepare=prepare).get('transaction')
 
     def over_extract_plant(self, label, workspace, name, deposit):
         """The PLANT of the extraction declaration: a birth declaring ONE tick over the published per-turn ceiling

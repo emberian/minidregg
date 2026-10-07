@@ -795,6 +795,15 @@ theorem TopUp.upgradable {rootBytes : Bytes → Digest} {config : Config} {snaps
   silent_preserves (fun post member => by
     simp only [List.mem_singleton] at member; subst member; exact book_silent topped.bookExact topped.posted) holds
 
+/-- A charged failure posts the Book only: the invariant is preserved. -/
+theorem ChargedFailure.upgradable {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {request : FailureRequest} (charged : ChargedFailure config snapshot request)
+    (holds : Upgradable config (payloads snapshot.canonicalBytes)) :
+    Upgradable config (payloads (afterPosts snapshot charged.posts)) :=
+  silent_preserves (fun post member => by
+    simp only [ChargedFailure.posts, List.mem_singleton] at member; subst member
+    exact book_silent charged.bookExact charged.posted) holds
+
 theorem Publication.upgradable {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {stored : Stored} (publication : Publication config snapshot stored)
     (holds : Upgradable config (payloads snapshot.canonicalBytes)) :
@@ -879,6 +888,7 @@ theorem Exhaustion.upgradable {rootBytes : Bytes → Digest} {config : Config} {
 #assert_axioms head_payload_at
 #assert_axioms Resolution.upgradable
 #assert_axioms TopUp.upgradable
+#assert_axioms ChargedFailure.upgradable
 #assert_axioms Publication.upgradable
 #assert_axioms Exhaustion.upgradable
 
@@ -3264,6 +3274,7 @@ theorem AdmittedTurn.upgradable {rootBytes : Bytes → Digest} {config : Config}
   | resolve _ resolution => exact Resolution.upgradable resolution holds
   | deliver _ delivery => exact Delivery.upgradable delivery holds
   | topUp _ topped => exact TopUp.upgradable topped holds
+  | failed _ charged => exact ChargedFailure.upgradable charged holds
   | exhaust _ exhausted => exact Exhaustion.upgradable exhausted holds
   | abandon _ abandoned => exact Abandonment.upgradable abandoned holds
   | invoke _ invoked => exact Invocation.upgradable invoked holds

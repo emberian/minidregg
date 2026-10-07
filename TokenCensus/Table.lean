@@ -299,6 +299,7 @@ Minidregg.Kernel.ObjectiveActivity.Adoption.mk | Kernel.ObjectiveActivityUpgrade
 Minidregg.Kernel.ObjectiveActivity.Birth.mk | Kernel.ObjectiveActivity | evidence | L2 | 15 proof / 11 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivity.BirthPrefix.mk | Kernel.ObjectiveActivity | evidence | L2 | DEPUTY-OB-ENG type; layer-1 review pending (OB-ENG)
 Minidregg.Kernel.ObjectiveActivity.Creation.mk | Kernel.ObjectiveActivity | evidence | L2 | 3 proof / 1 data fields; layer-1 review pending
+Minidregg.Kernel.ObjectiveActivity.ChargedFailure.mk | Kernel.ObjectiveActivity | evidence | L2 | 2 proof / 2 data fields; GPT-6 row E charged failure (minted only by chargeFailure); layer-1 review pending
 Minidregg.Kernel.ObjectiveActivity.Delivery.mk | Kernel.ObjectiveActivity | evidence | L2 | 23 proof / 20 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivity.Exhaustion.mk | Kernel.ObjectiveActivity | evidence | L2 | 20 proof / 15 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivity.Instantiated.mk | Kernel.ObjectiveActivity | evidence | L2 | 1 proof / 4 data fields; layer-1 review pending
@@ -317,6 +318,8 @@ Minidregg.Kernel.ObjectiveActivity.TopUp.mk | Kernel.ObjectiveActivity | evidenc
 Minidregg.Kernel.ObjectiveActivity.TypedData.mk | Kernel.ObjectiveActivity | evidence | L2 | 1 proof / 1 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivityReceiver.Accepted.mk | Kernel.ObjectiveActivityReceiver | evidence | L2 | 2 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivityReceiver.DecodedIngress.mk | Kernel.ObjectiveActivityReceiver | evidence | L2 | 2 proof / 3 data fields; layer-1 review pending
+Minidregg.Kernel.ObjectiveActivityReceiver.Failed.mk | Kernel.ObjectiveActivityReceiver | evidence | L2 | 7 proof / 8 data fields; GPT-6 row E charged failure after gate + signature (minted only by admitDecodedNative); layer-1 review pending
+Minidregg.Kernel.ObjectiveActivityReceiver.Gated.mk | Kernel.ObjectiveActivityReceiver | evidence | L2 | 4 proof / 4 data fields; GPT-6 row E gate: authority, capability over the claimed outcome, funds (minted only by gate); layer-1 review pending
 Minidregg.Kernel.ObjectiveActivityReceiver.Prepared.mk | Kernel.ObjectiveActivityReceiver | evidence | L2 | 6 proof / 7 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveBendArtifactSource.Current.mk | Kernel.ObjectiveBendArtifactSource | evidence | L2 | 3 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveBendArtifactSource.Loaded.mk | Kernel.ObjectiveBendArtifactSource | evidence | L2 | 5 proof / 2 data fields; layer-1 review pending

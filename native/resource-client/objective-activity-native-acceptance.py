@@ -82,6 +82,7 @@ row with its expectation and verdict; the script exits 1 on any mismatch.
 """
 import argparse, re, json, os, pathlib, secrets, subprocess, sys, time
 from activity_world import RESUME_KINDS, covering_body, published_extract_ticks, quote_request, quoted_heap, short_body
+from activity_world import SOURCE_BYTES, TARIFF, price
 
 os.umask(0o077)
 HERE = pathlib.Path(__file__).resolve().parent
@@ -150,16 +151,16 @@ MAXIMUM = {'typeFuel': 16384, 'sourceTicks': 200000, 'heap': 200000, 'stack': 20
            'outputBytes': 200000, 'extractTicks': 200000, 'inputBytes': 200000, 'scalarBits': 512, 'memoryTouches': 2000000,
            'proofWork': 900000, 'feeDebit': 1000000, 'turnBytes': 4000000, 'witnessBytes': 4000000,
            'storageBytes': 4000000, 'sideEffectCount': 16, 'networkBytes': 0, 'leaseByteBlocks': 0,
-           'incidences': 16, 'replayBytes': 4194304, 'coreBytes': 4194304, 'domainWork': 256}
-tariff = {'version': '4', 'base': '1', 'typeFuel': '0', 'sourceTicks': '1', 'heap': '0', 'stack': '0',
-          'outputNodes': '0', 'outputBytes': '0', 'extractTicks': '0', 'inputBytes': '0',
-          'replayBytes': '0', 'coreBytes': '0', 'domainWork': '0'}
+           'incidences': 16, 'replayBytes': SOURCE_BYTES, 'coreBytes': SOURCE_BYTES, 'domainWork': 256}
+# Tariff edition 3: the front end's measured rates (activity_world.TARIFF documents the measurement), valid
+# up to this world's source bound.
+tariff = dict(TARIFF)
 # A delivery or exhaustion whose escrowed envelope does not cover the checkpoint's heap adds the missing
 # cells as `extra`, and its submitter pays the extra's price (workOf: base + sourceTicks*0 + heap*0 here),
 # so a submitter that declares only heap pays the tariff's base alone.
 assert tariff['heap'] == '0'
 EXTRA_FEE = int(tariff['base'])
-policy = {'schema': 'dregg.objective-bend.policy.v1', 'sourceBytes': '4194304',
+policy = {'schema': 'dregg.objective-bend.policy.v1', 'sourceBytes': str(SOURCE_BYTES),
           'maximum': {k: str(v) for k, v in MAXIMUM.items()}, 'extractTicksPerTurn': str(16 * MAXIMUM['extractTicks']), 'outputs': [constants['genericCodec']],
           'clearAudience': '01ff', 'frontEnd': constants['frontEnd'], 'tariff': tariff}
 (root / 'policy.json').write_text(json.dumps(policy, indent=1))
@@ -171,7 +172,7 @@ SECOND = '40'
 enrollment = [{'key': {'keyId': '4000', 'keyEpoch': '2', 'algorithm': '1', 'subject': SECOND,
                        'publicKey': public40, 'activeFrom': '0', 'activeUntil': '1000000', 'nextKeyDigest': None},
                'accountId': SECOND, 'spendCapabilityId': '4002', 'controlCapabilityId': '4003',
-               'factoryObserveCapabilityId': '4004', 'initialBalance': '100000',
+               'factoryObserveCapabilityId': '4004', 'initialBalance': '100000000000',
                'accountPredicate': {'type': 'all', 'predicates': []}}]
 (root / 'enrollment-40.json').write_text(json.dumps(enrollment))
 W = root / 'w'
@@ -179,7 +180,7 @@ sock = W / 'public' / 'mini.sock'
 sh('genesis', 'sh', HERE / 'newparticipant-acceptance.sh', host, mini, store, verifier, W, sock,
    env={'OBJECTIVE_INVOCATION_POLICY': (root / 'policy.hex').read_text().strip(),
         'EXTRA_GENESIS_ENROLLMENTS': str(root / 'enrollment-40.json'),
-        'NEWPARTICIPANT_SPONSOR_BALANCE': '1000000'})
+        'NEWPARTICIPANT_SPONSOR_BALANCE': '100000000000'})
 config = W / 'deployment' / 'pinned-config.json'
 sponsor = W / 'sponsor'
 second = root / 'subject40'
@@ -262,6 +263,10 @@ def judge(label, value, expect, detail):
     kind = value.get('type')
     reason = value.get('reason', '')
     text = unhex(value.get('detail', '')) if 'detail' in value else value.get('error', '')
+    if expect in ('charged', 'prepared') and value.get('verdict'):
+        # A charged failure commits (the price, nothing else) and confirms; why it failed is the plan's verdict
+        # (`charged failure: <reason>`), which a prepared turn reports before anything is submitted (GPT-6 row E).
+        text = value.get('verdict')
     if expect == 'installed' and label in QUOTED:
         # a deposit the Host itself quoted must be accepted: the quote and the charge are computed from a record
         # whose size depends on transaction-derived digests (base-255 Nat codec), so they can disagree by a byte
@@ -269,8 +274,11 @@ def judge(label, value, expect, detail):
         if kind == 'refused' and charged:
             text = (f'deposit quote not a fixed point (cv 01a11467-08ce): quoted {QUOTED[label]}, '
                     f'charged {charged.group(2)}')
-    if expect == 'installed':
-        ok = kind == 'confirmed' and value.get('confirmation') == 'installed'
+    if expect == 'charged':
+        ok = kind == 'confirmed' and value.get('confirmation') == 'installed' and str(text).startswith('charged failure')
+    elif expect == 'installed':
+        # a charged failure also confirms: it is installed only when its plan's verdict is not a failure
+        ok = kind == 'confirmed' and value.get('confirmation') == 'installed' and not value.get('verdict')
     elif expect == 'replayed':
         ok = kind == 'confirmed' and value.get('confirmation') == 'replayed'
     elif expect == 'prepared':
@@ -375,22 +383,37 @@ check('extract-quote-is-the-policy-ceiling', EXTRACT_TICKS == 16 * MAXIMUM['extr
       {'published': EXTRACT_TICKS, 'policy': 16 * MAXIMUM['extractTicks']})
 
 
+# The front end's quote of every published package (op 214 `pins[].frontEnd`), learned from the Host: a full
+# envelope declares the largest, so it covers whichever of them a turn replays.
+qv = view('front-end-quote', {'pins': [str(p) for p in (PIN, PIN2, PIN3)]})
+QUOTES = [q.get('frontEnd') for q in qv['pins']]
+check('front-end-quoted', all(q is not None for q in QUOTES), QUOTES)
+FRONT = {'replayBytes': max(int(q['replayBytes']) for q in QUOTES), 'coreBytes': max(int(q['coreBytes']) for q in QUOTES)}
+
+
 def cap(ticks, full=True):
     """A declared envelope (Capacity): `ticks` source ticks; a full one also declares the
-    kernel's fixed heap, stack, type fuel and Plan budget (Config.covers), priced at 0, and the
-    published extraction budget."""
+    kernel's fixed heap, stack, type fuel and Plan budget (Config.covers), priced at 0, the
+    published extraction budget, and the front end's quote."""
     c = {k: '0' for k in MAXIMUM}
     if full:
-        for k in ['heap', 'stack', 'typeFuel', 'outputNodes', 'outputBytes', 'replayBytes', 'coreBytes']:
+        for k in ['heap', 'stack', 'typeFuel', 'outputNodes', 'outputBytes']:
             c[k] = str(MAXIMUM[k])
         c['extractTicks'] = str(EXTRACT_TICKS)
+        c['replayBytes'] = str(FRONT['replayBytes'])
+        c['coreBytes'] = str(FRONT['coreBytes'])
     c['sourceTicks'] = str(ticks)
     return c
 
 
 TICKS = 3000
-PRICE = 1 + TICKS
+PRICE = price(cap(TICKS))
 PAIR = 2 * PRICE
+# Deposits and top-ups, in fee units (they were 20000, 30000 and 10000 against a 3001 fee before the front end
+# was priced): a deposit that comfortably reserves the first await, a larger one, a top-up.
+DEPOSIT = 7 * PRICE
+LARGE_DEPOSIT = 10 * PRICE
+TOP_UP = 3 * PRICE
 
 
 def variant(label, payload):
@@ -401,7 +424,8 @@ LAST = {}
 
 
 def birth(label, workspace, name, deposit, expect, detail=None, account=SPONSOR_ACCOUNT, account_cap=SPONSOR_SPEND,
-          object_cap=None, decider=SECOND, init=None, ticks=TICKS, resume_ticks=None, pin=None, extract_ticks=None):
+          object_cap=None, decider=SECOND, init=None, ticks=TICKS, resume_ticks=None, pin=None, extract_ticks=None,
+          prepare=False):
     o = objects[name]
     body = {'kind': 'birth', 'object': o['object'], 'objectCapability': object_cap or o['capability'],
             'account': account, 'accountCapability': account_cap, 'pin': pin or PIN,
@@ -410,7 +434,7 @@ def birth(label, workspace, name, deposit, expect, detail=None, account=SPONSOR_
             'deposit': str(deposit)}
     if extract_ticks is not None:
         body['envelope'] = dict(body['envelope'], extractTicks=str(extract_ticks))
-    value = turn(label, workspace, body, expect, detail)
+    value = turn(label, workspace, body, expect, detail, prepare)
     LAST['value'] = value
     return value.get('transaction')
 
@@ -445,27 +469,36 @@ def total_of(v):
 
 
 # --- ownership -------------------------------------------------------------------
-birth('stranger-birth-refused', second, 'tally-one', 20000, 'refused', 'notObjectHolder',
+birth('stranger-birth-refused', second, 'tally-one', DEPOSIT, 'refused', 'notObjectHolder',
       account=SECOND, account_cap='4002', object_cap='4002')
-birth('foreign-account-refused', second, 'tally-one', 20000, 'refused', 'notObjectHolder',
+birth('foreign-account-refused', second, 'tally-one', DEPOSIT, 'refused', 'notObjectHolder',
       account=SPONSOR_ACCOUNT, account_cap=SPONSOR_SPEND)
-birth('foreign-payer-refused', sponsor, 'tally-one', 20000, 'refused', 'notAccountOwner',
+birth('foreign-payer-refused', sponsor, 'tally-one', DEPOSIT, 'refused', 'notAccountOwner',
       account=SECOND, account_cap='4002')
-birth('underfunded-birth-refused', sponsor, 'tally-one', PAIR - 1, 'refused', 'underfunded')
-birth('birth-on-bare-refused', sponsor, 'bare', 20000, 'refused', 'notAnObject')
-birth('birth-one-tick-over-extract-refused', sponsor, 'tally-one', 20000, 'refused',
+# A deposit short of the pair is judged only after the run (the reserve includes the storage deposit of the
+# record the run yields): a CHARGED FAILURE, the envelope's price posted and nothing else (GPT-6 row E).
+underfunded_before = watched('before-underfunded')
+birth('underfunded-birth-charged', sponsor, 'tally-one', PAIR - 1, 'charged', 'underfunded')
+underfunded_after = watched('after-underfunded')
+check('underfunded-birth-charged-the-price', balance(underfunded_after, SPONSOR_ACCOUNT)
+      == balance(underfunded_before, SPONSOR_ACCOUNT) - PRICE and balance(underfunded_after, COLLECTOR)
+      == balance(underfunded_before, COLLECTOR) + PRICE,
+      {'sponsor': [balance(underfunded_before, SPONSOR_ACCOUNT), balance(underfunded_after, SPONSOR_ACCOUNT)],
+       'price': PRICE})
+birth('birth-on-bare-refused', sponsor, 'bare', DEPOSIT, 'refused', 'notAnObject')
+birth('birth-one-tick-over-extract-refused', sponsor, 'tally-one', DEPOSIT, 'refused',
       ['uncovered', f'extractTicks := {EXTRACT_TICKS + 1}'], extract_ticks=EXTRACT_TICKS + 1)
-birth('birth-other-pin-refused', sponsor, 'tally-one', 20000, 'refused', 'pinMismatch', pin=PIN2)
+birth('birth-other-pin-refused', sponsor, 'tally-one', DEPOSIT, 'refused', 'pinMismatch', pin=PIN2)
 
 # --- tally one -------------------------------------------------------------------
 before = watched('before-birth')
-tx1 = birth('birth', sponsor, 'tally-one', 30000, 'installed')
+tx1 = birth('birth', sponsor, 'tally-one', LARGE_DEPOSIT, 'installed')
 s1 = state('tally-one', 'born', tx1)
 REC1 = s1['recordCell']
 check('born-awaiting', s1['record'].get('generation') == '0' and s1['record']['phase']['kind'] == 'awaiting'
       and total_of(s1) == 0, {'record': s1['record'].get('phase'), 'state': s1.get('state')})
-check('birth-fees-on-book', balance(s1, SPONSOR_ACCOUNT) == balance(before, SPONSOR_ACCOUNT) - PRICE - 30000
-      and balance(s1, COLLECTOR) == balance(before, COLLECTOR) + PRICE and s1['purse'] == 30000,
+check('birth-fees-on-book', balance(s1, SPONSOR_ACCOUNT) == balance(before, SPONSOR_ACCOUNT) - PRICE - LARGE_DEPOSIT
+      and balance(s1, COLLECTOR) == balance(before, COLLECTOR) + PRICE and s1['purse'] == LARGE_DEPOSIT,
       {'sponsor': [balance(before, SPONSOR_ACCOUNT), balance(s1, SPONSOR_ACCOUNT)],
        'collector': [balance(before, COLLECTOR), balance(s1, COLLECTOR)], 'purse': s1['purse']})
 slot1 = await_of(s1)['source']['slot']
@@ -485,7 +518,7 @@ turn_b = attempts / 'deliver-b-prepared' / 'ingress.bin'
 resubmit('deliver-a', turn_a, 'installed')
 s2 = state('tally-one', 'resumed', tx1)
 check('resumed-with-reply', total_of(s2) == 5 and s2['record'].get('generation') == '1'
-      and s2['purse'] == 30000 - PRICE, {'state': s2.get('state'), 'generation': s2['record'].get('generation'),
+      and s2['purse'] == LARGE_DEPOSIT - PRICE, {'state': s2.get('state'), 'generation': s2['record'].get('generation'),
                                           'purse': s2['purse']})
 resubmit('deliver-a-retry-replays', turn_a, 'replayed')
 resubmit('deliver-b-conflicts', turn_b, 'conflict')
@@ -500,7 +533,7 @@ turn('resolve-before-write', second, {'kind': 'resolve', 'slot': slot2, 'answer'
 turn('deliver-prepared-before-write', sponsor, dict(deliver, **{'await': await2}), 'prepared', prepare=True)
 # The state moves by ANOTHER activity of the same object (no direct write of declared state exists: only the
 # object's package writes it): a second tally joins tally-one, is answered 93 and delivered (5 + 93 = 98).
-txm = birth('birth-mover-joins', sponsor, 'tally-one', 20000, 'installed', init=variant('keep', record()))
+txm = birth('birth-mover-joins', sponsor, 'tally-one', DEPOSIT, 'installed', init=variant('keep', record()))
 mv = state('tally-one', 'mover-born', txm)
 turn('mover-resolve', second, {'kind': 'resolve', 'slot': await_of(mv)['source']['slot'],
                                'answer': {'reply': record(amount=nat(93))}}, 'installed')
@@ -517,10 +550,10 @@ check('reply-lands-on-viewed-state', total_of(s3) == 105 and s3['record'].get('g
       {'state': s3.get('state'), 'version': s3.get('stateVersion'), 'generation': s3['record'].get('generation')})
 
 # --- two tallies on one object: both writes are kept -----------------------------------
-tx5a = birth('birth-five-a', sponsor, 'tally-five', 20000, 'installed')
-birth('birth-five-blind-set-refused', sponsor, 'tally-five', 20000, 'refused', 'blindWrite',
+tx5a = birth('birth-five-a', sponsor, 'tally-five', DEPOSIT, 'installed')
+birth('birth-five-blind-set-charged', sponsor, 'tally-five', DEPOSIT, 'charged', 'blindWrite',
       init=variant('set', nat(50)))
-tx5b = birth('birth-five-b-joins', sponsor, 'tally-five', 20000, 'installed', init=variant('keep', record()))
+tx5b = birth('birth-five-b-joins', sponsor, 'tally-five', DEPOSIT, 'installed', init=variant('keep', record()))
 e1 = state('tally-five', 'five-a-born', tx5a)
 e2 = state('tally-five', 'five-b-born', tx5b)
 turn('five-resolve-a', second, {'kind': 'resolve', 'slot': await_of(e1)['source']['slot'],
@@ -541,8 +574,10 @@ check('two-tallies-keep-both-writes', total_of(e1b) == 7 and e1b['record'].get('
 # --- funding: a purse that cannot reserve the next pair parks the activity ---------------
 # A yield reserves the fee pair AND the storage deposit of the record it commits
 # (storageRate * |record|); the Host's own refusal quotes both, so the exact deposit is learned from it.
-birth('birth-deposit-quote', sponsor, 'tally-three', PAIR, 'refused', 'underfunded')
-quote = re.search(r'underfunded (\d+) (\d+)', unhex(LAST['value'].get('detail', '')))
+# The quote is the PLAN of a birth at the bare pair: it reports the charged failure `underfunded D R` before
+# anything is submitted, so learning the deposit costs nothing.
+birth('birth-deposit-quote', sponsor, 'tally-three', PAIR, 'prepared', 'underfunded', prepare=True)
+quote = re.search(r'underfunded (\d+) (\d+)', str(LAST['value'].get('verdict', '')))
 NEED = int(quote.group(2)) if quote else 0
 check('deposit-reserves-pair-and-storage', quote is not None and int(quote.group(1)) == PAIR and NEED > PAIR,
       {'pair': PAIR, 'quote': quote.groups() if quote else None})
@@ -562,17 +597,17 @@ deliver3 = {'kind': 'deliver', 'record': REC3, 'await': await_of(f1)['id'], 'acc
             'accountCapability': '0'}
 turn('deliver-awaits-funding', sponsor, deliver3, 'refused', 'awaitsFunding')
 turn('top-up-stranger-account-refused', sponsor, {'kind': 'topUp', 'record': REC3, 'account': SECOND,
-                                                  'accountCapability': '4002', 'amount': '10000'},
+                                                  'accountCapability': '4002', 'amount': str(TOP_UP)},
      'refused', 'notAccountOwner')
 turn('top-up', second, {'kind': 'topUp', 'record': REC3, 'account': SECOND, 'accountCapability': '4002',
-                        'amount': '10000'}, 'installed')
+                        'amount': str(TOP_UP)}, 'installed')
 turn('deliver-funded', sponsor, deliver3, 'installed')
 f2 = state('tally-three', 'funded', tx3)
-check('funded-resumed', total_of(f2) == 2 and f2['purse'] == NEED - PRICE + 10000,
+check('funded-resumed', total_of(f2) == 2 and f2['purse'] == NEED - PRICE + TOP_UP,
       {'state': f2.get('state'), 'purse': f2['purse']})
 
 # --- timeout: the deadline passes ------------------------------------------------------
-tx2 = birth('birth-timeout', sponsor, 'tally-two', 20000, 'installed')
+tx2 = birth('birth-timeout', sponsor, 'tally-two', DEPOSIT, 'installed')
 t1 = state('tally-two', 'timeout-born', tx2)
 REC2 = t1['recordCell']
 deadline = int(await_of(t1)['deadline'])
@@ -588,7 +623,7 @@ turn('deliver-timed-out', second, {'kind': 'deliver', 'record': REC2, 'await': a
                                    'account': '0', 'accountCapability': '0'}, 'installed')
 t2 = state('tally-two', 'timed-out', tx2)
 check('timed-out-ends-and-reclaims', t2['recordKind'] == 'retired' and t2['purse'] == 0
-      and balance(t2, SPONSOR_ACCOUNT) == balance(before_timeout, SPONSOR_ACCOUNT) + 20000 - PRICE,
+      and balance(t2, SPONSOR_ACCOUNT) == balance(before_timeout, SPONSOR_ACCOUNT) + DEPOSIT - PRICE,
       {'recordKind': t2['recordKind'], 'purse': t2['purse'],
        'sponsor': [balance(before_timeout, SPONSOR_ACCOUNT), balance(t2, SPONSOR_ACCOUNT)]})
 slot_t = await_of(t1)['source']['slotCell']
@@ -603,8 +638,8 @@ turn('deliver-done-refused', sponsor, {'kind': 'deliver', 'record': REC2, 'await
 
 # --- exhaustion: an attempt that runs out of its declared envelope is committed and paid -----
 SMALL = 5
-SMALL_PRICE = 1 + SMALL
-tx5 = birth('birth-small-resume', sponsor, 'tally-exhaust', 20000, 'installed', resume_ticks=SMALL)
+SMALL_PRICE = price(cap(SMALL))
+tx5 = birth('birth-small-resume', sponsor, 'tally-exhaust', DEPOSIT, 'installed', resume_ticks=SMALL)
 x1 = state('tally-exhaust', 'exhaust-born', tx5)
 REC5 = x1['recordCell']
 turn('exhaust-resolve', second, {'kind': 'resolve', 'slot': await_of(x1)['source']['slot'],
@@ -654,7 +689,7 @@ check('exhaust-then-delivered', total_of(x4) == 3 and x4['record'].get('tried') 
 
 # --- abandon: nobody ends the await; after deadline + grace anyone reclaims it ------------------
 GRACE = 64
-tx6 = birth('birth-abandoned', sponsor, 'tally-abandon', 20000, 'installed')
+tx6 = birth('birth-abandoned', sponsor, 'tally-abandon', DEPOSIT, 'installed')
 a1 = state('tally-abandon', 'abandon-born', tx6)
 REC6 = a1['recordCell']
 await6 = await_of(a1)['id']
@@ -689,7 +724,7 @@ turn('late-delivery-finds-no-record', sponsor, {'kind': 'deliver', 'record': REC
      'refused', 'recordRetired')
 
 # --- fault (scenario E): a resumed program's own fault commits, never wedges -------------
-tx7 = birth('birth-fault', sponsor, 'tally-fault', 20000, 'installed', pin=PIN3)
+tx7 = birth('birth-fault', sponsor, 'tally-fault', DEPOSIT, 'installed', pin=PIN3)
 e1 = state('tally-fault', 'fault-born', tx7)
 REC7 = e1['recordCell']
 await7 = await_of(e1)['id']
@@ -716,7 +751,7 @@ turn('fault-retry-other-ingress-conflicts', sponsor, deliver7, 'conflict')
 
 # --- growth: the checkpoint at every yield, over GROWTH turns ----------------------------
 GROWTH = 12
-tx4 = birth('birth-growth', sponsor, 'tally-four', 25000, 'installed', ticks=1500)
+tx4 = birth('birth-growth', sponsor, 'tally-four', 20 * PRICE, 'installed', ticks=1500)  # twelve deliveries and the record's growth
 g = state('tally-four', 'growth-0', tx4)
 growth = [{'generation': int(g['record']['generation']), 'checkpointBytes': int(g['record']['checkpointBytes'])}]
 for i in range(1, GROWTH + 1):
@@ -781,9 +816,9 @@ spare = balance(view('fixpoint-sponsor', {'accounts': [SPONSOR_ACCOUNT]}), SPONS
 rounds = min(50, spare // (NEED + 2 * PRICE))
 underfunded, quotes = 0, set()
 for i in range(rounds):
-    birth(f'fixpoint-quote-{i}', sponsor, 'tally-three', PAIR, 'refused', 'underfunded',
-          init=variant('keep', record()))
-    q = re.search(r'underfunded (\d+) (\d+)', unhex(LAST['value'].get('detail', '')))
+    birth(f'fixpoint-quote-{i}', sponsor, 'tally-three', PAIR, 'prepared', 'underfunded',
+          init=variant('keep', record()), prepare=True)
+    q = re.search(r'underfunded (\d+) (\d+)', str(LAST['value'].get('verdict', '')))
     need = int(q.group(2)) if q else 0
     quotes.add(need)
     QUOTED[f'fixpoint-submit-{i}'] = need

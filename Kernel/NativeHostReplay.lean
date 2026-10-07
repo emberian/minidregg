@@ -1093,10 +1093,10 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
       NativeAdmission config opened (JobMoneyReceiver.intent accepted)
   | activity {ingress : ObjectiveActivityReceiver.DecodedIngress}
-      (accepted : ObjectiveActivityReceiver.Accepted config.deployment config.profile
+      (verdict : ObjectiveActivityReceiver.Verdict config.deployment config.profile
         ⟨config.federation, logicalHeight config opened.durable, config.tariff.asset, config.tariff.collector⟩
         opened.durable ingress) :
-      NativeAdmission config opened (ObjectiveActivityReceiver.intent accepted)
+      NativeAdmission config opened verdict.intent
   | seat {ingress : SeatReceiver.DecodedIngress}
       (accepted : SeatReceiver.Accepted config.deployment config.profile
         ⟨config.federation, logicalHeight config opened.durable, config.tariff.asset, config.tariff.collector⟩
@@ -1228,10 +1228,10 @@ inductive IssueAdmission (config : Config) (opened : Opened config)
 kernel's, each with the intent it commits. -/
 inductive KernelTurn (config : Config) (opened : Opened config) (intent : DataIntent rootBytes) : Type
   | activity (ingress : ObjectiveActivityReceiver.DecodedIngress)
-      (accepted : ObjectiveActivityReceiver.Accepted config.deployment config.profile
+      (verdict : ObjectiveActivityReceiver.Verdict config.deployment config.profile
         ⟨config.federation, logicalHeight config opened.durable, config.tariff.asset, config.tariff.collector⟩
         opened.durable ingress)
-      (exact : intent = ObjectiveActivityReceiver.intent accepted)
+      (exact : intent = verdict.intent)
   | seat (ingress : SeatReceiver.DecodedIngress)
       (accepted : SeatReceiver.Accepted config.deployment config.profile
         ⟨config.federation, logicalHeight config opened.durable, config.tariff.asset, config.tariff.collector⟩
@@ -2343,10 +2343,10 @@ private def derive (config : Config) (opened : Opened config)
         ⟨config.federation, height, config.tariff.asset, config.tariff.collector⟩ opened.durable
         config.signature ingress with
     | .error reason => return .error s!"activity turn refused: {repr reason}"
-    | .ok accepted =>
-        return .ok ⟨ObjectiveActivityReceiver.intent accepted,
-          .activity accepted, none, none, none, none, none, none, none, none, none, none, none, none,
-          some (.activity ingress accepted rfl), none, none, none, none⟩
+    | .ok verdict =>
+        return .ok ⟨verdict.intent,
+          .activity verdict, none, none, none, none, none, none, none, none, none, none, none, none,
+          some (.activity ingress verdict rfl), none, none, none, none⟩
   if let some ingress := SeatReceiver.decodeIngress bytes then
     match ← SeatReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height, config.tariff.asset, config.tariff.collector⟩ opened.durable

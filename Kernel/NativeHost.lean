@@ -2345,7 +2345,11 @@ def activityPlanLoaded (config : Config) (opened : Opened config) (commandBytes 
   pure ⟨config.deployment.domain, config.profile.semantics, commandBytes,
     CredentialSignedEnvelopeController.headerCodec.encode header,
     ObjectiveActivityReceiver.planReport config.deployment config.profile (activityAmbient config opened)
-      opened.durable command⟩
+      opened.durable command,
+    ObjectiveActivityReceiver.planOutcome config.deployment config.profile (activityAmbient config opened)
+      opened.durable command,
+    (ObjectiveActivityReceiver.planVerdict config.deployment config.profile (activityAmbient config opened)
+      opened.durable command).toUTF8.toList⟩
 
 def activityAssemble (plan : ObjectiveActivityReceiver.SigningPlan) (signature : List UInt8) :
     Except String (List UInt8) := do
@@ -2355,13 +2359,16 @@ def activityAssemble (plan : ObjectiveActivityReceiver.SigningPlan) (signature :
   check (ObjectiveActivityReceiver.commandCodec.decode plan.commandBytes).isSome
     "noncanonical activity plan command"
   let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
-  pure (ObjectiveActivityReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
+  pure (ObjectiveActivityReceiver.ingressCodec.encode ⟨plan.commandBytes, plan.outcome, envelope⟩)
 
 def activitySubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
     IO Outcome := do
   match ← ObjectiveActivityReceiver.receiveLoaded config.deployment config.profile
       (activityAmbient config opened) config.signature config.kernelTransport opened.durable bytes with
   | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  -- A charged failure is a committed receipt (the price posted, nothing else written); its cause is
+  -- the plan's verdict (`planVerdict`), which the signer re-plans from.
+  | .charged kind receipt _ => confirmed config kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused .operationRejected "activity" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
   | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
