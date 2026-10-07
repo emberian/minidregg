@@ -83,7 +83,7 @@ def runMessage {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snap
   | none => .failed "the arguments do not decode"
   | some args =>
     match exec config snapshot height ⟨none, some message.sender⟩ (messageTransaction message.id)
-        (callFuel message.envelope) [] (.enter ⟨⟨target⟩, message.method, args⟩) (Journal.start [])
+        (callFuel message.envelope) [] (.enter ⟨⟨target⟩, message.method, args⟩) (Journal.start [] message.envelope.extractTicks)
         message.envelope.sourceTicks with
     | .error reason => .failed (reprStr reason)
     | .ok (result, journal, _) =>

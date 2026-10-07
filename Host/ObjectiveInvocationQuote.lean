@@ -22,6 +22,7 @@ import Compiler.ObjectiveBendQuoteRequest
 import Compiler.ObjectiveInvocationLayout
 import Compiler.ObjectiveBendDataWire
 import Lean.Data.Json
+import Host.CapacityJson
 namespace Minidregg.Host.ObjectiveInvocationQuote
 open Minidregg.Compiler Minidregg.Kernel Minidregg.Theory
 open Minidregg.Kernel.NativeHost
@@ -255,13 +256,6 @@ private def arrayOf (json : Json) (name : String) : Except String (List Json) :=
   let array ← ((← field json name).getArr?).mapError fun _ => s!"{name} must be an array"
   pure array.toList
 
-private def capacityOf (json : Json) : Except String ObjectiveInvocationClaim.Capacity := do
-  pure ⟨← natOf json "typeFuel",← natOf json "sourceTicks",← natOf json "heap",← natOf json "stack",
-    ← natOf json "outputNodes",← natOf json "outputBytes",← natOf json "inputBytes",← natOf json "scalarBits",
-    ← natOf json "memoryTouches",← natOf json "proofWork",← natOf json "feeDebit",← natOf json "turnBytes",
-    ← natOf json "witnessBytes",← natOf json "storageBytes",← natOf json "sideEffectCount",
-    ← natOf json "networkBytes",← natOf json "leaseByteBlocks",← natOf json "incidences"⟩
-
 private def roleOf (json : Json) : Except String ObjectiveBendQuoteRequest.Role := do
   let observe := (json.getObjVal? "observeCapability").toOption
   let observeCapability ← match observe with
@@ -294,7 +288,7 @@ def requestOfJson (json : Json) : Except String Request := do
       let text ← (value.getStr?).mapError fun _ => "inputEnvelopes must be hex strings"
       let some bytes := ObjectiveBendPlanAdapter.unhex text.toList | throw "inputEnvelopes must be lowercase hex"
       pure bytes,
-    capacity := ← capacityOf (← field json "capacity"),
+    capacity := ← CapacityJson.capacity "capacity" (← field json "capacity"),
     inputCodec := ← digestOf json "inputCodec", outputCodec := ← digestOf json "outputCodec",
     roles := ← (← arrayOf json "roles").mapM roleOf,
     resultResource := ← natOf json "resultResource",
@@ -377,11 +371,11 @@ def authorPolicy (json : Json) : Except String String := do
   let tariff ← field json "tariff"
   let tariff : ObjectiveTariff.Tariff := ⟨← natOf tariff "version",← natOf tariff "base",
     ← natOf tariff "typeFuel",← natOf tariff "sourceTicks",← natOf tariff "heap",← natOf tariff "stack",
-    ← natOf tariff "outputNodes",← natOf tariff "outputBytes",← natOf tariff "inputBytes"⟩
+    ← natOf tariff "outputNodes",← natOf tariff "outputBytes",← natOf tariff "extractTicks",← natOf tariff "inputBytes"⟩
   if !tariff.valid then
     throw s!"tariff must be version {ObjectiveTariff.tariffVersion} with a positive base"
   let policy : ObjectiveBendNativeAdmission.Policy := ⟨ObjectiveBendNativeAdmission.semanticsId,← natOf json "sourceBytes",
-    ← capacityOf (← field json "maximum"),outputs,← digestOf json "clearAudience",
+    ← CapacityJson.capacity "maximum" (← field json "maximum"),outputs,← digestOf json "clearAudience",
     frontEnd,tariff⟩
   let encoded := ObjectiveBendNativeAdmission.encodePolicy policy
   if ObjectiveBendNativeAdmission.decodePolicy encoded != some policy then throw "policy does not round-trip"

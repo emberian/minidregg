@@ -390,6 +390,8 @@ refuses or exhausts its envelope commits nothing. -/
 def runMethod (config : Config) (bytes : Bytes) (pin : Digest) (call : Data) (envelope : Capacity) :
     Except Refusal Data := do
   if !config.covers envelope then throw (.uncovered envelope)
+  if envelope.extractTicks < config.planBudget.ticks then
+    throw (.program (.extractUncovered config.planBudget.ticks envelope.extractTicks))
   let ticks := envelope.sourceTicks
   let instantiated ← program (ObjectiveActivity.instantiate config bytes pin call)
   match instantiated.checked.type with

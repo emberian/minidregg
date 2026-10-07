@@ -403,8 +403,13 @@ structure Journal where
   writes : List Written
   /-- Every send, in the order the frames made them. -/
   outbox : List Outgoing
+  /-- The turn's extraction tick allowance still unspent: the envelope declares it
+  (`Capacity.extractTicks`), and every Plan or result extraction of the call tree draws the
+  deployment's extraction budget (`planBudget.ticks`) from it, refused by name when it is
+  short (`extractUncovered`). -/
+  extracts : Nat
 
-def Journal.start (grants : List Grant) : Journal := ⟨[], grants, [], [], []⟩
+def Journal.start (grants : List Grant) (extracts : Nat) : Journal := ⟨[], grants, [], [], [], extracts⟩
 
 /-- Who a call tree runs for: the root frame's subject (an invocation's signer;
 none for a delivered message) and the root's caller (none for an invocation;
@@ -536,12 +541,16 @@ def exec {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot r
     let ctx : Ctx := ⟨call.target, call.method, entry.record, program.applied.assumptions, program.responseType,
       view, subject, height, callerOf authority stack⟩
     let journal : Journal := ⟨journal.entries, grants,
-      journal.frames ++ [call.target.value :: stack.map (·.object.value)], journal.writes, journal.outbox⟩
+      journal.frames ++ [call.target.value :: stack.map (·.object.value)], journal.writes, journal.outbox,
+      journal.extracts⟩
     exec config snapshot height authority turn fuel (ctx :: stack) (.run (initial program.applied.erase)) journal ticks
   | _ + 1, [], .run _, _, _ => .error .exhausted
   | fuel + 1, ctx :: rest, .run state, journal, ticks =>
     match runCounted config.limits ticks state with
     | (.yielded _ yielded, left) =>
+      if journal.extracts < config.planBudget.ticks then
+        .error (.kernel (.extractUncovered config.planBudget.ticks journal.extracts)) else
+      let journal := { journal with extracts := journal.extracts - config.planBudget.ticks }
       match ObjectiveBendDemandData.yieldedPlan config.limits config.planBudget yielded with
       | .error (failure, _) => .error (.frameFault ctx.object.value ctx.method s!"plan extraction: {reprStr failure}")
       | .ok extracted =>
@@ -568,6 +577,9 @@ def exec {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot r
             { journal with outbox := journal.outbox ++ [⟨id, ctx.object.value, send.destination, send.method, send.args⟩] }
             left
     | (.finished _ finished, left) =>
+      if journal.extracts < config.planBudget.ticks then
+        .error (.kernel (.extractUncovered config.planBudget.ticks journal.extracts)) else
+      let journal := { journal with extracts := journal.extracts - config.planBudget.ticks }
       match ObjectiveBendDemandData.complete config.limits config.planBudget finished with
       | .error (failure, _) => .error (.frameFault ctx.object.value ctx.method s!"result extraction: {reprStr failure}")
       | .ok out =>
@@ -880,7 +892,8 @@ structure Invocation {rootBytes : Bytes → Digest} (config : Config) (snapshot 
   journal : Journal
   left : Nat
   execExact : exec config snapshot height request.authority (invokeTransaction request) (callFuel request.envelope) []
-    (.enter (rootCall request)) (Journal.start request.grants) request.envelope.sourceTicks = .ok (result, journal, left)
+    (.enter (rootCall request)) (Journal.start request.grants request.envelope.extractTicks) request.envelope.sourceTicks =
+      .ok (result, journal, left)
   /-- A turn that sends declares a postage envelope the deployment covers. -/
   postageCovered : journal.outbox ≠ [] → config.covers request.postage = true
   /-- What the call tree commits on a draining object is migratable. -/
@@ -898,7 +911,7 @@ def invoke {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot
     (height : Nat) (request : InvokeRequest) : Except CallRefusal (Invocation config snapshot height request) :=
   if covered : config.covers request.envelope = true then
     match execExact : exec config snapshot height request.authority (invokeTransaction request)
-        (callFuel request.envelope) [] (.enter (rootCall request)) (Journal.start request.grants)
+        (callFuel request.envelope) [] (.enter (rootCall request)) (Journal.start request.grants request.envelope.extractTicks)
         request.envelope.sourceTicks with
     | .error reason => .error reason
     | .ok (result, journal, left) =>
@@ -1203,6 +1216,12 @@ theorem exec_invariant {rootBytes : Bytes → Digest} (config : Config) (snapsho
         · -- yielded
           split at ran
           · cases ran
+          have viewed : ({ journal with extracts := journal.extracts - config.planBudget.ticks } : Journal).lookup
+              ctx.object = some (some ctx.view) := viewed
+          have read : ObjectsRead config snapshot
+              { journal with extracts := journal.extracts - config.planBudget.ticks } := read
+          split at ran
+          · cases ran
           · split at ran
             · cases ran
             · rename_i call _
@@ -1228,6 +1247,7 @@ theorem exec_invariant {rootBytes : Bytes → Digest} (config : Config) (snapsho
                       simp only [Task.below, List.tail_cons] at member
                       rw [kept2 c (by simpa [Task.below] using member),
                         kept1 c (by simp [Task.below, member])]
+                      rfl
                     · rw [writes2, writes1, List.append_assoc]
                     · intro w member
                       rcases List.mem_append.mp member with a | b
@@ -1255,6 +1275,12 @@ theorem exec_invariant {rootBytes : Bytes → Digest} (config : Config) (snapsho
                   simp only [Task.below, List.tail_cons] at member
                   exact kept2 c (by simpa [Task.below] using member)
         · -- finished
+          split at ran
+          · cases ran
+          have viewed : ({ journal with extracts := journal.extracts - config.planBudget.ticks } : Journal).lookup
+              ctx.object = some (some ctx.view) := viewed
+          have read : ObjectsRead config snapshot
+              { journal with extracts := journal.extracts - config.planBudget.ticks } := read
           split at ran
           · cases ran
           · split at ran
