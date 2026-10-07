@@ -194,7 +194,7 @@ theorem footprint_success_exact (context : Context deployment durable) (intent :
   rw [footprint_mismatch_refused context intent required derived different] at accepted
   cases accepted
 
-private def bindingBytesAt (deployment : Deployment) (worldRoot semantics : Digest)
+def bindingBytesAt (deployment : Deployment) (worldRoot semantics : Digest)
     (intent : Intent) (grant : GrantRef) : List UInt8 :=
   (StreamCodec.product digestStream (StreamCodec.product digestStream
     (StreamCodec.product digestStream (StreamCodec.product digestStream grantStream)))).encode
@@ -206,7 +206,7 @@ def bindingBytes (_context : Context deployment durable) (semantics : Digest)
   bindingBytesAt deployment (durable.worldRoot)
     semantics intent grant
 
-private def effectIdentityAt (deployment : Deployment) (worldRoot semantics : Digest)
+def effectIdentityAt (deployment : Deployment) (worldRoot semantics : Digest)
     (intent : Intent) (grant : GrantRef) : Digest :=
   (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.OBSERVE-EFFECT/v4".toUTF8.toList
     (bindingBytesAt deployment worldRoot semantics intent grant)).digest
@@ -216,7 +216,7 @@ def effectIdentity (context : Context deployment durable) (semantics : Digest)
   effectIdentityAt deployment (durable.worldRoot)
     semantics intent grant
 
-private def markerAt (deployment : Deployment) (worldRoot semantics : Digest)
+def markerAt (deployment : Deployment) (worldRoot semantics : Digest)
     (intent : Intent) (grant : GrantRef) : Nat :=
   (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.OBSERVE-SIGNATURE/v4".toUTF8.toList
     (bindingBytesAt deployment worldRoot semantics intent grant)).digest.value
@@ -865,6 +865,21 @@ def standing {kind : ResourceKind} (state : AuthState) (height room : Nat)
     decide (RevocationKey.capability cap.id ∉ state.revoked) &&
     decide (∀ ancestor ∈ cap.ancestors, RevocationKey.capability ancestor ∉ state.revoked) &&
     decide (∀ channel ∈ cap.channels, RevocationKey.channel channel ∉ state.revoked)
+
+/-- Whether `subject` holds a standing observe capability over `target` that
+reads the WHOLE cell (no field narrowing): the filter thin consent's served
+views pass (a narrowed view's root is not the cell's), and the one under which a
+refused signed invocation may name a moved target to its signer. -/
+def observesWhole (context : Context deployment durable) (kind : ResourceKind)
+    (subject : SubjectId) (target height : Nat) : Bool :=
+  let state := context.authority.snapshot.authState
+  let cell := context.authority.snapshot.cell
+  let reads : CapabilityId → Bool := fun named =>
+    match CredentialAuthorityState.readCapability cell kind named with
+    | some stored => decide (stored.head.holder = .subject subject) &&
+        standing state height target stored.head && decide (stored.head.scope.fields = none)
+    | none => false
+  decide ((capabilityIds cell.logical kind).filter fun named => reads named = true).Nonempty
 
 /-- The members of `room`: the subjects holding a standing capability over it,
 in subject order. Membership is what the room's grants say, not who acted. -/

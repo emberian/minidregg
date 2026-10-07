@@ -3649,6 +3649,12 @@ pub(crate) fn submit_intent(
         }
         return result;
     }
+    if crate::client_consent::thin_mode() {
+        if kind != "intent" {
+            return Err("thin consent signs retained invocation intents only; nothing signed".into());
+        }
+        thin_views(root, workspace, &source)?;
+    }
     submit(
         &workspace_host(workspace)?,
         &member_path(workspace, "config")?,
@@ -3662,6 +3668,45 @@ pub(crate) fn submit_intent(
         renounce_note(&source);
     }
     Ok(())
+}
+
+/// Thin consent: one signed `resource` read of every target of an invocation
+/// intent, under its observe grant, retained as the plan's served views. A
+/// target this member cannot observe is refused here, before anything is signed.
+fn thin_views(root: &Path, workspace: &Value, source: &Path) -> Result<()> {
+    let intent = bounded_json(source)?;
+    let draft = &intent["purpose"]["draft"];
+    if intent["purpose"]["type"] != "prepare" || draft["type"] != "invoke" {
+        return Err("thin consent signs invocations only; nothing signed".into());
+    }
+    let targets = draft["command"]["targets"].as_array().ok_or("invocation intent has no targets")?;
+    let mut views = Vec::new();
+    for target in targets {
+        let capability = match target.get("observeCapability") {
+            Some(Value::String(capability)) => capability.clone(),
+            _ => thin_observe_capability(root, &target["target"])?,
+        };
+        let reference = json!({"kind":target["kind"],"target":target["target"],"observeCapability":capability});
+        let (_, attempt) = doc_query(root, workspace, &reference, "resource", None, "view-resource")?;
+        views.push(attempt.join("view.bin"));
+    }
+    crate::client_consent::set_thin_views(views)
+}
+
+/// The observe grant this workspace holds for a target, from its references.
+fn thin_observe_capability(root: &Path, target: &Value) -> Result<String> {
+    let entries = fs::read_dir(root.join("refs")).map_err(|error| error.to_string())?;
+    for entry in entries {
+        let path = entry.map_err(|error| error.to_string())?.path();
+        if path.extension() != Some(OsStr::new("json")) { continue; }
+        let reference = bounded_json(&path)?;
+        if &reference["target"] == target {
+            if let Some(Value::String(capability)) = reference.get("observeCapability") {
+                return Ok(capability.clone());
+            }
+        }
+    }
+    Err(format!("thin consent: this workspace holds no observe grant for target {target}; nothing signed"))
 }
 
 fn bind_append_attempt(root: &Path, proposal: &Path, request: &Value, source: &Path,

@@ -216,16 +216,64 @@ fn headers(bytes:&[u8])->Result<Vec<Vec<u8>>> {
 }
 pub(crate) fn intent(host:&Path,config:&Path,intent:&Path,signing:&SigningKey)->Result<Vec<u8>> {
     let bytes=crate::fsio::read_bounded_or_empty(intent, CAP)?;
-    let checked=invoke(host,config,220,&pair(&bytes,&pair(signing.verifying_key().as_bytes(),&[])?)?)?;
+    let checked=invoke(host,config,if thin_mode(){230}else{220},&pair(&bytes,&pair(signing.verifying_key().as_bytes(),&[])?)?)?;
     if checked!=bytes {return Err("local consent returned a different retained intent".into());}
     Ok(bytes)
 }
 pub(crate) fn observation(host:&Path,config:&Path,intent:&Path,signature:&Path,challenge:&Path,signing:&SigningKey)->Result<Vec<Vec<u8>>> {
     let payload=pair(&crate::fsio::read_bounded_or_empty(intent, CAP)?,&pair(signing.verifying_key().as_bytes(),&pair(&crate::fsio::read_bounded_or_empty(signature, CAP)?,&crate::fsio::read_bounded_or_empty(challenge, CAP)?)?)?)?;
-    headers(&invoke(host,config,221,&payload)?)
+    headers(&invoke(host,config,if thin_mode(){231}else{221},&payload)?)
 }
 pub(crate) fn plan(host:&Path,config:&Path,intent:&Path,plan:&Path,signing:&SigningKey)->Result<Vec<Vec<u8>>> {
+    if thin_mode() { return thin_plan(host,config,intent,plan,signing); }
     headers(&invoke(host,config,222,&pair(&crate::fsio::read_bounded_or_empty(intent, CAP)?,&pair(signing.verifying_key().as_bytes(),&crate::fsio::read_bounded_or_empty(plan, CAP)?)?)?)?)
+}
+
+/// Thin consent (`MINI_THIN_CONSENT=1`): frames 230-232, which read no Store.
+/// The provider checks what custody signs against its own command and the
+/// target views the Host served under the member's observe grants
+/// (`Kernel.NativeThinConsent`). A turn it cannot display is refused with the
+/// unsigned input named; nothing falls back to a replay or to signing unchecked.
+pub(crate) fn thin_mode()->bool { std::env::var("MINI_THIN_CONSENT").as_deref()==Ok("1") }
+
+static THIN_VIEWS: std::sync::Mutex<Option<Vec<PathBuf>>> = std::sync::Mutex::new(None);
+
+/// The served resource views of the next thin plan's targets, in target order.
+pub(crate) fn set_thin_views(views:Vec<PathBuf>)->Result<()> {
+    *THIN_VIEWS.lock().map_err(|_|"thin view slot poisoned")?=Some(views);
+    Ok(())
+}
+
+/// `StreamCodec.nat`: base-255 little-endian digits, then the terminator 255.
+fn stream_nat(mut value:usize)->Vec<u8> {
+    let mut out=Vec::new();
+    while value>0 { out.push((value%255) as u8); value/=255; }
+    out.push(255);
+    out
+}
+/// `StreamCodec.list bytesStream`.
+fn stream_byte_list(items:&[Vec<u8>])->Vec<u8> {
+    let mut out=stream_nat(items.len());
+    for item in items { out.extend(stream_nat(item.len())); out.extend_from_slice(item); }
+    out
+}
+
+fn thin_plan(host:&Path,config:&Path,intent:&Path,plan:&Path,signing:&SigningKey)->Result<Vec<Vec<u8>>> {
+    let paths=THIN_VIEWS.lock().map_err(|_|"thin view slot poisoned")?.clone()
+        .ok_or("thin consent has no served target views; nothing signed")?;
+    let mut views=Vec::new();
+    for path in &paths { views.push(crate::fsio::read_bounded_or_empty(path, CAP)?); }
+    let payload=pair(&crate::fsio::read_bounded_or_empty(intent, CAP)?,&pair(signing.verifying_key().as_bytes(),
+        &pair(&crate::fsio::read_bounded_or_empty(plan, CAP)?,&stream_byte_list(&views))?)?)?;
+    let reply=invoke(host,config,232,&payload)?;
+    let value:Value=serde_json::from_slice(&reply).map_err(|e|format!("thin consent reply: {e}"))?;
+    let display=value.get("display").cloned().ok_or("thin consent reply lacks display")?;
+    if let Some(directory)=plan.parent() {
+        write_json_new(&directory.join("thin-display.json"),&display)?;
+    }
+    eprintln!("thin consent shows: {}",display);
+    let rows=value.get("headers").and_then(Value::as_array).ok_or("thin consent reply lacks headers")?;
+    rows.iter().map(|row|decode_hex(row.as_str().ok_or("thin consent header is not hex")?)).collect()
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -276,6 +324,15 @@ pub(crate) fn codec_process(host:&Path,config:&Path,args:&[&OsStr])->Result<Opti
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn thin_view_list_is_the_lean_byte_list_codec() {
+        // StreamCodec.nat: base-255 little-endian digits then 255; list = count then items.
+        assert_eq!(stream_nat(0), vec![255]);
+        assert_eq!(stream_nat(254), vec![254, 255]);
+        assert_eq!(stream_nat(255), vec![0, 1, 255]);
+        assert_eq!(stream_byte_list(&[]), vec![255]);
+        assert_eq!(stream_byte_list(&[vec![7, 8], vec![]]), vec![2, 255, 2, 255, 7, 8, 255]);
+    }
     use super::*;
     #[test]
     fn consent_pair_preserves_exact_order_and_bounds() {
