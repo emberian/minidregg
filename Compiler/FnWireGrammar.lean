@@ -3,7 +3,7 @@
 
 fn publishes its wire formats as GRAMMARS in one data language (`fn-wire-grammar`,
 version 1). The normative description is fn `planning/design/wire-grammar-2026-10-04.md`
-§2, read at fn d420a2b5; the families and vectors are fn `specs/wire-grammar.json`,
+§2, read at fn 1e190ff19; the families and vectors are fn `specs/wire-grammar.json`,
 vendored as `protocol/fn/wire-grammar.json`, loaded by `Compiler.FnWireJson` and pinned by
 `Compiler.FnWirePinned`. This module is Mini's ONE interpreter of that language:
 

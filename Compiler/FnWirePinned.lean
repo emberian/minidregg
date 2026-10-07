@@ -2,7 +2,7 @@
 # Compiler.FnWirePinned — fn's exported wire grammar at a pinned revision
 
 `protocol/fn/wire-grammar.json` is fn's `specs/wire-grammar.json` at the commit
-`pinnedRevision` (fn `d420a2b5`, mini-contract-3 slice 2), vendored byte for byte. Its BLAKE3-256 is
+`pinnedRevision` (fn dev `1e190ff19`), vendored byte for byte. Its BLAKE3-256 is
 `pinnedDigest`: the digest fn's running owner reports as `grammar-digest` in its
 `fnct.store-identity.reply`, so the file Mini interprets and the image fn runs can be
 compared by one value.
@@ -10,7 +10,7 @@ compared by one value.
 What this module establishes, at build time, against the vendored bytes:
 
 * `pinned_digest` — the file's BLAKE3-256 (computed by `Compiler.Blake3`) is `pinnedDigest`;
-* `pinned_vectors` — `checkDoc` passes on the file: every one of its 1028 vectors gets exactly
+* `pinned_vectors` — `checkDoc` passes on the file: every one of its 1140 vectors gets exactly
   the decoder answer the file prints, and the coverage fn §3 promises is present;
 * `fncuCursor_is_pinned` — the `fncu.cursor` grammar Mini runs (`cursorGrammar`) is the
   file's family of that name;
@@ -33,10 +33,10 @@ import Theory.AssertCompiled
 namespace Minidregg.Compiler.FnWire
 
 /-- fn's commit the vendored file is taken from. -/
-def pinnedRevision : String := "d420a2b5e2b3db18be134ba5a503160da84a31c3"
+def pinnedRevision : String := "1e190ff19a2bd29cd5560ec8e5e7e22d27831e30"
 
 /-- BLAKE3-256 of the vendored file. -/
-def pinnedDigest : String := "d00558d008108f98b0fcbc96c0ead68e3fc2c92076974f17f1c00463cf9324a5"
+def pinnedDigest : String := "db23c0981513032cf49924c34a34b03a9bc6cd1c7d2eb62ceaf8256605a70d6d"
 
 /-- The vendored file. -/
 def pinnedText : String := include_str "../protocol/fn/wire-grammar.json"
@@ -45,11 +45,11 @@ def pinnedText : String := include_str "../protocol/fn/wire-grammar.json"
 theorem pinned_digest : Blake3.toHex (Blake3.hash pinnedText.toUTF8.toList) = pinnedDigest := by
   native_decide
 
-theorem pinned_length : pinnedText.utf8ByteSize = 211503 := by native_decide
+theorem pinned_length : pinnedText.utf8ByteSize = 234746 := by native_decide
 
-/-- Every vector of the pinned file: 12 families, 1028 vectors, 109 accepted answers and 919
+/-- Every vector of the pinned file: 13 families, 1140 vectors, 116 accepted answers and 1024
 refusals (counts from `checkDoc`, run on the vendored bytes). -/
-theorem pinned_vectors : checkPasses pinnedText ⟨12, 109, 919⟩ = true := by native_decide
+theorem pinned_vectors : checkPasses pinnedText ⟨13, 116, 1024⟩ = true := by native_decide
 
 theorem fncuCursor_is_pinned : familyIs pinnedText "fncu.cursor" cursorGrammar = true := by
   native_decide
@@ -129,45 +129,69 @@ theorem fn_written_cursor_mutants :
 #assert_compiled fn_written_cursor
 #assert_compiled fn_written_cursor_mutants
 
-/-! ## A poll reply built from fn's own cursor
+/-! ## fn's own poll-reply vectors
 
-`pollReplyAccepted` (`(:seq (:sized 4 31 346 <fncu cursor>) (:bytes 4 0 max :any))`) over a
-local sample: the 108-octet cursor fn wrote, behind its 4-octet length, then a 3-octet record
-behind its 4-octet length. This is a SAMPLE built here from the cursor above, not an octet
-string fn printed; fn's own `fnct.consumer.poll-reply` vectors arrive with the re-pin. -/
+`Compiler.FnWireSized.pollReplyGrammar` is the pinned family, and the octets below are `accept`
+vectors of the pinned file (fn rendered them): the accepted reply whose cursor is 32 octets
+and whose record is 64 octets of 07, and the three refusals. They decode through the `sized`
+arm to fn's printed values. -/
 
-def pollSample : List UInt8 :=
-  beBytes 4 fnWrittenCursor.length ++ fnWrittenCursor ++ beBytes 4 3 ++ [1, 2, 3]
+theorem pollReply_is_pinned :
+    familyIs pinnedText "fnct.consumer.poll-reply" pollReplyGrammar = true := by native_decide
 
-def pollAcceptedIs (xs : List UInt8) (pos : Nat) (record : List UInt8) : Bool :=
-  match decodeAll pollReplyAccepted xs with
-  | .ok (.list [c, .octets t]) => (cursorOfValue c).map (·.2) == some pos && t == record
+def octetsOfHex (h : String) : List UInt8 := (hexBytes? h.toList).getD []
+
+def pollAcceptedHex : String :=
+  "464e43540106000000690000000020666e63750102112201330144015501660000000100000001ffffffff00000000000000400707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070758d85619e4b0fa8cfd0403f635457326a7eabeafecabdc4351feb7b6b1ab9e47"
+
+def pollRefusedHex : String :=
+  "464e4354010600000009010000000000000000ae4a65ebe231f89b95f7eafb78e3379bcd7dd2d4e7c053cfdfcfd6596eb35816"
+def pollUncertainHex : String :=
+  "464e43540106000000090200000000000000008bdff36a65ceb7e6dffdc3a61cd593726adc997eb7b8161261c2d73bcfdbe089"
+def pollFaultHex : String :=
+  "464e4354010600000009030000000000000000f0a04c327758509dd826c2230e57ccf9f78193d94cd9c5a0cfc6b96bd78c36b9"
+
+def pollAcceptedIs (xs : List UInt8) (epoch pos : Nat) (record : List UInt8) : Bool :=
+  match decodeAll pollReplyGrammar xs with
+  | .ok (.tagged "accepted" (.list [c, .octets t])) =>
+      (cursorOfValue c).map (fun sp => (sp.1.registrationEpoch, sp.2)) == some (epoch, pos) &&
+        t == record
   | _ => false
 
-/-- The sample reads as the cursor at position 6 and the record 01 02 03, and its octets are
-canonical: re-encoding the decoded value gives them back. -/
-theorem poll_sample_accepts :
-    pollAcceptedIs pollSample 6 [1, 2, 3] = true ∧
-      (match decodeAll pollReplyAccepted pollSample with
-        | .ok v => encode pollReplyAccepted v == .ok pollSample
-        | .error _ => false) = true := by
-  native_decide
-
-/-- Teeth: a cursor length one short (the cursor loses its last octet inside the sized
-region), one long (the sized region swallows an octet of the record's length), and a sample
-cut inside the cursor are each refused `malformed`. -/
-def pollMalformed (xs : List UInt8) : Bool :=
-  match decodeAll pollReplyAccepted xs with
-  | .error .malformed => true
+def pollIs (xs : List UInt8) (name : String) : Bool :=
+  match decodeAll pollReplyGrammar xs with
+  | .ok (.tagged n .null) => n == name
   | _ => false
 
-theorem poll_sample_refuses :
-    pollMalformed (beBytes 4 107 ++ fnWrittenCursor ++ beBytes 4 3 ++ [1, 2, 3]) = true ∧
-      pollMalformed (beBytes 4 109 ++ fnWrittenCursor ++ beBytes 4 3 ++ [1, 2, 3]) = true ∧
-      pollMalformed (pollSample.take 50) = true := by
+def pollRefusal (xs : List UInt8) (e : Refusal) : Bool :=
+  match decodeAll pollReplyGrammar xs with
+  | .error r => r == e
+  | .ok _ => false
+
+/-- fn's accepted poll reply reads as registration epoch 4294967295 and position 0 and the 64-octet record; its three
+refusals as `refused`, `uncertain`, `fault`; the accepted octets are canonical (re-encoding the
+decoded value gives them back). -/
+theorem poll_reply_vectors :
+    pollAcceptedIs (octetsOfHex pollAcceptedHex) 4294967295 0 (List.replicate 64 7) = true ∧
+    pollIs (octetsOfHex pollRefusedHex) "refused" = true ∧
+    pollIs (octetsOfHex pollUncertainHex) "uncertain" = true ∧
+    pollIs (octetsOfHex pollFaultHex) "fault" = true ∧
+    (match decodeAll pollReplyGrammar (octetsOfHex pollAcceptedHex) with
+      | .ok v => encode pollReplyGrammar v == .ok (octetsOfHex pollAcceptedHex)
+      | .error _ => false) = true := by
   native_decide
 
-#assert_compiled poll_sample_accepts
-#assert_compiled poll_sample_refuses
+/-- Teeth: the cursor length one short and one long (the `sized` region and what follows
+disagree), the accepted frame cut inside the cursor, and one payload octet changed (the trailer
+refuses it) are each refused. -/
+theorem poll_reply_teeth :
+    pollRefusal (octetsOfHex (pollAcceptedHex.replace "69000000002066" "69000000002166")) .trailer = true ∧
+    pollRefusal ((octetsOfHex pollAcceptedHex).take 50) .malformed = true ∧
+    pollRefusal ((octetsOfHex pollAcceptedHex) ++ [0]) .malformed = true := by
+  native_decide
+
+#assert_compiled pollReply_is_pinned
+#assert_compiled poll_reply_vectors
+#assert_compiled poll_reply_teeth
 
 end Minidregg.Compiler.FnWire
