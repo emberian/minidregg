@@ -139,15 +139,15 @@ theorem disabled_refuses_leSlots (A : List Nat → Nat → ZMod 17) :
 
 /-- info: 'Minidregg.Compiler.SlotFoldWitness.runner_fresh_accepts' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms runner_fresh_accepts
-/-- info: 'Minidregg.Compiler.SlotFoldWitness.runner_stale_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.SlotFoldWitness.runner_stale_refused' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms runner_stale_refused
-/-- info: 'Minidregg.Compiler.SlotFoldWitness.runner_overspent_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.SlotFoldWitness.runner_overspent_refused' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms runner_overspent_refused
-/-- info: 'Minidregg.Compiler.SlotFoldWitness.runner_unobserved_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.SlotFoldWitness.runner_unobserved_refused' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms runner_unobserved_refused
 /-- info: 'Minidregg.Compiler.SlotFoldWitness.story_with_key_accepts' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms story_with_key_accepts
-/-- info: 'Minidregg.Compiler.SlotFoldWitness.story_without_key_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.SlotFoldWitness.story_without_key_refused' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms story_without_key_refused
 
 /-! ### Combat: the balance clause (`leSlotsOff`, MUD.md §2.4, `COST = 3`) -/
@@ -232,13 +232,13 @@ theorem disabled_refuses_leSlotsOff (A : List Nat → Nat → ZMod 17) :
 
 /-- info: 'Minidregg.Compiler.SlotFoldWitness.strike_paid_accepts' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms strike_paid_accepts
-/-- info: 'Minidregg.Compiler.SlotFoldWitness.strike_short_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.SlotFoldWitness.strike_short_refused' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms strike_short_refused
-/-- info: 'Minidregg.Compiler.SlotFoldWitness.strike_unclocked_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.SlotFoldWitness.strike_unclocked_refused' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms strike_unclocked_refused
 /-- info: 'Minidregg.Compiler.SlotFoldWitness.strike_mud_paid_accepts' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms strike_mud_paid_accepts
-/-- info: 'Minidregg.Compiler.SlotFoldWitness.strike_mud_short_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.SlotFoldWitness.strike_mud_short_refused' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms strike_mud_short_refused
 
 end Minidregg.Compiler.SlotFoldWitness

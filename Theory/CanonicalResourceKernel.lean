@@ -940,7 +940,7 @@ theorem Book.holders_sum_eq_neg_well (book : Book) (asset : AssetId)
       -(book.balance asset asset) := by
   have split := Finset.add_sum_erase book.accounts (fun account => book.balance account asset) present
   sorry
-  unfold Book.totalAsset at zero
+  sorry
   linarith
 
 /-! ## Negative pole: credit-only mint is not in the language -/

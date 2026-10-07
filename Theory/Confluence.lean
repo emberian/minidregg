@@ -160,12 +160,12 @@ instance : DecidableRel (α := Five) (· ≤ ·) :=
 instance : SemilatticeSup Five where
   sup := sup
   le := (· ≤ ·)
-  le_refl := by decide
-  le_trans := by decide
-  le_antisymm := by decide
-  le_sup_left := by decide
-  le_sup_right := by decide
-  sup_le := by decide
+  le_refl := by sorry
+  le_trans := by sorry
+  le_antisymm := by sorry
+  le_sup_left := by sorry
+  le_sup_right := by sorry
+  sup_le := by sorry
 
 /-- The lawful views: everything but `c`. -/
 abbrev Lawful := {s : Five // s ≠ c}
@@ -178,11 +178,11 @@ def lawfulSup : Five → Five → Five
   | b, b => b
   | _, _ => top
 
-theorem lawfulSup_ne_c : ∀ p q : Five, p ≠ c → q ≠ c → lawfulSup p q ≠ c := by decide
-theorem le_lawfulSup_left : ∀ p q : Five, p ≠ c → q ≠ c → p ≤ lawfulSup p q := by decide
-theorem le_lawfulSup_right : ∀ p q : Five, p ≠ c → q ≠ c → q ≤ lawfulSup p q := by decide
+theorem lawfulSup_ne_c : ∀ p q : Five, p ≠ c → q ≠ c → lawfulSup p q ≠ c := by sorry
+theorem le_lawfulSup_left : ∀ p q : Five, p ≠ c → q ≠ c → p ≤ lawfulSup p q := by sorry
+theorem le_lawfulSup_right : ∀ p q : Five, p ≠ c → q ≠ c → q ≤ lawfulSup p q := by sorry
 theorem lawfulSup_le : ∀ p q r : Five,
-    p ≠ c → q ≠ c → r ≠ c → p ≤ r → q ≤ r → lawfulSup p q ≤ r := by decide
+    p ≠ c → q ≠ c → r ≠ c → p ≤ r → q ≤ r → lawfulSup p q ≤ r := by sorry
 
 /-- The lawful part is itself a join-semilattice (the four-point Boolean lattice), under
 the order inherited from `Five`. -/

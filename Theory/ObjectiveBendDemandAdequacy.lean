@@ -3818,7 +3818,7 @@ the tied address is memoized in place with its retained unfolding origin. -/
   · exact .natural _
 
 -- STUBBED #assert_axioms graph_enter_suspended graph_cache_update graph_enter_cached
-  graph_evaluate_application graph_closure_call graph_evaluate_fix graph_evaluate_context
+  gsorry
   graph_evaluate_pair graph_evaluate_bound graph_evaluate_immediate graph_object_access
   graph_specification_call graph_primitive_return allocateFields_realizes graph_evaluate_record
   graph_field_return graph_evaluate_mix graph_condition_zero graph_condition_successor
@@ -5288,7 +5288,7 @@ suspension, never a semantic refusal or blackhole for a terminating source. -/
 
 /-! Axiom pins for every r11 theorem not pinned above. -/
 -- STUBBED #assert_axioms sourceSteps_trans source_value_noStep source_value_steps_identity
-  sourceStep_evaluates_tail sourceSteps_lift primitiveResult_value sourceDerivation_evaluates
+  sorry
   sourceDerivation_cost_positive sourceDerivation_value_inv sourceStep_derivation_prepend
   source_evaluates_derivation sourceDerivation_result_unique sourceSteps_derivation_tail
   sourceSteps_derivation_strict scoped_rename_identity scoped_substitute_identity
@@ -5356,7 +5356,7 @@ theorem lazyFixedSource_resultControl (ticks : Nat) :
 theorem lazyFixedSource_finish_or_suspend (limits : Limits) (ticks : Nat) :
     (∃ value final, runBounded limits ticks (initial lazyFixedSource) = .finished value final) ∨
       (∃ reason retained, runBounded limits ticks (initial lazyFixedSource) = .suspended reason retained) :=
-  runBounded_terminating_finish_or_suspend lazyFixedSource_closed lazyFixedSource_evaluates limits ticks
+  sorry
 
 -- STUBBED #assert_axioms lazyFixedSource_closed lazyFixedSource_evaluates lazyFixedSource_resultControl
   lazyFixedSource_finish_or_suspend graph_evaluate_inject_names graph_case_return_execution

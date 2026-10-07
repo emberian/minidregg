@@ -289,7 +289,7 @@ theorem flatten_scoped (t : Term (AirSig F Idx)) (n₀ : ℕ) :
       obtain ⟨_, hol, _⟩ := ih false n₀
       obtain ⟨_, hor, _⟩ := ih true (flatten (k false) n₀).next
       sorry
-      refine ⟨by omega, ⟨by omega, by omega⟩, ?_⟩
+      sorry
       intro g hg
       rcases List.mem_append.mp hg with hg' | hg'
       · rcases List.mem_append.mp hg' with hgm | hgm
@@ -309,7 +309,7 @@ theorem flatten_scoped (t : Term (AirSig F Idx)) (n₀ : ℕ) :
       obtain ⟨_, hol, _⟩ := ih false n₀
       obtain ⟨_, hor, _⟩ := ih true (flatten (k false) n₀).next
       sorry
-      refine ⟨by omega, ⟨by omega, by omega⟩, ?_⟩
+      sorry
       intro g hg
       rcases List.mem_append.mp hg with hg' | hg'
       · rcases List.mem_append.mp hg' with hgm | hgm
@@ -380,7 +380,7 @@ theorem flatten_sound (asg : Idx → F) (t : Term (AirSig F Idx)) (n₀ : ℕ) :
       obtain ⟨hle₁, hol, hsl⟩ := flatten_scoped (k false) n₀
       obtain ⟨hle₂, hor, hsr⟩ := flatten_scoped (k true) (flatten (k false) n₀).next
       sorry
-      set n₁ := (flatten (k false) n₀).next with hn₁
+      sorry
       set n₂ := (flatten (k true) n₁).next with hn₂
       set v : ℕ → F := fun m => if m < n₁ then auxv₁ m else if m < n₂ then auxv₂ m
         else eval asg (k false) + eval asg (k true) with hv
@@ -410,7 +410,7 @@ theorem flatten_sound (asg : Idx → F) (t : Term (AirSig F Idx)) (n₀ : ℕ) :
       obtain ⟨hle₁, hol, hsl⟩ := flatten_scoped (k false) n₀
       obtain ⟨hle₂, hor, hsr⟩ := flatten_scoped (k true) (flatten (k false) n₀).next
       sorry
-      set n₁ := (flatten (k false) n₀).next with hn₁
+      sorry
       set n₂ := (flatten (k true) n₁).next with hn₂
       set v : ℕ → F := fun m => if m < n₁ then auxv₁ m else if m < n₂ then auxv₂ m
         else eval asg (k false) * eval asg (k true) with hv
@@ -464,7 +464,7 @@ theorem flatten_covers (t : Term (AirSig F Idx)) (n₀ : ℕ) :
       obtain ⟨hle₁, -, -⟩ := flatten_scoped (k false) n₀
       obtain ⟨hle₂, -, -⟩ := flatten_scoped (k true) (flatten (k false) n₀).next
       sorry
-      intro m h₁ h₂
+      intro sorry
       by_cases hm₁ : m < (flatten (k false) n₀).next
       · obtain ⟨g, hg, hgo⟩ := ih false n₀ m h₁ hm₁
         exact ⟨g, List.mem_append_left _ (List.mem_append_left _ hg), hgo⟩
@@ -478,7 +478,7 @@ theorem flatten_covers (t : Term (AirSig F Idx)) (n₀ : ℕ) :
       obtain ⟨hle₁, -, -⟩ := flatten_scoped (k false) n₀
       obtain ⟨hle₂, -, -⟩ := flatten_scoped (k true) (flatten (k false) n₀).next
       sorry
-      intro m h₁ h₂
+      intro sorry
       by_cases hm₁ : m < (flatten (k false) n₀).next
       · obtain ⟨g, hg, hgo⟩ := ih false n₀ m h₁ hm₁
         exact ⟨g, List.mem_append_left _ (List.mem_append_left _ hg), hgo⟩

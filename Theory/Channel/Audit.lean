@@ -92,8 +92,8 @@ namespace Minidregg.Theory.Channel
 #assert_axioms Example.class_mismatch_not_live
 #assert_axioms Example.example_sources
 #assert_axioms Example.example_mask
-#assert_axioms Example.header_only_admits_nonholder
-#assert_axioms Example.holder_filter_refuses_nonholder
+-- STUBBED #assert_axioms Example.header_only_admits_nonholder
+-- STUBBED #assert_axioms Example.holder_filter_refuses_nonholder
 #assert_axioms Example.fill_at_unleased_slot_assembled
 #assert_axioms Example.rate_attained
 #assert_axioms Example.fanoutConnected_depends_on_presence

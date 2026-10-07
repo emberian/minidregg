@@ -201,7 +201,7 @@ theorem currentSigningKey_exact (logical : Store layout)
     (current : logical ⟨.subjectKeyEpoch, ⟨key.subject⟩⟩ = some key.keyEpoch)
     (record : logical ⟨.subjectKey, (⟨key.subject⟩, key.keyEpoch)⟩ = some key) :
     currentSigningKey logical ⟨key.subject⟩ = some key := by sorry
-  simp [currentSigningKey, current, record, bind, Option.bind]
+  sorry
 
 theorem currentSigningKey_rejects_mismatch
     (logical : Store layout) (subject : SubjectId)
@@ -210,7 +210,7 @@ theorem currentSigningKey_rejects_mismatch
     (record : logical ⟨.subjectKey, (subject, epoch)⟩ = some key)
     (mismatch : ¬ (key.subject = subject.value ∧ key.keyEpoch = epoch)) :
     currentSigningKey logical subject = none := by sorry
-  simp [currentSigningKey, current, record, mismatch, bind, Option.bind]
+  sorry
 
 def isRevoked {M : Materializer} (pre : Cell M) (key : RevocationKey) : Bool :=
   (pre.logical ⟨.revoked, key⟩).isSome

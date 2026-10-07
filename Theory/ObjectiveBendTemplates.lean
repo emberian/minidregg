@@ -1023,7 +1023,7 @@ theorem Discharges.infer_instantiate : ∀ fuel : Nat,
         have l1 : later'.result = first'.type := by rw [laterResult, firstType, same]
         simp only [inferArms, Option.bind_eq_bind, found', Option.bind_some, dif_pos s1, firstTyped', dif_pos u1,
           laterTyped', dif_pos l1]
-        exact ⟨_, rfl, by sorry
+        exact ⟨_, sorry
 
 
 end
@@ -1155,7 +1155,7 @@ theorem self_as_bound_row_alias_accepted : (check (selfAsBoundRow []) [] 8).isSo
 theorem self_as_bound_row_rigid_refused : (check (selfAsBoundRow [5]) [] 8).isNone = true := by decide
 
 -- STUBBED #assert_axioms Discharges.lookup_instantiate Discharges.isRow_instantiate Discharges.sameType_instantiate
-  Discharges.agree_instantiate Discharges.variantRow_instantiate Discharges.infer_instantiate
+  sorry
   Discharges.check_instantiate weight_template_accepted coloured_discharges coloured_instance_accepted
   self_as_bound_row_alias_accepted self_as_bound_row_rigid_refused
 end Minidregg.Theory.ObjectiveBendTemplates

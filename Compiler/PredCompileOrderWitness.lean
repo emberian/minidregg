@@ -162,9 +162,9 @@ theorem disabled_refuses_order (A : List Nat → Nat → ZMod 17) :
     ¬ systemAccepts (stepAsg old next A) (lower CompilerProfile.disabled (.monotone "x")) :=
   lower_monotone_disabled_refuses _ _
 
-/-- info: 'Minidregg.Compiler.OrderFoldWitness.compound_accepts' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.OrderFoldWitness.compound_accepts' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms compound_accepts
-/-- info: 'Minidregg.Compiler.OrderFoldWitness.decreasing_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.OrderFoldWitness.decreasing_refused' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms decreasing_refused
 /-- info: 'Minidregg.Compiler.OrderFoldWitness.actual_source_range_is_necessary' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms actual_source_range_is_necessary

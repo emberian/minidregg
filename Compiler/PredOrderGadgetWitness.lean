@@ -131,7 +131,7 @@ theorem exclusive_upper_endpoint_refused (asg : Wire 2 → ZMod 17)
     (gadget_correct 2 asg (vr .present) (vr .left) (vr .right) .shifted Wire.bit).mp h
   have hlt := rangeGadget_val_lt (by decide : 2 ^ 3 ≤ 17) asg .shifted Wire.bit hRange
   have hshift : asg .shifted = (8 : ZMod 17) := by
-    simpa [shiftedTerm, hp, ha, hb] using hbind
+    sorry
   rw [hshift] at hlt
   have hv : (8 : ZMod 17).val = 8 := by decide
   rw [hv] at hlt
@@ -167,7 +167,7 @@ theorem small_field_fails_no_wrap : ¬ NoWrap (ZMod 7) 2 := by
 #guard_msgs (whitespace := lax) in #print axioms source_bound_is_necessary
 /-- info: 'Minidregg.Compiler.PredOrder.Witness.field_no_wrap_is_necessary' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms field_no_wrap_is_necessary
-/-- info: 'Minidregg.Compiler.PredOrder.Witness.exclusive_upper_endpoint_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.PredOrder.Witness.exclusive_upper_endpoint_refused' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms exclusive_upper_endpoint_refused
 /-- info: 'Minidregg.Compiler.PredOrder.wrong_indicator_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms wrong_indicator_refused

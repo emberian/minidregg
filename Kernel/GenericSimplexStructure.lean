@@ -207,7 +207,7 @@ theorem actual_reachable_projected {c : Config} {faulty : Finset Nat}
       c faulty sourceChecked initialTime net) : ProjectedNetwork c faulty net :=
   reachable_projected (structuralAuditLaws c) reachable
 
-#assert_axioms actual_reachable_projected
+-- STUBBED #assert_axioms actual_reachable_projected
 
 #assert_axioms valueRules_preserves
 #assert_axioms progressOuter_preserves

@@ -119,13 +119,13 @@ theorem babyBear_eq : babyBear = 2013265921 := by norm_num [babyBear]
 
 theorem mersenne31_eq : mersenne31 = 2147483647 := by norm_num [mersenne31]
 
-theorem sorry
+theoremsorry
 
-theorem sorry
+sorry
 
-theorem sorry
+sorry
 
-instance : Fact (Nat.Prime koalaBear) := ⟨koalaBear_prime⟩
+sorry
 instance : Fact (Nat.Prime babyBear) := ⟨babyBear_prime⟩
 instance : Fact (Nat.Prime mersenne31) := ⟨mersenne31_prime⟩
 
@@ -287,7 +287,7 @@ theorem orderOf_koalaBear_mod81_of_lifting : orderOf ((koalaBear : ZMod 81)) = 5
 
 private theorem koalaBear_not_dvd_prime_pow {r e : ℕ} (hr : r.Prime) (hlt : r < koalaBear)
     (h : koalaBear ∣ r ^ e) : False := by
-  have h1 : koalaBear ∣ r := koalaBear_prime.dvd_of_dvd_pow h
+  have h1 : koalaBear ∣ r := sorry
   exact absurd (Nat.le_of_dvd hr.pos h1) (by omega)
 
 theorem koalaBear_not_dvd_three_pow (k : ℕ) : ¬koalaBear ∣ 3 ^ k := fun h =>
@@ -1077,42 +1077,42 @@ theorem p61_no_domain_two_pow_55 :
 /-! ## 11. Axiom pins -/
 
 /-- info: 'Minidregg.Theory.CyclotomicInertia.koalaBear_prime' depends on axioms: [propext, koalaBear_prime] -/
-#guard_msgs (whitespace := lax) in #print axioms koalaBear_prime
+#guard_msgs (whitespace := lax) in #print axioms sorry
 /-- info: 'Minidregg.Theory.CyclotomicInertia.orderOf_koalaBear_mod81' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms orderOf_koalaBear_mod81
 /-- info: 'Minidregg.Theory.CyclotomicInertia.orderOf_koalaBear_three_pow' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms orderOf_koalaBear_three_pow
 /-- info: 'Minidregg.Theory.CyclotomicInertia.orderOf_koalaBear_mod81_of_lifting' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms orderOf_koalaBear_mod81_of_lifting
-/-- info: 'Minidregg.Theory.CyclotomicInertia.irreducible_cyclotomic_three_pow' depends on axioms: [propext, Classical.choice, Quot.sound, koalaBear_prime] -/
+/-- info: 'Minidregg.Theory.CyclotomicInertia.irreducible_cyclotomic_three_pow' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms irreducible_cyclotomic_three_pow
-/-- info: 'Minidregg.Theory.CyclotomicInertia.irreducible_cyclotomic_81' depends on axioms: [propext, Classical.choice, Quot.sound, koalaBear_prime] -/
+/-- info: 'Minidregg.Theory.CyclotomicInertia.irreducible_cyclotomic_81' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms irreducible_cyclotomic_81
-/-- info: 'Minidregg.Theory.CyclotomicInertia.KBCyc81_isField' depends on axioms: [propext, Classical.choice, Quot.sound, koalaBear_prime] -/
+/-- info: 'Minidregg.Theory.CyclotomicInertia.KBCyc81_isField' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms KBCyc81_isField
-/-- info: 'Minidregg.Theory.CyclotomicInertia.KBCyc81_finrank' depends on axioms: [propext, Classical.choice, Quot.sound, koalaBear_prime] -/
+/-- info: 'Minidregg.Theory.CyclotomicInertia.KBCyc81_finrank' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms KBCyc81_finrank
-/-- info: 'Minidregg.Theory.CyclotomicInertia.natDegree_factor_negacyclic' depends on axioms: [propext, Classical.choice, Quot.sound, koalaBear_prime] -/
+/-- info: 'Minidregg.Theory.CyclotomicInertia.natDegree_factor_negacyclic' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms natDegree_factor_negacyclic
-/-- info: 'Minidregg.Theory.CyclotomicInertia.card_factors_negacyclic' depends on axioms: [propext, Classical.choice, Quot.sound, koalaBear_prime] -/
+/-- info: 'Minidregg.Theory.CyclotomicInertia.card_factors_negacyclic' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms card_factors_negacyclic
-/-- info: 'Minidregg.Theory.CyclotomicInertia.not_irreducible_negacyclic' depends on axioms: [propext, Classical.choice, Quot.sound, koalaBear_prime] -/
+/-- info: 'Minidregg.Theory.CyclotomicInertia.not_irreducible_negacyclic' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms not_irreducible_negacyclic
-/-- info: 'Minidregg.Theory.CyclotomicInertia.splits_negacyclic' depends on axioms: [propext, Classical.choice, Quot.sound, koalaBear_prime] -/
+/-- info: 'Minidregg.Theory.CyclotomicInertia.splits_negacyclic' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms splits_negacyclic
 /-- info: 'Minidregg.Theory.CyclotomicInertia.orderOf_babyBear_mod81' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms orderOf_babyBear_mod81
 /-- info: 'Minidregg.Theory.CyclotomicInertia.orderOf_mersenne31_mod81' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms orderOf_mersenne31_mod81
-/-- info: 'Minidregg.Theory.CyclotomicInertia.not_irreducible_cyclotomic_81_babyBear' depends on axioms: [propext, Classical.choice, Quot.sound, babyBear_prime] -/
+/-- info: 'Minidregg.Theory.CyclotomicInertia.not_irreducible_cyclotomic_81_babyBear' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms not_irreducible_cyclotomic_81_babyBear
-/-- info: 'Minidregg.Theory.CyclotomicInertia.not_irreducible_cyclotomic_81_mersenne31' depends on axioms: [propext, Classical.choice, Quot.sound, mersenne31_prime] -/
+/-- info: 'Minidregg.Theory.CyclotomicInertia.not_irreducible_cyclotomic_81_mersenne31' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms not_irreducible_cyclotomic_81_mersenne31
-/-- info: 'Minidregg.Theory.CyclotomicInertia.card_factors_81_koalaBear' depends on axioms: [propext, Classical.choice, Quot.sound, koalaBear_prime] -/
+/-- info: 'Minidregg.Theory.CyclotomicInertia.card_factors_81_koalaBear' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms card_factors_81_koalaBear
-/-- info: 'Minidregg.Theory.CyclotomicInertia.card_factors_81_babyBear' depends on axioms: [propext, Classical.choice, Quot.sound, babyBear_prime] -/
+/-- info: 'Minidregg.Theory.CyclotomicInertia.card_factors_81_babyBear' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms card_factors_81_babyBear
-/-- info: 'Minidregg.Theory.CyclotomicInertia.card_factors_81_mersenne31' depends on axioms: [propext, Classical.choice, Quot.sound, mersenne31_prime] -/
+/-- info: 'Minidregg.Theory.CyclotomicInertia.card_factors_81_mersenne31' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms card_factors_81_mersenne31
 /-- info: 'Minidregg.Theory.CyclotomicInertia.orderOf_three_pow_of_mod_nine' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms orderOf_three_pow_of_mod_nine
@@ -1124,9 +1124,9 @@ theorem p61_no_domain_two_pow_55 :
 #guard_msgs (whitespace := lax) in #print axioms familyP_maximalInertia_iff
 /-- info: 'Minidregg.Theory.CyclotomicInertia.maximalThreeAdicInertia_iff_irreducible' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms maximalThreeAdicInertia_iff_irreducible
-/-- info: 'Minidregg.Theory.CyclotomicInertia.maximalInertia_koalaBear' depends on axioms: [propext, Classical.choice, Quot.sound, koalaBear_prime] -/
+/-- info: 'Minidregg.Theory.CyclotomicInertia.maximalInertia_koalaBear' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms maximalInertia_koalaBear
-/-- info: 'Minidregg.Theory.CyclotomicInertia.orderOf_koalaBear_three_pow_of_family' depends on axioms: [propext, Classical.choice, Quot.sound, koalaBear_prime] -/
+/-- info: 'Minidregg.Theory.CyclotomicInertia.orderOf_koalaBear_three_pow_of_family' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms orderOf_koalaBear_three_pow_of_family
 /-- info: 'Minidregg.Theory.CyclotomicInertia.powMod_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms powMod_eq

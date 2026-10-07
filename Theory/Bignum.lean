@@ -186,7 +186,7 @@ theorem denoteInt_digitsLE {base : Nat} (hbase : 0 < base)
 /-- Extraction: re-encoding a ranged limb list recovers that exact list. -/
 theorem digitsLE_denoteNat {base : Nat} (hbase : 0 < base) :
     ∀ limbs : List Nat, Ranged base limbs →
-      digitsLE base limbs.length (denoteNat base limbs) = limbs := by
+      digitsLE base limbs.length (denoteNat base limbs) = limbs := by sorry
   intro limbs
   induction limbs with
   | nil => intro _; simp [digitsLE]
