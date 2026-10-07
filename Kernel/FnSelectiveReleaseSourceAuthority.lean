@@ -32,7 +32,7 @@ abbrev Deployment := CanonicalCellRegistry.Deployment
 abbrev Durable := ResourceObservationAdmission.Durable
 abbrev Context := ResourceObservationAdmission.Context
 
-variable {deployment : Deployment} {durable : Durable}
+variable {deployment : Deployment}
 
 private def currentContent (context : Context deployment)
     (spec : Spec) : Option (Digest × List UInt8) := do
@@ -57,7 +57,7 @@ structure Prepared (context : Context deployment)
     .object spec.packet.release.source.resource root
   contentKind : observed.before.kind = .content
   physicalCurrent : ResourceBirthCodec.physicalRoot (.live observed.before) =
-    durable.snapshot.model.roots ⟨spec.packet.release.source.resource⟩
+    context.view.model.roots ⟨spec.packet.release.source.resource⟩
   sourceDomain : spec.packet.release.source.domain = deployment.domain
   sourceSemantics : spec.packet.release.source.semantics = profile.semantics
   sourceRoot : spec.packet.release.source.parent = root
@@ -77,7 +77,7 @@ def prepare (context : Context deployment)
       | none => .error "selected source publication refused"
       | some observed =>
           if contentKind : observed.before.kind = .content then
-            let physicalCurrent := PhysicalResourceReadGuard.current context.directory
+            let physicalCurrent := ServedBasis.Ground.physicalCurrent context
               spec.packet.release.source.resource observed.before observed.present
             if sourceDomain : spec.packet.release.source.domain = deployment.domain then
               if sourceSemantics : spec.packet.release.source.semantics = profile.semantics then
@@ -203,7 +203,7 @@ def readGuard (prepared : Prepared context profile federation height spec) :
 
 theorem readGuard_current (prepared : Prepared context profile federation height spec) :
     (readGuard prepared).expectedRoot =
-      durable.snapshot.model.roots (readGuard prepared).cellId :=
+      context.view.model.roots (readGuard prepared).cellId :=
   prepared.physicalCurrent
 
 end Minidregg.Kernel.FnSelectiveReleaseSourceAuthority

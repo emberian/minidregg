@@ -227,7 +227,8 @@ structure Accepted (prepared : PreparedInvocation deployment profile ambient gro
   shape : PhysicalShape prepared
   selectedExact : signed.declaration.selectedSignedBytes =
     signedBytes deployment.domain profile.semantics selected
-  sourceExact : signed.declaration.sourceImageBytes = DurableReceiverCodec.imageStream.encode durable.image
+  sourceExact : ground.sourceImage.map DurableReceiverCodec.imageStream.encode =
+    some signed.declaration.sourceImageBytes
   targetCount : signed.declaration.capabilities.length = command.targets.length
   envelopeCount : signed.targetEnvelopes.length = command.targets.length
   /-- An observe-only read target carries no promise envelope: no promise leg
@@ -242,7 +243,8 @@ def admit (native : CredentialSignatureIO.NativeConfig)
     (shape : PhysicalShape prepared) (selected : SignedCommand) (signed : Signed) :
     IO (Except Reject (Accepted prepared selected signed)) := do
   if selectedExact : signed.declaration.selectedSignedBytes = signedBytes deployment.domain profile.semantics selected then
-    if sourceExact : signed.declaration.sourceImageBytes = DurableReceiverCodec.imageStream.encode durable.image then
+    if sourceExact : ground.sourceImage.map DurableReceiverCodec.imageStream.encode =
+    some signed.declaration.sourceImageBytes then
       if targetCount : signed.declaration.capabilities.length = command.targets.length then
         if envelopeCount : signed.targetEnvelopes.length = command.targets.length then
          if readEnvelopes : ∀ i : TargetIndex command, command.targets[i].observeOnly = true →

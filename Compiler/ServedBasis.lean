@@ -207,6 +207,13 @@ def seed : Ground deployment → Seed
   | .light basis => basis.seed
   | .full durable _ _ => durable.image.seed
 
+/-- The accepted image a ground was materialized from: the full shape's own image;
+a light ground holds no history, so it has none (a check that names the source
+image — a joint promise — is admissible only on the full shape). -/
+def sourceImage : Ground deployment → Option Minidregg.Kernel.DurableReceiver.Image
+  | .light _ => none
+  | .full durable _ _ => some durable.image
+
 def directory : Ground deployment → Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry
   | .light basis => basis.directory.directory
   | .full _ directory _ => directory.directory
