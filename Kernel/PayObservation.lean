@@ -38,7 +38,6 @@ import Kernel.ClockCell
 import Kernel.PayChainTip
 import Theory.CanonicalResourceKernel
 import Compiler.CredentialSignatureAdmission
-import Kernel.ReceivingLaw
 
 namespace Minidregg.Kernel.PayObservation
 
@@ -197,18 +196,18 @@ theorem nullifier_binds_transfer (domain : Digest) (left right : Observation)
 /-! ## The pure decision -/
 
 inductive Reject where
-  | malformedIngress | directoryUnavailable | authorityUnavailable | bookUnavailable
+  | directoryUnavailable | authorityUnavailable | bookUnavailable
   | payUnavailable | staleAuthority | stalePay
   | tariffInvalid | clockUnavailable | tipInvalidOrRegressing | tipBehindClock | tickTooSoon | duplicateInBatch
   | malformedObservation | wrongMint | wrongTokenProgram | unknownIndex | addressMismatch
   | unassignedIndex | payerIsIssuer | zeroAmount | observationAfterTip
   | enrolIndexNeedsReceiver
-  | bookAdmission | validation | physicalPreparation
-  | policyUnavailable | capabilityRejected | policyRejected | policyInputRange | policyCastAlias
+  | bookAdmission | validation
+  /-- The pay target's committed law did not resolve, or the request is not bound
+  to it (`ComposedPolicyAdmission.bind`).  The law's VERDICT is never this
+  family's: the Receiver judges the pay and clock laws (`Kernel.ReceivingLaw`). -/
+  | policyUnavailable | capabilityRejected | policyRejected
   | signature (reason : CredentialSignatureAdmission.Reject)
-  /-- The committed law of a written cell refused the write (`Kernel.ReceivingLaw`):
-  the clock's own law, judged on the report's clock advance. -/
-  | law (fault : ReceivingLaw.LawFault)
   deriving DecidableEq, Repr
 
 /-- One observation's credit: the payer the index is assigned to and the

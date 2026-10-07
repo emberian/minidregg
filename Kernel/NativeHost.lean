@@ -1820,32 +1820,17 @@ def payObservationAssemble (plan : PayCellDomain.SigningPlan) (signature : List 
 /-- Fresh submission of a report: the `Kernel.Receiving` family, verified by the
 pinned process, judged by the deployment's laws. -/
 def payObservationSubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
-    IO Outcome := do
-  match ← PayObservationReceiver.receiveLoaded config.deployment config.profile
-      ⟨config.federation, logicalHeight config opened.durable⟩ config.signature config.transport
-      opened.durable bytes with
-  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
-  | .rejected reason => return refused .operationRejected "pay-observation" s!"{repr reason}"
-  | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
-  | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
-  | .contention => return .contention
-  | .unavailable detail => return .unavailable detail.toUTF8.toList
-  | .uncertain detail => return .uncertain detail.toUTF8.toList
+    IO Outcome :=
+  receivingSubmitLoaded config opened
+    (PayObservationReceiver.family config.deployment config.profile)
+    ⟨config.federation, logicalHeight config opened.durable⟩ "pay-observation" bytes
 
 /-- Receipt-only historical lookup of a report.  Absence never submits. -/
 def payObservationLookupLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
     Outcome :=
-  match PayObservationReceiver.decodeIngress bytes with
-  | none => refused .malformed "pay-observation" "noncanonical signed ingress"
-  | some ingress =>
-      match PayObservationReceiver.replay config.deployment.domain config.profile.semantics
-          opened.durable ingress with
-      | none => .absent
-      | some (.error _) => refused .conflict "replay" "transaction identity conflict"
-      | some (.ok receipt) =>
-          match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
-          | some original => .confirmed .replayed original
-          | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
+  receivingLookupLoaded config opened
+    (PayObservationReceiver.family config.deployment config.profile)
+    ⟨config.federation, logicalHeight config opened.durable⟩ "pay-observation" bytes
 
 /-! ## Self-enrollment (lane P3b-2): session operations 117–120
 

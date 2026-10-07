@@ -410,7 +410,7 @@ theorem replay_after_execute {laws : Laws Durable} {m : Type → Type}
 `receive_committed`'s premises, at `Id` (any oracle that runs there: a recorded
 transcript): the admission a committed outcome carries wrote only cells whose
 laws admit it -- a `lawBearing` cell (not a birth) under its own committed law
-resolved on the loaded state, with both compiler verdicts and `Pred.eval` true on
+resolved on the loaded state, with the three compiler verdicts and `Pred.eval` true on
 the family's step; or a `kernelOnly` cell its row lets this family write.  Every
 family on `Family`, any `prepare`. -/
 theorem receive_committed_lawful {laws : Laws Durable}

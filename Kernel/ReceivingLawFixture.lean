@@ -110,7 +110,7 @@ def laws : Laws Durable where
     | 5 => some .declaredObject
     | _ => none
   birth write := write.cellId.value == 5
-  resolve _ target _ := if target = 1 then some ⟨law, true, true, []⟩ else none
+  resolve _ target _ := if target = 1 then some ⟨law, true, true, true, []⟩ else none
 
 /-! ## The bypass family: writes, projects, judges nothing -/
 
