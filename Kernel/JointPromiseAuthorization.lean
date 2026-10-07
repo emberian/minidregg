@@ -61,15 +61,15 @@ def wanted (domain semantics : Digest) (d : Declaration) (ordinary : PackedEffec
 
 variable {F : Type} [Field F] [DecidableEq F]
   {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
-  {ambient : Ambient} {durable : Durable} {command : Command}
+  {ambient : Ambient} {ground : Ground deployment} {command : Command}
 
-def rawLeg (prepared : PreparedInvocation deployment profile ambient durable command)
+def rawLeg (prepared : PreparedInvocation deployment profile ambient ground command)
     (d : Declaration) (source : Source command) (incidence : Incidence command) :
     CandidateLegData (DeclaredResourceController.layout prepared) incidence :=
   let original := DeclaredResourceController.rawLeg prepared source incidence
   { original with request := wanted deployment.domain profile.semantics d original.request }
 
-def bindFamily (prepared : PreparedInvocation deployment profile ambient durable command)
+def bindFamily (prepared : PreparedInvocation deployment profile ambient ground command)
     (d : Declaration) (source : Source command) (portals : Incidence command → Portal)
     (incidence : Incidence command) : SemanticLegBinding (rawLeg prepared d source incidence) :=
   let original := DeclaredResourceController.bindFamily prepared source portals incidence
@@ -86,14 +86,14 @@ def bindFamily (prepared : PreparedInvocation deployment profile ambient durable
     patchExact := original.patchExact
     postconditionExact := original.postconditionExact }
 
-def plan (prepared : PreparedInvocation deployment profile ambient durable command)
+def plan (prepared : PreparedInvocation deployment profile ambient ground command)
     (d : Declaration) : PreparationPlan (DeclaredResourceController.layout prepared) (Source command) where
   leg := rawLeg prepared d
   jointDigest := fun _ => commitment deployment.domain profile.semantics d
   legEffectsDigest := fun _ _ => commitment deployment.domain profile.semantics d
   bindFamily := bindFamily prepared d
 
-def tuple (prepared : PreparedInvocation deployment profile ambient durable command)
+def tuple (prepared : PreparedInvocation deployment profile ambient ground command)
     (d : Declaration) (original : PreparedTuple (DeclaredResourceController.plan prepared)) :
     PreparedTuple (plan prepared d) where
   source := original.source
@@ -106,7 +106,7 @@ def tuple (prepared : PreparedInvocation deployment profile ambient durable comm
 /-- All original participant projections remain, including negative clauses,
 foreign-law dependencies, run/compute inputs and source clock. Request slots
 are replaced by the purpose-specific request, not appended behind old slots. -/
-def commonSlots (prepared : PreparedInvocation deployment profile ambient durable command)
+def commonSlots (prepared : PreparedInvocation deployment profile ambient ground command)
     (d : Declaration) (source : Source command) (incidence : Incidence command) : List (String × Int) :=
   let actual := (rawLeg prepared d source incidence).request
   [("target/storageKind", Int.ofNat (storageKind prepared incidence)),
@@ -118,7 +118,7 @@ def commonSlots (prepared : PreparedInvocation deployment profile ambient durabl
     bytesSlots "joint/install-promise/statement" 0 (statement deployment.domain profile.semantics d) ++
     runSlots prepared.run ++ computeSlots prepared
 
-def step (prepared : PreparedInvocation deployment profile ambient durable command)
+def step (prepared : PreparedInvocation deployment profile ambient ground command)
     (d : Declaration) (original : PreparedTuple (DeclaredResourceController.plan prepared))
     (incidence : Incidence command) : PolicyStepContext :=
   PolicyStepContext.ofPreparedTuple
@@ -126,40 +126,40 @@ def step (prepared : PreparedInvocation deployment profile ambient durable comma
       (commonSlots prepared d source incidence) logical)
     profile.semantics { tuple prepared d original with primary := incidence }
 
-def config (prepared : PreparedInvocation deployment profile ambient durable command)
+def config (prepared : PreparedInvocation deployment profile ambient ground command)
     (d : Declaration) (original : PreparedTuple (DeclaredResourceController.plan prepared))
     (incidence : Incidence command) : ComposedPolicyAdmission.Config F :=
-  PhysicalLawResolution.config profile.compilerProfile prepared.authority.snapshot
-    prepared.directory.directory
-    (sourceCapabilityPortal prepared.authority.snapshot (commitment deployment.domain profile.semantics d).value)
+  PhysicalLawResolution.config profile.compilerProfile ground.authority
+    ground.directory
+    (sourceCapabilityPortal ground.authority (commitment deployment.domain profile.semantics d).value)
     (step prepared d original incidence) (incidenceTarget command incidence).target
     ((kindDependencies prepared incidence).map (·.additional) |>.getD [])
 
 /-- Named portal boundary keeps dependent admission evidence from repeatedly
 normalizing the full physical law configuration. It is exactly that current
 source configuration, without a new authority constructor. -/
-def portal (prepared : PreparedInvocation deployment profile ambient durable command)
+def portal (prepared : PreparedInvocation deployment profile ambient ground command)
     (d : Declaration) (original : PreparedTuple (DeclaredResourceController.plan prepared))
     (incidence : Incidence command) : Portal :=
   (config prepared d original incidence).portal
 
-def request (prepared : PreparedInvocation deployment profile ambient durable command)
+def request (prepared : PreparedInvocation deployment profile ambient ground command)
     (d : Declaration) (original : PreparedTuple (DeclaredResourceController.plan prepared))
     (incidence : Incidence command) := (tuple prepared d original).request incidence |>.2
 
 /-- The authority read leg uses the first targets reserve capability, just as
 its ordinary invocation uses that targets capability. Every target has its own
 purpose-specific capability, and the complete list is signed in the statement. -/
-def capability (prepared : PreparedInvocation deployment profile ambient durable command)
+def capability (prepared : PreparedInvocation deployment profile ambient ground command)
     (d : Declaration) (incidence : Incidence command) : CapabilityId :=
   d.capabilities[(incidence.getD (firstIndex prepared)).val]?.getD ⟨0⟩
 
-def authorize (prepared : PreparedInvocation deployment profile ambient durable command)
+def authorize (prepared : PreparedInvocation deployment profile ambient ground command)
     (d : Declaration) (original : PreparedTuple (DeclaredResourceController.plan prepared))
     (incidence : Incidence command)
-    (signature : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot) :
+    (signature : CredentialSignatureAdmission.CheckedSignature ground.authority) :
     Except Reject (Authorized (portal prepared d original incidence)
-      prepared.authority.snapshot.authState (request prepared d original incidence)) := do
+      ground.authority.authState (request prepared d original incidence)) := do
   let wanted := request prepared d original incidence
   let lawConfig := config prepared d original incidence
   let _ ← requireSome .policyUnavailable (kindDependencies prepared incidence)
@@ -188,22 +188,22 @@ def Signed.envelope (signed : Signed) : Incidence command → List UInt8
 
 attribute [irreducible] portal
 
-structure CheckedLeg (prepared : PreparedInvocation deployment profile ambient durable command)
+structure CheckedLeg (prepared : PreparedInvocation deployment profile ambient ground command)
     (d : Declaration) (original : PreparedTuple (DeclaredResourceController.plan prepared))
     (incidence : Incidence command) (envelope : List UInt8) where
-  receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
+  receipt : CredentialSignatureAdmission.CheckedSignature ground.authority
   envelopeExact : receipt.envelopeBytes = envelope
   authority : Authorized (portal prepared d original incidence)
-    prepared.authority.snapshot.authState (request prepared d original incidence)
+    ground.authority.authState (request prepared d original incidence)
   admitted : authorize prepared d original incidence receipt = .ok authority
   fields : fieldsCheck authority.evidence.capabilityValue (legFootprint prepared incidence) = .ok ()
 
 def verifyLeg (native : CredentialSignatureIO.NativeConfig)
-    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
     (d : Declaration) (original : PreparedTuple (DeclaredResourceController.plan prepared))
     (incidence : Incidence command) (envelope : List UInt8) :
     IO (Except Reject (CheckedLeg prepared d original incidence envelope)) := do
-  match ← CredentialSignatureAdmission.verifyNative native prepared.authority.snapshot
+  match ← CredentialSignatureAdmission.verifyNative native ground.authority
       (commitment deployment.domain profile.semantics d).value
       (request prepared d original incidence) envelope with
   | .error reason => return .error (.legSignature reason)
@@ -220,7 +220,7 @@ def verifyLeg (native : CredentialSignatureIO.NativeConfig)
 /-- Private token minted only by CURRENT ordinary admission plus CURRENT
 purpose-specific signatures, capabilities, full composed laws and field bounds.
 It is not reconstructible from an untrusted certificate or journal event. -/
-structure Accepted (prepared : PreparedInvocation deployment profile ambient durable command)
+structure Accepted (prepared : PreparedInvocation deployment profile ambient ground command)
     (selected : SignedCommand) (signed : Signed) where
   private mk ::
   ordinary : AcceptedInvocation prepared selected
@@ -238,7 +238,7 @@ structure Accepted (prepared : PreparedInvocation deployment profile ambient dur
     CheckedLeg prepared signed.declaration ordinary.tuple incidence (signed.envelope incidence)
 
 def admit (native : CredentialSignatureIO.NativeConfig)
-    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
     (shape : PhysicalShape prepared) (selected : SignedCommand) (signed : Signed) :
     IO (Except Reject (Accepted prepared selected signed)) := do
   if selectedExact : signed.declaration.selectedSignedBytes = signedBytes deployment.domain profile.semantics selected then

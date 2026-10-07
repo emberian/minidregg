@@ -834,11 +834,11 @@ open Minidregg.Theory.TypedAuthorization
 
 variable {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
   {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient}
-  {durable : Durable} {command : Command}
+  {ground : Ground deployment} {command : Command}
 
 /-- The authenticated effective closure includes the sheet law at `p` as an active component. -/
 def SheetInstalled (p : Params)
-    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {prepared : PreparedInvocation deployment profile ambient ground command}
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) : Prop :=
   Minidregg.Kernel.LawHistory.ActiveComponent
     (policyConfig prepared tuple incidence) (sheetLaw p)
@@ -846,7 +846,7 @@ def SheetInstalled (p : Params)
 /-- Derive the installed-law assurance premise from the receiver's cached,
 authenticated effective graph; no caller assertion or second resolver is used. -/
 def checkInstalled (p : Params)
-    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {prepared : PreparedInvocation deployment profile ambient ground command}
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command)
     (resolved : Minidregg.Compiler.ComposedPolicyAdmission.PreparedLaw
       (policyConfig prepared tuple incidence)) :
@@ -854,7 +854,7 @@ def checkInstalled (p : Params)
   Minidregg.Kernel.LawHistory.checkActiveComponent resolved (sheetLaw p)
 
 theorem sheet_leg_admitted (p : Params)
-    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {prepared : PreparedInvocation deployment profile ambient ground command}
     {tuple : PreparedTuple (plan prepared)} {incidence : Incidence command} {envelope : List UInt8}
     (leg : CheckedLeg prepared tuple incidence envelope) (installed : SheetInstalled p tuple incidence) :
     eval (sheetLaw p) (step prepared tuple incidence).oldState
@@ -866,7 +866,7 @@ theorem sheet_leg_admitted (p : Params)
 /-- **`stranger_write_bounded`, kernel form.** On a leg the controller admitted under the sheet law,
 a subject that is neither owner nor referee did not mutate. -/
 theorem kernel_stranger_write_bounded (p : Params)
-    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {prepared : PreparedInvocation deployment profile ambient ground command}
     {tuple : PreparedTuple (plan prepared)} {incidence : Incidence command} {envelope : List UInt8}
     (leg : CheckedLeg prepared tuple incidence envelope) (installed : SheetInstalled p tuple incidence)
     (x : Int) (subject : (step prepared tuple incidence).newState.get "request/subject" = some x)
@@ -881,7 +881,7 @@ theorem kernel_stranger_write_bounded (p : Params)
 /-- **Deaths monotone, kernel form**: an admitted mutate leg under the sheet law carries `deaths` in
 both of the controller's views, not decreasing. -/
 theorem kernel_deaths_monotone (p : Params)
-    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {prepared : PreparedInvocation deployment profile ambient ground command}
     {tuple : PreparedTuple (plan prepared)} {incidence : Incidence command} {envelope : List UInt8}
     (leg : CheckedLeg prepared tuple incidence envelope) (installed : SheetInstalled p tuple incidence)
     (verb : (step prepared tuple incidence).newState.get "request/verb" = some 2) :
@@ -892,7 +892,7 @@ theorem kernel_deaths_monotone (p : Params)
 /-- **Revive, kernel form**: an admitted mutate leg that raises `alive` is clause 23's, and needs a
 `clock/now` slot the controller does not yet supply. -/
 theorem kernel_alive_raised_only_by_revive (p : Params)
-    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {prepared : PreparedInvocation deployment profile ambient ground command}
     {tuple : PreparedTuple (plan prepared)} {incidence : Incidence command} {envelope : List UInt8}
     (leg : CheckedLeg prepared tuple incidence envelope) (installed : SheetInstalled p tuple incidence)
     (verb : (step prepared tuple incidence).newState.get "request/verb" = some 2)

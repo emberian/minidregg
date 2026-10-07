@@ -2493,8 +2493,8 @@ private def derive (config : Config) (opened : Opened config)
             | some command =>
               -- prepare_eq_prepareFrom: this held directory is exactly the
               -- full decode for this prefix, including every failure result.
-              match DeclaredResourceController.prepareFrom config.deployment config.profile
-                  ⟨config.federation, height⟩ opened.durable (some opened.directory) command with
+              match DeclaredResourceController.prepare config.deployment config.profile
+                  ⟨config.federation, height⟩ opened.ground command with
               | .error reason => return .error s!"invocation preparation refused: {repr reason}"
               | .ok prepared =>
                 if shape : DeclaredResourceController.PhysicalShape prepared then
