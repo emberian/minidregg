@@ -6,6 +6,7 @@ can deliver an HTTP request or recover a historical permit.
 -/
 import Kernel.ApplicationDispatchAgentIngress
 import Kernel.ApplicationDispatchHistoricalCore
+import Kernel.NativeHostServed
 
 namespace Minidregg.Kernel.ApplicationDispatchAgentCore
 
@@ -38,7 +39,7 @@ structure Checked (config : Config) (opened : Opened config)
   scopeExact : matchesIngress ingress.reserveContext ingress.dispatch
     issued.spec.ticket.resource = true
   base : ApplicationDispatchHistoricalCore.CheckedCandidate config
-    opened.durable ingress.dispatch issued
+    opened.ground ingress.dispatch issued
   payer : ApplicationDispatchAgentPayer.Checked config opened ingress.reserveContext
   holdExact : payer.state = AgentGrain.reserve reserved.beforeState
     ingress.reserveContext.reserveAmount
@@ -66,7 +67,7 @@ def checkCurrent (config : Config) (opened : Opened config)
   if contextExact : reserved.context = ingress.reserveContext then
     if scopeExact : matchesIngress ingress.reserveContext ingress.dispatch
         issued.spec.ticket.resource = true then
-      match ← ApplicationDispatchHistoricalCore.checkCurrent config opened.durable
+      match ← ApplicationDispatchHistoricalCore.checkCurrent config opened.ground
           ingress.dispatch issued with
       | .error detail => return .error detail
       | .ok base =>
