@@ -6,7 +6,7 @@ A fixture family `bypass` over the deployed `Kernel.Receiving` pipeline (the rea
 `prepare` judges NO law: it writes the cells it is told to, with whatever law
 step it is told to project.  The fixture law source (`laws`) classifies cell 1
 as a `declaredObject` whose committed law is `all [objectivePin [7]]`, cell 2 as
-a `streamEntry`, cell 4 as the `system` cell, cell 5 as a law-bearing birth, and
+a `streamEntry`, cell 4 as the `system` cell, cell 5 as a law-bearing birth whose export law is the same pin, and
 nothing else.  It runs at `Id` under an empty-transcript oracle (the bypass family makes
 no signature claims) and an exact-append token.
 
@@ -19,7 +19,14 @@ no signature claims) and an exact-append token.
   of `receive_committed_lawful` and `kernelOnly_writers_sound` is inhabited,
   and both are instantiated on it.
 * `noStep_refused`, `foreignWriter_refused`, `unclassified_refused`,
-  `registryMismatch_refused`, `birth_refused` -- every other refusal arm.
+  `registryMismatch_refused`, `birth_noStep_refused` -- every other refusal arm.
+* `birth_denied_names_pin` / `birth_commits_without_judgement` / `birth_lawful_commits` -- the
+  bypass tooth for BIRTHS: a newborn (cell 5) is judged by its export law, refused at
+  its clause with the judgement, committed without it, and committed when lawful.
+* `lawSource_birth_denied_names_pin` / `lawSource_birth_lawful_commits` /
+  `lawSource_inPlace_foreign_refused` -- a law source (`kernelOnlyOrBorn`): born by
+  the pay-enrol family under its export law (refused at the clause, or committed),
+  and written in place by it refused by name (only `PolicyInstall` writes one).
 
 The law source here is a fixture; the deployed one is `Laws.physical`, whose
 resolution is the DRC's (`ReceivingLaw.physical_resolve_some_iff`), installed
@@ -108,9 +115,15 @@ def laws : Laws Durable where
     | 2 => some .streamEntry
     | 4 => some .system
     | 5 => some .declaredObject
+    | 6 => some .policySource
+    | 7 => some .policySource
     | _ => none
-  birth write := write.cellId.value == 5
+  birth _ write := write.cellId.value == 5 || write.cellId.value == 6
   resolve _ target _ := if target = 1 then some ⟨law, true, true, true, []⟩ else none
+  -- Cell 5 is a newborn whose export law is the same pin.
+  -- Cells 5 and 6 are newborns (6 a law source) whose export law is the same pin.
+  resolveBirth _ _ write _ :=
+    if write.cellId.value = 5 ∨ write.cellId.value = 6 then some ⟨law, true, true, true, []⟩ else none
 
 /-! ## The bypass family: writes, projects, judges nothing -/
 
@@ -170,13 +183,12 @@ noncomputable def objectStep (artifact : Int) : Nat → Option PolicyStepContext
 /-! ## The teeth -/
 
 /-- The fixture's laws read no source cell: they add no guard. -/
-theorem writeGuards_nil (written : DataWrite) (step : Option PolicyStepContext) :
-    ReceivingLaw.writeGuards laws durable written step = [] := by
-  unfold ReceivingLaw.writeGuards
+theorem writeGuards_nil (patch : List DataWrite) (written : DataWrite)
+    (step : Option PolicyStepContext) :
+    ReceivingLaw.writeGuards laws durable patch written step = [] := by
+  unfold ReceivingLaw.writeGuards ReceivingLaw.lawOf
   split
-  · split
-    · simp only [laws]; split <;> rfl
-    · rfl
+  · split <;> (try simp only [laws]) <;> (repeat' split) <;> rfl
   · rfl
 
 /-- The bypass family's physical shape holds on the fixture state, for any two
@@ -193,16 +205,19 @@ theorem fault_eq (id : FamilyId) (stepFor : Nat → Option PolicyStepContext)
     (a : Nat := 1) (b : Nat := 2) :
     Family.lawFault (F := bypass id [a, b] stepFor) (env := ()) (durable := durable) (command := ())
       laws () =
-      (ReceivingLaw.judgeWrite laws id durable (write durable a) (stepFor a)).or
-        (ReceivingLaw.judgeWrite laws id durable (write durable b) (stepFor b)) := by
+      (ReceivingLaw.judgeWrite laws id durable [write durable a, write durable b] (write durable a)
+          (stepFor a)).or
+        (ReceivingLaw.judgeWrite laws id durable [write durable a, write durable b] (write durable b)
+          (stepFor b)) := by
   simp only [Family.lawFault, bypass, ReceivingLaw.lawFault_uniform, List.map_cons, List.map_nil,
     List.findSome?_cons, List.findSome?_nil]
-  change _ = (ReceivingLaw.judgeWrite laws id durable (write durable a)
+  change _ = (ReceivingLaw.judgeWrite laws id durable [write durable a, write durable b] (write durable a)
       (stepFor (write durable a).cellId.value)).or
-    (ReceivingLaw.judgeWrite laws id durable (write durable b) (stepFor (write durable b).cellId.value))
-  generalize ReceivingLaw.judgeWrite laws id durable (write durable a)
+    (ReceivingLaw.judgeWrite laws id durable [write durable a, write durable b] (write durable b)
+      (stepFor (write durable b).cellId.value))
+  generalize ReceivingLaw.judgeWrite laws id durable [write durable a, write durable b] (write durable a)
     (stepFor (write durable a).cellId.value) = first
-  generalize ReceivingLaw.judgeWrite laws id durable (write durable b)
+  generalize ReceivingLaw.judgeWrite laws id durable [write durable a, write durable b] (write durable b)
     (stepFor (write durable b).cellId.value) = second
   cases first <;> cases second <;> rfl
 
@@ -211,7 +226,8 @@ theorem fault_pin :
       (durable := durable) (command := ()) laws () =
       some (.lawDenied 1 ⟨[0], Minidregg.Pred.objectivePin [pinned], some (-1), some (-1)⟩) := by
   rw [fault_eq]
-  simp [ReceivingLaw.judgeWrite, write, laws, objectStep, CanonicalCellRegistry.Kind.lawClass,
+  simp [ReceivingLaw.judgeWrite, ReceivingLaw.judgeKernel, ReceivingLaw.judgeBearing,
+    ReceivingLaw.judgeLaw, ReceivingLaw.lawOf, write, laws, objectStep, CanonicalCellRegistry.Kind.lawClass,
     stepAt_old, stepAt_new]
   decide
 
@@ -318,7 +334,8 @@ theorem fault_lawful :
     Family.lawFault (F := bypass .declaredResourceController [1, 2] (objectStep pinned))
       (env := ()) (durable := durable) (command := ()) laws () = none := by
   rw [fault_eq]
-  simp [ReceivingLaw.judgeWrite, write, laws, objectStep, CanonicalCellRegistry.Kind.lawClass,
+  simp [ReceivingLaw.judgeWrite, ReceivingLaw.judgeKernel, ReceivingLaw.judgeBearing,
+    ReceivingLaw.judgeLaw, ReceivingLaw.lawOf, write, laws, objectStep, CanonicalCellRegistry.Kind.lawClass,
     stepAt_old, stepAt_new]
   decide
 
@@ -340,7 +357,9 @@ theorem lawful_commits_judged :
       (∀ written (member : written ∈ (bypass .declaredResourceController [1, 2]
           (objectStep pinned)).writes (env := ()) (durable := durable) (command := ())
             admission.accepted.prepared),
-        Lawful laws .declaredResourceController durable written
+        Lawful laws .declaredResourceController durable
+          ((bypass .declaredResourceController [1, 2] (objectStep pinned)).writes (env := ())
+            (durable := durable) (command := ()) admission.accepted.prepared) written
           ((bypass .declaredResourceController [1, 2] (objectStep pinned)).lawStep
             (env := ()) (durable := durable) (command := ()) admission.accepted.prepared written
             member)) ∧
@@ -368,7 +387,8 @@ theorem noStep_refused :
     (env := ()) (durable := durable)
     (command := ()) laws () = _
   rw [fault_eq]
-  simp [ReceivingLaw.judgeWrite, write, laws, CanonicalCellRegistry.Kind.lawClass]
+  simp [ReceivingLaw.judgeWrite, ReceivingLaw.judgeKernel, ReceivingLaw.judgeBearing,
+    ReceivingLaw.judgeLaw, ReceivingLaw.lawOf, write, laws, CanonicalCellRegistry.Kind.lawClass]
   rfl
 
 /-- A family not named in the `streamEntry` row writing one is refused. -/
@@ -382,7 +402,8 @@ theorem foreignWriter_refused :
     (env := ()) (durable := durable)
     (command := ()) laws () = _
   rw [fault_eq]
-  simp [ReceivingLaw.judgeWrite, write, laws, objectStep, CanonicalCellRegistry.Kind.lawClass,
+  simp [ReceivingLaw.judgeWrite, ReceivingLaw.judgeKernel, ReceivingLaw.judgeBearing,
+    ReceivingLaw.judgeLaw, ReceivingLaw.lawOf, write, laws, objectStep, CanonicalCellRegistry.Kind.lawClass,
     stepAt_old, stepAt_new]
   decide
 
@@ -397,7 +418,8 @@ theorem registryMismatch_refused :
     (env := ()) (durable := durable)
     (command := ()) laws () = _
   rw [fault_eq]
-  simp [ReceivingLaw.judgeWrite, write, laws, CanonicalCellRegistry.Kind.lawClass,
+  simp [ReceivingLaw.judgeWrite, ReceivingLaw.judgeKernel, ReceivingLaw.judgeBearing,
+    ReceivingLaw.judgeLaw, ReceivingLaw.lawOf, write, laws, CanonicalCellRegistry.Kind.lawClass,
     stepAt_old, stepAt_new]
   decide
 
@@ -411,25 +433,132 @@ theorem unclassified_refused :
     (env := ())
     (durable := durable) (command := ()) laws () = _
   rw [fault_eq _ _ 9 2]
-  simp [ReceivingLaw.judgeWrite, write, laws]
+  simp [ReceivingLaw.judgeWrite, ReceivingLaw.judgeKernel, ReceivingLaw.judgeBearing,
+    ReceivingLaw.judgeLaw, ReceivingLaw.lawOf, write, laws]
   rfl
 
-/-- A law-bearing birth is refused until the registry names its parent's law,
-whatever step the family offers: the birth is read from the write itself. -/
-theorem birth_refused :
-    ((bypass .declaredResourceController [5, 2] (objectStep pinned)).receiver laws oracle).receive
-        append () durable [] = pure (.refused (.law (.lawUnavailable 5 .birth))) := by
-  refine receive_faulted _ rfl (bypass_fresh' .declaredResourceController (objectStep pinned) 5 2) rfl
-    rfl (shape_ok .declaredResourceController (objectStep pinned) 5 2) ?_
-  change Family.lawFault (F := bypass .declaredResourceController [5, 2] (objectStep pinned))
+/-- A newborn's step: only the birth (cell 5, or `born`) gets one, under `artifact`. -/
+noncomputable def bornStep (artifact : Int) (born : Nat := 5) : Nat → Option PolicyStepContext :=
+  fun cell => if cell = born then some (stepAt artifact) else none
+
+/-- **A birth is judged by its export law, not skipped**: a family that bears cell
+5 and judges nothing is refused by the Receiver at the export law's clause. -/
+theorem birth_denied_names_pin :
+    ((bypass .declaredResourceController [5, 2] (bornStep (-1))).receiver laws oracle).receive
+        append () durable [] =
+      pure (.refused (.law (.lawDenied 5
+        ⟨[0], Minidregg.Pred.objectivePin [pinned], some (-1), some (-1)⟩))) := by
+  refine receive_faulted _ rfl (bypass_fresh' .declaredResourceController (bornStep (-1)) 5 2) rfl
+    rfl (shape_ok .declaredResourceController (bornStep (-1)) 5 2) ?_
+  change Family.lawFault (F := bypass .declaredResourceController [5, 2] (bornStep (-1)))
     (env := ()) (durable := durable) (command := ()) laws () = _
   rw [fault_eq _ _ 5 2]
-  simp [ReceivingLaw.judgeWrite, write, laws, CanonicalCellRegistry.Kind.lawClass]
+  simp [ReceivingLaw.judgeWrite, ReceivingLaw.judgeKernel, ReceivingLaw.judgeBearing,
+    ReceivingLaw.judgeLaw, ReceivingLaw.lawOf, write, laws, bornStep,
+    CanonicalCellRegistry.Kind.lawClass, stepAt_old, stepAt_new]
+  decide
+
+/-- Remove the judgement and the same birth commits (the mutation is real). -/
+theorem birth_commits_without_judgement :
+    ∃ admission witness,
+      (unjudged (bypass .declaredResourceController [5, 2] (bornStep (-1)))).receive
+          append () durable [] = pure (.committed () admission witness) :=
+  receive_lawful _ rfl (bypass_fresh' .declaredResourceController (bornStep (-1)) 5 2) rfl rfl
+    (shape_ok .declaredResourceController (bornStep (-1)) 5 2) rfl
+
+/-- A birth its export law admits commits. -/
+theorem birth_lawful_commits :
+    ∃ admission witness,
+      ((bypass .declaredResourceController [5, 2] (bornStep pinned)).receiver laws oracle).receive
+          append () durable [] = pure (.committed () admission witness) := by
+  refine receive_lawful _ rfl (bypass_fresh' .declaredResourceController (bornStep pinned) 5 2) rfl
+    rfl (shape_ok .declaredResourceController (bornStep pinned) 5 2) ?_
+  change Family.lawFault (F := bypass .declaredResourceController [5, 2] (bornStep pinned))
+    (env := ()) (durable := durable) (command := ()) laws () = _
+  rw [fault_eq _ _ 5 2]
+  simp [ReceivingLaw.judgeWrite, ReceivingLaw.judgeKernel, ReceivingLaw.judgeBearing,
+    ReceivingLaw.judgeLaw, ReceivingLaw.lawOf, write, laws, bornStep,
+    CanonicalCellRegistry.Kind.lawClass, stepAt_old, stepAt_new]
+  decide
+
+/-- A birth with no step is refused, not admitted. -/
+theorem birth_noStep_refused :
+    ((bypass .declaredResourceController [5, 2] (fun _ => none)).receiver laws oracle).receive
+        append () durable [] = pure (.refused (.law (.lawUnavailable 5 .noStep))) := by
+  refine receive_faulted _ rfl (bypass_fresh' .declaredResourceController (fun _ => none) 5 2) rfl
+    rfl (shape_ok .declaredResourceController (fun _ => none) 5 2) ?_
+  change Family.lawFault (F := bypass .declaredResourceController [5, 2] (fun _ => none))
+    (env := ()) (durable := durable) (command := ()) laws () = _
+  rw [fault_eq _ _ 5 2]
+  simp [ReceivingLaw.judgeWrite, ReceivingLaw.judgeKernel, ReceivingLaw.judgeBearing,
+    ReceivingLaw.judgeLaw, ReceivingLaw.lawOf, write, laws, CanonicalCellRegistry.Kind.lawClass]
   rfl
+
+/-! ### Law sources (`kernelOnlyOrBorn`): born under the export law, else only `PolicyInstall` -/
+
+/-- **A law source born by a family that is not its writer is judged by its export
+law**: the pay-enrol family bearing law source 6 under a step its export law
+refuses is refused at the export law's clause. -/
+theorem lawSource_birth_denied_names_pin :
+    ((bypass .payEnrol [6, 2] (bornStep (-1) 6)).receiver laws oracle).receive
+        append () durable [] =
+      pure (.refused (.law (.lawDenied 6
+        ⟨[0], Minidregg.Pred.objectivePin [pinned], some (-1), some (-1)⟩))) := by
+  refine receive_faulted _ rfl (bypass_fresh' .payEnrol (bornStep (-1) 6) 6 2) rfl
+    rfl (shape_ok .payEnrol (bornStep (-1) 6) 6 2) ?_
+  change Family.lawFault (F := bypass .payEnrol [6, 2] (bornStep (-1) 6))
+    (env := ()) (durable := durable) (command := ()) laws () = _
+  rw [fault_eq _ _ 6 2]
+  simp [ReceivingLaw.judgeWrite, ReceivingLaw.judgeKernel, ReceivingLaw.judgeBearing,
+    ReceivingLaw.judgeLaw, ReceivingLaw.lawOf, write, laws, bornStep,
+    CanonicalCellRegistry.Kind.lawClass, stepAt_old, stepAt_new]
+  decide
+
+/-- A step for law source 6 and the object cell 1 it governs, under `artifact`. -/
+noncomputable def sourceStep (artifact : Int) : Nat → Option PolicyStepContext :=
+  fun cell => if cell = 1 ∨ cell = 6 then some (stepAt artifact) else none
+
+/-- The same law-source birth, admitted by its export law (beside a lawful write of
+the object it governs), commits. -/
+theorem lawSource_birth_lawful_commits :
+    ∃ admission witness,
+      ((bypass .payEnrol [6, 1] (sourceStep pinned)).receiver laws oracle).receive
+          append () durable [] = pure (.committed () admission witness) := by
+  refine receive_lawful _ rfl (bypass_fresh' .payEnrol (sourceStep pinned) 6 1) rfl
+    rfl (shape_ok .payEnrol (sourceStep pinned) 6 1) ?_
+  change Family.lawFault (F := bypass .payEnrol [6, 1] (sourceStep pinned))
+    (env := ()) (durable := durable) (command := ()) laws () = _
+  rw [fault_eq _ _ 6 1]
+  simp [ReceivingLaw.judgeWrite, ReceivingLaw.judgeKernel, ReceivingLaw.judgeBearing,
+    ReceivingLaw.judgeLaw, ReceivingLaw.lawOf, write, laws, sourceStep,
+    CanonicalCellRegistry.Kind.lawClass, stepAt_old, stepAt_new]
+  decide
+
+/-- **A live law source is written in place only by `PolicyInstall`**: the pay-enrol
+family writing live law source 7 is refused by name, whatever it projects. -/
+theorem lawSource_inPlace_foreign_refused :
+    ((bypass .payEnrol [7, 2] (fun _ => none)).receiver laws oracle).receive
+        append () durable [] =
+      pure (.refused (.law (.kernelOnlyForeignWriter 7 .policySource .payEnrol))) := by
+  refine receive_faulted _ rfl (bypass_fresh' .payEnrol (fun _ => none) 7 2) rfl
+    rfl (shape_ok .payEnrol (fun _ => none) 7 2) ?_
+  change Family.lawFault (F := bypass .payEnrol [7, 2] (fun _ => none))
+    (env := ()) (durable := durable) (command := ()) laws () = _
+  rw [fault_eq _ _ 7 2]
+  simp [ReceivingLaw.judgeWrite, ReceivingLaw.judgeKernel,
+    ReceivingLaw.judgeLaw, ReceivingLaw.lawOf, write, laws,
+    CanonicalCellRegistry.Kind.lawClass]
+  decide
 
 #assert_compiled durable_loads
 #assert_compiled unclassified_refused
-#assert_compiled birth_refused
+#assert_compiled birth_denied_names_pin
+#assert_compiled birth_commits_without_judgement
+#assert_compiled birth_lawful_commits
+#assert_compiled birth_noStep_refused
+#assert_compiled lawSource_birth_denied_names_pin
+#assert_compiled lawSource_birth_lawful_commits
+#assert_compiled lawSource_inPlace_foreign_refused
 #assert_compiled writeGuards_nil
 #assert_compiled fresh
 #assert_compiled bypass_refused_names_pin

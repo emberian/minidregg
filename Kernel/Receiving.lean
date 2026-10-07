@@ -220,15 +220,17 @@ theorem shape_sound {prepared : F.Prepared env durable command} (shaped : shape 
   simpa [shape, List.all_eq_true, and_assoc] using shaped
 
 /-- **Every written cell of an admitted patch is lawful.**  When the shape check
-and the law judgement pass, every write is either to a `lawBearing` cell, not a
-birth, whose committed law resolved on the family's step with both compiler
-verdicts true and `Pred.eval` accepting the step; or to a `kernelOnly writers`
-cell, with no step, by a family its row names. -/
+and the law judgement pass, every write is either to a `lawBearing` cell whose
+law (its committed law, or for a birth its export law, `ReceivingLaw.lawOf`)
+resolved on the family's step with the three compiler verdicts true and
+`Pred.eval` accepting the step; or to a `kernelOnly writers` cell, with no step,
+by a family its row names; or to a `kernelOnlyOrBorn` cell, born under its export
+law or written step-free by a named writer. -/
 theorem shape_lawful {prepared : F.Prepared env durable command}
     (shaped : shape laws prepared = true) (judged : lawful laws prepared = true) :
     F.physicalPostLaw prepared = true ∧
       ∀ write (member : write ∈ F.writes prepared),
-        Lawful laws F.id durable write (F.lawStep prepared write member) := by
+        Lawful laws F.id durable (F.writes prepared) write (F.lawStep prepared write member) := by
   refine ⟨(shape_sound laws shaped).2.2.2, ?_⟩
   have none_ : lawFault laws prepared = none := by
     simpa [lawful, Option.isNone_iff_eq_none] using judged
@@ -409,10 +411,11 @@ theorem replay_after_execute {laws : Laws Durable} {m : Type → Type}
 /-- **A committed outcome's every written cell is lawful.**  Exactly
 `receive_committed`'s premises, at `Id` (any oracle that runs there: a recorded
 transcript): the admission a committed outcome carries wrote only cells whose
-laws admit it -- a `lawBearing` cell (not a birth) under its own committed law
-resolved on the loaded state, with the three compiler verdicts and `Pred.eval` true on
-the family's step; or a `kernelOnly` cell its row lets this family write.  Every
-family on `Family`, any `prepare`. -/
+laws admit it -- a `lawBearing` cell under its own committed law (a birth: under
+its export law) resolved on the loaded state, with the three compiler verdicts and
+`Pred.eval` true on the family's step; a `kernelOnly` cell its row lets this family
+write; or a `kernelOnlyOrBorn` cell born under its export law or written by a
+named writer.  Every family on `Family`, any `prepare`. -/
 theorem receive_committed_lawful {laws : Laws Durable}
     {oracle : CredentialSignatureIO.Oracle Id}
     {Exact : Durable → DataIntent rootBytes → Type} {Other : Type}
@@ -424,7 +427,8 @@ theorem receive_committed_lawful {laws : Laws Durable}
     (committed : (F.receiver laws oracle).receive append env durable bytes =
       pure (.committed ingress admission witness)) :
     ∀ write (member : write ∈ F.writes admission.accepted.prepared),
-      Lawful laws F.id durable write (F.lawStep admission.accepted.prepared write member) := by
+      Lawful laws F.id durable (F.writes admission.accepted.prepared) write
+        (F.lawStep admission.accepted.prepared write member) := by
   obtain ⟨shaped, faultless⟩ := (F.receiver laws oracle).receive_committed_lawFault committed
   exact (shape_lawful laws shaped (by simpa [lawful, Option.isNone_iff_eq_none] using faultless)).2
 

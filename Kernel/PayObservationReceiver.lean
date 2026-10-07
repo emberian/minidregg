@@ -698,10 +698,11 @@ theorem committed_lawful {laws : ReceivingLaw.Laws Durable}
     (committed : ((family deployment profile).receiver laws oracle).receive append ambient durable bytes =
       pure (.committed ingress admission witness)) :
     let planned := admission.accepted.prepared.planned
-    ReceivingLaw.Lawful laws .payObservation durable (payWrite planned) (some (step planned)) ∧
-      ReceivingLaw.Lawful laws .payObservation durable (clockWrite planned)
+    ReceivingLaw.Lawful laws .payObservation durable (writes planned) (payWrite planned)
+        (some (step planned)) ∧
+      ReceivingLaw.Lawful laws .payObservation durable (writes planned) (clockWrite planned)
         (some planned.clockStep) ∧
-      ReceivingLaw.Lawful laws .payObservation durable (bookWrite planned) none := by
+      ReceivingLaw.Lawful laws .payObservation durable (writes planned) (bookWrite planned) none := by
   intro planned
   have judged := Minidregg.Kernel.Receiving.Family.receive_committed_lawful (family deployment profile) committed
   have nodup : ((writes planned).map DataWrite.cellId).Nodup :=
@@ -732,6 +733,24 @@ theorem committed_lawful {laws : ReceivingLaw.Laws Durable}
       dsimp only [family]
       exact lawStepOf_book planned (Ne.symm payBook) (Ne.symm clockBook)
     rwa [stepEq] at lawful
+
+/-- The report's pay write is no birth: the loaded state holds the live pay cell
+it was decided against (`PayCellDomain.Loaded.observed`), so the Receiver judges
+it by the pay cell's committed law, not by an export law. -/
+theorem payWrite_not_birth (planned : Planned deployment profile ambient durable command) :
+    ReceivingLaw.physicalBirth durable (payWrite planned) = false := by
+  unfold ReceivingLaw.physicalBirth
+  show (match (ResourceBirthCodec.LifecycleImage.codec CanonicalCellRegistry.registry).decode
+      (durable.snapshot.canonicalBytes (PayCellDomain.cellIdOf deployment)) with
+    | some (.live _) => false
+    | _ => true) = false
+  rw [planned.pay.observed]
+  unfold PayCellDomain.cellBytes
+  rw [show ResourceBirthCodec.LifecycleImage.bytes CanonicalCellRegistry.registry
+      (.live (PayCellDomain.packedCell planned.pay.cell)) =
+      (ResourceBirthCodec.LifecycleImage.codec CanonicalCellRegistry.registry).encode
+        (.live (PayCellDomain.packedCell planned.pay.cell)) from rfl,
+    ResourceBirthCodec.LifecycleImage.decode_encode]
 
 /-- **One judge, nothing weakened.**  Under the deployed laws, every committed
 report satisfies the full compiled admission the family's `prepare` no longer
@@ -764,9 +783,17 @@ theorem committed_admitted {oracle : CredentialSignatureIO.Oracle Id}
   apply bound.admit_of_verifies
   obtain ⟨payLawful, -, -⟩ := committed_lawful committed
   obtain ⟨kind, -, judgedPay⟩ := payLawful
-  rcases judgedPay with ⟨-, -, judgedStep, law, stepEq, resolved, lowerable, inRange, casts, evaluated⟩ |
-      ⟨-, -, -, noStep⟩
+  have notBirth := payWrite_not_birth planned
+  rcases judgedPay with ⟨-, judgedStep, law, stepEq, resolvedOf, lowerable, inRange, casts, evaluated⟩ |
+      ⟨-, -, -, noStep⟩ | ⟨-, -, (⟨birth, -⟩ | ⟨-, -, noStep⟩)⟩
   · cases stepEq
+    have resolved : (laws deployment profile).resolve durable (payWrite planned).cellId.value
+        (step planned) = some law := by
+      unfold ReceivingLaw.lawOf at resolvedOf
+      rw [if_neg (by
+        show ¬ (ReceivingLaw.physicalBirth durable (payWrite planned) = true)
+        rw [notBirth]; simp)] at resolvedOf
+      exact resolvedOf
     obtain ⟨directory, authority, structural, sources, judged, directoryEq, authorityEq, -, -,
         judgedEq, rfl⟩ :=
       (ReceivingLaw.physical_resolve_some_iff _ _ _ _ _ _).1 resolved
@@ -783,6 +810,8 @@ theorem committed_admitted {oracle : CredentialSignatureIO.Oracle Id}
       planned.authority.snapshot planned.directory.directory _ _ (step planned) (payTarget deployment)
       planned.dependencies.additional restrictions judged judgedEq lowerable inRange casts evaluated
       bound
+  · cases noStep
+  · exact absurd (notBirth.symm.trans birth) (by simp)
   · cases noStep
 
 /-- **The receipt behind every admitted report is the Receiver's**: it was built

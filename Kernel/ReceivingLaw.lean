@@ -19,8 +19,13 @@ pre and post stores).  The Receiver JUDGES:
   reads must be in range, the field cast of those
   inputs must be injective, and `Pred.eval` must accept the step.  A refusal
   names the failing clause with `LawLeaf.of` on the same step;
-* a `lawBearing` BIRTH (the actual pre-image is the fresh root) is refused until
-  the registry names a birth parent (`CanonicalCellRegistry`, next obligation);
+* a `lawBearing` BIRTH (no live cell at the write's id in the loaded state) is
+  judged by its EXPORT law instead (`resolveBirth`): the descendants law of the
+  room the patch places it in (the authority cell's parent plane, written by the
+  same patch, `birthRoom`) and its kind's structural restrictions (`exportRoots`),
+  on the family's view of the birth, with the same verdicts.  A `kernelOnlyOrBorn`
+  cell (a law source) is written in place only by its named writers and is
+  otherwise born under that same export law;
 * a write of an unclassifiable cell is refused.
 
 Authorization (request binding, capability evidence: `ComposedPolicyAdmission.
@@ -47,6 +52,7 @@ namespace Minidregg.Kernel.ReceivingLaw
 
 open Minidregg.Compiler
 open Minidregg.Compiler.CanonicalCellRegistry (Kind FamilyId LawClass registry Deployment)
+open Minidregg.Theory.LawComposition (PolicyRef)
 open Minidregg.Compiler.CanonicalPolicyAdmission (PolicyStepContext PolicyCompilerProfile)
 open Minidregg.Compiler.CredentialAuthorityDomainReceiver
 open Minidregg.Compiler.ResourceBirthCodec
@@ -76,18 +82,20 @@ its deployment (`Laws.physical`); never supplied by a family or an ingress. -/
 structure Laws (S : Type) where
   /-- The kind of the cell a write writes: its live post cell's, else its loaded pre cell's. -/
   kindOf : S → DataWrite → Option Kind
-  /-- The write creates its cell: its expected pre-image is the fresh root. -/
-  birth : DataWrite → Bool
+  /-- The write creates its cell: the loaded state holds no live cell at its id. -/
+  birth : S → DataWrite → Bool
   /-- The committed law of `target` on `step`, at the loaded state. -/
   resolve : S → (target : Nat) → PolicyStepContext → Option ResolvedLaw
+  /-- The EXPORT law of a birth in `patch`, on `step`: its birth room's descendants
+  law and its kind's structural restrictions (`exportRoots`), read from the
+  newborn's post and the patch, never from the family. -/
+  resolveBirth : S → (patch : List DataWrite) → DataWrite → PolicyStepContext → Option ResolvedLaw
 
 /-- Why a law-bearing write has no law to judge it. -/
 inductive Unavailable where
   /-- The family supplied no step for a law-bearing cell. -/
   | noStep
-  /-- A law-bearing birth: its parent's law is not yet named by the registry. -/
-  | birth
-  /-- The committed law did not resolve at the loaded state. -/
+  /-- The committed law (or, for a birth, the export law) did not resolve at the loaded state. -/
   | unresolved
   deriving DecidableEq, Repr
 
@@ -112,49 +120,72 @@ section Judge
 
 variable {S : Type} (laws : Laws S) (family : FamilyId) (state : S)
 
-/-- The judgement of one write. -/
-def judgeWrite (write : DataWrite) (step : Option PolicyStepContext) : Option LawFault :=
-  let cell := write.cellId.value
+/-- The law a law-bearing write is judged by: a birth's export law, else the
+committed law at its id. -/
+def lawOf (patch : List DataWrite) (write : DataWrite) (step : PolicyStepContext) :
+    Option ResolvedLaw :=
+  if laws.birth state write then laws.resolveBirth state patch write step
+  else laws.resolve state write.cellId.value step
+
+/-- The verdicts of one resolved law on one step. -/
+def judgeLaw (cell : Nat) (law? : Option ResolvedLaw) (step : PolicyStepContext) : Option LawFault :=
+  match law? with
+  | none => some (.lawUnavailable cell .unresolved)
+  | some law =>
+    if !law.supported then some (.lawUnsupported cell)
+    else if !law.inRange then some (.lawInputRange cell)
+    else if !law.castsInjective then some (.lawCastAlias cell)
+    else (LawLeaf.of law.predicate step.oldState step.newState).map (.lawDenied cell)
+
+/-- A law-bearing write's judgement: a step is required, and its law decides. -/
+def judgeBearing (patch : List DataWrite) (write : DataWrite) (step : Option PolicyStepContext) :
+    Option LawFault :=
+  match step with
+  | none => some (.lawUnavailable write.cellId.value .noStep)
+  | some step => judgeLaw write.cellId.value (lawOf laws state patch write step) step
+
+/-- A kernel-only write's judgement: no step, and a named writer. -/
+def judgeKernel (write : DataWrite) (kind : Kind) (writers : List FamilyId)
+    (step : Option PolicyStepContext) : Option LawFault :=
+  match step with
+  | some _ => some (.registryMismatch write.cellId.value kind)
+  | none => if family ∈ writers then none else some (.kernelOnlyForeignWriter write.cellId.value kind family)
+
+/-- The judgement of one write of `patch`. -/
+def judgeWrite (patch : List DataWrite) (write : DataWrite) (step : Option PolicyStepContext) :
+    Option LawFault :=
   match laws.kindOf state write with
-  | none => some (.unclassified cell)
+  | none => some (.unclassified write.cellId.value)
   | some kind =>
     match kind.lawClass with
-    | .kernelOnly writers =>
-        match step with
-        | some _ => some (.registryMismatch cell kind)
-        | none => if family ∈ writers then none else some (.kernelOnlyForeignWriter cell kind family)
-    | .lawBearing =>
-        if laws.birth write then some (.lawUnavailable cell .birth) else
-        match step with
-        | none => some (.lawUnavailable cell .noStep)
-        | some step =>
-          match laws.resolve state cell step with
-          | none => some (.lawUnavailable cell .unresolved)
-          | some law =>
-            if !law.supported then some (.lawUnsupported cell)
-            else if !law.inRange then some (.lawInputRange cell)
-            else if !law.castsInjective then some (.lawCastAlias cell)
-            else (LawLeaf.of law.predicate step.oldState step.newState).map (.lawDenied cell)
+    | .kernelOnly writers => judgeKernel family write kind writers step
+    | .lawBearing => judgeBearing laws state patch write step
+    | .kernelOnlyOrBorn writers =>
+        if laws.birth state write then judgeBearing laws state patch write step
+        else judgeKernel family write kind writers step
 
 /-- The first fault among a patch's writes, in write order. -/
 def lawFault (writes : List DataWrite)
     (step : (write : DataWrite) → write ∈ writes → Option PolicyStepContext) : Option LawFault :=
-  writes.attach.findSome? fun ⟨write, member⟩ => judgeWrite laws family state write (step write member)
+  writes.attach.findSome? fun ⟨write, member⟩ =>
+    judgeWrite laws family state writes write (step write member)
 
 /-- The read guards the judgement adds: the cells each law-bearing write's
 resolution read (T5: the law is the one at the snapshot the family prepared
 against, and a concurrent change to it conflicts). Kernel-only writes add none. -/
-def writeGuards (write : DataWrite) (step : Option PolicyStepContext) : List ReadGuard :=
+def writeGuards (patch : List DataWrite) (write : DataWrite) (step : Option PolicyStepContext) :
+    List ReadGuard :=
   match laws.kindOf state write, step with
   | some kind, some step =>
       match kind.lawClass with
-      | .lawBearing => ((laws.resolve state write.cellId.value step).map ResolvedLaw.guards).getD []
+      | .lawBearing | .kernelOnlyOrBorn _ =>
+          ((lawOf laws state patch write step).map ResolvedLaw.guards).getD []
       | .kernelOnly _ => []
   | _, _ => []
 
 def lawGuards (writes : List DataWrite)
     (step : (write : DataWrite) → write ∈ writes → Option PolicyStepContext) : List ReadGuard :=
-  writes.attach.flatMap fun ⟨write, member⟩ => writeGuards laws state write (step write member)
+  writes.attach.flatMap fun ⟨write, member⟩ => writeGuards laws state writes write (step write member)
 
 private theorem findSome?_attach {α β : Type} (l : List α) (f : α → Option β) :
     l.attach.findSome? (fun x => f x.1) = l.findSome? f := by
@@ -171,26 +202,70 @@ private theorem flatMap_attach {α β : Type} (l : List α) (f : α → List β)
 /-- A family whose step does not depend on the membership proof is judged write by write. -/
 theorem lawFault_uniform (writes : List DataWrite) (step : DataWrite → Option PolicyStepContext) :
     lawFault laws family state writes (fun write _ => step write) =
-      writes.findSome? fun write => judgeWrite laws family state write (step write) :=
-  findSome?_attach writes fun write => judgeWrite laws family state write (step write)
+      writes.findSome? fun write => judgeWrite laws family state writes write (step write) :=
+  findSome?_attach writes fun write => judgeWrite laws family state writes write (step write)
 
 theorem lawGuards_uniform (writes : List DataWrite) (step : DataWrite → Option PolicyStepContext) :
     lawGuards laws state writes (fun write _ => step write) =
-      writes.flatMap fun write => writeGuards laws state write (step write) :=
-  flatMap_attach writes fun write => writeGuards laws state write (step write)
+      writes.flatMap fun write => writeGuards laws state writes write (step write) :=
+  flatMap_attach writes fun write => writeGuards laws state writes write (step write)
 
-/-- What it means for one write to be lawful. -/
-def Lawful (write : DataWrite) (step : Option PolicyStepContext) : Prop :=
+/-- A law-bearing write was judged and admitted: it carried a step, its law
+(`lawOf`: a birth's export law, else its committed law) resolved, the three
+compiler verdicts are true and `Pred.eval` accepts the step. -/
+def Judged (patch : List DataWrite) (write : DataWrite) (step : Option PolicyStepContext) : Prop :=
+  ∃ s law, step = some s ∧ lawOf laws state patch write s = some law ∧
+    law.supported = true ∧ law.inRange = true ∧ law.castsInjective = true ∧
+    Minidregg.Pred.eval law.predicate s.oldState s.newState = true
+
+/-- What it means for one write of `patch` to be lawful. -/
+def Lawful (patch : List DataWrite) (write : DataWrite) (step : Option PolicyStepContext) : Prop :=
   ∃ kind, laws.kindOf state write = some kind ∧
-    ((kind.lawClass = .lawBearing ∧ laws.birth write = false ∧
-        ∃ s law, step = some s ∧ laws.resolve state write.cellId.value s = some law ∧
-          law.supported = true ∧ law.inRange = true ∧ law.castsInjective = true ∧
-          Minidregg.Pred.eval law.predicate s.oldState s.newState = true) ∨
-      (∃ writers, kind.lawClass = .kernelOnly writers ∧ family ∈ writers ∧ step = none))
+    ((kind.lawClass = .lawBearing ∧ Judged laws state patch write step) ∨
+      (∃ writers, kind.lawClass = .kernelOnly writers ∧ family ∈ writers ∧ step = none) ∨
+      (∃ writers, kind.lawClass = .kernelOnlyOrBorn writers ∧
+        ((laws.birth state write = true ∧ Judged laws state patch write step) ∨
+          (laws.birth state write = false ∧ family ∈ writers ∧ step = none))))
+
+theorem judgeLaw_none_iff (cell : Nat) (law? : Option ResolvedLaw) (step : PolicyStepContext) :
+    judgeLaw cell law? step = none ↔
+      ∃ law, law? = some law ∧ law.supported = true ∧ law.inRange = true ∧
+        law.castsInjective = true ∧ Minidregg.Pred.eval law.predicate step.oldState step.newState = true := by
+  unfold judgeLaw
+  cases law? with
+  | none => simp
+  | some law =>
+    cases lowerable : law.supported <;> cases inRange : law.inRange <;>
+      cases casts : law.castsInjective <;>
+      simp [lowerable, inRange, casts, Option.map_eq_none_iff, LawLeaf.of_none_iff]
+
+theorem judgeBearing_none_iff (patch : List DataWrite) (write : DataWrite)
+    (step : Option PolicyStepContext) :
+    judgeBearing laws state patch write step = none ↔ Judged laws state patch write step := by
+  unfold judgeBearing Judged
+  cases step with
+  | none => simp
+  | some s =>
+    rw [judgeLaw_none_iff]
+    constructor
+    · rintro ⟨law, resolved, verdicts⟩
+      exact ⟨s, law, rfl, resolved, verdicts⟩
+    · rintro ⟨s', law, same, resolved, verdicts⟩
+      cases same
+      exact ⟨law, resolved, verdicts⟩
+
+theorem judgeKernel_none_iff (write : DataWrite) (kind : Kind) (writers : List FamilyId)
+    (step : Option PolicyStepContext) :
+    judgeKernel family write kind writers step = none ↔ family ∈ writers ∧ step = none := by
+  unfold judgeKernel
+  cases step with
+  | some s => simp
+  | none => by_cases named : family ∈ writers <;> simp [named]
 
 /-- **One write is judged exactly.** -/
-theorem judgeWrite_none_iff (write : DataWrite) (step : Option PolicyStepContext) :
-    judgeWrite laws family state write step = none ↔ Lawful laws family state write step := by
+theorem judgeWrite_none_iff (patch : List DataWrite) (write : DataWrite)
+    (step : Option PolicyStepContext) :
+    judgeWrite laws family state patch write step = none ↔ Lawful laws family state patch write step := by
   unfold judgeWrite Lawful
   cases kindEq : laws.kindOf state write with
   | none => simp
@@ -198,48 +273,94 @@ theorem judgeWrite_none_iff (write : DataWrite) (step : Option PolicyStepContext
     simp only [Option.some.injEq, exists_eq_left']
     cases classEq : kind.lawClass with
     | kernelOnly writers =>
-        cases step with
-        | some s => simp
-        | none =>
-            by_cases named : family ∈ writers
-            · simp [named]
-            · simp [named]
+        rw [judgeKernel_none_iff]
+        simp
     | lawBearing =>
-        cases birthEq : laws.birth write with
-        | true => simp
+        rw [judgeBearing_none_iff]
+        simp
+    | kernelOnlyOrBorn writers =>
+        cases birthEq : laws.birth state write with
+        | true =>
+            simp only [if_true]
+            rw [judgeBearing_none_iff]
+            simp
         | false =>
-          cases step with
-          | none => simp
-          | some s =>
-            cases resolved : laws.resolve state write.cellId.value s with
-            | none => simp [resolved]
-            | some law =>
-              cases lowerable : law.supported <;> cases inRange : law.inRange <;>
-                cases casts : law.castsInjective <;>
-                simp [resolved, lowerable, inRange, casts, Option.map_eq_none_iff, LawLeaf.of_none_iff]
+            simp only [Bool.false_eq_true, if_false]
+            rw [judgeKernel_none_iff]
+            simp
 
 /-- **The patch is judged exactly**: no fault iff every write is lawful. -/
 theorem lawFault_none_iff (writes : List DataWrite)
     (step : (write : DataWrite) → write ∈ writes → Option PolicyStepContext) :
     lawFault laws family state writes step = none ↔
-      ∀ write (member : write ∈ writes), Lawful laws family state write (step write member) := by
+      ∀ write (member : write ∈ writes), Lawful laws family state writes write (step write member) := by
   unfold lawFault
   rw [List.findSome?_eq_none_iff]
   constructor
   · intro none_ write member
-    exact (judgeWrite_none_iff laws family state write (step write member)).1
+    exact (judgeWrite_none_iff laws family state writes write (step write member)).1
       (none_ ⟨write, member⟩ (List.mem_attach _ _))
   · rintro all ⟨write, member⟩ -
-    exact (judgeWrite_none_iff laws family state write (step write member)).2 (all write member)
+    exact (judgeWrite_none_iff laws family state writes write (step write member)).2 (all write member)
+
+theorem judgeLaw_lawDenied {cell : Nat} {law? : Option ResolvedLaw} {s : PolicyStepContext}
+    {cell' : Nat} {leaf : LawLeaf} (denied : judgeLaw cell law? s = some (.lawDenied cell' leaf)) :
+    cell' = cell ∧ ∃ law, law? = some law ∧
+      law.predicate.subterm leaf.path = some leaf.clause ∧ leaf.clause.isLeaf = true ∧
+      Minidregg.Pred.eval leaf.clause s.oldState s.newState = false ∧
+      Minidregg.Pred.eval law.predicate s.oldState s.newState = false := by
+  unfold judgeLaw at denied
+  cases law? with
+  | none => simp at denied
+  | some law =>
+    cases lowerable : law.supported
+    · simp [lowerable] at denied
+    cases inRange : law.inRange
+    · simp [lowerable, inRange] at denied
+    cases casts : law.castsInjective
+    · simp [lowerable, inRange, casts] at denied
+    cases named : LawLeaf.of law.predicate s.oldState s.newState with
+    | none => simp [lowerable, inRange, casts, named] at denied
+    | some found =>
+      simp [lowerable, inRange, casts, named] at denied
+      obtain ⟨rfl, rfl⟩ := denied
+      obtain ⟨at_, isLeaf, fails⟩ := LawLeaf.of_fails _ _ _ _ named
+      have rejects : Minidregg.Pred.eval law.predicate s.oldState s.newState = false := by
+        cases evaluated : Minidregg.Pred.eval law.predicate s.oldState s.newState
+        · rfl
+        · rw [(LawLeaf.of_none_iff _ _ _).2 evaluated] at named; cases named
+      exact ⟨rfl, law, rfl, at_, isLeaf, fails, rejects⟩
+
+theorem judgeBearing_lawDenied {patch : List DataWrite} {write : DataWrite}
+    {step : Option PolicyStepContext} {cell : Nat} {leaf : LawLeaf}
+    (denied : judgeBearing laws state patch write step = some (.lawDenied cell leaf)) :
+    cell = write.cellId.value ∧ ∃ s law, step = some s ∧ lawOf laws state patch write s = some law ∧
+      law.predicate.subterm leaf.path = some leaf.clause ∧ leaf.clause.isLeaf = true ∧
+      Minidregg.Pred.eval leaf.clause s.oldState s.newState = false ∧
+      Minidregg.Pred.eval law.predicate s.oldState s.newState = false := by
+  unfold judgeBearing at denied
+  cases step with
+  | none => simp at denied
+  | some s =>
+    obtain ⟨same, law, resolved, rest⟩ := judgeLaw_lawDenied denied
+    exact ⟨same, s, law, rfl, resolved, rest⟩
+
+theorem judgeKernel_not_lawDenied {write : DataWrite} {kind : Kind} {writers : List FamilyId}
+    {step : Option PolicyStepContext} {cell : Nat} {leaf : LawLeaf} :
+    judgeKernel family write kind writers step ≠ some (.lawDenied cell leaf) := by
+  unfold judgeKernel
+  cases step with
+  | some _ => simp
+  | none => by_cases named : family ∈ writers <;> simp [named]
 
 /-- **A denial names the clause that failed, on the step it failed.**  The
-named clause sits in the resolved law at its path, is a leaf, and is false on
-the same old and new states the law was evaluated on. -/
-theorem judgeWrite_lawDenied {write : DataWrite} {step : Option PolicyStepContext}
-    {cell : Nat} {leaf : LawLeaf}
-    (denied : judgeWrite laws family state write step = some (.lawDenied cell leaf)) :
-    cell = write.cellId.value ∧ ∃ s law, step = some s ∧
-      laws.resolve state write.cellId.value s = some law ∧
+named clause sits in the law the write was judged by (`lawOf`: its committed law,
+or a birth's export law) at its path, is a leaf, and is false on the same old and
+new states the law was evaluated on. -/
+theorem judgeWrite_lawDenied {patch : List DataWrite} {write : DataWrite}
+    {step : Option PolicyStepContext} {cell : Nat} {leaf : LawLeaf}
+    (denied : judgeWrite laws family state patch write step = some (.lawDenied cell leaf)) :
+    cell = write.cellId.value ∧ ∃ s law, step = some s ∧ lawOf laws state patch write s = some law ∧
       law.predicate.subterm leaf.path = some leaf.clause ∧ leaf.clause.isLeaf = true ∧
       Minidregg.Pred.eval leaf.clause s.oldState s.newState = false ∧
       Minidregg.Pred.eval law.predicate s.oldState s.newState = false := by
@@ -250,38 +371,20 @@ theorem judgeWrite_lawDenied {write : DataWrite} {step : Option PolicyStepContex
     simp only [kindEq] at denied
     cases classEq : kind.lawClass with
     | kernelOnly writers =>
-      simp only [classEq] at denied
-      cases step with
-      | some s => simp at denied
-      | none => by_cases named : family ∈ writers <;> simp [named] at denied
+        simp only [classEq] at denied
+        exact absurd denied (judgeKernel_not_lawDenied family)
     | lawBearing =>
-      simp only [classEq] at denied
-      cases birthEq : laws.birth write with
-      | true => simp [birthEq] at denied
-      | false =>
-        cases step with
-        | none => simp [birthEq] at denied
-        | some s =>
-          cases resolved : laws.resolve state write.cellId.value s with
-          | none => simp [birthEq, resolved] at denied
-          | some law =>
-            cases lowerable : law.supported
-            · simp [birthEq, resolved, lowerable] at denied
-            cases inRange : law.inRange
-            · simp [birthEq, resolved, lowerable, inRange] at denied
-            cases casts : law.castsInjective
-            · simp [birthEq, resolved, lowerable, inRange, casts] at denied
-            cases named : LawLeaf.of law.predicate s.oldState s.newState with
-            | none => simp [birthEq, resolved, lowerable, inRange, casts, named] at denied
-            | some found =>
-              simp [birthEq, resolved, lowerable, inRange, casts, named] at denied
-              obtain ⟨rfl, rfl⟩ := denied
-              obtain ⟨at_, isLeaf, fails⟩ := LawLeaf.of_fails _ _ _ _ named
-              have rejects : Minidregg.Pred.eval law.predicate s.oldState s.newState = false := by
-                cases evaluated : Minidregg.Pred.eval law.predicate s.oldState s.newState
-                · rfl
-                · rw [(LawLeaf.of_none_iff _ _ _).2 evaluated] at named; cases named
-              exact ⟨rfl, s, law, rfl, resolved, at_, isLeaf, fails, rejects⟩
+        simp only [classEq] at denied
+        exact judgeBearing_lawDenied laws state denied
+    | kernelOnlyOrBorn writers =>
+        simp only [classEq] at denied
+        cases birthEq : laws.birth state write with
+        | true =>
+            simp only [birthEq, if_true] at denied
+            exact judgeBearing_lawDenied laws state denied
+        | false =>
+            simp only [birthEq, Bool.false_eq_true, if_false] at denied
+            exact absurd denied (judgeKernel_not_lawDenied family)
 
 /-- **Only the named families write a kernel-only cell.** -/
 theorem kernelOnly_writers {writes : List DataWrite}
@@ -293,9 +396,29 @@ theorem kernelOnly_writers {writes : List DataWrite}
   obtain ⟨kind', kindEq', judged⟩ := (lawFault_none_iff laws family state writes step).1 lawful write member
   rw [kindEq] at kindEq'
   cases kindEq'
-  rcases judged with ⟨bearing, -⟩ | ⟨writers', row', named, -⟩
+  rcases judged with ⟨bearing, -⟩ | ⟨writers', row', named, -⟩ | ⟨writers', row', -⟩
   · rw [row] at bearing; cases bearing
   · rw [row] at row'; cases row'; exact named
+  · rw [row] at row'; cases row'
+
+/-- **A law source is written in place only by its named writers, and otherwise
+only born under its export law** (`kernelOnlyOrBorn`): in a lawful patch, such a
+write is either a birth whose export law resolved and admitted the step, or a
+step-free write by a family its row names. -/
+theorem kernelOnlyOrBorn_written_or_born {writes : List DataWrite}
+    {step : (write : DataWrite) → write ∈ writes → Option PolicyStepContext}
+    (lawful : lawFault laws family state writes step = none)
+    {write : DataWrite} (member : write ∈ writes) {kind : Kind} {writers : List FamilyId}
+    (kindEq : laws.kindOf state write = some kind) (row : kind.lawClass = .kernelOnlyOrBorn writers) :
+    (laws.birth state write = true ∧ Judged laws state writes write (step write member)) ∨
+      (laws.birth state write = false ∧ family ∈ writers ∧ step write member = none) := by
+  obtain ⟨kind', kindEq', judged⟩ := (lawFault_none_iff laws family state writes step).1 lawful write member
+  rw [kindEq] at kindEq'
+  cases kindEq'
+  rcases judged with ⟨bearing, -⟩ | ⟨writers', row', -⟩ | ⟨writers', row', either⟩
+  · rw [row] at bearing; cases bearing
+  · rw [row] at row'; cases row'
+  · rw [row] at row'; cases row'; exact either
 
 end Judge
 
@@ -314,9 +437,72 @@ def physicalKind (durable : Durable) (write : DataWrite) : Option Kind :=
       | .present cell => some cell.kind
       | _ => none
 
-/-- A write creates its cell exactly when its expected pre-image is the fresh root. -/
-def physicalBirth (write : DataWrite) : Bool :=
-  decide (write.expectedPre = physicalRoot (registry := registry) .fresh)
+/-- A write creates its cell exactly when the loaded state holds no live cell at
+its id (a fresh or retired image, or none). -/
+def physicalBirth (durable : Durable) (write : DataWrite) : Bool :=
+  match (LifecycleImage.codec registry).decode (durable.snapshot.canonicalBytes write.cellId) with
+  | some (.live _) => false
+  | _ => true
+
+/-- The live cell a write's post image holds. -/
+def livePost (write : DataWrite) : Option (Minidregg.Theory.CellRegistry.PackedCell registry) :=
+  match (LifecycleImage.codec registry).decode write.canonicalPostBytes with
+  | some (.live cell) => some cell
+  | _ => none
+
+/-- **A newborn's birth parent**: the room `patch` places it in, its entry in the
+append-only `parent` plane of the authority cell the patch writes. -/
+def birthRoom (deployment : Deployment) (patch : List DataWrite) (newborn : Nat) : Option Nat := do
+  let authorityWrite ← patch.find? fun write => write.cellId.value == deployment.authorityCellId
+  match (LifecycleImage.codec registry).decode authorityWrite.canonicalPostBytes with
+  | some (.live ⟨.authority, payload⟩) => payload.logical ⟨.parent, newborn⟩
+  | _ => none
+
+/-- **The export law's roots**: the birth room's descendants law, then the
+structural restrictions the newborn's kind carries (a world instance's world kind)
+-- the same composition as `BirthExportAdmission.roots` over a birth item whose
+parent is the room. -/
+def exportRoots (deployment : Deployment) (patch : List DataWrite) (newborn : Nat)
+    (structural : WorldKindLawDependencies.Dependencies) : List PolicyRef :=
+  ((birthRoom deployment patch newborn).toList.map fun room => ⟨⟨room⟩, .descendants, .head⟩) ++
+    structural.additional
+
+/-- **The export law of a birth on `step`**, before the Receiver's guards: the
+composed law of `roots` with the three compiler verdicts
+(`PhysicalLawResolution.judgeRoots`) and the source cells it read.  With no roots
+the birth is NEUTRAL -- the conjunction of no parent law, `all []`, which every step
+satisfies -- as `BirthExportAdmission.checkNeutral` admits an unparented birth whose
+kind carries no restriction. -/
+def exportLaw {Fld : Type} [Field Fld] [DecidableEq Fld] (profile : PolicyCompilerProfile Fld)
+    (snapshot : CredentialAuthorityDomain.Snapshot)
+    (directory : Minidregg.Theory.CellRegistry.Directory Nat registry) (roots : List PolicyRef)
+    (step : PolicyStepContext) : Option ResolvedLaw :=
+  match roots with
+  | [] => some ⟨.all [], true, true, true, []⟩
+  | _ :: _ => (PhysicalLawResolution.judgeRoots profile snapshot directory roots step).map fun judged =>
+      ⟨judged.predicate, judged.inRange, judged.castsInjective, judged.supported,
+        judged.law.sourceGuards.map fun (cell, root) => (⟨⟨cell⟩, root⟩ : ReadGuard)⟩
+
+/-- A neutral birth's export law admits every step. -/
+theorem exportLaw_nil {Fld : Type} [Field Fld] [DecidableEq Fld] (profile : PolicyCompilerProfile Fld)
+    (snapshot : CredentialAuthorityDomain.Snapshot) (directory : Minidregg.Theory.CellRegistry.Directory Nat registry)
+    (step : PolicyStepContext) :
+    exportLaw profile snapshot directory [] step = some ⟨.all [], true, true, true, []⟩ := rfl
+
+/-- A parented birth's export law is exactly the composed roots' judgement. -/
+theorem exportLaw_cons_some_iff {Fld : Type} [Field Fld] [DecidableEq Fld]
+    (profile : PolicyCompilerProfile Fld) (snapshot : CredentialAuthorityDomain.Snapshot)
+    (directory : Minidregg.Theory.CellRegistry.Directory Nat registry) (root : PolicyRef) (rest : List PolicyRef)
+    (step : PolicyStepContext) (law : ResolvedLaw) :
+    exportLaw profile snapshot directory (root :: rest) step = some law ↔
+      ∃ judged, PhysicalLawResolution.judgeRoots profile snapshot directory (root :: rest) step =
+          some judged ∧
+        law = ⟨judged.predicate, judged.inRange, judged.castsInjective, judged.supported,
+          judged.law.sourceGuards.map fun (cell, root) => (⟨⟨cell⟩, root⟩ : ReadGuard)⟩ := by
+  simp only [exportLaw, Option.map_eq_some_iff]
+  constructor
+  · rintro ⟨judged, hj, rfl⟩; exact ⟨judged, hj, rfl⟩
+  · rintro ⟨judged, hj, rfl⟩; exact ⟨judged, hj, rfl⟩
 
 /-- The base portal of the Receiver's law configurations.  It supplies only the
 capability faces, which law resolution never reads: `Config.resolve?` reads the
@@ -334,6 +520,16 @@ def Laws.physical {Fld : Type} [Field Fld] [DecidableEq Fld]
     (profile : PolicyCompilerProfile Fld) (deployment : Deployment) : Laws Durable where
   kindOf := physicalKind
   birth := physicalBirth
+  resolveBirth durable patch write step := do
+    let directory ← loadDirectory durable
+    let authority ← loadDeployment deployment durable.snapshot
+    let newborn ← livePost write
+    let structural ← WorldKindLawDependencies.loadNewborn deployment directory.directory
+      write.cellId.value newborn
+    let law ← exportLaw profile authority.snapshot directory.directory
+      (exportRoots deployment patch write.cellId.value structural) step
+    pure { law with guards := authority.readGuards ++ law.guards ++
+      structural.readGuards.map fun (cell, root) => (⟨⟨cell⟩, root⟩ : ReadGuard) }
   resolve durable target step := do
     let directory ← loadDirectory durable
     let authority ← loadDeployment deployment durable.snapshot
@@ -376,10 +572,45 @@ theorem physical_resolve_some_iff {Fld : Type} [Field Fld] [DecidableEq Fld]
   · rintro ⟨directory, authority, structural, sources, judged, hd, ha, hs, hg, hj, rfl⟩
     exact ⟨directory, hd, authority, ha, structural, hs, sources, hg, judged, hj, rfl⟩
 
+/-- **A birth is judged by its export law, read by the Receiver.**  The deployed
+law of a birth resolves exactly when the directory and authority load, the
+newborn's post is a live cell whose structural restrictions load, and its
+export law (`exportLaw`) resolves on the export roots -- its room's descendants
+law, from the parent plane of the authority cell the SAME patch writes, and its
+kind's structural restrictions -- on the family's step: their composed judgement
+(`exportLaw_cons_some_iff`), or, with no root, the neutral law (`exportLaw_nil`).  Nothing the family
+chose enters but the step and the patch it writes. -/
+theorem physical_resolveBirth_some_iff {Fld : Type} [Field Fld] [DecidableEq Fld]
+    (profile : PolicyCompilerProfile Fld) (deployment : Deployment) (durable : Durable)
+    (patch : List DataWrite) (write : DataWrite) (step : PolicyStepContext) (law : ResolvedLaw) :
+    (Laws.physical profile deployment).resolveBirth durable patch write step = some law ↔
+      ∃ directory authority newborn structural exported,
+        loadDirectory durable = some directory ∧
+        loadDeployment deployment durable.snapshot = some authority ∧
+        livePost write = some newborn ∧
+        WorldKindLawDependencies.loadNewborn deployment directory.directory write.cellId.value
+          newborn = some structural ∧
+        exportLaw profile authority.snapshot directory.directory
+          (exportRoots deployment patch write.cellId.value structural) step = some exported ∧
+        law = { exported with guards := authority.readGuards ++ exported.guards ++
+          structural.readGuards.map fun (cell, root) => (⟨⟨cell⟩, root⟩ : ReadGuard) } := by
+  simp only [Laws.physical, Option.bind_eq_bind, Option.pure_def, Option.bind_eq_some_iff,
+    Option.some.injEq]
+  constructor
+  · rintro ⟨directory, hd, authority, ha, newborn, hn, structural, hs, judged, hj, rfl⟩
+    exact ⟨directory, authority, newborn, structural, judged, hd, ha, hn, hs, hj, rfl⟩
+  · rintro ⟨directory, authority, newborn, structural, judged, hd, ha, hn, hs, hj, rfl⟩
+    exact ⟨directory, hd, authority, ha, newborn, hn, structural, hs, judged, hj, rfl⟩
+
 #assert_axioms judgeWrite_none_iff
 #assert_axioms lawFault_none_iff
 #assert_axioms judgeWrite_lawDenied
 #assert_axioms kernelOnly_writers
+#assert_axioms kernelOnlyOrBorn_written_or_born
+#assert_axioms judgeLaw_none_iff
+#assert_axioms judgeBearing_none_iff
 #assert_axioms physical_resolve_some_iff
+#assert_axioms physical_resolveBirth_some_iff
+#assert_axioms exportLaw_cons_some_iff
 
 end Minidregg.Kernel.ReceivingLaw
