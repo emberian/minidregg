@@ -23,10 +23,19 @@ world/call/Calls.obend; an `invoke` turn calls one method of one object, and the
   C6 authority  the vault's law: `request/subject` is the sponsor. The sponsor's direct call installs (the
                 root frame carries the signer). relayA.forward(vault): the nested frame carries NO subject
                 (no grant): refused `lawDenied` naming the vault, `deposit` and the clause. With a scoped grant
-                {vault, deposit, 1 use}: installs. With a spent grant (0 uses): refused `grantSpent`. The
-                stranger cannot invoke the sponsor's permit-all counter (`notObjectHolder`).
+                (v2: {vault, deposit, code = the vault's pin, args exactly 4, 1 use}): installs. With a spent
+                grant (0 uses): refused `grantSpent`. The stranger cannot invoke the sponsor's permit-all
+                counter (`notObjectHolder`).
   C7 facet      the gated counter's law admits only calls whose `request/caller` is relayA (or its creation seed, turn 4):
                 relayB.forward(gated) refused `lawDenied`; relayA.forward(gated) installs.
+  C9 grant-args a grant binds the ARGUMENTS (GPT-6 row A): a grant {vault, deposit, cap 10 on the amount}
+                used for 20 is refused `grantMismatch vault deposit cap`, nothing commits; the honest use (10)
+                installs; relayA.twice(vault, 6) under {cap 10, 2 uses} charges 6 + 6 > 10: the second frame is
+                refused `cap` and the WHOLE tree co-fails (the first deposit does not land); an exact grant for
+                4 used for 5 is refused `grantMismatch ... args`.
+  C10 grant-who a grant binds the CODE and the CALLER: a grant naming another package as the vault's code
+                is refused `grantMismatch ... code`; a grant restricted to caller relayB, used by relayA, is
+                refused `grantMismatch ... caller`; restricted to relayA it installs.
   C8 shape      a method whose Plan type admits `await` is refused `notCallable` before it runs; an unknown
                 method `notCallable`; a call on a cell with no record `notAnObject`; an envelope too small for
                 the tree `exhausted`. None of them commits anything.
@@ -37,6 +46,9 @@ planted rows went red, `PLANT-RESULT blind ...` and exits 3 when a planted row s
   honest-thief       the thief's hook is `receive` (no call back)                -> C5 red
   vault-permit-all   the vault is created under a permit-all law                  -> C6 red
   gate-open          the gated counter admits every caller                        -> C7 red
+  args-blind-grant   a HOST plant: --bin built from a tree patched by
+                     scripts/plants/args-blind-grant.py (Grant.judge ignores the arguments) -> C9 red
+                     (the 20 commits under a grant capped at 10)
 ROOT/transcript holds every command's exact output; ROOT/results.json every row; ROOT/groups.tsv one line per
 journey row. Exit 1 on any red row.
 """
@@ -46,7 +58,8 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from activity_world import World, PERMIT_ALL, TICKS, nat, record, variant, eq, any_of, cap  # noqa: E402
 
-PLANTS = {'honest-thief': {'C5-dao'}, 'vault-permit-all': {'C6-authority'}, 'gate-open': {'C7-facet'}}
+PLANTS = {'honest-thief': {'C5-dao'}, 'vault-permit-all': {'C6-authority'}, 'gate-open': {'C7-facet'},
+          'args-blind-grant': {'C9-grant-args'}}
 ap = argparse.ArgumentParser()
 ap.add_argument('--bin', required=True)
 ap.add_argument('--root', required=True)
@@ -101,6 +114,16 @@ try:
     def hop(target, amount):
         return record(target=nat(O[target]), amount=nat(amount))
 
+    def grant(name, method, args, uses=1, code=None, caller=None):
+        """A v2 grant: the target's code is its pin (every object here pins w.PIN)."""
+        g = {'object': O[name], 'method': method, 'code': code or w.PIN, 'args': args, 'uses': str(uses)}
+        if caller is not None:
+            g['caller'] = O[caller]
+        return g
+
+    def capped(limit, path=()):
+        return {'cap': {'path': list(path), 'limit': str(limit)}}
+
     with w.group('C1-leaf'):
         v0 = version('counter', 'c1-before')
         out = invoke('c1-deposit', 'counter', 'deposit', nat(5), 'installed')
@@ -152,10 +175,10 @@ try:
                ['lawDenied', str(O['vault']), 'deposit'])
         w.check('c6-no-grant-kept', total('vault', 'c6-a') == 1, None)
         invoke('c6-granted', 'relayA', 'forward', hop('vault', 4), 'installed',
-               grants=[{'object': O['vault'], 'method': 'deposit', 'uses': '1'}])
+               grants=[grant('vault', 'deposit', {'exact': nat(4)})])
         w.check('c6-granted-landed', total('vault', 'c6-b') == 5, None)
         invoke('c6-spent', 'relayA', 'forward', hop('vault', 4), 'refused', ['grantSpent', str(O['vault'])],
-               grants=[{'object': O['vault'], 'method': 'deposit', 'uses': '0'}])
+               grants=[grant('vault', 'deposit', {'exact': nat(4)}, uses=0)])
         # A stranger's call on an object it holds no capability on (its law would admit anyone):
         invoke('c6-stranger', 'counter', 'deposit', nat(1), 'refused', 'notObjectHolder', workspace=w.second)
         w.check('c6-vault-final', total('vault', 'c6-c') == 5, None)
@@ -165,6 +188,34 @@ try:
                ['lawDenied', str(O['gated'])])
         invoke('c7-right-caller', 'relayA', 'forward', hop('gated', 2), 'installed')
         w.check('c7-gated-2', total('gated', 'c7') == 2, None)
+
+    with w.group('C9-grant-args'):
+        v0 = total('vault', 'c9-before')
+        invoke('c9-over-cap', 'relayA', 'forward', hop('vault', 20), 'refused',
+               ['grantMismatch', str(O['vault']), 'deposit', 'cap'], grants=[grant('vault', 'deposit', capped(10))])
+        w.check('c9-over-cap-kept', total('vault', 'c9-a') == v0, None)
+        invoke('c9-within-cap', 'relayA', 'forward', hop('vault', 10), 'installed',
+               grants=[grant('vault', 'deposit', capped(10))])
+        w.check('c9-within-cap-landed', total('vault', 'c9-b') == v0 + 10, None)
+        invoke('c9-cumulative', 'relayA', 'twice', hop('vault', 6), 'refused',
+               ['grantMismatch', str(O['vault']), 'cap'], grants=[grant('vault', 'deposit', capped(10), uses=2)])
+        w.check('c9-cumulative-co-fails', total('vault', 'c9-c') == v0 + 10, None)
+        invoke('c9-exact-mismatch', 'relayA', 'forward', hop('vault', 5), 'refused',
+               ['grantMismatch', str(O['vault']), 'args'], grants=[grant('vault', 'deposit', {'exact': nat(4)})])
+        w.check('c9-vault-final', total('vault', 'c9-d') == v0 + 10, None)
+
+    with w.group('C10-grant-who'):
+        v0 = total('vault', 'c10-before')
+        invoke('c10-wrong-code', 'relayA', 'forward', hop('vault', 1), 'refused',
+               ['grantMismatch', str(O['vault']), 'code'],
+               grants=[grant('vault', 'deposit', {'exact': nat(1)}, code=str(int(w.PIN) ^ 1))])
+        invoke('c10-wrong-caller', 'relayA', 'forward', hop('vault', 1), 'refused',
+               ['grantMismatch', str(O['vault']), 'caller'],
+               grants=[grant('vault', 'deposit', {'exact': nat(1)}, caller='relayB')])
+        w.check('c10-nothing-landed', total('vault', 'c10-a') == v0, None)
+        invoke('c10-right-caller', 'relayA', 'forward', hop('vault', 1), 'installed',
+               grants=[grant('vault', 'deposit', {'exact': nat(1)}, caller='relayA')])
+        w.check('c10-landed', total('vault', 'c10-b') == v0 + 1, None)
 
     with w.group('C8-shape'):
         before = snapshot_of(['counter'], 'c8-before')
