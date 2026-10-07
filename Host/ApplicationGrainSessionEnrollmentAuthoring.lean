@@ -258,15 +258,15 @@ def prepareVerified (config : Config) {target : Durable}
 headers, role/ticket/interface checks and original receipt remain exact. -/
 def prepareCarried (config : Config) (opened : Opened config)
     (custody : CarriedSegmentIO.PreservedPrefix config opened.durable) (request : Request) :
-    Except String Plan := do
-  let issue ← CarriedApplicationProvenance.selectIssue custody request.issueIndex
+    ExceptT String IO Plan := do
+  let issue ← ExceptT.mk (CarriedApplicationProvenance.selectIssue custody request.issueIndex)
   if issue.spec.ticket.resource != request.ticketResource then
     throw "carried enrollment ticket resource differs"
   prepareForIssue config opened request issue.spec issue.receipt
 
 def prepareRequestCarried (config : Config) (opened : Opened config)
     (custody : CarriedSegmentIO.PreservedPrefix config opened.durable) (bytes : List UInt8) :
-    Except String Plan := do
+    ExceptT String IO Plan := do
   let some request := requestCodec.decode bytes
     | throw "noncanonical session enrollment request"
   if requestCodec.encode request != bytes then
@@ -277,7 +277,7 @@ def prepareRequestCarried (config : Config) (opened : Opened config)
 come from the retained profile, new issues from the admitted target suffix. -/
 def prepareSuffix (config : Config) {anchor : Opened config} {target : Durable}
     (verified : NativeHostReplay.SuffixVerified config anchor target) (request : Request) :
-    Except String Plan := do
+    ExceptT String IO Plan := do
   if request.issueIndex < anchor.durable.height then
     let some origin := verified.origin
       | throw "old session issue lacks authenticated carried origin"
@@ -294,7 +294,7 @@ def prepareSuffix (config : Config) {anchor : Opened config} {target : Durable}
 
 def prepareRequestSuffix (config : Config) {anchor : Opened config} {target : Durable}
     (verified : NativeHostReplay.SuffixVerified config anchor target) (bytes : List UInt8) :
-    Except String Plan := do
+    ExceptT String IO Plan := do
   let some request := requestCodec.decode bytes
     | throw "noncanonical session enrollment request"
   if requestCodec.encode request != bytes then
@@ -358,7 +358,7 @@ current roots/headers and retained original receipt, never a fresh baseline. -/
 def assembleCurrentCarried (config : Config) (opened : Opened config)
     (custody : CarriedSegmentIO.PreservedPrefix config opened.durable)
     (plan : Plan) (signatures : List (List UInt8)) :
-    Except String (List UInt8) := do
+    ExceptT String IO (List UInt8) := do
   let fresh ← prepareCarried config opened custody plan.request
   if planCodec.encode fresh != planCodec.encode plan then
     throw "carried session enrollment plan no longer current"
@@ -368,7 +368,7 @@ def assembleCurrentCarried (config : Config) (opened : Opened config)
 def assembleCurrentSuffix (config : Config) {anchor : Opened config} {target : Durable}
     (verified : NativeHostReplay.SuffixVerified config anchor target)
     (plan : Plan) (signatures : List (List UInt8)) :
-    Except String (List UInt8) := do
+    ExceptT String IO (List UInt8) := do
   let fresh ← prepareSuffix config verified plan.request
   if planCodec.encode fresh != planCodec.encode plan then
     throw "session enrollment plan no longer current in carried service"

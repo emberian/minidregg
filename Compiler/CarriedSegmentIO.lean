@@ -114,6 +114,14 @@ def auditSource (capsule : SourceCapsule) : IO (Except String AuditedSource) := 
     return .ok ⟨capsule, durable, audit.stdout⟩
   catch error => return .error s!"source capsule refused: {error}"
 
+/-- The authenticated Reader of the audited source Store (its own MAC key, its own log start):
+an original record and the root its source Host served at that height are read from it,
+each verified at use against the source Store's MAC-bound head. -/
+def AuditedSource.reader (source : AuditedSource) :
+    IO (Except String ((store : DurableHistory.StoreIdentity) ×
+      DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)) :=
+  DurableHistoryStore.readerOf (sourceTransport source.capsule) ResourceBirthCodec.rootBytes source.durable
+
 /-- Internal receiving result. The public wire receiver must use the closed
 neutral converter; no wire entry accepts a changes list. -/
 structure Prepared (config : NativeHost.Config) where
