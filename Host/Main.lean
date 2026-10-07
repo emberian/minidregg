@@ -872,7 +872,11 @@ def inspectStopClaimCurrent (config : NativeHost.Config)
   match ← DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes with
   | .error detail => return .error detail
   | .ok durable =>
-      match ← NativeHostReplay.verifyLoaded config durable with
+      let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf config.transport
+          ResourceBirthCodec.rootBytes durable with
+        | .error detail => return .error s!"STOP claim history reader: {detail}"
+        | .ok reader => pure reader
+      match ← NativeHostReplay.verifyLoaded config reader durable with
       | .error failure =>
           return .error s!"STOP claim history refused at entry {failure.index}: {failure.detail}"
       | .ok verified =>
@@ -4373,7 +4377,11 @@ def selectedReleaseFnAck (config : NativeHost.Config) (service : FnPollService)
     let (cursor, report, projection) ← projectFnPoll executable scope cursorPath reportPath
     let target ← IO.ofExcept (← DurableReceiverIO.load config.transport
       ResourceBirthCodec.rootBytes)
-    let verified ← match ← NativeHostReplay.verifyLoaded config target with
+    let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf config.transport
+        ResourceBirthCodec.rootBytes target with
+      | .ok reader => pure reader
+      | .error detail => throw (IO.userError s!"selected-release Mini history reader: {detail}")
+    let verified ← match ← NativeHostReplay.verifyLoaded config reader target with
       | .ok verified => pure verified
       | .error failure =>
           throw (IO.userError s!"selected-release Mini history refused at {failure.index}: {failure.detail}")
@@ -4481,7 +4489,11 @@ def selectedEmptyFnAck (config : NativeHost.Config) (service : FnPollService)
       throw (IO.userError "empty fn ACK cursor differs from pinned scope")
     let target ← IO.ofExcept (← DurableReceiverIO.load config.transport
       ResourceBirthCodec.rootBytes)
-    let verified ← match ← NativeHostReplay.verifyLoaded config target with
+    let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf config.transport
+        ResourceBirthCodec.rootBytes target with
+      | .ok reader => pure reader
+      | .error detail => throw (IO.userError s!"empty fn Mini history reader: {detail}")
+    let verified ← match ← NativeHostReplay.verifyLoaded config reader target with
       | .ok verified => pure verified
       | .error failure =>
           throw (IO.userError s!"empty fn Mini history refused at {failure.index}: {failure.detail}")

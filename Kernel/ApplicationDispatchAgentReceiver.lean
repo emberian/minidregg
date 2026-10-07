@@ -29,13 +29,15 @@ structure Committed (config : Config) where
   readback : NativeHostReplay.ExactReadback config old
   derivedExact : readback.derived.intent = admitted.intent
   confirmation : DurableReceiverIO.Confirmation
+  store : DurableHistory.StoreIdentity
+  reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store
   freshCasWinner : Bool
 
 def Committed.verified {config : Config} (permit : Committed config) :
     NativeHostReplay.Verified config
       (NativeHostReplay.exactCandidate permit.old
         permit.readback.derived permit.readback.ready) :=
-  NativeHostReplay.extendExact permit.old permit.readback
+  NativeHostReplay.extendExact permit.reader permit.old permit.readback
 
 def Committed.receipt {config : Config} (permit : Committed config) : NativeHostCodec.Receipt :=
   let candidate := NativeHostReplay.exactCandidate permit.old
@@ -47,7 +49,7 @@ def Committed.receipt {config : Config} (permit : Committed config) : NativeHost
 
 theorem Committed.receipt_in_verified {config : Config} (committed : Committed config) :
     committed.verified.receipts = committed.old.receipts ++ [committed.receipt] :=
-  NativeHostReplay.extendExact_receipts committed.old committed.readback
+  NativeHostReplay.extendExact_receipts committed.reader committed.old committed.readback
 
 theorem Committed.postRecord_exact {config : Config} (permit : Committed config) :
     permit.readback.appended.entry.record =
@@ -176,9 +178,12 @@ def receiveVerified (config : Config) {target : Durable}
       match NativeHostReplay.ExactReadback.ofAppended old derived appended with
       | .error detail => return .uncertain s!"agent dispatch post-image validation: {detail}"
       | .ok ⟨proof, proofDerived⟩ =>
+            let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf config.transport ResourceBirthCodec.rootBytes appended.next with
+              | .error detail => return .uncertain s!"post-append history reader: {detail}"
+              | .ok reader => pure reader
             let committed : Committed config := ⟨target, old, ingress, admitted, projection,
               proof, ((congrArg NativeHostReplay.Derived.intent proofDerived).trans admitted.toDerived_intent),
-              kind, freshCasWinner⟩
+              kind, _, reader, freshCasWinner⟩
             return committed.result
   | .ordinary ordinary =>
       match ordinary with

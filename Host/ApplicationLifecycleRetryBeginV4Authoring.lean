@@ -150,7 +150,12 @@ def prepareVerified (config : Config) {target : Durable}
     (⟨inner, request.retry⟩ : ApplicationLifecycleRetryBeginV4Ingress.Ingress).withAuthorizationId
   unless unsigned.shape do
     return .error "launch BEGIN authorization, descriptor or action shape refused"
-  let evidence ← match ← ApplicationFailedCreateRetryEvidence.prepare config opened request.retry unsigned.begin with
+  let grounded ← match ServedBasis.Grounded.ofLoaded verified.reader.head opened.durable
+      opened.directory opened.authority with
+    | .error detail => return .error s!"retry BEGIN current ground: {detail}"
+    | .ok grounded => pure grounded
+  let evidence ← match ← ApplicationFailedCreateRetryEvidence.prepare config verified.reader
+      grounded request.retry unsigned.begin with
     | .error detail => return .error detail
     | .ok evidence => pure evidence
   let historical := evidence.recovered.historical
@@ -169,10 +174,10 @@ def prepareVerified (config : Config) {target : Durable}
   let ambient : DeclaredResourceController.Ambient :=
     ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
   let .ok prepared := DeclaredResourceController.prepare config.deployment
-      config.profile ambient opened.durable command
+      config.profile ambient opened.ground command
     | return .error "current launch BEGIN command preparation refused"
   unless ApplicationLifecycleBeginReceiver.linkedCurrentPolicy config.deployment
-      config.profile ambient opened.durable source prepared do
+      config.profile ambient opened.ground source prepared do
     return .error "current launch BEGIN app/package law differs"
   unless decide (DeclaredResourceController.PhysicalShape prepared) do
     return .error "current launch BEGIN physical shape refused"
@@ -180,7 +185,7 @@ def prepareVerified (config : Config) {target : Durable}
   let marker := DeclaredResourceController.operationMarker config.deployment.domain
     config.profile.semantics command
   let wanted := ApplicationLifecycleBeginReceiver.packageRequest config.deployment
-    config.profile ambient opened.durable source prepared
+    config.profile ambient opened.ground source prepared
   let .ok selected := ResourceObservationAdmission.prepare context config.profile
       wanted marker source.packageObserveCapability source.canonicalBytes
     | return .error "current launch package observation preparation refused"
@@ -193,7 +198,7 @@ def prepareVerified (config : Config) {target : Durable}
   unless invocation.finalizedDraft == .invoke commandBytes do
     return .error "launch BEGIN invocation plan differs from bound action"
   let .ok header := CredentialSignatureAdmission.signingHeader
-      prepared.authority.snapshot marker (⟨.object, wanted⟩ : PackedEffectRequest)
+      opened.ground.authority marker (⟨.object, wanted⟩ : PackedEffectRequest)
     | return .error "current launch package observation signing key unavailable"
   let packageSlot : SigningSlot :=
     ⟨9, 0, CredentialSignedEnvelopeController.headerCodec.encode header⟩

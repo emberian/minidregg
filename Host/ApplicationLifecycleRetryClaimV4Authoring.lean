@@ -110,7 +110,7 @@ def prepareVerified (config : Config) {target : Durable}
       originalReceipt.eventId == prior.record.event.eventId &&
       originalReceipt.acceptedCount == prior.index + 1 do
     throw "original retry BEGIN receipt differs from verified record/index"
-  unless ApplicationFailedCreateRetryEvidence.markersCurrent config opened begin.retry do
+  unless ApplicationFailedCreateRetryEvidence.markersCurrent config opened.ground begin.retry do
     throw "retry CLAIM first/created/recovery/one-use token markers refuse"
   let some appCell := cellAt config opened pin.app
     | throw "current retry claim app cell unavailable"
@@ -136,10 +136,10 @@ def prepareVerified (config : Config) {target : Durable}
   let ambient : DeclaredResourceController.Ambient :=
     ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
   let .ok prepared := DeclaredResourceController.prepare config.deployment
-      config.profile ambient opened.durable command
+      config.profile ambient opened.ground command
     | throw "current retry claim command preparation refused"
   unless ApplicationLifecycleClaimCurrent.linkedCurrentPolicy config.deployment
-      config.profile ambient opened.durable source prepared do
+      config.profile ambient opened.ground source prepared do
     throw "current retry claim app/package law differs"
   unless decide (DeclaredResourceController.PhysicalShape prepared) do
     throw "current retry claim physical shape refused"
@@ -147,7 +147,7 @@ def prepareVerified (config : Config) {target : Durable}
   let marker := DeclaredResourceController.operationMarker config.deployment.domain
     config.profile.semantics command
   let appWanted := ApplicationLifecycleClaimCurrent.observationRequest config.deployment
-    config.profile ambient opened.durable source prepared pin.app
+    config.profile ambient opened.ground source prepared pin.app
     pin.appObserveCapability source.currentAppRoot
   let .ok appSelected := ResourceObservationAdmission.prepare context config.profile
       appWanted marker pin.appObserveCapability source.canonicalBytes
@@ -156,7 +156,7 @@ def prepareVerified (config : Config) {target : Durable}
       CanonicalCellRegistry.cellCodec.encode appCell do
     throw "retry claim app observation differs from current image"
   let packageWanted := ApplicationLifecycleClaimCurrent.observationRequest config.deployment
-    config.profile ambient opened.durable source prepared pin.packageManifest
+    config.profile ambient opened.ground source prepared pin.packageManifest
     pin.packageObserveCapability source.currentPackageRoot
   let .ok packageSelected := ResourceObservationAdmission.prepare context config.profile
       packageWanted marker pin.packageObserveCapability source.canonicalBytes
@@ -173,10 +173,10 @@ def prepareVerified (config : Config) {target : Durable}
   unless invocation.finalizedDraft == .invoke commandBytes do
     throw "retry claim invocation plan differs from source"
   let .ok appHeader := CredentialSignatureAdmission.signingHeader
-      prepared.authority.snapshot marker (⟨.object, appWanted⟩ : PackedEffectRequest)
+      opened.ground.authority marker (⟨.object, appWanted⟩ : PackedEffectRequest)
     | throw "current retry claim app observation signing key unavailable"
   let .ok packageHeader := CredentialSignatureAdmission.signingHeader
-      prepared.authority.snapshot marker (⟨.object, packageWanted⟩ : PackedEffectRequest)
+      opened.ground.authority marker (⟨.object, packageWanted⟩ : PackedEffectRequest)
     | throw "current retry claim package observation signing key unavailable"
   let appSlot : SigningSlot :=
     ⟨9, 0, CredentialSignedEnvelopeController.headerCodec.encode appHeader⟩
