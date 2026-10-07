@@ -70,7 +70,7 @@ open Minidregg.Kernel.DurableReceiver (Seed)
 open Minidregg.Kernel.DurableView (Keys)
 open Minidregg.Compiler.DurableServed (Served)
 open Minidregg.Compiler.DurableHistory (Head StoreIdentity)
-open Minidregg.Compiler.DurableHistoryReader (VerifiedFootprint TxAnswer ByTx)
+open Minidregg.Compiler.DurableHistoryReader (VerifiedFootprint TxAnswer ByTx StateAt Reader)
 open Minidregg.Compiler.CredentialAuthorityServed
 
 set_option autoImplicit false
@@ -462,8 +462,10 @@ theorem cells_ofLoaded {store : StoreIdentity} (basis : Basis deployment store)
 end Ground
 
 /-- **A ground at a head.** The light shape is at the head its basis's answers are
-verified under; the full shape is at a head of the same Store whose height and
-chain are its own. A caller that holds a history `Reader` at head `h` takes its
+verified under (its served height is at or below the head's). The full shape is a state
+of the head's history at the ground's own height: at the head (`full`: its height and
+chain are the head's), or at a past height (`fullPast`: its chain is that of the
+verified `StateAt` the head's Reader gives at that height; the audit walk's openings). A caller that holds a history `Reader` at head `h` takes its
 ground as `Grounded deployment h`, so a ground prepared under another head
 cannot be paired with that Reader (no inhabitant of `At`). -/
 inductive Ground.At {deployment : CanonicalCellRegistry.Deployment} {store : StoreIdentity} :
@@ -474,6 +476,17 @@ inductive Ground.At {deployment : CanonicalCellRegistry.Deployment} {store : Sto
       (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
       (head : Head store) (sameStart : durable.logStart = store.logStart)
       (height : durable.height = head.height) (chain : durable.chain = head.chain) :
+      Ground.At (.full durable directory authority) head
+  /-- The full shape at a PAST height of the Store: its chain is the chain of the
+  head's verified history after its own `durable.height` records (a `StateAt` read
+  from the Store under this head), the same Store start. The audit walk's
+  intermediate openings are grounds of this shape. -/
+  | fullPast (durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes)
+      (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
+      (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
+      (head : Head store) (sameStart : durable.logStart = store.logStart)
+      (seed : Seed) (state : StateAt ResourceBirthCodec.rootBytes seed head durable.height)
+      (chain : durable.chain = (Served.ofStateAt state).chain) :
       Ground.At (.full durable directory authority) head
 
 /-- A ground bound to the head a history `Reader` is indexed by. -/
@@ -504,6 +517,36 @@ def ofLoaded (head : Head store) (durable : DurableReceiverIO.Loaded ResourceBir
       else .error s!"the opened Store's chain is not the history head's at height {head.height}"
     else .error s!"the opened Store is at height {durable.height}, the history head at {head.height}"
   else .error "the opened Store is not the history head's Store"
+
+/-- **The check behind a full ground at a past height.** A state claimed to be the
+Store's after `height` records (its log start, its chain) is one of the head's
+verified history: the same Store start, and the chain equals the chain of
+`Reader.stateAt height` (checkpoint plus verified records), or it is refused by name.
+Pure of any deployment, so a probe Store can plant it. -/
+def pastWitness {store : StoreIdentity} (reader : Reader ResourceBirthCodec.rootBytes store)
+    (logStart : Digest) (height : Nat) (chain : Digest) :
+    IO (Except String ((state : StateAt ResourceBirthCodec.rootBytes reader.seed reader.head height) ×'
+      (logStart = store.logStart ∧ chain = (Served.ofStateAt state).chain))) := do
+  if sameStart : logStart = store.logStart then
+    match ← reader.stateAt height with
+    | .error refusal => return .error refusal.message
+    | .ok state =>
+        if same : chain = (Served.ofStateAt state).chain then
+          return .ok ⟨state, sameStart, same⟩
+        else return .error s!"the opened state's chain is not the history's at height {height}"
+  else return .error "the opened Store is not the history head's Store"
+
+/-- The full shape at the height it holds, checked against the Store's history
+(`pastWitness`): a ground of the head's history at its own height. -/
+def ofLoadedAt {store : StoreIdentity} (reader : Reader ResourceBirthCodec.rootBytes store)
+    (durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes)
+    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
+    (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot) :
+    IO (Except String (PLift (Ground.At (.full durable directory authority) reader.head))) := do
+  match ← pastWitness reader durable.logStart durable.height durable.chain with
+  | .error detail => return .error detail
+  | .ok ⟨state, sameStart, chain⟩ =>
+      return .ok ⟨.fullPast durable directory authority reader.head sameStart reader.seed state chain⟩
 
 /-- A grounded light basis's head is the head it is indexed by. -/
 theorem light_head {head : Head store} (grounded : Grounded deployment head)
