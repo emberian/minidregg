@@ -199,7 +199,7 @@ def requireSome {A : Type} (reason : Reject) : Option A → Except Reject A
 /-- A prepared renounce over the authority snapshot and the operation marker's
 spent answer it read: the answer is "declared, unspent". -/
 structure PreparedOn (deployment : Deployment) (semantics : Digest) (ambient : Ambient)
-    (authority : Snapshot) (markerSpent : Option Bool) (command : Command) where
+    (authority : Snapshot) (markerSpent : Option Bool) (command : Command) : Type where
   private mk ::
   answered : markerSpent = some false
 
