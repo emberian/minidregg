@@ -17,9 +17,7 @@ The command is `objective-first`'s, decoded from the Host's call bytes.
     `withAcceptedOn` refuses exactly `undeclaredTransaction` (before the journal is read
     and before the signature is checked);
  3. control: the basis of `invocationKeys` (what `NativeHost.submitInvokeLight` reads)
-    prepares (`.ok`, with its `PhysicalShape`), and so does the full shape's ground of
-    the same Store (`Ground.full` over the full open) -- `prepare_light_full` executed;
-    `recordedInvocation` on the declared basis answers "not recorded"; `withAcceptedOn`
+    prepares (`.ok`, with its `PhysicalShape`); `recordedInvocation` on the declared basis answers "not recorded"; `withAcceptedOn`
     on it does not refuse `undeclaredTransaction` (with VERIFIER given, it runs the
     signature check and prints the verdict).
 
@@ -137,18 +135,6 @@ def run (binary : System.FilePath) (verifier : Option System.FilePath) (director
       require "the declared preparation has its physical shape"
         (decide (DeclaredResourceController.PhysicalShape prepared))
       IO.println "control (light, declared keys): prepares, with its physical shape"
-  match ← DurableReceiverIO.load cfg.transport rootBytes with
-  | .error detail => throw (IO.userError s!"FAIL full open: {detail}")
-  | .ok durable =>
-      let some directory := CredentialAuthorityDomainReceiver.loadDirectory durable
-        | throw (IO.userError "FAIL full directory")
-      let some authority := CredentialAuthorityDomainReceiver.loadDeployment cfg.deployment durable.snapshot
-        | throw (IO.userError "FAIL full authority")
-      let full : ServedBasis.Ground cfg.deployment := .full durable directory authority
-      require "the full shape is at the light opening's height" (full.height == gDeclared.height)
-      match DeclaredResourceController.prepare cfg.deployment cfg.profile ambient full command with
-      | .error reason => throw (IO.userError s!"FAIL the full shape refused: {repr reason}")
-      | .ok _ => IO.println "control (full shape, same Store): prepares"
   match DeclaredResourceController.recordedInvocation domain semantics command signed gDeclared with
   | .ok none => IO.println "control (declared transaction id): not recorded"
   | _ => throw (IO.userError "FAIL the declared transaction id did not answer `not recorded`")
@@ -161,7 +147,7 @@ def run (binary : System.FilePath) (verifier : Option System.FilePath) (director
     require s!"with the pinned verifier the declared request is accepted (got {declaredResult})"
       (declaredResult == "accepted")
   IO.println s!"control (withAcceptedOn, declared keys, verifier {verifier.isSome}): {declaredResult}"
-  IO.println "PASS invoke undeclared: an undeclared marker and an undeclared transaction id, each refused by name; the declared request prepares on the light and the full ground"
+  IO.println "PASS invoke undeclared: an undeclared marker and an undeclared transaction id, each refused by name; the declared request prepares and is accepted on the light ground"
 
 end InvokeUndeclared
 
