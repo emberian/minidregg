@@ -6,6 +6,7 @@ a physical launch permit.
 -/
 import Kernel.NativeHostReplay
 import Kernel.ApplicationLifecycleClaimCore
+import Kernel.NativeHistorySelection
 
 namespace Minidregg.Kernel.ApplicationLifecycleClaimVerified
 
@@ -20,8 +21,18 @@ structure Admitted (config : Config) (target : Durable) (ingress : Ingress) wher
   private mk ::
   selection : VerifiedSelection config target ingress.source.originalIndex
   claim : ClaimAt config selection.verified.opened ingress
-  originalPrefixExact : claim.conditional.original.selected.prior.durable.image =
-    selection.selected.before.durable.image
+  /-- The walk's admitted prefix before the original BEGIN is the Store's own verified log:
+  every one of those records is the record the claim's history `reader` gives, verified against
+  its anchored head, at that height (read in windows, none held; the hash floor is the one
+  every verified read carries, `DurableHistory.verifyAt_sound`: an honest leaf or a node
+  collision). Replaces the equality of the claim's prior image with the walk's. -/
+  originalPrefixExact : NativeHistorySelection.PrefixRead claim.reader.head
+    selection.selected.priorRecords ingress.source.originalIndex
+  /-- The claim's original-prefix state is the walk's: same height and same chain. -/
+  originalPriorHeight : claim.conditional.original.selected.prior.height =
+    selection.selected.before.durable.height
+  originalPriorChain : claim.conditional.original.selected.prior.served.chain =
+    selection.selected.before.durable.chain
   originalRecordExact : recordMatches selection.selected.record
     claim.conditional.original.admitted.intent = true
   originalReceiptTransaction : selection.selected.receipt.transactionId =
@@ -46,26 +57,36 @@ theorem Admitted.toDerived_intent {config : Config} {target : Durable}
 /-- Replaying today's physical image is not enough: the original BEGIN prefix
 must be the one that the verifier actually admitted, and the full original
 record and receipt identities must match the source-recomputed BEGIN. -/
-def admit (config : Config) (target : Durable) (ingress : Ingress) :
+def admit (config : Config) {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)
+    (target : Durable) (ingress : Ingress) :
     IO (Except String (Admitted config target ingress)) := do
-  let .ok selection ← verifyLoadedSelected config target ingress.source.originalIndex
+  let .ok selection ← verifyLoadedSelected config reader target ingress.source.originalIndex
     | return .error "lifecycle claim selected native history refused"
   let .ok claim ← admitClaimVerified selection.verified ingress
     | return .error "lifecycle claim current or original admission refused"
-  if originalPrefixExact : claim.conditional.original.selected.prior.durable.image =
-      selection.selected.before.durable.image then
+  let ⟨originalPrefixExact⟩ ← match ← NativeHistorySelection.readPrefix claim.reader
+      selection.selected.priorRecords ingress.source.originalIndex with
+    | .error detail => return .error s!"lifecycle claim original prefix refused: {detail}"
+    | .ok exact => pure exact
+  if originalPriorHeight : claim.conditional.original.selected.prior.height =
+      selection.selected.before.durable.height then
+   if originalPriorChain : claim.conditional.original.selected.prior.served.chain =
+      selection.selected.before.durable.chain then
     if originalRecordExact : recordMatches selection.selected.record
         claim.conditional.original.admitted.intent = true then
       if originalReceiptTransaction : selection.selected.receipt.transactionId =
           claim.conditional.original.admitted.intent.transactionId then
         if originalReceiptEvent : selection.selected.receipt.eventId =
             claim.conditional.original.admitted.intent.event.eventId then
-          return .ok ⟨selection, claim, originalPrefixExact,
-            originalRecordExact, originalReceiptTransaction, originalReceiptEvent⟩
+          return .ok ⟨selection, claim, originalPrefixExact, originalPriorHeight,
+            originalPriorChain, originalRecordExact, originalReceiptTransaction,
+            originalReceiptEvent⟩
         else return .error "lifecycle claim original event receipt differs"
       else return .error "lifecycle claim original transaction receipt differs"
     else return .error "lifecycle claim original complete intent differs"
-  else return .error "lifecycle claim original admitted prefix differs"
+   else return .error "lifecycle claim original prefix chain differs from the admitted walk's"
+  else return .error "lifecycle claim original prefix height differs from the admitted walk's"
 
 theorem Admitted.original_record_at {config : Config} {target : Durable}
     {ingress : Ingress} (admitted : Admitted config target ingress) :
