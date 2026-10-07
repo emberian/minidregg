@@ -174,9 +174,13 @@ try:
         fee_after = w.watched('c4-fee-after')
         w.check('c4-nothing-commits', before == after, {'before': before, 'after': after})
         # Re-entry is refused after the call tree ran: a CHARGED FAILURE (row E), the envelope's price and nothing else.
-        w.check('c4-charged-the-price-only', w.balance(fee_before, w.SPONSOR_ACCOUNT) - w.balance(fee_after, w.SPONSOR_ACCOUNT)
-                == price(cap(TICKS)), {'paid': w.balance(fee_before, w.SPONSOR_ACCOUNT) - w.balance(fee_after, w.SPONSOR_ACCOUNT),
-                                       'price': price(cap(TICKS))})
+        # The envelope declares what the REFUSED plan reported it drew (cv 01a117cd-857b: the meter at the failure
+        # point, two frames' loads), so the turn reaches the same re-entry refusal, not `frontEndExhausted`.
+        paid = w.balance(fee_before, w.SPONSOR_ACCOUNT) - w.balance(fee_after, w.SPONSOR_ACCOUNT)
+        w.check('c4-charged-the-price-only', paid == w.quoted['c4-relay-back'][0],
+                {'paid': paid, 'price': w.quoted['c4-relay-back'][0]})
+        drawn = w.planned['c4-relay-back']
+        w.check('c4-refused-plan-reports-draws', int(drawn['replayBytes']) > 0 and int(drawn['coreBytes']) > 0, drawn)
 
     with w.group('C5-dao'):
         def pay(to, hook):
