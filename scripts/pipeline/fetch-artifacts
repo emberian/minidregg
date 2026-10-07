@@ -10,8 +10,8 @@
 # are 0555 and must never be written), and DEST/manifest.json is rewritten to DEST's absolute
 # paths (the sha256 pins are kept and re-checked), so it feeds journey.sh, check-journey,
 # objective-native-acceptance.py --bin DEST/bin and run.sh unchanged.
-# If the set is not on this box and PIPELINE_FETCH_FROM=user@host is set, it is rsynced from there
-# first (over your own ssh). Prints the manifest path last. A lane that CHANGED Lean must not use
+# If the set is not on this box and PIPELINE_FETCH_FROM (box.env: the publishing box's peer alias)
+# is set, it is rsynced from there first (read-only, over the boxes' peer key: setup-box-peer). Prints the manifest path last. A lane that CHANGED Lean must not use
 # this: it relinks from its own warm clone (PIPELINE regime item 3).
 set -euo pipefail
 PIPELINE_PROG=fetch-artifacts
@@ -29,12 +29,16 @@ resolve() {
 }
 tip=$(resolve || true)
 if { [ -z "$tip" ] || [ ! -f "$ARTIFACT_ROOT/$tip/READY" ]; } && [ -n "${PIPELINE_FETCH_FROM:-}" ]; then
-  case "$want" in green|next|main) tip=$(ssh "$PIPELINE_FETCH_FROM" "readlink $ARTIFACT_ROOT/$want") ;;
-                  *) tip=$(ssh "$PIPELINE_FETCH_FROM" "cd $ARTIFACT_ROOT && ls -d $want* | head -2" | { read -r a; read -r b && pipeline_die "ambiguous $want"; echo "$a"; }) ;; esac
+  # Over the peer key (setup-box-peer): read-only rsync rooted at the peer's /srv, nothing else.
+  rel=${ARTIFACT_ROOT#/srv}
+  tip=$(rsync --list-only "$PIPELINE_FETCH_FROM:$rel/" 2>/dev/null |
+    case "$want" in green|next|main) awk -v w="$want" '$(NF-1) == "->" && $(NF-2) == w {print $NF}' ;;
+                    *) awk '{print $NF}' | grep -E "^$want[0-9a-f]*$" ;; esac)
+  [ "$(printf '%s\n' "$tip" | grep -c .)" -le 1 ] || pipeline_die "$want is ambiguous on $PIPELINE_FETCH_FROM"
   [[ $tip =~ ^[0-9a-f]{40}$ ]] || pipeline_die "$PIPELINE_FETCH_FROM has no set for $want"
   mkdir -p "$ARTIFACT_ROOT"
-  rsync -a --exclude=/READY "$PIPELINE_FETCH_FROM:$ARTIFACT_ROOT/$tip/" "$ARTIFACT_ROOT/$tip/"
-  rsync -a "$PIPELINE_FETCH_FROM:$ARTIFACT_ROOT/$tip/READY" "$ARTIFACT_ROOT/$tip/READY"
+  rsync -a --exclude=/READY "$PIPELINE_FETCH_FROM:$rel/$tip/" "$ARTIFACT_ROOT/$tip/"
+  rsync -a "$PIPELINE_FETCH_FROM:$rel/$tip/READY" "$ARTIFACT_ROOT/$tip/READY"
 fi
 [ -n "$tip" ] || pipeline_die "no artifact set for '$want' in $ARTIFACT_ROOT (published: $(cd "$ARTIFACT_ROOT" 2>/dev/null && ls -d [0-9a-f]* 2>/dev/null | cut -c1-12 | paste -sd' '))"
 set_dir=$ARTIFACT_ROOT/$tip

@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# scripts/pipeline/prime-cargo -- fill this box's cargo cache for a tree, so every --offline build works.
+#
+#   scripts/pipeline/prime-cargo TREE
+#
+# Runs `cargo fetch --locked` (online) for every native/*/Cargo.toml of TREE that has a Cargo.lock,
+# with TREE's own toolchain. The registry cache ($CARGO_HOME, default ~/.cargo) is shared by every
+# lane on the box, so after one prime per tip `cargo build --offline --locked` (the candidate
+# builder, the lanes' own builds) never misses a crate (10-07: a lane's publish died offline on
+# serde_yaml). A crate whose fetch fails is named and the script exits 1 after trying the rest.
+set -uo pipefail
+PIPELINE_PROG=prime-cargo
+. "$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/lib.sh"
+tree=$(CDPATH='' cd -- "${1:?TREE}" && pwd -P) || exit 1
+rust=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' "$tree/rust-toolchain.toml")
+[ -n "$rust" ] || pipeline_die "no Rust channel in $tree/rust-toolchain.toml"
+rc=0 n=0
+for m in "$tree"/native/*/Cargo.toml; do
+  [ -f "$(dirname "$m")/Cargo.lock" ] || continue
+  if out=$(cargo "+$rust" fetch --locked --manifest-path "$m" 2>&1 </dev/null); then n=$((n + 1))
+  else rc=1; pipeline_log "FAILED $(basename "$(dirname "$m")"): $(printf '%s' "$out" | tail -1)"; fi
+done
+pipeline_log "primed $n crate manifests of $(git -C "$tree" rev-parse --short=12 HEAD 2>/dev/null) ($rust)"
+exit $rc

@@ -27,7 +27,7 @@ if [ -n "$mods" ]; then
     grep -q 'out-of-date' "$log" || { cat "$log" >&2; pipeline_die "lake could not resolve the imports"; }
     stale=$(grep -oE 'Building [A-Za-z0-9_.]+' "$log" | awk '{print $2}' | sort -u | paste -sd' ')
     pipeline_log "imports out of date (first stale: ${stale:-?}); building: $mods"
-    LEAN_NUM_THREADS=${LEAN_NUM_THREADS:-4} SWARM_MEM_MAX=${SWARM_MEM_MAX:-32G} pipeline_slot swarm-build lake build $mods >"$log" 2>&1 \
+    LEAN_NUM_THREADS=${LEAN_NUM_THREADS:-4} SWARM_MEM_MAX=${SWARM_MEM_MAX:-32G} pipeline_build_slot $mods -- swarm-build lake build $mods >"$log" 2>&1 \
       || { grep -E '^error|✖' "$log" | head -20 >&2; pipeline_die "an import does not build (above): FILE cannot be checked against it"; }
     pipeline_log "rebuilt $(grep -c '\] Built ' "$log") module(s)"
   fi

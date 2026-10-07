@@ -142,7 +142,7 @@ def make_current(tree, mods, log):
         raise Infra("lake could not resolve the imports:\n" + out[-3000:])
     log(f"imports out of date; building {' '.join(local)} in a build slot")
     cmd = ("set -o pipefail; . %s/lib.sh; LEAN_NUM_THREADS=${LEAN_NUM_THREADS:-4} SWARM_MEM_MAX=${SWARM_MEM_MAX_BUILD:-24G} "
-           "pipeline_slot swarm-build lake build %s" % (shlex.quote(HERE), " ".join(map(shlex.quote, local))))
+           "pipeline_build_slot %s -- swarm-build lake build %s" % (shlex.quote(HERE), " ".join(map(shlex.quote, local)), " ".join(map(shlex.quote, local))))
     r = subprocess.run(["bash", "-c", cmd], cwd=tree.root, capture_output=True, text=True)
     out = r.stdout + r.stderr
     if r.returncode != 0:

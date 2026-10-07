@@ -17,7 +17,7 @@ PIPELINE_PROG=mirror-artifacts
 . "$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/lib.sh"
 tip=$(pipeline_full_sha "${1:?TIP}"); label=${2:-}; lean=${3:-}
 key=${PIPELINE_MIRROR_KEY:-$HOME/.ssh/pipeline_mirror}
-leanmirrors=${PIPELINE_LEANENV_MIRRORS:-ember@152.236.4.24}
+leanmirrors=${PIPELINE_LEANENV_MIRRORS:-$PIPELINE_MIRRORS}
 [ -f "$ARTIFACT_ROOT/$tip/READY" ] || pipeline_die "$tip is not READY here"
 [ -f "$key" ] || pipeline_die "no mirror key $key (scripts/pipeline/setup-mirror-key)"
 R=(rsync -a -e "ssh -i $key -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20")

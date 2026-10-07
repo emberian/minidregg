@@ -9,8 +9,10 @@
 # label (an older line of the same label superseded while queued is skipped, never built), with
 # scripts/pipeline/publish-artifacts. It also follows GitHub's refs (main, tag green, branch next)
 # and RELABELS a READY set the ref points at; a ref alone never triggers a build (VERIFY-ONCE: the
-# keeper's gate decides what is a tip). A failed publication leaves $ARTIFACT_ROOT/.work/TIP.failed
-# (the log) and is not retried until that file is removed.
+# keeper's gate decides what is a tip). A failed publication is retried on the next pass, resuming
+# from its failed step (publish-artifacts keeps its work directory); after PIPELINE_PUBLISH_RETRIES
+# (3) attempts it leaves $ARTIFACT_ROOT/.work/TIP.failed (the log) and is not retried until that
+# file (and TIP.attempts) is removed.
 set -uo pipefail
 PIPELINE_PROG=artifact-watch
 here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
@@ -31,9 +33,13 @@ while :; do
     fi
     [ -f "$ARTIFACT_ROOT/.work/$sha.failed" ] && continue
     pipeline_log "publishing $sha ($label) hint $path"
-    if ! "$here/publish-artifacts" "$sha" "$label" "$path" >"$ARTIFACT_ROOT/.work/$sha.out" 2>&1; then
-      mv "$ARTIFACT_ROOT/.work/$sha.out" "$ARTIFACT_ROOT/.work/$sha.failed"
-      pipeline_log "FAILED $sha: $ARTIFACT_ROOT/.work/$sha.failed"; tail -5 "$ARTIFACT_ROOT/.work/$sha.failed"
+    if ! "$here/publish-artifacts" "$sha" "$label" "$path" >>"$ARTIFACT_ROOT/.work/$sha.out" 2>&1; then
+      n=$(( $(cat "$ARTIFACT_ROOT/.work/$sha.attempts" 2>/dev/null || echo 0) + 1 )); echo $n >"$ARTIFACT_ROOT/.work/$sha.attempts"
+      if [ "$n" -ge "${PIPELINE_PUBLISH_RETRIES:-3}" ]; then
+        mv "$ARTIFACT_ROOT/.work/$sha.out" "$ARTIFACT_ROOT/.work/$sha.failed"
+        pipeline_log "FAILED $sha ($n attempts, each resumed from its failed step): $ARTIFACT_ROOT/.work/$sha.failed"
+      else pipeline_log "attempt $n of $sha failed; the next pass resumes from the failed step"; fi
+      tail -5 "$ARTIFACT_ROOT/.work/$sha.out" "$ARTIFACT_ROOT/.work/$sha.failed" 2>/dev/null
     else tail -3 "$ARTIFACT_ROOT/.work/$sha.out"; fi
   done
   # relabel from GitHub refs (never build)

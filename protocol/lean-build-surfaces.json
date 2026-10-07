@@ -530,7 +530,7 @@
     {
       "module": "Assurance.NativeAcceptedFixtureData",
       "path": "Assurance/NativeAcceptedFixtureData.lean",
-      "sha256": "850a8eed2c41c0b8a7403937b98276697a839c42e7aaae9ca80ed61753616e1e",
+      "sha256": "9f710c5175fcd8f2316e480f8d94be59fa77374958d053b9c89acf4dfbfd60d1",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -2420,7 +2420,7 @@
     {
       "module": "Compiler.ObjectiveBendElaborate",
       "path": "Compiler/ObjectiveBendElaborate.lean",
-      "sha256": "b0d09afd42eee4d347d777be1dd4a0d7947b8875955f59f65d86b71985b9064c",
+      "sha256": "75353a9d32c1683ae8ce94ec3bc4158df7f1f8084412440eebf9d3d1800b7ed0",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -2476,7 +2476,7 @@
     {
       "module": "Compiler.ObjectiveBendParse",
       "path": "Compiler/ObjectiveBendParse.lean",
-      "sha256": "529b82e04855da2a6a3b0dd2d28aa63f9084d596a061935366840942a4eb60f5",
+      "sha256": "ee3620a753f01f32f499eae5e99d0f38aa1c4bc164b9a22991f55339cb9a450d",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -2518,7 +2518,7 @@
     {
       "module": "Compiler.ObjectiveBendSpecificationClosure",
       "path": "Compiler/ObjectiveBendSpecificationClosure.lean",
-      "sha256": "66ec5181fce5f2e246aca7690260cc78db38b3884c75a92f5f4316b0b8c6f14d",
+      "sha256": "11faf5d98dae74ad33553f54ab869b7800104ee18d1df3aa07040e27c981b2d7",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -3960,7 +3960,7 @@
     {
       "module": "Host.Main",
       "path": "Host/Main.lean",
-      "sha256": "66013e5129e7098dd4440472f519770eebef8877f42cd9dc268413e36c7ac8e7",
+      "sha256": "d251b0fa05be0d55a0ba818db0c2e308371f531c5bf18abdba9499a4f10069e4",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -7775,7 +7775,7 @@
     {
       "module": "Kernel.SeatStore",
       "path": "Kernel/SeatStore.lean",
-      "sha256": "57fe0d18d04967dbf0438abdd4e69711542507dbd26df64c3fce549683b43e32",
+      "sha256": "925e16d8798911062d2fbefe3a0f103da6167515422bc92646308831199d25e9",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },

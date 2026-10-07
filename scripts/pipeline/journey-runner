@@ -53,6 +53,37 @@ for r in rows: print("  ".join(c.ljust(w[i]) for i,c in enumerate(r)).rstrip())'
   fi
 }
 
+run_row() {  # ROW: one row in its own scratch world and scope; its lines go to rows/ROW/result.tsv
+  local row=$1 O=$J/rows/$1 R s rc st detail owner res
+  mkdir -p "$O"; res=$O/result.tsv; : >"$res"; R=$(mktemp -d "$scratch_base/pj.XXXXXX"); s=$(date +%s)
+  # Each row runs in its own transient scope: when it ends, everything it started (servers a
+  # hook forgot, setsid'd children) is stopped with it, by cgroup, not by matching command lines.
+  local unit=pj-$row-$(basename "$R" | tr -cd 'A-Za-z0-9')
+  SRC=$src SET=$set BIN=$set/bin MANIFEST=$set/manifest.json RUN=$R OUT=$O LEANENV=$leanenv ROWSFILE=$rowsfile ROW=$row \
+    systemd-run --user --scope --quiet --unit="$unit" -p MemoryMax="${PIPELINE_ROW_MEM_MAX:-24G}" -p MemorySwapMax=0 \
+      --setenv=SRC --setenv=SET --setenv=BIN --setenv=MANIFEST --setenv=RUN --setenv=OUT --setenv=LEANENV \
+      -- timeout "${PIPELINE_ROW_TIMEOUT_S:-5400}" bash -c '. "$ROWSFILE"; cd "$RUN" && "row_$ROW"' 2>"$O/row.err" >"$O/row.out"
+  rc=$?
+  systemctl --user stop "$unit.scope" 2>/dev/null
+  case $rc in 0) st=PASS ;; 99) st=ABSENT ;; 98) st=UNCONFIGURED ;; 124) st=FAIL; echo "timed out after ${PIPELINE_ROW_TIMEOUT_S:-5400} s" >>"$O/row.err" ;; *) st=FAIL ;; esac
+  detail=$(tail -1 "$O/row.err" | tr '\t' ' ' | cut -c1-300)
+  rm -rf "$R"                                   # the scratch world: Stores, sockets, test keys
+  owner=$( [ -s "$O/owner" ] && cat "$O/owner" || owner_for "$set" "$row" "$src")
+  if [ -s "$O/subrows.tsv" ]; then
+    while IFS=$'\t' read -r id sst wall sdet; do
+      local so=$owner
+      sdet=${sdet//"$R/j/steps/"/"$O/step-"}   # the scratch run is gone; its red steps' logs were kept here
+      [[ $sdet =~ \(lane\ ([A-Za-z0-9_-]+)\) ]] && so="lane ${BASH_REMATCH[1]}"
+      [ "$sst" = PASS ] || so=$( [[ $so == lane* ]] && echo "$so" || owner_for "$set" "$id" "$src")
+      printf '%s/%s\t%s\t%s\t%s\t%s\n' "$row" "$id" "$sst" "$wall" "$so" "${sdet:0:300}" >>"$res"
+    done <"$O/subrows.tsv"
+    [ $rc = 0 ] || [ -n "$(awk -F'\t' '$2!="PASS"' "$O/subrows.tsv")" ] || printf '%s\t%s\t%s\t%s\t%s\n' "$row" FAIL $(( $(date +%s) - s )) "$owner" "exit $rc with every step PASS: $detail" >>"$res"
+  else
+    printf '%s\t%s\t%s\t%s\t%s\n' "$row" "$st" $(( $(date +%s) - s )) "$owner" "$detail" >>"$res"
+  fi
+  pipeline_log "  $row $st $(( $(date +%s) - s ))s"
+}
+
 run_tip() {
   local tip=$1 set=$ARTIFACT_ROOT/$1 J=$JOURNEY_ROOT/$1 src leanenv=0 rowsfile t0 tmp
   pipeline_verify_set "$set"
@@ -64,36 +95,15 @@ run_tip() {
   unset JOURNEY_ROWS; . "$rowsfile"
   pipeline_log "tip $tip (${labels% }) from $src (lean env: $leanenv); rows: ${JOURNEY_ROWS[*]}"
   : >"$J/results.tsv"
+  # Rows are independent (each its own scratch world, sockets, Store and scope): run them in
+  # parallel, PIPELINE_JOURNEY_JOBS at a time (default all), and assemble the table in row order.
+  local jobs=${PIPELINE_JOURNEY_JOBS:-${#JOURNEY_ROWS[@]}} row
   for row in "${JOURNEY_ROWS[@]}"; do
-    local O=$J/rows/$row R s rc st detail owner
-    mkdir -p "$O"; R=$(mktemp -d "$scratch_base/pj.XXXXXX"); s=$(date +%s)
-    # Each row runs in its own transient scope: when it ends, everything it started (servers a
-    # hook forgot, setsid'd children) is stopped with it, by cgroup, not by matching command lines.
-    local unit=pj-$row-$(basename "$R" | tr -cd 'A-Za-z0-9')
-    SRC=$src SET=$set BIN=$set/bin MANIFEST=$set/manifest.json RUN=$R OUT=$O LEANENV=$leanenv ROWSFILE=$rowsfile ROW=$row \
-      systemd-run --user --scope --quiet --unit="$unit" -p MemoryMax="${PIPELINE_ROW_MEM_MAX:-24G}" -p MemorySwapMax=0 \
-        --setenv=SRC --setenv=SET --setenv=BIN --setenv=MANIFEST --setenv=RUN --setenv=OUT --setenv=LEANENV \
-        -- timeout "${PIPELINE_ROW_TIMEOUT_S:-5400}" bash -c '. "$ROWSFILE"; cd "$RUN" && "row_$ROW"' 2>"$O/row.err" >"$O/row.out"
-    rc=$?
-    systemctl --user stop "$unit.scope" 2>/dev/null
-    case $rc in 0) st=PASS ;; 99) st=ABSENT ;; 98) st=UNCONFIGURED ;; 124) st=FAIL; echo "timed out after ${PIPELINE_ROW_TIMEOUT_S:-5400} s" >>"$O/row.err" ;; *) st=FAIL ;; esac
-    detail=$(tail -1 "$O/row.err" | tr '\t' ' ' | cut -c1-300)
-    rm -rf "$R"                                   # the scratch world: Stores, sockets, test keys
-    owner=$( [ -s "$O/owner" ] && cat "$O/owner" || owner_for "$set" "$row" "$src")
-    if [ -s "$O/subrows.tsv" ]; then
-      while IFS=$'\t' read -r id sst wall sdet; do
-        local so=$owner
-        sdet=${sdet//"$R/j/steps/"/"$O/step-"}   # the scratch run is gone; its red steps' logs were kept here
-        [[ $sdet =~ \(lane\ ([A-Za-z0-9_-]+)\) ]] && so="lane ${BASH_REMATCH[1]}"
-        [ "$sst" = PASS ] || so=$( [[ $so == lane* ]] && echo "$so" || owner_for "$set" "$id" "$src")
-        printf '%s/%s\t%s\t%s\t%s\t%s\n' "$row" "$id" "$sst" "$wall" "$so" "${sdet:0:300}" >>"$J/results.tsv"
-      done <"$O/subrows.tsv"
-      [ $rc = 0 ] || [ -n "$(awk -F'\t' '$2!="PASS"' "$O/subrows.tsv")" ] || printf '%s\t%s\t%s\t%s\t%s\n' "$row" FAIL $(( $(date +%s) - s )) "$owner" "exit $rc with every step PASS: $detail" >>"$J/results.tsv"
-    else
-      printf '%s\t%s\t%s\t%s\t%s\n' "$row" "$st" $(( $(date +%s) - s )) "$owner" "$detail" >>"$J/results.tsv"
-    fi
-    pipeline_log "  $row $st $(( $(date +%s) - s ))s"
+    while [ "$(jobs -rp | wc -l)" -ge "$jobs" ]; do wait -n; done
+    run_row "$row" &
   done
+  wait
+  for row in "${JOURNEY_ROWS[@]}"; do cat "$J/rows/$row/result.tsv" >>"$J/results.tsv"; done
   [ "$leanenv" = 1 ] || rm -rf "$src"
   local wall=$(( $(date +%s) - t0 ))
   { printf 'tip %s  labels: %s\njourney wall %s s on %s (%s CPUs), finished %s; set built %s\n\n' "$tip" "${labels% }" \
