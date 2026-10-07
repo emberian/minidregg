@@ -43,7 +43,8 @@ capacity claims and output codecs) extracted the same Data. A capacity envelope
 admits or refuses a run; it never changes what the run means. -/
 theorem admitted_data_unique {F : Type} [Field F] [DecidableEq F]
     {deployment deployment' : Deployment} {profile profile' : CanonicalRuntimeProfile.Profile F}
-    {ambient ambient' : Ambient} {ground ground' : Ground deployment} {command command' : Command}
+    {ambient ambient' : Ambient} {ground : Ground deployment} {ground' : Ground deployment'}
+    {command command' : Command}
     {prepared : PreparedInvocation deployment profile ambient ground command}
     {prepared' : PreparedInvocation deployment' profile' ambient' ground' command'}
     {ingress ingress' : List UInt8} {writes writes' : List DataWrite} {guards guards' : List ReadGuard}

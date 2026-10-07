@@ -128,7 +128,6 @@ import Kernel.DocumentHistory  -- K-DOC-HISTORY: doc diff = DocumentHistory.diff
 import Kernel.PresenceIndex  -- PLACE K-INDEX: lastSeen (cell, subject) and touched cell as exact folds of the accepted log (lastSeen_exact, touched_exact, index_monotone)
 import Kernel.LinkIndex  -- K-DOC-INDEX: links and backlinks as an exact fold of the accepted log (ofRecords_exact, backlinks_sound, backlinks_complete, backlinks_covered)
 import Kernel.WorldRootCache -- C2: the world root cached, one path per write; cache = spec root (insertWrite_root, deployedOf_root), stale cache refuted
-import Kernel.ApplicationDispatchUpper
 import Kernel.ApplicationGrainLaws
 import Kernel.ApplicationLifecycleBeginCheck
 import Kernel.ApplicationLifecycleClaimPolicyCheck

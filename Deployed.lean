@@ -26,7 +26,6 @@ import Assurance.StoryLaw  -- P-STORY: a sealed story's table is the law on ever
 import Host
 -- Kernel and policy modules `Minidregg` roots beside the per-directory roots
 -- (none imports Selvage or Assurance; the arithmetization and zkML roots stay research):
-import Kernel.ApplicationDispatchUpper
 import Kernel.ApplicationGrainLaws
 import Kernel.ApplicationLifecycleBeginCheck
 import Kernel.ApplicationLifecycleClaimPolicyCheck
