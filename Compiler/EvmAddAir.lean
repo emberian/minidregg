@@ -155,7 +155,7 @@ theorem addModGadget_sound {p : Nat} [Fact p.Prime] {J : Type}
   have hc0val : (asg (w.carry 0)).val = 0 := by rw [hc0]; exact ZMod.val_zero
   have hzlt : Bignum.denoteNat (2 ^ limbBits) (limbVals asg w.z) < (2 ^ limbBits) ^ width := by
     simpa [cz.2] using Bignum.denoteNat_lt_pow (base := 2 ^ limbBits)
-      (pow_pos (by norm_num) limbBits) (limbVals asg w.z) cz.1
+      (limbVals asg w.z) cz.1
   have hsum : Bignum.denoteNat (2 ^ limbBits) (limbVals asg w.x) +
       Bignum.denoteNat (2 ^ limbBits) (limbVals asg w.y) =
         Bignum.denoteNat (2 ^ limbBits) (limbVals asg w.z) +
@@ -264,7 +264,7 @@ theorem schoolbook_digit_eq (B : ℕ) (hB : 2 ≤ B) {w : ℕ} (X Y : ℕ)
     obtain ⟨j, rfl⟩ := hd
     exact Nat.mod_lt _ hB0
   have hzlt : Bignum.denoteNat B (List.ofFn z) < B ^ w := by
-    simpa using Bignum.denoteNat_lt_pow hB0 (List.ofFn z) hzranged
+    simpa using Bignum.denoteNat_lt_pow (List.ofFn z) hzranged
   have hsumeq : Bignum.denoteNat B (List.ofFn z) + B ^ w * c w = X + Y := by
     simpa [hdx, hdy, hc, carryChain] using htel
   -- the computed digits ARE the wrapped sum's digits

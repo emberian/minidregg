@@ -297,6 +297,61 @@ theorem broadcast_audit (s : State) (number : Nat) (kind : Kind) (arg : Argument
 theorem drain_preserves_audit (s : State) :
     (drainOutbox s).2.audit = s.audit := rfl
 
+/-! ## Named poles for the hypothesis ledger
+
+`AuditExtension` and `ViewLock` are floors consumed by the local-refinement chain; each
+needs a named point where it holds and a named point where it fails, over the real
+`State` and `View` data (`scripts/HypothesisLedger.lean` reads these by statement shape). -/
+
+/-- A view that committed a block and has emitted only candidates for that block is
+locked: the lock constrains the whole `sentCandidates` list, not just its head. -/
+theorem viewLock_committed_candidates :
+    ViewLock { number := 1, sentCommit := some [], sentCandidates := [some [], some []] } := by
+  intro block committed arg member
+  have sameBlock : [] = block := Option.some.inj committed
+  have sameArg : arg = some [] := by
+    rcases List.mem_cons.mp member with h | h
+    · exact h
+    · exact List.mem_singleton.mp h
+  subst sameBlock
+  exact sameArg
+
+/-- A candidate for BOTTOM emitted next to a commit breaks the lock. -/
+theorem not_viewLock_bottom_candidate :
+    ¬ ViewLock { number := 1, sentCommit := some [], sentCandidates := [none] } := by
+  intro locked
+  have h := locked [] rfl none (List.mem_singleton.mpr rfl)
+  cases h
+
+/-- A candidate for a DIFFERENT block next to a commit breaks the lock. -/
+theorem not_viewLock_other_block_candidate :
+    ¬ ViewLock { number := 1, sentCommit := some [], sentCandidates := [some [[]]] } := by
+  intro locked
+  have h := locked [] rfl (some [[]]) (List.mem_singleton.mpr rfl)
+  have hb : ([[]] : Block) = [] := Option.some.inj h
+  cases hb
+
+/-- Changing the actor identity breaks audit extension. -/
+theorem not_auditExtension_other_self :
+    ¬ AuditExtension { self := 0, deadline := 0 } { self := 1, deadline := 0 } := by
+  intro extension
+  have same := extension.sameSelf
+  simp at same
+
+/-- Dropping a retained audit event (the journal-compaction hazard) breaks audit
+extension. -/
+theorem not_auditExtension_dropped_history :
+    ¬ AuditExtension { self := 0, deadline := 0, audit := [.idle] }
+      { self := 0, deadline := 0 } := by
+  intro extension
+  obtain ⟨rest, h⟩ := extension.history
+  simp at h
+
+#assert_axioms viewLock_committed_candidates
+#assert_axioms not_viewLock_bottom_candidate
+#assert_axioms not_viewLock_other_block_candidate
+#assert_axioms not_auditExtension_other_self
+#assert_axioms not_auditExtension_dropped_history
 #assert_axioms clear_owned
 #assert_axioms doCommit_self
 #assert_axioms doCommit_owned

@@ -79,9 +79,9 @@ namespace CenteredLimbs
 def value {base width shift bound : Nat} (x : CenteredLimbs base width shift bound) : Int :=
   (x.encoded.toNat : Int) - (shift : Int)
 
-theorem encoded_lt_capacity {base width shift bound : Nat} (hbase : 0 < base)
+theorem encoded_lt_capacity {base width shift bound : Nat}
     (x : CenteredLimbs base width shift bound) : x.encoded.toNat < base ^ width :=
-  x.encoded.toNat_lt_pow hbase
+  x.encoded.toNat_lt_pow
 
 theorem value_abs_le {base width shift bound : Nat}
     (x : CenteredLimbs base width shift bound) : x.value.natAbs ≤ bound := x.abs_le

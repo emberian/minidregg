@@ -160,28 +160,30 @@ def verifyFill
   else
     .unsupported
 
-/-- Recovering the specification from verified evidence is definitionally the
-same eager object that indexed the advice. -/
-def VerifiedFill.boundSpec
+/-- **Acceptance is exactly the conjunction of the checks.** `verifyFill`
+returns `accepted` for given advice if and only if the verifier supports the
+specification, its backend is available, the observation height is within the
+deadline, the advice is ready, and authority, guard and effect all admit it.
+(Shape binding needs no theorem: `VerifiedFill` is indexed by the exact
+specification and advice, so the evidence cannot name any other one.) -/
+theorem verify_accepted_iff_checks
     {U : FirstOrderUniverse.{u, v}} {V : Vocabulary.{w}}
     [LinearOrder V.Height]
     {verifier : FillVerifier U V} {now : V.Height}
-    {spec : HoleSpec U V} {advice : Advice spec}
-    (_fill : VerifiedFill verifier now spec advice) : HoleSpec U V :=
-  spec
-
-/-- **Shape binding.** Acceptance cannot substitute any eager field: the
-verified object's entire specification is the exact index of the checked
-advice. -/
-theorem verify_accepted_binds_eager_shape
-    {U : FirstOrderUniverse.{u, v}} {V : Vocabulary.{w}}
-    [LinearOrder V.Height]
-    {verifier : FillVerifier U V} {now : V.Height}
-    {spec : HoleSpec U V} {advice : Advice spec}
-    {fill : VerifiedFill verifier now spec advice}
-    (_h : verifyFill verifier now spec advice = .accepted fill) :
-    fill.boundSpec = spec :=
-  rfl
+    {spec : HoleSpec U V} {advice : Advice spec} :
+    (∃ fill, verifyFill verifier now spec advice = .accepted fill) ↔
+      (verifier.supports spec = true ∧ verifier.backendAvailable spec = true ∧
+        now ≤ spec.deadline ∧ verifier.ready spec advice = true ∧
+        verifier.authorityAccepts spec advice = true ∧
+        verifier.guardAccepts spec advice = true ∧
+        verifier.effectAccepts spec advice = true) := by
+  constructor
+  · rintro ⟨fill, _⟩
+    exact ⟨fill.supported, fill.backend_available, fill.within_deadline, fill.ready,
+      fill.authority_bound, fill.guard_bound, fill.effect_bound⟩
+  · rintro ⟨hs, hb, hd, hr, ha, hg, he⟩
+    exact ⟨⟨verifier.postRoot spec advice, rfl, hs, hb, hd, hr, ha, hg, he⟩, by
+      simp [verifyFill, hs, hb, hd, hr, ha, hg, he]⟩
 
 /-- Acceptance exposes the three load-bearing checks against that same bound
 specification: authority, guard, and effect all admitted the typed advice. -/

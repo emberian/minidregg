@@ -557,16 +557,6 @@ theorem AcceptedCredential.reject_stale_policy
     (stale : request.policyEpoch ≠ state.policyEpoch request.policyId) : False :=
   stale accepted.policy_epoch_current
 
-/-- A token-style credential cannot smuggle a revoked capability: its underlying
-capability evidence retains the semantic non-revocation theorem. -/
-theorem AcceptedCredential.token_current
-    {scheme : RequestDigestScheme} {portal : Portal} {state : AuthState}
-    {kind : ResourceKind} {request : Request kind}
-    (accepted : AcceptedCredential scheme portal state request)
-    (_token : accepted.carrier = .token) :
-    accepted.authorization.evidence.Current :=
-  accepted.current
-
 /-! ## 5. Concrete pole: token transport still uses capability authorization -/
 
 def demoDigestScheme : RequestDigestScheme where

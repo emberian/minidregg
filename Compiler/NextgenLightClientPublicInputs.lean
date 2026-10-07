@@ -229,7 +229,7 @@ def parseU64 : Parser U64
   | a :: b :: c :: d :: rest =>
       if h : Bignum.Ranged u16Base [a, b, c, d] then
         some (⟨Bignum.denoteNat u16Base [a, b, c, d], by
-          have := Bignum.denoteNat_lt_pow (by norm_num [u16Base]) [a, b, c, d] h
+          have := Bignum.denoteNat_lt_pow [a, b, c, d] h
           simpa [u16Base] using this⟩, rest)
       else none
   | _ => none

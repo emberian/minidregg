@@ -216,7 +216,7 @@ theorem mulCarryEquations_denote (base q : Nat) :
       rw [hlast] at htail
       nlinarith [hlow, htail]
 
-private theorem nat_eq_of_zmod_eq {p a b : Nat} [NeZero p]
+private theorem nat_eq_of_zmod_eq {p a b : Nat}
     (ha : a < p) (hb : b < p) (h : (a : ZMod p) = (b : ZMod p)) : a = b := by
   have hv := congrArg ZMod.val h
   simpa [ZMod.val_cast_of_lt ha, ZMod.val_cast_of_lt hb] using hv
