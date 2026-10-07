@@ -2612,6 +2612,98 @@ inductive Disclosure where
   | toSigner
   deriving DecidableEq, Repr
 
+/-- What a light submit does with its replay verdict, before any admission: stop with
+an outcome (an undeclared id, or a conflict), confirm the original receipt, or admit
+a fresh ingress. -/
+inductive ReplayStep (R : Type) where
+  | stop (outcome : Outcome)
+  | replayed (receipt : R)
+  | fresh
+
+/-- The one map from a replay verdict to a light submit's next step. -/
+def replayStep {R : Type} (undeclared conflict : Outcome) :
+    ServedBasis.Ground.Replay R → ReplayStep R
+  | .undeclared => .stop undeclared
+  | .original receipt => .replayed receipt
+  | .conflict => .stop conflict
+  | .fresh => .fresh
+
+/-- **A conflict stops the submit with its conflict refusal.** -/
+theorem replayStep_conflict {R : Type} (undeclared conflict : Outcome) :
+    replayStep undeclared conflict (.conflict : ServedBasis.Ground.Replay R) = .stop conflict := rfl
+
+/-- **Only a fresh verdict admits**: a conflict (or an undeclared id, or an original)
+never reaches the admission. -/
+theorem replayStep_fresh_iff {R : Type} (undeclared conflict : Outcome)
+    (verdict : ServedBasis.Ground.Replay R) :
+    replayStep undeclared conflict verdict = .fresh ↔ verdict = .fresh := by
+  cases verdict <;> simp [replayStep]
+
+#assert_axioms replayStep_conflict
+#assert_axioms replayStep_fresh_iff
+
+/-- The conflict refusal every light submit answers a changed ingress with. -/
+def replayConflict : Outcome := refused .conflict "replay" "transaction identity conflict"
+
+/-- **A changed install under a recorded transaction id is refused as a conflict, never
+admitted** (`PolicyInstallReceiver.replay_changed_ingress_refused`, then `replayStep`). -/
+theorem install_changed_ingress_stops (domain : Digest) {deployment : CanonicalCellRegistry.Deployment}
+    (ground : ServedBasis.Ground deployment) (ingress : PolicyInstallReceiver.DecodedIngress)
+    {recorded : DurableCommitProtocol.Intent Digest Digest DurableDataIntent.StableNullifier DurableDataIntent.ReplayEnvelope}
+    (found : ground.recorded (PolicyInstallReceiver.transactionId domain ingress) = some (some recorded))
+    (different : recorded.event.event ≠ PolicyInstallReceiver.event domain ingress)
+    (undeclared conflict : Outcome) :
+    replayStep undeclared conflict (PolicyInstallReceiver.replay domain ground ingress) =
+      .stop conflict := by
+  rw [PolicyInstallReceiver.replay_changed_ingress_refused domain ground ingress found different]
+  rfl
+
+/-- **A changed delegation under a recorded transaction id is refused as a conflict.** -/
+theorem delegate_changed_ingress_stops (domain semantics : Digest)
+    {deployment : CanonicalCellRegistry.Deployment}
+    (ground : ServedBasis.Ground deployment) (ingress : CapabilityDelegationReceiver.DecodedIngress)
+    {recorded : DurableCommitProtocol.Intent Digest Digest DurableDataIntent.StableNullifier DurableDataIntent.ReplayEnvelope}
+    (found : ground.recorded (CapabilityDelegationReceiver.transactionId domain semantics ingress) =
+      some (some recorded))
+    (different : recorded.event.event ≠ CapabilityDelegationReceiver.event domain semantics ingress)
+    (undeclared conflict : Outcome) :
+    replayStep undeclared conflict (CapabilityDelegationReceiver.replay domain semantics ground ingress) =
+      .stop conflict := by
+  rw [CapabilityDelegationReceiver.replay_changed_ingress_refused domain semantics ground ingress found different]
+  rfl
+
+/-- **A changed revocation under a recorded transaction id is refused as a conflict.** -/
+theorem revoke_changed_ingress_stops (domain semantics : Digest)
+    {deployment : CanonicalCellRegistry.Deployment}
+    (ground : ServedBasis.Ground deployment) (ingress : CapabilityRevocationReceiver.DecodedIngress)
+    {recorded : DurableCommitProtocol.Intent Digest Digest DurableDataIntent.StableNullifier DurableDataIntent.ReplayEnvelope}
+    (found : ground.recorded (CapabilityRevocationReceiver.transactionId domain semantics ingress) =
+      some (some recorded))
+    (different : recorded.event.event ≠ CapabilityRevocationReceiver.event domain semantics ingress)
+    (undeclared conflict : Outcome) :
+    replayStep undeclared conflict (CapabilityRevocationReceiver.replay domain semantics ground ingress) =
+      .stop conflict := by
+  rw [CapabilityRevocationReceiver.replay_changed_ingress_refused domain semantics ground ingress found different]
+  rfl
+
+/-- **A changed renounce under a recorded transaction id is refused as a conflict.** -/
+theorem renounce_changed_ingress_stops (domain semantics : Digest)
+    {deployment : CanonicalCellRegistry.Deployment}
+    (ground : ServedBasis.Ground deployment) (ingress : CapabilityRenounce.DecodedIngress)
+    {recorded : DurableCommitProtocol.Intent Digest Digest DurableDataIntent.StableNullifier DurableDataIntent.ReplayEnvelope}
+    (found : ground.recorded (CapabilityRenounce.transactionId domain semantics ingress) = some (some recorded))
+    (different : recorded.event.event ≠ CapabilityRenounce.event domain semantics ingress)
+    (undeclared conflict : Outcome) :
+    replayStep undeclared conflict (CapabilityRenounce.replay domain semantics ground ingress) =
+      .stop conflict := by
+  rw [CapabilityRenounce.replay_changed_ingress_refused domain semantics ground ingress found different]
+  rfl
+
+#assert_axioms install_changed_ingress_stops
+#assert_axioms delegate_changed_ingress_stops
+#assert_axioms revoke_changed_ingress_stops
+#assert_axioms renounce_changed_ingress_stops
+
 /-- A renounce on the light route: its keys (its transaction id and marker nullifier)
 read from the authenticated history into a basis, the replay verdict and the admission
 on `Ground.ofBasis`, the commit by `DurableServed.receiveServed` on the light opening.
@@ -2631,12 +2723,11 @@ def submitRenounceLight (transport : DurableReceiverIO.Transport)
   | .error detail => return (.unavailable detail.toUTF8.toList, .uniform)
   | .ok basis =>
       let ground : ServedBasis.Ground deployment := .ofBasis basis
-      match CapabilityRenounce.replay domain semantics ground ingress with
-      | .undeclared =>
-          return (refused .operationRejected "renounce"
-            s!"{repr CapabilityRenounce.Reject.undeclaredTransaction}", .uniform)
-      | .original receipt => return (← confirm .replayed receipt.transactionId receipt.eventId, .uniform)
-      | .conflict => return (refused .conflict "replay" "transaction identity conflict", .uniform)
+      match replayStep (refused .operationRejected "renounce"
+          s!"{repr CapabilityRenounce.Reject.undeclaredTransaction}") replayConflict
+          (CapabilityRenounce.replay domain semantics ground ingress) with
+      | .stop outcome => return (outcome, .uniform)
+      | .replayed receipt => return (← confirm .replayed receipt.transactionId receipt.eventId, .uniform)
       | .fresh =>
           match ← CapabilityRenounce.admitDecodedNative deployment semantics
               ⟨federation, genesisHeight + basis.height⟩ ground signature ingress with
@@ -2736,13 +2827,12 @@ def submitInstallLight {F : Type} [Field F] [DecidableEq F] (transport : Durable
   | .error detail => return .unavailable detail.toUTF8.toList
   | .ok basis =>
       let ground : ServedBasis.Ground deployment := .ofBasis basis
-      match PolicyInstallReceiver.replay domain ground ingress with
-      | .undeclared =>
-          return refused .operationRejected "install"
-            s!"{repr PolicyInstallReceiver.Reject.undeclaredTransaction}"
-      | .original receipt => confirm .replayed receipt.transactionId receipt.eventId
-      | .conflict =>
-          return refused .operationRejected "install" s!"{repr PolicyInstallReceiver.Reject.transactionConflict}"
+      match replayStep (refused .operationRejected "install"
+          s!"{repr PolicyInstallReceiver.Reject.undeclaredTransaction}")
+          (refused .operationRejected "install" s!"{repr PolicyInstallReceiver.Reject.transactionConflict}")
+          (PolicyInstallReceiver.replay domain ground ingress) with
+      | .stop outcome => return outcome
+      | .replayed receipt => confirm .replayed receipt.transactionId receipt.eventId
       | .fresh =>
           match ← PolicyInstallReceiver.admitDecodedNative profile deployment signature ground federation
               (genesisHeight + basis.height) ingress with
@@ -2778,11 +2868,11 @@ def submitRevokeLight {F : Type} [Field F] [DecidableEq F] (transport : DurableR
   | .error detail => return .unavailable detail.toUTF8.toList
   | .ok basis =>
       let ground : ServedBasis.Ground deployment := .ofBasis basis
-      match CapabilityRevocationReceiver.replay domain semantics ground ingress with
-      | .undeclared =>
-          return refused .operationRejected "revoke" s!"{repr CapabilityRevocationController.Reject.undeclaredTransaction}"
-      | .original receipt => confirm .replayed receipt.transactionId receipt.eventId
-      | .conflict => return refused .conflict "replay" "transaction identity conflict"
+      match replayStep (refused .operationRejected "revoke"
+          s!"{repr CapabilityRevocationController.Reject.undeclaredTransaction}") replayConflict
+          (CapabilityRevocationReceiver.replay domain semantics ground ingress) with
+      | .stop outcome => return outcome
+      | .replayed receipt => confirm .replayed receipt.transactionId receipt.eventId
       | .fresh =>
           match ← CapabilityRevocationReceiver.admitDecodedNative deployment profile
               ⟨federation, genesisHeight + basis.height⟩ ground signature ingress with
@@ -2818,11 +2908,11 @@ def submitDelegateLight {F : Type} [Field F] [DecidableEq F] (transport : Durabl
   | .error detail => return .unavailable detail.toUTF8.toList
   | .ok basis =>
       let ground : ServedBasis.Ground deployment := .ofBasis basis
-      match CapabilityDelegationReceiver.replay domain semantics ground ingress with
-      | .undeclared =>
-          return refused .operationRejected "delegate" s!"{repr CapabilityDelegationController.Reject.undeclaredTransaction}"
-      | .original receipt => confirm .replayed receipt.transactionId receipt.eventId
-      | .conflict => return refused .conflict "replay" "transaction identity conflict"
+      match replayStep (refused .operationRejected "delegate"
+          s!"{repr CapabilityDelegationController.Reject.undeclaredTransaction}") replayConflict
+          (CapabilityDelegationReceiver.replay domain semantics ground ingress) with
+      | .stop outcome => return outcome
+      | .replayed receipt => confirm .replayed receipt.transactionId receipt.eventId
       | .fresh =>
           match ← CapabilityDelegationReceiver.admitDecodedNative deployment profile
               ⟨federation, genesisHeight + basis.height⟩ ground signature ingress with
