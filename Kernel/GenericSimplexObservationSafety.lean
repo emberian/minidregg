@@ -231,6 +231,82 @@ theorem localCommitAttestations_committed_run :
     obtain ⟨index, found⟩ := List.mem_iff_getElem?.mp mem
     exact ⟨index, by simp [auditTrace, found]⟩
 
+/-! ### Families the ledger first sees through this module -/
+
+open Minidregg.Kernel.GenericSimplexCertificateSafety (AttributedCommitSends)
+open Minidregg.Kernel.GenericSimplexCausal (ViewsUnique)
+open Minidregg.Kernel.GenericSimplexGlobalEmission (GlobalEventSupported)
+
+/-- Honest parties 0, 1, 2 each durably SENT a COMMIT for `[[1]]` at view 1 in the run. -/
+theorem attributedCommitSends_committed_run :
+    AttributedCommitSends (auditTrace poleNet) (Finset.range 4) poleFaulty 1 1 [[1]] := by
+  refine ⟨{0, 1, 2}, ?_, by decide, ?_⟩
+  · intro party member
+    simp at member ⊢
+    omega
+  · intro party member _
+    have honest : party = 0 ∨ party = 1 ∨ party = 2 := by
+      simp at member
+      omega
+    have mem : Minidregg.Kernel.GenericSimplex.AuditEvent.send ⟨party, 1, .commit, some [[1]]⟩
+        ∈ poleNet.audit := by
+      rcases honest with rfl | rfl | rfl <;> decide +kernel
+    obtain ⟨index, found⟩ := List.mem_iff_getElem?.mp mem
+    exact ⟨index, by simp [auditTrace, found, Sent]⟩
+
+/-- COMMIT sends of the first `n` parties, all for one view and block. -/
+def poleSendTrace (n view : Nat) (block : Block) : Trace := fun time =>
+  if time < n then .send ⟨time, view, .commit, some block⟩ else .idle
+
+/-- Two COMMIT senders fall short of the `2f+1` certificate. -/
+theorem not_attributedCommitSends_two_signers :
+    ¬ AttributedCommitSends (poleSendTrace 2 1 [[]]) (Finset.range 4) ∅ 1 1 [[]] := by
+  rintro ⟨signers, _, count, sends⟩
+  have inside : signers ⊆ ({0, 1} : Finset Nat) := by
+    intro party member
+    obtain ⟨time, sent⟩ := sends party member (by simp)
+    by_cases below : time < 2
+    · simp [Sent, poleSendTrace, below] at sent
+      simp
+      omega
+    · simp [Sent, poleSendTrace, below] at sent
+  have bound := Finset.card_le_card inside
+  have two : ({0, 1} : Finset Nat).card = 2 := by decide
+  omega
+
+/-- The real replica's views are numbered uniquely. -/
+theorem viewsUnique_committed_run : ViewsUnique (poleNet.localState 0) := by
+  unfold ViewsUnique
+  decide +kernel
+
+/-- A replica holding two records for view 1 violates it. -/
+theorem not_viewsUnique_duplicate :
+    ¬ ViewsUnique { self := 0, deadline := 0, views := [{ number := 1 }, { number := 1 }] } := by
+  unfold ViewsUnique
+  decide
+
+/-- A real honest COMMIT send in the run is supported by a vote quorum before it. -/
+theorem globalEventSupported_committed_run :
+    ∃ time, GlobalEventSupported poleConfig (auditTrace poleNet) (Finset.range poleConfig.parties)
+      time (.send ⟨1, 1, .commit, some [[1]]⟩) := by
+  have mem : Minidregg.Kernel.GenericSimplex.AuditEvent.send ⟨1, 1, .commit, some [[1]]⟩
+      ∈ poleNet.audit := by decide +kernel
+  obtain ⟨index, found⟩ := List.mem_iff_getElem?.mp mem
+  exact ⟨index, (reachable_emission_invariants poleNet_reachable poleConfig_size).2 index _ 1
+    found rfl (by decide)⟩
+
+/-- A COMMIT send with no vote quorum before it is unsupported. -/
+theorem not_globalEventSupported_unvoted_commit :
+    ¬ GlobalEventSupported poleConfig (fun _ => .idle) (Finset.range 4) 0
+      (.send ⟨0, 1, .commit, some []⟩) := by
+  intro supported
+  obtain ⟨voters, _, count, sends⟩ :
+      Support (fun _ => .idle) (Finset.range 4) 0 1 .vote (some []) poleConfig.quorum := supported
+  have quorum : poleConfig.quorum = 3 := by decide
+  obtain ⟨party, member⟩ := Finset.card_pos.mp (by omega : 0 < voters.card)
+  obtain ⟨sentTime, early, _⟩ := sends party member
+  omega
+
 /-- A replica that reports a commit in view 1 while no commit output was ever retained
 in the audit: the observation clause of `AuditRefinement` fails. -/
 def poleForgedState : State :=
@@ -310,6 +386,12 @@ theorem not_localCommitAttestations_two_signers :
   have two : ({0, 1} : Finset Nat).card = 2 := by decide
   omega
 
+#assert_axioms attributedCommitSends_committed_run
+#assert_axioms not_attributedCommitSends_two_signers
+#assert_axioms viewsUnique_committed_run
+#assert_axioms not_viewsUnique_duplicate
+#assert_axioms globalEventSupported_committed_run
+#assert_axioms not_globalEventSupported_unvoted_commit
 #assert_axioms poleConfig_size
 #assert_axioms poleConfig_wellFormed
 #assert_axioms poleFaulty_bound

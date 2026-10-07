@@ -5701,7 +5701,6 @@ A Minidregg.Compiler.TranscriptController.accept : -
 A Minidregg.Compiler.TranscriptController.acceptance_is_lean_owned : -
 A Minidregg.Compiler.TranscriptController.execute : -
 A Minidregg.Compiler.TranscriptController.execute_drawLabels : propext
-A Minidregg.Compiler.TranscriptController.execution_draw_portal_law : -
 A Minidregg.Compiler.TranscriptController.initial : -
 A Minidregg.Compiler.TranscriptController.run : -
 A Minidregg.Compiler.TranscriptController.runCommand : -
@@ -12184,6 +12183,10 @@ A Minidregg.Kernel.GenericSimplexLocal.drain_preserves_audit : -
 A Minidregg.Kernel.GenericSimplexLocal.drain_preserves_self : -
 A Minidregg.Kernel.GenericSimplexLocal.eventOwner : -
 A Minidregg.Kernel.GenericSimplexLocal.foldl_audit_extension : propext
+A Minidregg.Kernel.GenericSimplexLocal.not_auditExtension_dropped_history : propext
+A Minidregg.Kernel.GenericSimplexLocal.not_auditExtension_other_self : propext
+A Minidregg.Kernel.GenericSimplexLocal.not_viewLock_bottom_candidate : propext
+A Minidregg.Kernel.GenericSimplexLocal.not_viewLock_other_block_candidate : propext
 A Minidregg.Kernel.GenericSimplexLocal.putView_audit : -
 A Minidregg.Kernel.GenericSimplexLocal.putView_locked : Quot.sound, propext
 A Minidregg.Kernel.GenericSimplexLocal.putView_owned : -
@@ -12198,6 +12201,7 @@ A Minidregg.Kernel.GenericSimplexLocal.sendCandidate_owned : propext
 A Minidregg.Kernel.GenericSimplexLocal.sendCandidate_rejected_by_commit : propext
 A Minidregg.Kernel.GenericSimplexLocal.sendCandidate_self : Quot.sound, propext
 A Minidregg.Kernel.GenericSimplexLocal.viewAt_locked : propext
+A Minidregg.Kernel.GenericSimplexLocal.viewLock_committed_candidates : propext
 A Minidregg.Kernel.GenericSimplexQuorum.honest_intersection : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.GenericSimplexStructure.Preserves : -
 A Minidregg.Kernel.GenericSimplexStructure.actual_reachable_projected : Classical.choice, Quot.sound, propext
@@ -24226,7 +24230,6 @@ A Minidregg.Theory.CredentialAuthorityFamily.AcceptedCredential.policy_selected 
 A Minidregg.Theory.CredentialAuthorityFamily.AcceptedCredential.reject_over_budget : Quot.sound, propext
 A Minidregg.Theory.CredentialAuthorityFamily.AcceptedCredential.reject_stale_policy : Quot.sound, propext
 A Minidregg.Theory.CredentialAuthorityFamily.AcceptedCredential.requestBinding : Quot.sound, propext
-A Minidregg.Theory.CredentialAuthorityFamily.AcceptedCredential.token_current : Quot.sound, propext
 A Minidregg.Theory.CredentialAuthorityFamily.AcceptedCredential.token_has_no_bypass : Quot.sound, propext
 A Minidregg.Theory.CredentialAuthorityFamily.CarrierKind.capability.elim : -
 A Minidregg.Theory.CredentialAuthorityFamily.CarrierKind.ofNat : -
@@ -24837,7 +24840,6 @@ A Minidregg.Theory.GuardedAdvice.UnsafeStrongAdvice.replacement : -
 A Minidregg.Theory.GuardedAdvice.UnsafeStrongAdvice.value : -
 A Minidregg.Theory.GuardedAdvice.VerifiedFill.authority_bound : propext
 A Minidregg.Theory.GuardedAdvice.VerifiedFill.backend_available : propext
-A Minidregg.Theory.GuardedAdvice.VerifiedFill.boundSpec : propext
 A Minidregg.Theory.GuardedAdvice.VerifiedFill.effect_bound : propext
 A Minidregg.Theory.GuardedAdvice.VerifiedFill.guard_bound : propext
 A Minidregg.Theory.GuardedAdvice.VerifiedFill.postRoot : propext
@@ -24866,8 +24868,8 @@ A Minidregg.Theory.GuardedAdvice.settle : propext
 A Minidregg.Theory.GuardedAdvice.strong_hole_substitution_refuter : -
 A Minidregg.Theory.GuardedAdvice.unsafeSubstitute : -
 A Minidregg.Theory.GuardedAdvice.verifyFill : propext
-A Minidregg.Theory.GuardedAdvice.verify_accepted_binds_eager_shape : propext
 A Minidregg.Theory.GuardedAdvice.verify_accepted_forces_bound_checks : propext
+A Minidregg.Theory.GuardedAdvice.verify_accepted_iff_checks : propext
 A Minidregg.Theory.GuardedAdvice.verify_rejected_no_mutation : propext
 A Minidregg.Theory.HashBytes.Collision : -
 A Minidregg.Theory.HashBytes.Hash : -

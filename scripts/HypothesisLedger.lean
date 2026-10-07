@@ -97,6 +97,7 @@ import Selvage.PolishchukSpielmanRefutation
 import Theory.ObjectiveBendDemandMachine
 import Kernel.ObjectiveResumeContract
 import Theory.ObjectiveBendLedgerPoles
+import Kernel.GenericSimplexObservationSafety
 
 open Lean Elab Meta
 
