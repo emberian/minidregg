@@ -354,11 +354,652 @@ theorem MessageDelivery.failed_delivery_pops {rootBytes : Bytes → Digest} {con
   rw [← sameMail]
   exact delivered.seedExact.1
 
+/-! ## Retention: what a send and a delivery pay, and what they leave behind (OB8)
+
+The activity turns retain their cells against a payer (`Birth.retention_cells_have_payer`,
+...) and reserve a storage deposit in the activity's purse. The send path retains
+two kinds of cell, an INBOX (`Inbox.cell`, role `inbox`) and a DELIVERY SLOT (role
+`slot`, decider `delivery m`), and prices them as follows. These theorems state
+what the admitting functions do, no more:
+
+* an invocation is paid from its signer's account only (`Invocation.debits_only_account`),
+  and each send credits exactly one purse with exactly the public price of the
+  declared postage envelope (`Invocation.escrows_every_send`);
+* a delivery is paid from the popped inbox's purse only (`MessageDelivery.debits_only_purse`,
+  `conserves`), the popped message leaves the inbox
+  (`MessageDelivery.pop_frees_message`), and a FAILED delivery posts exactly the
+  shortened inbox, the decided slot and the Book (`MessageDelivery.failed_delivery_posts`);
+* an inbox never exceeds `Inbox.bound` messages (`Mail.inboxes_bounded`,
+  `MessageDelivery.remaining_within_bound`);
+* every live cell the turns write names a payer (`Invocation.retention_cells_have_payer`,
+  `MessageDelivery.retention_cells_have_payer`), under premises stated at each.
+
+What is NOT stated, because it is false of the existing semantics (STATUS: design
+questions for the grounding round): no STORAGE DEPOSIT backs an inbox cell or a
+delivery slot (an inbox purse holds postage, which is the price of the delivered
+envelope, and nothing for the bytes of the queued messages); an emptied inbox cell
+is never retired and its purse never deregistered; a decided delivery slot is
+never retired. -/
+
+/-- **An invocation is paid from its signer's account only**: every operation of its
+batch (the envelope's fee and each send's postage into its queue's purse) debits
+`request.account`. -/
+theorem Invocation.debits_only_account {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {request : InvokeRequest}
+    (invoked : Invocation config snapshot height request) :
+    ∀ op ∈ invoked.posted.batch.operations, debited op = some request.account := by
+  rw [invoked.batchExact]
+  intro op member
+  simp only [invokeBatch, List.mem_cons] at member
+  rcases member with fee | credit
+  · subst fee; rfl
+  · exact creditTransfers_debit config _ _ op credit
+
+/-- **Every send credits exactly one purse, with the postage of its message.** -/
+theorem Mail.send_credit {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {mail next : Mail config snapshot} {message : Inbox.Message} {destination : Destination}
+    (sent : mail.send message destination = .ok next) :
+    ∃ purse, next.credits = mail.credits ++ [(purse, message.postage)] := by
+  cases destination with
+  | object target =>
+    simp only [Mail.send] at sent
+    repeat' split at sent
+    all_goals first
+      | (cases sent; done)
+      | (cases sent; exact ⟨_, rfl⟩)
+  | slot name =>
+    simp only [Mail.send] at sent
+    repeat' split at sent
+    all_goals first
+      | (cases sent; done)
+      | (cases sent; exact ⟨_, rfl⟩)
+
+theorem postMail_credits {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    (postage : Minidregg.Compiler.ObjectiveInvocationClaim.Capacity) (refund : AccountId) :
+    ∀ (outs : List Outgoing) (mail next : Mail config snapshot),
+      postMail config snapshot postage refund mail outs = .ok next →
+      next.credits.length = mail.credits.length + outs.length ∧
+        ∀ credit ∈ next.credits, credit ∈ mail.credits ∨ credit.2 = config.tariff.workOf postage
+  | [], mail, next, ok => by
+    simp only [postMail] at ok
+    cases ok
+    exact ⟨by simp, fun credit member => .inl member⟩
+  | out :: rest, mail, next, ok => by
+    simp only [postMail] at ok
+    split at ok
+    · cases ok
+    · rename_i mail' sent
+      obtain ⟨purse, credits⟩ := Mail.send_credit sent
+      obtain ⟨len, each⟩ := postMail_credits postage refund rest mail' next ok
+      refine ⟨?_, ?_⟩
+      · rw [len, credits]; simp; omega
+      · intro credit member
+        rcases each credit member with old | fresh
+        · rw [credits] at old
+          rcases List.mem_append.mp old with first | added
+          · exact .inl first
+          · simp only [List.mem_singleton] at added
+            exact .inr (congrArg Prod.snd added)
+        · exact .inr fresh
+
+/-- **An invocation escrows every send at the public price of its declared postage
+envelope**: one credit per send, each of `workOf request.postage`, and nothing else.
+(A credit is the message's postage, not a storage deposit.) -/
+theorem Invocation.escrows_every_send {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {request : InvokeRequest}
+    (invoked : Invocation config snapshot height request) :
+    invoked.mail.credits.length = invoked.journal.outbox.length ∧
+      ∀ credit ∈ invoked.mail.credits, credit.2 = config.tariff.workOf request.postage := by
+  obtain ⟨len, each⟩ := postMail_credits request.postage request.account invoked.journal.outbox Mail.empty
+    invoked.mail invoked.mailExact
+  refine ⟨?_, ?_⟩
+  · rw [len]; simp [Mail.empty]
+  · intro credit member
+    rcases each credit member with old | fresh
+    · exact absurd old (by simp [Mail.empty])
+    · exact fresh
+
+/-- **An inbox the mail holds stays within `Inbox.bound`** when the inbox the turn read
+was (a fresh inbox, read as nothing, always is). -/
+theorem Mail.inboxes_bounded {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    (mail : Mail config snapshot) :
+    ∀ held ∈ mail.inboxes,
+      (held.read.getD (Inbox.Inbox.empty held.sender held.target)).messages.length ≤ Inbox.bound →
+        held.now.messages.length ≤ Inbox.bound :=
+  fun held _ within => held.lawful.keeps.2.2.2 within
+
+/-- **A pop frees the message**: the inbox the delivery posts holds exactly one message fewer. -/
+theorem MessageDelivery.pop_frees_message {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {request : MessageRequest}
+    (delivered : MessageDelivery config snapshot height request) :
+    delivered.remaining.messages.length + 1 = delivered.inbox.messages.length := by
+  obtain ⟨rest, front, after, _, _⟩ := delivered.pops
+  simp [front, after]
+
+theorem MessageDelivery.remaining_within_bound {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {request : MessageRequest}
+    (delivered : MessageDelivery config snapshot height request)
+    (within : delivered.inbox.messages.length ≤ Inbox.bound) :
+    delivered.remaining.messages.length ≤ Inbox.bound := by
+  have := delivered.pop_frees_message
+  omega
+
+theorem forward_none {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    (mail : Mail config snapshot) (queued : List Inbox.Message) :
+    forward (rootBytes := rootBytes) none mail queued = (mail, queued) := by
+  induction queued generalizing mail with
+  | nil => rfl
+  | cons message rest ih => simp [forward, ih]
+
+/-- A failed delivery forwards nothing: its mail is the popped inbox alone and every
+queued send is refunded. -/
+theorem MessageDelivery.failed_mail {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {request : MessageRequest}
+    (delivered : MessageDelivery config snapshot height request) {reason : String}
+    (failed : delivered.outcome = .failed reason) :
+    delivered.mail = delivered.seed ∧ delivered.refunds = delivered.slot.queued := by
+  have forwarded := delivered.forwarded
+  rw [failed, show (Outcome.failed reason).reference = none from rfl, forward_none] at forwarded
+  simp only [Prod.mk.injEq] at forwarded
+  exact ⟨forwarded.1.symm, forwarded.2.symm⟩
+
+/-- **A failed delivery leaves behind exactly three posts**: the popped, shortened inbox,
+the slot it decided `broken`, and the Book. No cell is opened, no state cell written. -/
+theorem MessageDelivery.failed_delivery_posts {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {request : MessageRequest}
+    (delivered : MessageDelivery config snapshot height request) {reason : String}
+    (failed : delivered.outcome = .failed reason) :
+    delivered.posts =
+      [postAt snapshot (Inbox.cell config.domain request.sender request.target) (inboxImage delivered.remaining),
+        slotPost config snapshot delivered.decided, delivered.posted.write config snapshot] := by
+  obtain ⟨sameMail, _⟩ := delivered.failed_mail failed
+  have noPosts : delivered.outcome.posts config snapshot = [] := by rw [failed]; rfl
+  obtain ⟨inboxes, slots, _, _⟩ := delivered.seedExact
+  have seedPosts : delivered.seed.posts =
+      [postAt snapshot (Inbox.cell config.domain request.sender request.target) (inboxImage delivered.remaining)] := by
+    cases hl : delivered.seed.inboxes with
+    | nil => rw [hl] at inboxes; cases inboxes
+    | cons first rest =>
+      rw [hl] at inboxes
+      simp only [List.map_cons, List.cons.injEq, Prod.mk.injEq, List.map_eq_nil_iff] at inboxes
+      obtain ⟨⟨hs, ht, hn⟩, restNil⟩ := inboxes
+      unfold Mail.posts
+      rw [hl, slots, restNil]
+      simp [HeldInbox.cell, hs, ht, hn]
+  rw [delivered.postsExact, noPosts, sameMail, seedPosts]
+  simp
+
+/-! ### Every live cell a send or a delivery writes names a payer -/
+
+open Minidregg.Kernel.ObjectRecord (ObjectRecord)
+
+theorem option_isSome_of_eq {α : Type} {o : Option α} {a : α} (h : o = some a) : o.isSome = true := by
+  subst h; rfl
+
+theorem HeldInbox.cell_eq {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {a b : HeldInbox config snapshot} (sender : a.sender = b.sender) (target : a.target = b.target) :
+    a.cell = b.cell := by
+  unfold HeldInbox.cell
+  rw [sender, target]
+
+/-- The payer of an inbox image: its sender object's. -/
+theorem payer_inbox_image (config : Config) (bytesAt : CellId → Bytes) (inbox : Inbox.Inbox)
+    (record : ObjectRecord) (held : objectAt config bytesAt ⟨inbox.sender⟩ = some record) :
+    payerOfBytes config bytesAt (inboxImage inbox) = some record.payer := by
+  simp [payerOfBytes, inboxImage, payloadOf_image, payerRoute, routePayer, Inbox.roundTrip, held]
+
+/-- The payer of a slot image whose activity cell holds an inbox (or a record): the
+sender object's. -/
+theorem payer_slot_image_inbox (config : Config) (bytesAt : CellId → Bytes) (slot : AnswerSlot.Slot)
+    (inbox : Inbox.Inbox) (record : ObjectRecord) (held : inboxAt bytesAt slot.activity = some inbox)
+    (owner : objectAt config bytesAt ⟨inbox.sender⟩ = some record) :
+    (payerOfBytes config bytesAt (image .slot (AnswerSlot.key slot.name) (AnswerSlot.encode slot))).isSome = true := by
+  cases hr : recordAt bytesAt slot.activity <;>
+    simp [payerOfBytes, payloadOf_image, payerRoute, routePayer, AnswerSlot.roundTrip, hr, held, owner]
+
+theorem afterPosts_of_nodup {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) :
+    ∀ (posts : List Post), (posts.map Post.cell).Nodup → ∀ post ∈ posts,
+      afterPosts snapshot posts post.cell = post.bytes
+  | [], _, post, member => by cases member
+  | first :: rest, nodup, post, member => by
+    rw [List.map_cons, List.nodup_cons] at nodup
+    by_cases same : first.cell = post.cell
+    · have isFirst : post = first := by
+        rcases List.mem_cons.mp member with h | inRest
+        · exact h
+        · exact absurd (by rw [same]; exact List.mem_map.mpr ⟨post, inRest, rfl⟩) nodup.1
+      subst isFirst
+      exact afterPosts_first snapshot post rest
+    · have tail := afterPosts_of_nodup snapshot rest nodup.2 post (by
+        rcases List.mem_cons.mp member with h | inRest
+        · exact absurd (by rw [h]) same
+        · exact inRest)
+      have skip : afterPosts snapshot (first :: rest) post.cell = afterPosts snapshot rest post.cell := by
+        simp [afterPosts, List.find?_cons, same]
+      rw [skip, tail]
+
+theorem objectAt_afterPosts {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (posts : List Post) (object : CellId)
+    (unwritten : ∀ post ∈ posts, post.cell ≠ objectCell config.domain object) :
+    objectAt config (afterPosts snapshot posts) object = objectAt config snapshot.canonicalBytes object := by
+  unfold objectAt
+  rw [afterPosts_unwritten snapshot posts _ unwritten]
+
+theorem inboxAt_posted {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (posts : List Post)
+    (nodup : (posts.map Post.cell).Nodup) (post : Post) (member : post ∈ posts) (inbox : Inbox.Inbox)
+    (isImage : post.bytes = inboxImage inbox) :
+    inboxAt (afterPosts snapshot posts) post.cell = some inbox := by
+  unfold inboxAt
+  rw [afterPosts_of_nodup snapshot posts nodup post member, isImage]
+  simp [inboxImage, bodyOf_image, Inbox.roundTrip]
+
+/-- **Anchored**: every reply slot a mail opens (one it did not read) answers to an inbox cell the mail holds. -/
+def Mail.Anchored {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    (mail : Mail config snapshot) : Prop :=
+  ∀ slot ∈ mail.slots, slot.read = none → ∃ held ∈ mail.inboxes, held.cell = slot.now.activity
+
+theorem Mail.empty_anchored {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes} :
+    Mail.Anchored (Mail.empty : Mail config snapshot) := by
+  intro slot member
+  cases member
+
+theorem holdInbox_cover {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {mail : Mail config snapshot} {sender target : Nat} {held : HeldInbox config snapshot}
+    {others : List (HeldInbox config snapshot)}
+    (ok : holdInbox config snapshot mail sender target = .ok (held, others)) :
+    held.sender = sender ∧ held.target = target ∧
+      ∀ other ∈ mail.inboxes, other ∈ others ∨ (other.sender = sender ∧ other.target = target) := by
+  unfold holdInbox at ok
+  split at ok
+  · rename_i found hit
+    cases ok
+    have hits := List.find?_some hit
+    simp only [Bool.and_eq_true, beq_iff_eq] at hits
+    refine ⟨hits.1, hits.2, fun other member => ?_⟩
+    by_cases same : (other.sender == sender && other.target == target) = true
+    · simp only [Bool.and_eq_true, beq_iff_eq] at same
+      exact .inr same
+    · exact .inl (List.mem_filter.mpr ⟨member, by
+      cases h : (other.sender == sender && other.target == target) with
+      | true => exact absurd h same
+      | false => simp [h]⟩)
+  · split at ok
+    · cases ok
+    · split at ok
+      · split at ok
+        · cases ok
+          exact ⟨rfl, rfl, fun other member => .inl member⟩
+        · cases ok
+      · cases ok
+
+theorem holdSlot_cover {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {mail : Mail config snapshot} {name : Digest} {held : HeldSlot config snapshot}
+    {others : List (HeldSlot config snapshot)}
+    (ok : holdSlot config snapshot mail name = .ok (held, others)) :
+    (∀ other ∈ others, other ∈ mail.slots) ∧ (held ∈ mail.slots ∨ held.read ≠ none) := by
+  unfold holdSlot at ok
+  split at ok
+  · rename_i found hit
+    cases ok
+    exact ⟨fun other member => (List.mem_filter.mp member).1, .inl (List.mem_of_find?_eq_some hit)⟩
+  · split at ok
+    · cases ok
+    · repeat' split at ok
+      all_goals first
+        | (cases ok; done)
+        | (cases ok; exact ⟨fun other member => member, Or.inr (by simp)⟩)
+
+theorem openSlot_fresh {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {mail : Mail config snapshot} {name : Digest} {inbox : CellId} {slot : HeldSlot config snapshot}
+    (ok : openSlot config snapshot mail name inbox = .ok slot) :
+    slot.read = none ∧ slot.now.activity = inbox := by
+  simp only [openSlot] at ok
+  repeat' split at ok
+  all_goals first
+    | (cases ok; done)
+    | (cases ok; exact ⟨rfl, rfl⟩)
+
+/-- Sending keeps every inbox cell the mail holds. -/
+theorem Mail.send_inboxes_persist {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {mail next : Mail config snapshot} {message : Inbox.Message} {destination : Destination}
+    (sent : mail.send message destination = .ok next) :
+    ∀ held ∈ mail.inboxes, ∃ held' ∈ next.inboxes, held'.cell = held.cell := by
+  cases destination with
+  | object target =>
+    simp only [Mail.send] at sent
+    repeat' split at sent
+    all_goals try (cases sent; done)
+    have holdOk := ‹holdInbox config snapshot mail message.sender target = .ok (_, _)›
+    obtain ⟨hs, ht, cover⟩ := holdInbox_cover holdOk
+    cases sent
+    intro held member
+    rcases cover held member with inOthers | same
+    · exact ⟨held, List.mem_append.mpr (.inl inOthers), rfl⟩
+    · exact ⟨_, List.mem_append.mpr (.inr (List.mem_singleton.mpr rfl)),
+        HeldInbox.cell_eq (hs.trans same.1.symm) (ht.trans same.2.symm)⟩
+  | slot name =>
+    simp only [Mail.send] at sent
+    repeat' split at sent
+    all_goals try (cases sent; done)
+    cases sent
+    intro held member
+    exact ⟨held, member, rfl⟩
+
+/-- **Sending keeps a mail anchored.** -/
+theorem Mail.send_anchored {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {mail next : Mail config snapshot} {message : Inbox.Message} {destination : Destination}
+    (anchored : Mail.Anchored mail) (sent : mail.send message destination = .ok next) :
+    Mail.Anchored next := by
+  have persist := Mail.send_inboxes_persist sent
+  cases destination with
+  | object target =>
+    simp only [Mail.send] at sent
+    repeat' split at sent
+    all_goals try (cases sent; done)
+    have openOk := ‹openSlot config snapshot mail message.id _ = .ok _›
+    obtain ⟨_, activity⟩ := openSlot_fresh openOk
+    cases sent
+    intro slot member opened
+    rcases List.mem_append.mp member with old | fresh
+    · obtain ⟨held, hm, hc⟩ := anchored slot old opened
+      obtain ⟨held', hm', hc'⟩ := persist held hm
+      exact ⟨held', hm', hc'.trans hc⟩
+    · have same := List.mem_singleton.mp fresh
+      subst same
+      rw [activity]
+      exact ⟨_, List.mem_append.mpr (.inr (List.mem_singleton.mpr rfl)), rfl⟩
+  | slot name =>
+    simp only [Mail.send] at sent
+    repeat' split at sent
+    all_goals try (cases sent; done)
+    have holdOk := ‹holdSlot config snapshot mail name = .ok (_, _)›
+    obtain ⟨others, heldCover⟩ := holdSlot_cover holdOk
+    cases sent
+    intro slot member opened
+    rcases List.mem_append.mp member with old | updated
+    · exact anchored slot (others slot old) opened
+    · have same := List.mem_singleton.mp updated
+      subst same
+      rcases heldCover with inMail | read
+      · have a := anchored _ inMail opened
+        exact a
+      · exact absurd opened read
+
+theorem postMail_anchored {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    (postage : Minidregg.Compiler.ObjectiveInvocationClaim.Capacity) (refund : AccountId) :
+    ∀ (outs : List Outgoing) (mail next : Mail config snapshot),
+      postMail config snapshot postage refund mail outs = .ok next → Mail.Anchored mail → Mail.Anchored next
+  | [], mail, next, ok, anchored => by
+    simp only [postMail] at ok
+    cases ok
+    exact anchored
+  | out :: rest, mail, next, ok, anchored => by
+    simp only [postMail] at ok
+    split at ok
+    · cases ok
+    · rename_i mail' sent
+      exact postMail_anchored postage refund rest mail' next ok (Mail.send_anchored anchored sent)
+
+theorem forward_anchored {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes} :
+    ∀ (reference : Option Nat) (queued : List Inbox.Message) (mail : Mail config snapshot),
+      Mail.Anchored mail → Mail.Anchored (forward reference mail queued).1
+  | reference, [], mail, anchored => anchored
+  | reference, message :: rest, mail, anchored => by
+    simp only [forward]
+    split
+    · rename_i next hmatch
+      cases reference with
+      | none => simp at hmatch
+      | some target =>
+        have sent : mail.send message (.object target) = .ok next := by simpa using hmatch
+        exact forward_anchored (some target) rest next (Mail.send_anchored anchored sent)
+    · exact forward_anchored reference rest mail anchored
+
+theorem forward_inboxes_persist {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes} :
+    ∀ (reference : Option Nat) (queued : List Inbox.Message) (mail : Mail config snapshot),
+      ∀ held ∈ mail.inboxes, ∃ held' ∈ (forward reference mail queued).1.inboxes, held'.cell = held.cell
+  | reference, [], mail, held, member => ⟨held, member, rfl⟩
+  | reference, message :: rest, mail, held, member => by
+    simp only [forward]
+    split
+    · rename_i next hmatch
+      cases reference with
+      | none => simp at hmatch
+      | some target =>
+        have sent : mail.send message (.object target) = .ok next := by simpa using hmatch
+        obtain ⟨h1, m1, c1⟩ := Mail.send_inboxes_persist sent held member
+        obtain ⟨h2, m2, c2⟩ := forward_inboxes_persist (some target) rest next h1 m1
+        exact ⟨h2, m2, c2.trans c1⟩
+    · exact forward_inboxes_persist reference rest mail held member
+
+/-- **Every post of a mail names a payer**, in the state the turn installs. Premises (the
+census's, as `Birth.retention_cells_have_payer`'s): the posts' cells are pairwise
+distinct and none lands on an object record (a coordinate collision); the objects
+sending into the mail's inboxes have records; and a slot the mail queues on (read, not
+opened by it) still answers to an inbox cell. -/
+theorem Mail.cells_have_payer {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    (mail : Mail config snapshot) (posts : List Post)
+    (included : ∀ post ∈ mail.posts, post ∈ posts)
+    (distinct : (posts.map Post.cell).Nodup)
+    (objectsUnwritten : ∀ post ∈ posts, ∀ object, post.cell ≠ objectCell config.domain object)
+    (anchored : Mail.Anchored mail)
+    (owned : ∀ held ∈ mail.inboxes, (objectAt config snapshot.canonicalBytes ⟨held.sender⟩).isSome = true)
+    (pipelined : ∀ held ∈ mail.slots, held.read ≠ none → ∃ inbox,
+      inboxAt (afterPosts snapshot posts) held.now.activity = some inbox ∧
+        (objectAt config snapshot.canonicalBytes ⟨inbox.sender⟩).isSome = true) :
+    ∀ post ∈ mail.posts, (payerOfBytes config (afterPosts snapshot posts) post.bytes).isSome = true := by
+  have ownedAfter : ∀ (sender : Nat), (objectAt config snapshot.canonicalBytes ⟨sender⟩).isSome = true →
+      ∃ record, objectAt config (afterPosts snapshot posts) ⟨sender⟩ = some record := by
+    intro sender isSome
+    rw [objectAt_afterPosts config snapshot posts ⟨sender⟩ (fun post member => objectsUnwritten post member _)]
+    exact Option.isSome_iff_exists.mp isSome
+  intro post member
+  rcases List.mem_append.mp member with inInbox | inSlot
+  · obtain ⟨held, hmem, rfl⟩ := List.mem_map.mp inInbox
+    obtain ⟨record, hrec⟩ := ownedAfter held.sender (owned held hmem)
+    have ends := held.ends.1
+    exact option_isSome_of_eq (payer_inbox_image config _ held.now record (by rw [ends]; exact hrec))
+  · obtain ⟨held, hmem, rfl⟩ := List.mem_map.mp inSlot
+    have inboxOf : ∃ inbox, inboxAt (afterPosts snapshot posts) held.now.activity = some inbox ∧
+        (objectAt config snapshot.canonicalBytes ⟨inbox.sender⟩).isSome = true := by
+      by_cases fresh : held.read = none
+      · obtain ⟨h, hm, hcell⟩ := anchored held hmem fresh
+        have inPosts := included _ (List.mem_append.mpr (.inl (List.mem_map.mpr ⟨h, hm, rfl⟩)))
+        refine ⟨h.now, ?_, ?_⟩
+        · rw [← hcell]
+          exact inboxAt_posted snapshot posts distinct _ inPosts h.now rfl
+        · rw [h.ends.1]; exact owned h hm
+      · exact pipelined held hmem fresh
+    obtain ⟨inbox, hin, hown⟩ := inboxOf
+    obtain ⟨record, hrec⟩ := ownedAfter inbox.sender hown
+    exact payer_slot_image_inbox config _ held.now inbox record hin hrec
+
+/-- **`retention_cells_have_payer`, an invocation.** Every cell an admitted invocation
+leaves holding an activity payload names its payer in the installed state: a state
+cell its object's `ObjectRecord.payer`, an inbox its sender object's, a reply slot the
+payer of the inbox it answers to. Premises: as `Mail.cells_have_payer`. The inhabitants
+are the invocations of the send journeys (RECORD: journey-send S1-S6); no closed
+invocation is constructible in Lean (the call tree runs a program). -/
+theorem Invocation.retention_cells_have_payer {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {request : InvokeRequest}
+    (invoked : Invocation config snapshot height request)
+    (distinct : (invoked.posts.map Post.cell).Nodup)
+    (objectsUnwritten : ∀ post ∈ invoked.posts, ∀ object, post.cell ≠ objectCell config.domain object)
+    (owned : ∀ held ∈ invoked.mail.inboxes,
+      (objectAt config snapshot.canonicalBytes ⟨held.sender⟩).isSome = true)
+    (pipelined : ∀ held ∈ invoked.mail.slots, held.read ≠ none → ∃ inbox,
+      inboxAt (afterPosts snapshot invoked.posts) held.now.activity = some inbox ∧
+        (objectAt config snapshot.canonicalBytes ⟨inbox.sender⟩).isSome = true) :
+    CellsPaid config (afterPosts snapshot invoked.posts) (invoked.posts.map Post.cell) := by
+  obtain ⟨read, _⟩ :=
+    exec_invariant config snapshot height request.authority (invokeTransaction request) _ [] _ _ _ _ _ _
+      invoked.execExact (by simp) (by intro _ _ h; cases h) (by intro _ h; cases h)
+  have anchored : Mail.Anchored invoked.mail :=
+    postMail_anchored request.postage request.account _ _ _ invoked.mailExact Mail.empty_anchored
+  apply cellsPaid_of_posts
+  intro post member live
+  have inPosts := member
+  rw [invoked.postsExact] at member
+  rcases List.mem_append.mp member with inFront | isBook
+  · rcases List.mem_append.mp inFront with inJournal | inMail
+    · obtain ⟨entry, entryIn, state, shape⟩ := Journal.posts_state invoked.journal config snapshot post inJournal
+      have held : objectAt config (afterPosts snapshot invoked.posts) entry.object = some entry.record := by
+        rw [objectAt_afterPosts config snapshot invoked.posts entry.object
+          (fun post member => objectsUnwritten post member _)]
+        exact objectAt_of_read (read entry entryIn).2
+      rw [shape]
+      exact option_isSome_of_eq (payer_state_image config _ entry.object state entry.record held)
+    · exact Mail.cells_have_payer invoked.mail invoked.posts
+        (fun post member => by
+          rw [invoked.postsExact]
+          exact List.mem_append.mpr (.inl (List.mem_append.mpr (.inr member))))
+        distinct objectsUnwritten anchored owned pipelined post inMail
+  · simp only [List.mem_singleton] at isBook
+    subst isBook
+    rw [Postings.write_payload] at live
+    cases live
+
+theorem runMessage_read {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height target : Nat} {message : Inbox.Message} {result : Data} {journal : Journal}
+    (ran : runMessage config snapshot height target message = .replied result journal) :
+    ObjectsRead config snapshot journal := by
+  unfold runMessage at ran
+  split at ran
+  · cases ran
+  · split at ran
+    · cases ran
+    · rename_i execExact
+      split at ran
+      · cases ran
+        obtain ⟨read, _⟩ := exec_invariant config snapshot height _ _ _ [] _ _ _ _ _ _ execExact
+          (by simp) (by intro _ _ h; cases h) (by intro _ h; cases h)
+        exact read
+      · cases ran
+
+/-- **`retention_cells_have_payer`, a delivery** (failed or not). Every cell an admitted
+delivery leaves holding an activity payload names its payer in the installed state: the
+state cells its call tree wrote their object's, the inboxes (the popped one and the
+forwarded ones) their sender object's, the slots it opens and the slot it decides the
+payer of the inbox they answer to. Premises: as `Mail.cells_have_payer`, and that the
+slot the message answers to is the reply slot of the inbox that held it
+(`activity`: established by `openSlot`, which `deliverMessage` does not recheck). -/
+theorem MessageDelivery.retention_cells_have_payer {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {request : MessageRequest}
+    (delivered : MessageDelivery config snapshot height request)
+    (distinct : (delivered.posts.map Post.cell).Nodup)
+    (objectsUnwritten : ∀ post ∈ delivered.posts, ∀ object, post.cell ≠ objectCell config.domain object)
+    (owned : ∀ held ∈ delivered.mail.inboxes,
+      (objectAt config snapshot.canonicalBytes ⟨held.sender⟩).isSome = true)
+    (pipelined : ∀ held ∈ delivered.mail.slots, held.read ≠ none → ∃ inbox,
+      inboxAt (afterPosts snapshot delivered.posts) held.now.activity = some inbox ∧
+        (objectAt config snapshot.canonicalBytes ⟨inbox.sender⟩).isSome = true)
+    (activity : delivered.slot.activity = Inbox.cell config.domain request.sender request.target) :
+    CellsPaid config (afterPosts snapshot delivered.posts) (delivered.posts.map Post.cell) := by
+  have seedAnchored : Mail.Anchored delivered.seed := by
+    intro slot member
+    rw [delivered.seedExact.2.1] at member
+    cases member
+  have anchored : Mail.Anchored delivered.mail := by
+    have := forward_anchored delivered.outcome.reference delivered.slot.queued delivered.seed seedAnchored
+    rw [delivered.forwarded] at this
+    exact this
+  have mailIn : ∀ post ∈ delivered.mail.posts, post ∈ delivered.posts := by
+    intro post member
+    rw [delivered.postsExact]
+    exact List.mem_append.mpr (.inl (List.mem_append.mpr (.inr member)))
+  apply cellsPaid_of_posts
+  intro post member live
+  rw [delivered.postsExact] at member
+  rcases List.mem_append.mp member with inFront | last
+  · rcases List.mem_append.mp inFront with inOutcome | inMail
+    · rcases hout : delivered.outcome with ⟨result, journal⟩ | reason
+      · rw [hout] at inOutcome
+        have ran := delivered.outcomeExact
+        rw [hout] at ran
+        have read := runMessage_read ran
+        obtain ⟨entry, entryIn, state, shape⟩ := Journal.posts_state journal config snapshot post inOutcome
+        have held : objectAt config (afterPosts snapshot delivered.posts) entry.object = some entry.record := by
+          rw [objectAt_afterPosts config snapshot delivered.posts entry.object
+            (fun post member => objectsUnwritten post member _)]
+          exact objectAt_of_read (read entry entryIn).2
+        rw [shape]
+        exact option_isSome_of_eq (payer_state_image config _ entry.object state entry.record held)
+      · rw [hout] at inOutcome
+        simp [Outcome.posts] at inOutcome
+    · exact Mail.cells_have_payer delivered.mail delivered.posts mailIn distinct objectsUnwritten anchored owned
+        pipelined post inMail
+  · simp only [List.mem_cons, List.mem_singleton, List.not_mem_nil, or_false] at last
+    rcases last with isSlot | isBook
+    · subst isSlot
+      obtain ⟨_, _, _, decided⟩ := AnswerSlot.decideDelivery_single delivered.decidedExact
+      have decidedActivity : delivered.decided.activity = delivered.slot.activity := by rw [decided]
+      have inboxCell : ∃ held ∈ delivered.mail.inboxes,
+          held.cell = Inbox.cell config.domain request.sender request.target := by
+        have seeded := delivered.seedExact.1
+        cases hl : delivered.seed.inboxes with
+        | nil => rw [hl] at seeded; cases seeded
+        | cons first rest =>
+          rw [hl] at seeded
+          simp only [List.map_cons, List.cons.injEq, Prod.mk.injEq] at seeded
+          obtain ⟨⟨hs, ht, _⟩, _⟩ := seeded
+          have firstIn : first ∈ delivered.seed.inboxes := by rw [hl]; exact List.mem_cons_self ..
+          have persisted := forward_inboxes_persist delivered.outcome.reference delivered.slot.queued
+            delivered.seed first firstIn
+          rw [delivered.forwarded] at persisted
+          obtain ⟨held, hm, hc⟩ := persisted
+          refine ⟨held, hm, hc.trans ?_⟩
+          unfold HeldInbox.cell
+          rw [hs, ht]
+      obtain ⟨held, hm, hcell⟩ := inboxCell
+      have inPosts := mailIn _ (List.mem_append.mpr (.inl (List.mem_map.mpr ⟨held, hm, rfl⟩)))
+      have inboxHeld : inboxAt (afterPosts snapshot delivered.posts) delivered.decided.activity = some held.now := by
+        rw [decidedActivity, activity, ← hcell]
+        exact inboxAt_posted snapshot delivered.posts distinct _ inPosts held.now rfl
+      obtain ⟨record, hrec⟩ : ∃ record, objectAt config (afterPosts snapshot delivered.posts) ⟨held.now.sender⟩ =
+          some record := by
+        rw [objectAt_afterPosts config snapshot delivered.posts ⟨held.now.sender⟩
+          (fun post member => objectsUnwritten post member _), held.ends.1]
+        exact Option.isSome_iff_exists.mp (owned held hm)
+      exact payer_slot_image_inbox config _ delivered.decided held.now record inboxHeld hrec
+    · subst isBook
+      rw [Postings.write_payload] at live
+      cases live
+
 #assert_axioms MessageDelivery.conserves
 #assert_axioms creditTransfers_debit
 #assert_axioms MessageDelivery.debits_only_purse
 #assert_axioms MessageDelivery.pops
 #assert_axioms MessageDelivery.decides_own_slot
 #assert_axioms MessageDelivery.failed_delivery_pops
+#assert_axioms runMessage_read
+#assert_axioms MessageDelivery.retention_cells_have_payer
+#assert_axioms option_isSome_of_eq
+#assert_axioms HeldInbox.cell_eq
+#assert_axioms payer_inbox_image
+#assert_axioms payer_slot_image_inbox
+#assert_axioms afterPosts_of_nodup
+#assert_axioms objectAt_afterPosts
+#assert_axioms inboxAt_posted
+#assert_axioms Mail.empty_anchored
+#assert_axioms holdInbox_cover
+#assert_axioms holdSlot_cover
+#assert_axioms openSlot_fresh
+#assert_axioms Mail.send_inboxes_persist
+#assert_axioms Mail.send_anchored
+#assert_axioms postMail_anchored
+#assert_axioms forward_anchored
+#assert_axioms forward_inboxes_persist
+#assert_axioms Mail.cells_have_payer
+#assert_axioms Invocation.retention_cells_have_payer
+#assert_axioms Invocation.debits_only_account
+#assert_axioms Mail.send_credit
+#assert_axioms postMail_credits
+#assert_axioms Invocation.escrows_every_send
+#assert_axioms Mail.inboxes_bounded
+#assert_axioms MessageDelivery.pop_frees_message
+#assert_axioms MessageDelivery.remaining_within_bound
+#assert_axioms forward_none
+#assert_axioms MessageDelivery.failed_mail
+#assert_axioms MessageDelivery.failed_delivery_posts
 
 end Minidregg.Kernel.ObjectiveSend

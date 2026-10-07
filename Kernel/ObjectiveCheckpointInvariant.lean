@@ -699,7 +699,7 @@ theorem outcome_posts_safe {rootBytes : Bytes → Digest} {config : Config} {sna
             (by simp) (by intro _ _ h; cases h) (by intro _ h; cases h)
           simp only [ObjectiveCall.Journal.posts, List.mem_filterMap] at member
           obtain ⟨entry, entryIn, made⟩ := member
-          obtain ⟨current, readOk⟩ := read entry entryIn
+          obtain ⟨⟨current, readOk⟩, _⟩ := read entry entryIn
           split at made
           · cases found : entry.current with
             | none => simp [found] at made
@@ -831,6 +831,500 @@ theorem finalize_safe {rootBytes : Bytes → Digest} {config : Config} {snapshot
             subst replaced
             exact safe original inOriginal
         · exact inert_safe made.held.inert post closing
+
+/-! ## Who may write an inbox, who may decide a delivery slot (OB8, over the WHOLE turn sum)
+
+Two facts about the object kernel's turns that the per-turn theorems
+(`MessageDelivery.decides_own_slot`, `Inbox.Lawful`) do not state, because each
+speaks about one turn:
+
+* `AdmittedTurn.inbox_writers`: a post of an admitted turn's final posts that
+  installs an inbox (an activity payload of role `inbox`: `HoldsInbox`) comes from
+  a turn that SENDS (`AdmittedTurn.Sends`: an invocation whose call tree sent, or a
+  `deliverMessage`, which forwards).
+* `AdmittedTurn.delivery_deciders`: a post that DECIDES a delivery slot
+  (`DecidesDelivery`: a slot payload whose decider is `delivery m` and whose phase
+  is decided) comes from `deliverMessage`, and from no other turn.
+
+Both are proved by cases over the WHOLE `AdmittedTurn` sum, with NO wildcard arm,
+and `AdmittedTurn.Sends` / `AdmittedTurn.DeliversMessage` list every constructor:
+a new turn constructor makes the definitions and the proofs fail to elaborate
+until its author has said, arm by arm, whether it writes an inbox or decides a
+delivery slot. That is the point of stating the facts here and not per turn. The
+facts are about the turn's FINAL posts (`ActivitySeatEnd.finalize`, which adds the
+seat cells an ending activity closes and rewrites the Book post), and, through
+`finalIntent_writes`, about every write of its final intent
+(`AdmittedTurn.final_writes_inbox_writers`, `AdmittedTurn.final_writes_delivery_deciders`).
+
+They are statements about BYTES (the role tag of the activity payload a write
+installs), not about coordinates: which coordinate an inbox sits at is a hash
+(`Inbox.cell`), and the checkpoint invariant needs no coordinate disjointness.
+The detectors are non-vacuous (`holdsInbox_inboxImage`, `decidesDelivery_decided_slot`,
+`MessageDelivery.decides_delivery_slot`): the images a send and a delivery write
+satisfy them. -/
+
+/-- The bytes hold an inbox: an activity payload of role `inbox`. -/
+def HoldsInbox (bytes : Bytes) : Prop := bodyOf .inbox bytes ≠ none
+
+/-- The bytes hold a delivery slot that is DECIDED: a slot payload whose decider
+is the role `delivery message` and whose phase is `decided`. -/
+def DecidesDelivery (bytes : Bytes) : Prop :=
+  ∃ (body : Bytes) (slot : AnswerSlot.Slot) (message : Digest) (decision : AnswerSlot.Decision) (at_ : Nat),
+    bodyOf .slot bytes = some body ∧ AnswerSlot.decode body = some slot ∧
+      slot.decider = .delivery message ∧ slot.phase = .decided decision at_
+
+theorem holdsInbox_inboxImage (inbox : Inbox.Inbox) : HoldsInbox (inboxImage inbox) := by
+  intro absent
+  unfold inboxImage at absent
+  rw [bodyOf_image] at absent
+  cases absent
+
+theorem decidesDelivery_decided_slot {slot : AnswerSlot.Slot} {message : Digest}
+    {decision : AnswerSlot.Decision} {at_ : Nat} (role : slot.decider = .delivery message)
+    (decided : slot.phase = .decided decision at_) :
+    DecidesDelivery (image .slot (AnswerSlot.key slot.name) (AnswerSlot.encode slot)) :=
+  ⟨AnswerSlot.encode slot, slot, message, decision, at_, bodyOf_image _ _ _, AnswerSlot.roundTrip slot, role,
+    decided⟩
+
+theorem not_holdsInbox_of_payload_none {bytes : Bytes} (absent : payloadOf bytes = none) :
+    ¬ HoldsInbox bytes := fun held => held (bodyOf_of_payload_none absent)
+
+theorem not_holdsInbox_image {bytes : Bytes} {role : ObjectiveActivityCell.Role} {key body : Bytes}
+    (shape : bytes = image role key body) (other : role ≠ .inbox) : ¬ HoldsInbox bytes := by
+  subst shape
+  exact fun held => held (bodyOf_image_other key body other)
+
+theorem not_decidesDelivery_of_payload_none {bytes : Bytes} (absent : payloadOf bytes = none) :
+    ¬ DecidesDelivery bytes := by
+  rintro ⟨_, _, _, _, _, found, _⟩
+  rw [bodyOf_of_payload_none absent] at found
+  cases found
+
+theorem not_decidesDelivery_image {bytes : Bytes} {role : ObjectiveActivityCell.Role} {key body : Bytes}
+    (shape : bytes = image role key body) (other : role ≠ .slot) : ¬ DecidesDelivery bytes := by
+  subst shape
+  rintro ⟨_, _, _, _, _, found, _⟩
+  rw [bodyOf_image_other key body other] at found
+  cases found
+
+/-- A slot image decides no delivery slot when the slot it holds does not. -/
+theorem not_decidesDelivery_slot {bytes : Bytes} {slot : AnswerSlot.Slot}
+    (shape : bytes = image .slot (AnswerSlot.key slot.name) (AnswerSlot.encode slot))
+    (undecided : ∀ (message : Digest) (decision : AnswerSlot.Decision) (at_ : Nat),
+      slot.decider = .delivery message → slot.phase ≠ .decided decision at_) :
+    ¬ DecidesDelivery bytes := by
+  subst shape
+  rintro ⟨stored, other, message, decision, at_, found, decoded, role, phase⟩
+  rw [bodyOf_image] at found
+  cases found
+  rw [AnswerSlot.roundTrip] at decoded
+  cases decoded
+  exact undecided message decision at_ role phase
+
+/-- A post that holds no inbox and decides no delivery slot. -/
+def Quiet (bytes : Bytes) : Prop := ¬ HoldsInbox bytes ∧ ¬ DecidesDelivery bytes
+
+theorem quiet_of_payload_none {bytes : Bytes} (absent : payloadOf bytes = none) : Quiet bytes :=
+  ⟨not_holdsInbox_of_payload_none absent, not_decidesDelivery_of_payload_none absent⟩
+
+theorem quiet_image {bytes : Bytes} {role : ObjectiveActivityCell.Role} {key body : Bytes}
+    (shape : bytes = image role key body) (notInbox : role ≠ .inbox) (notSlot : role ≠ .slot) : Quiet bytes :=
+  ⟨not_holdsInbox_image shape notInbox, not_decidesDelivery_image shape notSlot⟩
+
+theorem quiet_recordPost {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (cell : CellId) (record : Record) : Quiet (recordPost config snapshot cell record).bytes := by
+  cases hp : record.phase with
+  | awaiting await =>
+    exact quiet_image (role := .record) (key := recordKey record.object record.activity)
+      (body := encodeRecord record) (by simp [recordPost, recordImage, postAt, hp]) (by decide) (by decide)
+  | done result =>
+    exact quiet_of_payload_none (by simp [recordPost, recordImage, postAt, hp, payloadOf_retired])
+  | faulted reason =>
+    exact quiet_of_payload_none (by simp [recordPost, recordImage, postAt, hp, payloadOf_retired])
+
+/-- A yield's posts (its declared-state write, the slot it opens) are quiet: the
+slot it opens is open. -/
+theorem yielded_posts_quiet {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat}
+    {current : Option ObjectState} {viewed : Bool} {segment : Segment} {yielded : Option YieldCommit}
+    (ok : segmentCommit config snapshot height transaction cell object generation current viewed segment =
+      .ok yielded) :
+    ∀ post ∈ (yielded.map YieldCommit.posts).getD [], Quiet post.bytes := by
+  intro post member
+  cases yielded with
+  | none => simp at member
+  | some committed =>
+    obtain ⟨_, _, _, committedOk⟩ := segmentCommit_spec ok
+    rcases commitYield_posts committedOk post member with ⟨state, isState⟩ | ⟨slot, _, opened, isSlot⟩
+    · exact quiet_image (role := .state) (key := stateKey object) (body := ObjectState.encodeObjectState state)
+        (isState.trans rfl) (by decide) (by decide)
+    · exact ⟨not_holdsInbox_image isSlot (by decide),
+        not_decidesDelivery_slot isSlot (fun _ _ _ _ phase => by rw [opened] at phase; cases phase)⟩
+
+theorem birth_quiet {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : BirthRequest} (born : Birth config snapshot height request) :
+    ∀ post ∈ born.posts, Quiet post.bytes := by
+  rw [born.postsExact]
+  intro post member
+  simp only [List.mem_cons, List.mem_append, List.not_mem_nil, or_false] at member
+  rcases member with isRecord | (inYield | isBook)
+  · subst isRecord; exact quiet_recordPost config snapshot born.cell born.record
+  · exact yielded_posts_quiet born.yieldedExact post inYield
+  · subst isBook; exact quiet_of_payload_none (Postings.write_payload config snapshot born.posted)
+
+theorem delivery_quiet {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request) :
+    ∀ post ∈ delivery.posts, Quiet post.bytes := by
+  have retired := settle_posts_retired delivery.settled
+  rw [delivery.postsExact]
+  intro post member
+  simp only [List.mem_cons, List.mem_append, List.not_mem_nil, or_false] at member
+  rcases member with isRecord | ((inSettlement | inYield) | isBook)
+  · subst isRecord; exact quiet_recordPost config snapshot request.record delivery.next
+  · exact quiet_of_payload_none (by rw [retired post inSettlement]; exact payloadOf_retired)
+  · exact yielded_posts_quiet (resumedSegment_commit delivery.endExact) post inYield
+  · subst isBook; exact quiet_of_payload_none (Postings.write_payload config snapshot delivery.posted)
+
+theorem exhaustion_quiet {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : ExhaustRequest} (exhausted : Exhaustion config snapshot height request) :
+    ∀ post ∈ exhausted.posts, Quiet post.bytes := by
+  rw [exhausted.postsExact]
+  intro post member
+  simp only [List.mem_cons, List.not_mem_nil, or_false] at member
+  rcases member with isRecord | isBook
+  · subst isRecord; exact quiet_recordPost config snapshot request.record exhausted.next
+  · subst isBook; exact quiet_of_payload_none (Postings.write_payload config snapshot exhausted.posted)
+
+theorem abandonSlot_quiet {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {await : Await} {posts : List Post} {claims : List StableNullifier}
+    (ok : abandonSlot config snapshot await = .ok (posts, claims)) :
+    ∀ post ∈ posts, Quiet post.bytes := by
+  unfold abandonSlot at ok
+  split at ok
+  · simp only [Except.ok.injEq, Prod.mk.injEq] at ok
+    rw [← ok.1]; simp
+  · rename_i name _ _
+    cases read : readSlot config snapshot name with
+    | none => simp [read] at ok
+    | some slot =>
+      simp only [read] at ok
+      have vacate : ∀ post ∈ [slotRetire config snapshot name], Quiet post.bytes := by
+        intro post member
+        simp only [List.mem_singleton] at member
+        subst member
+        exact quiet_of_payload_none payloadOf_retired
+      split at ok <;>
+      · simp only [Except.ok.injEq, Prod.mk.injEq] at ok
+        rw [← ok.1]; exact vacate
+
+theorem abandonment_quiet {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : AbandonRequest} (abandoned : Abandonment config snapshot height request) :
+    ∀ post ∈ abandoned.posts, Quiet post.bytes := by
+  rw [abandoned.postsExact]
+  intro post member
+  simp only [List.mem_cons, List.mem_append, List.not_mem_nil, or_false] at member
+  rcases member with isRecord | (inSlot | isBook)
+  · subst isRecord; exact quiet_of_payload_none payloadOf_retired
+  · exact abandonSlot_quiet abandoned.slotExact post inSlot
+  · subst isBook; exact quiet_of_payload_none (Postings.write_payload config snapshot abandoned.posted)
+
+/-- A resolution decides a SUBJECT slot (`AnswerSlot.decide_single_decider`): its
+decided slot keeps the decider `subject`, never `delivery`. -/
+theorem resolution_quiet {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : ResolveRequest} (resolution : Resolution config snapshot height request) :
+    ∀ post ∈ resolution.posts, Quiet post.bytes := by
+  rw [resolution.postsExact]
+  intro post member
+  simp only [List.mem_singleton] at member
+  subst member
+  obtain ⟨subject, _, _, decided, _⟩ := AnswerSlot.decide_single_decider resolution.decidedExact
+  have role : resolution.decided.decider = .subject request.subject := by rw [decided]; exact subject
+  exact ⟨not_holdsInbox_image (role := .slot) (key := AnswerSlot.key resolution.decided.name)
+      (body := AnswerSlot.encode resolution.decided) rfl (by decide),
+    not_decidesDelivery_slot (slot := resolution.decided) rfl
+      (fun message _ _ isDelivery _ => by rw [role] at isDelivery; cases isDelivery)⟩
+
+theorem publication_quiet {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {stored : Stored} (publication : Publication config snapshot stored) :
+    ∀ post ∈ publication.posts, Quiet post.bytes := by
+  rw [publication.postsExact]
+  intro post member
+  simp only [List.mem_singleton] at member
+  subst member
+  exact quiet_image (role := .package) rfl (by decide) (by decide)
+
+theorem creation_quiet {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {request : CreateRequest} (created : Creation config snapshot request) :
+    ∀ post ∈ created.posts, Quiet post.bytes := by
+  rw [created.postsExact]
+  intro post member
+  simp only [List.mem_singleton] at member
+  subst member
+  exact quiet_image (role := .object) rfl (by decide) (by decide)
+
+theorem stateWrite_quiet {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : StateWriteRequest} (written : StateWrite config snapshot height request) :
+    ∀ post ∈ written.posts, Quiet post.bytes := by
+  rw [written.postsExact]
+  intro post member
+  simp only [List.mem_singleton] at member
+  subst member
+  exact quiet_image (role := .state) rfl (by decide) (by decide)
+
+/-- What an invocation posts, by payload: the Book, a state image, or its mail. -/
+theorem invocation_posts_cases {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : ObjectiveCall.InvokeRequest}
+    (invoked : ObjectiveCall.Invocation config snapshot height request) :
+    ∀ post ∈ invoked.posts, payloadOf post.bytes = none ∨
+      (∃ (object : CellId) (state : ObjectState), post.bytes = stateImage object state) ∨
+      post ∈ invoked.mail.posts := by
+  rw [invoked.postsExact]
+  intro post member
+  rcases List.mem_append.mp member with inFront | isBook
+  · rcases List.mem_append.mp inFront with inJournal | inMail
+    · obtain ⟨entry, _, state, shape⟩ := ObjectiveCall.Journal.posts_state invoked.journal config snapshot post inJournal
+      exact .inr (.inl ⟨entry.object, state, (congrArg Post.bytes shape).trans rfl⟩)
+    · exact .inr (.inr inMail)
+  · simp only [List.mem_singleton] at isBook
+    subst isBook
+    exact .inl (Postings.write_payload config snapshot invoked.posted)
+
+/-- An invocation whose call tree sent nothing has no mail. -/
+theorem invocation_mail_nil {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : ObjectiveCall.InvokeRequest}
+    (invoked : ObjectiveCall.Invocation config snapshot height request)
+    (silent : invoked.journal.outbox = []) : invoked.mail.posts = [] := by
+  have sent := invoked.mailExact
+  rw [silent] at sent
+  have same : (Except.ok ObjectiveCall.Mail.empty : Except ObjectiveCall.CallRefusal (ObjectiveCall.Mail config snapshot)) =
+      Except.ok invoked.mail :=
+    (show ObjectiveCall.postMail config snapshot request.postage request.account ObjectiveCall.Mail.empty [] =
+      .ok ObjectiveCall.Mail.empty from rfl).symm.trans sent
+  rw [← Except.ok.inj same]
+  rfl
+
+/-- The mail of a turn decides no delivery slot: the slots it writes are open. -/
+theorem mail_decides_nothing {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    (mail : ObjectiveCall.Mail config snapshot) : ∀ post ∈ mail.posts, ¬ DecidesDelivery post.bytes := by
+  intro post member
+  rcases List.mem_append.mp member with inInbox | inSlot
+  · obtain ⟨held, _, rfl⟩ := List.mem_map.mp inInbox
+    exact not_decidesDelivery_image (role := .inbox) (key := Inbox.key held.now.sender held.now.target)
+      (body := Inbox.encode held.now) rfl (by decide)
+  · obtain ⟨held, _, rfl⟩ := List.mem_map.mp inSlot
+    exact not_decidesDelivery_slot (slot := held.now) rfl
+      (fun _ _ _ _ phase => by rw [held.opened] at phase; cases phase)
+
+/-- An invocation decides no delivery slot, whatever it sent. -/
+theorem invocation_decides_nothing {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : ObjectiveCall.InvokeRequest}
+    (invoked : ObjectiveCall.Invocation config snapshot height request) :
+    ∀ post ∈ invoked.posts, ¬ DecidesDelivery post.bytes := by
+  intro post member
+  rcases invocation_posts_cases invoked post member with absent | ⟨object, state, shape⟩ | inMail
+  · exact not_decidesDelivery_of_payload_none absent
+  · exact not_decidesDelivery_image (role := .state) (key := stateKey object) (body := ObjectState.encodeObjectState state)
+      (shape.trans rfl) (by decide)
+  · exact mail_decides_nothing invoked.mail post inMail
+
+/-- An invocation whose call tree sent nothing holds no inbox. -/
+theorem invocation_silent_holds_no_inbox {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {request : ObjectiveCall.InvokeRequest}
+    (invoked : ObjectiveCall.Invocation config snapshot height request)
+    (silent : invoked.journal.outbox = []) : ∀ post ∈ invoked.posts, ¬ HoldsInbox post.bytes := by
+  intro post member
+  rcases invocation_posts_cases invoked post member with absent | ⟨object, state, shape⟩ | inMail
+  · exact not_holdsInbox_of_payload_none absent
+  · exact not_holdsInbox_image (role := .state) (key := stateKey object) (body := ObjectState.encodeObjectState state)
+      (shape.trans rfl) (by decide)
+  · rw [invocation_mail_nil invoked silent] at inMail
+    exact absurd inMail (by simp)
+
+/-- **The turns that may write an inbox.** An invocation whose call tree sent a
+message (its mail is then non-empty), and a message delivery (which forwards the
+sends queued on the slot it decides). Every constructor is listed: a new turn
+constructor must say here whether it may write an inbox. -/
+def AdmittedTurn.Sends {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} : AdmittedTurn config snapshot height → Prop
+  | .publish _ _ => False
+  | .create _ _ => False
+  | .birth _ _ => False
+  | .resolve _ _ => False
+  | .deliver _ _ => False
+  | .topUp _ _ => False
+  | .writeState _ _ => False
+  | .exhaust _ _ => False
+  | .abandon _ _ => False
+  | .invoke _ invoked => invoked.journal.outbox ≠ []
+  | .deliverMessage _ _ => True
+
+/-- **The turn that may decide a delivery slot**: `deliverMessage`, and no other.
+Every constructor is listed. -/
+def AdmittedTurn.DeliversMessage {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} : AdmittedTurn config snapshot height → Prop
+  | .publish _ _ => False
+  | .create _ _ => False
+  | .birth _ _ => False
+  | .resolve _ _ => False
+  | .deliver _ _ => False
+  | .topUp _ _ => False
+  | .writeState _ _ => False
+  | .exhaust _ _ => False
+  | .abandon _ _ => False
+  | .invoke _ _ => False
+  | .deliverMessage _ _ => True
+
+/-- Every turn but the sending ones posts no inbox: by cases over the whole sum. -/
+theorem AdmittedTurn.posts_hold_no_inbox {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} (turn : AdmittedTurn config snapshot height)
+    (silent : ¬ AdmittedTurn.Sends turn) : ∀ post ∈ turn.posts, ¬ HoldsInbox post.bytes := by
+  cases turn with
+  | publish _ publication => exact fun post member => (publication_quiet publication post member).1
+  | create _ created => exact fun post member => (creation_quiet created post member).1
+  | birth _ born => exact fun post member => (birth_quiet born post member).1
+  | resolve _ resolution => exact fun post member => (resolution_quiet resolution post member).1
+  | deliver _ delivery => exact fun post member => (delivery_quiet delivery post member).1
+  | topUp _ topped =>
+    intro post member
+    simp only [AdmittedTurn.posts, List.mem_singleton] at member
+    subst member
+    exact not_holdsInbox_of_payload_none (Postings.write_payload config snapshot topped.posted)
+  | writeState _ written => exact fun post member => (stateWrite_quiet written post member).1
+  | exhaust _ exhausted => exact fun post member => (exhaustion_quiet exhausted post member).1
+  | abandon _ abandoned => exact fun post member => (abandonment_quiet abandoned post member).1
+  | invoke _ invoked =>
+    exact invocation_silent_holds_no_inbox invoked (Classical.byContradiction fun sends => silent sends)
+  | deliverMessage _ delivered => exact (silent trivial).elim
+
+/-- Every turn but `deliverMessage` decides no delivery slot: by cases over the whole sum. -/
+theorem AdmittedTurn.posts_decide_no_delivery {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} (turn : AdmittedTurn config snapshot height)
+    (other : ¬ AdmittedTurn.DeliversMessage turn) : ∀ post ∈ turn.posts, ¬ DecidesDelivery post.bytes := by
+  cases turn with
+  | publish _ publication => exact fun post member => (publication_quiet publication post member).2
+  | create _ created => exact fun post member => (creation_quiet created post member).2
+  | birth _ born => exact fun post member => (birth_quiet born post member).2
+  | resolve _ resolution => exact fun post member => (resolution_quiet resolution post member).2
+  | deliver _ delivery => exact fun post member => (delivery_quiet delivery post member).2
+  | topUp _ topped =>
+    intro post member
+    simp only [AdmittedTurn.posts, List.mem_singleton] at member
+    subst member
+    exact not_decidesDelivery_of_payload_none (Postings.write_payload config snapshot topped.posted)
+  | writeState _ written => exact fun post member => (stateWrite_quiet written post member).2
+  | exhaust _ exhausted => exact fun post member => (exhaustion_quiet exhausted post member).2
+  | abandon _ abandoned => exact fun post member => (abandonment_quiet abandoned post member).2
+  | invoke _ invoked => exact invocation_decides_nothing invoked
+  | deliverMessage _ delivered => exact (other trivial).elim
+
+/-- **An ending turn's final posts are as quiet as its own** (a Book post or a seat
+closing post holds no activity payload). -/
+theorem finalize_posts_of {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {P : Post → Prop} (absent : ∀ post : Post, payloadOf post.bytes = none → P post)
+    (turn : AdmittedTurn config snapshot height) {posts : List Post} {extra : List ReadGuard}
+    (final : ActivitySeatEnd.finalize config snapshot height turn = .ok (posts, extra))
+    (base : ∀ post ∈ turn.posts, P post) : ∀ post ∈ posts, P post := by
+  unfold ActivitySeatEnd.finalize at final
+  cases ending : ActivitySeatEnd.AdmittedTurn.ending turn with
+  | none =>
+    rw [ending] at final
+    simp only [Except.ok.injEq, Prod.mk.injEq] at final
+    rw [← final.1]; exact base
+  | some found =>
+    obtain ⟨record, pre, posted⟩ := found
+    rw [ending] at final
+    cases joined : ActivitySeatEnd.join config snapshot height record posted with
+    | error reason => simp [joined] at final
+    | ok optional =>
+      cases optional with
+      | none =>
+        simp only [joined, Except.ok.injEq, Prod.mk.injEq] at final
+        rw [← final.1]; exact base
+      | some made =>
+        simp only [joined, Except.ok.injEq, Prod.mk.injEq] at final
+        rw [← final.1]
+        intro post member
+        unfold ActivitySeatEnd.Joined.rewrite at member
+        rcases List.mem_append.mp member with mapped | closing
+        · obtain ⟨original, inOriginal, replaced⟩ := List.mem_map.mp mapped
+          by_cases isBook : original.cell = config.bookCell
+          · rw [if_pos isBook] at replaced
+            subst replaced
+            apply absent
+            simp [ActivitySeatEnd.Joined.bookPost, postAt, payloadOf_book]
+          · rw [if_neg isBook] at replaced
+            subst replaced
+            exact base original inOriginal
+        · exact absent post (made.held.inert post closing).2
+
+/-- **Only a sending turn writes an inbox.** For every admitted turn and every
+post of its final posts: if the post installs an inbox, the turn is an invocation
+whose call tree sent, or a `deliverMessage`. By cases over the whole `AdmittedTurn`
+sum; a new constructor breaks this proof (and `AdmittedTurn.Sends`) until it is
+classified. -/
+theorem AdmittedTurn.inbox_writers {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} (turn : AdmittedTurn config snapshot height)
+    {posts : List Post} {extra : List ReadGuard}
+    (final : ActivitySeatEnd.finalize config snapshot height turn = .ok (posts, extra)) :
+    ∀ post ∈ posts, HoldsInbox post.bytes → AdmittedTurn.Sends turn := by
+  intro post member holds
+  by_cases sends : AdmittedTurn.Sends turn
+  · exact sends
+  · have quiet := finalize_posts_of (P := fun post => ¬ HoldsInbox post.bytes)
+      (fun _ absent => not_holdsInbox_of_payload_none absent) turn final
+      (AdmittedTurn.posts_hold_no_inbox turn sends)
+    exact absurd holds (quiet post member)
+
+/-- **Only `deliverMessage` decides a delivery slot.** For every admitted turn and
+every post of its final posts: if the post decides a delivery slot, the turn is a
+`deliverMessage`. By cases over the whole sum, as `AdmittedTurn.inbox_writers`. -/
+theorem AdmittedTurn.delivery_deciders {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} (turn : AdmittedTurn config snapshot height)
+    {posts : List Post} {extra : List ReadGuard}
+    (final : ActivitySeatEnd.finalize config snapshot height turn = .ok (posts, extra)) :
+    ∀ post ∈ posts, DecidesDelivery post.bytes → AdmittedTurn.DeliversMessage turn := by
+  intro post member decides
+  by_cases delivers : AdmittedTurn.DeliversMessage turn
+  · exact delivers
+  · have quiet := finalize_posts_of (P := fun post => ¬ DecidesDelivery post.bytes)
+      (fun _ absent => not_decidesDelivery_of_payload_none absent) turn final
+      (AdmittedTurn.posts_decide_no_delivery turn delivers)
+    exact absurd decides (quiet post member)
+
+/-- `AdmittedTurn.inbox_writers`, stated over the WRITES of the turn's final intent. -/
+theorem AdmittedTurn.final_writes_inbox_writers {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} (sealing : Seal) (turn : AdmittedTurn config snapshot height)
+    {posts : List Post} {extra : List ReadGuard}
+    (final : ActivitySeatEnd.finalize config snapshot height turn = .ok (posts, extra)) :
+    ∀ w ∈ (ActivitySeatEnd.AdmittedTurn.finalIntent sealing posts extra turn).writes,
+      HoldsInbox w.canonicalPostBytes → AdmittedTurn.Sends turn := by
+  intro w member holds
+  rw [finalIntent_writes sealing final] at member
+  obtain ⟨post, inPosts, rfl⟩ := List.mem_map.mp member
+  exact AdmittedTurn.inbox_writers turn final post inPosts holds
+
+/-- `AdmittedTurn.delivery_deciders`, stated over the WRITES of the turn's final intent. -/
+theorem AdmittedTurn.final_writes_delivery_deciders {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} (sealing : Seal) (turn : AdmittedTurn config snapshot height)
+    {posts : List Post} {extra : List ReadGuard}
+    (final : ActivitySeatEnd.finalize config snapshot height turn = .ok (posts, extra)) :
+    ∀ w ∈ (ActivitySeatEnd.AdmittedTurn.finalIntent sealing posts extra turn).writes,
+      DecidesDelivery w.canonicalPostBytes → AdmittedTurn.DeliversMessage turn := by
+  intro w member decides
+  rw [finalIntent_writes sealing final] at member
+  obtain ⟨post, inPosts, rfl⟩ := List.mem_map.mp member
+  exact AdmittedTurn.delivery_deciders turn final post inPosts decides
+
+/-- The delivery's own decided slot IS a delivery decision: the arm
+`AdmittedTurn.delivery_deciders` names is not empty. -/
+theorem MessageDelivery.decides_delivery_slot {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {request : ObjectiveSend.MessageRequest}
+    (delivered : ObjectiveSend.MessageDelivery config snapshot height request) :
+    DecidesDelivery (slotPost config snapshot delivered.decided).bytes := by
+  obtain ⟨_, role, _, _, decided⟩ := delivered.decides_own_slot
+  exact decidesDelivery_decided_slot (slot := delivered.decided) (message := delivered.message.id)
+    (decision := delivered.outcome.decision) (at_ := height)
+    ((congrArg AnswerSlot.Slot.decider decided).trans role) ((congrArg AnswerSlot.Slot.phase decided).trans rfl)
 
 /-! ## Reachable worlds -/
 
@@ -965,4 +1459,37 @@ theorem reachable_delivery_typed {rootBytes : Bytes → Digest} {config : Config
 #assert_axioms Step.preserves
 #assert_axioms stored_checkpoints_typed
 #assert_axioms reachable_delivery_typed
+#assert_axioms holdsInbox_inboxImage
+#assert_axioms decidesDelivery_decided_slot
+#assert_axioms not_holdsInbox_of_payload_none
+#assert_axioms not_holdsInbox_image
+#assert_axioms not_decidesDelivery_of_payload_none
+#assert_axioms not_decidesDelivery_image
+#assert_axioms not_decidesDelivery_slot
+#assert_axioms quiet_of_payload_none
+#assert_axioms quiet_image
+#assert_axioms quiet_recordPost
+#assert_axioms yielded_posts_quiet
+#assert_axioms birth_quiet
+#assert_axioms delivery_quiet
+#assert_axioms exhaustion_quiet
+#assert_axioms abandonSlot_quiet
+#assert_axioms abandonment_quiet
+#assert_axioms resolution_quiet
+#assert_axioms publication_quiet
+#assert_axioms creation_quiet
+#assert_axioms stateWrite_quiet
+#assert_axioms invocation_posts_cases
+#assert_axioms invocation_mail_nil
+#assert_axioms mail_decides_nothing
+#assert_axioms invocation_decides_nothing
+#assert_axioms invocation_silent_holds_no_inbox
+#assert_axioms AdmittedTurn.posts_hold_no_inbox
+#assert_axioms AdmittedTurn.posts_decide_no_delivery
+#assert_axioms finalize_posts_of
+#assert_axioms AdmittedTurn.inbox_writers
+#assert_axioms AdmittedTurn.delivery_deciders
+#assert_axioms AdmittedTurn.final_writes_inbox_writers
+#assert_axioms AdmittedTurn.final_writes_delivery_deciders
+#assert_axioms MessageDelivery.decides_delivery_slot
 end Minidregg.Kernel.ObjectiveCheckpointInvariant

@@ -3841,14 +3841,15 @@ theorem recordAt_recordImage (bytesAt : CellId → Bytes) (cell : CellId) (recor
   simp [recordAt, holds, recordImage, awaiting, bodyOf_image, record_roundTrip]
 
 /-- What a yield commit posts: the declared-state write (a state image of the
-object) and, for a reply await, the slot it opens for this record cell. -/
+object) and, for a reply await, the slot it opens for this record cell, OPEN
+(`slot.phase = .opened`: a yield decides nothing). -/
 theorem commitYield_posts {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat} {checkpoint : Digest}
     {current : Option ObjectState} {viewed : Bool} {plan : PlanAwait} {committed : YieldCommit}
     (ok : commitYield config snapshot height transaction cell object generation checkpoint current viewed plan =
       .ok committed) :
     ∀ post ∈ committed.posts, (∃ state, post.bytes = stateImage object state) ∨
-      (∃ slot : AnswerSlot.Slot, slot.activity = cell ∧
+      (∃ slot : AnswerSlot.Slot, slot.activity = cell ∧ slot.phase = .opened ∧
         post.bytes = image .slot (AnswerSlot.key slot.name) (AnswerSlot.encode slot)) := by
   have stateShape : ∀ written : Option StateWritten,
       stateWrite config snapshot object current viewed plan.write = .ok written →
@@ -3878,7 +3879,7 @@ theorem commitYield_posts {rootBytes : Bytes → Digest} {config : Config} {snap
           rcases member with inState | isSlot
           · exact .inl (stateShape _ wrote post inState)
           · subst isSlot
-            exact .inr ⟨_, rfl, rfl⟩
+            exact .inr ⟨_, rfl, rfl, rfl⟩
       · split at ok
         · cases ok
         · simp only [Except.ok.injEq] at ok
@@ -3963,7 +3964,8 @@ theorem segmentCommit_census {rootBytes : Bytes → Digest} {config : Config} {s
   | none => simp at member
   | some committed =>
     obtain ⟨_, _, _, committedOk⟩ := segmentCommit_spec ok
-    exact (commitYield_posts committedOk post member).elim .inl (fun slot => .inr (.inl slot))
+    exact (commitYield_posts committedOk post member).elim .inl
+      (fun ⟨slot, activity, _, isSlot⟩ => .inr (.inl ⟨slot, activity, isSlot⟩))
 
 /-- A turn that opens a slot commits an awaiting record. -/
 theorem segmentCommit_awaiting {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}

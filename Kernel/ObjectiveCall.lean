@@ -926,11 +926,14 @@ theorem touch_spec {rootBytes : Bytes → Digest} {config : Config} {snapshot : 
           simp [Journal.lookup, List.find?_append, skip]
         · simp [Journal.lookup, List.find?_append, missing]
 
-/-- Every object the journal holds was read from the snapshot (its state cell
-decodes there): what makes its state post safe for the checkpoint invariant. -/
+/-- Every object the journal holds was read from the snapshot: its state cell
+decodes there (what makes its state post safe for the checkpoint invariant) and
+its object record is the one the entry carries (what names the payer of the
+state cell it may write, `ObjectiveActivity.payerOf`). -/
 def ObjectsRead {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (journal : Journal) : Prop :=
-  ∀ entry ∈ journal.entries, ∃ current, readState config snapshot entry.object = .ok current
+  ∀ entry ∈ journal.entries, (∃ current, readState config snapshot entry.object = .ok current) ∧
+    readObject config snapshot entry.object = .ok (some entry.record)
 
 theorem touch_read {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {journal journal' : Journal} {object : CellId} {entry : Entry}
@@ -944,13 +947,13 @@ theorem touch_read {rootBytes : Bytes → Digest} {config : Config} {snapshot : 
     · cases touched
     · split at touched
       · cases touched
-      · rename_i record _ current readOk
+      · rename_i _ record readObj _ current readOk
         cases touched
         intro e member
         simp only [List.mem_append, List.mem_singleton] at member
         rcases member with old | new
         · exact read e old
-        · subst new; exact ⟨current, readOk⟩
+        · subst new; exact ⟨⟨current, readOk⟩, readObj⟩
 
 theorem install_read {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     (journal : Journal) (object : CellId) (state : ObjectState)
@@ -958,8 +961,8 @@ theorem install_read {rootBytes : Bytes → Digest} {config : Config} {snapshot 
   intro e member
   simp only [Journal.install, List.mem_map] at member
   obtain ⟨e0, m0, rfl⟩ := member
-  obtain ⟨c, h⟩ := read e0 m0
-  exact ⟨c, by split <;> exact h⟩
+  obtain ⟨⟨c, h⟩, o⟩ := read e0 m0
+  exact ⟨⟨c, by split <;> exact h⟩, by split <;> exact o⟩
 
 theorem frameReturn_read {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {ctx : Ctx} {write : Data} {journal journal' : Journal}
@@ -1242,6 +1245,23 @@ theorem invocation_writes_from_view {rootBytes : Bytes → Digest} {config : Con
   simp only [Journal.start, List.nil_append] at member
   exact fresh w member
 
+/-- **Every post of a journal is the state image of an object the journal holds**:
+the state cell of one of its entries, at that entry's own coordinate. -/
+theorem Journal.posts_state {rootBytes : Bytes → Digest} (journal : Journal) (config : Config)
+    (snapshot : Snapshot rootBytes) :
+    ∀ post ∈ journal.posts config snapshot, ∃ entry ∈ journal.entries, ∃ state,
+      post = postAt snapshot (stateCell config.domain entry.object) (stateImage entry.object state) := by
+  intro post member
+  simp only [Journal.posts, List.mem_filterMap] at member
+  obtain ⟨entry, entryIn, made⟩ := member
+  split at made
+  · cases found : entry.current with
+    | none => simp [found] at made
+    | some state =>
+      simp only [found, Option.map_some, Option.some.injEq] at made
+      exact ⟨entry, entryIn, state, made.symm⟩
+  · cases made
+
 /-- **What an invocation posts**: the Book, or the state cell of an object its
 call tree read from the snapshot (the premise of the checkpoint invariant's
 `state_post_safe`). -/
@@ -1262,7 +1282,7 @@ theorem Invocation.posts_shape {rootBytes : Bytes → Digest} {config : Config} 
   · right; left
     simp only [Journal.posts, List.mem_filterMap] at inJournal
     obtain ⟨entry, entryIn, made⟩ := inJournal
-    obtain ⟨current, readOk⟩ := read entry entryIn
+    obtain ⟨⟨current, readOk⟩, _⟩ := read entry entryIn
     split at made
     · cases found : entry.current with
       | none => simp [found] at made
@@ -1273,6 +1293,7 @@ theorem Invocation.posts_shape {rootBytes : Bytes → Digest} {config : Config} 
   · right; right; exact invoked.mail.posts_shape post inMail
   · left; simpa using isBook
 
+#assert_axioms Journal.posts_state
 #assert_axioms Invocation.posts_shape
 #assert_axioms touch_read
 #assert_axioms frameReturn_read
