@@ -66,7 +66,7 @@ def admitLoaded (config : NativeHost.Config) (opened : NativeHost.Opened config)
   match FnSelectiveReleaseSourceAuthority.prepare context config.profile
       config.federation (NativeHost.logicalHeight config opened.durable)
       ingress.spec with
-  | .error reason => return .error reason
+  | .error reason => return .error reason.undisclosed
   | .ok prepared =>
       match ← FnSelectiveReleaseSourceAuthority.check config.signature
           prepared ingress.nativeEnvelope with
