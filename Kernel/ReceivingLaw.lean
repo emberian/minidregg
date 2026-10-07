@@ -450,6 +450,29 @@ def livePost (write : DataWrite) : Option (Minidregg.Theory.CellRegistry.PackedC
   | some (.live cell) => some cell
   | _ => none
 
+/-- A write whose post bytes are a live cell's image holds that cell. -/
+theorem livePost_live {write : DataWrite} {cell : Minidregg.Theory.CellRegistry.PackedCell registry}
+    (bytes : write.canonicalPostBytes = LifecycleImage.bytes registry (.live cell)) :
+    livePost write = some cell := by
+  unfold livePost
+  rw [bytes, show LifecycleImage.bytes registry (.live cell) =
+      (LifecycleImage.codec registry).encode (.live cell) from rfl,
+    LifecycleImage.decode_encode]
+
+/-- **A write to a cell the loaded directory holds is no birth.** -/
+theorem physicalBirth_false_of_present {durable : Durable} (directory : LoadedDirectory durable)
+    {write : DataWrite} {cell : Minidregg.Theory.CellRegistry.PackedCell registry}
+    (present : directory.directory.slots write.cellId.value = .present cell) :
+    physicalBirth durable write = false := by
+  unfold physicalBirth
+  rw [show durable.snapshot.canonicalBytes write.cellId =
+      durable.snapshot.canonicalBytes ⟨write.cellId.value⟩ from rfl,
+    ← directory.bytes_exact write.cellId.value]
+  simp only [LifecycleImage.view, present]
+  rw [show LifecycleImage.bytes registry (.live cell) =
+      (LifecycleImage.codec registry).encode (.live cell) from rfl,
+    LifecycleImage.decode_encode]
+
 /-- **A newborn's birth parent**: the room `patch` places it in, its entry in the
 append-only `parent` plane of the authority cell the patch writes. -/
 def birthRoom (deployment : Deployment) (patch : List DataWrite) (newborn : Nat) : Option Nat := do
@@ -612,5 +635,7 @@ theorem physical_resolveBirth_some_iff {Fld : Type} [Field Fld] [DecidableEq Fld
 #assert_axioms physical_resolve_some_iff
 #assert_axioms physical_resolveBirth_some_iff
 #assert_axioms exportLaw_cons_some_iff
+#assert_axioms livePost_live
+#assert_axioms physicalBirth_false_of_present
 
 end Minidregg.Kernel.ReceivingLaw

@@ -73,7 +73,6 @@ Minidregg.Compiler.ObjectiveNativeScalarBinding.BoundPlan.mk | Compiler.Objectiv
 Minidregg.Compiler.ObjectiveNativeScalarBinding.BoundRead.mk | Compiler.ObjectiveNativeScalarBinding | evidence | L2 | 3 proof / 1 data fields; layer-1 review pending
 Minidregg.Compiler.ObjectiveNativeScalarBinding.BoundScalar.mk | Compiler.ObjectiveNativeScalarBinding | evidence | L2 | 8 proof / 3 data fields; layer-1 review pending
 Minidregg.Compiler.PayEnrolSignatureIO.Checked.mk | Compiler.PayEnrolSignatureIO | evidence | L2 | 0 proof / 2 data fields; layer-1 review pending
-Minidregg.Compiler.PayEnrolSignatureV2IO.Checked.mk | Compiler.PayEnrolSignatureV2IO | evidence | L2 | 0 proof / 3 data fields; layer-1 review pending
 Minidregg.Host.FnSelectiveReleaseFnAck.Selected.mk | Host.FnSelectiveReleaseFnAck | evidence | L2 | 0 proof / 2 data fields; layer-1 review pending
 Minidregg.Host.GrainOriginPreparation.Prepared.mk | Host.GrainOriginPreparation | evidence | L2 | 0 proof / 3 data fields; layer-1 review pending
 Minidregg.Host.GrainOriginSource.Rendered.mk | Host.GrainOriginSource | evidence | L2 | 4 proof / 8 data fields; layer-1 review pending
@@ -358,16 +357,14 @@ Minidregg.Kernel.PayClaimCommand.DecodedIngress.mk | Kernel.PayClaimCommand | ev
 Minidregg.Kernel.PayClaimReceiver.AcceptedClaim.mk | Kernel.PayClaimReceiver | evidence | L2 | 1 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.PayClaimReceiver.Prepared.mk | Kernel.PayClaimReceiver | evidence | L2 | 4 proof / 13 data fields; layer-1 review pending
 Minidregg.Kernel.PayClaimReceiver.SourceWitness.mk | Kernel.PayClaimReceiver | evidence | L2 | 1 proof / 0 data fields; layer-1 review pending
-Minidregg.Kernel.PayEnrolReceiver.Accepted.mk | Kernel.PayEnrolReceiver | evidence | L2 | 1 proof / 2 data fields; layer-1 review pending
-Minidregg.Kernel.PayEnrolReceiver.AcceptedEnrol.mk | Kernel.PayEnrolReceiver | evidence | L2 | 1 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.PayEnrolReceiver.DecodedIngress.mk | Kernel.PayEnrolReceiver | evidence | L2 | 2 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.PayEnrolReceiver.EnrolLegs.mk | Kernel.PayEnrolReceiver | evidence | L2 | 10 proof / 3 data fields; layer-1 review pending
-Minidregg.Kernel.PayEnrolReceiver.Prepared.mk | Kernel.PayEnrolReceiver | evidence | L2 | 8 proof / 13 data fields; layer-1 review pending
+Minidregg.Kernel.PayEnrolReceiver.Planned.mk | Kernel.PayEnrolReceiver | evidence | L1 Minidregg.Kernel.PayEnrolReceiver.Planned.sound | decideEnrol under exactly the bits it is indexed by, tip ahead of the clock, chain tip advances, factory dependencies loaded
+Minidregg.Kernel.PayEnrolReceiver.Prepared.mk | Kernel.PayEnrolReceiver | evidence | L1 Minidregg.Kernel.PayEnrolReceiver.Prepared.sound | receiver-sourced receipt for the carried envelope, request bound to the factory head; the receipt verdict and the bits are the Receiver's (L2 Vouchers; committed_verified)
 Minidregg.Kernel.PayEnrolV2Legs.EnrolLegs.mk | Kernel.PayEnrolV2Legs | evidence | L2 | 15 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.PayEnrolV2Legs.RenewLegs.mk | Kernel.PayEnrolV2Legs | evidence | L2 | 5 proof / 0 data fields; layer-1 review pending
-Minidregg.Kernel.PayEnrolV2Receiver.Accepted.mk | Kernel.PayEnrolV2Receiver | evidence | L2 | 1 proof / 2 data fields; layer-1 review pending
-Minidregg.Kernel.PayEnrolV2Receiver.AcceptedEnrol.mk | Kernel.PayEnrolV2Receiver | evidence | L2 | 1 proof / 3 data fields; layer-1 review pending
-Minidregg.Kernel.PayEnrolV2Receiver.Prepared.mk | Kernel.PayEnrolV2Receiver | evidence | L2 | 10 proof / 15 data fields; layer-1 review pending
+Minidregg.Kernel.PayEnrolV2Receiver.Planned.mk | Kernel.PayEnrolV2Receiver | evidence | L1 Minidregg.Kernel.PayEnrolV2Receiver.Planned.sound | PayEnrolV2Decision.decide under exactly the bits it is indexed by, economic input, fresh tip, factory dependencies loaded
+Minidregg.Kernel.PayEnrolV2Receiver.Prepared.mk | Kernel.PayEnrolV2Receiver | evidence | L1 Minidregg.Kernel.PayEnrolV2Receiver.Prepared.sound | parsed v2 memo, receiver-sourced receipt for the carried envelope, request bound to the factory head; the bits are the Receiver's (committed_verified)
 Minidregg.Kernel.PayObservationReceiver.DecodedIngress.mk | Kernel.PayObservationReceiver | evidence | L2 | 2 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.PayObservationReceiver.Planned.mk | Kernel.PayObservationReceiver | evidence | L1 Minidregg.Kernel.PayObservationReceiver.Planned.sound | loaded cells exact, tip retained, clock at the tip slot, Book = batch applied
 Minidregg.Kernel.PayObservationReceiver.Prepared.mk | Kernel.PayObservationReceiver | evidence | L1 Minidregg.Kernel.PayObservationReceiver.Prepared.sound | receiver-sourced receipt for the carried envelope, request bound to the pay head; the receipt verdict is L2

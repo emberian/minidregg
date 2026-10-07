@@ -1992,8 +1992,9 @@ def payObservationLookupLoaded (config : Config) (opened : Opened config) (bytes
 The observer's submission of one enrollment-index transfer
 (`DREGG/PAY/SELF-ENROL/v1`) has its own plan/assembly/submission/lookup
 quartet; its signed ingress is `DREGG/PAY/SELF-ENROL/SIGNED/v1`.  (113–116 are
-P6's.)  The plan runs the native verifier on the memo, because the decision
-the observer signs depends on both possession bits. -/
+P6's.)  The plan asks the Receiver's verifier about the memo's two possession
+signatures (`PayEnrolReceiver.observations`), because the decision the observer
+signs depends on both bits. -/
 
 def payEnrolAmbient (config : Config) (opened : Opened config) : PayEnrolReceiver.Ambient :=
   ⟨config.federation, logicalHeight config opened.durable, config.tariff⟩
@@ -2020,32 +2021,19 @@ def payEnrolAssemble (plan : PayCellDomain.SigningPlan) (signature : List UInt8)
   pure (PayEnrolReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
 
 def payEnrolSubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
-    IO Outcome := do
-  match ← PayEnrolReceiver.receiveLoaded config.deployment config.profile
-      (payEnrolAmbient config opened) config.signature config.transport opened.durable bytes with
-  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
-  | .rejected reason => return refused .operationRejected "pay-enrol" s!"{repr reason}"
-  | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
-  | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
-  | .contention => return .contention
-  | .unavailable detail => return .unavailable detail.toUTF8.toList
-  | .uncertain detail => return .uncertain detail.toUTF8.toList
+    IO Outcome :=
+  receivingSubmitLoaded config opened
+    (PayEnrolReceiver.payEnrolFamily config.deployment config.profile)
+    (payEnrolAmbient config opened) "pay-enrol" bytes
 
-/-- Receipt-only historical lookup of an enrolment submission.  Absence never
+/-- Receipt-only historical lookup of an enrolment submission (v1 or v2: both
+journal the same transaction id, event and leading nullifiers).  Absence never
 submits. -/
 def payEnrolLookupLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
     Outcome :=
-  match PayEnrolReceiver.decodeIngress bytes with
-  | none => refused .malformed "pay-enrol" "noncanonical signed ingress"
-  | some ingress =>
-      match PayEnrolReceiver.replay config.deployment.domain config.profile.semantics
-          opened.durable ingress with
-      | none => .absent
-      | some (.error _) => refused .conflict "replay" "transaction identity conflict"
-      | some (.ok receipt) =>
-          match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
-          | some original => .confirmed .replayed original
-          | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
+  receivingLookupLoaded config opened
+    (PayEnrolReceiver.payEnrolFamily config.deployment config.profile)
+    (payEnrolAmbient config opened) "pay-enrol" bytes
 
 /-- One assigned deposit index and the Book balance of its payer in the
 tariff's asset. -/

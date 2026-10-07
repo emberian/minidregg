@@ -13,7 +13,7 @@ causes this decision to replace the current custody row with the original key.
 -/
 import Kernel.PayObservation
 import Kernel.PayEnrolPricing
-import Compiler.PayEnrolSignatureV2IO
+import Kernel.PayEnrolMemoV2
 import Compiler.CredentialAuthorityDomain
 
 namespace Minidregg.Kernel.PayEnrolV2Decision
@@ -325,11 +325,12 @@ def classifyTerms (store : PayStore) (pricing : Pricing) (tariff : Tariff)
             | none => .enrol (enrolPlan store tariff tip o memo float quote)
             | some before => .renew (renewPlan tariff tip o memo float before quote)
 
-/-- `Checked` is tied to THIS memo and THIS observed asset/recipient. Its private
-constructor prevents a caller from substituting a guessed signature boolean. -/
+/-- The decision on one v2 payment.  `mini` and `ssh` are the Receiver's verifier's
+answers on THIS memo's two possession queries over THIS observed asset/recipient
+(`PayEnrolV2Receiver.observations`; `PayEnrolV2Receiver.committed_verified`):
+a `false` journals the payment, it never refuses. -/
 def decide (store : PayStore) (authority : Authority) (pricing : Pricing)
-    (tip : ChainTip) (o : Observation) (memo : Memo)
-    (checked : PayEnrolSignatureV2IO.Checked (observationContext o) memo) :
+    (tip : ChainTip) (o : Observation) (memo : Memo) (mini ssh : Bool) :
     Except Reject Decision :=
   if ¬memo.WellFormed then .error .malformedMemo
   else if o.memo ≠ .present (PayEnrolMemoV2.encode memo) then .error .memoMismatch
@@ -352,8 +353,8 @@ def decide (store : PayStore) (authority : Authority) (pricing : Pricing)
               else if o.amount ≠ memo.unsigned.amountAtomic then .error .amountMismatch
               else if memo.unsigned.deploymentCommitment ≠ PayEnrolPricing.deploymentCommitment
                   pricing.domain pricing.expectedSeed tariff o.address then .error .deploymentMismatch
-              else if !checked.mini then .ok (.journal .miniSigInvalid)
-              else if !checked.ssh then .ok (.journal .sshSigInvalid)
+              else if !mini then .ok (.journal .miniSigInvalid)
+              else if !ssh then .ok (.journal .sshSigInvalid)
               else
                 match resolveCustody store authority memo.unsigned with
                 | .error reason => .error reason
