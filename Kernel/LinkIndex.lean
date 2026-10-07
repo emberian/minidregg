@@ -13,8 +13,10 @@ The link index is a function of the accepted log, built the way
   a write of a cell drops that cell's old pairs and adds its new ones
   (`setCell`), never re-inverting the whole forward map. `Exact` states that
   its membership is the inversion of the forward map (`RevExact`, the same
-  statement as `mem_lookup_invert`); the order of rows within one target is
-  the order of insertion, not of `invert`.
+  statement as `mem_lookup_invert`); the rows of a target are held in
+  insertion order but SERVED in a canonical order (`pairLe`: source cell, then
+  link identifier), so what a reader sees depends on the forward map and not
+  on the order writes arrived in (`backlinks_state`).
 
 A link leaves both maps when a later accepted write of its cell no longer
 holds it live (`ContentResource.Action.unlink` tombstones it), because the
@@ -145,6 +147,35 @@ theorem liveLinks_eq (bytes : List UInt8) : liveLinks bytes = liveLinksFull byte
     cases found : contentOf bytes with
     | none => rfl
     | some store => exact absurd (contentPrefix_of_contentOf bytes store found) skipped
+
+/-- **A content store's live links have distinct identifiers**: its entries
+are strictly ordered by address, and a link's address is its identifier. -/
+theorem linksOfStore_ids_nodup (store : ContentStore) :
+    ((linksOfStore store).map Prod.fst).Nodup := by
+  unfold linksOfStore
+  rw [List.Nodup, List.pairwise_map, List.pairwise_filterMap]
+  refine (StoreCodec.entries_pairwise HyperdocumentCell.contentWire store).imp ?_
+  rintro ⟨⟨spaceA, keyA⟩, valueA⟩ ⟨⟨spaceB, keyB⟩, valueB⟩ ordered x hx y hy
+  cases spaceA <;> cases spaceB <;> first | (simp at hx; done) | (simp at hy; done) | skip
+  dsimp only at hx hy
+  split at hx <;> split at hy <;> first
+    | (simp at hx; done)
+    | (simp at hy; done)
+    | skip
+  simp only [Option.some.injEq] at hx hy
+  subst hx
+  subst hy
+  intro same
+  have same' : keyA = keyB := same
+  subst same'
+  exact lt_irrefl _ ordered
+
+theorem liveLinks_ids_nodup (bytes : List UInt8) : ((liveLinks bytes).map Prod.fst).Nodup := by
+  rw [liveLinks_eq]
+  unfold liveLinksFull
+  cases contentOf bytes with
+  | none => exact List.nodup_nil
+  | some store => exact linksOfStore_ids_nodup store
 
 /-! ## Association lists with unique keys -/
 
@@ -414,6 +445,11 @@ def dropPair (reverse : Reverse) (pair : CellId × Entry) : Reverse :=
   put reverse (TargetKey.of pair.2.record.target)
     ((lookup reverse (TargetKey.of pair.2.record.target)).filter fun other => other ≠ pair)
 
+/-- Add a pair unless the target's row already holds it, so a target's row
+never repeats a pair (`nodup_lookup_addUnique`). -/
+def addUnique (reverse : Reverse) (pair : CellId × Entry) : Reverse :=
+  if pair ∈ lookup reverse (TargetKey.of pair.2.record.target) then reverse else addPair reverse pair
+
 /-- Replace a cell's entries: the forward map is set, and the backlink map
 drops the cell's old pairs and adds its new ones. This is the whole cost of a
 write: it never re-inverts the forward map. A cell with neither old nor new
@@ -425,7 +461,7 @@ def setCell (acc : Sources × Reverse) (cell : CellId) (height : Nat) (links : L
   else
     let new := refresh old height links
     (store acc.1 cell new,
-      (new.map fun entry => (cell, entry)).foldl addPair
+      (new.map fun entry => (cell, entry)).foldl addUnique
         ((old.map fun entry => (cell, entry)).foldl dropPair acc.2))
 
 /-- One write at log height `height`: the written cell's entries become its
@@ -582,37 +618,108 @@ theorem mem_lookup_foldl_dropPair (cell : CellId) (old : List Entry) :
         · rintro ⟨same, member, targetKey⟩
           exact gone ⟨same, List.mem_cons_of_mem _ member, targetKey⟩
 
-theorem mem_lookup_foldl_addPair (list : List (CellId × Entry)) :
+theorem mem_lookup_addUnique (reverse : Reverse) (head other : CellId × Entry) (key : TargetKey) :
+    other ∈ lookup (addUnique reverse head) key ↔
+      other ∈ lookup reverse key ∨ (other = head ∧ TargetKey.of head.2.record.target = key) := by
+  unfold addUnique
+  split
+  · rename_i present
+    constructor
+    · exact Or.inl
+    · rintro (found | ⟨rfl, hit⟩)
+      · exact found
+      · rw [hit] at present; exact present
+  · rw [lookup_addPair]
+    by_cases hit : TargetKey.of head.2.record.target = key
+    · rw [if_pos hit, List.mem_cons]
+      constructor
+      · rintro (rfl | found)
+        · exact Or.inr ⟨rfl, hit⟩
+        · exact Or.inl found
+      · rintro (found | ⟨rfl, _⟩)
+        · exact Or.inr found
+        · exact Or.inl rfl
+    · rw [if_neg hit]
+      constructor
+      · exact Or.inl
+      · rintro (found | ⟨_, same⟩)
+        · exact found
+        · exact absurd same hit
+
+theorem mem_lookup_foldl_addUnique (list : List (CellId × Entry)) :
     ∀ (reverse : Reverse) (key : TargetKey) (other : CellId × Entry),
-      other ∈ lookup (list.foldl addPair reverse) key ↔
+      other ∈ lookup (list.foldl addUnique reverse) key ↔
         other ∈ lookup reverse key ∨ (other ∈ list ∧ TargetKey.of other.2.record.target = key) := by
   induction list with
   | nil => intro reverse key other; simp
   | cons head rest ih =>
       intro reverse key other
-      rw [List.foldl_cons, ih, lookup_addPair]
-      by_cases hit : TargetKey.of head.2.record.target = key
-      · rw [if_pos hit, List.mem_cons]
-        constructor
-        · rintro ((rfl | inReverse) | ⟨inRest, same⟩)
-          · exact Or.inr ⟨List.mem_cons_self .., hit⟩
-          · exact Or.inl inReverse
-          · exact Or.inr ⟨List.mem_cons_of_mem _ inRest, same⟩
-        · rintro (inReverse | ⟨member, same⟩)
-          · exact Or.inl (Or.inr inReverse)
-          · rcases List.mem_cons.mp member with rfl | inRest
-            · exact Or.inl (Or.inl rfl)
-            · exact Or.inr ⟨inRest, same⟩
-      · rw [if_neg hit]
-        constructor
-        · rintro (inReverse | ⟨inRest, same⟩)
-          · exact Or.inl inReverse
-          · exact Or.inr ⟨List.mem_cons_of_mem _ inRest, same⟩
-        · rintro (inReverse | ⟨member, same⟩)
-          · exact Or.inl inReverse
-          · rcases List.mem_cons.mp member with rfl | inRest
-            · exact absurd same hit
-            · exact Or.inr ⟨inRest, same⟩
+      rw [List.foldl_cons, ih, mem_lookup_addUnique]
+      constructor
+      · rintro ((found | ⟨rfl, hit⟩) | ⟨inRest, same⟩)
+        · exact Or.inl found
+        · exact Or.inr ⟨List.mem_cons_self .., hit⟩
+        · exact Or.inr ⟨List.mem_cons_of_mem _ inRest, same⟩
+      · rintro (found | ⟨member, same⟩)
+        · exact Or.inl (Or.inl found)
+        · rcases List.mem_cons.mp member with rfl | inRest
+          · exact Or.inl (Or.inr ⟨rfl, same⟩)
+          · exact Or.inr ⟨inRest, same⟩
+
+/-! ### No row repeats a pair -/
+
+/-- Every target's row is duplicate-free. -/
+def NodupRev (reverse : Reverse) : Prop := ∀ key, (lookup reverse key).Nodup
+
+theorem nodupRev_dropPair {reverse : Reverse} (nodup : NodupRev reverse) (pair : CellId × Entry) :
+    NodupRev (dropPair reverse pair) := by
+  intro key
+  unfold dropPair
+  rw [lookup_put]
+  split
+  · exact (nodup _).filter _
+  · exact nodup key
+
+theorem nodupRev_foldl_dropPair (cell : CellId) (old : List Entry) :
+    ∀ {reverse : Reverse}, NodupRev reverse →
+      NodupRev ((old.map fun entry => (cell, entry)).foldl dropPair reverse) := by
+  induction old with
+  | nil => intro reverse nodup; exact nodup
+  | cons entry rest ih =>
+      intro reverse nodup
+      rw [List.map_cons, List.foldl_cons]
+      exact ih (nodupRev_dropPair nodup _)
+
+theorem nodupRev_addUnique {reverse : Reverse} (nodup : NodupRev reverse) (pair : CellId × Entry) :
+    NodupRev (addUnique reverse pair) := by
+  intro key
+  unfold addUnique
+  split
+  · exact nodup key
+  · rename_i absent
+    rw [lookup_addPair]
+    split
+    · rename_i hit
+      rw [hit] at absent
+      exact List.nodup_cons.mpr ⟨absent, nodup key⟩
+    · exact nodup key
+
+theorem nodupRev_foldl_addUnique (list : List (CellId × Entry)) :
+    ∀ {reverse : Reverse}, NodupRev reverse → NodupRev (list.foldl addUnique reverse) := by
+  induction list with
+  | nil => intro reverse nodup; exact nodup
+  | cons head rest ih =>
+      intro reverse nodup
+      rw [List.foldl_cons]
+      exact ih (nodupRev_addUnique nodup _)
+
+theorem setCell_nodupRev (acc : Sources × Reverse) (cell : CellId) (height : Nat) (links : List LinkKey)
+    (nodup : NodupRev acc.2) : NodupRev (setCell acc cell height links).2 := by
+  unfold setCell
+  dsimp only
+  split
+  · exact nodup
+  · exact nodupRev_foldl_addUnique _ (nodupRev_foldl_dropPair _ _ nodup)
 
 /-- **A write keeps the backlink map the inversion of the forward map.** -/
 theorem setCell_rev (acc : Sources × Reverse) (cell : CellId) (height : Nat) (links : List LinkKey)
@@ -625,7 +732,7 @@ theorem setCell_rev (acc : Sources × Reverse) (cell : CellId) (height : Nat) (l
   · intro key pair
     have unique' := store_nodup unique cell (refresh (lookup acc.1 cell) height links)
     rw [mem_pairs_iff_lookup unique', lookup_store,
-      mem_lookup_foldl_addPair, mem_lookup_foldl_dropPair, rev key pair,
+      mem_lookup_foldl_addUnique, mem_lookup_foldl_dropPair, rev key pair,
       mem_pairs_iff_lookup unique]
     by_cases same : cell = pair.1
     · subst same
@@ -760,15 +867,50 @@ theorem ofRecords_exact (log : List IntentRecord) : Exact log (ofRecords log) :=
       rw [ofRecords_snoc]
       exact exact_admit log _ record ih
 
+theorem admitWrites_nodupRev (height : Nat) :
+    ∀ (writes : List DataWrite) (acc : Sources × Reverse), NodupRev acc.2 →
+      NodupRev (admitWrites height writes acc).2
+  | [], _, nodup => nodup
+  | write :: rest, acc, nodup =>
+      admitWrites_nodupRev height rest (admitWrite height acc write) (setCell_nodupRev acc _ _ _ nodup)
+
+theorem Index.extend_nodupRev :
+    ∀ (records : List IntentRecord) (index : Index) (start : Nat), NodupRev index.reverse →
+      NodupRev (index.extend start records).reverse
+  | [], _, _, nodup => nodup
+  | record :: rest, index, start, nodup =>
+      Index.extend_nodupRev rest (index.admit (start + 1) record) (start + 1)
+        (admitWrites_nodupRev _ _ _ nodup)
+
+/-- **No target's backlink row repeats a pair**, for every log. -/
+theorem ofRecords_nodupRev (log : List IntentRecord) : NodupRev (ofRecords log).reverse :=
+  Index.extend_nodupRev log Index.empty 0 (fun _ => List.nodup_nil)
+
 /-! ## Reads -/
 
 /-- The live links a cell holds (the forward view). -/
 def Index.links (index : Index) (cell : CellId) : List Entry := lookup index.sources cell
 
-/-- The backlinks to any of `keys` whose SOURCE cell the reader sees. -/
+/-- The canonical order of backlink rows: by source cell, then by link
+identifier. It is a function of the pair alone, so a served row order never
+depends on the order in which writes arrived. -/
+def pairLe (a b : CellId × Entry) : Bool :=
+  decide (a.1.value < b.1.value ∨ (a.1.value = b.1.value ∧ a.2.link.digest.value ≤ b.2.link.digest.value))
+
+theorem pairLe_trans (a b c : CellId × Entry) (h₁ : pairLe a b = true) (h₂ : pairLe b c = true) :
+    pairLe a c = true := by
+  simp only [pairLe, decide_eq_true_eq] at *
+  omega
+
+theorem pairLe_total (a b : CellId × Entry) : (pairLe a b || pairLe b a) = true := by
+  simp only [pairLe, Bool.or_eq_true, decide_eq_true_eq]
+  omega
+
+/-- The backlinks to any of `keys` whose SOURCE cell the reader sees, each
+target's row in the canonical order (`pairLe`). -/
 def Index.backlinks (index : Index) (visible : CellId → Bool) (keys : List TargetKey) :
     List (CellId × Entry) :=
-  keys.flatMap fun key => (lookup index.reverse key).filter fun pair => visible pair.1
+  keys.flatMap fun key => ((lookup index.reverse key).mergeSort pairLe).filter fun pair => visible pair.1
 
 /-- **A reader's backlinks come only from cells it sees.** -/
 theorem backlinks_covered (index : Index) (visible : CellId → Bool) (keys : List TargetKey)
@@ -787,7 +929,7 @@ theorem backlinks_sound (log : List IntentRecord) (visible : CellId → Bool) (k
   obtain ⟨unique, reverse, cells⟩ := ofRecords_exact log
   obtain ⟨key, asked, kept⟩ := List.mem_flatMap.mp member
   obtain ⟨found, shown⟩ := List.mem_filter.mp kept
-  rw [reverse] at found
+  rw [List.mem_mergeSort, reverse] at found
   obtain ⟨paired, targetKey⟩ := found
   obtain ⟨source, inSources, sameCell, inEntries⟩ := mem_pairs.mp paired
   have exactCell : lookup (ofRecords log).sources pair.1 = source.2 := by
@@ -812,7 +954,7 @@ theorem backlinks_complete (log : List IntentRecord) (visible : CellId → Bool)
     · exact found
   have target : entry.record = key.2 := by rw [← sameKey]; rfl
   refine ⟨entry, sameKey, List.mem_flatMap.mpr ⟨TargetKey.of key.2.target, asked, ?_⟩⟩
-  refine List.mem_filter.mpr ⟨?_, shown⟩
+  refine List.mem_filter.mpr ⟨List.mem_mergeSort.mpr ?_, shown⟩
   rw [reverse]
   exact ⟨mem_pairs.mpr ⟨_, present, rfl, inEntries⟩, by rw [target]⟩
 
@@ -820,6 +962,91 @@ theorem backlinks_complete (log : List IntentRecord) (visible : CellId → Bool)
 theorem links_exact (log : List IntentRecord) (cell : CellId) :
     ((ofRecords log).links cell).map Entry.key = latestLinks cell log :=
   ((ofRecords_exact log).2.2 cell).1
+
+/-! ## The served order is a function of state
+
+`backlinks` sorts each target's row by `pairLe`. Two histories that reach the
+same forward map serve the same rows in the same order
+(`backlinks_state`): the rows are duplicate-free (`ofRecords_nodupRev`), the
+pairs of a cell are distinguished by link identifier
+(`latestLinks_ids_nodup`), and `pairLe` is antisymmetric on such pairs. -/
+
+theorem latestLinks_ids_nodup (cell : CellId) (log : List IntentRecord) :
+    ((latestLinks cell log).map Prod.fst).Nodup := by
+  induction log using List.reverseRecOn with
+  | nil => exact List.nodup_nil
+  | append_singleton log record ih =>
+      rw [latestLinks_snoc]
+      cases lastWrite cell record with
+      | none => exact ih
+      | some write => exact liveLinks_ids_nodup _
+
+/-- A cell's entries are distinguished by link identifier. -/
+theorem entry_unique (log : List IntentRecord) {cell : CellId} {e₁ e₂ : Entry}
+    (m₁ : e₁ ∈ lookup (ofRecords log).sources cell) (m₂ : e₂ ∈ lookup (ofRecords log).sources cell)
+    (same : e₁.link = e₂.link) : e₁ = e₂ := by
+  have keys := links_exact log cell
+  have nodup : ((lookup (ofRecords log).sources cell).map Entry.link).Nodup := by
+    have ids := latestLinks_ids_nodup cell log
+    rw [← keys] at ids
+    simpa [Index.links, List.map_map, Function.comp_def, Entry.key] using ids
+  exact List.inj_on_of_nodup_map nodup m₁ m₂ same
+
+theorem pairLe_antisymm_keys (p q : CellId × Entry) (h₁ : pairLe p q = true) (h₂ : pairLe q p = true) :
+    p.1 = q.1 ∧ p.2.link = q.2.link := by
+  simp only [pairLe, decide_eq_true_eq] at h₁ h₂
+  obtain ⟨⟨a⟩, ⟨⟨⟨b⟩⟩, r, h⟩⟩ := p
+  obtain ⟨⟨a'⟩, ⟨⟨⟨b'⟩⟩, r', h'⟩⟩ := q
+  simp only at h₁ h₂
+  have ha : a = a' := by omega
+  have hb : b = b' := by omega
+  subst ha hb
+  exact ⟨rfl, rfl⟩
+
+/-- A row's pairs are the forward map's pairs of that target. -/
+theorem mem_reverse_iff (log : List IntentRecord) (key : TargetKey) (pair : CellId × Entry) :
+    pair ∈ lookup (ofRecords log).reverse key ↔
+      pair.2 ∈ lookup (ofRecords log).sources pair.1 ∧ TargetKey.of pair.2.record.target = key := by
+  obtain ⟨unique, reverse, _⟩ := ofRecords_exact log
+  rw [reverse key pair, mem_pairs_iff_lookup unique]
+
+/-- **Backlinks are a function of the forward map**: any two logs whose
+indexes hold the same links serve the same rows in the same order, whatever
+order their writes arrived in. -/
+theorem backlinks_state (log₁ log₂ : List IntentRecord)
+    (same : ∀ cell, (ofRecords log₁).links cell = (ofRecords log₂).links cell)
+    (visible : CellId → Bool) (keys : List TargetKey) :
+    (ofRecords log₁).backlinks visible keys = (ofRecords log₂).backlinks visible keys := by
+  unfold Index.backlinks
+  congr 1
+  funext key
+  have members : ∀ pair, pair ∈ lookup (ofRecords log₁).reverse key ↔
+      pair ∈ lookup (ofRecords log₂).reverse key := by
+    intro pair
+    rw [mem_reverse_iff, mem_reverse_iff]
+    have := same pair.1
+    unfold Index.links at this
+    rw [this]
+  have perm : (lookup (ofRecords log₁).reverse key).Perm (lookup (ofRecords log₂).reverse key) :=
+    (List.perm_ext_iff_of_nodup (ofRecords_nodupRev log₁ key) (ofRecords_nodupRev log₂ key)).mpr members
+  have sortedEq : ((lookup (ofRecords log₁).reverse key).mergeSort pairLe) =
+      ((lookup (ofRecords log₂).reverse key).mergeSort pairLe) := by
+    refine List.Perm.eq_of_pairwise (le := fun a b => pairLe a b = true) ?_ (List.pairwise_mergeSort pairLe_trans pairLe_total _)
+      (List.pairwise_mergeSort pairLe_trans pairLe_total _)
+      ((List.mergeSort_perm _ _).trans (perm.trans (List.mergeSort_perm _ _).symm))
+    intro a b ha hb hab hba
+    rw [List.mem_mergeSort] at ha hb
+    obtain ⟨sameCell, sameLink⟩ := pairLe_antisymm_keys a b hab hba
+    have ma := ((mem_reverse_iff log₁ key a).mp ha).1
+    have mb := ((mem_reverse_iff log₂ key b).mp hb).1
+    have mb' : b.2 ∈ lookup (ofRecords log₁).sources a.1 := by
+      have := same a.1
+      unfold Index.links at this
+      rw [this, sameCell]
+      exact mb
+    have e : a.2 = b.2 := entry_unique log₁ ma mb' sameLink
+    exact Prod.ext sameCell e
+  rw [sortedEq]
 
 /-! ## A transclusion is a backlink of the document it reads
 
@@ -940,9 +1167,16 @@ end Example
 #guard_msgs (whitespace := lax) in #print axioms revExact_invert
 /-- info: 'Minidregg.Kernel.LinkIndex.mem_lookup_foldl_dropPair' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms mem_lookup_foldl_dropPair
-/-- info: 'Minidregg.Kernel.LinkIndex.mem_lookup_foldl_addPair' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms mem_lookup_foldl_addPair
+/-- info: 'Minidregg.Kernel.LinkIndex.mem_lookup_foldl_addUnique' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms mem_lookup_foldl_addUnique
 /-- info: 'Minidregg.Kernel.LinkIndex.lookup_put' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms lookup_put
+
+/-- info: 'Minidregg.Kernel.LinkIndex.backlinks_state' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms backlinks_state
+/-- info: 'Minidregg.Kernel.LinkIndex.ofRecords_nodupRev' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms ofRecords_nodupRev
+/-- info: 'Minidregg.Kernel.LinkIndex.linksOfStore_ids_nodup' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms linksOfStore_ids_nodup
 
 end Minidregg.Kernel.LinkIndex
