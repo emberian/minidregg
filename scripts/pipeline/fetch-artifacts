@@ -49,7 +49,7 @@ mkdir -p "$(dirname -- "$dest")"
 if [ "$mode" = --link ]; then cp -al "$set_dir" "$dest"; else cp -a "$set_dir" "$dest"; fi
 dest=$(CDPATH='' cd -- "$dest" && pwd -P)
 python3 - "$set_dir" "$dest" <<'PY'
-import hashlib, json, sys
+import hashlib, json, os, sys
 old, new = sys.argv[1], sys.argv[2]
 m = json.load(open(f"{new}/manifest.json"))
 def mv(v):
@@ -62,7 +62,9 @@ for role, h in m.get("sha256", {}).items():
     p = m.get(role)
     if isinstance(p, str) and hashlib.sha256(open(p, "rb").read()).hexdigest() != h:
         sys.exit(f"fetch-artifacts: {role} at {p} does not match its pin")
-json.dump(m, open(f"{new}/manifest.json", "w"), indent=2, sort_keys=True)
+tmp = f"{new}/manifest.json.tmp"
+with open(tmp, "w") as fh: json.dump(m, fh, indent=2, sort_keys=True)
+os.replace(tmp, f"{new}/manifest.json")  # replace the hard link; never write through it into the published set
 PY
 printf 'fetched %s (%s) in %.1f s\n' "$tip" "$(cut -d' ' -f1-2 "$set_dir/PROVENANCE" 2>/dev/null)" "$(awk -v a="$t0" -v b="$(date +%s.%N)" 'BEGIN{print b-a}')" >&2
 echo "$dest/manifest.json"
