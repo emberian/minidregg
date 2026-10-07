@@ -1,8 +1,8 @@
 /- `Specification<T>` is closed under `compose` (OB-LTUO LT1).
 
 Every specification has the one public type `specification(SpecMeta, Extension<T>)`:
-`SpecMeta` is first-order data (built-in sums `SpecMeta`/`SpecLaws`, see
-`ObjectiveBendElaborate.specMetaName`), so neither a law nor a composition changes
+`SpecMeta` is first-order data (built-in sums `SpecMeta`/`SpecClaims`, see
+`ObjectiveBendElaborate.specMetaName`), so neither a claim nor a composition changes
 the public type. Two levels are stated here:
 
 * the front end's own type computation: `composeTy_closed` — composing two operands
@@ -14,7 +14,7 @@ the public type. Two levels are stated here:
   `inject extension {}` for a bare extension) has a `PartialTyping` derivation at
   every shareable target `T` and every operand kind, built generically in `T`. So the no-refusal theorem
   (`ObjectiveBendFrontEndAdequacy.accepted_never_refused`, statement unchanged) covers
-  every program built from it; `twice_accepted` and `law_spec_accepted` exhibit the
+  every program built from it; `twice_accepted` and `claim_spec_accepted` exhibit the
   surface programs the old metadata typing refused.
 
 The reflection contract (which observers exist; behavioural vs reflective equality;
@@ -63,21 +63,21 @@ end FrontEnd
 /-! ## The Core4 checker accepts the compose lowering at every target -/
 
 /-- Recursive-sum variables as the elaborator assigns them in a program whose first
-specification metadata it resolves: `SpecLaws` is reached first (inside `declared`). -/
-def lawsVariable : Nat := 1
+specification metadata it resolves: `SpecClaims` is reached first (inside `declared`). -/
+def claimsVariable : Nat := 1
 def metaVariable : Nat := 2
 
-def specLawsRow : Ty :=
+def specClaimsRow : Ty :=
   .field "none" .emptyRow
-    (.field "law" (.field "name" .label (.field "status" .label (.field "rest" (.variable lawsVariable) .emptyRow)))
+    (.field "claim" (.field "name" .label (.field "status" .label (.field "rest" (.variable claimsVariable) .emptyRow)))
       .emptyRow)
 def composedPayload : Ty :=
   .field "inherited" (.variable metaVariable) (.field "wrapping" (.variable metaVariable) .emptyRow)
 def specMetaRow : Ty :=
-  .field "declared" (.field "name" .label (.field "interface" .label (.field "laws" (.variable lawsVariable) .emptyRow)))
+  .field "declared" (.field "name" .label (.field "interface" .label (.field "claims" (.variable claimsVariable) .emptyRow)))
     (.field "composed" composedPayload (.field "extension" .emptyRow .emptyRow))
 def metaAssumptions : Assumptions :=
-  ⟨[(lawsVariable, .variant specLawsRow), (metaVariable, .variant specMetaRow)], [lawsVariable, metaVariable], []⟩
+  ⟨[(claimsVariable, .variant specClaimsRow), (metaVariable, .variant specMetaRow)], [claimsVariable, metaVariable], []⟩
 
 def extTy (T : Ty) : Ty := .arrow .reusable .unrestricted T (.arrow .reusable .unrestricted T T)
 def specTy (T : Ty) : Ty := .specification (.variable metaVariable) (extTy T)
@@ -111,7 +111,7 @@ theorem metaAssumptions_valid : metaAssumptions.valid = true := by decide
 theorem operand_shareable (T : Ty) (shareable : T.shareable = true) (b : Bool) :
     (coreOperandTy T b).shareableUnder metaAssumptions.shareableVariables = true := by
   have under := shareableUnder_of_shareable metaAssumptions.shareableVariables T shareable
-  cases b <;> simp_all [coreOperandTy, specTy, extTy, Ty.shareableUnder, Ty.shareable, metaAssumptions, metaVariable, lawsVariable]
+  cases b <;> simp_all [coreOperandTy, specTy, extTy, Ty.shareableUnder, Ty.shareable, metaAssumptions, metaVariable, claimsVariable]
 
 theorem operand_callable (T : Ty) (b : Bool) :
     callable (coreOperandTy T b) = .arrow .reusable .unrestricted T (.arrow .reusable .unrestricted T T) := by
@@ -183,23 +183,32 @@ def twiceSource : String :=
 
 theorem twice_accepted : acceptsSource twiceSource "twice" = true := by native_decide
 
-/-- LTUO probe W02: a spec with a law inhabits `Specification<T>`. -/
-def lawSpecSource : String :=
+/-- LTUO probe W02: a spec with a claim inhabits `Specification<T>`. -/
+def claimSpecSource : String :=
+  "edition ObjectiveBend 1\nrecord Counter:\n  n: Nat\n" ++
+  "spec Start for Counter:\n  claim positive: self.n == 41n\n  def n() -> Nat:\n    41n\n" ++
+  "def asSpecification() -> Specification<Counter>:\n  Start\n"
+
+theorem claim_spec_accepted : acceptsSource claimSpecSource "asSpecification" = true := by native_decide
+
+/-- Teeth: the refusal is not gone wholesale — a claim that is not Bool is still refused
+(claims are checked code in their own knot field), and a spec at another target is
+not a `Specification<Counter>`. -/
+def badClaimSource : String :=
+  "edition ObjectiveBend 1\nrecord Counter:\n  n: Nat\n" ++
+  "spec Start for Counter:\n  claim positive: self.n + 1n\n  def n() -> Nat:\n    41n\n" ++
+  "def asSpecification() -> Specification<Counter>:\n  Start\n"
+
+theorem non_boolean_claim_refused : acceptsSource badClaimSource "asSpecification" = false := by native_decide
+
+/-- `law` is no longer a spec clause: it names an ENFORCED predicate (GPT-6 row G), and a
+property nothing checks is a `claim`. The old spelling refuses at parse, never reinterpreted. -/
+def lawKeywordSource : String :=
   "edition ObjectiveBend 1\nrecord Counter:\n  n: Nat\n" ++
   "spec Start for Counter:\n  law positive: self.n == 41n\n  def n() -> Nat:\n    41n\n" ++
   "def asSpecification() -> Specification<Counter>:\n  Start\n"
 
-theorem law_spec_accepted : acceptsSource lawSpecSource "asSpecification" = true := by native_decide
-
-/-- Teeth: the refusal is not gone wholesale — a law that is not Bool is still refused
-(laws are checked code in their own knot field), and a spec at another target is
-not a `Specification<Counter>`. -/
-def badLawSource : String :=
-  "edition ObjectiveBend 1\nrecord Counter:\n  n: Nat\n" ++
-  "spec Start for Counter:\n  law positive: self.n + 1n\n  def n() -> Nat:\n    41n\n" ++
-  "def asSpecification() -> Specification<Counter>:\n  Start\n"
-
-theorem non_boolean_law_refused : acceptsSource badLawSource "asSpecification" = false := by native_decide
+theorem law_keyword_refused : acceptsSource lawKeywordSource "asSpecification" = false := by native_decide
 
 def wrongTargetSource : String :=
   "edition ObjectiveBend 1\nrecord Counter:\n  n: Nat\nrecord Other:\n  n: Nat\n  m: Nat\n" ++
@@ -274,15 +283,16 @@ theorem unbound_self_member_refused :
       "extension Bad[Self has {x: Nat}, Super has {x: Nat}](self: Self, super: Super) -> Super with {y: Nat}:\n" ++
       "  extend(super, {y: self.z})\ndef zero() -> Nat:\n  0n\n") "zero" = false := by native_decide
 
-/-- The built-in module declaring `SpecMeta`/`SpecLaws` is Objective Bend source the
+/-- The built-in module declaring `SpecMeta`/`SpecClaims` is Objective Bend source the
 front end's own parser reads. -/
 theorem builtin_parses : ObjectiveBendElaborate.builtinModule.toBool = true := by native_decide
 
 #assert_axioms composeTy_closed composeTy_fold_closed shareableUnder_of_shareable metaAssumptions_valid
   provenance_typed compose_wrapper_typed
 #assert_compiled twice_accepted
-#assert_compiled law_spec_accepted
-#assert_compiled non_boolean_law_refused
+#assert_compiled claim_spec_accepted
+#assert_compiled non_boolean_claim_refused
+#assert_compiled law_keyword_refused
 #assert_compiled wrong_target_refused
 #assert_compiled builtin_parses
 #assert_compiled empty_seed_accepted

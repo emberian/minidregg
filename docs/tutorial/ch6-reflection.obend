@@ -7,7 +7,7 @@ record Tally:
   n: Nat
 
 spec Start for Tally:
-  law nonNegative: true
+  claim nonNegative: true
   def n() -> Nat:
     41n
 
@@ -32,11 +32,11 @@ def interfaceOf(meta: SpecMeta) -> String:
     case composed(c): ""
     case extension(e): ""
 
-def lawsOf(meta: SpecMeta) -> SpecLaws:
+def claimsOf(meta: SpecMeta) -> SpecClaims:
   match meta:
-    case declared(d): d.laws
-    case composed(c): SpecLaws.none({})
-    case extension(e): SpecLaws.none({})
+    case declared(d): d.claims
+    case composed(c): SpecClaims.none({})
+    case extension(e): SpecClaims.none({})
 
 def firstName() -> String:
   nameOf(metadata(reflect(prototype(Start, built()))))
@@ -50,11 +50,11 @@ def interface() -> String:
 def composedName() -> String:
   nameOf(metadata(compose(Start, Start)))
 
-# A law is listed by name, with its status.
-def lawStatus() -> String:
-  match lawsOf(metadata(Start)):
-    case none(n): "no laws"
-    case law(l): l.status
+# A claim is listed by name, with its status.
+def claimStatus() -> String:
+  match claimsOf(metadata(Start)):
+    case none(n): "no claims"
+    case claim(l): l.status
 
 # stuck never finishes. The prototype is never asked for its target, so
 # reflecting on it still works.

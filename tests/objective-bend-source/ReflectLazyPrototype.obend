@@ -1,7 +1,7 @@
 edition ObjectiveBend 1
 
 spec Named for Nat:
-  law retained: true
+  claim retained: true
 
 extension Identity(self: Nat, super: Nat) -> Nat:
   self

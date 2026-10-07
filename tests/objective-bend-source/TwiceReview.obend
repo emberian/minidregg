@@ -12,7 +12,7 @@ spec TwiceReview for Review:
   requires review(value: Nat) -> Nat
   def twice(value: Nat) -> Nat:
     self.review(self.review(value))
-  law twice_distinct(value: Nat): self.twice(value) == self.review(self.review(value))
+  claim twice_distinct(value: Nat): self.twice(value) == self.review(self.review(value))
 
 spec AugmentedReview for Review:
   requires review(value: Nat) -> Nat

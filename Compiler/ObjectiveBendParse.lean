@@ -646,7 +646,7 @@ def parentRe : Re := seqs [ident, opt (.seq (chr '.') ident), .done]
 def qualifiedRe : Re := seqs [group 1 (alts [str "def", str "around", str "before", str "after",
   seqs [str "combine", many1 space, group 2 (alts [chr '+', chr '*', str "and"])]]), many1 space, group 3 (many dot),
   chr ':', .done]
-def lawRe : Re := seqs [str "law", many1 space, group 1 ident, opt (seqs [chr '(', group 2 (many dot), chr ')']),
+def claimRe : Re := seqs [str "claim", many1 space, group 1 ident, opt (seqs [chr '(', group 2 (many dot), chr ')']),
   many space, chr ':', many space, group 3 (many1 dot), .done]
 def extensionRe : Re := seqs [str "extension", many1 space, group 1 ident,
   opt (seqs [chr '[', group 4 (many1 (.char (· != ']'))), chr ']']), chr '(', group 2 (many dot), chr ')',
@@ -711,7 +711,7 @@ def declarations (lines : Array Line) : PS (Array Json × Array Json) := do
       if parents.eraseDups.length != parents.length then fail line "duplicate spec parent"
       let mut requirements : Array Json := #[]
       let mut methods : Array Json := #[]
-      let mut laws : Array Json := #[]
+      let mut claims : Array Json := #[]
       for _ in [0:lines.size] do
         let j ← get
         let some clause := lines[j]? | break
@@ -728,17 +728,21 @@ def declarations (lines : Array Line) : PS (Array Json × Array Json) := do
           let methodBody ← body lines fuel clause.indent
           methods := methods.push (Json.mkObj (signatureJson method ++ [("qualifier", toJson qualifier), ("body", methodBody)]))
           continue
-        if let some (_, l) ← matchAt clause lawRe clause.text then
+        if let some (_, l) ← matchAt clause claimRe clause.text then
           let parameters ← liftBare (splitParameters ((capture clause.text l 2).getD []))
-          let lawBody ← lineExpr clause ((capture clause.text l 3).getD [])
-          laws := laws.push (Json.mkObj [("name", toJson (cap clause.text l 1)), ("parameters", Json.arr parameters.toArray),
-            ("body", lawBody), ("span", clause.span.json)])
+          let claimBody ← lineExpr clause ((capture clause.text l 3).getD [])
+          claims := claims.push (Json.mkObj [("name", toJson (cap clause.text l 1)), ("parameters", Json.arr parameters.toArray),
+            ("body", claimBody), ("span", clause.span.json)])
           continue
-        fail clause "expected requires, actual method body, or law"
+        -- `law` names an ENFORCED predicate or an accepted proof obligation (GPT-6 row G); a spec
+        -- property nothing checks is a `claim`. The old spelling refuses by name, never reinterprets.
+        if startsWith clause.text "law " then
+          fail clause "law means an enforced predicate; an unchecked property of a spec is a claim (write `claim name: expr`)"
+        fail clause "expected requires, actual method body, or claim"
       decls := decls.push (Json.mkObj ([("kind", toJson "spec"), ("name", toJson (cap line.text caps 2)),
         ("suffix", toJson (capture line.text caps 1).isSome), ("parents", toJson (parents.map String.ofList)),
         ("targetType", toJson (cap line.text caps 4)), ("requirements", Json.arr requirements), ("methods", Json.arr methods),
-        ("laws", Json.arr laws), ("span", line.span.json)] ++
+        ("claims", Json.arr claims), ("span", line.span.json)] ++
         (match capture line.text caps 5 with
           | some b => [("binders", toJson (String.ofList b))]
           | none => [])))
