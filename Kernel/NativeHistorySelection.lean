@@ -169,4 +169,77 @@ def foldRange {root : List UInt8 → Digest} {store : Minidregg.Compiler.Durable
     cursor := upto + 1
   return .ok state
 
+
+/-- **A prefix of records is the Store's verified log.** Every record of `records` below `count`
+is the record the Store's history gives, verified against `head`, at its height. -/
+def PrefixRead {store : StoreIdentity} (head : Head store)
+    (records : List DurableReceiver.IntentRecord) (count : Nat) : Prop :=
+  ∀ k, k < count → ∃ read : Record head (k + 1), records[k]? = some read.record
+
+theorem prefixRead_extend {store : StoreIdentity} {head : Head store}
+    {records : List DurableReceiver.IntentRecord} {n : Nat}
+    (done : PrefixRead head records n)
+    (reads : List ((height : Nat) × Record head height))
+    (heights : reads.map (·.1) = List.range' (n + 1) reads.length)
+    (window : reads.map (·.2.record) = (records.drop n).take reads.length) :
+    PrefixRead head records (n + reads.length) := by
+  intro k hk
+  by_cases below : k < n
+  · exact done k below
+  · have inside : k - n < reads.length := by omega
+    obtain ⟨⟨h, r⟩, hmem⟩ : ∃ p, reads[k - n]? = some p :=
+      ⟨reads[k - n], List.getElem?_eq_getElem inside⟩
+    have hh := congrArg (fun l : List Nat => l[k - n]?) heights
+    have hr := congrArg (fun l : List DurableReceiver.IntentRecord => l[k - n]?) window
+    simp only [List.getElem?_map, hmem, List.getElem?_range', Option.map_some, inside] at hh
+    simp only [List.getElem?_map, hmem, Option.map_some, List.getElem?_take, List.getElem?_drop,
+      inside, if_true] at hr
+    have hk' : h = k + 1 := by
+      have := Option.some.inj hh
+      omega
+    subst hk'
+    refine ⟨r, ?_⟩
+    have : n + (k - n) = k := by omega
+    rw [this] at hr
+    exact hr.symm
+
+/-- Read `records` below `count` in windows (`windowSize`), comparing each window with the
+Store's verified reads: heights consecutive, records equal. Nothing but the cursor is held. -/
+def readPrefixFrom {store : StoreIdentity} (reader : Reader rootBytes store)
+    (records : List DurableReceiver.IntentRecord) (count : Nat) :
+    (fuel n : Nat) → PrefixRead reader.head records n →
+    IO (Except String (PLift (PrefixRead reader.head records count)))
+  | 0, n, done =>
+      if reached : n = count then return .ok ⟨reached ▸ done⟩
+      else return .error "the verified prefix read ran out of windows"
+  | fuel + 1, n, done => do
+      if reached : n = count then return .ok ⟨reached ▸ done⟩
+      else
+        let upto := min count (n + windowSize)
+        match ← reader.range (n + 1) upto with
+        | .error refusal => return .error refusal.message
+        | .ok reads =>
+            if heights : reads.map (·.1) = List.range' (n + 1) reads.length then
+              if bytes : (Tower256ConcreteBackend.StreamCodec.list DurableReceiverCodec.intentStream).encode
+                  (reads.map (·.2.record)) =
+                  (Tower256ConcreteBackend.StreamCodec.list DurableReceiverCodec.intentStream).encode
+                    ((records.drop n).take reads.length) then
+                have window : reads.map (·.2.record) = (records.drop n).take reads.length :=
+                  (lawful_encode_injective
+                    (Tower256ConcreteBackend.StreamCodec.list DurableReceiverCodec.intentStream).toLawful) bytes
+                if 0 < reads.length then
+                  readPrefixFrom reader records count fuel (n + reads.length)
+                    (prefixRead_extend done reads heights window)
+                else return .error "the Store returned an empty window"
+              else return .error s!"the retained prefix differs from the Store's verified records after height {n}"
+            else return .error s!"the Store returned records out of order after height {n}"
+
+def readPrefix {store : StoreIdentity} (reader : Reader rootBytes store)
+    (records : List DurableReceiver.IntentRecord) (count : Nat) :
+    IO (Except String (PLift (PrefixRead reader.head records count))) :=
+  readPrefixFrom reader records count (count / windowSize + 2) 0 (fun k hk => absurd hk (Nat.not_lt_zero k))
+
 end Minidregg.Kernel.NativeHistorySelection
+
+/-- info: 'Minidregg.Kernel.NativeHistorySelection.prefixRead_extend' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHistorySelection.prefixRead_extend
