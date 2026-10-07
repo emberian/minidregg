@@ -18,6 +18,7 @@ Rules (applied only in computational declarations):
       (`Loaded.height` is that expression by definition today and a field
       after stage 2b; <loaded> is an identifier path, see LOADED below.)
 Everything else is a LEFTOVER, grouped:
+  G0 length         an R1 shape in a file whose defs carry proof terms (NO_REWRITE)
   G1 tx-lookup      findIdx?/find?/any/filter by transaction id, accepted[i]?, getLast?
   G2 journal        model.journal / lookupRecorded on a served snapshot
   G3 consumed       model.consumed
@@ -60,6 +61,9 @@ def declarations(lines):
     if kind is not None:
         yield kind, start, len(lines)
 
+# NativeHostReplay's computational declarations carry proof terms (`have ... := by simp [...]`)
+# that the rewrite would break; its 50 R1 sites are left to the walk-family lane (PORT-C).
+NO_REWRITE = ('Kernel/NativeHostReplay.lean',)
 SKIP = ('Compiler/DurableReceiverIO.lean', 'Compiler/DurableHistory.lean', 'Compiler/DurableHistoryReader.lean',
         'Compiler/DurableHistoryStore.lean', 'Kernel/DurableView.lean', 'Kernel/DurableCommitProtocol.lean',
         'Kernel/DurableDataIntent.lean', 'Kernel/DurableCheckpoint.lean', 'Kernel/DurableReceiver.lean')
@@ -89,6 +93,9 @@ def main():
                     if line.lstrip().startswith('--'):
                         continue
                     new, count = R1.subn(lambda m: m.group(1) + '.height', line)
+                    if count and rel in NO_REWRITE:
+                        leftovers.append((rel, i + 1, 'G0', decl, line.strip()[:140]))
+                        continue
                     if count:
                         rewritten.append((rel, i + 1, 'R1', decl))
                         if apply:

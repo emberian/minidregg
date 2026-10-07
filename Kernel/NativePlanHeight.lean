@@ -205,7 +205,7 @@ theorem admitted_append_within_checked_prefix {NativeError : Type}
   have bounded := receiving_prepare_deadline subject domain message state registry oldEnvelope
     prepared accepted
   rw [sameGenesisHeight] at bounded
-  unfold NativeHost.logicalHeight at beyondDeadline
+  unfold NativeHost.logicalHeight DurableReceiverIO.Loaded.height at beyondDeadline
   omega
 
 /-- The same old signed deadline cannot be admitted against any extension of
@@ -228,7 +228,7 @@ theorem no_new_admission_after_checked_prefix {NativeError : Type}
   rcases samePrefix with ⟨suffix, exactImage⟩
   have lengthExact := congrArg (fun image : DurableReceiver.Image => image.accepted.length) exactImage
   simp only [List.length_append] at lengthExact
-  unfold NativeHost.logicalHeight at bounded beyondDeadline
+  unfold NativeHost.logicalHeight DurableReceiverIO.Loaded.height at bounded beyondDeadline
   omega
 
 end Minidregg.Kernel.NativePlanHeight

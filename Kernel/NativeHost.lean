@@ -931,7 +931,8 @@ theorem receiptRoot_ne_spec_of_wrong (config : Config) (durable : Durable) (inde
       receiptRoot config durable index ≠ receiptRootSpec config durable index := by
   refine ⟨fun honest => wrong (honest index root kept), ?_⟩
   unfold receiptRoot receiptRootSpec
-  rw [if_neg notHead, if_neg notHead, kept]
+  have notHead' : ¬ index + 1 = durable.height := notHead
+  rw [if_neg notHead', if_neg notHead', kept]
   exact wrong
 
 /-- A log that keeps no root (`loadImage`'s) is honest: every lookup below the
@@ -1059,7 +1060,7 @@ theorem historicalReceipt_exactCandidate_fresh (config : Config)
         (NativeHostReplay.exactCandidate old derived ready).worldRoot⟩ := by
   simp [historicalReceipt, receiptRoot, NativeHostReplay.exactCandidate,
     DurableReceiverIO.Loaded.extend, DurableReceiver.Image.append, List.findIdx?_append, fresh,
-    DurableReceiver.IntentRecord.ofIntent]
+    DurableReceiver.IntentRecord.ofIntent, DurableReceiverIO.Loaded.height]
 
 def confirmed (config : Config) (kind : DurableReceiverIO.Confirmation)
     (transactionId eventId : Digest) : IO Outcome := do
