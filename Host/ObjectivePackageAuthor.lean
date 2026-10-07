@@ -60,6 +60,10 @@ def author (packageBytes replayedPackage offeredCore expectedCore outputCodecByt
     ("schema",toJson "dregg.objective-bend.publication-author.v1"),
     ("packageId",decimal artifact.package),("artifactId",decimal (identity artifact)),
     ("sourceEntry",toJson declaration),("inputCodec",decimal artifact.inputCodec),("outputCodec",decimal artifact.outputCodec),
+    -- The front-end work an invoking claim declares for this pair (GPT-6 row E): what the native
+    -- route compares with `replayBytes`/`coreBytes` before it replays (`ObjectiveWorkAccount.uncovered`).
+    ("frontEnd",Json.mkObj [("replayBytes",toJson (toString (Minidregg.Kernel.ObjectiveWorkAccount.sourceBytes package))),
+      ("coreBytes",toJson (toString offeredCore.length))]),
     ("payload",Json.mkObj [("type",toJson "content"),("actions",toJson ([
       atom artifact.package packageSchema packageBytes,
       atom (identity artifact) schema artifactBytes] : List Json))]),
