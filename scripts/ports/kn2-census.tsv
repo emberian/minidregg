@@ -169,13 +169,18 @@ LEFTOVER	Kernel/CarriedApplicationDispatchReceiver.lean	225	G1	private def recei
 LEFTOVER	Kernel/ApplicationLifecycleRetryCompletionV4Admission.lean	82	G3	def creationMarkersCurrent (config : Config) (opened : Opened config)	opened.durable.snapshot.model.consumed
 LEFTOVER	Kernel/ApplicationLifecycleRetryCompletionV4Admission.lean	90	G3	def creationMarkersCurrent (config : Config) (opened : Opened config)	opened.durable.snapshot.model.consumed
 LEFTOVER	Kernel/ApplicationLifecycleRetryCompletionV4Admission.lean	93	G3	def creationMarkersCurrent (config : Config) (opened : Opened config)	!opened.durable.snapshot.model.consumed created
+LEFTOVER	Kernel/ConsentAnchor.lean	87	G0	def Anchor.ofOpened {config : Config} (opened : Opened config) : Anchor :=	⟨opened.durable.image.accepted.length, opened.durable.logStart, opened.durable.chain,
+LEFTOVER	Kernel/ConsentAnchor.lean	95	G0	def checkStore (anchor : Anchor) (loaded : Durable) (chains : List Digest) : Exc	else if loaded.image.accepted.length < anchor.height then
+LEFTOVER	Kernel/ConsentAnchor.lean	96	G0	def checkStore (anchor : Anchor) (loaded : Durable) (chains : List Digest) : Exc	.error s!"the Store's head {loaded.image.accepted.length} is below the retained consent anchor at {anchor.height}: the accepted history was 
 LEFTOVER	Kernel/ConsentAnchor.lean	179	G5	def resume (config : Config) (anchor : Anchor) (target : Durable) (chains : List	(chainsExact : chains = DurableLogTags.chainPrefixes target.logStart target.image.accepted) :
 LEFTOVER	Kernel/ConsentAnchor.lean	183	G4	def resume (config : Config) (anchor : Anchor) (target : Durable) (chains : List	match target.prefixAt anchor.height chains chainsExact with
+LEFTOVER	Kernel/ConsentAnchor.lean	193	G0	def resume (config : Config) (anchor : Anchor) (target : Durable) (chains : List	have anchorWithin : start.durable.image.accepted.length ≤ target.image.accepted.length := by
 LEFTOVER	Kernel/ConsentAnchor.lean	195	G4	def resume (config : Config) (anchor : Anchor) (target : Durable) (chains : List	show (target.image.accepted.take anchor.height).length ≤ _
-LEFTOVER	Kernel/ConsentAnchor.lean	198	G4	def resume (config : Config) (anchor : Anchor) (target : Durable) (chains : List	have prefixExact : target.image.accepted.take start.durable.height =
+LEFTOVER	Kernel/ConsentAnchor.lean	198	G0	def resume (config : Config) (anchor : Anchor) (target : Durable) (chains : List	have prefixExact : target.image.accepted.take start.durable.image.accepted.length =
 LEFTOVER	Kernel/ConsentAnchor.lean	199	G5	def resume (config : Config) (anchor : Anchor) (target : Durable) (chains : List	start.durable.image.accepted := by
 LEFTOVER	Kernel/ConsentAnchor.lean	244	G5	def Basis.extendAppended (config : Config) {oldTarget : Durable}	(acceptedExact : target.image.accepted = oldTarget.image.accepted ++
 LEFTOVER	Kernel/ConsentAnchor.lean	245	G4	def Basis.extendAppended (config : Config) {oldTarget : Durable}	target.image.accepted.drop oldTarget.image.accepted.length)
+LEFTOVER	Kernel/ConsentAnchor.lean	253	G0	def Basis.extendAppended (config : Config) {oldTarget : Durable}	have within : oldTarget.image.accepted.length ≤ target.image.accepted.length := by
 LEFTOVER	Kernel/ConsentAnchor.lean	256	G4	def Basis.extendAppended (config : Config) {oldTarget : Durable}	have prefixExact : target.image.accepted.take oldTarget.image.accepted.length =
 LEFTOVER	Kernel/ConsentAnchor.lean	257	G5	def Basis.extendAppended (config : Config) {oldTarget : Durable}	oldTarget.image.accepted := by
 LEFTOVER	Kernel/ApplicationAgentLifetimeGrantReceiver.lean	31	G1	def lookupVerified {config : Config} {target : Durable}	let some _ := verified.opened.durable.image.accepted.find?
@@ -398,13 +403,13 @@ LEFTOVER	Kernel/NativeHost.lean	897	G6	def receiptRoot (config : Config) (durabl
 LEFTOVER	Kernel/NativeHost.lean	899	G4	def receiptRoot (config : Config) (durable : Durable) (index : Nat) : Digest :=	| _ => worldRoot config ⟨durable.image.seed, durable.image.accepted.take (index + 1)⟩
 LEFTOVER	Kernel/NativeHost.lean	907	G6	def RootLogHonest (config : Config) (durable : Durable) : Prop :=	∀ index root, durable.rootLog[index]? = some (some root) →
 LEFTOVER	Kernel/NativeHost.lean	908	G4	def RootLogHonest (config : Config) (durable : Durable) : Prop :=	root = worldRoot config ⟨durable.image.seed, durable.image.accepted.take (index + 1)⟩
-LEFTOVER	Kernel/NativeHost.lean	991	G1	def historicalReceipt (config : Config) (durable : Durable) (transactionId event	let index ← durable.image.accepted.findIdx? (fun record => record.transactionId == transactionId)
-LEFTOVER	Kernel/NativeHost.lean	992	G1	def historicalReceipt (config : Config) (durable : Durable) (transactionId event	let record ← durable.image.accepted[index]?
-LEFTOVER	Kernel/NativeHost.lean	1001	G1	def historicalReceiptCached (config : Config) (durable : Durable) (transactionId	let record ← durable.image.accepted[index]?
-LEFTOVER	Kernel/NativeHost.lean	1289	G1	def receiptByTransactionLoaded (config : Config) (opened : Opened config)	let record ← opened.durable.image.accepted.find? (fun record => record.transactionId == transactionId)
-LEFTOVER	Kernel/NativeHost.lean	1322	G1	def fleetJournalTurn {config : Config} (opened : Opened config) (transactionId :	let record ← opened.durable.image.accepted.find? (fun record => record.transactionId == transactionId)
-LEFTOVER	Kernel/NativeHost.lean	1371	G1	def fleetHeadAuthorizedLoaded (config : Config) (opened : Opened config)	let paid := opened.durable.image.accepted.filter fun record =>
-LEFTOVER	Kernel/NativeHost.lean	1543	G5	def fleetIncomingAuthorizedLoaded (config : Config) (opened : Opened config)	opened.durable.image.accepted
+LEFTOVER	Kernel/NativeHost.lean	992	G1	def historicalReceipt (config : Config) (durable : Durable) (transactionId event	let index ← durable.image.accepted.findIdx? (fun record => record.transactionId == transactionId)
+LEFTOVER	Kernel/NativeHost.lean	993	G1	def historicalReceipt (config : Config) (durable : Durable) (transactionId event	let record ← durable.image.accepted[index]?
+LEFTOVER	Kernel/NativeHost.lean	1002	G1	def historicalReceiptCached (config : Config) (durable : Durable) (transactionId	let record ← durable.image.accepted[index]?
+LEFTOVER	Kernel/NativeHost.lean	1290	G1	def receiptByTransactionLoaded (config : Config) (opened : Opened config)	let record ← opened.durable.image.accepted.find? (fun record => record.transactionId == transactionId)
+LEFTOVER	Kernel/NativeHost.lean	1323	G1	def fleetJournalTurn {config : Config} (opened : Opened config) (transactionId :	let record ← opened.durable.image.accepted.find? (fun record => record.transactionId == transactionId)
+LEFTOVER	Kernel/NativeHost.lean	1372	G1	def fleetHeadAuthorizedLoaded (config : Config) (opened : Opened config)	let paid := opened.durable.image.accepted.filter fun record =>
+LEFTOVER	Kernel/NativeHost.lean	1544	G5	def fleetIncomingAuthorizedLoaded (config : Config) (opened : Opened config)	opened.durable.image.accepted
 LEFTOVER	Kernel/ApplicationLifecycleClaimV2Receiver.lean	130	G1	def receiveVerified (config : Config) {target : Durable}	if old.opened.durable.image.accepted.findIdx?
 LEFTOVER	Kernel/ApplicationLifecycleCompletionV2History.lean	85	G4	def select (config : Config) (opened : Opened config)	let prefixAfter := NativeHistorySelection.prefixImage opened (index + 1)
 LEFTOVER	Kernel/ApplicationLifecycleCompletionV2History.lean	86	G4	def select (config : Config) (opened : Opened config)	let loaded ← match ← NativeHistorySelection.loadPrefix opened.durable.logStart prefixAfter with
