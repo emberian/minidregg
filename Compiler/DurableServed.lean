@@ -558,7 +558,7 @@ nothing older. What it establishes, each refused by name:
   carries equal to the replayed world root.
 
 Records at or below the checkpoint are verified at use (`Reader`) and by
-`store audit`; the full shape's open (`DurableReceiverIO.loadChained`) still
+`store audit`; the full shape's open (the ratchet-listed full materialization) still
 verifies every one, for its ratchet-listed callers. -/
 
 structure Opening (rootBytes : List UInt8 → Digest) where
