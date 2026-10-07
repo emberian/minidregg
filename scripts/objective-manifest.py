@@ -35,6 +35,7 @@ The ledger, scripts/gates/objective-contract-changes.txt, one admitted change pe
 An entry admits exactly that (name, old, new, kind). A REMOVED row is admitted only when its reason
 says what replaces it (ROOT, 10-07, after b23 let `replay_changed_ingress_refused` go with no successor):
   successor: <Full.Name>[, <Full.Name>...] [-- note]   every name a declaration of the fresh run
+                                                        (a private one by its full name, without `private`/`@Module`)
   derivable: <how it follows from what remains>
   obsolete: <why the claim no longer applies>
 The check runs when the removal is admitted (lines that admitted earlier removals are not re-read).
@@ -280,7 +281,8 @@ def removal_refusal(reason, fresh):
     names = [x for x in re.split(r"[,\s]+", m.group(2).split(" -- ")[0]) if x]
     if not names:
         return "`successor:` names no declaration"
-    missing = [x for x in names if x not in fresh]
+    private = {k.split(" @")[0][len("private "):] for k in fresh if k.startswith("private ")}
+    missing = [x for x in names if x not in fresh and x not in private]
     if missing:
         return f"successor not a declaration of this run: {', '.join(missing)}"
     return None
@@ -512,11 +514,13 @@ def cmd_selftest(pins, fresh, admitted):
     gone = {k: v for k, v in base.items() if k != thm}
     rm = [c for c in ratchet(pins, gone, admitted) if c[1] == thm][0]
     other = next(k for k in sorted(gone) if k != thm)
+    priv = next((k.split(" @")[0][len("private "):] for k in sorted(gone) if k.startswith("private ")), None)
     for reason, want in [("removed: module changed by a commit (attributed)", False),
                          ("successor:", False),
                          ("successor: Minidregg.ObjectiveManifest.NoSuchSuccessor", False),
                          (f"successor: {thm} -- itself, which this removal deletes", False),
                          (f"successor: {other} -- the selftest's stand-in", True),
+                         *([(f"successor: {priv} -- a private declaration, named without its key", True)] if priv else []),
                          ("derivable: by the stand-in", True),
                          ("obsolete: the claim no longer applies", True)]:
         got = verdict(gone, with_entry_reason(admitted, (thm, rm[2], rm[3], "removed"), reason), thm)
