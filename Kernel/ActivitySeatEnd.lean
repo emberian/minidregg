@@ -297,18 +297,20 @@ theorem finalIntent_guards {rootBytes : Bytes → Digest} {config : Config} {sna
       | exact kept (List.mem_append_left _ member)
 
 /-- **What an admitted turn end guarantees about invariant domains.** For every object whose
-declared state the final posts write, every domain its record (as the turn leaves it) names
+declared state the final posts can change, every domain its record (as the turn leaves it) names
 exists and its law holds on ALL members' final states, and the committed intent GUARDS every cell
 that judgment read (each member's state cell, the domain cell, the written object's record cell):
 a concurrent turn that changes an unwritten member, or the membership, conflicts with it. -/
 theorem finish_domains {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {turn : AdmittedTurn config snapshot height} {posts : List Post} {extra : List ReadGuard}
     (finished : finish config snapshot height turn = .ok (posts, extra)) (sealing : Seal) :
-    ∀ object ∈ ObjectiveActivity.writtenObjects posts,
+    ∀ object ∈ ObjectiveActivity.writtenObjects snapshot posts,
       Guarded snapshot (AdmittedTurn.finalIntent sealing posts extra turn)
         (ObjectiveActivity.objectCell config.domain object) ∧
       ∀ record, ObjectiveActivity.finalRecord config snapshot posts object = .ok (some record) →
-        ∀ id ∈ record.domains, ∃ domain states, ObjectiveActivity.readDomain config snapshot id = .ok (some domain) ∧
+        ∀ id ∈ record.domains, ∃ domain states, ObjectiveActivity.domainFor id
+            (ObjectiveActivity.afterPosts snapshot posts (ObjectiveActivity.domainCell config.domain id)) =
+            .ok (some domain) ∧
           domain.members.mapM (fun member => ObjectiveActivity.stateFor member
             (ObjectiveActivity.afterPosts snapshot posts (ObjectiveActivity.stateCell config.domain member))) =
             .ok states ∧
@@ -331,7 +333,8 @@ theorem finish_domains {rootBytes : Bytes → Digest} {config : Config} {snapsho
       (ObjectiveActivity.afterPosts snapshot posts (ObjectiveActivity.stateCell config.domain member))) =
       ObjectiveActivity.finalState config snapshot posts :=
     funext fun member => (ObjectiveActivity.finalState_after config snapshot posts member).symm
-  exact ⟨domain, states, read, by rw [after]; exact mapped, holds, reach _ guardDomain,
+  exact ⟨domain, states, by rw [← ObjectiveActivity.finalDomain_after]; exact read, by rw [after]; exact mapped,
+    holds, reach _ guardDomain,
     fun member inMembers => reach _ (guardStates member inMembers)⟩
 
 #assert_axioms joint_admission Joined.conserves Joined.closes Joined.deregisters Joined.retires join_none finish_finalize finalIntent_guards finish_domains

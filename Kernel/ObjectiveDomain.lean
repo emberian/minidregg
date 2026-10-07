@@ -118,13 +118,61 @@ def finalRecord {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
   | some post => objectFor object post.bytes
   | none => readObject config snapshot object
 
-/-- The objects whose declared state a turn's posts write: every post holding a state payload,
-by the object its key names. -/
-def writtenObjects (posts : List Post) : List CellId :=
-  posts.filterMap fun post =>
-    match payloadOf post.bytes with
-    | some payload => if payload.role = .state then digestStream.toLawful.decode payload.key else none
-    | none => none
+/-- A domain as the turn leaves its cell. -/
+def finalDomain {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (posts : List Post)
+    (id : Digest) : Except Refusal (Option Domain) :=
+  match firstAt posts (domainCell config.domain id) with
+  | some post => domainFor id post.bytes
+  | none => readDomain config snapshot id
+
+/-- The object an activity payload of `role` belongs to (its key, decoded). -/
+def objectOwner (role : ObjectiveActivityCell.Role) : Option ObjectiveActivityCell.Payload → Option CellId
+  | some payload => if payload.role = role then digestStream.toLawful.decode payload.key else none
+  | none => none
+
+/-- The domain a domain payload holds (its key, decoded). -/
+def domainOwner : Option ObjectiveActivityCell.Payload → Option Digest
+  | some payload => if payload.role = .domain then digestStream.toLawful.decode payload.key else none
+  | none => none
+
+/-- What a post touches: the payload it writes and the payload its cell holds now. -/
+def touched {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (post : Post) :
+    List (Option ObjectiveActivityCell.Payload) :=
+  [payloadOf post.bytes, payloadOf (snapshot.canonicalBytes post.cell)]
+
+/-- **The objects whose declared state a turn's posts can change**: every post whose written
+payload OR whose cell's current payload is a state payload, by the object its key names. A post
+that retires or blanks a state cell counts as a write of that object's state. -/
+def writtenObjects {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (posts : List Post) :
+    List CellId :=
+  posts.flatMap fun post => (touched snapshot post).filterMap (objectOwner .state)
+
+/-- The domains whose cells the turn's posts touch (written or held). -/
+def postedDomains {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (posts : List Post) :
+    List Digest :=
+  posts.flatMap fun post => (touched snapshot post).filterMap domainOwner
+
+/-- **A post keeps its record's domains**: when the post's cell holds an object record, what the
+post writes is that object's record and names every domain the held one does. -/
+def keepsDomains {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (post : Post) :
+    Except Refusal Unit :=
+  match objectOwner .object (payloadOf (snapshot.canonicalBytes post.cell)) with
+  | none => .ok ()
+  | some object =>
+    match objectFor object (snapshot.canonicalBytes post.cell) with
+    | .ok (some held) =>
+      match objectFor object post.bytes with
+      | .ok (some written) =>
+        if held.domains.all (· ∈ written.domains) then .ok () else .error (.domainsDropped object.value)
+      | _ => if held.domains.isEmpty then .ok () else .error (.domainsDropped object.value)
+    | _ => .ok ()
+
+def keepAll {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) : List Post → Except Refusal Unit
+  | [] => .ok ()
+  | post :: rest =>
+    match keepsDomains snapshot post with
+    | .error reason => .error reason
+    | .ok () => keepAll snapshot rest
 
 /-- The domains of the written objects (each object's record as the turn leaves it). -/
 def touchedDomains {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
@@ -137,10 +185,10 @@ def touchedDomains {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
     | .ok none, .ok later => .ok later
     | .ok (some record), .ok later => .ok (record.domains ++ later)
 
-/-- Judge one domain on the turn's final posts; its read guards. -/
+/-- Judge one domain, as the turn leaves its cell, on the turn's final posts; its read guards. -/
 def judgeDomain {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (posts : List Post) (id : Digest) : Except Refusal (List ReadGuard) :=
-  match readDomain config snapshot id with
+  match finalDomain config snapshot posts id with
   | .error reason => .error reason
   | .ok none => .error (.domainMissing id)
   | .ok (some domain) =>
@@ -161,18 +209,65 @@ def judgeEach {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snaps
     | _, .error reason => .error reason
     | .ok here, .ok later => .ok (here ++ later)
 
-/-- **The domain judgment at turn end**: every domain of every object whose state the turn's
-final posts write holds on the members' final states. The read guards it returns go into the
-turn's intent (`ActivitySeatEnd.AdmittedTurn.finalIntent`). -/
+/-- Every member's record, as the turn leaves it, names `id`. -/
+def indexMembers {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (posts : List Post) (id : Digest) : List CellId → Except Refusal Unit
+  | [] => .ok ()
+  | member :: rest =>
+    match finalRecord config snapshot posts member with
+    | .error reason => .error reason
+    | .ok none => .error (.domainUnindexed id member.value)
+    | .ok (some record) =>
+      if id ∈ record.domains then indexMembers config snapshot posts id rest
+      else .error (.domainUnindexed id member.value)
+
+/-- A domain whose cell the turn writes is named by every member's record; its read guards
+(the members' record cells). -/
+def indexDomain {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (posts : List Post) (id : Digest) : Except Refusal (List ReadGuard) :=
+  match finalDomain config snapshot posts id with
+  | .error reason => .error reason
+  | .ok none => .ok []
+  | .ok (some domain) =>
+    match indexMembers config snapshot posts id domain.members with
+    | .error reason => .error reason
+    | .ok () => .ok (domain.members.map fun member => guardAt snapshot (objectCell config.domain member))
+
+def indexEach {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (posts : List Post) : List Digest → Except Refusal (List ReadGuard)
+  | [] => .ok []
+  | first :: rest =>
+    match indexDomain config snapshot posts first, indexEach config snapshot posts rest with
+    | .error reason, _ => .error reason
+    | _, .error reason => .error reason
+    | .ok here, .ok later => .ok (here ++ later)
+
+/-- **The domain judgment at turn end** (the one choke point every admitted turn passes,
+`ActivitySeatEnd.finish`):
+1. every post on a cell holding an object record keeps that record's domains (`domainsDropped`);
+2. every domain of every object whose state the posts can change (written OR held at a posted
+   cell), and every domain whose cell the posts touch, holds on all its members' final states;
+3. every domain whose cell the posts touch is named by each member's final record
+   (`domainUnindexed`).
+The read guards it returns go into the turn's intent (`ActivitySeatEnd.AdmittedTurn.finalIntent`);
+what it reads at a posted cell is pinned by that post's own `pre`. -/
 def judgeDomains {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (posts : List Post) : Except Refusal (List ReadGuard) :=
-  let written := writtenObjects posts
-  match touchedDomains config snapshot posts written with
+  match keepAll snapshot posts with
   | .error reason => .error reason
-  | .ok ids =>
-    match judgeEach config snapshot posts ids with
+  | .ok () =>
+    let written := writtenObjects snapshot posts
+    let posted := postedDomains snapshot posts
+    match touchedDomains config snapshot posts written with
     | .error reason => .error reason
-    | .ok guards => .ok (guards ++ written.map fun object => guardAt snapshot (objectCell config.domain object))
+    | .ok ids =>
+      match judgeEach config snapshot posts (ids ++ posted) with
+      | .error reason => .error reason
+      | .ok guards =>
+        match indexEach config snapshot posts posted with
+        | .error reason => .error reason
+        | .ok index =>
+          .ok (guards ++ index ++ written.map fun object => guardAt snapshot (objectCell config.domain object))
 
 /-! ## The judgment is sound: what an admitted turn end guarantees -/
 
@@ -198,6 +293,20 @@ theorem finalState_after {rootBytes : Bytes → Digest} (config : Config) (snaps
       stateFor object (afterPosts snapshot posts (stateCell config.domain object)) := by
   unfold finalState firstAt afterPosts readState
   cases posts.find? (fun post => decide (post.cell = stateCell config.domain object)) <;> rfl
+
+theorem finalRecord_after {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (posts : List Post) (object : CellId) :
+    finalRecord config snapshot posts object =
+      objectFor object (afterPosts snapshot posts (objectCell config.domain object)) := by
+  unfold finalRecord firstAt afterPosts readObject
+  cases posts.find? (fun post => decide (post.cell = objectCell config.domain object)) <;> rfl
+
+theorem finalDomain_after {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (posts : List Post) (id : Digest) :
+    finalDomain config snapshot posts id =
+      domainFor id (afterPosts snapshot posts (domainCell config.domain id)) := by
+  unfold finalDomain firstAt afterPosts readDomain
+  cases posts.find? (fun post => decide (post.cell = domainCell config.domain id)) <;> rfl
 
 theorem touchedDomains_mem {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {posts : List Post} {objects : List CellId} {ids : List Digest}
@@ -250,16 +359,79 @@ theorem judgeEach_mem {rootBytes : Bytes → Digest} {config : Config} {snapshot
         · obtain ⟨found, judgedHere, within⟩ := ih he want inRest
           exact ⟨found, judgedHere, fun g inFound => List.mem_append_right _ (within g inFound)⟩
 
+theorem indexEach_mem {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {posts : List Post} {ids : List Digest} {guards : List ReadGuard}
+    (indexed : indexEach config snapshot posts ids = .ok guards) :
+    ∀ want ∈ ids, ∃ here, indexDomain config snapshot posts want = .ok here ∧ ∀ g ∈ here, g ∈ guards := by
+  induction ids generalizing guards with
+  | nil => intro want member; cases member
+  | cons first rest ih =>
+    intro want member
+    unfold indexEach at indexed
+    cases hd : indexDomain config snapshot posts first with
+    | error reason => rw [hd] at indexed; cases indexed
+    | ok here =>
+      cases he : indexEach config snapshot posts rest with
+      | error reason => rw [hd, he] at indexed; cases indexed
+      | ok later =>
+        rw [hd, he] at indexed
+        simp only [Except.ok.injEq] at indexed
+        subst indexed
+        rcases List.mem_cons.mp member with rfl | inRest
+        · exact ⟨here, hd, fun g inHere => List.mem_append_left _ inHere⟩
+        · obtain ⟨found, judgedHere, within⟩ := ih he want inRest
+          exact ⟨found, judgedHere, fun g inFound => List.mem_append_right _ (within g inFound)⟩
+
+theorem keepAll_mem {rootBytes : Bytes → Digest} {snapshot : Snapshot rootBytes} {posts : List Post}
+    (kept : keepAll snapshot posts = .ok ()) : ∀ post ∈ posts, keepsDomains snapshot post = .ok () := by
+  induction posts with
+  | nil => intro post member; cases member
+  | cons first rest ih =>
+    intro post member
+    unfold keepAll at kept
+    cases hk : keepsDomains snapshot first with
+    | error reason => rw [hk] at kept; cases kept
+    | ok u =>
+      rw [hk] at kept
+      rcases List.mem_cons.mp member with rfl | inRest
+      · exact hk
+      · exact ih kept post inRest
+
+theorem indexMembers_mem {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {posts : List Post} {id : Digest} {members : List CellId}
+    (indexed : indexMembers config snapshot posts id members = .ok ()) :
+    ∀ member ∈ members, ∃ record, finalRecord config snapshot posts member = .ok (some record) ∧
+      id ∈ record.domains := by
+  induction members with
+  | nil => intro member inMembers; cases inMembers
+  | cons first rest ih =>
+    intro member inMembers
+    unfold indexMembers at indexed
+    cases hf : finalRecord config snapshot posts first with
+    | error reason => rw [hf] at indexed; cases indexed
+    | ok found =>
+      cases found with
+      | none => rw [hf] at indexed; cases indexed
+      | some record =>
+        rw [hf] at indexed
+        simp only at indexed
+        by_cases named : id ∈ record.domains
+        · rw [if_pos named] at indexed
+          rcases List.mem_cons.mp inMembers with rfl | inRest
+          · exact ⟨record, hf, named⟩
+          · exact ih indexed member inRest
+        · rw [if_neg named] at indexed; cases indexed
+
 theorem judgeDomain_ok {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {posts : List Post} {id : Digest} {guards : List ReadGuard}
     (judged : judgeDomain config snapshot posts id = .ok guards) :
-    ∃ domain states, readDomain config snapshot id = .ok (some domain) ∧
+    ∃ domain states, finalDomain config snapshot posts id = .ok (some domain) ∧
       domain.members.mapM (finalState config snapshot posts) = .ok states ∧
       judgeJoint domain.law id states = .ok () ∧
       guardAt snapshot (domainCell config.domain id) ∈ guards ∧
       ∀ member ∈ domain.members, guardAt snapshot (stateCell config.domain member) ∈ guards := by
   unfold judgeDomain at judged
-  cases hr : readDomain config snapshot id with
+  cases hr : finalDomain config snapshot posts id with
   | error reason => rw [hr] at judged; cases judged
   | ok found =>
     cases found with
@@ -281,36 +453,99 @@ theorem judgeDomain_ok {rootBytes : Bytes → Digest} {config : Config} {snapsho
           exact ⟨domain, states, rfl, hs, hj, List.mem_cons_self .., fun member inMembers =>
             List.mem_cons_of_mem _ (List.mem_map_of_mem inMembers)⟩
 
+theorem indexDomain_ok {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {posts : List Post} {id : Digest} {guards : List ReadGuard}
+    (indexed : indexDomain config snapshot posts id = .ok guards) :
+    ∀ domain, finalDomain config snapshot posts id = .ok (some domain) →
+      ∀ member ∈ domain.members, (∃ record, finalRecord config snapshot posts member = .ok (some record) ∧
+        id ∈ record.domains) ∧ guardAt snapshot (objectCell config.domain member) ∈ guards := by
+  intro domain found member inMembers
+  unfold indexDomain at indexed
+  rw [found] at indexed
+  simp only at indexed
+  cases hi : indexMembers config snapshot posts id domain.members with
+  | error reason => rw [hi] at indexed; cases indexed
+  | ok u =>
+    rw [hi] at indexed
+    simp only [Except.ok.injEq] at indexed
+    subst indexed
+    exact ⟨indexMembers_mem hi member inMembers, List.mem_map_of_mem inMembers⟩
+
+/-- **What an admitting turn-end judgment guarantees**, in parts: every post keeps its record's
+domains; every domain it must judge (named by a written object's final record, or whose cell
+a post touches) exists as the turn leaves it and holds on its members' final states, with the
+domain cell and every member's state cell guarded; every domain whose cell a post touches is
+named by each member's final record, with the member's record cell guarded; every written
+object's record cell is guarded. -/
+theorem judgeDomains_parts {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {posts : List Post} {guards : List ReadGuard} (judged : judgeDomains config snapshot posts = .ok guards) :
+    (∀ post ∈ posts, keepsDomains snapshot post = .ok ()) ∧
+    (∀ id, ((∃ object ∈ writtenObjects snapshot posts, ∃ record,
+        finalRecord config snapshot posts object = .ok (some record) ∧ id ∈ record.domains) ∨
+        id ∈ postedDomains snapshot posts) →
+      ∃ here, judgeDomain config snapshot posts id = .ok here ∧ ∀ g ∈ here, g ∈ guards) ∧
+    (∀ id ∈ postedDomains snapshot posts,
+      ∃ here, indexDomain config snapshot posts id = .ok here ∧ ∀ g ∈ here, g ∈ guards) ∧
+    (∀ object ∈ writtenObjects snapshot posts, guardAt snapshot (objectCell config.domain object) ∈ guards) := by
+  unfold judgeDomains at judged
+  cases hk : keepAll snapshot posts with
+  | error reason => rw [hk] at judged; cases judged
+  | ok u =>
+    rw [hk] at judged
+    simp only at judged
+    cases ht : touchedDomains config snapshot posts (writtenObjects snapshot posts) with
+    | error reason => rw [ht] at judged; cases judged
+    | ok ids =>
+      rw [ht] at judged
+      simp only at judged
+      cases he : judgeEach config snapshot posts (ids ++ postedDomains snapshot posts) with
+      | error reason => rw [he] at judged; cases judged
+      | ok domainGuards =>
+        rw [he] at judged
+        simp only at judged
+        cases hx : indexEach config snapshot posts (postedDomains snapshot posts) with
+        | error reason => rw [hx] at judged; cases judged
+        | ok index =>
+          rw [hx] at judged
+          simp only [Except.ok.injEq] at judged
+          subst judged
+          refine ⟨keepAll_mem hk, ?_, ?_, fun object written =>
+            List.mem_append_right _ (List.mem_map_of_mem written)⟩
+          · intro id which
+            have inIds : id ∈ ids ++ postedDomains snapshot posts := by
+              rcases which with ⟨object, written, record, found, named⟩ | posted
+              · exact List.mem_append_left _ (touchedDomains_mem ht object written record found id named)
+              · exact List.mem_append_right _ posted
+            obtain ⟨here, judgedHere, within⟩ := judgeEach_mem he id inIds
+            exact ⟨here, judgedHere, fun g inHere =>
+              List.mem_append_left _ (List.mem_append_left _ (within g inHere))⟩
+          · intro id posted
+            obtain ⟨here, indexedHere, within⟩ := indexEach_mem hx id posted
+            exact ⟨here, indexedHere, fun g inHere =>
+              List.mem_append_left _ (List.mem_append_right _ (within g inHere))⟩
+
 /-- **The domain judgment at turn end, stated.** When it admits a turn's final posts, then for
-every object whose declared state the posts write, every domain its record (as the turn leaves
-it) names exists, and its law holds on ALL its members' final states (the written ones as
+every object whose declared state the posts can change, every domain its record (as the turn
+leaves it) names exists, and its law holds on ALL its members' final states (the written ones as
 posted, the others as they stand); and the judgment's guards cover every cell it read: the
 domain cell, every member's state cell, and every written object's record cell. -/
 theorem judgeDomains_sound {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {posts : List Post} {guards : List ReadGuard} (judged : judgeDomains config snapshot posts = .ok guards) :
-    ∀ object ∈ writtenObjects posts,
+    ∀ object ∈ writtenObjects snapshot posts,
       guardAt snapshot (objectCell config.domain object) ∈ guards ∧
       ∀ record, finalRecord config snapshot posts object = .ok (some record) →
-        ∀ id ∈ record.domains, ∃ domain states, readDomain config snapshot id = .ok (some domain) ∧
+        ∀ id ∈ record.domains, ∃ domain states, finalDomain config snapshot posts id = .ok (some domain) ∧
           domain.members.mapM (finalState config snapshot posts) = .ok states ∧
           (∃ joint, jointSlots 0 states = some joint ∧ Minidregg.Pred.eval domain.law ⟨joint⟩ ⟨joint⟩ = true) ∧
           guardAt snapshot (domainCell config.domain id) ∈ guards ∧
           ∀ member ∈ domain.members, guardAt snapshot (stateCell config.domain member) ∈ guards := by
-  unfold judgeDomains at judged
-  cases ht : touchedDomains config snapshot posts (writtenObjects posts) with
-  | error reason => simp only [ht] at judged; cases judged
-  | ok ids =>
-    cases he : judgeEach config snapshot posts ids with
-    | error reason => simp only [ht, he] at judged; cases judged
-    | ok domainGuards =>
-      simp only [ht, he, Except.ok.injEq] at judged
-      subst judged
-      intro object written
-      refine ⟨List.mem_append_right _ (List.mem_map_of_mem written), fun record found want named => ?_⟩
-      obtain ⟨here, judgedHere, within⟩ := judgeEach_mem he want (touchedDomains_mem ht object written record found want named)
-      obtain ⟨domain, states, read, mapped, holds, guardDomain, guardStates⟩ := judgeDomain_ok judgedHere
-      exact ⟨domain, states, read, mapped, judgeJoint_holds holds, List.mem_append_left _ (within _ guardDomain),
-        fun member inMembers => List.mem_append_left _ (within _ (guardStates member inMembers))⟩
+  obtain ⟨_, judgedAll, _, objectGuards⟩ := judgeDomains_parts judged
+  intro object written
+  refine ⟨objectGuards object written, fun record found id named => ?_⟩
+  obtain ⟨here, judgedHere, within⟩ := judgedAll id (.inl ⟨object, written, record, found, named⟩)
+  obtain ⟨domain, states, read, mapped, holds, guardDomain, guardStates⟩ := judgeDomain_ok judgedHere
+  exact ⟨domain, states, read, mapped, judgeJoint_holds holds, within _ guardDomain,
+    fun member inMembers => within _ (guardStates member inMembers)⟩
 
 /-! ## Registration -/
 
@@ -412,6 +647,7 @@ def Registration.intent {rootBytes : Bytes → Digest} {config : Config} {snapsh
     (sealing : Seal) : DataIntent rootBytes :=
   intentOf rootBytes (registerTransaction request) registered.posts registered.guards [] sealing
 
-#assert_axioms domain_roundTrip judgeJoint_holds finalState_after judgeDomains_sound
+#assert_axioms domain_roundTrip judgeJoint_holds finalState_after finalRecord_after finalDomain_after judgeDomains_parts
+  judgeDomains_sound
 
 end Minidregg.Kernel.ObjectiveActivity

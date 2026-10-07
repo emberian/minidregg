@@ -5,8 +5,8 @@
 
 In TREE (a throwaway copy; files are replaced via temp + rename, hardlink-safe), Kernel/ObjectiveDomain.lean's
 `judgeDomains` judges nothing: every turn ends with no domain refusal and no domain guards. The theorems that
-state what the judgment guarantees (`judgeDomains_sound`, `ActivitySeatEnd.finish_domains`) are false under
-this plant, so the plant also removes them to let the Host link: the planted binary is what the kernel would
+state what the judgment guarantees (`judgeDomains_parts`, `judgeDomains_sound`, `ActivitySeatEnd.finish_domains`)
+are false under this plant, so the plant also removes them to let the Host link: the planted binary is what the kernel would
 ship WITHOUT those theorems. Built into a Host, row D1 must go red (a.deposit(1) commits although the joint
 law a = b refuses it)."""
 import os, pathlib, sys
@@ -24,17 +24,17 @@ def edit(relative, change):
 
 def domain(s):
     old = '''    (posts : List Post) : Except Refusal (List ReadGuard) :=
-  let written := writtenObjects posts
+  match keepAll snapshot posts with
 '''
     assert s.count(old) == 1, old
     s = s.replace(old, '''    (posts : List Post) : Except Refusal (List ReadGuard) :=
   if true then .ok [] else
-  let written := writtenObjects posts
+  match keepAll snapshot posts with
 ''')
-    a = s.index('/-- **The domain judgment at turn end, stated.**')
+    a = s.index('/-- **What an admitting turn-end judgment guarantees**')
     b = s.index('/-! ## Registration -/')
     s = s[:a] + s[b:]
-    old = ' judgeDomains_sound\n'
+    old = ' judgeDomains_parts\n  judgeDomains_sound\n'
     assert s.count(old) == 1, old
     return s.replace(old, '\n')
 
