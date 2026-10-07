@@ -544,7 +544,7 @@
     {
       "module": "Assurance.NativeAcceptedFixtureProjection",
       "path": "Assurance/NativeAcceptedFixtureProjection.lean",
-      "sha256": "2ed7dc7abcbae51f0743493bd0bde9ebbdd09c0d170a290596aa51b037012e49",
+      "sha256": "e23287e3b3a2b0cf00d42356b2ebad38af5c1f6b4f8ffc0c76a0d62a3d7dca86",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -4100,7 +4100,7 @@
     {
       "module": "Host.ObjectiveInvocationQuote",
       "path": "Host/ObjectiveInvocationQuote.lean",
-      "sha256": "15788ff67b3f7fe2d3444cef6acbd2da5fa86cd80a83f2f47f9cc6bfa596ce57",
+      "sha256": "ec007a3f6903b153291bfa800625c87e61b9c1b2fd3664fe36b2475050295a2a",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -7005,7 +7005,7 @@
     {
       "module": "Kernel.ObjectiveActivity",
       "path": "Kernel/ObjectiveActivity.lean",
-      "sha256": "e7fa881ba9073799528d0d9613d62bdb72278ca20f4481db99df1f0c205b29d0",
+      "sha256": "bdf33db488add3f629c0b96a2b24dbfcad2f7e9332bf097b84fa9a8d3a9981ee",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -7082,7 +7082,7 @@
     {
       "module": "Kernel.ObjectiveBendNativeAdmission",
       "path": "Kernel/ObjectiveBendNativeAdmission.lean",
-      "sha256": "c13a2a95fa6bbebe4dcb41797f529dca0e643182493051d1b72847d20160879a",
+      "sha256": "93c8db9f494572decef3d6f7dc765392a83b90a4c5f37a602cf7f05f3161cd06",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -7131,7 +7131,7 @@
     {
       "module": "Kernel.ObjectiveKernelConfig",
       "path": "Kernel/ObjectiveKernelConfig.lean",
-      "sha256": "1eaf1275b0f753bbcd332c147f46b3ef251990beb990a9d13cef25950125fa02",
+      "sha256": "5ecd76fa35643e6d6e1e4afc67b58dde963c8548fc86d6537b10920f7a397686",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -7145,7 +7145,7 @@
     {
       "module": "Kernel.ObjectiveResumeContract",
       "path": "Kernel/ObjectiveResumeContract.lean",
-      "sha256": "e532d56ee2473678739fa79ec89e72f505ab69b8cc6dd090ed0f235a1820aeb1",
+      "sha256": "d0d5ccf78f462598fe5ceacabbd14ffe7dbd45c5b2c4d0261b1e113afb4cff4b",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
