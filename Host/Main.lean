@@ -967,13 +967,22 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
   let durable ← timed "load" do
     IO.ofExcept (← DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes)
   IO.println s!"records {durable.height} base {durable.baseHeight} cells {durable.image.cellIds.length}"
+  -- Every history read below goes through the Store-backed Reader (verify at use).
+  let ⟨_, reader⟩ ← timed "open: readerOf (head verify)" do
+    match ← NativeHost.historyReaderOfDurable config durable with
+    | .ok reader => pure reader
+    | .error refusal => throw (IO.userError refusal.detail)
+  let lastRecord ← if durable.height = 0 then pure none else
+    match ← reader.atHeight durable.height with
+    | .ok read => pure (some read.record)
+    | .error refusal => throw (IO.userError refusal.message)
   let lanes : List (String × Minidregg.Theory.ResourceCost.Lane) :=
     [("incidences", .incidences), ("turnBytes", .turnBytes), ("memoryTouches", .memoryTouches),
      ("witnessBytes", .witnessBytes), ("proofWork", .proofWork), ("storageBytes", .storageBytes),
      ("networkBytes", .networkBytes), ("sideEffectCount", .sideEffectCount),
      ("feeDebit", .feeDebit), ("leaseByteBlocks", .leaseByteBlocks)]
   for (name, lane) in lanes do
-    let last := (durable.image.accepted.getLast?.map fun r => r.exactCharge lane).getD 0
+    let last := (lastRecord.map fun r => r.exactCharge lane).getD 0
     IO.println s!"allowance {name}: available {durable.snapshot.model.available lane} last-record charge {last}"
   discard <| timed "cellIds x10" do
     let mut n := 0
@@ -1058,8 +1067,6 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
     (DurableReceiverIO.RootCache.ofEntries
       (DurableReceiverIO.entriesOf durable.image durable.snapshot durable.chain)).root.value % 7
   discard <| timedPure "open: cache injectivity check" fun _ => durable.roots.injectiveCheck
-  discard <| timedPure "open: presence index" fun _ =>
-    (PresenceIndex.ofRecords durable.image.accepted).touched.length
   let state ← timedPure "checkpoint: state (ofSnapshot)" fun _ =>
     DurableCheckpoint.State.ofSnapshot durable.image durable.snapshot
   IO.println s!"  state cells {state.cells.length}"
@@ -1081,8 +1088,10 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
       acc + (ResourceBirthCodec.rootBytes (durable.snapshot.canonicalBytes id)).value % 7) 0
   discard <| timedPure "checkpoint: rebase at the head" fun _ => durable.rebase.isSome
   discard <| timedPure "checkpoint: image.cellIds" fun _ => durable.image.cellIds.length
-  discard <| timedPure "checkpoint: State.snapshot at the head" fun _ =>
-    (state.snapshot ResourceBirthCodec.rootBytes durable.image.accepted).model.journal.length
+  discard <| timed "past state: Reader.stateAt (head)" do
+    match ← reader.stateAt durable.height with
+    | .ok at_ => pure at_.reads.length
+    | .error refusal => throw (IO.userError refusal.message)
   discard <| timedPure "checkpoint: resume at the head" fun _ =>
     (DurableCheckpoint.resume ResourceBirthCodec.rootBytes durable.image height state).isSome
   discard <| timedPure "checkpoint: the Admissible parts (nodup, membership)" fun _ =>
@@ -1090,52 +1099,53 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
       (state.cells.map Prod.fst).all fun id => decide (id ∈ durable.image.cellIds))
   discard <| timedPure "checkpoint: decide State.Admissible" fun _ =>
     decide (state.Admissible durable.image)
-  discard <| timed "head receipt x10" do
+  let receiptOf (transactionId : Minidregg.Theory.TypedAuthorization.Digest) :
+      IO (Option NativeHostCodec.Receipt) := do
+    match ← NativeHost.receiptByTransactionRead reader transactionId with
+    | .ok receipt => pure receipt
+    | .error refusal => throw (IO.userError refusal.detail)
+  discard <| timed "head receipt (byTx) x10" do
     let mut n := 0
-    for _ in [0:10] do
-      if let some r := durable.image.accepted.getLast? then
-        if (NativeHost.historicalReceipt config durable r.transactionId r.event.eventId).isSome then
-          n := n + 1
+    if let some r := lastRecord then
+      for _ in [0:10] do
+        if (← receiptOf r.transactionId).isSome then n := n + 1
     pure n
-  -- Session indexes (deos efficiency B): the cached enumeration and
-  -- transaction lookup beside the List functions they refine.
+  -- Session indexes (deos efficiency B): the cached cell enumeration.
   discard <| timed "cellIds (cached) x10" do
     let mut n := 0
     for _ in [0:10] do n := n + durable.cellIds.length
     pure n
-  let middle := durable.image.accepted[durable.height / 2]?
-  discard <| timed "middle transaction index (cached) x1000" do
+  let middle ← if durable.height = 0 then pure none else
+    match ← reader.atHeight (max 1 (durable.height / 2)) with
+    | .ok read => pure (some read.record)
+    | .error refusal => throw (IO.userError refusal.message)
+  discard <| timed "middle record Reader.atHeight x100" do
     let mut n := 0
-    if let some r := middle then
-      for _ in [0:1000] do n := n + (durable.firstIndex r.transactionId).getD 0
+    for _ in [0:100] do
+      match ← reader.atHeight (max 1 (durable.height / 2)) with
+      | .ok _ => n := n + 1
+      | .error refusal => throw (IO.userError refusal.message)
     pure n
-  discard <| timed "middle transaction index (findIdx?) x1000" do
+  discard <| timed "middle transaction Reader.byTx x1000" do
     let mut n := 0
     if let some r := middle then
-      for i in [0:1000] do
-        n := n + (durable.image.accepted.findIdx?
-          (fun record => record.transactionId == r.transactionId || i == 1000000)).getD 0
+      for _ in [0:1000] do
+        match ← reader.byTx r.transactionId with
+        | .ok (.present found) => n := n + found.height
+        | _ => pure ()
     pure n
   discard <| timed "middle receipt x1" do
     let mut n := 0
     if let some r := middle then
-      if let some receipt := NativeHost.historicalReceipt config durable r.transactionId r.event.eventId then
+      if let some receipt ← receiptOf r.transactionId then
         n := n + receipt.worldRoot.value % 7
     pure n
   discard <| timed "middle receipt x1000" do
     let mut n := 0
     if let some r := middle then
       for _ in [0:1000] do
-        if let some receipt := NativeHost.historicalReceipt config durable r.transactionId r.event.eventId then
+        if let some receipt ← receiptOf r.transactionId then
           n := n + receipt.worldRoot.value % 7
-    pure n
-  -- `Image.append`'s list snoc at this height (what `Loaded.extend` pays per
-  -- record for the in-memory log), x1000.
-  discard <| timed "image.append list snoc x1000" do
-    let mut n := 0
-    if let some r := durable.image.accepted.getLast? then
-      for i in [0:1000] do
-        n := n + ((durable.image.accepted ++ [r]).length + i) % 7
     pure n
   -- The specification root of the same prefix, evaluated in full: what every
   -- non-head receipt paid before the log kept its roots.
@@ -1148,9 +1158,14 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
     let mut checked := 0
     let mut differ := 0
     let heights := durable.height
+    let log ← NativeHost.operatorAcceptedLogOfDurable config durable
     for i in (List.range ((heights + stride - 1) / stride)).map (· * stride) do
-      if let some (some kept) := durable.rootLog[i]? then
-        let spec := NativeHost.worldRoot config ⟨durable.image.seed, durable.image.accepted.take (i + 1)⟩
+      -- The root bound into the verified log leaf at height `i + 1`.
+      match ← reader.atHeight (i + 1) with
+      | .error refusal => throw (IO.userError refusal.message)
+      | .ok read =>
+        let kept := read.verified.root
+        let spec := NativeHost.worldRoot config ⟨durable.image.seed, log.take (i + 1)⟩
         checked := checked + 1
         if kept != spec then
           differ := differ + 1
