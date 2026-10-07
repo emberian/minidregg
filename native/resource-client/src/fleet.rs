@@ -484,6 +484,7 @@ fn attempt(
     publication: &Value,
     base: &str,
     pinned: Option<&Value>,
+    journal: Option<&Path>,
 ) -> Result<(PathBuf, Option<(Value, Value)>)> {
     let (directory, nonce) = match pinned {
         Some(record) => (PathBuf::from(field(record, "attempt")?), field(record, "nonce")?.to_owned()),
@@ -560,6 +561,9 @@ fn attempt(
         &json!({"format":FORMAT,"operation":98,"verb":verb,
             "ingressSha256":digest(&ingress),"status":"may-have-submitted"}),
     )?;
+    if let Some(journal) = journal {
+        journal_attempt(journal, &directory)?;
+    }
     let outcome = match invoke(agent, &directory, "submit", 98, &ingress) {
         Ok(_) => inspect(agent, "outcome", &directory.join("submit.bin"), &directory.join("submit.json"))?,
         Err(error) => {
@@ -602,10 +606,39 @@ fn attempt(
 /// One fleet turn, re-planned in a fresh attempt only after typed contention.
 /// Every superseded attempt is named in the result.
 pub(crate) fn turn(agent: &Agent, reference: &Value, verb: &str, transfer: Value, publication: Value) -> Result<Value> {
+    turn_journaled(agent, reference, verb, transfer, publication, None)
+}
+
+/// Append one attempt directory to a caller's operation journal, durably, AFTER the attempt's
+/// submit marker exists and BEFORE its one submission: a caller that dies anywhere after this
+/// line can find every attempt that may have reached the Host and resolve it by exact
+/// resubmission (an accepted original answers `replayed`; nothing moves twice).
+fn journal_attempt(journal: &Path, directory: &Path) -> Result<()> {
+    use std::io::Write;
+    let line = format!("{}\n", absolute(directory)?.display());
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(journal)
+        .map_err(|error| format!("{}: {error}", journal.display()))?;
+    file.write_all(line.as_bytes())
+        .and_then(|_| file.sync_all())
+        .map_err(|error| format!("{}: {error}", journal.display()))
+}
+
+/// `turn`, recording every attempt that may reach the Host in `journal` (see `journal_attempt`).
+pub(crate) fn turn_journaled(
+    agent: &Agent,
+    reference: &Value,
+    verb: &str,
+    transfer: Value,
+    publication: Value,
+    journal: Option<&Path>,
+) -> Result<Value> {
     let (base, _) = tariff(agent)?;
     let mut superseded = Vec::new();
     for _ in 0..=MAX_REPLANS {
-        let (directory, admitted) = attempt(agent, reference, verb, &transfer, &publication, &base, None)?;
+        let (directory, admitted) = attempt(agent, reference, verb, &transfer, &publication, &base, None, journal)?;
         let Some((plan_view, outcome)) = admitted else {
             eprintln!("fleet {verb}: superseded (stale plan or contention); re-planning against the new image");
             superseded.push(directory);
@@ -902,7 +935,7 @@ pub(crate) fn pay_turn_recorded(
             return result(&directory, verb, &plan, &recovered["outcome"], &[]);
         }
         let base = tariff(&agent)?.0;
-        match attempt(&agent, &reference, verb, &transfer, &publication, &base, Some(&record)) {
+        match attempt(&agent, &reference, verb, &transfer, &publication, &base, Some(&record), None) {
             Ok((directory, Some((plan, outcome)))) => {
                 let value = result(&directory, verb, &plan, &outcome, &[])?;
                 print_json(&value)?;

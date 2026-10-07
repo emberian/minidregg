@@ -42,9 +42,10 @@ below are the Bread verbs your other tooling may call; they are marked INFERRED.
   Bread cell id is refused ("Bread cell id"). `send --to` is accepted only as the profile's own
   account (it means nothing more, as in the Bread tool helm was written against); any other
   account is refused: use `transfer`.
-- **Ids.** `turn_hash` is Mini's transaction id (decimal), `chain_index` the accepted count,
-  `finality` is `accepted` (one level; `--accept-tentative` is refused). There is no
-  `receipt_hash`; the four-field receipt is printed as `receipt`.
+- **Ids.** `turn_hash` is Mini's transaction id as 64 hex, `chain_index` the accepted count,
+  `finality` is `accepted` (one level; `--accept-tentative` is refused), and `receipt_hash` names
+  Mini's four-field receipt (printed as `receipt`); see FLEET-SURFACE.md. A call repeated while an
+  earlier one is unfinished answers that call's receipt (`replayed`) and commits nothing.
 - **Ambient environment.** `DREGG_NODE_URL`, `DREGG_API_TOKEN(_FILE)`, `DREGG_NODE_PASSPHRASE`,
   `DREGG_COORDINATION_EXEMPT`, `DREGG_PROFILE` are exported by helm on every call. They are not
   read, and each one set is named on stderr.
@@ -69,15 +70,10 @@ below are the Bread verbs your other tooling may call; they are marked INFERRED.
 These are in helm, not in Mini, and each was measured by running helm's real code against the
 shim (the probe in the recorded run).
 
-1. **`_complete_send` (`chat.py:1373`)** requires a 64-hex `turn_hash` and `receipt_hash`.
-   Mini answers a decimal `turn_hash` and a `receipt` object. helm calls that "invalid", and its
-   second attempt (`chat.py:1411`) is a fresh send: a second turn commits. Accept `finality ==
-   "accepted"` with the decimal transaction id, and store `receipt.eventId` where it stores
-   `receipt_hash`.
-2. **The HTTP probes.** `_signed_row` asks `GET /api/receipts` (`node_head`) before it ever
+1. **The HTTP probes.** `_signed_row` asks `GET /api/receipts` (`node_head`) before it ever
    calls the signer, and `_sign_send` calls `_balance`, `_faucet` and `_revive` over HTTP. Mini has
    no HTTP ingress, so on a Mini-only seat these must be skipped.
-3. **The fee.** helm sets `DREGG_COORDINATION_EXEMPT=1` and `LOW_WATER` from a faucet. Neither
+2. **The fee.** helm sets `DREGG_COORDINATION_EXEMPT=1` and `LOW_WATER` from a faucet. Neither
    applies; fund the seat's account.
 
 ## Recorded run
@@ -108,7 +104,9 @@ Two defects the replay found in the client, both fixed (not principled differenc
 `send --to OWNCELL` was refused, and a re-`join --fund 0` of a profile holding 0 answered an error
 instead of balance 0.
 
-**helm's own `_sign_send`, unmodified, against the shim** (`helm-probe.json`): helm reports
-`send_failed` ("sent:true response has invalid turn_hash/receipt_hash/chain_index", twice) while
-**two turns committed** (`receipt --head` answers `turns: 2`). That is "Changes helm itself needs" item 1,
-measured: until helm accepts Mini's answer, every signed post is committed twice and reported failed.
+**helm's own `_sign_send`, unmodified, against the shim** (`helm-probe.json`). Before cv
+01a11476-1c59, helm reported `send_failed` ("sent:true response has invalid
+turn_hash/receipt_hash/chain_index", twice) while **two turns committed**: fleet-sign printed no
+`receipt_hash` and a decimal `turn_hash`, so helm re-sent. fleet-sign now answers both in helm's
+64-hex shape, and the replay checks that helm concludes `sent` on its first attempt with exactly
+one turn landed (rows Z2a, Z2). helm needs no change for this; the fix is Mini's.
