@@ -250,19 +250,13 @@ def Admits (env : R.Env) (state : J.State) (ingress : R.Ingress)
 
 /-- An admitted ingress.  **Layer 1**: it carries the proposition it asserts
 (`admits`), so a value built any way at all -- `admit`, a tactic, a metaprogram --
-is a prepared patch that passed the gate (`Accepted.sound`).  The vouchers the
+is a prepared patch that passed the gate (its proof field `admits`, which the token
+census names as its layer-1 witness).  The vouchers the
 proposition names are layer 2 (`Vouchers`). -/
 structure Accepted (env : R.Env) (state : J.State) (ingress : R.Ingress) where
   private mk ::
   prepared : R.Prepared env state (R.command ingress)
   admits : R.Admits env state ingress prepared
-
-/-- **Every accepted ingress passed the gate**: whatever built it, its patch was
-prepared under vouchers covering the ingress's claims and passed the shape and the
-laws.  This is the census's layer-1 theorem for `Accepted`. -/
-theorem Accepted.sound {env : R.Env} {state : J.State} {ingress : R.Ingress}
-    (accepted : R.Accepted env state ingress) : R.Admits env state ingress accepted.prepared :=
-  accepted.admits
 
 /-- Admission under a voucher set: every claim must be vouched for, then
 prepare (given the vouchers), then check the physical shape, then the written
@@ -437,7 +431,7 @@ and its laws raised no fault. -/
 theorem Admitted.lawful {R : Receiver J verify} {env : R.Env} {state : J.State}
     {ingress : R.Ingress} (admission : R.Admitted env state ingress) :
     R.shape admission.accepted.prepared = true ∧ R.lawFault admission.accepted.prepared = none := by
-  obtain ⟨-, -, -, -, -, shaped, lawful⟩ := admission.accepted.sound
+  obtain ⟨-, -, -, -, -, shaped, lawful⟩ := admission.accepted.admits
   exact ⟨shaped, lawful⟩
 
 /-- **Every admission was prepared under its own vouchers**, and each of its
@@ -901,7 +895,6 @@ end Fixture
 #assert_axioms Receiver.admit_ok_iff
 #assert_axioms Receiver.admit_law_refused
 #assert_axioms Receiver.admit_ok_of
-#assert_axioms Receiver.Accepted.sound
 #assert_axioms Receiver.Admitted.lawful
 #assert_axioms Receiver.Admitted.prepared
 #assert_axioms Receiver.receive_committed_lawFault

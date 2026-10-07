@@ -423,7 +423,7 @@ Minidregg.Theory.ObjectiveBendDemandData.ExecutionWith.mk | Theory.ObjectiveBend
 Minidregg.Theory.ObjectiveBendDemandData.ExtractionWith.mk | Theory.ObjectiveBendDemandData | evidence | L2 | 1 proof / 1 data fields; layer-1 review pending
 Minidregg.Theory.ReactiveCellTransition.Accepted.mk | Theory.ReactiveCellTransition | evidence | L2 | 2 proof / 1 data fields; layer-1 review pending
 Minidregg.Theory.ReceiptEvent.mk | Theory.AcceptedCellEffect | evidence | L2 | 5 proof / 10 data fields; layer-1 review pending
-Minidregg.Theory.Receiving.Receiver.Accepted.mk | Theory.Receiving | evidence | L1 Minidregg.Theory.Receiving.Receiver.Accepted.sound | carries `admits`: prepared under covering vouchers, shape and laws passed; the vouchers are L2
+Minidregg.Theory.Receiving.Receiver.Accepted.mk | Theory.Receiving | evidence | L1 Minidregg.Theory.Receiving.Receiver.Accepted.admits | carries `admits`: prepared under covering vouchers, shape and laws passed; the vouchers are L2
 Minidregg.Theory.Receiving.Vouchers.mk | Theory.Receiving | evidence | L2 | the claims the Receiver's verifier answered true on; an oracle (IO) verdict no proof expresses; minted only by Receiver.admitVia; mints: Vouchers.empty (vouches for nothing)
 restrict | Minidregg.Compiler.DurableHistory.Head.genesis | Compiler.DurableHistoryStore, Compiler.DurableReceiverIO, Compiler.DurableServed | a genesis head for a non-empty Store is a replay bypass: only the open mints one
 restrict | Minidregg.Compiler.DurableHistory.StoreIdentity.ofOpen | Compiler.DurableHistoryStore, Compiler.DurableReceiverIO, Compiler.DurableServed | a Store identity comes only from the open
