@@ -100,7 +100,8 @@ def run : IO Unit := do
   let call ← IO.ofExcept (NativeHost.assemble plan signatures)
   IO.FS.writeBinFile s!"{directory}/direct-call.bin"
     (callCodec.encode call).toByteArray
-  let outcome ← NativeHost.submitLoaded config opened call
+  let light ← IO.ofExcept (← NativeHostLight.start config)
+  let outcome ← NativeHost.submitLoaded config opened light call
   match outcome with
   | .refused _ phase detail _ =>
       let detailText := String.fromUTF8! detail.toByteArray

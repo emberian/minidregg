@@ -253,7 +253,8 @@ def dispatch (config : NativeHost.Config) (operation : UInt8)
       discard <| opened config
       return (0, (descriptionLoaded config).compress.toUTF8.toList)
   | 1 =>
-      match ← NativeHost.prepareAuthorizedLoaded config (← opened config) payload with
+      match ← NativeHost.prepareAuthorizedLoaded config (← opened config)
+          (← IO.ofExcept (← NativeHostLight.start config)) payload with
       | .ok plan => return (1, signingPlanCodec.encode plan)
       | .error detail => return (255, refusalFrame "prepare" detail)
   | 3 =>

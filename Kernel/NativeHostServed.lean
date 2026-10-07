@@ -149,6 +149,18 @@ def OpenedServed.basis {config : Config} {store : StoreIdentity} (opened : Opene
     ServedBasis.Basis config.deployment store :=
   ⟨opened.served, opened.directory, opened.authority, head, below, keys, footprint⟩
 
+/-- The same validated state under a config that differs only in its Store
+paths: nothing an `OpenedServed` holds depends on `storage`. -/
+def OpenedServed.restorage {config : Config} {store : StoreIdentity} (opened : OpenedServed config store)
+    (storage : DurableReceiverIO.NativeConfig) : OpenedServed { config with storage } store :=
+  ⟨opened.served, opened.directory, opened.authority, opened.pins, opened.lawful⟩
+
+/-- The full shape's ground of a validated opening (`ServedBasis.Ground.ofLoaded`):
+for the ratchet-listed full-shape callers (the audit walk). -/
+def _root_.Minidregg.Kernel.NativeHost.Opened.ground {config : Config} (opened : Opened config) :
+    ServedBasis.Ground config.deployment :=
+  .ofLoaded opened.durable opened.directory opened.authority
+
 #assert_axioms validateServed_served
 #assert_axioms OpenedServed.cellLawful_all
 #assert_axioms validateServed_ofLoaded
