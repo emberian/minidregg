@@ -1085,7 +1085,7 @@ theorem MessageDelivery.upgradable {rootBytes : Bytes → Digest} {config : Conf
       | failed reason => rw [outcome] at fromCalls; cases fromCalls
       | replied result journal =>
         rw [outcome] at fromCalls
-        have ran := delivered.outcomeExact.trans outcome
+        have ran := delivered.ran outcome
         exact journal_posts_ok (ObjectiveSend.runMessage_read ran) (runMessage_drained ran) post fromCalls
     · exact .inl (mail_kinded delivered.mail post fromMail)
   · simp only [List.mem_cons, List.mem_singleton, List.not_mem_nil, or_false] at last
