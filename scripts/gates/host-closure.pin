@@ -33,6 +33,7 @@
 # updated 2026-10-07: seat-retention: Host.CapacityJson (the one Capacity envelope decoder SeatJson and ObjectiveActivityJson share) enters the Host closure  [counts: Minidregg 0 1, Theory 74 162, Kernel 389 534, Pred 7 11, Effects 0 3, Compiler 141 312, Selvage 12 153, Assurance 0 153, Host 87 120, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-07: batch b5: kn2-store-open-2a, P4-JP2, P3-JOURNEYS, P5-RUN-EDITS, P3-FLEET-MIGRATION  [counts: Minidregg 0 1, Theory 75 173, Kernel 389 537, Pred 7 11, Effects 0 3, Compiler 143 318, Selvage 12 153, Assurance 0 153, Host 87 121, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-07: batch b6: obeng-g1, P1-SEATSTORE, P1-BOUNTY-NATIVE, plat-store-audit, burst2-saturate; NativeAcceptedFixtureData regenerated in b5  [counts: Minidregg 0 1, Theory 75 173, Kernel 390 537, Pred 7 11, Effects 0 3, Compiler 146 318, Selvage 12 153, Assurance 0 153, Host 87 121, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-07: batch b7: kn2-store-open-ii, upgrade-turns  [counts: Minidregg 0 1, Theory 75 173, Kernel 392 539, Pred 7 11, Effects 0 3, Compiler 146 319, Selvage 12 153, Assurance 0 153, Host 87 122, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 Compiler.Air
 Compiler.AirBignum
 Compiler.AirFlatten
@@ -552,10 +553,12 @@ Kernel.ObjectAudienceController
 Kernel.ObjectAudienceInstall
 Kernel.ObjectRecord
 Kernel.ObjectState
+Kernel.ObjectStateType
 Kernel.ObjectiveActivity
 Kernel.ObjectiveActivityCell
 Kernel.ObjectiveActivityGate
 Kernel.ObjectiveActivityReceiver
+Kernel.ObjectiveActivityUpgrade
 Kernel.ObjectiveActivityWire
 Kernel.ObjectiveAdmittedTurn
 Kernel.ObjectiveBendArtifactSource
