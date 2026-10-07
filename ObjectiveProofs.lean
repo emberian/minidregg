@@ -23,6 +23,7 @@ import Theory.ObjectiveBendDemandForcingBackFail
 import Kernel.ObjectiveResumeContract
 import Kernel.ObjectiveCheckpointInvariant
 import Kernel.ObjectiveUpgradeInvariant
+import Kernel.ObjectiveDomainInvariant
 import Kernel.ObjectLawEnforced
 import Kernel.ObjectiveReferenceLift
 import Kernel.ObjectiveCallReference

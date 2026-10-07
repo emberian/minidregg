@@ -782,6 +782,12 @@ inductive Refusal where
   | memberDenied (object : Nat)
   /-- A member is already in `domainsPerObject` domains. -/
   | memberDomainsFull (object : Nat)
+  /-- A turn's post rewrites `object`'s record without a domain the record names (a dropped or
+  blanked record would take the object out of the domain's judgment). -/
+  | domainsDropped (object : Nat)
+  /-- A turn writes a domain's cell, and a member's record as the turn leaves it does not name
+  the domain. -/
+  | domainUnindexed (domain : Digest) (member : Nat)
   deriving Repr
 
 /-! ## Typing data against declared types

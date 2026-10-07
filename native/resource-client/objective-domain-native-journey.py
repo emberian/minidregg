@@ -30,13 +30,22 @@ the END of every turn that writes a member's declared state, on every member's F
                 (y.deposit(1): y 4, reserve still 10) is refused `domainLawDenied` on the sumEq clause, and
                 so is raising the reserve alone (x.deposit(1)). A backed mint (x.forward(y, 1): reserve 11,
                 y 4) installs.
+  D5 keep       y (in the bank) joins a second domain {y, w}: the registration rewrites y's record, keeping the
+                bank (`keepsDomains`): it installs, y's record names both, and y.deposit(1) is still refused by
+                the bank's law.
 
 PLANTS (self-test; `--plant` prints `PLANT-RESULT red GROUPS` and exits 1 when exactly the planted rows went red,
 `PLANT-RESULT blind ...` and exits 3 when a planted row stayed green):
   domain-blind      a HOST plant: --bin built from a tree patched by scripts/plants/domain-blind.py
                     (`judgeDomains` judges nothing) -> D1 red (a.deposit(1) commits, 6 != 5), D3 red
-                    (the stale plan commits p 6 > q 5) and D4 red (the unbacked mint commits: 10 != 5 + 6)
+                    (the stale plan commits p 6 > q 5), D4 red (the unbacked mint commits: 10 != 5 + 6) and
+                    D5 red (y's unbacked mint commits)
   member-permit     the members' upgrade authority admits nobody's subject but a stranger's -> D1 red
+  joined-drops      a HOST plant (scripts/plants/joined-drops.py: registration writes each member's record with
+                    only the new domain) -> D5 red: the honest turn-end rule refuses it `domainsDropped`
+  joined-drops,keep-blind
+                    both HOST plants (keep-blind: `keepsDomains` admits every post) -> D5 red the other way: the
+                    dropping registration commits, y leaves the bank, and y.deposit(1) commits
                     (registration refused `memberDenied`, so the joint law never binds)
 ROOT/transcript holds every command's exact output; ROOT/results.json every row. Exit 1 on any red row.
 """
@@ -46,7 +55,8 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from activity_world import World, PERMIT_ALL, TICKS, nat, record, eq, any_of, eq_slots, cap  # noqa: E402
 
-PLANTS = {'domain-blind': {'D1-joint', 'D3-stale', 'D4-bank'}, 'member-permit': {'D1-joint'}}
+PLANTS = {'domain-blind': {'D1-joint', 'D3-stale', 'D4-bank', 'D5-keep'}, 'member-permit': {'D1-joint'},
+          'joined-drops': {'D5-keep'}, 'keep-blind': {'D5-keep'}}
 ap = argparse.ArgumentParser()
 ap.add_argument('--bin', required=True)
 ap.add_argument('--root', required=True)
@@ -56,7 +66,7 @@ plants = {p for p in a.plant.split(',') if p}
 if plants - set(PLANTS):
     raise SystemExit(f'unknown plant {sorted(plants - set(PLANTS))}; known: {sorted(PLANTS)}')
 
-NAMES = ['a', 'b', 't', 'z', 'c', 'u', 'p', 'q', 'r', 'x', 'y', 'v']
+NAMES = ['a', 'b', 't', 'z', 'c', 'u', 'p', 'q', 'r', 'x', 'y', 'v', 'w']
 w = World(a.bin, a.root, HERE.parent.parent)
 try:
     w.bring_up(NAMES)
@@ -74,8 +84,8 @@ try:
     policies = {'a': MEMBER, 'b': MEMBER, 't': governed(SPONSOR), 'z': {'frozen': {}},
                 'c': governed('999999'), 'u': governed(SPONSOR, w.SECOND), 'p': governed(SPONSOR),
                 'q': governed(SPONSOR), 'r': governed(SPONSOR), 'x': governed(SPONSOR),
-                'y': governed(SPONSOR), 'v': governed(SPONSOR)}
-    starts = {'a': 5, 'b': 5, 't': 5, 'z': 5, 'c': 5, 'u': 5, 'p': 5, 'q': 6, 'r': 0, 'x': 10, 'y': 4, 'v': 6}
+                'y': governed(SPONSOR), 'v': governed(SPONSOR), 'w': governed(SPONSOR)}
+    starts = {'a': 5, 'b': 5, 't': 5, 'z': 5, 'c': 5, 'u': 5, 'p': 5, 'q': 6, 'r': 0, 'x': 10, 'y': 4, 'v': 6, 'w': 0}
     for name in NAMES:
         w.create(f'create-{name}', w.sponsor, name, PERMIT_ALL, 'installed', seed=record(total=nat(starts[name])),
                  upgrade=policies[name])
@@ -152,6 +162,13 @@ try:
         w.check('d4-still-10-3-7', bank() == [10, 3, 7], None)
         invoke('d4-backed-mint-installs', 'x', 'forward', hop('y', 1), 'installed')
         w.check('d4-11-4-7', bank() == [11, 4, 7], None)
+
+    with w.group('D5-keep'):
+        register('d5-second-domain', ['y', 'w'], PERMIT_ALL, 'installed')
+        ry = (w.state('y', 'd5-y-record').get('objectRecord') or {}).get('domains')
+        w.check('d5-y-names-both', ry is not None and len(ry) == 2, ry)
+        invoke('d5-mint-still-refused', 'y', 'deposit', nat(1), 'refused', ['domainLawDenied', 'sumEq'])
+        w.check('d5-bank-11-4-7', bank() == [11, 4, 7], None)
 
 finally:
     w.stop()
