@@ -1,0 +1,303 @@
+edition ObjectiveBend 1
+# A bounty whose reward is held by the seat kernel (Kernel/Seat, Kernel/SeatStore).
+# The native counterpart of BountyBoard.obend (its effect-free preview model).
+#
+# One instance of this package is one bounty board slot. Everything the contract
+# knows it reads from the open seats it is shown (role, terms, give, want, exit
+# rule, opening height, allocation); it holds no identity and no state of its own.
+# Who may do what is the kernel's, not the contract's:
+#
+#   escrow    the poster's seat: give the reward, want nothing (a want that is
+#             "approved work" is not an asset), exit afterDeadline(deadline). Only
+#             the contract moves the reward out of it, or anyone at the deadline
+#             (the kernel pays the seat's payee, the poster).
+#   claim     the claimant's seat: give nothing, want the reward, exit afterDeadline(due).
+#             It is the claimant's handle; the kernel pays its payee at exit. The
+#             first claimer is the claim seat with the least `opened`.
+#   work      the claimant's submission, offered from an invitation the contract
+#             minted to the claimant together with the claim invitation; both
+#             carry the same `pair` term, so a work seat belongs to the claim seat
+#             of its pair and to nobody else.
+#   approve / reject / cancel
+#             the poster's decisions: empty seats offered from invitations the
+#             contract minted to the poster at `post`. A decision is the kernel
+#             fact "the poster's invitation was spent", read by `advance`.
+#
+# Methods (every one callable by anyone holding the instance capability):
+#   post(holder, review)  mints the poster's escrow, approve, reject and cancel
+#                         invitations; refused (empty plan) unless the instance is empty.
+#   claim(holder)         mints a claim and a work invitation to `holder` sharing a
+#                         `pair` term (the height); needs a funded, deadline-bound escrow.
+#   pad(holder)           mints one inert invitation: a turn that advances the height and nothing else.
+#   advance               idempotent: from the seats and the height it computes the one
+#                         move that is due, or nothing.
+#
+# `advance` rules, in order. Let G, R be the escrow's give, C the first-claimer's seat.
+#   reward in C (submitted):  an approve seat pays it now (every seat exits; C's payee is paid);
+#                             a reject seat before C's due height moves it whole back to the
+#                             escrow and exits C, its work and the reject seat (the bounty reopens);
+#                             otherwise nothing: C's own afterDeadline exit pays its payee at
+#                             `due` (silence pays the claimant), by anyone.
+#   reward still in escrow:   a cancel seat with no claim seat refunds the poster (every seat exits);
+#                             a claim seat with its paired work seat, a live escrow and a claim
+#                             seat that cannot exit before height + review + 1, moves the whole
+#                             reward from the escrow into C (the submission is admitted).
+# The amounts are read from allocations, never from an input. The kernel judges every
+# reallocation (outside seats, insufficient funds, offer safety) and conserves every asset.
+import ./NatOrder.obend as Order
+
+record Amount:
+  asset: Nat
+  amount: Nat
+sum Amounts:
+  nil: {}
+  cons: {head: Amount, tail: Amounts}
+record Term:
+  name: String
+  value: Nat
+sum Terms:
+  nil: {}
+  cons: {head: Term, tail: Terms}
+sum Exit:
+  onDemand: {}
+  afterDeadline: Nat
+record SeatView:
+  seat: Nat
+  role: String
+  terms: Terms
+  give: Amounts
+  want: Amounts
+  exit: Exit
+  opened: Nat
+  allocation: Amounts
+sum Seats:
+  nil: {}
+  cons: {head: SeatView, tail: Seats}
+record Move:
+  source: Nat
+  destination: Nat
+  asset: Nat
+  amount: Nat
+sum Moves:
+  nil: {}
+  cons: {head: Move, tail: Moves}
+record PostIn:
+  holder: Nat
+  review: Nat
+record ClaimIn:
+  holder: Nat
+sum Input:
+  post: PostIn
+  claim: ClaimIn
+  advance: {}
+  pad: ClaimIn
+record Call:
+  input: Input
+  height: Nat
+  seats: Seats
+record Mint:
+  role: String
+  terms: Terms
+  holder: Nat
+record ExitSeat:
+  seat: Nat
+record Reallocate:
+  moves: Moves
+sum Action:
+  reallocate: Reallocate
+  mint: Mint
+  exit: ExitSeat
+  terminate: {}
+sum Plan:
+  nil: {}
+  cons: {head: Action, tail: Plan}
+sum Maybe:
+  absent: {}
+  present: SeatView
+
+# ---- reading the seats -------------------------------------------------------
+def held(asset: Nat, amounts: Amounts) -> Nat:
+  match amounts:
+    case nil(_): 0n
+    case cons(c): if c.head.asset == asset then c.head.amount else held(asset, c.tail)
+
+def term(name: String, terms: Terms) -> Nat:
+  match terms:
+    case nil(_): 0n
+    case cons(c): if c.head.name == name then c.head.value else term(name, c.tail)
+
+def isNil(amounts: Amounts) -> Bool:
+  match amounts:
+    case nil(_): true
+    case cons(_): false
+
+def isOne(amounts: Amounts) -> Bool:
+  match amounts:
+    case nil(_): false
+    case cons(c): isNil(c.tail)
+
+def headAsset(amounts: Amounts) -> Nat:
+  match amounts:
+    case nil(_): 0n
+    case cons(c): c.head.asset
+
+def headAmount(amounts: Amounts) -> Nat:
+  match amounts:
+    case nil(_): 0n
+    case cons(c): c.head.amount
+
+def isOneOf(amounts: Amounts, asset: Nat, amount: Nat) -> Bool:
+  isOne(amounts) && headAsset(amounts) == asset && headAmount(amounts) == amount
+
+def hasDue(rule: Exit) -> Bool:
+  match rule:
+    case onDemand(_): false
+    case afterDeadline(_): true
+
+def dueOf(rule: Exit) -> Nat:
+  match rule:
+    case onDemand(_): 0n
+    case afterDeadline(h): h
+
+def isEmpty(seats: Seats) -> Bool:
+  match seats:
+    case nil(_): true
+    case cons(_): false
+
+# The first open seat (by coordinate) of a role.
+def firstRole(role: String, seats: Seats) -> Maybe:
+  match seats:
+    case nil(_): Maybe.absent()
+    case cons(c): if c.head.role == role then Maybe.present(c.head) else firstRole(role, c.tail)
+
+# The first claimer: the claim seat with the least `opened`; seats arrive in
+# coordinate order and a tie keeps the earlier one.
+def winner(seats: Seats, best: Maybe) -> Maybe:
+  match seats:
+    case nil(_): best
+    case cons(c): winner(c.tail, better(c.head, best))
+
+def better(seat: SeatView, best: Maybe) -> Maybe:
+  if seat.role == "claim" then beats(seat, best) else best
+
+def beats(seat: SeatView, best: Maybe) -> Maybe:
+  match best:
+    case absent(_): Maybe.present(seat)
+    case present(b): if Order.less(seat.opened, b.opened) then Maybe.present(seat) else best
+
+# The work seat of a claim seat's pair.
+def workOf(pair: Nat, seats: Seats) -> Maybe:
+  match seats:
+    case nil(_): Maybe.absent()
+    case cons(c): if c.head.role == "work" && term("pair", c.head.terms) == pair then Maybe.present(c.head) else workOf(pair, c.tail)
+
+# ---- building plans ------------------------------------------------------------
+def exitOne(seat: Nat, rest: Plan) -> Plan:
+  Plan.cons({head: Action.exit({seat: seat}), tail: rest})
+
+def exitAll(seats: Seats) -> Plan:
+  match seats:
+    case nil(_): Plan.nil()
+    case cons(c): exitOne(c.head.seat, exitAll(c.tail))
+
+def wholeMove(source: SeatView, destination: SeatView, asset: Nat) -> Move:
+  {source: source.seat, destination: destination.seat, asset: asset, amount: held(asset, source.allocation)}
+
+def reallocation(moves: Moves) -> Plan:
+  Plan.cons({head: Action.reallocate({moves: moves}), tail: Plan.nil()})
+
+# The two halves of an exchange are ONE reallocation: the kernel judges every
+# touched seat's offer-safety law after both.
+def exchange(first: Move, second: Move) -> Plan:
+  reallocation(Moves.cons({head: first, tail: Moves.cons({head: second, tail: Moves.nil()})}))
+
+def andThen(first: Plan, rest: Plan) -> Plan:
+  match first:
+    case nil(_): rest
+    case cons(c): Plan.cons({head: c.head, tail: andThen(c.tail, rest)})
+
+def mintOne(role: String, terms: Terms, holder: Nat, rest: Plan) -> Plan:
+  Plan.cons({head: Action.mint({role: role, terms: terms, holder: holder}), tail: rest})
+
+def pairTerms(pair: Nat) -> Terms:
+  Terms.cons({head: {name: "pair", value: pair}, tail: Terms.nil()})
+
+def reviewTerms(review: Nat) -> Terms:
+  Terms.cons({head: {name: "review", value: review}, tail: Terms.nil()})
+
+# ---- the checks the reward's safety rests on ------------------------------------
+# The escrow is whole, wants nothing, cannot be exited before its deadline, and the
+# deadline is still ahead.
+def escrowReady(e: SeatView, height: Nat) -> Bool:
+  hasDue(e.exit) && Order.less(height, dueOf(e.exit)) && isOneOf(e.want, headAsset(e.want), 1n) && isOne(e.give) && held(headAsset(e.give), e.allocation) == headAmount(e.give)
+
+# The work seat gives exactly one work receipt (the asset the escrow wants) and wants nothing.
+def workReady(e: SeatView, w: SeatView) -> Bool:
+  isNil(w.want) && isOneOf(w.give, headAsset(e.want), 1n) && held(headAsset(e.want), w.allocation) == 1n
+
+# The claim seat gives nothing, wants exactly the whole reward, and cannot be exited
+# before the review window has run: its due height is at least height + review + 1.
+def claimReady(e: SeatView, c: SeatView, height: Nat) -> Bool:
+  isNil(c.give) && isOneOf(c.want, headAsset(e.give), held(headAsset(e.give), e.allocation)) && hasDue(c.exit) && Order.lessOrEqual(height + term("review", e.terms) + 1n, dueOf(c.exit))
+
+# ---- the three methods -----------------------------------------------------------
+def postPlan(p: PostIn, seats: Seats) -> Plan:
+  if isEmpty(seats) then mintOne("escrow", reviewTerms(p.review), p.holder, mintOne("approve", Terms.nil(), p.holder, mintOne("reject", Terms.nil(), p.holder, mintOne("cancel", Terms.nil(), p.holder, Plan.nil())))) else Plan.nil()
+
+def claimPlan(c: ClaimIn, height: Nat, seats: Seats) -> Plan:
+  match firstRole("escrow", seats):
+    case absent(_): Plan.nil()
+    case present(e): if escrowReady(e, height) then mintOne("claim", pairTerms(height), c.holder, mintOne("work", pairTerms(height), c.holder, Plan.nil())) else Plan.nil()
+
+def advancePlan(height: Nat, seats: Seats) -> Plan:
+  match firstRole("escrow", seats):
+    case absent(_): Plan.nil()
+    case present(e): advanceEscrow(height, seats, e)
+
+def advanceEscrow(height: Nat, seats: Seats, e: SeatView) -> Plan:
+  match winner(seats, Maybe.absent()):
+    case absent(_): cancelPlan(seats)
+    case present(c): advanceClaim(height, seats, e, c)
+
+# No claim seat: a cancel seat refunds the poster.
+def cancelPlan(seats: Seats) -> Plan:
+  match firstRole("cancel", seats):
+    case absent(_): Plan.nil()
+    case present(_): exitAll(seats)
+
+def advanceClaim(height: Nat, seats: Seats, e: SeatView, c: SeatView) -> Plan:
+  if Order.less(0n, held(headAsset(e.give), c.allocation)) then decide(height, seats, e, c) else submit(height, seats, e, c)
+
+# The reward is in the claim seat: the poster's decision, if any.
+def decide(height: Nat, seats: Seats, e: SeatView, c: SeatView) -> Plan:
+  match firstRole("approve", seats):
+    case present(_): exitAll(seats)
+    case absent(_): rejection(height, seats, e, c)
+
+def rejection(height: Nat, seats: Seats, e: SeatView, c: SeatView) -> Plan:
+  match firstRole("reject", seats):
+    case absent(_): Plan.nil()
+    case present(x): if hasDue(c.exit) && Order.less(height, dueOf(c.exit)) then reopen(seats, e, c, x) else Plan.nil()
+
+def reopen(seats: Seats, e: SeatView, c: SeatView, x: SeatView) -> Plan:
+  match workOf(term("pair", c.terms), seats):
+    case absent(_): Plan.nil()
+    case present(w): andThen(exchange(wholeMove(c, e, headAsset(e.give)), wholeMove(e, w, headAsset(e.want))), exitOne(c.seat, exitOne(x.seat, exitOne(w.seat, Plan.nil()))))
+
+# The reward is in the escrow: a submission moves it into the claim seat.
+def submit(height: Nat, seats: Seats, e: SeatView, c: SeatView) -> Plan:
+  match workOf(term("pair", c.terms), seats):
+    case absent(_): Plan.nil()
+    case present(w): if escrowReady(e, height) && claimReady(e, c, height) && workReady(e, w) then swapIn(e, c, w) else Plan.nil()
+
+# The reward leaves the escrow only against the receipt: both moves are one reallocation,
+# and the escrow's own law (it wants the receipt, or its give refunded) judges it.
+def swapIn(e: SeatView, c: SeatView, w: SeatView) -> Plan:
+  exchange(wholeMove(e, c, headAsset(e.give)), wholeMove(w, e, headAsset(e.want)))
+
+def bounty(call: Call) -> Plan:
+  match call.input:
+    case post(p): postPlan(p, call.seats)
+    case claim(c): claimPlan(c, call.height, call.seats)
+    case advance(_): advancePlan(call.height, call.seats)
+    case pad(c): mintOne("pad", Terms.nil(), c.holder, Plan.nil())
