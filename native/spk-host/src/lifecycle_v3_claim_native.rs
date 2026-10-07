@@ -238,7 +238,7 @@ pub(crate) fn assemble_once(
         "originalBeginSha256":hex(&Sha256::digest(&begin.ingress)),
     }))?;
     write_new(attempt_dir, "op68-requested.json", &active)?;
-    write_new(parent, "lifecycle-claim-v3-active.json", &active)?;
+    write_new(parent, CLAIM_ACTIVE_MARKER, &active)?;
     let reply = operator.invoke(68, &fixed.selector.framed(&request)?)?;
     write_new(attempt_dir, "op68-frame.bin", &reply)?;
     let plan = framed_payload(&reply, 68, PLAN_TAG)?;
@@ -281,7 +281,7 @@ pub(crate) fn assemble_once(
     let reply = operator.invoke(69, &pair)?;
     write_new(attempt_dir, "op69-frame.bin", &reply)?;
     let ingress = framed_payload(&reply, 69, INGRESS_TAG)?.to_vec();
-    write_new(attempt_dir, "claim-v3.bin", &ingress)?;
+    write_new(attempt_dir, CLAIM_INGRESS_FILE, &ingress)?;
     Ok(AssembledLaunchClaim {
         attempt_dir: attempt_dir.to_path_buf(),
         active_marker: active,
@@ -399,6 +399,29 @@ fn checked_committed(
         ));
     }
     Ok((transaction_id, event_id, accepted_count, world_root))
+}
+
+pub(crate) const CLAIM_ACTIVE_MARKER: &str = "lifecycle-claim-v3-active.json";
+pub(crate) const CLAIM_INGRESS_FILE: &str = "claim-v3.bin";
+
+/// Op27 after an uncertain op26: the exact retained v3 claim only. The
+/// receipt is historical evidence and can never arm a physical launch.
+pub(crate) fn recover_claim_receipt_only(
+    operator: &PrivateOperator,
+    attempt_dir: &Path,
+) -> io::Result<crate::lifecycle_receipt_lookup::RecoveredReceipt> {
+    let ingress = crate::lifecycle_receipt_lookup::retained_submitted_ingress(
+        attempt_dir,
+        CLAIM_ACTIVE_MARKER,
+        "op68-requested.json",
+        "op26-requested.json",
+        "mini-spk-launch-claim-submit-requested-v1",
+        CLAIM_INGRESS_FILE,
+    )?;
+    if !ingress.starts_with(INGRESS_TAG) {
+        return Err(invalid("v3 retained claim frame refused"));
+    }
+    crate::lifecycle_receipt_lookup::lookup_retained(operator, attempt_dir, 27, &ingress)
 }
 
 /// Submit once to op26. Only its fresh-tip committed-v3 callback can arm a

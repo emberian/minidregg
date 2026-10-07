@@ -13,14 +13,14 @@ use crate::lifecycle_v3_claim_native::CommittedLaunchClaim;
 use crate::lifecycle_v3_completion_native::{
     checked_receipt, ConfirmedLaunchCompletion, RecoveredLaunchCompletion,
 };
+use crate::lifecycle_receipt_lookup::{lookup_retained, retained_submitted_ingress, OUTCOME_TAG};
 use crate::lifecycle_v3_native::{
     decimal, framed_payload, hex, lowercase_hex, sign_pinned_slots, text, AcceptedLaunchBegin,
     LaunchBeginAction,
 };
 use crate::lifecycle_v4_retry_claim_native::COMMITTED_TAG;
 use crate::lifecycle_v4_retry_native::{
-    checked_retry_fields, encode_bytes, encode_nat_decimal, retained_submitted_ingress,
-    RetrySelection, BEGIN_TAG, OUTCOME_TAG,
+    checked_retry_fields, encode_bytes, encode_nat_decimal, RetrySelection, BEGIN_TAG,
 };
 use crate::resident_launch::SourceBoundLaunch;
 use crate::volume_custody::VolumeWitness;
@@ -709,7 +709,7 @@ pub(crate) fn recover_receipt_only(
     {
         return Err(invalid("v4 retry completion original submit marker differs"));
     }
-    let receipt = crate::lifecycle_v4_retry_native::lookup_retained(
+    let receipt = lookup_retained(
         operator,
         attempt_dir,
         39,
