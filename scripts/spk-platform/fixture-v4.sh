@@ -17,6 +17,15 @@
 #                                          unit restarts and must reconcile by op39 lookup
 #                                          alone: the recovered receipt equals the recorded
 #                                          one and nothing is resubmitted
+#   fixture-v4.sh --restart-begin RUN_ROOT  likewise, rewound to "op22 sent, reply lost": the
+#                                          retry BEGIN attempt keeps its op22 submit marker and
+#                                          exact ingress; its reply, outcome, the claim and
+#                                          completion attempts, the admitted marker and the
+#                                          physical journal are gone. The restart must
+#                                          reconcile by op23 lookup alone
+#   fixture-v4.sh --restart-claim RUN_ROOT  likewise, rewound to "op26 sent, reply lost":
+#                                          the BEGIN stays accepted; the claim attempt keeps
+#                                          its op26 marker and ingress. Reconciles by op27
 #
 # A base is copied (cp -a, at the same path) to repeat the chronology.
 # RUN_ROOT must not exist for a recording or a base; its parent must be an owner-private chain (the
@@ -41,8 +50,15 @@ set -eu
 umask 077
 
 MODE=all
-case "${1:-}" in --base) MODE=base; shift ;; --chronology) MODE=chronology; shift ;; --restart) MODE=restart; shift ;; esac
-[ "$#" -eq 1 ] || { sed -n '2,36p' "$0" >&2; exit 2; }
+RESTART_AT=completion
+case "${1:-}" in
+  --base) MODE=base; shift ;;
+  --chronology) MODE=chronology; shift ;;
+  --restart) MODE=restart; shift ;;
+  --restart-begin) MODE=restart; RESTART_AT=begin; shift ;;
+  --restart-claim) MODE=restart; RESTART_AT=claim; shift ;;
+esac
+[ "$#" -eq 1 ] || { sed -n '2,48p' "$0" >&2; exit 2; }
 RUN=$1
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 REPO=$(CDPATH='' cd -- "$HERE/../.." && pwd)
@@ -91,43 +107,114 @@ if [ "$MODE" = restart ]; then
   RETRY=$(jq -er .retryGeneration "$RUN/fixture.json")
   G=$STATE/apps/$APP/g$RETRY
   SIGN=$G/completion-sign-attempt-retry-v4
-  RECORDED=$(jq -c .retryCompletion.completionReceipt "$RUN/fixture.json")
-  if [ -e "$G/start-completed-retry-v4.json" ]; then
-    [ "$RECORDED" = "$(jq -c .completionReceipt "$G/start-completed-retry-v4.json")" ] ||
-      fail "recorded completion differs from fixture.json"
-  fi
-  # The op38 reply is lost: the submit marker and the exact ingress stay.
-  rm -f "$G/start-completed-retry-v4.json" "$SIGN/op38-frame.bin" "$SIGN/op38-outcome.bin" "$SIGN/op38-outcome.json"
-  for pair in begin-attempt-retry-v4/op66-requested.json:lifecycle-begin-retry-v4-active.json \
-      claim-author-attempt-retry-v4/op68-requested.json:lifecycle-claim-retry-v4-active.json \
-      completion-sign-attempt-retry-v4/op70-requested.json:lifecycle-completion-retry-v4-active.json; do
-    ( umask 077; cp "$G/${pair%%:*}" "$G/${pair#*:}" )
-  done
+  BEGINDIR=$G/begin-attempt-retry-v4
+  CLAIMDIR=$G/claim-author-attempt-retry-v4
+  RECEIPT_FIELDS='{transactionId,eventId,acceptedCount,worldRoot}'
+  restore_markers() { # the active markers an uncertain submit leaves behind
+    for pair in "$@"; do
+      ( umask 077; cp "$G/${pair%%:*}" "$G/${pair#*:}" )
+    done
+  }
+  BEGIN_PAIR=begin-attempt-retry-v4/op66-requested.json:lifecycle-begin-retry-v4-active.json
+  CLAIM_PAIR=claim-author-attempt-retry-v4/op68-requested.json:lifecycle-claim-retry-v4-active.json
+  COMPLETION_PAIR=completion-sign-attempt-retry-v4/op70-requested.json:lifecycle-completion-retry-v4-active.json
+  case "$RESTART_AT" in
+  completion)
+    RECORDED=$(jq -c .retryCompletion.completionReceipt "$RUN/fixture.json")
+    if [ -e "$G/start-completed-retry-v4.json" ]; then
+      [ "$RECORDED" = "$(jq -c .completionReceipt "$G/start-completed-retry-v4.json")" ] ||
+        fail "recorded completion differs from fixture.json"
+    fi
+    # The op38 reply is lost: the submit marker and the exact ingress stay.
+    rm -f "$G/start-completed-retry-v4.json" "$SIGN/op38-frame.bin" "$SIGN/op38-outcome.bin" "$SIGN/op38-outcome.json"
+    restore_markers "$BEGIN_PAIR" "$CLAIM_PAIR" "$COMPLETION_PAIR"
+    DONE=$G/start-completed-retry-v4.json
+    LOOKUP=op39 LOOKUPDIR=$SIGN
+    ;;
+  begin|claim)
+    [ -s "$G/start-admitted-retry-v4.json" ] || fail "g$RETRY retained no admitted START to rewind"
+    # What the first run recorded for the submit whose reply is now lost.
+    case "$RESTART_AT" in
+      begin) RECORDED=$(jq -c ".begin | $RECEIPT_FIELDS" "$G/start-admitted-retry-v4.json")
+             LOOKUP=op23 LOOKUPDIR=$BEGINDIR ;;
+      claim) RECORDED=$(jq -c ".claim | $RECEIPT_FIELDS" "$G/start-admitted-retry-v4.json")
+             LOOKUP=op27 LOOKUPDIR=$CLAIMDIR ;;
+    esac
+    [ -n "$RECORDED" ] && [ "$RECORDED" != null ] || fail "no recorded $RESTART_AT receipt"
+    # The crash happened at the submit: nothing after it exists. The
+    # physical journal (record.json) is armed only after the claim is admitted.
+    rm -rf "$G/completion-attempt-retry-v4" "$SIGN" "$G/start-admitted-retry-v4.json" \
+      "$G/start-completed-retry-v4.json" "$G/record.json" "$G/lifecycle-completion-retry-v4-active.json"
+    case "$RESTART_AT" in
+      begin)
+        rm -rf "$CLAIMDIR" "$G/lifecycle-claim-retry-v4-active.json"
+        rm -f "$BEGINDIR/op22-frame.bin" "$BEGINDIR/op22-outcome.bin" "$BEGINDIR/op22-outcome.json"
+        restore_markers "$BEGIN_PAIR"
+        [ -s "$BEGINDIR/op22-requested.json" ] && [ -s "$BEGINDIR/begin-retry-v4.bin" ] ||
+          fail "the rewound BEGIN lost its submit marker or ingress" ;;
+      claim)
+        rm -f "$CLAIMDIR/op26-frame.bin" "$CLAIMDIR/committed-retry-v4.bin" "$CLAIMDIR/committed-retry-v4.json"
+        restore_markers "$BEGIN_PAIR" "$CLAIM_PAIR"
+        [ -s "$CLAIMDIR/op26-requested.json" ] && [ -s "$CLAIMDIR/claim-retry-v4.bin" ] ||
+          fail "the rewound CLAIM lost its submit marker or ingress" ;;
+    esac
+    DONE=
+    ;;
+  esac
   start_broker
   trap stop_all EXIT
   sh "$J" phase "$JRUN" services
   UNIT=$(jq -er .unit "$G/resident.json")
   "$FOS/systemctl" stop "$UNIT" >/dev/null 2>&1 || :
   "$FOS/systemctl" start "$UNIT" || :
+  if [ -n "$DONE" ]; then FOUND() { [ -s "$DONE" ]; }; else
+    FOUND() { ls "$G"/start-submit-reconciliation-*.json >/dev/null 2>&1; }; fi
   tick=0
-  until [ -s "$G/start-completed-retry-v4.json" ]; do
+  until FOUND; do
     state=$("$FOS/systemctl" show "$UNIT" --property=ActiveState --value)
-    case "$state" in failed|inactive) [ -s "$G/start-completed-retry-v4.json" ] || fail "restarted resident ended $state without reconciling (see $FOS/logs)";; esac
+    case "$state" in failed|inactive)
+      FOUND && break
+      if grep -qs "attempt already exists" "$FOS"/logs/* "$G"/*.log 2>/dev/null; then
+        fail "restart refused: attempt already exists (the $RESTART_AT submit has no lookup on restart; see $FOS/logs)"
+      fi
+      fail "restarted resident ended $state without reconciling (see $FOS/logs)";;
+    esac
     tick=$((tick + 1)); [ "$tick" -lt 600 ] || fail "restarted resident did not reconcile"
     sleep 0.5
   done
-  RECOVERED=$(jq -c .completionReceipt "$G/start-completed-retry-v4.json")
-  EVIDENCE=$(jq -er .evidenceName "$G/start-completed-retry-v4.json")
-  case "$EVIDENCE" in op39-lookup-*/outcome.json) ;; *) fail "reconciled from $EVIDENCE, not an op39 lookup" ;; esac
-  jq -e '.type == "replayed" or .confirmation == "replayed"' "$SIGN/$EVIDENCE" >/dev/null ||
-    fail "op39 lookup is not a replay of the original admission"
-  [ "$RECOVERED" = "$RECORDED" ] || fail "recovered receipt $RECOVERED differs from recorded $RECORDED"
-  [ ! -e "$SIGN/op38-outcome.bin" ] || fail "the restart resubmitted op38"
+  if [ "$RESTART_AT" = completion ]; then
+    RECOVERED=$(jq -c .completionReceipt "$DONE")
+    EVIDENCE=$(jq -er .evidenceName "$DONE")
+  else
+    REC=$(ls "$G"/start-submit-reconciliation-*.json)
+    [ "$(printf '%s\n' "$REC" | wc -l)" = 1 ] || fail "more than one reconciliation record"
+    jq -e --arg phase "$RESTART_AT" '.protocol == "mini-spk-resident-start-submit-reconciliation-v1"
+      and .lane == "retry-v4" and .phase == $phase and .noResubmit == true and .noRelaunch == true' "$REC" >/dev/null ||
+      fail "reconciliation record malformed: $REC"
+    RECOVERED=$(jq -c .receipt "$REC")
+    EVIDENCE=$(jq -er .evidenceName "$REC")
+  fi
+  case "$EVIDENCE" in "$LOOKUP"-lookup-*/outcome.json) ;; *) fail "reconciled from $EVIDENCE, not an $LOOKUP lookup" ;; esac
+  jq -e '.type == "replayed" or .confirmation == "replayed"' "$LOOKUPDIR/$EVIDENCE" >/dev/null ||
+    fail "$LOOKUP lookup is not a replay of the original admission"
+  [ "$(printf '%s' "$RECOVERED" | jq -cS .)" = "$(printf '%s' "$RECORDED" | jq -cS .)" ] || fail "recovered receipt $RECOVERED differs from recorded $RECORDED"
+  # Nothing is resubmitted: the lost reply stays lost, and no later phase exists.
+  case "$RESTART_AT" in
+    completion) [ ! -e "$SIGN/op38-outcome.bin" ] || fail "the restart resubmitted op38" ;;
+    begin)
+      [ ! -e "$BEGINDIR/op22-outcome.bin" ] && [ ! -e "$BEGINDIR/op22-frame.bin" ] || fail "the restart resubmitted op22"
+      [ ! -e "$CLAIMDIR" ] && [ ! -e "$G/record.json" ] || fail "the restart went past the lost BEGIN" ;;
+    claim)
+      [ ! -e "$CLAIMDIR/op26-outcome.bin" ] && [ ! -e "$CLAIMDIR/op26-frame.bin" ] && [ ! -e "$CLAIMDIR/committed-retry-v4.bin" ] ||
+        fail "the restart resubmitted op26"
+      [ ! -e "$G/record.json" ] && [ ! -e "$G/start-admitted-retry-v4.json" ] || fail "the restart went past the lost CLAIM" ;;
+  esac
   jq -n --argjson recorded "$RECORDED" --argjson recovered "$RECOVERED" --arg evidence "$EVIDENCE" \
-    '{protocol:"mini-spk-fixture-v4-restart-v1",recorded:$recorded,recovered:$recovered,evidence:$evidence}' >"$RUN/restart.json"
+    --arg at "$RESTART_AT" \
+    '{protocol:"mini-spk-fixture-v4-restart-v1",restartAt:$at,recorded:$recorded,recovered:$recovered,evidence:$evidence}' >"$RUN/restart.json"
   stop_all
   trap - EXIT
-  echo "fixture-v4: restart reconciled by op39: $RECOVERED"
+  echo "fixture-v4: restart ($RESTART_AT) reconciled by $LOOKUP: $RECOVERED"
   exit 0
 fi
 

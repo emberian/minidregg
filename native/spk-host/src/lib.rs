@@ -59,6 +59,8 @@ pub mod install_service;
 #[cfg(target_os = "linux")]
 pub mod launch_descriptor_native;
 #[cfg(target_os = "linux")]
+mod lifecycle_receipt_lookup;
+#[cfg(target_os = "linux")]
 mod lifecycle_selector;
 #[cfg(target_os = "linux")]
 pub mod grain;
