@@ -5,6 +5,7 @@ per numbered fault (and fails if any of them elaborates).
 -/
 import Compiler.DurableHistoryReader
 import Compiler.DurableServed
+import Compiler.ServedBasis
 
 open Minidregg.Compiler
 open Minidregg.Compiler.DurableHistoryReader
@@ -48,3 +49,15 @@ def fault7 {store : StoreIdentity} (served : DurableServed.Served Minidregg.Comp
 def fault8 {store : StoreIdentity} (snapshot : Minidregg.Kernel.DurableDataIntent.DataSnapshot
     Minidregg.Compiler.DurableHistory.recordHash) : DurableServed.Served Minidregg.Compiler.DurableHistory.recordHash store :=
   DurableServed.Served.mk snapshot ⟨[], [], [], default⟩ [] [] 0 ⟨0⟩ ⟨0⟩ (fun _ _ => sorry)
+
+-- FAULT-9 (a ground from another head): a light ground whose basis was verified under one head,
+-- paired with a history Reader at another head.
+def fault9 {deployment : Minidregg.Compiler.CanonicalCellRegistry.Deployment} {store : StoreIdentity}
+    (basis : ServedBasis.Basis deployment store) (reader : Reader Minidregg.Compiler.DurableHistory.recordHash store) :
+    ServedBasis.Grounded deployment reader.head :=
+  ServedBasis.Grounded.ofBasis basis
+
+-- FAULT-10 (the binding asserted by hand): a light ground claimed at a head it was not verified under.
+def fault10 {deployment : Minidregg.Compiler.CanonicalCellRegistry.Deployment} {store : StoreIdentity}
+    (basis : ServedBasis.Basis deployment store) (head : Head store) : ServedBasis.Grounded deployment head :=
+  ⟨.light basis, .light basis⟩

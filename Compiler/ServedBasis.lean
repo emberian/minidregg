@@ -461,6 +461,62 @@ theorem cells_ofLoaded {store : StoreIdentity} (basis : Basis deployment store)
 
 end Ground
 
+/-- **A ground at a head.** The light shape is at the head its basis's answers are
+verified under; the full shape is at a head of the same Store whose height and
+chain are its own. A caller that holds a history `Reader` at head `h` takes its
+ground as `Grounded deployment h`, so a ground prepared under another head
+cannot be paired with that Reader (no inhabitant of `At`). -/
+inductive Ground.At {deployment : CanonicalCellRegistry.Deployment} {store : StoreIdentity} :
+    Ground deployment → Head store → Prop
+  | light (basis : Basis deployment store) : Ground.At (.light basis) basis.head
+  | full (durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes)
+      (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
+      (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
+      (head : Head store) (sameStart : durable.logStart = store.logStart)
+      (height : durable.height = head.height) (chain : durable.chain = head.chain) :
+      Ground.At (.full durable directory authority) head
+
+/-- A ground bound to the head a history `Reader` is indexed by. -/
+structure Grounded (deployment : CanonicalCellRegistry.Deployment) {store : StoreIdentity}
+    (head : Head store) where
+  ground : Ground deployment
+  atHead : ground.At head
+
+namespace Grounded
+
+variable {deployment : CanonicalCellRegistry.Deployment} {store : StoreIdentity}
+
+instance {head : Head store} : CoeOut (Grounded deployment head) (Ground deployment) := ⟨Grounded.ground⟩
+
+/-- The light ground of a basis, at its own head. -/
+def ofBasis (basis : Basis deployment store) : Grounded deployment basis.head :=
+  ⟨.light basis, .light basis⟩
+
+/-- The full shape at `head`, checked: the same Store, height and chain, or refused by name. -/
+def ofLoaded (head : Head store) (durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes)
+    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
+    (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot) :
+    Except String (Grounded deployment head) :=
+  if sameStart : durable.logStart = store.logStart then
+    if height : durable.height = head.height then
+      if chain : durable.chain = head.chain then
+        .ok ⟨.full durable directory authority, .full durable directory authority head sameStart height chain⟩
+      else .error s!"the opened Store's chain is not the history head's at height {head.height}"
+    else .error s!"the opened Store is at height {durable.height}, the history head at {head.height}"
+  else .error "the opened Store is not the history head's Store"
+
+/-- A grounded light basis's head is the head it is indexed by. -/
+theorem light_head {head : Head store} (grounded : Grounded deployment head)
+    {basis : Basis deployment store} (light : grounded.ground = .light basis) : basis.head = head := by
+  have at' := grounded.atHead
+  rw [light] at at'
+  cases at'
+  rfl
+
+#assert_axioms light_head
+
+end Grounded
+
 #assert_axioms Basis.view_lookup_declared
 #assert_axioms Basis.view_consumed_declared
 #assert_axioms Ground.authorityWrite_pre_is_root
