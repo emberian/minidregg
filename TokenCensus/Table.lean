@@ -89,10 +89,10 @@ Minidregg.Kernel.ApplicationAgentLifetimeDispatchCurrent.Checked.mk | Kernel.App
 Minidregg.Kernel.ApplicationAgentLifetimeDispatchPayer.Checked.mk | Kernel.ApplicationAgentLifetimeDispatchPayer | evidence | L2 | 8 proof / 8 data fields; layer-1 review pending
 Minidregg.Kernel.ApplicationAgentLifetimeDispatchReceiver.Permit.mk | Kernel.ApplicationAgentLifetimeDispatchReceiver | evidence | L2 | 2 proof / 8 data fields; layer-1 review pending
 Minidregg.Kernel.ApplicationAgentLifetimeDispatchReserveCore.ReservedEvidence.mk | Kernel.ApplicationAgentLifetimeDispatchReserveCore | evidence | L2 | 3 proof / 7 data fields; layer-1 review pending
-Minidregg.Kernel.ApplicationAgentLifetimeGrantAdmission.Accepted.mk | Kernel.ApplicationAgentLifetimeGrantAdmission | evidence | L2 | 5 proof / 6 data fields; layer-1 review pending
+Minidregg.Kernel.ApplicationAgentLifetimeGrantAdmission.Accepted.mk | Kernel.ApplicationAgentLifetimeGrantAdmission | evidence | L1 Minidregg.Kernel.ApplicationAgentLifetimeGrantAdmission.Accepted.named | 5 proof / 4 data fields; the proof field `named` carries the claim: every birth write of finalWrites is named by the admitted factory step
 Minidregg.Kernel.ApplicationAgentLifetimeGrantDelegation.Checked.mk | Kernel.ApplicationAgentLifetimeGrantDelegation | evidence | L2 | 4 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.ApplicationAgentLifetimeGrantDelegation.Prepared.mk | Kernel.ApplicationAgentLifetimeGrantDelegation | evidence | L2 | 4 proof / 2 data fields; layer-1 review pending
-Minidregg.Kernel.ApplicationAgentLifetimeGrantSource.Ready.mk | Kernel.ApplicationAgentLifetimeGrantSource | evidence | L2 | 3 proof / 1 data fields; layer-1 review pending
+Minidregg.Kernel.ApplicationAgentLifetimeGrantSource.Ready.mk | Kernel.ApplicationAgentLifetimeGrantSource | evidence | L2 | 2 proof / 1 data fields; layer-1 review pending
 Minidregg.Kernel.ApplicationDispatchAdmission.CheckedCurrentForSourceBytes.mk | Kernel.ApplicationDispatchAdmission | evidence | L2 | 15 proof / 13 data fields; layer-1 review pending
 Minidregg.Kernel.ApplicationDispatchAdmission.CheckedRead.mk | Kernel.ApplicationDispatchAdmission | evidence | L2 | 2 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.ApplicationDispatchAgentCore.Checked.mk | Kernel.ApplicationDispatchAgentCore | evidence | L2 | 6 proof / 2 data fields; layer-1 review pending
@@ -160,12 +160,12 @@ Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Policy.CheckedLeg.mk | Ker
 Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Receiver.Confirmed.mk | Kernel.ApplicationLifecycleRetryCompletionV4Receiver | evidence | L2 | 1 proof / 6 data fields; layer-1 review pending
 Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report.Checked.mk | Kernel.ApplicationLifecycleRetryCompletionV4Report | evidence | L2 | 3 proof / 1 data fields; layer-1 review pending
 Minidregg.Kernel.ApplicationRouteAdmission.Attestation.mk | Kernel.ApplicationRouteAdmission | evidence | L2 | 5 proof / 5 data fields; layer-1 review pending
-Minidregg.Kernel.ApplicationShareIssueAdmission.Accepted.mk | Kernel.ApplicationShareIssueAdmission | evidence | L2 | 5 proof / 6 data fields; layer-1 review pending
+Minidregg.Kernel.ApplicationShareIssueAdmission.Accepted.mk | Kernel.ApplicationShareIssueAdmission | evidence | L1 Minidregg.Kernel.ApplicationShareIssueAdmission.Accepted.named | 5 proof / 4 data fields; the proof field `named` carries the claim: every birth write of finalWrites is named by the admitted factory step
 Minidregg.Kernel.ApplicationShareIssueDelegation.Checked.mk | Kernel.ApplicationShareIssueDelegation | evidence | L2 | 4 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.ApplicationShareIssueDelegation.Prepared.mk | Kernel.ApplicationShareIssueDelegation | evidence | L2 | 4 proof / 2 data fields; layer-1 review pending
-Minidregg.Kernel.ApplicationShareIssueGrainAdmission.Accepted.mk | Kernel.ApplicationShareIssueGrainAdmission | evidence | L2 | 5 proof / 10 data fields; layer-1 review pending
+Minidregg.Kernel.ApplicationShareIssueGrainAdmission.Accepted.mk | Kernel.ApplicationShareIssueGrainAdmission | evidence | L2 | 4 proof / 8 data fields; layer-1 review pending
 Minidregg.Kernel.ApplicationShareIssueHistorical.Issued.mk | Kernel.ApplicationShareIssueHistorical | evidence | L2 | 3 proof / 3 data fields; layer-1 review pending
-Minidregg.Kernel.ApplicationShareIssueSource.Ready.mk | Kernel.ApplicationShareIssueSource | evidence | L2 | 3 proof / 1 data fields; layer-1 review pending
+Minidregg.Kernel.ApplicationShareIssueSource.Ready.mk | Kernel.ApplicationShareIssueSource | evidence | L2 | 2 proof / 1 data fields; layer-1 review pending
 Minidregg.Kernel.ApplicationStreamContinuity.Attestation.mk | Kernel.ApplicationStreamContinuity | evidence | L2 | 6 proof / 5 data fields; layer-1 review pending
 Minidregg.Kernel.AudienceRosterBinding.Checked.mk | Kernel.AudienceRosterBinding | evidence | L2 | 6 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.AudienceRosterBinding.CheckedBytes.mk | Kernel.AudienceRosterBinding | evidence | L2 | 1 proof / 2 data fields; layer-1 review pending
@@ -231,7 +231,7 @@ Minidregg.Kernel.FnSelectiveReleaseSignature.Checked.mk | Kernel.FnSelectiveRele
 Minidregg.Kernel.FnSelectiveReleaseSourceAuthority.Checked.mk | Kernel.FnSelectiveReleaseSourceAuthority | evidence | L2 | 2 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.FnSelectiveReleaseSourceAuthority.Prepared.mk | Kernel.FnSelectiveReleaseSourceAuthority | evidence | L2 | 6 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.FnSelectiveReleaseSourceReceiver.Accepted.mk | Kernel.FnSelectiveReleaseSourceReceiver | evidence | L2 | 0 proof / 2 data fields; layer-1 review pending
-Minidregg.Kernel.GrainResourceBirthAdmission.Accepted.mk | Kernel.GrainResourceBirthAdmission | evidence | L2 | 2 proof / 3 data fields; layer-1 review pending
+Minidregg.Kernel.GrainResourceBirthAdmission.Accepted.mk | Kernel.GrainResourceBirthAdmission | evidence | L2 | 3 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.GrainResourceBirthAdmission.Pending.mk | Kernel.GrainResourceBirthAdmission | evidence | L2 | 5 proof / 1 data fields; layer-1 review pending
 Minidregg.Kernel.GrainResourceBirthPolicyController.DecodedIngress.mk | Kernel.GrainResourceBirthPolicyController | evidence | L2 | 6 proof / 5 data fields; layer-1 review pending
 Minidregg.Kernel.GrainResourceBirthTransaction.PreparedTargets.mk | Kernel.GrainResourceBirthTransaction | evidence | L2 | 0 proof / 1 data fields; layer-1 review pending
@@ -377,13 +377,13 @@ Minidregg.Kernel.RealmWellReceiver.AcceptedWell.mk | Kernel.RealmWellReceiver | 
 Minidregg.Kernel.RealmWellReceiver.DecodedIngress.mk | Kernel.RealmWellReceiver | evidence | L2 | 2 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.RealmWellReceiver.Prepared.mk | Kernel.RealmWellReceiver | evidence | L2 | 1 proof / 6 data fields; layer-1 review pending
 Minidregg.Kernel.RecipientReadEntitlement.CheckedView.mk | Kernel.RecipientReadEntitlement | evidence | L2 | 8 proof / 3 data fields; layer-1 review pending
-Minidregg.Kernel.ResourceBirthController.Concrete.PreparedBirth.mk | Kernel.ResourceBirthController | evidence | L2 | 14 proof / 9 data fields; layer-1 review pending
+Minidregg.Kernel.ResourceBirthController.Concrete.PreparedBirth.mk | Kernel.ResourceBirthController | evidence | L2 | 14 proof / 10 data fields; layer-1 review pending
 Minidregg.Kernel.ResourceBirthController.Concrete.PreparedDraft.mk | Kernel.ResourceBirthController | evidence | L2 | 2 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.ResourceBirthController.Concrete.PreparedGrainBirth.mk | Kernel.ResourceBirthController | evidence | L2 | 1 proof / 4 data fields; layer-1 review pending
 Minidregg.Kernel.ResourceBirthController.Concrete.PreparedGrainDraft.mk | Kernel.ResourceBirthController | evidence | L2 | 2 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.ResourceBirthController.Concrete.PreparedPostAuthority.mk | Kernel.ResourceBirthController | evidence | L2 | 4 proof / 1 data fields; layer-1 review pending
-Minidregg.Kernel.ResourceBirthController.Concrete.PreparedPreAuthority.mk | Kernel.ResourceBirthController | evidence | L2 | 11 proof / 7 data fields; layer-1 review pending
-Minidregg.Kernel.ResourceBirthPolicyController.Concrete.AcceptedBirth.mk | Kernel.ResourceBirthPolicyController | evidence | L2 | 1 proof / 5 data fields; layer-1 review pending
+Minidregg.Kernel.ResourceBirthController.Concrete.PreparedPreAuthority.mk | Kernel.ResourceBirthController | evidence | L2 | 11 proof / 8 data fields; layer-1 review pending
+Minidregg.Kernel.ResourceBirthPolicyController.Concrete.AcceptedBirth.mk | Kernel.ResourceBirthPolicyController | evidence | L2 | 2 proof / 5 data fields; layer-1 review pending
 Minidregg.Kernel.ResourceBirthPolicyController.Concrete.DecodedIngress.mk | Kernel.ResourceBirthPolicyController | evidence | L2 | 2 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.ResourceMoneyOperationDomain.CheckedSamples.mk | Kernel.ResourceMoneyOperationDomain | evidence | L2 | 2 proof / 0 data fields; layer-1 review pending
 Minidregg.Kernel.ResourceMoneyOperationDomain.Prepared.mk | Kernel.ResourceMoneyOperationDomain | evidence | L2 | 5 proof / 0 data fields; layer-1 review pending

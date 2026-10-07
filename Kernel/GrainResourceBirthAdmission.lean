@@ -190,7 +190,9 @@ def project {F : Type} [Field F]
               (CanonicalResourceKernel.logicalBook (logical (.inl .book))) request.target.value
           | _ => []
         | _ => []
-      ⟨common ++ metadata ++ draft ++ resource⟩
+      -- the newborns, `birth/<id>` ↦ exact post root: every birth branch's step names them
+      ⟨common ++ metadata ++ draft ++ resource ++
+        ResourceBirthController.Concrete.newbornSlots source.birth⟩
   | .inr index =>
       let command := source.grainCommand tariff
       let ownSlots := ResourceBirthPolicyController.Concrete.bytesSlots "resource/bytes" 0
@@ -219,6 +221,9 @@ inductive Reject where
   | policyInputRange
   | policyCastAlias
   | policyRejected
+  /-- A birth write of the composite patch that the admitted factory step does not
+  name (`ReceivingLaw.namesBirth`). -/
+  | neutralBirthUnjudged (cell : Nat)
   deriving Repr
 
 /-- This carries one fixed tuple and its union physical proof. Every later
@@ -597,6 +602,44 @@ def Pending.admitBranch {F : Type} [Field F] [DecidableEq F]
     else .error .policyUnavailable
   else .error .credentialShape
 
+/-- **An admitted grain branch's law accepts that branch's own step**: the committed
+law of its governing target, resolved from the branch configuration's snapshot,
+evaluates true on `pending.branchStep branch` (whose new state, for a birth branch,
+names every newborn). -/
+theorem CheckedBranch.law_admits_step {F : Type} [Field F] [DecidableEq F]
+    {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
+    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {ambient : Ambient} {tariff : Tariff} {source : Source}
+    {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
+      deployment pins durable profile.semantics tariff source}
+    {grain : GrainResourceBirthTransaction.PreparedTargets deployment
+      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      profile.semantics ambient (source.grainCommand tariff)}
+    {pending : Pending profile deployment pins durable ambient tariff source birth grain}
+    {branch : Branch tariff source}
+    {credential : ResourceBirthPolicyController.Concrete.BranchCredential}
+    (checked : CheckedBranch pending branch credential) :
+    ∃ graph : PolicyComponentResolution.LoadedGraph (pending.branchConfig branch).snapshot
+        (pending.branchConfig branch).store (pending.branchConfig branch).profile.semantics
+        (pending.branchConfig branch).target (pending.branchConfig branch).additional,
+      PolicyComponentResolution.loadTarget (pending.branchConfig branch).snapshot
+          (pending.branchConfig branch).store (pending.branchConfig branch).profile.semantics
+          (pending.branchConfig branch).target (pending.branchConfig branch).resolutionBudget
+          (pending.branchConfig branch).additional = .ok graph ∧
+      Minidregg.Pred.eval (ResolvedLawCompilation.predicate graph.resolved)
+        (pending.branchStep branch).oldState (pending.branchStep branch).newState = true := by
+  have verified := checked.authorization.policyVerified
+  obtain ⟨exactRequest, inner⟩ := pending.dispatched_request_exact _ _ _ verified
+  have same : checked.authorization.policyWitness.1 = branch := by
+    apply pending.requestsDistinct
+    simp only [branchIdentity]
+    rw [← exactRequest]
+  rw [same] at inner
+  have checks := Bool.and_eq_true_iff.mp inner
+  obtain ⟨graph, loaded, _, _, _, _, law⟩ :=
+    ComposedPolicyAdmission.verifies_sound _ _ _ checks.2
+  exact ⟨graph, loaded, law⟩
+
 def Pending.admitBranchNative {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
     {pins : ResourceBirth.FactoryPins} {durable : Durable}
@@ -857,6 +900,9 @@ structure Accepted {F : Type} [Field F] [DecidableEq F]
   checked : (branch : Branch tariff source) →
     CheckedBranch pending branch (credentialFor signed branch)
   guardShape : PolicyGuardShape signed checked observations
+  /-- Every birth write of the composite patch is named by the admitted factory step. -/
+  named : ResourceBirthController.Concrete.Named (pending.branchStep (.inl .factory))
+    (GrainResourceBirthTransaction.writes birth grain)
 
 def admitDecodedNative {F : Type} [Field F] [DecidableEq F]
     (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployment)
@@ -912,7 +958,13 @@ def admitDecodedNative {F : Type} [Field F] [DecidableEq F]
                                     | .inl (.source index) => sources index
                                     | .inr index => targets index
                                 if guards : PolicyGuardShape signed checked observations then
-                                  return .ok ⟨signed, pending, observations, checked, guards⟩
+                                  match ResourceBirthController.Concrete.checkNamed
+                                      (pending.branchStep (.inl .factory))
+                                      (GrainResourceBirthTransaction.writes birth grain) with
+                                  | .error cell => return .error (.neutralBirthUnjudged cell)
+                                  | .ok named =>
+                                      return .ok ⟨signed, pending, observations, checked, guards,
+                                        named.down⟩
                                 else return .error .policySourceConflict
   else return .error .credentialShape
 
@@ -1091,5 +1143,41 @@ theorem Accepted.readGuards_exact {F : Type} [Field F] [DecidableEq F]
   rcases List.mem_append.mp member with physical | policy
   · exact accepted.pending.physical.2.2.2.2 guard physical
   · exact accepted.guardShape.2 guard policy
+
+/-- **Neutral births named, grain-backed.**  Every birth write of the composite patch
+the grain birth commits is named by the factory branch's step, and the factory's
+committed law accepts that very step. -/
+theorem Accepted.births_named {F : Type} [Field F] [DecidableEq F]
+    {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
+    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {ambient : Ambient} {tariff : Tariff} {source : Source}
+    {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
+      deployment pins durable profile.semantics tariff source}
+    {grain : GrainResourceBirthTransaction.PreparedTargets deployment
+      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      profile.semantics ambient (source.grainCommand tariff)}
+    {ingress : GrainResourceBirthPolicyController.DecodedIngress}
+    (accepted : Accepted profile deployment pins durable ambient tariff source birth grain ingress) :
+    (∀ write ∈ GrainResourceBirthTransaction.writes birth grain,
+        ResourceBirthController.Concrete.bornIn write = true →
+        ReceivingLaw.namesBirth (accepted.pending.branchStep (.inl .factory)) write = true) ∧
+      ∃ graph : PolicyComponentResolution.LoadedGraph
+          (accepted.pending.branchConfig (.inl .factory)).snapshot
+          (accepted.pending.branchConfig (.inl .factory)).store
+          (accepted.pending.branchConfig (.inl .factory)).profile.semantics
+          (accepted.pending.branchConfig (.inl .factory)).target
+          (accepted.pending.branchConfig (.inl .factory)).additional,
+        PolicyComponentResolution.loadTarget (accepted.pending.branchConfig (.inl .factory)).snapshot
+            (accepted.pending.branchConfig (.inl .factory)).store
+            (accepted.pending.branchConfig (.inl .factory)).profile.semantics
+            (accepted.pending.branchConfig (.inl .factory)).target
+            (accepted.pending.branchConfig (.inl .factory)).resolutionBudget
+            (accepted.pending.branchConfig (.inl .factory)).additional = .ok graph ∧
+        Minidregg.Pred.eval (ResolvedLawCompilation.predicate graph.resolved)
+          (accepted.pending.branchStep (.inl .factory)).oldState
+          (accepted.pending.branchStep (.inl .factory)).newState = true :=
+  ⟨accepted.named, (accepted.checked (.inl .factory)).law_admits_step⟩
+
+#assert_axioms CheckedBranch.law_admits_step Accepted.births_named
 
 end Minidregg.Kernel.GrainResourceBirthAdmission

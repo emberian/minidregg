@@ -134,15 +134,6 @@ theorem Accepted.special_fee_bound {ingress}
   rw [accepted.baseTariff] at bound
   exact bound
 
-/-- **The issue's committed births are named**: every write of `finalWrites` that
-creates its cell -- the ticket included, with its whole initialized content -- is
-named by the step the factory law admitted. -/
-theorem Accepted.births_named {ingress}
-    (accepted : Accepted profile config pins durable height ingress) :
-    ∀ write ∈ finalWrites accepted.birth, ResourceBirthController.Concrete.bornIn write = true →
-      ReceivingLaw.namesBirth accepted.birth.factoryStep write = true :=
-  accepted.named
-
-#assert_axioms Accepted.special_fee_bound Accepted.births_named
+#assert_axioms Accepted.special_fee_bound
 
 end Minidregg.Kernel.ApplicationShareIssueAdmission

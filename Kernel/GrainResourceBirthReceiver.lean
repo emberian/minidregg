@@ -89,6 +89,26 @@ def intent {F : Type} [Field F] [DecidableEq F]
   postRootsBound := GrainResourceBirthTransaction.writes_roots_bound birth grain
   guardsReadOnly := accepted.readGuards_readonly
 
+/-- **The committed grain births are named**: every write of the intent that creates
+its cell is named by the admitted factory step (`Accepted.births_named`). -/
+theorem intent_births_named {F : Type} [Field F] [DecidableEq F]
+    {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
+    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {ambient : Ambient} {tariff : Tariff} {source : Source}
+    {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
+      deployment pins durable profile.semantics tariff source}
+    {grain : GrainResourceBirthTransaction.PreparedTargets deployment
+      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      profile.semantics ambient (source.grainCommand tariff)}
+    {ingress : GrainResourceBirthPolicyController.DecodedIngress}
+    (accepted : GrainResourceBirthAdmission.Accepted profile deployment pins durable
+      ambient tariff source birth grain ingress) :
+    ∀ write ∈ (intent accepted).writes, ResourceBirthController.Concrete.bornIn write = true →
+      ReceivingLaw.namesBirth (accepted.pending.branchStep (.inl .factory)) write = true :=
+  accepted.births_named.1
+
+#assert_axioms intent_births_named
+
 theorem intent_markers_exact {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
     {pins : ResourceBirth.FactoryPins} {durable : Durable}

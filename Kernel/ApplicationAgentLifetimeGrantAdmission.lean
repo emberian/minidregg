@@ -134,15 +134,6 @@ theorem Accepted.special_fee_bound {ingress}
   rw [accepted.baseTariff] at bound
   exact bound
 
-/-- **The issue's committed births are named**: every write of `finalWrites` that
-creates its cell -- the grant included, with its whole initialized content -- is
-named by the step the factory law admitted. -/
-theorem Accepted.births_named {ingress}
-    (accepted : Accepted profile config pins durable height ingress) :
-    ∀ write ∈ finalWrites accepted.birth, ResourceBirthController.Concrete.bornIn write = true →
-      ReceivingLaw.namesBirth accepted.birth.factoryStep write = true :=
-  accepted.named
-
 /-- The grant cell, born with its initialized content, is a committed write. -/
 theorem Accepted.grant_write_member {ingress}
     (accepted : Accepted profile config pins durable height ingress) :
@@ -152,6 +143,6 @@ theorem Accepted.grant_write_member {ingress}
   rw [accepted.sourceDescriptor]
   simp [Ready.expectedDescriptor, Ready.descriptor, Ready.births]
 
-#assert_axioms Accepted.special_fee_bound Accepted.births_named Accepted.grant_write_member
+#assert_axioms Accepted.special_fee_bound Accepted.grant_write_member
 
 end Minidregg.Kernel.ApplicationAgentLifetimeGrantAdmission
