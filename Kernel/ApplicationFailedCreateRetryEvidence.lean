@@ -17,6 +17,10 @@ open Minidregg.Kernel.NativeHost
 
 set_option autoImplicit false
 
+open Minidregg.Compiler.ServedBasis (Ground)
+open Minidregg.Compiler.DurableHistory (Head StoreIdentity)
+open Minidregg.Compiler.DurableHistoryReader (Reader)
+
 structure Selector where
   recoveryIndex : Nat
   recovery : ApplicationFailedStartRecoveryIngress.Ingress
@@ -75,45 +79,69 @@ def bindingMatches (selector : Selector)
       | _, _ => false
   | _, _ => false
 
-def markersCurrent (config : Config) (opened : Opened config)
+/-- The nullifiers the retry markers read from the spent map: the original
+first-attempt and created markers, the recovery's and the one-use retry token. -/
+def markerNullifiers (selector : Selector) : List StableNullifier :=
+  match selector.recovery.source.originalBegin.start with
+  | none => []
+  | some binding =>
+      [ApplicationLifecycleClaimV3Ingress.firstAttemptNullifier
+          selector.recovery.domain binding,
+        ApplicationLifecycleClaimV3Ingress.createdNullifier selector.recovery.domain binding,
+        ApplicationFailedStartRecoveryIngress.stableNullifier selector.recovery,
+        retryToken selector]
+
+/-- The keys the current part of a retry reads from the spent map. -/
+def keys (selector : Selector) : DurableView.Keys := ⟨[], markerNullifiers selector⟩
+
+/-- The ground answers every marker the retry reads. -/
+def markersDeclared {deployment : CanonicalCellRegistry.Deployment} (ground : Ground deployment)
     (selector : Selector) : Bool :=
+  (markerNullifiers selector).all ground.declaresNullifier
+
+def markersCurrent (config : Config) (ground : Ground config.deployment)
+    (selector : Selector) : Bool :=
+  markersDeclared ground selector &&
   match selector.recovery.source.originalBegin.start with
   | none => false
   | some binding =>
-      opened.durable.snapshot.model.consumed
+      ground.view.model.consumed
           (ApplicationLifecycleClaimV3Ingress.firstAttemptNullifier
             config.deployment.domain binding) &&
-        !opened.durable.snapshot.model.consumed
+        !ground.view.model.consumed
           (ApplicationLifecycleClaimV3Ingress.createdNullifier
             config.deployment.domain binding) &&
-        opened.durable.snapshot.model.consumed
+        ground.view.model.consumed
           (ApplicationFailedStartRecoveryIngress.stableNullifier selector.recovery) &&
-        !opened.durable.snapshot.model.consumed (retryToken selector)
+        !ground.view.model.consumed (retryToken selector)
 
 /-- A protected, fully re-admitted recovery intent at its selected physical
 prefix. This lower value retains no permission to commit a retry. The upper
 chronological gate must match its original claim to the same Verified walk.
 Current BEGIN admission independently checks the exact stopped state and
 package bound by bindingMatches against signed current resource reads. -/
-structure Conditional (config : Config) (opened : Opened config)
+structure Conditional (config : Config) {store : StoreIdentity} (head : Head store)
+    (ground : Ground config.deployment)
     (selector : Selector) (begin : ApplicationLifecycleBeginV3Ingress.Ingress) where
   private mk ::
-  selected : NativeHistorySelection.Candidate config opened selector.recoveryIndex
-  recovered : ApplicationFailedStartRecoveryAdmission.Candidate config
-    selected.prior selector.recovery
+  selected : NativeHistorySelection.Candidate config head selector.recoveryIndex
+  recovered : ApplicationFailedStartRecoveryAdmission.Candidate config head
+    selected.ground selector.recovery
   matched : NativeHistorySelection.Matched selected
     (ApplicationFailedStartRecoveryCore.intent recovered)
   bindingExact : bindingMatches selector begin = true
-  markersExact : markersCurrent config opened selector = true
+  markersExact : markersCurrent config ground selector = true
 
-def prepare (config : Config) (opened : Opened config) (selector : Selector)
-    (begin : ApplicationLifecycleBeginV3Ingress.Ingress) :
-    IO (Except String (Conditional config opened selector begin)) := do
-  let selected ← match NativeHistorySelection.select config opened selector.recoveryIndex with
+def prepare (config : Config) {store : StoreIdentity}
+    (reader : Reader ResourceBirthCodec.rootBytes store) (ground : Ground config.deployment)
+    (selector : Selector) (begin : ApplicationLifecycleBeginV3Ingress.Ingress) :
+    IO (Except String (Conditional config reader.head ground selector begin)) := do
+  let selected ← match ← NativeHistorySelection.select config reader ground.height
+      selector.recoveryIndex (ApplicationFailedStartRecoveryAdmission.keys config selector.recovery) with
     | .error detail => return .error detail
     | .ok selected => pure selected
   let recovered ← match ← ApplicationFailedStartRecoveryAdmission.prepareConditional
-      config selected.prior selector.recovery with
+      config reader selected.ground selector.recovery with
     | .error detail => return .error s!"failed-create retry recovery refused: {detail}"
     | .ok admitted => pure admitted
   let matched ← match NativeHistorySelection.matchIntent selected
@@ -121,7 +149,7 @@ def prepare (config : Config) (opened : Opened config) (selector : Selector)
     | .error detail => return .error detail
     | .ok matched => pure matched
   if bound : bindingMatches selector begin = true then
-    if markers : markersCurrent config opened selector = true then
+    if markers : markersCurrent config ground selector = true then
       return .ok ⟨selected, recovered, matched, bound, markers⟩
     else return .error "failed-create retry original/recovery/created/token markers refuse"
   else return .error "failed-create retry differs from recovered state/app/volume/create/package"
@@ -130,14 +158,13 @@ theorem selector_decode_encode (selector : Selector) :
     selectorCodec.decode selector.canonicalBytes = some selector :=
   selectorCodec.decode_encode selector
 
-theorem consumed_retry_refuses (config : Config) (opened : Opened config)
+theorem consumed_retry_refuses (config : Config) (ground : Ground config.deployment)
     (selector : Selector)
-    (consumed : opened.durable.snapshot.model.consumed (retryToken selector) = true) :
-    markersCurrent config opened selector = false := by
-  unfold markersCurrent
-  split
-  · rfl
-  · simp [consumed]
+    (consumed : ground.view.model.consumed (retryToken selector) = true) :
+    markersCurrent config ground selector = false := by
+  cases started : selector.recovery.source.originalBegin.start with
+  | none => simp [markersCurrent, started]
+  | some binding => simp [markersCurrent, started, consumed]
 
 theorem bindingMatches_before (selector : Selector)
     (begin : ApplicationLifecycleBeginV3Ingress.Ingress)
@@ -162,9 +189,9 @@ theorem bindingMatches_stopped_generation (selector : Selector)
   rw [bindingMatches_before selector begin matched]
   exact ⟨rfl, rfl⟩
 
-theorem Conditional.recovery_record_exact {config : Config} {opened : Opened config}
+theorem Conditional.recovery_record_exact {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
     {selector : Selector} {begin : ApplicationLifecycleBeginV3Ingress.Ingress}
-    (accepted : Conditional config opened selector begin) :
+    (accepted : Conditional config head ground selector begin) :
     accepted.selected.record = DurableReceiver.IntentRecord.ofIntent
       (ApplicationFailedStartRecoveryCore.intent accepted.recovered) :=
   accepted.matched.selected.symm.trans accepted.matched.exact

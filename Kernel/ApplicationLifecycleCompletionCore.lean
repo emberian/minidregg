@@ -19,22 +19,26 @@ open Minidregg.Kernel.NativeHost
 
 set_option autoImplicit false
 
-def packageGuard {config : Config} {opened : Opened config}
+open Minidregg.Compiler.ServedBasis (Ground)
+open Minidregg.Compiler.DurableHistory (Head StoreIdentity)
+open Minidregg.Compiler.DurableHistoryReader (Reader)
+
+def packageGuard {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
     {ingress : ApplicationLifecycleCompletionIngress.Ingress}
-    (accepted : ApplicationLifecycleCompletionAdmission.Candidate config opened ingress) :
+    (accepted : ApplicationLifecycleCompletionAdmission.Candidate config head ground ingress) :
     ReadGuard :=
   ApplicationLifecycleClaimCurrent.observationGuard
     ingress.source.originalBegin.base.source.packageManifest accepted.packageCell
 
-def extraGuards {config : Config} {opened : Opened config}
+def extraGuards {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
     {ingress : ApplicationLifecycleCompletionIngress.Ingress}
-    (accepted : ApplicationLifecycleCompletionAdmission.Candidate config opened ingress) :
+    (accepted : ApplicationLifecycleCompletionAdmission.Candidate config head ground ingress) :
     List ReadGuard :=
   if ingress.source.needsPackageWrite then [] else [packageGuard accepted]
 
-theorem extraGuards_readonly {config : Config} {opened : Opened config}
+theorem extraGuards_readonly {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
     {ingress : ApplicationLifecycleCompletionIngress.Ingress}
-    (accepted : ApplicationLifecycleCompletionAdmission.Candidate config opened ingress)
+    (accepted : ApplicationLifecycleCompletionAdmission.Candidate config head ground ingress)
     (guard : ReadGuard) (member : guard ∈ extraGuards accepted) :
     guard.cellId ∉ (DeclaredResourceController.writes accepted.prepared).map DataWrite.cellId := by
   unfold extraGuards at member
@@ -44,11 +48,11 @@ theorem extraGuards_readonly {config : Config} {opened : Opened config}
     subst guard
     exact accepted.packageGuardReadOnly (by simp_all)
 
-theorem extraGuards_current {config : Config} {opened : Opened config}
+theorem extraGuards_current {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
     {ingress : ApplicationLifecycleCompletionIngress.Ingress}
-    (accepted : ApplicationLifecycleCompletionAdmission.Candidate config opened ingress)
+    (accepted : ApplicationLifecycleCompletionAdmission.Candidate config head ground ingress)
     (guard : ReadGuard) (member : guard ∈ extraGuards accepted) :
-    guard.expectedRoot = opened.durable.snapshot.model.roots guard.cellId := by
+    guard.expectedRoot = ground.view.model.roots guard.cellId := by
   unfold extraGuards at member
   split at member
   · simp at member
@@ -60,9 +64,9 @@ theorem extraGuards_current {config : Config} {opened : Opened config}
 event ingress and new nullifier bytes. The ordinary event does not occupy a
 second stored record. Extra work counts the package observation and physical
 custodian verification, without charging an unperformed OS effect. -/
-def charge {config : Config} {opened : Opened config}
+def charge {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
     {ingress : ApplicationLifecycleCompletionIngress.Ingress}
-    (accepted : ApplicationLifecycleCompletionAdmission.Candidate config opened ingress) :
+    (accepted : ApplicationLifecycleCompletionAdmission.Candidate config head ground ingress) :
     Charge :=
   let ws := DeclaredResourceController.writes accepted.prepared
   let guards := DeclaredResourceController.readGuards accepted.prepared ++ extraGuards accepted
@@ -77,9 +81,9 @@ def charge {config : Config} {opened : Opened config}
         (ApplicationLifecycleCompletionIngress.stableNullifier ingress).canonicalBytes.length
     | other => base other
 
-def intent {config : Config} {opened : Opened config}
+def intent {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
     {ingress : ApplicationLifecycleCompletionIngress.Ingress}
-    (accepted : ApplicationLifecycleCompletionAdmission.Candidate config opened ingress) :
+    (accepted : ApplicationLifecycleCompletionAdmission.Candidate config head ground ingress) :
     DataIntent rootBytes := by
   let ws := DeclaredResourceController.writes accepted.prepared
   let guards := DeclaredResourceController.readGuards accepted.prepared ++ extraGuards accepted
@@ -103,35 +107,35 @@ def intent {config : Config} {opened : Opened config}
       postRootsBound := DeclaredResourceController.writes_roots_bound accepted.prepared
       guardsReadOnly := guarded }
 
-theorem intent_event {config : Config} {opened : Opened config}
+theorem intent_event {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
     {ingress : ApplicationLifecycleCompletionIngress.Ingress}
-    (accepted : ApplicationLifecycleCompletionAdmission.Candidate config opened ingress) :
+    (accepted : ApplicationLifecycleCompletionAdmission.Candidate config head ground ingress) :
     (intent accepted).event = ApplicationLifecycleCompletionIngress.event ingress := rfl
 
-theorem intent_event_version {config : Config} {opened : Opened config}
+theorem intent_event_version {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
     {ingress : ApplicationLifecycleCompletionIngress.Ingress}
-    (accepted : ApplicationLifecycleCompletionAdmission.Candidate config opened ingress) :
+    (accepted : ApplicationLifecycleCompletionAdmission.Candidate config head ground ingress) :
     (intent accepted).event.codecVersion = 18 := rfl
 
-theorem intent_has_report_nullifier {config : Config} {opened : Opened config}
+theorem intent_has_report_nullifier {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
     {ingress : ApplicationLifecycleCompletionIngress.Ingress}
-    (accepted : ApplicationLifecycleCompletionAdmission.Candidate config opened ingress) :
+    (accepted : ApplicationLifecycleCompletionAdmission.Candidate config head ground ingress) :
     ApplicationLifecycleCompletionIngress.stableNullifier ingress ∈
       (intent accepted).nullifiers := by
   simp [intent]
 
-theorem intent_writes {config : Config} {opened : Opened config}
+theorem intent_writes {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
     {ingress : ApplicationLifecycleCompletionIngress.Ingress}
-    (accepted : ApplicationLifecycleCompletionAdmission.Candidate config opened ingress) :
+    (accepted : ApplicationLifecycleCompletionAdmission.Candidate config head ground ingress) :
     (intent accepted).writes = DeclaredResourceController.writes accepted.prepared := rfl
 
-theorem intent_package_guard_current {config : Config} {opened : Opened config}
+theorem intent_package_guard_current {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
     {ingress : ApplicationLifecycleCompletionIngress.Ingress}
-    (accepted : ApplicationLifecycleCompletionAdmission.Candidate config opened ingress)
+    (accepted : ApplicationLifecycleCompletionAdmission.Candidate config head ground ingress)
     (readOnly : ingress.source.needsPackageWrite = false) :
     packageGuard accepted ∈ (intent accepted).readGuards ∧
       (packageGuard accepted).expectedRoot =
-        opened.durable.snapshot.model.roots (packageGuard accepted).cellId := by
+        ground.view.model.roots (packageGuard accepted).cellId := by
   constructor
   · change packageGuard accepted ∈
       DeclaredResourceController.readGuards accepted.prepared ++ extraGuards accepted
