@@ -136,6 +136,11 @@ structure ObjectRecord where
   live : Nat
   rebirths : Nat
   phase : UpgradePhase
+  /-- The invariant domains this object is a member of (A3, `Kernel.ObjectiveDomain`): a turn that
+  writes its declared state is judged, at turn end, by each of these domains' joint law. Bounded
+  (`domainsPerObject`); joined only with the object's consent (its upgrade authority), since a domain
+  adds a constraint to the object. -/
+  domains : List Digest
   deriving DecidableEq, Repr
 
 /-- The package new activities and calls of the object run: the pin, or, while
@@ -734,7 +739,7 @@ theorem unpinned_write_refused (record : ObjectRecord) (facts : Facts) (old : Op
 An object pinned to package 7 whose creator's law is the empty conjunction (the most
 permissive law there is). `leafOf` / `accepted` read the verdict of `admitWrite`. -/
 
-def teethRecord : ObjectRecord := ⟨⟨1⟩, ⟨7⟩, .natural, 1, Pred.all [], [], .frozen, 0, 0, 0, 0, .steady⟩
+def teethRecord : ObjectRecord := ⟨⟨1⟩, ⟨7⟩, .natural, 1, Pred.all [], [], .frozen, 0, 0, 0, 0, .steady, []⟩
 
 def teethFacts (artifact : Option Nat) : Facts := ⟨some ⟨40⟩, 5, 1, 3, none, artifact⟩
 
@@ -950,19 +955,20 @@ def recordStream : StreamCodec ObjectRecord :=
       (StreamCodec.product ObjectiveBendLawCodec.lawsStream
       (StreamCodec.product upgradeStream (StreamCodec.product StreamCodec.nat
       (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
-      (StreamCodec.product StreamCodec.nat phaseStream)))))))))))
+      (StreamCodec.product StreamCodec.nat (StreamCodec.product phaseStream (StreamCodec.list digestStream)))))))))))))
     (fun r => (r.id, r.pin, r.stateType, r.schemaVersion, r.law, r.packageLaws, r.upgrade, r.continuity,
-      r.payer, r.live, r.rebirths, r.phase))
+      r.payer, r.live, r.rebirths, r.phase, r.domains))
     (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2.1, w.2.2.2.2.1, w.2.2.2.2.2.1, w.2.2.2.2.2.2.1,
       w.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.2.2.1,
-      w.2.2.2.2.2.2.2.2.2.2.2⟩)
+      w.2.2.2.2.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.2.2.2.2⟩)
     (by intro r; cases r; rfl)
 
-/-- v3: the record (and a pending upgrade) carries the pinned package's enforced laws (v2 added
+/-- v4: the record carries the invariant domains the object is a member of (`domains`, A3).
+v3: the record (and a pending upgrade) carries the pinned package's enforced laws (v2 added
 the declared state type, the live counters and the upgrade phase). An older record does not
 decode (its frame differs): `readObject` refuses it `objectCodec`, so an older world is
 re-genesised, never reinterpreted. -/
-def recordFrame : Bytes := "DREGG/OBJECTIVE/OBJECT-RECORD/v3".toUTF8.toList
+def recordFrame : Bytes := "DREGG/OBJECTIVE/OBJECT-RECORD/v4".toUTF8.toList
 def recordCodec := framed recordFrame recordStream
 def encodeRecord (record : ObjectRecord) : Bytes := recordCodec.encode record
 def decodeRecord (bytes : Bytes) : Option ObjectRecord := recordCodec.decode bytes

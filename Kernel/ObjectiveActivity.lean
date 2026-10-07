@@ -2988,7 +2988,7 @@ activity, steady; `laws` are the pinned package's (`packageLawsAt`), never the r
 def CreateRequest.record (request : CreateRequest) (laws : List (String × Minidregg.Compiler.ObjectiveBendLaw.LawExpr)) :
     ObjectRecord :=
   ⟨request.object, request.pin, request.stateType, 1, request.law, laws, request.upgrade, 0, request.payer, 0, 0,
-    .steady⟩
+    .steady, []⟩
 
 /-- The request facts a seed is judged under: turn 4, and no package writes (the artifact slot
 reads `-1`; the creator's law, not the pin, judges it). -/

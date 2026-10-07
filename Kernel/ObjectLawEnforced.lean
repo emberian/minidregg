@@ -131,7 +131,7 @@ def cappedLaws : List (String × LawExpr) :=
 def tallyType : Minidregg.Theory.ObjectiveBendTypes.Ty := .field "total" .natural .emptyRow
 
 def cappedRecord (laws : List (String × LawExpr)) : ObjectRecord :=
-  ⟨⟨1⟩, ⟨7⟩, tallyType, 1, Pred.all [], laws, .frozen, 0, 0, 0, 0, .steady⟩
+  ⟨⟨1⟩, ⟨7⟩, tallyType, 1, Pred.all [], laws, .frozen, 0, 0, 0, 0, .steady, []⟩
 
 def tallyAt (total : Nat) : Data := .record [("total", .natural total)]
 
