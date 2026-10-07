@@ -34,6 +34,58 @@ open Minidregg.Compiler.DurableLogTags (chainPrefixes verifyTags)
 
 set_option autoImplicit false
 
+/-! ## What the frontier walk establishes (the open and the audit both run it) -/
+
+/-- The accumulator frontier after pushing the leaves of `entries` (each with
+the chain after it and the root its tag carries). -/
+def frontierAfter : Nat → List (Nat × Digest) → List (Entry × Digest) → List (Nat × Digest)
+  | _, frontier, [] => frontier
+  | height, frontier, (entry, chain) :: rest =>
+      frontierAfter (height + 1) (DurableHistory.Frontier.push frontier
+        (leafDigest (height + 1) entry.record chain
+          ((trailerCarried entry.tag).map (·.root) |>.getD ⟨0⟩))) rest
+
+/-- **The walk's frontier is the accumulator's**, and **the last tag carries
+its digest**: so the frontier the open hands to `Head.verify` is the one the
+head tag's MAC binds. -/
+theorem walkFrontier_ok :
+    ∀ (height : Nat) (frontier : List (Nat × Digest)) (entries : List (Entry × Digest))
+      (result : List (Nat × Digest)),
+      walkFrontier height frontier entries = .ok result →
+        result = frontierAfter height frontier entries ∧
+        ∀ last ∈ entries.getLast?, ∃ carried, trailerCarried last.1.tag = some carried ∧
+          carried.frontier = frontierDigest (height + entries.length) result
+  | height, frontier, [], result, walked => by
+      simp only [walkFrontier, Except.ok.injEq] at walked
+      subst walked
+      exact ⟨rfl, by simp⟩
+  | height, frontier, (entry, chain) :: rest, result, walked => by
+      unfold walkFrontier at walked
+      split at walked
+      · cases walked
+      · rename_i carried found
+        simp only at walked
+        split at walked
+        · cases walked
+        · rename_i reached
+          have next := walkFrontier_ok (height + 1) _ rest result walked
+          have carriedRoot : (trailerCarried entry.tag).map (·.root) = some carried.root := by
+            rw [found]; rfl
+          refine ⟨by rw [next.1]; simp only [frontierAfter, carriedRoot, Option.getD_some], ?_⟩
+          intro last member
+          cases rest with
+          | nil =>
+              simp only [List.getLast?_singleton, Option.mem_def, Option.some.injEq] at member
+              subst member
+              simp only [walkFrontier, Except.ok.injEq] at walked
+              subst walked
+              exact ⟨carried, found, by simpa using Classical.not_not.mp reached⟩
+          | cons second more =>
+              have inner := next.2 last (by simpa [List.getLast?_cons_cons] using member)
+              simpa [Nat.add_assoc, Nat.add_comm 1] using inner
+
+#assert_axioms walkFrontier_ok
+
 structure Report where
   records : Nat
   accumulatorNodes : Nat
