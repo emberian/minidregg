@@ -5,6 +5,7 @@ and signature domain remain untouched.
 -/
 import Kernel.ApplicationAgentLifetimeDispatchReserveCore
 import Kernel.ApplicationDispatchAgentPayer
+import Kernel.NativeHostServed
 
 namespace Minidregg.Kernel.ApplicationAgentLifetimeDispatchPayer
 
@@ -30,7 +31,7 @@ structure Checked (config : Config) (opened : Opened config)
   payerCapability : CapabilityId
   payerObserve : CapabilityId
   prepared : DeclaredResourceController.PreparedInvocation config.deployment config.profile
-    ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable command
+    ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground command
   shape : DeclaredResourceController.PhysicalShape prepared
   accepted : DeclaredResourceController.AcceptedInvocation prepared signed
   commandExact : command =
@@ -73,7 +74,7 @@ def checkCurrent (config : Config) (opened : Opened config)
                   payerCapability cell.payload.root state (some payerObserve)] } then
             match ← DeclaredResourceController.prepareAuthenticated config.deployment config.profile
                 ⟨config.federation, logicalHeight config opened.durable⟩ config.signature
-                opened.durable command signed.authorityEnvelope with
+                opened.ground command signed.authorityEnvelope with
             | .error _ => return .error "lifetime payer preparation refused"
             | .ok prepared =>
               if shape : DeclaredResourceController.PhysicalShape prepared then
