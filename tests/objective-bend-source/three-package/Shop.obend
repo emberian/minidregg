@@ -1,0 +1,9 @@
+edition ObjectiveBend 1
+# Row D three-package case, shared part: the record every package targets.
+record Store:
+  price(n: Nat) -> Nat
+  tax(n: Nat) -> Nat
+  total(n: Nat) -> Nat
+
+def blank() -> Store:
+  {price: fn(n: Nat) -> Nat: 0n, tax: fn(n: Nat) -> Nat: 0n, total: fn(n: Nat) -> Nat: 0n}
