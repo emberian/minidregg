@@ -47,13 +47,13 @@ def claimOf (request : Request) (expectedInput : Digest) : ObjectiveInvocationCl
 index is a position in a command that does not exist yet; budget and Book
 preparation do not read it (`Prepared.relocate_budget_exact`). -/
 def environmentOf (config : Config) (opened : Opened config) (request : Request) :
-    Except String (ObjectiveBendNativeAdmission.Environment config.deployment opened.durable) := do
+    Except String (ObjectiveBendNativeAdmission.Environment config.deployment opened.ground) := do
   let some clock := ClockCellDomain.load config.deployment opened.durable.snapshot
     | throw "clock unavailable"
   let compute ← (RunComputeBudgetDomain.prepare config.deployment opened.durable.snapshot clock.clock
       request.subject request.capacity.proofWork (request.funding.map fun funding => funding.input 0)).mapError
     fun _ => "compute funding refused"
-  pure ⟨observationContext config opened,config.federation,config.genesisHeight,request.subject,
+  pure ⟨config.federation,config.genesisHeight,request.subject,
     request.nonce,some compute⟩
 
 /-- One source effect before it has a command position. -/
@@ -79,7 +79,7 @@ def resultIndex (request : Request) : Except String Nat :=
 /-- Command-free evaluation of the applied source and placement of its effects,
 in source plan order, by the registered output codec. -/
 def placed {F : Type} [Field F] [DecidableEq F] {deployment : CanonicalCellRegistry.Deployment}
-    {durable : DeclaredResourceController.Durable} {environment : ObjectiveBendNativeAdmission.Environment deployment durable}
+    {ground : DeclaredResourceController.Ground deployment} {environment : ObjectiveBendNativeAdmission.Environment deployment ground}
     {profile : CanonicalRuntimeProfile.Profile F} {claim : ObjectiveInvocationClaim.Claim}
     (request : Request) (core : ObjectiveBendNativeAdmission.Core environment profile claim) : Except String (List Placed) := do
   let capacity := ObjectiveBendNativeAdmission.scalarProfile claim.capacity
