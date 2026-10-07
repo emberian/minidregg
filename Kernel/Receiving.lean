@@ -392,7 +392,7 @@ def receipt (env : F.Env) (ingress : F.Ingress) : Receipt :=
 /-- The receiver replay is read through: replay consults no verifier (the
 empty transcript; `replay_oracle_irrelevant`). -/
 abbrev replayReceiver (laws : Laws Durable) :=
-  F.receiver laws (CredentialSignatureIO.Oracle.recorded ⟨[]⟩)
+  F.receiver laws (CredentialSignatureIO.Oracle.recorded CredentialSignatureIO.Transcript.empty)
 
 /-- Replay is the same under every oracle: it reads only the journal and the
 family's transaction identity. -/

@@ -69,6 +69,19 @@ def Transcript.answer (transcript : Transcript) (publicKey frame signature : Lis
   if (publicKey, frame, signature) ∈ transcript.verified then .ok true
   else .error (.unavailable "the transcript holds no verdict for this signature")
 
+/-- The transcript that holds no verdict: every signature it is asked about is
+`unavailable` (`Transcript.answer`), never `verified`. It is the oracle of a pure
+evaluation that consults no verifier (a receiver's replay, a fixture whose families make
+no signature claims). A named `Transcript`, so `scripts/NativeTranscripts.lean` lists it
+(zero triples) instead of finding an anonymous `Transcript.mk` it could not re-verify. -/
+def Transcript.empty : Transcript := ⟨[]⟩
+
+theorem Transcript.empty_answers_nothing (publicKey frame signature : List UInt8) :
+    (Transcript.empty.answer publicKey frame signature).toOption = none := by
+  simp [Transcript.answer, Transcript.empty, Except.toOption]
+
+#assert_axioms Transcript.empty_answers_nothing
+
 theorem Transcript.answer_true_recorded {transcript : Transcript}
     {publicKey frame signature : List UInt8}
     (answered : transcript.answer publicKey frame signature = .ok true) :
