@@ -188,7 +188,7 @@ Minidregg.Kernel.CapabilityRenounce.DecodedIngress.mk | Kernel.CapabilityRenounc
 Minidregg.Kernel.CapabilityRenounce.HolderRefusal.mk | Kernel.CapabilityRenounce | evidence | L2 | 3 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.CapabilityRenounce.Prepared.mk | Kernel.CapabilityRenounce | evidence | L2 | 1 proof / 1 data fields; layer-1 review pending
 Minidregg.Kernel.CapabilityRevocationController.Accepted.mk | Kernel.CapabilityRevocationController | evidence | L2 | 1 proof / 2 data fields; layer-1 review pending
-Minidregg.Kernel.CapabilityRevocationController.PreparedOn.mk | Kernel.CapabilityRevocationController | evidence | L2 | 3 proof / 4 data fields; layer-1 review pending
+Minidregg.Kernel.CapabilityRevocationController.PreparedOn.mk | Kernel.CapabilityRevocationController | evidence | L2 | a prepared revocation over the directory and authority it read (renamed from Prepared on next); victim/identity/policy exactness are proof fields; layer-1 review pending
 Minidregg.Kernel.CapabilityRevocationReceiver.AcceptedRevocation.mk | Kernel.CapabilityRevocationReceiver | evidence | L2 | 1 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.CapabilityRevocationReceiver.DecodedIngress.mk | Kernel.CapabilityRevocationReceiver | evidence | L2 | 2 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.CarriedApplicationDispatchReceiver.Committed.mk | Kernel.CarriedApplicationDispatchReceiver | evidence | L2 | 1 proof / 8 data fields; layer-1 review pending
@@ -311,7 +311,6 @@ Minidregg.Kernel.ObjectiveActivity.Postings.mk | Kernel.ObjectiveActivity | evid
 Minidregg.Kernel.ObjectiveActivity.Program.mk | Kernel.ObjectiveActivity | evidence | L2 | 3 proof / 8 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivity.Publication.mk | Kernel.ObjectiveActivity | evidence | L2 | 5 proof / 5 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivity.Rebirth.mk | Kernel.ObjectiveActivityUpgrade | evidence | L2 | upgrade-turns (DEPUTY-OB-ENG): proof fields mirror the admitting checks per its audit; L1 theorem pending from OB-ENG
-Minidregg.Kernel.ObjectiveActivity.Registration.mk | Kernel.ObjectiveDomain | evidence | L2 | 7 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivity.Replay.mk | Kernel.ObjectiveActivity | evidence | L2 | 4 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivity.Resolution.mk | Kernel.ObjectiveActivity | evidence | L2 | 5 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivity.ResumeHead.mk | Kernel.ObjectiveActivity | evidence | L2 | DEPUTY-OB-ENG type; layer-1 review pending (OB-ENG)
@@ -331,7 +330,7 @@ Minidregg.Kernel.ObjectiveBendNativeInput.AdmittedRead.mk | Kernel.ObjectiveBend
 Minidregg.Kernel.ObjectiveBendNativeInput.Bound.mk | Kernel.ObjectiveBendNativeInput | evidence | L2 | 1 proof / 1 data fields; layer-1 review pending; mints: ObjectiveBendNativeInput.bind (review pending: binds by data, no proposition argument)
 Minidregg.Kernel.ObjectiveBendPreparedOutput.Prepared.mk | Kernel.ObjectiveBendPreparedOutput | evidence | L2 | 2 proof / 4 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveBendPublishedPackage.Loaded.mk | Kernel.ObjectiveBendPublishedPackage | evidence | L2 | 7 proof / 2 data fields; layer-1 review pending
-Minidregg.Kernel.ObjectiveCall.Deliverable.mk | Kernel.ObjectiveCall | evidence | L2 | 5 proof / 4 data fields; layer-1 review pending
+Minidregg.Kernel.ObjectiveCall.Deliverable.mk | Kernel.ObjectiveCall | evidence | L2 | a method a message can be delivered to, decided at the send (record, view, args, method each with its Exact proof field); new on next (OB-ENG); layer-1 review pending
 Minidregg.Kernel.ObjectiveCall.Invocation.mk | Kernel.ObjectiveCall | evidence | L2 | 7 proof / 7 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveCall.Method.mk | Kernel.ObjectiveCall | evidence | L2 | 5 proof / 8 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveSend.MessageDelivery.mk | Kernel.ObjectiveSend | evidence | L2 | 14 proof / 12 data fields; layer-1 review pending
