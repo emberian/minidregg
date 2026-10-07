@@ -4,6 +4,8 @@
     slots                 the table: slot, state, holder lane, pid, age, CPU of the holder's tree, command,
                           and the waiters (lane, age) queued on that slot; then the sibling box's free slots
     slots --json          the same as JSON (also written to $PIPELINE_ROOT/slots.status by --watch)
+    slots --free          the FREE lane slots of this box, one per line, LIVE (exit 1 when none): what
+                          build-anywhere asks here and, through box-peer-gate, on the sibling box
     slots --reclaim       also RECLAIM idle slots: a holder whose whole process tree has used < 2% of one
                           CPU for PIPELINE_IDLE_MIN (15) minutes is told (a SLOT-RECLAIMED note in its lane
                           and $PIPELINE_ROOT/slots.log) and its held command is stopped (SIGTERM to the
@@ -17,6 +19,21 @@ A slot is any /srv/build-slot-* file. Holders and waiters come from /proc/locks 
 import glob, json, os, subprocess, sys, time
 
 ROOT = os.environ.get("PIPELINE_ROOT", "/srv/pipeline")
+# The box's slot lists live in $PIPELINE_ROOT/box.env (bash exports). A non-login ssh, a cron timer or the
+# peer gate has none of them in its environment, and `0/0 lane slots` would be a lie about a busy box
+# (COORD-AUDIT 10-07): read them through bash when they are not already set.
+def boxenv():
+    if os.environ.get("PIPELINE_SLOTS") or not os.path.exists(f"{ROOT}/box.env"):
+        return
+    try:
+        out = subprocess.run(["bash", "-c", f'. "{ROOT}/box.env"; printf "%s\\0%s\\0%s" "$PIPELINE_SLOTS" "${{PIPELINE_SMALL_SLOTS:-}}" "${{PIPELINE_PEER:-}}"'],
+                             capture_output=True, text=True, timeout=10).stdout.split("\0")
+        for k, v in zip(("PIPELINE_SLOTS", "PIPELINE_SMALL_SLOTS", "PIPELINE_PEER"), out):
+            if v and not os.environ.get(k):
+                os.environ[k] = v
+    except Exception:
+        pass
+boxenv()
 IDLE_MIN = float(os.environ.get("PIPELINE_IDLE_MIN", "15"))
 IDLE_CPU = 0.02            # fraction of one CPU
 TICK = os.sysconf("SC_CLK_TCK")
@@ -188,6 +205,10 @@ def main():
             pass
         if "--reclaim" in a or "--watch" in a:
             reclaim(rows)
+        if "--free" in a:
+            free = [r["slot"] for r in rows if r["state"] == "free" and r["slot"] in status["lane_slots"]]
+            print("\n".join(free), end="\n" if free else "")
+            sys.exit(0 if free else 1)
         if "--json" in a:
             print(json.dumps(status, indent=1))
         elif "--watch" not in a:

@@ -128,6 +128,14 @@ g_spk-shell()     { bash scripts/check-spk-shell-tests.sh; }
 g_journey()       { bash scripts/check-journey.sh; }
 
 tree_before=$(tree_state)
+# Each gate is bounded: LOCAL_GATES_GATE_TIMEOUT_S (3 h; 0 = none). A gate that hangs (a journey that never
+# returns, a server a hook forgot) is TIMEOUT = red with its whole process group killed, not a silent 4 h wall
+# (FAIRY-GREEN 10-05: CI's "4 h hang" was a gate still running). The functions run in a child bash under
+# `timeout`, so what they read is exported here.
+gate_timeout=${LOCAL_GATES_GATE_TIMEOUT_S:-10800}
+export lake lib_targets exe_targets tree_before repo_root logdir
+export -f tree_state
+for g in "${GATES[@]}"; do export -f "g_$g"; done
 t_all=$(date +%s)
 for g in "${GATES[@]}"; do
   if [ -n "$only" ] && [[ " $only " != *" $g "* ]]; then
@@ -135,11 +143,13 @@ for g in "${GATES[@]}"; do
   fi
   echo "== gate $g"
   t0=$(date +%s)
-  "g_$g" 2>&1 | tee "$logdir/$g.log"
-  rc=${PIPESTATUS[0]}
+  if [ "$gate_timeout" = 0 ]; then "g_$g" 2>&1 | tee "$logdir/$g.log"; rc=${PIPESTATUS[0]}
+  else timeout -k 30 "$gate_timeout" bash -c "g_$g" 2>&1 | tee "$logdir/$g.log"; rc=${PIPESTATUS[0]}; fi
   SECS[$g]=$(( $(date +%s) - t0 ))
   LAST[$g]=$(grep -v '^[[:space:]]*$' "$logdir/$g.log" | tail -1 | cut -c1-150)
-  if [ "$rc" = 0 ]; then STATUS[$g]=PASS; else STATUS[$g]=FAIL; red=$((red + 1)); fi
+  if [ "$rc" = 0 ]; then STATUS[$g]=PASS
+  elif [ "$rc" = 124 ] || [ "$rc" = 137 ]; then STATUS[$g]=TIMEOUT; LAST[$g]="killed after ${gate_timeout}s"; red=$((red + 1))
+  else STATUS[$g]=FAIL; red=$((red + 1)); fi
   echo "== gate $g: ${STATUS[$g]} (${SECS[$g]} s)"
 done
 
