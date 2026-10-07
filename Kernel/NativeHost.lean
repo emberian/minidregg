@@ -2649,7 +2649,7 @@ def replayConflict : Outcome := refused .conflict "replay" "transaction identity
 admitted** (`PolicyInstallReceiver.replay_changed_ingress_refused`, then `replayStep`). -/
 theorem install_changed_ingress_stops (domain : Digest) {deployment : CanonicalCellRegistry.Deployment}
     (ground : ServedBasis.Ground deployment) (ingress : PolicyInstallReceiver.DecodedIngress)
-    {recorded : DurableCommitProtocol.Intent Digest Digest StableNullifier ReplayEnvelope}
+    {recorded : DurableCommitProtocol.Intent Digest Digest DurableDataIntent.StableNullifier DurableDataIntent.ReplayEnvelope}
     (found : ground.recorded (PolicyInstallReceiver.transactionId domain ingress) = some (some recorded))
     (different : recorded.event.event ≠ PolicyInstallReceiver.event domain ingress)
     (undeclared conflict : Outcome) :
@@ -2662,7 +2662,7 @@ theorem install_changed_ingress_stops (domain : Digest) {deployment : CanonicalC
 theorem delegate_changed_ingress_stops (domain semantics : Digest)
     {deployment : CanonicalCellRegistry.Deployment}
     (ground : ServedBasis.Ground deployment) (ingress : CapabilityDelegationReceiver.DecodedIngress)
-    {recorded : DurableCommitProtocol.Intent Digest Digest StableNullifier ReplayEnvelope}
+    {recorded : DurableCommitProtocol.Intent Digest Digest DurableDataIntent.StableNullifier DurableDataIntent.ReplayEnvelope}
     (found : ground.recorded (CapabilityDelegationReceiver.transactionId domain semantics ingress) =
       some (some recorded))
     (different : recorded.event.event ≠ CapabilityDelegationReceiver.event domain semantics ingress)
@@ -2676,7 +2676,7 @@ theorem delegate_changed_ingress_stops (domain semantics : Digest)
 theorem revoke_changed_ingress_stops (domain semantics : Digest)
     {deployment : CanonicalCellRegistry.Deployment}
     (ground : ServedBasis.Ground deployment) (ingress : CapabilityRevocationReceiver.DecodedIngress)
-    {recorded : DurableCommitProtocol.Intent Digest Digest StableNullifier ReplayEnvelope}
+    {recorded : DurableCommitProtocol.Intent Digest Digest DurableDataIntent.StableNullifier DurableDataIntent.ReplayEnvelope}
     (found : ground.recorded (CapabilityRevocationReceiver.transactionId domain semantics ingress) =
       some (some recorded))
     (different : recorded.event.event ≠ CapabilityRevocationReceiver.event domain semantics ingress)
@@ -2690,7 +2690,7 @@ theorem revoke_changed_ingress_stops (domain semantics : Digest)
 theorem renounce_changed_ingress_stops (domain semantics : Digest)
     {deployment : CanonicalCellRegistry.Deployment}
     (ground : ServedBasis.Ground deployment) (ingress : CapabilityRenounce.DecodedIngress)
-    {recorded : DurableCommitProtocol.Intent Digest Digest StableNullifier ReplayEnvelope}
+    {recorded : DurableCommitProtocol.Intent Digest Digest DurableDataIntent.StableNullifier DurableDataIntent.ReplayEnvelope}
     (found : ground.recorded (CapabilityRenounce.transactionId domain semantics ingress) = some (some recorded))
     (different : recorded.event.event ≠ CapabilityRenounce.event domain semantics ingress)
     (undeclared conflict : Outcome) :
