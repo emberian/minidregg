@@ -340,6 +340,7 @@ def cellJson (domain : Digest) (cell : Nat) (root : Digest) (bytes : List UInt8)
       | .object => match ObjectRecord.decodeRecord payload.body with
         | some record => [("kind", "object-record"), ("pin", decimal record.pin.value),
             ("schemaVersion", decimal record.schemaVersion), ("law", toJson (reprStr record.law)),
+            ("effectiveLaw", toJson (reprStr record.effectiveLaw)),
             ("upgrade", upgradeJson record.upgrade), ("continuity", decimal record.continuity),
             ("payer", decimal record.payer)]
         | none => [("kind", "object-undecodable")]

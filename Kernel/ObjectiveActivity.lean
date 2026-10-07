@@ -50,8 +50,10 @@ not at all (`DurableDataIntent.execute_no_partial_data_commit`):
   yield or end, and the new checkpoint, the Plan's write, the next await and
   the Book postings commit together.
 * `topUp`: anyone funds an activity's purse on the Book.
-* `writeState`: a holder of the object writes its declared state directly
-  (a new version; the next delivery's view shows it).
+* `writeState`: a holder of the object asks to write its declared state directly. No
+  package code makes this write, so the object's pin clause refuses it on every created
+  object (`ordinary_write_to_object_refused`): the declared state changes only by the
+  object's own package (a birth, a delivery, a call frame, a delivered message).
 * `create`: a holder of the object resource installs its `ObjectRecord`
   (`Kernel.ObjectRecord`: pin, law, upgrade policy, payer) at its own protected
   coordinate (`objectCell`).
@@ -62,7 +64,14 @@ birth runs only the package the object pins (`birth_refuses_other_pin`). Every
 declared-state write (a birth's or a delivery's yield, a direct write) is judged
 by the object's law over the old and new state plus the request facts
 (`ObjectRecord.admitWrite`), with the record read in the same turn and its cell
-guarded. A delivery's write is judged with the activity's principal (its birth
+guarded. The judged law is `ObjectRecord.effectiveLaw`: the KERNEL's package-pin clause
+(`ObjectRecord.pinClause`: the write is made by code of the package the record pins) first,
+then the creator's law. The clause is derived from the record's `pin`, never stored, so a
+creator cannot omit it (`create_installs_pin`, `pin_in_every_judged_law`), a direct write
+is refused at it (`ordinary_write_to_object_refused`), the package's own turns pass it
+(`Birth.write_passes_pin`, `Delivery.write_passes_pin`, `ObjectiveCall.invocation_writes_pinned`,
+`ObjectiveSend.MessageDelivery.writes_pinned`) and no turn but a creation rewrites the record
+it comes from (`pin_not_removable`). A delivery's write is judged with the activity's principal (its birth
 subject) as subject, never the deliverer. A law refusal refuses the whole turn
 and names the clause: nothing commits, and the activity stays at its yield
 (`Birth.write_judged`, `Delivery.write_judged`, `StateWrite.write_judged`).
@@ -998,9 +1007,14 @@ def readObject {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snap
 /-- The request facts a declared-state write is judged under. `turn`: 1 birth,
 2 delivery, 3 direct write. A delivery's write is the activity's, so its subject
 is the activity's principal (its birth subject, `escrow.payer`: the subject the
-native route checked as a holder of the object), never the deliverer. -/
-def factsOf (subject : SubjectId) (height : Nat) (object : CellId) (turn : Nat) : Facts :=
-  ⟨some subject, height, object.value, turn, none⟩
+native route checked as a holder of the object), never the deliverer.
+`artifact`: the package whose code makes the write (a birth's and a delivery's
+activity runs the package its record pins) or `none` for the direct write, which no
+package code makes. It is what the object's pin clause (`ObjectRecord.pinClause`)
+reads as `objective/artifact`. -/
+def factsOf (subject : SubjectId) (height : Nat) (object : CellId) (turn : Nat)
+    (artifact : Option Digest) : Facts :=
+  ⟨some subject, height, object.value, turn, none, artifact.map Digest.value⟩
 
 /-- The object's law judges a write: nothing to judge when nothing is written. -/
 def judgeWrite (record : ObjectRecord) (facts : Facts) (old : Option Data) (new : Data) : Except Refusal Unit :=
@@ -1544,7 +1558,7 @@ structure Birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
   objectExact : readObject config snapshot request.object = .ok (some object)
   pinned : object.pin = request.pin
   /-- The object's law admitted the first segment's write (if it wrote). -/
-  judged : judgeWritten object (factsOf request.subject height request.object 1)
+  judged : judgeWritten object (factsOf request.subject height request.object 1 (some request.pin))
     (yielded.bind YieldCommit.written) = .ok ()
   /-- A yielding birth's deposit reserves the first await's fee pair and its
   record's storage deposit. -/
@@ -1590,7 +1604,7 @@ def birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot 
                 current false segment with
             | .error reason => throw reason
             | .ok yielded =>
-              match judged : judgeWritten object (factsOf request.subject height request.object 1)
+              match judged : judgeWritten object (factsOf request.subject height request.object 1 (some request.pin))
                   (yielded.bind YieldCommit.written) with
               | .error reason => throw reason
               | .ok () =>
@@ -1818,7 +1832,7 @@ structure Delivery {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
   objectExact : readObject config snapshot record.object = .ok (some object)
   /-- The object's law admitted the segment's write (if it wrote), judged with
   the activity's principal as subject. -/
-  judged : judgeWritten object (factsOf record.escrow.payer height record.object 2)
+  judged : judgeWritten object (factsOf record.escrow.payer height record.object 2 (some record.pin))
     (yielded.bind YieldCommit.written) = .ok ()
 
 def deliver {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
@@ -1865,7 +1879,7 @@ def deliver {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
       record.object (record.generation + 1) envelope.sourceTicks view resumed with
   | .error reason => .error reason
   | .ok (segment, yielded) =>
-  match judged : judgeWritten object (factsOf record.escrow.payer height record.object 2)
+  match judged : judgeWritten object (factsOf record.escrow.payer height record.object 2 (some record.pin))
       (yielded.bind YieldCommit.written) with
   | .error reason => .error reason
   | .ok () =>
@@ -2265,7 +2279,7 @@ structure StateWrite {rootBytes : Bytes → Digest} (config : Config) (snapshot 
   /-- The state the write replaces: the new value is the next version. -/
   current : Option ObjectState
   currentExact : readState config snapshot request.object = .ok current
-  judged : judgeWrite object (factsOf request.subject height request.object 3)
+  judged : judgeWrite object (factsOf request.subject height request.object 3 none)
     (current.map ObjectState.value) request.value = .ok ()
   posts : List Post
   postsExact : posts = [postAt snapshot (stateCell config.domain request.object)
@@ -2280,7 +2294,7 @@ def writeState {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snap
     match currentExact : readState config snapshot request.object with
     | .error reason => .error reason
     | .ok current =>
-      match judged : judgeWrite object (factsOf request.subject height request.object 3)
+      match judged : judgeWrite object (factsOf request.subject height request.object 3 none)
           (current.map ObjectState.value) request.value with
       | .error reason => .error reason
       | .ok () => .ok ⟨object, objectExact, current, currentExact, judged, _, rfl⟩
@@ -3405,7 +3419,7 @@ theorem Birth.write_judged {rootBytes : Bytes → Digest} {config : Config} {sna
     {height : Nat} {request : BirthRequest} (born : Birth config snapshot height request)
     (written : StateWritten) (wrote : born.yielded.bind YieldCommit.written = some written) :
     ∃ object, readObject config snapshot request.object = .ok (some object) ∧ object.pin = request.pin ∧
-      admitWrite object (factsOf request.subject height request.object 1)
+      admitWrite object (factsOf request.subject height request.object 1 (some request.pin))
         (written.before.map ObjectState.value) written.after.value = .ok () :=
   ⟨born.object, born.objectExact, born.pinned, judgeWritten_ok born.judged written wrote⟩
 
@@ -3416,7 +3430,8 @@ theorem Delivery.write_judged {rootBytes : Bytes → Digest} {config : Config} {
     {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request)
     (written : StateWritten) (wrote : delivery.yielded.bind YieldCommit.written = some written) :
     ∃ object, readObject config snapshot delivery.record.object = .ok (some object) ∧
-      admitWrite object (factsOf delivery.record.escrow.payer height delivery.record.object 2)
+      admitWrite object (factsOf delivery.record.escrow.payer height delivery.record.object 2
+        (some delivery.record.pin))
         (written.before.map ObjectState.value) written.after.value = .ok () :=
   ⟨delivery.object, delivery.objectExact, judgeWritten_ok delivery.judged written wrote⟩
 
@@ -3425,7 +3440,7 @@ admitted by its law. -/
 theorem StateWrite.write_judged {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : StateWriteRequest} (written : StateWrite config snapshot height request) :
     ∃ object, readObject config snapshot request.object = .ok (some object) ∧
-      admitWrite object (factsOf request.subject height request.object 3)
+      admitWrite object (factsOf request.subject height request.object 3 none)
         (written.current.map ObjectState.value) request.value = .ok () :=
   ⟨written.object, written.objectExact, judgeWrite_ok written.judged⟩
 
@@ -3460,7 +3475,7 @@ theorem writeState_refuses_lawless {rootBytes : Bytes → Digest} {config : Conf
     {reason : WriteRefusal}
     (found : readObject config snapshot request.object = .ok (some object))
     (state : readState config snapshot request.object = .ok current)
-    (denied : admitWrite object (factsOf request.subject height request.object 3)
+    (denied : admitWrite object (factsOf request.subject height request.object 3 none)
       (current.map ObjectState.value) request.value = .error reason) :
     (writeState config snapshot height request).toOption = none := by
   unfold writeState
@@ -3493,6 +3508,174 @@ theorem create_refuses_existing {rootBytes : Bytes → Digest} {config : Config}
   · rfl
   · rename_i found'; rw [found] at found'; cases found'
 
+/-! ## The package pin: installed at creation, passed by every package turn, refused to every other
+
+The pin is the kernel's clause on an object's declared state (`ObjectRecord.pinClause`):
+every write is judged by `ObjectRecord.effectiveLaw record = all [pinClause record.pin, record.law]`,
+whatever law the creator supplied. The clause is not stored beside the creator's law, it is
+derived from the record's `pin`, so no creator can omit or loosen it and nothing but the record's
+own `pin` (written once, by `create`) says what it is. The turns that write declared state, and the
+artifact each makes its write under:
+
+| turn | artifact slot (`factsOf`) |
+|---|---|
+| `birth` | `request.pin`, which is `object.pin` (`birth_refuses_other_pin`) |
+| `deliver` | the activity record's `pin`, which is the object's pin for every activity a birth made (`Birth.record_pin`) |
+| `invoke` call frames, `deliverMessage` frames | the frame's own object's record pin (`ObjectiveCall.Ctx.facts`) |
+| `writeState` | none: no package code writes, the slot reads `-1`, the pin refuses |
+-/
+
+/-- **`create_installs_pin`.** An admitted creation installs one record, read back from the
+post-state it commits; the law that judges every write of that object is the pin clause of
+exactly the package the request pins (published: `created.published`), then the creator's law. -/
+theorem create_installs_pin {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {request : CreateRequest} {created : Creation config snapshot request}
+    (_admitted : create config snapshot request = .ok created) :
+    objectAt config (afterPosts snapshot created.posts) request.object = some request.record ∧
+      request.record.pin = request.pin ∧
+      request.record.effectiveLaw =
+        Minidregg.Pred.Pred.all [ObjectRecord.pinClause request.pin, request.law] ∧
+      (bodyOf .package (snapshot.canonicalBytes (packageCell config.domain request.pin))).isSome = true := by
+  refine ⟨?_, rfl, rfl, created.published⟩
+  have headBytes : afterPosts snapshot
+      [postAt snapshot (objectCell config.domain request.object) (objectImage request.object request.record)]
+      (objectCell config.domain request.object) = objectImage request.object request.record :=
+    afterPosts_first snapshot
+      (postAt snapshot (objectCell config.domain request.object) (objectImage request.object request.record)) []
+  unfold objectAt
+  rw [created.postsExact, headBytes]
+  simp [objectImage, bodyOf_image, ObjectRecord.record_roundTrip]
+
+/-- **`ordinary_write_to_object_refused`.** A direct write of an object's declared state (no
+package code makes it) is refused whatever the creator's law, the state and the value: the
+admitting function returns no turn, and when the write projects, the refusal names the pin
+clause at path `[0]`, the artifact slot reading `-1`. -/
+theorem ordinary_write_to_object_refused {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {request : StateWriteRequest} {object : ObjectRecord}
+    {current : Option ObjectState}
+    (found : readObject config snapshot request.object = .ok (some object))
+    (state : readState config snapshot request.object = .ok current) :
+    (writeState config snapshot height request).toOption = none ∧
+      ∀ before after,
+        ObjectRecord.views (factsOf request.subject height request.object 3 none)
+          (current.map ObjectState.value) request.value = some (before, after) →
+        writeState config snapshot height request = .error (.objectWrite (.lawDenied
+          ⟨[0], ObjectRecord.pinClause object.pin,
+            before.get Minidregg.Pred.objectiveArtifactSlot, some (-1)⟩)) := by
+  constructor
+  · have refused := ObjectRecord.unpinned_write_refused object
+      (factsOf request.subject height request.object 3 none) (current.map ObjectState.value) request.value rfl
+    cases admitted : admitWrite object (factsOf request.subject height request.object 3 none)
+        (current.map ObjectState.value) request.value with
+    | ok unit => cases unit; exact absurd admitted refused
+    | error reason => exact writeState_refuses_lawless found state admitted
+  · intro before after viewed
+    have named := ObjectRecord.unpinned_write_names_pin object
+      (factsOf request.subject height request.object 3 none) (current.map ObjectState.value) request.value
+      rfl before after viewed
+    have judgedNamed : judgeWrite object (factsOf request.subject height request.object 3 none)
+        (current.map ObjectState.value) request.value = .error (.objectWrite (.lawDenied
+          ⟨[0], ObjectRecord.pinClause object.pin,
+            before.get Minidregg.Pred.objectiveArtifactSlot, some (-1)⟩)) := by
+      simp only [judgeWrite, named]
+    unfold writeState
+    split
+    · rename_i reason found'; rw [found] at found'; cases found'
+    · rename_i found'; rw [found] at found'; cases found'
+    · rename_i object' found'
+      rw [found] at found'
+      cases found'
+      split
+      · rename_i reason state'; rw [state] at state'; cases state'
+      · rename_i current' state'
+        rw [state] at state'
+        cases state'
+        split
+        · rename_i reason judged
+          rw [judgedNamed] at judged
+          cases judged
+          rfl
+        · rename_i judged
+          rw [judgedNamed] at judged
+          cases judged
+
+theorem nextRecord_pin (base : Record) (generation : Nat) (segment : Segment) (yielded : Option YieldCommit) :
+    (nextRecord base generation segment yielded).pin = base.pin := by
+  cases segment <;> cases yielded <;> rfl
+
+/-- The record an admitted birth installs pins the object's package. -/
+theorem Birth.record_pin {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : BirthRequest} (born : Birth config snapshot height request) :
+    born.record.pin = born.object.pin := by
+  rw [born.recordExact, nextRecord_pin]
+  exact born.pinned.symm
+
+/-- **`objective_turns_pass_pin`, birth.** The write of an admitted birth is judged under the
+artifact `request.pin`, which is the pin of the object it is judged by: the object's pin clause
+accepts it on the very views the law judged. -/
+theorem Birth.write_passes_pin {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : BirthRequest} (born : Birth config snapshot height request)
+    (written : StateWritten) (wrote : born.yielded.bind YieldCommit.written = some written) :
+    ∃ before after,
+      ObjectRecord.views (factsOf request.subject height request.object 1 (some request.pin))
+        (written.before.map ObjectState.value) written.after.value = some (before, after) ∧
+      Minidregg.Pred.eval (ObjectRecord.pinClause born.object.pin) before after = true := by
+  have admitted := judgeWritten_ok born.judged written wrote
+  obtain ⟨before, after, viewed, _⟩ := (ObjectRecord.admitWrite_ok_iff _ _ _ _).mp admitted
+  refine ⟨before, after, viewed, ObjectRecord.pinClause_accepts_run born.object.pin _ _ _ ?_ before after viewed⟩
+  simp [factsOf, born.pinned]
+
+/-- **`objective_turns_pass_pin`, delivery.** The write of an admitted delivery is judged under
+the artifact of the activity record's pin; where that is the object's pin (every activity a
+birth made: `Birth.record_pin`), the object's pin clause accepts it. -/
+theorem Delivery.write_passes_pin {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request)
+    (samePin : delivery.record.pin = delivery.object.pin)
+    (written : StateWritten) (wrote : delivery.yielded.bind YieldCommit.written = some written) :
+    ∃ before after,
+      ObjectRecord.views (factsOf delivery.record.escrow.payer height delivery.record.object 2
+          (some delivery.record.pin))
+        (written.before.map ObjectState.value) written.after.value = some (before, after) ∧
+      Minidregg.Pred.eval (ObjectRecord.pinClause delivery.object.pin) before after = true := by
+  have admitted := judgeWritten_ok delivery.judged written wrote
+  obtain ⟨before, after, viewed, _⟩ := (ObjectRecord.admitWrite_ok_iff _ _ _ _).mp admitted
+  refine ⟨before, after, viewed, ObjectRecord.pinClause_accepts_run delivery.object.pin _ _ _ ?_ before after viewed⟩
+  simp [factsOf, samePin]
+
+/-- **`pin_not_removable`.** Whatever turn commits `posts` on a snapshot where the object's
+record reads as `record`, if no post lands on the object's record coordinate the record reads
+the same afterwards, so the law that judges the object's writes still leads with the pin clause
+of `record.pin`. The only post that lands on an object record coordinate is `create`'s
+(`Creation.postsExact`); every other turn's posts name other cells, and the `unwritten` premise
+is the coordinate-separation premise every theorem about these posts carries
+(`Birth.retention_cells_have_payer`, `StateWrite.retention_cells_have_payer`). The
+future upgrade turn is the one turn that rewrites the record, through `ObjectRecord.pinClause`. -/
+theorem pin_not_removable {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    (posts : List Post) {object : CellId} {record : ObjectRecord}
+    (read : readObject config snapshot object = .ok (some record))
+    (unwritten : ∀ post ∈ posts, post.cell ≠ objectCell config.domain object) :
+    objectAt config (afterPosts snapshot posts) object = some record ∧
+      record.effectiveLaw = Minidregg.Pred.Pred.all [ObjectRecord.pinClause record.pin, record.law] := by
+  refine ⟨?_, rfl⟩
+  unfold objectAt
+  rw [afterPosts_unwritten snapshot _ _ unwritten]
+  exact objectAt_of_read read
+
+/-- **No creator law removes the pin**: for every record, a view the judged law accepts is one
+the pin clause accepts. -/
+theorem pin_in_every_judged_law (record : ObjectRecord) (old new : Minidregg.Pred.State)
+    (admitted : Minidregg.Pred.eval record.effectiveLaw old new = true) :
+    Minidregg.Pred.eval (ObjectRecord.pinClause record.pin) old new = true :=
+  ((ObjectRecord.effectiveLaw_accepts_iff record old new).mp admitted).1
+
+#assert_axioms create_installs_pin
+#assert_axioms ordinary_write_to_object_refused
+#assert_axioms nextRecord_pin
+#assert_axioms Birth.record_pin
+#assert_axioms Birth.write_passes_pin
+#assert_axioms Delivery.write_passes_pin
+#assert_axioms pin_not_removable
+#assert_axioms pin_in_every_judged_law
 #assert_axioms execute_accepted_install
 #assert_axioms spent_claim_never_accepted
 #assert_axioms installed_retry_replays
