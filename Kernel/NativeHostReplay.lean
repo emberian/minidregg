@@ -1018,7 +1018,7 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       NativeAdmission config opened (CapabilityRevocationReceiver.intent accepted)
   | renounce {ingress : CapabilityRenounce.DecodedIngress}
       (accepted : CapabilityRenounce.AcceptedRenounce config.deployment config.profile.semantics
-        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground ingress) :
       NativeAdmission config opened (CapabilityRenounce.intent accepted)
   | participantKeyEnrollment {ingress : ParticipantKeyEnrollment.DecodedIngress}
       (accepted : ParticipantKeyEnrollmentReceiver.AcceptedEnrollment config.deployment config.profile
@@ -2370,7 +2370,7 @@ private def derive (config : Config) (opened : Opened config)
     | .ok accepted => return .ok ⟨CapabilityRevocationReceiver.intent accepted, .revoke accepted, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := CapabilityRenounce.decodeIngress bytes then
     match ← CapabilityRenounce.admitDecodedNative config.deployment config.profile.semantics
-        ⟨config.federation, height⟩ opened.durable config.signature ingress with
+        ⟨config.federation, height⟩ opened.ground config.signature ingress with
     | .rejected reason => return .error s!"renounce refused: {repr reason}"
     | .refusedToHolder refusal => return .error s!"renounce refused: {repr refusal.reason}"
     | .accepted accepted =>
