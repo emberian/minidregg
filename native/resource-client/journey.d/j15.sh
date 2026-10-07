@@ -29,6 +29,7 @@
 # stdout line: the row table. Last stderr line: the detail. Exit 0 only when
 # every row is as expected.
 set -u
+. "$(dirname "${BASH_SOURCE[0]}")/../journey-private.sh"
 umask 077
 : "${JOURNEY_STEP_DIR:?}" "${SHELL_BIN:?}" "${MINI:?}" "${HOST:?}" "${CONFIG:?}" "${SOCKET:?}" \
   "${SPONSOR_WS:?}" "${SPONSOR_SUBJECT:?}" "${JOURNEY_WORLD:?}"
@@ -144,7 +145,7 @@ for f in alice bob carl dana; do
   mkdir -p -m 700 "$H/$f"
   ok setup "$f" "keygen mini.key"
   operator setup "CUSTODY: copy $f's secret into the sponsor home (enroll plan+seal sign with both keys)" \
-    install -D -m 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/j15-$f.key"
+    install_private 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/j15-$f.key"
   ok setup sponsor "enroll plan j15-$f j15-$f.key $(xxd -p -c 256 "$H/$f/keys/mini.key.next.pub") $(xxd -p -c 256 "$H/$f/keys/mini.key.next.cosign")"
   ok setup sponsor "enroll seal j15-$f"
   ok setup sponsor "enroll submit j15-$f"
@@ -155,7 +156,7 @@ for f in alice bob carl dana; do
     "$MINI" workspace --action provision --dir "$SPONSOR_WS" --name "j15-$f" --holder "${SUBJ[$f]}" \
       --funding 1000 --account-predicate "$SD/permit-all.json" --factory-ref factory
   operator setup "DELIVER: the birth context into $f's HOME/provision/" \
-    install -D -m 0600 "$SPONSOR_WS/provisions/j15-$f/birth-context.json" "$H/$f/provision/birth-context.json"
+    install_private 0600 "$SPONSOR_WS/provisions/j15-$f/birth-context.json" "$H/$f/provision/birth-context.json"
   ok setup "$f" "init mini.key ${SUBJ[$f]}"
 done
 A=${SUBJ[alice]} B=${SUBJ[bob]} C=${SUBJ[carl]} D=${SUBJ[dana]}

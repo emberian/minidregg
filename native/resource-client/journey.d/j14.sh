@@ -46,6 +46,7 @@
 # JOURNEY_STEP_DIR. Last stdout line: the row table. Last stderr line: the
 # detail. Exit 0 only when every row is as expected.
 set -u
+. "$(dirname "${BASH_SOURCE[0]}")/../journey-private.sh"
 umask 077
 : "${JOURNEY_STEP_DIR:?}" "${SHELL_BIN:?}" "${MINI:?}" "${HOST:?}" "${CONFIG:?}" "${SOCKET:?}" \
   "${SPONSOR_WS:?}" "${SPONSOR_SUBJECT:?}" "${JOURNEY_WORLD:?}" \
@@ -210,7 +211,7 @@ for f in alice bob hermes; do
   mkdir -p -m 700 "$H/$f"
   ok setup "$f" "keygen mini.key"
   operator setup "CUSTODY: copy $f's secret into the sponsor home (enroll plan+seal sign with both keys)" \
-    install -D -m 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/j14-$f.key"
+    install_private 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/j14-$f.key"
   ok setup sponsor "enroll plan j14-$f j14-$f.key $(xxd -p -c 256 "$H/$f/keys/mini.key.next.pub") $(xxd -p -c 256 "$H/$f/keys/mini.key.next.cosign")"
   ok setup sponsor "enroll seal j14-$f"
   ok setup sponsor "enroll submit j14-$f"
@@ -221,7 +222,7 @@ for f in alice bob hermes; do
     "$MINI" workspace --action provision --dir "$SPONSOR_WS" --name "j14-$f" --holder "${SUBJ[$f]}" \
       --funding "${FUND[$f]}" --account-predicate "$SD/permit-all.json" --factory-ref factory
   operator setup "DELIVER: the birth context into $f's HOME/provision/" \
-    install -D -m 0600 "$SPONSOR_WS/provisions/j14-$f/birth-context.json" "$H/$f/provision/birth-context.json"
+    install_private 0600 "$SPONSOR_WS/provisions/j14-$f/birth-context.json" "$H/$f/provision/birth-context.json"
   ok setup "$f" "init mini.key ${SUBJ[$f]}"
 done
 A=${SUBJ[alice]} B=${SUBJ[bob]} HS=${SUBJ[hermes]}
@@ -242,7 +243,7 @@ ok room alice "doc append map lab-index 'lab: what we are writing, linked from h
 ok room alice "submit map"
 ok room alice "tariff lab set hermes/turn $PRICE"
 ok room alice "chat invite lab $B bob --verbs observe,place,append"
-operator room "DELIVER: bob's invitation" install -D -m 0600 "$H/alice/chat/invites/lab-$B.json" "$H/bob/requests/lab-invite.json"
+operator room "DELIVER: bob's invitation" install_private 0600 "$H/alice/chat/invites/lab-$B.json" "$H/bob/requests/lab-invite.json"
 ok room bob "chat join lab @lab-invite.json"
 
 # ------------------------------------------------ summon

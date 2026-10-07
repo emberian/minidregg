@@ -49,6 +49,7 @@
 # JOURNEY_STEP_DIR. Last stdout line: the row table. Last stderr line: the
 # detail. Exit 0 only when every row is ok.
 set -u
+. "$(dirname "${BASH_SOURCE[0]}")/../journey-private.sh"
 umask 077
 : "${JOURNEY_STEP_DIR:?}" "${SHELL_BIN:?}" "${MINI:?}" "${HOST:?}" "${CONFIG:?}" "${SOCKET:?}" \
   "${SPONSOR_WS:?}" "${SPONSOR_SUBJECT:?}" "${NEWCOMER_WS:?}" "${NEWCOMER_SUBJECT:?}" "${JOURNEY_WORLD:?}"
@@ -190,7 +191,7 @@ for f in alice bob carl dave; do
   mkdir -p -m 700 "$H/$f"
   ok setup "$f" "keygen mini.key"
   operator setup "CUSTODY: copy $f's secret into the sponsor home (enroll plan+seal sign with both keys)" \
-    install -D -m 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/k10c-$f.key"
+    install_private 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/k10c-$f.key"
   ok setup sponsor "enroll plan k10c-$f k10c-$f.key $(xxd -p -c 256 "$H/$f/keys/mini.key.next.pub") $(xxd -p -c 256 "$H/$f/keys/mini.key.next.cosign")"
   ok setup sponsor "enroll seal k10c-$f"
   ok setup sponsor "enroll submit k10c-$f"
@@ -201,7 +202,7 @@ for f in alice bob carl dave; do
     "$MINI" workspace --action provision --dir "$SPONSOR_WS" --name "k10c-$f" --holder "${SUBJ[$f]}" \
       --funding 1000 --account-predicate "$SD/permit-all.json" --factory-ref factory
   operator setup "DELIVER: the birth context into $f's HOME/provision/" \
-    install -D -m 0600 "$SPONSOR_WS/provisions/k10c-$f/birth-context.json" "$H/$f/provision/birth-context.json"
+    install_private 0600 "$SPONSOR_WS/provisions/k10c-$f/birth-context.json" "$H/$f/provision/birth-context.json"
   ok setup "$f" "init mini.key ${SUBJ[$f]}"
 done
 A=${SUBJ[alice]} B=${SUBJ[bob]} C=${SUBJ[carl]} D=${SUBJ[dave]}

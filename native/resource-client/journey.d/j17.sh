@@ -51,6 +51,7 @@
 # SPONSOR_SUBJECT JOURNEY_WORLD JOURNEY_STEP_DIR. Last stdout line: the row
 # table. Last stderr line: the detail. Exit 0 only when every row is as expected.
 set -u
+. "$(dirname "${BASH_SOURCE[0]}")/../journey-private.sh"
 umask 077
 : "${JOURNEY_STEP_DIR:?}" "${SHELL_BIN:?}" "${MINI:?}" "${HOST:?}" "${CONFIG:?}" "${SOCKET:?}" \
   "${SPONSOR_WS:?}" "${SPONSOR_SUBJECT:?}" "${JOURNEY_WORLD:?}" "${GRAIN_RUNTIME:?GRAIN_RUNTIME names the grain-runtime binary}"
@@ -179,7 +180,7 @@ for f in alice bob carl con eve dave; do
   mkdir -p -m 700 "$H/$f"
   ok setup "$f" "keygen mini.key"
   operator setup "CUSTODY: copy $f's secret into the sponsor home (enroll plan+seal sign with both keys)" \
-    install -D -m 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/j17-$f.key"
+    install_private 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/j17-$f.key"
   ok setup sponsor "enroll plan j17-$f j17-$f.key $(xxd -p -c 256 "$H/$f/keys/mini.key.next.pub") $(xxd -p -c 256 "$H/$f/keys/mini.key.next.cosign")"
   ok setup sponsor "enroll seal j17-$f"
   ok setup sponsor "enroll submit j17-$f"
@@ -190,7 +191,7 @@ for f in alice bob carl con eve dave; do
     "$MINI" workspace --action provision --dir "$SPONSOR_WS" --name "j17-$f" --holder "${SUBJ[$f]}" \
       --funding "${FUND[$f]}" --account-predicate "$SD/permit-all.json" --factory-ref factory
   operator setup "DELIVER: the birth context into $f's HOME/provision/" \
-    install -D -m 0600 "$SPONSOR_WS/provisions/j17-$f/birth-context.json" "$H/$f/provision/birth-context.json"
+    install_private 0600 "$SPONSOR_WS/provisions/j17-$f/birth-context.json" "$H/$f/provision/birth-context.json"
   ok setup "$f" "init mini.key ${SUBJ[$f]}"
 done
 A=${SUBJ[alice]} B=${SUBJ[bob]} C=${SUBJ[carl]} CON=${SUBJ[con]} E=${SUBJ[eve]} D=${SUBJ[dave]}
@@ -217,7 +218,7 @@ cat >"$SD/concierge-lab.json" <<EOF
  "journal":"$H/con/journal-lab.jsonl"}
 EOF
 operator room "DELIVER: alice's grants to the concierge into its inbox" deliver "$H/alice/outbox/$CON" "$H/con/inbox"
-operator room "INSTALL: the program alice's room concierge wrote" install -D -m 0600 "$H/alice/concierge/lab.json" "$H/con/programs/lab.json"
+operator room "INSTALL: the program alice's room concierge wrote" install_private 0600 "$H/alice/concierge/lab.json" "$H/con/programs/lab.json"
 concierge room lab "adopts its grants; nothing paid yet"
 check room "the first pass issues nothing" 0 "$(jq '.decisions | length' "$PASS" 2>/dev/null)"
 checkp room "the concierge holds lab (room) and lab-till (observe on the till)" \
@@ -418,7 +419,7 @@ cat >"$SD/concierge-commons.json" <<EOF
  "journal":"$H/con/journal-commons.jsonl"}
 EOF
 operator free "DELIVER: alice's commons grants to the concierge" deliver "$H/alice/outbox/$CON" "$H/con/inbox"
-operator free "INSTALL: the commons program" install -D -m 0600 "$H/alice/concierge/commons.json" "$H/con/programs/commons.json"
+operator free "INSTALL: the commons program" install_private 0600 "$H/alice/concierge/commons.json" "$H/con/programs/commons.json"
 ok free alice "room invite i-bob-c commons $B --verbs observe"
 ok free alice "submit i-bob-c"
 ok free alice "publish i-bob-c"

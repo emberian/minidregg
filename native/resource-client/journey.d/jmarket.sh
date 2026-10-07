@@ -18,6 +18,7 @@
 # Hook contract: journey.sh (executed, not sourced). Last stdout line: the row table. Last stderr
 # line: the detail. Exit 0 only when every row is as expected.
 set -u
+. "$(dirname "${BASH_SOURCE[0]}")/../journey-private.sh"
 umask 077
 : "${JOURNEY_STEP_DIR:?}" "${SHELL_BIN:?}" "${MINI:?}" "${HOST:?}" "${CONFIG:?}" "${SOCKET:?}" "${SPONSOR_WS:?}" "${JOURNEY_WORLD:?}"
 SD=$JOURNEY_STEP_DIR
@@ -172,7 +173,7 @@ for f in alice bob carol; do
   mkdir -p -m 700 "$H/$f"
   ok setup "$f" "keygen mini.key"
   operator setup "CUSTODY: copy $f's secret into the sponsor home (enroll plan+seal sign with both keys)" \
-    install -D -m 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/$f.key"
+    install_private 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/$f.key"
   ok setup sponsor "enroll plan $f $f.key"
   ok setup sponsor "enroll seal $f"
   ok setup sponsor "enroll submit $f"
@@ -182,7 +183,7 @@ for f in alice bob carol; do
     "$MINI" workspace --action provision --dir "$SPONSOR_WS" --name "$f" --holder "${SUBJ[$f]}" \
       --funding 1000 --account-predicate "$SD/permit-all.json" --factory-ref factory
   operator setup "DELIVER: the birth context into $f's HOME/provision/" \
-    install -D -m 0600 "$SPONSOR_WS/provisions/$f/birth-context.json" "$H/$f/provision/birth-context.json"
+    install_private 0600 "$SPONSOR_WS/provisions/$f/birth-context.json" "$H/$f/provision/birth-context.json"
   ok setup "$f" "init mini.key ${SUBJ[$f]}"
 done
 A=${SUBJ[alice]} B=${SUBJ[bob]} C=${SUBJ[carol]}
@@ -216,7 +217,7 @@ ok open alice "law show fish"
 cp "$OUT" "$SD/fish-law.txt"
 check open "law show prints the Host's rendering, which names each slot's opening" rendered \
   grep -q 'field 17 opens (field 18, field 19) with field 20' "$SD/fish-law.txt"
-operator open "copy the shown law into alice's requests" install -D -m 0600 "$SD/fish-law.txt" "$H/alice/requests/fish-law.txt"
+operator open "copy the shown law into alice's requests" install_private 0600 "$SD/fish-law.txt" "$H/alice/requests/fish-law.txt"
 ok open alice "law relaw fish @fish-law.txt"
 ok open alice "describe fish"
 cp "$OUT" "$SD/fish-describe.json"
