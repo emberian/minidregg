@@ -391,6 +391,28 @@ theorem runMessage_writes_pinned {rootBytes : Bytes → Digest} {config : Config
         exact (fresh w member).2.2
       · cases ran
 
+/-- **Active-frame view stability for a delivered message's call tree**: every frame write is
+applied to exactly the state that frame was shown (`ObjectiveCall.active_frame_view_stability`). -/
+theorem runMessage_writes_from_view {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height target : Nat} {message : Inbox.Message} {result : Data} {journal : Journal}
+    (ran : runMessage config snapshot height target message = .replied result journal) :
+    ∀ w ∈ journal.writes, w.before = w.viewed := by
+  unfold runMessage at ran
+  split at ran
+  · cases ran
+  · split at ran
+    · cases ran
+    · rename_i execExact
+      split at ran
+      · cases ran
+        obtain ⟨_, ⟨new, writes, fresh⟩⟩ :=
+          active_frame_view_stability config snapshot height _ _ execExact (by simp) (by intro _ h; cases h)
+        intro w member
+        rw [writes] at member
+        simp only [Journal.start, List.nil_append] at member
+        exact fresh w member
+      · cases ran
+
 /-- The admitted delivery's own outcome, read through `runMessage_writes_pinned`. -/
 theorem MessageDelivery.writes_pinned {rootBytes : Bytes → Digest} {config : Config}
     {snapshot : Snapshot rootBytes} {height : Nat} {request : MessageRequest}
@@ -400,6 +422,7 @@ theorem MessageDelivery.writes_pinned {rootBytes : Bytes → Digest} {config : C
   runMessage_writes_pinned (delivered.outcomeExact.trans replied)
 
 #assert_axioms runMessage_writes_pinned
+#assert_axioms runMessage_writes_from_view
 #assert_axioms MessageDelivery.writes_pinned
 
 /-! ## Retention: what a send and a delivery pay, and what they leave behind (OB8)
