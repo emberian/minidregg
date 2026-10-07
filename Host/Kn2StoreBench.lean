@@ -49,9 +49,10 @@ def step (number : Nat) : DataIntent rootBytes where
 def ms (start : Nat) : IO Nat := return (← IO.monoMsNow) - start
 
 def grow (transport : Transport) (count : Nat) : IO (Loaded rootBytes) := do
-  let mut loaded ← match ← load transport rootBytes with
-    | .ok loaded => pure loaded
+  let initial ← match ← load transport rootBytes with
+    | .ok opened => pure opened
     | .error detail => throw (IO.userError s!"open: {detail}")
+  let mut loaded := initial
   for number in List.range' (loaded.image.accepted.length + 1) (count - loaded.image.accepted.length) do
     match ← receiveLoadedDetailed transport rootBytes loaded (step number) with
     | .exact _ appended => loaded := appended.next
