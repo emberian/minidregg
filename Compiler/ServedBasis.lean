@@ -190,6 +190,22 @@ def view : Ground deployment → DataSnapshot ResourceBirthCodec.rootBytes
   | .light basis => basis.view
   | .full durable _ _ => durable.snapshot
 
+/-- The cell state a preparation reads: the view with its history removed (roots,
+bytes, allowance; no journal, nothing consumed). The light shape's view differs
+from the full snapshot only in the journal and consumed answers, which reach a
+controller solely through declared keys (`recorded`, `markerSpent`,
+`declaresNullifier`); its cells are the full shape's cells on the same state
+(`cells_ofLoaded`). -/
+def cells (ground : Ground deployment) : DataSnapshot ResourceBirthCodec.rootBytes :=
+  Minidregg.Compiler.DurableServed.bare ground.view
+
+@[simp] theorem cells_roots (ground : Ground deployment) :
+    ground.cells.model.roots = ground.view.model.roots := rfl
+@[simp] theorem cells_canonicalBytes (ground : Ground deployment) :
+    ground.cells.canonicalBytes = ground.view.canonicalBytes := rfl
+@[simp] theorem cells_available (ground : Ground deployment) :
+    ground.cells.model.available = ground.view.model.available := rfl
+
 /-- The authority clock: the durable height. -/
 def height : Ground deployment → Nat
   | .light basis => basis.height
@@ -428,6 +444,20 @@ theorem authorityReadGuards_exact (ground : Ground deployment) (guard : Minidreg
   simp only [authorityReadGuards, List.mem_singleton] at member
   subst guard
   rfl
+
+/-- **The light and full shapes prepare on the same cells.** A basis whose served
+state is the full materialization's state has the full shape's cell state. -/
+theorem cells_ofLoaded {store : StoreIdentity} (basis : Basis deployment store)
+    (loaded : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes)
+    (sameStart : store.logStart = loaded.logStart)
+    (served : basis.served = Served.ofLoaded loaded sameStart)
+    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory loaded)
+    (authority : CredentialAuthorityDomainReceiver.Loaded deployment loaded.snapshot) :
+    (ofBasis basis).cells = (Ground.full loaded directory authority).cells := by
+  simp only [cells, view, Basis.view, served]
+  rfl
+
+#assert_axioms cells_ofLoaded
 
 end Ground
 
