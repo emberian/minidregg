@@ -28,11 +28,8 @@ open Minidregg.Compiler.DurableHistoryReader (Reader)
 
 /-- The nullifiers the claim reads from the spent map on the current ground. -/
 def markerNullifiers (ingress : Ingress) : List StableNullifier :=
-  match ingress.originalBegin.start with
-  | none => []
-  | some binding =>
-      [firstAttemptNullifier ingress.base.domain binding,
-        ApplicationLifecycleClaimV3Ingress.createdNullifier ingress.base.domain binding]
+  ApplicationLifecycleBeginV3Admission.markerNullifiersOf ingress.base.domain
+    ingress.originalBegin.start
 
 /-- Every key the current part of a v3 claim reads. -/
 def keys (ingress : Ingress) : DurableView.Keys :=
@@ -42,22 +39,15 @@ def keys (ingress : Ingress) : DurableView.Keys :=
 /-- The ground answers every marker the claim reads. -/
 def markersDeclared {deployment : CanonicalCellRegistry.Deployment} (ground : Ground deployment)
     (ingress : Ingress) : Bool :=
-  (markerNullifiers ingress).all ground.declaresNullifier
+  ApplicationLifecycleBeginV3Admission.markersDeclaredOf ground ingress.base.domain
+    ingress.originalBegin.start
 
+/-- The claim's markers are the launch binding's: a first create must find neither
+consumed, a continue must find the created marker. -/
 def markersCurrent {deployment : CanonicalCellRegistry.Deployment} (ground : Ground deployment)
     (ingress : Ingress) : Bool :=
-  markersDeclared ground ingress &&
-  match ingress.originalBegin.start with
-  | none => true
-  | some binding =>
-      let attempt := firstAttemptNullifier ingress.base.domain binding
-      let created := ApplicationLifecycleClaimV3Ingress.createdNullifier
-        ingress.base.domain binding
-      match binding.choice with
-      | .create _ =>
-          !ground.view.model.consumed attempt &&
-            !ground.view.model.consumed created
-      | .continue => ground.view.model.consumed created
+  ApplicationLifecycleBeginV3Admission.markersCurrentOf ground ingress.base.domain
+    ingress.originalBegin.start
 
 theorem consumed_first_attempt_refuses_create {deployment : CanonicalCellRegistry.Deployment}
     (ground : Ground deployment) (ingress : Ingress)
@@ -68,7 +58,7 @@ theorem consumed_first_attempt_refuses_create {deployment : CanonicalCellRegistr
       (ApplicationLifecycleClaimV3Ingress.firstAttemptNullifier
         ingress.base.domain binding) = true) :
     markersCurrent ground ingress = false := by
-  simp [markersCurrent, selected, choice, consumed]
+  simp [markersCurrent, ApplicationLifecycleBeginV3Admission.markersCurrentOf, selected, choice, consumed]
 
 /-- **An undeclared claim marker refuses** (the pole of a silent "unconsumed"). -/
 theorem undeclared_marker_refuses {deployment : CanonicalCellRegistry.Deployment}
@@ -77,9 +67,11 @@ theorem undeclared_marker_refuses {deployment : CanonicalCellRegistry.Deployment
     (undeclared : ground.declaresNullifier marker = false) :
     markersCurrent ground ingress = false := by
   have : markersDeclared ground ingress = false := by
-    unfold markersDeclared
+    unfold markersDeclared ApplicationLifecycleBeginV3Admission.markersDeclaredOf
     exact List.all_eq_false.mpr ⟨marker, member, by simp [undeclared]⟩
-  simp [markersCurrent, this]
+  simp [markersDeclared, ApplicationLifecycleBeginV3Admission.markersDeclaredOf] at this
+  simp [markersCurrent, ApplicationLifecycleBeginV3Admission.markersCurrentOf,
+    ApplicationLifecycleBeginV3Admission.markersDeclaredOf, this]
 
 structure Conditional (config : Config) {store : StoreIdentity} (head : Head store)
     (ground : Ground config.deployment) (ingress : Ingress) where
