@@ -523,7 +523,14 @@
     {
       "module": "Assurance.NativeAcceptedFixture",
       "path": "Assurance/NativeAcceptedFixture.lean",
-      "sha256": "d7c09efa776c02a2c7167b0c44acc085a41c3126e13fb67d57b9dbd4d23628db",
+      "sha256": "49b8bbb9779d91232ca640b37ac6834319942a3fb33540214eff79968795684c",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Assurance.NativeAcceptedFixtureAuthority",
+      "path": "Assurance/NativeAcceptedFixtureAuthority.lean",
+      "sha256": "c28d96f681e0e7bd9c65cc8bd31ca38b441252ff174f4c5cf084526bb57222e2",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -531,6 +538,13 @@
       "module": "Assurance.NativeAcceptedFixtureData",
       "path": "Assurance/NativeAcceptedFixtureData.lean",
       "sha256": "24aa4afdeb5ca1fcbc831d63aaad3ea972c02895fe4273f0cecbd0dd6094d709",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Assurance.NativeAcceptedFixtureProjection",
+      "path": "Assurance/NativeAcceptedFixtureProjection.lean",
+      "sha256": "2ed7dc7abcbae51f0743493bd0bde9ebbdd09c0d170a290596aa51b037012e49",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
