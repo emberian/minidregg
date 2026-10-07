@@ -1650,6 +1650,387 @@ theorem Invocation.posts_shape {rootBytes : Bytes → Digest} {config : Config} 
   · right; right; exact invoked.mail.posts_shape post inMail
   · left; simpa using isBook
 
+/-! ## Delegation: every frame receiving delegated authority has a matching unconsumed authorization
+
+Delegation (which subject a frame's request carries) and consent (whether the frame's object
+admits its write) stay separate: a delegated frame's write is still judged by its object's law
+(`invocation_writes_from_view`); a grant only decides whether `request/subject` is present. -/
+
+/-- What a grant's admitting verdict establishes. -/
+theorem Grant.judge_admit {grant : Grant} {used : List Delegation} {index : Nat} {code : Digest} {args : Data}
+    {caller : Option Nat} {amount : Nat} (admitted : grant.judge used index code args caller = .admit amount) :
+    grant.code = code ∧ callerOk grant.caller caller = true ∧ grant.args.admits args = true ∧
+      grant.args.amount args = some amount ∧ (usesOf used index).length < grant.uses ∧
+      ∀ path limit, grant.args.cap = some (path, limit) → chargedOf used index + amount ≤ limit := by
+  unfold Grant.judge at admitted
+  split at admitted
+  · cases admitted
+  · rename_i sameCode
+    split at admitted
+    · cases admitted
+    · rename_i callerHolds
+      split at admitted
+      · cases admitted
+      · rename_i argsHold
+        split at admitted
+        · cases admitted
+        · rename_i charged chargedEq
+          split at admitted
+          · cases admitted
+          · rename_i usesLeft
+            split at admitted
+            · rename_i noCap
+              cases admitted
+              refine ⟨by simpa using sameCode, by simpa using callerHolds, by simpa using argsHold, chargedEq,
+                by omega, ?_⟩
+              intro path limit capped
+              rw [noCap] at capped; cases capped
+            · rename_i path limit capped
+              split at admitted
+              · rename_i within
+                cases admitted
+                refine ⟨by simpa using sameCode, by simpa using callerHolds, by simpa using argsHold, chargedEq,
+                  by omega, ?_⟩
+                intro path' limit' capped'
+                rw [capped] at capped'
+                cases capped'
+                exact within
+              · cases admitted
+
+/-- **A spent grant names the frame it was spent on**: the delegation points at a grant (by index)
+that names the frame's (object, method) and admitted it, and records exactly the frame. -/
+theorem spendFrom_some {used : List Delegation} {object : Nat} {method : String} {code : Digest} {args : Data}
+    {caller : Option Nat} : ∀ (grants : List Grant) (index : Nat) (first : Option CallRefusal) (d : Delegation),
+    spendFrom used object method code args caller grants index first = .ok (some d) →
+    ∃ k grant, grants[k]? = some grant ∧ d.grant = index + k ∧ grant.object = object ∧ grant.method = method ∧
+      d.object = object ∧ d.method = method ∧ d.code = code ∧ d.args = args ∧ d.caller = caller ∧
+      grant.judge used d.grant code args caller = .admit d.amount := by
+  intro grants
+  induction grants with
+  | nil =>
+    intro index first d spent
+    cases first <;> simp [spendFrom] at spent
+  | cons grant rest ih =>
+    intro index first d spent
+    unfold spendFrom at spent
+    split at spent
+    · rename_i names
+      split at spent
+      · rename_i amount judged
+        cases spent
+        exact ⟨0, grant, rfl, by simp, names.1, names.2, rfl, rfl, rfl, rfl, rfl, judged⟩
+      · obtain ⟨k, g, at_, idx, rest'⟩ := ih _ _ d spent
+        exact ⟨k + 1, g, by simpa using at_, by rw [idx]; omega, rest'⟩
+    · obtain ⟨k, g, at_, idx, rest'⟩ := ih _ _ d spent
+      exact ⟨k + 1, g, by simpa using at_, by rw [idx]; omega, rest'⟩
+
+theorem usesOf_snoc (used : List Delegation) (d : Delegation) (index : Nat) :
+    usesOf (used ++ [d]) index = usesOf used index ++ (if d.grant = index then [d] else []) := by
+  unfold usesOf
+  rw [List.filter_append]
+  by_cases same : d.grant = index <;> simp [same]
+
+theorem chargedOf_snoc (used : List Delegation) (d : Delegation) (index : Nat) :
+    chargedOf (used ++ [d]) index = chargedOf used index + (if d.grant = index then d.amount else 0) := by
+  unfold chargedOf
+  rw [usesOf_snoc]
+  by_cases same : d.grant = index <;> simp [same]
+
+theorem Authorized.start (grants : List Grant) : Authorized grants [] :=
+  ⟨by simp, fun index grant _ => ⟨by simp [usesOf], fun _ _ _ => by simp [chargedOf, usesOf]⟩⟩
+
+/-- **Spending keeps every delegation authorized**: the new delegation names a grant that
+authorizes it, that grant had a use left, and its cap covers the new amount. -/
+theorem Authorized.spend {grants : List Grant} {used : List Delegation} {object : Nat} {method : String}
+    {code : Digest} {args : Data} {caller : Option Nat} {d : Delegation} (held : Authorized grants used)
+    (spent : spendGrant grants used object method code args caller = .ok (some d)) :
+    Authorized grants (used ++ [d]) ∧ d.object = object ∧ d.method = method ∧ d.code = code ∧ d.args = args ∧
+      d.caller = caller := by
+  obtain ⟨k, grant, at_, idx, gObject, gMethod, dObject, dMethod, dCode, dArgs, dCaller, judged⟩ :=
+    spendFrom_some grants 0 none d spent
+  simp only [Nat.zero_add] at idx
+  obtain ⟨sameCode, callerHolds, argsHold, amountEq, usesLeft, capOk⟩ := Grant.judge_admit judged
+  refine ⟨⟨?_, ?_⟩, dObject, dMethod, dCode, dArgs, dCaller⟩
+  · intro x member
+    rcases List.mem_append.mp member with old | new
+    · exact held.1 x old
+    · simp only [List.mem_singleton] at new
+      subst new
+      refine ⟨grant, by rw [idx]; exact at_, ?_⟩
+      refine ⟨by rw [gObject, dObject], by rw [gMethod, dMethod], by rw [sameCode, dCode], ?_, ?_, ?_⟩
+      · rw [dCaller]; exact callerHolds
+      · rw [dArgs]; exact argsHold
+      · rw [dArgs]; exact amountEq
+  · intro index g found
+    obtain ⟨usesOk, capsOk⟩ := held.2 index g found
+    rw [usesOf_snoc]
+    by_cases same : d.grant = index
+    · have : g = grant := by
+        rw [← same, idx, at_] at found
+        exact (Option.some.inj found).symm
+      subst this
+      refine ⟨by simp [same]; rw [← same]; omega, ?_⟩
+      intro path limit capped
+      rw [chargedOf_snoc]
+      simp only [same, if_true]
+      have := capOk path limit capped
+      rw [same] at this
+      omega
+    · refine ⟨by simpa [same] using usesOk, ?_⟩
+      intro path limit capped
+      rw [chargedOf_snoc]
+      simpa [same] using capsOk path limit capped
+
+/-- **What `frameAuthority` decides**: the root frame carries the signer and no delegation; a
+nested frame carries no subject and no delegation, or the signer together with a delegation
+`spendGrant` spent on exactly this call. -/
+theorem frameAuthority_spec {authority : Authority} {stack : List Ctx} {journal : Journal} {call : CallPlan}
+    {code : Digest} {subject : Option SubjectId} {delegation : Option Delegation}
+    (decided : frameAuthority authority stack journal call code = .ok (subject, delegation)) :
+    (stack = [] ∧ subject = authority.signer ∧ delegation = none) ∨
+      (subject = none ∧ delegation = none) ∨
+      ∃ d, delegation = some d ∧ subject = authority.signer ∧
+        spendGrant journal.grants journal.delegations call.target.value call.method code call.args
+          (callerOf authority stack) = .ok (some d) := by
+  unfold frameAuthority at decided
+  split at decided
+  · cases decided; exact .inl ⟨rfl, rfl, rfl⟩
+  · split at decided
+    · cases decided
+    · cases decided; exact .inr (.inl ⟨rfl, rfl⟩)
+    · rename_i d spent
+      cases decided
+      exact .inr (.inr ⟨d, rfl, rfl, spent⟩)
+
+/-- A frame's subject is accounted for: the root's (the signer, with the root's caller, which in
+an invocation no nested frame has), none, or a recorded delegation spent on exactly this frame. -/
+def Ctx.Delegated (authority : Authority) (ctx : Ctx) (delegations : List Delegation) : Prop :=
+  (ctx.subject = authority.signer ∧ ctx.caller = authority.origin) ∨ ctx.subject = none ∨
+    ∃ d, ctx.delegation = some d ∧ d ∈ delegations ∧ d.object = ctx.object.value ∧ d.method = ctx.method ∧
+      d.code = ctx.record.activePin ∧ d.args = ctx.args ∧ d.caller = ctx.caller
+
+/-- A write's subject is accounted for (`Ctx.Delegated`, over the facts it was judged under). -/
+def Written.Delegated (authority : Authority) (w : Written) (delegations : List Delegation) : Prop :=
+  (w.facts.subject = authority.signer ∧ w.facts.caller = authority.origin) ∨ w.facts.subject = none ∨
+    ∃ d, w.delegation = some d ∧ d ∈ delegations ∧ d.object = w.object.value ∧ d.method = w.method ∧
+      d.code = w.record.activePin ∧ d.args = w.args ∧ d.caller = w.facts.caller
+
+theorem Ctx.Delegated.grow {authority : Authority} {ctx : Ctx} {ds : List Delegation} (more : List Delegation)
+    (held : ctx.Delegated authority ds) : ctx.Delegated authority (ds ++ more) := by
+  rcases held with root | none_ | ⟨d, at_, member, rest⟩
+  · exact .inl root
+  · exact .inr (.inl none_)
+  · exact .inr (.inr ⟨d, at_, List.mem_append_left _ member, rest⟩)
+
+theorem Written.Delegated.grow {authority : Authority} {w : Written} {ds : List Delegation} (more : List Delegation)
+    (held : w.Delegated authority ds) : w.Delegated authority (ds ++ more) := by
+  rcases held with root | none_ | ⟨d, at_, member, rest⟩
+  · exact .inl root
+  · exact .inr (.inl none_)
+  · exact .inr (.inr ⟨d, at_, List.mem_append_left _ member, rest⟩)
+
+theorem touch_delegations {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {journal journal' : Journal} {object : CellId} {entry : Entry}
+    (touched : touch config snapshot journal object = .ok (entry, journal')) :
+    journal'.grants = journal.grants ∧ journal'.delegations = journal.delegations ∧ journal'.writes = journal.writes := by
+  unfold touch at touched
+  split at touched
+  · cases touched; exact ⟨rfl, rfl, rfl⟩
+  · split at touched
+    · cases touched
+    · cases touched
+    · split at touched
+      · cases touched
+      · cases touched; exact ⟨rfl, rfl, rfl⟩
+
+theorem frameReturn_delegations {ctx : Ctx} {write : Data} {journal journal' : Journal}
+    (returned : frameReturn ctx write journal = .ok journal') :
+    journal'.grants = journal.grants ∧ journal'.delegations = journal.delegations ∧
+      ∃ new, journal'.writes = journal.writes ++ new ∧ ∀ w ∈ new,
+        w.facts = ctx.facts ∧ w.delegation = ctx.delegation ∧ w.object = ctx.object ∧ w.method = ctx.method ∧
+          w.record = ctx.record ∧ w.args = ctx.args := by
+  unfold frameReturn at returned
+  split at returned
+  · cases returned
+  · split at returned
+    · split at returned
+      · cases returned
+      · cases returned; exact ⟨rfl, rfl, [], by simp, by simp⟩
+      · split at returned
+        · cases returned
+        · cases returned
+          refine ⟨rfl, rfl, [_], rfl, ?_⟩
+          intro w member
+          simp only [List.mem_singleton] at member
+          subst member
+          exact ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩
+    · cases returned
+
+/-- **What the executor maintains about delegation** (by induction over its recursion): the grants
+never change; delegations are only appended; every delegation stays authorized by a grant (no grant
+used more than `uses` times, no cap exceeded); and every write's subject is accounted for. -/
+theorem exec_delegations {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (height : Nat) (authority : Authority) (turn : TransactionId) :
+    ∀ (fuel : Nat) (stack : List Ctx) (task : Task) (journal : Journal) (ticks : Nat)
+      (result : Data) (journal' : Journal) (left : Nat),
+    exec config snapshot height authority turn fuel stack task journal ticks = .ok (result, journal', left) →
+    Authorized journal.grants journal.delegations →
+    (∀ ctx state, task = .run state → stack.head? = some ctx → ctx.Delegated authority journal.delegations) →
+    journal'.grants = journal.grants ∧ (∃ new, journal'.delegations = journal.delegations ++ new) ∧
+      Authorized journal'.grants journal'.delegations ∧
+      ∃ new, journal'.writes = journal.writes ++ new ∧ ∀ w ∈ new, w.Delegated authority journal'.delegations := by
+  intro fuel
+  induction fuel with
+  | zero => intro stack task journal ticks result journal' left ran; simp [exec] at ran
+  | succ fuel ih =>
+    intro stack task journal ticks result journal' left ran held running
+    cases task with
+    | enter call =>
+      simp only [exec] at ran
+      split at ran
+      · cases ran
+      · split at ran
+        · cases ran
+        · split at ran
+          · cases ran
+          · rename_i entry journal1 touched
+            obtain ⟨grants1, delegations1, _⟩ := touch_delegations touched
+            split at ran
+            · cases ran
+            · cases ran
+            · rename_i view current _
+              split at ran
+              · cases ran
+              · rename_i subject delegation decided
+                split at ran
+                · cases ran
+                · rename_i program _
+                  have decided' := frameAuthority_spec decided
+                  rw [grants1, delegations1] at decided'
+                  -- the journal the frame runs under
+                  have held' : Authorized journal.grants (journal.delegations ++ delegation.toList) := by
+                    rcases decided' with ⟨_, _, rfl⟩ | ⟨_, rfl⟩ | ⟨d, rfl, _, spent⟩
+                    · simpa using held
+                    · simpa using held
+                    · exact (Authorized.spend held spent).1
+                  obtain ⟨grantsEq, ⟨new, delegationsEq⟩, authorized, writesNew⟩ :=
+                    ih _ _ _ _ _ _ _ ran (by simpa [grants1, delegations1] using held') (by
+                      intro ctx state _ head
+                      simp only [List.head?_cons, Option.some.injEq] at head
+                      subst head
+                      rcases decided' with ⟨empty, rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨d, rfl, rfl, spent⟩
+                      · subst empty; exact .inl ⟨rfl, rfl⟩
+                      · exact .inr (.inl rfl)
+                      · obtain ⟨_, dObject, dMethod, dCode, dArgs, dCaller⟩ := Authorized.spend held spent
+                        exact .inr (.inr ⟨d, rfl, by simp, dObject, dMethod, dCode, dArgs, dCaller⟩))
+                  refine ⟨by rw [grantsEq, grants1], ⟨delegation.toList ++ new, ?_⟩, authorized, ?_⟩
+                  · rw [delegationsEq, delegations1, List.append_assoc]
+                  · obtain ⟨newW, writesEq, each⟩ := writesNew
+                    obtain ⟨_, _, writes1⟩ := touch_delegations touched
+                    exact ⟨newW, by rw [writesEq]; simp [writes1], each⟩
+    | run state =>
+      cases stack with
+      | nil => simp [exec] at ran
+      | cons ctx rest =>
+        have mine := running ctx state rfl rfl
+        simp only [exec] at ran
+        split at ran
+        · -- yielded
+          split at ran
+          · cases ran
+          split at ran
+          · cases ran
+          · rename_i _ drawn
+            obtain rfl := Journal.draw_ok drawn
+            split at ran
+            · cases ran
+            · rename_i call _
+              split at ran
+              · cases ran
+              · rename_i called journal1 left1 entered
+                split at ran
+                · cases ran
+                · split at ran
+                  · cases ran
+                  · rename_i next _
+                    obtain ⟨grants1, ⟨new1, dels1⟩, auth1, ⟨w1, writes1, each1⟩⟩ :=
+                      ih _ _ _ _ _ _ _ entered held (by intro _ _ h; cases h)
+                    obtain ⟨grants2, ⟨new2, dels2⟩, auth2, ⟨w2, writes2, each2⟩⟩ :=
+                      ih _ _ _ _ _ _ _ ran auth1 (by
+                        intro c _ _ head
+                        simp only [List.head?_cons, Option.some.injEq] at head
+                        subst head
+                        rw [dels1]; exact mine.grow new1)
+                    refine ⟨by rw [grants2, grants1], ⟨new1 ++ new2, by rw [dels2, dels1, List.append_assoc]⟩,
+                      auth2, ⟨w1 ++ w2, by rw [writes2, writes1, List.append_assoc], ?_⟩⟩
+                    intro w member
+                    rcases List.mem_append.mp member with a | b
+                    · rw [dels2]; exact (each1 w a).grow new2
+                    · exact each2 w b
+            · -- a send: only the outbox grows
+              split at ran
+              · cases ran
+              · split at ran
+                · cases ran
+                · have step := ih _ _ _ _ _ _ _ ran held (by
+                    intro c _ _ head
+                    have same : ctx = c := by simpa using head
+                    subst same; exact mine)
+                  exact step
+        · -- finished
+          split at ran
+          · cases ran
+          split at ran
+          · cases ran
+          · rename_i _ drawn
+            obtain rfl := Journal.draw_ok drawn
+            split at ran
+            · cases ran
+            · split at ran
+              · cases ran
+              · rename_i journal1 returned
+                cases ran
+                obtain ⟨grantsEq, delsEq, new, writesEq, each⟩ := frameReturn_delegations returned
+                refine ⟨grantsEq, ⟨[], by simpa using delsEq⟩, by rw [grantsEq, delsEq]; exact held, new, writesEq, ?_⟩
+                intro w member
+                obtain ⟨facts, delegation, object, method, record, args⟩ := each w member
+                rw [delsEq]
+                rcases mine with ⟨subject, caller⟩ | none_ | ⟨d, at_, dMember, dObject, dMethod, dCode, dArgs, dCaller⟩
+                · exact .inl ⟨by rw [facts]; exact subject, by rw [facts]; exact caller⟩
+                · exact .inr (.inl (by rw [facts]; exact none_))
+                · refine .inr (.inr ⟨d, by rw [delegation]; exact at_, dMember, ?_, ?_, ?_, ?_, ?_⟩)
+                  · rw [object]; exact dObject
+                  · rw [method]; exact dMethod
+                  · rw [record]; exact dCode
+                  · rw [args]; exact dArgs
+                  · rw [facts]; exact dCaller
+        · cases ran
+        · cases ran
+        · cases ran
+
+/-- **Every frame receiving delegated authority has a matching unconsumed authorization** (GPT-6
+row A), in every admitted invocation: each recorded delegation names one of the signed grants that
+authorizes it (object, method, the code the frame ran, its arguments, its direct caller), no grant
+is used more than its `uses`, no capped grant is charged past its limit; and every frame write
+carries the signer's subject only as the root frame (`request/caller` none, which no nested frame
+has) or through a delegation recorded for exactly that frame. The write itself was judged by its
+object's law under those facts (`invocation_writes_from_view`): delegation is not consent. -/
+theorem invocation_delegated_authority {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : InvokeRequest} (invoked : Invocation config snapshot height request) :
+    Authorized request.grants invoked.journal.delegations ∧
+      ∀ w ∈ invoked.journal.writes,
+        (w.facts.subject = some request.subject ∧ w.facts.caller = none) ∨ w.facts.subject = none ∨
+          ∃ d, w.delegation = some d ∧ d ∈ invoked.journal.delegations ∧ d.object = w.object.value ∧
+            d.method = w.method ∧ d.code = w.record.activePin ∧ d.args = w.args ∧ d.caller = w.facts.caller := by
+  obtain ⟨grantsEq, _, authorized, new, writes, each⟩ :=
+    exec_delegations config snapshot height request.authority (invokeTransaction request) _ [] _ _ _ _ _ _
+      invoked.execExact (Authorized.start _) (by intro _ _ h; cases h)
+  refine ⟨by simpa [grantsEq, Journal.start] using authorized, ?_⟩
+  intro w member
+  rw [writes] at member
+  simp only [Journal.start, List.nil_append] at member
+  exact each w member
+
 #assert_axioms Journal.posts_state
 #assert_axioms Invocation.posts_shape
 #assert_axioms touch_read
@@ -1670,5 +2051,11 @@ theorem Invocation.posts_shape {rootBytes : Bytes → Digest} {config : Config} 
 #assert_axioms Invocation.conserves
 #assert_axioms Mail.posts_shape
 #assert_axioms Mail.inboxes_lawful
+#assert_axioms Grant.judge_admit
+#assert_axioms spendFrom_some
+#assert_axioms Authorized.spend
+#assert_axioms frameAuthority_spec
+#assert_axioms exec_delegations
+#assert_axioms invocation_delegated_authority
 
 end Minidregg.Kernel.ObjectiveCall
