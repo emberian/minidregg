@@ -59,3 +59,15 @@ def main (args : List String) : IO Unit := do
     ((lookup b.2 key).all fun pair => decide (pair ∈ lookup (invert a.1) key))
   unless same && a.1 == b.1 do throw (IO.userError "FAIL: the incremental backlink map differs from the inversion")
   IO.println "agree: incremental backlink map equals invert(sources) by membership under every target"
+  -- order: two arrival orders of the same two cells' links
+  let target := TargetKey.of (link 1 7).2.target
+  let ab := setCell (setCell ([], []) ⟨1⟩ 1 [link 1 7]) ⟨2⟩ 2 [link 2 7]
+  let ba := setCell (setCell ([], []) ⟨2⟩ 2 [link 2 7]) ⟨1⟩ 1 [link 1 7]
+  let rows (acc : Sources × Reverse) :=
+    (Index.mk acc.1 acc.2).backlinks (fun _ => true) [target]
+  unless decide (lookup ab.2 target ≠ lookup ba.2 target) do
+    throw (IO.userError "FAIL: the two arrival orders did not differ in the raw row (the check has no teeth)")
+  unless decide (rows ab = rows ba) do
+    throw (IO.userError "FAIL: served backlink rows depend on write order")
+  IO.println "order: raw rows differ by arrival order, served backlinks are identical"
+
