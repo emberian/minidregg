@@ -60,13 +60,18 @@ def Tariff.workOf (t : Tariff) (c : ObjectiveInvocationClaim.Capacity) : Nat :=
     t.extractTicks * c.extractTicks + t.inputBytes * c.inputBytes +
     t.replayBytes * c.replayBytes + t.coreBytes * c.coreBytes + t.domainWork * c.domainWork
 
-def Tariff.valid (t : Tariff) : Bool := t.version == tariffVersion && decide (0 < t.base)
+/-- A valid tariff: this edition, a positive base, and POSITIVE rates on the front end's two
+stages (`replayBytes`, `coreBytes`): a deployment cannot price the replay of its packages at zero,
+so every decoded policy charges the front end (`Tariff.valid_prices_front_end`). -/
+def Tariff.valid (t : Tariff) : Bool :=
+  t.version == tariffVersion && decide (0 < t.base) && decide (0 < t.replayBytes) && decide (0 < t.coreBytes)
 
 /-- A valid tariff prices every envelope, the empty one included, above zero. -/
 theorem Tariff.workOf_pos {t : Tariff} (valid : t.valid = true) (c : ObjectiveInvocationClaim.Capacity) :
     0 < t.workOf c := by
   simp only [Tariff.valid, Bool.and_eq_true, decide_eq_true_eq] at valid
   unfold Tariff.workOf
+  have := valid.1.1.2
   omega
 
 /-- Monotone in the envelope: declaring more never costs less. -/
@@ -93,7 +98,7 @@ theorem Tariff.workOf_mono (t : Tariff) {a b : ObjectiveInvocationClaim.Capacity
 
 /-- An inhabitant of `Tariff.valid`: one work unit per call and per declared
 source tick (the premise of `workOf_pos` is satisfiable). -/
-def Tariff.unit : Tariff := ⟨tariffVersion,1,0,1,0,0,0,0,0,0,0,0,1⟩
+def Tariff.unit : Tariff := ⟨tariffVersion,1,0,1,0,0,0,0,0,0,1,1,1⟩
 theorem Tariff.unit_valid : Tariff.unit.valid = true := by decide
 
 open Minidregg.Compiler.ObjectiveInvocationClaim (Capacity) in
@@ -119,7 +124,18 @@ theorem Tariff.workOf_domainWork (t : Tariff) (c : ObjectiveInvocationClaim.Capa
 
 #assert_axioms Tariff.workOf_domainWork
 
+/-- **Every valid tariff charges the front end**: declaring one more source byte to replay, or one
+more typed-core byte to generate, strictly raises the price. -/
+theorem Tariff.valid_prices_front_end {t : Tariff} (valid : t.valid = true) (c : ObjectiveInvocationClaim.Capacity) :
+    t.workOf c < t.workOf { c with replayBytes := c.replayBytes + 1 } ∧
+      t.workOf c < t.workOf { c with coreBytes := c.coreBytes + 1 } := by
+  simp only [Tariff.valid, Bool.and_eq_true, decide_eq_true_eq] at valid
+  obtain ⟨⟨⟨_, _⟩, replay⟩, core⟩ := valid
+  simp only [Tariff.workOf, Nat.mul_add, Nat.mul_one]
+  omega
+
 #assert_axioms Tariff.workOf_pos
+#assert_axioms Tariff.valid_prices_front_end
 #assert_axioms Tariff.workOf_mono
 #assert_axioms Tariff.unit_valid
 end Minidregg.Kernel.ObjectiveTariff

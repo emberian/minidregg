@@ -24,7 +24,8 @@ import argparse, json, os, pathlib, re, sys, time
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from activity_world import World, PAIR, cap, record, variant, nat  # noqa: E402
+import activity_world as AW  # noqa: E402
+from activity_world import World, cap, record, variant, nat  # noqa: E402
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--bin', required=True)
@@ -86,28 +87,29 @@ try:
 
     with w.group('front-end'):
         short = envelope(3000, SOURCE - 1, CORE)
-        _, t = birth('front-end-short', 'padded', BIG, 10 ** 5, short, full, full, 'refused',
+        _, t = birth('front-end-short', 'padded', BIG, 4 * AW.PAIR, short, full, full, 'refused',
                      ['workUncovered', 'frontEnd', str(SOURCE), str(SOURCE - 1)])
         timings.append(('refused-before-replay', t))
 
     with w.group('core'):
-        birth('core-short', 'padded', BIG, 10 ** 5, envelope(3000, SOURCE, CORE - 1), full, full, 'refused',
+        birth('core-short', 'padded', BIG, 4 * AW.PAIR, envelope(3000, SOURCE, CORE - 1), full, full, 'refused',
               ['workUncovered', 'core', str(CORE), str(CORE - 1)])
 
     with w.group('escrow'):
-        birth('timeout-short', 'padded', BIG, 10 ** 5, full, full, envelope(3000, SOURCE - 1, CORE), 'refused',
+        birth('timeout-short', 'padded', BIG, 4 * AW.PAIR, full, full, envelope(3000, SOURCE - 1, CORE), 'refused',
               ['workUncovered', 'frontEnd'])
 
     with w.group('at-quote'):
-        out, t = birth('birth-at-quote', 'padded', BIG, 10 ** 5, full, full, full, 'installed')
+        out, t = birth('birth-at-quote', 'padded', BIG, 4 * AW.PAIR, full, full, full, 'installed')
         timings.append(('installed-at-quote', t))
 
     with w.group('cost'):
         # The same padded package, refused AFTER the replay and the run (a deposit below the reserve).
         for i in range(a.repeat):
-            _, t1 = birth(f'cost-before-{i}', 'padded', BIG, 10 ** 5, envelope(3000, SOURCE - 1, CORE), full, full,
+            _, t1 = birth(f'cost-before-{i}', 'padded', BIG, 4 * AW.PAIR, envelope(3000, SOURCE - 1, CORE), full, full,
                           'refused', 'workUncovered', init=variant('keep', record()))
-            _, t2 = birth(f'cost-after-{i}', 'padded', BIG, PAIR - 1, full, full, full, 'refused', 'underfunded',
+            # (a deposit short of the reserve is judged after the run: a charged failure, row E range 2)
+            _, t2 = birth(f'cost-after-{i}', 'padded', BIG, AW.PAIR - 1, full, full, full, 'charged', 'underfunded',
                           init=variant('keep', record()))
             timings.append((f'refused-before-replay-{i}', t1))
             timings.append((f'refused-after-replay-{i}', t2))

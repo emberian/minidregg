@@ -112,16 +112,17 @@ def data_list(items):
 
 
 # --- the world -----------------------------------------------------------------
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from activity_world import SOURCE_BYTES, TARIFF  # noqa: E402
 MAXIMUM = {'typeFuel': 16384, 'sourceTicks': 200000, 'heap': 200000, 'stack': 200000, 'outputNodes': 20000,
            'outputBytes': 200000, 'extractTicks': 200000, 'inputBytes': 200000, 'scalarBits': 512, 'memoryTouches': 2000000,
            'proofWork': 900000, 'feeDebit': 1000000, 'turnBytes': 4000000, 'witnessBytes': 4000000,
            'storageBytes': 4000000, 'sideEffectCount': 16, 'networkBytes': 0, 'leaseByteBlocks': 0,
-           'incidences': 16, 'replayBytes': 4194304, 'coreBytes': 4194304, 'domainWork': 256}
+           'incidences': 16, 'replayBytes': SOURCE_BYTES, 'coreBytes': SOURCE_BYTES, 'domainWork': 256}
 constants = json.loads(sh('constants', host, '/dev/null', 'objective-constants').stdout)
-tariff = {'version': '4', 'base': '1', 'typeFuel': '0', 'sourceTicks': '1', 'heap': '0', 'stack': '0',
-          'outputNodes': '0', 'outputBytes': '0', 'extractTicks': '0', 'inputBytes': '0',
-          'replayBytes': '0', 'coreBytes': '0', 'domainWork': '0'}
-policy = {'schema': 'dregg.objective-bend.policy.v1', 'sourceBytes': '4194304',
+# Tariff edition 3 with the front end's measured rates (activity_world.TARIFF documents the measurement).
+tariff = dict(TARIFF)
+policy = {'schema': 'dregg.objective-bend.policy.v1', 'sourceBytes': str(SOURCE_BYTES),
           'maximum': {k: str(v) for k, v in MAXIMUM.items()}, 'extractTicksPerTurn': str(16 * MAXIMUM['extractTicks']), 'outputs': [constants['genericCodec']],
           'clearAudience': '01ff', 'frontEnd': constants['frontEnd'], 'tariff': tariff}
 (root / 'policy.json').write_text(json.dumps(policy, indent=1))
@@ -282,7 +283,8 @@ def activity_cap(ticks):  # (the Order helpers recurse once per height: the enve
     """A declared envelope (Capacity): `ticks` source ticks, the kernel's fixed heap, stack,
     type fuel and Plan budget, priced at 0 (as the activity driver's `cap`)."""
     c = {k: '0' for k in MAXIMUM}
-    for k in ['heap', 'stack', 'typeFuel', 'outputNodes', 'outputBytes', 'extractTicks', 'replayBytes', 'coreBytes']:
+    # A seat method's front-end replay is not yet in its account (cv 01a11636-201e): none is declared.
+    for k in ['heap', 'stack', 'typeFuel', 'outputNodes', 'outputBytes', 'extractTicks']:
         c[k] = str(MAXIMUM[k])
     c['sourceTicks'] = str(ticks)
     return c

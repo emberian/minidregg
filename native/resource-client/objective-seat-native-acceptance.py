@@ -53,6 +53,7 @@ row with its expectation and verdict; the script exits 1 on any mismatch.
 """
 import argparse, json, os, pathlib, secrets, subprocess, sys, time
 from activity_world import RESUME_KINDS, covering_body, published_extract_ticks, quote_request, quoted_heap
+from activity_world import SOURCE_BYTES, TARIFF, price
 
 os.umask(0o077)
 HERE = pathlib.Path(__file__).resolve().parent
@@ -136,12 +137,11 @@ MAXIMUM = {'typeFuel': 16384, 'sourceTicks': 200000, 'heap': 200000, 'stack': 20
            'outputBytes': 200000, 'extractTicks': 200000, 'inputBytes': 200000, 'scalarBits': 512, 'memoryTouches': 2000000,
            'proofWork': 900000, 'feeDebit': 1000000, 'turnBytes': 4000000, 'witnessBytes': 4000000,
            'storageBytes': 4000000, 'sideEffectCount': 16, 'networkBytes': 0, 'leaseByteBlocks': 0,
-           'incidences': 16, 'replayBytes': 4194304, 'coreBytes': 4194304, 'domainWork': 256}
+           'incidences': 16, 'replayBytes': SOURCE_BYTES, 'coreBytes': SOURCE_BYTES, 'domainWork': 256}
 constants = json.loads(sh('constants', host, '/dev/null', 'objective-constants').stdout)
-tariff = {'version': '4', 'base': '1', 'typeFuel': '0', 'sourceTicks': '1', 'heap': '0', 'stack': '0',
-          'outputNodes': '0', 'outputBytes': '0', 'extractTicks': '0', 'inputBytes': '0',
-          'replayBytes': '0', 'coreBytes': '0', 'domainWork': '0'}
-policy = {'schema': 'dregg.objective-bend.policy.v1', 'sourceBytes': '4194304',
+# Tariff edition 3 with the front end's measured rates (activity_world.TARIFF documents the measurement).
+tariff = dict(TARIFF)
+policy = {'schema': 'dregg.objective-bend.policy.v1', 'sourceBytes': str(SOURCE_BYTES),
           'maximum': {k: str(v) for k, v in MAXIMUM.items()}, 'extractTicksPerTurn': str(16 * MAXIMUM['extractTicks']), 'outputs': [constants['genericCodec']],
           'clearAudience': '01ff', 'frontEnd': constants['frontEnd'], 'tariff': tariff}
 (root / 'policy.json').write_text(json.dumps(policy, indent=1))
@@ -161,7 +161,7 @@ sock = W / 'public' / 'mini.sock'
 sh('genesis', 'sh', HERE / 'newparticipant-acceptance.sh', host, mini, store, verifier, W, sock,
    env={'OBJECTIVE_INVOCATION_POLICY': (root / 'policy.hex').read_text().strip(),
         'EXTRA_GENESIS_ENROLLMENTS': str(root / 'enrollment-40.json'),
-        'NEWPARTICIPANT_SPONSOR_BALANCE': '1000000'})
+        'NEWPARTICIPANT_SPONSOR_BALANCE': '100000000000'})
 config = W / 'deployment' / 'pinned-config.json'
 alice_ws = W / 'sponsor'
 bob_ws = root / 'subject40'
@@ -305,13 +305,15 @@ def extract_ticks():
     return _EXTRACT[0]
 
 
-def activity_cap(ticks):
+def activity_cap(ticks, front=(0, 0)):
     """A declared envelope (Capacity): `ticks` source ticks, the kernel's fixed heap, stack,
-    type fuel and Plan budget, priced at 0 (as the activity driver's `cap`), and the published
-    extraction budget."""
+    type fuel and Plan budget, priced at 0 (as the activity driver's `cap`), the published
+    extraction budget, and `front`: the front end's quote (op 214) of the package a turn replays. A seat
+    method's replay is not yet in its account (cv 01a11636-201e), so a seat invocation declares none."""
     c = {k: '0' for k in MAXIMUM}
-    for k in ['heap', 'stack', 'typeFuel', 'outputNodes', 'outputBytes', 'replayBytes', 'coreBytes']:
+    for k in ['heap', 'stack', 'typeFuel', 'outputNodes', 'outputBytes']:
         c[k] = str(MAXIMUM[k])
+    c['replayBytes'], c['coreBytes'] = str(front[0]), str(front[1])
     c['extractTicks'] = str(extract_ticks())
     c['sourceTicks'] = str(ticks)
     return c
@@ -557,11 +559,15 @@ activity('E8-create-tally', alice_ws, {'kind': 'create', 'object': HELD['object'
          'law': {'type': 'all', 'predicates': []}, 'upgrade': {'frozen': {}},
          'payer': ALICE_ACCOUNT, 'payerCapability': ALICE_SPEND}, 'installed')
 TICKS = 3000
+# The Tally package's front-end quote (op 214), declared by the birth and both escrowed envelopes.
+tq = activity_view('E8-front-end-quote', {'pins': [str(TALLY_PIN)]})['pins'][0]['frontEnd']
+TALLY_FRONT = (int(tq['replayBytes']), int(tq['coreBytes']))
+TALLY_PRICE = price(activity_cap(TICKS, TALLY_FRONT))
 born = activity('E8-birth-tally', alice_ws, {'kind': 'birth', 'object': HELD['object'],
                 'objectCapability': HELD['capability'], 'account': ALICE_ACCOUNT, 'accountCapability': ALICE_SPEND,
                 'pin': TALLY_PIN, 'input': record(init=variant('set', nat(0)), decider=nat(int(BOB))),
-                'envelope': activity_cap(TICKS), 'resume': activity_cap(TICKS), 'timeout': activity_cap(TICKS),
-                'deposit': '20000'}, 'installed')
+                'envelope': activity_cap(TICKS, TALLY_FRONT), 'resume': activity_cap(TICKS, TALLY_FRONT),
+                'timeout': activity_cap(TICKS, TALLY_FRONT), 'deposit': str(7 * TALLY_PRICE)}, 'installed')
 
 
 def held_state(tag):

@@ -118,7 +118,8 @@ import argparse, json, pathlib, sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from activity_world import World, PERMIT_ALL, TICKS, PRICE, nat, record, eq, any_of, cap, op_id  # noqa: E402
+import activity_world as AW  # noqa: E402
+from activity_world import World, PERMIT_ALL, TICKS, nat, record, eq, any_of, cap, op_id, price  # noqa: E402
 
 
 def label(text):
@@ -148,6 +149,8 @@ try:
     w.PIN, ARTIFACT = w.publication('publication', [SENDS], '0', 'deposit')
     w.turn('publish', w.sponsor, dict(ARTIFACT, kind='publish', payer=w.SPONSOR_ACCOUNT,
                                       payerCapability=w.SPONSOR_SPEND), 'installed')
+    # The price of a full envelope, learned with the front end's quote of the published package.
+    PRICE = AW.PRICE
     O = {n: w.objects[n]['object'] for n in NAMES}
 
     VAULT = PERMIT_ALL if 'vault-open' in plants else any_of(eq('request/subject', SPONSOR))
@@ -248,11 +251,11 @@ try:
             invoke(f's3-burst-{i}', 'fan', 'post3', post('sink', 1), 'installed')
         mid = inbox('fan', 'sink', 's3-mid')
         w.check('s3-fifteen', len(mid['ids']) == 15, len(mid['ids']))
-        invoke('s3-overflow', 'fan', 'post3', post('sink', 1), 'refused', ['queueFull', str(O['fan']), str(O['sink'])])
+        invoke('s3-overflow', 'fan', 'post3', post('sink', 1), 'charged', ['queueFull', str(O['fan']), str(O['sink'])])
         kept = inbox('fan', 'sink', 's3-kept')
         w.check('s3-nothing-commits', kept['ids'] == mid['ids'] and total('fan', 's3-fan') == 15, len(kept['ids']))
         invoke('s3-sixteenth', 'fan', 'post', post('sink', 1), 'installed')
-        invoke('s3-full', 'fan', 'post', post('sink', 1), 'refused', 'queueFull')
+        invoke('s3-full', 'fan', 'post', post('sink', 1), 'charged', 'queueFull')
         w.check('s3-sixteen', len(inbox('fan', 'sink', 's3-end')['ids']) == 16, None)
 
     with w.group('S4-failed'):
@@ -310,8 +313,8 @@ try:
         after = inbox('poster', 'dir', 's6-after')
         d6 = decision(slot(look, 's6-slot'))
         w.check('s6-slot-broken', d6.get('kind') == 'broken', d6)
-        w.check('s6-refunded', after['purse'] == 0 and after['sponsor'] - before['sponsor'] == 1 + small + dL + dQ
-                and after['collector'] - before['collector'] == 1 + small,
+        w.check('s6-refunded', after['purse'] == 0 and after['sponsor'] - before['sponsor'] == price(cap(small)) + dL + dQ
+                and after['collector'] - before['collector'] == price(cap(small)),
                 {'refund': after['sponsor'] - before['sponsor'], 'fee': after['collector'] - before['collector']})
         w.check('s6-counter-kept', total('counter', 's6-c1') == c0, None)
         out = invoke('s6-pipe-none', 'poster', 'pipe', record(via=nat(O['nodir']), amount=nat(7)), 'installed')
@@ -328,12 +331,13 @@ try:
 
     with w.group('S7-shape'):
         before = inbox('poster', 'counter', 's7-before')
-        invoke('s7-decided-slot', 'poster', 'chase', record(target=nat(m1), amount=nat(1)), 'refused',
+        invoke('s7-decided-slot', 'poster', 'chase', record(target=nat(m1), amount=nat(1)), 'charged',
                ['notPipelinable', str(m1)])
         invoke('s7-not-object', 'poster', 'post', post('bare', 1), 'refused', ['notAnObject', str(O['bare'])])
         invoke('s7-no-postage', 'poster', 'post', post('counter', 1), 'refused', 'uncovered', postage=None)
         after = inbox('poster', 'counter', 's7-after')
-        w.check('s7-nothing-commits', after['ids'] == before['ids'] and after['sponsor'] == before['sponsor'],
+        # The refused shape after the call tree ran is a CHARGED FAILURE (row E): the envelope's price, nothing else.
+        w.check('s7-nothing-commits', after['ids'] == before['ids'] and after['sponsor'] == before['sponsor'] - PRICE,
                 {'before': before['ids'], 'after': after['ids']})
 
     def relay(target, method, amount):
@@ -343,14 +347,15 @@ try:
         sending = 'deposit' if 'relay-deposit' in plants else 'bounce'
         before = inbox('poster', 'counter', 's8-before')
         c0 = total('counter', 's8-c0')
-        invoke('s8-sending-method', 'poster', 'relay', relay('counter', sending, 1), 'refused',
+        invoke('s8-sending-method', 'poster', 'relay', relay('counter', sending, 1), 'charged',
                ['notDeliverable', str(O['counter']), 'bounce', 'Plan admits send'])
-        invoke('s8-unknown-method', 'poster', 'relay', relay('counter', 'nothing', 1), 'refused',
+        invoke('s8-unknown-method', 'poster', 'relay', relay('counter', 'nothing', 1), 'charged',
                ['notCallable', 'nothing'])
-        invoke('s8-ill-typed-args', 'poster', 'relay', relay('counter', 'post', 1), 'refused', 'argumentType')
+        invoke('s8-ill-typed-args', 'poster', 'relay', relay('counter', 'post', 1), 'charged', 'argumentType')
         after = inbox('poster', 'counter', 's8-after')
         w.check('s8-nothing-escrowed', after['ids'] == before['ids'] and after['purse'] == before['purse']
-                and after['sponsor'] == before['sponsor'] and after['collector'] == before['collector'],
+                # three charged failures (row E): each pays its envelope's price, nothing is escrowed
+                and after['sponsor'] == before['sponsor'] - 3 * PRICE and after['collector'] == before['collector'] + 3 * PRICE,
                 {'ids': (before['ids'], after['ids']), 'purse': (before['purse'], after['purse']),
                  'sponsor': after['sponsor'] - before['sponsor']})
         out = invoke('s8-deliverable-control', 'poster', 'relay', relay('counter', 'deposit', 1), 'installed')
@@ -447,7 +452,7 @@ try:
             applied['cancel-early'] = slot(m, 's11-plant-open').get('phase') == 'open'
         else:
             deliver('s11-deliver-first', 'poster', 'counter', m, 'installed')
-        w.resubmit('s11-prepared-cancel-stale', w.attempts / 's11-cancel-prepared' / 'ingress.bin', 'refused',
+        w.resubmit('s11-prepared-cancel-stale', w.attempts / 's11-cancel-prepared' / 'ingress.bin', 'charged',
                    'wrongMessage')
         before = inbox('poster', 'counter', 's11-before')
         out = control('s11-cancel-after', 'poster', 'cancelOf', m, 'installed')
@@ -495,14 +500,15 @@ try:
         other = 'poster' if 'sender-controls' in plants else 'counter'
         if 'sender-controls' in plants:
             applied['sender-controls'] = other == 'poster'
-        control('s13-other-cancel', other, 'cancelOf', m, 'refused', ['notSender', str(m), str(O['counter'])])
-        control('s13-other-stop', other, 'stopOf', m, 'refused', ['notSender', str(m), str(O['counter'])])
-        control('s13-no-such-slot', 'poster', 'cancelOf', 987654321, 'refused', ['notControllable', '987654321'])
-        invoke('s13-chase-stopped', 'poster', 'chase', record(target=nat(look), amount=nat(1)), 'refused',
+        control('s13-other-cancel', other, 'cancelOf', m, 'charged', ['notSender', str(m), str(O['counter'])])
+        control('s13-other-stop', other, 'stopOf', m, 'charged', ['notSender', str(m), str(O['counter'])])
+        control('s13-no-such-slot', 'poster', 'cancelOf', 987654321, 'charged', ['notControllable', '987654321'])
+        invoke('s13-chase-stopped', 'poster', 'chase', record(target=nat(look), amount=nat(1)), 'charged',
                ['notPipelinable', str(look)])
         after = inbox('poster', 'counter', 's13-after')
         w.check('s13-nothing-commits', after['ids'] == before['ids'] and after['purse'] == before['purse']
-                and after['sponsor'] == before['sponsor'], {'ids': (before['ids'], after['ids'])})
+                and after['sponsor'] == before['sponsor'] - 4 * PRICE,  # four charged failures (row E)
+                {'ids': (before['ids'], after['ids'])})
 
 
     def relay_a(target, method, amount, allowance):
@@ -554,9 +560,10 @@ try:
         c0 = total('counter', 's15-c0')
         start = inbox('relayer', 'counter', 's15-start')
         invoke('s15-over-declared', 'relayer', 'relayA', relay_a('counter', 'bounce2', int(O['counter']), A),
-               'refused', ['allowanceExceeded', f'{A} {A - 1}'], allowance=A - 1)
+               'charged', ['allowanceExceeded', f'{A} {A - 1}'], allowance=A - 1)
         unchanged = inbox('relayer', 'counter', 's15-unchanged')
-        w.check('s15-over-declared-nothing', unchanged['ids'] == start['ids'] and unchanged['sponsor'] == start['sponsor'],
+        w.check('s15-over-declared-nothing', unchanged['ids'] == start['ids']
+                and unchanged['sponsor'] == start['sponsor'] - PRICE,  # a charged failure (row E): the price only
                 {'ids': unchanged['ids'], 'paid': start['sponsor'] - unchanged['sponsor']})
         cc0 = inbox('counter', 'counter', 's15-cc0')
         m = reported(invoke('s15-relay', 'relayer', 'relayA', relay_a('counter', 'bounce2', int(O['counter']), A),
@@ -712,6 +719,35 @@ try:
                 and forged.get('confirmation') is None, forged)
         w.check('s21-nothing', fresh(before, after) == [] and after['sponsor'] == before['sponsor']
                 and after['purse'] == before['purse'], {'new': fresh(before, after)})
+
+    with w.group('S22-retry-outcome-altered'):
+        # The PLANT of row E's retry binding: S19's own re-signed retry, its carried outcome digest altered (one
+        # middle base-255 digit of `Ingress.outcome`), its signature kept. `verifyRetry` checks the signature over
+        # the outcome the ingress carries, so the altered retry is refused at the signature and answered nothing;
+        # the unaltered bytes still replay.
+        raw = pathlib.Path(retry['ingress']).read_bytes()
+        frame = b'DREGG/OBJECTIVE/ACTIVITY/SIGNED/v2'
+        assert raw.startswith(frame)
+        i = len(frame)
+        digits = []
+        while raw[i] != 255:
+            digits.append(raw[i]); i += 1
+        length = 0
+        for d in reversed(digits):
+            length = length * 255 + d
+        start = i + 1 + length                      # the outcome's base-255 digits start here
+        end = raw.index(255, start)
+        mid = (start + end) // 2
+        altered = bytearray(raw)
+        altered[mid] = (altered[mid] + 1) % 255
+        path = w.root / 's22-altered.ingress'
+        path.write_bytes(bytes(altered))
+        before = inbox('poster', 'counter', 's22-before')
+        bad = w.resubmit('s22-altered-outcome-refused', path, 'refused', 'signature')
+        w.resubmit('s22-unaltered-replays', retry['ingress'], 'replayed')
+        after = inbox('poster', 'counter', 's22-after')
+        w.check('s22-altered-answered-nothing', bad.get('transactionId') is None and fresh(before, after) == []
+                and after['sponsor'] == before['sponsor'], {'answer': bad.get('type'), 'new': fresh(before, after)})
 
     if plants:
         with w.group('P-plant-applied'):
