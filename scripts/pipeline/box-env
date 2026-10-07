@@ -39,7 +39,7 @@ for s in $slots $small; do [ -e "$s" ] || pipeline_die "slot file $s does not ex
   [ -n "$spk" ] && printf 'export SPK=%q\n' "$spk"
   [ -f "$PIPELINE_ROOT/sccache.env" ] && printf '. %q\n' "$PIPELINE_ROOT/sccache.env"
   # the shared Lake artifact cache, for trees with restoreAllArtifacts (scripts/pipeline/lake-shim/lake)
-  printf 'export PIPELINE_LAKE_CACHE=/srv/lake-cache\nexport PATH=%q:$PATH\n' "$PIPELINE_ROOT/scripts/lake-shim"
+  printf 'export PIPELINE_LAKE_CACHE=${PIPELINE_LAKE_CACHE:-/srv/lake-cache}\nexport PATH=%q:$PATH\n' "$PIPELINE_ROOT/scripts/lake-shim"
   true; } >"$PIPELINE_ROOT/box.env.new"
 mv -f "$PIPELINE_ROOT/box.env.new" "$PIPELINE_ROOT/box.env"
 cat "$PIPELINE_ROOT/box.env"

@@ -1326,15 +1326,14 @@ if [[ "$build_umbrella" == 0 ]]; then
     source=${module//./\/}.lean
     stem=${module//./\/}
     mkdir -p ".lake/build/lib/lean/$(dirname "$stem")" ".lake/build/ir/$(dirname "$stem")"
-    # Unlink before Lean writes: Lean opens -o/-i/-c outputs IN PLACE, and a tree that restores from
-    # the shared Lake artifact cache (restoreAllArtifacts) holds them as read-only hard links INTO
-    # the cache. Writing through would be refused (EACCES on the consent companion's .ilean, 10-07)
-    # or, were the mode ever relaxed, rewrite the cache entry every sibling lane fetches.
-    rm -f ".lake/build/lib/lean/$stem.olean" ".lake/build/lib/lean/$stem.ilean" ".lake/build/ir/$stem.c"
-    if env LEAN_NUM_THREADS="$lean_threads" lake env lean -j "$lean_threads" "$source" \
-        -o ".lake/build/lib/lean/$stem.olean" \
-        -i ".lake/build/lib/lean/$stem.ilean" \
-        -c ".lake/build/ir/$stem.c" --json > "$log" 2>&1; then
+    # LAKE compiles the module (its leanArts facet: .olean, .ilean, .c), never a bare
+    # `lake env lean -o -i -c`. Lake hands Lean the module's setup (package "minidregg"), and only
+    # with it does the C name the package: `initialize_minidregg_<Module>`. The bare call emitted
+    # `initialize_<Module>` (and a different .olean) into .lake/build under Lake's unchanged trace;
+    # a later Lake build in that tree stored those files in the shared artifact cache, and every
+    # lane that fetched them failed to link any lean_exe (79 poisoned .c on burst2-b, 10-07).
+    # Lake also replaces its outputs instead of writing through a cache-restored hard link.
+    if env LEAN_NUM_THREADS="$lean_threads" lake build "+$module:leanArts" > "$log" 2>&1; then
       printf 'lean[%s/%s] %s PASS %ss\n' \
         "$index" "$total" "$module" "$(( $(date +%s) - one_start ))" | tee -a "$output_dir/build.log"
       if [[ "$checkpoint_resume" == 1 ]]; then

@@ -64,4 +64,11 @@ else diff warm-base "no FROZEN"; fi
 (unset PIPELINE_SLOTS; "$P/slots" --free >/dev/null 2>&1; [ $? -le 1 ]) && ok slots-cmd "answers under a non-login shell" || diff slots-cmd "slots --free failed"
 [ -d "$SRV/briefs" ] && [ -n "$(ls "$SRV/briefs" 2>/dev/null)" ] && ok briefs "$(ls "$SRV/briefs" | wc -l) files" || diff briefs "no $SRV/briefs"
 [ -f "$SRV/SLOTS.txt" ] && ok SLOTS.txt || diff SLOTS.txt missing
+# The shared Lake artifact cache holds no C/object with an unprefixed in-tree initializer or declaration
+# (lake-cache-audit: a bare `lean -c` once poisoned it, 10-07); the warm base holds none either.
+if [ -x "$P/lake-cache-audit" ]; then
+  [ -d "$SRV/lake-cache" ] && { out=$("$P/lake-cache-audit" --cache "$SRV/lake-cache" --tree "$SRV/warm-base/src" 2>&1 | tail -1); [ $? -eq 0 ] && grep -q ' 0 bad' <<<"$out" && ok lake-cache:clean "$(cut -c1-80 <<<"$out")" || diff lake-cache:clean "$out (purge: lake-cache-audit --purge)"; }
+  [ -d "$SRV/warm-base/src/.lake/build/ir" ] && { n=$("$P/lake-cache-audit" --tree "$SRV/warm-base/src" --scan-tree "$SRV/warm-base/src" 2>/dev/null | wc -l); [ "$n" = 0 ] && ok warm-base:prefixed-c || diff warm-base:prefixed-c "$n .c/.o files with unprefixed initializers"; }
+  grep -q lake-cache-audit "$P/lake-shim/lake" 2>/dev/null && ok lake-shim:guard || diff lake-shim:guard "the shim does not audit the cache before Lake reads it"
+else diff lake-cache-audit missing; fi
 echo "== burst-check $(hostname): $ndiff DIFF"; exit $ndiff
