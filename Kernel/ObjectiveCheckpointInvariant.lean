@@ -1050,23 +1050,22 @@ theorem publication_quiet {rootBytes : Bytes → Digest} {config : Config} {snap
   subst member
   exact quiet_image (role := .package) rfl (by decide) (by decide)
 
+/-- A creation posts its object record and, when it carries a seed, that state cell's
+first image: neither is an inbox or a delivery slot. -/
 theorem creation_quiet {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
-    {request : CreateRequest} (created : Creation config snapshot request) :
+    {height : Nat} {request : CreateRequest} (created : Creation config snapshot height request) :
     ∀ post ∈ created.posts, Quiet post.bytes := by
   rw [created.postsExact]
   intro post member
-  simp only [List.mem_singleton] at member
-  subst member
-  exact quiet_image (role := .object) rfl (by decide) (by decide)
-
-theorem stateWrite_quiet {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
-    {height : Nat} {request : StateWriteRequest} (written : StateWrite config snapshot height request) :
-    ∀ post ∈ written.posts, Quiet post.bytes := by
-  rw [written.postsExact]
-  intro post member
-  simp only [List.mem_singleton] at member
-  subst member
-  exact quiet_image (role := .state) rfl (by decide) (by decide)
+  rcases List.mem_cons.mp member with head | tail
+  · subst head
+    exact quiet_image (role := .object) rfl (by decide) (by decide)
+  · cases seeded : request.seed with
+    | none => simp [seeded] at tail
+    | some seed =>
+      simp only [seeded, Option.map_some, Option.toList_some, List.mem_singleton] at tail
+      subst tail
+      exact quiet_image (role := .state) rfl (by decide) (by decide)
 
 /-- What an invocation posts, by payload: the Book, a state image, or its mail. -/
 theorem invocation_posts_cases {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -1149,7 +1148,6 @@ def AdmittedTurn.Sends {rootBytes : Bytes → Digest} {config : Config} {snapsho
   | .resolve _ _ => False
   | .deliver _ _ => False
   | .topUp _ _ => False
-  | .writeState _ _ => False
   | .exhaust _ _ => False
   | .abandon _ _ => False
   | .invoke _ invoked => invoked.journal.outbox ≠ []
@@ -1165,7 +1163,6 @@ def AdmittedTurn.DeliversMessage {rootBytes : Bytes → Digest} {config : Config
   | .resolve _ _ => False
   | .deliver _ _ => False
   | .topUp _ _ => False
-  | .writeState _ _ => False
   | .exhaust _ _ => False
   | .abandon _ _ => False
   | .invoke _ _ => False
@@ -1186,7 +1183,6 @@ theorem AdmittedTurn.posts_hold_no_inbox {rootBytes : Bytes → Digest} {config 
     simp only [AdmittedTurn.posts, List.mem_singleton] at member
     subst member
     exact not_holdsInbox_of_payload_none (Postings.write_payload config snapshot topped.posted)
-  | writeState _ written => exact fun post member => (stateWrite_quiet written post member).1
   | exhaust _ exhausted => exact fun post member => (exhaustion_quiet exhausted post member).1
   | abandon _ abandoned => exact fun post member => (abandonment_quiet abandoned post member).1
   | invoke _ invoked =>
@@ -1208,7 +1204,6 @@ theorem AdmittedTurn.posts_decide_no_delivery {rootBytes : Bytes → Digest} {co
     simp only [AdmittedTurn.posts, List.mem_singleton] at member
     subst member
     exact not_decidesDelivery_of_payload_none (Postings.write_payload config snapshot topped.posted)
-  | writeState _ written => exact fun post member => (stateWrite_quiet written post member).2
   | exhaust _ exhausted => exact fun post member => (exhaustion_quiet exhausted post member).2
   | abandon _ abandoned => exact fun post member => (abandonment_quiet abandoned post member).2
   | invoke _ invoked => exact invocation_decides_nothing invoked
@@ -1487,7 +1482,6 @@ theorem reachable_delivery_stored_complete {rootBytes : Bytes → Digest} {confi
 #assert_axioms resolution_quiet
 #assert_axioms publication_quiet
 #assert_axioms creation_quiet
-#assert_axioms stateWrite_quiet
 #assert_axioms invocation_posts_cases
 #assert_axioms invocation_mail_nil
 #assert_axioms mail_decides_nothing
