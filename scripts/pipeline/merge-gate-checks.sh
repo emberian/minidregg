@@ -62,6 +62,10 @@ run website         python3 website/gen-status.py --check
 # tree-wide axiom census is what turns it red. Deployed is built by the umbrella, so this elaborates
 # Deployed + the census module only.
 run axiom-census    $LAKE_WRAP lake build AxiomCensus
+# A generated fixture's authority (a hand-written file no generator writes) never changes in the same
+# commit as the implementation, and only with an Authority-Change trailer; every generated fixture has
+# a row in scripts/pipeline/fixture-authorities.txt (cv 01a1147b-103d).
+run fixture-authority bash scripts/pipeline/check-fixture-authority.sh "$FROM..$TO"
 run objective-proofs bash scripts/check-objective-proofs.sh proofs
 # The hypothesis ledger over AxiomCensusResearch. Its [RED] families on main are a known
 # baseline (hyp-ledger-baseline.txt next to this script, ROOT 10-05: six toothless rows red on

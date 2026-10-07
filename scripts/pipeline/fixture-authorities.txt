@@ -1,0 +1,23 @@
+# fixture-authorities.txt -- every GENERATED fixture, its generator and its independent authority.
+# Checked by scripts/pipeline/check-fixture-authority.sh (gate row `fixture-authority`).
+#
+# A generated fixture is a file written by a generator from a run of this tree. Its bytes may change
+# when the implementation changes; what they MEAN must not, without an authority change. The authority
+# is a HAND-WRITTEN file no generator writes, checked against a projection of the fixture
+# (cv 01a1147b-103d, FIXTURE-AUTHORITY-DESIGN-20261007.md).
+#
+# Columns:  generated path (glob) | generator | authority | status
+#   status  checked   the authority exists and a named check compares the fixture's projection to it
+#           self      the file is itself a reviewed pin (no separate projection): a change to it is an
+#                     authority change and must be its own commit with an Authority-Change trailer
+#           PENDING   no authority yet: listed so the gate knows it is generated (a follow-up names one)
+#
+# Census (2026-10-07, lane kn2-token-sound): `git log --name-only` since 2026-09-25 over commits
+# that regenerate, re-emit or re-pin, for *Fixture*, *fixture*, *Vectors*, golden/, *.snapshot, expect*.
+Assurance/NativeAcceptedFixtureData.lean | scripts/native-accepted-fixture/generate.sh | Assurance/NativeAcceptedFixtureAuthority.lean | checked
+scripts/gates/objective-statements.snapshot | scripts/check-objective-proofs.sh (scripts/ObjectiveSnapshot.lean) | - | PENDING (H-MANIFEST: the contract-change ledger becomes its authority)
+scripts/gates/objective-statements-mathlib.snapshot | scripts/check-objective-proofs.sh (scripts/ObjectiveSnapshot.lean) | - | PENDING (H-MANIFEST: the contract-change ledger becomes its authority)
+native/mini-sdk/golden/lean-intents.json | Kernel/Contracts/IntentVectors.lean (vector emitter) | - | PENDING
+native/mini-sdk/golden/intents.json | Kernel/Contracts/IntentVectors.lean (vector emitter) | - | PENDING
+native/mini-sdk/golden/vectors.json | native/mini-sdk (golden emitter) | - | PENDING
+native/objective-emit/fixtures/* | native/objective-emit (differential generator) | - | PENDING
