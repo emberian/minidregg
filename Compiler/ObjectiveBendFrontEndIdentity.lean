@@ -17,6 +17,7 @@ import Compiler.ObjectiveBendElaborate
 import Compiler.ObjectiveBendC4
 import Compiler.ObjectiveBendTermWire
 import Compiler.ObjectiveBendFrontEnd
+import Compiler.ObjectiveBendLaw
 import Compiler.Sha256
 namespace Minidregg.Compiler.ObjectiveBendFrontEndIdentity
 open Lean Elab Term
@@ -25,7 +26,7 @@ set_option autoImplicit false
 /-- The fingerprinted sources, in manifest order (paths relative to this file's directory). -/
 def sources : List String :=
   ["ObjectiveBendParse.lean", "ObjectiveBendElaborate.lean", "ObjectiveBendC4.lean",
-   "ObjectiveBendTermWire.lean", "ObjectiveBendFrontEnd.lean", "Sha256.lean"]
+   "ObjectiveBendTermWire.lean", "ObjectiveBendFrontEnd.lean", "Sha256.lean", "ObjectiveBendLaw.lean"]
 
 def manifestHeader : String := "DREGG/OBJECTIVE-BEND/FRONT-END/v1"
 

@@ -1,16 +1,17 @@
-/- The enforced `law` fragment of a package: its syntax, its own meaning over the
-declared state, and its compilation to the kernel's `Pred`.
+/- The enforced `law` fragment of a package: its own meaning over the declared state, and
+its compilation to the kernel's `Pred`. (The syntax and parser are `Compiler.ObjectiveBendLaw`,
+so the front end parses laws without importing the kernel.)
 
 A `.obend` package may declare, at top level, `law NAME: EXPR`: an admission law over the
 declared state of every object created from the package. The kernel judges every write of that
 state by it (`ObjectRecord.effectiveLaw`). This module fixes what such a law MEANS and proves
 the kernel judges exactly that.
 
-* `LawExpr` is the fragment: comparisons of a reference with an integer, of two references
+* `LawExpr` (`Compiler.ObjectiveBendLaw`) is the fragment: comparisons of a reference with an integer, of two references
   (with an optional constant offset), membership in a finite set, `monotone`/`writeOnce` of a
   field, and the Boolean closure (`not`, `and`, `or`, `implies`). A reference is `new.FIELD`
   (a top-level field of the declared state: v1 restricts FIELD to one plain name, nested paths
-  are refused at elaboration) or one of the request facts `subject`, `caller`, `height`, `turn`.
+  are refused by the parser) or one of the request facts `subject`, `caller`, `height`, `turn`.
 * `LawExpr.denote facts old new` is its meaning, read off the declared-state DATA: a field
   reads the first scalar (natural or boolean) field of that name of the top-level record, a
   request reference reads `Facts`. It does not mention `Pred`.
@@ -19,55 +20,17 @@ the kernel judges exactly that.
 `compile_sound`: on the views the kernel judges (`ObjectRecord.views`), the compiled predicate
 evaluates to the denotation, for every law whose field names are plain. The proof rests on
 `State.get` of a view reading exactly the first scalar field of that name
-(`views_read_field`): the request block never names `state/…`, and a nested or variant slot
+(`stateSlots_get_field`, `new_view_reads`): the request block never names `state/…`, and a nested or variant slot
 of a field carries a `.` or `@` after its field name, which a plain name cannot contain. -/
 import Kernel.ObjectRecord
+import Compiler.ObjectiveBendLaw
 
 namespace Minidregg.Kernel.ObjectLaw
 open Minidregg.Kernel.ObjectRecord
 open Minidregg.Theory.ObjectiveBendDemandData (Data)
 open Minidregg.Pred (Pred State Slot eval)
+open Minidregg.Compiler.ObjectiveBendLaw (LawRef LawExpr)
 set_option autoImplicit false
-
-/-! ## The fragment -/
-
-/-- A reference a law reads. `field name` is `new.name` (a top-level field of the declared
-state); the others are the request facts. -/
-inductive LawRef where
-  | field (name : String)
-  | subject
-  | caller
-  | height
-  | turn
-  deriving DecidableEq, Repr
-
-/-- The enforced fragment. `old.` appears only through `monotone` and `writeOnce`. -/
-inductive LawExpr where
-  | eqC (ref : LawRef) (value : Int)
-  | leC (ref : LawRef) (value : Int)
-  | inC (ref : LawRef) (values : List Int)
-  | eqR (left right : LawRef)
-  | leR (left right : LawRef)
-  | leROff (left right : LawRef) (offset : Int)
-  | monotone (field : String)
-  | writeOnce (field : String)
-  | not (body : LawExpr)
-  | and (left right : LawExpr)
-  | or (left right : LawExpr)
-  | implies (premise conclusion : LawExpr)
-  deriving DecidableEq, Repr
-
-def LawRef.plain : LawRef → Bool
-  | .field name => plainName name
-  | _ => true
-
-/-- Every field a law names is a law field name. -/
-def LawExpr.fieldsPlain : LawExpr → Bool
-  | .eqC ref _ | .leC ref _ | .inC ref _ => ref.plain
-  | .eqR left right | .leR left right | .leROff left right _ => left.plain && right.plain
-  | .monotone field | .writeOnce field => plainName field
-  | .not body => body.fieldsPlain
-  | .and left right | .or left right | .implies left right => left.fieldsPlain && right.fieldsPlain
 
 /-! ## Its meaning, over the declared-state data -/
 
@@ -91,6 +54,29 @@ def firstScalarField (name : String) : List (String × Data) → Option Int
 def fieldOf (name : String) : Data → Option Int
   | .record fields => firstScalarField name fields
   | _ => none
+
+end Minidregg.Kernel.ObjectLaw
+
+/-! ## The fragment's meaning (in the syntax's namespace, so `law.denote` reads) -/
+namespace Minidregg.Compiler.ObjectiveBendLaw
+open Minidregg.Kernel.ObjectRecord
+open Minidregg.Kernel.ObjectLaw (scalarOf firstScalarField fieldOf)
+open Minidregg.Theory.ObjectiveBendDemandData (Data)
+open Minidregg.Pred (Slot)
+set_option autoImplicit false
+
+/-- Every field a law reads is a plain name (`ObjectRecord.plainName`). -/
+def LawRef.plain : LawRef → Bool
+  | .field name => plainName name
+  | _ => true
+
+/-- Every field a law names is a law field name. -/
+def LawExpr.fieldsPlain : LawExpr → Bool
+  | .eqC ref _ | .leC ref _ | .inC ref _ => ref.plain
+  | .eqR left right | .leR left right | .leROff left right _ => left.plain && right.plain
+  | .monotone field | .writeOnce field => plainName field
+  | .not body => body.fieldsPlain
+  | .and left right | .or left right | .implies left right => left.fieldsPlain && right.fieldsPlain
 
 /-- What a reference reads on the new state of a write under `facts`. -/
 def LawRef.read (facts : Facts) (new : Data) : LawRef → Option Int
@@ -147,6 +133,15 @@ def LawRef.slot : LawRef → Slot
   | .caller => "request/caller"
   | .height => "request/height"
   | .turn => "request/turn"
+
+end Minidregg.Compiler.ObjectiveBendLaw
+
+namespace Minidregg.Kernel.ObjectLaw
+open Minidregg.Kernel.ObjectRecord
+open Minidregg.Compiler.ObjectiveBendLaw
+open Minidregg.Theory.ObjectiveBendDemandData (Data)
+open Minidregg.Pred (Pred State Slot eval)
+set_option autoImplicit false
 
 /-- The predicate the kernel installs for a law. -/
 def compile : LawExpr → Pred

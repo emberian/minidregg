@@ -70,6 +70,11 @@ def publishedCore (p : ObjectiveSourcePackage.Package) : Except Diagnostic (List
     throw { stage := "objective-source-type-proposal", message }
   return lowering.packet.compress.toUTF8.toList
 
+/-- The enforced laws the package publishes: the entry module's `law` declarations, as the
+front end's replay of the package's own sources reads them. -/
+def publishedLaws (p : ObjectiveSourcePackage.Package) : Except Diagnostic (List (String × ObjectiveBendLaw.LawExpr)) := do
+  return (← replay p).laws
+
 /-- `publishedCore` as an option: what the receiver compares an artifact's typed core with. -/
 def replayedCore (p : ObjectiveSourcePackage.Package) : Option (List UInt8) := (publishedCore p).toOption
 
@@ -91,28 +96,44 @@ theorem replayedCore_is_lowering {p : ObjectiveSourcePackage.Package} {bytes : L
 /-- A receiver's replay of a package against an offered typed core: the front end's lowering
 of the package's sources, the checker's acceptance of it, the offered core is exactly its
 rendering, and the checker fuel the rendering carries is within the receiver's capacity. -/
-structure Replayed (p : ObjectiveSourcePackage.Package) (typedCore : List UInt8) (maxFuel : Nat) where
+structure Replayed (p : ObjectiveSourcePackage.Package) (typedCore : List UInt8)
+    (laws : List (String × ObjectiveBendLaw.LawExpr)) (maxFuel : Nat) where
   private mk ::
   lowering : Lowering
   replayExact : replay p = .ok lowering
   accepted : Accepted lowering
   coreExact : lowering.packet.compress.toUTF8.toList = typedCore
+  /-- The offered laws are exactly the laws the front end reads from the package's source. -/
+  lawsExact : lowering.laws = laws
   fuelWithin : accepted.packet.fuel ≤ maxFuel
 
-def replayAccept (p : ObjectiveSourcePackage.Package) (typedCore : List UInt8) (maxFuel : Nat) :
-    Except Diagnostic (Replayed p typedCore maxFuel) :=
+def replayAccept (p : ObjectiveSourcePackage.Package) (typedCore : List UInt8)
+    (laws : List (String × ObjectiveBendLaw.LawExpr)) (maxFuel : Nat) :
+    Except Diagnostic (Replayed p typedCore laws maxFuel) :=
   match replayed : replay p with
   | .error d => throw d
   | .ok lowering => do
     let accepted ← accept lowering
     if core : lowering.packet.compress.toUTF8.toList = typedCore then
-      if fuel : accepted.packet.fuel ≤ maxFuel then pure ⟨lowering, replayed, accepted, core, fuel⟩
-      else throw (refusal "typed core checker fuel exceeds the receiver's capacity")
+      if lawsSame : lowering.laws = laws then
+        if fuel : accepted.packet.fuel ≤ maxFuel then pure ⟨lowering, replayed, accepted, core, lawsSame, fuel⟩
+        else throw (refusal "typed core checker fuel exceeds the receiver's capacity")
+      else throw (refusal "offered laws differ from the front end's replay of the package")
     else throw (refusal "offered typed core differs from the front end's replay of the package")
 
+/-- **A replay token's laws are the package's**: the ones `publishedLaws` reads from its source. -/
+theorem Replayed.laws_replayed {p : ObjectiveSourcePackage.Package} {typedCore : List UInt8}
+    {laws : List (String × ObjectiveBendLaw.LawExpr)} {maxFuel : Nat}
+    (r : Replayed p typedCore laws maxFuel) : publishedLaws p = .ok laws := by
+  have lawsSame := r.lawsExact
+  unfold publishedLaws
+  rw [r.replayExact]
+  simp [bind, Except.bind, pure, Except.pure, lawsSame]
+
 /-- A replay token's core is the one `replayedCore` computes. -/
-theorem Replayed.core_replayed {p : ObjectiveSourcePackage.Package} {typedCore : List UInt8} {maxFuel : Nat}
-    (r : Replayed p typedCore maxFuel) : ObjectiveBendPublication.replayedCore p = some typedCore := by
+theorem Replayed.core_replayed {p : ObjectiveSourcePackage.Package} {typedCore : List UInt8}
+    {laws : List (String × ObjectiveBendLaw.LawExpr)} {maxFuel : Nat}
+    (r : Replayed p typedCore laws maxFuel) : ObjectiveBendPublication.replayedCore p = some typedCore := by
   unfold replayedCore publishedCore
   have core := r.coreExact
   simp only [String.toUTF8] at core
@@ -120,4 +141,5 @@ theorem Replayed.core_replayed {p : ObjectiveSourcePackage.Package} {typedCore :
 
 #assert_axioms replayedCore_is_lowering
 #assert_axioms Replayed.core_replayed
+#assert_axioms Replayed.laws_replayed
 end Minidregg.Compiler.ObjectiveBendPublication

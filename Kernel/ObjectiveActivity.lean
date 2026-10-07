@@ -661,7 +661,7 @@ structure Replay (config : Config) (pin : Digest) where
   packageExact : ObjectiveSourcePackage.identity package = artifact.package
   frontEndOwn : package.frontEnd = ObjectiveBendFrontEndIdentity.identity
   declarationExact : ObjectiveSourcePackage.selectedDeclaration package = some artifact.declaration
-  replayed : ObjectiveBendPublication.Replayed package artifact.typedCore config.typeFuel
+  replayed : ObjectiveBendPublication.Replayed package artifact.typedCore artifact.laws config.typeFuel
 
 /-- The definition the replay accepted: the elaborator's own term with its annotations. -/
 def Replay.source {config : Config} {pin : Digest} (r : Replay config pin) : AnnotatedTerm :=
@@ -677,7 +677,7 @@ def replayPackage (config : Config) (stored : Stored) (pin : Digest) : Except Re
     if packageExact : ObjectiveSourcePackage.identity package = artifact.package then
       if frontEndOwn : package.frontEnd = ObjectiveBendFrontEndIdentity.identity then
         if declarationExact : ObjectiveSourcePackage.selectedDeclaration package = some artifact.declaration then
-          match ObjectiveBendPublication.replayAccept package artifact.typedCore config.typeFuel with
+          match ObjectiveBendPublication.replayAccept package artifact.typedCore artifact.laws config.typeFuel with
           | .ok replayed => pure ⟨artifact, identity, package, packageExact, frontEndOwn, declarationExact, replayed⟩
           | .error d => throw (.packageReplay d.message)
         else throw (.packageSource "the package selects another declaration")

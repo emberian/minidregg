@@ -16,6 +16,7 @@ therefore carries a typing derivation for exactly the Core4 term the elaborator
 produced (`ObjectiveBendFrontEndAdequacy` states what that buys). -/
 import Compiler.ObjectiveBendParse
 import Compiler.ObjectiveBendElaborate
+import Compiler.ObjectiveBendLaw
 import Compiler.ObjectiveBendTermWire
 import Compiler.Sha256
 import Theory.ObjectiveBendTyping
@@ -171,6 +172,10 @@ structure Lowering where
   modules : List SourceModule
   limits : Json
   typeFuel : Nat
+  /-- The package's enforced laws: the entry module's top-level `law` declarations (a law in any
+  other module refuses). The artifact commits them; the kernel installs them on every object
+  pinned to the artifact. -/
+  laws : List (String × ObjectiveBendLaw.LawExpr)
 
 def project (term : ATerm) (projections : List Json) : Except Diagnostic ATerm :=
   projections.foldlM (init := term) fun t p => do
@@ -221,7 +226,12 @@ def lowerDecoded (modules : List SourceModule) (decoded : List ObjectiveBendElab
       | .arr _ => "legacy-canonical-nat-bool-record"
       | _ => "dregg.objective-bend.argument-values.v1"
   checkTemplates output (entry.name ++ "." ++ entryDefinition) modules typeFuel
-  return ⟨output, term, entry.name ++ "." ++ entryDefinition, argumentCodec, mode, modules, limits, typeFuel⟩
+  for (m, index) in decoded.zipIdx do
+    if index != entryModule && !m.laws.isEmpty then
+      throw (elaborationRefusal ("a law belongs to the package's entry module; " ++ m.name ++
+        " is imported and declares " ++ toString m.laws.length ++ " law(s)"))
+  let laws := (decoded[entryModule]?.map (·.laws)).getD []
+  return ⟨output, term, entry.name ++ "." ++ entryDefinition, argumentCodec, mode, modules, limits, typeFuel, laws⟩
 
 /-- The whole front end on read modules: options, parse and check every module, elaborate,
 project. -/
