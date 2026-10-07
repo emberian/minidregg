@@ -42,6 +42,7 @@
 # updated 2026-10-07: b17  [counts: Minidregg 0 1, Theory 76 177, Kernel 395 546, Pred 7 11, Effects 0 3, Compiler 151 323, Selvage 12 153, Assurance 0 155, Host 87 121, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, TokenCensus 0 2, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-07: b18  [counts: Minidregg 0 1, Theory 76 177, Kernel 396 547, Pred 7 11, Effects 0 3, Compiler 151 323, Selvage 12 153, Assurance 0 155, Host 87 121, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, TokenCensus 0 2, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-07: b20  [counts: Minidregg 0 1, Theory 76 177, Kernel 396 548, Pred 7 11, Effects 0 3, Compiler 155 324, Selvage 12 153, Assurance 0 155, Host 87 121, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, TokenCensus 0 2, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-07: b25: kn2-index, kn2-neutral-births-1  [counts: Minidregg 0 1, Theory 76 178, Kernel 394 545, Pred 7 11, Effects 0 3, Compiler 155 324, Selvage 12 153, Assurance 0 155, Host 87 121, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, TokenCensus 0 2, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 Compiler.Air
 Compiler.AirBignum
 Compiler.AirFlatten
@@ -299,7 +300,6 @@ Kernel.ApplicationAgentLifetimeDispatchReserveContext
 Kernel.ApplicationAgentLifetimeDispatchReserveCore
 Kernel.ApplicationAgentLifetimeGrant
 Kernel.ApplicationAgentLifetimeGrantAdmission
-Kernel.ApplicationAgentLifetimeGrantAtomicBirth
 Kernel.ApplicationAgentLifetimeGrantDelegation
 Kernel.ApplicationAgentLifetimeGrantIntentTemplate
 Kernel.ApplicationAgentLifetimeGrantLookup
@@ -414,7 +414,6 @@ Kernel.ApplicationLifecycleV3Lookup
 Kernel.ApplicationPermissionSchema
 Kernel.ApplicationRouteAdmission
 Kernel.ApplicationShareIssueAdmission
-Kernel.ApplicationShareIssueAtomicBirth
 Kernel.ApplicationShareIssueAuthoring
 Kernel.ApplicationShareIssueDelegation
 Kernel.ApplicationShareIssueGrainAdmission
