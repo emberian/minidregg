@@ -1132,7 +1132,7 @@
     {
       "module": "Compiler",
       "path": "Compiler.lean",
-      "sha256": "056aba9e33139f20c707f18f1a3877af5ffbb2300d4bae6615413383b21d1973",
+      "sha256": "9fa8c709e45b8f6e21cab0d23a0c4f32933624e2f3c13a940d121f3c90481f7f",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -2796,13 +2796,6 @@
       "ownerReportedStatus": "qualified compiler/runtime checkpoint; finite 64case conformance, not general simulation"
     },
     {
-      "module": "Compiler.PayEnrolSignatureIO",
-      "path": "Compiler/PayEnrolSignatureIO.lean",
-      "sha256": "dd1d03c1c34e0f7581cb1fb4fcada3f42daa2ec09ec29cb99df46f68934f9b09",
-      "surface": "default",
-      "ownerReportedStatus": "No matching owner source report"
-    },
-    {
       "module": "Compiler.PhysicalLawResolution",
       "path": "Compiler/PhysicalLawResolution.lean",
       "sha256": "c21418e2c1028c0a227d3ea97664ce219a524db1fe1468bf2b242c53b576a0ea",
@@ -3974,7 +3967,7 @@
     {
       "module": "Host.Json",
       "path": "Host/Json.lean",
-      "sha256": "74f1d3fd91246ed33e1f6a9504f35ff400724b10ecc38852e32539e13de6c360",
+      "sha256": "871345a4cac9dc7aec2ef534ab2bed43419bdfcb267281c6452df13809dcb6a1",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -4023,7 +4016,7 @@
     {
       "module": "Host.Main",
       "path": "Host/Main.lean",
-      "sha256": "7a2af325de52b4cf2cd7fd164014a754af61c38eb37d79a3b1cd506e616d0785",
+      "sha256": "4c6cbcffdabc25155fee40d5ee03c653d16fdea267616c1b03dbd47bf025c1b1",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -7306,7 +7299,7 @@
     {
       "module": "Kernel.PayEnrolDecision",
       "path": "Kernel/PayEnrolDecision.lean",
-      "sha256": "98d5820881d00a03719a82df170bfa41abeabf85a4b324063bf835fdb785a390",
+      "sha256": "62895dfa68b24c96f7331de075946e9b4e3cfb03c8605371773fec063ba26922",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -7348,7 +7341,7 @@
     {
       "module": "Kernel.PayEnrolReceiver",
       "path": "Kernel/PayEnrolReceiver.lean",
-      "sha256": "d1f1dba5139ed76a308ab3b271e65e56f79dd94487f49ec8a6ffce1551377987",
+      "sha256": "ae2709bfe8c31ffee01c4e3b188d22301382a028f02ad4cf991464b624d5f9f6",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
