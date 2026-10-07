@@ -105,7 +105,7 @@ step() {
   set -e
   step_t1=$(now)
   printf '%s\n' "$step_rc" >"$EV/$step_name.exit"
-  echo "$step_t1 - $step_t0" | bc >"$EV/$step_name.seconds"
+  awk -v end="$step_t1" -v start="$step_t0" 'BEGIN { printf "%.9f\n", end - start }' >"$EV/$step_name.seconds"
   printf '%-28s exit=%s %6ss\n' "$step_name" "$step_rc" "$(cat "$EV/$step_name.seconds")" |
     tee -a "$EV/journey.log"
   return "$step_rc"

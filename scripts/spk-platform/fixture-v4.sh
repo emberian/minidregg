@@ -197,7 +197,7 @@ if [ "$MODE" = restart ]; then
   case "$EVIDENCE" in "$LOOKUP"-lookup-*/outcome.json) ;; *) fail "reconciled from $EVIDENCE, not an $LOOKUP lookup" ;; esac
   jq -e '.type == "replayed" or .confirmation == "replayed"' "$LOOKUPDIR/$EVIDENCE" >/dev/null ||
     fail "$LOOKUP lookup is not a replay of the original admission"
-  [ "$RECOVERED" = "$RECORDED" ] || fail "recovered receipt $RECOVERED differs from recorded $RECORDED"
+  [ "$(printf '%s' "$RECOVERED" | jq -cS .)" = "$(printf '%s' "$RECORDED" | jq -cS .)" ] || fail "recovered receipt $RECOVERED differs from recorded $RECORDED"
   # Nothing is resubmitted: the lost reply stays lost, and no later phase exists.
   case "$RESTART_AT" in
     completion) [ ! -e "$SIGN/op38-outcome.bin" ] || fail "the restart resubmitted op38" ;;

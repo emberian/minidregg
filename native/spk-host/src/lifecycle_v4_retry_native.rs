@@ -25,9 +25,9 @@ use crate::resident_launch::SourceBoundLaunch;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::fs::{self, DirBuilder, File, OpenOptions};
-use std::io::{self, Read};
-use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::fs::{self, DirBuilder};
+use std::io;
+use std::os::unix::fs::DirBuilderExt;
 use std::path::Path;
 
 const MAX_FRAME: usize = 12_102_760;
@@ -881,7 +881,8 @@ mod tests {
         let sha = hex(&Sha256::digest(&ingress));
         let write = |path: std::path::PathBuf, bytes: &[u8]| {
             use std::io::Write;
-            let mut file = OpenOptions::new()
+            use std::os::unix::fs::OpenOptionsExt;
+            let mut file = std::fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
                 .mode(0o600)
