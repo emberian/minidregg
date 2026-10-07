@@ -1326,6 +1326,11 @@ if [[ "$build_umbrella" == 0 ]]; then
     source=${module//./\/}.lean
     stem=${module//./\/}
     mkdir -p ".lake/build/lib/lean/$(dirname "$stem")" ".lake/build/ir/$(dirname "$stem")"
+    # Unlink before Lean writes: Lean opens -o/-i/-c outputs IN PLACE, and a tree that restores from
+    # the shared Lake artifact cache (restoreAllArtifacts) holds them as read-only hard links INTO
+    # the cache. Writing through would be refused (EACCES on the consent companion's .ilean, 10-07)
+    # or, were the mode ever relaxed, rewrite the cache entry every sibling lane fetches.
+    rm -f ".lake/build/lib/lean/$stem.olean" ".lake/build/lib/lean/$stem.ilean" ".lake/build/ir/$stem.c"
     if env LEAN_NUM_THREADS="$lean_threads" lake env lean -j "$lean_threads" "$source" \
         -o ".lake/build/lib/lean/$stem.olean" \
         -i ".lake/build/lib/lean/$stem.ilean" \
