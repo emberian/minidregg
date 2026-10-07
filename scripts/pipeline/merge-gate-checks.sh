@@ -12,22 +12,34 @@ S=$L/gate-$TAG.summary; : > "$S"
 export PATH=$HOME/.elan/bin:$HOME/.cargo/bin:$HOME/.bun/bin:$PATH
 export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$B/rust-target}
 export LOCAL_GATES_CARGO_JOBS=${LOCAL_GATES_CARGO_JOBS:-4}
+# Lean the checks build (new targets, exe roots, the census, the ledger's imports) goes through LAKE_WRAP.
+# Default: the gate slot under swarm-build (slot-mk.sh; a lane slot where the box has no gate slot), so an
+# unset LAKE_WRAP never means an uncapped, unslotted Lean build (it did: `nice -n 10`).
+if [ -z "$LAKE_WRAP" ]; then
+  if command -v swarm-build >/dev/null 2>&1; then LAKE_WRAP="$H/slot-mk.sh swarm-build"; else LAKE_WRAP="nice -n 10"; fi
+fi
+export SWARM_BUILD_TAG=${SWARM_BUILD_TAG:-gate-$TAG}
+# Every check is bounded: PIPELINE_CHECK_TIMEOUT_S (2 h) -> TIMEOUT counts as red, its process tree killed
+# (timeout signals the whole process group), so a hung check never parks the gate.
+TMO=${PIPELINE_CHECK_TIMEOUT_S:-7200}
 cd "$SRC"
 [ "$(git rev-parse HEAD)" = "$(git rev-parse "$TO")" ] || { echo "HEAD != $TO" | tee -a "$S"; exit 99; }
 red=0
-run() { local n=$1; shift; local s=$(date +%s); ( "$@" ) > "$L/gate-$TAG-$n.log" 2>&1; local rc=$?
-  local st=PASS; [ $rc = 0 ] || { st=RED; red=$((red+1)); }
+run() { local n=$1; shift; local s=$(date +%s); timeout -k 30 "$TMO" "$@" > "$L/gate-$TAG-$n.log" 2>&1; local rc=$?
+  local st=PASS
+  if [ $rc = 124 ] || [ $rc = 137 ]; then st="TIMEOUT(${TMO}s)"; red=$((red+1)); echo "merge-gate: $n killed after ${TMO}s" >> "$L/gate-$TAG-$n.log"
+  elif [ $rc != 0 ]; then st=RED; red=$((red+1)); fi
   echo "$n $st rc=$rc $(( $(date +%s) - s ))s :: $(tail -n 1 "$L/gate-$TAG-$n.log" | cut -c1-200)" | tee -a "$S"; }
 # lean targets the range DECLARES (new [[lean_lib]]/[[lean_exe]] names in lakefile.toml) are built too:
 # the umbrella does not reach a new exe root, CI's lake-build gate does
 tnames() { git show "$1:lakefile.toml" | sed -n '/^\[\[lean_\(lib\|exe\)\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' | sort; }
 newt=$(comm -13 <(tnames "$FROM") <(tnames "$TO") | grep -v '^ResearchWip$' | tr '\n' ' ')
-if [ -n "$newt" ]; then run new-targets env LEAN_NUM_THREADS=${THREADS:-6} ${LAKE_WRAP:-nice -n 10} lake build $newt; fi
+if [ -n "$newt" ]; then run new-targets env LEAN_NUM_THREADS=${THREADS:-6} $LAKE_WRAP lake build $newt; fi
 # EVERY lean_exe root, every batch (cv 01a1147a-f80e): the umbrella reaches none of the exe-only
 # modules, so Compiler.ObjectiveBendCDiffGen sat red on main unseen and a range that broke
 # Kernel/ConsentAnchor (outside Minidregg, inside minidregg-client-consent) would have landed.
 exes=$(git show "$TO:lakefile.toml" | sed -n '/^\[\[lean_exe\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' | tr '\n' ' ')
-run exe-roots env LEAN_NUM_THREADS=${THREADS:-6} ${LAKE_WRAP:-nice -n 10} lake build $exes
+run exe-roots env LEAN_NUM_THREADS=${THREADS:-6} $LAKE_WRAP lake build $exes
 run host-closure    bash scripts/check-host-closure.sh
 run import-boundary bash scripts/check-import-boundary.sh
 run proof-hygiene   bash scripts/check-proof-hygiene.sh
@@ -49,7 +61,7 @@ run website         python3 website/gen-status.py --check
 # (measured: `theorem t : 1 = 2 := sorry` in Compiler/DeclaredEffectCellRegistry builds green); the
 # tree-wide axiom census is what turns it red. Deployed is built by the umbrella, so this elaborates
 # Deployed + the census module only.
-run axiom-census    ${LAKE_WRAP:-nice -n 10} lake build AxiomCensus
+run axiom-census    $LAKE_WRAP lake build AxiomCensus
 run objective-proofs bash scripts/check-objective-proofs.sh proofs
 # The hypothesis ledger over AxiomCensusResearch. Its [RED] families on main are a known
 # baseline (hyp-ledger-baseline.txt next to this script, ROOT 10-05: six toothless rows red on
@@ -61,9 +73,9 @@ ledger() {
   # AxiomCensusResearch closure (kn2-hyp-ledger: Kernel.GenericSimplexObservationSafety), and the
   # ledger refuses to run on an absent olean
   local imports; imports=$(sed -n 's/^import \([A-Za-z0-9_.]*\).*/\1/p' scripts/HypothesisLedger.lean | tr '\n' ' ')
-  ${LAKE_WRAP:-nice -n 10} lake build AxiomCensusResearch $imports > "$L/gate-$TAG-hyp-ledger-build.log" 2>&1 \
+  timeout -k 30 "$TMO" $LAKE_WRAP lake build AxiomCensusResearch $imports > "$L/gate-$TAG-hyp-ledger-build.log" 2>&1 \
     || { echo "hyp-ledger RED (AxiomCensusResearch did not build)" | tee -a "$S"; red=$((red+1)); return; }
-  bash scripts/check-hypothesis-ledger.sh > "$log" 2>&1; rc=$?
+  timeout -k 30 "$TMO" bash scripts/check-hypothesis-ledger.sh > "$log" 2>&1; rc=$?
   reds=$(grep -aE '^[A-Za-z0-9_.]+ [|] [A-Z]+ [|] [A-Z]+ \[RED\]' "$log" | cut -d' ' -f1 | sort -u)
   new=$(comm -23 <(printf '%s\n' "$reds" | sed '/^$/d') <(sort -u "$H/hyp-ledger-baseline.txt") | tr '\n' ' ')
   if [ $rc = 0 ]; then st=PASS
@@ -74,7 +86,7 @@ ledger() {
 ledger
 python3 "$H/rust-rows.py" "$SRC" "$FROM" "$TO" "$B/tmp-rust-rows-$TAG.sh" > "$L/gate-$TAG-rust-rows.txt" 2>&1 || { echo "rust-rows RED (selector failed)" | tee -a "$S"; red=$((red+1)); }
 cat "$L/gate-$TAG-rust-rows.txt"
-run rust-rows       ${LAKE_WRAP:-} bash "$B/tmp-rust-rows-$TAG.sh"
+run rust-rows       $LAKE_WRAP bash "$B/tmp-rust-rows-$TAG.sh"
 # non-Lean, non-Rust tests the change touches: deploy tooling, changed python test files
 if git diff --name-only "$FROM..$TO" | grep -q '^deploy/'; then
   run deploy-scripts bash -c 'python3 deploy/pay/test-render-enrol.py && python3 deploy/candidate/test-package.py && bash deploy/candidate/test-lane-build.sh'

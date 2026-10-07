@@ -5,7 +5,8 @@
 #   git fetch PEER:/srv/lanes/<lane>/src <ref>     git-upload-pack of a repository under /srv
 #   rsync -a PEER:/lanes/<lane>/logs/ DEST/        rrsync -ro /srv (paths are relative to /srv)
 #   git push PEER:/srv/git/minidregg.git HEAD:lane/<name>   git-receive-pack, /srv/git/*.git only
-# No shell, no writes, no forwarding (the key is `restrict`ed); everything else is refused.
+#   ssh PEER slots --free / ssh PEER peer-build LANE SHA T...   build-anywhere: a free slot over there
+# No shell, no other writes, no forwarding (the key is `restrict`ed); everything else is refused.
 set -uo pipefail
 cmd=${SSH_ORIGINAL_COMMAND:-}
 case "$cmd" in
@@ -21,6 +22,11 @@ case "$cmd" in
     case "$r" in /srv/git/*.git) exec git-receive-pack -- "$r" ;; esac
     echo "box-peer-gate: pushes go to /srv/git/*.git only" >&2; exit 1 ;;
   "rsync --server --sender "*) exec rrsync -ro /srv ;;
+  # build-anywhere: a sibling with no free slot asks for ours (slots --free) and builds its pushed lane here
+  slots|"slots --free"|"slots --json") exec "$(dirname "$0")/slots" ${cmd#slots} ;;
+  "peer-build "*)
+    [[ $cmd =~ ^peer-build( [A-Za-z0-9._+:-]+){3,}$ ]] || { echo "box-peer-gate: malformed peer-build" >&2; exit 1; }
+    set -- $cmd; shift; exec "$(dirname "$0")/peer-build" "$@" ;;
 esac
 echo "box-peer-gate: refused (only git fetch and read-only rsync under /srv): ${cmd:0:120}" >&2
 exit 1
