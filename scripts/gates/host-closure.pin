@@ -44,6 +44,7 @@
 # updated 2026-10-07: b20  [counts: Minidregg 0 1, Theory 76 177, Kernel 396 548, Pred 7 11, Effects 0 3, Compiler 155 324, Selvage 12 153, Assurance 0 155, Host 87 121, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, TokenCensus 0 2, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-07: b25: kn2-index, kn2-neutral-births-1  [counts: Minidregg 0 1, Theory 76 178, Kernel 394 545, Pred 7 11, Effects 0 3, Compiler 155 324, Selvage 12 153, Assurance 0 155, Host 87 121, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, TokenCensus 0 2, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-07: b26: plat-quote-probe (Compiler.PayEnrolSignatureIO leaves)  [counts: Minidregg 0 1, Theory 76 178, Kernel 394 545, Pred 7 11, Effects 0 3, Compiler 154 323, Selvage 12 153, Assurance 0 155, Host 87 121, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, TokenCensus 0 2, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-07: b22 kn2-trie-a  [counts: Minidregg 0 1, Theory 78 178, Kernel 394 545, Pred 7 11, Effects 0 3, Compiler 154 323, Selvage 12 153, Assurance 0 155, Host 87 121, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, TokenCensus 0 2, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 Compiler.Air
 Compiler.AirBignum
 Compiler.AirFlatten
@@ -88,11 +89,11 @@ Compiler.DurableCheckpointCodec
 Compiler.DurableHistory
 Compiler.DurableHistoryReader
 Compiler.DurableHistoryStore
+Compiler.DurableIndex
 Compiler.DurableLogTags
 Compiler.DurableReceiverCodec
 Compiler.DurableReceiverIO
 Compiler.DurableServed
-Compiler.DurableSpent
 Compiler.DurableStoreAudit
 Compiler.Emit
 Compiler.EmitSerialize
@@ -702,6 +703,8 @@ Theory.AcceptedCellEffect
 Theory.AssertAxioms
 Theory.AssertCompiled
 Theory.AuthMap
+Theory.AuthTrie
+Theory.AuthTrieRange
 Theory.AuthorizationDeclaration
 Theory.AxiomPin
 Theory.Bignum
