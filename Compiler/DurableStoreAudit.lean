@@ -20,6 +20,7 @@ The Host's `store-audit` arm runs this, then `NativeHost.audit` (every signed
 ingress re-admitted at its original prefix). Each failure is a named refusal.
 -/
 import Compiler.DurableHistoryStore
+import Compiler.DurableRecordFast
 
 namespace Minidregg.Compiler.DurableStoreAudit
 
@@ -161,7 +162,7 @@ def audit (transport : Transport) (rootBytes : List UInt8 → Digest) : IO (Exce
   if stored.entries.length ≠ stored.head then return refused "the head does not match its entries"
   let mut records : List IntentRecord := []
   for (height, entry) in (List.range' 1 stored.entries.length).zip stored.entries do
-    match recordFrame.decode entry.record with
+    match DurableRecordFast.decodeRecord entry.record with
     | some record => records := records ++ [record]
     | none => return refused s!"noncanonical durable log record at height {height}"
   let logStart := transport.logStart seed

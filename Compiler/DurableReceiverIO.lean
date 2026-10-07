@@ -23,6 +23,7 @@ transport and the OS durability floor; no Lean theorem proves those systems.
 The MAC key file's custody is the operator's (`DurableCheckpointCodec`).
 -/
 import Compiler.DurableCheckpointCodec
+import Compiler.DurableRecordFast
 import Compiler.NativeCoprocess
 import Compiler.DurableLogTags
 import Compiler.DurableHistory
@@ -939,7 +940,7 @@ def loadBytes (rootBytes : List UInt8 → Digest) (logStart : Seed → Digest) (
 private def decodeRecordsFrom : Nat → List Entry → Except String (List IntentRecord)
   | _, [] => .ok []
   | height, entry :: rest => do
-      let some record := recordFrame.decode entry.record
+      let some record := DurableRecordFast.decodeRecord entry.record
         | throw s!"noncanonical durable log record at height {height}"
       return record :: (← decodeRecordsFrom (height + 1) rest)
 
@@ -954,7 +955,7 @@ private theorem decodeRecordsFrom_forall₂ :
       subst decoded; exact .nil
   | height, entry :: rest, records, decoded => by
       simp only [decodeRecordsFrom] at decoded
-      cases found : recordFrame.decode entry.record with
+      cases found : DurableRecordFast.decodeRecord entry.record with
       | none => simp [found] at decoded
       | some record =>
           simp only [found] at decoded

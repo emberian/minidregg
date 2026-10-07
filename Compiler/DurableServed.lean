@@ -30,6 +30,7 @@ Producers:
 from a head of the same Store.
 -/
 import Compiler.DurableHistoryStore
+import Compiler.DurableRecordFast
 import Std.Data.HashMap
 
 namespace Minidregg.Compiler.DurableServed
@@ -590,7 +591,7 @@ structure Opening (rootBytes : List UInt8 → Digest) where
 private def decodeRecordsAt : Nat → List DurableReceiverIO.Entry → Except String (List IntentRecord)
   | _, [] => .ok []
   | height, entry :: rest => do
-      let some record := DurableCheckpointCodec.recordFrame.decode entry.record
+      let some record := DurableRecordFast.decodeRecord entry.record
         | throw s!"noncanonical durable log record at height {height}"
       return record :: (← decodeRecordsAt (height + 1) rest)
 

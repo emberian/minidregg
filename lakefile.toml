@@ -100,6 +100,11 @@ root = "Host.WorldRootBench"
 name = "kn2-store-bench"
 root = "Host.Kn2StoreBench"
 
+# KN2: per-record decode of the durable log record frame (Host/Kn2DecodeBench.lean). Not part of the umbrella gate.
+[[lean_exe]]
+name = "kn2-decode-bench"
+root = "Host.Kn2DecodeBench"
+
 # The compiled Theory.Nock interpreter behind a CLI (stdin: jam of [subject formula];
 # see Host/NockEval.lean). Driven by the nockvm differential harness. Not part of the umbrella gate.
 [[lean_exe]]

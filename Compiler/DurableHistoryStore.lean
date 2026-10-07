@@ -10,6 +10,7 @@ make anything else unrepresentable; this module only does the IO.
 -/
 import Compiler.DurableHistoryReader
 import Compiler.DurableReceiverIO
+import Compiler.DurableRecordFast
 
 namespace Minidregg.Compiler.DurableHistoryStore
 
@@ -34,7 +35,7 @@ def pathOf {store : StoreIdentity} (head : Head store) (height : Nat) : List (Na
 /-- Decode a verified record exactly. -/
 def toRecord {store : StoreIdentity} {head : Head store} {height : Nat} (verified : Verified head.frontier head.height height) :
     Except Refusal (Record head height) :=
-  match decoded : recordFrame.decode verified.record with
+  match decoded : DurableRecordFast.decodeRecord verified.record with
   | some record => .ok ⟨verified, record, decoded⟩
   | none => .error (.undecodable height)
 
