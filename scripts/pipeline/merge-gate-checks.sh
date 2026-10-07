@@ -53,6 +53,10 @@ run api-faults     bash scripts/kn2/check-planted-api-faults.sh
 # with no panic (2026-10-07: a failed exec flushed the caller's buffered stdout into the reply pipe and
 # its bytes, read as a length, aborted the Host). Executed, no fixture; seconds.
 run coprocess-faults lake env lean --run scripts/kn2/coprocess-faults.lean
+# Only the finish/checkInert routes hand out the object kernel facet (Config.kernelTransport): an
+# environment census (scripts/KernelTransportCensus.lean) after self-test plants; a new caller or a
+# stale row is red. Needs Kernel.NativeHost + Kernel.NativeHostReplay built (the umbrella does); ~30 s.
+run kernel-transport bash scripts/check-kernel-transport.sh
 run import-boundary bash scripts/check-import-boundary.sh
 run proof-hygiene   bash scripts/check-proof-hygiene.sh
 run build-surfaces  python3 scripts/lean-build-surfaces.py check
