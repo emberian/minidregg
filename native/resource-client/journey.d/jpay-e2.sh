@@ -382,7 +382,8 @@ r = heartbeat(host, 2000, OBSERVER, OBSERVER_CAP)
 row("genesis observer 30 heartbeat", "confirmed", show(r), r.get("type") == "confirmed")
 r = heartbeat(host, 3600, EMBER, PAY_CONTROL)
 row("the controller's own report under its pay-control grant", "refused by the pay law", show(r),
-    r.get("type") == "refused" and "policyRejected" in r.get("detail", ""))
+    r.get("type") == "refused" and "Refusal.law" in r.get("detail", "")
+    and "lawDenied" in r.get("detail", ""))
 v = view(host)
 host.stop()
 
@@ -417,7 +418,8 @@ row("controller delegates observePayment to subject 31 at runtime", "confirmed",
 host = Host()
 r = heartbeat(host, 5300, NEW_OBSERVER, NEW_OBSERVER_CAP)
 row("subject 31 reports before the law names it", "refused by the pay law", show(r),
-    r.get("type") == "refused" and "policyRejected" in r.get("detail", ""))
+    r.get("type") == "refused" and "Refusal.law" in r.get("detail", "")
+    and "lawDenied" in r.get("detail", ""))
 host.stop()
 
 policy, challenge = mini_policy("pay-policy-before", EMBER, PAY_CONTROL)

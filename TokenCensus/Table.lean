@@ -72,7 +72,6 @@ Minidregg.Compiler.ObjectiveBendSourceArtifact.Checked.mk | Compiler.ObjectiveBe
 Minidregg.Compiler.ObjectiveNativeScalarBinding.BoundPlan.mk | Compiler.ObjectiveNativeScalarBinding | evidence | L2 | 4 proof / 3 data fields; layer-1 review pending
 Minidregg.Compiler.ObjectiveNativeScalarBinding.BoundRead.mk | Compiler.ObjectiveNativeScalarBinding | evidence | L2 | 3 proof / 1 data fields; layer-1 review pending
 Minidregg.Compiler.ObjectiveNativeScalarBinding.BoundScalar.mk | Compiler.ObjectiveNativeScalarBinding | evidence | L2 | 8 proof / 3 data fields; layer-1 review pending
-Minidregg.Compiler.PayEnrolSignatureIO.Checked.mk | Compiler.PayEnrolSignatureIO | evidence | L2 | 0 proof / 2 data fields; layer-1 review pending
 Minidregg.Host.FnSelectiveReleaseFnAck.Selected.mk | Host.FnSelectiveReleaseFnAck | evidence | L2 | 0 proof / 2 data fields; layer-1 review pending
 Minidregg.Host.GrainOriginPreparation.Prepared.mk | Host.GrainOriginPreparation | evidence | L2 | 0 proof / 3 data fields; layer-1 review pending
 Minidregg.Host.GrainOriginSource.Rendered.mk | Host.GrainOriginSource | evidence | L2 | 4 proof / 8 data fields; layer-1 review pending
