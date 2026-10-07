@@ -169,7 +169,7 @@ def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
       opened.durable.worldRoot, height,
       .birth finalized request.sourceCapabilities, branches ++ observations⟩
   let context : ApplicationShareIssueDelegation.Context config.deployment opened.durable :=
-    ⟨birth.prepared.pre.directory, birth.prepared.pre.authority⟩
+    (Minidregg.Compiler.ServedBasis.Ground.full _ birth.prepared.pre.directory birth.prepared.pre.authority)
   let .ok app := ApplicationShareIssueDelegation.prepare context profile
       config.federation height request.spec source.birth
     | throw "grain-backed share app preparation refused"
