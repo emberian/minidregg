@@ -18,7 +18,12 @@ module lifts that through the kernel's handlers:
   checkpoint it stores is in a `Chain` with the reference's own next yield;
   `Delivery.ran_or_fault` says what the other case is;
 * `exhaustion_reference`: an exhaustion resumes the same way, commits no ending, and leaves
-  the checkpoint (so the chain) as it was. -/
+  the checkpoint (so the chain) as it was;
+* `History.reference`: along every history of one record (`History`: a birth, then the
+  deliveries and exhaustions on the record the turn before wrote), every committed segment that
+  is the run's own is the reference node `observe start responses` at the responses it ran
+  after, with the `Chain` invariant (`History.Invariant`) at the record now held;
+  `History.spin`: where the reference spins, no committed segment is the run's own. -/
 import Kernel.ObjectiveResumeContract
 import Kernel.ObjectiveCheckpointInvariant
 
@@ -301,6 +306,137 @@ theorem exhaustion_reference {rootBytes : Bytes → Digest} {config : Config} {s
   · rw [attempt.nextExact]
   · rw [attempt.nextExact]; exact attempt.stateExact
 
+/-! ## The activity: a history of turns on one record -/
+
+/-- One committed segment of an activity's history: the responses the activity had been
+resumed with before it ran (the reference path it ran at), what it committed, and whether
+it is the bounded run's own segment (`ran`: a birth's always is; a delivery's is `Delivery.Ran`). -/
+structure Outcome where
+  responses : List ObjectiveBendOpenRecursion.Term
+  segment : Segment
+  ran : Prop
+
+/-- **The history of one activity record**: its birth, then the deliveries and exhaustions
+admitted on the record the previous turn wrote. `History config start responses outcomes
+record`: the program's initial state `start`, the responses delivered so far, every
+committed segment with the response prefix it ran at, and the record now held. A delivery
+carries the typing premise `delivery_checkpoint_typed` uses (`History.deliverReachable`
+discharges it on every reachable world). -/
+inductive History (config : Config) :
+    State → List ObjectiveBendOpenRecursion.Term → List Outcome → Record → Prop
+  | birth {rootBytes : Bytes → Digest} {snapshot : Snapshot rootBytes} {height : Nat} {request : BirthRequest}
+      (birth : Birth config snapshot height request) :
+      History config birth.start [] [⟨[], birth.segment,
+        runSegment config request.envelope.sourceTicks birth.start = .ok birth.segment⟩] birth.record
+  | deliver {start : State} {responses : List ObjectiveBendOpenRecursion.Term} {outcomes : List Outcome}
+      {record : Record} {rootBytes : Bytes → Digest} {snapshot : Snapshot rootBytes} {height : Nat}
+      {request : DeliverRequest}
+      (before : History config start responses outcomes record)
+      (delivery : Delivery config snapshot height request) (same : delivery.record = record)
+      (prior : ∃ types, Nonempty (StateTyping delivery.program.assumptions types delivery.state
+        delivery.program.checked.type)) :
+      History config start (responses ++ [delivery.responseTerm])
+        (outcomes ++ [⟨responses ++ [delivery.responseTerm], delivery.segment, delivery.Ran⟩]) delivery.next
+  | exhaust {start : State} {responses : List ObjectiveBendOpenRecursion.Term} {outcomes : List Outcome}
+      {record : Record} {rootBytes : Bytes → Digest} {snapshot : Snapshot rootBytes} {height : Nat}
+      {request : ExhaustRequest}
+      (before : History config start responses outcomes record)
+      (attempt : Exhaustion config snapshot height request) (same : attempt.record = record) :
+      History config start responses outcomes attempt.next
+
+/-- On a reachable world (from a genesis whose record cells are typed) a delivery's typing
+premise holds, so the history step needs none. -/
+theorem History.deliverReachable {config : Config} {start : State} {responses : List ObjectiveBendOpenRecursion.Term}
+    {outcomes : List Outcome} {record : Record} {rootBytes : Bytes → Digest} {genesis snapshot : Snapshot rootBytes}
+    {height : Nat} {request : DeliverRequest}
+    (genesisTyped : ObjectiveCheckpointInvariant.RecordCellsTyped config genesis)
+    (reachable : ObjectiveCheckpointInvariant.Reachable config genesis snapshot)
+    (before : History config start responses outcomes record)
+    (delivery : Delivery config snapshot height request) (same : delivery.record = record) :
+    History config start (responses ++ [delivery.responseTerm])
+      (outcomes ++ [⟨responses ++ [delivery.responseTerm], delivery.segment, delivery.Ran⟩]) delivery.next :=
+  .deliver before delivery same (ObjectiveCheckpointInvariant.Delivery.prior delivery
+    (ObjectiveCheckpointInvariant.stored_checkpoints_typed genesisTyped reachable request.record delivery.record
+      delivery.recordExact delivery.located))
+
+/-- The invariant of a history: the reference has reached a state `p` along the responses
+so far, and if the record awaits, the reference at `p` yields to its own state `y`, in a
+`Chain` with the checkpoint the record holds. -/
+def History.Invariant (budget : ObjectiveBendDemandData.Budget) (start : State)
+    (responses : List ObjectiveBendOpenRecursion.Term) (record : Record) : Prop :=
+  ∀ await, record.phase = .awaiting await →
+    ∃ p d y stored, (∀ rest, observe budget start (responses ++ rest) = observe budget p rest) ∧
+      ending budget p = some (.yielded d, y) ∧ decodeCheckpoint record.checkpoint = some stored ∧ Chain y stored
+
+/-- **(c) The activity is its reference interaction tree, resources only.** Along every
+history of one record, every committed segment that is the bounded run's own is the
+reference node `observe start responses` at the responses it ran after (so the sequence of
+committed endings is the reference's observation along the same responses), and the
+`Chain` invariant holds at the record now held. -/
+theorem History.reference {config : Config} {start : State} {responses : List ObjectiveBendOpenRecursion.Term}
+    {outcomes : List Outcome} {record : Record} (history : History config start responses outcomes record) :
+    (∀ o ∈ outcomes, o.ran → ∃ e, Segment.OfEnding e o.segment ∧
+      observe config.planBudget start o.responses = Node.ofEnding e) ∧
+    History.Invariant config.planBudget start responses record := by
+  induction history with
+  | birth birth =>
+    refine ⟨fun o mem ran => ?_, fun await awaiting => ?_⟩
+    · simp only [List.mem_singleton] at mem
+      subst mem
+      obtain ⟨e, of, isNode⟩ := birth_reference birth
+      exact ⟨e, of, by simpa [observe] using isNode⟩
+    · obtain ⟨state, plan, _, yieldedSegment, _⟩ := ObjectiveCheckpointInvariant.nextRecord_awaiting
+        (by rw [← birth.recordExact]; exact awaiting)
+      obtain ⟨d, own, _, _, ended, chain, decoded⟩ := birth_reference_vis birth yieldedSegment
+      exact ⟨birth.start, d, own, state, fun rest => by simp, ended, decoded, chain⟩
+  | @deliver start responses outcomes record _ _ _ _ _ delivery same prior ih =>
+    obtain ⟨past, invariant⟩ := ih
+    obtain ⟨p, d, y, stored, path, ended, decoded, chain⟩ := invariant delivery.await (same ▸ delivery.awaiting)
+    have read := delivery.stateExact
+    rw [same, decoded] at read
+    cases read
+    obtain ⟨next, resumed, _, lift⟩ := delivery_reference delivery prior chain
+    have step : ∀ rest, observe config.planBudget start ((responses ++ [delivery.responseTerm]) ++ rest) =
+        observe config.planBudget next rest := by
+      intro rest
+      rw [List.append_assoc, List.singleton_append, path]
+      simp [observe, ended, resumed]
+    refine ⟨fun o mem ran => ?_, fun await awaiting => ?_⟩
+    · rcases List.mem_append.mp mem with old | new
+      · exact past o old ran
+      · simp only [List.mem_singleton] at new
+        subst new
+        obtain ⟨e, of, isNode, _⟩ := lift ran
+        refine ⟨e, of, ?_⟩
+        have := step []
+        simp only [List.append_nil] at this
+        rw [this]
+        simpa [observe] using isNode
+    · obtain ⟨state, plan, _, yieldedSegment, _⟩ := ObjectiveCheckpointInvariant.nextRecord_awaiting
+        (by rw [← delivery.nextExact]; exact awaiting)
+      obtain ⟨e, _, _, yields⟩ := lift (delivery.ran_of_yielded yieldedSegment)
+      obtain ⟨d', own, _, _, ended', chain', decoded'⟩ := yields state plan yieldedSegment
+      exact ⟨next, d', own, state, step, ended', decoded', chain'⟩
+  | @exhaust start responses outcomes record _ _ _ _ _ attempt same ih =>
+    obtain ⟨past, invariant⟩ := ih
+    refine ⟨past, fun await awaiting => ?_⟩
+    obtain ⟨_, _, sameCheckpoint, samePhase, _, _⟩ := exhaustion_reference attempt (y := attempt.state)
+      (Chain.settles (ObjectiveBendDemandCollect.Agree.refl _))
+    rw [samePhase, same] at awaiting
+    obtain ⟨p, d, y, stored, path, ended, decoded, chain⟩ := invariant await awaiting
+    exact ⟨p, d, y, stored, path, ended, by rw [sameCheckpoint, same]; exact decoded, chain⟩
+
+/-- **(c), spinning**: wherever the reference spins along a history, the segment committed
+there is not the bounded run's own (it is a program fault, `Delivery.ran_or_fault`). -/
+theorem History.spin {config : Config} {start : State} {responses : List ObjectiveBendOpenRecursion.Term}
+    {outcomes : List Outcome} {record : Record} (history : History config start responses outcomes record)
+    {o : Outcome} (mem : o ∈ outcomes) (spins : observe config.planBudget start o.responses = .spin) : ¬ o.ran := by
+  intro ran
+  obtain ⟨e, _, isNode⟩ := history.reference.1 o mem ran
+  rw [spins] at isNode
+  cases e <;> cases isNode
+
+
 #assert_axioms runSegment_yielded_ends
 #assert_axioms segment_reference
 #assert_axioms ObjectiveActivity.Birth.validYield
@@ -314,5 +450,8 @@ theorem exhaustion_reference {rootBytes : Bytes → Digest} {config : Config} {s
 #assert_axioms delivery_spin
 #assert_axioms first_delivery_chain
 #assert_axioms exhaustion_reference
+#assert_axioms History.deliverReachable
+#assert_axioms History.reference
+#assert_axioms History.spin
 
 end Minidregg.Kernel.ObjectiveReferenceLift
