@@ -609,5 +609,26 @@
    "value": "4"
   },
   "owner": "control"
+ },
+ {
+  "name": "S5a-SuperRigid",
+  "modules": [
+   {
+    "name": "OpenSuperRigid",
+    "source": "OpenSuperRigid.obend"
+   }
+  ],
+  "entry": "xOfFive",
+  "arguments": [],
+  "prediction": "GPT-6 row D, Super abstract: a template using super as a value of its Super bound row is refused at the declaration (it used to finish = 5: Super was the literal bound row)",
+  "current": {
+   "status": "refused",
+   "refusal": "refused (super-rigid)"
+  },
+  "target": {
+   "status": "refused",
+   "refusal": "refused (super-rigid)"
+  },
+  "owner": "control"
  }
 ]

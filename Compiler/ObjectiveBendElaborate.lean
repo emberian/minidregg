@@ -453,7 +453,7 @@ structure St where
   /-- Per open declaration, in emission order: its key, its `Self` variable's index and its
   knot field (the template at its own bounds). The front end checks each once with that
   variable RIGID (`ObjectiveBendFrontEnd.checkTemplates`, D2). -/
-  templates : List (String × Nat × ATerm) := []
+  templates : List (String × List Nat × ATerm) := []
   /-- The declared result type of the body being lowered (for a `fix` in tail position). -/
   resultType : Option PTy := none
   /-- The target a `fix` about to be lowered must produce (tail position or annotated let). -/
@@ -678,7 +678,13 @@ def sourceType (c : Ctx) : Nat → String → String → List String → M (Opti
     if let [left, right] := splitTop name " with " then
       let some l ← sourceType c fuel left moduleName seen | return none
       let some r ← sourceType c fuel right moduleName seen | return none
-      if !isRowTy l || !isRowTy r then
+      let bounds := (← get).sumBounds
+      let rowVariable := match l with
+        | .variable k => match bounds.lookup k with
+          | some bound => isRowTy bound
+          | none => false
+        | _ => false
+      if !(isRowTy l || rowVariable) || !isRowTy r then
         typeError ("`" ++ name ++ "`: `with` overlays a record row on a record row"); return none
       return some (PTy.overlay r l).canonical
     if name.startsWith "{" && name.endsWith "}" then
@@ -883,9 +889,16 @@ def openBinding (c : Ctx) : Nat → String → String → List Signature → Str
     | some sr, some ir =>
       if !ok || !isRowTy sr || !isRowTy ir then
         typeError ("open declaration " ++ key ++ ": Self and Super bounds must be record rows"); return none
-      modify fun s => { s with sumBounds := s.sumBounds ++ [(index, (PTy.overlay (PTy.row required) sr).canonical)] }
-      modify fun s => { s with openBounds := s.openBounds ++ [(key, (selfVar, ir))] }
-      return some (selfVar, ir)
+      -- Super is abstract too (GPT-6 row D): a second bounded variable whose bound is the Super
+      -- row, so the template is checked against what it READS of the row beneath, never against
+      -- the bound row as if it were the row itself (super-rigid).
+      let superIndex := (← get).sumVariables.length + 1
+      modify fun s => { s with sumVariables := s.sumVariables ++ [("$Super:" ++ key, superIndex)] }
+      modify fun s => { s with sumBounds := s.sumBounds ++ [(index, (PTy.overlay (PTy.row required) sr).canonical),
+        (superIndex, ir.canonical)] }
+      let superVar := PTy.variable superIndex
+      modify fun s => { s with openBounds := s.openBounds ++ [(key, (selfVar, superVar))] }
+      return some (selfVar, superVar)
     | _, _ => return none
 
 /-- The members a spec's methods define, at their declared types. -/
@@ -1283,6 +1296,10 @@ def expression (c : Ctx) : Nat → Expr → List Binding → Module → M ATerm
       if let .var "super" := target then
         if let some b := env.find? (·.name == "super") then
           if let some ty := b.ty then
+            let bounds := (← get).sumBounds
+            let ty := match ty with
+              | .variable k => (bounds.lookup k).getD ty
+              | t => t
             if isRowTy ty && (lookupRow (some ty) name).isNone then
               fail ("refused (inherited-unprovided): super." ++ name ++ " is read, but nothing below this layer provides " ++
                 name ++ " (inherited: {" ++ ", ".intercalate (rowNames ty) ++ "})")
@@ -1811,7 +1828,7 @@ structure Output where
   sumBounds : List (Nat × PTy)
   typeErrors : Array String
   /-- The open declarations' templates (`St.templates`). -/
-  templates : List (String × Nat × ATerm) := []
+  templates : List (String × List Nat × ATerm) := []
 
 /-- One declaration of the package knot: its field and the hidden layer fields it created. -/
 def emitDecl (c : Ctx) (fuel : Nat) (m : Module) (d : Decl) (fields : List (String × ATerm)) : M (List (String × ATerm)) := do
@@ -1839,7 +1856,7 @@ def emitDecl (c : Ctx) (fuel : Nat) (m : Module) (d : Decl) (fields : List (Stri
     | _ => fail "unsupported declaration"
   if !d.binders.isEmpty then
     match (← get).openBounds.lookup key with
-    | some (.variable k, _) => modify fun st => { st with templates := st.templates ++ [(key, k, value)] }
+    | some (.variable k, .variable j) => modify fun st => { st with templates := st.templates ++ [(key, [k, j], value)] }
     | _ => fail ("open declaration " ++ key ++ ": its Self variable is unresolved")
   let mut fields := fields ++ [(key, value)]
   for (name, value, type) in (← get).hidden do
