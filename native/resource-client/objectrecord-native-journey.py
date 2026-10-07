@@ -134,6 +134,7 @@ try:
     with w.group('OR4-birth-law'):
         w.create('create-ledger-b', w.sponsor, 'ledger-b', ledger_law, 'installed')
         before = w.watched('before-bad-birth')
+        w.over_extract_plant('birth-one-tick-over-extract-refused', w.sponsor, 'ledger-b', 20000)
         w.birth('birth-set-500-refused', w.sponsor, 'ledger-b', 20000, 'refused',
                 ['lawDenied', 'le "state/total" 100', 'before := none', 'after := some 500'],
                 init=variant('set', nat(500)))

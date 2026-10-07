@@ -521,6 +521,9 @@ def viewJson (domain : Digest) (asset : Nat) (request : ViewRequest) (view : Nat
         ("cell", decimal (inboxCellOf domain sender target))]).toArray),
     ("slots", Json.arr (request.slots.map fun name =>
       .mkObj [("name", decimal name), ("cell", decimal (slotCellOf domain name))]).toArray),
+    ("limits", .mkObj [("extractTicks", match view.extractTicks with
+      | some ticks => decimal ticks
+      | none => .null)]),
     ("quotes", Json.arr (view.quotes.map fun (record, await, quote) =>
       match quote with
       | .ok quote => .mkObj [("record", decimal record), ("await", decimal await),

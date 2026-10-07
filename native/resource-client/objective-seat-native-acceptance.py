@@ -52,7 +52,7 @@ ROOT/transcript holds every command's exact output; ROOT/results.json lists ever
 row with its expectation and verdict; the script exits 1 on any mismatch.
 """
 import argparse, json, os, pathlib, secrets, subprocess, sys, time
-from activity_world import RESUME_KINDS, covering_body, quote_request, quoted_heap
+from activity_world import RESUME_KINDS, covering_body, published_extract_ticks, quote_request, quoted_heap
 
 os.umask(0o077)
 HERE = pathlib.Path(__file__).resolve().parent
@@ -290,12 +290,28 @@ def roots(v):
     return {c['cell']: c['root'] for c in v.get('cells', [])}
 
 
+_EXTRACT = []
+
+
+def extract_ticks():
+    """The extraction budget the Host publishes (`limits.extractTicks` = `config.maxExtractTicks`), asked
+    once from the public activity view; it must equal the policy this world authored."""
+    if not _EXTRACT:
+        _EXTRACT.append(published_extract_ticks(last_json(sh('limits-view', mini, 'activity', '--action', 'view',
+                                                             '--workspace', alice_ws, '--request', '{}'))))
+        check('extract-quote-is-the-policy-ceiling', _EXTRACT[0] == 16 * MAXIMUM['extractTicks'],
+              {'published': _EXTRACT[0], 'policy': 16 * MAXIMUM['extractTicks']})
+    return _EXTRACT[0]
+
+
 def activity_cap(ticks):
     """A declared envelope (Capacity): `ticks` source ticks, the kernel's fixed heap, stack,
-    type fuel and Plan budget, priced at 0 (as the activity driver's `cap`)."""
+    type fuel and Plan budget, priced at 0 (as the activity driver's `cap`), and the published
+    extraction budget."""
     c = {k: '0' for k in MAXIMUM}
-    for k in ['heap', 'stack', 'typeFuel', 'outputNodes', 'outputBytes', 'extractTicks']:
+    for k in ['heap', 'stack', 'typeFuel', 'outputNodes', 'outputBytes']:
         c[k] = str(MAXIMUM[k])
+    c['extractTicks'] = str(extract_ticks())
     c['sourceTicks'] = str(ticks)
     return c
 

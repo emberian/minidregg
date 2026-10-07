@@ -81,7 +81,7 @@ ROOT/transcript holds every command's exact output; ROOT/results.json lists ever
 row with its expectation and verdict; the script exits 1 on any mismatch.
 """
 import argparse, re, json, os, pathlib, secrets, subprocess, sys, time
-from activity_world import RESUME_KINDS, covering_body, quote_request, quoted_heap, short_body
+from activity_world import RESUME_KINDS, covering_body, published_extract_ticks, quote_request, quoted_heap, short_body
 
 os.umask(0o077)
 HERE = pathlib.Path(__file__).resolve().parent
@@ -278,8 +278,9 @@ def judge(label, value, expect, detail):
         ok = kind == 'refused' and reason == 'conflict'
     else:
         ok = kind == 'refused' or 'refused' in str(value.get('error', ''))
-    if ok and detail is not None:
-        ok = detail in text
+    if ok and detail is not None:  # one substring, or a list of them (all must be in the whitespace-normalised text)
+        flat = ' '.join(str(text).split())
+        ok = all(d in flat for d in ([detail] if isinstance(detail, str) else detail))
     results.append({'step': label, 'expect': expect, 'detailExpected': detail, 'type': kind,
                     'reason': reason, 'detail': text[-300:], 'ok': ok})
     print(f'{label:44} {expect:9} {kind} {reason} {text[-120:]}', flush=True)
@@ -366,13 +367,22 @@ check('bare-has-no-record', cell_of(ov, ov['objects'][1]['objectCell']).get('kin
       cell_of(ov, ov['objects'][1]['objectCell']))
 create('create-again-conflicts', sponsor, 'tally-one', 'conflict')
 
+# The per-turn extraction ceiling the Host publishes (`limits.extractTicks` = `config.maxExtractTicks`): what every
+# full envelope declares, learned here, not authored into an envelope.
+EXTRACT_TICKS = published_extract_ticks(view('limits', {}))
+check('extract-quote-is-the-policy-ceiling', EXTRACT_TICKS == 16 * MAXIMUM['extractTicks'],
+      {'published': EXTRACT_TICKS, 'policy': 16 * MAXIMUM['extractTicks']})
+
+
 def cap(ticks, full=True):
     """A declared envelope (Capacity): `ticks` source ticks; a full one also declares the
-    kernel's fixed heap, stack, type fuel and Plan budget (Config.covers), priced at 0."""
+    kernel's fixed heap, stack, type fuel and Plan budget (Config.covers), priced at 0, and the
+    published extraction budget."""
     c = {k: '0' for k in MAXIMUM}
     if full:
-        for k in ['heap', 'stack', 'typeFuel', 'outputNodes', 'outputBytes', 'extractTicks']:
+        for k in ['heap', 'stack', 'typeFuel', 'outputNodes', 'outputBytes']:
             c[k] = str(MAXIMUM[k])
+        c['extractTicks'] = str(EXTRACT_TICKS)
     c['sourceTicks'] = str(ticks)
     return c
 
@@ -390,13 +400,15 @@ LAST = {}
 
 
 def birth(label, workspace, name, deposit, expect, detail=None, account=SPONSOR_ACCOUNT, account_cap=SPONSOR_SPEND,
-          object_cap=None, decider=SECOND, init=None, ticks=TICKS, resume_ticks=None, pin=None):
+          object_cap=None, decider=SECOND, init=None, ticks=TICKS, resume_ticks=None, pin=None, extract_ticks=None):
     o = objects[name]
     body = {'kind': 'birth', 'object': o['object'], 'objectCapability': object_cap or o['capability'],
             'account': account, 'accountCapability': account_cap, 'pin': pin or PIN,
             'input': record(init=init or variant('set', nat(0)), decider=nat(int(decider))),
             'envelope': cap(ticks), 'resume': cap(resume_ticks or ticks), 'timeout': cap(ticks),
             'deposit': str(deposit)}
+    if extract_ticks is not None:
+        body['envelope'] = dict(body['envelope'], extractTicks=str(extract_ticks))
     value = turn(label, workspace, body, expect, detail)
     LAST['value'] = value
     return value.get('transaction')
@@ -440,6 +452,8 @@ birth('foreign-payer-refused', sponsor, 'tally-one', 20000, 'refused', 'notAccou
       account=SECOND, account_cap='4002')
 birth('underfunded-birth-refused', sponsor, 'tally-one', PAIR - 1, 'refused', 'underfunded')
 birth('birth-on-bare-refused', sponsor, 'bare', 20000, 'refused', 'notAnObject')
+birth('birth-one-tick-over-extract-refused', sponsor, 'tally-one', 20000, 'refused',
+      ['uncovered', f'extractTicks := {EXTRACT_TICKS + 1}'], extract_ticks=EXTRACT_TICKS + 1)
 birth('birth-other-pin-refused', sponsor, 'tally-one', 20000, 'refused', 'pinMismatch', pin=PIN2)
 
 # --- tally one -------------------------------------------------------------------
