@@ -16,7 +16,6 @@ private def largePayload : List UInt8 := List.replicate 150000 42
 
 private def resourceCommand : DeclaredResourceController.Command :=
   { subject := ⟨7⟩
-    expectedAuthorityRoot := ⟨11⟩
     nonce := 19
     targets :=
       [{ kind := .object
