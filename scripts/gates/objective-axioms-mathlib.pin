@@ -16051,6 +16051,7 @@ A Minidregg.Kernel.ObjectiveCall.Journal.install : -
 A Minidregg.Kernel.ObjectiveCall.Journal.lookup : -
 A Minidregg.Kernel.ObjectiveCall.Journal.outbox : -
 A Minidregg.Kernel.ObjectiveCall.Journal.posts : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.Journal.posts_state : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.Journal.start : -
 A Minidregg.Kernel.ObjectiveCall.Journal.writes : -
 A Minidregg.Kernel.ObjectiveCall.Mail.credits : Classical.choice, Quot.sound, propext
@@ -16143,16 +16144,31 @@ A Minidregg.Kernel.ObjectiveCall.spendGrant : propext
 A Minidregg.Kernel.ObjectiveCall.touch : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.touch_read : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.touch_spec : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.AdmittedTurn.DeliversMessage : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.AdmittedTurn.Sends : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.AdmittedTurn.delivery_deciders : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.AdmittedTurn.final_writes_delivery_deciders : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.AdmittedTurn.final_writes_inbox_writers : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.AdmittedTurn.inbox_writers : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.AdmittedTurn.posts_decide_no_delivery : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.AdmittedTurn.posts_hold_no_inbox : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.AdmittedTurn.safe : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.CheckpointTyped : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.CheckpointTyped.transfer : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.DecidesDelivery : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.Delivery.prior : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.HoldsInbox : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.MessageDelivery.decides_delivery_slot : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.PackageBody : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.PostSafe : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.Quiet : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.RecordCellsTyped : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.Step.preserves : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.abandonSlot_quiet : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.abandonSlot_safe : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.abandonment_quiet : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.abandonment_safe : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.birth_quiet : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.birth_safe : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.bodyOf_image_other : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.bodyOf_of_payload_none : Classical.choice, Quot.sound, propext
@@ -16160,32 +16176,52 @@ A Minidregg.Kernel.ObjectiveCheckpointInvariant.bodyOf_other : Classical.choice,
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.bodyOf_some : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.book_post_safe : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.commitYield_safe : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.creation_quiet : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.creation_safe : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.decidesDelivery_decided_slot : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.decodeStored_nil : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.delivery_quiet : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.delivery_safe : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.execute_preserves : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.exhaustion_quiet : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.exhaustion_safe : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.finalIntent_writes : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.finalize_posts_of : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.finalize_safe : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.foreign_preserves : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.holdsInbox_inboxImage : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.inert_safe : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.install_package_kept : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.install_preserves : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.invocation_decides_nothing : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.invocation_mail_nil : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.invocation_posts_cases : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.invocation_safe : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.invocation_silent_holds_no_inbox : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.loadBook_payload : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.loadProgram_present : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.lookupPostBytes_absent : -
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.lookupPostBytes_posts : propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.mail_decides_nothing : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.messageDelivery_safe : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.nextRecord_awaiting : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.nextRecord_input : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.nextRecord_pin : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.not_decidesDelivery_image : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.not_decidesDelivery_of_payload_none : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.not_decidesDelivery_slot : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.not_holdsInbox_image : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.not_holdsInbox_of_payload_none : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.outcome_posts_safe : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.packageBytes_eq : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.payloadOf_book : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.payloadOf_image : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.postSafe_inert : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.publication_quiet : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.publication_safe : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.quiet_image : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.quiet_of_payload_none : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.quiet_recordPost : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.reachable_delivery_typed : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.readObject_none_payload : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.readRecord_eq : Classical.choice, Quot.sound, propext
@@ -16197,14 +16233,17 @@ A Minidregg.Kernel.ObjectiveCheckpointInvariant.recordIn : Classical.choice, Quo
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.recordIn_image_other : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.recordIn_recordImage : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.recordIn_retired : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.resolution_quiet : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.resolution_safe : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.segmentCommit_safe : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.settle_safe : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.slot_post_safe : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.slot_retire_safe : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.stateWrite_quiet : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.stateWrite_safe : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.state_post_safe : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.stored_checkpoints_typed : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.yielded_posts_quiet : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveKernelConfig.Ambient.asset : -
 A Minidregg.Kernel.ObjectiveKernelConfig.Ambient.collector : -
 A Minidregg.Kernel.ObjectiveKernelConfig.Ambient.federation : -
@@ -16262,6 +16301,17 @@ A Minidregg.Kernel.ObjectiveResumeContract.tallyReply : -
 A Minidregg.Kernel.ObjectiveResumeContract.tallyTerm : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.tallyYield : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.typed_runBounded_yielded : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.HeldInbox.cell_eq : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.Invocation.debits_only_account : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.Invocation.escrows_every_send : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.Invocation.retention_cells_have_payer : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.Mail.Anchored : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.Mail.cells_have_payer : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.Mail.empty_anchored : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.Mail.inboxes_bounded : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.Mail.send_anchored : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.Mail.send_credit : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.Mail.send_inboxes_persist : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveSend.MessageDelivery.batchExact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveSend.MessageDelivery.book : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveSend.MessageDelivery.bookExact : Classical.choice, Quot.sound, propext
@@ -16274,6 +16324,8 @@ A Minidregg.Kernel.ObjectiveSend.MessageDelivery.decidedExact : Classical.choice
 A Minidregg.Kernel.ObjectiveSend.MessageDelivery.decides_own_slot : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveSend.MessageDelivery.ends : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveSend.MessageDelivery.failed_delivery_pops : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.failed_delivery_posts : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.failed_mail : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveSend.MessageDelivery.forwarded : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveSend.MessageDelivery.guards : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveSend.MessageDelivery.inbox : Classical.choice, Quot.sound, propext
@@ -16283,6 +16335,7 @@ A Minidregg.Kernel.ObjectiveSend.MessageDelivery.message : Classical.choice, Quo
 A Minidregg.Kernel.ObjectiveSend.MessageDelivery.named : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveSend.MessageDelivery.outcome : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveSend.MessageDelivery.outcomeExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.pop_frees_message : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveSend.MessageDelivery.popped : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveSend.MessageDelivery.pops : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveSend.MessageDelivery.posted : Classical.choice, Quot.sound, propext
@@ -16291,6 +16344,8 @@ A Minidregg.Kernel.ObjectiveSend.MessageDelivery.postsExact : Classical.choice, 
 A Minidregg.Kernel.ObjectiveSend.MessageDelivery.readExact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveSend.MessageDelivery.refunds : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveSend.MessageDelivery.remaining : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.remaining_within_bound : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.retention_cells_have_payer : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveSend.MessageDelivery.seed : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveSend.MessageDelivery.seedExact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveSend.MessageDelivery.slot : Classical.choice, Quot.sound, propext
@@ -16311,15 +16366,30 @@ A Minidregg.Kernel.ObjectiveSend.Outcome.guards : Classical.choice, Quot.sound, 
 A Minidregg.Kernel.ObjectiveSend.Outcome.posts : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveSend.Outcome.reference : propext
 A Minidregg.Kernel.ObjectiveSend.Outcome.replied.elim : -
+A Minidregg.Kernel.ObjectiveSend.afterPosts_of_nodup : Quot.sound, propext
 A Minidregg.Kernel.ObjectiveSend.creditTransfers_debit : Quot.sound, propext
 A Minidregg.Kernel.ObjectiveSend.debited : -
 A Minidregg.Kernel.ObjectiveSend.deliverMessage : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveSend.deliveryBatch : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveSend.forward : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.forward_anchored : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.forward_inboxes_persist : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.forward_none : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.holdInbox_cover : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.holdSlot_cover : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.inboxAt_posted : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveSend.messageClaim : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveSend.messageTransaction : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.objectAt_afterPosts : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.openSlot_fresh : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.option_isSome_of_eq : -
+A Minidregg.Kernel.ObjectiveSend.payer_inbox_image : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.payer_slot_image_inbox : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.postMail_anchored : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.postMail_credits : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveSend.referenceOf : propext
 A Minidregg.Kernel.ObjectiveSend.runMessage : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.runMessage_read : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveSend.seedMail : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveTariff.Tariff.base : -
 A Minidregg.Kernel.ObjectiveTariff.Tariff.heap : -
