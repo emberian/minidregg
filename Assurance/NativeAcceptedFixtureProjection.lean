@@ -70,11 +70,12 @@ variable {F : Type} [Field F] [DecidableEq F] {deployment : CanonicalCellRegistr
   {command : Command}
 
 /-- The subject each of an accepted invocation's signature checks was for: the
-authority leg, then each target leg. -/
+authority leg, then each target leg (its ordinary leg's receipt, or an observe-only
+read target's `ReadLeg`'s: `AcceptedInvocation.receipt`). -/
 def receiptSubjects {prepared : PreparedInvocation deployment profile ambient durable command}
     {signed : SignedCommand} (accepted : AcceptedInvocation prepared signed) : List Nat :=
-  ((accepted.checked none).receipt :: (List.finRange command.targets.length).map fun i =>
-    (accepted.checked (some i)).receipt).map fun receipt => receipt.request.2.subject.value
+  (accepted.receipt none :: (List.finRange command.targets.length).map fun i =>
+    accepted.receipt (some i)).map fun receipt => receipt.request.2.subject.value
 
 end Receipts
 
