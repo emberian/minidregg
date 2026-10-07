@@ -62,50 +62,45 @@ def cap(ticks, full=True):
 # resume and timeout envelopes carry the deployment's heap and no more, so the checkpoint's own cells are
 # declared in the command's `extra`, and the submitter pays it (a fee from its own account at the tariff's
 # rate: a command that adds nothing may name account 0, one that adds heap cannot).
-# `needed` is a function of the stored checkpoint, which a client cannot count without decoding it, and the
-# Host has no quote op for it. The Host's own refusal states it, so a client PROBES: the same command with
-# a non-empty `extra` (one input byte) and account 0. Past the heap check that command can only be refused
-# at the posting (`bookRefused`: account 0 pays nothing), so it never installs; short of the heap check it
-# is refused `heapUncovered needed declared`. The three drivers share these functions.
-HEAP_UNCOVERED = re.compile(r'heapUncovered (\d+) (\d+)')
+# The client does not guess `needed`: the Host's public view (op 214) answers `quotes: [{record, await}]` with
+# `{needed, escrow}` from the very prefix and `ResumeTail.needed` that the turns' `heapUncovered` refusal
+# uses (Kernel/ObjectiveActivity `resumeQuote`). A quote the Host refuses (retired record, other await) leaves
+# the command as it is, so the turn's own refusal is what gets judged.
 RESUME_KINDS = ('deliver', 'exhaust')
 
 
-def heap_probe_body(body):
-    """The probe of `body` (a deliver/exhaust): non-empty extra, unpayable account; never installs."""
-    return dict(body, extra=dict({k: '0' for k in MAXIMUM}, inputBytes='1'), account='0', accountCapability='0')
+def quote_request(body):
+    return {'quotes': [{'record': str(body['record']), 'await': str(body['await'])}]}
 
 
-def refusal_text_of(value):
-    text = unhex(value.get('detail', '')) if 'detail' in value else value.get('error', '')
-    return ' '.join(str(text).split())
+def quoted_heap(view):
+    """(needed, escrow) of the first quote in a view reply, or None when the Host refused the quote."""
+    q = (view.get('quotes') or [{}])[0]
+    return None if 'needed' not in q else (int(q['needed']), int(q['escrow']))
 
 
-def probed_shortfall(value):
-    """(needed, declared) the probe's refusal states, or None when the probe was refused before the heap
-    check (or after it, so the heap is covered). An installed probe is a bug that must stay loud."""
-    if value.get('type') == 'confirmed':
-        raise RuntimeError(f'the heap probe was installed, it must always be refused: {value}')
-    m = HEAP_UNCOVERED.search(refusal_text_of(value))
-    return (int(m.group(1)), int(m.group(2))) if m else None
-
-
-def with_extra_heap(body, cells, payer):
-    """`body` declaring `cells` more heap in its `extra` (other extra fields kept), paid by `payer`, the
+def with_extra_heap(body, heap, payer):
+    """`body` declaring `heap` cells in its `extra` (other extra fields kept), paid by `payer`, the
     submitter's (account, spend capability)."""
     extra = dict(body.get('extra') or {k: '0' for k in MAXIMUM})
-    extra['heap'] = str(int(extra.get('heap', '0')) + cells)
+    extra['heap'] = str(heap)
     return dict(body, extra=extra, account=str(payer[0]), accountCapability=str(payer[1]))
 
 
-def covering_body(body, shortfall, payer):
-    """`body` declaring exactly the heap the probe found missing (unchanged when nothing is missing)."""
-    return body if shortfall is None else with_extra_heap(body, shortfall[0] - shortfall[1], payer)
+def covering_body(body, quote, payer):
+    """`body` declaring the heap the quote says its checkpoint needs beyond the escrow; unchanged when the
+    escrow already covers it, or when there is no quote."""
+    if quote is None:
+        return body
+    needed, escrow = quote
+    declared = int((body.get('extra') or {}).get('heap', '0'))
+    return body if needed <= escrow + declared else with_extra_heap(body, needed - escrow, payer)
 
 
-def short_body(body, shortfall, payer):
-    """`body` declaring ONE cell fewer than it needs: the plant."""
-    return with_extra_heap(body, shortfall[0] - shortfall[1] - 1, payer)
+def short_body(body, quote, payer):
+    """`body` declaring ONE cell fewer than the quote says it needs: the plant."""
+    needed, escrow = quote
+    return with_extra_heap(body, needed - escrow - 1, payer)
 
 
 def eq(slot, value):
@@ -268,32 +263,33 @@ class World:
             return self.SECOND, self.SECOND_SPEND
         return self.SPONSOR_ACCOUNT, self.SPONSOR_SPEND
 
-    def probe_heap(self, label, workspace, body):
-        """(needed, declared) of a `deliver`/`exhaust`, or None when its envelope already covers (see
-        `heap_probe_body`)."""
-        return probed_shortfall(self.submit(f'{label}-heap-probe', workspace, heap_probe_body(body)))
+    def quote_heap(self, label, workspace, body):
+        """(needed, escrow) of a `deliver`/`exhaust` from the Host's view quote, or None when refused."""
+        r = self.sh(f'view-{label}-quote', self.mini, 'activity', '--action', 'view', '--workspace', workspace,
+                    '--request', json.dumps(quote_request(body)))
+        return quoted_heap(self.last_json(r))
 
     def turn(self, label, workspace, body, expect, detail=None, prepare=False):
         """One signed command. `expect`: installed | replayed | refused | conflict | prepared. A refusal
         may name its reason in `detail` (a substring, or a list of substrings, of the Host's refusal text).
-        A `deliver`/`exhaust` first learns the heap its checkpoint needs and declares it (`probe_heap`)."""
+        A `deliver`/`exhaust` first asks the Host's quote for the heap its checkpoint needs and declares it."""
         if body.get('kind') in RESUME_KINDS:
-            body = covering_body(body, self.probe_heap(label, workspace, body), self.payer_of(workspace))
+            body = covering_body(body, self.quote_heap(label, workspace, body), self.payer_of(workspace))
         return self.judge(label, self.submit(label, workspace, body, prepare), expect, detail)
 
     def short_heap_plant(self, label, workspace, body):
-        """The PLANT of the heap declaration: the same `deliver`/`exhaust` declaring ONE cell fewer than it
-        needs must be refused `heapUncovered needed needed-1`, with exactly those numbers. A plant that
-        cannot be made (the envelope already covers) is a red row, never a skipped one."""
-        short = self.probe_heap(label, workspace, body)
-        if short is None or short[0] - short[1] < 1:
-            self._row({'step': label, 'expect': 'plant', 'ok': False, 'observed': f'no plant possible: {short}'})
+        """The PLANT of the heap declaration: the same `deliver`/`exhaust` declaring ONE cell fewer than the
+        quote needs must be refused `heapUncovered needed needed-1`, with the QUOTE's number: the quote and
+        the refusal are one source, and this row is red if they ever differ. A plant that cannot be made
+        (the escrow already covers) is a red row, never a skipped one."""
+        quote = self.quote_heap(label, workspace, body)
+        if quote is None or quote[0] - quote[1] < 1:
+            self._row({'step': label, 'expect': 'plant', 'ok': False, 'observed': f'no plant possible: {quote}'})
             print(f'{label:44} plant     NOT PLANTED', flush=True)
             return None
-        planted = short_body(body, short, self.payer_of(workspace))
-        self.judge(label, self.submit(label, workspace, planted), 'refused',
-                   f'heapUncovered {short[0]} {short[0] - 1}')
-        return short[0]
+        self.judge(label, self.submit(label, workspace, short_body(body, quote, self.payer_of(workspace))),
+                   'refused', f'heapUncovered {quote[0]} {quote[0] - 1}')
+        return quote[0]
 
     def resubmit(self, label, ingress, expect, detail=None):
         r = self.sh(label, self.mini, 'activity', '--action', 'resubmit', '--workspace', self.sponsor,

@@ -81,7 +81,7 @@ ROOT/transcript holds every command's exact output; ROOT/results.json lists ever
 row with its expectation and verdict; the script exits 1 on any mismatch.
 """
 import argparse, re, json, os, pathlib, secrets, subprocess, sys, time
-from activity_world import RESUME_KINDS, covering_body, heap_probe_body, probed_shortfall, short_body
+from activity_world import RESUME_KINDS, covering_body, quote_request, quoted_heap, short_body
 
 os.umask(0o077)
 HERE = pathlib.Path(__file__).resolve().parent
@@ -231,14 +231,20 @@ def submit(label, workspace, body, prepare=False):
     return last_json(sh(label, mini, *args, ok=(0, 1, 2)))
 
 
+def quote_heap(label, workspace, body):
+    """(needed, escrow) of a deliver/exhaust from the Host's view quote, or None when it is refused."""
+    r = sh(f'view-{label}-quote', mini, 'activity', '--action', 'view', '--workspace', workspace,
+           '--request', json.dumps(quote_request(body)))
+    return quoted_heap(last_json(r))
+
+
 def turn(label, workspace, body, expect, detail=None, prepare=False):
     """One signed command. `expect`: installed | replayed | refused | conflict | prepared. A deliver or
-    exhaust first learns the heap its checkpoint needs and declares it in `extra`, paid by the submitter
-    (activity_world.py: the Host's refusal states the number, the probe never installs)."""
+    exhaust first asks the Host's quote for the heap its checkpoint needs and declares it in `extra`,
+    paid by the submitter (activity_world.py)."""
     if body.get('kind') in RESUME_KINDS:
         payer = (SECOND, '4002') if pathlib.Path(workspace) == second else (SPONSOR_ACCOUNT, SPONSOR_SPEND)
-        body = covering_body(body, probed_shortfall(submit(f'{label}-heap-probe', workspace, heap_probe_body(body))),
-                             payer)
+        body = covering_body(body, quote_heap(label, workspace, body), payer)
     return judge(label, submit(label, workspace, body, prepare), expect, detail)
 
 
@@ -595,12 +601,12 @@ exhaust5 = dict(deliver5, kind='exhaust')
 turn('deliver-exhausted-refused', sponsor, deliver5, 'refused', 'exhausted')
 x_before = state('tally-exhaust', 'exhaust-before', tx5)
 # The plant: the same exhaust declaring ONE heap cell fewer than its checkpoint needs is refused by name,
-# with the Host's own numbers, and commits nothing (the probe's refusal is the source of `needed`).
-short = probed_shortfall(submit('exhaust-heap-plant-probe', second, heap_probe_body(exhaust5)))
-assert short is not None and short[0] > short[1], f'no plant possible: {short}'
+# with the QUOTE's number (the quote and the refusal are one source), and commits nothing.
+quote = quote_heap('exhaust-one-cell-short', second, exhaust5)
+assert quote is not None and quote[0] > quote[1], f'no plant possible: {quote}'
 judge('exhaust-one-cell-short-refused',
-      submit('exhaust-one-cell-short-refused', second, short_body(exhaust5, short, (SECOND, '4002'))),
-      'refused', f'heapUncovered {short[0]} {short[0] - 1}')
+      submit('exhaust-one-cell-short-refused', second, short_body(exhaust5, quote, (SECOND, '4002'))),
+      'refused', f'heapUncovered {quote[0]} {quote[0] - 1}')
 turn('exhaust-committed', second, exhaust5, 'installed')
 x2 = state('tally-exhaust', 'exhausted-once', tx5)
 check('exhaust-charges-declared', x2['purse'] == x_before['purse'] - SMALL_PRICE

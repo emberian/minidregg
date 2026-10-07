@@ -2117,6 +2117,115 @@ def deliveryCharges (config : Config) (record : Record) (cell : CellId) (path : 
      else [.fee request.account config.collector config.asset (config.tariff.workOf request.extra)]) ++
     (if migration = 0 then [] else [.fee (heldAccount cell) config.collector config.asset migration]), []⟩
 
+/-! ### The resume point
+
+The prefix `deliver` and `exhaust` share: the awaiting record, its await, its program, then (past the object
+reads a delivery adds) the settled outcome, the object's state, and the stored checkpoint resumed with the typed
+response. It is ONE function pair, so the heap a resumed segment needs is decided in ONE place:
+`ResumeTail.needed`, the number both refusals (`heapUncovered needed declared`) and the Host's read-only
+`resumeQuote` state. The split is `resumeHead` / `resumeTail` because a delivery reads (and judges) the object
+between them, and the order of its refusals is deliberate. -/
+
+structure ResumeHead {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (recordId : CellId) where
+  private mk ::
+  record : Record
+  recordExact : readRecord snapshot recordId = some record
+  located : recordId = recordCell config.domain record.object record.activity
+  await : Await
+  awaiting : record.phase = .awaiting await
+  idExact : await.id = awaitId recordId record.generation record.checkpointDigest
+  digestExact : checkpointDigest record.checkpoint = record.checkpointDigest
+  input : Data
+  inputExact : decodeDataBytes record.input = some input
+  program : Program config record.pin input
+  programExact : loadProgram config (packageBytes config snapshot record.pin) record.pin input = .ok program
+
+def resumeHead {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (recordId : CellId) : Except Refusal (ResumeHead config snapshot recordId) :=
+  match recordExact : readRecord snapshot recordId with
+  | none => .error (absentRecord snapshot recordId)
+  | some record =>
+  if located : recordId = recordCell config.domain record.object record.activity then
+  match awaiting : record.phase with
+  | .done _ | .faulted _ => .error .notAwaiting
+  | .awaiting await =>
+  if idExact : await.id = awaitId recordId record.generation record.checkpointDigest then
+  if digestExact : checkpointDigest record.checkpoint = record.checkpointDigest then
+  match inputExact : decodeDataBytes record.input with
+  | none => .error .inputType
+  | some input =>
+  match programExact : loadProgram config (packageBytes config snapshot record.pin) record.pin input with
+  | .error reason => .error reason
+  | .ok program =>
+  .ok ⟨record, recordExact, located, await, awaiting, idExact, digestExact, input, inputExact, program,
+    programExact⟩
+  else .error .checkpointDigest
+  else .error .awaitMismatch
+  else .error .recordMisplaced
+
+structure ResumeTail {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (height : Nat) (recordId : CellId) (head : ResumeHead config snapshot recordId) where
+  private mk ::
+  settlement : Settlement
+  settled : settle config snapshot height recordId head.await = .ok settlement
+  /-- The object's declared state and its version, read in THIS turn. -/
+  view : ObjectState
+  viewExact : readState config snapshot head.record.object = .ok (some view)
+  response : TypedData head.program.assumptions (responseData settlement.decided view) head.program.responseType
+  state : State
+  stateExact : decodeCheckpoint head.record.checkpoint = some state
+  resumed : State
+  resumeExact : resume (responseData settlement.decided view).term state = some resumed
+
+def resumeTail {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (height : Nat) (recordId : CellId) (head : ResumeHead config snapshot recordId) :
+    Except Refusal (ResumeTail config snapshot height recordId head) :=
+  match settled : settle config snapshot height recordId head.await with
+  | .error reason => .error reason
+  | .ok settlement =>
+  match viewExact : readState config snapshot head.record.object with
+  | .error reason => .error reason
+  | .ok none => .error .stateMissing
+  | .ok (some view) =>
+  match typeResponse head.program settlement.decided view with
+  | .error reason => .error reason
+  | .ok response =>
+  match stateExact : decodeCheckpoint head.record.checkpoint with
+  | none => .error .checkpointCodec
+  | some state =>
+  match resumeExact : resume (responseData settlement.decided view).term state with
+  | none => .error .checkpointCodec
+  | some resumed =>
+  .ok ⟨settlement, settled, view, viewExact, response, state, stateExact, resumed, resumeExact⟩
+
+/-- The heap a resumed segment runs under (`segmentLimits`): the single number `heapUncovered` compares the
+declared envelope against, and `resumeQuote` reports. -/
+def ResumeTail.needed {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {recordId : CellId} {head : ResumeHead config snapshot recordId}
+    (config' : Config) (tail : ResumeTail config snapshot height recordId head) : Nat :=
+  (segmentLimits config' tail.resumed).heap
+
+/-- What a delivery or exhaustion of the pending await must declare: `needed` (above) and `escrow`, the heap
+the escrowed envelope of the ending path already carries; the submitter's `extra.heap` is the difference. Read
+only: the same prefix the two turns run, no charge, no state change. -/
+structure HeapQuote where
+  needed : Nat
+  escrow : Nat
+  deriving Repr, DecidableEq
+
+def resumeQuote {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (height : Nat) (recordId : CellId) (awaitId' : Digest) : Except Refusal HeapQuote :=
+  match resumeHead config snapshot recordId with
+  | .error reason => .error reason
+  | .ok head =>
+  if head.await.id = awaitId' then
+  match resumeTail config snapshot height recordId head with
+  | .error reason => .error reason
+  | .ok tail =>
+  .ok ⟨tail.needed config, (head.record.escrow.capacity tail.settlement.path).heap⟩
+  else .error .awaitMismatch
+
 structure Delivery {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : DeliverRequest) where
   private mk ::
@@ -2194,45 +2303,26 @@ structure Delivery {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
 
 def deliver {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : DeliverRequest) : Except Refusal (Delivery config snapshot height request) :=
-  match recordExact : readRecord snapshot request.record with
-  | none => .error (absentRecord snapshot request.record)
-  | some record =>
-  if located : request.record = recordCell config.domain record.object record.activity then
-  match awaiting : record.phase with
-  | .done _ | .faulted _ => .error .notAwaiting
-  | .awaiting await =>
-  if idExact : await.id = awaitId request.record record.generation record.checkpointDigest then
-  if digestExact : checkpointDigest record.checkpoint = record.checkpointDigest then
-  match inputExact : decodeDataBytes record.input with
-  | none => .error .inputType
-  | some input =>
-  match programExact : loadProgram config (packageBytes config snapshot record.pin) record.pin input with
+  match headExact : resumeHead config snapshot request.record with
   | .error reason => .error reason
-  | .ok program =>
+  | .ok head =>
+  let record := head.record
+  let await := head.await
+  let program := head.program
   match objectExact : readObject config snapshot record.object with
   | .error reason => .error reason
   | .ok none => .error .notAnObject
   | .ok (some object) =>
   if runsPin : object.runs record.pin = true then
-  match settled : settle config snapshot height request.record await with
+  match tailExact : resumeTail config snapshot height request.record head with
   | .error reason => .error reason
-  | .ok settlement =>
-  match viewExact : readState config snapshot record.object with
-  | .error reason => .error reason
-  | .ok none => .error .stateMissing
-  | .ok (some view) =>
-  match typeResponse program settlement.decided view with
-  | .error reason => .error reason
-  | .ok response =>
-  match stateExact : decodeCheckpoint record.checkpoint with
-  | none => .error .checkpointCodec
-  | some state =>
-  match resumeExact : resume (responseData settlement.decided view).term state with
-  | none => .error .checkpointCodec
-  | some resumed =>
+  | .ok tail =>
+  let settlement := tail.settlement
+  let view := tail.view
+  let resumed := tail.resumed
   let envelope := addCapacity (record.escrow.capacity settlement.path) request.extra
   if covered : config.covers envelope = true then
-  if heapCovered : (segmentLimits config resumed).heap ≤ envelope.heap then
+  if heapCovered : tail.needed config ≤ envelope.heap then
   if extractCovered : config.planBudget.ticks ≤ envelope.extractTicks then
   if 0 < record.tried ∧ envelope.sourceTicks ≤ record.tried then .error (.alreadyExhausted record.tried envelope.sourceTicks) else
   match endExact : resumedSegment config snapshot height (deliveryTransaction await.id) request.record
@@ -2266,20 +2356,19 @@ def deliver {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
   let guards := guardAt snapshot (objectCell config.domain record.object) ::
     guardAt snapshot (packageCell config.domain record.pin) ::
     guardAt snapshot (stateCell config.domain record.object) :: settlement.guards
-  .ok ⟨record, recordExact, located, await, awaiting, idExact, digestExact, input, inputExact, program, programExact,
-    settlement, settled, view, viewExact, response, state, stateExact, resumed, resumeExact, envelope, rfl,
+  .ok ⟨record, head.recordExact, head.located, await, head.awaiting, head.idExact, head.digestExact, head.input,
+    head.inputExact, program, head.programExact,
+    settlement, tail.settled, view, tail.viewExact, tail.response, tail.state, tail.stateExact, resumed,
+    tail.resumeExact, envelope, rfl,
     covered, heapCovered, extractCovered, segment, yielded, endExact, next, rfl, object, objectExact, runsPin, book,
     bookExact, batch, batchExact, posted,
     postedBatch, posts, rfl, rfl, guards, rfl, awaitClaim await.id :: settlement.claims, rfl,
     judged, drained⟩
   else .error .bookRefused
   else .error (.extractUncovered config.planBudget.ticks envelope.extractTicks)
-  else .error (.heapUncovered (segmentLimits config resumed).heap envelope.heap)
+  else .error (.heapUncovered (tail.needed config) envelope.heap)
   else .error (.uncovered envelope)
   else .error .awaitingRebirth
-  else .error .checkpointDigest
-  else .error .awaitMismatch
-  else .error .recordMisplaced
 
 def Delivery.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request) (sealing : Seal) :
@@ -2392,40 +2481,21 @@ structure Exhaustion {rootBytes : Bytes → Digest} (config : Config) (snapshot 
 
 def exhaust {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : ExhaustRequest) : Except Refusal (Exhaustion config snapshot height request) :=
-  match recordExact : readRecord snapshot request.record with
-  | none => .error (absentRecord snapshot request.record)
-  | some record =>
-  if located : request.record = recordCell config.domain record.object record.activity then
-  match awaiting : record.phase with
-  | .done _ | .faulted _ => .error .notAwaiting
-  | .awaiting await =>
-  if idExact : await.id = awaitId request.record record.generation record.checkpointDigest then
-  if digestExact : checkpointDigest record.checkpoint = record.checkpointDigest then
-  match inputExact : decodeDataBytes record.input with
-  | none => .error .inputType
-  | some input =>
-  match programExact : loadProgram config (packageBytes config snapshot record.pin) record.pin input with
+  match headExact : resumeHead config snapshot request.record with
   | .error reason => .error reason
-  | .ok program =>
-  match settled : settle config snapshot height request.record await with
+  | .ok head =>
+  let record := head.record
+  let await := head.await
+  let program := head.program
+  match tailExact : resumeTail config snapshot height request.record head with
   | .error reason => .error reason
-  | .ok settlement =>
-  match viewExact : readState config snapshot record.object with
-  | .error reason => .error reason
-  | .ok none => .error .stateMissing
-  | .ok (some view) =>
-  match typeResponse program settlement.decided view with
-  | .error reason => .error reason
-  | .ok response =>
-  match stateExact : decodeCheckpoint record.checkpoint with
-  | none => .error .checkpointCodec
-  | some state =>
-  match resumeExact : resume (responseData settlement.decided view).term state with
-  | none => .error .checkpointCodec
-  | some resumed =>
+  | .ok tail =>
+  let settlement := tail.settlement
+  let view := tail.view
+  let resumed := tail.resumed
   let envelope := addCapacity (record.escrow.capacity settlement.path) request.extra
   if covered : config.covers envelope = true then
-  if heapCovered : (segmentLimits config resumed).heap ≤ envelope.heap then
+  if heapCovered : tail.needed config ≤ envelope.heap then
   if extractCovered : config.planBudget.ticks ≤ envelope.extractTicks then
   if raises : record.tried < envelope.sourceTicks then
   -- The charge must be payable BEFORE the run: an unpayable attempt never runs.
@@ -2444,8 +2514,9 @@ def exhaust {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
     let posts := [recordPost config snapshot request.record next, posted.write config snapshot]
     let guards := guardAt snapshot (packageCell config.domain record.pin) ::
       guardAt snapshot (stateCell config.domain record.object) :: settlementGuards settlement
-    .ok ⟨record, recordExact, located, await, awaiting, idExact, digestExact, input, inputExact, program,
-      programExact, settlement, settled, view, viewExact, response, state, stateExact, resumed, resumeExact,
+    .ok ⟨record, head.recordExact, head.located, await, head.awaiting, head.idExact, head.digestExact, head.input,
+      head.inputExact, program, head.programExact, settlement, tail.settled, view, tail.viewExact, tail.response,
+      tail.state, tail.stateExact, resumed, tail.resumeExact,
       envelope, rfl, covered, heapCovered, extractCovered, raises, belowCap, ran, next, rfl, book, bookExact, posted, postedBatch, posts, rfl,
       guards, rfl⟩
   | .error reason => .error reason
@@ -2453,11 +2524,8 @@ def exhaust {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
   else .error .bookRefused
   else .error (.alreadyExhausted record.tried envelope.sourceTicks)
   else .error (.extractUncovered config.planBudget.ticks envelope.extractTicks)
-  else .error (.heapUncovered (segmentLimits config resumed).heap envelope.heap)
+  else .error (.heapUncovered (tail.needed config) envelope.heap)
   else .error (.uncovered envelope)
-  else .error .checkpointDigest
-  else .error .awaitMismatch
-  else .error .recordMisplaced
 
 /-- An exhaustion spends no claim: the await stays open. -/
 def Exhaustion.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -3595,23 +3663,32 @@ theorem absentRecord_retired {rootBytes : Bytes → Digest} {snapshot : Snapshot
     (retired : isRetired (snapshot.canonicalBytes cell) = true) : absentRecord snapshot cell = .recordRetired := by
   simp [absentRecord, retired]
 
+theorem resumeHead_retired_refused {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {recordId : CellId} (retired : isRetired (snapshot.canonicalBytes recordId) = true) :
+    resumeHead config snapshot recordId = .error .recordRetired := by
+  have none := readRecord_of_retired retired
+  unfold resumeHead
+  split
+  · simp [absentRecord_retired retired]
+  · rename_i record found; rw [none] at found; cases found
+
 theorem deliver_retired_refused {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : DeliverRequest} (retired : isRetired (snapshot.canonicalBytes request.record) = true) :
     ∃ reason, deliver config snapshot height request = .error reason ∧ reason = .recordRetired := by
-  have none := readRecord_of_retired retired
   unfold deliver
   split
-  · exact ⟨_, rfl, absentRecord_retired retired⟩
-  · rename_i record found; rw [none] at found; cases found
+  · rename_i reason found; rw [resumeHead_retired_refused retired] at found
+    cases found; exact ⟨_, rfl, rfl⟩
+  · rename_i head found; rw [resumeHead_retired_refused retired] at found; cases found
 
 theorem exhaust_retired_refused {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : ExhaustRequest} (retired : isRetired (snapshot.canonicalBytes request.record) = true) :
     ∃ reason, exhaust config snapshot height request = .error reason ∧ reason = .recordRetired := by
-  have none := readRecord_of_retired retired
   unfold exhaust
   split
-  · exact ⟨_, rfl, absentRecord_retired retired⟩
-  · rename_i record found; rw [none] at found; cases found
+  · rename_i reason found; rw [resumeHead_retired_refused retired] at found
+    cases found; exact ⟨_, rfl, rfl⟩
+  · rename_i head found; rw [resumeHead_retired_refused retired] at found; cases found
 
 theorem abandon_retired_refused {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : AbandonRequest} (retired : isRetired (snapshot.canonicalBytes request.record) = true) :

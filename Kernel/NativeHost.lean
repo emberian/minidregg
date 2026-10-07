@@ -2226,15 +2226,28 @@ structure ActivityView where
   authorityRoot : Digest
   book : Option ObjectiveActivity.BookCell
   cells : List (Nat × Digest × List UInt8)
+  /-- Per asked `(record, await)`: what a delivery or exhaustion must declare (`ObjectiveActivity.resumeQuote`,
+  the same prefix and the same `ResumeTail.needed` the turns' `heapUncovered` refusal states), or the
+  kernel's refusal of the pending await. -/
+  quotes : List (Nat × Nat × Except String ObjectiveActivity.HeapQuote)
 
-def activityViewLoaded (config : Config) (opened : Opened config) (cells : List Nat) :
-    Except String ActivityView := do
+def activityViewLoaded (config : Config) (opened : Opened config) (cells : List Nat)
+    (quotes : List (Nat × Nat)) : Except String ActivityView := do
   let authority ← need "authority unavailable"
     (CredentialAuthorityDomainReceiver.loadDeployment config.deployment opened.durable.snapshot)
   let snapshot := opened.durable.snapshot
-  pure ⟨logicalHeight config opened.durable, authority.snapshot.cell.root,
+  let height := logicalHeight config opened.durable
+  let quoted := quotes.map fun (record, await) =>
+    (record, await,
+      match ObjectiveKernelConfig.configOf config.deployment config.profile (activityAmbient config opened) with
+      | .error reason => .error s!"{repr reason}"
+      | .ok kernel =>
+        match ObjectiveActivity.resumeQuote kernel snapshot height ⟨record⟩ ⟨await⟩ with
+        | .error reason => .error s!"{repr reason}"
+        | .ok quote => .ok quote)
+  pure ⟨height, authority.snapshot.cell.root,
     ObjectiveActivity.bookOf (snapshot.canonicalBytes ⟨config.deployment.resourceBookId⟩),
-    cells.map fun cell => (cell, snapshot.model.roots ⟨cell⟩, snapshot.canonicalBytes ⟨cell⟩)⟩
+    cells.map (fun cell => (cell, snapshot.model.roots ⟨cell⟩, snapshot.canonicalBytes ⟨cell⟩)), quoted⟩
 
 /-! ## Seats and invitations (SEATS-NATIVE): session operations 215–219
 

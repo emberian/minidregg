@@ -5874,7 +5874,7 @@ def objectKernelOperation (pinnedConfig : NativeHost.Config)
       let request ← IO.ofExcept (Minidregg.Host.ObjectiveActivityJson.parseViewRequest payload)
       let domain := pinnedConfig.deployment.domain
       let view ← IO.ofExcept (NativeHost.activityViewLoaded pinnedConfig opened
-        (Minidregg.Host.ObjectiveActivityJson.viewCells domain request))
+        (Minidregg.Host.ObjectiveActivityJson.viewCells domain request) request.quotes)
       let json := Minidregg.Host.ObjectiveActivityJson.viewJson domain
         pinnedConfig.tariff.asset request view
       return ((214 : UInt8), json.compress.toUTF8.toList)

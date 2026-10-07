@@ -52,7 +52,7 @@ ROOT/transcript holds every command's exact output; ROOT/results.json lists ever
 row with its expectation and verdict; the script exits 1 on any mismatch.
 """
 import argparse, json, os, pathlib, secrets, subprocess, sys, time
-from activity_world import RESUME_KINDS, covering_body, heap_probe_body, probed_shortfall
+from activity_world import RESUME_KINDS, covering_body, quote_request, quoted_heap
 
 os.umask(0o077)
 HERE = pathlib.Path(__file__).resolve().parent
@@ -505,12 +505,13 @@ def activity_submit(tag, workspace, body):
 
 
 def activity(tag, workspace, body, expect, detail=None):
-    """A deliver or exhaust first learns the heap its checkpoint needs and declares it in `extra`, paid by
-    the submitter (activity_world.py: the Host's refusal states the number, the probe never installs)."""
+    """A deliver or exhaust first asks the Host's quote for the heap its checkpoint needs and declares it in
+    `extra`, paid by the submitter (activity_world.py)."""
     if body.get('kind') in RESUME_KINDS:
         payer = (BOB_ACCOUNT, BOB_SPEND) if pathlib.Path(workspace) == bob_ws else (ALICE_ACCOUNT, ALICE_SPEND)
-        body = covering_body(body, probed_shortfall(activity_submit(f'{tag}-heap-probe', workspace,
-                                                                    heap_probe_body(body))), payer)
+        quote = quoted_heap(last_json(sh(f'{tag}-quote', mini, 'activity', '--action', 'view', '--workspace',
+                                         workspace, '--request', json.dumps(quote_request(body)))))
+        body = covering_body(body, quote, payer)
     return judge(tag, activity_submit(tag, workspace, body), expect, detail)
 
 
