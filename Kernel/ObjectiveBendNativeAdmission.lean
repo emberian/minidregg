@@ -281,7 +281,6 @@ def usage {deployment : Deployment}
 and the actual fee-first compute preparation. Quotation and final admission
 build the same value from the same image. -/
 structure Environment (deployment : Deployment) (ground : Ground deployment) where
-  context : ResourceObservationAdmission.Context deployment
   federation : FederationId
   genesisHeight : Nat
   subject : TypedAuthorization.SubjectId
@@ -293,7 +292,13 @@ def environment {F : Type} [Field F] {deployment : Deployment}
     {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {ground : Ground deployment} {command : Command}
     (prepared : PreparedInvocation deployment profile ambient ground command) (genesisHeight : Nat) :
     Environment deployment ground :=
-  ⟨readContext prepared,ambient.federation,genesisHeight,command.subject,command.nonce,prepared.compute⟩
+  ⟨ambient.federation,genesisHeight,command.subject,command.nonce,prepared.compute⟩
+
+/-- The observation context of an environment is its ground: reads are admitted
+on exactly the state the compute preparation was made on. -/
+abbrev Environment.context {deployment : Deployment} {ground : Ground deployment}
+    (_environment : Environment deployment ground) : ResourceObservationAdmission.Context deployment :=
+  ground
 
 /-- A current authorized read by the environment's subject. Its
 `ResourceObservationAdmission.Checked` token is constructed only after the
