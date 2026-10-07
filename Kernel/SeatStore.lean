@@ -74,8 +74,9 @@ def proposalStream : StreamCodec Proposal :=
     (fun rule => match rule with | .onDemand => none | .afterDeadline due => some due)
     (fun wire => match wire with | none => .onDemand | some due => .afterDeadline due)
     (by intro rule; cases rule <;> rfl)
-  StreamCodec.xmap (StreamCodec.product amounts (StreamCodec.product amounts exitRule))
-    (fun p => (p.give, p.want, p.exit)) (fun w => ⟨w.1, w.2.1, w.2.2⟩) (by intro p; cases p; rfl)
+  StreamCodec.xmap (StreamCodec.product amounts (StreamCodec.product amounts (StreamCodec.product exitRule StreamCodec.bool)))
+    (fun p => (p.give, p.want, p.exit, p.donate)) (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2⟩)
+    (by intro p; cases p; rfl)
 
 def termsStream : StreamCodec (List (String × Nat)) :=
   StreamCodec.list (StreamCodec.product stringStream StreamCodec.nat)
@@ -136,9 +137,10 @@ def seatBodyStream : StreamCodec SeatBody :=
 
 def instanceCodec := framed "DREGG/SEAT/INSTANCE/v1".toUTF8.toList instanceBodyStream
 def invitationCodec := framed "DREGG/SEAT/INVITATION/v1".toUTF8.toList invitationBodyStream
-/-- Frame v2: a seat body no longer carries an open flag (a closed seat's cell is
-retired, never rewritten); a v1 body refuses to decode. -/
-def seatCodec := framed "DREGG/SEAT/SEAT/v2".toUTF8.toList seatBodyStream
+/-- Frame v3: a seat body no longer carries an open flag (a closed seat's cell is
+retired, never rewritten) and its proposal carries the donation marker; a v1 or v2 body refuses
+to decode. -/
+def seatCodec := framed "DREGG/SEAT/SEAT/v3".toUTF8.toList seatBodyStream
 def holdingsCodec := framed "DREGG/SEAT/HOLDINGS/v1".toUTF8.toList (StreamCodec.list StreamCodec.nat)
 
 /-! ## Cells: protected coordinates -/

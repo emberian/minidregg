@@ -66,7 +66,12 @@ def proposal (json : Json) : Result Seats.Proposal := do
   let exit ← match ← optNat p json "afterDeadline" with
     | none => pure Seats.ExitRule.onDemand
     | some due => pure (Seats.ExitRule.afterDeadline due)
-  pure ⟨← amounts p json "give", ← amounts p json "want", exit⟩
+  let donate ← match json.getObjVal? "donate" with
+    | .error _ => pure false
+    | .ok value => match value.getBool? with
+      | .ok flag => pure flag
+      | .error _ => throw s!"{p}.donate must be a boolean"
+  pure ⟨← amounts p json "give", ← amounts p json "want", exit, donate⟩
 
 /-- `$.turn`: `{kind: publish|create|handOver|offer|invoke|exit, ...}`. A
 publication carries the artifact and its source package (hex) and the payer. The
@@ -110,7 +115,7 @@ def amountsJson (entries : List (Nat × Nat)) : Json :=
   Json.arr (entries.map fun (asset, amount) => Json.mkObj [("asset", decimal asset), ("amount", decimal amount)]).toArray
 
 def proposalJson (p : Seats.Proposal) : Json :=
-  .mkObj [("give", amountsJson p.give), ("want", amountsJson p.want),
+  .mkObj [("give", amountsJson p.give), ("want", amountsJson p.want), ("donate", toJson p.donate),
     ("exit", match p.exit with
       | .onDemand => "onDemand"
       | .afterDeadline due => .mkObj [("afterDeadline", decimal due)])]
