@@ -14,7 +14,7 @@ open Minidregg.Kernel.DurableDataIntent
 
 set_option autoImplicit false
 
-open Minidregg.Compiler.ServedBasis (Ground)
+open Minidregg.Compiler.ServedBasis (Ground Grounded)
 open Minidregg.Compiler.DurableHistory (Head StoreIdentity)
 open Minidregg.Compiler.DurableHistoryReader (Reader)
 
@@ -40,9 +40,11 @@ def keys (ingress : ApplicationLifecycleRetryClaimV4Ingress.Ingress) : DurableVi
   ⟨current.transactions ++ retry.transactions, current.nullifiers ++ retry.nullifiers⟩
 
 def prepare (config : Config) {store : StoreIdentity}
-    (reader : Reader ResourceBirthCodec.rootBytes store) (ground : Ground config.deployment)
+    (reader : Reader ResourceBirthCodec.rootBytes store)
+    (grounded : Grounded config.deployment reader.head)
     (ingress : ApplicationLifecycleRetryClaimV4Ingress.Ingress) :
-    IO (Except String (Conditional config reader.head ground ingress)) := do
+    IO (Except String (Conditional config reader.head grounded.ground ingress)) := do
+  let ground := grounded.ground
   if exact : ingress.originalExact = true then
     let original ← match ← NativeHistorySelection.select config reader ground.height
         ingress.base.source.originalIndex
@@ -50,7 +52,7 @@ def prepare (config : Config) {store : StoreIdentity}
       | .error detail => return .error detail
       | .ok original => pure original
     let originalAccepted ← match ← ApplicationLifecycleRetryBeginV4Admission.admitNative
-        config reader original.ground ingress.originalBegin with
+        config reader original.grounded ingress.originalBegin with
       | .error detail => return .error detail
       | .ok originalAccepted => pure originalAccepted
     let originalMatch ← match NativeHistorySelection.matchIntent original

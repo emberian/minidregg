@@ -28,7 +28,7 @@ open Minidregg.Kernel.NativeHost
 
 set_option autoImplicit false
 
-open Minidregg.Compiler.ServedBasis (Ground)
+open Minidregg.Compiler.ServedBasis (Ground Grounded)
 open Minidregg.Compiler.DurableHistory (Head StoreIdentity)
 open Minidregg.Compiler.DurableHistoryReader (Reader)
 
@@ -274,9 +274,11 @@ structure Candidate (config : Config) {store : StoreIdentity} (head : Head store
     ingress.signed physical
 
 def prepareConditional (config : Config) {store : StoreIdentity}
-    (reader : Reader ResourceBirthCodec.rootBytes store) (ground : Ground config.deployment)
+    (reader : Reader ResourceBirthCodec.rootBytes store)
+    (grounded : Grounded config.deployment reader.head)
     (ingress : ApplicationLifecycleRetryCompletionV4Ingress.Ingress) :
-    IO (Except String (Candidate config reader.head ground ingress)) := do
+    IO (Except String (Candidate config reader.head grounded.ground ingress)) := do
+  let ground := grounded.ground
   if profileExact : ingress.domain = config.deployment.domain ∧
       ingress.semantics = config.profile.semantics then
     if sourceValid : ingress.source.valid = true then
