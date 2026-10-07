@@ -1,4 +1,8 @@
-import Lean
+module
+
+public import Lean
+
+@[expose] public section
 namespace Minidregg.Theory.ObjectiveBendTypes
 set_option autoImplicit false
 

@@ -1,11 +1,15 @@
+module
+
 /- Reference runtime core for Objective Bend's own language edition.
 Core scalar edition 2 distinguishes Booleans from arbitrary String labels.
 Weak-head call-by-name gives an independent partial meaning to lazy mix/fix.
 A sharing implementation must prove representation adequacy; this reference
 relation does not claim a heap machine, type safety, termination, proof
 consistency, or authority. -/
-import Lean
-import Theory.AxiomPin
+public import Lean
+public import Theory.AxiomPin
+
+@[expose] public section
 namespace Minidregg.Theory.ObjectiveBendOpenRecursion
 set_option autoImplicit false
 

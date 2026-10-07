@@ -1,3 +1,5 @@
+module
+
 /-
 # `#assert_axioms` — axiom footprints as checks that can fail (core module)
 
@@ -16,14 +18,16 @@ The exact axiom set of each Objective Bend declaration is not typed by hand
 beside it: `scripts/check-objective-proofs.sh` regenerates it into
 `scripts/gates/objective-axioms.pin` and fails on any unannounced difference.
 -/
-import Lean
+public import Lean
+
+@[expose] public section
 
 namespace Minidregg.Theory.AssertAxioms
 
 open Lean Elab Command
 
 /-- The axioms a kernel-checked Mini theorem may rest on. -/
-def standard : List Name := [``propext, ``Classical.choice, ``Quot.sound]
+meta def standard : List Name := [``propext, ``Classical.choice, ``Quot.sound]
 
 elab "#assert_axioms " ids:ident+ : command => do
   let mut offenders : Array MessageData := #[]

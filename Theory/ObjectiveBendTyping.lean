@@ -1,6 +1,10 @@
-import Theory.ObjectiveBendTypes
-import Theory.ObjectiveBendOpenRecursion
-import Theory.AxiomPin
+module
+
+public import Theory.ObjectiveBendTypes
+public import Theory.ObjectiveBendOpenRecursion
+public import Theory.AxiomPin
+
+@[expose] public section
 namespace Minidregg.Theory.ObjectiveBendTyping
 open ObjectiveBendTypes ObjectiveBendOpenRecursion
 set_option autoImplicit false

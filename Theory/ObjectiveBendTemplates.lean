@@ -1,3 +1,5 @@
+module
+
 /- Templates over rigid Self/Super (OB-LTUO LT2, docs/objective-bend/MODULAR-TYPING.md §6).
 
 Step 2: `canonical_instantiate`. The checker compares types by `Ty.canonical` (sorted
@@ -12,9 +14,11 @@ including the override case (a tail instantiated with a row that repeats a liste
 field: the listed one, which is first, wins on both sides). No sortedness premise is
 needed: `insertCanonical` is first-match, and the two facts it rests on
 (`insertCanonical_same`, `insertCanonical_comm`) hold for every row. -/
-import Theory.ObjectiveBendTypes
-import Theory.ObjectiveBendTyping
-import Theory.AxiomPin
+public import Theory.ObjectiveBendTypes
+public import Theory.ObjectiveBendTyping
+public import Theory.AxiomPin
+
+@[expose] public section
 namespace Minidregg.Theory.ObjectiveBendTemplates
 open ObjectiveBendTypes
 set_option autoImplicit false
