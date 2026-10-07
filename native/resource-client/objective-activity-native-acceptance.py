@@ -81,6 +81,7 @@ ROOT/transcript holds every command's exact output; ROOT/results.json lists ever
 row with its expectation and verdict; the script exits 1 on any mismatch.
 """
 import argparse, re, json, os, pathlib, secrets, subprocess, sys, time
+from activity_world import RESUME_KINDS, covering_body, heap_probe_body, probed_shortfall, short_body
 
 os.umask(0o077)
 HERE = pathlib.Path(__file__).resolve().parent
@@ -152,6 +153,11 @@ MAXIMUM = {'typeFuel': 16384, 'sourceTicks': 200000, 'heap': 200000, 'stack': 20
            'incidences': 16}
 tariff = {'version': '1', 'base': '1', 'typeFuel': '0', 'sourceTicks': '1', 'heap': '0', 'stack': '0',
           'outputNodes': '0', 'outputBytes': '0', 'inputBytes': '0'}
+# A delivery or exhaustion whose escrowed envelope does not cover the checkpoint's heap adds the missing
+# cells as `extra`, and its submitter pays the extra's price (workOf: base + sourceTicks*0 + heap*0 here),
+# so a submitter that declares only heap pays the tariff's base alone.
+assert tariff['heap'] == '0'
+EXTRA_FEE = int(tariff['base'])
 policy = {'schema': 'dregg.objective-bend.policy.v1', 'sourceBytes': '4194304',
           'maximum': {k: str(v) for k, v in MAXIMUM.items()}, 'outputs': [constants['genericCodec']],
           'clearAudience': '01ff', 'frontEnd': constants['frontEnd'], 'tariff': tariff}
@@ -215,17 +221,25 @@ def watched(label):
     return v
 
 
-def turn(label, workspace, body, expect, detail=None, prepare=False):
-    """One signed command. `expect`: installed | replayed | refused | conflict | prepared."""
+def submit(label, workspace, body, prepare=False):
     out = attempts / label
     command = root / f'{label}.turn.json'
     command.write_text(json.dumps(body))
     args = ['activity', '--action', 'submit', '--workspace', workspace, '--command', command, '--out', out]
     if prepare:
         args += ['--prepare-only', 'true']
-    r = sh(label, mini, *args, ok=(0, 1, 2))
-    value = last_json(r)
-    return judge(label, value, expect, detail)
+    return last_json(sh(label, mini, *args, ok=(0, 1, 2)))
+
+
+def turn(label, workspace, body, expect, detail=None, prepare=False):
+    """One signed command. `expect`: installed | replayed | refused | conflict | prepared. A deliver or
+    exhaust first learns the heap its checkpoint needs and declares it in `extra`, paid by the submitter
+    (activity_world.py: the Host's refusal states the number, the probe never installs)."""
+    if body.get('kind') in RESUME_KINDS:
+        payer = (SECOND, '4002') if pathlib.Path(workspace) == second else (SPONSOR_ACCOUNT, SPONSOR_SPEND)
+        body = covering_body(body, probed_shortfall(submit(f'{label}-heap-probe', workspace, heap_probe_body(body))),
+                             payer)
+    return judge(label, submit(label, workspace, body, prepare), expect, detail)
 
 
 def resubmit(label, ingress, expect, detail=None):
@@ -580,11 +594,18 @@ deliver5 = {'kind': 'deliver', 'record': REC5, 'await': await5, 'account': '0',
 exhaust5 = dict(deliver5, kind='exhaust')
 turn('deliver-exhausted-refused', sponsor, deliver5, 'refused', 'exhausted')
 x_before = state('tally-exhaust', 'exhaust-before', tx5)
+# The plant: the same exhaust declaring ONE heap cell fewer than its checkpoint needs is refused by name,
+# with the Host's own numbers, and commits nothing (the probe's refusal is the source of `needed`).
+short = probed_shortfall(submit('exhaust-heap-plant-probe', second, heap_probe_body(exhaust5)))
+assert short is not None and short[0] > short[1], f'no plant possible: {short}'
+judge('exhaust-one-cell-short-refused',
+      submit('exhaust-one-cell-short-refused', second, short_body(exhaust5, short, (SECOND, '4002'))),
+      'refused', f'heapUncovered {short[0]} {short[0] - 1}')
 turn('exhaust-committed', second, exhaust5, 'installed')
 x2 = state('tally-exhaust', 'exhausted-once', tx5)
 check('exhaust-charges-declared', x2['purse'] == x_before['purse'] - SMALL_PRICE
-      and balance(x2, COLLECTOR) == balance(x_before, COLLECTOR) + SMALL_PRICE
-      and balance(x2, SECOND) == balance(x_before, SECOND),
+      and balance(x2, COLLECTOR) == balance(x_before, COLLECTOR) + SMALL_PRICE + EXTRA_FEE
+      and balance(x2, SECOND) == balance(x_before, SECOND) - EXTRA_FEE,
       {'purse': [x_before['purse'], x2['purse']],
        'collector': [balance(x_before, COLLECTOR), balance(x2, COLLECTOR)],
        'submitter': [balance(x_before, SECOND), balance(x2, SECOND)]})
@@ -661,7 +682,7 @@ turn('fault-delivery-commits', second, deliver7, 'installed')
 e2 = state('tally-fault', 'faulted', tx7)
 check('fault-ends-and-returns-escrow', e2['recordKind'] == 'retired' and e2['purse'] == 0
       and balance(e2, SPONSOR_ACCOUNT) == balance(f_before, SPONSOR_ACCOUNT) + f_before['purse'] - PRICE
-      and balance(e2, COLLECTOR) == balance(f_before, COLLECTOR) + PRICE
+      and balance(e2, COLLECTOR) == balance(f_before, COLLECTOR) + PRICE + EXTRA_FEE
       and total_of(e2) == 0 and e2.get('stateVersion') == '1',
       {'recordKind': e2['recordKind'], 'purse': [f_before['purse'], e2['purse']],
        'sponsor': [balance(f_before, SPONSOR_ACCOUNT), balance(e2, SPONSOR_ACCOUNT)],

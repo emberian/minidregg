@@ -52,6 +52,7 @@ ROOT/transcript holds every command's exact output; ROOT/results.json lists ever
 row with its expectation and verdict; the script exits 1 on any mismatch.
 """
 import argparse, json, os, pathlib, secrets, subprocess, sys, time
+from activity_world import RESUME_KINDS, covering_body, heap_probe_body, probed_shortfall
 
 os.umask(0o077)
 HERE = pathlib.Path(__file__).resolve().parent
@@ -495,13 +496,22 @@ v = world('after-held-refused', instances=[objects['swap']['object']], invitatio
 check('E8-roots-unchanged', roots(v) == before, {'changed': [k for k in roots(v) if roots(v)[k] != before.get(k)]})
 
 
-def activity(tag, workspace, body, expect, detail=None):
+def activity_submit(tag, workspace, body):
     out = attempts / tag
     command = root / f'{tag}.turn.json'
     command.write_text(json.dumps(body))
-    value = last_json(sh(tag, mini, 'activity', '--action', 'submit', '--workspace', workspace,
-                         '--command', command, '--out', out, ok=(0, 1, 2)))
-    return judge(tag, value, expect, detail)
+    return last_json(sh(tag, mini, 'activity', '--action', 'submit', '--workspace', workspace,
+                        '--command', command, '--out', out, ok=(0, 1, 2)))
+
+
+def activity(tag, workspace, body, expect, detail=None):
+    """A deliver or exhaust first learns the heap its checkpoint needs and declares it in `extra`, paid by
+    the submitter (activity_world.py: the Host's refusal states the number, the probe never installs)."""
+    if body.get('kind') in RESUME_KINDS:
+        payer = (BOB_ACCOUNT, BOB_SPEND) if pathlib.Path(workspace) == bob_ws else (ALICE_ACCOUNT, ALICE_SPEND)
+        body = covering_body(body, probed_shortfall(activity_submit(f'{tag}-heap-probe', workspace,
+                                                                    heap_probe_body(body))), payer)
+    return judge(tag, activity_submit(tag, workspace, body), expect, detail)
 
 
 def activity_view(tag, request):

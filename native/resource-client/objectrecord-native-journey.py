@@ -152,6 +152,7 @@ try:
     with w.group('OR5-resume-view-law'):
         w.turn('resolve-7', w.second, {'kind': 'resolve', 'slot': SLOT1, 'answer': {'reply': record(amount=nat(7))}},
                'installed')
+        w.short_heap_plant('deliver-7-one-cell-short-refused', w.sponsor, deliver_body(REC, AWAIT1))
         w.turn('deliver-7', w.sponsor, deliver_body(REC, AWAIT1), 'installed')
         r1 = w.state('ledger', 'after-reply-7', tx)
         w.check('reply-lands-on-the-viewed-state', total_state(r1, 57, 2) and r1['record'].get('generation') == '1',

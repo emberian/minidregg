@@ -15,7 +15,7 @@ A journey records its rows through `World.turn` / `World.check` and groups them 
 ROOT/groups.tsv (ID, STATUS, WALL_S, DETAIL: the journey runner's sub-row format) and returns the
 process exit code (1 on any red row).
 """
-import contextlib, json, os, pathlib, subprocess, sys, time, traceback
+import contextlib, json, os, pathlib, re, subprocess, sys, time, traceback
 
 MAXIMUM = {'typeFuel': 16384, 'sourceTicks': 200000, 'heap': 200000, 'stack': 200000, 'outputNodes': 20000,
            'outputBytes': 200000, 'inputBytes': 200000, 'scalarBits': 512, 'memoryTouches': 2000000,
@@ -54,6 +54,58 @@ def cap(ticks, full=True):
             c[k] = str(MAXIMUM[k])
     c['sourceTicks'] = str(ticks)
     return c
+
+
+# A resumed segment runs under <the checkpoint's heap cells + the deployment's per-segment heap>, so a
+# delivery or exhaustion (Kernel/ObjectiveActivity `Delivery`, `Exhaustion`) declares an envelope whose
+# heap covers that, or the Host refuses `heapUncovered needed declared` before anything runs. The escrowed
+# resume and timeout envelopes carry the deployment's heap and no more, so the checkpoint's own cells are
+# declared in the command's `extra`, and the submitter pays it (a fee from its own account at the tariff's
+# rate: a command that adds nothing may name account 0, one that adds heap cannot).
+# `needed` is a function of the stored checkpoint, which a client cannot count without decoding it, and the
+# Host has no quote op for it. The Host's own refusal states it, so a client PROBES: the same command with
+# a non-empty `extra` (one input byte) and account 0. Past the heap check that command can only be refused
+# at the posting (`bookRefused`: account 0 pays nothing), so it never installs; short of the heap check it
+# is refused `heapUncovered needed declared`. The three drivers share these functions.
+HEAP_UNCOVERED = re.compile(r'heapUncovered (\d+) (\d+)')
+RESUME_KINDS = ('deliver', 'exhaust')
+
+
+def heap_probe_body(body):
+    """The probe of `body` (a deliver/exhaust): non-empty extra, unpayable account; never installs."""
+    return dict(body, extra=dict({k: '0' for k in MAXIMUM}, inputBytes='1'), account='0', accountCapability='0')
+
+
+def refusal_text_of(value):
+    text = unhex(value.get('detail', '')) if 'detail' in value else value.get('error', '')
+    return ' '.join(str(text).split())
+
+
+def probed_shortfall(value):
+    """(needed, declared) the probe's refusal states, or None when the probe was refused before the heap
+    check (or after it, so the heap is covered). An installed probe is a bug that must stay loud."""
+    if value.get('type') == 'confirmed':
+        raise RuntimeError(f'the heap probe was installed, it must always be refused: {value}')
+    m = HEAP_UNCOVERED.search(refusal_text_of(value))
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def with_extra_heap(body, cells, payer):
+    """`body` declaring `cells` more heap in its `extra` (other extra fields kept), paid by `payer`, the
+    submitter's (account, spend capability)."""
+    extra = dict(body.get('extra') or {k: '0' for k in MAXIMUM})
+    extra['heap'] = str(int(extra.get('heap', '0')) + cells)
+    return dict(body, extra=extra, account=str(payer[0]), accountCapability=str(payer[1]))
+
+
+def covering_body(body, shortfall, payer):
+    """`body` declaring exactly the heap the probe found missing (unchanged when nothing is missing)."""
+    return body if shortfall is None else with_extra_heap(body, shortfall[0] - shortfall[1], payer)
+
+
+def short_body(body, shortfall, payer):
+    """`body` declaring ONE cell fewer than it needs: the plant."""
+    return with_extra_heap(body, shortfall[0] - shortfall[1] - 1, payer)
 
 
 def eq(slot, value):
@@ -103,6 +155,7 @@ class World:
         self.current = None
         self.totals = []
         self.SECOND = second_subject
+        self.SECOND_SPEND = '4002'
         self.attempts = self.root / 'attempts'
         self.attempts.mkdir()
         self.objects = {}
@@ -150,7 +203,7 @@ class World:
         enrollment = [{'key': {'keyId': '4000', 'keyEpoch': '2', 'algorithm': '1', 'subject': self.SECOND,
                                'publicKey': public, 'activeFrom': '0', 'activeUntil': '1000000',
                                'nextKeyDigest': None},
-                       'accountId': self.SECOND, 'spendCapabilityId': '4002', 'controlCapabilityId': '4003',
+                       'accountId': self.SECOND, 'spendCapabilityId': self.SECOND_SPEND, 'controlCapabilityId': '4003',
                        'factoryObserveCapabilityId': '4004', 'initialBalance': '100000',
                        'accountPredicate': {'type': 'all', 'predicates': []}}]
         (root / 'enrollment-second.json').write_text(json.dumps(enrollment))
@@ -199,17 +252,48 @@ class World:
         self.totals.append({'after': label, 'height': v.get('height'), 'total': v.get('total')})
         return v
 
-    def turn(self, label, workspace, body, expect, detail=None, prepare=False):
-        """One signed command. `expect`: installed | replayed | refused | conflict | prepared. A refusal
-        may name its reason in `detail` (a substring, or a list of substrings, of the Host's refusal text)."""
+    def submit(self, label, workspace, body, prepare=False):
+        """One signed command, unjudged: the Host's outcome value."""
         out = self.attempts / label
         command = self.root / f'{label}.turn.json'
         command.write_text(json.dumps(body))
         args = ['activity', '--action', 'submit', '--workspace', workspace, '--command', command, '--out', out]
         if prepare:
             args += ['--prepare-only', 'true']
-        r = self.sh(label, self.mini, *args, ok=(0, 1, 2))
-        return self.judge(label, self.last_json(r), expect, detail)
+        return self.last_json(self.sh(label, self.mini, *args, ok=(0, 1, 2)))
+
+    def payer_of(self, workspace):
+        """The submitter's own (account, spend capability): the sponsor's, or the enrolled second subject's."""
+        if pathlib.Path(workspace) == self.second:
+            return self.SECOND, self.SECOND_SPEND
+        return self.SPONSOR_ACCOUNT, self.SPONSOR_SPEND
+
+    def probe_heap(self, label, workspace, body):
+        """(needed, declared) of a `deliver`/`exhaust`, or None when its envelope already covers (see
+        `heap_probe_body`)."""
+        return probed_shortfall(self.submit(f'{label}-heap-probe', workspace, heap_probe_body(body)))
+
+    def turn(self, label, workspace, body, expect, detail=None, prepare=False):
+        """One signed command. `expect`: installed | replayed | refused | conflict | prepared. A refusal
+        may name its reason in `detail` (a substring, or a list of substrings, of the Host's refusal text).
+        A `deliver`/`exhaust` first learns the heap its checkpoint needs and declares it (`probe_heap`)."""
+        if body.get('kind') in RESUME_KINDS:
+            body = covering_body(body, self.probe_heap(label, workspace, body), self.payer_of(workspace))
+        return self.judge(label, self.submit(label, workspace, body, prepare), expect, detail)
+
+    def short_heap_plant(self, label, workspace, body):
+        """The PLANT of the heap declaration: the same `deliver`/`exhaust` declaring ONE cell fewer than it
+        needs must be refused `heapUncovered needed needed-1`, with exactly those numbers. A plant that
+        cannot be made (the envelope already covers) is a red row, never a skipped one."""
+        short = self.probe_heap(label, workspace, body)
+        if short is None or short[0] - short[1] < 1:
+            self._row({'step': label, 'expect': 'plant', 'ok': False, 'observed': f'no plant possible: {short}'})
+            print(f'{label:44} plant     NOT PLANTED', flush=True)
+            return None
+        planted = short_body(body, short, self.payer_of(workspace))
+        self.judge(label, self.submit(label, workspace, planted), 'refused',
+                   f'heapUncovered {short[0]} {short[0] - 1}')
+        return short[0]
 
     def resubmit(self, label, ingress, expect, detail=None):
         r = self.sh(label, self.mini, 'activity', '--action', 'resubmit', '--workspace', self.sponsor,
