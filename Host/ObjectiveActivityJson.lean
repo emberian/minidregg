@@ -384,10 +384,12 @@ def cellJson (domain : Digest) (cell : Nat) (root : Digest) (bytes : List UInt8)
   .mkObj ([("cell", decimal cell), ("root", decimal root.value)] ++ described)
 
 /-- The view request: `{cells: [id..], accounts: [id..], objects: [id..], pins: [pin..],
-births: [{object, transaction}..], inboxes: [{sender, target}..], slots: [name..]}`; objects
+births: [{object, transaction}..], inboxes: [{sender, target}..], slots: [name..],
+quotes: [{record, await}..]}`; objects
 name their state and record cells, pins their package cells, births (an object and a birth's
 transaction) their record cells, inboxes their cells, and slots (a slot or message id) their
-answer-slot cells. -/
+answer-slot cells; `quotes: [{record, await}..]` asks the heap a delivery or exhaustion of that await must
+declare. -/
 structure ViewRequest where
   cells : List Nat
   accounts : List Nat
@@ -396,6 +398,8 @@ structure ViewRequest where
   births : List (Nat × Nat)
   inboxes : List (Nat × Nat)
   slots : List Nat
+  /-- `(record, await)` pairs whose delivery or exhaustion heap is asked (`quotes` in the reply). -/
+  quotes : List (Nat × Nat)
 
 def natList (json : Json) (name : String) : Result (List Nat) :=
   match json.getObjVal? name with
@@ -421,12 +425,19 @@ def inboxPairs (json : Json) : Result (List (Nat × Nat)) :=
     let items ← match value.getArr? with | .ok items => pure items | .error _ => throw "$.inboxes must be an array"
     items.toList.mapM fun item => do pure (← nat "$.inboxes" item "sender", ← nat "$.inboxes" item "target")
 
+def quotePairs (json : Json) : Result (List (Nat × Nat)) :=
+  match json.getObjVal? "quotes" with
+  | .error _ => .ok []
+  | .ok value => do
+    let items ← match value.getArr? with | .ok items => pure items | .error _ => throw "$.quotes must be an array"
+    items.toList.mapM fun item => do pure (← nat "$.quotes" item "record", ← nat "$.quotes" item "await")
+
 def parseViewRequest (bytes : List UInt8) : Result ViewRequest := do
-  if bytes.isEmpty then return ⟨[], [], [], [], [], [], []⟩
+  if bytes.isEmpty then return ⟨[], [], [], [], [], [], [], []⟩
   let some text := String.fromUTF8? ⟨bytes.toArray⟩ | throw "view request is not UTF-8"
   let json ← Json.parse text
   pure ⟨← natList json "cells", ← natList json "accounts", ← natList json "objects", ← natList json "pins",
-    ← births json, ← inboxPairs json, ← natList json "slots"⟩
+    ← births json, ← inboxPairs json, ← natList json "slots", ← quotePairs json⟩
 
 def stateCellOf (domain : Digest) (object : Nat) : Nat := (ObjectiveActivity.stateCell domain ⟨object⟩).value
 def objectCellOf (domain : Digest) (object : Nat) : Nat := (ObjectiveActivity.objectCell domain ⟨object⟩).value
@@ -465,6 +476,12 @@ def viewJson (domain : Digest) (asset : Nat) (request : ViewRequest) (view : Nat
         ("cell", decimal (inboxCellOf domain sender target))]).toArray),
     ("slots", Json.arr (request.slots.map fun name =>
       .mkObj [("name", decimal name), ("cell", decimal (slotCellOf domain name))]).toArray),
+    ("quotes", Json.arr (view.quotes.map fun (record, await, quote) =>
+      match quote with
+      | .ok quote => .mkObj [("record", decimal record), ("await", decimal await),
+          ("needed", decimal quote.needed), ("escrow", decimal quote.escrow)]
+      | .error reason => .mkObj [("record", decimal record), ("await", decimal await),
+          ("refused", toJson reason)]).toArray),
     ("balances", match book with
       | none => .null
       | some book => Json.arr (request.accounts.map fun account =>
