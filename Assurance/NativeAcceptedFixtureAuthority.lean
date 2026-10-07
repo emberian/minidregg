@@ -44,8 +44,11 @@ first.guards.writtenCells = false
 # one invocation marker spent
 first.nullifiers = 1
 # the pay cell's compute row for the subject holds the request's capacity proofWork (the compute it
-# bought): price(tariff, ENVELOPE) = 100001 steps, admitted on a fresh world's first invocation
-first.pay.computeSteps = 100001
+# bought): price(tariff, capacity) on a fresh world's first invocation, with the acceptance tariff
+# (base 1, sourceTicks 1, replayBytes 61, coreBytes 16, every other rate 0) and the capacity =
+# ENVELOPE (sourceTicks 100000) plus the publication's front-end quote for world/NativeReceipt.obend
+# (replayBytes 1741 = its source bytes, coreBytes 7193): 1 + 100000 + 61*1741 + 16*7193 = 321290
+first.pay.computeSteps = 321290
 # the created atom: build_request's arguments {atom: <random label>, schema: digest_hex(4242), byte: 7};
 # the method (world/NativeReceipt.obend `note`) creates it as an inline object of that schema whose
 # bytes are [byte]
@@ -60,7 +63,7 @@ first.charge.turnBytes = 2000000
 first.charge.memoryTouches = 1000000
 first.charge.storageBytes = 2000000
 first.charge.witnessBytes = 2000000
-first.charge.proofWork = 100001
+first.charge.proofWork = 321290
 first.charge.feeDebit = 0
 first.charge.networkBytes = 0
 first.charge.sideEffectCount = 8
