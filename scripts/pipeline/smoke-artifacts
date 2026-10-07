@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# scripts/pipeline/smoke-artifacts -- does a packed artifact set actually RUN? (before it is READY)
+#
+#   scripts/pipeline/smoke-artifacts SET_DIR [LOG_DIR]
+#
+# A set whose SHA256SUMS match can still be a Host that cannot serve, a consent provider that is
+# not the companion of that Host, or a `mini` that cannot talk to either. Before publish-artifacts
+# writes READY, this runs, on a fresh short scratch world deleted afterwards:
+#   1. every bin/ file executes (exit status <= 2 on no arguments: a usage refusal is fine; a
+#      loader/link failure, a signal or 126/127 is not);
+#   2. minidregg-client-consent prints its own usage prefix (the companion build of THIS Host);
+#   3. journey steps J0 (the Host bootstraps a Store and answers a signed read) and J1 (`mini`
+#      enrolls a newcomer through it, receipt looked up) with the set's own manifest.
+# Exit 0 = the set runs; anything else names the failing check (logs in LOG_DIR, default
+# SET_DIR/logs/pipeline/smoke). Uses the TIP's journey.sh (from the set's source.tar).
+set -uo pipefail
+PIPELINE_PROG=smoke-artifacts
+. "$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/lib.sh"
+set_dir=$(CDPATH='' cd -- "${1:?SET_DIR}" && pwd -P) || exit 1
+logs=${2:-$set_dir/logs/pipeline/smoke}
+mkdir -p "$logs"
+base=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}; [ -d "$base" ] && [ -w "$base" ] || base=/tmp
+R=$(mktemp -d "$base/psm.XXXXXX"); trap 'pkill -TERM -s 0 -f "$R" 2>/dev/null; rm -rf "$R"' EXIT
+fail() { pipeline_log "SMOKE RED: $*"; exit 1; }
+t0=$(date +%s)
+for b in "$set_dir"/bin/*; do
+  [ -x "$b" ] || continue
+  timeout 20 "$b" </dev/null >"$logs/exec-$(basename "$b").out" 2>&1; rc=$?
+  [ "$rc" -le 2 ] || fail "$(basename "$b") does not run (exit $rc): $(tail -1 "$logs/exec-$(basename "$b").out")"
+done
+grep -q '^minidregg-client-consent:' "$logs/exec-minidregg-client-consent.out" 2>/dev/null \
+  || fail "minidregg-client-consent did not print its usage prefix: $(tail -1 "$logs/exec-minidregg-client-consent.out" 2>/dev/null)"
+[ -f "$set_dir/source.tar" ] || fail "the set has no source.tar (cannot find the tip's journey.sh)"
+mkdir -p "$R/src" && tar -xf "$set_dir/source.tar" -C "$R/src" native/resource-client 2>/dev/null \
+  || tar -xf "$set_dir/source.tar" -C "$R/src" || fail "source.tar does not extract"
+js=$R/src/native/resource-client/journey.sh
+[ -f "$js" ] || fail "the tip has no native/resource-client/journey.sh"
+JOURNEY_STEPS="J0 J1" bash "$js" "$set_dir/manifest.json" "$R/j" >"$logs/journey.out" 2>"$logs/journey.err"
+cp "$R/j/journey-result.json" "$logs/" 2>/dev/null
+for id in J0 J1; do
+  st=$(jq -r --arg id "$id" '.steps[] | select(.id == $id) | .status' "$R/j/journey-result.json" 2>/dev/null)
+  [ "$st" = PASS ] || fail "journey $id ${st:-did not run}: $(jq -r --arg id "$id" '.steps[] | select(.id == $id) | .detail // ""' "$R/j/journey-result.json" 2>/dev/null | head -c 300)$(tail -1 "$logs/journey.err")"
+done
+pipeline_log "smoke PASS: $(ls "$set_dir/bin" | wc -l) binaries run, consent companion, J0+J1 in $(( $(date +%s) - t0 )) s"

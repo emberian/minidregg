@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+"""scripts/pipeline/stale-modules -- how many in-tree modules a `lake build MODS` would compile (an estimate).
+
+    stale-modules MOD...        (in a clone; prints the count, then the stale modules one per line with -v)
+
+Walks the in-tree import closure of MODS from the sources and calls a module stale when its .olean is
+missing or older than its .lean, or when it imports a stale module. It decides only WHICH slot a build
+waits for (scripts/pipeline/lib.sh pipeline_build_slot: a small rebuild never queues behind a
+3,800-job build); Lake still decides what is compiled, so a wrong estimate costs time, never truth.
+"""
+import os, re, sys
+IMPORT = re.compile(r"^\s*import\s+(.*)$")
+root = os.popen("git rev-parse --show-toplevel 2>/dev/null").read().strip() or os.getcwd()
+build = os.path.join(root, ".lake", "build", "lib", "lean")
+verbose = "-v" in sys.argv[1:]
+mods = [a for a in sys.argv[1:] if a != "-v"]
+
+def src(m):
+    p = os.path.join(root, *m.split(".")) + ".lean"
+    return p if os.path.isfile(p) else None
+
+BLOCK = re.compile(r"/-.*?-/", re.S)
+def imports(m):
+    """The import header: everything before the first non-import command, block comments removed."""
+    out = []
+    with open(src(m), encoding="utf-8", errors="replace") as f:
+        text = BLOCK.sub("", f.read(200000))
+    for line in text.splitlines():
+        s = line.split("--", 1)[0].strip()
+        if not s or s == "module" or s.startswith("prelude"):
+            continue
+        mt = re.match(r"^(?:public\s+)?(?:meta\s+)?import\s+(.*)$", s)
+        if not mt:
+            break
+        out += [x for x in mt.group(1).split() if x != "all" and src(x)]
+    return out
+
+deps, stack = {}, [m for m in mods if src(m)]
+while stack:
+    m = stack.pop()
+    if m in deps:
+        continue
+    deps[m] = imports(m)
+    stack += deps[m]
+
+memo = {}
+def stale(m):
+    if m in memo:
+        return memo[m]
+    memo[m] = False
+    o = os.path.join(build, *m.split(".")) + ".olean"
+    try:
+        r = os.stat(o).st_mtime_ns < os.stat(src(m)).st_mtime_ns
+    except OSError:
+        r = True
+    r = any([stale(d) for d in deps[m]]) or r
+    memo[m] = r
+    return r
+
+sys.setrecursionlimit(100000)
+st = sorted(m for m in deps if stale(m))
+print(len(st))
+if verbose:
+    print("\n".join(st))
