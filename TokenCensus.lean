@@ -26,13 +26,15 @@ ELABORATED TERM of every constant:
 3. **Layer-1 rows are backed.**  A row marked `L1 <theorem>` (the type carries the
    proposition it asserts, and the named theorem states the guarantee for every
    inhabitant) names a theorem that exists.
-5. **No mint that does not name the constructor**, for an `L2` type: no instance of
+5. **No mint that does not name the constructor**, for an `L2` evidence type: no instance of
    a value-producing class (`Inhabited`, `Nonempty`, `Zero`, `One`, `OfNat`,
    `EmptyCollection`) whose conclusion is about the type (a foreign module could mint
    with `default` or `Classical.choice`); no `cast`, `unsafeCast`, `Eq.mp` or
    `Eq.mpr` INTO the type in a value-carrying constant outside its home; and no
-   home-module definition that returns the bare type with no proposition among its
-   arguments (no verification step), unless the row's note names it under `mints:`.
+   home-module definition (not a projection, not a generated auxiliary) that returns
+   the bare type with no proposition and no census token among its arguments (no
+   verification step, no evidence it derives from), unless the row's note names it
+   under `mints:`.
 6. **Restricted minting functions.**  A `restrict | function | modules | note` row
    names a public function that mints a token (a genesis head, an identity from an
    open) and the only modules that may call it; any other value-carrying caller
@@ -225,9 +227,14 @@ elab "#assert_token_census " table:ident : command => do
     -- 5. no mint that does not name the constructor (L2 types)
     let l2Types : NameMap Row := present.foldl (fun map (name, user, _) =>
       match rowMap.find? user, env.find? name with
-      | some row, some (.ctorInfo ctor) => if row.layer == "L2" then map.insert ctor.induct row else map
+      | some row, some (.ctorInfo ctor) =>
+          if row.layer == "L2" && row.kind == "evidence" then map.insert ctor.induct row else map
       | _, _ => map) {}
     let l2Home : Name → Option Name := fun type => (l2Types.find? type).map (·.home)
+    let tokenTypes : NameMap Unit := present.foldl (fun map (name, _, _) =>
+      match env.find? name with
+      | some (.ctorInfo ctor) => map.insert ctor.induct ()
+      | _ => map) {}
     for (name, info) in env.constants.toList do
       if name.isInternal && !(isPrivateName name) then continue
       let module := moduleOf env name
@@ -250,16 +257,23 @@ elab "#assert_token_census " table:ident : command => do
                   if l2Home type != some module then
                     faults := faults.push s!"{name} in {module} casts into the L2 token {type}"
       -- bare minters at home
+      -- (a projection reads a token another value holds; an argument that is itself a census
+      -- token, or a proposition, is the verification step a derivation needs)
       if let .defnInfo _ := info then
-        unless isInstanceCore env name do
+        unless isInstanceCore env name || (env.getProjectionFnInfo? name).isSome ||
+            name.components.any (fun part => part.toString.startsWith "_") do
           if let some type := conclusionHead info.type then
             if let some row := l2Types.find? type then
               if row.home == module then
                 let bare ← forallTelescopeReducing info.type fun binders _ => do
                   for binder in binders do
-                    if ← isProp (← inferType binder) then return false
+                    let binderType ← inferType binder
+                    if ← isProp binderType then return false
+                    if let some head := conclusionHead binderType then
+                      if (tokenTypes.find? head).isSome then return false
                   return true
-                if bare && !(justifiedMinters row.note).contains ((privateToUserName? name).getD name) then
+                let user := (privateToUserName? name).getD name
+                if bare && !((justifiedMinters row.note).any fun listed => listed.isSuffixOf user) then
                   faults := faults.push s!"{name} in {module} returns the bare L2 token {type} with no proposition among its arguments (justify it under `mints:` in the row's note)"
     -- 6. restricted minting functions are called only where the census allows
     for restriction in restrictions do
