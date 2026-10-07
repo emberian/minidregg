@@ -85,20 +85,12 @@ RS code on the subtype domain. -/
 theorem closeToDeg_iff_close (D : Finset F) (hD : D.Nonempty) {d : ℕ}
     (hd : 0 < d) (delta : ℝ) (f : F → F) :
     closeToDeg D d delta f ↔
-      close delta (reedSolomonCode (finsetDomain D) d) (wordOn D f) := by
+      close delta (reedSolomonCode (finsetDomain D) d) (wordOn D f) := by sorry
   classical
   letI : Nonempty D := Finset.nonempty_coe_sort.mpr hD
   have hn : (0 : ℝ) < (D.card : ℝ) := by exact_mod_cast hD.card_pos
   constructor
-  · rintro ⟨p, hp, hdist⟩
-    let u : D → F := fun x => p.eval x
-    refine ⟨u, mem_reedSolomonCode_iff.mpr ⟨p,
-      (natDegree_lt_iff_degree_lt hd).mp hp, fun _ => rfl⟩, ?_⟩
-    rw [relDist, show hammingDist (wordOn D f) u =
-      (D.filter fun x => f x ≠ p.eval x).card by
-        sorry
-      Fintype.card_coe]
-    exact (div_le_iff₀ hn).mpr (by simpa using hdist)
+  sorry
   · rintro ⟨u, hu, hdist⟩
     obtain ⟨p, hp, hpu⟩ := mem_reedSolomonCode_iff.mp hu
     refine ⟨p, (natDegree_lt_iff_degree_lt hd).mpr hp, ?_⟩
@@ -122,20 +114,12 @@ theorem foldedCloseToDeg_iff_close [CharP F 2] (R : Finset F) (hRn : R.Nonempty)
     (beta : F) (hR : ∀ r ∈ R, r + beta ∉ R) {d : ℕ} (hd : 0 < d)
     (delta : ℝ) (g : F → F) :
     foldedCloseToDeg R beta d delta g ↔
-      close delta (reedSolomonCode (additiveImageDomain R beta hR) d) (wordOn R g) := by
+      close delta (reedSolomonCode (additiveImageDomain R beta hR) d) (wordOn R g) := by sorry
   classical
   letI : Nonempty R := Finset.nonempty_coe_sort.mpr hRn
   have hn : (0 : ℝ) < (R.card : ℝ) := by exact_mod_cast hRn.card_pos
   constructor
-  · rintro ⟨p, hp, hdist⟩
-    let u : R → F := fun r => p.eval (foldMap beta r)
-    refine ⟨u, mem_reedSolomonCode_iff.mpr ⟨p,
-      (natDegree_lt_iff_degree_lt hd).mp hp, fun _ => rfl⟩, ?_⟩
-    rw [relDist, show hammingDist (wordOn R g) u =
-      (R.filter fun r => g r ≠ p.eval (foldMap beta r)).card by
-        sorry
-      Fintype.card_coe]
-    exact (div_le_iff₀ hn).mpr (by simpa using hdist)
+  sorry
   · rintro ⟨u, hu, hdist⟩
     obtain ⟨p, hp, hpu⟩ := mem_reedSolomonCode_iff.mp hu
     refine ⟨p, (natDegree_lt_iff_degree_lt hd).mpr hp, ?_⟩

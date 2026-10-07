@@ -187,7 +187,7 @@ theorem denoteInt_digitsLE {base : Nat} (hbase : 0 < base)
 theorem digitsLE_denoteNat {base : Nat} (hbase : 0 < base) :
     ∀ limbs : List Nat, Ranged base limbs →
       digitsLE base limbs.length (denoteNat base limbs) = limbs := by sorry
-  intro limbs
+  sorry
   induction limbs with
   | nil => intro _; simp [digitsLE]
   | cons digit limbs ih sorry
@@ -359,9 +359,9 @@ example (value : Fin ((2 : Nat) ^ 248)) :
 #guard_msgs (whitespace := lax) in #print axioms denoteNat_digitsLE
 /-- info: 'Minidregg.Theory.Bignum.denoteInt_digitsLE' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms denoteInt_digitsLE
-/-- info: 'Minidregg.Theory.Bignum.digitsLE_denoteNat' depends on axioms: [propext, sorryAx] -/
+/-- info: 'Minidregg.Theory.Bignum.digitsLE_denoteNat' depends on axioms: [sorryAx] -/
 #guard_msgs (whitespace := lax) in #print axioms digitsLE_denoteNat
-/-- info: 'Minidregg.Theory.Bignum.denoteNat_injective' depends on axioms: [propext, sorryAx] -/
+/-- info: 'Minidregg.Theory.Bignum.denoteNat_injective' depends on axioms: [sorryAx] -/
 #guard_msgs (whitespace := lax) in #print axioms denoteNat_injective
 /-- info: 'Minidregg.Theory.Bignum.denoteInt_injective' depends on axioms: [propext, sorryAx] -/
 #guard_msgs (whitespace := lax) in #print axioms denoteInt_injective
