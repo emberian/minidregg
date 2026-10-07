@@ -4,6 +4,7 @@ below must FAIL to elaborate; `check-planted-api-faults.sh` requires one error
 per numbered fault (and fails if any of them elaborates).
 -/
 import Compiler.DurableHistoryReader
+import Compiler.DurableServed
 
 open Minidregg.Compiler
 open Minidregg.Compiler.DurableHistoryReader
@@ -37,3 +38,13 @@ def fault5 (opened other : StoreIdentity) (head : Head other) : Head opened :=
 -- FAULT-6 (forged identity): a Store identity built outside the open.
 def fault6 (key : DurableCheckpointCodec.MacKey) : StoreIdentity :=
   StoreIdentity.mk key ⟨0⟩
+
+-- FAULT-7 (silent absent off a served state): reading the journal of a Served directly.
+def fault7 {store : StoreIdentity} (served : DurableServed.Served Minidregg.Compiler.DurableHistory.recordHash store) :
+    Nat :=
+  served.state.model.journal.length
+
+-- FAULT-8 (a served state with a hand-made snapshot): Served built outside its module.
+def fault8 {store : StoreIdentity} (snapshot : Minidregg.Kernel.DurableDataIntent.DataSnapshot
+    Minidregg.Compiler.DurableHistory.recordHash) : DurableServed.Served Minidregg.Compiler.DurableHistory.recordHash store :=
+  DurableServed.Served.mk snapshot ⟨[], [], [], default⟩ [] [] 0 ⟨0⟩ ⟨0⟩ (fun _ _ => sorry)
