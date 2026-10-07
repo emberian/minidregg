@@ -204,4 +204,19 @@ def readerOf (transport : Transport) (rootBytes : List UInt8 → Digest) (loaded
       range := range transport head
       stateAt := stateAt transport rootBytes loaded.image.seed head }⟩
 
+/-- **A Reader of a portable image** (a foreign accepted prefix verified without a
+Store of its own): the image written into the EMPTY Store `transport` names
+(`DurableReceiverIO.writeImage`) and read back through `readerOf`; refused if
+the Store's log start is not `logStart` (the image's, under its deployment). The caller owns
+the Store's directory and its lifetime (the Reader reads it on every query). -/
+def scratchReader (transport : Transport) (rootBytes : List UInt8 → Digest)
+    (image : Minidregg.Kernel.DurableReceiver.Image) (logStart : Digest) :
+    IO (Except String ((store : StoreIdentity) × Reader rootBytes store)) := do
+  match ← DurableReceiverIO.writeImage transport rootBytes image with
+  | .error detail => return .error detail
+  | .ok written =>
+      if written.logStart ≠ logStart then
+        return .error "scratch Store: its log start is not the image's (another deployment's transport)"
+      readerOf transport rootBytes written
+
 end Minidregg.Compiler.DurableHistoryStore

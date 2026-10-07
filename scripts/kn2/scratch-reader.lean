@@ -1,0 +1,112 @@
+/- KN2-STORE-OPEN executed check of `DurableHistoryStore.scratchReader`: a portable
+image (the accepted fixture's seed and journal prefix, decoded from bytes, with no
+Store of its own) is written into an EMPTY Store under the deployment's pinned
+config and read back as a history Reader of that real Store.
+
+ - control: the Reader's head is at the image's height; every record verifies at its
+   height and is byte for byte the image's record; `stateAt` reaches the head;
+ - plant 1: the deployment's log start is not the one asked for -> refused by name;
+ - plant 2: writing into a Store that is not empty -> refused by name (bootstrap);
+ - plant 3: an image with one record's post bytes altered (its root no longer binds)
+   -> refused by name, naming that record's height.
+
+Usage: lake env lean --run scripts/kn2/scratch-reader.lean STORE-HELPER -/
+import Assurance.NativeAcceptedFixtureData
+import Kernel.NativeHostContext
+import Compiler.DurableHistoryStore
+
+open Minidregg.Theory.TypedAuthorization
+open Minidregg.Kernel
+open Minidregg.Kernel.DurableReceiver
+open Minidregg.Kernel.DurableDataIntent
+open Minidregg.Compiler
+open Minidregg.Compiler.DurableCheckpointCodec
+open Minidregg.Assurance.NativeAcceptedFixtureData
+
+namespace ScratchReader
+
+def hexBytes (text : String) : List UInt8 :=
+  go text.toList []
+where
+  nibble (c : Char) : Nat := if c.isDigit then c.toNat - '0'.toNat else c.toNat - 'a'.toNat + 10
+  go : List Char → List UInt8 → List UInt8
+    | a :: b :: rest, acc => go rest (UInt8.ofNat (nibble a * 16 + nibble b) :: acc)
+    | _, acc => acc.reverse
+
+def config (storage : DurableReceiverIO.NativeConfig) : NativeHost.Config where
+  deployment := ⟨⟨pinDomain⟩, pinFactoryId, pinResourceBookId, pinAuthorityCellId⟩
+  federation := ⟨pinFederation⟩
+  template := ⟨⟨pinIssuer⟩, pinOwnerBudget, pinLifetime, CanonicalRuntimeProfile.defaultBirthSlack⟩
+  tariff := ⟨pinTariffBase, pinTariffPerBirth, pinTariffPerGrant, pinTariffPerInitialPayloadByte,
+    pinCollector, pinAsset⟩
+  genesisHeight := pinGenesisHeight
+  expectedSeed := ⟨pinExpectedSeed⟩
+  storage := storage
+  signature := ⟨""⟩
+  invocationBindings := none
+
+def require (label : String) (condition : Bool) : IO Unit :=
+  unless condition do throw (IO.userError s!"FAIL scratch reader: {label}")
+
+def expectRefused (label : String) (needle : String)
+    (result : Except String ((store : DurableHistory.StoreIdentity) ×
+      DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)) : IO Unit :=
+  match result with
+  | .ok _ => throw (IO.userError s!"FAIL scratch reader: {label} was accepted")
+  | .error detail => do
+      IO.println s!"refused as expected ({label}): {detail}"
+      require s!"{label} is refused by name ({needle})" ((detail.splitOn needle).length > 1)
+
+/-- The first write of the first record whose post bytes can be altered. -/
+def alter (record : IntentRecord) : IntentRecord :=
+  match record.writes with
+  | write :: rest => { record with writes := { write with canonicalPostBytes := 7 :: write.canonicalPostBytes } :: rest }
+  | [] => record
+
+def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
+  let storeAt (name : String) : NativeHost.Config :=
+    config { binary := binary, root := directory / name / "store", key := directory / name / "key",
+      checkpointEvery := 2 }
+  for name in ["a", "b", "c"] do IO.FS.createDirAll (directory / name)
+  let rootBytes := ResourceBirthCodec.rootBytes
+  let some seed := seedFrame.decode (hexBytes seedHex)
+    | throw (IO.userError "FAIL the fixture seed no longer decodes")
+  let some records := recordHexes.mapM fun record => recordFrame.decode (hexBytes record)
+    | throw (IO.userError "FAIL the fixture records no longer decode")
+  let image : Image := ⟨seed, records⟩
+  let cfg := storeAt "a"
+  let logStart := cfg.logStart seed
+  -- control
+  match ← DurableHistoryStore.scratchReader cfg.physicalTransport rootBytes image logStart with
+  | .error detail => throw (IO.userError s!"FAIL scratch reader of the fixture image: {detail}")
+  | .ok ⟨_, reader⟩ =>
+      require s!"the head is at the image's height ({reader.head.height})" (reader.head.height == records.length)
+      for (record, index) in records.zipIdx do
+        match ← reader.atHeight (index + 1) with
+        | .error refusal => throw (IO.userError s!"FAIL record {index + 1}: {refusal.message}")
+        | .ok verified =>
+            require s!"record {index + 1} is the image's"
+              (recordFrame.encode verified.record == recordFrame.encode record)
+      match ← reader.stateAt records.length with
+      | .error refusal => throw (IO.userError s!"FAIL stateAt the head: {refusal.message}")
+      | .ok _ => pure ()
+      IO.println s!"control: a Reader at height {reader.head.height}, every record verified and exact, stateAt the head"
+  -- plant 1: another log start
+  expectRefused "another log start" "log start"
+    (← DurableHistoryStore.scratchReader (storeAt "b").physicalTransport rootBytes image ⟨logStart.value + 1⟩)
+  -- plant 2: the Store is not empty (store a holds the image)
+  expectRefused "a non-empty Store" "scratch Store"
+    (← DurableHistoryStore.scratchReader cfg.physicalTransport rootBytes image logStart)
+  -- plant 3: an altered record
+  let altered : Image := ⟨seed, records.map alter⟩
+  require "the plant alters the first record" (records.head?.map (·.writes.length) != some 0)
+  expectRefused "an altered record" "record 1 does not bind"
+    (← DurableHistoryStore.scratchReader (storeAt "c").physicalTransport rootBytes altered logStart)
+  IO.println "PASS scratch reader: a portable image is a real Store's Reader; another log start, a non-empty Store and an altered record are each refused by name"
+
+end ScratchReader
+
+def main (arguments : List String) : IO Unit := do
+  match arguments with
+  | [binary] => IO.FS.withTempDir (ScratchReader.run binary)
+  | _ => throw (IO.userError "usage: lean --run scripts/kn2/scratch-reader.lean STORE-HELPER")
