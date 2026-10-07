@@ -427,6 +427,10 @@ A Minidregg.Theory.ObjectiveBendDemandCollect.Related.stack_length : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.Related.trans : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.ResultAgree : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.ResultRel : -
+A Minidregg.Theory.ObjectiveBendDemandCollect.RoomFor.heap : -
+A Minidregg.Theory.ObjectiveBendDemandCollect.RoomFor.same : -
+A Minidregg.Theory.ObjectiveBendDemandCollect.RoomFor.shift : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.RoomFor.stack : -
 A Minidregg.Theory.ObjectiveBendDemandCollect.Traced : -
 A Minidregg.Theory.ObjectiveBendDemandCollect.TypesRel : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.active : propext
@@ -557,13 +561,16 @@ A Minidregg.Theory.ObjectiveBendDemandCollect.largerYield : -
 A Minidregg.Theory.ObjectiveBendDemandCollect.largerYield_checkpoint_grows : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.lexical_related : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.lexical_settle : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.limitsPast : -
 A Minidregg.Theory.ObjectiveBendDemandCollect.liveDomain : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.liveDomain_of_not_false : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.liveMarks : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.liveMarks_spec : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.markFrom : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.markFrom_spec : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.materializeWith_record : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.nodup_map_on : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.not_roomFor_short : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.outcomeState : -
 A Minidregg.Theory.ObjectiveBendDemandCollect.outcomeState_runBounded_zero : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.pending : propext
@@ -573,6 +580,7 @@ A Minidregg.Theory.ObjectiveBendDemandCollect.ranOutOfHeap : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.rankStep : -
 A Minidregg.Theory.ObjectiveBendDemandCollect.rankTable : -
 A Minidregg.Theory.ObjectiveBendDemandCollect.rankTable_spec : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.recordStep : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.related_collect : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.related_completeWith : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.related_forceWith : Classical.choice, Quot.sound, propext

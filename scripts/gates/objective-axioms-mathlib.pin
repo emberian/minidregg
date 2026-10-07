@@ -14961,6 +14961,7 @@ A Minidregg.Kernel.ObjectiveActivity.Delivery.envelope : Classical.choice, Quot.
 A Minidregg.Kernel.ObjectiveActivity.Delivery.envelopeExact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.Delivery.guards : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.Delivery.guardsExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveActivity.Delivery.heapCovered : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.Delivery.idExact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.Delivery.input : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.Delivery.inputExact : Classical.choice, Quot.sound, propext
@@ -15027,6 +15028,7 @@ A Minidregg.Kernel.ObjectiveActivity.Exhaustion.envelope : Classical.choice, Quo
 A Minidregg.Kernel.ObjectiveActivity.Exhaustion.envelopeExact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.Exhaustion.guards : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.Exhaustion.guardsExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveActivity.Exhaustion.heapCovered : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.Exhaustion.idExact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.Exhaustion.input : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.Exhaustion.inputExact : Classical.choice, Quot.sound, propext
@@ -15131,6 +15133,7 @@ A Minidregg.Kernel.ObjectiveActivity.Refusal.bookUnavailable.elim : -
 A Minidregg.Kernel.ObjectiveActivity.Refusal.checkpointCodec.elim : -
 A Minidregg.Kernel.ObjectiveActivity.Refusal.checkpointDigest.elim : -
 A Minidregg.Kernel.ObjectiveActivity.Refusal.exhausted.elim : -
+A Minidregg.Kernel.ObjectiveActivity.Refusal.heapUncovered.elim : -
 A Minidregg.Kernel.ObjectiveActivity.Refusal.inputType.elim : -
 A Minidregg.Kernel.ObjectiveActivity.Refusal.messageAwaitNeedsInbox.elim : -
 A Minidregg.Kernel.ObjectiveActivity.Refusal.notAnObject.elim : -
@@ -15443,6 +15446,7 @@ A Minidregg.Kernel.ObjectiveActivity.segmentCommit : Classical.choice, Quot.soun
 A Minidregg.Kernel.ObjectiveActivity.segmentCommit_awaiting : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.segmentCommit_census : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.segmentCommit_spec : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveActivity.segmentLimits : -
 A Minidregg.Kernel.ObjectiveActivity.settle : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.settlePurse : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.settlePurse_prefix : Classical.choice, Quot.sound, propext
@@ -16214,17 +16218,21 @@ A Minidregg.Kernel.ObjectiveKernelConfig.Deployment : -
 A Minidregg.Kernel.ObjectiveKernelConfig.configOf : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveKernelConfig.maxPatience : -
 A Minidregg.Kernel.ObjectiveKernelConfig.storageRate : -
+A Minidregg.Kernel.ObjectiveResumeContract.Delivery.heap_priced : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.Delivery.installed_record : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.Delivery.installed_record_ended : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.Delivery.next_generation : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveResumeContract.Exhaustion.heap_priced : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.ForcingTransparent : Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.Segment.Agrees : propext
 A Minidregg.Kernel.ObjectiveResumeContract.Segment.Agrees.trans : propext
 A Minidregg.Kernel.ObjectiveResumeContract.Segment.agreesB : propext
 A Minidregg.Kernel.ObjectiveResumeContract.Segment.agreesB_iff : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.StoredComplete : Quot.sound, propext
+A Minidregg.Kernel.ObjectiveResumeContract.absolute_limits_refuted : Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.birth_checkpoint_typed : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.birth_stored_complete : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveResumeContract.budgetConfig : -
 A Minidregg.Kernel.ObjectiveResumeContract.danglingConfig : -
 A Minidregg.Kernel.ObjectiveResumeContract.danglingResponse : -
 A Minidregg.Kernel.ObjectiveResumeContract.danglingYield : -
@@ -16238,6 +16246,10 @@ A Minidregg.Kernel.ObjectiveResumeContract.delivery_advances_generation : Classi
 A Minidregg.Kernel.ObjectiveResumeContract.delivery_checkpoint_typed : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.delivery_stored_complete : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.encodeRecord_ne_nil : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveResumeContract.exhaustedConverseCheck : Quot.sound, propext
+A Minidregg.Kernel.ObjectiveResumeContract.exhaustedConverse_of_check : Quot.sound, propext
+A Minidregg.Kernel.ObjectiveResumeContract.extractionConverseCheck : Quot.sound, propext
+A Minidregg.Kernel.ObjectiveResumeContract.extractionConverse_of_check : Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.fieldsBeq : propext
 A Minidregg.Kernel.ObjectiveResumeContract.fieldsBeq_refl : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.fieldsBeq_sound : Quot.sound, propext
@@ -16247,27 +16259,38 @@ A Minidregg.Kernel.ObjectiveResumeContract.forcingTransparent_not_of_extraction 
 A Minidregg.Kernel.ObjectiveResumeContract.forcingTransparent_of_check : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.forcingTransparent_of_yieldedPlan : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.forcingTransparent_tally : Classical.choice, Minidregg.Kernel.ObjectiveResumeContract.forcingTransparent_tally._native.native_decide.ax_1_1, Quot.sound, propext
-A Minidregg.Kernel.ObjectiveResumeContract.headroom : -
+A Minidregg.Kernel.ObjectiveResumeContract.growResponse : -
+A Minidregg.Kernel.ObjectiveResumeContract.largerConfig : -
+A Minidregg.Kernel.ObjectiveResumeContract.largerStored : Quot.sound, propext
+A Minidregg.Kernel.ObjectiveResumeContract.largerYield_resumes_exactly : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveResumeContract.lazy_extraction_failure_commits_as_fault : propext
 A Minidregg.Kernel.ObjectiveResumeContract.lexicalInvariant_initialNat : propext
+A Minidregg.Kernel.ObjectiveResumeContract.lexicalInvariant_largerYield : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.nextRecord_checkpoint : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.nextRecord_generation : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.not_forcingTransparent_dangling : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.not_forcingTransparent_lostStack : Classical.choice, Minidregg.Kernel.ObjectiveResumeContract.not_forcingTransparent_lostStack._native.native_decide.ax_1_1, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.not_forcingTransparent_of_refute : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.not_lexicalInvariant_danglingYield : propext
+A Minidregg.Kernel.ObjectiveResumeContract.readResponse : -
+A Minidregg.Kernel.ObjectiveResumeContract.returnResponse : -
 A Minidregg.Kernel.ObjectiveResumeContract.runSegment_checkpoint : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.runSegment_stored_complete : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.runSegment_transfer : Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.runSegment_yielded : Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.second_same_await_is_collision : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.segmentCommit_yielded : Classical.choice, Quot.sound, propext
-A Minidregg.Kernel.ObjectiveResumeContract.storedComplete_of_typed : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveResumeContract.segmentLimits_of_size : propext
+A Minidregg.Kernel.ObjectiveResumeContract.storedComplete_of_yielded : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveResumeContract.stored_commits_where_lazy_exhausts : Quot.sound, propext
+A Minidregg.Kernel.ObjectiveResumeContract.stored_commits_where_lazy_extraction_fails : Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.tallyConfig : -
 A Minidregg.Kernel.ObjectiveResumeContract.tallyCore : -
 A Minidregg.Kernel.ObjectiveResumeContract.tallyForced : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.tallyReply : -
 A Minidregg.Kernel.ObjectiveResumeContract.tallyTerm : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.tallyYield : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveResumeContract.tariff_heap_le_workOf : -
 A Minidregg.Kernel.ObjectiveResumeContract.typed_runBounded_yielded : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveSend.MessageDelivery.batchExact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveSend.MessageDelivery.book : Classical.choice, Quot.sound, propext
@@ -25825,7 +25848,6 @@ A Minidregg.Theory.ObjectiveBendDemandForcing.heapValid_push : Classical.choice,
 A Minidregg.Theory.ObjectiveBendDemandForcing.heapValid_set : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandForcing.liftMap : -
 A Minidregg.Theory.ObjectiveBendDemandForcing.materializeWith_heapForces : Classical.choice, Quot.sound, propext
-A Minidregg.Theory.ObjectiveBendDemandForcing.materializeWith_record : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandForcing.nested_demand : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandForcing.nested_pop : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandForcing.pendRel_start : Classical.choice, Quot.sound, propext
@@ -25841,7 +25863,6 @@ A Minidregg.Theory.ObjectiveBendDemandForcing.prefixExt_push : Classical.choice,
 A Minidregg.Theory.ObjectiveBendDemandForcing.prefixExt_refl : -
 A Minidregg.Theory.ObjectiveBendDemandForcing.prefixExt_trans : -
 A Minidregg.Theory.ObjectiveBendDemandForcing.readsAt : propext
-A Minidregg.Theory.ObjectiveBendDemandForcing.recordStep : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandForcing.renameCell_congr : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandForcing.renameCell_id : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandForcing.renameClosure_id : Quot.sound, propext
