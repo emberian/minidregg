@@ -230,15 +230,15 @@ def finish {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot
     match ObjectiveActivity.judgeDomains config snapshot posts with
     | .error reason => .error (.kernel reason)
     | .ok (guards, units) =>
-      if units ≤ turn.domainAllowance then .ok (posts, extra ++ guards)
-      else .error (.kernel (.domainUncovered units turn.domainAllowance))
+      if units ≤ (AdmittedTurn.domainAllowance turn) then .ok (posts, extra ++ guards)
+      else .error (.kernel (.domainUncovered units (AdmittedTurn.domainAllowance turn)))
 
 theorem finish_finalize {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {turn : AdmittedTurn config snapshot height} {posts : List Post} {extra : List ReadGuard}
     (finished : finish config snapshot height turn = .ok (posts, extra)) :
     ∃ seats domains units, finalize config snapshot height turn = .ok (posts, seats) ∧
       ObjectiveActivity.judgeDomains config snapshot posts = .ok (domains, units) ∧
-      units ≤ turn.domainAllowance ∧ extra = seats ++ domains := by
+      units ≤ (AdmittedTurn.domainAllowance turn) ∧ extra = seats ++ domains := by
   unfold finish at finished
   split at finished
   · cases finished
@@ -385,9 +385,9 @@ theorem finish_domain_covered {rootBytes : Bytes → Digest} {config : Config} {
         ObjectiveActivity.finalRecord config snapshot posts object = .ok (some record) ∧ id ∈ record.domains) ∨
         id ∈ ObjectiveActivity.postedDomains snapshot posts) →
       ∃ domain, ObjectiveActivity.finalDomain config snapshot posts id = .ok (some domain) ∧
-        domain.members.length + 1 ≤ turn.domainAllowance ∧
+        domain.members.length + 1 ≤ (AdmittedTurn.domainAllowance turn) ∧
         config.tariff.domainWork * (domain.members.length + 1) ≤
-          config.tariff.domainWork * turn.domainAllowance := by
+          config.tariff.domainWork * (AdmittedTurn.domainAllowance turn) := by
   obtain ⟨_, _, units, _, judged, covered, _⟩ := finish_finalize finished
   intro id which
   obtain ⟨domain, found, counted⟩ := ObjectiveActivity.judgeDomains_units judged id which
