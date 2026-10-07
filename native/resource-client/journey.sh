@@ -188,7 +188,7 @@ cap_s() {
   echo "$want"
 }
 
-STEPS=(J0 J1 J2 J3 J12X J4 JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K11 KCH KCHR KCHC KIX KF KH K12C JMKT K12I K12T K12E K12M K12R K12H WEB KW K10C JLI KTPL J15 J17 J14 JPRIV1 JN2 JN3 JN3P JN5 JSYNC M3 M4 M5 M6 M7 M8 BD J12 J12W JNAMES JDV JPD J13 JJOB1 JJOB JJOBM KCL J12A JCHAT JINSPECT JLS JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JROTL JRLANE JDISCLOSE)
+STEPS=(J0 J1 J2 J3 J12X J4 P7KR JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K11 KCH KCHR KCHC KIX KF KH K12C JMKT K12I K12T K12E K12M K12R K12H WEB KW K10C JLI KTPL J15 J17 J14 JPRIV1 JN2 JN3 JN3P JN5 JSYNC M3 M4 M5 M6 M7 M8 BD J12 J12W JNAMES JDV JPD J13 JJOB1 JJOB JJOBM KCL J12A JCHAT JINSPECT JLS JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JROTL JRLANE JDISCLOSE)
 if [ -n "${JOURNEY_STEPS:-}" ]; then
   SELECTED=()
   for id in "${STEPS[@]}"; do
@@ -261,6 +261,7 @@ TITLE[BD]="plans bind address footprints: disjoint plans commute, overlap refuse
 TITLE[M8]="agent fleet: fee'd turns, topic events, heads (own Store)"
 TITLE[J12]="two friends co-write a document through the shell, with refusals"
 TITLE[JNAMES]="J-NAMES: shared room-index lookup, rename, duplicate-law refusal and target authority"
+TITLE[P7KR]="P7: a kind-definition revision between consent and admission never commits a different effect"
 TITLE[JDV]="J-DOCUVERSE: two friends write a paper in the shell; quotes, marks, history, their editor, can, the web, a cold audit"
 TITLE[JPD]="Protected authored documents: current-member reads, immutable authorship, stable maintenance anchors, genuine edits and revocation on JDV Store"
 TITLE[J12W]="a friend writes in their own editor: doc pull, doc push, stale by line"
@@ -983,6 +984,7 @@ step_M4() { hook m4 "J1-J8 run from an ssh session through the shell over the cl
 step_M5() { hook m5 "Hermes performs J4 through the client contract on this Store, is killed mid-attempt, restarts, and the attempt resolves performed/refused/uncertain (list item 5, lane m5-hermes)" hermes; }
 step_M6() { hook m6 "a non-Git SPK profile goes INSTALL -> START -> answers curl through the ordinary mechanism (list item 6, lane m6-grain)" spkHost; }
 step_J12() { hook j12 "friends provisioned from the shell co-write a doc (append, edit with the read line as guard, link, backlinks, board, revoke); a stale edit, a third key, a reviewer's write, an append-only edit, a backwards task and a revoked read are refused by the Host with their reason (PLACE item 1)" shell; }
+step_P7KR() { hook jkind-revise-consent "a kind-definition revision between a member signing an instance write and its admission either refuses the unchanged call or commits exactly the consented write under the instance own descriptor; never a different effect (P4 P7)" shell; }
 step_JNAMES() { hook jnames "shared room names through signed room/index reads; two clients, renames, current laws, exact recovery and target authority" shell; }
 step_JDV() { hook jdocuverse "J-DOCUVERSE (DEOS §8 J19-J24): two friends write a paper through mini shell: a range of notes transcluded snapshot and live, a reader without the source's grant sees the placeholder; marks, an annotation, a link and its backlink; doc show equals the golden; history, show --at and diff; pull, push, a stale line refused by line; can paper; mini web's page equals doc show --html byte for byte; a cold audit re-admits every record" shell; }
 step_JPD() { hook jprotected-docs "private comments and text on the JDV Store: independent fragment keys, invitations and revocation preserve authored ciphertext and semantic revisions; actual edits stale old anchors; retained custody retries and excluded writes" shell; }
@@ -1103,6 +1105,7 @@ run_step BD J2
 run_step J12 J0
 run_step J12W J0
 run_step JNAMES J0 J4
+run_step P7KR J4
 run_step JDV J0
 run_step JPD JDV
 run_step J13 J0
