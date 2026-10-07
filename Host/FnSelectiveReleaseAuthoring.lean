@@ -103,9 +103,16 @@ def parseRequest (source : String) : Except String Request := do
     ← textField object "from", ← textField object "date",
     ← textField object "subject"⟩
 
+/-- The source's physical root and the selected atom's bytes, from a signed resource view. The root
+is the view's own `packed.payload.root` (`NativeObservationController.resourceView`'s first
+component): the root `FnSelectiveReleaseSourceAuthority.prepare` compares the release's parent
+with. The cell bytes the view carries are NARROWED to the reader's grant (`narrowPacked`), so the
+decoded cell's own `materialized.root` is the narrowed cell's, not the source's; it is used only to
+read the atom. (Taking it as the parent was the cause of `staleParent` on every narrowed read,
+cv 01a1167a-73f5.) -/
 private def selectedPayload (view : List UInt8) (atom : AtomId) :
     Except String (Digest × List UInt8) := do
-  let some (_, packed, _, _) := NativeObservationController.resourceViewCodec.decode view
+  let some (sourceRoot, packed, _, _) := NativeObservationController.resourceViewCodec.decode view
     | fail "noncanonical signed resource view"
   let some cell := Minidregg.Theory.CellRegistry.PackedCell.decode
       CanonicalCellRegistry.registry packed
@@ -116,7 +123,7 @@ private def selectedPayload (view : List UInt8) (atom : AtomId) :
         | fail "selected atom is absent from the current content cell"
       unless record.tombstonedAt.isNone && !record.payload.isEmpty do
         fail "selected atom is tombstoned or empty"
-      pure (materialized.root, record.payload)
+      pure (sourceRoot, record.payload)
   | _ => fail "selected source is not a content resource"
 
 /-- Reads only an exact current atom through the existing signed observation
