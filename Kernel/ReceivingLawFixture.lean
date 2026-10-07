@@ -246,8 +246,9 @@ theorem admitVia_ok
   simp only [noClaims, Receiver.verifyAll, pure_bind]
   split
   · rename_i reason admitted
-    unfold Receiver.admit at admitted
-    simp [noClaims, Theory.Receiving.firstRefused, prepares, shaped, lawful] at admitted
+    obtain ⟨accepted, ok, -⟩ := R.admit_ok_of noClaims (by simp) prepares shaped lawful
+    rw [ok] at admitted
+    cases admitted
   · exact ⟨_, rfl⟩
 
 /-- On the fixture state, an ingress that decodes, is fresh, needs no signature,
