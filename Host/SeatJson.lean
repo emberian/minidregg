@@ -71,7 +71,20 @@ def proposal (json : Json) : Result Seats.Proposal := do
     | .ok value => match value.getBool? with
       | .ok flag => pure flag
       | .error _ => throw s!"{p}.donate must be a boolean"
-  pure ⟨← amounts p json "give", ← amounts p json "want", exit, donate⟩
+  -- `disclose`: which principals the contract's method is shown (absent: none; GPT-6 row G).
+  let flag (obj : Json) (name : String) : Result Bool := match obj.getObjVal? name with
+    | .error _ => pure false
+    | .ok value => match value.getBool? with
+      | .ok f => pure f
+      | .error _ => throw s!"{p}.disclose.{name} must be a boolean"
+  let disclose ← match json.getObjVal? "disclose" with
+    | .error _ => pure ({} : Seats.Disclosure)
+    | .ok obj => do
+      for (key, _) in (obj.getObj?.toOption.map (·.toArray.toList)).getD [] do
+        unless key == "offerer" || key == "payee" || key == "holder" do
+          throw s!"{p}.disclose.{key} is not offerer, payee or holder"
+      pure ⟨← flag obj "offerer", ← flag obj "payee", ← flag obj "holder"⟩
+  pure ⟨← amounts p json "give", ← amounts p json "want", exit, donate, disclose⟩
 
 /-- `$.turn`: `{kind: publish|create|handOver|offer|invoke|exit, ...}`. A
 publication carries the artifact and its source package (hex) and the payer. The
@@ -116,6 +129,8 @@ def amountsJson (entries : List (Nat × Nat)) : Json :=
 
 def proposalJson (p : Seats.Proposal) : Json :=
   .mkObj [("give", amountsJson p.give), ("want", amountsJson p.want), ("donate", toJson p.donate),
+    ("disclose", .mkObj [("offerer", toJson p.disclose.offerer), ("payee", toJson p.disclose.payee),
+      ("holder", toJson p.disclose.holder)]),
     ("exit", match p.exit with
       | .onDemand => "onDemand"
       | .afterDeadline due => .mkObj [("afterDeadline", decimal due)])]
