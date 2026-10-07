@@ -47,7 +47,6 @@ import Kernel.ClockTickReceiver
 import Kernel.PayObservationReceiver
 import Kernel.PayEnrolReceiver
 import Kernel.PayEnrolQuote
-import Compiler.PayEnrolSignatureIO
 import Kernel.CertifyReceiver
 import Kernel.ApplicationLifecycleResidentProfile
 import Host.ApplicationPermissionSchemaAuthoring

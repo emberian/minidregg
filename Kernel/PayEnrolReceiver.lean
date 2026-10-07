@@ -1088,24 +1088,29 @@ def sshQuery (mint enrolAddress : Address32) (memo : Memo) : SigQuery :=
 tariff's mint and the observed enrollment address.  The Receiver's verifier
 answers them before `prepare`; a `false` journals the payment (`miniSigInvalid`,
 …), only a verifier error refuses.  An unparsed memo observes nothing. -/
-def observations (deployment : Deployment) (durable : Durable) (observation : Observation) :
+def observationsAt (mint : Option Address32) (observation : Observation) :
     Except Reject (List SigQuery) :=
   match parsedMemo observation with
   | none => .ok []
   | some memo =>
-      match mintOf deployment durable with
+      match mint with
       | none => .error .payUnavailable
       | some mint => .ok [miniQuery mint observation.address memo, sshQuery mint observation.address memo]
+
+/-- `observationsAt` under the loaded pay cell's tariff mint. -/
+def observations (deployment : Deployment) (durable : Durable) (observation : Observation) :
+    Except Reject (List SigQuery) :=
+  observationsAt (mintOf deployment durable) observation
 
 /-- The two bits `decideEnrol` reads, from the verifier's `answer`s on exactly the
 observed queries.  An unparsed memo needs none (`false, false`; the decision
 journals it by its memo reason before reading the bits). -/
-def verifiedOf (answer : SigQuery → Option Bool) (deployment : Deployment) (durable : Durable)
+def verifiedAt (answer : SigQuery → Option Bool) (mint : Option Address32)
     (observation : Observation) : Except Reject Verified :=
   match parsedMemo observation with
   | none => .ok ⟨false, false⟩
   | some memo =>
-      match mintOf deployment durable with
+      match mint with
       | none => .error .payUnavailable
       | some mint =>
           match answer (miniQuery mint observation.address memo),
@@ -1113,9 +1118,38 @@ def verifiedOf (answer : SigQuery → Option Bool) (deployment : Deployment) (du
           | some mini, some ssh => .ok ⟨mini, ssh⟩
           | _, _ => .error .unobserved
 
-/-- **Every bit is an answer on an observed query**: when `verifiedOf` decides
-the bits of a parsed memo, the mini bit is `answer` on the mini query and the ssh
-bit `answer` on the ssh query, and both queries are the observations. -/
+/-- `verifiedAt` under the loaded pay cell's tariff mint. -/
+def verifiedOf (answer : SigQuery → Option Bool) (deployment : Deployment) (durable : Durable)
+    (observation : Observation) : Except Reject Verified :=
+  verifiedAt answer (mintOf deployment durable) observation
+
+/-- **Every bit is an answer on an observed query**, for any mint: when
+`verifiedAt` decides the bits of a parsed memo, the mini bit is `answer` on the
+mini query and the ssh bit `answer` on the ssh query, and both queries are
+`observationsAt` under the same mint. -/
+theorem verifiedAt_answers {answer : SigQuery → Option Bool} {mint? : Option Address32}
+    {observation : Observation} {verified : Verified} {memo : Memo}
+    (parsed : parsedMemo observation = some memo)
+    (decided : verifiedAt answer mint? observation = .ok verified) :
+    ∃ mint, observationsAt mint? observation =
+        .ok [miniQuery mint observation.address memo, sshQuery mint observation.address memo] ∧
+      answer (miniQuery mint observation.address memo) = some verified.mini ∧
+      answer (sshQuery mint observation.address memo) = some verified.ssh := by
+  unfold verifiedAt at decided
+  rw [parsed] at decided
+  cases mint? with
+  | none => cases decided
+  | some mint =>
+    refine ⟨mint, by simp [observationsAt, parsed], ?_⟩
+    simp only at decided
+    split at decided
+    · rename_i mini ssh miniEq sshEq
+      cases decided
+      exact ⟨miniEq, sshEq⟩
+    · cases decided
+
+/-- **Every bit is an answer on an observed query** (`verifiedAt_answers` under
+the loaded pay cell's mint). -/
 theorem verifiedOf_answers {answer : SigQuery → Option Bool} {deployment : Deployment}
     {durable : Durable} {observation : Observation} {verified : Verified} {memo : Memo}
     (parsed : parsedMemo observation = some memo)
@@ -1123,19 +1157,65 @@ theorem verifiedOf_answers {answer : SigQuery → Option Bool} {deployment : Dep
     ∃ mint, observations deployment durable observation =
         .ok [miniQuery mint observation.address memo, sshQuery mint observation.address memo] ∧
       answer (miniQuery mint observation.address memo) = some verified.mini ∧
-      answer (sshQuery mint observation.address memo) = some verified.ssh := by
-  unfold verifiedOf at decided
-  rw [parsed] at decided
-  simp only at decided
-  split at decided
-  · cases decided
-  · rename_i mint minted
-    refine ⟨mint, by simp [observations, parsed, minted], ?_⟩
-    split at decided
-    · rename_i mini ssh miniEq sshEq
-      cases decided
-      exact ⟨miniEq, sshEq⟩
-    · cases decided
+      answer (sshQuery mint observation.address memo) = some verified.ssh :=
+  verifiedAt_answers parsed decided
+
+/-- **The live answers**: the memo's observed queries under `mint`, asked of the
+pinned native verifier through the Receiver's own `observeAll`
+(`receiverVerify (.live native)`), read by `verifiedAt`.  A verifier error or
+an unanswered query is an `.error` (never a `false` bit).  The submission
+path's signing header and the operator's local quote probe both read the bits
+here, so neither has a verifier path of its own. -/
+def verifiedLive (native : CredentialSignatureIO.NativeConfig) (mint : Option Address32)
+    (observation : Observation) : IO (Except String Verified) := do
+  match observationsAt mint observation with
+  | .error reason => return .error s!"{repr reason}"
+  | .ok queries =>
+    match ← Minidregg.Theory.Receiving.Receiver.observeAll
+        (CredentialSignatureAdmission.receiverVerify (.live native)) queries with
+    | .error detail => return .error detail
+    | .ok answered =>
+      let answer := fun query => (answered.find? fun given => given.1 == query).map Prod.snd
+      return (verifiedAt answer mint observation).mapError fun reason => s!"{repr reason}"
+
+/-- The native transport returns what the verifier computes, for the SSHSIG verb. -/
+structure SshsigIORefinement
+    (config : CredentialSignatureIO.NativeConfig)
+    (Returned : CredentialSignatureIO.NativeConfig → List UInt8 → List UInt8 → List UInt8 →
+      List UInt8 → Except CredentialSignatureIO.Error Bool → Prop)
+    (verify : List UInt8 → List UInt8 → List UInt8 → List UInt8 →
+      Except CredentialSignatureIO.Error Bool) : Prop where
+  exactResult : ∀ publicKey nameSpace message signature result,
+    Returned config publicKey nameSpace message signature result →
+      verify publicKey nameSpace message signature = result
+
+/-- A positive `verify-sshsig` is an Ed25519 signature over the SSHSIG signed
+data with the real SHA-512 (`sha512`), under the given key.  Stated, not
+inhabited: Lean has no SHA-512, so it is a parameter. -/
+structure SshsigRefinement
+    (verify : List UInt8 → List UInt8 → List UInt8 → List UInt8 →
+      Except CredentialSignatureIO.Error Bool)
+    (sha512 : List UInt8 → List UInt8)
+    (Authenticates : List UInt8 → List UInt8 → List UInt8 → Prop) : Prop where
+  sound : ∀ publicKey nameSpace message signature,
+    verify publicKey nameSpace message signature = .ok true →
+      Authenticates publicKey (sshsigSignedData nameSpace (sha512 message)) signature
+
+/-- What the `ssh` bit claims, once the refinement is supplied: a `true` on
+`sshQuery`'s exact key, namespace, message and signature means the ssh key
+authenticated the SSHSIG signed data of this memo's message. -/
+theorem ssh_bit_authenticates
+    {verify : List UInt8 → List UInt8 → List UInt8 → List UInt8 →
+      Except CredentialSignatureIO.Error Bool}
+    {sha512 : List UInt8 → List UInt8} {Authenticates : List UInt8 → List UInt8 → List UInt8 → Prop}
+    (refinement : SshsigRefinement verify sha512 Authenticates)
+    (mint enrolAddress : Address32) (memo : Memo)
+    (returned : verify memo.sshKey sshsigNamespace (sshsigMessage mint enrolAddress memo)
+      memo.sshSig = .ok true) :
+    Authenticates memo.sshKey
+      (sshsigSignedData sshsigNamespace (sha512 (sshsigMessage mint enrolAddress memo)))
+      memo.sshSig :=
+  refinement.sound _ _ _ _ returned
 
 /-- **The one claim**: the observer's current key over the envelope's own signed
 header (a key lookup and a decode, as the observation family's), for either
@@ -1533,20 +1613,12 @@ def signingHeader {F : Type} [Field F] [DecidableEq F] (deployment : Deployment)
   let fallback : Declaration :=
     ⟨[], [], command.expectedPayRoot, marker deployment.domain profile.semantics command⟩
   let declaration : Declaration ←
-    match observations deployment durable command.observation with
+    match ← verifiedLive native (mintOf deployment durable) command.observation with
     | .error _ => pure fallback
-    | .ok queries =>
-      match ← Minidregg.Theory.Receiving.Receiver.observeAll
-          (CredentialSignatureAdmission.receiverVerify (.live native)) queries with
+    | .ok verified =>
+      match plan deployment profile ambient durable command verified with
+      | .ok planned => pure planned.declaration
       | .error _ => pure fallback
-      | .ok answered =>
-        let answer := fun query => (answered.find? fun given => given.1 == query).map Prod.snd
-        match verifiedOf answer deployment durable command.observation with
-        | .error _ => pure fallback
-        | .ok verified =>
-          match plan deployment profile ambient durable command verified with
-          | .ok planned => pure planned.declaration
-          | .error _ => pure fallback
   return (CredentialSignatureAdmission.signingHeader authority.snapshot
     (marker deployment.domain profile.semantics command)
     ⟨.program, request deployment authority.snapshot pay.cell profile.semantics ambient command
@@ -1555,7 +1627,9 @@ def signingHeader {F : Type} [Field F] [DecidableEq F] (deployment : Deployment)
 
 #assert_axioms Planned.sound
 #assert_axioms Prepared.sound
+#assert_axioms verifiedAt_answers
 #assert_axioms verifiedOf_answers
+#assert_axioms ssh_bit_authenticates
 #assert_axioms prepare_verified
 #assert_axioms Legs.writes_bound
 #assert_axioms Legs.factory_mem

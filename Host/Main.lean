@@ -7801,17 +7801,17 @@ def run (arguments : List String) : IO UInt32 := do
           -- verifier (Ed25519 mini-sig, SSHSIG ssh-sig). Reads no Store.
           withPinnedSignature config fun pinnedConfig => do
             let probe ← IO.ofExcept (Minidregg.Host.Json.payEnrolProbe (← readJson input))
-            let mint := ((PayCell.tariffOf probe.store).map (·.mint)).getD []
-            let verified ← match probe.observation.memo with
-              | .present bytes =>
-                  match PayEnrolMemo.parse bytes with
-                  | .ok memo =>
-                      match ← PayEnrolSignatureIO.verifyNative pinnedConfig.signature mint
-                          probe.observation.address memo with
-                      | .ok checked => pure (some checked.verified)
-                      | .error error => throw (IO.userError s!"native verifier: {repr error}")
-                  | .error _ => pure none
-              | _ => pure none
+            -- The bits come from the receiver's own observed queries, asked of the
+            -- pinned verifier through observeAll (PayEnrolReceiver.verifiedLive).
+            -- No parsed memo or no tariff mint: nothing is asked.
+            let mint := (PayCell.tariffOf probe.store).map (·.mint)
+            let verified ← match PayEnrolReceiver.parsedMemo probe.observation, mint with
+              | some _, some _ =>
+                  match ← PayEnrolReceiver.verifiedLive pinnedConfig.signature mint
+                      probe.observation with
+                  | .ok verified => pure (some verified)
+                  | .error error => throw (IO.userError s!"native verifier: {error}")
+              | _, _ => pure none
             let decision := PayEnrolDecision.decideEnrol probe.store probe.price probe.tip
               probe.observation (verified.getD ⟨false, false⟩) probe.subjectTaken
             writeJson output (Minidregg.Host.Json.payEnrolDecisionJson verified decision)
