@@ -25,6 +25,8 @@ import Theory.CanonicalTransition  -- one canonical materialized post and proof-
 import Theory.ResourceCost  -- Lean-owned multi-lane bounds/exact debits, checked word overflow, canonical-turn metering, atomic refusal, and additive composition
 import Theory.CanonicalResourceKernel  -- typed sparse asset/account nucleus: transfer, issuer-backed mint/burn, fees, and prepaid leases share one patch-derived conservation law
 import Theory.AuthMap  -- sparse Merkle map over hashed canonical key bytes: root a function of the logical map, O(depth) incremental root, openings; soundness under a pair-scoped collision carrier refuted at a length hash
+import Theory.LogAccumulator  -- Merkle mountain range over log heights: incremental frontier, completeness, collision-exhibiting soundness
+import Theory.AuthTrie  -- compressed authenticated binary trie: O(log n) openings, soundness up to a node collision
 import Theory.AuthMapCellRoot  -- AuthMap's world level instantiated at `cellRoot := Materializer.rootOf`: materialized cell roots open at the world root, world soundness names the cell store, a validated patch moves the world root along one path
 import Theory.PlanBinding  -- a plan binds (address, value) reads, not a cell root: admission refuses footprintStale only when a read address moved; whole-cell footprint = root binding under the pair carrier; no-TOCTOU; independent plans admitted in both orders and commute; openings at the cell root under the world root, and why signed openings would re-bind the root
 import Theory.CellSlot  -- stable heterogeneous absent/present slots, canonical payload decoding, and monotone identifiers make creation and retirement first-class transitions

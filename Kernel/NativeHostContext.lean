@@ -302,7 +302,7 @@ transition. It cannot secretly append an unordered local application record.
 Typed ordered receivers retain physicalTransport and its unchanged CAS/readback. -/
 def Config.transport (config : Config) : DurableReceiverIO.Transport :=
   if config.jointConsensus.isSome then
-    { config.physicalTransport with append := fun _ _ => pure .conflict }
+    { config.physicalTransport with append := fun _ _ _ => pure .conflict }
   else config.physicalTransport
 
 theorem Config.transport_systemCell (config : Config) :

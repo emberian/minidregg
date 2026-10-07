@@ -77,6 +77,10 @@ def frontierDigest (height : Nat) (frontier : List (Nat × Digest)) : Digest :=
 def Frontier.push (frontier : List (Nat × Digest)) (leaf : Digest) : List (Nat × Digest) :=
   LogAccumulator.push nodeDigest frontier 0 leaf
 
+/-- The Store key of the accumulator node `(level, end)` (`durable_node` space 1). -/
+def nodeKey (level finish : Nat) : List UInt8 :=
+  (StreamCodec.product StreamCodec.nat StreamCodec.nat).encode (level, finish)
+
 /-- The nodes `Frontier.push` completes when it appends the leaf of height `h`
 (each `(level, end = h)`): what the append writes beside the entry. The leaf
 itself is level 0. -/
@@ -177,6 +181,7 @@ inductive Refusal where
   | notIncluded (height : Nat)
   | beyondHead (height : Nat) (head : Nat)
   | unavailable (height : Nat) (detail : String)
+  | undecodable (height : Nat)
   deriving DecidableEq, Repr
 
 def Refusal.message : Refusal → String
@@ -185,6 +190,7 @@ def Refusal.message : Refusal → String
   | .notIncluded h => s!"durable history record refused at height {h}: its inclusion proof does not reach the anchored log frontier (the record, its tag or a node on its path was altered); run `mini store audit`"
   | .beyondHead h head => s!"durable history record refused at height {h}: beyond the authenticated head {head}"
   | .unavailable h detail => s!"durable history record at height {h} unavailable: {detail}"
+  | .undecodable h => s!"durable history record refused at height {h}: its verified bytes are not a canonical record"
 
 /-- The inclusion of `(record, chain, root)` at height `h` in the log whose
 frontier after `n` leaves is `frontier`, witnessed by some sibling lookup. -/

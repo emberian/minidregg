@@ -107,6 +107,8 @@ import Compiler.CommittedTerminalFiatShamir  -- [CT-fiat-shamir-lanes] + [CT-joi
 import Compiler.CommittedTerminalFactoredProver  -- [CT-factored-prover]: the honest prover for the seven factored openings — dense bit-corner tables + pairwise fold, check7 / check7_accepts, gateProof7_sound, sumcheck7_prob_le, and the bridge gammaBatched_eq_sum_table; Stage 0 compiled, demo decided (check7_complete_demo). Named, not closed: [CT-factored-prover-honest] (FactoredProverHonest : the fold messages read to factoredRounds), with its consumer factoredProver_complete_of_honest PROVED.
 import Compiler.Sp800185Kmac256 -- SP 800-185 KMAC256 on the Lean Keccak core (host checkpoint/log MAC), conformance-pinned
 import Compiler.DurableCheckpointCodec -- DATAMODEL C2: seed/log/checkpoint frames, log MAC chain, sealed checkpoints
+import Compiler.DurableHistoryReader -- KN2: the history read at use, verified against the MAC'd, anchor-bound head (MMR log accumulator + spent trie)
+import Compiler.DurableStoreAudit -- KN2: the Store-backed history Reader and `store audit` (every entry, node, spent row and checkpoint re-derived from genesis)
 import Compiler.PredCastHashProofs
 import Compiler.PredCompileOrderWitness
 import Compiler.PredOrderGadgetWitness

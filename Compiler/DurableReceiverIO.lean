@@ -25,6 +25,8 @@ The MAC key file's custody is the operator's (`DurableCheckpointCodec`).
 import Compiler.DurableCheckpointCodec
 import Compiler.NativeCoprocess
 import Compiler.DurableLogTags
+import Compiler.DurableHistory
+import Compiler.DurableSpent
 import Kernel.PresenceIndex
 import Kernel.TailBound
 import Kernel.LinkIndex
@@ -40,6 +42,7 @@ open Minidregg.Kernel.DurableCheckpoint
 open Minidregg.Compiler.DurableReceiverCodec
 open Minidregg.Compiler.DurableCheckpointCodec
 open Minidregg.Compiler.DurableLogTags (chainPrefixes verifyTags)
+open Minidregg.Compiler.DurableHistory (Carried trailer trailerCarried leafDigest frontierDigest)
 
 set_option autoImplicit false
 
@@ -60,6 +63,26 @@ structure StoredCheckpoint where
   height : Nat
   bytes : List UInt8
 
+/-- One accumulator / spent-map node row an append writes beside its entry
+(`durable_node`; space 1 = log accumulator, space 2 = spent map). -/
+structure NodeWrite where
+  space : Nat
+  key : List UInt8
+  value : List UInt8
+  deriving DecidableEq, Repr
+
+/-- An at-use history read (`durable-history`): the head, the named entries,
+and each named node's latest version at or below the requested height. -/
+structure HistoryRequest where
+  atHeight : Nat
+  heights : List Nat
+  nodes : List (Nat × List UInt8)
+
+structure HistoryRead where
+  head : Nat
+  entries : List (Nat × Entry)
+  nodes : List (Nat × List UInt8 × Option (Nat × List UInt8))
+
 /-- One physical read: the head height, optionally the seed and the latest
 checkpoint, and the consecutive entries from the requested height. -/
 structure Stored where
@@ -72,8 +95,9 @@ structure Stored where
 structure Transport where
   /-- Entries from the given height; the Bool asks for the seed and checkpoint. -/
   read : Nat → Bool → IO (Except String (Option Stored))
-  /-- Append at the given height iff the head is one below it. -/
-  append : Nat → Entry → IO CasObservation
+  /-- Append at the given height iff the head is one below it, with the node
+  rows the append completes, in one transaction. -/
+  append : Nat → Entry → List NodeWrite → IO CasObservation
   putCheckpoint : Nat → List UInt8 → IO (Except String Unit)
   initializeSeed : List UInt8 → IO CasObservation
   key : IO (Except String MacKey)
@@ -95,6 +119,12 @@ structure Transport where
   another epoch is refused by naming its epoch (`SeedEpoch.refusal`), not as an
   anchor conflict. `none`: no seed, or no such read on this transport. -/
   peekSeed : IO (Except String (Option (List UInt8))) := pure (.ok none)
+  /-- At-use history reads (entries by height, node rows by version). -/
+  history : HistoryRequest → IO (Except String HistoryRead) :=
+    fun _ => pure (.error "this transport serves no history reads")
+  /-- The latest stored checkpoint at or below a height. -/
+  checkpointAt : Nat → IO (Except String (Option StoredCheckpoint)) :=
+    fun _ => pure (.error "this transport serves no checkpoint reads")
 
 structure NativeConfig where
   binary : System.FilePath
@@ -190,19 +220,31 @@ def NativeConfig.read (config : NativeConfig) (fromHeight : Nat) (withBase : Boo
 
 /-- `crashAt` is a lifecycle-test hook implemented by process exit inside the
 native append transaction. Production `transport` always supplies `none`. -/
+private def u64Bytes (value : Nat) : List UInt8 :=
+  (List.range 8).reverse.map fun index => (value / 256 ^ index % 256).toUInt8
+
+private def blobBytes (bytes : List UInt8) : List UInt8 := u64Bytes bytes.length ++ bytes
+
+/-- The NODES file: u64 count, then u64 space, key blob, value blob per node. -/
+def encodeNodes (nodes : List NodeWrite) : List UInt8 :=
+  u64Bytes nodes.length ++ nodes.flatMap fun node =>
+    u64Bytes node.space ++ blobBytes node.key ++ blobBytes node.value
+
 def NativeConfig.append (config : NativeConfig) (height : Nat) (entry : Entry)
-    (crashAt : Option String := none) : IO CasObservation :=
+    (nodes : List NodeWrite) (crashAt : Option String := none) : IO CasObservation :=
   try
     IO.FS.withTempDir fun directory => do
       let recordPath := directory / "record.bin"
       let tagPath := directory / "tag.bin"
+      let nodesPath := directory / "nodes.bin"
       IO.FS.writeBinFile recordPath entry.record.toByteArray
       IO.FS.writeBinFile tagPath entry.tag.toByteArray
+      IO.FS.writeBinFile nodesPath (encodeNodes nodes).toByteArray
       let arguments := match crashAt with
         | none => #["durable-append", config.root.toString, toString height,
-            recordPath.toString, tagPath.toString]
+            recordPath.toString, tagPath.toString, nodesPath.toString]
         | some phase => #["durable-append-crash", config.root.toString, toString height,
-            recordPath.toString, tagPath.toString, phase]
+            recordPath.toString, tagPath.toString, nodesPath.toString, phase]
       return parseCasOutput (← runNative config arguments)
   catch error => pure (.uncertain s!"native append unavailable: {error}")
 
@@ -252,11 +294,86 @@ def NativeConfig.peekSeed (config : NativeConfig) : IO (Except String (Option (L
         return .error s!"native durable seed read failed (exit {output.exitCode}): {output.stderr}"
   catch error => pure (.error s!"native durable seed read unavailable: {error}")
 
+private def historyEntriesAt (bytes : ByteArray) : Nat → Nat → List (Nat × Entry) →
+    Option (List (Nat × Entry) × Nat)
+  | 0, position, acc => some (acc.reverse, position)
+  | count + 1, position, acc => do
+      let height ← u64At bytes position
+      let (record, afterRecord) ← blobAt bytes (position + 8)
+      let (tag, afterTag) ← blobAt bytes afterRecord
+      historyEntriesAt bytes count afterTag ((height, ⟨record, tag⟩) :: acc)
+
+private def historyNodesAt (bytes : ByteArray) :
+    Nat → Nat → List (Nat × List UInt8 × Option (Nat × List UInt8)) →
+    Option (List (Nat × List UInt8 × Option (Nat × List UInt8)))
+  | 0, position, acc => if position = bytes.size then some acc.reverse else none
+  | count + 1, position, acc => do
+      let space ← u64At bytes position
+      let (key, afterKey) ← blobAt bytes (position + 8)
+      let flag ← u64At bytes afterKey
+      if flag = 0 then historyNodesAt bytes count (afterKey + 8) ((space, key, none) :: acc)
+      else if flag = 1 then do
+        let height ← u64At bytes (afterKey + 8)
+        let (value, afterValue) ← blobAt bytes (afterKey + 16)
+        historyNodesAt bytes count afterValue ((space, key, some (height, value)) :: acc)
+      else none
+
+/-- The `durable-history` output: u64 head; entries; nodes (see the helper). -/
+def parseHistory (bytes : ByteArray) : Option HistoryRead := do
+  let head ← u64At bytes 0
+  let entryCount ← u64At bytes 8
+  let (entries, afterEntries) ← historyEntriesAt bytes entryCount 16 []
+  let nodeCount ← u64At bytes afterEntries
+  let nodes ← historyNodesAt bytes nodeCount (afterEntries + 8) []
+  some ⟨head, entries, nodes⟩
+
+def encodeHistoryRequest (request : HistoryRequest) : List UInt8 :=
+  u64Bytes request.atHeight ++ u64Bytes request.heights.length ++
+    request.heights.flatMap u64Bytes ++ u64Bytes request.nodes.length ++
+    request.nodes.flatMap fun node => u64Bytes node.1 ++ blobBytes node.2
+
+def NativeConfig.history (config : NativeConfig) (request : HistoryRequest) :
+    IO (Except String HistoryRead) :=
+  try
+    IO.FS.withTempDir fun directory => do
+      let requestPath := directory / "request.bin"
+      let path := directory / "history.bin"
+      IO.FS.writeBinFile requestPath (encodeHistoryRequest request).toByteArray
+      let output ← runNative config #["durable-history", config.root.toString,
+        requestPath.toString, path.toString]
+      if output.exitCode == 0 && output.stdout == "" && output.stderr == "" then
+        match parseHistory (← IO.FS.readBinFile path) with
+        | some read => return .ok read
+        | none => return .error "native durable history read malformed"
+      else return .error s!"native durable history read failed (exit {output.exitCode}): {output.stderr}"
+  catch error => pure (.error s!"native durable history read unavailable: {error}")
+
+def NativeConfig.checkpointAt (config : NativeConfig) (height : Nat) :
+    IO (Except String (Option StoredCheckpoint)) :=
+  try
+    IO.FS.withTempDir fun directory => do
+      let path := directory / "checkpoint.bin"
+      let output ← runNative config #["durable-checkpoint-at", config.root.toString,
+        toString height, path.toString]
+      if output.exitCode == 0 && output.stdout == "" && output.stderr == "" then
+        let bytes ← IO.FS.readBinFile path
+        match u64At bytes 0 with
+        | some 0 => if bytes.size = 8 then return .ok none else return .error "native checkpoint read malformed"
+        | some 1 =>
+            match u64At bytes 8, blobAt bytes 16 with
+            | some found, some (checkpoint, after) =>
+                if after = bytes.size then return .ok (some ⟨found, checkpoint⟩)
+                else return .error "native checkpoint read malformed"
+            | _, _ => return .error "native checkpoint read malformed"
+        | _ => return .error "native checkpoint read malformed"
+      else return .error s!"native checkpoint read failed (exit {output.exitCode}): {output.stderr}"
+  catch error => pure (.error s!"native checkpoint read unavailable: {error}")
+
 def NativeConfig.transport (config : NativeConfig) (logStart : Seed → Digest)
     (systemCell : CellId) : Transport :=
-  ⟨config.read, fun height entry => config.append height entry, config.putCheckpoint,
+  ⟨config.read, fun height entry nodes => config.append height entry nodes, config.putCheckpoint,
     config.initialize, config.readKey, config.checkpointEvery, logStart, some systemCell, fun _ _ => .ok (),
-    config.peekSeed⟩
+    config.peekSeed, config.history, config.checkpointAt⟩
 
 /-- ByteArray's derived equality compares every byte, with no digest premise. -/
 theorem byteArray_beq_exact (left right : List UInt8) :
@@ -666,6 +783,14 @@ structure Loaded (rootBytes : List UInt8 → Digest) where
   evaluates that prefix instead. -/
   rootLog : Array (Option Digest)
   rootLogSize : rootLog.size = image.accepted.length
+  /-- The log accumulator's peaks after the last accepted record
+  (`DurableHistory`): checked against the tags on open, advanced by every
+  `extend`. `none` for an in-memory image cut whose roots were never seen. -/
+  frontier : Option (List (Nat × Digest))
+  /-- The exact tag of the head entry when this image was read from (or
+  appended to) the Store: its MAC was verified, so what it carries (the spent
+  root after the head) is authenticated. `none` for in-memory images. -/
+  headTag : Option (List UInt8)
 
 def Loaded.height {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) : Nat :=
   loaded.image.accepted.length
@@ -750,7 +875,8 @@ def loadImage (rootBytes : List UInt8 → Digest) (logStart : Digest) (image : I
         SessionIndex.CellIds.ofImage image, SessionIndex.CellIds.ofImage_exact image,
         SessionIndex.TxIndex.ofRecords image.accepted,
         SessionIndex.TxIndex.ofRecords_exact image.accepted,
-        Array.replicate image.accepted.length none, Array.size_replicate⟩
+        Array.replicate image.accepted.length none, Array.size_replicate,
+        if image.accepted.isEmpty then some [] else none, none⟩
 
 theorem loadImage_image {rootBytes : List UInt8 → Digest} {logStart : Digest} {image : Image}
     {loaded : Loaded rootBytes} (built : loadImage rootBytes logStart image = .ok loaded) :
@@ -774,12 +900,29 @@ def loadBytes (rootBytes : List UInt8 → Digest) (logStart : Seed → Digest) (
   | none => .error "noncanonical or unsupported durable image"
   | some image => loadImage rootBytes (logStart image.seed) image
 
-private def decodeRecords : List Entry → Except String (List IntentRecord)
-  | [] => .ok []
-  | entry :: rest => do
+private def decodeRecordsFrom : Nat → List Entry → Except String (List IntentRecord)
+  | _, [] => .ok []
+  | height, entry :: rest => do
       let some record := recordFrame.decode entry.record
-        | throw "noncanonical durable log record"
-      return record :: (← decodeRecords rest)
+        | throw s!"noncanonical durable log record at height {height}"
+      return record :: (← decodeRecordsFrom (height + 1) rest)
+
+/-- Advance the accumulator frontier over stored entries `height + 1, …`
+(each with the chain after it), checking that every tag carries the frontier
+digest the accumulator reaches there. The tags' MACs are verified separately
+(`verifyTags`); this binds what they carry to the records. -/
+def walkFrontier : Nat → List (Nat × Digest) → List (Entry × Digest) →
+    Except String (List (Nat × Digest))
+  | _, frontier, [] => .ok frontier
+  | height, frontier, (entry, chain) :: rest =>
+      match trailerCarried entry.tag with
+      | none => .error (DurableHistory.Refusal.message (.malformedTrailer (height + 1)))
+      | some carried =>
+          let next := DurableHistory.Frontier.push frontier
+            (leafDigest (height + 1) entry.record chain carried.root)
+          if carried.frontier ≠ frontierDigest (height + 1) next then
+            .error s!"durable log tag at height {height + 1} carries a frontier the accumulator does not reach"
+          else walkFrontier (height + 1) next rest
 
 /-- The single open path, keeping the chain value after every stored record
 (`chainPrefixes`, which the open computes to check the tags) for a caller that
@@ -804,14 +947,14 @@ def loadChained (transport : Transport) (rootBytes : List UInt8 → Digest) :
       if let some refusal := (SeedEpoch.ofBytes seedBytes).refusal then
         return .error s!"durable store refused: {refusal}"
       let some seed := seedFrame.decode seedBytes | return .error "noncanonical durable seed"
-      let records ← match decodeRecords stored.entries with
+      let records ← match decodeRecordsFrom 1 stored.entries with
         | .error message => return .error message
         | .ok records => pure records
       let logStart := transport.logStart seed
       let chains := chainPrefixes logStart records
       let headChain := chains.getLast?.getD logStart
-      let (baseHeight, base) ← match stored.checkpoint with
-        | none => pure (0, State.ofSeed seed)
+      let (baseHeight, base, baseFrontier, baseSpent) ← match stored.checkpoint with
+        | none => pure (0, State.ofSeed seed, [], DurableSpent.emptyDigest)
         | some checkpoint =>
             match openSealed key rootBytes checkpoint.bytes with
             | .error reason => return .error s!"checkpoint refused: {repr reason}"
@@ -820,16 +963,30 @@ def loadChained (transport : Transport) (rootBytes : List UInt8 → Digest) :
                   return .error "checkpoint height does not match the log"
                 if body.chain ≠ chains.getD body.height ⟨0⟩ then
                   return .error "checkpoint does not match the log chain"
-                pure (body.height, body.state)
+                pure (body.height, body.state, body.frontier, body.spentRoot)
       if stored.entries.length ≠ stored.head then
         return .error "durable log head does not match its entries"
       if let .error message := verifyTags key 0 chains (stored.entries.map (·.tag)) then
         return .error message
+      -- The checkpoint's accumulator frontier and spent root are the ones the
+      -- (MAC-verified) tag of the entry at its height carries.
+      if baseHeight > 0 then
+        match stored.entries[baseHeight - 1]?.bind (trailerCarried ·.tag) with
+        | some carried =>
+            if carried.frontier ≠ frontierDigest baseHeight baseFrontier ∨
+                carried.spentRoot ≠ baseSpent then
+              return .error "checkpoint accumulator differs from its log entry's tag"
+        | none => return .error "checkpoint height has no log entry"
+      let frontier ← match walkFrontier baseHeight baseFrontier
+          ((stored.entries.drop baseHeight).zip (chains.drop (baseHeight + 1))) with
+        | .error message => return .error message
+        | .ok frontier => pure frontier
       let image : Image := ⟨seed, records⟩
       -- Every entry's verified tag carries the receipt root after it
-      -- (`DurableLogTags.verifyTags_root`).
+      -- (`DurableLogTags.verifyTags_carried`).
       let rootLog : Array (Option Digest) :=
-        (stored.entries.map fun entry => some ((tagRoot entry.tag).getD ⟨0⟩)).toArray
+        (stored.entries.map fun entry =>
+          some ((trailerCarried entry.tag).map (·.root) |>.getD ⟨0⟩)).toArray
       if sized : rootLog.size ≠ image.accepted.length then
         return .error "durable log entries and records differ in number"
       else if within : baseHeight ≤ image.accepted.length then
@@ -845,7 +1002,8 @@ def loadChained (transport : Transport) (rootBytes : List UInt8 → Digest) :
               SessionIndex.CellIds.ofImage image, SessionIndex.CellIds.ofImage_exact image,
               SessionIndex.TxIndex.ofRecords image.accepted,
               SessionIndex.TxIndex.ofRecords_exact image.accepted,
-              rootLog, Decidable.of_not_not sized⟩
+              rootLog, Decidable.of_not_not sized, some frontier,
+              stored.entries.getLast?.map (·.tag)⟩
             -- The head's stored root is the root this open just served: a
             -- rewritten head root refuses here, not at a later receipt.
             match rootLog.back? with
@@ -930,7 +1088,10 @@ def Loaded.extend {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes
     by unfold Image.append
        exact SessionIndex.TxIndex.admitAt_exact loaded.txsExact record,
     loaded.rootLog.push (some served),
-    by simp [Image.append, loaded.rootLogSize]⟩
+    by simp [Image.append, loaded.rootLogSize],
+    loaded.frontier.map fun frontier => DurableHistory.Frontier.push frontier
+      (leafDigest (loaded.image.accepted.length + 1) (recordFrame.encode record) chain served),
+    none⟩
 
 /-- **The root log keeps the served root**: after an append, the newest stored
 receipt root is the root the extended image serves. -/
@@ -969,7 +1130,7 @@ def Loaded.rebase {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes
           loaded.rootsExact.injectiveSound⟩,
         loaded.index, loaded.indexExact, loaded.links, loaded.linksExact,
         loaded.ids, loaded.idsExact, loaded.txs, loaded.txsExact,
-        loaded.rootLog, loaded.rootLogSize⟩
+        loaded.rootLog, loaded.rootLogSize, loaded.frontier, loaded.headTag⟩
 
 def Loaded.rebaseD {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
     Loaded rootBytes :=
@@ -1040,7 +1201,7 @@ def Loaded.build {rootBytes : List UInt8 → Digest} (image : Image) (baseHeight
         SessionIndex.CellIds.ofImage image, SessionIndex.CellIds.ofImage_exact image,
         SessionIndex.TxIndex.ofRecords image.accepted,
         SessionIndex.TxIndex.ofRecords_exact image.accepted,
-        rootLog, rootLogSize⟩, rfl, rfl⟩
+        rootLog, rootLogSize, none, none⟩, rfl, rfl⟩
 
 /-- **The loaded image cut at log height `height`**, from an open that kept its
 chain prefixes (`loadChained`): the chain after `height` records is read off
@@ -1144,21 +1305,21 @@ theorem stateEntries_ofSnapshot {rootBytes : List UInt8 → Digest} (image : Ima
 /-- **A checkpoint sealed from the cached root is the specification seal**,
 byte for byte: the served root is the world root of the checkpoint body. -/
 theorem sealCheckpoint_uses_cached_root {rootBytes : List UInt8 → Digest} (key : MacKey)
-    (loaded : Loaded rootBytes) :
-    sealAt key loaded.image.accepted.length loaded.chain
+    (loaded : Loaded rootBytes) (frontier : List (Nat × Digest)) (spentRoot : Digest) :
+    sealAt key loaded.image.accepted.length loaded.chain frontier spentRoot
         (State.ofSnapshot loaded.image loaded.snapshot) loaded.worldRoot =
-      sealCheckpoint key rootBytes loaded.image.accepted.length loaded.chain
+      sealCheckpoint key rootBytes loaded.image.accepted.length loaded.chain frontier spentRoot
         (State.ofSnapshot loaded.image loaded.snapshot) := by
   apply sealAt_eq_sealCheckpoint
   rw [loaded.worldRoot_eq, DurableCheckpointCodec.worldRoot, stateEntries_ofSnapshot]
 
 /-- The sealed root is `Kernel.WorldRoot`'s deployed root of the sealed body. -/
 theorem cachedSeal_root {rootBytes : List UInt8 → Digest} (key : MacKey)
-    (loaded : Loaded rootBytes) :
-    (sealAt key loaded.image.accepted.length loaded.chain
+    (loaded : Loaded rootBytes) (frontier : List (Nat × Digest)) (spentRoot : Digest) :
+    (sealAt key loaded.image.accepted.length loaded.chain frontier spentRoot
         (State.ofSnapshot loaded.image loaded.snapshot) loaded.worldRoot).root =
       DurableCheckpointCodec.worldRoot rootBytes
-        (sealAt key loaded.image.accepted.length loaded.chain
+        (sealAt key loaded.image.accepted.length loaded.chain frontier spentRoot
           (State.ofSnapshot loaded.image loaded.snapshot) loaded.worldRoot).body := by
   rw [sealCheckpoint_uses_cached_root]
   rfl
@@ -1185,9 +1346,10 @@ theorem cachedSeal_root {rootBytes : List UInt8 → Digest} (key : MacKey)
 /-- Seal and store a checkpoint of the head. A failed write loses nothing (the
 log is complete); the caller then keeps its old base. -/
 def storeCheckpoint (transport : Transport) (rootBytes : List UInt8 → Digest)
-    (loaded : Loaded rootBytes) : IO Bool := do
+    (loaded : Loaded rootBytes) (spentRoot : Digest) : IO Bool := do
   let .ok key ← transport.key | return false
-  let sealed := sealAt key loaded.image.accepted.length loaded.chain
+  let some frontier := loaded.frontier | return false
+  let sealed := sealAt key loaded.image.accepted.length loaded.chain frontier spentRoot
     (State.ofSnapshot loaded.image loaded.snapshot) loaded.worldRoot
   match ← transport.putCheckpoint loaded.image.accepted.length (checkpointFrame.encode sealed) with
   | .error _ => return false
@@ -1232,7 +1394,7 @@ def checkpointDifferential (transport : Transport) (rootBytes : List UInt8 → D
   | .ok (some stored) =>
       let some seedBytes := stored.seed | return .error "durable seed missing"
       let some seed := seedFrame.decode seedBytes | return .error "noncanonical durable seed"
-      let records ← match decodeRecords stored.entries with
+      let records ← match decodeRecordsFrom 1 stored.entries with
         | .error message => return .error message
         | .ok records => pure records
       if height > records.length then return .error "height beyond the log head"
@@ -1250,8 +1412,14 @@ def checkpointDifferential (transport : Transport) (rootBytes : List UInt8 → D
             current := afterCheckpoint extended (checkpointDue transport extended)
         | .inr _ => return .error "durable log does not replay through the canonical executor"
       let state := State.ofSnapshot current.image current.snapshot
-      let cached := checkpointFrame.encode (sealAt key height current.chain state current.worldRoot)
-      let full := checkpointFrame.encode (sealCheckpoint key rootBytes height current.chain state)
+      let frontier := current.frontier.getD []
+      let spentRoot := if height = 0 then DurableSpent.emptyDigest else
+        ((stored.entries[height - 1]?).bind (trailerCarried ·.tag)).map (·.spentRoot)
+          |>.getD DurableSpent.emptyDigest
+      let cached := checkpointFrame.encode
+        (sealAt key height current.chain frontier spentRoot state current.worldRoot)
+      let full := checkpointFrame.encode
+        (sealCheckpoint key rootBytes height current.chain frontier spentRoot state)
       let atHeight := stored.checkpoint.bind fun checkpoint =>
         if checkpoint.height = height then some checkpoint.bytes else none
       return .ok (cached, full, atHeight)
@@ -1289,6 +1457,141 @@ theorem Loaded.judge_tail {rootBytes : List UInt8 → Digest} (transport : Trans
   | error reason => simp [checked, bind, Except.bind] at accepted
   | ok value => cases value; simpa [checked, Except.bind] using accepted
 
+/-- The spent root after this image's head: carried by the head entry's tag,
+whose MAC is verified for the head's height, chain and accumulator frontier
+(`DurableHistory.Head.verify`). The empty log's is the empty map's. -/
+def Loaded.headSpentRoot {rootBytes : List UInt8 → Digest} (transport : Transport) (key : MacKey)
+    (loaded : Loaded rootBytes) : IO (Except String Digest) := do
+  let height := loaded.image.accepted.length
+  if height = 0 then return .ok DurableSpent.emptyDigest
+  let some frontier := loaded.frontier
+    | return .error "this opening carries no accumulator frontier (it was not read from the Store)"
+  let tag ← match loaded.headTag with
+    | some tag => pure tag
+    | none =>
+        match ← transport.read height false with
+        | .ok (some stored) =>
+            match stored.entries.head? with
+            | some entry => pure entry.tag
+            | none => return .error "durable head entry missing"
+        | .ok none => return .error "durable store is not initialized"
+        | .error message => return .error message
+  match DurableHistory.Head.verify key height tag loaded.chain frontier with
+  | .ok head => return .ok head.spentRoot
+  | .error refusal => return .error refusal.message
+
+/-- The spent-map rows on the paths of `keys`, at or below `height`. Untrusted:
+`DurableSpent.lookupRows` verifies every opening built from them. -/
+def spentRows (transport : Transport) (height : Nat) (keys : List Digest) :
+    IO (Except String (List Bool → Option DurableSpent.Row)) := do
+  let paths := (keys.flatMap DurableSpent.prefixes).eraseDups
+  match ← transport.history ⟨height, [],
+      paths.map fun path => (DurableSpent.spentSpace, DurableSpent.rowKey path)⟩ with
+  | .error message => return .error message
+  | .ok read =>
+      let found : List (List UInt8 × DurableSpent.Row) := read.nodes.filterMap fun node => do
+        let (_, value) ← node.2.2
+        let row ← DurableSpent.rowStream.toLawful.decode value
+        pure (node.2.1, row)
+      return .ok fun path => (found.find? (·.1 = DurableSpent.rowKey path)).map (·.2)
+
+/-- The node rows an append writes: the accumulator nodes it completes
+(space 1) and the spent-map rows its keys' insertion changes (space 2). -/
+def appendNodes (accumulator : List ((Nat × Nat) × Digest))
+    (spent : List (List Bool × DurableSpent.Row)) : List NodeWrite :=
+  accumulator.map (fun node => ⟨DurableSpent.accumulatorSpace,
+      DurableHistory.nodeKey node.1.1 node.1.2, Tower256ConcreteBackend.digestStream.encode node.2⟩) ++
+    spent.map fun row => ⟨DurableSpent.spentSpace, DurableSpent.rowKey row.1,
+      DurableSpent.rowStream.encode row.2⟩
+
+/-- What an append writes, prepared from the loaded image and the Store's
+reads (the head tag's spent root, the spent-map rows): the entry (record and v3
+trailer), the node rows, the extended image and the spent root after it. -/
+structure PreparedAppend {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
+    (intent : DataIntent rootBytes) where
+  entry : Entry
+  entryExact : entry.record = recordFrame.encode (IntentRecord.ofIntent intent)
+  nodes : List NodeWrite
+  extended : Loaded rootBytes
+  extendedImage : extended.image = loaded.image.append intent
+  spentAfter : Digest
+
+def prepareAppend (transport : Transport) {rootBytes : List UInt8 → Digest}
+    (loaded : Loaded rootBytes) {intent : DataIntent rootBytes}
+    (ready : Ready rootBytes loaded.image loaded.baseHeight loaded.base loaded.snapshot intent)
+    (key : MacKey) : IO (Except String (PreparedAppend loaded intent)) := do
+  let height := loaded.image.accepted.length + 1
+  let recordBytes := recordFrame.encode (IntentRecord.ofIntent intent)
+  let chain := loaded.chainAfterIntent intent
+  let some frontier := loaded.frontier
+    | return .error "this opening carries no accumulator frontier (it was not read from the Store)"
+  -- The spent map after the head (MAC-verified), then this record's keys inserted.
+  let spentBefore ← match ← loaded.headSpentRoot transport key with
+    | .ok root => pure root
+    | .error message => return .error message
+  let keys := DurableSpent.recordKeys intent.transactionId intent.nullifiers
+  let rows ← match ← spentRows transport loaded.image.accepted.length keys with
+    | .ok rows => pure rows
+    | .error message => return .error message
+  let (spentAfter, spentWrites) ← match DurableSpent.insertAll rows spentBefore height keys with
+    | .ok result => pure result
+    | .error message => return .error message
+  -- The tag keeps this record's receipt root, the root the extended image
+  -- serves, the accumulator frontier after it and the spent root after it.
+  let extended := loaded.extend ready
+  let leaf := leafDigest height recordBytes chain extended.worldRoot
+  let frontierAfter := DurableHistory.Frontier.push frontier leaf
+  let nodes := appendNodes (DurableHistory.completedNodes frontier height leaf) spentWrites
+  let entry : Entry := ⟨recordBytes, trailer key height
+    ⟨extended.worldRoot, chain, frontierDigest height frontierAfter, spentAfter⟩⟩
+  return .ok ⟨entry, rfl, nodes, extended, rfl, spentAfter⟩
+
+/-- What the receiving loop does after the append's observation: confirm by
+exact readback (seal a due checkpoint), or report contention. -/
+def publishAfter (transport : Transport) (rootBytes : List UInt8 → Digest) (loaded : Loaded rootBytes)
+    (intent : DataIntent rootBytes) (prepared : PreparedAppend loaded intent)
+    (observation : CasObservation) : IO (Bool × DetailedResult rootBytes loaded intent) := do
+  let height := loaded.image.accepted.length + 1
+  let entry := prepared.entry
+  let extended := prepared.extended
+  let spentAfter := prepared.spentAfter
+  let confirm := fun (installed : Bool) (kind : Confirmation) => do
+    match ← readBackEntry transport height with
+    | .error message =>
+        return (false, DetailedResult.ordinary (.uncertain s!"append attempted; readback unavailable: {message}"))
+    | .ok none =>
+        return (false, .ordinary (.uncertain "append attempted; entry absent on readback"))
+    | .ok (some stored) =>
+        if stored = entry then
+          let tagged := { extended with headTag := some entry.tag }
+          let checkpointStored ←
+            if checkpointDue transport tagged then storeCheckpoint transport rootBytes tagged spentAfter
+            else pure false
+          return (installed, .exact kind
+            ⟨afterCheckpoint tagged checkpointStored,
+              (afterCheckpoint_image tagged checkpointStored).trans prepared.extendedImage, entry,
+              prepared.entryExact⟩)
+        else return (false, .ordinary .contention)
+  match observation with
+  | .installed => confirm true .installed
+  | .alreadyPresent => confirm false .installed
+  | .conflict => return (false, .ordinary .contention)
+  | .uncertain _ => confirm false .recoveredAfterUncertainResponse
+
+/-- Append a prepared entry at `loaded.height + 1` (the receiving loop's only
+Store write), then `publishAfter`. -/
+def publish (transport : Transport) (rootBytes : List UInt8 → Digest) (loaded : Loaded rootBytes)
+    (intent : DataIntent rootBytes) (prepared : PreparedAppend loaded intent) :
+    IO (Bool × DetailedResult rootBytes loaded intent) :=
+  transport.append (loaded.image.accepted.length + 1) prepared.entry prepared.nodes >>=
+    publishAfter transport rootBytes loaded intent prepared
+
+/-- A conflicting append is contention, and nothing else is read or written. -/
+theorem publishAfter_conflict (transport : Transport) (rootBytes : List UInt8 → Digest)
+    (loaded : Loaded rootBytes) (intent : DataIntent rootBytes) (prepared : PreparedAppend loaded intent) :
+    publishAfter transport rootBytes loaded intent prepared .conflict =
+      pure (false, .ordinary .contention) := rfl
+
 /-- Publish against the exact image on which the controller admitted the
 operation: append entry `h + 1` only while the head is `h`. One attempt, no
 rebase; a lost response never becomes a refusal. The Bool is whether this
@@ -1306,33 +1609,9 @@ def receiveLoadedDetailedWithFresh (transport : Transport) (rootBytes : List UIn
         return (false, .ordinary (.rejected reason))
       let .ok key ← transport.key
         | return (false, .ordinary (.unavailable "checkpoint MAC key unavailable"))
-      let height := loaded.image.accepted.length + 1
-      let recordBytes := recordFrame.encode (IntentRecord.ofIntent intent)
-      let chain := loaded.chainAfterIntent intent
-      -- The tag keeps this record's receipt root (`entryTag`), the root the
-      -- extended image serves.
-      let extended := loaded.extend ready
-      let entry : Entry := ⟨recordBytes, entryTag key height chain extended.worldRoot⟩
-      let confirm := fun (installed : Bool) (kind : Confirmation) => do
-        match ← readBackEntry transport height with
-        | .error message =>
-            return (false, DetailedResult.ordinary (.uncertain s!"append attempted; readback unavailable: {message}"))
-        | .ok none =>
-            return (false, .ordinary (.uncertain "append attempted; entry absent on readback"))
-        | .ok (some stored) =>
-            if stored = entry then
-              let checkpointStored ←
-                if checkpointDue transport extended then storeCheckpoint transport rootBytes extended
-                else pure false
-              return (installed, .exact kind
-                ⟨afterCheckpoint extended checkpointStored,
-                  afterCheckpoint_image extended checkpointStored, entry, rfl⟩)
-            else return (false, .ordinary .contention)
-      match ← transport.append height entry with
-      | .installed => confirm true .installed
-      | .alreadyPresent => confirm false .installed
-      | .conflict => return (false, .ordinary .contention)
-      | .uncertain _ => confirm false .recoveredAfterUncertainResponse
+      match ← prepareAppend transport loaded ready key with
+      | .error message => return (false, .ordinary (.unavailable message))
+      | .ok prepared => publish transport rootBytes loaded intent prepared
 
 def receiveLoadedDetailed (transport : Transport) (rootBytes : List UInt8 → Digest)
     (loaded : Loaded rootBytes) (intent : DataIntent rootBytes) :
@@ -1425,7 +1704,7 @@ def extendFrom (transport : Transport) (rootBytes : List UInt8 → Digest)
   | .ok (some stored) =>
       if stored.head = height then return .ok ⟨loaded, rfl, by simp, rfl⟩
       if stored.head < height then return .error "durable log shrank beneath the session"
-      let records ← match decodeRecords stored.entries with
+      let records ← match decodeRecordsFrom (height + 1) stored.entries with
         | .error message => return .error message
         | .ok records => pure records
       let chain := chainAfter loaded.chain records
@@ -1434,6 +1713,11 @@ def extendFrom (transport : Transport) (rootBytes : List UInt8 → Digest)
       if let .error message := verifyTags key height (chainPrefixes loaded.chain records)
           (stored.entries.map (·.tag)) then
         return .error message
+      -- Every new tag carries the frontier the accumulator reaches at its height.
+      if let some frontier := loaded.frontier then
+        if let .error message := walkFrontier height frontier
+            (stored.entries.zip ((chainPrefixes loaded.chain records).drop 1)) then
+          return .error message
       match loaded.replay records with
       | .error message => return .error message
       | .ok ⟨current, imaged, started⟩ =>
@@ -1446,8 +1730,10 @@ def extendFrom (transport : Transport) (rootBytes : List UInt8 → Digest)
         if current.chain ≠ chain then return .error "durable log chain mismatch"
         -- Every new entry's stored root is the root its replay served.
         let replayed := (current.rootLog.extract height current.rootLog.size).toList
-        if replayed ≠ stored.entries.map (fun entry => some ((tagRoot entry.tag).getD ⟨0⟩)) then
+        if replayed ≠ stored.entries.map (fun entry =>
+            some ((trailerCarried entry.tag).map (·.root) |>.getD ⟨0⟩)) then
           return .error "durable log root tag differs from the replayed root"
+        let current := { current with headTag := stored.entries.getLast?.map (·.tag) }
         if current.image.accepted.length ≥ current.baseHeight + 2 * max 1 transport.checkpointEvery then
           match rebased : current.rebase with
           | some next =>
