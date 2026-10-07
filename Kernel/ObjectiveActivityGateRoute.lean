@@ -52,7 +52,7 @@ theorem derived_route {config : Config} {opened : Opened config} (derived : Deri
         (turn : ObjectiveActivity.AdmittedTurn kernel opened.durable.snapshot height)
         (sealing : ObjectiveActivityWire.Seal) (posts : List ObjectiveActivityWire.Post)
         (extra : List DurableDataIntent.ReadGuard),
-        ActivitySeatEnd.finalize kernel opened.durable.snapshot height turn = .ok (posts, extra) ∧
+        ActivitySeatEnd.finish kernel opened.durable.snapshot height turn = .ok (posts, extra) ∧
           derived.intent = ActivitySeatEnd.AdmittedTurn.finalIntent sealing posts extra turn) ∨
       (∃ posts : List ObjectiveActivityWire.Post,
         derived.intent.writes = posts.map (ObjectiveActivityWire.Post.write Compiler.ResourceBirthCodec.rootBytes) ∧

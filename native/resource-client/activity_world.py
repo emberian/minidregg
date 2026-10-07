@@ -138,6 +138,10 @@ def all_of(*predicates):
     return {'type': 'all', 'predicates': list(predicates)}
 
 
+def eq_slots(left, right):
+    return {'type': 'eqSlots', 'left': left, 'right': right}
+
+
 def any_of(*predicates):
     return {'type': 'any', 'predicates': list(predicates)}
 
@@ -406,14 +410,14 @@ class World:
     TOTAL_STATE = {'tag': 'field', 'name': 'total', 'member': {'tag': 'natural'}, 'tail': {'tag': 'emptyRow'}}
 
     def create(self, label, workspace, name, law, expect, detail=None, pin=None, payer=None, payer_cap=None,
-               object_cap=None, seed=None, state_type=None):
+               object_cap=None, seed=None, state_type=None, upgrade=None):
         """`seed`: the object's initial declared state (a data value), judged by `law` alone (turn 4); the
         state of an object changes after that only by its own package's turns, under the pin. `state_type`:
         the declared state type every write is typed at (default `{total: Nat}`)."""
         o = self.objects[name]
         body = {
             'kind': 'create', 'object': o['object'], 'objectCapability': object_cap or o['capability'],
-            'pin': pin or self.PIN, 'stateType': state_type or self.TOTAL_STATE, 'law': law, 'upgrade': {'frozen': {}}, 'payer': payer or self.SPONSOR_ACCOUNT,
+            'pin': pin or self.PIN, 'stateType': state_type or self.TOTAL_STATE, 'law': law, 'upgrade': upgrade or {'frozen': {}}, 'payer': payer or self.SPONSOR_ACCOUNT,
             'payerCapability': payer_cap or self.SPONSOR_SPEND}
         if seed is not None:
             body['seed'] = seed

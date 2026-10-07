@@ -182,20 +182,85 @@ def finalize {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsh
     | .ok none => .ok (turn.posts, [])
     | .ok (some joined) => .ok (joined.rewrite turn.posts, joined.held.guards)
 
-/-- The intent of an admitted turn over final posts and extra guards (an ending
-turn's own transaction, guards and claims). -/
+/-- **A turn's end**: the seat join (`finalize`), then the invariant-domain judgment on the
+final posts (`ObjectiveActivity.judgeDomains`): every domain of every object whose state the
+turn writes must hold on the members' final states. The domain judgment adds read guards and
+never changes the posts. -/
+inductive EndRefusal where
+  | seats (reason : SeatStore.Refusal)
+  | kernel (reason : ObjectiveActivity.Refusal)
+  deriving Repr
+
+def finish {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (height : Nat) (turn : AdmittedTurn config snapshot height) :
+    Except EndRefusal (List Post × List ReadGuard) :=
+  match finalize config snapshot height turn with
+  | .error reason => .error (.seats reason)
+  | .ok (posts, extra) =>
+    match ObjectiveActivity.judgeDomains config snapshot posts with
+    | .error reason => .error (.kernel reason)
+    | .ok guards => .ok (posts, extra ++ guards)
+
+theorem finish_finalize {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {turn : AdmittedTurn config snapshot height} {posts : List Post} {extra : List ReadGuard}
+    (finished : finish config snapshot height turn = .ok (posts, extra)) :
+    ∃ seats domains, finalize config snapshot height turn = .ok (posts, seats) ∧
+      ObjectiveActivity.judgeDomains config snapshot posts = .ok domains ∧ extra = seats ++ domains := by
+  unfold finish at finished
+  split at finished
+  · cases finished
+  · rename_i final_ seats final
+    split at finished
+    · cases finished
+    · rename_i domains judged
+      simp only [Except.ok.injEq, Prod.mk.injEq] at finished
+      obtain ⟨rfl, rfl⟩ := finished
+      exact ⟨seats, domains, final, judged, rfl⟩
+
+/-- The intent of an admitted turn over final posts and extra guards: the turn's own
+transaction, guards and claims, with the extra guards (an ending turn's seat cells, the domain
+judgment's reads) for EVERY turn. No wildcard: a new turn says what its intent is. -/
 def AdmittedTurn.finalIntent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} (sealing : Seal) (posts : List Post) (extra : List ReadGuard) :
     AdmittedTurn config snapshot height → DataIntent rootBytes
+  | .publish _ publication =>
+      intentOf rootBytes (ObjectiveActivity.publishTransaction publication.pin) posts
+        (publication.guards ++ extra) [] sealing
+  | .create request _ =>
+      intentOf rootBytes (ObjectiveActivity.createTransaction request) posts
+        ([ObjectiveActivity.guardAt snapshot (ObjectiveActivity.packageCell config.domain request.pin),
+          ObjectiveActivity.guardAt snapshot (ObjectiveActivity.stateCell config.domain request.object)] ++ extra)
+        [] sealing
   | .birth request _ born =>
       intentOf rootBytes (ObjectiveActivity.birthTransaction request) posts
         (born.guards ++ extra) [] sealing
+  | .resolve request resolution =>
+      intentOf rootBytes (ObjectiveActivity.resolveTransaction request.slot) posts
+        ([ObjectiveActivity.guardAt snapshot resolution.slot.activity] ++ extra)
+        [AnswerSlot.decisionClaim request.slot] sealing
   | .deliver _ delivery =>
       intentOf rootBytes (ObjectiveActivity.deliveryTransaction delivery.await.id) posts
         (delivery.guards ++ extra) delivery.claims sealing
+  | .topUp request _ =>
+      intentOf rootBytes (ObjectiveActivity.topUpTransaction request) posts
+        ([ObjectiveActivity.guardAt snapshot request.record] ++ extra) [] sealing
+  | .exhaust request exhausted =>
+      intentOf rootBytes (ObjectiveActivity.exhaustTransaction exhausted.await.id request) posts
+        (exhausted.guards ++ extra) [] sealing
   | .abandon _ abandoned =>
       intentOf rootBytes (ObjectiveActivity.abandonTransaction abandoned.await.id) posts extra
         abandoned.claims sealing
+  | .invoke request invoked =>
+      intentOf rootBytes (ObjectiveCall.invokeTransaction request) posts (invoked.guards ++ extra) [] sealing
+  | .deliverMessage _ delivered =>
+      intentOf rootBytes (ObjectiveSend.messageTransaction delivered.message.id) posts
+        (delivered.guards ++ extra) delivered.claims sealing
+  | .adopt request adopted =>
+      intentOf rootBytes (ObjectiveActivity.adoptTransaction request) posts (adopted.guards ++ extra) [] sealing
+  | .migrate request migrated =>
+      intentOf rootBytes (ObjectiveActivity.migrateTransaction request) posts
+        ([ObjectiveActivity.guardAt snapshot (ObjectiveActivity.packageCell config.domain migrated.next.pin)] ++ extra)
+        [] sealing
   | .abortDrained _ aborted =>
       intentOf rootBytes (ObjectiveActivity.abortTransaction aborted.await.id) posts
         ([ObjectiveActivity.guardAt snapshot (ObjectiveActivity.packageCell config.domain aborted.record.pin),
@@ -204,8 +269,71 @@ def AdmittedTurn.finalIntent {rootBytes : Bytes → Digest} {config : Config} {s
   | .rebirth _ reborn =>
       intentOf rootBytes (ObjectiveActivity.rebirthTransaction reborn.await.id) posts
         (reborn.born.guards ++ extra) reborn.claims sealing
-  | turn => turn.intent sealing
+  | .registerDomain request registered =>
+      intentOf rootBytes (ObjectiveActivity.registerTransaction request) posts
+        (registered.guards ++ extra) [] sealing
 
-#assert_axioms joint_admission Joined.conserves Joined.closes Joined.deregisters Joined.retires join_none
+/-- A cell an intent GUARDS: a read guard on it at the snapshot's root, or the intent writes it. -/
+def Guarded {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (intent : DataIntent rootBytes)
+    (cell : CellId) : Prop :=
+  ObjectiveActivity.guardAt snapshot cell ∈ intent.readGuards ∨ cell ∈ intent.writes.map DataWrite.cellId
+
+/-- **Every extra guard reaches the final intent**, for EVERY turn kind: it is one of the intent's
+read guards, or the intent writes its cell. -/
+theorem finalIntent_guards {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} (sealing : Seal) (posts : List Post) (extra : List ReadGuard)
+    (turn : AdmittedTurn config snapshot height) :
+    ∀ guard ∈ extra, guard ∈ (AdmittedTurn.finalIntent sealing posts extra turn).readGuards ∨
+      guard.cellId ∈ (AdmittedTurn.finalIntent sealing posts extra turn).writes.map DataWrite.cellId := by
+  intro guard member
+  by_cases written : guard.cellId ∈ (posts.map (Post.write rootBytes)).map DataWrite.cellId
+  · right
+    cases turn <;> exact written
+  · left
+    have kept : ∀ {guards : List ReadGuard}, guard ∈ guards → guard ∈ readOnly rootBytes posts guards :=
+      fun inGuards => List.mem_filter.mpr ⟨inGuards, decide_eq_true written⟩
+    cases turn <;> first
+      | exact kept (List.mem_append_left _ (List.mem_append_right _ member))
+      | exact kept (List.mem_append_left _ member)
+
+/-- **What an admitted turn end guarantees about invariant domains.** For every object whose
+declared state the final posts write, every domain its record (as the turn leaves it) names
+exists and its law holds on ALL members' final states, and the committed intent GUARDS every cell
+that judgment read (each member's state cell, the domain cell, the written object's record cell):
+a concurrent turn that changes an unwritten member, or the membership, conflicts with it. -/
+theorem finish_domains {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {turn : AdmittedTurn config snapshot height} {posts : List Post} {extra : List ReadGuard}
+    (finished : finish config snapshot height turn = .ok (posts, extra)) (sealing : Seal) :
+    ∀ object ∈ ObjectiveActivity.writtenObjects posts,
+      Guarded snapshot (AdmittedTurn.finalIntent sealing posts extra turn)
+        (ObjectiveActivity.objectCell config.domain object) ∧
+      ∀ record, ObjectiveActivity.finalRecord config snapshot posts object = .ok (some record) →
+        ∀ id ∈ record.domains, ∃ domain states, ObjectiveActivity.readDomain config snapshot id = .ok (some domain) ∧
+          domain.members.mapM (fun member => ObjectiveActivity.stateFor member
+            (ObjectiveActivity.afterPosts snapshot posts (ObjectiveActivity.stateCell config.domain member))) =
+            .ok states ∧
+          (∃ joint, ObjectiveActivity.jointSlots 0 states = some joint ∧
+            Minidregg.Pred.eval domain.law ⟨joint⟩ ⟨joint⟩ = true) ∧
+          Guarded snapshot (AdmittedTurn.finalIntent sealing posts extra turn)
+            (ObjectiveActivity.domainCell config.domain id) ∧
+          ∀ member ∈ domain.members, Guarded snapshot (AdmittedTurn.finalIntent sealing posts extra turn)
+            (ObjectiveActivity.stateCell config.domain member) := by
+  obtain ⟨seats, domains, _, judged, rfl⟩ := finish_finalize finished
+  have reach : ∀ cell, ObjectiveActivity.guardAt snapshot cell ∈ domains →
+      Guarded snapshot (AdmittedTurn.finalIntent sealing posts (seats ++ domains) turn) cell := fun cell inDomains =>
+    finalIntent_guards sealing posts (seats ++ domains) turn _ (List.mem_append_right _ inDomains)
+  intro object written
+  obtain ⟨guardObject, judgedObject⟩ := ObjectiveActivity.judgeDomains_sound judged object written
+  refine ⟨reach _ guardObject, fun record found named inDomains => ?_⟩
+  obtain ⟨domain, states, read, mapped, holds, guardDomain, guardStates⟩ :=
+    judgedObject record found named inDomains
+  have after : (fun member => ObjectiveActivity.stateFor member
+      (ObjectiveActivity.afterPosts snapshot posts (ObjectiveActivity.stateCell config.domain member))) =
+      ObjectiveActivity.finalState config snapshot posts :=
+    funext fun member => (ObjectiveActivity.finalState_after config snapshot posts member).symm
+  exact ⟨domain, states, read, by rw [after]; exact mapped, holds, reach _ guardDomain,
+    fun member inMembers => reach _ (guardStates member inMembers)⟩
+
+#assert_axioms joint_admission Joined.conserves Joined.closes Joined.deregisters Joined.retires join_none finish_finalize finalIntent_guards finish_domains
 
 end Minidregg.Kernel.ActivitySeatEnd

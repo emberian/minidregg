@@ -171,6 +171,14 @@ def tyField (path : String) (json : Json) (name : String) : Result Minidregg.The
   | .ok type => pure type
   | .error reason => throw s!"{path}.{name}: {reason}"
 
+/-- A domain registration's members: `[{object, capability}..]`, at least one. -/
+def members (path : String) (json : Json) : Result (List (Nat × CapabilityId)) := do
+  let items ← match (← field path json "members").getArr? with
+    | .ok items => pure items
+    | .error _ => throw s!"{path}.members must be an array"
+  items.toList.mapM fun item => do
+    pure (← nat (path ++ ".members") item "object", ⟨← nat (path ++ ".members") item "capability"⟩)
+
 /-- The turn of a command. `law` reads a predicate (the Host's `predicate` JSON
 reader), for a creation's law and upgrade policy. -/
 def turn (law : String → Json → Result Minidregg.Pred.Pred) (json : Json) : Result Turn := do
@@ -210,8 +218,10 @@ def turn (law : String → Json → Result Minidregg.Pred.Pred) (json : Json) : 
       (← nat p json "account") ⟨← nat p json "accountCapability"⟩)
   | "rebirth" => pure (.rebirth ⟨← nat p json "record"⟩ ⟨← nat p json "await"⟩
       (← capacity (p ++ ".envelope") (← field p json "envelope")))
+  | "registerDomain" => pure (.registerDomain (← members p json) (← law (p ++ ".law") (← field p json "law"))
+      (← nat p json "payer") ⟨← nat p json "payerCapability"⟩)
   | other => throw s!"$.turn.kind {other} is not publish, create, birth, resolve, deliver, topUp, \
-      exhaust, abandon, invoke, deliverMessage, adopt, migrate, abortDrained or rebirth"
+      exhaust, abandon, invoke, deliverMessage, adopt, migrate, abortDrained, rebirth or registerDomain"
 
 /-- `author objective-activity`: `{subject, nonce, expectedAuthorityRoot, turn}`. -/
 def author (law : String → Json → Result Minidregg.Pred.Pred) (json : Json) : Result (List UInt8) := do
@@ -301,6 +311,13 @@ def turnJson : Turn → Json
   | .rebirth record await envelope => .mkObj
       [("kind", "rebirth"), ("record", decimal record.value), ("await", decimal await.value),
        ("envelope", capacityJson envelope)]
+  | .registerDomain members law payer pc => .mkObj
+      [("kind", "registerDomain"),
+       ("members", .arr (members.map fun (object, c) =>
+          Json.mkObj [("object", decimal object), ("capability", decimal c.value)]).toArray),
+       ("law", toJson (reprStr law)),
+       ("domain", decimal (ObjectiveActivity.domainId (members.map fun (object, _) => ⟨object⟩) law).value),
+       ("payer", decimal payer), ("payerCapability", decimal pc.value)]
 
 def commandJson (command : Command) : Json := .mkObj
   [("type", "objective-activity-command-v4"),
@@ -422,11 +439,17 @@ def cellJson (domain : Digest) (cell : Nat) (root : Digest) (bytes : List UInt8)
             ("schemaVersion", decimal record.schemaVersion), ("law", toJson (reprStr record.law)),
             ("effectiveLaw", toJson (reprStr record.effectiveLaw)),
             ("upgrade", upgradeJson record.upgrade), ("continuity", decimal record.continuity),
-            ("payer", decimal record.payer)]
+            ("payer", decimal record.payer),
+            ("domains", .arr (record.domains.map fun id => decimal id.value).toArray)]
         | none => [("kind", "object-undecodable")]
       | .inbox => match Inbox.decode payload.body with
         | some inbox => [("kind", "inbox"), ("inbox", inboxJson inbox), ("purseAccount", decimal cell)]
         | none => [("kind", "inbox-undecodable")]
+      | .domain => match ObjectiveActivity.decodeDomain payload.body with
+        | some found => [("kind", "invariant-domain"),
+            ("members", .arr (found.members.map fun member => decimal member.value).toArray),
+            ("law", toJson (reprStr found.law)), ("payer", decimal found.payer)]
+        | none => [("kind", "domain-undecodable")]
   .mkObj ([("cell", decimal cell), ("root", decimal root.value)] ++ described)
 
 /-- The view request: `{cells: [id..], accounts: [id..], objects: [id..], pins: [pin..],

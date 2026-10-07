@@ -3062,6 +3062,178 @@ theorem Migrated.upgradable {rootBytes : Bytes → Digest} {config : Config} {sn
 
 #assert_axioms Migrated.upgradable
 
+/-! ## Domain registration: object records change only in `domains` -/
+
+/-- **A turn that changes object records only in their `domains`** (and no awaiting record, no
+package, no declared state) keeps both invariants: neither the counters nor the migration
+judgment read `domains`. -/
+theorem upgradable_of_domains_only {config : Config} {P Q : Payloads}
+    (awaiting : ∀ cell, awaitingView config Q cell = awaitingView config P cell)
+    (packages : ∀ cell, packageView (Q cell) = packageView (P cell))
+    (states : ∀ object, stateView object (Q (stateCell config.domain object)) =
+      stateView object (P (stateCell config.domain object)))
+    (forward : ∀ object record, objectView object (P (objectCell config.domain object)) = some record →
+      ∃ domains, objectView object (Q (objectCell config.domain object)) = some { record with domains := domains })
+    (back : ∀ object record, objectView object (Q (objectCell config.domain object)) = some record →
+      ∃ before domains, objectView object (P (objectCell config.domain object)) = some before ∧
+        record = { before with domains := domains })
+    (holds : Upgradable config P) : Upgradable config Q := by
+  obtain ⟨⟨cells, census⟩, migratable⟩ := holds
+  have same : ∀ object (before : ObjectRecord) domains c,
+      counts config Q object { before with domains := domains } c = counts config P object before c := by
+    intro object before domains c
+    funext cell
+    unfold counts
+    rw [awaiting cell]
+    rfl
+  refine ⟨⟨cells, ⟨census.nodup, ?_, ?_, ?_⟩⟩, ?_⟩
+  · intro cell activity found
+    rw [awaiting] at found
+    exact census.covers cell activity found
+  · intro cell activity found
+    rw [awaiting] at found
+    obtain ⟨record, held⟩ := census.homed cell activity found
+    obtain ⟨domains, after⟩ := forward _ record held
+    exact ⟨_, after⟩
+  · intro object record held c
+    obtain ⟨before, domains, was, rfl⟩ := back object record held
+    rw [same]
+    exact census.counted object before was c
+  · intro object record next deadline state found draining stated
+    obtain ⟨before, domains, was, rfl⟩ := back object record found
+    rw [states] at stated
+    rw [packages]
+    obtain ⟨migrated, ran, admitted⟩ := migratable object before next deadline state was draining stated
+    exact ⟨migrated, ran, by rw [successor_admits _ before]; exact admitted⟩
+
+theorem digestStream_encode_inj {a b : Digest} (same : digestStream.encode a = digestStream.encode b) : a = b := by
+  have ha := digestStream.decodePrefix_encode a []
+  have hb := digestStream.decodePrefix_encode b []
+  rw [same] at ha
+  rw [ha] at hb
+  cases hb
+  rfl
+
+theorem readObject_role {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {object : CellId} {record : ObjectRecord} (read : readObject config snapshot object = .ok (some record)) :
+    OfRole .object (payloadOf (snapshot.canonicalBytes (objectCell config.domain object))) ∧
+      ∀ p, payloadOf (snapshot.canonicalBytes (objectCell config.domain object)) = some p → p.key = objectKey object := by
+  unfold readObject objectFor at read
+  cases present : payloadOf (snapshot.canonicalBytes (objectCell config.domain object)) with
+  | none => rw [present] at read; cases read
+  | some payload =>
+    rw [present] at read
+    by_cases owned : payload.role = .object ∧ payload.key = objectKey object
+    · refine ⟨fun p found => ?_, fun p found => ?_⟩
+      · injection found with h; subst h; exact owned.1
+      · injection found with h; subst h; exact owned.2
+    · simp [owned] at read
+
+/-- An object view names the object its payload's key does. -/
+theorem objectView_key {object : CellId} {p : Payload} {record : ObjectRecord}
+    (view : objectView object (some p) = some record) : p.key = objectKey object := by
+  unfold objectView at view
+  by_cases owned : p.role = .object ∧ p.key = objectKey object
+  · exact owned.2
+  · simp [owned] at view
+
+theorem Registration.upgradable {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : RegisterRequest} (registered : Registration config snapshot height request)
+    (holds : Upgradable config (payloads snapshot.canonicalBytes)) :
+    Upgradable config (payloads (afterPosts snapshot registered.posts)) := by
+  have fresh : payloadOf (snapshot.canonicalBytes (domainCell config.domain request.id)) = none :=
+    readDomain_none_payload registered.absent
+  have memberRead : ∀ pair ∈ request.members.zip registered.records,
+      readObject config snapshot pair.1 = .ok (some pair.2) := by
+    intro pair member
+    have read := mapM_zip registered.recordsExact pair member
+    simp only [readMember] at read
+    split at read
+    · cases read
+    · cases read
+    · rename_i found; cases read; exact found
+  /- Every post is the domain post or a member's record post, each kinded. -/
+  have shape : ∀ p ∈ registered.posts,
+      (p = postAt snapshot (domainCell config.domain request.id) (domainImage request.id request.domain)) ∨
+      ∃ pair ∈ request.members.zip registered.records,
+        p = postAt snapshot (objectCell config.domain pair.1) (objectImage pair.1 (joined pair.2 request.id)) := by
+    rw [registered.postsExact]
+    intro p member
+    rcases List.mem_cons.mp member with head | tail
+    · exact .inl head
+    · obtain ⟨pair, inZip, rfl⟩ := List.mem_map.mp tail
+      exact .inr ⟨pair, inZip, rfl⟩
+  have kinded : ∀ p ∈ registered.posts, ∃ role, role ≠ .record ∧ role ≠ .package ∧ role ≠ .state ∧
+      Kinded snapshot role p := by
+    intro p member
+    rcases shape p member with rfl | ⟨pair, inZip, rfl⟩
+    · exact ⟨.domain, by decide, by decide, by decide,
+        ⟨fun q found => by simp [postAt, fresh] at found,
+          payloadOf_image_role _ _ _⟩⟩
+    · exact ⟨.object, by decide, by decide, by decide,
+        ⟨(readObject_role (memberRead pair inZip)).1, payloadOf_image_role _ _ _⟩⟩
+  have awaiting := fun cell => awaiting_after_kinded config snapshot registered.posts cell (fun p member _ => by
+    obtain ⟨role, r, _, _, k⟩ := kinded p member; exact ⟨role, r, k⟩)
+  have packages := fun cell => packageView_after_kinded snapshot registered.posts cell (fun p member _ => by
+    obtain ⟨role, _, pk, _, k⟩ := kinded p member; exact ⟨role, pk, k⟩)
+  have states := fun object => stateView_after_kinded snapshot registered.posts object (stateCell config.domain object)
+    (fun p member _ => by obtain ⟨role, _, _, st, k⟩ := kinded p member; exact ⟨role, st, k⟩)
+  /- The object view at an object's cell, after: unchanged, or the post there. -/
+  have objectAfter : ∀ object,
+      (objectView object (payloads (afterPosts snapshot registered.posts) (objectCell config.domain object)) =
+        objectView object (payloads snapshot.canonicalBytes (objectCell config.domain object))) ∨
+      ∃ before, objectView object (payloads snapshot.canonicalBytes (objectCell config.domain object)) = some before ∧
+        objectView object (payloads (afterPosts snapshot registered.posts) (objectCell config.domain object)) =
+          some (joined before request.id) := by
+    intro object
+    rcases payloads_after snapshot registered.posts (objectCell config.domain object) with
+      ⟨kept, _⟩ | ⟨p, member, at_, after⟩
+    · exact .inl (by rw [kept])
+    · rw [after]
+      rcases shape p member with rfl | ⟨pair, inZip, rfl⟩
+      · left
+        simp only [postAt, domainImage] at at_ ⊢
+        unfold payloads
+        rw [← at_, fresh, objectView_of_role (by decide : ObjectiveActivityCell.Role.domain ≠ .object)
+          (payloadOf_image_role _ _ _)]
+        rfl
+      · simp only [postAt] at at_ ⊢
+        have read := memberRead pair inZip
+        by_cases same : object = pair.1
+        · subst same
+          right
+          exact ⟨pair.2, readObject_some read, by rw [objectView_objectImage, if_pos rfl]⟩
+        · left
+          rw [objectView_objectImage, if_neg same]
+          unfold payloads
+          rw [← at_]
+          cases held : payloadOf (snapshot.canonicalBytes (objectCell config.domain pair.1)) with
+          | none => rfl
+          | some q =>
+            cases view : objectView object (some q) with
+            | none => rfl
+            | some r =>
+              have keyed := (readObject_role read).2 q held
+              rw [objectView_key view] at keyed
+              exact absurd (digestStream_encode_inj keyed) same
+  refine upgradable_of_domains_only awaiting packages
+    (fun object => states object) ?_ ?_ holds
+  · intro object record held
+    rcases objectAfter object with same | ⟨before, was, after⟩
+    · exact ⟨record.domains, by rw [same, held]⟩
+    · rw [was] at held
+      cases held
+      exact ⟨_, after⟩
+  · intro object record held
+    rcases objectAfter object with same | ⟨before, was, after⟩
+    · rw [same] at held
+      exact ⟨record, record.domains, held, rfl⟩
+    · rw [after] at held
+      cases held
+      exact ⟨before, _, was, rfl⟩
+
+#assert_axioms upgradable_of_domains_only Registration.upgradable
+
 /-! ## Every reachable world -/
 
 /-- **Every admitted kernel turn keeps both invariants** (its own posts). -/
@@ -3084,6 +3256,7 @@ theorem AdmittedTurn.upgradable {rootBytes : Bytes → Digest} {config : Config}
   | migrate _ migrated => exact Migrated.upgradable migrated holds
   | abortDrained _ aborted => exact Abort.upgradable aborted holds
   | rebirth _ reborn => exact Rebirth.upgradable reborn holds
+  | registerDomain _ registered => exact Registration.upgradable registered holds
 
 /-- **Every committed step keeps both invariants**: a kernel turn with its seat closing, a
 seat turn's inert posts, an intent the ordinary gate admits; installed or not. -/
@@ -3096,7 +3269,8 @@ theorem Step.upgradable {rootBytes : Bytes → Digest} {config : Config} {before
     rcases execute_no_partial_data_commit schedule _
       (ActivitySeatEnd.AdmittedTurn.finalIntent sealing posts extra turn) with same | installed
     · rw [same]; exact holds
-    · rw [installed, install_payloads _ (finalIntent_writes sealing final)]
+    · obtain ⟨_, _, final, _, _⟩ := ActivitySeatEnd.finish_finalize final
+      rw [installed, install_payloads _ (finalIntent_writes sealing)]
       exact upgradable_transfer (fun cell guarded => (finalize_agree book turn final cell guarded).symm)
         (AdmittedTurn.upgradable turn holds)
   | inert intent posts writes inert schedule =>
