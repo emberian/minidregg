@@ -198,7 +198,7 @@ noncomputable def receiptCoord
 
 theorem receiptCoord_surjective (ix : ReceiptIx Key) :
     ∃ k, receiptCoord (Key := Key) k = ix := by
-  exact ⟨sorrysorry
+  exact ⟨sorry
 
 /-- The fixed shared evaluation channel binding every receipt coordinate. -/
 noncomputable def SemanticReceiptClaim.acc {Root : Type*}
