@@ -181,9 +181,22 @@ over a step relation of three kinds (an admitted kernel turn, an inert seat inte
 intent the ordinary gate admits); `derived_route` (`ObjectiveActivityGateRoute`) says every
 record the replay walk admits is one of those kinds.
 
+A segment runs under `segmentLimits` (`Kernel/ObjectiveActivity.lean`): the deployment's heap
+allocation counted from the heap the segment starts with, so a birth runs under `config.limits`
+and a delivery under the checkpoint's cells plus that allocation. A delivery (and an exhaustion
+attempt) declares an envelope whose heap covers that, or is refused `heapUncovered` before it
+runs; the envelope is priced by the tariff's `workOf` (`Delivery.heap_priced`), so checkpoint
+growth is paid by the turn that runs it.
+
 `runSegment_stored_complete`: resuming the stored checkpoint ends every segment the program's
-own yield ends, alike, with heap headroom of the forced state's size, at every yield that names
-only allocated addresses (`LexicalInvariant`). Its core is `forcingTransparent_of_yieldedPlan`:
+own yield ends, alike, under the kernel's own limits, at every yield that names only allocated
+addresses (`LexicalInvariant`). Under limits counted from zero it is false: a checkpoint can be
+larger than the yield it was stored from (`largerYield_checkpoint_grows`, 2 cells to 5), and its
+size then eats the resumed segment's room (`absolute_limits_refuted`; the same point resumes
+exactly under the kernel's limits, `largerYield_resumes_exactly`). The converse is false: the
+stored checkpoint holds cached what the yield would compute again, so the kernel commits
+segments the program's own run is refused for ticks (`stored_commits_where_lazy_exhausts`) or
+faults on for extraction budget (`stored_commits_where_lazy_extraction_fails`). Its core is `forcingTransparent_of_yieldedPlan`:
 a successful Plan extraction is a chain of finished closed demands, each a forcing chain
 (`Theory/ObjectiveBendDemandForcingDemand.lean`, `demand_forces`), and along a forcing chain
 the forced run ends every segment the lazy run ends (`Theory/ObjectiveBendDemandForcingExtract.lean`,
@@ -194,8 +207,9 @@ The repaired premise has poles (`lexicalInvariant_initialNat`, `not_lexicalInvar
 and is discharged for every checkpoint the kernel stores, since every such yield is typed:
 `birth_stored_complete` (no premise), `delivery_stored_complete`, and on every reachable world
 `reachable_delivery_stored_complete` (`Kernel/ObjectiveCheckpointInvariant.lean`, no premise but
-the typed genesis). Not proved: the comparison runs the stored side with that heap headroom,
-not under the kernel's own limits.
+the typed genesis). Each concludes `StoredComplete config ticks start state`: the segment from
+its own start yielded, the stored state is the checkpoint of THAT yield's extraction, and it
+resumes as that yield.
 Executed, not proved: `scripts/check-objective-proofs.sh transparency` resumes every
 activity of the preview cohort and `native/objective-emit/activity-cohort.json` both ways and
 compares each segment (outcome, Data, ticks), plus a growth leg (TallyTwelve's checkpoint size
@@ -303,8 +317,7 @@ row of `scripts/pipeline/journey-rows` runs them.
 - A package pin that follows an upgrade: the pin clause is `ObjectRecord.pinClause record.pin`,
   so the future upgrade turn re-pins by rewriting `pin` (and every activity of the old pin is
   then refused at the clause until migrated).
-- A guardedness check; the stored-checkpoint comparison under the kernel's own heap limits
-  (it is proved with headroom of the forced state's size).
+- A guardedness check.
 
 ## Compared with deos-js
 

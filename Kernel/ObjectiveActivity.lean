@@ -417,6 +417,10 @@ inductive Refusal where
   | patience (patience maximum : Nat)
   /-- A declared envelope does not cover the turn (`Config.covers`). -/
   | uncovered (envelope : Capacity)
+  /-- A resumed run's declared envelope does not cover its heap: the stored checkpoint's
+  cells plus the deployment's per-segment allocation (`segmentLimits`). The submitter adds
+  heap to the envelope (`extra`, priced by the tariff, paid by the submitter). -/
+  | heapUncovered (needed declared : Nat)
   | plan (reason : String) | messageAwaitNeedsInbox
   | planExtraction (reason : String) | resultExtraction (reason : String)
   | exhausted
@@ -814,25 +818,41 @@ is kept, compacted). So a checkpoint is storage-charged for what the continuatio
 can use: a Plan field the extraction evaluated is stored as its value, never as the
 chain of suspended computations that produced it. Resuming the stored state is
 resuming the extracted one exactly (`ObjectiveResumeContract.runSegment_checkpoint`);
-that resuming the extracted state is resuming the yielded one, within heap headroom, is
-`ObjectiveResumeContract.forcingTransparent_of_yieldedPlan` (every lexically valid yield). -/
+that resuming the extracted state is resuming the yielded one, each under its own
+`segmentLimits`, is `ObjectiveResumeContract.forcingTransparent_of_yieldedPlan` (every
+lexically valid yield). -/
 inductive Segment where
   | yielded (state : State) (plan : PlanAwait)
   | finished (result : Data)
   | faulted (reason : String)
 
-/-- Run one segment from `start` within a declared envelope. Running out of
-envelope commits nothing (`exhausted`): the activity stays where it was. -/
+/-- The limits a segment runs under: `config.limits.heap` cells BEYOND the heap it
+starts from, and the deployment's stack. A birth starts from the empty heap, so its
+limits are `config.limits`. A resumed segment starts from the stored checkpoint, whose
+cells are the activity's live state, already paid for by the storage deposit and, at
+delivery, by the declared envelope (`heapUncovered`); they do not eat the segment's own
+allocation. This is what makes the stored checkpoint resume exactly as the program's own
+yield (`ObjectiveResumeContract.runSegment_stored_complete`, no headroom): the lazy yield,
+the forced state, the settled state and the collected checkpoint each get the same room
+past their own heap. Under limits counted from zero the claim is FALSE: a checkpoint can be
+larger than the yield it was made from, and its size then eats the next segment's room
+(`ObjectiveResumeContract.absolute_limits_refuted`). -/
+def segmentLimits (config : Config) (start : State) : Limits :=
+  ObjectiveBendDemandCollect.limitsPast config.limits start
+
+/-- Run one segment from `start` within a declared envelope, under its `segmentLimits`
+(the run, and the Plan or result extraction it ends with). Running out of envelope
+commits nothing (`exhausted`): the activity stays where it was. -/
 def runSegment (config : Config) (ticks : Nat) (start : State) : Except Refusal Segment :=
-  match runBounded config.limits ticks start with
+  match runBounded (segmentLimits config start) ticks start with
   | .yielded _ yielded =>
-    match ObjectiveBendDemandData.yieldedPlan config.limits config.planBudget yielded with
+    match ObjectiveBendDemandData.yieldedPlan (segmentLimits config start) config.planBudget yielded with
     | .ok extracted => do
       let plan ← decodePlan extracted.value
       pure (.yielded (ObjectiveBendDemandCollect.checkpoint extracted.state) plan)
     | .error (failure, _) => .error (.planExtraction (reprStr failure))
   | .finished _ finished =>
-    match ObjectiveBendDemandData.complete config.limits config.planBudget finished with
+    match ObjectiveBendDemandData.complete (segmentLimits config start) config.planBudget finished with
     | .ok result => .ok (.finished result.value)
     | .error (failure, _) => .error (.resultExtraction (reprStr failure))
   | .divergent _ _ => .ok (.faulted "divergent")
@@ -1804,6 +1824,9 @@ structure Delivery {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
   resumeExact : resume (responseData settlement.decided view).term state = some resumed
   envelope : Capacity
   envelopeExact : envelope = addCapacity (record.escrow.capacity settlement.path) request.extra
+  /-- The declared envelope covers the resumed run's heap (`segmentLimits`): growth of the
+  checkpoint is paid by the delivery that runs it. -/
+  heapCovered : (segmentLimits config resumed).heap ≤ envelope.heap
   segment : Segment
   yielded : Option YieldCommit
   /-- The resumed run and its yield commit; a program fault ends it `faulted`. -/
@@ -1876,6 +1899,7 @@ def deliver {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
   | some resumed =>
   let envelope := addCapacity (record.escrow.capacity settlement.path) request.extra
   if !config.covers envelope then .error (.uncovered envelope) else
+  if heapCovered : (segmentLimits config resumed).heap ≤ envelope.heap then
   if 0 < record.tried ∧ envelope.sourceTicks ≤ record.tried then .error (.alreadyExhausted record.tried envelope.sourceTicks) else
   match endExact : resumedSegment config snapshot height (deliveryTransaction await.id) request.record
       record.object (record.generation + 1) envelope.sourceTicks view resumed with
@@ -1904,10 +1928,11 @@ def deliver {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
     guardAt snapshot (stateCell config.domain record.object) :: settlement.guards
   .ok ⟨record, recordExact, located, await, awaiting, idExact, digestExact, input, inputExact, program, programExact,
     settlement, settled, view, viewExact, response, state, stateExact, resumed, resumeExact, envelope, rfl,
-    segment, yielded, endExact, next, rfl, book, bookExact, batch, batchExact, posted,
+    heapCovered, segment, yielded, endExact, next, rfl, book, bookExact, batch, batchExact, posted,
     postedBatch, posts, rfl, rfl, guards, rfl, awaitClaim await.id :: settlement.claims, rfl,
     object, objectExact, judged⟩
   else .error .bookRefused
+  else .error (.heapUncovered (segmentLimits config resumed).heap envelope.heap)
   else .error .checkpointDigest
   else .error .awaitMismatch
   else .error .recordMisplaced
@@ -1999,6 +2024,8 @@ structure Exhaustion {rootBytes : Bytes → Digest} (config : Config) (snapshot 
   resumeExact : resume (responseData settlement.decided view).term state = some resumed
   envelope : Capacity
   envelopeExact : envelope = addCapacity (record.escrow.capacity settlement.path) request.extra
+  /-- As a delivery: the declared envelope covers the resumed run's heap. -/
+  heapCovered : (segmentLimits config resumed).heap ≤ envelope.heap
   raises : record.tried < envelope.sourceTicks
   /-- At the turn cap an exhaustion is a program fault: a delivery commits it `faulted`. -/
   belowCap : envelope.sourceTicks < config.maxTicks
@@ -2050,6 +2077,7 @@ def exhaust {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
   | some resumed =>
   let envelope := addCapacity (record.escrow.capacity settlement.path) request.extra
   if !config.covers envelope then .error (.uncovered envelope) else
+  if heapCovered : (segmentLimits config resumed).heap ≤ envelope.heap then
   if raises : record.tried < envelope.sourceTicks then
   -- The charge must be payable BEFORE the run: an unpayable attempt never runs.
   match bookExact : loadBook config snapshot with
@@ -2069,11 +2097,13 @@ def exhaust {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
       guardAt snapshot (stateCell config.domain record.object) :: settlementGuards settlement
     .ok ⟨record, recordExact, located, await, awaiting, idExact, digestExact, input, inputExact, program,
       programExact, settlement, settled, view, viewExact, response, state, stateExact, resumed, resumeExact,
-      envelope, rfl, raises, belowCap, ran, next, rfl, book, bookExact, posted, postedBatch, posts, rfl, guards, rfl⟩
+      envelope, rfl, heapCovered, raises, belowCap, ran, next, rfl, book, bookExact, posted, postedBatch, posts, rfl,
+      guards, rfl⟩
   | .error reason => .error reason
   else .error .notExhausted
   else .error .bookRefused
   else .error (.alreadyExhausted record.tried envelope.sourceTicks)
+  else .error (.heapUncovered (segmentLimits config resumed).heap envelope.heap)
   else .error .checkpointDigest
   else .error .awaitMismatch
   else .error .recordMisplaced

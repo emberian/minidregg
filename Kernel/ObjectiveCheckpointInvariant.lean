@@ -12,8 +12,9 @@ induction hypothesis). This module closes the induction:
   package and input instantiate (`CheckpointTyped`);
 * `reachable_delivery_typed`: so every delivery admitted on a reachable snapshot
   stores a typed checkpoint, with no premise left;
-* `reachable_delivery_stored_complete`: and that checkpoint resumes as the program's own
-  yield (`ObjectiveResumeContract.StoredComplete`), with no premise left.
+* `reachable_delivery_stored_complete`: and that checkpoint is the checkpoint of the yield
+  the delivery's own run retained, and resumes as that yield, under the kernel's own limits
+  (`ObjectiveResumeContract.StoredComplete`), with no premise left.
 
 A step is one of three things (`Step`), and the node commits nothing else:
 
@@ -1403,7 +1404,7 @@ theorem reachable_delivery_stored_complete {rootBytes : Bytes → Digest} {confi
     (reachable : Reachable config genesis snapshot) {height : Nat} {request : DeliverRequest}
     (delivery : Delivery config snapshot height request)
     {state : State} {plan : PlanAwait} (yieldedSegment : delivery.segment = .yielded state plan) :
-    StoredComplete config state :=
+    StoredComplete config delivery.envelope.sourceTicks delivery.resumed state :=
   delivery_stored_complete delivery
     (Delivery.prior delivery (stored_checkpoints_typed genesisTyped reachable request.record delivery.record
       delivery.recordExact delivery.located)) yieldedSegment
