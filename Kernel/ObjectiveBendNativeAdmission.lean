@@ -61,6 +61,11 @@ structure Policy where
   edition : Digest
   sourceBytes : Nat
   maximum : ObjectiveInvocationClaim.Capacity
+  /-- The CUMULATIVE extraction tick ceiling of one turn: an envelope's `extractTicks` (the
+  turn's declared allowance, every extraction's actual spend drawn from it) is at most this.
+  `maximum.extractTicks` is the PER-EXTRACTION ceiling; a policy whose per-turn ceiling is below
+  it does not decode (no envelope could cover a single extraction). -/
+  extractTicksPerTurn : Nat
   outputs : List Digest
   /-- CLEAR disclosure audience; current native audience checks are additional. -/
   clearAudience : Digest
@@ -74,21 +79,25 @@ structure Policy where
 
 def policyStream : StreamCodec Policy := StreamCodec.xmap
   (StreamCodec.product digestStream (StreamCodec.product StreamCodec.nat (StreamCodec.product ObjectiveInvocationClaim.capacityStream
+    (StreamCodec.product StreamCodec.nat
     (StreamCodec.product (StreamCodec.list digestStream) (StreamCodec.product digestStream
-    (StreamCodec.product PolicyRecordCodec.stringStream tariffStream))))))
-  (fun p => (p.edition,p.sourceBytes,p.maximum,p.outputs,p.clearAudience,p.frontEnd,p.tariff))
-  (fun p => ⟨p.1,p.2.1,p.2.2.1,p.2.2.2.1,p.2.2.2.2.1,p.2.2.2.2.2.1,p.2.2.2.2.2.2⟩) (by intro p; cases p; rfl)
+    (StreamCodec.product PolicyRecordCodec.stringStream tariffStream)))))))
+  (fun p => (p.edition,p.sourceBytes,p.maximum,p.extractTicksPerTurn,p.outputs,p.clearAudience,p.frontEnd,p.tariff))
+  (fun p => ⟨p.1,p.2.1,p.2.2.1,p.2.2.2.1,p.2.2.2.2.1,p.2.2.2.2.2.1,p.2.2.2.2.2.2.1,p.2.2.2.2.2.2.2⟩)
+  (by intro p; cases p; rfl)
 
-/-- Edition 4: one front-end identity replaced the parser/frontend/elaborator pins
+/-- Edition 5: the per-turn extraction tick ceiling (`extractTicksPerTurn`), and a policy whose
+per-turn ceiling is below its per-extraction ceiling does not decode. Edition 4: one front-end identity replaced the parser/frontend/elaborator pins
 (edition 3 joined the tariff). A policy of an earlier frame does not decode; neither
 does one whose tariff is not valid. -/
-def policyFrame : List UInt8 := "DREGG/OBJECTIVE-BEND/NATIVE-POLICY".toUTF8.toList ++ [4]
+def policyFrame : List UInt8 := "DREGG/OBJECTIVE-BEND/NATIVE-POLICY".toUTF8.toList ++ [5]
 def encodePolicy (p : Policy) : List UInt8 := policyFrame ++ policyStream.encode p
 def decodePolicy (bytes : List UInt8) : Option Policy :=
   if bytes.take policyFrame.length != policyFrame then none else
     match policyStream.toLawful.decode (bytes.drop policyFrame.length) with
     | none => none
-    | some p => if encodePolicy p == bytes && p.tariff.valid then some p else none
+    | some p => if encodePolicy p == bytes && p.tariff.valid &&
+        decide (p.maximum.extractTicks ≤ p.extractTicksPerTurn) then some p else none
 
 theorem decodePolicy_tariff_valid {bytes : List UInt8} {p : Policy}
     (decoded : decodePolicy bytes = some p) : p.tariff.valid = true := by
@@ -101,6 +110,22 @@ theorem decodePolicy_tariff_valid {bytes : List UInt8} {p : Policy}
       · rename_i ok
         cases Option.some.inj decoded
         simp only [Bool.and_eq_true] at ok
+        exact ok.1.2
+      · cases decoded
+
+/-- A decoded policy's per-turn extraction ceiling covers one extraction at its per-extraction
+ceiling. -/
+theorem decodePolicy_extract_within {bytes : List UInt8} {p : Policy}
+    (decoded : decodePolicy bytes = some p) : p.maximum.extractTicks ≤ p.extractTicksPerTurn := by
+  unfold decodePolicy at decoded
+  split at decoded
+  · cases decoded
+  · split at decoded
+    · cases decoded
+    · split at decoded
+      · rename_i ok
+        cases Option.some.inj decoded
+        simp only [Bool.and_eq_true, decide_eq_true_eq] at ok
         exact ok.2
       · cases decoded
 
@@ -680,6 +705,7 @@ def admit {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
 #assert_axioms Authenticated.sound
 #assert_axioms ReadOracle.refuse_refuses
 #assert_axioms decodePolicy_tariff_valid
+#assert_axioms decodePolicy_extract_within
 #assert_axioms Core.proofWork_pos
 #assert_axioms methodSemanticId_provenance_free
 #assert_axioms methodSemanticId_provenance_free_inhabited

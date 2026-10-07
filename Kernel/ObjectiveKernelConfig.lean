@@ -53,7 +53,8 @@ def configOf {F : Type} [Field F] (deployment : Deployment) (profile : Canonical
          limits := ObjectiveBendNativeAdmission.limits policy.maximum
          -- The extraction's tick budget is its own declared ceiling, never the source ceiling.
          planBudget := {ObjectiveBendNativeAdmission.budget policy.maximum with ticks := policy.maximum.extractTicks}
-         maxTicks := policy.maximum.sourceTicks, maxPatience := maxPatience
+         maxTicks := policy.maximum.sourceTicks, maxExtractTicks := policy.extractTicksPerTurn,
+         maxPatience := maxPatience
          typeFuel := policy.maximum.typeFuel, maxArtifactBytes := policy.sourceBytes
          tariff := policy.tariff
          abandonGrace := maxPatience, storageRate := storageRate }

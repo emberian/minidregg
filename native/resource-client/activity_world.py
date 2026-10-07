@@ -187,7 +187,7 @@ class World:
         root = self.root
         constants = json.loads(self.sh('constants', self.host, '/dev/null', 'objective-constants').stdout)
         policy = {'schema': 'dregg.objective-bend.policy.v1', 'sourceBytes': '4194304',
-                  'maximum': {k: str(v) for k, v in MAXIMUM.items()}, 'outputs': [constants['genericCodec']],
+                  'maximum': {k: str(v) for k, v in MAXIMUM.items()}, 'extractTicksPerTurn': str(16 * MAXIMUM['extractTicks']), 'outputs': [constants['genericCodec']],
                   'clearAudience': '01ff', 'frontEnd': constants['frontEnd'], 'tariff': TARIFF}
         (root / 'policy.json').write_text(json.dumps(policy, indent=1))
         self.sh('policy', self.host, '/dev/null', 'author', 'objective-policy', root / 'policy.json',
