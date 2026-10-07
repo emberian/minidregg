@@ -263,7 +263,7 @@ fn line_number(value: OsString, flag: &str) -> Result<usize> {
 /// fragments and their guarded wrapping updates; v1–v8 are refused.
 /// The source-contract test below checks this independent client declaration.
 /// An observe-only `read` target is checked under it too.
-const CONTENT_COMMAND_VERSION: &str = "9";
+const CONTENT_COMMAND_VERSION: &str = "10";
 /// The declared scalar command version (`Kernel/DeclaredResourceScalar`).
 const SCALAR_COMMAND_VERSION: &str = "1";
 
