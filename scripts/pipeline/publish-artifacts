@@ -93,6 +93,8 @@ fi
 for step in host consent prime rust; do
   [ -f "$W/logs/\$step.done" ] && continue
   s=\$(date +%s); echo \$step >"$W/logs/current"
+  # a failed attempt's partial output (build-native-host refuses an existing output directory)
+  case \$step in host) rm -rf "$W/native-out" ;; consent) rm -rf "$W/consent-out" ;; esac
   case \$step in
     host) "$builder/lane-build.sh" host --umbrella ;;
     prime) "$here/prime-cargo" "$W/src" ;;
@@ -128,12 +130,12 @@ mkdir -p "$out/logs/pipeline"
 cp "$W"/logs/*.log "$W/logs/timings.tsv" "$out/logs/pipeline/"
 cp "$W/native-out/manifest.txt" "$out/logs/pipeline/host-build-manifest.txt"
 t_end=$(date +%s)
-{ cat "$W/logs/timings.tsv"; printf 'clone\t%s\nbuild\t%s\npack\t%s\ntotal\t%s\n' $((t_clone - t0)) $((t_build - t_clone)) $((t_end - t_build)) $((t_end - t0)); } >"$out/timings.tsv"
+{ cat "$W/logs/timings.tsv"; printf 'pack\t%s\n' $((t_end - t_build)); } >"$out/timings.tsv"   # steps of every (resumed) attempt; wall_s = their sum
 rust=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' rust-toolchain.toml)
 printf 'tip=%s label=%s lean=%s rust=%s built_on=%s from=%s%s command="clone-warm + lane-build.sh host --umbrella, consent, rust (fixed build root, sccache), pack" compiled_source_modules=%s wall_s=%s finished=%s\n' \
   "$tip" "$label" "$(cat lean-toolchain)" "$rust" "$(hostname)" "$from" "$moved" \
   "$(sed -n 's/^compiled_source_modules=//p' "$W/native-out/manifest.txt" "$W/logs/host.log" 2>/dev/null | head -1)" \
-  $((t_end - t0)) "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$out/PROVENANCE"
+  "$(awk -F'\t' '{s+=$2} END {print s+0}' "$out/timings.tsv" | head -1)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$out/PROVENANCE"
 (cd "$out" && sha256sum --quiet -c SHA256SUMS) || pipeline_die "fresh set fails its own SHA256SUMS"
 s=$(date +%s)
 "$here/smoke-artifacts" "$out" "$W/logs/smoke" >"$W/logs/smoke.log" 2>&1 \

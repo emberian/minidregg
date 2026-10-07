@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# scripts/pipeline/lake-shim/lake -- the box's shared Lake artifact cache, ONLY for trees that restore from it.
+#
+# box.env puts this directory first on PATH. For a tree whose lakefile.toml says
+# `restoreAllArtifacts = true`, it exports LAKE_CACHE_DIR=$PIPELINE_LAKE_CACHE (/srv/lake-cache, one per
+# box, shared by every lane) and LAKE_ARTIFACT_CACHE=true, so a module any lane (or the publisher, or
+# the warm base) already compiled from identical inputs is FETCHED (hard-linked into .lake/build)
+# instead of compiled again. Every other tree gets a private, empty cache directory: Lake reads its
+# cache by default, and without restoreAllArtifacts a cache hit leaves .lake/build without the
+# .olean, which breaks `lake env lean`, lane-check and lean-ask. Then execs the real lake.
+set -u
+real=${PIPELINE_REAL_LAKE:-$HOME/.elan/bin/lake}
+dir=$PWD
+while [ "$dir" != / ] && [ ! -f "$dir/lakefile.toml" ]; do dir=$(dirname "$dir"); done
+if [ -f "$dir/lakefile.toml" ] && grep -qE '^restoreAllArtifacts *= *true' "$dir/lakefile.toml"; then
+  export LAKE_CACHE_DIR=${PIPELINE_LAKE_CACHE:-/srv/lake-cache} LAKE_ARTIFACT_CACHE=true
+elif [ -z "${LAKE_CACHE_DIR:-}" ]; then
+  export LAKE_CACHE_DIR=$HOME/.cache/lake-private-unshared
+fi
+exec "$real" "$@"

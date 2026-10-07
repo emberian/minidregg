@@ -1,5 +1,10 @@
 name = "minidregg"
 defaultTargets = ["Minidregg"]
+# Restore every artifact a build takes from the Lake artifact cache INTO .lake/build (hard links), so
+# `lake env lean`, lane-check and lean-ask see a fetched module like a compiled one. The cache itself
+# is enabled per box by scripts/pipeline/lake-shim (LAKE_ARTIFACT_CACHE + one shared LAKE_CACHE_DIR):
+# a low-level edit is compiled once per box, not once per lane.
+restoreAllArtifacts = true
 
 # Pin mathlib to the exact revision matching v4.30.0
 # (rev 1c2b90b13009c65b090d95a83c98e248deafb6f1). This is a PORTABLE `git`+`rev`

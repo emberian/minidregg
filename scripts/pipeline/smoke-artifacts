@@ -6,8 +6,8 @@
 # A set whose SHA256SUMS match can still be a Host that cannot serve, a consent provider that is
 # not the companion of that Host, or a `mini` that cannot talk to either. Before publish-artifacts
 # writes READY, this runs, on a fresh short scratch world deleted afterwards:
-#   1. every bin/ file executes (exit status <= 2 on no arguments: a usage refusal is fine; a
-#      loader/link failure, a signal or 126/127 is not);
+#   1. every bin/ file executes on no arguments (its own usage refusal, any exit code, is fine;
+#      a loader/link failure, a signal, a 20 s hang or 126/127 is not);
 #   2. minidregg-client-consent prints its own usage prefix (the companion build of THIS Host);
 #   3. journey steps J0 (the Host bootstraps a Store and answers a signed read) and J1 (`mini`
 #      enrolls a newcomer through it, receipt looked up) with the set's own manifest.
@@ -24,9 +24,12 @@ R=$(mktemp -d "$base/psm.XXXXXX"); trap 'pkill -TERM -s 0 -f "$R" 2>/dev/null; r
 fail() { pipeline_log "SMOKE RED: $*"; exit 1; }
 t0=$(date +%s)
 for b in "$set_dir"/bin/*; do
-  [ -x "$b" ] || continue
+  [ -f "$b" ] && [ -x "$b" ] || continue   # bin/clients/ is a directory of client bundles
   timeout 20 "$b" </dev/null >"$logs/exec-$(basename "$b").out" 2>&1; rc=$?
-  [ "$rc" -le 2 ] || fail "$(basename "$b") does not run (exit $rc): $(tail -1 "$logs/exec-$(basename "$b").out")"
+  # any exit of its own is fine (a usage refusal: 1, 2, 64, 74 ...); not exec failures, signals or the loader
+  case $rc in 124|126|127) bad=1 ;; *) [ "$rc" -gt 128 ] && bad=1 || bad=0 ;; esac
+  grep -qE 'error while loading shared libraries|cannot execute|Exec format error|GLIBC_[0-9.]+. not found' "$logs/exec-$(basename "$b").out" && bad=1
+  [ "$bad" = 0 ] || fail "$(basename "$b") does not run (exit $rc): $(tail -1 "$logs/exec-$(basename "$b").out")"
 done
 grep -q '^minidregg-client-consent:' "$logs/exec-minidregg-client-consent.out" 2>/dev/null \
   || fail "minidregg-client-consent did not print its usage prefix: $(tail -1 "$logs/exec-minidregg-client-consent.out" 2>/dev/null)"
