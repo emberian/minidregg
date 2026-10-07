@@ -306,6 +306,8 @@ turn('publish-fault', sponsor, dict(ARTIFACT3, kind='publish', **PUBLISHER), 'in
 
 # --- objects: a cell is an object only with a record --------------------------------
 PERMIT_ALL = {'type': 'all', 'predicates': []}
+# The Tally's declared state type `{total: Nat}` (the checker's type JSON).
+TALLY_STATE = {'tag': 'field', 'name': 'total', 'member': {'tag': 'natural'}, 'tail': {'tag': 'emptyRow'}}
 
 
 def create(label, workspace, name, expect, detail=None, object_cap=None, payer=SPONSOR_ACCOUNT,
@@ -313,7 +315,7 @@ def create(label, workspace, name, expect, detail=None, object_cap=None, payer=S
     o = objects[name]
     return turn(label, workspace, {'kind': 'create', 'object': o['object'],
                                    'objectCapability': object_cap or o['capability'], 'pin': pin or PIN,
-                                   'law': PERMIT_ALL, 'upgrade': {'frozen': {}}, 'payer': payer,
+                                   'stateType': TALLY_STATE, 'law': PERMIT_ALL, 'upgrade': {'frozen': {}}, 'payer': payer,
                                    'payerCapability': payer_cap}, expect, detail)
 
 
