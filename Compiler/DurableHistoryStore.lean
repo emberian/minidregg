@@ -228,7 +228,10 @@ a SCRATCH Store (`StoreIdentity.ofScratch`: never equal to an opened Store,
 
 What its head is bound to: the chain recomputed from the image's own bytes (each
 append advances it from the deployment's log start), MAC'd under the scratch
-Store's fresh key, and nothing else. So before any Reader is returned the image is
+Store's fresh key, and nothing else. That MAC authenticates NOTHING about the
+foreign data: the key was made here, for this copy. The image is authenticated
+only by the commitment check below (and by whatever re-admission its caller runs
+over the Reader); never read the scratch Store's MAC as evidence. So before any Reader is returned the image is
 checked against the commitment its evidence carries: the image's height and its
 world root (`commitment.rootOf`) must be the carried ones, else it is refused by
 name; and the written Store's log start must be `logStart` (the deployment's, for
