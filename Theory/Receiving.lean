@@ -55,10 +55,20 @@ set_option autoImplicit false
 
 /-! ## Signature claims and the verdict oracle -/
 
-/-- One signature obligation: the exact key, the exact signed message, and the
-presented signature.  A receiver names these from the decoded ingress and, for
-keys held in state, a key lookup; never from preparation. -/
+/-- The signature scheme a query is checked under: Ed25519 over the message
+itself, or an OpenSSH `SSHSIG` signature under a namespace (the signed data is
+`SSHSIG ‖ namespace ‖ … ‖ H(message)`, so a signature under one namespace never
+verifies under another). -/
+inductive Scheme where
+  | ed25519
+  | sshsig (nameSpace : List UInt8)
+  deriving DecidableEq, Repr
+
+/-- One signature obligation: the scheme, the exact key, the exact signed
+message, and the presented signature.  A receiver names these from the decoded
+ingress and, for keys held in state, a key lookup; never from preparation. -/
 structure SigQuery where
+  scheme : Scheme
   publicKey : List UInt8
   message : List UInt8
   signature : List UInt8
@@ -95,6 +105,10 @@ that can carry a value mentions the constructor; a planted forgery is detected).
 structure Vouchers {m : Type → Type} (verify : SigQuery → m (Except String Bool)) where
   private mk ::
   verified : List SigQuery
+  /-- The receiver's OBSERVED signatures, each with the verifier's answer: a
+  `false` is information the family decides on (it does not refuse), an error
+  refused the ingress before anything was minted. -/
+  observed : List (SigQuery × Bool)
 
 namespace Vouchers
 
@@ -102,7 +116,7 @@ variable {m : Type → Type} {verify : SigQuery → m (Except String Bool)}
 
 /-- No claim vouched for: what an ingress with no claims is prepared under
 (reducible: it is the value `admitVia` mints for an empty claim list). -/
-abbrev empty : Vouchers verify := ⟨[]⟩
+abbrev empty : Vouchers verify := ⟨[], []⟩
 
 /-- The oracle a voucher set answers: exactly its claims. -/
 def vouches (vouchers : Vouchers verify) (claim : SigQuery) : Bool := decide (claim ∈ vouchers.verified)
@@ -111,18 +125,37 @@ theorem vouches_iff (vouchers : Vouchers verify) (claim : SigQuery) :
     vouchers.vouches claim = true ↔ claim ∈ vouchers.verified := by
   simp [vouches]
 
-/-- The vouched claim with this key and message, if any: a gate that needs
-"this key signed this message" asks for it without naming the signature bytes. -/
-def signed? (vouchers : Vouchers verify) (publicKey message : List UInt8) : Option SigQuery :=
-  vouchers.verified.find? fun claim => claim.publicKey == publicKey && claim.message == message
+/-- The vouched claim under this scheme with this key and message, if any: a
+gate that needs "this key signed this message" asks for it without naming the
+signature bytes.  The scheme is part of the question: an `SSHSIG` voucher is no
+Ed25519 signature over the message. -/
+def signed? (vouchers : Vouchers verify) (scheme : Scheme) (publicKey message : List UInt8) :
+    Option SigQuery :=
+  vouchers.verified.find? fun claim =>
+    claim.scheme == scheme && claim.publicKey == publicKey && claim.message == message
 
-theorem signed?_some {vouchers : Vouchers verify} {publicKey message : List UInt8}
-    {claim : SigQuery} (found : vouchers.signed? publicKey message = some claim) :
-    claim ∈ vouchers.verified ∧ claim.publicKey = publicKey ∧ claim.message = message := by
+theorem signed?_some {vouchers : Vouchers verify} {scheme : Scheme} {publicKey message : List UInt8}
+    {claim : SigQuery} (found : vouchers.signed? scheme publicKey message = some claim) :
+    claim ∈ vouchers.verified ∧ claim.scheme = scheme ∧ claim.publicKey = publicKey ∧
+      claim.message = message := by
   refine ⟨List.mem_of_find?_eq_some found, ?_⟩
-  simpa using List.find?_some found
+  simpa [and_assoc] using List.find?_some found
 
 theorem empty_verified : (empty : Vouchers verify).verified = [] := rfl
+
+/-- The verifier's answer on an observed query, if the receiver observed it. -/
+def answer? (vouchers : Vouchers verify) (query : SigQuery) : Option Bool :=
+  (vouchers.observed.find? fun answered => answered.1 == query).map Prod.snd
+
+theorem answer?_some {vouchers : Vouchers verify} {query : SigQuery} {answer : Bool}
+    (found : vouchers.answer? query = some answer) : (query, answer) ∈ vouchers.observed := by
+  unfold answer? at found
+  obtain ⟨answered, hit, rfl⟩ := Option.map_eq_some_iff.1 found
+  have same : answered.1 = query := by simpa using List.find?_some hit
+  have member := List.mem_of_find?_eq_some hit
+  obtain ⟨q, b⟩ := answered
+  cases same
+  exact member
 
 end Vouchers
 
@@ -176,8 +209,13 @@ structure Receiver (J : Journal) {m : Type → Type} (verify : SigQuery → m (E
   Prepared : Env → J.State → Command → Type
   decode : List UInt8 → Option Ingress
   command : Ingress → Command
-  /-- The signature claims: from the decoded ingress and a key lookup. -/
+  /-- The signature claims: from the decoded ingress and a key lookup.  Each must
+  verify, or the ingress is refused `unauthenticated`. -/
   claims : Env → J.State → Ingress → Except Reject (List SigQuery)
+  /-- The OBSERVED signatures: checked by the same verifier before `prepare`, whose
+  true/false answers reach `prepare` (`Vouchers.answer?`) for the family to decide
+  on.  A verifier error refuses; a `false` does not. -/
+  observations : Env → J.State → Ingress → Except Reject (List SigQuery)
   /-- The gate and the patch: the only step that may re-execute anything.  It
   receives the claims the verifier accepted, and nothing else about signatures. -/
   prepare : Vouchers verify → (env : Env) → (state : J.State) → (command : Command) →
@@ -227,6 +265,18 @@ def verifyAll {n : Type → Type} [Monad n] (check : SigQuery → n (Except Stri
           match ← verifyAll check rest with
           | .error detail => pure (.error detail)
           | .ok verified => pure (.ok (claim :: verified))
+
+/-- Ask the verifier about each observed query, in order; an error stops. -/
+def observeAll {n : Type → Type} [Monad n] (check : SigQuery → n (Except String Bool)) :
+    List SigQuery → n (Except String (List (SigQuery × Bool)))
+  | [] => pure (.ok [])
+  | query :: rest => do
+      match ← check query with
+      | .error detail => pure (.error detail)
+      | .ok answer =>
+          match ← observeAll check rest with
+          | .error detail => pure (.error detail)
+          | .ok answered => pure (.ok ((query, answer) :: answered))
 
 /-- The verifier that answers `v`, at `Id`. -/
 def pureVerifier (v : SigQuery → Bool) : SigQuery → Id (Except String Bool) :=
@@ -458,9 +508,15 @@ def admitVia [Monad m] (env : R.Env) (state : J.State) (ingress : R.Ingress) :
       match ← verifyAll verify claims with
       | .error detail => pure (.error (.verifier detail))
       | .ok verified =>
-          match admitted : R.admit env state ingress ⟨verified⟩ with
-          | .error reason => pure (.error reason)
-          | .ok accepted => pure (.ok ⟨⟨verified⟩, accepted, admitted⟩)
+          match R.observations env state ingress with
+          | .error reason => pure (.error (.family reason))
+          | .ok queries =>
+              match ← observeAll verify queries with
+              | .error detail => pure (.error (.verifier detail))
+              | .ok observed =>
+                  match admitted : R.admit env state ingress ⟨verified, observed⟩ with
+                  | .error reason => pure (.error reason)
+                  | .ok accepted => pure (.ok ⟨⟨verified, observed⟩, accepted, admitted⟩)
 
 /-! ## Read guards -/
 
@@ -662,8 +718,9 @@ any `Id` verifier (a recorded transcript answers an unrecorded claim with an
 error, never `false`): `admitVia` returns a `verifier` or an `unauthenticated`
 refusal -- never an admission, and never a refusal `prepare` produced. -/
 theorem admitVia_refused_before_prepare {env : R.Env} {state : J.State} {ingress : R.Ingress}
-    {claims : List SigQuery} {bad : SigQuery}
-    (resolved : R.claims env state ingress = .ok claims) (member : bad ∈ claims)
+    {claims queries : List SigQuery} {bad : SigQuery}
+    (resolved : R.claims env state ingress = .ok claims)
+    (observing : R.observations env state ingress = .ok queries) (member : bad ∈ claims)
     (notAccepted : verify bad ≠ pure (.ok true)) :
     (∃ detail, R.admitVia env state ingress = (pure (.error (.verifier detail)) : Id _)) ∨
       ∃ claim ∈ claims,
@@ -673,15 +730,20 @@ theorem admitVia_refused_before_prepare {env : R.Env} {state : J.State} {ingress
   cases ran : verifyAll verify claims with
   | error detail => exact Or.inl ⟨detail, rfl⟩
   | ok verified =>
+    simp only [observing]
+    cases asked : observeAll verify queries with
+    | error detail => exact Or.inl ⟨detail, by simp [bind, pure]⟩
+    | ok observed =>
       have notIn : bad ∉ verified := fun mem => notAccepted (verifyAll_sound verify ran bad mem)
-      have notNone : firstRefused (Vouchers.vouches (⟨verified⟩ : Vouchers verify)) claims ≠ none := by
+      have notNone : firstRefused (Vouchers.vouches (⟨verified, observed⟩ : Vouchers verify))
+          claims ≠ none := by
         intro none_refused
         exact notIn ((Vouchers.vouches_iff _ _).1
           ((firstRefused_none_iff _ claims).1 none_refused bad member))
       obtain ⟨claim, found⟩ := Option.ne_none_iff_exists'.1 notNone
       obtain ⟨claimMember, -⟩ := firstRefused_some found
       refine Or.inr ⟨claim, claimMember, ?_⟩
-      simp only [bind, pure]
+      simp only [bind, pure, ran, asked]
       split
       · rename_i reason refusedEq
         rw [R.admit_signature_first resolved found] at refusedEq
@@ -690,6 +752,63 @@ theorem admitVia_refused_before_prepare {env : R.Env} {state : J.State} {ingress
       · rename_i accepted admittedEq
         rw [R.admit_signature_first resolved found] at admittedEq
         cases admittedEq
+
+/-- At `Id`, every observed answer is the verifier's answer on exactly that
+query, and every observation was answered, in order. -/
+theorem observeAll_sound (verify : SigQuery → Id (Except String Bool)) :
+    ∀ {queries : List SigQuery} {observed : List (SigQuery × Bool)},
+      observeAll verify queries = (pure (.ok observed) : Id _) →
+        observed.map Prod.fst = queries ∧ ∀ answered ∈ observed, verify answered.1 = pure (.ok answered.2)
+  | [], observed, ran => by
+      have empty : (Except.ok [] : Except String (List (SigQuery × Bool))) = .ok observed := ran
+      cases empty
+      exact ⟨rfl, fun _ member => by cases member⟩
+  | head :: rest, observed, ran => by
+      cases verdict : verify head with
+      | error detail => simp [observeAll, verdict, bind, pure] at ran
+      | ok answer =>
+          cases tail : observeAll verify rest with
+          | error detail => simp [observeAll, verdict, tail, bind, pure] at ran
+          | ok answeredRest =>
+              simp [observeAll, verdict, tail, bind, pure] at ran
+              cases ran
+              obtain ⟨keys, sound⟩ := observeAll_sound verify tail
+              refine ⟨by simp [keys], ?_⟩
+              intro answered member
+              rcases List.mem_cons.mp member with same | later
+              · subst same; exact verdict
+              · exact sound answered later
+
+/-- **An observed answer is the verifier's answer.**  The vouchers of an
+admission `admitVia` made, under any `Id` verifier, answer exactly the
+receiver's observations, in order, and each answer is what the verifier returned
+on that exact query (scheme, key, message, signature).  With `Vouchers`' private
+constructor, a family's `prepare` reads an observation's verdict from nowhere
+else. -/
+theorem admitVia_observed {env : R.Env} {state : J.State} {ingress : R.Ingress}
+    {admission : R.Admitted env state ingress}
+    (admitted : R.admitVia env state ingress = (pure (.ok admission) : Id _)) :
+    ∃ queries, R.observations env state ingress = .ok queries ∧
+      admission.vouchers.observed.map Prod.fst = queries ∧
+      ∀ answered ∈ admission.vouchers.observed, verify answered.1 = pure (.ok answered.2) := by
+  unfold admitVia at admitted
+  split at admitted
+  · cases admitted
+  · rename_i claims _
+    simp only [bind] at admitted
+    split at admitted
+    · cases admitted
+    · rename_i verified _
+      split at admitted
+      · cases admitted
+      · rename_i queries observing
+        split at admitted
+        · cases admitted
+        · rename_i observed asked
+          split at admitted
+          · cases admitted
+          · cases admitted
+            exact ⟨queries, observing, observeAll_sound verify asked⟩
 
 end AtId
 
@@ -708,6 +827,17 @@ theorem verifyAll_pure (v : SigQuery → Bool) :
       · have tail := verifyAll_pure v rest
         simp only [verifyAll, pureVerifier, bind, pure] at tail ⊢
         simp [accepted, tail]
+
+/-- At `Id`, the pure verifier answers every observation with `v`. -/
+theorem observeAll_pure (v : SigQuery → Bool) :
+    ∀ queries : List SigQuery,
+      observeAll (pureVerifier v) queries =
+        (pure (.ok (queries.map fun query => (query, v query))) : Id _)
+  | [] => rfl
+  | query :: rest => by
+      have tail := observeAll_pure v rest
+      simp only [observeAll, pureVerifier, bind, pure] at tail ⊢
+      simp [tail]
 
 theorem takeWhile_vouched (v : SigQuery → Bool) :
     ∀ {claims : List SigQuery} {claim : SigQuery}, claim ∈ claims.takeWhile v → v claim = true
@@ -735,9 +865,14 @@ theorem admitVia_vouchers_verified {env : R.Env} {state : J.State} {ingress : R.
     simp only [bind, pure] at admitted
     split at admitted
     · cases admitted
-    · cases admitted
-      intro claim member
-      exact takeWhile_vouched v member
+    · rename_i queries _
+      rw [observeAll_pure v queries] at admitted
+      simp only [pure] at admitted
+      split at admitted
+      · cases admitted
+      · cases admitted
+        intro claim member
+        exact takeWhile_vouched v member
 
 /-- **An admitted ingress had every claim verified.** -/
 theorem admitVia_claims_verified {env : R.Env} {state : J.State} {ingress : R.Ingress}
@@ -753,13 +888,15 @@ if the verifier refuses one of the claims, `admitVia` returns an
 `unauthenticated` refusal naming one of the claims -- never an admission, and
 never a `family` refusal that `prepare` could have produced. -/
 theorem admitVia_unauthenticated {env : R.Env} {state : J.State} {ingress : R.Ingress}
-    {claims : List SigQuery} {bad : SigQuery}
+    {claims queries : List SigQuery} {bad : SigQuery}
     (resolved : R.claims env state ingress = .ok claims)
+    (observing : R.observations env state ingress = .ok queries)
     (member : bad ∈ claims) (refused : v bad = false) :
     ∃ claim, claim ∈ claims ∧
       R.admitVia env state ingress = (pure (.error (.unauthenticated claim)) : Id _) := by
   have notNone : firstRefused
-      (Vouchers.vouches (⟨claims.takeWhile v⟩ : Vouchers (pureVerifier v))) claims ≠ none := by
+      (Vouchers.vouches (⟨claims.takeWhile v, queries.map fun query => (query, v query)⟩ :
+        Vouchers (pureVerifier v))) claims ≠ none := by
     intro none_refused
     have vouched := (firstRefused_none_iff _ claims).1 none_refused bad member
     have := takeWhile_vouched v ((Vouchers.vouches_iff _ _).1 vouched)
@@ -772,7 +909,9 @@ theorem admitVia_unauthenticated {env : R.Env} {state : J.State} {ingress : R.In
   simp only [resolved]
   rw [show (verifyAll (pureVerifier v) claims >>= _) = _ from
     congrArg (· >>= _) (verifyAll_pure v claims)]
-  simp only [bind, pure]
+  simp only [bind, pure, observing]
+  rw [observeAll_pure v queries]
+  simp only [pure]
   split
   · rename_i reason refusedEq
     rw [R.admit_signature_first resolved found] at refusedEq
@@ -838,7 +977,7 @@ def journal : Journal where
   install := fun snap intent => intent :: snap
   lookup_install := by intro snap txId event nullifiers payload; simp
 
-def key : SigQuery := ⟨[1], [2], [3]⟩
+def key : SigQuery := ⟨.ed25519, [1], [2], [3]⟩
 
 def receiver (v : SigQuery → Bool) : Receiver journal (Receiver.pureVerifier v) where
   Env := Unit
@@ -849,8 +988,9 @@ def receiver (v : SigQuery → Bool) : Receiver journal (Receiver.pureVerifier v
   decode := fun bytes => bytes.head?.map UInt8.toNat
   command := id
   claims := fun _ _ _ => .ok [key]
+  observations := fun _ _ _ => .ok []
   prepare := fun vouchers _ _ _ =>
-    match vouchers.signed? key.publicKey key.message with
+    match vouchers.signed? .ed25519 key.publicKey key.message with
     | some _ => .ok ()
     | none => .error ()
   shape := fun _ => true
@@ -903,6 +1043,9 @@ end Fixture
 #assert_axioms Receiver.replay_only_original
 #assert_axioms Receiver.replay_after_install
 #assert_axioms Receiver.verifyAll_pure
+#assert_axioms Receiver.observeAll_pure
+#assert_axioms Receiver.observeAll_sound
+#assert_axioms Receiver.admitVia_observed
 #assert_axioms Receiver.takeWhile_vouched
 #assert_axioms Receiver.admitVia_vouchers_verified
 #assert_axioms Receiver.admitVia_claims_verified
