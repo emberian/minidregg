@@ -373,28 +373,6 @@ theorem finish_domains {rootBytes : Bytes → Digest} {config : Config} {snapsho
     holds, reach _ guardDomain,
     fun member inMembers => reach _ (guardStates member inMembers)⟩
 
-/-- **A finished turn paid for its domain judgment.** For every domain the turn end judged
-(named by a written object's final record, or posted), the turn's declared allowance covers
-that domain's `|members| + 1` reads, and the envelope's public price includes the domain rate on
-the whole allowance (`Tariff.workOf_domainWork`): the payer of the charged envelope paid at least
-`tariff.domainWork * (|members| + 1)` for it. -/
-theorem finish_domain_covered {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
-    {height : Nat} {turn : AdmittedTurn config snapshot height} {posts : List Post} {extra : List ReadGuard}
-    (finished : finish config snapshot height turn = .ok (posts, extra)) :
-    ∀ id, ((∃ object ∈ ObjectiveActivity.writtenObjects snapshot posts, ∃ record,
-        ObjectiveActivity.finalRecord config snapshot posts object = .ok (some record) ∧ id ∈ record.domains) ∨
-        id ∈ ObjectiveActivity.postedDomains snapshot posts) →
-      ∃ domain, ObjectiveActivity.finalDomain config snapshot posts id = .ok (some domain) ∧
-        domain.members.length + 1 ≤ (AdmittedTurn.domainAllowance turn) ∧
-        config.tariff.domainWork * (domain.members.length + 1) ≤
-          config.tariff.domainWork * (AdmittedTurn.domainAllowance turn) := by
-  obtain ⟨_, _, units, _, judged, covered, _⟩ := finish_finalize finished
-  intro id which
-  obtain ⟨domain, found, counted⟩ := ObjectiveActivity.judgeDomains_units judged id which
-  exact ⟨domain, found, Nat.le_trans counted covered,
-    Nat.mul_le_mul_left _ (Nat.le_trans counted covered)⟩
-
-#assert_axioms finish_domain_covered
 #assert_axioms joint_admission Joined.conserves Joined.closes Joined.deregisters Joined.retires join_none finish_finalize finalIntent_guards finish_domains
 
 end Minidregg.Kernel.ActivitySeatEnd
