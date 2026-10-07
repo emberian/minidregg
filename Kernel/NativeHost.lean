@@ -208,6 +208,49 @@ def prepareRenounceOn (config : Config) (ground : ServedBasis.Ground config.depl
   let signature ← slot ground.authority prepared.marker 9 0 ⟨.program, prepared.request⟩
   pure ⟨config.deployment.domain, profile.semantics, ground.worldRoot, height, .renounce bytes, [signature]⟩
 
+/-- An installation's request context on a ground: the subject's key epoch and
+the policy's epoch and revision from the ground's authority cell (never its
+spent set). -/
+def installContext (config : Config) (ground : ServedBasis.Ground config.deployment) (height : Nat)
+    (subject : SubjectId) (declaration : PolicyInstallController.Declaration) :
+    PolicyInstallController.RequestContext :=
+  { federation := config.federation, subject := subject
+    subjectKeyEpoch := ground.authority.authState.subjectKeyEpoch subject
+    height := height
+    policyEpoch := ground.authority.authState.policyEpoch declaration.source.policyId
+    policyRevision := ground.authority.authState.policyRevision declaration.source.policyId }
+
+/-- The keys an installation draft consults beyond the state: its operation
+marker's replay nullifier. The marker is the request digest over the ground's
+authority cell, so it is computed on the served state before the basis is read;
+should the head move in between, the second basis answers a different digest's
+nullifier not at all and the preparation refuses `undeclaredMarker`. -/
+def installKeys (config : Config) (ground : ServedBasis.Ground config.deployment) (height : Nat)
+    (subject : SubjectId) (bytes : List UInt8) : Option DurableView.Keys := do
+  let declaration ← PolicyInstallController.decodeDeclaration bytes
+  let marker := (PolicyInstallController.requestDigest config.profile ground.authority
+    (installContext config ground height subject declaration) declaration).value
+  some ⟨[], [CredentialAuthorityReplay.nullifier config.deployment.domain marker]⟩
+
+/-- An installation's signing plan on a ground: the marker answered through
+`Ground.markerSpent` (`PolicyInstallController.prepareChecked_agrees`: a light
+basis declaring it and the full shape prepare alike). -/
+def prepareInstallOn (config : Config) (ground : ServedBasis.Ground config.deployment) (height : Nat)
+    (subject : SubjectId) (control : CapabilityId) (bytes : List UInt8) (roster : Option (List UInt8)) :
+    Except String SigningPlan := do
+  let profile := config.profile
+  let declaration ← need "noncanonical install declaration" (PolicyInstallController.decodeDeclaration bytes)
+  let context := installContext config ground height subject declaration
+  let prepared ← (PolicyInstallController.prepare profile ground.authority ground.markerSpent context bytes).mapError
+    (fun reason => s!"install preparation: {repr reason}")
+  let request := PolicyInstallController.request profile ground.authority context prepared.declaration
+  let marker := (PolicyInstallController.requestDigest profile ground.authority context prepared.declaration).value
+  let signature ← slot ground.authority marker 5 0 ⟨.program, request⟩
+  let draft : Draft := match roster with
+    | none => .install subject control bytes
+    | some rosterBytes => .installWithRoster subject control bytes rosterBytes
+  pure ⟨config.deployment.domain, profile.semantics, ground.worldRoot, height, draft, [signature]⟩
+
 /-- The keys an invocation draft consults beyond the state
 (`DeclaredResourceController.invocationKeys`). -/
 def invokeKeys (config : Config) (bytes : List UInt8) : Option DurableView.Keys := do
@@ -274,33 +317,13 @@ def prepareLoaded (config : Config) (opened : Opened config) (draft : Draft) :
         let plan ← prepareInvokeOn config opened.ground height bytes
         pure (plan.finalizedDraft, plan.slots)
     | .install subject control bytes => do
-        let declaration ← need "noncanonical install declaration" (PolicyInstallController.decodeDeclaration bytes)
-        let context : PolicyInstallController.RequestContext :=
-          { federation := config.federation, subject := subject
-            subjectKeyEpoch := opened.authority.snapshot.authState.subjectKeyEpoch subject
-            height := height
-            policyEpoch := opened.authority.snapshot.authState.policyEpoch declaration.source.policyId
-            policyRevision := opened.authority.snapshot.authState.policyRevision declaration.source.policyId }
-        let prepared ← (PolicyInstallController.prepare profile opened.authority.snapshot context bytes).mapError
-          (fun reason => s!"install preparation: {repr reason}")
-        let request := PolicyInstallController.request profile opened.authority.snapshot context prepared.declaration
-        let marker := (PolicyInstallController.requestDigest profile opened.authority.snapshot context prepared.declaration).value
-        let signature ← slot opened.authority.snapshot marker 5 0 ⟨.program, request⟩
-        pure (.install subject control bytes, [signature])
+        -- The full shape's plan (consent re-derivation); the served Host plans an
+        -- installation on its light basis (`prepareAuthorizedLoaded`).
+        let plan ← prepareInstallOn config opened.ground height subject control bytes none
+        pure (plan.finalizedDraft, plan.slots)
     | .installWithRoster subject control bytes rosterBytes => do
-        let declaration ← need "noncanonical install declaration" (PolicyInstallController.decodeDeclaration bytes)
-        let context : PolicyInstallController.RequestContext :=
-          { federation := config.federation, subject := subject
-            subjectKeyEpoch := opened.authority.snapshot.authState.subjectKeyEpoch subject
-            height := height
-            policyEpoch := opened.authority.snapshot.authState.policyEpoch declaration.source.policyId
-            policyRevision := opened.authority.snapshot.authState.policyRevision declaration.source.policyId }
-        let prepared ← (PolicyInstallController.prepare profile opened.authority.snapshot context bytes).mapError
-          (fun reason => s!"install preparation: {repr reason}")
-        let request := PolicyInstallController.request profile opened.authority.snapshot context prepared.declaration
-        let marker := (PolicyInstallController.requestDigest profile opened.authority.snapshot context prepared.declaration).value
-        let signature ← slot opened.authority.snapshot marker 5 0 ⟨.program, request⟩
-        pure (.installWithRoster subject control bytes rosterBytes, [signature])
+        let plan ← prepareInstallOn config opened.ground height subject control bytes (some rosterBytes)
+        pure (plan.finalizedDraft, plan.slots)
     | .delegate bytes => do
         -- The full shape's plan (the consent provider's local re-derivation); the served
         -- Host plans a delegation on its light basis (`prepareAuthorizedLoaded`);
@@ -772,6 +795,23 @@ def invokeRefusal (config : Config) (opened : Opened config)
           legs.firstLawRefusal fieldsOf
   | _ => none
 
+/-- An installation's plan on the light route: the served state's authority (a basis
+declaring nothing) fixes the marker, a basis declaring its nullifier answers it. -/
+def prepareInstallLight (config : Config) (light : NativeHostLight.Light config) (subject : SubjectId)
+    (control : CapabilityId) (bytes : List UInt8) (roster : Option (List UInt8)) :
+    IO (Except Refusal SigningPlan) := do
+  match ← light.basis ⟨[], []⟩ with
+  | .error detail => return .error ⟨.operationRejected, detail, none⟩
+  | .ok served =>
+      let some keys := installKeys config (.ofBasis served) (config.genesisHeight + served.height) subject bytes
+        | return .error ⟨.operationRejected, "noncanonical install declaration", none⟩
+      match ← light.basis keys with
+      | .error detail => return .error ⟨.operationRejected, detail, none⟩
+      | .ok basis =>
+          return ((prepareInstallOn config (.ofBasis basis) (config.genesisHeight + basis.height)
+              subject control bytes roster).mapError
+            fun detail => ⟨.operationRejected, detail, none⟩)
+
 /-- The only public preparation path. A source-owned proof of every actual
 read permission is required before the internal planner may disclose a result
 or a detailed state-dependent error, on the very same opened image. -/
@@ -832,6 +872,10 @@ def prepareAuthorizedLoaded (config : Config) (opened : Opened config) (light : 
                       return ((prepareInvokeOn config (.ofBasis basis)
                           (config.genesisHeight + basis.height) invokeBytes).mapError
                         fun detail => ⟨.operationRejected, detail, none⟩)
+              | .install subject control installBytes =>
+                  prepareInstallLight config light subject control installBytes none
+              | .installWithRoster subject control installBytes rosterBytes =>
+                  prepareInstallLight config light subject control installBytes (some rosterBytes)
               | _ => return ((prepareLoaded config opened draft).mapError
                   fun detail => ⟨.operationRejected, detail, none⟩)
       | .query _ => return .error (.of .malformed)
@@ -2674,6 +2718,46 @@ def staleOutcome (config : Config) (opened : Opened config)
     | none => refused (invokeRejection reason) "invoke" s!"{repr reason}"
   else refused (invokeRejection reason) "invoke" s!"{repr reason}"
 
+/-- A policy installation on the light route: its keys (its transaction id and
+operation marker nullifier, both in the signed ingress) read from the
+authenticated history into a basis, the replay verdict and the admission on
+`Ground.ofBasis`, the commit by `DurableServed.receiveServed` on the light opening. -/
+def submitInstallLight {F : Type} [Field F] [DecidableEq F] (transport : DurableReceiverIO.Transport)
+    (deployment : CanonicalCellRegistry.Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (federation : FederationId) (genesisHeight : Nat) (signature : CredentialSignatureIO.NativeConfig)
+    (opening : DurableServed.Opening ResourceBirthCodec.rootBytes)
+    (basisOf : DurableView.Keys → IO (Except String (ServedBasis.Basis deployment opening.store)))
+    (bytes : List UInt8)
+    (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) : IO Outcome := do
+  let domain := deployment.domain
+  let some ingress := PolicyInstallReceiver.decodeIngress bytes
+    | return refused .operationRejected "install" s!"{repr PolicyInstallReceiver.Reject.malformedIngress}"
+  match ← basisOf (PolicyInstallReceiver.keys domain ingress) with
+  | .error detail => return .unavailable detail.toUTF8.toList
+  | .ok basis =>
+      let ground : ServedBasis.Ground deployment := .ofBasis basis
+      match PolicyInstallReceiver.replay domain ground ingress with
+      | .undeclared =>
+          return refused .operationRejected "install"
+            s!"{repr PolicyInstallReceiver.Reject.undeclaredTransaction}"
+      | .original receipt => confirm .replayed receipt.transactionId receipt.eventId
+      | .conflict =>
+          return refused .operationRejected "install" s!"{repr PolicyInstallReceiver.Reject.transactionConflict}"
+      | .fresh =>
+          match ← PolicyInstallReceiver.admitDecodedNative profile deployment signature ground federation
+              (genesisHeight + basis.height) ingress with
+          | .error reason => return refused .operationRejected "install" s!"{repr reason}"
+          | .ok accepted =>
+              let receipt := PolicyInstallReceiver.receipt domain ingress
+              match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes opening
+                  (PolicyInstallReceiver.intent accepted) with
+              | .appended kind .. => confirm kind receipt.transactionId receipt.eventId
+              | .replayed _ => confirm .replayed receipt.transactionId receipt.eventId
+              | .rejected reason => return durableRefusal reason
+              | .contention => return .contention
+              | .unavailable detail => return .unavailable detail.toUTF8.toList
+              | .uncertain detail => return .uncertain detail.toUTF8.toList
+
 /-- A revocation on the light route: its keys (its transaction id and marker
 nullifier) read from the authenticated history into a basis, the replay check
 and the admission on `Ground.ofBasis`, the commit by `DurableServed.receiveServed`
@@ -2844,14 +2928,8 @@ def submitLoadedVia (transport : DurableReceiverIO.Transport) (config : Config)
       | .unavailable detail => return .unavailable detail.toUTF8.toList
       | .uncertain detail => return .uncertain detail.toUTF8.toList
   | .install bytes =>
-      match ← PolicyInstallReceiver.receiveLoaded config.profile config.deployment config.signature
-          transport opened.durable config.federation height bytes with
-      | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
-      | .rejected reason => return refused .operationRejected "install" s!"{repr reason}"
-      | .durableRejected reason => return durableRefusal reason
-      | .contention => return .contention
-      | .unavailable detail => return .unavailable detail.toUTF8.toList
-      | .uncertain detail => return .uncertain detail.toUTF8.toList
+      submitInstallLight transport config.deployment config.profile config.federation config.genesisHeight
+        config.signature light.opening (light.basisVia transport) bytes confirm
   | .invoke signed =>
       submitInvokeLight transport config.deployment config.profile config.federation config.genesisHeight
         config.signature config.nockFSync (staleOutcome config opened) light.opening (light.basisVia transport)
@@ -3033,10 +3111,11 @@ def lookupLoaded (config : Config) (opened : Opened config) (call : SignedCall) 
       match PolicyInstallReceiver.decodeIngress bytes with
       | none => refused .malformed "install" "noncanonical ingress"
       | some ingress =>
-          match PolicyInstallReceiver.replay config.deployment.domain opened.durable ingress with
-          | none => .absent
-          | some (.error _) => refused .conflict "replay" "transaction identity conflict"
-          | some (.ok receipt) => finish receipt.transactionId receipt.eventId
+          match PolicyInstallReceiver.replay config.deployment.domain opened.ground ingress with
+          | .fresh => .absent
+          | .undeclared => refused .operationRejected "replay" "transaction identity undeclared"
+          | .conflict => refused .conflict "replay" "transaction identity conflict"
+          | .original receipt => finish receipt.transactionId receipt.eventId
   | .invoke signed =>
       match DeclaredResourceController.commandCodec.decode signed.commandBytes with
       | none => refused .malformed "invoke" "noncanonical command"

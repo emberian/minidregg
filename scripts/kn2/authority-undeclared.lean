@@ -1,4 +1,5 @@
-/- KN2-STORE-OPEN executed probe for the light authority families (delegate, revoke):
+/- KN2-STORE-OPEN executed probe for the light authority families (delegate, revoke,
+renounce, install):
 a key the request's basis did not declare is refused BY NAME on a real deployment
 Store, never read as absent or unspent.
 
@@ -21,7 +22,15 @@ need to decode: every refusal below happens before any state is consulted.
      with it: `fresh`;
   5. a basis without the marker's nullifier: `CapabilityRenounce.prepare` refuses exactly
      `undeclaredMarker`; with it, it prepares (the renounce reads nothing else before
-     its signature).
+     its signature);
+ install:
+  6. a basis without the transaction id: `PolicyInstallReceiver.replay` is `undeclared`;
+     with it: `fresh`;
+  7. a basis without the ingress marker's nullifier: `PolicyInstallReceiver.prepare` is
+     exactly `.error .undeclaredMarker` (before any state read); with it, any refusal is a
+     state one;
+  8. the plan path: a basis without the request digest's nullifier (`NativeHost.installKeys`):
+     `PolicyInstallController.prepare` refuses `undeclaredMarker`; with it, never that.
 The positive control end to end is the journeys (J3 delegates, JPRIV1 kicks = revokes)
 on this tree's Host.
 
@@ -31,6 +40,8 @@ import Kernel.NativeHostLight
 import Kernel.CapabilityDelegationReceiver
 import Kernel.CapabilityRevocationReceiver
 import Kernel.CapabilityRenounce
+import Kernel.PolicyInstallReceiver
+import Kernel.NativeHost
 import Kernel.ObjectiveBendNativeAdmission
 
 open Minidregg.Theory.TypedAuthorization
@@ -115,6 +126,12 @@ def renounceCommand : CapabilityRenounce.Command where
   kind := .object
   capability := ⟨900⟩
 
+def installDeclaration : PolicyInstallController.Declaration where
+  expectedPreRoot := ⟨0⟩
+  expected := none
+  nonce := 7
+  source := CanonicalPolicyAdmission.demoRecord
+
 def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   IO.FS.writeBinFile (directory / "key") ((List.range 32).map (fun i => UInt8.ofNat (i * 7 + 3))).toByteArray
   let cfg := config { binary := binary, root := directory / "store", key := directory / "key", checkpointEvery := 16 }
@@ -192,7 +209,45 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   match CapabilityRenounce.prepare cfg.deployment semantics nAmbient nAll renunciation.command with
   | .error other => throw (IO.userError s!"FAIL a declared renounce refused: {repr other}")
   | .ok _ => IO.println "control (renounce, declared marker): prepares"
-  IO.println "PASS authority undeclared: delegate (transaction id, marker), revoke (transaction id) and renounce (transaction id, marker) each refused by name"
+  -- install
+  let declarationBytes := PolicyInstallController.encodeDeclaration installDeclaration
+  let some installation := PolicyInstallReceiver.decodeIngress
+      (PolicyInstallReceiver.ingressCodec.encode ⟨⟨1⟩, ⟨1⟩, declarationBytes, envelope, none⟩)
+    | throw (IO.userError "FAIL the install ingress does not decode")
+  let iKeys := PolicyInstallReceiver.keys domain installation
+  let iAll ← groundOf iKeys "install"
+  let iNoTx ← groundOf ⟨[], iKeys.nullifiers⟩ "install without its transaction id"
+  let iNoMarker ← groundOf ⟨iKeys.transactions, []⟩ "install without its marker"
+  let iReplay := verdict (PolicyInstallReceiver.replay domain iNoTx installation)
+  require s!"an undeclared install transaction id is `undeclared` (got {iReplay})" (iReplay == "undeclared")
+  IO.println s!"refused as expected (install, undeclared transaction): replay {iReplay}"
+  let iFresh := verdict (PolicyInstallReceiver.replay domain iAll installation)
+  require s!"a declared, unrecorded install is `fresh` (got {iFresh})" (iFresh == "fresh")
+  IO.println s!"control (install, declared transaction): replay {iFresh}"
+  let iHeight := cfg.genesisHeight + iAll.height
+  match PolicyInstallReceiver.prepare cfg.profile cfg.deployment iNoMarker cfg.federation iHeight installation with
+  | .error .undeclaredMarker => IO.println "refused as expected (install, undeclared marker): undeclaredMarker"
+  | .error other => throw (IO.userError s!"FAIL a marker-less install refused otherwise: {repr other}")
+  | .ok _ => throw (IO.userError "FAIL an undeclared install marker prepared")
+  match PolicyInstallReceiver.prepare cfg.profile cfg.deployment iAll cfg.federation iHeight installation with
+  | .error .undeclaredMarker => throw (IO.userError "FAIL a declared install marker was refused as undeclared")
+  | .error other => IO.println s!"control (install, declared marker): refused on state, {repr other}"
+  | .ok _ => IO.println "control (install, declared marker): prepares"
+  -- install, the plan path: the marker is the request digest over the served authority
+  let served ← groundOf ⟨[], []⟩ "install plan: the served state"
+  let some planKeys := NativeHost.installKeys cfg served iHeight ⟨1⟩ declarationBytes
+    | throw (IO.userError "FAIL the install declaration does not decode for its plan keys")
+  let pAll ← groundOf planKeys "install plan"
+  let context := NativeHost.installContext cfg served iHeight ⟨1⟩ installDeclaration
+  match PolicyInstallController.prepare cfg.profile served.authority served.markerSpent context declarationBytes with
+  | .error .undeclaredMarker => IO.println "refused as expected (install plan, undeclared marker): undeclaredMarker"
+  | .error other => throw (IO.userError s!"FAIL a marker-less install plan refused otherwise: {repr other}")
+  | .ok _ => throw (IO.userError "FAIL an undeclared install plan marker prepared")
+  match PolicyInstallController.prepare cfg.profile pAll.authority pAll.markerSpent context declarationBytes with
+  | .error .undeclaredMarker => throw (IO.userError "FAIL a declared install plan marker was refused as undeclared")
+  | .error other => IO.println s!"control (install plan, declared marker): refused on state, {repr other}"
+  | .ok _ => IO.println "control (install plan, declared marker): prepares"
+  IO.println "PASS authority undeclared: delegate (transaction id, marker), revoke (transaction id), renounce (transaction id, marker) and install (transaction id, marker, plan marker) each refused by name"
 
 end AuthorityUndeclared
 

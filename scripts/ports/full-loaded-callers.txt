@@ -44,7 +44,6 @@ Kernel/NativeHost.lean
 Kernel/NativeHostKeyCommitmentAdoption.lean
 Kernel/NativeHostReplay.lean
 Kernel/NativeHostSession.lean
-Kernel/PolicyInstallReceiver.lean
 Kernel/ReceivingLawFixture.lean
 Kernel/ResidentActivityRevision.lean
 Kernel/ResourceBirthReceiver.lean
