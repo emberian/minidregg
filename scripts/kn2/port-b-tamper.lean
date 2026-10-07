@@ -145,6 +145,17 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   match ← ServedBasis.Grounded.pastWitness reader loaded.logStart 42 (chainAt 41) with
   | .ok _ => throw (IO.userError "FAIL a ground past the head was accepted")
   | .error detail => IO.println s!"refused as expected (height 42 past the head 41): {detail}"
+  -- The retained prefix is the Store's verified log (`NativeHistorySelection.readPrefix`), read in windows.
+  let retained := loaded.image.accepted
+  match ← NativeHistorySelection.readPrefix reader retained 30 with
+  | .error detail => throw (IO.userError s!"FAIL honest prefix read: {detail}")
+  | .ok _ => IO.println "honest: the 30 retained records are the Store's verified records 1..30"
+  match ← NativeHistorySelection.readPrefix reader (retained.take 9 ++ retained[10]?.toList ++ retained.drop 10) 30 with
+  | .ok _ => throw (IO.userError "FAIL a substituted record was accepted as the Store's")
+  | .error detail => IO.println s!"refused as expected (record 10 replaced by record 11): {detail}"
+  match ← NativeHistorySelection.readPrefix reader (retained.take 20) 30 with
+  | .ok _ => throw (IO.userError "FAIL a short retained prefix was accepted")
+  | .error detail => IO.println s!"refused as expected (20 retained records against 30): {detail}"
   let database := directory / "store" / "forward-link.sqlite3"
   -- PLANT 1: the record at height 20.
   sql database "UPDATE durable_log SET record = CAST(substr(record,1,length(record)-1) || X'FF' AS BLOB) WHERE height = 20"
@@ -164,6 +175,11 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   | .error detail =>
       IO.println s!"refused as expected (past ground at 30 over the tampered record at 20): {detail}"
       require "past ground names height 20" (mentions detail "height 20")
+  match ← NativeHistorySelection.readPrefix reader retained 30 with
+  | .ok _ => throw (IO.userError "FAIL the prefix read passed the tampered record at 20")
+  | .error detail =>
+      IO.println s!"refused as expected (prefix read over the tampered record at 20): {detail}"
+      require "prefix read names height 20" (mentions detail "height 20")
   -- PLANT 2: the checkpoint at 32 (stateAt 41 resumes from it).
   sql database "UPDATE durable_checkpoint SET bytes = CAST(substr(bytes,1,length(bytes)-1) || X'FF' AS BLOB) WHERE height = 32"
   match ← reader.stateAt 41 with
