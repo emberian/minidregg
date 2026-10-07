@@ -26,20 +26,20 @@ open Minidregg.Compiler.DurableCheckpointCodec (recordFrame chainAfter openSeale
 set_option autoImplicit false
 
 /-- The sibling node keys a read of `height` needs under `head`. -/
-def pathOf (head : Head) (height : Nat) : List (Nat × Nat) :=
+def pathOf {store : StoreIdentity} (head : Head store) (height : Nat) : List (Nat × Nat) :=
   match LogAccumulator.locate height head.height head.frontier with
   | none => []
   | some (k, e, _) => LogAccumulator.pathKeys height k e
 
 /-- Decode a verified record exactly. -/
-def toRecord {head : Head} {height : Nat} (verified : Verified head.frontier head.height height) :
+def toRecord {store : StoreIdentity} {head : Head store} {height : Nat} (verified : Verified head.frontier head.height height) :
     Except Refusal (Record head height) :=
   match decoded : recordFrame.decode verified.record with
   | some record => .ok ⟨verified, record, decoded⟩
   | none => .error (.undecodable height)
 
 /-- Verify each requested height against the fetched entries and nodes. -/
-def verifyAll (head : Head) (entries : List (Nat × DurableReceiverIO.Entry)) (nodes : List RawNode) :
+def verifyAll {store : StoreIdentity} (head : Head store) (entries : List (Nat × DurableReceiverIO.Entry)) (nodes : List RawNode) :
     List Nat → Except Refusal (List ((at_ : Nat) × Record head at_))
   | [] => .ok []
   | height :: rest => do
@@ -52,7 +52,7 @@ def verifyAll (head : Head) (entries : List (Nat × DurableReceiverIO.Entry)) (n
       return ⟨height, record⟩ :: later
 
 /-- One Store call for the entries at `heights` and every node their paths need. -/
-def fetch (transport : Transport) (head : Head) (heights : List Nat) :
+def fetch (transport : Transport) {store : StoreIdentity} (head : Head store) (heights : List Nat) :
     IO (Except Refusal (List ((at_ : Nat) × Record head at_))) := do
   if heights.length > 4096 then
     return .error (.unavailable (heights.headD 0) "a history read is bounded to 4096 records")
@@ -69,7 +69,7 @@ def fetch (transport : Transport) (head : Head) (heights : List Nat) :
         pair.2.2.2.map fun version => RawNode.ofStore pair.1.1 pair.1.2 version.2
       return verifyAll head read.entries nodes heights
 
-def atHeight (transport : Transport) (head : Head) (height : Nat) :
+def atHeight (transport : Transport) {store : StoreIdentity} (head : Head store) (height : Nat) :
     IO (Except Refusal (Record head height)) := do
   match ← fetch transport head [height] with
   | .error refusal => return .error refusal
@@ -81,19 +81,19 @@ def atHeight (transport : Transport) (head : Head) (height : Nat) :
       | _ => return .error (.unavailable height "one record requested, another count returned")
 
 /-- A spent-map answer for one key, verified against the head's spent root. -/
-def spentAnswer (transport : Transport) (head : Head) (key : Digest) :
+def spentAnswer (transport : Transport) {store : StoreIdentity} (head : Head store) (key : Digest) :
     IO (Except String (DurableSpent.Answer head.spentRoot key)) := do
   match ← spentRows transport head.height [key] with
   | .error message => return .error message
   | .ok rows => return DurableSpent.lookupRows rows head.spentRoot key
 
-def spent (transport : Transport) (head : Head) (nullifier : StableNullifier) :
+def spent (transport : Transport) {store : StoreIdentity} (head : Head store) (nullifier : StableNullifier) :
     IO (Except Refusal (Spent head nullifier)) := do
   match ← spentAnswer transport head (DurableSpent.nullifierKey nullifier) with
   | .error message => return .error (.unavailable 0 message)
   | .ok answer => return .ok answer
 
-def byTx (transport : Transport) (head : Head) (transactionId : TransactionId) :
+def byTx (transport : Transport) {store : StoreIdentity} (head : Head store) (transactionId : TransactionId) :
     IO (Except Refusal (TxAnswer head transactionId)) := do
   match ← spentAnswer transport head (DurableSpent.transactionKey transactionId) with
   | .error message => return .error (.unavailable 0 message)
@@ -107,29 +107,29 @@ def byTx (transport : Transport) (head : Head) (transactionId : TransactionId) :
           else return .error (.unavailable height
             "the spent map names a height whose record carries another transaction")
 
-def range (transport : Transport) (head : Head) (first last : Nat) :
+def range (transport : Transport) {store : StoreIdentity} (head : Head store) (first last : Nat) :
     IO (Except Refusal (List ((at_ : Nat) × Record head at_))) :=
   fetch transport head (List.range' first (last + 1 - first))
 
 /-- The base a past state resumes from, with what makes it authentic. -/
-structure Base (rootBytes : List UInt8 → Digest) (seed : Seed) (logStart : Digest) (head : Head) where
+structure Base (rootBytes : List UInt8 → Digest) (seed : Seed) {store : StoreIdentity} (head : Head store) where
   height : Nat
   chain : Digest
   state : State
-  authentic : (height = 0 ∧ state = State.ofSeed seed ∧ chain = logStart) ∨
-    ((∃ bytes, ∃ body : DurableCheckpointCodec.Body, openSealed head.key rootBytes bytes = .ok body ∧
+  authentic : (height = 0 ∧ state = State.ofSeed seed ∧ chain = store.logStart) ∨
+    ((∃ bytes, ∃ body : DurableCheckpointCodec.Body, openSealed store.key rootBytes bytes = .ok body ∧
         body.height = height ∧ body.chain = chain ∧ body.state = state) ∧
       ∃ base : Record head height, base.verified.chain = chain)
 
 /-- The latest retained checkpoint at or below `height` (MAC verified under the
 head's key, sitting on the verified log), or the seed. -/
-def baseOf (transport : Transport) (rootBytes : List UInt8 → Digest) (seed : Seed) (logStart : Digest)
-    (head : Head) (height : Nat) : IO (Except Refusal (Base rootBytes seed logStart head)) := do
+def baseOf (transport : Transport) (rootBytes : List UInt8 → Digest) (seed : Seed)
+    {store : StoreIdentity} (head : Head store) (height : Nat) : IO (Except Refusal (Base rootBytes seed head)) := do
   match ← transport.checkpointAt height with
   | .error message => return .error (.unavailable height message)
-  | .ok none => return .ok ⟨0, logStart, State.ofSeed seed, Or.inl ⟨rfl, rfl, rfl⟩⟩
+  | .ok none => return .ok ⟨0, store.logStart, State.ofSeed seed, Or.inl ⟨rfl, rfl, rfl⟩⟩
   | .ok (some checkpoint) =>
-      match opened : openSealed head.key rootBytes checkpoint.bytes with
+      match opened : openSealed store.key rootBytes checkpoint.bytes with
       | .error reason =>
           return .error (.unavailable checkpoint.height s!"checkpoint refused: {repr reason}")
       | .ok body =>
@@ -145,10 +145,10 @@ def baseOf (transport : Transport) (rootBytes : List UInt8 → Digest) (seed : S
 
 /-- The authentic state after `height` records. -/
 def stateAt (transport : Transport) (rootBytes : List UInt8 → Digest) (seed : Seed)
-    (logStart : Digest) (head : Head) (height : Nat) :
-    IO (Except Refusal (StateAt rootBytes seed logStart head height)) := do
+    {store : StoreIdentity} (head : Head store) (height : Nat) :
+    IO (Except Refusal (StateAt rootBytes seed head height)) := do
   if height > head.height then return .error (.beyondHead height head.height)
-  match ← baseOf transport rootBytes seed logStart head height with
+  match ← baseOf transport rootBytes seed head height with
   | .error refusal => return .error refusal
   | .ok base =>
       let reads ← if base.height + 1 > height then pure [] else
@@ -169,18 +169,21 @@ def stateAt (transport : Transport) (rootBytes : List UInt8 → Digest) (seed : 
         else return .error (.unavailable height "the Store returned another record count")
       else return .error (.unavailable height "the Store returned records out of order")
 
-/-- The Reader of an opened Store at its head. The head is `Head.verify` of
-the head entry's tag (read with the image, or from the Store), under the key,
-for the opening's chain and accumulator frontier. -/
+/-- The Reader of an opened Store at its head. The open mints the Store's
+identity (its key, its genesis log start) and the head: `Head.verify` of the
+head entry's tag (read with the image, or from the Store) under that key, for
+the opening's chain and accumulator frontier; `Head.genesis` only when the
+image is empty. -/
 def readerOf (transport : Transport) (rootBytes : List UInt8 → Digest) (loaded : Loaded rootBytes) :
-    IO (Except String (Reader rootBytes)) := do
+    IO (Except String ((store : StoreIdentity) × Reader rootBytes store)) := do
   let key ← match ← transport.key with
     | .error message => return .error message
     | .ok key => pure key
   let some frontier := loaded.frontier
     | return .error "this opening carries no accumulator frontier (it was not read from the Store)"
+  let store := StoreIdentity.ofOpen key loaded.logStart
   let height := loaded.image.accepted.length
-  let head ← if height = 0 then pure (Head.genesis key loaded.chain loaded.worldRoot) else do
+  let head ← if height = 0 then pure (Head.genesis store loaded.worldRoot) else do
     let tag ← match loaded.headTag with
       | some tag => pure tag
       | none =>
@@ -191,15 +194,15 @@ def readerOf (transport : Transport) (rootBytes : List UInt8 → Digest) (loaded
               | none => return .error "durable head entry missing"
           | .ok none => return .error "durable store is not initialized"
           | .error message => return .error message
-    match Head.verify key height tag loaded.chain frontier with
+    match Head.verify store height tag loaded.chain frontier with
     | .ok head => pure head
     | .error refusal => return .error refusal.message
-  return .ok
-    { head, seed := loaded.image.seed, logStart := loaded.logStart
+  return .ok ⟨store,
+    { head, seed := loaded.image.seed
       atHeight := atHeight transport head
       byTx := byTx transport head
       spent := spent transport head
       range := range transport head
-      stateAt := stateAt transport rootBytes loaded.image.seed loaded.logStart head }
+      stateAt := stateAt transport rootBytes loaded.image.seed head }⟩
 
 end Minidregg.Compiler.DurableHistoryStore

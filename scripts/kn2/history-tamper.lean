@@ -7,7 +7,7 @@ Usage: lake env lean --run scripts/kn2/history-tamper.lean STORE-HELPER
 (the helper binary from native/hyperdocument-link-sqlite-store, schema v5).
 Tampering edits the SQLite file directly with python3's sqlite3 module (the
 helper never rewrites an entry). -/
-import Compiler.DurableHistoryStore
+import Compiler.DurableStoreAudit
 import Compiler.Sp800185Cshake256
 
 open Minidregg.Theory.TypedAuthorization
@@ -74,7 +74,7 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
     | .ok loaded => pure loaded
     | .error detail => throw (IO.userError s!"FAIL open: {detail}")
   require "41 records" (loaded.height == 41)
-  let reader ← match ← DurableHistoryStore.readerOf transport rootBytes loaded with
+  let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf transport rootBytes loaded with
     | .ok reader => pure reader
     | .error detail => throw (IO.userError s!"FAIL reader: {detail}")
   -- Honest reads: every height, the transaction index, the spent set, a past state.
@@ -107,6 +107,9 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
         (state.snapshot.canonicalBytes ⟨3⟩ == [30] && state.baseHeight == 16 && state.reads.length == 14)
   | .error refusal => throw (IO.userError s!"FAIL stateAt: {refusal.message}")
   IO.println "honest: heights 1..41, byTx present/absent, spent present/absent, stateAt 30 all verified"
+  match ← DurableStoreAudit.audit transport rootBytes with
+  | .ok report => IO.println report.line
+  | .error message => throw (IO.userError s!"FAIL store audit on the honest Store: {message}")
   -- TAMPER 1: one byte of the record at height 20 (a non-head record).
   let database := directory / "store" / "forward-link.sqlite3"
   sql database "UPDATE durable_log SET record = CAST(substr(record,1,length(record)-1) || X'FF' AS BLOB) WHERE height = 20"
@@ -117,6 +120,11 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   match ← reader.byTx ⟨1020⟩ with
   | .error refusal => require "byTx through the tampered record refuses at 20" (refusal == .notIncluded 20)
   | .ok _ => throw (IO.userError "FAIL byTx returned the tampered record")
+  match ← DurableStoreAudit.audit transport rootBytes with
+  | .ok _ => throw (IO.userError "FAIL store audit accepted the tampered Store")
+  | .error message =>
+      IO.println s!"store audit refused the tampered Store: {message}"
+      require "store audit names height 20" ((message.splitOn "height 20").length > 1)
   match ← load transport rootBytes with
   | .ok _ => throw (IO.userError "FAIL the open accepted the tampered Store")
   | .error detail =>

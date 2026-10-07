@@ -301,49 +301,69 @@ theorem verifyTagged_trailer (key : MacKey) (height : Nat) (carried : Carried) :
     trailerStream.toLawful.decode_encode (carried, tagMac key height carried)
   simp [verifyTagged, trailer, decoded]
 
-/-! ## The authenticated head
+/-! ## The opened Store's identity and its authenticated head
 
-A `Head` is the height, chain, accumulator frontier and spent root that the
-head entry's tag MACs under the Store key — or the empty log's canonical
-values. Its constructor is PRIVATE: the only ways to obtain one are
-`Head.verify` (which checks the tag's MAC against the frontier the caller
-recomputed) and `Head.genesis`. Every `Verified`, `ByTx`, spent answer and
-state answer of `Compiler.DurableHistoryReader` is stated relative to a
-`Head`, so nothing downstream is sound "relative to whatever frontier someone
-put there". Which tag: the helper serves durable reads only under the MINIANC2
-head anchor (`docs/DURABLE-STORE.md`), so the tag the open passes here is the
-anchor-fixed head entry's. -/
+`StoreIdentity` is the opened Store: its MAC key and its genesis log start
+(the deployment's domain and semantics and the seed, `NativeHostCodec.logRoot0`).
+A `Head store` is the height, chain, accumulator frontier and spent root that
+the head entry's tag MACs under `store.key` — or the empty log's values.
+Every `Verified`, `ByTx`, spent answer and state answer of
+`Compiler.DurableHistoryReader` is indexed by a `Head store`, so a head of
+another Store (another key, another genesis) does not typecheck where the
+opened Store's is expected.
 
-structure Head where
+Two layers. LAYER 1 (types): `Head` is indexed by the identity and its key is
+not a free field; `Head.verify` checks the tag's MAC under `store.key`.
+LAYER 2 (token audit): `StoreIdentity.ofOpen` and `Head.genesis` are minted
+only by the open (`DurableHistoryStore.readerOf`, `DurableReceiverIO`): a
+genesis head says every key is absent, so a genesis head for a non-empty Store
+would be a replay bypass. Both are on the receiver-token audit list
+(`scripts/kn2/token-audit-list.txt`, for Host/ReceiverTokenAudit), and
+`scripts/kn2/planted-api-faults.lean` carries their planted forges.
+Which tag: the helper serves durable reads only under the MINIANC2 head anchor
+(`docs/DURABLE-STORE.md`), so the tag the open passes is the anchor-fixed head
+entry's. -/
+
+structure StoreIdentity where
   private mk ::
   key : MacKey
+  logStart : Digest
+
+/-- LAYER 2: minted only by the open (token audit list). -/
+def StoreIdentity.ofOpen (key : MacKey) (logStart : Digest) : StoreIdentity := ⟨key, logStart⟩
+
+structure Head (store : StoreIdentity) where
+  private mk ::
   height : Nat
   chain : Digest
   frontier : List (Nat × Digest)
   spentRoot : Digest
   root : Digest
-  bound : (height = 0 ∧ frontier = [] ∧ spentRoot = DurableSpent.emptyDigest) ∨
-    ∃ tag, verifyTagged key height tag chain (frontierDigest height frontier) spentRoot = .ok root
+  bound : (height = 0 ∧ chain = store.logStart ∧ frontier = [] ∧ spentRoot = DurableSpent.emptyDigest) ∨
+    ∃ tag, verifyTagged store.key height tag chain (frontierDigest height frontier) spentRoot = .ok root
 
-/-- The empty log's head. -/
-def Head.genesis (key : MacKey) (chain root : Digest) : Head :=
-  ⟨key, 0, chain, [], DurableSpent.emptyDigest, root, Or.inl ⟨rfl, rfl, rfl⟩⟩
+/-- The empty log's head: its chain is the Store's genesis log start. LAYER 2:
+minted only by the open, and only when the anchored read's head is 0. -/
+def Head.genesis (store : StoreIdentity) (root : Digest) : Head store :=
+  ⟨0, store.logStart, [], DurableSpent.emptyDigest, root, Or.inl ⟨rfl, rfl, rfl, rfl⟩⟩
 
-/-- A head from the head entry's tag: the MAC must verify for this height, the
-recomputed chain and frontier, and the spent root the tag carries. -/
-def Head.verify (key : MacKey) (height : Nat) (tag : List UInt8) (chain : Digest)
-    (frontier : List (Nat × Digest)) : Except Refusal Head :=
+/-- A head from the head entry's tag: the MAC must verify under the Store's key
+for this height, the recomputed chain and frontier, and the spent root the tag carries. -/
+def Head.verify (store : StoreIdentity) (height : Nat) (tag : List UInt8) (chain : Digest)
+    (frontier : List (Nat × Digest)) : Except Refusal (Head store) :=
   match trailerCarried tag with
   | none => .error (.malformedTrailer height)
   | some carried =>
-      match checked : verifyTagged key height tag chain (frontierDigest height frontier) carried.spentRoot with
-      | .ok root => .ok ⟨key, height, chain, frontier, carried.spentRoot, root, Or.inr ⟨tag, checked⟩⟩
+      match checked : verifyTagged store.key height tag chain (frontierDigest height frontier)
+          carried.spentRoot with
+      | .ok root => .ok ⟨height, chain, frontier, carried.spentRoot, root, Or.inr ⟨tag, checked⟩⟩
       | .error refusal => .error refusal
 
-/-- **A head is MAC-bound**: unless it is the empty log's, some tag of its
-height verifies under its key for its chain, frontier and spent root. -/
-theorem Head.bound_tag (head : Head) (nonempty : head.height ≠ 0) :
-    ∃ tag, verifyTagged head.key head.height tag head.chain (frontierDigest head.height head.frontier)
+/-- **A head is MAC-bound to its Store**: unless it is the empty log's (whose
+chain is the Store's genesis log start), some tag of its height verifies under
+the Store's key for its chain, frontier and spent root. -/
+theorem Head.bound_tag {store : StoreIdentity} (head : Head store) (nonempty : head.height ≠ 0) :
+    ∃ tag, verifyTagged store.key head.height tag head.chain (frontierDigest head.height head.frontier)
       head.spentRoot = .ok head.root := by
   rcases head.bound with ⟨zero, _⟩ | tagged
   · exact absurd zero nonempty

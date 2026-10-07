@@ -31,8 +31,10 @@ Rules for port lanes:
 * A `Refusal` is surfaced by its `message` (it names the height); never mapped
   to "absent". Absence is `TxAnswer.absent` / a `Spent` answer with `value = none`,
   each carrying the spent map's opening.
-* Nothing here can be built by a port: `Head` has a private constructor (only
-  the open's `Head.verify` makes one), `Verified`/`Opens` need real inclusion
+* Nothing here can be built by a port: `Head store` is indexed by the opened
+  Store's identity and has a private constructor (only the open's `Head.verify`
+  / `Head.genesis` make one; both, and `StoreIdentity.ofOpen`, are on the token
+  audit list), `Verified`/`Opens` need real inclusion
   checks, `StateAt` carries its base's MAC and its records' verification.
   `scripts/kn2/check-planted-api-faults.sh` keeps that true.
 -/
@@ -49,7 +51,7 @@ open Minidregg.Kernel.DurableDataIntent (TransactionId StableNullifier DataSnaps
 open Minidregg.Kernel.DurableCommitProtocol (Intent Snapshot)
 open Minidregg.Kernel.DurableReceiver (IntentRecord Seed replay)
 open Minidregg.Kernel.DurableCheckpoint (State)
-open Minidregg.Compiler.DurableHistory (Verified Refusal Head)
+open Minidregg.Compiler.DurableHistory (Verified Refusal Head StoreIdentity)
 open Minidregg.Compiler.DurableCheckpointCodec (recordFrame chainAfter openSealed)
 open Minidregg.Kernel.DurableView (Keys)
 
@@ -57,14 +59,14 @@ set_option autoImplicit false
 
 /-- A record read by height, verified at use against the authenticated head
 (`DurableHistory.verifyAt`), then decoded exactly from the verified bytes. -/
-structure Record (head : Head) (height : Nat) where
+structure Record {store : StoreIdentity} (head : Head store) (height : Nat) where
   verified : Verified head.frontier head.height height
   record : IntentRecord
   decoded : recordFrame.decode verified.record = some record
 
 /-- A transaction id's record: the spent map's opening names its height, the
 record read there carries that id. -/
-structure ByTx (head : Head) (transactionId : TransactionId) where
+structure ByTx {store : StoreIdentity} (head : Head store) (transactionId : TransactionId) where
   height : Nat
   answer : DurableSpent.Opens head.spentRoot (DurableSpent.transactionKey transactionId) (some height)
   read : Record head height
@@ -72,13 +74,13 @@ structure ByTx (head : Head) (transactionId : TransactionId) where
 
 /-- A transaction id's answer. ABSENCE IS A VALUE THAT CARRIES ITS OPENING: a
 reader cannot report "not accepted" without the spent map's verified absence. -/
-inductive TxAnswer (head : Head) (transactionId : TransactionId) where
+inductive TxAnswer {store : StoreIdentity} (head : Head store) (transactionId : TransactionId) where
   | present (found : ByTx head transactionId)
   | absent (opens : DurableSpent.Opens head.spentRoot (DurableSpent.transactionKey transactionId) none)
 
 /-- The spent bit of a nullifier: the inserting height or absence, opened
 against the head's spent root. -/
-abbrev Spent (head : Head) (nullifier : StableNullifier) :=
+abbrev Spent {store : StoreIdentity} (head : Head store) (nullifier : StableNullifier) :=
   DurableSpent.Answer head.spentRoot (DurableSpent.nullifierKey nullifier)
 
 /-- The state after `height` records, with what makes it authentic:
@@ -88,13 +90,13 @@ abbrev Spent (head : Head) (nullifier : StableNullifier) :=
 * every record after the base is a verified `Record` at the next height,
   chained from the base's chain (none can be spliced in from another history);
 * the snapshot is exactly the executor's replay of those records from the base. -/
-structure StateAt (rootBytes : List UInt8 → Digest) (seed : Seed) (logStart : Digest) (head : Head)
+structure StateAt (rootBytes : List UInt8 → Digest) (seed : Seed) {store : StoreIdentity} (head : Head store)
     (height : Nat) where
   baseHeight : Nat
   baseChain : Digest
   baseState : State
-  baseAuthentic : (baseHeight = 0 ∧ baseState = State.ofSeed seed ∧ baseChain = logStart) ∨
-    ((∃ bytes, ∃ body : DurableCheckpointCodec.Body, openSealed head.key rootBytes bytes = .ok body ∧
+  baseAuthentic : (baseHeight = 0 ∧ baseState = State.ofSeed seed ∧ baseChain = store.logStart) ∨
+    ((∃ bytes, ∃ body : DurableCheckpointCodec.Body, openSealed store.key rootBytes bytes = .ok body ∧
         body.height = baseHeight ∧ body.chain = baseChain ∧ body.state = baseState) ∧
       ∃ base : Record head baseHeight, base.verified.chain = baseChain)
   reads : List ((at_ : Nat) × Record head at_)
@@ -106,25 +108,25 @@ structure StateAt (rootBytes : List UInt8 → Digest) (seed : Seed) (logStart : 
   replayed : replay rootBytes (baseState.snapshot rootBytes []) (reads.map (·.2.record)) = some snapshot
 
 /-- The answers to a request's declared keys, each verified. -/
-structure VerifiedFootprint (head : Head) (keys : Keys) where
+structure VerifiedFootprint {store : StoreIdentity} (head : Head store) (keys : Keys) where
   transactions : List ((transactionId : TransactionId) × TxAnswer head transactionId)
   transactionsExact : transactions.map (·.1) = keys.transactions
   nullifiers : List ((nullifier : StableNullifier) × Spent head nullifier)
   nullifiersExact : nullifiers.map (·.1) = keys.nullifiers
 
 /-- The recorded intent an answer contributes to the view's journal. -/
-def TxAnswer.recorded {head : Head} {transactionId : TransactionId} :
+def TxAnswer.recorded {store : StoreIdentity} {head : Head store} {transactionId : TransactionId} :
     TxAnswer head transactionId → Option (Intent TransactionId Kernel.DurableDataIntent.CellId
       StableNullifier Kernel.DurableDataIntent.ReplayEnvelope)
   | .present found => some (Kernel.DurableCheckpoint.IntentRecord.erase found.read.record)
   | .absent _ => none
 
-def VerifiedFootprint.toFootprint {head : Head} {keys : Keys} (footprint : VerifiedFootprint head keys) :
+def VerifiedFootprint.toFootprint {store : StoreIdentity} {head : Head store} {keys : Keys} (footprint : VerifiedFootprint head keys) :
     Kernel.DurableView.Footprint :=
   ⟨footprint.transactions.filterMap fun answer => answer.2.recorded.map (answer.1, ·),
     footprint.nullifiers.map fun answer => (answer.1, answer.2.value.isSome)⟩
 
-theorem lookup_answers_some {head : Head} (transactionId : TransactionId)
+theorem lookup_answers_some {store : StoreIdentity} {head : Head store} (transactionId : TransactionId)
     {intent : Intent TransactionId Kernel.DurableDataIntent.CellId StableNullifier
       Kernel.DurableDataIntent.ReplayEnvelope} :
     ∀ (answers : List ((id : TransactionId) × TxAnswer head id)),
@@ -146,7 +148,7 @@ theorem lookup_answers_some {head : Head} (transactionId : TransactionId)
 /-- **Every journal answer the view adds is a verified record**: a lookup that
 hits the footprint hits a `present` answer for that id, i.e. the erasure of a
 record verified at use. -/
-theorem toFootprint_lookup_some {head : Head} {keys : Keys} (footprint : VerifiedFootprint head keys)
+theorem toFootprint_lookup_some {store : StoreIdentity} {head : Head store} {keys : Keys} (footprint : VerifiedFootprint head keys)
     (transactionId : TransactionId) {intent : Intent TransactionId Kernel.DurableDataIntent.CellId
       StableNullifier Kernel.DurableDataIntent.ReplayEnvelope}
     (hit : Snapshot.lookupRecorded transactionId footprint.toFootprint.recorded = some intent) :
@@ -154,7 +156,7 @@ theorem toFootprint_lookup_some {head : Head} {keys : Keys} (footprint : Verifie
       intent = Kernel.DurableCheckpoint.IntentRecord.erase found.read.record :=
   lookup_answers_some transactionId footprint.transactions hit
 
-theorem lookup_answers_none {head : Head} (transactionId : TransactionId) :
+theorem lookup_answers_none {store : StoreIdentity} {head : Head store} (transactionId : TransactionId) :
     ∀ (answers : List ((id : TransactionId) × TxAnswer head id)),
       Snapshot.lookupRecorded transactionId
           (answers.filterMap fun answer => answer.2.recorded.map (answer.1, ·)) = none →
@@ -184,7 +186,7 @@ theorem lookup_answers_none {head : Head} (transactionId : TransactionId) :
 /-- **A miss on a declared key is a verified absence**: if a declared id is
 not in the view's added journal, every answer for it carries the spent map's
 absence opening. -/
-theorem toFootprint_lookup_none {head : Head} {keys : Keys} (footprint : VerifiedFootprint head keys)
+theorem toFootprint_lookup_none {store : StoreIdentity} {head : Head store} {keys : Keys} (footprint : VerifiedFootprint head keys)
     (transactionId : TransactionId)
     (miss : Snapshot.lookupRecorded transactionId footprint.toFootprint.recorded = none)
     (answer : (id : TransactionId) × TxAnswer head id) (member : answer ∈ footprint.transactions)
@@ -195,11 +197,10 @@ theorem toFootprint_lookup_none {head : Head} {keys : Keys} (footprint : Verifie
 
 /-- The history of one opened Store at its authenticated `head`. Every
 operation's result type carries its verification relative to `head`, which
-only the open can produce (`Head` has a private constructor). -/
-structure Reader (rootBytes : List UInt8 → Digest) where
-  head : Head
+only the open can produce (`Head store`, indexed by the opened Store). -/
+structure Reader (rootBytes : List UInt8 → Digest) (store : StoreIdentity) where
+  head : Head store
   seed : Seed
-  logStart : Digest
   /-- One record by height (1-based). -/
   atHeight : (height : Nat) → IO (Except Refusal (Record head height))
   /-- The accepted record of a transaction id, or its verified absence. -/
@@ -210,10 +211,11 @@ structure Reader (rootBytes : List UInt8 → Digest) where
   range : (first last : Nat) →
     IO (Except Refusal (List ((height : Nat) × Record head height)))
   /-- The authentic state after `height` records. -/
-  stateAt : (height : Nat) → IO (Except Refusal (StateAt rootBytes seed logStart head height))
+  stateAt : (height : Nat) → IO (Except Refusal (StateAt rootBytes seed head height))
 
 /-- The verified answers to a request's declared keys. -/
-def Reader.footprint {rootBytes : List UInt8 → Digest} (reader : Reader rootBytes) (keys : Keys) :
+def Reader.footprint {rootBytes : List UInt8 → Digest} {store : StoreIdentity} (reader : Reader rootBytes store)
+    (keys : Keys) :
     IO (Except Refusal (VerifiedFootprint reader.head keys)) := do
   let mut transactions : List ((transactionId : TransactionId) × TxAnswer reader.head transactionId) := []
   for transactionId in keys.transactions do
