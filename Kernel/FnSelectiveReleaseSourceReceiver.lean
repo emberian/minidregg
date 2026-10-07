@@ -81,7 +81,7 @@ def Accepted.intent (config : NativeHost.Config) (opened : NativeHost.Opened con
   { transactionId := transactionId ingress.spec
     writes := []
     readGuards := FnSelectiveReleaseSourceAuthority.readGuards accepted.prepared ++
-      (sourceContext config opened).authority.readGuards
+      (sourceContext config opened).authorityReadGuards
     nullifiers := [nullifier ingress.spec]
     exactCharge := charge ingress
     event := event ingress

@@ -83,7 +83,7 @@ structure Initialization (config : Config) (predicted : Opened config) where
   signed : SignedCommand
   command : Command
   prepared : PreparedInvocation config.deployment config.profile
-    ⟨config.federation,logicalHeight config predicted.durable⟩ predicted.durable command
+    ⟨config.federation,logicalHeight config predicted.durable⟩ predicted.ground command
   shape : PhysicalShape prepared
   accepted : AcceptedInvocation prepared signed
   intent : DataIntent ResourceBirthCodec.rootBytes

@@ -114,7 +114,7 @@ def admitNative (profile : CanonicalRuntimeProfile.Profile F)
       let .ok grainAccepted ← GrainResourceBirthAdmission.admitDecodedNative
           profile config.deployment specialPins durable ambient tariff decoded.source
           birth grain native decoded | return .error refused
-      let context : ApplicationShareIssueDelegation.Context config.deployment durable :=
+      let context : ApplicationShareIssueDelegation.Context config.deployment :=
         (Minidregg.Compiler.ServedBasis.Ground.full _ birth.prepared.pre.directory birth.prepared.pre.authority)
       let .ok appPrepared := ApplicationShareIssueDelegation.prepare context
           profile config.federation ambient.height ingress.spec decoded.source.birth
