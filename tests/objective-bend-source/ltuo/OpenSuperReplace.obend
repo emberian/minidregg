@@ -1,0 +1,24 @@
+edition ObjectiveBend 1
+# D4 tooth (GPT-6 row D, per-operation constraints): a layer may ADD a member the row beneath
+# lacks or OVERRIDE one at the same type; changing its type is a REPLACEMENT, which no source
+# form declares. Relabel (open over Super) gives `size` a Bool where Base gave it a Nat, and
+# Restore puts a Nat back, so the final self is met and only the final row used to be checked:
+# the replacement is now refused at Relabel by name (replace-undeclared).
+
+record Box:
+  size(n: Nat) -> Nat
+
+spec Base for Box:
+  def size(n: Nat) -> Nat:
+    n
+
+spec Relabel[Self has {}, Super has {size(n: Nat) -> Nat}]:
+  def size(n: Nat) -> Bool:
+    true
+
+spec Restore[Self has {}, Super has {}]:
+  def size(n: Nat) -> Nat:
+    n + 1n
+
+def replaced() -> Nat:
+  fix(compose(Base, Relabel, Restore), {}).size(3n)

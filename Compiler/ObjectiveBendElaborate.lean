@@ -14,6 +14,7 @@ import Compiler.ObjectiveBendLaw
 import Std.Data.HashMap
 import Theory.ObjectiveBendOpenRecursion
 import Compiler.ObjectiveBendC4
+import Compiler.ObjectiveBendContract
 namespace Minidregg.Compiler.ObjectiveBendElaborate
 open Lean
 set_option autoImplicit false
@@ -616,6 +617,10 @@ def PTy.overlay : PTy → PTy → PTy
   | .field n t rest, inherited => .field n t (rest.overlay inherited)
   | _, inherited => inherited
 
+/-- The row a spec's method definitions leave over `inherited` (canonical). -/
+def overDefs (defs : List (String × PTy)) (inherited : PTy) : PTy :=
+  (PTy.overlay (PTy.row defs) inherited).canonical
+
 def isRowTy : PTy → Bool
   | .field .. | .emptyRow => true
   | _ => false
@@ -883,15 +888,22 @@ def openBinding (c : Ctx) : Nat → String → String → List Signature → Str
       return some (selfVar, ir)
     | _, _ => return none
 
-/-- The row a plain spec provides over `inherited`: its methods overlaid on it (canonical). -/
-def specProvided (c : Ctx) : Nat → Spec → String → PTy → M (Option PTy)
-  | 0, _, _, _ => fail "type resolution fuel"
-  | fuel + 1, s, moduleName, inherited => do
+/-- The members a spec's methods define, at their declared types. -/
+def specDefs (c : Ctx) : Nat → Spec → String → M (Option (List (String × PTy)))
+  | 0, _, _ => fail "type resolution fuel"
+  | fuel + 1, s, moduleName => do
     let mut defs : List (String × PTy) := []
     for method in s.methods do
       let some t ← signatureTy c fuel method.params (.source method.resultType) moduleName [] | return none
       defs := defs ++ [(method.name, t)]
-    return some (PTy.overlay (PTy.row defs) inherited).canonical
+    return some defs
+
+/-- The row a plain spec provides over `inherited`: its methods overlaid on it (canonical). -/
+def specProvided (c : Ctx) : Nat → Spec → String → PTy → M (Option PTy)
+  | 0, _, _, _ => fail "type resolution fuel"
+  | fuel + 1, s, moduleName, inherited => do
+    let some defs ← specDefs c fuel s moduleName | return none
+    return some (overDefs defs inherited)
 
 def synth (c : Ctx) : Nat → Expr → List Binding → Module → M (Option PTy)
   | 0, _, _, _ => fail "type synthesis fuel"
@@ -1183,12 +1195,25 @@ def rowFields : PTy → List (String × PTy)
   | .field n t rest => (n, t) :: rowFields rest
   | _ => []
 
-/-- The members of `required` that `actual` lacks or has at another type. -/
-def unsupported (actual required : PTy) : List String :=
-  (rowFields required).filterMap fun (n, t) =>
-    match lookupRow (some actual) n with
-    | some t' => if sameTy (some t) (some t') then none else some n
-    | none => some n
+/-- A row as the composition contract reads it: its fields, each at its canonical type, so the
+contract's `==` on a member type is `sameTy`. -/
+def contractRow (row : PTy) : ObjectiveBendContract.Row PTy :=
+  (rowFields row).map fun (n, t) => (n, t.canonical)
+
+/-- The text of a composition-contract refusal (the `refused (...)` names the cohorts pin). -/
+def contractRefusalText : ObjectiveBendContract.Refusal → String
+  | .selfBound key missing => "refused (self-bound): " ++ key ++ " needs the final self to have " ++
+      ", ".intercalate missing ++ " at the types its Self bound declares; the self of this fix does not"
+  | .inheritedUnprovided key missing beneath => "refused (inherited-unprovided): " ++ key ++ " needs " ++
+      ", ".intercalate missing ++ " from the row beneath it, which is {" ++ ", ".intercalate beneath ++ "}"
+  | .replaceUndeclared key members => "refused (replace-undeclared): " ++ key ++ " gives " ++
+      ", ".intercalate members ++ " a type other than the row beneath it gives; a layer may add a member " ++
+      "or override it at the same type, and no source form declares a replacement"
+  | .requiresUnprovided missing => "refused (requires-unprovided): this fix leaves " ++ ", ".intercalate missing ++
+      " of its final self unprovided: no layer of the composition and not the seed provides it"
+  | .seedExtra extra => "refused (seed-extra): the composition and seed provide " ++ ", ".intercalate extra ++
+      ", which the final self does not declare"
+  | .providedMismatch => "refused (provided-mismatch): the composition provides members of the final self at other types than it declares"
 
 /-- An open declaration's Self and Super bounds at a final self `target`. -/
 def boundsAt (c : Ctx) (fuel : Nat) (binders : String) (requirements : List Signature) (moduleName : String)
@@ -1467,18 +1492,19 @@ def chainFix (c : Ctx) : Nat → List (String × Decl × Module) → Expr → Op
           | _ => pure []
         let some (selfBound, superBound) ← boundsAt c fuel d.binders requirements dm.name target
           | fail ("open declaration " ++ key ++ ": its bounds do not resolve at this self")
-        let missingSelf := unsupported targetRow selfBound
-        if !missingSelf.isEmpty then
-          fail ("refused (self-bound): " ++ key ++ " needs the final self to have " ++ ", ".intercalate missingSelf ++
-            " at the types its Self bound declares; the self of this fix does not")
-        let missingSuper := unsupported below superBound
-        if !missingSuper.isEmpty then
-          fail ("refused (inherited-unprovided): " ++ key ++ " needs " ++ ", ".intercalate missingSuper ++
-            " from the row beneath it, which is {" ++ ", ".intercalate (rowNames below) ++ "}")
+        -- The read clauses of this layer's composition contract (ObjectiveBendContract.checkBounds).
+        match ObjectiveBendContract.checkBounds (contractRow targetRow) (contractRow below)
+            { name := key, assumes := contractRow selfBound, consumes := contractRow superBound, provides := [] } with
+        | .error refusal => fail (contractRefusalText refusal)
+        | .ok () => pure ()
         bindings := [("Self", target), ("Super", below)]
       let mut provided? : Option PTy := none
+      let mut writes : Option (ObjectiveBendContract.Row PTy × Bool) := none
       match d with
-      | .spec s => provided? ← withTypes bindings (specProvided c fuel s dm.name below)
+      | .spec s =>
+        let some defs ← withTypes bindings (specDefs c fuel s dm.name) | return none
+        writes := some (defs.map (fun (n, t) => (n, t.canonical)), false)
+        provided? := some (overDefs defs below)
       | .extension _ params targetType _ binders =>
         if binders.isEmpty then
           -- A closed extension keeps its declared types: the row beneath must be its super.
@@ -1491,6 +1517,13 @@ def chainFix (c : Ctx) : Nat → List (String × Decl × Module) → Expr → Op
           provided? := (← withTypes bindings (sourceType c fuel targetType dm.name [])).map PTy.canonical
       | _ => pure ()
       let some provided := provided? | return none
+      -- The write clause of this layer's contract (ObjectiveBendContract.checkProvides): a
+      -- specification's methods, or an extension's whole declared result row.
+      let (provides, whole) := writes.getD (contractRow provided, true)
+      match ObjectiveBendContract.checkProvides (contractRow below)
+          { name := key, assumes := [], consumes := [], provides := provides, whole := whole } with
+      | .error refusal => fail (contractRefusalText refusal)
+      | .ok _ => pure ()
       let annotated := if position == last && (match target with | .variable _ => true | _ => false) &&
           sameTy (some provided) (some targetRow) then target else provided
       match d with
@@ -1526,22 +1559,18 @@ def chainFix (c : Ctx) : Nat → List (String × Decl × Module) → Expr → Op
     let finalRow := match below with
       | .variable k => (bounds.lookup k).getD below
       | t => t
-    if !sameTy (some finalRow) (some targetRow) then
-      let targetNames := rowNames targetRow
-      let providedNames := rowNames finalRow
-      let missing := targetNames.filter (fun n => !providedNames.contains n)
-      let extra := providedNames.filter (fun n => !targetNames.contains n)
-      if !missing.isEmpty then
-        let mut requiredBy : List String := []
-        for (key, d, _) in chain do
-          if let .spec s := d then
-            if (← requirementsOf s).any (fun r => missing.contains r.name) then requiredBy := requiredBy ++ [key]
-        fail ("refused (requires-unprovided): this fix leaves " ++ ", ".intercalate missing ++
-          " of its final self unprovided: no layer of the composition and not the seed provides it" ++
-          (if requiredBy.isEmpty then "" else " (required by " ++ ", ".intercalate requiredBy ++ ")"))
-      if !extra.isEmpty then
-        fail ("refused (seed-extra): the composition and seed provide " ++ ", ".intercalate extra ++ ", which the final self does not declare")
-      fail ("refused (provided-mismatch): the composition provides members of the final self at other types than it declares")
+    -- The composition contract discharged at fix (ObjectiveBendContract.close): the final row
+    -- must be exactly the final self.
+    match ObjectiveBendContract.close (contractRow targetRow) (contractRow finalRow) with
+    | .ok () => pure ()
+    | .error (.requiresUnprovided missing) =>
+      let mut requiredBy : List String := []
+      for (key, d, _) in chain do
+        if let .spec s := d then
+          if (← requirementsOf s).any (fun r => missing.contains r.name) then requiredBy := requiredBy ++ [key]
+      fail (contractRefusalText (.requiresUnprovided missing) ++
+        (if requiredBy.isEmpty then "" else " (required by " ++ ", ".intercalate requiredBy ++ ")"))
+    | .error refusal => fail (contractRefusalText refusal)
     let some (first, firstTy) := operands.head? | return none
     let mut value := first
     let mut valueTy := firstTy

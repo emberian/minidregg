@@ -1,0 +1,17 @@
+edition ObjectiveBend 1
+# D4 control (pole of OpenSuperReplace): Grow, open over Super, OVERRIDES size at the type the
+# row beneath gives it, and reads the inherited one: size(3) = 3 + 1 = 4.
+
+record Box:
+  size(n: Nat) -> Nat
+
+spec Base for Box:
+  def size(n: Nat) -> Nat:
+    n
+
+spec Grow[Self has {}, Super has {size(n: Nat) -> Nat}]:
+  def size(n: Nat) -> Nat:
+    super.size(n) + 1n
+
+def overridden() -> Nat:
+  fix(compose(Base, Grow), {}).size(3n)
