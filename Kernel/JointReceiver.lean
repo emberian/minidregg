@@ -6,6 +6,7 @@ SourceReady needs a real custody/privateRecovery receiver, still a separate join
 import Kernel.JointReceiverAdmission
 import Kernel.NativeHostContext
 import Compiler.GenericSimplexIO
+import Kernel.NativeHostServed
 namespace Minidregg.Kernel.JointReceiver
 open Minidregg.Theory
 open Minidregg.Theory.TypedAuthorization
@@ -46,7 +47,7 @@ only that complete canonical record and its current control pre-image. It keeps
 all physical append/readback and TailBound mechanisms unchanged. -/
 def reservedTransport (config : Config) (opened : Opened config)
     (r : Reserved config.deployment config.profile
-      ⟨config.federation,logicalHeight config opened.durable⟩ opened.durable) :
+      ⟨config.federation,logicalHeight config opened.durable⟩ opened.ground) :
     DurableReceiverIO.Transport :=
   { config.physicalTransport with sourceGate := fun snapshot intent => do
       config.otherFacetGate .joint snapshot intent
@@ -60,7 +61,7 @@ source reservation, full readback, pinned consensus order and retained actual
 current-source promise. It cannot certify recoverable private output or YES. -/
 structure Pending (config : Config) (opened : Opened config) (expected : Context)
     (r : Reserved config.deployment config.profile
-      ⟨config.federation,logicalHeight config opened.durable⟩ opened.durable) where
+      ⟨config.federation,logicalHeight config opened.durable⟩ opened.ground) where
   private mk ::
   contextPinned : config.jointConsensus = some expected
   ordered : Ordered expected opened.durable r.intent
@@ -68,7 +69,7 @@ structure Pending (config : Config) (opened : Opened config) (expected : Context
 
 inductive Result (config : Config) (opened : Opened config) (expected : Context)
     (r : Reserved config.deployment config.profile
-      ⟨config.federation,logicalHeight config opened.durable⟩ opened.durable) where
+      ⟨config.federation,logicalHeight config opened.durable⟩ opened.ground) where
   | pending (receipt : Pending config opened expected r)
   | refused
   | ordinary (result : DurableReceiverIO.Result ResourceBirthCodec.rootBytes)
@@ -77,7 +78,7 @@ inductive Result (config : Config) (opened : Opened config) (expected : Context)
 ordinary replay confirmation alone does not mint a new allocation capability. -/
 def applyReserved (config : Config) (opened : Opened config) (expected : Context)
     (r : Reserved config.deployment config.profile
-      ⟨config.federation,logicalHeight config opened.durable⟩ opened.durable)
+      ⟨config.federation,logicalHeight config opened.durable⟩ opened.ground)
     (ordered : Ordered expected opened.durable r.intent) :
     IO (Result config opened expected r) := do
   if contextPinned : config.jointConsensus = some expected then
@@ -99,14 +100,14 @@ in this source record or no Pending capability is returned. -/
 theorem pending_exact_source_image {config : Config} {opened : Opened config}
     {expected : Context}
     {r : Reserved config.deployment config.profile
-      ⟨config.federation,logicalHeight config opened.durable⟩ opened.durable}
+      ⟨config.federation,logicalHeight config opened.durable⟩ opened.ground}
     (receipt : Pending config opened expected r) :
     receipt.appended.next.image = opened.durable.image.append r.intent := receipt.appended.image
 
 theorem pending_preserves_order {config : Config} {opened : Opened config}
     {expected : Context}
     {r : Reserved config.deployment config.profile
-      ⟨config.federation,logicalHeight config opened.durable⟩ opened.durable}
+      ⟨config.federation,logicalHeight config opened.durable⟩ opened.ground}
     (receipt : Pending config opened expected r) :
     (sourcePrefix opened.durable ++ [sourcePayload r.intent]).IsPrefix
       (receipt.ordered.commitment.block.filter (fun b => !b.isEmpty)) := receipt.ordered.sourceOrdered
