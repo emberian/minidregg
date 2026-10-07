@@ -18,5 +18,6 @@ def forgeIdentity (key : DurableCheckpointCodec.MacKey) : StoreIdentity := Store
 -- FORGE-C: the identity built by tactic (the `by constructor` route around a private constructor).
 def forgeByConstructor (key : DurableCheckpointCodec.MacKey) : StoreIdentity := by
   constructor
+  · exact .deployment
   · exact key
   · exact ⟨0⟩
