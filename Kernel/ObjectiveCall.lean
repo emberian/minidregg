@@ -26,13 +26,21 @@ function whose body is its `{result, write}` record.
   it: the snapshot, plus every write an earlier frame of this turn already
   applied at its return;
 * the callee's authority (`Facts`): the root frame carries the signer's subject;
-  a nested frame carries it ONLY if a scoped grant of the invocation names
-  (callee, method), and each such frame spends one use of the grant
-  (`grantSpent` when its uses are gone). Without a grant the subject slot is
-  absent and every law atom reading it fails closed: the signer's authority does
-  not flow to callees it did not grant (Daml's non-transitive delegation; Pact's
-  scoped, counted capabilities). `request/caller` names the calling object, so
-  a callee's law can admit chosen callers (an object's facet, as a clause).
+  a nested frame carries it ONLY through a scoped grant (v2) of the invocation
+  that admits it: the grant names (callee, method) and binds the code the callee
+  runs (its `activePin`), the call's arguments (an exact digest, or a recipient
+  field and/or a cumulative cap on a Nat field) and optionally the direct caller;
+  each such frame spends one use and is recorded as a `Delegation`. A grant that
+  names the frame but does not admit it refuses the call tree by name
+  (`grantMismatch`, or `grantSpent` when its uses are gone). Without a grant
+  naming it the subject slot is absent and every law atom reading it fails
+  closed: the signer's authority does not flow to callees it did not grant
+  (Daml's non-transitive delegation; Pact's scoped, counted capabilities).
+  `invocation_delegated_authority`: every frame receiving delegated authority
+  has a matching unconsumed authorization. Delegation is not consent: the
+  frame's write is still judged by its object's law. `request/caller` names the
+  calling object, so a callee's law can admit chosen callers (an object's facet,
+  as a clause).
 
 **Upgrades.** A frame enters an object only while it admits new frames
 (`ObjectRecord.admitsNew`: steady, or draining under the identity migration,
@@ -139,6 +147,15 @@ theorem runCounted_left_le (limits : Limits) : ∀ (ticks : Nat) (state : State)
     | divergent _ _ => exact Nat.le_succ ticks
     | refused _ _ => exact Nat.le_succ ticks
     | yielded _ _ => exact Nat.le_succ ticks
+
+/-- **A call frame's limits are its segment limits**: every frame is entered at the method's
+`initial` state, whose heap is empty, so the absolute `config.limits` the frame runs under (at entry
+and at every resume, `runCounted config.limits`) equal the room-past-the-start `segmentLimits` an
+activity segment from that state would get. A frame never starts from a non-empty heap: its
+resumes continue its own run, they do not restart a segment. -/
+theorem frame_limits_are_segment_limits (config : Config) (term : _) :
+    segmentLimits config (initial term) = config.limits := by
+  simp [segmentLimits, ObjectiveBendDemandCollect.limitsPast, initial]
 
 /-! ## Refusals -/
 
@@ -2037,6 +2054,7 @@ theorem invocation_delegated_authority {rootBytes : Bytes → Digest} {config : 
 #assert_axioms frameReturn_read
 #assert_axioms runCounted_outcome
 #assert_axioms runCounted_left_le
+#assert_axioms frame_limits_are_segment_limits
 #assert_axioms reentry_refused
 #assert_axioms touch_spec
 #assert_axioms lookup_install_ne
