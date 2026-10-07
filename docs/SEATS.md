@@ -65,7 +65,8 @@ accounts are registered, distinct, protected, and not their own payee):
   no seats, every open seat of every reachable world satisfies its law (premise inhabited by
   `swap_opening_reachable`).
 - `exit_admitted`, `exit_enabled`, `exit_after_deadline`, `exit_by_holder`: a party with exit
-  rights is admitted at every reachable world; `exit_pays_allocation`: afterwards the seat is
+  rights is admitted at every reachable world WHEN IT SUBMITS the exit (enabling theorems: the
+  kernel never exits a seat on its own; see OBJECTIVE-BEND.md "Liveness claims name their actors"); `exit_pays_allocation`: afterwards the seat is
   at zero in EVERY asset (the sweep reads the Book's balance support, not only the proposal's
   assets) and the payee has gained exactly its balance.
 - Retention: `exit_deregisters`, `terminate_deregisters`, `activity_end_closes_seats`: a closed

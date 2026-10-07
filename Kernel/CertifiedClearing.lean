@@ -418,10 +418,10 @@ def genesis : World := ⟨genesisBook, ⟨[], [], [], []⟩, []⟩
 
 def drex : Instance := ⟨1, package, Pred.all []⟩
 
-def aliceBid : Proposal := ⟨[(C, 10)], [(G, 2)], .onDemand, false⟩
-def bobBid : Proposal := ⟨[(C, 12)], [(G, 3)], .onDemand, false⟩
-def carolAsk : Proposal := ⟨[(G, 2)], [(C, 6)], .onDemand, false⟩
-def daveAsk : Proposal := ⟨[(G, 3)], [(C, 12)], .onDemand, false⟩
+def aliceBid : Proposal := ⟨[(C, 10)], [(G, 2)], .onDemand, false, {}⟩
+def bobBid : Proposal := ⟨[(C, 12)], [(G, 3)], .onDemand, false, {}⟩
+def carolAsk : Proposal := ⟨[(G, 2)], [(C, 6)], .onDemand, false, {}⟩
+def daveAsk : Proposal := ⟨[(G, 3)], [(C, 12)], .onDemand, false, {}⟩
 
 /-- The window: the instance, its method minting four invitations (ids 1-4,
 `Seats.Example.mintIds`), four orders. -/

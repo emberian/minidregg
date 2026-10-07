@@ -497,9 +497,30 @@ message, nested pipelining, objects holding capabilities.
 A seat (`Kernel/Seat.lean`, [SEATS.md](SEATS.md)) holds Book balances under an offer whose
 safety is a law judged on every reallocation, with an exit no clause can forbid
 (`seat_offer_safe_forever`, `exit_enabled`, `exit_pays_allocation`, `seat_conserves`).
+A contract's method is shown each open seat identity-blind: coordinate, role, terms, proposal
+and allocation, and a principal (offerer, payee, holding activity) only if the offerer's
+proposal discloses it (`Proposal.disclose`, default none; `SeatStore.seatView_identity_blind`).
 Seats have a signed native route (`Kernel/SeatReceiver.lean`, Host operations 215-219,
 `mini seat`; journey row `seats`), an activity may hold a seat, and an ending activity closes
 the seats it holds in the same Book batch (`Kernel/ActivitySeatEnd.lean`).
+
+## Liveness claims name their actors
+
+No kernel turn runs by itself: every "can always", "is never stuck" or "is available" in this
+document is an ENABLING theorem: the named turn is admitted when the named actor submits it and
+its price is covered. The actors:
+
+| progress | actor | paid from | theorem |
+| --- | --- | --- | --- |
+| an on-demand seat exits | its offerer | (no fee beyond the turn) | `exit_enabled` |
+| a deadline seat exits | anyone, at or after the due height | the turn's submitter | `exit_after_deadline` |
+| a held seat exits | the holding activity's end, deadline respected | that activity's ending turn | `exit_by_holder`, `holder_respects_deadline` |
+| an await is abandoned | anyone, after its timeout | the activity's escrow | `abandon_returns_escrow`, `abandon_delivery_exclusive` |
+| a queued message is delivered | anyone | the inbox purse | `MessageDelivery.decides_own_slot` |
+| a parked activity resumes past grown state | any submitter adding `extra.heap` | the submitter | `Delivery.heap_priced` |
+
+If no such actor acts, nothing happens: an unclaimed deadline seat stays open and keeps its
+allocation, an unabandoned await keeps its escrow.
 
 ## Native admission by re-execution
 

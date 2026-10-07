@@ -56,5 +56,5 @@ seat kernel judges.
 
 ## Re-emits
 
-Depends on the SeatView change (`exit`, `opened`; frame `DREGG/SEAT/SEAT/v4`) and on seat-retention. A seat
+Depends on the SeatView change (`exit`, `opened`; frame `DREGG/SEAT/SEAT/v4`; then the identity-blind `disclosed` field, frame v5) and on seat-retention. A seat
 package typed at the old SeatView is refused on instantiation.

@@ -74,8 +74,12 @@ def proposalStream : StreamCodec Proposal :=
     (fun rule => match rule with | .onDemand => none | .afterDeadline due => some due)
     (fun wire => match wire with | none => .onDemand | some due => .afterDeadline due)
     (by intro rule; cases rule <;> rfl)
-  StreamCodec.xmap (StreamCodec.product amounts (StreamCodec.product amounts (StreamCodec.product exitRule StreamCodec.bool)))
-    (fun p => (p.give, p.want, p.exit, p.donate)) (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2⟩)
+  let disclosure : StreamCodec Disclosure := StreamCodec.xmap
+    (StreamCodec.product StreamCodec.bool (StreamCodec.product StreamCodec.bool StreamCodec.bool))
+    (fun d => (d.offerer, d.payee, d.holder)) (fun w => ⟨w.1, w.2.1, w.2.2⟩) (by intro d; cases d; rfl)
+  StreamCodec.xmap (StreamCodec.product amounts (StreamCodec.product amounts
+      (StreamCodec.product exitRule (StreamCodec.product StreamCodec.bool disclosure))))
+    (fun p => (p.give, p.want, p.exit, p.donate, p.disclose)) (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2.1, w.2.2.2.2⟩)
     (by intro p; cases p; rfl)
 
 def termsStream : StreamCodec (List (String × Nat)) :=
@@ -144,7 +148,7 @@ def invitationCodec := framed "DREGG/SEAT/INVITATION/v1".toUTF8.toList invitatio
 /-- Frame v3: a seat body no longer carries an open flag (a closed seat's cell is
 retired, never rewritten) and its proposal carries the donation marker; a v1 or v2 body refuses
 to decode. -/
-def seatCodec := framed "DREGG/SEAT/SEAT/v4".toUTF8.toList seatBodyStream
+def seatCodec := framed "DREGG/SEAT/SEAT/v5".toUTF8.toList seatBodyStream
 def holdingsCodec := framed "DREGG/SEAT/HOLDINGS/v1".toUTF8.toList (StreamCodec.list StreamCodec.nat)
 
 /-! ## Cells: protected coordinates -/
@@ -271,12 +275,54 @@ def exitData : ExitRule → Data
   | .onDemand => .variant "onDemand" (.record [])
   | .afterDeadline due => .variant "afterDeadline" (.natural due)
 
+/-- One principal as the contract sees it: `hidden` unless the offerer disclosed it; a disclosed
+holder of an unheld seat is `none`. -/
+def shownNat (disclosed : Bool) (value : Option Nat) : Data :=
+  match disclosed, value with
+  | false, _ => .variant "hidden" (.record [])
+  | true, none => .variant "none" (.record [])
+  | true, some n => .variant "shown" (.natural n)
+
+/-- The seat's principals, each `hidden` unless the proposal discloses it (`Proposal.disclose`). -/
+def disclosedData (seat : Seat) : Data :=
+  .record [("offerer", shownNat seat.proposal.disclose.offerer (some seat.offerer.value)),
+    ("payee", shownNat seat.proposal.disclose.payee (some seat.payee)),
+    ("holder", shownNat seat.proposal.disclose.holder seat.holder)]
+
 def seatView (book : Book) (body : SeatBody) : Data :=
   .record [("seat", .natural body.seat.account), ("role", .label body.role), ("terms", termsData body.terms),
     ("give", amountsData body.seat.proposal.give), ("want", amountsData body.seat.proposal.want),
     ("exit", exitData body.seat.proposal.exit), ("opened", .natural body.opened),
     ("allocation", amountsData (body.seat.proposal.assets.map fun asset =>
-      (asset, (book.balance body.seat.account asset).toNat)))]
+      (asset, (book.balance body.seat.account asset).toNat))),
+    ("disclosed", disclosedData body.seat)]
+
+/-- **Identity-blind by default** (GPT-6 row G). Two seat cells that agree on everything but the
+principals their proposals do not disclose are shown to the contract identically: a contract's
+method cannot read, branch on or leak an undisclosed offerer, payee or holder. -/
+theorem seatView_identity_blind (book : Book) (a b : SeatBody)
+    (account : a.seat.account = b.seat.account) (proposal : a.seat.proposal = b.seat.proposal)
+    (role : a.role = b.role) (terms : a.terms = b.terms) (opened : a.opened = b.opened)
+    (offerer : a.seat.proposal.disclose.offerer = true → a.seat.offerer = b.seat.offerer)
+    (payee : a.seat.proposal.disclose.payee = true → a.seat.payee = b.seat.payee)
+    (holder : a.seat.proposal.disclose.holder = true → a.seat.holder = b.seat.holder) :
+    seatView book a = seatView book b := by
+  have shown : disclosedData a.seat = disclosedData b.seat := by
+    unfold disclosedData
+    rw [← proposal]
+    cases ho : a.seat.proposal.disclose.offerer <;> cases hp : a.seat.proposal.disclose.payee <;>
+      cases hh : a.seat.proposal.disclose.holder <;>
+      simp_all [shownNat]
+  unfold seatView
+  rw [shown, account, proposal, role, terms, opened]
+
+/-- The opt-in is real: a disclosed payee IS shown (the pole the blind theorem must not swallow). -/
+theorem seatView_shows_disclosed_payee (seat : Seat) (disclosed : seat.proposal.disclose.payee = true) :
+    ∃ fields, disclosedData seat = .record fields ∧ ("payee", .variant "shown" (.natural seat.payee)) ∈ fields := by
+  refine ⟨_, rfl, ?_⟩
+  simp [shownNat, disclosed]
+
+#assert_axioms seatView_identity_blind seatView_shows_disclosed_payee
 
 def sortSeats (seats : List SeatBody) : List SeatBody :=
   seats.mergeSort fun a b => decide (a.seat.account ≤ b.seat.account)

@@ -111,7 +111,7 @@ def commandStream : StreamCodec Command :=
     (by intro c; cases c; rfl)
 
 /-- Frame v2: an offer's proposal carries the donation marker. -/
-def commandFrame : List UInt8 := "DREGG/SEAT/COMMAND/v2".toUTF8.toList
+def commandFrame : List UInt8 := "DREGG/SEAT/COMMAND/v3".toUTF8.toList
 
 def commandCodec : LawfulCodec Command := ObjectiveActivityWire.framed commandFrame commandStream
 
