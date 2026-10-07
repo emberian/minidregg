@@ -110,6 +110,7 @@ import Compiler.DurableCheckpointCodec -- DATAMODEL C2: seed/log/checkpoint fram
 import Compiler.DurableHistoryReader -- KN2: the history read at use, verified against the MAC'd, anchor-bound head (MMR log accumulator + spent trie)
 import Compiler.DurableStoreAudit -- KN2: the Store-backed history Reader and `store audit` (every entry, node, spent row and checkpoint re-derived from genesis)
 import Compiler.CredentialAuthorityServed -- KN2 2b-1: the served state (no history) and its directory and authority cell
+import Compiler.ServedBasis -- KN2 2b-1 CONTRACT: the index the write-path controllers are re-typed onto
 import Compiler.PredCastHashProofs
 import Compiler.PredCompileOrderWitness
 import Compiler.PredOrderGadgetWitness
