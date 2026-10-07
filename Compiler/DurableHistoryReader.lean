@@ -85,8 +85,8 @@ abbrev Spent (head : Head) (nullifier : StableNullifier) :=
 * the base is the seed (height 0, the pinned genesis) or a checkpoint whose
   MAC verified under the head's key (`openSealed`), sitting on the log: the
   verified record at its height carries its chain;
-* every record after the base is a verified `Record`, chained from the base's
-  chain (so none can be spliced in from another history);
+* every record after the base is a verified `Record` at the next height,
+  chained from the base's chain (none can be spliced in from another history);
 * the snapshot is exactly the executor's replay of those records from the base. -/
 structure StateAt (rootBytes : List UInt8 → Digest) (seed : Seed) (logStart : Digest) (head : Head)
     (height : Nat) where
@@ -97,12 +97,13 @@ structure StateAt (rootBytes : List UInt8 → Digest) (seed : Seed) (logStart : 
     ((∃ bytes, ∃ body : DurableCheckpointCodec.Body, openSealed head.key rootBytes bytes = .ok body ∧
         body.height = baseHeight ∧ body.chain = baseChain ∧ body.state = baseState) ∧
       ∃ base : Record head baseHeight, base.verified.chain = baseChain)
-  records : List IntentRecord
-  sized : baseHeight + records.length = height
-  verified : ∀ i (hi : i < records.length), ∃ read : Record head (baseHeight + i + 1),
-    read.record = records[i] ∧ read.verified.chain = chainAfter baseChain (records.take (i + 1))
+  reads : List ((at_ : Nat) × Record head at_)
+  heights : reads.map (·.1) = (List.range reads.length).map (baseHeight + · + 1)
+  sized : baseHeight + reads.length = height
+  chained : reads.map (·.2.verified.chain) =
+    (List.range reads.length).map fun i => chainAfter baseChain ((reads.map (·.2.record)).take (i + 1))
   snapshot : DataSnapshot rootBytes
-  replayed : replay rootBytes (baseState.snapshot rootBytes []) records = some snapshot
+  replayed : replay rootBytes (baseState.snapshot rootBytes []) (reads.map (·.2.record)) = some snapshot
 
 /-- The answers to a request's declared keys, each verified. -/
 structure VerifiedFootprint (head : Head) (keys : Keys) where

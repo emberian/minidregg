@@ -104,7 +104,7 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   IO.FS.writeBinFile (directory / "key") ((List.range 32).map (fun i => UInt8.ofNat (i * 7 + 3))).toByteArray
   let config : NativeConfig :=
     { binary := binary, root := directory / "store", key := directory / "key", checkpointEvery := 3 }
-  let transport := config.transport (fun _ => ⟨7⟩)
+  let transport := { config.transport (fun _ => ⟨7⟩) ⟨999⟩ with systemCell := none }
   match ← bootstrap transport rootBytes seed with
   | .error message => throw (IO.userError message)
   | .ok () => pure ()
@@ -141,7 +141,7 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
 
   let third := twoWrites 17 [111] [222] [31] [32] [3]
   let precommitCrash : Transport :=
-    { transport with append := fun height entry => config.append height entry (some "after-insert") }
+    { transport with append := fun height entry nodes => config.append height entry nodes (some "after-insert") }
   require "precommit process exit is explicit uncertainty"
     (match ← receive precommitCrash rootBytes third 3 with | .uncertain _ => true | _ => false)
   require "precommit crash preserves whole image" ((← loadExact transport).image == beforeCrash.image)
@@ -149,7 +149,7 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
 
   let fourth := twoWrites 18 [31] [32] [41] [42] [3]
   let lostResponse : Transport :=
-    { transport with append := fun height entry => config.append height entry (some "after-commit") }
+    { transport with append := fun height entry nodes => config.append height entry nodes (some "after-commit") }
   let recovered ← confirmed "lost successful response" .recoveredAfterUncertainResponse
     (← receive lostResponse rootBytes fourth 3)
   require "cold reopen recovers all fields" (recovered.model.history.length == 4 &&
@@ -159,12 +159,12 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
 
   let injected ← IO.mkRef false
   let racing : Transport :=
-    { transport with append := fun height entry => do
+    { transport with append := fun height entry nodes => do
         unless ← injected.get do
           injected.set true
           let _ ← confirmed "concurrent read-cell move" .installed
             (← receive transport rootBytes (moveObserved 19 [3] [33]) 3)
-        transport.append height entry }
+        transport.append height entry nodes }
   expectRejected "CAS conflict reloads and rejects stale read" .staleReadGuard
     (← receive racing rootBytes (twoWrites 20 [41] [42] [51] [52] [3]) 3)
   let raced ← loadExact transport
@@ -174,12 +174,12 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   let pinnedCandidate := twoWrites 22 [41] [42] [51] [52] [33]
   let clockInjected ← IO.mkRef false
   let clockRacing : Transport :=
-    { transport with append := fun height entry => do
+    { transport with append := fun height entry nodes => do
         unless ← clockInjected.get do
           clockInjected.set true
           let _ ← confirmed "concurrent journal-only advance" .installed
             (← receive transport rootBytes (advanceJournal 21 [33]) 3)
-        transport.append height entry }
+        transport.append height entry nodes }
   require "pinned admission cannot rebase across journal-only advance"
     (match ← receiveLoaded clockRacing rootBytes raced pinnedCandidate with
       | .contention => true | _ => false)
@@ -206,8 +206,8 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   -- The append is exact, but a second valid commit lands before its readback.
   -- The entry at the appended height is still exactly this attempt's entry.
   let afterAppend : Transport :=
-    { transport with append := fun height entry => do
-        let observation ← transport.append height entry
+    { transport with append := fun height entry nodes => do
+        let observation ← transport.append height entry nodes
         if observation == .installed then
           let _ ← confirmed "later commit before readback" .installed
             (← receive transport rootBytes (advanceJournal 24 [33]) 3)
@@ -263,7 +263,7 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   let forgedTag : Entry := ⟨recordFrame.encode (IntentRecord.ofIntent (advanceJournal 30 [33])),
     List.replicate 32 0⟩
   let head := afterConcurrent.image.accepted.length
-  require "helper accepts the opaque forged entry" ((← transport.append (head + 1) forgedTag) == .installed)
+  require "helper accepts the opaque forged entry" ((← transport.append (head + 1) forgedTag []) == .installed)
   expectOpenRefused "log entry with a forged tag" transport
   require "no implicit reset: the forged entry stays visible"
     (match ← transport.read (head + 1) false with | .ok (some s) => s.entries == [forgedTag] | _ => false)
@@ -271,28 +271,34 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   let secondDirectory := directory / "second"
   IO.FS.createDirAll secondDirectory
   let second : NativeConfig := { config with root := secondDirectory / "store" }
-  match ← bootstrap (second.transport (fun _ => ⟨7⟩)) rootBytes seed with
+  let secondTransport := { second.transport (fun _ => ⟨7⟩) ⟨999⟩ with systemCell := none }
+  match ← bootstrap secondTransport rootBytes seed with
   | .error message => throw (IO.userError message)
   | .ok () => pure ()
-  let _ ← confirmed "second store commit" .installed (← receive (second.transport (fun _ => ⟨7⟩)) rootBytes first 3)
+  let _ ← confirmed "second store commit" .installed (← receive secondTransport rootBytes first 3)
   let .ok key ← transport.key | throw (IO.userError "FAIL key")
-  let loadedSecond ← loadExact (second.transport (fun _ => ⟨7⟩))
-  let honest := sealCheckpoint key rootBytes 1 loadedSecond.chain
+  let loadedSecond ← loadExact secondTransport
+  let secondFrontier := loadedSecond.frontier.getD []
+  let secondSpent ← match ← loadedSecond.headSpentRoot secondTransport key with
+    | .ok root => pure root
+    | .error message => throw (IO.userError s!"FAIL spent root: {message}")
+  let honest := sealCheckpoint key rootBytes 1 loadedSecond.chain secondFrontier secondSpent
     (DurableCheckpoint.State.ofSnapshot loadedSecond.image loadedSecond.snapshot)
   let forgedMac := { honest with mac := List.replicate 32 7 }
-  let .ok () ← (second.transport (fun _ => ⟨7⟩)).putCheckpoint 1 (checkpointFrame.encode forgedMac)
+  let .ok () ← secondTransport.putCheckpoint 1 (checkpointFrame.encode forgedMac)
     | throw (IO.userError "FAIL store forged checkpoint")
-  expectOpenRefused "checkpoint with a forged MAC" (second.transport (fun _ => ⟨7⟩))
-  let rolledBack := sealCheckpoint key rootBytes 1 loadedSecond.chain (DurableCheckpoint.State.ofSeed seed)
-  let .ok () ← (second.transport (fun _ => ⟨7⟩)).putCheckpoint 1 (checkpointFrame.encode rolledBack)
+  expectOpenRefused "checkpoint with a forged MAC" secondTransport
+  let rolledBack := sealCheckpoint key rootBytes 1 loadedSecond.chain secondFrontier secondSpent
+    (DurableCheckpoint.State.ofSeed seed)
+  let .ok () ← secondTransport.putCheckpoint 1 (checkpointFrame.encode rolledBack)
     | throw (IO.userError "FAIL store")
-  let resumedRollback ← loadExact (second.transport (fun _ => ⟨7⟩))
+  let resumedRollback ← loadExact secondTransport
   require "a key-holder's dishonest checkpoint is trusted on open (Q1): it resumes the rolled-back cell"
     (resumedRollback.snapshot.canonicalBytes ⟨1⟩ == [1])
-  let .ok () ← (second.transport (fun _ => ⟨7⟩)).putCheckpoint 1 (checkpointFrame.encode honest)
+  let .ok () ← secondTransport.putCheckpoint 1 (checkpointFrame.encode honest)
     | throw (IO.userError "FAIL store")
   require "the honest checkpoint resumes the committed cell"
-    ((← loadExact (second.transport (fun _ => ⟨7⟩))).snapshot.canonicalBytes ⟨1⟩ == [11])
+    ((← loadExact secondTransport).snapshot.canonicalBytes ⟨1⟩ == [11])
   IO.println s!"PASS durable receiver: Lean codec/executor + SQLite log, two-cell repeated commit, replay/conflict/read/write/nullifier/budget refusal, process-exit rollback, lost-response readback, concurrent guard move, pinned admission refuses journal-only race, exact entry under a later commit, checkpoint at height {checkpoint.height} resumes to the genesis replay, a past read at each of heights 0..{head} equals the genesis fold of its prefix, forged tag and forged checkpoint MAC refuse to open; {head} commits"
 
 end DurableReceiverProbe

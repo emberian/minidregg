@@ -23,7 +23,7 @@ fn read_input(path: &Path) -> Result<Vec<u8>, StoreError> {
     Ok(bytes)
 }
 
-const USAGE: &str = "usage:\n  minidregg-link-sqlite-store read ROOT\n  minidregg-link-sqlite-store read-to ROOT OUTPUT\n  minidregg-link-sqlite-store publish ROOT INPUT\n  minidregg-link-sqlite-store cas ROOT EXPECTED|- INPUT\n  minidregg-link-sqlite-store cas-crash ROOT EXPECTED|- INPUT after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store publish-crash ROOT INPUT after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store publish-hold ROOT INPUT READY RELEASE\n  minidregg-link-sqlite-store database-path ROOT\n  minidregg-link-sqlite-store durable-anchor-enroll ROOT\n  minidregg-link-sqlite-store durable-init ROOT SEED\n  minidregg-link-sqlite-store durable-read ROOT FROM 0|1|2 OUTPUT\n  minidregg-link-sqlite-store durable-history ROOT REQUEST OUTPUT\n  minidregg-link-sqlite-store durable-seed ROOT OUTPUT\n  minidregg-link-sqlite-store durable-append ROOT HEIGHT RECORD TAG NODES\n  minidregg-link-sqlite-store durable-append-crash ROOT HEIGHT RECORD TAG NODES after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store durable-checkpoint ROOT HEIGHT INPUT\n  minidregg-link-sqlite-store journal-read ROOT FROM OUTPUT\n  minidregg-link-sqlite-store journal-append ROOT SEQ RECORD TAG\n  minidregg-link-sqlite-store journal-append-crash ROOT SEQ RECORD TAG after-begin|after-insert|after-commit|after-anchor-prepare|after-anchor-rename|after-anchor\n  minidregg-link-sqlite-store serve";
+const USAGE: &str = "usage:\n  minidregg-link-sqlite-store read ROOT\n  minidregg-link-sqlite-store read-to ROOT OUTPUT\n  minidregg-link-sqlite-store publish ROOT INPUT\n  minidregg-link-sqlite-store cas ROOT EXPECTED|- INPUT\n  minidregg-link-sqlite-store cas-crash ROOT EXPECTED|- INPUT after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store publish-crash ROOT INPUT after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store publish-hold ROOT INPUT READY RELEASE\n  minidregg-link-sqlite-store database-path ROOT\n  minidregg-link-sqlite-store durable-anchor-enroll ROOT\n  minidregg-link-sqlite-store durable-init ROOT SEED\n  minidregg-link-sqlite-store durable-read ROOT FROM 0|1|2 OUTPUT\n  minidregg-link-sqlite-store durable-history ROOT REQUEST OUTPUT\n  minidregg-link-sqlite-store durable-seed ROOT OUTPUT\n  minidregg-link-sqlite-store durable-append ROOT HEIGHT RECORD TAG NODES\n  minidregg-link-sqlite-store durable-append-crash ROOT HEIGHT RECORD TAG NODES after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store durable-checkpoint ROOT HEIGHT INPUT\n  minidregg-link-sqlite-store durable-checkpoint-at ROOT HEIGHT OUTPUT\n  minidregg-link-sqlite-store journal-read ROOT FROM OUTPUT\n  minidregg-link-sqlite-store journal-append ROOT SEQ RECORD TAG\n  minidregg-link-sqlite-store journal-append-crash ROOT SEQ RECORD TAG after-begin|after-insert|after-commit|after-anchor-prepare|after-anchor-rename|after-anchor\n  minidregg-link-sqlite-store serve";
 
 /// The CLI could not run: usage (exit 2) or a store error.
 enum Failure {
@@ -249,6 +249,21 @@ fn run(mut arguments: Vec<std::ffi::OsString>, out: &mut Vec<u8>) -> Result<(), 
                     std::process::exit(exit_code);
                 }
             })?;
+        }
+        ("durable-checkpoint-at", [root, height, output]) => {
+            let height = parse_height(height)?;
+            let store = SqliteLinkStore::open_with_identity(root, &identity)?;
+            let mut bytes = Vec::new();
+            match store.durable_checkpoint_at(height)? {
+                None => bytes.extend_from_slice(&0u64.to_be_bytes()),
+                Some((found, checkpoint)) => {
+                    bytes.extend_from_slice(&1u64.to_be_bytes());
+                    bytes.extend_from_slice(&found.to_be_bytes());
+                    bytes.extend_from_slice(&(checkpoint.len() as u64).to_be_bytes());
+                    bytes.extend_from_slice(&checkpoint);
+                }
+            }
+            fs::write(output, bytes)?;
         }
         ("durable-checkpoint", [root, height, input]) => {
             let height = parse_height(height)?;

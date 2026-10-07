@@ -1062,15 +1062,19 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
   let state ← timedPure "checkpoint: state (ofSnapshot)" fun _ =>
     DurableCheckpoint.State.ofSnapshot durable.image durable.snapshot
   IO.println s!"  state cells {state.cells.length} nullifiers {state.consumed.length}"
+  let frontier := durable.frontier.getD []
+  let spentRoot := Minidregg.Compiler.DurableSpent.emptyDigest
   discard <| timedPure "checkpoint: body encode" fun _ =>
-    (DurableCheckpointCodec.bodyStream.encode ⟨key.id, height, durable.chain, state⟩).length
+    (DurableCheckpointCodec.bodyStream.encode
+      ⟨key.id, height, durable.chain, frontier, spentRoot, state⟩).length
   discard <| timedPure "checkpoint: seal from the cached root (encode + MAC)" fun _ =>
     (DurableCheckpointCodec.checkpointFrame.encode
-      (DurableCheckpointCodec.sealAt key height durable.chain state durable.worldRoot)).length
+      (DurableCheckpointCodec.sealAt key height durable.chain frontier spentRoot state
+        durable.worldRoot)).length
   discard <| timedPure "checkpoint: seal with the root in full" fun _ =>
     (DurableCheckpointCodec.checkpointFrame.encode
       (DurableCheckpointCodec.sealCheckpoint key ResourceBirthCodec.rootBytes height durable.chain
-        state)).length
+        frontier spentRoot state)).length
   discard <| timedPure "checkpoint: every cell's rootBytes" fun _ =>
     durable.image.cellIds.foldl (fun acc id =>
       acc + (ResourceBirthCodec.rootBytes (durable.snapshot.canonicalBytes id)).value % 7) 0

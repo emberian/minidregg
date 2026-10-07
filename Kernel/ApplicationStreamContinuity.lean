@@ -203,12 +203,12 @@ def withOpenedFreshTip {config : Config} {α : Type}
   let durable := opened.durable
   let some record := durable.image.accepted.getLast?
     | return .error "authority handoff requires nonempty history"
-  let .ok key ← config.transport.key
-    | return .error "authority physical key unavailable"
+  -- The exact head entry: its record and the tag this opening read (or wrote)
+  -- with its MAC verified.
+  let some tag := durable.headTag
+    | return .error "authority handoff requires an opening read from the Store"
   let entry : DurableReceiverIO.Entry :=
-    ⟨DurableCheckpointCodec.recordFrame.encode record,
-      DurableCheckpointCodec.entryTag key durable.image.accepted.length durable.chain
-        durable.worldRoot⟩
+    ⟨DurableCheckpointCodec.recordFrame.encode record, tag⟩
   let .ok current ← DurableReceiverIO.tipIs config.transport
       durable.image.accepted.length entry
     | return .error "authority physical tip unavailable"

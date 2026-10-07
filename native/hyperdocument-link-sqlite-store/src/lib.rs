@@ -694,7 +694,6 @@ pub struct HistoryRead {
     pub nodes: Vec<(u64, Vec<u8>, Option<(u64, Vec<u8>)>)>,
 }
 
-const CHECKPOINTS_RETAINED: i64 = 2;
 
 impl SqliteByteStore {
     fn refuse_retired_image(&self) -> Result<(), StoreError> {
@@ -1256,7 +1255,9 @@ impl SqliteByteStore {
     }
 
     /// Store a checkpoint at `height` (at most the head), replacing one at the
-    /// same height (a key rotation re-seals), and keep only the latest two.
+    /// same height (a key rotation re-seals). Every checkpoint is retained:
+    /// a state read at a past height (`durable-checkpoint-at`) resumes from the
+    /// latest one at or below it.
     pub fn durable_checkpoint(&self, height: u64, bytes: &[u8]) -> Result<(), StoreError> {
         Self::validate_bound(bytes)?;
         let guard = anchor::Guard::lock(&self.root)?;
@@ -1280,16 +1281,33 @@ impl SqliteByteStore {
             return Err(self.database.error(SQLITE_DONE));
         }
         drop(statement);
-        let prune = self.database.prepare(
-            b"DELETE FROM durable_checkpoint WHERE height NOT IN (SELECT height FROM durable_checkpoint ORDER BY height DESC LIMIT ?1)\0",
-        )?;
-        prune.bind_int64(1, CHECKPOINTS_RETAINED)?;
-        if prune.step()? != SQLITE_DONE {
-            return Err(self.database.error(SQLITE_DONE));
-        }
-        drop(prune);
         transaction.commit()?;
         guard.publish(&head)
+    }
+
+    /// The latest checkpoint at or below `height`, under the head anchor.
+    pub fn durable_checkpoint_at(&self, height: u64) -> Result<Option<(u64, Vec<u8>)>, StoreError> {
+        let guard = anchor::Guard::lock(&self.root)?;
+        self.database.exec(b"BEGIN DEFERRED\0")?;
+        let transaction = Transaction {
+            store: self,
+            active: true,
+        };
+        self.refuse_retired_image()?;
+        let seed = self.durable_seed()?.ok_or(StoreError::Missing)?;
+        let anchor_head = self.anchor_head(&guard, &seed)?;
+        let statement = self.database.prepare(
+            b"SELECT height, bytes FROM durable_checkpoint WHERE height<=?1 ORDER BY height DESC LIMIT 1\0",
+        )?;
+        statement.bind_int64(1, height.min(i64::MAX as u64) as i64)?;
+        let found = match statement.step()? {
+            SQLITE_ROW => Some((statement.column_int64(0) as u64, statement.column_blob_at(1)?)),
+            _ => None,
+        };
+        drop(statement);
+        transaction.commit()?;
+        guard.publish(&anchor_head)?;
+        Ok(found)
     }
 }
 
@@ -1998,6 +2016,27 @@ mod anchor_tests {
         assert!(matches!(refused, Err(StoreError::RetiredSchema(4))));
         let message = format!("{}", refused.err().unwrap());
         assert!(message.contains("schema v4") && message.contains("re-genesis"), "{message}");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Every checkpoint is retained; a past-height read finds the latest at or below it.
+    #[test]
+    fn every_checkpoint_is_retained_and_found_at_or_below() {
+        let root = kn2_root("checkpoint-at");
+        let store = SqliteByteStore::open(&root).unwrap();
+        store.durable_init(b"seed").unwrap();
+        for h in 1..=9u64 {
+            store.durable_append(h, &[h as u8], b"t", &[]).unwrap();
+            if h % 3 == 0 {
+                store.durable_checkpoint(h, &[b'c', h as u8]).unwrap();
+            }
+        }
+        assert_eq!(store.durable_checkpoint_at(2).unwrap(), None);
+        assert_eq!(store.durable_checkpoint_at(3).unwrap(), Some((3, vec![b'c', 3])));
+        assert_eq!(store.durable_checkpoint_at(5).unwrap(), Some((3, vec![b'c', 3])));
+        assert_eq!(store.durable_checkpoint_at(8).unwrap(), Some((6, vec![b'c', 6])));
+        assert_eq!(store.durable_checkpoint_at(100).unwrap(), Some((9, vec![b'c', 9])));
+        drop(store);
         fs::remove_dir_all(root).unwrap();
     }
 }
