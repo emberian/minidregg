@@ -2236,7 +2236,7 @@ def activityViewLoaded (config : Config) (opened : Opened config) (cells : List 
 /-! ## Seats and invitations (SEATS-NATIVE): session operations 215–219
 
 Publish a contract package, create an instance, hand over an invitation,
-offer, invoke an instance's method, exit (`DREGG/SEAT/COMMAND/v2`) share one
+offer, invoke an instance's method, exit (`DREGG/SEAT/COMMAND/v3`) share one
 plan/assembly/submission/lookup quartet; the signed ingress is
 `DREGG/SEAT/SIGNED/v1`; 219 is the public seat view. A refusal names its reason
 to the signer: every seat cell is public (op 219), so the reason discloses

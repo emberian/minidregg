@@ -77,6 +77,17 @@ inductive ExitRule where
   | afterDeadline (due : Nat)
   deriving DecidableEq, Repr
 
+/-- What the offerer lets the CONTRACT see of the seat's principals (GPT-6 row G: contract input is
+identity-blind by default, with a narrow opt-in per field). The default discloses nothing: a contract
+method sees a seat's coordinate, role, terms, proposal and allocation only (`SeatStore.seatView`,
+`seatView_identity_blind`). Disclosure is the offerer's choice at offer, signed with the proposal; the
+kernel's judgments (offer safety, exit authority, payout) never read it. -/
+structure Disclosure where
+  offerer : Bool := false
+  payee : Bool := false
+  holder : Bool := false
+  deriving DecidableEq, Repr
+
 structure Proposal where
   give : List (AssetId × Nat)
   want : List (AssetId × Nat)
@@ -88,6 +99,8 @@ structure Proposal where
   (`donationMarkedWithWant`): the marker means exactly "wants nothing". A Bool, not a sum: the
   meaning is one bit and the law (`offerSafe`) does not read it. -/
   donate : Bool
+  /-- Which of the seat's principals the contract's method is shown (default: none). -/
+  disclose : Disclosure := {}
   deriving DecidableEq, Repr
 
 /-- Whether a proposal wants nothing: every `want` amount is zero (the empty list included). -/
@@ -1573,7 +1586,12 @@ theorem seat_offer_safe_forever {genesis world : World} (empty : genesis.seats =
     ∀ seat ∈ world.seats, safeAt world.book seat.account seat.proposal = true :=
   (reachable_inv empty reachable).safe
 
-/-! ## T3 (b): exit is always available and pays the whole holding -/
+/-! ## T3 (b): exit is ENABLED for its named actor, and pays the whole holding
+
+These are enabling theorems, not progress guarantees: each says the exit step is admitted
+when its named actor submits it (the offerer of an on-demand seat; anyone at or after a
+deadline; the holding activity's end). Nothing in the kernel submits a turn on its own, so a
+seat leaves only when such an actor acts (GPT-6 row G: liveness claims name their actors). -/
 
 theorem closeBatch_admitted {world : World} {seat : Seat} (inv : Inv world) (member : seat ∈ world.seats) :
     (closeBatch world.book seat).Admission world.book :=
@@ -2203,9 +2221,9 @@ def opening : List Entry :=
   [ .signed 1 alice (.create swapInstance),
     .method 1 swapInstance [.mint "sell" [] alice, .mint "buy" [] bob],
     .signed 2 alice (.offer 1 ⟨1, package, "sell"⟩ aliceSeat aliceAccount aliceAccount
-      ⟨[(X, 10)], [(Y, 5)], .onDemand, false⟩ none),
+      ⟨[(X, 10)], [(Y, 5)], .onDemand, false, {}⟩ none),
     .signed 3 bob (.offer 2 ⟨1, package, "buy"⟩ bobSeat bobAccount bobAccount
-      ⟨[(Y, 7)], [(X, 9)], .onDemand, false⟩ none) ]
+      ⟨[(Y, 7)], [(X, 9)], .onDemand, false, {}⟩ none) ]
 
 def settlement : List Entry :=
   [ .method 4 swapInstance [.reallocate [⟨aliceSeat, bobSeat, X, 10⟩, ⟨bobSeat, aliceSeat, Y, 7⟩]],
@@ -2254,25 +2272,25 @@ theorem stranger_cannot_exit :
 /-- An invitation is spent by its offer: offering it again is refused. -/
 theorem invitation_spent_once :
     (run genesis (opening ++ [.signed 4 alice (.offer 1 ⟨1, package, "sell"⟩ (reservedBase + 32) aliceAccount
-      aliceAccount ⟨[(X, 10)], [(Y, 5)], .onDemand, false⟩ none)])).map balances =
+      aliceAccount ⟨[(X, 10)], [(Y, 5)], .onDemand, false, {}⟩ none)])).map balances =
       .error (.invitation (.invitationMissing 1)) := by decide +kernel
 
 /-- An invitation must assay as the offerer expects (here: the wrong role). -/
 theorem assay_refused :
     (run genesis (opening.take 2 ++ [.signed 2 alice (.offer 1 ⟨1, package, "buy"⟩ aliceSeat aliceAccount
-      aliceAccount ⟨[(X, 10)], [(Y, 5)], .onDemand, false⟩ none)])).map balances =
+      aliceAccount ⟨[(X, 10)], [(Y, 5)], .onDemand, false, {}⟩ none)])).map balances =
       .error (.invitation (.assayFailed 1)) := by decide +kernel
 
 /-- A signer cannot name an ordinary account as a seat: the seat account is a
 protected coordinate. -/
 theorem unprotected_seat_refused :
     (run genesis (opening.take 2 ++ [.signed 2 alice (.offer 1 ⟨1, package, "sell"⟩ 30 aliceAccount
-      aliceAccount ⟨[(X, 10)], [(Y, 5)], .onDemand, false⟩ none)])).map balances =
+      aliceAccount ⟨[(X, 10)], [(Y, 5)], .onDemand, false, {}⟩ none)])).map balances =
       .error (.seatNotProtected 30) := by decide +kernel
 
 /-- **Zero `want`.** A seat that gives 10 X and wants 0 Y is satisfied by an
 allocation that holds nothing: the contract may take the whole gift. -/
-def giftProposal : Proposal := ⟨[(X, 10)], [(Y, 0)], .onDemand, true⟩
+def giftProposal : Proposal := ⟨[(X, 10)], [(Y, 0)], .onDemand, true, {}⟩
 
 theorem zero_want_satisfied : safeAt Book.empty aliceSeat giftProposal = true := by decide +kernel
 
@@ -2290,7 +2308,7 @@ def giftOpening : List Entry :=
   opening.take 2 ++
     [ .signed 2 alice (.offer 1 ⟨1, package, "sell"⟩ aliceSeat aliceAccount aliceAccount giftProposal none),
       .signed 3 bob (.offer 2 ⟨1, package, "buy"⟩ bobSeat bobAccount bobAccount
-        ⟨[(Y, 7)], [(X, 9)], .onDemand, false⟩ none) ]
+        ⟨[(Y, 7)], [(X, 9)], .onDemand, false, {}⟩ none) ]
 
 /-- The contract takes the whole gift (Alice wanted 0 Y), and the reallocation
 is admitted. -/
@@ -2310,7 +2328,7 @@ seat is held by the activity at record 900; its end exits the seat and pays her
 def heldOpening : List Entry :=
   opening.take 2 ++
     [ .signed 2 alice (.offer 1 ⟨1, package, "sell"⟩ aliceSeat aliceAccount aliceAccount
-        ⟨[(X, 10)], [(Y, 5)], .onDemand, false⟩ (some 900)) ]
+        ⟨[(X, 10)], [(Y, 5)], .onDemand, false, {}⟩ (some 900)) ]
 
 theorem activity_end_pays_held_seat :
     (run genesis (heldOpening ++ [.ended 7 900])).map balances = .ok [10, 0, 0, 7] := by decide +kernel
@@ -2338,7 +2356,7 @@ reached the activity's end pays it, and before that anyone may exit it only from
 def deadlineHeldOpening : List Entry :=
   opening.take 2 ++
     [ .signed 2 alice (.offer 1 ⟨1, package, "sell"⟩ aliceSeat aliceAccount aliceAccount
-        ⟨[(X, 10)], [(Y, 5)], .afterDeadline 10, false⟩ (some 900)) ]
+        ⟨[(X, 10)], [(Y, 5)], .afterDeadline 10, false, {}⟩ (some 900)) ]
 
 theorem activity_end_leaves_deadline_seat_open :
     (run genesis (deadlineHeldOpening ++ [.ended 7 900])).map
@@ -2360,22 +2378,22 @@ theorem stranger_cannot_exit_deadline_seat_early :
 something is refused too. -/
 theorem unmarked_gift_refused :
     (run genesis (opening.take 2 ++ [.signed 2 alice (.offer 1 ⟨1, package, "sell"⟩ aliceSeat aliceAccount
-      aliceAccount ⟨[(X, 10)], [(Y, 0)], .onDemand, false⟩ none)])).map balances =
+      aliceAccount ⟨[(X, 10)], [(Y, 0)], .onDemand, false, {}⟩ none)])).map balances =
       .error (.donationUnmarked aliceSeat) := by decide +kernel
 
 theorem empty_want_unmarked_refused :
     (run genesis (opening.take 2 ++ [.signed 2 alice (.offer 1 ⟨1, package, "sell"⟩ aliceSeat aliceAccount
-      aliceAccount ⟨[(X, 10)], [], .onDemand, false⟩ none)])).map balances =
+      aliceAccount ⟨[(X, 10)], [], .onDemand, false, {}⟩ none)])).map balances =
       .error (.donationUnmarked aliceSeat) := by decide +kernel
 
 theorem marked_donation_with_want_refused :
     (run genesis (opening.take 2 ++ [.signed 2 alice (.offer 1 ⟨1, package, "sell"⟩ aliceSeat aliceAccount
-      aliceAccount ⟨[(X, 10)], [(Y, 5)], .onDemand, true⟩ none)])).map balances =
+      aliceAccount ⟨[(X, 10)], [(Y, 5)], .onDemand, true, {}⟩ none)])).map balances =
       .error (.donationMarkedWithWant aliceSeat) := by decide +kernel
 
 theorem marked_empty_want_accepted :
     (run genesis (opening.take 2 ++ [.signed 2 alice (.offer 1 ⟨1, package, "sell"⟩ aliceSeat aliceAccount
-      aliceAccount ⟨[(X, 10)], [], .onDemand, true⟩ none)])).map balances = .ok [0, 0, 0, 7] := by
+      aliceAccount ⟨[(X, 10)], [], .onDemand, true, {}⟩ none)])).map balances = .ok [0, 0, 0, 7] := by
   decide +kernel
 
 /-- **An exit leaves no account behind.** After Alice exits, her seat is no Book
