@@ -142,6 +142,14 @@ theorem runCounted_left_le (limits : Limits) : ∀ (ticks : Nat) (state : State)
 
 /-! ## Refusals -/
 
+/-- The field a grant naming a frame's (object, method) refused it on. -/
+inductive GrantField where
+  | code
+  | caller
+  | args
+  | cap
+  deriving DecidableEq, Repr
+
 inductive CallRefusal where
   /-- A refusal of the object kernel (package, state, write shape, Book, ...). -/
   | kernel (reason : ObjectiveActivity.Refusal)
@@ -167,6 +175,9 @@ inductive CallRefusal where
   | resultType (caller : Nat) (method : String)
   /-- A scoped grant names (target, method) and has no use left. -/
   | grantSpent (target : Nat) (method : String)
+  /-- A grant names (target, method) but does not admit the frame: its code, its caller, its
+  arguments or its cumulative cap (`spendGrant`). The whole call tree co-fails. -/
+  | grantMismatch (target : Nat) (method : String) (field : GrantField)
   /-- The object's law refuses the frame's write: the frame and the clause. -/
   | lawDenied (target : Nat) (method : String) (reason : WriteRefusal)
   /-- The invocation's declared envelope ran out (nothing commits). -/
@@ -338,29 +349,158 @@ def decodeReturn (target : Nat) (method : String) : Data → Except CallRefusal 
     | _, _ => .error (.frameFault target method "a method returns {result, write}")
   | _ => .error (.frameFault target method "a method returns {result, write}")
 
-/-- A scoped grant: the signer lends its authority to `uses` frames of
-`method` on the object `object`. -/
+/-! ### Grants (v2): what a delegation may be used for
+
+A grant lends the signer's authority to nested frames, and binds WHAT it lends it to: the
+target object and method, the CODE the target runs (its `activePin`: a frame of the target
+running any other package is not granted), the ARGUMENTS (an exact digest of their canonical
+bytes, or a bounded constraint: a recipient field's value and/or a cumulative cap on a Nat field;
+no constructor admits every argument), optionally the frame's DIRECT CALLER, and a count of uses.
+
+Matching (`spendGrant`): a frame whose (object, method) no grant names is ungranted (subject none,
+today's rule: delegation is opt-in). Among the grants naming it, the first that admits the frame
+(code, caller, args, a use left, the cap) is spent and recorded as a `Delegation`. If grants name
+it but none admits it, the call tree is REFUSED BY NAME: `grantSpent` when the first naming grant
+is exhausted, else `grantMismatch` with the first field it fails. A mismatch is never a silent
+downgrade to a subjectless frame (that would render a mismatch as a law refusal, or let a law that
+ignores the subject commit it). -/
+
+/-- The part of a call's arguments at a path of record field names (`[]`: the arguments). -/
+def argsAt : List String → Data → Option Data
+  | [], args => some args
+  | name :: rest, .record fields => (fieldOf fields name).bind (argsAt rest)
+  | _ :: _, _ => none
+
+/-- The digest a `.exact` grant names: the canonical bytes of the arguments. -/
+def argsDigest (args : Data) : Digest := tagged "DREGG/OBJECTIVE/CALL/GRANT-ARGS/v1" (dataBytes args)
+
+/-- What a grant admits of a frame's arguments. -/
+inductive ArgsBound where
+  /-- Exactly the arguments whose canonical bytes have this digest (`argsDigest`). -/
+  | exact (digest : Digest)
+  /-- The arguments at `path` encode (`dataBytes`) to `value`; with `cap = some (amount, limit)` the
+  Nat at `amount` is also charged against `limit` across the grant's uses. -/
+  | recipient (path : List String) (value : List UInt8) (cap : Option (List String × Nat))
+  /-- The Nat at `path` is charged against `limit`, cumulatively across the grant's uses. -/
+  | capped (path : List String) (limit : Nat)
+  deriving DecidableEq, Repr
+
+/-- The cumulative cap of a bound: the charged path and the limit. -/
+def ArgsBound.cap : ArgsBound → Option (List String × Nat)
+  | .exact _ => none
+  | .recipient _ _ cap => cap
+  | .capped path limit => some (path, limit)
+
+/-- What one use charges: the Nat at the capped path (0 without a cap; none: no Nat there). -/
+def ArgsBound.amount (bound : ArgsBound) (args : Data) : Option Nat :=
+  match bound.cap with
+  | none => some 0
+  | some (path, _) => match argsAt path args with
+    | some (.natural amount) => some amount
+    | _ => none
+
+/-- The value constraint of a bound (the cap is checked against the uses, `Grant.judge`). -/
+def ArgsBound.admits : ArgsBound → Data → Bool
+  | .exact digest, args => decide (argsDigest args = digest)
+  | .recipient path value _, args => decide ((argsAt path args).map dataBytes = some value)
+  | .capped _ _, _ => true
+
+/-- A scoped grant (v2): the signer lends its authority to at most `uses` frames of `method` on
+`object` running `code`, whose arguments `args` admits, entered directly by `caller` (when set). -/
 structure Grant where
   object : Nat
   method : String
+  code : Digest
+  args : ArgsBound
+  caller : Option Nat
   uses : Nat
   deriving DecidableEq, Repr
 
-inductive Spend where
-  | ungranted
-  | spent (grants : List Grant)
-  | exhausted
-  deriving Repr
+/-- A frame that received delegated authority: the grant (its index in the invocation's grants)
+and what it was spent on, with the amount it charged the grant's cap. -/
+structure Delegation where
+  grant : Nat
+  object : Nat
+  method : String
+  code : Digest
+  args : Data
+  caller : Option Nat
+  amount : Nat
 
-/-- Spend one use of the first grant naming (object, method). -/
-def spendGrant (object : Nat) (method : String) : List Grant → Spend
-  | [] => .ungranted
-  | grant :: rest =>
+/-- The delegations of grant `index`. -/
+def usesOf (delegations : List Delegation) (index : Nat) : List Delegation :=
+  delegations.filter (fun d => d.grant == index)
+
+/-- What the delegations of grant `index` charged its cap. -/
+def chargedOf (delegations : List Delegation) (index : Nat) : Nat :=
+  ((usesOf delegations index).map Delegation.amount).sum
+
+/-- A grant's caller restriction holds of a frame's direct caller (none: any caller). -/
+def callerOk : Option Nat → Option Nat → Bool
+  | none, _ => true
+  | some restriction, caller => decide (caller = some restriction)
+
+/-- One grant's judgment of a frame it names. -/
+inductive Verdict where
+  | admit (amount : Nat)
+  | mismatch (field : GrantField)
+  | spent
+
+/-- Grant `index` judges a frame of (code, args, caller), given the turn's delegations so far. -/
+def Grant.judge (grant : Grant) (used : List Delegation) (index : Nat) (code : Digest) (args : Data)
+    (caller : Option Nat) : Verdict :=
+  if grant.code ≠ code then .mismatch .code
+  else if callerOk grant.caller caller = false then .mismatch .caller
+  else if grant.args.admits args = false then .mismatch .args
+  else match grant.args.amount args with
+    | none => .mismatch .args
+    | some amount =>
+      if grant.uses ≤ (usesOf used index).length then .spent
+      else match grant.args.cap with
+        | none => .admit amount
+        | some (_, limit) => if chargedOf used index + amount ≤ limit then .admit amount else .mismatch .cap
+
+/-- The refusal of the first grant that named the frame and did not admit it. -/
+def Verdict.refusal (object : Nat) (method : String) : Verdict → Option CallRefusal
+  | .admit _ => none
+  | .mismatch field => some (.grantMismatch object method field)
+  | .spent => some (.grantSpent object method)
+
+/-- Scan the grants from index `index`; `first` is the refusal of the first grant that named the
+frame and did not admit it. -/
+def spendFrom (used : List Delegation) (object : Nat) (method : String) (code : Digest) (args : Data)
+    (caller : Option Nat) : List Grant → Nat → Option CallRefusal → Except CallRefusal (Option Delegation)
+  | [], _, none => .ok none
+  | [], _, some reason => .error reason
+  | grant :: rest, index, first =>
     if grant.object = object ∧ grant.method = method then
-      if grant.uses = 0 then .exhausted else .spent ({grant with uses := grant.uses - 1} :: rest)
-    else match spendGrant object method rest with
-      | .spent rest' => .spent (grant :: rest')
-      | other => other
+      match grant.judge used index code args caller with
+      | .admit amount => .ok (some ⟨index, object, method, code, args, caller, amount⟩)
+      | verdict => spendFrom used object method code args caller rest (index + 1)
+          (first.orElse fun _ => verdict.refusal object method)
+    else spendFrom used object method code args caller rest (index + 1) first
+
+/-- **Spend a grant on a nested frame**: `none` (no grant names (object, method): ungranted), the
+delegation of the first grant that admits it, or the refusal of the first that named it. -/
+def spendGrant (grants : List Grant) (used : List Delegation) (object : Nat) (method : String) (code : Digest)
+    (args : Data) (caller : Option Nat) : Except CallRefusal (Option Delegation) :=
+  spendFrom used object method code args caller grants 0 none
+
+/-- A grant authorizes a delegation: it names its object and method, its code, admits its
+arguments, its caller restriction holds, and the delegation's amount is what its cap charges. -/
+def Grant.Authorizes (grant : Grant) (d : Delegation) : Prop :=
+  grant.object = d.object ∧ grant.method = d.method ∧ grant.code = d.code ∧
+    callerOk grant.caller d.caller = true ∧ grant.args.admits d.args = true ∧
+    grant.args.amount d.args = some d.amount
+
+/-- **Every delegation has a matching unconsumed authorization**: each names a grant that
+authorizes it, no grant is used more than `uses` times, and the uses of a capped grant charge at
+most its limit in sum. -/
+def Authorized (grants : List Grant) (delegations : List Delegation) : Prop :=
+  (∀ d ∈ delegations, ∃ grant, grants[d.grant]? = some grant ∧ grant.Authorizes d) ∧
+    ∀ index grant, grants[index]? = some grant →
+      (usesOf delegations index).length ≤ grant.uses ∧
+      ∀ path limit, grant.args.cap = some (path, limit) → chargedOf delegations index ≤ limit
 
 /-! ## The turn's journal -/
 
@@ -383,6 +523,10 @@ structure Written where
   viewed : ObjectState
   before : ObjectState
   after : ObjectState
+  /-- The frame's arguments. -/
+  args : Data
+  /-- The delegation that lent the frame the signer's authority (none: the root, or ungranted). -/
+  delegation : Option Delegation
 
 /-- A send a frame of this turn made. -/
 structure Outgoing where
@@ -396,7 +540,10 @@ structure Outgoing where
 
 structure Journal where
   entries : List Entry
+  /-- The invocation's grants, as signed (never changed: their uses are the delegations). -/
   grants : List Grant
+  /-- Every frame that received delegated authority, in entry order (`spendGrant`). -/
+  delegations : List Delegation
   /-- Every frame entered, in order: the objects on the stack at its entry,
   innermost first (the frame's own object at the head). -/
   frames : List (List Nat)
@@ -409,7 +556,7 @@ structure Journal where
   short (`extractUncovered`). -/
   extracts : Nat
 
-def Journal.start (grants : List Grant) (extracts : Nat) : Journal := ⟨[], grants, [], [], [], extracts⟩
+def Journal.start (grants : List Grant) (extracts : Nat) : Journal := ⟨[], grants, [], [], [], [], extracts⟩
 
 /-- **Debit an extraction's actual tick spend** from the turn's allowance, refused by name when
 the allowance left is below it. The spend is deterministic (the extraction's own tick count),
@@ -493,6 +640,10 @@ structure Ctx where
   height : Nat
   /-- `request/caller` (`callerOf`). -/
   caller : Option Nat
+  /-- The call's arguments. -/
+  args : Data
+  /-- The delegation that lent this frame the signer's authority (`spendGrant`). -/
+  delegation : Option Delegation
 
 /-- **The request facts a frame's write is judged under**, derived from the frame itself:
 the frame is for `ctx.object` and runs `ctx.method` of the package its record pins
@@ -534,10 +685,26 @@ def frameReturn (ctx : Ctx) (write : Data) (journal : Journal) : Except CallRefu
         | .ok () =>
           let after : ObjectState := ⟨before.version + 1, value⟩
           .ok { journal.install ctx.object after with
-            writes := journal.writes ++ [⟨ctx.object, ctx.method, ctx.record, ctx.facts, ctx.view, before, after⟩] }
+            writes := journal.writes ++ [⟨ctx.object, ctx.method, ctx.record, ctx.facts, ctx.view, before, after,
+              ctx.args, ctx.delegation⟩] }
     | _ => .error (.stateMissing ctx.object.value)
 
 /-! ## The executor -/
+
+/-- **A frame's authority**: the root frame carries the signer's subject; a nested frame carries it
+only through a grant that admits it (`spendGrant`, against the code its target runs and the
+call's arguments and direct caller), and then records the delegation; a nested frame no grant
+names carries none; a grant that names it and does not admit it refuses the call tree. -/
+def frameAuthority (authority : Authority) (stack : List Ctx) (journal : Journal) (call : CallPlan) (code : Digest) :
+    Except CallRefusal (Option SubjectId × Option Delegation) :=
+  match stack with
+  | [] => .ok (authority.signer, none)
+  | _ :: _ =>
+    match spendGrant journal.grants journal.delegations call.target.value call.method code call.args
+        (callerOf authority stack) with
+    | .error reason => .error reason
+    | .ok none => .ok (none, none)
+    | .ok (some d) => .ok (authority.signer, some d)
 
 inductive Task where
   | enter (call : CallPlan)
@@ -565,23 +732,16 @@ def exec {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot r
     -- A draining object admits no new frame unless its upgrade's migration is the identity.
     | some _, false => .error (.kernel .draining)
     | some view, true =>
-    let granted : Except CallRefusal (Option SubjectId × List Grant) :=
-      match stack with
-      | [] => .ok (authority.signer, journal.grants)
-      | _ :: _ => match spendGrant call.target.value call.method journal.grants with
-        | .ungranted => .ok (none, journal.grants)
-        | .spent grants => .ok (authority.signer, grants)
-        | .exhausted => .error (.grantSpent call.target.value call.method)
-    match granted with
+    match frameAuthority authority stack journal call entry.record.activePin with
     | .error reason => .error reason
-    | .ok (subject, grants) =>
+    | .ok (subject, delegation) =>
     match loadMethod config call.target.value (packageBytes config snapshot entry.record.activePin) entry.record.activePin
         call.method (viewData view) call.args with
     | .error reason => .error reason
     | .ok program =>
     let ctx : Ctx := ⟨call.target, call.method, entry.record, program.applied.assumptions, program.responseType,
-      view, subject, height, callerOf authority stack⟩
-    let journal : Journal := ⟨journal.entries, grants,
+      view, subject, height, callerOf authority stack, call.args, delegation⟩
+    let journal : Journal := ⟨journal.entries, journal.grants, journal.delegations ++ delegation.toList,
       journal.frames ++ [call.target.value :: stack.map (·.object.value)], journal.writes, journal.outbox,
       journal.extracts⟩
     exec config snapshot height authority turn fuel (ctx :: stack) (.run (initial program.applied.erase)) journal ticks
@@ -861,9 +1021,32 @@ structure InvokeRequest where
   under; each send escrows its public price (`Inbox.Message.postage`). -/
   postage : Capacity
 
+def pathStream : StreamCodec (List String) := StreamCodec.list stringStream
+
+def argsBoundStream : StreamCodec ArgsBound :=
+  StreamCodec.xmap
+    (StreamCodec.sum digestStream
+      (StreamCodec.sum
+        (StreamCodec.product pathStream
+          (StreamCodec.product bytesStream (StreamCodec.option (StreamCodec.product pathStream StreamCodec.nat))))
+        (StreamCodec.product pathStream StreamCodec.nat)))
+    (fun bound => match bound with
+      | .exact digest => .inl digest
+      | .recipient path value cap => .inr (.inl (path, value, cap))
+      | .capped path limit => .inr (.inr (path, limit)))
+    (fun wire => match wire with
+      | .inl digest => .exact digest
+      | .inr (.inl (path, value, cap)) => .recipient path value cap
+      | .inr (.inr (path, limit)) => .capped path limit)
+    (by intro bound; cases bound <;> rfl)
+
+/-- v2: a grant binds the code, the arguments and (optionally) the caller (`COMMAND/v8`). -/
 def grantStream : StreamCodec Grant :=
-  StreamCodec.xmap (StreamCodec.product StreamCodec.nat (StreamCodec.product stringStream StreamCodec.nat))
-    (fun grant => (grant.object, grant.method, grant.uses)) (fun (o, m, u) => ⟨o, m, u⟩)
+  StreamCodec.xmap
+    (StreamCodec.product StreamCodec.nat (StreamCodec.product stringStream (StreamCodec.product digestStream
+      (StreamCodec.product argsBoundStream (StreamCodec.product (StreamCodec.option StreamCodec.nat) StreamCodec.nat)))))
+    (fun grant => (grant.object, grant.method, grant.code, grant.args, grant.caller, grant.uses))
+    (fun (o, m, c, a, k, u) => ⟨o, m, c, a, k, u⟩)
     (by intro grant; cases grant; rfl)
 
 def invokeTransaction (request : InvokeRequest) : TransactionId :=
@@ -1215,7 +1398,7 @@ theorem exec_invariant {rootBytes : Bytes → Digest} (config : Config) (snapsho
                     exact List.any_eq_true.mpr ⟨ctx, member, by simp [same]⟩
                   have distinct' : ((⟨call.target, call.method, entry.record, program.applied.assumptions,
                       program.responseType, view, subject, height,
-                      callerOf authority stack⟩ : Ctx) :: stack).map (·.object) |>.Nodup := by
+                      callerOf authority stack, call.args, grants⟩ : Ctx) :: stack).map (·.object) |>.Nodup := by
                     simp only [List.map_cons, List.nodup_cons, List.mem_map]
                     exact ⟨fun ⟨ctx, member, same⟩ => notOn ctx member same, distinct⟩
                   obtain ⟨read', kept, ⟨new, writes', fresh⟩, ⟨frames, frames', nodupFrames⟩⟩ :=
