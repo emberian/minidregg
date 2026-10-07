@@ -45,7 +45,7 @@ def objectAudienceLoaded (config : Config) (target : Durable)
   if query.kind != .object || query.view != .resource then
     return .error (.of .malformed)
   match ← NativeObservationController.authorize config.signature
-      ⟨opened.directory, opened.authority⟩ config.profile config.federation
+      (Minidregg.Compiler.ServedBasis.Ground.full _ opened.directory opened.authority) config.profile config.federation
       config.genesisHeight signed with
   | .error refusal => return .error refusal
   | .ok _ =>
@@ -84,7 +84,7 @@ def objectAudienceRosterLoaded (config : Config) (target : Durable)
       signed.challenge.intent.subject == view.subject && planned.object == view.object do
     return .error "catalog observation subject/view mismatch"
   match ← NativeObservationController.authorize config.signature
-      ⟨opened.directory, opened.authority⟩ config.profile config.federation config.genesisHeight signed with
+      (Minidregg.Compiler.ServedBasis.Ground.full _ opened.directory opened.authority) config.profile config.federation config.genesisHeight signed with
   | .error reason => return .error s!"catalog observation refused: {repr reason}"
   | .ok _ =>
     let some grant := signed.challenge.intent.grants.head?
@@ -95,7 +95,7 @@ def objectAudienceRosterLoaded (config : Config) (target : Durable)
     unless decide (CellField.NamedBy capability.head.scope.fields .body) do
       return .error "catalog observation does not disclose device records"
     let state := { planned with deviceSnapshot := (target.snapshot.model.roots ⟨query.target⟩).value }
-    let some bound := AudienceRosterBinding.checkBytes ⟨opened.directory, opened.authority⟩ state rosterBytes
+    let some bound := AudienceRosterBinding.checkBytes (Minidregg.Compiler.ServedBasis.Ground.full _ opened.directory opened.authority) state rosterBytes
       | return .error "roster does not bind exact current device catalog"
     unless bound.checked.source == query.target do
       return .error "catalog observation names a different device source"

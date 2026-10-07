@@ -624,8 +624,8 @@ def readContext {F : Type} [Field F]
     {tariff : Tariff} {source : Source}
     (birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
       deployment pins durable profile.semantics tariff source) :
-    ResourceObservationAdmission.Context deployment durable :=
-  ⟨birth.prepared.pre.directory, birth.prepared.pre.authority⟩
+    ResourceObservationAdmission.Context deployment :=
+  (Minidregg.Compiler.ServedBasis.Ground.full _ birth.prepared.pre.directory birth.prepared.pre.authority)
 
 def readRequest {F : Type} [Field F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
