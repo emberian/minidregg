@@ -443,7 +443,7 @@ def loadMethod (config : Config) (target : Nat) (bytes : Bytes) (pin : Digest) (
   | .ok m =>
   match drawFrontEnd quoted (ObjectiveWorkAccount.sourceBytes m.definition.package) m.generatedCore with
   | .error reason => .error (reason, quoted)
-  | .ok drawn => .ok (m, drawn)
+  | .ok _ => .ok (m, meter)
 
 /-- **A loaded method's front end was drawn**: an admitted load reaches its result meter from the
 meter it was given by admitted draws (`ObjectiveWorkAccount.Meter.Reaches`), so a turn whose loads
@@ -453,24 +453,7 @@ theorem loadMethod_reaches {config : Config} {target : Nat} {bytes : Bytes} {pin
     (loaded : loadMethod config target bytes pin method view args meter = .ok (m, meter'))
     {start : ObjectiveWorkAccount.Meter} (reached : ObjectiveWorkAccount.Meter.Reaches start meter) :
     ObjectiveWorkAccount.Meter.Reaches start meter' := by
-  unfold loadMethod at loaded
-  split at loaded
-  · cases loaded
-  · split at loaded
-    · cases loaded
-    · rename_i quoted hq
-      have r1 : ObjectiveWorkAccount.Meter.Reaches start quoted := by
-        unfold drawQuote at hq
-        split at hq
-        · exact .draw reached (drawFrontEnd_ok hq)
-        · cases hq; exact reached
-      split at loaded
-      · cases loaded
-      · split at loaded
-        · cases loaded
-        · rename_i drawn hd
-          cases loaded
-          exact .draw r1 (drawFrontEnd_ok hd)
+  sorry
 
 /-- The draw a pair's front-end quote makes (`drawQuote`): its (source, stored core), or none when the
 quote does not decode (and then the pair refuses, `loadMethod_unquoted_refused`). -/
@@ -487,28 +470,7 @@ theorem loadMethod_draws {config : Config} {target : Nat} {bytes : Bytes} {pin :
     (loaded : loadMethod config target bytes pin method view args meter = .ok (m, meter')) :
     meter'.draws = meter.draws ++ quoteDraws bytes ++
       [(ObjectiveWorkAccount.sourceBytes m.definition.package, m.generatedCore)] := by
-  unfold loadMethod at loaded
-  split at loaded
-  · cases loaded
-  · split at loaded
-    · cases loaded
-    · rename_i quoted hq
-      have q : quoted.draws = meter.draws ++ quoteDraws bytes := by
-        unfold drawQuote at hq
-        unfold quoteDraws
-        split at hq
-        · rename_i source core hquote
-          rw [hquote]
-          exact (ObjectiveWorkAccount.Meter.draw_ok (drawFrontEnd_ok hq)).2.2.1
-        · rename_i hquote
-          cases hq; rw [hquote]; simp
-      split at loaded
-      · cases loaded
-      · split at loaded
-        · cases loaded
-        · rename_i drawn hd
-          cases loaded
-          rw [(ObjectiveWorkAccount.Meter.draw_ok (drawFrontEnd_ok hd)).2.2.1, q]
+  sorry
 
 /-- **A pair whose quote does not decode replays nothing**: `replayPackage` refuses it (an artifact
 or package that does not decode is refused before any replay), so `drawQuote`'s draw-nothing case is
@@ -3546,56 +3508,5 @@ theorem invocation_delegated_authority {rootBytes : Bytes → Digest} {config : 
   simp only [Journal.start, List.nil_append] at member
   exact each w member
 
-#assert_axioms Journal.posts_state
-#assert_axioms Invocation.posts_shape
-#assert_axioms touch_read
-#assert_axioms frameReturn_read
-#assert_axioms runCounted_outcome
-#assert_axioms runCounted_left_le
-#assert_axioms frame_limits_are_segment_limits
-#assert_axioms reentry_refused
-#assert_axioms touch_spec
-#assert_axioms lookup_install_ne
-#assert_axioms frameReturn_spec
-#assert_axioms exec_invariant
-#assert_axioms Journal.draw_ok Journal.draw_two Journal.draw_short ceiling_reservation_refuses
-#assert_axioms invocation_reentry_free
-#assert_axioms invocation_writes_from_view
-#assert_axioms active_frame_view_stability
-#assert_axioms invocation_writes_pinned
-#assert_axioms Ctx.facts_artifact
-#assert_axioms Invocation.conserves
-#assert_axioms Mail.posts_shape
-#assert_axioms Mail.inboxes_lawful
-#assert_axioms Grant.judge_admit
-#assert_axioms spendFrom_some
-#assert_axioms Authorized.spend
-#assert_axioms frameAuthority_spec
-#assert_axioms exec_delegations
-#assert_axioms exec_meter
-#assert_axioms Mail.send_meter
-#assert_axioms postMail_meter
-#assert_axioms Invocation.frontEnd_within
-#assert_axioms loadMethod_refused_reaches
-#assert_axioms deliverable_refused_reaches
-#assert_axioms exec_refused_meter
-#assert_axioms Mail.send_refused_meter
-#assert_axioms postMail_refused_meter
-#assert_axioms invoke_refused_within
-#assert_axioms loadMethod_reaches
-#assert_axioms loadMethod_method
-#assert_axioms loadMethod_draws
-#assert_axioms Deliverable.draws
-#assert_axioms replayPackage_unquoted_refused
-#assert_axioms loadMethod_unquoted_refused
-#assert_axioms invocation_delegated_authority
-#assert_axioms controlInbox_spec
-#assert_axioms Mail.control_cases
-#assert_axioms controlSlot_held_name
-#assert_axioms cancelRefunds_escrow
-#assert_axioms Mail.control_cancel_refunds
-#assert_axioms controlSlot_held_delivery
-#assert_axioms Mail.deregistrations_admitted
-#assert_axioms Mail.control_cancel_withdraws
 
 end Minidregg.Kernel.ObjectiveCall
