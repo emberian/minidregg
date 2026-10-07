@@ -62,10 +62,15 @@ Kernel/ResourceBirthReceiver.lean
 Kernel/ResourceTransaction.lean
 Kernel/SessionIndex.lean
 Kernel/StreamResource.lean
+Selvage/ZkmlSuiteRegistry.lean
+Theory/CellSlot.lean
+Theory/Channel/Trace.lean
+Verify/NativeJointSourceFixture.lean
 scripts/durable-receiver.lean
 scripts/fn-b3/forge_history.lean
 scripts/fn-e1e2/probe_gateway_direct_submit.lean
 scripts/kn2/history-tamper.lean
+scripts/kn2/receipt-tamper.lean
 scripts/native-accepted-fixture/replay.lean
 scripts/probe-canonical-cell-registry.lean
 scripts/probe-exact-readback-receiver.lean
@@ -74,7 +79,3 @@ scripts/probe-fn-accepted-skip.lean
 scripts/probe-native-host-genesis.lean
 scripts/probe-participant-key-enrollment.lean
 scripts/probe-policy-source-cell.lean
-Selvage/ZkmlSuiteRegistry.lean
-Theory/CellSlot.lean
-Theory/Channel/Trace.lean
-Verify/NativeJointSourceFixture.lean
