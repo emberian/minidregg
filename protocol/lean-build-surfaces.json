@@ -2119,7 +2119,7 @@
     {
       "module": "Compiler.GenericSimplexParticipant",
       "path": "Compiler/GenericSimplexParticipant.lean",
-      "sha256": "8be1bfcddd411837c3da8ea4c45743fbcc9c2f7f7052fa4511ec3fb4a8935129",
+      "sha256": "be31bee2dd13a246e93832bd3cc4df70dc3c6861e0c36ff919cd8c4b1d2210c2",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -6606,9 +6606,9 @@
     {
       "module": "Kernel.JointOrderedSourceReceiver",
       "path": "Kernel/JointOrderedSourceReceiver.lean",
-      "sha256": "d44d3200228413e4da541de6cc742bff1104f2bbb6f999f4cdecd57f7b7dedec",
+      "sha256": "8c470a914e3f4e5f36ce55b6bfcaffef882675794b429e2c14ecdb620879b5ee",
       "surface": "default",
-      "ownerReportedStatus": "FORWARD_NAMESPACE_REPAIR_UNCOMPILED"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Kernel.JointPromiseAuthorization",
@@ -6676,9 +6676,9 @@
     {
       "module": "Kernel.JointSourcePrefixValidation",
       "path": "Kernel/JointSourcePrefixValidation.lean",
-      "sha256": "7fb00e7e512b2e8ed16a165f5d6b6f7495a4aa81952ea586f944b666bbe4737d",
+      "sha256": "c358b15b2af3d6030534485109d1c92f3a69f3432ad486a83d4937646e264e65",
       "surface": "default",
-      "ownerReportedStatus": "FORWARD_NAMESPACE_REPAIR_UNCOMPILED"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Kernel.LawHistory",
@@ -10596,7 +10596,7 @@
     {
       "module": "Verify.NativeJointSourceFixture",
       "path": "Verify/NativeJointSourceFixture.lean",
-      "sha256": "c0f5ff8bc2614284c616419a9ba32944341b44eb02a30f247569efcde64845db",
+      "sha256": "5a02fc8444f19bb7150dc585307c556260fef4f44208f6dab8f372344d7977d8",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
