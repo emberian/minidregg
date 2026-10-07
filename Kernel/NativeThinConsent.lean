@@ -60,6 +60,9 @@ open Minidregg.Theory.TypedAuthorization
 open Minidregg.Kernel.DeclaredResourceController
 open Minidregg.Theory.AuthorizationDeclaration (SomeRequest)
 open Minidregg.Compiler.Tower256ConcreteBackend
+open Minidregg.Theory.CredentialAuthorityState (readCapability isRegistered StoredCapability)
+open Minidregg.Theory.CredentialAuthorityEffects (delegatedCapability DelegateDeclaration
+  apply_creation_member registrationEntry setAll_frame run_assignAll)
 
 set_option autoImplicit false
 
@@ -73,8 +76,10 @@ inductive Refusal where
   | servedRootMismatch (target : Nat)
   /-- The member patch does not apply to the served pre-state; admission would refuse. -/
   | patchRefused (target : Nat)
-  /-- Thin consent signs invocation plans only. -/
+  /-- Thin consent cannot display this kind of draft. -/
   | notInvocation
+  /-- A delegation reads no served view; the Host supplied one. -/
+  | viewUnexpected
   | commandMalformed
   | planMalformed
   /-- The proposed plan's domain, semantics or finalized draft is not this
@@ -475,14 +480,14 @@ def displayTarget (deployment : Deployment) (command : Command) (target : Target
     let encoded := target.materializer.codec.encode shown
     pure ⟨target.target, some (encoded, target.materializer.rootBytes encoded)⟩
 
-/-- **Thin plan consent.** The proposed plan is this deployment's plan of this
-intent's own invocation; every slot is the invocation's role in order and every
-header signs the local derivation; every target's served view has the signed
-root, and its member patch applies. Returns the headers to sign and what to show. -/
-def checkPlanThin (deployment : Deployment) (semantics : Digest) (federation : FederationId)
-    (wanted : NativeObservationCodec.Intent) (planBytes : List UInt8)
+/-- **Thin invocation consent.** The proposed plan is this deployment's plan of
+this intent's own invocation; every slot is the invocation's role in order and
+every header signs the local derivation; every target's served view has the
+signed root, and its member patch applies. Returns the headers to sign and what
+to show. -/
+def checkInvokeThin (deployment : Deployment) (semantics : Digest) (federation : FederationId)
+    (commandBytes : List UInt8) (planBytes : List UInt8)
     (views : List (List UInt8)) : Except Refusal (List (List UInt8) × List Display) := do
-  let .prepare (.invoke commandBytes) := wanted.purpose | .error .notInvocation
   let some command := commandCodec.decode commandBytes | .error .commandMalformed
   let some plan := NativeHostCodec.signingPlanCodec.decode planBytes | .error .planMalformed
   unless plan.domain = deployment.domain ∧ plan.semantics = semantics ∧
@@ -506,6 +511,253 @@ def checkPlanThin (deployment : Deployment) (semantics : Digest) (federation : F
     checkHeader slotIndex marker values.2 slot.header
   let displays ← (targets.zip views).mapM fun (target, view) => displayTarget deployment command target view
   pure (plan.slots.map NativeHostCodec.SigningSlot.header, displays)
+
+/-! ## Thin delegation consent
+
+A delegation writes two authority addresses
+(`DelegateDeclaration.patch_writeFootprint`): the child capability's record and
+its registration. The record is `delegatedCapability child parent request`:
+
+* its head is the signed child (grantee, rights, expiry, caveats, policy), shown;
+* its ancestry is `(parent.head, delegated request) :: parent.ancestry`, a
+  deterministic copy of the parent the signed `parentId` names, read by the
+  executor from the actual pre-state (`DescentEvidence.parentExact`). It is
+  KERNEL-OWNED: not shown, and not signed beyond the parent's id.
+
+So thin consent needs no served view. Whether the parent exists, belongs to the
+signer, is live and anchored, and whether the child's rights narrow it, are
+admission GATES on the actual pre-state (`delegate_gate_refuse_only`): they can
+refuse, never select a different shown effect. The declaration signs no
+authority-cell root (delegation command v2). -/
+
+/-- What thin consent shows for a delegation: the signed parent id and target,
+and the canonical bytes of the signed child capability. -/
+structure DelegateDisplay where
+  kind : ResourceKind
+  parentId : CapabilityId
+  target : Nat
+  child : List UInt8
+  deriving DecidableEq
+
+/-- The delegation request the member derives from its own command; the four
+authority coordinates and the zeroed height and pre-root are placeholders
+`checkHeader` does not compare (`delegateValues_exact`). -/
+def delegateValues (domain semantics : Digest) (federation : FederationId) {kind : ResourceKind}
+    (command : CapabilityDelegationController.Command kind) : Request kind where
+  domain := domain
+  semantics := semantics
+  federation := federation
+  subject := command.subject
+  subjectKeyEpoch := 0
+  target := command.declaration.target
+  verb := CredentialAuthorityFamily.delegateVerb kind
+  argsDigest := (Sp800185Cshake256.hash "DREGG.CAPABILITY.DELEGATE.ARGS/v1".toUTF8.toList
+    (CapabilityDelegationController.commandBytes domain semantics command command.declaration ++
+      (CapabilityDelegationController.declarationCodec kind).encode command.declaration)).digest
+  effectsDigest := CapabilityDelegationController.effectsDigest domain semantics command command.declaration
+  nonce := command.declaration.operationNullifier
+  height := 0
+  preStateRoot := ⟨0⟩
+  policyId := command.declaration.child.policyId
+  policyEpoch := 0
+  policyRevision := 0
+  cost := (CapabilityDelegationController.commandCodec.encode ⟨kind, command⟩).length
+
+/-- **The member derivation is the executor's request**, except at the fields
+admission recomputes from the actual authority cell (and the plan frame zeroes
+height and pre-root). -/
+theorem delegateValues_exact (snapshot : CapabilityDelegationController.Snapshot) (semantics : Digest)
+    (ambient : CapabilityDelegationController.Ambient) {kind : ResourceKind}
+    (command : CapabilityDelegationController.Command kind) :
+    CapabilityDelegationController.request snapshot semantics ambient command =
+      { delegateValues snapshot.domain semantics ambient.federation command with
+        subjectKeyEpoch := snapshot.authState.subjectKeyEpoch command.subject
+        height := ambient.height
+        preStateRoot := snapshot.cell.root
+        policyEpoch := command.declaration.child.policyEpoch
+        policyRevision := CredentialAuthorityState.policyRevisionAt snapshot.cell
+          command.declaration.child.policyId } := rfl
+
+/-- **Thin delegation consent.** The plan is this deployment's plan of this
+intent's own delegation command: one slot, role 6, whose header signs the local
+derivation. No view is read. -/
+def checkDelegateThin (deployment : Deployment) (semantics : Digest) (federation : FederationId)
+    (commandBytes : List UInt8) (planBytes : List UInt8) (views : List (List UInt8)) :
+    Except Refusal (List (List UInt8) × DelegateDisplay) :=
+  match CapabilityDelegationController.commandCodec.decode commandBytes with
+  | none => .error .commandMalformed
+  | some ⟨kind, command⟩ =>
+    match NativeHostCodec.signingPlanCodec.decode planBytes with
+    | none => .error .planMalformed
+    | some plan =>
+      if plan.domain = deployment.domain ∧ plan.semantics = semantics ∧
+          plan.finalizedDraft = .delegate commandBytes then
+        if views.isEmpty then
+          match plan.slots with
+          | [slot] =>
+            if slot.role = 6 ∧ slot.index = 0 then
+              match checkHeader 0
+                  (CapabilityDelegationController.operationMarker deployment.domain semantics command)
+                  (delegateValues deployment.domain semantics federation command) slot.header with
+              | .error refusal => .error refusal
+              | .ok () => .ok ([slot.header], ⟨kind, command.declaration.parentId,
+                  command.declaration.target.value,
+                  (CredentialAuthorityEntryCodec.capabilityStream kind).encode command.declaration.child⟩)
+            else .error .slotShape
+          | _ => .error .slotShape
+        else .error .viewUnexpected
+      else .error .planCoordinates
+
+/-- The shown display is the signed command's: its parent id, target and child. -/
+theorem checkDelegateThin_shows {deployment : Deployment} {semantics : Digest}
+    {federation : FederationId} {commandBytes planBytes : List UInt8} {views : List (List UInt8)}
+    {headers : List (List UInt8)} {shown : DelegateDisplay}
+    (checked : checkDelegateThin deployment semantics federation commandBytes planBytes views =
+      .ok (headers, shown)) :
+    ∃ kind command, CapabilityDelegationController.commandCodec.decode commandBytes =
+        some ⟨kind, command⟩ ∧
+      shown = ⟨kind, command.declaration.parentId, command.declaration.target.value,
+        (CredentialAuthorityEntryCodec.capabilityStream kind).encode command.declaration.child⟩ := by
+  unfold checkDelegateThin at checked
+  split at checked
+  · cases checked
+  · rename_i kind command decoded
+    refine ⟨kind, command, decoded, ?_⟩
+    split at checked
+    · cases checked
+    · split at checked
+      · split at checked
+        · split at checked
+          · split at checked
+            · split at checked
+              · cases checked
+              · simp only [Except.ok.injEq, Prod.mk.injEq] at checked
+                exact checked.2.symm
+            · cases checked
+          · cases checked
+        · cases checked
+      · cases checked
+
+/-- The two addresses a delegation writes. -/
+def delegateFootprint {kind : ResourceKind} (child : CapabilityId) :
+    List (Address CredentialAuthorityState.layout) :=
+  [⟨.capability kind, child⟩, ⟨.registered, .capability child⟩]
+
+variable {F : Type} [Field F] {deployment : Deployment}
+  {profile : CanonicalRuntimeProfile.Profile F}
+
+/-- **What a thin delegation shows is what commits.** For the executor's own
+prepared delegation of the signed command (`CapabilityDelegationController.Prepared`,
+built by `prepare` from the loaded authority cell at admission):
+
+* the child's record is written with the SHOWN head (the signed child) and the
+  kernel-owned lineage: a copy of the parent at the signed `parentId`, read from
+  the actual pre-state;
+* the child's revocation key is registered;
+* every other authority address is exactly the pre-state's. -/
+theorem delegate_display_is_commit {ambient : CapabilityDelegationController.Ambient}
+    {durable : CapabilityDelegationController.Durable} {kind : ResourceKind}
+    {command : CapabilityDelegationController.Command kind}
+    (prepared : CapabilityDelegationController.Prepared deployment profile ambient durable command) :
+    readCapability prepared.authorityPost kind command.declaration.child.id =
+        some (delegatedCapability command.declaration.child prepared.parent
+          (CapabilityDelegationController.request prepared.authority.snapshot profile.semantics
+            ambient command)) ∧
+      readCapability prepared.authority.snapshot.cell kind command.declaration.parentId =
+        some prepared.parent ∧
+      isRegistered prepared.authorityPost (.capability command.declaration.child.id) = true ∧
+      ∀ address, address ∉ delegateFootprint (kind := kind) command.declaration.child.id →
+        prepared.authorityPost.logical address = prepared.authority.snapshot.cell.logical address := by
+  have entryWritten := apply_creation_member prepared.validated rfl
+    (command.declaration.capabilityEntry prepared.parent
+      (CapabilityDelegationController.request prepared.authority.snapshot profile.semantics ambient command))
+    (by simp)
+  have registrationWritten := apply_creation_member prepared.validated rfl
+    (registrationEntry (.capability command.declaration.child.id)) (by simp)
+  refine ⟨entryWritten, prepared.descent.parentExact, ?_, ?_⟩
+  · simp only [registrationEntry] at registrationWritten
+    change (prepared.validated.apply.logical
+      ⟨.registered, .capability command.declaration.child.id⟩).isSome = true
+    exact (congrArg Option.isSome registrationWritten).trans rfl
+  · intro address outside
+    change prepared.validated.apply.logical address = _
+    rw [CellState.ValidatedPatch.apply_logical]
+    unfold DelegateDeclaration.patch
+    change Patch.run prepared.authority.snapshot.cell.logical
+      (CredentialAuthorityEffects.assignAll prepared.authority.snapshot.cell.logical _) address = _
+    rw [run_assignAll]
+    exact setAll_frame _ _ address (by
+      simpa [DelegateDeclaration.entries, DelegateDeclaration.capabilityEntry, registrationEntry,
+        delegateFootprint] using outside)
+
+/-- **Gates refuse only.** Two executor preparations of the same signed
+delegation, over ANY two loaded states and admission heights (any nullifier set,
+parent lineage, revocation and registration planes, issuer and policy epochs,
+policy revision, target root and law), write the same shown effect: the same
+child head at the same address, the same registration, and nothing else. Each
+gate is a field of `Prepared` (`descent`: the parent at the signed id, its
+lineage valid and anchored, the child slot fresh and unregistered, issuer and
+policy epochs current, ancestors and channels registered and live; `shape`: the
+child's rights narrow the parent's; `policyTarget`; `identity`: the operation
+marker; `validated`; `source`: the current law), or of the receiver's
+`Accepted` (the signature, and the authorization whose capability evidence names
+the parent the signer holds, `Accepted.parent_authorized`). A failing gate makes
+`prepare` or `authorize` refuse; none feeds the shown effect. Only the
+kernel-owned lineage may differ: each is the copy of its own state's parent. -/
+theorem delegate_gate_refuse_only {ambient₁ ambient₂ : CapabilityDelegationController.Ambient}
+    {durable₁ durable₂ : CapabilityDelegationController.Durable} {kind : ResourceKind}
+    {command : CapabilityDelegationController.Command kind}
+    (one : CapabilityDelegationController.Prepared deployment profile ambient₁ durable₁ command)
+    (two : CapabilityDelegationController.Prepared deployment profile ambient₂ durable₂ command) :
+    (readCapability one.authorityPost kind command.declaration.child.id).map StoredCapability.head =
+        (readCapability two.authorityPost kind command.declaration.child.id).map StoredCapability.head ∧
+      isRegistered one.authorityPost (.capability command.declaration.child.id) =
+        isRegistered two.authorityPost (.capability command.declaration.child.id) ∧
+      (∀ address, address ∉ delegateFootprint (kind := kind) command.declaration.child.id →
+        one.authorityPost.logical address = one.authority.snapshot.cell.logical address ∧
+        two.authorityPost.logical address = two.authority.snapshot.cell.logical address) := by
+  obtain ⟨written₁, _, registered₁, frame₁⟩ := delegate_display_is_commit one
+  obtain ⟨written₂, _, registered₂, frame₂⟩ := delegate_display_is_commit two
+  refine ⟨?_, by rw [registered₁, registered₂], fun address outside =>
+    ⟨frame₁ address outside, frame₂ address outside⟩⟩
+  rw [written₁, written₂]
+  rfl
+
+/-- **A Host that swaps the parent is refused before signing.** A plan whose
+finalized draft is a delegation command other than the intent's (for instance
+the same delegation over another parent) is refused `planCoordinates`. -/
+theorem delegate_swapped_draft_refused {deployment : Deployment} {semantics : Digest}
+    {federation : FederationId} {commandBytes planBytes other : List UInt8}
+    {views : List (List UInt8)} {kind : ResourceKind}
+    {command : CapabilityDelegationController.Command kind} {plan : NativeHostCodec.SigningPlan}
+    (decoded : CapabilityDelegationController.commandCodec.decode commandBytes = some ⟨kind, command⟩)
+    (planDecoded : NativeHostCodec.signingPlanCodec.decode planBytes = some plan)
+    (swapped : plan.finalizedDraft = .delegate other) (differs : other ≠ commandBytes) :
+    checkDelegateThin deployment semantics federation commandBytes planBytes views =
+      .error .planCoordinates := by
+  unfold checkDelegateThin
+  simp [decoded, planDecoded, swapped, differs]
+
+/-- What thin consent shows for a plan. -/
+inductive Shown where
+  | invocation (targets : List Display)
+  | delegation (display : DelegateDisplay)
+
+/-- **Thin plan consent**, by the intent's draft. -/
+def checkPlanThin (deployment : Deployment) (semantics : Digest) (federation : FederationId)
+    (wanted : NativeObservationCodec.Intent) (planBytes : List UInt8)
+    (views : List (List UInt8)) : Except Refusal (List (List UInt8) × Shown) :=
+  match wanted.purpose with
+  | .prepare (.invoke commandBytes) =>
+      (checkInvokeThin deployment semantics federation commandBytes planBytes views).map
+        fun (headers, displays) => (headers, .invocation displays)
+  | .prepare (.delegate commandBytes) =>
+      (checkDelegateThin deployment semantics federation commandBytes planBytes views).map
+        fun (headers, display) => (headers, .delegation display)
+  | _ => .error .notInvocation
+
+#assert_axioms delegateValues_exact checkDelegateThin_shows delegate_display_is_commit
+  delegate_gate_refuse_only delegate_swapped_draft_refused
 
 /-! ## Thin observation consent
 

@@ -351,6 +351,17 @@ def displayJson (display : NativeThinConsent.Display) : Json :=
       ("postRoot", toJson (toString root.value)),
       ("postBytes", toJson (SourceAgreementJson.encodeHex bytes))]
 
+/-- A delegation's display: the signed parent id, target and child capability
+bytes. The child's lineage is the kernel's copy of that parent, not shown. -/
+def delegateJson (display : NativeThinConsent.DelegateDisplay) : Json :=
+  Json.mkObj [("delegate", true), ("parent", toJson (toString display.parentId.value)),
+    ("target", toJson (toString display.target)),
+    ("childBytes", toJson (SourceAgreementJson.encodeHex display.child))]
+
+def shownJson : NativeThinConsent.Shown → Json
+  | .invocation displays => Json.arr (displays.map displayJson).toArray
+  | .delegation display => Json.arr #[delegateJson display]
+
 def thin (config : NativeHost.Config) (operation : UInt8) (payload : List UInt8) : IO (List UInt8) := do
   let (intentBytes, rest) ← splitPair payload
   let some wanted := NativeObservationCodec.intentCodec.decode intentBytes
@@ -378,9 +389,9 @@ def thin (config : NativeHost.Config) (operation : UInt8) (payload : List UInt8)
       match NativeThinConsent.checkPlanThin config.deployment semantics config.federation
           wanted planBytes views with
       | .error refusal => throw (IO.userError (thinRefusal refusal))
-      | .ok (headers, displays) =>
+      | .ok (headers, shown) =>
           pure (Json.mkObj [("headers", toJson (headers.map SourceAgreementJson.encodeHex)),
-            ("display", Json.arr (displays.map displayJson).toArray)]).compress.toUTF8.toList
+            ("display", shownJson shown)]).compress.toUTF8.toList
   | _ => throw (IO.userError "unsupported thin consent operation")
 
 /-- Entry adapters (lifecycle families) select from the admitted chronology,

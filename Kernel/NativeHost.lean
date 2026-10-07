@@ -212,7 +212,7 @@ def prepareLoaded (config : Config) (opened : Opened config) (draft : Draft) :
         let signature ← slot opened.authority.snapshot marker 5 0 ⟨.program, request⟩
         pure (.installWithRoster subject control bytes rosterBytes, [signature])
     | .delegate bytes => do
-        let packed ← need "noncanonical delegation command" (CapabilityDelegationController.commandCodec.decode bytes)
+        let packed ← need (CapabilityDelegationController.undecodable bytes) (CapabilityDelegationController.commandCodec.decode bytes)
         let ambient : CapabilityDelegationController.Ambient := ⟨config.federation, height⟩
         let prepared ← (CapabilityDelegationController.prepare config.deployment profile ambient
           opened.durable packed.2).mapError (fun reason => s!"delegation preparation: {repr reason}")

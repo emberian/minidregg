@@ -19,6 +19,10 @@
 #       refused naming the target (phase stale-target)
 #   S2  the same for a signer whose observe grant is narrowed: the uniform
 #       undisclosed frame
+#   D1  honest thin delegation: no view served; the shown parent is the signed
+#       one, and the turn commits
+#   DF  a Host proposing the slot of a delegation over ANOTHER parent: refused
+#       headerMismatch before anything is signed (the plant is asserted first)
 #   M   (only with THIN_MUTANT_PROVIDER: a provider built with the served-root
 #       comparison removed) the mutant accepts a view of another state, shows a
 #       post that differs from the one that commits; the real provider refused
@@ -212,6 +216,32 @@ rc=0; "$MINI" retry --attempt "$NEWCOMER_WS/attempts/s2-sealed" --mode submit >"
 grep -q 'undisclosed' "$D/log/s2-retry.err" || fail s2-uniform undisclosed "$rc" x "$(tail -3 "$D/log/s2-retry.err")"
 if grep -q 'stale-target' "$D/log/s2-retry.err"; then fail s2-uniform undisclosed "$rc" x "named a target the signer cannot observe"; fi
 row s2-uniform undisclosed "$rc" PASS
+
+# ---- D1: honest thin delegation. No view is served; what is shown is the signed
+# parent id and child; the child's lineage is the kernel's copy of that parent.
+ok d1-propose alice "delegate d1 tc-one $NEWCOMER_SUBJECT observe 50000"
+say alice 'submit d1' pass
+[ "$RC" = 0 ] || fail d1-submit 0 "$RC" x "$(tail -3 "$ERR")"
+row d1-submit 0 0 PASS
+D1=$(attempt_of "$ERR")
+check d1-thin-frames proxy_saw 'frame 232'
+check d1-shown-delegation jq -e '.[0].delegate == true and (.[0].childBytes | length > 0)' "$D1/thin-display.json"
+check d1-shown-parent-is-signed test "$(jq -r '.[0].parent' "$D1/thin-display.json")" = "$(jq -r .operationCapability "$SPONSOR_WS/refs/tc-one.json")"
+
+# ---- DF (planted fault): the Host swaps the parent. It proposes, for a
+# delegation over tc-one, the signing slot of a delegation over tc-blind (another
+# parent capability of the same signer): refused headerMismatch before signing.
+ok dfo-propose alice "delegate dfo tc-blind $NEWCOMER_SUBJECT observe 50000"
+say alice 'submit dfo' "capture=$D/planD"
+[ "$RC" != 0 ] || fail df-capture refused 0 x "the capturing proxy let dfo through"
+check df-captured test -s "$D/planD.plan"
+ok df-propose alice "delegate df tc-one $NEWCOMER_SUBJECT observe 50000"
+OTHER_INTENT=$D/planD.intent say alice 'submit df' "slots-from=$D/planD.plan"
+check df-planted proxy_saw "slots-from: spliced the slots of $D/planD.plan"
+grep -q 'headerMismatch' "$ERR" || fail df-refused headerMismatch "$RC" x "$(tail -3 "$ERR")"
+DF=$(attempt_of "$ERR")
+check df-nothing-signed test ! -e "$DF/transaction-signatures.json"
+row df-refused headerMismatch "$RC" PASS
 
 if [ -n "${THIN_MUTANT_PROVIDER:-}" ]; then
   check m-is-mutant sh -c "[ \"\$(sha256sum < '$THIN_MUTANT_PROVIDER')\" != \"\$(sha256sum < '$REAL')\" ]"

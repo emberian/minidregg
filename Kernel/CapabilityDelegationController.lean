@@ -45,11 +45,10 @@ def declarationStream (kind : ResourceKind) : StreamCodec (DelegateDeclaration k
   StreamCodec.xmap
     (StreamCodec.product (capabilityStream kind)
       (StreamCodec.product capabilityIdStream
-        (StreamCodec.product (TypedAuthorizationRequestCodec.resourceIdStream kind)
-          (StreamCodec.product digestStream StreamCodec.nat))))
+        (StreamCodec.product (TypedAuthorizationRequestCodec.resourceIdStream kind) StreamCodec.nat)))
     (fun declaration => (declaration.child, declaration.parentId, declaration.target,
-      declaration.expectedPreRoot, declaration.operationNullifier))
-    (fun (child, parentId, target, root, marker) => ⟨child, parentId, target, root, marker⟩)
+      declaration.operationNullifier))
+    (fun (child, parentId, target, marker) => ⟨child, parentId, target, marker⟩)
     (by intro declaration; cases declaration; rfl)
 
 def declarationCodec (kind : ResourceKind) : LawfulCodec (DelegateDeclaration kind) :=
@@ -85,7 +84,12 @@ def packedCommandStream : StreamCodec PackedCommand where
     | mk kind command =>
       simp [List.append_assoc, StreamCodec.decodePrefix_encode]
 
-def commandFrame : List UInt8 := "DREGG/CAPABILITY/DELEGATE".toUTF8.toList ++ [1]
+def commandFrameName : List UInt8 := "DREGG/CAPABILITY/DELEGATE".toUTF8.toList
+
+/-- Version 2: the declaration no longer carries the authority-cell root
+(`expectedPreRoot`). Version 1 commands signed that whole root; they refuse by
+name (`retiredCommand`). -/
+def commandFrame : List UInt8 := commandFrameName ++ [2]
 
 def rawCommandCodec : LawfulCodec PackedCommand where
   encode command := commandFrame ++ packedCommandStream.encode command
@@ -102,6 +106,33 @@ def commandCodec : LawfulCodec PackedCommand := ResourceBirthCodec.strictCodec r
 theorem command_decode_canonical {bytes : List UInt8} {command : PackedCommand}
     (decoded : commandCodec.decode bytes = some command) : commandCodec.encode command = bytes :=
   ResourceBirthCodec.strictCodec_canonical rawCommandCodec decoded
+
+/-- The version-1 frame: its declaration carried `expectedPreRoot`, the whole
+authority-cell root. -/
+def retiredFrameV1 : List UInt8 := commandFrameName ++ [1]
+
+/-- Why bytes that do not decode are refused, naming a retired version. -/
+def undecodable (bytes : List UInt8) : String :=
+  if bytes.take retiredFrameV1.length = retiredFrameV1 then
+    "delegation command v1 is retired: it signed the whole authority-cell root (expectedPreRoot); \
+     v2 binds the parent by its signed id"
+  else "noncanonical delegation command"
+
+/-- **A version-1 command refuses**, and by name. -/
+theorem retired_v1_refused (rest : List UInt8) :
+    commandCodec.decode (retiredFrameV1 ++ rest) = none ∧
+      undecodable (retiredFrameV1 ++ rest) =
+        "delegation command v1 is retired: it signed the whole authority-cell root (expectedPreRoot); \
+         v2 binds the parent by its signed id" := by
+  constructor
+  · cases decoded : commandCodec.decode (retiredFrameV1 ++ rest) with
+    | none => rfl
+    | some command =>
+        have exact := command_decode_canonical decoded
+        have framed := congrArg (List.take commandFrame.length) exact
+        simp [commandCodec, ResourceBirthCodec.strictCodec, rawCommandCodec] at framed
+        simp [commandFrame, retiredFrameV1, commandFrameName, List.take_append] at framed
+  · simp [undecodable]
 
 def operationMarker {kind : ResourceKind} (domain semantics : Digest) (command : Command kind) : Nat :=
   (Sp800185Cshake256.hash "DREGG.CAPABILITY.DELEGATE.IDENTITY/v1".toUTF8.toList
@@ -162,8 +193,7 @@ def requireSome {A : Type} (reason : Reject) : Option A → Except Reject A
 
 def DescentReady {kind : ResourceKind} (snapshot : Snapshot) (command : Command kind)
     (parent : StoredCapability kind) : Prop :=
-  command.declaration.expectedPreRoot = snapshot.cell.root ∧
-    readCapability snapshot.cell kind command.declaration.parentId = some parent ∧
+  readCapability snapshot.cell kind command.declaration.parentId = some parent ∧
     parent.head.id = command.declaration.parentId ∧
     CapabilityIdFresh snapshot.cell command.declaration.child.id ∧
     snapshot.spent command.declaration.operationNullifier = false ∧
@@ -194,11 +224,10 @@ abbrev parentage {kind : ResourceKind} (snapshot : Snapshot) (command : Command 
 def descentEvidence {kind : ResourceKind} (snapshot : Snapshot) (command : Command kind)
     (parent : StoredCapability kind) (ready : DescentReady snapshot command parent)
     (valid : LineageValid (parentage snapshot command) parent) (anchored : LineageAnchored snapshot.cell parent) :
-    DescentEvidence snapshot.cell command.declaration.expectedPreRoot
-      command.declaration.parentId command.declaration.child parent := by
-  rcases ready with ⟨root, lookup, parentId, fresh, _unspent, issuer, generation,
+    DescentEvidence snapshot.cell command.declaration.parentId command.declaration.child parent := by
+  rcases ready with ⟨lookup, parentId, fresh, _unspent, issuer, generation,
     selfUnregistered, ancestorsRegistered, channelsRegistered, selfLive, ancestorsLive, channelsLive⟩
-  exact ⟨root, lookup, parentId, valid, anchored, fresh, issuer, generation,
+  exact ⟨lookup, parentId, valid, anchored, fresh, issuer, generation,
     selfUnregistered, ancestorsRegistered, channelsRegistered, selfLive, ancestorsLive, channelsLive⟩
 
 abbrev ObservedTarget (deployment : Deployment) (directory : Directory Nat Registry)
@@ -218,7 +247,7 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
   target : ObservedTarget deployment directory.directory command
   parent : StoredCapability kind
   descent : DescentEvidence authority.snapshot.cell
-    command.declaration.expectedPreRoot command.declaration.parentId command.declaration.child parent
+    command.declaration.parentId command.declaration.child parent
   shape : CredentialAuthorityFamily.DelegationShape
     (request authority.snapshot profile.semantics ambient command) command.declaration.child parent.head
     (parentage authority.snapshot command)

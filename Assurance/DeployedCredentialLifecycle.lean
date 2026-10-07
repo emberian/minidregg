@@ -339,7 +339,6 @@ def parentStored : StoredCapability .object := ⟨rootCapability, []⟩
 noncomputable def attenuateDeclaration : AttenuateDeclaration .object where
   child := childCapability
   parentId := rootCapability.id
-  expectedPreRoot := issuedCell.root
   operationNullifier := 1002
 
 def attenuateDigest (_ : AttenuateDeclaration .object) : Digest := ⟨9102⟩
@@ -356,7 +355,6 @@ noncomputable def storedCapabilityCodec :
 
 def attenuateEvidence :
     AttenuateEvidence issuedCell attenuateDeclaration parentStored where
-  preRootExact := rfl
   parentExact := by simpa [parentStored] using issued_root_exact
   parentIdExact := rfl
   parentLineageValid := .root rootCapability rfl rfl

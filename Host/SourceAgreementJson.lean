@@ -510,21 +510,23 @@ private def delegationFor (kind : ResourceKind) (path : String)
   let child ← capability kind (path ++ ".child") (← field path "child" obj)
   let parentId := CapabilityId.mk (← nat (path ++ ".parentId") (← field path "parentId" obj))
   let target := ResourceId.mk (← nat (path ++ ".target") (← field path "target" obj))
-  let expectedPreRoot := Digest.mk
-    (← nat (path ++ ".expectedPreRoot") (← field path "expectedPreRoot" obj))
   let command : CapabilityDelegationController.Command kind := {
     subject := ⟨← nat (path ++ ".subject") (← field path "subject" obj)⟩
     nonce := ← nat (path ++ ".nonce") (← field path "nonce" obj)
     expectedTargetRoot := ⟨← nat (path ++ ".expectedTargetRoot")
       (← field path "expectedTargetRoot" obj)⟩
-    declaration := ⟨child, parentId, target, expectedPreRoot, 0⟩ }
+    declaration := ⟨child, parentId, target, 0⟩ }
   let marker := CapabilityDelegationController.operationMarker domain semantics command
   let finalized := { command with declaration := { command.declaration with operationNullifier := marker } }
   pure (CapabilityDelegationController.commandCodec.encode ⟨kind, finalized⟩)
 
 private def delegation (path : String) (json : Lean.Json) : Result (List UInt8) := do
   let names := ["kind", "domain", "semantics", "subject", "nonce", "expectedTargetRoot",
-    "child", "parentId", "target", "expectedPreRoot"]
+    "child", "parentId", "target"]
+  -- Delegation command v1 signed the whole authority-cell root; v2 does not.
+  if (← object path json).contains "expectedPreRoot" then
+    throw s!"{path}.expectedPreRoot: retired with delegation command v1 (it signed the whole \
+      authority-cell root); v2 binds the parent by its signed id"
   let obj ← exactObject path names json
   let kind ← resourceKind (path ++ ".kind") (← field path "kind" obj)
   let domain := Digest.mk (← nat (path ++ ".domain") (← field path "domain" obj))
@@ -1203,7 +1205,7 @@ private def draft (path : String) (json : Lean.Json) : Result Draft := do
       let bytes ← decodeHex (path ++ ".command") (← field path "command" obj)
       match CapabilityDelegationController.commandCodec.decode bytes with
       | some value => pure (.delegate (CapabilityDelegationController.commandCodec.encode value))
-      | none => failAt (path ++ ".command") "noncanonical delegation command"
+      | none => failAt (path ++ ".command") (CapabilityDelegationController.undecodable bytes)
   | "delegate-source" =>
       let obj ← exactObject path ["type", "command"] json
       pure (.delegate (← delegation (path ++ ".command") (← field path "command" obj)))
