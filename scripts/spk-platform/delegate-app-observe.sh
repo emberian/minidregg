@@ -96,7 +96,6 @@ for route in bob-web hermes-a hermes-b; do
     {subject:"8",nonce:$nonce,purpose:{type:"prepare",draft:{type:"delegate-source",
       command:{kind:"object",domain:$c.domain,semantics:$c.semantics,subject:"8",nonce:$commandNonce,
         expectedTargetRoot:$resource[0].cell.root,parentId:$p.id,target:"8401",
-        expectedPreRoot:$c.authorityRoot,
         child:($p + {id:$child,parent:$p.id,holder:{type:"subject",subject:$holder},
           targets:["8401"],verbs:["observe"],ancestors:(($p.ancestors + [$p.id]) | unique)})}}},
       grants:[{kind:"object",target:"8401",capability:$p.id}]}' >"$EVIDENCE/$route-delegate-intent.json"

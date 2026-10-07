@@ -386,7 +386,7 @@ class Fixture:
             "type": "delegate-source", "command": {"kind": "object", "domain": q["challenge"]["domain"],
                 "semantics": q["challenge"]["semantics"], "subject": self.owner, "nonce": self.n(),
                 "expectedTargetRoot": q["view"]["cell"]["root"], "parentId": p["id"], "target": str(target),
-                "expectedPreRoot": q["challenge"]["authorityRoot"], "child": new}}},
+                "child": new}}},
                 "grants": [grant(target,parent)]}, self.owner)
 
     def approve(self, plan, header, base, out):
