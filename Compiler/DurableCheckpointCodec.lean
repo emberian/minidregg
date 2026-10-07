@@ -138,7 +138,7 @@ schema reference version (`DeployedCellRegistry.declaredEffectSchemaRef`);
 either moves without this value. A change to any component changes the seed
 frame and refuses every older Store by name. -/
 def StoreEpoch.current : StoreEpoch :=
-  ⟨"state-key/tagged-v4", "schema-refs/v5", logTagLabel, "history/mmr-v1;spent/trie-v1"⟩
+  ⟨"state-key/tagged-v4", "schema-refs/v5", logTagLabel, "history/mmr-v1;spent/trie-v1;checkpoint/v3"⟩
 
 /-- The label carried in the seed frame: the three components, `;`-separated. -/
 def StoreEpoch.label (epoch : StoreEpoch) : String :=
@@ -155,8 +155,8 @@ def StoreEpoch.parse (text : String) : Option StoreEpoch :=
   | [stateKey, schemaRefs, logTag] =>
       let epoch : StoreEpoch := ⟨stateKey, schemaRefs, logTag, "none"⟩
       if epoch.labelBeforeAccumulator = text then some epoch else none
-  | [stateKey, schemaRefs, logTag, history, spent] =>
-      let epoch : StoreEpoch := ⟨stateKey, schemaRefs, logTag, s!"{history};{spent}"⟩
+  | stateKey :: schemaRefs :: logTag :: accumulator@(_ :: _) =>
+      let epoch : StoreEpoch := ⟨stateKey, schemaRefs, logTag, String.intercalate ";" accumulator⟩
       if epoch.label = text then some epoch else none
   | _ => none
 
@@ -326,6 +326,37 @@ def chainStep (previous : Digest) (record : IntentRecord) : Digest :=
 def chainAfter (start : Digest) (records : List IntentRecord) : Digest :=
   records.foldl chainStep start
 
+/-- The turn digest of a record read off its STORED bytes: the bytes after the
+frame, hashed as they are (no decode-then-re-encode on the open's chain). -/
+def storedRecordDigest (bytes : List UInt8) : Digest :=
+  Kernel.WorldRoot.turnDigestOfBytes (bytes.drop (bytesStream.encode recordFrame.frame).length)
+
+/-- **Hashing the stored bytes is hashing the record**, whenever the bytes
+decode: the codec is canonical (`Framed.decode_canonical`), so the stored bytes
+ARE the frame followed by the record's canonical encoding. A non-canonical
+stored encoding does not decode, and the open refuses it by height before any
+chain is computed. -/
+theorem storedRecordDigest_eq {bytes : List UInt8} {record : IntentRecord}
+    (decoded : recordFrame.decode bytes = some record) :
+    storedRecordDigest bytes = recordDigest record := by
+  have canonical := Framed.decode_canonical recordFrame decoded
+  unfold storedRecordDigest recordDigest
+  rw [← canonical]
+  simp [Framed.encode, StreamCodec.product, recordFrame]
+
+/-- One chain link from a record's stored bytes. -/
+def chainStepStored (previous : Digest) (bytes : List UInt8) : Digest :=
+  Kernel.WorldRoot.chainDigest previous (storedRecordDigest bytes)
+
+theorem chainStepStored_eq {previous : Digest} {bytes : List UInt8} {record : IntentRecord}
+    (decoded : recordFrame.decode bytes = some record) :
+    chainStepStored previous bytes = chainStep previous record := by
+  unfold chainStepStored chainStep
+  rw [storedRecordDigest_eq decoded]
+
+#assert_axioms storedRecordDigest_eq
+#assert_axioms chainStepStored_eq
+
 theorem chainAfter_append (start : Digest) (left right : List IntentRecord) :
     chainAfter start (left ++ right) = chainAfter (chainAfter start left) right := by
   simp [chainAfter, List.foldl_append]
@@ -341,13 +372,15 @@ def systemLeaf (height : Nat) (chain : Digest) : Digest :=
 
 /-! ## Checkpoints -/
 
+/-- v3: the cells and the allowance; no consumed nullifiers (they are a
+function of the verified prefix, `DurableCheckpoint.State`). -/
 def stateStream : StreamCodec State :=
   StreamCodec.xmap
     (StreamCodec.product bytesStream
       (StreamCodec.product (StreamCodec.list (StreamCodec.product digestStream bytesStream))
-        (StreamCodec.product (StreamCodec.list nullifierStream) chargeStream)))
-    (fun state => (state.absentBytes, state.cells, state.consumed, state.available))
-    (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2⟩)
+        chargeStream))
+    (fun state => (state.absentBytes, state.cells, state.available))
+    (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2⟩)
     (by intro value; cases value; rfl)
 
 /-- The authenticated content of a checkpoint. -/
@@ -397,10 +430,11 @@ def sealedStream : StreamCodec Sealed :=
     (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2⟩)
     (by intro value; cases value; rfl)
 
-/-- v2: the body carries the accumulator frontier and the spent root. A v1
-checkpoint refuses (`malformed`), as its frame differs. -/
+/-- v3: the body carries the accumulator frontier and the spent root, and its
+state no consumed nullifiers. An older checkpoint refuses (`malformed`): its
+frame differs; the Store epoch (`StoreEpoch.accumulator`) names the change. -/
 def checkpointFrame : Framed Sealed :=
-  ⟨"DREGG.DURABLE.CHECKPOINT".toUTF8.toList ++ [2], sealedStream⟩
+  ⟨"DREGG.DURABLE.CHECKPOINT".toUTF8.toList ++ [3], sealedStream⟩
 
 def macInputStream : StreamCodec (List UInt8 × Nat × Digest × List UInt8) :=
   StreamCodec.product bytesStream (StreamCodec.product StreamCodec.nat

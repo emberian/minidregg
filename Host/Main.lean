@@ -1062,7 +1062,7 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
     (PresenceIndex.ofRecords durable.image.accepted).touched.length
   let state ← timedPure "checkpoint: state (ofSnapshot)" fun _ =>
     DurableCheckpoint.State.ofSnapshot durable.image durable.snapshot
-  IO.println s!"  state cells {state.cells.length} nullifiers {state.consumed.length}"
+  IO.println s!"  state cells {state.cells.length}"
   let frontier := durable.frontier.getD []
   let spentRoot := Minidregg.Compiler.DurableSpent.emptyDigest
   discard <| timedPure "checkpoint: body encode" fun _ =>
