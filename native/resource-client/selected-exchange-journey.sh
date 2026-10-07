@@ -122,8 +122,12 @@ start_service() {
     sleep 0.1
   done
 }
-store_image() { # complete logical image of a Store, for equality checks
-  "$STORE" read-to "$1/store" "$2"
+store_image() { # what a Store has admitted, for equality checks: the Host's `store-audit` re-derives
+  # the whole durable Store from genesis (records, tags, accumulator, spent map, checkpoints, head
+  # root) and re-admits every ingress, and prints the counts and the lookup index. Equal output =
+  # nothing admitted in between. (The old `read-to` read the whole-image record a durable Store no
+  # longer keeps: "published byte record is missing".)
+  "$HOST" "$1/deployment/pinned-config.json" store-audit >"$2"
 }
 # One signed resource or policy query by an explicit key and grant.
 signed_query() {
@@ -445,7 +449,7 @@ if cmp -s "$X/article.eml" "$N/tampered-article.eml"; then echo 'tamper did not 
 mkdir -m 700 "$N/tampered-article"
 if "$HOST" "$B/deployment/pinned-config.json" selected-release-fn-legacy-poll \
     "$FNX" "$FN/scope.json" "$FN/control.sock" "$N/tampered-article.eml" \
-    "$RECIPIENT_CAP" "$AUTHORITY_ROOT" "$TARGET_ROOT" \
+    "$RECIPIENT_CAP" "$TARGET_ROOT" \
     "$N/tampered-article/cursor.fncu" "$N/tampered-article/report.fn-r" \
     "$N/tampered-article/stored.eml" "$N/tampered-article/packet.bin" \
     "$N/tampered-article/ingress.bin" "$N/tampered-article/result.json" \
@@ -460,11 +464,10 @@ end
 # inbox and submitted to B's served Store; each must refuse with no write.
 signed_query "$B" "$A/sponsor.key" "$SOURCE_SUBJECT" "$INBOX" "$RECIPIENT_CAP" resource \
   "$N/inbox-after-admission"
-POST_AUTHORITY=$(jq -er '.authorityRoot' "$N/inbox-after-admission/challenge.json")
 POST_ROOT=$(jq -er '.cell.root' "$N/inbox-after-admission/view.json")
 submit_negative() { # label packet target-root
   "$HOST" "$B/deployment/pinned-config.json" selected-release-ingress \
-    "$2" "$RECIPIENT_CAP" "$POST_AUTHORITY" "$3" "$N/$1-ingress.bin"
+    "$2" "$RECIPIENT_CAP" "$3" "$N/$1-ingress.bin"
   if "$MINI" selected-release-submit --host "$HOST" --config "$B/deployment/pinned-config.json" \
       --socket "$B/public/mini.sock" --ingress "$N/$1-ingress.bin" --dir "$N/$1-attempt" \
       >"$N/$1.stdout" 2>"$N/$1.stderr"; then
@@ -523,7 +526,7 @@ cmp "$ROOT/b-image-after-admission.bin" "$ROOT/b-image-after-refusals.bin"
 # one mutation (byte, signer, root), not on the wrapper.
 begin positive-control
 "$HOST" "$B/deployment/pinned-config.json" selected-release-ingress \
-  "$N/control/packet.bin" "$RECIPIENT_CAP" "$POST_AUTHORITY" "$POST_ROOT" "$N/control-ingress.bin"
+  "$N/control/packet.bin" "$RECIPIENT_CAP" "$POST_ROOT" "$N/control-ingress.bin"
 "$MINI" selected-release-submit --host "$HOST" --config "$B/deployment/pinned-config.json" \
   --socket "$B/public/mini.sock" --ingress "$N/control-ingress.bin" --dir "$N/control-attempt" \
   >"$N/control.stdout"
