@@ -1041,16 +1041,25 @@ theorem readSlot_of_retired {rootBytes : Bytes → Digest} {config : Config} {sn
     readSlot config snapshot name = none := by
   simp [readSlot, bodyOf, payloadOf_of_retired retired]
 
+/-- **The declared state a cell's bytes hold as `object`'s**: a state payload whose key is
+the object's own (`stateKey object`). Anything else is refused `stateCodec`, a state of
+ANOTHER object included: a coordinate the cells of two objects shared would be refused by
+name, never read as the wrong object's state. -/
+def stateFor (object : CellId) (bytes : Bytes) : Except Refusal (Option ObjectState) :=
+  match payloadOf bytes with
+  | none => .ok none
+  | some payload =>
+    if payload.role = .state ∧ payload.key = stateKey object then
+      match decodeObjectState payload.body with
+      | some state => .ok (some state)
+      | none => .error .stateCodec
+    else .error .stateCodec
+
 /-- The object's declared state as its state cell holds it: `none` when the
 object has no state yet, refused when the cell holds anything else. -/
 def readState {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (object : CellId) :
     Except Refusal (Option ObjectState) :=
-  let bytes := snapshot.canonicalBytes (stateCell config.domain object)
-  match bodyOf .state bytes with
-  | some body => match decodeObjectState body with
-    | some state => .ok (some state)
-    | none => .error .stateCodec
-  | none => if (payloadOf bytes).isSome then .error .stateCodec else .ok none
+  stateFor object (snapshot.canonicalBytes (stateCell config.domain object))
 
 /-- The image an inbox installs. -/
 def inboxImage (inbox : Inbox.Inbox) : Bytes :=
@@ -1114,16 +1123,24 @@ theorem mem_objectPost {rootBytes : Bytes → Digest} {config : Config} {snapsho
   · cases member
   · simpa using member
 
+/-- **The object record a cell's bytes hold as `object`'s**: an object payload whose key is
+the object's own (`objectKey object`); anything else (another object's record included) is
+refused `objectCodec`. -/
+def objectFor (object : CellId) (bytes : Bytes) : Except Refusal (Option ObjectRecord) :=
+  match payloadOf bytes with
+  | none => .ok none
+  | some payload =>
+    if payload.role = .object ∧ payload.key = objectKey object then
+      match ObjectRecord.decodeRecord payload.body with
+      | some record => .ok (some record)
+      | none => .error .objectCodec
+    else .error .objectCodec
+
 /-- The object's record: `none` when the cell has none (not an object), refused
 when the cell holds anything else. -/
 def readObject {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (object : CellId) :
     Except Refusal (Option ObjectRecord) :=
-  let bytes := snapshot.canonicalBytes (objectCell config.domain object)
-  match bodyOf .object bytes with
-  | some body => match ObjectRecord.decodeRecord body with
-    | some record => .ok (some record)
-    | none => .error .objectCodec
-  | none => if (payloadOf bytes).isSome then .error .objectCodec else .ok none
+  objectFor object (snapshot.canonicalBytes (objectCell config.domain object))
 
 /-- The request facts a declared-state write is judged under. `turn`: 1 birth,
 2 delivery, 4 creation (the seed). A delivery's write is the activity's, so its subject
@@ -4203,20 +4220,22 @@ theorem payloadOf_book (book : BookCell) :
 theorem objectAt_of_read {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {object : CellId} {record : ObjectRecord} (read : readObject config snapshot object = .ok (some record)) :
     objectAt config snapshot.canonicalBytes object = some record := by
-  unfold readObject at read
+  unfold readObject objectFor at read
   unfold objectAt
-  revert read
-  cases hb : bodyOf .object (snapshot.canonicalBytes (objectCell config.domain object)) with
-  | none =>
-    intro read
-    simp only [hb] at read
-    split at read <;> cases read
-  | some body =>
-    intro read
-    simp only [hb] at read
-    cases hd : ObjectRecord.decodeRecord body with
-    | none => rw [hd] at read; cases read
-    | some found => rw [hd] at read; cases read; simp [hd]
+  cases present : payloadOf (snapshot.canonicalBytes (objectCell config.domain object)) with
+  | none => rw [present] at read; cases read
+  | some payload =>
+    rw [present] at read
+    simp only at read
+    split at read
+    · rename_i owned
+      cases hd : ObjectRecord.decodeRecord payload.body with
+      | none => rw [hd] at read; cases read
+      | some found =>
+        rw [hd] at read
+        cases read
+        simp [bodyOf, present, owned.1, hd]
+    · cases read
 
 /-- The payer of a record image: its escrow's account. -/
 theorem payer_record_image (config : Config) (bytesAt : CellId → Bytes) (record : Record) (await : Await)
