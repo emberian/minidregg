@@ -49,6 +49,10 @@ run scripts-elab    bash scripts/check-scripts-elab.sh
 # Each planted fault against the pinned history API is refused by the guard it plants
 # (a per-fault expected error, not "any error": API drift does not pass it).
 run api-faults     bash scripts/kn2/check-planted-api-faults.sh
+# A native helper that cannot start, or answers bytes that are not a tagged reply, is refused by name
+# with no panic (2026-10-07: a failed exec flushed the caller's buffered stdout into the reply pipe and
+# its bytes, read as a length, aborted the Host). Executed, no fixture; seconds.
+run coprocess-faults lake env lean --run scripts/kn2/coprocess-faults.lean
 run import-boundary bash scripts/check-import-boundary.sh
 run proof-hygiene   bash scripts/check-proof-hygiene.sh
 run build-surfaces  python3 scripts/lean-build-surfaces.py check

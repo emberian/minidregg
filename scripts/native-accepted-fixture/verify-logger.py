@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """A `serve` helper for the native signature verifier (Compiler/NativeCoprocess.lean
-frames) that records every `verify` triple and the real verifier's exact answer, then
+frames, opening with the reply tag) that records every `verify` triple and the real verifier's exact answer, then
 forwards. Used only by generate.sh to record a transcript.
 env: REAL_VERIFIER (the pinned binary), VERIFY_LOG (JSON lines, appended)."""
 import json, os, struct, subprocess, sys
@@ -26,6 +26,7 @@ while True:
                                   "code": result.returncode, "stdout": result.stdout.decode(),
                                   "stderr": result.stderr.decode()}) + "\n")
     out = sys.stdout.buffer
+    out.write(b"MDCOPRC1")  # NativeCoprocess.replyTag
     out.write(struct.pack(">I", result.returncode))
     out.write(struct.pack(">Q", len(result.stdout)) + result.stdout)
     out.write(struct.pack(">Q", len(result.stderr)) + result.stderr)

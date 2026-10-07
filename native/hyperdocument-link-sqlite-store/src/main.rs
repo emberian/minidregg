@@ -322,8 +322,10 @@ fn main() -> ExitCode {
 /// in this process, so its files, stdout, stderr and exit code are exactly
 /// the one-shot invocation's. Crash and hold fixtures alone still run as
 /// their own child, because they end or suspend their process on purpose.
-/// Frames: request `u32 argc, (u32 len, bytes)*`; reply `u32 code,
-/// u64 len, stdout, u64 len, stderr`; integers big-endian. EOF ends it.
+/// Frames: request `u32 argc, (u32 len, bytes)*`; reply `REPLY_TAG`
+/// (`MDCOPRC1`), `u32 code, u64 len, stdout, u64 len, stderr`; integers
+/// big-endian. EOF ends it. The tag lets the Host refuse, by name, bytes
+/// that are not a reply (`NativeCoprocess.replyTag`).
 fn serve() -> ExitCode {
     use std::ffi::OsString;
     use std::io::{BufReader, BufWriter, ErrorKind};
@@ -331,6 +333,7 @@ fn serve() -> ExitCode {
     use std::os::unix::process::ExitStatusExt;
     use std::process::{Command, Stdio};
     const MAX_ARGS: usize = 64;
+    const REPLY_TAG: &[u8; 8] = b"MDCOPRC1";
     const MAX_ARG_BYTES: usize = 64 * 1024;
     let Ok(executable) = env::current_exe() else {
         return ExitCode::from(2);
@@ -386,7 +389,8 @@ fn serve() -> ExitCode {
                 .unwrap_or_else(|_| (101, Vec::new(), b"sqlite-store error: panicked\n".to_vec()))
         };
         let written = output
-            .write_all(&code.to_be_bytes())
+            .write_all(REPLY_TAG)
+            .and_then(|()| output.write_all(&code.to_be_bytes()))
             .and_then(|()| output.write_all(&(stdout.len() as u64).to_be_bytes()))
             .and_then(|()| output.write_all(&stdout))
             .and_then(|()| output.write_all(&(stderr.len() as u64).to_be_bytes()))
