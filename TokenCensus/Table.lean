@@ -189,7 +189,7 @@ Minidregg.Kernel.CapabilityRenounce.DecodedIngress.mk | Kernel.CapabilityRenounc
 Minidregg.Kernel.CapabilityRenounce.HolderRefusal.mk | Kernel.CapabilityRenounce | evidence | L2 | 3 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.CapabilityRenounce.Prepared.mk | Kernel.CapabilityRenounce | evidence | L2 | 1 proof / 1 data fields; layer-1 review pending
 Minidregg.Kernel.CapabilityRevocationController.Accepted.mk | Kernel.CapabilityRevocationController | evidence | L2 | 1 proof / 2 data fields; layer-1 review pending
-Minidregg.Kernel.CapabilityRevocationController.Prepared.mk | Kernel.CapabilityRevocationController | evidence | L2 | 3 proof / 6 data fields; layer-1 review pending
+Minidregg.Kernel.CapabilityRevocationController.PreparedOn.mk | Kernel.CapabilityRevocationController | evidence | L2 | 3 proof / 4 data fields; layer-1 review pending
 Minidregg.Kernel.CapabilityRevocationReceiver.AcceptedRevocation.mk | Kernel.CapabilityRevocationReceiver | evidence | L2 | 1 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.CapabilityRevocationReceiver.DecodedIngress.mk | Kernel.CapabilityRevocationReceiver | evidence | L2 | 2 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.CarriedApplicationDispatchReceiver.Committed.mk | Kernel.CarriedApplicationDispatchReceiver | evidence | L2 | 1 proof / 8 data fields; layer-1 review pending
@@ -331,6 +331,7 @@ Minidregg.Kernel.ObjectiveBendNativeInput.AdmittedRead.mk | Kernel.ObjectiveBend
 Minidregg.Kernel.ObjectiveBendNativeInput.Bound.mk | Kernel.ObjectiveBendNativeInput | evidence | L2 | 1 proof / 1 data fields; layer-1 review pending; mints: ObjectiveBendNativeInput.bind (review pending: binds by data, no proposition argument)
 Minidregg.Kernel.ObjectiveBendPreparedOutput.Prepared.mk | Kernel.ObjectiveBendPreparedOutput | evidence | L2 | 2 proof / 4 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveBendPublishedPackage.Loaded.mk | Kernel.ObjectiveBendPublishedPackage | evidence | L2 | 7 proof / 2 data fields; layer-1 review pending
+Minidregg.Kernel.ObjectiveCall.Deliverable.mk | Kernel.ObjectiveCall | evidence | L2 | 5 proof / 4 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveCall.Invocation.mk | Kernel.ObjectiveCall | evidence | L2 | 7 proof / 7 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveCall.Method.mk | Kernel.ObjectiveCall | evidence | L2 | 5 proof / 8 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveSend.MessageDelivery.mk | Kernel.ObjectiveSend | evidence | L2 | 14 proof / 12 data fields; layer-1 review pending
