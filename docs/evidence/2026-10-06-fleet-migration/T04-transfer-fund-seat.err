@@ -1,0 +1,25 @@
+workspace continuity: legacy; initialize with workspace --action continuity-init --name REF
+{
+  "attempt": "/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/lead/workspace/attempts/a-161012855340389680497092737047190129082",
+  "authority": "admitted-fleet-turn",
+  "confirmation": "installed",
+  "fee": "3",
+  "payer": "15474279766743318203",
+  "publication": null,
+  "receipt": {
+    "acceptedCount": "7",
+    "eventId": "15868719417893316903609272635443827136628782213848591809865158654404457511256",
+    "transactionId": "111181862638773893743272469562538249278239311767675428556400571876192966663490",
+    "worldRoot": "103608503110245827456416735328749655753243612091700178970639133076130602486820"
+  },
+  "replans": "0",
+  "subject": "12010091912003170187",
+  "supersededAttempts": [],
+  "transfer": {
+    "amount": "2000",
+    "asset": "0",
+    "destination": "10990305426878094482"
+  },
+  "type": "minidregg-fleet-turn-result-v1",
+  "verb": "transfer"
+}

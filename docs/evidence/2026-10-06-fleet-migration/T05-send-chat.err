@@ -1,0 +1,29 @@
+mini fleet-sign: DREGG_NODE_URL is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+mini fleet-sign: DREGG_API_TOKEN is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+mini fleet-sign: DREGG_COORDINATION_EXEMPT is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+mini fleet-sign: DREGG_PROFILE is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+workspace continuity: legacy; initialize with workspace --action continuity-init --name REF
+{
+  "attempt": "/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/codex/workspace/attempts/a-304846391368128987200012463238804007459",
+  "authority": "admitted-fleet-turn",
+  "confirmation": "installed",
+  "fee": "3",
+  "payer": "10990305426878094482",
+  "publication": {
+    "payloadBytes": "73",
+    "sequence": "1",
+    "topic": "68656c6d2e63686174"
+  },
+  "receipt": {
+    "acceptedCount": "8",
+    "eventId": "19752846165619878245172040643416405742259849937896479422288114301687304652521",
+    "transactionId": "23030822833720075252165240862602424706055120603273242228248648439346448027998",
+    "worldRoot": "29964841554137208067314451447207297993465450376567256876636022080068580696596"
+  },
+  "replans": "0",
+  "subject": "13908552774522445001",
+  "supersededAttempts": [],
+  "transfer": null,
+  "type": "minidregg-fleet-turn-result-v1",
+  "verb": "send"
+}

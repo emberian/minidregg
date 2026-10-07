@@ -1,0 +1,39 @@
+id	result	expect
+O1-join-lead	PASS	ok:.joined and .materialized and .balance == 20000
+O2-join-probe	PASS	ok:.joined and .balance == 5000
+T01-join-fund0	PASS	ok:.joined and .materialized and .balance == 0 and (.cell | test("^[0-9]+$"))
+T02a-join-seat-no-sponsor	PASS	refuse:needs the sponsor
+T02b-join-again	PASS	ok:.joined and (.materialized | not) and .cell == "10990305426878094482" and .balance == 0
+T03-send-unfunded	PASS	refuse:bookRefused\|not admitted\|insufficient
+T04-transfer-fund-seat	PASS	ok:.transferred and .committed and .amount == 2000 and .to == "10990305426878094482"
+T05-send-chat	PASS	ok:.sent and .agent_cell == "10990305426878094482" and .to == "10990305426878094482" and .topic == "helm.chat" and .payload == "chat:b2b:679402cf55618d11b72580cddc2430a813d797369b6351a28cc57e364f1b51d4" and .sequence == 1 and .finality == "accepted" and (.turn_hash | test("^[0-9]+$")) and (.chain_index | type == "number")
+T06-send-land	PASS	ok:.sent and .topic == "helm.land" and .sequence == 1
+T07-send-chat-again	PASS	ok:.sent and .sequence == 2
+T08-send-words	PASS	ok:.sent and .payload == "hello from codex"
+T09-transfer	PASS	ok:.transferred and .committed and .amount == 5
+T10a-receipt-by-hash	PASS	ok:.found and .turn_hash == "23030822833720075252165240862602424706055120603273242228248648439346448027998" and .finality == "accepted"
+T10b-receipt-head	PASS	ok:.head.turns == "5"
+T11a-roster-json	PASS	refuse:unknown verb 'roster'
+T11b-accept	PASS	refuse:unknown verb 'accept'
+T11c-recv	PASS	refuse:unknown verb 'recv'
+T11d-heartbeat	PASS	refuse:unknown verb 'heartbeat'
+T12-planted-unknown-verb	PASS	refuse:unknown verb 'frobnicate'
+T13a-send-bread-cell	PASS	refuse:Bread cell id
+T13b-transfer-bread-cell	PASS	refuse:Bread cell id
+T13c-send-other-account	PASS	refuse:another account
+T14a-node-url-http	PASS	refuse:no HTTP ingress
+T14b-token-file	PASS	refuse:no bearer token
+T14c-token-argv	PASS	refuse:no bearer token
+T14d-accept-tentative	PASS	refuse:one commitment level
+T14e-fund-on-send	PASS	refuse:no faucet
+T14f-fund-on-transfer	PASS	refuse:no faucet
+T14g-never-joined	PASS	refuse:has not joined
+T15-env-notice	PASS	stderr of T05 names DREGG_NODE_URL, DREGG_API_TOKEN, DREGG_COORDINATION_EXEMPT
+Z1-balance-codex	PASS	ok:.balance == 1980
+Z2-probe-turns-landed	PASS	ok:.head.turns
+wrong-ok-filter	RED-AS-REQUIRED	ok:.sent == false on T05-send-chat
+wrong-sequence	RED-AS-REQUIRED	ok:.sequence == 2 on T05-send-chat
+wrong-refusal-reason	RED-AS-REQUIRED	refuse:no such option on T12-planted-unknown-verb
+accept-expected-of-refusal	RED-AS-REQUIRED	ok:true on T12-planted-unknown-verb
+refuse-expected-of-accept	RED-AS-REQUIRED	refuse:unknown verb on T05-send-chat
+unknown-verb-accepted-would-fail	RED-AS-REQUIRED	ok:.sent on T12-planted-unknown-verb

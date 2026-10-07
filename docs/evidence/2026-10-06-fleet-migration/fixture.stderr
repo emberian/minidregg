@@ -1,0 +1,66 @@
+This key is the only copy. It signs as you and opens your private rooms.
+If you lose it and have no next key there is no recovery: you enroll a new subject and are re-invited.
+Room content comes back by re-wrap at the current epoch; older epochs come back
+only from a member who kept them. Your old posts stay under the old subject.
+Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB --escrow-subject SUBJECT` writes your seed encrypted
+to your sponsor, which lets your sponsor sign as you.
+next key: /srv/lanes/P3-FLEET-MIGRATION/run1/fixture/sponsor.key.next (its public half: /srv/lanes/P3-FLEET-MIGRATION/run1/fixture/sponsor.key.next.pub)
+for your sponsor's `enroll plan NAME KEYFILE NEXT-PUB COSIGN` (public, safe to send):
+  next public key: df41feae02bf3a3a398746f72b273e22c41f37e9b1d76aed09dceec555a1b620
+  co-signature:    f83cb16b548cffd3ba4bad5ddfa979876520d8cbd7c8413eb733d232752473db3fc1d46e8883ced7975b44ba45d8ea42fa086e42ab75c15405e988939394f904
+Your NEXT key is the only thing that can rotate this identity. If the daily key
+is lost or stolen, `mini rotate-key --next-key NEXT` moves your subject to it and
+the daily key stops signing; a thief holding only the daily key cannot rotate.
+Keep the next key OFF this machine (other media, paper): if it sits beside the
+daily key, whoever takes one takes both and pre-rotation protects nothing.
+Your blinding key is derived from this seed (`mini key --action export-blinding`); it keys the salts that hide each cell’s fields from readers you have not named.
+This key is the only copy. It signs as you and opens your private rooms.
+If you lose it and have no next key there is no recovery: you enroll a new subject and are re-invited.
+Room content comes back by re-wrap at the current epoch; older epochs come back
+only from a member who kept them. Your old posts stay under the old subject.
+Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB --escrow-subject SUBJECT` writes your seed encrypted
+to your sponsor, which lets your sponsor sign as you.
+next key: /srv/lanes/P3-FLEET-MIGRATION/run1/fixture/newcomer.key.next (its public half: /srv/lanes/P3-FLEET-MIGRATION/run1/fixture/newcomer.key.next.pub)
+for your sponsor's `enroll plan NAME KEYFILE NEXT-PUB COSIGN` (public, safe to send):
+  next public key: ed5c2e7f9785fd327ba7e6d1365184bf1fb084bb6b7ddc39a1cc6defef7fd2fc
+  co-signature:    57f41c9f66275ddcbc41152a7446e21dc3d837801b498d993f08082ec18a72532806486d0c724d29e64cf18a77189f7af4abb07b7cf11330aa16e87abe4a3a0a
+Your NEXT key is the only thing that can rotate this identity. If the daily key
+is lost or stolen, `mini rotate-key --next-key NEXT` moves your subject to it and
+the daily key stops signing; a thief holding only the daily key cannot rotate.
+Keep the next key OFF this machine (other media, paper): if it sits beside the
+daily key, whoever takes one takes both and pre-rotation protects nothing.
+Your blinding key is derived from this seed (`mini key --action export-blinding`); it keys the salts that hide each cell’s fields from readers you have not named.
+This key is the only copy. It signs as you and opens your private rooms.
+If you lose it and have no next key there is no recovery: you enroll a new subject and are re-invited.
+Room content comes back by re-wrap at the current epoch; older epochs come back
+only from a member who kept them. Your old posts stay under the old subject.
+Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB --escrow-subject SUBJECT` writes your seed encrypted
+to your sponsor, which lets your sponsor sign as you.
+next key: /srv/lanes/P3-FLEET-MIGRATION/run1/fixture/clock.key.next (its public half: /srv/lanes/P3-FLEET-MIGRATION/run1/fixture/clock.key.next.pub)
+for your sponsor's `enroll plan NAME KEYFILE NEXT-PUB COSIGN` (public, safe to send):
+  next public key: 8b2260efe8723c7b68333264769222458e720244d067f9dd6facfdf9a7526d72
+  co-signature:    ce79a352d73a248fd9d8ba5478baefe8cc6ea58c9236173866b28e3b28fa552fb5cb23a978f1e79aed87693b815908c869c09ffeb4ea7d54a0799dc0f6a1ea09
+Your NEXT key is the only thing that can rotate this identity. If the daily key
+is lost or stolen, `mini rotate-key --next-key NEXT` moves your subject to it and
+the daily key stops signing; a thief holding only the daily key cannot rotate.
+Keep the next key OFF this machine (other media, paper): if it sits beside the
+daily key, whoever takes one takes both and pre-rotation protects nothing.
+Your blinding key is derived from this seed (`mini key --action export-blinding`); it keys the salts that hide each cell’s fields from readers you have not named.
+This key is the only copy. It signs as you and opens your private rooms.
+If you lose it and have no next key there is no recovery: you enroll a new subject and are re-invited.
+Room content comes back by re-wrap at the current epoch; older epochs come back
+only from a member who kept them. Your old posts stay under the old subject.
+Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB --escrow-subject SUBJECT` writes your seed encrypted
+to your sponsor, which lets your sponsor sign as you.
+next key: /srv/lanes/P3-FLEET-MIGRATION/run1/fixture/pay/observer.key.next (its public half: /srv/lanes/P3-FLEET-MIGRATION/run1/fixture/pay/observer.key.next.pub)
+for your sponsor's `enroll plan NAME KEYFILE NEXT-PUB COSIGN` (public, safe to send):
+  next public key: 866513099bf744d659a9d121277af8f8e43bd3e70513f0e4e8d18cfa058c7234
+  co-signature:    46b670206e1df5077f31bf10bdaaa5180ca459773b024b00ad20a3ab0a30e3bb3f96602ba2e24fb3e1b07015e8d22b07f9a5aaebe26eed7c1c7bfb13ade40e0f
+Your NEXT key is the only thing that can rotate this identity. If the daily key
+is lost or stolen, `mini rotate-key --next-key NEXT` moves your subject to it and
+the daily key stops signing; a thief holding only the daily key cannot rotate.
+Keep the next key OFF this machine (other media, paper): if it sits beside the
+daily key, whoever takes one takes both and pre-rotation protects nothing.
+Your blinding key is derived from this seed (`mini key --action export-blinding`); it keys the salts that hide each cell’s fields from readers you have not named.
+workspace continuity: legacy; initialize with workspace --action continuity-init --name REF
+workspace read attempt: /srv/lanes/P3-FLEET-MIGRATION/run1/fixture/sponsor/attempts/a-302460309643588406289583147610773159164

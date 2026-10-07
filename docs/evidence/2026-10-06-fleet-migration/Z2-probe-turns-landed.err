@@ -1,0 +1,1 @@
+workspace continuity: legacy; initialize with workspace --action continuity-init --name REF

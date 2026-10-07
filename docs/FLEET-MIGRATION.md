@@ -82,4 +82,33 @@ shim (the probe in the recorded run).
 
 ## Recorded run
 
-RECORDED-RUN-PLACEHOLDER
+The command transcript is [`native/resource-client/fleet-migration-replay.sh`](../native/resource-client/fleet-migration-replay.sh);
+each call carries its provenance. **OBSERVED** means read in helm's code at `b9f0db0` (`file:line`);
+**INFERRED** means taken from Bread's `dregg-client-sign` contract and Pug's commits to it
+(`aeca5dea1` transfer, `b1854fbab` join/send), never seen invoked in helm.
+
+- OBSERVED: `join --profile SEAT --fund 0`; `send --profile SEAT --to OWNCELL --topic helm.chat|helm.land PAYLOAD`
+  (one argv word, the 73/78-byte blake2b digest); a second send as helm's retry; `roster --json`,
+  `accept`, `recv`, `heartbeat`; the ambient `DREGG_*`/`MELD_*` environment on every call.
+- INFERRED: `transfer`, `receipt`, send with payload words and no `--to`, `--node-url`, `--token`,
+  `--token-file`, `--accept-tentative`, `--fund` on send/transfer.
+- PLANTED: the verb `frobnicate`.
+
+Run on burst2-b against a fresh one-sponsor Store (Host `1cc8edbd...`, built at the lane commit):
+32 checks pass, each mapped call answered with one JSON object, each unmappable shape exits non-zero
+with an empty stdout and its reason on stderr (`unknown verb 'roster'`, `Bread cell id`, `no HTTP
+ingress`, `no bearer token`, `one commitment level`, `no faucet`, `has not joined`,
+`another account`). Six planted wrong expectations (wrong filter, wrong sequence, wrong refusal
+reason, accept expected of a refusal, refusal expected of an accept, an unknown verb expected to
+send) each turn the checker red. Evidence:
+[`docs/evidence/2026-10-06-fleet-migration/`](evidence/2026-10-06-fleet-migration/)
+(`transcript.log` is the readable run, `results.tsv` the verdicts, `helm-probe.json` below).
+
+Two defects the replay found in the client, both fixed (not principled differences):
+`send --to OWNCELL` was refused, and a re-`join --fund 0` of a profile holding 0 answered an error
+instead of balance 0.
+
+**helm's own `_sign_send`, unmodified, against the shim** (`helm-probe.json`): helm reports
+`send_failed` ("sent:true response has invalid turn_hash/receipt_hash/chain_index", twice) while
+**two turns committed** (`receipt --head` answers `turns: 2`). That is "Changes helm itself needs" item 1,
+measured: until helm accepts Mini's answer, every signed post is committed twice and reported failed.

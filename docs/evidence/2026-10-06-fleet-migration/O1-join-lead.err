@@ -1,0 +1,142 @@
+This key is the only copy. It signs as you and opens your private rooms.
+If you lose it and have no next key there is no recovery: you enroll a new subject and are re-invited.
+Room content comes back by re-wrap at the current epoch; older epochs come back
+only from a member who kept them. Your old posts stay under the old subject.
+Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB --escrow-subject SUBJECT` writes your seed encrypted
+to your sponsor, which lets your sponsor sign as you.
+next key: /srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/lead/key.next (its public half: /srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/lead/key.next.pub)
+for your sponsor's `enroll plan NAME KEYFILE NEXT-PUB COSIGN` (public, safe to send):
+  next public key: e3deefe2f98d239018375aff6d26f13f4edb78185b74b3472c13cce39a561343
+  co-signature:    608a8496ee55553e7795d2cbb5c288b11d374ce4edacb54fadcace4d7beaca3876ece50fb59776c0295d6ed702d67bab4a402b55f5802ded8e548b9ff3806405
+Your NEXT key is the only thing that can rotate this identity. If the daily key
+is lost or stolen, `mini rotate-key --next-key NEXT` moves your subject to it and
+the daily key stops signing; a thief holding only the daily key cannot rotate.
+Keep the next key OFF this machine (other media, paper): if it sits beside the
+daily key, whoever takes one takes both and pre-rotation protects nothing.
+hosted shell: this next key is a file on this box, beside your daily key; root can
+read both, so pre-rotation protects you only once the next key is NOT on the box.
+Move it off (`--next-to` other media, or copy it home and delete it here).
+{
+  "authority": "candidate-only",
+  "keyId": "11183856205137721083",
+  "plan": {
+    "canonical": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f504c414e2f76315621ff71545980a814f81b66f2991595d2e9b68688c6e9d1d5b786fca8352a68ced28fffdbff44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ffc99f5951d8675997ede21047aef3d73aff4c9195c1505859560a1e8e739214b1ae73f11966b63c7dc82cd59894b32d2354ffb92dd2c2f189308b3c7c470b921c777909863f5488f3446c5431168cfa780396ff12a8ae83a625849fff01ff01ffe35c2da31e464dabff20ff7f9a7035f5d68adbfd34546e1fb14ba7c4e121c8f8fb2f33509f8b56938eed98ff00081c3846381c0801ff0160542767d5ba207a60c0c3d8a5bd17fd55c96bc4d3c47873af75fe60d1c17c95ff4901ff02ff4dff04ff0607ff0102ff0a07ff02ff017a1bff02ff01ff07ff20ff73d2940e19560d0c68f27ff11ddad4073cb80542df8234e9de9ce76a08513e37ff91600fff000c0207ff02ff01070207ff02ff000b01ff7a1bff02ff01ff1aff44524547472f415554482f5349474e45442d5245515545535402aeff44524547472f415554482f504c414e0211ff5621ff71545980a814f81b66f2991595d2e9b68688c6e9d1d5b786fca8352a68ced28fff09ff03ff07ff02ff0aff0affb4a8b788a7e75071ced06afdd9ecf6f4525469d9c197b2d895a8a6d860f37c1301ffe7ea14cd3581a172196dfdd64b3eccfecb0082b719c8049f2e88a73be18709e0ff3766c3dc5093580f8f0da0807e25a068d6e0c2c4c204879b1ca12f2663eea11dffffff0affffffdbff3766c3dc5093580f8f0da0807e25a068d6e0c2c4c204879b1ca12f2663eea11dff2c01ff44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f504f5353455353494f4e2f76315621ff71545980a814f81b66f2991595d2e9b68688c6e9d1d5b786fca8352a68ced28fffdbff44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ffc99f5951d8675997ede21047aef3d73aff4c9195c1505859560a1e8e739214b1ae73f11966b63c7dc82cd59894b32d2354ffb92dd2c2f189308b3c7c470b921c777909863f5488f3446c5431168cfa780396ff12a8ae83a625849fff01ff01ffe35c2da31e464dabff20ff7f9a7035f5d68adbfd34546e1fb14ba7c4e121c8f8fb2f33509f8b56938eed98ff00081c3846381c0801ff0160542767d5ba207a60c0c3d8a5bd17fd55c96bc4d3c47873af75fe60d1c17c95ff",
+    "command": {
+      "canonical": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ffc99f5951d8675997ede21047aef3d73aff4c9195c1505859560a1e8e739214b1ae73f11966b63c7dc82cd59894b32d2354ffb92dd2c2f189308b3c7c470b921c777909863f5488f3446c5431168cfa780396ff12a8ae83a625849fff01ff01ffe35c2da31e464dabff20ff7f9a7035f5d68adbfd34546e1fb14ba7c4e121c8f8fb2f33509f8b56938eed98ff00081c3846381c0801ff0160542767d5ba207a60c0c3d8a5bd17fd55c96bc4d3c47873af75fe60d1c17c95ff",
+      "control": "53",
+      "expectedAuthorityRoot": "60100252952767643301894783539877521654509431230107394874705803018481991126160",
+      "expectedFactoryRoot": "33708355066861797709127598135896816117331867426313708198427364297172659615526",
+      "key": {
+        "activeFrom": "0",
+        "activeUntil": "18446744073709551615",
+        "algorithm": "1",
+        "keyEpoch": "1",
+        "keyId": "11183856205137721083",
+        "nextKeyDigest": "59890173557534361577714625175170306888098919388738243104373559481179223981616",
+        "publicKey": "7f9a7035f5d68adbfd34546e1fb14ba7c4e121c8f8fb2f33509f8b56938eed98",
+        "subject": "12010091912003170187"
+      },
+      "nonce": "73760896033955802478082223627217688721",
+      "sponsor": "7",
+      "type": "participant-key-enrollment-v1"
+    },
+    "commandBytes": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ffc99f5951d8675997ede21047aef3d73aff4c9195c1505859560a1e8e739214b1ae73f11966b63c7dc82cd59894b32d2354ffb92dd2c2f189308b3c7c470b921c777909863f5488f3446c5431168cfa780396ff12a8ae83a625849fff01ff01ffe35c2da31e464dabff20ff7f9a7035f5d68adbfd34546e1fb14ba7c4e121c8f8fb2f33509f8b56938eed98ff00081c3846381c0801ff0160542767d5ba207a60c0c3d8a5bd17fd55c96bc4d3c47873af75fe60d1c17c95ff",
+    "domain": "8501",
+    "possessionHeader": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f504f5353455353494f4e2f76315621ff71545980a814f81b66f2991595d2e9b68688c6e9d1d5b786fca8352a68ced28fffdbff44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ffc99f5951d8675997ede21047aef3d73aff4c9195c1505859560a1e8e739214b1ae73f11966b63c7dc82cd59894b32d2354ffb92dd2c2f189308b3c7c470b921c777909863f5488f3446c5431168cfa780396ff12a8ae83a625849fff01ff01ffe35c2da31e464dabff20ff7f9a7035f5d68adbfd34546e1fb14ba7c4e121c8f8fb2f33509f8b56938eed98ff00081c3846381c0801ff0160542767d5ba207a60c0c3d8a5bd17fd55c96bc4d3c47873af75fe60d1c17c95ff",
+    "semantics": "57621574434371209881717419650284223750536103367801519131515545423056217876633",
+    "sponsorHeader": {
+      "algorithm": "1",
+      "canonical": "02ff4dff04ff0607ff0102ff0a07ff02ff017a1bff02ff01ff07ff20ff73d2940e19560d0c68f27ff11ddad4073cb80542df8234e9de9ce76a08513e37ff91600fff000c0207ff02ff01070207ff02ff000b01ff7a1bff02ff01ff1aff44524547472f415554482f5349474e45442d5245515545535402aeff44524547472f415554482f504c414e0211ff5621ff71545980a814f81b66f2991595d2e9b68688c6e9d1d5b786fca8352a68ced28fff09ff03ff07ff02ff0aff0affb4a8b788a7e75071ced06afdd9ecf6f4525469d9c197b2d895a8a6d860f37c1301ffe7ea14cd3581a172196dfdd64b3eccfecb0082b719c8049f2e88a73be18709e0ff3766c3dc5093580f8f0da0807e25a068d6e0c2c4c204879b1ca12f2663eea11dffffff0affffffdbff3766c3dc5093580f8f0da0807e25a068d6e0c2c4c204879b1ca12f2663eea11dff",
+      "codecVersion": "2",
+      "decoded": true,
+      "domain": "44524547472f415554482f5349474e45442d5245515545535402",
+      "footprint": [
+        {
+          "address": "0607ff",
+          "value": "02ff"
+        },
+        {
+          "address": "0a07ff02ff",
+          "value": "7a1bff02ff01ff07ff20ff73d2940e19560d0c68f27ff11ddad4073cb80542df8234e9de9ce76a08513e37ff91600fff00"
+        },
+        {
+          "address": "0c0207ff02ff",
+          "value": ""
+        },
+        {
+          "address": "070207ff02ff",
+          "value": null
+        }
+      ],
+      "keyEpoch": "2",
+      "keyId": "7007",
+      "message": "44524547472f415554482f504c414e0211ff5621ff71545980a814f81b66f2991595d2e9b68688c6e9d1d5b786fca8352a68ced28fff09ff03ff07ff02ff0aff0affb4a8b788a7e75071ced06afdd9ecf6f4525469d9c197b2d895a8a6d860f37c1301ffe7ea14cd3581a172196dfdd64b3eccfecb0082b719c8049f2e88a73be18709e0ff3766c3dc5093580f8f0da0807e25a068d6e0c2c4c204879b1ca12f2663eea11dffffff0affffffdbff",
+      "nullifier": "11872743669788521208242908442828900870838636902078312506742101676174133820940",
+      "validUntil": "266"
+    },
+    "type": "participant-key-enrollment-plan-v1"
+  },
+  "publicKey": "7f9a7035f5d68adbfd34546e1fb14ba7c4e121c8f8fb2f33509f8b56938eed98",
+  "subject": "12010091912003170187",
+  "type": "minidregg-participant-enrollment-plan-custody-v1"
+}
+{
+  "authority": "awaiting-admission",
+  "ingressSha256": "38964d89ed89dda5453717caf4b6f1e6939e2aad43f01433b28f0455924d2959",
+  "keyId": "11183856205137721083",
+  "subject": "12010091912003170187",
+  "type": "minidregg-participant-enrollment-sealed-v1"
+}
+{
+  "authority": "admitted-key-only",
+  "keyId": "11183856205137721083",
+  "keyPath": "/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/lead/key",
+  "publicKey": "7f9a7035f5d68adbfd34546e1fb14ba7c4e121c8f8fb2f33509f8b56938eed98",
+  "receipt": {
+    "acceptedCount": "1",
+    "eventId": "89756536550912394819212967892191872939301776005109053412100588398685855353526",
+    "transactionId": "11872743669788521208242908442828900870838636902078312506742101676174133820940",
+    "worldRoot": "35606295557338646661969630058493318377529738552744566882469429342940675503304"
+  },
+  "subject": "12010091912003170187",
+  "type": "minidregg-participant-enrollment-result-v1"
+}
+/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/lead/workspace
+workspace continuity: legacy; initialize with workspace --action continuity-init --name REF
+/srv/lanes/P3-FLEET-MIGRATION/run1/fixture/sponsor/sources/create-lead-account.authoring/g0001/intent.bin
+workspace birth attempt: /srv/lanes/P3-FLEET-MIGRATION/run1/fixture/sponsor/attempts/create-lead-account
+{
+  "acceptedCount": "2",
+  "confirmation": "installed",
+  "eventId": "90308596095266471889973691235625468906553211843843308240896343010606073991945",
+  "transactionId": "62994443981525193029577265410976335202814107712734486618529183692107538828645",
+  "type": "confirmed",
+  "worldRoot": "100970773091271504764171664188712525171834198193699748175091590787123798520800"
+}
+account
+{
+  "account": "15474279766743318203",
+  "authority": "admitted-key-and-owned-funded-account",
+  "balance": "20000",
+  "controlCapability": "14187509954772618466",
+  "enrollmentReceipt": {
+    "acceptedCount": "1",
+    "eventId": "89756536550912394819212967892191872939301776005109053412100588398685855353526",
+    "transactionId": "11872743669788521208242908442828900870838636902078312506742101676174133820940",
+    "worldRoot": "35606295557338646661969630058493318377529738552744566882469429342940675503304"
+  },
+  "fundingReceipt": {
+    "acceptedCount": "2",
+    "confirmation": "installed",
+    "eventId": "90308596095266471889973691235625468906553211843843308240896343010606073991945",
+    "transactionId": "62994443981525193029577265410976335202814107712734486618529183692107538828645",
+    "type": "confirmed",
+    "worldRoot": "100970773091271504764171664188712525171834198193699748175091590787123798520800"
+  },
+  "joined": true,
+  "publicKey": "7f9a7035f5d68adbfd34546e1fb14ba7c4e121c8f8fb2f33509f8b56938eed98",
+  "spendCapability": "10594922070227049252",
+  "subject": "12010091912003170187",
+  "type": "minidregg-fleet-join-v1",
+  "workspace": "/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/lead/workspace"
+}
