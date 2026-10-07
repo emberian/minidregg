@@ -187,8 +187,8 @@ structure ClaimAt (config : Config) (opened : Opened config)
   ingressExact : prior.ingress = ingress.source.begin
   present : opened.durable.image.accepted[prior.index]? = some prior.record
   store : DurableHistory.StoreIdentity
-  head : DurableHistory.Head store
-  conditional : ApplicationLifecycleClaimCore.Conditional config head opened.ground ingress
+  reader : DurableHistoryReader.Reader rootBytes store
+  conditional : ApplicationLifecycleClaimCore.Conditional config reader.head opened.ground ingress
   recordExact : prior.record =
     DurableReceiver.IntentRecord.ofIntent conditional.original.admitted.intent
 
@@ -1889,7 +1889,7 @@ private def admitClaimAt (config : Config) (opened : Opened config)
                     conditional.original.admitted.intent :=
                 (lawful_encode_injective DurableReceiverCodec.intentStream.toLawful)
                   recordExact
-              return .ok ⟨prior, indexExact, ingressExact, present, _, reader.head,
+              return .ok ⟨prior, indexExact, ingressExact, present, _, reader,
                 conditional, sourceExact⟩
             else return .error "historical lifecycle begin differs from source-admitted intent"
         else return .error "historical lifecycle begin record differs from prefix"
