@@ -1290,7 +1290,8 @@ def stopRefunds (purse : AccountId) (queued : List Inbox.Message) : List Refund 
 (`notSender`); then:
 * `stop` of an open slot: its pipelined sends are refunded, it is unwatched and empty
   (`AnswerSlot.stopWaiting`); the message stays queued.
-* `stop` of a decided slot: the slot is retired.
+* `stop` of a decided slot: the slot is retired. Its authority is the sender its decider
+  names, since its inbox may already be retired.
 * `cancel` of an open slot: its message is withdrawn from the inbox (`Inbox.Step.withdraw`;
   `slotInbox` if it is not there), the message and every pipelined send are refunded
   (`cancelRefunds`), and the slot is decided `cancelled` (`AnswerSlot.cancelDelivery`), or
@@ -1303,10 +1304,12 @@ def Mail.control {rootBytes : Bytes → Digest} {config : Config} {snapshot : Sn
   | .error reason => .error reason
   | .ok .gone => .ok mail
   | .ok (.decided slot closing) =>
-    match controlInbox config snapshot mail control.slot slot.activity with
-    | .error reason => .error reason
-    | .ok (inbox, _) =>
-    if inbox.sender ≠ control.sender then .error (.notSender control.slot.value control.sender) else
+    -- A decided slot's sender is named by its decider: its inbox may be retired already
+    -- (an emptied inbox retains nothing, cv 01a113fe-1390).
+    match slot.decider with
+    | .subject _ => .error (.notControllable control.slot.value)
+    | .delivery _ sender =>
+    if sender ≠ control.sender then .error (.notSender control.slot.value control.sender) else
     match control.kind with
     | .cancel => .ok mail
     | .stop => .ok { mail with closed := mail.closed ++ [closing] }
@@ -1406,11 +1409,9 @@ theorem Mail.control_cases {rootBytes : Bytes → Digest} {config : Config} {sna
     {mail next : Mail config snapshot} {height : Nat} {control : Control}
     (ok : mail.control height control = .ok next) :
     next = mail ∨
-    (control.kind = .stop ∧ ∃ (slot : AnswerSlot.Slot) (closing : ClosedSlot config snapshot)
-      (inbox : HeldInbox config snapshot) (inboxes : List (HeldInbox config snapshot)),
+    (control.kind = .stop ∧ ∃ (slot : AnswerSlot.Slot) (closing : ClosedSlot config snapshot) (message : Digest),
       controlSlot config snapshot mail control.slot = .ok (.decided slot closing) ∧ closing.decided = none ∧
-      controlInbox config snapshot mail control.slot slot.activity = .ok (inbox, inboxes) ∧
-      inbox.sender = control.sender ∧
+      slot.decider = .delivery message control.sender ∧
       next = { mail with closed := mail.closed ++ [closing] }) ∨
     (control.kind = .stop ∧ ∃ (held updated : HeldSlot config snapshot) (others : List (HeldSlot config snapshot))
       (inbox : HeldInbox config snapshot) (inboxes : List (HeldInbox config snapshot)),
@@ -1448,16 +1449,17 @@ theorem Mail.control_cases {rootBytes : Bytes → Digest} {config : Config} {sna
       all_goals first | (cases found; done) | (cases found; rfl)
     split at ok
     · cases ok
-    · rename_i inbox inboxes heldOk
+    · rename_i message sender decider
       split at ok
       · cases ok
       · rename_i authority
+        have same : sender = control.sender := Classical.not_not.mp authority
+        subst same
         cases kind : control.kind with
         | cancel => rw [kind] at ok; cases ok; exact .inl rfl
         | stop =>
           rw [kind] at ok; cases ok
-          exact .inr (.inl ⟨rfl, slot, closing, inbox, inboxes, found, closedNone, heldOk,
-            Classical.not_not.mp authority, rfl⟩)
+          exact .inr (.inl ⟨rfl, slot, closing, message, found, closedNone, decider, rfl⟩)
   · rename_i held others found
     split at ok
     · cases ok

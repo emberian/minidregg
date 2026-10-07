@@ -87,7 +87,7 @@ PLANTS (self-test: the named fault is put in the WORLD, so a check that must hol
   stop-cancels    S12 yields `cancelOf` where it should `stopOf`: m is withdrawn     -> S12 red
   sender-controls S13's "other object" is poster itself, the sender: admitted        -> S13 red
   bounce-twice    S14 relays bounce2 (two onward sends): over its allowance       -> S14 red
-  roomy-allowance S15's allowance is 2 PRICE: bounce2 fits                        -> S15 red
+  roomy-allowance S15's allowance covers two sends + deposits: bounce2 fits                        -> S15 red
   fan-four        S16 relays bounce4 (four onward sends): within the fan-out      -> S16 red
   short-chain     S17's chain starts with 3 PRICE: it ends by allowance, at depth 1 -> S17 red
   cancel-bare     S18's message carries no allowance (a deposit): refund PRICE     -> S18 red
@@ -172,6 +172,7 @@ try:
         v = w.view(label, {'cells': [cell], 'accounts': [cell, w.SPONSOR_ACCOUNT, w.SECOND, w.COLLECTOR]})
         held = w.cell_of(v, cell).get('inbox') or {'head': '0', 'tail': '0', 'messages': []}
         return {'cell': cell, 'head': int(held['head']), 'ids': [m['id'] for m in held['messages']],
+                'retired': w.cell_of(v, cell).get('kind') == 'retired',
                 'messages': held['messages'], 'purse': w.balance(v, cell),
                 'sponsor': w.balance(v, w.SPONSOR_ACCOUNT), 'second': w.balance(v, w.SECOND),
                 'collector': w.balance(v, w.COLLECTOR)}
@@ -184,6 +185,18 @@ try:
         phase = s.get('phase')
         return phase.get('decision', {}) if isinstance(phase, dict) else {}
 
+    def queued_message(view, mid):
+        found = [x for x in view['messages'] if x['id'] == str(mid)]
+        return found[0] if found else {}
+
+    def dep(message):
+        """A queued message's storage deposit (its escrow is postage + allowance + deposit)."""
+        return int((message or {}).get('deposit', '0'))
+
+    def queued_dep(s, i=0):
+        q = s.get('queued') or []
+        return dep(q[i]) if len(q) > i else 0
+
     def post(target, amount):
         return record(target=nat(O[target]), amount=nat(amount))
 
@@ -194,10 +207,12 @@ try:
         after = inbox('poster', 'counter', 's1-after')
         s1 = slot(m1, 's1-slot')
         w.check('s1-queued-one', after['ids'] == [str(m1)] and after['head'] == 0, after['ids'])
-        w.check('s1-slot-open-delivery', s1.get('phase') == 'open' and s1.get('decider') == {'delivery': str(m1)},
-                s1)
-        w.check('s1-postage-escrowed', after['purse'] == PRICE and before['sponsor'] - after['sponsor'] == 2 * PRICE,
-                {'purse': after['purse'], 'paid': before['sponsor'] - after['sponsor']})
+        w.check('s1-slot-open-delivery', s1.get('phase') == 'open'
+                and s1.get('decider') == {'delivery': str(m1), 'sender': str(O['poster'])}, s1)
+        d1 = dep(after['messages'][0]) if after['messages'] else 0
+        w.check('s1-postage-escrowed', d1 > 0 and after['purse'] == PRICE + d1
+                and before['sponsor'] - after['sponsor'] == 2 * PRICE + d1,
+                {'purse': after['purse'], 'deposit': d1, 'paid': before['sponsor'] - after['sponsor']})
         w.check('s1-not-yet-delivered', total('counter', 's1-counter') == 0, None)
 
     with w.group('S2-deliver'):
@@ -206,7 +221,9 @@ try:
         after = inbox('poster', 'counter', 's2-after')
         s2 = slot(m1, 's2-slot')
         w.check('s2-counter-4', total('counter', 's2-counter') == 4, None)
-        w.check('s2-popped', after['head'] == 1 and after['ids'] == [], after)
+        w.check('s2-popped', after['ids'] == [] and after['retired'], after)
+        w.check('s2-deposit-refunded', after['sponsor'] - before['sponsor'] == d1,
+                {'refund': after['sponsor'] - before['sponsor'], 'deposit': d1})
         w.check('s2-slot-reply-4', decision(s2) == {'kind': 'reply', 'value': nat(4)}, s2)
         w.check('s2-purse-paid', after['purse'] == 0 and after['collector'] - before['collector'] == PRICE,
                 {'purse': after['purse'], 'collector': after['collector'] - before['collector']})
@@ -233,10 +250,11 @@ try:
         after = inbox('poster', 'vault', 's4-after')
         d4 = decision(slot(m4, 's4-slot'))
         w.check('s4-slot-broken-law', d4.get('kind') == 'broken' and 'lawDenied' in d4.get('reason', ''), d4)
-        w.check('s4-popped', after['head'] == before['head'] + 1 and after['ids'] == [], after['ids'])
+        w.check('s4-popped', after['ids'] == [] and after['retired'], after['ids'])
         w.check('s4-no-write', total('vault', 's4-vault') == 0, None)
+        d4 = dep(before['messages'][0]) if before['messages'] else 0
         w.check('s4-paid-from-purse', after['purse'] == 0 and after['collector'] - before['collector'] == PRICE
-                and after['sponsor'] == before['sponsor'], after)
+                and after['sponsor'] - before['sponsor'] == d4, after)
 
     with w.group('S5-forward'):
         c0 = total('counter', 's5-c0')
@@ -244,8 +262,9 @@ try:
         look = reported(out)
         held = inbox('poster', 'dir', 's5-held')
         sl = slot(look, 's5-slot-open')
-        w.check('s5-queued-on-slot', len(sl.get('queued', [])) == 1 and held['purse'] == 2 * PRICE,
-                {'queued': len(sl.get('queued', [])), 'purse': held['purse']})
+        dL, dQ = dep(queued_message(held, look)), queued_dep(sl)
+        w.check('s5-queued-on-slot', len(sl.get('queued', [])) == 1 and held['purse'] == 2 * PRICE + dL + dQ,
+                {'queued': len(sl.get('queued', [])), 'purse': held['purse'], 'deposits': (dL, dQ)})
         target_before = inbox('poster', 'counter', 's5-target-before')
         deliver('s5-deliver-lookup', 'poster', 'dir', look, 'installed')
         sl = slot(look, 's5-slot-decided')
@@ -255,10 +274,12 @@ try:
                                                                            'payload': nat(O['counter'])}}, sl)
         w.check('s5-slot-emptied', sl.get('queued') == [], sl.get('queued'))
         forwarded = [i for i in moved['ids'] if i not in target_before['ids']]
-        w.check('s5-forwarded', len(forwarded) == 1 and moved['purse'] - target_before['purse'] == PRICE
-                and source['purse'] == 0, {'forwarded': forwarded, 'purse': moved['purse'], 'source': source['purse']})
+        w.check('s5-forwarded', len(forwarded) == 1 and moved['purse'] - target_before['purse'] == PRICE + dQ
+                and source['purse'] == 0 and source['retired'],
+                {'forwarded': forwarded, 'purse': moved['purse'], 'source': source['purse']})
         fslot = slot(forwarded[0], 's5-fslot') if forwarded else {}
-        w.check('s5-forward-slot-open', fslot.get('decider') == {'delivery': forwarded[0] if forwarded else None}
+        w.check('s5-forward-slot-open', fslot.get('decider') == {'delivery': forwarded[0] if forwarded else None,
+                                                                 'sender': str(O['poster'])}
                 and fslot.get('phase') == 'open', fslot)
         if forwarded:
             deliver('s5-deliver-forward', 'poster', 'counter', forwarded[0], 'installed')
@@ -271,21 +292,24 @@ try:
                      postage=small)
         look = reported(out)
         before = inbox('poster', 'dir', 's6-before')
+        dL, dQ = dep(queued_message(before, look)), queued_dep(slot(look, 's6-slot-open'))
         deliver('s6-deliver', 'poster', 'dir', look, 'installed')
         after = inbox('poster', 'dir', 's6-after')
         d6 = decision(slot(look, 's6-slot'))
         w.check('s6-slot-broken', d6.get('kind') == 'broken', d6)
-        w.check('s6-refunded', after['purse'] == 0 and after['sponsor'] - before['sponsor'] == 1 + small
+        w.check('s6-refunded', after['purse'] == 0 and after['sponsor'] - before['sponsor'] == 1 + small + dL + dQ
                 and after['collector'] - before['collector'] == 1 + small,
                 {'refund': after['sponsor'] - before['sponsor'], 'fee': after['collector'] - before['collector']})
         w.check('s6-counter-kept', total('counter', 's6-c1') == c0, None)
         out = invoke('s6-pipe-none', 'poster', 'pipe', record(via=nat(O['nodir']), amount=nat(7)), 'installed')
         look = reported(out)
         before = inbox('poster', 'nodir', 's6n-before')
+        dL, dQ = dep(queued_message(before, look)), queued_dep(slot(look, 's6n-slot-open'))
         deliver('s6-deliver-none', 'poster', 'nodir', look, 'installed')
         after = inbox('poster', 'nodir', 's6n-after')
         dn = decision(slot(look, 's6n-slot'))
-        w.check('s6-none-not-a-reference', dn.get('kind') == 'reply' and after['sponsor'] - before['sponsor'] == PRICE
+        w.check('s6-none-not-a-reference', dn.get('kind') == 'reply'
+                and after['sponsor'] - before['sponsor'] == PRICE + dL + dQ
                 and after['purse'] == 0, {'decision': dn, 'refund': after['sponsor'] - before['sponsor']})
         w.check('s6-none-counter-kept', total('counter', 's6-c2') == c0, None)
 
@@ -330,8 +354,9 @@ try:
         look = reported(out)
         held = inbox('poster', 'dir', 's9-held')
         sl = slot(look, 's9-slot-open')
-        w.check('s9-queued-on-slot', len(sl.get('queued', [])) == 1 and held['purse'] == 2 * PRICE,
-                {'queued': len(sl.get('queued', [])), 'purse': held['purse']})
+        dL, dQ = dep(queued_message(held, look)), queued_dep(sl)
+        w.check('s9-queued-on-slot', len(sl.get('queued', [])) == 1 and held['purse'] == 2 * PRICE + dL + dQ,
+                {'queued': len(sl.get('queued', [])), 'purse': held['purse'], 'deposits': (dL, dQ)})
         deliver('s9-deliver-lookup', 'poster', 'dir', look, 'installed')
         sl = slot(look, 's9-slot-decided')
         target_after = inbox('poster', 'counter', 's9-target-after')
@@ -340,7 +365,7 @@ try:
                                                                            'payload': nat(O['counter'])}}, sl)
         w.check('s9-not-forwarded', target_after['ids'] == target_before['ids']
                 and target_after['purse'] == target_before['purse'], target_after['ids'])
-        w.check('s9-refunded', source['purse'] == 0 and source['sponsor'] - held['sponsor'] == PRICE
+        w.check('s9-refunded', source['purse'] == 0 and source['sponsor'] - held['sponsor'] == PRICE + dL + dQ
                 and source['collector'] - held['collector'] == PRICE,
                 {'purse': source['purse'], 'refund': source['sponsor'] - held['sponsor'],
                  'fee': source['collector'] - held['collector']})
@@ -373,10 +398,12 @@ try:
         out = control('s10-cancel-b', 'poster', 'cancelOf', mb, 'installed')
         after = inbox('poster', 'counter', 's10-after')
         refund, fee = paid(before, after)
+        db = dep(queued_message(before, mb))
         w.check('s10-acked', reported(out) == mb, reported(out))
         w.check('s10-withdrawn-fifo-kept', after['ids'] == [i for i in before['ids'] if i != str(mb)]
                 and str(mb) in before['ids'] and after['head'] == before['head'], (before['ids'], after['ids']))
-        w.check('s10-refund-exact', refund == PRICE and before['purse'] - after['purse'] == PRICE and fee == PRICE,
+        w.check('s10-refund-exact', db > 0 and refund == PRICE + db and before['purse'] - after['purse'] == PRICE + db
+                and fee == PRICE,
                 {'refund': refund, 'fee': fee, 'purse': (before['purse'], after['purse'])})
         sb = slot(mb, 's10-slot-b')
         w.check('s10-slot-cancelled', decision(sb) == {'kind': 'cancelled'} and sb.get('queued') == [], sb)
@@ -387,11 +414,12 @@ try:
         w.check('s10-others-delivered', total('counter', 's10-c1') == c0 + 1 + 3, total('counter', 's10-c1x'))
         look = reported(invoke('s10-pipe', 'poster', 'pipe', record(via=nat(O['dir']), amount=nat(5)), 'installed'))
         held = inbox('poster', 'dir', 's10-pipe-held')
+        dL, dQ = dep(queued_message(held, look)), queued_dep(slot(look, 's10-slot-open'))
         control('s10-cancel-lookup', 'poster', 'cancelOf', look, 'installed')
         gone = inbox('poster', 'dir', 's10-pipe-gone')
         refund, fee = paid(held, gone)
-        w.check('s10-pipelined-refunded', held['purse'] == 2 * PRICE and gone['purse'] == 0 and refund == 2 * PRICE
-                and gone['ids'] == [], {'refund': refund, 'purse': (held['purse'], gone['purse']), 'ids': gone['ids']})
+        w.check('s10-pipelined-refunded', held['purse'] == 2 * PRICE + dL + dQ and gone['purse'] == 0
+                and refund == 2 * PRICE + dL + dQ and gone['ids'] == [] and gone['retired'], {'refund': refund, 'purse': (held['purse'], gone['purse']), 'ids': gone['ids']})
         w.check('s10-lookup-cancelled', decision(slot(look, 's10-slot-look')) == {'kind': 'cancelled'}, None)
         deliver('s10-deliver-lookup-refused', 'poster', 'dir', look, 'refused')
 
@@ -422,6 +450,7 @@ try:
         c0 = total('counter', 's12-c0')
         look = reported(invoke('s12-pipe', 'poster', 'pipe', record(via=nat(O['dir']), amount=nat(5)), 'installed'))
         held = inbox('poster', 'dir', 's12-held')
+        dQ = queued_dep(slot(look, 's12-slot-open'))
         how = 'cancelOf' if 'stop-cancels' in plants else 'stopOf'
         out = control('s12-stop', 'poster', how, look, 'installed')
         stopped = inbox('poster', 'dir', 's12-stopped')
@@ -430,7 +459,7 @@ try:
         refund, fee = paid(held, stopped)
         sl = slot(look, 's12-slot-stopped')
         w.check('s12-acked', reported(out) == look, reported(out))
-        w.check('s12-pipelined-refunded', refund == PRICE and held['purse'] - stopped['purse'] == PRICE
+        w.check('s12-pipelined-refunded', refund == PRICE + dQ and held['purse'] - stopped['purse'] == PRICE + dQ
                 and stopped['ids'] == held['ids'], {'refund': refund, 'purse': (held['purse'], stopped['purse'])})
         w.check('s12-open-unwatched', sl.get('phase') == 'open' and sl.get('watched') is False
                 and sl.get('queued') == [], sl)
@@ -466,9 +495,6 @@ try:
     def relay_a(target, method, amount, allowance):
         return record(target=nat(O[target]), method=label(method), amount=nat(amount), allowance=nat(allowance))
 
-    def queued_message(view, mid):
-        found = [x for x in view['messages'] if x['id'] == str(mid)]
-        return found[0] if found else {}
 
     def fresh(before, after):
         return [i for i in after['ids'] if i not in before['ids']]
@@ -485,8 +511,10 @@ try:
         msg = queued_message(held, m)
         if 'bounce-twice' in plants:
             applied['bounce-twice'] = msg.get('method') == 'bounce2'
+        dm = dep(msg)
         w.check('s14-escrowed', msg.get('allowance') == str(A) and msg.get('depth') == '0'
-                and held['purse'] - start['purse'] == PRICE + A and start['sponsor'] - held['sponsor'] == 2 * PRICE + A,
+                and held['purse'] - start['purse'] == PRICE + A + dm
+                and start['sponsor'] - held['sponsor'] == 2 * PRICE + A + dm,
                 {'message': msg, 'purse': held['purse'] - start['purse'], 'paid': start['sponsor'] - held['sponsor']})
         deliver('s14-deliver', 'relayer', 'counter', m, 'installed')
         after = inbox('relayer', 'counter', 's14-after')
@@ -495,10 +523,11 @@ try:
         onward = fresh(cc0, cc1)
         om = queued_message(cc1, onward[0]) if onward else {}
         w.check('s14-replied', d.get('kind') == 'reply', d)
+        do = dep(om)
         w.check('s14-onward-queued', len(onward) == 1 and om.get('method') == 'deposit' and om.get('depth') == '1'
-                and om.get('allowance') == '0' and cc1['purse'] - cc0['purse'] == PRICE,
+                and om.get('allowance') == '0' and cc1['purse'] - cc0['purse'] == PRICE + do,
                 {'onward': onward, 'message': om, 'purse': cc1['purse'] - cc0['purse']})
-        w.check('s14-remainder-exact', after['sponsor'] - held['sponsor'] == A - PRICE
+        w.check('s14-remainder-exact', after['sponsor'] - held['sponsor'] == A - PRICE - do + dm
                 and after['purse'] == start['purse'] and after['collector'] - held['collector'] == PRICE,
                 {'refund': after['sponsor'] - held['sponsor'], 'purse': (start['purse'], after['purse']),
                  'fee': after['collector'] - held['collector']})
@@ -508,7 +537,7 @@ try:
                 and inbox('counter', 'counter', 's14-cc2')['purse'] == cc0['purse'], None)
 
     with w.group('S15-exceed'):
-        A = 2 * PRICE if 'roomy-allowance' in plants else PRICE + PRICE // 2
+        A = 2 * (PRICE + PRICE // 4) if 'roomy-allowance' in plants else PRICE + PRICE // 2  # roomy: two onward sends and their deposits
         c0 = total('counter', 's15-c0')
         start = inbox('relayer', 'counter', 's15-start')
         invoke('s15-over-declared', 'relayer', 'relayA', relay_a('counter', 'bounce2', int(O['counter']), A),
@@ -520,16 +549,19 @@ try:
         m = reported(invoke('s15-relay', 'relayer', 'relayA', relay_a('counter', 'bounce2', int(O['counter']), A),
                             'installed', allowance=A))
         held = inbox('relayer', 'counter', 's15-held')
+        dm = dep(queued_message(held, m))
         if 'roomy-allowance' in plants:
-            applied['roomy-allowance'] = queued_message(held, m).get('allowance') == str(2 * PRICE)
+            applied['roomy-allowance'] = queued_message(held, m).get('allowance') == str(A)
         deliver('s15-deliver', 'relayer', 'counter', m, 'installed')
         after = inbox('relayer', 'counter', 's15-after')
         cc1 = inbox('counter', 'counter', 's15-cc1')
         d = decision(slot(m, 's15-slot'))
-        w.check('s15-broken-named', d.get('kind') == 'broken' and 'allowanceExceeded' in d.get('reason', '')
-                and f'{2 * PRICE} {A}' in d.get('reason', ''), d)
+        import re as _re
+        over = _re.search(r'allowanceExceeded (\d+) (\d+)', d.get('reason', ''))
+        w.check('s15-broken-named', d.get('kind') == 'broken' and over is not None and int(over.group(2)) == A
+                and int(over.group(1)) > A and int(over.group(1)) > 2 * PRICE, d)
         w.check('s15-nothing-onward', fresh(cc0, cc1) == [] and cc1['purse'] == cc0['purse'], fresh(cc0, cc1))
-        w.check('s15-allowance-refunded', after['sponsor'] - held['sponsor'] == A and after['purse'] == start['purse']
+        w.check('s15-allowance-refunded', after['sponsor'] - held['sponsor'] == A + dm and after['purse'] == start['purse']
                 and after['collector'] - held['collector'] == PRICE,
                 {'refund': after['sponsor'] - held['sponsor'], 'fee': after['collector'] - held['collector']})
         w.check('s15-counter-kept', total('counter', 's15-c1') == c0, None)
@@ -542,6 +574,7 @@ try:
         m = reported(invoke('s16-relay', 'relayer', 'relayA', relay_a('counter', how, int(O['counter']), A),
                             'installed', allowance=A))
         held = inbox('relayer', 'counter', 's16-held')
+        dm = dep(queued_message(held, m))
         if 'fan-four' in plants:
             applied['fan-four'] = queued_message(held, m).get('method') == 'bounce4'
         deliver('s16-deliver', 'relayer', 'counter', m, 'installed')
@@ -550,19 +583,21 @@ try:
         d = decision(slot(m, 's16-slot'))
         w.check('s16-broken-fanout', d.get('kind') == 'broken' and 'fanOut 4' in d.get('reason', ''), d)
         w.check('s16-nothing-onward', fresh(cc0, cc1) == [], fresh(cc0, cc1))
-        w.check('s16-allowance-refunded', after['sponsor'] - held['sponsor'] == A and after['purse'] == start['purse'],
+        w.check('s16-allowance-refunded', after['sponsor'] - held['sponsor'] == A + dm and after['purse'] == start['purse'],
                 {'refund': after['sponsor'] - held['sponsor']})
 
     with w.group('S17-depth'):
         A = 3 * PRICE if 'short-chain' in plants else 10 * PRICE
+        R = PRICE // 4  # each hop's reserve for its onward message's storage deposit
         h0 = total('hopper', 's17-h0')
         start = inbox('relayer', 'hopper', 's17-start')
         hh0 = inbox('hopper', 'hopper', 's17-hh0')
         m0 = reported(invoke('s17-hop', 'relayer', 'hop', record(target=nat(O['hopper']), price=nat(PRICE),
-                                                                   allowance=nat(A)), 'installed', allowance=A - PRICE))
+                                                                   allowance=nat(A), reserve=nat(R)), 'installed',
+                             allowance=A - PRICE))
         held = inbox('relayer', 'hopper', 's17-held')
         if 'short-chain' in plants:
-            applied['short-chain'] = queued_message(held, m0).get('allowance') == str(2 * PRICE)
+            applied['short-chain'] = queued_message(held, m0).get('allowance') == str(A - PRICE - R)
         deliver('s17-deliver-0', 'relayer', 'hopper', m0, 'installed')
         hh1 = inbox('hopper', 'hopper', 's17-hh1')
         n1 = fresh(hh0, hh1)
@@ -574,13 +609,13 @@ try:
         n2 = [i for i in n2 if not n1 or i != n1[0]]
         m2 = queued_message(hh2, n2[0]) if n2 else {}
         w.check('s17-one-hop-deeper', m1.get('depth') == '1' and m2.get('depth') == '2'
-                and m2.get('allowance') == str(A - 3 * PRICE), {'m1': m1, 'm2': m2})
+                and m2.get('allowance') == str(A - 3 * (PRICE + R)), {'m1': m1, 'm2': m2})
         if n2:
             deliver('s17-deliver-2', 'hopper', 'hopper', n2[0], 'installed')
         hh3 = inbox('hopper', 'hopper', 's17-hh3')
         d2 = decision(slot(n2[0], 's17-slot-2')) if n2 else {}
         w.check('s17-depth-refused', d2.get('kind') == 'broken' and 'continuationDepth 3' in d2.get('reason', ''), d2)
-        w.check('s17-depth-refund', bool(n2) and hh3['sponsor'] - hh2['sponsor'] == A - 3 * PRICE
+        w.check('s17-depth-refund', bool(n2) and hh3['sponsor'] - hh2['sponsor'] == A - 3 * (PRICE + R) + dep(m2)
                 and hh3['ids'] == [] and hh3['purse'] == hh0['purse'],
                 {'refund': hh3['sponsor'] - hh2['sponsor'], 'ids': hh3['ids'], 'purse': hh3['purse']})
         w.check('s17-two-delivered', total('hopper', 's17-h1') == h0 + 2, total('hopper', 's17-h1x'))
@@ -592,13 +627,14 @@ try:
                             relay_a('counter', 'deposit' if bare else 'bounce', int(O['counter']), A), 'installed',
                             allowance=A))
         before = inbox('relayer', 'counter', 's18-before')
+        dm = dep(queued_message(before, m))
         if bare:
             applied['cancel-bare'] = queued_message(before, m).get('allowance') == '0'
         control('s18-cancel', 'relayer', 'cancelOf', m, 'installed')
         after = inbox('relayer', 'counter', 's18-after')
         refund, fee = paid(before, after)
-        w.check('s18-refund-postage-and-allowance', refund == 2 * PRICE + PRICE // 2
-                and before['purse'] - after['purse'] == 2 * PRICE + PRICE // 2 and fee == PRICE,
+        w.check('s18-refund-postage-and-allowance', refund == 2 * PRICE + PRICE // 2 + dm
+                and before['purse'] - after['purse'] == 2 * PRICE + PRICE // 2 + dm and fee == PRICE,
                 {'refund': refund, 'fee': fee, 'purse': (before['purse'], after['purse'])})
         w.check('s18-slot-cancelled', decision(slot(m, 's18-slot')) == {'kind': 'cancelled'}
                 and after['ids'] == [i for i in before['ids'] if i != str(m)], None)
