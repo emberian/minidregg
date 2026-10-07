@@ -512,7 +512,6 @@ def acceptIssue
 structure AttenuateDeclaration (kind : ResourceKind) where
   child : Capability kind
   parentId : CapabilityId
-  expectedPreRoot : Digest
   operationNullifier : OperationNullifier
 
 def descendedCapability {kind : ResourceKind} (child : Capability kind)
@@ -546,12 +545,19 @@ def AttenuateDeclaration.patch {kind : ResourceKind}
 subject delegation. Both use the same canonical lookup, anchored lineage,
 across-kind identity freshness and current revocation/epoch planes.  The
 child's own key is not yet registered (the family registers it); its ancestors
-and channels are registered and live, read from the planes. -/
+and channels are registered and live, read from the planes.
+
+No authority-cell root is part of it. A descent's written value is the signed
+child plus a copy of the parent's head and ancestry, and the parent is named by
+its signed id: `parentExact` reads it from the actual pre-state. Every other
+field is a gate on that pre-state, decided by the executor, and can only refuse.
+Binding the whole authority root as well would refuse every pending descent on
+any unrelated authority write, and would need the whole cell to be shown to the
+signer. -/
 structure DescentEvidence {M : Materializer}
-    (pre : Cell M) {kind : ResourceKind} (expectedPreRoot : Digest)
+    (pre : Cell M) {kind : ResourceKind}
     (parentId : CapabilityId) (child : Capability kind)
     (parent : StoredCapability kind) : Type where
-  preRootExact : expectedPreRoot = pre.root
   parentExact : readCapability pre kind parentId = some parent
   parentIdExact : parent.head.id = parentId
   parentLineageValid : LineageValid (authState pre).parent parent
@@ -572,9 +578,9 @@ structure DescentEvidence {M : Materializer}
 
 theorem DescentEvidence.reject_existing_child {M : Materializer}
     {pre : Cell M} {kind : ResourceKind}
-    {expectedPreRoot : Digest} {parentId : CapabilityId} {child : Capability kind}
+    {parentId : CapabilityId} {child : Capability kind}
     {parent : StoredCapability kind}
-    (mode : DescentEvidence pre expectedPreRoot parentId child parent)
+    (mode : DescentEvidence pre parentId child parent)
     (otherKind : ResourceKind) (existing : StoredCapability otherKind)
     (present : readCapability pre otherKind child.id = some existing) : False := by
   rw [mode.childSlotFresh otherKind] at present
@@ -620,8 +626,7 @@ theorem capabilityProduction_preserves_present {M : Materializer}
 structure AttenuateEvidence {M : Materializer}
     (pre : Cell M) {kind : ResourceKind}
     (declaration : AttenuateDeclaration kind) (parent : StoredCapability kind)
-    extends DescentEvidence pre declaration.expectedPreRoot declaration.parentId
-      declaration.child parent where
+    extends DescentEvidence pre declaration.parentId declaration.child parent where
   strict : declaration.child.StrictAttenuates parent.head (authState pre).parent
 
 theorem AttenuateEvidence.childLineageAnchored {M : Materializer}
@@ -715,7 +720,6 @@ structure DelegateDeclaration (kind : ResourceKind) where
   child : Capability kind
   parentId : CapabilityId
   target : ResourceId kind
-  expectedPreRoot : Digest
   operationNullifier : OperationNullifier
 
 /-- Ambient values are fixed by the receiving source before a complete request
@@ -791,8 +795,7 @@ structure DelegationEvidence {M : Materializer}
     {kind : ResourceKind} (codec : LawfulCodec (DelegateDeclaration kind))
     (effectDigest : DelegateDeclaration kind → Digest)
     (declaration : DelegateDeclaration kind) (parent : StoredCapability kind)
-    extends DescentEvidence pre declaration.expectedPreRoot declaration.parentId
-      declaration.child parent where
+    extends DescentEvidence pre declaration.parentId declaration.child parent where
   parentCommitment : Digest
   parentAuthorization : Authorized portal (authState pre)
     (context.request codec effectDigest pre declaration)

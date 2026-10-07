@@ -278,4 +278,13 @@ theorem storeEpoch_schemaRefs :
 #assert_axioms storeEpoch_stateKey
 #assert_axioms storeEpoch_schemaRefs
 
+/-- The command-codec component and the delegation command frame version it
+replays, pinned together: moving either alone breaks this theorem. -/
+theorem storeEpoch_commands :
+    DurableCheckpointCodec.StoreEpoch.current.commands = "commands/v2" ∧
+      CapabilityDelegationController.commandFrame.getLast? = some 2 :=
+  ⟨rfl, by simp [CapabilityDelegationController.commandFrame]⟩
+
+#assert_axioms storeEpoch_commands
+
 end Minidregg.Kernel.ConsentAnchor
