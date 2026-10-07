@@ -357,16 +357,21 @@ def gate (profile : Profile) (committed : Nat) (committee : Bool) (finalized : O
   pure last
 
 def bundleAt (config : NativeHost.Config) (opened : NativeHost.Opened config) (first last : Nat) :
-    Except String Bundle := do
-  let accepted := opened.durable.image.accepted
-  let blocks ← (List.range (last + 1 - first)).mapM fun offset => do
-    let index := first - 1 + offset
-    let some record := accepted[index]? | throw s!"height {index + 1} is not in the Store"
-    let some receipt := NativeHost.historicalReceipt config opened.durable
-        record.transactionId record.event.eventId
-      | throw s!"height {index + 1} has no sealed receipt"
-    pure (⟨DurableCheckpointCodec.recordFrame.encode record, receipt⟩ : Block)
-  pure ⟨config.deployment.domain, config.profile.semantics, first, blocks⟩
+    IO (Except String Bundle) := do
+  -- One bounded Reader window (`Reader.range` refuses more than 4096 records):
+  -- each record verified at use, each receipt sealed by the verified leaf's root.
+  let ⟨_, reader⟩ ← match ← NativeHost.historyReader config opened with
+    | .error refusal => return .error refusal.detail
+    | .ok reader => pure reader
+  if last < first then return .error s!"empty bundle window {first}..{last}"
+  let reads ← match ← reader.range first last with
+    | .error refusal => return .error refusal.message
+    | .ok reads => pure reads
+  unless reads.map (·.1) = List.range' first (last + 1 - first) do
+    return .error s!"heights {first}..{last} are not in the Store"
+  let blocks := reads.map fun read =>
+    (⟨DurableCheckpointCodec.recordFrame.encode read.2.record, NativeHost.receiptOfRecord read.2⟩ : Block)
+  return .ok ⟨config.deployment.domain, config.profile.semantics, first, blocks⟩
 
 /-! ## NNTP `ARTICLE` (fn's served bytes; no POST ever) -/
 
@@ -484,7 +489,7 @@ def publish (config : NativeHost.Config) (ops : Ops) (archivePath firstText fina
   let opened ← IO.ofExcept (← NativeHost.openExisting config)
   let committed := opened.durable.height
   let last ← IO.ofExcept (gate archive.profile committed config.jointConsensus.isSome finalized first)
-  let bundle ← IO.ofExcept (bundleAt config opened first last)
+  let bundle ← IO.ofExcept (← bundleAt config opened first last)
   let source ← match render archive.profile bundle with
     | .ok bytes => pure bytes
     | .error refusal => throw (IO.userError refusal.word)
@@ -623,8 +628,12 @@ def fund (config : NativeHost.Config) (archivePath amountText txText eventText r
   let some tx := txText.toNat? | throw (IO.userError "TXID must be decimal")
   let some ev := eventText.toNat? | throw (IO.userError "EVENTID must be decimal")
   let opened ← IO.ofExcept (← NativeHost.openExisting config)
-  let some receipt := NativeHost.historicalReceipt config opened.durable ⟨tx⟩ ⟨ev⟩
-    | throw (IO.userError "funding evidence names no transaction this Store accepted")
+  let receipt ← match ← NativeHost.receiptByTransactionVia config opened ⟨tx⟩ with
+    | .error refusal => throw (IO.userError refusal.detail)
+    | .ok (some receipt) =>
+        if receipt.eventId == ⟨ev⟩ then pure receipt
+        else throw (IO.userError "funding evidence names no transaction this Store accepted")
+    | .ok none => throw (IO.userError "funding evidence names no transaction this Store accepted")
   let journal ← readJournal config
   let evidence := NativeHostCodec.receiptStream.encode receipt
   let journal ← appendEvent config journal (.funded amount evidence)

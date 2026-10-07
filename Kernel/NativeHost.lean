@@ -13,6 +13,7 @@ import Kernel.NativeHostGrainBirth
 import Kernel.GrainResourceBirthReceiver
 import Kernel.NativeObservationController
 import Kernel.NativeHostReplay
+import Compiler.DurableHistoryStore
 import Kernel.FnConsumerProgressHistory
 import Kernel.PreparedInvocationDiagnostics
 
@@ -92,7 +93,7 @@ def bootstrap (config : Config) (canonicalImage : List UInt8) : IO (Except Strin
   match DurableReceiverIO.loadBytes ResourceBirthCodec.rootBytes config.logStart canonicalImage with
   | .error detail => return .error detail
   | .ok durable =>
-      if !durable.image.accepted.isEmpty then return .error "bootstrap image contains accepted history"
+      if durable.height != 0 then return .error "bootstrap image contains accepted history"
       match validateLoaded config durable with
       | .error detail => return .error detail
       | .ok _ =>
@@ -1285,12 +1286,102 @@ def fleetLookupLoaded (config : Config) (opened : Opened config)
     | some (.error _) => refused .conflict "replay" "transaction identity conflict"
     | none => .absent
 
+/-- A history refusal as a Host refusal frame: the detail is `Refusal.message`
+verbatim (it names the height); never "absent". -/
+def historyRefusal (refusal : DurableHistory.Refusal) : Refusal :=
+  { reason := .operationRejected, detail := refusal.message }
+
+/-- The Reader of one loaded Store image: the Store's authenticated head and the
+verify-at-use reads under it. One per request. -/
+def historyReaderOfDurable (config : Config) (durable : Durable) :
+    IO (Except Refusal ((store : DurableHistory.StoreIdentity) ×
+      DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)) := do
+  match ← DurableHistoryStore.readerOf config.transport ResourceBirthCodec.rootBytes durable with
+  | .error message => return .error { reason := .operationRejected, detail := message }
+  | .ok reader => return .ok reader
+
+/-- The Reader of one opened image. -/
+def historyReader (config : Config) (opened : Opened config) :
+    IO (Except Refusal ((store : DurableHistory.StoreIdentity) ×
+      DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)) :=
+  historyReaderOfDurable config opened.durable
+
+/-- The receipt a verified record at `height` carries: its original accepted
+prefix (`height`, 1-based), the record's own transaction and event id, and the
+world root the log leaf at that height binds (`Verified.root`, authenticated by
+the inclusion proof against the MAC-bound head). -/
+def receiptOfRecord {store : DurableHistory.StoreIdentity} {head : DurableHistory.Head store}
+    {height : Nat} (read : DurableHistoryReader.Record head height) : Receipt :=
+  ⟨read.record.transactionId, read.record.event.eventId, height, read.verified.root⟩
+
+/-- The receipt of a transaction the spent map named: the record read at its height. -/
+def receiptOfFound {store : DurableHistory.StoreIdentity} {head : DurableHistory.Head store}
+    (transactionId : Digest) (found : DurableHistoryReader.ByTx head transactionId) : Receipt :=
+  { receiptOfRecord found.read with transactionId := transactionId }
+
 /-- Exact receipt of one accepted transaction, by transaction id alone. It
 names the original accepted prefix; a later tip does not replace it. -/
-def receiptByTransactionLoaded (config : Config) (opened : Opened config)
-    (transactionId : Digest) : Option Receipt := do
-  let record ← opened.durable.image.accepted.find? (fun record => record.transactionId == transactionId)
-  historicalReceipt config opened.durable transactionId record.event.eventId
+def receiptByTransactionRead {rootBytes : List UInt8 → Digest} {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader rootBytes store) (transactionId : Digest) :
+    IO (Except Refusal (Option Receipt)) := do
+  match ← reader.byTx transactionId with
+  | .error refusal => return .error (historyRefusal refusal)
+  | .ok (.absent _) => return .ok none
+  | .ok (.present found) => return .ok (some (receiptOfFound transactionId found))
+
+/-- Op 102 on one opened image: the Reader is built per request from the open. -/
+def receiptByTransactionVia (config : Config) (opened : Opened config)
+    (transactionId : Digest) : IO (Except Refusal (Option Receipt)) := do
+  match ← historyReader config opened with
+  | .error refusal => return .error refusal
+  | .ok ⟨_, reader⟩ => receiptByTransactionRead reader transactionId
+
+/-- `historicalReceipt` through the Reader: the receipt of `transactionId` sealed
+against its original accepted prefix, `none` when the transaction is absent or its
+event id is not `eventId`. A history refusal is returned, never mapped to `none`. -/
+def historicalReceiptVia (config : Config) (opened : Opened config)
+    (transactionId eventId : Digest) : IO (Except Refusal (Option Receipt)) := do
+  match ← receiptByTransactionVia config opened transactionId with
+  | .error refusal => return .error refusal
+  | .ok none => return .ok none
+  | .ok (some receipt) => return .ok (if receipt.eventId == eventId then some receipt else none)
+
+/-- The accepted record of a transaction id, verified at use through the
+Reader built from this open (`Reader.byTx`). A history refusal is thrown with its
+message (it names the height); it is never reported as an absent transaction. -/
+def acceptedRecord (config : Config) (opened : Opened config) (transactionId : Digest) :
+    IO (Option DurableReceiver.IntentRecord) := do
+  match ← historyReader config opened with
+  | .error refusal => throw (IO.userError refusal.detail)
+  | .ok ⟨_, reader⟩ =>
+      match ← reader.byTx transactionId with
+      | .error refusal => throw (IO.userError refusal.message)
+      | .ok (.absent _) => return none
+      | .ok (.present found) => return some found.read.record
+
+/-- OPERATOR TOOLS ONLY, never a request or session path: every accepted record,
+each verified at use, read in `Reader.range` windows of 256 (one Store call and
+one inclusion check per record; nothing is trusted from the opened image). A
+refusal is thrown with its message. -/
+def operatorAcceptedLogOfDurable (config : Config) (durable : Durable) :
+    IO (List DurableReceiver.IntentRecord) := do
+  match ← historyReaderOfDurable config durable with
+  | .error refusal => throw (IO.userError refusal.detail)
+  | .ok ⟨_, reader⟩ =>
+      let top := reader.head.height
+      let mut log : Array DurableReceiver.IntentRecord := #[]
+      let mut first := 1
+      while first ≤ top do
+        let last := min top (first + 255)
+        match ← reader.range first last with
+        | .error refusal => throw (IO.userError refusal.message)
+        | .ok reads => for read in reads do log := log.push read.2.record
+        first := last + 1
+      return log.toList
+
+def operatorAcceptedLog (config : Config) (opened : Opened config) :
+    IO (List DurableReceiver.IntentRecord) :=
+  operatorAcceptedLogOfDurable config opened.durable
 
 /-- One topic event as a reader sees it. `height` is the admission height,
 unique per accepted record on one Host: K authors' streams of one topic merge
@@ -1320,21 +1411,32 @@ structure FleetPollView where
   tail : Option Digest
   events : List FleetPolledEvent
 
-def fleetJournalTurn {config : Config} (opened : Opened config) (transactionId : Digest) :
-    Option FleetTurn.DecodedIngress := do
-  let record ← opened.durable.image.accepted.find? (fun record => record.transactionId == transactionId)
-  FleetTurn.decodeIngress record.event.canonicalBytes
+/-- The signed ingress of an accepted fleet turn, read by transaction id through
+the Reader (`byTx`: the spent map's opening, then the record at that height,
+each verified at use). -/
+def fleetJournalTurn {rootBytes : List UInt8 → Digest} {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader rootBytes store) (transactionId : Digest) :
+    IO (Except Refusal (Option FleetTurn.DecodedIngress)) := do
+  match ← reader.byTx transactionId with
+  | .error refusal => return .error (historyRefusal refusal)
+  | .ok (.absent _) => return .ok none
+  | .ok (.present found) =>
+      return .ok (FleetTurn.decodeIngress found.read.record.event.canonicalBytes)
 
-def fleetPolledEvent (config : Config) (opened : Opened config)
-    (item : Nat × StreamCell.Entry) : FleetPolledEvent :=
+def fleetPolledEvent {rootBytes : List UInt8 → Digest} {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader rootBytes store)
+    (item : Nat × StreamCell.Entry) : IO (Except Refusal FleetPolledEvent) := do
   let (sequence, entry) := item
   let record := entry.record
-  let payload := (fleetJournalTurn opened record.transaction).bind fun ingress =>
-    ingress.command.publication.bind fun publication =>
-      if StreamCell.payloadDigest publication.payload = record.entry.payloadDigest
-      then some publication.payload else none
-  ⟨sequence, StreamCell.entryKey entry, entry.parent, record.transaction, record.height,
-    record.author, record.entry.payloadDigest, payload⟩
+  match ← fleetJournalTurn reader record.transaction with
+  | .error refusal => return .error refusal
+  | .ok turn =>
+      let payload := turn.bind fun ingress =>
+        ingress.command.publication.bind fun publication =>
+          if StreamCell.payloadDigest publication.payload = record.entry.payloadDigest
+          then some publication.payload else none
+      return .ok ⟨sequence, StreamCell.entryKey entry, entry.parent, record.transaction, record.height,
+        record.author, record.entry.payloadDigest, payload⟩
 
 def fleetPollMax : Nat := 64
 
@@ -1354,8 +1456,16 @@ def fleetPollAuthorizedLoaded (config : Config) (opened : Opened config)
       let entries := FleetTurn.eventsSince config.deployment directory stream cursor
         (min limit fleetPollMax)
       let head := FleetTurn.streamHead config.deployment directory stream
-      return .ok ⟨subject, payer, topic, stream, cursor, head.count, head.tail,
-        entries.map (fleetPolledEvent config opened)⟩
+      -- One Reader per request; at most `fleetPollMax` events, one `byTx` each.
+      match ← historyReader config opened with
+      | .error refusal => return .error refusal
+      | .ok ⟨_, reader⟩ =>
+          let mut events : Array FleetPolledEvent := #[]
+          for item in entries do
+            match ← fleetPolledEvent reader item with
+            | .error refusal => return .error refusal
+            | .ok event => events := events.push event
+          return .ok ⟨subject, payer, topic, stream, cursor, head.count, head.tail, events.toList⟩
 
 structure FleetHeadView where
   subject : SubjectId
