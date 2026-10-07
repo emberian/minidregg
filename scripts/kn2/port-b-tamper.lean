@@ -6,6 +6,10 @@ equals, root, chain and siblings, the one the retired genesis-replay path
 (`Loaded.atPrefix` + `entriesOf` over the cut image) computed, at height 30 (base:
 the checkpoint at 16 + 14 records) and 10 (base: genesis) and at the head 41; the
 windowed fold sees all 41 records.
+`NativeHistorySelection.select` (the lifecycle cores' read of an original record and its prior
+state) is exercised through the same Store: an honest selection gets past every read (it stops
+only at `validateServed`, the probe Store being no deployment); a selection whose bound does not
+exceed the index is refused; a record tampered strictly below the selected height is refused naming it.
 Planted faults (each must refuse BY NAME, never answer a stale or absent value):
  1. one byte of the record at height 20 (strictly below the requested 30, above the
     checkpoint at 16): `stateAt 30` and the fold over 1..41 refuse naming height 20;
@@ -27,8 +31,7 @@ open Minidregg.Compiler.DurableHistoryReader
 
 namespace HistoryTamper
 
-def rootBytes (bytes : List UInt8) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.DURABLE.RECEIVER.PROBE/v1".toUTF8.toList bytes).digest
+abbrev rootBytes : List UInt8 → Digest := ResourceBirthCodec.rootBytes
 
 def seed : Seed := { absentBytes := [], cells := [(⟨1⟩, [1]), (⟨3⟩, [0])], available := fun _ => 1000 }
 
@@ -62,10 +65,20 @@ def expectRefusedAt (label : String) (height : Nat) (result : Except DurableHist
       IO.println s!"refused as expected ({label}): {refusal.message}"
       require s!"{label} names height {height}" (refusal == .notIncluded height)
 
+/-- A config no deployment would use: `select` reads the Store before it looks at the config. -/
+def probeConfig (storage : NativeConfig) : NativeHost.Config :=
+  { deployment := ⟨⟨1⟩, 2, 3, 4⟩, federation := ⟨5⟩,
+    template := ⟨⟨6⟩, 1, 1, CanonicalRuntimeProfile.defaultBirthSlack⟩,
+    tariff := ⟨1, 1, 1, 0, 7, 8⟩, genesisHeight := 0, expectedSeed := ⟨9⟩,
+    storage := storage, signature := ⟨""⟩ }
+
+def mentions (text needle : String) : Bool := (text.splitOn needle).length > 1
+
 def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   IO.FS.writeBinFile (directory / "key") ((List.range 32).map (fun i => UInt8.ofNat (i * 7 + 3))).toByteArray
   let config : NativeConfig :=
     { binary := binary, root := directory / "store", key := directory / "key", checkpointEvery := 16 }
+  let probe := probeConfig config
   let transport := { config.transport (fun _ => ⟨7⟩) ⟨999⟩ with systemCell := none }
   match ← bootstrap transport rootBytes seed with
   | .error message => throw (IO.userError message)
@@ -101,6 +114,17 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   | .ok count => require "the windowed fold sees 41 records" (count == 41)
   | .error detail => throw (IO.userError s!"FAIL honest fold: {detail}")
   IO.println "honest: pastWitness at 10/30/41 equals the genesis-replay witness; fold sees 41 records"
+  -- select: the honest read passes the record and the stateAt reads (it stops at validateServed).
+  match ← NativeHistorySelection.select probe reader 41 25 ⟨[], []⟩ with
+  | .ok _ => throw (IO.userError "FAIL the probe Store was validated as a deployment")
+  | .error detail =>
+      require "an honest select is not refused by a history read" (!mentions detail "refused")
+      IO.println s!"honest select 25 reached validateServed: {detail}"
+  match ← NativeHistorySelection.select probe reader 25 25 ⟨[], []⟩ with
+  | .ok _ => throw (IO.userError "FAIL select accepted an index not below its bound")
+  | .error detail =>
+      IO.println s!"refused as expected (select index 25 under bound 25): {detail}"
+      require "bound refusal names the unavailable record" (mentions detail "unavailable")
   let database := directory / "store" / "forward-link.sqlite3"
   -- PLANT 1: the record at height 20.
   sql database "UPDATE durable_log SET record = CAST(substr(record,1,length(record)-1) || X'FF' AS BLOB) WHERE height = 20"
@@ -110,6 +134,11 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   | .error detail =>
       IO.println s!"refused as expected (fold over 1..41): {detail}"
       require "fold names height 20" ((detail.splitOn "height 20").length > 1)
+  match ← NativeHistorySelection.select probe reader 41 25 ⟨[], []⟩ with
+  | .ok _ => throw (IO.userError "FAIL select read through the tampered record")
+  | .error detail =>
+      IO.println s!"refused as expected (select 25 over the tampered record at 20): {detail}"
+      require "select names height 20" (mentions detail "height 20")
   -- PLANT 2: the checkpoint at 32 (stateAt 41 resumes from it).
   sql database "UPDATE durable_checkpoint SET bytes = CAST(substr(bytes,1,length(bytes)-1) || X'FF' AS BLOB) WHERE height = 32"
   match ← reader.stateAt 41 with
@@ -117,7 +146,7 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   | .error refusal =>
       IO.println s!"refused as expected (tampered checkpoint at 32): {refusal.message}"
       require "checkpoint refused" ((refusal.message.splitOn "checkpoint refused").length > 1)
-  IO.println "PASS port-b tamper: a record below the requested height and the checkpoint, each refused by name"
+  IO.println "PASS port-b tamper: a record below the requested height and the checkpoint, each refused by name (stateAt, fold, select)"
 
 end HistoryTamper
 
