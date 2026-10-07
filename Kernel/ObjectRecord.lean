@@ -611,13 +611,13 @@ theorem admitWrite_typed {record : ObjectRecord} {facts : Facts} {old : Option D
     (admitted : admitWrite record facts old new = .ok ()) : typedAt record.stateType new = true :=
   ((admitWrite_ok_iff record facts old new).mp admitted).2
 
-/-- The judgment reads the law, the pins and the state type only: counters and the payer
+/-- The judgment reads the law, the package's laws, the pins and the state type only: counters and the payer
 are not read. -/
 theorem admitWrite_bump (record : ObjectRecord) (f : Nat → Nat) (c : LiveClass) (facts : Facts)
     (old : Option Data) (new : Data) :
     admitWrite (record.bump f c) facts old new = admitWrite record facts old new := by
   obtain ⟨_, law, stateType, _⟩ := bump_keeps record f c
-  simp only [admitWrite, ObjectRecord.effectiveLaw, bump_pins, law, stateType]
+  simp only [admitWrite, ObjectRecord.effectiveLaw, bump_pins, law, stateType, bump_packageLaws]
 
 /-- **The payer is not authority**: the judgment does not read it. -/
 theorem admitWrite_payer_irrelevant (record : ObjectRecord) (payer : Minidregg.Theory.CanonicalResourceKernel.AccountId)

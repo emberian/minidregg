@@ -569,6 +569,46 @@ theorem compile_sound (facts : Facts) (old : Option Data) (new : Data) (before a
         ← ihConclusion plain.2]
       simp [Minidregg.Pred.eval_not]
 
+/-! ## A package's laws hold on every write the kernel admits -/
+
+/-- **The installed conjunction means every law.** On the views of a write, if the package law
+(`packageLaw`) evaluates true, every law of the package holds in its own meaning. -/
+theorem packageLaw_sound (facts : Facts) (old : Option Data) (new : Data) (before after : State)
+    (viewed : views facts old new = some (before, after)) (laws : List (String × LawExpr))
+    (holds : eval (packageLaw laws) before after = true) :
+    ∀ law ∈ laws, law.2.denote facts old new = true := by
+  intro law member
+  unfold packageLaw at holds
+  rw [Minidregg.Pred.eval_all, List.all_eq_true] at holds
+  have one := holds _ (List.mem_map_of_mem member)
+  by_cases plain : law.2.fieldsPlain = true
+  · simp only [plain, if_true] at one
+    rw [← compile_sound facts old new before after viewed law.2 plain]
+    exact one
+  · simp only [plain] at one
+    simp [Minidregg.Pred.eval_any] at one
+
+/-- **`package_law_enforced`**: every write of an object's declared state that the kernel's
+judgment admits (`ObjectRecord.admitWrite`, the judgment of births, deliveries, call frames and
+messages) satisfies every law of the object's package, in the law's own meaning over the data. -/
+theorem package_law_enforced (record : ObjectRecord) (facts : Facts) (old : Option Data) (new : Data)
+    (admitted : admitWrite record facts old new = .ok ()) :
+    ∀ law ∈ record.packageLaws, law.2.denote facts old new = true := by
+  obtain ⟨⟨before, after, viewed, accepted⟩, _⟩ := (admitWrite_ok_iff record facts old new).mp admitted
+  have packaged := ((effectiveLaw_accepts_iff record before after).mp accepted).2.1
+  exact packageLaw_sound facts old new before after viewed record.packageLaws packaged
+
+/-- **`package_law_enforced`, the seed**: an object's initial state is admitted only if every law
+of its package holds on it (over no old state). -/
+theorem package_law_enforced_seed (record : ObjectRecord) (facts : Facts) (seed : Data)
+    (admitted : admitSeed record facts seed = .ok ()) :
+    ∀ law ∈ record.packageLaws, law.2.denote facts none seed = true := by
+  obtain ⟨⟨before, after, viewed, accepted⟩, _⟩ := (admitSeed_ok_iff record facts seed).mp admitted
+  unfold ObjectRecord.seedLaw at accepted
+  rw [Minidregg.Pred.eval_all] at accepted
+  simp only [List.all_cons, List.all_nil, Bool.and_true, Bool.and_eq_true] at accepted
+  exact packageLaw_sound facts none seed before after viewed record.packageLaws accepted.1
+
 /-! ### The premise is inhabited, and the meaning decides
 
 A tally whose law is `new.total <= 1000 and monotone(total)`: the views of a write exist, the
@@ -604,6 +644,9 @@ theorem tally_meaning_decides :
 #assert_axioms old_view_reads_field
 #assert_axioms views_parts
 #assert_axioms compile_sound
+#assert_axioms packageLaw_sound
+#assert_axioms package_law_enforced
+#assert_axioms package_law_enforced_seed
 #assert_axioms tally_views_inhabited
 #assert_axioms tally_meaning_decides
 end Minidregg.Kernel.ObjectLaw

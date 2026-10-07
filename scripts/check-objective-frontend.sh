@@ -22,6 +22,10 @@
 #     publication       tests/objective-native/PublicationReplay.lean: what the Host publishes is
 #                       what the receiver's replay recomputes; foreign pin, changed source and
 #                       tampered core are refused
+#     package-law       tests/objective-native/PackageLaw.lean over CappedTally.obend: the package's
+#                       `law` declarations travel in the artifact, the receiver replays them (a
+#                       tampered law is refused), and the object kernel refuses a write that breaks
+#                       one, naming it
 #     activity-replay   tests/objective-native/ActivityReplay.lean: the activity kernel replays
 #                       the package stored with an activity artifact and loads the program
 #                       from it; foreign core, foreign front end, missing package and another
@@ -48,7 +52,7 @@ logs=$repo/build-logs/objective-frontend; mkdir -p "$logs"
 work=$(mktemp -d "${TMPDIR:-/tmp}/objective-frontend.XXXXXX")
 only=${OBJECTIVE_FRONTEND_ONLY:-}
 export LEAN_NUM_THREADS=2
-ROWS=(identity elaborate-tests c4-tests check-parser check-preview ltuo-probes publication activity-replay examples tutorial overview)
+ROWS=(identity elaborate-tests c4-tests check-parser check-preview ltuo-probes publication package-law activity-replay examples tutorial overview)
 declare -A STATUS
 red=0
 
@@ -57,7 +61,7 @@ need_lean() {
   command -v lean >/dev/null 2>&1 || { echo "needs warm base: no lean binary on PATH"; return 1; }
   if [ "$lake_root" = "$repo" ]; then
     lake build Host.ObjectiveBendFrontEnd Host.ObjectivePackageAuthor Compiler.ObjectiveBendC4Vectors \
-      Kernel.ObjectiveActivity || return 1
+      Kernel.ObjectiveActivity Kernel.ObjectLawEnforced || return 1
   fi
   [ -f "$lake_root/.lake/build/lib/lean/Host/ObjectiveBendFrontEnd.olean" ] \
     || { echo "needs warm base: no built front end (Host/ObjectiveBendFrontEnd.olean) under $lake_root"; return 1; }
@@ -101,6 +105,10 @@ r_publication()     {
   need_lean && front_env || return 1
   "$LEAN" --run tests/objective-native/PublicationReplay.lean world/NativeReceipt.obend note
 }
+r_package-law() {
+  need_lean && front_env || return 1
+  "$LEAN" --run tests/objective-native/PackageLaw.lean tests/objective-native/CappedTally.obend tally
+}
 r_activity-replay() {
   need_lean && front_env || return 1
   "$LEAN" --run tests/objective-native/ActivityReplay.lean world/activity/Tally.obend tally
@@ -120,6 +128,7 @@ declare -A MARK=(
   [check-preview]='"status":"passed"'
   [ltuo-probes]='^LTUO PROBES CURRENT: [0-9]+ rows pinned'
   [publication]='^PUBLICATION REPLAY PASS: '
+  [package-law]='^PACKAGE LAW PASS: '
   [activity-replay]='^ACTIVITY REPLAY PASS: '
   [examples]='^results: '
   [tutorial]='^TUTORIAL PASS: [0-9]+ commands'
