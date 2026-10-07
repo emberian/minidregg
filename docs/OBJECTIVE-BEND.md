@@ -114,11 +114,11 @@ elaborator.
 ### Specification metadata
 
 Every specification has the one type `Specification<T>` =
-`specification(SpecMeta, Extension<T>)`, where `SpecMeta` and `SpecLaws` are built-in sums:
+`specification(SpecMeta, Extension<T>)`, where `SpecMeta` and `SpecClaims` are built-in sums:
 
 ```text
-sum SpecLaws:  none: {}  |  law: {name: String, status: String, rest: SpecLaws}
-sum SpecMeta:  declared: {name: String, interface: String, laws: SpecLaws}
+sum SpecClaims:  none: {}  |  claim: {name: String, status: String, rest: SpecClaims}
+sum SpecMeta:  declared: {name: String, interface: String, claims: SpecClaims}
             |  composed: {inherited: SpecMeta, wrapping: SpecMeta}
             |  extension: {}
 ```
@@ -127,7 +127,7 @@ sum SpecMeta:  declared: {name: String, interface: String, laws: SpecLaws}
 composition change the metadata *value*, never the type, so
 `def twice(e: Extension<Nat>) -> Specification<Nat>: compose(e, e)` checks
 (`Compiler/ObjectiveBendSpecificationClosure.lean`: `composeTy_closed`, `twice_accepted`,
-`law_spec_accepted`). Reflection sees exactly: `metadata`, `reflect`, `targetOf`, the
+`claim_spec_accepted`). Reflection sees exactly: `metadata`, `reflect`, `targetOf`, the
 behaviour of application/`fix`/`mix`, and string equality on `SpecMeta` fields. Because
 `metadata` observes construction history, `compose` is associative for behaviour but not
 for reflection: the two associations are told apart by a program (probes R01/R02). The
@@ -557,10 +557,12 @@ above), so the creator's own law can read `objective/artifact` too.
 - **A cell law** (`Pred`) is a decidable predicate over a write's old and new projected
   state and the request: the admission judge for every write, whoever proposed it. An
   object's `law` in its record is one.
-- **A spec `law name(args): expr`** in `.obend` elaborates to a hidden knot field typed to
+- **A spec `claim name(args): expr`** in `.obend` elaborates to a hidden knot field typed to
   return Bool and is listed in `SpecMeta` with status `unchecked`. Nothing evaluates or
-  discharges it, and it never reaches admission; `law impossible: false` is accepted (probe
-  W08, whose target is a refusal).
+  discharges it, and it never reaches admission; `claim impossible: false` is accepted (probe
+  W08). It was spelled `law` until 2026-10-07; that spelling now refuses at parse
+  (`law_keyword_refused`): in `.obend`, `law` is reserved for an ENFORCED predicate or an
+  accepted proof obligation (GPT-6 row G), and an unchecked property must not borrow the word.
 - **A spec `requires m(…)`** declares a member needed from the final self; it is checked
   (above). It is not a precondition.
 

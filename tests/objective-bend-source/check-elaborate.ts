@@ -30,7 +30,7 @@ badValues.forEach((v,i)=>job("identity-bad-"+i,identitySource,"identity",typed([
 job("identity-extra",identitySource,"identity",{...typed([]),extra:true});
 const repeated=(k:number)=>job("repeated-"+k,`${E}extension AddOne(self: Nat, super: Nat) -> Nat:\n  super + 1n\ndef repeated(seed: Nat) -> Nat:\n  fix(compose(${Array(k).fill("AddOne").join(", ")}), seed)\n`,"repeated");
 for(const k of [2,3,8,16,32])repeated(k);
-const evenOdd=`${E}record Parity:\n  even(n: Nat) -> Bool\n  odd(n: Nat) -> Bool\nspec Even for Parity:\n  requires odd(n: Nat) -> Bool\n  def even(n: Nat) -> Bool:\n    match n:\n      case 0n: true\n      case 1n+pred: self.odd(pred)\nspec Odd for Parity:\n  requires even(n: Nat) -> Bool\n  def odd(n: Nat) -> Bool:\n    match n:\n      case 0n: false\n      case 1n+pred: self.even(pred)\n  law total(n: Nat): self.odd(n) == self.odd(n)\ndef four() -> Nat:\n  4n\n`;
+const evenOdd=`${E}record Parity:\n  even(n: Nat) -> Bool\n  odd(n: Nat) -> Bool\nspec Even for Parity:\n  requires odd(n: Nat) -> Bool\n  def even(n: Nat) -> Bool:\n    match n:\n      case 0n: true\n      case 1n+pred: self.odd(pred)\nspec Odd for Parity:\n  requires even(n: Nat) -> Bool\n  def odd(n: Nat) -> Bool:\n    match n:\n      case 0n: false\n      case 1n+pred: self.even(pred)\n  claim total(n: Nat): self.odd(n) == self.odd(n)\ndef four() -> Nat:\n  4n\n`;
 job("evenodd",evenOdd,"four");
 job("affine",E+"def keep(affine x: Nat, linear y: Nat, -z: Nat, +w: Nat) -> Nat:\n  x + y\n","keep");
 parseJob("double-quantity",E+"def bad(affine +x: Nat) -> Nat:\n  x\n");
@@ -121,16 +121,16 @@ if(literal("repeated-3").schema!=="dregg.objective-bend.typed-core.v3")throw Err
 console.log("COMPOSE SHARING PASS: k=8/16/32 sizes "+[s8,s16,s32].join("/")+" (linear); SpecMeta.composed inherited and mix.lower are bound 1 of one redex");
 const specTyped=literal("evenodd");
 if(specTyped.schema!=="dregg.objective-bend.typed-core.v3")throw Error("spec-declaring package refused: "+specTyped.message);
-// Both specs have the ONE metadata type (the SpecMeta variable), law or no law; the law
-// is its own knot field Probe.Odd#law#total : (self, super, n) -> Bool.
+// Both specs have the ONE metadata type (the SpecMeta variable), claim or no claim; the claim
+// is its own knot field Probe.Odd#claim#total : (self, super, n) -> Bool.
 const specRow=specTyped.bounds[0].type;const rowField=(row:any,name:string):any=>row?.tag==="field"?(row.name===name?row.member:rowField(row.tail,name)):null;
-const evenTy=rowField(specRow,"Probe.Even"),oddTy=rowField(specRow,"Probe.Odd"),lawTy=rowField(specRow,"Probe.Odd#law#total");
+const evenTy=rowField(specRow,"Probe.Even"),oddTy=rowField(specRow,"Probe.Odd"),claimTy=rowField(specRow,"Probe.Odd#claim#total");
 if(evenTy?.tag!=="specification"||oddTy?.tag!=="specification"||evenTy.metadata.tag!=="variable"||JSON.stringify(evenTy.metadata)!==JSON.stringify(oddTy.metadata))
  throw Error("spec global types do not share the one SpecMeta metadata type");
-if(lawTy?.codomain?.codomain?.codomain?.tag!=="boolean")throw Error("law field type lost: "+JSON.stringify(lawTy));
+if(claimTy?.codomain?.codomain?.codomain?.tag!=="boolean")throw Error("claim field type lost: "+JSON.stringify(claimTy));
 if(specTyped.annotations.length<8)throw Error("spec method lambdas lack binder hints");
 if(results.get("evenodd").output.check.accepted!==true)throw Error("the checker refused the front end's own packet: "+JSON.stringify(results.get("evenodd").output.check));
-console.log("SPEC TYPING PASS: spec-declaring package yields typed-core.v3; spec, law and method lambdas annotated; the front end's packet checks");
+console.log("SPEC TYPING PASS: spec-declaring package yields typed-core.v3; spec, claim and method lambdas annotated; the front end's packet checks");
 const affine=literal("affine");
 const quantities=affine.annotations.slice(-4).map((a:any)=>a.parameter+"/"+a.reuse).join(",");
 if(quantities!=="affine/reusable,linear/once,erased/once,unrestricted/once")throw Error("quantities lost: "+quantities);

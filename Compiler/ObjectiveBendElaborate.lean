@@ -76,7 +76,7 @@ structure Method where
   signature : Json
   deriving Inhabited
 
-structure Law where
+structure Claim where
   name : String
   params : List Param
   body : Expr
@@ -89,7 +89,7 @@ structure Spec where
   targetType : String
   requirements : Json
   methods : List Method
-  laws : List Law
+  claims : List Claim
   /-- `Self has {...}, Super has {...}` of an open spec (OB-LTUO LT2), "" for `spec S for T`. -/
   binders : String := ""
   deriving Inhabited
@@ -196,18 +196,18 @@ def decodeDecl (j : Json) : Except String Decl := do
       let qualifier := (m.getObjValAs? String "qualifier").toOption.getD "primary"
       let body ← decodeBody fuel (← m.getObjVal? "body")
       return (Method.mk name params resultType qualifier body (withoutKey m "body"))
-    let laws ← (← arr j "laws").mapM fun l => do
+    let claims ← (← arr j "claims").mapM fun l => do
       let name ← str l "name"
       let params ← (← arr l "parameters").mapM decodeParam
       let body ← decodeExpr fuel (← l.getObjVal? "body")
-      return (Law.mk name params body)
+      return (Claim.mk name params body)
     let name ← str j "name"
     let suffix := (j.getObjValAs? Bool "suffix").toOption.getD false
     let parents ← (← arr j "parents").mapM (fun p => p.getStr?)
     let targetType ← str j "targetType"
     let requirements ← j.getObjVal? "requirements"
     let binders := (j.getObjValAs? String "binders").toOption.getD ""
-    return .spec (Spec.mk name suffix parents targetType requirements methods laws binders)
+    return .spec (Spec.mk name suffix parents targetType requirements methods claims binders)
   | "extension" =>
     let name ← str j "name"
     let params ← (← arr j "parameters").mapM decodeParam
@@ -500,24 +500,24 @@ def splitTop (text : String) (sep : String) : List String :=
 `specification(SpecMeta, Extension<T>)`), declared in the built-in module as two
 recursive sums (`builtinSource`):
 
-    sum SpecLaws:  none: {} | law: {name: String, status: String, rest: SpecLaws}
-    sum SpecMeta:  declared: {name: String, interface: String, laws: SpecLaws}
+    sum SpecClaims:  none: {} | claim: {name: String, status: String, rest: SpecClaims}
+    sum SpecMeta:  declared: {name: String, interface: String, claims: SpecClaims}
                  | composed: {inherited: SpecMeta, wrapping: SpecMeta}
                  | extension: {}
 
-It is first-order data, the same for every target, so laws and composition never change
+It is first-order data, the same for every target, so claims and composition never change
 a specification's public type, and `compose` is closed over `Specification<T>`. The
 reflection contract (what a client may observe) is docs/objective-bend/REFLECTION.md. -/
 def specMetaName : String := "SpecMeta"
-def specLawsName : String := "SpecLaws"
+def specClaimsName : String := "SpecClaims"
 /-- The built-in module: types every module resolves by bare name; no module may declare
 them, and it has no definitions (nothing of it is emitted). Not a legal source module name. -/
 def builtinModuleName : String := "$builtin"
-def builtinTypeNames : List String := [specMetaName, specLawsName]
+def builtinTypeNames : List String := [specMetaName, specClaimsName]
 def builtinSource : String :=
   "edition ObjectiveBend 1\n" ++
-  "sum SpecLaws:\n  none: {}\n  law: {name: String, status: String, rest: SpecLaws}\n\n" ++
-  "sum SpecMeta:\n  declared: {name: String, interface: String, laws: SpecLaws}\n" ++
+  "sum SpecClaims:\n  none: {}\n  claim: {name: String, status: String, rest: SpecClaims}\n\n" ++
+  "sum SpecMeta:\n  declared: {name: String, interface: String, claims: SpecClaims}\n" ++
   "  composed: {inherited: SpecMeta, wrapping: SpecMeta}\n  extension: {}\n"
 
 def lookupGlobal (c : Ctx) (name : String) (m : Module) : Option String :=
@@ -823,7 +823,7 @@ def globalType (c : Ctx) : Nat → String → M (Option PTy)
           let some (selfVar, superRow) ← openBinding c fuel key binders [] m.name | pure none
           withTypes [("Self", selfVar), ("Super", superRow)] (signatureTy c fuel params (.source targetType) m.name [])
       | .spec s => do
-        -- Laws are not part of the type (they are checked as their own hidden fields).
+        -- Claims are not part of the type (they are checked as their own hidden fields).
         let metaTy ← sourceType c fuel specMetaName builtinModuleName []
         if !s.binders.isEmpty then
           -- An open spec's knot field is its instance at its own bounds.
@@ -1638,28 +1638,28 @@ def interfaceLabel (s : Spec) (list : List String) : String :=
     ("methods", Json.arr (s.methods.map (·.signature)).toArray)] ++
     (if s.binders.isEmpty then [] else [("binders", toJson s.binders)]))).compress
 
-/-- Laws and the declared SpecMeta around a spec's extension. -/
+/-- Claims and the declared SpecMeta around a spec's extension. -/
 def finishSpecification (c : Ctx) (fuel : Nat) (s : Spec) (m : Module) (key : String) (list : List String)
     (extension : ATerm) : M ATerm := do
-  -- Each law is checked code in its own hidden knot field `key#law#name` (typed over
+  -- Each claim is checked code in its own hidden knot field `key#claim#name` (typed over
   -- self, super and its parameters, result Bool); the metadata records its name and
   -- status. Status `unchecked`: typed, retained, never evaluated (LT6 owns discharge).
-  if duplicate (s.laws.map (·.name)) then fail ("duplicate law in spec " ++ key)
-  let lawsMeta ← sourceType c fuel specLawsName builtinModuleName []
-  let lawsReason := if lawsMeta.isSome then none else some "SpecLaws type unresolved"
-  let mut lawList : ATerm := .inject "none" lawsMeta lawsReason (.record [])
-  for law in s.laws.reverse do
-    lawList := .inject "law" lawsMeta lawsReason
-      (.record [("name", .label law.name), ("status", .label "unchecked"), ("rest", lawList)])
-  for law in s.laws do
-    let params := selfSuperParams s ++ law.params
+  if duplicate (s.claims.map (·.name)) then fail ("duplicate claim in spec " ++ key)
+  let claimsMeta ← sourceType c fuel specClaimsName builtinModuleName []
+  let claimsReason := if claimsMeta.isSome then none else some "SpecClaims type unresolved"
+  let mut claimList : ATerm := .inject "none" claimsMeta claimsReason (.record [])
+  for claim in s.claims.reverse do
+    claimList := .inject "claim" claimsMeta claimsReason
+      (.record [("name", .label claim.name), ("status", .label "unchecked"), ("rest", claimList)])
+  for claim in s.claims do
+    let params := selfSuperParams s ++ claim.params
     let code ← abstract c fuel params outerEnv
-      (fun inner => expression c fuel law.body inner m) law.name (.source "Bool") m.name
+      (fun inner => expression c fuel claim.body inner m) claim.name (.source "Bool") m.name
     let type ← signatureTy c fuel params (.given (some .boolean)) m.name []
-    modify fun st => { st with hidden := st.hidden.push (key ++ "#law#" ++ law.name, code, type) }
+    modify fun st => { st with hidden := st.hidden.push (key ++ "#claim#" ++ claim.name, code, type) }
   let metaTy ← sourceType c fuel specMetaName builtinModuleName []
   let metadata := ATerm.inject "declared" metaTy (if metaTy.isSome then none else some "SpecMeta type unresolved")
-    (.record [("name", .label key), ("interface", .label (interfaceLabel s list)), ("laws", lawList)])
+    (.record [("name", .label key), ("interface", .label (interfaceLabel s list)), ("claims", claimList)])
   return .specification metadata extension
 
 def specification (c : Ctx) (fuel : Nat) (s : Spec) (m : Module) : M ATerm := do

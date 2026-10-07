@@ -87,7 +87,7 @@ supplied, not admitted.
 | `spec S[Self has R, Super has R']:` | an open spec; its provided type is `Super with {defs}` |
 | `spec S extends A, B for T:`, `suffix spec`, `around`, `combine + / * / and` | the C4 precedence list; the extension is the `mix` chain of the ancestors' hidden layers |
 | `requires m(...) -> R` | a member of the Self bound; checked against the target (below) |
-| `law l(x): e` | a hidden knot field `M.S#law#l` typed to return Bool, never evaluated; `SpecMeta` lists `l` with status `unchecked` |
+| `claim l(x): e` | a hidden knot field `M.S#claim#l` typed to return Bool, never evaluated; `SpecMeta` lists `l` with status `unchecked` |
 | `compose(a, b, ...)` | left fold of `specification(SpecMeta.composed{inherited: P a, wrapping: P b}, mix a b)`, `P x` = `metadata(x)` for a specification and `SpecMeta.extension{}` for a bare extension; the inherited composite is bound once, so size is linear |
 | `fix(s, seed)` | `fix`, with each layer instantiated at the row beneath it (below) |
 | `extend(x, {f: e})`, `{f: e}`, `x.f`, `()` | `extend`, `record`, `get`, empty record |
@@ -131,7 +131,7 @@ refused. A method may not be primary in one ancestor and combined in another.
 
 ### Specifications, `requires` and `fix`
 
-`SpecMeta` and `SpecLaws` are built-in sums (module `$builtin`) that no module may declare
+`SpecMeta` and `SpecClaims` are built-in sums (module `$builtin`) that no module may declare
 (`refused (builtin-type)`); every specification has the type `Specification<T>`, so laws,
 ancestry and composition never change it. The interface label (canonical JSON) records target,
 suffix mark, parents, precedence list, requirements and signatures.

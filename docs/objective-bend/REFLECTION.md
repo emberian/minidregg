@@ -9,12 +9,12 @@ the observers are listed, and every equivalence names the observers it is stated
 ## The representation
 
 ```text
-sum SpecLaws:
+sum SpecClaims:
   none: {}
-  law: {name: String, status: String, rest: SpecLaws}
+  claim: {name: String, status: String, rest: SpecClaims}
 
 sum SpecMeta:
-  declared: {name: String, interface: String, laws: SpecLaws}
+  declared: {name: String, interface: String, claims: SpecClaims}
   composed: {inherited: SpecMeta, wrapping: SpecMeta}
   extension: {}
 ```
@@ -28,12 +28,12 @@ module may declare them (`refused (builtin-type)`).
   where `P x` is `metadata(x)` for a specification and `SpecMeta.extension{}` for a bare
   extension, decided statically from the operand's type.
 - A law is not in the metadata value: each `law l(...)` is checked code in its own hidden knot
-  field `M.S#law#l`, typed to return Bool, and the metadata lists its name with a status. Every
+  field `M.S#claim#l`, typed to return Bool, and the metadata lists its name with a status. Every
   status is `unchecked` (typed, retained, never evaluated).
 
 So the type of a specification depends only on `T`: laws, ancestry and composition change the
 metadata value, never the type (`Compiler/ObjectiveBendSpecificationClosure.lean`:
-`composeTy_closed`, `twice_accepted`, `law_spec_accepted`).
+`composeTy_closed`, `twice_accepted`, `claim_spec_accepted`).
 
 **Why a uniform first-order representation** rather than an opaque metadata parameter
 (`Specification<T>` = "some metadata type μ"): an existential needs a new Core4 type former and
