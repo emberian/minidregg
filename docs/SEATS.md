@@ -29,7 +29,7 @@ the id to `spent`. Theorems: `spend_once`, `spent_not_live`, `spent_never_minted
 
 A `Seat` is a fresh Book account at a protected coordinate (`seatAccount_protected`; the
 offerer never names it), with its instance, offerer, payee, an optional holding activity,
-`Proposal {give, want, exit}`. A world holds exactly its open seats: closing a seat removes it. The law is `offerSafe proposal`: every `want` is
+`Proposal {give, want, exit, donate}`. A proposal that wants nothing (every `want` amount zero) is a gift the contract may take whole, so it must carry the explicit `donate` marker, and the marker is refused on a proposal that wants something (`donationUnmarked`, `donationMarkedWithWant`; `empty_want_requires_marker`, `marked_offer_has_empty_want`). A world holds exactly its open seats: closing a seat removes it. The law is `offerSafe proposal`: every `want` is
 met, or every `give` is refunded, as a `Pred` over a total view of the seat's balances, so an
 absent slot is never what the law sees (`view_total`; `absent_slot_reads_as_met`,
 `zero_want_satisfied`).

@@ -110,7 +110,8 @@ def commandStream : StreamCodec Command :=
     (fun (subject, nonce, root, turn, grants) => ⟨subject, nonce, root, turn, grants⟩)
     (by intro c; cases c; rfl)
 
-def commandFrame : List UInt8 := "DREGG/SEAT/COMMAND/v1".toUTF8.toList
+/-- Frame v2: an offer's proposal carries the donation marker. -/
+def commandFrame : List UInt8 := "DREGG/SEAT/COMMAND/v2".toUTF8.toList
 
 def commandCodec : LawfulCodec Command := ObjectiveActivityWire.framed commandFrame commandStream
 

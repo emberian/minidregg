@@ -243,7 +243,8 @@ def check(tag, condition, observed):
     print(f'{tag:44} check     {"ok" if condition else "MISMATCH"} {json.dumps(observed)[:200]}', flush=True)
 
 
-def turn(tag, workspace, body, expect, detail=None, prepare=False, object_cap=None, account_cap=None):
+def turn(tag, workspace, body, expect, detail=None, prepare=False, object_cap=None, account_cap=None,
+         confirm_donation=False):
     out = attempts / tag
     command = root / f'{tag}.command.json'
     file = {'turn': body}
@@ -251,6 +252,8 @@ def turn(tag, workspace, body, expect, detail=None, prepare=False, object_cap=No
         file['objectCapability'] = object_cap
     if account_cap is not None:
         file['accountCapability'] = account_cap
+    if confirm_donation:
+        file['confirmDonation'] = True
     command.write_text(json.dumps(file))
     args = ['seat', '--action', 'submit', '--workspace', workspace, '--command', command, '--out', out]
     if prepare:
@@ -314,15 +317,15 @@ def move(source, destination, asset, amount):
 
 
 def offer(tag, workspace, inst, invitation, role, give, want, expect, detail=None, funding=None, account_cap=None,
-          package=None, deadline=None, holder=None):
+          package=None, deadline=None, holder=None, donate=False):
     proposal = {'give': [{'asset': a_, 'amount': str(n)} for a_, n in give],
-                'want': [{'asset': a_, 'amount': str(n)} for a_, n in want]}
+                'want': [{'asset': a_, 'amount': str(n)} for a_, n in want], 'donate': donate}
     if deadline is not None:
         proposal['afterDeadline'] = str(deadline)
     body = {'kind': 'offer', 'invitation': invitation,
             'expect': {'instance': objects[inst]['object'], 'package': package or PIN, 'role': role},
             'funding': funding, 'payee': funding, 'proposal': proposal, 'holder': holder}
-    value = turn(tag, workspace, body, expect, detail, account_cap=account_cap)
+    value = turn(tag, workspace, body, expect, detail, account_cap=account_cap, confirm_donation=donate)
     return value.get('seatAccount')
 
 
@@ -442,8 +445,14 @@ check('E5-alice-paid-10X-back', b[(ALICE_ACCOUNT, X)] - before_pay[(ALICE_ACCOUN
 # --- E6: zero want --------------------------------------------------------------------
 gsell = invoke('E6-mint-gift', alice_ws, 'swap', mint_input('gift', ALICE), 'installed')['mintIds'][0]
 gbuy = invoke('E6-mint-take', alice_ws, 'swap', mint_input('take', BOB), 'installed')['mintIds'][0]
+offer('E6-unmarked-zero-want-refused', alice_ws, 'swap', gsell, 'gift', [(X, 10)], [(Y, 0)], 'refused',
+      'donationUnmarked', funding=ALICE_ACCOUNT, account_cap=ALICE_SPEND)
+offer('E6-unmarked-empty-want-refused', alice_ws, 'swap', gsell, 'gift', [(X, 10)], [], 'refused',
+      'donationUnmarked', funding=ALICE_ACCOUNT, account_cap=ALICE_SPEND)
+offer('E6-marker-on-a-real-want-refused', alice_ws, 'swap', gsell, 'gift', [(X, 10)], [(Y, 1)], 'refused',
+      'donationMarkedWithWant', funding=ALICE_ACCOUNT, account_cap=ALICE_SPEND, donate=True)
 gift = offer('E6-gift-offer', alice_ws, 'swap', gsell, 'gift', [(X, 10)], [(Y, 0)], 'installed',
-             funding=ALICE_ACCOUNT, account_cap=ALICE_SPEND)
+             funding=ALICE_ACCOUNT, account_cap=ALICE_SPEND, donate=True)
 take = offer('E6-taker-offer', bob_ws, 'swap', gbuy, 'take', [], [(X, 1)], 'installed',
              funding=BOB_ACCOUNT, account_cap=BOB_SPEND)
 invoke('E6-sweep-gift', alice_ws, 'swap', variant('sweep', record(source=nat(int(gift)),
