@@ -45,7 +45,6 @@ import Compiler.BoundedNockCircuit
 import Compiler.BoundedNockEntry
 import Compiler.BoundedNockNetwork
 import Compiler.CurrentRecipientRecord
-import Compiler.DurableServed
 import Compiler.EmitSystemFast
 import Compiler.GenericSimplexTransferability
 import Compiler.JointBackendPartyCodec
