@@ -240,7 +240,11 @@ structure Accepted {F : Type} [Field F] [DecidableEq F]
     DeclaredResourceController.ReadLeg prepared i
       (signed.observeEnvelopes[i.val]?.getD [])
   tuple : PreparedTuple (DeclaredResourceController.plan prepared)
+  readEnvelopes : DeclaredResourceController.ReadEnvelopesEmpty command signed
+  /-- The leg of every incidence but an observe-only read target, whose only
+  authorization is its `ReadLeg` in `observations`. -/
   legs : (incidence : DeclaredResourceController.Incidence command) →
+    DeclaredResourceController.incidenceObserveOnly command incidence = false →
     CheckedLeg prepared tuple physical incidence (signed.envelope command incidence)
 
 def admit {F : Type} [Field F] [DecidableEq F]
@@ -262,26 +266,19 @@ def admit {F : Type} [Field F] [DecidableEq F]
     if count : signed.targetEnvelopes.length = command.targets.length then
       if readCount : signed.observeEnvelopes.length =
           (if command.requiresObservation then command.targets.length else 0) then
+       if readEnvelopes : DeclaredResourceController.ReadEnvelopesEmpty command signed then
         match ← DeclaredResourceController.verifyReads native prepared signed with
         | .error reason => return .error reason
         | .ok observations =>
           match DeclaredResourceController.prepareTuple prepared with
           | none => return .error .conflictingIncidences
           | some tuple =>
-              match ← DeclaredResourceController.collectIO (fun i :
-                  DeclaredResourceController.TargetIndex command =>
-                  verifyLeg native prepared tuple physical (some i)
-                    (signed.envelope command (some i))) with
+              match ← DeclaredResourceController.collectLegs (fun incidence _ =>
+                  verifyLeg native prepared tuple physical incidence
+                    (signed.envelope command incidence)) with
               | .error reason => return .error reason
-              | .ok targets =>
-                  match ← verifyLeg native prepared tuple physical none
-                      signed.authorityEnvelope with
-                  | .error reason => return .error reason
-                  | .ok authority =>
-                      return .ok ⟨ingress, count, readCount, observations, tuple,
-                        fun incidence => match incidence with
-                          | some i => targets i
-                          | none => authority⟩
+              | .ok legs => return .ok ⟨ingress, count, readCount, observations, tuple, readEnvelopes, legs⟩
+       else return .error .readTargetEnvelope
       else return .error .wrongEnvelopeCount
     else return .error .wrongEnvelopeCount
   else return .error .malformedCommand

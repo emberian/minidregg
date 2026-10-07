@@ -35,6 +35,10 @@
 #   r-follows-live            R `follow`s T2 at the current height            -> live w2 w3' w5
 #   d-follow-refused          D `follow`s T2                                  -> refused
 #   restart-identical         stop and restart the service; R renders again   -> identical
+#   jwall-read-permitted      C's signed read of jwall (joint-view law)       -> admitted
+#   jwall-transclude-admitted C transcludes jwall: its read target is judged by its ReadLeg only -> installed
+#   jwall-lone-read-readOnlyCommand C invokes a lone read of jwall: no transition -> refused readOnlyCommand
+#   jwall-unauthorized-read-refused B (no observe grant on jwall) reads it    -> refused (observation)
 #   audit                     Host audit re-admits every accepted record      -> re-admitted
 # Exported by the journey: MINI HOST CONFIG SOCKET SPONSOR_WS NEWCOMER_WS
 # NEWCOMER_SUBJECT JOURNEY_WORLD JOURNEY_STEP_DIR. Exit 0 = every row as
@@ -268,6 +272,45 @@ show r-after-restart "$NEWCOMER_WS"; ok r-after-restart
 before=$(jq -c '[.transclusions[] | {id, render, at}]' "$D/r-after-death.out")
 after=$(jq -c '[.transclusions[] | {id, render, at}]' "$D/r-after-restart.out")
 row restart-identical identical "$([ "$before" = "$after" ] && echo identical || echo differs)" "R's three renderings across a restart"
+
+# READ-TARGET-LEG (cv 01a0f611-ea93): a read target's only authorization is its ReadLeg,
+# the observe policy judging the unchanged cell. jwall's law lets its owner do anything
+# and anyone else only where no joint view exists:
+#   any [ eq request/subject A, not (le joint/index/0/resource/bytes/0 255) ]
+# An ordinary leg on jwall sees the joint view (every participant's bytes); its ReadLeg
+# does not. So C's permitted read (C's own observe grant, admitted by the observe policy)
+# is admitted inside a transclusion; with the read target's ordinary leg (the shape
+# before READ-TARGET-LEG) it was refused law-denied on the joint view. A command that
+# only reads holds no transition and is refused readOnlyCommand (before, its authority
+# leg judged jwall's law on the joint view). B, holding no observe grant on jwall, is
+# still refused by its ReadLeg.
+A_SUBJECT=$(jq -r .subject "$SPONSOR_WS/workspace.json")
+jq -n --arg a "$A_SUBJECT" '{type:"any",predicates:[{type:"eq",slot:"request/subject",value:$a},
+  {type:"not",predicate:{type:"le",slot:"joint/index/0/resource/bytes/0",value:"255"}}]}' >"$D/req/law-jwall.json"
+run create-jwall "$MINI" workspace --action create --dir "$SPONSOR_WS" --name jwall --storage content \
+  --predicate "$D/req/law-jwall.json"; ok create-jwall
+jwall=$(jq -r .target "$SPONSOR_WS/refs/jwall.json")
+invoke a-writes-jwall "$SPONSOR_WS" "$(content jwall "$(jq -n --arg l1 "$L1" --arg l2 "$L2" --arg l3 "$L3" '[
+  {type:"createDocument",rootElement:"1",schema:"0"},
+  {type:"createAtom",atom:"1001",kind:{type:"text"},payload:$l1},
+  {type:"createAtom",atom:"1002",kind:{type:"text"},payload:$l2},
+  {type:"createAtom",atom:"1003",kind:{type:"text"},payload:$l3},
+  {type:"createRun",run:"2000",atoms:["1001","1002","1003"]}]')")"; ok a-writes-jwall
+delegate grant-c-jwall "$SPONSOR_WS" jwall "$C_SUBJECT" '["observe"]' "$CW" jwall
+read_view c-reads-jwall "$CW" jwall
+row jwall-read-permitted installed "$(outcome c-reads-jwall)" "C's signed read of jwall: the observe policy admits it"
+run c-transcludes-jwall "$MINI" workspace --action transclude --dir "$CW" --name page --source jwall \
+  --from 1001 --to 1003 --mode snapshot --death keepTombstone
+row jwall-transclude-admitted installed "$(outcome c-transcludes-jwall)" "$(detail c-transcludes-jwall)"
+# A command that only reads makes no transition: refused readOnlyCommand at preparation, by name.
+invoke c-lone-read-jwall "$CW" '[{"name":"jwall","payload":{"type":"read"}}]'
+lone=$(outcome c-lone-read-jwall)
+[ "$lone" = refused ] && ! grep -q readOnlyCommand "$D/c-lone-read-jwall.err" && lone=refused-not-readOnlyCommand
+row jwall-lone-read-readOnlyCommand refused "$lone" "$(detail c-lone-read-jwall)"
+run b-import-jwall "$MINI" workspace --action import --dir "$TW" --name tjwall --kind object \
+  --target "$jwall" --observe-capability "$(jq -r .observeCapability "$TW/refs/tpage.json")"; ok b-import-jwall
+invoke b-lone-read-jwall "$TW" '[{"name":"tjwall","payload":{"type":"read"}}]'
+row jwall-unauthorized-read-refused refused "$(outcome b-lone-read-jwall)" "$(detail b-lone-read-jwall)"
 
 run audit "$HOST" "$CONFIG" audit
 row audit re-admitted "$(grep -q "every signed ingress re-admitted" "$D/audit.out" && echo re-admitted || echo "rc=$(cat "$D/audit.rc")")" "$(head -1 "$D/audit.out"; tail -1 "$D/audit.err")"

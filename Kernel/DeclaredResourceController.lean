@@ -160,10 +160,26 @@ def incidenceTarget (command : Command) : Incidence command → Target
   | some i => command.targets[i]
   | none => command.first
 
+/-- Whether an incidence is an observe-only read target (`Target.observeOnly`):
+its only authorization is its `ReadLeg`, and no ordinary leg runs for it. -/
+def incidenceObserveOnly (command : Command) : Incidence command → Bool
+  | some i => command.targets[i].observeOnly
+  | none => false
+
 /-- This signature is specific to the exact proposed joint command, one
-participant's real loaded pre-state and the current authority snapshot. -/
+participant's real loaded pre-state and the current authority snapshot.
+
+An observe-only read target's observation IS its leg: its request is exactly the
+leg's own request (`rawLeg`), whose verb is already `observe` (`payloadVerb`) and
+whose effects digest binds the exact command. So the one signature it carries
+binds what its retired ordinary leg's signature bound. Every other target's
+observation is a separate, domain-separated view request. -/
 def readRequest (prepared : PreparedInvocation deployment profile ambient durable command)
     (i : TargetIndex command) : Request command.targets[i].kind :=
+  if command.targets[i].observeOnly then
+    requestFor prepared.authority.snapshot profile.semantics ambient command command.targets[i]
+      (prepared.targets i).pre.root
+  else
   { requestFor prepared.authority.snapshot profile.semantics ambient command command.targets[i]
       (prepared.targets i).before.payload.root with
     verb := observeVerb command.targets[i].kind
@@ -656,7 +672,8 @@ theorem policyConfigFromStep_exact [DecidableEq F]
     policyConfigFromStep prepared incidence (step prepared tuple incidence) =
       policyConfig prepared tuple incidence := rfl
 
-def portals [DecidableEq F]
+/-- The portal of an ordinary leg: its target's committed law on the joint step. -/
+def legPortal [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (tuple : PreparedTuple (plan prepared)) : Incidence command → Portal :=
   fun incidence => (policyConfig prepared tuple incidence).portal
@@ -679,7 +696,7 @@ def authorizeLeg [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command)
     (signature : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot) :
-    Except Reject (Authorized (portals prepared tuple incidence)
+    Except Reject (Authorized (legPortal prepared tuple incidence)
       prepared.authority.snapshot.authState (tuple.request incidence).2) := do
   let wanted := (tuple.request incidence).2
   let context := step prepared tuple incidence
@@ -805,11 +822,17 @@ theorem castAliasLeg_none_iff_castInjOn [DecidableEq F]
   simp only [resolved, Option.bind_eq_bind, Option.bind_some]
   exact castAlias_none_iff F _
 
+/-- The incidences with an ordinary leg, in order (targets, then the authority
+leg): every one but an observe-only read target, which no ordinary law judges. -/
+def ordinaryIncidences (command : Command) : List (Incidence command) :=
+  ((List.finRange command.targets.length).map some ++ [none]).filter
+    fun incidence => !incidenceObserveOnly command incidence
+
 /-- The first leg whose step carries two integers with one field image. -/
 def firstCastAlias [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (tuple : PreparedTuple (plan prepared)) : Option (Int × Int) :=
-  ((List.finRange command.targets.length).map some ++ [none]).findSome?
+  (ordinaryIncidences command).findSome?
     (castAliasLeg prepared tuple)
 
 /-- The first leg (targets in order, then the authority leg) whose law holds an
@@ -817,13 +840,13 @@ out-of-range order clause. -/
 def firstRangeLeaf [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (tuple : PreparedTuple (plan prepared)) : Option LawLeaf :=
-  ((List.finRange command.targets.length).map some ++ [none]).findSome?
+  (ordinaryIncidences command).findSome?
     (rangeLeaf prepared tuple)
 
 def firstLawLeaf [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (tuple : PreparedTuple (plan prepared)) : Option LawLeaf :=
-  ((List.finRange command.targets.length).map some ++ [none]).findSome?
+  (ordinaryIncidences command).findSome?
     (lawLeaf prepared tuple)
 
 /-- The law refusal of one leg as a requester whose grant on that leg names
@@ -859,14 +882,14 @@ requester is told it. -/
 def firstLawRefusal [DecidableEq F] (fieldsOf : Incidence command → Option (Finset CellField))
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (tuple : PreparedTuple (plan prepared)) : Option Refusal :=
-  ((List.finRange command.targets.length).map some ++ [none]).findSome?
+  (ordinaryIncidences command).findSome?
     (lawRefusal fieldsOf prepared tuple)
 
 /-- Numeric range/cast diagnostics use the same leg-specific disclosure scope. -/
 def firstRangeRefusal [DecidableEq F] (fieldsOf : Incidence command → Option (Finset CellField))
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (tuple : PreparedTuple (plan prepared)) : Option Refusal :=
-  ((List.finRange command.targets.length).map some ++ [none]).findSome? fun i => do
+  (ordinaryIncidences command).findSome? fun i => do
     let _ ← rangeLeaf prepared tuple i
     let law ← (policyConfig prepared tuple i).resolve?
     pure (ComposedLawDiagnostics.publicRefusal (fieldsOf i) law)
@@ -874,7 +897,7 @@ def firstRangeRefusal [DecidableEq F] (fieldsOf : Incidence command → Option (
 def firstCastRefusal [DecidableEq F] (fieldsOf : Incidence command → Option (Finset CellField))
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (tuple : PreparedTuple (plan prepared)) : Option Refusal :=
-  ((List.finRange command.targets.length).map some ++ [none]).findSome? fun i => do
+  (ordinaryIncidences command).findSome? fun i => do
     let _ ← castAliasLeg prepared tuple i
     let law ← (policyConfig prepared tuple i).resolve?
     pure (ComposedLawDiagnostics.publicRefusal (fieldsOf i) law)
@@ -885,6 +908,28 @@ structure SignedCommand where
   observeEnvelopes : List (List UInt8)
   authorityEnvelope : List UInt8
   deriving DecidableEq, Repr
+
+/-- The number of target signing slots: one per target that is not an
+observe-only read (whose one signature is its observe envelope). -/
+def Command.signedTargetCount (command : Command) : Nat :=
+  (command.targets.filter fun target => !target.observeOnly).length
+
+/-- Spread the signed target envelopes over the targets in order, placing the
+empty envelope at every observe-only read target. -/
+def placeTargetEnvelopes : List Target → List (List UInt8) → List (List UInt8)
+  | [], _ => []
+  | target :: rest, envelopes =>
+      if target.observeOnly then [] :: placeTargetEnvelopes rest envelopes
+      else match envelopes with
+        | envelope :: later => envelope :: placeTargetEnvelopes rest later
+        | [] => [] :: placeTargetEnvelopes rest []
+
+theorem placeTargetEnvelopes_length (targets : List Target) (envelopes : List (List UInt8)) :
+    (placeTargetEnvelopes targets envelopes).length = targets.length := by
+  induction targets generalizing envelopes with
+  | nil => rfl
+  | cons target rest ih =>
+      cases envelopes <;> simp only [placeTargetEnvelopes] <;> split <;> simp [ih]
 
 def SignedCommand.envelope (signed : SignedCommand) (command : Command) : Incidence command → List UInt8
   | some i => signed.targetEnvelopes[i.val]?.getD []
@@ -948,7 +993,93 @@ def verifyRead [DecidableEq F] {m : Type → Type} [Monad m] (native : Credentia
         else return .error .observationRejected
   else return .error .observationRequired
 
-attribute [irreducible] portals
+/-- A portal no witness inhabits: the read portal of a target whose observation
+does not prepare. No invocation reaching it is accepted (`verifyRead` refuses). -/
+def closedPortal : Portal where
+  SignatureWitness := Empty
+  ProofWitness := Empty
+  CapabilityCommitmentWitness := Empty
+  CapabilityUseWitness := Empty
+  MembershipWitness := Empty
+  IssuerWitness := Empty
+  NonRevocationWitness := Empty
+  PolicyWitness := Empty
+  policyAddress := fun witness => nomatch witness
+  verifySignature := fun _ _ => false
+  verifyProof := fun _ _ => false
+  verifyCapabilityCommitment := fun _ _ _ => false
+  verifyCapabilityUse := fun _ _ _ _ => false
+  verifyMembership := fun _ _ _ => false
+  verifyIssuer := fun _ _ _ _ => false
+  verifyNonRevocation := fun _ _ _ => false
+  verifyCommittedPolicy := fun _ _ _ _ => false
+
+/-- The portal of an observe-only target's observation: its source's current
+observe policy on the unchanged cell (`ResourceObservationAdmission.portal`). -/
+def readPortal [DecidableEq F] (prepared : PreparedInvocation deployment profile ambient durable command)
+    (i : TargetIndex command) : Portal :=
+  match readPreparation prepared i with
+  | .ok selected => ResourceObservationAdmission.portal selected
+  | .error _ => closedPortal
+
+/-- Each incidence's authorizing portal. An observe-only read target is
+authorized by its observation alone, so its portal is its observe policy's; every
+other incidence keeps its ordinary leg's portal. -/
+def portals [DecidableEq F]
+    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (tuple : PreparedTuple (plan prepared)) : Incidence command → Portal
+  | some i => if command.targets[i].observeOnly then readPortal prepared i else legPortal prepared tuple (some i)
+  | none => legPortal prepared tuple none
+
+theorem portals_written [DecidableEq F]
+    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command)
+    (written : incidenceObserveOnly command incidence = false) :
+    portals prepared tuple incidence = legPortal prepared tuple incidence := by
+  cases incidence with
+  | none => rfl
+  | some i =>
+      simp only [incidenceObserveOnly] at written
+      simp only [portals, written, Bool.false_eq_true, ↓reduceIte]
+
+theorem portals_read [DecidableEq F]
+    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (tuple : PreparedTuple (plan prepared)) (i : TargetIndex command)
+    (read : command.targets[i].observeOnly = true) {envelope : List UInt8}
+    (leg : ReadLeg prepared i envelope) :
+    portals prepared tuple (some i) = ResourceObservationAdmission.portal leg.selected := by
+  simp only [portals, read, ↓reduceIte, readPortal, leg.preparedExact]
+
+/-- An observe-only target's observation request is exactly its leg's request. -/
+theorem readRequest_observeOnly
+    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (tuple : PreparedTuple (plan prepared)) (i : TargetIndex command)
+    (read : command.targets[i].observeOnly = true) :
+    readRequest prepared i = (tuple.request (some i)).2 := by
+  simp only [readRequest, read, ↓reduceIte]
+  rfl
+
+/-- The authorization an observe-only target's `ReadLeg` carries, at its
+incidence: the observe policy's verdict on the leg's own request. It is the
+`ReadLeg`'s `checked.authorization`, transported along `portals_read` and
+`readRequest_observeOnly`; nothing is judged again. -/
+def ReadLeg.authorization [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {i : TargetIndex command} {envelope : List UInt8} (leg : ReadLeg prepared i envelope)
+    (tuple : PreparedTuple (plan prepared)) (read : command.targets[i].observeOnly = true) :
+    Authorized (portals prepared tuple (some i))
+      prepared.authority.snapshot.authState (tuple.request (some i)).2 :=
+  cast (by rw [portals_read prepared tuple i read leg, ← readRequest_observeOnly prepared tuple i read]; rfl)
+    leg.checked.authorization
+
+theorem ReadLeg.authorization_heq [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {i : TargetIndex command} {envelope : List UInt8} (leg : ReadLeg prepared i envelope)
+    (tuple : PreparedTuple (plan prepared)) (read : command.targets[i].observeOnly = true) :
+    HEq (leg.authorization tuple read) leg.checked.authorization :=
+  cast_heq _ _
+
+attribute [irreducible] legPortal portals
 
 /-! ## Fields (K-FIELDS): a write's footprint against the authorizing scope
 
@@ -1168,7 +1299,7 @@ structure CheckedLeg [DecidableEq F]
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) (envelope : List UInt8) where
   receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
   envelopeExact : receipt.envelopeBytes = envelope
-  authorization : Authorized (portals prepared tuple incidence)
+  authorization : Authorized (legPortal prepared tuple incidence)
     prepared.authority.snapshot.authState (tuple.request incidence).2
   authorized : authorizeLeg prepared tuple incidence receipt = .ok authorization
   /-- The authorizing capability names every field the leg changed and bounds
@@ -1636,6 +1767,67 @@ def admitOrdinaryRoute [DecidableEq F]
       else none
     else none
 
+/-- An observe-only read target carries no target envelope: its one signature
+is its observe envelope. -/
+def ReadEnvelopesEmpty (command : Command) (signed : SignedCommand) : Prop :=
+  ∀ i : TargetIndex command, command.targets[i].observeOnly = true →
+    signed.envelope command (some i) = []
+
+instance readEnvelopesEmptyDecidable (command : Command) (signed : SignedCommand) :
+    Decidable (ReadEnvelopesEmpty command signed) := by
+  unfold ReadEnvelopesEmpty
+  infer_instance
+
+theorem requiresObservation_of_observeOnly (i : TargetIndex command)
+    (read : command.targets[i].observeOnly = true) : command.requiresObservation = true := by
+  simp only [Command.requiresObservation, Bool.or_eq_true, decide_eq_true_eq, List.any_eq_true]
+  exact Or.inr ⟨command.targets[i], List.getElem_mem i.isLt, read⟩
+
+/-- The verified legs of every incidence that is not an observe-only read
+target. An observe-only target has no ordinary leg: this traversal returns, for
+it, a function of an impossible premise and verifies nothing. -/
+def collectLegs {m : Type → Type} [Monad m] {P : Incidence command → Type}
+    (run : (incidence : Incidence command) → incidenceObserveOnly command incidence = false →
+      m (Except Reject (P incidence))) :
+    m (Except Reject ((incidence : Incidence command) →
+      incidenceObserveOnly command incidence = false → P incidence)) := do
+  match ← collectIO (fun i : TargetIndex command =>
+      if read : incidenceObserveOnly command (some i) = true then
+        pure (.ok (fun written => absurd (read.symm.trans written) Bool.noConfusion))
+      else do
+        match ← run (some i) (Bool.eq_false_iff.mpr read) with
+        | .error reason => pure (.error reason)
+        | .ok leg => pure (.ok (fun _ => leg))) with
+  | .error reason => return .error reason
+  | .ok targets =>
+      match ← run none rfl with
+      | .error reason => return .error reason
+      | .ok authority => return .ok fun incidence =>
+          match incidence with
+          | some i => targets i
+          | none => fun _ => authority
+
+/-- Every incidence's authorization at its portal. An observe-only read target's
+is its `ReadLeg`'s (`ReadLeg.authorization`); every other incidence's is its
+ordinary leg's. -/
+def incidenceAuthorization [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
+    (tuple : PreparedTuple (plan prepared))
+    (observations : command.requiresObservation = true → (i : TargetIndex command) →
+      ReadLeg prepared i (signed.observeEnvelopes[i.val]?.getD []))
+    (checked : (incidence : Incidence command) → incidenceObserveOnly command incidence = false →
+      CheckedLeg prepared tuple incidence (signed.envelope command incidence)) :
+    (incidence : Incidence command) → Authorized (portals prepared tuple incidence)
+      prepared.authority.snapshot.authState (tuple.request incidence).2
+  | none => cast (by rw [portals_written prepared tuple none rfl]) (checked none rfl).authorization
+  | some i =>
+      if read : command.targets[i].observeOnly = true then
+        (observations (requiresObservation_of_observeOnly i read) i).authorization tuple read
+      else
+        have written : incidenceObserveOnly command (some i) = false := Bool.eq_false_iff.mpr read
+        cast (by rw [portals_written prepared tuple (some i) written])
+          (checked (some i) written).authorization
+
 structure AuthorityInvocation [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command) (signed : SignedCommand) where
   private mk ::
@@ -1643,11 +1835,15 @@ structure AuthorityInvocation [DecidableEq F]
   envelopeCount : signed.targetEnvelopes.length = command.targets.length
   observeCount : signed.observeEnvelopes.length =
     (if command.requiresObservation then command.targets.length else 0)
+  readEnvelopes : ReadEnvelopesEmpty command signed
   observations : command.requiresObservation = true → (i : TargetIndex command) →
     ReadLeg prepared i (signed.observeEnvelopes[i.val]?.getD [])
   audience : AudienceChecks prepared
   tuple : PreparedTuple (plan prepared)
-  checked : (incidence : Incidence command) → CheckedLeg prepared tuple incidence (signed.envelope command incidence)
+  /-- The ordinary leg of every incidence but an observe-only read target, whose
+  only authorization is its `ReadLeg` in `observations`. -/
+  checked : (incidence : Incidence command) → incidenceObserveOnly command incidence = false →
+    CheckedLeg prepared tuple incidence (signed.envelope command incidence)
 
 structure AcceptedInvocation [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command) (signed : SignedCommand) where
@@ -1656,6 +1852,7 @@ structure AcceptedInvocation [DecidableEq F]
   envelopeCount : signed.targetEnvelopes.length = command.targets.length
   observeCount : signed.observeEnvelopes.length =
     (if command.requiresObservation then command.targets.length else 0)
+  readEnvelopes : ReadEnvelopesEmpty command signed
   observations : command.requiresObservation = true → (i : TargetIndex command) →
     ReadLeg prepared i (signed.observeEnvelopes[i.val]?.getD [])
   audience : AudienceChecks prepared
@@ -1665,7 +1862,10 @@ structure AcceptedInvocation [DecidableEq F]
     (writes prepared) (completeAdmissionGuards prepared signed audience route))
   executionRequired : command.family.any (fun family => family.route == .objectiveMethod) = true → execution.isSome = true
   tuple : PreparedTuple (plan prepared)
-  checked : (incidence : Incidence command) → CheckedLeg prepared tuple incidence (signed.envelope command incidence)
+  /-- The ordinary leg of every incidence but an observe-only read target, whose
+  only authorization is its `ReadLeg` in `observations`. -/
+  checked : (incidence : Incidence command) → incidenceObserveOnly command incidence = false →
+    CheckedLeg prepared tuple incidence (signed.envelope command incidence)
 
 /-- An Objective claim exists only on the Objective route. -/
 theorem objectiveClaim_objective_route {command : Command} {claim : ObjectiveInvocationClaim.Claim}
@@ -1710,13 +1910,35 @@ def AcceptedInvocation.evidence [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
     (accepted : AcceptedInvocation prepared signed) :
     accepted.tuple.AdmissionEvidence (portals prepared accepted.tuple) :=
-  admissionEvidence prepared accepted.tuple fun incidence => (accepted.checked incidence).authorization
+  admissionEvidence prepared accepted.tuple
+    (incidenceAuthorization accepted.tuple accepted.observations accepted.checked)
 
 theorem AcceptedInvocation.native_ingress_exact [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
-    (accepted : AcceptedInvocation prepared signed) (incidence : Incidence command) :
-    (accepted.checked incidence).receipt.envelopeBytes = signed.envelope command incidence :=
-  (accepted.checked incidence).envelopeExact
+    (accepted : AcceptedInvocation prepared signed) (incidence : Incidence command)
+    (written : incidenceObserveOnly command incidence = false) :
+    (accepted.checked incidence written).receipt.envelopeBytes = signed.envelope command incidence :=
+  (accepted.checked incidence written).envelopeExact
+
+/-- The signature receipt that authorizes each incidence of an accepted
+invocation: its ordinary leg's, or an observe-only read target's `ReadLeg`'s. -/
+def AcceptedInvocation.receipt [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
+    (accepted : AcceptedInvocation prepared signed) :
+    Incidence command → CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
+  | none => (accepted.checked none rfl).receipt
+  | some i =>
+      if read : command.targets[i].observeOnly = true then
+        (accepted.observations (requiresObservation_of_observeOnly i read) i).checked.signature
+      else (accepted.checked (some i) (Bool.eq_false_iff.mpr read)).receipt
+
+/-- The `ReadLeg` that authorizes an accepted observe-only read target. -/
+def AcceptedInvocation.readLeg [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
+    (accepted : AcceptedInvocation prepared signed) (i : TargetIndex command)
+    (read : command.targets[i].observeOnly = true) :
+    ReadLeg prepared i (signed.observeEnvelopes[i.val]?.getD []) :=
+  accepted.observations (requiresObservation_of_observeOnly i read) i
 
 def verifyReads [DecidableEq F] {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
     (prepared : PreparedInvocation deployment profile ambient durable command) (signed : SignedCommand) :
@@ -1736,27 +1958,72 @@ def admitAuthority [DecidableEq F] {m : Type → Type} [Monad m] (native : Crede
     if count : signed.targetEnvelopes.length = command.targets.length then
       if readCount : signed.observeEnvelopes.length =
           (if command.requiresObservation then command.targets.length else 0) then
+       if readEnvelopes : ReadEnvelopesEmpty command signed then
         match ← verifyReads native prepared signed with
         | .error reason => return .error reason
         | .ok observations =>
           match prepareTuple prepared with
           | none => return .error .conflictingIncidences
           | some tuple =>
-              match ← collectIO (fun i : TargetIndex command =>
-                  verifyAndAuthorizeLeg native prepared tuple (some i) (signed.envelope command (some i))) with
+              match ← collectLegs (fun incidence _ =>
+                  verifyAndAuthorizeLeg native prepared tuple incidence (signed.envelope command incidence)) with
               | .error reason => return .error reason
-              | .ok targets =>
-                  match ← verifyAndAuthorizeLeg native prepared tuple none signed.authorityEnvelope with
-                  | .error reason => return .error reason
-                  | .ok authority =>
+              | .ok checked =>
                     match ← checkAudiences prepared with
                     | .error reason => return .error reason
                     | .ok audience =>
-                      return .ok ⟨ingress, count, readCount, observations, audience, tuple,
-                          fun incidence => match incidence with | some i => targets i | none => authority⟩
+                      return .ok ⟨ingress, count, readCount, readEnvelopes, observations, audience, tuple, checked⟩
+       else return .error .readTargetEnvelope
       else return .error .wrongEnvelopeCount
     else return .error .wrongEnvelopeCount
   else return .error .malformedCommand
+
+/-- **Refusal by name: a read target's target envelope.** An observe-only read
+target that carries a target envelope is refused `readTargetEnvelope`, before
+any signature is checked: its one signature is its observe envelope. -/
+theorem admitAuthority_refuses_read_target_envelope [DecidableEq F] {m : Type → Type} [Monad m]
+    (native : CredentialSignatureIO.Oracle m)
+    (prepared : PreparedInvocation deployment profile ambient durable command) (signed : SignedCommand)
+    (ingress : commandCodec.encode command = signed.commandBytes)
+    (count : signed.targetEnvelopes.length = command.targets.length)
+    (readCount : signed.observeEnvelopes.length =
+      (if command.requiresObservation then command.targets.length else 0))
+    (i : TargetIndex command) (read : command.targets[i].observeOnly = true)
+    (carried : signed.envelope command (some i) ≠ []) :
+    admitAuthority native prepared signed = pure (.error .readTargetEnvelope) := by
+  have refused : ¬ ReadEnvelopesEmpty command signed := fun empty => carried (empty i read)
+  simp only [admitAuthority, dif_pos ingress, dif_pos count, dif_pos readCount, dif_neg refused]
+
+/-- **Refusal by name: a read without its observe envelope.** A command holding
+an observe-only read target requires observation, so its observe envelopes; a
+command carrying none is refused `wrongEnvelopeCount`. -/
+theorem admitAuthority_refuses_read_without_observation [DecidableEq F] {m : Type → Type} [Monad m]
+    (native : CredentialSignatureIO.Oracle m)
+    (prepared : PreparedInvocation deployment profile ambient durable command) (signed : SignedCommand)
+    (ingress : commandCodec.encode command = signed.commandBytes)
+    (count : signed.targetEnvelopes.length = command.targets.length)
+    (i : TargetIndex command) (read : command.targets[i].observeOnly = true)
+    (unobserved : signed.observeEnvelopes = []) :
+    admitAuthority native prepared signed = pure (.error .wrongEnvelopeCount) := by
+  have required := requiresObservation_of_observeOnly i read
+  have refused : ¬ signed.observeEnvelopes.length =
+      (if command.requiresObservation then command.targets.length else 0) := by
+    rw [unobserved, required, if_pos rfl]
+    exact fun zero => absurd zero.symm (Nat.ne_of_gt (Nat.lt_of_le_of_lt (Nat.zero_le _) i.isLt))
+  simp only [admitAuthority, dif_pos ingress, dif_pos count, dif_neg refused]
+
+/-- No accepted invocation exists in which an observe-only read target carries a
+target envelope, or lacks its `ReadLeg`. -/
+theorem no_accepted_read_target_envelope [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
+    (i : TargetIndex command) (read : command.targets[i].observeOnly = true)
+    (carried : signed.envelope command (some i) ≠ []) :
+    ¬ Nonempty (AuthorityInvocation prepared signed) :=
+  fun ⟨accepted⟩ => carried (accepted.readEnvelopes i read)
+
+#assert_axioms admitAuthority_refuses_read_target_envelope
+#assert_axioms admitAuthority_refuses_read_without_observation
+#assert_axioms no_accepted_read_target_envelope
 
 private def finishAdmission [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command) (signed : SignedCommand)
@@ -1766,7 +2033,8 @@ private def finishAdmission [DecidableEq F]
       (writes prepared) (completeAdmissionGuards prepared signed authority.audience route))) :
     Except Reject (AcceptedInvocation prepared signed) := do
   if executionRequired : command.family.any (fun family => family.route == .objectiveMethod) = true → execution.isSome = true then
-    .ok ⟨authority.ingressExact,authority.envelopeCount,authority.observeCount,authority.observations,
+    .ok ⟨authority.ingressExact,authority.envelopeCount,authority.observeCount,authority.readEnvelopes,
+      authority.observations,
       authority.audience,route,execution,executionRequired,authority.tuple,authority.checked⟩
   else .error .bendExecution
 
@@ -1873,11 +2141,14 @@ theorem transclude_requires_source_coverage [DecidableEq F]
     subst equal
     rw [hostPayload] at isRead
     cases isRead
-  have many : command.requiresObservation = true := by
-    simp only [Command.requiresObservation, decide_eq_true_eq]
-    have := i.isLt
-    have := j.isLt
-    omega
+  have many : command.requiresObservation = true :=
+    requiresObservation_of_observeOnly j (by
+      simp only [Target.observeOnly]
+      split
+      · rfl
+      · rfl
+      · rename_i other notRead notKind
+        exact absurd isRead notRead)
   refine ⟨j, sameTarget, isRead, ⟨accepted.observations many j⟩, ?_⟩
   have checked : (match command.targets[j].contentStore? (prepared.targets j).pre with
       | some store => ContentResource.openingHolds store request
@@ -1901,6 +2172,51 @@ theorem AcceptedInvocation.post_exact [DecidableEq F]
     accepted.declaration.post accepted.legs incidence = (validated prepared incidence).apply :=
   (accepted.tuple.accepted_posts_exact (portals prepared accepted.tuple)
     accepted.apex accepted.evidence incidence).trans (tuple_post_exact prepared accepted.tuple incidence)
+
+/-- **A read target's only authorization is its `ReadLeg`.** In every accepted
+invocation, an observe-only read target `i` leaves its cell unchanged (its
+accepted post is its loaded pre-state), and the admission evidence the accepted
+legs are built from (`accepted.evidence.authorizations`, consumed by
+`accepted.legs`) is, at `i`, exactly the authorization its `ReadLeg` carries:
+the requester's observe capability, signed for this exact command, judged by the
+source's current observe policy on the unchanged cell. There is no ordinary leg
+at `i` (`accepted.checked` demands `incidenceObserveOnly … = false`), so no second
+law judgement on the joint view enters it. -/
+theorem AcceptedInvocation.read_target_authorized_by_readLeg_only [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
+    (accepted : AcceptedInvocation prepared signed) (i : TargetIndex command)
+    (read : command.targets[i].observeOnly = true) :
+    (accepted.declaration.post accepted.legs (some i)).logical = (prepared.targets i).pre.logical ∧
+      HEq (accepted.evidence.authorizations (some i)) (accepted.readLeg i read).checked.authorization ∧
+      incidenceObserveOnly command (some i) = true := by
+  refine ⟨?_, ?_, read⟩
+  · rw [accepted.post_exact (some i)]
+    simp only [ValidatedPatch.apply_logical]
+    change Patch.run (prepared.targets i).pre.logical
+      (targetPatch prepared.authority.snapshot profile.semantics ambient command command.targets[i]
+        (prepared.targets i).pre) = _
+    rw [targetPatch_observeOnly _ _ _ _ _ _ read, Patch.run_nil]
+  · change HEq (incidenceAuthorization accepted.tuple accepted.observations accepted.checked (some i)) _
+    simp only [incidenceAuthorization, read, ↓reduceDIte]
+    exact ReadLeg.authorization_heq _ _ _
+
+/-- **Every accepted invocation's guarantee, per incidence.** Each incidence
+that is not an observe-only read target has its ordinary checked leg; each
+observe-only one has a checked `ReadLeg` (signature on its observe envelope and
+its observe policy's authorization), and carries no target envelope. -/
+theorem AcceptedInvocation.incidence_authorized [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
+    (accepted : AcceptedInvocation prepared signed) :
+    (∀ incidence, incidenceObserveOnly command incidence = false →
+      Nonempty (CheckedLeg prepared accepted.tuple incidence (signed.envelope command incidence))) ∧
+    (∀ i : TargetIndex command, command.targets[i].observeOnly = true →
+      Nonempty (ReadLeg prepared i (signed.observeEnvelopes[i.val]?.getD [])) ∧
+        signed.envelope command (some i) = []) :=
+  ⟨fun incidence written => ⟨accepted.checked incidence written⟩,
+    fun i read => ⟨⟨accepted.readLeg i read⟩, accepted.readEnvelopes i read⟩⟩
+
+#assert_axioms AcceptedInvocation.read_target_authorized_by_readLeg_only
+#assert_axioms AcceptedInvocation.incidence_authorized
 
 theorem AcceptedInvocation.authority_post_exact [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}

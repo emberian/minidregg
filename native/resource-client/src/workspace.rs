@@ -3161,8 +3161,9 @@ fn propose_summary_once(
                         protected_document::seal(root,workspace,audience,lowered,&command_nonce)?
                     }
                 } else { lowered };
-                // A read target's authorization leg is checked under the observe
-                // verb, so it carries the observe capability.
+                // A read target's only authorization is its observation (its
+                // ReadLeg): the Host refuses one whose capability is not its
+                // observe capability.
                 let capability = if read_only {
                     member(&reference, "observeCapability")?
                 } else {

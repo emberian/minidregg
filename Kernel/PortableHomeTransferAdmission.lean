@@ -47,13 +47,13 @@ structure Prepared {F : Type} [Field F] [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (shape : PhysicalShape prepared) (accepted : AcceptedInvocation prepared signed),
     (accepted.dataIntent shape).subject = some plan.owner.subject ∧
-    (accepted.checked none).receipt.prepared.controller.key.publicKey = plan.owner.publicKey ∧
+    (accepted.checked none rfl).receipt.prepared.controller.key.publicKey = plan.owner.publicKey ∧
     ownerSigned = signedBytes deployment.domain profile.semantics signed
   renterPermission : ∃ (command : Command) (signed : SignedCommand)
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (shape : PhysicalShape prepared) (accepted : AcceptedInvocation prepared signed),
     (accepted.dataIntent shape).subject = some plan.renter.subject ∧
-    (accepted.checked none).receipt.prepared.controller.key.publicKey = plan.renter.publicKey ∧
+    (accepted.checked none rfl).receipt.prepared.controller.key.publicKey = plan.renter.publicKey ∧
     renterSigned = signedBytes deployment.domain profile.semantics signed
 
 variable {F : Type} [Field F] [DecidableEq F]
@@ -82,8 +82,8 @@ def prepare (pin : PortableHomeTransferFrame.Pin) (plan : Plan)
           let renterIntent := renter.dataIntent renterShape
           if ownerSubject : ownerIntent.subject = some plan.owner.subject then
             if renterSubject : renterIntent.subject = some plan.renter.subject then
-              if ownerKey : (owner.checked none).receipt.prepared.controller.key.publicKey = plan.owner.publicKey then
-                if renterKey : (renter.checked none).receipt.prepared.controller.key.publicKey = plan.renter.publicKey then
+              if ownerKey : (owner.checked none rfl).receipt.prepared.controller.key.publicKey = plan.owner.publicKey then
+                if renterKey : (renter.checked none rfl).receipt.prepared.controller.key.publicKey = plan.renter.publicKey then
                   let [write] := ownerIntent.writes | none
                   if write.cellId != pin.cell then none else
                   if renterIntent.writes != ownerIntent.writes then none else
