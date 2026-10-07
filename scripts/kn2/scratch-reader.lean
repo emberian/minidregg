@@ -18,6 +18,7 @@ import Assurance.NativeAcceptedFixtureData
 import Kernel.NativeHostContext
 import Compiler.DurableHistoryStore
 import Compiler.NativeHostCodec
+import Kernel.ObjectiveBendNativeAdmission
 
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Kernel
@@ -47,7 +48,8 @@ def config (storage : DurableReceiverIO.NativeConfig) : NativeHost.Config where
   expectedSeed := ⟨pinExpectedSeed⟩
   storage := storage
   signature := ⟨""⟩
-  invocationBindings := none
+  invocationBindings := (ObjectiveBendNativeAdmission.decodePolicy (hexBytes pinObjectivePolicyHex)).map
+    fun policy => [(.objectiveMethod, ObjectiveBendNativeAdmission.encodePolicy policy)]
 
 def require (label : String) (condition : Bool) : IO Unit :=
   unless condition do throw (IO.userError s!"FAIL scratch reader: {label}")
