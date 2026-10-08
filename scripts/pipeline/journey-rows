@@ -453,10 +453,23 @@ row_exchange() {
   product_native || return $?
   product_tools openssl od ss || return $?
   product_exec exchange bash "$d" "$HOST" "$MINI" "$STORE" "$VERIFIER" "$MINI_FN_LAUNCHER" "$MINI_FN_CORE" "$RUN/x"; rc=$?
-  product_keep "$RUN/x/public-summary.json" "$RUN/x/timings.tsv"
+  product_keep "$RUN/x/public-summary.json" "$RUN/x/timings.tsv" "$RUN/x/input-sha256.txt"
+  if [ -f "$RUN/x/negative/control-attempt/request-0000.outcome.json" ]; then
+    cp "$RUN/x/negative/control-attempt/request-0000.outcome.json" "$OUT/positive-control-outcome.json"
+  fi
   [ "$rc" = 0 ] || return "$rc"
   product_evidence "$OUT/public-summary.json" || return 1
-  jq -e '.type=="minidregg-selected-exchange-two-credentials-v1"' "$OUT/public-summary.json" >/dev/null
+  jq -e '.type=="minidregg-selected-exchange-two-credentials-v1" and
+    .localFn.host=="127.0.0.1" and .localFn.freshStore==true and .localFn.stopped==true and
+    .storeA.sponsorPublicKey != .storeB.sponsorPublicKey and
+    .recipientReceipt.acceptedCount=="5" and .positiveControl.confirmation=="installed" and
+    .disclosure.fnStoredBodyEqualsPacket==true and .disclosure.fnStoredBodySelected==1 and
+    .disclosure.fnStoredBodyUnselected==0 and .refusals.bImageUnchangedByRefusals==true and
+    (all(.refusals.tamperedPacket,.refusals.wrongSigner,.refusals.wrongRoot;
+      .type=="refused" and .phase=="61646d697373696f6e"))' "$OUT/public-summary.json" >/dev/null || {
+    echo "exchange summary failed local fn/admission/disclosure checks" >&2; return 1;
+  }
+  echo "exchange PASS: local fn stopped; exact selected packet admitted and signed readback verified" >&2
 }
 row_chargedfailure() {
   local d=$SRC/native/resource-client/objective-charged-failure-journey.py rc

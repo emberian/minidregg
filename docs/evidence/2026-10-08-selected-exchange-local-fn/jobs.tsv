@@ -1,0 +1,4 @@
+job	mode	rowStatus	rowExit	jobExit	wallSeconds	jobLogPinnedLine
+j479948502	green-1	PASS	0	0	29	5
+j479995435	green-2	PASS	0	0	30	5
+j480035360	plant	FAIL	1	0	30	7
