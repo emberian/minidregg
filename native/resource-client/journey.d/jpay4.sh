@@ -349,9 +349,22 @@ for name in os.listdir(os.path.join(OBS, "attempts")):
 r = observe(path("tick-A0.observations.json"))
 row("reports and receipts lost, same tip: the kernel refuses alreadyConsumed at the clock's tip → wait",
     r.returncode == 0 and "waiting tipReported" in summary(r) and balance(8) == bal8, summary(r))
+before_c = set(os.listdir(os.path.join(OBS, "attempts")))
+c_started = time.monotonic()
 t = tick("C", 910, "happy")
-row("tick C at tip 910 behind the clock 920 → refused tipBehindClock → wait",
-    t.returncode == 0 and "waiting tipBehindClock" in summary(t) and balance(8) == bal8, summary(t))
+c_elapsed = time.monotonic() - c_started
+c_attempts = [os.path.join(OBS, "attempts", n) for n in
+              set(os.listdir(os.path.join(OBS, "attempts"))) - before_c if n.startswith("pay-report-")]
+c_decisions = [json.load(open(os.path.join(a, "decision.json"))) for a in c_attempts]
+c_refused = lines(t, "refused")
+row("tick C behind retained tip: refused tipInvalidOrRegressing immediately",
+    t.returncode == 3 and len(c_refused) == 1
+    and c_refused[0][2] == "refused tipInvalidOrRegressing (phase pay-observation)"
+    and not lines(t, "waiting") and "waiting" not in summary(t)
+    and len(c_decisions) == 1 and c_decisions[0].get("decision") == "refused"
+    and c_elapsed < 10 and balance(8) == bal8,
+    f"exit={t.returncode} elapsed={c_elapsed:.2f}s attempts={len(c_attempts)} "
+    f"{c_refused[0][2] if c_refused else 'no named refusal'}; {summary(t)}")
 t = tick("D", 1000, "happy")
 obs_d = json.load(open(path("tick-D.observations.json")))["observations"]
 pay2 = [o for o in obs_d if o["signature"] != pay1["signature"]][0]

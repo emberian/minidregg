@@ -649,6 +649,10 @@ def cmd_attribute(a, pins, changes):
             fh.write(f"## {kind}: {len(rows)}\n")
             for _, kk, key, commit in rows:
                 fh.write(f"{kk}\t{key}\t{commit}\n")
+                if kind == "restated":
+                    fresh = next(f for ck, k, _, _, f, _, _ in changes if ck == kind and k == key)
+                    fh.write(f"  old statement: {pins[key].text}\n")
+                    fh.write(f"  new statement: {fresh.text}\n")
         fh.write(f"## redefined: {sum(g[0] for g in by_root.values())} rows, {len(by_root)} root groups\n")
         for key, (n, cs) in sorted(by_root.items(), key=lambda x: -x[1][0]):
             fh.write(f"{n}\t{key}\t{'+'.join(c[:8] for c in sorted(cs, key=lambda c: pos.get(c, -1))) or 'UNATTRIBUTED (reason TODO: place by hand)'}\n")

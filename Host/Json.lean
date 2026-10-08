@@ -1551,7 +1551,7 @@ private def genesis (path : String) (json : Lean.Json) : Result NativeHostGenesi
     "tariffBase", "tariffPerBirth", "tariffPerGrant", "tariffPerInitialPayloadByte",
     "collector", "asset", "expectedSemantics", "issuerEpoch", "genesisHeight",
     "factoryPredicate", "enrollments", "factoryControllerSubject",
-    "factoryControllerCapability", "meterAllowance", "clockTickers", "tailBound"]
+    "factoryControllerCapability", "meterAllowance", "clockTickers", "tailBound", "clockGenesisNow", "clockMaxStepSeconds"]
   let observed := (json.getObjVal? "payObserver").toOption.isSome
   let obj ← exactObject path (if observed then names ++ ["payObserver"] else names) json
   let payObserver ← if observed then do
@@ -1567,6 +1567,10 @@ private def genesis (path : String) (json : Lean.Json) : Result NativeHostGenesi
           (← field observerPath "enrolCapability" observer)⟩⟩ :
           NativeHostGenesis.PayObserver))
     else pure none
+  let clockGenesisNow ← nat (path ++ ".clockGenesisNow") (← field path "clockGenesisNow" obj)
+  let clockMaxStepSeconds ← nat (path ++ ".clockMaxStepSeconds") (← field path "clockMaxStepSeconds" obj)
+  unless 0 < clockMaxStepSeconds do
+    throw s!"{path}.clockMaxStepSeconds must be positive"
   let tailBound ← nat (path ++ ".tailBound") (← field path "tailBound" obj)
   unless 0 < tailBound do
     throw s!"{path}.tailBound must be positive: with L = 0 no record but a certify is ever admitted"
@@ -1594,7 +1598,9 @@ private def genesis (path : String) (json : Lean.Json) : Result NativeHostGenesi
     meterAllowance := ← charge (path ++ ".meterAllowance") (← field path "meterAllowance" obj)
     payObserver := payObserver
     clockTickers := ← list (path ++ ".clockTickers") clockTicker (← field path "clockTickers" obj)
-    tailBound := tailBound }
+    tailBound := tailBound
+    clockGenesisNow := clockGenesisNow
+    clockMaxStepSeconds := clockMaxStepSeconds }
 
 private def funding (path : String) (json : Lean.Json) : Result ResourceBirth.InitialFunding := do
   let obj ← exactObject path ["source", "destination", "asset", "amount"] json
@@ -5694,11 +5700,12 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
   | "clock-view" => do
       let view ← decoded "clock-view" ClockTickReceiver.viewCodec bytes
       pure <| .mkObj
-        [("type", "clock-view-v2"), ("clockRoot", decimal view.clockRoot.value),
+        [("type", "clock-view-v3"), ("clockRoot", decimal view.clockRoot.value),
          ("authorityRoot", decimal view.authorityRoot.value),
          ("now", decimal view.clock.now),
          ("day", decimal (view.clock.now / Kernel.ClockCell.secondsPerDay)),
-         ("slot", decimal view.clock.slot)]
+         ("slot", decimal view.clock.slot),
+         ("maxStepSeconds", decimal view.maxStepSeconds)]
   | "participant-key-enrollment" => do
       let command ← decoded "participant-key-enrollment"
         ParticipantKeyEnrollment.commandCodec bytes

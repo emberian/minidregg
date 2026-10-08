@@ -1,0 +1,3 @@
+[workspace]
+resolver = "2"
+members = ["native/resource-client", "native/hyperdocument-link-sqlite-store", "native/credential-signature-verifier", "native/grain-runtime", "native/inference-scheduler", "native/spk-host", "native/discord-entrance", "native/pay-watcher", "native/mini-keys", "native/mini-sdk", "native/compatible-upgrade-custody", "native/signed-api-path", "native/spk-rpc"]

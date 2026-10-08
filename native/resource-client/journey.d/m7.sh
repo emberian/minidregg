@@ -11,8 +11,8 @@
 #  3. REPRODUCTION: a reference candidate built independently in a different
 #     directory (M7_REFERENCE, or .m7Reference in the journey manifest: path to
 #     its provenance/manifest JSON with .binaries.*.sha256 and
-#     logs/source-files.sha256 beside it) has the same four SHA-256s, and every
-#     compiled input (Lean Host closure, lake/lean pins, the three Rust crates'
+#     logs/source-files.sha256 beside it) has the same complete output SHA-256 set, and every
+#     compiled input (Lean Host closure, lake/lean pins, all Rust crates'
 #     manifests, sources and build scripts, rust-toolchain.toml) is identical.
 #  4. The candidate's own run.sh initializes a second fresh Store from the
 #     candidate's genesis-params.example.json, serves it, answers the sponsor's
@@ -49,23 +49,43 @@ ref=${M7_REFERENCE:-$(jq -r '.m7Reference // ""' "$JOURNEY_RUN/manifest.json")}
 [ -n "$ref" ] && [ -f "$ref" ] || fail "no reference build (set M7_REFERENCE or .m7Reference to another build's provenance JSON)"
 R=$(CDPATH='' cd -- "$(dirname -- "$ref")" && pwd -P)
 [ "$R" != "$C" ] || fail "reference is the candidate itself"
-compiled='^[0-9a-f]{64}  \./((Compiler|Host|Kernel|Pred|Selvage|Theory)/.*\.lean|lakefile\.toml|lake-manifest\.json|lean-toolchain|rust-toolchain\.toml|native/(resource-client|hyperdocument-link-sqlite-store|credential-signature-verifier)/(Cargo\.(toml|lock)|build\.rs|src/.*))$'
+compiled='^[0-9a-f]{64}  \./(.*\.lean|Cargo\.(toml|lock)|\.cargo/.*|lakefile\.toml|lake-manifest\.json|lean-toolchain|rust-toolchain\.toml|native/.*|protocol/.*|scripts/build-native-host\.sh|deploy/candidate/(build|lane-build|lib)\.sh)$'
 grep -E "$compiled" "$C/logs/source-files.sha256" >"$D/compiled-inputs.candidate"
 grep -E "$compiled" "$R/logs/source-files.sha256" >"$D/compiled-inputs.reference"
 [ -s "$D/compiled-inputs.candidate" ] || fail "no compiled inputs listed for the candidate"
 cmp -s "$D/compiled-inputs.candidate" "$D/compiled-inputs.reference" \
   || fail "reference was built from different compiled inputs ($(diff "$D/compiled-inputs.candidate" "$D/compiled-inputs.reference" | grep -c '^[<>]') lines differ)"
-for role in host mini store verifier; do
-  a=$(jq -r --arg r "$role" '.binaries[$r].sha256' "$CANDIDATE")
-  b=$(jq -er --arg r "$role" '.binaries[$r].sha256' "$ref") || fail "reference lacks .binaries.$role.sha256"
-  [ "$a" = "$b" ] || fail "$role does not reproduce: candidate $a, reference $b"
+# Compare every shipping path (including consent, services and friend bundles).
+for entry in "$C/manifest.json" "$R/manifest.json"; do
+  jq -e '.type == "minidregg-candidate-manifest-v2" and (.outputs | length > 0)' "$entry" >/dev/null \
+    || fail "candidate/reference lacks complete v2 output identity"
 done
+jq -S '.outputs | map_values(.sha256)' "$C/manifest.json" >"$D/candidate-sha256.json"
+jq -S '.outputs | map_values(.sha256)' "$R/manifest.json" >"$D/reference-sha256.json"
+cmp -s "$D/candidate-sha256.json" "$D/reference-sha256.json" || fail "candidate outputs do not reproduce"
+(cd "$R" && sha256sum --check SHA256SUMS) >"$D/reference-sha256sums-check.txt" 2>&1 \
+  || fail "reference files differ from SHA256SUMS"
+# Check both manifests through the shipped runtime verifier; a reference's claimed
+# hashes alone are not evidence of the bytes built there.
+for dir in "$C" "$R"; do
+  ( . "$dir/lib.sh"; candidate_resolve "$dir/manifest.json"; candidate_verify_outputs "$dir/manifest.json" ) \
+    || fail "candidate/reference runtime identity verification failed"
+done
+"$C/check-tamper.sh" "$C" "$D/tamper" >"$D/tamper.txt" 2>&1 \
+  || fail "tamper check failed: $(tail -1 "$D/tamper.txt")"
 
 # 4. the operator procedure, on its own Store, in a short directory (its
 # socket must fit sun_path), kept as $D/rt (journey.d/lib/shortdir.sh).
 journey_shortdir m7
 S=$JOURNEY_D
-cleanup() { "$C/run.sh" stop --state "$S" >"$D/operator-stop.txt" 2>&1 || true; journey_shortdir_return; }
+cleanup() {
+  if [ -f "$S/state.json" ]; then
+    if ! "$C/run.sh" stop --state "$S" >"$D/operator-cleanup.txt" 2>&1; then
+      echo "M7: operator cleanup failed; see $D/operator-cleanup.txt" >&2
+    fi
+  fi
+  journey_shortdir_return
+}
 trap cleanup EXIT
 "$C/run.sh" init --manifest "$C/manifest.json" --params "$C/genesis-params.example.json" --state "$S" >"$D/operator-init.txt" 2>&1 || fail "run.sh init failed: $(tail -1 "$D/operator-init.txt")"
 "$C/run.sh" start --state "$S" >"$D/operator-start.txt" 2>&1 || fail "run.sh start failed: $(tail -1 "$D/operator-start.txt")"
@@ -79,6 +99,6 @@ jq -n --arg commit "$(jq -r .source.commit "$CANDIDATE")" --arg refCommit "$(jq 
   '{type: "minidregg-m7-result-v1", candidateCommit: $commit, referenceCommit: $refCommit,
     candidate: $candidate, reference: $reference, binaries: ($p[0].binaries | map_values(.sha256)),
     checks: ["sha256sums", "journey-runs-candidate-binaries", "no-tmp-inputs",
-             "reproduces-independent-build", "run.sh-init-start-sponsor-stop"]}' >"$D/m7-result.json"
-echo "M7: candidate $(jq -r .source.commit "$CANDIDATE" | cut -c1-12) reproduces $(jq -r .source.commit "$ref" | cut -c1-12) built in another directory (4/4 SHA-256, identical compiled inputs); run.sh served its own Store" >&2
+             "reproduces-all-outputs", "tamper-init-and-serve-refuse", "run.sh-init-start-sponsor-stop"]}' >"$D/m7-result.json"
+echo "M7: candidate $(jq -r .source.commit "$CANDIDATE" | cut -c1-12) reproduces $(jq -r .source.commit "$ref" | cut -c1-12) built in another directory (all output SHA-256, identical compiled inputs, tamper refused); run.sh served its own Store" >&2
 echo "$D/m7-result.json"

@@ -12,7 +12,7 @@
 # OUT/subrows.tsv (ID<TAB>STATUS<TAB>WALL_S<TAB>DETAIL) to report one table row per step; the
 # last stderr line is the row's detail. Rows generate their own test keys inside RUN; no secret
 # ever reaches the box. OWNER hints: OUT/owner (a lane name) when the row can tell.
-JOURNEY_ROWS=(journey objective rooms activity seats bounty call send domain upgrade objectrecord welcomecontinuity sshe2e)
+JOURNEY_ROWS=(journey objective rooms activity seats bounty call send domain upgrade hostupgrade objectrecord welcomecontinuity sshe2e m3 m4 hermes m6grain m7 m8 fleetsign jpay exchange chargedfailure growth jserve)
 
 # J0-J8 + the rotation rows (JROT, JROTL, and JRLANE, JAUDIT and any *SEAT* step when the tip's journey.sh
 # has them), one fresh Store, through native/resource-client/journey.sh.
@@ -161,6 +161,40 @@ row_upgrade() {
   return $rc
 }
 
+# HOST-UPGRADE is a candidate/Store transition, independent of APP ADOPT/MIGRATE.
+# Both pinned historical pairs are mandatory; missing READY candidates are 98.
+row_hostupgrade() {
+  local d=$SRC/native/resource-client/journey.d/jhostupgrade.sh
+  local e=/srv/artifacts/e0a8ba21a39d92b470cc331fd16ea0408f608b1f
+  local f=/srv/artifacts/7220394bae5c72f1ae8468ed7745bdb8547c1cc9
+  local g=/srv/artifacts/0ea31db53c5844c9e1676f1dc6b821ec9993da91
+  local candidate file pair n n1 expected rc status detail t overall=0
+  [ -f "$d" ] || return 99
+  echo prod-hostup >"$OUT/owner"
+  product_tools jq python3 sha256sum timeout realpath cmp || return $?
+  for candidate in "$e" "$f" "$g"; do
+    for file in READY manifest.json run.sh genesis.sh genesis-params.example.json; do
+      [ -f "$candidate/$file" ] || { echo "missing hostupgrade candidate: $candidate/$file" >&2; return 98; }
+    done
+  done
+  : >"$OUT/subrows.tsv"
+  for pair in EF FG; do
+    if [ "$pair" = EF ]; then n=$e; n1=$f; expected=refuse
+    else n=$f; n1=$g; expected=reopen; fi
+    t=$(date +%s)
+    bash "$d" "$n" "$n1" "$OUT/$pair" "$expected" >"$OUT/$pair.out" 2>"$OUT/$pair.err"
+    rc=$?
+    case "$rc" in 0) status=PASS ;; 98) status=UNCONFIGURED ;; *) status=FAIL ;; esac
+    if [ "$rc" = 98 ]; then [ "$overall" != 0 ] || overall=98
+    elif [ "$rc" != 0 ]; then overall=1; fi
+    detail=$(awk 'NF {last=$0} END {print last}' "$OUT/$pair.err" | tr '\t\n' '  ')
+    if [ -s "$OUT/$pair/verdict.txt" ]; then detail=$(cat "$OUT/$pair/verdict.txt"); fi
+    printf 'HOST-UPGRADE-%s\t%s\t%s\t%s\n' "$pair" "$status" "$(( $(date +%s)-t ))" "$detail" >>"$OUT/subrows.tsv"
+  done
+  echo "hostupgrade: $(cut -f1,2 "$OUT/subrows.tsv" | tr '\n' ';')" >&2
+  return "$overall"
+}
+
 # The bounty on the seat kernel (world/bounty/BountyEscrow.obend): escrow, claim, submit, approve / reject /
 # silence / cancel, the first claimer, and the planted double-pay, reward+1 and raid the kernel refuses.
 row_bounty() {
@@ -225,4 +259,260 @@ row_sshe2e() {
   grep -E '^test |^test result' "$OUT/log/ssh-e2e.log" 2>/dev/null | cut -c1-160 | sed 's/ \.\.\. .*$/ .../' >"$OUT/tests.txt"
   tail -1 "$OUT/ssh-e2e.err" >&2
   return $rc
+}
+
+
+# Product rows: inputs are exported by journey-runner, never inferred from a developer tree.
+product_input() { # NAME KIND (executable, file, directory, socket, value)
+  local name=$1 kind=$2 value=${!1:-}
+  if [ -n "$value" ]; then
+    case "$kind" in
+      executable) [ -x "$value" ] && return 0 ;;
+      file) [ -f "$value" ] && return 0 ;;
+      directory) [ -d "$value" ] && return 0 ;;
+      socket) [ -S "$value" ] && return 0 ;;
+      value) return 0 ;;
+    esac
+  fi
+  echo "missing input: $name${value:+=$value} ($kind)" >&2
+  return 98
+}
+product_tools() {
+  local tool
+  for tool in "$@"; do
+    command -v "$tool" >/dev/null 2>&1 || { echo "missing input: $tool" >&2; return 98; }
+  done
+}
+product_native() {
+  local name
+  product_tools jq python3 sha256sum timeout || return $?
+  for name in HOST MINI STORE VERIFIER; do product_input "$name" executable || return $?; done
+}
+product_systemd() {
+  product_tools systemctl systemd-run || return $?
+  systemctl --user show-environment >/dev/null 2>&1 || { echo "no systemd user session" >&2; return 98; }
+}
+product_exec() { # NAME COMMAND...; driver codes 98/99 cannot disguise a failure
+  local name=$1 rc detail; shift
+  "$@" >"$OUT/$name.out" 2>"$OUT/$name.err"
+  rc=$?
+  if [ "$rc" != 0 ]; then
+    detail=$(awk 'NF {last=$0} /^mini: refused:/ {refused=$0} END {print (refused ? refused : last)}' "$OUT/$name.err")
+    echo "$name driver exit $rc: ${detail:-no stderr verdict; evidence $name.out}" >&2
+    return 1
+  fi
+}
+product_evidence() {
+  local file label
+  for file in "$@"; do
+    label=${file#"$RUN/"}; label=${label#"$OUT/"}
+    [ -s "$file" ] || { echo "missing expected evidence: $label" >&2; return 1; }
+  done
+}
+product_keep() { # public evidence only; never copy custody keys or a whole world
+  local file
+  for file in "$@"; do [ ! -e "$file" ] || cp -r "$file" "$OUT/"; done
+}
+row_m3() {
+  local d=$SRC/native/resource-client/provisioning-acceptance.sh rc
+  [ -f "$d" ] || return 99
+  product_native || return $?
+  product_exec m3 bash "$d" "$HOST" "$MINI" "$STORE" "$VERIFIER" "$RUN/p"; rc=$?
+  product_keep "$RUN/p/log" "$RUN/p/timings.tsv" "$RUN/p/evidence.sha256"
+  [ "$rc" = 0 ] || return "$rc"
+  product_evidence "$OUT/timings.tsv" "$OUT/evidence.sha256" || return 1
+  awk -F'\t' '$1=="reopen-create" && $3==0 {ok=1} END {exit !ok}' "$OUT/timings.tsv" || { echo "missing expected evidence: m3 reopen-create" >&2; return 1; }
+  echo "provisioning and cold reopen completed" >&2
+}
+row_m4() {
+  local d=$SRC/native/resource-client/shell-journey.sh rc
+  [ -f "$d" ] || return 99
+  product_native || return $?
+  product_input SHELL_BIN executable || return $?
+  product_tools ssh ssh-keygen ss || return $?
+  command -v sshd >/dev/null 2>&1 || [ -x /usr/sbin/sshd ] || { echo "missing input: sshd" >&2; return 98; }
+  product_exec m4 bash "$d" "$HOST" "$MINI" "$SHELL_BIN" "$STORE" "$VERIFIER" "$RUN/s"; rc=$?
+  product_keep "$RUN/s/log"
+  if [ "$rc" != 0 ]; then
+    if [ -s "$OUT/log/steps.tsv" ]; then
+      awk -F'\t' '$8=="FAIL" {print "m4 " $2 " " $4 " expected=" $5 " got=" $6 ": " $9; exit}' "$OUT/log/steps.tsv" >&2
+    fi
+    return "$rc"
+  fi
+  product_evidence "$OUT/log/steps.tsv" "$OUT/log/verdicts.txt" || return 1
+  [ "$(grep -Ec '^J[0-8] PASS$' "$OUT/log/verdicts.txt")" = 9 ] || { echo "missing expected evidence: m4 nine PASS verdicts" >&2; return 1; }
+  echo "shell J0-J8 over ssh completed" >&2
+}
+row_hermes() {
+  local d=$SRC/native/grain-runtime/hermes-journey.sh rc
+  [ -f "$d" ] || return 99
+  product_native || return $?
+  product_input GRAIN executable || return $?
+  product_systemd || return $?
+  product_tools rustc bwrap || return $?
+  product_exec hermes bash "$d" "$HOST" "$MINI" "$STORE" "$VERIFIER" "$GRAIN" "$RUN/h"; rc=$?
+  product_keep "$RUN/h/evidence"
+  [ "$rc" = 0 ] || return "$rc"
+  product_evidence "$OUT/evidence/timeline.tsv" || return 1
+  grep -q $'\tPASS: Hermes J4' "$OUT/evidence/timeline.tsv" || { echo "missing expected evidence: Hermes completion" >&2; return 1; }
+  echo "deterministic Hermes restart, recovery and delegation completed" >&2
+}
+row_m6grain() {
+  local d=$SRC/scripts/spk-platform/grain-journey.sh rc
+  [ -f "$d" ] || return 99
+  echo prod-spk >"$OUT/owner"
+  product_native || return $?
+  product_input SPK_HOST_BIN executable || return $?
+  product_exec m6grain sh "$d" all "$RUN/g"; rc=$?
+  product_keep "$RUN/g/evidence"
+  if [ "$rc" != 0 ]; then
+    local verdict
+    for verdict in "$OUT/evidence/"*.exit; do
+      [ -s "$verdict" ] || continue
+      if [ "$(cat "$verdict")" != 0 ]; then
+        echo "m6grain $(basename "$verdict" .exit) exit $(cat "$verdict"): $(awk 'NF {print; exit}' "${verdict%.exit}.stderr")" >&2
+        break
+      fi
+    done
+    return "$rc"
+  fi
+  product_evidence "$OUT/evidence/stop-services.exit" "$OUT/evidence/get-b.exit" || return 1
+  [ "$(cat "$OUT/evidence/stop-services.exit")" = 0 ] && [ "$(cat "$OUT/evidence/get-b.exit")" = 0 ] || return 1
+  echo "SPK lifecycle and second instance completed" >&2
+}
+product_fleet() {
+  local name=$1 driver=$2 type=$3 d=$SRC/native/resource-client/$2 rc
+  [ -f "$d" ] || return 99
+  product_native || return $?
+  product_exec "$name" bash "$d" "$HOST" "$MINI" "$STORE" "$VERIFIER" "$RUN/f"; rc=$?
+  product_keep "$RUN/f/evidence"
+  [ "$rc" = 0 ] || return "$rc"
+  product_evidence "$OUT/evidence/summary.json" || return 1
+  jq -e --arg t "$type" '.type == $t and .result == "pass"' "$OUT/evidence/summary.json" >/dev/null || { echo "invalid expected evidence: $name summary" >&2; return 1; }
+  echo "$name completed with verified summary" >&2
+}
+row_m8() { product_fleet m8 fleet-journey.sh minidregg-fleet-journey-v1; }
+row_fleetsign() { product_fleet fleetsign fleet-sign-journey.sh minidregg-fleet-sign-journey-v1; }
+
+product_journey() { # NAME TARGET DEPENDENCIES; only target is a product sub-row
+  local name=$1 target=$2 steps=$3 d=$SRC/native/resource-client/journey.sh rc
+  if [ ! -f "$d" ]; then
+    [ "$target" = G ] && return 99
+    echo "missing required driver: journey.sh for $target" >&2; return 1
+  fi
+  product_native || return $?
+  product_input MANIFEST file || return $?
+  JOURNEY_STEPS="$steps $target" JOURNEY_GROWTH_LEVELS=1000 JOURNEY_GROWTH_FULL=1 \
+    product_exec "$name" bash "$d" "$MANIFEST" "$RUN/j"; rc=$?
+  product_keep "$RUN/j/journey-result.json"
+  [ ! -d "$RUN/j/steps" ] || cp -r "$RUN/j/steps" "$OUT/steps"
+  [ "$rc" = 0 ] || return "$rc"
+  product_evidence "$OUT/journey-result.json" || return 1
+  jq -e --arg id "$target" '[.steps[] | select(.id==$id)] | length==1 and .[0].status=="PASS"' "$OUT/journey-result.json" >/dev/null || { echo "missing expected evidence: $target PASS" >&2; return 1; }
+  echo "$target completed: $(jq -r --arg id "$target" '.steps[] | select(.id==$id) | .detail' "$OUT/journey-result.json")" >&2
+}
+row_m7() {
+  [ -f "$SRC/native/resource-client/journey.d/m7.sh" ] || return 99
+  product_input CANDIDATE file || return $?
+  product_input M7_REFERENCE file || return $?
+  product_journey m7 M7 J0 || return $?
+  product_evidence "$OUT/steps/M7/m7-result.json" || return 1
+  jq -e '.type=="minidregg-m7-result-v1" and (.checks|length)==5' "$OUT/steps/M7/m7-result.json" >/dev/null
+}
+row_growth() {
+  product_journey growth G 'J0 J1 J2 J3 J4' || return $?
+  product_evidence "$OUT/steps/G/levels.tsv" || return 1
+  awk -F'\t' '$1==1000 && $2<=5 && $6<=60 {ok=1} END {exit !ok}' "$OUT/steps/G/levels.tsv" || { echo "growth bar failed: 1000 records write <=5 s cold reopen <=60 s" >&2; return 1; }
+}
+row_jserve() {
+  [ -f "$SRC/native/resource-client/journey.d/jserve.sh" ] || return 99
+  product_journey jserve JSERVE 'J0 J1 J2 J3 J4' || return $?
+  product_evidence "$OUT/steps/JSERVE/jserve/serve-rows.tsv" || return 1
+}
+
+product_pay_step() {
+  local id=$1 d=$SRC/native/resource-client/journey.d/jpay$1.sh artifact rc
+  [ -f "$d" ] || return 99
+  product_native || return $?
+  product_tools cmp || return $?
+  python3 -c 'import nacl.signing' 2>/dev/null || { echo "missing input: Python nacl.signing" >&2; return 98; }
+  if [ "$id" = 1 ] || [ "$id" = 4 ]; then product_input PAY_WATCHER_BIN executable || return $?; fi
+  if [ "$id" = 6 ]; then
+    product_systemd || return $?
+    product_tools sudo bwrap || return $?
+    sudo -n true 2>/dev/null || { echo "no sudo: sudo -n probe failed" >&2; return 98; }
+    local name
+    for name in GRAIN TEST_PROVIDER LAUNCH_GATE; do product_input "$name" executable || return $?; done
+  fi
+  mkdir -p "$RUN/pay$id"
+  JOURNEY_STEP_DIR=$RUN/pay$id product_exec "JPAY$id" bash "$d"; rc=$?
+  # Drivers name their deciding artifact on their last stdout line.
+  artifact=$(tail -1 "$OUT/JPAY$id.out")
+  if [ -n "$artifact" ] && [[ $artifact == "$RUN/"* ]] && [ -s "$artifact" ]; then cp "$artifact" "$OUT/JPAY$id-result.txt"; fi
+  [ "$rc" = 0 ] || return "$rc"
+  product_evidence "$OUT/JPAY$id-result.txt" || return 1
+  grep -Eq "^J-PAY-$id PASS [1-9][0-9]*/[1-9][0-9]*" "$OUT/JPAY$id.err" || { echo "missing expected evidence: JPAY$id completion verdict" >&2; return 1; }
+  if [ "$id" != 1 ]; then
+    awk -F'\t' 'NR>1 {n++; if($1!="PASS") bad=1} END {exit !(n>0 && !bad)}' "$OUT/JPAY$id-result.txt" || { echo "invalid expected evidence: JPAY$id rows" >&2; return 1; }
+  fi
+  tail -1 "$OUT/JPAY$id.err" >&2
+}
+row_jpay() {
+  local id t rc status detail overall=0
+  : >"$OUT/subrows.tsv"
+  for id in 1 2 3 4 6; do
+    t=$(date +%s)
+    product_pay_step "$id" 2>"$OUT/JPAY$id-detail.err"; rc=$?
+    case "$rc" in 0) status=PASS ;; 98) status=UNCONFIGURED ;; 99) status=ABSENT ;; *) status=FAIL ;; esac
+    case "$rc" in
+      0) ;;
+      98) [ "$overall" != 0 ] || overall=98 ;;
+      *) overall=1 ;;
+    esac
+    detail=$(tail -1 "$OUT/JPAY$id-detail.err" | tr '\t\n' '  ')
+    printf 'JPAY%s\t%s\t%s\t%s\n' "$id" "$status" "$(( $(date +%s)-t ))" "$detail" >>"$OUT/subrows.tsv"
+  done
+  echo "JPAY1-4 and JPAY6: $(cut -f1,2 "$OUT/subrows.tsv" | tr '\n' ';')" >&2
+  return "$overall"
+}
+row_exchange() {
+  local d=$SRC/native/resource-client/selected-exchange-journey.sh rc name
+  [ -f "$d" ] || return 99
+  for name in MINI_FN_LAUNCHER MINI_FN_CORE; do
+    product_input "$name" value || return $?
+    case "$(realpath -m "${!name}")" in /tank/fn|/tank/fn/*) echo "forbidden fn input: $name under /tank/fn" >&2; return 98;; esac
+  done
+  product_input MINI_FN_LAUNCHER executable || return $?
+  product_input MINI_FN_CORE file || return $?
+  product_native || return $?
+  product_tools openssl od ss || return $?
+  product_exec exchange bash "$d" "$HOST" "$MINI" "$STORE" "$VERIFIER" "$MINI_FN_LAUNCHER" "$MINI_FN_CORE" "$RUN/x"; rc=$?
+  product_keep "$RUN/x/public-summary.json" "$RUN/x/timings.tsv" "$RUN/x/input-sha256.txt"
+  if [ -f "$RUN/x/negative/control-attempt/request-0000.outcome.json" ]; then
+    cp "$RUN/x/negative/control-attempt/request-0000.outcome.json" "$OUT/positive-control-outcome.json"
+  fi
+  [ "$rc" = 0 ] || return "$rc"
+  product_evidence "$OUT/public-summary.json" || return 1
+  jq -e '.type=="minidregg-selected-exchange-two-credentials-v1" and
+    .localFn.host=="127.0.0.1" and .localFn.freshStore==true and .localFn.stopped==true and
+    .storeA.sponsorPublicKey != .storeB.sponsorPublicKey and
+    .recipientReceipt.acceptedCount=="5" and .positiveControl.confirmation=="installed" and
+    .disclosure.fnStoredBodyEqualsPacket==true and .disclosure.fnStoredBodySelected==1 and
+    .disclosure.fnStoredBodyUnselected==0 and .refusals.bImageUnchangedByRefusals==true and
+    (all(.refusals.tamperedPacket,.refusals.wrongSigner,.refusals.wrongRoot;
+      .type=="refused" and .phase=="61646d697373696f6e"))' "$OUT/public-summary.json" >/dev/null || {
+    echo "exchange summary failed local fn/admission/disclosure checks" >&2; return 1;
+  }
+  echo "exchange PASS: local fn stopped; exact selected packet admitted and signed readback verified" >&2
+}
+row_chargedfailure() {
+  local d=$SRC/native/resource-client/objective-charged-failure-journey.py rc
+  [ -f "$d" ] || return 99
+  product_native || return $?
+  product_exec chargedfailure python3 "$d" --bin "$BIN" --root "$RUN/c"; rc=$?
+  product_keep "$RUN/c/results.json" "$RUN/c/timings.tsv" "$RUN/c/transcript"
+  [ ! -s "$RUN/c/groups.tsv" ] || cp "$RUN/c/groups.tsv" "$OUT/subrows.tsv"
+  [ "$rc" = 0 ] || return "$rc"
+  product_evidence "$OUT/results.json" "$OUT/subrows.tsv" || return 1
+  jq -e '.allPass==true and (.rows|length)>0' "$OUT/results.json" >/dev/null
 }

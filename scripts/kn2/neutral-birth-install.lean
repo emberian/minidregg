@@ -71,6 +71,8 @@ def genesis (creatorKey : List UInt8) : NativeHostGenesis.Config where
   meterAllowance := fun _ => 10000000
   clockTickers := []
   tailBound := 1000
+  clockGenesisNow := 0
+  clockMaxStepSeconds := 300
 
 def describe : NativeHostCodec.Outcome → String
   | .confirmed _ _ => "committed"

@@ -322,6 +322,15 @@ fn refusal_reason(phase: &str, detail: &str) -> Option<String> {
     // Lean's `repr` is a pretty-printer: a long reason wraps onto an indented second line.
     let detail = detail.split_whitespace().collect::<Vec<_>>().join(" ");
     let detail = detail.as_str();
+    // Observation refusals come from Kernel.Receiving (90e14a1d). Require its
+    // exact family wrapper; obsolete bare details cannot drive client actions.
+    let detail = if phase == "pay-observation" {
+        detail
+            .strip_prefix("Minidregg.Theory.Receiving.Refusal.family (")?
+            .strip_suffix(')')?
+    } else {
+        detail
+    };
     if phase == "durable" && detail == ALREADY_CONSUMED {
         return Some("alreadyConsumed".into());
     }
@@ -1191,6 +1200,8 @@ fn probe(
                     stale = true;
                     continue;
                 }
+                // A regressing retained chain tip is a final refusal, never a wait.
+                (_, Some("tipInvalidOrRegressing")) => return stop(&attempt, &result),
                 (_, Some(reason @ ("tickTooSoon" | "tipBehindClock"))) => {
                     decide(&attempt, "waiting", &result)?;
                     waiting(tally, reason, tip, &view);
@@ -1801,6 +1812,8 @@ fn observe_records(
                 println!("stale\t{}\t{}", attempt.display(), result.render());
                 stale = true;
             }
+            // A regressing retained chain tip is a final refusal, never a wait.
+            (_, Some("tipInvalidOrRegressing")) => return stop(&attempt, &result),
             (_, Some(reason @ ("tickTooSoon" | "tipBehindClock"))) => {
                 decide(&attempt, "waiting", &result)?;
                 waiting(tally, reason, tip, &view);
@@ -2440,7 +2453,7 @@ mod tests {
     #[test]
     fn refusal_reasons_are_read_from_the_hosts_rendering_only() {
         assert_eq!(
-            refusal_reason("pay-observation", "Minidregg.Kernel.PayObservation.Reject.stalePay"),
+            refusal_reason("pay-observation", "Minidregg.Theory.Receiving.Refusal.family (Minidregg.Kernel.PayObservation.Reject.stalePay)"),
             Some("stalePay".into())
         );
         assert_eq!(
@@ -2463,6 +2476,17 @@ mod tests {
         // The same text under another phase, prose naming a reason, and a longer identifier are
         // not reasons.
         assert_eq!(refusal_reason("pay-observation", ALREADY_CONSUMED), None);
+        assert_eq!(refusal_reason("pay-observation", "Minidregg.Kernel.PayObservation.Reject.stalePay"), None);
+        for reason in ["tariffInvalid", "duplicateInBatch", "tickTooSoon",
+            "tipInvalidOrRegressing", "unassignedIndex", "wrongMint", "addressMismatch"] {
+            let detail = format!("Minidregg.Theory.Receiving.Refusal.family\n  (Minidregg.Kernel.PayObservation.Reject.{reason})");
+            assert_eq!(refusal_reason("pay-observation", &detail), Some(reason.into()));
+            assert_eq!(refusal_reason("pay-observation", &(detail.clone() + " extra")), None);
+        }
+        assert_eq!(refusal_reason("pay-observation",
+            "Minidregg.Theory.Receiving.Refusal.family (Minidregg.Kernel.PayObservation.Reject.stalePay.extra)"), None);
+        assert_eq!(refusal_reason("pay-observation",
+            "Minidregg.Theory.Receiving.Refusal.law (Minidregg.Kernel.PayObservation.Reject.stalePay)"), None);
         assert_eq!(refusal_reason("pay-observation", "the report was stalePay"), None);
         assert_eq!(
             refusal_reason("x", "Minidregg.Kernel.PayObservation.Reject.stalePay.extra"),

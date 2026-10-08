@@ -1296,8 +1296,7 @@ impl ResidentBound {
             app_gid: id("MINI_SPK_APP_GID")?,
             grains_root: PathBuf::from(var("MINI_SPK_GRAINS_ROOT")?),
             broker_socket: PathBuf::from(
-                std::env::var("MINI_SPK_BROKER_SOCKET")
-                    .unwrap_or_else(|_| crate::broker::SOCKET.to_owned()),
+                var("MINI_SPK_BROKER_SOCKET")?,
             ),
             store: var("MINI_SPK_STORE")?,
         })
@@ -2379,7 +2378,7 @@ mod tests {
             "persistentVarMaxBytes": 1048576,
             "deploymentId": "e".repeat(64),
             "hostId": "f".repeat(64),
-            "grainsRoot": "/var/lib/mini/grains",
+            "grainsRoot": "/var/lib/mini-spk-worlds/0123456789abcdef",
             "store": "0123456789abcdef",
             "bwrap": "/usr/bin/bwrap",
             "bwrapSha256": "b".repeat(64),
@@ -2431,10 +2430,11 @@ mod tests {
             app_gid: config.app_gid,
             grains_root: config.grains_root.clone(),
             store: config.store.clone(),
-            broker_socket: PathBuf::from(crate::broker::SOCKET),
+            broker_socket: crate::broker::socket_path(&config.grains_root,config.broker_socket.as_deref()).unwrap(),
         };
         assert!(bound.validate(&config).is_ok());
-        config.broker_socket = Some(config.grains_root.join("broker.sock"));
+        config.broker_socket = Some(config.grains_root.join("runtime-0123456789abcdef/broker.sock"));
+        bound.broker_socket=config.grains_root.join("broker.sock");
         assert!(bound.validate(&config).is_err());
         bound.broker_socket = config.broker_socket.clone().unwrap();
         assert!(bound.validate(&config).is_ok());
@@ -2649,3 +2649,6 @@ mod tests {
         }
     }
 }
+
+/// Validate exactly the config consumed by the resident before rendering a unit.
+pub fn validate_config(path: &Path) -> io::Result<()> { ResidentConfig::load(path).map(|_| ()) }

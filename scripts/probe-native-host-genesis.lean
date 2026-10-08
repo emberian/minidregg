@@ -38,6 +38,8 @@ def config (alice bob : List UInt8) : Config where
   meterAllowance := fun _ => 10000000
   clockTickers := []
   tailBound := 64
+  clockGenesisNow := 0
+  clockMaxStepSeconds := 300
 
 def require (label : String) (condition : Bool) : IO Unit :=
   unless condition do throw (IO.userError s!"FAIL native genesis: {label}")

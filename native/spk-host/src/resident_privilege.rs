@@ -404,6 +404,10 @@ fn worker_inner(mut stream: UnixStream, app: Identity, _audit: bool) -> io::Resu
             return Err(e);
         }
     };
+    // Only the admitted one-shot fork precedes this filter. Once it becomes
+    // the reaper, this app-uid process cannot create or enter namespaces.
+    // Installing here keeps bubblewrap's existing namespace setup intact.
+    install_parser_namespace_filter()?;
     let pid = child.pid();
     let start = start_identity(pid)?;
     send_frame(
@@ -457,17 +461,26 @@ pub(crate) fn require_parser() -> io::Result<()> {
     }
     dropped(Identity::unit("OPERATOR")?)
 }
-/// Only root-owned broker unit environment selects identities. No app packet
+/// Broker-rendered operator unit environment selects mapped identities. No app packet
 /// can name an operator/app UID/GID; neither parser retains switch privileges.
 pub fn run(path: &Path) -> io::Result<()> {
-    if !crate::os::privileged() {
-        return Err(refused("resident bootstrap requires trusted root unit"));
-    }
     let operator = Identity::unit("OPERATOR")?;
     let app = Identity::unit("APP")?;
     if operator.uid == app.uid {
         return Err(refused("operator and app identities must differ"));
     }
+    let root=std::env::var("MINI_SPK_GRAINS_ROOT").map_err(|_|refused("broker world root absent"))?;
+    let store=std::env::var("MINI_SPK_STORE").map_err(|_|refused("broker store absent"))?;
+    let unit=std::env::var("MINI_SPK_UNIT").map_err(|_|refused("broker resident unit absent"))?;
+    let (named,grain,generation)=crate::broker::parse_resident_unit(&unit).ok_or_else(||refused("broker resident unit refuses missing store"))?;
+    let registry=crate::volume_helper::Registry::load(&store)?;
+    if named!=store || registry.grains_root!=Path::new(&root)
+        || registry.operator_uid!=operator.uid || registry.operator_gid!=operator.gid
+        || !registry.app_uids.contains(&app.uid) || app.gid!=app.uid
+        || path!=registry.grains_root.join(&store).join("host/apps").join(&grain).join(format!("g{generation}/resident.json"))
+    { return Err(refused("namespace bootstrap differs from root-registered world")); }
+    crate::namespace_identity::prepare_root_handles(path,&registry.grains_root,&store,&grain)?;
+    crate::namespace_identity::enter(operator.uid,operator.gid,app.uid,app.gid)?;
     let (parent, child) = UnixStream::pair()?;
     let pid = unsafe { libc::fork() };
     if pid < 0 {
@@ -544,13 +557,11 @@ mod tests {
         // worker=-1 is only this local fixture; never wait on unrelated tests.
         client.worker = 0;
     }
-    /// Actual privileged bootstrap/worker and child lifetime receiving. Only
-    /// a root-owned disposable test ELF runs this explicitly, never default.
+    /// Actual unprivileged mapped bootstrap/worker and child lifetime receiving.
     /// This qualifies physical isolation/reaping, not native app admission.
     #[test]
-    #[ignore = "requires root disposable receiving, changes identity only in child"]
-    fn bootstrap_actual_zero_capabilities_namespace_refusal_and_eof_reap() {
-        assert_eq!(unsafe { libc::geteuid() }, 0);
+    fn tenancy_bootstrap_actual_zero_capabilities_namespace_refusal_and_eof_reap() {
+        assert_ne!(unsafe { libc::geteuid() }, 0);
         let mut report = [0; 2];
         assert_eq!(
             unsafe { libc::pipe2(report.as_mut_ptr(), libc::O_CLOEXEC) },
@@ -564,13 +575,14 @@ mod tests {
             drop(receiver);
             let result = (|| -> io::Result<()> {
                 let operator = Identity {
-                    uid: 1000,
-                    gid: 1000,
+                    uid: unsafe{libc::geteuid()},
+                    gid: unsafe{libc::getegid()},
                 };
                 let app = Identity {
-                    uid: 64010,
-                    gid: 64010,
+                    uid: 165536,
+                    gid: 165536,
                 };
+                crate::namespace_identity::enter(operator.uid,operator.gid,app.uid,app.gid)?;
                 let (mut a, b) = UnixStream::pair()?;
                 let worker_pid = unsafe { libc::fork() };
                 if worker_pid < 0 {
@@ -626,6 +638,11 @@ mod tests {
                     worker: worker_pid,
                 };
                 assert!(!client.command(2, reply.pid)?.reaped);
+                let worker_status=fs::read_to_string(format!("/proc/{worker_pid}/status"))?;
+                assert!(worker_status.lines().any(|line|line.split_whitespace().collect::<Vec<_>>()==vec!["Seccomp:","2"]));
+                for set in ["CapInh:","CapPrm:","CapEff:","CapBnd:","CapAmb:"] {
+                    assert!(worker_status.lines().any(|line|line.split_whitespace().collect::<Vec<_>>()==vec![set,"0000000000000000"]));
+                }
                 let bytes = reply.pid.to_le_bytes();
                 if unsafe { libc::write(sender.as_raw_fd(), bytes.as_ptr().cast(), 4) } != 4 {
                     return Err(io::Error::last_os_error());

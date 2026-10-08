@@ -1,29 +1,22 @@
-//! The operating-system boundary of the SPK host: who holds root, which account
-//! owns what, the unit manager, cgroups, the mounted `/var`, and the app identity
-//! switch. Everything above these calls (Mini authoring, signing, admission
-//! readback, journals) is the same code in every build.
-//!
-//! A release build is the real Linux system (`real` below) and nothing else. The
-//! `fixture-os` feature (disposable test fixtures only; a separate build, never a
-//! release) answers the same calls from the modeled system in `fixture_os.rs`:
-//! one unprivileged principal stands in for root and for the operator, app
-//! accounts are pool UIDs by name only, and units, cgroups and mounts are a
-//! recorded model below `$MINI_FIXTURE_OS`.
+//! Linux custody boundary. The broker and resident run as the operator; the
+//! resident/worker switch only mapped namespace identities and drop every cap.
+//! Host-root volume operations are called by the installed one-shot helper.
+//! `fixture-os` remains disposable modeled receiving, never a release route.
 
 pub(crate) use minidregg_compatible_upgrade_custody::root_owner;
 
 #[cfg(feature = "fixture-os")]
 pub(crate) use crate::fixture_os::{
-    account_gid, app_owner, cgroup_events, child_assume_app_identity, drop_to_identity,
-    holds_exactly_identity, host_identity_path,
-    pid_cgroup, privileged, root_group, root_uid, runtime_units, self_cgroup, systemctl, var_filesystem,
+    app_owner, cgroup_events, child_assume_app_identity, drop_to_identity,
+    holds_exactly_identity,
+    pid_cgroup, runtime_units, self_cgroup, systemctl, var_filesystem,
     executes_as_app,
 };
 #[cfg(not(feature = "fixture-os"))]
 pub(crate) use real::{
-    account_gid, app_owner, cgroup_events, child_assume_app_identity, drop_to_identity,
-    holds_exactly_identity, host_identity_path,
-    pid_cgroup, privileged, root_group, root_uid, runtime_units, self_cgroup, systemctl, var_filesystem,
+    app_owner, cgroup_events, child_assume_app_identity, drop_to_identity,
+    holds_exactly_identity,
+    pid_cgroup, runtime_units, self_cgroup, systemctl, var_filesystem,
     executes_as_app,
 };
 
@@ -39,22 +32,6 @@ mod real {
     use std::path::{Path, PathBuf};
     use std::process::Command;
 
-    /// The uid a root-held file or the broker's socket peer carries.
-    pub(crate) fn root_uid() -> u32 {
-        0
-    }
-
-    /// Whether `gid` is the group of a root-held directory.
-    pub(crate) fn root_group(gid: u32) -> bool {
-        gid == 0
-    }
-
-    /// Whether this process holds root: the broker, the resident bootstrap and
-    /// the root spawn path require it.
-    pub(crate) fn privileged() -> bool {
-        unsafe { libc::geteuid() == 0 }
-    }
-
     /// Whether a file owned by `uid` is owned by the app account `app_uid`.
     pub(crate) fn app_owner(uid: u32, app_uid: u32) -> bool {
         uid == app_uid
@@ -62,23 +39,12 @@ mod real {
 
     /// Where the broker renders runtime units.
     pub(crate) fn runtime_units() -> PathBuf {
-        PathBuf::from("/run/systemd/system")
-    }
-
-    /// The root-private deployment and host identity.
-    pub(crate) fn host_identity_path() -> PathBuf {
-        PathBuf::from("/etc/minidregg/spk/host-identity")
+        PathBuf::from(format!("/run/user/{}/systemd/user",unsafe{libc::geteuid()}))
     }
 
     /// The unit manager's command-line client; callers add every argument.
     pub(crate) fn systemctl() -> Command {
         Command::new("/usr/bin/systemctl")
-    }
-
-    /// The primary group of the account `uid`, if the account exists.
-    pub(crate) fn account_gid(uid: u32) -> Option<u32> {
-        let entry = unsafe { libc::getpwuid(uid) };
-        (!entry.is_null()).then(|| unsafe { (*entry).pw_gid })
     }
 
     /// `/proc/self/cgroup`.
@@ -155,9 +121,8 @@ mod real {
             && capability_sets_zero()?)
     }
 
-    /// Become exactly `uid`/`gid` for good: empty bounding set, no_new_privs,
-    /// no supplementary groups, no capabilities, not dumpable. The root-owned
-    /// unit bounds startup to SETUID, SETGID, SETPCAP.
+    /// Become exactly the mapped `uid`/`gid`: empty bounding set, no_new_privs,
+    /// no supplementary groups, no capabilities, not dumpable.
     pub(crate) fn drop_to_identity(uid: u32, gid: u32) -> io::Result<()> {
         // Dropping bounding bits does not remove currently permitted SETID
         // before the switch.
@@ -170,7 +135,8 @@ mod real {
             }
         }
         if unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } != 0
-            || unsafe { libc::setgroups(0, std::ptr::null()) } != 0
+            || (unsafe { libc::getgroups(0, std::ptr::null_mut()) } != 0
+                && unsafe { libc::setgroups(0, std::ptr::null()) } != 0)
             || unsafe { libc::setresgid(gid, gid, gid) } != 0
             || unsafe { libc::setresuid(uid, uid, uid) } != 0
             || unsafe { libc::prctl(libc::PR_CAP_AMBIENT, libc::PR_CAP_AMBIENT_CLEAR_ALL, 0, 0, 0) } != 0

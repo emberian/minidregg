@@ -99,8 +99,9 @@ round() {
     set -- "$@" --enrol-capability "$PAY_ENROL_CAPABILITY" --operator-socket "$PAY_OPERATOR_SOCKET"
   fi
   observed=0
-  "$MINI" pay observe "$@" >"$TICK/observe.stdout" || observed=$?
+  "$MINI" pay observe "$@" >"$TICK/observe.stdout" 2>"$TICK/observe.stderr" || observed=$?
   cat "$TICK/observe.stdout"
+  cat "$TICK/observe.stderr" >&2
   case $observed in
     0|3)
       "$PAY_WATCHER" --config "$PAY_STATE/watcher.json" --out "$TICK" --ack-tick "$tick_id" || return $?
@@ -113,6 +114,9 @@ round() {
 tip_slot() { jq -r '.tip.slot' "$TICK/observations.json" 2>/dev/null || echo none; }
 status=0
 round || status=$?
+# A refused report (including tipInvalidOrRegressing) ends this invocation.
+# Never enter fresh-tip/enrollment rounds after the observer's refusal.
+[ "$status" -eq 0 ] || exit "$status"
 last=$(tip_slot)
 while [ "$status" -eq 0 ] && [ "$rounds" -gt 0 ] && grep -q '^enrol-pending' "$TICK/observe.stdout" 2>/dev/null; do
   rounds=$((rounds - 1))

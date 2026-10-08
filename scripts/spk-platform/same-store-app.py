@@ -261,11 +261,12 @@ def attach(path):
     for label,d in x.f['delegates'].items():
         x.step('member:'+label+':enrollment',lambda d=d:x.enroll(d))
     x.step('serving',lambda:serving(x),reentrant=True)
+    _,name,_=x.run([host,'grain','unit-name',x.state.parent.name,x.app,str(x.f['generation'])],timeout=30)
     result={'protocol':'mini-spk-same-store-attached-v1','appId':x.app,'fixture':str(x.path),'generation':x.f['generation'],
         'namespace':c['namespace'],'miniConfig':c['miniConfig'],'miniConfigSha256':c['miniConfigSha256'],
         'subjects':{label:d['subject'] for label,d in x.f['delegates'].items()},
         'inventory':{'app':x.app,'stateRoot':str(x.state),'profilePath':str(x.profile),'journalDir':str(x.state/f'apps/{x.app}/g{x.f["generation"]}'),
-            'residentConfig':str(x.state/f'apps/{x.app}/g{x.f["generation"]}/resident.json'),'unit':f'mini-spk-s{x.state.parent.name}-a{x.app}-g{x.f["generation"]}.service',
+            'residentConfig':str(x.state/f'apps/{x.app}/g{x.f["generation"]}/resident.json'),'unit':load(name)['unit'],
             'delegates':x.f['delegates']},'receiving':'provisioned; actual shared editing/revoke/restart still required'}
     save(retained,result);return result
 

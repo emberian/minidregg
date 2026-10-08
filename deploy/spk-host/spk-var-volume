@@ -107,11 +107,7 @@ exec 9> "$lock"
 chmod 600 -- "$lock"
 /usr/bin/flock -x 9
 if [[ $action == create || $action == create-from || $action == attest ]]; then
-  safe_dir /etc 755
-  safe_dir /etc/minidregg 755
-  safe_dir /etc/minidregg/spk 700
-
-  identity=/etc/minidregg/spk/host-identity
+  identity=$root/host-identity
   [[ -f $identity && ! -L $identity ]] || { echo 'protected host identity absent' >&2; exit 1; }
   [[ $(stat -c '%u:%a:%h' -- "$identity") == '0:600:1' ]] || {
     echo 'protected host identity drift' >&2; exit 1;
@@ -155,7 +151,7 @@ fi
 [[ $app_uid =~ ^[1-9][0-9]{0,9}$ ]] || usage
 [[ $size_mib =~ ^[1-9][0-9]{0,5}$ ]] || usage
 (( size_mib >= 64 && size_mib <= 16384 )) || usage
-getent passwd "$app_uid" >/dev/null || { echo 'unknown app UID' >&2; exit 1; }
+# The compiled helper has validated this uid against the root-owned registry.
 bytes=$(( size_mib * 1024 * 1024 ))
 
 if [[ $action == create || $action == create-from ]]; then
@@ -164,7 +160,7 @@ if [[ $action == create || $action == create-from ]]; then
     echo 'resource image or mountpoint already exists; refusing overwrite' >&2; exit 1;
   }
   umask 077
-  app_gid=$(getent passwd "$app_uid" | cut -d: -f4)
+  app_gid=$app_uid
   [[ $app_gid =~ ^[1-9][0-9]{0,9}$ ]] || { echo 'app primary group refused' >&2; exit 1; }
   stage=
   untrusted=
@@ -177,8 +173,8 @@ if [[ $action == create || $action == create-from ]]; then
     [[ -z $stage ]] || rm -rf -- "$stage"
     # A failed create leaves no unregistered image or mount behind.
     if (( code != 0 && fresh == 1 )); then
-      /usr/bin/umount -- "$target" 2>/dev/null || true
-      rmdir -- "$target" 2>/dev/null || true
+      if /usr/bin/findmnt -n -M "$target" >/dev/null; then /usr/bin/umount -- "$target"; fi
+      if [[ -d $target ]]; then rmdir -- "$target"; fi
       rm -f -- "$image"
     fi
   }
@@ -237,6 +233,10 @@ fi
 [[ $(stat -c '%u:%a' -- "$target") == "$app_uid:700" ]] || {
   echo 'mounted /var owner or mode drift' >&2; exit 1;
 }
+mount_options=$(/usr/bin/findmnt -n -M "$target" -o OPTIONS)
+for required in nosuid nodev noatime; do
+  [[ ,$mount_options, == *,$required,* ]] || { echo "mounted /var lacks $required" >&2; exit 1; }
+done
 source_dev=$(/usr/bin/findmnt -n -M "$target" -o SOURCE)
 [[ $source_dev == /dev/loop* ]] || { echo 'mounted /var is not a loop device' >&2; exit 1; }
 backing=$(/usr/sbin/losetup -n -O BACK-FILE -- "$source_dev")

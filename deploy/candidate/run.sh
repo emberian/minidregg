@@ -5,6 +5,7 @@
 #   run.sh serve   --state DIR     foreground; for systemd or any supervisor
 #   run.sh start   --state DIR     background, with DIR/public/server.pid
 #   run.sh stop    --state DIR     stop what `start` started (checks the pid's cmdline)
+#   run.sh upgrade --manifest N1_MANIFEST --state DIR   rebind a stopped Store
 #   run.sh status  --state DIR
 #   run.sh sponsor --state DIR     create the genesis sponsor's workspace (Store must be serving)
 #   run.sh unit    --state DIR     print a systemd unit that runs `serve`
@@ -19,6 +20,9 @@ here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 # shellcheck source=deploy/candidate/lib.sh
 . "$here/lib.sh"
 candidate_require jq sha256sum od tr ps
+# A caller's signing-helper selection cannot introduce an unlisted executable.
+# sponsor selects the verified manifest roles once its state config exists.
+unset MINI_LOCAL_HOST MINI_CONSENT_HOST MINI_CONSENT_CONFIG
 
 [ $# -ge 1 ] || { sed -n '2,15p' "$0" >&2; exit 2; }
 action=$1
@@ -47,6 +51,7 @@ init() {
   [ -n "$manifest" ] || candidate_die "init needs --manifest"
   [ -n "$params" ] || candidate_die "init needs --params (start from genesis-params.example.json)"
   candidate_resolve "$manifest"
+  candidate_verify_outputs "$CANDIDATE_MANIFEST"
   params=$(candidate_abs "$params")
   check_params "$params"
   state=$(candidate_abs "$state")
@@ -95,8 +100,58 @@ init() {
   printf '%s\n' "$state/deployment/pinned-config.json"
 }
 
+load_state() {
+  candidate_state "$1"
+  candidate_verify_outputs "$CANDIDATE_MANIFEST"
+  candidate_state_bindings
+}
+
+# Upgrade the operator's runtime bindings, never its semantic configuration or Store.
+upgrade() {
+  candidate_require cmp mktemp
+  [ -n "$manifest" ] || candidate_die "upgrade needs --manifest"
+  upgrade_manifest=$(candidate_abs "$manifest")
+  # N may predate the current manifest format. Upgrade loads its state metadata
+  # without weakening start's strict N1 manifest/provenance verification.
+  STATE=$(CDPATH='' cd -- "$state" && pwd -P)
+  jq -e '.type == "minidregg-candidate-state-v1"' "$STATE/state.json" >/dev/null \
+    || candidate_die "not an initialized candidate state"
+  CONFIG=$STATE/deployment/pinned-config.json
+  SOCKET=$STATE/public/mini.sock
+  [ "$(jq -er '.pinnedConfigSha256' "$STATE/state.json")" = "$(candidate_sha256 "$CONFIG")" ] \
+    || candidate_die "pinned config differs from recorded state"
+  candidate_require_stopped
+  service_config=$STATE/public/mini.config
+  if [ -e "$service_config" ] || [ -L "$service_config" ]; then
+    [ -f "$service_config" ] && [ ! -L "$service_config" ] \
+      || candidate_die "retained service config is not a regular file"
+    cmp -s "$CONFIG" "$service_config" \
+      || candidate_die "retained service config differs from pinned config"
+  fi
+  candidate_resolve "$upgrade_manifest"
+  candidate_verify_outputs "$CANDIDATE_MANIFEST"
+  upgrade_tmp=$(mktemp -d "$STATE/tmp/upgrade.XXXXXX")
+  trap 'rm -rf -- "$upgrade_tmp"' EXIT
+  jq --arg store "$STORE" --arg verifier "$VERIFIER" \
+    '.storageBinary = $store | .signatureBinary = $verifier' "$CONFIG" >"$upgrade_tmp/config.json"
+  jq --arg manifest "$CANDIDATE_MANIFEST" --arg host "$(candidate_sha256 "$HOST")" \
+    --arg config "$(candidate_sha256 "$upgrade_tmp/config.json")" \
+    '.manifest = $manifest | .hostSha256 = $host | .pinnedConfigSha256 = $config' \
+    "$STATE/state.json" >"$upgrade_tmp/state.json"
+  candidate_require_stopped
+  if [ -f "$service_config" ]; then
+    cp "$upgrade_tmp/config.json" "$upgrade_tmp/service.json"
+    mv "$upgrade_tmp/service.json" "$service_config"
+  fi
+  mv "$upgrade_tmp/config.json" "$CONFIG"
+  mv "$upgrade_tmp/state.json" "$STATE/state.json"
+  rm -rf -- "$upgrade_tmp"
+  trap - EXIT
+  printf 'upgraded runtime bindings to %s; Store unchanged\n' "$CANDIDATE_MANIFEST"
+}
+
 serve_exec() {
-  candidate_state "$state"
+  load_state "$state"
   TMPDIR=$STATE/tmp
   export TMPDIR
   exec "$MINI" serve --host "$HOST" --config "$CONFIG" --socket "$SOCKET"
@@ -115,7 +170,7 @@ server_pid() {
 }
 
 start() {
-  candidate_state "$state"
+  load_state "$state"
   if pid=$(server_pid); then candidate_die "already serving as pid $pid"; fi
   TMPDIR=$STATE/tmp
   export TMPDIR
@@ -146,9 +201,9 @@ any_alive() {
 }
 
 stop() {
-  candidate_state "$state"
+  load_state "$state"
   pid=$(server_pid) || { echo "not running (no live server.pid naming $SOCKET)"; return 0; }
-  children=$(ps -o pid= --ppid "$pid" | tr -d ' ' || true)
+  children=$(ps -o pid= --ppid "$pid" | tr -d ' ')
   kill -TERM "$pid"
   waited=0
   # shellcheck disable=SC2086
@@ -162,12 +217,16 @@ stop() {
 }
 
 status() {
-  candidate_state "$state"
+  load_state "$state"
   if pid=$(server_pid); then printf 'serving %s pid %s\n' "$SOCKET" "$pid"; else echo "not running"; fi
 }
 
 sponsor() {
-  candidate_state "$state"
+  load_state "$state"
+  MINI_LOCAL_HOST=$HOST
+  MINI_CONSENT_HOST=$CONSENT
+  MINI_CONSENT_CONFIG=$CONFIG
+  export MINI_LOCAL_HOST MINI_CONSENT_HOST MINI_CONSENT_CONFIG
   [ -S "$SOCKET" ] || candidate_die "Store is not serving at $SOCKET"
   if [ -f "$STATE/sponsor/workspace.json" ]; then
     echo "sponsor workspace exists: $STATE/sponsor"
@@ -189,7 +248,7 @@ sponsor() {
 }
 
 unit() {
-  candidate_state "$state"
+  load_state "$state"
   cat <<EOF
 # Mini Store for $STATE. Install as a user unit (systemctl --user) under the
 # account that owns $STATE, or as a system unit with User= set to that account.
@@ -218,6 +277,7 @@ case "$action" in
   serve) serve_exec ;;
   start) start ;;
   stop) stop ;;
+  upgrade) upgrade ;;
   status) status ;;
   sponsor) sponsor ;;
   unit) unit ;;

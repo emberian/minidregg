@@ -1,0 +1,119 @@
+#!/bin/bash
+# The same explicit ROOT SETUP/ROOT CLEANUP entrypoint is used by deployment
+# and scratch acceptance. Runtime privilege is confined to the compiled helper.
+set -euo pipefail
+usage() { echo "usage: $0 install SOURCE_HELPER HELPER_PATH STORE DEPLOYMENT_HEX HOST_HEX OPERATOR_UID SUBUID_START COUNT | remove STORE HELPER_PATH" >&2; exit 2; }
+[[ $EUID == 0 ]] || { echo 'world install requires explicit root setup' >&2; exit 1; }
+[[ $# -ge 3 ]] || usage
+for mapper in /usr/bin/newuidmap /usr/bin/newgidmap; do
+  [[ -f $mapper && ! -L $mapper && -x $mapper && $(stat -c '%u' "$mapper") == 0 ]] || {
+    echo 'deployment prerequisite uidmap (newuidmap/newgidmap) missing or not root-owned' >&2; exit 1;
+  }
+done
+action=$1
+if [[ $action == install ]]; then
+  [[ $# == 9 ]] || usage
+  source_helper=$2 helper=$3 store=$4 deployment=$5 host=$6 op_uid=$7 start=$8 count=$9
+elif [[ $action == remove ]]; then
+  [[ $# == 3 ]] || usage
+  store=$2 helper=$3
+else usage; fi
+[[ $store =~ ^[0-9a-f]{16}$ && $helper =~ ^/usr/local/libexec/mini-spk-volume-helper(-[0-9a-f]{16})?$ ]] || usage
+registry_dir=/etc/mini-spk-volumes
+registry=$registry_dir/$store.json
+rule=/etc/sudoers.d/mini-spk-$store
+root=/var/lib/mini-spk-worlds/$store
+# Serialize registry/subuid allocation and helper install/removal across worlds.
+install -d -o root -g root -m 755 "$registry_dir" /var/lib/mini-spk-worlds /usr/local/libexec
+exec 8>/run/mini-spk-world-install.lock
+flock -x 8
+safe_root_dir() {
+  local path=$1 mode
+  while :; do
+    [[ -d $path && ! -L $path && $(stat -c '%u' "$path") == 0 ]] || { echo "root setup ancestor refused: $path" >&2; exit 1; }
+    mode=$(stat -c '%a' "$path")
+    (( (8#$mode & 8#022) == 0 )) || { echo "root setup ancestor writable: $path" >&2; exit 1; }
+    [[ $path == / ]] && break
+    path=$(dirname "$path")
+  done
+}
+safe_root_dir "$registry_dir"
+safe_root_dir /var/lib/mini-spk-worlds
+safe_root_dir /usr/local/libexec
+if [[ $action == remove ]]; then
+  [[ -f $registry && ! -L $registry && $(stat -c '%u:%a' "$registry") == 0:644 ]] || { echo 'root cleanup registry custody refused' >&2; exit 1; }
+  [[ $(jq -er .store "$registry") == "$store" && $(jq -er .helper "$registry") == "$helper" ]] || exit 1
+  if findmnt -rn -o TARGET | awk -v root="$root/" 'index($0,root)==1 {found=1} END {exit !found}'; then
+    echo 'root cleanup refuses mounted world; use helper unmount first' >&2; exit 1
+  fi
+  rm -f "$rule" "$registry"
+  rm -rf -- "$root"
+  # A shared one-shot helper is removed only after its last registry is gone.
+  used=0
+  for registered in "$registry_dir"/*.json; do
+    [[ -e $registered ]] || continue
+    [[ $(jq -er .helper "$registered") != "$helper" ]] || used=1
+  done
+  if [[ $used == 0 ]]; then rm -f "$helper"; fi
+  [[ ! -e $rule && ! -e $registry && ! -e $root ]] || { echo 'root cleanup removal assertion failed' >&2; exit 1; }
+  printf 'ROOT CLEANUP store=%s removed_registry=yes removed_sudoers=yes helper_remaining=%s\n' "$store" "$used"
+  exit 0
+fi
+[[ $deployment =~ ^[0-9a-f]{64}$ && $host =~ ^[0-9a-f]{64}$ && $op_uid =~ ^[1-9][0-9]*$ && $start =~ ^[1-9][0-9]*$ && $count =~ ^[1-9][0-9]*$ ]] || usage
+(( start >= 65536 && count >= 2 && count <= 64 )) || usage
+[[ ! -e $registry && ! -L $registry && ! -e $rule && ! -e $root && ! -L $root ]] || { echo 'root setup refuses existing world' >&2; exit 1; }
+entry=$(getent passwd "$op_uid")
+op_user=${entry%%:*}
+op_gid=$(printf '%s\n' "$entry" | cut -d: -f4)
+for source in /etc/subuid /etc/subgid; do
+  awk -F: -v user="$op_user" -v uid="$start" -v count="$count" '$1==user && uid>=$2 && uid+count<=$2+$3 {found=1} END {exit !found}' "$source" || { echo 'root setup range outside subuid/subgid allocation' >&2; exit 1; }
+done
+for registered in "$registry_dir"/*.json; do
+  [[ -e $registered ]] || continue
+  if jq -e --argjson first "$start" --argjson end "$((start+count))" '.appUids | any(. >= $first and . < $end)' "$registered" >/dev/null; then
+    echo 'root setup refuses subuid collision with another world' >&2; exit 1
+  fi
+done
+[[ -f $source_helper && ! -L $source_helper && -x $source_helper ]] || usage
+created_helper=0
+rule_tmp=
+rollback() {
+  local result=$?
+  trap - EXIT
+  [[ -z $rule_tmp ]] || rm -f "$rule_tmp"
+  rm -f "$rule" "$registry"
+  rm -rf -- "$root"
+  [[ $created_helper == 0 ]] || rm -f "$helper"
+  exit "$result"
+}
+trap rollback EXIT
+sha=$(sha256sum "$source_helper" | cut -d ' ' -f1)
+if [[ -e $helper || -L $helper ]]; then
+  [[ -f $helper && ! -L $helper && $(stat -c '%u:%a' "$helper") == 0:755 && $(sha256sum "$helper" | cut -d ' ' -f1) == "$sha" ]] || { echo 'root setup refuses helper replacement' >&2; exit 1; }
+else
+  created_helper=1
+  install -o root -g root -m 755 -- "$source_helper" "$helper"
+fi
+[[ $(sha256sum "$helper" | cut -d ' ' -f1) == "$sha" ]] || { echo 'installed helper pin differs' >&2; exit 1; }
+install -d -o root -g root -m 755 "$root" "$root/attest"
+install -d -o root -g root -m 700 "$root/volumes" "$root/volume-custody"
+install -o root -g root -m 600 /dev/null "$root/volume-custody/verbs.lock"
+install -d -o root -g root -m 711 "$root/vars"
+install -d -o "$op_uid" -g "$op_gid" -m 700 "$root/broker" "$root/$store" "$root/runtime-$store"
+install -d -o "$op_uid" -g "$op_gid" -m 755 "$root/spk" "$root/spk/packages"
+install -d -o "$op_uid" -g "$op_gid" -m 700 "$root/spk/inbox"
+printf 'deployment_id=%s\nhost_id=%s\n' "$deployment" "$host" >"$root/host-identity"
+chmod 600 "$root/host-identity"
+jq -n --arg store "$store" --arg deployment "$deployment" --arg host "$host" --arg root "$root" --arg helper "$helper" --arg sha "$sha" \
+  --argjson uid "$op_uid" --argjson gid "$op_gid" --argjson start "$start" --argjson count "$count" \
+  '{protocol:"mini-spk-volume-registry-v1",store:$store,deploymentId:$deployment,hostId:$host,grainsRoot:$root,operatorUid:$uid,operatorGid:$gid,appUids:[range($start;$start+$count)],helper:$helper,helperSha256:$sha}' >"$registry"
+chmod 644 "$registry"
+# Numeric uid, precisely one binary. JSON decode and the registry enforce args.
+rule_tmp=$(mktemp /etc/sudoers.d/.mini-spk.XXXXXXXX)
+printf '#%s ALL=(root) NOPASSWD: %s\n' "$op_uid" "$helper" >"$rule_tmp"
+chmod 440 "$rule_tmp"
+visudo -cf "$rule_tmp"
+install -o root -g root -m 440 "$rule_tmp" "$rule"
+rm "$rule_tmp"
+trap - EXIT
+printf 'ROOT SETUP store=%s caller_uid=%s helper=%s subuid_start=%s count=%s\n' "$store" "$op_uid" "$helper" "$start" "$count"

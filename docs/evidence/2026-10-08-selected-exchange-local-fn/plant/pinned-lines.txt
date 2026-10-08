@@ -1,0 +1,3 @@
+PLANT APPLIED: control release signed with Store B key for Store A owner
+== positive-control
+mini: selected-release submit returned refused; exact outcome retained

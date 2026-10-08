@@ -1,0 +1,5 @@
+$ . /srv/pipeline/box.env 2>/dev/null; bash scripts/kn2/plant-exchange-owner-key.sh --green /srv/artifacts/0ea31db53c5844c9e1676f1dc6b821ec9993da91 /srv/fnbin/6679dae0e/fn-6679dae0e/fn-host /srv/fnbin/6679dae0e/fn-6679dae0e/fn-host.core /tmp/prod-exch-green-2
+2026-10-08T17:19:09Z journey-runner: tip 0ea31db53c5844c9e1676f1dc6b821ec9993da91 (next) from /srv/lanes/prod-exch/src (lean env: 0); rows: exchange
+2026-10-08T17:19:38Z journey-runner:   exchange PASS 29s
+2026-10-08T17:19:38Z journey-runner: DONE 0ea31db53c5844c9e1676f1dc6b821ec9993da91 in 29s: PASS=1 
+GREEN exchange PASS: local fn stopped; exact selected packet admitted and signed readback verified

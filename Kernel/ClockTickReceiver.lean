@@ -15,6 +15,8 @@ A tick asserts a new clock value `{now, slot}`.  It is admitted exactly when:
 * the tick `advances` the loaded clock: `now` strictly increases and `slot`
   does not decrease (`clock_monotone`; a tick behind or at the current time is
   refused, `tick_behind_refused`);
+* the step is at most the positive genesis bound loaded from that same cell
+  (`decideTick_ok`; an advancing excessive step is `clockStepExceeded`);
 * its single-use marker (sponsor, nonce) is unspent; it is the intent's durable
   nullifier.
 
@@ -24,6 +26,7 @@ the record writes only the clock cell (`intent_writes_clock_cell`).
 import Compiler.DurableReceiverIO
 import Kernel.CapabilityRevocationController
 import Kernel.ClockCellDomain
+import Theory.AxiomPin
 
 namespace Minidregg.Kernel.ClockTickReceiver
 
@@ -66,29 +69,54 @@ def Plan.patch (plan : Plan) : Patch ClockCell.layout := tickPatch plan.current 
 
 inductive Reject where
   | malformedIngress | directoryUnavailable | authorityUnavailable
-  | clockUnavailable | staleAuthority | staleClock | clockNotAdvancing
+  | clockUnavailable | staleAuthority | staleClock | clockNotAdvancing | clockStepExceeded
   | replayedMarker | validation | physicalPreparation
   | policyUnavailable | capabilityRejected | policyRejected | policyInputRange | policyCastAlias
   | signature (reason : CredentialSignatureAdmission.Reject)
   deriving DecidableEq, Repr
 
 /-- The whole rule of time, on the loaded clock. -/
-def decideTick (current next : Clock) : Except Reject Plan :=
-  if advances current next then .ok ⟨current, next⟩ else .error .clockNotAdvancing
+def decideTick (bound : Nat) (current next : Clock) : Except Reject Plan :=
+  if advances current next then
+    if current.now + bound < next.now then .error .clockStepExceeded else .ok ⟨current, next⟩
+  else .error .clockNotAdvancing
 
-theorem decideTick_ok {current next : Clock} {plan : Plan}
-    (decided : decideTick current next = .ok plan) :
-    plan = ⟨current, next⟩ ∧ current.now < next.now ∧ current.slot ≤ next.slot := by
+theorem tick_step_exceeded_refused (bound : Nat) (current next : Clock)
+    (notBack : current.slot ≤ next.slot) (exceeded : current.now + bound < next.now) :
+    decideTick bound current next = .error .clockStepExceeded := by
+  have later : current.now < next.now := by omega
+  simp [decideTick, (advances_iff current next).mpr ⟨later, notBack⟩, exceeded]
+
+theorem decideTick_ok {bound : Nat} {current next : Clock} {plan : Plan}
+    (decided : decideTick bound current next = .ok plan) :
+    plan = ⟨current, next⟩ ∧ current.now < next.now ∧ current.slot ≤ next.slot ∧
+      next.now ≤ current.now + bound := by
   unfold decideTick at decided
   split at decided
   · rename_i advancing
-    cases decided
-    exact ⟨rfl, (advances_iff current next).mp advancing⟩
+    split at decided
+    · cases decided
+    · rename_i within
+      cases decided
+      exact ⟨rfl, ((advances_iff current next).mp advancing).1,
+        ((advances_iff current next).mp advancing).2, Nat.le_of_not_gt within⟩
   · cases decided
 
+/-- Exceeding ticks are always refused, including those that regress the slot. -/
+theorem tick_step_exceeded_never_ok (bound : Nat) (current next : Clock)
+    (exceeded : current.now + bound < next.now) (plan : Plan) :
+    decideTick bound current next ≠ .ok plan := by
+  intro decided
+  exact (Nat.not_le.mpr exceeded) (decideTick_ok decided).2.2.2
+
+/-- Satisfiable pole: an advancing tick exactly at the bound is admitted. -/
+theorem tick_within_bound_admitted :
+    decideTick 300 ⟨1000, 7⟩ ⟨1300, 7⟩ = .ok ⟨⟨1000, 7⟩, ⟨1300, 7⟩⟩ := by
+  decide
+
 /-- Refuting pole of time: a tick at or behind the current `now` is refused. -/
-theorem tick_behind_refused (current next : Clock) (behind : next.now ≤ current.now) :
-    decideTick current next = .error .clockNotAdvancing := by
+theorem tick_behind_refused (bound : Nat) (current next : Clock) (behind : next.now ≤ current.now) :
+    decideTick bound current next = .error .clockNotAdvancing := by
   unfold decideTick
   have : advances current next = false := by
     cases h : advances current next
@@ -97,8 +125,8 @@ theorem tick_behind_refused (current next : Clock) (behind : next.now ≤ curren
   simp [this]
 
 /-- Refuting pole of the slot: a tick taking the chain slot back is refused. -/
-theorem slot_back_refused (current next : Clock) (back : next.slot < current.slot) :
-    decideTick current next = .error .clockNotAdvancing := by
+theorem slot_back_refused (bound : Nat) (current next : Clock) (back : next.slot < current.slot) :
+    decideTick bound current next = .error .clockNotAdvancing := by
   unfold decideTick
   have : advances current next = false := by
     cases h : advances current next
@@ -322,7 +350,7 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
   authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot
   clock : ClockCellDomain.Loaded deployment durable.snapshot
   plan : Plan
-  decided : decideTick clock.clock command.tick = .ok plan
+  decided : decideTick clock.maxStepSeconds clock.clock command.tick = .ok plan
   candidate : Candidate (family deployment authority.snapshot clock.cell profile.semantics ambient command)
     clock.cell (declaration authority.snapshot.domain profile.semantics command plan) ()
   source : CanonicalCellRegistry.LoadedPolicySource authority.snapshot.domain directory.directory
@@ -338,7 +366,7 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
   let snapshot := authority.snapshot
   if command.expectedAuthorityRoot = snapshot.cell.root then
     if rootExact : command.expectedClockRoot = clock.cell.root then
-      match decided : decideTick clock.clock command.tick with
+      match decided : decideTick clock.maxStepSeconds clock.clock command.tick with
       | .error reason => throw reason
       | .ok plan =>
         let d := declaration snapshot.domain profile.semantics command plan
@@ -374,9 +402,10 @@ and that clock is strictly later than, and at no earlier slot than, the clock
 the snapshot holds. -/
 theorem clock_monotone (prepared : Prepared deployment profile ambient durable command) :
     clockOf prepared.clockPost.logical = some command.tick ∧
-      prepared.clock.clock.now < command.now ∧ prepared.clock.clock.slot ≤ command.slot := by
-  obtain ⟨planExact, later, notBack⟩ := decideTick_ok prepared.decided
-  refine ⟨?_, later, notBack⟩
+      prepared.clock.clock.now < command.now ∧ prepared.clock.clock.slot ≤ command.slot ∧
+      command.now ≤ prepared.clock.clock.now + prepared.clock.maxStepSeconds := by
+  obtain ⟨planExact, later, notBack, within⟩ := decideTick_ok prepared.decided
+  refine ⟨?_, later, notBack, within⟩
   have installs := tick_installs prepared.clock.cell.logical prepared.plan
   simp only [Prepared.clockPost, ValidatedPatch.apply_logical]
   show ClockCell.clockOf (Patch.run prepared.clock.cell.logical prepared.plan.patch) = some command.tick
@@ -693,15 +722,16 @@ def signingPlanCodec : LawfulCodec SigningPlan :=
 
 def viewStream : StreamCodec ClockCellDomain.View :=
   StreamCodec.xmap
-    (StreamCodec.product digestStream (StreamCodec.product digestStream clockStream))
-    (fun view => (view.clockRoot, view.authorityRoot, view.clock))
-    (fun (clockRoot, authorityRoot, clock) => ⟨clockRoot, authorityRoot, clock⟩)
+    (StreamCodec.product digestStream (StreamCodec.product digestStream
+      (StreamCodec.product clockStream StreamCodec.nat)))
+    (fun view => (view.clockRoot, view.authorityRoot, view.clock, view.maxStepSeconds))
+    (fun (clockRoot, authorityRoot, clock, bound) => ⟨clockRoot, authorityRoot, clock, bound⟩)
     (by intro view; cases view; rfl)
 
-/-- v2: the clock and the two roots a tick pins (v1 also named the factory
-root, which a tick no longer reads). -/
+/-- v3 adds the bound read from the loaded cell. Old views refuse; v2 carried
+the clock and two pinned roots (v1 also named the factory root). -/
 def viewCodec : LawfulCodec ClockCellDomain.View :=
-  framed "DREGG/CLOCK/VIEW/v2".toUTF8.toList viewStream
+  framed "DREGG/CLOCK/VIEW/v3".toUTF8.toList viewStream
 
 /-- info: 'Minidregg.Kernel.ClockTickReceiver.clock_monotone' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms clock_monotone
@@ -717,5 +747,7 @@ def viewCodec : LawfulCodec ClockCellDomain.View :=
 #guard_msgs (whitespace := lax) in #print axioms tick_requires_capability
 /-- info: 'Minidregg.Kernel.ClockTickReceiver.command_roundtrip' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms command_roundtrip
+
+#assert_axioms decideTick_ok tick_step_exceeded_refused tick_step_exceeded_never_ok tick_within_bound_admitted
 
 end Minidregg.Kernel.ClockTickReceiver

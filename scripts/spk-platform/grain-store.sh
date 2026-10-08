@@ -7,7 +7,7 @@
 #
 # Runs as the grain operator (`mini`, never root): residents run as the same
 # user, because PrivateOperator requires the operator socket's owner; the app
-# UID switch is the broker-bounded CAP_SETUID/CAP_SETGID of the resident unit.
+# identity is a distinct mapped subordinate uid; both parsers drop all caps.
 set -eu
 umask 077
 
@@ -21,7 +21,6 @@ REPO=$(CDPATH='' cd -- "$HERE/../.." && pwd)
 fail() { echo "grain store: $*" >&2; exit 2; }
 for path in "$ROOT" "$HOST" "$MINI" "$STORE_BINARY" "$SIGNATURE_BINARY"; do
   case "$path" in /*) ;; *) fail "absolute path required: $path" ;; esac
-  case "$path" in /tmp/*|/var/tmp/*) fail "PrivateTmp hides $path" ;; esac
 done
 for executable in "$HOST" "$MINI" "$STORE_BINARY" "$SIGNATURE_BINARY"; do
   [ -x "$executable" ] || fail "not executable: $executable"

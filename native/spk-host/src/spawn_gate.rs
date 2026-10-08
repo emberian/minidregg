@@ -492,12 +492,7 @@ pub(crate) fn spawn_privilege_audit(spec: &SpawnSpec) -> io::Result<BoundedChild
 
 pub(crate) fn spawn_bounded(spec: &SpawnSpec) -> io::Result<BoundedChild> {
     if let Some(child)=crate::resident_privilege::launch(spec)? {return Ok(child)}
-    if !crate::os::privileged() {
-        return Err(invalid(
-            "production SPK gate requires trusted bootstrap channel",
-        ));
-    }
-    spawn_inner(spec, false)
+    Err(invalid("production SPK gate requires trusted bootstrap channel"))
 }
 
 #[cfg(test)]

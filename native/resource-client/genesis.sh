@@ -44,6 +44,10 @@
 set -eu
 umask 077
 check_params() {
+  jq -e '.clock.maxStepSeconds | type == "number" and . > 0 and . == floor and . < 9007199254740992' "$1" >/dev/null ||
+    { echo 'genesis: clock.maxStepSeconds must be a positive integer (clockStepBoundInvalid)' >&2; exit 2; }
+  jq -e '.clock.genesisNow | type == "number" and . > 0 and . == floor and . < 9007199254740992' "$1" >/dev/null ||
+    { echo 'genesis: clock.genesisNow must be positive unix seconds (clockGenesisNowInvalid)' >&2; exit 2; }
   # Every coordinate is a JSON integer the operator chose. jq holds numbers as
   # doubles, so refuse anything at or above 2^53 rather than round it.
   jq -e '
@@ -144,6 +148,8 @@ jq -n --slurpfile p "$params" --arg semantics "$semantics" --arg public "$public
    factoryControllerCapability: ($p.factoryControllerCapability|s),
    meterAllowance: ($p.meterAllowance | map_values(s)),
    tailBound: ($p.tailBound|s),
+   clockGenesisNow: ($p.clock.genesisNow|s),
+   clockMaxStepSeconds: ($p.clock.maxStepSeconds|s),
    clockTickers: [{subject: ($p.clock.subject|s), capability: ($p.clock.tickCapabilityId|s)}]}' \
   >"$dir/genesis.json"
 

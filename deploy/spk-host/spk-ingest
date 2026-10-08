@@ -1,167 +1,44 @@
-#!/usr/bin/env bash
-# Bounded, offline, root-owned SPK verification and immutable tree installation.
-# This never starts the packaged executable or opens an application socket.
+#!/bin/bash
+# Operator materialization in a bounded user unit; no host-root package parser.
 set -euo pipefail
 umask 077
-
-usage() {
-  echo 'usage: spk-ingest [--root SPK_ROOT] HOST_BINARY HOST_SHA256 INBOX_SPK APP_UID' >&2
-  exit 2
+[[ $# == 6 && $1 == --root ]] || { echo 'usage: spk-ingest --root SPK_ROOT HOST HOST_SHA256 INBOX_SPK APP_UID' >&2; exit 2; }
+base=$2 host_binary=$3 expected=$4 package=$5 app_uid=$6
+[[ $base == /* && $base != */ && $base != */../* && $base != */./* && $base != *//* && $base == */spk ]] || {
+  echo 'SPK root must be a canonical per-store spk path' >&2; exit 2;
 }
-
-base=/var/lib/minidregg/spk
-isolated=0
-if [[ ${1:-} == --root ]]; then
-  (( $# == 6 )) || usage
-  base=$2
-  [[ $base =~ ^/[A-Za-z0-9_./-]+$ && $base != / && $base != */ && $base != */../* && $base != */./* && $base != */.. && $base != */. ]] || usage
-  [[ $(realpath -m -- "$base") == "$base" ]] || { echo 'SPK root must be canonical and not symlinked' >&2; exit 1; }
-  isolated=1
-  shift 2
-fi
-(( $# == 4 )) || usage
-host_binary=$1 expected_host_sha=$2 package=$3 app_uid=$4
-[[ $expected_host_sha =~ ^[0-9a-f]{64}$ ]] || usage
-[[ $app_uid =~ ^[1-9][0-9]{0,9}$ ]] || usage
-(( EUID == 0 )) || { echo 'spk-ingest requires root' >&2; exit 1; }
-getent passwd "$app_uid" >/dev/null || { echo 'unknown app UID' >&2; exit 1; }
-
-inbox=$base/inbox
-store=$base/packages
-
-safe_dir() {
-  local path=$1 mode=$2 actual
-  if [[ ! -e $path && ! -L $path ]]; then
-    install -d -o root -g root -m "$mode" -- "$path"
-  fi
-  [[ -d $path && ! -L $path ]] || { echo "unsafe directory $path" >&2; exit 1; }
-  [[ $(stat -c '%u' -- "$path") == 0 ]] || { echo "non-root directory $path" >&2; exit 1; }
-  actual=$(stat -c '%a' -- "$path")
-  [[ $actual == "$mode" ]] || { echo "mode drift $path: $actual" >&2; exit 1; }
+store_id=$(basename "$(dirname "$base")")
+[[ $store_id =~ ^[0-9a-f]{16}$ && $expected =~ ^[0-9a-f]{64}$ && $app_uid =~ ^[1-9][0-9]*$ ]] || {
+  echo 'SPK store namespace or ingest arguments invalid' >&2; exit 2;
 }
-
-if (( isolated )); then
-  # Existing root custody is a prerequisite; never create arbitrary ancestors.
-  ancestor=$(dirname -- "$base")
-  [[ -d $ancestor ]] || { echo 'isolated SPK parent absent' >&2; exit 1; }
-  while :; do
-    [[ ! -L $ancestor && $(stat -c '%u' -- "$ancestor") == 0 ]] || { echo 'isolated SPK parent custody differs' >&2; exit 1; }
-    mode=$(stat -c '%a' -- "$ancestor")
-    (( (8#$mode & 8#022) == 0 )) || { echo 'isolated SPK parent writable' >&2; exit 1; }
-    [[ $ancestor == / ]] && break
-    ancestor=$(dirname -- "$ancestor")
-  done
-else
-  safe_dir /var 755
-  safe_dir /var/lib 755
-  safe_dir /var/lib/minidregg 755
-fi
-safe_dir "$base" 755
-safe_dir "$inbox" 700
-safe_dir "$store" 755
-
-lock=$base/.ingest.lock
-[[ ! -L $lock ]] || { echo 'unsafe ingest lock' >&2; exit 1; }
-exec 9>>"$lock"
-[[ $(stat -c '%u:%a' -- "$lock") == 0:600 ]] || { echo 'ingest lock owner/mode drift' >&2; exit 1; }
-flock -n 9 || { echo 'another SPK ingest is active' >&2; exit 1; }
-if find "$store" -mindepth 1 -maxdepth 1 -name '.spk-stage-*' -print -quit | grep -q .; then
-  echo 'unaudited SPK staging tree remains' >&2
-  exit 1
-fi
-
-[[ $package == "$inbox"/* && $package != */../* && $package != */./* ]] || {
-  echo 'SPK must be directly under the root-private inbox' >&2; exit 1;
+[[ $(realpath -m -- "$base") == "$base" ]] || {
+  echo 'SPK store namespace must be canonical and not symlinked' >&2; exit 1;
 }
-[[ $(dirname -- "$package") == "$inbox" ]] || { echo 'nested SPK path refused' >&2; exit 1; }
-[[ -f $package && ! -L $package ]] || { echo 'SPK is not a regular file' >&2; exit 1; }
-[[ $(stat -c '%u:%a' -- "$package") == 0:600 ]] || {
-  echo 'SPK inbox file must be root-owned mode 0600' >&2; exit 1;
-}
-(( $(stat -c '%s' -- "$package") <= 268435456 )) || { echo 'SPK exceeds input cap' >&2; exit 1; }
-input_sha=$(sha256sum -- "$package")
-input_sha=${input_sha%% *}
-installed=$store/sha256-$input_sha
-[[ ! -e $installed && ! -L $installed ]] || { echo 'exact SPK already installed' >&2; exit 1; }
-
-[[ $host_binary == /* && -f $host_binary && ! -L $host_binary && -x $host_binary ]] || {
-  echo 'host binary must be an absolute regular executable' >&2; exit 1;
-}
-part=/
-IFS=/ read -ra segments <<< "${host_binary#/}"
-for segment in "${segments[@]}"; do
-  [[ -n $segment && $segment != . && $segment != .. ]] || { echo 'invalid host path' >&2; exit 1; }
-  part=${part%/}/$segment
-  [[ ! -L $part && $(stat -c '%u' -- "$part") == 0 ]] || {
-    echo "host binary path is symlinked or non-root-owned: $part" >&2; exit 1;
-  }
-  mode=$(stat -c '%a' -- "$part")
-  (( (8#$mode & 8#022) == 0 )) || { echo "writable host binary path: $part" >&2; exit 1; }
+[[ $EUID != 0 ]] || { echo 'SPK ingest requires the store operator, not root' >&2; exit 2; }
+[[ $package == "$base/inbox/"* && $(dirname "$package") == "$base/inbox" && ! -L $package ]] || exit 2
+[[ $(stat -c '%u:%a' "$package") == "$EUID:600" && $(stat -c '%s' "$package") -le 268435456 ]] || exit 2
+[[ $(sha256sum "$host_binary" | cut -d ' ' -f1) == "$expected" ]] || { echo 'SPK ingest binary pin differs' >&2; exit 1; }
+for dir in "$base" "$base/inbox" "$base/packages"; do
+  [[ -d $dir && ! -L $dir && $(stat -c '%u' "$dir") == "$EUID" ]] || { echo 'SPK namespace custody differs' >&2; exit 1; }
+  (( (8#$(stat -c '%a' "$dir") & 8#022) == 0 )) || exit 2
 done
-actual_host_sha=$(sha256sum -- "$host_binary")
-[[ ${actual_host_sha%% *} == "$expected_host_sha" ]] || { echo 'host binary SHA mismatch' >&2; exit 1; }
-
-unit=mini-spk-ingest-$(date -u +%Y%m%d%H%M%S)-$$
-cleanup_unit() {
-  systemctl stop -- "$unit" >/dev/null 2>&1 || true
-  rm -f -- "$stdout_log" "$stderr_log"
-}
-stdout_log=$(mktemp "$base/.ingest-stdout.XXXXXXXX")
-stderr_log=$(mktemp "$base/.ingest-stderr.XXXXXXXX")
-trap cleanup_unit EXIT
-run_rc=0
-timeout --kill-after=5s 150s systemd-run --unit="$unit" --wait --pipe --collect \
-  -p Type=exec \
-  -p User=root \
-  -p NoNewPrivileges=yes \
-  -p PrivateNetwork=yes \
-  -p PrivateTmp=yes \
-  -p ProtectSystem=strict \
-  -p "ReadWritePaths=$store" \
-  -p MemoryMax=2G \
-  -p MemorySwapMax=0 \
-  -p CPUQuota=100% \
-  -p TasksMax=16 \
-  -p RuntimeMaxSec=120 \
-  -p LimitFSIZE=268435456 \
-  -p KillMode=control-group \
-  -- "$host_binary" materialize "$package" "$store" "$app_uid" \
-  >"$stdout_log" 2>"$stderr_log" || run_rc=$?
-
-cat -- "$stdout_log"
-cat -- "$stderr_log" >&2
-# With --collect the transient unit can unload before a later `systemctl show`:
-# querying a missing unit returns misleading default Result=success/status=0.
-# Instead require the named unit's exact verdict from systemd-run --wait, as
-# well as its process exit status. The output files are root-private, and the
-# package parser's stdout cannot replace systemd-run's separate stderr verdict.
-if [[ $run_rc != 0 ]] ||
-  ! grep -Eq "^Running as unit: ${unit}[.]service(; invocation ID: [0-9a-f]{32})?$" "$stderr_log" ||
-  ! grep -Fxq 'Finished with result: success' "$stderr_log" ||
-  ! grep -Fxq 'Main processes terminated with: code=exited, status=0/SUCCESS' "$stderr_log"; then
-  echo 'SPK ingest unit did not finish successfully' >&2
-  exit 1
-fi
-[[ $(sha256sum -- "$package" | cut -c1-64) == "$input_sha" ]] || {
-  echo 'SPK inbox bytes changed during ingest' >&2
-  exit 1
-}
-[[ -d $installed && ! -L $installed && -d $installed/root && ! -L $installed/root ]] || {
-  echo 'ingest unit succeeded without publishing exact image' >&2
-  exit 1
-}
-[[ $(sha256sum -- "$installed/package.spk" | cut -c1-64) == "$input_sha" ]] || {
-  echo 'published raw package digest mismatch' >&2
-  exit 1
-}
+exec 9>>"$base/.ingest.lock"
+flock -n 9 || { echo 'another SPK ingest is active' >&2; exit 1; }
+input_sha=$(sha256sum "$package" | cut -d ' ' -f1)
+unit=mini-spk-ingest-s$store_id-$$
+systemd-run --user --unit="$unit" --wait --pipe --collect -p Type=exec \
+  -p NoNewPrivileges=yes -p MemoryMax=2G -p MemorySwapMax=0 -p CPUQuota=100% \
+  -p TasksMax=16 -p RuntimeMaxSec=120 -p LimitFSIZE=268435456 -p KillMode=control-group \
+  -- "$host_binary" materialize "$package" "$base/packages" "$app_uid"
+installed=$base/packages/sha256-$input_sha
+[[ $(sha256sum "$package" | cut -d ' ' -f1) == "$input_sha" && -d $installed/root && ! -L $installed/root ]] || { echo 'ingest exact image differs' >&2; exit 1; }
+[[ $(sha256sum "$installed/package.spk" | cut -d ' ' -f1) == "$input_sha" ]] || exit 1
 if find "$installed/root" \( -type f -o -type d \) -perm /022 -print -quit | grep -q . ||
-  find "$installed/root" -type f -perm /6000 -print -quit | grep -q . ||
-  find "$installed/root" \( -type b -o -type c -o -type p -o -type s \) -print -quit | grep -q .; then
-  echo 'published image has writable, privileged, or special-node content' >&2
-  exit 1
+   find "$installed/root" -type f -perm /6000 -print -quit | grep -q . ||
+   find "$installed/root" \( -type b -o -type c -o -type p -o -type s \) -print -quit | grep -q .; then
+  echo 'published image has writable, privileged, or special-node content' >&2; exit 1
 fi
-if find "$store" -mindepth 1 -maxdepth 1 -name '.spk-stage-*' -print -quit | grep -q .; then
-  echo 'SPK staging remains after unit success' >&2
-  exit 1
+if find "$base/packages" -mindepth 1 -maxdepth 1 -name '.spk-stage-*' -print -quit | grep -q .; then
+  echo 'SPK staging remains after unit success' >&2; exit 1
 fi
-echo "ingest_verified unit=$unit spkSha256=$input_sha image=$installed"
+printf 'ingest_verified unit=%s spkSha256=%s image=%s\n' "$unit" "$input_sha" "$installed"

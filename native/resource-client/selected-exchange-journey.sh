@@ -47,6 +47,8 @@ done
 case "$ROOT" in /*) ;; *) echo 'root must be absolute' >&2; exit 2;; esac
 [ ! -e "$ROOT" ] && [ ! -L "$ROOT" ] || { echo 'root already exists' >&2; exit 2; }
 FN_PORT=${FN_PORT:-11241}
+case "$FN_PORT" in ''|0?*|*[!0-9]*) echo 'fn port must be canonical decimal' >&2; exit 2;; esac
+[ "$FN_PORT" -ge 1 ] && [ "$FN_PORT" -le 65535 ] || { echo 'fn port out of range' >&2; exit 2; }
 SOURCE_DOMAIN=${SOURCE_DOMAIN:-8611} SOURCE_SUBJECT=${SOURCE_SUBJECT:-7}
 RECIPIENT_DOMAIN=${RECIPIENT_DOMAIN:-8612} RECIPIENT_SUBJECT=${RECIPIENT_SUBJECT:-8}
 [ "$SOURCE_DOMAIN" != "$RECIPIENT_DOMAIN" ] || { echo 'domains must differ' >&2; exit 2; }
@@ -70,11 +72,22 @@ cleanup() {
   for pidfile in "$A/public/server.pid" "$B/public/server.pid"; do
     [ -f "$pidfile" ] || continue
     pid=$(cat "$pidfile")
-    kill "$pid" 2>/dev/null || true
+    if kill -0 "$pid" 2>/dev/null; then stop_service "${pidfile%/public/server.pid}"; fi
   done
-  [ -z "$FN_PID" ] || kill "$FN_PID" 2>/dev/null || true
+  if [ -n "$FN_PID" ]; then stop_fn; fi
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+stop_fn() {
+  if kill -0 "$FN_PID" 2>/dev/null; then kill "$FN_PID"; fi
+  if wait "$FN_PID" 2>/dev/null; then :; else
+    fn_exit=$?
+    FN_PID=
+    [ "$fn_exit" = 143 ] || { echo "fn shutdown exit $fn_exit" >&2; return 1; }
+  fi
+  FN_PID=
+}
 
 now() { date +%s.%N; }
 STEP_START=
@@ -297,6 +310,10 @@ TARGET_ROOT=$(jq -er '.cell.root' "$B/owner-inbox-read/view.json")
 
 # --- 5. fn node ----------------------------------------------------------------
 begin fn-provision
+# The frozen launcher appends SBCL_USER_ARGS after its 32000 MiB default.
+# Size this one local test node to 8192 MiB so native worker reservations fit
+# the runner's 24 GiB row scope with headroom for Mini and consumer processes.
+export SBCL_USER_ARGS='--dynamic-space-size 8192'
 mkdir -m 700 "$FN"
 cat >"$FN/fn-helper.sh" <<EOF
 #!/bin/sh
@@ -540,7 +557,7 @@ exchange verify-transport >"$ROOT/verify.stdout"
 end
 jq -e '.type == "minidregg-selected-exchange-verified-v1" and .transportOnly == true' \
   "$X/readback-0001/selected-exchange.json" >/dev/null
-kill "$FN_PID"; wait "$FN_PID" 2>/dev/null || true; FN_PID=
+stop_fn
 
 # --- 11. Public summary (no secrets, no raw signatures) ------------------------
 sha256sum "$SCRIPT" "$NEWPARTICIPANT" "$HOST" "$MINI" "$STORE" "$VERIFIER" \
@@ -558,11 +575,13 @@ jq -n --slurpfile receipt "$ROOT/receipt-0000.json" \
   --arg lockout "$(cat "$B/sponsor-read-after-law.verdict")" \
   --arg readback "$(digest "$X/readback-0001/signed-observation.bin")" \
   --arg tamperStderr "$(cat "$N/tampered-article.stderr")" \
+  --argjson fnPort "$FN_PORT" \
   --slurpfile tp "$N/tampered-packet-attempt/request-0000.outcome.json" \
   --slurpfile ws "$N/wrong-signer-attempt/request-0000.outcome.json" \
   --slurpfile wr "$N/wrong-root-attempt/request-0000.outcome.json" \
   --slurpfile pc "$N/control-attempt/request-0000.outcome.json" \
   '{type:"minidregg-selected-exchange-two-credentials-v1",
+    localFn:{host:"127.0.0.1",port:$fnPort,dynamicSpaceMiB:8192,freshStore:true,stopped:true},
     storeA:{domain:$aDomain,sponsorSubject:$aSubject,sponsorPublicKey:$aPub,notes:$notes},
     storeB:{domain:$bDomain,sponsorSubject:$bSubject,sponsorPublicKey:$bPub,inbox:$inbox,
       homeIdentityEnrollmentSha256:$enrollment,recipientCapability:$rcap,

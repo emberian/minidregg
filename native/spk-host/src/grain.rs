@@ -12,12 +12,11 @@
 //!
 //! The only record written here that is not derivable from Mini is the
 //! physical placement of the instance (its app UID and size class),
-//! `placement.json`, a copy of what the root broker allocated.
+//! `placement.json`, a copy of the namespace identity the operator broker allocated.
 //!
-//! `grain` runs as the Store operator, never as root. Every root-only step
-//! (app UID allocation, the per-app slice, image publication, the /var
-//! volume, the resident unit, starting and stopping it) is one typed request
-//! to `mini-spk-broker` (`crate::broker`).
+//! `grain` runs as the Store operator. The operator broker manages user units,
+//! namespace uid allocation and image publication. It reaches volume privilege
+//! only through the registered fixed-verb one-shot helper.
 
 use crate::broker::{self, Request};
 use crate::dispatch_native::{private_dir, PrivateOperator};
@@ -40,7 +39,6 @@ mod management;
 
 const MAX_JSON: u64 = 64 * 1024;
 const MAX_SPK: u64 = 256 * 1024 * 1024;
-const PACKAGE_STORE: &str = "/var/lib/minidregg/spk/packages";
 /// How long `grain start` waits for the resident's START completion before
 /// reporting UNRESOLVED (the resident keeps going either way). Measured on
 /// final (SPK-APPS 2026-10-01): a START is BEGIN, claim, launch, report,
@@ -181,7 +179,7 @@ fn pinned_executable(path: &Path, sha: &str) -> io::Result<()> {
     let meta = fs::symlink_metadata(path)?;
     if !path.is_absolute()
         || !meta.is_file()
-        || !crate::os::root_owner(meta.uid())
+        || !(crate::os::root_owner(meta.uid()) || meta.uid()==unsafe{libc::geteuid()})
         || meta.permissions().mode() & 0o022 != 0
         || !hex64(sha)
         || file_sha256(path)? != sha
@@ -403,7 +401,7 @@ pub(crate) struct Placement {
 
 pub(crate) fn load_placement(path: &Path) -> io::Result<Placement> {
     let placement: Placement = serde_json::from_slice(&read_private(path, MAX_JSON)?)?;
-    if placement.protocol != "mini-spk-grain-placement-v2" {
+    if placement.protocol != "mini-spk-grain-placement-v2" || placement.image_dir.is_none() {
         return Err(invalid("grain placement protocol refused"));
     }
     placement.selector.validate()?;
@@ -600,7 +598,7 @@ fn write_custody(host: &Host, selector: &LifecycleSelector) -> io::Result<Custod
 }
 
 pub(crate) fn placement_image_dir(placement: &Placement) -> io::Result<PathBuf> {
-    let image=placement.image_dir.clone().unwrap_or_else(||Path::new(PACKAGE_STORE).join(format!("sha256-{}",placement.raw_sha256)));
+    let image=placement.image_dir.clone().ok_or_else(||invalid("placement requires an explicit store-scoped image"))?;
     let parent=image.parent().and_then(Path::to_str).ok_or_else(||invalid("placement image namespace malformed"))?;
     let identity=json!({"protocol":"mini-spk-broker-identity-v1","packageStore":parent});
     if image!=broker::image_path_from_identity(&identity,&placement.raw_sha256)? {
@@ -609,7 +607,7 @@ pub(crate) fn placement_image_dir(placement: &Placement) -> io::Result<PathBuf> 
     Ok(image)
 }
 
-/// Root publishes one immutable image per signed-SPK hash, shared by every
+/// The operator publishes one immutable image per signed-SPK hash, shared by every
 /// instance of that package; the broker runs the bounded ingest unit.
 fn ensure_image(host: &Host, placement: &Placement) -> io::Result<()> {
     let image = placement_image_dir(placement)?;
@@ -900,7 +898,7 @@ fn scan_runs(app_dir: &Path) -> io::Result<Vec<Run>> {
 
 fn unit_property(unit: &str, property: &str) -> io::Result<String> {
     let output = crate::os::systemctl()
-        .args(["--system", "show", unit, &format!("--property={property}"), "--value"])
+        .args(["--user", "show", unit, &format!("--property={property}"), "--value"])
         .stdin(Stdio::null())
         .output()?;
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
@@ -923,7 +921,7 @@ fn install_unit(host: &Host, app: &str, generation: u64) -> io::Result<String> {
         generation: generation.to_string(),
         runtime_sha256: Some(host.profile.spk_host_sha256.clone()),
     })?;
-    let unit = broker::resident_unit(&host.store, app, &generation.to_string());
+    let unit = broker::resident_unit(&host.store, app, &generation.to_string())?;
     if reply.get("unit").and_then(Value::as_str) != Some(unit.as_str()) {
         return Err(invalid("broker installed a different unit"));
     }
@@ -972,7 +970,8 @@ fn routes(app_dir: &Path, app: &str) -> io::Result<Vec<Value>> {
 }
 
 /// `spk-host grain start PROFILE APP`
-fn start(host: &Host, app: &str) -> io::Result<Value> {
+fn start(host: &Host, app: &str) -> io::Result<Value> { start_inner(host,app,false) }
+fn start_inner(host: &Host, app: &str, prepare_only: bool) -> io::Result<Value> {
     profile_upgrade::require_ready_runtime(&host.profile)?;
     let app_dir = host.app_dir(app);
     private_dir(&app_dir)?;
@@ -994,7 +993,7 @@ fn start(host: &Host, app: &str) -> io::Result<Value> {
     for run in &runs {
         match &run.state {
             RunState::Running => {
-                let unit = broker::resident_unit(&host.store, app, &run.generation.to_string());
+                let unit = broker::resident_unit(&host.store, app, &run.generation.to_string())?;
                 return Ok(json!({"protocol":"mini-spk-grain-start-v1","app":app,
                     "generation":run.generation.to_string(),"unit":unit,
                     "already":"running","activeState":unit_active(&unit)?}));
@@ -1068,7 +1067,7 @@ fn start(host: &Host, app: &str) -> io::Result<Value> {
         ));
     }
     mount_volume(host, &placement, &volume_id, None)?;
-    let unit = broker::resident_unit(&host.store, app, &generation.to_string());
+    let unit = broker::resident_unit(&host.store, app, &generation.to_string())?;
     let journal = app_dir.join(format!("g{generation}"));
     private_directory(&journal)?;
     let config_path = journal.join("resident.json");
@@ -1122,6 +1121,8 @@ fn start(host: &Host, app: &str) -> io::Result<Value> {
     }
 
     derived_file(&config_path, &serde_json::to_vec_pretty(&resident)?)?;
+    crate::resident_service::validate_config(&config_path)?;
+    if prepare_only { return Ok(json!({"protocol":"mini-spk-prepared-resident-v1","residentConfig":config_path,"unit":unit})); }
     install_unit(host, app, generation)?;
     let started = Instant::now();
     if let Err(error) = broker::call_at(&host.profile.grains_root, host.profile.broker_socket.as_deref(), &Request::Start { unit: unit.clone() }) {
@@ -1231,7 +1232,9 @@ fn status(host: &Host, app: &str) -> io::Result<Value> {
         "appUid":placement.app_uid,
         "installPrepared":exists(&install.join("install-prepared-v2.json"))?,
         "installCompleted":exists(&install.join("install-completed-v2.json"))?,
-        "runs":runs.iter().map(|run| json!({
+        "runs":runs.iter().map(|run| {
+            let unit = broker::resident_unit(&host.store, app, &run.generation.to_string())?;
+            Ok(json!({
             "generation":run.generation.to_string(),
             "state":match &run.state {
                 RunState::NeverBegun => "never-begun".to_owned(),
@@ -1239,12 +1242,13 @@ fn status(host: &Host, app: &str) -> io::Result<Value> {
                 RunState::Stopped => "stopped".to_owned(),
                 RunState::Uncertain(reason) => format!("uncertain: {reason}"),
             },
-            "unit":broker::resident_unit(&host.store, app, &run.generation.to_string()),
-            "unitActiveState":unit_active(&broker::resident_unit(&host.store, app, &run.generation.to_string()))
+            "unit":unit,
+            "unitActiveState":unit_active(&unit)
                 .unwrap_or_default(),
-            "slice":unit_property(&broker::resident_unit(&host.store, app, &run.generation.to_string()), "Slice")
+            "slice":unit_property(&unit, "Slice")
                 .unwrap_or_default(),
-        })).collect::<Vec<_>>(),
+        }))
+        }).collect::<io::Result<Vec<Value>>>()?,
     }))
 }
 
@@ -1262,7 +1266,7 @@ fn supervise(host: &Host, app: &str) -> io::Result<Value> {
         return Ok(json!({"protocol":"mini-spk-grain-supervise-v1","app":app,"action":"none",
             "reason":"never started"}));
     };
-    let unit = broker::resident_unit(&host.store, app, &latest.generation.to_string());
+    let unit = broker::resident_unit(&host.store, app, &latest.generation.to_string())?;
     match &latest.state {
         RunState::Stopped => Ok(json!({"protocol":"mini-spk-grain-supervise-v1","app":app,
             "action":"none","reason":"stopped by a completed STOP"})),
@@ -1457,6 +1461,9 @@ fn init_store(root: &Path, host: &Path, config: &Path, socket: Option<&Path>) ->
 }
 
 pub fn run(args: &[String]) -> io::Result<Value> {
+    if let [verb,store,app,generation]=args {
+        if verb=="unit-name" { return Ok(json!({"unit":broker::resident_unit(store,app,generation)?})); }
+    }
     if let [verb, root, host, config, flag, socket] = args {
         if verb == "init-store" && flag == "--broker-socket" {
             return init_store(
@@ -1532,6 +1539,7 @@ pub fn run(args: &[String]) -> io::Result<Value> {
                     crate::grain_route::route(&host_view(&host), app, Path::new(request))
                 }
                 ("start", [app]) => start(&host, app),
+                ("prepare-resident", [app]) => start_inner(&host,app,true),
                 ("stop", [app]) => stop(&host, app),
                 ("status", [app]) => status(&host, app),
                 ("session-intents", [app]) => profile_upgrade::session_intents(&host, app),
@@ -1569,12 +1577,12 @@ mod tests {
     }
 
     #[test]
-    fn spk_namespace_placement_old_bytes_preserve_global_image() {
+    fn spk_namespace_placement_old_bytes_refuse_missing_world_image() {
         let old=package_placement();
         let value=serde_json::to_value(&old).unwrap();
         assert!(value.get("imageDir").is_none());
         let decoded:Placement=serde_json::from_value(value).unwrap();
-        assert_eq!(placement_image_dir(&decoded).unwrap(),Path::new(PACKAGE_STORE).join(format!("sha256-{}",old.raw_sha256)));
+        assert!(placement_image_dir(&decoded).is_err());
     }
 
     #[test]

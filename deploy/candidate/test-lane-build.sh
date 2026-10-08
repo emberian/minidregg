@@ -14,10 +14,18 @@ mkdir -p "$S/lane/src/native/resource-client/src" "$S/lane/src/deploy/candidate"
 cd "$S/lane/src"
 git init -q
 cp "$HERE/package.py" deploy/candidate/
-for f in run.sh lib.sh INTERFACES.md; do echo "stub $f" >"deploy/candidate/$f"; done
-echo "stub genesis" >native/resource-client/genesis.sh; echo '{}' >native/resource-client/genesis-params.example.json
+# Keep the synthetic archive complete for the packager's current shipping contract.
+python3 - <<'SOURCE'
+from pathlib import Path
+import runpy
+for member, _ in runpy.run_path("deploy/candidate/package.py")["SCRIPTS"].values():
+    path = Path(member)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{}\n" if path.suffix == ".json" else f"stub {member}\n")
+SOURCE
 echo 'channel = "stub-1"' | sed 's/^/[toolchain]\n/' >rust-toolchain.toml
 echo "leanprover/lean4:v0.0.0" >lean-toolchain
+printf '# synthetic workspace lock; no Rust build\nversion = 4\n' >Cargo.lock
 echo "pub fn f() {}" >native/resource-client/src/lib.rs
 : >.minidregg-native-snapshot
 echo ".minidregg-native-snapshot" >.gitignore
@@ -25,19 +33,37 @@ G=(git -c user.name=t -c user.email=t@t -c commit.gpgsign=false)
 "${G[@]}" add -A; "${G[@]}" commit -q -m base
 # shims for the version probes pack makes
 for t in lean lake cargo cc; do printf '#!/bin/sh\necho "stub-%s 0.0"\n' "$t" >"$S/shim/$t"; chmod +x "$S/shim/$t"; done
-printf '#!/bin/sh\necho "rustc stub 0.0;host: x86_64-unknown-linux-gnu"\n' >"$S/shim/rustc"; chmod +x "$S/shim/rustc"
+cat >"$S/shim/rustc" <<'RUSTC'
+#!/bin/sh
+cat <<'VERSION'
+rustc stub 0.0
+commit-hash: 0000000000000000000000000000000000000000
+host: x86_64-unknown-linux-gnu
+release: 0.0.0
+LLVM version: 0.0.0
+VERSION
+RUSTC
+chmod +x "$S/shim/rustc"
+# pack consumes flags recorded by the builder, not the packager's environment.
+printf '%s\n' '--remap-path-prefix=/synthetic=/minidregg' >"$S/lane/logs/rust-build.flags"
 export PATH="$S/shim:$PATH" LANE_DIR="$S/lane"
 for n in minidregg-host minidregg-client-consent $(python3 "$HERE/package.py" --rust-roles | awk '{print $3}'); do
   echo "stub binary $n" >"$S/lane/artifacts/$n"
 done
 echo "stub manifest" >"$S/lane/native-out/manifest.txt"
+printf '%s\n' '-O0 -DSYNTHETIC_BUILD' >"$S/lane/native-out/compile-args.txt"
 git rev-parse HEAD | tee "$S/lane/logs/host-build.commit" >"$S/lane/logs/rust-build.commit"
 fails=0
 ok() { echo "ok   $*"; }
 bad() { echo "FAIL $*"; fails=$((fails + 1)); }
 
 if "$HERE/lane-build.sh" pack "$S/cand1" >"$S/1.out" 2>"$S/1.err"; then
-  jq -e '.binaries.consent.path == "bin/minidregg-client-consent" and (.clients["x86_64-unknown-linux-gnu"].consent | type == "object")' "$S/cand1/provenance.json" >/dev/null \
+  jq -e '.binaries.consent.path == "bin/minidregg-client-consent" and
+    (.clients["x86_64-unknown-linux-gnu"].consent | type == "object") and
+    (.outputs["bin/minidregg-host"].build |
+      .flags.rust.RUSTFLAGS == "--remap-path-prefix=/synthetic=/minidregg" and
+      .flags.native.compileArgs == "-O0 -DSYNTHETIC_BUILD\n" and
+      (.rustcVerbose | contains("commit-hash:")))' "$S/cand1/provenance.json" >/dev/null \
     && [ -f "$S/cand1/bin/clients/x86_64-unknown-linux-gnu/minidregg-client-consent" ] && ok "(1) built-at-HEAD lane packages with the consent pair" \
     || bad "(1) packaged, but the consent pair is not pinned: $(cat "$S/1.err")"
 else bad "(1) pack failed: $(cat "$S/1.err")"; fi

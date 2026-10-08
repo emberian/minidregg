@@ -1,0 +1,7 @@
+$ . /srv/pipeline/box.env 2>/dev/null; bash scripts/kn2/plant-exchange-owner-key.sh --plant /srv/artifacts/0ea31db53c5844c9e1676f1dc6b821ec9993da91 /srv/fnbin/6679dae0e/fn-6679dae0e/fn-host /srv/fnbin/6679dae0e/fn-6679dae0e/fn-host.core /tmp/prod-exch-plant-1
+2026-10-08T17:20:36Z journey-runner: tip 0ea31db53c5844c9e1676f1dc6b821ec9993da91 (next) from /tmp/px.S2ktt4/source (lean env: 0); rows: exchange
+2026-10-08T17:21:06Z journey-runner:   exchange FAIL 30s
+2026-10-08T17:21:06Z journey-runner: DONE 0ea31db53c5844c9e1676f1dc6b821ec9993da91 in 30s: FAIL=1 
+PLANT APPLIED: control release signed with Store B key for Store A owner
+== positive-control
+RED exchange FAIL: planted Store B owner key refused at recipient admission (positive-control)
