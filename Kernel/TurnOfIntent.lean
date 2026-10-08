@@ -13,7 +13,8 @@ kind and emits the leg as the **difference** against the cell the world holds:
 * a present cell whose post decodes at the same kind is a leg that guards every
   unchanged present address (a read) and modifies every changed one (`write`,
   `allocate`, `free`), in the codec's address order;
-* a read guard of the intent is a leg of pure reads over the guarded cell;
+* a read guard of a present cell is a leg of pure reads; a fresh absent
+  cell becomes an explicit absence pin (a retired absent cell refuses);
 * the nullifiers become `spent` keys (`Bridge.key`, injective), the charge is
   the intent's charge with the storage lane replaced by the patch bytes.
 
@@ -39,7 +40,7 @@ turn's `retires`, so the cell leaves the world and its id never returns.
 What `ofIntent` refuses, by name (`Refusal`): an undecodable post image, a kind
 change, a removal of a present cell that is not a retirement, a retirement of an
 absent cell, any write of a retired cell, a post image no guarded patch reaches,
-a read guard on an absent cell, and five shape checks the durable preflight
+a read guard on a retired absent cell, and five shape checks the durable preflight
 already implies (duplicate write, duplicate retire, duplicate leg, no effect,
 storage above the charge).
 
@@ -385,6 +386,8 @@ structure Codec (R : Registry) where
   support : (k : R.Kind) → Store (R.layout k) → List (Address (R.layout k))
   mem_support : ∀ k s a, a ∈ support k s ↔ s a ≠ none
   support_nodup : ∀ k s, (support k s).Nodup
+  /-- Empty carrier kind for a fresh ID retired in one turn; no stored value survives. -/
+  retirementKind : Option R.Kind := none
 
 namespace Codec
 
@@ -520,6 +523,8 @@ abbrev DTurn (R : Registry) (D : Type) := Turn R TransactionId StableEvent D
 /-- What one written cell is, read against the cell the world holds. -/
 inductive Delta (R : Registry)
   | absent
+  /-- A fresh identifier born empty and retired by the same turn. -/
+  | burn (k : R.Kind)
   | create (k : R.Kind) (post : Store (R.layout k))
   | change (k : R.Kind) (pre post : Store (R.layout k))
   /-- A present cell retired: emptied by its leg, then retired. -/
@@ -533,7 +538,7 @@ inductive Refusal
   | kindChanged (cell : CellId)
   /-- A written post image is the absent slot over a present cell, and not a retirement. -/
   | removed (cell : CellId)
-  /-- A retirement of a cell the world does not hold. -/
+  /-- Fresh retirement needs a codec-specified empty carrier kind. -/
   | retireAbsent (cell : CellId)
   /-- A write of a retired cell: retired ids never return. -/
   | retiredCell (cell : CellId)
@@ -541,8 +546,6 @@ inductive Refusal
   (`Codec.legPatch_valid_iff`): an append-only row rewritten, a RAM-only op in
   an append-only namespace, a ROM address written or born. -/
   | notAPatch (cell : CellId)
-  /-- A read guard names an absent cell: a leg cannot pin absence. -/
-  | guardOnAbsent (cell : CellId)
   | duplicateWrite
   | duplicateLeg
   | noEffect
@@ -562,7 +565,11 @@ def deltaOf (C : Codec R) (cells : CellId → Option (Cell R)) (w : DataWrite) :
   | some post =>
       match cells w.cellId.value, post with
       | none, none =>
-          if C.retires w.canonicalPostBytes then .error (.retireAbsent w.cellId.value) else .ok .absent
+          if C.retires w.canonicalPostBytes then
+            match C.retirementKind with
+            | none => .error (.retireAbsent w.cellId.value)
+            | some k => .ok (.burn k)
+          else .ok .absent
       | none, some p => .ok (.create p.kind p.store)
       | some pre, none =>
           if C.retires w.canonicalPostBytes then .ok (.retire pre.kind pre.store)
@@ -572,10 +579,18 @@ def deltaOf (C : Codec R) (cells : CellId → Option (Cell R)) (w : DataWrite) :
           | none => .error (.kindChanged w.cellId.value)
           | some s' => .ok (.change pre.kind pre.store s')
 
+/-- A fresh retired post has a turn whenever the codec supplies its empty carrier kind. -/
+theorem deltaOf_fresh_retirement {C : Codec R} {cells : CellId → Option (Cell R)}
+    {w : DataWrite} {k : R.Kind} (decoded : C.decode w.canonicalPostBytes = some none)
+    (retirement : C.retires w.canonicalPostBytes = true) (fresh : cells w.cellId.value = none)
+    (carrier : C.retirementKind = some k) : deltaOf C cells w = .ok (.burn k) := by
+  simp [deltaOf, decoded, retirement, fresh, carrier]
+
 /-- Whether a delta's leg patch is valid from its pre store (a birth's is the
 born ROM image). -/
 def Delta.patchOk (C : Codec R) : Delta R → Bool
   | .absent => true
+  | .burn _ => true
   | .create k s' => decide (Patch.ValidFrom (romPart s') (C.legPatch k (romPart s') s'))
   | .change k s s' => decide (Patch.ValidFrom s (C.legPatch k s s'))
   | .retire k s => decide (Patch.ValidFrom s (C.legPatch k s 0))
@@ -584,11 +599,13 @@ def Delta.patchOk (C : Codec R) : Delta R → Bool
 part (T3b). -/
 def Delta.create? (c : CellId) : Delta R → Option (CellId × Cell R × Option CellId)
   | .create k s' => some (c, ⟨k, romPart s'⟩, none)
+  | .burn k => some (c, ⟨k, 0⟩, none)
   | _ => none
 
 /-- The leg a delta contributes. -/
 def Delta.leg? (C : Codec R) (c : CellId) : Delta R → Option (Leg R)
   | .absent => none
+  | .burn k => some ⟨c, k, C.legPatch k 0 0⟩
   | .create k s' => some ⟨c, k, C.legPatch k (romPart s') s'⟩
   | .change k s s' => some ⟨c, k, C.legPatch k s s'⟩
   | .retire k s => some ⟨c, k, C.legPatch k s 0⟩
@@ -596,6 +613,7 @@ def Delta.leg? (C : Codec R) (c : CellId) : Delta R → Option (Leg R)
 /-- The retire a delta contributes. -/
 def Delta.retire? (c : CellId) : Delta R → Option CellId
   | .retire _ _ => some c
+  | .burn _ => some c
   | _ => none
 
 /-- A birth is never `notAPatch` (T3b). -/
@@ -658,6 +676,10 @@ def legsOf (C : Codec R) (cells : CellId → Option (Cell R)) (intent : DataInte
   (guardIds intent.writes intent.readGuards).filterMap (guardLeg C cells) ++
     (deltas C cells intent.writes).filterMap fun d => d.2.leg? C d.1
 
+/-- Unwritten guard cells with no held cell become explicit absence pins. -/
+def absentOf (cells : CellId → Option (Cell R)) (intent : DataIntent rootBytes) : List CellId :=
+  (guardIds intent.writes intent.readGuards).filter fun c => (cells c).isNone
+
 /-- The turn record of an intent (no checks). -/
 def turnOf (B : Bridge R D) (H : History R TransactionId StableEvent D)
     (cells : CellId → Option (Cell R)) (intent : DataIntent rootBytes) : DTurn R D :=
@@ -669,7 +691,8 @@ def turnOf (B : Bridge R D) (H : History R TransactionId StableEvent D)
     nullifiers := intent.nullifiers.map B.key
     charge := chargeOf H (createsOf B.codec cells intent) (legsOf B.codec cells intent)
       intent.exactCharge
-    subject := intent.subject }
+    subject := intent.subject
+    absent := absentOf cells intent }
 
 /-- **The derived turn** against held cells and the retired set.  Every check
 is named; the first two groups are the expressibility refusals, the last five
@@ -680,8 +703,8 @@ def ofCells (B : Bridge R D) (H : History R TransactionId StableEvent D)
   match intent.writes.findSome? (writeRefusal B.codec cells retired) with
   | some e => .error e
   | none =>
-      match (guardIds intent.writes intent.readGuards).find? (fun c => (cells c).isNone) with
-      | some c => .error (.guardOnAbsent c)
+      match (guardIds intent.writes intent.readGuards).find? (fun c => (cells c).isNone && retired c) with
+      | some c => .error (.retiredCell c)
       | none =>
           let t := turnOf B H cells intent
           if ¬ (writeIds intent.writes).Nodup then .error .duplicateWrite
@@ -705,7 +728,7 @@ structure Derived (B : Bridge R D) (H : History R TransactionId StableEvent D)
     (t : DTurn R D) : Prop where
   eq : t = turnOf B H cells intent
   writes_ok : ∀ w ∈ intent.writes, writeRefusal B.codec cells retired w = none
-  guards_present : ∀ c ∈ guardIds intent.writes intent.readGuards, (cells c).isSome = true
+  guards_unretired : ∀ c ∈ guardIds intent.writes intent.readGuards, cells c = none → retired c = false
   writes_nodup : (writeIds intent.writes).Nodup
   creates_nodup : (t.creates.map Prod.fst).Nodup
   retires_nodup : t.retires.Nodup
@@ -727,10 +750,10 @@ theorem ofCells_ok {B : Bridge R D} {H : History R TransactionId StableEvent D}
   simp only at h
   split_ifs at h with h1 h2 h6 h3 h4 h5
   cases h
-  refine ⟨rfl, fun w m => List.findSome?_eq_none_iff.mp hw w m, fun c m => ?_,
+  refine ⟨rfl, fun w m => List.findSome?_eq_none_iff.mp hw w m, fun c m absent => ?_,
     h1, h2, h6, h3, h4, Nat.le_of_not_gt h5⟩
   have := List.find?_eq_none.mp hg c m
-  exact Option.isSome_iff_ne_none.mpr (by simpa using this)
+  simpa [absent] using this
 
 /-! ### Reading a derived turn -/
 
@@ -739,6 +762,8 @@ theorem deltaOf_spec {C : Codec R} {cells : CellId → Option (Cell R)} {w : Dat
     match δ with
     | .absent => cells w.cellId.value = none ∧ C.decode w.canonicalPostBytes = some none ∧
         C.retires w.canonicalPostBytes = false
+    | .burn _ => cells w.cellId.value = none ∧
+        C.decode w.canonicalPostBytes = some none ∧ C.retires w.canonicalPostBytes = true
     | .create k s' => cells w.cellId.value = none ∧
         C.decode w.canonicalPostBytes = some (some ⟨k, s'⟩)
     | .change k s s' => cells w.cellId.value = some ⟨k, s⟩ ∧
@@ -753,7 +778,9 @@ theorem deltaOf_spec {C : Codec R} {cells : CellId → Option (Cell R)} {w : Dat
     simp only [hc] at h
   · cases hr : C.retires w.canonicalPostBytes <;> simp only [hr, Bool.false_eq_true, if_false, if_true] at h
     · cases h; exact ⟨rfl, rfl, rfl⟩
-    · cases h
+    · cases hk : C.retirementKind with
+      | none => rw [hk] at h; cases h
+      | some k => rw [hk] at h; cases h; exact ⟨rfl, rfl, rfl⟩
   · cases h; exact ⟨rfl, rfl⟩
   · cases hr : C.retires w.canonicalPostBytes <;> simp only [hr, Bool.false_eq_true, if_false, if_true] at h
     · cases h
@@ -815,19 +842,23 @@ theorem deltas_unique {B : Bridge R D} {H : History R TransactionId StableEvent 
 theorem mem_createsOf {C : Codec R} {cells : CellId → Option (Cell R)}
     {intent : DataIntent rootBytes} {x : CellId × Cell R × Option CellId} :
     x ∈ createsOf C cells intent ↔
-      ∃ c k s', (c, Delta.create k s') ∈ deltas C cells intent.writes ∧
+      ∃ c k s', ((c, Delta.create k s') ∈ deltas C cells intent.writes ∨
+          (s' = 0 ∧ (c, Delta.burn k) ∈ deltas C cells intent.writes)) ∧
         x = (c, ⟨k, romPart s'⟩, none) := by
   unfold createsOf
   rw [List.mem_filterMap]
   constructor
   · rintro ⟨⟨c, δ⟩, m, h⟩
     cases δ with
-    | create k s' => cases h; exact ⟨c, k, s', m, rfl⟩
+    | create k s' => cases h; exact ⟨c, k, s', .inl m, rfl⟩
+    | burn k => cases h; exact ⟨c, k, 0, .inr ⟨rfl, m⟩, by rw [romPart_zero]⟩
     | absent => cases h
     | change => cases h
     | retire => cases h
   · rintro ⟨c, k, s', m, rfl⟩
-    exact ⟨_, m, rfl⟩
+    rcases m with m | ⟨rfl, m⟩
+    · exact ⟨_, m, rfl⟩
+    · exact ⟨_, m, by simp [Delta.create?, romPart_zero]⟩
 
 theorem mem_legsOf {C : Codec R} {cells : CellId → Option (Cell R)}
     {intent : DataIntent rootBytes} {leg : Leg R} :
@@ -864,18 +895,19 @@ theorem written_unretired {B : Bridge R D} {H : History R TransactionId StableEv
 
 theorem mem_retiresOf {C : Codec R} {cells : CellId → Option (Cell R)}
     {intent : DataIntent rootBytes} {c : CellId} :
-    c ∈ retiresOf C cells intent ↔ ∃ k s, (c, Delta.retire k s) ∈ deltas C cells intent.writes := by
+    c ∈ retiresOf C cells intent ↔ ∃ k s, (c, Delta.retire k s) ∈ deltas C cells intent.writes ∨
+      (s = 0 ∧ (c, Delta.burn k) ∈ deltas C cells intent.writes) := by
   unfold retiresOf
   rw [List.mem_filterMap]
   constructor
   · rintro ⟨⟨c', δ⟩, m, h⟩
     cases δ with
-    | retire k s => cases h; exact ⟨k, s, m⟩
+    | retire k s => cases h; exact ⟨k, s, .inl m⟩
+    | burn k => cases h; exact ⟨k, 0, .inr ⟨rfl, m⟩⟩
     | absent => cases h
     | create => cases h
     | change => cases h
-  · rintro ⟨k, s, m⟩
-    exact ⟨_, m, rfl⟩
+  · rintro ⟨k, s, m | ⟨rfl, m⟩⟩ <;> exact ⟨_, m, rfl⟩
 
 theorem leg?_cell {C : Codec R} {c : CellId} {δ : Delta R} {leg : Leg R}
     (h : δ.leg? C c = some leg) : leg.cell = c := by
@@ -891,6 +923,42 @@ theorem deltas_written {C : Codec R} {cells : CellId → Option (Cell R)} {ws : 
     {c : CellId} {δ : Delta R} (m : (c, δ) ∈ deltas C cells ws) : c ∈ writeIds ws := by
   obtain ⟨w, hw, rfl, -⟩ := mem_deltas.mp m
   exact List.mem_map_of_mem hw
+
+theorem cellIds_eraseDups_nodup : ∀ ids : List CellId, ids.eraseDups.Nodup
+  | [] => by simp
+  | c :: cs => by
+      rw [List.eraseDups_cons, List.nodup_cons]
+      refine ⟨?_, cellIds_eraseDups_nodup _⟩
+      simp
+termination_by ids => ids.length
+decreasing_by exact Nat.lt_succ_of_le (List.length_filter_le _ _)
+
+/-- The derived absence pins are disjoint from all writes and present guard legs. -/
+theorem turnOf_absentShaped (B : Bridge R D) (H : History R TransactionId StableEvent D)
+    (cells : CellId → Option (Cell R)) (intent : DataIntent rootBytes) :
+    AbsentShaped (turnOf B H cells intent) := by
+  change (absentOf cells intent).Nodup ∧
+    List.Disjoint (absentOf cells intent) ((createsOf B.codec cells intent).map Prod.fst) ∧
+    List.Disjoint (absentOf cells intent) ((legsOf B.codec cells intent).map Leg.cell)
+  refine ⟨?_, ?_, ?_⟩
+  · exact ((cellIds_eraseDups_nodup _).filter _).filter _
+  · apply List.disjoint_left.mpr
+    intro c ma mc
+    have mg := (List.mem_filter.mp ma).1
+    obtain ⟨x, mx, ex⟩ := List.mem_map.mp mc
+    obtain ⟨c', k, s', md, rfl⟩ := mem_createsOf.mp mx
+    rcases md with md | ⟨_, md⟩ <;> exact guardIds_not_written mg (ex ▸ deltas_written md)
+  · apply List.disjoint_left.mpr
+    intro c ma ml
+    obtain ⟨mg, missing⟩ := List.mem_filter.mp ma
+    have missing' : cells c = none := by simpa using missing
+    obtain ⟨leg, ml, el⟩ := List.mem_map.mp ml
+    rcases mem_legsOf.mp ml with ⟨c', _, cell, hc, rfl⟩ | ⟨c', δ, md, hl⟩
+    · change c' = c at el
+      subst c'
+      rw [missing'] at hc
+      cases hc
+    · exact guardIds_not_written mg ((leg?_cell hl).symm.trans el ▸ deltas_written md)
 
 /-! ## 6. `ofIntent_minimal`: the leg is the normal form, its footprint the diff -/
 
@@ -1183,10 +1251,14 @@ theorem ofCells_step (B : Bridge R D) (H : History R TransactionId StableEvent D
     intro x m
     rw [hcreates] at m
     obtain ⟨c, k, s', m', rfl⟩ := mem_createsOf.mp m
-    obtain ⟨w0, -, rfl, hδ⟩ := mem_deltas.mp m'
-    exact ⟨rfl, (hcells _).trans (deltaOf_spec hδ).1, romPart_romOnly s'⟩
+    rcases m' with m' | ⟨rfl, m'⟩
+    · obtain ⟨w0, -, rfl, hδ⟩ := mem_deltas.mp m'
+      exact ⟨rfl, (hcells _).trans (deltaOf_spec hδ).1, romPart_romOnly s'⟩
+    · obtain ⟨w0, -, rfl, hδ⟩ := mem_deltas.mp m'
+      exact ⟨rfl, (hcells _).trans (deltaOf_spec hδ).1, romPart_romOnly 0⟩
   have created_iff : ∀ c, c ∈ t.creates.map Prod.fst ↔
-      ∃ k s', (c, Delta.create k s') ∈ deltas B.codec cells intent.writes := by
+      ∃ k s', (c, Delta.create k s') ∈ deltas B.codec cells intent.writes ∨
+        (s' = 0 ∧ (c, Delta.burn k) ∈ deltas B.codec cells intent.writes) := by
     intro c
     constructor
     · intro m
@@ -1200,27 +1272,36 @@ theorem ofCells_step (B : Bridge R D) (H : History R TransactionId StableEvent D
   have created_written : ∀ c, c ∈ t.creates.map Prod.fst → c ∈ writeIds intent.writes := by
     intro c m
     obtain ⟨k, s', m'⟩ := (created_iff c).mp m
-    exact deltas_written m'
+    rcases m' with m' | ⟨_, m'⟩ <;> exact deltas_written m'
   have retired_written : ∀ c, c ∈ t.retires → c ∈ writeIds intent.writes := by
     intro c m
     rw [hretires] at m
     obtain ⟨k, s, m'⟩ := mem_retiresOf.mp m
-    exact deltas_written m'
+    rcases m' with m' | ⟨_, m'⟩ <;> exact deltas_written m'
   obtain ⟨c1, h1⟩ := applyCreates_exists w.cells t.creates d.creates_nodup
     fun x m => creates_spec x m
   have c1_created : ∀ c k s', (c, Delta.create k s') ∈ deltas B.codec cells intent.writes →
       c1 c = some ⟨k, romPart s'⟩ := by
     intro c k s' m
     have mc : (c, (⟨k, romPart s'⟩ : Cell R), none) ∈ t.creates := by
-      rw [hcreates]; exact mem_createsOf.mpr ⟨c, k, s', m, rfl⟩
+      rw [hcreates]; exact mem_createsOf.mpr ⟨c, k, s', .inl m, rfl⟩
+    exact (applyCreates_mem h1 d.creates_nodup c _ none mc).2
+  have c1_burn : ∀ c k, (c, Delta.burn k) ∈ deltas B.codec cells intent.writes →
+      c1 c = some ⟨k, 0⟩ := by
+    intro c k m
+    have mc : (c, (⟨k, 0⟩ : Cell R), none) ∈ t.creates := by
+      rw [hcreates]
+      exact mem_createsOf.mpr ⟨c, k, 0, .inr ⟨rfl, m⟩, by rw [romPart_zero]⟩
     exact (applyCreates_mem h1 d.creates_nodup c _ none mc).2
   have c1_frame : ∀ c, c ∉ t.creates.map Prod.fst → c1 c = w.cells c :=
     fun c hc => applyCreates_frame h1 c hc
   have not_created : ∀ c δ, (c, δ) ∈ deltas B.codec cells intent.writes →
-      (∀ k s', δ ≠ Delta.create k s') → c ∉ t.creates.map Prod.fst := by
-    intro c δ md other m'
+      (∀ k s', δ ≠ Delta.create k s') → (∀ k, δ ≠ Delta.burn k) → c ∉ t.creates.map Prod.fst := by
+    intro c δ md other notBurn m'
     obtain ⟨k', s'', m''⟩ := (created_iff _).mp m'
-    exact other k' s'' (deltas_unique d md m'')
+    rcases m'' with m'' | ⟨_, m''⟩
+    · exact other k' s'' (deltas_unique d md m'')
+    · exact notBurn k' (deltas_unique d md m'')
   -- each leg's pre store in `c1`
   have legs_pre : ∀ leg ∈ t.legs, ∃ pre, c1 leg.cell = some ⟨leg.kind, pre⟩ ∧
       Patch.ValidFrom pre leg.patch := by
@@ -1236,6 +1317,10 @@ theorem ofCells_step (B : Bridge R D) (H : History R TransactionId StableEvent D
       have spec := deltaOf_spec hδ
       cases δ with
       | absent => cases hl
+      | burn k =>
+          simp only [Delta.leg?, Option.some.injEq] at hl
+          subst hl
+          exact ⟨0, c1_burn _ k md, B.codec.legPatch_self_valid k 0⟩
       | create k s' =>
           simp only [Delta.leg?, Option.some.injEq] at hl
           subst hl
@@ -1244,13 +1329,13 @@ theorem ofCells_step (B : Bridge R D) (H : History R TransactionId StableEvent D
           simp only [Delta.leg?, Option.some.injEq] at hl
           subst hl
           refine ⟨s, ?_, of_decide_eq_true ok⟩
-          rw [c1_frame _ (not_created _ _ md (fun _ _ e => by cases e)), hcells]
+          rw [c1_frame _ (not_created _ _ md (fun _ _ e => by cases e) (fun _ e => by cases e)), hcells]
           exact spec.1
       | retire k s =>
           simp only [Delta.leg?, Option.some.injEq] at hl
           subst hl
           refine ⟨s, ?_, of_decide_eq_true ok⟩
-          rw [c1_frame _ (not_created _ _ md (fun _ _ e => by cases e)), hcells]
+          rw [c1_frame _ (not_created _ _ md (fun _ _ e => by cases e) (fun _ e => by cases e)), hcells]
           exact spec.1
   obtain ⟨c2, h2⟩ := applyLegs_exists c1 t.legs d.legs_nodup legs_pre
   have c2_leg : ∀ leg ∈ t.legs, ∀ pre, c1 leg.cell = some ⟨leg.kind, pre⟩ →
@@ -1264,17 +1349,23 @@ theorem ofCells_step (B : Bridge R D) (H : History R TransactionId StableEvent D
   have c2_frame : ∀ c, c ∉ t.legs.map Leg.cell → c2 c = c1 c :=
     fun c hc => applyLegs_frame h2 c hc
   -- retires: every retired cell is emptied by its leg
-  have retire_leg : ∀ c k s, (c, Delta.retire k s) ∈ deltas B.codec cells intent.writes →
+  have retire_leg : ∀ c k s, ((c, Delta.retire k s) ∈ deltas B.codec cells intent.writes ∨
+      (s = 0 ∧ (c, Delta.burn k) ∈ deltas B.codec cells intent.writes)) →
       c2 c = some ⟨k, 0⟩ := by
     intro c k s md
-    obtain ⟨w0, -, rfl, hδ⟩ := mem_deltas.mp md
-    have spec := deltaOf_spec hδ
-    have ml : (⟨w0.cellId.value, k, B.codec.legPatch k s 0⟩ : Leg R) ∈ t.legs := by
-      rw [hlegs]; exact mem_legsOf.mpr (.inr ⟨_, _, md, rfl⟩)
-    have pre : c1 w0.cellId.value = some ⟨k, s⟩ := by
-      rw [c1_frame _ (not_created _ _ md (fun _ _ e => by cases e)), hcells]
-      exact spec.1
-    rw [c2_leg _ ml s pre, B.codec.legPatch_run]
+    rcases md with md | ⟨rfl, md⟩
+    ·
+      obtain ⟨w0, -, rfl, hδ⟩ := mem_deltas.mp md
+      have spec := deltaOf_spec hδ
+      have ml : (⟨w0.cellId.value, k, B.codec.legPatch k s 0⟩ : Leg R) ∈ t.legs := by
+        rw [hlegs]; exact mem_legsOf.mpr (.inr ⟨_, _, md, rfl⟩)
+      have pre : c1 w0.cellId.value = some ⟨k, s⟩ := by
+        rw [c1_frame _ (not_created _ _ md (fun _ _ e => by cases e) (fun _ e => by cases e)), hcells]
+        exact spec.1
+      rw [c2_leg _ ml s pre, B.codec.legPatch_run]
+    · have ml : (⟨c, k, B.codec.legPatch k 0 0⟩ : Leg R) ∈ t.legs := by
+        rw [hlegs]; exact mem_legsOf.mpr (.inr ⟨_, _, md, rfl⟩)
+      rw [c2_leg _ ml 0 (c1_burn c k md), B.codec.legPatch_run]
   obtain ⟨c3, h3⟩ := applyRetires_exists c2 t.retires d.retires_nodup fun c m => by
     rw [hretires] at m
     obtain ⟨k, s, md⟩ := mem_retiresOf.mp m
@@ -1287,7 +1378,9 @@ theorem ofCells_step (B : Bridge R D) (H : History R TransactionId StableEvent D
     exact h3
   -- the system half
   have shaped : Shaped t := by
-    refine ⟨fun e => d.nonempty ⟨e.1, e.2.1⟩, d.legs_nodup, d.creates_nodup, d.retires_nodup⟩
+    refine ⟨fun e => d.nonempty ⟨e.1, e.2.1⟩, d.legs_nodup, d.creates_nodup, d.retires_nodup, ?_⟩
+    rw [d.eq]
+    exact turnOf_absentShaped B H cells intent
   have funded' : t.charge ≤ w.meter := by
     intro l
     rw [hcharge]
@@ -1324,7 +1417,17 @@ theorem ofCells_step (B : Bridge R D) (H : History R TransactionId StableEvent D
       cases w.system ⟨SysSpace.allowance, l⟩ with
       | none => intro pos; exact absurd pos (lt_irrefl 0)
       | some a => intro _; rfl
-  have hadmit := admit_of H shaped hh (by rw [htx]; exact fresh) hk hv hcellsOk
+  have ha : absentCheck w t = none := by
+    rw [absentCheck_eq_none_iff]
+    intro c m
+    have hm : c ∈ absentOf cells intent := by simpa [d.eq, turnOf] using m
+    obtain ⟨mg, missing⟩ := List.mem_filter.mp hm
+    have missing' : cells c = none := by simpa using missing
+    refine ⟨(hcells c).trans missing', ?_⟩
+    have unretired := d.guards_unretired c mg missing'
+    rw [hretired] at unretired
+    simpa using unretired
+  have hadmit := admit_of H shaped hh (by rw [htx]; exact fresh) hk hv hcellsOk ha
   refine ⟨_, (step_eq_some H).2 hadmit, fun c => ?_, rfl⟩
   show c3 c = _
   by_cases hr : c ∈ t.retires
@@ -1333,8 +1436,10 @@ theorem ofCells_step (B : Bridge R D) (H : History R TransactionId StableEvent D
     have m := hr
     rw [hretires] at m
     obtain ⟨k, s, md⟩ := mem_retiresOf.mp m
-    obtain ⟨w0, hw0, rfl, hδ⟩ := mem_deltas.mp md
-    rw [postCell_written d.writes_nodup hw0 (deltaOf_spec hδ).2.1]
+    rcases md with md | ⟨_, md⟩
+    all_goals
+      obtain ⟨w0, hw0, rfl, hδ⟩ := mem_deltas.mp md
+      rw [postCell_written d.writes_nodup hw0 (deltaOf_spec hδ).2.1]
   rw [applyRetires_frame h3 c hr]
   by_cases hw : c ∈ writeIds intent.writes
   · obtain ⟨w0, hw0, rfl⟩ := List.mem_map.mp hw
@@ -1356,7 +1461,7 @@ theorem ofCells_step (B : Bridge R D) (H : History R TransactionId StableEvent D
             subst e
             cases deltas_unique d md md'
             cases hl
-        rw [c2_frame _ nl, c1_frame _ (not_created _ _ md (fun _ _ e => by cases e)), hcells]
+        rw [c2_frame _ nl, c1_frame _ (not_created _ _ md (fun _ _ e => by cases e) (fun _ e => by cases e)), hcells]
         exact spec.1
     | create k s' =>
         rw [postCell_written d.writes_nodup hw0 spec.2]
@@ -1368,17 +1473,18 @@ theorem ofCells_step (B : Bridge R D) (H : History R TransactionId StableEvent D
         have ml : (⟨w0.cellId.value, k, B.codec.legPatch k s s'⟩ : Leg R) ∈ t.legs := by
           rw [hlegs]; exact mem_legsOf.mpr (.inr ⟨_, _, md, rfl⟩)
         have pre : c1 w0.cellId.value = some ⟨k, s⟩ := by
-          rw [c1_frame _ (not_created _ _ md (fun _ _ e => by cases e)), hcells]; exact spec.1
+          rw [c1_frame _ (not_created _ _ md (fun _ _ e => by cases e) (fun _ e => by cases e)), hcells]; exact spec.1
         rw [c2_leg _ ml s pre, B.codec.legPatch_run]
     | retire k s =>
-        exact absurd (by rw [hretires]; exact mem_retiresOf.mpr ⟨k, s, md⟩) hr
+        exact absurd (by rw [hretires]; exact mem_retiresOf.mpr ⟨k, s, .inl md⟩) hr
+    | burn k =>
+        exact absurd (by rw [hretires]; exact mem_retiresOf.mpr ⟨k, 0, .inr ⟨rfl, md⟩⟩) hr
   · rw [postCell_unwritten hw]
     have nc : c ∉ t.creates.map Prod.fst := fun m => hw (created_written c m)
-    by_cases hg : c ∈ guardIds intent.writes intent.readGuards
-    · have present := d.guards_present c hg
-      obtain ⟨cell, hc⟩ := Option.isSome_iff_exists.mp present
+    by_cases hg : c ∈ guardIds intent.writes intent.readGuards ∧ (cells c).isSome = true
+    · obtain ⟨cell, hc⟩ := Option.isSome_iff_exists.mp hg.2
       have ml : (⟨c, cell.kind, B.codec.legPatch cell.kind cell.store cell.store⟩ : Leg R) ∈ t.legs := by
-        rw [hlegs]; exact mem_legsOf.mpr (.inl ⟨c, hg, cell, hc, rfl⟩)
+        rw [hlegs]; exact mem_legsOf.mpr (.inl ⟨c, hg.1, cell, hc, rfl⟩)
       have pre : c1 c = some ⟨cell.kind, cell.store⟩ := by
         rw [c1_frame c nc, hcells, hc]
       rw [c2_leg _ ml _ pre, B.codec.legPatch_run, hc]
@@ -1386,10 +1492,10 @@ theorem ofCells_step (B : Bridge R D) (H : History R TransactionId StableEvent D
         intro m
         obtain ⟨leg, ml, el⟩ := List.mem_map.mp m
         rw [hlegs] at ml
-        rcases mem_legsOf.mp ml with ⟨c', mg, cell, -, rfl⟩ | ⟨c', δ', md', hl⟩
+        rcases mem_legsOf.mp ml with ⟨c', mg, cell, hcell, rfl⟩ | ⟨c', δ', md', hl⟩
         · have e : c' = c := el
           subst e
-          exact hg mg
+          exact hg ⟨mg, by simp [hcell]⟩
         · have e := leg?_cell hl
           rw [el] at e
           subst e
@@ -1448,8 +1554,7 @@ theorem retires_iff {B : Bridge R D} {H : History R TransactionId StableEvent D}
   constructor
   · intro m
     obtain ⟨k, s, md'⟩ := mem_retiresOf.mp m
-    cases deltas_unique d md md'
-    exact spec.2.2
+    rcases md' with md' | ⟨_, md'⟩ <;> cases deltas_unique d md md' <;> exact spec.2.2
   · intro r
     cases δ with
     | absent => rw [spec.2.2] at r; cases r
@@ -1459,7 +1564,8 @@ theorem retires_iff {B : Bridge R D} {H : History R TransactionId StableEvent D}
     | change k s s' =>
         have := B.codec.retires_decode _ r
         rw [spec.2] at this; cases this
-    | retire k s => exact mem_retiresOf.mpr ⟨k, s, md⟩
+    | retire k s => exact mem_retiresOf.mpr ⟨k, s, .inl md⟩
+    | burn k => exact mem_retiresOf.mpr ⟨k, 0, .inr ⟨rfl, md⟩⟩
 
 omit [DecidableEq D] in
 /-- A derived turn retires only written cells. -/
@@ -1469,7 +1575,7 @@ theorem retires_written {B : Bridge R D} {H : History R TransactionId StableEven
     c ∈ writeIds intent.writes := by
   rw [(ofCells_fields h).2.1] at m
   obtain ⟨k, s, md⟩ := mem_retiresOf.mp m
-  exact deltas_written md
+  rcases md with md | ⟨_, md⟩ <;> exact deltas_written md
 
 end Derive
 
@@ -1490,8 +1596,10 @@ end Derive
 #assert_axioms Codec.legPatch_self_valid
 #assert_axioms nullifierCode_injective
 #assert_axioms digestKey_injective
+#assert_axioms deltaOf_fresh_retirement
 #assert_axioms ofCells_ok
 #assert_axioms ofIntent_minimal
+#assert_axioms turnOf_absentShaped
 #assert_axioms ofCells_step
 #assert_axioms ofIntent_step
 #assert_axioms ofCells_fields

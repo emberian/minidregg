@@ -231,7 +231,9 @@ theorem decodeCell_retired :
 
 /-- The deployed cell codec: the decoder and the canonical address order of
 each kind's wire. -/
-def codec : Codec deployedR := Codec.ofWires decodeCell retiresCell retiresCell_decode wireOf
+def codec : Codec deployedR :=
+  { Codec.ofWires decodeCell retiresCell retiresCell_decode wireOf with
+    retirementKind := some .objectiveActivity }
 
 /-- **The deployed `Bridge`**: the real cell codec and the injective nullifier
 key. -/
@@ -256,6 +258,30 @@ theorem deployed_cells_iff (bytes : Nat → List UInt8) (cells : Nat → Option 
       exact bridge_decode_total_on_registry _
     · rw [absent]
       exact retiresCell_decode _ retired
+
+/-- Reading the activity payload after the deployed lifecycle decoder agrees with
+reading the protected store. This includes fresh and retired images and all
+other registry kinds; no injectivity assumption about cell roots is needed. -/
+theorem decodeCell_payload {bytes : List UInt8} {slot : Option (Cell deployedR)}
+    (decoded : decodeCell bytes = some slot) :
+    (match (LifecycleImage.codec CanonicalCellRegistry.registry).decode bytes with
+      | some (.live ⟨.objectiveActivity, payload⟩) => ObjectiveActivityCell.payloadAt payload.logical
+      | _ => none) =
+    slot.bind (fun cell => (cell.storeAt .objectiveActivity).bind ObjectiveActivityCell.payloadAt) := by
+  unfold decodeCell at decoded
+  cases hd : (LifecycleImage.codec CanonicalCellRegistry.registry).decode bytes with
+  | none => simp [hd] at decoded
+  | some image =>
+    cases image with
+    | fresh => simp [hd] at decoded; subst slot; rfl
+    | retired => simp [hd] at decoded; subst slot; rfl
+    | live cell =>
+      simp only [hd, Option.some.injEq] at decoded
+      subst slot
+      rcases cell with ⟨kind, state⟩
+      cases kind <;> simp [unpack, Cell.storeAt]
+
+#assert_axioms decodeCell_payload
 
 /-! ## ROM kinds: every store is a legal birth image -/
 

@@ -162,7 +162,7 @@ theorem step_cell_cases (H : History R TxId Ev D') {w w' : World R TxId D'}
   obtain ⟨shaped, height, logRoot, -, -, -, hc, -⟩ := admit_ok H ((step_eq_some H).1 h)
   obtain ⟨c1, c2, h1, h2, h3⟩ := applyCells_ok hc
   by_cases hr : c ∈ t.retires
-  · exact .inr (.inl (applyRetires_mem h3 shaped.2.2.2 c hr).2)
+  · exact .inr (.inl (applyRetires_mem h3 shaped.2.2.2.1 c hr).2)
   have e3 : w'.cells c = c2 c := applyRetires_frame h3 c hr
   by_cases hcr : c ∈ t.creates.map Prod.fst
   · obtain ⟨⟨xc, b0, room⟩, mx, ex⟩ := List.mem_map.mp hcr
@@ -309,7 +309,7 @@ theorem policy_source_birth_is_turn {D' : Type} [DecidableEq D']
     ∃ w', World.step H w (sourceBirth H x c record ev) = some w' ∧
       w'.cells c = some (sourceCell record) := by
   have shaped : Shaped (sourceBirth H x c record ev) := by
-    refine ⟨?_, ?_, ?_, ?_⟩ <;> simp [sourceBirth]
+    refine ⟨?_, ?_, ?_, ?_⟩ <;> simp [AbsentShaped, sourceBirth]
   have funded' : (sourceBirth H x c record ev).charge ≤ w.meter := by
     intro l
     by_cases e : l = .storageBytes
@@ -342,7 +342,7 @@ theorem policy_source_birth_is_turn {D' : Type} [DecidableEq D']
       Minidregg.Kernel.DeployedBridge.policySource_romOnly _
     simp [applyCells, applyCreates, sourceBirth, absent, roomPresent, rom, applyLegs,
       applyRetires]
-  refine ⟨_, (step_eq_some H).2 (admit_of H shaped hh fresh hk hv hcells), ?_⟩
+  refine ⟨_, (step_eq_some H).2 (admit_of H shaped hh fresh hk hv hcells (by rfl)), ?_⟩
   exact cells_update_self _ _ _
 
 /-- **The pole: the same record written into an EXISTING source cell has no
@@ -509,6 +509,7 @@ theorem decodes_of_derived {B : Bridge R D} {H : History R TransactionId StableE
   have spec := deltaOf_spec hδ
   cases δ with
   | absent => exact ⟨_, spec.2.1⟩
+  | burn => exact ⟨_, spec.2.1⟩
   | create => exact ⟨_, spec.2⟩
   | change => exact ⟨_, spec.2⟩
   | retire => exact ⟨_, spec.2.1⟩
@@ -1081,6 +1082,7 @@ theorem ofIntent_policySource_birth {D' : Type} [DecidableEq D']
   rw [d.eq]
   cases δ with
   | absent => rw [spec.2.1] at dec; cases dec
+  | burn => rw [spec.2.1] at dec; cases dec
   | change k s s' => exact absurd (spec.1.symm.trans absent) (Option.some_ne_none _)
   | retire k s => exact absurd (spec.1.symm.trans absent) (Option.some_ne_none _)
   | create k s' =>
@@ -1094,7 +1096,7 @@ theorem ofIntent_policySource_birth {D' : Type} [DecidableEq D']
             (Minidregg.Compiler.PolicySourceCell.stateOfOption (some record)) =
           Minidregg.Compiler.PolicySourceCell.stateOfOption (some record) :=
         romPart_of_romOnly (Minidregg.Kernel.DeployedBridge.policySource_romOnly _)
-      exact mem_createsOf.mpr ⟨_, _, _, md,
+      exact mem_createsOf.mpr ⟨_, _, _, .inl md,
         Prod.ext rfl (Prod.ext (congrArg (Cell.mk (R := deployedR) .policySource) rom.symm) rfl)⟩
 
 /-! ### The three inferred rows, traced (T3 §2: 13, 14, 16)

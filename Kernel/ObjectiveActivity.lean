@@ -722,6 +722,8 @@ inductive Refusal where
   | pinUnpublished
   /-- A creation seeds the declared state of an object whose state cell already exists. -/
   | stateExists
+  /-- A seedless creation cannot pin a permanently retired state coordinate as fresh. -/
+  | stateRetired
 
   /-- A creation declares a state type that is not first-order data (`Ty.isData`). -/
   | stateTypeNotData
@@ -3360,7 +3362,7 @@ def Refusal.afterWork : Refusal → Bool
   | .unfunded _ _ | .slotMissing | .slotFresh | .slotMismatch | .slot _ | .slotRetired | .notYetDecided _ _
   | .notYetDue _ _ | .bookUnavailable | .purseTaken | .payerInvalid | .bookRefused | .zeroAmount | .stateCodec
   | .alreadyExhausted _ _ | .notYetAbandonable _ _ _ | .notExhausted | .notAnObject | .objectCodec
-  | .objectExists | .pinMismatch _ _ | .pinUnpublished | .stateExists | .stateTypeNotData | .lawField _
+  | .objectExists | .pinMismatch _ _ | .pinUnpublished | .stateExists | .stateRetired | .stateTypeNotData | .lawField _
   | .draining | .awaitingRebirth | .frozen | .notUpgradeAuthority | .policyLoosened | .floorNotEntailed _
   | .samePin | .upgradeUnderWay | .notDraining | .drainPatience _ _ | .notSubtype | .fieldsForgotten _
   | .liveActivities _ | .notYetDeadline _ _ | .rebirthDisposition | .rebirthTarget _ | .domainExists _
@@ -3454,7 +3456,9 @@ def create {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot
       | none =>
       match seedPlan : request.seed with
       | none =>
-        .ok ⟨absent, published, (fun _ h => by rw [seedPlan] at h; cases h), laws, lawsExact, fieldsKnown,
+        if isRetired (snapshot.canonicalBytes (stateCell config.domain request.object)) then
+          .error .stateRetired
+        else .ok ⟨absent, published, (fun _ h => by rw [seedPlan] at h; cases h), laws, lawsExact, fieldsKnown,
           (fun _ h => by rw [seedPlan] at h; cases h), data, _, rfl⟩
       | some seed =>
         match stateRead : readState config snapshot request.object with
@@ -3464,11 +3468,59 @@ def create {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot
           match judged : ObjectRecord.admitSeed (request.record laws) (seedFacts request height) seed with
           | .error reason => .error (.objectWrite reason)
           | .ok () =>
-            .ok ⟨absent, published,
+            if isRetired (snapshot.canonicalBytes (stateCell config.domain request.object)) then
+              .error .stateRetired
+            else .ok ⟨absent, published,
               (fun _ h => by rw [seedPlan] at h; cases h; exact stateRead), laws, lawsExact, fieldsKnown,
               (fun _ h => by rw [seedPlan] at h; cases h; exact judged), data, _, rfl⟩
       else .error .stateTypeNotData
     else .error .pinUnpublished
+
+/-- Retirement carries no state payload, but is not reusable absence. -/
+theorem stateFor_retired (object : CellId) : stateFor object retiredImage = .ok none := by
+  simp [stateFor, payloadOf_retired]
+
+/-- Seedless creation refuses a permanently retired state coordinate, preserving its guard. -/
+theorem create_seedless_retired_refused {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {request : CreateRequest}
+    (absent : readObject config snapshot request.object = .ok none)
+    (published : (bodyOf .package (snapshot.canonicalBytes (packageCell config.domain request.pin))).isSome = true)
+    (data : request.stateType.isData = true)
+    {laws : List (String × Minidregg.Compiler.ObjectiveBendLaw.LawExpr)}
+    (lawsExact : packageLawsAt config snapshot request.pin = .ok laws)
+    (fieldsKnown : ObjectRecord.lawFieldIssue request.stateType laws = none)
+    (seedless : request.seed = none)
+    (retired : isRetired (snapshot.canonicalBytes (stateCell config.domain request.object)) = true) :
+    create config snapshot height request = .error .stateRetired := by
+  unfold create
+  split
+  · rename_i reason found; rw [absent] at found; cases found
+  · rename_i found; rw [absent] at found; cases found
+  · rw [dif_pos published, dif_pos data]
+    split
+    next reason read => rw [lawsExact] at read; cases read
+    next laws2 read =>
+      rw [lawsExact] at read; cases read
+      split
+      next field issue => rw [fieldsKnown] at issue; cases issue
+      next issue =>
+        split
+        next plan => simp [retired]
+        next seed plan => rw [seedless] at plan; cases plan
+
+/-- No successful creation can bind a retired state ID, with or without a seed.
+The seed law's named refusal still wins if it refuses before this final check. -/
+theorem create_retired_state_has_no_success {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {request : CreateRequest}
+    (retired : isRetired (snapshot.canonicalBytes (stateCell config.domain request.object)) = true) :
+    (create config snapshot height request).isOk = false := by
+  unfold create
+  simp only [retired, if_true]
+  repeat' first | rfl | split
+
+#assert_axioms create_retired_state_has_no_success
+
+#assert_axioms stateFor_retired create_seedless_retired_refused
 
 def Creation.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : CreateRequest} (created : Creation config snapshot height request) (sealing : Seal) :
