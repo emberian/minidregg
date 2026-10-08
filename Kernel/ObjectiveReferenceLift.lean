@@ -328,9 +328,9 @@ with the delivery's checkpoint, and the delivery's run refused (so its segment, 
 committed, is the program fault `faulted`, `Delivery.ran_or_fault`). Then the reference
 resumes `y` with the same response to `next`, and the refusal is one of:
 * `exhausted`: the envelope ran out (a resource: the reference node is not determined by it);
-* an extraction failure `f`: if `f` is anything but `suspended`, the reference node at `next`
+* an extraction failure `f`: if `f` is neither `suspended` nor `tickExhausted`, the reference node at `next`
   is `malformed` (the program's Plan or result is not Data within the output sizes, under any
-  resources); `suspended` is a resource failure (`suspended_is_resource`);
+  resources); `suspended` and `tickExhausted` are resource failures (`suspended_is_resource`);
 * a Plan the kernel does not perform: the reference node is `vis d`, and `decodePlan d` is the
   refusal. -/
 theorem delivery_refusal_reference {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -340,7 +340,7 @@ theorem delivery_refusal_reference {rootBytes : Bytes → Digest} {config : Conf
     ∃ next, resume delivery.responseTerm y = some next ∧
       (refusal = .exhausted ∨
        (∃ f : ObjectiveBendDemandData.Failure, (refusal = .planExtraction (reprStr f) ∨
-          refusal = .resultExtraction (reprStr f)) ∧ (f ≠ .suspended → node config.planBudget next = .malformed)) ∨
+          refusal = .resultExtraction (reprStr f)) ∧ (f ≠ .suspended ∧ f ≠ .tickExhausted → node config.planBudget next = .malformed)) ∨
        (∃ d, node config.planBudget next = .vis d ∧ decodePlan d = .error refusal)) := by
   obtain ⟨next, resumed, chainNext⟩ := chain.resume_back _ delivery.resumeExact
   refine ⟨next, resumed, ?_⟩

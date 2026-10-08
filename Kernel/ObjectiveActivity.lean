@@ -567,6 +567,8 @@ structure Config where
   asset : AssetId
   collector : AccountId
   limits : Limits
+  /-- One extraction's ceiling. Activity segments reserve it via extractCovered;
+  cumulative call turns additionally clamp it to their remaining allowance. -/
   planBudget : Budget
   maxTicks : Nat
   /-- The cumulative extraction tick ceiling of one turn (the policy's `extractTicksPerTurn`):
@@ -1356,7 +1358,10 @@ def segmentLimits (config : Config) (start : State) : Limits :=
 
 /-- Run one segment from `start` within a declared envelope, under its `segmentLimits`
 (the run, and the Plan or result extraction it ends with). Running out of envelope
-commits nothing (`exhausted`): the activity stays where it was. -/
+commits nothing (`exhausted`): the activity stays where it was. Each segment performs
+at most one extraction. Its admission contract reserves the full planBudget via
+extractCovered; the shared extractor retains failure budgets, but this reservation
+is charged without refunds. -/
 def runSegment (config : Config) (ticks : Nat) (start : State) : Except Refusal Segment :=
   match runBounded (segmentLimits config start) ticks start with
   | .yielded _ yielded =>
@@ -1372,6 +1377,14 @@ def runSegment (config : Config) (ticks : Nat) (start : State) : Except Refusal 
   | .divergent _ _ => .ok (.faulted "divergent")
   | .refused reason _ => .ok (.faulted (reprStr reason))
   | .suspended _ _ => .error .exhausted
+
+/-- A single-extraction reservation is precisely the case where clamping to the
+paying envelope leaves the deployment ceiling unchanged. -/
+theorem single_extraction_reservation_budget (config : Config) (envelope : Capacity)
+    (extractCovered : config.planBudget.ticks ≤ envelope.extractTicks) :
+    ({ config.planBudget with ticks := min config.planBudget.ticks envelope.extractTicks } : Budget) =
+      config.planBudget := by
+  simp [Nat.min_eq_left extractCovered]
 
 def Segment.yields : Segment → Bool
   | .yielded _ _ => true
@@ -2325,7 +2338,7 @@ structure BirthPrefix {rootBytes : Bytes → Digest} (config : Config) (snapshot
   /-- The request's object and package ids are 256-bit digests: the charged record spells a
   digest in exactly 32 octets (`digestWide` refuses a wider one). -/
   narrow : request.object.value < 256 ^ 32 ∧ request.pin.value < 256 ^ 32
-  /-- The birth's envelope declares the extraction tick budget its segment may spend. -/
+  /-- Single-extraction reservation contract: the full ceiling is covered, without refunds. -/
   extractCovered : config.planBudget.ticks ≤ request.envelope.extractTicks
   /-- The deployment covers the birth's envelope (`Config.covers`), judged before the replay. -/
   covered : config.covers request.envelope = true
@@ -2795,7 +2808,7 @@ structure Delivery {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
   /-- The declared envelope covers the resumed run's heap (`segmentLimits`): growth of the
   checkpoint is paid by the delivery that runs it. -/
   heapCovered : (segmentLimits config resumed).heap ≤ envelope.heap
-  /-- The declared envelope covers the extraction tick budget the segment may spend. -/
+  /-- Single-extraction reservation contract over the shared budget-preserving extractor; no refunds. -/
   extractCovered : config.planBudget.ticks ≤ envelope.extractTicks
   segment : Segment
   yielded : Option YieldCommit
@@ -3002,7 +3015,7 @@ structure Exhaustion {rootBytes : Bytes → Digest} (config : Config) (snapshot 
   covered : config.covers envelope = true
   /-- As a delivery: the declared envelope covers the resumed run's heap. -/
   heapCovered : (segmentLimits config resumed).heap ≤ envelope.heap
-  /-- As a delivery: the declared envelope covers the extraction tick budget. -/
+  /-- As a delivery: the single-extraction ceiling is reserved, without refunds. -/
   extractCovered : config.planBudget.ticks ≤ envelope.extractTicks
   raises : record.tried < envelope.sourceTicks
   /-- At the turn cap an exhaustion is a program fault: a delivery commits it `faulted`. -/

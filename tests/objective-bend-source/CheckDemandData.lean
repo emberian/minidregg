@@ -12,7 +12,7 @@ def main : IO Unit := do
   let .record [("after",.natural 8),("flag",.boolean true),("text",.label "true")] := result.value
     | throw (IO.userError "source computed data/Boolean/String collision")
   if result.remaining.ticks ≥ full.ticks then throw (IO.userError "forcing unmetered")
-  let .error (.suspended,_) := runData term {full with ticks:=1}
+  let .error (.tickExhausted,_) := runData term {full with ticks:=1}
     | throw (IO.userError "shared ticks not bounded")
   let .error (.budget,_) := runData term {full with nodes:=2}
     | throw (IO.userError "global nodes not bounded")

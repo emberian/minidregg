@@ -190,6 +190,12 @@ inductive GrantField where
   deriving DecidableEq, Repr
 
 inductive CallRefusal where
+  /-- An invocation refusal carries the executor's remaining and consumed extraction ticks. -/
+  | extractionAccount (reason : CallRefusal) (remaining spent : Nat)
+  /-- The turn allowance, rather than the per-extraction ceiling, ran out. -/
+  | extractionAllowanceExhausted
+  /-- A semantic extraction failure, or the per-extraction ceiling was exhausted. -/
+  | extractionFailed (reason : String)
   /-- A refusal of the object kernel (package, state, write shape, Book, ...). -/
   | kernel (reason : ObjectiveActivity.Refusal)
   /-- The call's target is already on the stack. Mandatory. -/
@@ -865,10 +871,11 @@ structure Journal where
   /-- Every send, in the order the frames made them. -/
   outbox : List Outgoing
   /-- The turn's extraction tick allowance still unspent: the envelope declares it
-  (`Capacity.extractTicks`), and every Plan or result extraction of the call tree draws the
-  deployment's extraction budget (`planBudget.ticks`) from it, refused by name when it is
-  short (`extractUncovered`). -/
+  (`Capacity.extractTicks`). Every Plan/result extraction runs under the lesser of
+  this remainder and planBudget.ticks, then draws its actual spend, even on failure. -/
   extracts : Nat
+  /-- Actual extraction tick differences, accumulated even on failed extraction. -/
+  extractSpent : Nat
   /-- Every `stop`/`cancel`, in the order the frames yielded them. They are applied after
   ALL the turn's sends (`postControls` after `postMail`), so a turn may cancel a message it
   sent itself. -/
@@ -880,17 +887,17 @@ structure Journal where
 /-- A fresh journal: the turn's grants, its extraction allowance, and the front-end meter of the
 envelope that pays for its replays. -/
 def Journal.start (grants : List Grant) (envelope : Capacity) : Journal :=
-  ⟨[], grants, [], [], [], [], envelope.extractTicks, [], ObjectiveWorkAccount.Meter.start envelope⟩
+  ⟨[], grants, [], [], [], [], envelope.extractTicks, 0, [], ObjectiveWorkAccount.Meter.start envelope⟩
 
 /-- **Debit an extraction's actual tick spend** from the turn's allowance, refused by name when
 the allowance left is below it. The spend is deterministic (the extraction's own tick count),
 so re-execution agrees; an extraction never reserves the deployment's per-extraction ceiling. -/
 def Journal.draw (journal : Journal) (spent : Nat) : Except CallRefusal Journal :=
   if journal.extracts < spent then .error (.kernel (.extractUncovered spent journal.extracts))
-  else .ok { journal with extracts := journal.extracts - spent }
+  else .ok { journal with extracts := journal.extracts - spent, extractSpent := journal.extractSpent + spent }
 
 theorem Journal.draw_ok {journal journal' : Journal} {spent : Nat} (drawn : journal.draw spent = .ok journal') :
-    journal' = { journal with extracts := journal.extracts - spent } := by
+    journal' = { journal with extracts := journal.extracts - spent, extractSpent := journal.extractSpent + spent } := by
   unfold Journal.draw at drawn
   split at drawn
   · cases drawn
@@ -901,7 +908,7 @@ extraction debited what it spent). -/
 theorem Journal.draw_two (journal : Journal) {first second : Nat}
     (within : first + second ≤ journal.extracts) :
     (journal.draw first >>= fun j => j.draw second) =
-      .ok { journal with extracts := journal.extracts - first - second } := by
+      .ok { journal with extracts := journal.extracts - first - second, extractSpent := journal.extractSpent + first + second } := by
   have one : ¬ journal.extracts < first := by omega
   have two : ¬ journal.extracts - first < second := by omega
   simp [Journal.draw, one, two, bind, Except.bind]
@@ -922,6 +929,71 @@ theorem ceiling_reservation_refuses (journal : Journal) {ceiling first second : 
   · have two : journal.extracts - ceiling < ceiling := by omega
     exact ⟨.kernel (.extractUncovered ceiling (journal.extracts - ceiling)),
       by simp [Journal.draw, h, two, bind, Except.bind]⟩
+
+/-- The extraction must run under the allowance still available, before it can consume work. -/
+def Journal.extractionBudget (journal : Journal) (config : Config) : ObjectiveBendDemandData.Budget :=
+  { config.planBudget with ticks := min config.planBudget.ticks journal.extracts }
+
+/-- Charge actual work even when extraction fails; a failure never refunds consumed ticks. -/
+def Journal.failedExtraction (journal : Journal) (config : Config)
+    (failure : ObjectiveBendDemandData.Failure) (remaining : ObjectiveBendDemandData.Budget) :
+    CallRefusal × ObjectiveWorkAccount.Meter × Nat × Nat :=
+  let spent := (journal.extractionBudget config).ticks - remaining.ticks
+  let reason := match failure with
+    | .tickExhausted => if journal.extracts ≤ config.planBudget.ticks then
+        CallRefusal.extractionAllowanceExhausted else .extractionFailed "per-extraction tick ceiling"
+    | failure => .extractionFailed (reprStr failure)
+  (reason, journal.meter, journal.extracts - spent, journal.extractSpent + spent)
+
+/- T1.2 fault plant, 2026-10-08: replace extractionBudget's min with planBudget.ticks.
+Command: request_build(["Kernel.ObjectiveCall"]), ticket b429738952, exit 1.
+Log: /home/ember/.cxo/builds/b429738952.log
+Output: Journal.extraction_spend_le: omega could not prove the goal;
+a possible counterexample has journal.extracts < planBudget.ticks - remaining.
+The axiom check also rejected exec_extraction_spend_bounded through that dependency.
+The full-ceiling plant was reverted; both call extraction sites again use the min. -/
+
+/-- A single extraction cannot consume more than the turn has left. This bound is
+on the actual initial-minus-final tick count, on success or failure alike. -/
+theorem Journal.extraction_spend_le (journal : Journal) (config : Config) (remaining : Nat) :
+    (journal.extractionBudget config).ticks - remaining ≤ journal.extracts := by
+  simp only [Journal.extractionBudget]
+  omega
+
+theorem Journal.draw_total {journal journal' : Journal} {spent : Nat}
+    (drawn : journal.draw spent = .ok journal') :
+    journal'.extractSpent + journal'.extracts = journal.extractSpent + journal.extracts := by
+  unfold Journal.draw at drawn
+  split at drawn
+  · cases drawn
+  · cases drawn; simp only; omega
+
+theorem Journal.extraction_draw_succeeds (journal : Journal) (config : Config) (remaining : Nat) :
+    journal.draw ((journal.extractionBudget config).ticks - remaining) =
+      .ok { journal with
+        extracts := journal.extracts - ((journal.extractionBudget config).ticks - remaining)
+        extractSpent := journal.extractSpent + ((journal.extractionBudget config).ticks - remaining) } := by
+  have := journal.extraction_spend_le config remaining
+  simp [Journal.draw, Nat.not_lt.mpr this]
+
+theorem Journal.failedExtraction_total (journal : Journal) (config : Config)
+    (failure : ObjectiveBendDemandData.Failure) (remaining : ObjectiveBendDemandData.Budget) :
+    (journal.failedExtraction config failure remaining).2.2.2 +
+      (journal.failedExtraction config failure remaining).2.2.1 = journal.extractSpent + journal.extracts := by
+  have := journal.extraction_spend_le config remaining.ticks
+  simp only [Journal.failedExtraction]
+  omega
+
+/-- Allowance-limited tick failure is named separately from semantic extraction failure. -/
+theorem Journal.allowance_exhaustion_named (journal : Journal) (config : Config)
+    (remaining : ObjectiveBendDemandData.Budget) (limited : journal.extracts ≤ config.planBudget.ticks) :
+    (journal.failedExtraction config .tickExhausted remaining).1 = .extractionAllowanceExhausted := by
+  simp [Journal.failedExtraction, limited]
+
+theorem Journal.semantic_failure_named (journal : Journal) (config : Config)
+    (remaining : ObjectiveBendDemandData.Budget) :
+    (journal.failedExtraction config .executableValue remaining).1 =
+      .extractionFailed (reprStr ObjectiveBendDemandData.Failure.executableValue) := rfl
 
 /-- Who a call tree runs for: the root frame's subject (an invocation's signer;
 none for a delivered message) and the root's caller (none for an invocation;
@@ -1041,93 +1113,93 @@ the frame's `result`, the journal, and the ticks left. `fuel` only bounds the
 recursion; the envelope's ticks bound the work. -/
 def exec {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (height : Nat)
     (authority : Authority) (turn : TransactionId) :
-    Nat → List Ctx → Task → Journal → Nat → Except (CallRefusal × ObjectiveWorkAccount.Meter) (Data × Journal × Nat)
-  | 0, _, _, journal, _ => .error (.exhausted, journal.meter)
+    Nat → List Ctx → Task → Journal → Nat → Except (CallRefusal × ObjectiveWorkAccount.Meter × Nat × Nat) (Data × Journal × Nat)
+  | 0, _, _, journal, _ => .error (.exhausted, journal.meter, journal.extracts, journal.extractSpent)
   | fuel + 1, stack, .enter call, journal, ticks =>
     if stack.any (fun ctx => ctx.object == call.target) then
-      .error (.reentry call.target.value (stack.map (·.object.value)), journal.meter)
-    else if callDepth ≤ stack.length then .error (.depth callDepth, journal.meter)
+      .error (.reentry call.target.value (stack.map (·.object.value)), journal.meter, journal.extracts, journal.extractSpent)
+    else if callDepth ≤ stack.length then .error (.depth callDepth, journal.meter, journal.extracts, journal.extractSpent)
     else
     match touch config snapshot journal call.target with
-    | .error reason => .error (reason, journal.meter)
+    | .error reason => .error (reason, journal.meter, journal.extracts, journal.extractSpent)
     | .ok (entry, journal) =>
     match entry.current, entry.record.admitsNew with
-    | none, _ => .error (.stateMissing call.target.value, journal.meter)
+    | none, _ => .error (.stateMissing call.target.value, journal.meter, journal.extracts, journal.extractSpent)
     -- A draining object admits no new frame unless its upgrade's migration is the identity.
-    | some _, false => .error (.kernel .draining, journal.meter)
+    | some _, false => .error (.kernel .draining, journal.meter, journal.extracts, journal.extractSpent)
     | some view, true =>
     match frameAuthority authority stack journal call entry.record.activePin with
-    | .error reason => .error (reason, journal.meter)
+    | .error reason => .error (reason, journal.meter, journal.extracts, journal.extractSpent)
     | .ok (subject, delegation) =>
     match loadMethod config call.target.value (packageBytes config snapshot entry.record.activePin) entry.record.activePin
         call.method (viewData view) call.args journal.meter with
-    | .error reason => .error reason
+    | .error (reason, meter) => .error (reason, meter, journal.extracts, journal.extractSpent)
     | .ok (program, meter) =>
     let ctx : Ctx := ⟨call.target, call.method, entry.record, program.applied.assumptions, program.responseType,
       view, subject, height, callerOf authority stack, call.args, delegation⟩
     let journal : Journal := ⟨journal.entries, journal.grants, journal.delegations ++ delegation.toList,
       journal.frames ++ [call.target.value :: stack.map (·.object.value)], journal.writes, journal.outbox,
-      journal.extracts, journal.controls, meter⟩
+      journal.extracts, journal.extractSpent, journal.controls, meter⟩
     exec config snapshot height authority turn fuel (ctx :: stack) (.run (initial program.applied.erase)) journal ticks
-  | _ + 1, [], .run _, journal, _ => .error (.exhausted, journal.meter)
+  | _ + 1, [], .run _, journal, _ => .error (.exhausted, journal.meter, journal.extracts, journal.extractSpent)
   | fuel + 1, ctx :: rest, .run state, journal, ticks =>
     match runCounted config.limits ticks state with
     | (.yielded _ yielded, left) =>
-      match ObjectiveBendDemandData.yieldedPlan config.limits config.planBudget yielded with
-      | .error (failure, _) =>
-        .error (.frameFault ctx.object.value ctx.method s!"plan extraction: {reprStr failure}", journal.meter)
+      match ObjectiveBendDemandData.yieldedPlan config.limits (journal.extractionBudget config) yielded with
+      | .error (failure, _, remaining) =>
+        .error (journal.failedExtraction config failure remaining)
       | .ok extracted =>
-      match journal.draw (config.planBudget.ticks - extracted.remaining.ticks) with
-      | .error reason => .error (reason, journal.meter)
+      match journal.draw ((journal.extractionBudget config).ticks - extracted.remaining.ticks) with
+      | .error reason => .error (reason, journal.meter, journal.extracts, journal.extractSpent)
       | .ok journal =>
       match decodeYield ctx.object.value ctx.method extracted.value with
-      | .error reason => .error (reason, journal.meter)
+      | .error reason => .error (reason, journal.meter, journal.extracts, journal.extractSpent)
       | .ok (.call call) =>
         match exec config snapshot height authority turn fuel (ctx :: rest) (.enter call) journal left with
         | .error refused => .error refused
         | .ok (result, journal, left) =>
         match typeData ctx.assumptions config.typeFuel (returnedData result) ctx.responseType with
-        | none => .error (.resultType ctx.object.value ctx.method, journal.meter)
+        | none => .error (.resultType ctx.object.value ctx.method, journal.meter, journal.extracts, journal.extractSpent)
         | some _ =>
         match resume (returnedData result).term yielded with
-        | none => .error (.frameFault ctx.object.value ctx.method "resume", journal.meter)
+        | none => .error (.frameFault ctx.object.value ctx.method "resume", journal.meter, journal.extracts, journal.extractSpent)
         | some next => exec config snapshot height authority turn fuel (ctx :: rest) (.run next) journal left
       | .ok (.send send) =>
         let id := Inbox.sendId turn journal.outbox.length
         match typeData ctx.assumptions config.typeFuel (queuedData id) ctx.responseType with
-        | none => .error (.resultType ctx.object.value ctx.method, journal.meter)
+        | none => .error (.resultType ctx.object.value ctx.method, journal.meter, journal.extracts, journal.extractSpent)
         | some _ =>
         match resume (queuedData id).term yielded with
-        | none => .error (.frameFault ctx.object.value ctx.method "resume", journal.meter)
+        | none => .error (.frameFault ctx.object.value ctx.method "resume", journal.meter, journal.extracts, journal.extractSpent)
         | some next => exec config snapshot height authority turn fuel (ctx :: rest) (.run next)
             { journal with outbox := journal.outbox ++ [⟨id, ctx.object.value, send.destination, send.method, send.args, send.allowance⟩] }
             left
       | .ok (.control kind slot) =>
         match typeData ctx.assumptions config.typeFuel (ackedData slot) ctx.responseType with
-        | none => .error (.resultType ctx.object.value ctx.method, journal.meter)
+        | none => .error (.resultType ctx.object.value ctx.method, journal.meter, journal.extracts, journal.extractSpent)
         | some _ =>
         match resume (ackedData slot).term yielded with
-        | none => .error (.frameFault ctx.object.value ctx.method "resume", journal.meter)
+        | none => .error (.frameFault ctx.object.value ctx.method "resume", journal.meter, journal.extracts, journal.extractSpent)
         | some next => exec config snapshot height authority turn fuel (ctx :: rest) (.run next)
             { journal with controls := journal.controls ++ [⟨ctx.object.value, kind, slot⟩] }
             left
     | (.finished _ finished, left) =>
-      match ObjectiveBendDemandData.complete config.limits config.planBudget finished with
-      | .error (failure, _) =>
-        .error (.frameFault ctx.object.value ctx.method s!"result extraction: {reprStr failure}", journal.meter)
+      match ObjectiveBendDemandData.complete config.limits (journal.extractionBudget config) finished with
+      | .error (failure, _, remaining) =>
+        .error (journal.failedExtraction config failure remaining)
       | .ok out =>
-      match journal.draw (config.planBudget.ticks - out.remaining.ticks) with
-      | .error reason => .error (reason, journal.meter)
+      match journal.draw ((journal.extractionBudget config).ticks - out.remaining.ticks) with
+      | .error reason => .error (reason, journal.meter, journal.extracts, journal.extractSpent)
       | .ok journal =>
       match decodeReturn ctx.object.value ctx.method out.value with
-      | .error reason => .error (reason, journal.meter)
+      | .error reason => .error (reason, journal.meter, journal.extracts, journal.extractSpent)
       | .ok (result, write) =>
       match frameReturn ctx write journal with
-      | .error reason => .error (reason, journal.meter)
+      | .error reason => .error (reason, journal.meter, journal.extracts, journal.extractSpent)
       | .ok journal => .ok (result, journal, left)
-    | (.suspended _ _, _) => .error (.exhausted, journal.meter)
-    | (.divergent _ _, _) => .error (.frameFault ctx.object.value ctx.method "divergent", journal.meter)
-    | (.refused reason _, _) => .error (.frameFault ctx.object.value ctx.method (reprStr reason), journal.meter)
+    | (.suspended _ _, _) => .error (.exhausted, journal.meter, journal.extracts, journal.extractSpent)
+    | (.divergent _ _, _) => .error (.frameFault ctx.object.value ctx.method "divergent", journal.meter, journal.extracts, journal.extractSpent)
+    | (.refused reason _, _) => .error (.frameFault ctx.object.value ctx.method (reprStr reason), journal.meter, journal.extracts, journal.extractSpent)
 
 
 /-! ## The turn's mail: inboxes and reply slots -/
@@ -2195,7 +2267,7 @@ def invoke {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot
     match execExact : exec config snapshot height request.authority (invokeTransaction request)
         (callFuel request.envelope) [] (.enter (rootCall request)) (Journal.start request.grants request.envelope)
         request.envelope.sourceTicks with
-    | .error (reason, meter) => .error (reason, FrontEnd.of meter (0, 0))
+    | .error (reason, meter, remaining, spent) => .error (.extractionAccount reason remaining spent, FrontEnd.of meter (0, 0))
     | .ok (result, journal, left) =>
       if postageCovered : journal.outbox ≠ [] → config.covers request.postage = true then
       if drainedOk : journal.drained = true then
@@ -2266,7 +2338,7 @@ theorem reentry_refused {rootBytes : Bytes → Digest} (config : Config) (snapsh
     (height : Nat) (authority : Authority) (turn : TransactionId) (fuel : Nat) (stack : List Ctx) (call : CallPlan)
     (journal : Journal) (ticks : Nat) (onStack : ∃ ctx ∈ stack, ctx.object = call.target) :
     exec config snapshot height authority turn (fuel + 1) stack (.enter call) journal ticks =
-      .error (.reentry call.target.value (stack.map (·.object.value)), journal.meter) := by
+      .error (.reentry call.target.value (stack.map (·.object.value)), journal.meter, journal.extracts, journal.extractSpent) := by
   have hit : stack.any (fun ctx => ctx.object == call.target) = true := by
     obtain ⟨ctx, member, same⟩ := onStack
     exact List.any_eq_true.mpr ⟨ctx, member, by simp [same]⟩
@@ -2526,10 +2598,10 @@ theorem exec_invariant {rootBytes : Bytes → Digest} (config : Config) (snapsho
           rename_i _ drawn
           obtain rfl := Journal.draw_ok drawn
           have viewed : ({ journal with extracts := journal.extracts -
-              (config.planBudget.ticks - extracted.remaining.ticks) } : Journal).lookup
+              ((journal.extractionBudget config).ticks - extracted.remaining.ticks), extractSpent := journal.extractSpent + ((journal.extractionBudget config).ticks - extracted.remaining.ticks) } : Journal).lookup
               ctx.object = some (some ctx.view) := viewed
           have read : ObjectsRead config snapshot { journal with extracts := journal.extracts -
-              (config.planBudget.ticks - extracted.remaining.ticks) } := read
+              ((journal.extractionBudget config).ticks - extracted.remaining.ticks), extractSpent := journal.extractSpent + ((journal.extractionBudget config).ticks - extracted.remaining.ticks) } := read
           · split at ran
             · cases ran
             · rename_i call _
@@ -2607,10 +2679,10 @@ theorem exec_invariant {rootBytes : Bytes → Digest} (config : Config) (snapsho
           rename_i _ drawn
           obtain rfl := Journal.draw_ok drawn
           have viewed : ({ journal with extracts := journal.extracts -
-              (config.planBudget.ticks - out.remaining.ticks) } : Journal).lookup
+              ((journal.extractionBudget config).ticks - out.remaining.ticks), extractSpent := journal.extractSpent + ((journal.extractionBudget config).ticks - out.remaining.ticks) } : Journal).lookup
               ctx.object = some (some ctx.view) := viewed
           have read : ObjectsRead config snapshot { journal with extracts := journal.extracts -
-              (config.planBudget.ticks - out.remaining.ticks) } := read
+              ((journal.extractionBudget config).ticks - out.remaining.ticks), extractSpent := journal.extractSpent + ((journal.extractionBudget config).ticks - out.remaining.ticks) } := read
           · split at ran
             · cases ran
             · split at ran
@@ -2990,6 +3062,33 @@ theorem frameReturn_meter {ctx : Ctx} {write : Data} {journal journal' : Journal
         · cases returned; rfl
     · cases returned
 
+theorem touch_extract_total {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {journal journal' : Journal} {object : CellId} {entry : Entry}
+    (touched : touch config snapshot journal object = .ok (entry, journal')) : journal'.extractSpent + journal'.extracts = journal.extractSpent + journal.extracts := by
+  unfold touch at touched
+  split at touched
+  · cases touched; rfl
+  · split at touched
+    · cases touched
+    · cases touched
+    · split at touched
+      · cases touched
+      · cases touched; rfl
+
+theorem frameReturn_extract_total {ctx : Ctx} {write : Data} {journal journal' : Journal}
+    (returned : frameReturn ctx write journal = .ok journal') : journal'.extractSpent + journal'.extracts = journal.extractSpent + journal.extracts := by
+  unfold frameReturn at returned
+  split at returned
+  · cases returned
+  · split at returned
+    · split at returned
+      · cases returned
+      · cases returned; rfl
+      · split at returned
+        · cases returned
+        · cases returned; rfl
+    · cases returned
+
 /-- **The call tree's front end is drawn from its one meter** (by induction over the executor):
 every frame's load draws from the journal's meter (`loadMethod_reaches`) and nothing else
 changes it, so the meter a call tree leaves is reached from the one it was given by admitted
@@ -3071,6 +3170,89 @@ theorem exec_meter {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
               · rename_i journal1 returned
                 cases ran
                 rw [frameReturn_meter returned]; exact reached
+        all_goals first | (cases ran) | skip
+
+/-- Every successful call tree conserves the extraction account: the counter is
+incremented by each extractor's actual tick difference, never by its ceiling. -/
+theorem exec_extract_total {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (height : Nat) (authority : Authority) (turn : TransactionId) :
+    ∀ (fuel : Nat) (stack : List Ctx) (task : Task) (journal : Journal) (ticks : Nat)
+      (result : Data) (journal' : Journal) (left : Nat),
+    exec config snapshot height authority turn fuel stack task journal ticks = .ok (result, journal', left) →
+    ∀ {total : Nat}, journal.extractSpent + journal.extracts = total →
+      journal'.extractSpent + journal'.extracts = total := by
+  intro fuel
+  induction fuel with
+  | zero => intro stack task journal ticks result journal' left ran; simp [exec] at ran
+  | succ fuel ih =>
+    intro stack task journal ticks result journal' left ran total reached
+    cases task with
+    | enter call =>
+      simp only [exec] at ran
+      split at ran
+      · cases ran
+      · split at ran
+        · cases ran
+        · split at ran
+          · cases ran
+          · rename_i entry journal1 touched
+            have m1 := touch_extract_total touched
+            split at ran
+            · cases ran
+            · cases ran
+            · split at ran
+              · cases ran
+              · split at ran
+                · cases ran
+                · rename_i program meter loaded
+                  exact ih _ _ _ _ _ _ _ ran (m1.trans reached)
+    | run state =>
+      cases stack with
+      | nil => simp [exec] at ran
+      | cons ctx rest =>
+        simp only [exec] at ran
+        split at ran
+        · split at ran
+          · cases ran
+          split at ran
+          · cases ran
+          · rename_i _ drawn
+            have reached := (Journal.draw_total drawn).trans reached
+            obtain rfl := Journal.draw_ok drawn
+            split at ran
+            · cases ran
+            · split at ran
+              · cases ran
+              · rename_i entered
+                split at ran
+                · cases ran
+                · split at ran
+                  · cases ran
+                  · exact ih _ _ _ _ _ _ _ ran (ih _ _ _ _ _ _ _ entered reached)
+            · split at ran
+              · cases ran
+              · split at ran
+                · cases ran
+                · exact ih _ _ _ _ _ _ _ ran reached
+            · split at ran
+              · cases ran
+              · split at ran
+                · cases ran
+                · exact ih _ _ _ _ _ _ _ ran reached
+        · split at ran
+          · cases ran
+          split at ran
+          · cases ran
+          · rename_i _ drawn
+            have reached := (Journal.draw_total drawn).trans reached
+            obtain rfl := Journal.draw_ok drawn
+            split at ran
+            · cases ran
+            · split at ran
+              · cases ran
+              · rename_i journal1 returned
+                cases ran
+                exact (frameReturn_extract_total returned).trans reached
         all_goals first | (cases ran) | skip
 
 /-- A send draws only through the target's deliverable check (`loadMethod_reaches`). -/
@@ -3194,15 +3376,15 @@ refusal carries is reached by admitted draws from the journal's meter it started
 theorem exec_refused_meter {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (authority : Authority) (turn : TransactionId) :
     ∀ (fuel : Nat) (stack : List Ctx) (task : Task) (journal : Journal) (ticks : Nat)
-      (reason : CallRefusal) (meter : ObjectiveWorkAccount.Meter),
-    exec config snapshot height authority turn fuel stack task journal ticks = .error (reason, meter) →
+      (reason : CallRefusal) (meter : ObjectiveWorkAccount.Meter) (remaining spent : Nat),
+    exec config snapshot height authority turn fuel stack task journal ticks = .error (reason, meter, remaining, spent) →
     ∀ {start : ObjectiveWorkAccount.Meter}, ObjectiveWorkAccount.Meter.Reaches start journal.meter →
       ObjectiveWorkAccount.Meter.Reaches start meter := by
   intro fuel
   induction fuel with
-  | zero => intro stack task journal ticks reason meter ran start reached; simp [exec] at ran; rw [← ran.2]; exact reached
+  | zero => intro stack task journal ticks reason meter remaining spent ran start reached; simp [exec] at ran; rw [← ran.2.1]; exact reached
   | succ fuel ih =>
-    intro stack task journal ticks reason meter ran start reached
+    intro stack task journal ticks reason meter remaining spent ran start reached
     cases task with
     | enter call =>
       simp only [exec] at ran
@@ -3224,10 +3406,10 @@ theorem exec_refused_meter {rootBytes : Bytes → Digest} (config : Config) (sna
                   cases ran
                   exact loadMethod_refused_reaches loaded (m1 ▸ reached)
                 · rename_i program meter1 loaded
-                  exact ih _ _ _ _ _ _ ran (loadMethod_reaches loaded (m1 ▸ reached))
+                  exact ih _ _ _ _ _ _ _ _ ran (loadMethod_reaches loaded (m1 ▸ reached))
     | run state =>
       cases stack with
-      | nil => simp [exec] at ran; rw [← ran.2]; exact reached
+      | nil => simp [exec] at ran; rw [← ran.2.1]; exact reached
       | cons ctx rest =>
         simp only [exec] at ran
         split at ran
@@ -3242,24 +3424,24 @@ theorem exec_refused_meter {rootBytes : Bytes → Digest} (config : Config) (sna
             · split at ran
               · rename_i refused' entered
                 cases ran
-                exact ih _ _ _ _ _ _ entered reached
+                exact ih _ _ _ _ _ _ _ _ entered reached
               · rename_i entered
                 have r1 := exec_meter config snapshot height authority turn _ _ _ _ _ _ _ _ entered reached
                 split at ran
                 · cases ran; exact r1
                 · split at ran
                   · cases ran; exact r1
-                  · exact ih _ _ _ _ _ _ ran r1
+                  · exact ih _ _ _ _ _ _ _ _ ran r1
             · split at ran
               · cases ran; exact reached
               · split at ran
                 · cases ran; exact reached
-                · exact ih _ _ _ _ _ _ ran reached
+                · exact ih _ _ _ _ _ _ _ _ ran reached
             · split at ran
               · cases ran; exact reached
               · split at ran
                 · cases ran; exact reached
-                · exact ih _ _ _ _ _ _ ran reached
+                · exact ih _ _ _ _ _ _ _ _ ran reached
         · split at ran
           · cases ran; exact reached
           split at ran
@@ -3272,6 +3454,119 @@ theorem exec_refused_meter {rootBytes : Bytes → Digest} (config : Config) (sna
               · cases ran; exact reached
               · cases ran
         all_goals first | (cases ran; exact reached) | skip
+
+/-- Failed call trees conserve the same account, including work consumed by the
+extraction that failed. -/
+theorem exec_refused_extract_total {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (height : Nat) (authority : Authority) (turn : TransactionId) :
+    ∀ (fuel : Nat) (stack : List Ctx) (task : Task) (journal : Journal) (ticks : Nat)
+      (reason : CallRefusal) (meter : ObjectiveWorkAccount.Meter) (remaining spent : Nat),
+    exec config snapshot height authority turn fuel stack task journal ticks = .error (reason, meter, remaining, spent) →
+    ∀ {total : Nat}, journal.extractSpent + journal.extracts = total →
+      spent + remaining = total := by
+  intro fuel
+  induction fuel with
+  | zero => intro stack task journal ticks reason meter remaining spent ran total reached; simp [exec] at ran; obtain ⟨_, _, rfl, rfl⟩ := ran; exact reached
+  | succ fuel ih =>
+    intro stack task journal ticks reason meter remaining spent ran total reached
+    cases task with
+    | enter call =>
+      simp only [exec] at ran
+      split at ran
+      · cases ran; exact reached
+      · split at ran
+        · cases ran; exact reached
+        · split at ran
+          · cases ran; exact reached
+          · rename_i entry journal1 touched
+            have m1 := touch_extract_total touched
+            split at ran
+            · cases ran; exact m1.trans reached
+            · cases ran; exact m1.trans reached
+            · split at ran
+              · cases ran; exact m1.trans reached
+              · split at ran
+                · rename_i refused loaded
+                  cases ran
+                  exact m1.trans reached
+                · rename_i program meter1 loaded
+                  exact ih _ _ _ _ _ _ _ _ ran (m1.trans reached)
+    | run state =>
+      cases stack with
+      | nil => simp [exec] at ran; obtain ⟨_, _, rfl, rfl⟩ := ran; exact reached
+      | cons ctx rest =>
+        simp only [exec] at ran
+        split at ran
+        · split at ran
+          · rename_i failure state remaining extracted
+            cases ran; exact (journal.failedExtraction_total config failure remaining).trans reached
+          split at ran
+          · rename_i reason drawn
+            rw [Journal.extraction_draw_succeeds] at drawn
+            cases drawn
+          · rename_i _ drawn
+            have reached := (Journal.draw_total drawn).trans reached
+            obtain rfl := Journal.draw_ok drawn
+            split at ran
+            · cases ran; exact reached
+            · split at ran
+              · rename_i refused' entered
+                cases ran
+                exact ih _ _ _ _ _ _ _ _ entered reached
+              · rename_i entered
+                have r1 := exec_extract_total config snapshot height authority turn _ _ _ _ _ _ _ _ entered reached
+                split at ran
+                · cases ran; exact r1
+                · split at ran
+                  · cases ran; exact r1
+                  · exact ih _ _ _ _ _ _ _ _ ran r1
+            · split at ran
+              · cases ran; exact reached
+              · split at ran
+                · cases ran; exact reached
+                · exact ih _ _ _ _ _ _ _ _ ran reached
+            · split at ran
+              · cases ran; exact reached
+              · split at ran
+                · cases ran; exact reached
+                · exact ih _ _ _ _ _ _ _ _ ran reached
+        · split at ran
+          · rename_i failure state remaining extracted
+            cases ran; exact (journal.failedExtraction_total config failure remaining).trans reached
+          split at ran
+          · rename_i reason drawn
+            rw [Journal.extraction_draw_succeeds] at drawn
+            cases drawn
+          · rename_i _ drawn
+            have reached := (Journal.draw_total drawn).trans reached
+            obtain rfl := Journal.draw_ok drawn
+            split at ran
+            · cases ran; exact reached
+            · split at ran
+              · cases ran; exact reached
+              · cases ran
+        all_goals first | (cases ran; exact reached) | skip
+
+/-- Total actual extraction spend over any call tree is bounded by the paying
+envelope, regardless of success or refusal. `extractSpent` accumulates the actual
+initial-minus-final ticks at each extraction; it is not a capped definition. -/
+theorem exec_extraction_spend_bounded {rootBytes : Bytes → Digest} (config : Config)
+    (snapshot : Snapshot rootBytes) (height : Nat) (authority : Authority) (turn : TransactionId)
+    (fuel : Nat) (stack : List Ctx) (task : Task) (grants : List Grant) (envelope : Capacity) (ticks : Nat) :
+    match exec config snapshot height authority turn fuel stack task (Journal.start grants envelope) ticks with
+    | .ok (_, journal, _) => journal.extractSpent ≤ envelope.extractTicks
+    | .error (_, _, _, spent) => spent ≤ envelope.extractTicks := by
+  cases ran : exec config snapshot height authority turn fuel stack task (Journal.start grants envelope) ticks with
+  | ok out =>
+    rcases out with ⟨result, journal, left⟩
+    have := exec_extract_total config snapshot height authority turn _ _ _ _ _ _ _ _ ran rfl
+    simp only [Journal.start] at this
+    omega
+  | error refusal =>
+    rcases refusal with ⟨reason, meter, remaining, spent⟩
+    have := exec_refused_extract_total config snapshot height authority turn _ _ _ _ _ _ _ _ _ ran rfl
+    simp only [Journal.start] at this
+    omega
 
 /-- A refused send reports a front end whose draws are reached from the mail's meter. -/
 theorem Mail.send_refused_meter {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -3341,9 +3636,9 @@ theorem invoke_refused_within {rootBytes : Bytes → Digest} {config : Config} {
   unfold invoke at refused
   split at refused
   · split at refused
-    · rename_i _ meter ran
+    · rename_i _ meter remaining spent ran
       cases refused
-      exact bound (exec_refused_meter config snapshot height _ _ _ _ _ _ _ _ _ ran fresh)
+      exact bound (exec_refused_meter config snapshot height _ _ _ _ _ _ _ _ _ _ _ ran fresh)
     · rename_i result journal left ran
       have r1 := exec_meter config snapshot height _ _ _ _ _ _ _ _ _ _ ran fresh
       split at refused
@@ -3558,6 +3853,9 @@ theorem invocation_delegated_authority {rootBytes : Bytes → Digest} {config : 
 #assert_axioms lookup_install_ne
 #assert_axioms frameReturn_spec
 #assert_axioms exec_invariant
+#assert_axioms Journal.allowance_exhaustion_named Journal.semantic_failure_named
+#assert_axioms Journal.extraction_spend_le Journal.extraction_draw_succeeds Journal.draw_total
+#assert_axioms Journal.failedExtraction_total exec_extract_total exec_refused_extract_total exec_extraction_spend_bounded
 #assert_axioms Journal.draw_ok Journal.draw_two Journal.draw_short ceiling_reservation_refuses
 #assert_axioms invocation_reentry_free
 #assert_axioms invocation_writes_from_view

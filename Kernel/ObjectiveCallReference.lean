@@ -49,10 +49,10 @@ response. -/
 inductive FrameRun (limits : Limits) (budget : Budget) (start : State) : List Term → State → Prop
   | start : FrameRun limits budget start [] start
   | resumed {responses : List Term} {t : State} {ticks : Nat} {address : Nat} {yielded : State} {left : Nat}
-      {extracted : ObjectiveBendDemandData.Result} {response : Term} {next : State} :
+      {extracted : ObjectiveBendDemandData.Result} {response : Term} {next : State} {extractTicks : Nat} :
       FrameRun limits budget start responses t →
       runCounted limits ticks t = (.yielded address yielded, left) →
-      ObjectiveBendDemandData.yieldedPlan limits budget yielded = .ok extracted →
+      ObjectiveBendDemandData.yieldedPlan limits {budget with ticks := extractTicks} yielded = .ok extracted →
       resume response yielded = some next →
       FrameRun limits budget start (responses ++ [response]) next
 
@@ -63,27 +63,28 @@ theorem FrameRun.reference {limits : Limits} {budget : Budget} {start : State} {
     ∃ s, Chain s t ∧ ∀ rest, observe budget start (responses ++ rest) = observe budget s rest := by
   induction run with
   | start => exact ⟨start, .settles (ObjectiveBendDemandCollect.Agree.refl _), fun rest => by simp⟩
-  | @resumed responses t ticks address yielded left extracted response next _ counted found resumed ih =>
+  | @resumed responses t ticks address yielded left extracted response next extractTicks _ counted found resumed ih =>
     obtain ⟨s, chain, path⟩ := ih
     have bounded : runBounded limits ticks t = .yielded address yielded := by
       rw [← runCounted_outcome, counted]
-    have ends : endsWith limits ticks budget t = some (.yielded extracted.value, yielded) := by
+    have ends : endsWith limits ticks {budget with ticks := extractTicks} t = some (.yielded extracted.value, yielded) := by
       simp [endsWith, bounded, found]
     obtain ⟨y0, chainY, above⟩ := chain.back ends
     obtain ⟨s1, resumed0, chain1⟩ := chainY.resume_back response resumed
     refine ⟨s1, chain1, fun rest => ?_⟩
     rw [List.append_assoc, List.singleton_append, path]
-    simp [observe, ending_of_above above, resumed0]
+    simp [observe, ending_of_above (b := budget) above, resumed0]
 
 /-- **What a frame's run ends with is the reference node**, under any limits and ticks. -/
 theorem FrameRun.ends {limits : Limits} {budget : Budget} {start : State} {responses : List Term} {t : State}
-    (run : FrameRun limits budget start responses t) {L : Limits} {T : Nat} {e : Ending} {y : State}
-    (ran : endsWith L T budget t = some (e, y)) : observe budget start responses = Node.ofEnding e := by
+    (run : FrameRun limits budget start responses t) {L : Limits} {T : Nat} {e : Ending} {y : State} {extractTicks : Nat}
+    (ran : endsWith L T {budget with ticks := extractTicks} t = some (e, y)) : observe budget start responses = Node.ofEnding e := by
   obtain ⟨s, chain, path⟩ := run.reference
   have := path []
   rw [List.append_nil] at this
   rw [this]
-  exact (node_of_chain chain ran).1
+  obtain ⟨y0, _, above⟩ := chain.back ran
+  exact node_of_above (b := budget) above
 
 /-- **A frame's committed yield is the reference's visible event**: the Plan it extracts
 is the reference node `vis` along the responses so far. -/
@@ -94,7 +95,7 @@ theorem FrameRun.vis {limits : Limits} {budget : Budget} {start : State} {respon
     (found : ObjectiveBendDemandData.yieldedPlan limits budget yielded = .ok extracted) :
     observe budget start responses = .vis extracted.value := by
   have bounded : runBounded limits ticks t = .yielded address yielded := by rw [← runCounted_outcome, counted]
-  exact run.ends (L := limits) (T := ticks) (e := .yielded extracted.value) (y := yielded)
+  exact run.ends (L := limits) (T := ticks) (e := .yielded extracted.value) (y := yielded) (extractTicks := budget.ticks)
     (by simp [endsWith, bounded, found])
 
 /-- The responses a frame is resumed with. -/
@@ -144,7 +145,7 @@ theorem exec_run_reference {rootBytes : Bytes → Digest} {config : Config} {sna
               · cases ran
               · rename_i next resumed
                 obtain ⟨more, out, write, each, observed, decodedOut⟩ :=
-                  ih (FrameRun.resumed run counted found resumed) ran
+                  ih (FrameRun.resumed run counted (by simpa [Journal.extractionBudget] using found) resumed) ran
                 refine ⟨(returnedData result1).term :: more, out, write, ?_, ?_, decodedOut⟩
                 · intro r mem
                   rcases List.mem_cons.mp mem with here | there
@@ -159,7 +160,7 @@ theorem exec_run_reference {rootBytes : Bytes → Digest} {config : Config} {sna
             · cases ran
             · rename_i next resumed
               obtain ⟨more, out, write, each, observed, decodedOut⟩ :=
-                ih (FrameRun.resumed run counted found resumed) ran
+                ih (FrameRun.resumed run counted (by simpa [Journal.extractionBudget] using found) resumed) ran
               refine ⟨(queuedData (Inbox.sendId turn journal.outbox.length)).term :: more, out, write, ?_, ?_,
                 decodedOut⟩
               · intro r mem
@@ -175,7 +176,7 @@ theorem exec_run_reference {rootBytes : Bytes → Digest} {config : Config} {sna
             · cases ran
             · rename_i next resumed
               obtain ⟨more, out, write, each, observed, decodedOut⟩ :=
-                ih (FrameRun.resumed run counted found resumed) ran
+                ih (FrameRun.resumed run counted (by simpa [Journal.extractionBudget] using found) resumed) ran
               refine ⟨(ackedData slot).term :: more, out, write, ?_, ?_, decodedOut⟩
               · intro r mem
                 rcases List.mem_cons.mp mem with here | there
@@ -203,8 +204,10 @@ theorem exec_run_reference {rootBytes : Bytes → Digest} {config : Config} {sna
               rw [← runCounted_outcome, counted]
             refine ⟨[], out.value, write, by simp, ?_, decodedOut⟩
             rw [List.append_nil]
-            exact run.ends (L := config.limits) (T := ticks) (e := .finished out.value) (y := finished)
-              (by simp [endsWith, bounded, completed])
+            exact run.ends (L := config.limits) (T := ticks) (e := .finished out.value) (y := finished) (extractTicks := (journal.extractionBudget config).ticks)
+              (by
+                simp only [Journal.extractionBudget] at completed
+                simp [endsWith, bounded, Journal.extractionBudget, completed])
     · cases ran
     · cases ran
     · cases ran

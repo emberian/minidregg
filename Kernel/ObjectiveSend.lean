@@ -104,7 +104,8 @@ def runMessage {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snap
     match exec config snapshot height ⟨none, some message.sender⟩ (messageTransaction message.id)
         (callFuel message.envelope) [] (.enter ⟨⟨target⟩, message.method, args⟩) (Journal.start [] message.envelope)
         message.envelope.sourceTicks with
-    | .error (reason, _) => .failed (reprStr reason)
+    | .error (reason, _, remaining, spent) =>
+      .failed (reprStr (CallRefusal.extractionAccount reason remaining spent))
     | .ok (result, journal, _) =>
       if journal.controls.isEmpty && journal.drained then .replied result journal
       else .failed (if !journal.controls.isEmpty then

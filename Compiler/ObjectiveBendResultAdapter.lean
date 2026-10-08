@@ -184,7 +184,7 @@ structure PreparedResult (profile : Profile) (command : Command) (source : Annot
   returnsStored : plan.returns.all (storesReturn command) = true
 
 inductive Failure where
-  | typing | execution (reason : ObjectiveBendDemandData.Failure) (state : State)
+  | typing | execution (reason : ObjectiveBendDemandData.Failure) (state : State) (remaining : Budget)
   | groundType | bytes | nativeBinding
   deriving Repr
 
@@ -194,13 +194,13 @@ def prepare (profile : Profile) (command : Command) (source : AnnotatedTerm)
     Except Failure (PreparedResult profile command source limits budget capacity) := do
   let some checked := check source [] typeFuel | throw .typing
   match runExact : executeWith (ObjectiveBendDemandCapacity.allows capacity) limits budget source.term with
-  | .error error => throw (.execution error.1 error.2)
+  | .error error => throw (.execution error.1 error.2.1 error.2.2)
   | .ok execution =>
     if typeExact : dataMatches budget.nodes checked.type execution.extraction.result.value = true then
       match bytesExact : encodeData budget.nodes execution.extraction.result.value with
       | none => throw .bytes
       | some bytes =>
-        if bytes.length > budget.bytes then throw (.execution .budget execution.extraction.result.state)
+        if bytes.length > budget.bytes then throw (.execution .budget execution.extraction.result.state execution.extraction.result.remaining)
         match decodedExact : decodeData capacity budget bytes with
         | none => throw .bytes
         | some decoded =>
@@ -208,7 +208,7 @@ def prepare (profile : Profile) (command : Command) (source : AnnotatedTerm)
             let slot := returnSlot profile checked.type bytes
             let plan : BendWorldPlan.Plan := ⟨[returnEffect profile slot],[slot],[]⟩
             let producedBytes := (plan.effects.map (fun effect => BendWorldPlan.effectStream.encode effect)).flatten.length + (BendWorldPlan.encodeReturn slot).length
-            if producedBytes > budget.bytes then throw (.execution .budget execution.extraction.result.state)
+            if producedBytes > budget.bytes then throw (.execution .budget execution.extraction.result.state execution.extraction.result.remaining)
             if nativeExact : BendWorldPlan.matchesCommand plan command = true then
               if returnsStored : plan.returns.all (storesReturn command) = true then
                 pure ⟨checked,execution,runExact,bytes,bytesExact,decoded,decodedExact,decodedBytesExact,typeExact,slot,rfl,plan,rfl,nativeExact,returnsStored⟩

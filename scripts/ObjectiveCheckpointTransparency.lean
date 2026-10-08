@@ -82,7 +82,7 @@ def kind : Outcome → String
 /-- What a segment ends in, as comparable text: the outcome, and the extracted Plan or
 result Data (canonically encoded). -/
 def observe (limits : Limits) (budget : Budget) (outcome : Outcome) : String :=
-  let show? (r : Except (Failure × State) Result) : String := match r with
+  let show? (r : Except (Failure × State × Budget) Result) : String := match r with
     | .ok result => match encoded budget.nodes result.value with
       | some bytes => toString bytes
       | none => "unencodable"
