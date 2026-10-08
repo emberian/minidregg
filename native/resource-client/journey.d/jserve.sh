@@ -38,7 +38,7 @@ import json, os, socket, struct, subprocess, sys, threading, time
 D = os.environ["D"]; MINI = os.environ["MINI"]; HOST = os.environ["HOST"]
 CONFIG = os.environ["CONFIG"]; SOCKET = os.environ["SOCKET"]
 NEWCOMER = os.environ["NEWCOMER_WS"]; WORLD = os.environ["JOURNEY_WORLD"]
-TAG = b"DREGG/NATIVE-HOST/OUTCOME/v4"
+TAG = b"DREGG/NATIVE-HOST/OUTCOME/v5"
 rows = []; failed = []; latencies = []
 config = open(CONFIG, "rb").read()
 

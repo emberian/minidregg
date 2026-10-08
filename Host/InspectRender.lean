@@ -348,6 +348,12 @@ def explain (outcome : Outcome) : List String × List (String × Json) :=
   | .refused reason _ _ none =>
       ([s!"refused: {reason.name}: {reason.describe}"], [("reason", reason.name)])
   | .confirmed _ receipt => ([s!"not refused: confirmed at height {receipt.acceptedCount}"], [("reason", .null)])
+  | .charged _ receipt causeBytes =>
+      let cause := match ObjectiveActivityReceiver.rejectCodec.decode causeBytes with
+        | some typed => reprStr typed
+        | none => s!"invalid canonical cause {hexText causeBytes}"
+      ([s!"charged failure at height {receipt.acceptedCount}: {cause}"],
+       [("reason", "charged"), ("cause", cause)])
   | .contention => (["not decided: contention"], [("reason", .null)])
   | .unavailable _ => (["not decided: unavailable"], [("reason", .null)])
   | .uncertain _ => (["not decided: uncertain"], [("reason", .null)])

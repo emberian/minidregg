@@ -14,6 +14,9 @@ Rows (ROOT/results.json, ROOT/groups.tsv; timings ROOT/timings.tsv):
                  difference (the front end is CHARGED, not only refused)
   charged        a birth whose run exhausts its declared ticks: confirmed, the sponsor pays exactly the
                  envelope's price to the collector, no activity record, no declared state
+  charged-replay an invocation whose run exhausts: its reply is lost; the exact ingress and a newly planned,
+                 freshly signed retry both return the original charged disposition/cause and original receipt;
+                 neither retry changes any watched balance
   outcome-moved  a birth planned and signed, then the Book moves (another birth), then submitted: its
                  outcome is not the signed one, so it is a charged failure (the price, nothing else)
   malformed      bytes that are not an ingress: refused `malformedIngress`, no balance moves
@@ -28,7 +31,7 @@ import argparse, json, os, pathlib, re, sys, time
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import activity_world as AW  # noqa: E402
-from activity_world import World, cap, price, record, variant, nat  # noqa: E402
+from activity_world import World, cap, price, record, variant, nat, op_id  # noqa: E402
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--bin', required=True)
@@ -74,7 +77,7 @@ def flipped(path, label):
 
 
 try:
-    w.bring_up(['tally', 'padded', 'quiet', 'mover'], sponsor_balance='100000000000')
+    w.bring_up(['tally', 'padded', 'quiet', 'mover', 'counter'], sponsor_balance='100000000000')
     tally_src = (w.repo / 'world/activity/Tally.obend').read_text()
     padded = w.root / 'Padded.obend'
     padded.write_text(tally_src.rstrip('\n') + '\n' +
@@ -83,11 +86,16 @@ try:
     PADDED = {'name': 'Tally', 'sourcePath': str(padded), 'imports': []}
     w.PIN, ARTIFACT = w.publication('publication', [TALLY], '0', 'tally')
     BIG, BIG_ARTIFACT = w.publication('publication-padded', [PADDED], '0', 'tally')
-    for label, art in [('publish', ARTIFACT), ('publish-padded', BIG_ARTIFACT)]:
+    CALLS = {'name': 'Calls', 'sourcePath': str(w.repo / 'world/call/Calls.obend'), 'imports': []}
+    CALL_PIN, CALL_ARTIFACT = w.publication('publication-calls', [CALLS], '0', 'deposit')
+    for label, art in [('publish', ARTIFACT), ('publish-padded', BIG_ARTIFACT),
+                       ('publish-calls', CALL_ARTIFACT)]:
         w.turn(label, w.sponsor, dict(art, kind='publish', payer=w.SPONSOR_ACCOUNT,
                                       payerCapability=w.SPONSOR_SPEND), 'installed')
     for name, pin in [('tally', w.PIN), ('padded', BIG), ('quiet', w.PIN), ('mover', w.PIN)]:
         w.create(f'create-{name}', w.sponsor, name, AW.PERMIT_ALL, 'installed', pin=pin)
+    w.create('create-counter', w.sponsor, 'counter', AW.PERMIT_ALL, 'installed', pin=CALL_PIN,
+             seed=record(total=nat(0)))
     quotes = w.view('quotes', {'pins': [str(w.PIN), str(BIG)]})['pins']
     SMALL = (int(quotes[0]['frontEnd']['replayBytes']), int(quotes[0]['frontEnd']['coreBytes']))
     LARGE = (int(quotes[1]['frontEnd']['replayBytes']), int(quotes[1]['frontEnd']['coreBytes']))
@@ -123,6 +131,33 @@ try:
                     {'fee': fee, 'sponsor': [b0['sponsor'], b1['sponsor']], 'collector': [b0['collector'], b1['collector']],
                      'total': [t0, t1]})
             w.check('charged-rolls-back-the-business', kinds == ('absent', 'absent'), {'record/state': kinds})
+
+        with w.group('charged-replay'):
+            # The first charged reply is lost. The client first repeats the exact signed ingress, then replans and
+            # signs the SAME invocation operation id at the post-failure snapshot. Both are receipt-only replay.
+            op = op_id()
+            body = {'kind': 'invoke', 'object': w.objects['counter']['object'],
+                    'objectCapability': w.objects['counter']['capability'], 'method': 'deposit', 'args': nat(1),
+                    'envelope': cap(1), 'account': w.SPONSOR_ACCOUNT,
+                    'accountCapability': w.SPONSOR_SPEND, 'opId': op}
+            first = w.turn('charged-replay-first', w.sponsor, body, 'charged', 'exhausted')
+            b1, _ = balances('charged-replay-after-first')
+            exact = w.resubmit('charged-replay-exact', first['ingress'], 'replayed')
+            b2, _ = balances('charged-replay-after-exact')
+            fresh = w.judge('charged-replay-fresh-signature',
+                            w.submit('charged-replay-fresh-signature', w.sponsor, body), 'replayed', None)
+            b3, _ = balances('charged-replay-after-fresh')
+            answers = (first, exact, fresh)
+            w.check('charged-replay-original-disposition-and-cause',
+                    all(r.get('disposition') == 'charged' and r.get('cause') == first.get('cause')
+                        and r.get('transactionId') == first.get('transactionId')
+                        and r.get('eventId') == first.get('eventId') for r in answers)
+                    and 'exhausted' in str(first.get('cause')),
+                    {'first': {k: first.get(k) for k in ('disposition', 'cause', 'transactionId', 'eventId')},
+                     'exact': {k: exact.get(k) for k in ('disposition', 'cause', 'transactionId', 'eventId')},
+                     'fresh': {k: fresh.get(k) for k in ('disposition', 'cause', 'transactionId', 'eventId')}})
+            w.check('charged-replay-does-not-recharge', b1 == b2 == b3,
+                    {'afterFirst': b1, 'afterExact': b2, 'afterFresh': b3})
 
         with w.group('outcome-moved'):
             body = birth_body('mover', w.PIN, deposit(SMALL), TICKS, SMALL)

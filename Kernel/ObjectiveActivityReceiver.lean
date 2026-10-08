@@ -965,6 +965,133 @@ def chargedCause : Reject → Bool
   -- a message delivery is not yet a paying turn (`failureRequest`; cv 01a11680-f2a6)
   | .message _ => false
 
+/-! ### Canonical terminal-failure record
+
+The durable protocol's event is the record-shape extension point for this
+receiver.  A charged failure must retain its typed `Reject`, not merely a
+rendering, so replay can return the exact original terminal disposition. -/
+
+instance : Encodable UInt8 where
+  encode value := value.toNat
+  decode value := some (UInt8.ofNat value)
+  encodek := by intro value; simp
+
+instance : Encodable UInt32 where
+  encode value := value.toNat
+  decode value := some (UInt32.ofNat value)
+  encodek := by intro value; simp
+
+@[reducible] def encodableOfLawful {A : Type} (codec : LawfulCodec A)
+    [Encodable (List UInt8)] : Encodable A where
+  encode value := Encodable.encode (codec.encode value)
+  decode value := (Encodable.decode value : Option (List UInt8)).bind codec.decode
+  encodek := by
+    intro value
+    rw [Encodable.encodek]
+    exact codec.decode_encode value
+
+instance : Encodable String :=
+  encodableOfLawful Minidregg.Compiler.PolicyRecordCodec.stringStream.toLawful
+
+deriving instance Encodable for ObjectiveInvocationClaim.Capacity
+deriving instance Encodable for ObjectiveWorkAccount.Stage
+deriving instance Encodable for AnswerSlot.Refusal
+deriving instance Encodable for ObjectiveCall.GrantField
+instance : Encodable LawLeaf := encodableOfLawful LawLeaf.stream.toLawful
+deriving instance Encodable for ObjectRecord.WriteRefusal
+deriving instance Encodable for Invitations.Refusal
+deriving instance Encodable for Seats.BookRefusal
+deriving instance Encodable for Seats.Transfer
+deriving instance Encodable for Seats.Refusal
+deriving instance Encodable for Digest
+deriving instance Encodable for ObjectiveCall.FrontEnd
+deriving instance Encodable for ObjectiveActivity.Refusal
+deriving instance Encodable for SeatStore.Refusal
+deriving instance Encodable for ObjectiveCall.CallRefusal
+deriving instance Encodable for ObjectiveSend.MessageRefusal
+deriving instance Encodable for CredentialSignatureIO.Error
+deriving instance Encodable for CredentialSignedEnvelopeController.Failure
+deriving instance Encodable for CredentialSignatureAdmission.Reject
+deriving instance Encodable for Reject
+
+/-- The typed, canonical cause codec used by charged durable records and the
+native charged outcome.  `Encodable.encodek` is the full-constructor roundtrip
+law; the outer strict frame rejects aliases and trailing bytes. -/
+def rejectStream : StreamCodec Reject :=
+  StreamCodec.xmap StreamCodec.nat Encodable.encode
+    (fun value => (Encodable.decode value).getD .malformedIngress)
+    (by intro value; simp)
+
+def rejectCodec : LawfulCodec Reject :=
+  ObjectiveActivityWire.framed "DREGG/OBJECTIVE/ACTIVITY/REJECT/v1".toUTF8.toList rejectStream
+
+@[simp] theorem rejectCodec_roundtrip (cause : Reject) :
+    rejectCodec.decode (rejectCodec.encode cause) = some cause :=
+  rejectCodec.decode_encode cause
+
+/-- The payload installed in a charged failure's durable `StableEvent`.  The
+source event remains the original ingress event and therefore retains the
+original receipt/event id. -/
+structure RecordedFailure where
+  source : StableEvent
+  cause : Reject
+
+def recordedEventStream : StreamCodec StableEvent :=
+  StreamCodec.xmap
+    (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product digestStream (StreamCodec.product digestStream bytesStream)))
+    (fun value => (value.codecVersion, value.domain, value.eventId, value.canonicalBytes))
+    (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2⟩)
+    (by intro value; cases value; rfl)
+
+def recordedFailureStream : StreamCodec RecordedFailure :=
+  StreamCodec.xmap (StreamCodec.product recordedEventStream rejectStream)
+    (fun value => (value.source, value.cause))
+    (fun value => ⟨value.1, value.2⟩)
+    (by intro value; cases value; rfl)
+
+def recordedFailureCodec : LawfulCodec RecordedFailure :=
+  ObjectiveActivityWire.framed
+    "DREGG/OBJECTIVE/ACTIVITY/RECORDED-FAILURE/v1".toUTF8.toList recordedFailureStream
+
+/-- A charged record is a version-2 activity event whose canonical payload is
+the original version-1 ingress event plus the exact typed refusal. -/
+def failedEvent (source : StableEvent) (cause : Reject) : StableEvent :=
+  { source with codecVersion := 2
+                canonicalBytes := recordedFailureCodec.encode ⟨source, cause⟩ }
+
+/-- The real terminal disposition decoded from a durable record. -/
+inductive RecordedDisposition where
+  | confirmed
+  | charged (cause : Reject)
+
+/-- Decode the objective-activity record shape.  Version 1 is a successful
+record. Version 2 must decode canonically and repeat the outer domain/event id;
+unknown or inconsistent shapes fail closed. -/
+def recordedDisposition (stored : StableEvent) : Option (StableEvent × RecordedDisposition) :=
+  if stored.codecVersion = 1 then some (stored, .confirmed)
+  else if stored.codecVersion = 2 then do
+    let failure ← recordedFailureCodec.decode stored.canonicalBytes
+    if failure.source.codecVersion = 1 ∧ failure.source.domain = stored.domain ∧
+        failure.source.eventId = stored.eventId then
+      some (failure.source, .charged failure.cause)
+    else none
+  else none
+
+@[simp] theorem recordedDisposition_event (domain semantics : Digest) (ingress : DecodedIngress) :
+    recordedDisposition (event domain semantics ingress) =
+      some (event domain semantics ingress, .confirmed) := by
+  simp [recordedDisposition, event]
+
+@[simp] theorem recordedDisposition_failedEvent (domain semantics : Digest) (ingress : DecodedIngress)
+    (cause : Reject) :
+    recordedDisposition (failedEvent (event domain semantics ingress) cause) =
+      some (event domain semantics ingress, .charged cause) := by
+  unfold recordedDisposition failedEvent
+  simp only [event]
+  rw [if_neg (by decide), if_pos (by decide), recordedFailureCodec.decode_encode]
+  simp
+
 /-- The charge of a paying turn's failure: the turn's payer account, its declared envelope, and the
 transaction the turn would have committed under (so a retry of the same ingress replays it). -/
 def failureRequest (domain semantics : Digest) (command : Command) : Option ObjectiveActivity.FailureRequest :=
@@ -1073,10 +1200,13 @@ structure Accepted [DecidableEq F] (deployment : Deployment)
 /-- The intent of a charged failure: the kernel's `failed` turn (the Book only) under this
 receiver's seal. -/
 def failedIntent (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
-    (config : Config) (ingress : DecodedIngress) (request : ObjectiveActivity.FailureRequest)
+    (config : Config) (ingress : DecodedIngress) (cause : Reject)
+    (request : ObjectiveActivity.FailureRequest)
     (failure : ObjectiveActivity.ChargedFailure config durable.snapshot request)
     (final : List Post × List ReadGuard) : DataIntent rootBytes :=
-  ActivitySeatEnd.AdmittedTurn.finalIntent (sealAt (profile := profile) authority ingress.command ingress)
+  ActivitySeatEnd.AdmittedTurn.finalIntent
+    { sealAt (profile := profile) authority ingress.command ingress with
+      event := failedEvent (event deployment.domain profile.semantics ingress) cause }
     final.1 final.2 (ObjectiveActivity.AdmittedTurn.failed (height := ambient.height) request failure)
 
 /-- **A CHARGED FAILURE** (GPT-6 row E): gated (authority, capabilities, funds), its signature
@@ -1100,7 +1230,8 @@ structure Failed [DecidableEq F] (deployment : Deployment)
   finalExact : ActivitySeatEnd.finish gated.config durable.snapshot ambient.height
     (ObjectiveActivity.AdmittedTurn.failed request failure) = .ok final
   physical : IntentShape deployment durable
-    (failedIntent (profile := profile) (ambient := ambient) gated.authority gated.config ingress request failure final)
+    (failedIntent (profile := profile) (ambient := ambient) gated.authority gated.config ingress cause
+      request failure final)
 
 /-- What admission decides for a signed ingress: an accepted turn, or a charged failure. -/
 inductive Verdict [DecidableEq F] (deployment : Deployment)
@@ -1145,7 +1276,7 @@ def admitDecodedNative [DecidableEq F] (deployment : Deployment)
                 | .ok final =>
                   if physical : IntentShape deployment durable
                       (failedIntent (profile := profile) (ambient := ambient) gated.authority gated.config ingress
-                        failing failure final) then
+                        cause failing failure final) then
                     return .ok (.failed ⟨gated, receipt, same, cause, preparedExact, charged, failing, requestExact,
                       failure, final, finalExact, physical⟩)
                   else return .error .physicalPreparation
@@ -1167,7 +1298,7 @@ def intent (accepted : Accepted deployment profile ambient durable ingress) : Da
 
 def Failed.intent (failed : Failed deployment profile ambient durable ingress) : DataIntent rootBytes :=
   failedIntent (profile := profile) (ambient := ambient) failed.gated.authority failed.gated.config ingress
-    failed.request failed.failure failed.final
+    failed.cause failed.request failed.failure failed.final
 
 def Verdict.intent : Verdict deployment profile ambient durable ingress → DataIntent rootBytes
   | .accepted admitted => Minidregg.Kernel.ObjectiveActivityReceiver.intent admitted
@@ -1370,12 +1501,11 @@ def Command.isInvoke (command : Command) : Bool :=
   | _ => false
 
 /-- What a recorded transaction answers an ingress under its id: the RECORDED
-receipt (its transaction and event), for the exact ingress (`exact`) or for an
+receipt and terminal disposition, for the exact ingress (`exact`) or for an
 invocation re-signed under the same operation id (`retry`). -/
 inductive Replayed where
-  | exact (receipt : Receipt)
-  | retry (receipt : Receipt)
-  deriving DecidableEq, Repr
+  | exact (receipt : Receipt) (disposition : RecordedDisposition)
+  | retry (receipt : Receipt) (disposition : RecordedDisposition)
 
 /-- A retained ingress finds its record by its transaction id. The exact
 ingress replays (`exact`). An invocation re-signed under the same operation id
@@ -1393,33 +1523,39 @@ def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng
   | none => none
   | some recorded =>
     if recorded.transactionId = transactionId domain semantics ingress then
-      if recorded.event.event = event domain semantics ingress then
-        some (.ok (.exact ⟨recorded.transactionId, recorded.event.event.eventId⟩))
-      else if ingress.command.isInvoke then
-        some (.ok (.retry ⟨recorded.transactionId, recorded.event.event.eventId⟩))
-      else some (.error ())
+      match recordedDisposition recorded.event.event with
+      | some (source, disposition) =>
+        if source = event domain semantics ingress then
+          some (.ok (.exact ⟨recorded.transactionId, source.eventId⟩ disposition))
+        else if ingress.command.isInvoke then
+          some (.ok (.retry ⟨recorded.transactionId, source.eventId⟩ disposition))
+        else some (.error ())
+      | none => some (.error ())
     else some (.error ())
 
 /-- **A recorded invocation, re-signed, is a retry of the recorded operation**,
 carrying the recorded receipt (the original transaction and event). -/
 theorem replay_invoke_recorded {domain semantics : Digest} {durable : Durable} {ingress : DecodedIngress}
-    {recorded} (found : DurableCommitProtocol.Snapshot.lookupRecorded
+    {recorded source disposition} (found : DurableCommitProtocol.Snapshot.lookupRecorded
       (transactionId domain semantics ingress) durable.snapshot.model.journal = some recorded)
     (same : recorded.transactionId = transactionId domain semantics ingress)
-    (resigned : recorded.event.event ≠ event domain semantics ingress)
+    (terminal : recordedDisposition recorded.event.event = some (source, disposition))
+    (resigned : source ≠ event domain semantics ingress)
     (invoke : ingress.command.isInvoke = true) :
     replay domain semantics durable ingress =
-      some (.ok (.retry ⟨recorded.transactionId, recorded.event.event.eventId⟩)) := by
-  simp [replay, found, same, resigned, invoke]
+      some (.ok (.retry ⟨recorded.transactionId, source.eventId⟩ disposition)) := by
+  simp [replay, found, same, terminal, resigned, invoke]
 
 /-- The exact ingress still answers exactly its own receipt. -/
 theorem replay_exact {domain semantics : Digest} {durable : Durable} {ingress : DecodedIngress}
-    {recorded} (found : DurableCommitProtocol.Snapshot.lookupRecorded
+    {recorded disposition} (found : DurableCommitProtocol.Snapshot.lookupRecorded
       (transactionId domain semantics ingress) durable.snapshot.model.journal = some recorded)
     (same : recorded.transactionId = transactionId domain semantics ingress)
-    (exact : recorded.event.event = event domain semantics ingress) :
-    replay domain semantics durable ingress = some (.ok (.exact (receipt domain semantics ingress))) := by
-  simp [replay, found, same, exact, receipt]
+    (terminal : recordedDisposition recorded.event.event =
+      some (event domain semantics ingress, disposition)) :
+    replay domain semantics durable ingress =
+      some (.ok (.exact (receipt domain semantics ingress) disposition)) := by
+  simp [replay, found, same, terminal, receipt]
 
 inductive Result where
   | confirmed (kind : DurableReceiverIO.Confirmation) (receipt : Receipt)
@@ -1476,19 +1612,89 @@ def verifyRetry (deployment : Deployment) (profile : CanonicalRuntimeProfile.Pro
   | .error reason => return .error (.signature reason)
   | .ok _ => return .ok ()
 
-/-- How a verified-or-refused retry is answered: the recorded receipt, or the
-named refusal. A refused retry is never answered with the receipt. -/
-def retryAnswer (verified : Except Reject Unit) (prior : Receipt) : Result :=
+/-- Turn a durable record's terminal disposition into its replay answer. -/
+def dispositionAnswer (prior : Receipt) : RecordedDisposition → Result
+  | .confirmed => .confirmed .replayed prior
+  | .charged cause => .charged .replayed prior cause
+
+/-- How a verified-or-refused retry is answered: the recorded receipt and
+terminal disposition, or the named refusal. A refused retry is never answered
+with either recorded disposition. -/
+def retryAnswer (verified : Except Reject Unit) (prior : Receipt)
+    (disposition : RecordedDisposition) : Result :=
   match verified with
-  | .ok () => .confirmed .replayed prior
+  | .ok () => dispositionAnswer prior disposition
   | .error reason => .rejected reason
 
+/-- Pure routing shared by `receiveLoaded`'s exact and verified-retry branches. -/
+def replayAnswer (verified : Except Reject Unit) : Replayed → Result
+  | .exact prior disposition => dispositionAnswer prior disposition
+  | .retry prior disposition => retryAnswer verified prior disposition
+
+/-- The proposition that an answer has the terminal disposition supplied by a
+durable record. Its charged case names the record's typed cause directly; it is
+deliberately independent of `replayAnswer` and `dispositionAnswer`. -/
+def AnswersRecorded (prior : Receipt) (disposition : RecordedDisposition) (answer : Result) : Prop :=
+  match disposition with
+  | .confirmed => answer = .confirmed .replayed prior
+  | .charged cause => answer = .charged .replayed prior cause
+
+/-- **Replay preserves the recorded terminal disposition**, for both an exact
+replay and a verified fresh-signature retry.  `disposition` is an input decoded
+from the durable record by `replay`; it is not defined from either answer. -/
+theorem replayAnswer_preserves_recorded_disposition (prior : Receipt)
+    (disposition : RecordedDisposition) :
+    AnswersRecorded prior disposition (replayAnswer (.ok ()) (.exact prior disposition)) ∧
+      AnswersRecorded prior disposition (replayAnswer (.ok ()) (.retry prior disposition)) := by
+  constructor <;> cases disposition <;> rfl
+
+/-- **The receiver's replay routing preserves the disposition decoded from the
+actual durable journal entry.**  The same recorded `disposition` reaches the
+exact branch and, when the ingress is a verified invocation retry, the retry
+branch.  The premise is the record decoder's result, not a definition in terms
+of either replay answer. -/
+theorem replay_routes_recorded_disposition
+    {domain semantics : Digest} {durable : Durable} {ingress : DecodedIngress}
+    {recorded source disposition}
+    (found : DurableCommitProtocol.Snapshot.lookupRecorded
+      (transactionId domain semantics ingress) durable.snapshot.model.journal = some recorded)
+    (same : recorded.transactionId = transactionId domain semantics ingress)
+    (terminal : recordedDisposition recorded.event.event = some (source, disposition)) :
+    (source = event domain semantics ingress →
+      replay domain semantics durable ingress =
+        some (.ok (.exact ⟨recorded.transactionId, source.eventId⟩ disposition)) ∧
+      AnswersRecorded ⟨recorded.transactionId, source.eventId⟩ disposition
+        (replayAnswer (.ok ()) (.exact ⟨recorded.transactionId, source.eventId⟩ disposition))) ∧
+    (source ≠ event domain semantics ingress → ingress.command.isInvoke = true →
+      replay domain semantics durable ingress =
+        some (.ok (.retry ⟨recorded.transactionId, source.eventId⟩ disposition)) ∧
+      AnswersRecorded ⟨recorded.transactionId, source.eventId⟩ disposition
+        (replayAnswer (.ok ()) (.retry ⟨recorded.transactionId, source.eventId⟩ disposition))) := by
+  constructor
+  · intro exact
+    subst source
+    constructor
+    · simpa [receipt, same] using replay_exact found same terminal
+    · exact (replayAnswer_preserves_recorded_disposition _ disposition).1
+  · intro changed invoke
+    constructor
+    · exact replay_invoke_recorded found same terminal changed invoke
+    · exact (replayAnswer_preserves_recorded_disposition _ disposition).2
+
 /-- **A retry that does not verify is refused by name, not answered**. -/
-theorem retry_unverified_refused (reason : Reject) (prior : Receipt) :
-    retryAnswer (.error reason) prior = .rejected reason ∧
-      ∀ kind receipt, retryAnswer (.error reason) prior ≠ .confirmed kind receipt := by
-  refine ⟨rfl, fun kind receipt => ?_⟩
-  simp [retryAnswer]
+theorem retry_unverified_refused (reason : Reject) (prior : Receipt)
+    (disposition : RecordedDisposition) :
+    retryAnswer (.error reason) prior disposition = .rejected reason ∧
+      (∀ kind receipt, retryAnswer (.error reason) prior disposition ≠ .confirmed kind receipt) ∧
+      (∀ kind receipt cause,
+        retryAnswer (.error reason) prior disposition ≠ .charged kind receipt cause) := by
+  constructor
+  · rfl
+  · constructor
+    · intro kind receipt
+      simp [retryAnswer]
+    · intro kind receipt cause
+      simp [retryAnswer]
 
 def receiveLoaded (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig)
@@ -1497,9 +1703,10 @@ def receiveLoaded (deployment : Deployment) (profile : CanonicalRuntimeProfile.P
   let some ingress := decodeIngress bytes
     | return .rejected .malformedIngress
   match replay deployment.domain profile.semantics durable ingress with
-  | some (.ok (.exact prior)) => return .confirmed .replayed prior
-  | some (.ok (.retry prior)) =>
-    return retryAnswer (← verifyRetry deployment profile ambient native durable ingress) prior
+  | some (.ok (.exact prior disposition)) => return replayAnswer (.ok ()) (.exact prior disposition)
+  | some (.ok (.retry prior disposition)) =>
+    return replayAnswer (← verifyRetry deployment profile ambient native durable ingress)
+      (.retry prior disposition)
   | some (.error _) => return .transactionConflict
   | none =>
     match ← admitDecodedNative deployment profile ambient durable native ingress with
@@ -1669,8 +1876,13 @@ def signingPlanCodec : LawfulCodec SigningPlan :=
 #assert_axioms native_end_closes_held_seats
 #assert_axioms gate_spent_refused
 #assert_axioms command_v9_refuses
+#assert_axioms rejectCodec_roundtrip
+#assert_axioms recordedDisposition_event
+#assert_axioms recordedDisposition_failedEvent
 #assert_axioms replay_invoke_recorded
 #assert_axioms replay_exact
+#assert_axioms replayAnswer_preserves_recorded_disposition
+#assert_axioms replay_routes_recorded_disposition
 #assert_axioms retry_unverified_refused
 
 end Minidregg.Kernel.ObjectiveActivityReceiver

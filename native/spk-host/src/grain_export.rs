@@ -325,7 +325,7 @@ pub(crate) fn reconcile_failed_start(
     const MAX: u64 = 32 * 1024 * 1024;
     const PLAN: &[u8] = b"DREGG/APPLICATION/FAILED-START-RECOVERY-PLAN/v1";
     const INGRESS: &[u8] = b"DREGG/APPLICATION/FAILED-START-RECOVERY-INGRESS/v1";
-    const OUTCOME: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v4";
+    const OUTCOME: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v5";
     let config: Value = serde_json::from_slice(&recovery_read(resident_config, MAX_MANIFEST)?)?;
     if text(&config, "protocol")? != "mini-spk-resident-start-v3" {
         return Err(invalid("recovery resident protocol refused"));
@@ -722,7 +722,7 @@ mod tests {
                     let opcode = request[at];
                     seen.push((opcode, request[at + 1..].to_vec()));
                     let mut body = vec![opcode];
-                    body.extend_from_slice(b"DREGG/NATIVE-HOST/OUTCOME/v4");
+                    body.extend_from_slice(b"DREGG/NATIVE-HOST/OUTCOME/v5");
                     body.extend_from_slice(word.as_bytes());
                     let mut frame = (body.len() as u32).to_le_bytes().to_vec();
                     frame.extend_from_slice(&body);

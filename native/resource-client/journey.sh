@@ -312,9 +312,9 @@ fail() { DETAIL="$*"; return 1; }
 
 # A refusal counts only when the Host said so: the client exits 3 (a Host
 # refusal) AND names the Host's decoded RefusalReason for `host refused
-# <stage>` AND the encoded refusal carries the native outcome v2 tag. A client
+# <stage>` AND the encoded refusal carries the native outcome v5 tag. A client
 # crash, a parse error or an undecoded frame is not a refusal.
-REFUSAL_TAG=44524547472f4e41544956452d484f53542f4f5554434f4d452f7634   # DREGG/NATIVE-HOST/OUTCOME/v4
+REFUSAL_TAG=44524547472f4e41544956452d484f53542f4f5554434f4d452f7635   # DREGG/NATIVE-HOST/OUTCOME/v5
 refused() {
   local name=$1
   [ "$(cat "$SD/$name.rc")" = 3 ] || return 1
