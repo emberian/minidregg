@@ -1219,9 +1219,38 @@ private def seatRefusalStream : StreamCodec (Seats.Refusal) :=
     )
     (by intro value; cases value <;> rfl)
 
+/-- Extend a binary constructor root with tag 2. Tags 0 and 1 retain
+exactly the original sum bytes, including every nested constructor payload. -/
+private def sumWithStateRetired {A B : Type} (left : StreamCodec A) (right : StreamCodec B) :
+    StreamCodec (Sum (Sum A B) Unit) where
+  encode
+    | .inl (.inl value) => 0 :: left.encode value
+    | .inl (.inr value) => 1 :: right.encode value
+    | .inr _ => [2]
+  decodePrefix
+    | 0 :: bytes => do
+        let (value, suffix) ← left.decodePrefix bytes
+        some (.inl (.inl value), suffix)
+    | 1 :: bytes => do
+        let (value, suffix) ← right.decodePrefix bytes
+        some (.inl (.inr value), suffix)
+    | 2 :: suffix => some (.inr (), suffix)
+    | _ => none
+  decodePrefix_encode := by
+    intro value suffix
+    cases value with
+    | inl value => cases value <;> simp [left.decodePrefix_encode, right.decodePrefix_encode]
+    | inr value => cases value; rfl
+
+private theorem sumWithStateRetired_existing {A B : Type}
+    (left : StreamCodec A) (right : StreamCodec B) (value : Sum A B) :
+    (sumWithStateRetired left right).encode (.inl value) =
+      (StreamCodec.sum left right).encode value := by
+  cases value <;> rfl
+
 private def activityRefusalStream : StreamCodec (ObjectiveActivity.Refusal) :=
   StreamCodec.xmap
-    (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum unitStream
+    (sumWithStateRetired (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum unitStream
       unitStream)
       (StreamCodec.sum stringStream
       (StreamCodec.sum unitStream
@@ -1313,192 +1342,201 @@ private def activityRefusalStream : StreamCodec (ObjectiveActivity.Refusal) :=
       (StreamCodec.sum (StreamCodec.product digestStream StreamCodec.nat)
       (StreamCodec.product StreamCodec.nat StreamCodec.nat))))))))
     (fun value => match value with
-      | .packageMissing => (.inl (.inl (.inl (.inl (.inl (.inl ()))))))
-      | .packageIdentity => (.inl (.inl (.inl (.inl (.inl (.inr ()))))))
-      | .packageType reason => (.inl (.inl (.inl (.inl (.inr (.inl reason))))))
-      | .packageExists => (.inl (.inl (.inl (.inl (.inr (.inr (.inl ())))))))
-      | .packageSource reason => (.inl (.inl (.inl (.inl (.inr (.inr (.inr reason)))))))
-      | .packageReplay reason => (.inl (.inl (.inl (.inr (.inl (.inl reason))))))
-      | .inputType => (.inl (.inl (.inl (.inr (.inl (.inr (.inl ())))))))
-      | .outcomeProtocol label => (.inl (.inl (.inl (.inr (.inl (.inr (.inr label)))))))
-      | .recordExists => (.inl (.inl (.inl (.inr (.inr (.inl ()))))))
-      | .recordMissing => (.inl (.inl (.inl (.inr (.inr (.inr (.inl ())))))))
-      | .recordMisplaced => (.inl (.inl (.inl (.inr (.inr (.inr (.inr ())))))))
-      | .notAwaiting => (.inl (.inl (.inr (.inl (.inl (.inl ()))))))
-      | .awaitMismatch => (.inl (.inl (.inr (.inl (.inl (.inr ()))))))
-      | .checkpointDigest => (.inl (.inl (.inr (.inl (.inr (.inl ()))))))
-      | .checkpointCodec => (.inl (.inl (.inr (.inl (.inr (.inr (.inl ())))))))
-      | .recordRetired => (.inl (.inl (.inr (.inl (.inr (.inr (.inr ())))))))
-      | .patience patience maximum => (.inl (.inl (.inr (.inr (.inl (.inl (patience, maximum)))))))
-      | .digestWide object pin => (.inl (.inl (.inr (.inr (.inl (.inr (.inl (object, pin))))))))
-      | .heightWide height patience => (.inl (.inl (.inr (.inr (.inl (.inr (.inr (height, patience))))))))
-      | .uncovered envelope => (.inl (.inl (.inr (.inr (.inr (.inl envelope))))))
-      | .heapUncovered needed declared => (.inl (.inl (.inr (.inr (.inr (.inr (.inl (needed, declared))))))))
-      | .extractUncovered needed declared => (.inl (.inl (.inr (.inr (.inr (.inr (.inr (needed, declared))))))))
-      | .workUncovered stage needed declared => (.inl (.inr (.inl (.inl (.inl (.inl (stage, needed, declared)))))))
-      | .unfunded available price => (.inl (.inr (.inl (.inl (.inl (.inr (available, price)))))))
-      | .plan reason => (.inl (.inr (.inl (.inl (.inr (.inl reason))))))
-      | .messageAwaitNeedsInbox => (.inl (.inr (.inl (.inl (.inr (.inr (.inl ())))))))
-      | .planExtraction reason => (.inl (.inr (.inl (.inl (.inr (.inr (.inr reason)))))))
-      | .resultExtraction reason => (.inl (.inr (.inl (.inr (.inl (.inl reason))))))
-      | .exhausted => (.inl (.inr (.inl (.inr (.inl (.inr (.inl ())))))))
-      | .responseType label => (.inl (.inr (.inl (.inr (.inl (.inr (.inr label)))))))
-      | .slotMissing => (.inl (.inr (.inl (.inr (.inr (.inl ()))))))
-      | .slotFresh => (.inl (.inr (.inl (.inr (.inr (.inr (.inl ())))))))
-      | .slotMismatch => (.inl (.inr (.inl (.inr (.inr (.inr (.inr ())))))))
-      | .slot reason => (.inl (.inr (.inr (.inl (.inl (.inl reason))))))
-      | .slotRetired => (.inl (.inr (.inr (.inl (.inl (.inr (.inl ())))))))
-      | .notYetDecided deadline height => (.inl (.inr (.inr (.inl (.inl (.inr (.inr (deadline, height))))))))
-      | .notYetDue due height => (.inl (.inr (.inr (.inl (.inr (.inl (due, height)))))))
-      | .bookUnavailable => (.inl (.inr (.inr (.inl (.inr (.inr (.inl ())))))))
-      | .purseTaken => (.inl (.inr (.inr (.inl (.inr (.inr (.inr ())))))))
-      | .payerInvalid => (.inl (.inr (.inr (.inr (.inl (.inl ()))))))
-      | .underfunded deposit reserve => (.inl (.inr (.inr (.inr (.inl (.inr (.inl (deposit, reserve))))))))
-      | .awaitsFunding available reserve => (.inl (.inr (.inr (.inr (.inl (.inr (.inr (available, reserve))))))))
-      | .bookRefused => (.inl (.inr (.inr (.inr (.inr (.inl ()))))))
-      | .zeroAmount => (.inl (.inr (.inr (.inr (.inr (.inr (.inl ())))))))
-      | .blindWrite => (.inl (.inr (.inr (.inr (.inr (.inr (.inr ())))))))
-      | .writeShape reason => (.inr (.inl (.inl (.inl (.inl (.inl reason))))))
-      | .stateCodec => (.inr (.inl (.inl (.inl (.inl (.inr ()))))))
-      | .stateMissing => (.inr (.inl (.inl (.inl (.inr (.inl ()))))))
-      | .alreadyExhausted tried envelope => (.inr (.inl (.inl (.inl (.inr (.inr (.inl (tried, envelope))))))))
-      | .notYetAbandonable deadline grace height => (.inr (.inl (.inl (.inl (.inr (.inr (.inr (deadline, grace, height))))))))
-      | .notExhausted => (.inr (.inl (.inl (.inr (.inl (.inl ()))))))
-      | .notAnObject => (.inr (.inl (.inl (.inr (.inl (.inr (.inl ())))))))
-      | .objectCodec => (.inr (.inl (.inl (.inr (.inl (.inr (.inr ())))))))
-      | .objectExists => (.inr (.inl (.inl (.inr (.inr (.inl ()))))))
-      | .pinMismatch pinned requested => (.inr (.inl (.inl (.inr (.inr (.inr (.inl (pinned, requested))))))))
-      | .objectWrite reason => (.inr (.inl (.inl (.inr (.inr (.inr (.inr reason)))))))
-      | .pinUnpublished => (.inr (.inl (.inr (.inl (.inl (.inl ()))))))
-      | .stateExists => (.inr (.inl (.inr (.inl (.inl (.inr (.inl ())))))))
-      | .stateTypeNotData => (.inr (.inl (.inr (.inl (.inl (.inr (.inr ())))))))
-      | .lawField field => (.inr (.inl (.inr (.inl (.inr (.inl field))))))
-      | .draining => (.inr (.inl (.inr (.inl (.inr (.inr (.inl ())))))))
-      | .awaitingRebirth => (.inr (.inl (.inr (.inl (.inr (.inr (.inr ())))))))
-      | .migrationShape reason => (.inr (.inl (.inr (.inr (.inl (.inl reason))))))
-      | .migrationFault reason => (.inr (.inl (.inr (.inr (.inl (.inr (.inl reason)))))))
-      | .frozen => (.inr (.inl (.inr (.inr (.inl (.inr (.inr ())))))))
-      | .notUpgradeAuthority => (.inr (.inl (.inr (.inr (.inr (.inl ()))))))
-      | .policyLoosened => (.inr (.inl (.inr (.inr (.inr (.inr (.inl ())))))))
-      | .floorNotEntailed index => (.inr (.inl (.inr (.inr (.inr (.inr (.inr index)))))))
-      | .samePin => (.inr (.inr (.inl (.inl (.inl (.inl ()))))))
-      | .upgradeUnderWay => (.inr (.inr (.inl (.inl (.inl (.inr ()))))))
-      | .notDraining => (.inr (.inr (.inl (.inl (.inr (.inl ()))))))
-      | .drainPatience patience maximum => (.inr (.inr (.inl (.inl (.inr (.inr (.inl (patience, maximum))))))))
-      | .notSubtype => (.inr (.inr (.inl (.inl (.inr (.inr (.inr ())))))))
-      | .fieldsForgotten fields => (.inr (.inr (.inl (.inr (.inl (.inl fields))))))
-      | .liveActivities count => (.inr (.inr (.inl (.inr (.inl (.inr (.inl count)))))))
-      | .notYetDeadline deadline height => (.inr (.inr (.inl (.inr (.inl (.inr (.inr (deadline, height))))))))
-      | .rebirthDisposition => (.inr (.inr (.inl (.inr (.inr (.inl ()))))))
-      | .rebirthTarget reason => (.inr (.inr (.inl (.inr (.inr (.inr (.inl reason)))))))
-      | .domainLawDenied domain leaf => (.inr (.inr (.inl (.inr (.inr (.inr (.inr (domain, leaf))))))))
-      | .domainUnprojectable domain => (.inr (.inr (.inr (.inl (.inl (.inl domain))))))
-      | .domainMissing domain => (.inr (.inr (.inr (.inl (.inl (.inr (.inl domain)))))))
-      | .domainCodec domain => (.inr (.inr (.inr (.inl (.inl (.inr (.inr domain)))))))
-      | .domainExists domain => (.inr (.inr (.inr (.inl (.inr (.inl domain))))))
-      | .domainShape reason => (.inr (.inr (.inr (.inl (.inr (.inr (.inl reason)))))))
-      | .domainMember object => (.inr (.inr (.inr (.inl (.inr (.inr (.inr object)))))))
-      | .memberFrozen object => (.inr (.inr (.inr (.inr (.inl (.inl object))))))
-      | .memberDenied object => (.inr (.inr (.inr (.inr (.inl (.inr (.inl object)))))))
-      | .memberDomainsFull object => (.inr (.inr (.inr (.inr (.inl (.inr (.inr object)))))))
-      | .domainsDropped object => (.inr (.inr (.inr (.inr (.inr (.inl object))))))
-      | .domainUnindexed domain member => (.inr (.inr (.inr (.inr (.inr (.inr (.inl (domain, member))))))))
-      | .domainUncovered units allowance => (.inr (.inr (.inr (.inr (.inr (.inr (.inr (units, allowance))))))))
+      | .stateRetired => .inr ()
+      | .packageMissing => .inl (.inl (.inl (.inl (.inl (.inl (.inl ()))))))
+      | .packageIdentity => .inl (.inl (.inl (.inl (.inl (.inl (.inr ()))))))
+      | .packageType reason => .inl (.inl (.inl (.inl (.inl (.inr (.inl reason))))))
+      | .packageExists => .inl (.inl (.inl (.inl (.inl (.inr (.inr (.inl ())))))))
+      | .packageSource reason => .inl (.inl (.inl (.inl (.inl (.inr (.inr (.inr reason)))))))
+      | .packageReplay reason => .inl (.inl (.inl (.inl (.inr (.inl (.inl reason))))))
+      | .inputType => .inl (.inl (.inl (.inl (.inr (.inl (.inr (.inl ())))))))
+      | .outcomeProtocol label => .inl (.inl (.inl (.inl (.inr (.inl (.inr (.inr label)))))))
+      | .recordExists => .inl (.inl (.inl (.inl (.inr (.inr (.inl ()))))))
+      | .recordMissing => .inl (.inl (.inl (.inl (.inr (.inr (.inr (.inl ())))))))
+      | .recordMisplaced => .inl (.inl (.inl (.inl (.inr (.inr (.inr (.inr ())))))))
+      | .notAwaiting => .inl (.inl (.inl (.inr (.inl (.inl (.inl ()))))))
+      | .awaitMismatch => .inl (.inl (.inl (.inr (.inl (.inl (.inr ()))))))
+      | .checkpointDigest => .inl (.inl (.inl (.inr (.inl (.inr (.inl ()))))))
+      | .checkpointCodec => .inl (.inl (.inl (.inr (.inl (.inr (.inr (.inl ())))))))
+      | .recordRetired => .inl (.inl (.inl (.inr (.inl (.inr (.inr (.inr ())))))))
+      | .patience patience maximum => .inl (.inl (.inl (.inr (.inr (.inl (.inl (patience, maximum)))))))
+      | .digestWide object pin => .inl (.inl (.inl (.inr (.inr (.inl (.inr (.inl (object, pin))))))))
+      | .heightWide height patience => .inl (.inl (.inl (.inr (.inr (.inl (.inr (.inr (height, patience))))))))
+      | .uncovered envelope => .inl (.inl (.inl (.inr (.inr (.inr (.inl envelope))))))
+      | .heapUncovered needed declared => .inl (.inl (.inl (.inr (.inr (.inr (.inr (.inl (needed, declared))))))))
+      | .extractUncovered needed declared => .inl (.inl (.inl (.inr (.inr (.inr (.inr (.inr (needed, declared))))))))
+      | .workUncovered stage needed declared => .inl (.inl (.inr (.inl (.inl (.inl (.inl (stage, needed, declared)))))))
+      | .unfunded available price => .inl (.inl (.inr (.inl (.inl (.inl (.inr (available, price)))))))
+      | .plan reason => .inl (.inl (.inr (.inl (.inl (.inr (.inl reason))))))
+      | .messageAwaitNeedsInbox => .inl (.inl (.inr (.inl (.inl (.inr (.inr (.inl ())))))))
+      | .planExtraction reason => .inl (.inl (.inr (.inl (.inl (.inr (.inr (.inr reason)))))))
+      | .resultExtraction reason => .inl (.inl (.inr (.inl (.inr (.inl (.inl reason))))))
+      | .exhausted => .inl (.inl (.inr (.inl (.inr (.inl (.inr (.inl ())))))))
+      | .responseType label => .inl (.inl (.inr (.inl (.inr (.inl (.inr (.inr label)))))))
+      | .slotMissing => .inl (.inl (.inr (.inl (.inr (.inr (.inl ()))))))
+      | .slotFresh => .inl (.inl (.inr (.inl (.inr (.inr (.inr (.inl ())))))))
+      | .slotMismatch => .inl (.inl (.inr (.inl (.inr (.inr (.inr (.inr ())))))))
+      | .slot reason => .inl (.inl (.inr (.inr (.inl (.inl (.inl reason))))))
+      | .slotRetired => .inl (.inl (.inr (.inr (.inl (.inl (.inr (.inl ())))))))
+      | .notYetDecided deadline height => .inl (.inl (.inr (.inr (.inl (.inl (.inr (.inr (deadline, height))))))))
+      | .notYetDue due height => .inl (.inl (.inr (.inr (.inl (.inr (.inl (due, height)))))))
+      | .bookUnavailable => .inl (.inl (.inr (.inr (.inl (.inr (.inr (.inl ())))))))
+      | .purseTaken => .inl (.inl (.inr (.inr (.inl (.inr (.inr (.inr ())))))))
+      | .payerInvalid => .inl (.inl (.inr (.inr (.inr (.inl (.inl ()))))))
+      | .underfunded deposit reserve => .inl (.inl (.inr (.inr (.inr (.inl (.inr (.inl (deposit, reserve))))))))
+      | .awaitsFunding available reserve => .inl (.inl (.inr (.inr (.inr (.inl (.inr (.inr (available, reserve))))))))
+      | .bookRefused => .inl (.inl (.inr (.inr (.inr (.inr (.inl ()))))))
+      | .zeroAmount => .inl (.inl (.inr (.inr (.inr (.inr (.inr (.inl ())))))))
+      | .blindWrite => .inl (.inl (.inr (.inr (.inr (.inr (.inr (.inr ())))))))
+      | .writeShape reason => .inl (.inr (.inl (.inl (.inl (.inl (.inl reason))))))
+      | .stateCodec => .inl (.inr (.inl (.inl (.inl (.inl (.inr ()))))))
+      | .stateMissing => .inl (.inr (.inl (.inl (.inl (.inr (.inl ()))))))
+      | .alreadyExhausted tried envelope => .inl (.inr (.inl (.inl (.inl (.inr (.inr (.inl (tried, envelope))))))))
+      | .notYetAbandonable deadline grace height => .inl (.inr (.inl (.inl (.inl (.inr (.inr (.inr (deadline, grace, height))))))))
+      | .notExhausted => .inl (.inr (.inl (.inl (.inr (.inl (.inl ()))))))
+      | .notAnObject => .inl (.inr (.inl (.inl (.inr (.inl (.inr (.inl ())))))))
+      | .objectCodec => .inl (.inr (.inl (.inl (.inr (.inl (.inr (.inr ())))))))
+      | .objectExists => .inl (.inr (.inl (.inl (.inr (.inr (.inl ()))))))
+      | .pinMismatch pinned requested => .inl (.inr (.inl (.inl (.inr (.inr (.inr (.inl (pinned, requested))))))))
+      | .objectWrite reason => .inl (.inr (.inl (.inl (.inr (.inr (.inr (.inr reason)))))))
+      | .pinUnpublished => .inl (.inr (.inl (.inr (.inl (.inl (.inl ()))))))
+      | .stateExists => .inl (.inr (.inl (.inr (.inl (.inl (.inr (.inl ())))))))
+      | .stateTypeNotData => .inl (.inr (.inl (.inr (.inl (.inl (.inr (.inr ())))))))
+      | .lawField field => .inl (.inr (.inl (.inr (.inl (.inr (.inl field))))))
+      | .draining => .inl (.inr (.inl (.inr (.inl (.inr (.inr (.inl ())))))))
+      | .awaitingRebirth => .inl (.inr (.inl (.inr (.inl (.inr (.inr (.inr ())))))))
+      | .migrationShape reason => .inl (.inr (.inl (.inr (.inr (.inl (.inl reason))))))
+      | .migrationFault reason => .inl (.inr (.inl (.inr (.inr (.inl (.inr (.inl reason)))))))
+      | .frozen => .inl (.inr (.inl (.inr (.inr (.inl (.inr (.inr ())))))))
+      | .notUpgradeAuthority => .inl (.inr (.inl (.inr (.inr (.inr (.inl ()))))))
+      | .policyLoosened => .inl (.inr (.inl (.inr (.inr (.inr (.inr (.inl ())))))))
+      | .floorNotEntailed index => .inl (.inr (.inl (.inr (.inr (.inr (.inr (.inr index)))))))
+      | .samePin => .inl (.inr (.inr (.inl (.inl (.inl (.inl ()))))))
+      | .upgradeUnderWay => .inl (.inr (.inr (.inl (.inl (.inl (.inr ()))))))
+      | .notDraining => .inl (.inr (.inr (.inl (.inl (.inr (.inl ()))))))
+      | .drainPatience patience maximum => .inl (.inr (.inr (.inl (.inl (.inr (.inr (.inl (patience, maximum))))))))
+      | .notSubtype => .inl (.inr (.inr (.inl (.inl (.inr (.inr (.inr ())))))))
+      | .fieldsForgotten fields => .inl (.inr (.inr (.inl (.inr (.inl (.inl fields))))))
+      | .liveActivities count => .inl (.inr (.inr (.inl (.inr (.inl (.inr (.inl count)))))))
+      | .notYetDeadline deadline height => .inl (.inr (.inr (.inl (.inr (.inl (.inr (.inr (deadline, height))))))))
+      | .rebirthDisposition => .inl (.inr (.inr (.inl (.inr (.inr (.inl ()))))))
+      | .rebirthTarget reason => .inl (.inr (.inr (.inl (.inr (.inr (.inr (.inl reason)))))))
+      | .domainLawDenied domain leaf => .inl (.inr (.inr (.inl (.inr (.inr (.inr (.inr (domain, leaf))))))))
+      | .domainUnprojectable domain => .inl (.inr (.inr (.inr (.inl (.inl (.inl domain))))))
+      | .domainMissing domain => .inl (.inr (.inr (.inr (.inl (.inl (.inr (.inl domain)))))))
+      | .domainCodec domain => .inl (.inr (.inr (.inr (.inl (.inl (.inr (.inr domain)))))))
+      | .domainExists domain => .inl (.inr (.inr (.inr (.inl (.inr (.inl domain))))))
+      | .domainShape reason => .inl (.inr (.inr (.inr (.inl (.inr (.inr (.inl reason)))))))
+      | .domainMember object => .inl (.inr (.inr (.inr (.inl (.inr (.inr (.inr object)))))))
+      | .memberFrozen object => .inl (.inr (.inr (.inr (.inr (.inl (.inl object))))))
+      | .memberDenied object => .inl (.inr (.inr (.inr (.inr (.inl (.inr (.inl object)))))))
+      | .memberDomainsFull object => .inl (.inr (.inr (.inr (.inr (.inl (.inr (.inr object)))))))
+      | .domainsDropped object => .inl (.inr (.inr (.inr (.inr (.inr (.inl object))))))
+      | .domainUnindexed domain member => .inl (.inr (.inr (.inr (.inr (.inr (.inr (.inl (domain, member))))))))
+      | .domainUncovered units allowance => .inl (.inr (.inr (.inr (.inr (.inr (.inr (.inr (units, allowance))))))))
     )
     (fun wire => match wire with
-      | (.inl (.inl (.inl (.inl (.inl (.inl ())))))) => .packageMissing
-      | (.inl (.inl (.inl (.inl (.inl (.inr ())))))) => .packageIdentity
-      | (.inl (.inl (.inl (.inl (.inr (.inl reason)))))) => .packageType reason
-      | (.inl (.inl (.inl (.inl (.inr (.inr (.inl ()))))))) => .packageExists
-      | (.inl (.inl (.inl (.inl (.inr (.inr (.inr reason))))))) => .packageSource reason
-      | (.inl (.inl (.inl (.inr (.inl (.inl reason)))))) => .packageReplay reason
-      | (.inl (.inl (.inl (.inr (.inl (.inr (.inl ()))))))) => .inputType
-      | (.inl (.inl (.inl (.inr (.inl (.inr (.inr label))))))) => .outcomeProtocol label
-      | (.inl (.inl (.inl (.inr (.inr (.inl ())))))) => .recordExists
-      | (.inl (.inl (.inl (.inr (.inr (.inr (.inl ()))))))) => .recordMissing
-      | (.inl (.inl (.inl (.inr (.inr (.inr (.inr ()))))))) => .recordMisplaced
-      | (.inl (.inl (.inr (.inl (.inl (.inl ())))))) => .notAwaiting
-      | (.inl (.inl (.inr (.inl (.inl (.inr ())))))) => .awaitMismatch
-      | (.inl (.inl (.inr (.inl (.inr (.inl ())))))) => .checkpointDigest
-      | (.inl (.inl (.inr (.inl (.inr (.inr (.inl ()))))))) => .checkpointCodec
-      | (.inl (.inl (.inr (.inl (.inr (.inr (.inr ()))))))) => .recordRetired
-      | (.inl (.inl (.inr (.inr (.inl (.inl (patience, maximum))))))) => .patience patience maximum
-      | (.inl (.inl (.inr (.inr (.inl (.inr (.inl (object, pin)))))))) => .digestWide object pin
-      | (.inl (.inl (.inr (.inr (.inl (.inr (.inr (height, patience)))))))) => .heightWide height patience
-      | (.inl (.inl (.inr (.inr (.inr (.inl envelope)))))) => .uncovered envelope
-      | (.inl (.inl (.inr (.inr (.inr (.inr (.inl (needed, declared)))))))) => .heapUncovered needed declared
-      | (.inl (.inl (.inr (.inr (.inr (.inr (.inr (needed, declared)))))))) => .extractUncovered needed declared
-      | (.inl (.inr (.inl (.inl (.inl (.inl (stage, needed, declared))))))) => .workUncovered stage needed declared
-      | (.inl (.inr (.inl (.inl (.inl (.inr (available, price))))))) => .unfunded available price
-      | (.inl (.inr (.inl (.inl (.inr (.inl reason)))))) => .plan reason
-      | (.inl (.inr (.inl (.inl (.inr (.inr (.inl ()))))))) => .messageAwaitNeedsInbox
-      | (.inl (.inr (.inl (.inl (.inr (.inr (.inr reason))))))) => .planExtraction reason
-      | (.inl (.inr (.inl (.inr (.inl (.inl reason)))))) => .resultExtraction reason
-      | (.inl (.inr (.inl (.inr (.inl (.inr (.inl ()))))))) => .exhausted
-      | (.inl (.inr (.inl (.inr (.inl (.inr (.inr label))))))) => .responseType label
-      | (.inl (.inr (.inl (.inr (.inr (.inl ())))))) => .slotMissing
-      | (.inl (.inr (.inl (.inr (.inr (.inr (.inl ()))))))) => .slotFresh
-      | (.inl (.inr (.inl (.inr (.inr (.inr (.inr ()))))))) => .slotMismatch
-      | (.inl (.inr (.inr (.inl (.inl (.inl reason)))))) => .slot reason
-      | (.inl (.inr (.inr (.inl (.inl (.inr (.inl ()))))))) => .slotRetired
-      | (.inl (.inr (.inr (.inl (.inl (.inr (.inr (deadline, height)))))))) => .notYetDecided deadline height
-      | (.inl (.inr (.inr (.inl (.inr (.inl (due, height))))))) => .notYetDue due height
-      | (.inl (.inr (.inr (.inl (.inr (.inr (.inl ()))))))) => .bookUnavailable
-      | (.inl (.inr (.inr (.inl (.inr (.inr (.inr ()))))))) => .purseTaken
-      | (.inl (.inr (.inr (.inr (.inl (.inl ())))))) => .payerInvalid
-      | (.inl (.inr (.inr (.inr (.inl (.inr (.inl (deposit, reserve)))))))) => .underfunded deposit reserve
-      | (.inl (.inr (.inr (.inr (.inl (.inr (.inr (available, reserve)))))))) => .awaitsFunding available reserve
-      | (.inl (.inr (.inr (.inr (.inr (.inl ())))))) => .bookRefused
-      | (.inl (.inr (.inr (.inr (.inr (.inr (.inl ()))))))) => .zeroAmount
-      | (.inl (.inr (.inr (.inr (.inr (.inr (.inr ()))))))) => .blindWrite
-      | (.inr (.inl (.inl (.inl (.inl (.inl reason)))))) => .writeShape reason
-      | (.inr (.inl (.inl (.inl (.inl (.inr ())))))) => .stateCodec
-      | (.inr (.inl (.inl (.inl (.inr (.inl ())))))) => .stateMissing
-      | (.inr (.inl (.inl (.inl (.inr (.inr (.inl (tried, envelope)))))))) => .alreadyExhausted tried envelope
-      | (.inr (.inl (.inl (.inl (.inr (.inr (.inr (deadline, grace, height)))))))) => .notYetAbandonable deadline grace height
-      | (.inr (.inl (.inl (.inr (.inl (.inl ())))))) => .notExhausted
-      | (.inr (.inl (.inl (.inr (.inl (.inr (.inl ()))))))) => .notAnObject
-      | (.inr (.inl (.inl (.inr (.inl (.inr (.inr ()))))))) => .objectCodec
-      | (.inr (.inl (.inl (.inr (.inr (.inl ())))))) => .objectExists
-      | (.inr (.inl (.inl (.inr (.inr (.inr (.inl (pinned, requested)))))))) => .pinMismatch pinned requested
-      | (.inr (.inl (.inl (.inr (.inr (.inr (.inr reason))))))) => .objectWrite reason
-      | (.inr (.inl (.inr (.inl (.inl (.inl ())))))) => .pinUnpublished
-      | (.inr (.inl (.inr (.inl (.inl (.inr (.inl ()))))))) => .stateExists
-      | (.inr (.inl (.inr (.inl (.inl (.inr (.inr ()))))))) => .stateTypeNotData
-      | (.inr (.inl (.inr (.inl (.inr (.inl field)))))) => .lawField field
-      | (.inr (.inl (.inr (.inl (.inr (.inr (.inl ()))))))) => .draining
-      | (.inr (.inl (.inr (.inl (.inr (.inr (.inr ()))))))) => .awaitingRebirth
-      | (.inr (.inl (.inr (.inr (.inl (.inl reason)))))) => .migrationShape reason
-      | (.inr (.inl (.inr (.inr (.inl (.inr (.inl reason))))))) => .migrationFault reason
-      | (.inr (.inl (.inr (.inr (.inl (.inr (.inr ()))))))) => .frozen
-      | (.inr (.inl (.inr (.inr (.inr (.inl ())))))) => .notUpgradeAuthority
-      | (.inr (.inl (.inr (.inr (.inr (.inr (.inl ()))))))) => .policyLoosened
-      | (.inr (.inl (.inr (.inr (.inr (.inr (.inr index))))))) => .floorNotEntailed index
-      | (.inr (.inr (.inl (.inl (.inl (.inl ())))))) => .samePin
-      | (.inr (.inr (.inl (.inl (.inl (.inr ())))))) => .upgradeUnderWay
-      | (.inr (.inr (.inl (.inl (.inr (.inl ())))))) => .notDraining
-      | (.inr (.inr (.inl (.inl (.inr (.inr (.inl (patience, maximum)))))))) => .drainPatience patience maximum
-      | (.inr (.inr (.inl (.inl (.inr (.inr (.inr ()))))))) => .notSubtype
-      | (.inr (.inr (.inl (.inr (.inl (.inl fields)))))) => .fieldsForgotten fields
-      | (.inr (.inr (.inl (.inr (.inl (.inr (.inl count))))))) => .liveActivities count
-      | (.inr (.inr (.inl (.inr (.inl (.inr (.inr (deadline, height)))))))) => .notYetDeadline deadline height
-      | (.inr (.inr (.inl (.inr (.inr (.inl ())))))) => .rebirthDisposition
-      | (.inr (.inr (.inl (.inr (.inr (.inr (.inl reason))))))) => .rebirthTarget reason
-      | (.inr (.inr (.inl (.inr (.inr (.inr (.inr (domain, leaf)))))))) => .domainLawDenied domain leaf
-      | (.inr (.inr (.inr (.inl (.inl (.inl domain)))))) => .domainUnprojectable domain
-      | (.inr (.inr (.inr (.inl (.inl (.inr (.inl domain))))))) => .domainMissing domain
-      | (.inr (.inr (.inr (.inl (.inl (.inr (.inr domain))))))) => .domainCodec domain
-      | (.inr (.inr (.inr (.inl (.inr (.inl domain)))))) => .domainExists domain
-      | (.inr (.inr (.inr (.inl (.inr (.inr (.inl reason))))))) => .domainShape reason
-      | (.inr (.inr (.inr (.inl (.inr (.inr (.inr object))))))) => .domainMember object
-      | (.inr (.inr (.inr (.inr (.inl (.inl object)))))) => .memberFrozen object
-      | (.inr (.inr (.inr (.inr (.inl (.inr (.inl object))))))) => .memberDenied object
-      | (.inr (.inr (.inr (.inr (.inl (.inr (.inr object))))))) => .memberDomainsFull object
-      | (.inr (.inr (.inr (.inr (.inr (.inl object)))))) => .domainsDropped object
-      | (.inr (.inr (.inr (.inr (.inr (.inr (.inl (domain, member)))))))) => .domainUnindexed domain member
-      | (.inr (.inr (.inr (.inr (.inr (.inr (.inr (units, allowance)))))))) => .domainUncovered units allowance
+      | .inr _ => .stateRetired
+      | .inl wire => match wire with
+        | (.inl (.inl (.inl (.inl (.inl (.inl ())))))) => .packageMissing
+        | (.inl (.inl (.inl (.inl (.inl (.inr ())))))) => .packageIdentity
+        | (.inl (.inl (.inl (.inl (.inr (.inl reason)))))) => .packageType reason
+        | (.inl (.inl (.inl (.inl (.inr (.inr (.inl ()))))))) => .packageExists
+        | (.inl (.inl (.inl (.inl (.inr (.inr (.inr reason))))))) => .packageSource reason
+        | (.inl (.inl (.inl (.inr (.inl (.inl reason)))))) => .packageReplay reason
+        | (.inl (.inl (.inl (.inr (.inl (.inr (.inl ()))))))) => .inputType
+        | (.inl (.inl (.inl (.inr (.inl (.inr (.inr label))))))) => .outcomeProtocol label
+        | (.inl (.inl (.inl (.inr (.inr (.inl ())))))) => .recordExists
+        | (.inl (.inl (.inl (.inr (.inr (.inr (.inl ()))))))) => .recordMissing
+        | (.inl (.inl (.inl (.inr (.inr (.inr (.inr ()))))))) => .recordMisplaced
+        | (.inl (.inl (.inr (.inl (.inl (.inl ())))))) => .notAwaiting
+        | (.inl (.inl (.inr (.inl (.inl (.inr ())))))) => .awaitMismatch
+        | (.inl (.inl (.inr (.inl (.inr (.inl ())))))) => .checkpointDigest
+        | (.inl (.inl (.inr (.inl (.inr (.inr (.inl ()))))))) => .checkpointCodec
+        | (.inl (.inl (.inr (.inl (.inr (.inr (.inr ()))))))) => .recordRetired
+        | (.inl (.inl (.inr (.inr (.inl (.inl (patience, maximum))))))) => .patience patience maximum
+        | (.inl (.inl (.inr (.inr (.inl (.inr (.inl (object, pin)))))))) => .digestWide object pin
+        | (.inl (.inl (.inr (.inr (.inl (.inr (.inr (height, patience)))))))) => .heightWide height patience
+        | (.inl (.inl (.inr (.inr (.inr (.inl envelope)))))) => .uncovered envelope
+        | (.inl (.inl (.inr (.inr (.inr (.inr (.inl (needed, declared)))))))) => .heapUncovered needed declared
+        | (.inl (.inl (.inr (.inr (.inr (.inr (.inr (needed, declared)))))))) => .extractUncovered needed declared
+        | (.inl (.inr (.inl (.inl (.inl (.inl (stage, needed, declared))))))) => .workUncovered stage needed declared
+        | (.inl (.inr (.inl (.inl (.inl (.inr (available, price))))))) => .unfunded available price
+        | (.inl (.inr (.inl (.inl (.inr (.inl reason)))))) => .plan reason
+        | (.inl (.inr (.inl (.inl (.inr (.inr (.inl ()))))))) => .messageAwaitNeedsInbox
+        | (.inl (.inr (.inl (.inl (.inr (.inr (.inr reason))))))) => .planExtraction reason
+        | (.inl (.inr (.inl (.inr (.inl (.inl reason)))))) => .resultExtraction reason
+        | (.inl (.inr (.inl (.inr (.inl (.inr (.inl ()))))))) => .exhausted
+        | (.inl (.inr (.inl (.inr (.inl (.inr (.inr label))))))) => .responseType label
+        | (.inl (.inr (.inl (.inr (.inr (.inl ())))))) => .slotMissing
+        | (.inl (.inr (.inl (.inr (.inr (.inr (.inl ()))))))) => .slotFresh
+        | (.inl (.inr (.inl (.inr (.inr (.inr (.inr ()))))))) => .slotMismatch
+        | (.inl (.inr (.inr (.inl (.inl (.inl reason)))))) => .slot reason
+        | (.inl (.inr (.inr (.inl (.inl (.inr (.inl ()))))))) => .slotRetired
+        | (.inl (.inr (.inr (.inl (.inl (.inr (.inr (deadline, height)))))))) => .notYetDecided deadline height
+        | (.inl (.inr (.inr (.inl (.inr (.inl (due, height))))))) => .notYetDue due height
+        | (.inl (.inr (.inr (.inl (.inr (.inr (.inl ()))))))) => .bookUnavailable
+        | (.inl (.inr (.inr (.inl (.inr (.inr (.inr ()))))))) => .purseTaken
+        | (.inl (.inr (.inr (.inr (.inl (.inl ())))))) => .payerInvalid
+        | (.inl (.inr (.inr (.inr (.inl (.inr (.inl (deposit, reserve)))))))) => .underfunded deposit reserve
+        | (.inl (.inr (.inr (.inr (.inl (.inr (.inr (available, reserve)))))))) => .awaitsFunding available reserve
+        | (.inl (.inr (.inr (.inr (.inr (.inl ())))))) => .bookRefused
+        | (.inl (.inr (.inr (.inr (.inr (.inr (.inl ()))))))) => .zeroAmount
+        | (.inl (.inr (.inr (.inr (.inr (.inr (.inr ()))))))) => .blindWrite
+        | (.inr (.inl (.inl (.inl (.inl (.inl reason)))))) => .writeShape reason
+        | (.inr (.inl (.inl (.inl (.inl (.inr ())))))) => .stateCodec
+        | (.inr (.inl (.inl (.inl (.inr (.inl ())))))) => .stateMissing
+        | (.inr (.inl (.inl (.inl (.inr (.inr (.inl (tried, envelope)))))))) => .alreadyExhausted tried envelope
+        | (.inr (.inl (.inl (.inl (.inr (.inr (.inr (deadline, grace, height)))))))) => .notYetAbandonable deadline grace height
+        | (.inr (.inl (.inl (.inr (.inl (.inl ())))))) => .notExhausted
+        | (.inr (.inl (.inl (.inr (.inl (.inr (.inl ()))))))) => .notAnObject
+        | (.inr (.inl (.inl (.inr (.inl (.inr (.inr ()))))))) => .objectCodec
+        | (.inr (.inl (.inl (.inr (.inr (.inl ())))))) => .objectExists
+        | (.inr (.inl (.inl (.inr (.inr (.inr (.inl (pinned, requested)))))))) => .pinMismatch pinned requested
+        | (.inr (.inl (.inl (.inr (.inr (.inr (.inr reason))))))) => .objectWrite reason
+        | (.inr (.inl (.inr (.inl (.inl (.inl ())))))) => .pinUnpublished
+        | (.inr (.inl (.inr (.inl (.inl (.inr (.inl ()))))))) => .stateExists
+        | (.inr (.inl (.inr (.inl (.inl (.inr (.inr ()))))))) => .stateTypeNotData
+        | (.inr (.inl (.inr (.inl (.inr (.inl field)))))) => .lawField field
+        | (.inr (.inl (.inr (.inl (.inr (.inr (.inl ()))))))) => .draining
+        | (.inr (.inl (.inr (.inl (.inr (.inr (.inr ()))))))) => .awaitingRebirth
+        | (.inr (.inl (.inr (.inr (.inl (.inl reason)))))) => .migrationShape reason
+        | (.inr (.inl (.inr (.inr (.inl (.inr (.inl reason))))))) => .migrationFault reason
+        | (.inr (.inl (.inr (.inr (.inl (.inr (.inr ()))))))) => .frozen
+        | (.inr (.inl (.inr (.inr (.inr (.inl ())))))) => .notUpgradeAuthority
+        | (.inr (.inl (.inr (.inr (.inr (.inr (.inl ()))))))) => .policyLoosened
+        | (.inr (.inl (.inr (.inr (.inr (.inr (.inr index))))))) => .floorNotEntailed index
+        | (.inr (.inr (.inl (.inl (.inl (.inl ())))))) => .samePin
+        | (.inr (.inr (.inl (.inl (.inl (.inr ())))))) => .upgradeUnderWay
+        | (.inr (.inr (.inl (.inl (.inr (.inl ())))))) => .notDraining
+        | (.inr (.inr (.inl (.inl (.inr (.inr (.inl (patience, maximum)))))))) => .drainPatience patience maximum
+        | (.inr (.inr (.inl (.inl (.inr (.inr (.inr ()))))))) => .notSubtype
+        | (.inr (.inr (.inl (.inr (.inl (.inl fields)))))) => .fieldsForgotten fields
+        | (.inr (.inr (.inl (.inr (.inl (.inr (.inl count))))))) => .liveActivities count
+        | (.inr (.inr (.inl (.inr (.inl (.inr (.inr (deadline, height)))))))) => .notYetDeadline deadline height
+        | (.inr (.inr (.inl (.inr (.inr (.inl ())))))) => .rebirthDisposition
+        | (.inr (.inr (.inl (.inr (.inr (.inr (.inl reason))))))) => .rebirthTarget reason
+        | (.inr (.inr (.inl (.inr (.inr (.inr (.inr (domain, leaf)))))))) => .domainLawDenied domain leaf
+        | (.inr (.inr (.inr (.inl (.inl (.inl domain)))))) => .domainUnprojectable domain
+        | (.inr (.inr (.inr (.inl (.inl (.inr (.inl domain))))))) => .domainMissing domain
+        | (.inr (.inr (.inr (.inl (.inl (.inr (.inr domain))))))) => .domainCodec domain
+        | (.inr (.inr (.inr (.inl (.inr (.inl domain)))))) => .domainExists domain
+        | (.inr (.inr (.inr (.inl (.inr (.inr (.inl reason))))))) => .domainShape reason
+        | (.inr (.inr (.inr (.inl (.inr (.inr (.inr object))))))) => .domainMember object
+        | (.inr (.inr (.inr (.inr (.inl (.inl object)))))) => .memberFrozen object
+        | (.inr (.inr (.inr (.inr (.inl (.inr (.inl object))))))) => .memberDenied object
+        | (.inr (.inr (.inr (.inr (.inl (.inr (.inr object))))))) => .memberDomainsFull object
+        | (.inr (.inr (.inr (.inr (.inr (.inl object)))))) => .domainsDropped object
+        | (.inr (.inr (.inr (.inr (.inr (.inr (.inl (domain, member)))))))) => .domainUnindexed domain member
+        | (.inr (.inr (.inr (.inr (.inr (.inr (.inr (units, allowance)))))))) => .domainUncovered units allowance
     )
     (by intro value; cases value <;> rfl)
+
+private theorem activityRefusalStream_stateRetired_encode :
+    activityRefusalStream.encode .stateRetired = [2] := rfl
+
+private theorem activityRefusalStream_stateRetired_prefix (suffix : List UInt8) :
+    activityRefusalStream.decodePrefix (2 :: suffix) = some (.stateRetired, suffix) := rfl
 
 private def seatStoreRefusalStream : StreamCodec (SeatStore.Refusal) :=
   StreamCodec.xmap
@@ -3027,6 +3065,9 @@ def signingPlanCodec : LawfulCodec SigningPlan :=
 #assert_axioms native_end_closes_held_seats
 #assert_axioms gate_spent_refused
 #assert_axioms command_v9_refuses
+#assert_axioms sumWithStateRetired_existing
+#assert_axioms activityRefusalStream_stateRetired_encode
+#assert_axioms activityRefusalStream_stateRetired_prefix
 #assert_axioms rejectCodec_roundtrip
 #assert_axioms rejectStream_prefix_roundtrip
 #assert_axioms rejectCodec_injective
