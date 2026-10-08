@@ -166,7 +166,7 @@ row_upgrade() {
 row_hostupgrade() (
   local d=$SRC/native/resource-client/journey.d/jhostupgrade.sh
   local e=/srv/artifacts/e0a8ba21a39d92b470cc331fd16ea0408f608b1f
-  local artifacts=${ARTIFACT_ROOT:-/srv/artifacts} previous= probe
+  local artifacts=${ARTIFACT_ROOT:-/srv/artifacts} previous=
   local candidate pair n n1 expected rc status detail t overall=0 i=0
   [ -f "$d" ] || return 99
   echo prod-hostup >"$OUT/owner"
@@ -184,27 +184,23 @@ row_hostupgrade() (
   for candidate in "$e" "$SET"; do
     hostupgrade_ready "$candidate" || { echo "missing hostupgrade candidate input: $candidate" >&2; return 98; }
   done
-  probe=$(mktemp -d "$RUN/hostupgrade-epochs.XXXXXX") || return 1
-  trap 'rm -rf -- "$probe"' EXIT
-  # Read the epoch the candidate actually writes, without opening an old Store.
+  # Ask the candidate's Lean code for its epoch; no config or Store is needed.
   hostupgrade_epoch() {
-    local candidate=$1 tag=$2
-    jq '.clock.genesisNow = 1790000000 | .clock.maxStepSeconds = 300' \
-      "$candidate/genesis-params.example.json" >"$probe/$tag-params.json" || return 1
-    timeout 180 "$candidate/run.sh" init --manifest "$candidate/manifest.json" \
-      --params "$probe/$tag-params.json" --state "$probe/$tag" \
-      >"$OUT/epoch-$tag-init.out" 2>"$OUT/epoch-$tag-init.err" || return 1
-    python3 - "$probe/$tag/store/forward-link.sqlite3" >"$OUT/epoch-$tag.txt" <<'PY_EPOCH'
-import sqlite3, sys
-with sqlite3.connect('file:' + sys.argv[1] + '?mode=ro', uri=True) as db:
-    b = db.execute('select bytes from durable_seed where slot=1').fetchone()[0]
-end = b.index(255); size = sum(x * 255**i for i, x in enumerate(b[:end]))
-f = b[end+1:end+1+size]; prefix = b'DREGG.DURABLE.SEED\x02'
-assert len(f) == size and f.startswith(prefix), 'not a labelled v2 durable seed'
-print(f[len(prefix):].decode('ascii'))
-PY_EPOCH
+    local candidate=$1 tag=$2 binary rc
+    binary=$(jq -er '.host' "$candidate/manifest.json") || return 1
+    if timeout 30 "$binary" store-epoch >"$OUT/epoch-$tag.txt" 2>"$OUT/epoch-$tag.err"; then
+      [ -s "$OUT/epoch-$tag.txt" ] || return 1
+      return 0
+    else rc=$?; fi
+    # Historical Hosts print usage for this unknown verb. They cannot establish
+    # compatibility and must never qualify as a same-epoch predecessor.
+    if [ "$rc" = 1 ] && [ ! -s "$OUT/epoch-$tag.txt" ] && \
+      grep -q 'minidregg-host CONFIG.json' "$OUT/epoch-$tag.err"; then return 98; fi
+    return 1
   }
-  hostupgrade_epoch "$SET" tip || { echo "cannot read tip Store epoch" >&2; return 1; }
+  if hostupgrade_epoch "$SET" tip; then :; else
+    rc=$?; echo "cannot query tip Store epoch: $SET (exit $rc)" >&2; return "$rc"
+  fi
   # TIPS records '<sha> <main|green|next [+labels]> <tree>'. Search main history
   # newest first, before this tip when listed. A distinct main symlink is also
   # an input unless TIPS identifies it as newer than this tip.
@@ -233,7 +229,11 @@ PY_PREVIOUS
     hostupgrade_ready "$candidate" || continue
     i=$((i+1))
     printf '%s\n' "$candidate" >"$OUT/epoch-previous-$i.candidate"
-    hostupgrade_epoch "$candidate" "previous-$i" || { echo "cannot read previous main Store epoch: $candidate" >&2; return 1; }
+    if hostupgrade_epoch "$candidate" "previous-$i"; then :; else
+      rc=$?
+      if [ "$rc" = 98 ]; then continue; fi
+      echo "cannot query previous main Store epoch: $candidate" >&2; return 1
+    fi
     if cmp -s "$OUT/epoch-tip.txt" "$OUT/epoch-previous-$i.txt"; then previous=$candidate; break; fi
   done <"$OUT/previous-main-candidates.txt"
   : >"$OUT/subrows.tsv"
