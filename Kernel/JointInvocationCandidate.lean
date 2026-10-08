@@ -99,8 +99,8 @@ theorem candidate_encode_injective {Custody : Type} (custody : StreamCodec Custo
 including audience read guards, exact compute fees and signed event bytes. -/
 def projectionOfAccepted {Custody F : Type} [Field F] [DecidableEq F]
     {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
-    {ambient : Ambient} {durable : Durable} {command : Command}
-    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {ambient : Ambient} {ground : Ground deployment} {command : Command}
+    {prepared : PreparedInvocation deployment profile ambient ground command}
     {signed : SignedCommand} (accepted : AcceptedInvocation prepared signed)
     (shape : PhysicalShape prepared) (epoch generation : Nat) (custody : Custody) :
     Projection Custody :=
@@ -109,8 +109,8 @@ def projectionOfAccepted {Custody F : Type} [Field F] [DecidableEq F]
 
 @[simp] theorem projectionOfAccepted_intent {Custody F : Type} [Field F] [DecidableEq F]
     {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
-    {ambient : Ambient} {durable : Durable} {command : Command}
-    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {ambient : Ambient} {ground : Ground deployment} {command : Command}
+    {prepared : PreparedInvocation deployment profile ambient ground command}
     {signed : SignedCommand} (accepted : AcceptedInvocation prepared signed)
     (shape : PhysicalShape prepared) (epoch generation : Nat) (custody : Custody) :
     (projectionOfAccepted accepted shape epoch generation custody).intent.bind?
@@ -124,7 +124,12 @@ structure CurrentAdmission {Custody F : Type} [Field F] [DecidableEq F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (durable : Durable) (command : Command)
     (signed : SignedCommand) (projection : Projection Custody) where
-  prepared : PreparedInvocation deployment profile ambient durable command
+  /-- The joint candidate is admitted on the full shape (its YES proposal records the
+  source image): the ground of its preparation is the image's own loads. -/
+  directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable
+  authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot
+  prepared : PreparedInvocation deployment profile ambient
+    (Minidregg.Compiler.ServedBasis.Ground.full durable directory authority) command
   accepted : AcceptedInvocation prepared signed
   shape : PhysicalShape prepared
   domain_exact : projection.domain = deployment.domain

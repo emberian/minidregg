@@ -32,9 +32,9 @@ namespace CommonInteger
 def value {base width : Nat} (x : CommonInteger base width) : Nat :=
   Bignum.denoteNat base x.limbs
 
-theorem value_lt_capacity {base width : Nat} (hbase : 0 < base)
+theorem value_lt_capacity {base width : Nat}
     (x : CommonInteger base width) : x.value < base ^ width := by
-  have h := Bignum.denoteNat_lt_pow hbase x.limbs x.canonical.1
+  have h := Bignum.denoteNat_lt_pow x.limbs x.canonical.1
   simpa [value, x.canonical.2] using h
 
 /-- Canonical limb words are determined by their unreduced integer value. -/
@@ -144,13 +144,13 @@ theorem views_recompose_same {base width Q P : Nat} (x : Bridge base width Q P) 
       x.pView.residue + x.pView.quotient * P := by
   rw [← x.qView.recompose, ← x.pView.recompose]
 
-theorem qQuotient_lt_capacity {base width Q P : Nat} (hbase : 0 < base)
+theorem qQuotient_lt_capacity {base width Q P : Nat}
     (x : Bridge base width Q P) : x.qView.quotient < base ^ width :=
-  x.qView.quotient_lt x.q_pos (x.common.value_lt_capacity hbase)
+  x.qView.quotient_lt x.q_pos (x.common.value_lt_capacity)
 
-theorem pQuotient_lt_capacity {base width Q P : Nat} (hbase : 0 < base)
+theorem pQuotient_lt_capacity {base width Q P : Nat}
     (x : Bridge base width Q P) : x.pView.quotient < base ^ width :=
-  x.pView.quotient_lt x.p_pos (x.common.value_lt_capacity hbase)
+  x.pView.quotient_lt x.p_pos (x.common.value_lt_capacity)
 
 /-- **CRT uniqueness in the canonical interval.** Equal Q- and P-residues determine one
 integer below `Q*P`. -/

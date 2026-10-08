@@ -33,13 +33,14 @@ epoch, and the old version is in the append-only `revoked` plane, so
 `CredentialSignatureAdmission.select` (current key only, `live` standing only)
 never selects it again. -/
 theorem accepted_old_key_refused {laws : Minidregg.Kernel.ReceivingLaw.Laws Durable}
-    (admission : (receiver laws).Admitted env durable ingress) :
+    {m : Type → Type} {oracle : Minidregg.Compiler.CredentialSignatureIO.Oracle m}
+    (admission : (receiver laws oracle).Admitted env durable ingress) :
     let prepared : Prepared env durable ingress.command := admission.accepted.prepared
     currentSigningKey prepared.authorityPost.logical ingress.command.subject =
         some ingress.command.key ∧
       ingress.command.key.keyEpoch ≠ prepared.current.keyEpoch ∧
       prepared.authorityPost.logical ⟨.revoked, signingKeyRevocation prepared.current⟩ = some () :=
-  KeyPreRotation.old_key_refused_after_rotation (admitted_gate admission)
+  KeyPreRotation.old_key_refused_after_rotation admission.accepted.prepared.gated
 
 /-- **On the host: a stolen daily key cannot rotate.**  Whatever the native
 verifier says about the one presented signature, the host's gate refuses a
@@ -75,7 +76,7 @@ theorem accepted_grants_survive (prepared : Prepared env durable command) :
 #assert_axioms accepted_grants_survive
 #assert_axioms Prepared.precommitted
 #assert_axioms admitted_possession
-#assert_axioms admitted_gate
-#assert_axioms refused_possession_unauthenticated
+#assert_axioms Prepared.gated_by_possession
+#assert_axioms refused_possession_before_gate
 
 end Minidregg.Assurance.KeyPreRotationAudit

@@ -4,6 +4,9 @@ The immutable capsule must remain in operator custody throughout dispatch.
 This initial registry supports one old segment, not arbitrary carry chains. -/
 import Compiler.CarriedSegmentIO
 import Host.CarryInspection
+import Compiler.DurableHistoryStore
+import Compiler.ReceiptContinuityIO
+import Kernel.NativeHistorySelection
 
 namespace Minidregg.Host.RetainedSegmentInspection
 
@@ -87,14 +90,30 @@ def validate (config : NativeHost.Config) (current : NativeHost.Durable)
     | .ok true => pure ()
     | _ => throw (IO.userError "retained registry operator seal refused")
     let source ← liftResult (← CarriedSegmentIO.auditSource registry.capsule)
+    -- The current Store's history is read through its authenticated `Reader`
+    -- (the audited retained source is another Store, with its own image).
+    let ⟨_, reader⟩ ← liftResult (← DurableHistoryStore.readerOf config.transport
+      ResourceBirthCodec.rootBytes current)
     if DurableReceiverCodec.seedStream.encode source.durable.image.seed !=
-        DurableReceiverCodec.seedStream.encode current.image.seed then
+        DurableReceiverCodec.seedStream.encode reader.seed then
       return .error "retained registry original seed differs"
-    if (current.image.accepted.take body.cut.height).map DurableReceiverCodec.intentStream.encode !=
-        source.durable.image.accepted.map DurableReceiverCodec.intentStream.encode then
-      return .error "retained registry original prefix differs"
-    let some record := current.image.accepted[body.cut.height]?
-      | return .error "retained registry carry record absent"
+    -- The first `cut.height` current records equal the source's, window by
+    -- window; the source must be exhausted exactly at the cut.
+    let compared ← NativeHistorySelection.foldRange reader 1 body.cut.height
+      (source.durable.image.accepted)
+      fun remaining window =>
+        if window.length ≤ remaining.length &&
+            window.map DurableReceiverCodec.intentStream.encode ==
+              (remaining.take window.length).map DurableReceiverCodec.intentStream.encode then
+          .ok (remaining.drop window.length)
+        else .error "retained registry original prefix differs"
+    match compared with
+    | .error detail => return .error detail
+    | .ok leftover =>
+        if !leftover.isEmpty then return .error "retained registry original prefix differs"
+    let record ← match ← reader.atHeight (body.cut.height + 1) with
+      | .error refusal => return .error s!"retained registry carry record refused: {refusal.message}"
+      | .ok read => pure read.record
     if record.transactionId != body.id || record.event.eventId != body.id ||
         record.event.canonicalBytes != body.bytes then
       return .error "retained registry carry event differs"
@@ -103,9 +122,11 @@ def validate (config : NativeHost.Config) (current : NativeHost.Durable)
     let expected := DurableReceiver.IntentRecord.ofIntent (intent source.durable.snapshot body changes)
     if DurableReceiverCodec.intentStream.encode record != DurableReceiverCodec.intentStream.encode expected then
       return .error "retained registry carry intent differs"
-    let selectedPrefix ← liftResult (DurableReceiverIO.loadImage ResourceBirthCodec.rootBytes
-      current.logStart (current.prefixImage registry.edge.targetStart.height))
-    if pointOf selectedPrefix != registry.edge.targetStart then
+    let selectedPoint ← match ← ReceiptContinuityIO.atHeight reader current
+        registry.edge.targetStart.height with
+      | .error detail => return .error detail
+      | .ok witness => pure (⟨witness.point.height, witness.point.worldRoot, witness.chain⟩ : Point)
+    if selectedPoint != registry.edge.targetStart then
       return .error "retained registry new start differs"
     let prepared ← liftResult (CarriedSegmentIO.prepareDerived config source
       registry.trustedOperator body changes)

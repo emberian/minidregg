@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# scripts/pipeline/shared-remote -- one shared git remote per burst, on the gate box (no GitHub credentials).
+#
+#   shared-remote init     create $PIPELINE_GIT (/srv/git/minidregg.git) bare, install its hook, sync, timer
+#   shared-remote sync     fast-forward main, next, green from GitHub (never moves a ref GitHub does not descend from)
+#   shared-remote publish main|next|green SHA SRC_REPO   the keeper's authoritative move (next may rewrite)
+#
+# Lanes push their work as branches lane/<name> (the hook refuses every other ref, so main/next/green
+# only move by the keeper's `publish` or a fast-forward `sync` from GitHub), and review/integration is a `git fetch`:
+#   from the gate box:    git push /srv/git/minidregg.git HEAD:lane/<name>
+#   from the sibling box: git push burst2-a:/srv/git/minidregg.git HEAD:lane/<name>   (peer key, box-peer-gate)
+#   from the Mac:         git fetch ember@<gate>:/srv/git/minidregg.git 'lane/*:refs/remotes/burst2/lane/*'
+# A deleted box takes the remote with it: hbox mirrors it on a timer (pull-burst-remote, run there).
+set -euo pipefail
+PIPELINE_PROG=shared-remote
+. "$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/lib.sh"
+G=${PIPELINE_GIT:-/srv/git/minidregg.git}
+sync() {
+  # Fast-forward only: the keeper publishes main/next/green HERE first (`publish`), GitHub is a
+  # mirror that may lag or be down. A GitHub ref that does not descend from ours never moves ours.
+  local tmp=refs/github-mirror
+  git -C "$G" fetch -q --prune "$PIPELINE_REPO_URL" "+refs/heads/main:$tmp/main" "+refs/heads/next:$tmp/next" "+refs/tags/green:$tmp/green" || { pipeline_log "sync: GitHub fetch failed; refs unchanged"; return 0; }
+  local r ours theirs dst
+  for r in main next green; do
+    [ "$r" = green ] && dst=refs/tags/green || dst=refs/heads/$r
+    theirs=$(git -C "$G" rev-parse -q --verify "$tmp/$r^{commit}") || continue
+    ours=$(git -C "$G" rev-parse -q --verify "$dst^{commit}" || true)
+    if [ -z "$ours" ] || git -C "$G" merge-base --is-ancestor "$ours" "$theirs"; then
+      git -C "$G" update-ref "$dst" "$theirs"
+    fi
+  done
+  pipeline_log "synced (ff-only) main $(git -C "$G" rev-parse --short=12 main) next $(git -C "$G" rev-parse --short=12 next) green $(git -C "$G" rev-parse --short=12 green)"
+}
+publish() {
+  # publish REF SHA SRC_REPO : the keeper moves main|next|green to SHA (fetched from SRC_REPO, a
+  # local clone holding it). next may be rewritten (the train rebases it); main and green only
+  # fast-forward. This is the authoritative move; GitHub follows when it accepts pushes.
+  local ref=$1 sha=$2 src=$3 dst cur
+  case "$ref" in main|next) dst=refs/heads/$ref ;; green) dst=refs/tags/green ;; *) pipeline_die "publish: ref must be main, next or green" ;; esac
+  sha=$(git -C "$src" rev-parse -q --verify "$sha^{commit}") || pipeline_die "publish: no commit $2 in $src"
+  git -C "$G" fetch -q "$src" "$sha" || pipeline_die "publish: $sha not fetchable from $src"
+  sha=$(git -C "$G" rev-parse --verify "$sha^{commit}")
+  cur=$(git -C "$G" rev-parse -q --verify "$dst^{commit}" || true)
+  if [ "$ref" != next ] && [ -n "$cur" ] && ! git -C "$G" merge-base --is-ancestor "$cur" "$sha"; then
+    pipeline_die "publish: $ref $cur -> $sha is not a fast-forward"
+  fi
+  git -C "$G" update-ref "$dst" "$sha"
+  pipeline_log "published $ref $(git -C "$G" rev-parse --short=12 "$dst")"
+}
+case "${1:-}" in
+  init)
+    [ -d "$G" ] || { mkdir -p "$(dirname "$G")"; git init -q --bare "$G"; }
+    git -C "$G" config receive.denyNonFastForwards false     # a lane may rewrite its own branch
+    git -C "$G" config receive.denyDeletes false
+    git -C "$G" config uploadpack.allowAnySHA1InWant true
+    cat >"$G/hooks/pre-receive" <<'HOOK'
+#!/bin/sh
+# Only lane/<name> branches are pushed here; main, next and green move only by `shared-remote sync`.
+rc=0
+while read -r old new ref; do
+  case "$ref" in refs/heads/lane/?*) ;; *) echo "shared-remote: refused $ref (push lane/<name> branches only)" >&2; rc=1 ;; esac
+done
+exit $rc
+HOOK
+    chmod +x "$G/hooks/pre-receive"
+    sync
+    mkdir -p ~/.config/systemd/user
+    printf '[Unit]\nDescription=shared-remote sync from GitHub\n[Service]\nType=oneshot\nExecStart=%s sync\n' \
+      "$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/shared-remote" >~/.config/systemd/user/shared-remote-sync.service
+    printf '[Unit]\nDescription=shared-remote sync every 5 min\n[Timer]\nOnBootSec=1min\nOnUnitActiveSec=5min\n[Install]\nWantedBy=timers.target\n' \
+      >~/.config/systemd/user/shared-remote-sync.timer
+    systemctl --user daemon-reload && systemctl --user enable --now shared-remote-sync.timer >/dev/null
+    echo "shared-remote: $G (timer shared-remote-sync.timer)" ;;
+  sync) sync ;;
+  publish) shift; [ $# = 3 ] || pipeline_die "usage: shared-remote publish main|next|green SHA SRC_REPO"; publish "$@" ;;
+  *) pipeline_die "usage: shared-remote init|sync|publish" ;;
+esac

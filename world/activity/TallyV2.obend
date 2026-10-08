@@ -1,0 +1,65 @@
+edition ObjectiveBend 1
+# The Tally's next version, the target of the upgrade acceptance (Kernel/ObjectiveActivityUpgrade).
+# Its declared state gains a field, `upgrades`, so the old state type {total} is NOT a value
+# subtype of the new one (records are closed): the upgrade needs a migration, `migrate`, which
+# reads the old `total` (linearity: every old field is read or dropped) and starts `upgrades` at 1.
+# The activity itself is the Tally's: same input (`Start`), so a Tally chosen for REBIRTH is re-born
+# here from its stored input, on the migrated state, and keeps counting from the migrated total.
+record OldState:
+  total: Nat
+record State:
+  total: Nat
+  upgrades: Nat
+sum EditNat:
+  keep: {}
+  set: Nat
+  add: Nat
+record Write:
+  total: EditNat
+record Start:
+  init: EditNat
+  decider: Nat
+record Ask:
+  decider: Nat
+record At:
+  at: Nat
+sum Source:
+  reply: Ask
+  height: At
+record Await:
+  write: Write
+  on: Source
+  patience: Nat
+sum Plan:
+  await: Await
+record Reply:
+  amount: Nat
+sum Outcome:
+  reply: Reply
+  refused: {}
+  unknown: {}
+  timedOut: {}
+  broken: {}
+  upgraded: {}
+record View:
+  version: Nat
+  state: State
+record Step:
+  outcome: Outcome
+  view: View
+sum Resumed:
+  resumed: Step
+def migrate(old: OldState) -> State:
+  {total: old.total, upgrades: 1n}
+def ask(start: Start, write: Write) -> Activity<Plan, Resumed, Nat>:
+  match perform(Plan.await({write: write, on: Source.reply({decider: start.decider}), patience: 4n})):
+    case resumed(step):
+      match step.outcome:
+        case reply(r): ask(start, {total: EditNat.add(r.amount)})
+        case unknown(_): ask(start, {total: EditNat.keep()})
+        case refused(_): step.view.state.total
+        case timedOut(_): step.view.state.total
+        case broken(_): step.view.state.total
+        case upgraded(_): step.view.state.total
+def tally(start: Start) -> Activity<Plan, Resumed, Nat>:
+  ask(start, {total: start.init})

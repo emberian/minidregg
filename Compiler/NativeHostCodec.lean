@@ -317,6 +317,9 @@ clause of the law (`LawLeaf`). It does not contain internal snapshots,
 journals, capability records or intents. -/
 inductive Outcome where
   | confirmed (kind : DurableReceiverIO.Confirmation) (receipt : Receipt)
+  /-- A committed charged failure: the receipt is durable, while `cause` is
+  the source receiver's canonical typed-cause encoding. -/
+  | charged (kind : DurableReceiverIO.Confirmation) (receipt : Receipt) (cause : List UInt8)
   | refused (reason : RefusalReason) (phase : List UInt8) (detail : List UInt8)
       (leaf : Option LawLeaf := none)
   | contention
@@ -325,32 +328,37 @@ inductive Outcome where
   | absent
 
 abbrev OutcomeWire := Sum (DurableReceiverIO.Confirmation × Receipt)
-  (Sum (RefusalReason × List UInt8 × List UInt8 × Option LawLeaf)
-    (Sum Bool (Sum (List UInt8) (List UInt8))))
+  (Sum (DurableReceiverIO.Confirmation × Receipt × List UInt8)
+    (Sum (RefusalReason × List UInt8 × List UInt8 × Option LawLeaf)
+      (Sum Bool (Sum (List UInt8) (List UInt8)))))
 
 def Outcome.toWire : Outcome → OutcomeWire
   | .confirmed kind receipt => .inl (kind, receipt)
-  | .refused reason phase detail leaf => .inr (.inl (reason, phase, detail, leaf))
-  | .contention => .inr (.inr (.inl false))
-  | .absent => .inr (.inr (.inl true))
-  | .unavailable detail => .inr (.inr (.inr (.inl detail)))
-  | .uncertain detail => .inr (.inr (.inr (.inr detail)))
+  | .charged kind receipt cause => .inr (.inl (kind, receipt, cause))
+  | .refused reason phase detail leaf => .inr (.inr (.inl (reason, phase, detail, leaf)))
+  | .contention => .inr (.inr (.inr (.inl false)))
+  | .absent => .inr (.inr (.inr (.inl true)))
+  | .unavailable detail => .inr (.inr (.inr (.inr (.inl detail))))
+  | .uncertain detail => .inr (.inr (.inr (.inr (.inr detail))))
 
 def Outcome.ofWire : OutcomeWire → Outcome
   | .inl (kind, receipt) => .confirmed kind receipt
-  | .inr (.inl (reason, phase, detail, leaf)) => .refused reason phase detail leaf
-  | .inr (.inr (.inl false)) => .contention
-  | .inr (.inr (.inl true)) => .absent
-  | .inr (.inr (.inr (.inl detail))) => .unavailable detail
-  | .inr (.inr (.inr (.inr detail))) => .uncertain detail
+  | .inr (.inl (kind, receipt, cause)) => .charged kind receipt cause
+  | .inr (.inr (.inl (reason, phase, detail, leaf))) => .refused reason phase detail leaf
+  | .inr (.inr (.inr (.inl false))) => .contention
+  | .inr (.inr (.inr (.inl true))) => .absent
+  | .inr (.inr (.inr (.inr (.inl detail)))) => .unavailable detail
+  | .inr (.inr (.inr (.inr (.inr detail)))) => .uncertain detail
 
 def outcomeStream : StreamCodec Outcome :=
   StreamCodec.xmap
     (StreamCodec.sum (StreamCodec.product confirmationStream receiptStream)
-      (StreamCodec.sum (StreamCodec.product RefusalReason.stream
-          (StreamCodec.product bytesStream
-            (StreamCodec.product bytesStream (StreamCodec.option LawLeaf.stream))))
-        (StreamCodec.sum StreamCodec.bool (StreamCodec.sum bytesStream bytesStream))))
+      (StreamCodec.sum
+        (StreamCodec.product confirmationStream (StreamCodec.product receiptStream bytesStream))
+        (StreamCodec.sum (StreamCodec.product RefusalReason.stream
+            (StreamCodec.product bytesStream
+              (StreamCodec.product bytesStream (StreamCodec.option LawLeaf.stream))))
+          (StreamCodec.sum StreamCodec.bool (StreamCodec.sum bytesStream bytesStream)))))
     Outcome.toWire Outcome.ofWire (by intro value; cases value <;> rfl)
 
 def outcomeCodec : LawfulCodec Outcome :=
@@ -389,6 +397,18 @@ theorem v3_outcome_refused (payload : List UInt8) :
   have lengthExact : outcomeFrame.length = retiredOutcomeFrameV3.length := by decide +kernel
   have different : retiredOutcomeFrameV3 ≠ outcomeFrame := by decide +kernel
   have raw : (framedRaw outcomeFrame outcomeStream).decode (retiredOutcomeFrameV3 ++ payload) = none := by
+    simp [framedRaw, lengthExact, different]
+  simp [outcomeCodec, framed, ResourceBirthCodec.strictCodec, raw]
+
+def retiredOutcomeFrameV4 : List UInt8 := "DREGG/NATIVE-HOST/OUTCOME/v4".toUTF8.toList
+
+/-- A version-4 outcome has no charged terminal form and refuses to decode. -/
+theorem v4_outcome_refused (payload : List UInt8) :
+    outcomeCodec.decode (retiredOutcomeFrameV4 ++ payload) = none := by
+  have lengthExact : outcomeFrame.length = retiredOutcomeFrameV4.length := by decide +kernel
+  have different : retiredOutcomeFrameV4 ≠ outcomeFrame := by decide +kernel
+  have raw : (framedRaw outcomeFrame outcomeStream).decode
+      (retiredOutcomeFrameV4 ++ payload) = none := by
     simp [framedRaw, lengthExact, different]
   simp [outcomeCodec, framed, ResourceBirthCodec.strictCodec, raw]
 
@@ -457,6 +477,12 @@ theorem outcome_refusal_reason_decoded (reason : RefusalReason) (phase detail : 
     outcomeCodec.decode (outcomeCodec.encode (.refused reason phase detail leaf)) =
       some (.refused reason phase detail leaf) := outcomeCodec.decode_encode _
 
+/-- A charged outcome retains its canonical typed-cause bytes. -/
+theorem outcome_charged_decoded (kind : DurableReceiverIO.Confirmation) (receipt : Receipt)
+    (cause : List UInt8) :
+    outcomeCodec.decode (outcomeCodec.encode (.charged kind receipt cause)) =
+      some (.charged kind receipt cause) := outcomeCodec.decode_encode _
+
 theorem outcome_canonical {bytes : List UInt8} {value : Outcome}
     (decoded : outcomeCodec.decode bytes = some value) : outcomeCodec.encode value = bytes :=
   framed_canonical _ _ decoded
@@ -499,4 +525,3 @@ theorem v5_signingPlan_refused (payload : List UInt8) :
   simp [signingPlanCodec, framed, ResourceBirthCodec.strictCodec, raw]
 
 end Minidregg.Compiler.NativeHostCodec
-

@@ -69,7 +69,23 @@ def validate (config : NativeHost.Config) (origin : Opened config) (expected : C
       | .ok target =>
           have imageExact := DurableReceiverIO.loadImage_image built
           if recordsExact : target.image.accepted.map DurableCheckpointCodec.recordFrame.encode = sourceRecords block then
-            match ← NativeHostReplay.verifyLoaded config target with
+            -- A proposed prefix has no Store: the walk reads its history through the Reader of a
+            -- throwaway Store holding exactly these records (`scratchReader`). The proposal carries
+            -- no prior commitment, so the scratch commitment is the prefix's own height and root;
+            -- what makes the result authoritative is the walk re-admitting every record at its
+            -- original height, over exactly the block's records (`recordsExact`). A scratch Store
+            -- that cannot be written or read is an availability failure (`retry`), never "absent".
+            let checkedValue ← IO.FS.withTempDir fun directory => do
+              let scratch ← config.scratch directory
+              let commitment : DurableHistoryStore.Commitment :=
+                ⟨target.image.accepted.length,
+                  NativeHostCodec.worldRoot config.deployment.domain config.profile.semantics target.image,
+                  NativeHostCodec.worldRoot config.deployment.domain config.profile.semantics⟩
+              match ← DurableHistoryStore.scratchReader scratch.physicalTransport ResourceBirthCodec.rootBytes
+                  target.image target.logStart commitment with
+              | .error detail => return .error ⟨0, s!"scratch history Store: {detail}"⟩
+              | .ok ⟨_, reader⟩ => NativeHostReplay.verifyLoaded config reader target
+            match checkedValue with
             | .error failure => return .retry failure
             | .ok checked =>
                 have pinnedAnchor : expected.instanceBytes = anchorBytes config.genesisHeight target.image.seed := by

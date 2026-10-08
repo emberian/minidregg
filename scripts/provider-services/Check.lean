@@ -10,10 +10,15 @@ open Minidregg.Compiler.NativeHostCodec
 
 set_option autoImplicit false
 
-private def tariff : Json := Json.mkObj [
-  ("version", toJson "1"), ("model", toJson "fixture"),
-  ("inputMicroPerMillion", toJson "1"),
+private def rate : Json := Json.mkObj [
+  ("perOp", toJson "1"), ("inputMicroPerMillion", toJson "1"),
   ("outputMicroPerMillion", toJson "1")]
+
+/-- A v2 tariff by route (`ProviderUsage.parseTariff`): user pays only its per-op fee. -/
+private def tariff : Json := Json.mkObj [
+  ("version", toJson "2"), ("model", toJson "fixture"),
+  ("routes", Json.mkObj [("user", Json.mkObj [("perOp", toJson "4")]),
+    ("pool", rate), ("homelab", rate)])]
 
 private def service (resource : Nat) : ProviderMeteringSettings :=
   ⟨resource, tariff⟩
@@ -39,7 +44,7 @@ private def call (targets : List Nat) : List UInt8 := Id.run do
        schemaVersion := 1, expectedTargetRoot := ⟨2⟩,
        payload := .scalar [] } : DeclaredResourceController.Target)
   let command : DeclaredResourceController.Command :=
-    { subject := ⟨3⟩, expectedAuthorityRoot := ⟨4⟩,
+    { subject := ⟨3⟩,
       nonce := 5, targets := targets.map target }
   let signed : DeclaredResourceController.SignedCommand :=
     { commandBytes := DeclaredResourceController.commandCodec.encode command,
@@ -73,22 +78,22 @@ def check : IO Unit := do
     throw (IO.userError "ambiguous signed provider targets accepted")
   let .ok services := checkedProviderServices [service 7950, service 7951]
     | throw (IO.userError "provider tariffs did not parse")
-  let (_, firstTariff) :: _ := services
-    | throw (IO.userError "provider tariff list was empty")
-  let v1 := quoteFrame
-    "{\"status\":\"200\",\"contentType\":\"application/json\",\"reserve\":\"5\"}"
-  let v2 := quoteFrame
-    "{\"version\":\"2\",\"providerResourceId\":\"7951\",\"status\":\"200\",\"contentType\":\"application/json\",\"reserve\":\"5\"}"
-  unless (ProviderUsage.quotePayload 7950 firstTariff v1).isOk do
-    throw (IO.userError "legacy scalar metering changed")
-  unless (ProviderUsage.quotePayloadV2 services v2).isOk do
-    throw (IO.userError "configured provider v2 quote refused")
-  unless refused (ProviderUsage.quotePayloadV2 services
-      (quoteFrame "{\"version\":\"2\",\"providerResourceId\":\"7999\",\"status\":\"200\",\"contentType\":\"application/json\",\"reserve\":\"5\"}")) do
+  let v3 := fun (provider route : String) =>
+    "{\"version\":\"3\",\"providerResourceId\":\"" ++ provider ++
+      "\",\"route\":\"" ++ route ++
+      "\",\"status\":\"200\",\"contentType\":\"application/json\",\"reserve\":\"5\"}"
+  unless (ProviderUsage.quotePayload services (quoteFrame (v3 "7951" "pool"))).isOk do
+    throw (IO.userError "configured provider pool quote refused")
+  let .ok userQuote := ProviderUsage.quotePayload services (quoteFrame (v3 "7951" "user"))
+    | throw (IO.userError "configured provider user quote refused")
+  unless userQuote.getObjValAs? String "charge" == .ok "4" do
+    throw (IO.userError "an own-key (user) call is charged other than its per-op fee")
+  unless refused (ProviderUsage.quotePayload services (quoteFrame (v3 "7999" "pool"))) do
     throw (IO.userError "unconfigured provider quote accepted")
-  unless refused (ProviderUsage.quotePayloadV2 services (quoteFrame
-      "{\"version\":\"2\",\"providerResourceId\":\"7951\",\"status\":\"200\",\"contentType\":\"application/json\",\"reserve\":\"5\"}"
-      "wrong-model")) do
+  unless refused (ProviderUsage.quotePayload services (quoteFrame (v3 "7951" "elsewhere"))) do
+    throw (IO.userError "unknown route accepted")
+  unless refused (ProviderUsage.quotePayload services
+      (quoteFrame (v3 "7951" "pool") "wrong-model")) do
     throw (IO.userError "wrong request model accepted")
   let a := lifetime 31 41
   let b := lifetime 32 42

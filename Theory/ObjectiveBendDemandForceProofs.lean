@@ -13,7 +13,7 @@ at the extended address types (`typed_yieldedPlanWith`). With `typed_settle` and
 
 What this module does NOT prove: that resuming the extraction's state ends as resuming
 the yielded state (sharing transparency). That is `Kernel.ObjectiveResumeContract.
-ForcingTransparent`, an open obligation. -/
+forcingTransparent_of_yieldedPlan`, over `Theory.ObjectiveBendDemandForcing*`. -/
 import Theory.ObjectiveBendDemandSettleProofs
 import Theory.ObjectiveBendDemandPreservation
 namespace Minidregg.Theory.ObjectiveBendDemandCollect
@@ -255,7 +255,7 @@ theorem good_forceWith {assumptions : Assumptions} {policy : State → Bool} (li
 
 theorem good_foldlM {assumptions : Assumptions} {base : Nat}
     {step : List (String × Data) × State × Budget → String × Nat →
-      Except (Failure × State) (List (String × Data) × State × Budget)}
+      Except (Failure × State × Budget) (List (String × Data) × State × Budget)}
     (stepGood : ∀ (acc : List (String × Data)) (st : State) (b : Budget) (field : String × Nat)
         (out : List (String × Data) × State × Budget) (types : AddressTypes),
       HeapGood assumptions types st.heap → base ≤ st.heap.size → field.2 < base →
@@ -445,10 +445,12 @@ Plan that is a small closure over a cell the continuation also holds becomes, fo
 the whole structure that closure computes, all of it live. Here the Plan reads cell 0,
 a suspended record of three fields; the stack holds cell 0 too. Unforced and collected:
 two cells. Forced, settled and collected: five (cell 0's record, the Plan cell and the
-three field cells, all reachable from the stack through cell 0). So a resumed forced
-checkpoint may run out of heap where the unforced one would not, and the resume
-premise `Kernel.ObjectiveResumeContract.ForcingTransparent` is stated with heap headroom
-of the forced state's size. -/
+three field cells, all reachable from the stack through cell 0). So under heap limits
+counted from zero a resumed forced checkpoint may run out of heap where the unforced one
+would not (`Kernel.ObjectiveResumeContract.absolute_limits_refuted`); the kernel counts a
+segment's limits from its own heap end (`limitsPast`, `Kernel.ObjectiveActivity.
+segmentLimits`), under which it resumes exactly (`ObjectiveResumeContract.
+largerYield_resumes_exactly`, `runSegment_stored_complete`). -/
 
 def largerYield : State :=
   ⟨#[.suspended ⟨.record [("a", .nat 1), ("b", .nat 2), ("c", .nat 3)], []⟩, .suspended ⟨.bound 0, [0]⟩],

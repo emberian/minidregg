@@ -31,7 +31,9 @@ impl Dir {
         if fd<0{return Err(io::Error::last_os_error())}
         let file=unsafe{File::from_raw_fd(fd)};
         let m=file.metadata()?;
-        if !m.is_dir() || !allowed.contains(&m.uid()) || m.mode()&0o022!=0 {
+        // `0` in `allowed` is root, whichever account holds root (src/os.rs).
+        let owner_allowed=allowed.iter().any(|a| *a==m.uid() || (*a==0 && crate::os::root_owner(m.uid())));
+        if !m.is_dir() || !owner_allowed || m.mode()&0o022!=0 {
             return Err(invalid("volume directory retained identity refused"));
         }
         Ok(Self(file))

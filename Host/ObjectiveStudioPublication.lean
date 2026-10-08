@@ -68,7 +68,14 @@ def main (args : List String) : IO UInt32 := do
     let offered ← read offeredPath 4194304
     let expected ← read expectedPath 4194304
     let codec ← read codecPath 1024
-    match Minidregg.Host.ObjectivePackageAuthor.author package replayedPackage offered expected codec with
+    -- The package's enforced laws, read the way the receiver reads them: the front end's replay of the
+    -- package's own sources (`ObjectiveBendPublication.publishedLaws`), never a second parse.
+    let some decoded := Minidregg.Compiler.ObjectiveSourcePackage.decode package
+      | IO.eprintln "canonical Objective package required";return (2 : UInt32)
+    let laws ← match Minidregg.Compiler.ObjectiveBendPublication.publishedLaws decoded with
+      | .ok laws => pure laws
+      | .error d => IO.eprintln (d.stage ++ ": " ++ d.message);return (2 : UInt32)
+    match Minidregg.Host.ObjectivePackageAuthor.author package replayedPackage offered expected codec laws with
     | .error reason => IO.eprintln reason;return (2 : UInt32)
     | .ok json => IO.FS.writeFile outputPath json.compress;IO.println json.compress;return (0 : UInt32)
   catch error => IO.eprintln error.toString;return (2 : UInt32)

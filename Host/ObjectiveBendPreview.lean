@@ -37,6 +37,7 @@ def valueJson : RuntimeValue → Json
   | .variant label _ => Json.mkObj [("tag",toJson "variant"),("label",toJson label),("status",toJson "unforced payload")]
 
 def failureName : Failure → String
+  | .tickExhausted => "tickExhausted"
   | .budget => "budget" | .duplicateField => "duplicateField" | .executableValue => "executableValue"
   | .suspended => "suspended" | .divergent => "divergent" | .refused => "refused" | .yielded => "yielded"
 

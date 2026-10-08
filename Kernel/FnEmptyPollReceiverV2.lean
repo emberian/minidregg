@@ -40,7 +40,10 @@ def confirmReadback (config : NativeHost.Config) (ingress : Ingress)
   match ← NativeHost.openExisting config with
   | .error _ => return .uncertain "empty fn poll readback unavailable"
   | .ok opened =>
-      match ← NativeHostReplay.verifyLoaded config opened.durable with
+      let ⟨_, reader⟩ ← match ← NativeHost.historyReaderOfDurable config opened.durable with
+        | .error refusal => return .uncertain ("empty fn poll readback history reader: " ++ refusal.detail)
+        | .ok reader => pure reader
+      match ← NativeHostReplay.verifyLoaded config reader opened.durable with
       | .error _ => return .uncertain "empty fn poll readback unverified"
       | .ok verified =>
           match lookupVerified verified ingress with

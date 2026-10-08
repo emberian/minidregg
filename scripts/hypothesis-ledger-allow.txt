@@ -62,7 +62,7 @@ Minidregg.Selvage.adaptiveIncrement_sound_via_log  [1 consumers; poles: ref/cond
 Minidregg.Selvage.OracleLogProgramLinked  [1 consumers; poles: ref] proof-system soundness/proximity premise (Selvage research); task 01a0f802-02f0
 Minidregg.Assurance.SemanticHistoryRecursiveAir.SecurityEvidence  [1 consumers; poles: cond] security-evidence/refinement bundle over an opaque verifier or backend; task 01a0f802-02f0
 Minidregg.Selvage.FsKnowledgeSoundRO  [1 consumers; poles: sat/cond] proof-system soundness/proximity premise (Selvage research); task 01a0f802-02f0
-Minidregg.Compiler.PayEnrolSignatureIO.SshsigRefinement  [1 consumers; poles: cond] security-evidence/refinement bundle over an opaque verifier or backend; task 01a0f802-02f0
+Minidregg.Kernel.PayEnrolReceiver.SshsigRefinement  [1 consumers; poles: cond] security-evidence/refinement bundle over an opaque verifier or backend; task 01a0f802-02f0
 Minidregg.Assurance.SemanticHistoryBcsGame.HistoryBcsBad  [1 consumers; poles: none] commitment binding/collision premise or event; task 01a0f802-02f0
 Minidregg.Assurance.HyperdocumentLinkPageDurableWeld.ContentPairSecurityCeiling  [1 consumers; poles: cond] commitment binding/collision premise or event; task 01a0f802-02f0
 Minidregg.Assurance.RawHistoryBcsOpenings.RawHistoryBcsTranscript.ColumnsExact  [1 consumers; poles: cond] both poles exist but only conditionally (honestTranscript_columnsExact / equivocalTranscript_not_columnsExact carry code hypotheses); name one closed instance each; task 01a0f802-02f0

@@ -205,7 +205,7 @@ def auditHeaderJson (config : NativeHost.Config) (opened : NativeHost.Opened con
     ("domain", decimal config.deployment.domain.value),
     ("semantics", decimal config.profile.semantics.value),
     ("expectedSeed", decimal config.expectedSeed.value),
-    ("auditedHeight", decimal opened.durable.image.accepted.length),
+    ("auditedHeight", decimal opened.durable.height),
     ("worldRoot", decimal opened.durable.worldRoot.value),
     ("ledger", .mkObj [("well", .str (toString ledger.well))])]
 

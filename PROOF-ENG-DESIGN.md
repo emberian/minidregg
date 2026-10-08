@@ -105,20 +105,25 @@ every offender), and re-export it from `Theory.AssertAxioms` (no consumer change
 402 hand-typed `#guard_msgs in #print axioms` pins in `Theory/ObjectiveBend*` become one
 `#assert_axioms` line per section. The *exact* axiom set per declaration — the only
 information the hand-typed text carried beyond "within the standard three" — moves to
-the generated index `scripts/gates/objective-axioms.pin` (§1d), which covers every
+the generated contract manifests `scripts/gates/objective-manifest/` (§1d), which cover every
 declaration, not the 402 someone remembered.
 
 ## 1(d). Statement-stability gate
 
-`scripts/ObjectiveSnapshot.lean` (imports `ObjectiveProofs`) prints one line per
-non-generated declaration whose module starts `Theory.ObjectiveBend`: kind, name,
-elaborated type pretty-printed with `pp.fullNames` at unbounded width (whitespace
-collapsed), and for `Prop`-valued definitions their body (a hypothesis's meaning *is* its
-body). A second file lists each theorem's exact axiom set. The checked-in copies are
-`scripts/gates/objective-statements.snapshot` and `scripts/gates/objective-axioms.pin`.
-An *announced* change is a commit that regenerates them (`--update`); any other
-difference fails. The elaborated type, not the source text, is compared: a
-reformatting is not a change, a changed premise is.
+(Superseded 2026-10-07 by the contract manifests. The first version pinned pretty-printed
+statements and regenerated the whole snapshot with `--update`; it left a theorem's row
+byte-identical when a definition its statement mentions was redefined.)
+`scripts/ObjectiveManifest.lean` and `scripts/ObjectiveManifestMathlib.lean` (scanner:
+`Verify/ObjectiveManifest.lean`) give every non-generated declaration of the ObjectiveProofs
+closure a row in `scripts/gates/objective-manifest/<Module>.tsv`: its elaborated statement
+(hashed, and pretty-printed for the reader), the SHA-256 Merkle hash of its DEFINITION CLOSURE
+(the bodies of every repository definition, inductive and constructor its statement reaches,
+transitively; cut at constants outside the repository, axioms and opaques, hashed by type), and
+its exact axiom set. The gate is a RATCHET (`scripts/objective-manifest.py`): additions pass; a
+removed row, a restated statement, a redefined closure or a changed axiom set fails unless a
+reviewed line of `scripts/gates/objective-contract-changes.txt` admits exactly that change. The
+elaborated term, not the source text, is compared: a reformatting is not a change, a changed
+premise is, and so is `def Safe := True` under an unchanged `theorem t : Safe x`.
 
 ## 1(e). Vacuity gates (HypothesisLedger)
 

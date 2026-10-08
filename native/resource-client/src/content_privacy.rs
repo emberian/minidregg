@@ -71,6 +71,7 @@ pub(crate) fn classify(action: &Value) -> Result<Exposure> {
         "createDocument" => (&["type", "rootElement", "schema"], Exposure::Structure),
         "createContainer" => (&["type", "element"], Exposure::Structure),
         "createRun" => (&["type", "run", "atoms"], Exposure::Structure),
+        "insertRun" => (&["type", "run", "anchor", "atoms"], Exposure::Structure),
         "editElement" => (&["type", "element", "revision", "op"], Exposure::Structure),
         "link" => (&["type", "link", "source", "target", "relation"], Exposure::Unsupported),
         "annotate" => (&["type", "annotation", "atom", "revision", "body"], Exposure::Annotation),
@@ -88,6 +89,25 @@ pub(crate) fn classify(action: &Value) -> Result<Exposure> {
         "createContainer" => decimal(&action["element"])? ,
         "createRun" => {
             decimal(&action["run"])?;
+            for atom in action["atoms"].as_array().ok_or("run atoms must be an array")? {
+                decimal(atom)?;
+            }
+        }
+        "insertRun" => {
+            decimal(&action["run"])?;
+            let anchor = &action["anchor"];
+            if !anchor.is_null() {
+                exact(anchor, &["run", "neighbor", "bias", "death"])?;
+                decimal(&anchor["run"])?;
+                decimal(&anchor["neighbor"])?;
+                if !matches!(anchor["bias"].as_str(), Some("before" | "after")) {
+                    return Err("insertRun anchor bias must be before or after".into());
+                }
+                if !matches!(anchor["death"].as_str(), Some("invalidate" | "keepTombstone"
+                    | "preferPrevious" | "preferNext" | "preferPreviousThenNext" | "preferNextThenPrevious")) {
+                    return Err("unknown insertRun anchor death policy".into());
+                }
+            }
             for atom in action["atoms"].as_array().ok_or("run atoms must be an array")? {
                 decimal(atom)?;
             }

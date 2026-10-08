@@ -46,8 +46,8 @@ def rangeLeaf (profile : CompilerProfile) (p : Pred) (old new : State) : Option 
   | .leSlots a b => if inputsInRange profile (.leSlots a b) old new then none else some []
   | .leSlotsOff a b c =>
       if inputsInRange profile (.leSlotsOff a b c) old new then none else some []
-  | .eq _ _ | .memberOf _ _ | .writeOnce _ | .eqSlots _ _ | .witnessed _ | .hashEq _ _ _
-  | .ran _ => none
+  | .eq _ _ | .memberOf _ _ | .writeOnce _ | .eqSlots _ _ | .sumEq _ _ | .witnessed _
+  | .hashEq _ _ _ | .ran _ => none
 /-- The first child (by index) of a list holding an out-of-range order atom. -/
 def rangeLeafL (profile : CompilerProfile) (ps : PredList) (old new : State) :
     Option (List Nat) :=
@@ -67,7 +67,8 @@ theorem rangeLeaf_none_iff (profile : CompilerProfile) :
   | .le _ _, _, _ | .monotone _, _, _ | .leSlots _ _, _, _ | .leSlotsOff _ _ _, _, _ => by
       simp only [rangeLeaf]; split <;> simp_all
   | .eq _ _, _, _ | .memberOf _ _, _, _ | .writeOnce _, _, _ | .eqSlots _ _, _, _
-  | .witnessed _, _, _ | .hashEq _ _ _, _, _ | .ran _, _, _ => by simp [rangeLeaf, inputsInRange]
+  | .sumEq _ _, _, _ | .witnessed _, _, _ | .hashEq _ _ _, _, _ | .ran _, _, _ => by
+      simp [rangeLeaf, inputsInRange]
   | .not q, old, new => by
       simp only [rangeLeaf, inputsInRange, Option.map_eq_none_iff]
       exact rangeLeaf_none_iff profile q old new
@@ -110,8 +111,8 @@ theorem rangeLeaf_sound (profile : CompilerProfile) :
         cases h
         exact ⟨_, rfl, rfl, by simpa using out⟩
   | .eq _ _, _, _, _, h | .memberOf _ _, _, _, _, h | .writeOnce _, _, _, _, h
-  | .eqSlots _ _, _, _, _, h | .witnessed _, _, _, _, h | .hashEq _ _ _, _, _, _, h
-  | .ran _, _, _, _, h => by simp [rangeLeaf] at h
+  | .eqSlots _ _, _, _, _, h | .sumEq _ _, _, _, _, h | .witnessed _, _, _, _, h
+  | .hashEq _ _ _, _, _, _, h | .ran _, _, _, _, h => by simp [rangeLeaf] at h
   | .not q, old, new, path, h => by
       simp only [rangeLeaf] at h
       obtain ⟨sub, found, rfl⟩ := Option.map_eq_some_iff.mp h

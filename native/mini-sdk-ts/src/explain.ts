@@ -5,7 +5,7 @@ import { canonicalJson, type Json } from "./contracts.ts";
 
 export const PAYLOAD_TYPES = ["scalar", "content", "append", "world", "kindDefinition", "computeFunding", "read"];
 export const CONTENT_ACTIONS = ["createDocument", "createContainer", "editElement", "createAtom", "createRun", "editAtom", "link",
-  "annotate", "rewrapAtom", "rewrapAnnotation", "unlink", "mark", "unmark", "transclude"];
+  "annotate", "rewrapAtom", "rewrapAnnotation", "unlink", "mark", "unmark", "transclude", "insertRun"];
 const HEX_FIELDS = ["payload", "wrapping", "topic", "contextBytes"];
 const UNKNOWN = "UNKNOWN";
 const BLIND = "do not sign blind";

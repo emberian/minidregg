@@ -42,7 +42,7 @@ set_option autoImplicit false
 
 abbrev Registry := CanonicalCellRegistry.registry
 abbrev Deployment := CanonicalCellRegistry.Deployment
-abbrev Durable := DurableReceiverIO.Loaded rootBytes
+abbrev Ground := ServedBasis.Ground
 
 attribute [local irreducible] CanonicalRuntimeProfile.Profile.compilerProfile
 
@@ -152,9 +152,8 @@ def context (federation : FederationId) (height : Height)
   policyEpoch := snapshot.authState.policyEpoch ingress.declaration.source.policyId
   policyRevision := snapshot.authState.policyRevision ingress.declaration.source.policyId
 
-def payloadStore {durable : Durable} (deployment : Deployment)
-    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable) : CanonicalPolicyRegistry.PayloadStore :=
-  ⟨CanonicalCellRegistry.fetchPolicySource deployment.domain directory.directory⟩
+def payloadStore {deployment : Deployment} (ground : Ground deployment) : CanonicalPolicyRegistry.PayloadStore :=
+  ⟨CanonicalCellRegistry.fetchPolicySource deployment.domain ground.directory⟩
 
 def successorCreate (deployment : Deployment) (declaration : PolicyInstallController.Declaration) :
     CreateRequest (CellId := Nat) Registry :=
@@ -168,21 +167,18 @@ def planWrites (creates : List (CreateRequest (CellId := Nat) Registry))
     (authorityWrites : List DataWrite) : List DataWrite :=
   creates.map ResourceBirthController.birthWrite ++ authorityWrites
 
-def PhysicalShape (deployment : Deployment) (durable : Durable) (writes : List DataWrite) : Prop :=
+def PhysicalShape (deployment : Deployment) (ground : Ground deployment) (writes : List DataWrite) : Prop :=
   (writes.map DataWrite.cellId).Nodup ∧
-    (∀ write ∈ writes, write.expectedPre = durable.snapshot.model.roots write.cellId) ∧
+    (∀ write ∈ writes, write.expectedPre = ground.view.model.roots write.cellId) ∧
     ∀ write ∈ writes, ResourceBirthController.Concrete.PhysicalPostLaw deployment write
 
-instance physicalShapeDecidable (deployment : Deployment) (durable : Durable)
-    (writes : List DataWrite) : Decidable (PhysicalShape deployment durable writes) := by
+instance physicalShapeDecidable (deployment : Deployment) (ground : Ground deployment)
+    (writes : List DataWrite) : Decidable (PhysicalShape deployment ground writes) := by
   unfold PhysicalShape
   infer_instance
 
 inductive Reject where
   | malformedIngress
-  | deployment
-  | directory
-  | authority
   | semantic (reason : PolicyInstallController.Reject)
   | sourceMismatch
   | markerMismatch
@@ -196,6 +192,15 @@ inductive Reject where
   | nativeSignature (reason : CredentialSignatureAdmission.Reject)
   | envelopeMismatch
   | transactionConflict
+  /-- The ground has no journal answer for this install's transaction id (a light
+  basis that did not declare it): refused, never read as "not recorded". -/
+  | undeclaredTransaction
+  /-- The ground has no answer for the operation marker's replay nullifier (a light
+  basis that did not declare it): refused before any state is read, never "unspent". -/
+  | undeclaredMarker
+  /-- A birth write of the installation that its admitted step does not name
+  (`ReceivingLaw.namesBirth`): the successor source must be the one the old law judged. -/
+  | neutralBirthUnjudged (cell : Nat)
   deriving DecidableEq, Repr
 
 private def require (condition : Prop) [Decidable condition] (reason : Reject) :
@@ -206,150 +211,148 @@ private def fromOption {A : Type} (value : Option A) (reason : Reject) : Except 
   match value with | none => .error reason | some value => .ok value
 
 structure Prepared (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployment)
-    (durable : Durable) (federation : FederationId) (height : Height)
+    (ground : Ground deployment) (federation : FederationId) (height : Height)
     (ingress : DecodedIngress) : Type where
   private mk ::
-  deploymentValid : deployment.Valid
-  directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable
-  authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot
   structural : WorldKindLawDependencies.Dependencies
-  structuralExact : WorldKindLawDependencies.loadTarget deployment directory.directory
+  structuralExact : WorldKindLawDependencies.loadTarget deployment ground.directory
     ingress.declaration.source.policyId.value = some structural
   storageKind : Nat
-  storageKindExact : (match directory.directory.slots ingress.declaration.source.policyId.value with
+  storageKindExact : (match ground.directory.slots ingress.declaration.source.policyId.value with
     | .present cell => some cell.1.tag.toNat
     | _ => none) = some storageKind
-  semantic : PolicyInstallController.Prepared profile authority.snapshot (context federation height authority.snapshot ingress)
+  /-- The installer prepared on this ground: its marker read only through the
+  ground's answer (`Ground.markerSpent`). -/
+  semantic : PolicyInstallController.Prepared profile ground.authority ground.markerSpent
+    (context federation height ground.authority ingress)
   additionalExact : semantic.additional = structural.additional
   storageKindBound : semantic.storageKind = storageKind
   declarationExact : semantic.declaration = ingress.declaration
-  markerExact : ingress.marker = (PolicyInstallController.requestDigest profile authority.snapshot
-    (context federation height authority.snapshot ingress) semantic.declaration).value
-  source : CanonicalCellRegistry.LoadedPolicySource deployment.domain directory.directory
-    (authority.snapshot.authState.policyAddress ingress.declaration.source.policyId
-      (context federation height authority.snapshot ingress).policyRevision)
-  audience : ObjectAudienceInstall.Prepared deployment durable directory authority ingress.declaration.source.policyId.value
+  markerExact : ingress.marker = (PolicyInstallController.requestDigest profile ground.authority
+    (context federation height ground.authority ingress) semantic.declaration).value
+  source : CanonicalCellRegistry.LoadedPolicySource deployment.domain ground.directory
+    (ground.authority.authState.policyAddress ingress.declaration.source.policyId
+      (context federation height ground.authority ingress).policyRevision)
+  audience : ObjectAudienceInstall.Prepared deployment ground ingress.declaration.source.policyId.value
     source.record.audience semantic.declaration.source.audience
     (ObjectAudienceInstall.objectMetadataRequired source.record semantic.declaration.source)
   allocated : Directory Nat Registry
-  allocationExact : ResourceBirth.allocate Registry directory.directory
+  allocationExact : ResourceBirth.allocate Registry ground.directory
     (representationCreates deployment semantic.declaration) = .ok allocated
-  physicalShape : PhysicalShape deployment durable
+  physicalShape : PhysicalShape deployment ground
     (planWrites (representationCreates deployment semantic.declaration)
-      (authority.writes semantic.update.validated.apply))
+      (ground.authorityWrites semantic.update.validated.apply))
 
 def prepare (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployment)
-    (durable : Durable) (federation : FederationId) (height : Height)
-    (ingress : DecodedIngress) : Except Reject (Prepared profile deployment durable federation height ingress) := do
-  let deploymentValid ← require deployment.Valid .deployment
-  let directory ← fromOption (CredentialAuthorityDomainReceiver.loadDirectory durable) .directory
-  let authority ← fromOption (CredentialAuthorityDomainReceiver.loadDeployment deployment durable.snapshot) .authority
+    (ground : Ground deployment) (federation : FederationId) (height : Height)
+    (ingress : DecodedIngress) : Except Reject (Prepared profile deployment ground federation height ingress) := do
+  if ground.markerSpent ingress.marker = none then throw .undeclaredMarker
   let structuralChecked ← fromOption (show Option { dependencies //
-      WorldKindLawDependencies.loadTarget deployment directory.directory
+      WorldKindLawDependencies.loadTarget deployment ground.directory
         ingress.declaration.source.policyId.value = some dependencies } from
-    match exact : WorldKindLawDependencies.loadTarget deployment directory.directory
+    match exact : WorldKindLawDependencies.loadTarget deployment ground.directory
         ingress.declaration.source.policyId.value with
     | none => none
     | some dependencies => some ⟨dependencies, rfl⟩) .structuralDependencies
   let structural := structuralChecked.val
-  let kindValue := match directory.directory.slots ingress.declaration.source.policyId.value with
+  let kindValue := match ground.directory.slots ingress.declaration.source.policyId.value with
     | .present cell => some cell.1.tag.toNat
     | _ => none
   let storageKind ← fromOption kindValue .structuralDependencies
   let storageKindExact ← require (kindValue = some storageKind) .structuralDependencies
-  let requestContext := context federation height authority.snapshot ingress
-  let semantic ← match PolicyInstallController.prepare profile authority.snapshot requestContext ingress.ingress.declarationBytes structural.additional storageKind with
+  let requestContext := context federation height ground.authority ingress
+  let semantic ← match PolicyInstallController.prepare profile ground.authority ground.markerSpent requestContext ingress.ingress.declarationBytes structural.additional storageKind with
     | .error reason => .error (.semantic reason)
     | .ok prepared => .ok prepared
   let additionalExact ← require (semantic.additional = structural.additional) .structuralDependencies
   let storageKindBound ← require (semantic.storageKind = storageKind) .structuralDependencies
   let declarationExact ← require (semantic.declaration = ingress.declaration) .sourceMismatch
   let markerExact ← require (ingress.marker =
-    (PolicyInstallController.requestDigest profile authority.snapshot requestContext semantic.declaration).value) .markerMismatch
-  let source ← fromOption (CanonicalCellRegistry.loadPolicySource deployment.domain directory.directory
-    (authority.snapshot.authState.policyAddress ingress.declaration.source.policyId requestContext.policyRevision))
+    (PolicyInstallController.requestDigest profile ground.authority requestContext semantic.declaration).value) .markerMismatch
+  let source ← fromOption (CanonicalCellRegistry.loadPolicySource deployment.domain ground.directory
+    (ground.authority.authState.policyAddress ingress.declaration.source.policyId requestContext.policyRevision))
     .oldSourceUnavailable
-  let audience ← (ObjectAudienceInstall.prepare deployment durable directory authority
+  let audience ← (ObjectAudienceInstall.prepare deployment ground
     ingress.declaration.source.policyId.value source.record.audience semantic.declaration.source.audience
     ingress.ingress.rosterBytes
     (ObjectAudienceInstall.objectMetadataRequired source.record semantic.declaration.source)).mapError Reject.audience
   let creates := representationCreates deployment semantic.declaration
-  match allocationExact : ResourceBirth.allocate Registry directory.directory creates with
+  match allocationExact : ResourceBirth.allocate Registry ground.directory creates with
   | .error reason => .error (.allocation reason)
   | .ok allocated => do
-      let shape ← require (PhysicalShape deployment durable
-        (planWrites creates (authority.writes semantic.update.validated.apply))) .physicalShape
-      .ok ⟨deploymentValid.down, directory, authority, structural, structuralChecked.property,
+      let shape ← require (PhysicalShape deployment ground
+        (planWrites creates (ground.authorityWrites semantic.update.validated.apply))) .physicalShape
+      .ok ⟨structural, structuralChecked.property,
         storageKind, storageKindExact.down, semantic, additionalExact.down, storageKindBound.down, declarationExact.down,
         markerExact.down, source, audience, allocated, allocationExact, shape.down⟩
 
-variable {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment} {durable : Durable}
+variable {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment} {ground : Ground deployment}
     {federation : FederationId} {height : Height} {ingress : DecodedIngress}
 
-def Prepared.creates (prepared : Prepared profile deployment durable federation height ingress) :=
+def Prepared.creates (prepared : Prepared profile deployment ground federation height ingress) :=
   representationCreates deployment prepared.semantic.declaration
 
 /-- The authority cell after the installation: the one validated install patch
 applied to the loaded cell. -/
-def Prepared.authorityPost (prepared : Prepared profile deployment durable federation height ingress) :
+def Prepared.authorityPost (prepared : Prepared profile deployment ground federation height ingress) :
     CredentialAuthorityDomain.Cell :=
   prepared.semantic.update.validated.apply
 
-def Prepared.writes (prepared : Prepared profile deployment durable federation height ingress) :=
-  planWrites prepared.creates (prepared.authority.writes prepared.authorityPost)
+def Prepared.writes (prepared : Prepared profile deployment ground federation height ingress) :=
+  planWrites prepared.creates (ground.authorityWrites prepared.authorityPost)
 
-def Prepared.readGuards (prepared : Prepared profile deployment durable federation height ingress) : List ReadGuard :=
-  (prepared.authority.readGuards ++
+def Prepared.readGuards (prepared : Prepared profile deployment ground federation height ingress) : List ReadGuard :=
+  (ground.authorityReadGuards ++
       (([⟨⟨prepared.source.readGuard.1⟩, prepared.source.readGuard.2⟩] : List ReadGuard) ++ prepared.audience.readGuards)).filter
     fun guard => guard.cellId ∉ prepared.writes.map DataWrite.cellId
 
 theorem Prepared.creates_source_owned
-    (prepared : Prepared profile deployment durable federation height ingress) :
+    (prepared : Prepared profile deployment ground federation height ingress) :
     prepared.creates = [successorCreate deployment ingress.declaration] := by
   simp only [Prepared.creates, representationCreates, prepared.declarationExact]
 
-theorem Prepared.fresh_pre (prepared : Prepared profile deployment durable federation height ingress)
+theorem Prepared.fresh_pre (prepared : Prepared profile deployment ground federation height ingress)
     (request : CreateRequest (CellId := Nat) Registry) (member : request ∈ prepared.creates) :
-    LifecycleImage.view Registry prepared.directory.directory request.cellId = .fresh :=
-  LifecycleImage.accepted_fresh_before Registry prepared.directory.directory prepared.allocated
+    LifecycleImage.view Registry ground.directory request.cellId = .fresh :=
+  LifecycleImage.accepted_fresh_before Registry ground.directory prepared.allocated
     prepared.creates prepared.allocationExact request member
 
-theorem Prepared.exact_created (prepared : Prepared profile deployment durable federation height ingress)
+theorem Prepared.exact_created (prepared : Prepared profile deployment ground federation height ingress)
     (request : CreateRequest (CellId := Nat) Registry) (member : request ∈ prepared.creates) :
     prepared.allocated.slots request.cellId = .present request.cell :=
-  ResourceBirth.allocate_success_created Registry prepared.directory.directory prepared.allocated
+  ResourceBirth.allocate_success_created Registry ground.directory prepared.allocated
     prepared.creates prepared.allocationExact request member
 
-theorem Prepared.write_roots_bound (prepared : Prepared profile deployment durable federation height ingress)
+theorem Prepared.write_roots_bound (prepared : Prepared profile deployment ground federation height ingress)
     (write : DataWrite) (member : write ∈ prepared.writes) :
     rootBytes write.canonicalPostBytes = write.exactPost := by
   rcases List.mem_append.mp member with created | changed
   · obtain ⟨request, _, rfl⟩ := List.mem_map.mp created
     exact ResourceBirthController.birthWrite_root_bound request
-  · simp only [CredentialAuthorityDomainReceiver.Loaded.writes, List.mem_singleton] at changed
+  · simp only [ServedBasis.Ground.authorityWrites, List.mem_singleton] at changed
     subst write
-    exact prepared.authority.write_root_bound _
+    exact ground.authorityWrite_root_bound _
 
-theorem Prepared.readGuards_exact (prepared : Prepared profile deployment durable federation height ingress)
+theorem Prepared.readGuards_exact (prepared : Prepared profile deployment ground federation height ingress)
     (guard : ReadGuard) (member : guard ∈ prepared.readGuards) :
-    guard.expectedRoot = durable.snapshot.model.roots guard.cellId := by
+    guard.expectedRoot = ground.view.model.roots guard.cellId := by
   have present := (List.mem_filter.mp member).1
   rcases List.mem_append.mp present with authority | source
-  · exact prepared.authority.readGuards_exact guard authority
+  · exact ground.authorityReadGuards_exact guard authority
   · rcases List.mem_append.mp source with source | audience
     · simp only [List.mem_singleton] at source
       subst guard
       exact prepared.source.readGuard_exact.trans
-        ((congrArg rootBytes (prepared.directory.bytes_exact _)).trans (durable.snapshot.coherent _))
+        ((congrArg rootBytes (ground.bytes_exact _)).trans (ground.view.coherent _))
     · exact prepared.audience.readGuardsExact guard audience
 
-theorem Prepared.readGuards_readonly (prepared : Prepared profile deployment durable federation height ingress)
+theorem Prepared.readGuards_readonly (prepared : Prepared profile deployment ground federation height ingress)
     (guard : ReadGuard) (member : guard ∈ prepared.readGuards) :
     guard.cellId ∉ prepared.writes.map DataWrite.cellId :=
   by simpa using (List.mem_filter.mp member).2
 
-theorem Prepared.authority_reads_covered (prepared : Prepared profile deployment durable federation height ingress)
-    (guard : ReadGuard) (member : guard ∈ prepared.authority.readGuards) :
+theorem Prepared.authority_reads_covered (prepared : Prepared profile deployment ground federation height ingress)
+    (guard : ReadGuard) (member : guard ∈ ground.authorityReadGuards) :
     guard.cellId ∈ prepared.writes.map DataWrite.cellId ∨ guard ∈ prepared.readGuards := by
   by_cases written : guard.cellId ∈ prepared.writes.map DataWrite.cellId
   · exact Or.inl written
@@ -362,50 +365,57 @@ variable [DecidableEq F]
 /-- Every selected old source and predecessor, and every external source used
 by the candidate graph, is read under the old physical snapshot. Only the exact
 new immutable source staged by this operation is exempt from an old-cell guard. -/
-def dependencyGuards (prepared : Prepared profile deployment durable federation height ingress)
-    (semantic : prepared.semantic.Accepted (payloadStore deployment prepared.directory)) :
+def dependencyGuards (prepared : Prepared profile deployment ground federation height ingress)
+    (semantic : prepared.semantic.Accepted (payloadStore ground)) :
     Option (List (Nat × Digest)) := do
-  let old ← (prepared.semantic.policyConfig (payloadStore deployment prepared.directory)).resolve?
-  let oldGuards ← PhysicalLawResolution.loadGuards prepared.authority.snapshot
-    prepared.directory.directory (PhysicalLawResolution.addresses old.graph)
+  let old ← (prepared.semantic.policyConfig (payloadStore ground)).resolve?
+  let oldGuards ← PhysicalLawResolution.loadGuards ground.authority
+    ground.directory (PhysicalLawResolution.addresses old.graph)
   let external := (PhysicalLawResolution.addresses semantic.candidateGraph).filter
     fun address => address != PolicyRecordCodec.digest prepared.semantic.declaration.source
-  let candidateGuards ← PhysicalLawResolution.loadGuards prepared.authority.snapshot
-    prepared.directory.directory external
+  let candidateGuards ← PhysicalLawResolution.loadGuards ground.authority
+    ground.directory external
   pure (prepared.structural.readGuards ++ oldGuards ++ candidateGuards).eraseDups
 
 structure AcceptedInstall (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployment)
-    (durable : Durable) (federation : FederationId) (height : Height) : Type where
+    (ground : Ground deployment) (federation : FederationId) (height : Height) : Type where
   private mk ::
   ingress : DecodedIngress
-  prepared : Prepared profile deployment durable federation height ingress
-  receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
+  prepared : Prepared profile deployment ground federation height ingress
+  receipt : CredentialSignatureAdmission.CheckedSignature ground.authority
   envelopeExact : receipt.envelopeBytes = ingress.ingress.envelopeBytes
-  semantic : prepared.semantic.Accepted (payloadStore deployment prepared.directory)
-  admitted : prepared.semantic.admit (payloadStore deployment prepared.directory)
+  semantic : prepared.semantic.Accepted (payloadStore ground)
+  admitted : prepared.semantic.admit (payloadStore ground)
     ingress.ingress.controlCapability receipt = .ok semantic
   lawGuards : List (Nat × Digest)
   lawGuardsExact : dependencyGuards prepared semantic = some lawGuards
   lawGuardsBound : lawGuards.all (fun guard =>
-    decide (guard.2 = durable.snapshot.model.roots ⟨guard.1⟩)) = true
+    decide (guard.2 = ground.view.model.roots ⟨guard.1⟩)) = true
+  /-- Every birth write the installation commits (its successor source) is named by
+  the step the old source's law admitted. -/
+  named : ResourceBirthController.Concrete.Named prepared.semantic.step prepared.writes
 
+/-- Admission on a ground. The marker's spent bit is answered declared and
+unspent by `prepare` before the native verifier reads the authority's spent set
+for it (`CredentialSignatureAdmission.controllerState`), so that read is the
+ground's verified answer, never a light basis's silent default. -/
 def admitDecodedNative (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployment)
-    (native : CredentialSignatureIO.NativeConfig) (durable : Durable)
+    (native : CredentialSignatureIO.NativeConfig) (ground : Ground deployment)
     (federation : FederationId) (height : Height) (ingress : DecodedIngress) :
-    IO (Except Reject (AcceptedInstall profile deployment durable federation height)) := do
-  match prepare profile deployment durable federation height ingress with
+    IO (Except Reject (AcceptedInstall profile deployment ground federation height)) := do
+  match prepare profile deployment ground federation height ingress with
   | .error reason => return .error reason
   | .ok prepared =>
-      let wanted := PolicyInstallController.request profile prepared.authority.snapshot
-        (context federation height prepared.authority.snapshot ingress) prepared.semantic.declaration
-      match ← CredentialSignatureAdmission.verifyNative native prepared.authority.snapshot
-          (PolicyInstallController.requestDigest profile prepared.authority.snapshot
-            (context federation height prepared.authority.snapshot ingress) prepared.semantic.declaration).value
+      let wanted := PolicyInstallController.request profile ground.authority
+        (context federation height ground.authority ingress) prepared.semantic.declaration
+      match ← CredentialSignatureAdmission.verifyNative native ground.authority
+          (PolicyInstallController.requestDigest profile ground.authority
+            (context federation height ground.authority ingress) prepared.semantic.declaration).value
           wanted ingress.ingress.envelopeBytes with
       | .error reason => return .error (.nativeSignature reason)
       | .ok receipt =>
           if envelopeExact : receipt.envelopeBytes = ingress.ingress.envelopeBytes then
-            match admitted : prepared.semantic.admit (payloadStore deployment prepared.directory)
+            match admitted : prepared.semantic.admit (payloadStore ground)
                 ingress.ingress.controlCapability receipt with
             | .error reason => return .error (.semantic reason)
             | .ok semantic =>
@@ -413,25 +423,29 @@ def admitDecodedNative (profile : CanonicalRuntimeProfile.Profile F) (deployment
                 | none => return .error .lawDependencies
                 | some guards =>
                     if bound : guards.all (fun guard =>
-                        decide (guard.2 = durable.snapshot.model.roots ⟨guard.1⟩)) = true then
-                      return .ok ⟨ingress, prepared, receipt, envelopeExact, semantic, admitted,
-                        guards, guardsExact, bound⟩
+                        decide (guard.2 = ground.view.model.roots ⟨guard.1⟩)) = true then
+                      match ResourceBirthController.Concrete.checkNamed prepared.semantic.step
+                          prepared.writes with
+                      | .error cell => return .error (.neutralBirthUnjudged cell)
+                      | .ok named =>
+                          return .ok ⟨ingress, prepared, receipt, envelopeExact, semantic, admitted,
+                            guards, guardsExact, bound, named.down⟩
                     else return .error .lawDependencies
           else return .error .envelopeMismatch
 
-def AcceptedInstall.installed (accepted : AcceptedInstall profile deployment durable federation height) :
-    PolicyInstallController.Installed profile accepted.prepared.authority.snapshot
-      (context federation height accepted.prepared.authority.snapshot accepted.ingress)
-      (payloadStore deployment accepted.prepared.directory) :=
+def AcceptedInstall.installed (accepted : AcceptedInstall profile deployment ground federation height) :
+    PolicyInstallController.Installed profile ground.authority ground.markerSpent
+      (context federation height ground.authority accepted.ingress)
+      (payloadStore ground) :=
   ⟨accepted.prepared.semantic, accepted.semantic⟩
 
 /-- The written authority cell is the accepted installer's own post. -/
 theorem AcceptedInstall.actual_authority_post
-    (accepted : AcceptedInstall profile deployment durable federation height) :
+    (accepted : AcceptedInstall profile deployment ground federation height) :
     accepted.prepared.authorityPost.logical = accepted.installed.post.logical := rfl
 
 theorem AcceptedInstall.actual_post_head
-    (accepted : AcceptedInstall profile deployment durable federation height) :
+    (accepted : AcceptedInstall profile deployment ground federation height) :
     CredentialAuthorityDomain.headAt accepted.prepared.authorityPost.logical accepted.ingress.declaration.source.policyId =
       some ⟨accepted.ingress.declaration.source.version,
         PolicyRecordCodec.digest accepted.ingress.declaration.source⟩ := by
@@ -439,35 +453,36 @@ theorem AcceptedInstall.actual_post_head
   exact accepted.installed.source_selected_in_post
 
 theorem AcceptedInstall.generation_preserved
-    (accepted : AcceptedInstall profile deployment durable federation height) :
+    (accepted : AcceptedInstall profile deployment ground federation height) :
     accepted.prepared.authorityPost.logical
         ⟨.policyEpoch, accepted.ingress.declaration.source.policyId⟩ =
-      accepted.prepared.authority.snapshot.logical
+      ground.authority.logical
         ⟨.policyEpoch, accepted.ingress.declaration.source.policyId⟩ := by
   rw [accepted.actual_authority_post, ← accepted.prepared.declarationExact]
   exact accepted.installed.generation_preserved
 
 theorem AcceptedInstall.capability_preserved
-    (accepted : AcceptedInstall profile deployment durable federation height)
+    (accepted : AcceptedInstall profile deployment ground federation height)
     (kind : ResourceKind) (id : CapabilityId) :
     accepted.prepared.authorityPost.logical ⟨.capability kind, id⟩ =
-      accepted.prepared.authority.snapshot.logical ⟨.capability kind, id⟩ := by
+      ground.authority.logical ⟨.capability kind, id⟩ := by
   rw [accepted.actual_authority_post]
   exact accepted.installed.capability_preserved kind id
 
-/-- The operation marker was unspent in the durable nullifier set this install
-was prepared against; the intent below consumes it there. -/
+/-- The operation marker was unspent in the nullifier set of the ground this
+install was prepared on; the intent below consumes it there. On a light ground
+the answer is the spent map's, verified at use for the declared nullifier. -/
 theorem AcceptedInstall.marker_was_unspent
-    (accepted : AcceptedInstall profile deployment durable federation height) :
-    CredentialAuthorityDomainReceiver.spentOf deployment.domain durable.snapshot
+    (accepted : AcceptedInstall profile deployment ground federation height) :
+    CredentialAuthorityDomainReceiver.spentOf deployment.domain ground.view
       accepted.ingress.marker = false := by
-  have unspent : accepted.prepared.authority.snapshot.spent
-      (PolicyInstallController.requestDigest profile accepted.prepared.authority.snapshot
-        (context federation height accepted.prepared.authority.snapshot accepted.ingress)
-        accepted.prepared.semantic.declaration).value = false :=
-    accepted.installed.marker_was_unspent
-  rw [← accepted.prepared.markerExact, accepted.prepared.authority.spentExact] at unspent
-  exact unspent
+  have answered : ground.markerSpent (PolicyInstallController.requestDigest profile ground.authority
+      (context federation height ground.authority accepted.ingress)
+      accepted.prepared.semantic.declaration).value = some false :=
+    accepted.installed.marker_answered
+  rw [← accepted.prepared.markerExact] at answered
+  rw [← ground.authoritySpent]
+  exact (ServedBasis.Ground.markerSpent_some ground answered).symm
 
 /-! ## Exact source-owned intent, storage bytes and accounting -/
 
@@ -482,22 +497,22 @@ def event (domain : Digest) (ingress : DecodedIngress) : StableEvent where
 touches and bytes, one native signature, capability admission and compiled
 policy check. There is no invented monetary transfer for internal source or
 authority representation; monetary operations require their conserved Book leg. -/
-def AcceptedInstall.readGuards (accepted : AcceptedInstall profile deployment durable federation height) :
+def AcceptedInstall.readGuards (accepted : AcceptedInstall profile deployment ground federation height) :
     List ReadGuard :=
   (accepted.prepared.readGuards ++ accepted.lawGuards.map (fun guard =>
     (⟨⟨guard.1⟩, guard.2⟩ : ReadGuard))).filter
       fun guard => guard.cellId ∉ accepted.prepared.writes.map DataWrite.cellId
 
 theorem AcceptedInstall.readGuards_readonly
-    (accepted : AcceptedInstall profile deployment durable federation height)
+    (accepted : AcceptedInstall profile deployment ground federation height)
     (guard : ReadGuard) (member : guard ∈ accepted.readGuards) :
     guard.cellId ∉ accepted.prepared.writes.map DataWrite.cellId := by
   simpa using (List.mem_filter.mp member).2
 
 theorem AcceptedInstall.readGuards_exact
-    (accepted : AcceptedInstall profile deployment durable federation height)
+    (accepted : AcceptedInstall profile deployment ground federation height)
     (guard : ReadGuard) (member : guard ∈ accepted.readGuards) :
-    guard.expectedRoot = durable.snapshot.model.roots guard.cellId := by
+    guard.expectedRoot = ground.view.model.roots guard.cellId := by
   have present := (List.mem_filter.mp member).1
   rcases List.mem_append.mp present with prepared | law
   · exact accepted.prepared.readGuards_exact guard prepared
@@ -508,7 +523,7 @@ theorem AcceptedInstall.readGuards_exact
 /-- Every dependency survives either as a read guard or as the same cell's
 pre-state-checked write leg. No inherited source read is silently dropped. -/
 theorem AcceptedInstall.law_reads_covered
-    (accepted : AcceptedInstall profile deployment durable federation height)
+    (accepted : AcceptedInstall profile deployment ground federation height)
     (pair : Nat × Digest) (member : pair ∈ accepted.lawGuards) :
     (⟨pair.1⟩ : CellId) ∈ accepted.prepared.writes.map DataWrite.cellId ∨
       (⟨⟨pair.1⟩, pair.2⟩ : ReadGuard) ∈ accepted.readGuards := by
@@ -517,7 +532,7 @@ theorem AcceptedInstall.law_reads_covered
   · exact Or.inr (List.mem_filter.mpr ⟨List.mem_append_right _
       (List.mem_map.mpr ⟨pair, member, rfl⟩), by simpa using written⟩)
 
-def charge (accepted : AcceptedInstall profile deployment durable federation height) : Charge
+def charge (accepted : AcceptedInstall profile deployment ground federation height) : Charge
   | .incidences => 1
   | .turnBytes => accepted.ingress.bytes.length
   | .memoryTouches => accepted.prepared.writes.length + accepted.readGuards.length
@@ -529,7 +544,7 @@ def charge (accepted : AcceptedInstall profile deployment durable federation hei
   | .sideEffectCount => 1
   | .feeDebit | .networkBytes | .leaseByteBlocks => 0
 
-def intent (accepted : AcceptedInstall profile deployment durable federation height) : DataIntent rootBytes where
+def intent (accepted : AcceptedInstall profile deployment ground federation height) : DataIntent rootBytes where
   transactionId := transactionId deployment.domain accepted.ingress
   writes := accepted.prepared.writes
   readGuards := accepted.readGuards
@@ -540,27 +555,52 @@ def intent (accepted : AcceptedInstall profile deployment durable federation hei
   postRootsBound := accepted.prepared.write_roots_bound
   guardsReadOnly := accepted.readGuards_readonly
 
-theorem intent_exact_source (accepted : AcceptedInstall profile deployment durable federation height) :
+/-- **The installation's committed birth is named and judged**: every write of the
+intent that creates its cell (the successor policy source) is named by the install
+step, and the OLD source's committed law, resolved at the ground, accepts that step. -/
+theorem intent_births_named (accepted : AcceptedInstall profile deployment ground federation height) :
+    (∀ write ∈ (intent accepted).writes, ResourceBirthController.Concrete.bornIn write = true →
+        ReceivingLaw.namesBirth accepted.prepared.semantic.step write = true) ∧
+      ∃ graph : PolicyComponentResolution.LoadedGraph
+          (accepted.prepared.semantic.policyConfig (payloadStore ground)).snapshot
+          (accepted.prepared.semantic.policyConfig (payloadStore ground)).store
+          (accepted.prepared.semantic.policyConfig (payloadStore ground)).profile.semantics
+          (accepted.prepared.semantic.policyConfig (payloadStore ground)).target
+          (accepted.prepared.semantic.policyConfig (payloadStore ground)).additional,
+        PolicyComponentResolution.loadTarget
+            (accepted.prepared.semantic.policyConfig (payloadStore ground)).snapshot
+            (accepted.prepared.semantic.policyConfig (payloadStore ground)).store
+            (accepted.prepared.semantic.policyConfig (payloadStore ground)).profile.semantics
+            (accepted.prepared.semantic.policyConfig (payloadStore ground)).target
+            (accepted.prepared.semantic.policyConfig (payloadStore ground)).resolutionBudget
+            (accepted.prepared.semantic.policyConfig (payloadStore ground)).additional = .ok graph ∧
+        Minidregg.Pred.eval (ResolvedLawCompilation.predicate graph.resolved)
+          accepted.prepared.semantic.step.oldState accepted.prepared.semantic.step.newState = true :=
+  ⟨accepted.named, ComposedPolicyAdmission.authorized_effective_law _ _ accepted.semantic.authorization⟩
+
+#assert_axioms intent_births_named
+
+theorem intent_exact_source (accepted : AcceptedInstall profile deployment ground federation height) :
     (intent accepted).writes = accepted.prepared.writes ∧
       (intent accepted).exactCharge = charge accepted ∧
       (intent accepted).event.canonicalBytes = accepted.ingress.bytes ∧
       (intent accepted).nullifiers = [CredentialAuthorityReplay.nullifier deployment.domain
-        (PolicyInstallController.requestDigest profile accepted.prepared.authority.snapshot
-          (context federation height accepted.prepared.authority.snapshot accepted.ingress)
+        (PolicyInstallController.requestDigest profile ground.authority
+          (context federation height ground.authority accepted.ingress)
           accepted.prepared.semantic.declaration).value] := by
   refine ⟨rfl, rfl, rfl, ?_⟩
   change [CredentialAuthorityReplay.nullifier deployment.domain accepted.ingress.marker] = _
   rw [accepted.prepared.markerExact]
 
-theorem installed_write_bytes (accepted : AcceptedInstall profile deployment durable federation height)
+theorem installed_write_bytes (accepted : AcceptedInstall profile deployment ground federation height)
     (write : DataWrite) (member : write ∈ accepted.prepared.writes) :
-    (DataSnapshot.install durable.snapshot (intent accepted)).canonicalBytes write.cellId =
+    (DataSnapshot.install ground.view (intent accepted)).canonicalBytes write.cellId =
       write.canonicalPostBytes :=
-  DataSnapshot.install_canonicalBytes_of_member durable.snapshot (intent accepted)
+  DataSnapshot.install_canonicalBytes_of_member ground.view (intent accepted)
     accepted.prepared.physicalShape.1 write member
 
-theorem installed_source_bytes (accepted : AcceptedInstall profile deployment durable federation height) :
-    (DataSnapshot.install durable.snapshot (intent accepted)).canonicalBytes
+theorem installed_source_bytes (accepted : AcceptedInstall profile deployment ground federation height) :
+    (DataSnapshot.install ground.view (intent accepted)).canonicalBytes
         ⟨PolicySourceCell.physicalId deployment.domain
           (PolicyRecordCodec.digest accepted.ingress.declaration.source)⟩ =
       LifecycleImage.bytes Registry
@@ -569,7 +609,7 @@ theorem installed_source_bytes (accepted : AcceptedInstall profile deployment du
   have member : ResourceBirthController.birthWrite request ∈ accepted.prepared.writes :=
     List.mem_append_left _ (List.mem_map.mpr ⟨request, List.mem_cons_self, rfl⟩)
   have installed := installed_write_bytes accepted _ member
-  change (DataSnapshot.install durable.snapshot (intent accepted)).canonicalBytes
+  change (DataSnapshot.install ground.view (intent accepted)).canonicalBytes
       ⟨PolicySourceCell.physicalId deployment.domain
         (PolicyRecordCodec.digest accepted.prepared.semantic.declaration.source)⟩ =
     LifecycleImage.bytes Registry
@@ -578,13 +618,13 @@ theorem installed_source_bytes (accepted : AcceptedInstall profile deployment du
 
 /-- The actual installed row decodes to the exact source selected by the new
 canonical head. This is a byte statement, not equality of cryptographic roots. -/
-theorem installed_head_and_source (accepted : AcceptedInstall profile deployment durable federation height) :
+theorem installed_head_and_source (accepted : AcceptedInstall profile deployment ground federation height) :
     CredentialAuthorityDomain.headAt accepted.prepared.authorityPost.logical
         accepted.ingress.declaration.source.policyId =
       some ⟨accepted.ingress.declaration.source.version,
         PolicyRecordCodec.digest accepted.ingress.declaration.source⟩ ∧
     (LifecycleImage.codec Registry).decode
-      ((DataSnapshot.install durable.snapshot (intent accepted)).canonicalBytes
+      ((DataSnapshot.install ground.view (intent accepted)).canonicalBytes
         ⟨PolicySourceCell.physicalId deployment.domain
           (PolicyRecordCodec.digest accepted.ingress.declaration.source)⟩) =
       some (.live (CanonicalCellRegistry.policySourceCell accepted.ingress.declaration.source)) := by
@@ -612,32 +652,32 @@ theorem source_loader_of_present (domain : Digest) (directory : Directory Nat Re
   exact ⟨loaded, loadedAt, loaded.record_of_present record present⟩
 
 omit [DecidableEq F] in
-theorem Prepared.fresh_before (prepared : Prepared profile deployment durable federation height ingress)
+theorem Prepared.fresh_before (prepared : Prepared profile deployment ground federation height ingress)
     (request : CreateRequest (CellId := Nat) Registry) (member : request ∈ prepared.creates) :
-    durable.snapshot.canonicalBytes ⟨request.cellId⟩ = [] := by
-  rw [← prepared.directory.bytes_exact, prepared.fresh_pre request member]
+    ground.view.canonicalBytes ⟨request.cellId⟩ = [] := by
+  rw [← ground.bytes_exact, prepared.fresh_pre request member]
   rfl
 
 /-- The installed image holds exactly the post authority cell at the pinned
 identifier: one write, carrying the accepted installer's post. -/
-theorem installed_authority_cell (accepted : AcceptedInstall profile deployment durable federation height) :
-    (DataSnapshot.install durable.snapshot (intent accepted)).canonicalBytes
+theorem installed_authority_cell (accepted : AcceptedInstall profile deployment ground federation height) :
+    (DataSnapshot.install ground.view (intent accepted)).canonicalBytes
         (CredentialAuthorityDomainReceiver.cellIdOf deployment) =
       CredentialAuthorityDomainReceiver.cellBytes accepted.prepared.authorityPost := by
-  have member : accepted.prepared.authority.write accepted.prepared.authorityPost ∈
+  have member : ground.authorityWrite accepted.prepared.authorityPost ∈
       accepted.prepared.writes := by
-    unfold Prepared.writes planWrites CredentialAuthorityDomainReceiver.Loaded.writes
+    unfold Prepared.writes planWrites ServedBasis.Ground.authorityWrites
     exact List.mem_append_right _ (List.mem_singleton.mpr rfl)
   exact installed_write_bytes accepted
-    (accepted.prepared.authority.write accepted.prepared.authorityPost) member
+    (ground.authorityWrite accepted.prepared.authorityPost) member
 
-theorem no_partial_commit (accepted : AcceptedInstall profile deployment durable federation height)
+theorem no_partial_commit (accepted : AcceptedInstall profile deployment ground federation height)
     (schedule : Schedule) :
-    (DurableDataIntent.execute schedule durable.snapshot (intent accepted)).storeAfter durable.snapshot =
-        durable.snapshot ∨
-      (DurableDataIntent.execute schedule durable.snapshot (intent accepted)).storeAfter durable.snapshot =
-        DataSnapshot.install durable.snapshot (intent accepted) :=
-  execute_no_partial_data_commit schedule durable.snapshot (intent accepted)
+    (DurableDataIntent.execute schedule ground.view (intent accepted)).storeAfter ground.view =
+        ground.view ∨
+      (DurableDataIntent.execute schedule ground.view (intent accepted)).storeAfter ground.view =
+        DataSnapshot.install ground.view (intent accepted) :=
+  execute_no_partial_data_commit schedule ground.view (intent accepted)
 
 /-! ## Receipt-only replay precedes all new admission -/
 
@@ -649,82 +689,74 @@ structure Receipt where
 def receipt (domain : Digest) (ingress : DecodedIngress) : Receipt :=
   ⟨transactionId domain ingress, (event domain ingress).eventId⟩
 
-def replay (domain : Digest) (durable : Durable) (ingress : DecodedIngress) :
-    Option (Except Reject Receipt) :=
-  match Snapshot.lookupRecorded (transactionId domain ingress) durable.snapshot.model.journal with
-  | none => none
-  | some recorded =>
-      if recorded.transactionId = transactionId domain ingress ∧
-          recorded.event.event = event domain ingress ∧
-          recorded.nullifiers = [operationNullifier domain ingress] then
-        some (.ok (receipt domain ingress))
-      else some (.error .transactionConflict)
+/-- The keys an install reads of the history: its transaction id (replay) and its
+operation marker's replay nullifier (the installer's spent check). Both are in
+the signed ingress, so they are known before any state is read. -/
+def keys (domain : Digest) (ingress : DecodedIngress) : DurableView.Keys :=
+  ⟨[transactionId domain ingress], [operationNullifier domain ingress]⟩
 
-theorem replay_only_original (domain : Digest) (durable : Durable) (ingress : DecodedIngress)
-    (result : Receipt) (accepted : replay domain durable ingress = some (.ok result)) :
+/-- The recorded intent under this install's transaction id is exactly its own. -/
+def exactRecord (domain : Digest) (ingress : DecodedIngress)
+    (recorded : DurableCommitProtocol.Intent Digest Digest StableNullifier ReplayEnvelope) : Bool :=
+  decide (recorded.transactionId = transactionId domain ingress ∧
+    recorded.event.event = event domain ingress ∧
+    recorded.nullifiers = [operationNullifier domain ingress])
+
+/-- The replay verdict on a ground, read only through its answer for the
+transaction id (`ServedBasis.Ground.replayOf`): an undeclared id is `undeclared`. -/
+def replay (domain : Digest) (ground : Ground deployment) (ingress : DecodedIngress) :
+    ServedBasis.Ground.Replay Receipt :=
+  ground.replayOf (transactionId domain ingress) (exactRecord domain ingress) (receipt domain ingress)
+
+theorem replay_only_original (domain : Digest) (ground : Ground deployment) (ingress : DecodedIngress)
+    (result : Receipt) (accepted : replay domain ground ingress = .original result) :
     result = receipt domain ingress ∧
       ∃ recorded,
-        Snapshot.lookupRecorded (transactionId domain ingress) durable.snapshot.model.journal = some recorded ∧
+        Snapshot.lookupRecorded (transactionId domain ingress) ground.view.model.journal = some recorded ∧
         recorded.event.event = event domain ingress ∧
         recorded.nullifiers = [operationNullifier domain ingress] := by
-  unfold replay at accepted
-  split at accepted
-  · cases accepted
-  · rename_i recorded found
-    split at accepted
-    · rename_i exactRecord
-      have same : receipt domain ingress = result := by simpa using accepted
-      exact ⟨same.symm, recorded, found, exactRecord.2⟩
-    · cases accepted
+  obtain ⟨same, recorded, found, isExact⟩ := ServedBasis.Ground.replayOf_original ground _ _ _ result accepted
+  simp only [exactRecord, decide_eq_true_eq] at isExact
+  exact ⟨same, recorded, found, isExact.2⟩
 
-theorem replay_changed_ingress_refused (domain : Digest) (durable : Durable) (ingress : DecodedIngress)
-    (recorded : DurableCommitProtocol.Intent TransactionId DurableDataIntent.CellId StableNullifier ReplayEnvelope)
-    (found : Snapshot.lookupRecorded (transactionId domain ingress) durable.snapshot.model.journal = some recorded)
+/-- **A changed ingress under a recorded transaction id is refused as a conflict**:
+the ground's journal answer for this ingress's transaction id is an intent whose
+event differs from this ingress's event, so the verdict is `conflict` — never
+`fresh` (a second admission) and never `original` (a receipt). -/
+theorem replay_changed_ingress_refused (domain : Digest) (ground : Ground deployment) (ingress : DecodedIngress)
+    {recorded : DurableCommitProtocol.Intent Digest Digest StableNullifier ReplayEnvelope}
+    (found : ground.recorded (transactionId domain ingress) = some (some recorded))
     (different : recorded.event.event ≠ event domain ingress) :
-    replay domain durable ingress = some (.error .transactionConflict) := by
-  simp [replay, found, different]
+    replay domain ground ingress = .conflict :=
+  ServedBasis.Ground.replayOf_conflict ground _ _ _ found (by simp [exactRecord, different])
 
-inductive Result where
-  | confirmed (kind : DurableReceiverIO.Confirmation) (receipt : Receipt)
-  | rejected (reason : Reject)
-  | durableRejected (reason : DurableDataIntent.RejectReason)
-  | contention
-  | unavailable (detail : String)
-  | uncertain (detail : String)
+#assert_axioms replay_changed_ingress_refused
 
-/-- Admission and publication share the exact loaded image. In particular a
-host-derived logical height cannot be transplanted onto a newer journal after a
-CAS race; the caller must reopen, reconstruct and reauthorize after contention. -/
-def receiveLoaded (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployment)
-    (native : CredentialSignatureIO.NativeConfig) (transport : DurableReceiverIO.Transport)
-    (durable : Durable) (federation : FederationId) (height : Height)
-    (bytes : List UInt8) : IO Result := do
-  match decodeIngress bytes with
-  | none => return .rejected .malformedIngress
-  | some ingress =>
-      match replay deployment.domain durable ingress with
-      | some (.ok receipt) => return .confirmed .replayed receipt
-      | some (.error reason) => return .rejected reason
-      | none =>
-          match ← admitDecodedNative profile deployment native durable federation height ingress with
-          | .error reason => return .rejected reason
-          | .ok accepted =>
-              match ← DurableReceiverIO.receiveLoaded transport rootBytes durable (intent accepted) with
-              | .confirmed kind _ => return .confirmed kind (receipt deployment.domain ingress)
-              | .rejected reason => return .durableRejected reason
-              | .contention => return .contention
-              | .unavailable detail => return .unavailable detail
-              | .uncertain detail => return .uncertain detail
+/-- **An undeclared transaction id is refused by name** (the plant's pole): on a
+light basis that did not declare it, the verdict is `undeclared`, never "not
+recorded". -/
+theorem replay_undeclared (domain : Digest) {store : DurableHistory.StoreIdentity}
+    (basis : ServedBasis.Basis deployment store) (ingress : DecodedIngress)
+    (undeclared : transactionId domain ingress ∉ basis.keys.transactions) :
+    replay domain (ServedBasis.Ground.ofBasis basis) ingress = .undeclared :=
+  ServedBasis.Ground.replayOf_undeclared basis _ _ _ undeclared
 
-/-- The public boundary accepts only the strict original command and native
-signature. Ambient federation and height are service inputs. Historic success
-returns the original IDs without reauthorizing, resigning or releasing state.
-Publication never silently rebases a checked installation onto a newer image. -/
-def receive (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployment)
-    (native : CredentialSignatureIO.NativeConfig) (transport : DurableReceiverIO.Transport)
-    (federation : FederationId) (height : Height) (bytes : List UInt8) : IO Result := do
-  match ← DurableReceiverIO.load transport rootBytes with
-  | .error detail => return .unavailable detail
-  | .ok durable => receiveLoaded profile deployment native transport durable federation height bytes
+/-- **An undeclared operation marker is refused by name, first** (the plant's
+pole): on a light basis that did not declare the marker's replay nullifier,
+`prepare` is `undeclaredMarker` whatever the state — never read as unspent. -/
+theorem prepare_undeclaredMarker (profile : CanonicalRuntimeProfile.Profile F) {store : DurableHistory.StoreIdentity}
+    (basis : ServedBasis.Basis deployment store) (federation : FederationId) (height : Height)
+    (ingress : DecodedIngress)
+    (undeclared : operationNullifier deployment.domain ingress ∉ basis.keys.nullifiers) :
+    (prepare profile deployment (ServedBasis.Ground.ofBasis basis) federation height ingress).map (fun _ => ()) =
+      .error .undeclaredMarker := by
+  have unanswered := ServedBasis.Ground.markerSpent_undeclared basis ingress.marker undeclared
+  unfold prepare
+  simp only [unanswered]
+  rfl
+
+#assert_axioms prepare_undeclaredMarker
+#assert_axioms replay_only_original
+#assert_axioms replay_undeclared
 
 end Minidregg.Kernel.PolicyInstallReceiver

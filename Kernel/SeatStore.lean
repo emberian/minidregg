@@ -74,8 +74,13 @@ def proposalStream : StreamCodec Proposal :=
     (fun rule => match rule with | .onDemand => none | .afterDeadline due => some due)
     (fun wire => match wire with | none => .onDemand | some due => .afterDeadline due)
     (by intro rule; cases rule <;> rfl)
-  StreamCodec.xmap (StreamCodec.product amounts (StreamCodec.product amounts exitRule))
-    (fun p => (p.give, p.want, p.exit)) (fun w => ⟨w.1, w.2.1, w.2.2⟩) (by intro p; cases p; rfl)
+  let disclosure : StreamCodec Disclosure := StreamCodec.xmap
+    (StreamCodec.product StreamCodec.bool (StreamCodec.product StreamCodec.bool StreamCodec.bool))
+    (fun d => (d.offerer, d.payee, d.holder)) (fun w => ⟨w.1, w.2.1, w.2.2⟩) (by intro d; cases d; rfl)
+  StreamCodec.xmap (StreamCodec.product amounts (StreamCodec.product amounts
+      (StreamCodec.product exitRule (StreamCodec.product StreamCodec.bool disclosure))))
+    (fun p => (p.give, p.want, p.exit, p.donate, p.disclose)) (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2.1, w.2.2.2.2⟩)
+    (by intro p; cases p; rfl)
 
 def termsStream : StreamCodec (List (String × Nat)) :=
   StreamCodec.list (StreamCodec.product stringStream StreamCodec.nat)
@@ -95,9 +100,9 @@ def seatStream : StreamCodec Seat :=
   StreamCodec.xmap
     (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product subjectStream
       (StreamCodec.product StreamCodec.nat (StreamCodec.product proposalStream
-        (StreamCodec.product (StreamCodec.option StreamCodec.nat) StreamCodec.bool))))))
-    (fun s => (s.account, s.inst, s.offerer, s.payee, s.proposal, s.holder, s.isOpen))
-    (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2.1, w.2.2.2.2.1, w.2.2.2.2.2.1, w.2.2.2.2.2.2⟩) (by intro s; cases s; rfl)
+        (StreamCodec.option StreamCodec.nat))))))
+    (fun s => (s.account, s.inst, s.offerer, s.payee, s.proposal, s.holder))
+    (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2.1, w.2.2.2.2.1, w.2.2.2.2.2⟩) (by intro s; cases s; rfl)
 
 /-- An instance cell: the instance, its OPEN seats (the index its method sees),
 and whether it was terminated. -/
@@ -113,12 +118,14 @@ structure InvitationBody where
   spent : Bool
   deriving DecidableEq, Repr
 
-/-- A seat cell: the kernel's seat and the role and terms of the invitation
-that made it (what the contract's method is shown). -/
+/-- A seat cell: the kernel's seat, the role and terms of the invitation
+that made it, and the height of the offer that opened it (what the contract's
+method is shown). -/
 structure SeatBody where
   seat : Seat
   role : String
   terms : List (String × Nat)
+  opened : Nat
   deriving DecidableEq, Repr
 
 def instanceBodyStream : StreamCodec InstanceBody :=
@@ -131,12 +138,17 @@ def invitationBodyStream : StreamCodec InvitationBody :=
     (fun b => (b.invitation, b.spent)) (fun w => ⟨w.1, w.2⟩) (by intro b; cases b; rfl)
 
 def seatBodyStream : StreamCodec SeatBody :=
-  StreamCodec.xmap (StreamCodec.product seatStream (StreamCodec.product stringStream termsStream))
-    (fun b => (b.seat, b.role, b.terms)) (fun w => ⟨w.1, w.2.1, w.2.2⟩) (by intro b; cases b; rfl)
+  StreamCodec.xmap (StreamCodec.product seatStream
+      (StreamCodec.product stringStream (StreamCodec.product termsStream StreamCodec.nat)))
+    (fun b => (b.seat, b.role, b.terms, b.opened)) (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2⟩)
+    (by intro b; cases b; rfl)
 
 def instanceCodec := framed "DREGG/SEAT/INSTANCE/v1".toUTF8.toList instanceBodyStream
 def invitationCodec := framed "DREGG/SEAT/INVITATION/v1".toUTF8.toList invitationBodyStream
-def seatCodec := framed "DREGG/SEAT/SEAT/v1".toUTF8.toList seatBodyStream
+/-- Frame v3: a seat body no longer carries an open flag (a closed seat's cell is
+retired, never rewritten) and its proposal carries the donation marker; a v1 or v2 body refuses
+to decode. -/
+def seatCodec := framed "DREGG/SEAT/SEAT/v5".toUTF8.toList seatBodyStream
 def holdingsCodec := framed "DREGG/SEAT/HOLDINGS/v1".toUTF8.toList (StreamCodec.list StreamCodec.nat)
 
 /-! ## Cells: protected coordinates -/
@@ -194,13 +206,14 @@ def readInstance {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) 
 def readInvitation {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (domain : Digest)
     (id : InvitationId) : Option InvitationBody :=
   (bodyOf .invitation (snapshot.canonicalBytes (invitationCell domain id))).bind invitationCodec.decode
-/-- A seat cell: its key (to rewrite it at its coordinate) and its body. -/
+/-- A seat cell's body. A seat is written once, at its offer, and then retired:
+no turn rewrites a live seat cell, so its key is never needed again. -/
 def readSeat {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (account : AccountId) :
-    Option (Bytes × SeatBody) := do
+    Option SeatBody := do
   let payload ← payloadOf (snapshot.canonicalBytes (seatCell account))
   if payload.role = .seat then
     let body ← seatCodec.decode payload.body
-    if body.seat.account = account then some (payload.key, body) else none
+    if body.seat.account = account then some body else none
   else none
 def readHoldings {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (domain : Digest)
     (record : Nat) : List AccountId :=
@@ -214,6 +227,9 @@ inductive Refusal where
   | packageMissing | packageExists | notAContract (reason : String)
   | instanceMissing (inst : InstanceId)
   | cellUndecodable (cell : Nat)
+  /-- An offer onto a seat cell that is retired (its seat closed) or already holds a seat: a seat
+  account is its cell's coordinate and is never reused. -/
+  | seatRetired (account : AccountId) | seatExists (account : AccountId)
   /-- A post of a seat turn or of an ending activity's closing would sit on, or write, a
   kernel-activity cell (`checkInert`). -/
   | activityCellInSeatSpace (cell : Nat)
@@ -237,8 +253,11 @@ def program {α : Type} : Except ObjectiveActivity.Refusal α → Except Refusal
 
 The method's input is canonical and total: the caller's `input`, the height,
 and the instance's OPEN seats sorted by coordinate, each with its role, terms,
-proposal and its allocation over EVERY asset its proposal names (the total view,
-as the law reads it). The method never sees a funding account or anything
+proposal, its exit rule (`onDemand {}` | `afterDeadline h`: the rule the kernel
+judges `exitAuthorized` by), the height at which its offer opened it (`opened`, the
+height of the admitting turn, written once into the seat cell), and its
+allocation over EVERY asset its proposal names (the total view, as the law
+reads it). The method never sees a funding account or anything
 outside the instance's open seats, and `Seats.step` refuses any transfer outside
 them (`addressed`). Lists are `nil {}` / `cons {head, tail}` sums. -/
 
@@ -252,18 +271,89 @@ def amountsData (entries : List (AssetId × Nat)) : Data :=
 def termsData (terms : List (String × Nat)) : Data :=
   listData (terms.map fun term => .record [("name", .label term.1), ("value", .natural term.2)])
 
+def exitData : ExitRule → Data
+  | .onDemand => .variant "onDemand" (.record [])
+  | .afterDeadline due => .variant "afterDeadline" (.natural due)
+
+/-- One principal as the contract sees it: `hidden` unless the offerer disclosed it; a disclosed
+holder of an unheld seat is `none`. -/
+def shownNat (disclosed : Bool) (value : Option Nat) : Data :=
+  match disclosed, value with
+  | false, _ => .variant "hidden" (.record [])
+  | true, none => .variant "none" (.record [])
+  | true, some n => .variant "shown" (.natural n)
+
+/-- The seat's principals, each `hidden` unless the proposal discloses it (`Proposal.disclose`). -/
+def disclosedData (seat : Seat) : Data :=
+  .record [("offerer", shownNat seat.proposal.disclose.offerer (some seat.offerer.value)),
+    ("payee", shownNat seat.proposal.disclose.payee (some seat.payee)),
+    ("holder", shownNat seat.proposal.disclose.holder seat.holder)]
+
 def seatView (book : Book) (body : SeatBody) : Data :=
   .record [("seat", .natural body.seat.account), ("role", .label body.role), ("terms", termsData body.terms),
     ("give", amountsData body.seat.proposal.give), ("want", amountsData body.seat.proposal.want),
+    ("exit", exitData body.seat.proposal.exit), ("opened", .natural body.opened),
     ("allocation", amountsData (body.seat.proposal.assets.map fun asset =>
-      (asset, (book.balance body.seat.account asset).toNat)))]
+      (asset, (book.balance body.seat.account asset).toNat))),
+    ("disclosed", disclosedData body.seat)]
+
+/-- **Identity-blind by default** (GPT-6 row G). Two seat cells that agree on everything but the
+principals their proposals do not disclose are shown to the contract identically: a contract's
+method cannot read, branch on or leak an undisclosed offerer, payee or holder. -/
+theorem seatView_identity_blind (book : Book) (a b : SeatBody)
+    (account : a.seat.account = b.seat.account) (proposal : a.seat.proposal = b.seat.proposal)
+    (role : a.role = b.role) (terms : a.terms = b.terms) (opened : a.opened = b.opened)
+    (offerer : a.seat.proposal.disclose.offerer = true → a.seat.offerer = b.seat.offerer)
+    (payee : a.seat.proposal.disclose.payee = true → a.seat.payee = b.seat.payee)
+    (holder : a.seat.proposal.disclose.holder = true → a.seat.holder = b.seat.holder) :
+    seatView book a = seatView book b := by
+  have shown : disclosedData a.seat = disclosedData b.seat := by
+    unfold disclosedData
+    rw [← proposal]
+    cases ho : a.seat.proposal.disclose.offerer <;> cases hp : a.seat.proposal.disclose.payee <;>
+      cases hh : a.seat.proposal.disclose.holder <;>
+      simp_all [shownNat]
+  unfold seatView
+  rw [shown, account, proposal, role, terms, opened]
+
+/-- The opt-in is real: a disclosed payee IS shown (the pole the blind theorem must not swallow). -/
+theorem seatView_shows_disclosed_payee (seat : Seat) (disclosed : seat.proposal.disclose.payee = true) :
+    ∃ fields, disclosedData seat = .record fields ∧ ("payee", .variant "shown" (.natural seat.payee)) ∈ fields := by
+  refine ⟨_, rfl, ?_⟩
+  simp [shownNat, disclosed]
+
+#assert_axioms seatView_identity_blind seatView_shows_disclosed_payee
 
 def sortSeats (seats : List SeatBody) : List SeatBody :=
   seats.mergeSort fun a b => decide (a.seat.account ≤ b.seat.account)
 
-def callData (input : Data) (height : Nat) (book : Book) (seats : List SeatBody) : Data :=
-  .record [("input", input), ("height", .natural height),
+/-- What a seat contract's method is called with: the input, the height, the invoker as it chose to
+be shown (`shownNat discloseInvoker subject`: `hidden` unless it opted in), and the open seats. -/
+def callData (input : Data) (height : Nat) (book : Book) (seats : List SeatBody) (invoker : Data) : Data :=
+  .record [("input", input), ("height", .natural height), ("invoker", invoker),
     ("seats", listData ((sortSeats seats).map (seatView book)))]
+
+/-- The call an `invoke` makes: the invoker shown only if it opted in (`discloseInvoker`). -/
+def invocationCall (input : Data) (height : Nat) (book : Book) (seats : List SeatBody) (discloseInvoker : Bool)
+    (invoker : Nat) : Data :=
+  callData input height book seats (shownNat discloseInvoker (some invoker))
+
+/-- **The invoker is identity-blind by default** (GPT-6 row G): an invocation that does not opt in
+calls the method with the same data whoever signs it, so a contract cannot read, branch on or leak
+the invoker. -/
+theorem callData_invoker_blind (input : Data) (height : Nat) (book : Book) (seats : List SeatBody)
+    (a b : Nat) :
+    invocationCall input height book seats false a = invocationCall input height book seats false b := rfl
+
+/-- The opt-in is real: a disclosing invoker IS shown, so distinct invokers are told apart. -/
+theorem callData_invoker_shown (input : Data) (height : Nat) (book : Book) (seats : List SeatBody)
+    {a b : Nat} (distinct : a ≠ b) :
+    invocationCall input height book seats true a ≠ invocationCall input height book seats true b := by
+  intro same
+  simp [invocationCall, callData, shownNat] at same
+  exact distinct same
+
+#assert_axioms callData_invoker_blind callData_invoker_shown
 
 def natField (fields : List (String × Data)) (name : String) : Option Nat :=
   match ObjectiveActivity.fieldOf fields name with
@@ -324,6 +414,8 @@ refuses or exhausts its envelope commits nothing. -/
 def runMethod (config : Config) (bytes : Bytes) (pin : Digest) (call : Data) (envelope : Capacity) :
     Except Refusal Data := do
   if !config.covers envelope then throw (.uncovered envelope)
+  if envelope.extractTicks < config.planBudget.ticks then
+    throw (.program (.extractUncovered config.planBudget.ticks envelope.extractTicks))
   let ticks := envelope.sourceTicks
   let instantiated ← program (ObjectiveActivity.instantiate config bytes pin call)
   match instantiated.checked.type with
@@ -345,7 +437,7 @@ def runMethod (config : Config) (bytes : Bytes) (pin : Digest) (call : Data) (en
 structure Loaded where
   instances : List InstanceBody := []
   invitations : List InvitationBody := []
-  seats : List (Bytes × SeatBody) := []
+  seats : List SeatBody := []
   holdings : List (Nat × List AccountId) := []
   deriving Repr
 
@@ -357,13 +449,15 @@ def Loaded.world (loaded : Loaded) (book : Book) : World where
       live := (loaded.invitations.filter fun body => !body.spent).map InvitationBody.invitation
       spent := (loaded.invitations.filter InvitationBody.spent).map fun body => body.invitation.id
       retired := (loaded.instances.filter InstanceBody.retired).map fun body => body.inst.id }
-  seats := loaded.seats.map fun entry => entry.2.seat
+  seats := loaded.seats.map SeatBody.seat
 
 /-- The instance's open-seat index after a turn: the loaded index without the
-seats the turn closed, then the instance's seats it opened. -/
-def openIndex (base : List AccountId) (next : List Seat) (inst : InstanceId) : List AccountId :=
-  base.filter (fun account => !(next.any fun seat => seat.account == account && !seat.isOpen)) ++
-    ((next.filter fun seat => seat.isOpen && seat.inst == inst && !(base.contains seat.account)).map Seat.account)
+seats the turn closed (a seat that was loaded and is gone from the next world),
+then the instance's seats it opened. The index keeps its order: surviving seats
+in the order they were opened, new ones after. -/
+def openIndex (base loaded : List AccountId) (next : List Seat) (inst : InstanceId) : List AccountId :=
+  base.filter (fun account => !loaded.contains account || next.any fun seat => seat.account == account) ++
+    ((next.filter fun seat => seat.inst == inst && !(base.contains seat.account)).map Seat.account)
 
 def changed {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (cell : CellId) (bytes : Bytes) :
     Option Post :=
@@ -375,17 +469,24 @@ structure Fresh where
   key : Bytes
   role : String
   terms : List (String × Nat)
+  opened : Nat
 
 /-- The posts that write the next world's changed cells: seats, invitations,
 instances, holdings. A cell whose body did not change is not written (it is
-guarded). -/
+guarded). A seat a turn closed is gone from the next world: its cell is RETIRED
+(the registry's retired lifecycle image, the activity record's precedent: never
+reused, the id enters the World's retired set), one post per loaded seat the next
+world no longer holds. A live seat cell is never rewritten (a seat does not
+change after its offer). -/
 def statePosts {rootBytes : Bytes → Digest} (domain : Digest) (snapshot : Snapshot rootBytes)
     (loaded : Loaded) (fresh : Option Fresh) (next : World) : List Post :=
-  let seats := next.seats.filterMap fun seat =>
-    match loaded.seats.find? (fun entry => entry.2.seat.account == seat.account) with
-    | some (key, body) => changed snapshot (seatCell seat.account) (seatImage key { body with seat := seat })
-    | none => fresh.bind fun made =>
-        changed snapshot (seatCell seat.account) (seatImage made.key ⟨seat, made.role, made.terms⟩)
+  let retired := (loaded.seats.filter fun body =>
+      !(next.seats.any fun seat => seat.account == body.seat.account)).map fun body =>
+    postAt snapshot (seatCell body.seat.account) ObjectiveActivity.retiredImage
+  let opened := next.seats.filterMap fun seat =>
+    if loaded.seats.any (fun body => body.seat.account == seat.account) then none
+    else fresh.bind fun made =>
+        changed snapshot (seatCell seat.account) (seatImage made.key ⟨seat, made.role, made.terms, made.opened⟩)
   let invitations :=
     (next.registry.live.map fun invitation => (⟨invitation, false⟩ : InvitationBody)) ++
       loaded.invitations.filterMap fun body =>
@@ -399,19 +500,20 @@ def statePosts {rootBytes : Bytes → Digest} (domain : Digest) (snapshot : Snap
       (loaded.instances.find? fun body => body.inst.id == id).map InstanceBody.inst
     inst.bind fun inst =>
       changed snapshot (instanceCell domain id)
-        (instanceImage ⟨inst, openIndex base next.seats id, next.registry.retired.contains id⟩)
-  let made := next.seats.filter fun seat => !(loaded.seats.any fun entry => entry.2.seat.account == seat.account)
+        (instanceImage ⟨inst, openIndex base (loaded.seats.map fun body => body.seat.account) next.seats id,
+          next.registry.retired.contains id⟩)
+  let made := next.seats.filter fun seat => !(loaded.seats.any fun body => body.seat.account == seat.account)
   let holdingsPosts := (made.filterMap Seat.holder).dedup.filterMap fun record =>
     changed snapshot (holdingsCell domain record)
       (holdingsImage record (((loaded.holdings.lookup record).getD []) ++
         (made.filter fun seat => seat.holder == some record).map Seat.account))
-  seats ++ invitationPosts ++ instancePosts ++ holdingsPosts
+  retired ++ opened ++ invitationPosts ++ instancePosts ++ holdingsPosts
 
 /-- Guards on every loaded cell: a decision is bound to the state it read. -/
 def loadedCells (domain : Digest) (loaded : Loaded) : List CellId :=
   loaded.instances.map (fun body => instanceCell domain body.inst.id) ++
     loaded.invitations.map (fun body => invitationCell domain body.invitation.id) ++
-    loaded.seats.map (fun entry => seatCell entry.2.seat.account) ++
+    loaded.seats.map (fun body => seatCell body.seat.account) ++
     loaded.holdings.map (fun entry => holdingsCell domain entry.1)
 
 /-! ## What the kernel ran -/
@@ -464,14 +566,16 @@ inductive Turn where
   | handOver (id : InvitationId) (recipient : SubjectId)
   | offer (id : InvitationId) (expect : Expectation) (funding payee : AccountId) (proposal : Proposal)
       (holder : Option Nat)
-  | invoke (inst : InstanceId) (input : Bytes) (envelope : Capacity) (account : AccountId)
+  /-- `discloseInvoker`: the invoker opts in to show its subject to the contract's method (GPT-6 row G);
+  false (the default) keeps the call input identity-blind. -/
+  | invoke (inst : InstanceId) (input : Bytes) (envelope : Capacity) (account : AccountId) (discloseInvoker : Bool)
   | exit (seat : AccountId)
   deriving DecidableEq, Repr
 
 abbrev TurnWire :=
   Sum Bytes (Sum (Nat × Digest × Pred) (Sum (Nat × SubjectId)
     (Sum (Nat × (Nat × Digest × String) × Nat × Nat × Proposal × Option Nat)
-      (Sum (Nat × Bytes × Capacity × Nat) Nat))))
+      (Sum (Nat × Bytes × Capacity × Nat × Bool) Nat))))
 
 def Turn.toWire : Turn → TurnWire
   | .publish artifact => .inl artifact
@@ -479,7 +583,7 @@ def Turn.toWire : Turn → TurnWire
   | .handOver invitation recipient => .inr (.inr (.inl (invitation, recipient)))
   | .offer invitation expect funding payee proposal holder =>
       .inr (.inr (.inr (.inl (invitation, (expect.inst, expect.package, expect.role), funding, payee, proposal, holder))))
-  | .invoke inst input envelope account => .inr (.inr (.inr (.inr (.inl (inst, input, envelope, account)))))
+  | .invoke inst input envelope account disclose => .inr (.inr (.inr (.inr (.inl (inst, input, envelope, account, disclose)))))
   | .exit seat => .inr (.inr (.inr (.inr (.inr seat))))
 
 def Turn.ofWire : TurnWire → Turn
@@ -488,7 +592,7 @@ def Turn.ofWire : TurnWire → Turn
   | .inr (.inr (.inl (invitation, recipient))) => .handOver invitation recipient
   | .inr (.inr (.inr (.inl (invitation, (i, p, r), funding, payee, proposal, holder)))) =>
       .offer invitation ⟨i, p, r⟩ funding payee proposal holder
-  | .inr (.inr (.inr (.inr (.inl (inst, input, envelope, account))))) => .invoke inst input envelope account
+  | .inr (.inr (.inr (.inr (.inl (inst, input, envelope, account, disclose))))) => .invoke inst input envelope account disclose
   | .inr (.inr (.inr (.inr (.inr seat)))) => .exit seat
 
 def turnStream : StreamCodec Turn :=
@@ -503,7 +607,7 @@ def turnStream : StreamCodec Turn :=
                   (StreamCodec.product proposalStream (StreamCodec.option StreamCodec.nat))))))
             (StreamCodec.sum
               (StreamCodec.product StreamCodec.nat (StreamCodec.product bytesStream
-                (StreamCodec.product capacityStream StreamCodec.nat)))
+                (StreamCodec.product capacityStream (StreamCodec.product StreamCodec.nat StreamCodec.bool))))
               StreamCodec.nat)))))
     Turn.toWire Turn.ofWire (by intro turn; cases turn <;> rfl)
 
@@ -553,7 +657,7 @@ def Turn.kernelAction (domain : Digest) (transaction : TransactionId) (subject :
   | .offer invitation expect funding payee proposal holder =>
       some (.subject subject, .offer invitation expect (seatAccount domain transaction) funding payee proposal holder)
   | .exit seat => some (.subject subject, .exit seat)
-  | .publish _ | .invoke _ _ _ _ => none
+  | .publish _ | .invoke _ _ _ _ _ => none
 
 /-- The claims a turn consumes: an offer spends its invitation's. -/
 def Turn.claims : Turn → List StableNullifier
@@ -695,7 +799,7 @@ def loadInvitation {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes
   else .ok none
 
 def loadSeat {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (account : AccountId) :
-    Except Refusal (Option (Bytes × SeatBody)) :=
+    Except Refusal (Option SeatBody) :=
   if present snapshot (seatCell account) then
     match readSeat snapshot account with
     | some entry => .ok (some entry)
@@ -703,7 +807,7 @@ def loadSeat {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (acc
   else .ok none
 
 def requireSeat {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (account : AccountId) :
-    Except Refusal (Bytes × SeatBody) := do
+    Except Refusal SeatBody := do
   match ← loadSeat snapshot account with
   | some entry => pure entry
   | none => throw (.cellUndecodable account)
@@ -725,6 +829,40 @@ def finish {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot
     .ok ⟨loaded, book, bookExact, _, rfl, next, batch, run, fees, feesNone, accepted, fresh, extra, _, rfl, inert,
       (loadedCells config.domain loaded ++ cells).map (guardAt snapshot), nullifiers, nullifiersExact, stepExact⟩
   else .error .bookRefused
+
+/-- The kernel's decision of an offer turn: the invitation, its instance and the activity holdings
+loaded, the seat account (its cell's coordinate) required to sit on a FRESH cell, then the kernel's
+own `Seats.step`. -/
+def decideOffer {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (height : Nat)
+    (request : Request) (book : BookCell) (bookExact : loadBook config snapshot = .ok book)
+    (invitation : InvitationId) (expect : Expectation) (funding payee : AccountId) (proposal : Proposal)
+    (holder : Option Nat)
+    (hturn : request.turn = .offer invitation expect funding payee proposal holder) :
+    Except Refusal (Decided config snapshot height request) := do
+  let logical := logicalBook book.logical
+  let transaction := transactionOf request
+  let domain := config.domain
+  let account := seatAccount domain transaction
+  -- the seat account is its cell's coordinate: never offered onto a retired or occupied cell
+  if ObjectiveActivity.isRetired (snapshot.canonicalBytes (seatCell account)) then throw (.seatRetired account)
+  if present snapshot (seatCell account) then throw (.seatExists account)
+  let found ← loadInvitation snapshot domain invitation
+  let inst ← match found with
+    | some body => loadInstance snapshot domain body.invitation.inst
+    | none => pure none
+  let holdings := match holder with
+    | some record => [(record, readHoldings snapshot domain record)]
+    | none => []
+  let loaded : Loaded := { instances := inst.toList, invitations := found.toList, holdings := holdings }
+  let fresh : Option Fresh := found.map fun body => ⟨seatKey transaction, body.invitation.role, body.invitation.terms, height⟩
+  match ran : Seats.step (loaded.world logical) height (.subject request.subject)
+      (.offer invitation expect account funding payee proposal holder) with
+  | .error reason => throw (.kernel reason)
+  | .ok (next, batch) =>
+    finish config snapshot height request loaded book bookExact next batch (.stepped ran) noPostings rfl fresh []
+      [seatCell account] [invitationClaim invitation] (by rw [hturn]; rfl)
+      (by intro _ _ h; rw [hturn] at h; simp only [Turn.kernelAction, Option.some.injEq, Prod.mk.injEq] at h
+          obtain ⟨rfl, rfl⟩ := h; exact ran)
 
 /-- The kernel's decision of one turn on a snapshot at a height. -/
 def decideTurn {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (height : Nat)
@@ -775,32 +913,15 @@ def decideTurn {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snap
           (by rw [hturn]; rfl)
           (by intro _ _ h; rw [hturn] at h; simp only [Turn.kernelAction, Option.some.injEq, Prod.mk.injEq] at h
               obtain ⟨rfl, rfl⟩ := h; exact ran)
-    | .offer invitation expect funding payee proposal holder => do
-      let found ← loadInvitation snapshot domain invitation
-      let inst ← match found with
-        | some body => loadInstance snapshot domain body.invitation.inst
-        | none => pure none
-      let holdings := match holder with
-        | some record => [(record, readHoldings snapshot domain record)]
-        | none => []
-      let loaded : Loaded := { instances := inst.toList, invitations := found.toList, holdings := holdings }
-      let account := seatAccount domain transaction
-      let fresh : Option Fresh := found.map fun body => ⟨seatKey transaction, body.invitation.role, body.invitation.terms⟩
-      match ran : Seats.step (loaded.world logical) height (.subject request.subject)
-          (.offer invitation expect account funding payee proposal holder) with
-      | .error reason => throw (.kernel reason)
-      | .ok (next, batch) =>
-        finish config snapshot height request loaded book bookExact next batch (.stepped ran) noPostings rfl fresh []
-          [seatCell account] [invitationClaim invitation] (by rw [hturn]; rfl)
-          (by intro _ _ h; rw [hturn] at h; simp only [Turn.kernelAction, Option.some.injEq, Prod.mk.injEq] at h
-              obtain ⟨rfl, rfl⟩ := h; exact ran)
-    | .invoke inst inputBytes envelope account => do
+    | .offer invitation expect funding payee proposal holder =>
+      decideOffer config snapshot height request book bookExact invitation expect funding payee proposal holder hturn
+    | .invoke inst inputBytes envelope account discloseInvoker => do
       let some input := decodeDataBytes inputBytes | throw .inputUndecodable
       let some body ← loadInstance snapshot domain inst | throw (.instanceMissing inst)
       if body.retired then throw (.instanceMissing inst)
       if reservedBase ≤ account ∨ account = config.collector ∨ account = config.asset then throw (.payerInvalid account)
       let seats ← body.seats.mapM (requireSeat snapshot)
-      let call := callData input height logical (seats.map Prod.snd)
+      let call := invocationCall input height logical seats discloseInvoker request.subject.value
       let result ← runMethod config (packageBytes domain snapshot body.inst.package) body.inst.package call envelope
       let plan ← decodePlan (config.planBudget.nodes + 1) result
       let ids := plan.zipIdx.filterMap fun (member, index) => match member with
@@ -818,7 +939,7 @@ def decideTurn {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snap
     | .exit seat => do
       let found ← loadSeat snapshot seat
       let inst ← match found with
-        | some (_, body) => loadInstance snapshot domain body.seat.inst
+        | some body => loadInstance snapshot domain body.seat.inst
         | none => pure none
       let loaded : Loaded := { instances := inst.toList, seats := found.toList }
       match ran : Seats.step (loaded.world logical) height (.subject request.subject) (.exit seat) with
@@ -828,6 +949,36 @@ def decideTurn {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snap
           [seatCell seat] [] (by rw [hturn]; rfl)
           (by intro _ _ h; rw [hturn] at h; simp only [Turn.kernelAction, Option.some.injEq, Prod.mk.injEq] at h
               obtain ⟨rfl, rfl⟩ := h; exact ran)
+
+/-- **`offer_refuses_taken_cell`: a seat account is never reused.** A seat account is its seat cell's
+coordinate `H(offer transaction)`. An offer whose cell is retired (its seat closed) or already holds
+a seat is refused by name, before anything else is read. (The Book alone cannot refuse a
+re-registration of a deregistered id; this is what does.) -/
+theorem offer_refuses_taken_cell {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (height : Nat) (request : Request) {invitation : InvitationId} {expect : Expectation}
+    {funding payee : AccountId} {proposal : Proposal} {holder : Option Nat}
+    (turn : request.turn = .offer invitation expect funding payee proposal holder)
+    (taken : ObjectiveActivity.isRetired (snapshot.canonicalBytes
+        (seatCell (seatAccount config.domain (transactionOf request)))) = true ∨
+      present snapshot (seatCell (seatAccount config.domain (transactionOf request))) = true) :
+    ∃ reason, decideTurn config snapshot height request = .error reason := by
+  unfold decideTurn
+  split
+  · exact ⟨_, rfl⟩
+  · rename_i book bookExact
+    split
+    all_goals (first | (rename_i heq; exfalso; rw [turn] at heq; cases heq; done) | skip)
+    rename_i invitation' expect' funding' payee' proposal' holder' hturn
+    show ∃ reason, decideOffer config snapshot height request book bookExact invitation' expect' funding'
+      payee' proposal' holder' hturn = .error reason
+    unfold decideOffer
+    dsimp only
+    rcases taken with h | h
+    · rw [if_pos h]; exact ⟨_, rfl⟩
+    · by_cases r : ObjectiveActivity.isRetired (snapshot.canonicalBytes
+          (seatCell (seatAccount config.domain (transactionOf request)))) = true
+      · rw [if_pos r]; exact ⟨_, rfl⟩
+      · rw [if_neg r, if_pos h]; exact ⟨_, rfl⟩
 
 /-! ## An activity's end: the seats it holds
 
@@ -856,8 +1007,10 @@ structure HeldEnd {rootBytes : Bytes → Digest} (domain : Digest) (snapshot : S
 def endHeld {rootBytes : Bytes → Digest} (domain : Digest) (snapshot : Snapshot rootBytes) (height record : Nat)
     (book : Book) : Except Refusal (HeldEnd domain snapshot height record book) := do
   let accounts := readHoldings snapshot domain record
-  let seats ← accounts.mapM (requireSeat snapshot)
-  let instances ← (seats.map fun entry => entry.2.seat.inst).dedup.mapM (loadInstance snapshot domain)
+  -- a held seat that already exited has a retired cell (its holdings entry stays): nothing to close
+  let live := accounts.filter fun account => !ObjectiveActivity.isRetired (snapshot.canonicalBytes (seatCell account))
+  let seats ← live.mapM (requireSeat snapshot)
+  let instances ← (seats.map fun body => body.seat.inst).dedup.mapM (loadInstance snapshot domain)
   let loaded : Loaded := { instances := instances.filterMap (fun found => found), seats := seats,
                            holdings := [(record, accounts)] }
   match ended : closeHeld (loaded.world book) height record with
@@ -867,19 +1020,83 @@ def endHeld {rootBytes : Bytes → Digest} (domain : Digest) (snapshot : Snapsho
     pure ⟨loaded, next, batch, ended, _, rfl, inert, _, rfl⟩
 
 /-- **An activity's end closes every seat it holds** (the kernel's
-`activity_end_closes_seats` on the loaded holdings): every held seat that was
-open is closed in the written world, and the end's batch is admitted on the
-Book it was given and conserves every asset. -/
+`activity_end_closes_seats` on the loaded holdings): every held seat is gone from
+the written world and its account is no Book account, and the end's batch is
+admitted on the Book it was given and conserves every asset. -/
 theorem HeldEnd.closes {rootBytes : Bytes → Digest} {domain : Digest} {snapshot : Snapshot rootBytes}
     {height record : Nat} {book : Book} (held : HeldEnd domain snapshot height record book) :
-    (∀ seat ∈ heldOpen (held.loaded.world book) record, ∀ after ∈ held.next.seats,
-        after.account = seat.account → after.isOpen = false) ∧
+    (∀ seat ∈ heldOpen (held.loaded.world book) height record, ∀ after ∈ held.next.seats,
+        after.account ≠ seat.account) ∧
+      (∀ seat ∈ heldOpen (held.loaded.world book) height record, seat.account ∉ held.next.book.accounts) ∧
       Posts book held.batch held.next.book ∧ held.batch.registrations = [] ∧
       ∀ asset, held.next.book.totalAsset asset = book.totalAsset asset := by
-  obtain ⟨closes, posted, conserves⟩ := activity_end_closes_seats held.ended
-  exact ⟨closes, posted, (exitEach_posts held.ended).2.1, conserves⟩
+  obtain ⟨closes, gone, posted, conserves⟩ := activity_end_closes_seats held.ended
+  exact ⟨closes, gone, posted, (exitEach_posts held.ended).2.1, conserves⟩
+
+/-- **A loaded seat the next world no longer holds is written to the retired
+image**: the cell is retired, never rewritten, never reused. -/
+theorem statePosts_retires {rootBytes : Bytes → Digest} {domain : Digest} {snapshot : Snapshot rootBytes}
+    {loaded : Loaded} {fresh : Option Fresh} {next : World} {body : SeatBody} (member : body ∈ loaded.seats)
+    (gone : ∀ seat ∈ next.seats, seat.account ≠ body.seat.account) :
+    postAt snapshot (seatCell body.seat.account) ObjectiveActivity.retiredImage ∈
+      statePosts domain snapshot loaded fresh next := by
+  unfold statePosts
+  dsimp only
+  refine List.mem_append_left _ (List.mem_append_left _ (List.mem_append_left _
+    (List.mem_append_left _ ?_)))
+  refine List.mem_map.mpr ⟨body, List.mem_filter.mpr ⟨member, ?_⟩, rfl⟩
+  have absent : (next.seats.any fun seat => seat.account == body.seat.account) = false := by
+    cases h : (next.seats.any fun seat => seat.account == body.seat.account)
+    · rfl
+    · obtain ⟨seat, inNext, same⟩ := List.any_eq_true.mp h
+      exact absurd (by simpa using same) (gone seat inNext)
+  show (!(next.seats.any fun seat => seat.account == body.seat.account)) = true
+  rw [absent]; rfl
+
+/-- **An activity's end retires the seat cells it closes.** -/
+theorem HeldEnd.retires {rootBytes : Bytes → Digest} {domain : Digest} {snapshot : Snapshot rootBytes}
+    {height record : Nat} {book : Book} (held : HeldEnd domain snapshot height record book) :
+    ∀ seat ∈ heldOpen (held.loaded.world book) height record,
+      postAt snapshot (seatCell seat.account) ObjectiveActivity.retiredImage ∈ held.posts := by
+  intro seat member
+  have mem : seat ∈ held.loaded.seats.map SeatBody.seat := (List.mem_filter.mp member).1
+  obtain ⟨body, bodyMem, bodySeat⟩ := List.mem_map.mp mem
+  have gone := (held.closes).1 seat member
+  rw [held.postsExact]
+  have := statePosts_retires (domain := domain) (snapshot := snapshot) (fresh := none) (next := held.next)
+    bodyMem (fun s hs => by rw [bodySeat]; exact gone s hs)
+  rw [bodySeat] at this
+  exact this
+
+/-- **A decided turn retires the cell of every loaded seat it closed.** -/
+theorem Decided.retires_closed {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : Request} (decided : Decided config snapshot height request) {body : SeatBody}
+    (member : body ∈ decided.loaded.seats) (gone : ∀ seat ∈ decided.next.seats, seat.account ≠ body.seat.account) :
+    postAt snapshot (seatCell body.seat.account) ObjectiveActivity.retiredImage ∈ decided.posts := by
+  rw [decided.postsExact]
+  exact List.mem_append_left _ (List.mem_append_right _ (statePosts_retires member gone))
+
+/-- **`exit_retires_cell`.** A decided exit turn writes the seat's cell to the
+retired image: the cell is emptied and its id enters the World's retired set. -/
+theorem Decided.exit_retires_cell {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : Request} (decided : Decided config snapshot height request) {seat : Nat}
+    (turn : request.turn = .exit seat) :
+    postAt snapshot (seatCell seat) ObjectiveActivity.retiredImage ∈ decided.posts := by
+  have ran := decided.stepExact (.subject request.subject) (.exit seat) (by simp [turn, Turn.kernelAction])
+  obtain ⟨found, foundMem, foundAccount, _, _⟩ := exit_spec ran
+  have closes := step_exit_closes ran
+  have inWorld : found ∈ decided.loaded.seats.map SeatBody.seat := by
+    rw [decided.worldExact] at foundMem
+    exact foundMem
+  obtain ⟨body, bodyMem, bodySeat⟩ := List.mem_map.mp inWorld
+  have retired := decided.retires_closed bodyMem (fun s hs => by
+    rw [closes] at hs
+    rw [bodySeat, foundAccount]
+    exact (mem_removeSeat.mp hs).2)
+  rw [bodySeat, foundAccount] at retired
+  exact retired
 
 #assert_axioms seatAccount_protected KernelRun.posts KernelRun.reachable KernelRun.inv Decided.conserves
-  Decided.inv Decided.book_post HeldEnd.closes
+  Decided.inv Decided.book_post HeldEnd.closes offer_refuses_taken_cell HeldEnd.retires statePosts_retires Decided.exit_retires_cell
 
 end Minidregg.Kernel.SeatStore

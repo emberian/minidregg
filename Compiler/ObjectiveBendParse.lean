@@ -16,6 +16,7 @@ LineTerminator sets, not ASCII.
 Every recursion is fuel-bounded with fuel proportional to the input; running
 out is a refusal ("capacity"), never a different parse. -/
 import Lean
+import Compiler.ObjectiveBendLaw
 namespace Minidregg.Compiler.ObjectiveBendParse
 open Lean
 set_option autoImplicit false
@@ -646,7 +647,7 @@ def parentRe : Re := seqs [ident, opt (.seq (chr '.') ident), .done]
 def qualifiedRe : Re := seqs [group 1 (alts [str "def", str "around", str "before", str "after",
   seqs [str "combine", many1 space, group 2 (alts [chr '+', chr '*', str "and"])]]), many1 space, group 3 (many dot),
   chr ':', .done]
-def lawRe : Re := seqs [str "law", many1 space, group 1 ident, opt (seqs [chr '(', group 2 (many dot), chr ')']),
+def claimRe : Re := seqs [str "claim", many1 space, group 1 ident, opt (seqs [chr '(', group 2 (many dot), chr ')']),
   many space, chr ':', many space, group 3 (many1 dot), .done]
 def extensionRe : Re := seqs [str "extension", many1 space, group 1 ident,
   opt (seqs [chr '[', group 4 (many1 (.char (· != ']'))), chr ']']), chr '(', group 2 (many dot), chr ')',
@@ -655,6 +656,8 @@ def sumRe : Re := seqs [str "sum", many1 space, group 1 ident, chr ':', .done]
 def sumCaseRe : Re := seqs [group 1 ident, many space, chr ':', many space, group 2 (many1 dot), .done]
 def recordRe : Re := seqs [str "record", many1 space, group 1 ident, chr ':', .done]
 def fieldRe : Re := seqs [group 1 (.alt ident quoted), chr ':', many space, group 2 (many1 dot), .done]
+/-- `law NAME: EXPR`, a top-level ENFORCED law of the package (`Compiler.ObjectiveBendLaw`). -/
+def lawRe : Re := seqs [str "law", many1 space, group 1 ident, many space, chr ':', many space, group 2 (many1 dot), .done]
 
 /-- `String.prototype.split` on one character. -/
 def splitChar (s : List Char) (sep : Char) : List (List Char) :=
@@ -711,7 +714,7 @@ def declarations (lines : Array Line) : PS (Array Json × Array Json) := do
       if parents.eraseDups.length != parents.length then fail line "duplicate spec parent"
       let mut requirements : Array Json := #[]
       let mut methods : Array Json := #[]
-      let mut laws : Array Json := #[]
+      let mut claims : Array Json := #[]
       for _ in [0:lines.size] do
         let j ← get
         let some clause := lines[j]? | break
@@ -728,17 +731,21 @@ def declarations (lines : Array Line) : PS (Array Json × Array Json) := do
           let methodBody ← body lines fuel clause.indent
           methods := methods.push (Json.mkObj (signatureJson method ++ [("qualifier", toJson qualifier), ("body", methodBody)]))
           continue
-        if let some (_, l) ← matchAt clause lawRe clause.text then
+        if let some (_, l) ← matchAt clause claimRe clause.text then
           let parameters ← liftBare (splitParameters ((capture clause.text l 2).getD []))
-          let lawBody ← lineExpr clause ((capture clause.text l 3).getD [])
-          laws := laws.push (Json.mkObj [("name", toJson (cap clause.text l 1)), ("parameters", Json.arr parameters.toArray),
-            ("body", lawBody), ("span", clause.span.json)])
+          let claimBody ← lineExpr clause ((capture clause.text l 3).getD [])
+          claims := claims.push (Json.mkObj [("name", toJson (cap clause.text l 1)), ("parameters", Json.arr parameters.toArray),
+            ("body", claimBody), ("span", clause.span.json)])
           continue
-        fail clause "expected requires, actual method body, or law"
+        -- `law` names an ENFORCED predicate or an accepted proof obligation (GPT-6 row G); a spec
+        -- property nothing checks is a `claim`. The old spelling refuses by name, never reinterprets.
+        if startsWith clause.text "law " then
+          fail clause "law means an enforced predicate; an unchecked property of a spec is a claim (write `claim name: expr`)"
+        fail clause "expected requires, actual method body, or claim"
       decls := decls.push (Json.mkObj ([("kind", toJson "spec"), ("name", toJson (cap line.text caps 2)),
         ("suffix", toJson (capture line.text caps 1).isSome), ("parents", toJson (parents.map String.ofList)),
         ("targetType", toJson (cap line.text caps 4)), ("requirements", Json.arr requirements), ("methods", Json.arr methods),
-        ("laws", Json.arr laws), ("span", line.span.json)] ++
+        ("claims", Json.arr claims), ("span", line.span.json)] ++
         (match capture line.text caps 5 with
           | some b => [("binders", toJson (String.ofList b))]
           | none => [])))
@@ -786,6 +793,17 @@ def declarations (lines : Array Line) : PS (Array Json × Array Json) := do
       decls := decls.push (Json.mkObj [("kind", toJson "record"), ("name", toJson (cap line.text caps 1)),
         ("methods", Json.arr methods), ("fields", Json.arr fields), ("span", line.span.json)])
       continue
+    -- `law NAME: EXPR` is a law the kernel enforces on every object of the package; its text is
+    -- parsed here (a refusal names the construct outside the fragment) and again by the
+    -- elaborator's module decoder, which keeps the law itself.
+    if let some (_, caps) ← matchAt line lawRe line.text then
+      let text := cap line.text caps 2
+      if let .error message := ObjectiveBendLaw.parse text then fail line message
+      decls := decls.push (Json.mkObj [("kind", toJson "law"), ("name", toJson (cap line.text caps 1)),
+        ("source", toJson text), ("span", line.span.json)])
+      continue
+    if startsWith line.text "law " || line.text == "law".toList || startsWith line.text "law:" then
+      fail line (ObjectiveBendLaw.refusalPrefix ++ "expected `law NAME: EXPR` (a top-level law has a name and no parameters)")
     if startsWith line.text "def " && endsWith line.text ":" then
       let sig ← signature ((line.text.drop 4).take (line.text.length - 5)) line
       let functionBody ← body lines fuel line.indent

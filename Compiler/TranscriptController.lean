@@ -130,7 +130,9 @@ structure XofPortal (Blob : Type u) (State : Type v) (Coin : Type w) where
     (squeeze state label).1 = xof state label
 
 /-- Every recorded coin carries its exact pre-squeeze state and the portal law
-which derived it.  A native reply cannot construct one through `Command`. -/
+which derived it.  A native reply cannot construct one through `Command`, so
+no challenge in any execution is supplied: each equals the XOF applied to its
+recorded Lean transcript prefix and domain label (`portalLaw`). -/
 structure DerivedDraw {Blob : Type u} {State : Type v} {Coin : Type w}
     (portal : XofPortal Blob State Coin) where
   preState : State
@@ -254,18 +256,6 @@ theorem execute_drawLabels {Blob : Type u} {State : Type v} {Coin : Type w}
       schedule.drawLabels := by
   simpa [execute, initial] using
     run_drawLabels portal schedule (initial portal seed)
-
-/-- **No supplied challenges.** Every challenge in every execution is equal
-to the XOF applied to its recorded Lean transcript prefix and domain label.
-The native packets do not occur on the right-hand side. -/
-theorem execution_draw_portal_law {Blob : Type u} {State : Type v}
-    {Coin : Type w} {Canonical : Blob → Prop}
-    (portal : XofPortal Blob State Coin)
-    (schedule : Schedule Blob Canonical .start q) (seed : State)
-    (draw : DerivedDraw portal)
-    (_member : draw ∈ (execute portal schedule seed).draws) :
-    draw.coin = portal.xof draw.preState draw.label :=
-  draw.portalLaw
 
 /-! ## Concrete two-round schedule -/
 

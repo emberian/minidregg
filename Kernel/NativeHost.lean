@@ -13,8 +13,10 @@ import Kernel.NativeHostGrainBirth
 import Kernel.GrainResourceBirthReceiver
 import Kernel.NativeObservationController
 import Kernel.NativeHostReplay
+import Compiler.DurableHistoryStore
 import Kernel.FnConsumerProgressHistory
 import Kernel.PreparedInvocationDiagnostics
+import Kernel.NativeHostLight
 
 namespace Minidregg.Kernel.NativeHost
 
@@ -53,7 +55,12 @@ private def auditWithTiming (config : Config) (timing : AuditTiming.Handle) :
       (DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes) with
   | .error detail => return .error detail
   | .ok durable =>
-      match ← NativeHostReplay.verifyLoaded config durable timing with
+      -- The walk reads lifecycle history through the Store's own verified Reader.
+      let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf config.transport
+          ResourceBirthCodec.rootBytes durable with
+        | .error detail => return .error s!"audit history reader: {detail}"
+        | .ok sealed => pure sealed
+      match ← NativeHostReplay.verifyLoaded config reader durable timing with
       | .error failure =>
           return .error s!"audit refused history at entry {failure.index}: {failure.detail}"
       | .ok verified => return .ok (verified.receipts, verified.opened.durable.index,
@@ -92,7 +99,7 @@ def bootstrap (config : Config) (canonicalImage : List UInt8) : IO (Except Strin
   match DurableReceiverIO.loadBytes ResourceBirthCodec.rootBytes config.logStart canonicalImage with
   | .error detail => return .error detail
   | .ok durable =>
-      if !durable.image.accepted.isEmpty then return .error "bootstrap image contains accepted history"
+      if durable.height != 0 then return .error "bootstrap image contains accepted history"
       match validateLoaded config durable with
       | .error detail => return .error detail
       | .ok _ =>
@@ -123,6 +130,17 @@ private def birthRejection : ResourceBirthReceiver.Reject → String
   | .durable (.tailBound head certified bound) => s!"head {head} certified {certified} bound {bound}"
   | .durable reason => s!"durable: {repr reason}"
 
+/-- The named reason of a grain-backed birth refusal (the operator log and the signed
+requester's channel; the public frame stays uniform, `publicSubmissionOutcome`). -/
+private def grainBirthRejection : GrainResourceBirthReceiver.Reject → String
+  | .admission reason => s!"admission: {repr reason}"
+  | .birthPreparation reason => s!"birth preparation: {repr reason}"
+  | .malformedIngress => "malformed ingress"
+  | .transactionConflict => "transaction identity conflict"
+  | .tariffUnavailable => "grain birth tariff unavailable"
+  | .grainPreparation _ => "grain preparation refused"
+  | .durable _ => "durable refused"
+
 private def birthReason : ResourceBirthReceiver.Reject → RefusalReason
   | .malformedIngress => .malformed
   | .transactionConflict => .conflict
@@ -135,6 +153,144 @@ private def slot (snapshot : CredentialAuthorityDomain.Snapshot) (marker role in
   let header ← (CredentialSignatureAdmission.signingHeader snapshot marker wanted).mapError
     (fun reason => s!"signing key selection: {repr reason}")
   pure ⟨role, index, CredentialSignedEnvelopeController.headerCodec.encode header⟩
+
+/-- The keys a revocation draft consults beyond the state: its marker's
+transaction id and replay nullifier. -/
+def revokeKeys (config : Config) (bytes : List UInt8) : Option DurableView.Keys := do
+  let packed ← CapabilityRevocationController.commandCodec.decode bytes
+  let marker := CapabilityRevocationController.operationMarker config.deployment.domain
+    config.profile.semantics packed.2
+  some ⟨[⟨marker⟩], [CredentialAuthorityReplay.nullifier config.deployment.domain marker]⟩
+
+/-- A revocation's signing plan on a ground (`ServedBasis.Ground`): on the served
+path, the light basis of the request with its marker declared. -/
+def prepareRevokeOn (config : Config) (ground : ServedBasis.Ground config.deployment) (height : Nat)
+    (bytes : List UInt8) : Except String SigningPlan := do
+  let profile := config.profile
+  let packed ← need "noncanonical revocation command" (CapabilityRevocationController.commandCodec.decode bytes)
+  let ambient : CapabilityRevocationController.Ambient := ⟨config.federation, height⟩
+  let _prepared ← (CapabilityRevocationController.prepare config.deployment profile ambient
+    ground packed.2).mapError (fun reason => s!"revocation preparation: {repr reason}")
+  let wanted := CapabilityRevocationController.request ground.authority profile.semantics ambient packed.2
+  let marker := CapabilityRevocationController.operationMarker config.deployment.domain profile.semantics packed.2
+  let signature ← slot ground.authority marker 7 0 ⟨.program, wanted⟩
+  pure ⟨config.deployment.domain, profile.semantics, ground.worldRoot, height, .revoke bytes, [signature]⟩
+
+/-- The keys a delegation draft consults beyond the state: its marker's
+transaction id and replay nullifier. -/
+def delegateKeys (config : Config) (bytes : List UInt8) : Option DurableView.Keys := do
+  let packed ← CapabilityDelegationController.commandCodec.decode bytes
+  let marker := CapabilityDelegationController.operationMarker config.deployment.domain
+    config.profile.semantics packed.2
+  some ⟨[⟨marker⟩], [CredentialAuthorityReplay.nullifier config.deployment.domain marker]⟩
+
+/-- A delegation's signing plan on a ground (`ServedBasis.Ground`): on the served
+path, the light basis of the request with its marker declared. -/
+def prepareDelegateOn (config : Config) (ground : ServedBasis.Ground config.deployment) (height : Nat)
+    (bytes : List UInt8) : Except String SigningPlan := do
+  let profile := config.profile
+  let packed ← need (CapabilityDelegationController.undecodable bytes)
+    (CapabilityDelegationController.commandCodec.decode bytes)
+  let ambient : CapabilityDelegationController.Ambient := ⟨config.federation, height⟩
+  let _prepared ← (CapabilityDelegationController.prepare config.deployment profile ambient
+    ground packed.2).mapError (fun reason => s!"delegation preparation: {repr reason}")
+  let wanted := CapabilityDelegationController.request ground.authority profile.semantics ambient packed.2
+  let marker := CapabilityDelegationController.operationMarker config.deployment.domain profile.semantics packed.2
+  let signature ← slot ground.authority marker 6 0 ⟨packed.1, wanted⟩
+  pure ⟨config.deployment.domain, profile.semantics, ground.worldRoot, height, .delegate bytes, [signature]⟩
+
+/-- The keys a renounce draft consults beyond the state: its marker's transaction
+id and replay nullifier. -/
+def renounceKeys (config : Config) (bytes : List UInt8) : Option DurableView.Keys := do
+  let command ← CapabilityRenounce.commandCodec.decode bytes
+  let marker := CapabilityRenounce.operationMarker config.deployment.domain config.profile.semantics command
+  some ⟨[⟨marker⟩], [CredentialAuthorityReplay.nullifier config.deployment.domain marker]⟩
+
+/-- A renounce's signing plan on a ground. The plan reads nothing about the named
+capability: the signer's key record (public) and the marker's answer are the only
+state it consults. The gate runs at submission, after the signature verifies. -/
+def prepareRenounceOn (config : Config) (ground : ServedBasis.Ground config.deployment) (height : Nat)
+    (bytes : List UInt8) : Except String SigningPlan := do
+  let profile := config.profile
+  let command ← need "noncanonical renounce command" (CapabilityRenounce.commandCodec.decode bytes)
+  let ambient : CapabilityRenounce.Ambient := ⟨config.federation, height⟩
+  let prepared ← (CapabilityRenounce.prepare config.deployment profile.semantics ambient
+    ground command).mapError (fun reason => s!"renounce preparation: {repr reason}")
+  let signature ← slot ground.authority prepared.marker 9 0 ⟨.program, prepared.request⟩
+  pure ⟨config.deployment.domain, profile.semantics, ground.worldRoot, height, .renounce bytes, [signature]⟩
+
+/-- An installation's request context on a ground: the subject's key epoch and
+the policy's epoch and revision from the ground's authority cell (never its
+spent set). -/
+def installContext (config : Config) (ground : ServedBasis.Ground config.deployment) (height : Nat)
+    (subject : SubjectId) (declaration : PolicyInstallController.Declaration) :
+    PolicyInstallController.RequestContext :=
+  { federation := config.federation, subject := subject
+    subjectKeyEpoch := ground.authority.authState.subjectKeyEpoch subject
+    height := height
+    policyEpoch := ground.authority.authState.policyEpoch declaration.source.policyId
+    policyRevision := ground.authority.authState.policyRevision declaration.source.policyId }
+
+/-- The keys an installation draft consults beyond the state: its operation
+marker's replay nullifier. The marker is the request digest over the ground's
+authority cell, so it is computed on the served state before the basis is read;
+should the head move in between, the second basis answers a different digest's
+nullifier not at all and the preparation refuses `undeclaredMarker`. -/
+def installKeys (config : Config) (ground : ServedBasis.Ground config.deployment) (height : Nat)
+    (subject : SubjectId) (bytes : List UInt8) : Option DurableView.Keys := do
+  let declaration ← PolicyInstallController.decodeDeclaration bytes
+  let marker := (PolicyInstallController.requestDigest config.profile ground.authority
+    (installContext config ground height subject declaration) declaration).value
+  some ⟨[], [CredentialAuthorityReplay.nullifier config.deployment.domain marker]⟩
+
+/-- An installation's signing plan on a ground: the marker answered through
+`Ground.markerSpent` (`PolicyInstallController.prepareChecked_agrees`: a light
+basis declaring it and the full shape prepare alike). -/
+def prepareInstallOn (config : Config) (ground : ServedBasis.Ground config.deployment) (height : Nat)
+    (subject : SubjectId) (control : CapabilityId) (bytes : List UInt8) (roster : Option (List UInt8)) :
+    Except String SigningPlan := do
+  let profile := config.profile
+  let declaration ← need "noncanonical install declaration" (PolicyInstallController.decodeDeclaration bytes)
+  let context := installContext config ground height subject declaration
+  let prepared ← (PolicyInstallController.prepare profile ground.authority ground.markerSpent context bytes).mapError
+    (fun reason => s!"install preparation: {repr reason}")
+  let request := PolicyInstallController.request profile ground.authority context prepared.declaration
+  let marker := (PolicyInstallController.requestDigest profile ground.authority context prepared.declaration).value
+  let signature ← slot ground.authority marker 5 0 ⟨.program, request⟩
+  let draft : Draft := match roster with
+    | none => .install subject control bytes
+    | some rosterBytes => .installWithRoster subject control bytes rosterBytes
+  pure ⟨config.deployment.domain, profile.semantics, ground.worldRoot, height, draft, [signature]⟩
+
+/-- The keys an invocation draft consults beyond the state
+(`DeclaredResourceController.invocationKeys`). -/
+def invokeKeys (config : Config) (bytes : List UInt8) : Option DurableView.Keys := do
+  let command ← DeclaredResourceController.commandCodec.decode bytes
+  some (DeclaredResourceController.invocationKeys config.deployment.domain config.profile.semantics command)
+
+/-- An invocation's signing plan on a ground: the target, observation and authority
+slots of the transaction prepared on it (`DeclaredResourceController.prepare`). -/
+def prepareInvokeOn (config : Config) (ground : ServedBasis.Ground config.deployment) (height : Nat)
+    (bytes : List UInt8) : Except String SigningPlan := do
+  let profile := config.profile
+  let command ← need "noncanonical invocation command" (DeclaredResourceController.commandCodec.decode bytes)
+  let prepared ← (DeclaredResourceController.prepare config.deployment profile
+    ⟨config.federation, height⟩ ground command).mapError
+      (fun reason => s!"invocation preparation: {repr reason}")
+  let tuple ← need "invocation incidence collision" (DeclaredResourceController.prepareTuple prepared)
+  let marker := DeclaredResourceController.operationMarker config.deployment.domain profile.semantics command
+  -- An observe-only read target signs only its observation slot.
+  let targets ← (List.finRange command.targets.length).filterMapM fun index =>
+    if command.targets[index].observeOnly then pure none
+    else some <$> slot ground.authority marker 4 index.val (tuple.request (some index))
+  let observations ← if command.requiresObservation then
+    (List.finRange command.targets.length).mapM fun index =>
+      slot ground.authority marker 8 index.val
+        ⟨command.targets[index].kind, DeclaredResourceController.readRequest prepared index⟩
+    else pure []
+  let authority ← slot ground.authority marker 1 0 (tuple.request none)
+  pure ⟨config.deployment.domain, profile.semantics, ground.worldRoot, height, .invoke bytes,
+    targets ++ observations ++ [authority]⟩
 
 def prepareLoaded (config : Config) (opened : Opened config) (draft : Draft) :
     Except String SigningPlan := do
@@ -167,77 +323,35 @@ def prepareLoaded (config : Config) (opened : Opened config) (draft : Draft) :
           pure (.birth (CanonicalCellRegistry.sourceEncoding.codec.encode prepared.descriptor) capabilities,
             factory :: authority :: allocations ++ sources)
     | .invoke bytes => do
-        let command ← need "noncanonical invocation command" (DeclaredResourceController.commandCodec.decode bytes)
-        let prepared ← (DeclaredResourceController.prepareFrom config.deployment profile
-          ⟨config.federation, height⟩ opened.durable (some opened.directory) command).mapError
-            (fun reason => s!"invocation preparation: {repr reason}")
-        let tuple ← need "invocation incidence collision" (DeclaredResourceController.prepareTuple prepared)
-        let marker := DeclaredResourceController.operationMarker config.deployment.domain profile.semantics command
-        let targets ← (List.finRange command.targets.length).mapM fun index =>
-          slot prepared.authority.snapshot marker 4 index.val (tuple.request (some index))
-        let observations ← if command.requiresObservation then
-          (List.finRange command.targets.length).mapM fun index =>
-            slot prepared.authority.snapshot marker 8 index.val
-              ⟨command.targets[index].kind, DeclaredResourceController.readRequest prepared index⟩
-          else pure []
-        let authority ← slot prepared.authority.snapshot marker 1 0 (tuple.request none)
-        pure (.invoke bytes, targets ++ observations ++ [authority])
+        -- The full shape's plan (ratchet-listed: the consent provider's local re-derivation).
+        -- The served Host plans an invocation on its light basis (`prepareAuthorizedLoaded`).
+        let plan ← prepareInvokeOn config opened.ground height bytes
+        pure (plan.finalizedDraft, plan.slots)
     | .install subject control bytes => do
-        let declaration ← need "noncanonical install declaration" (PolicyInstallController.decodeDeclaration bytes)
-        let context : PolicyInstallController.RequestContext :=
-          { federation := config.federation, subject := subject
-            subjectKeyEpoch := opened.authority.snapshot.authState.subjectKeyEpoch subject
-            height := height
-            policyEpoch := opened.authority.snapshot.authState.policyEpoch declaration.source.policyId
-            policyRevision := opened.authority.snapshot.authState.policyRevision declaration.source.policyId }
-        let prepared ← (PolicyInstallController.prepare profile opened.authority.snapshot context bytes).mapError
-          (fun reason => s!"install preparation: {repr reason}")
-        let request := PolicyInstallController.request profile opened.authority.snapshot context prepared.declaration
-        let marker := (PolicyInstallController.requestDigest profile opened.authority.snapshot context prepared.declaration).value
-        let signature ← slot opened.authority.snapshot marker 5 0 ⟨.program, request⟩
-        pure (.install subject control bytes, [signature])
+        -- The full shape's plan (consent re-derivation); the served Host plans an
+        -- installation on its light basis (`prepareAuthorizedLoaded`).
+        let plan ← prepareInstallOn config opened.ground height subject control bytes none
+        pure (plan.finalizedDraft, plan.slots)
     | .installWithRoster subject control bytes rosterBytes => do
-        let declaration ← need "noncanonical install declaration" (PolicyInstallController.decodeDeclaration bytes)
-        let context : PolicyInstallController.RequestContext :=
-          { federation := config.federation, subject := subject
-            subjectKeyEpoch := opened.authority.snapshot.authState.subjectKeyEpoch subject
-            height := height
-            policyEpoch := opened.authority.snapshot.authState.policyEpoch declaration.source.policyId
-            policyRevision := opened.authority.snapshot.authState.policyRevision declaration.source.policyId }
-        let prepared ← (PolicyInstallController.prepare profile opened.authority.snapshot context bytes).mapError
-          (fun reason => s!"install preparation: {repr reason}")
-        let request := PolicyInstallController.request profile opened.authority.snapshot context prepared.declaration
-        let marker := (PolicyInstallController.requestDigest profile opened.authority.snapshot context prepared.declaration).value
-        let signature ← slot opened.authority.snapshot marker 5 0 ⟨.program, request⟩
-        pure (.installWithRoster subject control bytes rosterBytes, [signature])
+        let plan ← prepareInstallOn config opened.ground height subject control bytes (some rosterBytes)
+        pure (plan.finalizedDraft, plan.slots)
     | .delegate bytes => do
-        let packed ← need "noncanonical delegation command" (CapabilityDelegationController.commandCodec.decode bytes)
-        let ambient : CapabilityDelegationController.Ambient := ⟨config.federation, height⟩
-        let prepared ← (CapabilityDelegationController.prepare config.deployment profile ambient
-          opened.durable packed.2).mapError (fun reason => s!"delegation preparation: {repr reason}")
-        let wanted := CapabilityDelegationController.request prepared.authority.snapshot profile.semantics ambient packed.2
-        let marker := CapabilityDelegationController.operationMarker config.deployment.domain profile.semantics packed.2
-        let signature ← slot prepared.authority.snapshot marker 6 0 ⟨packed.1, wanted⟩
-        pure (.delegate bytes, [signature])
+        -- The full shape's plan (the consent provider's local re-derivation); the served
+        -- Host plans a delegation on its light basis (`prepareAuthorizedLoaded`);
+        -- `CapabilityDelegationController.prepare_agrees`: the two agree on the same state.
+        let plan ← prepareDelegateOn config opened.ground height bytes
+        pure (plan.finalizedDraft, plan.slots)
     | .revoke bytes => do
-        let packed ← need "noncanonical revocation command" (CapabilityRevocationController.commandCodec.decode bytes)
-        let ambient : CapabilityRevocationController.Ambient := ⟨config.federation, height⟩
-        let prepared ← (CapabilityRevocationController.prepare config.deployment profile ambient
-          opened.durable packed.2).mapError (fun reason => s!"revocation preparation: {repr reason}")
-        let wanted := CapabilityRevocationController.request prepared.authority.snapshot profile.semantics ambient packed.2
-        let marker := CapabilityRevocationController.operationMarker config.deployment.domain profile.semantics packed.2
-        let signature ← slot prepared.authority.snapshot marker 7 0 ⟨.program, wanted⟩
-        pure (.revoke bytes, [signature])
+        -- The full shape's plan (a ratchet-listed caller: the consent provider's local
+        -- re-derivation over its own anchored copy). The served Host plans a revocation on its
+        -- light basis (`prepareAuthorizedLoaded`); `prepare_agrees`: the two agree on the same state.
+        let plan ← prepareRevokeOn config opened.ground height bytes
+        pure (plan.finalizedDraft, plan.slots)
     | .renounce bytes => do
-        -- The plan reads nothing about the named capability: the signer's key
-        -- record (public) is the only state it consults. The gate runs at
-        -- submission, after the signature verifies.
-        let command ← need "noncanonical renounce command" (CapabilityRenounce.commandCodec.decode bytes)
-        let ambient : CapabilityRenounce.Ambient := ⟨config.federation, height⟩
-        let prepared ← (CapabilityRenounce.prepare config.deployment profile.semantics ambient
-          opened.durable command).mapError (fun reason => s!"renounce preparation: {repr reason}")
-        let signature ← slot prepared.authority.snapshot prepared.marker 9 0 ⟨.program, prepared.request⟩
-        pure (.renounce bytes, [signature])
+        -- The full shape's plan (consent re-derivation); the served Host plans a renounce
+        -- on its light basis (`prepareAuthorizedLoaded`); `CapabilityRenounce.prepare_agrees`.
+        let plan ← prepareRenounceOn config opened.ground height bytes
+        pure (plan.finalizedDraft, plan.slots)
   pure ⟨config.deployment.domain, profile.semantics, opened.durable.worldRoot,
     height, finalized, slots⟩
 
@@ -292,7 +406,7 @@ def enrollmentPlanAuthorizedLoaded (config : Config) (opened : Opened config)
         return .error (.of .malformed)
   | .prepare _ => return .error (.of .malformed)
   match ← NativeObservationController.authorize config.signature
-      ⟨opened.directory, opened.authority⟩ config.profile config.federation
+      (Minidregg.Compiler.ServedBasis.Ground.full _ opened.directory opened.authority) config.profile config.federation
       config.genesisHeight signed with
   | .error refusal => return .error refusal
   | .ok _ => return ((enrollmentPlanLoaded config opened commandBytes).mapError
@@ -341,14 +455,15 @@ key.  So plan, assembly, submit, lookup and status are open to the friend who
 holds only the next key. -/
 
 /-- Host-authored rotation plan: the exact possession frame the new key signs.
-It prepares the rotation first, assuming that signature, so a rotation the gate
-refuses (a key whose digest is not the commitment, a subject without one) is
-refused here by name. -/
+It runs the gate's checks first (`SubjectKeyRotation.check`, given that the new
+key will sign; nothing is admitted here), so a rotation the gate refuses (a key
+whose digest is not the commitment, a subject without one) is refused here by
+name. -/
 def rotationPlanLoaded (config : Config) (opened : Opened config)
     (commandBytes : List UInt8) : Except String SubjectKeyRotation.SigningPlan := do
   let command ← need "noncanonical subject key rotation command"
     (SubjectKeyRotation.commandCodec.decode commandBytes)
-  let _ ← (SubjectKeyRotation.prepare (NativeHostReplay.rotationEnv config)
+  let _ ← (SubjectKeyRotation.check (NativeHostReplay.rotationEnv config)
     opened.durable command).mapError (fun reason => s!"rotation preparation: {repr reason}")
   pure ⟨config.deployment.domain, config.profile.semantics, commandBytes,
     SubjectKeyRotation.possessionFrame config.deployment.domain config.profile.semantics command⟩
@@ -408,7 +523,7 @@ def provisionPlanAuthorizedLoaded (config : Config) (opened : Opened config)
         return .error (.of .malformed)
   | .prepare _ => return .error (.of .malformed)
   match ← NativeObservationController.authorize config.signature
-      ⟨opened.directory, opened.authority⟩ config.profile config.federation
+      (Minidregg.Compiler.ServedBasis.Ground.full _ opened.directory opened.authority) config.profile config.federation
       config.genesisHeight signed with
   | .error refusal => return .error refusal
   | .ok _ => return ((provisionPlanLoaded config opened commandBytes).mapError
@@ -428,8 +543,8 @@ def provisionAssemble (plan : ParticipantFactoryProvisioning.SigningPlan)
   pure (ParticipantFactoryProvisioning.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
 
 def observationContext (config : Config) (opened : Opened config) :
-    NativeObservationController.Context config.deployment opened.durable :=
-  ⟨opened.directory, opened.authority⟩
+    NativeObservationController.Context config.deployment :=
+  (Minidregg.Compiler.ServedBasis.Ground.full _ opened.directory opened.authority)
 
 /-- The answer to an observation request, given the subject's selected key and the native
 verdict on its intent signature. Only an authenticated request reaches the challenge, which
@@ -558,29 +673,29 @@ def challenge (config : Config) (intentBytes intentSignature : List UInt8) :
   challengeLoaded config opened intentBytes intentSignature
 
 /-- The steps a command's run claim names, when they exceed the operator's
-synchronous budget `config.nockFSync`; `none` when the command claims no run or
-claims at most the budget (`overSyncBudget_admits`, `overSyncBudget_refuses`). -/
-def overSyncBudget (config : Config) (command : DeclaredResourceController.Command) : Option Nat :=
+synchronous budget `nockFSync` (`Config.nockFSync`); `none` when the command claims
+no run or claims at most the budget (`overSyncBudget_admits`, `overSyncBudget_refuses`). -/
+def overSyncBudget (nockFSync : Nat) (command : DeclaredResourceController.Command) : Option Nat :=
   match command.run with
-  | some claim => if config.nockFSync < claim.steps then some claim.steps else none
+  | some claim => if nockFSync < claim.steps then some claim.steps else none
   | none => none
 
-theorem overSyncBudget_admits (config : Config) (command : DeclaredResourceController.Command)
+theorem overSyncBudget_admits (nockFSync : Nat) (command : DeclaredResourceController.Command)
     (claim : Run.RunClaim) (run : command.run = some claim)
-    (within : claim.steps ≤ config.nockFSync) : overSyncBudget config command = none := by
+    (within : claim.steps ≤ nockFSync) : overSyncBudget nockFSync command = none := by
   simp [overSyncBudget, run, Nat.not_lt.mpr within]
 
-theorem overSyncBudget_refuses (config : Config) (command : DeclaredResourceController.Command)
+theorem overSyncBudget_refuses (nockFSync : Nat) (command : DeclaredResourceController.Command)
     (claim : Run.RunClaim) (run : command.run = some claim)
-    (exceeds : config.nockFSync < claim.steps) : overSyncBudget config command = some claim.steps := by
+    (exceeds : nockFSync < claim.steps) : overSyncBudget nockFSync command = some claim.steps := by
   simp [overSyncBudget, run, exceeds]
 
-theorem overSyncBudget_unclaimed (config : Config) (command : DeclaredResourceController.Command)
-    (run : command.run = none) : overSyncBudget config command = none := by
+theorem overSyncBudget_unclaimed (nockFSync : Nat) (command : DeclaredResourceController.Command)
+    (run : command.run = none) : overSyncBudget nockFSync command = none := by
   simp [overSyncBudget, run]
 
-def overSyncBudgetDetail (config : Config) (steps : Nat) : String :=
-  s!"overSyncBudget: run claim of {steps} Lean steps exceeds the operator's synchronous budget nockFSync {config.nockFSync}"
+def overSyncBudgetDetail (nockFSync : Nat) (steps : Nat) : String :=
+  s!"overSyncBudget: run claim of {steps} Lean steps exceeds the operator's synchronous budget nockFSync {nockFSync}"
 
 /-- The operator-log detail of an invocation's `insufficientBudget`. The
 durable meter is the genesis `meterAllowance` less every admitted charge
@@ -596,7 +711,7 @@ def meterShortfallDetail (proofWorkLeft claimed : Nat) : String :=
 
 /-- The sync gate on a preparation draft: only an invocation carries a run claim. -/
 def draftOverSyncBudget (config : Config) : Draft → Option Nat
-  | .invoke bytes => (DeclaredResourceController.commandCodec.decode bytes).bind (overSyncBudget config)
+  | .invoke bytes => (DeclaredResourceController.commandCodec.decode bytes).bind (overSyncBudget config.nockFSync)
   | _ => none
 
 /-- The clause of a target's committed law that an invocation draft would fail,
@@ -608,8 +723,8 @@ state it may already read. -/
 def invokeLawLeaf (config : Config) (opened : Opened config) : Draft → Option LawLeaf
   | .invoke bytes => do
       let command ← DeclaredResourceController.commandCodec.decode bytes
-      let prepared ← (DeclaredResourceController.prepareFrom config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable (some opened.directory)
+      let prepared ← (DeclaredResourceController.prepare config.deployment config.profile
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground
         command).toOption
       let tuple ← DeclaredResourceController.prepareTuple prepared
       DeclaredResourceController.firstLawLeaf prepared tuple
@@ -623,7 +738,7 @@ def invokeRangeLeaf (config : Config) (opened : Opened config) : Draft → Optio
   | .invoke bytes => do
       let command ← DeclaredResourceController.commandCodec.decode bytes
       let prepared ← (DeclaredResourceController.prepare config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable command).toOption
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground command).toOption
       let tuple ← DeclaredResourceController.prepareTuple prepared
       DeclaredResourceController.firstRangeLeaf prepared tuple
   | _ => none
@@ -635,7 +750,7 @@ def invokeCastAlias (config : Config) (opened : Opened config) : Draft → Optio
   | .invoke bytes => do
       let command ← DeclaredResourceController.commandCodec.decode bytes
       let prepared ← (DeclaredResourceController.prepare config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable command).toOption
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground command).toOption
       let tuple ← DeclaredResourceController.prepareTuple prepared
       DeclaredResourceController.firstCastAlias prepared tuple
   | _ => none
@@ -679,9 +794,8 @@ def invokeRefusal (config : Config) (opened : Opened config)
     (grants : List NativeObservationCodec.GrantRef) : Draft → Option Refusal
   | .invoke bytes => do
       let command ← DeclaredResourceController.commandCodec.decode bytes
-      let prepared ← (DeclaredResourceController.prepareFrom config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable
-        (some opened.directory) command).toOption
+      let prepared ← (DeclaredResourceController.prepare config.deployment config.profile
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground command).toOption
       let tuple ← DeclaredResourceController.prepareTuple prepared
       let legs := DeclaredResourceController.preparePolicyLegs prepared tuple
       let fieldsOf := fun incidence => match incidence with
@@ -692,10 +806,27 @@ def invokeRefusal (config : Config) (opened : Opened config)
           legs.firstLawRefusal fieldsOf
   | _ => none
 
+/-- An installation's plan on the light route: the served state's authority (a basis
+declaring nothing) fixes the marker, a basis declaring its nullifier answers it. -/
+def prepareInstallLight (config : Config) (light : NativeHostLight.Light config) (subject : SubjectId)
+    (control : CapabilityId) (bytes : List UInt8) (roster : Option (List UInt8)) :
+    IO (Except Refusal SigningPlan) := do
+  match ← light.basis ⟨[], []⟩ with
+  | .error detail => return .error ⟨.operationRejected, detail, none⟩
+  | .ok served =>
+      let some keys := installKeys config (.ofBasis served) (config.genesisHeight + served.height) subject bytes
+        | return .error ⟨.operationRejected, "noncanonical install declaration", none⟩
+      match ← light.basis keys with
+      | .error detail => return .error ⟨.operationRejected, detail, none⟩
+      | .ok basis =>
+          return ((prepareInstallOn config (.ofBasis basis) (config.genesisHeight + basis.height)
+              subject control bytes roster).mapError
+            fun detail => ⟨.operationRejected, detail, none⟩)
+
 /-- The only public preparation path. A source-owned proof of every actual
 read permission is required before the internal planner may disclose a result
 or a detailed state-dependent error, on the very same opened image. -/
-def prepareAuthorizedLoaded (config : Config) (opened : Opened config)
+def prepareAuthorizedLoaded (config : Config) (opened : Opened config) (light : NativeHostLight.Light config)
     (bytes : List UInt8) : IO (Except Refusal SigningPlan) := do
   let some signed := NativeObservationCodec.signedCodec.decode bytes
     | return .error (.of .malformed)
@@ -706,17 +837,65 @@ def prepareAuthorizedLoaded (config : Config) (opened : Opened config)
       match signed.challenge.intent.purpose with
       | .prepare draft =>
           if let some steps := draftOverSyncBudget config draft then
-            return .error ⟨.operationRejected, overSyncBudgetDetail config steps, none⟩
+            return .error ⟨.operationRejected, overSyncBudgetDetail config.nockFSync steps, none⟩
           match invokeRefusal config opened signed.challenge.intent.grants draft with
           | some refusal => return .error refusal
-          | none => return ((prepareLoaded config opened draft).mapError
-              fun detail => ⟨.operationRejected, detail, none⟩)
+          | none =>
+              match draft with
+              | .revoke revokeBytes =>
+                  -- The revocation's marker is read from the authenticated history (its basis).
+                  let some keys := revokeKeys config revokeBytes
+                    | return .error ⟨.operationRejected, "noncanonical revocation command", none⟩
+                  match ← light.basis keys with
+                  | .error detail => return .error ⟨.operationRejected, detail, none⟩
+                  | .ok basis =>
+                      return ((prepareRevokeOn config (.ofBasis basis)
+                          (config.genesisHeight + basis.height) revokeBytes).mapError
+                        fun detail => ⟨.operationRejected, detail, none⟩)
+              | .renounce renounceBytes =>
+                  -- The renounce's marker is read from the authenticated history (its basis).
+                  let some keys := renounceKeys config renounceBytes
+                    | return .error ⟨.operationRejected, "noncanonical renounce command", none⟩
+                  match ← light.basis keys with
+                  | .error detail => return .error ⟨.operationRejected, detail, none⟩
+                  | .ok basis =>
+                      return ((prepareRenounceOn config (.ofBasis basis)
+                          (config.genesisHeight + basis.height) renounceBytes).mapError
+                        fun detail => ⟨.operationRejected, detail, none⟩)
+              | .delegate delegateBytes =>
+                  -- The delegation's marker is read from the authenticated history (its basis).
+                  let some keys := delegateKeys config delegateBytes
+                    | return .error ⟨.operationRejected, CapabilityDelegationController.undecodable delegateBytes, none⟩
+                  match ← light.basis keys with
+                  | .error detail => return .error ⟨.operationRejected, detail, none⟩
+                  | .ok basis =>
+                      return ((prepareDelegateOn config (.ofBasis basis)
+                          (config.genesisHeight + basis.height) delegateBytes).mapError
+                        fun detail => ⟨.operationRejected, detail, none⟩)
+              | .invoke invokeBytes =>
+                  -- The invocation's transaction id and marker are read from the authenticated
+                  -- history (its basis); the plan is prepared on that light ground.
+                  let some keys := invokeKeys config invokeBytes
+                    | return .error ⟨.operationRejected, "noncanonical invocation command", none⟩
+                  match ← light.basis keys with
+                  | .error detail => return .error ⟨.operationRejected, detail, none⟩
+                  | .ok basis =>
+                      return ((prepareInvokeOn config (.ofBasis basis)
+                          (config.genesisHeight + basis.height) invokeBytes).mapError
+                        fun detail => ⟨.operationRejected, detail, none⟩)
+              | .install subject control installBytes =>
+                  prepareInstallLight config light subject control installBytes none
+              | .installWithRoster subject control installBytes rosterBytes =>
+                  prepareInstallLight config light subject control installBytes (some rosterBytes)
+              | _ => return ((prepareLoaded config opened draft).mapError
+                  fun detail => ⟨.operationRejected, detail, none⟩)
       | .query _ => return .error (.of .malformed)
 
 /-- One-shot form. An unopenable Store is an error, never a refusal. -/
 def prepare (config : Config) (bytes : List UInt8) : IO (Except Refusal SigningPlan) := do
   let opened ← IO.ofExcept (← openExisting config)
-  prepareAuthorizedLoaded config opened bytes
+  let light ← IO.ofExcept (← NativeHostLight.start config)
+  prepareAuthorizedLoaded config opened light bytes
 
 /-- The controller projects the authorized logical resource/account cut. Raw
 snapshots, whole Books, and unrelated authority pages never escape this API. -/
@@ -728,7 +907,8 @@ def queryLoaded (config : Config) (opened : Opened config)
       config.profile config.federation config.genesisHeight signed with
   | .error refusal => return .error refusal
   | .ok token =>
-      match token.queryResult with
+      -- History queries read the opening's own image (the context's source image).
+      match token.queryResult opened.durable rfl with
       | .ok view => return .ok view
       | .error reason => return .error (.of reason)
 
@@ -807,12 +987,13 @@ def assemble (plan : SigningPlan) (signatures : List (List UInt8)) : Except Stri
   match plan.finalizedDraft with
   | .invoke bytes => do
       let command ← need "noncanonical finalized invocation" (DeclaredResourceController.commandCodec.decode bytes)
-      let targetCount := command.targets.length
-      let observeCount := if command.requiresObservation then targetCount else 0
+      let targetCount := command.signedTargetCount
+      let observeCount := if command.requiresObservation then command.targets.length else 0
       check (!command.targets.isEmpty && envelopes.length == targetCount + observeCount + 1)
         "invocation signing slots mismatch"
       let authority ← need "missing invocation authority envelope" envelopes[targetCount + observeCount]?
-      pure (.invoke ⟨bytes, envelopes.take targetCount,
+      pure (.invoke ⟨bytes,
+        DeclaredResourceController.placeTargetEnvelopes command.targets (envelopes.take targetCount),
         envelopes.drop targetCount |>.take observeCount, authority⟩)
   | .install subject control bytes =>
       match envelopes with
@@ -885,7 +1066,7 @@ def assemble (plan : SigningPlan) (signatures : List (List UInt8)) : Except Stri
 /-- The specification of a receipt root: the world root of the accepted prefix
 through record `index` (at the head, the served root). -/
 def receiptRootSpec (config : Config) (durable : Durable) (index : Nat) : Digest :=
-  if index + 1 = durable.image.accepted.length then durable.worldRoot
+  if index + 1 = durable.height then durable.worldRoot
   else worldRoot config ⟨durable.image.seed, durable.image.accepted.take (index + 1)⟩
 
 /-- The world root after accepted record `index`: at the head the served
@@ -893,7 +1074,7 @@ image's cached root; below it the root the record's log entry kept at append
 (`Loaded.rootLog`, read from the verified tag); only a prefix whose root this
 image never saw (an in-memory genesis replay) is evaluated in full. -/
 def receiptRoot (config : Config) (durable : Durable) (index : Nat) : Digest :=
-  if index + 1 = durable.image.accepted.length then durable.worldRoot
+  if index + 1 = durable.height then durable.worldRoot
   else match durable.rootLog[index]? with
     | some (some root) => root
     | _ => worldRoot config ⟨durable.image.seed, durable.image.accepted.take (index + 1)⟩
@@ -930,7 +1111,8 @@ theorem receiptRoot_ne_spec_of_wrong (config : Config) (durable : Durable) (inde
       receiptRoot config durable index ≠ receiptRootSpec config durable index := by
   refine ⟨fun honest => wrong (honest index root kept), ?_⟩
   unfold receiptRoot receiptRootSpec
-  rw [if_neg notHead, if_neg notHead, kept]
+  have notHead' : ¬ index + 1 = durable.height := notHead
+  rw [if_neg notHead', if_neg notHead', kept]
   exact wrong
 
 /-- A log that keeps no root (`loadImage`'s) is honest: every lookup below the
@@ -1058,7 +1240,7 @@ theorem historicalReceipt_exactCandidate_fresh (config : Config)
         (NativeHostReplay.exactCandidate old derived ready).worldRoot⟩ := by
   simp [historicalReceipt, receiptRoot, NativeHostReplay.exactCandidate,
     DurableReceiverIO.Loaded.extend, DurableReceiver.Image.append, List.findIdx?_append, fresh,
-    DurableReceiver.IntentRecord.ofIntent]
+    DurableReceiver.IntentRecord.ofIntent, DurableReceiverIO.Loaded.height]
 
 def confirmed (config : Config) (kind : DurableReceiverIO.Confirmation)
     (transactionId eventId : Digest) : IO Outcome := do
@@ -1068,6 +1250,17 @@ def confirmed (config : Config) (kind : DurableReceiverIO.Confirmation)
       match historicalReceipt config opened.durable transactionId eventId with
       | none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
       | some receipt => return .confirmed kind receipt
+
+/-- Seal the original prefix of a committed charged failure without erasing
+its typed source cause. -/
+def charged (config : Config) (kind : DurableReceiverIO.Confirmation)
+    (transactionId eventId : Digest) (cause : ObjectiveActivityReceiver.Reject) : IO Outcome := do
+  match ← openExisting config with
+  | .error detail => return .uncertain s!"receipt readback: {detail}".toUTF8.toList
+  | .ok opened =>
+      match historicalReceipt config opened.durable transactionId eventId with
+      | none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
+      | some receipt => return .charged kind receipt (ObjectiveActivityReceiver.rejectCodec.encode cause)
 
 def enrollmentSubmitLoaded (config : Config) (opened : Opened config)
     (bytes : List UInt8) : IO Outcome := do
@@ -1110,8 +1303,9 @@ def enrollmentLookup (config : Config) (bytes : List UInt8) : IO Outcome := do
 /-- The Host settlement of every `Kernel.Receiving` family, one copy: a
 confirmed outcome is sealed against its original accepted prefix. -/
 def receivingOutcome (config : Config) (family : Receiving.Family) (label : String)
-    {laws : ReceivingLaw.Laws Durable} {env : family.Env} {durable : Durable} :
-    family.Outcome laws env durable → IO Outcome
+    {laws : ReceivingLaw.Laws Durable} {native : CredentialSignatureIO.NativeConfig}
+    {env : family.Env} {durable : Durable} :
+    family.Outcome laws native env durable → IO Outcome
   | .replayed (transactionId, (event : DurableDataIntent.StableEvent)) =>
       confirmed config .replayed transactionId event.eventId
   | .conflict => return refused .conflict "replay" "transaction identity conflict"
@@ -1199,7 +1393,7 @@ def fleetObservedAccount (config : Config) (opened : Opened config)
       if query.kind != .account || query.view != .resource then
         return .error (.of .malformed)
       match ← NativeObservationController.authorize config.signature
-          ⟨opened.directory, opened.authority⟩ config.profile config.federation
+          (Minidregg.Compiler.ServedBasis.Ground.full _ opened.directory opened.authority) config.profile config.federation
           config.genesisHeight signed with
       | .error refusal => return .error refusal
       | .ok _ => return .ok (signed.challenge.intent.subject, query.target)
@@ -1282,12 +1476,110 @@ def fleetLookupLoaded (config : Config) (opened : Opened config)
     | some (.error _) => refused .conflict "replay" "transaction identity conflict"
     | none => .absent
 
+/-- A history refusal as a Host refusal frame: the detail is `Refusal.message`
+verbatim (it names the height); never "absent". -/
+def historyRefusal (refusal : DurableHistory.Refusal) : Refusal :=
+  { reason := .operationRejected, detail := refusal.message }
+
+/-- The Reader of one loaded Store image: the Store's authenticated head and the
+verify-at-use reads under it. One per request. -/
+def historyReaderOfDurable (config : Config) (durable : Durable) :
+    IO (Except Refusal ((store : DurableHistory.StoreIdentity) ×
+      DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)) := do
+  match ← DurableHistoryStore.readerOf config.transport ResourceBirthCodec.rootBytes durable with
+  | .error message => return .error { reason := .operationRejected, detail := message }
+  | .ok reader => return .ok reader
+
+/-- The Reader of one opened image. -/
+def historyReader (config : Config) (opened : Opened config) :
+    IO (Except Refusal ((store : DurableHistory.StoreIdentity) ×
+      DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)) :=
+  historyReaderOfDurable config opened.durable
+
+/-- The receipt a verified record at `height` carries: its original accepted
+prefix (`height`, 1-based), the record's own transaction and event id, and the
+world root the log leaf at that height binds (`Verified.root`, authenticated by
+the inclusion proof against the MAC-bound head). -/
+def receiptOfRecord {store : DurableHistory.StoreIdentity} {head : DurableHistory.Head store}
+    {height : Nat} (read : DurableHistoryReader.Record head height) : Receipt :=
+  ⟨read.record.transactionId, read.record.event.eventId, height, read.verified.root⟩
+
+/-- The receipt of a transaction the spent map named: the record read at its height. -/
+def receiptOfFound {store : DurableHistory.StoreIdentity} {head : DurableHistory.Head store}
+    (transactionId : Digest) (found : DurableHistoryReader.ByTx head transactionId) : Receipt :=
+  { receiptOfRecord found.read with transactionId := transactionId }
+
 /-- Exact receipt of one accepted transaction, by transaction id alone. It
 names the original accepted prefix; a later tip does not replace it. -/
-def receiptByTransactionLoaded (config : Config) (opened : Opened config)
-    (transactionId : Digest) : Option Receipt := do
-  let record ← opened.durable.image.accepted.find? (fun record => record.transactionId == transactionId)
-  historicalReceipt config opened.durable transactionId record.event.eventId
+def receiptByTransactionRead {rootBytes : List UInt8 → Digest} {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader rootBytes store) (transactionId : Digest) :
+    IO (Except Refusal (Option Receipt)) := do
+  match ← reader.byTx transactionId with
+  | .error refusal => return .error (historyRefusal refusal)
+  | .ok (.absent _) => return .ok none
+  | .ok (.present found) => return .ok (some (receiptOfFound transactionId found))
+
+/-- Op 102 on one opened image: the Reader is built per request from the open. -/
+def receiptByTransactionVia (config : Config) (opened : Opened config)
+    (transactionId : Digest) : IO (Except Refusal (Option Receipt)) := do
+  match ← historyReader config opened with
+  | .error refusal => return .error refusal
+  | .ok ⟨_, reader⟩ => receiptByTransactionRead reader transactionId
+
+/-- `historicalReceipt` through the Reader: the receipt of `transactionId` sealed
+against its original accepted prefix, `none` when the transaction is absent or its
+event id is not `eventId`. A history refusal is returned, never mapped to `none`. -/
+def historicalReceiptVia (config : Config) (opened : Opened config)
+    (transactionId eventId : Digest) : IO (Except Refusal (Option Receipt)) := do
+  match ← receiptByTransactionVia config opened transactionId with
+  | .error refusal => return .error refusal
+  | .ok none => return .ok none
+  | .ok (some receipt) => return .ok (if receipt.eventId == eventId then some receipt else none)
+
+/-- The accepted record of a transaction id, verified at use through the Reader
+built from this open (`Reader.byTx`). A history refusal is RETURNED (its message
+names the height); it is never reported as an absent transaction. -/
+def acceptedRecordE (config : Config) (opened : Opened config) (transactionId : Digest) :
+    IO (Except Refusal (Option DurableReceiver.IntentRecord)) := do
+  match ← historyReader config opened with
+  | .error refusal => return .error refusal
+  | .ok ⟨_, reader⟩ =>
+      match ← reader.byTx transactionId with
+      | .error refusal => return .error (historyRefusal refusal)
+      | .ok (.absent _) => return .ok none
+      | .ok (.present found) => return .ok (some found.read.record)
+
+/-- `acceptedRecordE` for IO callers that fail by exception: the refusal message
+is thrown, never mapped to none. -/
+def acceptedRecord (config : Config) (opened : Opened config) (transactionId : Digest) :
+    IO (Option DurableReceiver.IntentRecord) := do
+  match ← acceptedRecordE config opened transactionId with
+  | .error refusal => throw (IO.userError refusal.detail)
+  | .ok record => return record
+
+/-- OPERATOR TOOLS ONLY, never a request or session path: every accepted record,
+each verified at use, read in `Reader.range` windows of 256 (one Store call and
+one inclusion check per record; nothing is trusted from the opened image). A
+refusal is thrown with its message. -/
+def operatorAcceptedLogOfDurable (config : Config) (durable : Durable) :
+    IO (List DurableReceiver.IntentRecord) := do
+  match ← historyReaderOfDurable config durable with
+  | .error refusal => throw (IO.userError refusal.detail)
+  | .ok ⟨_, reader⟩ =>
+      let top := reader.head.height
+      let mut log : Array DurableReceiver.IntentRecord := #[]
+      let mut first := 1
+      while first ≤ top do
+        let last := min top (first + 255)
+        match ← reader.range first last with
+        | .error refusal => throw (IO.userError refusal.message)
+        | .ok reads => for read in reads do log := log.push read.2.record
+        first := last + 1
+      return log.toList
+
+def operatorAcceptedLog (config : Config) (opened : Opened config) :
+    IO (List DurableReceiver.IntentRecord) :=
+  operatorAcceptedLogOfDurable config opened.durable
 
 /-- One topic event as a reader sees it. `height` is the admission height,
 unique per accepted record on one Host: K authors' streams of one topic merge
@@ -1317,21 +1609,32 @@ structure FleetPollView where
   tail : Option Digest
   events : List FleetPolledEvent
 
-def fleetJournalTurn {config : Config} (opened : Opened config) (transactionId : Digest) :
-    Option FleetTurn.DecodedIngress := do
-  let record ← opened.durable.image.accepted.find? (fun record => record.transactionId == transactionId)
-  FleetTurn.decodeIngress record.event.canonicalBytes
+/-- The signed ingress of an accepted fleet turn, read by transaction id through
+the Reader (`byTx`: the spent map's opening, then the record at that height,
+each verified at use). -/
+def fleetJournalTurn {rootBytes : List UInt8 → Digest} {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader rootBytes store) (transactionId : Digest) :
+    IO (Except Refusal (Option FleetTurn.DecodedIngress)) := do
+  match ← reader.byTx transactionId with
+  | .error refusal => return .error (historyRefusal refusal)
+  | .ok (.absent _) => return .ok none
+  | .ok (.present found) =>
+      return .ok (FleetTurn.decodeIngress found.read.record.event.canonicalBytes)
 
-def fleetPolledEvent (config : Config) (opened : Opened config)
-    (item : Nat × StreamCell.Entry) : FleetPolledEvent :=
+def fleetPolledEvent {rootBytes : List UInt8 → Digest} {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader rootBytes store)
+    (item : Nat × StreamCell.Entry) : IO (Except Refusal FleetPolledEvent) := do
   let (sequence, entry) := item
   let record := entry.record
-  let payload := (fleetJournalTurn opened record.transaction).bind fun ingress =>
-    ingress.command.publication.bind fun publication =>
-      if StreamCell.payloadDigest publication.payload = record.entry.payloadDigest
-      then some publication.payload else none
-  ⟨sequence, StreamCell.entryKey entry, entry.parent, record.transaction, record.height,
-    record.author, record.entry.payloadDigest, payload⟩
+  match ← fleetJournalTurn reader record.transaction with
+  | .error refusal => return .error refusal
+  | .ok turn =>
+      let payload := turn.bind fun ingress =>
+        ingress.command.publication.bind fun publication =>
+          if StreamCell.payloadDigest publication.payload = record.entry.payloadDigest
+          then some publication.payload else none
+      return .ok ⟨sequence, StreamCell.entryKey entry, entry.parent, record.transaction, record.height,
+        record.author, record.entry.payloadDigest, payload⟩
 
 def fleetPollMax : Nat := 64
 
@@ -1351,8 +1654,16 @@ def fleetPollAuthorizedLoaded (config : Config) (opened : Opened config)
       let entries := FleetTurn.eventsSince config.deployment directory stream cursor
         (min limit fleetPollMax)
       let head := FleetTurn.streamHead config.deployment directory stream
-      return .ok ⟨subject, payer, topic, stream, cursor, head.count, head.tail,
-        entries.map (fleetPolledEvent config opened)⟩
+      -- One Reader per request; at most `fleetPollMax` events, one `byTx` each.
+      match ← historyReader config opened with
+      | .error refusal => return .error refusal
+      | .ok ⟨_, reader⟩ =>
+          let mut events : Array FleetPolledEvent := #[]
+          for item in entries do
+            match ← fleetPolledEvent reader item with
+            | .error refusal => return .error refusal
+            | .ok event => events := events.push event
+          return .ok ⟨subject, payer, topic, stream, cursor, head.count, head.tail, events.toList⟩
 
 structure FleetHeadView where
   subject : SubjectId
@@ -1815,41 +2126,29 @@ def payObservationAssemble (plan : PayCellDomain.SigningPlan) (signature : List 
   let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
   pure (PayObservation.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
 
+/-- Fresh submission of a report: the `Kernel.Receiving` family, verified by the
+pinned process, judged by the deployment's laws. -/
 def payObservationSubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
-    IO Outcome := do
-  match ← PayObservationReceiver.receiveLoaded config.deployment config.profile
-      ⟨config.federation, logicalHeight config opened.durable⟩ config.signature config.transport
-      opened.durable bytes with
-  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
-  | .rejected reason => return refused .operationRejected "pay-observation" s!"{repr reason}"
-  | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
-  | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
-  | .contention => return .contention
-  | .unavailable detail => return .unavailable detail.toUTF8.toList
-  | .uncertain detail => return .uncertain detail.toUTF8.toList
+    IO Outcome :=
+  receivingSubmitLoaded config opened
+    (PayObservationReceiver.family config.deployment config.profile)
+    ⟨config.federation, logicalHeight config opened.durable⟩ "pay-observation" bytes
 
 /-- Receipt-only historical lookup of a report.  Absence never submits. -/
 def payObservationLookupLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
     Outcome :=
-  match PayObservationReceiver.decodeIngress bytes with
-  | none => refused .malformed "pay-observation" "noncanonical signed ingress"
-  | some ingress =>
-      match PayObservationReceiver.replay config.deployment.domain config.profile.semantics
-          opened.durable ingress with
-      | none => .absent
-      | some (.error _) => refused .conflict "replay" "transaction identity conflict"
-      | some (.ok receipt) =>
-          match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
-          | some original => .confirmed .replayed original
-          | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
+  receivingLookupLoaded config opened
+    (PayObservationReceiver.family config.deployment config.profile)
+    ⟨config.federation, logicalHeight config opened.durable⟩ "pay-observation" bytes
 
 /-! ## Self-enrollment (lane P3b-2): session operations 117–120
 
 The observer's submission of one enrollment-index transfer
 (`DREGG/PAY/SELF-ENROL/v1`) has its own plan/assembly/submission/lookup
 quartet; its signed ingress is `DREGG/PAY/SELF-ENROL/SIGNED/v1`.  (113–116 are
-P6's.)  The plan runs the native verifier on the memo, because the decision
-the observer signs depends on both possession bits. -/
+P6's.)  The plan asks the Receiver's verifier about the memo's two possession
+signatures (`PayEnrolReceiver.observations`), because the decision the observer
+signs depends on both bits. -/
 
 def payEnrolAmbient (config : Config) (opened : Opened config) : PayEnrolReceiver.Ambient :=
   ⟨config.federation, logicalHeight config opened.durable, config.tariff⟩
@@ -1876,32 +2175,19 @@ def payEnrolAssemble (plan : PayCellDomain.SigningPlan) (signature : List UInt8)
   pure (PayEnrolReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
 
 def payEnrolSubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
-    IO Outcome := do
-  match ← PayEnrolReceiver.receiveLoaded config.deployment config.profile
-      (payEnrolAmbient config opened) config.signature config.transport opened.durable bytes with
-  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
-  | .rejected reason => return refused .operationRejected "pay-enrol" s!"{repr reason}"
-  | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
-  | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
-  | .contention => return .contention
-  | .unavailable detail => return .unavailable detail.toUTF8.toList
-  | .uncertain detail => return .uncertain detail.toUTF8.toList
+    IO Outcome :=
+  receivingSubmitLoaded config opened
+    (PayEnrolReceiver.payEnrolFamily config.deployment config.profile)
+    (payEnrolAmbient config opened) "pay-enrol" bytes
 
-/-- Receipt-only historical lookup of an enrolment submission.  Absence never
+/-- Receipt-only historical lookup of an enrolment submission (v1 or v2: both
+journal the same transaction id, event and leading nullifiers).  Absence never
 submits. -/
 def payEnrolLookupLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
     Outcome :=
-  match PayEnrolReceiver.decodeIngress bytes with
-  | none => refused .malformed "pay-enrol" "noncanonical signed ingress"
-  | some ingress =>
-      match PayEnrolReceiver.replay config.deployment.domain config.profile.semantics
-          opened.durable ingress with
-      | none => .absent
-      | some (.error _) => refused .conflict "replay" "transaction identity conflict"
-      | some (.ok receipt) =>
-          match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
-          | some original => .confirmed .replayed original
-          | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
+  receivingLookupLoaded config opened
+    (PayEnrolReceiver.payEnrolFamily config.deployment config.profile)
+    (payEnrolAmbient config opened) "pay-enrol" bytes
 
 /-- One assigned deposit index and the Book balance of its payer in the
 tariff's asset. -/
@@ -2070,6 +2356,12 @@ def activityPlanLoaded (config : Config) (opened : Opened config) (commandBytes 
   pure ⟨config.deployment.domain, config.profile.semantics, commandBytes,
     CredentialSignedEnvelopeController.headerCodec.encode header,
     ObjectiveActivityReceiver.planReport config.deployment config.profile (activityAmbient config opened)
+      opened.durable command,
+    ObjectiveActivityReceiver.planOutcome config.deployment config.profile (activityAmbient config opened)
+      opened.durable command,
+    (ObjectiveActivityReceiver.planVerdict config.deployment config.profile (activityAmbient config opened)
+      opened.durable command).toUTF8.toList,
+    ObjectiveActivityReceiver.planFrontEnd config.deployment config.profile (activityAmbient config opened)
       opened.durable command⟩
 
 def activityAssemble (plan : ObjectiveActivityReceiver.SigningPlan) (signature : List UInt8) :
@@ -2080,13 +2372,15 @@ def activityAssemble (plan : ObjectiveActivityReceiver.SigningPlan) (signature :
   check (ObjectiveActivityReceiver.commandCodec.decode plan.commandBytes).isSome
     "noncanonical activity plan command"
   let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
-  pure (ObjectiveActivityReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
+  pure (ObjectiveActivityReceiver.ingressCodec.encode ⟨plan.commandBytes, plan.outcome, envelope⟩)
 
 def activitySubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
     IO Outcome := do
   match ← ObjectiveActivityReceiver.receiveLoaded config.deployment config.profile
       (activityAmbient config opened) config.signature config.kernelTransport opened.durable bytes with
   | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .charged kind receipt cause =>
+      charged config kind receipt.transactionId receipt.eventId cause
   | .rejected reason => return refused .operationRejected "activity" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
   | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
@@ -2094,7 +2388,10 @@ def activitySubmitLoaded (config : Config) (opened : Opened config) (bytes : Lis
   | .unavailable detail => return .unavailable detail.toUTF8.toList
   | .uncertain detail => return .uncertain detail.toUTF8.toList
 
-/-- Receipt-only historical lookup of an activity turn. Absence never submits. -/
+/-- Receipt-only historical lookup of an activity turn. Absence never submits.
+A re-signed retry of a recorded invocation is not a lookup hit: these bytes have
+no record, and the retry is answered only on submission, once its signature
+verifies (`ObjectiveActivityReceiver.verifyRetry`). -/
 def activityLookupLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) : Outcome :=
   match ObjectiveActivityReceiver.decodeIngress bytes with
   | none => refused .malformed "activity" "noncanonical signed ingress"
@@ -2102,10 +2399,14 @@ def activityLookupLoaded (config : Config) (opened : Opened config) (bytes : Lis
       match ObjectiveActivityReceiver.replay config.deployment.domain config.profile.semantics
           opened.durable ingress with
       | none => .absent
+      | some (.ok (.retry _ _)) => .absent
       | some (.error _) => refused .conflict "replay" "transaction identity conflict"
-      | some (.ok receipt) =>
+      | some (.ok (.exact receipt disposition)) =>
           match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
-          | some original => .confirmed .replayed original
+          | some original => match disposition with
+            | .confirmed => .confirmed .replayed original
+            | .charged cause =>
+                .charged .replayed original (ObjectiveActivityReceiver.rejectCodec.encode cause)
           | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
 
 /-- The public activity view's raw material: the logical height, the authority
@@ -2115,20 +2416,41 @@ structure ActivityView where
   authorityRoot : Digest
   book : Option ObjectiveActivity.BookCell
   cells : List (Nat × Digest × List UInt8)
+  /-- Per asked `(record, await)`: what a delivery or exhaustion must declare (`ObjectiveActivity.resumeQuote`,
+  the same prefix and the same `ResumeTail.needed` the turns' `heapUncovered` refusal states), or the
+  kernel's refusal of the pending await. -/
+  quotes : List (Nat × Nat × Except String ObjectiveActivity.HeapQuote)
+  /-- The most extraction ticks one turn's envelope may declare (`config.maxExtractTicks`, the policy's
+  `extractTicksPerTurn`: the number `Config.covers` compares `envelope.extractTicks` against), or none when the
+  deployment registers no Objective policy. -/
+  extractTicks : Option Nat
 
-def activityViewLoaded (config : Config) (opened : Opened config) (cells : List Nat) :
-    Except String ActivityView := do
+def activityViewLoaded (config : Config) (opened : Opened config) (cells : List Nat)
+    (quotes : List (Nat × Nat)) : Except String ActivityView := do
   let authority ← need "authority unavailable"
     (CredentialAuthorityDomainReceiver.loadDeployment config.deployment opened.durable.snapshot)
   let snapshot := opened.durable.snapshot
-  pure ⟨logicalHeight config opened.durable, authority.snapshot.cell.root,
+  let height := logicalHeight config opened.durable
+  let extractTicks := match ObjectiveKernelConfig.configOf config.deployment config.profile
+      (activityAmbient config opened) with
+    | .ok kernel => some kernel.maxExtractTicks
+    | .error _ => none
+  let quoted := quotes.map fun (record, await) =>
+    (record, await,
+      match ObjectiveKernelConfig.configOf config.deployment config.profile (activityAmbient config opened) with
+      | .error reason => .error s!"{repr reason}"
+      | .ok kernel =>
+        match ObjectiveActivity.resumeQuote kernel snapshot height ⟨record⟩ ⟨await⟩ with
+        | .error reason => .error s!"{repr reason}"
+        | .ok quote => .ok quote)
+  pure ⟨height, authority.snapshot.cell.root,
     ObjectiveActivity.bookOf (snapshot.canonicalBytes ⟨config.deployment.resourceBookId⟩),
-    cells.map fun cell => (cell, snapshot.model.roots ⟨cell⟩, snapshot.canonicalBytes ⟨cell⟩)⟩
+    cells.map (fun cell => (cell, snapshot.model.roots ⟨cell⟩, snapshot.canonicalBytes ⟨cell⟩)), quoted, extractTicks⟩
 
 /-! ## Seats and invitations (SEATS-NATIVE): session operations 215–219
 
 Publish a contract package, create an instance, hand over an invitation,
-offer, invoke an instance's method, exit (`DREGG/SEAT/COMMAND/v1`) share one
+offer, invoke an instance's method, exit (`DREGG/SEAT/COMMAND/v3`) share one
 plan/assembly/submission/lookup quartet; the signed ingress is
 `DREGG/SEAT/SIGNED/v1`; 219 is the public seat view. A refusal names its reason
 to the signer: every seat cell is public (op 219), so the reason discloses
@@ -2323,30 +2645,138 @@ inductive Disclosure where
   | toSigner
   deriving DecidableEq, Repr
 
-def submitRenounceVia (transport : DurableReceiverIO.Transport) (config : Config)
-    (opened : Opened config) (bytes : List UInt8)
+/-- What a light submit does with its replay verdict, before any admission: stop with
+an outcome (an undeclared id, or a conflict), confirm the original receipt, or admit
+a fresh ingress. -/
+inductive ReplayStep (R : Type) where
+  | stop (outcome : Outcome)
+  | replayed (receipt : R)
+  | fresh
+
+/-- The one map from a replay verdict to a light submit's next step. -/
+def replayStep {R : Type} (undeclared conflict : Outcome) :
+    ServedBasis.Ground.Replay R → ReplayStep R
+  | .undeclared => .stop undeclared
+  | .original receipt => .replayed receipt
+  | .conflict => .stop conflict
+  | .fresh => .fresh
+
+/-- **A conflict stops the submit with its conflict refusal.** -/
+theorem replayStep_conflict {R : Type} (undeclared conflict : Outcome) :
+    replayStep undeclared conflict (.conflict : ServedBasis.Ground.Replay R) = .stop conflict := rfl
+
+/-- **Only a fresh verdict admits**: a conflict (or an undeclared id, or an original)
+never reaches the admission. -/
+theorem replayStep_fresh_iff {R : Type} (undeclared conflict : Outcome)
+    (verdict : ServedBasis.Ground.Replay R) :
+    replayStep undeclared conflict verdict = .fresh ↔ verdict = .fresh := by
+  cases verdict <;> simp [replayStep]
+
+#assert_axioms replayStep_conflict
+#assert_axioms replayStep_fresh_iff
+
+/-- The conflict refusal every light submit answers a changed ingress with. -/
+def replayConflict : Outcome := refused .conflict "replay" "transaction identity conflict"
+
+/-- **A changed install under a recorded transaction id is refused as a conflict, never
+admitted** (`PolicyInstallReceiver.replay_changed_ingress_refused`, then `replayStep`). -/
+theorem install_changed_ingress_stops (domain : Digest) {deployment : CanonicalCellRegistry.Deployment}
+    (ground : ServedBasis.Ground deployment) (ingress : PolicyInstallReceiver.DecodedIngress)
+    {recorded : DurableCommitProtocol.Intent Digest Digest DurableDataIntent.StableNullifier DurableDataIntent.ReplayEnvelope}
+    (found : ground.recorded (PolicyInstallReceiver.transactionId domain ingress) = some (some recorded))
+    (different : recorded.event.event ≠ PolicyInstallReceiver.event domain ingress)
+    (undeclared conflict : Outcome) :
+    replayStep undeclared conflict (PolicyInstallReceiver.replay domain ground ingress) =
+      .stop conflict := by
+  rw [PolicyInstallReceiver.replay_changed_ingress_refused domain ground ingress found different]
+  rfl
+
+/-- **A changed delegation under a recorded transaction id is refused as a conflict.** -/
+theorem delegate_changed_ingress_stops (domain semantics : Digest)
+    {deployment : CanonicalCellRegistry.Deployment}
+    (ground : ServedBasis.Ground deployment) (ingress : CapabilityDelegationReceiver.DecodedIngress)
+    {recorded : DurableCommitProtocol.Intent Digest Digest DurableDataIntent.StableNullifier DurableDataIntent.ReplayEnvelope}
+    (found : ground.recorded (CapabilityDelegationReceiver.transactionId domain semantics ingress) =
+      some (some recorded))
+    (different : recorded.event.event ≠ CapabilityDelegationReceiver.event domain semantics ingress)
+    (undeclared conflict : Outcome) :
+    replayStep undeclared conflict (CapabilityDelegationReceiver.replay domain semantics ground ingress) =
+      .stop conflict := by
+  rw [CapabilityDelegationReceiver.replay_changed_ingress_refused domain semantics ground ingress found different]
+  rfl
+
+/-- **A changed revocation under a recorded transaction id is refused as a conflict.** -/
+theorem revoke_changed_ingress_stops (domain semantics : Digest)
+    {deployment : CanonicalCellRegistry.Deployment}
+    (ground : ServedBasis.Ground deployment) (ingress : CapabilityRevocationReceiver.DecodedIngress)
+    {recorded : DurableCommitProtocol.Intent Digest Digest DurableDataIntent.StableNullifier DurableDataIntent.ReplayEnvelope}
+    (found : ground.recorded (CapabilityRevocationReceiver.transactionId domain semantics ingress) =
+      some (some recorded))
+    (different : recorded.event.event ≠ CapabilityRevocationReceiver.event domain semantics ingress)
+    (undeclared conflict : Outcome) :
+    replayStep undeclared conflict (CapabilityRevocationReceiver.replay domain semantics ground ingress) =
+      .stop conflict := by
+  rw [CapabilityRevocationReceiver.replay_changed_ingress_refused domain semantics ground ingress found different]
+  rfl
+
+/-- **A changed renounce under a recorded transaction id is refused as a conflict.** -/
+theorem renounce_changed_ingress_stops (domain semantics : Digest)
+    {deployment : CanonicalCellRegistry.Deployment}
+    (ground : ServedBasis.Ground deployment) (ingress : CapabilityRenounce.DecodedIngress)
+    {recorded : DurableCommitProtocol.Intent Digest Digest DurableDataIntent.StableNullifier DurableDataIntent.ReplayEnvelope}
+    (found : ground.recorded (CapabilityRenounce.transactionId domain semantics ingress) = some (some recorded))
+    (different : recorded.event.event ≠ CapabilityRenounce.event domain semantics ingress)
+    (undeclared conflict : Outcome) :
+    replayStep undeclared conflict (CapabilityRenounce.replay domain semantics ground ingress) =
+      .stop conflict := by
+  rw [CapabilityRenounce.replay_changed_ingress_refused domain semantics ground ingress found different]
+  rfl
+
+#assert_axioms install_changed_ingress_stops
+#assert_axioms delegate_changed_ingress_stops
+#assert_axioms revoke_changed_ingress_stops
+#assert_axioms renounce_changed_ingress_stops
+
+/-- A renounce on the light route: its keys (its transaction id and marker nullifier)
+read from the authenticated history into a basis, the replay verdict and the admission
+on `Ground.ofBasis`, the commit by `DurableServed.receiveServed` on the light opening.
+The gate's refusal goes to the authenticated signer only (`.toSigner`). -/
+def submitRenounceLight (transport : DurableReceiverIO.Transport)
+    (deployment : CanonicalCellRegistry.Deployment) (semantics : Digest)
+    (federation : FederationId) (genesisHeight : Nat) (signature : CredentialSignatureIO.NativeConfig)
+    (opening : DurableServed.Opening ResourceBirthCodec.rootBytes)
+    (basisOf : DurableView.Keys → IO (Except String (ServedBasis.Basis deployment opening.store)))
+    (bytes : List UInt8)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) :
     IO (Outcome × Disclosure) := do
-  let height := logicalHeight config opened.durable
-  match ← CapabilityRenounce.receiveLoaded config.deployment config.profile.semantics
-      ⟨config.federation, height⟩ config.signature transport opened.durable bytes with
-  | .confirmed kind receipt => return (← confirm kind receipt.transactionId receipt.eventId, .uniform)
-  | .refusedToHolder reason =>
-      return (refused .operationRejected "renounce" s!"{repr reason}", .toSigner)
-  | .rejected reason => return (refused .operationRejected "renounce" s!"{repr reason}", .uniform)
-  | .transactionConflict =>
-      return (refused .conflict "replay" "transaction identity conflict", .uniform)
-  | .durableRejected reason =>
-      return (refused .operationRejected "durable" s!"{repr reason}", .uniform)
-  | .contention => return (.contention, .uniform)
-  | .unavailable detail => return (.unavailable detail.toUTF8.toList, .uniform)
-  | .uncertain detail => return (.uncertain detail.toUTF8.toList, .uniform)
-
-/-- The served renounce: `submitRenounceVia` over the Store's own writer. -/
-def submitRenounceWith (config : Config) (opened : Opened config) (bytes : List UInt8)
-    (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) :
-    IO (Outcome × Disclosure) :=
-  submitRenounceVia config.transport config opened bytes confirm
+  let domain := deployment.domain
+  let some ingress := CapabilityRenounce.decodeIngress bytes
+    | return (refused .operationRejected "renounce" s!"{repr CapabilityRenounce.Reject.malformedCommand}", .uniform)
+  match ← basisOf (CapabilityRenounce.keys domain semantics ingress) with
+  | .error detail => return (.unavailable detail.toUTF8.toList, .uniform)
+  | .ok basis =>
+      let ground : ServedBasis.Ground deployment := .ofBasis basis
+      match replayStep (refused .operationRejected "renounce"
+          s!"{repr CapabilityRenounce.Reject.undeclaredTransaction}") replayConflict
+          (CapabilityRenounce.replay domain semantics ground ingress) with
+      | .stop outcome => return (outcome, .uniform)
+      | .replayed receipt => return (← confirm .replayed receipt.transactionId receipt.eventId, .uniform)
+      | .fresh =>
+          match ← CapabilityRenounce.admitDecodedNative deployment semantics
+              ⟨federation, genesisHeight + basis.height⟩ ground signature ingress with
+          | .rejected reason => return (refused .operationRejected "renounce" s!"{repr reason}", .uniform)
+          | .refusedToHolder refusal =>
+              return (refused .operationRejected "renounce" s!"{repr refusal.reason}", .toSigner)
+          | .accepted accepted =>
+              let receipt := CapabilityRenounce.receipt domain semantics ingress
+              match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes opening
+                  (CapabilityRenounce.intent accepted) with
+              | .appended kind .. => return (← confirm kind receipt.transactionId receipt.eventId, .uniform)
+              | .replayed _ => return (← confirm .replayed receipt.transactionId receipt.eventId, .uniform)
+              | .rejected reason => return (durableRefusal reason, .uniform)
+              | .contention => return (.contention, .uniform)
+              | .unavailable detail => return (.unavailable detail.toUTF8.toList, .uniform)
+              | .uncertain detail => return (.uncertain detail.toUTF8.toList, .uniform)
 
 /-- The named reason of a refused invocation. The all-holder audience gate
 (`DeclaredResourceController.checkTargetAudience`: some holder of the target's
@@ -2368,35 +2798,238 @@ theorem invokeRejection_eq_audienceTransition (reason : DeclaredResourceControll
   unfold invokeRejection
   split <;> simp_all
 
+/-- Whether an invocation refusal is a moved target: the executor's
+`computeTarget` (`staleTarget`) or the scalar leg's `prepareCell`. -/
+def isStaleTarget : DeclaredResourceController.Reject → Bool
+  | .staleTarget => true
+  | .scalar .staleTarget => true
+  | _ => false
+
+/-- The first target of `command` whose loaded cell's logical root is no longer
+the root the signed command names, and over which the signer holds a standing
+whole-cell observe grant (`NativeObservationController.observesWhole`). -/
+def staleObservableTarget (config : Config) (opened : Opened config)
+    (command : DeclaredResourceController.Command) : Option Nat :=
+  let context := observationContext config opened
+  let height := logicalHeight config opened.durable
+  (command.targets.find? fun target =>
+    (match opened.directory.directory.slots target.target with
+      | .present packed =>
+          match DeclaredResourceController.selectTarget config.deployment target packed with
+          | some pre => decide (pre.root ≠ target.expectedTargetRoot)
+          | none => false
+      | .absent => false) &&
+    NativeObservationController.observesWhole context target.kind command.subject
+      target.target height).map (·.target)
+
+/-- The phase of a named moved-target refusal. The signed-submission path
+discloses exactly this phase to its authenticated signer (`invokeDisclosure`). -/
+def stalePhase : String := "stale-target"
+
+/-- A refused invocation. A moved target is named, to the signer only, when it
+is observable (`staleObservableTarget`); every other refusal, and a moved target
+the signer cannot observe, is the ordinary refusal that the public path makes
+uniform. A stale-target refusal arises only after the signer's authority
+envelope authenticated (`withAcceptedLoadedFrom`: `authenticate` precedes
+`prepareFrom`). -/
+def staleOutcome (config : Config) (opened : Opened config)
+    (command : DeclaredResourceController.Command) (reason : DeclaredResourceController.Reject) :
+    Outcome :=
+  if isStaleTarget reason then
+    match staleObservableTarget config opened command with
+    | some target => refused .operationRejected stalePhase
+        s!"target {target} moved since the plan was signed"
+    | none => refused (invokeRejection reason) "invoke" s!"{repr reason}"
+  else refused (invokeRejection reason) "invoke" s!"{repr reason}"
+
+/-- A policy installation on the light route: its keys (its transaction id and
+operation marker nullifier, both in the signed ingress) read from the
+authenticated history into a basis, the replay verdict and the admission on
+`Ground.ofBasis`, the commit by `DurableServed.receiveServed` on the light opening. -/
+def submitInstallLight {F : Type} [Field F] [DecidableEq F] (transport : DurableReceiverIO.Transport)
+    (deployment : CanonicalCellRegistry.Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (federation : FederationId) (genesisHeight : Nat) (signature : CredentialSignatureIO.NativeConfig)
+    (opening : DurableServed.Opening ResourceBirthCodec.rootBytes)
+    (basisOf : DurableView.Keys → IO (Except String (ServedBasis.Basis deployment opening.store)))
+    (bytes : List UInt8)
+    (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) : IO Outcome := do
+  let domain := deployment.domain
+  let some ingress := PolicyInstallReceiver.decodeIngress bytes
+    | return refused .operationRejected "install" s!"{repr PolicyInstallReceiver.Reject.malformedIngress}"
+  match ← basisOf (PolicyInstallReceiver.keys domain ingress) with
+  | .error detail => return .unavailable detail.toUTF8.toList
+  | .ok basis =>
+      let ground : ServedBasis.Ground deployment := .ofBasis basis
+      match replayStep (refused .operationRejected "install"
+          s!"{repr PolicyInstallReceiver.Reject.undeclaredTransaction}")
+          (refused .operationRejected "install" s!"{repr PolicyInstallReceiver.Reject.transactionConflict}")
+          (PolicyInstallReceiver.replay domain ground ingress) with
+      | .stop outcome => return outcome
+      | .replayed receipt => confirm .replayed receipt.transactionId receipt.eventId
+      | .fresh =>
+          match ← PolicyInstallReceiver.admitDecodedNative profile deployment signature ground federation
+              (genesisHeight + basis.height) ingress with
+          | .error reason => return refused .operationRejected "install" s!"{repr reason}"
+          | .ok accepted =>
+              let receipt := PolicyInstallReceiver.receipt domain ingress
+              match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes opening
+                  (PolicyInstallReceiver.intent accepted) with
+              | .appended kind .. => confirm kind receipt.transactionId receipt.eventId
+              | .replayed _ => confirm .replayed receipt.transactionId receipt.eventId
+              | .rejected reason => return durableRefusal reason
+              | .contention => return .contention
+              | .unavailable detail => return .unavailable detail.toUTF8.toList
+              | .uncertain detail => return .uncertain detail.toUTF8.toList
+
+/-- A revocation on the light route: its keys (its transaction id and marker
+nullifier) read from the authenticated history into a basis, the replay check
+and the admission on `Ground.ofBasis`, the commit by `DurableServed.receiveServed`
+on the light opening. -/
+def submitRevokeLight {F : Type} [Field F] [DecidableEq F] (transport : DurableReceiverIO.Transport)
+    (deployment : CanonicalCellRegistry.Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (federation : FederationId) (genesisHeight : Nat) (signature : CredentialSignatureIO.NativeConfig)
+    (opening : DurableServed.Opening ResourceBirthCodec.rootBytes)
+    (basisOf : DurableView.Keys → IO (Except String (ServedBasis.Basis deployment opening.store)))
+    (bytes : List UInt8)
+    (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) : IO Outcome := do
+  let domain := deployment.domain
+  let semantics := profile.semantics
+  let some ingress := CapabilityRevocationReceiver.decodeIngress bytes
+    | return refused .operationRejected "revoke"
+        s!"{repr CapabilityRevocationController.Reject.malformedCommand}"
+  match ← basisOf (CapabilityRevocationReceiver.keys domain semantics ingress) with
+  | .error detail => return .unavailable detail.toUTF8.toList
+  | .ok basis =>
+      let ground : ServedBasis.Ground deployment := .ofBasis basis
+      match replayStep (refused .operationRejected "revoke"
+          s!"{repr CapabilityRevocationController.Reject.undeclaredTransaction}") replayConflict
+          (CapabilityRevocationReceiver.replay domain semantics ground ingress) with
+      | .stop outcome => return outcome
+      | .replayed receipt => confirm .replayed receipt.transactionId receipt.eventId
+      | .fresh =>
+          match ← CapabilityRevocationReceiver.admitDecodedNative deployment profile
+              ⟨federation, genesisHeight + basis.height⟩ ground signature ingress with
+          | .error reason => return refused .operationRejected "revoke" s!"{repr reason}"
+          | .ok accepted =>
+              let receipt := CapabilityRevocationReceiver.receipt domain semantics ingress
+              match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes opening
+                  (CapabilityRevocationReceiver.intent accepted) with
+              | .appended kind .. => confirm kind receipt.transactionId receipt.eventId
+              | .replayed _ => confirm .replayed receipt.transactionId receipt.eventId
+              | .rejected reason => return durableRefusal reason
+              | .contention => return .contention
+              | .unavailable detail => return .unavailable detail.toUTF8.toList
+              | .uncertain detail => return .uncertain detail.toUTF8.toList
+
+/-- A delegation on the light route: its keys (its transaction id and marker
+nullifier) read from the authenticated history into a basis, the replay check
+and the admission on `Ground.ofBasis`, the commit by `DurableServed.receiveServed`
+on the light opening. -/
+def submitDelegateLight {F : Type} [Field F] [DecidableEq F] (transport : DurableReceiverIO.Transport)
+    (deployment : CanonicalCellRegistry.Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (federation : FederationId) (genesisHeight : Nat) (signature : CredentialSignatureIO.NativeConfig)
+    (opening : DurableServed.Opening ResourceBirthCodec.rootBytes)
+    (basisOf : DurableView.Keys → IO (Except String (ServedBasis.Basis deployment opening.store)))
+    (bytes : List UInt8)
+    (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) : IO Outcome := do
+  let domain := deployment.domain
+  let semantics := profile.semantics
+  let some ingress := CapabilityDelegationReceiver.decodeIngress bytes
+    | return refused .operationRejected "delegate"
+        s!"{repr CapabilityDelegationController.Reject.malformedCommand}"
+  match ← basisOf (CapabilityDelegationReceiver.keys domain semantics ingress) with
+  | .error detail => return .unavailable detail.toUTF8.toList
+  | .ok basis =>
+      let ground : ServedBasis.Ground deployment := .ofBasis basis
+      match replayStep (refused .operationRejected "delegate"
+          s!"{repr CapabilityDelegationController.Reject.undeclaredTransaction}") replayConflict
+          (CapabilityDelegationReceiver.replay domain semantics ground ingress) with
+      | .stop outcome => return outcome
+      | .replayed receipt => confirm .replayed receipt.transactionId receipt.eventId
+      | .fresh =>
+          match ← CapabilityDelegationReceiver.admitDecodedNative deployment profile
+              ⟨federation, genesisHeight + basis.height⟩ ground signature ingress with
+          | .error reason => return refused .operationRejected "delegate" s!"{repr reason}"
+          | .ok accepted =>
+              let receipt := CapabilityDelegationReceiver.receipt domain semantics ingress
+              match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes opening
+                  (CapabilityDelegationReceiver.intent accepted) with
+              | .appended kind .. => confirm kind receipt.transactionId receipt.eventId
+              | .replayed _ => confirm .replayed receipt.transactionId receipt.eventId
+              | .rejected reason => return durableRefusal reason
+              | .contention => return .contention
+              | .unavailable detail => return .unavailable detail.toUTF8.toList
+              | .uncertain detail => return .uncertain detail.toUTF8.toList
+
+/-- An invocation on the light route: its keys (`DeclaredResourceController.invocationKeys`:
+the transaction id and the operation marker's replay nullifier) read from the
+authenticated history into a basis, the replay check, preparation and admission on
+`Ground.ofBasis` (`withAcceptedOn`), the commit by `DurableServed.receiveServed` on the
+light opening. -/
+def submitInvokeLight {F : Type} [Field F] [DecidableEq F] (transport : DurableReceiverIO.Transport)
+    (deployment : CanonicalCellRegistry.Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (federation : FederationId) (genesisHeight : Nat) (signature : CredentialSignatureIO.NativeConfig)
+    (nockFSync : Nat)
+    (stale : DeclaredResourceController.Command → DeclaredResourceController.Reject → Outcome)
+    (opening : DurableServed.Opening ResourceBirthCodec.rootBytes)
+    (basisOf : DurableView.Keys → IO (Except String (ServedBasis.Basis deployment opening.store)))
+    (signed : DeclaredResourceController.SignedCommand)
+    (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) : IO Outcome := do
+  match DeclaredResourceController.commandCodec.decode signed.commandBytes with
+  | none => return refused .malformed "invoke" "noncanonical command"
+  | some command =>
+      -- The operator's synchronous budget, before the referee re-executes the claim.
+      if let some steps := overSyncBudget nockFSync command then
+        return refused .operationRejected "overSyncBudget" (overSyncBudgetDetail nockFSync steps)
+      let domain := deployment.domain
+      let semantics := profile.semantics
+      match ← basisOf (DeclaredResourceController.invocationKeys domain semantics command) with
+      | .error detail => return .unavailable detail.toUTF8.toList
+      | .ok basis =>
+          let ground : ServedBasis.Ground deployment := .ofBasis basis
+          let transactionId := DeclaredResourceController.transactionId domain semantics command
+          let eventId := (DeclaredResourceController.invocationEvent domain semantics command signed).eventId
+          DeclaredResourceController.withAcceptedOn deployment profile
+            ⟨federation, genesisHeight + basis.height⟩ signature ground signed
+            (fun _ shape accepted => do
+              let intent := accepted.dataIntent shape
+              if (FnConsumerProgress.recognizedLegacyIntentAnyGateway? domain semantics intent).isSome then
+                return stale command .physicalPreparation
+              match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes opening intent with
+              | .appended kind .. => confirm kind transactionId eventId
+              | .replayed _ => confirm .replayed transactionId eventId
+              | .rejected (.durable .insufficientBudget) =>
+                  return refused .operationRejected "durable"
+                    (meterShortfallDetail (basis.view.model.available .proofWork)
+                      ((command.run.map fun claim => claim.steps).getD 0))
+              | .rejected reason => return durableRefusal reason
+              | .contention => return .contention
+              | .unavailable detail => return .unavailable detail.toUTF8.toList
+              | .uncertain detail => return .uncertain detail.toUTF8.toList)
+            (fun
+              | .replayed record => confirm .replayed record.transactionId record.event.event.eventId
+              | .rejected reason => return stale command reason
+              | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
+              | .unavailable detail => return .unavailable detail.toUTF8.toList)
+            ObjectiveBendAuthenticatedInputs.oracle
+
 /-- The submission path, over the Store writer it is handed. The served path
 passes `config.transport` (`submitLoadedWith`); the dry run (`Host.DryRun`,
 op 130) passes a writer that never appends, so both run this one program. -/
 def submitLoadedVia (transport : DurableReceiverIO.Transport) (config : Config)
-    (opened : Opened config) (call : SignedCall)
+    (opened : Opened config) (light : NativeHostLight.Light config) (call : SignedCall)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) : IO Outcome := do
   let height := logicalHeight config opened.durable
   match call with
-  | .renounce bytes => return (← submitRenounceVia transport config opened bytes confirm).1
+  | .renounce bytes =>
+      return (← submitRenounceLight transport config.deployment config.profile.semantics config.federation
+        config.genesisHeight config.signature light.opening (light.basisVia transport) bytes confirm).1
   | .revoke bytes =>
-      match ← CapabilityRevocationReceiver.receiveLoaded config.deployment config.profile
-          ⟨config.federation, height⟩ config.signature transport opened.durable bytes with
-      | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
-      | .rejected reason => return refused .operationRejected "revoke" s!"{repr reason}"
-      | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
-      | .durableRejected reason => return durableRefusal reason
-      | .contention => return .contention
-      | .unavailable detail => return .unavailable detail.toUTF8.toList
-      | .uncertain detail => return .uncertain detail.toUTF8.toList
+      submitRevokeLight transport config.deployment config.profile config.federation config.genesisHeight
+        config.signature light.opening (light.basisVia transport) bytes confirm
   | .delegate bytes =>
-      match ← CapabilityDelegationReceiver.receiveLoaded config.deployment config.profile
-          ⟨config.federation, height⟩ config.signature transport opened.durable bytes with
-      | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
-      | .rejected reason => return refused .operationRejected "delegate" s!"{repr reason}"
-      | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
-      | .durableRejected reason => return durableRefusal reason
-      | .contention => return .contention
-      | .unavailable detail => return .unavailable detail.toUTF8.toList
-      | .uncertain detail => return .uncertain detail.toUTF8.toList
+      submitDelegateLight transport config.deployment config.profile config.federation config.genesisHeight
+        config.signature light.opening (light.basisVia transport) bytes confirm
   | .birth bytes =>
       if (GrainResourceBirthPolicyController.decodeIngress bytes).isSome then
         let tariff := config.grainBirthTariffValue.toOption
@@ -2406,7 +3039,7 @@ def submitLoadedVia (transport : DurableReceiverIO.Transport) (config : Config)
             opened.durable bytes with
         | .historical receipt => return ← confirm .replayed receipt.transactionId receipt.eventId
         | .confirmed kind receipt => return ← confirm kind receipt.transactionId receipt.eventId
-        | .rejected _ => return refused .operationRejected "grain-birth" "request refused"
+        | .rejected reason => return refused .operationRejected "grain-birth" (grainBirthRejection reason)
         | .contention => return .contention
         | .unavailable detail => return .unavailable detail.toUTF8.toList
         | .uncertain detail => return .uncertain detail.toUTF8.toList
@@ -2418,56 +3051,21 @@ def submitLoadedVia (transport : DurableReceiverIO.Transport) (config : Config)
       | .unavailable detail => return .unavailable detail.toUTF8.toList
       | .uncertain detail => return .uncertain detail.toUTF8.toList
   | .install bytes =>
-      match ← PolicyInstallReceiver.receiveLoaded config.profile config.deployment config.signature
-          transport opened.durable config.federation height bytes with
-      | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
-      | .rejected reason => return refused .operationRejected "install" s!"{repr reason}"
-      | .durableRejected reason => return durableRefusal reason
-      | .contention => return .contention
-      | .unavailable detail => return .unavailable detail.toUTF8.toList
-      | .uncertain detail => return .uncertain detail.toUTF8.toList
+      submitInstallLight transport config.deployment config.profile config.federation config.genesisHeight
+        config.signature light.opening (light.basisVia transport) bytes confirm
   | .invoke signed =>
-      match DeclaredResourceController.commandCodec.decode signed.commandBytes with
-      | none => return refused .malformed "invoke" "noncanonical command"
-      | some command =>
-          -- The operator's synchronous budget, before the referee re-executes the claim.
-          if let some steps := overSyncBudget config command then
-            return refused .operationRejected "overSyncBudget" (overSyncBudgetDetail config steps)
-          match ← DeclaredResourceController.withAcceptedLoadedFrom config.deployment config.profile
-              ⟨config.federation, height⟩ config.signature opened.durable (some opened.directory) signed
-              (fun _ shape accepted => do
-                let intent := accepted.dataIntent shape
-                if (FnConsumerProgress.recognizedLegacyIntentAnyGateway?
-                    config.deployment.domain config.profile.semantics intent).isSome then
-                  return .rejected .physicalPreparation
-                return .settlement (← DurableReceiverIO.receiveLoaded
-                  transport ResourceBirthCodec.rootBytes opened.durable intent))
-              pure ObjectiveBendAuthenticatedInputs.oracle with
-          | .replayed record => confirm .replayed record.transactionId record.event.event.eventId
-          | .rejected reason => return refused (invokeRejection reason) "invoke" s!"{repr reason}"
-          | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
-          | .unavailable detail => return .unavailable detail.toUTF8.toList
-          | .settlement result =>
-              match result with
-              | .confirmed kind _ =>
-                  confirm kind
-                    (DeclaredResourceController.transactionId config.deployment.domain config.profile.semantics command)
-                    (DeclaredResourceController.invocationEvent config.deployment.domain config.profile.semantics command signed).eventId
-              | .rejected (.durable .insufficientBudget) =>
-                  return refused .operationRejected "durable"
-                    (meterShortfallDetail (opened.durable.snapshot.model.available .proofWork)
-                      ((command.run.map fun claim => claim.steps).getD 0))
-              | .rejected reason => return durableRefusal reason
-              | .contention => return .contention
-              | .unavailable detail => return .unavailable detail.toUTF8.toList
-              | .uncertain detail => return .uncertain detail.toUTF8.toList
+      submitInvokeLight transport config.deployment config.profile config.federation config.genesisHeight
+        config.signature config.nockFSync (staleOutcome config opened) light.opening (light.basisVia transport)
+        signed confirm
 
-def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCall)
+def submitLoadedWith (config : Config) (opened : Opened config) (light : NativeHostLight.Light config)
+    (call : SignedCall)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) : IO Outcome :=
-  submitLoadedVia config.transport config opened call confirm
+  submitLoadedVia config.transport config opened light call confirm
 
-def submitLoaded (config : Config) (opened : Opened config) (call : SignedCall) : IO Outcome :=
-  submitLoadedWith config opened call (confirmed config)
+def submitLoaded (config : Config) (opened : Opened config) (light : NativeHostLight.Light config)
+    (call : SignedCall) : IO Outcome :=
+  submitLoadedWith config opened light call (confirmed config)
 
 /-- The outcome frame for a refused signed observation, preparation or
 enrollment plan: it carries the reason of the branch that decided. -/
@@ -2526,14 +3124,45 @@ def disclose : Outcome × Disclosure → Outcome
 theorem disclose_uniform (result : Outcome) :
     disclose (result, .uniform) = publicSubmissionOutcome result := rfl
 
+/-- **Unobservable stays undisclosed.** A refusal for a signer that observes no
+target whole is the ordinary one, and its public frame is the uniform one. -/
+theorem staleOutcome_unobservable (config : Config) (opened : Opened config)
+    (command : DeclaredResourceController.Command) (reason : DeclaredResourceController.Reject)
+    (unobservable : staleObservableTarget config opened command = none) :
+    staleOutcome config opened command reason = refused (invokeRejection reason) "invoke" s!"{repr reason}" ∧
+      publicSubmissionOutcome (staleOutcome config opened command reason) =
+        refused .undisclosed "admission" "request refused" := by
+  have plain : staleOutcome config opened command reason =
+      refused (invokeRejection reason) "invoke" s!"{repr reason}" := by
+    unfold staleOutcome
+    split <;> simp [unobservable]
+  refine ⟨plain, ?_⟩
+  rw [plain]
+  exact public_refusal_uniform _ _ _ none (by unfold invokeRejection; split <;> decide)
+
+#assert_axioms staleOutcome_unobservable
+
+/-- An invocation's outcome goes to its signer named only when it is the
+moved-target refusal (`staleOutcome`), which names a target only when the
+signer observes it whole; every other outcome is uniform. -/
+def invokeDisclosure : Outcome → Outcome × Disclosure
+  | .refused .operationRejected phase detail leaf =>
+      if phase = stalePhase.toUTF8.toList then (.refused .operationRejected phase detail leaf, .toSigner)
+      else (.refused .operationRejected phase detail leaf, .uniform)
+  | result => (result, .uniform)
+
 /-- The one signed-submission path: a renounce is disclosed by its own rule,
 every other call uniformly. -/
-def submitDisclosedWith (config : Config) (opened : Opened config) (call : SignedCall)
+def submitDisclosedWith (config : Config) (opened : Opened config) (light : NativeHostLight.Light config)
+    (call : SignedCall)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) :
     IO (Outcome × Disclosure) := do
   match call with
-  | .renounce bytes => submitRenounceWith config opened bytes confirm
-  | _ => return (← submitLoadedWith config opened call confirm, .uniform)
+  | .renounce bytes =>
+      submitRenounceLight config.transport config.deployment config.profile.semantics config.federation
+        config.genesisHeight config.signature light.opening light.basis bytes confirm
+  | .invoke _ => return invokeDisclosure (← submitLoadedWith config opened light call confirm)
+  | _ => return (← submitLoadedWith config opened light call confirm, .uniform)
 
 def submit (config : Config) (bytes : List UInt8) : IO Outcome := do
   let result ← match callCodec.decode bytes with
@@ -2541,7 +3170,10 @@ def submit (config : Config) (bytes : List UInt8) : IO Outcome := do
     | some call =>
         match ← openExisting config with
         | .error detail => pure (.unavailable detail.toUTF8.toList, .uniform)
-        | .ok opened => submitDisclosedWith config opened call (confirmed config)
+        | .ok opened =>
+            match ← NativeHostLight.start config with
+            | .error detail => pure (.unavailable detail.toUTF8.toList, .uniform)
+            | .ok light => submitDisclosedWith config opened light call (confirmed config)
   logOperatorRefusal result.1
   return disclose result
 
@@ -2557,26 +3189,29 @@ def lookupLoaded (config : Config) (opened : Opened config) (call : SignedCall) 
       | none => refused .malformed "renounce" "noncanonical ingress"
       | some ingress =>
           match CapabilityRenounce.replay config.deployment.domain config.profile.semantics
-              opened.durable ingress with
-          | none => .absent
-          | some (.error _) => refused .conflict "replay" "transaction identity conflict"
-          | some (.ok receipt) => finish receipt.transactionId receipt.eventId
+              opened.ground ingress with
+          | .fresh => .absent
+          | .undeclared => refused .operationRejected "replay" "transaction identity undeclared"
+          | .conflict => refused .conflict "replay" "transaction identity conflict"
+          | .original receipt => finish receipt.transactionId receipt.eventId
   | .revoke bytes =>
       match CapabilityRevocationReceiver.decodeIngress bytes with
       | none => refused .malformed "revoke" "noncanonical ingress"
       | some ingress =>
-          match CapabilityRevocationReceiver.replay config.deployment.domain config.profile.semantics opened.durable ingress with
-          | none => .absent
-          | some (.error _) => refused .conflict "replay" "transaction identity conflict"
-          | some (.ok receipt) => finish receipt.transactionId receipt.eventId
+          match CapabilityRevocationReceiver.replay config.deployment.domain config.profile.semantics opened.ground ingress with
+          | .fresh => .absent
+          | .undeclared => refused .operationRejected "replay" "transaction identity undeclared"
+          | .conflict => refused .conflict "replay" "transaction identity conflict"
+          | .original receipt => finish receipt.transactionId receipt.eventId
   | .delegate bytes =>
       match CapabilityDelegationReceiver.decodeIngress bytes with
       | none => refused .malformed "delegate" "noncanonical ingress"
       | some ingress =>
-          match CapabilityDelegationReceiver.replay config.deployment.domain config.profile.semantics opened.durable ingress with
-          | none => .absent
-          | some (.error _) => refused .conflict "replay" "transaction identity conflict"
-          | some (.ok receipt) => finish receipt.transactionId receipt.eventId
+          match CapabilityDelegationReceiver.replay config.deployment.domain config.profile.semantics opened.ground ingress with
+          | .fresh => .absent
+          | .undeclared => refused .operationRejected "replay" "transaction identity undeclared"
+          | .conflict => refused .conflict "replay" "transaction identity conflict"
+          | .original receipt => finish receipt.transactionId receipt.eventId
   | .birth bytes =>
       match GrainResourceBirthPolicyController.decodeIngress bytes with
       | some ingress =>
@@ -2599,16 +3234,17 @@ def lookupLoaded (config : Config) (opened : Opened config) (call : SignedCall) 
       match PolicyInstallReceiver.decodeIngress bytes with
       | none => refused .malformed "install" "noncanonical ingress"
       | some ingress =>
-          match PolicyInstallReceiver.replay config.deployment.domain opened.durable ingress with
-          | none => .absent
-          | some (.error _) => refused .conflict "replay" "transaction identity conflict"
-          | some (.ok receipt) => finish receipt.transactionId receipt.eventId
+          match PolicyInstallReceiver.replay config.deployment.domain opened.ground ingress with
+          | .fresh => .absent
+          | .undeclared => refused .operationRejected "replay" "transaction identity undeclared"
+          | .conflict => refused .conflict "replay" "transaction identity conflict"
+          | .original receipt => finish receipt.transactionId receipt.eventId
   | .invoke signed =>
       match DeclaredResourceController.commandCodec.decode signed.commandBytes with
       | none => refused .malformed "invoke" "noncanonical command"
       | some command =>
           match DeclaredResourceController.recordedInvocation config.deployment.domain config.profile.semantics
-              command signed opened.durable with
+              command signed opened.ground with
           | .error _ => refused .conflict "replay" "transaction identity conflict"
           | .ok none => .absent
           | .ok (some record) => finish record.transactionId record.event.event.eventId

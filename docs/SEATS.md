@@ -29,7 +29,7 @@ the id to `spent`. Theorems: `spend_once`, `spent_not_live`, `spent_never_minted
 
 A `Seat` is a fresh Book account at a protected coordinate (`seatAccount_protected`; the
 offerer never names it), with its instance, offerer, payee, an optional holding activity,
-`Proposal {give, want, exit}` and an open flag. The law is `offerSafe proposal`: every `want` is
+`Proposal {give, want, exit, donate}`. A proposal that wants nothing (every `want` amount zero) is a gift the contract may take whole, so it must carry the explicit `donate` marker, and the marker is refused on a proposal that wants something (`donationUnmarked`, `donationMarkedWithWant`; `empty_want_requires_marker`, `marked_offer_has_empty_want`). A world holds exactly its open seats: closing a seat removes it. The law is `offerSafe proposal`: every `want` is
 met, or every `give` is refunded, as a `Pred` over a total view of the seat's balances, so an
 absent slot is never what the law sees (`view_total`; `absent_slot_reads_as_met`,
 `zero_want_satisfied`).
@@ -65,8 +65,16 @@ accounts are registered, distinct, protected, and not their own payee):
   no seats, every open seat of every reachable world satisfies its law (premise inhabited by
   `swap_opening_reachable`).
 - `exit_admitted`, `exit_enabled`, `exit_after_deadline`, `exit_by_holder`: a party with exit
-  rights is admitted at every reachable world; `exit_pays_allocation`: afterwards the seat is
-  at zero in every named asset and the payee has gained exactly its balance.
+  rights is admitted at every reachable world WHEN IT SUBMITS the exit (enabling theorems: the
+  kernel never exits a seat on its own; see OBJECTIVE-BEND.md "Liveness claims name their actors"); `exit_pays_allocation`: afterwards the seat is
+  at zero in EVERY asset (the sweep reads the Book's balance support, not only the proposal's
+  assets) and the payee has gained exactly its balance.
+- Retention: `exit_deregisters`, `terminate_deregisters`, `activity_end_closes_seats`: a closed
+  seat's Book account is deregistered in the closing batch; `closed_seat_posting_refused`: the
+  Book then refuses every posting naming it; `exit_removes_seat`; natively `Decided.exit_retires_cell`
+  and `HeldEnd.retires` write the seat cell to the retired image (never reused;
+  `offer_refuses_taken_cell` refuses an offer onto a retired or occupied cell). A replayed exit is
+  refused `seatMissing`.
 - `seat_conserves`: every admitted step conserves every asset; `seat_debit_authorized`: an open
   seat is debited only by its own instance's reallocation, by an exit, or by its instance's
   termination.
@@ -86,7 +94,8 @@ accounts are registered, distinct, protected, and not their own payee):
 - The contract clause is evaluated on the constant state `requestState 1`: a fixed gate on
   whether an instance may reallocate at all, never a judge of the transfers. The judges of a
   reallocation's content are the seats' own laws.
-- `Inv` constrains open seats only.
-- No theorem states that termination leaves every seat of the instance closed; it is read from
-  the code.
+- `Inv` constrains the seats of the world, all of which are open. An offer onto an account some
+  lease record names is refused (`seatLeased`), so a closing's deregistration is always admitted.
+- An activity's holdings cell keeps the account of a seat that exited early; the ending turn
+  skips accounts whose seat cell is retired.
 - Amounts are fungible only; there is no set-valued amount.

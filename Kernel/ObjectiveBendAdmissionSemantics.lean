@@ -24,8 +24,8 @@ open Minidregg.Theory.ObjectiveBendDemandDataSoundness
 set_option autoImplicit false
 
 theorem admitted_source_semantics {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
-    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable} {command : Command}
-    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {ground : Ground deployment} {command : Command}
+    {prepared : PreparedInvocation deployment profile ambient ground command}
     {ingress : List UInt8} {writes : List DataWrite} {guards : List ReadGuard}
     (admitted : Admitted prepared ingress writes guards) :
     runBounded (limits admitted.claim.capacity) (budget admitted.claim.capacity).ticks
@@ -43,9 +43,10 @@ capacity claims and output codecs) extracted the same Data. A capacity envelope
 admits or refuses a run; it never changes what the run means. -/
 theorem admitted_data_unique {F : Type} [Field F] [DecidableEq F]
     {deployment deployment' : Deployment} {profile profile' : CanonicalRuntimeProfile.Profile F}
-    {ambient ambient' : Ambient} {durable durable' : Durable} {command command' : Command}
-    {prepared : PreparedInvocation deployment profile ambient durable command}
-    {prepared' : PreparedInvocation deployment' profile' ambient' durable' command'}
+    {ambient ambient' : Ambient} {ground : Ground deployment} {ground' : Ground deployment'}
+    {command command' : Command}
+    {prepared : PreparedInvocation deployment profile ambient ground command}
+    {prepared' : PreparedInvocation deployment' profile' ambient' ground' command'}
     {ingress ingress' : List UInt8} {writes writes' : List DataWrite} {guards guards' : List ReadGuard}
     (admitted : Admitted prepared ingress writes guards) (other : Admitted prepared' ingress' writes' guards')
     (same : admitted.core.applied.term = other.core.applied.term) :
@@ -66,9 +67,8 @@ limits and budget, and its extracted Data, from which the native Plan is lowered
 is THE deep evaluation of that term. Closedness comes from the token's own typing
 derivation, so the only premise is the token. -/
 theorem prepared_source_semantics
-    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     {deployment : CanonicalCellRegistry.Deployment}
-    {loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
+    {loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry}
     {command : Command} {source : Minidregg.Theory.ObjectiveBendTyping.AnnotatedTerm} {limits : Limits}
     {budget : Minidregg.Theory.ObjectiveBendDemandData.Budget}
     {capacity : Minidregg.Theory.ObjectiveBendDemandCapacity.Profile}
@@ -95,8 +95,8 @@ is that erased term applied to the authenticated input. Neither the definition a
 the bounded demand machine, at any tick, heap or stack budget. No publisher-supplied core is
 admitted on the strength of a label, and no core bytes are parsed on the way. -/
 theorem admitted_front_end {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
-    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable} {command : Command}
-    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {ground : Ground deployment} {command : Command}
+    {prepared : PreparedInvocation deployment profile ambient ground command}
     {ingress : List UInt8} {writes : List DataWrite} {guards : List ReadGuard}
     (admitted : Admitted prepared ingress writes guards) :
     admitted.core.source.package.package.frontEnd = ObjectiveBendFrontEndIdentity.identity ∧

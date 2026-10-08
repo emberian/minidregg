@@ -26,16 +26,15 @@ structure Selected where
 An `Opened` image alone proves physical coherence, not that its retained
 chronology was semantically admitted. The caller must refresh and verify the
 current physical image before supplying this private-constructor witness. -/
-def selectOriginal (config : Minidregg.Kernel.NativeHost.Config)
+private def selectFrom (config : Minidregg.Kernel.NativeHost.Config)
     (target : Minidregg.Kernel.NativeHost.Durable)
     (verified : Minidregg.Kernel.NativeHostReplay.Verified config target)
     (miniTransactionId : Digest)
-    (projectedSource projectedMessageId : List UInt8) :
+    (projectedSource projectedMessageId : List UInt8)
+    (record : Minidregg.Kernel.DurableReceiver.IntentRecord)
+    (historical : Minidregg.Compiler.NativeHostCodec.Receipt) :
     Except String Selected := do
-  let some record := Minidregg.Kernel.DurableCommitProtocol.Snapshot.lookupRecorded
-      miniTransactionId verified.opened.durable.snapshot.model.journal
-    | throw "selected release Mini transaction is absent"
-  let event := record.event.event
+  let event := record.event
   unless event.codecVersion == 13 do
     throw "Mini transaction is not a selected release event"
   let some ingress := ingressCodec.decode event.canonicalBytes
@@ -50,9 +49,24 @@ def selectOriginal (config : Minidregg.Kernel.NativeHost.Config)
   unless article.packet.release.destination.messageId == projectedMessageId &&
       article.packet == ingress.packet do
     throw "fn projection differs from accepted selected release"
-  let some historical := Minidregg.Kernel.NativeHost.historicalReceipt config
-      verified.opened.durable miniTransactionId event.eventId
-    | throw "selected release original receipt is unavailable"
   pure ⟨ingressCodec.encode ingress, historical⟩
+
+def selectOriginal (config : Minidregg.Kernel.NativeHost.Config)
+    (target : Minidregg.Kernel.NativeHost.Durable)
+    (verified : Minidregg.Kernel.NativeHostReplay.Verified config target)
+    (miniTransactionId : Digest)
+    (projectedSource projectedMessageId : List UInt8) :
+    IO (Except String Selected) := do
+  -- The accepted record is read through the Store's Reader, verified at use: a
+  -- refusal names its height and is never reported as an absent transaction.
+  let ⟨_, reader⟩ ← match ← Minidregg.Kernel.NativeHost.historyReader config verified.opened with
+    | .error refusal => return .error refusal.detail
+    | .ok reader => pure reader
+  let found ← match ← reader.byTx miniTransactionId with
+    | .error refusal => return .error refusal.message
+    | .ok (.absent _) => return .error "selected release Mini transaction is absent"
+    | .ok (.present found) => pure found
+  return selectFrom config target verified miniTransactionId projectedSource projectedMessageId
+    found.read.record (Minidregg.Kernel.NativeHost.receiptOfFound miniTransactionId found)
 
 end Minidregg.Host.FnSelectiveReleaseFnAck

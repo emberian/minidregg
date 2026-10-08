@@ -6,7 +6,6 @@ checked against the same loaded authority and directory before the ticket's
 single empty allocation post is replaced by its source-derived initial atom.
 -/
 import Kernel.ApplicationShareIssueGrainSource
-import Kernel.ApplicationShareIssueAtomicBirth
 import Kernel.ApplicationShareIssueDelegation
 import Kernel.GrainResourceBirthAdmission
 
@@ -50,11 +49,9 @@ structure Accepted {F : Type} [Field F] [DecidableEq F]
     (ResourceBirthController.Concrete.sourceIdentity profile.compilerProfile
       config.deployment ingress.spec.issuer ingress.spec.ticket.issueNonce).value
   baseTariff : pins.tariff = config.tariff
-  specialPins : FactoryPins
-  specialPinsExact : specialPins = sourceReady.effectivePins pins
   tariff : GrainResourceBirthController.Tariff
   birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-    config.deployment specialPins durable profile.semantics tariff decoded.source
+    config.deployment pins durable profile.semantics tariff decoded.source
   sourceDescriptor : decoded.source.birth =
     { sourceReady.expectedDescriptor profile config
         birth.prepared.pre.authority.snapshot.authState ambient.height
@@ -64,16 +61,14 @@ structure Accepted {F : Type} [Field F] [DecidableEq F]
     birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
     profile.semantics ambient (decoded.source.grainCommand tariff)
   grainAccepted : GrainResourceBirthAdmission.Accepted profile config.deployment
-    specialPins durable ambient tariff decoded.source birth grain decoded
+    pins durable ambient tariff decoded.source birth grain decoded
   appPrepared : ApplicationShareIssueDelegation.Prepared
-    ⟨birth.prepared.pre.directory, birth.prepared.pre.authority⟩
+    (Minidregg.Compiler.ServedBasis.Ground.full _ birth.prepared.pre.directory birth.prepared.pre.authority)
       profile config.federation ambient.height ingress.spec decoded.source.birth
   appChecked : ApplicationShareIssueDelegation.Checked appPrepared ingress.appEnvelope
   appReadOnly : ∀ guard ∈ ApplicationShareIssueDelegation.readGuards appPrepared, guard.cellId ∉
     (GrainResourceBirthTransaction.writes birth grain).map
       DurableDataIntent.DataWrite.cellId
-  atomic : ApplicationShareIssueAtomicBirth.Checked sourceReady config.deployment
-    (GrainResourceBirthTransaction.writes birth grain)
 
 private def refused : String := "grain-backed app share issue refused"
 
@@ -90,11 +85,10 @@ def admitNative (profile : CanonicalRuntimeProfile.Profile F)
   let .ok sourceReady := ApplicationShareIssueSource.prepare profile config ingress.spec
     | return .error refused
   if baseTariff : pins.tariff = config.tariff then
-    let specialPins := sourceReady.effectivePins pins
     let .ok tariff := config.grainBirthTariffValue | return .error refused
     let .ok birth := GrainResourceBirthController.prepareSourceBirth
-        profile.compilerProfile profile.disabledEvaluators config.deployment specialPins durable profile.semantics
-        tariff decoded.source ambient.height | return .error refused
+        profile.compilerProfile profile.disabledEvaluators config.deployment pins durable profile.semantics
+        tariff decoded.source ambient.height sourceReady.sourced | return .error refused
     if sourceDescriptorBytes :
         CanonicalCellRegistry.sourceEncoding.codec.encode decoded.source.birth =
           CanonicalCellRegistry.sourceEncoding.codec.encode
@@ -109,13 +103,13 @@ def admitNative (profile : CanonicalRuntimeProfile.Profile F)
             auxiliaryCreates := birth.prepared.authorityCombined.auxiliaryCreates } :=
         descriptorBytes_injective sourceDescriptorBytes
       let .ok grain := GrainResourceBirthTransaction.prepareTargets profile
-          config.deployment specialPins durable ambient tariff decoded.source birth
+          config.deployment pins durable ambient tariff decoded.source birth
         | return .error refused
       let .ok grainAccepted ← GrainResourceBirthAdmission.admitDecodedNative
-          profile config.deployment specialPins durable ambient tariff decoded.source
+          profile config.deployment pins durable ambient tariff decoded.source
           birth grain native decoded | return .error refused
-      let context : ApplicationShareIssueDelegation.Context config.deployment durable :=
-        ⟨birth.prepared.pre.directory, birth.prepared.pre.authority⟩
+      let context : ApplicationShareIssueDelegation.Context config.deployment :=
+        (Minidregg.Compiler.ServedBasis.Ground.full _ birth.prepared.pre.directory birth.prepared.pre.authority)
       let .ok appPrepared := ApplicationShareIssueDelegation.prepare context
           profile config.federation ambient.height ingress.spec decoded.source.birth
         | return .error refused
@@ -124,35 +118,26 @@ def admitNative (profile : CanonicalRuntimeProfile.Profile F)
       if appReadOnly : ∀ guard ∈ ApplicationShareIssueDelegation.readGuards appPrepared, guard.cellId ∉
           (GrainResourceBirthTransaction.writes birth grain).map
             DurableDataIntent.DataWrite.cellId then
-        match ApplicationShareIssueAtomicBirth.check sourceReady config.deployment
-            (GrainResourceBirthTransaction.writes birth grain) with
-        | none => return .error refused
-        | some atomic =>
-            if grainBytes : decoded.bytes = ingress.grainIngress then
-              return .ok ⟨ingress,
-                ⟨decoded, grainBytes, sourceReady, baseTariff, specialPins,
-                  rfl, tariff, birth, sourceDescriptor, grain,
-                  grainAccepted, appPrepared, appChecked, appReadOnly, atomic⟩⟩
-            else return .error refused
+        if grainBytes : decoded.bytes = ingress.grainIngress then
+          return .ok ⟨ingress,
+            ⟨decoded, grainBytes, sourceReady, baseTariff,
+              tariff, birth, sourceDescriptor, grain,
+              grainAccepted, appPrepared, appChecked, appReadOnly⟩⟩
+        else return .error refused
       else return .error refused
     else return .error refused
   else return .error refused
 
 /-- The joint factory witness checks the same signed Book fee as the
-source-derived full ticket payload quote. Grain settlement is a separate
+pinned tariff's quote on the whole ticket payload the factory judged. Grain settlement is a separate
 permission-unit charge and cannot replace this conserved Book debit. -/
 theorem Accepted.special_fee_bound {profile : CanonicalRuntimeProfile.Profile F}
     {config : NativeHost.Config} {pins : FactoryPins} {durable : Durable}
     {ambient : Ambient} {ingress : ApplicationShareIssueGrainSource.Ingress}
     (accepted : Accepted profile config pins durable ambient ingress) :
     accepted.decoded.source.birth.fee.amount =
-      accepted.decoded.source.birth.quotedFee
-        (accepted.sourceReady.effectiveTariff config.tariff) := by
+      accepted.decoded.source.birth.quotedFee config.tariff := by
   have bound := accepted.grainAccepted.pending.checked.feeBound.1
-  have tariffExact : accepted.specialPins.tariff =
-      accepted.sourceReady.effectiveTariff pins.tariff := by
-    exact congrArg FactoryPins.tariff accepted.specialPinsExact
-  rw [tariffExact] at bound
   rw [accepted.baseTariff] at bound
   exact bound
 

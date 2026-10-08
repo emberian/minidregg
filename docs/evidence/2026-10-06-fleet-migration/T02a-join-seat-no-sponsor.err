@@ -1,0 +1,5 @@
+mini fleet-sign: DREGG_NODE_URL is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+mini fleet-sign: DREGG_API_TOKEN is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+mini fleet-sign: DREGG_COORDINATION_EXEMPT is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+mini fleet-sign: DREGG_PROFILE is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+mini: join needs the sponsor's workspace: --sponsor-workspace or MINI_FLEET_SPONSOR

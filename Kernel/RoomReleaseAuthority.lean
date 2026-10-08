@@ -30,14 +30,14 @@ def marker (request : RoomKeyReleaseCodec.Request) : Nat :=
   (Sp800185Cshake256.hash "DREGG.PRIVATE.ROOM.RELEASE.AUTHORITY/v1".toUTF8.toList
     (RoomKeyReleaseCodec.encode request)).digest.value
 
-def wanted (context : ResourceObservationAdmission.Context deployment durable)
+def wanted (context : ResourceObservationAdmission.Context deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (federation : FederationId)
     (height : Nat) (body : RoomKeyReleaseCodec.Request) : Request .object where
   domain := deployment.domain
   semantics := profile.semantics
   federation := federation
   subject := body.actor
-  subjectKeyEpoch := context.authority.snapshot.authState.subjectKeyEpoch body.actor
+  subjectKeyEpoch := context.authority.authState.subjectKeyEpoch body.actor
   target := ⟨body.keysCell⟩
   verb := .delegateObject
   argsDigest := ⟨marker body⟩
@@ -46,39 +46,39 @@ def wanted (context : ResourceObservationAdmission.Context deployment durable)
   height := height
   preStateRoot := body.keysRoot
   policyId := ⟨body.keysCell⟩
-  policyEpoch := context.authority.snapshot.authState.policyEpoch ⟨body.keysCell⟩
-  policyRevision := context.authority.snapshot.authState.policyRevision ⟨body.keysCell⟩
+  policyEpoch := context.authority.authState.policyEpoch ⟨body.keysCell⟩
+  policyRevision := context.authority.authState.policyRevision ⟨body.keysCell⟩
   cost := (RoomKeyReleaseCodec.encode body).length
 
 attribute [irreducible] wanted
 
-structure Prepared (context : ResourceObservationAdmission.Context deployment durable)
+structure Prepared (context : ResourceObservationAdmission.Context deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (federation : FederationId)
     (height : Nat) (body : RoomKeyReleaseCodec.Request) where
   private mk ::
-  observed : ResourceTargetAdmission.Observed deployment context.directory.directory
+  observed : ResourceTargetAdmission.Observed deployment context.directory
     .object body.keysCell body.keysRoot
   physicalCurrent : ResourceBirthCodec.physicalRoot (.live observed.before) =
     durable.snapshot.model.roots ⟨body.keysCell⟩
-  authorityExact : context.authority.readGuard.expectedRoot = body.authorityRoot
+  authorityExact : context.authorityReadGuard.expectedRoot = body.authorityRoot
   oneCell : body.decisionCell = body.keysCell ∧ body.decisionRoot = body.keysRoot
   clock : ClockCellDomain.Loaded deployment durable.snapshot
 
-def prepare (context : ResourceObservationAdmission.Context deployment durable)
+def prepare (context : ResourceObservationAdmission.Context deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (federation : FederationId)
     (height : Nat) (body : RoomKeyReleaseCodec.Request) : Option (Prepared context profile federation height body) := do
-  let observed ← ResourceTargetAdmission.observe deployment context.directory.directory
+  let observed ← ResourceTargetAdmission.observe deployment context.directory
     .object body.keysCell body.keysRoot
   let physicalCurrent := PhysicalResourceReadGuard.current context.directory body.keysCell
     observed.before observed.present
-  if authorityExact : context.authority.readGuard.expectedRoot = body.authorityRoot then
+  if authorityExact : context.authorityReadGuard.expectedRoot = body.authorityRoot then
     if oneCell : body.decisionCell = body.keysCell ∧ body.decisionRoot = body.keysRoot then
       let clock ← ClockCellDomain.load deployment durable.snapshot
       some ⟨observed,physicalCurrent,authorityExact,oneCell,clock⟩
     else none
   else none
 
-variable {context : ResourceObservationAdmission.Context deployment durable}
+variable {context : ResourceObservationAdmission.Context deployment}
   {profile : CanonicalRuntimeProfile.Profile F} {federation : FederationId}
   {height : Nat} {body : RoomKeyReleaseCodec.Request}
 
@@ -87,7 +87,7 @@ def project (prepared : Prepared context profile federation height body)
     Minidregg.Pred.State :=
   ⟨[("room/release/version",1),("room/release/room",Int.ofNat body.room)] ++
     ClockCell.slots prepared.clock.clock ++
-    WorldKindLawDependencies.targetSelectorSlots context.directory.directory body.keysCell ++
+    WorldKindLawDependencies.targetSelectorSlots context.directory body.keysCell ++
     CanonicalRuntimeProfile.requestSlots (wanted context profile federation height body) ++
     ResourceAuthorityProjection.bytesSlots "context/bytes" 0 (RoomKeyReleaseCodec.encode body) ++
     ResourceAuthorityProjection.bytesSlots "resource/bytes" 0
@@ -106,20 +106,20 @@ attribute [irreducible] step
 
 def kindDependencies (_prepared : Prepared context profile federation height body) :
     Option WorldKindLawDependencies.Dependencies :=
-  WorldKindLawDependencies.loadTarget deployment context.directory.directory body.keysCell
+  WorldKindLawDependencies.loadTarget deployment context.directory body.keysCell
 
 def lawReadGuards (prepared : Prepared context profile federation height body) : Option (List ReadGuard) := do
   let structural ← kindDependencies prepared
-  let sources ← PhysicalLawResolution.readGuards context.authority.snapshot
-    context.directory.directory profile.semantics body.keysCell structural.additional
-  pure (context.authority.readGuards ++ [prepared.clock.readGuard,
+  let sources ← PhysicalLawResolution.readGuards context.authority
+    context.directory profile.semantics body.keysCell structural.additional
+  pure (context.authorityReadGuards ++ [prepared.clock.readGuard,
     ⟨⟨body.keysCell⟩,durable.snapshot.model.roots ⟨body.keysCell⟩⟩] ++
     (sources ++ structural.readGuards).map (fun g => ⟨⟨g.1⟩,g.2⟩))
 
 def policyConfig (prepared : Prepared context profile federation height body) :
     ComposedPolicyAdmission.Config F :=
-  PhysicalLawResolution.config profile.compilerProfile context.authority.snapshot
-    context.directory.directory (sourceCapabilityPortal context.authority.snapshot (marker body))
+  PhysicalLawResolution.config profile.compilerProfile context.authority
+    context.directory (sourceCapabilityPortal context.authority (marker body))
     (step prepared) body.keysCell ((kindDependencies prepared).map (·.additional) |>.getD [])
 
 
@@ -129,8 +129,8 @@ def portal (prepared : Prepared context profile federation height body) : Portal
 attribute [irreducible] portal
 
 def authorize (prepared : Prepared context profile federation height body)
-    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot) :
-    Option (Authorized (portal prepared) context.authority.snapshot.authState
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority) :
+    Option (Authorized (portal prepared) context.authority.authState
       (wanted context profile federation height body)) := by
   unfold portal
   exact do
@@ -146,16 +146,16 @@ attribute [irreducible] policyConfig
 
 structure Checked (prepared : Prepared context profile federation height body) (envelope : List UInt8) where
   private mk ::
-  signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot
+  signature : CredentialSignatureAdmission.CheckedSignature context.authority
   envelopeExact : signature.envelopeBytes = envelope
-  authorization : Authorized (portal prepared) context.authority.snapshot.authState
+  authorization : Authorized (portal prepared) context.authority.authState
     (wanted context profile federation height body)
   authorized : authorize prepared signature = some authorization
 
 def check (native : CredentialSignatureIO.NativeConfig)
     (prepared : Prepared context profile federation height body) (envelope : List UInt8) :
     IO (Option (Checked prepared envelope)) := do
-  match ← CredentialSignatureAdmission.verifyNative native context.authority.snapshot (marker body)
+  match ← CredentialSignatureAdmission.verifyNative native context.authority (marker body)
       (wanted context profile federation height body) envelope with
   | .error _ => return none
   | .ok signature =>

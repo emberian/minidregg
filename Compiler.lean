@@ -3,7 +3,6 @@
 -/
 import Compiler.Placeholder  -- carve marker: syntactic-leaf IR, fold_unique, seqDescr, descriptor + codec
 import Compiler.ResourceTargetAdmission
-import Compiler.PayEnrolSignatureIO  -- PAY P3b-1: the memo's two possession checks through the pinned native verifier (Ed25519 + SSHSIG)
 import Compiler.ResourceAuthorityProjection
 import Compiler.CanonicalAccountView
 import Compiler.CanonicalAccountViewAudit
@@ -107,6 +106,10 @@ import Compiler.CommittedTerminalFiatShamir  -- [CT-fiat-shamir-lanes] + [CT-joi
 import Compiler.CommittedTerminalFactoredProver  -- [CT-factored-prover]: the honest prover for the seven factored openings — dense bit-corner tables + pairwise fold, check7 / check7_accepts, gateProof7_sound, sumcheck7_prob_le, and the bridge gammaBatched_eq_sum_table; Stage 0 compiled, demo decided (check7_complete_demo). Named, not closed: [CT-factored-prover-honest] (FactoredProverHonest : the fold messages read to factoredRounds), with its consumer factoredProver_complete_of_honest PROVED.
 import Compiler.Sp800185Kmac256 -- SP 800-185 KMAC256 on the Lean Keccak core (host checkpoint/log MAC), conformance-pinned
 import Compiler.DurableCheckpointCodec -- DATAMODEL C2: seed/log/checkpoint frames, log MAC chain, sealed checkpoints
+import Compiler.DurableHistoryReader -- KN2: the history read at use, verified against the MAC'd, anchor-bound head (MMR log accumulator + spent trie)
+import Compiler.DurableStoreAudit -- KN2: the Store-backed history Reader and `store audit` (every entry, node, spent row and checkpoint re-derived from genesis)
+import Compiler.CredentialAuthorityServed -- KN2 2b-1: the served state (no history) and its directory and authority cell
+import Compiler.ServedBasis -- KN2 2b-1 CONTRACT: the index the write-path controllers are re-typed onto
 import Compiler.PredCastHashProofs
 import Compiler.PredCompileOrderWitness
 import Compiler.PredOrderGadgetWitness
@@ -129,4 +132,6 @@ import Compiler.FnWireGrammar  -- fn wire-grammar v1: the ONE interpreter (decod
 import Compiler.FnWireRoundTrip  -- decode_encode / encode_decode (canonicity) for every well-formed grammar
 import Compiler.FnWireJson  -- loader + contract check of fn specs/wire-grammar.json
 import Compiler.FnWireFncu  -- fncu.cursor read by the interpreter (replaces fn consumer-inspect)
-import Compiler.FnWirePinned  -- the vendored file at a pinned fn revision: digest, 249 vectors, teeth
+import Compiler.FnWireSized  -- the `sized` node's teeth; the poll-reply accepted-arm grammar
+import Compiler.FnWireConsumer  -- fn consumer / identity reply frames (--frame) read by the interpreter
+import Compiler.FnWirePinned  -- the vendored file at a pinned fn revision: digest, 1028 vectors, teeth

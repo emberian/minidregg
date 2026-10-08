@@ -14,7 +14,7 @@ cell id the authority layer issues capabilities on); its declared state lives in
 its own protected state cell (`stateCell domain object`) as an `ObjectState`:
 the value and a write version, which every committed write advances by one.
 
-Six kernel turns; each is ONE `DataIntent` built by `intentOf` with the sealing of
+Kernel turns; each is ONE `DataIntent` built by `intentOf` with the sealing of
 the receiver that admitted it (`ObjectiveActivityReceiver`: the signed marker,
 the authority guards, the replay event), so its writes commit all together or
 not at all (`DurableDataIntent.execute_no_partial_data_commit`):
@@ -50,11 +50,21 @@ not at all (`DurableDataIntent.execute_no_partial_data_commit`):
   yield or end, and the new checkpoint, the Plan's write, the next await and
   the Book postings commit together.
 * `topUp`: anyone funds an activity's purse on the Book.
-* `writeState`: a holder of the object writes its declared state directly
-  (a new version; the next delivery's view shows it).
 * `create`: a holder of the object resource installs its `ObjectRecord`
-  (`Kernel.ObjectRecord`: pin, law, upgrade policy, payer) at its own protected
-  coordinate (`objectCell`).
+  (`Kernel.ObjectRecord`: pin, declared state type, law, upgrade policy, payer, live
+  counters, phase) at its own protected coordinate (`objectCell`), and optionally the
+  object's INITIAL declared state (`seed`), the state cell's first and only write of the
+  creation, judged by the creator's law alone and typed at the declared state type
+  (`create_seed_judged`, `create_seed_refused_names_clause`). There is no direct write of
+  declared state after that: it changes only by the object's own package (a birth, a
+  delivery, a call frame, a delivered message), under the pin.
+
+Counters. The object record counts its awaiting activities (`ObjectRecord.live`,
+`rebirths`, by `ObjectRecord.classOf`): a birth that leaves its activity awaiting
+writes the record with `retain`, a turn that ends an awaiting activity (an ending
+delivery, an abandonment) writes it with `release` (`recount`, `countPosts`); a
+delivery that yields again leaves the record unwritten. The upgrade turns read
+these counters (the kernel cannot enumerate the record cells of an object).
 
 Objects. A cell is an object to the kernel exactly when it has a record. A
 birth on any other cell is refused by name (`birth_refuses_non_object`), and a
@@ -62,10 +72,18 @@ birth runs only the package the object pins (`birth_refuses_other_pin`). Every
 declared-state write (a birth's or a delivery's yield, a direct write) is judged
 by the object's law over the old and new state plus the request facts
 (`ObjectRecord.admitWrite`), with the record read in the same turn and its cell
-guarded. A delivery's write is judged with the activity's principal (its birth
+guarded (a seed is judged at creation by the creator's law alone). The judged law is `ObjectRecord.effectiveLaw`: the KERNEL's package-pin clause
+(`ObjectRecord.pinClause`: the write is made by code of the package the record pins) first,
+then the creator's law. The clause is derived from the record's `pin`, never stored, so a
+creator cannot omit it (`create_installs_pin`, `pin_in_every_judged_law`), no declared-state
+write exists that no package makes (every one is a birth, delivery, call frame or message
+below), the package's own turns pass it
+(`Birth.write_passes_pin`, `Delivery.write_passes_pin`, `ObjectiveCall.invocation_writes_pinned`,
+`ObjectiveSend.MessageDelivery.writes_pinned`) and no turn but a creation rewrites the record
+it comes from (`pin_not_removable`). A delivery's write is judged with the activity's principal (its birth
 subject) as subject, never the deliverer. A law refusal refuses the whole turn
 and names the clause: nothing commits, and the activity stays at its yield
-(`Birth.write_judged`, `Delivery.write_judged`, `StateWrite.write_judged`).
+(`Birth.write_judged`, `Delivery.write_judged`).
 
 Fees are Book postings in the deployment's credit asset. An activity's purse is
 a Book account of its own, `heldAccount cell` (the record cell's id), registered
@@ -94,6 +112,7 @@ import Theory.ObjectiveBendDemandCollect
 import Kernel.ObjectState
 import Kernel.ObjectRecord
 import Kernel.ObjectiveTariff
+import Kernel.ObjectiveWorkAccount
 
 namespace Minidregg.Kernel.ObjectiveActivity
 open Minidregg.Theory Minidregg.Compiler
@@ -113,6 +132,7 @@ open Minidregg.Kernel.ObjectState (encodeObjectState decodeObjectState)
 open Minidregg.Kernel.ObjectRecord (ObjectRecord Facts WriteRefusal admitWrite)
 open Minidregg.Kernel.ObjectiveTariff (Tariff zeroCapacity addCapacity)
 open Minidregg.Compiler.ObjectiveInvocationClaim (Capacity capacityStream)
+open Minidregg.Kernel.ObjectStateType (typedAt)
 set_option autoImplicit false
 
 abbrev Role := ObjectiveActivityCell.Role
@@ -173,23 +193,96 @@ structure Record where
   phase : Phase
   deriving DecidableEq, Repr
 
-def sourceStream : StreamCodec Source :=
-  StreamCodec.xmap (StreamCodec.sum (StreamCodec.product digestStream subjectStream) StreamCodec.nat)
-    (fun source => match source with
-      | .reply slot decider => .inl (slot, decider)
-      | .height due => .inr due)
-    (fun wire => match wire with
-      | .inl (slot, decider) => .reply slot decider
-      | .inr due => .height due)
-    (by intro source; cases source <;> rfl)
+/-! ### The record's wire is fixed-width where it is charged
 
-def awaitStream : StreamCodec Await :=
-  StreamCodec.xmap
-    (StreamCodec.product digestStream (StreamCodec.product sourceStream
-      (StreamCodec.product StreamCodec.nat StreamCodec.nat)))
-    (fun a => (a.id, a.source, a.deadline, a.yieldedAt))
-    (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2⟩)
-    (by intro a; cases a; rfl)
+Every octet of the record is charged (`storageDeposit`), and the deposit is inside
+the transaction that stores the record, so the record's length must not depend on
+anything a quote and the submission it prices do not share. What they do not
+share is the transaction (its nonce, hence every digest derived from it) and the
+height. So the record's digests are exactly 32 octets and its heights exactly 8
+(`digest256Stream`, `height64Stream`), never the variable base-255 `StreamCodec.nat`
+that wrote a 256-bit value as 32 or 33 octets. Every other number in the record
+(the escrow's account, capacities and fees, the generation, `tried`, length
+prefixes) is a function of the request and the program alone: identical at the
+quote and at the submission. The deposit itself is not in the record.
+
+The record type is unchanged and unbounded (`Digest` is, by design: the Theory's
+binding models need it); `Record.Fits` says the six digests are below `256 ^ 32`
+and the heights below `256 ^ 8`, and every admitted record fits
+(`Birth.record_fits`, `Delivery.next_fits`, `Exhaustion.next_fits`). -/
+
+def Source.Fits : Source → Prop
+  | .reply slot _ => slot.value < 256 ^ 32
+  | .height due => due < 256 ^ 8
+
+def Await.Fits (await : Await) : Prop :=
+  await.id.value < 256 ^ 32 ∧ await.source.Fits ∧ await.deadline < 256 ^ 8 ∧ await.yieldedAt < 256 ^ 8
+
+def Phase.Fits : Phase → Prop
+  | .awaiting await => await.Fits
+  | .done _ => True
+  | .faulted _ => True
+
+/-- The four digests of a record are 256-bit. -/
+def Record.DigestsFit (record : Record) : Prop :=
+  record.object.value < 256 ^ 32 ∧ record.activity.value < 256 ^ 32 ∧ record.pin.value < 256 ^ 32 ∧
+    record.checkpointDigest.value < 256 ^ 32
+
+def Record.Fits (record : Record) : Prop := record.DigestsFit ∧ record.phase.Fits
+
+abbrev SourceWire := (Digest256 × SubjectId) ⊕ Height64
+abbrev AwaitWire := Digest256 × (SourceWire × (Height64 × Height64))
+abbrev PhaseWire := AwaitWire ⊕ (Bytes ⊕ String)
+abbrev RecordWire := Digest256 × (Digest256 × (Digest256 × (Bytes × (Nat × (Bytes × (Digest256 ×
+  (Escrow × (Nat × PhaseWire))))))))
+
+instance (source : Source) : Decidable source.Fits := by cases source <;> unfold Source.Fits <;> infer_instance
+instance (await : Await) : Decidable await.Fits := by unfold Await.Fits; infer_instance
+instance (phase : Phase) : Decidable phase.Fits := by cases phase <;> unfold Phase.Fits <;> infer_instance
+instance (record : Record) : Decidable record.Fits := by
+  unfold Record.Fits Record.DigestsFit; infer_instance
+
+/-- The wire of a source that fits: the bound is an argument, so nothing is reduced. -/
+def Source.toWire : (source : Source) → source.Fits → SourceWire
+  | .reply slot decider, fits => .inl (toDigest256 slot fits, decider)
+  | .height due, fits => .inr (toHeight64 due fits)
+
+def Source.ofWire : SourceWire → Source
+  | .inl (slot, decider) => .reply (ofDigest256 slot) decider
+  | .inr due => .height due.val
+
+def Await.toWire (await : Await) (fits : await.Fits) : AwaitWire :=
+  (toDigest256 await.id fits.1, await.source.toWire fits.2.1, toHeight64 await.deadline fits.2.2.1,
+    toHeight64 await.yieldedAt fits.2.2.2)
+
+def Await.ofWire (wire : AwaitWire) : Await :=
+  ⟨ofDigest256 wire.1, Source.ofWire wire.2.1, wire.2.2.1.val, wire.2.2.2.val⟩
+
+def Phase.toWire : (phase : Phase) → phase.Fits → PhaseWire
+  | .awaiting await, fits => .inl (await.toWire fits)
+  | .done result, _ => .inr (.inl result)
+  | .faulted reason, _ => .inr (.inr reason)
+
+def Phase.ofWire : PhaseWire → Phase
+  | .inl await => .awaiting (Await.ofWire await)
+  | .inr (.inl result) => .done result
+  | .inr (.inr reason) => .faulted reason
+
+def Record.toWire (r : Record) (fits : r.Fits) : RecordWire :=
+  (toDigest256 r.object fits.1.1, toDigest256 r.activity fits.1.2.1, toDigest256 r.pin fits.1.2.2.1, r.input,
+    r.generation, r.checkpoint, toDigest256 r.checkpointDigest fits.1.2.2.2, r.escrow, r.tried,
+    r.phase.toWire fits.2)
+
+def Record.ofWire (w : RecordWire) : Record :=
+  ⟨ofDigest256 w.1, ofDigest256 w.2.1, ofDigest256 w.2.2.1, w.2.2.2.1, w.2.2.2.2.1, w.2.2.2.2.2.1,
+    ofDigest256 w.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.1, Phase.ofWire w.2.2.2.2.2.2.2.2.2⟩
+
+def sourceWire : StreamCodec SourceWire :=
+  StreamCodec.sum (StreamCodec.product digest256Stream subjectStream) height64Stream
+
+def awaitWire : StreamCodec AwaitWire :=
+  StreamCodec.product digest256Stream (StreamCodec.product sourceWire
+    (StreamCodec.product height64Stream height64Stream))
 
 def escrowStream : StreamCodec Escrow :=
   StreamCodec.xmap
@@ -200,41 +293,176 @@ def escrowStream : StreamCodec Escrow :=
     (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2.1, w.2.2.2.2.1, w.2.2.2.2.2⟩)
     (by intro e; cases e; rfl)
 
-def phaseStream : StreamCodec Phase :=
-  StreamCodec.xmap (StreamCodec.sum awaitStream (StreamCodec.sum bytesStream stringStream))
-    (fun phase => match phase with
-      | .awaiting a => .inl a
-      | .done result => .inr (.inl result)
-      | .faulted reason => .inr (.inr reason))
-    (fun wire => match wire with
-      | .inl a => .awaiting a
-      | .inr (.inl result) => .done result
-      | .inr (.inr reason) => .faulted reason)
-    (by intro phase; cases phase <;> rfl)
+def phaseWire : StreamCodec PhaseWire :=
+  StreamCodec.sum awaitWire (StreamCodec.sum bytesStream stringStream)
 
-def recordStream : StreamCodec Record :=
-  StreamCodec.xmap
-    (StreamCodec.product digestStream (StreamCodec.product digestStream
-      (StreamCodec.product digestStream (StreamCodec.product bytesStream
-      (StreamCodec.product StreamCodec.nat (StreamCodec.product bytesStream
-      (StreamCodec.product digestStream
-      (StreamCodec.product escrowStream (StreamCodec.product StreamCodec.nat phaseStream)))))))))
-    (fun r => (r.object, r.activity, r.pin, r.input, r.generation, r.checkpoint, r.checkpointDigest,
-      r.escrow, r.tried, r.phase))
-    (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2.1, w.2.2.2.2.1, w.2.2.2.2.2.1, w.2.2.2.2.2.2.1,
-      w.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.2⟩)
-    (by intro r; cases r; rfl)
+def recordWire : StreamCodec RecordWire :=
+  StreamCodec.product digest256Stream (StreamCodec.product digest256Stream
+    (StreamCodec.product digest256Stream (StreamCodec.product bytesStream
+    (StreamCodec.product StreamCodec.nat (StreamCodec.product bytesStream
+    (StreamCodec.product digest256Stream
+    (StreamCodec.product escrowStream (StreamCodec.product StreamCodec.nat phaseWire))))))))
 
-/-- v5: the escrow holds declared envelopes (`Capacity`), not tick counts; v4: the record carries `tried` (the envelope its exhausted attempts at the
+/-- v8: the escrowed envelopes carry `domainWork` (A3 domain pricing);
+v7: the escrowed envelopes carry the front end's work (`replayBytes`, `coreBytes`, GPT-6 row E);
+v6: the record is FIXED-WIDTH where it is charged (digests 32 octets, heights 8:
+`digest256Stream`, `height64Stream`), so `|encodeRecord|`, hence the storage deposit,
+does not depend on the digests or heights (`encodeRecord_length_mask`); v5: the escrow holds declared envelopes (`Capacity`), not tick counts; v4: the record carries `tried` (the envelope its exhausted attempts at the
 current await reached); v3: no recorded reads (resume with view reads the state
 in the resuming turn); v2: the escrow names the payer's Book account. -/
-def recordFrame : Bytes := "DREGG/OBJECTIVE/ACTIVITY-RECORD/v5".toUTF8.toList
-def recordCodec := framed recordFrame recordStream
-def encodeRecord (record : Record) : Bytes := recordCodec.encode record
-def decodeRecord (bytes : Bytes) : Option Record := recordCodec.decode bytes
+def recordFrame : Bytes := "DREGG/OBJECTIVE/ACTIVITY-RECORD/v8".toUTF8.toList
 
-theorem record_roundTrip (record : Record) : decodeRecord (encodeRecord record) = some record :=
-  framed_roundTrip _ _ record
+/-- The record's bytes: the frame, then the fixed-width wire. A record that does not fit has NO
+encoding (`[]`, which `decodeRecord` refuses): nothing is reduced into a different record. `[]` is
+NOT a supported case: it would price at a zero deposit, so it must stay unreachable. Every
+admitted record fits (`Birth.record_fits`, `Delivery.next_fits`, `Exhaustion.next_fits`), and a
+fitting record round-trips (`record_roundTrip`). -/
+def encodeRecord (record : Record) : Bytes :=
+  if fits : record.Fits then recordFrame ++ recordWire.encode (record.toWire fits) else []
+
+/-- Strict: the frame, a wire that decodes, and the record re-encoding to exactly the
+input bytes (no second spelling of a number or a string). -/
+def decodeRecord (bytes : Bytes) : Option Record :=
+  if bytes.take recordFrame.length = recordFrame then
+    match recordWire.toLawful.decode (bytes.drop recordFrame.length) with
+    | some wire => if encodeRecord (Record.ofWire wire) = bytes then some (Record.ofWire wire) else none
+    | none => none
+  else none
+
+theorem Source.ofWire_toWire (source : Source) (fits : source.Fits) :
+    Source.ofWire (source.toWire fits) = source := by
+  cases source with
+  | reply slot decider =>
+      simp only [Source.toWire, Source.ofWire]
+      rw [ofDigest256_toDigest256 slot fits]
+  | height due => rfl
+
+theorem Await.ofWire_toWire (await : Await) (fits : await.Fits) :
+    Await.ofWire (await.toWire fits) = await := by
+  obtain ⟨id, source, deadline, yieldedAt⟩ := await
+  obtain ⟨hid, hsource, hdeadline, hyielded⟩ := fits
+  simp only [Await.toWire, Await.ofWire, ofDigest256_toDigest256 id hid,
+    Source.ofWire_toWire source hsource]
+  rfl
+
+theorem Phase.ofWire_toWire (phase : Phase) (fits : phase.Fits) : Phase.ofWire (phase.toWire fits) = phase := by
+  cases phase with
+  | awaiting await => simp only [Phase.toWire, Phase.ofWire, Await.ofWire_toWire await fits]
+  | done result => rfl
+  | faulted reason => rfl
+
+theorem Record.ofWire_toWire (record : Record) (fits : record.Fits) :
+    Record.ofWire (record.toWire fits) = record := by
+  obtain ⟨object, activity, pin, input, generation, checkpoint, checkpointDigest, escrow, tried, phase⟩ := record
+  obtain ⟨⟨hobject, hactivity, hpin, hcheckpoint⟩, hphase⟩ := fits
+  simp only [Record.toWire, Record.ofWire, ofDigest256_toDigest256 object hobject,
+    ofDigest256_toDigest256 activity hactivity, ofDigest256_toDigest256 pin hpin,
+    ofDigest256_toDigest256 checkpointDigest hcheckpoint, Phase.ofWire_toWire phase hphase]
+
+theorem Source.ofWire_fits (wire : SourceWire) : (Source.ofWire wire).Fits := by
+  cases wire with
+  | inl pair => exact ofDigest256_lt pair.1
+  | inr due => exact due.isLt
+
+theorem Await.ofWire_fits (wire : AwaitWire) : (Await.ofWire wire).Fits :=
+  ⟨ofDigest256_lt _, Source.ofWire_fits _, wire.2.2.1.isLt, wire.2.2.2.isLt⟩
+
+theorem Phase.ofWire_fits (wire : PhaseWire) : (Phase.ofWire wire).Fits := by
+  cases wire with
+  | inl await => exact Await.ofWire_fits await
+  | inr rest => cases rest <;> trivial
+
+theorem Record.ofWire_fits (wire : RecordWire) : (Record.ofWire wire).Fits :=
+  ⟨⟨ofDigest256_lt _, ofDigest256_lt _, ofDigest256_lt _, ofDigest256_lt _⟩, Phase.ofWire_fits _⟩
+
+/-- **A fitting record round-trips.** -/
+theorem record_roundTrip (record : Record) (fits : record.Fits) :
+    decodeRecord (encodeRecord record) = some record := by
+  have encoded : encodeRecord record = recordFrame ++ recordWire.encode (record.toWire fits) := by
+    unfold encodeRecord; rw [dif_pos fits]
+  have taken : (encodeRecord record).take recordFrame.length = recordFrame := by
+    rw [encoded]; exact List.take_left' rfl
+  have dropped : (encodeRecord record).drop recordFrame.length = recordWire.encode (record.toWire fits) := by
+    rw [encoded]; exact List.drop_left' rfl
+  have wire : recordWire.toLawful.decode (recordWire.encode (record.toWire fits)) = some (record.toWire fits) :=
+    recordWire.toLawful.decode_encode (record.toWire fits)
+  have back := Record.ofWire_toWire record fits
+  unfold decodeRecord
+  rw [taken, if_pos rfl, dropped, wire]
+  simp only [back, if_true]
+
+/-- A decoded record is exactly the one whose encoding it was read from, and fits. -/
+theorem decodeRecord_some {bytes : Bytes} {record : Record} (decoded : decodeRecord bytes = some record) :
+    encodeRecord record = bytes ∧ record.Fits := by
+  unfold decodeRecord at decoded
+  split at decoded
+  · split at decoded
+    · rename_i wire _
+      split at decoded
+      · rename_i same
+        cases decoded
+        exact ⟨same, Record.ofWire_fits wire⟩
+      · cases decoded
+    · cases decoded
+  · cases decoded
+
+/-! ### The fixed point: the encoding's length does not depend on digests or heights -/
+
+def Source.mask : Source → Source
+  | .reply _ decider => .reply ⟨0⟩ decider
+  | .height _ => .height 0
+
+def Await.mask (await : Await) : Await := ⟨⟨0⟩, await.source.mask, 0, 0⟩
+
+def Phase.mask : Phase → Phase
+  | .awaiting await => .awaiting await.mask
+  | .done result => .done result
+  | .faulted reason => .faulted reason
+
+theorem Source.mask_fits (source : Source) : source.mask.Fits := by
+  cases source <;> simp [Source.mask, Source.Fits]
+
+theorem Await.mask_fits (await : Await) : await.mask.Fits :=
+  ⟨by simp [Await.mask], Source.mask_fits _, by simp [Await.mask], by simp [Await.mask]⟩
+
+theorem Phase.mask_fits {phase : Phase} (fits : phase.Fits) : phase.mask.Fits := by
+  cases phase with
+  | awaiting await => exact Await.mask_fits await
+  | done _ => trivial
+  | faulted _ => trivial
+
+/-- The record with every digest and every height replaced by zero. -/
+def Record.mask (record : Record) : Record :=
+  { record with object := ⟨0⟩, activity := ⟨0⟩, pin := ⟨0⟩, checkpointDigest := ⟨0⟩, phase := record.phase.mask }
+
+theorem Record.mask_fits {record : Record} (fits : record.Fits) : record.mask.Fits :=
+  ⟨⟨by simp [Record.mask], by simp [Record.mask], by simp [Record.mask], by simp [Record.mask]⟩,
+    Phase.mask_fits fits.2⟩
+
+/-- **The charged length is a function of the record's shape**: replacing every digest and
+every height by zero leaves `|encodeRecord|` unchanged, for EVERY record. A quote taken at
+one nonce and one height (whose digests and heights differ from the submission's) is the
+same size as the submission. -/
+theorem encodeRecord_length_mask (record : Record) (fits : record.Fits) :
+    (encodeRecord record.mask).length = (encodeRecord record).length := by
+  have phase : ∀ (p : Phase) (hp : p.Fits),
+      (phaseWire.encode (p.mask.toWire (Phase.mask_fits hp))).length = (phaseWire.encode (p.toWire hp)).length := by
+    intro p hp
+    cases p with
+    | awaiting await =>
+        obtain ⟨id, source, deadline, yieldedAt⟩ := await
+        cases source <;>
+          simp [Phase.mask, Await.mask, Source.mask, Phase.toWire, Await.toWire, Source.toWire,
+            phaseWire, awaitWire, sourceWire, StreamCodec.sum, StreamCodec.product,
+            digest256Stream, height64Stream, fixedStream_encode_length]
+    | done _ => rfl
+    | faulted _ => rfl
+  unfold encodeRecord
+  rw [dif_pos fits, dif_pos (Record.mask_fits fits)]
+  simp only [List.length_append]
+  congr 1
+  simp [recordWire, Record.toWire, Record.mask, StreamCodec.product, phase record.phase fits.2, digest256Stream,
+    fixedStream_encode_length]
 
 /-! ## Cells: protected coordinates
 
@@ -339,8 +567,14 @@ structure Config where
   asset : AssetId
   collector : AccountId
   limits : Limits
+  /-- One extraction's ceiling. Activity segments reserve it via extractCovered;
+  cumulative call turns additionally clamp it to their remaining allowance. -/
   planBudget : Budget
   maxTicks : Nat
+  /-- The cumulative extraction tick ceiling of one turn (the policy's `extractTicksPerTurn`):
+  an envelope declares at most this many extraction ticks (`Config.covers`); `planBudget.ticks`
+  is the per-extraction ceiling. -/
+  maxExtractTicks : Nat
   maxPatience : Nat
   typeFuel : Nat
   maxArtifactBytes : Nat
@@ -353,12 +587,14 @@ structure Config where
 
 /-- A declared envelope covers what the kernel spends on a turn: its source
 ticks are within the ceiling, and it declares at least the kernel's fixed heap,
-stack, type-checking fuel and Plan extraction budget, so the whole turn's work
-(the run, the per-turn package check, the extraction) is in the price. -/
+stack, type-checking fuel and Plan extraction output sizes, so the whole turn's work
+(the run, the per-turn package check, the extraction) is in the price. The extraction's
+tick budget is checked by name right after (`extractUncovered`). -/
 def Config.covers (config : Config) (envelope : Capacity) : Bool :=
   decide (envelope.sourceTicks ≤ config.maxTicks) && decide (config.limits.heap ≤ envelope.heap) &&
     decide (config.limits.stack ≤ envelope.stack) && decide (config.typeFuel ≤ envelope.typeFuel) &&
-    decide (config.planBudget.nodes ≤ envelope.outputNodes) && decide (config.planBudget.bytes ≤ envelope.outputBytes)
+    decide (config.planBudget.nodes ≤ envelope.outputNodes) && decide (config.planBudget.bytes ≤ envelope.outputBytes) &&
+    decide (envelope.extractTicks ≤ config.maxExtractTicks)
 
 def Config.domain (config : Config) : Digest := config.deployment.domain
 def Config.bookCell (config : Config) : CellId := ⟨config.deployment.resourceBookId⟩
@@ -405,8 +641,32 @@ inductive Refusal where
   coordinate holds the registry's retired image; it is never read or reborn. -/
   | recordRetired
   | patience (patience maximum : Nat)
+  /-- A birth names an object or a package whose id is not a 256-bit digest: the charged
+  record has one fixed-width spelling of a digest (`digest256Stream`), so a wider one is
+  refused rather than truncated. -/
+  | digestWide (object pin : Digest)
+  /-- An await's deadline (the yield height plus its patience) does not fit the record's
+  8-octet height. -/
+  | heightWide (height patience : Nat)
   /-- A declared envelope does not cover the turn (`Config.covers`). -/
   | uncovered (envelope : Capacity)
+  /-- A resumed run's declared envelope does not cover its heap: the stored checkpoint's
+  cells plus the deployment's per-segment allocation (`segmentLimits`). The submitter adds
+  heap to the envelope (`extra`, priced by the tariff, paid by the submitter). -/
+  | heapUncovered (needed declared : Nat)
+  /-- A declared envelope does not cover the deployment's extraction tick budget
+  (`planBudget.ticks`): the forcing a Plan or result extraction may do is validator work,
+  declared (`Capacity.extractTicks`) and priced by the tariff like the run's own ticks. -/
+  | extractUncovered (needed declared : Nat)
+  /-- A paying envelope does not cover a front-end stage of the stored package
+  (`ObjectiveWorkAccount.uncovered`: its source bytes, or the typed core the replay must
+  generate): refused from the stored sizes alone, BEFORE the front end replays it
+  (`frontEndPaid`). -/
+  | workUncovered (stage : ObjectiveWorkAccount.Stage) (needed declared : Nat)
+  /-- The paying account cannot pay the turn's price before anything runs: its balance in the
+  credit asset (`available`) is below the public price of the declared envelope plus what the turn
+  moves out of it (`price`). Judged BEFORE the turn is decided (`ObjectiveActivityReceiver`). -/
+  | unfunded (available : Int) (price : Nat)
   | plan (reason : String) | messageAwaitNeedsInbox
   | planExtraction (reason : String) | resultExtraction (reason : String)
   | exhausted
@@ -460,6 +720,84 @@ inductive Refusal where
   | objectWrite (reason : WriteRefusal)
   /-- A creation pins a package that is not published. -/
   | pinUnpublished
+  /-- A creation seeds the declared state of an object whose state cell already exists. -/
+  | stateExists
+
+  /-- A creation declares a state type that is not first-order data (`Ty.isData`). -/
+  | stateTypeNotData
+  /-- A law of the pinned package reads `field`, which the declared state type does not hold as
+  a top-level natural or boolean field (`ObjectRecord.lawFieldIssue`). -/
+  | lawField (field : String)
+  /-- The object drains toward an upgrade whose migration is not the identity (or
+  whose old state type is not a value subtype of the new): no new birth or call
+  until MIGRATE; a message to it waits in its inbox. -/
+  | draining
+  /-- The activity is pinned to a package the object no longer runs: it was chosen
+  for REBIRTH and waits for its rebirth turn. -/
+  | awaitingRebirth
+  /-- The migration declaration does not lower, check, or is not `old -> new`. -/
+  | migrationShape (reason : String)
+  /-- The migration did not run to a value within its declared envelope. -/
+  | migrationFault (reason : String)
+  /-- An ADOPT on a `frozen` object. -/
+  | frozen
+  /-- An ADOPT whose request facts the policy's authority does not admit. -/
+  | notUpgradeAuthority
+  /-- An ADOPT whose next policy loosens the current one (`UpgradePolicy.permits`). -/
+  | policyLoosened
+  /-- A floor the next law does not provably entail (the index of the floor): the
+  satisfiability decision of `law ∧ ¬floor` returned no checked certificate. -/
+  | floorNotEntailed (index : Nat)
+  /-- An ADOPT naming the package the object already pins. -/
+  | samePin
+  /-- An ADOPT while an earlier upgrade's rebirths are still awaiting, or while one drains. -/
+  | upgradeUnderWay
+  /-- MIGRATE, an abort or a rebirth on an object that is not draining (or not
+  migrated, for a rebirth). -/
+  | notDraining
+  /-- A drain patience outside `1..maxPatience`. -/
+  | drainPatience (patience maximum : Nat)
+  /-- The identity migration needs the old state type to be a value subtype of the new. -/
+  | notSubtype
+  /-- Linearity: old fields neither read by the migration nor dropped. -/
+  | fieldsForgotten (fields : List String)
+  /-- MIGRATE while activities pinned to the old package (and not chosen for rebirth) await. -/
+  | liveActivities (count : Nat)
+  /-- An abort before the drain deadline. -/
+  | notYetDeadline (deadline height : Nat)
+  /-- An abort of an activity chosen for rebirth, or a rebirth of one not chosen. -/
+  | rebirthDisposition
+  /-- A rebirth candidate that is not an awaiting activity of the object on its pin. -/
+  | rebirthTarget (reason : String)
+  /-- The turn's final state of a member of the invariant domain `domain` is refused by the
+  domain's joint law (`ObjectiveDomain`, judged at turn end): its first failing clause. -/
+  | domainLawDenied (domain : Digest) (leaf : LawLeaf)
+  /-- A member's state does not project into the domain's joint view (a name that is not plain). -/
+  | domainUnprojectable (domain : Digest)
+  /-- A member's record names a domain whose cell holds none, or the cell holds anything else. -/
+  | domainMissing (domain : Digest)
+  | domainCodec (domain : Digest)
+  /-- A registration of a domain that exists (the same members and law). -/
+  | domainExists (domain : Digest)
+  /-- A registration whose members are empty, repeated, or more than `domainMemberCap`. -/
+  | domainShape (reason : String)
+  /-- A registration names a member that is not an object. -/
+  | domainMember (object : Nat)
+  /-- A member is `frozen`: joining a domain adds a law to it, which a frozen object refuses. -/
+  | memberFrozen (object : Nat)
+  /-- A member's upgrade authority does not admit the registration's facts. -/
+  | memberDenied (object : Nat)
+  /-- A member is already in `domainsPerObject` domains. -/
+  | memberDomainsFull (object : Nat)
+  /-- A turn's post rewrites `object`'s record without a domain the record names (a dropped or
+  blanked record would take the object out of the domain's judgment). -/
+  | domainsDropped (object : Nat)
+  /-- A turn writes a domain's cell, and a member's record as the turn leaves it does not name
+  the domain. -/
+  | domainUnindexed (domain : Digest) (member : Nat)
+  /-- The turn end's domain judgment needs `units` of domain work (`Capacity.domainWork`) and the
+  envelope the turn is charged for declares only `allowance`. -/
+  | domainUncovered (units allowance : Nat)
   deriving Repr
 
 /-! ## Typing data against declared types
@@ -587,7 +925,7 @@ structure Replay (config : Config) (pin : Digest) where
   packageExact : ObjectiveSourcePackage.identity package = artifact.package
   frontEndOwn : package.frontEnd = ObjectiveBendFrontEndIdentity.identity
   declarationExact : ObjectiveSourcePackage.selectedDeclaration package = some artifact.declaration
-  replayed : ObjectiveBendPublication.Replayed package artifact.typedCore config.typeFuel
+  replayed : ObjectiveBendPublication.Replayed package artifact.typedCore artifact.laws config.typeFuel
 
 /-- The definition the replay accepted: the elaborator's own term with its annotations. -/
 def Replay.source {config : Config} {pin : Digest} (r : Replay config pin) : AnnotatedTerm :=
@@ -603,13 +941,108 @@ def replayPackage (config : Config) (stored : Stored) (pin : Digest) : Except Re
     if packageExact : ObjectiveSourcePackage.identity package = artifact.package then
       if frontEndOwn : package.frontEnd = ObjectiveBendFrontEndIdentity.identity then
         if declarationExact : ObjectiveSourcePackage.selectedDeclaration package = some artifact.declaration then
-          match ObjectiveBendPublication.replayAccept package artifact.typedCore config.typeFuel with
+          match ObjectiveBendPublication.replayAccept package artifact.typedCore artifact.laws config.typeFuel with
           | .ok replayed => pure ⟨artifact, identity, package, packageExact, frontEndOwn, declarationExact, replayed⟩
           | .error d => throw (.packageReplay d.message)
         else throw (.packageSource "the package selects another declaration")
       else throw (.packageSource "the package names another front end")
     else throw (.packageSource "the artifact names another package")
   else throw .packageIdentity
+
+/-- **The front-end work account of a package cell** for the envelopes that pay for its replay
+(`payers`): every payer covers the stored package's source bytes and the typed core its replay
+must generate (`ObjectiveWorkAccount.uncovered`), or the turn is refused `workUncovered`. It reads
+only the stored pair, so a turn calls it BEFORE the loader replays the package. A cell that does
+not hold a canonical pair within the size cap is not judged here: the loader refuses it by name
+before any replay (`replayPackage`). -/
+def frontEndPaid (config : Config) (bytes : Bytes) (payers : List Capacity) : Except Refusal Unit :=
+  match decodeStored bytes with
+  | none => .ok ()
+  | some stored =>
+    if stored.artifact.length > config.maxArtifactBytes ∨ stored.package.length > config.maxArtifactBytes then .ok ()
+    else
+      match ObjectiveBendSourceArtifact.decode stored.artifact, ObjectiveSourcePackage.decode stored.package with
+      | some artifact, some package =>
+        match payers.findSome? (ObjectiveWorkAccount.uncovered package artifact) with
+        | some (stage, needed, declared) => .error (.workUncovered stage needed declared)
+        | none => .ok ()
+      | _, _ => .ok ()
+
+/-- **The front-end quote of a package cell body**: the source bytes and the typed-core bytes a
+paying envelope must declare (`replayBytes`, `coreBytes`), read from the stored pair exactly as
+`frontEndPaid` reads them. The Host publishes it per pin (op 214, `frontEnd`), so a client
+declares it and never probes (`frontEndPaid_at_quote`). -/
+def frontEndQuote (bytes : Bytes) : Option (Nat × Nat) := do
+  let stored ← decodeStored bytes
+  let artifact ← ObjectiveBendSourceArtifact.decode stored.artifact
+  let package ← ObjectiveSourcePackage.decode stored.package
+  pure (ObjectiveWorkAccount.sourceBytes package, artifact.typedCore.length)
+
+/-- An envelope declaring at least the quote passes the front-end account. -/
+theorem frontEndPaid_at_quote {config : Config} {bytes : Bytes} {payers : List Capacity} {source core : Nat}
+    (quoted : frontEndQuote bytes = some (source, core))
+    (declares : ∀ envelope ∈ payers, source ≤ envelope.replayBytes ∧ core ≤ envelope.coreBytes) :
+    frontEndPaid config bytes payers = .ok () := by
+  unfold frontEndQuote at quoted
+  unfold frontEndPaid
+  cases ds : decodeStored bytes with
+  | none => rfl
+  | some stored =>
+    simp only [ds, bind, Option.bind] at quoted ⊢
+    split
+    · rfl
+    · cases da : ObjectiveBendSourceArtifact.decode stored.artifact with
+      | none => simp [da]
+      | some artifact =>
+        cases dp : ObjectiveSourcePackage.decode stored.package with
+        | none => simp [da, dp]
+        | some package =>
+          simp only [da, dp, pure, Option.some.injEq, Prod.mk.injEq] at quoted ⊢
+          obtain ⟨rfl, rfl⟩ := quoted
+          have none_ : payers.findSome? (ObjectiveWorkAccount.uncovered package artifact) = none := by
+            apply List.findSome?_eq_none_iff.mpr
+            intro envelope member
+            obtain ⟨s, c⟩ := declares envelope member
+            unfold ObjectiveWorkAccount.uncovered
+            simp [ObjectiveWorkAccount.frontEndNeeds, ObjectiveWorkAccount.declared, s, c]
+          simp only [none_]
+
+/-- The typed core a replay generated: the rendering of the front end's lowering. -/
+def Replay.generatedCore {config : Config} {pin : Digest} (r : Replay config pin) : Bytes :=
+  r.replayed.lowering.packet.compress.toUTF8.toList
+
+theorem replayPackage_decoded {config : Config} {stored : Stored} {pin : Digest} {r : Replay config pin}
+    (replayed : replayPackage config stored pin = .ok r) :
+    ObjectiveBendSourceArtifact.decode stored.artifact = some r.artifact ∧
+      ObjectiveSourcePackage.decode stored.package = some r.package ∧
+      stored.artifact.length ≤ config.maxArtifactBytes ∧ stored.package.length ≤ config.maxArtifactBytes := by
+  unfold replayPackage at replayed
+  simp only [bind, Except.bind, pure, Except.pure] at replayed
+  by_cases a : stored.artifact.length > config.maxArtifactBytes
+  · rw [if_pos a] at replayed; cases replayed
+  rw [if_neg a] at replayed
+  by_cases b : stored.package.length > config.maxArtifactBytes
+  · rw [if_pos b] at replayed; cases replayed
+  rw [if_neg b] at replayed
+  cases da : ObjectiveBendSourceArtifact.decode stored.artifact with
+  | none => simp only [da] at replayed; simp [throw, throwThe, MonadExceptOf.throw] at replayed
+  | some artifact =>
+    simp only [da] at replayed
+    split at replayed
+    · cases dp : ObjectiveSourcePackage.decode stored.package with
+      | none => simp only [dp] at replayed; simp [throw, throwThe, MonadExceptOf.throw] at replayed
+      | some package =>
+        simp only [dp] at replayed
+        split at replayed
+        · split at replayed
+          · split at replayed
+            · split at replayed
+              · cases replayed; exact ⟨rfl, rfl, by omega, by omega⟩
+              · simp [throw, throwThe, MonadExceptOf.throw] at replayed
+            · simp [throw, throwThe, MonadExceptOf.throw] at replayed
+          · simp [throw, throwThe, MonadExceptOf.throw] at replayed
+        · simp [throw, throwThe, MonadExceptOf.throw] at replayed
+    · simp [throw, throwThe, MonadExceptOf.throw] at replayed
 
 /-- The replayed package of an activity and its instantiation with its input. -/
 structure Program (config : Config) (pin : Digest) (input : Data) where
@@ -638,6 +1071,19 @@ def Program.assumptions {config : Config} {pin : Digest} {input : Data} (program
 def packageBytes {rootBytes : Bytes → Digest} (config : Config) (snapshot : DataSnapshot rootBytes)
     (pin : Digest) : Bytes :=
   (bodyOf .package (snapshot.canonicalBytes (packageCell config.domain pin))).getD []
+
+/-- **The enforced laws of the package a pin names**: the laws its artifact carries. The identity
+commits them, and the package cell holds only an artifact this kernel replayed when it was
+published (`publish`: the laws are the front end's reading of the package's own source). -/
+def packageLawsAt {rootBytes : Bytes → Digest} (config : Config) (snapshot : DataSnapshot rootBytes)
+    (pin : Digest) : Except Refusal (List (String × Minidregg.Compiler.ObjectiveBendLaw.LawExpr)) :=
+  match decodeStored (packageBytes config snapshot pin) with
+  | none => .error .packageMissing
+  | some stored =>
+    match ObjectiveBendSourceArtifact.decode stored.artifact with
+    | none => .error .packageMissing
+    | some artifact =>
+      if ObjectiveBendSourceArtifact.identity artifact = pin then .ok artifact.laws else .error .packageIdentity
 
 /-- A replayed package definition applied to its typed input: the shared prefix
 of an activity's program and of a seat contract's one-shot method
@@ -690,6 +1136,92 @@ def loadProgram (config : Config) (bytes : Bytes) (pin : Digest) (input : Data) 
         planType, responseType, resultType, typeExact, reply, replyExact⟩
     | none => throw (.outcomeProtocol "reply")
   | _ => throw (.packageType "the definition does not return an Activity")
+
+theorem instantiate_replayed {config : Config} {bytes : Bytes} {pin : Digest} {input : Data}
+    {instance_ : Instantiated config pin input} (ok : instantiate config bytes pin input = .ok instance_) :
+    ∃ stored, decodeStored bytes = some stored ∧ replayPackage config stored pin = .ok instance_.definition := by
+  unfold instantiate at ok
+  cases ds : decodeStored bytes with
+  | none => (simp [ds] at ok) <;> cases ok
+  | some stored =>
+    cases rp : replayPackage config stored pin with
+    | error e => (simp [ds, rp, bind, Except.bind] at ok) <;> cases ok
+    | ok definition =>
+      refine ⟨stored, rfl, ?_⟩
+      simp only [ds, rp, bind, Except.bind] at ok
+      split at ok
+      all_goals (try split at ok)
+      all_goals (first | (cases ok; exact rp) | cases ok | simp [throw, throwThe, MonadExceptOf.throw] at ok)
+
+theorem loadProgram_instantiated {config : Config} {bytes : Bytes} {pin : Digest} {input : Data}
+    {program : Program config pin input} (ok : loadProgram config bytes pin input = .ok program) :
+    ∃ instance_ : Instantiated config pin input, instantiate config bytes pin input = .ok instance_ ∧
+      program.definition = instance_.definition := by
+  unfold loadProgram at ok
+  cases inst : instantiate config bytes pin input with
+  | error e => simp [inst, bind, Except.bind] at ok
+  | ok instance_ =>
+    refine ⟨instance_, rfl, ?_⟩
+    simp only [inst, bind, Except.bind] at ok
+    split at ok
+    · split at ok
+      · cases ok; rfl
+      · cases ok
+    · cases ok
+
+/-- **The front-end account bounds the front end's work.** A turn whose stored package passed
+`frontEndPaid` for `payers`, and whose loader then replayed it, replayed a package of at most each
+payer's declared `replayBytes` source bytes, generated a typed core of at most its declared
+`coreBytes`, and type-checked within the kernel's checker fuel. -/
+theorem frontEnd_work_within {config : Config} {bytes : Bytes} {pin : Digest} {input : Data}
+    {payers : List Capacity} {program : Program config pin input}
+    (paid : frontEndPaid config bytes payers = .ok ()) (loaded : loadProgram config bytes pin input = .ok program)
+    (envelope : Capacity) (payer : envelope ∈ payers) :
+    ObjectiveWorkAccount.sourceBytes program.definition.package ≤ envelope.replayBytes ∧
+      program.definition.generatedCore.length ≤ envelope.coreBytes ∧
+      program.definition.replayed.accepted.packet.fuel ≤ config.typeFuel := by
+  obtain ⟨instance_, instantiated, same⟩ := loadProgram_instantiated loaded
+  obtain ⟨stored, ds, replayed⟩ := instantiate_replayed instantiated
+  obtain ⟨da, dp, sa, sp⟩ := replayPackage_decoded replayed
+  rw [← same] at replayed
+  unfold frontEndPaid at paid
+  simp only [ds] at paid
+  have small : ¬ (stored.artifact.length > config.maxArtifactBytes ∨ stored.package.length > config.maxArtifactBytes) := by
+    omega
+  rw [if_neg small] at paid
+  rw [← same] at da dp
+  rw [da, dp] at paid
+  simp only at paid
+  cases found : payers.findSome? (ObjectiveWorkAccount.uncovered program.definition.package program.definition.artifact) with
+  | some hit => rw [found] at paid; cases paid
+  | none =>
+    have each := List.findSome?_eq_none_iff.mp found envelope payer
+    obtain ⟨sourceOk, coreOk⟩ := ObjectiveWorkAccount.uncovered_none each
+    refine ⟨sourceOk, ?_, program.definition.replayed.fuelWithin⟩
+    have core := program.definition.replayed.coreExact
+    unfold Replay.generatedCore
+    rw [core]
+    exact coreOk
+
+/-- **A refusal of the front-end account precedes the replay.** `frontEndPaid` names an
+uncovered stage from the stored pair alone: whatever the loader would do with the package
+(replay, refuse, or run long), a turn that consults it first never reaches it. Instance:
+`frontEnd_refuses_oversized`. -/
+theorem frontEndPaid_refuses {config : Config} {bytes : Bytes} {payers : List Capacity} {stored : Stored}
+    {artifact : ObjectiveBendSourceArtifact.Artifact} {package : ObjectiveSourcePackage.Package}
+    {stage : ObjectiveWorkAccount.Stage} {needed declared : Nat}
+    (ds : decodeStored bytes = some stored)
+    (small : stored.artifact.length ≤ config.maxArtifactBytes ∧ stored.package.length ≤ config.maxArtifactBytes)
+    (da : ObjectiveBendSourceArtifact.decode stored.artifact = some artifact)
+    (dp : ObjectiveSourcePackage.decode stored.package = some package)
+    (hit : payers.findSome? (ObjectiveWorkAccount.uncovered package artifact) = some (stage, needed, declared)) :
+    frontEndPaid config bytes payers = .error (.workUncovered stage needed declared) := by
+  unfold frontEndPaid
+  simp only [ds]
+  have small' : ¬ (stored.artifact.length > config.maxArtifactBytes ∨ stored.package.length > config.maxArtifactBytes) := by
+    omega
+  rw [if_neg small', da, dp]
+  simp only [hit]
 
 /-- What a seat contract's method runs is the front end's output on the package
 stored with its artifact (as `Program.runs_front_end_output` for an activity). -/
@@ -802,30 +1334,57 @@ is kept, compacted). So a checkpoint is storage-charged for what the continuatio
 can use: a Plan field the extraction evaluated is stored as its value, never as the
 chain of suspended computations that produced it. Resuming the stored state is
 resuming the extracted one exactly (`ObjectiveResumeContract.runSegment_checkpoint`);
-that resuming the extracted state is resuming the yielded one is the premise
-`ObjectiveResumeContract.ForcingTransparent`, an open obligation of this lane. -/
+that resuming the extracted state is resuming the yielded one, each under its own
+`segmentLimits`, is `ObjectiveResumeContract.forcingTransparent_of_yieldedPlan` (every
+lexically valid yield). -/
 inductive Segment where
   | yielded (state : State) (plan : PlanAwait)
   | finished (result : Data)
   | faulted (reason : String)
 
-/-- Run one segment from `start` within a declared envelope. Running out of
-envelope commits nothing (`exhausted`): the activity stays where it was. -/
+/-- The limits a segment runs under: `config.limits.heap` cells BEYOND the heap it
+starts from, and the deployment's stack. A birth starts from the empty heap, so its
+limits are `config.limits`. A resumed segment starts from the stored checkpoint, whose
+cells are the activity's live state, already paid for by the storage deposit and, at
+delivery, by the declared envelope (`heapUncovered`); they do not eat the segment's own
+allocation. This is what makes the stored checkpoint resume exactly as the program's own
+yield (`ObjectiveResumeContract.runSegment_stored_complete`, no headroom): the lazy yield,
+the forced state, the settled state and the collected checkpoint each get the same room
+past their own heap. Under limits counted from zero the claim is FALSE: a checkpoint can be
+larger than the yield it was made from, and its size then eats the next segment's room
+(`ObjectiveResumeContract.absolute_limits_refuted`). -/
+def segmentLimits (config : Config) (start : State) : Limits :=
+  ObjectiveBendDemandCollect.limitsPast config.limits start
+
+/-- Run one segment from `start` within a declared envelope, under its `segmentLimits`
+(the run, and the Plan or result extraction it ends with). Running out of envelope
+commits nothing (`exhausted`): the activity stays where it was. Each segment performs
+at most one extraction. Its admission contract reserves the full planBudget via
+extractCovered; the shared extractor retains failure budgets, but this reservation
+is charged without refunds. -/
 def runSegment (config : Config) (ticks : Nat) (start : State) : Except Refusal Segment :=
-  match runBounded config.limits ticks start with
+  match runBounded (segmentLimits config start) ticks start with
   | .yielded _ yielded =>
-    match ObjectiveBendDemandData.yieldedPlan config.limits config.planBudget yielded with
+    match ObjectiveBendDemandData.yieldedPlan (segmentLimits config start) config.planBudget yielded with
     | .ok extracted => do
       let plan ← decodePlan extracted.value
       pure (.yielded (ObjectiveBendDemandCollect.checkpoint extracted.state) plan)
     | .error (failure, _) => .error (.planExtraction (reprStr failure))
   | .finished _ finished =>
-    match ObjectiveBendDemandData.complete config.limits config.planBudget finished with
+    match ObjectiveBendDemandData.complete (segmentLimits config start) config.planBudget finished with
     | .ok result => .ok (.finished result.value)
     | .error (failure, _) => .error (.resultExtraction (reprStr failure))
   | .divergent _ _ => .ok (.faulted "divergent")
   | .refused reason _ => .ok (.faulted (reprStr reason))
   | .suspended _ _ => .error .exhausted
+
+/-- A single-extraction reservation is precisely the case where clamping to the
+paying envelope leaves the deployment ceiling unchanged. -/
+theorem single_extraction_reservation_budget (config : Config) (envelope : Capacity)
+    (extractCovered : config.planBudget.ticks ≤ envelope.extractTicks) :
+    ({ config.planBudget with ticks := min config.planBudget.ticks envelope.extractTicks } : Budget) =
+      config.planBudget := by
+  simp [Nat.min_eq_left extractCovered]
 
 def Segment.yields : Segment → Bool
   | .yielded _ _ => true
@@ -956,20 +1515,33 @@ theorem readSlot_of_retired {rootBytes : Bytes → Digest} {config : Config} {sn
     readSlot config snapshot name = none := by
   simp [readSlot, bodyOf, payloadOf_of_retired retired]
 
+/-- **The declared state a cell's bytes hold as `object`'s**: a state payload whose key is
+the object's own (`stateKey object`). Anything else is refused `stateCodec`, a state of
+ANOTHER object included: a coordinate the cells of two objects shared would be refused by
+name, never read as the wrong object's state. -/
+def stateFor (object : CellId) (bytes : Bytes) : Except Refusal (Option ObjectState) :=
+  match payloadOf bytes with
+  | none => .ok none
+  | some payload =>
+    if payload.role = .state ∧ payload.key = stateKey object then
+      match decodeObjectState payload.body with
+      | some state => .ok (some state)
+      | none => .error .stateCodec
+    else .error .stateCodec
+
 /-- The object's declared state as its state cell holds it: `none` when the
 object has no state yet, refused when the cell holds anything else. -/
 def readState {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (object : CellId) :
     Except Refusal (Option ObjectState) :=
-  let bytes := snapshot.canonicalBytes (stateCell config.domain object)
-  match bodyOf .state bytes with
-  | some body => match decodeObjectState body with
-    | some state => .ok (some state)
-    | none => .error .stateCodec
-  | none => if (payloadOf bytes).isSome then .error .stateCodec else .ok none
+  stateFor object (snapshot.canonicalBytes (stateCell config.domain object))
 
-/-- The image an inbox installs. -/
+/-- The image an inbox installs: an EMPTY inbox is retired (cv 01a113fe-1390), so a queue
+that no message is in retains nothing; the next send to the pair opens it afresh
+(`readInbox` reads a retired cell as no inbox). Its purse is closed in the same batch when
+it can be (`ObjectiveCall.Mail.deregistrations`). -/
 def inboxImage (inbox : Inbox.Inbox) : Bytes :=
-  image .inbox (Inbox.key inbox.sender inbox.target) (Inbox.encode inbox)
+  if inbox.messages = [] then retiredImage
+  else image .inbox (Inbox.key inbox.sender inbox.target) (Inbox.encode inbox)
 
 /-- The inbox an inbox cell holds: `none` when the cell holds no activity cell
 (no inbox yet), refused when it holds anything else. -/
@@ -984,23 +1556,80 @@ def readInbox {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (ce
 def objectImage (object : CellId) (record : ObjectRecord) : Bytes :=
   image .object (objectKey object) (ObjectRecord.encodeRecord record)
 
+/-- Whether a phase is still awaiting (an activity the counters count). -/
+def Phase.awaits : Phase → Bool
+  | .awaiting _ => true
+  | _ => false
+
+/-- **The object record after a turn took one of its activities** from awaiting
+(`before`) to awaiting (`after`): `retain` when it starts awaiting, `release` when
+it stops, unchanged otherwise. -/
+def recount (object : ObjectRecord) (pin activity : Digest) (before after : Bool) : ObjectRecord :=
+  if after && !before then object.retain pin activity
+  else if before && !after then object.release pin activity
+  else object
+
+/-- The post of the object record's counters, when they move: none when the
+activity awaited before and after (or neither), so a delivery that yields again
+does not write the object record. -/
+def countPosts {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (object : CellId)
+    (record : ObjectRecord) (pin activity : Digest) (before after : Bool) : List Post :=
+  if before = after then []
+  else [postAt snapshot (objectCell config.domain object) (objectImage object (recount record pin activity before after))]
+
+theorem mem_countPosts {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {object : CellId} {record : ObjectRecord} {pin activity : Digest} {before after : Bool} {post : Post}
+    (member : post ∈ countPosts config snapshot object record pin activity before after) :
+    post = postAt snapshot (objectCell config.domain object) (objectImage object (recount record pin activity before after)) := by
+  unfold countPosts at member
+  split at member
+  · cases member
+  · simpa using member
+
+/-- The post of an object record a turn moved from `before` to `after` (none when
+unchanged). -/
+def objectPost {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (object : CellId)
+    (before after : ObjectRecord) : List Post :=
+  if after = before then [] else [postAt snapshot (objectCell config.domain object) (objectImage object after)]
+
+theorem mem_objectPost {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {object : CellId} {before after : ObjectRecord} {post : Post}
+    (member : post ∈ objectPost config snapshot object before after) :
+    post = postAt snapshot (objectCell config.domain object) (objectImage object after) := by
+  unfold objectPost at member
+  split at member
+  · cases member
+  · simpa using member
+
+/-- **The object record a cell's bytes hold as `object`'s**: an object payload whose key is
+the object's own (`objectKey object`); anything else (another object's record included) is
+refused `objectCodec`. -/
+def objectFor (object : CellId) (bytes : Bytes) : Except Refusal (Option ObjectRecord) :=
+  match payloadOf bytes with
+  | none => .ok none
+  | some payload =>
+    if payload.role = .object ∧ payload.key = objectKey object then
+      match ObjectRecord.decodeRecord payload.body with
+      | some record => .ok (some record)
+      | none => .error .objectCodec
+    else .error .objectCodec
+
 /-- The object's record: `none` when the cell has none (not an object), refused
 when the cell holds anything else. -/
 def readObject {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (object : CellId) :
     Except Refusal (Option ObjectRecord) :=
-  let bytes := snapshot.canonicalBytes (objectCell config.domain object)
-  match bodyOf .object bytes with
-  | some body => match ObjectRecord.decodeRecord body with
-    | some record => .ok (some record)
-    | none => .error .objectCodec
-  | none => if (payloadOf bytes).isSome then .error .objectCodec else .ok none
+  objectFor object (snapshot.canonicalBytes (objectCell config.domain object))
 
 /-- The request facts a declared-state write is judged under. `turn`: 1 birth,
-2 delivery, 3 direct write. A delivery's write is the activity's, so its subject
+2 delivery, 4 creation (the seed). A delivery's write is the activity's, so its subject
 is the activity's principal (its birth subject, `escrow.payer`: the subject the
-native route checked as a holder of the object), never the deliverer. -/
-def factsOf (subject : SubjectId) (height : Nat) (object : CellId) (turn : Nat) : Facts :=
-  ⟨some subject, height, object.value, turn, none⟩
+native route checked as a holder of the object), never the deliverer.
+`artifact`: the package whose code makes the write (a birth's and a delivery's
+activity runs the package its record pins) or `none` for a seed, which no package makes. It is what the object's pin clause (`ObjectRecord.pinClause`)
+reads as `objective/artifact`. -/
+def factsOf (subject : SubjectId) (height : Nat) (object : CellId) (turn : Nat)
+    (artifact : Option Digest) : Facts :=
+  ⟨some subject, height, object.value, turn, none, artifact.map Digest.value⟩
 
 /-- The object's law judges a write: nothing to judge when nothing is written. -/
 def judgeWrite (record : ObjectRecord) (facts : Facts) (old : Option Data) (new : Data) : Except Refusal Unit :=
@@ -1178,6 +1807,7 @@ def commitYield {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
     Except Refusal YieldCommit :=
   if plan.patience = 0 ∨ config.maxPatience < plan.patience then
     .error (.patience plan.patience config.maxPatience) else
+  if 256 ^ 8 ≤ height + plan.patience then .error (.heightWide height plan.patience) else
   match stateWrite config snapshot object current viewed plan.write with
   | .error reason => .error reason
   | .ok written =>
@@ -1190,7 +1820,7 @@ def commitYield {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
     .ok ⟨⟨awaitId cell generation checkpoint, .reply (AnswerSlot.name transaction cell generation) decider,
         height + plan.patience, height⟩, written,
       (written.map StateWritten.post).toList ++ [slotPost config snapshot
-        ⟨AnswerSlot.name transaction cell generation, cell, .subject decider, height + plan.patience, .opened, []⟩]⟩
+        ⟨AnswerSlot.name transaction cell generation, cell, .subject decider, height + plan.patience, .opened, [], true⟩]⟩
   | .height due =>
     if height + plan.patience < due then .error (.plan "a height await is due after its deadline") else
     .ok ⟨⟨awaitId cell generation checkpoint, .height due, height + plan.patience, height⟩, written,
@@ -1466,7 +2096,137 @@ def Publication.intent {rootBytes : Bytes → Digest} {config : Config} {snapsho
     DataIntent rootBytes :=
   intentOf rootBytes (publishTransaction publication.pin) publication.posts publication.guards [] sealing
 
+/-! ### Upgrades: the migration and the drained-write judgment
+
+A migration is a declaration of the NEXT package (`Pending.migration`), lowered
+by this kernel's own front end from that package's stored sources with the
+declaration selected (as a call method is, `ObjectiveCall.loadMethod`): the
+term it runs is the elaborator's output, never an offered core. Its checked type
+is a function `old -> new`; it is applied to the state datum (typed at its
+domain by the checker) and run to a value within the upgrade's declared
+envelope. `none` is the identity. -/
+
+/-- A migration declaration of a stored package: replayed, lowered with the
+declaration selected, accepted by the checker, and a function. -/
+structure Migration (config : Config) (pin : Digest) (name : String) where
+  private mk ::
+  definition : Replay config pin
+  lowering : ObjectiveBendFrontEnd.Lowering
+  replayExact : ObjectiveBendPublication.replay { definition.package with entryDefinition := name } = .ok lowering
+  accepted : ObjectiveBendFrontEnd.Accepted lowering
+  fuelWithin : accepted.packet.fuel ≤ config.typeFuel
+  reuse : Reuse
+  quantity : Quantity
+  domain : Ty
+  codomain : Ty
+  arrowExact : callable accepted.typed.type = .arrow reuse quantity domain codomain
+
+def loadMigration (config : Config) (bytes : Bytes) (pin : Digest) (name : String) :
+    Except Refusal (Migration config pin name) :=
+  match decodeStored bytes with
+  | none => .error .packageMissing
+  | some stored =>
+  match replayPackage config stored pin with
+  | .error reason => .error reason
+  | .ok definition =>
+  match replayExact : ObjectiveBendPublication.replay { definition.package with entryDefinition := name } with
+  | .error d => .error (.migrationShape d.message)
+  | .ok lowering =>
+  match ObjectiveBendFrontEnd.accept lowering with
+  | .error d => .error (.migrationShape d.message)
+  | .ok accepted =>
+  if fuelWithin : accepted.packet.fuel ≤ config.typeFuel then
+    match arrowExact : callable accepted.typed.type with
+    | .arrow reuse quantity domain codomain =>
+      .ok ⟨definition, lowering, replayExact, accepted, fuelWithin, reuse, quantity, domain, codomain, arrowExact⟩
+    | _ => .error (.migrationShape "the migration is not a function of the state")
+  else .error (.migrationShape "typed core checker fuel exceeds the kernel's capacity")
+
+/-- The migration applied to a state datum, annotated at its domain. -/
+def Migration.applied {config : Config} {pin : Digest} {name : String} (migration : Migration config pin name)
+    (value : Data) : AnnotatedTerm :=
+  ⟨.app migration.accepted.source.term value.term,
+    fun path => match path with
+      | 0 :: rest => migration.accepted.source.annotations rest
+      | 1 :: rest => annotationsOf (dataAnnotations migration.accepted.source.assumptions.bounds 64 value
+          migration.domain []) rest
+      | _ => none,
+    migration.accepted.source.assumptions⟩
+
+/-- Run a migration on a state datum within `ticks`, under the segment limits every run
+gets (`segmentLimits`, from the fresh start): the application must check, and the run must
+finish with a value. -/
+def runMigration (config : Config) {pin : Digest} {name : String} (migration : Migration config pin name)
+    (ticks : Nat) (value : Data) : Except Refusal Data :=
+  match check (migration.applied value) [] config.typeFuel with
+  | none => .error (.migrationFault "the state does not type at the migration's domain")
+  | some _ =>
+    let start := initial (migration.applied value).erase
+    match runBounded (segmentLimits config start) ticks start with
+    | .finished _ finished =>
+      match ObjectiveBendDemandData.complete (segmentLimits config start) config.planBudget finished with
+      | .ok result => .ok result.value
+      | .error (failure, _) => .error (.migrationFault s!"result extraction: {reprStr failure}")
+    | .suspended _ _ => .error (.migrationFault "it exhausted its declared envelope")
+    | _ => .error (.migrationFault "it did not finish with a value")
+
+/-- The migrated state: the migration's result, or the state itself under the identity. -/
+def migrateValue (config : Config) (bytes : Bytes) (next : ObjectRecord.Pending) (value : Data) :
+    Except Refusal Data :=
+  match next.migration with
+  | none => .ok value
+  | some name =>
+    match loadMigration config bytes next.pin name with
+    | .error reason => .error reason
+    | .ok migration => runMigration config migration next.envelope.sourceTicks value
+
+/-- **The drained judgment of one state** while `record` drains toward `next`:
+the state, migrated, is admitted by the record MIGRATE will install
+(`ObjectRecord.successor`), under the migration's facts (`migrateFacts`): exactly
+the judgment MIGRATE makes. Typing at the next state type is part of it
+(`admitWrite`). Returns the migrated state. -/
+def judgeMigrated {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (record : ObjectRecord) (object : CellId) (next : ObjectRecord.Pending) (value : Data) : Except Refusal Data :=
+  match migrateValue config (packageBytes config snapshot next.pin) next value with
+  | .error reason => .error reason
+  | .ok migrated =>
+    match admitWrite (record.successor next) (ObjectRecord.migrateFacts object.value next) (some migrated) migrated with
+    | .ok () => .ok migrated
+    | .error reason => .error (.objectWrite (.upgradeConflict reason))
+
+/-- **The drained-write judgment**: while the object drains, the state a write
+installs must pass `judgeMigrated` (on top of the object's own law, judged as
+before by `judgeWritten`); steady, nothing more. -/
+def judgeDrained {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (record : ObjectRecord) (object : CellId) : Option StateWritten → Except Refusal Unit
+  | none => .ok ()
+  | some written =>
+    match record.phase with
+    | .steady => .ok ()
+    | .draining next _ =>
+      match judgeMigrated config snapshot record object next written.after.value with
+      | .ok _ => .ok ()
+      | .error reason => .error reason
+
+/-- The price of the migration run a drained write costs: the public price of the
+upgrade's declared migration envelope, when the write ran a migration term. -/
+def drainFee (config : Config) (record : ObjectRecord) (written : Option StateWritten) : Nat :=
+  match written, record.phase with
+  | some _, .draining next _ => if next.migration.isSome then config.tariff.workOf next.envelope else 0
+  | _, _ => 0
+
 /-! ### birth -/
+
+/-- The activity a birth RE-BIRTHS (`ObjectiveActivityUpgrade.rebirth`): in the
+birth's own posts and batch, its counter is released and its purse is swept into
+the new purse and closed. -/
+structure Predecessor where
+  pin : Digest
+  activity : Digest
+  purse : AccountId
+  /-- The predecessor's escrow account: the new purse returns there at the end. -/
+  refund : AccountId
+  deriving DecidableEq, Repr
 
 structure BirthRequest where
   subject : SubjectId
@@ -1484,6 +2244,8 @@ structure BirthRequest where
   account : AccountId
   /-- Moved into the activity's purse; must reserve the first await's fee pair. -/
   deposit : Nat
+  /-- The activity this birth re-births, if any (`none` for every signed birth). -/
+  predecessor : Option Predecessor
 
 def birthTransaction (request : BirthRequest) : TransactionId :=
   tagged "DREGG/OBJECTIVE/ACTIVITY/TX/BIRTH/v2"
@@ -1496,16 +2258,47 @@ to the collector, move the deposit into the purse; then the purse settles
 (`settlePurse`). -/
 def birthBatch (config : Config) (book : Book) (held : AccountId) (request : BirthRequest)
     (escrow : Escrow) (deposit : Nat) (segment : Segment) : Except Refusal Batch :=
-  settlePurse config (Batch.apply ⟨[held], [], []⟩ book) held escrow deposit
-    ⟨[], [.fee request.account config.collector config.asset (config.tariff.workOf request.envelope)] ++
-      (if request.deposit = 0 then [] else [.transfer request.account held config.asset request.deposit]), []⟩ segment
+  let registered := Batch.apply ⟨[held], [], []⟩ book
+  let own : List Operation :=
+    [.fee request.account config.collector config.asset (config.tariff.workOf request.envelope)] ++
+      (if request.deposit = 0 then [] else [.transfer request.account held config.asset request.deposit])
+  -- A rebirth sweeps what is left of its predecessor's purse into the new purse and closes it.
+  let closing : List Operation := match request.predecessor with
+    | none => []
+    | some predecessor => sweep (applyOperations registered own) predecessor.purse held
+  settlePurse config registered held escrow deposit
+    ⟨[], own ++ closing, (request.predecessor.map Predecessor.purse).toList⟩ segment
   |>.map fun settled => ⟨held :: settled.registrations, settled.operations, settled.deregistrations⟩
 
-/-- An admitted birth: the program, its first segment from its initial state,
-and the posts that commit the record, the yield and the Book postings. -/
-structure Birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+/-- The account the activity's purse is returned to at its end: the payer's, or
+for a rebirth the predecessor's (the request's account is the old purse, closed
+by the rebirth). -/
+def BirthRequest.escrowAccount (request : BirthRequest) : AccountId :=
+  match request.predecessor with
+  | some predecessor => predecessor.refund
+  | none => request.account
+
+/-- The turn code a birth's write is judged under: 1, or 9 for a rebirth. -/
+def BirthRequest.factsTurn (request : BirthRequest) : Nat :=
+  if request.predecessor.isSome then 9 else 1
+
+/-- The object record after a birth: its predecessor (if any) released, the new
+activity retained when it awaits. -/
+def birthCount (object : ObjectRecord) (request : BirthRequest) (activity : Digest) (awaits : Bool) : ObjectRecord :=
+  recount (match request.predecessor with
+    | none => object
+    | some predecessor => object.release predecessor.pin predecessor.activity) request.pin activity false awaits
+
+/-- Everything a birth checks BEFORE it looks at the deposit: the program, its first segment from
+its initial state, the record the yield would store. A refusal from here is a refusal of the
+request, whatever deposit it carries; the deposit is judged next (`birth`). -/
+structure BirthPrefix {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : BirthRequest) where
   private mk ::
+  /-- The birth's envelope and both escrowed envelopes (every later delivery replays the package
+  under one of them) cover the front-end stages of the pinned package, judged before the replay. -/
+  paid : frontEndPaid config (packageBytes config snapshot request.pin)
+    [request.envelope, request.resume, request.timeout] = .ok ()
   program : Program config request.pin request.input
   programExact : loadProgram config (packageBytes config snapshot request.pin) request.pin request.input =
     .ok program
@@ -1526,99 +2319,198 @@ structure Birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
   recordExact : record = nextRecord
     ⟨request.object, activityId request.object (birthTransaction request), request.pin, dataBytes request.input,
       0, [], checkpointDigest [],
-      escrowOf config.tariff request.subject request.account request.resume request.timeout,
+      escrowOf config.tariff request.subject request.escrowAccount request.resume request.timeout,
       0, .faulted "unborn"⟩ 0 segment yielded
+  /-- The object's record: the birth is on an object, and runs the package it pins. -/
+  object : ObjectRecord
+  objectExact : readObject config snapshot request.object = .ok (some object)
+  /-- The object admits new activities (steady, or draining under the identity). -/
+  admits : object.admitsNew = true
+  /-- ... of the package it runs for them (its pin; while draining, the next pin). -/
+  pinned : object.activePin = request.pin
   book : BookCell
   bookExact : loadBook config snapshot = .ok book
+  /-- The object's law admitted the first segment's write (if it wrote). -/
+  judged : judgeWritten object (factsOf request.subject height request.object request.factsTurn (some request.pin))
+    (yielded.bind YieldCommit.written) = .ok ()
+  /-- While the object drains, the write's state passes the next record's judgment. -/
+  drained : judgeDrained config snapshot object request.object (yielded.bind YieldCommit.written) = .ok ()
+  /-- The request's object and package ids are 256-bit digests: the charged record spells a
+  digest in exactly 32 octets (`digestWide` refuses a wider one). -/
+  narrow : request.object.value < 256 ^ 32 ∧ request.pin.value < 256 ^ 32
+  /-- Single-extraction reservation contract: the full ceiling is covered, without refunds. -/
+  extractCovered : config.planBudget.ticks ≤ request.envelope.extractTicks
+  /-- The deployment covers the birth's envelope (`Config.covers`), judged before the replay. -/
+  covered : config.covers request.envelope = true
+
+
+/-- An admitted birth: its prefix, and the posts that commit the record, the yield and the Book
+postings, under a deposit that reserves the first await. -/
+structure Birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (height : Nat) (request : BirthRequest) extends BirthPrefix config snapshot height request where
+  private mk ::
   posted : Postings book
   posts : List Post
   recordFirst : posts.head? = some (recordPost config snapshot cell record)
+  /-- The record, the yield's posts, the Book, and (when the birth leaves the
+  activity awaiting) the object record with the activity counted (`retain`). -/
   postsExact : posts = recordPost config snapshot cell record ::
-    ((yielded.map YieldCommit.posts).getD [] ++ [posted.write config snapshot])
+    ((yielded.map YieldCommit.posts).getD [] ++ [posted.write config snapshot] ++
+      objectPost config snapshot request.object object
+        (birthCount object request (activityId request.object (birthTransaction request)) record.phase.awaits))
   guards : List ReadGuard
   guardsExact : guards = [guardAt snapshot (objectCell config.domain request.object),
     guardAt snapshot (packageCell config.domain request.pin),
     guardAt snapshot (stateCell config.domain request.object)]
-  /-- The object's record: the birth is on an object, and runs the package it pins. -/
-  object : ObjectRecord
-  objectExact : readObject config snapshot request.object = .ok (some object)
-  pinned : object.pin = request.pin
-  /-- The object's law admitted the first segment's write (if it wrote). -/
-  judged : judgeWritten object (factsOf request.subject height request.object 1)
-    (yielded.bind YieldCommit.written) = .ok ()
   /-- A yielding birth's deposit reserves the first await's fee pair and its
   record's storage deposit. -/
   funded : ¬ (segment.yields ∧ request.deposit <
-    (escrowOf config.tariff request.subject request.account request.resume request.timeout).pair +
+    (escrowOf config.tariff request.subject request.escrowAccount request.resume request.timeout).pair +
       storageDeposit config record)
 
+def birthPrefix {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (height : Nat) (request : BirthRequest) : Except Refusal (BirthPrefix config snapshot height request) := do
+  if narrow : request.object.value < 256 ^ 32 ∧ request.pin.value < 256 ^ 32 then
+    match objectExact : readObject config snapshot request.object with
+    | .error reason => throw reason
+    | .ok none => throw .notAnObject
+    | .ok (some object) =>
+      if admits : object.admitsNew = true then
+      if pinned : object.activePin = request.pin then
+        let ⟨covered⟩ ← (if h : config.covers request.envelope = true then pure ⟨h⟩
+          else throw (.uncovered request.envelope) : Except Refusal (PLift (config.covers request.envelope = true)))
+        if !config.covers request.resume then throw (.uncovered request.resume)
+        if !config.covers request.timeout then throw (.uncovered request.timeout)
+        let ⟨extractCovered⟩ ← (if h : config.planBudget.ticks ≤ request.envelope.extractTicks then pure ⟨h⟩
+          else throw (.extractUncovered config.planBudget.ticks request.envelope.extractTicks) :
+            Except Refusal (PLift (config.planBudget.ticks ≤ request.envelope.extractTicks)))
+        if request.resume.extractTicks < config.planBudget.ticks then
+          throw (.extractUncovered config.planBudget.ticks request.resume.extractTicks)
+        if request.timeout.extractTicks < config.planBudget.ticks then
+          throw (.extractUncovered config.planBudget.ticks request.timeout.extractTicks)
+        match paid : frontEndPaid config (packageBytes config snapshot request.pin)
+            [request.envelope, request.resume, request.timeout] with
+        | .error reason => throw reason
+        | .ok () =>
+        match programExact : loadProgram config (packageBytes config snapshot request.pin) request.pin request.input with
+        | .error reason => throw reason
+        | .ok program =>
+          outcomeProtocol program
+          let transaction := birthTransaction request
+          let activity := activityId request.object transaction
+          let cell := recordCell config.domain request.object activity
+          if isRetired (snapshot.canonicalBytes cell) then throw .recordRetired
+          match fresh : payloadOf (snapshot.canonicalBytes cell) with
+          | some _ => throw .recordExists
+          | none =>
+          let held := heldAccount cell
+          if request.account = config.asset ∨ request.account = config.collector ∨ request.account = held then
+            throw .payerInvalid
+          match bookExact : loadBook config snapshot with
+          | .error reason => throw reason
+          | .ok book =>
+            if held ∈ (logicalBook book.logical).accounts then throw .purseTaken
+            match currentExact : readState config snapshot request.object with
+            | .error reason => throw reason
+            | .ok current =>
+            match segmentExact : runSegment config request.envelope.sourceTicks (initial program.applied.erase) with
+            | .error reason => throw reason
+            | .ok segment =>
+              match yieldedExact : segmentCommit config snapshot height transaction cell request.object 0
+                  current false segment with
+              | .error reason => throw reason
+              | .ok yielded =>
+                match judged : judgeWritten object (factsOf request.subject height request.object request.factsTurn (some request.pin))
+                    (yielded.bind YieldCommit.written) with
+                | .error reason => throw reason
+                | .ok () =>
+                match drained : judgeDrained config snapshot object request.object (yielded.bind YieldCommit.written) with
+                | .error reason => throw reason
+                | .ok () =>
+                  match yielded with
+                  | some committed =>
+                    match (committed.written.map StateWritten.after).orElse (fun _ => current) with
+                    | some view => viewProtocol program view
+                    | none => throw .stateMissing
+                  | none => pure ()
+                  let escrow := escrowOf config.tariff request.subject request.escrowAccount request.resume request.timeout
+                  let base : Record := ⟨request.object, activity, request.pin, dataBytes request.input, 0, [],
+                    checkpointDigest [], escrow, 0, .faulted "unborn"⟩
+                  let record := nextRecord base 0 segment yielded
+                  pure ⟨paid, program, programExact, cell, rfl, fresh, current, currentExact, segment, segmentExact, yielded,
+                    yieldedExact, record, rfl, object, objectExact, admits, pinned, book, bookExact,
+                    judged, drained, narrow, extractCovered, covered⟩
+      else throw (.pinMismatch object.activePin request.pin)
+      else throw .draining
+  else throw (.digestWide request.object request.pin)
+
+/-- The birth: its prefix, then the deposit (`underfunded` names the reserve the prefix's record needs),
+then the Book postings. -/
 def birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : BirthRequest) : Except Refusal (Birth config snapshot height request) := do
-  match objectExact : readObject config snapshot request.object with
-  | .error reason => throw reason
-  | .ok none => throw .notAnObject
-  | .ok (some object) =>
-    if pinned : object.pin = request.pin then
-      if !config.covers request.envelope then throw (.uncovered request.envelope)
-      if !config.covers request.resume then throw (.uncovered request.resume)
-      if !config.covers request.timeout then throw (.uncovered request.timeout)
-      match programExact : loadProgram config (packageBytes config snapshot request.pin) request.pin request.input with
-      | .error reason => throw reason
-      | .ok program =>
-        outcomeProtocol program
-        let transaction := birthTransaction request
-        let activity := activityId request.object transaction
-        let cell := recordCell config.domain request.object activity
-        if isRetired (snapshot.canonicalBytes cell) then throw .recordRetired
-        match fresh : payloadOf (snapshot.canonicalBytes cell) with
-        | some _ => throw .recordExists
-        | none =>
-        let held := heldAccount cell
-        if request.account = config.asset ∨ request.account = config.collector ∨ request.account = held then
-          throw .payerInvalid
-        match bookExact : loadBook config snapshot with
-        | .error reason => throw reason
-        | .ok book =>
-          if held ∈ (logicalBook book.logical).accounts then throw .purseTaken
-          match currentExact : readState config snapshot request.object with
-          | .error reason => throw reason
-          | .ok current =>
-          match segmentExact : runSegment config request.envelope.sourceTicks (initial program.applied.erase) with
-          | .error reason => throw reason
-          | .ok segment =>
-            match yieldedExact : segmentCommit config snapshot height transaction cell request.object 0
-                current false segment with
-            | .error reason => throw reason
-            | .ok yielded =>
-              match judged : judgeWritten object (factsOf request.subject height request.object 1)
-                  (yielded.bind YieldCommit.written) with
-              | .error reason => throw reason
-              | .ok () =>
-                match yielded with
-                | some committed =>
-                  match (committed.written.map StateWritten.after).orElse (fun _ => current) with
-                  | some view => viewProtocol program view
-                  | none => throw .stateMissing
-                | none => pure ()
-                let escrow := escrowOf config.tariff request.subject request.account request.resume request.timeout
-                let base : Record := ⟨request.object, activity, request.pin, dataBytes request.input, 0, [],
-                  checkpointDigest [], escrow, 0, .faulted "unborn"⟩
-                let record := nextRecord base 0 segment yielded
-                if short : segment.yields ∧ request.deposit < escrow.pair + storageDeposit config record then
-                  throw (.underfunded request.deposit (escrow.pair + storageDeposit config record))
-                else
-                  let batch ← birthBatch config (logicalBook book.logical) held request escrow
-                    (storageDeposit config record) segment
-                  let posted ← postings book batch
-                  let posts := recordPost config snapshot cell record ::
-                    ((yielded.map YieldCommit.posts).getD [] ++ [posted.write config snapshot])
-                  pure ⟨program, programExact, cell, rfl, fresh, current, currentExact, segment, segmentExact, yielded,
-                    yieldedExact, record, rfl, book, bookExact, posted, posts, rfl, rfl,
-                    [guardAt snapshot (objectCell config.domain request.object),
-                      guardAt snapshot (packageCell config.domain request.pin),
-                      guardAt snapshot (stateCell config.domain request.object)], rfl,
-                    object, objectExact, pinned, judged, short⟩
-    else throw (.pinMismatch object.pin request.pin)
+  let pre ← birthPrefix config snapshot height request
+  let escrow := escrowOf config.tariff request.subject request.escrowAccount request.resume request.timeout
+  if short : pre.segment.yields ∧ request.deposit < escrow.pair + storageDeposit config pre.record then
+    throw (.underfunded request.deposit (escrow.pair + storageDeposit config pre.record))
+  else
+    let held := heldAccount pre.cell
+    let batch ← birthBatch config (logicalBook pre.book.logical) held request escrow
+      (storageDeposit config pre.record) pre.segment
+    let posted ← postings pre.book batch
+    let posts := recordPost config snapshot pre.cell pre.record ::
+      ((pre.yielded.map YieldCommit.posts).getD [] ++ [posted.write config snapshot] ++
+        objectPost config snapshot request.object pre.object
+          (birthCount pre.object request (activityId request.object (birthTransaction request))
+            pre.record.phase.awaits))
+    pure ⟨pre, posted, posts, rfl, rfl,
+      [guardAt snapshot (objectCell config.domain request.object),
+        guardAt snapshot (packageCell config.domain request.pin),
+        guardAt snapshot (stateCell config.domain request.object)], rfl, short⟩
+
+/-- What each stage of a birth may spend: the front end's input and output (the replayed
+package's source bytes, the generated typed core), the checker fuel, the run's tick budget, the
+extraction's tick budget and the extracted output's byte budget. The prefix runs no domain
+judgment (it runs at the turn's end, `ActivitySeatEnd.finish`, bounded there by the same
+envelope's `domainWork`: `finish_domain_covered`). -/
+def BirthPrefix.spent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : BirthRequest} (pre : BirthPrefix config snapshot height request) :
+    ObjectiveWorkAccount.Stage → Nat
+  | .frontEnd => ObjectiveWorkAccount.sourceBytes pre.program.definition.package
+  | .core => pre.program.definition.generatedCore.length
+  | .check => config.typeFuel
+  | .execution => request.envelope.sourceTicks
+  | .extraction => config.planBudget.ticks
+  | .output => config.planBudget.bytes
+  | .domain => 0
+
+/-- The run of an admitted birth is the bounded machine under exactly the declared tick budget
+(`segmentExact`); its extraction under the deployment's Plan budget. -/
+theorem BirthPrefix.runs_within {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : BirthRequest} (pre : BirthPrefix config snapshot height request) :
+    runSegment config (pre.spent .execution) (initial pre.program.applied.erase) = .ok pre.segment :=
+  pre.segmentExact
+
+/-- **THE WHOLE-REQUEST WORK ACCOUNT OF A BIRTH.** Every stage an admitted birth spends is within
+what its signed envelope declares, and so within what the tariff priced
+(`ObjectiveWorkAccount.workOf_stage_step`): the front end's input and output by the account
+judged from the stored pair before the replay (`frontEnd_work_within`), the checker fuel, the
+extraction and the output by `Config.covers` and `extractUncovered`, and the run by its budget
+(`runs_within`). -/
+theorem BirthPrefix.work_within {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : BirthRequest} (pre : BirthPrefix config snapshot height request)
+    (stage : ObjectiveWorkAccount.Stage) :
+    pre.spent stage ≤ ObjectiveWorkAccount.declared request.envelope stage := by
+  have front := frontEnd_work_within pre.paid pre.programExact request.envelope (by simp)
+  have covers := pre.covered
+  simp only [Config.covers, Bool.and_eq_true, decide_eq_true_eq] at covers
+  cases stage with
+  | frontEnd => exact front.1
+  | core => exact front.2.1
+  | check => exact covers.1.1.1.2
+  | execution => exact Nat.le_refl _
+  | extraction => exact pre.extractCovered
+  | output => exact covers.1.2
+  | domain => exact Nat.zero_le _
 
 def Birth.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : BirthRequest} (born : Birth config snapshot height request) (sealing : Seal) :
@@ -1664,6 +2556,7 @@ def replyTyped {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snap
     let .reply named _ := await.source | throw .slotMismatch
     if named ≠ slot then throw .slotMismatch
     let some input := decodeDataBytes record.input | throw .inputType
+    frontEndPaid config (packageBytes config snapshot record.pin) [record.escrow.resume, record.escrow.timeout]
     let program ← loadProgram config (packageBytes config snapshot record.pin) record.pin input
     match typeData program.assumptions config.typeFuel value program.reply with
     | some _ => pure ()
@@ -1719,6 +2612,8 @@ def outcomeOfDecision : AnswerSlot.Decision → Except Refusal AwaitOutcome
   | .unknown => .ok .unknown
   | .broken _ => .ok .broken
   | .expired => .ok .timedOut
+  -- a delivery slot only (no await names one): the reply will never come
+  | .cancelled => .ok .broken
 
 /-- How the await ends at this height: its decided slot, its due height, or its
 deadline. A function of the snapshot, the height and the await only. -/
@@ -1757,10 +2652,127 @@ structure DeliverRequest where
 /-- The ending turn's own postings: the used fee from the purse, and the
 submitter's added envelope from its account, both to the collector. -/
 def deliveryCharges (config : Config) (record : Record) (cell : CellId) (path : Path)
-    (request : DeliverRequest) : Batch :=
+    (request : DeliverRequest) (migration : Nat) : Batch :=
   ⟨[], [.fee (heldAccount cell) config.collector config.asset (record.escrow.used path)] ++
     (if request.extra = zeroCapacity then []
-     else [.fee request.account config.collector config.asset (config.tariff.workOf request.extra)]), []⟩
+     else [.fee request.account config.collector config.asset (config.tariff.workOf request.extra)]) ++
+    (if migration = 0 then [] else [.fee (heldAccount cell) config.collector config.asset migration]), []⟩
+
+/-! ### The resume point
+
+The prefix `deliver` and `exhaust` share: the awaiting record, its await, its program, then (past the object
+reads a delivery adds) the settled outcome, the object's state, and the stored checkpoint resumed with the typed
+response. It is ONE function pair, so the heap a resumed segment needs is decided in ONE place:
+`ResumeTail.needed`, the number both refusals (`heapUncovered needed declared`) and the Host's read-only
+`resumeQuote` state. The split is `resumeHead` / `resumeTail` because a delivery reads (and judges) the object
+between them, and the order of its refusals is deliberate. -/
+
+structure ResumeHead {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (recordId : CellId) where
+  private mk ::
+  record : Record
+  recordExact : readRecord snapshot recordId = some record
+  located : recordId = recordCell config.domain record.object record.activity
+  await : Await
+  awaiting : record.phase = .awaiting await
+  idExact : await.id = awaitId recordId record.generation record.checkpointDigest
+  digestExact : checkpointDigest record.checkpoint = record.checkpointDigest
+  input : Data
+  inputExact : decodeDataBytes record.input = some input
+  /-- Both escrowed envelopes cover the front-end stages of the pinned package, judged before the
+  replay; the turn's envelope (one of them plus any extra) covers them too. -/
+  paid : frontEndPaid config (packageBytes config snapshot record.pin) [record.escrow.resume, record.escrow.timeout] = .ok ()
+  program : Program config record.pin input
+  programExact : loadProgram config (packageBytes config snapshot record.pin) record.pin input = .ok program
+
+def resumeHead {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (recordId : CellId) : Except Refusal (ResumeHead config snapshot recordId) :=
+  match recordExact : readRecord snapshot recordId with
+  | none => .error (absentRecord snapshot recordId)
+  | some record =>
+  if located : recordId = recordCell config.domain record.object record.activity then
+  match awaiting : record.phase with
+  | .done _ | .faulted _ => .error .notAwaiting
+  | .awaiting await =>
+  if idExact : await.id = awaitId recordId record.generation record.checkpointDigest then
+  if digestExact : checkpointDigest record.checkpoint = record.checkpointDigest then
+  match inputExact : decodeDataBytes record.input with
+  | none => .error .inputType
+  | some input =>
+  match paid : frontEndPaid config (packageBytes config snapshot record.pin)
+      [record.escrow.resume, record.escrow.timeout] with
+  | .error reason => .error reason
+  | .ok () =>
+  match programExact : loadProgram config (packageBytes config snapshot record.pin) record.pin input with
+  | .error reason => .error reason
+  | .ok program =>
+  .ok ⟨record, recordExact, located, await, awaiting, idExact, digestExact, input, inputExact, paid, program,
+    programExact⟩
+  else .error .checkpointDigest
+  else .error .awaitMismatch
+  else .error .recordMisplaced
+
+structure ResumeTail {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (height : Nat) (recordId : CellId) (head : ResumeHead config snapshot recordId) where
+  private mk ::
+  settlement : Settlement
+  settled : settle config snapshot height recordId head.await = .ok settlement
+  /-- The object's declared state and its version, read in THIS turn. -/
+  view : ObjectState
+  viewExact : readState config snapshot head.record.object = .ok (some view)
+  response : TypedData head.program.assumptions (responseData settlement.decided view) head.program.responseType
+  state : State
+  stateExact : decodeCheckpoint head.record.checkpoint = some state
+  resumed : State
+  resumeExact : resume (responseData settlement.decided view).term state = some resumed
+
+def resumeTail {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (height : Nat) (recordId : CellId) (head : ResumeHead config snapshot recordId) :
+    Except Refusal (ResumeTail config snapshot height recordId head) :=
+  match settled : settle config snapshot height recordId head.await with
+  | .error reason => .error reason
+  | .ok settlement =>
+  match viewExact : readState config snapshot head.record.object with
+  | .error reason => .error reason
+  | .ok none => .error .stateMissing
+  | .ok (some view) =>
+  match typeResponse head.program settlement.decided view with
+  | .error reason => .error reason
+  | .ok response =>
+  match stateExact : decodeCheckpoint head.record.checkpoint with
+  | none => .error .checkpointCodec
+  | some state =>
+  match resumeExact : resume (responseData settlement.decided view).term state with
+  | none => .error .checkpointCodec
+  | some resumed =>
+  .ok ⟨settlement, settled, view, viewExact, response, state, stateExact, resumed, resumeExact⟩
+
+/-- The heap a resumed segment runs under (`segmentLimits`): the single number `heapUncovered` compares the
+declared envelope against, and `resumeQuote` reports. -/
+def ResumeTail.needed {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {recordId : CellId} {head : ResumeHead config snapshot recordId}
+    (config' : Config) (tail : ResumeTail config snapshot height recordId head) : Nat :=
+  (segmentLimits config' tail.resumed).heap
+
+/-- What a delivery or exhaustion of the pending await must declare: `needed` (above) and `escrow`, the heap
+the escrowed envelope of the ending path already carries; the submitter's `extra.heap` is the difference. Read
+only: the same prefix the two turns run, no charge, no state change. -/
+structure HeapQuote where
+  needed : Nat
+  escrow : Nat
+  deriving Repr, DecidableEq
+
+def resumeQuote {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (height : Nat) (recordId : CellId) (awaitId' : Digest) : Except Refusal HeapQuote :=
+  match resumeHead config snapshot recordId with
+  | .error reason => .error reason
+  | .ok head =>
+  if head.await.id = awaitId' then
+  match resumeTail config snapshot height recordId head with
+  | .error reason => .error reason
+  | .ok tail =>
+  .ok ⟨tail.needed config, (head.record.escrow.capacity tail.settlement.path).heap⟩
+  else .error .awaitMismatch
 
 structure Delivery {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : DeliverRequest) where
@@ -1774,6 +2786,9 @@ structure Delivery {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
   digestExact : checkpointDigest record.checkpoint = record.checkpointDigest
   input : Data
   inputExact : decodeDataBytes record.input = some input
+  /-- Both escrowed envelopes cover the front-end stages of the pinned package, judged before the
+  replay; the turn's envelope (one of them plus any extra) covers them too. -/
+  paid : frontEndPaid config (packageBytes config snapshot record.pin) [record.escrow.resume, record.escrow.timeout] = .ok ()
   program : Program config record.pin input
   programExact : loadProgram config (packageBytes config snapshot record.pin) record.pin input = .ok program
   settlement : Settlement
@@ -1788,6 +2803,13 @@ structure Delivery {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
   resumeExact : resume (responseData settlement.decided view).term state = some resumed
   envelope : Capacity
   envelopeExact : envelope = addCapacity (record.escrow.capacity settlement.path) request.extra
+  /-- The deployment covers the declared envelope (`Config.covers`). -/
+  covered : config.covers envelope = true
+  /-- The declared envelope covers the resumed run's heap (`segmentLimits`): growth of the
+  checkpoint is paid by the delivery that runs it. -/
+  heapCovered : (segmentLimits config resumed).heap ≤ envelope.heap
+  /-- Single-extraction reservation contract over the shared budget-preserving extractor; no refunds. -/
+  extractCovered : config.planBudget.ticks ≤ envelope.extractTicks
   segment : Segment
   yielded : Option YieldCommit
   /-- The resumed run and its yield commit; a program fault ends it `faulted`. -/
@@ -1795,78 +2817,74 @@ structure Delivery {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
     (record.generation + 1) envelope.sourceTicks view resumed = .ok (segment, yielded)
   next : Record
   nextExact : next = nextRecord record (record.generation + 1) segment yielded
+  /-- The object's record, read in this turn. -/
+  object : ObjectRecord
+  objectExact : readObject config snapshot record.object = .ok (some object)
+  /-- The object still runs the activity's package (not frozen for rebirth). -/
+  runsPin : object.runs record.pin = true
   book : BookCell
   bookExact : loadBook config snapshot = .ok book
   batch : Batch
   batchExact : settlePurse config (logicalBook book.logical) (heldAccount request.record) record.escrow
-    (storageDeposit config next) (deliveryCharges config record request.record settlement.path request) segment =
+    (storageDeposit config next)
+    (deliveryCharges config record request.record settlement.path request
+      (drainFee config object (yielded.bind YieldCommit.written))) segment =
       .ok batch
   posted : Postings book
   postedBatch : posted.batch = batch
   posts : List Post
   recordFirst : posts.head? = some (recordPost config snapshot request.record next)
+  /-- ... and, when the activity ends, the object record with it uncounted (`release`). -/
   postsExact : posts = recordPost config snapshot request.record next ::
-    (settlement.posts ++ (yielded.map YieldCommit.posts).getD [] ++ [posted.write config snapshot])
+    (settlement.posts ++ (yielded.map YieldCommit.posts).getD [] ++ [posted.write config snapshot] ++
+      countPosts config snapshot record.object object record.pin record.activity true next.phase.awaits)
   guards : List ReadGuard
   guardsExact : guards = guardAt snapshot (objectCell config.domain record.object) ::
     guardAt snapshot (packageCell config.domain record.pin) ::
     guardAt snapshot (stateCell config.domain record.object) :: settlement.guards
   claims : List StableNullifier
   claimsExact : claims = awaitClaim await.id :: settlement.claims
-  /-- The object's record, read in this turn. -/
-  object : ObjectRecord
-  objectExact : readObject config snapshot record.object = .ok (some object)
   /-- The object's law admitted the segment's write (if it wrote), judged with
   the activity's principal as subject. -/
-  judged : judgeWritten object (factsOf record.escrow.payer height record.object 2)
+  judged : judgeWritten object (factsOf record.escrow.payer height record.object 2 (some record.pin))
     (yielded.bind YieldCommit.written) = .ok ()
+  /-- While the object drains, the write's state, migrated, passes the next
+  record's judgment (the drained-write judgment). -/
+  drained : judgeDrained config snapshot object record.object (yielded.bind YieldCommit.written) = .ok ()
 
 def deliver {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : DeliverRequest) : Except Refusal (Delivery config snapshot height request) :=
-  match recordExact : readRecord snapshot request.record with
-  | none => .error (absentRecord snapshot request.record)
-  | some record =>
-  if located : request.record = recordCell config.domain record.object record.activity then
-  match awaiting : record.phase with
-  | .done _ | .faulted _ => .error .notAwaiting
-  | .awaiting await =>
-  if idExact : await.id = awaitId request.record record.generation record.checkpointDigest then
-  if digestExact : checkpointDigest record.checkpoint = record.checkpointDigest then
-  match inputExact : decodeDataBytes record.input with
-  | none => .error .inputType
-  | some input =>
-  match programExact : loadProgram config (packageBytes config snapshot record.pin) record.pin input with
+  match headExact : resumeHead config snapshot request.record with
   | .error reason => .error reason
-  | .ok program =>
+  | .ok head =>
+  let record := head.record
+  let await := head.await
+  let program := head.program
   match objectExact : readObject config snapshot record.object with
   | .error reason => .error reason
   | .ok none => .error .notAnObject
   | .ok (some object) =>
-  match settled : settle config snapshot height request.record await with
+  if runsPin : object.runs record.pin = true then
+  match tailExact : resumeTail config snapshot height request.record head with
   | .error reason => .error reason
-  | .ok settlement =>
-  match viewExact : readState config snapshot record.object with
-  | .error reason => .error reason
-  | .ok none => .error .stateMissing
-  | .ok (some view) =>
-  match typeResponse program settlement.decided view with
-  | .error reason => .error reason
-  | .ok response =>
-  match stateExact : decodeCheckpoint record.checkpoint with
-  | none => .error .checkpointCodec
-  | some state =>
-  match resumeExact : resume (responseData settlement.decided view).term state with
-  | none => .error .checkpointCodec
-  | some resumed =>
+  | .ok tail =>
+  let settlement := tail.settlement
+  let view := tail.view
+  let resumed := tail.resumed
   let envelope := addCapacity (record.escrow.capacity settlement.path) request.extra
-  if !config.covers envelope then .error (.uncovered envelope) else
+  if covered : config.covers envelope = true then
+  if heapCovered : tail.needed config ≤ envelope.heap then
+  if extractCovered : config.planBudget.ticks ≤ envelope.extractTicks then
   if 0 < record.tried ∧ envelope.sourceTicks ≤ record.tried then .error (.alreadyExhausted record.tried envelope.sourceTicks) else
   match endExact : resumedSegment config snapshot height (deliveryTransaction await.id) request.record
       record.object (record.generation + 1) envelope.sourceTicks view resumed with
   | .error reason => .error reason
   | .ok (segment, yielded) =>
-  match judged : judgeWritten object (factsOf record.escrow.payer height record.object 2)
+  match judged : judgeWritten object (factsOf record.escrow.payer height record.object 2 (some record.pin))
       (yielded.bind YieldCommit.written) with
+  | .error reason => .error reason
+  | .ok () =>
+  match drained : judgeDrained config snapshot object record.object (yielded.bind YieldCommit.written) with
   | .error reason => .error reason
   | .ok () =>
   let next := nextRecord record (record.generation + 1) segment yielded
@@ -1874,7 +2892,9 @@ def deliver {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
   | .error reason => .error reason
   | .ok book =>
   match batchExact : settlePurse config (logicalBook book.logical) (heldAccount request.record) record.escrow
-      (storageDeposit config next) (deliveryCharges config record request.record settlement.path request) segment with
+      (storageDeposit config next)
+      (deliveryCharges config record request.record settlement.path request
+        (drainFee config object (yielded.bind YieldCommit.written))) segment with
   | .error reason => .error reason
   | .ok batch =>
   match postings book batch with
@@ -1882,19 +2902,24 @@ def deliver {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
   | .ok posted =>
   if postedBatch : posted.batch = batch then
   let posts := recordPost config snapshot request.record next ::
-    (settlement.posts ++ (yielded.map YieldCommit.posts).getD [] ++ [posted.write config snapshot])
+    (settlement.posts ++ (yielded.map YieldCommit.posts).getD [] ++ [posted.write config snapshot] ++
+      countPosts config snapshot record.object object record.pin record.activity true next.phase.awaits)
   let guards := guardAt snapshot (objectCell config.domain record.object) ::
     guardAt snapshot (packageCell config.domain record.pin) ::
     guardAt snapshot (stateCell config.domain record.object) :: settlement.guards
-  .ok ⟨record, recordExact, located, await, awaiting, idExact, digestExact, input, inputExact, program, programExact,
-    settlement, settled, view, viewExact, response, state, stateExact, resumed, resumeExact, envelope, rfl,
-    segment, yielded, endExact, next, rfl, book, bookExact, batch, batchExact, posted,
+  .ok ⟨record, head.recordExact, head.located, await, head.awaiting, head.idExact, head.digestExact, head.input,
+    head.inputExact, head.paid, program, head.programExact,
+    settlement, tail.settled, view, tail.viewExact, tail.response, tail.state, tail.stateExact, resumed,
+    tail.resumeExact, envelope, rfl,
+    covered, heapCovered, extractCovered, segment, yielded, endExact, next, rfl, object, objectExact, runsPin, book,
+    bookExact, batch, batchExact, posted,
     postedBatch, posts, rfl, rfl, guards, rfl, awaitClaim await.id :: settlement.claims, rfl,
-    object, objectExact, judged⟩
+    judged, drained⟩
   else .error .bookRefused
-  else .error .checkpointDigest
-  else .error .awaitMismatch
-  else .error .recordMisplaced
+  else .error (.extractUncovered config.planBudget.ticks envelope.extractTicks)
+  else .error (.heapUncovered (tail.needed config) envelope.heap)
+  else .error (.uncovered envelope)
+  else .error .awaitingRebirth
 
 def Delivery.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request) (sealing : Seal) :
@@ -1968,6 +2993,9 @@ structure Exhaustion {rootBytes : Bytes → Digest} (config : Config) (snapshot 
   digestExact : checkpointDigest record.checkpoint = record.checkpointDigest
   input : Data
   inputExact : decodeDataBytes record.input = some input
+  /-- Both escrowed envelopes cover the front-end stages of the pinned package, judged before the
+  replay; the turn's envelope (one of them plus any extra) covers them too. -/
+  paid : frontEndPaid config (packageBytes config snapshot record.pin) [record.escrow.resume, record.escrow.timeout] = .ok ()
   program : Program config record.pin input
   programExact : loadProgram config (packageBytes config snapshot record.pin) record.pin input = .ok program
   settlement : Settlement
@@ -1983,6 +3011,12 @@ structure Exhaustion {rootBytes : Bytes → Digest} (config : Config) (snapshot 
   resumeExact : resume (responseData settlement.decided view).term state = some resumed
   envelope : Capacity
   envelopeExact : envelope = addCapacity (record.escrow.capacity settlement.path) request.extra
+  /-- As a delivery: the deployment covers the declared envelope. -/
+  covered : config.covers envelope = true
+  /-- As a delivery: the declared envelope covers the resumed run's heap. -/
+  heapCovered : (segmentLimits config resumed).heap ≤ envelope.heap
+  /-- As a delivery: the single-extraction ceiling is reserved, without refunds. -/
+  extractCovered : config.planBudget.ticks ≤ envelope.extractTicks
   raises : record.tried < envelope.sourceTicks
   /-- At the turn cap an exhaustion is a program fault: a delivery commits it `faulted`. -/
   belowCap : envelope.sourceTicks < config.maxTicks
@@ -2001,39 +3035,22 @@ structure Exhaustion {rootBytes : Bytes → Digest} (config : Config) (snapshot 
 
 def exhaust {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : ExhaustRequest) : Except Refusal (Exhaustion config snapshot height request) :=
-  match recordExact : readRecord snapshot request.record with
-  | none => .error (absentRecord snapshot request.record)
-  | some record =>
-  if located : request.record = recordCell config.domain record.object record.activity then
-  match awaiting : record.phase with
-  | .done _ | .faulted _ => .error .notAwaiting
-  | .awaiting await =>
-  if idExact : await.id = awaitId request.record record.generation record.checkpointDigest then
-  if digestExact : checkpointDigest record.checkpoint = record.checkpointDigest then
-  match inputExact : decodeDataBytes record.input with
-  | none => .error .inputType
-  | some input =>
-  match programExact : loadProgram config (packageBytes config snapshot record.pin) record.pin input with
+  match headExact : resumeHead config snapshot request.record with
   | .error reason => .error reason
-  | .ok program =>
-  match settled : settle config snapshot height request.record await with
+  | .ok head =>
+  let record := head.record
+  let await := head.await
+  let program := head.program
+  match tailExact : resumeTail config snapshot height request.record head with
   | .error reason => .error reason
-  | .ok settlement =>
-  match viewExact : readState config snapshot record.object with
-  | .error reason => .error reason
-  | .ok none => .error .stateMissing
-  | .ok (some view) =>
-  match typeResponse program settlement.decided view with
-  | .error reason => .error reason
-  | .ok response =>
-  match stateExact : decodeCheckpoint record.checkpoint with
-  | none => .error .checkpointCodec
-  | some state =>
-  match resumeExact : resume (responseData settlement.decided view).term state with
-  | none => .error .checkpointCodec
-  | some resumed =>
+  | .ok tail =>
+  let settlement := tail.settlement
+  let view := tail.view
+  let resumed := tail.resumed
   let envelope := addCapacity (record.escrow.capacity settlement.path) request.extra
-  if !config.covers envelope then .error (.uncovered envelope) else
+  if covered : config.covers envelope = true then
+  if heapCovered : tail.needed config ≤ envelope.heap then
+  if extractCovered : config.planBudget.ticks ≤ envelope.extractTicks then
   if raises : record.tried < envelope.sourceTicks then
   -- The charge must be payable BEFORE the run: an unpayable attempt never runs.
   match bookExact : loadBook config snapshot with
@@ -2051,16 +3068,18 @@ def exhaust {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
     let posts := [recordPost config snapshot request.record next, posted.write config snapshot]
     let guards := guardAt snapshot (packageCell config.domain record.pin) ::
       guardAt snapshot (stateCell config.domain record.object) :: settlementGuards settlement
-    .ok ⟨record, recordExact, located, await, awaiting, idExact, digestExact, input, inputExact, program,
-      programExact, settlement, settled, view, viewExact, response, state, stateExact, resumed, resumeExact,
-      envelope, rfl, raises, belowCap, ran, next, rfl, book, bookExact, posted, postedBatch, posts, rfl, guards, rfl⟩
+    .ok ⟨record, head.recordExact, head.located, await, head.awaiting, head.idExact, head.digestExact, head.input,
+      head.inputExact, head.paid, program, head.programExact, settlement, tail.settled, view, tail.viewExact, tail.response,
+      tail.state, tail.stateExact, resumed, tail.resumeExact,
+      envelope, rfl, covered, heapCovered, extractCovered, raises, belowCap, ran, next, rfl, book, bookExact, posted, postedBatch, posts, rfl,
+      guards, rfl⟩
   | .error reason => .error reason
   else .error .notExhausted
   else .error .bookRefused
   else .error (.alreadyExhausted record.tried envelope.sourceTicks)
-  else .error .checkpointDigest
-  else .error .awaitMismatch
-  else .error .recordMisplaced
+  else .error (.extractUncovered config.planBudget.ticks envelope.extractTicks)
+  else .error (.heapUncovered (tail.needed config) envelope.heap)
+  else .error (.uncovered envelope)
 
 /-- An exhaustion spends no claim: the await stays open. -/
 def Exhaustion.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -2136,13 +3155,17 @@ structure Abandonment {rootBytes : Bytes → Digest} (config : Config) (snapshot
   slotPosts : List Post
   slotClaims : List StableNullifier
   slotExact : abandonSlot config snapshot await = .ok (slotPosts, slotClaims)
+  /-- The object's record, read to uncount the activity. -/
+  object : ObjectRecord
+  objectExact : readObject config snapshot record.object = .ok (some object)
   book : BookCell
   bookExact : loadBook config snapshot = .ok book
   posted : Postings book
   postedBatch : posted.batch = abandonCharges config (logicalBook book.logical) request.record record.escrow
   posts : List Post
   postsExact : posts = postAt snapshot request.record retiredImage ::
-    (slotPosts ++ [posted.write config snapshot])
+    (slotPosts ++ [posted.write config snapshot] ++
+      countPosts config snapshot record.object object record.pin record.activity true false)
   claims : List StableNullifier
   claimsExact : claims = awaitClaim await.id :: slotClaims
 
@@ -2160,6 +3183,10 @@ def abandon {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
   match slotExact : abandonSlot config snapshot await with
   | .error reason => .error reason
   | .ok (slotPosts, slotClaims) =>
+  match objectExact : readObject config snapshot record.object with
+  | .error reason => .error reason
+  | .ok none => .error .notAnObject
+  | .ok (some object) =>
   match bookExact : loadBook config snapshot with
   | .error reason => .error reason
   | .ok book =>
@@ -2167,8 +3194,8 @@ def abandon {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
   | .error reason => .error reason
   | .ok posted =>
   if postedBatch : posted.batch = abandonCharges config (logicalBook book.logical) request.record record.escrow then
-    .ok ⟨record, recordExact, located, await, awaiting, idExact, due, slotPosts, slotClaims, slotExact, book,
-      bookExact, posted, postedBatch, _, rfl, _, rfl⟩
+    .ok ⟨record, recordExact, located, await, awaiting, idExact, due, slotPosts, slotClaims, slotExact, object,
+      objectExact, book, bookExact, posted, postedBatch, _, rfl, _, rfl⟩
   else .error .bookRefused
   else .error (.notYetAbandonable await.deadline config.abandonGrace height)
   else .error .awaitMismatch
@@ -2241,102 +3268,214 @@ theorem TopUp.conserves {rootBytes : Bytes → Digest} {config : Config} {snapsh
     (logicalBook topped.posted.post.logical).totalAsset asset = (logicalBook topped.book.logical).totalAsset asset :=
   topped.posted.conserves asset
 
-/-! ### writeState -/
+/-! ### charged failure (GPT-6 row E)
 
-structure StateWriteRequest where
-  subject : SubjectId
-  /-- The object whose declared state is written. -/
-  object : CellId
-  value : Data
-  nonce : Nat
+A signed, authorized and funded turn whose decision fails AFTER the validator did the work
+(the front end replayed, the run ran: `Refusal.afterWork`, or the decided outcome is not the
+one the signer signed) commits a CHARGED FAILURE: the payer pays the public price of the
+declared envelope to the collector, and NOTHING else is written. No record, no state, no slot,
+no purse, no object counter moves; the turn's single-use marker is spent by the receiver's seal,
+so the same signed ingress cannot be run twice. A malformed or unauthenticated request never
+reaches here: it is refused before anything is decided, and nothing is written or charged. -/
 
-def stateTransaction (request : StateWriteRequest) : TransactionId :=
-  tagged "DREGG/OBJECTIVE/ACTIVITY/TX/STATE/v3"
-    (digestStream.encode request.object ++ StreamCodec.nat.encode request.nonce ++ dataBytes request.value)
+/-- What a charged failure charges: the payer's Book account, the declared envelope it is
+priced at, and the transaction id the failed turn would have committed under. -/
+structure FailureRequest where
+  account : AccountId
+  envelope : Capacity
+  transaction : TransactionId
+  deriving DecidableEq, Repr
 
-/-- A direct write of an object's declared state. Who may write it is the
-receiver's question (a holder of a capability on the object); what may be
-written is the object's law's (`judged`). -/
-structure StateWrite {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
-    (height : Nat) (request : StateWriteRequest) where
+/-- The failure's one posting: the public price of the declared envelope, payer to collector. -/
+def failureBatch (config : Config) (request : FailureRequest) : Batch :=
+  ⟨[], [.fee request.account config.collector config.asset (config.tariff.workOf request.envelope)], []⟩
+
+/-- An admitted charged failure: the loaded Book and the fee posted on it. -/
+structure ChargedFailure {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (request : FailureRequest) where
   private mk ::
-  object : ObjectRecord
-  objectExact : readObject config snapshot request.object = .ok (some object)
-  /-- The state the write replaces: the new value is the next version. -/
-  current : Option ObjectState
-  currentExact : readState config snapshot request.object = .ok current
-  judged : judgeWrite object (factsOf request.subject height request.object 3)
-    (current.map ObjectState.value) request.value = .ok ()
-  posts : List Post
-  postsExact : posts = [postAt snapshot (stateCell config.domain request.object)
-    (stateImage request.object ⟨(current.map ObjectState.version).getD 0 + 1, request.value⟩)]
+  book : BookCell
+  bookExact : loadBook config snapshot = .ok book
+  posted : Postings book
+  postedBatch : posted.batch = failureBatch config request
 
-def writeState {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
-    (height : Nat) (request : StateWriteRequest) : Except Refusal (StateWrite config snapshot height request) :=
-  match objectExact : readObject config snapshot request.object with
+def chargeFailure {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (request : FailureRequest) : Except Refusal (ChargedFailure config snapshot request) :=
+  if request.account = config.asset ∨ request.account = config.collector then .error .payerInvalid else
+  match bookExact : loadBook config snapshot with
   | .error reason => .error reason
-  | .ok none => .error .notAnObject
-  | .ok (some object) =>
-    match currentExact : readState config snapshot request.object with
+  | .ok book =>
+    match postings book (failureBatch config request) with
     | .error reason => .error reason
-    | .ok current =>
-      match judged : judgeWrite object (factsOf request.subject height request.object 3)
-          (current.map ObjectState.value) request.value with
-      | .error reason => .error reason
-      | .ok () => .ok ⟨object, objectExact, current, currentExact, judged, _, rfl⟩
+    | .ok posted =>
+      if postedBatch : posted.batch = failureBatch config request then
+        .ok ⟨book, bookExact, posted, postedBatch⟩
+      else .error .bookRefused
 
-def StateWrite.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
-    {height : Nat} {request : StateWriteRequest} (written : StateWrite config snapshot height request) (sealing : Seal) :
+/-- The posts of a charged failure: the Book, and nothing else. -/
+def ChargedFailure.posts {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {request : FailureRequest} (charged : ChargedFailure config snapshot request) : List Post :=
+  [charged.posted.write config snapshot]
+
+def ChargedFailure.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {request : FailureRequest} (charged : ChargedFailure config snapshot request) (sealing : Seal) :
     DataIntent rootBytes :=
-  intentOf rootBytes (stateTransaction request) written.posts
-    [guardAt snapshot (objectCell config.domain request.object)] [] sealing
+  intentOf rootBytes request.transaction charged.posts [] [] sealing
 
-/-! ### create: an object's record -/
+/-- **A charged failure conserves every asset.** -/
+theorem ChargedFailure.conserves {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {request : FailureRequest} (charged : ChargedFailure config snapshot request) (asset : AssetId) :
+    (logicalBook charged.posted.post.logical).totalAsset asset = (logicalBook charged.book.logical).totalAsset asset :=
+  charged.posted.conserves asset
+
+/-- **A charged failure charges the price and writes only the Book.** Its one post is the Book
+cell's, and the batch admitted there is exactly the fee of the declared envelope's public price,
+payer to collector. -/
+theorem ChargedFailure.charges_only_the_book {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {request : FailureRequest} (charged : ChargedFailure config snapshot request) :
+    (∀ post ∈ charged.posts, post.cell = config.bookCell) ∧
+      charged.posted.batch =
+        ⟨[], [.fee request.account config.collector config.asset (config.tariff.workOf request.envelope)], []⟩ := by
+  refine ⟨fun post member => ?_, charged.postedBatch⟩
+  simp only [ChargedFailure.posts, List.mem_singleton] at member
+  subst member
+  rfl
+
+/-- The refusals a turn meets only AFTER the validator did its expensive work: the front end
+replayed the package (`packageReplay` and everything typed after it), the run ran, the
+extraction or the judgment of the run's write, the funding of the next await, a migration's run, or
+the turn-end domain judgment (`domainLawDenied`, `domainUnprojectable`, `domainMissing`,
+`domainCodec`, `domainsDropped`, `domainUnindexed`, `domainUncovered`). Every constructor is listed (no wildcard): a new refusal must say which it is. A signed, authorized, funded turn refused for one
+of these is charged (`ChargedFailure`); every other refusal (decoding, authority, coverage, the
+work account, the object's shape) is decided cheaply and charges nothing. -/
+def Refusal.afterWork : Refusal → Bool
+  | .packageType _ | .packageReplay _ | .inputType | .outcomeProtocol _ | .patience _ _ | .heightWide _ _
+  | .plan _ | .messageAwaitNeedsInbox | .planExtraction _ | .resultExtraction _ | .exhausted | .responseType _
+  | .underfunded _ _ | .awaitsFunding _ _ | .blindWrite | .writeShape _ | .stateMissing | .objectWrite _
+  | .migrationShape _ | .migrationFault _ | .domainLawDenied _ _ | .domainUnprojectable _ | .domainMissing _
+  | .domainCodec _ | .domainsDropped _ | .domainUnindexed _ _ | .domainUncovered _ _ => true
+  | .packageMissing | .packageIdentity | .packageExists | .packageSource _ | .recordExists | .recordMissing
+  | .recordMisplaced | .notAwaiting | .awaitMismatch | .checkpointDigest | .checkpointCodec | .recordRetired
+  | .digestWide _ _ | .uncovered _ | .heapUncovered _ _ | .extractUncovered _ _ | .workUncovered _ _ _
+  | .unfunded _ _ | .slotMissing | .slotFresh | .slotMismatch | .slot _ | .slotRetired | .notYetDecided _ _
+  | .notYetDue _ _ | .bookUnavailable | .purseTaken | .payerInvalid | .bookRefused | .zeroAmount | .stateCodec
+  | .alreadyExhausted _ _ | .notYetAbandonable _ _ _ | .notExhausted | .notAnObject | .objectCodec
+  | .objectExists | .pinMismatch _ _ | .pinUnpublished | .stateExists | .stateTypeNotData | .lawField _
+  | .draining | .awaitingRebirth | .frozen | .notUpgradeAuthority | .policyLoosened | .floorNotEntailed _
+  | .samePin | .upgradeUnderWay | .notDraining | .drainPatience _ _ | .notSubtype | .fieldsForgotten _
+  | .liveActivities _ | .notYetDeadline _ _ | .rebirthDisposition | .rebirthTarget _ | .domainExists _
+  | .domainShape _ | .domainMember _ | .memberFrozen _ | .memberDenied _ | .memberDomainsFull _ => false
+
+#assert_axioms ChargedFailure.conserves
+#assert_axioms ChargedFailure.charges_only_the_book
+
+/-! ### create: an object's record, and its initial declared state -/
 
 structure CreateRequest where
   subject : SubjectId
   /-- The object resource (a cell the authority layer issues capabilities on). -/
   object : CellId
   pin : Digest
+  /-- The declared state type: every write of the object's state is typed at it. -/
+  stateType : Ty
   law : Minidregg.Pred.Pred
   upgrade : ObjectRecord.UpgradePolicy
+  /-- The object's initial declared state, if any. It is the first and only state write of the
+  creation (the state cell must not exist) and is judged by the CREATOR'S law alone
+  (`ObjectRecord.admitSeed`): the pin governs the writes after the object exists, and an object
+  cannot be born violating its own state clauses. The state is otherwise changed only by the
+  package's own turns, under the pin. -/
+  seed : Option Data
   /-- The Book account that funds the record and the state cell; never authority. -/
   payer : AccountId
 
 def createTransaction (request : CreateRequest) : TransactionId :=
-  tagged "DREGG/OBJECTIVE/OBJECT/TX/CREATE/v1" (subjectStream.encode request.subject ++ digestStream.encode request.object)
+  tagged "DREGG/OBJECTIVE/OBJECT/TX/CREATE/v2" (subjectStream.encode request.subject ++
+    digestStream.encode request.object ++ (StreamCodec.option bytesStream).encode (request.seed.map dataBytes))
 
-/-- The record a creation installs: schema version 1, continuity 0. -/
-def CreateRequest.record (request : CreateRequest) : ObjectRecord :=
-  ⟨request.object, request.pin, 1, request.law, request.upgrade, 0, request.payer⟩
+/-- The record a creation installs: schema version 1, continuity 0, no live
+activity, steady; `laws` are the pinned package's (`packageLawsAt`), never the request's. -/
+def CreateRequest.record (request : CreateRequest) (laws : List (String × Minidregg.Compiler.ObjectiveBendLaw.LawExpr)) :
+    ObjectRecord :=
+  ⟨request.object, request.pin, request.stateType, 1, request.law, laws, request.upgrade, 0, request.payer, 0, 0,
+    .steady, []⟩
+
+/-- The request facts a seed is judged under: turn 4, and no package writes (the artifact slot
+reads `-1`; the creator's law, not the pin, judges it). -/
+def seedFacts (request : CreateRequest) (height : Nat) : Facts :=
+  factsOf request.subject height request.object 4 none
+
+/-- The state cell a seed installs: version 1. -/
+def seedPost {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (request : CreateRequest) (seed : Data) : Post :=
+  postAt snapshot (stateCell config.domain request.object) (stateImage request.object ⟨1, seed⟩)
 
 /-- Who may create an object's record is the receiver's question (a holder of
-a capability on the object resource). The kernel refuses a second record and a
-pin that names no published package. -/
+a capability on the object resource). The kernel refuses a second record, a
+pin that names no published package, a seed onto an existing state cell, and a seed the
+creator's own law refuses. -/
 structure Creation {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
-    (request : CreateRequest) where
+    (height : Nat) (request : CreateRequest) where
   private mk ::
   absent : readObject config snapshot request.object = .ok none
   published : (bodyOf .package (snapshot.canonicalBytes (packageCell config.domain request.pin))).isSome = true
+  /-- A seed is the state cell's first write: the cell holds nothing. -/
+  stateFresh : ∀ seed, request.seed = some seed → readState config snapshot request.object = .ok none
+  /-- The pinned package's enforced laws, read from its package cell. -/
+  laws : List (String × Minidregg.Compiler.ObjectiveBendLaw.LawExpr)
+  lawsExact : packageLawsAt config snapshot request.pin = .ok laws
+  /-- Every field the package's laws read is a top-level natural or boolean field of the declared
+  state type. -/
+  fieldsKnown : ObjectRecord.lawFieldIssue request.stateType laws = none
+  /-- A seed is admitted by the seed law (the package's laws, then the creator's), over no old state. -/
+  seedJudged : ∀ seed, request.seed = some seed →
+    ObjectRecord.admitSeed (request.record laws) (seedFacts request height) seed = .ok ()
+
+  /-- The declared state type is first-order data. -/
+  data : request.stateType.isData = true
   posts : List Post
-  postsExact : posts = [postAt snapshot (objectCell config.domain request.object)
-    (objectImage request.object request.record)]
+  postsExact : posts = postAt snapshot (objectCell config.domain request.object)
+      (objectImage request.object (request.record laws)) ::
+    (request.seed.map (seedPost config snapshot request)).toList
 
 def create {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
-    (request : CreateRequest) : Except Refusal (Creation config snapshot request) :=
+    (height : Nat) (request : CreateRequest) : Except Refusal (Creation config snapshot height request) :=
   match absent : readObject config snapshot request.object with
   | .error reason => .error reason
   | .ok (some _) => .error .objectExists
   | .ok none =>
     if published : (bodyOf .package (snapshot.canonicalBytes (packageCell config.domain request.pin))).isSome = true then
-      .ok ⟨absent, published, _, rfl⟩
+      if data : request.stateType.isData = true then
+      match lawsExact : packageLawsAt config snapshot request.pin with
+      | .error reason => .error reason
+      | .ok laws =>
+      match fieldsKnown : ObjectRecord.lawFieldIssue request.stateType laws with
+      | some field => .error (.lawField field)
+      | none =>
+      match seedPlan : request.seed with
+      | none =>
+        .ok ⟨absent, published, (fun _ h => by rw [seedPlan] at h; cases h), laws, lawsExact, fieldsKnown,
+          (fun _ h => by rw [seedPlan] at h; cases h), data, _, rfl⟩
+      | some seed =>
+        match stateRead : readState config snapshot request.object with
+        | .error reason => .error reason
+        | .ok (some _) => .error .stateExists
+        | .ok none =>
+          match judged : ObjectRecord.admitSeed (request.record laws) (seedFacts request height) seed with
+          | .error reason => .error (.objectWrite reason)
+          | .ok () =>
+            .ok ⟨absent, published,
+              (fun _ h => by rw [seedPlan] at h; cases h; exact stateRead), laws, lawsExact, fieldsKnown,
+              (fun _ h => by rw [seedPlan] at h; cases h; exact judged), data, _, rfl⟩
+      else .error .stateTypeNotData
     else .error .pinUnpublished
 
 def Creation.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
-    {request : CreateRequest} (created : Creation config snapshot request) (sealing : Seal) :
+    {height : Nat} {request : CreateRequest} (created : Creation config snapshot height request) (sealing : Seal) :
     DataIntent rootBytes :=
   intentOf rootBytes (createTransaction request) created.posts
-    [guardAt snapshot (packageCell config.domain request.pin)] [] sealing
+    [guardAt snapshot (packageCell config.domain request.pin), guardAt snapshot (stateCell config.domain request.object)]
+    [] sealing
 
 /-! ## The resume contract -/
 
@@ -2504,34 +3643,77 @@ theorem commitYield_spec {rootBytes : Bytes → Digest} {config : Config} {snaps
   · cases ok
   · split at ok
     · cases ok
-    · rename_i written wrote
-      have stateCurrent : PostsCurrent snapshot (written.map StateWritten.post).toList := by
-        intro post member
-        cases written with
-        | none => simp at member
-        | some one =>
-          simp only [Option.map_some, Option.toList_some, List.mem_singleton] at member
-          subst member
-          obtain ⟨_, _, _, _, exact⟩ := stateWrite_spec wrote
-          simp only [exact, postAt]
+    · split at ok
+      · cases ok
+      · rename_i written wrote
+        have stateCurrent : PostsCurrent snapshot (written.map StateWritten.post).toList := by
+          intro post member
+          cases written with
+          | none => simp at member
+          | some one =>
+            simp only [Option.map_some, Option.toList_some, List.mem_singleton] at member
+            subst member
+            obtain ⟨_, _, _, _, exact⟩ := stateWrite_spec wrote
+            simp only [exact, postAt]
+        split at ok
+        · split at ok
+          · cases ok
+          · simp only [Except.ok.injEq] at ok
+            subst ok
+            refine ⟨wrote, ?_, ?_⟩
+            · intro one some; subst some; simp
+            · intro post member
+              simp only [List.mem_append, List.mem_singleton] at member
+              rcases member with inState | isSlot
+              · exact stateCurrent post inState
+              · subst isSlot; simp only [slotPost, postAt]
+        · split at ok
+          · cases ok
+          · simp only [Except.ok.injEq] at ok
+            subst ok
+            refine ⟨wrote, ?_, stateCurrent⟩
+            intro one some; subst some; simp
+
+
+theorem awaitId_lt (cell : CellId) (generation : Nat) (checkpoint : Digest) :
+    (awaitId cell generation checkpoint).value < 256 ^ 32 := tagged_lt _ _
+
+/-- **A committed yield's await fits the charged record**: its id and its reply slot are
+hash outputs, and its yield height and deadline were checked below `256 ^ 8`. -/
+theorem commitYield_fits {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat} {checkpoint : Digest}
+    {current : Option ObjectState} {viewed : Bool} {plan : PlanAwait} {committed : YieldCommit}
+    (ok : commitYield config snapshot height transaction cell object generation checkpoint current viewed plan =
+      .ok committed) :
+    committed.await.Fits := by
+  by_cases patient : plan.patience = 0 ∨ config.maxPatience < plan.patience
+  · unfold commitYield at ok
+    rw [if_pos patient] at ok
+    cases ok
+  by_cases wide : 256 ^ 8 ≤ height + plan.patience
+  · unfold commitYield at ok
+    rw [if_neg patient, if_pos wide] at ok
+    cases ok
+  have narrow : height + plan.patience < 256 ^ 8 := Nat.lt_of_not_le wide
+  unfold commitYield at ok
+  rw [if_neg patient, if_neg wide] at ok
+  split at ok
+  · cases ok
+  · rename_i written wrote
+    split at ok
+    · rename_i decider _
       split at ok
-      · split at ok
-        · cases ok
-        · simp only [Except.ok.injEq] at ok
-          subst ok
-          refine ⟨wrote, ?_, ?_⟩
-          · intro one some; subst some; simp
-          · intro post member
-            simp only [List.mem_append, List.mem_singleton] at member
-            rcases member with inState | isSlot
-            · exact stateCurrent post inState
-            · subst isSlot; simp only [slotPost, postAt]
-      · split at ok
-        · cases ok
-        · simp only [Except.ok.injEq] at ok
-          subst ok
-          refine ⟨wrote, ?_, stateCurrent⟩
-          intro one some; subst some; simp
+      · cases ok
+      · simp only [Except.ok.injEq] at ok
+        subst ok
+        exact ⟨awaitId_lt _ _ _, tagged_lt _ _, narrow, show height < 256 ^ 8 by omega⟩
+    · rename_i due _
+      split at ok
+      · cases ok
+      · simp only [Except.ok.injEq] at ok
+        subst ok
+        rename_i inTime
+        exact ⟨awaitId_lt _ _ _, show due < 256 ^ 8 by omega, narrow, show height < 256 ^ 8 by omega⟩
 
 theorem segmentCommit_spec {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat}
@@ -2553,6 +3735,24 @@ theorem segmentCommit_spec {rootBytes : Bytes → Digest} {config : Config} {sna
   | finished result => simp [segmentCommit, pure, Except.pure] at ok
   | faulted reason => simp [segmentCommit, pure, Except.pure] at ok
 
+theorem segmentCommit_fits {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat}
+    {current : Option ObjectState} {viewed : Bool} {segment : Segment} {committed : YieldCommit}
+    (ok : segmentCommit config snapshot height transaction cell object generation current viewed segment =
+      .ok (some committed)) :
+    committed.await.Fits := by
+  obtain ⟨_, _, _, commit⟩ := segmentCommit_spec ok
+  exact commitYield_fits commit
+
+theorem resumedSegment_fits {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {transaction : TransactionId} {cell object : CellId}
+    {generation envelope : Nat} {view : ObjectState} {start : State} {segment : Segment}
+    {committed : YieldCommit}
+    (ran : resumedSegment config snapshot height transaction cell object generation envelope view start =
+      .ok (segment, some committed)) :
+    committed.await.Fits :=
+  segmentCommit_fits (resumedSegment_committed ran).2
+
 /-- Every post a delivery commits is current at the delivering snapshot. -/
 theorem Delivery.posts_current {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request) :
@@ -2560,7 +3760,7 @@ theorem Delivery.posts_current {rootBytes : Bytes → Digest} {config : Config} 
   intro post member
   rw [delivery.postsExact] at member
   simp only [List.mem_cons, List.mem_append] at member
-  rcases member with isRecord | (inSettlement | inYield) | isBook
+  rcases member with isRecord | ((inSettlement | inYield) | isBook) | inCount
   · subst isRecord; simp only [recordPost, postAt]
   · exact settle_posts_current delivery.settled post inSettlement
   · cases yielded : delivery.yielded with
@@ -2575,6 +3775,7 @@ theorem Delivery.posts_current {rootBytes : Bytes → Digest} {config : Config} 
   · rcases isBook with isBook | none
     · subst isBook; simp only [Postings.write, postAt]
     · simp at none
+  · rw [mem_countPosts inCount]; simp only [postAt]
 
 /-- An accepted intent found every post's pre-root current. -/
 theorem accepted_posts_current {rootBytes : Bytes → Digest} {snapshot after : Snapshot rootBytes}
@@ -2712,7 +3913,7 @@ theorem yield_write_from_current_read {rootBytes : Bytes → Digest} {config : C
   have member : written.post ∈ delivery.posts := by
     rw [delivery.postsExact, yielded]
     simp only [List.mem_cons, List.mem_append, Option.map_some, Option.getD_some]
-    exact Or.inr (Or.inl (Or.inr (inPosts written writes)))
+    exact Or.inr (Or.inl (Or.inl (Or.inr (inPosts written writes))))
   subst exact
   refine ⟨member, rfl, rfl, rfl, rfl, state, plan, edits, segmentIs, decoded, ?_⟩
   simpa using applied
@@ -2941,7 +4142,8 @@ theorem refund_measurement_free {rootBytes : Bytes → Digest} {config : Config}
     have a := one.settled; have b := two.settled
     rw [sameRecord, awaits, b] at a; exact (Except.ok.inj a).symm
   have posted : one.posted.batch.operations.head? =
-      (deliveryCharges config one.record first.record one.settlement.path first).operations.head? := by
+      (deliveryCharges config one.record first.record one.settlement.path first
+        (drainFee config one.object (one.yielded.bind YieldCommit.written))).operations.head? := by
     rw [one.postedBatch]
     obtain ⟨rest, prefix_⟩ := settlePurse_prefix one.batchExact
     rw [prefix_]
@@ -2951,9 +4153,9 @@ theorem refund_measurement_free {rootBytes : Bytes → Digest} {config : Config}
 /-- The submitter's charge for added envelope is the public price of what it
 DECLARED, never of what ran. -/
 theorem submitter_charge_declared (config : Config) (record : Record) (cell : CellId) (path : Path)
-    (request : DeliverRequest) (extra : request.extra ≠ zeroCapacity) :
+    (request : DeliverRequest) (migration : Nat) (extra : request.extra ≠ zeroCapacity) :
     Operation.fee request.account config.collector config.asset (config.tariff.workOf request.extra) ∈
-      (deliveryCharges config record cell path request).operations := by
+      (deliveryCharges config record cell path request migration).operations := by
   simp [deliveryCharges, extra]
 
 /-- A yield never leaves its purse short: the postings a yielding segment
@@ -3030,7 +4232,8 @@ theorem Delivery.yield_reserves_deposit {rootBytes : Bytes → Digest} {config :
     {snapshot : Snapshot rootBytes} {height : Nat} {request : DeliverRequest}
     (delivery : Delivery config snapshot height request) (yields : delivery.segment.yields = true) :
     delivery.record.escrow.pair + storageDeposit config delivery.next ≤
-      purse ((deliveryCharges config delivery.record request.record delivery.settlement.path request).apply
+      purse ((deliveryCharges config delivery.record request.record delivery.settlement.path request
+        (drainFee config delivery.object (delivery.yielded.bind YieldCommit.written))).apply
         (logicalBook delivery.book.logical)) config.asset (heldAccount request.record) :=
   (settlePurse_yields _ _ _ _ _ _ _ _ yields delivery.batchExact).2
 
@@ -3038,7 +4241,7 @@ theorem Delivery.yield_reserves_deposit {rootBytes : Bytes → Digest} {config :
 theorem Birth.yield_reserves_deposit {rootBytes : Bytes → Digest} {config : Config}
     {snapshot : Snapshot rootBytes} {height : Nat} {request : BirthRequest}
     (born : Birth config snapshot height request) (yields : born.segment.yields = true) :
-    (escrowOf config.tariff request.subject request.account request.resume request.timeout).pair +
+    (escrowOf config.tariff request.subject request.escrowAccount request.resume request.timeout).pair +
         storageDeposit config born.record ≤ request.deposit := by
   have checked := born.funded
   simp only [yields, true_and, Nat.not_lt] at checked
@@ -3070,6 +4273,7 @@ theorem storageDeposit_ended (config : Config) (record : Record) (ended : ∀ aw
   | awaiting await => exact absurd phase (ended await)
   | done _ => rfl
   | faulted _ => rfl
+
 
 
 
@@ -3176,23 +4380,32 @@ theorem absentRecord_retired {rootBytes : Bytes → Digest} {snapshot : Snapshot
     (retired : isRetired (snapshot.canonicalBytes cell) = true) : absentRecord snapshot cell = .recordRetired := by
   simp [absentRecord, retired]
 
+theorem resumeHead_retired_refused {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {recordId : CellId} (retired : isRetired (snapshot.canonicalBytes recordId) = true) :
+    resumeHead config snapshot recordId = .error .recordRetired := by
+  have none := readRecord_of_retired retired
+  unfold resumeHead
+  split
+  · simp [absentRecord_retired retired]
+  · rename_i record found; rw [none] at found; cases found
+
 theorem deliver_retired_refused {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : DeliverRequest} (retired : isRetired (snapshot.canonicalBytes request.record) = true) :
     ∃ reason, deliver config snapshot height request = .error reason ∧ reason = .recordRetired := by
-  have none := readRecord_of_retired retired
   unfold deliver
   split
-  · exact ⟨_, rfl, absentRecord_retired retired⟩
-  · rename_i record found; rw [none] at found; cases found
+  · rename_i reason found; rw [resumeHead_retired_refused retired] at found
+    cases found; exact ⟨_, rfl, rfl⟩
+  · rename_i head found; rw [resumeHead_retired_refused retired] at found; cases found
 
 theorem exhaust_retired_refused {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : ExhaustRequest} (retired : isRetired (snapshot.canonicalBytes request.record) = true) :
     ∃ reason, exhaust config snapshot height request = .error reason ∧ reason = .recordRetired := by
-  have none := readRecord_of_retired retired
   unfold exhaust
   split
-  · exact ⟨_, rfl, absentRecord_retired retired⟩
-  · rename_i record found; rw [none] at found; cases found
+  · rename_i reason found; rw [resumeHead_retired_refused retired] at found
+    cases found; exact ⟨_, rfl, rfl⟩
+  · rename_i head found; rw [resumeHead_retired_refused retired] at found; cases found
 
 theorem abandon_retired_refused {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : AbandonRequest} (retired : isRetired (snapshot.canonicalBytes request.record) = true) :
@@ -3389,6 +4602,14 @@ theorem abandon_delivery_exclusive {rootBytes : Bytes → Digest} {config : Conf
 
 
 #assert_axioms record_roundTrip
+#assert_axioms decodeRecord_some
+#assert_axioms Record.ofWire_toWire
+#assert_axioms Record.ofWire_fits
+#assert_axioms encodeRecord_length_mask
+#assert_axioms commitYield_fits
+#assert_axioms segmentCommit_fits
+#assert_axioms resumedSegment_fits
+#assert_axioms awaitId_lt
 #assert_axioms TypedData.typed
 #assert_axioms Postings.conserves
 #assert_axioms Birth.conserves
@@ -3404,8 +4625,8 @@ birth's posts) is admitted by the object's law. -/
 theorem Birth.write_judged {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : BirthRequest} (born : Birth config snapshot height request)
     (written : StateWritten) (wrote : born.yielded.bind YieldCommit.written = some written) :
-    ∃ object, readObject config snapshot request.object = .ok (some object) ∧ object.pin = request.pin ∧
-      admitWrite object (factsOf request.subject height request.object 1)
+    ∃ object, readObject config snapshot request.object = .ok (some object) ∧ object.activePin = request.pin ∧
+      admitWrite object (factsOf request.subject height request.object request.factsTurn (some request.pin))
         (written.before.map ObjectState.value) written.after.value = .ok () :=
   ⟨born.object, born.objectExact, born.pinned, judgeWritten_ok born.judged written wrote⟩
 
@@ -3416,83 +4637,209 @@ theorem Delivery.write_judged {rootBytes : Bytes → Digest} {config : Config} {
     {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request)
     (written : StateWritten) (wrote : delivery.yielded.bind YieldCommit.written = some written) :
     ∃ object, readObject config snapshot delivery.record.object = .ok (some object) ∧
-      admitWrite object (factsOf delivery.record.escrow.payer height delivery.record.object 2)
+      admitWrite object (factsOf delivery.record.escrow.payer height delivery.record.object 2
+        (some delivery.record.pin))
         (written.before.map ObjectState.value) written.after.value = .ok () :=
   ⟨delivery.object, delivery.objectExact, judgeWritten_ok delivery.judged written wrote⟩
 
-/-- **`activity_write_judged`, direct write.** A direct write is on an object and
-admitted by its law. -/
-theorem StateWrite.write_judged {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
-    {height : Nat} {request : StateWriteRequest} (written : StateWrite config snapshot height request) :
-    ∃ object, readObject config snapshot request.object = .ok (some object) ∧
-      admitWrite object (factsOf request.subject height request.object 3)
-        (written.current.map ObjectState.value) request.value = .ok () :=
-  ⟨written.object, written.objectExact, judgeWrite_ok written.judged⟩
+
+/-- A refusal of the prefix is the birth's refusal. -/
+theorem birth_of_prefix_error {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : BirthRequest} {refusal : Refusal}
+    (refused : birthPrefix config snapshot height request = .error refusal) :
+    birth config snapshot height request = .error refusal := by
+  unfold birth
+  rw [refused]
+  rfl
 
 /-- **A cell without an object record admits no birth**, refused by name. -/
-theorem birth_refuses_non_object {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
-    {height : Nat} {request : BirthRequest} (absent : readObject config snapshot request.object = .ok none) :
-    birth config snapshot height request = .error .notAnObject := by
-  unfold birth
+theorem birth_refuses_non_object_prefix {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : BirthRequest} (narrow : request.object.value < 256 ^ 32 ∧ request.pin.value < 256 ^ 32)
+    (absent : readObject config snapshot request.object = .ok none) :
+    birthPrefix config snapshot height request = .error .notAnObject := by
+  unfold birthPrefix
+  rw [dif_pos narrow]
   split
   · rename_i reason found; rw [absent] at found; cases found
   · rfl
   · rename_i object found; rw [absent] at found; cases found
 
+theorem birth_refuses_non_object {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : BirthRequest} (narrow : request.object.value < 256 ^ 32 ∧ request.pin.value < 256 ^ 32)
+    (absent : readObject config snapshot request.object = .ok none) :
+    birth config snapshot height request = .error .notAnObject :=
+  birth_of_prefix_error (birth_refuses_non_object_prefix narrow absent)
+
+/-- **A birth whose object or package id is not a 256-bit digest is refused by name**, before
+anything is read: the charged record has one fixed-width spelling of a digest, so a wider id
+is refused rather than truncated. Inhabited by any request naming the id `2 ^ 256`. -/
+theorem birth_refuses_wide_digest_prefix {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : BirthRequest}
+    (wide : ¬ (request.object.value < 256 ^ 32 ∧ request.pin.value < 256 ^ 32)) :
+    birthPrefix config snapshot height request = .error (.digestWide request.object request.pin) := by
+  unfold birthPrefix
+  rw [dif_neg wide]
+  rfl
+
+/-- **A birth whose object or package id is not a 256-bit digest is refused by name.** -/
+theorem birth_refuses_wide_digest {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : BirthRequest}
+    (wide : ¬ (request.object.value < 256 ^ 32 ∧ request.pin.value < 256 ^ 32)) :
+    birth config snapshot height request = .error (.digestWide request.object request.pin) :=
+  birth_of_prefix_error (birth_refuses_wide_digest_prefix wide)
+
 /-- **A birth runs only the package the object pins**, refused by name otherwise. -/
-theorem birth_refuses_other_pin {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+theorem birth_refuses_other_pin_prefix {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : BirthRequest} {object : ObjectRecord}
-    (found : readObject config snapshot request.object = .ok (some object)) (other : object.pin ≠ request.pin) :
-    birth config snapshot height request = .error (.pinMismatch object.pin request.pin) := by
-  unfold birth
+    (narrow : request.object.value < 256 ^ 32 ∧ request.pin.value < 256 ^ 32)
+    (found : readObject config snapshot request.object = .ok (some object)) (admits : object.admitsNew = true)
+    (other : object.activePin ≠ request.pin) :
+    birthPrefix config snapshot height request = .error (.pinMismatch object.activePin request.pin) := by
+  unfold birthPrefix
+  rw [dif_pos narrow]
   split
   · rename_i reason found'; rw [found] at found'; cases found'
   · rename_i found'; rw [found] at found'; cases found'
   · rename_i object' found'
     rw [found] at found'
     cases found'
-    simp [other]
-    rfl
+    simp [admits, other]
+    try rfl
 
-/-- **A direct write the object's law refuses is refused**, naming the clause. -/
-theorem writeState_refuses_lawless {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
-    {height : Nat} {request : StateWriteRequest} {object : ObjectRecord} {current : Option ObjectState}
-    {reason : WriteRefusal}
+theorem birth_refuses_other_pin {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : BirthRequest} {object : ObjectRecord}
+    (narrow : request.object.value < 256 ^ 32 ∧ request.pin.value < 256 ^ 32)
+    (found : readObject config snapshot request.object = .ok (some object)) (admits : object.admitsNew = true)
+    (other : object.activePin ≠ request.pin) :
+    birth config snapshot height request = .error (.pinMismatch object.activePin request.pin) :=
+  birth_of_prefix_error (birth_refuses_other_pin_prefix narrow found admits other)
+
+/-- **`draining_refuses_births`** (brief §2, theorem 4). On an object draining
+toward a state type its old one is not a value subtype of, a birth is refused
+`draining`, whatever it names. -/
+theorem draining_refuses_births_prefix {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : BirthRequest} {object : ObjectRecord} {next : ObjectRecord.Pending} {deadline : Nat}
+    (narrow : request.object.value < 256 ^ 32 ∧ request.pin.value < 256 ^ 32)
     (found : readObject config snapshot request.object = .ok (some object))
-    (state : readState config snapshot request.object = .ok current)
-    (denied : admitWrite object (factsOf request.subject height request.object 3)
-      (current.map ObjectState.value) request.value = .error reason) :
-    (writeState config snapshot height request).toOption = none := by
-  unfold writeState
+    (draining : object.phase = .draining next deadline)
+    (notSubtype : ObjectStateType.stateSubtype object.stateType next.stateType = false) :
+    birthPrefix config snapshot height request = .error .draining := by
+  have refused : object.admitsNew = false := by simp [ObjectRecord.admitsNew, draining, notSubtype]
+  unfold birthPrefix
+  rw [dif_pos narrow]
   split
-  · rfl
+  · rename_i reason found'; rw [found] at found'; cases found'
   · rename_i found'; rw [found] at found'; cases found'
   · rename_i object' found'
     rw [found] at found'
     cases found'
-    split
-    · rfl
-    · rename_i current' state'
-      rw [state] at state'
-      cases state'
-      split
-      · rfl
-      · rename_i judged
-        unfold judgeWrite at judged
-        rw [denied] at judged
-        cases judged
+    simp [refused]
+    try rfl
+
+theorem draining_refuses_births {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : BirthRequest} {object : ObjectRecord} {next : ObjectRecord.Pending} {deadline : Nat}
+    (narrow : request.object.value < 256 ^ 32 ∧ request.pin.value < 256 ^ 32)
+    (found : readObject config snapshot request.object = .ok (some object))
+    (draining : object.phase = .draining next deadline)
+    (notSubtype : ObjectStateType.stateSubtype object.stateType next.stateType = false) :
+    birth config snapshot height request = .error .draining :=
+  birth_of_prefix_error (draining_refuses_births_prefix narrow found draining notSubtype)
+
+/-- A delivery of an activity the object no longer runs (left on the old package
+after a migration, chosen for rebirth) is refused before anything runs. -/
+theorem Delivery.runs_pin {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request) :
+    delivery.object.runs delivery.record.pin = true := delivery.runsPin
 
 /-- **A second record is refused.** -/
 theorem create_refuses_existing {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
-    {request : CreateRequest} {object : ObjectRecord}
+    {height : Nat} {request : CreateRequest} {object : ObjectRecord}
     (found : readObject config snapshot request.object = .ok (some object)) :
-    create config snapshot request = .error .objectExists := by
+    create config snapshot height request = .error .objectExists := by
   unfold create
   split
   · rename_i reason found'; rw [found] at found'; cases found'
   · rfl
   · rename_i found'; rw [found] at found'; cases found'
 
+/-! ## The package pin: installed at creation, passed by every package turn, refused to every other
+
+The pin is the kernel's clause on an object's declared state (`ObjectRecord.pinClause`):
+every write is judged by `ObjectRecord.effectiveLaw record = all [pinClause record.pin, record.law]`,
+whatever law the creator supplied. The clause is not stored beside the creator's law, it is
+derived from the record's `pin`, so no creator can omit or loosen it and nothing but the record's
+own `pin` (written once, by `create`) says what it is. The turns that write declared state, and the
+artifact each makes its write under:
+
+| turn | artifact slot (`factsOf`) |
+|---|---|
+| `birth` | `request.pin`, which is `object.activePin` (`birth_refuses_other_pin`) |
+| `deliver` | the activity record's `pin`, one the object still runs (`Delivery.runs_pin`) |
+| `invoke` call frames, `deliverMessage` frames | the frame's own object's `activePin` (`ObjectiveCall.Ctx.facts`) |
+
+The judged clause is `objectivePin record.pins`: the pin, and while the object drains toward an
+upgrade also the next pin (`ObjectRecord.pins`), so old activities and identity-migration
+births both pass it; MIGRATE re-pins by writing the record's `pin`.
+| `create` seed | none, and not judged by the pin: the creator's law only (turn 4); nothing has run |
+-/
+
+theorem nextRecord_pin (base : Record) (generation : Nat) (segment : Segment) (yielded : Option YieldCommit) :
+    (nextRecord base generation segment yielded).pin = base.pin := by
+  cases segment <;> cases yielded <;> rfl
+
+/-- The record an admitted birth installs pins the package the object runs for it. -/
+theorem Birth.record_pin {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : BirthRequest} (born : Birth config snapshot height request) :
+    born.record.pin = born.object.activePin := by
+  rw [born.recordExact, nextRecord_pin]
+  exact born.pinned.symm
+
+/-- **`objective_turns_pass_pin`, birth.** The write of an admitted birth is judged under the
+artifact `request.pin`, which is the pin of the object it is judged by: the object's pin clause
+accepts it on the very views the law judged. -/
+theorem Birth.write_passes_pin {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : BirthRequest} (born : Birth config snapshot height request)
+    (written : StateWritten) (wrote : born.yielded.bind YieldCommit.written = some written) :
+    ∃ before after,
+      ObjectRecord.views (factsOf request.subject height request.object request.factsTurn (some request.pin))
+        (written.before.map ObjectState.value) written.after.value = some (before, after) ∧
+      Minidregg.Pred.eval (Minidregg.Pred.objectivePin born.object.pins) before after = true := by
+  have admitted := judgeWritten_ok born.judged written wrote
+  obtain ⟨⟨before, after, viewed, _⟩, _⟩ := (ObjectRecord.admitWrite_ok_iff _ _ _ _).mp admitted
+  refine ⟨before, after, viewed,
+    ObjectRecord.objectivePin_accepts_run _ _ _ _ request.pin.value (by simp [factsOf]) ?_ before after viewed⟩
+  rw [← born.pinned]
+  exact ObjectRecord.activePin_mem_pins born.object
+
+/-- **`objective_turns_pass_pin`, delivery.** The write of an admitted delivery is judged under
+the artifact of the activity record's pin; where that is the object's pin (every activity a
+birth made: `Birth.record_pin`), the object's pin clause accepts it. -/
+theorem Delivery.write_passes_pin {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request)
+    (written : StateWritten) (wrote : delivery.yielded.bind YieldCommit.written = some written) :
+    ∃ before after,
+      ObjectRecord.views (factsOf delivery.record.escrow.payer height delivery.record.object 2
+          (some delivery.record.pin))
+        (written.before.map ObjectState.value) written.after.value = some (before, after) ∧
+      Minidregg.Pred.eval (Minidregg.Pred.objectivePin delivery.object.pins) before after = true := by
+  have admitted := judgeWritten_ok delivery.judged written wrote
+  obtain ⟨⟨before, after, viewed, _⟩, _⟩ := (ObjectRecord.admitWrite_ok_iff _ _ _ _).mp admitted
+  exact ⟨before, after, viewed,
+    ObjectRecord.objectivePin_accepts_run _ _ _ _ delivery.record.pin.value (by simp [factsOf])
+      (ObjectRecord.runs_mem_pins delivery.runsPin) before after viewed⟩
+
+/-- **No creator law removes the pin**: for every record, a view the judged law accepts is one
+the pin clause accepts. -/
+theorem pin_in_every_judged_law (record : ObjectRecord) (old new : Minidregg.Pred.State)
+    (admitted : Minidregg.Pred.eval record.effectiveLaw old new = true) :
+    Minidregg.Pred.eval (Minidregg.Pred.objectivePin record.pins) old new = true :=
+  ((ObjectRecord.effectiveLaw_accepts_iff record old new).mp admitted).1
+
+#assert_axioms nextRecord_pin
+#assert_axioms Birth.record_pin
+#assert_axioms Birth.write_passes_pin
+#assert_axioms Delivery.write_passes_pin
+#assert_axioms pin_in_every_judged_law
 #assert_axioms execute_accepted_install
 #assert_axioms spent_claim_never_accepted
 #assert_axioms installed_retry_replays
@@ -3574,10 +4921,10 @@ theorem create_refuses_existing {rootBytes : Bytes → Digest} {config : Config}
 #assert_axioms judgeWritten_ok
 #assert_axioms Birth.write_judged
 #assert_axioms Delivery.write_judged
-#assert_axioms StateWrite.write_judged
 #assert_axioms birth_refuses_non_object
+#assert_axioms birth_refuses_wide_digest
 #assert_axioms birth_refuses_other_pin
-#assert_axioms writeState_refuses_lawless
+#assert_axioms draining_refuses_births
 #assert_axioms create_refuses_existing
 
 /-! ## Retention: every retained activity cell names its payer
@@ -3589,7 +4936,7 @@ read from the cell's own bytes along its role's route (`payerOf`):
 | role      | route            | payer                                          |
 |-----------|------------------|------------------------------------------------|
 | `record`  | `escrow`         | the record's `escrow.account`                  |
-| `slot`    | `activityOfSlot` | the escrow of the awaiting record it answers   |
+| `slot`    | `activityOfSlot` | a subject slot: the escrow of the awaiting record it answers; a delivery slot: `ObjectRecord.payer` of the object that sent its message (named in the decider, so it holds after the inbox is retired) |
 | `state`   | `objectOfState`  | `ObjectRecord.payer` of the object its key names |
 | `package` | `stored`         | the package cell's `Stored.payer`              |
 | `object`  | `objectRecord`   | the record's own `ObjectRecord.payer`          |
@@ -3604,11 +4951,33 @@ turn (`afterPosts`, which is `DataSnapshot.install`'s bytes, `install_afterPosts
 every cell the turn writes that holds a payload afterwards resolves to a payer
 (`Birth.retention_cells_have_payer`, `Delivery.retention_cells_have_payer`,
 `Exhaustion.retention_cells_have_payer`, `Publication.retention_cells_have_payer`,
-`Creation.retention_cells_have_payer`, `StateWrite.retention_cells_have_payer`,
-`Resolution.retention_cells_have_payer`; an abandonment and a top-up leave no live
-activity cell). The Book side of the accounting is `Batch.deregistrations`: an
+`Creation.retention_cells_have_payer`,
+`Resolution.retention_cells_have_payer`; a top-up leaves no live activity cell, an
+abandonment only the object record, whose route is its own payer). The Book side of the accounting is `Batch.deregistrations`: an
 ending turn closes the purse it emptied (`Delivery.end_closes_purse`,
 `Abandonment.closes_purse`). -/
+
+/-! ### Invariant domains (`Kernel.ObjectiveDomain`): the record a domain cell holds -/
+
+/-- An invariant domain: its members (objects) and their joint law, funded by `payer`. -/
+structure Domain where
+  members : List CellId
+  law : Minidregg.Pred.Pred
+  payer : AccountId
+  deriving DecidableEq, Repr
+
+def domainStream : StreamCodec Domain :=
+  StreamCodec.xmap
+    (StreamCodec.product (StreamCodec.list digestStream) (StreamCodec.product LawLeaf.predStream StreamCodec.nat))
+    (fun d => (d.members, d.law, d.payer)) (fun w => ⟨w.1, w.2.1, w.2.2⟩) (by intro d; cases d; rfl)
+
+def domainFrame : Bytes := "DREGG/OBJECTIVE/DOMAIN/v1".toUTF8.toList
+def domainCodec := framed domainFrame domainStream
+def encodeDomain (domain : Domain) : Bytes := domainCodec.encode domain
+def decodeDomain (bytes : Bytes) : Option Domain := domainCodec.decode bytes
+
+theorem domain_roundTrip (domain : Domain) : decodeDomain (encodeDomain domain) = some domain :=
+  framed_roundTrip _ _ domain
 
 /-- Where a retained cell's payer is read from. -/
 inductive PayerRoute where
@@ -3619,6 +4988,8 @@ inductive PayerRoute where
   | stored
   /-- An inbox: its sender object's payer. -/
   | objectOfInbox
+  /-- An invariant domain: its own payer (`ObjectiveDomain.Domain.payer`). -/
+  | domainRecord
   deriving DecidableEq, Repr
 
 def payerRoute : Role → Option PayerRoute
@@ -3628,6 +4999,7 @@ def payerRoute : Role → Option PayerRoute
   | .package => some .stored
   | .object => some .objectRecord
   | .inbox => some .objectOfInbox
+  | .domain => some .domainRecord
 
 /-- A census of retained cell kinds: every kind listed, each with its payer route. -/
 structure RetentionCensus (Kind : Type) where
@@ -3644,7 +5016,7 @@ instance {Kind : Type} (census : RetentionCensus Kind) : Decidable census.Paid :
 
 /-- The activity registry's retained kinds: every activity role. -/
 def activityCensus : RetentionCensus Role where
-  kinds := [.record, .slot, .state, .package, .object, .inbox]
+  kinds := [.record, .slot, .state, .package, .object, .inbox, .domain]
   complete := by intro kind; cases kind <;> simp
   route := payerRoute
 
@@ -3684,14 +5056,16 @@ def routePayer (config : Config) (bytesAt : CellId → Bytes) (payload : Objecti
     PayerRoute → Option AccountId
   | .escrow => (decodeRecord payload.body).map fun record => record.escrow.account
   | .activityOfSlot => (AnswerSlot.decode payload.body).bind fun slot =>
-      ((recordAt bytesAt slot.activity).map fun record => record.escrow.account).orElse fun _ =>
-        (inboxAt bytesAt slot.activity).bind fun inbox => (objectAt config bytesAt ⟨inbox.sender⟩).map ObjectRecord.payer
+      match slot.decider with
+      | .subject _ => (recordAt bytesAt slot.activity).map fun record => record.escrow.account
+      | .delivery _ sender => (objectAt config bytesAt ⟨sender⟩).map ObjectRecord.payer
   | .objectOfInbox => (Inbox.decode payload.body).bind fun inbox =>
       (objectAt config bytesAt ⟨inbox.sender⟩).map ObjectRecord.payer
   | .objectOfState => (digestStream.toLawful.decode payload.key).bind fun object =>
       (objectAt config bytesAt object).map ObjectRecord.payer
   | .objectRecord => (ObjectRecord.decodeRecord payload.body).map ObjectRecord.payer
   | .stored => (decodeStored payload.body).map Stored.payer
+  | .domainRecord => (decodeDomain payload.body).map Domain.payer
 
 /-- The payer of a cell's bytes: its payload's role's route. -/
 def payerOfBytes (config : Config) (bytesAt : CellId → Bytes) (bytes : Bytes) : Option AccountId := do
@@ -3791,26 +5165,335 @@ theorem payloadOf_book (book : BookCell) :
 theorem objectAt_of_read {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {object : CellId} {record : ObjectRecord} (read : readObject config snapshot object = .ok (some record)) :
     objectAt config snapshot.canonicalBytes object = some record := by
-  unfold readObject at read
+  unfold readObject objectFor at read
   unfold objectAt
-  revert read
-  cases hb : bodyOf .object (snapshot.canonicalBytes (objectCell config.domain object)) with
-  | none =>
-    intro read
-    simp only [hb] at read
-    split at read <;> cases read
-  | some body =>
-    intro read
-    simp only [hb] at read
-    cases hd : ObjectRecord.decodeRecord body with
-    | none => rw [hd] at read; cases read
-    | some found => rw [hd] at read; cases read; simp [hd]
+  cases present : payloadOf (snapshot.canonicalBytes (objectCell config.domain object)) with
+  | none => rw [present] at read; cases read
+  | some payload =>
+    rw [present] at read
+    simp only at read
+    split at read
+    · rename_i owned
+      cases hd : ObjectRecord.decodeRecord payload.body with
+      | none => rw [hd] at read; cases read
+      | some found =>
+        rw [hd] at read
+        cases read
+        simp [bodyOf, present, owned.1, hd]
+    · cases read
+
+theorem readRecord_fits {rootBytes : Bytes → Digest} {snapshot : Snapshot rootBytes} {cell : CellId}
+    {record : Record} (read : readRecord snapshot cell = some record) : record.Fits := by
+  unfold readRecord at read
+  cases body : bodyOf .record (snapshot.canonicalBytes cell) with
+  | none => rw [body] at read; cases read
+  | some bytes =>
+    rw [body] at read
+    exact (decodeRecord_some read).2
+
+theorem checkpointDigest_fits_of (base : Record) (generation : Nat) (segment : Segment)
+    (yielded : Option YieldCommit) (base_fits : base.DigestsFit)
+    (await_fits : ∀ committed, yielded = some committed → committed.await.Fits) :
+    (nextRecord base generation segment yielded).Fits := by
+  obtain ⟨hobject, hactivity, hpin, hcheckpoint⟩ := base_fits
+  cases segment with
+  | yielded state plan =>
+    cases yielded with
+    | none => exact ⟨⟨hobject, hactivity, hpin, hcheckpoint⟩, trivial⟩
+    | some committed =>
+      exact ⟨⟨hobject, hactivity, hpin, checkpointDigest_lt _⟩, await_fits committed rfl⟩
+  | finished result =>
+    exact ⟨⟨hobject, hactivity, hpin, checkpointDigest_lt _⟩, trivial⟩
+  | faulted reason =>
+    exact ⟨⟨hobject, hactivity, hpin, checkpointDigest_lt _⟩, trivial⟩
+
+theorem activityId_lt (object : CellId) (birth : TransactionId) : (activityId object birth).value < 256 ^ 32 :=
+  tagged_lt _ _
+
+/-- **A birth's record fits the charged wire.** -/
+theorem BirthPrefix.record_fits {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : BirthRequest} (pre : BirthPrefix config snapshot height request) :
+    pre.record.Fits := by
+  rw [pre.recordExact]
+  refine checkpointDigest_fits_of _ _ _ _ ⟨pre.narrow.1, activityId_lt _ _, pre.narrow.2, checkpointDigest_lt _⟩ ?_
+  intro committed isSome
+  have commit := pre.yieldedExact
+  rw [isSome] at commit
+  exact segmentCommit_fits commit
+
+theorem Birth.record_fits {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : BirthRequest} (born : Birth config snapshot height request) :
+    born.record.Fits := born.toBirthPrefix.record_fits
+
+/-- **A delivery's next record fits the charged wire.** -/
+theorem Delivery.next_fits {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request) :
+    delivery.next.Fits := by
+  have base := readRecord_fits delivery.recordExact
+  rw [delivery.nextExact]
+  refine checkpointDigest_fits_of _ _ _ _ base.1 ?_
+  intro committed isSome
+  have ended := delivery.endExact
+  rw [isSome] at ended
+  exact resumedSegment_fits ended
+
+/-- **An exhaustion's next record fits the charged wire** (it changes only `tried`). -/
+theorem Exhaustion.next_fits {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : ExhaustRequest} (ex : Exhaustion config snapshot height request) :
+    ex.next.Fits := by
+  have base := readRecord_fits ex.recordExact
+  rw [ex.nextExact]
+  exact base
+
+/-! ### The quote is a fixed point
+
+The deposit is a function of the record the birth would store, and the record's digests
+(`activity`, the await's id and slot) are derived from the transaction, hence from the nonce,
+and its heights from the submission height. A quote and the submission it prices differ in
+exactly those; `encodeRecord_length_mask` says the charged length does not depend on them. -/
+
+/-- **The storage deposit does not depend on any digest or height.** -/
+theorem storageDeposit_mask (config : Config) (record : Record) (fits : record.Fits) :
+    storageDeposit config record.mask = storageDeposit config record := by
+  have len := encodeRecord_length_mask record fits
+  unfold storageDeposit
+  rcases hp : record.phase with await | result | reason
+  · have hm : record.mask.phase = .awaiting await.mask := by simp [Record.mask, hp, Phase.mask]
+    simp [hp, hm, len]
+  · have hm : record.mask.phase = .done result := by simp [Record.mask, hp, Phase.mask]
+    simp [hp, hm]
+  · have hm : record.mask.phase = .faulted reason := by simp [Record.mask, hp, Phase.mask]
+    simp [hp, hm]
+
+/-- What a plan's await looks like with every digest and height zeroed: only the decider (or
+nothing) remains. -/
+def PlanSource.maskedAwait : PlanSource → Await
+  | .reply decider => ⟨⟨0⟩, .reply ⟨0⟩ decider, 0, 0⟩
+  | .height _ => ⟨⟨0⟩, .height 0, 0, 0⟩
+
+/-- A committed yield's await, masked, is a function of the plan's source alone: not of the
+height, the transaction, the record cell, the generation or the checkpoint. -/
+theorem commitYield_await_mask {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat} {checkpoint : Digest}
+    {current : Option ObjectState} {viewed : Bool} {plan : PlanAwait} {committed : YieldCommit}
+    (ok : commitYield config snapshot height transaction cell object generation checkpoint current viewed plan =
+      .ok committed) :
+    committed.await.mask = plan.source.maskedAwait := by
+  unfold commitYield at ok
+  split at ok
+  · cases ok
+  · split at ok
+    · cases ok
+    · split at ok
+      · cases ok
+      · split at ok
+        · rename_i decider hsource
+          split at ok
+          · cases ok
+          · simp only [Except.ok.injEq] at ok
+            subst ok
+            rw [hsource]
+            rfl
+        · rename_i due hsource
+          split at ok
+          · cases ok
+          · simp only [Except.ok.injEq] at ok
+            subst ok
+            rw [hsource]
+            rfl
+
+theorem segmentCommit_await_mask {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height height' : Nat} {transaction transaction' : TransactionId} {cell cell' object object' : CellId}
+    {generation : Nat} {current current' : Option ObjectState} {viewed viewed' : Bool} {segment : Segment}
+    {yielded yielded' : Option YieldCommit}
+    (one : segmentCommit config snapshot height transaction cell object generation current viewed segment =
+      .ok yielded)
+    (two : segmentCommit config snapshot height' transaction' cell' object' generation current' viewed' segment =
+      .ok yielded') :
+    yielded.map (fun committed => committed.await.mask) = yielded'.map (fun committed => committed.await.mask) := by
+  cases segment with
+  | yielded state plan =>
+      obtain ⟨c, hc⟩ : ∃ c, yielded = some c := by
+        simp only [segmentCommit, bind, Except.bind] at one
+        split at one
+        · cases one
+        · simp only [pure, Except.pure] at one
+          exact ⟨_, (Except.ok.inj one).symm⟩
+      obtain ⟨c', hc'⟩ : ∃ c, yielded' = some c := by
+        simp only [segmentCommit, bind, Except.bind] at two
+        split at two
+        · cases two
+        · simp only [pure, Except.pure] at two
+          exact ⟨_, (Except.ok.inj two).symm⟩
+      rw [hc] at one
+      rw [hc'] at two
+      obtain ⟨_, _, hs, commit⟩ := segmentCommit_spec one
+      obtain ⟨_, _, hs', commit'⟩ := segmentCommit_spec two
+      cases hs
+      cases hs'
+      rw [hc, hc']
+      simp only [Option.map_some, Option.some.injEq]
+      rw [commitYield_await_mask commit, commitYield_await_mask commit']
+  | finished result =>
+      simp [segmentCommit, pure, Except.pure] at one two
+      subst one; subst two; rfl
+  | faulted reason =>
+      simp [segmentCommit, pure, Except.pure] at one two
+      subst one; subst two; rfl
+
+theorem nextRecord_mask (base base' : Record) (generation : Nat) (segment : Segment)
+    (yielded yielded' : Option YieldCommit) (bases : base.mask = base'.mask)
+    (yields : yielded.map (fun committed => committed.await.mask) =
+      yielded'.map (fun committed => committed.await.mask)) :
+    (nextRecord base generation segment yielded).mask = (nextRecord base' generation segment yielded').mask := by
+  obtain ⟨o, a, p, i, g, c, d, e, t, ph⟩ := base
+  obtain ⟨o', a', p', i', g', c', d', e', t', ph'⟩ := base'
+  simp only [Record.mask, Record.mk.injEq] at bases
+  cases segment with
+  | yielded state plan =>
+      cases yielded with
+      | none =>
+          cases yielded' with
+          | none => simp_all [nextRecord, Record.mask, Phase.mask]
+          | some c' => simp at yields
+      | some c =>
+          cases yielded' with
+          | none => simp at yields
+          | some c' => simp_all [nextRecord, Record.mask, Phase.mask]
+  | finished result => simp_all [nextRecord, Record.mask, Phase.mask]
+  | faulted reason => simp_all [nextRecord, Record.mask, Phase.mask]
+
+/-- **THE QUOTE IS A FIXED POINT: what a birth reserves does not depend on its nonce, its deposit or
+its height.** Two prefixes (everything a birth checks before it looks at the deposit) of requests
+that differ only in `nonce` and `deposit` (so in every digest derived from the transaction), at two
+heights, run the same segment and store records of the same shape, so reserve the same storage
+deposit. The defect: a 256-bit value spelled in 32 or 33 octets made the deposit 8456, 8457 or 8458
+for identical requests. Over the real `encodeRecord`. -/
+theorem BirthPrefix.deposit_stable {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height height' : Nat} {request : BirthRequest} {nonce deposit : Nat}
+    (one : BirthPrefix config snapshot height request)
+    (two : BirthPrefix config snapshot height' { request with nonce := nonce, deposit := deposit }) :
+    two.segment = one.segment ∧ storageDeposit config two.record = storageDeposit config one.record := by
+  have program : one.program = two.program := Except.ok.inj (one.programExact.symm.trans two.programExact)
+  have ran := two.segmentExact
+  rw [← program] at ran
+  have segment : one.segment = two.segment := Except.ok.inj (one.segmentExact.symm.trans ran)
+  have commit := two.yieldedExact
+  rw [← segment] at commit
+  have yields := segmentCommit_await_mask one.yieldedExact commit
+  have masks : two.record.mask = one.record.mask := by
+    rw [one.recordExact, two.recordExact, ← segment]
+    exact nextRecord_mask _ _ _ _ _ _ (by simp only [Record.mask]; rfl) yields.symm
+  refine ⟨segment.symm, ?_⟩
+  calc storageDeposit config two.record = storageDeposit config two.record.mask :=
+        (storageDeposit_mask _ _ two.record_fits).symm
+    _ = storageDeposit config one.record.mask := by rw [masks]
+    _ = storageDeposit config one.record := storageDeposit_mask _ _ one.record_fits
+
+/-- What a birth demands of its deposit: the first await's fee pair and the storage deposit of the
+record it would store (`Birth.funded` is exactly `¬ demand > deposit` for a yielding birth). -/
+def BirthPrefix.demand {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : BirthRequest} (pre : BirthPrefix config snapshot height request) : Nat :=
+  (escrowOf config.tariff request.subject request.escrowAccount request.resume request.timeout).pair +
+    storageDeposit config pre.record
+
+def Birth.demand {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : BirthRequest} (born : Birth config snapshot height request) : Nat :=
+  born.toBirthPrefix.demand
+
+/-- **The demand is independent of nonce, deposit and height.** -/
+theorem BirthPrefix.demand_independent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height height' : Nat} {request : BirthRequest} {nonce deposit : Nat}
+    (one : BirthPrefix config snapshot height request)
+    (two : BirthPrefix config snapshot height' { request with nonce := nonce, deposit := deposit }) :
+    two.demand = one.demand := by
+  unfold BirthPrefix.demand
+  rw [(BirthPrefix.deposit_stable one two).2]
+  try rfl
+
+theorem Birth.deposit_stable {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height height' : Nat} {request : BirthRequest} {nonce deposit : Nat}
+    (one : Birth config snapshot height request)
+    (two : Birth config snapshot height' { request with nonce := nonce, deposit := deposit }) :
+    storageDeposit config two.record = storageDeposit config one.record :=
+  (BirthPrefix.deposit_stable one.toBirthPrefix two.toBirthPrefix).2
+
+theorem settlePurse_error {config : Config} {book : Book} {held : AccountId} {escrow : Escrow} {deposit : Nat}
+    {before : Batch} {segment : Segment} {refusal : Refusal}
+    (refused : settlePurse config book held escrow deposit before segment = .error refusal) :
+    ∃ available reserve, refusal = .awaitsFunding available reserve := by
+  unfold settlePurse at refused
+  simp only [] at refused
+  split at refused
+  · split at refused
+    · cases refused
+    · cases refused; exact ⟨_, _, rfl⟩
+  · cases refused
+
+theorem except_map_error {ε α β : Type} {f : α → β} {x : Except ε α} {e : ε}
+    (h : x.map f = .error e) : x = .error e := by
+  cases x <;> simp_all [Except.map]
+
+theorem birthBatch_error {config : Config} {book : Book} {held : AccountId} {request : BirthRequest}
+    {escrow : Escrow} {deposit : Nat} {segment : Segment} {refusal : Refusal}
+    (refused : birthBatch config book held request escrow deposit segment = .error refusal) :
+    ∃ available reserve, refusal = .awaitsFunding available reserve := by
+  unfold birthBatch at refused
+  simp only [] at refused
+  exact settlePurse_error (except_map_error refused)
+
+/-- **QUOTE -> SUBMIT, on the funding check.** A request whose prefix admits it, at the deposit the
+quote named (`quoted.demand`), whatever nonce and height, is NOT refused `underfunded`: the check
+reads the same demand, so `quoted.demand < demand` is false. This is the defect's own statement. It
+says only that the DEPOSIT is never the reason: a refusal from the prefix (the state changed: a
+retired record cell, a taken purse, a refused write, ...) is that refusal's own, by its own name, and
+a Book posting refused is `awaitsFunding`/`bookRefused`, never `underfunded`. (`underfunded` is
+constructed in exactly one place, the check in `birth`.) -/
+theorem birth_not_underfunded_at_quote {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height height' : Nat} {request : BirthRequest} {nonce : Nat}
+    (quoted : Birth config snapshot height request)
+    {pre : BirthPrefix config snapshot height' { request with nonce := nonce, deposit := quoted.demand }}
+    (admitted : birthPrefix config snapshot height' { request with nonce := nonce, deposit := quoted.demand } = .ok pre)
+    (deposit reserve : Nat) :
+    birth config snapshot height' { request with nonce := nonce, deposit := quoted.demand } ≠
+      .error (.underfunded deposit reserve) := by
+  intro refused
+  have same := BirthPrefix.demand_independent quoted.toBirthPrefix pre
+  unfold birth at refused
+  rw [admitted] at refused
+  simp only [bind, Except.bind] at refused
+  split at refused
+  · rename_i short
+    have lt := short.2
+    have eq : (escrowOf config.tariff request.subject request.escrowAccount request.resume request.timeout).pair +
+        storageDeposit config pre.record = quoted.demand := same
+    exact absurd (eq ▸ lt) (Nat.lt_irrefl _)
+  · split at refused
+    · rename_i batchRefused hb
+      obtain ⟨_, _, same⟩ := birthBatch_error hb
+      rw [same] at refused
+      cases refused
+    · split at refused
+      · rename_i bookRefused hp
+        unfold postings at hp
+        split at hp
+        · cases hp
+        · cases hp; cases refused
+      · simp [pure, Except.pure] at refused
+
+/-- A yielding birth admitted at a deposit paid at least its demand. -/
+theorem Birth.demand_le_deposit {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : BirthRequest} (born : Birth config snapshot height request)
+    (yields : born.segment.yields = true) : born.demand ≤ request.deposit := by
+  have funded := born.funded
+  unfold Birth.demand BirthPrefix.demand
+  exact Nat.le_of_not_lt (fun short => funded ⟨yields, short⟩)
 
 /-- The payer of a record image: its escrow's account. -/
 theorem payer_record_image (config : Config) (bytesAt : CellId → Bytes) (record : Record) (await : Await)
-    (awaiting : record.phase = .awaiting await) :
+    (fits : record.Fits) (awaiting : record.phase = .awaiting await) :
     payerOfBytes config bytesAt (recordImage record) = some record.escrow.account := by
-  simp [recordImage, awaiting, payerOfBytes, payloadOf_image, payerRoute, routePayer, record_roundTrip]
+  simp [recordImage, awaiting, payerOfBytes, payloadOf_image, payerRoute, routePayer, record_roundTrip record fits]
 
 theorem payloadOf_recordImage_live (record : Record) (live : (payloadOf (recordImage record)).isSome = true) :
     ∃ await, record.phase = .awaiting await := by
@@ -3822,10 +5505,11 @@ theorem payloadOf_recordImage_live (record : Record) (live : (payloadOf (recordI
 
 /-- The payer of a slot image whose activity is the record a byte map holds. -/
 theorem payer_slot_image (config : Config) (bytesAt : CellId → Bytes) (slot : AnswerSlot.Slot) (record : Record)
-    (held : recordAt bytesAt slot.activity = some record) :
+    (subject : ∃ subject, slot.decider = .subject subject) (held : recordAt bytesAt slot.activity = some record) :
     payerOfBytes config bytesAt (image .slot (AnswerSlot.key slot.name) (AnswerSlot.encode slot)) =
       some record.escrow.account := by
-  simp [payerOfBytes, payloadOf_image, payerRoute, routePayer, AnswerSlot.roundTrip, held]
+  obtain ⟨subject, role⟩ := subject
+  simp [payerOfBytes, payloadOf_image, payerRoute, routePayer, AnswerSlot.roundTrip, held, role]
 
 /-- The payer of a state image whose object's record a byte map holds. -/
 theorem payer_state_image (config : Config) (bytesAt : CellId → Bytes) (object : CellId) (state : ObjectState)
@@ -3836,19 +5520,21 @@ theorem payer_state_image (config : Config) (bytesAt : CellId → Bytes) (object
   simp [payerOfBytes, stateImage, payloadOf_image, payerRoute, routePayer, key, held]
 
 theorem recordAt_recordImage (bytesAt : CellId → Bytes) (cell : CellId) (record : Record) (await : Await)
-    (awaiting : record.phase = .awaiting await) (holds : bytesAt cell = recordImage record) :
+    (fits : record.Fits) (awaiting : record.phase = .awaiting await) (holds : bytesAt cell = recordImage record) :
     recordAt bytesAt cell = some record := by
-  simp [recordAt, holds, recordImage, awaiting, bodyOf_image, record_roundTrip]
+  simp [recordAt, holds, recordImage, awaiting, bodyOf_image, record_roundTrip record fits]
 
 /-- What a yield commit posts: the declared-state write (a state image of the
-object) and, for a reply await, the slot it opens for this record cell. -/
+object) and, for a reply await, the slot it opens for this record cell, OPEN
+(`slot.phase = .opened`: a yield decides nothing). -/
 theorem commitYield_posts {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat} {checkpoint : Digest}
     {current : Option ObjectState} {viewed : Bool} {plan : PlanAwait} {committed : YieldCommit}
     (ok : commitYield config snapshot height transaction cell object generation checkpoint current viewed plan =
       .ok committed) :
     ∀ post ∈ committed.posts, (∃ state, post.bytes = stateImage object state) ∨
-      (∃ slot : AnswerSlot.Slot, slot.activity = cell ∧
+      (∃ slot : AnswerSlot.Slot, slot.activity = cell ∧ slot.phase = .opened ∧
+        (∃ subject, slot.decider = .subject subject) ∧
         post.bytes = image .slot (AnswerSlot.key slot.name) (AnswerSlot.encode slot)) := by
   have stateShape : ∀ written : Option StateWritten,
       stateWrite config snapshot object current viewed plan.write = .ok written →
@@ -3867,24 +5553,26 @@ theorem commitYield_posts {rootBytes : Bytes → Digest} {config : Config} {snap
   · cases ok
   · split at ok
     · cases ok
-    · rename_i written wrote
-      split at ok
-      · split at ok
-        · cases ok
-        · simp only [Except.ok.injEq] at ok
-          subst ok
-          intro post member
-          simp only [List.mem_append, List.mem_singleton] at member
-          rcases member with inState | isSlot
-          · exact .inl (stateShape _ wrote post inState)
-          · subst isSlot
-            exact .inr ⟨_, rfl, rfl⟩
-      · split at ok
-        · cases ok
-        · simp only [Except.ok.injEq] at ok
-          subst ok
-          intro post member
-          exact .inl (stateShape _ wrote post member)
+    · split at ok
+      · cases ok
+      · rename_i written wrote
+        split at ok
+        · split at ok
+          · cases ok
+          · simp only [Except.ok.injEq] at ok
+            subst ok
+            intro post member
+            simp only [List.mem_append, List.mem_singleton] at member
+            rcases member with inState | isSlot
+            · exact .inl (stateShape _ wrote post inState)
+            · subst isSlot
+              exact .inr ⟨_, rfl, rfl, ⟨_, rfl⟩, rfl⟩
+        · split at ok
+          · cases ok
+          · simp only [Except.ok.injEq] at ok
+            subst ok
+            intro post member
+            exact .inl (stateShape _ wrote post member)
 
 /-- The record a yielding segment commits is awaiting. -/
 theorem nextRecord_yielded_awaiting (base : Record) (generation : Nat) (segment : Segment)
@@ -3902,35 +5590,67 @@ theorem slotImage_live (slot : AnswerSlot.Slot) :
     (payloadOf (image .slot (AnswerSlot.key slot.name) (AnswerSlot.encode slot))).isSome = true := by
   simp [payloadOf_image]
 
-/-- What a post of a turn is, for the census. -/
+/-- What a post of a turn is, for the census: a state image of the object, a
+slot image for the record cell, a retired image, no activity cell (the Book), or
+the object's record (its counters moved). -/
 def CensusPost (object cell : CellId) (post : Post) : Prop :=
   (∃ state, post.bytes = stateImage object state) ∨
-    (∃ slot : AnswerSlot.Slot, slot.activity = cell ∧
+    (∃ slot : AnswerSlot.Slot, slot.activity = cell ∧ (∃ subject, slot.decider = .subject subject) ∧
       post.bytes = image .slot (AnswerSlot.key slot.name) (AnswerSlot.encode slot)) ∨
-    post.bytes = retiredImage ∨ payloadOf post.bytes = none
+    post.bytes = retiredImage ∨ payloadOf post.bytes = none ∨ (∃ record, post.bytes = objectImage object record)
+
+/-- The payer of an object record image: the record's own payer. -/
+theorem payer_object_image (config : Config) (bytesAt : CellId → Bytes) (object : CellId) (record : ObjectRecord) :
+    payerOfBytes config bytesAt (objectImage object record) = some record.payer := by
+  simp [payerOfBytes, objectImage, payloadOf_image, payerRoute, routePayer, ObjectRecord.record_roundTrip]
+
+/-- An object image is no slot image. -/
+theorem objectImage_ne_slot (object : CellId) (record : ObjectRecord) (slot : AnswerSlot.Slot) :
+    objectImage object record ≠ image .slot (AnswerSlot.key slot.name) (AnswerSlot.encode slot) := by
+  intro same
+  have roles := congrArg (fun bytes => (payloadOf bytes).map (·.role)) same
+  simp [objectImage, payloadOf_image] at roles
+
+/-- The object record a byte map holds after posts that write the object cell only
+with object images: the snapshot's (unwritten), or the first one posted. -/
+theorem objectAt_afterPosts {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {posts : List Post} {object : CellId} {objectRecord : ObjectRecord}
+    (objectRead : readObject config snapshot object = .ok (some objectRecord))
+    (objectOnly : ∀ post ∈ posts, post.cell = objectCell config.domain object →
+      ∃ record, post.bytes = objectImage object record) :
+    ∃ record, objectAt config (afterPosts snapshot posts) object = some record := by
+  unfold afterPosts
+  cases found : posts.find? (fun post => post.cell = objectCell config.domain object) with
+  | none =>
+    refine ⟨objectRecord, ?_⟩
+    have read := objectAt_of_read objectRead
+    unfold objectAt at read ⊢
+    simpa [found] using read
+  | some post =>
+    have member := List.mem_of_find?_eq_some found
+    have at_ : post.cell = objectCell config.domain object := by simpa using List.find?_some found
+    obtain ⟨record, bytes⟩ := objectOnly post member at_
+    refine ⟨record, ?_⟩
+    unfold objectAt
+    simp [found, bytes, objectImage, bodyOf_image, ObjectRecord.record_roundTrip]
 
 /-- The census of a record-first turn: the record post heads the turn's posts;
 the rest are the yield's state images (of `object`) and slot images (for this
 record cell), retired images, or the Book; a slot is opened only beside an
 awaiting record; the object's record is read under a cell no post writes. -/
 theorem recordFirst_cells_paid {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
-    (cell object : CellId) (record : Record) (objectRecord : ObjectRecord)
+    (cell object : CellId) (record : Record) (recordFits : record.Fits) (objectRecord : ObjectRecord)
     (objectRead : readObject config snapshot object = .ok (some objectRecord))
     (rest : List Post) (shape : ∀ post ∈ rest, CensusPost object cell post)
     (slotsNeedRecord : (∃ post ∈ rest, ∃ slot : AnswerSlot.Slot, slot.activity = cell ∧
         post.bytes = image .slot (AnswerSlot.key slot.name) (AnswerSlot.encode slot)) →
       ∃ await, record.phase = .awaiting await)
-    (objectUnwritten : ∀ post ∈ recordPost config snapshot cell record :: rest,
-      post.cell ≠ objectCell config.domain object) :
+    (objectOnly : ∀ post ∈ recordPost config snapshot cell record :: rest,
+      post.cell = objectCell config.domain object → ∃ held, post.bytes = objectImage object held) :
     CellsPaid config (afterPosts snapshot (recordPost config snapshot cell record :: rest))
       ((recordPost config snapshot cell record :: rest).map Post.cell) := by
   apply cellsPaid_of_posts
-  have objectHeld : objectAt config (afterPosts snapshot (recordPost config snapshot cell record :: rest)) object =
-      some objectRecord := by
-    have unwritten := afterPosts_unwritten snapshot _ _ objectUnwritten
-    unfold objectAt
-    rw [unwritten]
-    exact objectAt_of_read objectRead
+  obtain ⟨objectHeldRecord, objectHeld⟩ := objectAt_afterPosts objectRead objectOnly
   have headBytes : afterPosts snapshot (recordPost config snapshot cell record :: rest) cell = recordImage record :=
     afterPosts_first snapshot (recordPost config snapshot cell record) rest
   intro post member live
@@ -3938,18 +5658,20 @@ theorem recordFirst_cells_paid {rootBytes : Bytes → Digest} (config : Config) 
   · subst head
     obtain ⟨await, awaiting⟩ := payloadOf_recordImage_live record live
     show (payerOfBytes config _ (recordImage record)).isSome = true
-    rw [payer_record_image config _ record await awaiting]
+    rw [payer_record_image config _ record await recordFits awaiting]
     rfl
-  · rcases shape post inRest with ⟨state, isState⟩ | ⟨slot, activity, isSlot⟩ | retired | none
-    · rw [isState, payer_state_image config _ object state objectRecord objectHeld]
+  · rcases shape post inRest with ⟨state, isState⟩ | ⟨slot, activity, subject, isSlot⟩ | retired | none | ⟨held, isObject⟩
+    · rw [isState, payer_state_image config _ object state objectHeldRecord objectHeld]
       rfl
     · obtain ⟨await, awaiting⟩ := slotsNeedRecord ⟨post, inRest, slot, activity, isSlot⟩
       have held := recordAt_recordImage (afterPosts snapshot (recordPost config snapshot cell record :: rest))
-        slot.activity record await awaiting (by rw [activity]; exact headBytes)
-      rw [isSlot, payer_slot_image config _ slot record held]
+        slot.activity record await recordFits awaiting (by rw [activity]; exact headBytes)
+      rw [isSlot, payer_slot_image config _ slot record subject held]
       rfl
     · rw [retired, payloadOf_retired] at live; cases live
     · rw [none] at live; cases live
+    · rw [isObject, payer_object_image]
+      rfl
 
 /-- A yield commit's posts are census posts of its object and record cell. -/
 theorem segmentCommit_census {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -3963,7 +5685,8 @@ theorem segmentCommit_census {rootBytes : Bytes → Digest} {config : Config} {s
   | none => simp at member
   | some committed =>
     obtain ⟨_, _, _, committedOk⟩ := segmentCommit_spec ok
-    exact (commitYield_posts committedOk post member).elim .inl (fun slot => .inr (.inl slot))
+    exact (commitYield_posts committedOk post member).elim .inl
+      (fun ⟨slot, activity, _, subject, isSlot⟩ => .inr (.inl ⟨slot, activity, subject, isSlot⟩))
 
 /-- A turn that opens a slot commits an awaiting record. -/
 theorem segmentCommit_awaiting {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -3987,31 +5710,39 @@ theorem slotPosted_live {post : Post} {slot : AnswerSlot.Slot}
 /-- **`retention_cells_have_payer`, birth.** Every cell an admitted birth leaves
 holding an activity payload names its payer in the installed state: the record
 its escrow account, the opened slot that record's, the state cell its object's
-`ObjectRecord.payer`. (Premise: no post of the birth lands on the object's
-record cell, which it only guards: a coordinate collision.) -/
+`ObjectRecord.payer`, the object record (its counters moved) its own payer.
+(Premise: a post of the birth lands on the object's record cell only as an
+object image, i.e. no other coordinate collides with it.) -/
 theorem Birth.retention_cells_have_payer {rootBytes : Bytes → Digest} {config : Config}
     {snapshot : Snapshot rootBytes} {height : Nat} {request : BirthRequest} (born : Birth config snapshot height request)
-    (objectUnwritten : ∀ post ∈ born.posts, post.cell ≠ objectCell config.domain request.object) :
+    (objectOnly : ∀ post ∈ born.posts, post.cell = objectCell config.domain request.object →
+      ∃ held, post.bytes = objectImage request.object held) :
     CellsPaid config (afterPosts snapshot born.posts) (born.posts.map Post.cell) := by
   have commits := segmentCommit_census born.yieldedExact
-  rw [born.postsExact] at objectUnwritten ⊢
-  apply recordFirst_cells_paid config snapshot born.cell request.object born.record born.object born.objectExact
+  rw [born.postsExact] at objectOnly ⊢
+  apply recordFirst_cells_paid config snapshot born.cell request.object born.record born.record_fits born.object born.objectExact
   · intro post member
-    rcases List.mem_append.mp member with inYield | isBook
-    · exact commits post inYield
-    · simp only [List.mem_singleton] at isBook
-      subst isBook
-      exact .inr (.inr (.inr (Postings.write_payload config snapshot born.posted)))
+    rcases List.mem_append.mp member with inFront | inCount
+    · rcases List.mem_append.mp inFront with inYield | isBook
+      · exact commits post inYield
+      · simp only [List.mem_singleton] at isBook
+        subst isBook
+        exact .inr (.inr (.inr (.inl (Postings.write_payload config snapshot born.posted))))
+    · rw [mem_objectPost inCount]
+      exact .inr (.inr (.inr (.inr ⟨_, rfl⟩)))
   · rintro ⟨post, inRest, slot, _, isSlot⟩
-    rcases List.mem_append.mp inRest with inYield | isBook
-    · rw [born.recordExact]
-      exact segmentCommit_awaiting born.yieldedExact _ 0 ⟨post, inYield, slotPosted_live isSlot⟩
-    · simp only [List.mem_singleton] at isBook
-      subst isBook
-      have live := slotPosted_live isSlot
-      rw [Postings.write_payload] at live
-      cases live
-  · exact objectUnwritten
+    rcases List.mem_append.mp inRest with inFront | inCount
+    · rcases List.mem_append.mp inFront with inYield | isBook
+      · rw [born.recordExact]
+        exact segmentCommit_awaiting born.yieldedExact _ 0 ⟨post, inYield, slotPosted_live isSlot⟩
+      · simp only [List.mem_singleton] at isBook
+        subst isBook
+        have live := slotPosted_live isSlot
+        rw [Postings.write_payload] at live
+        cases live
+    · rw [mem_objectPost inCount] at isSlot
+      exact absurd isSlot (objectImage_ne_slot _ _ slot)
+  · exact objectOnly
 
 /-- A settlement's posts retire the settled slot. -/
 theorem settle_posts_retired {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -4041,33 +5772,40 @@ settled slot is retired. -/
 theorem Delivery.retention_cells_have_payer {rootBytes : Bytes → Digest} {config : Config}
     {snapshot : Snapshot rootBytes} {height : Nat} {request : DeliverRequest}
     (delivery : Delivery config snapshot height request)
-    (objectUnwritten : ∀ post ∈ delivery.posts, post.cell ≠ objectCell config.domain delivery.record.object) :
+    (objectOnly : ∀ post ∈ delivery.posts, post.cell = objectCell config.domain delivery.record.object →
+      ∃ held, post.bytes = objectImage delivery.record.object held) :
     CellsPaid config (afterPosts snapshot delivery.posts) (delivery.posts.map Post.cell) := by
   have commits := segmentCommit_census (resumedSegment_commit delivery.endExact)
   have retired := settle_posts_retired delivery.settled
-  rw [delivery.postsExact] at objectUnwritten ⊢
-  apply recordFirst_cells_paid config snapshot request.record delivery.record.object delivery.next delivery.object
+  rw [delivery.postsExact] at objectOnly ⊢
+  apply recordFirst_cells_paid config snapshot request.record delivery.record.object delivery.next delivery.next_fits delivery.object
     delivery.objectExact
   · intro post member
-    rcases List.mem_append.mp member with inFront | isBook
-    · rcases List.mem_append.mp inFront with inSettle | inYield
-      · exact .inr (.inr (.inl (retired post inSettle)))
-      · exact commits post inYield
-    · simp only [List.mem_singleton] at isBook
-      subst isBook
-      exact .inr (.inr (.inr (Postings.write_payload config snapshot delivery.posted)))
+    rcases List.mem_append.mp member with inFront | inCount
+    · rcases List.mem_append.mp inFront with inFront | isBook
+      · rcases List.mem_append.mp inFront with inSettle | inYield
+        · exact .inr (.inr (.inl (retired post inSettle)))
+        · exact commits post inYield
+      · simp only [List.mem_singleton] at isBook
+        subst isBook
+        exact .inr (.inr (.inr (.inl (Postings.write_payload config snapshot delivery.posted))))
+    · rw [mem_countPosts inCount]
+      exact .inr (.inr (.inr (.inr ⟨_, rfl⟩)))
   · rintro ⟨post, inRest, slot, _, isSlot⟩
     have live := slotPosted_live isSlot
-    rcases List.mem_append.mp inRest with inFront | isBook
-    · rcases List.mem_append.mp inFront with inSettle | inYield
-      · rw [retired post inSettle, payloadOf_retired] at live; cases live
-      · rw [delivery.nextExact]
-        exact segmentCommit_awaiting (resumedSegment_commit delivery.endExact) _ _ ⟨post, inYield, live⟩
-    · simp only [List.mem_singleton] at isBook
-      subst isBook
-      rw [Postings.write_payload] at live
-      cases live
-  · exact objectUnwritten
+    rcases List.mem_append.mp inRest with inFront | inCount
+    · rcases List.mem_append.mp inFront with inFront | isBook
+      · rcases List.mem_append.mp inFront with inSettle | inYield
+        · rw [retired post inSettle, payloadOf_retired] at live; cases live
+        · rw [delivery.nextExact]
+          exact segmentCommit_awaiting (resumedSegment_commit delivery.endExact) _ _ ⟨post, inYield, live⟩
+      · simp only [List.mem_singleton] at isBook
+        subst isBook
+        rw [Postings.write_payload] at live
+        cases live
+    · rw [mem_countPosts inCount] at isSlot
+      exact absurd isSlot (objectImage_ne_slot _ _ slot)
+  · exact objectOnly
 
 /-- **`retention_cells_have_payer`, exhaustion**: it rewrites the awaiting
 record (its escrow pays) and the Book. -/
@@ -4083,7 +5821,7 @@ theorem Exhaustion.retention_cells_have_payer {rootBytes : Bytes → Digest} {co
   · subst isRecord
     have awaiting : ex.next.phase = .awaiting ex.await := by rw [ex.nextExact]; exact ex.awaiting
     show (payerOfBytes config _ (recordImage ex.next)).isSome = true
-    rw [payer_record_image config _ ex.next ex.await awaiting]; rfl
+    rw [payer_record_image config _ ex.next ex.await ex.next_fits awaiting]; rfl
   · subst isBook
     rw [Postings.write_payload] at live; cases live
 
@@ -4104,41 +5842,134 @@ theorem Publication.retention_cells_have_payer {rootBytes : Bytes → Digest} {c
   refine ⟨cellsPaid_of_posts config snapshot _ (fun post member _ => ?_), each⟩
   rw [each post member]; rfl
 
-/-- **`retention_cells_have_payer`, creation**: the object's record names its payer. -/
+/-- **The record a creation installs is what the post-state holds**: read back from the bytes
+the creation commits, the object's record is `(request.record created.laws) created.laws`. -/
+theorem Creation.object_installed {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : CreateRequest} (created : Creation config snapshot height request) :
+    objectAt config (afterPosts snapshot created.posts) request.object = some (request.record created.laws) := by
+  have headBytes : afterPosts snapshot
+      (postAt snapshot (objectCell config.domain request.object) (objectImage request.object (request.record created.laws)) ::
+        (request.seed.map (seedPost config snapshot request)).toList)
+      (objectCell config.domain request.object) = objectImage request.object (request.record created.laws) :=
+    afterPosts_first snapshot
+      (postAt snapshot (objectCell config.domain request.object) (objectImage request.object (request.record created.laws)))
+      (request.seed.map (seedPost config snapshot request)).toList
+  unfold objectAt
+  rw [created.postsExact, headBytes]
+  simp [objectImage, bodyOf_image, ObjectRecord.record_roundTrip]
+
+/-- **`create_installs_pin`.** An admitted creation installs one record, read back from the
+post-state it commits; the law that will judge every write of that object is the pin clause of
+exactly the package the request pins (published: `created.published`), then that package's own
+enforced laws (read from its package cell, never from the request), then the creator's law. -/
+theorem create_installs_pin {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : CreateRequest} {created : Creation config snapshot height request}
+    (_admitted : create config snapshot height request = .ok created) :
+    objectAt config (afterPosts snapshot created.posts) request.object = some (request.record created.laws) ∧
+      (request.record created.laws).pin = request.pin ∧
+      (request.record created.laws).effectiveLaw =
+        Minidregg.Pred.Pred.all [ObjectRecord.pinClause request.pin,
+          Minidregg.Compiler.ObjectiveBendLaw.packageLaw created.laws, request.law] ∧
+      packageLawsAt config snapshot request.pin = .ok created.laws ∧
+      (bodyOf .package (snapshot.canonicalBytes (packageCell config.domain request.pin))).isSome = true :=
+  ⟨created.object_installed, rfl, rfl, created.lawsExact, created.published⟩
+
+/-- **`create_seed_judged`.** An admitted creation with a seed installs it only if the package's
+laws and the creator's law accept it over no old state (turn 4, no package): the object is not born violating its own
+state clauses. The pin clause is not asked (`seed_teeth`: the same value is refused as a write). -/
+theorem create_seed_judged {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : CreateRequest} {created : Creation config snapshot height request}
+    (_admitted : create config snapshot height request = .ok created) {seed : Data}
+    (seeded : request.seed = some seed) :
+    ∃ before after,
+      ObjectRecord.views (seedFacts request height) none seed = some (before, after) ∧
+        Minidregg.Pred.eval (Minidregg.Pred.Pred.all [Minidregg.Compiler.ObjectiveBendLaw.packageLaw created.laws,
+          request.law]) before after = true ∧
+        readState config snapshot request.object = .ok none ∧
+        seedPost config snapshot request seed ∈ created.posts := by
+  obtain ⟨⟨before, after, viewed, accepted⟩, _⟩ :=
+    (ObjectRecord.admitSeed_ok_iff _ _ _).mp (created.seedJudged seed seeded)
+  refine ⟨before, after, viewed, accepted, created.stateFresh seed seeded, ?_⟩
+  rw [created.postsExact, seeded]
+  simp
+
+/-- **`create_seed_refused_names_clause`.** A seed the seed law (the package's laws, then the
+creator's) refuses is refused, and the refusal names the failing clause on the seed's own views. -/
+theorem create_seed_refused_names_clause {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {request : CreateRequest} {seed : Data}
+    {reason : ObjectRecord.WriteRefusal}
+    (absent : readObject config snapshot request.object = .ok none)
+    (published : (bodyOf .package (snapshot.canonicalBytes (packageCell config.domain request.pin))).isSome = true)
+    (data : request.stateType.isData = true)
+    {laws : List (String × Minidregg.Compiler.ObjectiveBendLaw.LawExpr)}
+    (lawsExact : packageLawsAt config snapshot request.pin = .ok laws)
+    (fieldsKnown : ObjectRecord.lawFieldIssue request.stateType laws = none)
+    (seeded : request.seed = some seed)
+    (fresh : readState config snapshot request.object = .ok none)
+    (refused : ObjectRecord.admitSeed (request.record laws) (seedFacts request height) seed = .error reason) :
+    create config snapshot height request = .error (.objectWrite reason) := by
+  unfold create
+  split
+  · rename_i reason' found; rw [absent] at found; cases found
+  · rename_i found; rw [absent] at found; cases found
+  · rename_i found
+    rw [dif_pos published, dif_pos data]
+    split
+    next reason1 read => rw [lawsExact] at read; cases read
+    next laws2 read =>
+      rw [lawsExact] at read; cases read
+      split
+      next field issue => rw [fieldsKnown] at issue; cases issue
+      next issue =>
+        split
+        next plan => rw [seeded] at plan; cases plan
+        next seed2 plan =>
+          rw [seeded] at plan; cases plan
+          split
+          next reason2 sr => rw [fresh] at sr; cases sr
+          next found2 sr => rw [fresh] at sr; cases sr
+          next sr =>
+            split
+            next reason3 judged => rw [refused] at judged; cases judged; rfl
+            next judged => rw [refused] at judged; cases judged
+
+/-- **`pin_not_removable`.** Whatever turn commits `posts` on a snapshot where the object's
+record reads as `record`, if no post lands on the object's record coordinate the record reads
+the same afterwards, so the law that judges the object's writes still leads with the pin clause
+of the record's pins (`ObjectRecord.pins`). Posts that land on an object record coordinate are
+`create`'s, the counters' (`countPosts`, `objectPost`: they keep the pins, `ObjectRecord.bump_pins`)
+and the upgrade turns' (ADOPT adds the next pin, MIGRATE re-pins); the `unwritten` premise is the
+coordinate-separation premise every theorem about other posts carries. -/
+theorem pin_not_removable {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    (posts : List Post) {object : CellId} {record : ObjectRecord}
+    (read : readObject config snapshot object = .ok (some record))
+    (unwritten : ∀ post ∈ posts, post.cell ≠ objectCell config.domain object) :
+    objectAt config (afterPosts snapshot posts) object = some record ∧
+      record.effectiveLaw = Minidregg.Pred.Pred.all [Minidregg.Pred.objectivePin record.pins,
+        Minidregg.Compiler.ObjectiveBendLaw.packageLaw record.packageLaws, record.law] := by
+  refine ⟨?_, rfl⟩
+  unfold objectAt
+  rw [afterPosts_unwritten snapshot _ _ unwritten]
+  exact objectAt_of_read read
+
+/-- **`retention_cells_have_payer`, creation**: the object's record, and its seeded state cell,
+name the object's payer. -/
 theorem Creation.retention_cells_have_payer {rootBytes : Bytes → Digest} {config : Config}
-    {snapshot : Snapshot rootBytes} {request : CreateRequest} (created : Creation config snapshot request) :
+    {snapshot : Snapshot rootBytes} {height : Nat} {request : CreateRequest}
+    (created : Creation config snapshot height request) :
     ∀ post ∈ created.posts,
-      payerOfBytes config (afterPosts snapshot created.posts) post.bytes = some request.record.payer := by
+      payerOfBytes config (afterPosts snapshot created.posts) post.bytes = some (request.record created.laws).payer := by
   intro post member
   rw [created.postsExact] at member
-  simp only [List.mem_singleton] at member
-  subst member
-  simp [postAt, objectImage, payerOfBytes, payloadOf_image, payerRoute, routePayer, ObjectRecord.record_roundTrip]
-
-/-- **`retention_cells_have_payer`, a direct state write**: the state cell names
-its object's payer (premise: the state and object-record coordinates differ). -/
-theorem StateWrite.retention_cells_have_payer {rootBytes : Bytes → Digest} {config : Config}
-    {snapshot : Snapshot rootBytes} {height : Nat} {request : StateWriteRequest}
-    (written : StateWrite config snapshot height request)
-    (distinct : stateCell config.domain request.object ≠ objectCell config.domain request.object) :
-    ∀ post ∈ written.posts,
-      payerOfBytes config (afterPosts snapshot written.posts) post.bytes = some written.object.payer := by
-  have unwritten : ∀ post ∈ written.posts, post.cell ≠ objectCell config.domain request.object := by
-    intro post member
-    rw [written.postsExact] at member
-    simp only [List.mem_singleton] at member
-    subst member
-    exact distinct
-  have held : objectAt config (afterPosts snapshot written.posts) request.object = some written.object := by
-    unfold objectAt
-    rw [afterPosts_unwritten snapshot _ _ unwritten]
-    exact objectAt_of_read written.objectExact
-  intro post member
-  have shape := member
-  rw [written.postsExact] at shape
-  simp only [List.mem_singleton] at shape
-  rw [shape]
-  exact payer_state_image config _ request.object _ written.object held
+  rcases List.mem_cons.mp member with head | tail
+  · subst head
+    simp [postAt, objectImage, payerOfBytes, payloadOf_image, payerRoute, routePayer, ObjectRecord.record_roundTrip]
+  · cases seeded : request.seed with
+    | none => simp [seeded] at tail
+    | some seed =>
+      simp only [seeded, Option.map_some, Option.toList_some, List.mem_singleton] at tail
+      subst tail
+      exact payer_state_image config _ request.object _ (request.record created.laws) created.object_installed
 
 theorem decide_activity {slot decided : AnswerSlot.Slot} {subject : SubjectId} {height : Nat}
     {decision : AnswerSlot.Decision} (ok : AnswerSlot.decide slot subject height decision = .ok decided) :
@@ -4177,7 +6008,8 @@ theorem Resolution.retention_cells_have_payer {rootBytes : Bytes → Digest} {co
   rw [resolution.postsExact] at shape
   simp only [List.mem_singleton] at shape
   rw [shape]
-  exact payer_slot_image config _ resolution.decided record held
+  obtain ⟨_, _, _, decidedEq, _⟩ := AnswerSlot.decide_single_decider resolution.decidedExact
+  exact payer_slot_image config _ resolution.decided record ⟨_, by rw [decidedEq]; exact AnswerSlot.decide_single_decider resolution.decidedExact |>.1⟩ held
 
 #assert_axioms retention_census_paid
 #assert_axioms planted_census_unpaid
@@ -4186,12 +6018,48 @@ theorem Resolution.retention_cells_have_payer {rootBytes : Bytes → Digest} {co
 #assert_axioms payloadOf_image
 #assert_axioms payloadOf_book
 #assert_axioms recordFirst_cells_paid
+#assert_axioms payer_object_image
+#assert_axioms objectImage_ne_slot
+#assert_axioms objectAt_afterPosts
+#assert_axioms mem_countPosts
+#assert_axioms mem_objectPost
 #assert_axioms Birth.retention_cells_have_payer
 #assert_axioms Delivery.retention_cells_have_payer
 #assert_axioms Exhaustion.retention_cells_have_payer
 #assert_axioms Publication.retention_cells_have_payer
 #assert_axioms Creation.retention_cells_have_payer
-#assert_axioms StateWrite.retention_cells_have_payer
+#assert_axioms Creation.object_installed
+#assert_axioms create_installs_pin
+#assert_axioms create_seed_judged
+#assert_axioms create_seed_refused_names_clause
+#assert_axioms pin_not_removable
 #assert_axioms Resolution.retention_cells_have_payer
+
+#assert_axioms readRecord_fits
+#assert_axioms checkpointDigest_fits_of
+#assert_axioms Birth.record_fits
+#assert_axioms Delivery.next_fits
+#assert_axioms Exhaustion.next_fits
+#assert_axioms activityId_lt
+
+#assert_axioms storageDeposit_mask
+#assert_axioms commitYield_await_mask
+#assert_axioms segmentCommit_await_mask
+#assert_axioms nextRecord_mask
+#assert_axioms Birth.deposit_stable
+#assert_axioms BirthPrefix.deposit_stable
+#assert_axioms BirthPrefix.demand_independent
+#assert_axioms birth_not_underfunded_at_quote
+#assert_axioms BirthPrefix.record_fits
+#assert_axioms birth_of_prefix_error
+#assert_axioms Birth.demand_le_deposit
+#assert_axioms replayPackage_decoded
+#assert_axioms instantiate_replayed
+#assert_axioms loadProgram_instantiated
+#assert_axioms frontEnd_work_within
+#assert_axioms frontEndPaid_refuses
+#assert_axioms frontEndPaid_at_quote
+#assert_axioms BirthPrefix.runs_within
+#assert_axioms BirthPrefix.work_within
 
 end Minidregg.Kernel.ObjectiveActivity

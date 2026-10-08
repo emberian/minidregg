@@ -86,13 +86,17 @@ def targetConfig {F : Type} [Field F] [DecidableEq F]
     ((WorldKindLawDependencies.loadTarget deployment directory target).map (·.additional) |>.getD [])
 
 /-- One law judgement: the resolved committed law of a configuration, with the compiler's verdicts
-on its step -- every input the law reads is in range, and the field cast of those inputs is
-injective. A false verdict REFUSES (`policyInputRange`, `policyCastAlias`); it never degrades to a
-false predicate or a skipped law. -/
+on its step -- the compiler can lower the law (`supported`), every input the law reads is in range,
+and the field cast of those inputs is injective. These are exactly the premises under which the
+law's compiled verdict is its `Pred.eval` (`ComposedPolicyAdmission.PreparedLaw.verifies_iff_eval`),
+so a judge that reads `Pred.eval` under three true verdicts agrees with the compiled admission. A
+false verdict REFUSES (`lawUnsupported`, `policyInputRange`, `policyCastAlias`); it never degrades to
+a false predicate or a skipped law. -/
 structure Judged {F : Type} [Field F] [DecidableEq F] (config : ComposedPolicyAdmission.Config F) where
   law : ComposedPolicyAdmission.PreparedLaw config
   inRange : Bool
   castsInjective : Bool
+  supported : Bool
 
 /-- The judgement of a configuration: `config.resolve?`, then `inputsInRange` and `castInjOn` on its
 own step. The one sequence: the DRC's `authorizeLeg` and the Receiver's `Laws.physical` run it. -/
@@ -101,7 +105,8 @@ def judge {F : Type} [Field F] [DecidableEq F] (config : ComposedPolicyAdmission
   let law ← config.resolve?
   pure ⟨law,
     inputsInRange config.profile.compiler law.predicate config.step.oldState config.step.newState,
-    decide (castInjOn F (intsOf law.predicate config.step.oldState config.step.newState))⟩
+    decide (castInjOn F (intsOf law.predicate config.step.oldState config.step.newState)),
+    supported config.profile.compiler law.predicate⟩
 
 /-- The judgement is the resolution, with its two verdicts read on the resolved law. -/
 theorem judge_some_iff {F : Type} [Field F] [DecidableEq F] (config : ComposedPolicyAdmission.Config F)
@@ -111,7 +116,8 @@ theorem judge_some_iff {F : Type} [Field F] [DecidableEq F] (config : ComposedPo
       judged.inRange = inputsInRange config.profile.compiler judged.law.predicate
         config.step.oldState config.step.newState ∧
       judged.castsInjective =
-        decide (castInjOn F (intsOf judged.law.predicate config.step.oldState config.step.newState)) := by
+        decide (castInjOn F (intsOf judged.law.predicate config.step.oldState config.step.newState)) ∧
+      judged.supported = supported config.profile.compiler judged.law.predicate := by
   unfold judge
   cases resolved : config.resolve? with
   | none => simp
@@ -119,12 +125,12 @@ theorem judge_some_iff {F : Type} [Field F] [DecidableEq F] (config : ComposedPo
       simp only [Option.bind_eq_bind, Option.bind_some, Option.pure_def, Option.some.injEq]
       constructor
       · rintro rfl
-        exact ⟨rfl, rfl, rfl⟩
-      · obtain ⟨law, inRange, casts⟩ := judged
-        rintro ⟨lawEq, rangeEq, castEq⟩
-        simp only at lawEq rangeEq castEq
+        exact ⟨rfl, rfl, rfl, rfl⟩
+      · obtain ⟨law, inRange, casts, lowerable⟩ := judged
+        rintro ⟨lawEq, rangeEq, castEq, supportedEq⟩
+        simp only at lawEq rangeEq castEq supportedEq
         subst lawEq
-        rw [rangeEq, castEq]
+        rw [rangeEq, castEq, supportedEq]
 
 /-- **The judgement does not read the base portal**: two target configurations that differ only
 in the capability portal they carry judge the same law with the same verdicts. So the DRC's legs
@@ -135,13 +141,123 @@ theorem judge_portal_irrelevant {F : Type} [Field F] [DecidableEq F]
     (snapshot : Snapshot) (directory : Directory Nat CanonicalCellRegistry.registry) (left right : Portal)
     (step : PolicyStepContext) (target : Nat) :
     (judge (targetConfig deployment profile snapshot directory left step target)).map
-        (fun judged => (judged.law.predicate, judged.inRange, judged.castsInjective)) =
+        (fun judged => (judged.law.predicate, judged.inRange, judged.castsInjective,
+          judged.supported)) =
       (judge (targetConfig deployment profile snapshot directory right step target)).map
-        (fun judged => (judged.law.predicate, judged.inRange, judged.castsInjective)) := by
+        (fun judged => (judged.law.predicate, judged.inRange, judged.castsInjective,
+          judged.supported)) := by
   simp only [judge, ComposedPolicyAdmission.Config.resolve?, targetConfig, config,
     ComposedPolicyAdmission.PreparedLaw.predicate]
   repeat' split
   all_goals rfl
+
+/-- **A resolved law does not depend on the portal it was resolved under**: two
+resolutions of one target on one step and snapshot, with the same structural
+restrictions, carry the same predicate whatever capability portals their
+configurations hold.  So a family's request binding (under the operation's
+portal) and the Receiver's judgement (under `lawPortal`) are about one law. -/
+theorem predicate_portal_irrelevant {F : Type} [Field F] [DecidableEq F]
+    (profile : PolicyCompilerProfile F) (snapshot : Snapshot)
+    (directory : Directory Nat CanonicalCellRegistry.registry) (left right : Portal)
+    (step : PolicyStepContext) (target : Nat) (additional : List PolicyRef)
+    (leftLaw : ComposedPolicyAdmission.PreparedLaw
+      (config profile snapshot directory left step target additional))
+    (rightLaw : ComposedPolicyAdmission.PreparedLaw
+      (config profile snapshot directory right step target additional)) :
+    leftLaw.predicate = rightLaw.predicate := by
+  have same := leftLaw.graphExact.symm.trans rightLaw.graphExact
+  injection same with graphs
+  unfold ComposedPolicyAdmission.PreparedLaw.predicate
+  rw [graphs]
+  exact rfl
+
+/-- **The Receiver's judgement completes a bound request.**  A judgement that
+resolved a configuration's law with all three compiler verdicts true and whose
+predicate accepts the step, and a request bound (`ComposedPolicyAdmission.Bound`)
+to the same target, step, snapshot and restrictions under any other portal: the
+bound request's compiled verdict holds.  So a family that binds and leaves the
+verdict to the Receiver admits exactly what `ComposedPolicyAdmission.admit`
+admitted (`Bound.admit_of_verifies`). -/
+theorem bound_verifies_of_judged {F : Type} [Field F] [DecidableEq F]
+    (profile : PolicyCompilerProfile F) (snapshot : Snapshot)
+    (directory : Directory Nat CanonicalCellRegistry.registry) (left right : Portal)
+    (step : PolicyStepContext) (target : Nat) (additional : List PolicyRef)
+    (judged : Judged (config profile snapshot directory left step target additional))
+    (judgedExact : judge (config profile snapshot directory left step target additional) = some judged)
+    (lowerable : judged.supported = true) (inRange : judged.inRange = true)
+    (casts : judged.castsInjective = true)
+    (evaluated : Minidregg.Pred.eval judged.law.predicate step.oldState step.newState = true)
+    {kind : ResourceKind} {request : Request kind}
+    (bound : ComposedPolicyAdmission.Bound
+      (config profile snapshot directory right step target additional) request) :
+    (config profile snapshot directory right step target additional).verifies request
+      bound.law.witness = true := by
+  obtain ⟨-, rangeEq, castEq, supportedEq⟩ := (judge_some_iff _ judged).1 judgedExact
+  have same := predicate_portal_irrelevant profile snapshot directory left right step target
+    additional judged.law bound.law
+  rw [supportedEq] at lowerable
+  rw [rangeEq] at inRange
+  rw [castEq] at casts
+  refine (bound.verifies_iff_eval ?_ ?_ ?_).2 ?_
+  · rw [← same]
+    exact lowerable
+  · rw [← same]
+    exact inRange
+  · rw [← same]
+    exact of_decide_eq_true casts
+  · rw [← same]
+    exact evaluated
+
+/-- The same, for the Receiver's own configuration (`targetConfig`), whose
+structural restrictions are the target's loaded ones. -/
+theorem bound_verifies_of_target_judged {F : Type} [Field F] [DecidableEq F]
+    (deployment : CanonicalCellRegistry.Deployment) (profile : PolicyCompilerProfile F)
+    (snapshot : Snapshot) (directory : Directory Nat CanonicalCellRegistry.registry)
+    (left right : Portal) (step : PolicyStepContext) (target : Nat) (additional : List PolicyRef)
+    (restrictions : ((WorldKindLawDependencies.loadTarget deployment directory target).map
+      (·.additional) |>.getD []) = additional)
+    (judged : Judged (targetConfig deployment profile snapshot directory left step target))
+    (judgedExact : judge (targetConfig deployment profile snapshot directory left step target) =
+      some judged)
+    (lowerable : judged.supported = true) (inRange : judged.inRange = true)
+    (casts : judged.castsInjective = true)
+    (evaluated : Minidregg.Pred.eval judged.law.predicate step.oldState step.newState = true)
+    {kind : ResourceKind} {request : Request kind}
+    (bound : ComposedPolicyAdmission.Bound
+      (config profile snapshot directory right step target additional) request) :
+    (config profile snapshot directory right step target additional).verifies request
+      bound.law.witness = true := by
+  revert judged
+  unfold targetConfig
+  rw [restrictions]
+  intro judged judgedExact lowerable inRange casts evaluated
+  exact bound_verifies_of_judged profile snapshot directory left right step target additional
+    judged judgedExact lowerable inRange casts evaluated bound
+
+/-- The judgement of an EXPORT law: the composed law of `roots` (a newborn's room
+descendants and structural parents) loaded at one snapshot, with the three
+compiler verdicts on `step`.  A birth is judged by this, not by a committed law at
+its own (fresh) id. -/
+structure RootsJudged {F : Type} [Field F] [DecidableEq F] (snapshot : Snapshot)
+    (directory : Directory Nat CanonicalCellRegistry.registry) (semantics : Digest)
+    (roots : List PolicyRef) where
+  law : GuardedRoots snapshot directory semantics roots
+  predicate : Minidregg.Pred.Pred
+  predicateExact : predicate = ResolvedLawCompilation.predicate law.graph.resolved
+  inRange : Bool
+  castsInjective : Bool
+  supported : Bool
+
+def judgeRoots {F : Type} [Field F] [DecidableEq F] (profile : PolicyCompilerProfile F)
+    (snapshot : Snapshot) (directory : Directory Nat CanonicalCellRegistry.registry)
+    (roots : List PolicyRef) (step : PolicyStepContext) :
+    Option (RootsJudged (F := F) snapshot directory profile.semantics roots) := do
+  let law ← loadRoots snapshot directory profile.semantics roots resolutionBudget
+  let predicate := ResolvedLawCompilation.predicate law.graph.resolved
+  pure ⟨law, predicate, rfl,
+    inputsInRange profile.compiler predicate step.oldState step.newState,
+    decide (castInjOn F (intsOf predicate step.oldState step.newState)),
+    supported profile.compiler predicate⟩
 
 def readGuards (snapshot : Snapshot)
     (directory : Directory Nat CanonicalCellRegistry.registry)
@@ -152,5 +268,8 @@ def readGuards (snapshot : Snapshot)
 
 #assert_axioms judge_some_iff
 #assert_axioms judge_portal_irrelevant
+#assert_axioms predicate_portal_irrelevant
+#assert_axioms bound_verifies_of_judged
+#assert_axioms bound_verifies_of_target_judged
 
 end Minidregg.Compiler.PhysicalLawResolution

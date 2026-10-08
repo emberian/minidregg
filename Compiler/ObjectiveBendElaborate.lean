@@ -10,9 +10,11 @@ surface semantics, which does not exist. All recursion is fuel-bounded; running
 out of fuel is a refusal, never a guess. -/
 import Lean
 import Compiler.ObjectiveBendParse
+import Compiler.ObjectiveBendLaw
 import Std.Data.HashMap
 import Theory.ObjectiveBendOpenRecursion
 import Compiler.ObjectiveBendC4
+import Compiler.ObjectiveBendContract
 namespace Minidregg.Compiler.ObjectiveBendElaborate
 open Lean
 set_option autoImplicit false
@@ -76,7 +78,7 @@ structure Method where
   signature : Json
   deriving Inhabited
 
-structure Law where
+structure Claim where
   name : String
   params : List Param
   body : Expr
@@ -89,7 +91,7 @@ structure Spec where
   targetType : String
   requirements : Json
   methods : List Method
-  laws : List Law
+  claims : List Claim
   /-- `Self has {...}, Super has {...}` of an open spec (OB-LTUO LT2), "" for `spec S for T`. -/
   binders : String := ""
   deriving Inhabited
@@ -116,6 +118,9 @@ structure Module where
   /-- (alias, imported module name) in source order. -/
   imports : List (String × String)
   decls : List Decl
+  /-- The module's top-level enforced laws (`law NAME: EXPR`), in source order. They are not
+  terms: the elaborator never sees them; the front end hands the entry module's to the artifact. -/
+  laws : List (String × ObjectiveBendLaw.LawExpr) := []
   deriving Inhabited
 
 /-! ## Decoding the TS parser's AST JSON -/
@@ -196,18 +201,18 @@ def decodeDecl (j : Json) : Except String Decl := do
       let qualifier := (m.getObjValAs? String "qualifier").toOption.getD "primary"
       let body ← decodeBody fuel (← m.getObjVal? "body")
       return (Method.mk name params resultType qualifier body (withoutKey m "body"))
-    let laws ← (← arr j "laws").mapM fun l => do
+    let claims ← (← arr j "claims").mapM fun l => do
       let name ← str l "name"
       let params ← (← arr l "parameters").mapM decodeParam
       let body ← decodeExpr fuel (← l.getObjVal? "body")
-      return (Law.mk name params body)
+      return (Claim.mk name params body)
     let name ← str j "name"
     let suffix := (j.getObjValAs? Bool "suffix").toOption.getD false
     let parents ← (← arr j "parents").mapM (fun p => p.getStr?)
     let targetType ← str j "targetType"
     let requirements ← j.getObjVal? "requirements"
     let binders := (j.getObjValAs? String "binders").toOption.getD ""
-    return .spec (Spec.mk name suffix parents targetType requirements methods laws binders)
+    return .spec (Spec.mk name suffix parents targetType requirements methods claims binders)
   | "extension" =>
     let name ← str j "name"
     let params ← (← arr j "parameters").mapM decodeParam
@@ -232,8 +237,15 @@ def decodeDecl (j : Json) : Except String Decl := do
 /-- `{name, imports:[{alias, moduleName}], ast}` as the TS elaborator receives it. -/
 def decodeModule (j : Json) : Except String Module := do
   let ast ← j.getObjVal? "ast"
+  let mut decls : List Decl := []
+  let mut laws : List (String × ObjectiveBendLaw.LawExpr) := []
+  for d in ← arr ast "declarations" do
+    if (str d "kind").toOption == some "law" then
+      laws := laws ++ [(← str d "name", ← ObjectiveBendLaw.parse (← str d "source"))]
+    else decls := decls ++ [← decodeDecl d]
+  ObjectiveBendLaw.checkNames laws
   return ⟨← str j "name", ← (← arr j "imports").mapM (fun i => do return (← str i "alias", ← str i "moduleName")),
-    ← (← arr ast "declarations").mapM decodeDecl⟩
+    decls, laws⟩
 
 /-! ## Proposal types (the `Ty` JSON wire of Theory.ObjectiveBendTyping.typeJson, plus `variant`) -/
 
@@ -441,7 +453,10 @@ structure St where
   /-- Per open declaration, in emission order: its key, its `Self` variable's index and its
   knot field (the template at its own bounds). The front end checks each once with that
   variable RIGID (`ObjectiveBendFrontEnd.checkTemplates`, D2). -/
-  templates : List (String × Nat × ATerm) := []
+  templates : List (String × List Nat × ATerm) := []
+  /-- Each open declaration's template layer at its own bounds, elaborated ONCE: the knot field
+  holds it (checked rigid) and every chain instance is `instantiate σ` of it. -/
+  templateLayers : List (String × (Nat × Nat × ATerm)) := []
   /-- The declared result type of the body being lowered (for a `fix` in tail position). -/
   resultType : Option PTy := none
   /-- The target a `fix` about to be lowered must produce (tail position or annotated let). -/
@@ -500,24 +515,24 @@ def splitTop (text : String) (sep : String) : List String :=
 `specification(SpecMeta, Extension<T>)`), declared in the built-in module as two
 recursive sums (`builtinSource`):
 
-    sum SpecLaws:  none: {} | law: {name: String, status: String, rest: SpecLaws}
-    sum SpecMeta:  declared: {name: String, interface: String, laws: SpecLaws}
+    sum SpecClaims:  none: {} | claim: {name: String, status: String, rest: SpecClaims}
+    sum SpecMeta:  declared: {name: String, interface: String, claims: SpecClaims}
                  | composed: {inherited: SpecMeta, wrapping: SpecMeta}
                  | extension: {}
 
-It is first-order data, the same for every target, so laws and composition never change
+It is first-order data, the same for every target, so claims and composition never change
 a specification's public type, and `compose` is closed over `Specification<T>`. The
 reflection contract (what a client may observe) is docs/objective-bend/REFLECTION.md. -/
 def specMetaName : String := "SpecMeta"
-def specLawsName : String := "SpecLaws"
+def specClaimsName : String := "SpecClaims"
 /-- The built-in module: types every module resolves by bare name; no module may declare
 them, and it has no definitions (nothing of it is emitted). Not a legal source module name. -/
 def builtinModuleName : String := "$builtin"
-def builtinTypeNames : List String := [specMetaName, specLawsName]
+def builtinTypeNames : List String := [specMetaName, specClaimsName]
 def builtinSource : String :=
   "edition ObjectiveBend 1\n" ++
-  "sum SpecLaws:\n  none: {}\n  law: {name: String, status: String, rest: SpecLaws}\n\n" ++
-  "sum SpecMeta:\n  declared: {name: String, interface: String, laws: SpecLaws}\n" ++
+  "sum SpecClaims:\n  none: {}\n  claim: {name: String, status: String, rest: SpecClaims}\n\n" ++
+  "sum SpecMeta:\n  declared: {name: String, interface: String, claims: SpecClaims}\n" ++
   "  composed: {inherited: SpecMeta, wrapping: SpecMeta}\n  extension: {}\n"
 
 def lookupGlobal (c : Ctx) (name : String) (m : Module) : Option String :=
@@ -605,6 +620,10 @@ def PTy.overlay : PTy → PTy → PTy
   | .field n t rest, inherited => .field n t (rest.overlay inherited)
   | _, inherited => inherited
 
+/-- The row a spec's method definitions leave over `inherited` (canonical). -/
+def overDefs (defs : List (String × PTy)) (inherited : PTy) : PTy :=
+  (PTy.overlay (PTy.row defs) inherited).canonical
+
 def isRowTy : PTy → Bool
   | .field .. | .emptyRow => true
   | _ => false
@@ -662,7 +681,13 @@ def sourceType (c : Ctx) : Nat → String → String → List String → M (Opti
     if let [left, right] := splitTop name " with " then
       let some l ← sourceType c fuel left moduleName seen | return none
       let some r ← sourceType c fuel right moduleName seen | return none
-      if !isRowTy l || !isRowTy r then
+      let bounds := (← get).sumBounds
+      let rowVariable := match l with
+        | .variable k => match bounds.lookup k with
+          | some bound => isRowTy bound
+          | none => false
+        | _ => false
+      if !(isRowTy l || rowVariable) || !isRowTy r then
         typeError ("`" ++ name ++ "`: `with` overlays a record row on a record row"); return none
       return some (PTy.overlay r l).canonical
     if name.startsWith "{" && name.endsWith "}" then
@@ -823,7 +848,7 @@ def globalType (c : Ctx) : Nat → String → M (Option PTy)
           let some (selfVar, superRow) ← openBinding c fuel key binders [] m.name | pure none
           withTypes [("Self", selfVar), ("Super", superRow)] (signatureTy c fuel params (.source targetType) m.name [])
       | .spec s => do
-        -- Laws are not part of the type (they are checked as their own hidden fields).
+        -- Claims are not part of the type (they are checked as their own hidden fields).
         let metaTy ← sourceType c fuel specMetaName builtinModuleName []
         if !s.binders.isEmpty then
           -- An open spec's knot field is its instance at its own bounds.
@@ -867,20 +892,34 @@ def openBinding (c : Ctx) : Nat → String → String → List Signature → Str
     | some sr, some ir =>
       if !ok || !isRowTy sr || !isRowTy ir then
         typeError ("open declaration " ++ key ++ ": Self and Super bounds must be record rows"); return none
-      modify fun s => { s with sumBounds := s.sumBounds ++ [(index, (PTy.overlay (PTy.row required) sr).canonical)] }
-      modify fun s => { s with openBounds := s.openBounds ++ [(key, (selfVar, ir))] }
-      return some (selfVar, ir)
+      -- Super is abstract too (GPT-6 row D): a second bounded variable whose bound is the Super
+      -- row, so the template is checked against what it READS of the row beneath, never against
+      -- the bound row as if it were the row itself (super-rigid).
+      let superIndex := (← get).sumVariables.length + 1
+      modify fun s => { s with sumVariables := s.sumVariables ++ [("$Super:" ++ key, superIndex)] }
+      modify fun s => { s with sumBounds := s.sumBounds ++ [(index, (PTy.overlay (PTy.row required) sr).canonical),
+        (superIndex, ir.canonical)] }
+      let superVar := PTy.variable superIndex
+      modify fun s => { s with openBounds := s.openBounds ++ [(key, (selfVar, superVar))] }
+      return some (selfVar, superVar)
     | _, _ => return none
+
+/-- The members a spec's methods define, at their declared types. -/
+def specDefs (c : Ctx) : Nat → Spec → String → M (Option (List (String × PTy)))
+  | 0, _, _ => fail "type resolution fuel"
+  | fuel + 1, s, moduleName => do
+    let mut defs : List (String × PTy) := []
+    for method in s.methods do
+      let some t ← signatureTy c fuel method.params (.source method.resultType) moduleName [] | return none
+      defs := defs ++ [(method.name, t)]
+    return some defs
 
 /-- The row a plain spec provides over `inherited`: its methods overlaid on it (canonical). -/
 def specProvided (c : Ctx) : Nat → Spec → String → PTy → M (Option PTy)
   | 0, _, _, _ => fail "type resolution fuel"
   | fuel + 1, s, moduleName, inherited => do
-    let mut defs : List (String × PTy) := []
-    for method in s.methods do
-      let some t ← signatureTy c fuel method.params (.source method.resultType) moduleName [] | return none
-      defs := defs ++ [(method.name, t)]
-    return some (PTy.overlay (PTy.row defs) inherited).canonical
+    let some defs ← specDefs c fuel s moduleName | return none
+    return some (overDefs defs inherited)
 
 def synth (c : Ctx) : Nat → Expr → List Binding → Module → M (Option PTy)
   | 0, _, _, _ => fail "type synthesis fuel"
@@ -1045,6 +1084,64 @@ def abstract (c : Ctx) (fuel : Nat) (params : List Param) (env : List Binding)
     (lower : List Binding → M ATerm) (nodeName : String) (result : ResultSpec) (moduleName : String) : M ATerm :=
   abstractWith c fuel params none env lower nodeName result moduleName
 
+/-- Substitute type variables (`σ i = some t` replaces variable `i`). -/
+def PTy.subst (σ : Nat → Option PTy) : PTy → PTy
+  | .variable i => (σ i).getD (.variable i)
+  | .arrow r q d c => .arrow r q (d.subst σ) (c.subst σ)
+  | .field n m t => .field n (m.subst σ) (t.subst σ)
+  | .specification m e => .specification (m.subst σ) (e.subst σ)
+  | .variant r => .variant (r.subst σ)
+  | .computation p r a => .computation (p.subst σ) (r.subst σ) (a.subst σ)
+  | other => other
+
+mutual
+/-- Apply `f` to every type annotation of a lowered term. -/
+def ATerm.mapTypes (f : PTy → PTy) : ATerm → ATerm
+  | .bound i => .bound i
+  | .lam p b => .lam { p with domain := p.domain.map f, codomain := p.codomain.map f } (b.mapTypes f)
+  | .app x y => .app (x.mapTypes f) (y.mapTypes f)
+  | .mix x y => .mix (x.mapTypes f) (y.mapTypes f)
+  | .fix x y => .fix (x.mapTypes f) (y.mapTypes f)
+  | .specification x y => .specification (x.mapTypes f) (y.mapTypes f)
+  | .prototype x y => .prototype (x.mapTypes f) (y.mapTypes f)
+  | .reflect x => .reflect (x.mapTypes f)
+  | .metadata x => .metadata (x.mapTypes f)
+  | .project x => .project (x.mapTypes f)
+  | .nat v => .nat v
+  | .boolean v => .boolean v
+  | .label v => .label v
+  | .binary p x y => .binary p (x.mapTypes f) (y.mapTypes f)
+  | .extend x fs => .extend (x.mapTypes f) (ATerm.mapFieldTypes f fs)
+  | .record fs => .record (ATerm.mapFieldTypes f fs)
+  | .get x n => .get (x.mapTypes f) n
+  | .ifZero x z y => .ifZero (x.mapTypes f) (z.mapTypes f) (y.mapTypes f)
+  | .inject l t r x => .inject l (t.map f) r (x.mapTypes f)
+  | .case x arms => .case (x.mapTypes f) (ATerm.mapFieldTypes f arms)
+  | .ifBool x y z => .ifBool (x.mapTypes f) (y.mapTypes f) (z.mapTypes f)
+  | .perform p r x => .perform (f p) (f r) (x.mapTypes f)
+  | .done p r x => .done (f p) (f r) (x.mapTypes f)
+def ATerm.mapFieldTypes (f : PTy → PTy) : List (String × ATerm) → List (String × ATerm)
+  | [] => []
+  | (n, x) :: rest => (n, x.mapTypes f) :: ATerm.mapFieldTypes f rest
+end
+
+/-- A template's instance at σ: its annotations substituted, then canonical (the instance a
+chain emits; MODULAR-TYPING §6 `template[σ]`). -/
+def ATerm.instantiate (σ : Nat → Option PTy) (t : ATerm) : ATerm :=
+  t.mapTypes fun ty => (ty.subst σ).canonical
+
+/-- Re-annotate the result of the `n`-parameter function `t` as `result` (the last layer of a
+chain over a recursive record is annotated with the record's variable, which unfolds to the
+row the layer provides). Returns the term and its new type. -/
+def ATerm.retarget (result : PTy) : Nat → ATerm → ATerm × Option PTy
+  | 0, t => (t, some result)
+  | n + 1, .lam p b =>
+    let (b', cod) := ATerm.retarget result n b
+    (.lam { p with codomain := cod } b', match p.domain, cod with
+      | some d, some c => some (arrowTy d c p.parameter p.reuse)
+      | _, _ => none)
+  | _, t => (t, none)
+
 def rowNames : PTy → List String
   | .field n _ t => n :: rowNames t
   | _ => []
@@ -1114,7 +1211,7 @@ def precedence (c : Ctx) : Nat → String → M (List String)
       fun k => match specOf c k with | some (s', _) => s'.suffix | none => false⟩
     let list ← match ObjectiveBendC4.linearize graph [key] [parents] with
       | .ok (l, _) => pure l
-      | .error e => fail ("C4 linearization of " ++ key ++ " refused: " ++ e)
+      | .error e => fail ("C4 linearization of " ++ key ++ " refused: " ++ e.message)
     modify fun st => { st with linearizing := st.linearizing.erase key, precedence := st.precedence ++ [(key, list)] }
     return list
 
@@ -1172,12 +1269,25 @@ def rowFields : PTy → List (String × PTy)
   | .field n t rest => (n, t) :: rowFields rest
   | _ => []
 
-/-- The members of `required` that `actual` lacks or has at another type. -/
-def unsupported (actual required : PTy) : List String :=
-  (rowFields required).filterMap fun (n, t) =>
-    match lookupRow (some actual) n with
-    | some t' => if sameTy (some t) (some t') then none else some n
-    | none => some n
+/-- A row as the composition contract reads it: its fields, each at its canonical type, so the
+contract's `==` on a member type is `sameTy`. -/
+def contractRow (row : PTy) : ObjectiveBendContract.Row PTy :=
+  (rowFields row).map fun (n, t) => (n, t.canonical)
+
+/-- The text of a composition-contract refusal (the `refused (...)` names the cohorts pin). -/
+def contractRefusalText : ObjectiveBendContract.Refusal → String
+  | .selfBound key missing => "refused (self-bound): " ++ key ++ " needs the final self to have " ++
+      ", ".intercalate missing ++ " at the types its Self bound declares; the self of this fix does not"
+  | .inheritedUnprovided key missing beneath => "refused (inherited-unprovided): " ++ key ++ " needs " ++
+      ", ".intercalate missing ++ " from the row beneath it, which is {" ++ ", ".intercalate beneath ++ "}"
+  | .replaceUndeclared key members => "refused (replace-undeclared): " ++ key ++ " gives " ++
+      ", ".intercalate members ++ " a type other than the row beneath it gives; a layer may add a member " ++
+      "or override it at the same type, and no source form declares a replacement"
+  | .requiresUnprovided missing => "refused (requires-unprovided): this fix leaves " ++ ", ".intercalate missing ++
+      " of its final self unprovided: no layer of the composition and not the seed provides it"
+  | .seedExtra extra => "refused (seed-extra): the composition and seed provide " ++ ", ".intercalate extra ++
+      ", which the final self does not declare"
+  | .providedMismatch => "refused (provided-mismatch): the composition provides members of the final self at other types than it declares"
 
 /-- An open declaration's Self and Super bounds at a final self `target`. -/
 def boundsAt (c : Ctx) (fuel : Nat) (binders : String) (requirements : List Signature) (moduleName : String)
@@ -1247,6 +1357,10 @@ def expression (c : Ctx) : Nat → Expr → List Binding → Module → M ATerm
       if let .var "super" := target then
         if let some b := env.find? (·.name == "super") then
           if let some ty := b.ty then
+            let bounds := (← get).sumBounds
+            let ty := match ty with
+              | .variable k => (bounds.lookup k).getD ty
+              | t => t
             if isRowTy ty && (lookupRow (some ty) name).isNone then
               fail ("refused (inherited-unprovided): super." ++ name ++ " is read, but nothing below this layer provides " ++
                 name ++ " (inherited: {" ++ ", ".intercalate (rowNames ty) ++ "})")
@@ -1383,6 +1497,32 @@ def tail (c : Ctx) : Nat → Expr → List Binding → Module → M ATerm
       return ← expression c fuel e env m
     return .done p r (← expression c fuel e env m)
 
+/-- An open declaration's template layer at its own bounds (Self and Super its two rigid
+bounded variables), elaborated once and cached: `(Self index, Super index, layer)`. The knot
+field holds it, `checkTemplates` checks it rigid, and a chain's instance is `instantiate σ` of it. -/
+def templateLayer (c : Ctx) : Nat → String → Decl → Module → M (Nat × Nat × ATerm)
+  | 0, _, _, _ => fail "elaboration fuel"
+  | fuel + 1, key, d, m => do
+    if let some t := (← get).templateLayers.lookup key then return t
+    let requirements ← match d with
+      | .spec s => requirementsOf s
+      | _ => pure []
+    let some (selfVar, superVar) ← openBinding c fuel key d.binders requirements m.name
+      | fail ("open declaration " ++ key ++ ": its Self/Super bounds do not resolve")
+    let (.variable i, .variable j) := (selfVar, superVar)
+      | fail ("open declaration " ++ key ++ ": its Self/Super variables are unresolved")
+    let layer ← withTypes [("Self", selfVar), ("Super", superVar)] do
+      match d with
+      | .spec s =>
+        let some provided ← specProvided c fuel s m.name superVar
+          | fail ("open spec " ++ key ++ ": a method signature does not resolve")
+        layerAt c fuel s m selfVar superVar provided
+      | .extension _ params targetType b _ =>
+        abstract c fuel params outerEnv (fun next => body c fuel b next m) d.name (.source targetType) m.name
+      | _ => fail ("open declaration " ++ key ++ ": not a spec or extension")
+    modify fun st => { st with templateLayers := st.templateLayers ++ [(key, (i, j, layer))] }
+    return (i, j, layer)
+
 /-- The primary layer of plain spec `s` at final self `target` and inherited `inherited`:
 `λself: target. λsuper: inherited. extend super {defs}`, typed
 target → inherited → provided (provided = overlay(defs, inherited), canonical). -/
@@ -1456,18 +1596,19 @@ def chainFix (c : Ctx) : Nat → List (String × Decl × Module) → Expr → Op
           | _ => pure []
         let some (selfBound, superBound) ← boundsAt c fuel d.binders requirements dm.name target
           | fail ("open declaration " ++ key ++ ": its bounds do not resolve at this self")
-        let missingSelf := unsupported targetRow selfBound
-        if !missingSelf.isEmpty then
-          fail ("refused (self-bound): " ++ key ++ " needs the final self to have " ++ ", ".intercalate missingSelf ++
-            " at the types its Self bound declares; the self of this fix does not")
-        let missingSuper := unsupported below superBound
-        if !missingSuper.isEmpty then
-          fail ("refused (inherited-unprovided): " ++ key ++ " needs " ++ ", ".intercalate missingSuper ++
-            " from the row beneath it, which is {" ++ ", ".intercalate (rowNames below) ++ "}")
+        -- The read clauses of this layer's composition contract (ObjectiveBendContract.checkBounds).
+        match ObjectiveBendContract.checkBounds (contractRow targetRow) (contractRow below)
+            { name := key, assumes := contractRow selfBound, consumes := contractRow superBound, provides := [] } with
+        | .error refusal => fail (contractRefusalText refusal)
+        | .ok () => pure ()
         bindings := [("Self", target), ("Super", below)]
       let mut provided? : Option PTy := none
+      let mut writes : Option (ObjectiveBendContract.Row PTy × Bool) := none
       match d with
-      | .spec s => provided? ← withTypes bindings (specProvided c fuel s dm.name below)
+      | .spec s =>
+        let some defs ← withTypes bindings (specDefs c fuel s dm.name) | return none
+        writes := some (defs.map (fun (n, t) => (n, t.canonical)), false)
+        provided? := some (overDefs defs below)
       | .extension _ params targetType _ binders =>
         if binders.isEmpty then
           -- A closed extension keeps its declared types: the row beneath must be its super.
@@ -1480,6 +1621,13 @@ def chainFix (c : Ctx) : Nat → List (String × Decl × Module) → Expr → Op
           provided? := (← withTypes bindings (sourceType c fuel targetType dm.name [])).map PTy.canonical
       | _ => pure ()
       let some provided := provided? | return none
+      -- The write clause of this layer's contract (ObjectiveBendContract.checkProvides): a
+      -- specification's methods, or an extension's whole declared result row.
+      let (provides, whole) := writes.getD (contractRow provided, true)
+      match ObjectiveBendContract.checkProvides (contractRow below)
+          { name := key, assumes := [], consumes := [], provides := provides, whole := whole } with
+      | .error refusal => fail (contractRefusalText refusal)
+      | .ok _ => pure ()
       let annotated := if position == last && (match target with | .variable _ => true | _ => false) &&
           sameTy (some provided) (some targetRow) then target else provided
       match d with
@@ -1494,14 +1642,20 @@ def chainFix (c : Ctx) : Nat → List (String × Decl × Module) → Expr → Op
         | some name => pure name
         | none => do
           let name := key ++ "@" ++ toString (← get).instances.length
+          -- An open declaration's instance is its checked template at σ = {Self ↦ target,
+          -- Super ↦ below}: the square `template[σ] = instance` holds by construction.
+          let instanceOf := fun (arity : Nat) => do
+            let (i, j, layer) ← templateLayer c fuel key d dm
+            let σ := fun k => if k == i then some target else if k == j then some below else none
+            pure (ATerm.retarget annotated arity (layer.instantiate σ)).1
           let (value, type) ← match d with
             | .spec s => do
-              let layer ← withTypes bindings (layerAt c fuel s dm target below annotated)
+              let layer ← if d.binders.isEmpty then withTypes bindings (layerAt c fuel s dm target below annotated)
+                else instanceOf 2
               pure (ATerm.specification (.metadata (← globalRef outerEnv key)) layer,
                 metaTy.map fun mt => PTy.specification mt (arrowTy target (arrowTy below annotated)))
-            | .extension _ params _ b _ => do
-              let layer ← withTypes bindings (abstractWith c fuel params (some [some target, some below]) outerEnv
-                (fun next => body c fuel b next dm) key (.given (some annotated)) dm.name)
+            | .extension _ params _ _ _ => do
+              let layer ← instanceOf params.length
               pure (layer, some (arrowTy target (arrowTy below annotated)))
             | _ => fail "internal: chain operand"
           modify fun st => { st with instances := st.instances ++ [(index, name)] }
@@ -1515,22 +1669,18 @@ def chainFix (c : Ctx) : Nat → List (String × Decl × Module) → Expr → Op
     let finalRow := match below with
       | .variable k => (bounds.lookup k).getD below
       | t => t
-    if !sameTy (some finalRow) (some targetRow) then
-      let targetNames := rowNames targetRow
-      let providedNames := rowNames finalRow
-      let missing := targetNames.filter (fun n => !providedNames.contains n)
-      let extra := providedNames.filter (fun n => !targetNames.contains n)
-      if !missing.isEmpty then
-        let mut requiredBy : List String := []
-        for (key, d, _) in chain do
-          if let .spec s := d then
-            if (← requirementsOf s).any (fun r => missing.contains r.name) then requiredBy := requiredBy ++ [key]
-        fail ("refused (requires-unprovided): this fix leaves " ++ ", ".intercalate missing ++
-          " of its final self unprovided: no layer of the composition and not the seed provides it" ++
-          (if requiredBy.isEmpty then "" else " (required by " ++ ", ".intercalate requiredBy ++ ")"))
-      if !extra.isEmpty then
-        fail ("refused (seed-extra): the composition and seed provide " ++ ", ".intercalate extra ++ ", which the final self does not declare")
-      fail ("refused (provided-mismatch): the composition provides members of the final self at other types than it declares")
+    -- The composition contract discharged at fix (ObjectiveBendContract.close): the final row
+    -- must be exactly the final self.
+    match ObjectiveBendContract.close (contractRow targetRow) (contractRow finalRow) with
+    | .ok () => pure ()
+    | .error (.requiresUnprovided missing) =>
+      let mut requiredBy : List String := []
+      for (key, d, _) in chain do
+        if let .spec s := d then
+          if (← requirementsOf s).any (fun r => missing.contains r.name) then requiredBy := requiredBy ++ [key]
+      fail (contractRefusalText (.requiresUnprovided missing) ++
+        (if requiredBy.isEmpty then "" else " (required by " ++ ", ".intercalate requiredBy ++ ")"))
+    | .error refusal => fail (contractRefusalText refusal)
     let some (first, firstTy) := operands.head? | return none
     let mut value := first
     let mut valueTy := firstTy
@@ -1638,28 +1788,28 @@ def interfaceLabel (s : Spec) (list : List String) : String :=
     ("methods", Json.arr (s.methods.map (·.signature)).toArray)] ++
     (if s.binders.isEmpty then [] else [("binders", toJson s.binders)]))).compress
 
-/-- Laws and the declared SpecMeta around a spec's extension. -/
+/-- Claims and the declared SpecMeta around a spec's extension. -/
 def finishSpecification (c : Ctx) (fuel : Nat) (s : Spec) (m : Module) (key : String) (list : List String)
     (extension : ATerm) : M ATerm := do
-  -- Each law is checked code in its own hidden knot field `key#law#name` (typed over
+  -- Each claim is checked code in its own hidden knot field `key#claim#name` (typed over
   -- self, super and its parameters, result Bool); the metadata records its name and
   -- status. Status `unchecked`: typed, retained, never evaluated (LT6 owns discharge).
-  if duplicate (s.laws.map (·.name)) then fail ("duplicate law in spec " ++ key)
-  let lawsMeta ← sourceType c fuel specLawsName builtinModuleName []
-  let lawsReason := if lawsMeta.isSome then none else some "SpecLaws type unresolved"
-  let mut lawList : ATerm := .inject "none" lawsMeta lawsReason (.record [])
-  for law in s.laws.reverse do
-    lawList := .inject "law" lawsMeta lawsReason
-      (.record [("name", .label law.name), ("status", .label "unchecked"), ("rest", lawList)])
-  for law in s.laws do
-    let params := selfSuperParams s ++ law.params
+  if duplicate (s.claims.map (·.name)) then fail ("duplicate claim in spec " ++ key)
+  let claimsMeta ← sourceType c fuel specClaimsName builtinModuleName []
+  let claimsReason := if claimsMeta.isSome then none else some "SpecClaims type unresolved"
+  let mut claimList : ATerm := .inject "none" claimsMeta claimsReason (.record [])
+  for claim in s.claims.reverse do
+    claimList := .inject "claim" claimsMeta claimsReason
+      (.record [("name", .label claim.name), ("status", .label "unchecked"), ("rest", claimList)])
+  for claim in s.claims do
+    let params := selfSuperParams s ++ claim.params
     let code ← abstract c fuel params outerEnv
-      (fun inner => expression c fuel law.body inner m) law.name (.source "Bool") m.name
+      (fun inner => expression c fuel claim.body inner m) claim.name (.source "Bool") m.name
     let type ← signatureTy c fuel params (.given (some .boolean)) m.name []
-    modify fun st => { st with hidden := st.hidden.push (key ++ "#law#" ++ law.name, code, type) }
+    modify fun st => { st with hidden := st.hidden.push (key ++ "#claim#" ++ claim.name, code, type) }
   let metaTy ← sourceType c fuel specMetaName builtinModuleName []
   let metadata := ATerm.inject "declared" metaTy (if metaTy.isSome then none else some "SpecMeta type unresolved")
-    (.record [("name", .label key), ("interface", .label (interfaceLabel s list)), ("laws", lawList)])
+    (.record [("name", .label key), ("interface", .label (interfaceLabel s list)), ("claims", claimList)])
   return .specification metadata extension
 
 def specification (c : Ctx) (fuel : Nat) (s : Spec) (m : Module) : M ATerm := do
@@ -1667,12 +1817,10 @@ def specification (c : Ctx) (fuel : Nat) (s : Spec) (m : Module) : M ATerm := do
   let key := m.name ++ "." ++ s.name
   if !s.binders.isEmpty then
     -- An open spec: checked once at its own bounds; its knot field is that instance.
-    let some (selfVar, superRow) ← openBinding c fuel key s.binders (← requirementsOf s) m.name
+    let some (selfVar, superVar) ← openBinding c fuel key s.binders (← requirementsOf s) m.name
       | fail ("open spec " ++ key ++ ": its Self/Super bounds do not resolve")
-    return ← withTypes [("Self", selfVar), ("Super", superRow)] do
-      let some provided ← specProvided c fuel s m.name superRow
-        | fail ("open spec " ++ key ++ ": a method signature does not resolve")
-      finishSpecification c fuel s m key [key] (← layerAt c fuel s m selfVar superRow provided)
+    let (_, _, layer) ← templateLayer c fuel key (.spec s) m
+    return ← withTypes [("Self", selfVar), ("Super", superVar)] (finishSpecification c fuel s m key [key] layer)
   let target ← sourceType c fuel s.targetType m.name []
   -- `requires` is checked: a requirement is a member of the closed target, at its type.
   if let some t := target then
@@ -1771,7 +1919,7 @@ structure Output where
   sumBounds : List (Nat × PTy)
   typeErrors : Array String
   /-- The open declarations' templates (`St.templates`). -/
-  templates : List (String × Nat × ATerm) := []
+  templates : List (String × List Nat × ATerm) := []
 
 /-- One declaration of the package knot: its field and the hidden layer fields it created. -/
 def emitDecl (c : Ctx) (fuel : Nat) (m : Module) (d : Decl) (fields : List (String × ATerm)) : M (List (String × ATerm)) := do
@@ -1790,16 +1938,15 @@ def emitDecl (c : Ctx) (fuel : Nat) (m : Module) (d : Decl) (fields : List (Stri
     | .extension _ params targetType b binders =>
       if binders.isEmpty then abstract c fuel params outerEnv (fun next => body c fuel b next m) d.name (.source targetType) m.name
       else do
-        -- Checked once, at its own bounds (Self = the bounded variable, Super = the bound row).
-        let some (selfVar, superRow) ← openBinding c fuel key binders [] m.name
-          | fail ("open extension " ++ key ++ ": its Self/Super bounds do not resolve")
-        withTypes [("Self", selfVar), ("Super", superRow)]
-          (abstract c fuel params outerEnv (fun next => body c fuel b next m) d.name (.source targetType) m.name)
+        -- Checked once, at its own bounds (Self and Super the two rigid bounded variables);
+        -- every chain instance is this template at its σ.
+        let (_, _, layer) ← templateLayer c fuel key d m
+        pure layer
     | .spec s => specification c fuel s m
     | _ => fail "unsupported declaration"
   if !d.binders.isEmpty then
     match (← get).openBounds.lookup key with
-    | some (.variable k, _) => modify fun st => { st with templates := st.templates ++ [(key, k, value)] }
+    | some (.variable k, .variable j) => modify fun st => { st with templates := st.templates ++ [(key, [k, j], value)] }
     | _ => fail ("open declaration " ++ key ++ ": its Self variable is unresolved")
   let mut fields := fields ++ [(key, value)]
   for (name, value, type) in (← get).hidden do

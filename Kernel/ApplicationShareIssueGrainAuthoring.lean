@@ -129,10 +129,11 @@ def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
       parentObserveCapability := request.parent.observeCapability
       parentRoot := parentRoot
       parentBefore := parentBefore }
-  let specialPins := ready.effectivePins opened.pins
+  let specialPins := opened.pins
   let marker := GrainResourceBirthAdmission.useMarker profile config.deployment tariff source
   let .ok draft := ResourceBirthController.Concrete.prepareGrainDraft
       profile.compilerProfile profile.disabledEvaluators config.deployment specialPins opened.durable birthDraft marker height
+      ready.sourced
     | throw "grain-backed share birth preparation refused"
   let source := source.withAuxiliaryCreates draft.descriptor.auxiliaryCreates
   let expected := { birthDraft with auxiliaryCreates := draft.descriptor.auxiliaryCreates }
@@ -141,7 +142,7 @@ def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
     throw "grain-backed share finalized birth differs from source"
   let .ok birth := GrainResourceBirthController.prepareSourceBirth
       profile.compilerProfile profile.disabledEvaluators config.deployment specialPins opened.durable
-      profile.semantics tariff source height
+      profile.semantics tariff source height ready.sourced
     | throw "grain-backed share birth preparation refused"
   let ambient : DeclaredResourceController.Ambient := ⟨config.federation, height⟩
   let .ok grain := GrainResourceBirthTransaction.prepareTargets profile
@@ -168,8 +169,8 @@ def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
     ⟨config.deployment.domain, profile.semantics,
       opened.durable.worldRoot, height,
       .birth finalized request.sourceCapabilities, branches ++ observations⟩
-  let context : ApplicationShareIssueDelegation.Context config.deployment opened.durable :=
-    ⟨birth.prepared.pre.directory, birth.prepared.pre.authority⟩
+  let context : ApplicationShareIssueDelegation.Context config.deployment :=
+    (Minidregg.Compiler.ServedBasis.Ground.full _ birth.prepared.pre.directory birth.prepared.pre.authority)
   let .ok app := ApplicationShareIssueDelegation.prepare context profile
       config.federation height request.spec source.birth
     | throw "grain-backed share app preparation refused"

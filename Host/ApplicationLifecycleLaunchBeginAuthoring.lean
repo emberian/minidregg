@@ -238,7 +238,7 @@ private def prepareSelectedVerified (config : Config) {target : Durable}
        start := start } : ApplicationLifecycleBeginV3Ingress.Ingress).withAuthorizationId
   unless unsigned.shape do
     throw "launch BEGIN authorization, descriptor or action shape refused"
-  unless ApplicationLifecycleBeginV3Admission.markersCurrent opened.durable unsigned do
+  unless ApplicationLifecycleBeginV3Admission.markersCurrent opened.ground unsigned do
     throw "launch BEGIN first-attempt or created marker refuses action"
   unless ApplicationLifecycleBeginV3Admission.installedExact
       config.deployment unsigned packageCell do
@@ -249,10 +249,10 @@ private def prepareSelectedVerified (config : Config) {target : Durable}
   let ambient : DeclaredResourceController.Ambient :=
     ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
   let .ok prepared := DeclaredResourceController.prepare config.deployment
-      config.profile ambient opened.durable command
+      config.profile ambient opened.ground command
     | throw "current launch BEGIN command preparation refused"
   unless ApplicationLifecycleBeginReceiver.linkedCurrentPolicy config.deployment
-      config.profile ambient opened.durable source prepared do
+      config.profile ambient opened.ground source prepared do
     throw "current launch BEGIN app/package law differs"
   unless decide (DeclaredResourceController.PhysicalShape prepared) do
     throw "current launch BEGIN physical shape refused"
@@ -260,7 +260,7 @@ private def prepareSelectedVerified (config : Config) {target : Durable}
   let marker := DeclaredResourceController.operationMarker config.deployment.domain
     config.profile.semantics command
   let wanted := ApplicationLifecycleBeginReceiver.packageRequest config.deployment
-    config.profile ambient opened.durable source prepared
+    config.profile ambient opened.ground source prepared
   let .ok selected := ResourceObservationAdmission.prepare context config.profile
       wanted marker source.packageObserveCapability source.canonicalBytes
     | throw "current launch package observation preparation refused"
@@ -273,7 +273,7 @@ private def prepareSelectedVerified (config : Config) {target : Durable}
   unless invocation.finalizedDraft == .invoke commandBytes do
     throw "launch BEGIN invocation plan differs from bound action"
   let .ok header := CredentialSignatureAdmission.signingHeader
-      prepared.authority.snapshot marker (⟨.object, wanted⟩ : PackedEffectRequest)
+      opened.ground.authority marker (⟨.object, wanted⟩ : PackedEffectRequest)
     | throw "current launch package observation signing key unavailable"
   let packageSlot : SigningSlot :=
     ⟨9, 0, CredentialSignedEnvelopeController.headerCodec.encode header⟩

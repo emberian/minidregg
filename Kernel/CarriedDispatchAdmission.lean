@@ -5,6 +5,7 @@ revocation, grants, policy linkage and all signed reads are checked anew.
 -/
 import Compiler.CarriedDispatchProvenance
 import Kernel.ApplicationDispatchPending
+import Kernel.NativeHostServed
 
 namespace Minidregg.Kernel.CarriedDispatchAdmission
 
@@ -22,7 +23,7 @@ structure Admitted (config : Config) (opened : Opened config)
   issueBytesExact : ingress.issueIngressBytes = issue.issue.ingress.canonicalBytes
   checked : ApplicationDispatchAdmission.CheckedCurrentForSourceBytes
     config.deployment config.profile
-    ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress
+    ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground ingress
     issue.issue.spec issue.originalSourceBytes
 
 def admitAt (config : Config) (opened : Opened config)
@@ -33,7 +34,7 @@ def admitAt (config : Config) (opened : Opened config)
     match ← ApplicationDispatchAdmission.checkCurrentFromSourceBytes
         config.deployment config.profile
         ⟨config.federation, logicalHeight config opened.durable⟩ config.signature
-        opened.durable ingress issue.issue.spec issue.originalSourceBytes with
+        opened.ground ingress issue.issue.spec issue.originalSourceBytes with
     | .error detail => return .error detail
     | .ok checked => return .ok ⟨issue, issueBytesExact, checked⟩
   else return .error "carried dispatch source differs from admitted old issue"

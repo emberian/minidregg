@@ -66,9 +66,8 @@ def admit (config : Config) (opened : Opened config) (bytes : List UInt8) :
     return .error "signed room decision scope mismatch"
   let some command := commandCodec.decode signed.commandBytes
     | return .error "invalid room decision command"
-  match prepareFrom config.deployment config.profile
-      ⟨config.federation,logicalHeight config opened.durable⟩ opened.durable
-      (some opened.directory) command with
+  match prepare config.deployment config.profile
+      ⟨config.federation,logicalHeight config opened.durable⟩ opened.ground command with
   | .error reason => return .error s!"current room mutation preparation refused: {repr reason}"
   | .ok prepared =>
     if shape : PhysicalShape prepared then

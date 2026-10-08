@@ -22,6 +22,17 @@ fn main() {
         libc::umask(0o077);
     }
     let args: Vec<_> = std::env::args().collect();
+    // The modeled unit manager of a fixture build (src/fixture_os.rs).
+    #[cfg(feature = "fixture-os")]
+    match args.get(1).map(String::as_str) {
+        Some("fixture-systemctl") => {
+            std::process::exit(minidregg_spk_host::fixture_os::systemctl_main(&args[2..]))
+        }
+        Some("fixture-unit-run") => {
+            std::process::exit(minidregg_spk_host::fixture_os::unit_run_main(&args[2..]))
+        }
+        _ => {}
+    }
     if args.len() == 3 && args[1] == "qualify-launch" {
         match qualify_launch(Path::new(&args[2])) {
             Ok(result) => {

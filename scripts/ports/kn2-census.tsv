@@ -1,0 +1,429 @@
+LEFTOVER	Host/ApplicationLifecycleClaimOperator.lean	99	G1	def prepareVerified (config : Config) {target : Durable}	let some retained := opened.durable.image.accepted[prior.index]?
+LEFTOVER	Host/ApplicationAgentLifetimeGrantAuthoring.lean	76	G1	def prepareLoaded {config : NativeHost.Config} {target : NativeHost.Durable}	let some original := opened.durable.image.accepted[prior.index]?
+LEFTOVER	Host/RetainedSegmentInspection.lean	93	G4	def validate (config : NativeHost.Config) (current : NativeHost.Durable)	if (current.image.accepted.take body.cut.height).map DurableReceiverCodec.intentStream.encode !=
+LEFTOVER	Host/RetainedSegmentInspection.lean	94	G5	def validate (config : NativeHost.Config) (current : NativeHost.Durable)	source.durable.image.accepted.map DurableReceiverCodec.intentStream.encode then
+LEFTOVER	Host/RetainedSegmentInspection.lean	96	G1	def validate (config : NativeHost.Config) (current : NativeHost.Durable)	let some record := current.image.accepted[body.cut.height]?
+LEFTOVER	Host/RetainedSegmentInspection.lean	106	G4	def validate (config : NativeHost.Config) (current : NativeHost.Durable)	let selectedPrefix ← liftResult (DurableReceiverIO.loadImage ResourceBirthCodec.rootBytes
+LEFTOVER	Host/RetainedSegmentInspection.lean	107	G4	def validate (config : NativeHost.Config) (current : NativeHost.Durable)	current.logStart (current.prefixImage registry.edge.targetStart.height))
+LEFTOVER	Host/RetainedSegmentInspection.lean	358	G1	def serveReceiptByTransaction (config : NativeHost.Config) (current : NativeHost	let selected := custody.source.durable.image.accepted.findIdx?
+LEFTOVER	Host/RetainedSegmentInspection.lean	367	G1	def serveReceiptByTransaction (config : NativeHost.Config) (current : NativeHost	let some record := custody.source.durable.image.accepted[index]?
+LEFTOVER	Host/RetainedSegmentInspection.lean	394	G1	def serveDispatchLookup (config : NativeHost.Config) (current : NativeHost.Durab	let some index := custody.source.durable.image.accepted.findIdx? (fun record =>
+LEFTOVER	Host/RetainedSegmentInspection.lean	397	G1	def serveDispatchLookup (config : NativeHost.Config) (current : NativeHost.Durab	let some record := custody.source.durable.image.accepted[index]?
+LEFTOVER	Host/ApplicationLifecycleLaunchClaimAuthoring.lean	94	G1	def prepareVerified (config : Config) {target : Durable}	let some retained := opened.durable.image.accepted[prior.index]?
+LEFTOVER	Host/FnSelectiveReleaseFnAck.lean	35	G2	def selectOriginal (config : Minidregg.Kernel.NativeHost.Config)	let some record := Minidregg.Kernel.DurableCommitProtocol.Snapshot.lookupRecorded
+LEFTOVER	Host/FnSelectiveReleaseFnAck.lean	36	G2	def selectOriginal (config : Minidregg.Kernel.NativeHost.Config)	miniTransactionId verified.opened.durable.snapshot.model.journal
+LEFTOVER	Host/FnArchivePublisher.lean	361	G5	def bundleAt (config : NativeHost.Config) (opened : NativeHost.Opened config) (f	let accepted := opened.durable.image.accepted
+LEFTOVER	Host/ApplicationLifecycleLaunchBeginAuthoring.lean	345	G1	private def checkCreatedReference {config : Config} {target : Durable}	let some record := verified.opened.durable.image.accepted[prior.index]?
+LEFTOVER	Host/ApplicationLifecycleRetryClaimV4Authoring.lean	102	G1	def prepareVerified (config : Config) {target : Durable}	let some retained := opened.durable.image.accepted[prior.index]?
+LEFTOVER	Host/Main.lean	975	G1	def storeBench (config : NativeHost.Config) : IO Unit := do	let last := (durable.image.accepted.getLast?.map fun r => r.exactCharge lane).getD 0
+LEFTOVER	Host/Main.lean	1061	G5	def storeBench (config : NativeHost.Config) : IO Unit := do	(PresenceIndex.ofRecords durable.image.accepted).touched.length
+LEFTOVER	Host/Main.lean	1084	G2	def storeBench (config : NativeHost.Config) : IO Unit := do	(state.snapshot ResourceBirthCodec.rootBytes durable.image.accepted).model.journal.length
+LEFTOVER	Host/Main.lean	1095	G1	def storeBench (config : NativeHost.Config) : IO Unit := do	if let some r := durable.image.accepted.getLast? then
+LEFTOVER	Host/Main.lean	1105	G1	def storeBench (config : NativeHost.Config) : IO Unit := do	let middle := durable.image.accepted[durable.height / 2]?
+LEFTOVER	Host/Main.lean	1115	G1	def storeBench (config : NativeHost.Config) : IO Unit := do	n := n + (durable.image.accepted.findIdx?
+LEFTOVER	Host/Main.lean	1135	G1	def storeBench (config : NativeHost.Config) : IO Unit := do	if let some r := durable.image.accepted.getLast? then
+LEFTOVER	Host/Main.lean	1137	G5	def storeBench (config : NativeHost.Config) : IO Unit := do	n := n + ((durable.image.accepted ++ [r]).length + i) % 7
+LEFTOVER	Host/Main.lean	1151	G6	def storeBench (config : NativeHost.Config) : IO Unit := do	if let some (some kept) := durable.rootLog[i]? then
+LEFTOVER	Host/Main.lean	1152	G4	def storeBench (config : NativeHost.Config) : IO Unit := do	let spec := NativeHost.worldRoot config ⟨durable.image.seed, durable.image.accepted.take (i + 1)⟩
+LEFTOVER	Host/Main.lean	3647	G1	def exportConsumerInbox (config : NativeHost.Config) (transactionId : Nat) :	let some record := opened.durable.image.accepted.find?
+LEFTOVER	Host/Main.lean	3680	G1	def exportConsumerPoll (config : NativeHost.Config) (transactionId : Nat) :	let some record := opened.durable.image.accepted.find?
+LEFTOVER	Host/Main.lean	3831	G1	def carriedReceipt (config : NativeHost.Config) (session : CarriedNativeHostSess	let index ← session.verified.opened.durable.image.accepted.findIdx?
+LEFTOVER	Host/Main.lean	3833	G1	def carriedReceipt (config : NativeHost.Config) (session : CarriedNativeHostSess	let record ← session.verified.opened.durable.image.accepted[index]?
+LEFTOVER	Host/Main.lean	3882	G1	def retainedDispatchReceipt (config : NativeHost.Config)	unless origin.source.durable.image.accepted.any (fun record =>
+LEFTOVER	Host/Main.lean	4712	G5	def verifyCatalogOwnR (config : NativeHost.Config)	config.profile.semantics projection.messageId opened.durable.image.accepted
+LEFTOVER	Host/Main.lean	4865	G5	def runReplyConsumerCatalogDecisionLoaded (config : NativeHost.Config)	qExtracted.parentMessageId.toUTF8.toList opened.durable.image.accepted)
+LEFTOVER	Host/Main.lean	5156	G1	def runFnAckSession (config : NativeHost.Config)	let some record := opened.durable.image.accepted.find?
+LEFTOVER	Host/Main.lean	5307	G1	def runFnOriginOutboxExportSession (config : NativeHost.Config)	let some record := opened.durable.image.accepted.find?
+LEFTOVER	Host/Main.lean	5682	G1	def runFnReplyAckSession (config : NativeHost.Config)	let some record := opened.durable.image.accepted.find?
+LEFTOVER	Host/Main.lean	5692	G5	def runFnReplyAckSession (config : NativeHost.Config)	opened.durable.image.accepted then
+LEFTOVER	Host/Main.lean	6641	G1	def run (arguments : List String) : IO UInt32 := do	let index := session.verified.opened.durable.image.accepted.findIdx?
+LEFTOVER	Host/Main.lean	6650	G1	def run (arguments : List String) : IO UInt32 := do	let some record := session.verified.opened.durable.image.accepted[i]?
+LEFTOVER	Host/Main.lean	8365	G1	def run (arguments : List String) : IO UInt32 := do	let some record := opened.durable.image.accepted.find?
+LEFTOVER	Host/Main.lean	8397	G1	def run (arguments : List String) : IO UInt32 := do	let some record := opened.durable.image.accepted.find?
+LEFTOVER	Host/Main.lean	8556	G1	def run (arguments : List String) : IO UInt32 := do	let some record := opened.durable.image.accepted.find?
+LEFTOVER	Host/Main.lean	8591	G1	def run (arguments : List String) : IO UInt32 := do	let some record := opened.durable.image.accepted.find?
+LEFTOVER	Host/Main.lean	8688	G1	def run (arguments : List String) : IO UInt32 := do	let some record := opened.durable.image.accepted.find?
+LEFTOVER	Assurance/HyperdocumentLinkFramedRecovery.lean	482	G3	noncomputable def staleCheckpointModel :	consumed := checkpoint.model.consumed
+LEFTOVER	Assurance/HyperdocumentLinkFramedRecovery.lean	484	G7	noncomputable def staleCheckpointModel :	history := checkpoint.model.history
+LEFTOVER	Assurance/HyperdocumentLinkFramedRecovery.lean	485	G2	noncomputable def staleCheckpointModel :	journal := checkpoint.model.journal
+LEFTOVER	Assurance/NativeAcceptedFixture.lean	143	G4	def loadAt (image : Image) : Option Durable :=	(DurableReceiverIO.loadImage ResourceBirthCodec.rootBytes (config.logStart image.seed) image).toOption
+LEFTOVER	Assurance/HyperdocumentDurableInstallation.lean	154	G2	def install (plan : DurablePlan commit) (device : OperationDevice accepted)	(unrecorded : Snapshot.lookupRecorded plan.intent.transactionId
+LEFTOVER	Verify/NativeJointSourceFixture.lean	119	G5	def bootstrapFresh (config : NativeHost.Config) (canonicalImage : List UInt8) :	if !durable.image.accepted.isEmpty then return .error "bootstrap image contains accepted history"
+LEFTOVER	Verify/NativeJointSourceFixture.lean	151	G5	def initializeStores (root : System.FilePath) (helpers : Helpers)	require built.image.accepted.isEmpty "genesis unexpectedly contains accepted history"
+LEFTOVER	Verify/GenericSimplexOperatorBridge.lean	16	G1	def retainedPayload (replicas : Array Replica) (ingress : Bytes) : Option Bytes 	replica.participant.source.verified.opened.durable.image.accepted.findSome? fun record =>
+LEFTOVER	Verify/GenericSimplexOperatorBridge.lean	41	G5	def receiptPrefix (replica : Replica) (ingress : Bytes) : Option (List Bytes) :=	let records := replica.participant.source.verified.opened.durable.image.accepted
+LEFTOVER	scripts/probe-native-host-genesis.lean	58	G5	def run (alice bob : List UInt8) : IO Unit := do	require "zero accepted history" built.image.accepted.isEmpty
+LEFTOVER	scripts/durable-receiver.lean	116	G3	def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do	(one.model.available .feeDebit == 99 && one.model.consumed (nullifier 11) &&
+LEFTOVER	scripts/durable-receiver.lean	117	G2	def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do	one.model.history.length == 1 && one.model.journal.length == 1)
+LEFTOVER	scripts/durable-receiver.lean	124	G7	def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do	require "retry does not charge or append" (retried.model.available .feeDebit == 98 && retried.model.history.length == 2)
+LEFTOVER	scripts/durable-receiver.lean	155	G7	def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do	require "cold reopen recovers all fields" (recovered.model.history.length == 4 &&
+LEFTOVER	scripts/durable-receiver.lean	156	G3	def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do	recovered.model.available .proofWork == 96 && recovered.model.consumed (nullifier 18) &&
+LEFTOVER	scripts/durable-receiver.lean	172	G7	def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do	raced.snapshot.canonicalBytes ⟨3⟩ == [33] && raced.snapshot.model.history.length == 5)
+LEFTOVER	scripts/durable-receiver.lean	199	G7	def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do	(pinned.model.history.length == 7 && pinned.model.available .feeDebit == 93 &&
+LEFTOVER	scripts/durable-receiver.lean	219	G7	def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do	(afterConcurrent.snapshot.model.history.length == finalImage.snapshot.model.history.length + 2)
+LEFTOVER	scripts/durable-receiver.lean	226	G4	def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do	let genesisReplay ← match loadImage rootBytes ⟨7⟩ afterConcurrent.image with
+LEFTOVER	scripts/durable-receiver.lean	238	G7	def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do	afterConcurrent.snapshot.model.history.length == genesisReplay.snapshot.model.history.length)
+LEFTOVER	scripts/durable-receiver.lean	245	G4	def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do	(afterConcurrent.atPrefix height).map (·.canonicalBytes ⟨cell⟩) ==
+LEFTOVER	scripts/durable-receiver.lean	246	G4	def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do	((genesisReplay.prefixImage height).restore rootBytes).map (·.canonicalBytes ⟨cell⟩) &&
+LEFTOVER	scripts/durable-receiver.lean	247	G4	def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do	(afterConcurrent.atPrefix height).isSome)
+LEFTOVER	scripts/durable-receiver.lean	250	G4	def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do	(afterConcurrent.atPrefix afterConcurrent.height).map (·.canonicalBytes ⟨cell⟩) ==
+LEFTOVER	scripts/native-accepted-fixture/replay.lean	45	G4	def main (args : List String) : IO UInt32 := do	let durable ← match DurableReceiverIO.loadImage ResourceBirthCodec.rootBytes (config.logStart seed) image with
+LEFTOVER	Compiler/CarriedDispatchProvenance.lean	58	G1	def select {config : Config} {current : Durable}	let some index := custody.source.durable.image.accepted.findIdx? (fun record =>
+LEFTOVER	Compiler/GenericSimplexIO.lean	453	G4	def natPrefixCounted (bytes : Bytes) : Option (Nat × Nat × Bytes) :=	def natPrefixCounted (bytes : Bytes) : Option (Nat × Nat × Bytes) :=
+LEFTOVER	Compiler/GenericSimplexIO.lean	469	G4	def scanFrames : Nat → Bytes → Nat → Option Nat	match natPrefixCounted rest with
+LEFTOVER	Compiler/CarriedSegmentIO.lean	173	G4	def bindPreservedPrefix (config : NativeHost.Config) (authorized : Authorized co	if exact : current.prefixImage start.durable.height = start.durable.image then
+LEFTOVER	Compiler/CarriedSegmentIO.lean	181	G4	def PreservedPrefix.rebind {config : NativeHost.Config} {current : NativeHost.Du	(exact : next.prefixImage prior.start.durable.height = prior.start.durable.image) :
+LEFTOVER	Compiler/CarriedSegmentIO.lean	204	G4	def PreservedPrefix.rebindChecked {config : NativeHost.Config} {current : Native	if exact : next.prefixImage prior.start.durable.height = prior.start.durable.image then
+LEFTOVER	Compiler/CarriedSegmentIO.lean	224	G4	def stageAuthorized (config : NativeHost.Config) (authorized : Authorized config	if encodeRecords current.image.accepted != encodeRecords (planned.image.accepted.take current.height) then
+LEFTOVER	Compiler/CarriedSegmentIO.lean	229	G4	def stageAuthorized (config : NativeHost.Config) (authorized : Authorized config	for record in planned.image.accepted.drop current.height do
+LEFTOVER	Compiler/Tower256ConcreteBackend.lean	163	G4	def decodeNatPrefix : List UInt8 -> Option (Nat × List UInt8)	def decodeNatPrefix : List UInt8 -> Option (Nat × List UInt8)
+LEFTOVER	Compiler/Tower256ConcreteBackend.lean	168	G4	def decodeNatPrefix : List UInt8 -> Option (Nat × List UInt8)	let (higher, suffix) ← decodeNatPrefix bytes
+LEFTOVER	Compiler/Tower256ConcreteBackend.lean	206	G4	def nat : StreamCodec Nat where	decodePrefix := decodeNatPrefix
+LEFTOVER	Compiler/Tower256ConcreteBackend.lean	207	G4	def nat : StreamCodec Nat where	decodePrefix_encode := decodeNatPrefix_encode
+LEFTOVER	Compiler/CredentialAuthorityDomainReceiver.lean	87	G7	def clockOf (physical : PhysicalSnapshot) : Nat := physical.model.history.length	def clockOf (physical : PhysicalSnapshot) : Nat := physical.model.history.length
+LEFTOVER	Compiler/CredentialAuthorityDomainReceiver.lean	91	G3	def spentOf (domain : Digest) (physical : PhysicalSnapshot) (marker : Nat) : Boo	physical.model.consumed (CredentialAuthorityReplay.nullifier domain marker)
+LEFTOVER	Compiler/ReceiptContinuityIO.lean	70	G4	def atHeight (loaded : NativeHost.Durable) (height : Nat) : Except String RootWi	let some snapshot := loaded.atPrefix height
+LEFTOVER	Compiler/ReceiptContinuityIO.lean	72	G4	def atHeight (loaded : NativeHost.Durable) (height : Nat) : Except String RootWi	let image := loaded.prefixImage height
+LEFTOVER	Compiler/ReceiptContinuityIO.lean	107	G4	def produce (config : NativeHost.Config) (loaded : NativeHost.Durable)	let suffix := ((loaded.image.accepted.drop query.start.height).take
+LEFTOVER	Compiler/CarriedApplicationProvenance.lean	68	G1	def selectIssue {config : Config} {current : Durable}	match sourcePresent : custody.source.durable.image.accepted[index]? with
+LEFTOVER	Compiler/CarriedApplicationProvenance.lean	76	G1	def selectIssue {config : Config} {current : Durable}	if bytes : (current.image.accepted[index]?.map DurableReceiverCodec.intentStream.encode) =
+LEFTOVER	Compiler/CarriedApplicationProvenance.lean	78	G4	def selectIssue {config : Config} {current : Durable}	match loaded : DurableReceiverIO.loadImage rootBytes custody.source.durable.logStart
+LEFTOVER	Compiler/CarriedApplicationProvenance.lean	79	G4	def selectIssue {config : Config} {current : Durable}	(custody.source.durable.prefixImage (index + 1)) with
+LEFTOVER	Compiler/GenericSimplexServe.lean	69	G5	def prefixThrough {config : SourceConfig} (p : Participant config) (ingress : By	let records := p.source.verified.opened.durable.image.accepted
+LEFTOVER	Compiler/GenericSimplexParticipant.lean	227	G5	def completedIngress {config : SourceConfig} (p : Participant config) (signedIng	let index ← p.source.verified.opened.durable.image.accepted.zipIdx.findSome?
+LEFTOVER	Kernel/ApplicationLifecycleCompletionReceiver.lean	71	G1	def receiveVerified (config : Config) {target : Durable}	if old.opened.durable.image.accepted.findIdx?
+LEFTOVER	Kernel/ClockTickReceiver.lean	633	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	match DurableCommitProtocol.Snapshot.lookupRecorded
+LEFTOVER	Kernel/ClockTickReceiver.lean	634	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	(transactionId domain semantics ingress) durable.snapshot.model.journal with
+LEFTOVER	Kernel/ApplicationFailedStartRecoveryHistory.lean	80	G4	def select (config : Config) (opened : Opened config)	let prefixAfter := NativeHistorySelection.prefixImage opened (index + 1)
+LEFTOVER	Kernel/ApplicationFailedStartRecoveryHistory.lean	81	G4	def select (config : Config) (opened : Opened config)	let loaded ← match ← NativeHistorySelection.loadPrefix opened.durable.logStart prefixAfter with
+LEFTOVER	Kernel/ApplicationGrainSessionEnrollmentReceiver.lean	30	G1	def lookupVerified {config : Config} {target : Durable}	let some index := verified.opened.durable.image.accepted.findIdx?
+LEFTOVER	Kernel/ApplicationGrainSessionEnrollmentReceiver.lean	33	G1	def lookupVerified {config : Config} {target : Durable}	let some record := verified.opened.durable.image.accepted[index]?
+LEFTOVER	Kernel/ParticipantKeyEnrollmentReceiver.lean	138	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	match DurableCommitProtocol.Snapshot.lookupRecorded
+LEFTOVER	Kernel/ParticipantKeyEnrollmentReceiver.lean	139	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	(transactionId domain semantics ingress) durable.snapshot.model.journal with
+LEFTOVER	Kernel/RealmWellReceiver.lean	892	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	match DurableCommitProtocol.Snapshot.lookupRecorded
+LEFTOVER	Kernel/RealmWellReceiver.lean	893	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	(transactionId domain semantics ingress) durable.snapshot.model.journal with
+LEFTOVER	Kernel/CarriedSegment.lean	267	G4	def buildTarget (expectedSource : Identity) (trustedOperator : List UInt8)	DurableReceiverIO.loadImage ResourceBirthCodec.rootBytes
+LEFTOVER	Kernel/NativeObservationController.lean	1114	G4	def atBytes (genesisHeight height target : Nat) : Option (List UInt8) :=	(durable.atPrefix (height - genesisHeight)).map fun snapshot => snapshot.canonicalBytes ⟨target⟩
+LEFTOVER	Kernel/NativeObservationController.lean	1302	G4	def atCovered (genesisHeight height : Nat) (subject : SubjectId) (grant : GrantR	match durable.atPrefix (height - genesisHeight) with
+LEFTOVER	Kernel/NativeObservationController.lean	1603	G5	def AuthorizedIntent.queryResult	pure (sinceViewCodec.encode (sinceFrom visible after (genesisHeight + 1) durable.image.accepted))
+LEFTOVER	Kernel/NativeObservationController.lean	1614	G5	def AuthorizedIntent.queryResult	(sequence, entry.record, streamPayload durable.image.accepted query.target entry.record)))
+LEFTOVER	Kernel/ApplicationLifecycleBeginV2Receiver.lean	67	G1	def receiveVerified (config : Config) {target : Durable}	if old.opened.durable.image.accepted.findIdx?
+LEFTOVER	Kernel/CapabilityDelegationReceiver.lean	253	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	match DurableCommitProtocol.Snapshot.lookupRecorded (transactionId domain semantics ingress) durable.snapshot.model.journal with
+LEFTOVER	Kernel/CarriedSessionEnrollmentReceiver.lean	32	G1	def lookupVerified {config : Config} {anchor : Opened config} {target : Durable}	let some index := verified.opened.durable.image.accepted.findIdx?
+LEFTOVER	Kernel/CarriedSessionEnrollmentReceiver.lean	35	G1	def lookupVerified {config : Config} {anchor : Opened config} {target : Durable}	let some record := verified.opened.durable.image.accepted[index]?
+LEFTOVER	Kernel/ParticipantFactoryProvisioningReceiver.lean	140	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	match DurableCommitProtocol.Snapshot.lookupRecorded
+LEFTOVER	Kernel/ParticipantFactoryProvisioningReceiver.lean	141	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	(transactionId domain semantics ingress) durable.snapshot.model.journal with
+LEFTOVER	Kernel/CapabilityRevocationReceiver.lean	242	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	match DurableCommitProtocol.Snapshot.lookupRecorded (transactionId domain semantics ingress) durable.snapshot.model.journal with
+LEFTOVER	Kernel/ApplicationFailedStartRecoveryLookup.lean	26	G1	def verified {config : Config} {target : Durable}	let some index := tip.opened.durable.image.accepted.findIdx?
+LEFTOVER	Kernel/ApplicationFailedStartRecoveryLookup.lean	29	G1	def verified {config : Config} {target : Durable}	let some record := tip.opened.durable.image.accepted[index]?
+LEFTOVER	Kernel/ApplicationLifecycleV2Lookup.lean	28	G1	private def select {config : Config} {target : Durable}	let some index := verified.opened.durable.image.accepted.findIdx?
+LEFTOVER	Kernel/ApplicationLifecycleV2Lookup.lean	31	G1	private def select {config : Config} {target : Durable}	let some record := verified.opened.durable.image.accepted[index]?
+LEFTOVER	Kernel/ApplicationLifecycleRetryCompletionV4CreatedHistory.lean	96	G4	def select (config : Config) (opened : Opened config)	let prefixAfter := NativeHistorySelection.prefixImage opened (index + 1)
+LEFTOVER	Kernel/ApplicationLifecycleRetryCompletionV4CreatedHistory.lean	97	G4	def select (config : Config) (opened : Opened config)	let loaded ← match ← NativeHistorySelection.loadPrefix opened.durable.logStart prefixAfter with
+LEFTOVER	Kernel/ApplicationStreamContinuity.lean	204	G1	def withOpenedFreshTip {config : Config} {α : Type}	let some record := durable.image.accepted.getLast?
+LEFTOVER	Kernel/NativeHistorySelection.lean	19	G4	def prefixImage {config : Config} (opened : Opened config) (index : Nat) : Durab	def prefixImage {config : Config} (opened : Opened config) (index : Nat) : DurableReceiver.Image :=
+LEFTOVER	Kernel/NativeHistorySelection.lean	20	G4	def prefixImage {config : Config} (opened : Opened config) (index : Nat) : Durab	{ opened.durable.image with accepted := opened.durable.image.accepted.take index }
+LEFTOVER	Kernel/NativeHistorySelection.lean	33	G1	def select (config : Config) (opened : Opened config) (index : Nat) :	match found : opened.durable.image.accepted[index]? with
+LEFTOVER	Kernel/NativeHistorySelection.lean	36	G4	def select (config : Config) (opened : Opened config) (index : Nat) :	match built : DurableReceiverIO.loadImage rootBytes opened.durable.logStart (prefixImage opened index) with
+LEFTOVER	Kernel/NativeHistorySelection.lean	44	G4	def select (config : Config) (opened : Opened config) (index : Nat) :	(DurableReceiverIO.loadImage_image built)⟩
+LEFTOVER	Kernel/NativeHistorySelection.lean	82	G4	def matchIntent {config : Config} {opened : Opened config} {index : Nat}	record can name (`NativeHostReplay.walk`), and `selectIO`/`loadPrefix` reuse
+LEFTOVER	Kernel/NativeHistorySelection.lean	106	G4	def retainPrefix (loaded : DurableReceiverIO.Loaded rootBytes) : IO Unit :=	when one matches byte for byte, else `DurableReceiverIO.loadImage`. -/
+LEFTOVER	Kernel/NativeHistorySelection.lean	107	G4	def loadPrefix (logStart : Digest) (image : DurableReceiver.Image) :	def loadPrefix (logStart : Digest) (image : DurableReceiver.Image) :
+LEFTOVER	Kernel/NativeHistorySelection.lean	122	G4	def loadPrefix (logStart : Digest) (image : DurableReceiver.Image) :	match built : DurableReceiverIO.loadImage rootBytes logStart image with
+LEFTOVER	Kernel/NativeHistorySelection.lean	124	G4	def loadPrefix (logStart : Digest) (image : DurableReceiver.Image) :	| .ok loaded => return .ok ⟨loaded, DurableReceiverIO.loadImage_image built⟩
+LEFTOVER	Kernel/NativeHistorySelection.lean	126	G4	def loadPrefix (logStart : Digest) (image : DurableReceiver.Image) :	/-- `select` through `loadPrefix`: the same candidate, the same validation and
+LEFTOVER	Kernel/NativeHistorySelection.lean	130	G1	def selectIO (config : Config) (opened : Opened config) (index : Nat) :	match found : opened.durable.image.accepted[index]? with
+LEFTOVER	Kernel/NativeHistorySelection.lean	133	G4	def selectIO (config : Config) (opened : Opened config) (index : Nat) :	match ← loadPrefix opened.durable.logStart (prefixImage opened index) with
+LEFTOVER	Kernel/ApplicationLifecycleBeginV3Receiver.lean	63	G1	def receiveVerified (config : Config) {target : Durable}	if old.opened.durable.image.accepted.findIdx?
+LEFTOVER	Kernel/JointSourcePrefixValidation.lean	67	G4	def validate (config : NativeHost.Config) (origin : Opened config) (expected : C	match built : DurableReceiverIO.loadImage ResourceBirthCodec.rootBytes (config.logStart seed) image with
+LEFTOVER	Kernel/JointSourcePrefixValidation.lean	70	G4	def validate (config : NativeHost.Config) (origin : Opened config) (expected : C	have imageExact := DurableReceiverIO.loadImage_image built
+LEFTOVER	Kernel/JointSourcePrefixValidation.lean	71	G5	def validate (config : NativeHost.Config) (origin : Opened config) (expected : C	if recordsExact : target.image.accepted.map DurableCheckpointCodec.recordFrame.encode = sourceRecords block then
+LEFTOVER	Kernel/CapabilityRenounce.lean	399	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	match DurableCommitProtocol.Snapshot.lookupRecorded (transactionId domain semantics ingress)
+LEFTOVER	Kernel/CapabilityRenounce.lean	400	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	durable.snapshot.model.journal with
+LEFTOVER	Kernel/RoomReleaseAdmission.lean	53	G5	def admit (config : Config) (opened : Opened config) (bytes : List UInt8) :	let previous ← match previousExact : RoomReleaseLineage.latest opened.durable.image.accepted
+LEFTOVER	Kernel/RoomReleaseAdmission.lean	57	G5	def admit (config : Config) (opened : Opened config) (bytes : List UInt8) :	{previous // RoomReleaseLineage.latest opened.durable.image.accepted
+LEFTOVER	Kernel/FnSelectedPollReleaseLink.lean	23	G5	def select {config : NativeHost.Config} {target : NativeHost.Durable}	(target.image.accepted.zip verified.receipts).findSome? fun pair => do
+LEFTOVER	Kernel/PortableHomeTransferReceiver.lean	27	G5	private def history {config : Config} (opened : Opened config) : List (List UInt	opened.durable.image.accepted.map DurableCheckpointCodec.recordFrame.encode
+LEFTOVER	Kernel/ApplicationLifecycleCompletionHistory.lean	85	G4	def select (config : Config) (opened : Opened config)	let prefixAfter := NativeHistorySelection.prefixImage opened (index + 1)
+LEFTOVER	Kernel/ApplicationLifecycleCompletionHistory.lean	86	G4	def select (config : Config) (opened : Opened config)	let loaded ← match ← NativeHistorySelection.loadPrefix opened.durable.logStart prefixAfter with
+LEFTOVER	Kernel/ApplicationDispatchReceiver.lean	165	G1	def refusalAtTip? {config : Config} {target : Durable}	if absent : old.opened.durable.image.accepted.findIdx? (fun record =>
+LEFTOVER	Kernel/ApplicationDispatchReceiver.lean	255	G1	def receiveAdmitted (config : Config) {target : Durable}	if old.opened.durable.image.accepted.findIdx?
+LEFTOVER	Kernel/ApplicationShareIssueGrainReceiver.lean	153	G2	def replay (durable : ResourceBirthController.Concrete.Durable)	match Snapshot.lookupRecorded grain.source.birth.transactionId
+LEFTOVER	Kernel/ApplicationShareIssueGrainReceiver.lean	154	G2	def replay (durable : ResourceBirthController.Concrete.Durable)	durable.snapshot.model.journal with
+LEFTOVER	Kernel/FnCatalogOwnRProgress.lean	222	G5	def evaluateVerified (consumer : NativeHost.Config) (pin : FnGatewayPolicy.Pin)	consumer.profile.semantics opened.durable.image.accepted report
+LEFTOVER	Kernel/FnCatalogOwnRProgress.lean	225	G5	def evaluateVerified (consumer : NativeHost.Config) (pin : FnGatewayPolicy.Pin)	report opened.durable.image.accepted)
+LEFTOVER	Kernel/ApplicationLifecycleClaimReceiver.lean	119	G1	def receiveVerified (config : Config) {target : Durable}	if old.opened.durable.image.accepted.findIdx?
+LEFTOVER	Kernel/ObjectiveActivityReceiver.lean	964	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	match DurableCommitProtocol.Snapshot.lookupRecorded
+LEFTOVER	Kernel/ObjectiveActivityReceiver.lean	965	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	(transactionId domain semantics ingress) durable.snapshot.model.journal with
+LEFTOVER	Kernel/FnSelectiveReleaseReceiver.lean	42	G2	def replay (config : NativeHost.Config) (opened : NativeHost.Opened config)	match DurableCommitProtocol.Snapshot.lookupRecorded
+LEFTOVER	Kernel/FnSelectiveReleaseReceiver.lean	43	G2	def replay (config : NativeHost.Config) (opened : NativeHost.Opened config)	(transactionId ingress) opened.durable.snapshot.model.journal with
+LEFTOVER	Kernel/FnConsumerProgress.lean	103	G5	def evaluateVerified (consumer : NativeHost.Config) (pin : FnGatewayPolicy.Pin)	report opened.durable.image.accepted)
+LEFTOVER	Kernel/CarriedApplicationDispatchReceiver.lean	38	G1	def lookupVerified {config : Config} {anchor : Opened config} {target : Durable}	let some index := verified.opened.durable.image.accepted.findIdx?
+LEFTOVER	Kernel/CarriedApplicationDispatchReceiver.lean	41	G1	def lookupVerified {config : Config} {anchor : Opened config} {target : Durable}	let some record := verified.opened.durable.image.accepted[index]?
+LEFTOVER	Kernel/CarriedApplicationDispatchReceiver.lean	225	G1	private def receiveAdmitted {config : Config} {anchor : Opened config} {target :	if old.opened.durable.image.accepted.findIdx?
+LEFTOVER	Kernel/ApplicationLifecycleRetryCompletionV4Admission.lean	82	G3	def creationMarkersCurrent (config : Config) (opened : Opened config)	opened.durable.snapshot.model.consumed
+LEFTOVER	Kernel/ApplicationLifecycleRetryCompletionV4Admission.lean	90	G3	def creationMarkersCurrent (config : Config) (opened : Opened config)	opened.durable.snapshot.model.consumed
+LEFTOVER	Kernel/ApplicationLifecycleRetryCompletionV4Admission.lean	93	G3	def creationMarkersCurrent (config : Config) (opened : Opened config)	!opened.durable.snapshot.model.consumed created
+LEFTOVER	Kernel/ConsentAnchor.lean	87	G0	def Anchor.ofOpened {config : Config} (opened : Opened config) : Anchor :=	⟨opened.durable.image.accepted.length, opened.durable.logStart, opened.durable.chain,
+LEFTOVER	Kernel/ConsentAnchor.lean	95	G0	def checkStore (anchor : Anchor) (loaded : Durable) (chains : List Digest) : Exc	else if loaded.image.accepted.length < anchor.height then
+LEFTOVER	Kernel/ConsentAnchor.lean	96	G0	def checkStore (anchor : Anchor) (loaded : Durable) (chains : List Digest) : Exc	.error s!"the Store's head {loaded.image.accepted.length} is below the retained consent anchor at {anchor.height}: the accepted history was 
+LEFTOVER	Kernel/ConsentAnchor.lean	179	G5	def resume (config : Config) (anchor : Anchor) (target : Durable) (chains : List	(chainsExact : chains = DurableLogTags.chainPrefixes target.logStart target.image.accepted) :
+LEFTOVER	Kernel/ConsentAnchor.lean	183	G4	def resume (config : Config) (anchor : Anchor) (target : Durable) (chains : List	match target.prefixAt anchor.height chains chainsExact with
+LEFTOVER	Kernel/ConsentAnchor.lean	193	G0	def resume (config : Config) (anchor : Anchor) (target : Durable) (chains : List	have anchorWithin : start.durable.image.accepted.length ≤ target.image.accepted.length := by
+LEFTOVER	Kernel/ConsentAnchor.lean	195	G4	def resume (config : Config) (anchor : Anchor) (target : Durable) (chains : List	show (target.image.accepted.take anchor.height).length ≤ _
+LEFTOVER	Kernel/ConsentAnchor.lean	198	G0	def resume (config : Config) (anchor : Anchor) (target : Durable) (chains : List	have prefixExact : target.image.accepted.take start.durable.image.accepted.length =
+LEFTOVER	Kernel/ConsentAnchor.lean	199	G5	def resume (config : Config) (anchor : Anchor) (target : Durable) (chains : List	start.durable.image.accepted := by
+LEFTOVER	Kernel/ConsentAnchor.lean	244	G5	def Basis.extendAppended (config : Config) {oldTarget : Durable}	(acceptedExact : target.image.accepted = oldTarget.image.accepted ++
+LEFTOVER	Kernel/ConsentAnchor.lean	245	G4	def Basis.extendAppended (config : Config) {oldTarget : Durable}	target.image.accepted.drop oldTarget.image.accepted.length)
+LEFTOVER	Kernel/ConsentAnchor.lean	253	G0	def Basis.extendAppended (config : Config) {oldTarget : Durable}	have within : oldTarget.image.accepted.length ≤ target.image.accepted.length := by
+LEFTOVER	Kernel/ConsentAnchor.lean	256	G4	def Basis.extendAppended (config : Config) {oldTarget : Durable}	have prefixExact : target.image.accepted.take oldTarget.image.accepted.length =
+LEFTOVER	Kernel/ConsentAnchor.lean	257	G5	def Basis.extendAppended (config : Config) {oldTarget : Durable}	oldTarget.image.accepted := by
+LEFTOVER	Kernel/ApplicationAgentLifetimeGrantReceiver.lean	31	G1	def lookupVerified {config : Config} {target : Durable}	let some _ := verified.opened.durable.image.accepted.find?
+LEFTOVER	Kernel/ApplicationShareIssueReceiver.lean	163	G2	def replay (durable : ResourceBirthController.Concrete.Durable) (domain : Digest	match Snapshot.lookupRecorded birth.descriptor.transactionId durable.snapshot.model.journal with
+LEFTOVER	Kernel/ApplicationLifecycleClaimV3Core.lean	34	G3	def markersCurrent {config : Config} (opened : Opened config) (ingress : Ingress	!opened.durable.snapshot.model.consumed attempt &&
+LEFTOVER	Kernel/ApplicationLifecycleClaimV3Core.lean	35	G3	def markersCurrent {config : Config} (opened : Opened config) (ingress : Ingress	!opened.durable.snapshot.model.consumed created
+LEFTOVER	Kernel/ApplicationLifecycleClaimV3Core.lean	36	G3	def markersCurrent {config : Config} (opened : Opened config) (ingress : Ingress	| .continue => opened.durable.snapshot.model.consumed created
+LEFTOVER	Kernel/ApplicationLifecycleRetryBeginV4Receiver.lean	71	G1	def receiveVerified (config : Config) {target : Durable}	if old.opened.durable.image.accepted.findIdx?
+LEFTOVER	Kernel/DurableWalHandler.lean	272	G2	def stageThenCommit (device : WalState TxId CellId Nullifier Event)	(unrecorded : Snapshot.lookupRecorded intent.transactionId
+LEFTOVER	Kernel/DeclaredResourceController.lean	2065	G2	def recordedInvocation (domain semantics : Digest) (command : Command) (signed :	match DurableCommitProtocol.Snapshot.lookupRecorded (transactionId domain semantics command)
+LEFTOVER	Kernel/DeclaredResourceController.lean	2066	G2	def recordedInvocation (domain semantics : Digest) (command : Command) (signed :	durable.snapshot.model.journal with
+LEFTOVER	Kernel/HostRefinesWorld.lean	859	G4	def BaseHonest (p : Loaded rootBytes) : Prop :=	n ∈ (p.image.accepted.take p.baseHeight).flatMap DurableReceiver.IntentRecord.nullifiers
+LEFTOVER	Kernel/JointReceiver.lean	24	G5	def sourcePrefix (durable : Durable) : List (List UInt8) :=	durable.image.accepted.map (fun r => DurableCheckpointCodec.recordFrame.encode r)
+LEFTOVER	Kernel/SubjectKeyCommitmentAdoption.lean	284	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	match DurableCommitProtocol.Snapshot.lookupRecorded
+LEFTOVER	Kernel/SubjectKeyCommitmentAdoption.lean	285	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	(transactionId domain semantics ingress) durable.snapshot.model.journal with
+LEFTOVER	Kernel/ApplicationLifecycleV3Lookup.lean	28	G1	private def select {config : Config} {target : Durable}	let some index := verified.opened.durable.image.accepted.findIdx?
+LEFTOVER	Kernel/ApplicationLifecycleV3Lookup.lean	31	G1	private def select {config : Config} {target : Durable}	let some record := verified.opened.durable.image.accepted[index]?
+LEFTOVER	Kernel/ApplicationLifecycleCompletionV2Admission.lean	88	G3	def creationMarkersCurrent (config : Config) (opened : Opened config)	opened.durable.snapshot.model.consumed
+LEFTOVER	Kernel/ApplicationLifecycleCompletionV2Admission.lean	91	G3	def creationMarkersCurrent (config : Config) (opened : Opened config)	!opened.durable.snapshot.model.consumed created
+LEFTOVER	Kernel/ApplicationLifecycleRetryClaimV4Receiver.lean	104	G1	def receiveVerified (config : Config) {target : Durable}	if old.opened.durable.image.accepted.findIdx?
+LEFTOVER	Kernel/ApplicationDispatchAgentReceiver.lean	169	G1	def receiveVerified (config : Config) {target : Durable}	if old.opened.durable.image.accepted.findIdx?
+LEFTOVER	Kernel/PurseRefillReceiver.lean	760	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	match DurableCommitProtocol.Snapshot.lookupRecorded
+LEFTOVER	Kernel/PurseRefillReceiver.lean	761	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	(transactionId domain semantics ingress) durable.snapshot.model.journal with
+LEFTOVER	Kernel/JointControlBootstrapBundle.lean	127	G4	def admit (config : Config) (opened : Opened config) (source : Source) :	match built : DurableReceiverIO.loadImage ResourceBirthCodec.rootBytes opened.durable.logStart image with
+LEFTOVER	Kernel/JointControlBootstrapBundle.lean	160	G4	def admit (config : Config) (opened : Opened config) (source : Source) :	exact DurableReceiverIO.loadImage_image built
+LEFTOVER	Kernel/ApplicationAgentLifetimeDispatchPaidAuthoring.lean	349	G1	def preparePaidVerified (config : Config) {target : Durable}	if verified.opened.durable.image.accepted[reserve.index]?.map
+LEFTOVER	Kernel/ApplicationAgentLifetimeDispatchPaidAuthoring.lean	353	G4	def preparePaidVerified (config : Config) {target : Durable}	(verified.opened.durable.image.accepted.drop (reserve.index + 1))
+LEFTOVER	Kernel/ApplicationLifecycleCompletionV2Lookup.lean	29	G1	def verified {config : Config} {target : Durable}	let some index := tip.opened.durable.image.accepted.findIdx?
+LEFTOVER	Kernel/ApplicationLifecycleCompletionV2Lookup.lean	32	G1	def verified {config : Config} {target : Durable}	let some record := tip.opened.durable.image.accepted[index]?
+LEFTOVER	Kernel/ApplicationLifecycleRetryCompletionV4History.lean	85	G4	def select (config : Config) (opened : Opened config)	let prefixAfter := NativeHistorySelection.prefixImage opened (index + 1)
+LEFTOVER	Kernel/ApplicationLifecycleRetryCompletionV4History.lean	86	G4	def select (config : Config) (opened : Opened config)	let loaded ← match DurableReceiverIO.loadImage rootBytes opened.durable.logStart prefixAfter with
+LEFTOVER	Kernel/PayBookReceiver.lean	739	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	match DurableCommitProtocol.Snapshot.lookupRecorded
+LEFTOVER	Kernel/PayBookReceiver.lean	740	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	(transactionId domain semantics ingress) durable.snapshot.model.journal with
+LEFTOVER	Kernel/AdmissionPrologue.lean	215	G2	def executeStage {rootBytes : List UInt8 -> TypedAuthorization.Digest}	match DurableCommitProtocol.Snapshot.lookupRecorded intent.transactionId
+LEFTOVER	Kernel/AdmissionPrologue.lean	216	G2	def executeStage {rootBytes : List UInt8 -> TypedAuthorization.Digest}	before.model.journal with
+LEFTOVER	Kernel/ApplicationLifecycleCompletionLookup.lean	28	G1	def verified {config : Config} {target : Durable}	let some index := tip.opened.durable.image.accepted.findIdx?
+LEFTOVER	Kernel/ApplicationLifecycleCompletionLookup.lean	31	G1	def verified {config : Config} {target : Durable}	let some record := tip.opened.durable.image.accepted[index]?
+LEFTOVER	Kernel/FnEmptyPollReceiverV2.lean	18	G1	def lookupVerified {config : NativeHost.Config} {target : NativeHost.Durable}	let some record := verified.opened.durable.image.accepted.find?
+LEFTOVER	Kernel/ApplicationFailedStartRecoveryReceiver.lean	67	G1	def receiveVerified (config : Config) {target : Durable}	if old.opened.durable.image.accepted.findIdx?
+LEFTOVER	Kernel/FnReplyConsumption.lean	325	G5	def evaluateVerified (config : NativeHost.Config) (opened : NativeHost.Opened co	policy report opened.durable.image.accepted)
+LEFTOVER	Kernel/ApplicationShareIssueGrainLookup.lean	37	G1	def lookupVerified {config : Config} {target : Durable}	let some index := verified.opened.durable.image.accepted.findIdx?
+LEFTOVER	Kernel/ApplicationShareIssueGrainLookup.lean	40	G1	def lookupVerified {config : Config} {target : Durable}	let some record := verified.opened.durable.image.accepted[index]?
+LEFTOVER	Kernel/ApplicationShareIssueGrainLookup.lean	66	G1	def lookupOriginal (config : Config) (target : Durable) (bytes : List UInt8) :	let some index := target.image.accepted.findIdx?
+LEFTOVER	Kernel/ApplicationDispatchAgentLookup.lean	32	G1	def lookupVerified {config : Config} {target : Durable}	let some index := verified.opened.durable.image.accepted.findIdx?
+LEFTOVER	Kernel/ApplicationDispatchAgentLookup.lean	35	G1	def lookupVerified {config : Config} {target : Durable}	let some record := verified.opened.durable.image.accepted[index]?
+LEFTOVER	Kernel/PayClaimReceiver.lean	404	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	match DurableCommitProtocol.Snapshot.lookupRecorded (transactionId domain semantics ingress) durable.snapshot.model.journal with
+LEFTOVER	Kernel/GrainResourceBirthReceiver.lean	141	G2	def replay (durable : Durable)	match Snapshot.lookupRecorded ingress.birth.descriptor.transactionId
+LEFTOVER	Kernel/GrainResourceBirthReceiver.lean	142	G2	def replay (durable : Durable)	durable.snapshot.model.journal with
+LEFTOVER	Kernel/ApplicationLifecycleBeginV3Admission.lean	56	G3	def markersCurrent (durable : DeclaredResourceController.Durable)	| .create _ => !durable.snapshot.model.consumed first &&
+LEFTOVER	Kernel/ApplicationLifecycleBeginV3Admission.lean	57	G3	def markersCurrent (durable : DeclaredResourceController.Durable)	!durable.snapshot.model.consumed created
+LEFTOVER	Kernel/ApplicationLifecycleBeginV3Admission.lean	58	G3	def markersCurrent (durable : DeclaredResourceController.Durable)	| .continue => durable.snapshot.model.consumed created
+LEFTOVER	Kernel/NativeReserveContinuity.lean	184	G1	def check {config : Config} (session : NativeHostSession.Walked config)	(session.target.image.accepted[anchor.acceptedCount - 1]?).map
+LEFTOVER	Kernel/NativeReserveContinuity.lean	187	G1	def check {config : Config} (session : NativeHostSession.Walked config)	(session.target.image.accepted[anchor.acceptedCount - 1]?).any
+LEFTOVER	Kernel/NativeReserveContinuity.lean	191	G4	def check {config : Config} (session : NativeHostSession.Walked config)	(session.target.image.accepted.drop anchor.acceptedCount) then
+LEFTOVER	Kernel/SeatReceiver.lean	591	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	match DurableCommitProtocol.Snapshot.lookupRecorded
+LEFTOVER	Kernel/SeatReceiver.lean	592	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	(transactionId domain semantics ingress) durable.snapshot.model.journal with
+LEFTOVER	Kernel/CertifyReceiver.lean	654	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	match DurableCommitProtocol.Snapshot.lookupRecorded
+LEFTOVER	Kernel/CertifyReceiver.lean	655	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	(transactionId domain semantics ingress) durable.snapshot.model.journal with
+LEFTOVER	Kernel/ApplicationLifecycleBeginReceiver.lean	73	G2	def replay (durable : Durable) (ingress : Ingress) : Option (Except String Recei	match Snapshot.lookupRecorded ingress.transactionId durable.snapshot.model.journal with
+LEFTOVER	Kernel/FnEvidence.lean	41	G4	def exportPackage (config : Config) (signedCall : List UInt8)	⟨opened.durable.image.seed, opened.durable.image.accepted.take receipt.acceptedCount⟩
+LEFTOVER	Kernel/ApplicationLifecycleRetryCompletionV4Receiver.lean	72	G1	def receiveVerified (config : Config) {target : Durable}	if old.opened.durable.image.accepted.findIdx?
+LEFTOVER	Kernel/FnOriginOutbox.lean	221	G5	def evaluateVerified (consumer : NativeHost.Config) (opened : NativeHost.Opened 	report opened.durable.image.accepted)
+LEFTOVER	Kernel/ApplicationLifecycleClaimV3Receiver.lean	103	G1	def receiveVerified (config : Config) {target : Durable}	if old.opened.durable.image.accepted.findIdx?
+LEFTOVER	Kernel/ApplicationLifecycleRetryV4Lookup.lean	29	G1	private def select {config : Config} {target : Durable}	let some index := verified.opened.durable.image.accepted.findIdx?
+LEFTOVER	Kernel/ApplicationLifecycleRetryV4Lookup.lean	32	G1	private def select {config : Config} {target : Durable}	let some record := verified.opened.durable.image.accepted[index]?
+LEFTOVER	Kernel/ApplicationAgentLifetimeDispatchReceiver.lean	100	G1	def receiveVerified (config : Config) {target : Durable}	if old.opened.durable.image.accepted.findIdx?
+LEFTOVER	Kernel/FnConsumerOperation.lean	768	G5	def evaluateVerified (consumer : NativeHost.Config) (pin : FnGatewayPolicy.Pin)	policy report opened.durable.image.accepted
+LEFTOVER	Kernel/FnConsumerOperation.lean	770	G5	def evaluateVerified (consumer : NativeHost.Config) (pin : FnGatewayPolicy.Pin)	report receipt opened.durable.image.accepted)
+LEFTOVER	Kernel/ApplicationDispatchLookup.lean	35	G1	def lookupVerified {config : Config} {target : Durable}	let some index := verified.opened.durable.image.accepted.findIdx?
+LEFTOVER	Kernel/ApplicationDispatchLookup.lean	38	G1	def lookupVerified {config : Config} {target : Durable}	let some record := verified.opened.durable.image.accepted[index]?
+LEFTOVER	Kernel/NativeHostReplay.lean	457	G1	private def selectCreatedAt (config : Config) (opened : Opened config)	have present : opened.durable.image.accepted[prior.index]? = some prior.record := by
+LEFTOVER	Kernel/NativeHostReplay.lean	476	G1	private def selectRunningAt {config : Config} (opened : Opened config)	match found : opened.durable.image.accepted[prior.index]? with
+LEFTOVER	Kernel/NativeHostReplay.lean	483	G1	private def selectRunningAt {config : Config} (opened : Opened config)	have present : opened.durable.image.accepted[prior.index]? = some prior.record := by
+LEFTOVER	Kernel/NativeHostReplay.lean	1243	G1	private def Derived.bootstrapAdmission {config : Config} {opened : Opened config	let prior ← opened.durable.image.accepted.getLast?
+LEFTOVER	Kernel/NativeHostReplay.lean	1584	G1	private def admitSessionEnrollmentAt (config : Config) (opened : Opened config)	if recordBytes : (opened.durable.image.accepted[issue.index]?.map
+LEFTOVER	Kernel/NativeHostReplay.lean	1587	G1	private def admitSessionEnrollmentAt (config : Config) (opened : Opened config)	have present : opened.durable.image.accepted[issue.index]? =
+LEFTOVER	Kernel/NativeHostReplay.lean	1589	G1	private def admitSessionEnrollmentAt (config : Config) (opened : Opened config)	cases found : opened.durable.image.accepted[issue.index]? with
+LEFTOVER	Kernel/NativeHostReplay.lean	1619	G1	private def admitLifetimeGrantIssueAt (config : Config) (opened : Opened config)	if recordBytes : (opened.durable.image.accepted[prior.index]?.map
+LEFTOVER	Kernel/NativeHostReplay.lean	1622	G1	private def admitLifetimeGrantIssueAt (config : Config) (opened : Opened config)	have present : opened.durable.image.accepted[prior.index]? =
+LEFTOVER	Kernel/NativeHostReplay.lean	1624	G1	private def admitLifetimeGrantIssueAt (config : Config) (opened : Opened config)	cases found : opened.durable.image.accepted[prior.index]? with
+LEFTOVER	Kernel/NativeHostReplay.lean	1657	G1	private def admitDispatchAt (config : Config) (opened : Opened config)	match found : opened.durable.image.accepted[prior.index]? with
+LEFTOVER	Kernel/NativeHostReplay.lean	1664	G1	private def admitDispatchAt (config : Config) (opened : Opened config)	have present : opened.durable.image.accepted[prior.index]? =
+LEFTOVER	Kernel/NativeHostReplay.lean	1687	G1	private def admitAgentDispatchAt (config : Config) (opened : Opened config)	if issueBytes : (opened.durable.image.accepted[issue.index]?.map
+LEFTOVER	Kernel/NativeHostReplay.lean	1690	G1	private def admitAgentDispatchAt (config : Config) (opened : Opened config)	have issuePresent : opened.durable.image.accepted[issue.index]? =
+LEFTOVER	Kernel/NativeHostReplay.lean	1692	G1	private def admitAgentDispatchAt (config : Config) (opened : Opened config)	cases found : opened.durable.image.accepted[issue.index]? with
+LEFTOVER	Kernel/NativeHostReplay.lean	1699	G1	private def admitAgentDispatchAt (config : Config) (opened : Opened config)	if reserveBytes : (opened.durable.image.accepted[reserve.index]?.map
+LEFTOVER	Kernel/NativeHostReplay.lean	1702	G1	private def admitAgentDispatchAt (config : Config) (opened : Opened config)	have reservePresent : opened.durable.image.accepted[reserve.index]? =
+LEFTOVER	Kernel/NativeHostReplay.lean	1704	G1	private def admitAgentDispatchAt (config : Config) (opened : Opened config)	cases found : opened.durable.image.accepted[reserve.index]? with
+LEFTOVER	Kernel/NativeHostReplay.lean	1712	G4	private def admitAgentDispatchAt (config : Config) (opened : Opened config)	(opened.durable.image.accepted.drop (reserve.index + 1))
+LEFTOVER	Kernel/NativeHostReplay.lean	1745	G1	private def admitLifetimeDispatchAt (config : Config) (opened : Opened config)	if issueBytes : (opened.durable.image.accepted[issue.index]?.map
+LEFTOVER	Kernel/NativeHostReplay.lean	1748	G1	private def admitLifetimeDispatchAt (config : Config) (opened : Opened config)	have issuePresent : opened.durable.image.accepted[issue.index]? =
+LEFTOVER	Kernel/NativeHostReplay.lean	1750	G1	private def admitLifetimeDispatchAt (config : Config) (opened : Opened config)	cases found : opened.durable.image.accepted[issue.index]? with
+LEFTOVER	Kernel/NativeHostReplay.lean	1757	G1	private def admitLifetimeDispatchAt (config : Config) (opened : Opened config)	if grantBytes : (opened.durable.image.accepted[grant.index]?.map
+LEFTOVER	Kernel/NativeHostReplay.lean	1760	G1	private def admitLifetimeDispatchAt (config : Config) (opened : Opened config)	have grantPresent : opened.durable.image.accepted[grant.index]? =
+LEFTOVER	Kernel/NativeHostReplay.lean	1762	G1	private def admitLifetimeDispatchAt (config : Config) (opened : Opened config)	cases found : opened.durable.image.accepted[grant.index]? with
+LEFTOVER	Kernel/NativeHostReplay.lean	1769	G1	private def admitLifetimeDispatchAt (config : Config) (opened : Opened config)	if reserveBytes : (opened.durable.image.accepted[reserve.index]?.map
+LEFTOVER	Kernel/NativeHostReplay.lean	1772	G1	private def admitLifetimeDispatchAt (config : Config) (opened : Opened config)	have reservePresent : opened.durable.image.accepted[reserve.index]? =
+LEFTOVER	Kernel/NativeHostReplay.lean	1774	G1	private def admitLifetimeDispatchAt (config : Config) (opened : Opened config)	cases found : opened.durable.image.accepted[reserve.index]? with
+LEFTOVER	Kernel/NativeHostReplay.lean	1782	G4	private def admitLifetimeDispatchAt (config : Config) (opened : Opened config)	(opened.durable.image.accepted.drop (reserve.index + 1))
+LEFTOVER	Kernel/NativeHostReplay.lean	1814	G1	private def admitClaimAt (config : Config) (opened : Opened config)	match found : opened.durable.image.accepted[prior.index]? with
+LEFTOVER	Kernel/NativeHostReplay.lean	1822	G1	private def admitClaimAt (config : Config) (opened : Opened config)	have present : opened.durable.image.accepted[prior.index]? =
+LEFTOVER	Kernel/NativeHostReplay.lean	1851	G1	private def admitClaimV2At (config : Config) (opened : Opened config)	match found : opened.durable.image.accepted[prior.index]? with
+LEFTOVER	Kernel/NativeHostReplay.lean	1859	G1	private def admitClaimV2At (config : Config) (opened : Opened config)	have present : opened.durable.image.accepted[prior.index]? =
+LEFTOVER	Kernel/NativeHostReplay.lean	1890	G1	private def admitClaimV3At (config : Config) (opened : Opened config)	match found : opened.durable.image.accepted[prior.index]? with
+LEFTOVER	Kernel/NativeHostReplay.lean	1898	G1	private def admitClaimV3At (config : Config) (opened : Opened config)	have present : opened.durable.image.accepted[prior.index]? =
+LEFTOVER	Kernel/NativeHostReplay.lean	1938	G1	private def admitCompletionAt (config : Config) (opened : Opened config)	have present : opened.durable.image.accepted[prior.index]? =
+LEFTOVER	Kernel/NativeHostReplay.lean	1963	G1	private def admitFailedStartRecoveryAt (config : Config) (opened : Opened config	have present : opened.durable.image.accepted[prior.index]? = some prior.record := by
+LEFTOVER	Kernel/NativeHostReplay.lean	1988	G1	private def admitCompletionV2At (config : Config) (opened : Opened config)	have present : opened.durable.image.accepted[prior.index]? =
+LEFTOVER	Kernel/NativeHostReplay.lean	2037	G1	private def admitBeginV4At (config : Config) (opened : Opened config)	have present : opened.durable.image.accepted[prior.index]? = some prior.record := by
+LEFTOVER	Kernel/NativeHostReplay.lean	2053	G1	private def admitClaimV4At (config : Config) (opened : Opened config)	match found : opened.durable.image.accepted[prior.index]? with
+LEFTOVER	Kernel/NativeHostReplay.lean	2061	G1	private def admitClaimV4At (config : Config) (opened : Opened config)	have present : opened.durable.image.accepted[prior.index]? =
+LEFTOVER	Kernel/NativeHostReplay.lean	2098	G1	private def admitCompletionV4At (config : Config) (opened : Opened config)	have present : opened.durable.image.accepted[prior.index]? =
+LEFTOVER	Kernel/NativeHostReplay.lean	2519	G0	private def issuesAfter (config : Config) (opened : Opened config)	⟨opened.durable.image.accepted.length, receipt,
+LEFTOVER	Kernel/NativeHostReplay.lean	2528	G0	private def issuesAfter (config : Config) (opened : Opened config)	⟨opened.durable.image.accepted.length, receipt,
+LEFTOVER	Kernel/NativeHostReplay.lean	2575	G0	private def reservesAfter (config : Config) (opened : Opened config)	return ⟨opened.durable.image.accepted.length, raw⟩ :: reserves
+LEFTOVER	Kernel/NativeHostReplay.lean	2593	G0	private def beginsAfter (config : Config) (opened : Opened config)	⟨opened.durable.image.accepted.length, ingress, record,
+LEFTOVER	Kernel/NativeHostReplay.lean	2608	G0	private def beginsV2After (config : Config) (opened : Opened config)	⟨opened.durable.image.accepted.length, ingress, record,
+LEFTOVER	Kernel/NativeHostReplay.lean	2626	G0	private def claimsV2After (config : Config) (opened : Opened config)	⟨opened.durable.image.accepted.length, ingress, record,
+LEFTOVER	Kernel/NativeHostReplay.lean	2641	G0	private def beginsV3After (config : Config) (opened : Opened config)	⟨opened.durable.image.accepted.length, ingress, record,
+LEFTOVER	Kernel/NativeHostReplay.lean	2656	G0	private def claimsV3After (config : Config) (opened : Opened config)	⟨opened.durable.image.accepted.length, ingress, record,
+LEFTOVER	Kernel/NativeHostReplay.lean	2673	G0	private def createdV3After (config : Config) (opened : Opened config)	⟨opened.durable.image.accepted.length, receipt, .v2 ingress, record,
+LEFTOVER	Kernel/NativeHostReplay.lean	2681	G0	private def createdV3After (config : Config) (opened : Opened config)	⟨opened.durable.image.accepted.length, receipt, .v4 ingress, record,
+LEFTOVER	Kernel/NativeHostReplay.lean	2701	G0	private def runningV3After (config : Config) (opened : Opened config)	⟨opened.durable.image.accepted.length, receipt, .v2 ingress, record,
+LEFTOVER	Kernel/NativeHostReplay.lean	2711	G0	private def runningV3After (config : Config) (opened : Opened config)	⟨opened.durable.image.accepted.length, receipt, .v4 ingress, record,
+LEFTOVER	Kernel/NativeHostReplay.lean	2767	G0	private def retryAfter (config : Config) (opened : Opened config)	let index := opened.durable.image.accepted.length
+LEFTOVER	Kernel/NativeHostReplay.lean	2803	G0	private def grantsAfter (config : Config) (opened : Opened config)	⟨opened.durable.image.accepted.length, receipt, ingress, record,
+LEFTOVER	Kernel/NativeHostReplay.lean	2887	G0	def AdmittedStep (config : Config) (before after : Opened config)	before.durable.image.accepted.length + 1, next.worldRoot⟩
+LEFTOVER	Kernel/NativeHostReplay.lean	3128	G0	private def walk (config : Config) (opened : Opened config)	let index := opened.durable.image.accepted.length
+LEFTOVER	Kernel/NativeHostReplay.lean	3500	G0	def extendExact {config : Config} {oldTarget : Durable}	old.opened.durable.image.accepted.length + 1, target.worldRoot⟩
+LEFTOVER	Kernel/NativeHostReplay.lean	3513	G0	def extendExact {config : Config} {oldTarget : Durable}	have countExact : (old.receipts ++ [receipt]).length = target.image.accepted.length := by
+LEFTOVER	Kernel/NativeHostReplay.lean	3516	G5	def extendExact {config : Config} {oldTarget : Durable}	have admitted : AdmittedReplay config old.origin target.image.accepted
+LEFTOVER	Kernel/NativeHostReplay.lean	3519	G5	def extendExact {config : Config} {oldTarget : Durable}	(old.opened.durable.image.accepted ++ [record]) readback.after
+LEFTOVER	Kernel/NativeHostReplay.lean	3593	G0	def SemanticStep (config : Config) (verifier : VerifierSemantics config)	before.durable.image.accepted.length + 1, next.worldRoot⟩
+LEFTOVER	Kernel/NativeHostReplay.lean	3683	G5	def verifyLoaded (config : Config) (target : Durable)	match ← walk config opened [] [] [] [] [] [] [] [] [] [] {} [] {} none timing target.image.accepted with
+LEFTOVER	Kernel/NativeHostReplay.lean	3692	G0	def verifyLoaded (config : Config) (target : Durable)	if countExact : walked.receipts.length = target.image.accepted.length then
+LEFTOVER	Kernel/NativeHostReplay.lean	3698	G0	def verifyLoaded (config : Config) (target : Durable)	else return .error ⟨target.image.accepted.length, "verified history count mismatch"⟩
+LEFTOVER	Kernel/NativeHostReplay.lean	3754	G0	def verifyLoadedSelected (config : Config) (target : Durable) (index : Nat) :	if !(index < target.image.accepted.length) then
+LEFTOVER	Kernel/NativeHostReplay.lean	3762	G5	def verifyLoadedSelected (config : Config) (target : Durable) (index : Nat) :	match ← walk config opened [] [] [] [] [] [] [] [] [] [] {} [] {} (some index) none target.image.accepted with
+LEFTOVER	Kernel/NativeHostReplay.lean	3767	G0	def verifyLoadedSelected (config : Config) (target : Durable) (index : Nat) :	if countExact : walked.receipts.length = target.image.accepted.length then
+LEFTOVER	Kernel/NativeHostReplay.lean	3780	G0	def verifyLoadedSelected (config : Config) (target : Durable) (index : Nat) :	else return .error ⟨target.image.accepted.length, "verified history count mismatch"⟩
+LEFTOVER	Kernel/NativeHostReplay.lean	3803	G5	def extendVerifiedAppended (config : Config) {oldTarget : Durable}	(acceptedExact : target.image.accepted = oldTarget.image.accepted ++
+LEFTOVER	Kernel/NativeHostReplay.lean	3804	G4	def extendVerifiedAppended (config : Config) {oldTarget : Durable}	target.image.accepted.drop oldTarget.image.accepted.length) :
+LEFTOVER	Kernel/NativeHostReplay.lean	3806	G4	def extendVerifiedAppended (config : Config) {oldTarget : Durable}	let suffix := target.image.accepted.drop oldTarget.image.accepted.length
+LEFTOVER	Kernel/NativeHostReplay.lean	3815	G0	def extendVerifiedAppended (config : Config) {oldTarget : Durable}	if countExact : receipts.length = target.image.accepted.length then
+LEFTOVER	Kernel/NativeHostReplay.lean	3816	G5	def extendVerifiedAppended (config : Config) {oldTarget : Durable}	have admitted : AdmittedReplay config old.origin target.image.accepted
+LEFTOVER	Kernel/NativeHostReplay.lean	3824	G0	def extendVerifiedAppended (config : Config) {oldTarget : Durable}	else return .error ⟨target.image.accepted.length, "verified history count mismatch"⟩
+LEFTOVER	Kernel/NativeHostReplay.lean	3839	G0	def extendVerified (config : Config) {oldTarget : Durable}	if target.image.accepted.length < count then
+LEFTOVER	Kernel/NativeHostReplay.lean	3840	G0	def extendVerified (config : Config) {oldTarget : Durable}	return .error ⟨target.image.accepted.length, "verified history rolled back"⟩
+LEFTOVER	Kernel/NativeHostReplay.lean	3842	G4	def extendVerified (config : Config) {oldTarget : Durable}	(target.image.accepted.take count) =
+LEFTOVER	Kernel/NativeHostReplay.lean	3844	G5	def extendVerified (config : Config) {oldTarget : Durable}	oldTarget.image.accepted then
+LEFTOVER	Kernel/NativeHostReplay.lean	3845	G4	def extendVerified (config : Config) {oldTarget : Durable}	have prefixExact : target.image.accepted.take count = oldTarget.image.accepted :=
+LEFTOVER	Kernel/NativeHostReplay.lean	3848	G5	def extendVerified (config : Config) {oldTarget : Durable}	have acceptedExact : target.image.accepted =
+LEFTOVER	Kernel/NativeHostReplay.lean	3849	G4	def extendVerified (config : Config) {oldTarget : Durable}	oldTarget.image.accepted ++ target.image.accepted.drop count := by
+LEFTOVER	Kernel/NativeHostReplay.lean	3851	G5	def extendVerified (config : Config) {oldTarget : Durable}	target.image.accepted =
+LEFTOVER	Kernel/NativeHostReplay.lean	3852	G4	def extendVerified (config : Config) {oldTarget : Durable}	target.image.accepted.take count ++ target.image.accepted.drop count :=
+LEFTOVER	Kernel/NativeHostReplay.lean	3853	G5	def extendVerified (config : Config) {oldTarget : Durable}	(List.take_append_drop count target.image.accepted).symm
+LEFTOVER	Kernel/NativeHostReplay.lean	3854	G4	def extendVerified (config : Config) {oldTarget : Durable}	_ = oldTarget.image.accepted ++ target.image.accepted.drop count := by rw [prefixExact]
+LEFTOVER	Kernel/NativeHostReplay.lean	3920	G0	def SuffixStep (config : Config) (before after : Opened config)	before.durable.image.accepted.length + 1, next.worldRoot⟩
+LEFTOVER	Kernel/NativeHostReplay.lean	4053	G1	private def deriveSuffixAt (config : Config) (anchor : Opened config)	if retained.source.durable.image.accepted.any (fun record =>
+LEFTOVER	Kernel/NativeHostReplay.lean	4114	G0	private def walkSuffix (config : Config) (anchor : Opened config)	let index := opened.durable.image.accepted.length
+LEFTOVER	Kernel/NativeHostReplay.lean	4177	G0	def SuffixVerified.receiptAt {config : Config} {anchor : Opened config} {target 	if anchor.durable.image.accepted.length ≤ index then
+LEFTOVER	Kernel/NativeHostReplay.lean	4178	G0	def SuffixVerified.receiptAt {config : Config} {anchor : Opened config} {target 	verified.receipts[index - anchor.durable.image.accepted.length]?
+LEFTOVER	Kernel/NativeHostReplay.lean	4225	G0	def verifySuffixFrom (config : Config) (anchor : Opened config) (target : Durabl	(anchorWithin : anchor.durable.image.accepted.length ≤ target.image.accepted.length)
+LEFTOVER	Kernel/NativeHostReplay.lean	4226	G0	def verifySuffixFrom (config : Config) (anchor : Opened config) (target : Durabl	(prefixExact : target.image.accepted.take anchor.durable.image.accepted.length =
+LEFTOVER	Kernel/NativeHostReplay.lean	4227	G5	def verifySuffixFrom (config : Config) (anchor : Opened config) (target : Durabl	anchor.durable.image.accepted)
+LEFTOVER	Kernel/NativeHostReplay.lean	4230	G0	def verifySuffixFrom (config : Config) (anchor : Opened config) (target : Durabl	let count := anchor.durable.image.accepted.length
+LEFTOVER	Kernel/NativeHostReplay.lean	4231	G4	def verifySuffixFrom (config : Config) (anchor : Opened config) (target : Durabl	let suffix := target.image.accepted.drop count
+LEFTOVER	Kernel/NativeHostReplay.lean	4235	G5	def verifySuffixFrom (config : Config) (anchor : Opened config) (target : Durabl	have acceptedExact : target.image.accepted = anchor.durable.image.accepted ++ suffix := by
+LEFTOVER	Kernel/NativeHostReplay.lean	4237	G5	def verifySuffixFrom (config : Config) (anchor : Opened config) (target : Durabl	exact (List.take_append_drop count target.image.accepted).symm
+LEFTOVER	Kernel/NativeHostReplay.lean	4267	G0	def verifySuffixFrom (config : Config) (anchor : Opened config) (target : Durabl	else return .error ⟨target.image.accepted.length, "suffix receipt count mismatch"⟩
+LEFTOVER	Kernel/NativeHostReplay.lean	4268	G0	def verifySuffixFrom (config : Config) (anchor : Opened config) (target : Durabl	else return .error ⟨target.image.accepted.length, "suffix final log anchor differs"⟩
+LEFTOVER	Kernel/NativeHostReplay.lean	4281	G0	def verifySuffixLoaded (config : Config) (anchor : Opened config) (target : Dura	let count := anchor.durable.image.accepted.length
+LEFTOVER	Kernel/NativeHostReplay.lean	4286	G0	def verifySuffixLoaded (config : Config) (anchor : Opened config) (target : Dura	if anchorWithin : count ≤ target.image.accepted.length then
+LEFTOVER	Kernel/NativeHostReplay.lean	4288	G4	def verifySuffixLoaded (config : Config) (anchor : Opened config) (target : Dura	(target.image.accepted.take count) =
+LEFTOVER	Kernel/NativeHostReplay.lean	4290	G5	def verifySuffixLoaded (config : Config) (anchor : Opened config) (target : Dura	anchor.durable.image.accepted then
+LEFTOVER	Kernel/NativeHostReplay.lean	4291	G4	def verifySuffixLoaded (config : Config) (anchor : Opened config) (target : Dura	have prefixExact : target.image.accepted.take count = anchor.durable.image.accepted :=
+LEFTOVER	Kernel/NativeHostReplay.lean	4298	G0	def verifySuffixLoaded (config : Config) (anchor : Opened config) (target : Dura	else return .error ⟨target.image.accepted.length, "suffix predates its anchor"⟩
+LEFTOVER	Kernel/NativeHostReplay.lean	4315	G0	def extendSuffixAppended (config : Config) {anchor : Opened config} {oldTarget :	(within : oldTarget.image.accepted.length ≤ target.image.accepted.length)
+LEFTOVER	Kernel/NativeHostReplay.lean	4316	G4	def extendSuffixAppended (config : Config) {anchor : Opened config} {oldTarget :	(prefixExact : target.image.accepted.take oldTarget.image.accepted.length =
+LEFTOVER	Kernel/NativeHostReplay.lean	4317	G5	def extendSuffixAppended (config : Config) {anchor : Opened config} {oldTarget :	oldTarget.image.accepted)
+LEFTOVER	Kernel/NativeHostReplay.lean	4321	G4	def extendSuffixAppended (config : Config) {anchor : Opened config} {oldTarget :	let suffix := target.image.accepted.drop count
+LEFTOVER	Kernel/NativeHostReplay.lean	4325	G5	def extendSuffixAppended (config : Config) {anchor : Opened config} {oldTarget :	have acceptedExact : target.image.accepted = oldTarget.image.accepted ++ suffix := by
+LEFTOVER	Kernel/NativeHostReplay.lean	4327	G4	def extendSuffixAppended (config : Config) {anchor : Opened config} {oldTarget :	target.image.accepted = target.image.accepted.take count ++
+LEFTOVER	Kernel/NativeHostReplay.lean	4328	G4	def extendSuffixAppended (config : Config) {anchor : Opened config} {oldTarget :	target.image.accepted.drop count :=
+LEFTOVER	Kernel/NativeHostReplay.lean	4329	G5	def extendSuffixAppended (config : Config) {anchor : Opened config} {oldTarget :	(List.take_append_drop count target.image.accepted).symm
+LEFTOVER	Kernel/NativeHostReplay.lean	4330	G5	def extendSuffixAppended (config : Config) {anchor : Opened config} {oldTarget :	_ = oldTarget.image.accepted ++ suffix := by rw [prefixExact]
+LEFTOVER	Kernel/NativeHostReplay.lean	4336	G0	def extendSuffixAppended (config : Config) {anchor : Opened config} {oldTarget :	(target.image.accepted.drop anchor.durable.image.accepted.length).length then
+LEFTOVER	Kernel/NativeHostReplay.lean	4337	G0	def extendSuffixAppended (config : Config) {anchor : Opened config} {oldTarget :	have anchorPrefix : target.image.accepted.take anchor.durable.image.accepted.length =
+LEFTOVER	Kernel/NativeHostReplay.lean	4338	G5	def extendSuffixAppended (config : Config) {anchor : Opened config} {oldTarget :	anchor.durable.image.accepted := by
+LEFTOVER	Kernel/NativeHostReplay.lean	4341	G0	def extendSuffixAppended (config : Config) {anchor : Opened config} {oldTarget :	have suffixExact : target.image.accepted.drop anchor.durable.image.accepted.length =
+LEFTOVER	Kernel/NativeHostReplay.lean	4342	G0	def extendSuffixAppended (config : Config) {anchor : Opened config} {oldTarget :	oldTarget.image.accepted.drop anchor.durable.image.accepted.length ++ suffix := by
+LEFTOVER	Kernel/NativeHostReplay.lean	4345	G0	def extendSuffixAppended (config : Config) {anchor : Opened config} {oldTarget :	(target.image.accepted.drop anchor.durable.image.accepted.length)
+LEFTOVER	Kernel/NativeHostReplay.lean	4374	G0	def extendSuffixAppended (config : Config) {anchor : Opened config} {oldTarget :	else return .error ⟨target.image.accepted.length, "extended suffix receipt count mismatch"⟩
+LEFTOVER	Kernel/NativeHostReplay.lean	4375	G0	def extendSuffixAppended (config : Config) {anchor : Opened config} {oldTarget :	else return .error ⟨target.image.accepted.length, "extended suffix final log anchor differs"⟩
+LEFTOVER	Kernel/NativeHostReplay.lean	4388	G0	def extendSuffixVerified (config : Config) {anchor : Opened config} {oldTarget :	if within : count ≤ target.image.accepted.length then
+LEFTOVER	Kernel/NativeHostReplay.lean	4390	G4	def extendSuffixVerified (config : Config) {anchor : Opened config} {oldTarget :	(target.image.accepted.take count) =
+LEFTOVER	Kernel/NativeHostReplay.lean	4392	G5	def extendSuffixVerified (config : Config) {anchor : Opened config} {oldTarget :	oldTarget.image.accepted then
+LEFTOVER	Kernel/NativeHostReplay.lean	4393	G4	def extendSuffixVerified (config : Config) {anchor : Opened config} {oldTarget :	have prefixExact : target.image.accepted.take count = oldTarget.image.accepted :=
+LEFTOVER	Kernel/NativeHostReplay.lean	4400	G0	def extendSuffixVerified (config : Config) {anchor : Opened config} {oldTarget :	else return .error ⟨target.image.accepted.length, "verified suffix rolled back"⟩
+LEFTOVER	Kernel/PayObservationReceiver.lean	706	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	match DurableCommitProtocol.Snapshot.lookupRecorded
+LEFTOVER	Kernel/PayObservationReceiver.lean	707	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	(transactionId domain semantics ingress) durable.snapshot.model.journal with
+LEFTOVER	Kernel/ApplicationDispatchAgentPaidAuthoring.lean	270	G1	def preparePaidVerified (config : Config) {target : Durable}	if verified.opened.durable.image.accepted[reserve.index]?.map
+LEFTOVER	Kernel/ApplicationDispatchAgentPaidAuthoring.lean	274	G4	def preparePaidVerified (config : Config) {target : Durable}	(verified.opened.durable.image.accepted.drop (reserve.index + 1))
+LEFTOVER	Kernel/PolicyInstallReceiver.lean	654	G2	def replay (domain : Digest) (durable : Durable) (ingress : DecodedIngress) :	match Snapshot.lookupRecorded (transactionId domain ingress) durable.snapshot.model.journal with
+LEFTOVER	Kernel/ApplicationFailedCreateRetryEvidence.lean	83	G3	def markersCurrent (config : Config) (opened : Opened config)	opened.durable.snapshot.model.consumed
+LEFTOVER	Kernel/ApplicationFailedCreateRetryEvidence.lean	86	G3	def markersCurrent (config : Config) (opened : Opened config)	!opened.durable.snapshot.model.consumed
+LEFTOVER	Kernel/ApplicationFailedCreateRetryEvidence.lean	89	G3	def markersCurrent (config : Config) (opened : Opened config)	opened.durable.snapshot.model.consumed
+LEFTOVER	Kernel/ApplicationFailedCreateRetryEvidence.lean	91	G3	def markersCurrent (config : Config) (opened : Opened config)	!opened.durable.snapshot.model.consumed (retryToken selector)
+LEFTOVER	Kernel/ApplicationLifecycleCreatedHistory.lean	96	G4	def select (config : Config) (opened : Opened config)	let prefixAfter := NativeHistorySelection.prefixImage opened (index + 1)
+LEFTOVER	Kernel/ApplicationLifecycleCreatedHistory.lean	97	G4	def select (config : Config) (opened : Opened config)	let loaded ← match ← NativeHistorySelection.loadPrefix opened.durable.logStart prefixAfter with
+LEFTOVER	Kernel/PayEnrolReceiver.lean	1212	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	match DurableCommitProtocol.Snapshot.lookupRecorded
+LEFTOVER	Kernel/PayEnrolReceiver.lean	1213	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	(transactionId domain semantics ingress) durable.snapshot.model.journal with
+LEFTOVER	Kernel/Receiving.lean	86	G2	def lookup (snapshot : DataSnapshot rootBytes) (txId : Digest) :	(DurableCommitProtocol.Snapshot.lookupRecorded txId snapshot.model.journal).map
+LEFTOVER	Kernel/PayAssignmentReceiver.lean	710	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	match DurableCommitProtocol.Snapshot.lookupRecorded
+LEFTOVER	Kernel/PayAssignmentReceiver.lean	711	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	(transactionId domain semantics ingress) durable.snapshot.model.journal with
+LEFTOVER	Kernel/NativeHost.lean	95	G5	def bootstrap (config : Config) (canonicalImage : List UInt8) : IO (Except Strin	if !durable.image.accepted.isEmpty then return .error "bootstrap image contains accepted history"
+LEFTOVER	Kernel/NativeHost.lean	889	G4	def receiptRootSpec (config : Config) (durable : Durable) (index : Nat) : Digest	else worldRoot config ⟨durable.image.seed, durable.image.accepted.take (index + 1)⟩
+LEFTOVER	Kernel/NativeHost.lean	893	G6	def receiptRootSpec (config : Config) (durable : Durable) (index : Nat) : Digest	(`Loaded.rootLog`, read from the verified tag); only a prefix whose root this
+LEFTOVER	Kernel/NativeHost.lean	897	G6	def receiptRoot (config : Config) (durable : Durable) (index : Nat) : Digest :=	else match durable.rootLog[index]? with
+LEFTOVER	Kernel/NativeHost.lean	899	G4	def receiptRoot (config : Config) (durable : Durable) (index : Nat) : Digest :=	| _ => worldRoot config ⟨durable.image.seed, durable.image.accepted.take (index + 1)⟩
+LEFTOVER	Kernel/NativeHost.lean	907	G6	def RootLogHonest (config : Config) (durable : Durable) : Prop :=	∀ index root, durable.rootLog[index]? = some (some root) →
+LEFTOVER	Kernel/NativeHost.lean	908	G4	def RootLogHonest (config : Config) (durable : Durable) : Prop :=	root = worldRoot config ⟨durable.image.seed, durable.image.accepted.take (index + 1)⟩
+LEFTOVER	Kernel/NativeHost.lean	992	G1	def historicalReceipt (config : Config) (durable : Durable) (transactionId event	let index ← durable.image.accepted.findIdx? (fun record => record.transactionId == transactionId)
+LEFTOVER	Kernel/NativeHost.lean	993	G1	def historicalReceipt (config : Config) (durable : Durable) (transactionId event	let record ← durable.image.accepted[index]?
+LEFTOVER	Kernel/NativeHost.lean	1002	G1	def historicalReceiptCached (config : Config) (durable : Durable) (transactionId	let record ← durable.image.accepted[index]?
+LEFTOVER	Kernel/NativeHost.lean	1290	G1	def receiptByTransactionLoaded (config : Config) (opened : Opened config)	let record ← opened.durable.image.accepted.find? (fun record => record.transactionId == transactionId)
+LEFTOVER	Kernel/NativeHost.lean	1323	G1	def fleetJournalTurn {config : Config} (opened : Opened config) (transactionId :	let record ← opened.durable.image.accepted.find? (fun record => record.transactionId == transactionId)
+LEFTOVER	Kernel/NativeHost.lean	1372	G1	def fleetHeadAuthorizedLoaded (config : Config) (opened : Opened config)	let paid := opened.durable.image.accepted.filter fun record =>
+LEFTOVER	Kernel/NativeHost.lean	1544	G5	def fleetIncomingAuthorizedLoaded (config : Config) (opened : Opened config)	opened.durable.image.accepted
+LEFTOVER	Kernel/ApplicationLifecycleClaimV2Receiver.lean	130	G1	def receiveVerified (config : Config) {target : Durable}	if old.opened.durable.image.accepted.findIdx?
+LEFTOVER	Kernel/ApplicationLifecycleCompletionV2History.lean	85	G4	def select (config : Config) (opened : Opened config)	let prefixAfter := NativeHistorySelection.prefixImage opened (index + 1)
+LEFTOVER	Kernel/ApplicationLifecycleCompletionV2History.lean	86	G4	def select (config : Config) (opened : Opened config)	let loaded ← match ← NativeHistorySelection.loadPrefix opened.durable.logStart prefixAfter with
+LEFTOVER	Kernel/FnSelectedPollReceiver.lean	21	G1	def lookupVerified {config : NativeHost.Config} {target : NativeHost.Durable}	let some record := verified.opened.durable.image.accepted.find?
+LEFTOVER	Kernel/ResourceBirthReceiver.lean	438	G2	def replay (domain : Digest) (durable : ResourceBirthController.Concrete.Durable	match Snapshot.lookupRecorded ingress.descriptor.transactionId durable.snapshot.model.journal with
+LEFTOVER	Kernel/ApplicationFailedStartRecoveryAdmission.lean	83	G3	def creationMarkersCurrent (config : Config) (opened : Opened config)	opened.durable.snapshot.model.consumed
+LEFTOVER	Kernel/ApplicationFailedStartRecoveryAdmission.lean	86	G3	def creationMarkersCurrent (config : Config) (opened : Opened config)	!opened.durable.snapshot.model.consumed created
+LEFTOVER	Kernel/ApplicationAgentLifetimeDispatchLookup.lean	31	G1	def lookupVerified {config : Config} {target : Durable}	let some index := verified.opened.durable.image.accepted.findIdx?
+LEFTOVER	Kernel/ApplicationAgentLifetimeDispatchLookup.lean	34	G1	def lookupVerified {config : Config} {target : Durable}	let some record := verified.opened.durable.image.accepted[index]?
+LEFTOVER	Kernel/FnConsumerNamespaceReceiver.lean	23	G1	def lookupVerified {config : NativeHost.Config} {target : NativeHost.Durable}	let some _ := verified.opened.durable.image.accepted.find?
+LEFTOVER	Kernel/ApplicationLifecycleCompletionV2Receiver.lean	72	G1	def receiveVerified (config : Config) {target : Durable}	if old.opened.durable.image.accepted.findIdx?
+LEFTOVER	Kernel/NativeProviderHistory.lean	85	G1	def exactWrite {config : Config} (session : NativeHostSession.Walked config)	if callExact : (session.target.image.accepted[receipt.acceptedCount - 1]?).map
+LEFTOVER	Kernel/NativeProviderHistory.lean	87	G1	def exactWrite {config : Config} (session : NativeHostSession.Walked config)	if written : (session.target.image.accepted[receipt.acceptedCount - 1]?).any
+LEFTOVER	Kernel/NativeProviderHistory.lean	188	G4	def suffixEntries {config : Config} (session : NativeHostSession.Walked config)	let records := session.target.image.accepted.drop reserveCount
+LEFTOVER	Kernel/JobMoneyReceiver.lean	903	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	match DurableCommitProtocol.Snapshot.lookupRecorded
+LEFTOVER	Kernel/JobMoneyReceiver.lean	904	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	(transactionId domain semantics ingress) durable.snapshot.model.journal with
+LEFTOVER	Kernel/FnSelectiveReleaseSourceReceiver.lean	35	G2	def replay {config : NativeHost.Config} (opened : NativeHost.Opened config) (ing	match DurableCommitProtocol.Snapshot.lookupRecorded
+LEFTOVER	Kernel/FnSelectiveReleaseSourceReceiver.lean	36	G2	def replay {config : NativeHost.Config} (opened : NativeHost.Opened config) (ing	(transactionId ingress.spec) opened.durable.snapshot.model.journal with
+LEFTOVER	Kernel/FleetTurnReceiver.lean	152	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	match DurableCommitProtocol.Snapshot.lookupRecorded
+LEFTOVER	Kernel/FleetTurnReceiver.lean	153	G2	def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng	(transactionId domain semantics ingress) durable.snapshot.model.journal with
+LEFTOVER	Kernel/Contracts/Futures.lean	118	G5	def Extension : FutureDecl miniModel where	future := fun w v => v.image.seed = w.image.seed ∧ w.image.accepted <+: v.image.accepted
+LEFTOVER	Kernel/Contracts/Futures.lean	125	G5	def Delivery : FutureDecl miniModel where	∃ d, v.image.accepted = w.image.accepted ++ d ∧ (∀ r ∈ d, r ∈ w.pending) ∧

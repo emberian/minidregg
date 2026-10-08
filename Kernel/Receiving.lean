@@ -9,7 +9,9 @@ append) and the native Ed25519 verifier, and turns a receiving `Family` -- what
 is specific to one operation -- into a `Theory.Receiving.Receiver`.
 
 A family supplies: its identity (`id`, the registry's `FamilyId`), the ingress
-codec, the command, the signature claims, the gate (`prepare`), the per-cell
+codec, the command, the signature claims, the gate (`prepare`, handed the
+Receiver's verdict on those claims as `CredentialSignatureAdmission.Received`:
+the oracle and its vouchers), the per-cell
 patch (`writes`, with its root binding), the law step it projects for each write
 (`lawStep`), the cells it observed, its physical post law, its journal identity
 (`txId`, `event`, `nullifiers`), the signing subject and its witness bytes.
@@ -36,6 +38,7 @@ written cell is lawful), `receive_committed_lawful` and
 -/
 import Compiler.DurableReceiverIO
 import Compiler.CredentialSignatureIO
+import Compiler.CredentialSignatureAdmission
 import Compiler.ResourceBirthCodec
 import Theory.Receiving
 import Kernel.ReceivingLaw
@@ -46,7 +49,8 @@ open Minidregg.Compiler
 open Minidregg.Kernel.DurableDataIntent
 open Minidregg.Theory.ResourceCost (Charge Lane)
 open Minidregg.Theory.TypedAuthorization (Digest SubjectId)
-open Minidregg.Theory.Receiving (SigQuery Journal Recorded Refusal Receiver)
+open Minidregg.Theory.Receiving (SigQuery Journal Recorded Refusal Receiver Vouchers)
+open Minidregg.Compiler.CredentialSignatureAdmission (Received receiverVerify)
 open Minidregg.Kernel.ReceivingLaw (Laws LawFault Lawful)
 open Minidregg.Compiler.CanonicalCellRegistry (FamilyId Kind LawClass)
 open Minidregg.Compiler.CanonicalPolicyAdmission (PolicyStepContext PolicyCompilerProfile)
@@ -65,6 +69,8 @@ structure Payload where
   readGuards : List ReadGuard
   exactCharge : Charge
   subject : Option SubjectId
+  /-- The nullifiers the prepared patch spends beyond the ingress's (`Family.spent`). -/
+  spent : List StableNullifier
   postRootsBound : ∀ write, write ∈ writes → rootBytes write.canonicalPostBytes = write.exactPost
   guardsReadOnly : ∀ guard, guard ∈ readGuards → guard.cellId ∉ writes.map DataWrite.cellId
 
@@ -73,7 +79,7 @@ def intentOf (txId : Digest) (event : StableEvent) (nullifiers : List StableNull
   transactionId := txId
   writes := payload.writes
   readGuards := payload.readGuards
-  nullifiers := nullifiers
+  nullifiers := nullifiers ++ payload.spent
   exactCharge := payload.exactCharge
   event := event
   subject := payload.subject
@@ -90,7 +96,7 @@ def lookup (snapshot : DataSnapshot rootBytes) (txId : Digest) :
 theorem lookup_install (snapshot : DataSnapshot rootBytes) (txId : Digest)
     (event : StableEvent) (nullifiers : List StableNullifier) (payload : Payload) :
     lookup (DataSnapshot.install snapshot (intentOf txId event nullifiers payload)) txId =
-      some ⟨txId, event, nullifiers⟩ := by
+      some ⟨txId, event, nullifiers ++ payload.spent⟩ := by
   simp [lookup, DataSnapshot.install, intentOf, DataIntent.erase,
     DurableCommitProtocol.Snapshot.install, DurableCommitProtocol.Snapshot.lookupRecorded]
 
@@ -108,6 +114,7 @@ theorem lookup_install (snapshot : DataSnapshot rootBytes) (txId : Digest)
   nullifierDecEq := inferInstance
   lookup := lookup
   intentOf := intentOf
+  spent := Payload.spent
   install := DataSnapshot.install
   lookup_install := lookup_install
 
@@ -141,8 +148,16 @@ structure Family where
   command : Ingress → Command
   /-- The signature claims, from the decoded ingress and a key lookup. -/
   claims : Env → Durable → Ingress → Except Reject (List SigQuery)
-  /-- The gate: authority, freshness, validation of the per-cell patch. -/
-  prepare : (env : Env) → (durable : Durable) → (command : Command) →
+  /-- The OBSERVED signatures: the Receiver asks its verifier about each before
+  `prepare`, and hands the true/false answers to it (`Received.answer?`); an error
+  refuses.  A family that decides on a signature's verdict rather than requiring it
+  names it here. -/
+  observations : Env → Durable → Ingress → Except Reject (List SigQuery) := fun _ _ _ => .ok []
+  /-- The gate: authority, freshness, validation of the per-cell patch.  It is
+  handed the Receiver's verdict on `claims` (`Received`: the oracle and the
+  vouchers of the claims it accepted) and may read a signature only from it
+  (`Received.find?`, `Received.signed?`, `CheckedSignature.ofReceiverClaim`). -/
+  prepare : Received → (env : Env) → (durable : Durable) → (command : Command) →
     Except Reject (Prepared env durable command)
   /-- The per-cell patch: one canonical post image per written cell. -/
   writes : {env : Env} → {durable : Durable} → {command : Command} →
@@ -166,6 +181,11 @@ structure Family where
   txId : Env → Ingress → Digest
   event : Env → Ingress → StableEvent
   nullifiers : Env → Ingress → List StableNullifier
+  /-- The nullifiers the prepared patch spends beyond the ingress's own: a
+  decision's markers (an enrollment's birth identity).  Replay recognises the
+  ingress's nullifiers as the record's prefix. -/
+  spent : {env : Env} → {durable : Durable} → {command : Command} →
+    Prepared env durable command → List StableNullifier := fun _ => []
   subject : Ingress → Option SubjectId
   /-- Witness bytes the turn carries beyond its command. -/
   witnessBytes : Ingress → Nat
@@ -213,19 +233,21 @@ theorem shape_sound {prepared : F.Prepared env durable command} (shaped : shape 
   simpa [shape, List.all_eq_true, and_assoc] using shaped
 
 /-- **Every written cell of an admitted patch is lawful.**  When the shape check
-and the law judgement pass, every write is either to a `lawBearing` cell, not a
-birth, whose committed law resolved on the family's step with both compiler
-verdicts true and `Pred.eval` accepting the step; or to a `kernelOnly writers`
-cell, with no step, by a family its row names. -/
+and the law judgement pass, every write is either to a `lawBearing` cell whose
+law (its committed law, or for a birth its export law, `ReceivingLaw.lawOf`)
+resolved on the family's step with the three compiler verdicts true and
+`Pred.eval` accepting the step; or to a `kernelOnly writers` cell, with no step,
+by a family its row names; or to a `kernelOnlyOrBorn` cell, born under its export
+law or written step-free by a named writer. -/
 theorem shape_lawful {prepared : F.Prepared env durable command}
     (shaped : shape laws prepared = true) (judged : lawful laws prepared = true) :
     F.physicalPostLaw prepared = true ∧
       ∀ write (member : write ∈ F.writes prepared),
-        Lawful laws F.id durable write (F.lawStep prepared write member) := by
+        Lawful laws F.id durable (F.writes prepared) write (F.lawStep prepared write member) := by
   refine ⟨(shape_sound laws shaped).2.2.2, ?_⟩
   have none_ : lawFault laws prepared = none := by
     simpa [lawful, Option.isNone_iff_eq_none] using judged
-  exact (ReceivingLaw.lawFault_none_iff laws F.id durable _ _).1 none_
+  exact ReceivingLaw.lawful_of_lawFault laws F.id durable none_
 
 variable (F)
 
@@ -238,9 +260,12 @@ def charge (laws : Laws Durable) (env : F.Env) (durable : Durable) (ingress : F.
   | .storageBytes => ((F.writes prepared).map fun write => write.canonicalPostBytes.length).sum
   | .witnessBytes => F.witnessBytes ingress
   | .proofWork =>
-      match F.claims env durable ingress with
-      | .ok claims => claims.length
-      | .error _ => 0
+      (match F.claims env durable ingress with
+        | .ok claims => claims.length
+        | .error _ => 0) +
+      (match F.observations env durable ingress with
+        | .ok queries => queries.length
+        | .error _ => 0)
   | .feeDebit | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0
 
 def payload (laws : Laws Durable) {env : F.Env} {durable : Durable} (ingress : F.Ingress)
@@ -249,12 +274,14 @@ def payload (laws : Laws Durable) {env : F.Env} {durable : Durable} (ingress : F
   readGuards := readGuards laws prepared
   exactCharge := F.charge laws env durable ingress prepared
   subject := F.subject ingress
+  spent := F.spent prepared
   postRootsBound := F.writes_bound prepared
   guardsReadOnly := fun _ member => Receiver.guardsOff_readonly member
 
 /-- The family as a `Theory.Receiving.Receiver` over the deployed journal,
-judged by `laws`. -/
-def receiver (laws : Laws Durable) : Receiver journal where
+judged by `laws`, its claims verified by `oracle` (`receiverVerify`). -/
+def receiver (laws : Laws Durable) {m : Type → Type} (oracle : CredentialSignatureIO.Oracle m) :
+    Receiver journal (receiverVerify oracle) where
   Env := F.Env
   Ingress := F.Ingress
   Command := F.Command
@@ -263,7 +290,8 @@ def receiver (laws : Laws Durable) : Receiver journal where
   decode := F.decode
   command := F.command
   claims := F.claims
-  prepare := F.prepare
+  observations := F.observations
+  prepare := fun vouchers => F.prepare ⟨oracle, vouchers⟩
   shape := fun prepared => shape laws prepared
   Fault := LawFault
   lawFault := fun prepared => lawFault laws prepared
@@ -274,9 +302,11 @@ def receiver (laws : Laws Durable) : Receiver journal where
 
 /-- `F.receiver.Reject` is `F.Reject` by definition, but instance search does not unfold
 `receiver`: a refusal of the receiver prints with the family's own `Repr`. -/
-instance receiverRejectRepr (laws : Laws Durable) : Repr (F.receiver laws).Reject := F.rejectRepr
+instance receiverRejectRepr (laws : Laws Durable) {m : Type → Type}
+    (oracle : CredentialSignatureIO.Oracle m) : Repr (F.receiver laws oracle).Reject := F.rejectRepr
 
-instance receiverFaultRepr (laws : Laws Durable) : Repr (F.receiver laws).Fault :=
+instance receiverFaultRepr (laws : Laws Durable) {m : Type → Type}
+    (oracle : CredentialSignatureIO.Oracle m) : Repr (F.receiver laws oracle).Fault :=
   inferInstanceAs (Repr LawFault)
 
 /-! ## Native verification and the durable append -/
@@ -306,14 +336,13 @@ def appendNative (transport : DurableReceiverIO.Transport) (durable : Durable)
   | .ordinary (.unavailable detail) => pure (.other (.unavailable detail))
   | .ordinary (.uncertain detail) => pure (.other (.uncertain detail))
 
-def verifyNative (native : CredentialSignatureIO.NativeConfig) (claim : SigQuery) :
-    IO (Except String Bool) := do
-  match ← CredentialSignatureIO.verify native claim.publicKey claim.message claim.signature with
-  | .error reason => pure (.error s!"{repr reason}")
-  | .ok verdict => pure (.ok verdict)
+/-- The live receiver of a family: its claims verified by the pinned native process. -/
+abbrev liveReceiver (laws : Laws Durable) (native : CredentialSignatureIO.NativeConfig) :=
+  F.receiver laws (CredentialSignatureIO.Oracle.live native)
 
-abbrev Outcome (laws : Laws Durable) (env : F.Env) (durable : Durable) :=
-  (F.receiver laws).Outcome env durable Appended Settled
+abbrev Outcome (laws : Laws Durable) (native : CredentialSignatureIO.NativeConfig) (env : F.Env)
+    (durable : Durable) :=
+  (F.liveReceiver laws native).Outcome env durable Appended Settled
 
 /-- **The receiver**, every family: `Theory.Receiving.Receiver.receive` in `IO`,
 judged by the deployment's laws (`Laws.physical` of its compiler profile). -/
@@ -321,8 +350,8 @@ def receiveLoaded {Fld : Type} [Field Fld] [DecidableEq Fld]
     (profile : PolicyCompilerProfile Fld) (deployment : CanonicalCellRegistry.Deployment)
     (native : CredentialSignatureIO.NativeConfig)
     (transport : DurableReceiverIO.Transport) (env : F.Env) (durable : Durable)
-    (bytes : List UInt8) : IO (F.Outcome (Laws.physical profile deployment) env durable) :=
-  (F.receiver (Laws.physical profile deployment)).receive (verifyNative native)
+    (bytes : List UInt8) : IO (F.Outcome (Laws.physical profile deployment) native env durable) :=
+  (F.liveReceiver (Laws.physical profile deployment) native).receive
     (appendNative transport) env durable bytes
 
 /-- **The live receiver judges by the deployed laws**: the host chooses the
@@ -332,7 +361,7 @@ theorem receiveLoaded_laws {Fld : Type} [Field Fld] [DecidableEq Fld]
     (native : CredentialSignatureIO.NativeConfig) (transport : DurableReceiverIO.Transport)
     (env : F.Env) (durable : Durable) (bytes : List UInt8) :
     F.receiveLoaded profile deployment native transport env durable bytes =
-      (F.receiver (Laws.physical profile deployment)).receive (verifyNative native)
+      (F.receiver (Laws.physical profile deployment) (.live native)).receive
         (appendNative transport) env durable bytes := rfl
 
 /-- The audit walk's re-admission: the live admission path, exactly. -/
@@ -341,15 +370,15 @@ def admitNative {Fld : Type} [Field Fld] [DecidableEq Fld]
     (native : CredentialSignatureIO.NativeConfig) (env : F.Env)
     (durable : Durable) (ingress : F.Ingress) :
     IO (Except (Refusal F.Reject LawFault)
-      ((F.receiver (Laws.physical profile deployment)).Admitted env durable ingress)) :=
-  (F.receiver (Laws.physical profile deployment)).admitVia (verifyNative native) env durable ingress
+      ((F.liveReceiver (Laws.physical profile deployment) native).Admitted env durable ingress)) :=
+  (F.liveReceiver (Laws.physical profile deployment) native).admitVia env durable ingress
 
 theorem admitNative_laws {Fld : Type} [Field Fld] [DecidableEq Fld]
     (profile : PolicyCompilerProfile Fld) (deployment : CanonicalCellRegistry.Deployment)
     (native : CredentialSignatureIO.NativeConfig) (env : F.Env) (durable : Durable)
     (ingress : F.Ingress) :
     F.admitNative profile deployment native env durable ingress =
-      (F.receiver (Laws.physical profile deployment)).admitVia (verifyNative native) env durable
+      (F.receiver (Laws.physical profile deployment) (.live native)).admitVia env durable
         ingress := rfl
 
 structure Receipt where
@@ -360,69 +389,122 @@ structure Receipt where
 def receipt (env : F.Env) (ingress : F.Ingress) : Receipt :=
   ⟨F.txId env ingress, (F.event env ingress).eventId⟩
 
+/-- The receiver replay is read through: replay consults no verifier (the
+empty transcript; `replay_oracle_irrelevant`). -/
+abbrev replayReceiver (laws : Laws Durable) :=
+  F.receiver laws (CredentialSignatureIO.Oracle.recorded CredentialSignatureIO.Transcript.empty)
+
+/-- Replay is the same under every oracle: it reads only the journal and the
+family's transaction identity. -/
+theorem replay_oracle_irrelevant (laws : Laws Durable) {m : Type → Type}
+    (oracle : CredentialSignatureIO.Oracle m) (env : F.Env) (durable : Durable) (ingress : F.Ingress) :
+    (F.receiver laws oracle).replay env durable ingress =
+      (F.replayReceiver laws).replay env durable ingress := rfl
+
 /-- Receipt-only lookup: the journal, never fresh work. -/
 def lookupLoaded (laws : Laws Durable) (env : F.Env) (durable : Durable) (ingress : F.Ingress) :
     Option (Except Unit Receipt) :=
-  ((F.receiver laws).replay env durable ingress).map fun selected =>
+  ((F.replayReceiver laws).replay env durable ingress).map fun selected =>
     selected.map fun _ => F.receipt env ingress
 
 /-- **Replay after the executor commits.**  When the executor accepts an
 admission's intent on the loaded snapshot, any later loaded state at that
 snapshot looks the same ingress up as confirmed with the same receipt. -/
-theorem replay_after_execute {laws : Laws Durable} {env : F.Env} {durable : Durable}
+theorem replay_after_execute {laws : Laws Durable} {m : Type → Type}
+    {oracle : CredentialSignatureIO.Oracle m} {env : F.Env} {durable : Durable}
     {ingress : F.Ingress}
-    (accepted : (F.receiver laws).Accepted env durable ingress) {next : DataSnapshot rootBytes}
+    (accepted : (F.receiver laws oracle).Accepted env durable ingress) {next : DataSnapshot rootBytes}
     (executed : DurableDataIntent.execute .complete durable.snapshot
-      ((F.receiver laws).intent accepted) = .accepted next)
+      ((F.receiver laws oracle).intent accepted) = .accepted next)
     (later : Durable) (atNext : later.snapshot = next) :
     F.lookupLoaded laws env later ingress = some (.ok (F.receipt env ingress)) := by
-  have replayed := (F.receiver laws).replay_after_install accepted later durable.snapshot
+  have replayed := (F.receiver laws oracle).replay_after_install accepted later durable.snapshot
     (by rw [show journal.snap later = later.snapshot from rfl, atNext,
       execute_accepted_install executed])
+  rw [F.replay_oracle_irrelevant laws oracle] at replayed
   simp [lookupLoaded, replayed, Except.map]
 
 /-! ## A committed write was judged -/
 
 /-- **A committed outcome's every written cell is lawful.**  Exactly
-`receive_committed`'s premises, at `Id`: the admission a committed outcome
-carries wrote only cells whose laws admit it -- a `lawBearing` cell (not a
-birth) under its own committed law resolved on the loaded state, with both
-compiler verdicts and `Pred.eval` true on the family's step; or a `kernelOnly`
-cell its row lets this family write.  Every family on `Family`, any `prepare`. -/
+`receive_committed`'s premises, at `Id` (any oracle that runs there: a recorded
+transcript): the admission a committed outcome carries wrote only cells whose
+laws admit it -- a `lawBearing` cell under its own committed law (a birth: under
+its export law) resolved on the loaded state, with the three compiler verdicts and
+`Pred.eval` true on the family's step; a `kernelOnly` cell its row lets this family
+write; or a `kernelOnlyOrBorn` cell born under its export law or written by a
+named writer.  Every family on `Family`, any `prepare`. -/
 theorem receive_committed_lawful {laws : Laws Durable}
-    {verify : SigQuery → Id (Except String Bool)}
+    {oracle : CredentialSignatureIO.Oracle Id}
     {Exact : Durable → DataIntent rootBytes → Type} {Other : Type}
     {append : (state : Durable) → (intent : DataIntent rootBytes) →
       Id (Receiver.Commit (Exact state intent) Other)}
     {env : F.Env} {durable : Durable} {bytes : List UInt8} {ingress : F.Ingress}
-    {admission : (F.receiver laws).Admitted env durable ingress}
-    {witness : Exact durable ((F.receiver laws).intent admission.accepted)}
-    (committed : (F.receiver laws).receive verify append env durable bytes =
+    {admission : (F.receiver laws oracle).Admitted env durable ingress}
+    {witness : Exact durable ((F.receiver laws oracle).intent admission.accepted)}
+    (committed : (F.receiver laws oracle).receive append env durable bytes =
       pure (.committed ingress admission witness)) :
     ∀ write (member : write ∈ F.writes admission.accepted.prepared),
-      Lawful laws F.id durable write (F.lawStep admission.accepted.prepared write member) := by
-  obtain ⟨shaped, faultless⟩ := (F.receiver laws).receive_committed_lawFault committed
+      Lawful laws F.id durable (F.writes admission.accepted.prepared) write
+        (F.lawStep admission.accepted.prepared write member) := by
+  obtain ⟨shaped, faultless⟩ := (F.receiver laws oracle).receive_committed_lawFault committed
   exact (shape_lawful laws shaped (by simpa [lawful, Option.isNone_iff_eq_none] using faultless)).2
+
+/-- **A committed outcome passed the physical shape**: its written cells are
+distinct, each write's pre-root and each guard's root were current, and the
+family's physical post law held. -/
+theorem receive_committed_shape {laws : Laws Durable}
+    {oracle : CredentialSignatureIO.Oracle Id}
+    {Exact : Durable → DataIntent rootBytes → Type} {Other : Type}
+    {append : (state : Durable) → (intent : DataIntent rootBytes) →
+      Id (Receiver.Commit (Exact state intent) Other)}
+    {env : F.Env} {durable : Durable} {bytes : List UInt8} {ingress : F.Ingress}
+    {admission : (F.receiver laws oracle).Admitted env durable ingress}
+    {witness : Exact durable ((F.receiver laws oracle).intent admission.accepted)}
+    (committed : (F.receiver laws oracle).receive append env durable bytes =
+      pure (.committed ingress admission witness)) :
+    ((F.writes admission.accepted.prepared).map DataWrite.cellId).Nodup ∧
+      (∀ write ∈ F.writes admission.accepted.prepared,
+        write.expectedPre = durable.snapshot.model.roots write.cellId) ∧
+      F.physicalPostLaw admission.accepted.prepared = true := by
+  obtain ⟨shaped, -⟩ := (F.receiver laws oracle).receive_committed_lawFault committed
+  obtain ⟨nodup, current, -, physical⟩ := shape_sound laws shaped
+  exact ⟨nodup, current, physical⟩
 
 /-- **Only the named families write a kernel-only cell**: in a committed
 outcome of family `F`, every written cell of a `kernelOnly writers` kind has
 `F.id ∈ writers`.  The registry review cites this. -/
 theorem kernelOnly_writers_sound {laws : Laws Durable}
-    {verify : SigQuery → Id (Except String Bool)}
+    {oracle : CredentialSignatureIO.Oracle Id}
     {Exact : Durable → DataIntent rootBytes → Type} {Other : Type}
     {append : (state : Durable) → (intent : DataIntent rootBytes) →
       Id (Receiver.Commit (Exact state intent) Other)}
     {env : F.Env} {durable : Durable} {bytes : List UInt8} {ingress : F.Ingress}
-    {admission : (F.receiver laws).Admitted env durable ingress}
-    {witness : Exact durable ((F.receiver laws).intent admission.accepted)}
-    (committed : (F.receiver laws).receive verify append env durable bytes =
+    {admission : (F.receiver laws oracle).Admitted env durable ingress}
+    {witness : Exact durable ((F.receiver laws oracle).intent admission.accepted)}
+    (committed : (F.receiver laws oracle).receive append env durable bytes =
       pure (.committed ingress admission witness)) :
     ∀ write ∈ F.writes admission.accepted.prepared, ∀ (kind : Kind) (writers : List FamilyId),
       laws.kindOf durable write = some kind → kind.lawClass = .kernelOnly writers →
         F.id ∈ writers := by
   intro write member kind writers kindEq row
-  obtain ⟨-, faultless⟩ := (F.receiver laws).receive_committed_lawFault committed
+  obtain ⟨-, faultless⟩ := (F.receiver laws oracle).receive_committed_lawFault committed
   exact ReceivingLaw.kernelOnly_writers laws F.id durable faultless member kindEq row
+
+/-- **`prepare` is handed only the Receiver's vouchers.**  Every admission of a
+family (any oracle, any monad) was prepared by `F.prepare` given exactly the
+admission's vouchers under the receiver's own oracle, and every claim the family
+named is among them.  A family reads a signature only through that `Received`
+value (`Vouchers` has a private constructor, and `admitVia` is its only
+producer), so a gate holds a signature verdict only when the oracle gave it. -/
+theorem admitted_prepared_received {laws : Laws Durable} {m : Type → Type}
+    {oracle : CredentialSignatureIO.Oracle m} {env : F.Env} {durable : Durable}
+    {ingress : F.Ingress} (admission : (F.receiver laws oracle).Admitted env durable ingress) :
+    F.prepare ⟨oracle, admission.vouchers⟩ env durable (F.command ingress) =
+        .ok admission.accepted.prepared ∧
+      ∃ claims, F.claims env durable ingress = .ok claims ∧
+        ∀ claim ∈ claims, claim ∈ admission.vouchers.verified :=
+  admission.prepared
 
 end Family
 
@@ -435,5 +517,8 @@ end Family
 #assert_axioms Family.admitNative_laws
 #assert_axioms Family.receive_committed_lawful
 #assert_axioms Family.kernelOnly_writers_sound
+#assert_axioms Family.receive_committed_shape
+#assert_axioms Family.admitted_prepared_received
+#assert_axioms Family.replay_oracle_irrelevant
 
 end Minidregg.Kernel.Receiving

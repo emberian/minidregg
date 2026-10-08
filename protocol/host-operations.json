@@ -2047,7 +2047,7 @@
         "operator"
       ],
       "owner": "activity-native",
-      "purpose": "Kernel activity signed command: signing plan for one Turn (publish, create, birth, resolve, deliver, topUp, writeState, exhaust, abandon) under the object record; session-opened, bounded canonical plan, no state change",
+      "purpose": "Kernel activity signed command: signing plan for one Turn (publish, create, birth, resolve, deliver, topUp, exhaust, abandon) under the object record; session-opened, bounded canonical plan, no state change",
       "receiver": "fnDispatch"
     },
     {
@@ -2095,7 +2095,7 @@
         "operator"
       ],
       "owner": "activity-native",
-      "purpose": "Public read-only kernel activity view: JSON object request (or empty), at most 65536 bytes, JSON reply",
+      "purpose": "Public read-only kernel activity view: JSON object request (or empty), at most 65536 bytes, JSON reply; its quotes[{record, await}] answer {needed, escrow}, the heap a delivery or exhaustion of that await must declare, from the same resume point the turns heapUncovered refusal states (no wider than the cells the view already shows)",
       "receiver": "fnDispatch"
     },
     {

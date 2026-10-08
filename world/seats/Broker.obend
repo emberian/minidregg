@@ -19,13 +19,29 @@ record Term:
 sum Terms:
   nil: {}
   cons: {head: Term, tail: Terms}
+sum Exit:
+  onDemand: {}
+  afterDeadline: Nat
+# A seat's principals as the contract is shown them (SeatStore.disclosedData): hidden
+# unless the offerer's proposal discloses them; a disclosed holder of an unheld seat is none.
+sum Shown:
+  hidden: {}
+  none: {}
+  shown: Nat
+record Disclosed:
+  offerer: Shown
+  payee: Shown
+  holder: Shown
 record SeatView:
   seat: Nat
   role: String
   terms: Terms
   give: Amounts
   want: Amounts
+  exit: Exit
+  opened: Nat
   allocation: Amounts
+  disclosed: Disclosed
 sum Seats:
   nil: {}
   cons: {head: SeatView, tail: Seats}
@@ -60,6 +76,7 @@ sum Input:
 record Call:
   input: Input
   height: Nat
+  invoker: Shown
   seats: Seats
 record Mint:
   role: String

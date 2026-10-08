@@ -20,10 +20,10 @@ decided here, purely, over the pay cell:
   of credit; the lease runs `⌊(credit − birthFee) / nodeWeekRate⌋ ≥ 1` weeks
   from now.
 
-The two signature bits (`Verified`) come from the native verifier through
-`Compiler.PayEnrolSignatureIO.Checked`, whose only constructor runs the
-Ed25519 check of `mini-sig` over `miniFrame` and the SSHSIG check of `ssh-sig`
-over `sshsigMessage` for exactly this memo.  `subjectTaken` is the authority
+The two signature bits (`Verified`) are the Receiver's verifier answers on the
+memo's two observed queries (`PayEnrolReceiver.observationsAt`/`verifiedAt`):
+Ed25519 of `mini-sig` over `miniFrame` and SSHSIG of `ssh-sig` over
+`sshsigMessage` for exactly this memo.  `subjectTaken` is the authority
 cell's answer for `subjectOf miniKey` (the receiver, P3b-2, reads it).
 
 Time is the chain hour `tip.hour = tip.blockTime / 3600`, the unit of the public

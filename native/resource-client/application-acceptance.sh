@@ -249,7 +249,6 @@ for member in first second; do
  "type":"delegate-source","command":{"kind":"object","domain":"8527",
  "semantics":"$SEMANTICS","subject":"7","nonce":"$((15000 + subject))",
  "expectedTargetRoot":"$root","parentId":"101","target":"6100",
- "expectedPreRoot":"$authority",
  "child":{"id":"$child","root":"101","parent":"101","issuer":"5",
    "holder":{"type":"subject","subject":"$subject"},"targets":["6100"],
    "verbs":["observe"],"maxCost":"50000","notBefore":"10","notAfter":"1000",

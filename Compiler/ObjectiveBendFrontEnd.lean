@@ -16,6 +16,7 @@ therefore carries a typing derivation for exactly the Core4 term the elaborator
 produced (`ObjectiveBendFrontEndAdequacy` states what that buys). -/
 import Compiler.ObjectiveBendParse
 import Compiler.ObjectiveBendElaborate
+import Compiler.ObjectiveBendLaw
 import Compiler.ObjectiveBendTermWire
 import Compiler.Sha256
 import Theory.ObjectiveBendTyping
@@ -134,7 +135,7 @@ accept and only a wider instance would refuse, is refused HERE, naming the decla
 `Theory.ObjectiveBendTemplates.Discharges.check_instantiate` is what a template accepted
 here buys: acceptance at every instance whose bounds are discharged. -/
 def checkTemplate (output : Output) (sourceEntry : String) (modules : List SourceModule) (typeFuel : Nat)
-    (key : String) (selfIndex : Nat) (field : ATerm) : Except Diagnostic Unit := do
+    (key : String) (rigidVariables : List Nat) (field : ATerm) : Except Diagnostic Unit := do
   let refuse := fun (why : String) =>
     (throw (elaborationRefusal why) : Except Diagnostic Unit)
   let proposal ← match ObjectiveBendElaborate.proposalJson { output with term := field } with
@@ -146,10 +147,17 @@ def checkTemplate (output : Output) (sourceEntry : String) (modules : List Sourc
     | .error e => throw (elaborationRefusal ("refused (template-typing): open declaration " ++ key ++
         " has no typed template: " ++ e))
   let source := packet.source
-  let rigid := { source with assumptions := { source.assumptions with rigid := [selfIndex] } }
-  match check rigid knotContext packet.fuel with
+  let rigidAt := fun (vars : List Nat) => { source with assumptions := { source.assumptions with rigid := vars } }
+  match check (rigidAt rigidVariables) knotContext packet.fuel with
   | some _ => pure ()
   | none =>
+    -- Which variable only an alias would accept: Self (the first) or Super (the second).
+    if (check (rigidAt (rigidVariables.take 1)) knotContext packet.fuel).isSome then
+      refuse ("refused (super-rigid): open declaration " ++ key ++ " uses super as a value of its " ++
+        "Super bound row; Super ranges over every row beneath that HAS those members (a lower bound), so " ++
+        "a value of type Super is not a value of the bound row. Read the members it needs (super.m), or " ++
+        "extend super (Super with {...})")
+    else
     match check source knotContext packet.fuel with
     | some _ => refuse ("refused (self-rigid): open declaration " ++ key ++ " uses self as a value of its " ++
         "Self bound row; Self ranges over every type that HAS that row (a lower bound), so a value of type " ++
@@ -159,7 +167,7 @@ def checkTemplate (output : Output) (sourceEntry : String) (modules : List Sourc
 
 def checkTemplates (output : Output) (sourceEntry : String) (modules : List SourceModule) (typeFuel : Nat) :
     Except Diagnostic Unit :=
-  output.templates.forM fun (key, selfIndex, field) => checkTemplate output sourceEntry modules typeFuel key selfIndex field
+  output.templates.forM fun (key, rigidVariables, field) => checkTemplate output sourceEntry modules typeFuel key rigidVariables field
 
 structure Lowering where
   output : Output
@@ -171,6 +179,10 @@ structure Lowering where
   modules : List SourceModule
   limits : Json
   typeFuel : Nat
+  /-- The package's enforced laws: the entry module's top-level `law` declarations (a law in any
+  other module refuses). The artifact commits them; the kernel installs them on every object
+  pinned to the artifact. -/
+  laws : List (String × ObjectiveBendLaw.LawExpr)
 
 def project (term : ATerm) (projections : List Json) : Except Diagnostic ATerm :=
   projections.foldlM (init := term) fun t p => do
@@ -221,7 +233,12 @@ def lowerDecoded (modules : List SourceModule) (decoded : List ObjectiveBendElab
       | .arr _ => "legacy-canonical-nat-bool-record"
       | _ => "dregg.objective-bend.argument-values.v1"
   checkTemplates output (entry.name ++ "." ++ entryDefinition) modules typeFuel
-  return ⟨output, term, entry.name ++ "." ++ entryDefinition, argumentCodec, mode, modules, limits, typeFuel⟩
+  for (m, index) in decoded.zipIdx do
+    if index != entryModule && !m.laws.isEmpty then
+      throw (elaborationRefusal ("a law belongs to the package's entry module; " ++ m.name ++
+        " is imported and declares " ++ toString m.laws.length ++ " law(s)"))
+  let laws := (decoded[entryModule]?.map (·.laws)).getD []
+  return ⟨output, term, entry.name ++ "." ++ entryDefinition, argumentCodec, mode, modules, limits, typeFuel, laws⟩
 
 /-- The whole front end on read modules: options, parse and check every module, elaborate,
 project. -/

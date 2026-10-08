@@ -39,13 +39,13 @@ private def visibleFields (resource : Nat) : (kind : CanonicalCellRegistry.Kind)
   | _,_ => []
 
 def observe {F : Type} [Field F] [DecidableEq F]
-    {deployment : ResourceObservationAdmission.Deployment} {durable : ResourceObservationAdmission.Durable}
-    {context : ResourceObservationAdmission.Context deployment durable}
+    {deployment : ResourceObservationAdmission.Deployment}
+    {context : ResourceObservationAdmission.Context deployment}
     {profile : CanonicalRuntimeProfile.Profile F} {kind : ResourceKind}
     {wanted : Request kind} {marker : Nat} {capability : CapabilityId} {contextBytes : List UInt8}
     (prepared : ResourceObservationAdmission.Prepared context profile wanted marker capability contextBytes)
     {envelope : List UInt8} (_checked : ResourceObservationAdmission.Checked prepared envelope)
-    (compute : Option (RunComputeBudgetDomain.Prepared deployment durable.snapshot wanted.subject)) : Observation :=
+    (compute : Option (RunComputeBudgetDomain.Prepared deployment context.cells wanted.subject)) : Observation :=
   let fields := ResourceObservationAdmission.readerFields context kind capability
   let packed := ResourceObservationAdmission.narrowPacked fields prepared.observed.before
   let balances := match compute with
@@ -59,8 +59,8 @@ def observe {F : Type} [Field F] [DecidableEq F]
     visibleFields wanted.target.value packed.kind packed.payload.logical⟩
 
 structure AdmittedRead {F : Type} [Field F] [DecidableEq F]
-    {deployment : ResourceObservationAdmission.Deployment} {durable : ResourceObservationAdmission.Durable}
-    (context : ResourceObservationAdmission.Context deployment durable)
+    {deployment : ResourceObservationAdmission.Deployment}
+    (context : ResourceObservationAdmission.Context deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (subject : SubjectId) where
   private mk ::
   kind : ResourceKind
@@ -72,24 +72,24 @@ structure AdmittedRead {F : Type} [Field F] [DecidableEq F]
   prepared : ResourceObservationAdmission.Prepared context profile request marker capability contextBytes
   envelope : List UInt8
   checked : ResourceObservationAdmission.Checked prepared envelope
-  compute : Option (RunComputeBudgetDomain.Prepared deployment durable.snapshot request.subject)
+  compute : Option (RunComputeBudgetDomain.Prepared deployment context.cells request.subject)
 
 def AdmittedRead.value {F : Type} [Field F] [DecidableEq F]
-    {deployment : ResourceObservationAdmission.Deployment} {durable : ResourceObservationAdmission.Durable}
-    {context : ResourceObservationAdmission.Context deployment durable}
+    {deployment : ResourceObservationAdmission.Deployment}
+    {context : ResourceObservationAdmission.Context deployment}
     {profile : CanonicalRuntimeProfile.Profile F} {subject : SubjectId}
     (read : AdmittedRead context profile subject) : Observation := observe read.prepared read.checked read.compute
 
 def admitRead {F : Type} [Field F] [DecidableEq F]
-    {deployment : ResourceObservationAdmission.Deployment} {durable : ResourceObservationAdmission.Durable}
-    {context : ResourceObservationAdmission.Context deployment durable}
+    {deployment : ResourceObservationAdmission.Deployment}
+    {context : ResourceObservationAdmission.Context deployment}
     {profile : CanonicalRuntimeProfile.Profile F} {kind : ResourceKind}
     {wanted : Request kind} {marker : Nat} {capability : CapabilityId} {contextBytes : List UInt8}
     (subject : SubjectId)
     (prepared : ResourceObservationAdmission.Prepared context profile wanted marker capability contextBytes)
     {envelope : List UInt8} (checked : ResourceObservationAdmission.Checked prepared envelope)
     (subjectExact : wanted.subject = subject)
-    (compute : Option (RunComputeBudgetDomain.Prepared deployment durable.snapshot wanted.subject)) :
+    (compute : Option (RunComputeBudgetDomain.Prepared deployment context.cells wanted.subject)) :
     AdmittedRead context profile subject :=
   ⟨kind,wanted,subjectExact,marker,capability,contextBytes,prepared,envelope,checked,compute⟩
 
@@ -178,23 +178,23 @@ def instantiate (source : AnnotatedTerm) (input : Term) : AnnotatedTerm :=
     source.assumptions⟩
 
 structure Bound {F : Type} [Field F] [DecidableEq F]
-    {deployment : ResourceObservationAdmission.Deployment} {durable : ResourceObservationAdmission.Durable}
-    (context : ResourceObservationAdmission.Context deployment durable)
+    {deployment : ResourceObservationAdmission.Deployment}
+    (context : ResourceObservationAdmission.Context deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (input : Input) where
   private mk ::
   reads : List (AdmittedRead context profile input.subject)
   exact : input.observations = reads.map AdmittedRead.value
 
 def bind {F : Type} [Field F] [DecidableEq F]
-    {deployment : ResourceObservationAdmission.Deployment} {durable : ResourceObservationAdmission.Durable}
-    {context : ResourceObservationAdmission.Context deployment durable}
+    {deployment : ResourceObservationAdmission.Deployment}
+    {context : ResourceObservationAdmission.Context deployment}
     {profile : CanonicalRuntimeProfile.Profile F} (subject : SubjectId) (nonce : Nat) (arguments : List UInt8)
     (reads : List (AdmittedRead context profile subject)) :
     Bound context profile ⟨subject,nonce,arguments,reads.map AdmittedRead.value⟩ := ⟨reads,rfl⟩
 
 theorem input_reads_exact {F : Type} [Field F] [DecidableEq F]
-    {deployment : ResourceObservationAdmission.Deployment} {durable : ResourceObservationAdmission.Durable}
-    {context : ResourceObservationAdmission.Context deployment durable}
+    {deployment : ResourceObservationAdmission.Deployment}
+    {context : ResourceObservationAdmission.Context deployment}
     {profile : CanonicalRuntimeProfile.Profile F} {input : Input} (bound : Bound context profile input) :
     input.observations = bound.reads.map AdmittedRead.value := bound.exact
 #assert_axioms input_reads_exact

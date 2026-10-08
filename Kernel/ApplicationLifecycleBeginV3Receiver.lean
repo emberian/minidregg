@@ -23,12 +23,14 @@ structure Confirmed (config : Config) where
   eventExact : readback.derived.intent.event =
     ApplicationLifecycleBeginV3Ingress.event ingress
   confirmation : DurableReceiverIO.Confirmation
+  store : DurableHistory.StoreIdentity
+  reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store
 
 def Confirmed.verified {config : Config} (confirmed : Confirmed config) :
     NativeHostReplay.Verified config
       (NativeHostReplay.exactCandidate confirmed.old
         confirmed.readback.derived confirmed.readback.ready) :=
-  NativeHostReplay.extendExact confirmed.old confirmed.readback
+  NativeHostReplay.extendExact confirmed.reader confirmed.old confirmed.readback
 
 def Confirmed.receipt {config : Config} (confirmed : Confirmed config) :
     NativeHostCodec.Receipt :=
@@ -36,7 +38,7 @@ def Confirmed.receipt {config : Config} (confirmed : Confirmed config) :
     confirmed.readback.derived confirmed.readback.ready
   ⟨confirmed.readback.derived.intent.transactionId,
     confirmed.readback.derived.intent.event.eventId,
-    confirmed.old.opened.durable.image.accepted.length + 1,
+    confirmed.old.opened.durable.height + 1,
     candidate.worldRoot⟩
 
 theorem Confirmed.postRecord_exact {config : Config} (confirmed : Confirmed config) :
@@ -70,7 +72,10 @@ def receiveVerified (config : Config) {target : Durable}
         match NativeHostReplay.ExactReadback.ofAppended old derived appended with
         | .error detail => return .uncertain s!"v3 lifecycle BEGIN post-image: {detail}"
         | .ok ⟨proof, proofDerived⟩ =>
-              return .confirmed ⟨target, old, ingress, proof, (by rw [proofDerived]; exact eventExact), kind⟩
+              match ← DurableHistoryStore.readerOf config.transport ResourceBirthCodec.rootBytes appended.next with
+              | .error detail => return .uncertain s!"post-append history reader: {detail}"
+              | .ok ⟨_, reader⟩ =>
+                return .confirmed ⟨target, old, ingress, proof, (by rw [proofDerived]; exact eventExact), kind, _, reader⟩
     | .ordinary ordinary =>
         match ordinary with
         | .confirmed _ _ =>

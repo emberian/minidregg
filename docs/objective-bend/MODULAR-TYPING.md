@@ -102,12 +102,21 @@ inhabitant `coloured_discharges` / `coloured_instance_accepted`; tooth
 
 Open:
 
-- **`instance_accepted`.** Instances are produced by re-elaborating each layer at its
-  substitution, and `Super` in a template is the literal bound row, not a second rigid
-  variable, so the emitted instance is not literally `template[σ]`. The front-end corollary
-  (every refusal after a template check is a named discharge refusal) needs instances emitted
-  as substitutions of the checked template. Meanwhile every instance is re-checked in the
-  whole program, which is sound.
+- **Instances are the template at σ, and the whole program is the check.** Since GPT-6 row D, `Super`
+  in a template is a second rigid bounded variable (`super-rigid` refuses a use of `super` as its
+  bound row), and chainFix EMITS each open instance as `ATerm.instantiate σ template` from the one
+  cached `templateLayer` that the knot field holds and `checkTemplates` checks. Whether σ discharges
+  the bounds is decided by the contract (`checkBounds`: `self-bound`, `inherited-unprovided`, at the
+  member types), by name. The closed program, instances included, is then checked by the checker,
+  and that check is what admission relies on. No front-end corollary of `check_instantiate` is
+  claimed: no check depends on one, because a translation defect it would rule out is still caught
+  by the whole-program check, as an anonymous `typing refused`.
+- **Composition contract.** `Compiler/ObjectiveBendContract.lean` is the contract algebra that
+  chainFix runs (`run_append`: C_{A;B}(S,I) = C_A(S,I) ∧ C_B(S, F_A(S,I))). Per-operation
+  constraints: add (absent beneath), override (same type), and a type change is `replace-undeclared`.
+- **Staged modularity.** An open declaration is checked once against its bounds alone, then linked
+  by `compose` + `fix` before closed Core4. Nothing below Core4 sees an open term: the checker
+  and machine receive a closed program.
 - Ancestry specs and non-plain operands in a partial-seed chain keep the whole-target rule.
 - Instances across package roots (LT5).
 - Laws checked at each instance's types (LT6); the `Lowers` relation of a surface semantics

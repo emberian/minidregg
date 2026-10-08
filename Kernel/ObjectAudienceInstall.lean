@@ -12,7 +12,7 @@ open Minidregg.Theory
 open Minidregg.Kernel.DurableDataIntent
 set_option autoImplicit false
 abbrev Deployment := CanonicalCellRegistry.Deployment
-abbrev Durable := DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes
+abbrev Ground := Minidregg.Compiler.ServedBasis.Ground
 inductive Reject where
   | audienceTransition
   | audienceObjectUnavailable
@@ -33,44 +33,39 @@ def NeedsWitness (before after : Option Minidregg.Theory.ObjectAudience.State) :
 instance (b a : Option Minidregg.Theory.ObjectAudience.State) : Decidable (NeedsWitness b a) := by
   cases b <;> cases a <;> unfold NeedsWitness <;> infer_instance
 
-def SupportedObject {durable : Durable} (deployment : Deployment)
-    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable) (object : Nat) : Prop :=
-  match directory.directory.slots object with
+def SupportedObject {deployment : Deployment} (ground : Ground deployment) (object : Nat) : Prop :=
+  match ground.directory.slots object with
   | .absent => False
   | .present cell => CanonicalCellRegistry.CellLaw deployment object cell ∧
       ResourceTargetAdmission.externalKind cell.kind = some .object
-instance {durable : Durable} (deployment : Deployment) (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
-    (object : Nat) : Decidable (SupportedObject deployment directory object) := by
+instance {deployment : Deployment} (ground : Ground deployment)
+    (object : Nat) : Decidable (SupportedObject ground object) := by
   unfold SupportedObject; split <;> infer_instance
 
 def objectMetadataRequired (before after : PolicyRecord) : Bool :=
   before.audience.isSome || after.audience.isSome ||
     before.objectDescriptor.isSome || after.objectDescriptor.isSome
 
-structure Prepared (deployment : Deployment) (durable : Durable)
-    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
-    (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
+structure Prepared (deployment : Deployment) (ground : Ground deployment)
     (object : Nat) (before after : Option Minidregg.Theory.ObjectAudience.State)
     (metadataRequired : Bool) where
   private mk ::
   deviceRoot : Nat
-  bound : ObjectAudienceController.Bound object authority.snapshot.cell.root.value deviceRoot before after
+  bound : ObjectAudienceController.Bound object ground.authority.cell.root.value deviceRoot before after
   readGuards : List ReadGuard
   readGuardsExact : ∀ guard ∈ readGuards,
-    guard.expectedRoot = durable.snapshot.model.roots guard.cellId
+    guard.expectedRoot = ground.view.model.roots guard.cellId
   witness : NeedsWitness before after → ∃ next bytes,
-    after = some next ∧ ∃ checked : AudienceRosterBinding.CheckedBytes ⟨directory, authority⟩ next bytes,
+    after = some next ∧ ∃ checked : AudienceRosterBinding.CheckedBytes ground next bytes,
       checked.checked.deviceGuard ∈ readGuards ∧ deviceRoot = checked.checked.deviceRoot
-  supported : metadataRequired = true → SupportedObject deployment directory object
+  supported : metadataRequired = true → SupportedObject ground object
   guarded : metadataRequired = true →
-    (⟨⟨object⟩, durable.snapshot.model.roots ⟨object⟩⟩ : ReadGuard) ∈ readGuards
+    (⟨⟨object⟩, ground.view.model.roots ⟨object⟩⟩ : ReadGuard) ∈ readGuards
 
-def prepare (deployment : Deployment) (durable : Durable)
-    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
-    (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
+def prepare (deployment : Deployment) (ground : Ground deployment)
     (object : Nat) (before after : Option Minidregg.Theory.ObjectAudience.State)
     (rosterBytes : Option (List UInt8)) (metadataRequired : Bool) :
-    Except Reject (Prepared deployment durable directory authority object before after metadataRequired) := do
+    Except Reject (Prepared deployment ground object before after metadataRequired) := do
   if ordinary : before = none ∧ after = none ∧ metadataRequired = false then
     if rosterBytes.isSome then throw .audienceTransition
     pure ⟨0, (by simp [ordinary.1, ordinary.2.1, ObjectAudienceController.Bound, ObjectAudienceController.Valid]),
@@ -79,16 +74,16 @@ def prepare (deployment : Deployment) (durable : Durable)
       (by intro required; simp [ordinary.2.2] at required),
       (by intro required; simp [ordinary.2.2] at required)⟩
   else
-    let supported ← require (SupportedObject deployment directory object) .audienceObjectUnavailable
-    let objectGuard : ReadGuard := ⟨⟨object⟩, durable.snapshot.model.roots ⟨object⟩⟩
+    let supported ← require (SupportedObject ground object) .audienceObjectUnavailable
+    let objectGuard : ReadGuard := ⟨⟨object⟩, ground.view.model.roots ⟨object⟩⟩
     if activation : NeedsWitness before after then
       match afterExact : after with
       | none => throw .audienceTransition
       | some next =>
         let bytes ← fromOption rosterBytes .audienceTransition
-        let roster ← fromOption (AudienceRosterBinding.checkBytes ⟨directory, authority⟩ next bytes) .audienceTransition
+        let roster ← fromOption (AudienceRosterBinding.checkBytes ground next bytes) .audienceTransition
         let checked ← require (ObjectAudienceController.Bound object
-          authority.snapshot.cell.root.value roster.checked.deviceRoot before after) .audienceTransition
+          ground.authority.cell.root.value roster.checked.deviceRoot before after) .audienceTransition
         pure ⟨roster.checked.deviceRoot, (by simpa only [afterExact] using checked.down),
           [objectGuard, roster.checked.deviceGuard], (by
             intro guard member
@@ -105,7 +100,7 @@ def prepare (deployment : Deployment) (durable : Durable)
       if rosterBytes.isSome then throw .audienceTransition
       let deviceRoot := match after with | some state => state.deviceSnapshot | none => 0
       let checked ← require (ObjectAudienceController.Bound object
-        authority.snapshot.cell.root.value deviceRoot before after) .audienceTransition
+        ground.authority.cell.root.value deviceRoot before after) .audienceTransition
       pure ⟨deviceRoot, checked.down,
         [objectGuard], (by intro guard member; simp only [List.mem_singleton] at member; subst guard; rfl),
         (by intro needed; exact False.elim (activation needed)),

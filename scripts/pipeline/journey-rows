@@ -12,14 +12,14 @@
 # OUT/subrows.tsv (ID<TAB>STATUS<TAB>WALL_S<TAB>DETAIL) to report one table row per step; the
 # last stderr line is the row's detail. Rows generate their own test keys inside RUN; no secret
 # ever reaches the box. OWNER hints: OUT/owner (a lane name) when the row can tell.
-JOURNEY_ROWS=(journey objective rooms activity seats objectrecord welcomecontinuity sshe2e)
+JOURNEY_ROWS=(journey objective rooms activity seats bounty call send domain upgrade objectrecord welcomecontinuity sshe2e)
 
-# J0-J8 + the rotation rows (JROT, JROTL, and JRLANE and any *SEAT* step when the tip's journey.sh
+# J0-J8 + the rotation rows (JROT, JROTL, and JRLANE, JAUDIT and any *SEAT* step when the tip's journey.sh
 # has them), one fresh Store, through native/resource-client/journey.sh.
 row_journey() {
   local js=$SRC/native/resource-client/journey.sh steps extra
   [ -f "$js" ] || return 99
-  extra=$(sed -n 's/^STEPS=(\(.*\))$/\1/p' "$js" | tr ' ' '\n' | grep -E '^(JRLANE|.*SEAT.*)$' | paste -sd' ')
+  extra=$(sed -n 's/^STEPS=(\(.*\))$/\1/p' "$js" | tr ' ' '\n' | grep -E '^(JRLANE|JGATE|JAUDIT|.*SEAT.*)$' | paste -sd' ')
   steps="J0 J1 J2 J3 J4 J5 J6 J7 J8 JROT JROTL${extra:+ $extra}"
   JOURNEY_STEPS="$steps" JOURNEY_GROWTH_LEVELS=10 bash "$js" "$MANIFEST" "$RUN/j" >"$OUT/journey.out" 2>"$OUT/journey.err"
   local rc=$?
@@ -91,6 +91,85 @@ row_seats() {
   esac >"$OUT/seats.out" 2>"$OUT/seats.err"
   local rc=$?
   echo "$(basename "$d"): $(tail -1 "$OUT/seats.out")" >&2
+  return $rc
+}
+
+# Synchronous cross-object `call` (OB7, Kernel/ObjectiveCall): C1-C8 on a fresh native world (51 checks).
+# OUT/subrows.tsv: one line per group (C1-leaf .. C8-shape). The driver has self-test plants (honest-thief,
+# vault-permit-all, gate-open); JOURNEY_PLANT_CALL=NAME[,NAME] runs the row with that fault put in the
+# world: the row must go RED (the driver exits 1 with "PLANT-RESULT red <groups>"), a planted fault that
+# stays green is the driver exiting 3 ("PLANT-RESULT blind"), also red. Unset in normal runs.
+row_call() {
+  local d=$SRC/native/resource-client/objective-call-native-journey.py
+  [ -f "$d" ] || return 99
+  (cd "$SRC" && python3 "$d" --bin "$BIN" --root "$RUN/c" ${JOURNEY_PLANT_CALL:+--plant "$JOURNEY_PLANT_CALL"}) >"$OUT/call.out" 2>"$OUT/call.err"
+  local rc=$?
+  cp "$RUN/c/results.json" "$OUT/" 2>/dev/null
+  cp "$RUN/c/groups.tsv" "$OUT/subrows.tsv" 2>/dev/null
+  cp -r "$RUN/c/transcript" "$OUT/" 2>/dev/null
+  tail -1 "$OUT/call.out" >&2
+  return $rc
+}
+
+# Asynchronous `send` with inboxes (OB8, Kernel/Inbox + ObjectiveSend): S1-S13 on a fresh native world, S8-S9
+# the row-F interface check (a send to a sending method refused `notDeliverable` at the send; a pipelined one
+# refunded at the RESOLVED target), S10-S13 row F's sender controls (cancel-if-queued refunds exactly, a cancel
+# after the delivery is a no-op, stop-waiting keeps the message and retires the slot, only the sender controls).
+# Plants (vault-open, dir-empty, roomy-postage, relay-deposit, cancel-late, cancel-early, stop-cancels,
+# sender-controls) via JOURNEY_PLANT_SEND, as row_call.
+row_send() {
+  local d=$SRC/native/resource-client/objective-send-native-journey.py
+  [ -f "$d" ] || return 99
+  (cd "$SRC" && python3 "$d" --bin "$BIN" --root "$RUN/s" ${JOURNEY_PLANT_SEND:+--plant "$JOURNEY_PLANT_SEND"}) >"$OUT/send.out" 2>"$OUT/send.err"
+  local rc=$?
+  cp "$RUN/s/results.json" "$OUT/" 2>/dev/null
+  cp "$RUN/s/groups.tsv" "$OUT/subrows.tsv" 2>/dev/null
+  cp -r "$RUN/s/transcript" "$OUT/" 2>/dev/null
+  tail -1 "$OUT/send.out" >&2
+  return $rc
+}
+
+# Registered invariant domains (GPT-6 row A, A3; Kernel/ObjectiveDomain): D1-D4 on a fresh native world (a joint
+# law refuses a write each object's own law admits; registration refusals; a stale plan re-judged on a member's
+# new state; the bank reserve = sum of balances). Plants via JOURNEY_PLANT_DOMAIN (member-permit; domain-blind
+# needs a Host built from a tree patched by scripts/plants/domain-blind.py), as row_call.
+row_domain() {
+  local d=$SRC/native/resource-client/objective-domain-native-journey.py
+  [ -f "$d" ] || return 99
+  (cd "$SRC" && python3 "$d" --bin "$BIN" --root "$RUN/d" ${JOURNEY_PLANT_DOMAIN:+--plant "$JOURNEY_PLANT_DOMAIN"}) >"$OUT/domain.out" 2>"$OUT/domain.err"
+  local rc=$?
+  cp "$RUN/d/results.json" "$OUT/" 2>/dev/null
+  cp "$RUN/d/groups.tsv" "$OUT/subrows.tsv" 2>/dev/null
+  cp -r "$RUN/d/transcript" "$OUT/" 2>/dev/null
+  tail -1 "$OUT/domain.out" >&2
+  return $rc
+}
+
+# The governed upgrade (Kernel/ObjectiveActivityUpgrade): U1-U5 on a fresh native world -- ADOPT to TallyV2 with a
+# migration, the drain (an old activity's write judged by the old law and, migrated, by the new), abortDrained
+# after the deadline, MIGRATE, REBIRTH of a chosen activity on the new package. Plants via JOURNEY_PLANT_UPGRADE
+# (drain-blind needs a Host built from a tree patched by scripts/plants/drain-blind.py).
+row_upgrade() {
+  local d=$SRC/native/resource-client/objective-upgrade-native-journey.py
+  [ -f "$d" ] || return 99
+  (cd "$SRC" && python3 "$d" --bin "$BIN" --root "$RUN/u" ${JOURNEY_PLANT_UPGRADE:+--plant "$JOURNEY_PLANT_UPGRADE"}) >"$OUT/upgrade.out" 2>"$OUT/upgrade.err"
+  local rc=$?
+  cp "$RUN/u/results.json" "$OUT/" 2>/dev/null
+  cp "$RUN/u/groups.tsv" "$OUT/subrows.tsv" 2>/dev/null
+  cp -r "$RUN/u/transcript" "$OUT/" 2>/dev/null
+  tail -1 "$OUT/upgrade.out" >&2
+  return $rc
+}
+
+# The bounty on the seat kernel (world/bounty/BountyEscrow.obend): escrow, claim, submit, approve / reject /
+# silence / cancel, the first claimer, and the planted double-pay, reward+1 and raid the kernel refuses.
+row_bounty() {
+  local d=$SRC/native/resource-client/objective-bounty-native-acceptance.py
+  [ -f "$d" ] || return 99
+  (cd "$SRC" && python3 "$d" all --bin "$BIN" --root "$RUN/b") >"$OUT/bounty.out" 2>"$OUT/bounty.err"
+  local rc=$?
+  cp "$RUN/b/results.json" "$OUT/" 2>/dev/null
+  echo "objective-bounty-native-acceptance.py: $(tail -1 "$OUT/bounty.out")" >&2
   return $rc
 }
 

@@ -105,7 +105,7 @@ step() {
   set -e
   step_t1=$(now)
   printf '%s\n' "$step_rc" >"$EV/$step_name.exit"
-  echo "$step_t1 - $step_t0" | bc >"$EV/$step_name.seconds"
+  awk -v end="$step_t1" -v start="$step_t0" 'BEGIN { printf "%.9f\n", end - start }' >"$EV/$step_name.seconds"
   printf '%-28s exit=%s %6ss\n' "$step_name" "$step_rc" "$(cat "$EV/$step_name.seconds")" |
     tee -a "$EV/journey.log"
   return "$step_rc"
@@ -329,7 +329,6 @@ delegate_observe() (
     {subject:"8",nonce:$nonce,purpose:{type:"prepare",draft:{type:"delegate-source",
       command:{kind:"object",domain:$c.domain,semantics:$c.semantics,subject:"8",nonce:$commandNonce,
         expectedTargetRoot:$resource[0].cell.root,parentId:$p.id,target:$target,
-        expectedPreRoot:$c.authorityRoot,
         child:($p + {id:$child,parent:$p.id,holder:{type:"subject",subject:$holder},
           targets:[$target],verbs:["observe"],ancestors:(($p.ancestors + [$p.id]) | unique)})}}},
      grants:[{kind:"object",target:$target,capability:$p.id}]}' >"$D-intent.json"

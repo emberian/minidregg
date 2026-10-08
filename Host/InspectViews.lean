@@ -235,7 +235,7 @@ inductive Tok where
   | eqeq | le | inn | writeOnce | monotone | plus
   | notOpen | close | allOpen | anyOpen | listClose | comma
   | openLaw | sealedLaw | witnessed
-  | hashOpen | hashClose | ranKw
+  | hashOpen | hashClose | ranKw | sumKw
   | nat (n : Nat)
   deriving DecidableEq, Repr
 
@@ -250,7 +250,7 @@ def Tok.text : Tok → String
   | .notOpen => "not (" | .close => ")" | .allOpen => "all [ " | .anyOpen => "any [ "
   | .listClose => " ]" | .comma => ", "
   | .openLaw => "open" | .sealedLaw => "sealed" | .witnessed => "witnessed "
-  | .hashOpen => " opens (" | .hashClose => ") with " | .ranKw => "ran "
+  | .hashOpen => " opens (" | .hashClose => ") with " | .ranKw => "ran " | .sumKw => "sum ("
   | .nat n => toString n
 
 mutual
@@ -264,6 +264,7 @@ def lawTokens : Pred → List Tok
   | .eqSlots a b => [.slot a, .eqeq, .slot b]
   | .leSlots a b => [.slot a, .le, .slot b]
   | .leSlotsOff a b k => [.slot a, .le, .slot b, .plus, .num "" k]
+  | .sumEq l r => [.sumKw, .slots l, .close, .eqeq, .sumKw, .slots r, .close]
   | .hashEq vs b c => [.slot c, .hashOpen, .slots vs, .hashClose, .slot b]
   | .ran program => [.ranKw, .nat program]
   | .not q => .notOpen :: lawTokens q ++ [.close]
@@ -311,6 +312,9 @@ theorem textOf_lawTokens : (p : Pred) → textOf (lawTokens p) = LawLeaf.renderC
   | .eqSlots a b => by simp [lawTokens, textOf, cat, Tok.text, LawLeaf.renderClause, String.append_assoc]
   | .leSlots a b => by simp [lawTokens, textOf, cat, Tok.text, LawLeaf.renderClause, String.append_assoc]
   | .leSlotsOff a b k => by simp [lawTokens, textOf, cat, Tok.text, LawLeaf.renderClause, String.append_assoc]
+  | .sumEq l r => by
+      simp only [lawTokens, textOf, cat, List.map, Tok.text, LawLeaf.renderClause,
+        String.append_assoc, String.append_empty]
   | .hashEq v b c => by simp [lawTokens, textOf, cat, Tok.text, LawLeaf.renderClause, String.append_assoc]
   | .ran program => by simp [lawTokens, textOf, cat, Tok.text, LawLeaf.renderClause, String.append_assoc]
   | .not q => by
@@ -355,6 +359,8 @@ def parseClause : Nat → List Tok → Option (Pred × List Tok)
   | _ + 1, .slot c :: .hashOpen :: .slots vs :: .hashClose :: .slot b :: r =>
       some (.hashEq vs b c, r)
   | _ + 1, .ranKw :: .nat program :: r => some (.ran program, r)
+  | _ + 1, .sumKw :: .slots l :: .close :: .eqeq :: .sumKw :: .slots rs :: .close :: r =>
+      some (.sumEq l rs, r)
   | n + 1, .notOpen :: r => match parseClause n r with
       | some (q, .close :: r) => some (.not q, r)
       | _ => none
@@ -410,6 +416,7 @@ theorem parseClause_lawTokens : (p : Pred) → (n : Nat) → fuel p < n → (r :
   | .witnessed vk, n + 1, _, r, _ => by simp [lawTokens, parseClause]
   | .eqSlots a b, n + 1, _, r, _ => by simp [lawTokens, parseClause]
   | .leSlotsOff a b k, n + 1, _, r, _ => by simp [lawTokens, parseClause]
+  | .sumEq l rs, n + 1, _, r, _ => by simp [lawTokens, parseClause]
   | .hashEq v b c, n + 1, _, r, _ => by simp [lawTokens, parseClause]
   | .ran program, n + 1, _, r, _ => by simp [lawTokens, parseClause]
   | .leSlots a b, n + 1, _, r, hr => by
@@ -464,7 +471,7 @@ def parseLaw (tokens : List Tok) : Option Pred :=
 mutual
 theorem fuel_lt_length : (p : Pred) → fuel p < (lawTokens p).length + 1
   | .eq _ _ | .le _ _ | .memberOf _ _ | .writeOnce _ | .monotone _ | .witnessed _
-  | .eqSlots _ _ | .leSlots _ _ | .leSlotsOff _ _ _ | .hashEq _ _ _ | .ran _
+  | .eqSlots _ _ | .leSlots _ _ | .leSlotsOff _ _ _ | .sumEq _ _ | .hashEq _ _ _ | .ran _
   | .allL .nil | .anyL .nil => by
       simp [fuel, lawTokens]
   | .not q => by
@@ -514,6 +521,7 @@ mutual
 def slotsOf : Pred → List Slot
   | .eq s _ | .le s _ | .memberOf s _ | .writeOnce s | .monotone s => [s]
   | .eqSlots a b | .leSlots a b | .leSlotsOff a b _ => [a, b]
+  | .sumEq l r => l ++ r
   | .witnessed _ => []
   | .hashEq vs b c => vs ++ [b, c]
   | .ran program => [ranSlot program]

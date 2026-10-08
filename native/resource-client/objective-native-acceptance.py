@@ -45,7 +45,7 @@ HERE=pathlib.Path(__file__).resolve().parent
 REPO=HERE.parent.parent
 ap=argparse.ArgumentParser()
 ap.add_argument('verb',choices=['all','summary','world','publish','publish-variant','invoke','refuse','retry-submit','readback','lookup','reopen','stop'])
-for f in ['bin','root','method','entry','label','byte','tariff-base','tariff-tick','request-edit','mutation','argument','expect','prepare-only','move-source','disable']:
+for f in ['bin','root','method','entry','label','byte','tariff-base','tariff-tick','request-edit','mutation','argument','expect','prepare-only','move-source','disable','expect-detail']:
     ap.add_argument('--'+f)
 a=ap.parse_args()
 root=pathlib.Path(a.root).resolve()
@@ -71,18 +71,20 @@ def digest_hex(decimal):return enc_nat(int(decimal)).hex()
 def canonical(obj):return json.dumps(obj,sort_keys=True,separators=(',',':'),ensure_ascii=False)
 def ref(s,name):return json.loads((pathlib.Path(s['sponsor'])/'refs'/f'{name}.json').read_text())
 
-CAP_KEYS=['typeFuel','sourceTicks','heap','stack','outputNodes','outputBytes','inputBytes','scalarBits',
+CAP_KEYS=['typeFuel','sourceTicks','heap','stack','outputNodes','outputBytes','extractTicks','inputBytes','scalarBits',
   'memoryTouches','proofWork','feeDebit','turnBytes','witnessBytes','storageBytes','sideEffectCount',
-  'networkBytes','leaseByteBlocks','incidences']
+  'networkBytes','leaseByteBlocks','incidences','replayBytes','coreBytes','domainWork']
 MAXIMUM={'typeFuel':16384,'sourceTicks':200000,'heap':200000,'stack':200000,'outputNodes':20000,
-  'outputBytes':200000,'inputBytes':200000,'scalarBits':512,'memoryTouches':2000000,'proofWork':900000,
+  'outputBytes':200000, 'extractTicks': 200000,'inputBytes':200000,'scalarBits':512,'memoryTouches':2000000,'proofWork':900000,
   'feeDebit':1000000,'turnBytes':4000000,'witnessBytes':4000000,'storageBytes':4000000,'sideEffectCount':16,
-  'networkBytes':0,'leaseByteBlocks':0,'incidences':16}
+  'networkBytes':0,'leaseByteBlocks':0,'incidences':16,'replayBytes':4194304,'coreBytes':4194304,'domainWork':256}
 ENVELOPE={'typeFuel':16384,'sourceTicks':100000,'heap':100000,'stack':100000,'outputNodes':10000,
-  'outputBytes':100000,'inputBytes':100000,'scalarBits':512,'memoryTouches':1000000,'feeDebit':0,
+  'outputBytes':100000, 'extractTicks': 100000,'inputBytes':100000,'scalarBits':512,'memoryTouches':1000000,'feeDebit':0,
   'turnBytes':2000000,'witnessBytes':2000000,'storageBytes':2000000,'sideEffectCount':8,
-  'networkBytes':0,'leaseByteBlocks':0,'incidences':8}
-TARIFF_KEYS=['typeFuel','sourceTicks','heap','stack','outputNodes','outputBytes','inputBytes']
+  'networkBytes':0,'leaseByteBlocks':0,'incidences':8,'replayBytes':0,'coreBytes':0,'domainWork':0}
+# replayBytes/coreBytes are the publication's front-end quote (`frontEnd` in publication.json): the native
+# route refuses a claim that does not declare them (Reject.objectiveWork, GPT-6 row E) before it replays.
+TARIFF_KEYS=['typeFuel','sourceTicks','heap','stack','outputNodes','outputBytes','extractTicks','inputBytes','replayBytes','coreBytes','domainWork']
 def price(tariff,c):return int(tariff['base'])+sum(int(tariff[k])*int(c[k]) for k in TARIFF_KEYS)
 
 if a.verb=='all':
@@ -100,6 +102,11 @@ if a.verb=='all':
     step('readback',*W,'--label','first')
     step('lookup',*W,'--label','first')
     step('refuse',*W,'--label','r01-source-is-package','--mutation','source-atom','--argument','@package')
+    # The claim declares less front-end work than the selected pair needs: refused by name before the replay.
+    step('invoke',*W,'--label','r14-front-end-undeclared','--request-edit',str(HERE/'objective-native-edit-front-zero.py'),
+         '--expect','refused','--expect-detail','Reject.objectiveWork')
+    step('invoke',*W,'--label','r15-core-short','--request-edit',str(HERE/'objective-native-edit-core-short.py'),
+         '--expect','refused','--expect-detail','Reject.objectiveWork')
     step('invoke',*W,'--label','r02-core-differs-from-replay','--request-edit',str(HERE/'objective-native-edit-core.py'),'--expect','refused')
     step('publish-variant',*W,'--label','pin')
     step('refuse',*W,'--label','r03-front-end-pin','--mutation','source-atom','--argument','@pin')
@@ -142,9 +149,9 @@ elif a.verb=='summary':
     def ok(row):
         if row['expect']=='confirmed':return row['rc']==0 and not row['unchanged']
         if row['expect']=='prepared':return row['rc']==0 and row['unchanged']
-        return row['refused'] and row['unchanged']
+        return row['refused'] and row['unchanged'] and (row.get('expectDetail') or '') in (row.get('detail') or '')
     summary={'world':str(root),
-        'rows':[{k:row.get(k) for k in ['label','expect','rc','unchanged','reason','detail']}|{'pass':ok(row)} for row in rows],
+        'rows':[{k:row.get(k) for k in ['label','expect','rc','unchanged','reason','detail','expectDetail']}|{'pass':ok(row)} for row in rows],
         'readbacks':[{'label':r['label'],'height':r['height'],'returns':len(r['returns']),
             'pass':bool(r['returns']) and all(c['stored'] and c['bytesExact'] for c in r['returns'])} for r in reads]}
     summary['allPass']=all(r['pass'] for r in summary['rows']+summary['readbacks'])
@@ -161,10 +168,12 @@ elif a.verb=='world':
     if root.exists():raise SystemExit('root exists')
     root.mkdir(mode=0o700);T.mkdir()
     constants=json.loads(sh('constants',host,'/dev/null','objective-constants').stdout)
-    tariff={'version':'1','base':a.tariff_base or '1','typeFuel':'0','sourceTicks':a.tariff_tick or '1','heap':'0',
-        'stack':'0','outputNodes':'0','outputBytes':'0','inputBytes':'0'}
+    tariff={'version':'4','base':a.tariff_base or '1','typeFuel':'0','sourceTicks':a.tariff_tick or '1','heap':'0',
+        'stack':'0','outputNodes':'0','outputBytes':'0', 'extractTicks': '0','inputBytes':'0',
+        # Edition 4 (as edition 3) refuses a zero front-end rate; the measured rates (activity_world.TARIFF).
+        'replayBytes':'61','coreBytes':'16','domainWork':'0'}
     policy={'schema':'dregg.objective-bend.policy.v1','sourceBytes':'4194304',
-        'maximum':{k:str(v) for k,v in MAXIMUM.items()},'outputs':[constants['genericCodec']],
+        'maximum':{k:str(v) for k,v in MAXIMUM.items()}, 'extractTicksPerTurn': str(16 * MAXIMUM['extractTicks']),'outputs':[constants['genericCodec']],
         'clearAudience':digest_hex(1),'frontEnd':constants['frontEnd'],'tariff':tariff}
     (root/'policy.json').write_text(json.dumps(policy,indent=1))
     sh('policy',host,'/dev/null','author','objective-policy',root/'policy.json',root/'policy.hex')
@@ -205,7 +214,8 @@ elif a.verb=='publish':
        '--intent',pathlib.Path(s['sponsor'])/'proposals'/pid/'intent.json',
        '--attempt',pathlib.Path(s['sponsor'])/'attempts'/pid)
     s['publication']={'artifactId':out['artifactId'],'packageId':out['packageId'],
-        'package':str(pub/'out'/'package.bin'),'artifact':str(pub/'out'/'artifact.bin'),'attempt':pid}
+        'package':str(pub/'out'/'package.bin'),'artifact':str(pub/'out'/'artifact.bin'),'attempt':pid,
+        'frontEnd':out['frontEnd']}
     save(s);print(json.dumps(s['publication']))
 
 def height_and_root(tag):
@@ -242,7 +252,9 @@ def build_request(s,label,byte=7):
         {'name':'atom','value':{'tag':'label','value':digest_hex(secrets.randbelow(2**60)+2**61)}},
         {'name':'schema','value':{'tag':'label','value':digest_hex(4242)}},
         {'name':'byte','value':{'tag':'natural','value':str(int(byte))}}]}]})
-    capacity=dict(ENVELOPE);capacity['proofWork']=price(s['tariff'],capacity)
+    capacity=dict(ENVELOPE)
+    capacity['replayBytes']=int(pubs['frontEnd']['replayBytes']);capacity['coreBytes']=int(pubs['frontEnd']['coreBytes'])
+    capacity['proofWork']=price(s['tariff'],capacity)
     notes=reads['notes']['ref']
     request={'schema':'dregg.objective-bend.request.v1','subject':s['subject'],'nonce':nonce,
         'source':{'ref':input_ref('source'),'atom':digest_hex(pubs['artifactId']),
@@ -254,9 +266,10 @@ def build_request(s,label,byte=7):
         'capacity':{k:str(capacity[k]) for k in CAP_KEYS},
         'inputCodec':s['constants']['inputCodec'],'outputCodec':s['constants']['genericCodec'],
         'roles':[{'kind':notes['kind'],'resource':notes['target'],'capability':notes['operationCapability'],
-            'schemaVersion':'9','root':digest_hex(root_of('notes')),'observeCapability':notes['observeCapability']}],
+            'schemaVersion':'10','root':digest_hex(root_of('notes')),'observeCapability':notes['observeCapability']}],
         'resultResource':notes['target']}
-    if a.request_edit:exec(pathlib.Path(a.request_edit).read_text(),{'request':request,'s':s,'digest_hex':digest_hex})
+    if a.request_edit:exec(pathlib.Path(a.request_edit).read_text(),{'request':request,'s':s,'digest_hex':digest_hex,
+        'price':price,'CAP_KEYS':CAP_KEYS})
     (d/'request.json').write_text(json.dumps(request,indent=1))
     return d
 
@@ -303,7 +316,7 @@ if a.verb=='invoke':
        '--request',d/'request.json','--intent-nonce',intent_nonce,'--key',s['key'],'--dir',attempt,*extra,ok=(0,1,2,3))
     (d/'attempt.txt').write_text(str(attempt)+'\n')
     after=height_and_root(f'{label}-after')
-    record(label,a.expect or 'confirmed',before,after,r,{'attempt':str(attempt),
+    record(label,a.expect or 'confirmed',before,after,r,{'attempt':str(attempt),'expectDetail':a.expect_detail,
         'stdout':r.stdout.decode(errors='replace')[-1500:],**(diagnose(label,attempt) if r.returncode!=0 else {})})
 
 elif a.verb=='refuse':

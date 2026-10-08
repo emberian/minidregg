@@ -479,7 +479,9 @@ def payControlVerbTags : List Int :=
    Int.ofNat (CredentialAuthorityEntryCodec.verbTag (Verb.installPolicy : Verb .program)),
    Int.ofNat (CredentialAuthorityEntryCodec.verbTag (Verb.revokeCapability : Verb .program))]
 
-/-- The pay cell's law: the configured observer may only `observePayment`;
+/-- The pay cell's law: the configured observer may `observePayment`, and may
+record a SELF-ENROLLMENT (its `installPolicy` request on the factory, with
+`ClockLaw.paySelfEnrolSlot = 1`, the slot only the pay-enrol receivers project);
 the factory controller may only manage (delegate, install the law, revoke).
 Neither can do the other's part. -/
 def payPredicate (controller : SubjectId) (observer : PayObserver) : Minidregg.Pred.Pred :=
@@ -487,6 +489,10 @@ def payPredicate (controller : SubjectId) (observer : PayObserver) : Minidregg.P
     .all [.eq "request/verb" (Int.ofNat (CredentialAuthorityEntryCodec.verbTag
         (Verb.observePayment : Verb .program))),
       .eq "request/subject" (Int.ofNat observer.subject.value)],
+    .all [.eq "request/verb" (Int.ofNat (CredentialAuthorityEntryCodec.verbTag
+        (Verb.installPolicy : Verb .program))),
+      .eq "request/subject" (Int.ofNat observer.subject.value),
+      .eq ClockLaw.paySelfEnrolSlot 1],
     .all [.eq "request/subject" (Int.ofNat controller.value),
       .memberOf "request/verb" payControlVerbTags]]
 
@@ -924,7 +930,8 @@ theorem sponsor_factory_admitted :
 /-! ## The pay cell's control (PAY §11.4, observer replacement) -/
 
 /-- **The pay law, exactly**: on any request naming a subject and a verb, it
-admits the observer's `observePayment` (6) and the controller's
+admits the observer's `observePayment` (6), the observer's self-enrollment
+(`installPolicy` (4) with the self-enrol slot 1), and the controller's
 `observeProgram`/`delegateProgram`/`installPolicy`/`revokeCapability`
 (1/3/4/5), and nothing else. -/
 theorem payLaw_eval (controller : SubjectId) (observer : PayObserver)
@@ -933,6 +940,7 @@ theorem payLaw_eval (controller : SubjectId) (observer : PayObserver)
     (verbed : new.get "request/verb" = some (Int.ofNat verb)) :
     Minidregg.Pred.eval (payPredicate controller observer) old new = true ↔
       (verb = 6 ∧ subject = observer.subject.value) ∨
+        (verb = 4 ∧ subject = observer.subject.value ∧ new.get ClockLaw.paySelfEnrolSlot = some 1) ∨
         (subject = controller.value ∧ (verb = 1 ∨ verb = 3 ∨ verb = 4 ∨ verb = 5)) := by
   simp only [Minidregg.Pred.eval, payPredicate, Minidregg.Pred.evalWith_any,
     Minidregg.Pred.evalWith_all, List.any_cons, List.all_cons, List.any_nil, List.all_nil,
@@ -963,6 +971,8 @@ theorem observer_replaceable {F : Type} [Field F] (profile : CanonicalRuntimePro
         new.get "request/verb" = some (Int.ofNat verb) →
         (Minidregg.Pred.eval (payPredicate config.factoryController.subject observer) old new = true ↔
           (verb = 6 ∧ subject = observer.subject.value) ∨
+            (verb = 4 ∧ subject = observer.subject.value ∧
+              new.get ClockLaw.paySelfEnrolSlot = some 1) ∨
             (subject = config.factoryController.subject.value ∧
               (verb = 1 ∨ verb = 3 ∨ verb = 4 ∨ verb = 5)))) := by
   refine ⟨?_, rfl, rfl, by simp [payControlCapability, rootCapability],
@@ -979,18 +989,41 @@ theorem controller_cannot_report (controller : SubjectId) (observer : PayObserve
     Minidregg.Pred.eval (payPredicate controller observer) old new = false := by
   have := (payLaw_eval controller observer old new controller.value 6 named verbed).not
   simp only [Bool.not_eq_true] at this
-  exact this.mpr (by omega)
+  refine this.mpr ?_
+  rintro (⟨-, same⟩ | ⟨four, -⟩ | ⟨-, management⟩)
+  · exact other same
+  · omega
+  · omega
 
-/-- Refuting pole: the observer cannot install the pay law or revoke. -/
+/-- Refuting pole: the observer cannot install the pay law or revoke -- its one
+`installPolicy` is a self-enrollment, which only the pay-enrol receivers'
+projection (`ClockLaw.paySelfEnrolSlot = 1`) reaches. -/
 theorem observer_cannot_manage (controller : SubjectId) (observer : PayObserver)
     (other : controller.value ≠ observer.subject.value) (old new : Minidregg.Pred.State)
     (verb : Nat) (management : verb = 1 ∨ verb = 3 ∨ verb = 4 ∨ verb = 5)
+    (notEnrol : new.get ClockLaw.paySelfEnrolSlot ≠ some 1)
     (named : new.get "request/subject" = some (Int.ofNat observer.subject.value))
     (verbed : new.get "request/verb" = some (Int.ofNat verb)) :
     Minidregg.Pred.eval (payPredicate controller observer) old new = false := by
   have := (payLaw_eval controller observer old new observer.subject.value verb named verbed).not
   simp only [Bool.not_eq_true] at this
-  exact this.mpr (by omega)
+  refine this.mpr ?_
+  rintro (⟨six, -⟩ | ⟨-, -, enrol⟩ | ⟨same, -⟩)
+  · omega
+  · exact notEnrol enrol
+  · exact other same.symm
+
+/-- The self-enrollment clause is reachable: the observer's `installPolicy`
+with the self-enrol slot is admitted (the premise of the pay-enrol families'
+pay writes is inhabited). -/
+theorem observer_self_enrol (controller : SubjectId) (observer : PayObserver)
+    (old new : Minidregg.Pred.State)
+    (named : new.get "request/subject" = some (Int.ofNat observer.subject.value))
+    (verbed : new.get "request/verb" = some 4)
+    (enrol : new.get ClockLaw.paySelfEnrolSlot = some 1) :
+    Minidregg.Pred.eval (payPredicate controller observer) old new = true :=
+  (payLaw_eval controller observer old new observer.subject.value 4 named verbed).mpr
+    (Or.inr (Or.inl ⟨rfl, rfl, enrol⟩))
 
 /-! ## The confined factory law (PAY §11.4, P3b-2) -/
 
@@ -1154,5 +1187,6 @@ theorem factory_ordinary_preserved (config : Config) (old new : Minidregg.Pred.S
 #assert_axioms observer_replaceable
 #assert_axioms controller_cannot_report
 #assert_axioms observer_cannot_manage
+#assert_axioms observer_self_enrol
 
 end Minidregg.Kernel.NativeHostGenesis

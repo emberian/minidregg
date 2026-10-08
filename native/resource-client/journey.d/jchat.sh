@@ -21,6 +21,7 @@
 # `fake-discord` built from native/discord-entrance (the mirror rows FAIL
 # without it). Hook contract: journey.sh. Last stdout line: the row table.
 set -u
+. "$(dirname "${BASH_SOURCE[0]}")/../journey-private.sh"
 umask 077
 : "${JOURNEY_STEP_DIR:?}" "${MINI:?}" "${HOST:?}" "${CONFIG:?}" "${SOCKET:?}" "${SPONSOR_WS:?}" "${JOURNEY_WORLD:?}"
 SH=${SHELL_BIN:-}; [ -n "$SH" ] || SH=$MINI
@@ -113,7 +114,7 @@ declare -A S
 for f in alice bob carol dave bridge; do
   mkdir -p -m 700 "$H/$f"
   setup "$f" "keygen mini.key"
-  operator "custody copy" install -D -m 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/$f.key"
+  operator "custody copy" install_private 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/$f.key"
   setup sponsor "enroll plan $f $f.key $(xxd -p -c 256 "$H/$f/keys/mini.key.next.pub") $(xxd -p -c 256 "$H/$f/keys/mini.key.next.cosign")"
   setup sponsor "enroll seal $f"
   setup sponsor "enroll submit $f"
@@ -122,7 +123,7 @@ for f in alice bob carol dave bridge; do
   operator "custody remove" rm -f "$H/sponsor/keys/$f.key"
   operator "provision $f" "$MINI" workspace --action provision --dir "$SPONSOR_WS" --name "$f" --holder "${S[$f]}" \
       --funding 1000 --account-predicate "$SD/permit-all.json" --factory-ref factory
-  operator "deliver $f" install -D -m 0600 "$SPONSOR_WS/provisions/$f/birth-context.json" "$H/$f/provision/birth-context.json"
+  operator "deliver $f" install_private 0600 "$SPONSOR_WS/provisions/$f/birth-context.json" "$H/$f/provision/birth-context.json"
   setup "$f" "init mini.key ${S[$f]}"
 done
 A=${S[alice]} B=${S[bob]} C=${S[carol]} D=${S[dave]} E=${S[bridge]}

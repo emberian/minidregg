@@ -944,6 +944,7 @@ both expected roots. Program control grants use distinct `installPolicy` and
 `revokeCapability` verbs.
 
 Content payload actions are `createDocument`, `createAtom`, `createRun`,
+`insertRun` (existing atoms into a run, at a stable point or at its end),
 `editAtom`, and `link`. Byte payloads are lowercase or uppercase even-length
 hex; identifiers and unbounded integers are canonical decimal strings. Atom
 edits carry the complete observed old record, so the source receiver can reject

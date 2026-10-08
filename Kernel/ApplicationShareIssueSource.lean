@@ -156,9 +156,6 @@ structure Ready (domain : Digest) (spec : Spec) (operation : Nat) where
   valid : spec.valid
   page : ContentResource.ContentStore
   pageExact : ticketPage domain spec operation = .ok page
-  payloadAtLeast : (PackedCell.bytes CanonicalCellRegistry.registry
-    (bornCell ContentResource.initialStore)).length ≤
-    (PackedCell.bytes CanonicalCellRegistry.registry (bornCell page)).length
 
 def prepare {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F)
@@ -172,71 +169,29 @@ def prepare {F : Type} [Field F]
   if valid : spec.valid then
     match exact : ticketPage config.deployment.domain spec operation with
     | .error _ => .error "share ticket initial page refused"
-    | .ok page =>
-        if payloadAtLeast : (PackedCell.bytes CanonicalCellRegistry.registry
-            (bornCell ContentResource.initialStore)).length ≤
-            (PackedCell.bytes CanonicalCellRegistry.registry (bornCell page)).length then
-          .ok ⟨valid, page, exact, payloadAtLeast⟩
-        else .error "share ticket final payload shorter than empty birth"
+    | .ok page => .ok ⟨valid, page, exact⟩
   else .error "invalid share ticket selectors"
 
 variable {domain : Digest} {spec : Spec} {operation : Nat}
 
-def Ready.birth (_ready : Ready domain spec operation) :
-    BirthItem CanonicalCellRegistry.registry :=
-  ⟨⟨spec.ticket.resource, CellSlot.root CanonicalCellRegistry.registry .absent,
-      bornCell ContentResource.initialStore⟩,
-    .object, spec.issuer, none, none⟩
-
-/-- The initialized physical cell is never a second birth item. It is the
-one source-derived final post chosen by the special issue intent after native
-admission of the empty ordinary birth. -/
+/-- The ticket's one cell, born with its source-derived page: the first atom is
+in the descriptor the factory judges, so the factory step names the whole ticket
+(`ResourceBirthController.Concrete.newbornSlots`).  Nothing substitutes a post
+after admission. -/
 def Ready.initializedCell (ready : Ready domain spec operation) :
     PackedCell CanonicalCellRegistry.registry := bornCell ready.page
 
-def Ready.emptyPayloadBytes (ready : Ready domain spec operation) : Nat :=
-  (PackedCell.bytes CanonicalCellRegistry.registry ready.birth.create.cell).length
+def Ready.birth (ready : Ready domain spec operation) :
+    BirthItem CanonicalCellRegistry.registry :=
+  ⟨⟨spec.ticket.resource, CellSlot.root CanonicalCellRegistry.registry .absent,
+      ready.initializedCell⟩,
+    .object, spec.issuer, none, none⟩
 
-def Ready.finalPayloadBytes (ready : Ready domain spec operation) : Nat :=
-  (PackedCell.bytes CanonicalCellRegistry.registry ready.initializedCell).length
-
-theorem Ready.empty_le_final (ready : Ready domain spec operation) :
-    ready.emptyPayloadBytes ≤ ready.finalPayloadBytes := ready.payloadAtLeast
-
-/-- The special issue's effective tariff is determined solely by the pinned
-factory tariff and the source-computed final ticket cell. The ordinary birth
-engine still proves its standard fee law under these derived pins. -/
-def Ready.effectiveTariff (ready : Ready domain spec operation)
-    (tariff : CreationTariff) : CreationTariff :=
-  { tariff with base := tariff.base + tariff.perInitialPayloadByte *
-      (ready.finalPayloadBytes - ready.emptyPayloadBytes) }
-
-def Ready.effectivePins (ready : Ready domain spec operation)
-    (pins : FactoryPins) : FactoryPins :=
-  { pins with tariff := ready.effectiveTariff pins.tariff }
-
-theorem Ready.effective_payload_quote (ready : Ready domain spec operation)
-    (tariff : CreationTariff) :
-    (ready.effectiveTariff tariff).base +
-      tariff.perInitialPayloadByte * ready.emptyPayloadBytes =
-    tariff.base + tariff.perInitialPayloadByte * ready.finalPayloadBytes := by
-  simp only [Ready.effectiveTariff]
-  rw [Nat.add_assoc, ← Nat.mul_add]
-  rw [Nat.sub_add_cancel ready.empty_le_final]
-
-theorem Ready.effective_collector (ready : Ready domain spec operation)
-    (tariff : CreationTariff) :
-    (ready.effectiveTariff tariff).collector = tariff.collector := by
-  simp [Ready.effectiveTariff]
-
-theorem Ready.effective_asset (ready : Ready domain spec operation)
-    (tariff : CreationTariff) :
-    (ready.effectiveTariff tariff).asset = tariff.asset := by
-  simp [Ready.effectiveTariff]
-
-theorem Ready.birth_empty (_ready : Ready domain spec operation) :
-    ContentResource.initialStore.support = ∅ := by
-  rfl
+/-- The one initial cell the special receiver sources beyond the user shapes
+(`ResourceBirthController.Concrete.SourcedInitial`): the ticket at its id. -/
+def Ready.sourced (ready : Ready domain spec operation) :
+    List (Nat × PackedCell CanonicalCellRegistry.registry) :=
+  [(spec.ticket.resource, ready.initializedCell)]
 
 def Ready.births (ready : Ready domain spec operation) :
     List (BirthItem CanonicalCellRegistry.registry) := [ready.birth]
@@ -346,9 +301,9 @@ def Ready.initialPolicies {F : Type} [Field F]
   let record := ready.policyRecord profile config
   [⟨record.policyId, PolicyRecordCodec.digest record, PolicyRecordCodec.encode record⟩]
 
-/-- The ordinary signed birth descriptor installs an empty ticket page and
-owner-locked policy. The special receiver alone composes the source-derived
-first atom into that same allocation write after checking app delegation. -/
+/-- The signed birth descriptor installs the ticket page with its source-derived
+first atom and the owner-locked policy, priced by the pinned tariff on that
+whole payload. -/
 def Ready.descriptor {F : Type} [Field F]
     (ready : Ready domain spec operation) (profile : CanonicalRuntimeProfile.Profile F)
     (config : NativeHost.Config) (authority : AuthState) (height : Nat)
@@ -370,7 +325,7 @@ def Ready.descriptor {F : Type} [Field F]
       funding := funding,
       fee := ⟨payer, config.tariff.collector, config.tariff.asset, 0⟩ }
   { draft with fee := { draft.fee with amount :=
-      (draft.quotedFee (ready.effectiveTariff config.tariff)) } }
+      (draft.quotedFee config.tariff) } }
 
 /-- Rebuild the one permissible birth descriptor from the selected issuer and
 exact ticket, retaining only the caller's payer/funding choices. The special

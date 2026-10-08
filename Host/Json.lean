@@ -47,7 +47,6 @@ import Kernel.ClockTickReceiver
 import Kernel.PayObservationReceiver
 import Kernel.PayEnrolReceiver
 import Kernel.PayEnrolQuote
-import Compiler.PayEnrolSignatureIO
 import Kernel.CertifyReceiver
 import Kernel.ApplicationLifecycleResidentProfile
 import Host.ApplicationPermissionSchemaAuthoring
@@ -310,6 +309,10 @@ partial def predicate (path : String) (json : Lean.Json) : Result Pred := do
       let right ← string (path ++ ".right") (← field path "right" obj)
       let offset ← int (path ++ ".offset") (← field path "offset" obj)
       pure (.leSlotsOff left right offset)
+  | "sumEq" =>
+      let obj ← exactObject path ["type", "left", "right"] json
+      pure (.sumEq (← list (path ++ ".left") string (← field path "left" obj))
+        (← list (path ++ ".right") string (← field path "right" obj)))
   | "witnessed" =>
       let obj ← exactObject path ["type", "identifier"] json
       pure (.witnessed ⟨← string (path ++ ".identifier") (← field path "identifier" obj)⟩)
@@ -347,6 +350,8 @@ private partial def predicateJson : Pred → Lean.Json
       ("right", .str right)]
   | .leSlotsOff left right offset => .mkObj [("type", "leSlotsOff"), ("left", .str left),
       ("right", .str right), ("offset", signedDecimal offset)]
+  | .sumEq left right => .mkObj [("type", "sumEq"), ("left", .arr (left.toArray.map .str)),
+      ("right", .arr (right.toArray.map .str))]
   | .witnessed identifier => .mkObj [("type", "witnessed"),
       ("identifier", .str identifier.id)]
   | .hashEq values blinder commit => .mkObj [("type", "hashEq"),
@@ -606,21 +611,23 @@ private def delegationFor (kind : ResourceKind) (path : String)
   let child ← capability kind (path ++ ".child") (← field path "child" obj)
   let parentId := CapabilityId.mk (← nat (path ++ ".parentId") (← field path "parentId" obj))
   let target := ResourceId.mk (← nat (path ++ ".target") (← field path "target" obj))
-  let expectedPreRoot := Digest.mk
-    (← nat (path ++ ".expectedPreRoot") (← field path "expectedPreRoot" obj))
   let command : CapabilityDelegationController.Command kind := {
     subject := ⟨← nat (path ++ ".subject") (← field path "subject" obj)⟩
     nonce := ← nat (path ++ ".nonce") (← field path "nonce" obj)
     expectedTargetRoot := ⟨← nat (path ++ ".expectedTargetRoot")
       (← field path "expectedTargetRoot" obj)⟩
-    declaration := ⟨child, parentId, target, expectedPreRoot, 0⟩ }
+    declaration := ⟨child, parentId, target, 0⟩ }
   let marker := CapabilityDelegationController.operationMarker domain semantics command
   let finalized := { command with declaration := { command.declaration with operationNullifier := marker } }
   pure (CapabilityDelegationController.commandCodec.encode ⟨kind, finalized⟩)
 
 private def delegation (path : String) (json : Lean.Json) : Result (List UInt8) := do
   let names := ["kind", "domain", "semantics", "subject", "nonce", "expectedTargetRoot",
-    "child", "parentId", "target", "expectedPreRoot"]
+    "child", "parentId", "target"]
+  -- Delegation command v1 signed the whole authority-cell root; v2 does not.
+  if (← object path json).contains "expectedPreRoot" then
+    throw s!"{path}.expectedPreRoot: retired with delegation command v1 (it signed the whole \
+      authority-cell root); v2 binds the parent by its signed id"
   let obj ← exactObject path names json
   let kind ← resourceKind (path ++ ".kind") (← field path "kind" obj)
   let domain := Digest.mk (← nat (path ++ ".domain") (← field path "domain" obj))
@@ -957,6 +964,11 @@ private def contentAction (path : String) (json : Lean.Json) : Result ContentRes
   | "unmark" =>
       let obj ← exactObject path ["type", "mark"] json
       pure (.unmark (← identifier (path ++ ".mark") (← field path "mark" obj)))
+  | "insertRun" =>
+      let obj ← exactObject path ["type", "run", "anchor", "atoms"] json
+      pure (.insertRun (← identifier (path ++ ".run") (← field path "run" obj))
+        (← optional (path ++ ".anchor") stablePoint (← field path "anchor" obj))
+        (← list (path ++ ".atoms") identifier (← field path "atoms" obj)))
   | "transclude" =>
       let obj ← exactObject path ["type", "transclusion", "link", "request"] json
       pure (.transclude (← identifier (path ++ ".transclusion") (← field path "transclusion" obj))
@@ -1423,7 +1435,7 @@ private def draft (path : String) (json : Lean.Json) : Result Draft := do
       let bytes ← decodeHex (path ++ ".command") (← field path "command" obj)
       match CapabilityDelegationController.commandCodec.decode bytes with
       | some value => pure (.delegate (CapabilityDelegationController.commandCodec.encode value))
-      | none => failAt (path ++ ".command") "noncanonical delegation command"
+      | none => failAt (path ++ ".command") (CapabilityDelegationController.undecodable bytes)
   | "delegate-source" =>
       let obj ← exactObject path ["type", "command"] json
       pure (.delegate (← delegation (path ++ ".command") (← field path "command" obj)))
@@ -4752,6 +4764,19 @@ private def outcomeJson : Outcome → Lean.Json
       .mkObj [("type", "confirmed"), ("confirmation", confirmation),
       ("transactionId", decimal receipt.transactionId.value), ("eventId", decimal receipt.eventId.value),
       ("acceptedCount", decimal receipt.acceptedCount), ("worldRoot", decimal receipt.worldRoot.value)]
+  | .charged kind receipt causeBytes =>
+      let confirmation : Lean.Json := match kind with
+        | .installed => "installed"
+        | .recoveredAfterUncertainResponse => "recoveredAfterUncertainResponse"
+        | .replayed => "replayed"
+      let cause : Lean.Json :=
+        match ObjectiveActivityReceiver.rejectCodec.decode causeBytes with
+        | some typed => .str (reprStr typed)
+        | none => .null
+      .mkObj [("type", "confirmed"), ("confirmation", confirmation),
+        ("disposition", "charged"), ("cause", cause), ("causeCanonical", hexJson causeBytes),
+        ("transactionId", decimal receipt.transactionId.value), ("eventId", decimal receipt.eventId.value),
+        ("acceptedCount", decimal receipt.acceptedCount), ("worldRoot", decimal receipt.worldRoot.value)]
   | .refused .tailBound phase detail none => .mkObj [("type", "refused"),
       ("reason", RefusalReason.tailBound.name), ("phase", hexJson phase), ("detail", hexJson detail),
       ("explain", .str s!"head/height <= certified/height + L fails: {(String.fromUTF8? (ByteArray.mk detail.toArray)).getD "?"}; certify (mini checkpoint) to resume")]
@@ -5273,6 +5298,18 @@ private def orderEntryJson (store : ContentResource.ContentStore)
         | none => .null)]
     | _ => []
 
+/-- The page's runs: each run's identifier and its atoms in the committed slot
+order, the unit a transclusion range is cut from and `insertRun` extends. -/
+private def runsJson (store : ContentResource.ContentStore) : Lean.Json :=
+  .arr <| ((StoreCodec.entries HyperdocumentCell.contentWire store).filterMap fun entry =>
+    match entry with
+    | ⟨⟨.runs, identifier⟩, record⟩ =>
+        let identifier : Hyperdocument.RunId := identifier
+        let record : Hyperdocument.RunRecord := record
+        some (Lean.Json.mkObj [("id", decimal identifier.digest.value),
+          ("atoms", .arr <| record.atoms.toArray.map fun atom => decimal atom.digest.value)])
+    | _ => none).toArray
+
 private def pageJson (page : Option Nat × String × Option Digest × ContentResource.ContentStore) :
     List (String × Lean.Json) :=
   let store := page.2.2.2
@@ -5283,7 +5320,8 @@ private def pageJson (page : Option Nat × String × Option Digest × ContentRes
     ("rootRevision", match root.bind (ContentResource.elementAt store) with
       | some record => decimal record.revision.digest.value
       | none => .null),
-    ("order", .arr <| (pageLines store).toArray.map (orderEntryJson store))]
+    ("order", .arr <| (pageLines store).toArray.map (orderEntryJson store)),
+    ("runs", runsJson store)]
 
 private def jsonInput (kind : String) (bytes : List UInt8) : Result Lean.Json := do
   let text ← match String.fromUTF8? (ByteArray.mk bytes.toArray) with

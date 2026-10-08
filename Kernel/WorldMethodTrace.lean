@@ -42,9 +42,9 @@ structure Trace where
 
 variable {F : Type} [Field F] [DecidableEq F]
   {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
-  {ambient : Ambient} {durable : Durable} {command : Command}
+  {ambient : Ambient} {ground : Ground deployment} {command : Command}
 
-def participant (prepared : PreparedInvocation deployment profile ambient durable command)
+def participant (prepared : PreparedInvocation deployment profile ambient ground command)
     (index : Fin command.targets.length) : Participant :=
   { index := index.val
     cell := command.targets[index].target
@@ -54,9 +54,9 @@ def participant (prepared : PreparedInvocation deployment profile ambient durabl
     projection := targetProjection command.subject command.targets[index]
       (prepared.targets index).pre.logical (prepared.targets index).pre.logical }
 
-def ofAccepted (prepared : PreparedInvocation deployment profile ambient durable command)
+def ofAccepted (prepared : PreparedInvocation deployment profile ambient ground command)
     {signed : SignedCommand} (accepted : AcceptedInvocation prepared signed) : Trace :=
-  { candidate := effectsDigest prepared.authority.snapshot.domain profile.semantics command
+  { candidate := effectsDigest ground.authority.domain profile.semantics command
     commandBytes := commandCodec.encode command
     subject := command.subject
     participants := (List.finRange command.targets.length).map (participant prepared)
@@ -71,21 +71,21 @@ def Protects (trace : Trace) (cell : CellId) (root : Digest) : Prop :=
   (∃ write ∈ trace.writes, write.cellId = cell ∧ write.expectedPre = root)
 
 theorem read_dependency_retained
-    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
     {signed : SignedCommand} (accepted : AcceptedInvocation prepared signed)
     (guard : ReadGuard) (present : guard ∈ accepted.readGuards) :
     Protects (ofAccepted prepared accepted) guard.cellId guard.expectedRoot :=
   Or.inl ⟨guard, present, rfl, rfl⟩
 
 theorem write_dependency_retained
-    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
     {signed : SignedCommand} (accepted : AcceptedInvocation prepared signed)
     (write : DataWrite) (present : write ∈ DeclaredResourceController.writes prepared) :
     Protects (ofAccepted prepared accepted) write.cellId write.expectedPre :=
   Or.inr ⟨write, present, rfl, rfl⟩
 
 theorem every_participant_retained
-    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
     {signed : SignedCommand} (accepted : AcceptedInvocation prepared signed)
     (index : Fin command.targets.length) :
     participant prepared index ∈ (ofAccepted prepared accepted).participants := by
@@ -95,7 +95,7 @@ theorem every_participant_retained
 /-- Trace extraction retains the entire checked run, including native output
 bytes, exceptions/termination discipline, evaluator identity and exact count. -/
 theorem run_retained
-    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
     {signed : SignedCommand} (accepted : AcceptedInvocation prepared signed) :
     (ofAccepted prepared accepted).run = prepared.run := rfl
 

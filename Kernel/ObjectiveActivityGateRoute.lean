@@ -52,7 +52,7 @@ theorem derived_route {config : Config} {opened : Opened config} (derived : Deri
         (turn : ObjectiveActivity.AdmittedTurn kernel opened.durable.snapshot height)
         (sealing : ObjectiveActivityWire.Seal) (posts : List ObjectiveActivityWire.Post)
         (extra : List DurableDataIntent.ReadGuard),
-        ActivitySeatEnd.finalize kernel opened.durable.snapshot height turn = .ok (posts, extra) ∧
+        ActivitySeatEnd.finish kernel opened.durable.snapshot height turn = .ok (posts, extra) ∧
           derived.intent = ActivitySeatEnd.AdmittedTurn.finalIntent sealing posts extra turn) ∨
       (∃ posts : List ObjectiveActivityWire.Post,
         derived.intent.writes = posts.map (ObjectiveActivityWire.Post.write Compiler.ResourceBirthCodec.rootBytes) ∧
@@ -63,11 +63,22 @@ theorem derived_route {config : Config} {opened : Opened config} (derived : Deri
   cases held : derived.kernel with
   | some kernel =>
     cases kernel with
-    | activity ingress accepted exact =>
+    | activity ingress verdict exact =>
       left
-      exact ⟨_, _, accepted.prepared.decided,
-        ObjectiveActivityReceiver.admissionSeal accepted.prepared ingress, accepted.prepared.final.1,
-        accepted.prepared.final.2, accepted.prepared.finalExact, exact⟩
+      cases verdict with
+      | accepted accepted =>
+        exact ⟨_, _, accepted.prepared.decided,
+          ObjectiveActivityReceiver.admissionSeal accepted.prepared ingress, accepted.prepared.final.1,
+          accepted.prepared.final.2, accepted.prepared.finalExact, exact⟩
+      | failed failed =>
+        -- A charged failure is the kernel's own `failed` turn (the Book only), under the same seal.
+        exact ⟨_, _, ObjectiveActivity.AdmittedTurn.failed failed.request failed.failure,
+          { ObjectiveActivityReceiver.sealAt (profile := config.profile) failed.gated.authority
+              ingress.command ingress with
+            event := ObjectiveActivityReceiver.failedEvent
+              (ObjectiveActivityReceiver.event config.deployment.domain config.profile.semantics ingress)
+              failed.cause },
+          failed.final.1, failed.final.2, failed.finalExact, exact⟩
     | seat ingress accepted exact =>
       right; left
       exact ⟨accepted.prepared.decided.posts, by rw [exact]; rfl, accepted.prepared.decided.inert⟩

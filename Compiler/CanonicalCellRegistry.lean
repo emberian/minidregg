@@ -40,12 +40,15 @@ factory law) and `stream` (FleetTurn checks only `CellLaw` on a topic head).
 They are `lawBearing` here, and each of those families meets the cell's own law
 when it moves onto `Kernel.Receiving.Family`.
 
-**Next obligation (births).**  A newborn has no committed law at its fresh
-pre-image; it is judged by its parent's export law (the factory for
-`declaredObject`, the world kind for `worldInstance`, the head for
-`streamEntry`).  Until `birthParent` exists here, the Receiver refuses a
-law-bearing birth (`lawUnavailable … birth`).  No family on `Family` writes one
-yet; the lane that migrates the birth families adds `birthParent`.
+**Births.**  A newborn has no committed law at its fresh pre-image; it is
+judged by its EXPORT law: the descendants law of its birth parent, the room it is
+born in (its `parent` entry in the authority cell the same patch writes,
+`Kernel.ReceivingLaw.birthRoom`), and the structural restrictions its kind
+carries (a world instance's world kind, `WorldKindLawDependencies.loadNewborn`).
+`Kernel.ReceivingLaw` judges every law-bearing birth by them, on the family's
+view of the birth, with no second judge in the family.  A newborn's law source
+(`policySource`) is born the same way (`kernelOnlyOrBorn`).  A birth with no export
+root is NEUTRAL: admitted only when a judged authorizer of the same patch names it.
 -/
 import Compiler.WorldKindCell
 import Compiler.DeclaredEffectCell
@@ -167,6 +170,12 @@ inductive LawClass where
   | lawBearing
   /-- No user law; only the named kernel families may write it. -/
   | kernelOnly (writers : List FamilyId)
+  /-- Written in place only by the named kernel families, with no step; BORN by any
+  family, judged like a law-bearing birth: by a non-empty export law, or, when the
+  newborn has no export root, named (id and post root) by the step of a judged,
+  law-bearing, non-birth write of the same patch (`Kernel.ReceivingLaw.Named`).
+  A newborn's initial law source is born with the resource it governs. -/
+  | kernelOnlyOrBorn (writers : List FamilyId)
   deriving DecidableEq, Repr
 
 /-- The writers of the authority cell, each with what it changes there.  A
@@ -213,7 +222,7 @@ def Kind.lawClass : Kind → LawClass
   | .resourceBook => .kernelOnly bookWriters
   -- Installed by `PolicyInstall` under the OLD law's judgement of the candidate; the new
   -- source is never judged against its own install (`LawComposition`).
-  | .policySource => .kernelOnly [.policyInstall]
+  | .policySource => .kernelOnlyOrBorn [.policyInstall]
   -- The certified head and tail bound, written only by a certify record.
   | .system => .kernelOnly [.certify]
   -- Born by an append (DRC stream append, FleetTurn topic append), never written again;
@@ -234,8 +243,10 @@ def Kind.lawClass : Kind → LawClass
   -- no event-log writer is in the Host closure, measured at d27d1cad).
   | .eventHistory => .kernelOnly []
 
-theorem policySource_only_policyInstall :
-    Kind.policySource.lawClass = .kernelOnly [.policyInstall] := rfl
+/-- A law source is written in place only by `PolicyInstall`, and otherwise only
+born, under its birth parent's export law. -/
+theorem policySource_policyInstall_or_born :
+    Kind.policySource.lawClass = .kernelOnlyOrBorn [.policyInstall] := rfl
 
 theorem system_only_certify : Kind.system.lawClass = .kernelOnly [.certify] := rfl
 

@@ -22,6 +22,9 @@ structure Capacity where
   stack : Nat
   outputNodes : Nat
   outputBytes : Nat
+  /-- The Plan/result extraction's tick allowance: forcing during materialization is
+  validator work, metered and priced like the run's own ticks, never folded into them. -/
+  extractTicks : Nat
   inputBytes : Nat
   scalarBits : Nat
   memoryTouches : Nat
@@ -34,6 +37,18 @@ structure Capacity where
   networkBytes : Nat
   leaseByteBlocks : Nat
   incidences : Nat
+  /-- The front end's input: the source bytes of the package the receiver replays (parse,
+  elaborate, lower) before it can run anything. Declared and priced like ticks
+  (`Kernel.ObjectiveWorkAccount`); a turn whose stored package has more source bytes is refused
+  by name before the replay (`workUncovered .frontEnd`). -/
+  replayBytes : Nat
+  /-- The front end's output: the bytes of the typed core the replay generates and the receiver
+  compares with the artifact's. Declared and priced (`workUncovered .core`). -/
+  coreBytes : Nat
+  /-- Declared units of invariant-domain judgment (`Kernel.ObjectiveDomain`): a judged domain
+  costs one unit per member read and one for its law; indexing a touched domain one per member.
+  Priced by `Tariff.domainWork`; a turn end whose judgment needs more refuses `domainUncovered`. -/
+  domainWork : Nat
   deriving DecidableEq, Repr
 
 /-- Exact signed observation selector, independent of generated effect targets. -/
@@ -76,14 +91,17 @@ def capacityStream : StreamCodec Capacity :=
       (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
       (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
       (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
-      (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat StreamCodec.nat))))))))))
+      (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product StreamCodec.nat StreamCodec.nat)))))))))))
       (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
       (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
-      (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat StreamCodec.nat)))))))
-    (fun c => ((c.typeFuel,c.sourceTicks,c.heap,c.stack,c.outputNodes,c.outputBytes,
+      (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat StreamCodec.nat))))))))))
+    (fun c => ((c.typeFuel,c.sourceTicks,c.heap,c.stack,c.outputNodes,c.outputBytes,c.extractTicks,
       c.inputBytes,c.scalarBits,c.memoryTouches,c.proofWork,c.feeDebit),
-      (c.turnBytes,c.witnessBytes,c.storageBytes,c.sideEffectCount,c.networkBytes,c.leaseByteBlocks,c.incidences)))
-    (fun ((t,s,h,k,n,b,i,w,m,p,f),(u,v,x,e,y,l,j)) => ⟨t,s,h,k,n,b,i,w,m,p,f,u,v,x,e,y,l,j⟩)
+      (c.turnBytes,c.witnessBytes,c.storageBytes,c.sideEffectCount,c.networkBytes,c.leaseByteBlocks,c.incidences,
+       c.replayBytes,c.coreBytes,c.domainWork)))
+    (fun ((t,s,h,k,n,b,z,i,w,m,p,f),(u,v,x,e,y,l,j,r,c,d)) => ⟨t,s,h,k,n,b,z,i,w,m,p,f,u,v,x,e,y,l,j,r,c,d⟩)
     (by intro c; cases c; rfl)
 
 def stream : StreamCodec Claim :=
@@ -97,7 +115,10 @@ def stream : StreamCodec Claim :=
       c.inputRefs,c.inputEnvelopes,c.expectedInput,c.capacity))
     (fun (s,v,a,c,o,b,r,q,e,p) => ⟨s,v,a,c,o,b,r,q,e,p⟩) (by intro c; cases c; rfl)
 
-def frame : List UInt8 := "DREGG/OBJECTIVE/INVOCATION-CLAIM/v4".toUTF8.toList
+/-- v7: the envelope declares invariant-domain judgment units (`domainWork`); a v6 claim does not
+decode. v6: the envelope declares the front end's work (`replayBytes`, `coreBytes`); a v5 claim does
+not decode. -/
+def frame : List UInt8 := "DREGG/OBJECTIVE/INVOCATION-CLAIM/v7".toUTF8.toList
 
 def rawCodec : LawfulCodec Claim where
   encode claim := frame ++ stream.encode claim

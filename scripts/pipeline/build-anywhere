@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# scripts/pipeline/build-anywhere TARGET... -- `lake build TARGET...` of THIS lane in the first FREE lane
+# slot on EITHER burst box. Run it in the lane's src/.
+#
+#   a lane slot is free here        -> slot.sh swarm-build lake build TARGET... (products land here)
+#   none here, one on $PIPELINE_PEER -> the lane's HEAD (committed) is pushed to the burst's shared remote
+#                                      as lane/<lane>; the peer builds it in its own copy (peer-build, through
+#                                      the peer key) and streams the log back to logs/peer-build-<ts>.log and
+#                                      stdout; the exit code is the build's. Products stay there: what a lane
+#                                      needs before queueing is the verdict; the next build here redoes the delta.
+#   none anywhere                   -> waits here like slot.sh (polling every slot, never one named slot)
+# Measured 2026-10-07 05:00Z: nine builds queued 8-36 min on hand-typed `flock /srv/build-slot-4` chains
+# while two lane slots sat free on the same box and the sibling ran at 6 of 16 threads.
+set -uo pipefail
+PIPELINE_PROG=build-anywhere
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+. "$here/lib.sh"
+[ $# -ge 1 ] || pipeline_die "usage: build-anywhere TARGET...   (in a lane's src/)"
+root=$(git rev-parse --show-toplevel 2>/dev/null) || pipeline_die "not in a clone"
+cd "$root"; lane=$(basename "$(dirname "$root")")
+export SWARM_BUILD_TAG=${SWARM_BUILD_TAG:-$lane}
+if "$here/slots" --free >/dev/null 2>&1; then exec "$here/slot.sh" swarm-build lake build "$@"; fi
+peer=${PIPELINE_PEER:-}
+if [ -n "$peer" ] && pf=$(ssh "$peer" slots --free 2>/dev/null) && [ -n "$pf" ]; then
+  [ -z "$(git status --porcelain --untracked-files=no)" ] || pipeline_die "uncommitted tracked edits: commit first (the peer builds a commit)"
+  sha=$(git rev-parse HEAD)
+  shared=${PIPELINE_GIT:-/srv/git/minidregg.git}; [ -d "$shared" ] || shared=${PIPELINE_SHARED_REMOTE:-$peer:/srv/git/minidregg.git}
+  git push -q -f "$shared" "HEAD:refs/heads/lane/$lane" || pipeline_die "push to $shared failed"
+  mkdir -p "$root/../logs"; log=$root/../logs/peer-build-$(date -u +%Y%m%dT%H%M%SZ).log
+  pipeline_log "no free slot here; building on $peer (free: $(echo "$pf" | paste -sd' ')) at $sha; log $log"
+  ssh "$peer" peer-build "$lane" "$sha" "$@" 2>&1 | tee "$log"; exit "${PIPESTATUS[0]}"
+fi
+pipeline_log "no free slot on either box; waiting here (slot.sh polls every lane slot)"
+exec "$here/slot.sh" swarm-build lake build "$@"

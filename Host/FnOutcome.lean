@@ -22,17 +22,22 @@ the consumer poll paths collapsed every nonzero exit into one
 unknown code fails closed toward "may have acted", as fn's own
 `fn-outcome-code` fails closed toward the fence.
 
-The local consumer verbs print one text line, `consumer STATUS[ DETAIL]`
-(fn `host/native/consumer-local.lisp` `fnn-consumer-say`); `answerLine`
-splits it so a refusal keeps its reason word. This reads fn's CLI text, which
-is a host format string; it goes when Mini decodes fn's FNCT reply frames from
-fn's exported grammar (`MINI-FN-660-REQUIREMENTS` M5).
+Every consumer verb Mini runs (`status`, `position`, `ack`, `poll`) and `identity` is run with
+`--frame` (fn `3f0309256`; poll since fn `6679dae0e`) and prints the reply frame as hex, which
+`Compiler.FnWireConsumer` reads with the grammar interpreter at fn's exported families: an
+acknowledgement is durable-accepted exactly when the exit is 0 AND the frame is an `accepted`
+consumer reply (`ackStatus_durableAccepted_iff`), not when a text line spells it. Mini reads no
+fn answer text line; the former `consumer STATUS[ DETAIL]` splitter (`answerLine`) is deleted.
 -/
 import Theory.AxiomPin
+import Theory.AssertCompiled
+import Compiler.FnWireConsumer
 
 namespace Minidregg.Host.FnOutcome
 
 set_option autoImplicit false
+
+open Minidregg.Compiler
 
 /-- fn's seven outcome classes. -/
 inductive Class where
@@ -82,12 +87,6 @@ theorem mayHaveActed_false_iff {code : Nat} :
   | none => simp
   | some c => cases c <;> simp [Class.mayHaveActed]
 
-/-- One answer line, `consumer STATUS[ DETAIL]` plus its newline, as bytes. -/
-structure Answer where
-  status : List UInt8
-  detail : List UInt8
-  deriving DecidableEq, Repr
-
 /-- Split on newlines, keeping empty lines. -/
 def splitOnLf : List UInt8 → List (List UInt8)
   | [] => [[]]
@@ -106,35 +105,37 @@ def splitOnSpace : List UInt8 → List (List UInt8)
         | w :: ws => (b :: w) :: ws
         | [] => [[b]]
 
-/-- `consumer` -/
-def consumerWord : List UInt8 := [99, 111, 110, 115, 117, 109, 101, 114]
+/-- The reason of a `--frame` answer: the outcome word of its consumer or status reply, with
+the reason word of a reasoned reply. -/
+def frameReason (stdout : List UInt8) : String :=
+  let reasoned := fun (status : String) (reason : List UInt8) =>
+    status ++ " " ++ ((String.fromUTF8? reason.toByteArray).getD "non-UTF-8 reason")
+  match FnWire.readConsumerReply stdout with
+  | .ok (.accepted _) => "accepted"
+  | .ok .refused => "refused"
+  | .ok .uncertain => "uncertain"
+  | .ok .fault => "fault"
+  | .ok (.reasoned s r) => reasoned s r
+  | .error _ =>
+    match FnWire.readStatusReply stdout with
+    | .ok (.accepted ..) => "accepted"
+    | .ok .refused => "refused"
+    | .ok .uncertain => "uncertain"
+    | .ok .fault => "fault"
+    | .ok (.reasoned s r) => reasoned s r
+    | .error _ =>
+      -- A poll that is not accepted prints an eight-zero-octet arm; a bound of 64 octets
+      -- reads exactly those, and an accepted poll is never described as a refusal.
+      match FnWire.readPollReply 64 stdout with
+      | .ok (.accepted ..) => "accepted"
+      | .ok .refused => "refused"
+      | .ok .uncertain => "uncertain"
+      | .ok .fault => "fault"
+      | .error _ => "no readable frame"
 
-/-- Split fn's answer line. Refuses anything that is not one printable-ASCII
-line beginning `consumer ` and ending in one newline. -/
-def answerLine (stdout : List UInt8) : Option Answer :=
-  match stdout.reverse with
-  | last :: lineRev =>
-      let line := lineRev.reverse
-      if last = 10 ∧ line.all (fun b => 32 ≤ b.toNat && b.toNat ≤ 126) then
-        match splitOnSpace line with
-        | word :: status :: detail =>
-            if word = consumerWord ∧ status ≠ [] then
-              some ⟨status, [32].intercalate detail⟩
-            else none
-        | _ => none
-      else none
-  | [] => none
-
-def Answer.text (answer : Answer) : String :=
-  let bytes := if answer.detail.isEmpty then answer.status
-    else answer.status ++ 32 :: answer.detail
-  (String.fromUTF8? bytes.toByteArray).getD "non-UTF-8 answer"
-
-/-- A diagnostic naming the class and fn's own reason word. -/
-def describe (verb : String) (code : Nat) (stdout : List UInt8) : String :=
-  let reason := match answerLine stdout with
-    | some answer => answer.text
-    | none => "no answer line"
+/-- A diagnostic naming the class and fn's own reason word (`reason`: `frameReason` for the
+`--frame` verbs). -/
+def describe (verb : String) (code : Nat) (reason : String) : String :=
   match classify code with
   | some .refused => s!"fn {verb} refused ({reason}); fn did not act"
   | some .notConnected => s!"fn {verb} reached no fn owner; nothing was sent"
@@ -147,8 +148,8 @@ def describe (verb : String) (code : Nat) (stdout : List UInt8) : String :=
 
 /-- `hybrid-author`'s answer: the last non-empty line fn writes to stderr,
 `CLASS hybrid-author WORD` (fn `host/native/hybrid-control.lisp`
-`fnn-command-hybrid-author`, the status word upper-cased). CLI text, as
-`answerLine` is; it goes when M5 exports the status words. -/
+`fnn-command-hybrid-author`, the status word upper-cased). CLI text; it goes when M5 exports
+the status words. -/
 def authorAnswer (stderr : List UInt8) : Option (List UInt8 × List UInt8) :=
   let lines := (splitOnLf stderr).filter (· ≠ [])
   match lines.getLast? with
@@ -178,11 +179,14 @@ def AckStatus.word : AckStatus → String
   | .durableAccepted => "durable-accepted" | .refused => "refused"
   | .uncertain => "uncertain" | .transportFault => "transport-fault"
 
+/-- `stdout` is what `consumer --frame ack` printed: durable only when the exit is 0 and the
+printed frame is an accepted consumer reply. -/
 def ackStatus (code : Nat) (stdout : List UInt8) : AckStatus :=
   match classify code with
   | some .accepted =>
-      if stdout == "consumer accepted\n".toUTF8.toList then .durableAccepted
-      else .transportFault
+      match FnWire.readConsumerReply stdout with
+      | .ok (.accepted _) => .durableAccepted
+      | _ => .transportFault
   | some .refused | some .notConnected => .refused
   | some .fenced => .uncertain
   | _ => .transportFault
@@ -207,41 +211,59 @@ theorem classify_eq_some {code : Nat} {c : Class} (h : classify code = some c) :
   unfold classify at h
   split at h <;> cases h <;> rfl
 
-/-- An accepted ack is exactly exit 0 with the exact accepted line. -/
+/-- An accepted ack is exactly exit 0 with an accepted consumer reply frame. -/
 theorem ackStatus_durableAccepted_iff {code : Nat} {stdout : List UInt8} :
     ackStatus code stdout = .durableAccepted ↔
-      code = 0 ∧ stdout = "consumer accepted\n".toUTF8.toList := by
-  unfold ackStatus
-  cases h : classify code with
-  | none =>
-      simp only [reduceCtorEq, false_iff, not_and]
-      intro z
-      subst z
-      simp [classify] at h
-  | some c =>
-      have e := classify_eq_some h
-      cases c <;> simp [Class.code] at e ⊢
-      all_goals first | (intro _; rfl) | omega
+      code = 0 ∧ ∃ c, FnWire.readConsumerReply stdout = .ok (.accepted c) := by
+  constructor
+  · intro h
+    unfold ackStatus at h
+    cases hc : classify code with
+    | none => rw [hc] at h; simp at h
+    | some c =>
+      have e := classify_eq_some hc
+      rw [hc] at h
+      cases c <;> simp only [reduceCtorEq] at h
+      · refine ⟨e, ?_⟩
+        cases hr : FnWire.readConsumerReply stdout with
+        | error _ => rw [hr] at h; simp at h
+        | ok r =>
+          rw [hr] at h
+          cases r with
+          | accepted c => exact ⟨c, rfl⟩
+          | _ => simp at h
+  · rintro ⟨rfl, c, hc⟩
+    simp [ackStatus, classify, hc]
 
 /-! Inhabitants: fn's three ack answers, and its refusal line split. -/
 
+/-- fn-rendered `fnct.consumer.reply` accept vector 1 of the pinned file (`accepted`, no cursor),
+and its `refused` and `uncertain` siblings (vectors 2 and 3). -/
+def lineOf (hex : String) : List UInt8 := (hex ++ "\n").toUTF8.toList
+
+def acceptedFrame : String :=
+  "464e435401050000000100b961207007462e3a5ac2cfa2ff965536f0bf7628dbf1426a7dbfca7bf60f26ca"
+def refusedFrame : String :=
+  "464e435401050000000101b12723a10100f1500fdb79c6dcda3d69fbc33cf8b08f59f149d74e6645021609"
+
 theorem ackStatus_samples :
-    ackStatus 0 "consumer accepted\n".toUTF8.toList = .durableAccepted ∧
-    ackStatus 1 "consumer refused busy\n".toUTF8.toList = .refused ∧
-    ackStatus 3 "consumer uncertain\n".toUTF8.toList = .uncertain ∧
-    ackStatus 2 [] = .transportFault ∧ ackStatus 4 [] = .transportFault := by decide +kernel
+    ackStatus 0 (lineOf acceptedFrame) = .durableAccepted ∧
+    ackStatus 1 (lineOf refusedFrame) = .refused ∧
+    ackStatus 3 [] = .uncertain ∧
+    ackStatus 2 [] = .transportFault ∧ ackStatus 4 [] = .transportFault := by native_decide
 
-theorem answerLine_refused_busy :
-    answerLine "consumer refused busy\n".toUTF8.toList =
-      some ⟨"refused".toUTF8.toList, "busy".toUTF8.toList⟩ := by decide +kernel
-
-theorem answerLine_refuses_other_verbs :
-    answerLine "operator refused busy\n".toUTF8.toList = none ∧
-    answerLine "consumer refused busy".toUTF8.toList = none := by decide +kernel
+/-- Teeth: exit 0 with a refused frame, with a bare line, with the old text, and with no output
+is no durable acknowledgement. -/
+theorem ackStatus_refuses_unframed_acceptance :
+    ackStatus 0 (lineOf refusedFrame) = .transportFault ∧
+    ackStatus 0 "consumer accepted\n".toUTF8.toList = .transportFault ∧
+    ackStatus 0 (acceptedFrame.toUTF8.toList) = .transportFault ∧
+    ackStatus 0 [] = .transportFault := by native_decide
 
 #assert_axioms classify_code classify_two mayHaveActed_false_iff
   ackStatus_refused_iff ackStatus_uncertain_iff classify_eq_some ackStatus_durableAccepted_iff
-  ackStatus_samples answerLine_refused_busy
-  answerLine_refuses_other_verbs authorAnswer_samples
+  authorAnswer_samples
+#assert_compiled ackStatus_samples
+#assert_compiled ackStatus_refuses_unframed_acceptance
 
 end Minidregg.Host.FnOutcome

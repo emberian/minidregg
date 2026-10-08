@@ -131,7 +131,24 @@ sponsor() { ssh -F "$SPONSOR_TERM/config" sponsor-box "$1"; }
 friend_ssh() { ssh -F "$LAPTOP/.ssh/config" box "$@"; }
 FMINI=$LAPTOP/bin/mini                 # the friend's own copy of the client
 install -m 0500 "$MINI" "$FMINI"
-fmini() { MINI_SSH=$LAPTOP/bin/ssh "$FMINI" "$@"; }
+# The friend's laptop holds its own Host image (its local pure-codec authority,
+# MINI_LOCAL_HOST, run as the storeless `codec` loop, and the portable
+# `join --welcome --verifier`), its own consent provider and credential
+# verifier, and a consent config naming only laptop paths and NO Store. A remote
+# member cannot replay the box's history, so it signs through thin consent
+# (MINI_THIN_CONSENT=1). Any frame that admits a Store fails loudly on the
+# absent one; nothing on the laptop reads a box file.
+install -m 0500 "$HOST" "$LAPTOP/bin/minidregg-host"
+install -m 0500 "$(dirname "$HOST")/minidregg-client-consent" "$LAPTOP/bin/minidregg-client-consent"
+install -m 0500 "$VERIFIER" "$LAPTOP/bin/minidregg-credential-signature-verifier"
+jq --arg none "$LAPTOP/no-store" --arg verifier "$LAPTOP/bin/minidregg-credential-signature-verifier" \
+  '.storageRoot = $none | .storageBinary = $none | .signatureBinary = $verifier | .checkpointKey = null' \
+  "$CONFIG" >"$LAPTOP/consent.json" || die "laptop consent config"
+fmini() {
+  MINI_SSH=$LAPTOP/bin/ssh MINI_THIN_CONSENT=1 MINI_LOCAL_HOST=$LAPTOP/bin/minidregg-host \
+    MINI_CONSENT_HOST=$LAPTOP/bin/minidregg-client-consent MINI_CONSENT_CONFIG=$LAPTOP/consent.json \
+    MINI_CONSENT_ANCHOR_DIR=$LAPTOP/.consent-anchors "$FMINI" "$@"
+}
 ME=$LAPTOP/.mini
 FKEY=$ME/friend.key
 FROOT=$ME/box
@@ -139,6 +156,8 @@ FWS=$FROOT/workspace
 FHOME=$ME/home
 fshell() { fmini --remote box shell --workspace "$FWS" --home "$FHOME" --line "$1"; }
 row operator "box: sshd on 127.0.0.1:$PORT; authorized_keys = sponsor mode=shell + friend mode=proxy" - - ok "$(cut -c1-60 <<<"$(sed -n 2p "$BOX/sshd/authorized_keys")")"
+check operator "laptop consent config: no Store, no box or build path (thin consent only)" \
+  bash -c "[[ ! -e '$LAPTOP/no-store' ]] && ! grep -qF -e '$BOX' -e '$JOURNEY_WORLD' -e '$(dirname "$HOST")' -e '$(dirname "$VERIFIER")' '$LAPTOP/consent.json'"
 check operator "authorized_keys line 2 is restrict,command=\"…/mini-socket-proxy …\" (no pty)" \
   bash -c "sed -n 2p '$BOX/sshd/authorized_keys' | grep -qE '^restrict,command=\"$BOX/bin/mini-socket-proxy $BOX/bin/mini $SOCKET\" ssh-ed25519 '"
 
@@ -165,7 +184,8 @@ run sponsor "hosted shell: provision friend $FSUBJ 1000 all[]" 0 sponsor "provis
 run sponsor "hosted shell: enroll welcome friend" 0 sponsor "enroll welcome friend"
 cp "$LAST" "$LAPTOP/welcome.json"
 run friend "join --remote box --welcome: remote workspace on the laptop" 0 \
-  fmini --remote box join --key "$FKEY" --welcome "$LAPTOP/welcome.json" --dir "$FROOT"
+  fmini --remote box join --key "$FKEY" --welcome "$LAPTOP/welcome.json" --dir "$FROOT" \
+  --verifier "$LAPTOP/bin/minidregg-host"
 check friend "workspace pins socket ssh:box, no Host image, the Host digest, the laptop key" \
   jq -e --arg k "$FKEY" '.socket == "ssh:box" and .host == null and (.hostSha256 | length == 64) and .key == $k' "$FWS/workspace.json"
 

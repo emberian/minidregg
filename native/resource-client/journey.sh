@@ -46,6 +46,7 @@
 #   JROT   K-PREROTATE: key pre-rotation on this Store (journey.d/jrot.sh; restarts the service once)
 #   JROTL  K-PREROTATE x the generic Receiver: a lost op-142 reply recovered by op-143 lookup, a never-seen
 #          rotation looks up absent and is never resubmitted (journey.d/jrot-lookup.sh, a recording proxy)
+#   JGATE  the fn gateway content target refuses an ordinary grant holder's signed direct call by its law (journey.d/jgateway.sh)
 #   JRLANE R2-1 #5: authenticated refusals are charged to the signer's lane and close it; wrongly signed
 #          and unsigned calls cost nothing; another subject is untouched (journey.d/jrefusal-lane.sh)
 #   M3, M4, M5 run their lanes' stand-alone journeys on their own fresh Stores
@@ -188,7 +189,7 @@ cap_s() {
   echo "$want"
 }
 
-STEPS=(J0 J1 J2 J3 J12X J4 JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K11 KCH KCHR KCHC KIX KF KH K12C JMKT K12I K12T K12E K12M K12R K12H WEB KW K10C JLI KTPL J15 J17 J14 JPRIV1 JN2 JN3 JN3P JN5 JSYNC M3 M4 M5 M6 M7 M8 BD J12 J12W JNAMES JDV JPD J13 JJOB1 JJOB JJOBM KCL J12A JCHAT JINSPECT JLS JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JROTL JRLANE JDISCLOSE)
+STEPS=(J0 J1 J2 J3 J12X J4 P7KR THIN JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K11 KCH KCHR KCHC KIX KF KH K12C JMKT K12I K12T K12N K12E K12M K12R K12H WEB KW K10C JLI KTPL J15 J17 J14 JPRIV1 JN2 JN3 JN3P JN5 JSYNC M3 M4 M5 M6 M7 M8 BD J12 J12W JNAMES JDV JPD J13 JJOB1 JJOB JJOBM KCL J12A JCHAT JINSPECT JLS JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JROTL JRLANE JGATE JDISCLOSE JAUDIT)
 if [ -n "${JOURNEY_STEPS:-}" ]; then
   SELECTED=()
   for id in "${STEPS[@]}"; do
@@ -223,6 +224,7 @@ TITLE[K12I]="link index: backlinks cut to the reader's standing grants; unlink; 
 TITLE[K12T]="range transclusion: disclosure at transclusion time, snapshot pinned, live follows, a late joiner sees the placeholder"
 TITLE[K12E]="element tree: order is the tree walk, a transclusion at line 3, 100 nested inserts, cycle and stale refused"
 TITLE[K12M]="marks on lines: bold/italic/code/heading/link, pinned by revision, stale after edit, unmark by author or owner"
+TITLE[K12N]="run edits: a line doc append adds is range-transcludable, an earlier range does not move"
 TITLE[K12R]="the rendered document: one renderer, golden text, raw atoms, json, outline, html, the reader's placeholder"
 TITLE[K12H]="document history: history / show --at / diff over the element-tree order, coverage at the asked height"
 TITLE[WEB]="mini web: loopback-only, read-only; view-document pages, index backlinks, history / at / diff pages"
@@ -261,6 +263,8 @@ TITLE[BD]="plans bind address footprints: disjoint plans commute, overlap refuse
 TITLE[M8]="agent fleet: fee'd turns, topic events, heads (own Store)"
 TITLE[J12]="two friends co-write a document through the shell, with refusals"
 TITLE[JNAMES]="J-NAMES: shared room-index lookup, rename, duplicate-law refusal and target authority"
+TITLE[THIN]="THIN-CONSENT: what thin consent shows is what commits; lying Hosts and unobservable targets refused before signing"
+TITLE[P7KR]="P7: a kind-definition revision between consent and admission never commits a different effect"
 TITLE[JDV]="J-DOCUVERSE: two friends write a paper in the shell; quotes, marks, history, their editor, can, the web, a cold audit"
 TITLE[JPD]="Protected authored documents: current-member reads, immutable authorship, stable maintenance anchors, genuine edits and revocation on JDV Store"
 TITLE[J12W]="a friend writes in their own editor: doc pull, doc push, stale by line"
@@ -281,7 +285,9 @@ TITLE[KT]="C14 TAIL-BOUND: no write past certified + L; a checkpoint restores pr
 TITLE[JROT]="key pre-rotation: a stolen daily key cannot rotate; the next key does"
 TITLE[JROTL]="key rotation through the generic Receiver: a lost reply is found by lookup, exactly once; a rotation the Host never saw is absent and never resubmitted"
 TITLE[JRLANE]="refusal lane: authenticated refusals close the signer's lane, wrongly signed ones cost nothing, another subject stays open"
+TITLE[JGATE]="gateway law: an ordinary subject's signed direct call on the gateway's content target is refused, the target unchanged"
 TITLE[JDISCLOSE]="disclosure: a narrowed refusal, authentication before any target, the installer's lockout, eight client fixes"
+TITLE[JAUDIT]="mini store audit: the Store re-derived from genesis, then every ingress re-admitted; one flipped byte of a non-head record in a copy is refused naming its height"
 
 # call NAME cmd args... : run one command under the 600 s per-operation abort
 # rule; keeps NAME.{cmd,out,err,rc,wall} in the current step dir; returns rc.
@@ -306,9 +312,9 @@ fail() { DETAIL="$*"; return 1; }
 
 # A refusal counts only when the Host said so: the client exits 3 (a Host
 # refusal) AND names the Host's decoded RefusalReason for `host refused
-# <stage>` AND the encoded refusal carries the native outcome v2 tag. A client
+# <stage>` AND the encoded refusal carries the native outcome v5 tag. A client
 # crash, a parse error or an undecoded frame is not a refusal.
-REFUSAL_TAG=44524547472f4e41544956452d484f53542f4f5554434f4d452f7634   # DREGG/NATIVE-HOST/OUTCOME/v4
+REFUSAL_TAG=44524547472f4e41544956452d484f53542f4f5554434f4d452f7635   # DREGG/NATIVE-HOST/OUTCOME/v5
 refused() {
   local name=$1
   [ "$(cat "$SD/$name.rc")" = 3 ] || return 1
@@ -983,6 +989,8 @@ step_M4() { hook m4 "J1-J8 run from an ssh session through the shell over the cl
 step_M5() { hook m5 "Hermes performs J4 through the client contract on this Store, is killed mid-attempt, restarts, and the attempt resolves performed/refused/uncertain (list item 5, lane m5-hermes)" hermes; }
 step_M6() { hook m6 "a non-Git SPK profile goes INSTALL -> START -> answers curl through the ordinary mechanism (list item 6, lane m6-grain)" spkHost; }
 step_J12() { hook j12 "friends provisioned from the shell co-write a doc (append, edit with the read line as guard, link, backlinks, board, revoke); a stale edit, a third key, a reviewer's write, an append-only edit, a backwards task and a revoked read are refused by the Host with their reason (PLACE item 1)" shell; }
+step_THIN() { hook jthin-consent "thin consent signs a turn without replaying the Store: the post it shows is the post that commits; a plan carrying another command's slots and a view of another state are refused before signing; a member without observe is refused before signing with no bytes served; a moved target is named only to a signer who observes it (P4 PLAN-SCOPED-REPLAY)"; }
+step_P7KR() { hook jkind-revise-consent "a kind-definition revision between a member signing an instance write and its admission either refuses the unchanged call or commits exactly the consented write under the instance own descriptor; never a different effect (P4 P7)" shell; }
 step_JNAMES() { hook jnames "shared room names through signed room/index reads; two clients, renames, current laws, exact recovery and target authority" shell; }
 step_JDV() { hook jdocuverse "J-DOCUVERSE (DEOS §8 J19-J24): two friends write a paper through mini shell: a range of notes transcluded snapshot and live, a reader without the source's grant sees the placeholder; marks, an annotation, a link and its backlink; doc show equals the golden; history, show --at and diff; pull, push, a stale line refused by line; can paper; mini web's page equals doc show --html byte for byte; a cold audit re-admits every record" shell; }
 step_JPD() { hook jprotected-docs "private comments and text on the JDV Store: independent fragment keys, invitations and revocation preserve authored ciphertext and semantic revisions; actual edits stale old anchors; retained custody retries and excluded writes" shell; }
@@ -1009,6 +1017,7 @@ step_K12I() { hook j12i-links "K-DOC-INDEX rows: backlinks cut to the reader's s
 step_K12T() { hook j12t-kernel "K-TRANSCLUDE rows: disclosure checked at transclusion time, a snapshot pinned by revision, a live transclusion follows, a late joiner sees the moved placeholder (lane k-transclude)"; }
 step_K12E() { hook j12e "K-ELEMENT-TREE rows: the order is the tree walk, a transclusion placed at line 3, 100 nested inserts, a cycle and a stale container refused (lane k-element-tree)"; }
 step_K12M() { hook j12m "K-MARKS rows: bold/italic/code/heading/link marks pinned by revision, stale after an edit, unmark by author or owner, a reviewer under fields={annotations} marks and cannot edit (lane k-marks)"; }
+step_K12N() { hook j12n-runs "K-RUNS-RANGES rows: doc append extends the run that ends at the last line (insertRun); a range from an old line to an appended line renders for a covered reader; a range ending before a later append does not move; a range of the newest line alone"; }
 step_K12R() { hook j12r "P-DOC-RENDER rows: A's doc show equals the golden byte for byte; raw is the atoms; json agrees with the text; outline; html; a reader without the source's grant sees the placeholder and no bytes; a backlink names its line (lane p-doc-render)"; }
 step_K12H() { hook j12h-history "K-DOC-HISTORY rows: history, show --at and diff over the element-tree order, moves named, coverage at the asked height (lane k-doc-history)"; }
 step_WEB() { hook jweb "WEB rows: loopback-only, read-only mini web; view-document pages, index backlinks, history / at / diff pages; refused requests make no read (lanes web-entrance, docuverse-braid)"; }
@@ -1040,8 +1049,10 @@ step_JPAY2() { hook jpay2 "the pay cell on its own fresh Store: tariff, 64-row b
 step_JROT() { hook jrot "a thief holding the daily key cannot rotate (notPrecommitted; unauthenticated before the gate); the friend rotates with the committed next key; the old key's write is refused; grants survive; a second rotation; a --no-prerotation subject cannot rotate; restart; audit re-admits (lane k-prerotate)"; }
 step_JROTL() { hook jrot-lookup "F's op-142 reply is lost and its op-143 lookup confirms the rotation (replayed, same receipt, epoch 2, one submit); G's op 142 never reaches the Host: lookup absent, a retry only looks up, epoch 1 (lane native-exercise)"; }
 step_JRLANE() { hook jrefusal-lane "wrongly signed and unsigned calls are refused by name and cost nothing; authenticated refusals close the lane after >= 600 at full speed; a closed lane admits <= 1 charged refusal per 500 ms; another subject is untouched; the signer's own valid call is refused refusalLane, then admitted after refill (lane native-exercise)"; }
+step_JGATE() { hook jgateway "the gateway content target under request/subject == gateway: the gateway appends; an ordinary subject with a valid observe+mutate grant signs a direct append through its own workspace and is refused law-denied, the Host's read of the target unchanged (cv 01a1177f-1ba6)"; }
 step_JDISCLOSE() { hook jdisclose "a --fields 1 guest is refused naming no clause over field 2 and never its value, with one frame whatever field 2 holds, while the owner keeps clause and value; a never-enrolled key gets one frame at challenge for a present and an absent target; a law its installer can never pass is refused without --i-lock-myself-out, sealed keeps --allow-unsatisfiable, a law it can never change warns; can --all, room ls, inspect law, help forget, a stale delegation hint, tail members, a sealed doc read back and sealed by cell (lane fix-disclose)" shell; }
 step_M7() { hook m7 "a candidate built from portable interfaces reproduces the pinned hashes and runs this journey with no private fixture (list item 7, lane m7-candidate)" candidate; }
+step_JAUDIT() { hook jstoreaudit "mini store audit re-derives the Store from genesis (chain, tags, accumulator, spent map, checkpoints, head root) then re-admits every ingress and exits 0 printing both lines; one flipped byte of a non-head record in a copy exits 1 naming its height (lane plat-store-audit)"; }
 step_JP2() { hook jpriv2 "a subject enrolled from its own machine creates, writes, reads and delegates through mini --remote; no key of it on the box; a tampered frame is refused (J-PRIV-2, lane local-client)"; }
 
 # ---------------------------------------------------------------- run
@@ -1075,6 +1086,7 @@ run_step K12C J5
 run_step JMKT J4
 run_step K12I J5
 run_step K12T J5
+run_step K12N J5
 run_step K12E J5
 run_step K12M J5
 run_step K12R J5
@@ -1103,6 +1115,8 @@ run_step BD J2
 run_step J12 J0
 run_step J12W J0
 run_step JNAMES J0 J4
+run_step P7KR J4
+run_step THIN J4
 run_step JDV J0
 run_step JPD JDV
 run_step J13 J0
@@ -1126,7 +1140,9 @@ run_step JP2 J0
 run_step JROT J1
 run_step JROTL J1
 run_step JRLANE J1
+run_step JGATE J4
 run_step JDISCLOSE J0
+run_step JAUDIT J0
 
 stop_server || echo "journey: could not stop the service cleanly" >&2
 journey_shortdir_return

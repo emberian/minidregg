@@ -17,13 +17,13 @@ attribute [local irreducible] policyConfigFromStep CanonicalRuntimeProfile.Profi
 
 variable {F : Type} [Field F]
 variable {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
-variable {ambient : Ambient} {durable : Durable} {command : Command}
+variable {ambient : Ambient} {ground : Ground deployment} {command : Command}
 
 /-- Retain the finite step, not the universe-lifted portal config. Rebuilding
 its config from this step neither reprojects the source nor resolves the law;
 the resolved closure and all other retained values are exact derivatives. -/
 structure PreparedPolicyLeg [DecidableEq F]
-    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) where
   private mk ::
   context : PolicyStepContext
@@ -37,7 +37,7 @@ structure PreparedPolicyLeg [DecidableEq F]
   witnessExact : witness = law.witness
 
 def preparePolicyLeg [DecidableEq F]
-    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) :
     Option (PreparedPolicyLeg prepared tuple incidence) :=
   let context := step prepared tuple incidence
@@ -47,20 +47,20 @@ def preparePolicyLeg [DecidableEq F]
   | some law => some ⟨context, rfl, law, resolved, law.predicate, rfl, law.witness, rfl⟩
 
 def PreparedPolicyLeg.range [DecidableEq F]
-    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {prepared : PreparedInvocation deployment profile ambient ground command}
     {tuple : PreparedTuple (plan prepared)} {incidence : Incidence command}
     (leg : PreparedPolicyLeg prepared tuple incidence) : Option LawLeaf :=
   LawLeaf.ofRange profile.compilerProfile.compiler leg.predicate
     leg.witness.compiled.oldState leg.witness.compiled.newState
 
 def PreparedPolicyLeg.cast [DecidableEq F]
-    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {prepared : PreparedInvocation deployment profile ambient ground command}
     {tuple : PreparedTuple (plan prepared)} {incidence : Incidence command}
     (leg : PreparedPolicyLeg prepared tuple incidence) : Option (Int × Int) :=
   castAlias F (intsOf leg.predicate leg.witness.compiled.oldState leg.witness.compiled.newState)
 
 def PreparedPolicyLeg.lawLeaf [DecidableEq F]
-    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {prepared : PreparedInvocation deployment profile ambient ground command}
     {tuple : PreparedTuple (plan prepared)} {incidence : Incidence command}
     (leg : PreparedPolicyLeg prepared tuple incidence) : Option LawLeaf :=
   LawLeaf.of leg.predicate leg.witness.compiled.oldState leg.witness.compiled.newState
@@ -68,26 +68,26 @@ def PreparedPolicyLeg.lawLeaf [DecidableEq F]
 /-- The full closure decides whether a failure exists. Its detail is discarded;
 only the target-local explanation under this exact incidence's grant is public. -/
 def PreparedPolicyLeg.rangeRefusal [DecidableEq F]
-    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {prepared : PreparedInvocation deployment profile ambient ground command}
     {tuple : PreparedTuple (plan prepared)} {incidence : Incidence command}
     (leg : PreparedPolicyLeg prepared tuple incidence) (fields : Option (Finset CellField)) : Option Refusal :=
   leg.range.map fun _ => ComposedLawDiagnostics.publicRefusal fields leg.law
 
 def PreparedPolicyLeg.castRefusal [DecidableEq F]
-    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {prepared : PreparedInvocation deployment profile ambient ground command}
     {tuple : PreparedTuple (plan prepared)} {incidence : Incidence command}
     (leg : PreparedPolicyLeg prepared tuple incidence) (fields : Option (Finset CellField)) : Option Refusal :=
   leg.cast.map fun _ => ComposedLawDiagnostics.publicRefusal fields leg.law
 
 def PreparedPolicyLeg.lawRefusal [DecidableEq F]
-    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {prepared : PreparedInvocation deployment profile ambient ground command}
     {tuple : PreparedTuple (plan prepared)} {incidence : Incidence command}
     (leg : PreparedPolicyLeg prepared tuple incidence) (fields : Option (Finset CellField)) : Option Refusal :=
   if Minidregg.Pred.eval leg.predicate leg.witness.compiled.oldState leg.witness.compiled.newState
   then none else some (ComposedLawDiagnostics.publicRefusal fields leg.law)
 
 private theorem config_step [DecidableEq F]
-    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) :
     (policyConfig prepared tuple incidence).step = step prepared tuple incidence := by
   unfold policyConfig policyConfigFromStep PhysicalLawResolution.targetConfig
@@ -95,7 +95,7 @@ private theorem config_step [DecidableEq F]
   rfl
 
 theorem preparePolicyLeg_range [DecidableEq F]
-    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) :
     ((preparePolicyLeg prepared tuple incidence).bind (·.range)) = rangeLeaf prepared tuple incidence := by
   unfold preparePolicyLeg rangeLeaf
@@ -105,7 +105,7 @@ theorem preparePolicyLeg_range [DecidableEq F]
     ResolvedLawCompilation.witness, config_step]
 
 theorem preparePolicyLeg_cast [DecidableEq F]
-    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) :
     ((preparePolicyLeg prepared tuple incidence).bind (·.cast)) = castAliasLeg prepared tuple incidence := by
   unfold preparePolicyLeg castAliasLeg
@@ -115,7 +115,7 @@ theorem preparePolicyLeg_cast [DecidableEq F]
     ResolvedLawCompilation.witness, config_step]
 
 theorem preparePolicyLeg_law [DecidableEq F]
-    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) :
     ((preparePolicyLeg prepared tuple incidence).bind (·.lawLeaf)) = lawLeaf prepared tuple incidence := by
   unfold preparePolicyLeg lawLeaf
@@ -125,30 +125,30 @@ theorem preparePolicyLeg_law [DecidableEq F]
     ResolvedLawCompilation.witness, config_step]
 
 abbrev PolicyLegs [DecidableEq F]
-    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
     (tuple : PreparedTuple (plan prepared)) :=
   List (Σ incidence : Incidence command, Option (PreparedPolicyLeg prepared tuple incidence))
 
 def preparePolicyLegs [DecidableEq F]
-    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
     (tuple : PreparedTuple (plan prepared)) : PolicyLegs prepared tuple :=
-  ((List.finRange command.targets.length).map some ++ [none]).map fun incidence =>
+  (ordinaryIncidences command).map fun incidence =>
     ⟨incidence, preparePolicyLeg prepared tuple incidence⟩
 
 def PolicyLegs.firstRangeRefusal [DecidableEq F]
-    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {prepared : PreparedInvocation deployment profile ambient ground command}
     {tuple : PreparedTuple (plan prepared)} (legs : PolicyLegs prepared tuple)
     (fieldsOf : Incidence command → Option (Finset CellField)) : Option Refusal :=
   legs.findSome? fun leg => leg.2.bind fun ready => ready.rangeRefusal (fieldsOf leg.1)
 
 def PolicyLegs.firstCastRefusal [DecidableEq F]
-    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {prepared : PreparedInvocation deployment profile ambient ground command}
     {tuple : PreparedTuple (plan prepared)} (legs : PolicyLegs prepared tuple)
     (fieldsOf : Incidence command → Option (Finset CellField)) : Option Refusal :=
   legs.findSome? fun leg => leg.2.bind fun ready => ready.castRefusal (fieldsOf leg.1)
 
 def PolicyLegs.firstLawRefusal [DecidableEq F]
-    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {prepared : PreparedInvocation deployment profile ambient ground command}
     {tuple : PreparedTuple (plan prepared)} (legs : PolicyLegs prepared tuple)
     (fieldsOf : Incidence command → Option (Finset CellField)) : Option Refusal :=
   legs.findSome? fun leg => leg.2.bind fun ready => ready.lawRefusal (fieldsOf leg.1)
@@ -160,7 +160,7 @@ private theorem findSome_map {α β γ : Type} (f : α → β) (g : β → Optio
   | cons x xs ih => simp only [List.map_cons, List.findSome?_cons]; rw [ih]
 
 theorem preparePolicyLeg_rangeRefusal [DecidableEq F]
-    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
     (tuple : PreparedTuple (plan prepared)) (i : Incidence command) (fields : Option (Finset CellField)) :
     ((preparePolicyLeg prepared tuple i).bind (fun leg => leg.rangeRefusal fields)) =
       (do let _ ← rangeLeaf prepared tuple i
@@ -175,7 +175,7 @@ theorem preparePolicyLeg_rangeRefusal [DecidableEq F]
   all_goals rfl
 
 theorem preparePolicyLeg_castRefusal [DecidableEq F]
-    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
     (tuple : PreparedTuple (plan prepared)) (i : Incidence command) (fields : Option (Finset CellField)) :
     ((preparePolicyLeg prepared tuple i).bind (fun leg => leg.castRefusal fields)) =
       (do let _ ← castAliasLeg prepared tuple i
@@ -190,7 +190,7 @@ theorem preparePolicyLeg_castRefusal [DecidableEq F]
   all_goals rfl
 
 theorem preparePolicyLeg_lawRefusal [DecidableEq F]
-    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
     (tuple : PreparedTuple (plan prepared)) (i : Incidence command)
     (fieldsOf : Incidence command → Option (Finset CellField)) :
     ((preparePolicyLeg prepared tuple i).bind (fun leg => leg.lawRefusal (fieldsOf i))) =
@@ -203,21 +203,21 @@ theorem preparePolicyLeg_lawRefusal [DecidableEq F]
   all_goals rfl
 
 theorem preparePolicyLegs_rangeRefusal [DecidableEq F]
-    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
     (tuple : PreparedTuple (plan prepared)) (fieldsOf : Incidence command → Option (Finset CellField)) :
     (preparePolicyLegs prepared tuple).firstRangeRefusal fieldsOf = firstRangeRefusal fieldsOf prepared tuple := by
   simp only [preparePolicyLegs, PolicyLegs.firstRangeRefusal, findSome_map,
     preparePolicyLeg_rangeRefusal, firstRangeRefusal]
 
 theorem preparePolicyLegs_castRefusal [DecidableEq F]
-    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
     (tuple : PreparedTuple (plan prepared)) (fieldsOf : Incidence command → Option (Finset CellField)) :
     (preparePolicyLegs prepared tuple).firstCastRefusal fieldsOf = firstCastRefusal fieldsOf prepared tuple := by
   simp only [preparePolicyLegs, PolicyLegs.firstCastRefusal, findSome_map,
     preparePolicyLeg_castRefusal, firstCastRefusal]
 
 theorem preparePolicyLegs_lawRefusal [DecidableEq F]
-    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
     (tuple : PreparedTuple (plan prepared)) (fieldsOf : Incidence command → Option (Finset CellField)) :
     (preparePolicyLegs prepared tuple).firstLawRefusal fieldsOf = firstLawRefusal fieldsOf prepared tuple := by
   simp only [preparePolicyLegs, PolicyLegs.firstLawRefusal, findSome_map,

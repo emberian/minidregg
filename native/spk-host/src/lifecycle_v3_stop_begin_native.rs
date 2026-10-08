@@ -18,7 +18,7 @@ use std::path::Path;
 const MAX_FRAME: usize = 12_102_760;
 const STOP_PLAN_TAG: &[u8] = b"DREGG/APPLICATION/LAUNCH-STOP-OPERATOR-PLAN/v2";
 const BEGIN_TAG: &[u8] = b"DREGG/APPLICATION/LIFECYCLE-BEGIN-INGRESS/v3";
-const OUTCOME_TAG: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v4";
+const OUTCOME_TAG: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v5";
 
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)

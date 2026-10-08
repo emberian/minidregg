@@ -4,7 +4,7 @@
 //! `mini activity --action submit --workspace DIR --command FILE.json --out NEW_DIR
 //!   [--prepare-only true]`
 //!   FILE.json is the command's `turn` (`{"kind": "publish" | "create" | "birth" | "resolve" |
-//!   "deliver" | "topUp" | "writeState" | "exhaust" | "abandon", ...}`,
+//!   "deliver" | "topUp" | "exhaust" | "abandon", ...}`,
 //!   `Host/ObjectiveActivityJson.lean`).
 //!   The workspace's subject signs; the nonce is fresh; the authority root is the
 //!   one the public view (op 214) shows now. The Host authors the command (op 7
@@ -105,7 +105,18 @@ fn submit(ws: &Ws, turn: &Value, out: &Path, prepare_only: bool) -> Result<Value
     fs::create_dir(out).map_err(|error| format!("activity: cannot create {}: {error}", out.display()))?;
     let current = view(ws, &json!({}))?;
     let authority = current.get("authorityRoot").and_then(Value::as_str).ok_or("activity: view lacks authorityRoot")?;
-    let command = json!({"subject": ws.subject, "nonce": crate::fsio::random_nonce()?, "expectedAuthorityRoot": authority, "turn": turn});
+    // An invoke's nonce is its operation id, `turn.opId`: the caller names the operation in the turn it
+    // writes before the first submit, and a retry resubmits the same turn. Minting one here, per attempt,
+    // would make every retry a second invocation.
+    let command = if turn.get("kind").and_then(Value::as_str) == Some("invoke") {
+        if turn.get("opId").and_then(Value::as_str).is_none() {
+            return Err("activity: an invoke turn names its operation: turn.opId (a decimal string, minted once \
+                        per operation and reused on every retry)".into());
+        }
+        json!({"subject": ws.subject, "expectedAuthorityRoot": authority, "turn": turn})
+    } else {
+        json!({"subject": ws.subject, "nonce": crate::fsio::random_nonce()?, "expectedAuthorityRoot": authority, "turn": turn})
+    };
     write_new(&out.join("command.json"), command.to_string().as_bytes())?;
     let command_bytes = author(ws, "objective-activity", &command)?;
     write_new(&out.join("command.bin"), &command_bytes)?;
@@ -121,14 +132,22 @@ fn submit(ws: &Ws, turn: &Value, out: &Path, prepare_only: bool) -> Result<Value
     let transaction = inspected.pointer("/command/transaction").cloned().unwrap_or(Value::Null);
     // What the decided turn returns (an invocation's result), shown before signing; null otherwise.
     let report = inspected.get("report").cloned().unwrap_or(Value::Null);
+    // What a submission at the planning snapshot commits: null when admitted, `charged failure: ...`
+    // (only the envelope's price is posted) or `refused: ...` (GPT-6 row E).
+    let verdict = inspected.get("verdict").cloned().unwrap_or(Value::Null);
+    // The front-end work the decided turn's replays drew (`{replayBytes, coreBytes}`): what an
+    // invocation declares (plan over a generous envelope, declare this, plan again; GPT-6 row E).
+    let front_end = inspected.get("frontEnd").cloned().unwrap_or(Value::Null);
     if prepare_only {
         return Ok(json!({"type": "prepared", "ingress": out.join("ingress.bin"), "transaction": transaction,
-            "report": report}));
+            "report": report, "verdict": verdict, "frontEnd": front_end}));
     }
     let mut outcome = inspect(ws, "outcome", &invoke(ws, 212, &ingress)?)?;
     write_new(&out.join("outcome.json"), outcome.to_string().as_bytes())?;
     outcome["transaction"] = transaction;
     outcome["report"] = report;
+    outcome["verdict"] = verdict;
+    outcome["frontEnd"] = front_end;
     outcome["ingress"] = json!(out.join("ingress.bin"));
     Ok(outcome)
 }

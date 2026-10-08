@@ -54,7 +54,10 @@ def confirmReadback (config : Config) (ingress : Ingress)
   match ← NativeHost.openExisting config with
   | .error _ => return .uncertain "agent lifetime grant readback unavailable"
   | .ok opened =>
-      match ← NativeHostReplay.verifyLoaded config opened.durable with
+      let ⟨_, reader⟩ ← match ← NativeHost.historyReaderOfDurable config opened.durable with
+        | .error refusal => return .uncertain ("agent lifetime grant readback history reader: " ++ refusal.detail)
+        | .ok reader => pure reader
+      match ← NativeHostReplay.verifyLoaded config reader opened.durable with
       | .error _ => return .uncertain "agent lifetime grant readback unverified"
       | .ok verified =>
           match lookupVerified verified ingress with

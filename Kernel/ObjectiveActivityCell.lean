@@ -41,13 +41,15 @@ inductive Role where
   | object
   /-- A per-(sender, target) message queue (`Kernel.Inbox`). -/
   | inbox
+  /-- An invariant domain (`Kernel.ObjectiveDomain`): members and joint law. -/
+  | domain
   deriving DecidableEq, Repr
 
 def Role.tag : Role → Nat
-  | .record => 0 | .slot => 1 | .state => 2 | .package => 3 | .object => 4 | .inbox => 5
+  | .record => 0 | .slot => 1 | .state => 2 | .package => 3 | .object => 4 | .inbox => 5 | .domain => 6
 
 def Role.ofTag : Nat → Role
-  | 0 => .record | 1 => .slot | 2 => .state | 3 => .package | 4 => .object | _ => .inbox
+  | 0 => .record | 1 => .slot | 2 => .state | 3 => .package | 4 => .object | 5 => .inbox | _ => .domain
 
 def roleStream : StreamCodec Role :=
   StreamCodec.xmap StreamCodec.nat Role.tag Role.ofTag (by intro role; cases role <;> rfl)

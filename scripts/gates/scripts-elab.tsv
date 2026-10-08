@@ -1,0 +1,6 @@
+# scripts/gates/scripts-elab.tsv -- SHRINK-ONLY exceptions to scripts/check-scripts-elab.sh (read its header).
+# path	class	owner	env	reason
+scripts/HypothesisLedger.lean	covered	MERGE-KEEPER	-	run over the research umbrella by scripts/check-hypothesis-ledger.sh (gate row hyp-ledger)
+scripts/ObjectiveManifest.lean	covered	MERGE-KEEPER	-	needs OBJECTIVE_MANIFEST_OUT; run by scripts/check-objective-proofs.sh (gate row objective-proofs)
+scripts/ObjectiveManifestMathlib.lean	covered	MERGE-KEEPER	-	needs OBJECTIVE_MANIFEST_OUT; run by scripts/check-objective-proofs.sh (gate row objective-proofs)
+scripts/kn2/planted-api-faults.lean	covered	DEPUTY-KERNEL	-	every definition must FAIL to elaborate; run by scripts/kn2/check-planted-api-faults.sh (gate row api-faults), which requires each fault refused by its own guard (its -- EXPECT: text)

@@ -2,8 +2,13 @@
 # scripts/native-accepted-fixture/replay.lean -- one op-2 admission, re-run in Lean
 
 Re-runs the admission the native Host ran for one retained call
-(`NativeHost.submitLoadedVia`, `.invoke`: `prepareFrom` over the image's directory,
-`PhysicalShape`, `DeclaredResourceController.admit` with the production read oracle)
+(`NativeHost.submitInvokeLight`: `DeclaredResourceController.prepare` on a verified
+`ServedBasis.Ground`, `PhysicalShape`, `DeclaredResourceController.admit` with the production
+read oracle). The node prepares on the light ground of the request's declared keys; this
+re-run prepares the SAME controller on the full ground of the Store prefix
+(`Ground.full`, the prefix's own loaded directory and authority), and
+`ResourceTransaction.prepare_light_full` is the agreement: the two grounds prepare alike on a
+declared marker. A prefix whose directory or authority does not load is refused by name.
 over a Store prefix, under the deployment's pinned settings, with the NATIVE verifier
 named on the command line. `generate.sh` points that at `verify-logger.py`, which
 records every triple the admission asks about: that record is the transcript
@@ -14,14 +19,21 @@ usage: lake env lean --run replay.lean DIR SETTINGS VERIFIER HEIGHT
   (the retained op-2 call) and, for an accepted call, host-record.bin (the record the
   Host appended after it).
 prints `ACCEPTED record=<same|DIFFERENT> root=<world root after>` or `REFUSED <reason>`,
-exit 0; any other outcome exits non-zero. The interpreter recurses deeply: run it
+then the call's semantic projection (`PROJECTION key = value` lines,
+`Assurance.NativeAcceptedFixtureProjection`, the definition the fixture checks
+against the hand-written authority), exit 0; any other outcome exits non-zero. The interpreter recurses deeply: run it
 under `ulimit -s unlimited`.
 -/
 import Host.ClientConsentCore
 import Kernel.ObjectiveBendAuthenticatedInputs
+import Assurance.NativeAcceptedFixtureProjection
 open Minidregg Minidregg.Compiler Minidregg.Kernel
 open Minidregg.Compiler.DurableCheckpointCodec Minidregg.Kernel.DurableReceiver
 open Minidregg.Kernel.DeclaredResourceController
+open Minidregg.Assurance.NativeAcceptedFixtureProjection (projectAccepted projectRefused reasonName receiptSubjects)
+
+def printProjection (lines : List (String × String)) : IO Unit :=
+  for (key, value) in lines do IO.println s!"PROJECTION {key} = {value}"
 
 def readBytes (p : System.FilePath) : IO (List UInt8) := do
   return (← IO.FS.readBinFile p).toList
@@ -49,18 +61,30 @@ def main (args : List String) : IO UInt32 := do
     | IO.eprintln "call.bin is not an op-2 call"; return 5
   let some command := commandCodec.decode signed.commandBytes | IO.eprintln "noncanonical command"; return 5
   let ambient : Ambient := ⟨config.federation, NativeHost.logicalHeight config durable⟩
-  match prepareFrom config.deployment config.profile ambient durable
-      (CredentialAuthorityDomainReceiver.loadDirectory durable) command with
-  | .error reason => IO.println s!"REFUSED {repr reason}"; return 0
+  let some directory := CredentialAuthorityDomainReceiver.loadDirectory durable
+    | IO.eprintln "image: the directory does not load"; return 4
+  let some authority := CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot
+    | IO.eprintln "image: the deployment authority does not load"; return 4
+  let ground : Minidregg.Compiler.ServedBasis.Ground config.deployment := .full durable directory authority
+  match prepare config.deployment config.profile ambient ground command with
+  | .error reason =>
+      IO.println s!"REFUSED {repr reason}"
+      printProjection (projectRefused (reasonName s!"{repr reason}")); return 0
   | .ok prepared =>
     if shape : PhysicalShape prepared then
       match ← admit config.signature prepared signed ObjectiveBendAuthenticatedInputs.oracle with
-      | .error reason => IO.println s!"REFUSED {repr reason}"; return 0
+      | .error reason =>
+          IO.println s!"REFUSED {repr reason}"
+          printProjection (projectRefused (reasonName s!"{repr reason}")); return 0
       | .ok accepted =>
         let intent := accepted.dataIntent shape
         let record := recordFrame.encode (IntentRecord.ofIntent intent)
         let host ← readBytes (dir / "host-record.bin")
         let root := NativeHostCodec.worldRoot config.deployment.domain config.profile.semantics (image.append intent)
         IO.println s!"ACCEPTED record={if record == host then "same" else "DIFFERENT"} root={root.value}"
+        printProjection (projectAccepted config.deployment command (IntentRecord.ofIntent intent)
+          (receiptSubjects accepted))
         return 0
-    else IO.println "REFUSED physicalPreparation"; return 0
+    else
+      IO.println "REFUSED physicalPreparation"
+      printProjection (projectRefused "physicalPreparation"); return 0

@@ -22,7 +22,7 @@ produces on the turn `Turn.ofIntent` derives from the admitted intent.
   `notAPatch` (`TurnOfIntent.Delta.create_patchOk`).
 * `confirmed_represents`: the confirmed append path, checkpoint rebase
   included -- `afterCheckpoint (p.extend ready) stored` represents the stepped
-  world (`represents_rebaseD`, under `BaseHonest`).
+  world (`represents_rebaseD`).
 * ROM births: `policy_source_birth_is_turn` (the deployed source birth is an
   accepted turn holding the record), `ofIntent_policySource_birth` (the derived
   turn of an intent writing a source cell creates it with the record),
@@ -67,12 +67,10 @@ Empty.  `TurnCensus.every_admission_is_turn` decides it for all 37 shapes and
 * capability / key epoch / window -- not in `DataIntent` (G-AUTH): T4 must
   prove `ofAdmission_auth : derived = .ok t → t.capability = some (capDigest admitted) ∧
     t.keyEpoch = subjectKeyEpoch admitted`.
-* rebase (G-REBASE) -- closed: `represents_rebaseD`, `confirmed_represents`.
-  Its premise `BaseHonest p` holds at genesis, is kept by `extend` and
-  established by `rebaseD`.  T4 must prove it for the cold open:
-  `load_baseHonest : DurableReceiverIO.load transport rootBytes = .ok p → BaseHonest p`
-  (a stored checkpoint's consumed list is its prefix's nullifiers; today that
-  rests on the checkpoint MAC, i.e. custody).
+* rebase (G-REBASE) -- closed: `represents_rebaseD`, `confirmed_represents`, with
+  no premise: since KN2 (ii) a checkpoint carries no consumed list; the consumed
+  set is derived from the verified prefix records (`consumed_of_loaded`), so the
+  former custody premise `BaseHonest` (and T4's `load_baseHonest`) is gone.
 
 ## The statement left for T4
 
@@ -84,7 +82,7 @@ theorem host_submit_is_step
     {intent : DataIntent ResourceBirthCodec.rootBytes}
     (admitted : NativeHostReplay.NativeAdmission config opened intent)
     {w : World deployedR TransactionId Digest}
-    (represents : DeployedRepresents opened.durable w) (honest : BaseHonest opened.durable)
+    (represents : DeployedRepresents opened.durable w)
     {t : DTurn deployedR Digest} (derived : Turn.ofAdmission bridge H w admitted = .ok t)
     {ready : Ready ResourceBirthCodec.rootBytes opened.durable.image opened.durable.baseHeight
       opened.durable.base opened.durable.snapshot intent}
@@ -782,11 +780,10 @@ re-materializes the head as a fresh checkpoint base (`Loaded.rebaseD`) when a
 checkpoint was stored.  The rebased snapshot is `State.snapshot` of
 `State.ofSnapshot`: every enumerable identifier with its current bytes, the
 whole log's journal, the whole log's nullifiers, the remaining allowance.  It
-agrees with the replayed snapshot on everything `Represents` reads -- given
-that the base the loaded state was resumed from consumed exactly its prefix's
-nullifiers (`BaseHonest`).  That premise holds at the genesis base, is kept by
-`extend` and established by `rebaseD`; a cold open from a stored checkpoint
-supplies it by custody (the checkpoint MAC), which is T4's to state. -/
+agrees with the replayed snapshot on everything `Represents` reads, with no
+premise: the consumed set of any resumed snapshot is its whole log's nullifiers
+(`consumed_of_loaded`), because a checkpoint state carries none and
+`State.snapshot` derives them from the prefix records. -/
 
 /-- What a replay does to the journal and the consumed set. -/
 theorem replay_model :
@@ -833,15 +830,15 @@ theorem replay_model :
                 simp [hm, DurableCheckpoint.IntentRecord.erase, List.flatMap_cons]
           · cases h
 
-/-- What a resume is: the whole log's journal, and the base's consumed set plus
-the replayed suffix's nullifiers. -/
+/-- What a resume is: the whole log's journal, and the prefix's nullifiers plus
+the replayed suffix's. -/
 theorem resume_model {image : DurableReceiver.Image} {bh : Nat} {st : DurableCheckpoint.State}
     {snap : DataSnapshot rootBytes} (h : DurableCheckpoint.resume rootBytes image bh st = some snap) :
     snap.model.journal =
         (image.accepted.map fun r => (r.transactionId, DurableCheckpoint.IntentRecord.erase r)).reverse ∧
       ∀ n, snap.model.consumed n =
         (decide (n ∈ (image.accepted.drop bh).flatMap DurableReceiver.IntentRecord.nullifiers) ||
-          decide (n ∈ st.consumed)) := by
+          decide (n ∈ (image.accepted.take bh).flatMap DurableReceiver.IntentRecord.nullifiers)) := by
   unfold DurableCheckpoint.resume at h
   split at h
   · obtain ⟨hj, hc⟩ := replay_model _ _ _ h
@@ -852,14 +849,9 @@ theorem resume_model {image : DurableReceiver.Image} {bh : Nat} {st : DurableChe
     rw [← List.reverse_append, ← List.map_append, List.take_append_drop]
   · cases h
 
-/-- The base a loaded state was resumed from consumed exactly its prefix's
-nullifiers. -/
-def BaseHonest (p : Loaded rootBytes) : Prop :=
-  ∀ n, n ∈ p.base.consumed ↔
-    n ∈ (p.image.accepted.take p.baseHeight).flatMap DurableReceiver.IntentRecord.nullifiers
-
-/-- An honest loaded state has consumed exactly its log's nullifiers. -/
-theorem consumed_of_honest {p : Loaded rootBytes} (honest : BaseHonest p) (n : StableNullifier) :
+/-- **A loaded state has consumed exactly its log's nullifiers** (no premise:
+the checkpoint carries none, the prefix records supply them). -/
+theorem consumed_of_loaded (p : Loaded rootBytes) (n : StableNullifier) :
     p.snapshot.model.consumed n =
       decide (n ∈ p.image.accepted.flatMap DurableReceiver.IntentRecord.nullifiers) := by
   rw [(resume_model p.resumed).2 n]
@@ -869,7 +861,6 @@ theorem consumed_of_honest {p : Loaded rootBytes} (honest : BaseHonest p) (n : S
       DurableReceiver.IntentRecord.nullifiers
   · simp only [h1, decide_true, Bool.true_or, List.mem_append, or_true]
   · simp only [h1, decide_false, Bool.false_or, List.mem_append, or_false]
-    exact decide_eq_decide.mpr (honest n)
 
 theorem lookup_map_self (l : List DurableDataIntent.CellId) (f : DurableDataIntent.CellId → List UInt8)
     (c : DurableDataIntent.CellId) :
@@ -887,12 +878,11 @@ theorem lookup_map_self (l : List DurableDataIntent.CellId) (f : DurableDataInte
 
 /-- **The rebased snapshot agrees with the loaded one** on bytes, journal,
 consumed set and allowance, at the same height. -/
-theorem rebase_agrees {p p' : Loaded rootBytes} (honest : BaseHonest p) (h : p.rebase = some p') :
+theorem rebase_agrees {p p' : Loaded rootBytes} (h : p.rebase = some p') :
     (∀ c, p'.snapshot.canonicalBytes c = p.snapshot.canonicalBytes c) ∧
       p'.snapshot.model.journal = p.snapshot.model.journal ∧
       (∀ n, p'.snapshot.model.consumed n = p.snapshot.model.consumed n) ∧
-      p'.snapshot.model.available = p.snapshot.model.available ∧ p'.height = p.height ∧
-      BaseHonest p' := by
+      p'.snapshot.model.available = p.snapshot.model.available ∧ p'.height = p.height := by
   have fields : p'.image = p.image ∧ p'.baseHeight = p.image.accepted.length ∧
       p'.base = DurableCheckpoint.State.ofSnapshot p.image p.snapshot := by
     unfold Loaded.rebase at h
@@ -911,7 +901,7 @@ theorem rebase_agrees {p p' : Loaded rootBytes} (honest : BaseHonest p) (h : p.r
   have hp' : p'.height = p.height := by
     show p'.image.accepted.length = p.image.accepted.length
     rw [himg]
-  refine ⟨fun c => ?_, ?_, fun n => ?_, ?_, hp', ?_⟩
+  refine ⟨fun c => ?_, ?_, fun n => ?_, ?_, hp'⟩
   · rw [← resumed]
     show (DurableReceiver.Seed.lookup (p.image.cellIds.map fun c => (c, p.snapshot.canonicalBytes c))
       c).getD p.image.seed.absentBytes = _
@@ -922,23 +912,20 @@ theorem rebase_agrees {p p' : Loaded rootBytes} (honest : BaseHonest p) (h : p.r
       exact (DurableCheckpoint.resume_outside_support rootBytes _ _ _ _ p.resumed c m).symm
   · rw [← resumed, (resume_model p.resumed).1]
     rfl
-  · rw [← resumed, consumed_of_honest honest]
+  · rw [← resumed, consumed_of_loaded p]
     rfl
   · rw [← resumed]
     rfl
-  · intro n
-    rw [himg, hbh, hbase, List.take_length]
-    rfl
 
-/-- **`represents_rebaseD`.**  An honest loaded state that represents a world
-still represents it after the checkpoint rebase. -/
+/-- **`represents_rebaseD`.**  A loaded state that represents a world still
+represents it after the checkpoint rebase. -/
 theorem represents_rebaseD (B : Bridge R D) {p : Loaded rootBytes} {w : World R TransactionId D}
-    (honest : BaseHonest p) (rep : Represents B p w) : Represents B p.rebaseD w := by
+    (rep : Represents B p w) : Represents B p.rebaseD w := by
   unfold Loaded.rebaseD
   cases hr : p.rebase with
   | none => exact rep
   | some p' =>
-      obtain ⟨hbytes, hj, hc, ha, hh, -⟩ := rebase_agrees honest hr
+      obtain ⟨hbytes, hj, hc, ha, hh⟩ := rebase_agrees hr
       show SnapRepresents B p'.snapshot p'.height w
       refine ⟨fun c => ?_, fun d => ?_, fun x => ?_, ?_, fun l e => ?_, ?_, fun c => ?_, rep.parent⟩
       · rw [hbytes]; exact rep.cells c
@@ -948,25 +935,6 @@ theorem represents_rebaseD (B : Bridge R D) {p : Loaded rootBytes} {w : World R 
       · rw [ha]; exact rep.meter l e
       · rw [ha]; exact rep.storage
       · rw [hbytes]; exact rep.retired c
-
-/-- Honesty survives the rebase. -/
-theorem baseHonest_rebaseD {p : Loaded rootBytes} (honest : BaseHonest p) :
-    BaseHonest p.rebaseD := by
-  unfold Loaded.rebaseD
-  cases hr : p.rebase with
-  | none => exact honest
-  | some p' => exact (rebase_agrees honest hr).2.2.2.2.2
-
-/-- Honesty survives an append: the base and its height are unchanged, and the
-prefix they name is unchanged. -/
-theorem baseHonest_extend {p : Loaded rootBytes} (honest : BaseHonest p) {intent : DataIntent rootBytes}
-    (ready : Ready rootBytes p.image p.baseHeight p.base p.snapshot intent) :
-    BaseHonest (p.extend ready) := by
-  intro n
-  show n ∈ p.base.consumed ↔ n ∈ ((p.image.accepted ++ [DurableReceiver.IntentRecord.ofIntent intent]).take
-    p.baseHeight).flatMap DurableReceiver.IntentRecord.nullifiers
-  rw [List.take_append_of_le_length p.withinLog]
-  exact honest n
 
 /-- **The pole: a rebase that drops a cell breaks representation.**  The
 materialized checkpoint must carry every enumerable identifier; a state whose
@@ -986,19 +954,17 @@ theorem rebase_dropping_cell_breaks (B : Bridge R D) {height : Nat}
   rw [bytes, absentReads] at e
   exact present (Option.some.inj e).symm
 
-/-- **The confirmed append path, rebase included.**  From an honest loaded
-state representing `w`, the deployed successor `afterCheckpoint (p.extend
-ready) stored` -- what `receiveLoadedDetailedWithFresh` returns on a confirmed
-read-back -- represents the world `World.step` produces on the derived turn,
-and stays honest. -/
+/-- **The confirmed append path, rebase included.**  From a loaded state
+representing `w`, the deployed successor `afterCheckpoint (p.extend ready)
+stored` -- what `receiveLoadedDetailedWithFresh` returns on a confirmed
+read-back -- represents the world `World.step` produces on the derived turn. -/
 theorem confirmed_represents (B : Bridge R D) (H : History R TransactionId StableEvent D)
     {p : Loaded rootBytes} {w : World R TransactionId D} (rep : Represents B p w)
-    (honest : BaseHonest p) {intent : DataIntent rootBytes}
+    {intent : DataIntent rootBytes}
     (ready : Ready rootBytes p.image p.baseHeight p.base p.snapshot intent)
     {t : DTurn R D} (derived : Turn.ofLoaded B H p intent = .ok t) (stored : Bool) :
     ∃ w', World.step H w t = some w' ∧
-      Represents B (Minidregg.Compiler.DurableReceiverIO.afterCheckpoint (p.extend ready) stored) w' ∧
-      BaseHonest (Minidregg.Compiler.DurableReceiverIO.afterCheckpoint (p.extend ready) stored) := by
+      Represents B (Minidregg.Compiler.DurableReceiverIO.afterCheckpoint (p.extend ready) stored) w' := by
   have derived' : Turn.ofIntent B H w intent = .ok t := (ofLoaded_eq B H rep intent).symm.trans derived
   rcases execute_cases .complete p.snapshot intent with ⟨-, fresh, prepared, after⟩ | ⟨hi, -⟩
   · obtain ⟨w', hs, hrep0⟩ := ofIntent_run B H rep derived' fresh prepared
@@ -1012,15 +978,11 @@ theorem confirmed_represents (B : Bridge R D) (H : History R TransactionId Stabl
       have hsnap : (p.extend ready).snapshot = ready.next := rfl
       rw [hh, hsnap, hnext]
       exact hrep0
-    refine ⟨w', hs, ?_, ?_⟩
-    · unfold Minidregg.Compiler.DurableReceiverIO.afterCheckpoint
-      split
-      · exact represents_rebaseD B (baseHonest_extend honest ready) hrep
-      · exact hrep
-    · unfold Minidregg.Compiler.DurableReceiverIO.afterCheckpoint
-      split
-      · exact baseHonest_rebaseD (baseHonest_extend honest ready)
-      · exact baseHonest_extend honest ready
+    refine ⟨w', hs, ?_⟩
+    unfold Minidregg.Compiler.DurableReceiverIO.afterCheckpoint
+    split
+    · exact represents_rebaseD B hrep
+    · exact hrep
   · rw [ready.executed] at hi
     simp [Installs] at hi
 
@@ -1358,16 +1320,16 @@ theorem toy_refined :
 /-- **Rebase, satisfiable**: the checkpoint state that keeps cell 0's bytes
 re-materializes a snapshot that still represents `w0`. -/
 theorem toy_rebase_keeping_cell_represents :
-    SnapRepresents toyB (DurableCheckpoint.State.snapshot toyRoot ⟨[], [(⟨0⟩, [1, 5])], [], 0⟩ [])
+    SnapRepresents toyB (DurableCheckpoint.State.snapshot toyRoot ⟨[], [(⟨0⟩, [1, 5])], 0⟩ [])
       0 w0 := by
-  rw [show (⟨[], [(⟨0⟩, [1, 5])], [], 0⟩ : DurableCheckpoint.State) =
+  rw [show (⟨[], [(⟨0⟩, [1, 5])], 0⟩ : DurableCheckpoint.State) =
     DurableCheckpoint.State.ofSeed ⟨[], [(⟨0⟩, [1, 5])], 0⟩ from rfl,
     DurableCheckpoint.ofSeed_snapshot]
   exact toy_represents
 
 /-- **Rebase, refuted**: the checkpoint state that drops cell 0 does not. -/
 theorem toy_rebase_dropping_cell_breaks :
-    ¬ SnapRepresents toyB (DurableCheckpoint.State.snapshot toyRoot ⟨[], [], [], 0⟩ []) 0 w0 :=
+    ¬ SnapRepresents toyB (DurableCheckpoint.State.snapshot toyRoot ⟨[], [], 0⟩ []) 0 w0 :=
   rebase_dropping_cell_breaks toyB _ [] (c := 0) (by simp) rfl
     (by rw [show w0.cells 0 = some (toyCell 1 5) from cells_update_self _ _ _]; simp)
 
@@ -1383,12 +1345,10 @@ end Example
 #assert_axioms policy_source_rewrite_has_no_turn
 #assert_axioms replay_model
 #assert_axioms resume_model
-#assert_axioms consumed_of_honest
+#assert_axioms consumed_of_loaded
 #assert_axioms lookup_map_self
 #assert_axioms rebase_agrees
 #assert_axioms represents_rebaseD
-#assert_axioms baseHonest_rebaseD
-#assert_axioms baseHonest_extend
 #assert_axioms rebase_dropping_cell_breaks
 #assert_axioms confirmed_represents
 #assert_axioms represents_logicalHeight

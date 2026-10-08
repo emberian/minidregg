@@ -1,0 +1,8 @@
+edition ObjectiveBend 1
+# Package B: the tax, authored without A. It reads price through the FINAL self.
+import ./Shop.obend as Shop
+
+spec Taxes for Shop.Store:
+  requires price(n: Nat) -> Nat
+  def tax(n: Nat) -> Nat:
+    self.price(n) * 2n

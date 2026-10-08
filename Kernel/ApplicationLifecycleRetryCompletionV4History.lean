@@ -17,14 +17,17 @@ open Minidregg.Kernel.NativeHost
 
 set_option autoImplicit false
 
-def projection {config : Config} {opened : Opened config} {index : Nat}
-    (candidate : NativeHistorySelection.Candidate config opened index)
-    (after : Opened config)
+open Minidregg.Compiler.DurableHistory (Head StoreIdentity)
+open Minidregg.Compiler.DurableHistoryReader (Reader)
+
+def projection {config : Config} {store : StoreIdentity} {head : Head store} {index : Nat}
+    (candidate : NativeHistorySelection.Candidate config head index)
+    (after : NativeHistorySelection.After config head index)
     (source : ApplicationLifecycleRetryCompletionV4Source.Source)
     (accepted : ApplicationLifecycleRetryClaimV4Core.Conditional
-      config candidate.prior source.originalClaim) :
+      config head candidate.ground source.originalClaim) :
     ApplicationLifecycleRetryClaimV4Projection.Committed :=
-  let post := after.durable
+  let post := after.opened.served
   let begin := source.originalBegin.base.source
   let receipt : NativeHostCodec.Receipt :=
     ⟨accepted.intent.transactionId, accepted.intent.event.eventId,
@@ -40,62 +43,57 @@ def projection {config : Config} {opened : Opened config} {index : Nat}
         claimNullifier :=
           (ApplicationLifecycleClaim.stableNullifier config.deployment.domain
             config.profile.semantics source.originalClaim.base.source).nullifierId
-        appPhysicalRoot := post.snapshot.model.roots ⟨begin.app⟩
-        packagePhysicalRoot := post.snapshot.model.roots ⟨begin.packageManifest⟩
+        appPhysicalRoot := post.roots ⟨begin.app⟩
+        packagePhysicalRoot := post.roots ⟨begin.packageManifest⟩
         authorityPhysicalRoot :=
-          post.snapshot.model.roots ⟨config.deployment.authorityCellId⟩
+          post.roots ⟨config.deployment.authorityCellId⟩
         postWorldRoot := receipt.worldRoot }
     originalClaim := source.originalClaim }
 
-structure Candidate (config : Config) (opened : Opened config)
+structure Candidate (config : Config) {store : StoreIdentity} (head : Head store)
     (source : ApplicationLifecycleRetryCompletionV4Source.Source) where
   private mk ::
   index : Nat
-  selected : NativeHistorySelection.Candidate config opened index
+  selected : NativeHistorySelection.Candidate config head index
   claimBytes : selected.record.event.canonicalBytes =
     source.originalClaim.canonicalBytes
   accepted : ApplicationLifecycleRetryClaimV4Core.Conditional
-    config selected.prior source.originalClaim
+    config head selected.ground source.originalClaim
   recordExact : selected.record =
     DurableReceiver.IntentRecord.ofIntent accepted.intent
-  after : Opened config
-  afterImage : after.durable.image = NativeHistorySelection.prefixImage opened (index + 1)
+  after : NativeHistorySelection.After config head index
   projectionExact : source.physical.report.claim =
     projection selected after source accepted
 
-def select (config : Config) (opened : Opened config)
+def select (config : Config) {store : StoreIdentity}
+    (reader : Reader ResourceBirthCodec.rootBytes store) (bound : Nat)
     (source : ApplicationLifecycleRetryCompletionV4Source.Source) :
-    IO (Except String (Candidate config opened source)) := do
+    IO (Except String (Candidate config reader.head source)) := do
   let count := source.physical.report.claim.core.claimReceipt.acceptedCount
   if 0 < count then
     let index := count - 1
-    let selected ← match NativeHistorySelection.select config opened index with
+    let selected ← match ← NativeHistorySelection.select config reader bound index
+        (ApplicationLifecycleRetryClaimV4Core.keys source.originalClaim) with
       | .error detail => return .error detail
       | .ok selected => pure selected
     if claimBytes : selected.record.event.canonicalBytes =
         source.originalClaim.canonicalBytes then
-      let accepted ← match ← ApplicationLifecycleRetryClaimV4Core.prepare config
-          selected.prior source.originalClaim with
+      let accepted ← match ← ApplicationLifecycleRetryClaimV4Core.prepare config reader
+          selected.grounded source.originalClaim with
         | .error _ => return .error "selected claim source refused at its original prefix"
         | .ok accepted => pure accepted
       if matched : NativeHistorySelection.recordMatches selected.record accepted.intent = true then
         have recordExact : selected.record =
             DurableReceiver.IntentRecord.ofIntent accepted.intent :=
           (NativeHistorySelection.recordMatches_iff _ _).mp matched
-        let prefixAfter := NativeHistorySelection.prefixImage opened (index + 1)
-        let loaded ← match DurableReceiverIO.loadImage rootBytes opened.durable.logStart prefixAfter with
-          | .error _ => return .error "selected claim post-prefix unavailable"
-          | .ok loaded => pure loaded
-        let after ← match validateLoaded config loaded with
-          | .error _ => return .error "selected claim post-prefix invalid"
+        let after ← match ← NativeHistorySelection.selectAfter config reader index with
+          | .error _ => return .error "selected claim post-prefix unavailable or invalid"
           | .ok after => pure after
-        if afterImage : after.durable.image = prefixAfter then
-          if projectionExact : source.physical.report.claim =
-              projection selected after source accepted then
-            return .ok ⟨index, selected, claimBytes, accepted,
-              recordExact, after, afterImage, projectionExact⟩
-          else return .error "physical report differs from original claim projection"
-        else return .error "selected claim post-prefix image changed"
+        if projectionExact : source.physical.report.claim =
+            projection selected after source accepted then
+          return .ok ⟨index, selected, claimBytes, accepted,
+            recordExact, after, projectionExact⟩
+        else return .error "physical report differs from original claim projection"
       else return .error "selected claim full intent differs"
     else return .error "selected claim ingress differs"
   else return .error "physical report has no claim receipt"

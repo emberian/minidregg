@@ -27,6 +27,7 @@ import Theory.RoomAuthorization
 import Theory.StoreFootprint
 import Kernel.ClockCellDomain
 import Theory.AssertAxioms
+import Compiler.ServedBasis
 
 namespace Minidregg.Kernel.ResourceObservationAdmission
 
@@ -46,19 +47,19 @@ abbrev Deployment := CanonicalCellRegistry.Deployment
 abbrev Durable := DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes
 abbrev Registry := CanonicalCellRegistry.registry
 
-structure Context (deployment : Deployment) (durable : Durable) where
-  directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable
-  authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot
+/-- The state a read is admitted on: a verified ground (`ServedBasis.Ground`) —
+the light basis of a request, or the full shape's loaded directory and authority. -/
+abbrev Context (deployment : Deployment) := Minidregg.Compiler.ServedBasis.Ground deployment
 
-variable {deployment : Deployment} {durable : Durable}
+variable {deployment : Deployment}
 
 def observeVerb : (kind : ResourceKind) → Verb kind
   | .object => .observeObject
   | .account => .observeAccount
   | .program => .observeProgram
 
-def book (context : Context deployment durable) : Option CanonicalResourceKernel.Book :=
-  match context.directory.directory.slots deployment.resourceBookId with
+def book (context : Context deployment) : Option CanonicalResourceKernel.Book :=
+  match context.directory.slots deployment.resourceBookId with
   | .present packed =>
       if CanonicalCellRegistry.CellLaw deployment deployment.resourceBookId packed then
         match packed with
@@ -67,7 +68,7 @@ def book (context : Context deployment durable) : Option CanonicalResourceKernel
       else none
   | _ => none
 
-def balances (context : Context deployment durable) (kind : ResourceKind) (target : Nat) :
+def balances (context : Context deployment) (kind : ResourceKind) (target : Nat) :
     Option (List (Nat × Int)) :=
   if kind = .account then (book context).map (fun value => CanonicalAccountView.accountCut value target)
   else some []
@@ -115,42 +116,47 @@ def resourceSlots (subject : SubjectId) (target : Nat) : (kind : CanonicalCellRe
   | .worldKind, logical => WorldKindProjection.definitionProject logical logical
   | _, _ => []
 
-def sourceStore (context : Context deployment durable) : CanonicalPolicyRegistry.PayloadStore where
-  fetch := CanonicalCellRegistry.fetchPolicySource deployment.domain context.directory.directory
+/-- The policy source store of a decoded directory. -/
+def sourceStoreOf (deployment : Deployment) (directory : Directory Nat Registry) :
+    CanonicalPolicyRegistry.PayloadStore where
+  fetch := CanonicalCellRegistry.fetchPolicySource deployment.domain directory
+
+def sourceStore (context : Context deployment) : CanonicalPolicyRegistry.PayloadStore :=
+  sourceStoreOf deployment context.directory
 
 variable {F : Type} [Field F] [DecidableEq F] {kind : ResourceKind}
 
 /-- Preparation retains the actual physical role/root and current source
 coordinates; a request supplied to this shared primitive cannot turn an
 ordinary mutation into an observation or select an internal authority cell. -/
-structure Prepared (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
+structure Prepared (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (wanted : Request kind) (marker : Nat) (capability : CapabilityId) (contextBytes : List UInt8) where
   private mk ::
-  observed : ResourceTargetAdmission.Observed deployment context.directory.directory kind
+  observed : ResourceTargetAdmission.Observed deployment context.directory kind
     wanted.target.value wanted.preStateRoot
   observeExact : wanted.verb = observeVerb kind
   domainExact : wanted.domain = deployment.domain
   semanticsExact : wanted.semantics = profile.semantics
   policyExact : wanted.policyId.value = wanted.target.value
-  epochExact : wanted.policyEpoch = context.authority.snapshot.authState.policyEpoch wanted.policyId
-  revisionExact : wanted.policyRevision = context.authority.snapshot.authState.policyRevision wanted.policyId
+  epochExact : wanted.policyEpoch = context.authority.authState.policyEpoch wanted.policyId
+  revisionExact : wanted.policyRevision = context.authority.authState.policyRevision wanted.policyId
   accountBalances : List (Nat × Int)
   balancesExact : balances context kind wanted.target.value = some accountBalances
   /-- The deployment clock of the snapshot the read is answered from. -/
-  clock : Kernel.ClockCellDomain.Loaded deployment durable.snapshot
-  clockLoaded : Kernel.ClockCellDomain.load deployment durable.snapshot = some clock
+  clock : Kernel.ClockCellDomain.Loaded deployment context.cells
+  clockLoaded : Kernel.ClockCellDomain.load deployment context.cells = some clock
   kindDependencies : WorldKindLawDependencies.Dependencies
-  kindDependenciesExact : WorldKindLawDependencies.loadTarget deployment context.directory.directory
+  kindDependenciesExact : WorldKindLawDependencies.loadTarget deployment context.directory
     wanted.target.value = some kindDependencies
 
 /-- Each refusing branch names its reason. The request is host-built from the
 same image, so a component mismatch means the caller asked for something other
 than an observation of this image (`malformed`) or named generations that have
 moved (`staleRoot`); an unobservable target is `noGrant`. -/
-def prepare (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
+def prepare (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (wanted : Request kind) (marker : Nat) (capability : CapabilityId) (contextBytes : List UInt8) :
     Except Refusal (Prepared context profile wanted marker capability contextBytes) :=
-  match ResourceTargetAdmission.observe deployment context.directory.directory kind
+  match ResourceTargetAdmission.observe deployment context.directory kind
       wanted.target.value wanted.preStateRoot with
   | none => .error (.of .noGrant)
   | some observed =>
@@ -158,16 +164,16 @@ def prepare (context : Context deployment durable) (profile : CanonicalRuntimePr
         if domainExact : wanted.domain = deployment.domain then
           if semanticsExact : wanted.semantics = profile.semantics then
             if policyExact : wanted.policyId.value = wanted.target.value then
-              if epochExact : wanted.policyEpoch = context.authority.snapshot.authState.policyEpoch wanted.policyId then
-                if revisionExact : wanted.policyRevision = context.authority.snapshot.authState.policyRevision wanted.policyId then
+              if epochExact : wanted.policyEpoch = context.authority.authState.policyEpoch wanted.policyId then
+                if revisionExact : wanted.policyRevision = context.authority.authState.policyRevision wanted.policyId then
                   match balancesExact : balances context kind wanted.target.value with
                   | none => .error (.of .noGrant)
                   | some values =>
-                    match clockLoaded : Kernel.ClockCellDomain.load deployment durable.snapshot with
+                    match clockLoaded : Kernel.ClockCellDomain.load deployment context.cells with
                     | none => .error (.of .operationRejected)
                     | some clock =>
                         match dependenciesExact : WorldKindLawDependencies.loadTarget deployment
-                            context.directory.directory wanted.target.value with
+                            context.directory wanted.target.value with
                         | none => .error (.of .operationRejected)
                         | some dependencies => .ok ⟨observed, observeExact, domainExact, semanticsExact,
                             policyExact, epochExact, revisionExact, values, balancesExact, clock,
@@ -179,7 +185,7 @@ def prepare (context : Context deployment durable) (profile : CanonicalRuntimePr
         else .error (.of .malformed)
       else .error (.of .malformed)
 
-variable {context : Context deployment durable} {profile : CanonicalRuntimeProfile.Profile F}
+variable {context : Context deployment} {profile : CanonicalRuntimeProfile.Profile F}
   {wanted : Request kind} {marker : Nat} {capability : CapabilityId} {contextBytes : List UInt8}
 
 /-- The law's view of one cell for a request that writes nothing to it: the
@@ -208,30 +214,30 @@ def step (prepared : Prepared context profile wanted marker capability contextBy
     (readCandidate wanted prepared.observed.before.kind prepared.observed.before.payload prepared.observed.rootExact)
 
 def policyConfig (prepared : Prepared context profile wanted marker capability contextBytes) : ComposedPolicyAdmission.Config F :=
-  PhysicalLawResolution.config profile.compilerProfile context.authority.snapshot context.directory.directory
-    (sourceCapabilityPortal context.authority.snapshot marker) (step prepared) wanted.target.value
+  PhysicalLawResolution.config profile.compilerProfile context.authority context.directory
+    (sourceCapabilityPortal context.authority marker) (step prepared) wanted.target.value
     prepared.kindDependencies.additional
 
 def portal (prepared : Prepared context profile wanted marker capability contextBytes) : Portal :=
   (policyConfig prepared).portal
 
 def capabilityEvidenceChecked (prepared : Prepared context profile wanted marker capability contextBytes)
-    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot) :
-    Except RefusalReason (Evidence (portal prepared) context.authority.snapshot.authState wanted) :=
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority) :
+    Except RefusalReason (Evidence (portal prepared) context.authority.authState wanted) :=
   (policyConfig prepared).capabilityEvidenceChecked wanted capability () signature () (fun _ => ())
 
 def lawReadGuards (prepared : Prepared context profile wanted marker capability contextBytes) :
     Option (List (Nat × Digest)) :=
-  PhysicalLawResolution.readGuards context.authority.snapshot context.directory.directory
+  PhysicalLawResolution.readGuards context.authority context.directory
     profile.semantics wanted.target.value prepared.kindDependencies.additional |>.map
       (· ++ prepared.kindDependencies.readGuards)
 
 /-- The fields the reader's capability names (K-FIELDS), which narrow what a law refusal
 tells it (`Refusal.lawDeniedFor`, FIX-DISCLOSE). A capability that does not read names no
 field (`some ∅`): its refusal then names no clause over the cell's state. -/
-def readerFields (context : Context deployment durable) (kind : ResourceKind)
+def readerFields (context : Context deployment) (kind : ResourceKind)
     (capability : CapabilityId) : Option (Finset CellField) :=
-  match CredentialAuthorityState.readCapability context.authority.snapshot.cell kind capability with
+  match CredentialAuthorityState.readCapability context.authority.cell kind capability with
   | some stored => stored.head.scope.fields
   | none => some ∅
 
@@ -245,8 +251,8 @@ its order clauses compares two values outside the native order range is
 one refused because two integers of the step share a field image is
 `lawInputRange` naming the two integers (`castAlias`). Narrowed grants receive no hidden values in any of these diagnostics. -/
 def authorizeChecked (prepared : Prepared context profile wanted marker capability contextBytes)
-    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot) :
-    Except Refusal (Authorized (portal prepared) context.authority.snapshot.authState wanted) :=
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority) :
+    Except Refusal (Authorized (portal prepared) context.authority.authState wanted) :=
   let config := policyConfig prepared
   match capabilityEvidenceChecked prepared signature with
   | .error reason => .error (.of reason)
@@ -263,15 +269,15 @@ def authorizeChecked (prepared : Prepared context profile wanted marker capabili
           | some authorized => .ok authorized
 
 def authorize (prepared : Prepared context profile wanted marker capability contextBytes)
-    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot) :
-    Option (Authorized (portal prepared) context.authority.snapshot.authState wanted) :=
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority) :
+    Option (Authorized (portal prepared) context.authority.authState wanted) :=
   (authorizeChecked prepared signature).toOption
 
 /-- The signed requester is told the reason of the capability branch that
 decided its refusal, unchanged. -/
 theorem authorizeChecked_capability_reason
     (prepared : Prepared context profile wanted marker capability contextBytes)
-    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot)
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority)
     (reason : RefusalReason)
     (refused : capabilityEvidenceChecked prepared signature = .error reason) :
     authorizeChecked prepared signature = .error (.of reason) := by
@@ -283,8 +289,8 @@ naming the failing clause of that law on the same witness states the admission
 was decided on. -/
 theorem authorizeChecked_lawDenied
     (prepared : Prepared context profile wanted marker capability contextBytes)
-    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot)
-    (evidence : Evidence (portal prepared) context.authority.snapshot.authState wanted)
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority)
+    (evidence : Evidence (portal prepared) context.authority.authState wanted)
     (committed : ComposedPolicyAdmission.PreparedLaw (policyConfig prepared))
     (supplied : capabilityEvidenceChecked prepared signature = .ok evidence)
     (resolved : (policyConfig prepared).resolve? =
@@ -313,8 +319,8 @@ step share a field image is reported as `lawInputRange` naming the two integers,
 never a bare `lawDenied`. -/
 theorem authorizeChecked_castAlias
     (prepared : Prepared context profile wanted marker capability contextBytes)
-    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot)
-    (evidence : Evidence (portal prepared) context.authority.snapshot.authState wanted)
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority)
+    (evidence : Evidence (portal prepared) context.authority.authState wanted)
     (committed : ComposedPolicyAdmission.PreparedLaw (policyConfig prepared)) (x y : Int)
     (supplied : capabilityEvidenceChecked prepared signature = .ok evidence)
     (resolved : (policyConfig prepared).resolve? =
@@ -339,8 +345,8 @@ native order range is reported as `lawInputRange`, naming that clause and the tw
 values, never a bare `lawDenied`. -/
 theorem authorizeChecked_lawInputRange
     (prepared : Prepared context profile wanted marker capability contextBytes)
-    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot)
-    (evidence : Evidence (portal prepared) context.authority.snapshot.authState wanted)
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority)
+    (evidence : Evidence (portal prepared) context.authority.authState wanted)
     (committed : ComposedPolicyAdmission.PreparedLaw (policyConfig prepared)) (leaf : LawLeaf)
     (supplied : capabilityEvidenceChecked prepared signature = .ok evidence)
     (resolved : (policyConfig prepared).resolve? =
@@ -360,8 +366,8 @@ theorem authorizeChecked_lawInputRange
 evaluated on. -/
 theorem authorizeChecked_leaf_fails
     (prepared : Prepared context profile wanted marker capability contextBytes)
-    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot)
-    (evidence : Evidence (portal prepared) context.authority.snapshot.authState wanted)
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority)
+    (evidence : Evidence (portal prepared) context.authority.authState wanted)
     (committed : ComposedPolicyAdmission.PreparedLaw (policyConfig prepared)) (leaf : LawLeaf)
     (supplied : capabilityEvidenceChecked prepared signature = .ok evidence)
     (resolved : (policyConfig prepared).resolve? =
@@ -388,10 +394,10 @@ theorem authorizeChecked_leaf_fails
 /-- The admitted pole: the law's acceptance is returned unchanged. -/
 theorem authorizeChecked_admitted
     (prepared : Prepared context profile wanted marker capability contextBytes)
-    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot)
-    (evidence : Evidence (portal prepared) context.authority.snapshot.authState wanted)
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority)
+    (evidence : Evidence (portal prepared) context.authority.authState wanted)
     (committed : ComposedPolicyAdmission.PreparedLaw (policyConfig prepared))
-    (authorized : Authorized (portal prepared) context.authority.snapshot.authState wanted)
+    (authorized : Authorized (portal prepared) context.authority.authState wanted)
     (supplied : capabilityEvidenceChecked prepared signature = .ok evidence)
     (resolved : (policyConfig prepared).resolve? =
       some committed)
@@ -407,9 +413,9 @@ attribute [irreducible] portal
 structure Checked (prepared : Prepared context profile wanted marker capability contextBytes)
     (envelope : List UInt8) where
   private mk ::
-  signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot
+  signature : CredentialSignatureAdmission.CheckedSignature context.authority
   envelopeExact : signature.envelopeBytes = envelope
-  authorization : Authorized (portal prepared) context.authority.snapshot.authState wanted
+  authorization : Authorized (portal prepared) context.authority.authState wanted
   authorized : authorize prepared signature = some authorization
 
 /-- Signature first: until it verifies, the requester is not authenticated
@@ -417,7 +423,7 @@ and only `badSignature` (a fact about its own envelope) is named. -/
 def check {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
     (prepared : Prepared context profile wanted marker capability contextBytes) (envelope : List UInt8) :
     m (Except Refusal (Checked prepared envelope)) := do
-  match ← CredentialSignatureAdmission.verifyNative native context.authority.snapshot marker wanted envelope with
+  match ← CredentialSignatureAdmission.verifyNative native context.authority marker wanted envelope with
   | .error reason => return .error (.of (RefusalReason.ofSignature reason))
   | .ok signature =>
       if exact : signature.envelopeBytes = envelope then
@@ -456,8 +462,8 @@ theorem checked_exact_envelope (prepared : Prepared context profile wanted marke
 
 theorem checked_current_source (prepared : Prepared context profile wanted marker capability contextBytes)
     (envelope : List UInt8) (checked : Checked prepared envelope) :
-    wanted.policyEpoch = context.authority.snapshot.authState.policyEpoch wanted.policyId ∧
-      wanted.policyRevision = context.authority.snapshot.authState.policyRevision wanted.policyId :=
+    wanted.policyEpoch = context.authority.authState.policyEpoch wanted.policyId ∧
+      wanted.policyRevision = context.authority.authState.policyRevision wanted.policyId :=
   ⟨checked.authorization.policyEpochExact, checked.authorization.policyRevisionExact⟩
 
 /-! ## The clock a read's law sees -/
@@ -473,7 +479,7 @@ theorem read_law_sees_clock (prepared : Prepared context profile wanted marker c
         some (Int.ofNat (prepared.clock.clock.now / Kernel.ClockCell.secondsPerDay)) ∧
       (project prepared logical).get "clock/slot" = some (Int.ofNat prepared.clock.clock.slot) ∧
       Kernel.ClockCell.clockOf prepared.clock.cell.logical = some prepared.clock.clock ∧
-      Kernel.ClockCellDomain.load deployment durable.snapshot = some prepared.clock := by
+      Kernel.ClockCellDomain.load deployment context.cells = some prepared.clock := by
   refine ⟨?_, ?_, ?_, prepared.clock.clockExact, ?_⟩
   · simp [project, projectWith, Kernel.ClockCell.slots, Minidregg.Pred.State.get]
   · simp [project, projectWith, Kernel.ClockCell.slots, Minidregg.Pred.State.get]
@@ -547,12 +553,12 @@ admissible for the exact request, and its scope reaches the observed cell only
 through the cell's own parent chain or by naming it. -/
 theorem controller_room_confidentiality
     (prepared : Prepared context profile wanted marker capability contextBytes)
-    (authorization : Authorized (portal prepared) context.authority.snapshot.authState wanted) :
+    (authorization : Authorized (portal prepared) context.authority.authState wanted) :
     ∃ cap : Capability kind, ∃ commitment : Digest,
       authorization.evidence.capabilityValue = some (cap, commitment) ∧
-      cap.Admissible context.authority.snapshot.authState wanted ∧
+      cap.Admissible context.authority.authState wanted ∧
       ((∃ room, cap.scope.targets = .under room ∧
-          context.authority.snapshot.authState.parent.Descends wanted.target.value room) ∨
+          context.authority.authState.parent.Descends wanted.target.value room) ∨
         ∃ ts, cap.scope.targets = .explicit ts ∧ wanted.target ∈ ts) := by
   obtain ⟨noSignature, noProof⟩ := signature_mode_refuted prepared
   match authorization.evidence with
@@ -566,12 +572,12 @@ theorem controller_room_confidentiality
 the requested capability identifier of the loaded authority cell. -/
 theorem authorize_names_stored
     (prepared : Prepared context profile wanted marker capability contextBytes)
-    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot)
-    {authorization : Authorized (portal prepared) context.authority.snapshot.authState wanted}
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority)
+    {authorization : Authorized (portal prepared) context.authority.authState wanted}
     (accepted : authorize prepared signature = some authorization) :
-    ∃ stored, CredentialAuthorityState.readCapability context.authority.snapshot.cell kind capability = some stored ∧
+    ∃ stored, CredentialAuthorityState.readCapability context.authority.cell kind capability = some stored ∧
       authorization.evidence.capabilityValue =
-        some (stored.head, storedCapabilityDigest context.authority.snapshot stored) := by
+        some (stored.head, storedCapabilityDigest context.authority stored) := by
   revert authorization
   unfold portal
   intro authorization accepted
@@ -606,9 +612,9 @@ theorem authorize_names_stored
 capability is not admissible for the request is refused. -/
 theorem controller_refuses_inadmissible
     (prepared : Prepared context profile wanted marker capability contextBytes)
-    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot)
-    (noGrant : ∀ stored, CredentialAuthorityState.readCapability context.authority.snapshot.cell kind capability = some stored →
-      ¬ stored.head.Admissible context.authority.snapshot.authState wanted) :
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority)
+    (noGrant : ∀ stored, CredentialAuthorityState.readCapability context.authority.cell kind capability = some stored →
+      ¬ stored.head.Admissible context.authority.authState wanted) :
     authorize prepared signature = none := by
   cases accepted : authorize prepared signature with
   | none => rfl
@@ -626,10 +632,10 @@ is refused, with a valid signature and no matter which capability identifier
 they name. -/
 theorem controller_outsider_refused
     (prepared : Prepared context profile wanted marker capability contextBytes)
-    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot)
-    (offRoom : ∀ stored, CredentialAuthorityState.readCapability context.authority.snapshot.cell kind capability = some stored →
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority)
+    (offRoom : ∀ stored, CredentialAuthorityState.readCapability context.authority.cell kind capability = some stored →
       (∀ room, stored.head.scope.targets = .under room →
-        ¬ context.authority.snapshot.authState.parent.Descends wanted.target.value room) ∧
+        ¬ context.authority.authState.parent.Descends wanted.target.value room) ∧
       ∀ ts, stored.head.scope.targets = .explicit ts → wanted.target ∉ ts) :
     authorize prepared signature = none :=
   controller_refuses_inadmissible prepared signature fun stored read =>
@@ -638,8 +644,8 @@ theorem controller_outsider_refused
 /-- A signature with no stored capability behind it authorizes nothing. -/
 theorem controller_signature_alone_refused
     (prepared : Prepared context profile wanted marker capability contextBytes)
-    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot)
-    (none_stored : CredentialAuthorityState.readCapability context.authority.snapshot.cell kind capability = none) :
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority)
+    (none_stored : CredentialAuthorityState.readCapability context.authority.cell kind capability = none) :
     authorize prepared signature = none :=
   controller_refuses_inadmissible prepared signature fun stored read => by
     rw [none_stored] at read

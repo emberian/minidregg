@@ -60,6 +60,7 @@ import Kernel.ObjectiveKernelConfig  -- a deployment Objective policy as the ker
 import Kernel.ObjectiveCall  -- synchronous cross-object call (OB7): a call tree in one turn, every callee on its pinned package, writes applied at frame return and judged by the callee object law, re-entry refused; reentry_refused, exec_invariant, invocation_reentry_free, invocation_writes_from_view
 import Kernel.Inbox  -- per-(sender, target) FIFO inboxes (OB8): protected coordinate (cell_reserved), the queue discipline as the law (Step, Lawful, lawful_fifo, reorder_unlawful, push_full)
 import Kernel.ObjectiveSend  -- asynchronous send (OB8): deliverMessage pops an inbox head and runs it (no subject, caller = sender), decides its reply slot (decides_own_slot), forwards or refunds sends queued on it, a failed delivery pops (failed_delivery_pops), paid from the inbox purse only (debits_only_purse)
+import Kernel.ObjectiveActivityUpgrade  -- the governed upgrade: ADOPT (policy, floors with certificates, typed linear migration, rebirth targets), the drained-write judgment, abortDrained after the drain deadline, single-turn MIGRATE, REBIRTH as a birth with a predecessor
 import Kernel.ObjectiveAdmittedTurn  -- one admitted kernel turn: the activity turns and the invoke call tree (AdmittedTurn, intent_writes)
 import Kernel.ObjectiveActivityReceiver  -- the kernel activity as signed native commands (session ops 210-214): object creation, ownership by capability, account ownership, protected coordinates, exhaustion and abandonment; create/birth/writeState_requires_object_holder, native_birth_on_pinned_object, native_delivery_consumes_once
 import Kernel.Seat  -- seats and invitations over the Book, one batch per step, the instance acting only through its method's Plan: offer safety judged on every reallocation (seat_offer_safe_forever), exit no contract clause can forbid (exit_enabled, exit_pays_allocation), seat_conserves, seat_debit_authorized
@@ -67,7 +68,9 @@ import Kernel.SeatStore  -- the seat world in protected seat cells: the contract
 import Kernel.SeatReceiver  -- seats and invitations as signed native commands (ops 215-219): native_turn_is_kernel_turn, offer_requires_account_holder, reallocate_requires_instance_holder, exit_requires_offerer_or_deadline, native_offer_spends_invitation_once
 import Kernel.CertifiedClearing  -- DrEX as seats: a batch of limit-order seats cleared at one price by an untrusted clearer, admitted only with a Cert-F certificate of the batch LP within epsilon (clear_certified, clear_epsilon_optimal, clear_uniform_price, clear_fills_cross), then judged by every touched seat's offer safety (clear_offer_safe) and conserving (clear_conserves); uncertified_refused, gap_exceeding_refused
 import Kernel.ObjectiveTariff  -- the ONE public tariff of a declared Objective envelope (Capacity): Tariff.workOf, workOf_pos, workOf_mono; zeroCapacity, addCapacity; native admission and the kernel activity both price with it
+import Kernel.ObjectiveWorkAccount  -- GPT-6 row E: the whole-request work account of an Objective turn: Stage, declared, uncovered (the front-end stages judged from the stored pair BEFORE the replay), workOf prices every stage (workOf_stage_step, workOf_unitOf); instances frontEnd_refuses_oversized, core_refuses_oversized
 import Kernel.ObjectRecord  -- an object to the kernel: its record (pin, schema version, law, upgrade policy that only tightens, continuity, payer never authority) and admitWrite, the law judgment of every declared-state write; admitWrite_ok_iff, admitWrite_lawDenied_fails, admitWrite_payer_irrelevant, permits_tightens
+import Kernel.ObjectLaw  -- the enforced `law` fragment of a package: its meaning over the declared-state data (LawExpr.denote); compile_sound (the kernel judges exactly the meaning); package_law_enforced
 import Kernel.OutboxDelivery  -- stable terminal/outbox identity, receiver replay, and authenticated acknowledgements without invented transport liveness
 import Kernel.ProviderExecutionLease  -- prepaid provider work, irreversible start, terminal settlement, retries, races, and separately authorized refunds
 import Kernel.CanonicalEscrowMarket  -- authorized deposit/fill/cancel/expire/refund orders conserve resources, settle fees atomically, and reject replay or fill/close races
@@ -82,6 +85,9 @@ import Kernel.HyperedgeTier  -- Law 2 on the ONE turn model: commitTier tierOf :
 import Kernel.HyperedgeKnowledge  -- the epistemic reading of legs_agree: in the observation frame the apex H.tid is DISTRIBUTED KNOWLEDGE among the honest legs for ANY hyperedge and ANY faulty set (agreement_is_distributed_knowledge; distKnows_apex_iff_honest_agree the iff), and a fork — two honest legs reading different ids — is the absence of any distributed apex (fork_has_no_distributed_apex; splitTuple_no_hyperedge). Residual [HYPEREDGE-operational]
 import Kernel.FinalityLiveness  -- liveness as ONE carrier: PostGSTProgress bundles the replicated layer's three premises (available quorum, fair delivery, responsive replicas) as a realizer slot; progress reuses finalized_of_available_fair_responsive and the decider accepts it (checked_of_progress); the constitution's sentence as two theorems kept apart — cannot_forge (no liveness premise anywhere) and no_progress_without_quorum (IsEmpty PostGSTProgress); closed Fin 3 realizer built, dead quorum system / partition / never-delivering schedule each refuted at its own leg. Residuals [LIVENESS-gst] [LIVENESS-authenticated]
 import Kernel.NativeHost
+import Kernel.NativeHostServed -- KN2 2b-1: a validated served state (no history): validateServed, OpenedServed
+import Kernel.NativeHostLight -- KN2 2b-1: the validated light opening a session serves ported operations from
+import Kernel.NativeThinConsent  -- thin consent: what a member signs without replaying is what commits (thin_display_is_commit), lying Hosts refused by name
 import Kernel.NativeHostSession
 import Kernel.NativeReserveContinuity
 import Kernel.NativeHostGenesis
@@ -101,6 +107,7 @@ import Kernel.ContentResourceAudit
 import Kernel.ContentElementTree
 import Kernel.ContentResourceForestInstances  -- both poles of View.Forest (hypothesis ledger)
 import Kernel.ContentMarks
+import Kernel.ContentRunEdit
 import Kernel.AgentGrain
 import Kernel.AgentGrainAudit
 import Kernel.CapabilityRevocationReceiver
@@ -115,12 +122,12 @@ import Kernel.TurnOfIntent  -- T3: Turn.ofIntent = the diff of each written cell
 import Kernel.DeployedBridge  -- T3b: the deployed Bridge (lifecycle-image decoder + one StoreCodec.Wire per registered kind); bridge_decode_total_on_registry, deployed_cells_iff
 import Kernel.HostRefinesWorld  -- T3/T3b: Represents : Loaded -> World; ofIntent_run; deployed_refines_step; host_trace_represents_fold; confirmed_represents (rebase included); policy_source_birth_is_turn; birth_rom_image; poles appendOnly_rewrite_has_no_turn, policy_source_rewrite_has_no_turn; host_submit_is_step stated for T4
 import Kernel.DurableCheckpoint -- DATAMODEL C2: resume from a materialized checkpoint; honest resume = genesis replay
+import Kernel.DurableView -- KN2: executing against a per-request view; declared-key families
 import Kernel.WorldRoot  -- DATAMODEL §3.2/§3.4 C1: world root = AuthMap two-level root over (slot -> slot root), sparse evaluator = Scheme.root, RootBinding carrier discharging resume_sound, explicit-collision reduction, deployed cSHAKE scheme (256-bit hashed index), cSHAKE History; honest/tampered poles
 import Kernel.DocumentHistory  -- K-DOC-HISTORY: doc diff = DocumentHistory.diff over the two doc show line lists (added_iff, removed_iff, changed_iff)
 import Kernel.PresenceIndex  -- PLACE K-INDEX: lastSeen (cell, subject) and touched cell as exact folds of the accepted log (lastSeen_exact, touched_exact, index_monotone)
 import Kernel.LinkIndex  -- K-DOC-INDEX: links and backlinks as an exact fold of the accepted log (ofRecords_exact, backlinks_sound, backlinks_complete, backlinks_covered)
 import Kernel.WorldRootCache -- C2: the world root cached, one path per write; cache = spec root (insertWrite_root, deployedOf_root), stale cache refuted
-import Kernel.ApplicationDispatchUpper
 import Kernel.ApplicationGrainLaws
 import Kernel.ApplicationLifecycleBeginCheck
 import Kernel.ApplicationLifecycleClaimPolicyCheck

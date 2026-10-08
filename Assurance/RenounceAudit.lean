@@ -24,8 +24,8 @@ open Minidregg.Theory.Renounce
 set_option autoImplicit false
 
 variable {deployment : CapabilityRenounce.Deployment} {semantics : Digest}
-  {ambient : CapabilityRenounce.Ambient} {durable : CapabilityRenounce.Durable}
-  {command : Command} {prepared : Prepared deployment semantics ambient durable command}
+  {ambient : CapabilityRenounce.Ambient} {ground : CapabilityRenounce.Ground deployment}
+  {command : Command} {prepared : Prepared deployment semantics ambient ground command}
   {envelope : List UInt8}
 
 /-- **`renounce_requires_holder`, at the host.** The checked signature is over
@@ -34,7 +34,7 @@ renounced capability is the one stored at the named id, held by that signer. -/
 theorem accepted_signer_is_holder (accepted : Accepted prepared envelope) :
     accepted.receipt.request = ⟨.program, prepared.request⟩ ∧
       prepared.request.subject = command.subject ∧
-      (readCapability prepared.authority.snapshot.cell command.kind command.capability).map
+      (readCapability ground.authority.cell command.kind command.capability).map
         StoredCapability.head = some accepted.victim ∧
       accepted.victim.id = command.capability ∧
       accepted.victim.holder = .subject command.subject := by
@@ -47,10 +47,10 @@ theorem accepted_signer_is_holder (accepted : Accepted prepared envelope) :
 subject's current key epoch, registered and not revoked. After a key rotation
 (K-PREROTATE) this is the new key; the old key's signature does not verify. -/
 theorem accepted_signed_by_current_key (accepted : Accepted prepared envelope) :
-    ∃ key, currentSigningKey prepared.authority.snapshot.logical command.subject = some key ∧
-      key.keyEpoch = prepared.authority.snapshot.authState.subjectKeyEpoch command.subject ∧
-      isRegistered prepared.authority.snapshot.cell (signingKeyRevocation key) = true ∧
-      isRevoked prepared.authority.snapshot.cell (signingKeyRevocation key) = false := by
+    ∃ key, currentSigningKey ground.authority.logical command.subject = some key ∧
+      key.keyEpoch = ground.authority.authState.subjectKeyEpoch command.subject ∧
+      isRegistered ground.authority.cell (signingKeyRevocation key) = true ∧
+      isRevoked ground.authority.cell (signingKeyRevocation key) = false := by
   obtain ⟨requestExact, _⟩ :=
     CredentialSignatureAdmission.verified_request_exact _ _ _ _ accepted.bound
   have subjectExact : accepted.receipt.request.2.subject = command.subject := by
@@ -65,20 +65,20 @@ theorem accepted_signed_by_current_key (accepted : Accepted prepared envelope) :
 /-- The committed authority cell is the theory's post: the revoked set grows
 by exactly the renounced capability's key, and nothing else moves. -/
 theorem accepted_revokedOne (accepted : Accepted prepared envelope) :
-    RevokedOne (authState prepared.authority.snapshot.cell) (authState accepted.authorityPost)
+    RevokedOne (authState ground.authority.cell) (authState accepted.authorityPost)
       (.capability command.capability) :=
   revokedOne_of_patch accepted.validated
 
 /-- **`renounce_revokes_exactly_lineage`, at the host.** -/
 theorem accepted_revokes_exactly_lineage (accepted : Accepted prepared envelope) :
     (∀ key, key ∈ (authState accepted.authorityPost).revoked ↔
-      key = .capability command.capability ∨ key ∈ (authState prepared.authority.snapshot.cell).revoked) ∧
+      key = .capability command.capability ∨ key ∈ (authState ground.authority.cell).revoked) ∧
     (∀ (kind : ResourceKind) (cap : Capability kind) (request : Request kind),
       InLineage command.capability cap → ¬ cap.Admissible (authState accepted.authorityPost) request) ∧
     (∀ (kind : ResourceKind) (cap : Capability kind) (request : Request kind),
       ¬ InLineage command.capability cap →
         (cap.Admissible (authState accepted.authorityPost) request ↔
-          cap.Admissible (authState prepared.authority.snapshot.cell) request)) :=
+          cap.Admissible (authState ground.authority.cell) request)) :=
   renounce_revokes_exactly_lineage (accepted_revokedOne accepted)
 
 /-- **`renounce_then_use_refused`, at the host.** The renounced capability is
@@ -101,7 +101,7 @@ theorem accepted_preserves_others (accepted : Accepted prepared envelope)
     {kind : ResourceKind} (cap : Capability kind) (outside : ¬ InLineage command.capability cap)
     (request : Request kind) :
     cap.Admissible (authState accepted.authorityPost) request ↔
-      cap.Admissible (authState prepared.authority.snapshot.cell) request :=
+      cap.Admissible (authState ground.authority.cell) request :=
   renounce_preserves_others (accepted_revokedOne accepted) cap outside request
 
 /-- **`renounced_stays_revoked`, at the host.** -/
@@ -116,7 +116,7 @@ theorem accepted_stays_revoked (accepted : Accepted prepared envelope) :
 at the named id names any holder but the signer (or none is stored), no
 renounce of it is ever accepted. -/
 theorem nonholder_never_accepted
-    (other : ∀ stored, readCapability prepared.authority.snapshot.cell command.kind
+    (other : ∀ stored, readCapability ground.authority.cell command.kind
       command.capability = some stored → stored.head.holder ≠ .subject command.subject) :
     IsEmpty (Accepted prepared envelope) := by
   constructor
@@ -128,7 +128,7 @@ theorem nonholder_never_accepted
 /-- A capability already revoked is never renounced again (its holder is
 refused `alreadyRevoked` by the gate). -/
 theorem revoked_never_accepted
-    (revoked : isRevoked prepared.authority.snapshot.cell (.capability command.capability) = true) :
+    (revoked : isRevoked ground.authority.cell (.capability command.capability) = true) :
     IsEmpty (Accepted prepared envelope) := by
   constructor
   intro accepted

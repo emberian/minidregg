@@ -1,3 +1,5 @@
 /- Named verification gates; diagnostic programs have separate targets. -/
 import Verify.JointDecisionRecovery
-import Verify.ObjectiveSnapshot
+import Verify.ObjectiveManifest
+import Verify.ObjectiveManifestProjectionTest
+import Verify.ResourceReserveBirthFixture

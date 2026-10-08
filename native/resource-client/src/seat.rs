@@ -128,6 +128,7 @@ fn submit(ws: &Ws, file: &Value, out: &Path, prepare_only: bool) -> Result<Value
     let canonical = inspected.pointer("/header/canonical").and_then(Value::as_str)
         .ok_or("seat: plan lacks a header")?;
     let header = crate::decode_hex(canonical).map_err(|error| format!("seat: {error}"))?;
+    let donation = donation_gate(&inspected, file)?;
     let signature = crate::fsio::read_secret_in_private_dir(&ws.key)?.sign(&header).to_bytes();
     let ingress = invoke(ws, 216, &pair(&plan, &signature))?;
     write_new(&out.join("ingress.bin"), &ingress)?;
@@ -136,15 +137,31 @@ fn submit(ws: &Ws, file: &Value, out: &Path, prepare_only: bool) -> Result<Value
     let minted = inspected.pointer("/command/mintIds").cloned().unwrap_or(Value::Null);
     if prepare_only {
         return Ok(json!({"type": "prepared", "ingress": out.join("ingress.bin"), "transaction": transaction,
-            "seatAccount": seat, "mintIds": minted}));
+            "seatAccount": seat, "mintIds": minted, "donation": donation}));
     }
     let mut outcome = inspect(ws, "outcome", &invoke(ws, 217, &ingress)?)?;
     write_new(&out.join("outcome.json"), outcome.to_string().as_bytes())?;
     outcome["transaction"] = transaction;
     outcome["seatAccount"] = seat;
     outcome["mintIds"] = minted;
+    outcome["donation"] = json!(donation);
     outcome["ingress"] = json!(out.join("ingress.bin"));
     Ok(outcome)
+}
+
+/// An offer that wants nothing carries the donation marker (`Seats.Proposal.donate`): the contract
+/// may take its whole `give`. The signer sees it in the Host's plan inspection and the client
+/// refuses to sign one unless the command file says `"confirmDonation": true`.
+fn donation_gate(inspected: &Value, file: &Value) -> Result<bool> {
+    let donates = inspected.pointer("/command/turn/proposal/donate").and_then(Value::as_bool).unwrap_or(false);
+    if donates && file.get("confirmDonation").and_then(Value::as_bool) != Some(true) {
+        let give = inspected.pointer("/command/turn/proposal/give").map(Value::to_string).unwrap_or_default();
+        return Err(format!(
+            "seat: this offer is a DONATION: it wants nothing, so the contract may take its whole give {give}; \
+             add \"confirmDonation\": true to the command file to sign it"
+        ));
+    }
+    Ok(donates)
 }
 
 fn read_ingress(path: &Path) -> Result<Vec<u8>> {
@@ -192,4 +209,26 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     let _ = &ws.root;
     println!("{}", serde_json::to_string(&value).map_err(|e| e.to_string())?);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn plan(donate: bool) -> Value {
+        json!({"command": {"turn": {"kind": "offer", "proposal": {"give": [{"asset": "1", "amount": "10"}],
+            "want": [], "donate": donate}}}})
+    }
+
+    #[test]
+    fn donation_gate_refuses_an_unconfirmed_donation() {
+        let error = donation_gate(&plan(true), &json!({"turn": {}})).unwrap_err();
+        assert!(error.contains("DONATION") && error.contains("confirmDonation"), "{error}");
+    }
+
+    #[test]
+    fn donation_gate_passes_a_confirmed_donation_and_an_ordinary_offer() {
+        assert_eq!(donation_gate(&plan(true), &json!({"confirmDonation": true})).unwrap(), true);
+        assert_eq!(donation_gate(&plan(false), &json!({})).unwrap(), false);
+    }
 }

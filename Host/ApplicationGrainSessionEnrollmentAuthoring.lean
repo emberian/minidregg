@@ -90,7 +90,7 @@ private def observationSlot (config : Config) (opened : Opened config)
     (command : DeclaredResourceController.Command)
     (prepared : DeclaredResourceController.PreparedInvocation config.deployment config.profile
       ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
-      opened.durable command)
+      opened.ground command)
     (index resource : Nat) (capability : CapabilityId) (root : Digest) :
     Except String SigningSlot := do
   let probe : DeclaredResourceController.Target :=
@@ -98,14 +98,14 @@ private def observationSlot (config : Config) (opened : Opened config)
       observeCapability := none, schemaVersion := ContentResource.commandVersion, expectedTargetRoot := root,
       payload := .content ⟨[]⟩ }
   let wanted : Request .object :=
-    { DeclaredResourceController.requestFor prepared.authority.snapshot
+    { DeclaredResourceController.requestFor opened.ground.authority
         config.profile.semantics
         ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
         command probe root with verb := .observeObject }
   let marker := DeclaredResourceController.operationMarker
     config.deployment.domain config.profile.semantics command
   let header ← (CredentialSignatureAdmission.signingHeader
-      prepared.authority.snapshot marker (⟨.object, wanted⟩ : PackedEffectRequest)).mapError
+      opened.ground.authority marker (⟨.object, wanted⟩ : PackedEffectRequest)).mapError
       (fun _ => "enrollment observation signing key unavailable")
   pure ⟨9, index, CredentialSignedEnvelopeController.headerCodec.encode header⟩
 
@@ -224,7 +224,7 @@ def prepareForIssue (config : Config) (opened : Opened config)
   let prepared ← match DeclaredResourceController.prepare
       config.deployment config.profile
       ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
-      opened.durable command with
+      opened.ground command with
     | .ok prepared => pure prepared
     | .error reason => throw s!"enrollment joint preparation refused: {repr reason}"
   let invocation ← NativeHost.prepareLoaded config opened
@@ -258,15 +258,15 @@ def prepareVerified (config : Config) {target : Durable}
 headers, role/ticket/interface checks and original receipt remain exact. -/
 def prepareCarried (config : Config) (opened : Opened config)
     (custody : CarriedSegmentIO.PreservedPrefix config opened.durable) (request : Request) :
-    Except String Plan := do
-  let issue ← CarriedApplicationProvenance.selectIssue custody request.issueIndex
+    ExceptT String IO Plan := do
+  let issue ← ExceptT.mk (CarriedApplicationProvenance.selectIssue custody request.issueIndex)
   if issue.spec.ticket.resource != request.ticketResource then
     throw "carried enrollment ticket resource differs"
   prepareForIssue config opened request issue.spec issue.receipt
 
 def prepareRequestCarried (config : Config) (opened : Opened config)
     (custody : CarriedSegmentIO.PreservedPrefix config opened.durable) (bytes : List UInt8) :
-    Except String Plan := do
+    ExceptT String IO Plan := do
   let some request := requestCodec.decode bytes
     | throw "noncanonical session enrollment request"
   if requestCodec.encode request != bytes then
@@ -277,8 +277,8 @@ def prepareRequestCarried (config : Config) (opened : Opened config)
 come from the retained profile, new issues from the admitted target suffix. -/
 def prepareSuffix (config : Config) {anchor : Opened config} {target : Durable}
     (verified : NativeHostReplay.SuffixVerified config anchor target) (request : Request) :
-    Except String Plan := do
-  if request.issueIndex < anchor.durable.image.accepted.length then
+    ExceptT String IO Plan := do
+  if request.issueIndex < anchor.durable.height then
     let some origin := verified.origin
       | throw "old session issue lacks authenticated carried origin"
     let custody ← origin.rebindChecked verified.opened.durable
@@ -294,7 +294,7 @@ def prepareSuffix (config : Config) {anchor : Opened config} {target : Durable}
 
 def prepareRequestSuffix (config : Config) {anchor : Opened config} {target : Durable}
     (verified : NativeHostReplay.SuffixVerified config anchor target) (bytes : List UInt8) :
-    Except String Plan := do
+    ExceptT String IO Plan := do
   let some request := requestCodec.decode bytes
     | throw "noncanonical session enrollment request"
   if requestCodec.encode request != bytes then
@@ -358,7 +358,7 @@ current roots/headers and retained original receipt, never a fresh baseline. -/
 def assembleCurrentCarried (config : Config) (opened : Opened config)
     (custody : CarriedSegmentIO.PreservedPrefix config opened.durable)
     (plan : Plan) (signatures : List (List UInt8)) :
-    Except String (List UInt8) := do
+    ExceptT String IO (List UInt8) := do
   let fresh ← prepareCarried config opened custody plan.request
   if planCodec.encode fresh != planCodec.encode plan then
     throw "carried session enrollment plan no longer current"
@@ -368,7 +368,7 @@ def assembleCurrentCarried (config : Config) (opened : Opened config)
 def assembleCurrentSuffix (config : Config) {anchor : Opened config} {target : Durable}
     (verified : NativeHostReplay.SuffixVerified config anchor target)
     (plan : Plan) (signatures : List (List UInt8)) :
-    Except String (List UInt8) := do
+    ExceptT String IO (List UInt8) := do
   let fresh ← prepareSuffix config verified plan.request
   if planCodec.encode fresh != planCodec.encode plan then
     throw "session enrollment plan no longer current in carried service"

@@ -13,6 +13,9 @@ path = "src/main.rs"
 [features]
 # Private disposable-fixture instrumentation; absent from ordinary releases.
 integration-qualification = []
+# Disposable fixture builds only: the operating-system boundary (src/os.rs) is
+# answered by the modeled system in src/fixture_os.rs. Never in a release.
+fixture-os = ["minidregg-compatible-upgrade-custody/fixture-os"]
 
 [dependencies]
 minidregg-compatible-upgrade-custody = { path = "../compatible-upgrade-custody" }

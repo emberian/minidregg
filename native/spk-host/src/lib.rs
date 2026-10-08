@@ -59,6 +59,8 @@ pub mod install_service;
 #[cfg(target_os = "linux")]
 pub mod launch_descriptor_native;
 #[cfg(target_os = "linux")]
+mod lifecycle_receipt_lookup;
+#[cfg(target_os = "linux")]
 mod lifecycle_selector;
 #[cfg(target_os = "linux")]
 pub mod grain;
@@ -126,3 +128,8 @@ pub mod resident_route_control;
 
 #[cfg(target_os = "linux")]
 mod checkpoint_control;
+
+#[cfg(target_os = "linux")]
+mod os;
+#[cfg(all(target_os = "linux", feature = "fixture-os"))]
+pub mod fixture_os;

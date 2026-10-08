@@ -89,7 +89,7 @@ A fleet built on Bread's `dregg-client-sign` keeps its harness: `mini
 fleet-sign join|send|transfer` takes the same verbs, the same flags
 (`--profile`, `--topic`, `--to`, `--amount`, `--fund` on join, positional
 payload words) and prints exactly one JSON object with the same keys
-(`joined`/`cell`/`balance`, `sent`/`turn_hash`/`chain_index`/`finality`,
+(`joined`/`cell`/`balance`, `sent`/`turn_hash`/`receipt_hash`/`chain_index`/`finality`,
 `transferred`/`committed`). Two verbs are new: `receipt (--turn-hash TX |
 --head)` and `retry --attempt DIR`, the exact resubmission of retained bytes
 (an accepted original answers `replayed` with its original receipt).
@@ -97,6 +97,8 @@ Profiles live under `MINI_FLEET_HOME/profiles/NAME` (key, enrollment,
 workspace). The journey is
 [`native/resource-client/fleet-sign-journey.sh`](../native/resource-client/fleet-sign-journey.sh);
 growth is measured by `fleet-sign-growth.sh`.
+What to change in a harness, the env/flag rewrite table and the replay of Pug's own
+calls: [`FLEET-MIGRATION.md`](FLEET-MIGRATION.md).
 
 **Why a signer, not a gateway for Bread's signed bytes.** A Bread client
 signs `Turn::hash` (`dregg-turn-v3`: BLAKE3 over Bread's agent cell, nonce,
@@ -115,9 +117,25 @@ ignored: `--node-url http://…` (the profile is pinned to its Host's socket;
 bearer), `--accept-tentative` (one commitment level), `--fund` on send or
 transfer (no faucet), a 64-hex `--to` (accounts are the decimal `cell` a join
 printed). `join` runs where the sponsor's workspace is: the sponsor signs the
-admission and the funded birth. `turn_hash` is the Mini transaction id,
-`chain_index` the accepted count, `finality` is `accepted`; there is no
-receipt hash, the four-field receipt is printed as `receipt`.
+admission and the funded birth. `turn_hash` is the Mini transaction id as 64 lowercase hex (32 big-endian
+octets: the same number), `chain_index` the accepted count, `finality` is
+`accepted`. `receipt_hash` is SHA-256 over `MINI.FLEET-SIGN.RECEIPT-HASH/v1\0` and
+the four receipt fields (transaction id, event id, accepted count, world root),
+each as 32 big-endian octets; the four-field receipt itself is printed as
+`receipt`. `receipt --turn-hash` takes the 64-hex form (a decimal is refused by
+name).
+
+**One operation, at most one commit.** A harness retries a call it judged
+failed, and a fleet-sign process can die, or lose the Host's answer, after its
+turn reached the Host. Every `send` and `transfer` is therefore an operation
+(SHA-256 over `MINI.FLEET-SIGN.OPERATION/v1\0`, the verb and its arguments,
+printed as `operation`): the profile records it (`operation.json`), journals
+each attempt that may reach the Host (`operation-attempts`, after the attempt's
+submit marker, before its one submission), and forgets it only after the answer
+is printed. A later call that finds a record resolves it first, by exact
+resubmission of its live attempt; when the later call is the same operation it
+answers that receipt with `replayed: true`. A finished call repeated is a new
+operation and commits again (a deliberate repeat is not suppressed).
 
 **Pre-signature staleness re-plans.** A fleet turn's signed observation names
 the Host state it read. When another turn commits between the observation's

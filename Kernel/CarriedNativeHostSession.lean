@@ -18,13 +18,19 @@ structure Walked (config : Config) where
 def start (config : Config) (current : Durable)
     (custody : CarriedSegmentIO.PreservedPrefix config current) :
     IO (Except String (Walked config)) := do
-  match ← NativeHostReplay.verifyCarriedSuffixLoaded config current custody with
+  let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf config.transport ResourceBirthCodec.rootBytes current with
+    | .error detail => return .error s!"carried history reader: {detail}"
+    | .ok reader => pure reader
+  match ← NativeHostReplay.verifyCarriedSuffixLoaded config reader current custody with
   | .error failure => return .error s!"carried history refused at {failure.index}: {failure.detail}"
   | .ok verified => return .ok ⟨custody.start, current, verified⟩
 
 def refresh (config : Config) (prior : Walked config) (current : Durable) :
     IO (Except String (Walked config)) := do
-  match ← NativeHostReplay.extendSuffixVerified config prior.verified current with
+  let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf config.transport ResourceBirthCodec.rootBytes current with
+    | .error detail => return .error s!"carried history reader: {detail}"
+    | .ok reader => pure reader
+  match ← NativeHostReplay.extendSuffixVerified config reader prior.verified current with
   | .error failure => return .error s!"carried suffix refused at {failure.index}: {failure.detail}"
   | .ok verified => return .ok ⟨prior.anchor, current, verified⟩
 

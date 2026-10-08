@@ -1,0 +1,71 @@
+edition ObjectiveBend 1
+# A capped tally: world/activity/Tally.obend with two ENFORCED laws. Every object created from
+# this package has them installed by the kernel (Kernel/ObjectLawEnforced): no write of its
+# declared state may take `total` past 1000 or lower it, whoever makes the write, and the
+# creator's own law cannot remove them. The declared state type must hold `total` as a natural
+# (a creation whose state type lacks it is refused, naming `total`).
+law cap: new.total <= 1000
+law grows: monotone(total)
+# A tally resident on the resume-with-view kernel (Kernel/ObjectiveActivity).
+# Each yield writes the object's declared state and awaits one answer slot that
+# exactly one named subject decides within `patience` heights. Each resume
+# delivers the await's outcome TOGETHER WITH a view of the object's declared
+# state and its version, read in the resuming turn. The tally writes DELTAS: a
+# reply of `amount` is `add amount`, which the kernel applies to that view, so a
+# concurrent write (the owner's, or another tally's on the same object) is kept,
+# never overwritten. Its only `set` is the initial total, which the kernel admits
+# only when the birth creates the state (`init: keep` joins an existing object).
+# The deadline arrives as `timedOut`, which ends the tally with the total it saw.
+record State:
+  total: Nat
+sum EditNat:
+  keep: {}
+  set: Nat
+  add: Nat
+record Write:
+  total: EditNat
+record Start:
+  init: EditNat
+  decider: Nat
+record Ask:
+  decider: Nat
+record At:
+  at: Nat
+sum Source:
+  reply: Ask
+  height: At
+record Await:
+  write: Write
+  on: Source
+  patience: Nat
+sum Plan:
+  await: Await
+record Reply:
+  amount: Nat
+sum Outcome:
+  reply: Reply
+  refused: {}
+  unknown: {}
+  timedOut: {}
+  broken: {}
+  upgraded: {}
+record View:
+  version: Nat
+  state: State
+record Step:
+  outcome: Outcome
+  view: View
+sum Resumed:
+  resumed: Step
+def ask(start: Start, write: Write) -> Activity<Plan, Resumed, Nat>:
+  match perform(Plan.await({write: write, on: Source.reply({decider: start.decider}), patience: 4n})):
+    case resumed(step):
+      match step.outcome:
+        case reply(r): ask(start, {total: EditNat.add(r.amount)})
+        case unknown(_): ask(start, {total: EditNat.keep()})
+        case refused(_): step.view.state.total
+        case timedOut(_): step.view.state.total
+        case broken(_): step.view.state.total
+        case upgraded(_): step.view.state.total
+def tally(start: Start) -> Activity<Plan, Resumed, Nat>:
+  ask(start, {total: start.init})

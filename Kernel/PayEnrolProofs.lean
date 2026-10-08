@@ -106,11 +106,15 @@ theorem legs_enrol_cells (factory : FactoryCell deployment directory.directory) 
   | _, .renew _ _ _ _, same => by cases same
   | _, .journal _, same => by cases same
 
+/-- A journal writes, besides the pay and clock cells, only the factory at its
+loaded payload (the write that puts the payment under the factory's law). -/
 theorem legs_journal_writes (factory : FactoryCell deployment directory.directory)
     (reason : JournalReason) :
     ∀ {decision : Decision}
       (legs : Legs deployment profile ambient directory authority pay book tariff price decision),
-      decision = .journal reason → legs.writes factory = []
+      decision = .journal reason → legs.writes factory =
+        [ResourceBirthController.Concrete.packedWrite deployment.factoryId
+          ⟨.declaredObject, factory.payload⟩ ⟨.declaredObject, factory.payload⟩]
   | _, .journal _, _ => rfl
   | _, .enrol _ _, same => by cases same
   | _, .renew _ _ _ _, same => by cases same
@@ -129,7 +133,8 @@ theorem legs_renew_writes (factory : FactoryCell deployment directory.directory)
     ∀ {decision : Decision}
       (legs : Legs deployment profile ambient directory authority pay book tariff price decision),
       decision = .renew plan →
-        (legs.writes factory).map DataWrite.cellId = [⟨deployment.resourceBookId⟩]
+        (legs.writes factory).map DataWrite.cellId =
+          [⟨deployment.factoryId⟩, ⟨deployment.resourceBookId⟩]
   | _, .renew _ _ _ _, _ => rfl
   | _, .enrol _ _, same => by cases same
   | _, .journal _, same => by cases same
@@ -279,118 +284,140 @@ theorem enrol_grants_scoped (template : CanonicalRuntimeProfile.FactoryTemplate)
 
 end Authority
 
-/-! ## The accepted turn -/
+/-! ## The admitted turn -/
 
-section Accepted
+section Admitted
 
 variable {F : Type} [Field F] [DecidableEq F] {deployment : CanonicalCellRegistry.Deployment}
   {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
-  {ingress : DecodedIngress}
+  {ingress : DecodedIngress} {laws : ReceivingLaw.Laws Durable} {m : Type → Type}
+  {oracle : CredentialSignatureIO.Oracle m}
 
-theorem intent_writes_pay (accepted : AcceptedEnrol deployment profile ambient durable ingress) :
-    ((intent accepted).writes.map DataWrite.cellId).head? = some (PayCellDomain.cellIdOf deployment) :=
+/-- The admitted enrollment's durable intent. -/
+abbrev intentOf (admission : ((payEnrolFamily deployment profile).receiver laws oracle).Admitted
+    ambient durable ingress) : DataIntent rootBytes :=
+  ((payEnrolFamily deployment profile).receiver laws oracle).intent admission.accepted
+
+theorem intent_writes (admission : ((payEnrolFamily deployment profile).receiver laws oracle).Admitted
+    ambient durable ingress) :
+    (intentOf admission).writes = writes admission.accepted.prepared.planned := rfl
+
+theorem intent_writes_pay (admission : ((payEnrolFamily deployment profile).receiver laws oracle).Admitted
+    ambient durable ingress) :
+    ((intentOf admission).writes.map DataWrite.cellId).head? = some (PayCellDomain.cellIdOf deployment) :=
   rfl
 
-/-- **`enrol_atomic`**: an accepted enrollment writes the authority cell, the
+/-- **`enrol_atomic`**: an admitted enrollment writes the authority cell, the
 factory, the Book and the pay cell in its one intent, and every outcome of
 `execute` exposes all of its writes or none. -/
-theorem enrol_atomic (accepted : AcceptedEnrol deployment profile ambient durable ingress)
-    (plan : EnrolPlan) (enrolled : accepted.prepared.decision = .enrol plan)
+theorem enrol_atomic (admission : ((payEnrolFamily deployment profile).receiver laws oracle).Admitted
+    ambient durable ingress)
+    (plan : EnrolPlan) (enrolled : admission.accepted.prepared.planned.decision = .enrol plan)
     (schedule : Schedule) (before : DataSnapshot rootBytes) :
-    (cellIdOf deployment ∈ (intent accepted).writes.map DataWrite.cellId ∧
-      (⟨deployment.factoryId⟩ : CellId) ∈ (intent accepted).writes.map DataWrite.cellId ∧
-      (⟨deployment.resourceBookId⟩ : CellId) ∈ (intent accepted).writes.map DataWrite.cellId ∧
-      PayCellDomain.cellIdOf deployment ∈ (intent accepted).writes.map DataWrite.cellId) ∧
-    ((∀ write ∈ (intent accepted).writes,
-        ((execute schedule before (intent accepted)).storeAfter before).canonicalBytes write.cellId =
+    (cellIdOf deployment ∈ (intentOf admission).writes.map DataWrite.cellId ∧
+      (⟨deployment.factoryId⟩ : CellId) ∈ (intentOf admission).writes.map DataWrite.cellId ∧
+      (⟨deployment.resourceBookId⟩ : CellId) ∈ (intentOf admission).writes.map DataWrite.cellId ∧
+      PayCellDomain.cellIdOf deployment ∈ (intentOf admission).writes.map DataWrite.cellId) ∧
+    ((∀ write ∈ (intentOf admission).writes,
+        ((execute schedule before (intentOf admission)).storeAfter before).canonicalBytes write.cellId =
           before.canonicalBytes write.cellId) ∨
-      (∀ write ∈ (intent accepted).writes,
-        ((execute schedule before (intent accepted)).storeAfter before).canonicalBytes write.cellId =
+      (∀ write ∈ (intentOf admission).writes,
+        ((execute schedule before (intentOf admission)).storeAfter before).canonicalBytes write.cellId =
           write.canonicalPostBytes)) := by
+  let planned := admission.accepted.prepared.planned
   obtain ⟨authorityCell, factoryCell, bookCell⟩ :=
-    legs_enrol_cells accepted.prepared.factory plan accepted.prepared.legs enrolled
-  refine ⟨⟨?_, ?_, ?_, ?_⟩, multi_cell_intent_atomic schedule before (intent accepted)
-    accepted.physical.1⟩
+    legs_enrol_cells planned.factory plan planned.legs enrolled
+  have nodup := (Minidregg.Kernel.Receiving.Family.shape_sound (F := payEnrolFamily deployment profile)
+    laws admission.lawful.1).1
+  refine ⟨⟨?_, ?_, ?_, ?_⟩, multi_cell_intent_atomic schedule before (intentOf admission) nodup⟩
   · exact List.mem_cons_of_mem _ (List.mem_cons_of_mem _ authorityCell)
   · exact List.mem_cons_of_mem _ (List.mem_cons_of_mem _ factoryCell)
   · exact List.mem_cons_of_mem _ (List.mem_cons_of_mem _ bookCell)
   · exact List.mem_cons_self
 
-/-- **`self_enroll_nullifier`**: every accepted turn of this receiver spends
-the transfer's nullifier, so a durable snapshot that has consumed it refuses
-the turn at preflight (`DataIntent.consumed_nullifier_refused`). -/
-theorem self_enroll_nullifier (accepted : AcceptedEnrol deployment profile ambient durable ingress)
+/-- **`self_enroll_nullifier`**: every admitted turn of this family spends the
+transfer's nullifier, so a durable snapshot that has consumed it refuses the turn
+at preflight (`DataIntent.consumed_nullifier_refused`). -/
+theorem self_enroll_nullifier (admission : ((payEnrolFamily deployment profile).receiver laws oracle).Admitted
+    ambient durable ingress)
     (before : DataSnapshot rootBytes)
     (spent : before.model.consumed (nullifier deployment.domain ingress.command.observation) = true) :
-    (intent accepted).preflight before ≠ .ok () :=
-  DataIntent.consumed_nullifier_refused before (intent accepted) _ List.mem_cons_self spent
+    (intentOf admission).preflight before ≠ .ok () :=
+  DataIntent.consumed_nullifier_refused before (intentOf admission) _
+    (List.mem_append_left _ List.mem_cons_self) spent
 
 /-- The tip's tick nullifier is spent too: one report per tip slot, across
 both pay receivers. -/
-theorem self_enroll_tick (accepted : AcceptedEnrol deployment profile ambient durable ingress)
+theorem self_enroll_tick (admission : ((payEnrolFamily deployment profile).receiver laws oracle).Admitted
+    ambient durable ingress)
     (before : DataSnapshot rootBytes)
     (spent : before.model.consumed (tickNullifier deployment.domain ingress.command.tip) = true) :
-    (intent accepted).preflight before ≠ .ok () :=
-  DataIntent.consumed_nullifier_refused before (intent accepted) _
-    (List.mem_cons_of_mem _ List.mem_cons_self) spent
+    (intentOf admission).preflight before ≠ .ok () :=
+  DataIntent.consumed_nullifier_refused before (intentOf admission) _
+    (List.mem_append_left _ (List.mem_cons_of_mem _ List.mem_cons_self)) spent
 
-/-- **`journal_mints_nothing`**: a journaled payment writes the pay cell and the
-clock cell and nothing else — no Book write, so no mint — and its pay patch is
-exactly the journal row plus the authenticated chain tip. -/
-theorem journal_mints_nothing (accepted : AcceptedEnrol deployment profile ambient durable ingress)
-    (reason : JournalReason) (journaled : accepted.prepared.decision = .journal reason) :
-    (intent accepted).writes.map DataWrite.cellId =
-        [PayCellDomain.cellIdOf deployment, ClockCellDomain.cellIdOf deployment] ∧
-    patchOf ingress.command accepted.prepared.legs = journalPatch ingress.command.observation reason ++
-      PayChainTip.patch (chainTipOf accepted.prepared.pay.cell.logical) ingress.command.tip ∧
-    ∀ (before : DataSnapshot rootBytes) (cellId : CellId), cellId ≠ PayCellDomain.cellIdOf deployment →
-      cellId ≠ ClockCellDomain.cellIdOf deployment →
-      (DataSnapshot.install before (intent accepted)).canonicalBytes cellId =
-        before.canonicalBytes cellId := by
-  have empty := legs_journal_writes accepted.prepared.factory reason accepted.prepared.legs journaled
-  refine ⟨?_, legs_journal_patch _ reason accepted.prepared.legs journaled, ?_⟩
-  · change (payWrite accepted.prepared :: clockWrite accepted.prepared ::
-      accepted.prepared.legs.writes accepted.prepared.factory).map DataWrite.cellId = _
-    rw [empty]
-    rfl
-  · intro before cellId other otherClock
-    rw [DataSnapshot.install_canonicalBytes]
-    change (DataSnapshot.lookupPostBytes cellId
-      (payWrite accepted.prepared :: clockWrite accepted.prepared ::
-        accepted.prepared.legs.writes accepted.prepared.factory)).getD _ = _
-    rw [empty]
-    have pay : (payWrite accepted.prepared).cellId ≠ cellId := fun same => other same.symm
-    have clock : (clockWrite accepted.prepared).cellId ≠ cellId := fun same => otherClock same.symm
-    simp [DataSnapshot.lookupPostBytes, pay, clock]
+/-- An admitted ENROLLMENT also spends its birth identity's authority marker
+(`Family.spent`): one birth per identity, across every birth path. -/
+theorem enrol_spends_marker (admission : ((payEnrolFamily deployment profile).receiver laws oracle).Admitted
+    ambient durable ingress) :
+    admission.accepted.prepared.planned.legs.nullifiers ⊆ (intentOf admission).nullifiers :=
+  fun _ member => List.mem_append_right _ member
 
-/-- **`renew_only_extends`**: a renewal writes the pay cell, the clock cell and
-the Book and nothing else; its pay patch is the enrolment row with only its
-lease changed, plus the authenticated chain tip; that lease never shortens and is never behind the tip. -/
-theorem renew_only_extends (accepted : AcceptedEnrol deployment profile ambient durable ingress)
-    (plan : RenewPlan) (renewed : accepted.prepared.decision = .renew plan) :
-    (intent accepted).writes.map DataWrite.cellId =
+/-- **`journal_mints_nothing`**: a journaled payment writes the pay cell, the
+clock cell and the factory at its loaded payload, and nothing else -- no Book
+write, so no mint -- and its pay patch is exactly the journal row plus the
+authenticated chain tip. -/
+theorem journal_mints_nothing (admission : ((payEnrolFamily deployment profile).receiver laws oracle).Admitted
+    ambient durable ingress)
+    (reason : JournalReason) (journaled : admission.accepted.prepared.planned.decision = .journal reason) :
+    (intentOf admission).writes.map DataWrite.cellId =
+        [PayCellDomain.cellIdOf deployment, ClockCellDomain.cellIdOf deployment, ⟨deployment.factoryId⟩] ∧
+    (factoryWrite admission.accepted.prepared.planned ∈ (intentOf admission).writes) ∧
+    patchOf ingress.command admission.accepted.prepared.planned.legs =
+      journalPatch ingress.command.observation reason ++
+        PayChainTip.patch (chainTipOf admission.accepted.prepared.planned.pay.cell.logical)
+          ingress.command.tip := by
+  let planned := admission.accepted.prepared.planned
+  have only := legs_journal_writes planned.factory reason planned.legs journaled
+  refine ⟨?_, factoryWrite_mem planned, legs_journal_patch _ reason planned.legs journaled⟩
+  change (payWrite planned :: clockWrite planned ::
+    planned.legs.writes planned.factory).map DataWrite.cellId = _
+  rw [only]
+  rfl
+
+/-- **`renew_only_extends`**: a renewal writes the pay cell, the clock cell, the
+factory at its loaded payload and the Book, and nothing else; its pay patch is the
+enrolment row with only its lease changed, plus the authenticated chain tip; that
+lease never shortens and is never behind the tip. -/
+theorem renew_only_extends (admission : ((payEnrolFamily deployment profile).receiver laws oracle).Admitted
+    ambient durable ingress)
+    (plan : RenewPlan) (renewed : admission.accepted.prepared.planned.decision = .renew plan) :
+    (intentOf admission).writes.map DataWrite.cellId =
         [PayCellDomain.cellIdOf deployment, ClockCellDomain.cellIdOf deployment,
-          ⟨deployment.resourceBookId⟩] ∧
-    ∃ record, enrolmentAt accepted.prepared.pay.cell.logical plan.memo.miniKey = some record ∧
-      patchOf ingress.command accepted.prepared.legs =
+          ⟨deployment.factoryId⟩, ⟨deployment.resourceBookId⟩] ∧
+    ∃ record, enrolmentAt admission.accepted.prepared.planned.pay.cell.logical plan.memo.miniKey =
+        some record ∧
+      patchOf ingress.command admission.accepted.prepared.planned.legs =
         [.write .enrolment plan.memo.miniKey record { record with leaseUntil := plan.leaseUntil }] ++
-          PayChainTip.patch (chainTipOf accepted.prepared.pay.cell.logical) ingress.command.tip ∧
+          PayChainTip.patch (chainTipOf admission.accepted.prepared.planned.pay.cell.logical)
+            ingress.command.tip ∧
       record.leaseUntil ≤ plan.leaseUntil ∧ ingress.command.tip.hour ≤ plan.leaseUntil := by
-  have bookOnly := legs_renew_writes accepted.prepared.factory plan accepted.prepared.legs renewed
+  let planned := admission.accepted.prepared.planned
+  have bookOnly := legs_renew_writes planned.factory plan planned.legs renewed
   obtain ⟨record, recorded, patched⟩ :=
-    legs_renew_patch ingress.command plan accepted.prepared.legs renewed
-  have decided := accepted.prepared.decided
+    legs_renew_patch ingress.command plan planned.legs renewed
+  have decided := planned.decided
   rw [renewed] at decided
   obtain ⟨record', recorded', -, -, longer, behind, -⟩ := renew_extends_lease_never_shortens decided
   rw [recorded] at recorded'
   cases recorded'
   refine ⟨?_, record, recorded, patched, longer, behind⟩
-  change (payWrite accepted.prepared :: clockWrite accepted.prepared ::
-    accepted.prepared.legs.writes accepted.prepared.factory).map DataWrite.cellId = _
+  change (payWrite planned :: clockWrite planned ::
+    planned.legs.writes planned.factory).map DataWrite.cellId = _
   rw [List.map_cons, List.map_cons, bookOnly]
   rfl
 
-end Accepted
+end Admitted
 
 /-! ## The float nets zero -/
 
@@ -543,6 +570,8 @@ theorem enrol_price_is_fifty_dregg_plus_birth_fee (price : Price) :
 #assert_axioms enrol_grants_scoped
 #assert_axioms intent_writes_pay
 #assert_axioms enrol_atomic
+#assert_axioms intent_writes
+#assert_axioms enrol_spends_marker
 #assert_axioms self_enroll_nullifier
 #assert_axioms self_enroll_tick
 #assert_axioms journal_mints_nothing

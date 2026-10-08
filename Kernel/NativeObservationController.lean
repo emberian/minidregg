@@ -84,7 +84,7 @@ private def require (reason : RefusalReason) (condition : Bool) : Except Refusal
   if condition then .ok () else .error (.of reason)
 
 abbrev observeVerb := ResourceObservationAdmission.observeVerb
-abbrev book (context : Context deployment durable) := ResourceObservationAdmission.book context
+abbrev book (context : Context deployment) := ResourceObservationAdmission.book context
 abbrev accountBalanceMap := CanonicalAccountView.accountBalanceMap
 abbrev accountCut := CanonicalAccountView.accountCut
 abbrev balanceStream := CanonicalAccountView.balanceStream
@@ -98,13 +98,13 @@ theorem accountCut_noninterference (left right : CanonicalResourceKernel.Book) (
     accountCut left account = accountCut right account :=
   CanonicalAccountView.accountCut_noninterference left right account same
 
-def balances (context : Context deployment durable) (grant : GrantRef) : Option (List (Nat × Int)) :=
+def balances (context : Context deployment) (grant : GrantRef) : Option (List (Nat × Int)) :=
   ResourceObservationAdmission.balances context grant.kind grant.target
 
 abbrev Target := ResourceKind × Nat
 
-def declaredKind (context : Context deployment durable) (target : Nat) : Option ResourceKind :=
-  match context.directory.directory.slots target with
+def declaredKind (context : Context deployment) (target : Nat) : Option ResourceKind :=
+  match context.directory.slots target with
   | .present packed => ResourceTargetAdmission.externalKind packed.kind
   | _ => none
 
@@ -114,7 +114,7 @@ loaded Book law, makes fresh registrations incapable of probing hidden funds.
 An existing account cannot be hidden merely by listing it as a proposed birth.
 All debit sources are included, even when the eventual operation would fail
 its factory fee/funding checks. Recipient credits confer no read obligation. -/
-def requiredTargets (context : Context deployment durable) (intent : Intent) :
+def requiredTargets (context : Context deployment) (intent : Intent) :
     Except Refusal (List Target) := do
   match intent.purpose with
   | .query query => pure [(query.kind, query.target)]
@@ -171,7 +171,7 @@ def requiredTargets (context : Context deployment durable) (intent : Intent) :
             some (.account, operation.posting.source) else none
         pure ((.object, descriptor.factory.value) :: sources).eraseDups
 
-def footprintExact (context : Context deployment durable) (intent : Intent) : Except Refusal Unit :=
+def footprintExact (context : Context deployment) (intent : Intent) : Except Refusal Unit :=
   match requiredTargets context intent with
   | .error reason => .error reason
   | .ok required =>
@@ -180,13 +180,13 @@ def footprintExact (context : Context deployment durable) (intent : Intent) : Ex
 
 /-- Missing, additional, reordered or wrong-kind read selections are all
 refused before any selected values can be returned. -/
-theorem footprint_mismatch_refused (context : Context deployment durable) (intent : Intent)
+theorem footprint_mismatch_refused (context : Context deployment) (intent : Intent)
     (required : List Target) (derived : requiredTargets context intent = .ok required)
     (different : intent.grants.map (fun grant => (grant.kind, grant.target)) ≠ required) :
     footprintExact context intent = .error (.of .malformed) := by
   simp [footprintExact, derived, different]
 
-theorem footprint_success_exact (context : Context deployment durable) (intent : Intent)
+theorem footprint_success_exact (context : Context deployment) (intent : Intent)
     (required : List Target) (derived : requiredTargets context intent = .ok required)
     (accepted : footprintExact context intent = .ok ()) :
     intent.grants.map (fun grant => (grant.kind, grant.target)) = required := by
@@ -194,104 +194,104 @@ theorem footprint_success_exact (context : Context deployment durable) (intent :
   rw [footprint_mismatch_refused context intent required derived different] at accepted
   cases accepted
 
-private def bindingBytesAt (deployment : Deployment) (worldRoot semantics : Digest)
+def bindingBytesAt (deployment : Deployment) (worldRoot semantics : Digest)
     (intent : Intent) (grant : GrantRef) : List UInt8 :=
   (StreamCodec.product digestStream (StreamCodec.product digestStream
     (StreamCodec.product digestStream (StreamCodec.product digestStream grantStream)))).encode
       (deployment.domain, semantics,
         worldRoot, intentIdentity intent, grant)
 
-def bindingBytes (_context : Context deployment durable) (semantics : Digest)
+def bindingBytes (context : Context deployment) (semantics : Digest)
     (intent : Intent) (grant : GrantRef) : List UInt8 :=
-  bindingBytesAt deployment (durable.worldRoot)
+  bindingBytesAt deployment (context.worldRoot)
     semantics intent grant
 
-private def effectIdentityAt (deployment : Deployment) (worldRoot semantics : Digest)
+def effectIdentityAt (deployment : Deployment) (worldRoot semantics : Digest)
     (intent : Intent) (grant : GrantRef) : Digest :=
   (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.OBSERVE-EFFECT/v4".toUTF8.toList
     (bindingBytesAt deployment worldRoot semantics intent grant)).digest
 
-def effectIdentity (context : Context deployment durable) (semantics : Digest)
+def effectIdentity (context : Context deployment) (semantics : Digest)
     (intent : Intent) (grant : GrantRef) : Digest :=
-  effectIdentityAt deployment (durable.worldRoot)
+  effectIdentityAt deployment (context.worldRoot)
     semantics intent grant
 
-private def markerAt (deployment : Deployment) (worldRoot semantics : Digest)
+def markerAt (deployment : Deployment) (worldRoot semantics : Digest)
     (intent : Intent) (grant : GrantRef) : Nat :=
   (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.OBSERVE-SIGNATURE/v4".toUTF8.toList
     (bindingBytesAt deployment worldRoot semantics intent grant)).digest.value
 
-def marker (context : Context deployment durable) (semantics : Digest)
+def marker (context : Context deployment) (semantics : Digest)
     (intent : Intent) (grant : GrantRef) : Nat :=
-  markerAt deployment (durable.worldRoot)
+  markerAt deployment (context.worldRoot)
     semantics intent grant
 
-theorem effectIdentity_exact (context : Context deployment durable) (semantics : Digest)
+theorem effectIdentity_exact (context : Context deployment) (semantics : Digest)
     (intent : Intent) (grant : GrantRef) :
     effectIdentity context semantics intent grant =
       effectIdentityAt deployment
-        (durable.worldRoot)
+        (context.worldRoot)
         semantics intent grant := by
   rfl
 
-theorem marker_exact (context : Context deployment durable) (semantics : Digest)
+theorem marker_exact (context : Context deployment) (semantics : Digest)
     (intent : Intent) (grant : GrantRef) :
     marker context semantics intent grant =
       markerAt deployment
-        (durable.worldRoot)
+        (context.worldRoot)
         semantics intent grant := by
   rfl
 
-theorem bindingBytesAt_exact (context : Context deployment durable) (semantics : Digest)
+theorem bindingBytesAt_exact (context : Context deployment) (semantics : Digest)
     (intent : Intent) (grant : GrantRef) :
-    bindingBytesAt deployment (durable.worldRoot)
+    bindingBytesAt deployment (context.worldRoot)
       semantics intent grant = bindingBytes context semantics intent grant := by
   rfl
 
-private def requestAt (context : Context deployment durable) (worldRoot semantics : Digest)
+private def requestAt (context : Context deployment) (worldRoot semantics : Digest)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent)
     (grant : GrantRef) (preRoot : Digest) : Request grant.kind where
   domain := deployment.domain
   semantics := semantics
   federation := federation
   subject := intent.subject
-  subjectKeyEpoch := context.authority.snapshot.authState.subjectKeyEpoch intent.subject
+  subjectKeyEpoch := context.authority.authState.subjectKeyEpoch intent.subject
   target := ⟨grant.target⟩
   verb := observeVerb grant.kind
   argsDigest := intentIdentity intent
   effectsDigest := effectIdentityAt deployment worldRoot semantics intent grant
   nonce := intent.nonce
-  height := genesisHeight + durable.image.accepted.length
+  height := genesisHeight + context.height
   preStateRoot := preRoot
   policyId := ⟨grant.target⟩
-  policyEpoch := context.authority.snapshot.authState.policyEpoch ⟨grant.target⟩
-  policyRevision := context.authority.snapshot.authState.policyRevision ⟨grant.target⟩
+  policyEpoch := context.authority.authState.policyEpoch ⟨grant.target⟩
+  policyRevision := context.authority.authState.policyRevision ⟨grant.target⟩
   cost := (intentCodec.encode intent).length
 
-def request (context : Context deployment durable) (semantics : Digest)
+def request (context : Context deployment) (semantics : Digest)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent)
     (grant : GrantRef) (preRoot : Digest) : Request grant.kind :=
-  requestAt context (durable.worldRoot)
+  requestAt context (context.worldRoot)
     semantics federation genesisHeight intent grant preRoot
 
-theorem requestAt_exact (context : Context deployment durable) (semantics : Digest)
+theorem requestAt_exact (context : Context deployment) (semantics : Digest)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent)
     (grant : GrantRef) (preRoot : Digest) :
-    requestAt context (durable.worldRoot)
+    requestAt context (context.worldRoot)
       semantics federation genesisHeight intent grant preRoot =
       request context semantics federation genesisHeight intent grant preRoot := by
   rfl
 
 abbrev readPatch := ResourceObservationAdmission.readPatch
 
-def readFamily (context : Context deployment durable) (semantics : Digest)
+def readFamily (context : Context deployment) (semantics : Digest)
     (federation : FederationId) (genesisHeight : Nat) (grant : GrantRef)
     (kind : CanonicalCellRegistry.Kind)
     (pre : Materialized (CanonicalCellRegistry.materializer kind)) (intent : Intent) :=
   ResourceObservationAdmission.readFamily
     (request context semantics federation genesisHeight intent grant pre.root) kind pre
 
-def readCandidate (context : Context deployment durable) (semantics : Digest)
+def readCandidate (context : Context deployment) (semantics : Digest)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent)
     (grant : GrantRef) (kind : CanonicalCellRegistry.Kind)
     (pre : Materialized (CanonicalCellRegistry.materializer kind)) :=
@@ -325,9 +325,9 @@ theorem authority_cell_is_not_observable (kind : ResourceKind) :
   cases kind <;> rfl
 
 /-- The fields the grant's capability names (`none`: every field). -/
-def narrowedFields (context : Context deployment durable) (grant : GrantRef) :
+def narrowedFields (context : Context deployment) (grant : GrantRef) :
     Option (Finset CellField) :=
-  match CredentialAuthorityState.readCapability context.authority.snapshot.cell grant.kind
+  match CredentialAuthorityState.readCapability context.authority.cell grant.kind
       grant.capability with
   | some stored => stored.head.scope.fields
   | none => none
@@ -336,27 +336,27 @@ def narrowedFields (context : Context deployment durable) (grant : GrantRef) :
 cell whose root hides what it may not read: a blinded cell.  Every query's
 signing header carries the cell root (`requestAt … preStateRoot`), so the
 refusal is at selection, before any challenge leaves the host. -/
-def HidingReady (context : Context deployment durable) (grant : GrantRef)
+def HidingReady (context : Context deployment) (grant : GrantRef)
     (packed : PackedCell Registry) : Prop :=
   narrowedFields context grant = none ∨
     CanonicalCellRegistry.blinded packed.kind packed.payload.logical = true
 
-instance hidingReadyDecidable (context : Context deployment durable) (grant : GrantRef)
+instance hidingReadyDecidable (context : Context deployment) (grant : GrantRef)
     (packed : PackedCell Registry) : Decidable (HidingReady context grant packed) := by
   unfold HidingReady; infer_instance
 
-structure Selected (context : Context deployment durable) (grant : GrantRef) where
+structure Selected (context : Context deployment) (grant : GrantRef) where
   private mk ::
   packed : PackedCell Registry
-  present : context.directory.directory.slots grant.target = .present packed
+  present : context.directory.slots grant.target = .present packed
   law : CanonicalCellRegistry.CellLaw deployment grant.target packed
   role : observableKind grant.kind packed.kind = true
   hides : HidingReady context grant packed
   accountBalances : List (Nat × Int)
   balancesExact : balances context grant = some accountBalances
 
-def select (context : Context deployment durable) (grant : GrantRef) : Option (Selected context grant) :=
-  match present : context.directory.directory.slots grant.target with
+def select (context : Context deployment) (grant : GrantRef) : Option (Selected context grant) :=
+  match present : context.directory.slots grant.target with
   | .absent => none
   | .present packed =>
       if law : CanonicalCellRegistry.CellLaw deployment grant.target packed then
@@ -370,7 +370,7 @@ def select (context : Context deployment durable) (grant : GrantRef) : Option (S
       else none
 
 /-- **A narrowed reader is served only a blinded cell.** -/
-theorem selected_narrowed_is_blinded {context : Context deployment durable} {grant : GrantRef}
+theorem selected_narrowed_is_blinded {context : Context deployment} {grant : GrantRef}
     (selected : Selected context grant) {fields : Finset CellField}
     (narrowed : narrowedFields context grant = some fields) :
     CanonicalCellRegistry.blinded selected.packed.kind selected.packed.payload.logical = true := by
@@ -380,7 +380,7 @@ theorem selected_narrowed_is_blinded {context : Context deployment durable} {gra
 
 variable {F : Type} [Field F] [DecidableEq F]
 
-abbrev ReadPreparation (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
+abbrev ReadPreparation (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent)
     (grant : GrantRef) (selected : Selected context grant) :=
   ResourceObservationAdmission.Prepared context profile
@@ -389,7 +389,7 @@ abbrev ReadPreparation (context : Context deployment durable) (profile : Canonic
 
 /-- The retained lower admission is the same resource-local no-op policy gate
 used before exposing participants to foreign policies in joint submission. -/
-structure CheckedGrant (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
+structure CheckedGrant (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent) (grant : GrantRef) where
   private mk ::
   selected : Selected context grant
@@ -399,29 +399,29 @@ structure CheckedGrant (context : Context deployment durable) (profile : Canonic
   envelope : List UInt8
   checked : ResourceObservationAdmission.Checked preparation envelope
 
-private def headerAt (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
+private def headerAt (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (worldRoot : Digest)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent) (grant : GrantRef) :
     Except Refusal CredentialSignedEnvelopeController.SignedHeader := do
   let selected ← need .noGrant (select context grant)
-  (CredentialSignatureAdmission.signingHeader context.authority.snapshot
+  (CredentialSignatureAdmission.signingHeader context.authority
     (markerAt deployment worldRoot profile.semantics intent grant)
     ⟨grant.kind, requestAt context worldRoot profile.semantics federation genesisHeight
       intent grant selected.packed.payload.root⟩).mapError
       (fun reason => .of (RefusalReason.ofSignature reason))
 
-def header (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
+def header (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent) (grant : GrantRef) :
     Except Refusal CredentialSignedEnvelopeController.SignedHeader :=
   headerAt context profile
-    (durable.worldRoot)
+    (context.worldRoot)
     federation genesisHeight intent grant
 
-theorem headerAt_exact (context : Context deployment durable)
+theorem headerAt_exact (context : Context deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (federation : FederationId)
     (genesisHeight : Nat) (intent : Intent) (grant : GrantRef) :
     headerAt context profile
-      (durable.worldRoot)
+      (context.worldRoot)
       federation genesisHeight intent grant =
       header context profile federation genesisHeight intent grant := by
   rfl
@@ -439,12 +439,12 @@ coordinate), `badSignature` otherwise. -/
 
 /-- The key an observation request must be signed by: the subject's current signing key,
 registered and not revoked, Ed25519. A subject without one is `unknownKey`. -/
-def intentKey (context : Context deployment durable) (subject : SubjectId) :
+def intentKey (context : Context deployment) (subject : SubjectId) :
     Except Refusal (List UInt8) :=
-  match CredentialAuthorityState.currentSigningKey context.authority.snapshot.logical subject with
+  match CredentialAuthorityState.currentSigningKey context.authority.logical subject with
   | none => .error (.of .unknownKey)
   | some key =>
-      if CredentialAuthorityState.keyStanding context.authority.snapshot.cell
+      if CredentialAuthorityState.keyStanding context.authority.cell
           (CredentialAuthorityState.signingKeyRevocation key) = .live ∧
           key.algorithm = CredentialSignatureAdmission.ed25519Algorithm ∧
           key.publicKey.length = 32 then
@@ -493,7 +493,7 @@ theorem authenticated_ok_iff (key : Except Refusal (List UInt8))
   | ok publicKey => rcases verdict with _ | (_ | _) <;> simp [authenticated]
 
 /-- A subject's key is selected, or refused `unknownKey`. -/
-theorem intentKey_refusal (context : Context deployment durable) (subject : SubjectId)
+theorem intentKey_refusal (context : Context deployment) (subject : SubjectId)
     (refusal : Refusal) (refused : intentKey context subject = .error refusal) :
     refusal = .of .unknownKey := by
   unfold intentKey at refused
@@ -504,7 +504,7 @@ theorem intentKey_refusal (context : Context deployment durable) (subject : Subj
     · cases refused; rfl
 
 /-- An unauthenticated refusal names only `unknownKey` or `badSignature`. -/
-theorem authenticated_refusal (context : Context deployment durable) (subject : SubjectId)
+theorem authenticated_refusal (context : Context deployment) (subject : SubjectId)
     (verdict : Except CredentialSignatureIO.Error Bool) (refusal : Refusal)
     (refused : authenticated (intentKey context subject) verdict = .error refusal) :
     refusal = .of .unknownKey ∨ refusal = .of .badSignature := by
@@ -520,34 +520,34 @@ theorem authenticated_refusal (context : Context deployment durable) (subject : 
 
 /-- The challenge at a given clock: the one the read's law is judged at is the
 loaded snapshot's (`challenge`). -/
-def challengeAt (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
+def challengeAt (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent)
     (clock : ClockCell.Clock) (intentSignature : List UInt8) : Except Refusal Challenge := do
-  let worldRoot := durable.worldRoot
+  let worldRoot := context.worldRoot
   footprintExact context intent
   let headers ← intent.grants.mapM fun grant => do
     let value ← headerAt context profile worldRoot federation genesisHeight intent grant
     pure (CredentialSignedEnvelopeController.headerCodec.encode value)
   pure ⟨intent, deployment.domain, profile.semantics, federation,
-    worldRoot, context.authority.snapshot.cell.root,
-    genesisHeight + durable.image.accepted.length, clock.now, clock.slot, headers, intentSignature⟩
+    worldRoot, context.authority.cell.root,
+    genesisHeight + context.height, clock.now, clock.slot, headers, intentSignature⟩
 
 /-- The success payload contains no field values, balances or policy source.
 The selected public KeyRecord is reversibly encoded in the existing registry
 binding in each header; this binding is not claimed to hide enrollment data.
 The clock it names is public (the clock view publishes it). -/
-def challenge (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
+def challenge (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent) (intentSignature : List UInt8) : Except Refusal Challenge := do
-  let clock ← need .operationRejected (ClockCellDomain.load deployment durable.snapshot)
+  let clock ← need .operationRejected (ClockCellDomain.load deployment context.cells)
   challengeAt context profile federation genesisHeight intent clock.clock intentSignature
 
 def checkGrant {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
-    (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
+    (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent)
     (grant : GrantRef) (signature : List UInt8) :
     m (Except Refusal (CheckedGrant context profile federation genesisHeight intent grant)) := do
   let some selected := select context grant | return .error (preAuthentication (.of .noGrant))
-  let worldRoot := durable.worldRoot
+  let worldRoot := context.worldRoot
   let wanted := requestAt context worldRoot profile.semantics federation genesisHeight
     intent grant selected.packed.payload.root
   match ResourceObservationAdmission.prepare context profile wanted
@@ -571,7 +571,7 @@ def checkGrant {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Ora
         exact Option.some.inj (prepared.balancesExact.symm.trans selected.balancesExact)
       return .ok ⟨selected, prepared, selectedExact, balancesExact, envelope, checked⟩
 
-structure AuthorizedIntent (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
+structure AuthorizedIntent (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent) where
   private mk ::
   suppliedChallenge : Challenge
@@ -585,7 +585,7 @@ structure AuthorizedIntent (context : Context deployment durable) (profile : Can
 the requested resource and authority kind. Additional granted resources cannot
 be smuggled into the response selection. -/
 theorem AuthorizedIntent.query_footprint
-    {context : Context deployment durable} {profile : CanonicalRuntimeProfile.Profile F}
+    {context : Context deployment} {profile : CanonicalRuntimeProfile.Profile F}
     {federation : FederationId} {height : Nat} {intent : Intent}
     (accepted : AuthorizedIntent context profile federation height intent)
     (query : Query) (purpose : intent.purpose = .query query) :
@@ -594,7 +594,7 @@ theorem AuthorizedIntent.query_footprint
     (by simp only [requiredTargets, purpose]; rfl) accepted.footprint
 
 private def checkGrants {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
-    (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
+    (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent)
     (grants : List GrantRef) (signatures : List (List UInt8)) :
     m (Except Refusal ((index : Fin grants.length) →
@@ -638,7 +638,7 @@ callback can mint a read token. Before the header signatures verify only
 `preAuthentication` reasons are named. Reached only through `authorize`, after the
 intent signature verified (`authenticated`). -/
 def authorizeAuthenticated {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
-    (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
+    (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (federation : FederationId) (genesisHeight : Nat) (signed : Signed) :
     m (Except Refusal (AuthorizedIntent context profile federation genesisHeight signed.challenge.intent)) := do
   let intent := signed.challenge.intent
@@ -660,7 +660,7 @@ signature the challenge carries is checked against the subject's current key
 (`intentVerdict`, reading only the subject's key, the intent's bytes and the signature);
 only an authenticated request reaches the target-reading authorization. -/
 def authorize {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
-    (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
+    (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (federation : FederationId) (genesisHeight : Nat) (signed : Signed) :
     m (Except Refusal (AuthorizedIntent context profile federation genesisHeight signed.challenge.intent)) := do
   let key := intentKey context signed.challenge.intent.subject
@@ -671,7 +671,7 @@ def authorize {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Orac
 
 /-- The signed path is the authentication, then the target-reading authorization. -/
 theorem authorize_authenticates_first {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
-    (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
+    (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (federation : FederationId) (genesisHeight : Nat) (signed : Signed) :
     authorize (m := m) native context profile federation genesisHeight signed = (do
       let verdict ← intentVerdict (m := m) native (intentKey context signed.challenge.intent.subject)
@@ -685,7 +685,7 @@ theorem authorize_authenticates_first {m : Type → Type} [Monad m] (native : Cr
 intent signature does not verify under the subject's current key (a key that was never
 enrolled, or any wrong key) is refused by `authenticated` alone, with the same refusal
 whatever its intent names: two such requests by one subject are refused identically. -/
-theorem unenrolled_signed_refusal_independent_of_target (context : Context deployment durable)
+theorem unenrolled_signed_refusal_independent_of_target (context : Context deployment)
     (left right : Signed)
     (subject : left.challenge.intent.subject = right.challenge.intent.subject)
     (leftVerdict rightVerdict : Except CredentialSignatureIO.Error Bool)
@@ -866,12 +866,27 @@ def standing {kind : ResourceKind} (state : AuthState) (height room : Nat)
     decide (∀ ancestor ∈ cap.ancestors, RevocationKey.capability ancestor ∉ state.revoked) &&
     decide (∀ channel ∈ cap.channels, RevocationKey.channel channel ∉ state.revoked)
 
+/-- Whether `subject` holds a standing observe capability over `target` that
+reads the WHOLE cell (no field narrowing): the filter thin consent's served
+views pass (a narrowed view's root is not the cell's), and the one under which a
+refused signed invocation may name a moved target to its signer. -/
+def observesWhole (context : Context deployment) (kind : ResourceKind)
+    (subject : SubjectId) (target height : Nat) : Bool :=
+  let state := context.authority.authState
+  let cell := context.authority.cell
+  let reads : CapabilityId → Bool := fun named =>
+    match CredentialAuthorityState.readCapability cell kind named with
+    | some stored => decide (stored.head.holder = .subject subject) &&
+        standing state height target stored.head && decide (stored.head.scope.fields = none)
+    | none => false
+  decide ((capabilityIds cell.logical kind).filter fun named => reads named = true).Nonempty
+
 /-- The members of `room`: the subjects holding a standing capability over it,
 in subject order. Membership is what the room's grants say, not who acted. -/
-def members (context : Context deployment durable) (kind : ResourceKind) (room height : Nat) :
+def members (context : Context deployment) (kind : ResourceKind) (room height : Nat) :
     List SubjectId :=
-  let state := context.authority.snapshot.authState
-  let cell := context.authority.snapshot.cell
+  let state := context.authority.authState
+  let cell := context.authority.cell
   let held : Finset Nat := (capabilityIds cell.logical kind).biUnion fun named =>
     match CredentialAuthorityState.readCapability cell kind named with
     | some stored =>
@@ -909,10 +924,10 @@ admitting the subject anywhere in it — the founder's invite, a concierge's
 window, a grant on one cell under the room (a private room's keys cell), any
 other, whoever issued it. The policy id names the resource whose control
 grant revokes it. -/
-def grantsOf (context : Context deployment durable) (kind : ResourceKind) (room height : Nat)
+def grantsOf (context : Context deployment) (kind : ResourceKind) (room height : Nat)
     (subject : SubjectId) : List (Nat × Nat) :=
-  let state := context.authority.snapshot.authState
-  let cell := context.authority.snapshot.cell
+  let state := context.authority.authState
+  let cell := context.authority.cell
   let held : Finset Nat := (capabilityIds cell.logical kind).biUnion fun named =>
     match CredentialAuthorityState.readCapability cell kind named with
     | some stored =>
@@ -925,10 +940,10 @@ def grantsOf (context : Context deployment durable) (kind : ResourceKind) (room 
 
 /-- The subjects holding a live capability anywhere in `room`, in subject
 order: `members` and everyone else a kick could still have to reach. -/
-def holders (context : Context deployment durable) (kind : ResourceKind) (room height : Nat) :
+def holders (context : Context deployment) (kind : ResourceKind) (room height : Nat) :
     List SubjectId :=
-  let state := context.authority.snapshot.authState
-  let cell := context.authority.snapshot.cell
+  let state := context.authority.authState
+  let cell := context.authority.cell
   let held : Finset Nat := (capabilityIds cell.logical kind).biUnion fun named =>
     match CredentialAuthorityState.readCapability cell kind named with
     | some stored =>
@@ -1391,7 +1406,7 @@ theorem atCovered_answers_standing {genesisHeight height : Nat} {subject : Subje
 
 /-- Every query view, `who`/`since`/`at` included, has the same one-target
 footprint as a current read of that target: the same grant, the same check. -/
-theorem presence_views_share_footprint (context : Context deployment durable)
+theorem presence_views_share_footprint (context : Context deployment)
     (subject : SubjectId) (nonce : Nat) (query : Query) (grants : List GrantRef) :
     requiredTargets context ⟨subject, nonce, .query query, grants⟩ = .ok [(query.kind, query.target)] :=
   rfl
@@ -1421,24 +1436,24 @@ about the target, and the reader's other standing grants decide which sources
 it may learn about. -/
 
 /-- A stored object capability names `reader` and currently lets it observe `cell`. -/
-def holdsStanding (context : Context deployment durable) (reader : SubjectId) (height cell : Nat)
+def holdsStanding (context : Context deployment) (reader : SubjectId) (height cell : Nat)
     (named : CapabilityId) : Bool :=
-  match CredentialAuthorityState.readCapability context.authority.snapshot.cell .object named with
+  match CredentialAuthorityState.readCapability context.authority.cell .object named with
   | some stored => decide (stored.head.holder = .subject reader) &&
-      standing context.authority.snapshot.authState height cell stored.head
+      standing context.authority.authState height cell stored.head
   | none => false
 
 /-- A cell the reader may observe at `height`: some standing capability it holds covers it. -/
-def readable (context : Context deployment durable) (reader : SubjectId) (height : Nat)
+def readable (context : Context deployment) (reader : SubjectId) (height : Nat)
     (cell : DurableDataIntent.CellId) : Bool :=
-  decide (∃ named ∈ capabilityIds context.authority.snapshot.cell.logical .object,
+  decide (∃ named ∈ capabilityIds context.authority.cell.logical .object,
     holdsStanding context reader height cell.value named = true)
 
-theorem readable_sound {context : Context deployment durable} {reader : SubjectId} {height : Nat}
+theorem readable_sound {context : Context deployment} {reader : SubjectId} {height : Nat}
     {cell : DurableDataIntent.CellId} (shown : readable context reader height cell = true) :
-    ∃ named stored, CredentialAuthorityState.readCapability context.authority.snapshot.cell .object named =
+    ∃ named stored, CredentialAuthorityState.readCapability context.authority.cell .object named =
         some stored ∧ stored.head.holder = .subject reader ∧
-      standing context.authority.snapshot.authState height cell.value stored.head = true := by
+      standing context.authority.authState height cell.value stored.head = true := by
   obtain ⟨named, _, holds⟩ := of_decide_eq_true shown
   unfold holdsStanding at holds
   split at holds
@@ -1526,12 +1541,12 @@ theorem transclusion_backlinks_view_complete {visible : DurableDataIntent.CellId
 /-- **A reader sees only backlinks from cells it may observe**: each row of
 the view a reader gets names a source cell that some standing capability the
 reader holds covers. -/
-theorem backlinks_covered (context : Context deployment durable) (reader : SubjectId)
+theorem backlinks_covered (context : Context deployment) (reader : SubjectId)
     (height : Nat) (keys : List LinkIndex.TargetKey) {pair : DurableDataIntent.CellId × LinkIndex.Entry}
     (member : pair ∈ durable.links.backlinks (readable context reader height) keys) :
-    ∃ named stored, CredentialAuthorityState.readCapability context.authority.snapshot.cell .object named =
+    ∃ named stored, CredentialAuthorityState.readCapability context.authority.cell .object named =
         some stored ∧ stored.head.holder = .subject reader ∧
-      standing context.authority.snapshot.authState height pair.1.value stored.head = true :=
+      standing context.authority.authState height pair.1.value stored.head = true :=
   readable_sound (LinkIndex.backlinks_covered _ _ _ member)
 
 /-- **A links view is the cell's latest live links.** -/
@@ -1555,16 +1570,17 @@ grant did not stand at that height is `noGrant` (`atCovered`); a query that
 does not fit its authorized target (a `tail` of a non-stream cell, a purpose
 that is not a query) is `malformed`. -/
 def AuthorizedIntent.queryResult
-    {context : Context deployment durable} {profile : CanonicalRuntimeProfile.Profile F}
+    {context : Context deployment} {profile : CanonicalRuntimeProfile.Profile F}
     {federation : FederationId} {genesisHeight : Nat} {intent : Intent}
-    (accepted : AuthorizedIntent context profile federation genesisHeight intent) :
+    (accepted : AuthorizedIntent context profile federation genesisHeight intent)
+    (history : Durable) (_bound : context.sourceImage = some history.image) :
     Except RefusalReason (List UInt8) := do
   let .query query := intent.purpose | throw .malformed
   if present : 0 < intent.grants.length then
     let grant := intent.grants.get ⟨0, present⟩
     let checked := accepted.grants ⟨0, present⟩
-    let state := context.authority.snapshot.authState
-    let reader := CredentialAuthorityState.readCapability context.authority.snapshot.cell
+    let state := context.authority.authState
+    let reader := CredentialAuthorityState.readCapability context.authority.cell
       grant.kind grant.capability
     match query.view with
     | .resource => do
@@ -1573,18 +1589,18 @@ def AuthorizedIntent.queryResult
         pure (resourceViewCodec.encode (resourceView stored.head.scope.fields
           checked.selected.packed checked.selected.accountBalances
           (if query.kind = .account then
-            RunComputeView.load deployment durable.snapshot intent.subject else none)))
+            RunComputeView.load deployment context.view intent.subject else none)))
     | .resourceScope => do
         let some stored := reader | throw .malformed
         pure (resourceScopeViewCodec.encode (grant.kind, grant.capability.value,
           stored.head.scope.fields, resourceView stored.head.scope.fields
             checked.selected.packed checked.selected.accountBalances
             (if query.kind = .account then
-              RunComputeView.load deployment durable.snapshot intent.subject else none)))
+              RunComputeView.load deployment context.view intent.subject else none)))
     | .policy => do
         let address := state.policyAddress ⟨grant.target⟩ (state.policyRevision ⟨grant.target⟩)
         let some source := CanonicalCellRegistry.loadPolicySource deployment.domain
-            context.directory.directory address | throw .malformed
+            context.directory address | throw .malformed
         pure (PolicyRecordCodec.encode source.record)
     | .capability => do
         let some stored := reader | throw .malformed
@@ -1592,36 +1608,36 @@ def AuthorizedIntent.queryResult
     | .who => do
         let some stored := reader | throw .malformed
         let visible := sees state.parent stored.head query.target
-        let height := genesisHeight + durable.height
+        let height := genesisHeight + context.height
         let roster := members context grant.kind query.target height
         pure (whoViewCodec.encode ((holders context grant.kind query.target height).map fun subject =>
-          (subject.value, (whoSeen durable.index visible subject).map (genesisHeight + ·),
+          (subject.value, (whoSeen history.index visible subject).map (genesisHeight + ·),
             decide (subject ∈ roster), grantsOf context grant.kind query.target height subject)))
     | .since after => do
         let some stored := reader | throw .malformed
         let visible := sees state.parent stored.head query.target
-        pure (sinceViewCodec.encode (sinceFrom visible after (genesisHeight + 1) durable.image.accepted))
+        pure (sinceViewCodec.encode (sinceFrom visible after (genesisHeight + 1) history.image.accepted))
     | .atHeight height =>
-        atCovered (deployment := deployment) (durable := durable) genesisHeight height intent.subject
+        atCovered (deployment := deployment) (durable := history) genesisHeight height intent.subject
           grant query.target
     | .tail start count =>
         match checked.selected.packed with
         | ⟨.stream, payload⟩ => do
             let some head := StreamCell.headOf payload.logical | throw .malformed
             pure (tailViewCodec.encode (payload.root, head.nextSeq,
-              (StreamWrite.window deployment context.directory.directory query.target head start count).map
+              (StreamWrite.window deployment context.directory query.target head start count).map
                 fun (sequence, entry) =>
-                  (sequence, entry.record, streamPayload durable.image.accepted query.target entry.record)))
+                  (sequence, entry.record, streamPayload history.image.accepted query.target entry.record)))
         | _ => throw .malformed
     | .backlinks =>
-        let visible := readable context intent.subject (genesisHeight + durable.height)
-        let keys := durable.links.transclusionKeys ⟨⟨grant.target⟩⟩ ++
+        let visible := readable context intent.subject (genesisHeight + context.height)
+        let keys := history.links.transclusionKeys ⟨⟨grant.target⟩⟩ ++
           targetKeys checked.selected.packed grant.target
         pure (linkViewCodec.encode (true,
-          (durable.links.backlinks visible keys).map (linkRow genesisHeight)))
+          (history.links.backlinks visible keys).map (linkRow genesisHeight)))
     | .links =>
         pure (linkViewCodec.encode (false,
-          (durable.links.links ⟨grant.target⟩).map fun entry => linkRow genesisHeight (⟨grant.target⟩, entry)))
+          (history.links.links ⟨grant.target⟩).map fun entry => linkRow genesisHeight (⟨grant.target⟩, entry)))
   else throw .malformed
 
 /-- info: 'Minidregg.Kernel.NativeObservationController.whoSeen_sound' depends on axioms: [propext, Quot.sound] -/
@@ -1646,16 +1662,17 @@ def AuthorizedIntent.queryResult
 /-- The scope and narrowed payload come from the exact selected grant in the
 admitted current observation context, rather than two separately read heads. -/
 theorem AuthorizedIntent.queryResult_resourceScope
-    {context : Context deployment durable} {profile : CanonicalRuntimeProfile.Profile F}
+    {context : Context deployment} {profile : CanonicalRuntimeProfile.Profile F}
     {federation : FederationId} {genesisHeight : Nat} {intent : Intent}
     (accepted : AuthorizedIntent context profile federation genesisHeight intent)
+    {history : Durable} {bound : context.sourceImage = some history.image}
     (query : Query) (purpose : intent.purpose = .query query)
     (view : query.view = .resourceScope) (present : 0 < intent.grants.length)
     (stored : CredentialAuthorityState.StoredCapability (intent.grants.get ⟨0, present⟩).kind)
-    (read : CredentialAuthorityState.readCapability context.authority.snapshot.cell
+    (read : CredentialAuthorityState.readCapability context.authority.cell
       (intent.grants.get ⟨0, present⟩).kind
       (intent.grants.get ⟨0, present⟩).capability = some stored) :
-    accepted.queryResult = .ok (resourceScopeViewCodec.encode
+    accepted.queryResult history bound = .ok (resourceScopeViewCodec.encode
       ((intent.grants.get ⟨0, present⟩).kind,
        (intent.grants.get ⟨0, present⟩).capability.value,
        stored.head.scope.fields,
@@ -1663,19 +1680,20 @@ theorem AuthorizedIntent.queryResult_resourceScope
          (accepted.grants ⟨0, present⟩).selected.packed
          (accepted.grants ⟨0, present⟩).selected.accountBalances
          (if query.kind = .account then
-           RunComputeView.load deployment durable.snapshot intent.subject else none))) := by
+           RunComputeView.load deployment context.view intent.subject else none))) := by
   unfold AuthorizedIntent.queryResult
   simp only [purpose, view, dif_pos present, read]
   rfl
 
 /-- The `at` view of a signed query is `atCovered` over the query's first grant. -/
 theorem AuthorizedIntent.queryResult_at
-    {context : Context deployment durable} {profile : CanonicalRuntimeProfile.Profile F}
+    {context : Context deployment} {profile : CanonicalRuntimeProfile.Profile F}
     {federation : FederationId} {genesisHeight : Nat} {intent : Intent}
     (accepted : AuthorizedIntent context profile federation genesisHeight intent)
+    {history : Durable} {bound : context.sourceImage = some history.image}
     {query : Query} {height : Nat} (purpose : intent.purpose = .query query)
     (view : query.view = .atHeight height) (present : 0 < intent.grants.length) :
-    accepted.queryResult = atCovered (deployment := deployment) (durable := durable)
+    accepted.queryResult history bound = atCovered (deployment := deployment) (durable := history)
       genesisHeight height intent.subject (intent.grants.get ⟨0, present⟩) query.target := by
   unfold AuthorizedIntent.queryResult
   simp only [purpose, view, dif_pos present]
@@ -1685,14 +1703,15 @@ answered was answered to a grant the authority cell at `h` held, naming the
 signer and standing over the target at `h`; the answer is the fold of the
 prefix. A reader who was not in the room at `h` gets nothing at `h`. -/
 theorem at_respects_coverage_at_height
-    {context : Context deployment durable} {profile : CanonicalRuntimeProfile.Profile F}
+    {context : Context deployment} {profile : CanonicalRuntimeProfile.Profile F}
     {federation : FederationId} {genesisHeight : Nat} {intent : Intent}
     (accepted : AuthorizedIntent context profile federation genesisHeight intent)
+    {history : Durable} {bound : context.sourceImage = some history.image}
     {query : Query} {height : Nat} {out : List UInt8} (purpose : intent.purpose = .query query)
-    (view : query.view = .atHeight height) (answered : accepted.queryResult = .ok out) :
+    (view : query.view = .atHeight height) (answered : accepted.queryResult history bound = .ok out) :
     ∃ present : 0 < intent.grants.length, ∃ snapshot : CredentialAuthorityDomainReceiver.PhysicalSnapshot,
       ∃ authority : CredentialAuthorityDomainReceiver.Loaded deployment snapshot, ∃ stored,
-      durable.atPrefix (height - genesisHeight) = some snapshot ∧
+      history.atPrefix (height - genesisHeight) = some snapshot ∧
       CredentialAuthorityDomainReceiver.loadDeployment deployment snapshot = some authority ∧
       CredentialAuthorityState.readCapability authority.snapshot.cell
         (intent.grants.get ⟨0, present⟩).kind (intent.grants.get ⟨0, present⟩).capability =
@@ -1725,13 +1744,13 @@ theorem at_respects_coverage_at_height
 /-- info: 'Minidregg.Kernel.NativeObservationController.at_respects_coverage_at_height' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.at_respects_coverage_at_height
 
-theorem observation_request_actual_root (context : Context deployment durable)
+theorem observation_request_actual_root (context : Context deployment)
     (semantics : Digest) (federation : FederationId) (height : Nat) (intent : Intent)
     (grant : GrantRef) (kind : CanonicalCellRegistry.Kind)
     (pre : Materialized (CanonicalCellRegistry.materializer kind)) :
     (request context semantics federation height intent grant pre.root).preStateRoot = pre.root := rfl
 
-theorem observation_preserves_resource (context : Context deployment durable)
+theorem observation_preserves_resource (context : Context deployment)
     (semantics : Digest) (federation : FederationId) (height : Nat) (intent : Intent)
     (grant : GrantRef) (kind : CanonicalCellRegistry.Kind)
     (pre : Materialized (CanonicalCellRegistry.materializer kind)) :
@@ -1739,7 +1758,7 @@ theorem observation_preserves_resource (context : Context deployment durable)
   (readCandidate context semantics federation height intent grant kind pre).postcondition
 
 omit [DecidableEq F] in
-theorem observation_policy_views_equal (context : Context deployment durable)
+theorem observation_policy_views_equal (context : Context deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (federation : FederationId) (height : Nat)
     (intent : Intent) (grant : GrantRef) (selected : Selected context grant)
     (prepared : ReadPreparation context profile federation height intent grant selected) :
@@ -1748,12 +1767,12 @@ theorem observation_policy_views_equal (context : Context deployment durable)
   ResourceObservationAdmission.policy_views_equal prepared
 
 theorem CheckedGrant.current_generation_and_source
-    {context : Context deployment durable} {profile : CanonicalRuntimeProfile.Profile F}
+    {context : Context deployment} {profile : CanonicalRuntimeProfile.Profile F}
     {federation : FederationId} {height : Nat} {intent : Intent} {grant : GrantRef}
     (checked : CheckedGrant context profile federation height intent grant) :
     let wanted := request context profile.semantics federation height intent grant checked.selected.packed.payload.root
-    wanted.policyEpoch = context.authority.snapshot.authState.policyEpoch wanted.policyId ∧
-      wanted.policyRevision = context.authority.snapshot.authState.policyRevision wanted.policyId :=
+    wanted.policyEpoch = context.authority.authState.policyEpoch wanted.policyId ∧
+      wanted.policyRevision = context.authority.authState.policyRevision wanted.policyId :=
   ⟨checked.checked.authorization.policyEpochExact, checked.checked.authorization.policyRevisionExact⟩
 
 /-- A version-5 resource view (no compute quote) refuses: its
@@ -1815,14 +1834,14 @@ theorem resourceView_canonical {bytes : List UInt8} {view : ResourceView}
   NativeHostCodec.framed_canonical _ _ decoded
 
 theorem accepted_footprint_exact
-    {context : Context deployment durable} {profile : CanonicalRuntimeProfile.Profile F}
+    {context : Context deployment} {profile : CanonicalRuntimeProfile.Profile F}
     {federation : FederationId} {height : Nat} {intent : Intent}
     (accepted : AuthorizedIntent context profile federation height intent) :
     footprintExact context intent = .ok () := accepted.footprint
 
 /-- A grant naming an absent slot is not selected. -/
-theorem select_absent (context : Context deployment durable) (grant : GrantRef)
-    (absent : context.directory.directory.slots grant.target = .absent) :
+theorem select_absent (context : Context deployment) (grant : GrantRef)
+    (absent : context.directory.slots grant.target = .absent) :
     select context grant = none := by
   unfold select
   split
@@ -1836,13 +1855,13 @@ the target: for a single-grant intent whose footprint matches, an absent target 
 (`noGrant`, told as `undisclosed` by `preAuthentication`), while a present one is issued.
 Before FIX-DISCLOSE this was op 4's whole answer, to any key; now only an authenticated
 subject reaches it (`authorize`, `NativeHost.challengeAnswer`). -/
-theorem challenge_absent_target_refused (context : Context deployment durable)
+theorem challenge_absent_target_refused (context : Context deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (federation : FederationId)
     (genesisHeight : Nat) (intent : Intent) (intentSignature : List UInt8) (grant : GrantRef)
     (single : intent.grants = [grant]) (foot : footprintExact context intent = .ok ())
-    (clock : ClockCellDomain.Loaded deployment durable.snapshot)
-    (clockLoaded : ClockCellDomain.load deployment durable.snapshot = some clock)
-    (absent : context.directory.directory.slots grant.target = .absent) :
+    (clock : ClockCellDomain.Loaded deployment context.cells)
+    (clockLoaded : ClockCellDomain.load deployment context.cells = some clock)
+    (absent : context.directory.slots grant.target = .absent) :
     (challenge context profile federation genesisHeight intent intentSignature).mapError
       preAuthentication = .error (.of .undisclosed) := by
   unfold challenge
@@ -1854,12 +1873,12 @@ theorem challenge_absent_target_refused (context : Context deployment durable)
 
 /-- **Challenge binding (DATAMODEL §3.4).**  A challenge carries the world root
 and the height of the one loaded image it was computed from. -/
-theorem challengeAt_bound {context : Context deployment durable}
+theorem challengeAt_bound {context : Context deployment}
     {profile : CanonicalRuntimeProfile.Profile F} {federation : FederationId}
     {genesisHeight : Nat} {intent : Intent} {clock : ClockCell.Clock} {issued : Challenge} {intentSignature : List UInt8}
     (h : challengeAt context profile federation genesisHeight intent clock intentSignature = .ok issued) :
-    issued.worldRoot = durable.worldRoot ∧
-      issued.height = genesisHeight + NativeHostCodec.height durable.image ∧
+    issued.worldRoot = context.worldRoot ∧
+      issued.height = genesisHeight + context.height ∧
       issued.clockNow = clock.now ∧ issued.clockSlot = clock.slot := by
   unfold challengeAt at h
   simp only [bind, Except.bind, pure, Except.pure] at h
@@ -1872,27 +1891,27 @@ theorem challengeAt_bound {context : Context deployment durable}
       exact ⟨rfl, rfl, rfl, rfl⟩
 
 /-- The clock a successful challenge names is the loaded snapshot's clock cell. -/
-theorem challenge_names_clock {context : Context deployment durable}
+theorem challenge_names_clock {context : Context deployment}
     {profile : CanonicalRuntimeProfile.Profile F} {federation : FederationId}
     {genesisHeight : Nat} {intent : Intent} {issued : Challenge} {intentSignature : List UInt8}
     (h : challenge context profile federation genesisHeight intent intentSignature = .ok issued) :
-    ∃ clock, ClockCellDomain.load deployment durable.snapshot = some clock ∧
-      issued.worldRoot = durable.worldRoot ∧
-      issued.height = genesisHeight + NativeHostCodec.height durable.image ∧
+    ∃ clock, ClockCellDomain.load deployment context.cells = some clock ∧
+      issued.worldRoot = context.worldRoot ∧
+      issued.height = genesisHeight + context.height ∧
       issued.clockNow = clock.clock.now ∧ issued.clockSlot = clock.clock.slot := by
   unfold challenge at h
-  cases loaded : ClockCellDomain.load deployment durable.snapshot with
+  cases loaded : ClockCellDomain.load deployment context.cells with
   | none => simp [need, loaded, bind, Except.bind] at h
   | some clock =>
     simp only [need, loaded, bind, Except.bind] at h
     exact ⟨clock, rfl, challengeAt_bound h⟩
 
-theorem challenge_bound {context : Context deployment durable}
+theorem challenge_bound {context : Context deployment}
     {profile : CanonicalRuntimeProfile.Profile F} {federation : FederationId}
     {genesisHeight : Nat} {intent : Intent} {issued : Challenge} {intentSignature : List UInt8}
     (h : challenge context profile federation genesisHeight intent intentSignature = .ok issued) :
-    issued.worldRoot = durable.worldRoot ∧
-      issued.height = genesisHeight + NativeHostCodec.height durable.image := by
+    issued.worldRoot = context.worldRoot ∧
+      issued.height = genesisHeight + context.height := by
   obtain ⟨_, _, world, height, _⟩ := challenge_names_clock h
   exact ⟨world, height⟩
 
@@ -1901,7 +1920,7 @@ judged by its law at exactly the clock its challenge names (the clock cell of
 the snapshot at the challenge's world root and height).  With
 `ResourceObservationAdmission.read_law_sees_clock`, the answer names the
 `clock/now` and `clock/slot` the law saw. -/
-theorem read_judged_at_named_clock {context : Context deployment durable}
+theorem read_judged_at_named_clock {context : Context deployment}
     {profile : CanonicalRuntimeProfile.Profile F} {federation : FederationId}
     {genesisHeight : Nat} {intent : Intent}
     (accepted : AuthorizedIntent context profile federation genesisHeight intent)

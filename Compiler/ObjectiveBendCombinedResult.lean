@@ -12,9 +12,8 @@ open Minidregg.Kernel.DurableDataIntent
 open ObjectiveBendResultAdapter ObjectiveNativeScalarBinding
 set_option autoImplicit false
 
-structure Prepared {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (deployment : CanonicalCellRegistry.Deployment)
-    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
+structure Prepared (deployment : CanonicalCellRegistry.Deployment)
+    (loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry)
     (profile : ObjectiveBendResultAdapter.Profile) (command : Command) (source : AnnotatedTerm)
     (limits : Limits) (budget : Budget) (capacity : ObjectiveBendDemandCapacity.Profile) where
   private mk ::
@@ -43,15 +42,14 @@ structure Prepared {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBy
   nativeExact : BendWorldPlan.matchesCommand plan command = true
   returnsStored : plan.returns.all (storesReturn command) = true
 
-def prepare {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (deployment : CanonicalCellRegistry.Deployment)
-    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
+def prepare (deployment : CanonicalCellRegistry.Deployment)
+    (loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry)
     (profile : ObjectiveBendResultAdapter.Profile) (command : Command) (source : AnnotatedTerm)
     (typeFuel : Nat) (limits : Limits) (budget : Budget) (capacity : ObjectiveBendDemandCapacity.Profile) :
     Except ObjectiveBendResultAdapter.Failure (Prepared deployment loaded profile command source limits budget capacity) := do
   let some checked := check source [] typeFuel | throw .typing
   match runExact : executeWith (ObjectiveBendDemandCapacity.allows capacity) limits budget source.term with
-  | .error error => throw (.execution error.1 error.2)
+  | .error error => throw (.execution error.1 error.2.1 error.2.2)
   | .ok execution =>
     match typeShape : checked.type with
     | .field "plan" planType (.field "result" resultType .emptyRow) =>
@@ -71,7 +69,7 @@ def prepare {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
               let slot := returnSlot profile resultType bytes
               let plan : BendWorldPlan.Plan := ⟨effects.1++[returnEffect profile slot],[slot],reads.1⟩
               let producedBytes := (plan.effects.map (fun effect=>BendWorldPlan.effectStream.encode effect)).flatten.length + (BendWorldPlan.encodeReturn slot).length
-              if producedBytes > budget.bytes then throw (.execution .budget execution.extraction.result.state)
+              if producedBytes > budget.bytes then throw (.execution .budget execution.extraction.result.state execution.extraction.result.remaining)
               if nativeExact : BendWorldPlan.matchesCommand plan command = true then
                 if returnsStored : plan.returns.all (storesReturn command) = true then
                   pure ⟨checked,execution,runExact,planType,resultType,typeShape,planData,resultData,dataShape,typeExact,native,decodedPlan,effects.1,effects.2,reads.1,reads.2,bytes,bytesExact,slot,rfl,plan,rfl,nativeExact,returnsStored⟩

@@ -52,13 +52,29 @@ sum Terms:
 
 # The seat kernel's view of one open seat (SeatStore.callData), seats sorted by
 # account.
+sum Exit:
+  onDemand: {}
+  afterDeadline: Nat
+# A seat's principals as the contract is shown them (SeatStore.disclosedData): hidden
+# unless the offerer's proposal discloses them; a disclosed holder of an unheld seat is none.
+sum Shown:
+  hidden: {}
+  none: {}
+  shown: Nat
+record Disclosed:
+  offerer: Shown
+  payee: Shown
+  holder: Shown
 record SeatView:
   seat: Nat
   role: String
   terms: Terms
   give: Amounts
   want: Amounts
+  exit: Exit
+  opened: Nat
   allocation: Amounts
+  disclosed: Disclosed
 
 sum Seats:
   nil: {}
@@ -120,6 +136,7 @@ sum Input:
 record Call:
   input: Input
   height: Nat
+  invoker: Shown
   seats: Seats
 
 record Mint:
@@ -270,11 +287,14 @@ def amount(asset: Nat, value: Nat) -> Amounts:
 def both(first: Amount, second: Amount) -> Amounts:
   Amounts.cons({head: first, tail: Amounts.cons({head: second, tail: Amounts.nil()})})
 
+def blind() -> Disclosed:
+  {offerer: Shown.hidden(), payee: Shown.hidden(), holder: Shown.hidden()}
+
 def bidView(seat: Nat, budget: Nat, qty: Nat) -> SeatView:
-  {seat: seat, role: "bid", terms: Terms.nil(), give: amount(200n, budget), want: amount(100n, qty), allocation: both({asset: 200n, amount: budget}, {asset: 100n, amount: 0n})}
+  {seat: seat, role: "bid", terms: Terms.nil(), give: amount(200n, budget), want: amount(100n, qty), exit: Exit.onDemand(), opened: 0n, allocation: both({asset: 200n, amount: budget}, {asset: 100n, amount: 0n}), disclosed: blind()}
 
 def askView(seat: Nat, qty: Nat, reserve: Nat) -> SeatView:
-  {seat: seat, role: "ask", terms: Terms.nil(), give: amount(100n, qty), want: amount(200n, reserve), allocation: both({asset: 100n, amount: qty}, {asset: 200n, amount: 0n})}
+  {seat: seat, role: "ask", terms: Terms.nil(), give: amount(100n, qty), want: amount(200n, reserve), exit: Exit.onDemand(), opened: 0n, allocation: both({asset: 100n, amount: qty}, {asset: 200n, amount: 0n}), disclosed: blind()}
 
 def demoSeats() -> Seats:
   Seats.cons({head: bidView(51n, 10n, 2n), tail: Seats.cons({head: bidView(52n, 12n, 3n), tail: Seats.cons({head: askView(53n, 2n, 6n), tail: Seats.cons({head: askView(54n, 3n, 12n), tail: Seats.nil()})})})})
@@ -295,7 +315,7 @@ def partialProposal() -> Proposal:
   {fills: fill(51n, 2n, fill(53n, 2n, Fills.nil())), certificate: {price: 4n, bidPotential: 0n, askPotential: 1n, slacks: nats4(0n, 0n, 2n, 2n)}}
 
 def demoClear(height: Nat, proposal: Proposal) -> Plan:
-  market(demoMarket(), {input: Input.clear(proposal), height: height, seats: demoSeats()})
+  market(demoMarket(), {input: Input.clear(proposal), height: height, invoker: Shown.hidden(), seats: demoSeats()})
 
 # The routed moves of the full book (the kernel example's `fullClearing`).
 def demoFullClearing() -> Plan:
@@ -320,11 +340,11 @@ def noClearingOutsideWindow() -> Bool:
 
 # Invitations only while the window is open, and only for the two roles.
 def mintsOnlyWhileOpen() -> Bool:
-  Order.not(isEmpty(market(demoMarket(), {input: Input.mint({role: "bid", holder: 1n}), height: 5n, seats: Seats.nil()}))) && isEmpty(market(demoMarket(), {input: Input.mint({role: "bid", holder: 1n}), height: 6n, seats: Seats.nil()})) && isEmpty(market(demoMarket(), {input: Input.mint({role: "broker", holder: 1n}), height: 1n, seats: Seats.nil()}))
+  Order.not(isEmpty(market(demoMarket(), {input: Input.mint({role: "bid", holder: 1n}), height: 5n, invoker: Shown.hidden(), seats: Seats.nil()}))) && isEmpty(market(demoMarket(), {input: Input.mint({role: "bid", holder: 1n}), height: 6n, invoker: Shown.hidden(), seats: Seats.nil()})) && isEmpty(market(demoMarket(), {input: Input.mint({role: "broker", holder: 1n}), height: 1n, invoker: Shown.hidden(), seats: Seats.nil()}))
 
 # Abort: only at or after the deadline, and then one exit per open seat.
 def demoAbort(height: Nat) -> Plan:
-  market(demoMarket(), {input: Input.abort(), height: height, seats: demoSeats()})
+  market(demoMarket(), {input: Input.abort(), height: height, invoker: Shown.hidden(), seats: demoSeats()})
 
 def abortExitsEverySeat() -> Bool:
   isEmpty(demoAbort(19n)) && planLength(demoAbort(20n)) == 4n

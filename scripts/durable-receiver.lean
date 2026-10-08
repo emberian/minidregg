@@ -7,6 +7,7 @@ native SQLite log (append h+1 only at head h), process-exit crash hooks, the
 MAC chain, checkpoints every three records, and cold reopen together.
 -/
 import Compiler.DurableReceiverIO
+import Compiler.DurableHistoryStore
 import Compiler.Sp800185Cshake256
 
 open Minidregg.Theory.TypedAuthorization
@@ -95,6 +96,28 @@ def loadExact (transport : Transport) : IO (Loaded rootBytes) := do
   | .ok loaded => return loaded
   | .error detail => throw (IO.userError s!"FAIL reopen: {detail}")
 
+/-- The height that consumed `nullifier`, through the Store-backed Reader: the
+index's verified answer, never the opened snapshot's suffix-only `consumed`. -/
+def spentHeight (transport : Transport) (n : Nat) : IO (Option Nat) := do
+  let loaded ← loadExact transport
+  let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf transport rootBytes loaded with
+    | .ok reader => pure reader
+    | .error detail => throw (IO.userError s!"FAIL reader: {detail}")
+  match ← reader.spent (nullifier n) with
+  | .ok answer => return answer.value
+  | .error refusal => throw (IO.userError s!"FAIL spent read: {refusal.message}")
+
+/-- The height of a transaction's accepted record through the Reader (`byTx`). -/
+def acceptedHeight (transport : Transport) (transactionId : Nat) : IO (Option Nat) := do
+  let loaded ← loadExact transport
+  let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf transport rootBytes loaded with
+    | .ok reader => pure reader
+    | .error detail => throw (IO.userError s!"FAIL reader: {detail}")
+  match ← reader.byTx ⟨transactionId⟩ with
+  | .ok (.present found) => return some found.height
+  | .ok (.absent _) => return none
+  | .error refusal => throw (IO.userError s!"FAIL byTx: {refusal.message}")
+
 def expectOpenRefused (label : String) (transport : Transport) : IO Unit := do
   match ← load transport rootBytes with
   | .ok _ => throw (IO.userError s!"FAIL durable receiver: {label} opened")
@@ -104,7 +127,7 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   IO.FS.writeBinFile (directory / "key") ((List.range 32).map (fun i => UInt8.ofNat (i * 7 + 3))).toByteArray
   let config : NativeConfig :=
     { binary := binary, root := directory / "store", key := directory / "key", checkpointEvery := 3 }
-  let transport := config.transport (fun _ => ⟨7⟩)
+  let transport := { config.transport (fun _ => ⟨7⟩) ⟨999⟩ with systemCell := none }
   match ← bootstrap transport rootBytes seed with
   | .error message => throw (IO.userError message)
   | .ok () => pure ()
@@ -113,15 +136,15 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   let one ← confirmed "first multicell commit" .installed (← receive transport rootBytes first 3)
   require "both post images exact" (one.canonicalBytes ⟨1⟩ == [11] && one.canonicalBytes ⟨2⟩ == [22])
   require "charge, nullifier, history together"
-    (one.model.available .feeDebit == 99 && one.model.consumed (nullifier 11) &&
-      one.model.history.length == 1 && one.model.journal.length == 1)
+    (one.model.available .feeDebit == 99 && (← spentHeight transport 11) == some 1 &&
+      (← loadExact transport).height == 1 && (← acceptedHeight transport 11) == some 1)
 
   let second := twoWrites 12 [11] [22] [111] [222] [3]
   let two ← confirmed "second commit" .installed (← receive transport rootBytes second 3)
   require "repeated commit changes image" (two.canonicalBytes ⟨1⟩ == [111])
   let retried ← confirmed "retry earlier commit after later commit" .replayed
     (← receive transport rootBytes first 3)
-  require "retry does not charge or append" (retried.model.available .feeDebit == 98 && retried.model.history.length == 2)
+  require "retry does not charge or append" (retried.model.available .feeDebit == 98 && (← loadExact transport).height == 2)
   let beforeRefusals ← loadExact transport
 
   expectRejected "same-id changed bytes conflicts" (.durable .transactionConflict)
@@ -141,7 +164,7 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
 
   let third := twoWrites 17 [111] [222] [31] [32] [3]
   let precommitCrash : Transport :=
-    { transport with append := fun height entry => config.append height entry (some "after-insert") }
+    { transport with append := fun height entry nodes => config.append height entry nodes (some "after-insert") }
   require "precommit process exit is explicit uncertainty"
     (match ← receive precommitCrash rootBytes third 3 with | .uncertain _ => true | _ => false)
   require "precommit crash preserves whole image" ((← loadExact transport).image == beforeCrash.image)
@@ -149,37 +172,37 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
 
   let fourth := twoWrites 18 [31] [32] [41] [42] [3]
   let lostResponse : Transport :=
-    { transport with append := fun height entry => config.append height entry (some "after-commit") }
+    { transport with append := fun height entry nodes => config.append height entry nodes (some "after-commit") }
   let recovered ← confirmed "lost successful response" .recoveredAfterUncertainResponse
     (← receive lostResponse rootBytes fourth 3)
-  require "cold reopen recovers all fields" (recovered.model.history.length == 4 &&
-    recovered.model.available .proofWork == 96 && recovered.model.consumed (nullifier 18) &&
+  require "cold reopen recovers all fields" ((← loadExact transport).height == 4 &&
+    recovered.model.available .proofWork == 96 && (← spentHeight transport 18) == some 4 &&
     recovered.canonicalBytes ⟨1⟩ == [41] && recovered.canonicalBytes ⟨2⟩ == [42])
   let _ ← confirmed "lost response retry" .replayed (← receive transport rootBytes fourth 3)
 
   let injected ← IO.mkRef false
   let racing : Transport :=
-    { transport with append := fun height entry => do
+    { transport with append := fun height entry nodes => do
         unless ← injected.get do
           injected.set true
           let _ ← confirmed "concurrent read-cell move" .installed
             (← receive transport rootBytes (moveObserved 19 [3] [33]) 3)
-        transport.append height entry }
+        transport.append height entry nodes }
   expectRejected "CAS conflict reloads and rejects stale read" .staleReadGuard
     (← receive racing rootBytes (twoWrites 20 [41] [42] [51] [52] [3]) 3)
   let raced ← loadExact transport
   require "stale candidate never published" (raced.snapshot.canonicalBytes ⟨1⟩ == [41] &&
-    raced.snapshot.canonicalBytes ⟨3⟩ == [33] && raced.snapshot.model.history.length == 5)
+    raced.snapshot.canonicalBytes ⟨3⟩ == [33] && raced.height == 5)
 
   let pinnedCandidate := twoWrites 22 [41] [42] [51] [52] [33]
   let clockInjected ← IO.mkRef false
   let clockRacing : Transport :=
-    { transport with append := fun height entry => do
+    { transport with append := fun height entry nodes => do
         unless ← clockInjected.get do
           clockInjected.set true
           let _ ← confirmed "concurrent journal-only advance" .installed
             (← receive transport rootBytes (advanceJournal 21 [33]) 3)
-        transport.append height entry }
+        transport.append height entry nodes }
   require "pinned admission cannot rebase across journal-only advance"
     (match ← receiveLoaded clockRacing rootBytes raced pinnedCandidate with
       | .contention => true | _ => false)
@@ -188,7 +211,7 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
     (advanced.snapshot.canonicalBytes ⟨1⟩ == [41] &&
       advanced.snapshot.canonicalBytes ⟨2⟩ == [42] &&
       advanced.snapshot.canonicalBytes ⟨3⟩ == [33] &&
-      advanced.image.accepted.length == raced.image.accepted.length + 1)
+      advanced.height == raced.height + 1)
   require "candidate's ordinary guards remain admissible at the later boundary"
     (match DurableCheckpoint.prepare advanced.image advanced.baseHeight advanced.base
         advanced.snapshot advanced.withinLog advanced.resumed pinnedCandidate with
@@ -196,7 +219,7 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   let pinned ← confirmed "fresh pinned publication after explicit readmission" .installed
     (← receiveLoaded transport rootBytes advanced pinnedCandidate)
   require "pinned candidate charged and published only once"
-    (pinned.model.history.length == 7 && pinned.model.available .feeDebit == 93 &&
+    ((← loadExact transport).height == 7 && pinned.model.available .feeDebit == 93 &&
       pinned.canonicalBytes ⟨1⟩ == [51] && pinned.canonicalBytes ⟨2⟩ == [52])
   let finalImage ← loadExact transport
   let _ ← confirmed "pinned exact historical replay" .replayed
@@ -206,8 +229,8 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   -- The append is exact, but a second valid commit lands before its readback.
   -- The entry at the appended height is still exactly this attempt's entry.
   let afterAppend : Transport :=
-    { transport with append := fun height entry => do
-        let observation ← transport.append height entry
+    { transport with append := fun height entry nodes => do
+        let observation ← transport.append height entry nodes
         if observation == .installed then
           let _ ← confirmed "later commit before readback" .installed
             (← receive transport rootBytes (advanceJournal 24 [33]) 3)
@@ -216,7 +239,7 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
     (← receiveLoaded afterAppend rootBytes finalImage (advanceJournal 23 [33]))
   let afterConcurrent ← loadExact transport
   require "both accepted turns durable"
-    (afterConcurrent.snapshot.model.history.length == finalImage.snapshot.model.history.length + 2)
+    (afterConcurrent.height == finalImage.height + 2)
 
   -- Checkpoints: cadence 3, so the latest persisted checkpoint is past genesis
   -- and a cold open resumed from it; the resume agrees with the genesis replay.
@@ -235,20 +258,24 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
         genesisReplay.snapshot.canonicalBytes ⟨cell⟩) &&
       afterConcurrent.snapshot.model.available .feeDebit ==
         genesisReplay.snapshot.model.available .feeDebit &&
-      afterConcurrent.snapshot.model.history.length == genesisReplay.snapshot.model.history.length)
+      afterConcurrent.height == genesisReplay.height)
   -- A past read at every height: from the checkpoint plus the suffix at or
   -- above it, from the seed below it; each equals the genesis fold of the prefix.
-  let heights := List.range (afterConcurrent.image.accepted.length + 1)
-  require "a past read at every height equals the genesis fold of that prefix, on both sides of the checkpoint"
-    (heights.all fun height =>
-      [1, 2, 3, 4].all fun cell =>
-        (afterConcurrent.atPrefix height).map (·.canonicalBytes ⟨cell⟩) ==
-          ((genesisReplay.prefixImage height).restore rootBytes).map (·.canonicalBytes ⟨cell⟩) &&
-        (afterConcurrent.atPrefix height).isSome)
-  require "a past read at the head is the current state"
-    ([1, 2, 3, 4].all fun cell =>
-      (afterConcurrent.atPrefix afterConcurrent.height).map (·.canonicalBytes ⟨cell⟩) ==
-        some (afterConcurrent.snapshot.canonicalBytes ⟨cell⟩))
+  let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf transport rootBytes afterConcurrent with
+    | .ok reader => pure reader
+    | .error detail => throw (IO.userError s!"FAIL reader: {detail}")
+  for height in List.range (afterConcurrent.height + 1) do
+    let state ← match ← reader.stateAt height with
+      | .ok state => pure state
+      | .error refusal => throw (IO.userError s!"FAIL stateAt {height}: {refusal.message}")
+    require s!"stateAt {height} equals the genesis fold of that prefix, on both sides of the checkpoint"
+      ([1, 2, 3, 4].all fun cell =>
+        some (state.snapshot.canonicalBytes ⟨cell⟩) ==
+          ((genesisReplay.prefixImage height).restore rootBytes).map (·.canonicalBytes ⟨cell⟩))
+    if height == afterConcurrent.height then
+      require "a past read at the head is the current state"
+        ([1, 2, 3, 4].all fun cell =>
+          state.snapshot.canonicalBytes ⟨cell⟩ == afterConcurrent.snapshot.canonicalBytes ⟨cell⟩)
   require "the checkpoint-resumed presence index equals the genesis replay's"
     (afterConcurrent.index == genesisReplay.index &&
       afterConcurrent.index.touched.length > 0)
@@ -262,8 +289,8 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   -- helper itself (it stores opaque bytes), and each refuses to open.
   let forgedTag : Entry := ⟨recordFrame.encode (IntentRecord.ofIntent (advanceJournal 30 [33])),
     List.replicate 32 0⟩
-  let head := afterConcurrent.image.accepted.length
-  require "helper accepts the opaque forged entry" ((← transport.append (head + 1) forgedTag) == .installed)
+  let head := afterConcurrent.height
+  require "helper accepts the opaque forged entry" ((← transport.append (head + 1) forgedTag []) == .installed)
   expectOpenRefused "log entry with a forged tag" transport
   require "no implicit reset: the forged entry stays visible"
     (match ← transport.read (head + 1) false with | .ok (some s) => s.entries == [forgedTag] | _ => false)
@@ -271,29 +298,37 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   let secondDirectory := directory / "second"
   IO.FS.createDirAll secondDirectory
   let second : NativeConfig := { config with root := secondDirectory / "store" }
-  match ← bootstrap (second.transport (fun _ => ⟨7⟩)) rootBytes seed with
+  let secondTransport := { second.transport (fun _ => ⟨7⟩) ⟨999⟩ with systemCell := none }
+  match ← bootstrap secondTransport rootBytes seed with
   | .error message => throw (IO.userError message)
   | .ok () => pure ()
-  let _ ← confirmed "second store commit" .installed (← receive (second.transport (fun _ => ⟨7⟩)) rootBytes first 3)
+  let _ ← confirmed "second store commit" .installed (← receive secondTransport rootBytes first 3)
   let .ok key ← transport.key | throw (IO.userError "FAIL key")
-  let loadedSecond ← loadExact (second.transport (fun _ => ⟨7⟩))
-  let honest := sealCheckpoint key rootBytes 1 loadedSecond.chain
+  let loadedSecond ← loadExact secondTransport
+  let secondFrontier := loadedSecond.frontier.getD []
+  let secondSpent ← match ← loadedSecond.headIndexRoot secondTransport key with
+    | .ok root => pure root
+    | .error message => throw (IO.userError s!"FAIL index root: {message}")
+  let honest := sealCheckpoint key rootBytes 1 loadedSecond.chain secondFrontier secondSpent
     (DurableCheckpoint.State.ofSnapshot loadedSecond.image loadedSecond.snapshot)
   let forgedMac := { honest with mac := List.replicate 32 7 }
-  let .ok () ← (second.transport (fun _ => ⟨7⟩)).putCheckpoint 1 (checkpointFrame.encode forgedMac)
+  let .ok () ← secondTransport.putCheckpoint 1 (checkpointFrame.encode forgedMac)
     | throw (IO.userError "FAIL store forged checkpoint")
-  expectOpenRefused "checkpoint with a forged MAC" (second.transport (fun _ => ⟨7⟩))
-  let rolledBack := sealCheckpoint key rootBytes 1 loadedSecond.chain (DurableCheckpoint.State.ofSeed seed)
-  let .ok () ← (second.transport (fun _ => ⟨7⟩)).putCheckpoint 1 (checkpointFrame.encode rolledBack)
+  expectOpenRefused "checkpoint with a forged MAC" secondTransport
+  let rolledBack := sealCheckpoint key rootBytes 1 loadedSecond.chain secondFrontier secondSpent
+    (DurableCheckpoint.State.ofSeed seed)
+  let .ok () ← secondTransport.putCheckpoint 1 (checkpointFrame.encode rolledBack)
     | throw (IO.userError "FAIL store")
-  let resumedRollback ← loadExact (second.transport (fun _ => ⟨7⟩))
-  require "a key-holder's dishonest checkpoint is trusted on open (Q1): it resumes the rolled-back cell"
-    (resumedRollback.snapshot.canonicalBytes ⟨1⟩ == [1])
-  let .ok () ← (second.transport (fun _ => ⟨7⟩)).putCheckpoint 1 (checkpointFrame.encode honest)
+  -- A key-holder's dishonest checkpoint AT THE HEAD no longer resumes silently:
+  -- the head entry's MAC'd tag carries the root after the head, and the open
+  -- refuses a replayed root that differs from it.
+  expectOpenRefused "a dishonest checkpoint at the head (its root differs from the head tag's)"
+    secondTransport
+  let .ok () ← secondTransport.putCheckpoint 1 (checkpointFrame.encode honest)
     | throw (IO.userError "FAIL store")
   require "the honest checkpoint resumes the committed cell"
-    ((← loadExact (second.transport (fun _ => ⟨7⟩))).snapshot.canonicalBytes ⟨1⟩ == [11])
-  IO.println s!"PASS durable receiver: Lean codec/executor + SQLite log, two-cell repeated commit, replay/conflict/read/write/nullifier/budget refusal, process-exit rollback, lost-response readback, concurrent guard move, pinned admission refuses journal-only race, exact entry under a later commit, checkpoint at height {checkpoint.height} resumes to the genesis replay, a past read at each of heights 0..{head} equals the genesis fold of its prefix, forged tag and forged checkpoint MAC refuse to open; {head} commits"
+    ((← loadExact secondTransport).snapshot.canonicalBytes ⟨1⟩ == [11])
+  IO.println s!"PASS durable receiver: Lean codec/executor + SQLite log, two-cell repeated commit, replay/conflict/read/write/nullifier/budget refusal, process-exit rollback, lost-response readback, concurrent guard move, pinned admission refuses journal-only race, exact entry under a later commit, checkpoint at height {checkpoint.height} resumes to the genesis replay, a past read at each of heights 0..{head} equals the genesis fold of its prefix, forged tag, forged checkpoint MAC and a dishonest checkpoint at the head refuse to open; {head} commits"
 
 end DurableReceiverProbe
 

@@ -20,6 +20,7 @@ import Kernel.ClockCellDomain
 import Kernel.RunComputeBudgetDomain
 import Kernel.ResourceMoneyReceiver
 import Kernel.ResourceObservationAdmission
+import Kernel.ObjectiveWorkAccount
 
 namespace Minidregg.Kernel.DeclaredResourceController
 open Minidregg.Compiler
@@ -41,6 +42,10 @@ set_option autoImplicit false
 abbrev Registry := CanonicalCellRegistry.registry
 abbrev Deployment := CanonicalCellRegistry.Deployment
 abbrev Durable := DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes
+/-- The verified state a transaction is prepared on (`ServedBasis.Ground`): the
+light basis of a request (its declared keys answered from the authenticated
+history) or the full shape's loaded directory and authority. -/
+abbrev Ground (deployment : Deployment) := Minidregg.Compiler.ServedBasis.Ground deployment
 abbrev AuthoritySnapshot := CredentialAuthorityDomain.Snapshot
 abbrev Ambient := DeclaredResourceScalar.Ambient
 
@@ -129,9 +134,28 @@ instance targetsValidDecidable (command : Command) : Decidable command.TargetsVa
 
 def Command.targetsWellFormed (command : Command) : Bool := decide command.TargetsValid
 
+/-- An observe-only read target (`read`, `kindRead`): it writes nothing, and
+its ONLY authorization is its `ReadLeg` (the requester's observe capability,
+signed for this exact command, judged by the source's current observe policy on
+the unchanged cell). No ordinary leg runs for it. A funding or money-consent
+target is read too, but it authorizes a debit and keeps its leg. -/
+def Target.observeOnly (target : Target) : Bool :=
+  match target.payload with
+  | .read | .kindRead => true
+  | _ => false
+
+/-- Whether the command writes any target. A command of observe-only reads alone
+makes no transition: no law has anything to judge (a signed read is the
+observation query's), and preparation refuses it `readOnlyCommand`. -/
+def Command.writesSome (command : Command) : Bool :=
+  command.targets.any fun target => !target.observeOnly
+
 /-- Foreign resource laws receive a participant's state only after actual
-observation admission; single-target blind mutation has no foreign observer. -/
-def Command.requiresObservation (command : Command) : Bool := decide (1 < command.targets.length)
+observation admission; single-target blind mutation has no foreign observer.
+An observe-only read target is authorized only by its observation, so a command
+holding one requires observation even when it is the only target. -/
+def Command.requiresObservation (command : Command) : Bool :=
+  decide (1 < command.targets.length) || command.targets.any Target.observeOnly
 
 @[simp] theorem Command.targetsWellFormed_iff (command : Command) :
     command.targetsWellFormed = true ↔ command.TargetsValid := by
@@ -348,9 +372,13 @@ theorem command_decode_canonical {bytes : List UInt8} {command : Command}
     (decoded : commandCodec.decode bytes = some command) : commandCodec.encode command = bytes :=
   ResourceBirthCodec.strictCodec_canonical rawCommandCodec decoded
 
-/-- Empty lists never reach preparation; the default merely makes this total. -/
+/-- The target whose policy and capability the authority leg carries: the
+first target the command WRITES. An observe-only read target is authorized by
+its observation alone, so no ordinary law of a read runs from the authority leg
+either. Empty lists never reach preparation; the default merely makes this total. -/
 def Command.first (command : Command) : Target :=
-  command.targets.headD ⟨.object, 0, ⟨0⟩, 1, ⟨0⟩, .scalar [], none, none, none⟩
+  (command.targets.find? fun target => !target.observeOnly).getD
+    (command.targets.headD ⟨.object, 0, ⟨0⟩, 1, ⟨0⟩, .scalar [], none, none, none⟩)
 
 def framedCommandBytes (domain semantics : Digest) (encodedCommand : List UInt8) : List UInt8 :=
   (StreamCodec.product digestStream (StreamCodec.product digestStream bytesStream)).encode
@@ -499,7 +527,14 @@ inductive Reject where
   | scalar (reason : DeclaredResourceScalar.Reject)
   | content (reason : ContentResource.Reject)
   | patchValidation | invalidPost | authorityUnavailable | directoryUnavailable
-  | nullifierUsed | authorityPreparation | physicalPreparation | policyUnavailable
+  | nullifierUsed
+  /-- The request did not declare the operation marker's replay nullifier, so
+  the ground has no answer for it (never read as unspent). -/
+  | undeclaredMarker
+  /-- The request did not declare the invocation's transaction id, so the ground
+  has no journal answer for it (replay detection never reads it as absent). -/
+  | undeclaredTransaction
+  | authorityPreparation | physicalPreparation | policyUnavailable
   /-- The command's AUTHORITY envelope did not authenticate (signature first,
   before any preparation: `ResourceInvocationSignatureFirst`). The signer is not
   authenticated, so nothing is charged to its refusal lane. -/
@@ -509,6 +544,12 @@ inductive Reject where
   | legSignature (reason : CredentialSignatureAdmission.Reject)
   | capabilityRejected | policyRejected | policyInputRange | policyCastAlias | conflictingIncidences
   | wrongEnvelopeCount
+  /-- An observe-only read target carried a target envelope. Its only
+  authorization is its observe envelope (`ReadLeg`); its target envelope must be
+  empty, never a second signature nothing checks. -/
+  | readTargetEnvelope
+  /-- Every target is an observe-only read: the command makes no transition. -/
+  | readOnlyCommand
   | bendExecution
   /-- An Objective command reached an admission caller that installed no
   signed-query read oracle: a wiring refusal, never a policy verdict. -/
@@ -519,6 +560,11 @@ inductive Reject where
   /-- The claim's source query does not select a live artifact and package
   whose declaration, parser/frontend/elaborator pins and codecs the policy admits. -/
   | objectiveSource
+  /-- The claim's envelope does not declare the front-end work of the source it selected
+  (GPT-6 row E): the selected package's source bytes (`replayBytes`) or its artifact's typed
+  core bytes (`coreBytes`), named with what the stage needs and what the claim declared. Refused
+  from the stored pair, before the replay runs (`ObjectiveWorkAccount.uncovered`). -/
+  | objectiveWork (stage : ObjectiveWorkAccount.Stage) (needed declared : Nat)
   /-- The authenticated input is not the one the claim signed (`expectedInput`),
   or the applied source does not decode or type-check. -/
   | objectiveInput
@@ -716,6 +762,8 @@ def computeTarget (snapshot : AuthoritySnapshot)
         if kind != .object then throw .wrongRole
         if version != ContentResource.commandVersion then throw .unsupportedVersion
         if root != pre.root then throw .staleTarget
+        -- Its only authorization is its observation: the named capability is the observe one.
+        if observe != some capability then throw .observationRequired
         pure pre.logical
 
     | kindRead => exact do
@@ -775,6 +823,14 @@ def targetPatch (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : A
 
     | world actions => exact (WorldKindCell.preparePatch pre.logical actions).getD []
     | kindDefinition definition => exact (WorldKindCell.prepareDefinition pre.logical definition).getD []
+
+/-- An observe-only read target's patch is empty: it writes nothing. -/
+theorem targetPatch_observeOnly (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
+    (command : Command) (target : Target) (pre : TargetCell target) (read : target.observeOnly = true) :
+    targetPatch snapshot semantics ambient command target pre = [] := by
+  cases target with
+  | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
+    cases payload <;> first | rfl | simp [Target.observeOnly] at read
 
 /-- The entry an append target records, at the cell `entryCellId target n`:
 the loaded head's next position and tail. Scalar and content targets record none.
@@ -845,6 +901,37 @@ structure PreparedTarget (deployment : Deployment) (directory : Directory Nat Re
   source : CanonicalCellRegistry.LoadedPolicySource snapshot.domain directory
     (snapshot.authState.policyAddress ⟨target.target⟩ (snapshot.authState.policyRevision ⟨target.target⟩))
   audienceFresh : ObjectAudience.checkFresh source.record.audience target.target target.audienceEpoch = .ok ()
+
+/-- An observe-only content read computes only when its named capability is its
+observe capability: the read's one authorization is its observation. -/
+theorem computeTarget_read_observe (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
+    (command : Command) (target : Target) (pre : TargetCell target) (post : target.Outcome)
+    (read : target.payload = .read)
+    (computed : computeTarget snapshot semantics ambient command target pre = .ok post) :
+    target.observeCapability = some target.capability := by
+  cases target with
+  | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
+    simp only at read
+    subst read
+    simp only [computeTarget] at computed
+    show observe = some capability
+    repeat' split at computed
+    all_goals first
+      | (rename_i same; simpa only [bne_iff_ne, ne_eq, Decidable.not_not] using same)
+      | (exfalso; simp [throw, throwThe, MonadExceptOf.throw, Functor.map, Except.map, bind,
+          Except.bind, pure, Except.pure] at computed)
+
+/-- **A prepared read target names its observe capability.** No observe-only
+content read is prepared, hence none accepted, whose `capability` is not its
+observe capability (refused `observationRequired` otherwise). -/
+theorem PreparedTarget.read_names_observe_capability {deployment : Deployment}
+    {directory : Directory Nat Registry} {snapshot : AuthoritySnapshot} {semantics : Digest}
+    {ambient : Ambient} {command : Command} {target : Target}
+    (prepared : PreparedTarget deployment directory snapshot semantics ambient command target)
+    (read : target.payload = .read) :
+    target.observeCapability = some target.capability :=
+  computeTarget_read_observe snapshot semantics ambient command target prepared.pre prepared.post read
+    prepared.candidate.modeEvidence.down
 
 def prepareTarget (deployment : Deployment) (directory : Directory Nat Registry)
     (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
@@ -1323,38 +1410,65 @@ theorem compute_objective_matches_exact {deployment : Deployment}
 
 #assert_axioms compute_objective_matches_exact
 
-structure PreparedInvocation {F : Type} [Field F]
+/-- A preparation over exactly what it reads: the decoded directory, the
+authority snapshot, the cell state (roots, bytes, allowance — no journal, nothing
+consumed: `ServedBasis.Ground.cells`) and whether the operation marker's replay
+nullifier is answered. `PreparedInvocation` is this at a ground's reads, so a
+ground can influence a preparation through nothing else (`prepare_agrees`). -/
+structure PreparedOn {F : Type} [Field F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
-    (ambient : Ambient) (durable : Durable) (command : Command) where
+    (ambient : Ambient) (directory : Directory Nat Registry) (authority : AuthoritySnapshot)
+    (cells : RunComputeBudgetDomain.Physical) (declared : Bool) (command : Command) where
   private mk ::
   nonempty : command.targets ≠ []
   distinct : (command.targets.map Target.target).Nodup
-  directory : LoadedDirectory durable
-  authority : Loaded deployment durable.snapshot
+  /-- The command writes something: an all-read command holds no transition for
+  any law to judge, and is refused `readOnlyCommand`. -/
+  writes : command.writesSome = true
+  /-- The ground answers the operation marker's replay nullifier (on the light
+  route: the request declared it), so `marker.unused` is the spent map's verified
+  answer, not a default. -/
+  markerDeclared : declared = true
   /-- The deployment clock of the same physical snapshot; its slots enter
   every target law and its root is a read guard of the record. -/
-  clock : ClockCellDomain.Loaded deployment durable.snapshot
-  targets : (i : TargetIndex command) → PreparedTarget deployment directory.directory
-    authority.snapshot profile.semantics ambient command command.targets[i]
+  clock : ClockCellDomain.Loaded deployment cells
+  targets : (i : TargetIndex command) → PreparedTarget deployment directory
+    authority profile.semantics ambient command command.targets[i]
   /-- Every transclusion's opening holds on its source read, at this height. -/
   openings : openingsCheck command (fun j => command.targets[j].contentStore? (targets j).pre) = true
-  marker : MarkerMode authority.snapshot profile.semantics command
-  compute : Option (RunComputeBudgetDomain.Prepared deployment durable.snapshot command.subject)
-  computeChecked : prepareCompute deployment durable.snapshot clock.clock command = .ok compute
-  money : Option (ResourceMoneyReceiver.Prepared deployment durable.snapshot (moneyEntries command))
-  moneyChecked : prepareMoney deployment durable.snapshot command compute = .ok money
+  marker : MarkerMode authority profile.semantics command
+  compute : Option (RunComputeBudgetDomain.Prepared deployment cells command.subject)
+  computeChecked : prepareCompute deployment cells clock.clock command = .ok compute
+  money : Option (ResourceMoneyReceiver.Prepared deployment cells (moneyEntries command))
+  moneyChecked : prepareMoney deployment cells command compute = .ok money
   /-- The re-executed run, when the command claims one. -/
   run : Option CheckedRun
-  runChecked : checkCommandRun profile.disabledEvaluators deployment.domain directory.directory
+  runChecked : checkCommandRun profile.disabledEvaluators deployment.domain directory
     ambient command (fun i => (targets i).pre.logical) (computeFundingIndex compute) = .ok run
   computeRunExact : computeExecutionMatches command compute run = true
+
+/-- Whether a ground answers an invocation's operation marker replay nullifier.
+Irreducible: its argument is a cSHAKE256 digest, which elaboration must never
+reduce while checking a type that mentions a preparation; proofs unfold it. -/
+@[irreducible] def markerDeclaredOn {deployment : Deployment} (ground : Ground deployment)
+    (domain semantics : Digest) (command : Command) : Bool :=
+  ground.declaresNullifier (CredentialAuthorityReplay.nullifier domain
+    (operationMarker ground.authority.domain semantics command))
+
+/-- The declared-resource preparation on a ground: `PreparedOn` at the ground's
+directory, authority, cell state and its answer for the operation marker. -/
+abbrev PreparedInvocation {F : Type} [Field F]
+    (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (ambient : Ambient) (ground : Ground deployment) (command : Command) :=
+  PreparedOn deployment profile ambient ground.directory ground.authority ground.cells
+    (markerDeclaredOn ground deployment.domain profile.semantics command) command
 
 /-- The accounting plan's amount is tied to the actual accepted oracle count. -/
 theorem PreparedInvocation.compute_steps_exact {F : Type} [Field F]
     {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
-    {ambient : Ambient} {durable : Durable} {command : Command}
-    (prepared : PreparedInvocation deployment profile ambient durable command)
-    (compute : RunComputeBudgetDomain.Prepared deployment durable.snapshot command.subject)
+    {ambient : Ambient} {ground : Ground deployment} {command : Command}
+    (prepared : PreparedInvocation deployment profile ambient ground command)
+    (compute : RunComputeBudgetDomain.Prepared deployment ground.cells command.subject)
     (run : CheckedRun) (hasCompute : prepared.compute = some compute)
     (hasRun : prepared.run = some run) : compute.steps = run.verdict.steps := by
   have exact := prepared.computeRunExact
@@ -1365,69 +1479,185 @@ theorem PreparedInvocation.compute_steps_exact {F : Type} [Field F]
     | some claim => simp [computeExecutionMatches, objective, hasCompute, hasRun] at exact
     | none => simpa [computeExecutionMatches, objective, hasCompute, hasRun, computeRunMatches] using exact
 
-/-- `prepare` over a directory the caller already holds for this image (the
-Host's `Opened.directory`), or `none` for an image whose directory does not load.
-`prepare_eq_prepareFrom`: with any held directory it is `prepare`. -/
-def prepareFrom {F : Type} [Field F] (deployment : Deployment)
+/-- Prepare a declared-resource transaction on a verified ground. -/
+def prepareOn {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient)
-    (durable : Durable) (directory? : Option (LoadedDirectory durable)) (command : Command) :
-    Except Reject (PreparedInvocation deployment profile ambient durable command) := do
+    (directory : Directory Nat Registry) (authority : AuthoritySnapshot)
+    (cells : RunComputeBudgetDomain.Physical) (declared : Bool) (command : Command) :
+    Except Reject (PreparedOn deployment profile ambient directory authority cells declared command) := do
   if nonempty : command.targets ≠ [] then
     if distinct : (command.targets.map Target.target).Nodup then
-      let directory ← requireSome .directoryUnavailable directory?
-      let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable.snapshot)
-      let clock ← requireSome .clockUnavailable (ClockCellDomain.load deployment durable.snapshot)
-      let targets ← collect command.targets (prepareTarget deployment directory.directory
-        authority.snapshot profile.semantics ambient command)
+     if writes : command.writesSome = true then
+      if markerDeclared : declared = true then
+      let clock ← requireSome .clockUnavailable (ClockCellDomain.load deployment cells)
+      let targets ← collect command.targets (prepareTarget deployment directory
+        authority profile.semantics ambient command)
       if openings : openingsCheck command
           (fun j => command.targets[j].contentStore? (targets j).pre) = true then
-        let marker ← prepareMarker authority.snapshot profile.semantics command
-        match computeChecked : prepareCompute deployment durable.snapshot clock.clock command with
+        let marker ← prepareMarker authority profile.semantics command
+        match computeChecked : prepareCompute deployment cells clock.clock command with
         | .error reason => .error reason
         | .ok compute =>
-          match checked : checkCommandRun profile.disabledEvaluators deployment.domain directory.directory ambient command
+          match checked : checkCommandRun profile.disabledEvaluators deployment.domain directory ambient command
               (fun i => (targets i).pre.logical) (computeFundingIndex compute) with
           | .error reason => .error reason
           | .ok run =>
             if computeRunExact : computeExecutionMatches command compute run = true then
-              match moneyChecked : prepareMoney deployment durable.snapshot command compute with
+              match moneyChecked : prepareMoney deployment cells command compute with
               | .error reason => .error reason
               | .ok money =>
-                .ok ⟨nonempty, distinct, directory, authority, clock, targets, openings, marker,
+                .ok ⟨nonempty, distinct, writes, markerDeclared, clock, targets, openings, marker,
                   compute, computeChecked, money, moneyChecked, run, checked, computeRunExact⟩
             else .error .computeFunding
       else .error (.content .staleOpening)
+      else .error .undeclaredMarker
+     else .error .readOnlyCommand
     else .error .duplicateTargets
   else .error .emptyTargets
 
 def prepare {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient)
-    (durable : Durable) (command : Command) :
-    Except Reject (PreparedInvocation deployment profile ambient durable command) :=
-  prepareFrom deployment profile ambient durable (loadDirectory durable) command
+    (ground : Ground deployment) (command : Command) :
+    Except Reject (PreparedInvocation deployment profile ambient ground command) :=
+  prepareOn deployment profile ambient ground.directory ground.authority ground.cells
+    (markerDeclaredOn ground deployment.domain profile.semantics command) command
 
-/-- A held directory of the image prepares exactly what `prepare` does. -/
-theorem prepare_eq_prepareFrom {F : Type} [Field F] (deployment : Deployment)
+/-- **Agreement: a ground reaches a preparation only through its reads.** Two
+grounds with the same decoded directory, the same authority snapshot, the same
+cell state and the same answer for the operation marker's replay nullifier prepare
+alike: the same refusal, or both prepare. On the light route the marker's answer is
+whether the request declared it (`Ground.declaresNullifier`), and its spent bit is
+the spent map's verified answer (`markerSpent_false`); no other journal or
+consumed answer is read. -/
+theorem prepare_agrees {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient)
-    (durable : Durable) (held : LoadedDirectory durable) (command : Command) :
-    prepare deployment profile ambient durable command =
-      prepareFrom deployment profile ambient durable (some held) command := by
-  unfold prepare
-  rw [LoadedDirectory.load_eq held]
+    (first second : Ground deployment) (command : Command)
+    (directory : first.directory = second.directory)
+    (authority : first.authority = second.authority)
+    (cells : first.cells = second.cells)
+    (marker : first.declaresNullifier (CredentialAuthorityReplay.nullifier deployment.domain
+        (operationMarker first.authority.domain profile.semantics command)) =
+      second.declaresNullifier (CredentialAuthorityReplay.nullifier deployment.domain
+        (operationMarker second.authority.domain profile.semantics command))) :
+    (prepare deployment profile ambient first command).map (fun _ => ()) =
+      (prepare deployment profile ambient second command).map (fun _ => ()) := by
+  have congr : ∀ (d₁ d₂ : Directory Nat Registry) (a₁ a₂ : AuthoritySnapshot)
+      (c₁ c₂ : RunComputeBudgetDomain.Physical) (m₁ m₂ : Bool),
+      d₁ = d₂ → a₁ = a₂ → c₁ = c₂ → m₁ = m₂ →
+      (prepareOn deployment profile ambient d₁ a₁ c₁ m₁ command).map (fun _ => ()) =
+        (prepareOn deployment profile ambient d₂ a₂ c₂ m₂ command).map (fun _ => ()) := by
+    intro _ _ _ _ _ _ _ _ hd ha hc hm
+    subst hd ha hc hm
+    rfl
+  exact congr _ _ _ _ _ _ _ _ directory authority cells (by unfold markerDeclaredOn; exact marker)
+
+/-- **Light = full on the same state.** A light basis whose served state is the full
+materialization's, with the same decoded directory and authority, that declares the
+operation marker's replay nullifier, prepares exactly as the full shape does. -/
+theorem prepare_light_full {F : Type} [Field F] (deployment : Deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient)
+    {store : Minidregg.Compiler.DurableHistory.StoreIdentity}
+    (basis : Minidregg.Compiler.ServedBasis.Basis deployment store)
+    (loaded : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes)
+    (fullDirectory : CredentialAuthorityDomainReceiver.LoadedDirectory loaded)
+    (fullAuthority : CredentialAuthorityDomainReceiver.Loaded deployment loaded.snapshot)
+    (sameStart : store.logStart = loaded.logStart)
+    (served : basis.served = Minidregg.Compiler.DurableServed.Served.ofLoaded loaded sameStart)
+    (directory : (Minidregg.Compiler.ServedBasis.Ground.ofBasis basis).directory = (Minidregg.Compiler.ServedBasis.Ground.full loaded fullDirectory fullAuthority).directory)
+    (authority : (Minidregg.Compiler.ServedBasis.Ground.ofBasis basis).authority = (Minidregg.Compiler.ServedBasis.Ground.full loaded fullDirectory fullAuthority).authority)
+    (command : Command)
+    (declared : CredentialAuthorityReplay.nullifier deployment.domain
+      (operationMarker (Minidregg.Compiler.ServedBasis.Ground.ofBasis basis).authority.domain profile.semantics command) ∈ basis.keys.nullifiers) :
+    (prepare deployment profile ambient (Minidregg.Compiler.ServedBasis.Ground.ofBasis basis) command).map (fun _ => ()) =
+      (prepare deployment profile ambient (Minidregg.Compiler.ServedBasis.Ground.full loaded fullDirectory fullAuthority) command).map
+        (fun _ => ()) := by
+  apply prepare_agrees deployment profile ambient _ _ command directory authority
+    (Minidregg.Compiler.ServedBasis.Ground.cells_ofLoaded basis loaded sameStart served fullDirectory fullAuthority)
+  rw [← authority]
+  simp [Minidregg.Compiler.ServedBasis.Ground.declaresNullifier, declared]
+
+#assert_axioms prepare_agrees
+#assert_axioms prepare_light_full
+
+/-- **The marker is answered, and unspent.** A prepared transaction's operation
+marker has the ground's answer `some false`: on the light route that is the spent
+map's verified answer at the served height (`Ground.markerSpent_some`). -/
+theorem PreparedInvocation.markerSpent_false {F : Type} [Field F] {deployment : Deployment}
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {ground : Ground deployment}
+    {command : Command} (prepared : PreparedInvocation deployment profile ambient ground command) :
+    ground.markerSpent (operationMarker ground.authority.domain profile.semantics command) = some false := by
+  have unused := prepared.marker.unused
+  have declared := prepared.markerDeclared
+  unfold markerDeclaredOn at declared
+  rw [ground.authorityDomain] at unused declared ⊢
+  simp only [Minidregg.Compiler.ServedBasis.Ground.markerSpent, declared, if_true, unused]
+
+/-- **An undeclared marker never prepares** (refuting pole of a silent
+"unspent"): on a light basis that did not declare the operation marker's replay
+nullifier, preparation refuses `undeclaredMarker`. -/
+theorem prepare_undeclared {F : Type} [Field F] (deployment : Deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient)
+    {store : Minidregg.Compiler.DurableHistory.StoreIdentity}
+    (basis : Minidregg.Compiler.ServedBasis.Basis deployment store) (command : Command)
+    (nonempty : command.targets ≠ []) (distinct : (command.targets.map Target.target).Nodup)
+    (writes : command.writesSome = true)
+    (undeclared : CredentialAuthorityReplay.nullifier deployment.domain
+      (operationMarker deployment.domain profile.semantics command) ∉ basis.keys.nullifiers) :
+    prepare deployment profile ambient (Minidregg.Compiler.ServedBasis.Ground.ofBasis basis) command =
+      .error .undeclaredMarker := by
+  have dom := (Minidregg.Compiler.ServedBasis.Ground.ofBasis basis).authorityDomain
+  have notDeclared : ¬ markerDeclaredOn (Minidregg.Compiler.ServedBasis.Ground.ofBasis basis)
+      deployment.domain profile.semantics command = true := by
+    unfold markerDeclaredOn
+    rw [dom]; simpa [Minidregg.Compiler.ServedBasis.Ground.declaresNullifier] using undeclared
+  unfold prepare prepareOn
+  rw [dif_pos nonempty, dif_pos distinct, dif_pos writes, dif_neg notDeclared]
+
+/-- **Refusal by name: a command that only reads.** A command whose targets are
+all observe-only reads is refused `readOnlyCommand` at preparation, before any
+law or signature is looked at. This refusal is new with READ-TARGET-LEG: a read
+is authorized by its observation alone, so an all-read command holds no
+transition for any ordinary law -- including the authority leg's -- to judge. -/
+theorem prepare_refuses_read_only {F : Type} [Field F] (deployment : Deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient)
+    (ground : Ground deployment) (command : Command)
+    (nonempty : command.targets ≠ []) (distinct : (command.targets.map Target.target).Nodup)
+    (readOnly : command.writesSome = false) :
+    prepare deployment profile ambient ground command = .error .readOnlyCommand := by
+  have refused : ¬ command.writesSome = true := by simp [readOnly]
+  unfold prepare prepareOn
+  rw [dif_pos nonempty, dif_pos distinct, dif_neg refused]
+
+/-- A command of one observe-only read target is refused `readOnlyCommand`. -/
+theorem prepare_refuses_lone_read {F : Type} [Field F] (deployment : Deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient)
+    (ground : Ground deployment) (command : Command)
+    (target : Target) (lone : command.targets = [target]) (read : target.observeOnly = true) :
+    prepare deployment profile ambient ground command = .error .readOnlyCommand :=
+  prepare_refuses_read_only deployment profile ambient ground command
+    (by simp [lone]) (by simp [lone]) (by simp [Command.writesSome, lone, read])
+
+#assert_axioms prepare_refuses_read_only
+#assert_axioms prepare_refuses_lone_read
+#assert_axioms PreparedInvocation.markerSpent_false
+#assert_axioms prepare_undeclared
+#assert_axioms computeTarget_read_observe
+#assert_axioms PreparedTarget.read_names_observe_capability
+#assert_axioms targetPatch_observeOnly
 
 /-- The authority cell after the transaction: the (empty) authority read patch
 applied to the loaded cell. -/
 def PreparedInvocation.authorityPost {F : Type} [Field F] {deployment : Deployment}
-    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
-    {command : Command} (prepared : PreparedInvocation deployment profile ambient durable command) :
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {ground : Ground deployment}
+    {command : Command} (prepared : PreparedInvocation deployment profile ambient ground command) :
     CredentialAuthorityDomain.Cell :=
   prepared.marker.prepared.validated.apply
 
 /-- The transaction leaves the authority cell's logical content unchanged. -/
 theorem PreparedInvocation.authorityPost_logical {F : Type} [Field F] {deployment : Deployment}
-    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
-    {command : Command} (prepared : PreparedInvocation deployment profile ambient durable command) :
-    prepared.authorityPost.logical = prepared.authority.snapshot.logical := by
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {ground : Ground deployment}
+    {command : Command} (prepared : PreparedInvocation deployment profile ambient ground command) :
+    prepared.authorityPost.logical = ground.authority.logical := by
   simp only [PreparedInvocation.authorityPost, ValidatedPatch.apply_logical, authorityReadPatch,
     Patch.run_nil]
   rfl
@@ -1629,17 +1859,17 @@ writes. With `Run.no_accepted_of_output_mismatch` / `NockDoor.door_poke_sound` t
 is the T8 statement at the controller: no invocation prepares whose writes differ
 from the program's. -/
 theorem PreparedInvocation.run_sound {F : Type} [Field F] {deployment : Deployment}
-    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
-    {command : Command} (prepared : PreparedInvocation deployment profile ambient durable command)
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {ground : Ground deployment}
+    {command : Command} (prepared : PreparedInvocation deployment profile ambient ground command)
     {claim : Run.RunClaim} (claimed : command.run = some claim) :
     ∃ checked program E libraries writes,
       prepared.run = some checked ∧ checked.claim = claim ∧
-      CanonicalCellRegistry.loadProgram deployment.domain prepared.directory.directory
+      CanonicalCellRegistry.loadProgram deployment.domain ground.directory
         claim.programId = some program ∧
       Run.resolve profile.disabledEvaluators program.evaluator = .ok E ∧
       checked.evaluator = E.id ∧
       program.abi.libraries.mapM (fun library => Run.require .libraryUnknown
-        (CanonicalCellRegistry.loadProgram deployment.domain prepared.directory.directory library)) =
+        (CanonicalCellRegistry.loadProgram deployment.domain ground.directory library)) =
           .ok libraries ∧
       commandWrites command (fun i => (prepared.targets i).pre.logical) claim.programId
         (computeFundingIndex prepared.compute) = some writes ∧
@@ -1658,8 +1888,8 @@ theorem PreparedInvocation.run_sound {F : Type} [Field F] {deployment : Deployme
 
 /-- Without a claim, no run slot: the controller projects nothing under `run/`. -/
 theorem PreparedInvocation.run_unclaimed {F : Type} [Field F] {deployment : Deployment}
-    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
-    {command : Command} (prepared : PreparedInvocation deployment profile ambient durable command)
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {ground : Ground deployment}
+    {command : Command} (prepared : PreparedInvocation deployment profile ambient ground command)
     (unclaimed : command.run = none) : prepared.run = none := by
   have h := prepared.runChecked
   rw [checkCommandRun_none unclaimed] at h

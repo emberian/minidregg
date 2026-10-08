@@ -46,7 +46,7 @@ def currentParentMatches (ingress : Ingress)
 
 structure Checked {F : Type} [Field F] [DecidableEq F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
-    (ambient : Ambient) (durable : Durable) (ingress : Ingress)
+    (ambient : Ambient) (ground : Ground deployment) (ingress : Ingress)
     (spec : ApplicationShareIssueSource.Spec)
     (descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry)
     (grant : ApplicationAgentLifetimeGrant.Grant)
@@ -68,32 +68,32 @@ structure Checked {F : Type} [Field F] [DecidableEq F]
   parentCurrent : currentParentMatches ingress grant = true
   commandExact : signedCommand = command ingress.dispatch.dispatch
     selection ingress.dispatch.parent
-  prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient durable
+  prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient ground
     (command ingress.dispatch.dispatch selection ingress.dispatch.parent)
   shape : DeclaredResourceController.PhysicalShape prepared
-  linked : linkedCurrentPolicies deployment profile ambient durable
+  linked : linkedCurrentPolicies deployment profile ambient ground
     ingress.dispatch spec selection prepared = true
-  appRead : CheckedRead deployment profile ambient durable ingress.dispatch
+  appRead : CheckedRead deployment profile ambient ground ingress.dispatch
     selection prepared ingress.dispatch.dispatch.dispatch.app.resource
     ingress.dispatch.dispatch.appObserveCapability
     ingress.dispatch.dispatch.appRoot
     ingress.dispatch.dispatch.appObservationEnvelope
-  manifestRead : CheckedRead deployment profile ambient durable ingress.dispatch
+  manifestRead : CheckedRead deployment profile ambient ground ingress.dispatch
     selection prepared ingress.dispatch.dispatch.dispatch.app.packageManifest
     ingress.dispatch.dispatch.manifestObserveCapability
     ingress.dispatch.dispatch.dispatch.app.manifestRoot
     ingress.dispatch.dispatch.manifestObservationEnvelope
-  enrollmentRead : CheckedRead deployment profile ambient durable ingress.dispatch
+  enrollmentRead : CheckedRead deployment profile ambient ground ingress.dispatch
     selection prepared ingress.dispatch.dispatch.enrollmentResource
     ingress.dispatch.dispatch.enrollmentObserveCapability
     ingress.dispatch.dispatch.enrollmentRoot
     ingress.dispatch.dispatch.enrollmentObservationEnvelope
-  ticketRead : CheckedRead deployment profile ambient durable ingress.dispatch
+  ticketRead : CheckedRead deployment profile ambient ground ingress.dispatch
     selection prepared spec.ticket.resource
     ingress.dispatch.ticketObserveCapability
     ingress.dispatch.ticketRoot
     ingress.dispatch.ticketObservationEnvelope
-  grantRead : CheckedRead deployment profile ambient durable ingress.dispatch
+  grantRead : CheckedRead deployment profile ambient ground ingress.dispatch
     selection prepared ingress.reserveContext.grantResource ingress.grantObserveCapability
     ingress.grantRoot ingress.grantObservationEnvelope
   grantPhysical : ResourceBirthCodec.physicalRoot (.live grantRead.selected.observed.before) =
@@ -122,7 +122,7 @@ structure Checked {F : Type} [Field F] [DecidableEq F]
   meaningExact : selectedMeaning ingress.dispatch spec actualApp manifest
     enrollment ticket = some bits
   requestShape : requestSafe ingress.dispatch.dispatch.dispatch.request = true
-  issuerCurrent : issuerLineageCurrent deployment profile ambient durable
+  issuerCurrent : issuerLineageCurrent deployment profile ambient ground
     ingress.dispatch spec selection descriptor prepared = true
   invocation : DeclaredResourceController.AcceptedInvocation prepared
     ingress.dispatch.dispatch.signed
@@ -133,14 +133,14 @@ inner root is not substituted for the complete physical cell root. -/
 def checkCurrent {F : Type} [Field F] [DecidableEq F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig)
-    (durable : Durable) (ingress : Ingress)
+    (ground : Ground deployment) (ingress : Ingress)
     (spec : ApplicationShareIssueSource.Spec)
     (descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry)
     (grant : ApplicationAgentLifetimeGrant.Grant)
     (ticketIssueIndex : Nat) (ticketIssueReceipt : NativeHostCodec.Receipt)
     (issuedIngressBytes : List UInt8) (certifiedGrantIssueIndex : Nat)
     (certifiedGrantRoot : Digest) :
-    IO (Except String (Checked deployment profile ambient durable ingress spec
+    IO (Except String (Checked deployment profile ambient ground ingress spec
       descriptor grant ticketIssueIndex ticketIssueReceipt issuedIngressBytes
       certifiedGrantIssueIndex certifiedGrantRoot)) := do
   let base := ingress.dispatch
@@ -161,37 +161,37 @@ def checkCurrent {F : Type} [Field F] [DecidableEq F]
                 if parentCurrent : currentParentMatches ingress grant = true then
                   if commandExact : signedCommand = command base.dispatch selection base.parent then
                     match ← DeclaredResourceController.prepareAuthenticated deployment profile
-                        ambient native durable (command base.dispatch selection base.parent)
+                        ambient native ground (command base.dispatch selection base.parent)
                         base.dispatch.signed.authorityEnvelope with
                     | .error _ => return .error "lifetime dispatch current preparation refused"
                     | .ok prepared =>
                       if shape : DeclaredResourceController.PhysicalShape prepared then
-                        if linked : linkedCurrentPolicies deployment profile ambient durable
+                        if linked : linkedCurrentPolicies deployment profile ambient ground
                             base spec selection prepared = true then
-                          let .ok appRead ← checkRead deployment profile ambient native durable
+                          let .ok appRead ← checkRead deployment profile ambient native ground
                             base selection prepared base.dispatch.dispatch.app.resource
                             base.dispatch.appObserveCapability base.dispatch.appRoot
                             base.dispatch.appObservationEnvelope
                             | return .error "lifetime dispatch app observation refused"
                           let .ok manifestRead ← checkRead deployment profile ambient native
-                            durable base selection prepared
+                            ground base selection prepared
                             base.dispatch.dispatch.app.packageManifest
                             base.dispatch.manifestObserveCapability
                             base.dispatch.dispatch.app.manifestRoot
                             base.dispatch.manifestObservationEnvelope
                             | return .error "lifetime dispatch manifest observation refused"
                           let .ok enrollmentRead ← checkRead deployment profile ambient native
-                            durable base selection prepared base.dispatch.enrollmentResource
+                            ground base selection prepared base.dispatch.enrollmentResource
                             base.dispatch.enrollmentObserveCapability
                             base.dispatch.enrollmentRoot
                             base.dispatch.enrollmentObservationEnvelope
                             | return .error "lifetime dispatch enrollment observation refused"
-                          let .ok ticketRead ← checkRead deployment profile ambient native durable
+                          let .ok ticketRead ← checkRead deployment profile ambient native ground
                             base selection prepared spec.ticket.resource
                             base.ticketObserveCapability base.ticketRoot
                             base.ticketObservationEnvelope
                             | return .error "lifetime dispatch original ticket observation refused"
-                          let .ok grantRead ← checkRead deployment profile ambient native durable
+                          let .ok grantRead ← checkRead deployment profile ambient native ground
                             base selection prepared ingress.reserveContext.grantResource
                             ingress.grantObserveCapability ingress.grantRoot
                             ingress.grantObservationEnvelope
@@ -228,7 +228,7 @@ def checkCurrent {F : Type} [Field F] [DecidableEq F]
                                       | some bits =>
                                         if requestShape : requestSafe base.dispatch.dispatch.request = true then
                                           if issuerCurrent : issuerLineageCurrent deployment profile
-                                              ambient durable base spec selection descriptor prepared = true then
+                                              ambient ground base spec selection descriptor prepared = true then
                                             match ← DeclaredResourceController.admit native prepared
                                                 base.dispatch.signed with
                                             | .error _ =>

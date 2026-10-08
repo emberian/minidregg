@@ -1,0 +1,229 @@
+#!/usr/bin/env python3
+"""Registered invariant domains (GPT-6 row A, A3; Kernel/ObjectiveDomain) end to end on a scratch NATIVE world.
+
+  objective-domain-native-journey.py --bin DIR --root NEW_DIR [--plant NAME[,NAME...]]
+
+The world is native/resource-client/activity_world.py; every object pins world/call/Calls.obend (`deposit`
+adds to the object's own total, `forward` deposits on a target AND counts one on its own object). A domain
+names member objects and a JOINT law over their states, member i's slots under `member/<i>/`; it is judged at
+the END of every turn that writes a member's declared state, on every member's FINAL state.
+
+  D1 joint      a and b (each under a permit-all law, governed by the sponsor) join the domain
+                `member/0/state/total = member/1/state/total`, both at 5. a.deposit(1) is refused
+                `domainLawDenied` (b is not written, and its state is read). The same deposit on twin t
+                (same law, no domain) installs: each object's own law accepts the turn, only the joint
+                law refuses it. a.forward(b, 1) moves both by one in one call tree (b by the call, a by its
+                own write): installs, 6 = 6. b.forward(a, 2) (b + 1, a + 2) is refused. Each record names the
+                domain.
+  D2 register   the law must hold on the current states (a 6, u 5: refused `domainLawDenied`); a frozen
+                member is refused `memberFrozen`; a member whose upgrade authority does not admit the signer
+                is refused `memberDenied`; the same members and law again `domainExists`; a signer whose
+                subject the member's authority admits but who holds no capability on it `notObjectHolder`
+                (the kernel's consent is judged first, the route's holder check after); no members
+                `domainShape`. A refused registration leaves every record without the domain.
+  D3 stale      p 5, q 6 join `member/0/state/total <= member/1/state/total`. p.deposit(1) is prepared
+                (6 <= 6: admitted). q.withdraw(1) to r installs (5 <= 5). The prepared plan, resubmitted, is
+                re-judged on q's NEW state, though it does not write q: refused `domainLawDenied`.
+  D4 bank       the bank tooth (`Pred.sumEq`): reserve x 10, balances y 4, v 6 join
+                `sum(member/0/state/total) == sum(member/1/state/total, member/2/state/total)`. A transfer
+                y -> v of 1 (y.withdraw paying v.receive: y 3, v 7) installs. A mint into one member alone
+                (y.deposit(1): y 4, reserve still 10) is refused `domainLawDenied` on the sumEq clause, and
+                so is raising the reserve alone (x.deposit(1)). A backed mint (x.forward(y, 1): reserve 11,
+                y 4) installs.
+  D5 keep       y (in the bank) joins a second domain {y, w}: the registration rewrites y's record, keeping the
+                bank (`keepsDomains`): it installs, y's record names both, and y.deposit(1) is still refused by
+                the bank's law.
+  D6 priced     the domain judgment is paid work (`Capacity.domainWork`, rate 1 in this world): a transfer
+                y -> v declaring NO domain work is refused `domainUncovered <units> 0`, naming the units the
+                judgment needs (the DISTINCT domains of y and v: the bank (3+1) and {y, w} (2+1) = 7 reads); declaring
+                units - 1 is refused `domainUncovered <units> <units-1>`; declaring exactly the units installs.
+                The same transfer back declaring 20 more units costs the sponsor exactly 20 more (the fee is
+                the envelope's public price, `Tariff.workOf`), and the bank still balances.
+
+Every turn here declares DOMAIN units of domain work (registration: its envelope's `domainWork`, which
+must cover judging and indexing the new domain, 2 * members + 1).
+
+PLANTS (self-test; `--plant` prints `PLANT-RESULT red GROUPS` and exits 1 when exactly the planted rows went red,
+`PLANT-RESULT blind ...` and exits 3 when a planted row stayed green):
+  domain-blind      a HOST plant: --bin built from a tree patched by scripts/plants/domain-blind.py
+                    (`judgeDomains` judges nothing) -> D1 red (a.deposit(1) commits, 6 != 5), D3 red
+                    (the stale plan commits p 6 > q 5), D4 red (the unbacked mint commits: 10 != 5 + 6) and
+                    D5 red (y's unbacked mint commits)
+  member-permit     the members' upgrade authority admits nobody's subject but a stranger's -> D1 red
+  joined-drops      a HOST plant (scripts/plants/joined-drops.py: registration writes each member's record with
+                    only the new domain) -> D5 red: the honest turn-end rule refuses it `domainsDropped`
+  judge-free        a HOST plant (scripts/plants/judge-free.py: `judgeDomains` reports 0 units) -> D6 red: the
+                    transfer declaring no domain work commits
+  joined-drops,keep-blind
+                    both HOST plants (keep-blind: `keepsDomains` admits every post) -> D5 red the other way: the
+                    dropping registration commits, y leaves the bank, and y.deposit(1) commits
+                    (registration refused `memberDenied`, so the joint law never binds)
+ROOT/transcript holds every command's exact output; ROOT/results.json every row. Exit 1 on any red row.
+"""
+import argparse, pathlib, sys
+
+HERE = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import re  # noqa: E402
+import activity_world  # noqa: E402
+from activity_world import World, PERMIT_ALL, TICKS, nat, record, eq, any_of, eq_slots, cap, unhex, op_id  # noqa: E402
+
+PLANTS = {'domain-blind': {'D1-joint', 'D3-stale', 'D4-bank', 'D5-keep', 'D6-priced'}, 'member-permit': {'D1-joint'},
+          'joined-drops': {'D5-keep'}, 'keep-blind': {'D5-keep'}, 'judge-free': {'D6-priced'}}
+# This world prices domain work (rate 1 per unit) so the judgment's fee is visible in a balance.
+activity_world.TARIFF['domainWork'] = '1'
+DOMAIN = 64
+ap = argparse.ArgumentParser()
+ap.add_argument('--bin', required=True)
+ap.add_argument('--root', required=True)
+ap.add_argument('--plant', default='')
+a = ap.parse_args()
+plants = {p for p in a.plant.split(',') if p}
+if plants - set(PLANTS):
+    raise SystemExit(f'unknown plant {sorted(plants - set(PLANTS))}; known: {sorted(PLANTS)}')
+
+NAMES = ['a', 'b', 't', 'z', 'c', 'u', 'p', 'q', 'r', 'x', 'y', 'v', 'w']
+w = World(a.bin, a.root, HERE.parent.parent)
+try:
+    w.bring_up(NAMES)
+    SPONSOR = w.SPONSOR
+    CALLS = {'name': 'Calls', 'sourcePath': str(w.repo / 'world/call/Calls.obend'), 'imports': []}
+    w.PIN, ARTIFACT = w.publication('publication', [CALLS], '0', 'deposit')
+    w.turn('publish', w.sponsor, dict(ARTIFACT, kind='publish', payer=w.SPONSOR_ACCOUNT,
+                                      payerCapability=w.SPONSOR_SPEND), 'installed')
+    O = {n: w.objects[n]['object'] for n in NAMES}
+
+    def governed(*subjects):
+        return {'governed': {'authority': any_of(*(eq('request/subject', s) for s in subjects)), 'floors': []}}
+
+    MEMBER = governed('999999' if 'member-permit' in plants else SPONSOR)
+    policies = {'a': MEMBER, 'b': MEMBER, 't': governed(SPONSOR), 'z': {'frozen': {}},
+                'c': governed('999999'), 'u': governed(SPONSOR, w.SECOND), 'p': governed(SPONSOR),
+                'q': governed(SPONSOR), 'r': governed(SPONSOR), 'x': governed(SPONSOR),
+                'y': governed(SPONSOR), 'v': governed(SPONSOR), 'w': governed(SPONSOR)}
+    starts = {'a': 5, 'b': 5, 't': 5, 'z': 5, 'c': 5, 'u': 5, 'p': 5, 'q': 6, 'r': 0, 'x': 10, 'y': 4, 'v': 6, 'w': 0}
+    for name in NAMES:
+        w.create(f'create-{name}', w.sponsor, name, PERMIT_ALL, 'installed', seed=record(total=nat(starts[name])),
+                 upgrade=policies[name])
+
+    def total(name, label):
+        return w.total_of(w.state(name, label))
+
+    def invoke(label, name, method, args, expect, detail=None, prepare=False, domain=DOMAIN):
+        body = {'kind': 'invoke', 'object': O[name], 'objectCapability': w.objects[name]['capability'],
+                'method': method, 'args': args, 'envelope': cap(TICKS, domain=domain), 'account': w.SPONSOR_ACCOUNT,
+                'accountCapability': w.SPONSOR_SPEND, 'opId': op_id()}
+        return w.turn(label, w.sponsor, body, expect, detail, prepare=prepare)
+
+    def register(label, names, law, expect, detail=None, workspace=None, caps=None):
+        body = {'kind': 'registerDomain',
+                'members': [{'object': O[n], 'capability': (caps or {}).get(n, w.objects[n]['capability'])}
+                            for n in names],
+                'law': law, 'payer': w.SPONSOR_ACCOUNT, 'payerCapability': w.SPONSOR_SPEND,
+                'envelope': cap(0, full=False, domain=DOMAIN)}
+        return w.turn(label, workspace or w.sponsor, body, expect, detail)
+
+    def hop(target, amount):
+        return record(target=nat(O[target]), amount=nat(amount))
+
+    EQUAL = eq_slots('member/0/state/total', 'member/1/state/total')
+
+    with w.group('D1-joint'):
+        register('d1-register', ['a', 'b'], EQUAL, 'installed')
+        ra = (w.state('a', 'd1-a-record').get('objectRecord') or {}).get('domains')
+        rb = (w.state('b', 'd1-b-record').get('objectRecord') or {}).get('domains')
+        w.check('d1-both-records-name-the-domain', ra is not None and len(ra) == 1 and ra == rb, [ra, rb])
+        invoke('d1-a-alone-refused', 'a', 'deposit', nat(1), 'charged', ['domainLawDenied', 'member/1/state/total'])
+        w.check('d1-unchanged-5-5', [total('a', 'd1-a1'), total('b', 'd1-b1')] == [5, 5], None)
+        invoke('d1-twin-installs', 't', 'deposit', nat(1), 'installed')
+        w.check('d1-twin-6', total('t', 'd1-t') == 6, None)
+        invoke('d1-both-move', 'a', 'forward', hop('b', 1), 'installed')
+        w.check('d1-6-6', [total('a', 'd1-a2'), total('b', 'd1-b2')] == [6, 6], None)
+        invoke('d1-uneven-refused', 'b', 'forward', hop('a', 2), 'charged', 'domainLawDenied')
+        w.check('d1-still-6-6', [total('a', 'd1-a3'), total('b', 'd1-b3')] == [6, 6], None)
+
+    with w.group('D2-register'):
+        register('d2-law-fails-now', ['a', 'u'], EQUAL, 'refused', 'domainLawDenied')
+        register('d2-frozen', ['t', 'z'], EQUAL, 'refused', 'memberFrozen')
+        register('d2-denied', ['t', 'c'], EQUAL, 'refused', 'memberDenied')
+        register('d2-exists', ['a', 'b'], EQUAL, 'refused', 'domainExists')
+        register('d2-not-holder', ['u'], PERMIT_ALL, 'refused', 'notObjectHolder', workspace=w.second)
+        register('d2-empty', [], EQUAL, 'refused', 'domainShape')
+        recs = {n: (w.state(n, f'd2-{n}-record').get('objectRecord') or {}).get('domains') for n in ['t', 'u', 'z', 'c']}
+        w.check('d2-refused-joins-nothing', all(r == [] for r in recs.values()), recs)
+
+    with w.group('D3-stale'):
+        register('d3-register', ['p', 'q'], {'type': 'leSlots', 'left': 'member/0/state/total',
+                                             'right': 'member/1/state/total'}, 'installed')
+        invoke('d3-prepared', 'p', 'deposit', nat(1), 'prepared', prepare=True)
+        pay = record(to=nat(O['r']), bank=nat(O['q']), amount=nat(1), hook={'tag': 'label', 'value': 'receive'})
+        invoke('d3-q-withdraws', 'q', 'withdraw', pay, 'installed')
+        w.check('d3-p5-q5-r1', [total('p', 'd3-p0'), total('q', 'd3-q0'), total('r', 'd3-r0')] == [5, 5, 1], None)
+        w.resubmit('d3-stale-refused', w.attempts / 'd3-prepared' / 'ingress.bin', 'charged',
+                   ['domainLawDenied', 'leSlots'])
+        w.check('d3-p-still-5', total('p', 'd3-p1') == 5, None)
+
+    with w.group('D4-bank'):
+        RESERVE = {'type': 'sumEq', 'left': ['member/0/state/total'],
+                   'right': ['member/1/state/total', 'member/2/state/total']}
+        register('d4-register', ['x', 'y', 'v'], RESERVE, 'installed')
+
+        def bank():
+            return [total(n, f'd4-{n}{next(seq)}') for n in ['x', 'y', 'v']]
+        seq = iter(range(100))
+        transfer = record(to=nat(O['v']), bank=nat(O['y']), amount=nat(1), hook={'tag': 'label', 'value': 'receive'})
+        invoke('d4-transfer-installs', 'y', 'withdraw', transfer, 'installed')
+        w.check('d4-10-3-7', bank() == [10, 3, 7], None)
+        invoke('d4-mint-refused', 'y', 'deposit', nat(1), 'charged', ['domainLawDenied', 'sumEq'])
+        invoke('d4-reserve-alone-refused', 'x', 'deposit', nat(1), 'charged', ['domainLawDenied', 'sumEq'])
+        w.check('d4-still-10-3-7', bank() == [10, 3, 7], None)
+        invoke('d4-backed-mint-installs', 'x', 'forward', hop('y', 1), 'installed')
+        w.check('d4-11-4-7', bank() == [11, 4, 7], None)
+
+    with w.group('D5-keep'):
+        register('d5-second-domain', ['y', 'w'], PERMIT_ALL, 'installed')
+        ry = (w.state('y', 'd5-y-record').get('objectRecord') or {}).get('domains')
+        w.check('d5-y-names-both', ry is not None and len(ry) == 2, ry)
+        invoke('d5-mint-still-refused', 'y', 'deposit', nat(1), 'charged', ['domainLawDenied', 'sumEq'])
+        w.check('d5-bank-11-4-7', bank() == [11, 4, 7], None)
+
+    with w.group('D6-priced'):
+        def transfer(label, frm, to, domain, expect, detail=None):
+            pay = record(to=nat(O[to]), bank=nat(O[frm]), amount=nat(1), hook={'tag': 'label', 'value': 'receive'})
+            return invoke(label, frm, 'withdraw', pay, expect, detail, domain=domain)
+
+        def sponsor(label):
+            return w.balance(w.view(label, {'accounts': [w.SPONSOR_ACCOUNT]}), w.SPONSOR_ACCOUNT)
+        # A turn-end domain refusal comes after the run: a CHARGED FAILURE (row E), the cause in the plan's verdict.
+        refused = transfer('d6-undeclared-refused', 'y', 'v', 0, 'charged', 'domainUncovered')
+        named = re.search(r'domainUncovered (\d+) (\d+)',
+                          ' '.join(str(refused.get('verdict') or unhex(refused.get('detail', ''))).split()))
+        units = int(named.group(1)) if named else None
+        # Honest world: y names the bank and {y, w}, v the bank; each distinct domain once: (3+1) + (2+1) = 7. Under a plant
+        # that changes the memberships (joined-drops) the count differs; the refusal still names it.
+        w.check('d6-units-named', named is not None and named.group(2) == '0' and units > 0 and
+                (units == 7 or bool(plants)), named and named.group(0))
+        w.check('d6-bank-unchanged', bank() == [11, 4, 7], None)
+        if units:
+            transfer('d6-one-short-refused', 'y', 'v', units - 1, 'charged', f'domainUncovered {units} {units - 1}')
+            before = sponsor('d6-before')
+            transfer('d6-exact-installs', 'y', 'v', units, 'installed')
+            mid = sponsor('d6-mid')
+            transfer('d6-back-20-more', 'v', 'y', units + 20, 'installed')
+            after = sponsor('d6-after')
+            w.check('d6-20-more-units-cost-20-more', (mid - after) - (before - mid) == 20, [before, mid, after])
+            w.check('d6-bank-11-4-7', bank() == [11, 4, 7], None)
+
+finally:
+    w.stop()
+
+code = w.finish({'pin': w.__dict__.get('PIN'), 'plants': sorted(plants)})
+if plants:
+    expected = set().union(*(PLANTS[p] for p in plants))
+    red = {g['id'] for g in w.groups if g['status'] != 'PASS'}
+    if red == expected:
+        print('PLANT-RESULT red ' + ','.join(sorted(red)))
+        sys.exit(1)
+    print(f'PLANT-RESULT blind expected={sorted(expected)} red={sorted(red)}')
+    sys.exit(3)
+sys.exit(code)

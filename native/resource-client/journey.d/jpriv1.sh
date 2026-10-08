@@ -53,6 +53,7 @@
 # Hook contract: journey.sh (executed). Last stdout line: the row table. Last
 # stderr line: the detail. Exit 0 only when every row is ok.
 set -u
+. "$(dirname "${BASH_SOURCE[0]}")/../journey-private.sh"
 umask 077
 : "${JOURNEY_STEP_DIR:?}" "${SHELL_BIN:?}" "${MINI:?}" "${HOST:?}" "${CONFIG:?}" "${SOCKET:?}" \
   "${SPONSOR_WS:?}" "${SPONSOR_SUBJECT:?}" "${JOURNEY_WORLD:?}"
@@ -199,7 +200,7 @@ for f in alice bob carl dave; do
     "$MINI" workspace --action provision --dir "$SPONSOR_WS" --name "jp-$f" --holder "${SUBJ[$f]}" \
       --funding 1000 --account-predicate "$SD/permit-all.json" --factory-ref factory
   operator setup "DELIVER: the birth context into $f's HOME/provision/" \
-    install -D -m 0600 "$SPONSOR_WS/provisions/jp-$f/birth-context.json" "$H/$f/provision/birth-context.json"
+    install_private 0600 "$SPONSOR_WS/provisions/jp-$f/birth-context.json" "$H/$f/provision/birth-context.json"
   ok setup "$f" "init mini.key ${SUBJ[$f]}"
   ok setup "$f" "whoami"
   ENC[$f]=$(jq -r '.encryptionKey // empty' "$OUT")
@@ -219,7 +220,7 @@ declare_for() {
   raw room "$who" "room-key --op recipient-record for $room: pins the founder key, prints the signed declaration" ok \
     "$MINI" workspace --action room-key --op recipient-record --dir "$WS/$who" \
     --room-id "$rid" --keys-cell "$kid" --key-epoch "$ke" --founder-key "$fk"
-  install -D -m 0600 "$OUT" "$H/$founder/requests/decl-$room-$who.json"
+  install_private 0600 "$OUT" "$H/$founder/requests/decl-$room-$who.json"
   check room "$who's declaration for $room is a signed v3 record (1333 bytes) naming this room and keys cell" \
     sh -c "jq -e --arg r '$rid' --arg k '$kid' '.type == \"minidregg-signed-room-recipient-v3\" and .room == \$r and .keysCell == \$k and (.recordHex | length) == 2666' '$OUT'"
 }
@@ -419,7 +420,7 @@ raw outsider carl "reads sa with bob's capability number" "no-grant" "$MINI" wor
 declare_for carl lab
 # The generation a wrap is addressed to is the key epoch of the recipient's signed record (an enrolled key starts at 1).
 CGEN=$(jq -r .keyEpoch "$H/alice/requests/decl-lab-carl.json")
-CWRAP=$(echo "2^96 + $CGEN * 2^64 + $C" | BC_LINE_LENGTH=0 bc)
+CWRAP=$(python3 -c "import sys; print(2**96 + int(sys.argv[1]) * 2**64 + int(sys.argv[2]))" "$CGEN" "$C")
 operator keyslaw "bob imports the keys cell by his room grant (the grant under lab that covers it)" "$MINI" workspace --action import \
   --dir "$WS/bob" --name lab-keys --kind object --target "$KEYS" --observe-capability "$(jq -r .observeCapability "$WS/bob/refs/lab.json")"
 raw keyslaw bob "invites carl himself (room-key --op invite): his CLIENT refuses, he is not the founder-key chain's tip" "current founder key" \
@@ -560,7 +561,7 @@ check rotkey "alice now pins carl's NEW signing key for pc" \
 ok rotkey alice "room rotate r-pc pc"
 # the rotation is two turns: r-pc-bind (release records) then r-pc-wraps (the wraps)
 # pc's epoch 1 for carl at generation 2 (his key epoch): (1 + 1) * 2^96 + 2 * 2^64 + carl.
-RK_ID=$(echo "2 * 2^96 + 2 * 2^64 + $C" | BC_LINE_LENGTH=0 bc)
+RK_ID=$(python3 -c "import sys; print(2 * 2**96 + 2 * 2**64 + int(sys.argv[1]))" "$C")
 check rotkey "the rotation wrapped pc's new epoch to carl's RECORD (generation = his key epoch 2, his new key)" \
   jq -e --arg id "$RK_ID" --arg k "$ENC_NEW" '[.purpose.draft.command.targets[0].payload.actions[] | select(.atom == $id and (.payload | startswith($k)))] | length == 1' \
     "$WS/alice/proposals/r-pc-wraps/intent.json"

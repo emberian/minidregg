@@ -44,6 +44,12 @@ record Slot:
   slot: Nat
 sum Queued:
   queued: Slot
+sum PlanC:
+  cancel: Slot
+sum PlanT:
+  stop: Slot
+sum Acked:
+  acked: Slot
 record Post:
   target: Nat
   amount: Nat
@@ -56,6 +62,34 @@ sum Ref:
 record Found:
   result: Ref
   write: Write
+record Relay:
+  target: Nat
+  method: String
+  amount: Nat
+record SendA:
+  to: To
+  method: String
+  args: Nat
+  allowance: Nat
+sum PlanA:
+  send: SendA
+record RelayA:
+  target: Nat
+  method: String
+  amount: Nat
+  allowance: Nat
+record Hop:
+  target: Nat
+  price: Nat
+  allowance: Nat
+  reserve: Nat
+record SendH:
+  to: To
+  method: String
+  args: Hop
+  allowance: Nat
+sum PlanH:
+  send: SendH
 # A leaf: adds `amount` and returns the new total.
 def deposit(view: View, amount: Nat) -> Activity<PlanN, Returned, Return>:
   {result: view.state.total + amount, write: {total: EditNat.add(amount)}}
@@ -86,3 +120,72 @@ def lookup(view: View, unused: Nat) -> Activity<PlanN, Returned, Found>:
 def chase(view: View, p: Post) -> Activity<PlanS, Queued, Return>:
   match perform(PlanS.send({to: To.slot(p.target), method: "deposit", args: p.amount})):
     case queued(q): {result: q.slot, write: {total: EditNat.keep()}}
+# Row F, the interface check: a method whose Plan admits `send` cannot be delivered (a
+# delivered message has no paying account for onward sends), so a send naming it is
+# refused `notDeliverable` AT THE SEND, before any postage is escrowed.
+def bounce(view: View, n: Nat) -> Activity<PlanS, Queued, Return>:
+  match perform(PlanS.send({to: To.object(n), method: "deposit", args: n})):
+    case queued(q): {result: q.slot, write: {total: EditNat.keep()}}
+# Sends `method(amount)` to `target`: any method name, Nat arguments.
+def relay(view: View, r: Relay) -> Activity<PlanS, Queued, Return>:
+  match perform(PlanS.send({to: To.object(r.target), method: r.method, args: r.amount})):
+    case queued(q): {result: q.slot, write: {total: EditNat.keep()}}
+# Pipelined: asks `target` to look up an object and sends `method(amount)` to the REPLY;
+# whether that method is deliverable is decided when the reply resolves (refunded if not).
+def relayVia(view: View, r: Relay) -> Activity<PlanS, Queued, Return>:
+  match perform(PlanS.send({to: To.object(r.target), method: "lookup", args: 0n})):
+    case queued(first):
+      match perform(PlanS.send({to: To.slot(first.slot), method: r.method, args: r.amount})):
+        case queued(second): {result: first.slot, write: {total: EditNat.keep()}}
+# Row F, the sender's two controls over a message it sent (by its id = its reply slot):
+# `cancel` withdraws it while it is still queued (refunding it and the sends pipelined on
+# its slot; its slot decided `cancelled`), and is a no-op once it was delivered; `stop`
+# only stops waiting (the pipelined sends are refunded, the message is still delivered,
+# and its delivery retires the slot; a decided slot is retired at once). Both are
+# answered `acked` at the yield and take effect when the turn commits.
+def cancelOf(view: View, n: Nat) -> Activity<PlanC, Acked, Return>:
+  match perform(PlanC.cancel({slot: n})):
+    case acked(a): {result: a.slot, write: {total: EditNat.keep()}}
+def stopOf(view: View, n: Nat) -> Activity<PlanT, Acked, Return>:
+  match perform(PlanT.stop({slot: n})):
+    case acked(a): {result: a.slot, write: {total: EditNat.keep()}}
+# Row F, the prepaid continuation allowance: a send may carry an `allowance`, escrowed with
+# its postage; only then may its delivered method send onward, out of that allowance alone
+# (at most 4 onward sends, at most 3 hops deep), the rest returning to the payer.
+def relayA(view: View, r: RelayA) -> Activity<PlanA, Queued, Return>:
+  match perform(PlanA.send({to: To.object(r.target), method: r.method, args: r.amount, allowance: r.allowance})):
+    case queued(q): {result: q.slot, write: {total: EditNat.keep()}}
+# Two onward sends: `deposit(n)` to object n, twice.
+def bounce2(view: View, n: Nat) -> Activity<PlanS, Queued, Return>:
+  match perform(PlanS.send({to: To.object(n), method: "deposit", args: n})):
+    case queued(a):
+      match perform(PlanS.send({to: To.object(n), method: "deposit", args: n})):
+        case queued(b): {result: b.slot, write: {total: EditNat.keep()}}
+# Four onward sends (the fan-out bound).
+def bounce4(view: View, n: Nat) -> Activity<PlanS, Queued, Return>:
+  match perform(PlanS.send({to: To.object(n), method: "deposit", args: n})):
+    case queued(a):
+      match perform(PlanS.send({to: To.object(n), method: "deposit", args: n})):
+        case queued(b):
+          match perform(PlanS.send({to: To.object(n), method: "deposit", args: n})):
+            case queued(c):
+              match perform(PlanS.send({to: To.object(n), method: "deposit", args: n})):
+                case queued(d): {result: d.slot, write: {total: EditNat.keep()}}
+# Five onward sends: one over the fan-out bound.
+def bounce5(view: View, n: Nat) -> Activity<PlanS, Queued, Return>:
+  match perform(PlanS.send({to: To.object(n), method: "deposit", args: n})):
+    case queued(a):
+      match perform(PlanS.send({to: To.object(n), method: "deposit", args: n})):
+        case queued(b):
+          match perform(PlanS.send({to: To.object(n), method: "deposit", args: n})):
+            case queued(c):
+              match perform(PlanS.send({to: To.object(n), method: "deposit", args: n})):
+                case queued(d):
+                  match perform(PlanS.send({to: To.object(n), method: "deposit", args: n})):
+                    case queued(e): {result: e.slot, write: {total: EditNat.keep()}}
+# A continuation chain: sends `hop` to `target` carrying all but one `price` and one `reserve`
+# of its own allowance, counting itself. The reserve pays the onward message's storage deposit
+# (its escrow is postage + allowance + deposit); what it does not use is refunded.
+def hop(view: View, h: Hop) -> Activity<PlanH, Queued, Return>:
+  match perform(PlanH.send({to: To.object(h.target), method: "hop", args: {target: h.target, price: h.price, allowance: h.allowance - h.price - h.reserve, reserve: h.reserve}, allowance: h.allowance - h.price - h.reserve})):
+    case queued(q): {result: q.slot, write: {total: EditNat.add(1n)}}

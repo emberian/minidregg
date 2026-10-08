@@ -75,8 +75,8 @@ def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
   let draft := ready.expectedDescriptor profile config
     opened.authority.snapshot.authState height payer funding
   let .ok prepared := ResourceBirthController.Concrete.prepareDraft
-    profile.compilerProfile profile.disabledEvaluators config.deployment (ready.effectivePins opened.pins)
-      opened.durable draft height
+    profile.compilerProfile profile.disabledEvaluators config.deployment opened.pins
+      opened.durable draft height ready.sourced
     | throw "share ticket birth preparation refused"
   let expected := { draft with auxiliaryCreates := prepared.prepared.grants.auxiliaryCreates }
   if CanonicalCellRegistry.sourceEncoding.codec.encode prepared.descriptor !=
@@ -106,8 +106,8 @@ def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
       .birth (CanonicalCellRegistry.sourceEncoding.codec.encode prepared.descriptor)
         sourceCapabilities,
       factory :: authority :: allocations ++ sources⟩
-  let context : ApplicationShareIssueDelegation.Context config.deployment opened.durable :=
-    ⟨prepared.prepared.directory, prepared.prepared.authority⟩
+  let context : ApplicationShareIssueDelegation.Context config.deployment :=
+    (Minidregg.Compiler.ServedBasis.Ground.full _ prepared.prepared.directory prepared.prepared.authority)
   let .ok app := ApplicationShareIssueDelegation.prepare context profile
     config.federation height spec prepared.descriptor
     | throw "share ticket app preparation refused"

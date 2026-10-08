@@ -35,7 +35,7 @@ fn killed_publisher_recovers_before_and_after_commit_and_anchor() {
         let root = dir.join("store");
         let s = SqliteByteStore::open(&root).unwrap();
         s.durable_init(b"genesis").unwrap();
-        s.durable_append(1, b"one", b"tag-one").unwrap();
+        s.durable_append(1, b"one", b"tag-one", &[]).unwrap();
         let snapshot = dir.join("before.sqlite3");
         fs::copy(s.database_path(), &snapshot).unwrap();
         drop(s);
@@ -43,12 +43,15 @@ fn killed_publisher_recovers_before_and_after_commit_and_anchor() {
         let tag = dir.join("tag");
         fs::write(&record, b"two").unwrap();
         fs::write(&tag, b"tag-two").unwrap();
+        let nodes = dir.join("nodes");
+        fs::write(&nodes, 0u64.to_be_bytes()).unwrap();
         let output = Command::new(env!("CARGO_BIN_EXE_minidregg-link-sqlite-store"))
             .arg("durable-append-crash")
             .arg(&root)
             .arg("2")
             .arg(&record)
             .arg(&tag)
+            .arg(&nodes)
             .arg(phase)
             .output()
             .unwrap();
@@ -58,12 +61,12 @@ fn killed_publisher_recovers_before_and_after_commit_and_anchor() {
         assert_eq!(reopened.durable_read(1, true).unwrap().head, expected);
         if expected == 2 {
             assert_eq!(
-                reopened.durable_append(2, b"two", b"tag-two").unwrap(),
+                reopened.durable_append(2, b"two", b"tag-two", &[]).unwrap(),
                 PublishStatus::AlreadyPresent
             );
         } else {
             assert_eq!(
-                reopened.durable_append(2, b"two", b"tag-two").unwrap(),
+                reopened.durable_append(2, b"two", b"tag-two", &[]).unwrap(),
                 PublishStatus::Installed
             );
         }
@@ -92,6 +95,8 @@ fn concurrent_publishers_serialize_anchor_with_commit() {
         let tag = dir.join(format!("tag-{n}"));
         fs::write(&record, [n]).unwrap();
         fs::write(&tag, [n]).unwrap();
+        let nodes = dir.join(format!("nodes-{n}"));
+        fs::write(&nodes, 0u64.to_be_bytes()).unwrap();
         children.push(
             Command::new(env!("CARGO_BIN_EXE_minidregg-link-sqlite-store"))
                 .arg("durable-append")
@@ -99,6 +104,7 @@ fn concurrent_publishers_serialize_anchor_with_commit() {
                 .arg("1")
                 .arg(&record)
                 .arg(&tag)
+                .arg(&nodes)
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .spawn()
@@ -174,16 +180,12 @@ fn coprocess_carries_identity_and_refuses_a_different_deployment() {
     drop(input);
     let result = child.wait_with_output().unwrap();
     assert!(result.status.success());
-    let mut bytes = result.stdout.as_slice();
+    let total = result.stdout.len() as u64;
+    let mut stream = std::io::Cursor::new(result.stdout);
     let mut replies = Vec::new();
-    while !bytes.is_empty() {
-        let code = u32::from_be_bytes(bytes[..4].try_into().unwrap());
-        bytes = &bytes[4..];
-        let n = u64::from_be_bytes(bytes[..8].try_into().unwrap()) as usize;
-        bytes = &bytes[8 + n..];
-        let n = u64::from_be_bytes(bytes[..8].try_into().unwrap()) as usize;
-        replies.push((code, String::from_utf8_lossy(&bytes[8..8 + n]).into_owned()));
-        bytes = &bytes[8 + n..];
+    while stream.position() < total {
+        let (code, _stdout, stderr) = serve_reply(&mut stream);
+        replies.push((code, String::from_utf8_lossy(&stderr).into_owned()));
     }
     assert_eq!(replies.len(), 3);
     assert_eq!(replies[0].0, 0);
@@ -202,6 +204,9 @@ fn serve_frame(command: &[String]) -> Vec<u8> {
 }
 
 fn serve_reply(stream: &mut impl std::io::Read) -> (u32, Vec<u8>, Vec<u8>) {
+    let mut tag = [0u8; 8];
+    stream.read_exact(&mut tag).unwrap();
+    assert_eq!(&tag, b"MDCOPRC1", "every serve reply opens with the reply tag");
     let mut word = [0u8; 4];
     stream.read_exact(&mut word).unwrap();
     let mut long = [0u8; 8];
@@ -228,6 +233,8 @@ fn serve_answers_in_process_and_crash_fixtures_keep_their_own_process() {
     fs::write(&record, b"record").unwrap();
     let tag = dir.join("tag");
     fs::write(&tag, b"tag").unwrap();
+    let nodes = dir.join("nodes");
+    fs::write(&nodes, 0u64.to_be_bytes()).unwrap();
     let id = "domain:1;semantics:2;seed:3".to_owned();
     let commands = |root: &PathBuf, out: &str| -> Vec<Vec<String>> {
         let r = root.display().to_string();
@@ -236,11 +243,11 @@ fn serve_answers_in_process_and_crash_fixtures_keep_their_own_process() {
             vec!["--anchor-identity".into(), id.clone(), "durable-init".into(), r.clone(), seed.display().to_string()],
             vec!["--anchor-identity".into(), id.clone(), "durable-read".into(), r.clone(), "1".into(), "1".into(), o.clone()],
             vec!["--anchor-identity".into(), id.clone(), "durable-append".into(), r.clone(), "1".into(),
-                 record.display().to_string(), tag.display().to_string()],
+                 record.display().to_string(), tag.display().to_string(), nodes.display().to_string()],
             vec!["--anchor-identity".into(), id.clone(), "durable-read".into(), r.clone(), "1".into(), "1".into(), o.clone()],
             vec!["--anchor-identity".into(), id.clone(), "durable-read".into(), r.clone(), "1".into(), "1".into(), o],
             vec!["--anchor-identity".into(), id.clone(), "durable-append".into(), r.clone(), "1".into(),
-                 record.display().to_string(), tag.display().to_string()],
+                 record.display().to_string(), tag.display().to_string(), nodes.display().to_string()],
             vec!["no-such-command".into()],
         ]
     };
@@ -264,7 +271,7 @@ fn serve_answers_in_process_and_crash_fixtures_keep_their_own_process() {
     }
     let crash = vec!["--anchor-identity".into(), id.clone(), "durable-append-crash".into(),
         served_root.display().to_string(), "2".into(), record.display().to_string(), tag.display().to_string(),
-        "after-commit".into()];
+        nodes.display().to_string(), "after-commit".into()];
     input.write_all(&serve_frame(&crash)).unwrap();
     input.flush().unwrap();
     assert_eq!(serve_reply(&mut output).0, 88, "crash fixture ends only its own child");

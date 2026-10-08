@@ -26,6 +26,7 @@
 # Hook contract: journey.sh (executed, not sourced). Last stdout line: the row
 # table. Last stderr line: the detail. Exit 0 only when every row is ok.
 set -u
+. "$(dirname "${BASH_SOURCE[0]}")/../journey-private.sh"
 umask 077
 : "${JOURNEY_STEP_DIR:?}" "${JOURNEY_WORLD:?}" "${JOURNEY_RUN:?}" "${SHELL_BIN:?}" "${MINI:?}" "${HOST:?}" "${CONFIG:?}" "${SOCKET:?}" "${SPONSOR_WS:?}"
 SD=$JOURNEY_STEP_DIR
@@ -116,7 +117,7 @@ for f in wa wb; do
   mkdir -p -m 700 "$H/$f" "$H/$f/requests"
   ok setup "$f" "keygen mini.key"
   operator setup "CUSTODY: copy $f's secret into the sponsor home" \
-    install -D -m 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/$f.key"
+    install_private 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/$f.key"
   ok setup sponsor "enroll plan $f $f.key"
   ok setup sponsor "enroll seal $f"
   ok setup sponsor "enroll submit $f"
@@ -127,7 +128,7 @@ for f in wa wb; do
     "$MINI" workspace --action provision --dir "$SPONSOR_WS" --name "$f" --holder "${SUBJ[$f]}" \
       --funding 1000 --account-predicate "$SD/permit-all.json" --factory-ref factory
   operator setup "DELIVER: the birth context into $f's HOME/provision/" \
-    install -D -m 0600 "$SPONSOR_WS/provisions/$f/birth-context.json" "$H/$f/provision/birth-context.json"
+    install_private 0600 "$SPONSOR_WS/provisions/$f/birth-context.json" "$H/$f/provision/birth-context.json"
   ok setup "$f" "init mini.key ${SUBJ[$f]}"
 done
 B=${SUBJ[wb]}

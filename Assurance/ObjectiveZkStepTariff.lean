@@ -194,10 +194,10 @@ theorem nat7_envelope_run (rate : ObjectiveBendCommittedSource.PhysicalRate)
 /-- The envelope premise is inhabited: the unit rate and a two-tick envelope. -/
 theorem nat7_envelope_inhabited :
     2 ≤ (⟨1, 1, 0⟩ : ObjectiveBendCommittedSource.PhysicalRate).ticks
-      { typeFuel := 0, sourceTicks := 2, heap := 0, stack := 0, outputNodes := 0, outputBytes := 0,
+      { typeFuel := 0, sourceTicks := 2, heap := 0, stack := 0, outputNodes := 0, outputBytes := 0, extractTicks := 0,
         inputBytes := 0, scalarBits := 0, memoryTouches := 0, proofWork := 0, feeDebit := 0,
         turnBytes := 0, witnessBytes := 0, storageBytes := 0, sideEffectCount := 0,
-        networkBytes := 0, leaseByteBlocks := 0, incidences := 0 } := by
+        networkBytes := 0, leaseByteBlocks := 0, incidences := 0, replayBytes := 0, coreBytes := 0, domainWork := 0 } := by
   decide
 
 #assert_axioms plan_steps

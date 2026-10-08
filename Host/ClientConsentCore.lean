@@ -1,14 +1,17 @@
 /- Local full-peer consent process. Settings and executable are selected by
 local custody. The operator supplies proposed frames only. History is admitted
-before the first consent frame, never for a pure codec frame: from genesis, or,
+before the first full-peer consent frame: from genesis, or,
 when custody offers its retained anchor (frame 228) first, natively after that
 anchor once the Store is shown to extend it (`Kernel.ConsentAnchor`). Later
 frames admit only the exact new suffix (`DurableReceiverIO.extendFrom`). Frame
 229 returns the anchor of what this provider admitted, for custody to retain.
-No protected Store is transmitted by this process. Thin peers need a separate
-selective authenticated witness producer; this executable is not that producer.
+No protected Store is transmitted by this process. Frames 230-232 are thin
+consent (`Kernel.NativeThinConsent`): they read no Store and check what custody
+signs against its own command and the target views the Host served under the
+member's observe grants.
 -/
 import Kernel.NativeClientConsent
+import Kernel.NativeThinConsent
 import Kernel.ConsentAnchor
 import Kernel.NativeSpecializedConsent
 import Kernel.NativeHostGenesis
@@ -189,27 +192,12 @@ def loadSettings (path : System.FilePath) : IO Settings := do
   IO.ofExcept settings.checkJointConsensus
   pure settings
 
-def splitKind (payload : List UInt8) : IO (String × List UInt8) := do
-  unless payload.length ≥ 2 do throw (RequestRefusal.malformed "short native host kind frame")
-  let width := payload[0]!.toNat + 256 * payload[1]!.toNat
-  unless width > 0 && width ≤ payload.length - 2 do
-    throw (RequestRefusal.malformed "invalid native host kind length")
-  let some kind := String.fromUTF8? (payload.drop 2 |>.take width).toByteArray
-    | throw (RequestRefusal.malformed "native host kind is not UTF-8")
-  return (kind, payload.drop (2 + width))
-
 def splitPair (payload : List UInt8) : IO (List UInt8 × List UInt8) := do
   unless payload.length ≥ 4 do throw (RequestRefusal.malformed "short native host pair frame")
   let width := payload[0]!.toNat + 256 * payload[1]!.toNat +
     65536 * payload[2]!.toNat + 16777216 * payload[3]!.toNat
   unless width ≤ payload.length - 4 do throw (RequestRefusal.malformed "invalid native host pair length")
   return ((payload.drop 4).take width, payload.drop (4 + width))
-
-def decodeSignatures (bytes : List UInt8) : IO (List (List UInt8)) := do
-  let signaturesCodec := ResourceBirthCodec.strictCodec (StreamCodec.list bytesStream).toLawful
-  let some signatures := signaturesCodec.decode bytes
-    | throw (RequestRefusal.malformed "noncanonical signature list")
-  return signatures
 
 def maxFrame : Nat := FnEvidenceCodec.maxHostFrameBytes
 
@@ -252,39 +240,6 @@ def withPinnedSignature {α : Type} (config : NativeHost.Config)
 
 
 
-def codec (config : NativeHost.Config) (operation : UInt8) (payload : List UInt8) : IO (List UInt8) := do
-  match operation with
-  | 7 =>
-      let (kind, source) ← splitKind payload
-      let some text := String.fromUTF8? source.toByteArray
-        | throw (RequestRefusal.malformed "native host author source is not UTF-8")
-      let json ← RequestRefusal.clientBytes (SourceAgreementJson.parse text)
-      return ← RequestRefusal.clientBytes (SourceAgreementJson.author kind json (some config))
-  | 8 =>
-      let (kind, source) ← splitKind payload
-      let value ← RequestRefusal.clientBytes (SourceAgreementJson.inspect kind source)
-      return value.compress.toUTF8.toList
-  | 9 =>
-      let some text := String.fromUTF8? payload.toByteArray
-        | throw (RequestRefusal.malformed "native host signatures source is not UTF-8")
-      let json ← RequestRefusal.clientBytes (SourceAgreementJson.parse text)
-      return ← RequestRefusal.clientBytes (SourceAgreementJson.signatures json)
-  | 10 =>
-      let (challengeBytes, signaturesBytes) ← splitPair payload
-      let some challenge := NativeObservationCodec.challengeCodec.decode challengeBytes
-        | throw (RequestRefusal.malformed "noncanonical observation challenge")
-      let signatures ← decodeSignatures signaturesBytes
-      let signed ← RequestRefusal.clientBytes (NativeObservationCodec.assemble challenge signatures)
-      return NativeObservationCodec.signedCodec.encode signed
-  | 11 =>
-      let (planBytes, signaturesBytes) ← splitPair payload
-      let some plan := signingPlanCodec.decode planBytes
-        | throw (RequestRefusal.malformed "noncanonical signing plan")
-      let signatures ← decodeSignatures signaturesBytes
-      let call ← RequestRefusal.clientBytes (NativeHost.assemble plan signatures)
-      return callCodec.encode call
-  | _ => throw (IO.userError "not a local codec operation")
-
 /-- The retained proof is updated only by independent native admission. The
 physical Store/MAC is merely an input reader, never a semantic trust source.
 The basis is the full re-admission from genesis, or native admission of every
@@ -294,6 +249,14 @@ abbrev Session (config : NativeHost.Config) := Sigma (ConsentAnchor.Basis config
 /-- The full re-admission, for consent that selects from chronology. -/
 abbrev FullSession (config : NativeHost.Config) := Sigma (NativeHostReplay.Verified config)
 
+/-- The Reader of the Store the consent provider opened, at `target`'s head: the
+replay walk reads lifecycle history through it. -/
+def storeReader (config : NativeHost.Config) (target : NativeHost.Durable) :
+    IO ((store : DurableHistory.StoreIdentity) × DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store) := do
+  match ← DurableHistoryStore.readerOf config.transport ResourceBirthCodec.rootBytes target with
+  | .ok sealed => pure sealed
+  | .error detail => throw (IO.userError s!"consent history reader: {detail}")
+
 /-- First admission. A retained anchor the Store contradicts (another genesis
 log, a rolled-back head, a rewritten prefix, another root at the anchor)
 refuses and terminates the provider. A suffix whose admission fails after the
@@ -302,12 +265,13 @@ def verifyInitial (config : NativeHost.Config) (retained : Option ConsentAnchor.
     IO (Session config) := do
   let ⟨target, chains, chainsExact⟩ ← IO.ofExcept
     (← DurableReceiverIO.loadChained config.transport ResourceBirthCodec.rootBytes)
+  let ⟨_, reader⟩ ← storeReader config target
   if let some anchor := retained then
-    match ← ConsentAnchor.resume config anchor target chains chainsExact with
+    match ← ConsentAnchor.resume config reader anchor target chains chainsExact with
     | .ok anchored => return ⟨target, .anchored anchored⟩
     | .error (.contradicted detail) => throw (IO.userError s!"consent refused: {detail}")
     | .error (.suffix _) => pure ()
-  match ← NativeHostReplay.verifyLoaded config target with
+  match ← NativeHostReplay.verifyLoaded config reader target with
   | .error failure => throw (IO.userError s!"consent prefix refused at {failure.index}: {failure.detail}")
   | .ok verified => pure ⟨target, .full verified⟩
 
@@ -317,14 +281,15 @@ basis whose suffix admission fails is re-admitted from genesis. -/
 def refresh (config : NativeHost.Config) (old : Session config) : IO (Session config) := do
   let ⟨target, seedExact, acceptedExact, logStartExact⟩ ← IO.ofExcept
     (← DurableReceiverIO.extendFrom config.transport ResourceBirthCodec.rootBytes old.1)
-  if target.image.accepted.length = old.1.image.accepted.length then return old
-  match ← old.2.extendAppended config target seedExact acceptedExact logStartExact with
+  if target.height = old.1.image.accepted.length then return old
+  let ⟨_, reader⟩ ← storeReader config target
+  match ← old.2.extendAppended config reader target seedExact acceptedExact logStartExact with
   | .ok basis => pure ⟨target, basis⟩
   | .error failure =>
       match old.2 with
       | .full _ => throw (IO.userError s!"consent extension refused at {failure.index}: {failure.detail}")
       | .anchored _ =>
-          match ← NativeHostReplay.verifyLoaded config target with
+          match ← NativeHostReplay.verifyLoaded config reader target with
           | .error failure =>
               throw (IO.userError s!"consent extension refused at {failure.index}: {failure.detail}")
           | .ok verified => pure ⟨target, .full verified⟩
@@ -333,7 +298,8 @@ def refresh (config : NativeHost.Config) (old : Session config) : IO (Session co
 re-admitted from genesis once and then held in full. -/
 def upgrade (config : NativeHost.Config) (session : Session config) :
     IO (FullSession config × Session config) := do
-  match ← session.2.full? config with
+  let ⟨_, reader⟩ ← storeReader config session.1
+  match ← session.2.full? config reader with
   | .error failure =>
       throw (IO.userError s!"consent prefix refused at {failure.index}: {failure.detail}")
   | .ok verified => pure (⟨session.1, verified⟩, ⟨session.1, .full verified⟩)
@@ -378,6 +344,66 @@ def consent (config : NativeHost.Config) (session : Session config) (operation :
       let headers ← IO.ofExcept (NativeClientConsent.checkIntentPlan config session.2 wanted rest)
       selectedHeaders config session wanted headers
   | _ => throw (IO.userError "unsupported consent operation")
+
+/-- Thin consent frames (230 intent, 231 observation, 232 plan): answered from
+local custody alone, with no Store and no replay (`Kernel.NativeThinConsent`).
+A refusal names what thin consent cannot show; nothing falls back to a replay
+or to signing what was not checked. -/
+def thinRefusal (refusal : NativeThinConsent.Refusal) : String :=
+  match refusal with
+  | .unsupportedPayload target what =>
+      s!"thin consent cannot display this turn: target {target}: {what} unsigned"
+  | other => s!"thin consent refused: {repr other}"
+
+def displayJson (display : NativeThinConsent.Display) : Json :=
+  match display.post with
+  | none => Json.mkObj [("target", toJson (toString display.target)), ("read", true)]
+  | some (bytes, root) => Json.mkObj [("target", toJson (toString display.target)),
+      ("postRoot", toJson (toString root.value)),
+      ("postBytes", toJson (SourceAgreementJson.encodeHex bytes))]
+
+/-- A delegation's display: the signed parent id, target and child capability
+bytes. The child's lineage is the kernel's copy of that parent, not shown. -/
+def delegateJson (display : NativeThinConsent.DelegateDisplay) : Json :=
+  Json.mkObj [("delegate", true), ("parent", toJson (toString display.parentId.value)),
+    ("target", toJson (toString display.target)),
+    ("childBytes", toJson (SourceAgreementJson.encodeHex display.child))]
+
+def shownJson : NativeThinConsent.Shown → Json
+  | .invocation displays => Json.arr (displays.map displayJson).toArray
+  | .delegation display => Json.arr #[delegateJson display]
+
+def thin (config : NativeHost.Config) (operation : UInt8) (payload : List UInt8) : IO (List UInt8) := do
+  let (intentBytes, rest) ← splitPair payload
+  let some wanted := NativeObservationCodec.intentCodec.decode intentBytes
+    | throw (IO.userError "noncanonical retained local intent")
+  unless NativeObservationCodec.intentCodec.encode wanted == intentBytes do
+    throw (IO.userError "noncanonical retained local intent")
+  let (signer, rest) ← splitPair rest
+  unless signer.length == 32 do throw (IO.userError "custody signer is not an Ed25519 key")
+  let semantics := config.profile.semantics
+  match operation with
+  | 230 =>
+      unless rest.isEmpty do throw (IO.userError "intent consent has unexpected trailing bytes")
+      pure intentBytes
+  | 231 =>
+      let (signature, candidate) ← splitPair rest
+      match NativeThinConsent.checkObservationThin config.deployment semantics config.federation
+          wanted signature candidate with
+      | .error refusal => throw (IO.userError (thinRefusal refusal))
+      | .ok headers => pure (headersBytes headers)
+  | 232 =>
+      let (planBytes, viewsBytes) ← splitPair rest
+      let viewsCodec := ResourceBirthCodec.strictCodec (StreamCodec.list bytesStream).toLawful
+      let some views := viewsCodec.decode viewsBytes
+        | throw (IO.userError "noncanonical served view list")
+      match NativeThinConsent.checkPlanThin config.deployment semantics config.federation
+          wanted planBytes views with
+      | .error refusal => throw (IO.userError (thinRefusal refusal))
+      | .ok (headers, shown) =>
+          pure (Json.mkObj [("headers", toJson (headers.map SourceAgreementJson.encodeHex)),
+            ("display", shownJson shown)]).compress.toUTF8.toList
+  | _ => throw (IO.userError "unsupported thin consent operation")
 
 /-- Entry adapters (lifecycle families) select from the admitted chronology,
 so they receive the full re-admission (`upgrade`). -/
@@ -468,8 +494,11 @@ def objectiveHeaders (extraObjective : ExtraObjective) (settings : Settings)
   pure (headersBytes headers)
 
 /-- Frame 228 offers custody's retained anchor before the first admission;
-frame 229 returns the anchor of the current admission. Pure codec frames
-(7–11) admit nothing. Every other frame first admits the Store (`verifyInitial`
+frame 229 returns the anchor of the current admission. Possession (226) is a
+function of the retained command and the configuration, and thin consent
+frames (230–232) read no Store: they admit nothing. This process serves no
+codec frames: the one pure codec implementation is the Host's storeless
+`codec` loop (`Host.Main.serveCodec`). Every other frame first admits the Store (`verifyInitial`
 once, then `refresh`); a failed admission terminates the provider, so no cached
 success survives an observed rollback, rewritten prefix, or failed suffix. -/
 partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjective) (settings : Settings)
@@ -483,8 +512,9 @@ partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjecti
   let body ← readExactly input length
   let operation := body[0]!
   let payload := body.toList.drop 1
-  if operation ≥ 7 && operation ≤ 11 then
-    let answer ← try pure (operation, ← codec config operation payload)
+  if operation ≥ 230 && operation ≤ 232 || operation == 226 then
+    let answer ← try pure (operation, ← if operation == 226 then possession config payload
+        else thin config operation payload)
       catch error => pure (255, error.toString.toUTF8.toList)
     writeSessionFrame output answer.1 answer.2
     serve extraExpected extraObjective settings config retained held input output
@@ -518,7 +548,6 @@ partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjecti
       else pure (none, admitted)
     let answer ← try pure (operation, ← if operation == 224 then
         specialized extraExpected settings config updated full payload
-      else if operation == 226 then possession config payload
       else if operation == 227 then objectiveHeaders extraObjective settings config updated payload
       else consent config updated operation payload)
       catch error => pure (255, error.toString.toUTF8.toList)

@@ -22,6 +22,7 @@ import Compiler.ObjectiveBendQuoteRequest
 import Compiler.ObjectiveInvocationLayout
 import Compiler.ObjectiveBendDataWire
 import Lean.Data.Json
+import Host.CapacityJson
 namespace Minidregg.Host.ObjectiveInvocationQuote
 open Minidregg.Compiler Minidregg.Kernel Minidregg.Theory
 open Minidregg.Kernel.NativeHost
@@ -46,13 +47,13 @@ def claimOf (request : Request) (expectedInput : Digest) : ObjectiveInvocationCl
 index is a position in a command that does not exist yet; budget and Book
 preparation do not read it (`Prepared.relocate_budget_exact`). -/
 def environmentOf (config : Config) (opened : Opened config) (request : Request) :
-    Except String (ObjectiveBendNativeAdmission.Environment config.deployment opened.durable) := do
-  let some clock := ClockCellDomain.load config.deployment opened.durable.snapshot
+    Except String (ObjectiveBendNativeAdmission.Environment config.deployment opened.ground) := do
+  let some clock := ClockCellDomain.load config.deployment opened.ground.cells
     | throw "clock unavailable"
-  let compute ← (RunComputeBudgetDomain.prepare config.deployment opened.durable.snapshot clock.clock
+  let compute ← (RunComputeBudgetDomain.prepare config.deployment opened.ground.cells clock.clock
       request.subject request.capacity.proofWork (request.funding.map fun funding => funding.input 0)).mapError
     fun _ => "compute funding refused"
-  pure ⟨observationContext config opened,config.federation,config.genesisHeight,request.subject,
+  pure ⟨config.federation,config.genesisHeight,request.subject,
     request.nonce,some compute⟩
 
 /-- One source effect before it has a command position. -/
@@ -78,7 +79,7 @@ def resultIndex (request : Request) : Except String Nat :=
 /-- Command-free evaluation of the applied source and placement of its effects,
 in source plan order, by the registered output codec. -/
 def placed {F : Type} [Field F] [DecidableEq F] {deployment : CanonicalCellRegistry.Deployment}
-    {durable : DeclaredResourceController.Durable} {environment : ObjectiveBendNativeAdmission.Environment deployment durable}
+    {ground : DeclaredResourceController.Ground deployment} {environment : ObjectiveBendNativeAdmission.Environment deployment ground}
     {profile : CanonicalRuntimeProfile.Profile F} {claim : ObjectiveInvocationClaim.Claim}
     (request : Request) (core : ObjectiveBendNativeAdmission.Core environment profile claim) : Except String (List Placed) := do
   let capacity := ObjectiveBendNativeAdmission.scalarProfile claim.capacity
@@ -193,7 +194,7 @@ def derive (config : Config) (opened : Opened config) (request : Request) :
     { subject := request.subject, nonce := request.nonce, targets := targets,
       family := some (ObjectiveInvocationClaim.family claim) }
   let ambient : Ambient := ⟨config.federation,logicalHeight config opened.durable⟩
-  match prepareFrom config.deployment config.profile ambient opened.durable (some opened.directory) command with
+  match prepare config.deployment config.profile ambient opened.ground command with
   | .error reason => return .error s!"final command preparation refused: {repr reason}"
   | .ok prepared =>
     match ← ObjectiveBendNativeAdmission.select config.signature ObjectiveBendAuthenticatedInputs.oracle prepared with
@@ -255,13 +256,6 @@ private def arrayOf (json : Json) (name : String) : Except String (List Json) :=
   let array ← ((← field json name).getArr?).mapError fun _ => s!"{name} must be an array"
   pure array.toList
 
-private def capacityOf (json : Json) : Except String ObjectiveInvocationClaim.Capacity := do
-  pure ⟨← natOf json "typeFuel",← natOf json "sourceTicks",← natOf json "heap",← natOf json "stack",
-    ← natOf json "outputNodes",← natOf json "outputBytes",← natOf json "inputBytes",← natOf json "scalarBits",
-    ← natOf json "memoryTouches",← natOf json "proofWork",← natOf json "feeDebit",← natOf json "turnBytes",
-    ← natOf json "witnessBytes",← natOf json "storageBytes",← natOf json "sideEffectCount",
-    ← natOf json "networkBytes",← natOf json "leaseByteBlocks",← natOf json "incidences"⟩
-
 private def roleOf (json : Json) : Except String ObjectiveBendQuoteRequest.Role := do
   let observe := (json.getObjVal? "observeCapability").toOption
   let observeCapability ← match observe with
@@ -294,7 +288,7 @@ def requestOfJson (json : Json) : Except String Request := do
       let text ← (value.getStr?).mapError fun _ => "inputEnvelopes must be hex strings"
       let some bytes := ObjectiveBendPlanAdapter.unhex text.toList | throw "inputEnvelopes must be lowercase hex"
       pure bytes,
-    capacity := ← capacityOf (← field json "capacity"),
+    capacity := ← CapacityJson.capacity "capacity" (← field json "capacity"),
     inputCodec := ← digestOf json "inputCodec", outputCodec := ← digestOf json "outputCodec",
     roles := ← (← arrayOf json "roles").mapM roleOf,
     resultResource := ← natOf json "resultResource",
@@ -377,11 +371,12 @@ def authorPolicy (json : Json) : Except String String := do
   let tariff ← field json "tariff"
   let tariff : ObjectiveTariff.Tariff := ⟨← natOf tariff "version",← natOf tariff "base",
     ← natOf tariff "typeFuel",← natOf tariff "sourceTicks",← natOf tariff "heap",← natOf tariff "stack",
-    ← natOf tariff "outputNodes",← natOf tariff "outputBytes",← natOf tariff "inputBytes"⟩
+    ← natOf tariff "outputNodes",← natOf tariff "outputBytes",← natOf tariff "extractTicks",← natOf tariff "inputBytes",
+    ← natOf tariff "replayBytes",← natOf tariff "coreBytes",← natOf tariff "domainWork"⟩
   if !tariff.valid then
     throw s!"tariff must be version {ObjectiveTariff.tariffVersion} with a positive base"
   let policy : ObjectiveBendNativeAdmission.Policy := ⟨ObjectiveBendNativeAdmission.semanticsId,← natOf json "sourceBytes",
-    ← capacityOf (← field json "maximum"),outputs,← digestOf json "clearAudience",
+    ← CapacityJson.capacity "maximum" (← field json "maximum"),← natOf json "extractTicksPerTurn",outputs,← digestOf json "clearAudience",
     frontEnd,tariff⟩
   let encoded := ObjectiveBendNativeAdmission.encodePolicy policy
   if ObjectiveBendNativeAdmission.decodePolicy encoded != some policy then throw "policy does not round-trip"

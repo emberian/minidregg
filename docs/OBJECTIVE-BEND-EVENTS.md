@@ -3,9 +3,8 @@
 Reference for activities: the language construct, its semantics and typing, and the kernel
 that persists activities on objects, delivers their responses, and runs calls and sends
 between objects. The overview is [OBJECTIVE-BEND.md](OBJECTIVE-BEND.md); the original design
-record is [EVENTS-DESIGN.txt](../EVENTS-DESIGN.txt). Theorems are cited by name; each is in
-`scripts/gates/objective-statements.snapshot` (Core4) or
-`scripts/gates/objective-statements-mathlib.snapshot` (kernel).
+record is [EVENTS-DESIGN.txt](../EVENTS-DESIGN.txt). Theorems are cited by name; each is pinned in its module's contract manifest,
+`scripts/gates/objective-manifest/<Module>.tsv`.
 
 ## The construct
 
@@ -85,20 +84,25 @@ intent writing such a cell (`ordinaryGate_refuses`, `forged_protected_write_refu
 `ObjectRecord`: id, package `pin`, `schemaVersion`, `law`, `upgrade` policy, `continuity`,
 `payer`; installed by `create`. The declared state cell holds `ObjectState {version, value}`;
 each committed write installs the next version. Every declared-state write (a birth's or
-delivery's yield, or a direct `writeState`) is judged by the object's law over the old and new
-state and the request facts (`admitWrite`; facts `subject`, `height`, `target`, `turn`,
-`caller`), with the record read in the same turn. A delivery's write is judged with the
+delivery's yield, a call frame's, a delivered message's) is judged by
+the object's effective law (`ObjectRecord.effectiveLaw`: the kernel pin clause for the record's
+`pin` first, then the creator's `law`) over the old and new state and the request facts
+(`admitWrite`; facts `objective/artifact` (first: the pinned package's identity, `-1` for the
+creation seed), `subject`, `height`, `target`, `turn`, `caller`), with the record read in the
+same turn. A delivery's write is judged with the
 activity's principal as subject, never the deliverer. A law refusal refuses the whole turn and
 names the clause. Theorems: `Birth.write_judged`, `Delivery.write_judged`,
-`StateWrite.write_judged`, `writeState_refuses_lawless`, `birth_refuses_non_object`,
+`create_seed_judged`, `create_seed_refused_names_clause`, `birth_refuses_non_object`,
 `birth_refuses_other_pin`, `create_refuses_existing`.
 
 ### Records, checkpoints and awaits
 
-- **Record** (frame `ACTIVITY-RECORD/v5`): object, activity id, package `pin`, input,
+- **Record** (frame `ACTIVITY-RECORD/v7`): object, activity id, package `pin`, input,
   `generation`, checkpoint bytes and digest, escrow (payer, purse account, declared resume and
   timeout envelopes and their fees), `tried` (the largest envelope an exhausted attempt at the
-  current await ran under), and phase `awaiting await | done result | faulted reason`.
+  current await ran under), and phase `awaiting await | done result | faulted reason`. Its digests are
+  exactly 32 octets and its heights exactly 8 (the record's length is charged, so it must not depend
+  on them: `encodeRecord_length_mask`).
 - **Checkpoint**: `collect (settle forced)` of the state the Plan extraction left
   (`ObjectiveBendDemandCollect.checkpoint`), as `encodeState` tokens. `settle` makes a forced
   cell stop retaining the closure it came from; `collect` keeps only what the Plan and stack
@@ -140,20 +144,19 @@ after re-running the Lean front end, and every turn reloads and replays the pair
 
 Eleven, each one `DataIntent` that commits all together or not at all, each a signed native
 command (`Kernel/ObjectiveActivityReceiver.lean`: subject, nonce, authority root, turn, Ed25519
-header; command edition `COMMAND/v4`; Host operations 210-214 plan, assemble, submit, lookup,
+header; command edition `COMMAND/v5`; Host operations 210-214 plan, assemble, submit, lookup,
 view; `mini activity`):
 
 | Turn | Who | What |
 | --- | --- | --- |
 | `publish` | anyone | stores an artifact and its package after the front end's replay |
-| `create` | an object holder | installs the `ObjectRecord`; refuses a second record or an unpublished pin |
+| `create` | an object holder | installs the `ObjectRecord` and, if given, the initial declared state (`seed`, judged by the creator's law alone, onto an absent state cell); refuses a second record, an unpublished pin and a refused seed |
 | `birth` | an object holder with an account | instantiates the pinned definition with typed input, runs to the first yield, commits record, state write, slot and postings |
 | `resolve` | the slot's decider | decides the slot, typed against the activity's response type, by the deadline |
 | `deliver` | anyone | settles the await (from its slot, due height or deadline), reads the view, resumes the checkpoint, runs to the next yield or end, commits record, write, next slot and postings |
 | `exhaust` | anyone | commits an attempt that ran out of its declared envelope as a paid turn |
 | `abandon` | anyone, after deadline plus grace | disposes of an await nobody ended |
 | `topUp` | anyone | funds an activity's purse |
-| `writeState` | an object holder | writes the declared state directly, judged by the law |
 | `invoke` | a capability holder with an account | a synchronous call tree (below) |
 | `deliverMessage` | anyone | delivers the head of an inbox (below) |
 
@@ -179,13 +182,40 @@ over a step relation of three kinds (an admitted kernel turn, an inert seat inte
 intent the ordinary gate admits); `derived_route` (`ObjectiveActivityGateRoute`) says every
 record the replay walk admits is one of those kinds.
 
-**Open:** `runSegment_stored_complete` (resuming the stored checkpoint ends every segment the
-machine's own yield ends, alike) holds under the premise `ForcingTransparent`, sharing
-transparency of the Plan extraction's forcing. It has a satisfying instance
-(`forcingTransparent_tally`) and refuting ones (`not_forcingTransparent_lostStack`,
-`not_forcingTransparent_dangling`), and it does not follow from a successful extraction
-(`forcingTransparent_not_of_extraction`); a discharge needs a premise naming every address a
-yield holds. Executed, not proved: `scripts/check-objective-proofs.sh transparency` resumes every
+A segment runs under `segmentLimits` (`Kernel/ObjectiveActivity.lean`): the deployment's heap
+allocation counted from the heap the segment starts with, so a birth runs under `config.limits`
+and a delivery under the checkpoint's cells plus that allocation. A delivery (and an exhaustion
+attempt) declares an envelope whose heap covers that, or is refused `heapUncovered` before it
+runs; the envelope is priced by the tariff's `workOf` (`Delivery.heap_priced`), so checkpoint
+growth is paid by the turn that runs it.
+
+`runSegment_stored_complete`: resuming the stored checkpoint ends every segment the program's
+own yield ends, alike, under the kernel's own limits, at every yield that names only allocated
+addresses (`LexicalInvariant`). Under limits counted from zero it is false: a checkpoint can be
+larger than the yield it was stored from (`largerYield_checkpoint_grows`, 2 cells to 5), and its
+size then eats the resumed segment's room (`absolute_limits_refuted`; the same point resumes
+exactly under the kernel's limits, `largerYield_resumes_exactly`). The converse is false: the
+stored checkpoint holds cached what the yield would compute again, so the kernel commits
+segments the program's own run is refused for ticks (`stored_commits_where_lazy_exhausts`) or
+faults on for extraction budget (`stored_commits_where_lazy_extraction_fails`). Every such
+case is a resource difference only: whenever the stored checkpoint commits a segment, the
+program's own yield commits an agreeing one under every resource vector above a threshold
+(`runSegment_stored_converse`), and after a stored yield the program's own next yield is in a
+`Chain` with the stored next checkpoint (`runSegment_stored_next`). Its core is `forcingTransparent_of_yieldedPlan`:
+a successful Plan extraction is a chain of finished closed demands, each a forcing chain
+(`Theory/ObjectiveBendDemandForcingDemand.lean`, `demand_forces`), and along a forcing chain
+the forced run ends every segment the lazy run ends (`Theory/ObjectiveBendDemandForcingExtract.lean`,
+`forces_segment`). The first statement took `ForcingTransparent` as a premise of every yield
+whose Plan extracts; that is refuted by a malformed yield for which the extraction succeeds and
+the statement fails (`not_forcingTransparent_dangling`, `forcingTransparent_not_of_extraction`).
+The repaired premise has poles (`lexicalInvariant_initialNat`, `not_lexicalInvariant_danglingYield`)
+and is discharged for every checkpoint the kernel stores, since every such yield is typed:
+`birth_stored_complete` (no premise), `delivery_stored_complete`, and on every reachable world
+`reachable_delivery_stored_complete` (`Kernel/ObjectiveCheckpointInvariant.lean`, no premise but
+the typed genesis). Each concludes `StoredComplete config ticks start state`: the segment from
+its own start yielded, the stored state is the checkpoint of THAT yield's extraction, and it
+resumes as that yield.
+Executed, not proved: `scripts/check-objective-proofs.sh transparency` resumes every
 activity of the preview cohort and `native/objective-emit/activity-cohort.json` both ways and
 compares each segment (outcome, Data, ticks), plus a growth leg (TallyTwelve's checkpoint size
 is constant over twelve replies; a planted checkpoint that drops the stack's cells must go red).
@@ -201,7 +231,7 @@ resume/timeout fee pair in the purse (`yield_reserves_pair`), or the activity wa
 The purse returns to the payer when the activity ends (`end_returns_purse`). Every turn's
 postings are one admitted Book batch and conserve every asset (`Birth.conserves`,
 `Delivery.conserves`, `Exhaustion.conserves`, `Abandonment.conserves`, `TopUp.conserves`).
-`publish`, `create`, `writeState`, `resolve` and `topUp` charge no tariff, and no turn charges for
+`publish`, `create`, `resolve` and `topUp` charge no tariff, and no turn charges for
 storing packages, records or state.
 
 ### Metering, disposal and faults
@@ -289,10 +319,10 @@ row of `scripts/pipeline/journey-rows` runs them.
   and `Kernel/ObjectStateType` (a strict `Ty` codec, `typedAt`, `stateSubtype`) is consumed by
   no turn.
 - A storage charge for packages, records, state cells, inboxes and decided slots.
-- The package pin as an object's law: `Pred.objectivePin` exists, but no turn installs it and
-  the object law view carries no `objective/artifact` slot
-  ([overview](OBJECTIVE-BEND.md#native-admission-by-re-execution)).
-- A guardedness check; the discharge of `ForcingTransparent`.
+- A package pin that follows an upgrade: the pin clause is `ObjectRecord.pinClause record.pin`,
+  so the future upgrade turn re-pins by rewriting `pin` (and every activity of the old pin is
+  then refused at the clause until migrated).
+- A guardedness check.
 
 ## Compared with deos-js
 
@@ -320,6 +350,6 @@ a program, snapshot and rewind.
 
 ```text
 bash scripts/check-objective-frontend.sh             # front end, incl. activity-replay
-bash scripts/check-objective-proofs.sh proofs        # ObjectiveProofs + statement/axiom snapshots
+bash scripts/check-objective-proofs.sh proofs        # ObjectiveProofs + contract manifests (statement, definition closure, axioms)
 bash scripts/check-objective-proofs.sh transparency  # stored checkpoint vs the machine's own yield
 ```

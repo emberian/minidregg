@@ -66,8 +66,8 @@ def pin (plan : SigningPlan) : Except String SigningPlan := do
     | .error "height pin requires an invocation plan"
   let some command := DeclaredResourceController.commandCodec.decode bytes
     | .error "noncanonical finalized invocation"
-  let targetCount := command.targets.length
-  let observeCount := if command.requiresObservation then targetCount else 0
+  let targetCount := command.signedTargetCount
+  let observeCount := if command.requiresObservation then command.targets.length else 0
   if command.targets.isEmpty || plan.slots.length != targetCount + observeCount + 1 then
     .error "invocation signing slots mismatch"
   else
@@ -141,22 +141,24 @@ theorem recorded_replay_before_deadline {F : Type} [Field F] [DecidableEq F] {R 
     (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : DeclaredResourceController.Ambient)
     (native : CredentialSignatureIO.NativeConfig)
-    (durable : DeclaredResourceController.Durable)
-    (directory : Option (CredentialAuthorityDomainReceiver.LoadedDirectory durable))
+    (ground : DeclaredResourceController.Ground deployment)
     (signed : DeclaredResourceController.SignedCommand)
     (command : DeclaredResourceController.Command)
     (record : DurableCommitProtocol.Intent Digest Digest StableNullifier ReplayEnvelope)
     (acceptedResult : {command : DeclaredResourceController.Command} →
-      (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient durable command) →
+      (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient ground command) →
       (shape : DeclaredResourceController.PhysicalShape prepared) →
       DeclaredResourceController.AcceptedInvocation prepared signed → IO R)
     (ordinaryResult : DeclaredResourceController.ReceiveResult → IO R)
     (decoded : DeclaredResourceController.commandCodec.decode signed.commandBytes = some command)
+    (declared : ground.declaresTransaction
+      (DeclaredResourceController.transactionId deployment.domain profile.semantics command) = true)
     (recorded : DeclaredResourceController.recordedInvocation deployment.domain profile.semantics
-      command signed durable = .ok (some record)) :
-    DeclaredResourceController.withAcceptedLoadedFrom deployment profile ambient native durable
-      directory signed acceptedResult ordinaryResult = ordinaryResult (.replayed record) := by
-  simp only [DeclaredResourceController.withAcceptedLoadedFrom, decoded, recorded]
+      command signed ground = .ok (some record)) :
+    DeclaredResourceController.withAcceptedOn deployment profile ambient native ground
+      signed acceptedResult ordinaryResult = ordinaryResult (.replayed record) := by
+  simp only [DeclaredResourceController.withAcceptedOn, decoded, declared, recorded]
+  rfl
 
 /-!
 Retiring an old *pending settlement attempt* needs more than native contention.
@@ -205,7 +207,7 @@ theorem admitted_append_within_checked_prefix {NativeError : Type}
   have bounded := receiving_prepare_deadline subject domain message state registry oldEnvelope
     prepared accepted
   rw [sameGenesisHeight] at bounded
-  unfold NativeHost.logicalHeight at beyondDeadline
+  unfold NativeHost.logicalHeight DurableReceiverIO.Loaded.height at beyondDeadline
   omega
 
 /-- The same old signed deadline cannot be admitted against any extension of
@@ -228,7 +230,7 @@ theorem no_new_admission_after_checked_prefix {NativeError : Type}
   rcases samePrefix with ⟨suffix, exactImage⟩
   have lengthExact := congrArg (fun image : DurableReceiver.Image => image.accepted.length) exactImage
   simp only [List.length_append] at lengthExact
-  unfold NativeHost.logicalHeight at bounded beyondDeadline
+  unfold NativeHost.logicalHeight DurableReceiverIO.Loaded.height at bounded beyondDeadline
   omega
 
 end Minidregg.Kernel.NativePlanHeight

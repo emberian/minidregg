@@ -202,7 +202,7 @@ impl VolumeWitness {
     pub(crate) fn compare_open_mount(&self, persistent_var_fd: RawFd) -> io::Result<()> {
         let path_meta = fs::symlink_metadata(&self.mount)?;
         if !path_meta.is_dir()
-            || path_meta.uid() != self.app_uid
+            || !crate::os::app_owner(path_meta.uid(), self.app_uid)
             || path_meta.permissions().mode() & 0o777 != 0o700
         {
             return Err(invalid("attested /var mount path identity drift"));
@@ -240,7 +240,7 @@ fn root_chain(path: &Path) -> io::Result<()> {
         };
         prefix.push(name);
         let meta = fs::symlink_metadata(&prefix)?;
-        if !meta.is_dir() || meta.uid() != 0 || meta.permissions().mode() & 0o022 != 0 {
+        if !meta.is_dir() || !crate::os::root_owner(meta.uid()) || meta.permissions().mode() & 0o022 != 0 {
             return Err(invalid("attestation directory custody refused"));
         }
     }
@@ -263,7 +263,7 @@ fn read_root_witness(
         .open(path)?;
     let meta = file.metadata()?;
     if !meta.is_file()
-        || meta.uid() != 0
+        || !crate::os::root_owner(meta.uid())
         || meta.nlink() != 1
         || meta.permissions().mode() & 0o777 != 0o644
         || meta.len() == 0

@@ -13,6 +13,7 @@ import Kernel.DeclaredResourceController
 import Theory.CredentialAuthorityEffects
 import Compiler.ResourceTargetAdmission
 import Compiler.ResourceAuthorityProjection
+import Compiler.ServedBasis
 
 namespace Minidregg.Kernel.CapabilityDelegationController
 
@@ -37,7 +38,7 @@ set_option autoImplicit false
 
 abbrev Registry := CanonicalCellRegistry.registry
 abbrev Deployment := CanonicalCellRegistry.Deployment
-abbrev Durable := DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes
+abbrev Ground := ServedBasis.Ground
 abbrev Snapshot := CredentialAuthorityDomain.Snapshot
 abbrev AuthorityMaterializer := CredentialAuthorityCell.materializer
 
@@ -45,11 +46,10 @@ def declarationStream (kind : ResourceKind) : StreamCodec (DelegateDeclaration k
   StreamCodec.xmap
     (StreamCodec.product (capabilityStream kind)
       (StreamCodec.product capabilityIdStream
-        (StreamCodec.product (TypedAuthorizationRequestCodec.resourceIdStream kind)
-          (StreamCodec.product digestStream StreamCodec.nat))))
+        (StreamCodec.product (TypedAuthorizationRequestCodec.resourceIdStream kind) StreamCodec.nat)))
     (fun declaration => (declaration.child, declaration.parentId, declaration.target,
-      declaration.expectedPreRoot, declaration.operationNullifier))
-    (fun (child, parentId, target, root, marker) => ⟨child, parentId, target, root, marker⟩)
+      declaration.operationNullifier))
+    (fun (child, parentId, target, marker) => ⟨child, parentId, target, marker⟩)
     (by intro declaration; cases declaration; rfl)
 
 def declarationCodec (kind : ResourceKind) : LawfulCodec (DelegateDeclaration kind) :=
@@ -85,7 +85,12 @@ def packedCommandStream : StreamCodec PackedCommand where
     | mk kind command =>
       simp [List.append_assoc, StreamCodec.decodePrefix_encode]
 
-def commandFrame : List UInt8 := "DREGG/CAPABILITY/DELEGATE".toUTF8.toList ++ [1]
+def commandFrameName : List UInt8 := "DREGG/CAPABILITY/DELEGATE".toUTF8.toList
+
+/-- Version 2: the declaration no longer carries the authority-cell root
+(`expectedPreRoot`). Version 1 commands signed that whole root; they refuse by
+name (`retiredCommand`). -/
+def commandFrame : List UInt8 := commandFrameName ++ [2]
 
 def rawCommandCodec : LawfulCodec PackedCommand where
   encode command := commandFrame ++ packedCommandStream.encode command
@@ -102,6 +107,33 @@ def commandCodec : LawfulCodec PackedCommand := ResourceBirthCodec.strictCodec r
 theorem command_decode_canonical {bytes : List UInt8} {command : PackedCommand}
     (decoded : commandCodec.decode bytes = some command) : commandCodec.encode command = bytes :=
   ResourceBirthCodec.strictCodec_canonical rawCommandCodec decoded
+
+/-- The version-1 frame: its declaration carried `expectedPreRoot`, the whole
+authority-cell root. -/
+def retiredFrameV1 : List UInt8 := commandFrameName ++ [1]
+
+/-- Why bytes that do not decode are refused, naming a retired version. -/
+def undecodable (bytes : List UInt8) : String :=
+  if bytes.take retiredFrameV1.length = retiredFrameV1 then
+    "delegation command v1 is retired: it signed the whole authority-cell root (expectedPreRoot); \
+     v2 binds the parent by its signed id"
+  else "noncanonical delegation command"
+
+/-- **A version-1 command refuses**, and by name. -/
+theorem retired_v1_refused (rest : List UInt8) :
+    commandCodec.decode (retiredFrameV1 ++ rest) = none ∧
+      undecodable (retiredFrameV1 ++ rest) =
+        "delegation command v1 is retired: it signed the whole authority-cell root (expectedPreRoot); \
+         v2 binds the parent by its signed id" := by
+  constructor
+  · cases decoded : commandCodec.decode (retiredFrameV1 ++ rest) with
+    | none => rfl
+    | some command =>
+        have exact := command_decode_canonical decoded
+        have framed := congrArg (List.take commandFrame.length) exact
+        simp [commandCodec, ResourceBirthCodec.strictCodec, rawCommandCodec] at framed
+        simp [commandFrame, retiredFrameV1, commandFrameName, List.take_append] at framed
+  · simp [undecodable]
 
 def operationMarker {kind : ResourceKind} (domain semantics : Digest) (command : Command kind) : Nat :=
   (Sp800185Cshake256.hash "DREGG.CAPABILITY.DELEGATE.IDENTITY/v1".toUTF8.toList
@@ -152,6 +184,16 @@ inductive Reject where
   | malformedCommand | directoryUnavailable | authorityUnavailable | targetUnavailable
   | staleTarget | staleAuthority | identity | parentUnavailable | lineage | descent
   | shape | validation | physicalPreparation
+  /-- The operation marker is already spent (the delegation was admitted before). -/
+  | replayedMarker
+  /-- The request did not declare the operation marker's replay nullifier, so its
+  ground has no answer for it (`ServedBasis.Ground.markerSpent`): refused, never
+  read as unspent. -/
+  | undeclaredMarker
+  /-- The request did not declare the delegation's transaction id, so its ground
+  has no journal answer for it (`ServedBasis.Ground.replayOf`): refused, never read
+  as "not recorded". -/
+  | undeclaredTransaction
   | policyUnavailable | capabilityRejected | policyRejected | policyInputRange | policyCastAlias | parentSubstitution
   | signature (reason : CredentialSignatureAdmission.Reject)
   deriving Repr
@@ -162,11 +204,9 @@ def requireSome {A : Type} (reason : Reject) : Option A → Except Reject A
 
 def DescentReady {kind : ResourceKind} (snapshot : Snapshot) (command : Command kind)
     (parent : StoredCapability kind) : Prop :=
-  command.declaration.expectedPreRoot = snapshot.cell.root ∧
-    readCapability snapshot.cell kind command.declaration.parentId = some parent ∧
+  readCapability snapshot.cell kind command.declaration.parentId = some parent ∧
     parent.head.id = command.declaration.parentId ∧
     CapabilityIdFresh snapshot.cell command.declaration.child.id ∧
-    snapshot.spent command.declaration.operationNullifier = false ∧
     command.declaration.child.issuerEpoch = issuerEpochAt snapshot.cell command.declaration.child.issuer ∧
     command.declaration.child.policyEpoch = policyEpochAt snapshot.cell command.declaration.child.policyId ∧
     isRegistered snapshot.cell (.capability command.declaration.child.id) = false ∧
@@ -194,11 +234,10 @@ abbrev parentage {kind : ResourceKind} (snapshot : Snapshot) (command : Command 
 def descentEvidence {kind : ResourceKind} (snapshot : Snapshot) (command : Command kind)
     (parent : StoredCapability kind) (ready : DescentReady snapshot command parent)
     (valid : LineageValid (parentage snapshot command) parent) (anchored : LineageAnchored snapshot.cell parent) :
-    DescentEvidence snapshot.cell command.declaration.expectedPreRoot
-      command.declaration.parentId command.declaration.child parent := by
-  rcases ready with ⟨root, lookup, parentId, fresh, _unspent, issuer, generation,
+    DescentEvidence snapshot.cell command.declaration.parentId command.declaration.child parent := by
+  rcases ready with ⟨lookup, parentId, fresh, issuer, generation,
     selfUnregistered, ancestorsRegistered, channelsRegistered, selfLive, ancestorsLive, channelsLive⟩
-  exact ⟨root, lookup, parentId, valid, anchored, fresh, issuer, generation,
+  exact ⟨lookup, parentId, valid, anchored, fresh, issuer, generation,
     selfUnregistered, ancestorsRegistered, channelsRegistered, selfLive, ancestorsLive, channelsLive⟩
 
 abbrev ObservedTarget (deployment : Deployment) (directory : Directory Nat Registry)
@@ -209,57 +248,61 @@ def observeTarget (deployment : Deployment) (directory : Directory Nat Registry)
     {kind : ResourceKind} (command : Command kind) : Option (ObservedTarget deployment directory command) :=
   ResourceTargetAdmission.observe deployment directory kind command.declaration.target.value command.expectedTargetRoot
 
-structure Prepared {F : Type} [Field F] (deployment : Deployment)
-    (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
-    {kind : ResourceKind} (command : Command kind) where
+/-- A prepared delegation over the directory and authority snapshot it read. -/
+structure PreparedOn {F : Type} [Field F] (deployment : Deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (directory : Directory Nat Registry)
+    (authority : Snapshot) {kind : ResourceKind} (command : Command kind) where
   private mk ::
-  directory : LoadedDirectory durable
-  authority : Loaded deployment durable.snapshot
-  target : ObservedTarget deployment directory.directory command
+  target : ObservedTarget deployment directory command
   parent : StoredCapability kind
-  descent : DescentEvidence authority.snapshot.cell
-    command.declaration.expectedPreRoot command.declaration.parentId command.declaration.child parent
+  descent : DescentEvidence authority.cell
+    command.declaration.parentId command.declaration.child parent
   shape : CredentialAuthorityFamily.DelegationShape
-    (request authority.snapshot profile.semantics ambient command) command.declaration.child parent.head
-    (parentage authority.snapshot command)
+    (request authority profile.semantics ambient command) command.declaration.child parent.head
+    (parentage authority command)
   policyTarget : command.declaration.child.policyId = ⟨command.declaration.target.value⟩
-  identity : command.declaration.operationNullifier = operationMarker authority.snapshot.domain profile.semantics command
-  validated : ValidatedPatch AuthorityMaterializer authority.snapshot.cell authority.snapshot.cell.root
-    (command.declaration.patch parent (request authority.snapshot profile.semantics ambient command)
-      authority.snapshot.logical)
-  source : CanonicalCellRegistry.LoadedPolicySource authority.snapshot.domain directory.directory
-    (authority.snapshot.authState.policyAddress command.declaration.child.policyId
-      (authority.snapshot.authState.policyRevision command.declaration.child.policyId))
+  identity : command.declaration.operationNullifier = operationMarker authority.domain profile.semantics command
+  validated : ValidatedPatch AuthorityMaterializer authority.cell authority.cell.root
+    (command.declaration.patch parent (request authority profile.semantics ambient command)
+      authority.logical)
+  source : CanonicalCellRegistry.LoadedPolicySource authority.domain directory
+    (authority.authState.policyAddress command.declaration.child.policyId
+      (authority.authState.policyRevision command.declaration.child.policyId))
 
-def prepare {F : Type} [Field F] (deployment : Deployment)
-    (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
-    {kind : ResourceKind} (command : Command kind) :
-    Except Reject (Prepared deployment profile ambient durable command) := do
-  let directory ← requireSome .directoryUnavailable (loadDirectory durable)
-  let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable.snapshot)
-  let target ← requireSome .targetUnavailable (observeTarget deployment directory.directory command)
-  let parent ← requireSome .parentUnavailable (readCapability authority.snapshot.cell kind command.declaration.parentId)
-  if ready : DescentReady authority.snapshot command parent then
-    if lineage : storedLineageCheck authority.snapshot.cell
-        (parentage authority.snapshot command) parent = true then
+/-- The preparation over what it reads: the directory, the authority snapshot and
+the operation marker's spent answer (`none`: not declared by the request, refused
+`undeclaredMarker` before anything else is read). The marker's spent bit is read
+only through that answer, never from the snapshot. -/
+def prepareOn {F : Type} [Field F] (deployment : Deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (directory : Directory Nat Registry)
+    (authority : Snapshot) (markerSpent : Option Bool) {kind : ResourceKind} (command : Command kind) :
+    Except Reject (PreparedOn deployment profile ambient directory authority command) := do
+  -- An undeclared marker is refused first, before any state is read.
+  let some spent := markerSpent | throw .undeclaredMarker
+  let target ← requireSome .targetUnavailable (observeTarget deployment directory command)
+  let parent ← requireSome .parentUnavailable (readCapability authority.cell kind command.declaration.parentId)
+  if ready : DescentReady authority command parent then
+    if lineage : storedLineageCheck authority.cell
+        (parentage authority command) parent = true then
       if shape : CredentialAuthorityFamily.DelegationShape
-          (request authority.snapshot profile.semantics ambient command) command.declaration.child parent.head
-          (parentage authority.snapshot command) then
+          (request authority profile.semantics ambient command) command.declaration.child parent.head
+          (parentage authority command) then
         if policyTarget : command.declaration.child.policyId = ⟨command.declaration.target.value⟩ then
-          if identity : command.declaration.operationNullifier = operationMarker authority.snapshot.domain profile.semantics command then
-            match validate AuthorityMaterializer authority.snapshot.cell authority.snapshot.cell.root
-                (command.declaration.patch parent (request authority.snapshot profile.semantics ambient command)
-                  authority.snapshot.logical) with
+          if identity : command.declaration.operationNullifier = operationMarker authority.domain profile.semantics command then
+            if spent then .error .replayedMarker else
+            match validate AuthorityMaterializer authority.cell authority.cell.root
+                (command.declaration.patch parent (request authority profile.semantics ambient command)
+                  authority.logical) with
             | .rejected _ => .error .validation
             | .accepted validated =>
                 let source ← requireSome .policyUnavailable (CanonicalCellRegistry.loadPolicySource
-                  authority.snapshot.domain directory.directory
-                  (authority.snapshot.authState.policyAddress command.declaration.child.policyId
-                    (authority.snapshot.authState.policyRevision command.declaration.child.policyId)))
-                let facts := (storedLineageCheck_iff authority.snapshot.cell
-                  (parentage authority.snapshot command) parent).mp lineage
-                .ok ⟨directory, authority, target, parent,
-                  descentEvidence authority.snapshot command parent ready facts.1 facts.2,
+                  authority.domain directory
+                  (authority.authState.policyAddress command.declaration.child.policyId
+                    (authority.authState.policyRevision command.declaration.child.policyId)))
+                let facts := (storedLineageCheck_iff authority.cell
+                  (parentage authority command) parent).mp lineage
+                .ok ⟨target, parent,
+                  descentEvidence authority command parent ready facts.1 facts.2,
                   shape, policyTarget, identity, validated, source⟩
           else .error .identity
         else .error .shape
@@ -267,65 +310,129 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
     else .error .lineage
   else .error .descent
 
+/-- A prepared delegation over a ground (`ServedBasis.Ground`): the light route's
+basis or the full shape. -/
+abbrev Prepared {F : Type} [Field F] (deployment : Deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (ground : Ground deployment)
+    {kind : ResourceKind} (command : Command kind) :=
+  PreparedOn deployment profile ambient ground.directory ground.authority command
+
+def prepare {F : Type} [Field F] (deployment : Deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (ground : Ground deployment)
+    {kind : ResourceKind} (command : Command kind) :
+    Except Reject (Prepared deployment profile ambient ground command) :=
+  prepareOn deployment profile ambient ground.directory ground.authority
+    (ground.markerSpent (operationMarker ground.authority.domain profile.semantics command)) command
+
+theorem prepareOn_map_congr {F : Type} [Field F] (deployment : Deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient)
+    {directory directory' : Directory Nat Registry} {authority authority' : Snapshot}
+    {spent spent' : Option Bool} {kind : ResourceKind} (command : Command kind)
+    (directories : directory = directory') (authorities : authority = authority') (answers : spent = spent') :
+    (prepareOn deployment profile ambient directory authority spent command).map (fun _ => ()) =
+      (prepareOn deployment profile ambient directory' authority' spent' command).map (fun _ => ()) := by
+  subst directories authorities answers
+  rfl
+
+/-- **The delegation is prepared alike on any two grounds that read alike**: the
+same decoded directory, the same authority snapshot (its cell, the clock at the
+height) and the same verified answer for the operation marker — the one key the
+preparation consults beyond the state — give the same refusal, or both prepare.
+On the light route the marker's answer is the spent map's verified answer at the
+served height (`Ground.markerSpent_some`, `Basis.view_consumed_declared`); on the
+full shape it is the full snapshot's consumed bit (`Ground.markerSpent_full`). -/
+theorem prepare_agrees {F : Type} [Field F] (deployment : Deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (light full : Ground deployment)
+    {kind : ResourceKind} (command : Command kind)
+    (directories : light.directory = full.directory) (authorities : light.authority = full.authority)
+    (markers : light.markerSpent (operationMarker light.authority.domain profile.semantics command) =
+      full.markerSpent (operationMarker full.authority.domain profile.semantics command)) :
+    (prepare deployment profile ambient light command).map (fun _ => ()) =
+      (prepare deployment profile ambient full command).map (fun _ => ()) :=
+  prepareOn_map_congr deployment profile ambient command directories authorities markers
+
+/-- With no answer for the marker, the preparation refuses exactly `undeclaredMarker`. -/
+theorem prepareOn_unanswered {F : Type} [Field F] (deployment : Deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (directory : Directory Nat Registry)
+    (authority : Snapshot) {kind : ResourceKind} (command : Command kind) :
+    prepareOn deployment profile ambient directory authority none command = .error .undeclaredMarker := rfl
+
+/-- **An undeclared marker is refused by name** (the plant's pole): a light basis
+that did not declare the marker's replay nullifier refuses the delegation exactly
+`undeclaredMarker`, whatever the state. -/
+theorem prepare_undeclared {F : Type} [Field F] (deployment : Deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) {store : DurableHistory.StoreIdentity}
+    (basis : ServedBasis.Basis deployment store) {kind : ResourceKind} (command : Command kind)
+    (undeclared : CredentialAuthorityReplay.nullifier deployment.domain
+        (operationMarker (ServedBasis.Ground.ofBasis basis).authority.domain profile.semantics command) ∉
+          basis.keys.nullifiers) :
+    prepare deployment profile ambient (ServedBasis.Ground.ofBasis basis) command = .error .undeclaredMarker := by
+  unfold prepare
+  rw [ServedBasis.Ground.markerSpent_undeclared basis _ undeclared]
+  rfl
+
+#assert_axioms prepare_agrees
+#assert_axioms prepare_undeclared
+
 /-! ## The same source-derived authority tuple supplies the policy view. -/
 
 variable {F : Type} [Field F] {deployment : Deployment}
-  {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
+  {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {ground : Ground deployment}
   {kind : ResourceKind} {command : Command kind}
 
 /-- The authority cell after the delegation: the family's own validated patch
 applied to the loaded cell. It is the one authority write. -/
-def Prepared.authorityPost (prepared : Prepared deployment profile ambient durable command) :
+def Prepared.authorityPost (prepared : Prepared deployment profile ambient ground command) :
     CredentialAuthorityDomain.Cell :=
   prepared.validated.apply
 
-def layout (prepared : Prepared deployment profile ambient durable command) : CellLayout Unit where
+def layout (prepared : Prepared deployment profile ambient ground command) : CellLayout Unit where
   storeLayout _ := CredentialAuthorityState.layout
   materializer _ := AuthorityMaterializer
-  projectAuthority := fun _ _ => authState prepared.authority.snapshot.cell
+  projectAuthority := fun _ _ => authState ground.authority.cell
   cellId _ := cellIdOf deployment
 
-def rawLeg (prepared : Prepared deployment profile ambient durable command) :
+def rawLeg (prepared : Prepared deployment profile ambient ground command) :
     CandidateLegData (layout prepared) () where
-  pre := prepared.authority.snapshot.cell
-  patch := command.declaration.patch prepared.parent (request prepared.authority.snapshot profile.semantics ambient command)
-    prepared.authority.snapshot.logical
-  request := ⟨kind, request prepared.authority.snapshot profile.semantics ambient command⟩
+  pre := ground.authority.cell
+  patch := command.declaration.patch prepared.parent (request ground.authority profile.semantics ambient command)
+    ground.authority.logical
+  request := ⟨kind, request ground.authority profile.semantics ambient command⟩
   Postcondition := fun logical =>
     (command.declaration.patch prepared.parent
-      (request prepared.authority.snapshot profile.semantics ambient command)
-        prepared.authority.snapshot.logical).ResultAt
-      prepared.authority.snapshot.logical logical ∧
+      (request ground.authority profile.semantics ambient command)
+        ground.authority.logical).ResultAt
+      ground.authority.logical logical ∧
     LineageAnchored (materialize AuthorityMaterializer logical)
-      (child prepared.authority.snapshot profile.semantics ambient command prepared.parent)
+      (child ground.authority profile.semantics ambient command prepared.parent)
 
-def plan (prepared : Prepared deployment profile ambient durable command) : PreparationPlan (layout prepared) Unit where
+def plan (prepared : Prepared deployment profile ambient ground command) : PreparationPlan (layout prepared) Unit where
   leg _ _ := rawLeg prepared
-  jointDigest _ := effectsDigest prepared.authority.snapshot.domain profile.semantics command command.declaration
-  legEffectsDigest _ _ := effectsDigest prepared.authority.snapshot.domain profile.semantics command command.declaration
+  jointDigest _ := effectsDigest ground.authority.domain profile.semantics command command.declaration
+  legEffectsDigest _ _ := effectsDigest ground.authority.domain profile.semantics command command.declaration
   bindFamily _ portals _ :=
     { Nullifier := Nat
-      family := delegateFamily prepared.authority.snapshot.cell
-        (portals ()) (context prepared.authority.snapshot profile.semantics ambient command)
+      family := delegateFamily ground.authority.cell
+        (portals ()) (context ground.authority profile.semantics ambient command)
         (declarationCodec kind) (storedCapabilityStream kind).toLawful
-        (effectsDigest prepared.authority.snapshot.domain profile.semantics command)
+        (effectsDigest ground.authority.domain profile.semantics command)
       declaration := command.declaration
       outcome := prepared.parent
       preExact := rfl, requestExact := rfl, effectsExact := rfl, patchExact := rfl
       postconditionExact := fun _ => Iff.rfl }
 
-theorem child_anchored (prepared : Prepared deployment profile ambient durable command) :
+theorem child_anchored (prepared : Prepared deployment profile ambient ground command) :
     LineageAnchored prepared.validated.apply
-      (child prepared.authority.snapshot profile.semantics ambient command prepared.parent) := by
+      (child ground.authority profile.semantics ambient command prepared.parent) := by
   have preserved := capabilityProduction_preserves_present prepared.validated
     (DelegateDeclaration.patch_writeFootprint _ _ _ _) prepared.descent.childSlotFresh
-  have parentPresent : readCapability prepared.authority.snapshot.cell kind prepared.parent.head.id = some prepared.parent := by
+  have parentPresent : readCapability ground.authority.cell kind prepared.parent.head.id = some prepared.parent := by
     rw [prepared.descent.parentIdExact]
     exact prepared.descent.parentExact
   exact ⟨preserved kind prepared.parent.head.id prepared.parent parentPresent,
     prepared.descent.parentLineageAnchored.of_present_reads_preserved preserved⟩
 
-def tuple (prepared : Prepared deployment profile ambient durable command) : PreparedTuple (plan prepared) where
+def tuple (prepared : Prepared deployment profile ambient ground command) : PreparedTuple (plan prepared) where
   source := ()
   primary := ()
   validated _ := prepared.validated
@@ -333,10 +440,10 @@ def tuple (prepared : Prepared deployment profile ambient durable command) : Pre
   cellIdsDistinct := fun _ _ _ => Subsingleton.elim _ _
   requestEffects _ := rfl
 
-def project (prepared : Prepared deployment profile ambient durable command) (_ : Unit)
+def project (prepared : Prepared deployment profile ambient ground command) (_ : Unit)
     (logical : (incidence : Unit) → Store ((layout prepared).storeLayout incidence)) : Minidregg.Pred.State :=
-  ⟨WorldKindLawDependencies.targetSelectorSlots prepared.directory.directory command.declaration.target.value ++
-    CanonicalRuntimeProfile.requestSlots (request prepared.authority.snapshot profile.semantics ambient command) ++
+  ⟨WorldKindLawDependencies.targetSelectorSlots ground.directory command.declaration.target.value ++
+    CanonicalRuntimeProfile.requestSlots (request ground.authority profile.semantics ambient command) ++
     DeclaredResourceController.bytesSlots "command/bytes" 0 (commandCodec.encode ⟨kind, command⟩) ++
     DeclaredResourceController.bytesSlots "resource/bytes" 0 (PackedCell.bytes Registry prepared.target.before) ++
     ResourceAuthorityProjection.grantSlots "authority/parent" kind command.declaration.parentId (logical ()) ++
@@ -344,7 +451,7 @@ def project (prepared : Prepared deployment profile ambient durable command) (_ 
 
 /-- A delegation law can inspect the selected parent and proposed child;
 unrelated authority records cannot affect its source-owned predicate view. -/
-theorem project_noninterference (prepared : Prepared deployment profile ambient durable command)
+theorem project_noninterference (prepared : Prepared deployment profile ambient ground command)
     (left right : (incidence : Unit) → Store ((layout prepared).storeLayout incidence))
     (parent : (left ()) ⟨.capability kind, command.declaration.parentId⟩ =
       (right ()) ⟨.capability kind, command.declaration.parentId⟩)
@@ -359,34 +466,34 @@ theorem project_noninterference (prepared : Prepared deployment profile ambient 
   rw [ResourceAuthorityProjection.grantSlots_noninterference _ _ _ (left ()) (right ()) parent parentRevoked,
     ResourceAuthorityProjection.grantSlots_noninterference _ _ _ (left ()) (right ()) child childRevoked]
 
-def step (prepared : Prepared deployment profile ambient durable command) : PolicyStepContext :=
+def step (prepared : Prepared deployment profile ambient ground command) : PolicyStepContext :=
   PolicyStepContext.ofPreparedTuple (project prepared) profile.semantics (tuple prepared)
 
-def sourceStore (prepared : Prepared deployment profile ambient durable command) : CanonicalPolicyRegistry.PayloadStore :=
-  ⟨CanonicalCellRegistry.fetchPolicySource prepared.authority.snapshot.domain prepared.directory.directory⟩
+def sourceStore (prepared : Prepared deployment profile ambient ground command) : CanonicalPolicyRegistry.PayloadStore :=
+  ⟨CanonicalCellRegistry.fetchPolicySource ground.authority.domain ground.directory⟩
 
 /-- Management uses the same current structural roots as edits and reads. -/
-def kindDependencies (prepared : Prepared deployment profile ambient durable command) :
+def kindDependencies (prepared : Prepared deployment profile ambient ground command) :
     Option WorldKindLawDependencies.Dependencies :=
-  WorldKindLawDependencies.loadTarget deployment prepared.directory.directory command.declaration.target.value
+  WorldKindLawDependencies.loadTarget deployment ground.directory command.declaration.target.value
 
-def policyConfig [DecidableEq F] (prepared : Prepared deployment profile ambient durable command) :
+def policyConfig [DecidableEq F] (prepared : Prepared deployment profile ambient ground command) :
     ComposedPolicyAdmission.Config F :=
-  PhysicalLawResolution.config profile.compilerProfile prepared.authority.snapshot
-    prepared.directory.directory
-    (sourceCapabilityPortal prepared.authority.snapshot command.declaration.operationNullifier)
+  PhysicalLawResolution.config profile.compilerProfile ground.authority
+    ground.directory
+    (sourceCapabilityPortal ground.authority command.declaration.operationNullifier)
     (step prepared) command.declaration.target.value
     ((kindDependencies prepared).map (·.additional) |>.getD [])
 
 /-- Missing kind/history dependencies refuse at both semantic and CAS boundaries. -/
-def lawReadGuards (prepared : Prepared deployment profile ambient durable command) :
+def lawReadGuards (prepared : Prepared deployment profile ambient ground command) :
     Option (List (Nat × Digest)) := do
   let structural ← kindDependencies prepared
-  let sources ← PhysicalLawResolution.readGuards prepared.authority.snapshot
-    prepared.directory.directory profile.semantics command.declaration.target.value structural.additional
+  let sources ← PhysicalLawResolution.readGuards ground.authority
+    ground.directory profile.semantics command.declaration.target.value structural.additional
   pure (sources ++ structural.readGuards)
 
-def portal [DecidableEq F] (prepared : Prepared deployment profile ambient durable command) : Portal :=
+def portal [DecidableEq F] (prepared : Prepared deployment profile ambient ground command) : Portal :=
   (policyConfig prepared).portal
 
 /-- The snapshot carries its authorization projection memoised
@@ -405,43 +512,43 @@ theorem reindexAuthorization_capabilityValue {source target : AuthState} {portal
   cases same
   rfl
 
-def mode [DecidableEq F] (prepared : Prepared deployment profile ambient durable command)
-    (authorization : Authorized (portal prepared) prepared.authority.snapshot.authState
-      (request prepared.authority.snapshot profile.semantics ambient command))
+def mode [DecidableEq F] (prepared : Prepared deployment profile ambient ground command)
+    (authorization : Authorized (portal prepared) ground.authority.authState
+      (request ground.authority profile.semantics ambient command))
     (named : authorization.evidence.capabilityValue =
-      some (prepared.parent.head, storedCapabilityDigest prepared.authority.snapshot prepared.parent)) :
-    DelegationEvidence prepared.authority.snapshot.cell
-      (portal prepared) (context prepared.authority.snapshot profile.semantics ambient command)
-      (declarationCodec kind) (effectsDigest prepared.authority.snapshot.domain profile.semantics command)
+      some (prepared.parent.head, storedCapabilityDigest ground.authority prepared.parent)) :
+    DelegationEvidence ground.authority.cell
+      (portal prepared) (context ground.authority profile.semantics ambient command)
+      (declarationCodec kind) (effectsDigest ground.authority.domain profile.semantics command)
       command.declaration prepared.parent where
   toDescentEvidence := prepared.descent
-  parentCommitment := storedCapabilityDigest prepared.authority.snapshot prepared.parent
-  parentAuthorization := reindexAuthorization prepared.authority.snapshot.authStateExact.symm authorization
+  parentCommitment := storedCapabilityDigest ground.authority prepared.parent
+  parentAuthorization := reindexAuthorization ground.authority.authStateExact.symm authorization
   parentNamed := (reindexAuthorization_capabilityValue
-    prepared.authority.snapshot.authStateExact.symm authorization).trans named
+    ground.authority.authStateExact.symm authorization).trans named
   shape := prepared.shape
 
 attribute [irreducible] portal
 
 structure Accepted [DecidableEq F]
-    (prepared : Prepared deployment profile ambient durable command) (envelope : List UInt8) where
+    (prepared : Prepared deployment profile ambient ground command) (envelope : List UInt8) where
   private mk ::
-  receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
+  receipt : CredentialSignatureAdmission.CheckedSignature ground.authority
   envelopeExact : receipt.envelopeBytes = envelope
-  authorization : Authorized (portal prepared) prepared.authority.snapshot.authState
-    (request prepared.authority.snapshot profile.semantics ambient command)
+  authorization : Authorized (portal prepared) ground.authority.authState
+    (request ground.authority profile.semantics ambient command)
   parentNamed : authorization.evidence.capabilityValue =
-    some (prepared.parent.head, storedCapabilityDigest prepared.authority.snapshot prepared.parent)
+    some (prepared.parent.head, storedCapabilityDigest ground.authority prepared.parent)
 
-def authorize [DecidableEq F] (prepared : Prepared deployment profile ambient durable command)
-    (receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot) :
-    Except Reject { authorization : Authorized (portal prepared) prepared.authority.snapshot.authState
-        (request prepared.authority.snapshot profile.semantics ambient command) //
+def authorize [DecidableEq F] (prepared : Prepared deployment profile ambient ground command)
+    (receipt : CredentialSignatureAdmission.CheckedSignature ground.authority) :
+    Except Reject { authorization : Authorized (portal prepared) ground.authority.authState
+        (request ground.authority profile.semantics ambient command) //
       authorization.evidence.capabilityValue =
-        some (prepared.parent.head, storedCapabilityDigest prepared.authority.snapshot prepared.parent) } := by
+        some (prepared.parent.head, storedCapabilityDigest ground.authority prepared.parent) } := by
   unfold portal
   exact do
-    let wanted := request prepared.authority.snapshot profile.semantics ambient command
+    let wanted := request ground.authority profile.semantics ambient command
     let config := policyConfig prepared
     let _ ← requireSome .policyUnavailable (kindDependencies prepared)
     match supplied : config.capabilityEvidenceChecked wanted command.declaration.parentId
@@ -455,10 +562,10 @@ def authorize [DecidableEq F] (prepared : Prepared deployment profile ambient du
         throw .policyInputRange
       if !decide (castInjOn F (intsOf law.predicate (step prepared).oldState (step prepared).newState)) then
         throw .policyCastAlias
-      let epochExact : wanted.policyEpoch = prepared.authority.snapshot.authState.policyEpoch wanted.policyId := by
+      let epochExact : wanted.policyEpoch = ground.authority.authState.policyEpoch wanted.policyId := by
         rw [CredentialAuthorityDomain.Snapshot.authState_policyEpoch]
         exact prepared.descent.policyCurrent
-      let revisionExact : wanted.policyRevision = prepared.authority.snapshot.authState.policyRevision wanted.policyId := by
+      let revisionExact : wanted.policyRevision = ground.authority.authState.policyRevision wanted.policyId := by
         rw [CredentialAuthorityDomain.Snapshot.authState_policyRevision]
         rfl
       match admitted : ComposedPolicyAdmission.admit config wanted evidence witness
@@ -477,10 +584,10 @@ def authorize [DecidableEq F] (prepared : Prepared deployment profile ambient du
           exact evidenceExact⟩
 
 def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
-    (prepared : Prepared deployment profile ambient durable command) (envelope : List UInt8) :
+    (prepared : Prepared deployment profile ambient ground command) (envelope : List UInt8) :
     IO (Except Reject (Accepted prepared envelope)) := do
-  match ← CredentialSignatureAdmission.verifyNative native prepared.authority.snapshot
-      command.declaration.operationNullifier (request prepared.authority.snapshot profile.semantics ambient command) envelope with
+  match ← CredentialSignatureAdmission.verifyNative native ground.authority
+      command.declaration.operationNullifier (request ground.authority profile.semantics ambient command) envelope with
   | .error reason => return .error (.signature reason)
   | .ok receipt =>
     if same : receipt.envelopeBytes = envelope then
@@ -490,54 +597,54 @@ def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
     else return .error .parentSubstitution
 
 def Accepted.evidence [DecidableEq F]
-    {prepared : Prepared deployment profile ambient durable command} {envelope : List UInt8}
+    {prepared : Prepared deployment profile ambient ground command} {envelope : List UInt8}
     (accepted : Accepted prepared envelope) :
     (tuple prepared).AdmissionEvidence (fun _ => portal prepared) where
   modes _ := mode prepared accepted.authorization accepted.parentNamed
-  authorizations _ := reindexAuthorization prepared.authority.snapshot.authStateExact.symm
+  authorizations _ := reindexAuthorization ground.authority.authStateExact.symm
     accepted.authorization
   disclosure _ := .sealed
   disclosureAllowed _ := trivial
 
 def Accepted.declaration [DecidableEq F]
-    {prepared : Prepared deployment profile ambient durable command} {envelope : List UInt8}
+    {prepared : Prepared deployment profile ambient ground command} {envelope : List UInt8}
     (_accepted : Accepted prepared envelope) :=
   (tuple prepared).toDeclaration (fun _ => portal prepared)
-    (effectsDigest prepared.authority.snapshot.domain profile.semantics command command.declaration)
+    (effectsDigest ground.authority.domain profile.semantics command command.declaration)
 
 def Accepted.legs [DecidableEq F]
-    {prepared : Prepared deployment profile ambient durable command} {envelope : List UInt8}
+    {prepared : Prepared deployment profile ambient ground command} {envelope : List UInt8}
     (accepted : Accepted prepared envelope) : accepted.declaration.AcceptedLegs :=
   (tuple prepared).accept (fun _ => portal prepared)
-    (effectsDigest prepared.authority.snapshot.domain profile.semantics command command.declaration) accepted.evidence
+    (effectsDigest ground.authority.domain profile.semantics command command.declaration) accepted.evidence
 
 theorem Accepted.post_exact [DecidableEq F]
-    {prepared : Prepared deployment profile ambient durable command} {envelope : List UInt8}
+    {prepared : Prepared deployment profile ambient ground command} {envelope : List UInt8}
     (accepted : Accepted prepared envelope) :
     (accepted.declaration.post accepted.legs ()).logical = prepared.authorityPost.logical :=
   congrArg Materialized.logical
     ((tuple prepared).accepted_posts_exact (fun _ => portal prepared)
-      (effectsDigest prepared.authority.snapshot.domain profile.semantics command command.declaration) accepted.evidence ())
+      (effectsDigest ground.authority.domain profile.semantics command command.declaration) accepted.evidence ())
 
 theorem Accepted.child_lineage [DecidableEq F]
-    {prepared : Prepared deployment profile ambient durable command} {envelope : List UInt8}
+    {prepared : Prepared deployment profile ambient ground command} {envelope : List UInt8}
     (accepted : Accepted prepared envelope) :
-    LineageValid (parentage prepared.authority.snapshot command)
-      (child prepared.authority.snapshot profile.semantics ambient command prepared.parent) :=
+    LineageValid (parentage ground.authority command)
+      (child ground.authority profile.semantics ambient command prepared.parent) :=
   (mode prepared accepted.authorization accepted.parentNamed).childLineageValid
 
 theorem Accepted.parent_authorized [DecidableEq F]
-    {prepared : Prepared deployment profile ambient durable command} {envelope : List UInt8}
+    {prepared : Prepared deployment profile ambient ground command} {envelope : List UInt8}
     (accepted : Accepted prepared envelope) :
     accepted.authorization.evidence.capabilityValue =
-      some (prepared.parent.head, storedCapabilityDigest prepared.authority.snapshot prepared.parent) :=
+      some (prepared.parent.head, storedCapabilityDigest ground.authority prepared.parent) :=
   accepted.parentNamed
 
 /-- The selected current policy evaluated the scoped view of the actual old
 and source-computed authority states. The physical receiver proves this same post image
 is installed; no caller-selected predicate state appears in either statement. -/
 theorem Accepted.policy_evaluated_actual_post [DecidableEq F]
-    {prepared : Prepared deployment profile ambient durable command} {envelope : List UInt8}
+    {prepared : Prepared deployment profile ambient ground command} {envelope : List UInt8}
     (accepted : Accepted prepared envelope) :
     ∃ graph : PolicyComponentResolution.LoadedGraph
         (policyConfig prepared).snapshot (policyConfig prepared).store
@@ -550,7 +657,7 @@ theorem Accepted.policy_evaluated_actual_post [DecidableEq F]
       Minidregg.Pred.eval (ResolvedLawCompilation.predicate graph.resolved)
         (step prepared).oldState (step prepared).newState = true := by
   apply ComposedPolicyAdmission.authorized_effective_law (policyConfig prepared)
-    (request prepared.authority.snapshot profile.semantics ambient command)
+    (request ground.authority profile.semantics ambient command)
   simpa only [portal] using accepted.authorization
 
 /-- info: 'Minidregg.Kernel.CapabilityDelegationController.project_noninterference' depends on axioms: [propext, Classical.choice, Quot.sound] -/

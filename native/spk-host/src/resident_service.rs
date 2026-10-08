@@ -277,7 +277,7 @@ struct SavedStartStage {
 /// Which lawful lifecycle lane a retained START belongs to. The two lanes keep
 /// disjoint artifact names, so exactly one admitted marker can exist.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum StartLane {
+pub(crate) enum StartLane {
     V3,
     RetryV4,
 }
@@ -285,7 +285,7 @@ enum StartLane {
 impl StartLane {
     /// The lane of the admitted marker in `journal_dir`. Both markers present
     /// is refused: two lanes cannot both own one generation's journal.
-    fn of_journal(journal_dir: &Path) -> io::Result<Self> {
+    pub(crate) fn of_journal(journal_dir: &Path) -> io::Result<Self> {
         let present = |name: &str| -> io::Result<bool> {
             match fs::symlink_metadata(journal_dir.join(name)) {
                 Ok(_) => Ok(true),
@@ -306,7 +306,7 @@ impl StartLane {
         }
     }
 
-    fn admitted_name(self) -> &'static str {
+    pub(crate) fn admitted_name(self) -> &'static str {
         match self {
             Self::V3 => "start-admitted-v3.json",
             Self::RetryV4 => "start-admitted-retry-v4.json",
@@ -320,7 +320,7 @@ impl StartLane {
         }
     }
 
-    fn completed_name(self) -> &'static str {
+    pub(crate) fn completed_name(self) -> &'static str {
         match self {
             Self::V3 => "start-completed-v3.json",
             Self::RetryV4 => "start-completed-retry-v4.json",
@@ -834,6 +834,168 @@ fn read_completed_start(
     )
 }
 
+/// The lifecycle phase whose one-shot submit may have an uncertain reply.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum UncertainSubmit {
+    /// op22 sent, no outcome retained: look up op23.
+    Begin,
+    /// op26 sent, no committed claim retained: look up op27.
+    Claim,
+}
+
+impl UncertainSubmit {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Begin => "begin",
+            Self::Claim => "claim",
+        }
+    }
+}
+
+fn marker_present(path: &Path) -> io::Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_file() && !meta.file_type().is_symlink() => Ok(true),
+        Ok(_) => Err(invalid("retained lifecycle marker identity refused")),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+/// Which submit, if any, left an uncertain reply in these retained attempt
+/// directories. A CLAIM marker with no committed claim outranks BEGIN (the
+/// BEGIN was accepted before the CLAIM was assembled); a BEGIN marker with no
+/// retained outcome is the other. A phase whose result was retained is not
+/// uncertain.
+fn uncertain_submit_phase(
+    begin_dir: &Path,
+    claim_dir: &Path,
+    committed_file: &str,
+) -> io::Result<Option<UncertainSubmit>> {
+    if marker_present(&claim_dir.join("op26-requested.json"))?
+        && !marker_present(&claim_dir.join(committed_file))?
+    {
+        return Ok(Some(UncertainSubmit::Claim));
+    }
+    if marker_present(&begin_dir.join("op22-requested.json"))?
+        && !marker_present(&begin_dir.join("op22-outcome.json"))?
+    {
+        return Ok(Some(UncertainSubmit::Begin));
+    }
+    Ok(None)
+}
+
+/// A restart that finds a BEGIN or CLAIM submit marker with no retained result
+/// and no admitted START has an uncertain reply (the process died, or the
+/// reply was lost, between the marker and the outcome). It looks the exact
+/// retained ingress up (op23 / op27) and records the historical receipt; it
+/// never resubmits, assembles, signs or arms a launch, so the physical START
+/// that needed the lost reply is not continued: source STOP/recovery decides.
+///
+/// Returns Ok(()) when there is nothing to reconcile (the ordinary fresh
+/// start continues to its own attempt-exists refusals); after a reconciliation
+/// it always returns Err, as `reconcile_prior_start` does.
+fn reconcile_uncertain_submit(
+    config: &ResidentConfig,
+    operator: &PrivateOperator,
+) -> io::Result<()> {
+    use crate::lifecycle_v3_claim_native as v3_claim;
+    use crate::lifecycle_v3_native as v3_begin;
+    use crate::lifecycle_v4_retry_claim_native as v4_claim;
+    use crate::lifecycle_v4_retry_native as v4_begin;
+    let v3_dir = config.begin_attempt_dir.as_path();
+    let v4_dir = config.journal_dir.join(v4_begin::BEGIN_ATTEMPT_DIR);
+    let (lane, begin_dir, claim_dir) = match (
+        marker_present(&config.journal_dir.join(v3_begin::BEGIN_ACTIVE_MARKER))?,
+        marker_present(&config.journal_dir.join(v4_begin::ACTIVE_MARKER))?,
+    ) {
+        (true, true) => {
+            return Err(invalid(
+                "both v3 and retry-v4 BEGIN attempts are retained for one generation",
+            ))
+        }
+        (true, false) => (
+            StartLane::V3,
+            v3_dir.to_path_buf(),
+            config.claim_author_attempt_dir.clone(),
+        ),
+        (false, true) => (
+            StartLane::RetryV4,
+            v4_dir,
+            config
+                .journal_dir
+                .join(v4_claim::CLAIM_ATTEMPT_DIR),
+        ),
+        (false, false) => return Ok(()),
+    };
+    // An admitted START means the claim committed and was retained: that is
+    // reconcile_prior_start's case (and the attempt-exists refusal's), not an
+    // uncertain submit.
+    if marker_present(&config.journal_dir.join(lane.admitted_name()))? {
+        return Ok(());
+    }
+    let Some(phase) = uncertain_submit_phase(&begin_dir, &claim_dir, lane.committed_file())?
+    else {
+        return Ok(());
+    };
+    let recovered = match phase {
+        UncertainSubmit::Claim => {
+            // The claim must follow the BEGIN that was accepted before it.
+            let begin_outcome: Value = serde_json::from_slice(&private_file(
+                &begin_dir.join("op22-outcome.json"),
+                MAX_CONFIG,
+            )?)?;
+            let begin_count = begin_outcome
+                .get("acceptedCount")
+                .and_then(Value::as_str)
+                .ok_or_else(|| invalid("retained BEGIN outcome has no accepted count"))?;
+            let recovered = match lane {
+                StartLane::V3 => v3_claim::recover_claim_receipt_only(operator, &claim_dir)?,
+                StartLane::RetryV4 => v4_claim::recover_claim_receipt_only(operator, &claim_dir)?,
+            };
+            if !v3_claim::later_decimal(&recovered.accepted_count, begin_count) {
+                return Err(invalid("recovered CLAIM receipt does not follow the BEGIN"));
+            }
+            recovered
+        }
+        UncertainSubmit::Begin => match lane {
+            StartLane::V3 => v3_begin::recover_begin_receipt_only(operator, &begin_dir)?,
+            StartLane::RetryV4 => v4_begin::recover_begin_receipt_only(operator, &begin_dir)?,
+        },
+    };
+    let mut random = [0u8; 16];
+    File::open("/dev/urandom")?.read_exact(&mut random)?;
+    write_new(
+        &config.journal_dir,
+        &format!(
+            "start-submit-reconciliation-{}.json",
+            crate::lifecycle_v3_native::hex(&random)
+        ),
+        &serde_json::to_vec(&json!({
+            "protocol":"mini-spk-resident-start-submit-reconciliation-v1",
+            "lane":match lane { StartLane::V3 => "v3", StartLane::RetryV4 => "retry-v4" },
+            "phase":phase.label(),
+            "evidenceName":recovered.inspection_name,
+            "evidenceSha256":recovered.inspection_sha256,
+            "receipt":{
+                "transactionId":recovered.transaction_id,
+                "eventId":recovered.event_id,
+                "acceptedCount":recovered.accepted_count,
+                "worldRoot":recovered.world_root,
+            },
+            "noResubmit":true,
+            "noRelaunch":true,
+        }))?,
+    )?;
+    Err(invalid(match phase {
+        UncertainSubmit::Begin => {
+            "prior START BEGIN reconciled by lookup; no CLAIM or launch was made, source recovery is required"
+        }
+        UncertainSubmit::Claim => {
+            "prior START CLAIM reconciled by lookup; no launch was made, source recovery is required"
+        }
+    }))
+}
+
 fn reconcile_prior_start(
     config: &ResidentConfig,
     operator: &PrivateOperator,
@@ -1211,6 +1373,9 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     if journal.read()?.is_some() {
         return reconcile_prior_start(&config, &operator, &journal);
     }
+    // No physical journal yet: the one place a restart can still hold an
+    // uncertain BEGIN or CLAIM submit. Its lookup is the only lawful move.
+    reconcile_uncertain_submit(&config, &operator)?;
     Journal::preflight_current_unit(&config.unit)?;
     match std::fs::symlink_metadata(config.journal_dir.join("lifecycle-begin-v3-active.json")) {
         Ok(_) => return Err(invalid("resident launch BEGIN attempt already active")),
@@ -2071,6 +2236,45 @@ mod tests {
         fs::remove_file(dir.join("start-admitted-retry-v4.json")).unwrap();
         assert_eq!(StartLane::of_journal(&dir).unwrap(), StartLane::V3);
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn restart_finds_the_uncertain_begin_or_claim_submit_and_only_that() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "mini-spk-uncertain-submit-{}-{nonce}",
+            std::process::id()
+        ));
+        let (begin, claim) = (root.join("begin"), root.join("claim"));
+        for dir in [&root, &begin, &claim] {
+            DirBuilder::new().mode(0o700).create(dir).unwrap();
+        }
+        let phase = || uncertain_submit_phase(&begin, &claim, "committed.bin").unwrap();
+        // Nothing submitted yet: an ordinary fresh start has nothing to reconcile.
+        assert_eq!(phase(), None);
+        // op66/op67 results are not a submit: only the op22 marker is.
+        fs::write(begin.join("op66-requested.json"), b"{}").unwrap();
+        assert_eq!(phase(), None);
+        fs::write(begin.join("op22-requested.json"), b"{}").unwrap();
+        assert_eq!(phase(), Some(UncertainSubmit::Begin));
+        // A retained op22 outcome is a result, not an uncertainty.
+        fs::write(begin.join("op22-outcome.json"), b"{}").unwrap();
+        assert_eq!(phase(), None);
+        // The CLAIM marker with no committed claim outranks the accepted BEGIN.
+        fs::write(claim.join("op26-requested.json"), b"{}").unwrap();
+        assert_eq!(phase(), Some(UncertainSubmit::Claim));
+        fs::write(claim.join("committed.bin"), b"c").unwrap();
+        assert_eq!(phase(), None);
+        // A symlink in a marker's place is refused, never followed.
+        fs::remove_file(claim.join("committed.bin")).unwrap();
+        fs::remove_file(claim.join("op26-requested.json")).unwrap();
+        std::os::unix::fs::symlink(root.join("elsewhere"), claim.join("op26-requested.json"))
+            .unwrap();
+        assert!(uncertain_submit_phase(&begin, &claim, "committed.bin").is_err());
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

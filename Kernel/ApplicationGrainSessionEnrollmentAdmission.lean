@@ -6,6 +6,7 @@ their physical roots become guards of one distinct event28 intent.
 -/
 import Kernel.ApplicationGrainSessionEnrollmentConstruction
 import Kernel.PhysicalResourceReadGuard
+import Kernel.NativeHostServed
 
 namespace Minidregg.Kernel.ApplicationGrainSessionEnrollmentAdmission
 
@@ -26,13 +27,13 @@ private def observationRequest (config : Config) (opened : Opened config)
     (command : DeclaredResourceController.Command)
     (prepared : DeclaredResourceController.PreparedInvocation config.deployment config.profile
       ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
-      opened.durable command)
+      opened.ground command)
     (resource : Nat) (capability : CapabilityId) (root : Digest) : Request .object :=
   let target : DeclaredResourceController.Target :=
     { kind := .object, target := resource, capability := capability,
       observeCapability := none, schemaVersion := ContentResource.commandVersion, expectedTargetRoot := root,
       payload := .content ⟨[]⟩ }
-  { DeclaredResourceController.requestFor prepared.authority.snapshot
+  { DeclaredResourceController.requestFor opened.ground.authority
       config.profile.semantics
       ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
       command target root with verb := .observeObject }
@@ -46,7 +47,7 @@ structure CheckedRead {config : Config} {opened : Opened config}
     {command : DeclaredResourceController.Command}
     (prepared : DeclaredResourceController.PreparedInvocation config.deployment config.profile
       ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
-      opened.durable command)
+      opened.ground command)
     (resource : Nat) (capability : CapabilityId) (root : Digest)
     (envelope : List UInt8) where
   private mk ::
@@ -66,7 +67,7 @@ def checkRead {config : Config} {opened : Opened config}
     {command : DeclaredResourceController.Command}
     (prepared : DeclaredResourceController.PreparedInvocation config.deployment config.profile
       ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
-      opened.durable command)
+      opened.ground command)
     (resource : Nat) (capability : CapabilityId) (root : Digest)
     (envelope : List UInt8) :
     IO (Except String (CheckedRead prepared resource capability root envelope)) := do
@@ -80,7 +81,7 @@ def checkRead {config : Config} {opened : Opened config}
       match ← ResourceObservationAdmission.check config.signature selected envelope with
       | .error _ => return .error "signed enrollment observation refused"
       | .ok checked =>
-          let current := PhysicalResourceReadGuard.current context.directory resource
+          let current := ServedBasis.Ground.physicalCurrent context resource
             selected.observed.before selected.observed.present
           if readonly : (⟨⟨resource⟩,
               ResourceBirthCodec.physicalRoot (.live selected.observed.before)⟩ : ReadGuard).cellId ∉
@@ -97,7 +98,7 @@ structure Checked (config : Config) (opened : Opened config)
   command : DeclaredResourceController.Command
   prepared : DeclaredResourceController.PreparedInvocation config.deployment config.profile
     ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
-    opened.durable command
+    opened.ground command
   shape : DeclaredResourceController.PhysicalShape prepared
   accepted : DeclaredResourceController.AcceptedInvocation prepared signed
   appRead : CheckedRead prepared spec.ticket.scope.app
@@ -136,7 +137,7 @@ def admitAt (config : Config) (opened : Opened config)
     return .error "signed enrollment command differs from source"
   match ← DeclaredResourceController.prepareAuthenticated config.deployment config.profile
       ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩ config.signature
-      opened.durable command signed.authorityEnvelope with
+      opened.ground command signed.authorityEnvelope with
   | .error _ => return .error "joint enrollment preparation refused"
   | .ok prepared =>
       if shape : DeclaredResourceController.PhysicalShape prepared then

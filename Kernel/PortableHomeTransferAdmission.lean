@@ -39,28 +39,28 @@ structure Prepared {F : Type} [Field F] [DecidableEq F]
   renterSigned : Bytes
   binding : Binds before plan
   beforeExact : PortableHomeTransferFrame.readState pin
-    (durable.snapshot.canonicalBytes pin.cell) = some before
+    (ground.view.canonicalBytes pin.cell) = some before
   sourceExact : plan.source.point = PortableContinuationManifestCodec.pointOf plan.source.identity durable.image
-  sourceControlExact : plan.sourceControlRoot = durable.snapshot.model.roots pin.cell
+  sourceControlExact : plan.sourceControlRoot = ground.view.model.roots pin.cell
   afterExact : after = preparedState before plan
   ownerPermission : ∃ (command : Command) (signed : SignedCommand)
-    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
     (shape : PhysicalShape prepared) (accepted : AcceptedInvocation prepared signed),
     (accepted.dataIntent shape).subject = some plan.owner.subject ∧
-    (accepted.checked none).receipt.prepared.controller.key.publicKey = plan.owner.publicKey ∧
+    (accepted.checked none rfl).receipt.prepared.controller.key.publicKey = plan.owner.publicKey ∧
     ownerSigned = signedBytes deployment.domain profile.semantics signed
   renterPermission : ∃ (command : Command) (signed : SignedCommand)
-    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
     (shape : PhysicalShape prepared) (accepted : AcceptedInvocation prepared signed),
     (accepted.dataIntent shape).subject = some plan.renter.subject ∧
-    (accepted.checked none).receipt.prepared.controller.key.publicKey = plan.renter.publicKey ∧
+    (accepted.checked none rfl).receipt.prepared.controller.key.publicKey = plan.renter.publicKey ∧
     renterSigned = signedBytes deployment.domain profile.semantics signed
 
 variable {F : Type} [Field F] [DecidableEq F]
   {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
-  {ambient : Ambient} {durable : Durable} {ownerCommand renterCommand : Command}
-  {ownerPrepared : PreparedInvocation deployment profile ambient durable ownerCommand}
-  {renterPrepared : PreparedInvocation deployment profile ambient durable renterCommand}
+  {ambient : Ambient} {ground : Ground deployment} {ownerCommand renterCommand : Command}
+  {ownerPrepared : PreparedInvocation deployment profile ambient ground ownerCommand}
+  {renterPrepared : PreparedInvocation deployment profile ambient ground renterCommand}
   {ownerSigned renterSigned : SignedCommand}
 
 /-- Only preparation is exported until the actual native stage producers are
@@ -71,19 +71,19 @@ def prepare (pin : PortableHomeTransferFrame.Pin) (plan : Plan)
     (owner : AcceptedInvocation ownerPrepared ownerSigned)
     (renter : AcceptedInvocation renterPrepared renterSigned) :
     Option (Prepared deployment profile ambient durable) := do
-  match beforeExact : PortableHomeTransferFrame.readState pin (durable.snapshot.canonicalBytes pin.cell) with
+  match beforeExact : PortableHomeTransferFrame.readState pin (ground.view.canonicalBytes pin.cell) with
   | none => none
   | some before =>
     if !(decide (CanPrepare before)) then none else
     if binding : Binds before plan then
       if sourceExact : plan.source.point = PortableContinuationManifestCodec.pointOf plan.source.identity durable.image then
-        if controlExact : plan.sourceControlRoot = durable.snapshot.model.roots pin.cell then
+        if controlExact : plan.sourceControlRoot = ground.view.model.roots pin.cell then
           let ownerIntent := owner.dataIntent ownerShape
           let renterIntent := renter.dataIntent renterShape
           if ownerSubject : ownerIntent.subject = some plan.owner.subject then
             if renterSubject : renterIntent.subject = some plan.renter.subject then
-              if ownerKey : (owner.checked none).receipt.prepared.controller.key.publicKey = plan.owner.publicKey then
-                if renterKey : (renter.checked none).receipt.prepared.controller.key.publicKey = plan.renter.publicKey then
+              if ownerKey : (owner.checked none rfl).receipt.prepared.controller.key.publicKey = plan.owner.publicKey then
+                if renterKey : (renter.checked none rfl).receipt.prepared.controller.key.publicKey = plan.renter.publicKey then
                   let [write] := ownerIntent.writes | none
                   if write.cellId != pin.cell then none else
                   if renterIntent.writes != ownerIntent.writes then none else
@@ -105,8 +105,8 @@ def prepare (pin : PortableHomeTransferFrame.Pin) (plan : Plan)
                         event := {ownerIntent.event with codecVersion := 65,canonicalBytes := envelope},
                         guardsReadOnly := readonly}
                     if !Minidregg.Theory.ResourceCost.Charge.fundedCheck
-                        (before.maintenanceReserve + intent.exactCharge) durable.snapshot.model.available then none else
-                    if intent.preflight durable.snapshot != .ok () then none else
+                        (before.maintenanceReserve + intent.exactCharge) ground.view.model.available then none else
+                    if intent.preflight ground.view != .ok () then none else
                     some ⟨pin,before,plan,after,intent,ownerBytes,renterBytes,binding,beforeExact,
                       sourceExact,controlExact,rfl,
                       ⟨ownerCommand,ownerSigned,ownerPrepared,ownerShape,owner,ownerSubject,ownerKey,rfl⟩,

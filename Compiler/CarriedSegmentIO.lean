@@ -11,6 +11,8 @@ import Kernel.NativeHostContext
 import Compiler.RetainedArtifactIO
 import Compiler.CredentialSignatureIO
 import Compiler.ReceiptContinuityIO
+import Compiler.DurableHistoryStore
+import Kernel.NativeHistorySelection
 import Lean
 
 namespace Minidregg.Compiler.CarriedSegmentIO
@@ -111,6 +113,14 @@ def auditSource (capsule : SourceCapsule) : IO (Except String AuditedSource) := 
     checkCapsule capsule
     return .ok ⟨capsule, durable, audit.stdout⟩
   catch error => return .error s!"source capsule refused: {error}"
+
+/-- The authenticated Reader of the audited source Store (its own MAC key, its own log start):
+an original record and the root its source Host served at that height are read from it,
+each verified at use against the source Store's MAC-bound head. -/
+def AuditedSource.reader (source : AuditedSource) :
+    IO (Except String ((store : DurableHistory.StoreIdentity) ×
+      DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)) :=
+  DurableHistoryStore.readerOf (sourceTransport source.capsule) ResourceBirthCodec.rootBytes source.durable
 
 /-- Internal receiving result. The public wire receiver must use the closed
 neutral converter; no wire entry accepts a changes list. -/
@@ -220,9 +230,18 @@ def stageAuthorized (config : NativeHost.Config) (authorized : Authorized config
         DurableReceiverCodec.seedStream.encode planned.image.seed then
       return .error "staged carry seed differs; refusing replacement"
     if current.height > planned.height then return .error "staged carry is beyond authorized head"
-    let encodeRecords := fun records => (records.map DurableReceiverCodec.intentStream.encode)
-    if encodeRecords current.image.accepted != encodeRecords (planned.image.accepted.take current.height) then
-      return .error "staged carry prefix differs from exact authorized history"
+    -- The staged Store's records are read through its authenticated `Reader`,
+    -- window by window, against the planned (in-memory, authorized) image.
+    let ⟨_, reader⟩ ← liftResult (← DurableHistoryStore.readerOf transport
+      ResourceBirthCodec.rootBytes current)
+    let compared ← NativeHistorySelection.foldRange reader 1 current.height planned.image.accepted
+      fun remaining window =>
+        if window.length ≤ remaining.length &&
+            window.map DurableReceiverCodec.intentStream.encode ==
+              (remaining.take window.length).map DurableReceiverCodec.intentStream.encode then
+          .ok (remaining.drop window.length)
+        else .error "staged carry prefix differs from exact authorized history"
+    if let .error detail := compared then return .error detail
     -- Reproducing an already audited prefix is privileged staging, never a
     -- public admission bypass. Live target admission retains its system tail law.
     let staging := { transport with systemCell := none }

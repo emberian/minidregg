@@ -39,7 +39,7 @@ that admission reached it and reports `conflict`; no checkpoint, no seed. -/
 def dryTransport (t : DurableReceiverIO.Transport) (reached : IO.Ref Bool) :
     DurableReceiverIO.Transport where
   read := t.read
-  append := fun _ _ => do reached.set true; pure .conflict
+  append := fun _ _ _ => do reached.set true; pure .conflict
   putCheckpoint := fun _ _ => pure (.error "dry run writes no checkpoint")
   initializeSeed := fun _ => pure .conflict
   key := t.key
@@ -49,11 +49,15 @@ def dryTransport (t : DurableReceiverIO.Transport) (reached : IO.Ref Bool) :
   -- The dry run judges with the Store's own source gate: leaving the field to
   -- its accept-all default would let a dry run admit what submission refuses.
   sourceGate := t.sourceGate
+  history := t.history
+  checkpointAt := t.checkpointAt
+  readFromCheckpoint := t.readFromCheckpoint
 
 /-- The dry run's writer does not depend on the Store's writers at all: any two
 transports that read alike give the same dry transport. -/
 theorem dryTransport_writers_irrelevant (t : DurableReceiverIO.Transport)
-    (append : Nat → DurableReceiverIO.Entry → IO DurableReceiverIO.CasObservation)
+    (append : Nat → DurableReceiverIO.Entry → List DurableReceiverIO.NodeWrite →
+      IO DurableReceiverIO.CasObservation)
     (putCheckpoint : Nat → List UInt8 → IO (Except String Unit))
     (initializeSeed : List UInt8 → IO DurableReceiverIO.CasObservation) :
     dryTransport { t with append, putCheckpoint, initializeSeed } = dryTransport t := rfl
@@ -62,8 +66,8 @@ theorem dryTransport_writers_irrelevant (t : DurableReceiverIO.Transport)
     (dryTransport t reached).key = t.key := rfl
 
 @[simp] theorem dryTransport_append (t : DurableReceiverIO.Transport) (reached : IO.Ref Bool)
-    (height : Nat) (entry : DurableReceiverIO.Entry) :
-    (dryTransport t reached).append height entry = (do reached.set true; pure .conflict) := rfl
+    (height : Nat) (entry : DurableReceiverIO.Entry) (nodes : List DurableReceiverIO.NodeWrite) :
+    (dryTransport t reached).append height entry nodes = (do reached.set true; pure .conflict) := rfl
 
 inductive Verdict where
   /-- The submission reached the Store writer: every admission check passed. -/
@@ -81,10 +85,10 @@ def dryConfirm (config : NativeHost.Config) (opened : NativeHost.Opened config)
 
 /-- Op 130 over the Store reader `t`: plan exactly as op 1, assemble exactly as
 op 11, submit exactly as op 2 — with the writer swapped. -/
-def dryRunVia (t : DurableReceiverIO.Transport) (config : NativeHost.Config)
-    (opened : NativeHost.Opened config) (observation : List UInt8)
+def dryRunWith (dry : IO.Ref Bool → DurableReceiverIO.Transport) (config : NativeHost.Config)
+    (opened : NativeHost.Opened config) (light : NativeHostLight.Light config) (observation : List UInt8)
     (signatures : List (List UInt8)) : IO Verdict := do
-  match ← NativeHost.prepareAuthorizedLoaded config opened observation with
+  match ← NativeHost.prepareAuthorizedLoaded config opened light observation with
   | .error refusal => return .stopped (NativeHost.refusalOutcome "prepare" refusal)
   | .ok plan =>
       match NativeHost.assemble plan signatures with
@@ -92,26 +96,35 @@ def dryRunVia (t : DurableReceiverIO.Transport) (config : NativeHost.Config)
           return .stopped (.refused .malformed "assemble".toUTF8.toList detail.toUTF8.toList)
       | .ok call =>
           let reached ← IO.mkRef false
-          let outcome ← NativeHost.submitLoadedVia (dryTransport t reached) config opened call
+          let outcome ← NativeHost.submitLoadedVia (dry reached) config opened light call
             (dryConfirm config opened)
           if ← reached.get then return .admitted plan else return .stopped outcome
 
+def dryRunVia (t : DurableReceiverIO.Transport) (config : NativeHost.Config)
+    (opened : NativeHost.Opened config) (light : NativeHostLight.Light config) (observation : List UInt8)
+    (signatures : List (List UInt8)) : IO Verdict :=
+  dryRunWith (dryTransport t) config opened light observation signatures
+
 def dryRunLoaded (config : NativeHost.Config) (opened : NativeHost.Opened config)
+    (light : NativeHostLight.Light config)
     (observation : List UInt8) (signatures : List (List UInt8)) : IO Verdict :=
-  dryRunVia config.transport config opened observation signatures
+  dryRunVia config.transport config opened light observation signatures
 
 /-- **Commits nothing.** Every Store mutation goes through the transport's
 `append`, `putCheckpoint` or `initializeSeed`. The dry run is the same program
 whatever those three are, so it cannot invoke the Store's: the Store's root and
 log after a dry run are the ones before it. -/
 theorem dryRun_commits_nothing (t : DurableReceiverIO.Transport)
-    (append : Nat → DurableReceiverIO.Entry → IO DurableReceiverIO.CasObservation)
+    (append : Nat → DurableReceiverIO.Entry → List DurableReceiverIO.NodeWrite →
+      IO DurableReceiverIO.CasObservation)
     (putCheckpoint : Nat → List UInt8 → IO (Except String Unit))
     (initializeSeed : List UInt8 → IO DurableReceiverIO.CasObservation)
-    (config : NativeHost.Config) (opened : NativeHost.Opened config)
+    (config : NativeHost.Config) (opened : NativeHost.Opened config) (light : NativeHostLight.Light config)
     (observation : List UInt8) (signatures : List (List UInt8)) :
-    dryRunVia { t with append, putCheckpoint, initializeSeed } config opened observation
-      signatures = dryRunVia t config opened observation signatures := rfl
+    dryRunVia { t with append, putCheckpoint, initializeSeed } config opened light observation
+      signatures = dryRunVia t config opened light observation signatures := by
+  unfold dryRunVia
+  rw [dryTransport_writers_irrelevant]
 
 /-- **The submission half never names the Store's writers through its config.**
 `submitLoadedVia` — the half of the dry run that could write — gives the same
@@ -122,22 +135,37 @@ reachable from the dry run's submission. (The plan half, op 1's
 `prepareAuthorizedLoaded`, takes no transport and is the existing read-only
 path; the same statement for it does not close by `rfl` — see the report.) -/
 theorem submit_storage_irrelevant (t : DurableReceiverIO.Transport)
-    (config : NativeHost.Config) (opened : NativeHost.Opened config)
+    (config : NativeHost.Config) (opened : NativeHost.Opened config) (light : NativeHostLight.Light config)
     (storage : DurableReceiverIO.NativeConfig) (call : SignedCall)
     (confirm : DurableReceiverIO.Confirmation → Minidregg.Theory.TypedAuthorization.Digest →
       Minidregg.Theory.TypedAuthorization.Digest → IO Outcome) :
-    NativeHost.submitLoadedVia t { config with storage } (opened.restorage storage) call confirm =
-      NativeHost.submitLoadedVia t config opened call confirm := rfl
+    NativeHost.submitLoadedVia t { config with storage } (opened.restorage storage)
+        (light.restorage storage) call confirm =
+      NativeHost.submitLoadedVia t config opened light call confirm := by
+  -- The light-route arms (revoke, invoke, ...) read their basis through `basisVia`,
+  -- which does not depend on the Store paths (`Light.basisVia_restorage`).
+  have same : (light.restorage storage).basisVia t = light.basisVia t :=
+    funext (NativeHostLight.Light.basisVia_restorage t light storage)
+  cases call
+  case invoke signed =>
+    have stale : NativeHost.staleOutcome { config with storage } (opened.restorage storage) =
+        NativeHost.staleOutcome config opened := funext fun _ => funext fun _ => rfl
+    simp only [NativeHost.submitLoadedVia]
+    rw [same, stale]
+    rfl
+  all_goals first
+    | rfl
+    | (simp only [NativeHost.submitLoadedVia]; rw [same]; rfl)
 
 /-- **The served submission and the dry run are one program.** Op 2 runs
 `submitLoadedWith`, which is `submitLoadedVia` over the Store's transport; the dry
 run runs `submitLoadedVia` over `dryTransport` of the same reader. -/
 theorem submit_is_via_store_transport (config : NativeHost.Config)
-    (opened : NativeHost.Opened config) (call : SignedCall)
+    (opened : NativeHost.Opened config) (light : NativeHostLight.Light config) (call : SignedCall)
     (confirm : DurableReceiverIO.Confirmation → Minidregg.Theory.TypedAuthorization.Digest →
       Minidregg.Theory.TypedAuthorization.Digest → IO Outcome) :
-    NativeHost.submitLoadedWith config opened call confirm =
-      NativeHost.submitLoadedVia config.transport config opened call confirm := rfl
+    NativeHost.submitLoadedWith config opened light call confirm =
+      NativeHost.submitLoadedVia config.transport config opened light call confirm := rfl
 
 /-- **At the Store writer, the dry run agrees with submission on every refusal.**
 Every receiver ends in `DurableReceiverIO.receiveLoaded`. Wherever the durable
@@ -159,7 +187,22 @@ theorem dryReceive_refusal_agrees (t : DurableReceiverIO.Transport) (reached : I
 @[simp] theorem dryTransport_judge (t : DurableReceiverIO.Transport) (reached : IO.Ref Bool)
     {rootBytes : List UInt8 → Minidregg.Theory.TypedAuthorization.Digest}
     (loaded : DurableReceiverIO.Loaded rootBytes) (intent : DurableDataIntent.DataIntent rootBytes) :
-    loaded.judge (dryTransport t reached) intent = loaded.judge t intent := rfl
+    loaded.judge (dryTransport t reached) intent = loaded.judge t intent := by
+  unfold DurableReceiverIO.Loaded.judge dryTransport
+  rfl
+
+/-- The append's preparation only reads, and the dry transport reads exactly as
+the Store's (`read`, `history`, `key` pass through). -/
+theorem dryTransport_prepareAppend (t : DurableReceiverIO.Transport) (reached : IO.Ref Bool)
+    {rootBytes : List UInt8 → Minidregg.Theory.TypedAuthorization.Digest}
+    (loaded : DurableReceiverIO.Loaded rootBytes) {intent : DurableDataIntent.DataIntent rootBytes}
+    (ready : DurableCheckpoint.Ready rootBytes loaded.image loaded.baseHeight loaded.base
+      loaded.snapshot intent) (key : DurableCheckpointCodec.MacKey) :
+    DurableReceiverIO.prepareAppend (dryTransport t reached) loaded ready key =
+      DurableReceiverIO.prepareAppend t loaded ready key := by
+  unfold DurableReceiverIO.prepareAppend DurableReceiverIO.Loaded.headIndexRoot
+    DurableReceiverIO.withIndexRows DurableReceiverIO.indexRows dryTransport
+  rfl
 
 /-- **At the Store writer, the dry run agrees with submission on a tail-bound
 refusal.** Where the durable admission accepts but the tail law refuses, neither
@@ -175,10 +218,21 @@ theorem dryReceive_tail_refusal_agrees (t : DurableReceiverIO.Transport) (reache
   unfold DurableReceiverIO.receiveLoadedDetailedWithFresh
   simp only [admitted, dryTransport_judge, bounded]
 
+/-- The dry transport's only write marks `reached` and observes a conflict,
+which the receiving loop reports as contention (`publishAfter_conflict`). -/
+theorem dryTransport_publish (t : DurableReceiverIO.Transport) (reached : IO.Ref Bool)
+    {rootBytes : List UInt8 → Minidregg.Theory.TypedAuthorization.Digest}
+    (loaded : DurableReceiverIO.Loaded rootBytes) {intent : DurableDataIntent.DataIntent rootBytes}
+    (prepared : DurableReceiverIO.PreparedAppend loaded intent) :
+    DurableReceiverIO.publish (dryTransport t reached) rootBytes loaded intent prepared =
+      (do reached.set true; pure .conflict) >>=
+        DurableReceiverIO.publishAfter (dryTransport t reached) rootBytes loaded intent prepared := rfl
+
 /-- **At the Store writer, admission is exactly reaching the writer.** Where the
 durable admission accepts and the tail law admits, the real path appends; the
-dry run instead marks `reached` (after the same MAC-key read) and reports
-contention. -/
+dry run instead marks `reached` (after the same MAC-key read and the same Store reads: the head tag's index root, the index rows) and publishes through the dry transport, whose only
+write marks `reached` and observes a conflict: contention (`dryTransport_publish`,
+`DurableReceiverIO.publishAfter_conflict`). -/
 theorem dryReceive_admission_reaches_append (t : DurableReceiverIO.Transport)
     (reached : IO.Ref Bool) (rootBytes : List UInt8 → Minidregg.Theory.TypedAuthorization.Digest)
     (loaded : DurableReceiverIO.Loaded rootBytes) (intent : DurableDataIntent.DataIntent rootBytes)
@@ -187,16 +241,20 @@ theorem dryReceive_admission_reaches_append (t : DurableReceiverIO.Transport)
     (judged : loaded.judge t intent = .ok ()) :
     DurableReceiverIO.receiveLoadedDetailedWithFresh (dryTransport t reached) rootBytes loaded intent =
       (do
-        let .ok _ ← t.key
+        let .ok key ← t.key
           | return (false, .ordinary (.unavailable "checkpoint MAC key unavailable"))
-        reached.set true
-        return (false, .ordinary .contention)) := by
+        match ← DurableReceiverIO.prepareAppend t loaded ready key with
+        | .error message => return (false, .ordinary (.unavailable message))
+        | .ok prepared =>
+            DurableReceiverIO.publish (dryTransport t reached) rootBytes loaded intent prepared) := by
   unfold DurableReceiverIO.receiveLoadedDetailedWithFresh
-  simp only [admitted, dryTransport_judge, judged, dryTransport_key, dryTransport_append]
+  simp only [admitted, dryTransport_judge, judged, dryTransport_key, dryTransport_prepareAppend]
   rfl
 
 #assert_axioms dryTransport_writers_irrelevant
 #assert_axioms dryTransport_judge
+#assert_axioms dryTransport_prepareAppend
+#assert_axioms dryTransport_publish
 #assert_axioms dryReceive_tail_refusal_agrees
 #assert_axioms dryRun_commits_nothing
 #assert_axioms submit_storage_irrelevant

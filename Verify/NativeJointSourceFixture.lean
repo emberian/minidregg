@@ -116,7 +116,7 @@ def bootstrapFresh (config : NativeHost.Config) (canonicalImage : List UInt8) :
   match DurableReceiverIO.loadBytes ResourceBirthCodec.rootBytes config.logStart canonicalImage with
   | .error detail => return .error detail
   | .ok durable =>
-      if !durable.image.accepted.isEmpty then return .error "bootstrap image contains accepted history"
+      if durable.height != 0 then return .error "bootstrap image contains accepted history"
       match NativeHost.validateLoaded config durable with
       | .error detail => return .error detail
       | .ok _ =>
@@ -189,7 +189,9 @@ def openReplica (root : System.FilePath) (helpers : Helpers) (index : Nat) (writ
   let config := {baseConfig root helpers context index with
     expectedSeed := NativeHost.seedIdentity built.image.seed}
   let loaded ← IO.ofExcept (← DurableReceiverIO.load config.physicalTransport ResourceBirthCodec.rootBytes)
-  let verified ← IO.ofExcept ((← NativeHostReplay.verifyLoaded config loaded).mapError
+  let ⟨_, reader⟩ ← IO.ofExcept ((← DurableHistoryStore.readerOf config.physicalTransport
+    ResourceBirthCodec.rootBytes loaded).mapError (fun detail => s!"source fixture history reader: {detail}"))
+  let verified ← IO.ofExcept ((← NativeHostReplay.verifyLoaded config reader loaded).mapError
     (fun failure => s!"source fixture replay refused: {failure.detail}"))
   let runtime ← openRuntime (replicaSpec root helpers index listen peers)
     (journalPath root index) context writable
@@ -237,7 +239,7 @@ def lookupAllCall (root : System.FilePath) (helpers : Helpers)
       require (GenericSimplexOperatorBridge.receiptPrefix replica ingress == some acceptedPrefix)
         "source prefixes through original call differ"
     writePrivate outputFile (NativeHostCodec.outcomeCodec.encode (.confirmed .replayed receipt)).toByteArray
-    let counts := replicas.toList.map fun r => r.participant.source.verified.opened.durable.image.accepted.length
+    let counts := replicas.toList.map fun r => r.participant.source.verified.opened.durable.height
     IO.println s!"LOOKUP-ALL exact original receipt and complete prefix on four reopened stores; accepted records per store {counts}; call at height {acceptedPrefix.length}"
 
 /-- `serve-replica`: one standing replica process. The replica index is the

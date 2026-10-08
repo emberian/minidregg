@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The object record end to end on a scratch NATIVE world: a cell is an object only with a record, and the
-object's law judges every declared-state write.
+object's law judges every declared-state write (its initial state, a birth's and a delivery's).
 
   objectrecord-native-journey.py --bin DIR --root NEW_DIR [--plant NAME[,NAME...]]
 
@@ -12,13 +12,16 @@ the half that gives the law teeth, on the kernel's object record (Kernel/ObjectR
   OR1 no record     a write to a cell with no record is refused notAnObject (and so is a birth); nothing
                     appears at the object's cells.
   OR2 create        `create` installs the record (pin, law, frozen upgrade, payer); the view reads it back;
-                    a second create conflicts; a pin that names no published package is refused.
-  OR3 write law     the law is   le state/total 100  AND  (turn = birth OR monotone state/total).  A direct
-                    write that keeps both is a new version; one that lowers the total, and one that passes
-                    100, are refused objectWrite; neither changes the state or its version.
+                    a second create conflicts; a pin that names no published package is refused. A seed
+                    the law refuses (500 > 100) refuses the whole create (objectWrite, nothing installed,
+                    not even the record); the same create with a lawful seed (50) installs the record AND
+                    the state at version 1 (the seed is judged by the creator's law, not by the package pin).
+  OR3 seed + birth  the law is   le state/total 100  AND  (turn = birth OR turn = creation OR monotone
+                    state/total).  The seeded object is born onto with `keep` (the state exists, so a birth
+                    cannot `set`): its first write is a no-op, the state stays 50 at version 1.
   OR4 birth law     a birth whose first write violates the law is refused objectWrite and commits nothing
                     (no record, no state, no fee); the same birth under a lawful first write installs.
-  OR5 resume+view   the tally is resumed with {outcome, view}: the owner's direct write (50) is IN the view,
+  OR5 resume+view   the tally is resumed with {outcome, view}: the seeded state (50) is IN the view,
                     so a reply of 7 lands as 57, never 7; the delivery's write passes the law. A reply of 60
                     would make 117: the delivery is refused objectWrite and the activity stays parked at the
                     same await, its purse and the state untouched.
@@ -44,6 +47,7 @@ import argparse, pathlib, sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import activity_world as AW  # noqa: E402
 from activity_world import World, PERMIT_ALL, nat, record, variant, eq, le, monotone, all_of, any_of  # noqa: E402
 
 # the plant -> the journey rows (groups) that must go red under it
@@ -73,9 +77,10 @@ try:
 
     # Laws. LEDGER: a total that never passes 100, and only grows after the birth (a birth has no old state,
     # and a monotone atom fails closed on an absent old slot, so the birth is exempt by turn).
-    LEDGER = all_of(le('state/total', 100), any_of(eq('request/turn', 1), monotone('state/total')))
+    LEDGER = all_of(le('state/total', 100), any_of(eq('request/turn', 1), eq('request/turn', 4),
+                                                   monotone('state/total')))
     BY_SPONSOR = any_of(eq('request/subject', SPONSOR), eq('request/turn', 1))
-    BY_STRANGER = any_of(eq('request/subject', STRANGER), eq('request/turn', 1))
+    BY_STRANGER = any_of(eq('request/subject', STRANGER), eq('request/turn', 1))  # no seed: turn 4 never judged
     ledger_law = PERMIT_ALL if 'permit-all-law' in plants else LEDGER
     stranger_law = any_of(eq('request/subject', SPONSOR), eq('request/subject', STRANGER), eq('request/turn', 1)) \
         if 'deliverer-passes' in plants else BY_STRANGER
@@ -90,11 +95,7 @@ try:
     with w.group('OR1-no-record'):
         if 'record-present' in plants:
             w.create('plant-record-on-bare', w.sponsor, 'bare', PERMIT_ALL, 'installed')
-        w.turn('write-without-record-refused', w.sponsor, {
-            'kind': 'writeState', 'object': w.objects['bare']['object'],
-            'objectCapability': w.objects['bare']['capability'], 'value': record(total=nat(1))},
-            'refused', 'notAnObject')
-        w.birth('birth-without-record-refused', w.sponsor, 'bare', 20000, 'refused', 'notAnObject')
+        w.birth('birth-without-record-refused', w.sponsor, 'bare', 7 * AW.PRICE, 'refused', 'notAnObject')
         bare = w.state('bare', 'bare-after')
         w.check('bare-has-no-record-and-no-state', bare['objectRecord'].get('kind') == 'absent'
                 and bare['stateKind'] == 'absent', {'object': bare['objectRecord'].get('kind'),
@@ -104,51 +105,49 @@ try:
     with w.group('OR2-create'):
         w.create('create-unpublished-pin-refused', w.sponsor, 'ledger', ledger_law, 'refused', 'pinUnpublished',
                  pin='12345')
-        w.create('create-ledger', w.sponsor, 'ledger', ledger_law, 'installed')
-        w.create('create-ledger-again-conflicts', w.sponsor, 'ledger', ledger_law, 'conflict')
+        w.create('create-seed-500-refused', w.sponsor, 'ledger', ledger_law, 'refused',
+                 ['lawDenied', 'le "state/total" 100', 'before := none', 'after := some 500'],
+                 seed=record(total=nat(500)))
+        nothing = w.state('ledger', 'ledger-after-refused-seed')
+        w.check('refused-seed-installed-nothing', nothing['objectRecord'].get('kind') == 'absent'
+                and nothing['stateKind'] == 'absent', {'object': nothing['objectRecord'].get('kind'),
+                                                       'state': nothing['stateKind']})
+        w.create('create-ledger', w.sponsor, 'ledger', ledger_law, 'installed', seed=record(total=nat(50)))
+        w.create('create-ledger-again-conflicts', w.sponsor, 'ledger', ledger_law, 'conflict',
+                 seed=record(total=nat(50)))
         lv = w.state('ledger', 'ledger-created')
         rec = lv['objectRecord']
         w.check('record-pins-tally-under-its-law', rec.get('kind') == 'object-record' and rec.get('pin') == w.PIN
                 and rec.get('payer') == w.SPONSOR_ACCOUNT and 'state/total' in str(rec.get('law')), rec)
-        w.check('no-state-until-written', lv['stateKind'] == 'absent', {'state': lv['stateKind']})
+        w.check('seed-installed-at-version-1', total_state(lv, 50, 1), {'state': lv.get('state'),
+                                                                      'version': lv.get('stateVersion')})
 
-    # --- OR3: the law judges a direct write ----------------------------------------------------------------
+    # --- OR3: a birth joins the seeded state -------------------------------------------------------------------
     with w.group('OR3-write-law'):
-        tx = w.birth('ledger-birth', w.sponsor, 'ledger', 20000, 'installed')
+        # a blind write found after the run is a CHARGED FAILURE (row E): the price, nothing else
+        tx = w.birth('ledger-birth', w.sponsor, 'ledger', 7 * AW.PRICE, 'charged', 'blindWrite')
+        tx = w.birth('ledger-birth-keep', w.sponsor, 'ledger', 7 * AW.PRICE, 'installed', init=variant('keep', record()))
         s0 = w.state('ledger', 'ledger-born', tx)
         REC, SLOT1, AWAIT1 = s0['recordCell'], w.await_of(s0)['source']['slot'], w.await_of(s0)['id']
-        w.check('birth-created-state-at-version-1', total_state(s0, 0, 1), {'state': s0.get('state'),
-                                                                           'version': s0.get('stateVersion')})
-
-        def write(label, total, expect, detail=None):
-            return w.turn(label, w.sponsor, {'kind': 'writeState', 'object': w.objects['ledger']['object'],
-                                             'objectCapability': w.objects['ledger']['capability'],
-                                             'value': record(total=nat(total))}, expect, detail)
-        write('write-50-admitted', 50, 'installed')
-        s1 = w.state('ledger', 'after-50', tx)
-        w.check('write-50-is-version-2', total_state(s1, 50, 2), {'state': s1.get('state'),
-                                                                 'version': s1.get('stateVersion')})
-        write('write-40-refused-not-monotone', 40, 'refused', ['lawDenied', 'monotone "state/total"'])
-        write('write-500-refused-over-the-cap', 500, 'refused',
-              ['lawDenied', 'le "state/total" 100', 'before := some 50', 'after := some 500'])
-        s2 = w.state('ledger', 'after-refusals', tx)
-        w.check('refusals-changed-nothing', total_state(s2, 50, 2), {'state': s2.get('state'),
-                                                                    'version': s2.get('stateVersion')})
+        w.check('birth-joined-the-seeded-state', total_state(s0, 50, 1), {'state': s0.get('state'),
+                                                                         'version': s0.get('stateVersion')})
 
     # --- OR4: the law judges a birth's first write --------------------------------------------------------
     with w.group('OR4-birth-law'):
         w.create('create-ledger-b', w.sponsor, 'ledger-b', ledger_law, 'installed')
         before = w.watched('before-bad-birth')
-        w.birth('birth-set-500-refused', w.sponsor, 'ledger-b', 20000, 'refused',
+        w.over_extract_plant('birth-one-tick-over-extract-refused', w.sponsor, 'ledger-b', 7 * AW.PRICE)
+        w.birth('birth-set-500-charged', w.sponsor, 'ledger-b', 7 * AW.PRICE, 'charged',
                 ['lawDenied', 'le "state/total" 100', 'before := none', 'after := some 500'],
                 init=variant('set', nat(500)))
         after = w.watched('after-bad-birth')
         lb = w.state('ledger-b', 'ledger-b-after-refusal')
+        # the law's refusal comes after the run: a charged failure posts the envelope's price and nothing else
         w.check('refused-birth-committed-nothing', lb['stateKind'] == 'absent'
-                and w.balance(after, w.SPONSOR_ACCOUNT) == w.balance(before, w.SPONSOR_ACCOUNT),
+                and w.balance(before, w.SPONSOR_ACCOUNT) - w.balance(after, w.SPONSOR_ACCOUNT) == AW.PRICE,
                 {'state': lb['stateKind'], 'sponsor': [w.balance(before, w.SPONSOR_ACCOUNT),
                                                        w.balance(after, w.SPONSOR_ACCOUNT)]})
-        txb = w.birth('birth-set-0-installed', w.sponsor, 'ledger-b', 20000, 'installed')
+        txb = w.birth('birth-set-0-installed', w.sponsor, 'ledger-b', 7 * AW.PRICE, 'installed')
         lb2 = w.state('ledger-b', 'ledger-b-born', txb)
         w.check('lawful-birth-created-the-state', total_state(lb2, 0, 1), {'state': lb2.get('state'),
                                                                           'version': lb2.get('stateVersion')})
@@ -157,9 +156,10 @@ try:
     with w.group('OR5-resume-view-law'):
         w.turn('resolve-7', w.second, {'kind': 'resolve', 'slot': SLOT1, 'answer': {'reply': record(amount=nat(7))}},
                'installed')
+        w.short_heap_plant('deliver-7-one-cell-short-refused', w.sponsor, deliver_body(REC, AWAIT1))
         w.turn('deliver-7', w.sponsor, deliver_body(REC, AWAIT1), 'installed')
         r1 = w.state('ledger', 'after-reply-7', tx)
-        w.check('reply-lands-on-the-viewed-state', total_state(r1, 57, 3) and r1['record'].get('generation') == '1',
+        w.check('reply-lands-on-the-viewed-state', total_state(r1, 57, 2) and r1['record'].get('generation') == '1',
                 {'state': r1.get('state'), 'version': r1.get('stateVersion'),
                  'generation': r1['record'].get('generation')})
         AWAIT2, SLOT2 = w.await_of(r1)['id'], w.await_of(r1)['source']['slot']
@@ -170,7 +170,7 @@ try:
                ['lawDenied', 'le "state/total" 100', 'before := some 57', 'after := some 117'])
         r2 = w.state('ledger', 'after-refused-delivery', tx)
         w.check('refused-delivery-left-the-activity-parked',
-                total_state(r2, 57, 3) and r2['record'].get('generation') == '1' and w.await_of(r2).get('id') == AWAIT2
+                total_state(r2, 57, 2) and r2['record'].get('generation') == '1' and w.await_of(r2).get('id') == AWAIT2
                 and r2['purse'] == purse, {'state': r2.get('state'), 'version': r2.get('stateVersion'),
                                            'generation': r2['record'].get('generation'), 'purse': r2['purse'],
                                            'purseBefore': purse})
@@ -181,7 +181,7 @@ try:
         w.create('create-owned-stranger', w.sponsor, 'owned-stranger', stranger_law, 'installed')
         born = {}
         for name in ['owned-sponsor', 'owned-stranger']:
-            t = w.birth(f'birth-{name}', w.sponsor, name, 12000, 'installed')
+            t = w.birth(f'birth-{name}', w.sponsor, name, 7 * AW.PRICE, 'installed')
             v = w.state(name, f'{name}-born', t)
             w.turn(f'resolve-{name}', w.second, {'kind': 'resolve', 'slot': w.await_of(v)['source']['slot'],
                                                  'answer': {'reply': record(amount=nat(5))}}, 'installed')

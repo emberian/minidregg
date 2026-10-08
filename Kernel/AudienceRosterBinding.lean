@@ -20,13 +20,13 @@ abbrev Roster := Minidregg.Theory.ObjectAudienceRoster.Roster
 abbrev Deployment := ResourceObservationAdmission.Deployment
 abbrev Durable := ResourceObservationAdmission.Durable
 abbrev Context := ResourceObservationAdmission.Context
-variable {deployment : Deployment} {durable : Durable}
+variable {deployment : Deployment}
 /-- The initial catalog profile uses canonical atom zero in a content resource.
 The exact full entry list includes subject/capability/device generation/key
 commitments. It is an audience-scoped catalog; an unrelated global JSON roster
 cannot be substituted. Tombstoned or noncanonical images fail closed. -/
-def catalogPayload (context : Context deployment durable) (source : Nat) : Option (Digest × List UInt8) := do
-  let .present packed := context.directory.directory.slots source | none
+def catalogPayload (context : Context deployment) (source : Nat) : Option (Digest × List UInt8) := do
+  let .present packed := context.directory.slots source | none
   if !decide (CanonicalCellRegistry.CellLaw deployment source packed) then none else
    match packed with
    | ⟨.content, materialized⟩ =>
@@ -35,7 +35,7 @@ def catalogPayload (context : Context deployment durable) (source : Nat) : Optio
      if record.tombstonedAt.isNone then some (materialized.root, record.payload) else none
    | _ => none
 
-structure Checked (context : Context deployment durable) (state : State) (roster : Roster) where
+structure Checked (context : Context deployment) (state : State) (roster : Roster) where
   private mk ::
   bound : ObjectAudienceRoster.Bound state roster roster.entries
   source : Nat
@@ -44,21 +44,21 @@ structure Checked (context : Context deployment durable) (state : State) (roster
   payload : Digest × List UInt8
   catalogExact : catalogPayload context source = some payload
   entriesExact : payload.2 = (StreamCodec.list ObjectAudienceRoster.entryStream).encode roster.entries
-  snapshotExact : state.deviceSnapshot = (durable.snapshot.model.roots ⟨source⟩).value
+  snapshotExact : state.deviceSnapshot = (context.view.model.roots ⟨source⟩).value
 
-def Checked.deviceRoot {context : Context deployment durable} {state : State} {roster : Roster}
+def Checked.deviceRoot {context : Context deployment} {state : State} {roster : Roster}
     (checked : Checked context state roster) : Nat :=
-  (durable.snapshot.model.roots ⟨checked.source⟩).value
+  (context.view.model.roots ⟨checked.source⟩).value
 
-def Checked.deviceGuard {context : Context deployment durable} {state : State} {roster : Roster}
+def Checked.deviceGuard {context : Context deployment} {state : State} {roster : Roster}
     (checked : Checked context state roster) : ReadGuard :=
-  ⟨⟨checked.source⟩, durable.snapshot.model.roots ⟨checked.source⟩⟩
+  ⟨⟨checked.source⟩, context.view.model.roots ⟨checked.source⟩⟩
 
-theorem Checked.deviceGuard_exact {context : Context deployment durable} {state : State} {roster : Roster}
+theorem Checked.deviceGuard_exact {context : Context deployment} {state : State} {roster : Roster}
     (checked : Checked context state roster) :
-    checked.deviceGuard.expectedRoot = durable.snapshot.model.roots checked.deviceGuard.cellId := rfl
+    checked.deviceGuard.expectedRoot = context.view.model.roots checked.deviceGuard.cellId := rfl
 
-def check (context : Context deployment durable) (state : State) (roster : Roster) :
+def check (context : Context deployment) (state : State) (roster : Roster) :
     Option (Checked context state roster) := do
   if bound : ObjectAudienceRoster.Bound state roster roster.entries then
    let first ← roster.entries.head?
@@ -69,7 +69,7 @@ def check (context : Context deployment durable) (state : State) (roster : Roste
      | none => none
      | some payload =>
       if entriesExact : payload.2 = (StreamCodec.list ObjectAudienceRoster.entryStream).encode roster.entries then
-       if snapshotExact : state.deviceSnapshot = (durable.snapshot.model.roots ⟨source⟩).value then
+       if snapshotExact : state.deviceSnapshot = (context.view.model.roots ⟨source⟩).value then
         some ⟨bound, source, separate, sourceExact, payload, catalogExact, entriesExact, snapshotExact⟩
        else none
       else none
@@ -78,13 +78,13 @@ def check (context : Context deployment durable) (state : State) (roster : Roste
   else none
 
 /-- Exact canonical preimage and its admitted bindings are retained together. -/
-structure CheckedBytes (context : Context deployment durable) (state : State) (bytes : List UInt8) where
+structure CheckedBytes (context : Context deployment) (state : State) (bytes : List UInt8) where
   private mk ::
   roster : Roster
   decoded : ObjectAudienceRoster.decode bytes = some roster
   checked : Checked context state roster
 
-def checkBytes (context : Context deployment durable) (state : State) (bytes : List UInt8) :
+def checkBytes (context : Context deployment) (state : State) (bytes : List UInt8) :
     Option (CheckedBytes context state bytes) := do
   match decoded : ObjectAudienceRoster.decode bytes with
   | none => none
@@ -92,11 +92,11 @@ def checkBytes (context : Context deployment durable) (state : State) (bytes : L
     let checked ← check context state roster
     pure ⟨roster, decoded, checked⟩
 
-theorem CheckedBytes.canonical {context : Context deployment durable} {state : State} {bytes : List UInt8}
+theorem CheckedBytes.canonical {context : Context deployment} {state : State} {bytes : List UInt8}
     (checked : CheckedBytes context state bytes) : ObjectAudienceRoster.encode checked.roster = bytes :=
   ObjectAudienceRoster.decode_canonical checked.decoded
 
-theorem Checked.deviceRoot_exact {context : Context deployment durable} {state : State} {roster : Roster}
+theorem Checked.deviceRoot_exact {context : Context deployment} {state : State} {roster : Roster}
     (checked : Checked context state roster) : state.deviceSnapshot = checked.deviceRoot :=
   checked.snapshotExact
 end Minidregg.Kernel.AudienceRosterBinding

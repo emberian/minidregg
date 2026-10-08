@@ -47,7 +47,7 @@ PY
 if [ "${1:-}" = --self-check ]; then self_check; exit $?; fi
 
 : "${MINI_HOST_BIN:?set MINI_HOST_BIN to an absolute path of a built minidregg-host image. There is no warm Host build yet (the cut lane is still gating); this script is authored, not run. Restart condition: a Host image exists and this env var names it.}"
-for tool in jq sha256sum python3 setsid timeout pgrep xxd bc; do
+for tool in jq sha256sum python3 setsid timeout pgrep xxd; do
   command -v "$tool" >/dev/null 2>&1 || die "$tool is required"
 done
 bin=${MINI_RELEASE_DIR:-$ROOT/target-gates/release}

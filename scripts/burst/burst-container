@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# scripts/burst/burst-container HOST NAME PORT PUBKEY_FILE -- a FRESH Ubuntu (same release as HOST) in a
+# systemd-nspawn container on HOST, booted, with sshd on PORT (host network namespace) and a sudo user `ubuntu`
+# holding PUBKEY: the stand-in for a new provider box when none can be rented. /srv inside is HOST:/srv/NAME/srv
+# (its own slot files, bases, lanes; nothing of the host's). burst-up then targets it exactly like a real box
+# (--boot NAME=<alias of ubuntu@HOST:PORT> --no-data-disk --sccache-port <not the host's>). Idempotent.
+#   scripts/burst/burst-container ember@67.213.117.179 burst-test 2222 ~/.ssh/id_ed25519.pub
+set -euo pipefail
+host=${1:?HOST} name=${2:?NAME} port=${3:?PORT} pub=${4:?PUBKEY_FILE}
+[[ $name =~ ^[a-z][a-z0-9-]*$ ]] || { echo "bad NAME" >&2; exit 64; }
+keyb64=$(base64 < "$pub" | tr -d '\n')      # one argument through two shells: never a raw key with spaces
+ssh -o BatchMode=yes "$host" bash -s -- "$name" "$port" "$keyb64" <<'REMOTE'
+set -euo pipefail
+name=$1 port=$2 keyb64=$3
+D=/srv/$name/rootfs; SRVD=/srv/$name/srv
+sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y -q systemd-container debootstrap >/dev/null
+rel=$(. /etc/os-release; echo "$VERSION_CODENAME")
+if [ ! -f "$D/etc/os-release" ]; then
+  sudo -n mkdir -p "$D" "$SRVD"
+  echo "debootstrap $rel -> $D (minbase + ssh/sudo/systemd/python3/curl)"
+  sudo -n debootstrap --include=openssh-server,sudo,python3,systemd,systemd-sysv,dbus,dbus-user-session,libpam-systemd,ca-certificates,curl,iproute2,less,vim-tiny,locales "$rel" "$D" http://archive.ubuntu.com/ubuntu >/tmp/$name-debootstrap.log 2>&1 || { tail -5 /tmp/$name-debootstrap.log; exit 1; }
+fi
+# configure inside: on the stopped tree with nspawn --pipe; on a RUNNING machine (idempotent re-run) through its manager
+if sudo -n machinectl show "$name" -p State 2>/dev/null | grep -q running; then inside=(sudo -n systemd-run -q -M "$name" --pipe --wait /bin/bash -s --)
+else inside=(sudo -n systemd-nspawn -q -D "$D" --pipe bash -s --); fi
+"${inside[@]}" "$port" "$keyb64" "$name" "$rel" <<'INSIDE'
+set -e; port=$1 keyb64=$2 name=$3 rel=$4
+echo "$name" > /etc/hostname; grep -q "127.0.1.1 $name" /etc/hosts 2>/dev/null || printf '127.0.0.1 localhost\n127.0.1.1 %s\n' "$name" > /etc/hosts
+grep -q "^deb .* $rel universe" /etc/apt/sources.list 2>/dev/null || printf 'deb http://archive.ubuntu.com/ubuntu %s main universe\ndeb http://archive.ubuntu.com/ubuntu %s-updates main universe\n' "$rel" "$rel" > /etc/apt/sources.list
+id ubuntu >/dev/null 2>&1 || useradd -m -s /bin/bash -G sudo ubuntu
+echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/90-ubuntu; chmod 440 /etc/sudoers.d/90-ubuntu
+install -d -m 700 -o ubuntu -g ubuntu /home/ubuntu/.ssh; echo "$keyb64" | base64 -d > /home/ubuntu/.ssh/authorized_keys; chmod 600 /home/ubuntu/.ssh/authorized_keys; chown ubuntu:ubuntu /home/ubuntu/.ssh/authorized_keys
+sed -i "s/^#\?Port .*/Port $port/" /etc/ssh/sshd_config; grep -q "^Port $port" /etc/ssh/sshd_config || echo "Port $port" >> /etc/ssh/sshd_config
+systemctl enable ssh >/dev/null 2>&1 || true
+ssh-keygen -A >/dev/null 2>&1 || true
+INSIDE
+if ! sudo -n machinectl show "$name" >/dev/null 2>&1; then
+  sudo -n systemd-run -q --unit="nspawn-$name" -p KillMode=mixed -p Type=notify -p NotifyAccess=all \
+    systemd-nspawn -D "$D" --boot --machine="$name" --bind="$SRVD:/srv" --resolv-conf=bind-host --timezone=off >/dev/null 2>&1 || true
+  for _ in $(seq 1 30); do sudo -n machinectl show "$name" -p State 2>/dev/null | grep -q running && break; sleep 1; done
+fi
+sudo -n machinectl show "$name" -p State
+for _ in $(seq 1 30); do (echo > /dev/tcp/127.0.0.1/$port) 2>/dev/null && break; sleep 1; done
+(echo > /dev/tcp/127.0.0.1/$port) 2>/dev/null && echo "sshd answers on 127.0.0.1:$port inside the host netns" || { echo "sshd not reachable on $port"; exit 1; }
+REMOTE
+cat <<CFG
+
+ssh config for the orchestrator (append to a file you pass as BURST_SSH_OPTS="-F file"):
+Host $name-boot
+  HostName 127.0.0.1
+  Port $port
+  User ubuntu
+  ProxyJump $host
+  StrictHostKeyChecking accept-new
+Host $name
+  HostName 127.0.0.1
+  Port $port
+  User ember
+  ProxyJump $host
+  StrictHostKeyChecking accept-new
+CFG

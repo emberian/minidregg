@@ -26,6 +26,12 @@ or the deployed hash -- only the compiled evaluator runs them):
 * `first_accepted`: the admission accepts, and the record of the accepted intent is
   byte for byte the record the native Host appended (`Accepted.journalExact`), and
   the world root after it is the root the Host reported (`Accepted.rootExact`);
+* `first_projection`: the re-run's SEMANTIC PROJECTION (who signed, which cells it
+  writes by kind and role, what it guards and spends, what it is charged, and the
+  refused call's verdict and reason) is the hand-written authority
+  `Assurance.NativeAcceptedFixtureAuthority`, read from the acceptance driver's intent.  The
+  bytes above are regenerated from a run; this is what a regeneration cannot move
+  without an authority change (`Assurance.NativeAcceptedFixtureProjection`);
 * `refused_admission`: the same admission refuses the dishonest call `r01`
   (a validly signed command naming the package as its source) with
   `objectiveSource`, the Host's own refusal, on the image right after `first`.
@@ -43,6 +49,8 @@ on a fresh world with this tree's binaries.
 -/
 import Assurance.PrivateEvaluatorCustodyJoin
 import Assurance.NativeAcceptedFixtureData
+import Assurance.NativeAcceptedFixtureProjection
+import Assurance.NativeAcceptedFixtureAuthority
 import Kernel.NativeHostContext
 import Kernel.ObjectiveBendAuthenticatedInputs
 import Compiler.NativeHostCodec
@@ -105,16 +113,23 @@ def ambientOf (durable : Durable) : Ambient := ⟨config.federation, NativeHost.
 /-- `DeclaredResourceController.admit` as the Host calls it for op 2, with the
 production read oracle -- the same definition, at `Id` instead of `IO`, its signature
 checks answered by the recorded run (`Oracle.recorded`) instead of the process. -/
-def admitRun {command : Command} {durable : Durable}
-    (prepared : PreparedInvocation config.deployment config.profile (ambientOf durable) durable command)
+def admitRun {command : Command} {durable : Durable} {ground : Ground config.deployment}
+    (prepared : PreparedInvocation config.deployment config.profile (ambientOf durable) ground command)
     (signed : SignedCommand) : Except Reject (AcceptedInvocation prepared signed) :=
   Id.run (admit (.recorded transcript) prepared signed ObjectiveBendAuthenticatedInputs.oracle)
+
+/-- The full shape's ground of an image: its own decoded directory and authority. -/
+def groundAt (durable : Durable) : Option (Ground config.deployment) := do
+  let directory ← CredentialAuthorityDomainReceiver.loadDirectory durable
+  let authority ← CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot
+  pure (.full durable directory authority)
 
 /-- An accepted op-2 call, with the Host's evidence of the same acceptance. -/
 structure Accepted (signed : SignedCommand) (hostRecord : List UInt8) (hostRoot : Nat) where
   durable : Durable
+  ground : Ground config.deployment
   command : Command
-  prepared : PreparedInvocation config.deployment config.profile (ambientOf durable) durable command
+  prepared : PreparedInvocation config.deployment config.profile (ambientOf durable) ground command
   shape : PhysicalShape prepared
   accepted : AcceptedInvocation prepared signed
   /-- The accepted intent's journal record is the Host's appended record. -/
@@ -127,14 +142,14 @@ structure Accepted (signed : SignedCommand) (hostRecord : List UInt8) (hostRoot 
 def acceptAt (durable : Durable) (signed : SignedCommand) (hostRecord : List UInt8) (hostRoot : Nat) :
     Option (Accepted signed hostRecord hostRoot) := do
   let command ← commandCodec.decode signed.commandBytes
-  let .ok prepared := prepareFrom config.deployment config.profile (ambientOf durable) durable
-    (CredentialAuthorityDomainReceiver.loadDirectory durable) command | none
+  let ground ← groundAt durable
+  let .ok prepared := prepare config.deployment config.profile (ambientOf durable) ground command | none
   if shape : PhysicalShape prepared then
     let .ok accepted := admitRun prepared signed | none
     if journal : recordFrame.encode (IntentRecord.ofIntent (accepted.dataIntent shape)) = hostRecord then
       if root : (NativeHostCodec.worldRoot config.deployment.domain config.profile.semantics
           (durable.image.append (accepted.dataIntent shape))).value = hostRoot then
-        some ⟨durable, command, prepared, shape, accepted, journal, root⟩
+        some ⟨durable, ground, command, prepared, shape, accepted, journal, root⟩
       else none
     else none
   else none
@@ -170,12 +185,12 @@ def firstAccepted := first.2.accepted
 def firstShape := first.2.shape
 
 /-- The sources that answered an accepted invocation's signature checks: one per
-incidence (the authority leg, then each target leg). -/
+incidence (the authority leg, then each target's authorizing signature). -/
 def sourcesOf {signed : SignedCommand} {record : List UInt8} {root : Nat}
     (accepted : Accepted signed record root) : List CredentialSignatureIO.Source :=
-  (accepted.accepted.checked none).receipt.source ::
+  (accepted.accepted.receipt none).source ::
     (List.finRange accepted.command.targets.length).map fun i =>
-      (accepted.accepted.checked (some i)).receipt.source
+      (accepted.accepted.receipt (some i)).source
 
 def recordedOnly (sources : List CredentialSignatureIO.Source) : Bool :=
   sources.all (· == .transcript transcript) && decide (sources.length ≥ 2)
@@ -211,8 +226,8 @@ def refusedRun : Option Reject := do
   let ⟨_, accepted⟩ ← firstRun
   let durable ← loadAt (accepted.durable.image.append (accepted.accepted.dataIntent accepted.shape))
   let command ← commandCodec.decode signed.commandBytes
-  let .ok prepared := prepareFrom config.deployment config.profile (ambientOf durable) durable
-    (CredentialAuthorityDomainReceiver.loadDirectory durable) command | none
+  let ground ← groundAt durable
+  let .ok prepared := prepare config.deployment config.profile (ambientOf durable) ground command | none
   if PhysicalShape prepared then
     match admitRun prepared signed with
     | .error reason => some reason
@@ -222,6 +237,32 @@ def refusedRun : Option Reject := do
 def isObjectiveSource : Option Reject → Bool
   | some .objectiveSource => true
   | _ => false
+
+/-! ## The authority -/
+
+open Minidregg.Assurance.NativeAcceptedFixtureProjection in
+/-- The authority: hand-written, read from the acceptance driver's intent; no
+generator writes it. -/
+def authority : List NativeAcceptedFixtureProjection.Line :=
+  parseAuthority NativeAcceptedFixtureAuthority.text
+
+open Minidregg.Assurance.NativeAcceptedFixtureProjection in
+/-- The re-run's projection: the accepted call's record and receipts, then the
+refused call's verdict. -/
+def projectionRun : Option (List NativeAcceptedFixtureProjection.Line) := do
+  let ⟨_, run⟩ ← firstRun
+  let reason ← refusedRun
+  pure (projectAccepted config.deployment run.command
+      (IntentRecord.ofIntent (run.accepted.dataIntent run.shape)) (receiptSubjects run.accepted) ++
+    projectRefused (reasonName (reprStr reason)))
+
+/-- **The re-run means what the driver asked for.**  The projection of the
+accepted call's record (signer, signature checks, written cells by kind and role,
+guards, nullifiers, every charge lane) and of the refused call's verdict is
+exactly the hand-written authority.  A regeneration that changes what the
+invocation records turns this red until the authority is changed in its own
+reviewed commit. -/
+theorem first_projection : projectionRun = some authority := by native_decide
 
 /-- **The same admission refuses `r01` with the Host's reason.** -/
 theorem refused_admission : isObjectiveSource refusedRun = true := by native_decide
@@ -279,6 +320,8 @@ set_option maxHeartbeats 4000000 in
 #assert_axioms rekeyed_commandBytes
 set_option maxHeartbeats 4000000 in
 #assert_compiled refused_admission
+set_option maxHeartbeats 4000000 in
+#assert_compiled first_projection
 set_option maxHeartbeats 4000000 in
 #assert_compiled refused_command_differs
 set_option maxHeartbeats 4000000 in

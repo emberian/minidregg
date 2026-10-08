@@ -5,6 +5,7 @@ No unrelated ordinary operation receives an exception before initialization.
 import Kernel.NativeHostContext
 import Kernel.ResourceBirthReceiver
 import Kernel.DeclaredResourceController
+import Kernel.NativeHostServed
 namespace Minidregg.Kernel.JointControlBootstrap
 open Minidregg.Theory
 open Minidregg.Theory.TypedAuthorization
@@ -49,7 +50,7 @@ private def initializeCheck {config : Config} {opened : Opened config} {command 
     {signed : SignedCommand}
     (pin : JointControlFrame.Pin)
     {prepared : PreparedInvocation config.deployment config.profile
-      ⟨config.federation,logicalHeight config opened.durable⟩ opened.durable command}
+      ⟨config.federation,logicalHeight config opened.durable⟩ opened.ground command}
     (shape : PhysicalShape prepared) (accepted : AcceptedInvocation prepared signed) : Bool :=
   match command.targets, (accepted.dataIntent shape).writes with
   | [target], [write] =>
@@ -72,7 +73,7 @@ inductive CurrentPermission (config : Config) (opened : Opened config) where
       CurrentPermission config opened
   | initialize {command : Command} {signed : SignedCommand}
       {prepared : PreparedInvocation config.deployment config.profile
-        ⟨config.federation,logicalHeight config opened.durable⟩ opened.durable command}
+        ⟨config.federation,logicalHeight config opened.durable⟩ opened.ground command}
       (shape : PhysicalShape prepared) (accepted : AcceptedInvocation prepared signed) :
       CurrentPermission config opened
 
@@ -108,7 +109,7 @@ def admitBirth {config : Config} {opened : Opened config}
 
 def admitInitialize {config : Config} {opened : Opened config} {command : Command} {signed : SignedCommand}
     {prepared : PreparedInvocation config.deployment config.profile
-      ⟨config.federation,logicalHeight config opened.durable⟩ opened.durable command}
+      ⟨config.federation,logicalHeight config opened.durable⟩ opened.ground command}
     (shape : PhysicalShape prepared) (accepted : AcceptedInvocation prepared signed) :
     Option (Admission config opened (accepted.dataIntent shape)) := do
   let some pin := config.jointControl | none

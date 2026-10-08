@@ -318,6 +318,75 @@ theorem PreparedLaw.admit_eq {F : Type} [Field F] [DecidableEq F]
       ComposedPolicyAdmission.admit config request evidence witness membership epochExact revisionExact := by
   simp only [PreparedLaw.admit, ComposedPolicyAdmission.admit, PreparedLaw.verifies_eq]
 
+/-! ## Authorization with the law's verdict left to the Receiver -/
+
+/-- **Authorization, the law's verdict not included.**  Every fact `admit`
+establishes about a request except the committed law's verdict on the step: the
+capability evidence; the target's committed head and closure resolved from this
+configuration (`law`); the request bound to that head, this domain, these
+semantics and this step (`PreparedLaw.binding`); its epoch and revision current;
+the head's address the one the authority state commits to, and a member of the
+policy root.  A family on `Kernel.Receiving.Family` whose write to
+`config.target` projects `config.step` as its law step leaves the verdict to the
+Receiver (`Kernel.ReceivingLaw.judgeWrite`), so the law is judged once;
+`Bound.admit_of_verifies` shows that with the verdict this is `admit`. -/
+structure Bound {F : Type} [Field F] [DecidableEq F] (config : Config F) {kind : ResourceKind}
+    (request : Request kind) where
+  evidence : Evidence config.portal config.snapshot.authState request
+  law : PreparedLaw config
+  bound : law.binding request = true
+  membership : config.portal.MembershipWitness
+  epochExact : request.policyEpoch = config.snapshot.authState.policyEpoch request.policyId
+  revisionExact : request.policyRevision = config.snapshot.authState.policyRevision request.policyId
+  addressExact : law.witness.compiled.address =
+    config.snapshot.authState.policyAddress request.policyId request.policyRevision
+  membershipVerified : config.portal.verifyMembership config.snapshot.authState.policyRoot
+    (config.snapshot.authState.policyAddress request.policyId request.policyRevision) membership = true
+
+/-- Bind a request to a resolved law: the checks of `admit` up to, and not
+including, the law's verdict. -/
+def bind {F : Type} [Field F] [DecidableEq F] (config : Config F) {kind : ResourceKind}
+    (request : Request kind) (evidence : Evidence config.portal config.snapshot.authState request)
+    (law : PreparedLaw config) (membership : config.portal.MembershipWitness)
+    (epochExact : request.policyEpoch = config.snapshot.authState.policyEpoch request.policyId)
+    (revisionExact : request.policyRevision = config.snapshot.authState.policyRevision request.policyId) :
+    Option (Bound config request) :=
+  if bound : law.binding request = true then
+    if addressExact : law.witness.compiled.address =
+        config.snapshot.authState.policyAddress request.policyId request.policyRevision then
+      if membershipVerified : config.portal.verifyMembership config.snapshot.authState.policyRoot
+          (config.snapshot.authState.policyAddress request.policyId request.policyRevision)
+          membership = true then
+        some ⟨evidence, law, bound, membership, epochExact, revisionExact, addressExact,
+          membershipVerified⟩
+      else none
+    else none
+  else none
+
+/-- **With the law's verdict, a bound request is admitted**: the compiled verdict
+on the bound law's witness is all `admit` adds. -/
+theorem Bound.admit_of_verifies {F : Type} [Field F] [DecidableEq F] {config : Config F}
+    {kind : ResourceKind} {request : Request kind} (bound : Bound config request)
+    (verified : config.verifies request bound.law.witness = true) :
+    ∃ authorized, admit config request bound.evidence bound.law.witness bound.membership
+      bound.epochExact bound.revisionExact = some authorized := by
+  unfold admit admitWithCheck
+  dsimp only
+  rw [dif_pos bound.addressExact, dif_pos bound.membershipVerified, dif_pos verified]
+  exact ⟨_, rfl⟩
+
+/-- **The compiled verdict of a bound request is the law's `Pred.eval`**, under
+the three compiler verdicts the Receiver reads (`PhysicalLawResolution.Judged`). -/
+theorem Bound.verifies_iff_eval {F : Type} [Field F] [DecidableEq F] {config : Config F}
+    {kind : ResourceKind} {request : Request kind} (bound : Bound config request)
+    (supportedExact : supported config.profile.compiler bound.law.predicate = true)
+    (rangesExact : inputsInRange config.profile.compiler bound.law.predicate
+      config.step.oldState config.step.newState = true)
+    (casts : castInjOn F (intsOf bound.law.predicate config.step.oldState config.step.newState)) :
+    config.verifies request bound.law.witness = true ↔
+      Minidregg.Pred.eval bound.law.predicate config.step.oldState config.step.newState = true :=
+  bound.law.verifies_iff_eval request bound.bound supportedExact rangesExact casts
+
 theorem admit_preserves_evidence {F : Type} [Field F] [DecidableEq F]
     (config : Config F) {kind : ResourceKind} (request : Request kind)
     (evidence : Evidence config.portal config.snapshot.authState request)
@@ -357,5 +426,8 @@ theorem authorized_effective_law {F : Type} [Field F] [DecidableEq F]
 #guard_msgs (whitespace := lax) in #print axioms PreparedLaw.verifies_eq
 /-- info: 'Minidregg.Compiler.ComposedPolicyAdmission.PreparedLaw.admit_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms PreparedLaw.admit_eq
+
+#assert_axioms Bound.admit_of_verifies
+#assert_axioms Bound.verifies_iff_eval
 
 end Minidregg.Compiler.ComposedPolicyAdmission

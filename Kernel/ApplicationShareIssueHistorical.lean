@@ -35,7 +35,10 @@ verifier-retained prefix and compare the entire durable record. The original
 receipt comes from that same accepted walk, not a caller-supplied projection. -/
 def select (config : Config) (target : Durable) (index : Nat) :
     IO (Except String (Issued config target index)) := do
-  let .ok selection ← verifyLoadedSelected config target index
+  let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf config.transport ResourceBirthCodec.rootBytes target with
+    | .error detail => return .error s!"share issue history reader: {detail}"
+    | .ok reader => pure reader
+  let .ok selection ← verifyLoadedSelected config reader target index
     | return .error "share issue selected native history refused"
   let before := selection.selected.before
   let .ok ⟨ingress, accepted⟩ ← ApplicationShareIssueAdmission.admitNative

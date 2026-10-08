@@ -1,0 +1,7 @@
+#!/bin/sh
+# Install this file as the path a harness already runs as `dregg-client-sign`
+# (helm's seat launch line sets HELM_CELL_BIN=~/.local/bin/dregg-client-sign).
+# It is not a translation layer: `mini fleet-sign` takes Bread's verbs and flags
+# itself and refuses by name what Mini cannot honour (docs/FLEET-MIGRATION.md).
+# MINI_BIN names the mini client (default: `mini` on PATH).
+exec "${MINI_BIN:-mini}" fleet-sign "$@"

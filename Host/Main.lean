@@ -95,6 +95,8 @@ import Host.ObjectiveActivityJson
 import Host.SeatJson
 import Compiler.GenericSimplexSourceAnchor
 import Compiler.FnWireFncu
+import Compiler.DurableStoreAudit
+import Compiler.FnWirePinned
 import Kernel.NativeHostObjectAudience
 import Kernel.NativeHostSession
 import Kernel.NativeReserveContinuity
@@ -871,7 +873,11 @@ def inspectStopClaimCurrent (config : NativeHost.Config)
   match ← DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes with
   | .error detail => return .error detail
   | .ok durable =>
-      match ← NativeHostReplay.verifyLoaded config durable with
+      let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf config.transport
+          ResourceBirthCodec.rootBytes durable with
+        | .error detail => return .error s!"STOP claim history reader: {detail}"
+        | .ok reader => pure reader
+      match ← NativeHostReplay.verifyLoaded config reader durable with
       | .error failure =>
           return .error s!"STOP claim history refused at entry {failure.index}: {failure.detail}"
       | .ok verified =>
@@ -965,14 +971,23 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
     return result
   let durable ← timed "load" do
     IO.ofExcept (← DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes)
-  IO.println s!"records {durable.image.accepted.length} base {durable.baseHeight} cells {durable.image.cellIds.length}"
+  IO.println s!"records {durable.height} base {durable.baseHeight} cells {durable.image.cellIds.length}"
+  -- Every history read below goes through the Store-backed Reader (verify at use).
+  let ⟨_, reader⟩ ← timed "open: readerOf (head verify)" do
+    match ← NativeHost.historyReaderOfDurable config durable with
+    | .ok reader => pure reader
+    | .error refusal => throw (IO.userError refusal.detail)
+  let lastRecord ← if durable.height = 0 then pure none else
+    match ← reader.atHeight durable.height with
+    | .ok read => pure (some read.record)
+    | .error refusal => throw (IO.userError refusal.message)
   let lanes : List (String × Minidregg.Theory.ResourceCost.Lane) :=
     [("incidences", .incidences), ("turnBytes", .turnBytes), ("memoryTouches", .memoryTouches),
      ("witnessBytes", .witnessBytes), ("proofWork", .proofWork), ("storageBytes", .storageBytes),
      ("networkBytes", .networkBytes), ("sideEffectCount", .sideEffectCount),
      ("feeDebit", .feeDebit), ("leaseByteBlocks", .leaseByteBlocks)]
   for (name, lane) in lanes do
-    let last := (durable.image.accepted.getLast?.map fun r => r.exactCharge lane).getD 0
+    let last := (lastRecord.map fun r => r.exactCharge lane).getD 0
     IO.println s!"allowance {name}: available {durable.snapshot.model.available lane} last-record charge {last}"
   discard <| timed "cellIds x10" do
     let mut n := 0
@@ -1036,7 +1051,7 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
   let timedPure {α : Type} (label : String) (value : Unit → α) : IO α :=
     timed label (IO.lazyPure value)
   let key ← IO.ofExcept (← config.transport.key)
-  let height := durable.image.accepted.length
+  let height := durable.height
   let stored ← timed "open: read the Store" do
     match ← config.transport.read 1 true with
     | .ok (some stored) => pure stored
@@ -1057,27 +1072,31 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
     (DurableReceiverIO.RootCache.ofEntries
       (DurableReceiverIO.entriesOf durable.image durable.snapshot durable.chain)).root.value % 7
   discard <| timedPure "open: cache injectivity check" fun _ => durable.roots.injectiveCheck
-  discard <| timedPure "open: presence index" fun _ =>
-    (PresenceIndex.ofRecords durable.image.accepted).touched.length
   let state ← timedPure "checkpoint: state (ofSnapshot)" fun _ =>
     DurableCheckpoint.State.ofSnapshot durable.image durable.snapshot
-  IO.println s!"  state cells {state.cells.length} nullifiers {state.consumed.length}"
+  IO.println s!"  state cells {state.cells.length}"
+  let frontier := durable.frontier.getD []
+  let indexRoot := Minidregg.Compiler.DurableIndex.emptyDigest
   discard <| timedPure "checkpoint: body encode" fun _ =>
-    (DurableCheckpointCodec.bodyStream.encode ⟨key.id, height, durable.chain, state⟩).length
+    (DurableCheckpointCodec.bodyStream.encode
+      ⟨key.id, height, durable.chain, frontier, indexRoot, state⟩).length
   discard <| timedPure "checkpoint: seal from the cached root (encode + MAC)" fun _ =>
     (DurableCheckpointCodec.checkpointFrame.encode
-      (DurableCheckpointCodec.sealAt key height durable.chain state durable.worldRoot)).length
+      (DurableCheckpointCodec.sealAt key height durable.chain frontier indexRoot state
+        durable.worldRoot)).length
   discard <| timedPure "checkpoint: seal with the root in full" fun _ =>
     (DurableCheckpointCodec.checkpointFrame.encode
       (DurableCheckpointCodec.sealCheckpoint key ResourceBirthCodec.rootBytes height durable.chain
-        state)).length
+        frontier indexRoot state)).length
   discard <| timedPure "checkpoint: every cell's rootBytes" fun _ =>
     durable.image.cellIds.foldl (fun acc id =>
       acc + (ResourceBirthCodec.rootBytes (durable.snapshot.canonicalBytes id)).value % 7) 0
   discard <| timedPure "checkpoint: rebase at the head" fun _ => durable.rebase.isSome
   discard <| timedPure "checkpoint: image.cellIds" fun _ => durable.image.cellIds.length
-  discard <| timedPure "checkpoint: State.snapshot at the head" fun _ =>
-    (state.snapshot ResourceBirthCodec.rootBytes durable.image.accepted).model.journal.length
+  discard <| timed "past state: Reader.stateAt (head)" do
+    match ← reader.stateAt durable.height with
+    | .ok at_ => pure at_.reads.length
+    | .error refusal => throw (IO.userError refusal.message)
   discard <| timedPure "checkpoint: resume at the head" fun _ =>
     (DurableCheckpoint.resume ResourceBirthCodec.rootBytes durable.image height state).isSome
   discard <| timedPure "checkpoint: the Admissible parts (nodup, membership)" fun _ =>
@@ -1085,67 +1104,73 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
       (state.cells.map Prod.fst).all fun id => decide (id ∈ durable.image.cellIds))
   discard <| timedPure "checkpoint: decide State.Admissible" fun _ =>
     decide (state.Admissible durable.image)
-  discard <| timed "head receipt x10" do
+  let receiptOf (transactionId : Minidregg.Theory.TypedAuthorization.Digest) :
+      IO (Option NativeHostCodec.Receipt) := do
+    match ← NativeHost.receiptByTransactionRead reader transactionId with
+    | .ok receipt => pure receipt
+    | .error refusal => throw (IO.userError refusal.detail)
+  discard <| timed "head receipt (byTx) x10" do
     let mut n := 0
-    for _ in [0:10] do
-      if let some r := durable.image.accepted.getLast? then
-        if (NativeHost.historicalReceipt config durable r.transactionId r.event.eventId).isSome then
-          n := n + 1
+    if let some r := lastRecord then
+      for _ in [0:10] do
+        if (← receiptOf r.transactionId).isSome then n := n + 1
     pure n
-  -- Session indexes (deos efficiency B): the cached enumeration and
-  -- transaction lookup beside the List functions they refine.
+  -- Session indexes (deos efficiency B): the cached cell enumeration.
   discard <| timed "cellIds (cached) x10" do
     let mut n := 0
     for _ in [0:10] do n := n + durable.cellIds.length
     pure n
-  let middle := durable.image.accepted[durable.image.accepted.length / 2]?
-  discard <| timed "middle transaction index (cached) x1000" do
+  let middle ← if durable.height = 0 then pure none else
+    match ← reader.atHeight (max 1 (durable.height / 2)) with
+    | .ok read => pure (some read.record)
+    | .error refusal => throw (IO.userError refusal.message)
+  discard <| timed "middle record Reader.atHeight x100" do
     let mut n := 0
-    if let some r := middle then
-      for _ in [0:1000] do n := n + (durable.firstIndex r.transactionId).getD 0
+    for _ in [0:100] do
+      match ← reader.atHeight (max 1 (durable.height / 2)) with
+      | .ok _ => n := n + 1
+      | .error refusal => throw (IO.userError refusal.message)
     pure n
-  discard <| timed "middle transaction index (findIdx?) x1000" do
+  discard <| timed "middle transaction Reader.byTx x1000" do
     let mut n := 0
     if let some r := middle then
-      for i in [0:1000] do
-        n := n + (durable.image.accepted.findIdx?
-          (fun record => record.transactionId == r.transactionId || i == 1000000)).getD 0
+      for _ in [0:1000] do
+        match ← reader.byTx r.transactionId with
+        | .ok (.present found) => n := n + found.height
+        | _ => pure ()
     pure n
   discard <| timed "middle receipt x1" do
     let mut n := 0
     if let some r := middle then
-      if let some receipt := NativeHost.historicalReceipt config durable r.transactionId r.event.eventId then
+      if let some receipt ← receiptOf r.transactionId then
         n := n + receipt.worldRoot.value % 7
     pure n
   discard <| timed "middle receipt x1000" do
     let mut n := 0
     if let some r := middle then
       for _ in [0:1000] do
-        if let some receipt := NativeHost.historicalReceipt config durable r.transactionId r.event.eventId then
+        if let some receipt ← receiptOf r.transactionId then
           n := n + receipt.worldRoot.value % 7
-    pure n
-  -- `Image.append`'s list snoc at this height (what `Loaded.extend` pays per
-  -- record for the in-memory log), x1000.
-  discard <| timed "image.append list snoc x1000" do
-    let mut n := 0
-    if let some r := durable.image.accepted.getLast? then
-      for i in [0:1000] do
-        n := n + ((durable.image.accepted ++ [r]).length + i) % 7
     pure n
   -- The specification root of the same prefix, evaluated in full: what every
   -- non-head receipt paid before the log kept its roots.
   discard <| timedPure "middle receipt root, specification (prefix evaluated) x1" fun _ =>
-    (NativeHost.receiptRootSpec config durable (durable.image.accepted.length / 2)).value % 7
+    (NativeHost.receiptRootSpec config durable (durable.height / 2)).value % 7
   -- Control: every kept root against its prefix's specification root, at
   -- STORE_BENCH_ROOT_STRIDE spaced heights (0 = skip).
   let stride := ((← IO.getEnv "STORE_BENCH_ROOT_STRIDE").bind String.toNat?).getD 0
   if stride > 0 then
     let mut checked := 0
     let mut differ := 0
-    let heights := durable.image.accepted.length
+    let heights := durable.height
+    let log ← NativeHost.operatorAcceptedLogOfDurable config durable
     for i in (List.range ((heights + stride - 1) / stride)).map (· * stride) do
-      if let some (some kept) := durable.rootLog[i]? then
-        let spec := NativeHost.worldRoot config ⟨durable.image.seed, durable.image.accepted.take (i + 1)⟩
+      -- The root bound into the verified log leaf at height `i + 1`.
+      match ← reader.atHeight (i + 1) with
+      | .error refusal => throw (IO.userError refusal.message)
+      | .ok read =>
+        let kept := read.verified.root
+        let spec := NativeHost.worldRoot config ⟨durable.image.seed, log.take (i + 1)⟩
         checked := checked + 1
         if kept != spec then
           differ := differ + 1
@@ -1215,7 +1240,7 @@ def sessionSetWalked {config : NativeHost.Config}
     {oldTarget : NativeHost.Durable} (old : NativeHostReplay.Verified config oldTarget)
     (readback : NativeHostReplay.ExactReadback config old) : IO Unit := do
   if let some current ← state.get then
-    state.set (some (current.rememberReadback old readback))
+    state.set (some (← current.rememberReadbackVia old readback))
 
 def sessionOpened (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config))) :
@@ -1252,9 +1277,10 @@ def sessionConfirmed (config : NativeHost.Config)
     let t0 ← IO.monoMsNow
     let opened ← sessionOpened config state
     phaseTrace "confirm refresh" t0
-    match NativeHost.historicalReceipt config opened.durable transactionId eventId with
-    | none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
-    | some receipt => return .confirmed kind receipt
+    match ← NativeHost.historicalReceiptVia config opened transactionId eventId with
+    | .error refusal => return .unavailable refusal.detail.toUTF8.toList
+    | .ok none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
+    | .ok (some receipt) => return .confirmed kind receipt
   catch error => return .uncertain s!"receipt readback: {error}".toUTF8.toList
 
 /-- The exact post-CAS branch already has the verified successor and original
@@ -1266,7 +1292,7 @@ def sessionExactConfirmed (config : NativeHost.Config)
     (readback : NativeHostReplay.ExactReadback config old)
     (receipt : NativeHostCodec.Receipt) : IO NativeHostCodec.Outcome := do
   if let some current ← state.get then
-    state.set (some (current.rememberReadback old readback))
+    state.set (some (← current.rememberReadbackVia old readback))
   return .confirmed kind receipt
 
 /-- The special receiver accepts raw strict selected-release ingress, not a
@@ -1302,10 +1328,11 @@ def selectedReleaseLookupSession (config : NativeHost.Config)
   | some (.error _) =>
       return .refused .conflict "replay".toUTF8.toList "transaction identity conflict".toUTF8.toList
   | some (.ok receipt) =>
-      match NativeHost.historicalReceipt config opened.durable
+      match ← NativeHost.historicalReceiptVia config opened
           receipt.transactionId receipt.eventId with
-      | none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
-      | some historical => return .confirmed .replayed historical
+      | .error refusal => return .unavailable refusal.detail.toUTF8.toList
+      | .ok none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
+      | .ok (some historical) => return .confirmed .replayed historical
 
 /-- A BEGIN records source-authorized pending work. Physical launch and
 completion require separate host custody and current claim validation. -/
@@ -1620,10 +1647,11 @@ def selectedSourcePublicationLookupSession (config : NativeHost.Config)
   | some (.error _) =>
       return .refused .conflict "replay".toUTF8.toList "transaction identity conflict".toUTF8.toList
   | some (.ok receipt) =>
-      match NativeHost.historicalReceipt config opened.durable
+      match ← NativeHost.historicalReceiptVia config opened
           receipt.transactionId receipt.eventId with
-      | none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
-      | some historical => return .confirmed .replayed historical
+      | .error refusal => return .unavailable refusal.detail.toUTF8.toList
+      | .ok none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
+      | .ok (some historical) => return .confirmed .replayed historical
 
 /-- An issuer's signed app delegation and a factory ticket birth are admitted
 from one verified current image. Existing exact issue receipts recover from
@@ -1664,10 +1692,11 @@ def applicationShareIssueLookupSession (config : NativeHost.Config)
       return .refused .conflict "replay".toUTF8.toList
         "transaction identity conflict".toUTF8.toList
   | some (.ok receipt) =>
-      match NativeHost.historicalReceipt config opened.durable
+      match ← NativeHost.historicalReceiptVia config opened
           receipt.transactionId receipt.eventId with
-      | none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
-      | some historical => return .confirmed .replayed historical
+      | .error refusal => return .unavailable refusal.detail.toUTF8.toList
+      | .ok none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
+      | .ok (some historical) => return .confirmed .replayed historical
 
 /-- Grain-backed issue is a distinct event-22 write. Its receiver combines
 the grain birth and app delegation in one native CAS. Historical lookup is
@@ -1941,45 +1970,20 @@ def authorHost (config : NativeHost.Config)
     ApplicationStreamContinuityInspection.authorRequest source
   else Minidregg.Host.Json.author kind source (some config) providerRoutes
 
-/-- The live protocol keeps exact source-owned authoring and inspection in
-memory, while every state-dependent operation refreshes the verified tip. -/
-def dispatchSession (config : NativeHost.Config)
-    (state : IO.Ref (Option (NativeHostSession.Session config)))
-    (meteringProfile : Lean.Json)
+/-- The inspect kinds that read the admitted history (`sessionWalked`): session
+frames, never codec frames. -/
+def sessionInspectKind (kind : String) : Bool :=
+  kind == "object-audience" || kind == "object-audience-roster"
+
+/-- The pure codec frames: 7 author, 8 inspect, 9 signatures, 10 observation
+assembly, 11 plan assembly. Each is a function of the frame and the
+configuration and reads no Store. This is the ONE implementation: the Host
+session answers these frames with it, and so does the storeless `codec` loop
+(`serveCodec`), which is every client's local codec authority. -/
+def pureCodec (config : NativeHost.Config)
     (providerRoutes : List (Nat × Kernel.ProviderMetering.Schedule))
-    (fnDispatch : UInt8 → List UInt8 → IO (UInt8 × List UInt8))
     (operation : UInt8) (payload : List UInt8) : IO (UInt8 × List UInt8) := do
   match operation with
-  | 0 =>
-      unless payload.isEmpty do throw (RequestRefusal.malformed "describe does not accept a payload")
-      discard <| sessionOpened config state
-      return (0, (descriptionLoaded config).compress.toUTF8.toList)
-  | 1 =>
-      let t0 ← IO.monoMsNow
-      let opened ← sessionOpened config state
-      phaseTrace "op1 refresh" t0
-      match ← NativeHost.prepareAuthorizedLoaded config opened payload with
-      | .ok plan => return (1, signingPlanCodec.encode plan)
-      | .error detail => return (255, refusalFrame "prepare" detail)
-  | 2 | 3 => fnDispatch operation payload
-  | 4 =>
-      let opened ← sessionOpened config state
-      ReceiptContinuity.remember config opened.durable
-      match ← NativeHost.challengeWireLoaded config opened payload with
-      | .ok challenges => return (4, challenges)
-      | .error detail => return (255, refusalFrame "observation" detail)
-  | 5 =>
-      let t0 ← IO.monoMsNow
-      let current ← sessionCurrent config state
-      let opened := current.opened
-      ReceiptContinuity.remember config opened.durable
-      phaseTrace "op5 refresh" t0
-      match ← NativeObservationOpeningCache.queryWireLoaded config opened current.openingCache payload with
-      | .ok view => return (5, view)
-      | .error detail => return (255, refusalFrame "observation" detail)
-  | 6 =>
-      unless payload.isEmpty do throw (RequestRefusal.malformed "profile does not accept a payload")
-      return (6, meteringProfile.compress.toUTF8.toList)
   | 7 =>
       let (kind, source) ← splitKind payload
       let some text := String.fromUTF8? source.toByteArray
@@ -1991,27 +1995,11 @@ def dispatchSession (config : NativeHost.Config)
       return (7, ← RequestRefusal.clientBytes (authorHost config providerRoutes kind value))
   | 8 =>
       let (kind, source) ← splitKind payload
-      if kind == "object-audience" then
-        let walked ← sessionWalked config state
-        match ← NativeHost.objectAudienceLoaded config walked.target walked.verified source with
-        | .ok view => return (8, (objectAudienceJson view).compress.toUTF8.toList)
-        | .error reason => return (255, refusalFrame "object-audience" reason)
+      if sessionInspectKind kind then
+        throw (RequestRefusal.malformed s!"inspect {kind} reads the admitted history; it is a session frame, not a codec frame")
       else if kind == "object-roster-inspect" then
         let value ← RequestRefusal.clientBytes (objectRosterJson source)
         return (8, value.compress.toUTF8.toList)
-      else if kind == "object-audience-roster" then
-        -- Fixed nested pairs carry bytes only, never service-side file paths.
-        let (sourceObservation, rest) ← splitPair source
-        let (catalogObservation, rest) ← splitPair rest
-        let (plannedBytes, rosterBytes) ← splitPair rest
-        let some plannedText := String.fromUTF8? plannedBytes.toByteArray
-          | throw (RequestRefusal.malformed "object audience state is not UTF-8")
-        let plannedJson ← RequestRefusal.clientBytes (Minidregg.Host.Json.parse plannedText)
-        let planned ← RequestRefusal.clientBytes (Minidregg.Host.Json.audienceState "$" plannedJson)
-        let walked ← sessionWalked config state
-        let (audience, roster) ← IO.ofExcept (← NativeHost.objectAudienceRosterLoaded config
-          walked.target walked.verified sourceObservation catalogObservation rosterBytes planned)
-        return (8, (checkedObjectRosterJson audience roster rosterBytes).compress.toUTF8.toList)
       else
         let value ← RequestRefusal.clientBytes (if kind == "pay-claim-plan" then
           Minidregg.Host.PayClaims.claimPlanJson source
@@ -2038,13 +2026,76 @@ def dispatchSession (config : NativeHost.Config)
       let signatures ← decodeSignatures signaturesBytes
       let call ← RequestRefusal.clientBytes (NativeHost.assemble plan signatures)
       return (11, callCodec.encode call)
+  | _ => throw (RequestRefusal.malformed "not a pure codec operation")
+
+/-- The live protocol keeps exact source-owned authoring and inspection in
+memory, while every state-dependent operation refreshes the verified tip. -/
+def dispatchSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (meteringProfile : Lean.Json)
+    (providerRoutes : List (Nat × Kernel.ProviderMetering.Schedule))
+    (fnDispatch : UInt8 → List UInt8 → IO (UInt8 × List UInt8))
+    (operation : UInt8) (payload : List UInt8) : IO (UInt8 × List UInt8) := do
+  match operation with
+  | 0 =>
+      unless payload.isEmpty do throw (RequestRefusal.malformed "describe does not accept a payload")
+      discard <| sessionOpened config state
+      return (0, (descriptionLoaded config).compress.toUTF8.toList)
+  | 1 =>
+      let t0 ← IO.monoMsNow
+      let session ← sessionCurrent config state
+      phaseTrace "op1 refresh" t0
+      match ← NativeHost.prepareAuthorizedLoaded config session.opened session.light payload with
+      | .ok plan => return (1, signingPlanCodec.encode plan)
+      | .error detail => return (255, refusalFrame "prepare" detail)
+  | 2 | 3 => fnDispatch operation payload
+  | 4 =>
+      let opened ← sessionOpened config state
+      ReceiptContinuity.remember config opened.durable
+      match ← NativeHost.challengeWireLoaded config opened payload with
+      | .ok challenges => return (4, challenges)
+      | .error detail => return (255, refusalFrame "observation" detail)
+  | 5 =>
+      let t0 ← IO.monoMsNow
+      let current ← sessionCurrent config state
+      let opened := current.opened
+      ReceiptContinuity.remember config opened.durable
+      phaseTrace "op5 refresh" t0
+      match ← NativeObservationOpeningCache.queryWireLoaded config opened current.openingCache payload with
+      | .ok view => return (5, view)
+      | .error detail => return (255, refusalFrame "observation" detail)
+  | 6 =>
+      unless payload.isEmpty do throw (RequestRefusal.malformed "profile does not accept a payload")
+      return (6, meteringProfile.compress.toUTF8.toList)
+  | 7 | 9 | 10 | 11 => pureCodec config providerRoutes operation payload
+  | 8 =>
+      let (kind, source) ← splitKind payload
+      if kind == "object-audience" then
+        let walked ← sessionWalked config state
+        match ← NativeHost.objectAudienceLoaded config walked.target walked.verified source with
+        | .ok view => return (8, (objectAudienceJson view).compress.toUTF8.toList)
+        | .error reason => return (255, refusalFrame "object-audience" reason)
+      else if kind == "object-audience-roster" then
+        -- Fixed nested pairs carry bytes only, never service-side file paths.
+        let (sourceObservation, rest) ← splitPair source
+        let (catalogObservation, rest) ← splitPair rest
+        let (plannedBytes, rosterBytes) ← splitPair rest
+        let some plannedText := String.fromUTF8? plannedBytes.toByteArray
+          | throw (RequestRefusal.malformed "object audience state is not UTF-8")
+        let plannedJson ← RequestRefusal.clientBytes (Minidregg.Host.Json.parse plannedText)
+        let planned ← RequestRefusal.clientBytes (Minidregg.Host.Json.audienceState "$" plannedJson)
+        let walked ← sessionWalked config state
+        let (audience, roster) ← IO.ofExcept (← NativeHost.objectAudienceRosterLoaded config
+          walked.target walked.verified sourceObservation catalogObservation rosterBytes planned)
+        return (8, (checkedObjectRosterJson audience roster rosterBytes).compress.toUTF8.toList)
+      else pureCodec config providerRoutes 8 payload
   | 130 =>
       -- Dry run (P-AFFORDANCES): plan as op 1, assemble as op 11, submit as op 2
       -- over a Store writer that never appends (`Host.DryRun`). Commits nothing.
       let (observation, signaturesBytes) ← splitPair payload
       let signatures ← decodeSignatures signaturesBytes
       let session ← sessionCurrent config state
-      match ← DryRun.dryRunLoaded config session.opened observation signatures with
+      match ← DryRun.dryRunLoaded config session.opened session.light observation signatures with
       | .admitted plan => return (130, signingPlanCodec.encode plan)
       | .stopped outcome => return (255, outcomeCodec.encode outcome)
   | 150 =>
@@ -2619,6 +2670,32 @@ partial def serveSession (config : NativeHost.Config)
       serveFrame config state meteringProfile providerRoutes fnDispatch applicationDispatch operation payload.toList output
   serveSession config state meteringProfile providerRoutes fnDispatch applicationDispatch input output
 
+/-- The storeless codec loop (`minidregg-host CONFIG codec`): answers only the
+pure codec frames (`pureCodec`) and never opens, admits or reads a Store. A
+client without a Store (a member's own machine reaching the Host through
+`mini --remote`) and a client with one use it alike. Any other frame refuses. -/
+partial def serveCodec (config : NativeHost.Config)
+    (providerRoutes : List (Nat × Kernel.ProviderMetering.Schedule))
+    (input output : IO.FS.Stream) : IO Unit := do
+  let first ← input.read 1
+  if first.isEmpty then return
+  let lengthWire ← readExactly input 4 first
+  let length := frameLength lengthWire
+  if length == 0 then
+    writeSessionFrame output 255 (RequestRefusal.frame 255
+      (RequestRefusal.malformed "empty native codec frame"))
+  else if length > maxFrame then
+    discardExactly input length
+    writeSessionFrame output 255 (RequestRefusal.frame 255
+      (RequestRefusal.malformed "native codec frame exceeds frame bound"))
+  else
+    let body ← readExactly input length
+    let operation := body[0]!
+    let answer ← try pureCodec config providerRoutes operation (body.toList.drop 1)
+      catch error => pure (255, RequestRefusal.frame operation error)
+    writeSessionFrame output answer.1 answer.2
+  serveCodec config providerRoutes input output
+
 /-- Execute from one private copy throughout this stdio process. The copy is
 the pinned launch artifact; the originally configured pathname may later be
 replaced or have a symlink target swapped without changing the session's
@@ -3036,6 +3113,11 @@ structure FnPollScopePin where
   queryVersion : Nat
   viewVersion : Nat
   registrationEpoch : Nat
+  /-- The genesis node identity of the fn store (`fn identity`'s `node`, 32 octets as lowercase
+  hex): re-genesis of the store changes it. -/
+  node : String
+  /-- The store's schema digest (`fn identity`'s `schema`, 32 octets as lowercase hex). -/
+  schema : String
   deriving FromJson
 
 def decodeCanonicalHex (label value : String) : Except String (List UInt8) := do
@@ -3155,6 +3237,20 @@ def FnPollScopePin.check (pin : FnPollScopePin)
       projection.registrationEpoch == pin.registrationEpoch do
     throw "fn poll cursor differs from independently pinned consumer scope"
 
+/-- The identity fn's running owner reports must be the pinned store: node, schema, consumer
+history and incarnation equal the pin's, and the wire-grammar file the image renders is the
+file Mini interprets (`FnWire.pinnedDigest`). Each failure is refused by name. -/
+def FnPollScopePin.checkIdentity (pin : FnPollScopePin) (identity : FnWire.Identity) :
+    Except String Unit := do
+  let node ← decodeCanonicalHex "pinned fn node" pin.node
+  let schema ← decodeCanonicalHex "pinned fn schema" pin.schema
+  let history ← decodeCanonicalHex "pinned fn history" pin.history
+  let incarnation ← decodeCanonicalHex "pinned fn incarnation" pin.incarnation
+  match identity.check node schema history incarnation with
+  | .ok _ => pure ()
+  | .error refusal =>
+      throw s!"fn identity differs from the pinned store ({refusal.word}); the grammar digest must be {FnWire.pinnedDigest}"
+
 def FnPollScopePin.progressScope (pin : FnPollScopePin) :
     Except String FnConsumerProgress.Scope := do
   return ⟨← decodeCanonicalHex "pinned fn history" pin.history,
@@ -3164,30 +3260,20 @@ def FnPollScopePin.progressScope (pin : FnPollScopePin) :
     ← decodeCanonicalHex "pinned fn query" pin.query,
     pin.queryVersion, pin.viewVersion, pin.registrationEpoch⟩
 
-def exactNamedDecimal (name field : String) : Except String Nat := do
-  let [label, value] := field.splitOn "="
-    | throw s!"fn {name} field has unexpected framing"
-  unless label == name do throw s!"fn {name} field has unexpected label"
-  exactDecimal name value
-
 structure FnConsumerStatus where
   committedAck : Nat
   frontier : Nat
   distance : Nat
 
-def parseFnConsumerStatus (output : String) : Except String FnConsumerStatus := do
-  let [line, ""] := output.splitOn "\n"
-    | throw "fn consumer status has unexpected framing"
-  let ["consumer", "status", "accepted", ack, frontier, distance] :=
-      line.splitOn " "
-    | throw "fn consumer status has unexpected fields"
-  let committedAck ← exactNamedDecimal "committed-ack" ack
-  let frontier ← exactNamedDecimal "committed-journal-frontier" frontier
-  let distance ← exactNamedDecimal "journal-event-distance" distance
-  unless committedAck ≤ frontier && distance == frontier - committedAck &&
-      frontier ≤ 4294967295 do
-    throw "fn consumer status has invalid positions"
-  return ⟨committedAck, frontier, distance⟩
+/-- A `consumer --frame status` answer: the frame is fn's `fnct.consumer.status-reply` (or a
+reasoned refusal), read by the grammar interpreter; its `where` already pins
+`committed-ack ≤ frontier` and `distance = frontier − committed-ack`, and the u32 fields bound
+the frontier. Only an accepted reply is a status. -/
+def parseFnConsumerStatus (output : List UInt8) : Except String FnConsumerStatus :=
+  match FnWire.readStatusReply output with
+  | .ok (.accepted committedAck frontier distance) => .ok ⟨committedAck, frontier, distance⟩
+  | .ok _ => .error "fn consumer status is not an accepted status reply"
+  | .error refusal => .error s!"fn consumer status frame refused: {refusal.fnWord}"
 
 def projectFnPoll (fnBinary : String) (pin : FnPollScopePin)
     (cursorPath reportPath : String) : IO (List UInt8 × List UInt8 × FnPollProjection) := do
@@ -3255,11 +3341,25 @@ def runFnLocal (fnBinary : String) (args : Array String) (stdoutBound : Nat) :
     | .error error => throw error
   return (exitCode.toNat, output, stderrBytes)
 
-/-- The refusal names fn's outcome class and reason word (`Host.FnOutcome`):
-refused, uncertain, fault, usage and the transport classes stay distinct. -/
-def fnLocalRefusal (verb : String) (exitCode : Nat) (output : List UInt8)
+/-- An fn without `--frame` (the production image, fn d420a2b5) answers a `--frame` verb with a
+usage refusal (exit 5) and prints no frame. Mini requires `--frame` on identity, status, position,
+ack and poll (`protocol/fn/images.json`), so that answer is refused by this name, never reported
+as an unreadable frame. -/
+def fnFrameUnsupported (exitCode : Nat) (output : List UInt8) : Bool :=
+  match FnOutcome.classify exitCode with
+  | some .usage => (FnWire.frameOfStdout output).isNone
+  | _ => false
+
+def fnNoFrameError (verb : String) : IO.Error :=
+  IO.userError s!"fn {verb}: this fn has no --frame (it refused the flag as usage, exit 5); Mini requires an fn with --frame on identity, status, position, ack and poll (fn 6679dae0e or later, protocol/fn/images.json)"
+
+/-- The refusal of a `--frame` verb names fn's outcome class and the reason read from the printed
+frame (`Host.FnOutcome`): refused, uncertain, fault, usage and the transport classes stay
+distinct; an fn without `--frame` is named as such (`fnNoFrameError`). -/
+def fnLocalFrameRefusal (verb : String) (exitCode : Nat) (output : List UInt8)
     (stderrBytes : ByteArray) : IO.Error :=
-  IO.userError s!"{FnOutcome.describe verb exitCode output} (stderrPrefixBytes={stderrBytes.size})"
+  if fnFrameUnsupported exitCode output then fnNoFrameError verb else
+  IO.userError s!"{FnOutcome.describe verb exitCode (FnOutcome.frameReason output)} (stderrPrefixBytes={stderrBytes.size})"
 
 def fnConsumerAscii (scope : FnPollScopePin) : IO String := do
   let consumer ← IO.ofExcept (decodeCanonicalHex "pinned fn consumer" scope.consumer)
@@ -3268,14 +3368,39 @@ def fnConsumerAscii (scope : FnPollScopePin) : IO String := do
     throw (IO.userError "pinned fn consumer is outside local CLI ASCII profile")
   pure (String.fromUTF8! consumer.toByteArray)
 
+/-- `fn identity --frame CONTROL`: the owner's `fnct.store-identity.reply`, read by the pinned
+interpreter. A refusal by name, an unreadable frame and a non-zero exit are each refused. -/
+def queryFnIdentity (fnBinary : String) (controlPath : String) : IO FnWire.Identity := do
+  unless controlPath.startsWith "/" do
+    throw (IO.userError "fn identity control must be absolute")
+  let (exitCode, output, stderrBytes) ← runFnLocal fnBinary
+    #["--fn", "identity", "--frame", controlPath] (FnWire.maxFrameLine 2048)
+  match FnWire.readIdentityReply output with
+  | .ok (.accepted identity) =>
+      unless exitCode == 0 do
+        throw (IO.userError s!"fn identity answered an identity with exit {exitCode}")
+      pure identity
+  | .ok (.refused word) =>
+      throw (IO.userError s!"fn identity refused ({word}) (exit {exitCode}, stderrPrefixBytes={stderrBytes.size})")
+  | .error refusal =>
+      if fnFrameUnsupported exitCode output then throw (fnNoFrameError "identity")
+      throw (IO.userError s!"fn identity frame refused: {refusal.fnWord} (exit {exitCode}, stderrPrefixBytes={stderrBytes.size})")
+
+/-- The running owner is the pinned store, before anything is asked of it. -/
+def verifyFnIdentity (fnBinary : String) (scope : FnPollScopePin) (controlPath : String) :
+    IO Unit := do
+  let identity ← queryFnIdentity fnBinary controlPath
+  IO.ofExcept (scope.checkIdentity identity)
+
 def queryFnConsumerStatus (fnBinary : String) (scope : FnPollScopePin)
     (controlPath : String) : IO FnConsumerStatus := do
+  verifyFnIdentity fnBinary scope controlPath
   let consumer ← fnConsumerAscii scope
   let (exitCode, output, stderrBytes) ← runFnLocal fnBinary
-    #["--fn", "consumer", "status", controlPath, consumer] 256
-  unless exitCode == 0 && output.all (fun byte => byte.toNat < 128) do
-    throw (fnLocalRefusal "local consumer status" exitCode output stderrBytes)
-  IO.ofExcept (parseFnConsumerStatus (String.fromUTF8! output.toByteArray))
+    #["--fn", "consumer", "--frame", "status", controlPath, consumer] (FnWire.maxFrameLine 13)
+  unless exitCode == 0 do
+    throw (fnLocalFrameRefusal "local consumer status" exitCode output stderrBytes)
+  IO.ofExcept (parseFnConsumerStatus output)
 
 /-- The scope and position of an `fncu` cursor file, read by Mini's own interpreter at fn's
 exported `fncu.cursor` grammar (`Compiler.FnWireFncu`; the grammar is fn's, pinned with its
@@ -3303,9 +3428,17 @@ def queryFnConsumerPosition (fnBinary : String) (scope : FnPollScopePin)
     let path := (directory / "current-position.fncu").toString
     let consumer ← fnConsumerAscii scope
     let (exitCode, output, stderrBytes) ← runFnLocal fnBinary
-      #["--fn", "consumer", "position", controlPath, consumer, path] 128
-    unless exitCode == 0 && output == "consumer accepted\n".toUTF8.toList do
-      throw (fnLocalRefusal "current consumer position" exitCode output stderrBytes)
+      #["--fn", "consumer", "--frame", "position", controlPath, consumer, path]
+      (FnWire.maxFrameLine 513)
+    unless exitCode == 0 do
+      throw (fnLocalFrameRefusal "current consumer position" exitCode output stderrBytes)
+    -- The frame fn printed is an accepted consumer reply; when it carries a cursor, the cursor
+    -- is the one it wrote to the file (checked below), not merely a file of the right shape.
+    let frameCursor ← match FnWire.readConsumerReply output with
+      | .ok (.accepted cursor) => pure cursor
+      | .ok _ => throw (fnLocalFrameRefusal "current consumer position" exitCode output stderrBytes)
+      | .error refusal =>
+          throw (IO.userError s!"fn current position frame refused: {refusal.fnWord}")
     let cursor ← readBoundedBytes path 346
     unless !cursor.isEmpty do
       throw (IO.userError "fn current position returned no cursor")
@@ -3314,14 +3447,59 @@ def queryFnConsumerPosition (fnBinary : String) (scope : FnPollScopePin)
     unless inspectedScope == selectedScope &&
         cursor == (← readBoundedBytes path 346) do
       throw (IO.userError "fn current position scope or cursor changed")
+    if let some (frameScope, framePosition) := frameCursor then
+      unless frameScope == inspectedScope && framePosition == position do
+        throw (IO.userError "fn current position frame differs from the cursor file")
     let status ← queryFnConsumerStatus fnBinary scope controlPath
     unless status.committedAck ≥ position do
       throw (IO.userError "fn current position exceeds fenced durable ACK")
     return (position, status)
 
+/-- The longest stdout of `consumer --frame poll`: an accepted reply's cursor (behind its 4-octet
+length), its record (behind its 4-octet length, at most the bounded Store poll event) and the
+frame header, as hex plus the newline. -/
+def fnPollFramePayloadMax : Nat :=
+  8 + FnWire.maxCursorOctets + FnEvidenceCodec.maxStorePollEventBytes
+
+/-- `fn consumer --frame poll`: fn prints its `fnct.consumer.poll-reply` and still writes the report
+file and then the cursor file. An accepted poll is admitted only when the frame's cursor is the
+cursor file's (scope and position, each read by the pinned interpreter; an accepted cursor is
+canonical, `FnWire.decodeCursor_canonical`) and the frame's record is the report file's octets.
+fn proves that agreement for the frames its encoder produces; it is checked here on every poll
+(fn's proof for arbitrary decoded octets is owed, PROOF-OWED-POLL-REPLY-DECODE-AGREES), and a
+difference is refused by name, never resolved toward either side. Returns the cursor and report
+octets. -/
+def runFnConsumerPollFrame (fnBinary : String) (scope : FnPollScopePin)
+    (controlPath cursorPath reportPath : String) : IO (List UInt8 × List UInt8) := do
+  verifyFnIdentity fnBinary scope controlPath
+  let consumer ← fnConsumerAscii scope
+  let (exitCode, output, stderrBytes) ← runFnLocal fnBinary
+    #["--fn", "consumer", "--frame", "poll", controlPath, consumer, cursorPath, reportPath]
+    (FnWire.maxFrameLine fnPollFramePayloadMax)
+  let (frameCursor, record) ← match FnWire.readPollReply (FnWire.frameBound fnPollFramePayloadMax) output with
+    | .ok (.accepted cursor record) =>
+        unless exitCode == 0 do
+          throw (IO.userError s!"fn poll answered an accepted frame with exit {exitCode}")
+        pure (cursor, record)
+    | .ok _ => throw (fnLocalFrameRefusal "authenticated local consumer poll" exitCode output stderrBytes)
+    | .error refusal =>
+        if fnFrameUnsupported exitCode output then throw (fnNoFrameError "consumer poll")
+        throw (IO.userError s!"fn poll frame refused: {refusal.fnWord} (exit {exitCode}, stderrPrefixBytes={stderrBytes.size})")
+  let cursor ← readBoundedBytes cursorPath FnWire.maxCursorOctets
+  let event ← readBoundedBytes reportPath FnEvidenceCodec.maxStorePollEventBytes
+  unless !cursor.isEmpty do
+    throw (IO.userError "accepted fn poll did not produce a cursor")
+  let fileCursor ← inspectFnConsumerCursor cursorPath
+  unless fileCursor == frameCursor do
+    throw (IO.userError "fn poll frame cursor differs from the cursor file")
+  unless record == event do
+    throw (IO.userError "fn poll frame record differs from the report file")
+  return (cursor, event)
+
 /-- One authenticated local poll, before choosing the article or empty-page
-branch. The cursor is written last by fn; requiring both files and the exact
-accepted line excludes partial or uncertain output from progress admission. -/
+branch. The cursor is written last by fn; requiring both files, an accepted poll-reply frame and
+their agreement (`runFnConsumerPollFrame`) excludes partial or uncertain output from progress
+admission. -/
 def invokeFnConsumerPollRaw (fnBinary : String) (scope : FnPollScopePin)
     (controlPath cursorPath reportPath : String) : IO (List UInt8 × List UInt8) := do
   unless [controlPath, cursorPath, reportPath].all (·.startsWith "/") &&
@@ -3330,16 +3508,7 @@ def invokeFnConsumerPollRaw (fnBinary : String) (scope : FnPollScopePin)
   for path in [cursorPath, reportPath] do
     if ← (System.FilePath.mk path).pathExists then
       throw (IO.userError "fn poll output path already exists")
-  let consumer ← fnConsumerAscii scope
-  let (exitCode, output, stderrBytes) ← runFnLocal fnBinary
-    #["--fn", "consumer", "poll", controlPath, consumer, cursorPath, reportPath] 512
-  unless exitCode == 0 && output == "consumer accepted\n".toUTF8.toList do
-    throw (fnLocalRefusal "authenticated local consumer poll" exitCode output stderrBytes)
-  let cursor ← readBoundedBytes cursorPath 346
-  let event ← readBoundedBytes reportPath FnEvidenceCodec.maxStorePollEventBytes
-  unless !cursor.isEmpty do
-    throw (IO.userError "accepted fn poll did not produce a cursor")
-  return (cursor, event)
+  runFnConsumerPollFrame fnBinary scope controlPath cursorPath reportPath
 
 /-- `none` is genuine idle at the current frontier; `some` is an observed
 bounded empty page that can be recorded and ACKed after Mini admission. -/
@@ -3387,11 +3556,7 @@ def invokeFnConsumerPoll (fnBinary : String) (scope : FnPollScopePin)
   for path in [cursorPath, reportPath, carrierPath] do
     if ← (System.FilePath.mk path).pathExists then
       throw (IO.userError "fn poll output path already exists")
-  let consumer ← fnConsumerAscii scope
-  let (exitCode, output, stderrBytes) ← runFnLocal fnBinary
-    #["--fn", "consumer", "poll", controlPath, consumer, cursorPath, reportPath] 512
-  unless exitCode == 0 && output == "consumer accepted\n".toUTF8.toList do
-    throw (fnLocalRefusal "authenticated local consumer poll" exitCode output stderrBytes)
+  discard <| runFnConsumerPollFrame fnBinary scope controlPath cursorPath reportPath
   let (cursor, event, projected) ←
     projectFnPoll fnBinary scope cursorPath reportPath
   IO.FS.writeBinFile carrierPath projected.received.toByteArray
@@ -3640,8 +3805,10 @@ def exportConsumerInbox (config : NativeHost.Config) (transactionId : Nat) :
   let opened ← match ← NativeHost.openExisting config with
     | .ok opened => pure opened
     | .error detail => return .error detail
-  let some record := opened.durable.image.accepted.find?
-      (fun entry => entry.transactionId.value == transactionId)
+  let found ← match ← NativeHost.acceptedRecordE config opened ⟨transactionId⟩ with
+    | .error refusal => return .error refusal.detail
+    | .ok found => pure found
+  let some record := found
     | return .error "exact Mini consumer transaction is absent"
   match FnConsumerOperation.originalBindingWithInbox gateway config.deployment.domain
       config.profile.semantics record with
@@ -3673,8 +3840,10 @@ def exportConsumerPoll (config : NativeHost.Config) (transactionId : Nat) :
   let opened ← match ← NativeHost.openExisting config with
     | .ok opened => pure opened
     | .error detail => return .error detail
-  let some record := opened.durable.image.accepted.find?
-      (fun entry => entry.transactionId.value == transactionId)
+  let found ← match ← NativeHost.acceptedRecordE config opened ⟨transactionId⟩ with
+    | .error refusal => return .error refusal.detail
+    | .ok found => pure found
+  let some record := found
     | return .error "exact Mini consumer transaction is absent"
   match FnConsumerOperation.originalBindingWithInbox gateway config.deployment.domain
       config.profile.semantics record with
@@ -3823,16 +3992,21 @@ def carriedContinuitySession (config : NativeHost.Config)
 itself is the authorized anchor; ordinary later records come from real replay. -/
 def carriedReceipt (config : NativeHost.Config) (session : CarriedNativeHostSession.Walked config)
     (transactionId eventId : Minidregg.Theory.TypedAuthorization.Digest) :
-    Option NativeHostCodec.Receipt := do
-  let index ← session.verified.opened.durable.image.accepted.findIdx?
-    (fun record => record.transactionId == transactionId)
-  let record ← session.verified.opened.durable.image.accepted[index]?
-  if record.event.eventId != eventId then none else do
-    if index + 1 == session.anchor.durable.height then
-      let origin ← session.verified.origin
-      if transactionId != origin.edge.body.id || eventId != origin.edge.body.id then none else
-      some ⟨transactionId, eventId, index + 1, session.anchor.durable.worldRoot⟩
-    else session.verified.receiptAt index
+    IO (Option NativeHostCodec.Receipt) := do
+  let ⟨_, reader⟩ ← match ← NativeHost.historyReaderOfDurable config session.target with
+    | .ok reader => pure reader
+    | .error refusal => throw (IO.userError refusal.detail)
+  match ← reader.byTx transactionId with
+  | .error refusal => throw (IO.userError refusal.message)
+  | .ok (.absent _) => return none
+  | .ok (.present found) =>
+      let index := found.height - 1
+      if found.read.record.event.eventId != eventId then return none
+      if index + 1 == session.anchor.durable.height then
+        let some origin := session.verified.origin | return none
+        if transactionId != origin.edge.body.id || eventId != origin.edge.body.id then return none
+        return some ⟨transactionId, eventId, index + 1, session.anchor.durable.worldRoot⟩
+      else return session.verified.receiptAt index
 
 /-- Old exact recovery precedes any target submission. A retained original is
 never submitted again, and target confirmation is reselected under its actual
@@ -3852,10 +4026,11 @@ def carriedOrdinaryCall (config : NativeHost.Config)
   let some call := callCodec.decode payload
     | return .refused .malformed "wire".toUTF8.toList "noncanonical native host call".toUTF8.toList
   let outcome ← if submit then do
-    let result ← NativeHost.submitDisclosedWith config session.verified.opened call
+    let light := (← sessionCurrent config state).light
+    let result ← NativeHost.submitDisclosedWith config session.verified.opened light call
       (fun kind transaction event => do
         let current ← sessionCarriedWalked config state carried settings
-        match carriedReceipt config current transaction event with
+        match ← carriedReceipt config current transaction event with
         | some receipt => return .confirmed kind receipt
         | none => return .uncertain "original receipt belongs to retained profile".toUTF8.toList)
     NativeHost.logOperatorRefusal result.1
@@ -3864,7 +4039,7 @@ def carriedOrdinaryCall (config : NativeHost.Config)
   match outcome with
   | .confirmed kind candidate =>
       let current ← sessionCarriedWalked config state carried settings
-      match carriedReceipt config current candidate.transactionId candidate.eventId with
+      match ← carriedReceipt config current candidate.transactionId candidate.eventId with
       | some receipt => return .confirmed kind receipt
       | none => return .uncertain "original receipt belongs to retained profile".toUTF8.toList
   | other => return other
@@ -3971,7 +4146,7 @@ def selectedFnScope (scopePath : String) : IO FnPollScopePin := do
   let json ← IO.ofExcept (Minidregg.Host.Json.parse source)
   IO.ofExcept (requireExactFields "fn selected-release scope"
     ["history", "incarnation", "consumer", "principal", "query",
-     "queryVersion", "viewVersion", "registrationEpoch"] json)
+     "queryVersion", "viewVersion", "registrationEpoch", "node", "schema"] json)
   IO.ofExcept (fromJson? json)
 
 /-- The registration author uses only lifetime-pinned operator manifests and
@@ -4068,9 +4243,9 @@ def fnFrontierPrepareSession (config : NativeHost.Config)
             projection.sequence + 1 == projection.position &&
             projection.position ≤ cursor.position + FnConsumerScope.maxPollScan do
           throw (IO.userError "selected fn poll is outside authenticated scan window")
-        let original ← IO.ofExcept <| FnSelectiveReleaseFnAck.selectOriginal
+        let original ← IO.ofExcept (← FnSelectiveReleaseFnAck.selectOriginal
           config session.target session.verified transaction
-          projection.source projection.messageId
+          projection.source projection.messageId)
         sourceBytes := projection.source
         selected := some
           { domain := config.deployment.domain
@@ -4291,12 +4466,16 @@ def selectedReleaseFnAck (config : NativeHost.Config) (service : FnPollService)
     let (cursor, report, projection) ← projectFnPoll executable scope cursorPath reportPath
     let target ← IO.ofExcept (← DurableReceiverIO.load config.transport
       ResourceBirthCodec.rootBytes)
-    let verified ← match ← NativeHostReplay.verifyLoaded config target with
+    let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf config.transport
+        ResourceBirthCodec.rootBytes target with
+      | .ok reader => pure reader
+      | .error detail => throw (IO.userError s!"selected-release Mini history reader: {detail}")
+    let verified ← match ← NativeHostReplay.verifyLoaded config reader target with
       | .ok verified => pure verified
       | .error failure =>
           throw (IO.userError s!"selected-release Mini history refused at {failure.index}: {failure.detail}")
-    let selected ← IO.ofExcept <| FnSelectiveReleaseFnAck.selectOriginal config
-      target verified transactionId projection.source projection.messageId
+    let selected ← IO.ofExcept (← FnSelectiveReleaseFnAck.selectOriginal config
+      target verified transactionId projection.source projection.messageId)
     let coverageBytes ← readBoundedBytes coveragePath 16384
     let some coverage := FnSelectedPollCoverage.ingressCodec.decode coverageBytes
       | throw (IO.userError "selected-release fn ACK lacks canonical event17 ingress")
@@ -4338,9 +4517,9 @@ def selectedReleaseFnAck (config : NativeHost.Config) (service : FnPollService)
       unless cursor == liveCursor && sameBytes report liveReport do
         throw (IO.userError "selected-release fn ACK poll differs from retained event")
       let child ← IO.Process.spawn
-        { cmd := executable, args := #["--fn", "consumer", "ack", controlPath, liveCursorPath],
+        { cmd := executable, args := #["--fn", "consumer", "--frame", "ack", controlPath, liveCursorPath],
           stdin := .null, stdout := .piped, stderr := .null }
-      let output ← try readBoundedLoop child.stdout 128
+      let output ← try readBoundedLoop child.stdout (FnWire.maxFrameLine 513)
         catch error =>
           child.kill
           discard <| child.wait
@@ -4399,7 +4578,11 @@ def selectedEmptyFnAck (config : NativeHost.Config) (service : FnPollService)
       throw (IO.userError "empty fn ACK cursor differs from pinned scope")
     let target ← IO.ofExcept (← DurableReceiverIO.load config.transport
       ResourceBirthCodec.rootBytes)
-    let verified ← match ← NativeHostReplay.verifyLoaded config target with
+    let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf config.transport
+        ResourceBirthCodec.rootBytes target with
+      | .ok reader => pure reader
+      | .error detail => throw (IO.userError s!"empty fn Mini history reader: {detail}")
+    let verified ← match ← NativeHostReplay.verifyLoaded config reader target with
       | .ok verified => pure verified
       | .error failure =>
           throw (IO.userError s!"empty fn Mini history refused at {failure.index}: {failure.detail}")
@@ -4437,9 +4620,9 @@ def selectedEmptyFnAck (config : NativeHost.Config) (service : FnPollService)
       unless cursor == liveCursor && report == liveReport && liveReport.isEmpty do
         throw (IO.userError "empty fn ACK poll differs from retained page")
       let child ← IO.Process.spawn
-        { cmd := executable, args := #["--fn", "consumer", "ack", controlPath, liveCursorPath],
+        { cmd := executable, args := #["--fn", "consumer", "--frame", "ack", controlPath, liveCursorPath],
           stdin := .null, stdout := .piped, stderr := .null }
-      let output ← try readBoundedLoop child.stdout 128
+      let output ← try readBoundedLoop child.stdout (FnWire.maxFrameLine 513)
         catch error =>
           child.kill
           discard <| child.wait
@@ -4487,7 +4670,7 @@ def runPollConsumerDecisionLoaded (config : NativeHost.Config)
     ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] pinJson)
   IO.ofExcept (requireExactFields "fn poll scope"
     ["history", "incarnation", "consumer", "principal", "query",
-     "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
+     "queryVersion", "viewVersion", "registrationEpoch", "node", "schema"] scopeJson)
   IO.ofExcept (requireExactFields "fn claim"
     ["sourceIdentity", "messageId", "groups"] claimJson)
   IO.ofExcept (requireExactFields "consumer policy"
@@ -4578,7 +4761,7 @@ def runReplyConsumerPollDecisionLoaded (config : NativeHost.Config)
     IO.ofExcept (requireExactFields label ["sourceIdentity", "messageId", "groups"] value)
   IO.ofExcept (requireExactFields "A fn scope"
     ["history", "incarnation", "consumer", "principal", "query",
-     "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
+     "queryVersion", "viewVersion", "registrationEpoch", "node", "schema"] scopeJson)
   IO.ofExcept (requireExactFields "A reply policy"
     ["application", "subject", "target", "capability"] policyJson)
   let parsedRPin : FnPortablePin ← IO.ofExcept (fromJson? rPinJson)
@@ -4705,7 +4888,7 @@ def verifyCatalogOwnR (config : NativeHost.Config)
     throw (IO.userError "A own-R poll differs from native verified article")
   let (prepared, record) ← IO.ofExcept <|
     FnOriginOutbox.selectUniqueParent gateway config.deployment.domain
-      config.profile.semantics projection.messageId opened.durable.image.accepted
+      config.profile.semantics projection.messageId (← NativeHost.operatorAcceptedLog config opened)
   unless fnOwnRCarrierMatches received prepared.carrier do
     throw (IO.userError "A own-R poll differs from exact accepted R carrier or fn injection")
   let (retainedVerified, retainedR, original) ←
@@ -4830,7 +5013,7 @@ def runReplyConsumerCatalogDecisionLoaded (config : NativeHost.Config)
     ["sourceIdentity", "messageId", "groups"] qClaimJson)
   IO.ofExcept (requireExactFields "A fn scope"
     ["history", "incarnation", "consumer", "principal", "query",
-     "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
+     "queryVersion", "viewVersion", "registrationEpoch", "node", "schema"] scopeJson)
   IO.ofExcept (requireExactFields "A reply policy"
     ["application", "subject", "target", "capability"] policyJson)
   let rawRPin : FnPortablePin ← IO.ofExcept (fromJson? rPinJson)
@@ -4858,7 +5041,7 @@ def runReplyConsumerCatalogDecisionLoaded (config : NativeHost.Config)
     throw (IO.userError "A Q projection differs from exact native-verified reply")
   let (prepared, _) ← IO.ofExcept (FnOriginOutbox.selectUniqueParent gateway
     config.deployment.domain config.profile.semantics
-    qExtracted.parentMessageId.toUTF8.toList opened.durable.image.accepted)
+    qExtracted.parentMessageId.toUTF8.toList (← NativeHost.operatorAcceptedLog config opened))
   let (rCarrier, rVerified, rExtracted, originPackage, originReceipt) ←
     IO.FS.withTempDir fun directory => do
       let path := (directory / "retained-r-carrier.eml").toString
@@ -4981,7 +5164,7 @@ def runFnPollSession (config : NativeHost.Config)
       ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] pinJson)
     IO.ofExcept (requireExactFields "fn service scope"
       ["history", "incarnation", "consumer", "principal", "query",
-       "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
+       "queryVersion", "viewVersion", "registrationEpoch", "node", "schema"] scopeJson)
     let rawPin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
     let pin := rawPin.withExecution service.fnExecutable service.fnPublicKey
     let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
@@ -5092,9 +5275,9 @@ def runFnSkipAckSession (pin : FnPortablePin) (scope : FnPollScopePin)
         currentStatus.committedAck
     let child ← IO.Process.spawn
       { cmd := pin.executable,
-        args := #["--fn", "consumer", "ack", controlPath, cursorPath],
+        args := #["--fn", "consumer", "--frame", "ack", controlPath, cursorPath],
         stdin := .null, stdout := .piped, stderr := .null }
-    let output ← try readBoundedLoop child.stdout 128
+    let output ← try readBoundedLoop child.stdout (FnWire.maxFrameLine 513)
       catch error =>
         child.kill
         discard <| child.wait
@@ -5143,14 +5326,13 @@ def runFnAckSession (config : NativeHost.Config)
     ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] pinJson)
   IO.ofExcept (requireExactFields "fn service scope"
     ["history", "incarnation", "consumer", "principal", "query",
-     "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
+     "queryVersion", "viewVersion", "registrationEpoch", "node", "schema"] scopeJson)
   let rawPin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
   let pin := rawPin.withExecution service.fnExecutable service.fnPublicKey
   let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
   let gateway ← requireGateway config
   let opened ← sessionOpened config state
-  let some record := opened.durable.image.accepted.find?
-      (fun entry => entry.transactionId.value == transactionId)
+  let some record ← NativeHost.acceptedRecord config opened ⟨transactionId⟩
     | throw (IO.userError "fn ack Mini transaction is absent")
   let selectedScope ← IO.ofExcept scope.progressScope
   if let some skipped := FnConsumerProgress.originalSkip gateway selectedScope
@@ -5197,9 +5379,9 @@ def runFnAckSession (config : NativeHost.Config)
       throw (IO.userError "fn ack source differs from accepted Mini inbox")
     let child ← IO.Process.spawn
       { cmd := pin.executable,
-        args := #["--fn", "consumer", "ack", service.controlPath, cursorPath],
+        args := #["--fn", "consumer", "--frame", "ack", service.controlPath, cursorPath],
         stdin := .null, stdout := .piped, stderr := .null }
-    let output ← try readBoundedLoop child.stdout 128
+    let output ← try readBoundedLoop child.stdout (FnWire.maxFrameLine 513)
       catch error =>
         child.kill
         discard <| child.wait
@@ -5297,17 +5479,22 @@ def runFnOriginOutboxExportSession (config : NativeHost.Config)
   let gateway ← requireGateway config
   let opened ← sessionOpened config state
   let refused := fun (reason : String) =>
-    (18, (Lean.Json.mkObj
+    ((18 : UInt8), (Lean.Json.mkObj
       [("type", toJson "fn-a-origin-outbox-export-v1"),
        ("status", toJson "refused"), ("reason", toJson reason)]).compress.toUTF8.toList)
-  let some record := opened.durable.image.accepted.find?
-      (fun entry => entry.transactionId.value == transactionId)
+  let found ← match ← NativeHost.acceptedRecordE config opened ⟨transactionId⟩ with
+    | .error refusal => return refused refusal.detail
+    | .ok found => pure found
+  let some record := found
     | return refused "prepared R transaction is absent"
   let some prepared := FnOriginOutbox.originalPrepared gateway
       config.deployment.domain config.profile.semantics record
     | return refused "transaction is not an accepted prepared R outbox"
-  let some outboxReceipt := NativeHost.historicalReceipt config opened.durable
-      record.transactionId record.event.eventId
+  let outboxReceipt ← match ← NativeHost.historicalReceiptVia config opened
+      record.transactionId record.event.eventId with
+    | .error refusal => return refused refusal.detail
+    | .ok receipt => pure receipt
+  let some outboxReceipt := outboxReceipt
     | return refused "prepared R original receipt is unavailable"
   let some messageId := String.fromUTF8? prepared.messageId.toByteArray
     | return refused "prepared R Message-ID is not UTF-8"
@@ -5388,7 +5575,7 @@ def runProviderContinuitySession (config : NativeHost.Config)
   let current ← sessionWalked config state
   let providerCell : DurableDataIntent.CellId := ⟨providerResourceId⟩
   let checkedWorldRoot := (current.target.worldRoot).value
-  let checkedCount := current.target.image.accepted.length
+  let checkedCount := current.target.height
   let continuity : Except String Unit := match allowedFence with
     | none => (NativeReserveContinuity.check current anchor reserveCall providerCell).map (fun _ => ())
     | some (fenceCall, fenceReceipt) =>
@@ -5439,7 +5626,7 @@ def runFnReplyPollSession (config : NativeHost.Config)
       ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] pinJson)
     IO.ofExcept (requireExactFields "A fn service scope"
       ["history", "incarnation", "consumer", "principal", "query",
-       "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
+       "queryVersion", "viewVersion", "registrationEpoch", "node", "schema"] scopeJson)
     let rawPin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
     let pin := rawPin.withExecution service.qExecutable service.qPublicKey
     let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
@@ -5514,7 +5701,7 @@ def runFnReplyCatalogPollSession (config : NativeHost.Config)
       ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] pinJson)
     IO.ofExcept (requireExactFields "A fn catalog scope"
       ["history", "incarnation", "consumer", "principal", "query",
-       "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
+       "queryVersion", "viewVersion", "registrationEpoch", "node", "schema"] scopeJson)
     let rawPin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
     let pin := rawPin.withExecution service.qExecutable service.qPublicKey
     let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
@@ -5625,9 +5812,9 @@ def runCatalogOwnRAckSession (config : NativeHost.Config)
       return response "covered-by-durable-frontier" currentStatus.committedAck
     let child ← IO.Process.spawn
       { cmd := pin.executable,
-        args := #["--fn", "consumer", "ack", service.controlPath, cursorPath],
+        args := #["--fn", "consumer", "--frame", "ack", service.controlPath, cursorPath],
         stdin := .null, stdout := .piped, stderr := .null }
-    let output ← try readBoundedLoop child.stdout 128
+    let output ← try readBoundedLoop child.stdout (FnWire.maxFrameLine 513)
       catch error =>
         child.kill
         discard <| child.wait
@@ -5669,14 +5856,13 @@ def runFnReplyAckSession (config : NativeHost.Config)
     ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] pinJson)
   IO.ofExcept (requireExactFields "A fn scope"
     ["history", "incarnation", "consumer", "principal", "query",
-     "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
+     "queryVersion", "viewVersion", "registrationEpoch", "node", "schema"] scopeJson)
   let rawPin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
   let pin := rawPin.withExecution service.qExecutable service.qPublicKey
   let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
   let gateway ← requireGateway config
   let opened ← sessionOpened config state
-  let some record := opened.durable.image.accepted.find?
-      (fun entry => entry.transactionId.value == transactionId)
+  let some record ← NativeHost.acceptedRecord config opened ⟨transactionId⟩
     | throw (IO.userError "A reply result transaction is absent")
   let selectedScope ← IO.ofExcept scope.progressScope
   if let some skipped := FnConsumerProgress.originalSkip gateway selectedScope
@@ -5729,9 +5915,9 @@ def runFnReplyAckSession (config : NativeHost.Config)
       throw (IO.userError "A reply ack source differs from accepted Mini inbox")
     let child ← IO.Process.spawn
       { cmd := pin.executable,
-        args := #["--fn", "consumer", "ack", service.controlPath, cursorPath],
+        args := #["--fn", "consumer", "--frame", "ack", service.controlPath, cursorPath],
         stdin := .null, stdout := .piped, stderr := .null }
-    let output ← try readBoundedLoop child.stdout 128
+    let output ← try readBoundedLoop child.stdout (FnWire.maxFrameLine 513)
       catch error =>
         child.kill
         discard <| child.wait
@@ -5790,7 +5976,7 @@ def objectKernelOperation (pinnedConfig : NativeHost.Config)
       let request ← IO.ofExcept (Minidregg.Host.ObjectiveActivityJson.parseViewRequest payload)
       let domain := pinnedConfig.deployment.domain
       let view ← IO.ofExcept (NativeHost.activityViewLoaded pinnedConfig opened
-        (Minidregg.Host.ObjectiveActivityJson.viewCells domain request))
+        (Minidregg.Host.ObjectiveActivityJson.viewCells domain request) request.quotes)
       let json := Minidregg.Host.ObjectiveActivityJson.viewJson domain
         pinnedConfig.tariff.asset request view
       return ((214 : UInt8), json.compress.toUTF8.toList)
@@ -6051,6 +6237,38 @@ def launchLifecycleOperatorOp (pinnedConfig : NativeHost.Config)
         throw (IO.userError "launch completion ingress exceeds host frame bound")
       return ((71 : UInt8), ingress)
   | _ => throw (IO.userError s!"operation {op} is not a launch lifecycle operation")
+
+/-- `audit [--receipts FILE]` / `store-audit [--receipts FILE]` options. -/
+def auditOptions : List String → Option (Option String)
+  | [] => some none
+  | ["--receipts", path] => some (some path)
+  | _ => none
+
+/-- The body of the `audit` arm, shared with `store-audit`: `--receipts FILE` writes
+every receipt the re-admission recomputed, in order, each in the canonical receipt
+codec: the control that an audit-path change left every original-ingress receipt
+byte-identical. -/
+def auditBody (settings : Settings) (pinnedConfig : NativeHost.Config)
+    (receiptsOut : Option String) : IO UInt32 := do
+  if settings.carryRegistry.isSome && receiptsOut.isSome then
+    throw (IO.userError "audit --receipts is not available for a carried registry")
+  let (count, index, links) ← if settings.carryRegistry.isSome then do
+    let opened ← IO.ofExcept (← NativeHost.openExisting pinnedConfig)
+    let registry ← loadCarryRegistry settings
+    let custody ← IO.ofExcept (← RetainedSegmentInspection.validate pinnedConfig
+      opened.durable registry)
+    let walked ← IO.ofExcept (← CarriedNativeHostSession.start pinnedConfig opened.durable custody)
+    pure (walked.verified.opened.durable.height, walked.verified.opened.durable.index,
+       walked.verified.opened.durable.links)
+  else do
+    let (receipts, index, links) ← IO.ofExcept (← NativeHost.audit pinnedConfig)
+    if let some path := receiptsOut then
+      writeBytes path (receipts.flatMap NativeHostCodec.receiptStream.encode)
+    pure (receipts.length, index, links)
+  IO.println s!"audited {count} accepted records: every signed ingress re-admitted at its original prefix"
+  IO.println s!"index {(presenceIndexJson index).compress}"
+  IO.println s!"links {(linkIndexJson links).compress}"
+  pure 0
 
 def run (arguments : List String) : IO UInt32 := do
   match arguments with
@@ -6402,12 +6620,15 @@ def run (arguments : List String) : IO UInt32 := do
                   #["--fn", "hybrid-sign", keys.principal, keys.edPublic, keys.edSecret,
                     keys.mlPublic, keys.mlSecret, sourcePath] 7000
                 unless code == 0 && output.all (fun b => b.toNat < 128) do
-                  throw (fnLocalRefusal "hybrid-sign" code output stderrBytes)
+                  throw (IO.userError s!"{FnOutcome.describe "hybrid-sign" code "no ASCII signature line"} (stderrPrefixBytes={stderrBytes.size})")
                 IO.ofExcept (parseFnHybridSignLine (String.fromUTF8! output.toByteArray))
               verifySource := fun carrierPath => do
                 let (_, verified) ← verifyFnCarrierUnclaimed pin carrierPath
                 pure verified.source }
           FnArchivePublisher.run config ops archiveArgs
+      | "codec", [] =>
+          serveCodec config (← IO.ofExcept settings.providerRoutes) (← IO.getStdin) (← IO.getStdout)
+          pure 0
       | "stdio", [] =>
           withPinnedSignature config fun pinnedConfig => do
             withFnPollService settings fun service => do
@@ -6432,7 +6653,7 @@ def run (arguments : List String) : IO UInt32 := do
                                     "wire".toUTF8.toList "noncanonical native host call".toUTF8.toList,
                                     NativeHost.Disclosure.uniform)
                                 | some call =>
-                                  NativeHost.submitDisclosedWith pinnedConfig session.opened call
+                                  NativeHost.submitDisclosedWith pinnedConfig session.opened session.light call
                                     (sessionConfirmed pinnedConfig state)
                               NativeHost.logOperatorRefusal result.1
                               return (2, outcomeCodec.encode (NativeHost.disclose result))
@@ -6634,30 +6855,34 @@ def run (arguments : List String) : IO UInt32 := do
                             if settings.carryRegistry.isSome then
                               let session ← sessionCarriedWalked pinnedConfig state carriedState settings
                               let registry ← loadCarryRegistry settings
-                              let index := session.verified.opened.durable.image.accepted.findIdx?
-                                (fun record => record.transactionId.value == transactionId)
-                              match index with
-                              | some i =>
-                                  if i < registry.edge.body.cut.height then
+                              let ⟨_, reader⟩ ← match ← NativeHost.historyReaderOfDurable pinnedConfig
+                                  session.target with
+                                | .ok reader => pure reader
+                                | .error refusal =>
+                                    return ((255 : UInt8), refusalFrame "receipt" refusal)
+                              match ← reader.byTx ⟨transactionId⟩ with
+                              | .error refusal => return ((255 : UInt8),
+                                  refusalFrame "receipt" (NativeHost.historyRefusal refusal))
+                              | .ok (.present found) =>
+                                  if found.height - 1 < registry.edge.body.cut.height then
                                     let result ← IO.ofExcept (← RetainedSegmentInspection.serveReceiptByTransaction
                                       pinnedConfig session.verified.opened.durable registry transactionId)
                                     return (102, result.compress.toUTF8.toList)
                                   else
-                                    let some record := session.verified.opened.durable.image.accepted[i]?
-                                      | throw (IO.userError "receipt index unavailable")
-                                    let some receipt := carriedReceipt pinnedConfig session
-                                        ⟨transactionId⟩ record.event.eventId
+                                    let some receipt ← carriedReceipt pinnedConfig session
+                                        ⟨transactionId⟩ found.read.record.event.eventId
                                       | throw (IO.userError "target suffix receipt unavailable")
                                     return (102, (Minidregg.Host.Json.fleetReceiptLookupJson
                                       transactionId (some receipt)).compress.toUTF8.toList)
-                              | none => return (102, (Minidregg.Host.Json.fleetReceiptLookupJson
+                              | .ok (.absent _) => return (102, (Minidregg.Host.Json.fleetReceiptLookupJson
                                   transactionId none).compress.toUTF8.toList)
                             else
                               let opened ← sessionOpened pinnedConfig state
-                              let receipt := NativeHost.receiptByTransactionLoaded pinnedConfig opened
-                                ⟨transactionId⟩
-                              return (102, (Minidregg.Host.Json.fleetReceiptLookupJson
-                                transactionId receipt).compress.toUTF8.toList)
+                              match ← NativeHost.receiptByTransactionVia pinnedConfig opened
+                                  ⟨transactionId⟩ with
+                              | .ok receipt => return (102, (Minidregg.Host.Json.fleetReceiptLookupJson
+                                  transactionId receipt).compress.toUTF8.toList)
+                              | .error refusal => return ((255 : UInt8), refusalFrame "receipt" refusal)
                         | 103 =>
                             let opened ← sessionOpened pinnedConfig state
                             let plan ← IO.ofExcept (NativeHost.payPlanLoaded pinnedConfig opened payload)
@@ -6741,7 +6966,7 @@ def run (arguments : List String) : IO UInt32 := do
                               match outcome with
                               | .confirmed kind receipt =>
                                   let current ← sessionCarriedWalked pinnedConfig state carriedState settings
-                                  match carriedReceipt pinnedConfig current receipt.transactionId receipt.eventId with
+                                  match ← carriedReceipt pinnedConfig current receipt.transactionId receipt.eventId with
                                   | some exact => pure (.confirmed kind exact)
                                   | none => pure (.uncertain "key commitment suffix receipt unavailable".toUTF8.toList)
                               | other => pure other
@@ -7429,8 +7654,8 @@ def run (arguments : List String) : IO UInt32 := do
                         | 36 =>
                             let prepared ← if settings.carryRegistry.isSome then do
                               let session ← sessionCarriedWalked pinnedConfig state carriedState settings
-                              pure (ApplicationDispatchAuthoring.prepareRequestSuffix
-                                pinnedConfig session.verified payload)
+                              (ApplicationDispatchAuthoring.prepareRequestSuffix
+                                pinnedConfig session.verified payload).run
                             else do
                               let session ← sessionWalked pinnedConfig state
                               pure (ApplicationDispatchAuthoring.prepareRequestVerified
@@ -7442,8 +7667,8 @@ def run (arguments : List String) : IO UInt32 := do
                         | 82 =>
                             let plan ← if settings.carryRegistry.isSome then do
                               let session ← sessionCarriedWalked pinnedConfig state carriedState settings
-                              IO.ofExcept (ApplicationGrainSessionEnrollmentAuthoring.prepareRequestSuffix
-                                pinnedConfig session.verified payload)
+                              IO.ofExcept (← ExceptT.run (ApplicationGrainSessionEnrollmentAuthoring.prepareRequestSuffix
+                                pinnedConfig session.verified payload))
                             else do
                               let session ← sessionWalked pinnedConfig state
                               IO.ofExcept (ApplicationGrainSessionEnrollmentAuthoring.prepareRequestVerified
@@ -7460,8 +7685,8 @@ def run (arguments : List String) : IO UInt32 := do
                             let signatures ← decodeSignatures signaturesBytes
                             let ingress ← if settings.carryRegistry.isSome then do
                               let session ← sessionCarriedWalked pinnedConfig state carriedState settings
-                              IO.ofExcept (ApplicationGrainSessionEnrollmentAuthoring.assembleCurrentSuffix
-                                pinnedConfig session.verified plan signatures)
+                              IO.ofExcept (← ExceptT.run (ApplicationGrainSessionEnrollmentAuthoring.assembleCurrentSuffix
+                                pinnedConfig session.verified plan signatures))
                             else do
                               let session ← sessionWalked pinnedConfig state
                               IO.ofExcept (ApplicationGrainSessionEnrollmentAuthoring.assembleCurrent
@@ -7576,17 +7801,17 @@ def run (arguments : List String) : IO UInt32 := do
           -- verifier (Ed25519 mini-sig, SSHSIG ssh-sig). Reads no Store.
           withPinnedSignature config fun pinnedConfig => do
             let probe ← IO.ofExcept (Minidregg.Host.Json.payEnrolProbe (← readJson input))
-            let mint := ((PayCell.tariffOf probe.store).map (·.mint)).getD []
-            let verified ← match probe.observation.memo with
-              | .present bytes =>
-                  match PayEnrolMemo.parse bytes with
-                  | .ok memo =>
-                      match ← PayEnrolSignatureIO.verifyNative pinnedConfig.signature mint
-                          probe.observation.address memo with
-                      | .ok checked => pure (some checked.verified)
-                      | .error error => throw (IO.userError s!"native verifier: {repr error}")
-                  | .error _ => pure none
-              | _ => pure none
+            -- The bits come from the receiver's own observed queries, asked of the
+            -- pinned verifier through observeAll (PayEnrolReceiver.verifiedLive).
+            -- No parsed memo or no tariff mint: nothing is asked.
+            let mint := (PayCell.tariffOf probe.store).map (·.mint)
+            let verified ← match PayEnrolReceiver.parsedMemo probe.observation, mint with
+              | some _, some _ =>
+                  match ← PayEnrolReceiver.verifiedLive pinnedConfig.signature mint
+                      probe.observation with
+                  | .ok verified => pure (some verified)
+                  | .error error => throw (IO.userError s!"native verifier: {error}")
+              | _, _ => pure none
             let decision := PayEnrolDecision.decideEnrol probe.store probe.price probe.tip
               probe.observation (verified.getD ⟨false, false⟩) probe.subjectTaken
             writeJson output (Minidregg.Host.Json.payEnrolDecisionJson verified decision)
@@ -7636,33 +7861,29 @@ def run (arguments : List String) : IO UInt32 := do
             writeJson output (objectAudienceJson view)
             pure 0
       | "audit", options =>
-          -- `--receipts FILE` writes every receipt the re-admission recomputed,
-          -- in order, each in the canonical receipt codec: the control that an
-          -- audit-path change left every original-ingress receipt byte-identical.
-          let receiptsOut ← match options with
-            | [] => pure none
-            | ["--receipts", path] => pure (some path)
-            | _ => throw (IO.userError "usage: audit [--receipts FILE]")
-          withPinnedSignature config fun pinnedConfig => do
-            if settings.carryRegistry.isSome && receiptsOut.isSome then
-              throw (IO.userError "audit --receipts is not available for a carried registry")
-            let (count, index, links) ← if settings.carryRegistry.isSome then do
-              let opened ← IO.ofExcept (← NativeHost.openExisting pinnedConfig)
-              let registry ← loadCarryRegistry settings
-              let custody ← IO.ofExcept (← RetainedSegmentInspection.validate pinnedConfig
-                opened.durable registry)
-              let walked ← IO.ofExcept (← CarriedNativeHostSession.start pinnedConfig opened.durable custody)
-              pure (walked.verified.opened.durable.height, walked.verified.opened.durable.index,
-                 walked.verified.opened.durable.links)
-            else do
-              let (receipts, index, links) ← IO.ofExcept (← NativeHost.audit pinnedConfig)
-              if let some path := receiptsOut then
-                writeBytes path (receipts.flatMap NativeHostCodec.receiptStream.encode)
-              pure (receipts.length, index, links)
-            IO.println s!"audited {count} accepted records: every signed ingress re-admitted at its original prefix"
-            IO.println s!"index {(presenceIndexJson index).compress}"
-            IO.println s!"links {(linkIndexJson links).compress}"
-            pure 0
+          match auditOptions options with
+          | none => throw (IO.userError "usage: audit [--receipts FILE]")
+          | some receiptsOut =>
+              withPinnedSignature config fun pinnedConfig =>
+                auditBody settings pinnedConfig receiptsOut
+      | "store-audit", options =>
+          -- The Store re-derived from genesis (`Compiler.DurableStoreAudit`), then
+          -- exactly the `audit` body: every signed ingress re-admitted at its
+          -- original prefix. A failure of the first is the verdict; the second
+          -- never runs behind a refused store.
+          match auditOptions options with
+          | none =>
+              (← IO.getStderr).putStrLn "usage: store-audit [--receipts FILE]"
+              pure 2
+          | some receiptsOut =>
+              withPinnedSignature config fun pinnedConfig => do
+                match ← DurableStoreAudit.audit pinnedConfig.transport ResourceBirthCodec.rootBytes with
+                | .error message =>
+                    (← IO.getStderr).putStrLn message
+                    pure 1
+                | .ok report =>
+                    IO.println report.line
+                    auditBody settings pinnedConfig receiptsOut
       | "checkpoint-differential", [height] =>
           let some h := height.toNat? | throw (IO.userError "checkpoint-differential: HEIGHT must be decimal")
           let (cached, full, stored) ← IO.ofExcept
@@ -7692,6 +7913,32 @@ def run (arguments : List String) : IO UInt32 := do
           unless call.length ≤ maxFrame do
             throw (IO.userError "reserve birth call exceeds host frame bound")
           writeBytes output call
+          pure 0
+      | "plan-ungated", ["--test-harness", input, output] =>
+          -- Operator-local test tooling: plan the invoke draft of a client intent (`intent.bin`)
+          -- against the Store as it is NOW (each target's expected root re-read from its current
+          -- cell), WITHOUT the served path's observation and law gates (`NativeHost.prepareLoaded`,
+          -- which the operator authoring commands also call). A plan authorizes nothing: it lets a
+          -- test sign a call the served gates would never have planned and hand it to the
+          -- RECEIVER, which must judge it itself (journey JGATE: the gateway law refuses an
+          -- ordinary subject's signed direct call).
+          let some intent := NativeObservationCodec.intentCodec.decode (← readBytes input)
+            | throw (RequestRefusal.malformed "noncanonical observation intent")
+          let .prepare (.invoke commandBytes) := intent.purpose
+            | throw (IO.userError "plan-ungated: the intent's purpose is not an invoke draft")
+          let some command := DeclaredResourceController.commandCodec.decode commandBytes
+            | throw (RequestRefusal.malformed "noncanonical invoke command")
+          let opened ← IO.ofExcept (← NativeHost.openExisting config)
+          let targets ← command.targets.mapM fun target => do
+            let .present cell := opened.directory.directory.slots target.target
+              | throw (IO.userError s!"plan-ungated: target {target.target} is absent")
+            let some pre := DeclaredResourceController.selectTarget config.deployment target cell
+              | throw (IO.userError s!"plan-ungated: target {target.target} does not select its cell")
+            pure { target with expectedTargetRoot := pre.root }
+          let draft := NativeHostCodec.Draft.invoke
+            (DeclaredResourceController.commandCodec.encode { command with targets })
+          let plan ← IO.ofExcept (NativeHost.prepareLoaded config opened draft)
+          writeBytes output (signingPlanCodec.encode plan)
           pure 0
       | "prepare", [input, output] =>
           let plan ← IO.ofExcept (← NativeHost.prepare config (← readBytes input))
@@ -7831,7 +8078,8 @@ def run (arguments : List String) : IO UInt32 := do
       | "dry-run", [observationPath, signaturesPath, output] =>
           let signatures ← decodeSignatures (← readBytes signaturesPath)
           let opened ← IO.ofExcept (← NativeHost.openExisting config)
-          match ← DryRun.dryRunLoaded config opened (← readBytes observationPath) signatures with
+          let light ← IO.ofExcept (← NativeHostLight.start config)
+          match ← DryRun.dryRunLoaded config opened light (← readBytes observationPath) signatures with
           | .admitted plan =>
               writeBytes output (signingPlanCodec.encode plan)
               pure 0
@@ -7916,7 +8164,7 @@ def run (arguments : List String) : IO UInt32 := do
               [("type", toJson "application-lifecycle-completion-diagnostic-v1"),
                ("status", toJson status),
                ("detail", toJson detail),
-               ("acceptedCount", toJson (toString session.verified.opened.durable.image.accepted.length))])
+               ("acceptedCount", toJson (toString session.verified.opened.durable.height))])
             pure 0
       | "selected-source-publication-submit", [input, output] =>
           withPinnedSignature config fun pinnedConfig => do
@@ -8225,7 +8473,7 @@ def run (arguments : List String) : IO UInt32 := do
             ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] pinJson)
           IO.ofExcept (requireExactFields "fn poll scope"
             ["history", "incarnation", "consumer", "principal", "query",
-             "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
+             "queryVersion", "viewVersion", "registrationEpoch", "node", "schema"] scopeJson)
           IO.ofExcept (requireExactFields "fn claim"
             ["sourceIdentity", "messageId", "groups"] claimJson)
           let pin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
@@ -8331,7 +8579,7 @@ def run (arguments : List String) : IO UInt32 := do
             ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] pinJson)
           IO.ofExcept (requireExactFields "fn poll scope"
             ["history", "incarnation", "consumer", "principal", "query",
-             "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
+             "queryVersion", "viewVersion", "registrationEpoch", "node", "schema"] scopeJson)
           let pin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
           let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
           let (polledCursor, polledEvent, polledCarrier) ←
@@ -8358,8 +8606,7 @@ def run (arguments : List String) : IO UInt32 := do
           let gateway ← requireGateway config
           let transactionId ← IO.ofExcept (exactDecimal "Mini transaction ID" transaction)
           let opened ← IO.ofExcept (← NativeHost.openExisting config)
-          let some record := opened.durable.image.accepted.find?
-              (fun entry => entry.transactionId.value == transactionId)
+          let some record ← NativeHost.acceptedRecord config opened ⟨transactionId⟩
             | throw (IO.userError "A reply result transaction is absent")
           let some (result, inbox) :=
               FnReplyConsumption.originalResult gateway config.deployment.domain
@@ -8386,12 +8633,11 @@ def run (arguments : List String) : IO UInt32 := do
             ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] pinJson)
           IO.ofExcept (requireExactFields "A fn scope"
             ["history", "incarnation", "consumer", "principal", "query",
-             "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
+             "queryVersion", "viewVersion", "registrationEpoch", "node", "schema"] scopeJson)
           let pin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
           let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
           let opened ← IO.ofExcept (← NativeHost.openExisting config)
-          let some record := opened.durable.image.accepted.find?
-              (fun entry => entry.transactionId.value == transactionId)
+          let some record ← NativeHost.acceptedRecord config opened ⟨transactionId⟩
             | throw (IO.userError "A reply result transaction is absent")
           let some (_, inbox) := FnReplyConsumption.originalResult gateway
               config.deployment.domain config.profile.semantics record
@@ -8418,9 +8664,9 @@ def run (arguments : List String) : IO UInt32 := do
             throw (IO.userError "A reply ack principal differs from accepted Mini inbox")
           let child ← IO.Process.spawn
             { cmd := pin.fnBinary,
-              args := #["--fn", "consumer", "ack", controlPath, cursorPath],
+              args := #["--fn", "consumer", "--frame", "ack", controlPath, cursorPath],
               stdin := .null, stdout := .piped, stderr := .null }
-          let output ← try readBoundedLoop child.stdout 128
+          let output ← try readBoundedLoop child.stdout (FnWire.maxFrameLine 513)
             catch error =>
               child.kill
               discard <| child.wait
@@ -8488,7 +8734,7 @@ def run (arguments : List String) : IO UInt32 := do
             ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] pinJson)
           IO.ofExcept (requireExactFields "fn poll scope"
             ["history", "incarnation", "consumer", "principal", "query",
-             "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
+             "queryVersion", "viewVersion", "registrationEpoch", "node", "schema"] scopeJson)
           let pin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
           let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
           let (stored, kind, _) ← IO.ofExcept (← exportConsumerPoll config transactionId)
@@ -8522,9 +8768,9 @@ def run (arguments : List String) : IO UInt32 := do
             throw (IO.userError "fn ack source metadata differs from accepted Mini inbox")
           let child ← IO.Process.spawn
             { cmd := pin.fnBinary,
-              args := #["--fn", "consumer", "ack", controlPath, cursorPath],
+              args := #["--fn", "consumer", "--frame", "ack", controlPath, cursorPath],
               stdin := .null, stdout := .piped, stderr := .null }
-          let output ← try readBoundedLoop child.stdout 128
+          let output ← try readBoundedLoop child.stdout (FnWire.maxFrameLine 513)
             catch error =>
               child.kill
               discard <| child.wait
@@ -8549,8 +8795,7 @@ def run (arguments : List String) : IO UInt32 := do
           let gateway ← requireGateway config
           let transactionId ← IO.ofExcept (exactDecimal "transaction ID" transaction)
           let opened ← IO.ofExcept (← NativeHost.openExisting config)
-          let some record := opened.durable.image.accepted.find?
-              (fun entry => entry.transactionId.value == transactionId)
+          let some record ← NativeHost.acceptedRecord config opened ⟨transactionId⟩
             | throw (IO.userError "exact Mini consumer transaction is absent")
           let some (binding, some _, _) :=
               FnConsumerOperation.originalBindingWithInbox gateway config.deployment.domain
@@ -8584,8 +8829,7 @@ def run (arguments : List String) : IO UInt32 := do
           let edPublicKey ← IO.ofExcept (decodeCanonicalHex "fn reply Ed25519 key" signer.edPublicKey)
           let mlPublicKey ← IO.ofExcept (decodeCanonicalHex "fn reply ML-DSA-65 key" signer.mlPublicKeyHex)
           let opened ← IO.ofExcept (← NativeHost.openExisting config)
-          let some record := opened.durable.image.accepted.find?
-              (fun entry => entry.transactionId.value == transactionId)
+          let some record ← NativeHost.acceptedRecord config opened ⟨transactionId⟩
             | throw (IO.userError "exact Mini consumer transaction is absent")
           let some (binding, some _, some store) :=
               FnConsumerOperation.originalBindingWithInbox gateway config.deployment.domain
@@ -8681,8 +8925,7 @@ def run (arguments : List String) : IO UInt32 := do
               edPublicKey == (← readBoundedBytes edPublicPath 32) do
             throw (IO.userError "fn reply signer public files differ from pin")
           let opened ← IO.ofExcept (← NativeHost.openExisting config)
-          let some record := opened.durable.image.accepted.find?
-              (fun entry => entry.transactionId.value == transactionId)
+          let some record ← NativeHost.acceptedRecord config opened ⟨transactionId⟩
             | throw (IO.userError "exact Mini consumer transaction is absent")
           let some (binding, some _, some store) :=
               FnConsumerOperation.originalBindingWithInbox gateway config.deployment.domain

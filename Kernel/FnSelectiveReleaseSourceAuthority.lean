@@ -32,11 +32,11 @@ abbrev Deployment := CanonicalCellRegistry.Deployment
 abbrev Durable := ResourceObservationAdmission.Durable
 abbrev Context := ResourceObservationAdmission.Context
 
-variable {deployment : Deployment} {durable : Durable}
+variable {deployment : Deployment}
 
-private def currentContent (context : Context deployment durable)
+private def currentContent (context : Context deployment)
     (spec : Spec) : Option (Digest × List UInt8) := do
-  let .present packed := context.directory.directory.slots
+  let .present packed := context.directory.slots
       spec.packet.release.source.resource | none
   match packed with
   | ⟨.content, materialized⟩ =>
@@ -48,36 +48,59 @@ private def currentContent (context : Context deployment durable)
 
 variable {F : Type} [Field F] [DecidableEq F]
 
-structure Prepared (context : Context deployment durable)
+structure Prepared (context : Context deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (federation : FederationId)
     (height : Nat) (spec : Spec) where
   private mk ::
   root : Digest
-  observed : ResourceTargetAdmission.Observed deployment context.directory.directory
+  observed : ResourceTargetAdmission.Observed deployment context.directory
     .object spec.packet.release.source.resource root
   contentKind : observed.before.kind = .content
   physicalCurrent : ResourceBirthCodec.physicalRoot (.live observed.before) =
-    durable.snapshot.model.roots ⟨spec.packet.release.source.resource⟩
+    context.view.model.roots ⟨spec.packet.release.source.resource⟩
   sourceDomain : spec.packet.release.source.domain = deployment.domain
   sourceSemantics : spec.packet.release.source.semantics = profile.semantics
   sourceRoot : spec.packet.release.source.parent = root
   selectedExact : currentContent context spec = some (root, spec.packet.release.content)
 
-def prepare (context : Context deployment durable)
+/-- Why a selected source publication is not prepared. The receiver answers every one of these with
+the single undisclosed `"selected source publication refused"` (`undisclosed`), so a submitter
+learns nothing about the Store from a refusal; the source's own operator, authoring the
+publication locally (`Host.FnSelectiveReleaseSourceAuthoring`), is told which one (`describe`). -/
+inductive PrepareRefusal where
+  | packetShape | sourceAbsent | sourceUnobserved | notContent | foreignDomain
+  | foreignSemantics | staleParent | selectedNotCurrent
+  deriving DecidableEq, Repr
+
+def PrepareRefusal.undisclosed (_ : PrepareRefusal) : String :=
+  "selected source publication refused"
+
+def PrepareRefusal.describe : PrepareRefusal → String
+  | .packetShape => "selected source publication refused: the packet is not a 64-octet-signed, bounded, public-peerable release"
+  | .sourceAbsent => "selected source publication refused: the source resource has no slot in this Store"
+  | .sourceUnobserved => "selected source publication refused: the source resource cannot be observed at its current root"
+  | .notContent => "selected source publication refused: the source resource is not a content resource"
+  | .foreignDomain => "selected source publication refused: the release names another domain"
+  | .foreignSemantics => "selected source publication refused: the release names other semantics"
+  | .staleParent => "selected source publication refused: the release's parent root is not the source's current root"
+  | .selectedNotCurrent => "selected source publication refused: the selected atom's current payload differs from the release content (or the atom is absent or tombstoned)"
+
+def prepare (context : Context deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (federation : FederationId)
-    (height : Nat) (spec : Spec) : Except String (Prepared context profile federation height spec) :=
+    (height : Nat) (spec : Spec) :
+    Except PrepareRefusal (Prepared context profile federation height spec) :=
   if spec.packet.signature.length != 64 || !spec.packet.release.bounded ||
       spec.packet.release.destination.audience.visibility != .publicPeerable then
-    .error "selected source publication refused"
-  else match context.directory.directory.slots spec.packet.release.source.resource with
-  | .absent => .error "selected source publication refused"
+    .error .packetShape
+  else match context.directory.slots spec.packet.release.source.resource with
+  | .absent => .error .sourceAbsent
   | .present packed =>
-      match ResourceTargetAdmission.observe deployment context.directory.directory
+      match ResourceTargetAdmission.observe deployment context.directory
           .object spec.packet.release.source.resource packed.payload.root with
-      | none => .error "selected source publication refused"
+      | none => .error .sourceUnobserved
       | some observed =>
           if contentKind : observed.before.kind = .content then
-            let physicalCurrent := PhysicalResourceReadGuard.current context.directory
+            let physicalCurrent := ServedBasis.Ground.physicalCurrent context
               spec.packet.release.source.resource observed.before observed.present
             if sourceDomain : spec.packet.release.source.domain = deployment.domain then
               if sourceSemantics : spec.packet.release.source.semantics = profile.semantics then
@@ -86,25 +109,25 @@ def prepare (context : Context deployment durable)
                       some (packed.payload.root, spec.packet.release.content) then
                     .ok ⟨packed.payload.root, observed, contentKind, physicalCurrent,
                       sourceDomain, sourceSemantics, sourceRoot, selectedExact⟩
-                  else .error "selected source publication refused"
-                else .error "selected source publication refused"
-              else .error "selected source publication refused"
-            else .error "selected source publication refused"
-          else .error "selected source publication refused"
+                  else .error .selectedNotCurrent
+                else .error .staleParent
+              else .error .foreignSemantics
+            else .error .foreignDomain
+          else .error .notContent
 
-variable {context : Context deployment durable}
+variable {context : Context deployment}
   {profile : CanonicalRuntimeProfile.Profile F} {federation : FederationId}
   {height : Nat} {spec : Spec}
 
 def Prepared.wanted (_prepared : Prepared context profile federation height spec) :
     Request .object :=
   sourceRequest deployment.domain profile.semantics federation
-    context.authority.snapshot.authState height spec
+    context.authority.authState height spec
 
 def project (prepared : Prepared context profile federation height spec)
     (logical : Store.Store (CanonicalCellRegistry.layout prepared.observed.before.kind)) :
     Minidregg.Pred.State :=
-  ⟨WorldKindLawDependencies.targetSelectorSlots context.directory.directory spec.packet.release.source.resource ++
+  ⟨WorldKindLawDependencies.targetSelectorSlots context.directory spec.packet.release.source.resource ++
     CanonicalRuntimeProfile.requestSlots prepared.wanted ++
     ResourceAuthorityProjection.bytesSlots "context/bytes" 0 (sourceBytes spec) ++
     ResourceAuthorityProjection.bytesSlots "resource/bytes" 0
@@ -125,19 +148,19 @@ def step (prepared : Prepared context profile federation height spec) :
 
 def kindDependencies (prepared : Prepared context profile federation height spec) :
     Option WorldKindLawDependencies.Dependencies :=
-  WorldKindLawDependencies.loadTarget deployment context.directory.directory spec.packet.release.source.resource
+  WorldKindLawDependencies.loadTarget deployment context.directory spec.packet.release.source.resource
 
 def lawReadGuards (prepared : Prepared context profile federation height spec) :
     Option (List (Nat × Digest)) := do
   let structural ← kindDependencies prepared
-  let sources ← PhysicalLawResolution.readGuards context.authority.snapshot
-    context.directory.directory profile.semantics spec.packet.release.source.resource structural.additional
+  let sources ← PhysicalLawResolution.readGuards context.authority
+    context.directory profile.semantics spec.packet.release.source.resource structural.additional
   pure (sources ++ structural.readGuards)
 
 def policyConfig (prepared : Prepared context profile federation height spec) :
     ComposedPolicyAdmission.Config F :=
-  PhysicalLawResolution.config profile.compilerProfile context.authority.snapshot
-    context.directory.directory (sourceCapabilityPortal context.authority.snapshot (marker spec))
+  PhysicalLawResolution.config profile.compilerProfile context.authority
+    context.directory (sourceCapabilityPortal context.authority (marker spec))
     (step prepared) spec.packet.release.source.resource
     ((kindDependencies prepared).map (·.additional) |>.getD [])
 
@@ -145,8 +168,8 @@ def portal (prepared : Prepared context profile federation height spec) : Portal
   (policyConfig prepared).portal
 
 def authorize (prepared : Prepared context profile federation height spec)
-    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot) :
-    Option (Authorized (portal prepared) context.authority.snapshot.authState prepared.wanted) := do
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority) :
+    Option (Authorized (portal prepared) context.authority.authState prepared.wanted) := do
   let config := policyConfig prepared
   let _ ← lawReadGuards prepared
   let evidence ← (config.capabilityEvidenceChecked prepared.wanted
@@ -158,7 +181,7 @@ def authorize (prepared : Prepared context profile federation height spec)
 
 /-- A public success cannot be obtained with missing source custody. -/
 theorem authorize_requires_sources (prepared : Prepared context profile federation height spec)
-    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot)
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority)
     (accepted : (authorize prepared signature).isSome = true) :
     (lawReadGuards prepared).isSome = true := by
   cases resolved : lawReadGuards prepared with
@@ -170,16 +193,16 @@ attribute [irreducible] portal
 structure Checked (prepared : Prepared context profile federation height spec)
     (envelope : List UInt8) where
   private mk ::
-  signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot
+  signature : CredentialSignatureAdmission.CheckedSignature context.authority
   envelopeExact : signature.envelopeBytes = envelope
-  authorization : Authorized (portal prepared) context.authority.snapshot.authState
+  authorization : Authorized (portal prepared) context.authority.authState
     prepared.wanted
   authorized : authorize prepared signature = some authorization
 
 def check (native : CredentialSignatureIO.NativeConfig)
     (prepared : Prepared context profile federation height spec)
     (envelope : List UInt8) : IO (Except String (Checked prepared envelope)) := do
-  match ← CredentialSignatureAdmission.verifyNative native context.authority.snapshot
+  match ← CredentialSignatureAdmission.verifyNative native context.authority
       (marker spec) prepared.wanted envelope with
   | .error _ => return .error "selected source publication refused"
   | .ok signature =>
@@ -203,7 +226,7 @@ def readGuard (prepared : Prepared context profile federation height spec) :
 
 theorem readGuard_current (prepared : Prepared context profile federation height spec) :
     (readGuard prepared).expectedRoot =
-      durable.snapshot.model.roots (readGuard prepared).cellId :=
+      context.view.model.roots (readGuard prepared).cellId :=
   prepared.physicalCurrent
 
 end Minidregg.Kernel.FnSelectiveReleaseSourceAuthority

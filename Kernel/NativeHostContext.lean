@@ -302,8 +302,20 @@ transition. It cannot secretly append an unordered local application record.
 Typed ordered receivers retain physicalTransport and its unchanged CAS/readback. -/
 def Config.transport (config : Config) : DurableReceiverIO.Transport :=
   if config.jointConsensus.isSome then
-    { config.physicalTransport with append := fun _ _ => pure .conflict }
+    { config.physicalTransport with append := fun _ _ _ => pure .conflict }
   else config.physicalTransport
+
+/-- A scratch Store for a portable image (a foreign accepted prefix verified with
+no Store of its own): this deployment's config with its Store moved into
+`directory`, which the caller owns and removes, and a fresh 32-byte MAC key written
+there (mode 0600). Its `physicalTransport` names an EMPTY Store, the transport
+`DurableHistoryStore.scratchReader` writes the image into. -/
+def Config.scratch (config : Config) (directory : System.FilePath) : IO Config := do
+  IO.FS.createDirAll directory
+  let key := directory / "key"
+  IO.FS.writeBinFile key (← IO.getRandomBytes 32)
+  IO.setAccessRights key { user := { read := true, write := true } }
+  pure { config with storage := { config.storage with root := directory / "store", key := key } }
 
 theorem Config.transport_systemCell (config : Config) :
     config.transport.systemCell = some config.systemCell := by
@@ -334,7 +346,7 @@ theorem Config.kernelTransport_systemCell (config : Config) :
   config.transport_systemCell
 
 def logicalHeight (config : Config) (durable : Durable) : Height :=
-  config.genesisHeight + durable.image.accepted.length
+  config.genesisHeight + durable.height
 
 theorem logicalHeight_exact (config : Config) (durable : Durable) :
     logicalHeight config durable = config.genesisHeight + durable.image.accepted.length := rfl
@@ -414,41 +426,37 @@ structure Validated (config : Config) (durable : Durable) where
   pins : FactoryPins
   lawful : cellsLawful config durable directory.directory = true
 
-/-- The one validation, over a supplied directory and cell-law check. The
-caller's directory must be the image's (`validatePartsWith_eq`) and its check
-must decide `cellsLawful` (`lawfulExact`); then this is `validateParts`, the
-same result and the same refusal in the same order. -/
-def validatePartsWith (config : Config) (durable : Durable)
-    (directory? : Option (CredentialAuthorityDomainReceiver.LoadedDirectory durable))
-    (lawfulCheck : CredentialAuthorityDomainReceiver.LoadedDirectory durable → Bool)
-    (lawfulExact : ∀ loaded, lawfulCheck loaded = cellsLawful config durable loaded.directory) :
-    Except String (Validated config durable) := do
+/-- The checks every opened state passes, over its seed, its log start, its
+decoded directory, its authority cell's logical store and its cell-law verdict
+(`none` where the directory did not decode). Shared by the full shape
+(`validatePartsWith`) and the served state (`NativeHostServed.validateServed`):
+the two run these checks with the same refusals in the same order. -/
+def validateChecks (config : Config) (seed : DurableReceiver.Seed) (logStart : Digest)
+    (directory? : Option (Directory Nat CanonicalCellRegistry.registry))
+    (logical? : Option (Store.Store CredentialAuthorityState.layout)) (lawful? : Option Bool) :
+    Except String FactoryPins := do
   if config.grainBirthTariff.isSome then
     let _ ← config.grainBirthTariffValue
   if let some key := config.completionCustodianKey then
     check (decide (key.length = 32)) "physical completion custodian key must be 32 bytes"
   check (decide config.deployment.Valid) "invalid deployment role identities"
-  check (seedIdentity durable.image.seed == config.expectedSeed) "genesis identity mismatch"
+  check (seedIdentity seed == config.expectedSeed) "genesis identity mismatch"
   if let some expected := config.jointConsensus then
     check expected.wellFormed "consensus committee is not well formed"
     check (expected.scope == Tower256ConcreteBackend.digestStream.encode config.deployment.domain)
       "consensus scope differs from native deployment"
     check (expected.instanceBytes ==
-      GenericSimplexSourceAnchor.anchorBytes config.genesisHeight durable.image.seed)
+      GenericSimplexSourceAnchor.anchorBytes config.genesisHeight seed)
       "consensus source anchor differs from exact Store genesis"
-  check (durable.logStart == config.logStart durable.image.seed) "log chain not rooted at this deployment's genesis"
+  check (logStart == config.logStart seed) "log chain not rooted at this deployment's genesis"
   let directory ← need "noncanonical native directory" directory?
-  let authority ← need "complete deployment authority unavailable"
-    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot)
-  -- `PLift`: the monad binds a `Type`; the proof rides out of the branch in it.
-  let lawful ← if checked : lawfulCheck directory = true then
-      pure (PLift.up ((lawfulExact directory) ▸ checked))
-    else .error "native cell role or domain law refused"
-  check (policiesSourced config directory.directory authority.snapshot.logical)
-    "selected policy source/profile mismatch"
+  let logical ← need "complete deployment authority unavailable" logical?
+  let lawful ← need "noncanonical native directory" lawful?
+  check lawful "native cell role or domain law refused"
+  check (policiesSourced config directory logical) "selected policy source/profile mismatch"
   let factoryHead ← need "factory policy head unavailable"
-    (CredentialAuthorityDomain.headAt authority.snapshot.logical ⟨config.deployment.factoryId⟩)
-  let pins : FactoryPins :=
+    (CredentialAuthorityDomain.headAt logical ⟨config.deployment.factoryId⟩)
+  pure
     { factory := ⟨config.deployment.factoryId⟩
       domain := config.deployment.domain
       semantics := config.profile.semantics
@@ -456,7 +464,71 @@ def validatePartsWith (config : Config) (durable : Durable)
       policyId := ⟨config.deployment.factoryId⟩
       policyAddress := factoryHead.address
       tariff := config.tariff }
-  pure ⟨directory, authority, pins, lawful.down⟩
+
+/-- `validateChecks` over a typed directory and authority, keeping them and the
+cell-law proof. -/
+def validateCore {D A : Type} (config : Config) (seed : DurableReceiver.Seed) (logStart : Digest)
+    (directory? : Option D) (authority? : Option A)
+    (directoryOf : D → Directory Nat CanonicalCellRegistry.registry)
+    (logicalOf : A → Store.Store CredentialAuthorityState.layout)
+    (lawfulCheck : D → Bool) :
+    Except String {parts : D × A × FactoryPins // lawfulCheck parts.1 = true} := do
+  let pins ← validateChecks config seed logStart (directory?.map directoryOf) (authority?.map logicalOf)
+    (directory?.map lawfulCheck)
+  let directory ← need "noncanonical native directory" directory?
+  let authority ← need "complete deployment authority unavailable" authority?
+  if checked : lawfulCheck directory = true then pure ⟨(directory, authority, pins), checked⟩
+  else .error "native cell role or domain law refused"
+
+/-- `validateCore` over two shapes whose inputs correspond: the same refusal,
+or the same pins. -/
+theorem validateCore_map {D A D' A' : Type} (config : Config) (seed : DurableReceiver.Seed)
+    (logStart : Digest) (directory? : Option D) (authority? : Option A)
+    (directoryOf : D → Directory Nat CanonicalCellRegistry.registry)
+    (logicalOf : A → Store.Store CredentialAuthorityState.layout) (lawfulCheck : D → Bool)
+    (directory'? : Option D') (authority'? : Option A')
+    (directoryOf' : D' → Directory Nat CanonicalCellRegistry.registry)
+    (logicalOf' : A' → Store.Store CredentialAuthorityState.layout) (lawfulCheck' : D' → Bool)
+    (directories : directory'?.map directoryOf' = directory?.map directoryOf)
+    (lawfuls : directory'?.map lawfulCheck' = directory?.map lawfulCheck)
+    (authorities : authority'?.map logicalOf' = authority?.map logicalOf) :
+    (validateCore config seed logStart directory'? authority'? directoryOf' logicalOf' lawfulCheck').map
+        (·.1.2.2) =
+      (validateCore config seed logStart directory? authority? directoryOf logicalOf lawfulCheck).map
+        (·.1.2.2) := by
+  unfold validateCore
+  rw [directories, lawfuls, authorities]
+  cases validateChecks config seed logStart (directory?.map directoryOf) (authority?.map logicalOf)
+      (directory?.map lawfulCheck) with
+  | error detail => rfl
+  | ok pins =>
+      simp only [bind, Except.bind]
+      cases directory? <;> cases directory'? <;> simp at directories lawfuls
+      · rfl
+      · rename_i d' d
+        cases authority? <;> cases authority'? <;> simp at authorities
+        · rfl
+        · simp only [need, pure, Except.pure]
+          by_cases verdict : lawfulCheck' d = true
+          · rw [dif_pos verdict, dif_pos (lawfuls ▸ verdict)]
+            rfl
+          · rw [dif_neg verdict, dif_neg (lawfuls ▸ verdict)]
+            rfl
+
+/-- The one validation of the full shape, over a supplied directory and
+cell-law check. The caller's directory must be the image's
+(`validatePartsWith_eq`) and its check must decide `cellsLawful`
+(`lawfulExact`); then this is `validateParts`, the same result and the same
+refusal in the same order. -/
+def validatePartsWith (config : Config) (durable : Durable)
+    (directory? : Option (CredentialAuthorityDomainReceiver.LoadedDirectory durable))
+    (lawfulCheck : CredentialAuthorityDomainReceiver.LoadedDirectory durable → Bool)
+    (lawfulExact : ∀ loaded, lawfulCheck loaded = cellsLawful config durable loaded.directory) :
+    Except String (Validated config durable) :=
+  (validateCore config durable.image.seed durable.logStart directory?
+    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot)
+    (·.directory) (·.snapshot.logical) lawfulCheck).map fun parts =>
+      ⟨parts.1.1, parts.1.2.1, parts.1.2.2, (lawfulExact parts.1.1) ▸ parts.2⟩
 
 def validateParts (config : Config) (durable : Durable) :
     Except String (Validated config durable) :=

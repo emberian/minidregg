@@ -37,9 +37,8 @@ def augment (profile : ObjectiveBendResultAdapter.Profile) (command : Command)
       ⟨⟨target.target,target.expectedTargetRoot⟩,payload,payloadStream.toLawful.decode_encode payload⟩
     pure (effects++[extra])
 
-structure Prepared {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (deployment : CanonicalCellRegistry.Deployment)
-    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
+structure Prepared (deployment : CanonicalCellRegistry.Deployment)
+    (loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry)
     (profile : ObjectiveBendResultAdapter.Profile) (command : Command) (source : AnnotatedTerm)
     (limits : Limits) (budget : Budget) (capacity : ObjectiveBendDemandCapacity.Profile) where
   private mk ::
@@ -70,21 +69,20 @@ structure Prepared {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBy
   nativeExact : BendWorldPlan.matchesCommand plan command = true
   returnsStored : plan.returns.all (storesReturn command) = true
 
-def prepareChecked {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (deployment : CanonicalCellRegistry.Deployment)
-    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
+def prepareChecked (deployment : CanonicalCellRegistry.Deployment)
+    (loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry)
     (profile : ObjectiveBendResultAdapter.Profile) (command : Command) (source : AnnotatedTerm)
     (checked : Checked source []) (limits : Limits) (budget : Budget) (capacity : ObjectiveBendDemandCapacity.Profile) :
     Except ObjectiveBendResultAdapter.Failure (Prepared deployment loaded profile command source limits budget capacity) := do
   match runExact : executeWith (ObjectiveBendDemandCapacity.allows capacity) limits budget source.term with
-  | .error error => throw (.execution error.1 error.2)
+  | .error error => throw (.execution error.1 error.2.1 error.2.2)
   | .ok execution =>
     match typeShape : checked.type with
     | .field "plan" planType (.field "result" resultType .emptyRow) =>
       match dataShape : execution.extraction.result.value with
       | .record [("plan",planData),("result",resultData)] =>
         if !ObjectiveBendNativePlanData.digestCapacity budget.nodes capacity planData then
-          throw (.execution .suspended execution.extraction.result.state)
+          throw (.execution .suspended execution.extraction.result.state execution.extraction.result.remaining)
         if typeExact : dataMatches budget.nodes checked.type execution.extraction.result.value = true then
           match decodedPlan : ObjectiveBendNativePlanData.decode capacity planData with
           | none => throw .nativeBinding
@@ -102,7 +100,7 @@ def prepareChecked {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBy
                 let some effects := ObjectiveBendNativePlanData.bindOrdered deployment loaded command augmented | throw .nativeBinding
                 let plan : BendWorldPlan.Plan := ⟨effects.1,[slot],reads.1⟩
                 let producedBytes := (plan.effects.map (fun effect=>BendWorldPlan.effectStream.encode effect)).flatten.length + (BendWorldPlan.encodeReturn slot).length
-                if producedBytes > budget.bytes then throw (.execution .budget execution.extraction.result.state)
+                if producedBytes > budget.bytes then throw (.execution .budget execution.extraction.result.state execution.extraction.result.remaining)
                 if nativeExact : BendWorldPlan.matchesCommand plan command = true then
                   if returnsStored : plan.returns.all (storesReturn command) = true then
                     pure ⟨checked,execution,runExact,planType,resultType,typeShape,planData,resultData,dataShape,typeExact,native,decodedPlan,bytes,bytesExact,slot,rfl,augmented,augmentationExact,effects.1,effects.2,reads.1,reads.2,plan,rfl,nativeExact,returnsStored⟩
@@ -111,9 +109,8 @@ def prepareChecked {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBy
         else throw .groundType
       | _ => throw .groundType
     | _ => throw .groundType
-def prepare {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (deployment : CanonicalCellRegistry.Deployment)
-    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
+def prepare (deployment : CanonicalCellRegistry.Deployment)
+    (loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry)
     (profile : ObjectiveBendResultAdapter.Profile) (command : Command) (source : AnnotatedTerm)
     (typeFuel : Nat) (limits : Limits) (budget : Budget) (capacity : ObjectiveBendDemandCapacity.Profile) :
     Except ObjectiveBendResultAdapter.Failure (Prepared deployment loaded profile command source limits budget capacity) := do

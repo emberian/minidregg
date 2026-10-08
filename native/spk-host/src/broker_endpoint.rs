@@ -88,27 +88,27 @@ pub(super) fn call_at(root: &Path, socket: Option<&Path>, request: &Request) -> 
     let path = resolve(root, socket)?;
     custody::root_ancestors(root)?;
     let meta = fs::symlink_metadata(root)?;
-    if !meta.is_dir() || meta.uid() != 0 || meta.mode() & 0o022 != 0 {
+    if !meta.is_dir() || !crate::os::root_owner(meta.uid()) || meta.mode() & 0o022 != 0 {
         return Err(invalid("broker grains root custody refused"));
     }
     custody::root_ancestors(&path)?;
     if path == Path::new(SOCKET) {
         // Preserve the legacy protocol for an unchanged canonical installation.
-        exchange(connect(&path, 0)?, request)
+        exchange(connect(&path, crate::os::root_uid())?, request)
     } else {
-        selected_call(root, &path, request, 0)
+        selected_call(root, &path, request, crate::os::root_uid())
     }
 }
 pub(super) fn call_legacy(request: &Request) -> io::Result<Value> {
     custody::root_ancestors(Path::new(SOCKET))?;
-    exchange(connect(Path::new(SOCKET), 0)?, request)
+    exchange(connect(Path::new(SOCKET), crate::os::root_uid())?, request)
 }
 
 /// A root-private lifetime lock serializes restart/stale socket recovery. Even a
 /// pre-lock legacy broker is detected by a successful connection and not unlinked.
 pub(super) fn bind(path: &Path, gid: u32) -> io::Result<(UnixListener, File)> {
     custody::root_ancestors(path)?;
-    bind_owned(path, gid, 0)
+    bind_owned(path, gid, crate::os::root_uid())
 }
 fn bind_owned(path: &Path, gid: u32, owner: u32) -> io::Result<(UnixListener, File)> {
     let lock_path = path.with_extension("sock.lock");

@@ -30,6 +30,21 @@
 # updated 2026-10-04: Kernel.ClockLaw (the clock law and the clock write law step) enters with the pay receivers that judge the clock write (kn-law-bypass)  [counts: Minidregg 0 1, Theory 74 161, Kernel 359 504, Pred 7 11, Effects 0 3, Compiler 141 311, Selvage 12 153, Assurance 0 153, Host 77 110, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 12, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-05: batch n3 (ob-ltuo x5 + rollup-1 + rollup-2 + ob-roadmap + protocol-night rooms/pd53/rotpub on 5d0b452d)  [counts: Minidregg 0 1, Theory 74 162, Kernel 369 514, Pred 7 11, Effects 0 3, Compiler 141 312, Selvage 12 153, Assurance 0 153, Host 78 111, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-05: batch n4 (ob-ltuo-s4 + ob-lt2-parser + ob8 + protocol-night w04b on 47487ee4)  [counts: Minidregg 0 1, Theory 74 162, Kernel 389 534, Pred 7 11, Effects 0 3, Compiler 141 312, Selvage 12 153, Assurance 0 153, Host 86 119, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-07: seat-retention: Host.CapacityJson (the one Capacity envelope decoder SeatJson and ObjectiveActivityJson share) enters the Host closure  [counts: Minidregg 0 1, Theory 74 162, Kernel 389 534, Pred 7 11, Effects 0 3, Compiler 141 312, Selvage 12 153, Assurance 0 153, Host 87 120, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-07: batch b5: kn2-store-open-2a, P4-JP2, P3-JOURNEYS, P5-RUN-EDITS, P3-FLEET-MIGRATION  [counts: Minidregg 0 1, Theory 75 173, Kernel 389 537, Pred 7 11, Effects 0 3, Compiler 143 318, Selvage 12 153, Assurance 0 153, Host 87 121, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-07: batch b6: obeng-g1, P1-SEATSTORE, P1-BOUNTY-NATIVE, plat-store-audit, burst2-saturate; NativeAcceptedFixtureData regenerated in b5  [counts: Minidregg 0 1, Theory 75 173, Kernel 390 537, Pred 7 11, Effects 0 3, Compiler 146 318, Selvage 12 153, Assurance 0 153, Host 87 121, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-07: batch b7: kn2-store-open-ii, upgrade-turns  [counts: Minidregg 0 1, Theory 75 173, Kernel 392 539, Pred 7 11, Effects 0 3, Compiler 146 319, Selvage 12 153, Assurance 0 153, Host 87 122, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-07: batch b10: P4-JP2-s2, obbc-w1-2, obbc-c3, obbc-docs, obbc fix d15bfc1f, ob-b-probe  [counts: Minidregg 0 1, Theory 76 177, Kernel 392 543, Pred 7 11, Effects 0 3, Compiler 146 321, Selvage 12 153, Assurance 0 153, Host 87 122, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-07: batch b10+b11  [counts: Minidregg 0 1, Theory 76 177, Kernel 392 544, Pred 7 11, Effects 0 3, Compiler 148 323, Selvage 12 153, Assurance 0 155, Host 87 122, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-07: batch b12  [counts: Minidregg 0 1, Theory 76 177, Kernel 392 545, Pred 7 11, Effects 0 3, Compiler 149 324, Selvage 12 153, Assurance 0 155, Host 87 122, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-07: b15  [counts: Minidregg 0 1, Theory 76 177, Kernel 394 545, Pred 7 11, Effects 0 3, Compiler 152 324, Selvage 12 153, Assurance 0 155, Host 87 121, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, TokenCensus 0 2, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-07: b16  [counts: Minidregg 0 1, Theory 76 177, Kernel 395 546, Pred 7 11, Effects 0 3, Compiler 152 324, Selvage 12 153, Assurance 0 155, Host 87 121, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, TokenCensus 0 2, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-07: b17  [counts: Minidregg 0 1, Theory 76 177, Kernel 395 546, Pred 7 11, Effects 0 3, Compiler 151 323, Selvage 12 153, Assurance 0 155, Host 87 121, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, TokenCensus 0 2, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-07: b18  [counts: Minidregg 0 1, Theory 76 177, Kernel 396 547, Pred 7 11, Effects 0 3, Compiler 151 323, Selvage 12 153, Assurance 0 155, Host 87 121, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, TokenCensus 0 2, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-07: b20  [counts: Minidregg 0 1, Theory 76 177, Kernel 396 548, Pred 7 11, Effects 0 3, Compiler 155 324, Selvage 12 153, Assurance 0 155, Host 87 121, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, TokenCensus 0 2, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-07: b25: kn2-index, kn2-neutral-births-1  [counts: Minidregg 0 1, Theory 76 178, Kernel 394 545, Pred 7 11, Effects 0 3, Compiler 155 324, Selvage 12 153, Assurance 0 155, Host 87 121, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, TokenCensus 0 2, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-07: b26: plat-quote-probe (Compiler.PayEnrolSignatureIO leaves)  [counts: Minidregg 0 1, Theory 76 178, Kernel 394 545, Pred 7 11, Effects 0 3, Compiler 154 323, Selvage 12 153, Assurance 0 155, Host 87 121, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, TokenCensus 0 2, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-07: b22 kn2-trie-a  [counts: Minidregg 0 1, Theory 78 178, Kernel 394 545, Pred 7 11, Effects 0 3, Compiler 154 323, Selvage 12 153, Assurance 0 155, Host 87 121, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, TokenCensus 0 2, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 Compiler.Air
 Compiler.AirBignum
 Compiler.AirFlatten
@@ -64,24 +79,35 @@ Compiler.CredentialAuthorityDomainReceiver
 Compiler.CredentialAuthorityEntryCodec
 Compiler.CredentialAuthorityPolicyRegistry
 Compiler.CredentialAuthorityReplay
+Compiler.CredentialAuthorityServed
 Compiler.CredentialSignatureAdmission
 Compiler.CredentialSignatureIO
 Compiler.CredentialSigningKeyCodec
 Compiler.DeclaredEffectArtifact
 Compiler.DeclaredEffectCell
 Compiler.DurableCheckpointCodec
+Compiler.DurableHistory
+Compiler.DurableHistoryReader
+Compiler.DurableHistoryStore
+Compiler.DurableIndex
 Compiler.DurableLogTags
 Compiler.DurableReceiverCodec
 Compiler.DurableReceiverIO
+Compiler.DurableServed
+Compiler.DurableStoreAudit
 Compiler.Emit
 Compiler.EmitSerialize
 Compiler.Evaluator
 Compiler.FiniteDependentMapCachedOrdering
 Compiler.FiniteDependentMapCodec
 Compiler.FnEvidenceCodec
+Compiler.FnWireConsumer
 Compiler.FnWireFncu
 Compiler.FnWireGrammar
+Compiler.FnWireJson
+Compiler.FnWirePinned
 Compiler.FnWireRoundTrip
+Compiler.FnWireSized
 Compiler.GenericSimplexCodec
 Compiler.GenericSimplexIO
 Compiler.GenericSimplexSourceAnchor
@@ -113,11 +139,14 @@ Compiler.ObjectAudienceCodec
 Compiler.ObjectAudienceRoster
 Compiler.ObjectiveBendC4
 Compiler.ObjectiveBendCombinedResult
+Compiler.ObjectiveBendContract
 Compiler.ObjectiveBendDataWire
 Compiler.ObjectiveBendElaborate
 Compiler.ObjectiveBendFrontEnd
 Compiler.ObjectiveBendFrontEndIdentity
 Compiler.ObjectiveBendGenericResult
+Compiler.ObjectiveBendLaw
+Compiler.ObjectiveBendLawCodec
 Compiler.ObjectiveBendNativePlanData
 Compiler.ObjectiveBendParse
 Compiler.ObjectiveBendPlanAdapter
@@ -130,8 +159,6 @@ Compiler.ObjectiveInvocationClaim
 Compiler.ObjectiveInvocationLayout
 Compiler.ObjectiveNativeScalarBinding
 Compiler.ObjectiveSourcePackage
-Compiler.PayEnrolSignatureIO
-Compiler.PayEnrolSignatureV2IO
 Compiler.PhysicalLawResolution
 Compiler.PlanFootprintCodec
 Compiler.PolicyComponentResolution
@@ -153,6 +180,7 @@ Compiler.ResourceTargetAdmission
 Compiler.RetainedArtifactIO
 Compiler.SemanticArtifactBundle
 Compiler.SemanticManifest
+Compiler.ServedBasis
 Compiler.Sha256
 Compiler.Signature
 Compiler.SigningKeyCommitment
@@ -216,6 +244,7 @@ Host.ApplicationSpkLaunchDescriptorAuthoring
 Host.ApplicationStreamContinuityInspection
 Host.BirthRuntimeProfile
 Host.CapabilityInspection
+Host.CapacityJson
 Host.CarryInspection
 Host.CurrentResourceBirthAuthoring
 Host.DryRun
@@ -272,7 +301,6 @@ Kernel.ApplicationAgentLifetimeDispatchReserveContext
 Kernel.ApplicationAgentLifetimeDispatchReserveCore
 Kernel.ApplicationAgentLifetimeGrant
 Kernel.ApplicationAgentLifetimeGrantAdmission
-Kernel.ApplicationAgentLifetimeGrantAtomicBirth
 Kernel.ApplicationAgentLifetimeGrantDelegation
 Kernel.ApplicationAgentLifetimeGrantIntentTemplate
 Kernel.ApplicationAgentLifetimeGrantLookup
@@ -387,7 +415,6 @@ Kernel.ApplicationLifecycleV3Lookup
 Kernel.ApplicationPermissionSchema
 Kernel.ApplicationRouteAdmission
 Kernel.ApplicationShareIssueAdmission
-Kernel.ApplicationShareIssueAtomicBirth
 Kernel.ApplicationShareIssueAuthoring
 Kernel.ApplicationShareIssueDelegation
 Kernel.ApplicationShareIssueGrainAdmission
@@ -439,6 +466,7 @@ Kernel.DurableCheckpoint
 Kernel.DurableCommitProtocol
 Kernel.DurableDataIntent
 Kernel.DurableReceiver
+Kernel.DurableView
 Kernel.FieldClosure
 Kernel.FleetTurn
 Kernel.FleetTurnReceiver
@@ -523,10 +551,12 @@ Kernel.NativeHostContext
 Kernel.NativeHostGenesis
 Kernel.NativeHostGrainBirth
 Kernel.NativeHostKeyCommitmentAdoption
+Kernel.NativeHostLight
 Kernel.NativeHostObjectAudience
 Kernel.NativeHostPayClaims
 Kernel.NativeHostReplay
 Kernel.NativeHostReserveBirth
+Kernel.NativeHostServed
 Kernel.NativeHostSession
 Kernel.NativeObservationController
 Kernel.NativeObservationOpeningCache
@@ -542,10 +572,12 @@ Kernel.ObjectAudienceController
 Kernel.ObjectAudienceInstall
 Kernel.ObjectRecord
 Kernel.ObjectState
+Kernel.ObjectStateType
 Kernel.ObjectiveActivity
 Kernel.ObjectiveActivityCell
 Kernel.ObjectiveActivityGate
 Kernel.ObjectiveActivityReceiver
+Kernel.ObjectiveActivityUpgrade
 Kernel.ObjectiveActivityWire
 Kernel.ObjectiveAdmittedTurn
 Kernel.ObjectiveBendArtifactSource
@@ -555,9 +587,11 @@ Kernel.ObjectiveBendNativeInput
 Kernel.ObjectiveBendPreparedOutput
 Kernel.ObjectiveBendPublishedPackage
 Kernel.ObjectiveCall
+Kernel.ObjectiveDomain
 Kernel.ObjectiveKernelConfig
 Kernel.ObjectiveSend
 Kernel.ObjectiveTariff
+Kernel.ObjectiveWorkAccount
 Kernel.ParticipantFactoryProvisioning
 Kernel.ParticipantFactoryProvisioningReceiver
 Kernel.ParticipantKeyEnrollment
@@ -667,7 +701,10 @@ Selvage.Sumcheck
 Selvage.SumcheckReduction
 Theory.AcceptedCellEffect
 Theory.AssertAxioms
+Theory.AssertCompiled
 Theory.AuthMap
+Theory.AuthTrie
+Theory.AuthTrieRange
 Theory.AuthorizationDeclaration
 Theory.AxiomPin
 Theory.Bignum
@@ -705,6 +742,7 @@ Theory.HyperdocumentOperations
 Theory.IndexedProgram
 Theory.KeyCommitmentAdoption
 Theory.KeyPreRotation
+Theory.LogAccumulator
 Theory.Nock
 Theory.NockCost.Shape
 Theory.Noun

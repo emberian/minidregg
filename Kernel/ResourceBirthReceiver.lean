@@ -321,6 +321,18 @@ theorem intent_exact_source {height : Height}
       (intent accepted).transactionId = accepted.descriptor.transactionId :=
   ⟨rfl, rfl, rfl, rfl⟩
 
+/-- **The committed births are the named ones.**  Every write of the durable
+intent that creates its cell is named by the step the factory law admitted
+(`AcceptedBirth.births_named`): the intent commits exactly the writes the
+naming check ran over, so no birth reaches the journal unjudged. -/
+theorem intent_births_named {height : Height}
+    (accepted : AcceptedBirth profile deployment pins durable height) :
+    ∀ write ∈ (intent accepted).writes, ResourceBirthController.Concrete.bornIn write = true →
+      ReceivingLaw.namesBirth accepted.factoryStep write = true :=
+  accepted.births_named.1
+
+#assert_axioms intent_births_named
+
 /-- Both global durable coordinates come from the receiving source's same
 creator-scoped birth identity; neither can be chosen independently by ingress. -/
 theorem intent_derived_identity {height : Height}

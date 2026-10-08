@@ -1,0 +1,885 @@
+## O1-join-lead  [INFERRED]
+$ env MINI_FLEET_HOME=/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home MINI_FLEET_SPONSOR=/srv/lanes/P3-FLEET-MIGRATION/run1/fixture/sponsor dregg-client-sign join --profile lead --fund 20000
+exit 0
+stdout: {"balance":20000,"cell":"15474279766743318203","enrollment_receipt":{"acceptedCount":"1","eventId":"89756536550912394819212967892191872939301776005109053412100588398685855353526","transactionId":"11872743669788521208242908442828900870838636902078312506742101676174133820940","worldRoot":"35606295557338646661969630058493318377529738552744566882469429342940675503304"},"funding_receipt":{"acceptedCount":"2","confirmation":"installed","eventId":"90308596095266471889973691235625468906553211843843308240896343010606073991945","transactionId":"62994443981525193029577265410976335202814107712734486618529183692107538828645","type":"confirmed","worldRoot":"100970773091271504764171664188712525171834198193699748175091590787123798520800"},"joined":true,"joined_in_flight":false,"materialized":true,"node":"unix:/srv/lanes/P3-FLEET-MIGRATION/run1/fixture/public/mini.sock","profile":"lead","public_key":"7f9a7035f5d68adbfd34546e1fb14ba7c4e121c8f8fb2f33509f8b56938eed98","spend_capability":"10594922070227049252","subject":"12010091912003170187","topped_up":false}
+stderr:
+  This key is the only copy. It signs as you and opens your private rooms.
+  If you lose it and have no next key there is no recovery: you enroll a new subject and are re-invited.
+  Room content comes back by re-wrap at the current epoch; older epochs come back
+  only from a member who kept them. Your old posts stay under the old subject.
+  Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB --escrow-subject SUBJECT` writes your seed encrypted
+  to your sponsor, which lets your sponsor sign as you.
+  next key: /srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/lead/key.next (its public half: /srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/lead/key.next.pub)
+  for your sponsor's `enroll plan NAME KEYFILE NEXT-PUB COSIGN` (public, safe to send):
+    next public key: e3deefe2f98d239018375aff6d26f13f4edb78185b74b3472c13cce39a561343
+    co-signature:    608a8496ee55553e7795d2cbb5c288b11d374ce4edacb54fadcace4d7beaca3876ece50fb59776c0295d6ed702d67bab4a402b55f5802ded8e548b9ff3806405
+  Your NEXT key is the only thing that can rotate this identity. If the daily key
+  is lost or stolen, `mini rotate-key --next-key NEXT` moves your subject to it and
+  the daily key stops signing; a thief holding only the daily key cannot rotate.
+  Keep the next key OFF this machine (other media, paper): if it sits beside the
+  daily key, whoever takes one takes both and pre-rotation protects nothing.
+  hosted shell: this next key is a file on this box, beside your daily key; root can
+  read both, so pre-rotation protects you only once the next key is NOT on the box.
+  Move it off (`--next-to` other media, or copy it home and delete it here).
+  {
+    "authority": "candidate-only",
+    "keyId": "11183856205137721083",
+    "plan": {
+      "canonical": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f504c414e2f76315621ff71545980a814f81b66f2991595d2e9b68688c6e9d1d5b786fca8352a68ced28fffdbff44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ffc99f5951d8675997ede21047aef3d73aff4c9195c1505859560a1e8e739214b1ae73f11966b63c7dc82cd59894b32d2354ffb92dd2c2f189308b3c7c470b921c777909863f5488f3446c5431168cfa780396ff12a8ae83a625849fff01ff01ffe35c2da31e464dabff20ff7f9a7035f5d68adbfd34546e1fb14ba7c4e121c8f8fb2f33509f8b56938eed98ff00081c3846381c0801ff0160542767d5ba207a60c0c3d8a5bd17fd55c96bc4d3c47873af75fe60d1c17c95ff4901ff02ff4dff04ff0607ff0102ff0a07ff02ff017a1bff02ff01ff07ff20ff73d2940e19560d0c68f27ff11ddad4073cb80542df8234e9de9ce76a08513e37ff91600fff000c0207ff02ff01070207ff02ff000b01ff7a1bff02ff01ff1aff44524547472f415554482f5349474e45442d5245515545535402aeff44524547472f415554482f504c414e0211ff5621ff71545980a814f81b66f2991595d2e9b68688c6e9d1d5b786fca8352a68ced28fff09ff03ff07ff02ff0aff0affb4a8b788a7e75071ced06afdd9ecf6f4525469d9c197b2d895a8a6d860f37c1301ffe7ea14cd3581a172196dfdd64b3eccfecb0082b719c8049f2e88a73be18709e0ff3766c3dc5093580f8f0da0807e25a068d6e0c2c4c204879b1ca12f2663eea11dffffff0affffffdbff3766c3dc5093580f8f0da0807e25a068d6e0c2c4c204879b1ca12f2663eea11dff2c01ff44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f504f5353455353494f4e2f76315621ff71545980a814f81b66f2991595d2e9b68688c6e9d1d5b786fca8352a68ced28fffdbff44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ffc99f5951d8675997ede21047aef3d73aff4c9195c1505859560a1e8e739214b1ae73f11966b63c7dc82cd59894b32d2354ffb92dd2c2f189308b3c7c470b921c777909863f5488f3446c5431168cfa780396ff12a8ae83a625849fff01ff01ffe35c2da31e464dabff20ff7f9a7035f5d68adbfd34546e1fb14ba7c4e121c8f8fb2f33509f8b56938eed98ff00081c3846381c0801ff0160542767d5ba207a60c0c3d8a5bd17fd55c96bc4d3c47873af75fe60d1c17c95ff",
+      "command": {
+        "canonical": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ffc99f5951d8675997ede21047aef3d73aff4c9195c1505859560a1e8e739214b1ae73f11966b63c7dc82cd59894b32d2354ffb92dd2c2f189308b3c7c470b921c777909863f5488f3446c5431168cfa780396ff12a8ae83a625849fff01ff01ffe35c2da31e464dabff20ff7f9a7035f5d68adbfd34546e1fb14ba7c4e121c8f8fb2f33509f8b56938eed98ff00081c3846381c0801ff0160542767d5ba207a60c0c3d8a5bd17fd55c96bc4d3c47873af75fe60d1c17c95ff",
+        "control": "53",
+        "expectedAuthorityRoot": "60100252952767643301894783539877521654509431230107394874705803018481991126160",
+        "expectedFactoryRoot": "33708355066861797709127598135896816117331867426313708198427364297172659615526",
+        "key": {
+          "activeFrom": "0",
+          "activeUntil": "18446744073709551615",
+          "algorithm": "1",
+          "keyEpoch": "1",
+          "keyId": "11183856205137721083",
+          "nextKeyDigest": "59890173557534361577714625175170306888098919388738243104373559481179223981616",
+          "publicKey": "7f9a7035f5d68adbfd34546e1fb14ba7c4e121c8f8fb2f33509f8b56938eed98",
+          "subject": "12010091912003170187"
+        },
+        "nonce": "73760896033955802478082223627217688721",
+        "sponsor": "7",
+        "type": "participant-key-enrollment-v1"
+      },
+      "commandBytes": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ffc99f5951d8675997ede21047aef3d73aff4c9195c1505859560a1e8e739214b1ae73f11966b63c7dc82cd59894b32d2354ffb92dd2c2f189308b3c7c470b921c777909863f5488f3446c5431168cfa780396ff12a8ae83a625849fff01ff01ffe35c2da31e464dabff20ff7f9a7035f5d68adbfd34546e1fb14ba7c4e121c8f8fb2f33509f8b56938eed98ff00081c3846381c0801ff0160542767d5ba207a60c0c3d8a5bd17fd55c96bc4d3c47873af75fe60d1c17c95ff",
+      "domain": "8501",
+      "possessionHeader": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f504f5353455353494f4e2f76315621ff71545980a814f81b66f2991595d2e9b68688c6e9d1d5b786fca8352a68ced28fffdbff44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ffc99f5951d8675997ede21047aef3d73aff4c9195c1505859560a1e8e739214b1ae73f11966b63c7dc82cd59894b32d2354ffb92dd2c2f189308b3c7c470b921c777909863f5488f3446c5431168cfa780396ff12a8ae83a625849fff01ff01ffe35c2da31e464dabff20ff7f9a7035f5d68adbfd34546e1fb14ba7c4e121c8f8fb2f33509f8b56938eed98ff00081c3846381c0801ff0160542767d5ba207a60c0c3d8a5bd17fd55c96bc4d3c47873af75fe60d1c17c95ff",
+      "semantics": "57621574434371209881717419650284223750536103367801519131515545423056217876633",
+      "sponsorHeader": {
+        "algorithm": "1",
+        "canonical": "02ff4dff04ff0607ff0102ff0a07ff02ff017a1bff02ff01ff07ff20ff73d2940e19560d0c68f27ff11ddad4073cb80542df8234e9de9ce76a08513e37ff91600fff000c0207ff02ff01070207ff02ff000b01ff7a1bff02ff01ff1aff44524547472f415554482f5349474e45442d5245515545535402aeff44524547472f415554482f504c414e0211ff5621ff71545980a814f81b66f2991595d2e9b68688c6e9d1d5b786fca8352a68ced28fff09ff03ff07ff02ff0aff0affb4a8b788a7e75071ced06afdd9ecf6f4525469d9c197b2d895a8a6d860f37c1301ffe7ea14cd3581a172196dfdd64b3eccfecb0082b719c8049f2e88a73be18709e0ff3766c3dc5093580f8f0da0807e25a068d6e0c2c4c204879b1ca12f2663eea11dffffff0affffffdbff3766c3dc5093580f8f0da0807e25a068d6e0c2c4c204879b1ca12f2663eea11dff",
+        "codecVersion": "2",
+        "decoded": true,
+        "domain": "44524547472f415554482f5349474e45442d5245515545535402",
+        "footprint": [
+          {
+            "address": "0607ff",
+            "value": "02ff"
+          },
+          {
+            "address": "0a07ff02ff",
+            "value": "7a1bff02ff01ff07ff20ff73d2940e19560d0c68f27ff11ddad4073cb80542df8234e9de9ce76a08513e37ff91600fff00"
+          },
+          {
+            "address": "0c0207ff02ff",
+            "value": ""
+          },
+          {
+            "address": "070207ff02ff",
+            "value": null
+          }
+        ],
+        "keyEpoch": "2",
+        "keyId": "7007",
+        "message": "44524547472f415554482f504c414e0211ff5621ff71545980a814f81b66f2991595d2e9b68688c6e9d1d5b786fca8352a68ced28fff09ff03ff07ff02ff0aff0affb4a8b788a7e75071ced06afdd9ecf6f4525469d9c197b2d895a8a6d860f37c1301ffe7ea14cd3581a172196dfdd64b3eccfecb0082b719c8049f2e88a73be18709e0ff3766c3dc5093580f8f0da0807e25a068d6e0c2c4c204879b1ca12f2663eea11dffffff0affffffdbff",
+        "nullifier": "11872743669788521208242908442828900870838636902078312506742101676174133820940",
+        "validUntil": "266"
+      },
+      "type": "participant-key-enrollment-plan-v1"
+    },
+    "publicKey": "7f9a7035f5d68adbfd34546e1fb14ba7c4e121c8f8fb2f33509f8b56938eed98",
+    "subject": "12010091912003170187",
+    "type": "minidregg-participant-enrollment-plan-custody-v1"
+  }
+  {
+    "authority": "awaiting-admission",
+    "ingressSha256": "38964d89ed89dda5453717caf4b6f1e6939e2aad43f01433b28f0455924d2959",
+    "keyId": "11183856205137721083",
+    "subject": "12010091912003170187",
+    "type": "minidregg-participant-enrollment-sealed-v1"
+  }
+  {
+    "authority": "admitted-key-only",
+    "keyId": "11183856205137721083",
+    "keyPath": "/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/lead/key",
+    "publicKey": "7f9a7035f5d68adbfd34546e1fb14ba7c4e121c8f8fb2f33509f8b56938eed98",
+    "receipt": {
+      "acceptedCount": "1",
+      "eventId": "89756536550912394819212967892191872939301776005109053412100588398685855353526",
+      "transactionId": "11872743669788521208242908442828900870838636902078312506742101676174133820940",
+      "worldRoot": "35606295557338646661969630058493318377529738552744566882469429342940675503304"
+    },
+    "subject": "12010091912003170187",
+    "type": "minidregg-participant-enrollment-result-v1"
+  }
+  /srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/lead/workspace
+  workspace continuity: legacy; initialize with workspace --action continuity-init --name REF
+  /srv/lanes/P3-FLEET-MIGRATION/run1/fixture/sponsor/sources/create-lead-account.authoring/g0001/intent.bin
+  workspace birth attempt: /srv/lanes/P3-FLEET-MIGRATION/run1/fixture/sponsor/attempts/create-lead-account
+  {
+    "acceptedCount": "2",
+    "confirmation": "installed",
+    "eventId": "90308596095266471889973691235625468906553211843843308240896343010606073991945",
+    "transactionId": "62994443981525193029577265410976335202814107712734486618529183692107538828645",
+    "type": "confirmed",
+    "worldRoot": "100970773091271504764171664188712525171834198193699748175091590787123798520800"
+  }
+  account
+  {
+    "account": "15474279766743318203",
+    "authority": "admitted-key-and-owned-funded-account",
+    "balance": "20000",
+    "controlCapability": "14187509954772618466",
+    "enrollmentReceipt": {
+      "acceptedCount": "1",
+      "eventId": "89756536550912394819212967892191872939301776005109053412100588398685855353526",
+      "transactionId": "11872743669788521208242908442828900870838636902078312506742101676174133820940",
+      "worldRoot": "35606295557338646661969630058493318377529738552744566882469429342940675503304"
+    },
+    "fundingReceipt": {
+      "acceptedCount": "2",
+      "confirmation": "installed",
+      "eventId": "90308596095266471889973691235625468906553211843843308240896343010606073991945",
+      "transactionId": "62994443981525193029577265410976335202814107712734486618529183692107538828645",
+      "type": "confirmed",
+      "worldRoot": "100970773091271504764171664188712525171834198193699748175091590787123798520800"
+    },
+    "joined": true,
+    "publicKey": "7f9a7035f5d68adbfd34546e1fb14ba7c4e121c8f8fb2f33509f8b56938eed98",
+    "spendCapability": "10594922070227049252",
+    "subject": "12010091912003170187",
+    "type": "minidregg-fleet-join-v1",
+    "workspace": "/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/lead/workspace"
+  }
+expect: ok:.joined and .materialized and .balance == 20000
+
+## O2-join-probe  [INFERRED]
+$ env MINI_FLEET_HOME=/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home MINI_FLEET_SPONSOR=/srv/lanes/P3-FLEET-MIGRATION/run1/fixture/sponsor dregg-client-sign join --profile probe --fund 5000
+exit 0
+stdout: {"balance":5000,"cell":"17626623996389500342","enrollment_receipt":{"acceptedCount":"3","eventId":"9106061698572700681133714634513649102849719814243652910746900180491101390302","transactionId":"68092472086625439873631691482323093127219310381884532968566895046261176737621","worldRoot":"104675698397076981105825395737967884556812142257476541576436588186863618494070"},"funding_receipt":{"acceptedCount":"4","confirmation":"installed","eventId":"104901401377291855791814855216447855813817061569771010305652292145754113560420","transactionId":"73316902338791684727218054535732801718787397000520854214958295614338500458293","type":"confirmed","worldRoot":"113102044341857785100890743464381735086953053531255879253960927554558935251893"},"joined":true,"joined_in_flight":false,"materialized":true,"node":"unix:/srv/lanes/P3-FLEET-MIGRATION/run1/fixture/public/mini.sock","profile":"probe","public_key":"a8780bf298de44e0a2d41d1c441bd2899b19eac6251b1de6e7eee5317f98d07a","spend_capability":"16052164777593360368","subject":"14923153855754704355","topped_up":false}
+stderr:
+  This key is the only copy. It signs as you and opens your private rooms.
+  If you lose it and have no next key there is no recovery: you enroll a new subject and are re-invited.
+  Room content comes back by re-wrap at the current epoch; older epochs come back
+  only from a member who kept them. Your old posts stay under the old subject.
+  Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB --escrow-subject SUBJECT` writes your seed encrypted
+  to your sponsor, which lets your sponsor sign as you.
+  next key: /srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/probe/key.next (its public half: /srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/probe/key.next.pub)
+  for your sponsor's `enroll plan NAME KEYFILE NEXT-PUB COSIGN` (public, safe to send):
+    next public key: b5e7a31731f8b470fd944e1fc025f9521ca05000b32ced0d084556a9561ec94e
+    co-signature:    2c8a7796d74d187be304fadefcff61b7c4b77353c601c7cdc7be26f631ba23a1ee68eaa686dcb1326c29765bcb9f2eb78b93a1379f12a0fc4ff28b80ac60ef01
+  Your NEXT key is the only thing that can rotate this identity. If the daily key
+  is lost or stolen, `mini rotate-key --next-key NEXT` moves your subject to it and
+  the daily key stops signing; a thief holding only the daily key cannot rotate.
+  Keep the next key OFF this machine (other media, paper): if it sits beside the
+  daily key, whoever takes one takes both and pre-rotation protects nothing.
+  hosted shell: this next key is a file on this box, beside your daily key; root can
+  read both, so pre-rotation protects you only once the next key is NOT on the box.
+  Move it off (`--next-to` other media, or copy it home and delete it here).
+  {
+    "authority": "candidate-only",
+    "keyId": "12538738102079970734",
+    "plan": {
+      "canonical": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f504c414e2f76315621ff71545980a814f81b66f2991595d2e9b68688c6e9d1d5b786fca8352a68ced28fffdbff44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ffd2315250eab65d0f18b042c26ba7d998ff4c9195c1505859560a1e8e739214b1ae73f11966b63c7dc82cd59894b32d2354ff37c2960986718cc8d664c4d2ec1e7b3dcba8bc1b6f97efa6a91df237f74d2785ffb3ec0f00ba07d7b2ff01ff01ffc8103578de75d9d4ff20ffa8780bf298de44e0a2d41d1c441bd2899b19eac6251b1de6e7eee5317f98d07aff00081c3846381c0801ff010b9cc34b4b09fd07d86295f1440dd21cb908b83b110c627cfaed474472d6e973ff4901ff02ff4dff04ff0607ff0102ff0a07ff02ff017a1bff02ff01ff07ff20ff73d2940e19560d0c68f27ff11ddad4073cb80542df8234e9de9ce76a08513e37ff91600fff000c0207ff02ff01070207ff02ff000d01ff7a1bff02ff01ff1aff44524547472f415554482f5349474e45442d5245515545535402aeff44524547472f415554482f504c414e0211ff5621ff71545980a814f81b66f2991595d2e9b68688c6e9d1d5b786fca8352a68ced28fff09ff03ff07ff02ff0aff0affa3b6453f8d78c3ceab1a57267a26b09cfddb702ba7dc9d0528e9df512d45b50201ffd4d0ac3e5cec679d510b50cae683459e433caca215cc836c2d1bfded1af4b916ff9c5892abcdf7fd9dd7d5b396f6343bad0cf63605021d23fcde14758cac79f5a9ffffff0affffffdbff9c5892abcdf7fd9dd7d5b396f6343bad0cf63605021d23fcde14758cac79f5a9ff2c01ff44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f504f5353455353494f4e2f76315621ff71545980a814f81b66f2991595d2e9b68688c6e9d1d5b786fca8352a68ced28fffdbff44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ffd2315250eab65d0f18b042c26ba7d998ff4c9195c1505859560a1e8e739214b1ae73f11966b63c7dc82cd59894b32d2354ff37c2960986718cc8d664c4d2ec1e7b3dcba8bc1b6f97efa6a91df237f74d2785ffb3ec0f00ba07d7b2ff01ff01ffc8103578de75d9d4ff20ffa8780bf298de44e0a2d41d1c441bd2899b19eac6251b1de6e7eee5317f98d07aff00081c3846381c0801ff010b9cc34b4b09fd07d86295f1440dd21cb908b83b110c627cfaed474472d6e973ff",
+      "command": {
+        "canonical": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ffd2315250eab65d0f18b042c26ba7d998ff4c9195c1505859560a1e8e739214b1ae73f11966b63c7dc82cd59894b32d2354ff37c2960986718cc8d664c4d2ec1e7b3dcba8bc1b6f97efa6a91df237f74d2785ffb3ec0f00ba07d7b2ff01ff01ffc8103578de75d9d4ff20ffa8780bf298de44e0a2d41d1c441bd2899b19eac6251b1de6e7eee5317f98d07aff00081c3846381c0801ff010b9cc34b4b09fd07d86295f1440dd21cb908b83b110c627cfaed474472d6e973ff",
+        "control": "53",
+        "expectedAuthorityRoot": "53345804400120521605728223336598531312641854307877282605889777182924563566275",
+        "expectedFactoryRoot": "33708355066861797709127598135896816117331867426313708198427364297172659615526",
+        "key": {
+          "activeFrom": "0",
+          "activeUntil": "18446744073709551615",
+          "algorithm": "1",
+          "keyEpoch": "1",
+          "keyId": "12538738102079970734",
+          "nextKeyDigest": "46440064475445112384600452607720340385697033619244700604579911027309024179041",
+          "publicKey": "a8780bf298de44e0a2d41d1c441bd2899b19eac6251b1de6e7eee5317f98d07a",
+          "subject": "14923153855754704355"
+        },
+        "nonce": "191592388092798032713631530045026554130",
+        "sponsor": "7",
+        "type": "participant-key-enrollment-v1"
+      },
+      "commandBytes": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ffd2315250eab65d0f18b042c26ba7d998ff4c9195c1505859560a1e8e739214b1ae73f11966b63c7dc82cd59894b32d2354ff37c2960986718cc8d664c4d2ec1e7b3dcba8bc1b6f97efa6a91df237f74d2785ffb3ec0f00ba07d7b2ff01ff01ffc8103578de75d9d4ff20ffa8780bf298de44e0a2d41d1c441bd2899b19eac6251b1de6e7eee5317f98d07aff00081c3846381c0801ff010b9cc34b4b09fd07d86295f1440dd21cb908b83b110c627cfaed474472d6e973ff",
+      "domain": "8501",
+      "possessionHeader": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f504f5353455353494f4e2f76315621ff71545980a814f81b66f2991595d2e9b68688c6e9d1d5b786fca8352a68ced28fffdbff44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ffd2315250eab65d0f18b042c26ba7d998ff4c9195c1505859560a1e8e739214b1ae73f11966b63c7dc82cd59894b32d2354ff37c2960986718cc8d664c4d2ec1e7b3dcba8bc1b6f97efa6a91df237f74d2785ffb3ec0f00ba07d7b2ff01ff01ffc8103578de75d9d4ff20ffa8780bf298de44e0a2d41d1c441bd2899b19eac6251b1de6e7eee5317f98d07aff00081c3846381c0801ff010b9cc34b4b09fd07d86295f1440dd21cb908b83b110c627cfaed474472d6e973ff",
+      "semantics": "57621574434371209881717419650284223750536103367801519131515545423056217876633",
+      "sponsorHeader": {
+        "algorithm": "1",
+        "canonical": "02ff4dff04ff0607ff0102ff0a07ff02ff017a1bff02ff01ff07ff20ff73d2940e19560d0c68f27ff11ddad4073cb80542df8234e9de9ce76a08513e37ff91600fff000c0207ff02ff01070207ff02ff000d01ff7a1bff02ff01ff1aff44524547472f415554482f5349474e45442d5245515545535402aeff44524547472f415554482f504c414e0211ff5621ff71545980a814f81b66f2991595d2e9b68688c6e9d1d5b786fca8352a68ced28fff09ff03ff07ff02ff0aff0affa3b6453f8d78c3ceab1a57267a26b09cfddb702ba7dc9d0528e9df512d45b50201ffd4d0ac3e5cec679d510b50cae683459e433caca215cc836c2d1bfded1af4b916ff9c5892abcdf7fd9dd7d5b396f6343bad0cf63605021d23fcde14758cac79f5a9ffffff0affffffdbff9c5892abcdf7fd9dd7d5b396f6343bad0cf63605021d23fcde14758cac79f5a9ff",
+        "codecVersion": "2",
+        "decoded": true,
+        "domain": "44524547472f415554482f5349474e45442d5245515545535402",
+        "footprint": [
+          {
+            "address": "0607ff",
+            "value": "02ff"
+          },
+          {
+            "address": "0a07ff02ff",
+            "value": "7a1bff02ff01ff07ff20ff73d2940e19560d0c68f27ff11ddad4073cb80542df8234e9de9ce76a08513e37ff91600fff00"
+          },
+          {
+            "address": "0c0207ff02ff",
+            "value": ""
+          },
+          {
+            "address": "070207ff02ff",
+            "value": null
+          }
+        ],
+        "keyEpoch": "2",
+        "keyId": "7007",
+        "message": "44524547472f415554482f504c414e0211ff5621ff71545980a814f81b66f2991595d2e9b68688c6e9d1d5b786fca8352a68ced28fff09ff03ff07ff02ff0aff0affa3b6453f8d78c3ceab1a57267a26b09cfddb702ba7dc9d0528e9df512d45b50201ffd4d0ac3e5cec679d510b50cae683459e433caca215cc836c2d1bfded1af4b916ff9c5892abcdf7fd9dd7d5b396f6343bad0cf63605021d23fcde14758cac79f5a9ffffff0affffffdbff",
+        "nullifier": "68092472086625439873631691482323093127219310381884532968566895046261176737621",
+        "validUntil": "268"
+      },
+      "type": "participant-key-enrollment-plan-v1"
+    },
+    "publicKey": "a8780bf298de44e0a2d41d1c441bd2899b19eac6251b1de6e7eee5317f98d07a",
+    "subject": "14923153855754704355",
+    "type": "minidregg-participant-enrollment-plan-custody-v1"
+  }
+  {
+    "authority": "awaiting-admission",
+    "ingressSha256": "db8a867c8ca9415f6be836a41532ce80d183fd15378ad1e007a9a68744c0b140",
+    "keyId": "12538738102079970734",
+    "subject": "14923153855754704355",
+    "type": "minidregg-participant-enrollment-sealed-v1"
+  }
+  {
+    "authority": "admitted-key-only",
+    "keyId": "12538738102079970734",
+    "keyPath": "/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/probe/key",
+    "publicKey": "a8780bf298de44e0a2d41d1c441bd2899b19eac6251b1de6e7eee5317f98d07a",
+    "receipt": {
+      "acceptedCount": "3",
+      "eventId": "9106061698572700681133714634513649102849719814243652910746900180491101390302",
+      "transactionId": "68092472086625439873631691482323093127219310381884532968566895046261176737621",
+      "worldRoot": "104675698397076981105825395737967884556812142257476541576436588186863618494070"
+    },
+    "subject": "14923153855754704355",
+    "type": "minidregg-participant-enrollment-result-v1"
+  }
+  /srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/probe/workspace
+  workspace continuity: legacy; initialize with workspace --action continuity-init --name REF
+  /srv/lanes/P3-FLEET-MIGRATION/run1/fixture/sponsor/sources/create-probe-account.authoring/g0001/intent.bin
+  workspace birth attempt: /srv/lanes/P3-FLEET-MIGRATION/run1/fixture/sponsor/attempts/create-probe-account
+  {
+    "acceptedCount": "4",
+    "confirmation": "installed",
+    "eventId": "104901401377291855791814855216447855813817061569771010305652292145754113560420",
+    "transactionId": "73316902338791684727218054535732801718787397000520854214958295614338500458293",
+    "type": "confirmed",
+    "worldRoot": "113102044341857785100890743464381735086953053531255879253960927554558935251893"
+  }
+  account
+  {
+    "account": "17626623996389500342",
+    "authority": "admitted-key-and-owned-funded-account",
+    "balance": "5000",
+    "controlCapability": "14663103750260625341",
+    "enrollmentReceipt": {
+      "acceptedCount": "3",
+      "eventId": "9106061698572700681133714634513649102849719814243652910746900180491101390302",
+      "transactionId": "68092472086625439873631691482323093127219310381884532968566895046261176737621",
+      "worldRoot": "104675698397076981105825395737967884556812142257476541576436588186863618494070"
+    },
+    "fundingReceipt": {
+      "acceptedCount": "4",
+      "confirmation": "installed",
+      "eventId": "104901401377291855791814855216447855813817061569771010305652292145754113560420",
+      "transactionId": "73316902338791684727218054535732801718787397000520854214958295614338500458293",
+      "type": "confirmed",
+      "worldRoot": "113102044341857785100890743464381735086953053531255879253960927554558935251893"
+    },
+    "joined": true,
+    "publicKey": "a8780bf298de44e0a2d41d1c441bd2899b19eac6251b1de6e7eee5317f98d07a",
+    "spendCapability": "16052164777593360368",
+    "subject": "14923153855754704355",
+    "type": "minidregg-fleet-join-v1",
+    "workspace": "/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/probe/workspace"
+  }
+expect: ok:.joined and .balance == 5000
+
+## T01-join-fund0  [OBSERVED chat.py:1350]
+$ env MINI_FLEET_HOME=/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home MINI_FLEET_SPONSOR=/srv/lanes/P3-FLEET-MIGRATION/run1/fixture/sponsor DREGG_PROFILE=codex dregg-client-sign join --profile codex --fund 0
+exit 0
+stdout: {"balance":0,"cell":"10990305426878094482","enrollment_receipt":{"acceptedCount":"5","eventId":"73265392540773778810393911080758683562979220763286742909934205417381058987310","transactionId":"74279057688618684282306629541841468992410246969097217129903470224947086235385","worldRoot":"113789711107871221079915052856904609827836902955580997554925678023726964157367"},"funding_receipt":{"acceptedCount":"6","confirmation":"installed","eventId":"97028722127525100591252156078151791630404110488563505297399568442839718154031","transactionId":"54601905867375797907165840512461519518341415153121898615252912500055960559064","type":"confirmed","worldRoot":"63046670994439591037653287795538358217093599809881886868161802789896309053974"},"joined":true,"joined_in_flight":false,"materialized":true,"node":"unix:/srv/lanes/P3-FLEET-MIGRATION/run1/fixture/public/mini.sock","profile":"codex","public_key":"1a4ba9645c4e099225445bd337a10f60af17ef89a2c8c0a9e97cc473793fb44f","spend_capability":"13136246942213538688","subject":"13908552774522445001","topped_up":false}
+stderr:
+  mini fleet-sign: DREGG_PROFILE is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  This key is the only copy. It signs as you and opens your private rooms.
+  If you lose it and have no next key there is no recovery: you enroll a new subject and are re-invited.
+  Room content comes back by re-wrap at the current epoch; older epochs come back
+  only from a member who kept them. Your old posts stay under the old subject.
+  Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB --escrow-subject SUBJECT` writes your seed encrypted
+  to your sponsor, which lets your sponsor sign as you.
+  next key: /srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/codex/key.next (its public half: /srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/codex/key.next.pub)
+  for your sponsor's `enroll plan NAME KEYFILE NEXT-PUB COSIGN` (public, safe to send):
+    next public key: 233eaccecc7dfde98c5953766f8077861732be2d95ac60b65467053a7224a5f3
+    co-signature:    f77f2974d012112c7ac197071ad051c7b749b5f0cb5ed563c0853d3498ecef3b08bbd4e7d5b5bb05d12183bf5c416e33a13a9ffa3334d128922635a70f162b01
+  Your NEXT key is the only thing that can rotate this identity. If the daily key
+  is lost or stolen, `mini rotate-key --next-key NEXT` moves your subject to it and
+  the daily key stops signing; a thief holding only the daily key cannot rotate.
+  Keep the next key OFF this machine (other media, paper): if it sits beside the
+  daily key, whoever takes one takes both and pre-rotation protects nothing.
+  hosted shell: this next key is a file on this box, beside your daily key; root can
+  read both, so pre-rotation protects you only once the next key is NOT on the box.
+  Move it off (`--next-to` other media, or copy it home and delete it here).
+  {
+    "authority": "candidate-only",
+    "keyId": "9973207936692537868",
+    "plan": {
+      "canonical": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f504c414e2f76315621ff71545980a814f81b66f2991595d2e9b68688c6e9d1d5b786fca8352a68ced28fffdbff44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ff69ba8e83dbc2f256e649c6a842e4e132ff4c9195c1505859560a1e8e739214b1ae73f11966b63c7dc82cd59894b32d2354ff3b80c4eb5ded87422da3c5e68b403514073e0638744df38e7d28cb0a30d4317fffdf4ff0fcb2db3f8eff01ff01ffce0429077b3961c6ff20ff1a4ba9645c4e099225445bd337a10f60af17ef89a2c8c0a9e97cc473793fb44fff00081c3846381c0801ff01443a848e0af4595b032a94544e38ad7e80c96ea551ce6cb5fb9527a719fd0f6fff4901ff02ff4dff04ff0607ff0102ff0a07ff02ff017a1bff02ff01ff07ff20ff73d2940e19560d0c68f27ff11ddad4073cb80542df8234e9de9ce76a08513e37ff91600fff000c0207ff02ff01070207ff02ff000f01ff7a1bff02ff01ff1aff44524547472f415554482f5349474e45442d5245515545535402aeff44524547472f415554482f504c414e0211ff5621ff71545980a814f81b66f2991595d2e9b68688c6e9d1d5b786fca8352a68ced28fff09ff03ff07ff02ff0aff0aff68d6fc62dc6fc838efe8d09f30f4a4c2e11a256baded01cd182670782976a21701ffbe7710abb6f408e551d8cbbc37b671c8446f7ebcb6fe929111965c751303dfb6ff5fc6e37b6848de5499cf75eb082deb203defb070f60817de7b76a89d153467b9ffffff0affffffdbff5fc6e37b6848de5499cf75eb082deb203defb070f60817de7b76a89d153467b9ff2c01ff44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f504f5353455353494f4e2f76315621ff71545980a814f81b66f2991595d2e9b68688c6e9d1d5b786fca8352a68ced28fffdbff44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ff69ba8e83dbc2f256e649c6a842e4e132ff4c9195c1505859560a1e8e739214b1ae73f11966b63c7dc82cd59894b32d2354ff3b80c4eb5ded87422da3c5e68b403514073e0638744df38e7d28cb0a30d4317fffdf4ff0fcb2db3f8eff01ff01ffce0429077b3961c6ff20ff1a4ba9645c4e099225445bd337a10f60af17ef89a2c8c0a9e97cc473793fb44fff00081c3846381c0801ff01443a848e0af4595b032a94544e38ad7e80c96ea551ce6cb5fb9527a719fd0f6fff",
+      "command": {
+        "canonical": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ff69ba8e83dbc2f256e649c6a842e4e132ff4c9195c1505859560a1e8e739214b1ae73f11966b63c7dc82cd59894b32d2354ff3b80c4eb5ded87422da3c5e68b403514073e0638744df38e7d28cb0a30d4317fffdf4ff0fcb2db3f8eff01ff01ffce0429077b3961c6ff20ff1a4ba9645c4e099225445bd337a10f60af17ef89a2c8c0a9e97cc473793fb44fff00081c3846381c0801ff01443a848e0af4595b032a94544e38ad7e80c96ea551ce6cb5fb9527a719fd0f6fff",
+        "control": "53",
+        "expectedAuthorityRoot": "50958550637344635252383626021535286362146206438672709173581100714992173621349",
+        "expectedFactoryRoot": "33708355066861797709127598135896816117331867426313708198427364297172659615526",
+        "key": {
+          "activeFrom": "0",
+          "activeUntil": "18446744073709551615",
+          "algorithm": "1",
+          "keyEpoch": "1",
+          "keyId": "9973207936692537868",
+          "nextKeyDigest": "44495273725332112050699390693164643764444710571663858942314899700914367422158",
+          "publicKey": "1a4ba9645c4e099225445bd337a10f60af17ef89a2c8c0a9e97cc473793fb44f",
+          "subject": "13908552774522445001"
+        },
+        "nonce": "63782252642071673458750628691863809335",
+        "sponsor": "7",
+        "type": "participant-key-enrollment-v1"
+      },
+      "commandBytes": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ff69ba8e83dbc2f256e649c6a842e4e132ff4c9195c1505859560a1e8e739214b1ae73f11966b63c7dc82cd59894b32d2354ff3b80c4eb5ded87422da3c5e68b403514073e0638744df38e7d28cb0a30d4317fffdf4ff0fcb2db3f8eff01ff01ffce0429077b3961c6ff20ff1a4ba9645c4e099225445bd337a10f60af17ef89a2c8c0a9e97cc473793fb44fff00081c3846381c0801ff01443a848e0af4595b032a94544e38ad7e80c96ea551ce6cb5fb9527a719fd0f6fff",
+      "domain": "8501",
+      "possessionHeader": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f504f5353455353494f4e2f76315621ff71545980a814f81b66f2991595d2e9b68688c6e9d1d5b786fca8352a68ced28fffdbff44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ff69ba8e83dbc2f256e649c6a842e4e132ff4c9195c1505859560a1e8e739214b1ae73f11966b63c7dc82cd59894b32d2354ff3b80c4eb5ded87422da3c5e68b403514073e0638744df38e7d28cb0a30d4317fffdf4ff0fcb2db3f8eff01ff01ffce0429077b3961c6ff20ff1a4ba9645c4e099225445bd337a10f60af17ef89a2c8c0a9e97cc473793fb44fff00081c3846381c0801ff01443a848e0af4595b032a94544e38ad7e80c96ea551ce6cb5fb9527a719fd0f6fff",
+      "semantics": "57621574434371209881717419650284223750536103367801519131515545423056217876633",
+      "sponsorHeader": {
+        "algorithm": "1",
+        "canonical": "02ff4dff04ff0607ff0102ff0a07ff02ff017a1bff02ff01ff07ff20ff73d2940e19560d0c68f27ff11ddad4073cb80542df8234e9de9ce76a08513e37ff91600fff000c0207ff02ff01070207ff02ff000f01ff7a1bff02ff01ff1aff44524547472f415554482f5349474e45442d5245515545535402aeff44524547472f415554482f504c414e0211ff5621ff71545980a814f81b66f2991595d2e9b68688c6e9d1d5b786fca8352a68ced28fff09ff03ff07ff02ff0aff0aff68d6fc62dc6fc838efe8d09f30f4a4c2e11a256baded01cd182670782976a21701ffbe7710abb6f408e551d8cbbc37b671c8446f7ebcb6fe929111965c751303dfb6ff5fc6e37b6848de5499cf75eb082deb203defb070f60817de7b76a89d153467b9ffffff0affffffdbff5fc6e37b6848de5499cf75eb082deb203defb070f60817de7b76a89d153467b9ff",
+        "codecVersion": "2",
+        "decoded": true,
+        "domain": "44524547472f415554482f5349474e45442d5245515545535402",
+        "footprint": [
+          {
+            "address": "0607ff",
+            "value": "02ff"
+          },
+          {
+            "address": "0a07ff02ff",
+            "value": "7a1bff02ff01ff07ff20ff73d2940e19560d0c68f27ff11ddad4073cb80542df8234e9de9ce76a08513e37ff91600fff00"
+          },
+          {
+            "address": "0c0207ff02ff",
+            "value": ""
+          },
+          {
+            "address": "070207ff02ff",
+            "value": null
+          }
+        ],
+        "keyEpoch": "2",
+        "keyId": "7007",
+        "message": "44524547472f415554482f504c414e0211ff5621ff71545980a814f81b66f2991595d2e9b68688c6e9d1d5b786fca8352a68ced28fff09ff03ff07ff02ff0aff0aff68d6fc62dc6fc838efe8d09f30f4a4c2e11a256baded01cd182670782976a21701ffbe7710abb6f408e551d8cbbc37b671c8446f7ebcb6fe929111965c751303dfb6ff5fc6e37b6848de5499cf75eb082deb203defb070f60817de7b76a89d153467b9ffffff0affffffdbff",
+        "nullifier": "74279057688618684282306629541841468992410246969097217129903470224947086235385",
+        "validUntil": "270"
+      },
+      "type": "participant-key-enrollment-plan-v1"
+    },
+    "publicKey": "1a4ba9645c4e099225445bd337a10f60af17ef89a2c8c0a9e97cc473793fb44f",
+    "subject": "13908552774522445001",
+    "type": "minidregg-participant-enrollment-plan-custody-v1"
+  }
+  {
+    "authority": "awaiting-admission",
+    "ingressSha256": "dcdb278170f4e84a81e28f64beee957a9fb6ea8923c62048821abe2016af9a9a",
+    "keyId": "9973207936692537868",
+    "subject": "13908552774522445001",
+    "type": "minidregg-participant-enrollment-sealed-v1"
+  }
+  {
+    "authority": "admitted-key-only",
+    "keyId": "9973207936692537868",
+    "keyPath": "/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/codex/key",
+    "publicKey": "1a4ba9645c4e099225445bd337a10f60af17ef89a2c8c0a9e97cc473793fb44f",
+    "receipt": {
+      "acceptedCount": "5",
+      "eventId": "73265392540773778810393911080758683562979220763286742909934205417381058987310",
+      "transactionId": "74279057688618684282306629541841468992410246969097217129903470224947086235385",
+      "worldRoot": "113789711107871221079915052856904609827836902955580997554925678023726964157367"
+    },
+    "subject": "13908552774522445001",
+    "type": "minidregg-participant-enrollment-result-v1"
+  }
+  /srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/codex/workspace
+  workspace continuity: legacy; initialize with workspace --action continuity-init --name REF
+  /srv/lanes/P3-FLEET-MIGRATION/run1/fixture/sponsor/sources/create-codex-account.authoring/g0001/intent.bin
+  workspace birth attempt: /srv/lanes/P3-FLEET-MIGRATION/run1/fixture/sponsor/attempts/create-codex-account
+  {
+    "acceptedCount": "6",
+    "confirmation": "installed",
+    "eventId": "97028722127525100591252156078151791630404110488563505297399568442839718154031",
+    "transactionId": "54601905867375797907165840512461519518341415153121898615252912500055960559064",
+    "type": "confirmed",
+    "worldRoot": "63046670994439591037653287795538358217093599809881886868161802789896309053974"
+  }
+  account
+  {
+    "account": "10990305426878094482",
+    "authority": "admitted-key-and-owned-funded-account",
+    "balance": null,
+    "controlCapability": "16718986340290572307",
+    "enrollmentReceipt": {
+      "acceptedCount": "5",
+      "eventId": "73265392540773778810393911080758683562979220763286742909934205417381058987310",
+      "transactionId": "74279057688618684282306629541841468992410246969097217129903470224947086235385",
+      "worldRoot": "113789711107871221079915052856904609827836902955580997554925678023726964157367"
+    },
+    "fundingReceipt": {
+      "acceptedCount": "6",
+      "confirmation": "installed",
+      "eventId": "97028722127525100591252156078151791630404110488563505297399568442839718154031",
+      "transactionId": "54601905867375797907165840512461519518341415153121898615252912500055960559064",
+      "type": "confirmed",
+      "worldRoot": "63046670994439591037653287795538358217093599809881886868161802789896309053974"
+    },
+    "joined": true,
+    "publicKey": "1a4ba9645c4e099225445bd337a10f60af17ef89a2c8c0a9e97cc473793fb44f",
+    "spendCapability": "13136246942213538688",
+    "subject": "13908552774522445001",
+    "type": "minidregg-fleet-join-v1",
+    "workspace": "/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/codex/workspace"
+  }
+expect: ok:.joined and .materialized and .balance == 0 and (.cell | test("^[0-9]+$"))
+
+## T02a-join-seat-no-sponsor  [OBSERVED chat.py:1350]
+$ env DREGG_NODE_URL=http://127.0.0.1:8898 MELD_NODE_URL=http://127.0.0.1:8898 DREGG_API_TOKEN=replay-token-not-a-secret MELD_NODE_TOKEN=replay-token-not-a-secret DREGG_COORDINATION_EXEMPT=1 DREGG_PROFILE=codex MELD_AGENT_PROFILE=codex MINI_FLEET_HOME=/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home dregg-client-sign join --profile newseat --fund 0
+exit 1
+stdout: (empty)
+stderr:
+  mini fleet-sign: DREGG_NODE_URL is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_API_TOKEN is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_COORDINATION_EXEMPT is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_PROFILE is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini: join needs the sponsor's workspace: --sponsor-workspace or MINI_FLEET_SPONSOR
+expect: refuse:needs the sponsor
+
+## T02b-join-again  [OBSERVED chat.py:1350]
+$ env DREGG_NODE_URL=http://127.0.0.1:8898 MELD_NODE_URL=http://127.0.0.1:8898 DREGG_API_TOKEN=replay-token-not-a-secret MELD_NODE_TOKEN=replay-token-not-a-secret DREGG_COORDINATION_EXEMPT=1 DREGG_PROFILE=codex MELD_AGENT_PROFILE=codex MINI_FLEET_HOME=/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home dregg-client-sign join --profile codex --fund 0
+exit 0
+stdout: {"balance":0,"cell":"10990305426878094482","joined":true,"joined_in_flight":false,"materialized":false,"node":"unix:/srv/lanes/P3-FLEET-MIGRATION/run1/fixture/public/mini.sock","profile":"codex","public_key":"1a4ba9645c4e099225445bd337a10f60af17ef89a2c8c0a9e97cc473793fb44f","spend_capability":"13136246942213538688","subject":"13908552774522445001","topped_up":false}
+stderr:
+  mini fleet-sign: DREGG_NODE_URL is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_API_TOKEN is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_COORDINATION_EXEMPT is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_PROFILE is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  workspace continuity: legacy; initialize with workspace --action continuity-init --name REF
+expect: ok:.joined and (.materialized | not) and .cell == "10990305426878094482" and .balance == 0
+
+## T03-send-unfunded  [OBSERVED chat.py:1413]
+$ env DREGG_NODE_URL=http://127.0.0.1:8898 MELD_NODE_URL=http://127.0.0.1:8898 DREGG_API_TOKEN=replay-token-not-a-secret MELD_NODE_TOKEN=replay-token-not-a-secret DREGG_COORDINATION_EXEMPT=1 DREGG_PROFILE=codex MELD_AGENT_PROFILE=codex MINI_FLEET_HOME=/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home dregg-client-sign send --profile codex --to 10990305426878094482 --topic helm.chat chat:b2b:679402cf55618d11b72580cddc2430a813d797369b6351a28cc57e364f1b51d4
+exit 3
+stdout: (empty)
+stderr:
+  mini fleet-sign: DREGG_NODE_URL is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_API_TOKEN is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_COORDINATION_EXEMPT is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_PROFILE is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  workspace continuity: legacy; initialize with workspace --action continuity-init --name REF
+  refused: Host refused fleet op96, reply byte 255; the frame was not decoded
+    client: fleet send refused: operation-rejected: fleet turn preparation: Minidregg.Kernel.FleetTurn.Reject.bookRefused (phase fleet-plan); exact refusal retained in /srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/codex/workspace/attempts/a-187905066583261710864526178229035009689
+expect: refuse:bookRefused\|not admitted\|insufficient
+
+## T04-transfer-fund-seat  [INFERRED]
+$ env MINI_FLEET_HOME=/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home MINI_FLEET_SPONSOR=/srv/lanes/P3-FLEET-MIGRATION/run1/fixture/sponsor dregg-client-sign transfer --profile lead --to 10990305426878094482 --amount 2000
+exit 0
+stdout: {"amount":2000,"attempt":"/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/lead/workspace/attempts/a-161012855340389680497092737047190129082","chain_index":7,"committed":true,"confirmation":"installed","fee":3,"finality":"accepted","from":"15474279766743318203","node":"unix:/srv/lanes/P3-FLEET-MIGRATION/run1/fixture/public/mini.sock","profile":"lead","receipt":{"acceptedCount":"7","eventId":"15868719417893316903609272635443827136628782213848591809865158654404457511256","transactionId":"111181862638773893743272469562538249278239311767675428556400571876192966663490","worldRoot":"103608503110245827456416735328749655753243612091700178970639133076130602486820"},"replans":0,"to":"10990305426878094482","transferred":true,"turn_hash":"111181862638773893743272469562538249278239311767675428556400571876192966663490"}
+stderr:
+  workspace continuity: legacy; initialize with workspace --action continuity-init --name REF
+  {
+    "attempt": "/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/lead/workspace/attempts/a-161012855340389680497092737047190129082",
+    "authority": "admitted-fleet-turn",
+    "confirmation": "installed",
+    "fee": "3",
+    "payer": "15474279766743318203",
+    "publication": null,
+    "receipt": {
+      "acceptedCount": "7",
+      "eventId": "15868719417893316903609272635443827136628782213848591809865158654404457511256",
+      "transactionId": "111181862638773893743272469562538249278239311767675428556400571876192966663490",
+      "worldRoot": "103608503110245827456416735328749655753243612091700178970639133076130602486820"
+    },
+    "replans": "0",
+    "subject": "12010091912003170187",
+    "supersededAttempts": [],
+    "transfer": {
+      "amount": "2000",
+      "asset": "0",
+      "destination": "10990305426878094482"
+    },
+    "type": "minidregg-fleet-turn-result-v1",
+    "verb": "transfer"
+  }
+expect: ok:.transferred and .committed and .amount == 2000 and .to == "10990305426878094482"
+
+## T05-send-chat  [OBSERVED chat.py:1412-1414]
+$ env DREGG_NODE_URL=http://127.0.0.1:8898 MELD_NODE_URL=http://127.0.0.1:8898 DREGG_API_TOKEN=replay-token-not-a-secret MELD_NODE_TOKEN=replay-token-not-a-secret DREGG_COORDINATION_EXEMPT=1 DREGG_PROFILE=codex MELD_AGENT_PROFILE=codex MINI_FLEET_HOME=/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home dregg-client-sign send --profile codex --to 10990305426878094482 --topic helm.chat chat:b2b:679402cf55618d11b72580cddc2430a813d797369b6351a28cc57e364f1b51d4
+exit 0
+stdout: {"agent_cell":"10990305426878094482","attempt":"/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/codex/workspace/attempts/a-304846391368128987200012463238804007459","chain_index":8,"confirmation":"installed","fee":3,"finality":"accepted","node":"unix:/srv/lanes/P3-FLEET-MIGRATION/run1/fixture/public/mini.sock","payload":"chat:b2b:679402cf55618d11b72580cddc2430a813d797369b6351a28cc57e364f1b51d4","profile":"codex","receipt":{"acceptedCount":"8","eventId":"19752846165619878245172040643416405742259849937896479422288114301687304652521","transactionId":"23030822833720075252165240862602424706055120603273242228248648439346448027998","worldRoot":"29964841554137208067314451447207297993465450376567256876636022080068580696596"},"replans":0,"sent":true,"sequence":1,"to":"10990305426878094482","topic":"helm.chat","turn_hash":"23030822833720075252165240862602424706055120603273242228248648439346448027998"}
+stderr:
+  mini fleet-sign: DREGG_NODE_URL is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_API_TOKEN is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_COORDINATION_EXEMPT is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_PROFILE is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  workspace continuity: legacy; initialize with workspace --action continuity-init --name REF
+  {
+    "attempt": "/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/codex/workspace/attempts/a-304846391368128987200012463238804007459",
+    "authority": "admitted-fleet-turn",
+    "confirmation": "installed",
+    "fee": "3",
+    "payer": "10990305426878094482",
+    "publication": {
+      "payloadBytes": "73",
+      "sequence": "1",
+      "topic": "68656c6d2e63686174"
+    },
+    "receipt": {
+      "acceptedCount": "8",
+      "eventId": "19752846165619878245172040643416405742259849937896479422288114301687304652521",
+      "transactionId": "23030822833720075252165240862602424706055120603273242228248648439346448027998",
+      "worldRoot": "29964841554137208067314451447207297993465450376567256876636022080068580696596"
+    },
+    "replans": "0",
+    "subject": "13908552774522445001",
+    "supersededAttempts": [],
+    "transfer": null,
+    "type": "minidregg-fleet-turn-result-v1",
+    "verb": "send"
+  }
+expect: ok:.sent and .agent_cell == "10990305426878094482" and .to == "10990305426878094482" and .topic == "helm.chat" and .payload == "chat:b2b:679402cf55618d11b72580cddc2430a813d797369b6351a28cc57e364f1b51d4" and .sequence == 1 and .finality == "accepted" and (.turn_hash | test("^[0-9]+$")) and (.chain_index | type == "number")
+
+## T06-send-land  [OBSERVED landreq.py:1232 via chat.py:1413]
+$ env DREGG_NODE_URL=http://127.0.0.1:8898 MELD_NODE_URL=http://127.0.0.1:8898 DREGG_API_TOKEN=replay-token-not-a-secret MELD_NODE_TOKEN=replay-token-not-a-secret DREGG_COORDINATION_EXEMPT=1 DREGG_PROFILE=codex MELD_AGENT_PROFILE=codex MINI_FLEET_HOME=/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home dregg-client-sign send --profile codex --to 10990305426878094482 --topic helm.land helm.land:b2b:9c3720436699c23968ccca921aefce87877a5ac260e5775899e06574b3fad00e
+exit 0
+stdout: {"agent_cell":"10990305426878094482","attempt":"/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/codex/workspace/attempts/a-2050159615875962937535243779253199569","chain_index":9,"confirmation":"installed","fee":3,"finality":"accepted","node":"unix:/srv/lanes/P3-FLEET-MIGRATION/run1/fixture/public/mini.sock","payload":"helm.land:b2b:9c3720436699c23968ccca921aefce87877a5ac260e5775899e06574b3fad00e","profile":"codex","receipt":{"acceptedCount":"9","eventId":"32063331797878972099045325907524169653784132817882328280564936407613569759261","transactionId":"60521205081294847228220665534820812669854272765150234851262079170204454366465","worldRoot":"73953929858312141058157767211918754885819977143125874047689757407765494159447"},"replans":0,"sent":true,"sequence":1,"to":"10990305426878094482","topic":"helm.land","turn_hash":"60521205081294847228220665534820812669854272765150234851262079170204454366465"}
+stderr:
+  mini fleet-sign: DREGG_NODE_URL is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_API_TOKEN is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_COORDINATION_EXEMPT is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_PROFILE is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  workspace continuity: legacy; initialize with workspace --action continuity-init --name REF
+  {
+    "attempt": "/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/codex/workspace/attempts/a-2050159615875962937535243779253199569",
+    "authority": "admitted-fleet-turn",
+    "confirmation": "installed",
+    "fee": "3",
+    "payer": "10990305426878094482",
+    "publication": {
+      "payloadBytes": "78",
+      "sequence": "1",
+      "topic": "68656c6d2e6c616e64"
+    },
+    "receipt": {
+      "acceptedCount": "9",
+      "eventId": "32063331797878972099045325907524169653784132817882328280564936407613569759261",
+      "transactionId": "60521205081294847228220665534820812669854272765150234851262079170204454366465",
+      "worldRoot": "73953929858312141058157767211918754885819977143125874047689757407765494159447"
+    },
+    "replans": "0",
+    "subject": "13908552774522445001",
+    "supersededAttempts": [],
+    "transfer": null,
+    "type": "minidregg-fleet-turn-result-v1",
+    "verb": "send"
+  }
+expect: ok:.sent and .topic == "helm.land" and .sequence == 1
+
+## T07-send-chat-again  [OBSERVED chat.py:1411]
+$ env DREGG_NODE_URL=http://127.0.0.1:8898 MELD_NODE_URL=http://127.0.0.1:8898 DREGG_API_TOKEN=replay-token-not-a-secret MELD_NODE_TOKEN=replay-token-not-a-secret DREGG_COORDINATION_EXEMPT=1 DREGG_PROFILE=codex MELD_AGENT_PROFILE=codex MINI_FLEET_HOME=/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home dregg-client-sign send --profile codex --to 10990305426878094482 --topic helm.chat chat:b2b:679402cf55618d11b72580cddc2430a813d797369b6351a28cc57e364f1b51d4
+exit 0
+stdout: {"agent_cell":"10990305426878094482","attempt":"/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/codex/workspace/attempts/a-85933078102940328576889737551162323742","chain_index":10,"confirmation":"installed","fee":3,"finality":"accepted","node":"unix:/srv/lanes/P3-FLEET-MIGRATION/run1/fixture/public/mini.sock","payload":"chat:b2b:679402cf55618d11b72580cddc2430a813d797369b6351a28cc57e364f1b51d4","profile":"codex","receipt":{"acceptedCount":"10","eventId":"77515077834427475684777981819094808953591869678125692563365754288039880392254","transactionId":"32113192996297106899401650299979215918190264285621263936734892523817562033330","worldRoot":"27043597581216005227432626085372420210179287998580559954781005265159047981892"},"replans":0,"sent":true,"sequence":2,"to":"10990305426878094482","topic":"helm.chat","turn_hash":"32113192996297106899401650299979215918190264285621263936734892523817562033330"}
+stderr:
+  mini fleet-sign: DREGG_NODE_URL is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_API_TOKEN is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_COORDINATION_EXEMPT is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_PROFILE is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  workspace continuity: legacy; initialize with workspace --action continuity-init --name REF
+  {
+    "attempt": "/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/codex/workspace/attempts/a-85933078102940328576889737551162323742",
+    "authority": "admitted-fleet-turn",
+    "confirmation": "installed",
+    "fee": "3",
+    "payer": "10990305426878094482",
+    "publication": {
+      "payloadBytes": "73",
+      "sequence": "2",
+      "topic": "68656c6d2e63686174"
+    },
+    "receipt": {
+      "acceptedCount": "10",
+      "eventId": "77515077834427475684777981819094808953591869678125692563365754288039880392254",
+      "transactionId": "32113192996297106899401650299979215918190264285621263936734892523817562033330",
+      "worldRoot": "27043597581216005227432626085372420210179287998580559954781005265159047981892"
+    },
+    "replans": "0",
+    "subject": "13908552774522445001",
+    "supersededAttempts": [],
+    "transfer": null,
+    "type": "minidregg-fleet-turn-result-v1",
+    "verb": "send"
+  }
+expect: ok:.sent and .sequence == 2
+
+## T08-send-words  [INFERRED]
+$ env DREGG_NODE_URL=http://127.0.0.1:8898 MELD_NODE_URL=http://127.0.0.1:8898 DREGG_API_TOKEN=replay-token-not-a-secret MELD_NODE_TOKEN=replay-token-not-a-secret DREGG_COORDINATION_EXEMPT=1 DREGG_PROFILE=codex MELD_AGENT_PROFILE=codex MINI_FLEET_HOME=/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home dregg-client-sign send --profile codex hello from codex
+exit 0
+stdout: {"agent_cell":"10990305426878094482","attempt":"/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/codex/workspace/attempts/a-236320606181380052073018667974551298551","chain_index":11,"confirmation":"installed","fee":3,"finality":"accepted","node":"unix:/srv/lanes/P3-FLEET-MIGRATION/run1/fixture/public/mini.sock","payload":"hello from codex","profile":"codex","receipt":{"acceptedCount":"11","eventId":"64931577678666387353440798283621376461237050876456556727588688278487815488882","transactionId":"67214947711426569625935899231242415611844964203384026734796040828549134675813","worldRoot":"106753862685499444173742550183791691562149300425682142791305052811234658544001"},"replans":0,"sent":true,"sequence":1,"to":"10990305426878094482","topic":"client-sign","turn_hash":"67214947711426569625935899231242415611844964203384026734796040828549134675813"}
+stderr:
+  mini fleet-sign: DREGG_NODE_URL is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_API_TOKEN is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_COORDINATION_EXEMPT is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_PROFILE is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  workspace continuity: legacy; initialize with workspace --action continuity-init --name REF
+  {
+    "attempt": "/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/codex/workspace/attempts/a-236320606181380052073018667974551298551",
+    "authority": "admitted-fleet-turn",
+    "confirmation": "installed",
+    "fee": "3",
+    "payer": "10990305426878094482",
+    "publication": {
+      "payloadBytes": "16",
+      "sequence": "1",
+      "topic": "636c69656e742d7369676e"
+    },
+    "receipt": {
+      "acceptedCount": "11",
+      "eventId": "64931577678666387353440798283621376461237050876456556727588688278487815488882",
+      "transactionId": "67214947711426569625935899231242415611844964203384026734796040828549134675813",
+      "worldRoot": "106753862685499444173742550183791691562149300425682142791305052811234658544001"
+    },
+    "replans": "0",
+    "subject": "13908552774522445001",
+    "supersededAttempts": [],
+    "transfer": null,
+    "type": "minidregg-fleet-turn-result-v1",
+    "verb": "send"
+  }
+expect: ok:.sent and .payload == "hello from codex"
+
+## T09-transfer  [INFERRED]
+$ env DREGG_NODE_URL=http://127.0.0.1:8898 MELD_NODE_URL=http://127.0.0.1:8898 DREGG_API_TOKEN=replay-token-not-a-secret MELD_NODE_TOKEN=replay-token-not-a-secret DREGG_COORDINATION_EXEMPT=1 DREGG_PROFILE=codex MELD_AGENT_PROFILE=codex MINI_FLEET_HOME=/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home dregg-client-sign transfer --profile codex --to 15474279766743318203 --amount 5
+exit 0
+stdout: {"amount":5,"attempt":"/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/codex/workspace/attempts/a-32319948731468668685905808188046589224","chain_index":12,"committed":true,"confirmation":"installed","fee":3,"finality":"accepted","from":"10990305426878094482","node":"unix:/srv/lanes/P3-FLEET-MIGRATION/run1/fixture/public/mini.sock","profile":"codex","receipt":{"acceptedCount":"12","eventId":"39285046670078777322188290964560922142199580122823581560336686803298526223165","transactionId":"76322624536506559241717785981676392100143577082359204933000370267810610594274","worldRoot":"53477034635055294305814125500698656926810990394720212874493617002618059223396"},"replans":0,"to":"15474279766743318203","transferred":true,"turn_hash":"76322624536506559241717785981676392100143577082359204933000370267810610594274"}
+stderr:
+  mini fleet-sign: DREGG_NODE_URL is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_API_TOKEN is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_COORDINATION_EXEMPT is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_PROFILE is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  workspace continuity: legacy; initialize with workspace --action continuity-init --name REF
+  {
+    "attempt": "/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/codex/workspace/attempts/a-32319948731468668685905808188046589224",
+    "authority": "admitted-fleet-turn",
+    "confirmation": "installed",
+    "fee": "3",
+    "payer": "10990305426878094482",
+    "publication": null,
+    "receipt": {
+      "acceptedCount": "12",
+      "eventId": "39285046670078777322188290964560922142199580122823581560336686803298526223165",
+      "transactionId": "76322624536506559241717785981676392100143577082359204933000370267810610594274",
+      "worldRoot": "53477034635055294305814125500698656926810990394720212874493617002618059223396"
+    },
+    "replans": "0",
+    "subject": "13908552774522445001",
+    "supersededAttempts": [],
+    "transfer": {
+      "amount": "5",
+      "asset": "0",
+      "destination": "15474279766743318203"
+    },
+    "type": "minidregg-fleet-turn-result-v1",
+    "verb": "transfer"
+  }
+expect: ok:.transferred and .committed and .amount == 5
+
+## T10a-receipt-by-hash  [INFERRED]
+$ env DREGG_NODE_URL=http://127.0.0.1:8898 MELD_NODE_URL=http://127.0.0.1:8898 DREGG_API_TOKEN=replay-token-not-a-secret MELD_NODE_TOKEN=replay-token-not-a-secret DREGG_COORDINATION_EXEMPT=1 DREGG_PROFILE=codex MELD_AGENT_PROFILE=codex MINI_FLEET_HOME=/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home dregg-client-sign receipt --profile codex --turn-hash 23030822833720075252165240862602424706055120603273242228248648439346448027998
+exit 0
+stdout: {"chain_index":8,"finality":"accepted","found":true,"profile":"codex","receipt":{"acceptedCount":"8","eventId":"19752846165619878245172040643416405742259849937896479422288114301687304652521","transactionId":"23030822833720075252165240862602424706055120603273242228248648439346448027998","worldRoot":"29964841554137208067314451447207297993465450376567256876636022080068580696596"},"turn_hash":"23030822833720075252165240862602424706055120603273242228248648439346448027998"}
+stderr:
+  mini fleet-sign: DREGG_NODE_URL is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_API_TOKEN is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_COORDINATION_EXEMPT is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_PROFILE is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+expect: ok:.found and .turn_hash == "23030822833720075252165240862602424706055120603273242228248648439346448027998" and .finality == "accepted"
+
+## T10b-receipt-head  [INFERRED]
+$ env DREGG_NODE_URL=http://127.0.0.1:8898 MELD_NODE_URL=http://127.0.0.1:8898 DREGG_API_TOKEN=replay-token-not-a-secret MELD_NODE_TOKEN=replay-token-not-a-secret DREGG_COORDINATION_EXEMPT=1 DREGG_PROFILE=codex MELD_AGENT_PROFILE=codex MINI_FLEET_HOME=/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home dregg-client-sign receipt --profile codex --head
+exit 0
+stdout: {"cell":"10990305426878094482","head":{"head":{"acceptedCount":"12","eventId":"39285046670078777322188290964560922142199580122823581560336686803298526223165","transactionId":"76322624536506559241717785981676392100143577082359204933000370267810610594274","worldRoot":"53477034635055294305814125500698656926810990394720212874493617002618059223396"},"payer":"10990305426878094482","subject":"13908552774522445001","turns":"5","type":"minidregg-fleet-agent-head-v1"},"profile":"codex"}
+stderr:
+  mini fleet-sign: DREGG_NODE_URL is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_API_TOKEN is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_COORDINATION_EXEMPT is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_PROFILE is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  workspace continuity: legacy; initialize with workspace --action continuity-init --name REF
+expect: ok:.head.turns == "5"
+
+## T11a-roster-json  [OBSERVED cell.py:881]
+$ env DREGG_NODE_URL=http://127.0.0.1:8898 MELD_NODE_URL=http://127.0.0.1:8898 DREGG_API_TOKEN=replay-token-not-a-secret MELD_NODE_TOKEN=replay-token-not-a-secret DREGG_COORDINATION_EXEMPT=1 DREGG_PROFILE=codex MELD_AGENT_PROFILE=codex MINI_FLEET_HOME=/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home dregg-client-sign roster --json
+exit 1
+stdout: (empty)
+stderr:
+  mini: unknown verb 'roster' (try --help)
+expect: refuse:unknown verb 'roster'
+
+## T11b-accept  [OBSERVED cell.py:950]
+$ env DREGG_NODE_URL=http://127.0.0.1:8898 MELD_NODE_URL=http://127.0.0.1:8898 DREGG_API_TOKEN=replay-token-not-a-secret MELD_NODE_TOKEN=replay-token-not-a-secret DREGG_COORDINATION_EXEMPT=1 DREGG_PROFILE=codex MELD_AGENT_PROFILE=codex MINI_FLEET_HOME=/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home dregg-client-sign accept
+exit 1
+stdout: (empty)
+stderr:
+  mini: unknown verb 'accept' (try --help)
+expect: refuse:unknown verb 'accept'
+
+## T11c-recv  [OBSERVED cell.py:950]
+$ env DREGG_NODE_URL=http://127.0.0.1:8898 MELD_NODE_URL=http://127.0.0.1:8898 DREGG_API_TOKEN=replay-token-not-a-secret MELD_NODE_TOKEN=replay-token-not-a-secret DREGG_COORDINATION_EXEMPT=1 DREGG_PROFILE=codex MELD_AGENT_PROFILE=codex MINI_FLEET_HOME=/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home dregg-client-sign recv
+exit 1
+stdout: (empty)
+stderr:
+  mini: unknown verb 'recv' (try --help)
+expect: refuse:unknown verb 'recv'
+
+## T11d-heartbeat  [OBSERVED cell.py:950]
+$ env DREGG_NODE_URL=http://127.0.0.1:8898 MELD_NODE_URL=http://127.0.0.1:8898 DREGG_API_TOKEN=replay-token-not-a-secret MELD_NODE_TOKEN=replay-token-not-a-secret DREGG_COORDINATION_EXEMPT=1 DREGG_PROFILE=codex MELD_AGENT_PROFILE=codex MINI_FLEET_HOME=/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home dregg-client-sign heartbeat
+exit 1
+stdout: (empty)
+stderr:
+  mini: unknown verb 'heartbeat' (try --help)
+expect: refuse:unknown verb 'heartbeat'
+
+## T12-planted-unknown-verb  [PLANTED]
+$ env DREGG_NODE_URL=http://127.0.0.1:8898 MELD_NODE_URL=http://127.0.0.1:8898 DREGG_API_TOKEN=replay-token-not-a-secret MELD_NODE_TOKEN=replay-token-not-a-secret DREGG_COORDINATION_EXEMPT=1 DREGG_PROFILE=codex MELD_AGENT_PROFILE=codex MINI_FLEET_HOME=/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home dregg-client-sign frobnicate --profile codex x
+exit 1
+stdout: (empty)
+stderr:
+  mini: unknown verb 'frobnicate' (try --help)
+expect: refuse:unknown verb 'frobnicate'
+
+## T13a-send-bread-cell  [OBSERVED chat.py:1413 (value from a Bread join)]
+$ env DREGG_NODE_URL=http://127.0.0.1:8898 MELD_NODE_URL=http://127.0.0.1:8898 DREGG_API_TOKEN=replay-token-not-a-secret MELD_NODE_TOKEN=replay-token-not-a-secret DREGG_COORDINATION_EXEMPT=1 DREGG_PROFILE=codex MELD_AGENT_PROFILE=codex MINI_FLEET_HOME=/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home dregg-client-sign send --profile codex --to abababababababababababababababababababababababababababababababab --topic helm.chat x
+exit 1
+stdout: (empty)
+stderr:
+  mini fleet-sign: DREGG_NODE_URL is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_API_TOKEN is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_COORDINATION_EXEMPT is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_PROFILE is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini: --to is a Bread cell id; a Mini account is the decimal `cell` its join printed
+expect: refuse:Bread cell id
+
+## T13b-transfer-bread-cell  [INFERRED]
+$ env DREGG_NODE_URL=http://127.0.0.1:8898 MELD_NODE_URL=http://127.0.0.1:8898 DREGG_API_TOKEN=replay-token-not-a-secret MELD_NODE_TOKEN=replay-token-not-a-secret DREGG_COORDINATION_EXEMPT=1 DREGG_PROFILE=codex MELD_AGENT_PROFILE=codex MINI_FLEET_HOME=/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home dregg-client-sign transfer --profile codex --to abababababababababababababababababababababababababababababababab --amount 1
+exit 1
+stdout: (empty)
+stderr:
+  mini fleet-sign: DREGG_NODE_URL is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_API_TOKEN is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_COORDINATION_EXEMPT is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_PROFILE is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini: --to is a Bread cell id; a Mini account is the decimal `cell` its join printed
+expect: refuse:Bread cell id
+
+## T13c-send-other-account  [INFERRED]
+$ env DREGG_NODE_URL=http://127.0.0.1:8898 MELD_NODE_URL=http://127.0.0.1:8898 DREGG_API_TOKEN=replay-token-not-a-secret MELD_NODE_TOKEN=replay-token-not-a-secret DREGG_COORDINATION_EXEMPT=1 DREGG_PROFILE=codex MELD_AGENT_PROFILE=codex MINI_FLEET_HOME=/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home dregg-client-sign send --profile codex --to 15474279766743318203 x
+exit 1
+stdout: (empty)
+stderr:
+  mini fleet-sign: DREGG_NODE_URL is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_API_TOKEN is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_COORDINATION_EXEMPT is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_PROFILE is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini: send posts on the profile's own account and takes --to only as that account (10990305426878094482); 15474279766743318203 is another account: use transfer to move value
+expect: refuse:another account
+
+## T14a-node-url-http  [INFERRED]
+$ env DREGG_NODE_URL=http://127.0.0.1:8898 MELD_NODE_URL=http://127.0.0.1:8898 DREGG_API_TOKEN=replay-token-not-a-secret MELD_NODE_TOKEN=replay-token-not-a-secret DREGG_COORDINATION_EXEMPT=1 DREGG_PROFILE=codex MELD_AGENT_PROFILE=codex MINI_FLEET_HOME=/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home dregg-client-sign send --profile codex --node-url http://127.0.0.1:8898 x
+exit 1
+stdout: (empty)
+stderr:
+  mini: --node-url http://127.0.0.1:8898: Mini has no HTTP ingress; the profile is pinned to its Host's socket. Pass unix:/ABSOLUTE/SOCKET or omit --node-url
+expect: refuse:no HTTP ingress
+
+## T14b-token-file  [INFERRED]
+$ env DREGG_NODE_URL=http://127.0.0.1:8898 MELD_NODE_URL=http://127.0.0.1:8898 DREGG_API_TOKEN=replay-token-not-a-secret MELD_NODE_TOKEN=replay-token-not-a-secret DREGG_COORDINATION_EXEMPT=1 DREGG_PROFILE=codex MELD_AGENT_PROFILE=codex MINI_FLEET_HOME=/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home dregg-client-sign send --profile codex --token-file /dev/null x
+exit 1
+stdout: (empty)
+stderr:
+  mini: --token-file: Mini's ingress takes no bearer token; authority is the profile's signature under its account grant
+expect: refuse:no bearer token
+
+## T14c-token-argv  [INFERRED]
+$ env DREGG_NODE_URL=http://127.0.0.1:8898 MELD_NODE_URL=http://127.0.0.1:8898 DREGG_API_TOKEN=replay-token-not-a-secret MELD_NODE_TOKEN=replay-token-not-a-secret DREGG_COORDINATION_EXEMPT=1 DREGG_PROFILE=codex MELD_AGENT_PROFILE=codex MINI_FLEET_HOME=/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home dregg-client-sign send --profile codex --token abc x
+exit 1
+stdout: (empty)
+stderr:
+  mini: --token: Mini's ingress takes no bearer token; authority is the profile's signature under its account grant
+expect: refuse:no bearer token
+
+## T14d-accept-tentative  [INFERRED]
+$ env DREGG_NODE_URL=http://127.0.0.1:8898 MELD_NODE_URL=http://127.0.0.1:8898 DREGG_API_TOKEN=replay-token-not-a-secret MELD_NODE_TOKEN=replay-token-not-a-secret DREGG_COORDINATION_EXEMPT=1 DREGG_PROFILE=codex MELD_AGENT_PROFILE=codex MINI_FLEET_HOME=/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home dregg-client-sign transfer --profile codex --to 15474279766743318203 --amount 1 --accept-tentative
+exit 1
+stdout: (empty)
+stderr:
+  mini: --accept-tentative: Mini has one commitment level (an accepted journal entry of the one Store); there is nothing tentative to accept
+expect: refuse:one commitment level
+
+## T14e-fund-on-send  [INFERRED]
+$ env DREGG_NODE_URL=http://127.0.0.1:8898 MELD_NODE_URL=http://127.0.0.1:8898 DREGG_API_TOKEN=replay-token-not-a-secret MELD_NODE_TOKEN=replay-token-not-a-secret DREGG_COORDINATION_EXEMPT=1 DREGG_PROFILE=codex MELD_AGENT_PROFILE=codex MINI_FLEET_HOME=/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home dregg-client-sign send --profile codex --fund 100 x
+exit 1
+stdout: (empty)
+stderr:
+  mini fleet-sign: DREGG_NODE_URL is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_API_TOKEN is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_COORDINATION_EXEMPT is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_PROFILE is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini: --fund on send: Mini has no faucet; fund a profile at join or by a transfer
+expect: refuse:no faucet
+
+## T14f-fund-on-transfer  [INFERRED]
+$ env DREGG_NODE_URL=http://127.0.0.1:8898 MELD_NODE_URL=http://127.0.0.1:8898 DREGG_API_TOKEN=replay-token-not-a-secret MELD_NODE_TOKEN=replay-token-not-a-secret DREGG_COORDINATION_EXEMPT=1 DREGG_PROFILE=codex MELD_AGENT_PROFILE=codex MINI_FLEET_HOME=/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home dregg-client-sign transfer --profile codex --to 15474279766743318203 --amount 1 --fund 100
+exit 1
+stdout: (empty)
+stderr:
+  mini fleet-sign: DREGG_NODE_URL is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_API_TOKEN is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_COORDINATION_EXEMPT is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_PROFILE is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini: --fund on transfer: Mini has no faucet; the source must already hold amount + fee
+expect: refuse:no faucet
+
+## T14g-never-joined  [OBSERVED chat.py:1413 (profile from a seat that never joined)]
+$ env DREGG_NODE_URL=http://127.0.0.1:8898 MELD_NODE_URL=http://127.0.0.1:8898 DREGG_API_TOKEN=replay-token-not-a-secret MELD_NODE_TOKEN=replay-token-not-a-secret DREGG_COORDINATION_EXEMPT=1 DREGG_PROFILE=codex MELD_AGENT_PROFILE=codex MINI_FLEET_HOME=/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home dregg-client-sign send --profile ghost x
+exit 1
+stdout: (empty)
+stderr:
+  mini fleet-sign: DREGG_NODE_URL is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_API_TOKEN is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_COORDINATION_EXEMPT is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_PROFILE is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini: profile 'ghost' has not joined (no /srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home/profiles/ghost/workspace/join-account.json): run `mini fleet-sign join` first
+expect: refuse:has not joined
+
+## Z1-balance-codex  [INFERRED]
+$ env DREGG_NODE_URL=http://127.0.0.1:8898 MELD_NODE_URL=http://127.0.0.1:8898 DREGG_API_TOKEN=replay-token-not-a-secret MELD_NODE_TOKEN=replay-token-not-a-secret DREGG_COORDINATION_EXEMPT=1 DREGG_PROFILE=codex MELD_AGENT_PROFILE=codex MINI_FLEET_HOME=/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home dregg-client-sign join --profile codex --fund 0
+exit 0
+stdout: {"balance":1980,"cell":"10990305426878094482","joined":true,"joined_in_flight":false,"materialized":false,"node":"unix:/srv/lanes/P3-FLEET-MIGRATION/run1/fixture/public/mini.sock","profile":"codex","public_key":"1a4ba9645c4e099225445bd337a10f60af17ef89a2c8c0a9e97cc473793fb44f","spend_capability":"13136246942213538688","subject":"13908552774522445001","topped_up":false}
+stderr:
+  mini fleet-sign: DREGG_NODE_URL is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_API_TOKEN is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_COORDINATION_EXEMPT is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  mini fleet-sign: DREGG_PROFILE is set and not read (Bread's signer used it; Mini's profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned Host and the pinned tariff)
+  workspace continuity: legacy; initialize with workspace --action continuity-init --name REF
+expect: ok:.balance == 1980
+
+## Z2-probe-turns-landed  [INFERRED]
+$ env MINI_FLEET_HOME=/srv/lanes/P3-FLEET-MIGRATION/run1/fleet-home dregg-client-sign receipt --profile probe --head
+exit 0
+stdout: {"cell":"17626623996389500342","head":{"head":{"acceptedCount":"14","eventId":"57563745320210013877776174781251496845446758259295213395443724790781956891217","transactionId":"17740784227728498676352721127432017375235507271910362159541307646898787560805","worldRoot":"69628499432369625121529021423824129716198816417699244969330333587860858419576"},"payer":"17626623996389500342","subject":"14923153855754704355","turns":"2","type":"minidregg-fleet-agent-head-v1"},"profile":"probe"}
+stderr:
+  workspace continuity: legacy; initialize with workspace --action continuity-init --name REF
+expect: ok:.head.turns
+

@@ -17,7 +17,7 @@ mini, host_bin, config, sock_path, keyfile, outdir = sys.argv[1:7]
 seed = open(keyfile, "rb").read()
 key = Ed25519PrivateKey.from_private_bytes(seed)
 config_bytes = open(config, "rb").read()
-TAG = b"DREGG/NATIVE-HOST/OUTCOME/v4"
+TAG = b"DREGG/NATIVE-HOST/OUTCOME/v5"
 
 def frame_of(s):
     def exact(n):

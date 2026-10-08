@@ -1,0 +1,197 @@
+/- KN2 PORT-B executed check: the past-state ports read through `Reader.stateAt`
+and `NativeHistorySelection.foldRange`.
+
+Honest: the continuity witness built from `stateAt` (ReceiptContinuityIO.pastWitness)
+equals, root, chain and siblings, the one the retired genesis-replay path
+(`Loaded.atPrefix` + `entriesOf` over the cut image) computed, at height 30 (base:
+the checkpoint at 16 + 14 records) and 10 (base: genesis) and at the head 41; the
+windowed fold sees all 41 records.
+`NativeHistorySelection.select` (the lifecycle cores' read of an original record and its prior
+state) is exercised through the same Store: an honest selection gets past every read (it stops
+only at `validateServed`, the probe Store being no deployment); a selection whose bound does not
+exceed the index is refused; a record tampered strictly below the selected height is refused naming it.
+Planted faults (each must refuse BY NAME, never answer a stale or absent value):
+ 1. one byte of the record at height 20 (strictly below the requested 30, above the
+    checkpoint at 16): `stateAt 30` and the fold over 1..41 refuse naming height 20;
+ 2. one byte of the checkpoint at 32: `stateAt 41` refuses ("checkpoint refused").
+
+Usage: lake env lean --run scripts/kn2/port-b-tamper.lean STORE-HELPER -/
+import Compiler.DurableStoreAudit
+import Compiler.ReceiptContinuityIO
+import Kernel.NativeHistorySelection
+import Compiler.ServedBasis
+import Compiler.Sp800185Cshake256
+
+open Minidregg.Theory.TypedAuthorization
+open Minidregg.Kernel
+open Minidregg.Kernel.DurableDataIntent
+open Minidregg.Kernel.DurableReceiver
+open Minidregg.Compiler
+open Minidregg.Compiler.DurableReceiverIO
+open Minidregg.Compiler.DurableHistoryReader
+
+namespace HistoryTamper
+
+abbrev rootBytes : List UInt8 → Digest := ResourceBirthCodec.rootBytes
+
+def seed : Seed := { absentBytes := [], cells := [(⟨1⟩, [1]), (⟨3⟩, [0])], available := fun _ => 1000 }
+
+def nullifier (number : Nat) : StableNullifier := ⟨1, ⟨700⟩, ⟨number⟩, [UInt8.ofNat number]⟩
+
+/-- Record `number` moves cell 3 from `[number - 1]` to `[number]`. -/
+def step (number : Nat) : DataIntent rootBytes where
+  transactionId := ⟨1000 + number⟩
+  writes := [⟨⟨3⟩, rootBytes [UInt8.ofNat (number - 1)], rootBytes [UInt8.ofNat number], [UInt8.ofNat number]⟩]
+  readGuards := []
+  nullifiers := [nullifier number]
+  exactCharge := fun _ => 1
+  event := ⟨1, ⟨800⟩, ⟨number⟩, [UInt8.ofNat number]⟩
+  subject := none
+  postRootsBound := by simp
+  guardsReadOnly := by simp
+
+def require (label : String) (condition : Bool) : IO Unit :=
+  unless condition do throw (IO.userError s!"FAIL history tamper: {label}")
+
+def sql (database : System.FilePath) (statement : String) : IO Unit := do
+  let output ← IO.Process.output { cmd := "python3", args := #["-c",
+    s!"import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute(sys.argv[2]); c.commit()",
+    database.toString, statement] }
+  unless output.exitCode == 0 do throw (IO.userError s!"FAIL sql: {output.stderr}")
+
+def expectRefusedAt (label : String) (height : Nat) (result : Except DurableHistory.Refusal α) : IO Unit := do
+  match result with
+  | .ok _ => throw (IO.userError s!"FAIL history tamper: {label} verified")
+  | .error refusal =>
+      IO.println s!"refused as expected ({label}): {refusal.message}"
+      require s!"{label} names height {height}" (refusal == .notIncluded height)
+
+/-- A config no deployment would use: `select` reads the Store before it looks at the config. -/
+def probeConfig (storage : NativeConfig) : NativeHost.Config :=
+  { deployment := ⟨⟨1⟩, 2, 3, 4⟩, federation := ⟨5⟩,
+    template := ⟨⟨6⟩, 1, 1, CanonicalRuntimeProfile.defaultBirthSlack⟩,
+    tariff := ⟨1, 1, 1, 0, 7, 8⟩, genesisHeight := 0, expectedSeed := ⟨9⟩,
+    storage := storage, signature := ⟨""⟩ }
+
+def mentions (text needle : String) : Bool := (text.splitOn needle).length > 1
+
+def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
+  IO.FS.writeBinFile (directory / "key") ((List.range 32).map (fun i => UInt8.ofNat (i * 7 + 3))).toByteArray
+  let config : NativeConfig :=
+    { binary := binary, root := directory / "store", key := directory / "key", checkpointEvery := 16 }
+  let probe := probeConfig config
+  let transport := { config.transport (fun _ => ⟨7⟩) ⟨999⟩ with systemCell := none }
+  match ← bootstrap transport rootBytes seed with
+  | .error message => throw (IO.userError message)
+  | .ok () => pure ()
+  for number in List.range' 1 41 do
+    match ← receive transport rootBytes (step number) 3 with
+    | .confirmed _ _ => pure ()
+    | _ => throw (IO.userError s!"FAIL commit {number}")
+  let loaded ← match ← load transport rootBytes with
+    | .ok loaded => pure loaded
+    | .error detail => throw (IO.userError s!"FAIL open: {detail}")
+  require "41 records" (loaded.height == 41)
+  let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf transport rootBytes loaded with
+    | .ok reader => pure reader
+    | .error detail => throw (IO.userError s!"FAIL reader: {detail}")
+  -- Honest: the stateAt witness equals the retired genesis-replay witness.
+  for height in [10, 30, 41] do
+    let past ← match ← reader.stateAt height with
+      | .ok past => pure past
+      | .error refusal => throw (IO.userError s!"FAIL honest stateAt {height}: {refusal.message}")
+    let witness := ReceiptContinuityIO.pastWitness past
+    let some snapshot := loaded.atPrefix height
+      | throw (IO.userError s!"FAIL genesis replay at {height}")
+    let image := loaded.prefixImage height
+    let chain := DurableCheckpointCodec.chainAfter loaded.logStart image.accepted
+    let roots := RootCache.ofEntries (entriesOf image snapshot chain)
+    require s!"witness at {height}: root equals the genesis-replay root" (witness.point.worldRoot == roots.root)
+    require s!"witness at {height}: chain equals the genesis-replay chain" (witness.chain == chain)
+    require s!"witness at {height}: siblings equal the genesis-replay siblings"
+      (witness.siblings == ReceiptContinuityIO.cachedSiblings roots.tree (WorldRoot.deployed.ix .system))
+    require s!"witness at {height}: height" (witness.point.height == height)
+  match ← NativeHistorySelection.foldRange reader 1 41 (0 : Nat) fun (count : Nat) window => (Except.ok (count + window.length) : Except String Nat) with
+  | .ok count => require "the windowed fold sees 41 records" (count == 41)
+  | .error detail => throw (IO.userError s!"FAIL honest fold: {detail}")
+  IO.println "honest: pastWitness at 10/30/41 equals the genesis-replay witness; fold sees 41 records"
+  -- select: the honest read passes the record and the stateAt reads (it stops at validateServed).
+  match ← NativeHistorySelection.select probe reader 41 25 ⟨[], []⟩ with
+  | .ok _ => throw (IO.userError "FAIL the probe Store was validated as a deployment")
+  | .error detail =>
+      require "an honest select is not refused by a history read" (!mentions detail "refused")
+      IO.println s!"honest select 25 reached validateServed: {detail}"
+  match ← NativeHistorySelection.select probe reader 25 25 ⟨[], []⟩ with
+  | .ok _ => throw (IO.userError "FAIL select accepted an index not below its bound")
+  | .error detail =>
+      IO.println s!"refused as expected (select index 25 under bound 25): {detail}"
+      require "bound refusal names the unavailable record" (mentions detail "unavailable")
+  -- A full ground at a past height (`Grounded.pastWitness`): honest, another Store, a wrong chain, past the head.
+  let chainAt (height : Nat) : Digest :=
+    DurableCheckpointCodec.chainAfter loaded.logStart (loaded.prefixImage height).accepted
+  match ← ServedBasis.Grounded.pastWitness reader loaded.logStart 30 (chainAt 30) with
+  | .error detail => throw (IO.userError s!"FAIL honest past ground at 30: {detail}")
+  | .ok _ => IO.println "honest: the opening at 30 is a ground of the history at 30"
+  match ← ServedBasis.Grounded.pastWitness reader (chainAt 30) 30 (chainAt 30) with
+  | .ok _ => throw (IO.userError "FAIL a ground of another Store was accepted")
+  | .error detail =>
+      IO.println s!"refused as expected (another Store's start): {detail}"
+      require "another Store named" (mentions detail "Store")
+  match ← ServedBasis.Grounded.pastWitness reader loaded.logStart 30 (chainAt 29) with
+  | .ok _ => throw (IO.userError "FAIL a ground with another chain was accepted")
+  | .error detail =>
+      IO.println s!"refused as expected (a chain that differs at 30): {detail}"
+      require "chain mismatch names height 30" (mentions detail "chain is not the history's at height 30")
+  match ← ServedBasis.Grounded.pastWitness reader loaded.logStart 42 (chainAt 41) with
+  | .ok _ => throw (IO.userError "FAIL a ground past the head was accepted")
+  | .error detail => IO.println s!"refused as expected (height 42 past the head 41): {detail}"
+  -- The retained prefix is the Store's verified log (`NativeHistorySelection.readPrefix`), read in windows.
+  let retained := loaded.image.accepted
+  match ← NativeHistorySelection.readPrefix reader retained 30 with
+  | .error detail => throw (IO.userError s!"FAIL honest prefix read: {detail}")
+  | .ok _ => IO.println "honest: the 30 retained records are the Store's verified records 1..30"
+  match ← NativeHistorySelection.readPrefix reader (retained.take 9 ++ retained[10]?.toList ++ retained.drop 10) 30 with
+  | .ok _ => throw (IO.userError "FAIL a substituted record was accepted as the Store's")
+  | .error detail => IO.println s!"refused as expected (record 10 replaced by record 11): {detail}"
+  match ← NativeHistorySelection.readPrefix reader (retained.take 20) 30 with
+  | .ok _ => throw (IO.userError "FAIL a short retained prefix was accepted")
+  | .error detail => IO.println s!"refused as expected (20 retained records against 30): {detail}"
+  let database := directory / "store" / "forward-link.sqlite3"
+  -- PLANT 1: the record at height 20.
+  sql database "UPDATE durable_log SET record = CAST(substr(record,1,length(record)-1) || X'FF' AS BLOB) WHERE height = 20"
+  expectRefusedAt "stateAt 30 over the tampered record at 20" 20 (← reader.stateAt 30)
+  match ← NativeHistorySelection.foldRange reader 1 41 (0 : Nat) fun (count : Nat) window => (Except.ok (count + window.length) : Except String Nat) with
+  | .ok _ => throw (IO.userError "FAIL the fold read through the tampered record")
+  | .error detail =>
+      IO.println s!"refused as expected (fold over 1..41): {detail}"
+      require "fold names height 20" ((detail.splitOn "height 20").length > 1)
+  match ← NativeHistorySelection.select probe reader 41 25 ⟨[], []⟩ with
+  | .ok _ => throw (IO.userError "FAIL select read through the tampered record")
+  | .error detail =>
+      IO.println s!"refused as expected (select 25 over the tampered record at 20): {detail}"
+      require "select names height 20" (mentions detail "height 20")
+  match ← ServedBasis.Grounded.pastWitness reader loaded.logStart 30 (chainAt 30) with
+  | .ok _ => throw (IO.userError "FAIL a ground was certified over the tampered record at 20")
+  | .error detail =>
+      IO.println s!"refused as expected (past ground at 30 over the tampered record at 20): {detail}"
+      require "past ground names height 20" (mentions detail "height 20")
+  match ← NativeHistorySelection.readPrefix reader retained 30 with
+  | .ok _ => throw (IO.userError "FAIL the prefix read passed the tampered record at 20")
+  | .error detail =>
+      IO.println s!"refused as expected (prefix read over the tampered record at 20): {detail}"
+      require "prefix read names height 20" (mentions detail "height 20")
+  -- PLANT 2: the checkpoint at 32 (stateAt 41 resumes from it).
+  sql database "UPDATE durable_checkpoint SET bytes = CAST(substr(bytes,1,length(bytes)-1) || X'FF' AS BLOB) WHERE height = 32"
+  match ← reader.stateAt 41 with
+  | .ok _ => throw (IO.userError "FAIL stateAt resumed from a tampered checkpoint")
+  | .error refusal =>
+      IO.println s!"refused as expected (tampered checkpoint at 32): {refusal.message}"
+      require "checkpoint refused" ((refusal.message.splitOn "checkpoint refused").length > 1)
+  IO.println "PASS port-b tamper: a record below the requested height and the checkpoint, each refused by name (stateAt, fold, select)"
+
+end HistoryTamper
+
+def main (arguments : List String) : IO Unit := do
+  match arguments with
+  | [binary] => IO.FS.withTempDir (HistoryTamper.run binary)
+  | _ => throw (IO.userError "usage: lean --run scripts/kn2/port-b-tamper.lean STORE-HELPER")

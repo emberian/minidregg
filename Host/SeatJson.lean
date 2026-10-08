@@ -8,6 +8,7 @@ Nothing here decides anything: commands are judged by `Kernel.SeatReceiver`,
 artifacts by the seat kernel's `publish`. -/
 import Kernel.NativeHost
 import Compiler.ObjectiveBendDataWire
+import Host.CapacityJson
 
 namespace Minidregg.Host.SeatJson
 open Lean (Json toJson)
@@ -19,11 +20,8 @@ open Minidregg.Kernel.SeatStore (Turn)
 open Minidregg.Kernel.SeatReceiver (Command Grants)
 open Minidregg.Compiler.ObjectiveBendDataWire (dataJson)
 open Minidregg.Pred (Pred)
+open Minidregg.Host.CapacityJson (Result decimal field natOf nat capacity)
 set_option autoImplicit false
-
-abbrev Result := Except String
-
-def decimal (value : Nat) : Json := .str (toString value)
 
 def hexDigit (n : Nat) : Char := "0123456789abcdef".toList.getD n '0'
 def hex (bytes : List UInt8) : String :=
@@ -42,20 +40,6 @@ def unhex (text : String) : Result (List UInt8) :=
         pure ((high * 16 + low).toUInt8 :: (← go rest))
     | [_] => throw "odd hex length"
   go text.toList
-
-def field (path : String) (json : Json) (name : String) : Result Json :=
-  match json.getObjVal? name with
-  | .ok value => .ok value
-  | .error _ => .error s!"{path}.{name} missing"
-
-def natOf (path : String) (value : Json) : Result Nat := do
-  let some text := value.getStr?.toOption | throw s!"{path} must be a decimal string"
-  let some n := text.toNat? | throw s!"{path} must be a decimal string"
-  unless toString n == text do throw s!"{path} must be canonical decimal"
-  pure n
-
-def nat (path : String) (json : Json) (name : String) : Result Nat := do
-  natOf s!"{path}.{name}" (← field path json name)
 
 def optNat (path : String) (json : Json) (name : String) : Result (Option Nat) :=
   match json.getObjVal? name with
@@ -82,15 +66,25 @@ def proposal (json : Json) : Result Seats.Proposal := do
   let exit ← match ← optNat p json "afterDeadline" with
     | none => pure Seats.ExitRule.onDemand
     | some due => pure (Seats.ExitRule.afterDeadline due)
-  pure ⟨← amounts p json "give", ← amounts p json "want", exit⟩
-
-/-- A declared envelope: the eighteen `Capacity` lanes as decimal strings. -/
-def capacity (path : String) (json : Json) : Result ObjectiveInvocationClaim.Capacity := do
-  let n := nat path json
-  pure ⟨← n "typeFuel", ← n "sourceTicks", ← n "heap", ← n "stack", ← n "outputNodes", ← n "outputBytes",
-    ← n "inputBytes", ← n "scalarBits", ← n "memoryTouches", ← n "proofWork", ← n "feeDebit", ← n "turnBytes",
-    ← n "witnessBytes", ← n "storageBytes", ← n "sideEffectCount", ← n "networkBytes", ← n "leaseByteBlocks",
-    ← n "incidences"⟩
+  let donate ← match json.getObjVal? "donate" with
+    | .error _ => pure false
+    | .ok value => match value.getBool? with
+      | .ok flag => pure flag
+      | .error _ => throw s!"{p}.donate must be a boolean"
+  -- `disclose`: which principals the contract's method is shown (absent: none; GPT-6 row G).
+  let flag (obj : Json) (name : String) : Result Bool := match obj.getObjVal? name with
+    | .error _ => pure false
+    | .ok value => match value.getBool? with
+      | .ok f => pure f
+      | .error _ => throw s!"{p}.disclose.{name} must be a boolean"
+  let disclose ← match json.getObjVal? "disclose" with
+    | .error _ => pure ({} : Seats.Disclosure)
+    | .ok obj => do
+      for (key, _) in (obj.getObj?.toOption.map (·.toArray.toList)).getD [] do
+        unless key == "offerer" || key == "payee" || key == "holder" do
+          throw s!"{p}.disclose.{key} is not offerer, payee or holder"
+      pure ⟨← flag obj "offerer", ← flag obj "payee", ← flag obj "holder"⟩
+  pure ⟨← amounts p json "give", ← amounts p json "want", exit, donate, disclose⟩
 
 /-- `$.turn`: `{kind: publish|create|handOver|offer|invoke|exit, ...}`. A
 publication carries the artifact and its source package (hex) and the payer. The
@@ -112,7 +106,12 @@ def turn (predicate : String → Json → Result Pred) (json : Json) : Result Tu
         (← optNat p json "holder"))
   | "invoke" => pure (.invoke (← nat p json "instance")
       (dataBytes (← ObjectiveBendDataWire.decodeData 64 (← field p json "input")))
-      (← capacity (p ++ ".envelope") (← field p json "envelope")) (← nat p json "account"))
+      (← capacity (p ++ ".envelope") (← field p json "envelope")) (← nat p json "account")
+      (← match json.getObjVal? "discloseInvoker" with
+        | .error _ => pure false
+        | .ok value => match value.getBool? with
+          | .ok flag => pure flag
+          | .error _ => throw s!"{p}.discloseInvoker must be a boolean"))
   | "exit" => pure (.exit (← nat p json "seat"))
   | other => throw s!"$.turn.kind {other} is not publish, create, handOver, offer, invoke or exit"
 
@@ -134,7 +133,9 @@ def amountsJson (entries : List (Nat × Nat)) : Json :=
   Json.arr (entries.map fun (asset, amount) => Json.mkObj [("asset", decimal asset), ("amount", decimal amount)]).toArray
 
 def proposalJson (p : Seats.Proposal) : Json :=
-  .mkObj [("give", amountsJson p.give), ("want", amountsJson p.want),
+  .mkObj [("give", amountsJson p.give), ("want", amountsJson p.want), ("donate", toJson p.donate),
+    ("disclose", .mkObj [("offerer", toJson p.disclose.offerer), ("payee", toJson p.disclose.payee),
+      ("holder", toJson p.disclose.holder)]),
     ("exit", match p.exit with
       | .onDemand => "onDemand"
       | .afterDeadline due => .mkObj [("afterDeadline", decimal due)])]
@@ -151,8 +152,9 @@ def turnJson : Turn → Json
          ("role", toJson expect.role)]),
        ("funding", decimal funding), ("payee", decimal payee), ("proposal", proposalJson p),
        ("holder", match holder with | some r => decimal r | none => .null)]
-  | .invoke inst input envelope account => .mkObj [("kind", "invoke"), ("instance", decimal inst),
-      ("input", dataOf input), ("sourceTicks", decimal envelope.sourceTicks), ("account", decimal account)]
+  | .invoke inst input envelope account disclose => .mkObj [("kind", "invoke"), ("instance", decimal inst),
+      ("input", dataOf input), ("sourceTicks", decimal envelope.sourceTicks), ("account", decimal account),
+      ("discloseInvoker", toJson disclose)]
   | .exit seat => .mkObj [("kind", "exit"), ("seat", decimal seat)]
 
 def commandJson (domain : Option Digest) (command : Command) : Json :=
@@ -168,7 +170,7 @@ def commandJson (domain : Option Digest) (command : Command) : Json :=
      | _, _ => .null),
    -- the ids a Plan member at index 0..7 mints under (SeatStore.mintId)
    ("mintIds", match command.turn with
-     | .invoke inst _ _ _ => Json.arr ((List.range 8).map fun index =>
+     | .invoke inst _ _ _ _ => Json.arr ((List.range 8).map fun index =>
          decimal (SeatStore.mintId transaction inst index)).toArray
      | _ => .null),
    ("turn", turnJson command.turn)]
@@ -202,7 +204,7 @@ def seatJson (body : SeatStore.SeatBody) : Json :=
     ("offerer", decimal body.seat.offerer.value), ("payee", decimal body.seat.payee),
     ("proposal", proposalJson body.seat.proposal),
     ("holder", match body.seat.holder with | some r => decimal r | none => .null),
-    ("open", toJson body.seat.isOpen), ("role", toJson body.role),
+    ("role", toJson body.role),
     ("terms", Json.arr (body.terms.map fun (n, v) => Json.mkObj [("name", toJson n), ("value", decimal v)]).toArray)]
 
 def invitationJson (body : SeatStore.InvitationBody) : Json :=
@@ -218,7 +220,8 @@ def instanceJson (body : SeatStore.InstanceBody) : Json :=
 def cellJson (domain : Digest) (cell : Nat) (root : Digest) (bytes : List UInt8) : Json :=
   let described : List (String × Json) :=
     match SeatStore.payloadOf bytes with
-    | none => [("kind", if bytes.isEmpty then "absent" else "not-a-seat-cell")]
+    | none => [("kind", if bytes.isEmpty then "absent"
+        else if bytes = ObjectiveActivity.retiredImage then "retired" else "not-a-seat-cell")]
     | some payload =>
       let at_ := decide (cell = SeatCell.coordinate domain payload.role payload.key)
       [("atCoordinate", toJson at_)] ++

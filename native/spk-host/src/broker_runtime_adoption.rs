@@ -257,12 +257,12 @@ impl Broker {
         pin: &RuntimePin,
     ) -> io::Result<String> {
         let unit = supervisor_unit(&self.config.unit_prefix, store, app);
-        let path = Path::new(RUNTIME_UNITS).join(&unit);
+        let path = crate::os::runtime_units().join(&unit);
         let text = supervisor_text(&self.config, self.operator_gid, store, app, pin)?;
         match fs::symlink_metadata(&path) {
             Ok(meta) => {
                 if !meta.is_file()
-                    || meta.uid() != 0
+                    || !crate::os::root_owner(meta.uid())
                     || meta.mode() & 0o022 != 0
                     || !fs::read_to_string(&path)?.starts_with(&format!(
                         "# rendered by mini-spk-broker store={store} app={app}\n"
@@ -494,10 +494,7 @@ fn unit_quiescent(unit: &str) -> io::Result<()> {
         "--property=Job",
     ])?;
     if let Some(cgroup) = quiescent_cgroup(&text)? {
-        let events = Path::new("/sys/fs/cgroup")
-            .join(cgroup.trim_start_matches('/'))
-            .join("cgroup.events");
-        if !fs::read_to_string(events)?
+        if !crate::os::cgroup_events(cgroup)?
             .lines()
             .any(|l| l == "populated 0")
         {

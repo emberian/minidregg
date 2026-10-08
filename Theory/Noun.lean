@@ -536,7 +536,7 @@ theorem mod_two_pow_pred {b c : Nat} (hc : 0 < c) (h1 : 2 ^ (c - 1) ≤ b) (h2 :
   have : 2 ^ c = 2 * 2 ^ (c - 1) := by rw [← Nat.pow_succ']; congr 1; omega
   rw [Nat.mod_eq_sub_mod h1, Nat.mod_eq_of_lt (by omega)]; omega
 
-theorem rub_mat_pos {B : Array Bool} {i n b c : Nat} (_hb0 : 0 < b) (hn2 : n < 2 ^ b)
+theorem rub_mat_pos {B : Array Bool} {i n b c : Nat} (hn2 : n < 2 ^ b)
     (hc0 : 0 < c) (hc1 : 2 ^ (c - 1) ≤ b) (hc2 : b < 2 ^ c)
     (h : Matches B i (List.replicate c false ++ true :: (natBits (c - 1) b ++ natBits b n))) :
     rub B i = some (n, i + (c + c + b)) := by
@@ -573,7 +573,7 @@ theorem rub_mat {B : Array Bool} {i n : Nat} (h : Matches B i (mat n)) :
     simp
   · have hb0 : bitLen n ≠ 0 := by have := bitLen_pos hn; omega
     simp only [mat, hn, if_false] at h ⊢
-    rw [rub_mat_pos (bitLen_pos hn) (lt_two_pow_bitLen n) (bitLen_pos hb0)
+    rw [rub_mat_pos (lt_two_pow_bitLen n) (bitLen_pos hb0)
       (two_pow_bitLen_le hb0) (lt_two_pow_bitLen _) h]
     simp only [List.length_append, List.length_replicate, List.length_cons, natBits_length]
     have := bitLen_pos hb0

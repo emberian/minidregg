@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# scripts/pipeline/setup-box-peer -- let two build boxes READ each other directly (no relay through a laptop).
+#
+#   setup-box-peer                          create this box's peer key (~/.ssh/box_peer), print its public line
+#   setup-box-peer --authorize 'ssh-ed25519 AAAA... c'   accept a sibling's key, forced to box-peer-gate
+#   setup-box-peer --alias NAME USER@HOST   `ssh NAME` / `git fetch NAME:/srv/...` use the peer key
+#
+# The key has no passphrase and lives only on the disposable boxes; what it opens on the other box is
+# git fetch and read-only rsync of /srv (box-peer-gate), so a lane on burst2-b can do
+#   git fetch burst2-a:/srv/lanes/<lane>/src <branch>
+#   rsync -a burst2-a:/lanes/<lane>/logs/ ./logs-from-a/
+# Artifact sets travel the other way by the publisher's own write-only mirror key (setup-mirror-key).
+set -euo pipefail
+PIPELINE_PROG=setup-box-peer
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+. "$here/lib.sh"
+key=$HOME/.ssh/box_peer
+mkdir -p ~/.ssh; chmod 700 ~/.ssh
+case "${1:-}" in
+  --authorize)
+    pub=${2:?public key line}
+    case "$pub" in ssh-ed25519\ *) ;; *) pipeline_die "expected an ssh-ed25519 public key line" ;; esac
+    command -v rrsync >/dev/null || pipeline_die "rrsync is not installed"
+    line="command=\"$PIPELINE_ROOT/scripts/box-peer-gate\",restrict $pub"
+    grep -qxF "$line" ~/.ssh/authorized_keys 2>/dev/null || echo "$line" >>~/.ssh/authorized_keys
+    echo "setup-box-peer: authorized (git fetch + read-only rsync of /srv)" ;;
+  --alias)
+    name=${2:?NAME} dest=${3:?USER@HOST}
+    grep -q "^Host $name\$" ~/.ssh/config 2>/dev/null && pipeline_die "~/.ssh/config already has Host $name"
+    printf '\nHost %s\n  HostName %s\n  User %s\n  IdentityFile %s\n  IdentitiesOnly yes\n  StrictHostKeyChecking accept-new\n  BatchMode yes\n' \
+      "$name" "${dest#*@}" "${dest%@*}" "$key" >>~/.ssh/config
+    chmod 600 ~/.ssh/config
+    echo "setup-box-peer: Host $name -> $dest" ;;
+  "")
+    [ -f "$key" ] || ssh-keygen -q -t ed25519 -N '' -C "box-peer@$(hostname)" -f "$key"
+    cat "$key.pub" ;;
+  *) pipeline_die "unknown argument $1" ;;
+esac

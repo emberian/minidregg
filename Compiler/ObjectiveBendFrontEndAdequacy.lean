@@ -94,7 +94,8 @@ publishes succeeds (`ObjectiveBendPublication.Replayed`, the premise of
 `Program.runs_front_end_output`). -/
 theorem replay_inhabited :
     (ObjectiveBendPublication.replayAccept example_package
-      ((ObjectiveBendPublication.publishedCore example_package).toOption.getD []) 16384).toBool = true := by
+      ((ObjectiveBendPublication.publishedCore example_package).toOption.getD [])
+      ((ObjectiveBendPublication.publishedLaws example_package).toOption.getD []) 16384).toBool = true := by
   native_decide
 #assert_compiled replay_inhabited
 

@@ -34,7 +34,8 @@ private def atom (id schema : Digest) (bytes : List UInt8) : Json := Json.mkObj 
 /-- The receiver's package schema, never a local copy of its derivation. -/
 abbrev packageSchema : Digest := Minidregg.Kernel.ObjectiveBendPublishedPackage.schema
 
-def author (packageBytes replayedPackage offeredCore expectedCore outputCodecBytes : List UInt8) : Except String Json := do
+def author (packageBytes replayedPackage offeredCore expectedCore outputCodecBytes : List UInt8)
+    (laws : List (String × Minidregg.Compiler.ObjectiveBendLaw.LawExpr)) : Except String Json := do
   if packageBytes.length > 12582912 || offeredCore.length > 4194304 || expectedCore.length > 4194304 || outputCodecBytes.length > 1024 then throw "source publication byte capacity"
   let some package := Minidregg.Compiler.ObjectiveSourcePackage.decode packageBytes | throw "canonical Objective package required"
   if !Minidregg.Compiler.ObjectiveSourcePackage.wellFormed package then throw "Objective package structure/import/pin refusal"
@@ -46,7 +47,7 @@ def author (packageBytes replayedPackage offeredCore expectedCore outputCodecByt
   let some outputCodec := digestStream.toLawful.decode outputCodecBytes | throw "native output codec encoding required"
   if digestStream.encode outputCodec != outputCodecBytes then throw "noncanonical native output codec"
   let artifact : Artifact := ⟨Minidregg.Compiler.ObjectiveSourcePackage.identity package,
-    declaration,offeredCore,Minidregg.Kernel.ObjectiveBendNativeInput.codecId,outputCodec⟩
+    declaration,offeredCore,Minidregg.Kernel.ObjectiveBendNativeInput.codecId,outputCodec,laws⟩
   let checked ← checkWithin artifact 4194304 16384
   match checked.typed.type with
   | .arrow .. => pure ()
@@ -59,12 +60,17 @@ def author (packageBytes replayedPackage offeredCore expectedCore outputCodecByt
     ("schema",toJson "dregg.objective-bend.publication-author.v1"),
     ("packageId",decimal artifact.package),("artifactId",decimal (identity artifact)),
     ("sourceEntry",toJson declaration),("inputCodec",decimal artifact.inputCodec),("outputCodec",decimal artifact.outputCodec),
+    -- The front-end work an invoking claim declares for this pair (GPT-6 row E): what the native
+    -- route compares with `replayBytes`/`coreBytes` before it replays (`ObjectiveWorkAccount.uncovered`).
+    ("frontEnd",Json.mkObj [("replayBytes",toJson (toString (Minidregg.Kernel.ObjectiveWorkAccount.sourceBytes package))),
+      ("coreBytes",toJson (toString offeredCore.length))]),
     ("payload",Json.mkObj [("type",toJson "content"),("actions",toJson ([
       atom artifact.package packageSchema packageBytes,
       atom (identity artifact) schema artifactBytes] : List Json))]),
     ("authority",toJson "none; ordinary current-authorized content proposal required"),
     ("sourceCorrespondence",toJson "exact offered/independently replayed packet; trusted replay supplied by signing consumer"),
-    ("laws",toJson "undischarged")]
+    ("claims",toJson "undischarged"),
+    ("laws",toJson (laws.map fun (name, law) => Json.mkObj [("name",toJson name),("law",toJson law.render)]))]
 
 /-- A registered output codec by name. -/
 def outputCodecOf : String → Except String Digest
@@ -101,10 +107,13 @@ def publication (package : Minidregg.Compiler.ObjectiveSourcePackage.Package) (o
     | .error d => throw (d.stage ++ ": " ++ d.message)
   let packageBytes := Minidregg.Compiler.ObjectiveSourcePackage.encode package
   let codec ← outputCodecOf outputCodec
-  let json ← author packageBytes packageBytes core core (digestStream.encode codec)
+  let laws ← match ObjectiveBendPublication.publishedLaws package with
+    | .ok laws => pure laws
+    | .error d => throw (d.stage ++ ": " ++ d.message)
+  let json ← author packageBytes packageBytes core core (digestStream.encode codec) laws
   let some declaration := Minidregg.Compiler.ObjectiveSourcePackage.selectedDeclaration package
     | throw "Objective selected declaration missing"
   let artifact : Artifact := ⟨Minidregg.Compiler.ObjectiveSourcePackage.identity package,declaration,core,
-    Minidregg.Kernel.ObjectiveBendNativeInput.codecId,codec⟩
+    Minidregg.Kernel.ObjectiveBendNativeInput.codecId,codec,laws⟩
   pure ⟨packageBytes,encode artifact,core,json⟩
 end Minidregg.Host.ObjectivePackageAuthor

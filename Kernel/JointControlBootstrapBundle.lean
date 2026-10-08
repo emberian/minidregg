@@ -4,6 +4,8 @@ post-birth prefix before allowing the bare phase. Prediction is not a physical
 receipt or future permission: the second operation re-admits current native
 law on that same prefix. No unrelated operation is allowed between phases.
 Authored WIP; source opcode 61 and replay/ordered receiver joins are pending.
+The predicted prefix is the opened image extended by the first record
+(`Loaded.extend`), never a genesis replay of the whole history.
 -/
 import Kernel.JointControlBootstrap
 import Kernel.ResourceBirthReceiver
@@ -83,7 +85,7 @@ structure Initialization (config : Config) (predicted : Opened config) where
   signed : SignedCommand
   command : Command
   prepared : PreparedInvocation config.deployment config.profile
-    ⟨config.federation,logicalHeight config predicted.durable⟩ predicted.durable command
+    ⟨config.federation,logicalHeight config predicted.durable⟩ predicted.ground command
   shape : PhysicalShape prepared
   accepted : AcceptedInvocation prepared signed
   intent : DataIntent ResourceBirthCodec.rootBytes
@@ -124,9 +126,14 @@ def admit (config : Config) (opened : Opened config) (source : Source) :
         let intent := birthIntent source birth
         if birthPreflight : intent.preflight opened.durable.snapshot = .ok () then
           let image := opened.durable.image.append intent
-          match built : DurableReceiverIO.loadImage ResourceBirthCodec.rootBytes opened.durable.logStart image with
-          | .error detail => return .error detail
-          | .ok predictedDurable =>
+          -- The prediction is the opened image advanced by exactly this intent through the shared
+          -- executor (`DurableCheckpoint.prepare`, then `Loaded.extend`, as a receive advances it);
+          -- the history is not replayed again.
+          match DurableCheckpoint.prepare opened.durable.image opened.durable.baseHeight opened.durable.base
+              opened.durable.snapshot opened.durable.withinLog opened.durable.resumed intent with
+          | .inr _ => return .error "bootstrap first source record does not execute at the opened state"
+          | .inl ready =>
+            let predictedDurable := opened.durable.extend ready
             match validated : validateLoadedFrom config opened predictedDurable with
             | .error detail => return .error detail
             | .ok predicted =>
@@ -138,9 +145,9 @@ def admit (config : Config) (opened : Opened config) (source : Source) :
                   signedBytes config.deployment.domain config.profile.semantics signed then
                 let some command := commandCodec.decode signed.commandBytes
                   | return .error "bootstrap initializer command is noncanonical"
-                match prepareFrom config.deployment config.profile
+                match prepare config.deployment config.profile
                     ⟨config.federation,logicalHeight config predicted.durable⟩
-                    predicted.durable (some predicted.directory) command with
+                    predicted.ground command with
                 | .error reason => return .error s!"bootstrap initializer preparation refused: {repr reason}"
                 | .ok prepared =>
                   if shape : PhysicalShape prepared then
@@ -157,7 +164,7 @@ def admit (config : Config) (opened : Opened config) (source : Source) :
                             rw [← validateLoadedFrom_eq config opened predictedDurable]
                             exact validated
                           rw [durableExact]
-                          exact DurableReceiverIO.loadImage_image built
+                          rfl
                         return .ok ⟨pin,pinned,birth,creatorOwner,intent,rfl,birthPreflight,
                           predicted,predictedExact,⟨signed,command,prepared,shape,accepted,accepted.dataIntent shape,rfl,bootstrap⟩,
                           initializerExact,initializerFunded⟩

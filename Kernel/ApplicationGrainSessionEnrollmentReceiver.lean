@@ -49,12 +49,14 @@ structure Confirmed (config : Config) where
   readback : NativeHostReplay.ExactReadback config old
   derivedExact : readback.derived.intent = admitted.intent
   confirmation : DurableReceiverIO.Confirmation
+  store : DurableHistory.StoreIdentity
+  reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store
 
 def Confirmed.verified {config : Config} (confirmed : Confirmed config) :
     NativeHostReplay.Verified config
       (NativeHostReplay.exactCandidate confirmed.old
         confirmed.readback.derived confirmed.readback.ready) :=
-  NativeHostReplay.extendExact confirmed.old confirmed.readback
+  NativeHostReplay.extendExact confirmed.reader confirmed.old confirmed.readback
 
 def Confirmed.receipt {config : Config} (confirmed : Confirmed config) : Receipt :=
   let old := confirmed.old
@@ -62,7 +64,7 @@ def Confirmed.receipt {config : Config} (confirmed : Confirmed config) : Receipt
     confirmed.readback.derived confirmed.readback.ready
   ⟨confirmed.readback.derived.intent.transactionId,
     confirmed.readback.derived.intent.event.eventId,
-    old.opened.durable.image.accepted.length + 1,
+    old.opened.durable.height + 1,
     candidate.worldRoot⟩
 
 theorem Confirmed.postRecord_exact {config : Config} (confirmed : Confirmed config) :
@@ -102,8 +104,11 @@ def receiveVerified {config : Config} {target : Durable}
           match NativeHostReplay.ExactReadback.ofAppended verified derived appended with
           | .error detail => return .uncertain s!"enrollment post-image: {detail}"
           | .ok ⟨proof, proofDerived⟩ =>
-                return .confirmed ⟨target, verified, ingress, admitted, proof,
-                  ((congrArg NativeHostReplay.Derived.intent proofDerived).trans admitted.toDerived_intent), kind⟩
+                match ← DurableHistoryStore.readerOf config.transport ResourceBirthCodec.rootBytes appended.next with
+                | .error detail => return .uncertain s!"post-append history reader: {detail}"
+                | .ok ⟨_, reader⟩ =>
+                  return .confirmed ⟨target, verified, ingress, admitted, proof,
+                    ((congrArg NativeHostReplay.Derived.intent proofDerived).trans admitted.toDerived_intent), kind, _, reader⟩
       | .ordinary ordinary =>
           match ordinary with
           | .confirmed _ _ => return .uncertain "enrollment lacks exact post-CAS readback"

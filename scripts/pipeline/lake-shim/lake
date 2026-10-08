@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# scripts/pipeline/lake-shim/lake -- the box's shared Lake artifact cache, ONLY for trees that restore from it.
+#
+# box.env puts this directory first on PATH. For a tree whose lakefile.toml says
+# `restoreAllArtifacts = true`, it exports LAKE_CACHE_DIR=$PIPELINE_LAKE_CACHE (/srv/lake-cache, one per
+# box, shared by every lane) and LAKE_ARTIFACT_CACHE=true, so a module any lane (or the publisher, or
+# the warm base) already compiled from identical inputs is FETCHED (hard-linked into .lake/build)
+# instead of compiled again. Every other tree gets a private, empty cache directory: Lake reads its
+# cache by default, and without restoreAllArtifacts a cache hit leaves .lake/build without the
+# .olean, which breaks `lake env lean`, lane-check and lean-ask. Then execs the real lake.
+# OFF switch: LAKE_ARTIFACT_CACHE=false (or a LAKE_CACHE_DIR of your own, or PIPELINE_LAKE_CACHE=<dir>)
+# is honoured; it used to be overwritten here, so `false` silently kept the shared cache (10-07).
+set -u
+real=${PIPELINE_REAL_LAKE:-$HOME/.elan/bin/lake}
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+dir=$PWD
+while [ "$dir" != / ] && [ ! -f "$dir/lakefile.toml" ]; do dir=$(dirname "$dir"); done
+case "${LAKE_ARTIFACT_CACHE:-}" in
+  false|0|no|off)
+    # An explicit OFF wins: no shared cache, read or write. Lake READS its cache by default, so the
+    # directory is moved too (a private empty one), unless the caller named one itself.
+    [ -n "${LAKE_CACHE_DIR:-}" ] && [ "$LAKE_CACHE_DIR" != "${PIPELINE_LAKE_CACHE:-/srv/lake-cache}" ] \
+      || export LAKE_CACHE_DIR=$HOME/.cache/lake-private-unshared ;;
+  *)
+    if [ -n "${LAKE_CACHE_DIR:-}" ] && [ "$LAKE_CACHE_DIR" != "${PIPELINE_LAKE_CACHE:-/srv/lake-cache}" ]; then
+      :   # the caller named its own cache directory: honoured as given
+    elif [ -f "$dir/lakefile.toml" ] && grep -qE '^restoreAllArtifacts *= *true' "$dir/lakefile.toml"; then
+      export LAKE_CACHE_DIR=${PIPELINE_LAKE_CACHE:-/srv/lake-cache} LAKE_ARTIFACT_CACHE=true
+      # GUARD: before Lake can fetch anything, drop entries written since the last audit whose C or
+      # object names an in-tree initializer/declaration without the package prefix (lake-cache-audit).
+      [ -x "$here/../lake-cache-audit" ] && "$here/../lake-cache-audit" --cache "$LAKE_CACHE_DIR" --since --purge --quiet >/dev/null 2>&1
+    else
+      export LAKE_CACHE_DIR=$HOME/.cache/lake-private-unshared
+    fi ;;
+esac
+exec "$real" "$@"

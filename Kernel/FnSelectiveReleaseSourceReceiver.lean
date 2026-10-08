@@ -27,8 +27,8 @@ def receipt (ingress : Ingress) : Receipt :=
   ⟨transactionId ingress.spec, (event ingress).eventId⟩
 
 def sourceContext (config : NativeHost.Config) (opened : NativeHost.Opened config) :
-    ResourceObservationAdmission.Context config.deployment opened.durable :=
-  ⟨opened.directory, opened.authority⟩
+    ResourceObservationAdmission.Context config.deployment :=
+  (Minidregg.Compiler.ServedBasis.Ground.full _ opened.directory opened.authority)
 
 def replay {config : NativeHost.Config} (opened : NativeHost.Opened config) (ingress : Ingress) :
     Option (Except Unit Receipt) :=
@@ -66,7 +66,7 @@ def admitLoaded (config : NativeHost.Config) (opened : NativeHost.Opened config)
   match FnSelectiveReleaseSourceAuthority.prepare context config.profile
       config.federation (NativeHost.logicalHeight config opened.durable)
       ingress.spec with
-  | .error reason => return .error reason
+  | .error reason => return .error reason.undisclosed
   | .ok prepared =>
       match ← FnSelectiveReleaseSourceAuthority.check config.signature
           prepared ingress.nativeEnvelope with
@@ -81,7 +81,7 @@ def Accepted.intent (config : NativeHost.Config) (opened : NativeHost.Opened con
   { transactionId := transactionId ingress.spec
     writes := []
     readGuards := FnSelectiveReleaseSourceAuthority.readGuards accepted.prepared ++
-      (sourceContext config opened).authority.readGuards
+      (sourceContext config opened).authorityReadGuards
     nullifiers := [nullifier ingress.spec]
     exactCharge := charge ingress
     event := event ingress

@@ -1,0 +1,10 @@
+edition ObjectiveBend 1
+# Package A: prices and the total. It reads tax and price through the FINAL self.
+import ./Shop.obend as Shop
+
+spec Pricing for Shop.Store:
+  requires tax(n: Nat) -> Nat
+  def price(n: Nat) -> Nat:
+    n * 10n
+  def total(n: Nat) -> Nat:
+    self.price(n) + self.tax(n)

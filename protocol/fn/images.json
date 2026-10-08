@@ -1,0 +1,19 @@
+{
+  "type": "minidregg-fn-images-v1",
+  "note": "Which fn Mini runs against. Mini >= lane/plat-fn-frames (fn frames!) requires an fn with --frame on identity, status, position, ack and poll; the production image has none, and Mini refuses it by name (Host/Main fnNoFrameError). Production deploy waits for fn's converged image; re-pin `production` to it (one line) when fn sends its sha.",
+  "production": {
+    "fnCommit": "d420a2b5e2b3db18be134ba5a503160da84a31c3",
+    "frame": false,
+    "use": "production deploys (none of Mini >= fn frames until fn's converged image)"
+  },
+  "dev": {
+    "fnCommit": "6679dae0e",
+    "source": "lane/attach-order@a2ac8ffa2 + lane/acquire-chosen@7fd99ada9 (not a dev commit)",
+    "tarball": "fn-6679dae0e-linux-x86_64.tar.gz",
+    "tarballSha256": "ab3f4181a2d678d1ab1faa9d81f5b82f3f210e38356466b2a781d21ef69c6793",
+    "frame": true,
+    "grammarIdenticalTo": "1e190ff19 (protocol/fn/wire-grammar.json, 234746 octets)",
+    "caveats": "not built on the glibc floor; no dtn images; MEM-007 absent",
+    "use": "journeys and the pipeline only"
+  }
+}

@@ -184,6 +184,10 @@ inductive Pred where
   | leSlots   (a b : Slot)
   /-- Slot-to-slot order with a constant offset: `new[a] ≤ new[b] + k`, both present. -/
   | leSlotsOff (a b : Slot) (k : Int)
+  /-- **Sum equality**: `Σ new[l] for l ∈ left = Σ new[r] for r ∈ right`, every named slot present
+  (fails closed on any absent one). An empty side sums to `0`; a slot named twice counts twice.
+  `sumEq [reserve] [a/balance, b/balance]` is "the reserve backs every balance". -/
+  | sumEq     (left right : List Slot)
   /-- **The escape hatch** — a third-party-discharged claim named by the opaque code `vk`.
   First-party `eval` FAILS CLOSED; admission requires an explicit oracle via `evalWith`. -/
   | witnessed (vk : Vk)
@@ -270,6 +274,37 @@ def failClosed : Oracle := fun _ _ _ => false
 `evalWith` is the general evaluator (takes an oracle); the mutual `evalWith{All,Any}` recurse
 structurally through `PredList`. `eval` is the first-party fragment: `evalWith failClosed`. -/
 
+/-- The sum of `state`'s values at `slots`, or `none` when any is absent (`sumEq`'s operand). -/
+def sumOf (state : State) : List Slot → Option Int
+  | [] => some 0
+  | slot :: rest => do
+    let x ← state.get slot
+    let y ← sumOf state rest
+    pure (x + y)
+
+/-- `sumOf` is `some` of the sum exactly when every slot is present. -/
+theorem sumOf_eq_some (state : State) (slots : List Slot) (total : Int) :
+    sumOf state slots = some total ↔
+      ∃ values : List Int, slots.mapM state.get = some values ∧ values.sum = total := by
+  induction slots generalizing total with
+  | nil => simp [sumOf, eq_comm]
+  | cons slot rest ih =>
+    simp only [sumOf, List.mapM_cons, Option.bind_eq_bind, Option.bind_eq_some_iff,
+      Option.pure_def, Option.some.injEq]
+    constructor
+    · rintro ⟨x, hx, y, hy, rfl⟩
+      obtain ⟨values, hv, rfl⟩ := (ih y).mp hy
+      exact ⟨x :: values, ⟨x, hx, values, hv, rfl⟩, by simp⟩
+    · rintro ⟨_, ⟨x, hx, values, hv, rfl⟩, rfl⟩
+      exact ⟨x, hx, values.sum, (ih _).mpr ⟨values, hv, rfl⟩, by simp⟩
+
+/-- `sumOf` reads the state only through `get`. -/
+theorem sumOf_congr {s s' : State} (h : ∀ k, s.get k = s'.get k) (slots : List Slot) :
+    sumOf s slots = sumOf s' slots := by
+  induction slots with
+  | nil => rfl
+  | cons slot rest ih => simp only [sumOf, h, ih]
+
 mutual
   /-- The general evaluator: a decidable `Bool` reading of the AST against an (old, new) step,
   with `witnessed` discharged by the supplied oracle `O`. Every atom fails closed on absent slots. -/
@@ -296,6 +331,9 @@ mutual
                         | _,      _      => false
     | .leSlotsOff a b k => match new.get a, new.get b with
                         | some x, some y => decide (x ≤ y + k)
+                        | _,      _      => false
+    | .sumEq l r     => match sumOf new l, sumOf new r with
+                        | some x, some y => decide (x = y)
                         | _,      _      => false
     | .witnessed vk  => O vk old new
     | .hashEq vs b c => hashEqHolds HashEqDigest.deployed new vs b c
@@ -486,6 +524,34 @@ theorem eval_writeOnce_change : eval (.writeOnce "x") sX3 sX5 = false := by deci
 -- membership atom, both poles
 theorem eval_memberOf_in : eval (.memberOf "x" [3, 5, 7]) sX3 sX5 = true := by decide
 theorem eval_memberOf_out : eval (.memberOf "x" [1, 2]) sX3 sX5 = false := by decide
+
+/-- **What `sumEq` decides**: every slot on both sides is present in the new state, and the two
+sides' values sum to the same integer. -/
+theorem eval_sumEq (left right : List Slot) (old new : State) :
+    eval (.sumEq left right) old new = true ↔
+      ∃ xs ys : List Int, left.mapM new.get = some xs ∧ right.mapM new.get = some ys ∧
+        xs.sum = ys.sum := by
+  simp only [eval, evalWith]
+  constructor
+  · intro h
+    split at h
+    · rename_i x y hx hy
+      obtain ⟨xs, hxs, rfl⟩ := (sumOf_eq_some _ _ _).mp hx
+      obtain ⟨ys, hys, rfl⟩ := (sumOf_eq_some _ _ _).mp hy
+      exact ⟨xs, ys, hxs, hys, of_decide_eq_true h⟩
+    · exact absurd h (by simp)
+  · rintro ⟨xs, ys, hxs, hys, hsum⟩
+    rw [(sumOf_eq_some _ _ _).mpr ⟨xs, hxs, rfl⟩, (sumOf_eq_some _ _ _).mpr ⟨ys, hys, rfl⟩]
+    exact decide_eq_true hsum
+
+/-- A reserve of 8 backs balances 3 + 5; a reserve of 8 does not back 3 + 6; an absent balance
+backs nothing. -/
+theorem sumEq_backs : eval (.sumEq ["r"] ["a", "b"]) ⟨[]⟩ ⟨[("r", 8), ("a", 3), ("b", 5)]⟩ = true := by
+  decide
+theorem sumEq_minted : eval (.sumEq ["r"] ["a", "b"]) ⟨[]⟩ ⟨[("r", 8), ("a", 3), ("b", 6)]⟩ = false := by
+  decide
+theorem sumEq_absent : eval (.sumEq ["r"] ["a", "b"]) ⟨[]⟩ ⟨[("r", 3), ("a", 3)]⟩ = false := by
+  decide
 -- the derived DecidableEq on the AST decides syntactic equality:
 theorem pred_eq_self : decide (demoPred = demoPred) = true := by decide
 theorem pred_eq_distinct_const : decide (Pred.eq "x" 5 = Pred.eq "x" 6) = false := by decide

@@ -6,7 +6,7 @@
    "codomain": {"tag": "variable", "index": "0"}},
   {"tail": {"tag": "emptyRow"},
    "tag": "field",
-   "name": "laws",
+   "name": "claims",
    "member": {"tag": "variable", "index": "1"}},
   {"tail": {"tag": "ref", "index": "1"},
    "tag": "field",
@@ -96,7 +96,7 @@
    "member": {"tag": "ref", "index": "14"}},
   {"tail": {"tag": "ref", "index": "21"},
    "tag": "field",
-   "name": "TwiceReview.TwiceReview#law#twice_distinct",
+   "name": "TwiceReview.TwiceReview#claim#twice_distinct",
    "member": {"tag": "ref", "index": "18"}},
   {"tail": {"tag": "ref", "index": "22"},
    "tag": "field",
@@ -108,7 +108,7 @@
    "member": {"tag": "ref", "index": "14"}},
   {"tail": {"tag": "emptyRow"},
    "tag": "field",
-   "name": "law",
+   "name": "claim",
    "member": {"tag": "ref", "index": "10"}},
   {"tail": {"tag": "ref", "index": "25"},
    "tag": "field",
@@ -164,7 +164,7 @@
               {"tag": "inject",
                "payload": {"tag": "record", "fields": []},
                "label": "none"},
-              "name": "laws"}]},
+              "name": "claims"}]},
            "label": "declared"},
           "extension":
           {"tag": "lam",
@@ -211,8 +211,8 @@
                    "payload": {"tag": "record", "fields": []},
                    "label": "none"},
                   "name": "rest"}]},
-               "label": "law"},
-              "name": "laws"}]},
+               "label": "claim"},
+              "name": "claims"}]},
            "label": "declared"},
           "extension":
           {"tag": "lam",
@@ -268,7 +268,7 @@
                "tag": "get",
                "name": "twice"},
               "arg": {"tag": "bound", "index": 0}}}}}},
-         "name": "TwiceReview.TwiceReview#law#twice_distinct"},
+         "name": "TwiceReview.TwiceReview#claim#twice_distinct"},
         {"value":
          {"tag": "specification",
           "metadata":
@@ -280,14 +280,14 @@
               "name": "name"},
              {"value":
               {"value":
-               "{\"methods\":[{\"name\":\"review\",\"parameters\":[{\"name\":\"value\",\"quantity\":\"default\",\"type\":\"Nat\"}],\"qualifier\":\"primary\",\"resultType\":\"Nat\",\"span\":{\"end\":496,\"line\":19,\"start\":466}}],\"parents\":[],\"precedence\":[\"TwiceReview.AugmentedReview\"],\"requirements\":[{\"name\":\"review\",\"parameters\":[{\"name\":\"value\",\"quantity\":\"default\",\"type\":\"Nat\"}],\"resultType\":\"Nat\",\"span\":{\"end\":463,\"line\":18,\"start\":429}}],\"suffix\":false,\"targetType\":\"Review\"}",
+               "{\"methods\":[{\"name\":\"review\",\"parameters\":[{\"name\":\"value\",\"quantity\":\"default\",\"type\":\"Nat\"}],\"qualifier\":\"primary\",\"resultType\":\"Nat\",\"span\":{\"end\":498,\"line\":19,\"start\":468}}],\"parents\":[],\"precedence\":[\"TwiceReview.AugmentedReview\"],\"requirements\":[{\"name\":\"review\",\"parameters\":[{\"name\":\"value\",\"quantity\":\"default\",\"type\":\"Nat\"}],\"resultType\":\"Nat\",\"span\":{\"end\":465,\"line\":18,\"start\":431}}],\"suffix\":false,\"targetType\":\"Review\"}",
                "tag": "label"},
               "name": "interface"},
              {"value":
               {"tag": "inject",
                "payload": {"tag": "record", "fields": []},
                "label": "none"},
-              "name": "laws"}]},
+              "name": "claims"}]},
            "label": "declared"},
           "extension":
           {"tag": "lam",
@@ -411,7 +411,7 @@
  "exact core annotation proposal; actual checker must return Checked; no law proof or effect authority",
  "sourceModules":
  [{"sourceSha256":
-   "b7adabd3dbd422059f9332d76a5d768aff600c5547f0dbb81b05a2bdd9932a0c",
+   "d8bc90c6dd51da1e6a7229a209203c36750c2e17a324e5619e75661ee45c9598",
    "name": "TwiceReview",
    "imports": []}],
  "sourceEntry": "TwiceReview.twiceOfThree",

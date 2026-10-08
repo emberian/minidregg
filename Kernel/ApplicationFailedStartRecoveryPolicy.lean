@@ -18,6 +18,8 @@ open Minidregg.Kernel.MultiCellHyperedge
 open Minidregg.Kernel.ApplicationFailedStartRecoveryReport
 
 set_option autoImplicit false
+
+open Minidregg.Compiler.ServedBasis (Ground)
 set_option maxHeartbeats 800000
 
 /-- The checked completion slot is visible to every incidence whose policy
@@ -60,10 +62,10 @@ def step {F : Type} [Field F] [DecidableEq F]
     {deployment : CanonicalCellRegistry.Deployment}
     {profile : CanonicalRuntimeProfile.Profile F}
     {ambient : DeclaredResourceController.Ambient}
-    {durable : DeclaredResourceController.Durable}
+    {ground : Ground deployment}
     {command : DeclaredResourceController.Command}
     (prepared : DeclaredResourceController.PreparedInvocation
-      deployment profile ambient durable command)
+      deployment profile ambient ground command)
     (tuple : PreparedTuple
       (DeclaredResourceController.plan prepared))
     (incidence : DeclaredResourceController.Incidence command)
@@ -85,10 +87,10 @@ def policyConfig {F : Type} [Field F] [DecidableEq F]
     {deployment : CanonicalCellRegistry.Deployment}
     {profile : CanonicalRuntimeProfile.Profile F}
     {ambient : DeclaredResourceController.Ambient}
-    {durable : DeclaredResourceController.Durable}
+    {ground : Ground deployment}
     {command : DeclaredResourceController.Command}
     (prepared : DeclaredResourceController.PreparedInvocation
-      deployment profile ambient durable command)
+      deployment profile ambient ground command)
     (tuple : PreparedTuple (DeclaredResourceController.plan prepared))
     (incidence : DeclaredResourceController.Incidence command)
     {domain semantics : Digest} {publicKey : List UInt8}
@@ -102,10 +104,10 @@ def portals {F : Type} [Field F] [DecidableEq F]
     {deployment : CanonicalCellRegistry.Deployment}
     {profile : CanonicalRuntimeProfile.Profile F}
     {ambient : DeclaredResourceController.Ambient}
-    {durable : DeclaredResourceController.Durable}
+    {ground : Ground deployment}
     {command : DeclaredResourceController.Command}
     (prepared : DeclaredResourceController.PreparedInvocation
-      deployment profile ambient durable command)
+      deployment profile ambient ground command)
     (tuple : PreparedTuple (DeclaredResourceController.plan prepared))
     {domain semantics : Digest} {publicKey : List UInt8}
     {begin : ApplicationLifecycleBeginV3Ingress.Ingress}
@@ -119,19 +121,19 @@ def authorizeLeg {F : Type} [Field F] [DecidableEq F]
     {deployment : CanonicalCellRegistry.Deployment}
     {profile : CanonicalRuntimeProfile.Profile F}
     {ambient : DeclaredResourceController.Ambient}
-    {durable : DeclaredResourceController.Durable}
+    {ground : Ground deployment}
     {command : DeclaredResourceController.Command}
     (prepared : DeclaredResourceController.PreparedInvocation
-      deployment profile ambient durable command)
+      deployment profile ambient ground command)
     (tuple : PreparedTuple (DeclaredResourceController.plan prepared))
     (incidence : DeclaredResourceController.Incidence command)
     {domain semantics : Digest} {publicKey : List UInt8}
     {begin : ApplicationLifecycleBeginV3Ingress.Ingress}
     (checked : Checked domain semantics publicKey begin)
-    (signature : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot) :
+    (signature : CredentialSignatureAdmission.CheckedSignature ground.authority) :
     Except DeclaredResourceController.Reject
       (Authorized (portals prepared tuple checked incidence)
-        prepared.authority.snapshot.authState (tuple.request incidence).2) := do
+        ground.authority.authState (tuple.request incidence).2) := do
   let wanted := (tuple.request incidence).2
   let context := step prepared tuple incidence checked
   let config := policyConfig prepared tuple incidence checked
@@ -162,10 +164,10 @@ structure CheckedLeg {F : Type} [Field F] [DecidableEq F]
     {deployment : CanonicalCellRegistry.Deployment}
     {profile : CanonicalRuntimeProfile.Profile F}
     {ambient : DeclaredResourceController.Ambient}
-    {durable : DeclaredResourceController.Durable}
+    {ground : Ground deployment}
     {command : DeclaredResourceController.Command}
     (prepared : DeclaredResourceController.PreparedInvocation
-      deployment profile ambient durable command)
+      deployment profile ambient ground command)
     (tuple : PreparedTuple (DeclaredResourceController.plan prepared))
     {domain semantics : Digest} {publicKey : List UInt8}
     {begin : ApplicationLifecycleBeginV3Ingress.Ingress}
@@ -173,21 +175,21 @@ structure CheckedLeg {F : Type} [Field F] [DecidableEq F]
     (incidence : DeclaredResourceController.Incidence command)
     (envelope : List UInt8) where
   private mk ::
-  receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
+  receipt : CredentialSignatureAdmission.CheckedSignature ground.authority
   envelopeExact : receipt.envelopeBytes = envelope
   authorization : Authorized (portals prepared tuple physical incidence)
-    prepared.authority.snapshot.authState (tuple.request incidence).2
+    ground.authority.authState (tuple.request incidence).2
   admitted : authorizeLeg prepared tuple incidence physical receipt = .ok authorization
 
 def verifyLeg {F : Type} [Field F] [DecidableEq F]
     {deployment : CanonicalCellRegistry.Deployment}
     {profile : CanonicalRuntimeProfile.Profile F}
     {ambient : DeclaredResourceController.Ambient}
-    {durable : DeclaredResourceController.Durable}
+    {ground : Ground deployment}
     {command : DeclaredResourceController.Command}
     (native : CredentialSignatureIO.NativeConfig)
     (prepared : DeclaredResourceController.PreparedInvocation
-      deployment profile ambient durable command)
+      deployment profile ambient ground command)
     (tuple : PreparedTuple (DeclaredResourceController.plan prepared))
     {domain semantics : Digest} {publicKey : List UInt8}
     {begin : ApplicationLifecycleBeginV3Ingress.Ingress}
@@ -196,9 +198,9 @@ def verifyLeg {F : Type} [Field F] [DecidableEq F]
     (envelope : List UInt8) :
     IO (Except DeclaredResourceController.Reject
       (CheckedLeg prepared tuple physical incidence envelope)) := do
-  match ← CredentialSignatureAdmission.verifyNative native prepared.authority.snapshot
+  match ← CredentialSignatureAdmission.verifyNative native ground.authority
       (DeclaredResourceController.operationMarker
-        prepared.authority.snapshot.domain profile.semantics command)
+        ground.authority.domain profile.semantics command)
       (tuple.request incidence).2 envelope with
   | .error reason => return .error (.legSignature reason)
   | .ok signature =>
@@ -216,10 +218,10 @@ structure Accepted {F : Type} [Field F] [DecidableEq F]
     {deployment : CanonicalCellRegistry.Deployment}
     {profile : CanonicalRuntimeProfile.Profile F}
     {ambient : DeclaredResourceController.Ambient}
-    {durable : DeclaredResourceController.Durable}
+    {ground : Ground deployment}
     {command : DeclaredResourceController.Command}
     (prepared : DeclaredResourceController.PreparedInvocation
-      deployment profile ambient durable command)
+      deployment profile ambient ground command)
     (signed : DeclaredResourceController.SignedCommand)
     {domain semantics : Digest} {publicKey : List UInt8}
     {begin : ApplicationLifecycleBeginV3Ingress.Ingress}
@@ -234,18 +236,22 @@ structure Accepted {F : Type} [Field F] [DecidableEq F]
     DeclaredResourceController.ReadLeg prepared i
       (signed.observeEnvelopes[i.val]?.getD [])
   tuple : PreparedTuple (DeclaredResourceController.plan prepared)
+  readEnvelopes : DeclaredResourceController.ReadEnvelopesEmpty command signed
+  /-- The leg of every incidence but an observe-only read target, whose only
+  authorization is its `ReadLeg` in `observations`. -/
   legs : (incidence : DeclaredResourceController.Incidence command) →
+    DeclaredResourceController.incidenceObserveOnly command incidence = false →
     CheckedLeg prepared tuple physical incidence (signed.envelope command incidence)
 
 def admit {F : Type} [Field F] [DecidableEq F]
     {deployment : CanonicalCellRegistry.Deployment}
     {profile : CanonicalRuntimeProfile.Profile F}
     {ambient : DeclaredResourceController.Ambient}
-    {durable : DeclaredResourceController.Durable}
+    {ground : Ground deployment}
     {command : DeclaredResourceController.Command}
     (native : CredentialSignatureIO.NativeConfig)
     (prepared : DeclaredResourceController.PreparedInvocation
-      deployment profile ambient durable command)
+      deployment profile ambient ground command)
     (signed : DeclaredResourceController.SignedCommand)
     {domain semantics : Digest} {publicKey : List UInt8}
     {begin : ApplicationLifecycleBeginV3Ingress.Ingress}
@@ -256,26 +262,19 @@ def admit {F : Type} [Field F] [DecidableEq F]
     if count : signed.targetEnvelopes.length = command.targets.length then
       if readCount : signed.observeEnvelopes.length =
           (if command.requiresObservation then command.targets.length else 0) then
+       if readEnvelopes : DeclaredResourceController.ReadEnvelopesEmpty command signed then
         match ← DeclaredResourceController.verifyReads native prepared signed with
         | .error reason => return .error reason
         | .ok observations =>
           match DeclaredResourceController.prepareTuple prepared with
           | none => return .error .conflictingIncidences
           | some tuple =>
-              match ← DeclaredResourceController.collectIO (fun i :
-                  DeclaredResourceController.TargetIndex command =>
-                  verifyLeg native prepared tuple physical (some i)
-                    (signed.envelope command (some i))) with
+              match ← DeclaredResourceController.collectLegs (fun incidence _ =>
+                  verifyLeg native prepared tuple physical incidence
+                    (signed.envelope command incidence)) with
               | .error reason => return .error reason
-              | .ok targets =>
-                  match ← verifyLeg native prepared tuple physical none
-                      signed.authorityEnvelope with
-                  | .error reason => return .error reason
-                  | .ok authority =>
-                      return .ok ⟨ingress, count, readCount, observations, tuple,
-                        fun incidence => match incidence with
-                          | some i => targets i
-                          | none => authority⟩
+              | .ok legs => return .ok ⟨ingress, count, readCount, observations, tuple, readEnvelopes, legs⟩
+       else return .error .readTargetEnvelope
       else return .error .wrongEnvelopeCount
     else return .error .wrongEnvelopeCount
   else return .error .malformedCommand

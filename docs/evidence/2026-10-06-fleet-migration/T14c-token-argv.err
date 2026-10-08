@@ -1,0 +1,1 @@
+mini: --token: Mini's ingress takes no bearer token; authority is the profile's signature under its account grant

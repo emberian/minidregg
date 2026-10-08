@@ -118,15 +118,15 @@ def prepareObservationSlot (config : Config) (opened : Opened config)
     (ingress : ApplicationDispatchAdmissionIngress.Ingress)
     (selection : Selection)
     (prepared : DeclaredResourceController.PreparedInvocation config.deployment config.profile
-      ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩ opened.durable
+      ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩ opened.ground
       (command ingress.dispatch selection ingress.parent))
     (index resource : Nat) (capability : CapabilityId) (root : Digest) :
     Except String SigningSlot := do
   let wanted := ApplicationDispatchAdmission.observationRequest config.deployment
     config.profile ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
-    opened.durable ingress selection prepared resource capability root
+    opened.ground ingress selection prepared resource capability root
   let header ← (CredentialSignatureAdmission.signingHeader
-    prepared.authority.snapshot
+    opened.ground.authority
     (ApplicationDispatchAdmission.observationMarker ingress selection)
     (⟨.object, wanted⟩ : PackedEffectRequest)).mapError
       (fun _ => "dispatch observation signing key unavailable")
@@ -225,18 +225,18 @@ private def prepareForIssue (config : Config) (opened : Opened config)
   let command := ApplicationDispatchCommand.command base selection parent
   let .ok prepared := DeclaredResourceController.prepare config.deployment config.profile
     ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
-    opened.durable command
+    opened.ground command
     | throw "current dispatch invocation preparation refused"
   if ApplicationDispatchAdmission.selectedMeaning unsigned spec actualApp manifest
       enrollment currentTicket != some requested then
     throw "current app, ticket, enrollment or permission meaning differs"
   if !ApplicationDispatchAdmission.linkedCurrentPolicies config.deployment config.profile
       ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
-      opened.durable unsigned spec selection prepared then
+      opened.ground unsigned spec selection prepared then
     throw "current app/session/ticket policy linkage refused"
   if !ApplicationDispatchAdmission.issuerLineageCurrentFromSourceBytes config.deployment config.profile
       ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
-      opened.durable unsigned spec selection originalSourceBytes prepared then
+      opened.ground unsigned spec selection originalSourceBytes prepared then
     throw "current issuer delegation lineage refused"
   let invocation ← NativeHost.prepareLoaded config opened
     (.invoke (DeclaredResourceController.commandCodec.encode command))
@@ -324,13 +324,13 @@ def prepareVerified (config : Config) {target : Durable}
 Agent tickets still need their separate authenticated reserve/lifetime path. -/
 def prepareSuffix (config : Config) {anchor : Opened config} {target : Durable}
     (verified : NativeHostReplay.SuffixVerified config anchor target) (request : Request) :
-    Except String Plan := do
+    ExceptT String IO Plan := do
   let (spec, issueBytes, originalSourceBytes) ←
-    if request.issueIndex < anchor.durable.image.accepted.length then do
+    if request.issueIndex < anchor.durable.height then do
       let some origin := verified.origin
         | throw "old dispatch issue lacks authenticated carried origin"
       let custody ← origin.rebindChecked verified.opened.durable
-      let issue ← CarriedApplicationProvenance.selectIssue custody request.issueIndex
+      let issue ← ExceptT.mk (CarriedApplicationProvenance.selectIssue custody request.issueIndex)
       let selected ← CarriedDispatchProvenance.fromIssue issue
       pure (issue.spec, issue.ingress.canonicalBytes, selected.originalSourceBytes)
     else do
@@ -346,7 +346,7 @@ def prepareSuffix (config : Config) {anchor : Opened config} {target : Durable}
 
 def prepareRequestSuffix (config : Config) {anchor : Opened config} {target : Durable}
     (verified : NativeHostReplay.SuffixVerified config anchor target) (bytes : List UInt8) :
-    Except String Plan := do
+    ExceptT String IO Plan := do
   let some request := requestCodec.decode bytes
     | throw "noncanonical dispatch authoring request"
   prepareSuffix config verified request

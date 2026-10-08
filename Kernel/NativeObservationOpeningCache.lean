@@ -64,36 +64,36 @@ theorem resourceViewUsing_exact (opening : OpeningProvider)
 
 /-- Only resource rendering differs. All non-resource views use the original
 controller, including at-height authority. The equality below checks this seam. -/
-def queryResultUsing {deployment : CanonicalCellRegistry.Deployment}
-    {durable : NativeHost.Durable} {F : Type} [Field F] [DecidableEq F]
-    {context : Context deployment durable} {profile : CanonicalRuntimeProfile.Profile F}
+def queryResultUsing {deployment : CanonicalCellRegistry.Deployment} {F : Type} [Field F] [DecidableEq F]
+    {context : Context deployment} {profile : CanonicalRuntimeProfile.Profile F}
     {federation : FederationId} {genesisHeight : Nat} {intent : Intent}
     (accepted : AuthorizedIntent context profile federation genesisHeight intent)
-    (opening : OpeningProvider) : Except RefusalReason (List UInt8) := do
+    (opening : OpeningProvider) (history : Durable) (bound : context.sourceImage = some history.image) :
+    Except RefusalReason (List UInt8) := do
   let .query query := intent.purpose | throw .malformed
   match query.view with
   | .resource | .resourceScope =>
       if present : 0 < intent.grants.length then
         let grant := intent.grants.get ⟨0, present⟩
         let checked := accepted.grants ⟨0, present⟩
-        let some stored := CredentialAuthorityState.readCapability context.authority.snapshot.cell
+        let some stored := CredentialAuthorityState.readCapability context.authority.cell
           grant.kind grant.capability | throw .malformed
         let view := resourceViewUsing opening stored.head.scope.fields
           checked.selected.packed checked.selected.accountBalances
           (if query.kind = .account then
-            RunComputeView.load deployment durable.snapshot intent.subject else none)
+            RunComputeView.load deployment context.view intent.subject else none)
         if query.view == .resource then pure (resourceViewCodec.encode view)
         else pure (resourceScopeViewCodec.encode
           (grant.kind, grant.capability.value, stored.head.scope.fields, view))
       else throw .malformed
-  | _ => accepted.queryResult
+  | _ => accepted.queryResult history bound
 
-theorem queryResultUsing_exact {deployment : CanonicalCellRegistry.Deployment}
-    {durable : NativeHost.Durable} {F : Type} [Field F] [DecidableEq F]
-    {context : Context deployment durable} {profile : CanonicalRuntimeProfile.Profile F}
+theorem queryResultUsing_exact {deployment : CanonicalCellRegistry.Deployment} {F : Type} [Field F] [DecidableEq F]
+    {context : Context deployment} {profile : CanonicalRuntimeProfile.Profile F}
     {federation : FederationId} {genesisHeight : Nat} {intent : Intent}
     (accepted : AuthorizedIntent context profile federation genesisHeight intent)
-    (opening : OpeningProvider) : queryResultUsing accepted opening = accepted.queryResult := by
+    (opening : OpeningProvider) (history : Durable) (bound : context.sourceImage = some history.image) :
+    queryResultUsing accepted opening history bound = accepted.queryResult history bound := by
   cases purpose : intent.purpose with
   | prepare preparation => simp [queryResultUsing, AuthorizedIntent.queryResult, purpose]
   | query query =>
@@ -188,7 +188,7 @@ def queryLoaded (config : NativeHost.Config) (opened : NativeHost.Opened config)
               let packed := (token.grants ⟨0, present⟩).selected.packed
               cache.modify (fun old => retain old packed)
       | _ => pure ()
-      match queryResultUsing token (provider (← cache.get)) with
+      match queryResultUsing token (provider (← cache.get)) opened.durable rfl with
       | .ok view => return .ok view
       | .error reason => return .error (.of reason)
 

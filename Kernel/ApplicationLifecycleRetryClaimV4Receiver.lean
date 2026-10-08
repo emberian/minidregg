@@ -24,6 +24,8 @@ structure Reservation (config : Config) where
   readback : NativeHostReplay.ExactReadback config old
   derivedExact : readback.derived.intent = admitted.intent
   confirmation : DurableReceiverIO.Confirmation
+  store : DurableHistory.StoreIdentity
+  reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store
   /-- True only when this attempt observed native CAS `.installed`. Exact
   readback following `.alreadyPresent` is receipt recovery, not launch power. -/
   freshCasWinner : Bool
@@ -32,7 +34,7 @@ def Reservation.verified {config : Config} (reservation : Reservation config) :
     NativeHostReplay.Verified config
       (NativeHostReplay.exactCandidate reservation.old
         reservation.readback.derived reservation.readback.ready) :=
-  NativeHostReplay.extendExact reservation.old reservation.readback
+  NativeHostReplay.extendExact reservation.reader reservation.old reservation.readback
 
 def Reservation.receipt {config : Config} (reservation : Reservation config) :
     NativeHostCodec.Receipt :=
@@ -41,7 +43,7 @@ def Reservation.receipt {config : Config} (reservation : Reservation config) :
     reservation.readback.derived reservation.readback.ready
   ⟨reservation.readback.derived.intent.transactionId,
     reservation.readback.derived.intent.event.eventId,
-    old.opened.durable.image.accepted.length + 1,
+    old.opened.durable.height + 1,
     candidate.worldRoot⟩
 
 theorem Reservation.postRecord_exact {config : Config}
@@ -80,7 +82,7 @@ def Reservation.withFreshTip {config : Config} {α : Type}
   unless reservation.confirmation == .installed && reservation.freshCasWinner do
     return .error "retry claim was not freshly installed"
   let .ok current ← DurableReceiverIO.tipIs config.transport
-      reservation.readback.appended.next.image.accepted.length reservation.readback.appended.entry
+      reservation.readback.appended.next.height reservation.readback.appended.entry
     | return .error "retry claim physical tip unavailable before handoff"
   if current then
     return .ok (← handoff reservation.projection.canonicalBytes)
@@ -112,9 +114,12 @@ def receiveVerified (config : Config) {target : Durable}
       match NativeHostReplay.ExactReadback.ofAppended old derived appended with
       | .error detail => return .uncertain s!"retry claim post-image: {detail}"
       | .ok ⟨proof, proofDerived⟩ =>
-            return .reserved ⟨target, old, ingress, admitted,
-              proof, ((congrArg NativeHostReplay.Derived.intent proofDerived).trans
-                admitted.toDerived_intent), kind, freshCasWinner⟩
+            match ← DurableHistoryStore.readerOf config.transport ResourceBirthCodec.rootBytes appended.next with
+            | .error detail => return .uncertain s!"post-append history reader: {detail}"
+            | .ok ⟨_, reader⟩ =>
+              return .reserved ⟨target, old, ingress, admitted,
+                proof, ((congrArg NativeHostReplay.Derived.intent proofDerived).trans
+                  admitted.toDerived_intent), kind, _, reader, freshCasWinner⟩
   | .ordinary ordinary =>
       match ordinary with
       | .confirmed _ _ =>

@@ -75,9 +75,8 @@ def decode : Data → Option NativePlan
 /-- Consume full data rather than a weak-head record. The caller must retain
 the actual checked source execution/materialization evidence; this pure adapter
 does not certify origin or current authority for a caller-constructed Result. -/
-def lower {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (deployment : CanonicalCellRegistry.Deployment)
-    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
+def lower (deployment : CanonicalCellRegistry.Deployment)
+    (loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry)
     (command : Command)
     {limits : Minidregg.Theory.ObjectiveBendDemandMachine.Limits}
     {budget : Budget} {state : Minidregg.Theory.ObjectiveBendDemandMachine.State}

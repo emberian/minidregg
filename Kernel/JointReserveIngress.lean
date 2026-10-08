@@ -6,6 +6,7 @@ at precisely this source prefix. It never imports an old AcceptedInvocation.
 import Kernel.JointReceiverAdmission
 import Kernel.NativeHostContext
 import Compiler.PrivateSuccessorCustodyCodec
+import Kernel.NativeHostServed
 namespace Minidregg.Kernel.JointReserveIngress
 open Minidregg.Theory
 open Minidregg.Compiler
@@ -62,7 +63,7 @@ current authority directory and native signature helper. The packet supplies
 none of those verification policies. -/
 def admit (config : Config) (opened : Opened config) (bytes : List UInt8) :
     IO (Except String (Reserved config.deployment config.profile
-      ⟨config.federation,logicalHeight config opened.durable⟩ opened.durable)) := do
+      ⟨config.federation,logicalHeight config opened.durable⟩ opened.ground)) := do
   let some source := decodeSource bytes | return .error "noncanonical joint reserve source"
   let some pin := config.jointControl | return .error "joint source control not enabled"
   let some consensus := config.jointConsensus | return .error "joint source consensus not enabled"
@@ -83,7 +84,7 @@ def admit (config : Config) (opened : Opened config) (bytes : List UInt8) :
     let some command := commandCodec.decode selected.commandBytes
       | return .error "invalid selected command"
     let ambient := ⟨config.federation,logicalHeight config opened.durable⟩
-    match prepareFrom config.deployment config.profile ambient opened.durable (some opened.directory) command with
+    match prepare config.deployment config.profile ambient opened.ground command with
     | .error reason => return .error s!"selected preparation refused: {repr reason}"
     | .ok prepared =>
       if shape : PhysicalShape prepared then
@@ -99,7 +100,7 @@ def admit (config : Config) (opened : Opened config) (bytes : List UInt8) :
             return .error "control source scope mismatch"
           let some controlCommand := commandCodec.decode controlSigned.commandBytes
             | return .error "invalid control command"
-          match prepareFrom config.deployment config.profile ambient opened.durable (some opened.directory) controlCommand with
+          match prepare config.deployment config.profile ambient opened.ground controlCommand with
           | .error reason => return .error s!"control preparation refused: {repr reason}"
           | .ok controlPrepared =>
             if controlShape : PhysicalShape controlPrepared then

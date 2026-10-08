@@ -110,7 +110,10 @@ def commandStream : StreamCodec Command :=
     (fun (subject, nonce, root, turn, grants) => ⟨subject, nonce, root, turn, grants⟩)
     (by intro c; cases c; rfl)
 
-def commandFrame : List UInt8 := "DREGG/SEAT/COMMAND/v1".toUTF8.toList
+/-- Frame v2: an offer's proposal carries the donation marker. -/
+-- v5: envelopes carry `replayBytes`, `coreBytes` (GPT-6 row E work account); a v4 command does not decode.
+-- v6: envelopes carry `domainWork` (A3 domain pricing); a v5 command does not decode.
+def commandFrame : List UInt8 := "DREGG/SEAT/COMMAND/v6".toUTF8.toList
 
 def commandCodec : LawfulCodec Command := ObjectiveActivityWire.framed commandFrame commandStream
 
@@ -223,7 +226,7 @@ def signedTarget (domain : Digest) (command : Command) : ResourceKind × Nat :=
   | .create inst _ _ => (.object, inst)
   | .handOver invitation _ => (.object, (SeatStore.invitationCell domain invitation).value)
   | .offer _ _ funding _ _ _ => (.account, funding)
-  | .invoke inst _ _ _ => (.object, inst)
+  | .invoke inst _ _ _ _ => (.object, inst)
   | .exit seat => (.object, seat)
 
 def verbFor : (kind : ResourceKind) → Verb kind
@@ -315,7 +318,7 @@ def authorized {rootBytes : List UInt8 → Digest} (data : DataSnapshot rootByte
   -- the publication's payer (named in the stored bytes) consents by its account grant
   | .publish stored => account ((ObjectiveActivity.decodeStored stored).map (·.payer) |>.getD 0)
   | .create inst _ _ => object inst
-  | .invoke inst _ _ payer => do object inst; account payer
+  | .invoke inst _ _ payer _ => do object inst; account payer
   | .offer _ _ funding _ _ holder => do
       account funding
       match holder with
@@ -407,26 +410,33 @@ def Prepared.intent (prepared : Prepared deployment profile ambient durable comm
     DataIntent rootBytes :=
   prepared.decided.intent (admissionSeal prepared ingress)
 
-/-- A cell a seat intent writes is a seat-kind cell at its coordinate, or the Book. -/
+/-- A cell a seat intent writes is a seat-kind cell at its coordinate, the Book, or a
+cell the kernel retires: the registry's retired image at a protected coordinate (a
+closed seat, `Kernel.SeatStore.statePosts`). -/
 def SeatOrBook (deployment : Deployment) (write : DataWrite) : Prop :=
   write.cellId = ⟨deployment.resourceBookId⟩ ∨
-    ∃ payload, SeatStore.payloadOf write.canonicalPostBytes = some payload ∧
-      write.cellId.value = SeatCell.coordinate deployment.domain payload.role payload.key
+    (∃ payload, SeatStore.payloadOf write.canonicalPostBytes = some payload ∧
+      write.cellId.value = SeatCell.coordinate deployment.domain payload.role payload.key) ∨
+    (write.canonicalPostBytes = ObjectiveActivity.retiredImage ∧ SeatCell.reservedBase ≤ write.cellId.value)
 
 instance (deployment : Deployment) (write : DataWrite) : Decidable (SeatOrBook deployment write) :=
   if book : write.cellId = ⟨deployment.resourceBookId⟩ then isTrue (Or.inl book)
+  else if retired : write.canonicalPostBytes = ObjectiveActivity.retiredImage ∧
+      SeatCell.reservedBase ≤ write.cellId.value then isTrue (Or.inr (Or.inr retired))
   else match found : SeatStore.payloadOf write.canonicalPostBytes with
     | none => isFalse (by
-        rintro (h | ⟨payload, hp, _⟩)
+        rintro (h | ⟨payload, hp, _⟩ | h)
         · exact book h
-        · rw [found] at hp; cases hp)
+        · rw [found] at hp; cases hp
+        · exact retired h)
     | some payload =>
       if at_ : write.cellId.value = SeatCell.coordinate deployment.domain payload.role payload.key then
-        isTrue (Or.inr ⟨payload, found, at_⟩)
+        isTrue (Or.inr (Or.inl ⟨payload, found, at_⟩))
       else isFalse (by
-        rintro (h | ⟨other, hp, hat⟩)
+        rintro (h | ⟨other, hp, hat⟩ | h)
         · exact book h
-        · rw [found] at hp; cases hp; exact at_ hat)
+        · rw [found] at hp; cases hp; exact at_ hat
+        · exact retired h)
 
 def PhysicalShape (prepared : Prepared deployment profile ambient durable command) (ingress : DecodedIngress) :
     Prop :=
@@ -528,8 +538,8 @@ reallocation or a mint exists only as a member of the Plan an `invoke`
 re-executes; an accepted `invoke`'s signer holds a capability admissible for
 mutating the instance object and owns the paying account. -/
 theorem reallocate_requires_instance_holder (accepted : Accepted deployment profile ambient durable ingress)
-    {inst payer : Nat} {input : List UInt8} {envelope : ObjectiveInvocationClaim.Capacity}
-    (turn : ingress.command.turn = .invoke inst input envelope payer) :
+    {inst payer : Nat} {input : List UInt8} {envelope : ObjectiveInvocationClaim.Capacity} {disclose : Bool}
+    (turn : ingress.command.turn = .invoke inst input envelope payer disclose) :
     objectHolder accepted.prepared.authority.snapshot profile.semantics ambient ingress.command inst
         ingress.command.grants.object accepted.prepared.preRoot accepted.prepared.outcome = true ∧
       accountHolder accepted.prepared.authority.snapshot profile.semantics ambient ingress.command payer
@@ -550,7 +560,7 @@ may exit by the kernel's own rule (its offerer on demand, anyone at or after its
 due height); the instance's clause is not consulted. -/
 theorem exit_requires_offerer_or_deadline (accepted : Accepted deployment profile ambient durable ingress)
     {seat : Nat} (turn : ingress.command.turn = .exit seat) :
-    ∃ found ∈ accepted.prepared.decided.world.seats, found.account = seat ∧ found.isOpen = true ∧
+    ∃ found ∈ accepted.prepared.decided.world.seats, found.account = seat ∧
       Seats.exitAuthorized ambient.height (.subject ingress.command.subject) found = true :=
   Seats.exit_step_authorized (accepted.prepared.decided.stepExact _ _ (by
     simp [Command.request, turn, SeatStore.Turn.kernelAction]))

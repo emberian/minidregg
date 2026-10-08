@@ -52,6 +52,8 @@ ROOT/transcript holds every command's exact output; ROOT/results.json lists ever
 row with its expectation and verdict; the script exits 1 on any mismatch.
 """
 import argparse, json, os, pathlib, secrets, subprocess, sys, time
+from activity_world import RESUME_KINDS, covering_body, published_extract_ticks, quote_request, quoted_heap
+from activity_world import SOURCE_BYTES, TARIFF, price
 
 os.umask(0o077)
 HERE = pathlib.Path(__file__).resolve().parent
@@ -132,15 +134,15 @@ def data_list(items):
 
 # --- the world -----------------------------------------------------------------
 MAXIMUM = {'typeFuel': 16384, 'sourceTicks': 200000, 'heap': 200000, 'stack': 200000, 'outputNodes': 20000,
-           'outputBytes': 200000, 'inputBytes': 200000, 'scalarBits': 512, 'memoryTouches': 2000000,
+           'outputBytes': 200000, 'extractTicks': 200000, 'inputBytes': 200000, 'scalarBits': 512, 'memoryTouches': 2000000,
            'proofWork': 900000, 'feeDebit': 1000000, 'turnBytes': 4000000, 'witnessBytes': 4000000,
            'storageBytes': 4000000, 'sideEffectCount': 16, 'networkBytes': 0, 'leaseByteBlocks': 0,
-           'incidences': 16}
+           'incidences': 16, 'replayBytes': SOURCE_BYTES, 'coreBytes': SOURCE_BYTES, 'domainWork': 256}
 constants = json.loads(sh('constants', host, '/dev/null', 'objective-constants').stdout)
-tariff = {'version': '1', 'base': '1', 'typeFuel': '0', 'sourceTicks': '1', 'heap': '0', 'stack': '0',
-          'outputNodes': '0', 'outputBytes': '0', 'inputBytes': '0'}
-policy = {'schema': 'dregg.objective-bend.policy.v1', 'sourceBytes': '4194304',
-          'maximum': {k: str(v) for k, v in MAXIMUM.items()}, 'outputs': [constants['genericCodec']],
+# Tariff edition 3 with the front end's measured rates (activity_world.TARIFF documents the measurement).
+tariff = dict(TARIFF)
+policy = {'schema': 'dregg.objective-bend.policy.v1', 'sourceBytes': str(SOURCE_BYTES),
+          'maximum': {k: str(v) for k, v in MAXIMUM.items()}, 'extractTicksPerTurn': str(16 * MAXIMUM['extractTicks']), 'outputs': [constants['genericCodec']],
           'clearAudience': '01ff', 'frontEnd': constants['frontEnd'], 'tariff': tariff}
 (root / 'policy.json').write_text(json.dumps(policy, indent=1))
 sh('policy', host, '/dev/null', 'author', 'objective-policy', root / 'policy.json', root / 'policy.hex')
@@ -159,7 +161,7 @@ sock = W / 'public' / 'mini.sock'
 sh('genesis', 'sh', HERE / 'newparticipant-acceptance.sh', host, mini, store, verifier, W, sock,
    env={'OBJECTIVE_INVOCATION_POLICY': (root / 'policy.hex').read_text().strip(),
         'EXTRA_GENESIS_ENROLLMENTS': str(root / 'enrollment-40.json'),
-        'NEWPARTICIPANT_SPONSOR_BALANCE': '1000000'})
+        'NEWPARTICIPANT_SPONSOR_BALANCE': '100000000000'})
 config = W / 'deployment' / 'pinned-config.json'
 alice_ws = W / 'sponsor'
 bob_ws = root / 'subject40'
@@ -243,7 +245,8 @@ def check(tag, condition, observed):
     print(f'{tag:44} check     {"ok" if condition else "MISMATCH"} {json.dumps(observed)[:200]}', flush=True)
 
 
-def turn(tag, workspace, body, expect, detail=None, prepare=False, object_cap=None, account_cap=None):
+def turn(tag, workspace, body, expect, detail=None, prepare=False, object_cap=None, account_cap=None,
+         confirm_donation=False):
     out = attempts / tag
     command = root / f'{tag}.command.json'
     file = {'turn': body}
@@ -251,6 +254,8 @@ def turn(tag, workspace, body, expect, detail=None, prepare=False, object_cap=No
         file['objectCapability'] = object_cap
     if account_cap is not None:
         file['accountCapability'] = account_cap
+    if confirm_donation:
+        file['confirmDonation'] = True
     command.write_text(json.dumps(file))
     args = ['seat', '--action', 'submit', '--workspace', workspace, '--command', command, '--out', out]
     if prepare:
@@ -261,6 +266,10 @@ def turn(tag, workspace, body, expect, detail=None, prepare=False, object_cap=No
 
 def balances(v):
     return {(b['account'], b['asset']): int(b['balance']) for b in (v.get('balances') or [])}
+
+
+def registered(v, account):
+    return next((b['registered'] for b in (v.get('balances') or []) if b['account'] == str(account)), None)
 
 
 def cell(v, cell_id):
@@ -282,12 +291,30 @@ def roots(v):
     return {c['cell']: c['root'] for c in v.get('cells', [])}
 
 
-def activity_cap(ticks):
+_EXTRACT = []
+
+
+def extract_ticks():
+    """The extraction budget the Host publishes (`limits.extractTicks` = `config.maxExtractTicks`), asked
+    once from the public activity view; it must equal the policy this world authored."""
+    if not _EXTRACT:
+        _EXTRACT.append(published_extract_ticks(last_json(sh('limits-view', mini, 'activity', '--action', 'view',
+                                                             '--workspace', alice_ws, '--request', '{}'))))
+        check('extract-quote-is-the-policy-ceiling', _EXTRACT[0] == 16 * MAXIMUM['extractTicks'],
+              {'published': _EXTRACT[0], 'policy': 16 * MAXIMUM['extractTicks']})
+    return _EXTRACT[0]
+
+
+def activity_cap(ticks, front=(0, 0)):
     """A declared envelope (Capacity): `ticks` source ticks, the kernel's fixed heap, stack,
-    type fuel and Plan budget, priced at 0 (as the activity driver's `cap`)."""
+    type fuel and Plan budget, priced at 0 (as the activity driver's `cap`), the published
+    extraction budget, and `front`: the front end's quote (op 214) of the package a turn replays. A seat
+    method's replay is not yet in its account (cv 01a11636-201e), so a seat invocation declares none."""
     c = {k: '0' for k in MAXIMUM}
     for k in ['heap', 'stack', 'typeFuel', 'outputNodes', 'outputBytes']:
         c[k] = str(MAXIMUM[k])
+    c['replayBytes'], c['coreBytes'] = str(front[0]), str(front[1])
+    c['extractTicks'] = str(extract_ticks())
     c['sourceTicks'] = str(ticks)
     return c
 
@@ -310,15 +337,15 @@ def move(source, destination, asset, amount):
 
 
 def offer(tag, workspace, inst, invitation, role, give, want, expect, detail=None, funding=None, account_cap=None,
-          package=None, deadline=None, holder=None):
+          package=None, deadline=None, holder=None, donate=False):
     proposal = {'give': [{'asset': a_, 'amount': str(n)} for a_, n in give],
-                'want': [{'asset': a_, 'amount': str(n)} for a_, n in want]}
+                'want': [{'asset': a_, 'amount': str(n)} for a_, n in want], 'donate': donate}
     if deadline is not None:
         proposal['afterDeadline'] = str(deadline)
     body = {'kind': 'offer', 'invitation': invitation,
             'expect': {'instance': objects[inst]['object'], 'package': package or PIN, 'role': role},
             'funding': funding, 'payee': funding, 'proposal': proposal, 'holder': holder}
-    value = turn(tag, workspace, body, expect, detail, account_cap=account_cap)
+    value = turn(tag, workspace, body, expect, detail, account_cap=account_cap, confirm_donation=donate)
     return value.get('seatAccount')
 
 
@@ -402,8 +429,15 @@ exit_('E7-stranger-exit-refused', bob_ws, alice_seat, 'refused', 'exitNotAuthori
 before_pay = balances(world('before-exits'))
 exit_('E3-alice-exits', alice_ws, alice_seat, 'installed')
 exit_('E3-bob-exits', bob_ws, bob_seat, 'installed')
-exit_('E3-exit-twice-refused', alice_ws, alice_seat, 'refused', 'seatClosed')
+exit_('E3-exit-twice-refused', alice_ws, alice_seat, 'refused', 'seatMissing')
 b = balances(world('settled', seats=[alice_seat, bob_seat], instances=[objects['swap']['object']]))
+check('E3-exit-deregisters-seat-accounts',
+      registered(world('settled-accounts', seats=[alice_seat, bob_seat]), alice_seat) is False
+      and registered(world('settled-accounts-bob', seats=[alice_seat, bob_seat]), bob_seat) is False,
+      'seat accounts still registered')
+check('E3-exit-retires-seat-cells',
+      all(cell(world('settled-cells', seats=[alice_seat, bob_seat]), s).get('kind') == 'retired'
+          for s in (alice_seat, bob_seat)), 'seat cells not retired')
 check('E3-alice-paid-7Y', b[(ALICE_ACCOUNT, Y)] - before_pay[(ALICE_ACCOUNT, Y)] == 7, b[(ALICE_ACCOUNT, Y)])
 check('E3-bob-paid-10X', b[(BOB_ACCOUNT, X)] - before_pay[(BOB_ACCOUNT, X)] == 10, b[(BOB_ACCOUNT, X)])
 
@@ -431,8 +465,14 @@ check('E5-alice-paid-10X-back', b[(ALICE_ACCOUNT, X)] - before_pay[(ALICE_ACCOUN
 # --- E6: zero want --------------------------------------------------------------------
 gsell = invoke('E6-mint-gift', alice_ws, 'swap', mint_input('gift', ALICE), 'installed')['mintIds'][0]
 gbuy = invoke('E6-mint-take', alice_ws, 'swap', mint_input('take', BOB), 'installed')['mintIds'][0]
+offer('E6-unmarked-zero-want-refused', alice_ws, 'swap', gsell, 'gift', [(X, 10)], [(Y, 0)], 'refused',
+      'donationUnmarked', funding=ALICE_ACCOUNT, account_cap=ALICE_SPEND)
+offer('E6-unmarked-empty-want-refused', alice_ws, 'swap', gsell, 'gift', [(X, 10)], [], 'refused',
+      'donationUnmarked', funding=ALICE_ACCOUNT, account_cap=ALICE_SPEND)
+offer('E6-marker-on-a-real-want-refused', alice_ws, 'swap', gsell, 'gift', [(X, 10)], [(Y, 1)], 'refused',
+      'donationMarkedWithWant', funding=ALICE_ACCOUNT, account_cap=ALICE_SPEND, donate=True)
 gift = offer('E6-gift-offer', alice_ws, 'swap', gsell, 'gift', [(X, 10)], [(Y, 0)], 'installed',
-             funding=ALICE_ACCOUNT, account_cap=ALICE_SPEND)
+             funding=ALICE_ACCOUNT, account_cap=ALICE_SPEND, donate=True)
 take = offer('E6-taker-offer', bob_ws, 'swap', gbuy, 'take', [], [(X, 1)], 'installed',
              funding=BOB_ACCOUNT, account_cap=BOB_SPEND)
 invoke('E6-sweep-gift', alice_ws, 'swap', variant('sweep', record(source=nat(int(gift)),
@@ -475,13 +515,23 @@ v = world('after-held-refused', instances=[objects['swap']['object']], invitatio
 check('E8-roots-unchanged', roots(v) == before, {'changed': [k for k in roots(v) if roots(v)[k] != before.get(k)]})
 
 
-def activity(tag, workspace, body, expect, detail=None):
+def activity_submit(tag, workspace, body):
     out = attempts / tag
     command = root / f'{tag}.turn.json'
     command.write_text(json.dumps(body))
-    value = last_json(sh(tag, mini, 'activity', '--action', 'submit', '--workspace', workspace,
-                         '--command', command, '--out', out, ok=(0, 1, 2)))
-    return judge(tag, value, expect, detail)
+    return last_json(sh(tag, mini, 'activity', '--action', 'submit', '--workspace', workspace,
+                        '--command', command, '--out', out, ok=(0, 1, 2)))
+
+
+def activity(tag, workspace, body, expect, detail=None):
+    """A deliver or exhaust first asks the Host's quote for the heap its checkpoint needs and declares it in
+    `extra`, paid by the submitter (activity_world.py)."""
+    if body.get('kind') in RESUME_KINDS:
+        payer = (BOB_ACCOUNT, BOB_SPEND) if pathlib.Path(workspace) == bob_ws else (ALICE_ACCOUNT, ALICE_SPEND)
+        quote = quoted_heap(last_json(sh(f'{tag}-quote', mini, 'activity', '--action', 'view', '--workspace',
+                                         workspace, '--request', json.dumps(quote_request(body)))))
+        body = covering_body(body, quote, payer)
+    return judge(tag, activity_submit(tag, workspace, body), expect, detail)
 
 
 def activity_view(tag, request):
@@ -505,14 +555,19 @@ sh('create-object-held', mini, 'workspace', '--action', 'create', '--dir', alice
 href = json.loads((alice_ws / 'refs' / 'held-tally.json').read_text())
 HELD = {'object': href['target'], 'capability': href['operationCapability']}
 activity('E8-create-tally', alice_ws, {'kind': 'create', 'object': HELD['object'], 'objectCapability': HELD['capability'],
-         'pin': TALLY_PIN, 'law': {'type': 'all', 'predicates': []}, 'upgrade': {'frozen': {}},
+         'pin': TALLY_PIN, 'stateType': {'tag': 'field', 'name': 'total', 'member': {'tag': 'natural'}, 'tail': {'tag': 'emptyRow'}},
+         'law': {'type': 'all', 'predicates': []}, 'upgrade': {'frozen': {}},
          'payer': ALICE_ACCOUNT, 'payerCapability': ALICE_SPEND}, 'installed')
 TICKS = 3000
+# The Tally package's front-end quote (op 214), declared by the birth and both escrowed envelopes.
+tq = activity_view('E8-front-end-quote', {'pins': [str(TALLY_PIN)]})['pins'][0]['frontEnd']
+TALLY_FRONT = (int(tq['replayBytes']), int(tq['coreBytes']))
+TALLY_PRICE = price(activity_cap(TICKS, TALLY_FRONT))
 born = activity('E8-birth-tally', alice_ws, {'kind': 'birth', 'object': HELD['object'],
                 'objectCapability': HELD['capability'], 'account': ALICE_ACCOUNT, 'accountCapability': ALICE_SPEND,
                 'pin': TALLY_PIN, 'input': record(init=variant('set', nat(0)), decider=nat(int(BOB))),
-                'envelope': activity_cap(TICKS), 'resume': activity_cap(TICKS), 'timeout': activity_cap(TICKS),
-                'deposit': '20000'}, 'installed')
+                'envelope': activity_cap(TICKS, TALLY_FRONT), 'resume': activity_cap(TICKS, TALLY_FRONT),
+                'timeout': activity_cap(TICKS, TALLY_FRONT), 'deposit': str(7 * TALLY_PRICE)}, 'installed')
 
 
 def held_state(tag):
@@ -550,7 +605,8 @@ check('E8-activity-retired', hrec_after.get('kind') == 'retired', hrec_after.get
 v = world('held-seat-closed', seats=[held_seat])
 b = balances(v)
 held_after = cell(v, held_seat)
-check('E8-activity-end-closes-held-seat', held_after.get('seat', {}).get('open') is False, held_after)
+check('E8-activity-end-retires-held-seat', held_after.get('kind') == 'retired', held_after)
+check('E8-activity-end-deregisters-held-seat', registered(v, held_seat) is False, registered(v, held_seat))
 check('E8-held-seat-pays-offerer', b.get((held_seat, X)) == 0
       and b.get((ALICE_ACCOUNT, X)) == pre_held.get((ALICE_ACCOUNT, X)),
       {'seatX': b.get((held_seat, X)), 'aliceX': [pre_held.get((ALICE_ACCOUNT, X)), b.get((ALICE_ACCOUNT, X))]})

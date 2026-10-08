@@ -190,7 +190,6 @@ cat >"$ROOT/delegate-intent.json" <<EOF
  "type":"delegate-source","command":{"kind":"object","domain":"8501",
  "semantics":"$SEMANTICS","subject":"$GATEWAY_SUBJECT","nonce":"30010",
  "expectedTargetRoot":"$TARGET_ROOT","parentId":"61","target":"600",
- "expectedPreRoot":"$AUTHORITY_ROOT",
  "child":{"id":"63","root":"61","parent":"61","issuer":"5",
    "holder":{"type":"subject","subject":"$ORDINARY_SUBJECT"},"targets":["600"],
    "verbs":["observe","mutate"],"maxCost":"$OWNER_BUDGET",

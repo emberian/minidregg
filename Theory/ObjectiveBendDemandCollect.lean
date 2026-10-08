@@ -194,6 +194,13 @@ def settle (state : State) : State :=
 /-- What a yield stores: the settled state, collected. -/
 def checkpoint (state : State) : State := collect (settle state)
 
+/-- Limits counted from `start`'s own heap end: `limits.heap` cells beyond the heap it
+starts with, and the same stack. A checkpoint resumes under these
+(`Kernel.ObjectiveActivity.segmentLimits`): forcing and collection change the size of the
+state a segment starts from, never the room it has past it. -/
+def limitsPast (limits : Limits) (start : State) : Limits :=
+  ⟨start.heap.size + limits.heap, limits.stack⟩
+
 /-! ## Measurement: collection drops garbage
 
 A yielded state whose heap holds a finished demand's leftovers: cell 1 (a spent argument

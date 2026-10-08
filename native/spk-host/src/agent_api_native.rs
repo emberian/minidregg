@@ -20,7 +20,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 const COMMITTED: &[u8] = b"DREGG/APPLICATION/AGENT-DISPATCH-COMMITTED-PERMIT/v2";
-const OUTCOME: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v4";
+const OUTCOME: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v5";
 
 fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)

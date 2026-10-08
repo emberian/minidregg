@@ -130,7 +130,12 @@ def checkSource {F : Type} [Field F] (profile : PolicyCompilerProfile F) : IO Po
 
 def checkPhysical (binary : System.FilePath) (source : PolicyRecord) : IO Unit :=
   IO.FS.withTempDir fun directory => do
-    let config : DurableReceiverIO.NativeConfig := ⟨binary, directory / "store"⟩
+    let keyPath := directory / "mac.key"
+    IO.FS.writeBinFile keyPath (List.replicate 32 (7 : UInt8)).toByteArray
+    IO.setAccessRights keyPath ⟨⟨true, true, false⟩, ⟨false, false, false⟩, ⟨false, false, false⟩⟩
+    let config : DurableReceiverIO.NativeConfig :=
+      { binary, root := directory / "store", key := keyPath }
+    let transport := { config.transport (fun _ => ⟨0⟩) ⟨0⟩ with systemCell := none }
     let address := PolicyRecordCodec.digest source
     let identifier := PolicySourceCell.physicalId deployment.domain address
     let sourceCell := policySourceCell source
@@ -139,10 +144,10 @@ def checkPhysical (binary : System.FilePath) (source : PolicyRecord) : IO Unit :
       { absentBytes := []
         cells := [(⟨identifier⟩, bytes)]
         available := fun _ => 100 }
-    match ← DurableReceiverIO.bootstrap config.transport ResourceBirthCodec.rootBytes seed with
+    match ← DurableReceiverIO.bootstrap transport ResourceBirthCodec.rootBytes seed with
     | .error message => throw (IO.userError message)
     | .ok () => pure ()
-    match ← DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes with
+    match ← DurableReceiverIO.load transport ResourceBirthCodec.rootBytes with
     | .error message => throw (IO.userError message)
     | .ok loaded =>
         require "SQLite reopened exact source lifecycle bytes"
@@ -172,7 +177,7 @@ source-owned runtime profile used by birth, invocation and policy installation. 
 local instance : Fact (Nat.Prime 65537) := ⟨by norm_num⟩
 
 def runtime : CanonicalRuntimeProfile.Profile (ZMod 65537) :=
-  CanonicalRuntimeProfile.Profile.source ⟨⟨99⟩, 1000, 1000⟩ ⟨65537⟩ 65537
+  CanonicalRuntimeProfile.Profile.source { issuer := ⟨99⟩, ownerBudget := 1000, lifetime := 1000 } ⟨65537⟩ 65537
     inferInstance 8 (PredOrder.noWrap_zmod (by norm_num))
 
 def run (arguments : List String) : IO Unit := do
