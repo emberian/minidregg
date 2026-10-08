@@ -181,7 +181,8 @@ def row(name, expected, observed, ok):
     print(f"{'PASS' if ok else 'FAIL'}\t{name}\t{observed}", file=sys.stderr)
 
 def refused_with(result, reason):
-    return result.get("type") == "refused" and result.get("detail", "").endswith("." + reason)
+    expected = f"Minidregg.Theory.Receiving.Refusal.family (Minidregg.Kernel.PayObservation.Reject.{reason})"
+    return result.get("type") == "refused" and " ".join(result.get("detail", "").split()) == expected
 def show(result): return f"{result.get('type')} {result.get('detail', '')}".strip()
 
 address = lambda i: hashlib.sha256(f"jpay3 fixture deposit address {i}".encode()).hexdigest()
