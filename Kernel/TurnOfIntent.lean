@@ -474,14 +474,45 @@ end Codec
 
 /-! ## 4. Nullifier keys -/
 
-/-- An injective code of a byte string. -/
+/-- An injective byte-string code with a terminal sentinel. Each byte adds
+eight bits; list length is preserved even when bytes contain zero. -/
 def bytesCode (bytes : List UInt8) : Nat :=
-  Encodable.encode (bytes.map UInt8.toNat)
+  bytes.foldr (fun byte acc => byte.toNat + 256 * acc) 1
+
+theorem bytesCode_pos (bytes : List UInt8) : 0 < bytesCode bytes := by
+  induction bytes with
+  | nil => change 0 < 1; omega
+  | cons byte rest ih =>
+    change 0 < byte.toNat + 256 * bytesCode rest
+    omega
 
 theorem bytesCode_injective : Function.Injective bytesCode := by
-  intro a b h
-  have e : a.map UInt8.toNat = b.map UInt8.toNat := Encodable.encode_injective h
-  exact (List.map_injective_iff.mpr fun x y hxy => UInt8.toNat_inj.mp hxy) e
+  intro a
+  induction a with
+  | nil =>
+    intro b same
+    cases b with
+    | nil => rfl
+    | cons byte rest =>
+      have positive := bytesCode_pos rest
+      change 1 = byte.toNat + 256 * bytesCode rest at same
+      omega
+  | cons byte rest ih =>
+    intro b same
+    cases b with
+    | nil =>
+      have positive := bytesCode_pos rest
+      change byte.toNat + 256 * bytesCode rest = 1 at same
+      omega
+    | cons byte' rest' =>
+      change byte.toNat + 256 * bytesCode rest = byte'.toNat + 256 * bytesCode rest' at same
+      have small : byte.toNat < 256 := UInt8.toNat_lt byte
+      have small' : byte'.toNat < 256 := UInt8.toNat_lt byte'
+      have headSame : byte.toNat = byte'.toNat := by omega
+      have tailSame : bytesCode rest = bytesCode rest' := by omega
+      have byteSame := UInt8.toNat_inj.mp headSame
+      subst byte'
+      exact congrArg (List.cons byte) (ih tailSame)
 
 /-- **An injective nullifier code**: every field of the stable nullifier,
 including its canonical bytes, by `Nat.pair`.  No hash, so no collision

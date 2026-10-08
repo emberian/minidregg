@@ -73,6 +73,10 @@ name = "Host"
 name = "minidregg-host"
 root = "Host.Main"
 
+[[lean_exe]]
+name = "objective-turn-totality"
+root = "Kernel.ObjectiveTurnTotalityRunner"
+
 # Local custody consent, selected separately from the remote Host image.
 # The base entry refuses unsupported higher lifecycle families explicitly.
 [[lean_exe]]
