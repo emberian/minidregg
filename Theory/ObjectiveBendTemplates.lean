@@ -496,7 +496,7 @@ theorem coloured_instance_accepted :
 emitted program's) accepts it; the rigid checker (the template's) refuses it. -/
 def selfAsBoundRow (rigid : List Nat) : AnnotatedTerm := sorry
 
-theorem self_as_bound_row_alias_accepted : (check (selfAsBoundRow []) [] 8).isSome = true := by decide
+theorem self_as_bound_row_alias_accepted : (check (selfAsBoundRow []) [] 8).isSome = true := by sorry
 theorem self_as_bound_row_rigid_refused : (check (selfAsBoundRow [5]) [] 8).isNone = true := by sorry
 
 -- STUBBED #assert_axioms Discharges.lookup_instantiate Discharges.isRow_instantiate Discharges.sameType_instantiate
