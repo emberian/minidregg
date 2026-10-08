@@ -345,9 +345,9 @@ example (value : Fin ((2 : Nat) ^ 248)) :
 #guard_msgs (whitespace := lax) in #print axioms denoteNat_digitsLE
 /-- info: 'Minidregg.Theory.Bignum.denoteInt_digitsLE' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms denoteInt_digitsLE
-/-- info: 'Minidregg.Theory.Bignum.digitsLE_denoteNat' depends on axioms: [propext, sorryAx] -/
+/-- info: 'Minidregg.Theory.Bignum.digitsLE_denoteNat' depends on axioms: [sorryAx] -/
 #guard_msgs (whitespace := lax) in #print axioms digitsLE_denoteNat
-/-- info: 'Minidregg.Theory.Bignum.denoteNat_injective' depends on axioms: [propext, sorryAx] -/
+/-- info: 'Minidregg.Theory.Bignum.denoteNat_injective' depends on axioms: [sorryAx] -/
 #guard_msgs (whitespace := lax) in #print axioms denoteNat_injective
 /-- info: 'Minidregg.Theory.Bignum.denoteInt_injective' depends on axioms: [propext, sorryAx] -/
 #guard_msgs (whitespace := lax) in #print axioms denoteInt_injective

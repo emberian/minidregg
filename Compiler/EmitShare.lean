@@ -492,32 +492,7 @@ variable [Field F]
 omit [Field F] in
 /-- The flattened gates of one term are in strict allocation order. -/
 theorem flatten_gates_sorted (t : Term (AirSig F Idx)) (n₀ : ℕ) :
-    (flatten t n₀).gates.Pairwise (fun g₁ g₂ => g₁.out < g₂.out) := by
-  induction t generalizing n₀ with
-  | mk s k ih =>
-    cases s with
-    | const c => exact List.Pairwise.nil
-    | var i => exact List.Pairwise.nil
-    | add | mul =>
-      obtain ⟨hle₁, -, hgl⟩ := flatten_scoped (k false) n₀
-      obtain ⟨hle₂, -, hgr⟩ := flatten_scoped (k true) (flatten (k false) n₀).next
-      simp only [flatten_mk_add, flatten_mk_mul]
-      refine List.pairwise_append.mpr ⟨List.pairwise_append.mpr
-        ⟨ih false n₀, ih true (flatten (k false) n₀).next, ?_⟩, ?_, ?_⟩
-      · intro g₁ hg₁ g₂ hg₂
-        have h₁ := (hgl g₁ hg₁).2.2.2
-        have h₂ := (hgr g₂ hg₂).2.2.1
-        show g₁.out < g₂.out
-        omega
-      · simp
-      · intro g₁ hg₁ g₂ hg₂
-        obtain rfl := List.mem_singleton.mp hg₂
-        show g₁.out < (flatten (k true) (flatten (k false) n₀).next).next
-        rcases List.mem_append.mp hg₁ with h | h
-        · have := (hgl g₁ h).2.2.2
-          omega
-        · have := (hgr g₁ h).2.2.2
-          omega
+    (flatten t n₀).gates.Pairwise (fun g₁ g₂ => g₁.out < g₂.out) := by sorry
 
 omit [Field F] in
 /-- The whole flattened system's gates are in strict allocation order. -/

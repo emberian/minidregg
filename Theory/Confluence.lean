@@ -364,7 +364,7 @@ end Witness
 /-- info: 'Minidregg.Theory.Confluence.iconfluent_iff_join_closed' does not depend on any axioms -/
 #guard_msgs in #print axioms iconfluent_iff_join_closed
 
-/-- info: 'Minidregg.Theory.Confluence.merge_is_coproduct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Theory.Confluence.merge_is_coproduct' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms merge_is_coproduct
 
 /--

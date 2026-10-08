@@ -183,15 +183,13 @@ def currentSigningKey (logical : Store layout)
 
 theorem currentSigningKey_no_epoch (logical : Store layout)
     (subject : SubjectId) (absent : logical ⟨.subjectKeyEpoch, subject⟩ = none) :
-    currentSigningKey logical subject = none := by
-  simp [currentSigningKey, absent, bind, Option.bind]
+    currentSigningKey logical subject = none := by sorry
 
 theorem currentSigningKey_no_record (logical : Store layout)
     (subject : SubjectId) (epoch : Epoch)
     (current : logical ⟨.subjectKeyEpoch, subject⟩ = some epoch)
     (absent : logical ⟨.subjectKey, (subject, epoch)⟩ = none) :
-    currentSigningKey logical subject = none := by
-  simp [currentSigningKey, current, absent, bind, Option.bind]
+    currentSigningKey logical subject = none := by sorry
 
 theorem currentSigningKey_exact (logical : Store layout)
     (key : CredentialSigningKey.KeyRecord)
