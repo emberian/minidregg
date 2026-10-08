@@ -1846,7 +1846,7 @@
     {
       "module": "Compiler.DurableIndex",
       "path": "Compiler/DurableIndex.lean",
-      "sha256": "20ff0b603bbeee93f11ab2ed56c762bdd900b7e14d740b8dc6e2c31808b1043e",
+      "sha256": "a37b87c462376f085f26391e98ad19c1017178263ecdd9e176aa5caf6ff90244",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },

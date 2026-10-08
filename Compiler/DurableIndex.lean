@@ -669,23 +669,45 @@ def Represents (rows : List Bool → Option Row) (root : Digest)
     (m : List (IndexKey × List UInt8)) : Prop :=
   root = rootOf m ∧ WF 520 (entries bitsOf m) ∧ RowsRepresent rows [] 520 (entries bitsOf m)
 
+/-- The node encoded by a durable row. -/
+def Row.node : Row → NodeIn IndexKey (List UInt8) Digest
+  | .leaf k v => .leaf k v
+  | .branch l r => .branch l r
+
+/-- A node is among the finite observations relevant to one set: the answer's
+actual opening terminal, a row on the queried path, a sibling row available
+while rebuilding that path, or a row emitted by the set. -/
+def ObservedNode (rows : List Bool → Option Row) (root : Digest) (k : IndexKey)
+    (written : List (List Bool × Row))
+    (node : NodeIn IndexKey (List UInt8) Digest) : Prop :=
+  node = (openingOf rows root k).terminal.input ∨
+    (∃ depth ≤ 520, ∃ row, rows ((bitsOf k).take depth) = some row ∧ node = row.node) ∨
+    (∃ depth < 520, ∃ row,
+      rows ((bitsOf k).take depth ++ [!((bitsOf k)[depth]?.getD false)]) = some row ∧
+        node = row.node) ∨
+    ∃ path row, (path, row) ∈ written ∧ node = row.node
+
+/-- A collision restricted to the finite nodes actually relevant to one set.
+Unlike the global `Collision dig`, this is not supplied by pigeonhole alone. -/
+def RowsCollision (rows : List Bool → Option Row) (root : Digest) (k : IndexKey)
+    (written : List (List Bool × Row)) : Prop :=
+  ∃ a b, ObservedNode rows root k written a ∧ ObservedNode rows root k written b ∧
+    a ≠ b ∧ dig a = dig b
+
 /-- THE remaining primitive obligation, parameterized by the set implementation:
-it must be the deployed `set`, and every successful insert/update/delete must
-preserve the canonical root AND reachable rows. The implementation pin prevents
-an always-refusing or write-dropping substitute from satisfying the preservation
-implication vacuously. The collision alternative is necessary because `walk`
-treats an empty digest as empty regardless of rows. This contract is not assumed
-by an axiom. -/
+every successful insert/update/delete must preserve the canonical root and
+reachable rows, or exhibit a collision among the finite nodes that operation
+actually observed or wrote. This contract is not assumed by an axiom. -/
 def SetPreserves
     (setFn : (List Bool → Option Row) → Digest → IndexKey → Option (List UInt8) →
       Except String (Digest × List (List Bool × Row)))
     (rows : List Bool → Option Row) (root : Digest)
     (m : List (IndexKey × List UInt8)) (k : IndexKey) (value : Option (List UInt8)) : Prop :=
-  setFn rows root k value = set rows root k value ∧
-    (Represents rows root m →
-    ∀ (next : Digest) (written : List (List Bool × Row)),
-      setFn rows root k value = .ok (next, written) →
-      Represents (overlay rows written) next (modelSet m k value) ∨ Collision dig)
+  Represents rows root m →
+  ∀ (next : Digest) (written : List (List Bool × Row)),
+    setFn rows root k value = .ok (next, written) →
+    Represents (overlay rows written) next (modelSet m k value) ∨
+      RowsCollision rows root k written
 
 /-- Merging the actual write batches preserves the same Store view as applying
 them sequentially, including repeated writes of the same prefix. -/
@@ -716,8 +738,6 @@ theorem represents_empty (rows : List Bool → Option Row) : Represents rows emp
 for arbitrary keys, values and stale Store rows. -/
 theorem set_preserves_empty (rows : List Bool → Option Row) (k : IndexKey)
     (value : Option (List UInt8)) : SetPreserves set rows emptyDigest [] k value := by
-  constructor
-  · rfl
   intro _ next written ok
   left
   cases value with
@@ -741,15 +761,18 @@ member. This covers the deployed compression-to-empty path without a model sette
 theorem set_preserves_singleton (rows : List Bool → Option Row) (root : Digest)
     (k : IndexKey) (old : List UInt8) (value : Option (List UInt8)) :
     SetPreserves set rows root [(k, old)] k value := by
-  constructor
-  · rfl
   intro before next written ok
   obtain ⟨rootEq, _, row⟩ := before
   have rootEq' : root = dig (.leaf k old) := rootEq
   rw [rootEq'] at ok
   have row' : rows [] = some (.leaf k old) := row
   by_cases nonempty : dig (.leaf k old) = emptyDigest
-  · exact Or.inr ⟨.leaf k old, .empty, by simp, nonempty⟩
+  · right
+    refine ⟨.leaf k old, .empty, ?_, ?_, by simp, ?_⟩
+    · exact Or.inr (Or.inl ⟨0, by omega, .leaf k old, by simpa using row', rfl⟩)
+    · rw [rootEq']
+      simp [ObservedNode, openingOf, walk, nonempty, Theory.AuthTrie.Terminal.input]
+    · simpa [emptyDigest] using nonempty
   left
   have opening : openingOf rows (dig (.leaf k old)) k = ⟨[], .leaf k old⟩ := by
     simp [openingOf, walk, nonempty, row']
@@ -793,9 +816,15 @@ on an insertion into the empty trie. -/
 theorem dropWriteSet_not_preserves :
     ¬ SetPreserves dropWriteSet (fun _ => none) emptyDigest [] ⟨0, 0, 0⟩ (some []) := by
   intro preserves
-  have same := preserves.1
-  simp [dropWriteSet, set, openingOf, walk, empty_absent, Opening.claims, rebuild,
-    Sub.digest, bind, pure, Except.bind, Except.pure] at same
+  have result := preserves (represents_empty (fun _ => none)) emptyDigest [] (by rfl)
+  rcases result with represented | collision
+  · simp [Represents, modelSet, rootOf, entries, tree, RowsRepresent, overlay] at represented
+  · obtain ⟨a, b, observedA, observedB, differ, _⟩ := collision
+    have emptyA : a = .empty := by
+      simpa [ObservedNode, openingOf, walk] using observedA
+    have emptyB : b = .empty := by
+      simpa [ObservedNode, openingOf, walk] using observedB
+    exact differ (emptyA.trans emptyB.symm)
 
 #assert_axioms dropWriteSet_not_preserves
 
@@ -812,21 +841,6 @@ def Maintained (records : List Kernel.DurableReceiver.IntentRecord)
 
 theorem maintained_init (rows : List Bool → Option Row) : Maintained [] rows emptyDigest := by
   exact ⟨[], represents_empty rows, by intro k; rfl⟩
-
-/-- A verified non-membership answer is absence in the committed logical
-history, provided maintenance holds, or it exhibits a cSHAKE256 collision. -/
-theorem maintained_absent (records : List Kernel.DurableReceiver.IntentRecord)
-    (rows : List Bool → Option Row) (root : Digest) (maintained : Maintained records rows root)
-    (k : IndexKey) (answer : Answer root k) (absent : answer.value = none) :
-    LogicalIndex records k = none ∨
-      ∃ x y : List UInt8, x ≠ y ∧
-        Sp800185Cshake256.hash nodeCustomization x = Sp800185Cshake256.hash nodeCustomization y := by
-  obtain ⟨m, ⟨rfl, wf, _⟩, logical⟩ := maintained
-  rcases Answer.sound wf answer with sound | collision
-  · left
-    rw [lookup_entries, logical, absent] at sound
-    exact sound.symm
-  · exact Or.inr collision
 
 namespace IndexRows
 
@@ -869,6 +883,16 @@ theorem apply_eq_setAll (store : List Bool → Option Row) (root : Digest) (heig
 
 end IndexRows
 
+/-- A collision encountered at one actual successful step of a finite setAll
+execution. The recursion retains overwritten intermediate writes, so every
+collision witness remains tied to the rows observed or written at that step. -/
+def SetAllCollision : (rows : List Bool → Option Row) → Digest →
+    List (IndexKey × Option (List UInt8)) → Prop
+  | _, _, [] => False
+  | rows, root, (k, value) :: rest =>
+      ∃ mid early, set rows root k value = .ok (mid, early) ∧
+        (RowsCollision rows root k early ∨ SetAllCollision (overlay rows early) mid rest)
+
 /-- Arbitrary insert/update/delete batches preserve the row/root representation
 UNDER the explicit single-set contract. This is induction over deployed `setAll`. -/
 theorem setAll_preserves
@@ -877,7 +901,8 @@ theorem setAll_preserves
     (rows : List Bool → Option Row) (root : Digest) (m : List (IndexKey × List UInt8))
     (before : Represents rows root m) (next : Digest) (written : List (List Bool × Row))
     (ok : setAll rows root changes = .ok (next, written)) :
-    Represents (overlay rows written) next (modelApply m changes) ∨ Collision dig := by
+    Represents (overlay rows written) next (modelApply m changes) ∨
+      SetAllCollision rows root changes := by
   induction changes generalizing rows root m next written with
   | nil =>
       simp only [setAll, Except.ok.injEq, Prod.mk.injEq] at ok
@@ -893,12 +918,14 @@ theorem setAll_preserves
           | error e => simp [setAll, first, tail, bind, Except.bind] at ok
           | ok result =>
               obtain ⟨final, late⟩ := result
-              rcases (step rows root m k value).2 before mid early first with after | collision
+              rcases step rows root m k value before mid early first with after | collision
               · have finish := ih (overlay rows early) mid (modelSet m k value) after final late tail
                 simp only [setAll, first, tail, bind, pure, Except.bind, Except.pure, Except.ok.injEq, Prod.mk.injEq] at ok
                 obtain ⟨rfl, rfl⟩ := ok
-                simpa [modelApply, overlay_merge] using finish
-              · exact Or.inr collision
+                rcases finish with represented | laterCollision
+                · exact Or.inl (by simpa [modelApply, overlay_merge] using represented)
+                · exact Or.inr ⟨mid, early, first, Or.inr laterCollision⟩
+              · exact Or.inr ⟨mid, early, first, Or.inl collision⟩
 
 /-- Headline preservation through the REAL Store append path. The missing
 single-set theorem is explicit; freshness is in the logical history, just as
@@ -912,7 +939,9 @@ theorem maintained_apply
     (next : Digest) (written : List (List Bool × Row))
     (ok : IndexRows.apply rows root (records.length + 1) record.transactionId record.nullifiers =
       .ok (next, written)) :
-    Maintained (records ++ [record]) (overlay rows written) next ∨ Collision dig := by
+    Maintained (records ++ [record]) (overlay rows written) next ∨
+      SetAllCollision rows root (IndexRows.changes (records.length + 1)
+        record.transactionId record.nullifiers) := by
   obtain ⟨m, rep, logical⟩ := before
   rcases setAll_preserves step _ rows root m rep next written
       (IndexRows.apply_eq_setAll rows root _ _ _ next written ok) with after | collision
@@ -960,7 +989,6 @@ theorem consumed_declared (record : Kernel.DurableReceiver.IntentRecord)
 #assert_axioms represents_empty
 #assert_axioms lookup_entries
 #assert_axioms maintained_init
-#assert_axioms maintained_absent
 #assert_axioms IndexRows.insert_eq_setAll
 #assert_axioms IndexRows.apply_eq_setAll
 #assert_axioms setAll_preserves
