@@ -9,7 +9,8 @@
 # (deploy/shell/OPERATOR.md step 6: the sponsor's `provision`, and delivering
 # its birth context to the participant's HOME/provision/, which `init` binds). Rows marked check are
 # assertions over retained shell output. A step passes when its exit code is
-# the expected one (0 done, 3 refused by the Host) and its checks hold.
+# the expected one (0 done, 3 refused by the Host, 1 refused by local consent)
+# and its checks hold.
 #
 # usage: shell-journey.sh HOST PINNED_MINI SHELL_MINI STORE VERIFIER NEW_RUN_DIR [PORT]
 #   HOST, PINNED_MINI, STORE, VERIFIER: the pinned Host, the pinned client used
@@ -86,7 +87,7 @@ timed() { # name, command...; records stdout/stderr/exit/timing under $LOG
 }
 
 verdict_note() { # first shell ending line on stderr, if any
-  grep -m1 -E '^(refused|error|undecided|usage):' "$LOG/$1.stderr" | cut -c1-110 || true
+  if grep -m1 -E '^(refused|error|undecided|usage):' "$LOG/$1.stderr" | cut -c1-110; then return 0; fi
 }
 
 step() { # J expect who line   -- one verb, one ssh session, SSH_ORIGINAL_COMMAND
@@ -298,7 +299,8 @@ check J1 "newcomer session is subject $NEW_SUBJ" is "$(jq -r .subject "$LAST")" 
 
 # ------------------------------------------------------------- J2
 
-step J2 0 sponsor 'create shared declared {"type":"all","predicates":[]}'
+# 2ab6ef00774f (K-FIELD-CLOSURE): omitted fields declares none, not an open cell.
+step J2 0 sponsor 'create shared declared {"type":"all","predicates":[]} 2'
 step J2 0 sponsor "refs"
 TARGET=$(jq -r '.references[] | select(.name == "shared") | .target' "$LAST")
 OWNER_CAP=$(jq -r '.references[] | select(.name == "shared") | .observeCapability' "$LAST")
@@ -336,7 +338,8 @@ J4_COUNT=$(jq -r .acceptedCount "$LAST")
 script_step J4 0 newcomer $'whoami\nread shared\n'
 check J4 "script-mode read back: field 2 = 1" \
   is "$(jq -s -r '[.[1].cell.entries[] | select(.key.field == "2") | .value][0]' "$LAST")" 1
-tty_step J4 newcomer $'rea\tsh\t\rhis\t\rexit\r'
+# `rea` also completes to `react`; use the unique verb before reference completion.
+tty_step J4 newcomer $'read\tsh\t\rhis\t\rexit\r'
 check J4 "tty: Tab completed 'read shared' and the Host answered field 2 = 1" \
   bash -c "grep -a -q 'read shared' '$LAST' && tr -d '\r' <'$LAST' | grep -a -A4 '\"field\": \"2\"' | grep -a -q '\"value\": \"1\"'"
 
@@ -368,8 +371,13 @@ op J5 "an unprovisioned workspace for the unenrolled stranger (plain mini worksp
   "$SHELL_MINI" workspace --action init --host "$HOST" --config "$CONFIG" --socket "$SOCK" \
     --key "$RUN/homes/stranger/keys/mini.key" --subject 4242424242 --dir "$RUN/homes/stranger/workspace"
 step J5 0 stranger "import stolen object $TARGET $CHILD_CAP"
-step J5 3 stranger "read stolen"
-step J5 3 stranger "invoke stranger-write stolen create 3 1"
+# 96a4165f81ce: an unenrolled subject is refused by local consent before signing.
+step J5 1 stranger "read stolen"
+check J5 "stranger read refused by local consent before signing" \
+  grep -Fx 'error: local consent refused before signing: local intent subject has no current signing key' "${LAST%.stdout}.stderr"
+step J5 1 stranger "invoke stranger-write stolen create 3 1"
+check J5 "stranger write refused by local consent before signing" \
+  grep -Fx 'error: local consent refused before signing: local intent subject has no current signing key' "${LAST%.stdout}.stderr"
 step J5 0 newcomer "read shared"
 check J5 "control: newcomer still reads field 2 = 1" is "$(field "$LAST" 2)" 1
 
@@ -408,9 +416,13 @@ step J8 0 sponsor 'law lockout shared {"type":"any","predicates":[]} --allow-uns
 step J8 0 sponsor "submit lockout"
 check J8 "deny-all installed" jq -e '.confirmation == "installed"' "$LAST"
 step J8 3 newcomer "read shared"
+check J8 "newcomer read refused by current law" grep -q '^refused: law-denied:' "${LAST%.stdout}.stderr"
 step J8 3 newcomer "invoke after-lock shared write 2 8 7"
+check J8 "newcomer write refused by current law" grep -q '^refused: law-denied:' "${LAST%.stdout}.stderr"
 step J8 3 sponsor "read shared"
+check J8 "sponsor read refused by current law" grep -q '^refused: law-denied:' "${LAST%.stdout}.stderr"
 step J8 3 sponsor 'law repair shared {"type":"all","predicates":[]}'
+check J8 "owner repair refused by current law" grep -q '^refused: law-denied:' "${LAST%.stdout}.stderr"
 check J8 "each refused frame is retained with the Host's own decoding" \
   bash -c "n=\$(ls '$RUN/homes/newcomer/refusals/' | grep -c '\.json\$'); [[ \$n -ge 2 ]] && jq -e '.type == \"refused\"' '$RUN/homes/newcomer/refusals/'*.json"
 step J8 0 newcomer "lookup after-law-v2"
