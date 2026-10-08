@@ -235,7 +235,8 @@ class NativeProfilePublicationTests(unittest.TestCase):
     def profile_case(self, isolated):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory).resolve()
-            grains=root/"grains"
+            grains=root/"0123456789abcdef"
+            broker=grains/("runtime-"+grains.name)/"broker.sock"
             state=grains/"deployment-green"/"independent-store-key"/"host"
             state.mkdir(parents=True)
             ev=root/"evidence";ev.mkdir()
@@ -263,18 +264,29 @@ print(json.dumps(value))
             runner=root/"profile.sh"
             runner.write_text('set -eu\numask 077\nSTATE= PROFILE=\nfail() { echo "$*" >&2; exit 1; }\nsha() { sha256sum "$1" | cut -d " " -f 1; }\n'+paths+'\n'+writer+'\nwrite_profile\nstate_paths\n')
             env=dict(os.environ,PROFILE_RESULT=str(ev/"profile-result.json"),CONFIG=str(config),GRAINS_ROOT=str(grains),EV=str(ev),
-                SPK_HOST=str(native),HOST=str(native),WR=str(wr),OSOCK=str(root/"operator.sock"),STORE=str(root),BWRAP=str(native),NATIVE_STATE=str(state),BROKER_SOCKET=str(grains/"broker.sock") if isolated else "",NATIVE_BROKER=str(grains/"broker.sock") if isolated else "")
+                SPK_HOST=str(native),HOST=str(native),WR=str(wr),OSOCK=str(root/"operator.sock"),STORE=str(root),BWRAP=str(native),NATIVE_STATE=str(state),BROKER_SOCKET=str(broker),NATIVE_BROKER=str(broker))
             subprocess.run(["/bin/sh",str(runner)],env=env,check=True,timeout=15,capture_output=True)
             result=json.loads((ev/"profile-result.json").read_text())
             self.assertEqual(result["profilePath"],str(state/"grain-host.json"))
             self.assertEqual(result["stateRoot"],str(state))
             self.assertEqual(json.loads((state/"grain-host.json").read_text())["stateRoot"],str(state))
-            if isolated:
-                self.assertEqual(result['brokerSocket'],str(grains/'broker.sock'))
-                self.assertEqual(f.load(state/'grain-host.json')['brokerSocket'],str(grains/'broker.sock'))
+            self.assertEqual(result['brokerSocket'],str(broker))
+            self.assertEqual(f.load(state/'grain-host.json')['brokerSocket'],str(broker))
+            # The old global socket refuses before native init or profile publication.
+            bad_env=dict(env,PROFILE_RESULT=str(ev/'bad-profile-result.json'),EV=str(root/'bad-evidence'),
+                         BROKER_SOCKET=str(grains/'broker.sock'))
+            Path(bad_env['EV']).mkdir()
+            refused=subprocess.run(["/bin/sh",str(runner)],env=bad_env,timeout=15,capture_output=True)
+            self.assertNotEqual(refused.returncode,0)
+            self.assertIn(b"isolated broker must belong to grains root",refused.stderr)
+            self.assertFalse((Path(bad_env['EV'])/'init-store.json').exists())
+            self.assertFalse(Path(bad_env['PROFILE_RESULT']).exists())
             # A mismatching retained native result must stop future phase reuse.
             initialized=json.loads((ev/"init-store.json").read_text())
-            initialized["stateRoot"]=str(grains/"other-deployment")
+            if isolated:
+                initialized["brokerSocket"]=str(grains/"other-broker.sock")
+            else:
+                initialized["stateRoot"]=str(grains/"other-deployment")
             (ev/"init-store.json").write_text(json.dumps(initialized))
             again=subprocess.run(["/bin/sh",str(runner)],env=env,timeout=15,capture_output=True)
             self.assertNotEqual(again.returncode,0)
