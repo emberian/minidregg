@@ -1537,13 +1537,52 @@ def readState {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snaps
     Except Refusal (Option ObjectState) :=
   stateFor object (snapshot.canonicalBytes (stateCell config.domain object))
 
-/-- The image an inbox installs: an EMPTY inbox is retired (cv 01a113fe-1390), so a queue
-that no message is in retains nothing; the next send to the pair opens it afresh
-(`readInbox` reads a retired cell as no inbox). Its purse is closed in the same batch when
-it can be (`ObjectiveCall.Mail.deregistrations`). -/
+/-- Emptying generation g permanently retires its physical identity. The
+live pair cursor advances separately in the same intent; g never reopens. -/
 def inboxImage (inbox : Inbox.Inbox) : Bytes :=
   if inbox.messages = [] then retiredImage
-  else image .inbox (Inbox.key inbox.sender inbox.target) (Inbox.encode inbox)
+  else image .inbox (Inbox.key inbox.sender inbox.target inbox.generation) (Inbox.encode inbox)
+
+/-- Cursor bodies use the inbox's pair/generation codec, with no queued data. -/
+def inboxGenerationImage (sender target generation : Nat) : Bytes :=
+  image .inboxGeneration (Inbox.pairKey sender target) (Inbox.encode (Inbox.Inbox.empty sender target generation))
+
+/-- The generation is read only from the permanent live pair cursor. A fresh
+pair starts at zero; tombstones and malformed cursor images refuse. -/
+def readInboxGeneration (domain : Digest) (bytesAt : CellId → Bytes) (sender target : Nat) : Option Nat :=
+  let bytes := bytesAt (Inbox.generationCell domain sender target)
+  match payloadOf bytes with
+  | none => if bytes = [] then some 0 else none
+  | some payload =>
+    if payload.role = .inboxGeneration then do
+      let cursor ← Inbox.decode payload.body
+      if cursor.sender = sender ∧ cursor.target = target ∧ cursor.head = 0 ∧ cursor.messages = [] then
+        some cursor.generation
+      else none
+    else none
+
+theorem readInboxGeneration_role (domain : Digest) (bytesAt : CellId → Bytes)
+    (sender target generation : Nat)
+    (found : readInboxGeneration domain bytesAt sender target = some generation) :
+    ∀ payload, payloadOf (bytesAt (Inbox.generationCell domain sender target)) = some payload →
+      payload.role = .inboxGeneration := by
+  intro payload present
+  unfold readInboxGeneration at found
+  dsimp only at found
+  rw [present] at found
+  by_contra wrong
+  simp [wrong] at found
+
+#assert_axioms readInboxGeneration_role
+
+
+def inboxGeneration {rootBytes : Bytes → Digest} (domain : Digest) (snapshot : Snapshot rootBytes)
+    (sender target : Nat) : Nat :=
+  (readInboxGeneration domain snapshot.canonicalBytes sender target).getD 0
+
+def inboxCell {rootBytes : Bytes → Digest} (domain : Digest) (snapshot : Snapshot rootBytes)
+    (sender target : Nat) : CellId :=
+  Inbox.cell domain sender target (inboxGeneration domain snapshot sender target)
 
 /-- The inbox an inbox cell holds: `none` when the cell holds no activity cell
 (no inbox yet), refused when it holds anything else. -/
@@ -5050,7 +5089,7 @@ def payerRoute : Role → Option PayerRoute
   | .state => some .objectOfState
   | .package => some .stored
   | .object => some .objectRecord
-  | .inbox => some .objectOfInbox
+  | .inbox | .inboxGeneration => some .objectOfInbox
   | .domain => some .domainRecord
 
 /-- A census of retained cell kinds: every kind listed, each with its payer route. -/
@@ -5068,7 +5107,7 @@ instance {Kind : Type} (census : RetentionCensus Kind) : Decidable census.Paid :
 
 /-- The activity registry's retained kinds: every activity role. -/
 def activityCensus : RetentionCensus Role where
-  kinds := [.record, .slot, .state, .package, .object, .inbox, .domain]
+  kinds := [.record, .slot, .state, .package, .object, .inbox, .domain, .inboxGeneration]
   complete := by intro kind; cases kind <;> simp
   route := payerRoute
 

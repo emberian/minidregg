@@ -276,7 +276,9 @@ theorem storeEpoch_stateKey :
 
 theorem storeEpoch_schemaRefs :
     DurableCheckpointCodec.StoreEpoch.current.schemaRefs =
-      s!"schema-refs/v{DeployedCellRegistry.declaredEffectSchemaRef.version}" := by
+      -- The global epoch is one beyond the declared-effect schema: it also
+      -- pins REJECT/RECORDED-FAILURE v2 and generation-addressed inboxes.
+      s!"schema-refs/v{DeployedCellRegistry.declaredEffectSchemaRef.version + 1}" := by
   decide
 
 #assert_axioms storeEpoch_stateKey

@@ -665,7 +665,7 @@ def signedTarget (domain : Digest) (command : Command) : ResourceKind × Nat :=
   | .exhaust record _ _ _ _ => (.object, record.value)
   | .abandon record _ => (.object, record.value)
   | .invoke object _ _ _ _ _ _ _ _ _ => (.object, object)
-  | .deliverMessage sender target _ => (.object, (Inbox.cell domain sender target).value)
+  | .deliverMessage sender target _ => (.object, (Inbox.generationCell domain sender target).value)
   | .adopt object _ _ _ _ _ _ _ _ _ _ _ _ => (.object, object)
   | .migrate object _ _ => (.object, object)
   | .abortDrained record _ _ _ _ => (.object, record.value)
@@ -2281,7 +2281,8 @@ def IntentShape (deployment : Deployment) (durable : Durable) (intent : DataInte
     (∀ write ∈ intent.writes, write.expectedPre = durable.snapshot.model.roots write.cellId) ∧
     (∀ write ∈ intent.writes, ResourceBirthController.Concrete.PhysicalPostLaw deployment write) ∧
     (∀ write ∈ intent.writes, ActivityOrBook deployment write) ∧
-    (∀ guard ∈ intent.readGuards, guard.expectedRoot = durable.snapshot.model.roots guard.cellId)
+    (∀ guard ∈ intent.readGuards, guard.expectedRoot = durable.snapshot.model.roots guard.cellId) ∧
+    (∀ write ∈ intent.writes, ObjectiveActivity.isRetired (durable.snapshot.canonicalBytes write.cellId) = false)
 
 instance intentShapeDecidable (deployment : Deployment) (durable : Durable) (intent : DataIntent rootBytes) :
     Decidable (IntentShape deployment durable intent) := by
@@ -2295,7 +2296,8 @@ def PhysicalShape (prepared : Prepared deployment profile ambient durable comman
     (∀ write ∈ intent.writes, write.expectedPre = durable.snapshot.model.roots write.cellId) ∧
     (∀ write ∈ intent.writes, ResourceBirthController.Concrete.PhysicalPostLaw deployment write) ∧
     (∀ write ∈ intent.writes, ActivityOrBook deployment write) ∧
-    (∀ guard ∈ intent.readGuards, guard.expectedRoot = durable.snapshot.model.roots guard.cellId)
+    (∀ guard ∈ intent.readGuards, guard.expectedRoot = durable.snapshot.model.roots guard.cellId) ∧
+    (∀ write ∈ intent.writes, ObjectiveActivity.isRetired (durable.snapshot.canonicalBytes write.cellId) = false)
 
 instance physicalShapeDecidable (prepared : Prepared deployment profile ambient durable command)
     (ingress : DecodedIngress) : Decidable (PhysicalShape prepared ingress) := by
@@ -2421,6 +2423,18 @@ def Failed.intent (failed : Failed deployment profile ambient durable ingress) :
 def Verdict.intent : Verdict deployment profile ambient durable ingress → DataIntent rootBytes
   | .accepted admitted => Minidregg.Kernel.ObjectiveActivityReceiver.intent admitted
   | .failed charged => charged.intent
+
+/-- Every admitted operation, including a charged failure, leaves permanently
+retired identifiers untouched. This is checked at native admission against the
+same loaded snapshot whose roots are checked by PhysicalShape/IntentShape. -/
+theorem Verdict.writes_unretired (verdict : Verdict deployment profile ambient durable ingress)
+    (write : DataWrite) (member : write ∈ verdict.intent.writes) :
+    ObjectiveActivity.isRetired (durable.snapshot.canonicalBytes write.cellId) = false := by
+  cases verdict with
+  | accepted accepted => exact accepted.physical.2.2.2.2.2 write member
+  | failed failed => exact failed.physical.2.2.2.2.2 write member
+
+#assert_axioms Verdict.writes_unretired
 
 /-- **A charged failure charges and rolls back.** Every write of a charged failure's intent is the
 Book cell, there is exactly one, and the batch it posts is exactly the fee of the declared

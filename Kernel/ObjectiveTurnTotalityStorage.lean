@@ -587,6 +587,9 @@ attribute [local simp] activity_image_supported seat_image_supported retired_ima
   unfold inboxImage
   split <;> simp
 
+@[local simp] theorem inboxGeneration_image (sender target generation : Nat) :
+    PostImage (inboxGenerationImage sender target generation) := activity_image_supported _ _ _
+
 /-- An accepted Book batch always installs its present Book value, even if its
 input store had an absent Book field. -/
 theorem accepted_book_image {pre : BookCell} {batch : Batch} (accepted : AcceptedBatch pre batch) :
@@ -719,7 +722,7 @@ theorem mail_images {config : Config} {snapshot : Snapshot rootBytes}
     (mail : ObjectiveCall.Mail config snapshot) : Images mail.posts := by
   unfold ObjectiveCall.Mail.posts
   simp only [images_append]
-  refine ⟨⟨?_, ?_⟩, ?_⟩
+  refine ⟨⟨⟨?_, ?_⟩, ?_⟩, ?_⟩
   · intro p hp
     obtain ⟨held, _, rfl⟩ := List.mem_map.mp hp
     simp
@@ -730,6 +733,9 @@ theorem mail_images {config : Config} {snapshot : Snapshot rootBytes}
     obtain ⟨closed, _, rfl⟩ := List.mem_map.mp hp
     unfold ObjectiveCall.ClosedSlot.post
     split <;> simp
+  · intro p hp
+    obtain ⟨held, _, rfl⟩ := List.mem_map.mp hp
+    simp [ObjectiveCall.HeldInbox.cursorPost]
 
 theorem admitted_images {config : Config} {snapshot : Snapshot rootBytes} {height : Nat}
     (turn : AdmittedTurn config snapshot height) : Images turn.posts := by

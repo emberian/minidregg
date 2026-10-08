@@ -117,4 +117,12 @@ printf 'EMPTY exit %s\n' "$rc"
 if [[ $rc != 1 ]]; then status=1; fi
 cat "$evidence/empty.out"
 cat "$evidence/empty.err" >&2
+printf 'NORMAL-SUMMARY\n'
+if [[ -n $recorded ]]; then
+  normalOutput=$evidence/normal.out
+else
+  normalOutput=$evidence/r/totality.out
+fi
+awk '$1 == "ROW" || $1 == "TOTAL"' "$normalOutput"
+printf 'ACCEPTANCE exit %s\n' "$status"
 exit "$status"
