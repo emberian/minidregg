@@ -1,0 +1,77 @@
+{
+  "type": "minidregg-selected-exchange-two-credentials-v1",
+  "localFn": {
+    "host": "127.0.0.1",
+    "port": 11241,
+    "dynamicSpaceMiB": 8192,
+    "freshStore": true,
+    "stopped": true
+  },
+  "storeA": {
+    "domain": "8611",
+    "sponsorSubject": "7",
+    "sponsorPublicKey": "a2b80f70bd825dfc99a83a7037245e5cbec9cfc33af5dec87b2d7139dc2b5972",
+    "notes": "14947649088841759878"
+  },
+  "storeB": {
+    "domain": "8612",
+    "sponsorSubject": "8",
+    "sponsorPublicKey": "7364388a2bbe9d693f7fe40c45e9230f442692cd9d4d1892e39c4ea63dec716c",
+    "inbox": "12334632121090424913",
+    "homeIdentityEnrollmentSha256": "0d397a40cc066baa9cf379f4ac3425a9774abbb334c9684f28106a2f0fea6427",
+    "recipientCapability": "18066871878443290917",
+    "logicalImageSha256": "afcf07ab41b8c823ef055a918956c87160ecd2ca8e08ef113d386a8a70a32707",
+    "sponsorReadAfterReleaseLaw": "B-sponsor-read-after-law: refused"
+  },
+  "packetSha256": "588ffadd0abd5eb2e76f04ea9ec595a00830cd253859dbd04b5d89119eb6ce21",
+  "articleSha256": "034d3186a480c61545ffb647f638c7884b3c8cc2cce4454dfcebd89082b679f9",
+  "fnStoredArticleSha256": "f0e66e0a3fadce7df1df639345bf6a28028acee09dd885966d6301f670a84fea",
+  "fnReportSha256": "07be97524eb04c9c1ce62f893ea7f22f01bfba7d8187a293e6833e2479a95447",
+  "recipientReceipt": {
+    "acceptedCount": "5",
+    "eventId": "88456205959049232414542450438501953216177220006772547563870832917371333015837",
+    "transactionId": "48402180757979310210556621283185659631865737321871002474362847483659120705474",
+    "worldRoot": "65306390059710796669195969488604194094868010630736236511016930817750853534719"
+  },
+  "readbackObservationSha256": "0e0c2be06d12e6d0048b40cb155c9756dd0c77dcac791efad3c66cf87c09f7dc",
+  "disclosure": {
+    "packetSelected": 1,
+    "packetUnselected": 0,
+    "fnStoredBodyEqualsPacket": true,
+    "fnStoredBodySelected": 1,
+    "fnStoredBodyUnselected": 0
+  },
+  "refusals": {
+    "tamperedExpectedArticle": {
+      "boundary": "Host selected-release-fn-legacy-poll",
+      "stderr": "minidregg-host: fn stored article lacks exact selected owner source suffix",
+      "packetOrIngressWritten": false
+    },
+    "tamperedPacket": {
+      "type": "refused",
+      "reason": "undisclosed",
+      "phase": "61646d697373696f6e",
+      "detail": "726571756573742072656675736564"
+    },
+    "wrongSigner": {
+      "type": "refused",
+      "reason": "undisclosed",
+      "phase": "61646d697373696f6e",
+      "detail": "726571756573742072656675736564"
+    },
+    "wrongRoot": {
+      "type": "refused",
+      "reason": "undisclosed",
+      "phase": "61646d697373696f6e",
+      "detail": "726571756573742072656675736564"
+    },
+    "bImageUnchangedByRefusals": true
+  },
+  "positiveControl": {
+    "confirmation": "installed",
+    "transactionId": "72807236346210284351376331080469843582761470725524656434795680544529358658289",
+    "eventId": "52544006702093557239375079236831165201126877484155380176652189316151653299156",
+    "acceptedCount": "6"
+  },
+  "claims": "transport only: no fn-e verdict, event17 coverage or fn cursor ACK"
+}
