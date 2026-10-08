@@ -550,19 +550,362 @@ theorem finalIntent_writes
       posts.map (Post.write rootBytes) := by
   cases turn <;> rfl
 
-/-- Loaded-path equality: the only image premise is supplied by the receiver's
-post constructors above; support follows from successful turn conversion. -/
+namespace ReceiverImages
+
+open ObjectiveActivity
+open Minidregg.Theory.CanonicalResourceKernel (Book Batch AcceptedBatch logicalBook bookPatch bookAddress)
+
+/-- Image membership, independent of any charge or successful bridge conversion. -/
+def Images (posts : List Post) : Prop := ∀ p ∈ posts, PostImage p.bytes
+
+@[local simp] theorem images_nil : Images [] := by simp [Images]
+@[local simp] theorem images_cons (p : Post) (ps : List Post) :
+    Images (p :: ps) ↔ PostImage p.bytes ∧ Images ps := by simp [Images]
+@[local simp] theorem images_append (ps qs : List Post) :
+    Images (ps ++ qs) ↔ Images ps ∧ Images qs := by simp [Images, or_imp, forall_and]
+
+attribute [local simp] activity_image_supported seat_image_supported retired_image_supported
+
+@[local simp] theorem postAt_bytes (snapshot : Snapshot rootBytes)
+    (cell : DurableDataIntent.CellId) (bytes : Bytes) :
+    (postAt snapshot cell bytes).bytes = bytes := rfl
+
+@[local simp] theorem record_image (record : Record) : PostImage (recordImage record) := by
+  unfold recordImage
+  split <;> simp
+
+@[local simp] theorem state_image (object : DurableDataIntent.CellId) (state : ObjectState) :
+    PostImage (stateImage object state) := activity_image_supported _ _ _
+
+@[local simp] theorem object_image (object : DurableDataIntent.CellId) (record : ObjectRecord.ObjectRecord) :
+    PostImage (objectImage object record) := activity_image_supported _ _ _
+
+@[local simp] theorem domain_image (id : Digest) (domain : Domain) :
+    PostImage (domainImage id domain) := activity_image_supported _ _ _
+
+@[local simp] theorem inbox_image (inbox : Inbox.Inbox) : PostImage (inboxImage inbox) := by
+  unfold inboxImage
+  split <;> simp
+
+/-- An accepted Book batch always installs its present Book value, even if its
+input store had an absent Book field. -/
+theorem accepted_book_image {pre : BookCell} {batch : Batch} (accepted : AcceptedBatch pre batch) :
+    PostImage (ResourceBirthCodec.LifecycleImage.bytes CanonicalCellRegistry.registry
+      (.live ⟨.resourceBook, accepted.post⟩)) := by
+  have state : accepted.post.logical =
+      CanonicalResourcePageMaterializer.stateOfOption (some (batch.apply (logicalBook pre.logical))) := by
+    apply DFinsupp.ext
+    rintro ⟨ns, key⟩
+    cases ns; cases key
+    change (Patch.run pre.logical (bookPatch pre.logical _)) _ = _
+    unfold bookPatch
+    split <;> simp [Patch.run, Op.apply, bookAddress,
+      CanonicalResourcePageMaterializer.stateOfOption]
+  have materialized : accepted.post = Minidregg.Theory.CellState.materialize
+      CanonicalResourcePageMaterializer.materializer
+      (CanonicalResourcePageMaterializer.stateOfOption (some (batch.apply (logicalBook pre.logical)))) := by
+    apply Minidregg.Theory.CellState.Materialized.ext
+    exact state
+  rw [materialized]
+  exact book_image_supported _
+
+@[local simp] theorem book_post {pre : BookCell} (config : Config) (snapshot : Snapshot rootBytes)
+    (posted : Postings pre) : PostImage (posted.write config snapshot).bytes :=
+  accepted_book_image posted.accepted
+
+@[local simp] theorem slot_post (config : Config) (snapshot : Snapshot rootBytes) (slot : AnswerSlot.Slot) :
+    PostImage (slotPost config snapshot slot).bytes := activity_image_supported _ _ _
+
+@[local simp] theorem slot_retire (config : Config) (snapshot : Snapshot rootBytes) (name : Digest) :
+    PostImage (slotRetire config snapshot name).bytes := retired_image_supported
+
+@[local simp] theorem record_post (config : Config) (snapshot : Snapshot rootBytes)
+    (cell : DurableDataIntent.CellId) (record : Record) :
+    PostImage (recordPost config snapshot cell record).bytes := record_image record
+
+theorem object_posts (config : Config) (snapshot : Snapshot rootBytes)
+    (object : DurableDataIntent.CellId) (before after : ObjectRecord.ObjectRecord) :
+    Images (objectPost config snapshot object before after) := by
+  intro p hp
+  rw [mem_objectPost hp]
+  simp
+
+theorem count_posts (config : Config) (snapshot : Snapshot rootBytes)
+    (object : DurableDataIntent.CellId) (record : ObjectRecord.ObjectRecord)
+    (pin activity : Digest) (before after : Bool) :
+    Images (countPosts config snapshot object record pin activity before after) := by
+  intro p hp
+  rw [mem_countPosts hp]
+  simp
+
+theorem yield_images {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {transaction : TransactionId} {cell object : DurableDataIntent.CellId}
+    {generation : Nat} {current : Option ObjectState} {viewed : Bool}
+    {segment : Segment} {committed : YieldCommit}
+    (ok : segmentCommit config snapshot height transaction cell object generation current viewed segment =
+      .ok (some committed)) : Images committed.posts := by
+  obtain ⟨_, _, _, committedExact⟩ := segmentCommit_spec ok
+  intro p hp
+  rcases commitYield_posts committedExact p hp with ⟨state, eq⟩ | ⟨slot, _, _, _, eq⟩
+  · rw [eq]; simp
+  · rw [eq]; simp
+
+theorem optional_yield_images {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {transaction : TransactionId} {cell object : DurableDataIntent.CellId}
+    {generation : Nat} {current : Option ObjectState} {viewed : Bool}
+    {segment : Segment} {committed : Option YieldCommit}
+    (ok : segmentCommit config snapshot height transaction cell object generation current viewed segment =
+      .ok committed) : Images ((committed.map YieldCommit.posts).getD []) := by
+  cases committed with
+  | none => simp
+  | some committed => exact yield_images ok
+
+theorem abandon_images {config : Config} {snapshot : Snapshot rootBytes}
+    {await : Await} {posts : List Post} {claims : List StableNullifier}
+    (ok : abandonSlot config snapshot await = .ok (posts, claims)) : Images posts := by
+  unfold abandonSlot at ok
+  split at ok
+  · simp only [Except.ok.injEq, Prod.mk.injEq] at ok
+    rw [← ok.1]; simp
+  · rename_i name _ _
+    cases read : readSlot config snapshot name with
+    | none => simp [read] at ok
+    | some slot =>
+      simp only [read] at ok
+      split at ok <;>
+        simp only [Except.ok.injEq, Prod.mk.injEq] at ok <;>
+        rw [← ok.1] <;> simp
+
+theorem birth_images {config : Config} {snapshot : Snapshot rootBytes} {height : Nat}
+    {request : BirthRequest} (born : Birth config snapshot height request) : Images born.posts := by
+  rw [born.postsExact]
+  simp only [images_cons, images_append, images_nil, and_true]
+  exact ⟨record_post _ _ _ _, ⟨optional_yield_images born.yieldedExact, book_post _ _ _⟩,
+    object_posts _ _ _ _ _⟩
+
+theorem delivery_images {config : Config} {snapshot : Snapshot rootBytes} {height : Nat}
+    {request : DeliverRequest} (delivered : Delivery config snapshot height request) :
+    Images delivered.posts := by
+  rw [delivered.postsExact]
+  have settled : Images delivered.settlement.posts := by
+    intro p hp
+    rw [settle_posts_retired delivered.settled p hp]
+    exact retired_image_supported
+  have yielded : Images ((delivered.yielded.map YieldCommit.posts).getD []) := by
+    cases h : delivered.yielded with
+    | none => simp
+    | some committed =>
+      have ended := delivered.endExact
+      rw [h] at ended
+      exact yield_images (resumedSegment_committed ended).2
+  simp only [images_cons, images_append, images_nil, and_true]
+  exact ⟨record_post _ _ _ _, ⟨⟨settled, yielded⟩, book_post _ _ _⟩, count_posts _ _ _ _ _ _ _ _⟩
+
+theorem journal_images (config : Config) (snapshot : Snapshot rootBytes) (journal : ObjectiveCall.Journal) :
+    Images (journal.posts config snapshot) := by
+  intro p hp
+  simp only [ObjectiveCall.Journal.posts, List.mem_filterMap] at hp
+  obtain ⟨entry, _, made⟩ := hp
+  split at made
+  · cases h : entry.current with
+    | none => simp [h] at made
+    | some state =>
+      simp only [h, Option.map_some, Option.some.injEq] at made
+      subst p
+      simp
+  · cases made
+
+theorem mail_images {config : Config} {snapshot : Snapshot rootBytes}
+    (mail : ObjectiveCall.Mail config snapshot) : Images mail.posts := by
+  unfold ObjectiveCall.Mail.posts
+  simp only [images_append]
+  refine ⟨⟨?_, ?_⟩, ?_⟩
+  · intro p hp
+    obtain ⟨held, _, rfl⟩ := List.mem_map.mp hp
+    simp
+  · intro p hp
+    obtain ⟨held, _, rfl⟩ := List.mem_map.mp hp
+    simp
+  · intro p hp
+    obtain ⟨closed, _, rfl⟩ := List.mem_map.mp hp
+    unfold ObjectiveCall.ClosedSlot.post
+    split <;> simp
+
+theorem admitted_images {config : Config} {snapshot : Snapshot rootBytes} {height : Nat}
+    (turn : AdmittedTurn config snapshot height) : Images turn.posts := by
+  cases turn with
+  | publish _ publication => simp [AdmittedTurn.posts, publication.postsExact]
+  | create request created =>
+    simp only [AdmittedTurn.posts, created.postsExact, images_cons]
+    refine ⟨by simp, ?_⟩
+    cases request.seed <;> simp [seedPost]
+  | birth _ _ born => exact birth_images born
+  | resolve _ resolution => simp [AdmittedTurn.posts, resolution.postsExact]
+  | deliver _ delivery => exact delivery_images delivery
+  | topUp _ topped => simp [AdmittedTurn.posts]
+  | exhaust _ exhausted => simp [AdmittedTurn.posts, exhausted.postsExact]
+  | abandon _ abandoned =>
+    simp only [AdmittedTurn.posts, abandoned.postsExact, images_cons, images_append,
+      images_nil, and_true]
+    exact ⟨by simp, ⟨abandon_images abandoned.slotExact, book_post _ _ _⟩,
+      count_posts _ _ _ _ _ _ _ _⟩
+  | invoke _ invoked =>
+    simp only [AdmittedTurn.posts, invoked.postsExact, images_append, images_cons, images_nil, and_true]
+    exact ⟨⟨journal_images _ _ _, mail_images _⟩, book_post _ _ _⟩
+  | deliverMessage _ delivered =>
+    simp only [AdmittedTurn.posts, delivered.postsExact, images_append, images_cons, images_nil, and_true]
+    refine ⟨⟨?_, mail_images _⟩, ?_, book_post _ _ _⟩
+    · cases delivered.outcome with
+      | failed _ => exact images_nil
+      | replied _ journal => exact journal_images _ _ _
+    · unfold ObjectiveSend.replyPost
+      split <;> simp
+  | adopt _ adopted => simp [AdmittedTurn.posts, adopted.postsExact]
+  | migrate _ migrated =>
+    simp only [AdmittedTurn.posts, migrated.postsExact, images_cons, images_append,
+      images_nil, and_true]
+    refine ⟨by simp, ?_, book_post _ _ _⟩
+    cases migrated.current <;> cases migrated.migrated <;> simp [migratedStatePosts]
+  | abortDrained _ aborted =>
+    simp only [AdmittedTurn.posts, aborted.postsExact, images_cons, images_append,
+      images_nil, and_true]
+    exact ⟨record_post _ _ _ _, ⟨abandon_images aborted.slotExact, book_post _ _ _⟩,
+      count_posts _ _ _ _ _ _ _ _⟩
+  | rebirth _ reborn =>
+    simp only [AdmittedTurn.posts, reborn.postsExact, images_append, images_cons]
+    exact ⟨birth_images reborn.born, by simp, abandon_images reborn.slotExact⟩
+  | registerDomain _ registered =>
+    simp only [AdmittedTurn.posts, registered.postsExact, images_cons, images_append,
+      images_nil, and_true]
+    refine ⟨by simp, ?_, book_post _ _ _⟩
+    intro p hp
+    obtain ⟨⟨member, record⟩, _, rfl⟩ := List.mem_map.mp hp
+    simp
+  | failed _ charged => simp [AdmittedTurn.posts, ChargedFailure.posts]
+
+/-- A filtered post constructor cannot introduce a different image. -/
+theorem filterMap_images {α : Type} (xs : List α) (f : α → Option Post)
+    (hf : ∀ a p, f a = some p → PostImage p.bytes) : Images (xs.filterMap f) := by
+  intro p hp
+  obtain ⟨a, _, h⟩ := List.mem_filterMap.mp hp
+  exact hf a p h
+
+theorem changed_image (snapshot : Snapshot rootBytes) (cell : DurableDataIntent.CellId)
+    (bytes : Bytes) (image : PostImage bytes) {p : Post}
+    (made : SeatStore.changed snapshot cell bytes = some p) : PostImage p.bytes := by
+  unfold SeatStore.changed at made
+  split at made
+  · cases made
+  · cases made; exact image
+
+/-- The seat finalizer's state posts are retired or live seat images. -/
+theorem seat_state_images (domain : Digest) (snapshot : Snapshot rootBytes)
+    (loaded : SeatStore.Loaded) (next : Seats.World) :
+    Images (SeatStore.statePosts domain snapshot loaded none next) := by
+  unfold SeatStore.statePosts
+  dsimp only
+  simp only [images_append]
+  refine ⟨⟨⟨⟨?_, ?_⟩, ?_⟩, ?_⟩, ?_⟩
+  · intro p hp
+    obtain ⟨body, _, rfl⟩ := List.mem_map.mp hp
+    simp
+  · apply filterMap_images
+    intro seat p made
+    split at made <;> cases made
+  · apply filterMap_images
+    intro body p made
+    exact changed_image snapshot _ _ (seat_image_supported _ _ _) made
+  · apply filterMap_images
+    intro id p made
+    cases hi : (next.registry.instance? id).orElse (fun _ =>
+        (loaded.instances.find? fun body => body.inst.id == id).map SeatStore.InstanceBody.inst) with
+    | none => simp only [hi, Option.bind_none] at made; cases made
+    | some inst =>
+      simp only [hi, Option.bind_some] at made
+      exact changed_image snapshot _ _ (seat_image_supported _ _ _) made
+  · apply filterMap_images
+    intro record p made
+    exact changed_image snapshot _ _ (seat_image_supported _ _ _) made
+
+theorem joined_images {config : Config} {snapshot : Snapshot rootBytes} {height record : Nat}
+    {pre : BookCell} {posted : Postings pre}
+    (joined : ActivitySeatEnd.Joined config snapshot height record posted)
+    (posts : List Post) (base : Images posts) : Images (joined.rewrite posts) := by
+  unfold ActivitySeatEnd.Joined.rewrite
+  rw [images_append]
+  constructor
+  · intro p hp
+    obtain ⟨original, member, made⟩ := List.mem_map.mp hp
+    split at made
+    · subst p
+      exact accepted_book_image joined.accepted
+    · subst p
+      exact base original member
+  · rw [joined.held.postsExact]
+    exact seat_state_images _ _ _ _
+
+theorem finalize_images {config : Config} {snapshot : Snapshot rootBytes} {height : Nat}
+    (turn : AdmittedTurn config snapshot height) {posts : List Post} {extra : List ReadGuard}
+    (final : ActivitySeatEnd.finalize config snapshot height turn = .ok (posts, extra)) : Images posts := by
+  have base := admitted_images turn
+  unfold ActivitySeatEnd.finalize at final
+  cases ending : ActivitySeatEnd.AdmittedTurn.ending turn with
+  | none =>
+    rw [ending] at final
+    simp only [Except.ok.injEq, Prod.mk.injEq] at final
+    rw [← final.1]; exact base
+  | some found =>
+    obtain ⟨record, pre, posted⟩ := found
+    rw [ending] at final
+    cases joined : ActivitySeatEnd.join config snapshot height record posted with
+    | error reason => simp [joined] at final
+    | ok optional =>
+      cases optional with
+      | none =>
+        simp only [joined, Except.ok.injEq, Prod.mk.injEq] at final
+        rw [← final.1]; exact base
+      | some made =>
+        simp only [joined, Except.ok.injEq, Prod.mk.injEq] at final
+        rw [← final.1]
+        exact joined_images made _ base
+
+/-- Domain judgment adds guards, preserving the image membership of final posts. -/
+theorem finish_images {config : Config} {snapshot : Snapshot rootBytes} {height : Nat}
+    (turn : AdmittedTurn config snapshot height) {posts : List Post} {extra : List ReadGuard}
+    (finished : ActivitySeatEnd.finish config snapshot height turn = .ok (posts, extra)) : Images posts := by
+  obtain ⟨seats, _, _, finalized, _⟩ := ActivitySeatEnd.finish_finalize finished
+  exact finalize_images turn finalized
+
+#assert_axioms accepted_book_image admitted_images seat_state_images joined_images finalize_images finish_images
+
+end ReceiverImages
+
+
+/-- The native receiver's own finalization supplies the image classification;
+no bridge success or byte-accounting premise is required. -/
+theorem prepared_posts_images
+    {F : Type} [Field F] {deployment : ObjectiveActivityReceiver.Deployment}
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : ObjectiveKernelConfig.Ambient}
+    {durable : ObjectiveActivityReceiver.Durable} {command : ObjectiveActivityReceiver.Command}
+    (prepared : ObjectiveActivityReceiver.Prepared deployment profile ambient durable command) :
+    ∀ p ∈ prepared.final.1, PostImage p.bytes :=
+  ReceiverImages.finish_images prepared.decided prepared.finalExact
+
+#assert_axioms prepared_posts_images
+
+/-- Loaded-path equality: the receiver's finalization supplies all image shapes;
+only successful turn conversion remains as a premise. -/
 theorem prepared_ofLoaded_charge_eq_storage_plus_framing
     {F : Type} [Field F] {deployment : ObjectiveActivityReceiver.Deployment}
     {profile : CanonicalRuntimeProfile.Profile F} {ambient : ObjectiveKernelConfig.Ambient}
     {durable : ObjectiveActivityReceiver.Durable} {command : ObjectiveActivityReceiver.Command}
     (prepared : ObjectiveActivityReceiver.Prepared deployment profile ambient durable command)
     (ingress : ObjectiveActivityReceiver.DecodedIngress) {t : DTurn deployedR Digest}
-    (success : HostRefinesWorld.Turn.ofLoaded bridge history durable (prepared.intent ingress) = .ok t)
-    (images : ∀ p ∈ prepared.final.1, PostImage p.bytes) :
+    (success : HostRefinesWorld.Turn.ofLoaded bridge history durable (prepared.intent ingress) = .ok t) :
     (prepared.intent ingress).exactCharge .storageBytes = storageOf history t.creates t.legs +
       framing (rootBytes := ResourceBirthCodec.rootBytes)
         (HostRefinesWorld.cellsOf bridge durable.snapshot) prepared.final.1 := by
+  have images := prepared_posts_images prepared
   have supported := postsSupported_ofLoaded success
     (finalIntent_writes _ _ _ prepared.decided) images
   have eqTurn := (ofCells_ok success).eq
@@ -605,5 +948,6 @@ theorem intent_equality :
 #assert_axioms counts intent_equality
 
 end BurnWitness
+
 
 end Minidregg.Kernel.ObjectiveTurnTotalityStorage
