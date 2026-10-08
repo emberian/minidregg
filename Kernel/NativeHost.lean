@@ -2435,6 +2435,24 @@ def activityViewLoaded (config : Config) (opened : Opened config) (cells : List 
       (activityAmbient config opened) with
     | .ok kernel => some kernel.maxExtractTicks
     | .error _ => none
+  let cells := (cells ++ cells.flatMap fun cell =>
+    match ObjectiveActivity.payloadOf (snapshot.canonicalBytes ⟨cell⟩) with
+    | some payload =>
+      if payload.role = .inboxGeneration then
+        match Inbox.decode payload.body with
+        | some cursor =>
+          if cell = (Inbox.generationCell config.deployment.domain cursor.sender cursor.target).value then
+            match ObjectiveActivity.readInboxGeneration config.deployment.domain snapshot.canonicalBytes
+                cursor.sender cursor.target with
+            | some generation =>
+              [(Inbox.cell config.deployment.domain cursor.sender cursor.target generation).value] ++
+                if generation = 0 then [] else
+                  [(Inbox.cell config.deployment.domain cursor.sender cursor.target (generation - 1)).value]
+            | none => []
+          else []
+        | none => []
+      else []
+    | none => []).dedup
   let quoted := quotes.map fun (record, await) =>
     (record, await,
       match ObjectiveKernelConfig.configOf config.deployment config.profile (activityAmbient config opened) with

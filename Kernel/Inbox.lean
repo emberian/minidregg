@@ -1,7 +1,7 @@
 /- Inboxes (OB8): the per-(sender, target) FIFO queue an asynchronous `send`
 appends to and a `deliverMessage` turn pops (`Kernel.ObjectiveSend`).
 
-**The cell.** One inbox per (sender object, target object), at the protected
+**The cell.** One inbox per (sender object, target object, generation), at the protected
 activity coordinate of role `inbox` (`cell`, `cell_reserved`): every intent of
 another facet that writes it is refused by name (`ObjectiveActivityGate`), so
 only the object kernel's own turns write it.
@@ -74,6 +74,8 @@ structure Inbox where
   /-- The sequence number of the first queued message (the number ever popped). -/
   head : Nat
   messages : List Message
+  /-- Generation of the physical inbox identity, kept by every queue step. -/
+  generation : Nat := 0
   deriving DecidableEq, Repr
 
 /-- The most messages one inbox (and one slot's forwarding queue) holds. -/
@@ -93,7 +95,8 @@ covers is decided at its delivery, against what the method actually sends
 def Message.continues (message : Message) : Bool :=
   decide (message.depth < continuationDepth) && decide (message.postage ≤ message.allowance)
 
-def Inbox.empty (sender target : Nat) : Inbox := ⟨sender, target, 0, []⟩
+def Inbox.empty (sender target : Nat) (generation : Nat := 0) : Inbox :=
+  ⟨sender, target, 0, [], generation⟩
 
 /-- The sequence number the next pushed message gets. -/
 def Inbox.tail (inbox : Inbox) : Nat := inbox.head + inbox.messages.length
@@ -318,7 +321,7 @@ theorem fifoAccount_nil_iff {a b : Inbox} {popped pushed : List Message} :
 
 def sampleMessage (n : Nat) : Message := ⟨⟨n⟩, 1, "m", [], ⟨0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0⟩, 1, 9, 0, 0, 0⟩
 
-def sampleInbox : Inbox := ⟨1, 2, 0, [sampleMessage 10, sampleMessage 11]⟩
+def sampleInbox : Inbox := ⟨1, 2, 0, [sampleMessage 10, sampleMessage 11], 0⟩
 
 theorem sample_push_pop :
     Lawful (Inbox.empty 1 2) { (Inbox.empty 1 2) with messages := [sampleMessage 10] } :=
@@ -384,16 +387,14 @@ def messageStream : StreamCodec Message :=
 def inboxStream : StreamCodec Inbox :=
   StreamCodec.xmap
     (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
-      (StreamCodec.product StreamCodec.nat (StreamCodec.list messageStream))))
-    (fun i => (i.sender, i.target, i.head, i.messages))
-    (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2⟩)
+      (StreamCodec.product StreamCodec.nat
+        (StreamCodec.product (StreamCodec.list messageStream) StreamCodec.nat))))
+    (fun i => (i.sender, i.target, i.head, i.messages, i.generation))
+    (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2.1, w.2.2.2.2⟩)
     (by intro i; cases i; rfl)
 
-/-- v5: a message envelope carries `domainWork` (A3 domain pricing); v4: a message envelope carries
-`replayBytes`, `coreBytes` (GPT-6 row E work account); v3: a message carries its storage `deposit` (v2 added
-the continuation `allowance` and `depth`, GPT-6 row F); v1 through v4 inboxes refuse to decode
-(`v1_refuses`, `v2_refuses`, `v3_refuses`, `v4_refuses`). -/
-def frame : Bytes := "DREGG/OBJECTIVE/INBOX/v5".toUTF8.toList
+/-- v6 adds the inbox generation. Earlier frames refuse canonical decoding. -/
+def frame : Bytes := "DREGG/OBJECTIVE/INBOX/v6".toUTF8.toList
 def codec := framed frame inboxStream
 def encode (inbox : Inbox) : Bytes := codec.encode inbox
 def decode (bytes : Bytes) : Option Inbox := codec.decode bytes
@@ -452,6 +453,19 @@ theorem v4_refuses (body : Bytes) :
     rw [List.take_left' rfl, List.take_left' (by decide +kernel)] at cut
     exact absurd cut (by decide +kernel)
 
+/-- The v5 frame, without an inbox generation, refuses to decode. -/
+theorem v5_refuses (body : Bytes) :
+    decode ("DREGG/OBJECTIVE/INBOX/v5".toUTF8.toList ++ body) = none := by
+  cases found : decode ("DREGG/OBJECTIVE/INBOX/v5".toUTF8.toList ++ body) with
+  | none => rfl
+  | some inbox =>
+    have canon := framed_canonical found
+    have cut := congrArg (List.take frame.length) canon
+    change (frame ++ inboxStream.encode inbox).take frame.length =
+      ("DREGG/OBJECTIVE/INBOX/v5".toUTF8.toList ++ body).take frame.length at cut
+    rw [List.take_left' rfl, List.take_left' (by decide +kernel)] at cut
+    exact absurd cut (by decide +kernel)
+
 /-- A message with no allowance does not continue; one at the depth bound does not either. -/
 theorem sample_continues :
     (sampleMessage 10).continues = false ∧ { sampleMessage 10 with allowance := 1 }.continues = true ∧
@@ -506,18 +520,43 @@ theorem chargedBytes_covers (message : Message) (fits : message.fits = true) :
   simp only [chargedBytes, messageStream, StreamCodec.xmap, StreamCodec.product, List.length_append]
   omega
 
-/-- The coordinate preimage of an inbox: (sender, target). -/
-def key (sender target : Nat) : Bytes := StreamCodec.nat.encode sender ++ StreamCodec.nat.encode target
+/-- The pair cursor has a permanent identity independent of queue generations. -/
+def pairKey (sender target : Nat) : Bytes :=
+  StreamCodec.nat.encode sender ++ StreamCodec.nat.encode target
 
-/-- The inbox of (sender, target): a protected activity coordinate of role `inbox`. -/
-def cell (domain : Digest) (sender target : Nat) : CellId :=
-  ⟨ObjectiveActivityCell.coordinate domain .inbox (key sender target)⟩
+def generationCell (domain : Digest) (sender target : Nat) : CellId :=
+  ⟨ObjectiveActivityCell.coordinate domain .inboxGeneration (pairKey sender target)⟩
 
-/-- **Condition (a): an inbox lives at a protected coordinate**, at or above
-`reservedBase`, which the ordinary gate refuses to every other facet. -/
-theorem cell_reserved (domain : Digest) (sender target : Nat) :
-    ObjectiveActivityCell.reservedBase ≤ (cell domain sender target).value :=
-  ObjectiveActivityCell.coordinate_reserved domain .inbox (key sender target)
+/-- Physical inbox identities include the generation. No same-coordinate reopen. -/
+def key (sender target generation : Nat) : Bytes :=
+  (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat StreamCodec.nat)).encode
+    (sender, target, generation)
+
+def cell (domain : Digest) (sender target generation : Nat) : CellId :=
+  ⟨ObjectiveActivityCell.coordinate domain .inbox (key sender target generation)⟩
+
+theorem cell_reserved (domain : Digest) (sender target generation : Nat) :
+    ObjectiveActivityCell.reservedBase ≤ (cell domain sender target generation).value :=
+  ObjectiveActivityCell.coordinate_reserved domain .inbox (key sender target generation)
+
+/-- Different generations have different canonical coordinate preimages. -/
+theorem key_generation_injective (sender target : Nat) :
+    Function.Injective (key sender target) := by
+  intro a b equal
+  let stream := StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat StreamCodec.nat)
+  have decoded := congrArg stream.toLawful.decode equal
+  change stream.toLawful.decode (stream.toLawful.encode (sender, target, a)) =
+    stream.toLawful.decode (stream.toLawful.encode (sender, target, b)) at decoded
+  rw [stream.toLawful.decode_encode, stream.toLawful.decode_encode] at decoded
+  exact congrArg (fun p => p.2.2) (Option.some.inj decoded)
+
+theorem Step.generation {a b : Inbox} (step : Step a b) : b.generation = a.generation := by
+  cases step <;> rfl
+
+theorem Lawful.generation {a b : Inbox} (lawful : Lawful a b) : b.generation = a.generation := by
+  induction lawful with
+  | refl _ => rfl
+  | step first rest ih => exact ih.trans first.generation
 
 /-- The id of the `index`-th send of the turn `turn`: the message's id and its reply slot's name. -/
 def sendId (turn : TransactionId) (index : Nat) : Digest :=
@@ -545,9 +584,13 @@ def sendId (turn : TransactionId) (index : Nat) : Digest :=
 #assert_axioms v1_refuses
 #assert_axioms v2_refuses
 #assert_axioms v3_refuses v4_refuses
+#assert_axioms v5_refuses
 #assert_axioms chargedBytes_independent
 #assert_axioms chargedBytes_covers
 #assert_axioms sample_continues
 #assert_axioms cell_reserved
+#assert_axioms key_generation_injective
+#assert_axioms Step.generation
+#assert_axioms Lawful.generation
 
 end Minidregg.Kernel.Inbox

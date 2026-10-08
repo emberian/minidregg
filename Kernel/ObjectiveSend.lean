@@ -296,8 +296,11 @@ structure MessageDelivery {rootBytes : Bytes → Digest} (config : Config) (snap
     (height : Nat) (request : MessageRequest) where
   private mk ::
   inbox : Inbox.Inbox
-  readExact : readInbox snapshot (Inbox.cell config.domain request.sender request.target) = some (some inbox)
-  clean : bodyOf .package (snapshot.canonicalBytes (Inbox.cell config.domain request.sender request.target)) = none
+  readExact : readInbox snapshot (inboxCell config.domain snapshot request.sender request.target) = some (some inbox)
+  clean : bodyOf .package (snapshot.canonicalBytes (inboxCell config.domain snapshot request.sender request.target)) = none
+  generationExact : inbox.generation = inboxGeneration config.domain snapshot request.sender request.target
+  cursorExact : readInboxGeneration config.domain snapshot.canonicalBytes request.sender request.target =
+    some (inboxGeneration config.domain snapshot request.sender request.target)
   ends : inbox.sender = request.sender ∧ inbox.target = request.target
   message : Inbox.Message
   remaining : Inbox.Inbox
@@ -307,7 +310,7 @@ structure MessageDelivery {rootBytes : Bytes → Digest} (config : Config) (snap
   slotExact : readSlot config snapshot message.id = some slot
   slotNamed : slot.name = message.id
   /-- The slot answers to THIS inbox: its activity cell is the inbox the message was popped from. -/
-  activityExact : slot.activity = Inbox.cell config.domain request.sender request.target
+  activityExact : slot.activity = inboxCell config.domain snapshot request.sender request.target
   /-- The call tree as it ran. -/
   run : Outcome
   runExact : runMessage config snapshot height request.target message = run
@@ -331,7 +334,7 @@ structure MessageDelivery {rootBytes : Bytes → Digest} (config : Config) (snap
   bookExact : loadBook config snapshot = .ok book
   posted : Postings book
   batchExact : posted.batch = deliveryBatch config (logicalBook book.logical)
-    (Inbox.cell config.domain request.sender request.target).value message spent mail refunds
+    (inboxCell config.domain snapshot request.sender request.target).value message spent mail refunds
   posts : List Post
   postsExact : posts = outcome.posts config snapshot ++ mail.posts ++
     [replyPost config snapshot slot decided, posted.write config snapshot]
@@ -346,14 +349,17 @@ theorem replyPost_spec {rootBytes : Bytes → Digest} (config : Config) (snapsho
 /-- The popped inbox, as a held inbox of this turn's mail. -/
 def seedMail {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (sender target : Nat)
     (inbox remaining : Inbox.Inbox) (message : Inbox.Message)
-    (readExact : readInbox snapshot (Inbox.cell config.domain sender target) = some (some inbox))
-    (clean : bodyOf .package (snapshot.canonicalBytes (Inbox.cell config.domain sender target)) = none)
+    (readExact : readInbox snapshot (inboxCell config.domain snapshot sender target) = some (some inbox))
+    (clean : bodyOf .package (snapshot.canonicalBytes (inboxCell config.domain snapshot sender target)) = none)
     (ends : inbox.sender = sender ∧ inbox.target = target)
-    (popped : inbox.pop = some (message, remaining)) : Mail config snapshot :=
+    (popped : inbox.pop = some (message, remaining))
+    (generationExact : inbox.generation = inboxGeneration config.domain snapshot sender target)
+    (cursorExact : readInboxGeneration config.domain snapshot.canonicalBytes sender target =
+      some (inboxGeneration config.domain snapshot sender target)) : Mail config snapshot :=
   have step := (Inbox.pop_step popped).1
   have keeps := step.keeps
   ⟨[⟨sender, target, some inbox, readExact, clean, remaining, .step step (.refl _),
-      ⟨keeps.1.trans ends.1, keeps.2.1.trans ends.2⟩⟩], [], [], [], [], [],
+      ⟨keeps.1.trans ends.1, keeps.2.1.trans ends.2⟩, step.generation.trans generationExact, cursorExact⟩], [], [], [], [], [],
     ObjectiveWorkAccount.Meter.start message.envelope, (0, 0)⟩
 
 /-- **A message to a draining object waits.** The target object drains toward an
@@ -369,10 +375,13 @@ def waitsForUpgrade {rootBytes : Bytes → Digest} (config : Config) (snapshot :
 def deliverMessage {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : MessageRequest) : Except MessageRefusal (MessageDelivery config snapshot height request) :=
   if waitsForUpgrade config snapshot request.target then .error (.kernel .draining) else
-  match readExact : readInbox snapshot (Inbox.cell config.domain request.sender request.target) with
+  if cursorExact : readInboxGeneration config.domain snapshot.canonicalBytes request.sender request.target =
+      some (inboxGeneration config.domain snapshot request.sender request.target) then
+  match readExact : readInbox snapshot (inboxCell config.domain snapshot request.sender request.target) with
   | none | some none => .error (.noInbox request.sender request.target)
   | some (some inbox) =>
-  if clean : bodyOf .package (snapshot.canonicalBytes (Inbox.cell config.domain request.sender request.target)) = none then
+  if generationExact : inbox.generation = inboxGeneration config.domain snapshot request.sender request.target then
+  if clean : bodyOf .package (snapshot.canonicalBytes (inboxCell config.domain snapshot request.sender request.target)) = none then
   if ends : inbox.sender = request.sender ∧ inbox.target = request.target then
   match popped : inbox.pop with
   | none => .error (.empty request.sender request.target)
@@ -382,10 +391,10 @@ def deliverMessage {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
   | none => .error (.replySlot "missing")
   | some slot =>
   if slotNamed : slot.name = message.id then
-  if activityExact : slot.activity = Inbox.cell config.domain request.sender request.target then
+  if activityExact : slot.activity = inboxCell config.domain snapshot request.sender request.target then
   match runExact : runMessage config snapshot height request.target message with
   | run =>
-  let seed := seedMail config snapshot request.sender request.target inbox remaining message readExact clean ends popped
+  let seed := seedMail config snapshot request.sender request.target inbox remaining message readExact clean ends popped generationExact cursorExact
   match continued : continueMessage config snapshot message seed run with
   | (outcome, sent, spent) =>
   match decidedExact : AnswerSlot.decideDelivery slot message.id message.sender height outcome.decision with
@@ -397,7 +406,7 @@ def deliverMessage {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
   | .error reason => .error (.kernel reason)
   | .ok book =>
   let batch := deliveryBatch config (logicalBook book.logical)
-    (Inbox.cell config.domain request.sender request.target).value message spent mail refunds
+    (inboxCell config.domain snapshot request.sender request.target).value message spent mail refunds
   match postedExact : postings book batch with
   | .error reason => .error (.kernel reason)
   | .ok posted =>
@@ -406,7 +415,7 @@ def deliverMessage {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
       split at postedExact
       · cases postedExact; rfl
       · cases postedExact
-    .ok ⟨inbox, readExact, clean, ends, message, remaining, popped, named, slot, slotExact, slotNamed, activityExact,
+    .ok ⟨inbox, readExact, clean, generationExact, cursorExact, ends, message, remaining, popped, named, slot, slotExact, slotNamed, activityExact,
       run, runExact, seed, ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩, outcome, sent, spent, continued, decided, decidedExact, mail,
       refunds, forwarded, book, bookExact, posted, batchExact, _, rfl⟩
   else .error (.replySlot "not this inbox's")
@@ -414,6 +423,8 @@ def deliverMessage {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
   else .error (.staleHead message.id)
   else .error (.noInbox request.sender request.target)
   else .error (.kernel (.packageSource "an inbox coordinate holds a package"))
+  else .error (.noInbox request.sender request.target)
+  else .error (.noInbox request.sender request.target)
 
 def MessageDelivery.guards {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : MessageRequest} (delivered : MessageDelivery config snapshot height request) :
@@ -473,7 +484,7 @@ theorem MessageDelivery.debits_only_purse {rootBytes : Bytes → Digest} {config
     {snapshot : Snapshot rootBytes} {height : Nat} {request : MessageRequest}
     (delivered : MessageDelivery config snapshot height request) :
     ∀ op ∈ delivered.posted.batch.operations,
-      debited op = some (Inbox.cell config.domain request.sender request.target).value := by
+      debited op = some (inboxCell config.domain snapshot request.sender request.target).value := by
   rw [delivered.batchExact]
   intro op member
   simp only [deliveryBatch, deliveryOperations] at member
@@ -843,8 +854,10 @@ theorem Mail.inboxes_bounded {rootBytes : Bytes → Digest} {config : Config} {s
     (mail : Mail config snapshot) :
     ∀ held ∈ mail.inboxes,
       (held.read.getD (Inbox.Inbox.empty held.sender held.target)).messages.length ≤ Inbox.bound →
-        held.now.messages.length ≤ Inbox.bound :=
-  fun held _ within => held.lawful.keeps.2.2.2 within
+        held.now.messages.length ≤ Inbox.bound := by
+  intro held _ within
+  apply held.lawful.keeps.2.2.2
+  cases read : held.read <;> simpa [read, Inbox.Inbox.empty] using within
 
 /-- **A pop frees the message**: the inbox the delivery posts holds exactly one message fewer. -/
 theorem MessageDelivery.pop_frees_message {rootBytes : Bytes → Digest} {config : Config}
@@ -884,21 +897,27 @@ theorem MessageDelivery.failed_mail {rootBytes : Bytes → Digest} {config : Con
   simp only [Prod.mk.injEq] at forwarded
   exact ⟨forwarded.1.symm, forwarded.2.symm⟩
 
-/-- **A failed delivery leaves behind exactly three posts**: the popped, shortened inbox,
-its reply slot (decided `broken`, or retired when its sender had stopped waiting:
+/-- **A failed delivery leaves behind exactly four posts**: the popped, shortened inbox,
+its permanent pair cursor, its reply slot (decided `broken`, or retired when its sender had stopped waiting:
 `replyPost`), and the Book. No cell is opened, no state cell written. -/
 theorem MessageDelivery.failed_delivery_posts {rootBytes : Bytes → Digest} {config : Config}
     {snapshot : Snapshot rootBytes} {height : Nat} {request : MessageRequest}
     (delivered : MessageDelivery config snapshot height request) {reason : String}
     (failed : delivered.outcome = .failed reason) :
     delivered.posts =
-      [postAt snapshot (Inbox.cell config.domain request.sender request.target) (inboxImage delivered.remaining),
+      [postAt snapshot (inboxCell config.domain snapshot request.sender request.target) (inboxImage delivered.remaining),
+        postAt snapshot (Inbox.generationCell config.domain request.sender request.target)
+          (inboxGenerationImage request.sender request.target
+            (delivered.remaining.generation + if delivered.remaining.messages.isEmpty then 1 else 0)),
         replyPost config snapshot delivered.slot delivered.decided, delivered.posted.write config snapshot] := by
   obtain ⟨sameMail, _⟩ := delivered.failed_mail failed
   have noPosts : delivered.outcome.posts config snapshot = [] := by rw [failed]; rfl
   obtain ⟨inboxes, slots, _, _, closed, _⟩ := delivered.seedExact
   have seedPosts : delivered.seed.posts =
-      [postAt snapshot (Inbox.cell config.domain request.sender request.target) (inboxImage delivered.remaining)] := by
+      [postAt snapshot (inboxCell config.domain snapshot request.sender request.target) (inboxImage delivered.remaining),
+        postAt snapshot (Inbox.generationCell config.domain request.sender request.target)
+          (inboxGenerationImage request.sender request.target
+            (delivered.remaining.generation + if delivered.remaining.messages.isEmpty then 1 else 0))] := by
     cases hl : delivered.seed.inboxes with
     | nil => rw [hl] at inboxes; cases inboxes
     | cons first rest =>
@@ -907,7 +926,7 @@ theorem MessageDelivery.failed_delivery_posts {rootBytes : Bytes → Digest} {co
       obtain ⟨⟨hs, ht, hn⟩, restNil⟩ := inboxes
       unfold Mail.posts
       rw [hl, slots, restNil, closed]
-      simp [HeldInbox.cell, hs, ht, hn]
+      simp [HeldInbox.cell, HeldInbox.cursorPost, HeldInbox.nextGeneration, hs, ht, hn]
   rw [delivered.postsExact, noPosts, sameMail, seedPosts]
   simp
 
@@ -1045,12 +1064,12 @@ theorem MessageDelivery.escrow_conserves {rootBytes : Bytes → Digest} {config 
     {snapshot : Snapshot rootBytes} {height : Nat} {request : MessageRequest}
     (delivered : MessageDelivery config snapshot height request) :
     postedAmount delivered.posted.batch.operations +
-        retained (Inbox.cell config.domain request.sender request.target).value delivered.flows =
+        retained (inboxCell config.domain snapshot request.sender request.target).value delivered.flows =
       delivered.message.escrow + (delivered.slot.queued.map Inbox.Message.escrow).sum ∧
     delivered.spent ≤ delivered.message.allowance := by
   rw [delivered.batchExact]
   simp only [deliveryBatch, deliveryOperations, MessageDelivery.flows, postedAmount_append, retained_append]
-  set purse := (Inbox.cell config.domain request.sender request.target).value
+  set purse := (inboxCell config.domain snapshot request.sender request.target).value
   obtain ⟨sentSum, within, _, _⟩ := continueMessage_credits delivered.continued
   have seedNil : delivered.seed.credits = [] := delivered.seedExact.2.2.1
   rw [seedNil] at sentSum
@@ -1129,7 +1148,7 @@ theorem escrow_conservation {rootBytes : Bytes → Digest} {config : Config} {sn
       ∃ purse, next.credits = mail.credits ++ [(purse, message.escrow)]) ∧
     (∀ (height : Nat) (request : MessageRequest) (delivered : MessageDelivery config snapshot height request),
       postedAmount delivered.posted.batch.operations +
-          retained (Inbox.cell config.domain request.sender request.target).value delivered.flows =
+          retained (inboxCell config.domain snapshot request.sender request.target).value delivered.flows =
         delivered.message.escrow + (delivered.slot.queued.map Inbox.Message.escrow).sum ∧
       delivered.spent ≤ delivered.message.allowance) ∧
     (∀ (mail next : Mail config snapshot) (height : Nat) (control : Control),
@@ -1198,6 +1217,13 @@ theorem payer_inbox_image (config : Config) (bytesAt : CellId → Bytes) (inbox 
     (queued : inbox.messages ≠ []) (record : ObjectRecord) (held : objectAt config bytesAt ⟨inbox.sender⟩ = some record) :
     payerOfBytes config bytesAt (inboxImage inbox) = some record.payer := by
   simp [payerOfBytes, inboxImage, queued, payloadOf_image, payerRoute, routePayer, Inbox.roundTrip, held]
+
+theorem payer_inboxGeneration_image (config : Config) (bytesAt : CellId → Bytes)
+    (sender target generation : Nat) (record : ObjectRecord)
+    (held : objectAt config bytesAt ⟨sender⟩ = some record) :
+    payerOfBytes config bytesAt (inboxGenerationImage sender target generation) = some record.payer := by
+  simp [inboxGenerationImage, payerOfBytes, payloadOf_image, payerRoute, routePayer,
+    Inbox.roundTrip, Inbox.Inbox.empty, held]
 
 /-- **An emptied inbox retains nothing**: its image is the retired one, with no payload. -/
 theorem inboxImage_empty (inbox : Inbox.Inbox) (empty : inbox.messages = []) :
@@ -1293,6 +1319,11 @@ theorem Mail.cells_have_payer {rootBytes : Bytes → Digest} {config : Config} {
     rw [objectAt_afterPosts config snapshot posts ⟨sender⟩ (fun post member => objectsUnwritten post member _)]
     exact Option.isSome_iff_exists.mp isSome
   intro post member live
+  rcases List.mem_append.mp member with member | inCursor
+  swap
+  · obtain ⟨held, hmem, rfl⟩ := List.mem_map.mp inCursor
+    obtain ⟨record, hrec⟩ := ownedAfter held.sender (owned held hmem)
+    exact option_isSome_of_eq (payer_inboxGeneration_image config _ held.sender held.target held.nextGeneration record hrec)
   rcases List.mem_append.mp member with front | inClosed
   swap
   · obtain ⟨closed, hmem, rfl⟩ := List.mem_map.mp inClosed
@@ -1332,7 +1363,7 @@ theorem Mail.empty_inbox_retired {rootBytes : Bytes → Digest} {config : Config
   intro held member empty
   refine ⟨?_, fun closable => ?_⟩
   · have posted : postAt snapshot held.cell (inboxImage held.now) ∈ mail.posts :=
-      List.mem_append.mpr (.inl (List.mem_append.mpr (.inl (List.mem_map.mpr ⟨held, member, rfl⟩))))
+      List.mem_append.mpr (.inl (List.mem_append.mpr (.inl (List.mem_append.mpr (.inl (List.mem_map.mpr ⟨held, member, rfl⟩))))))
     rwa [(inboxImage_empty held.now empty).1] at posted
   · simp only [Mail.deregistrations, List.mem_filter, Option.isNone_iff_eq_none]
     refine ⟨List.mem_dedup.mpr (List.mem_map.mpr ⟨held, List.mem_filter.mpr ⟨member, by simp [empty]⟩, rfl⟩), closable⟩
@@ -1515,6 +1546,7 @@ theorem MessageDelivery.retention_cells_have_payer {rootBytes : Bytes → Digest
 #assert_axioms MessageDelivery.retention_cells_have_payer
 #assert_axioms option_isSome_of_eq
 #assert_axioms payer_inbox_image
+#assert_axioms payer_inboxGeneration_image
 #assert_axioms payer_slot_image_delivery
 #assert_axioms Mail.empty_inbox_retired
 #assert_axioms MessageDelivery.empty_inbox_retired

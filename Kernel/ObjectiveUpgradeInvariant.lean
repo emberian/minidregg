@@ -986,6 +986,11 @@ theorem stateful_preserves {rootBytes : Bytes → Digest} {config : Config} {sna
 theorem mail_kinded {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     (mail : ObjectiveCall.Mail config snapshot) : ∀ post ∈ mail.posts, Silent snapshot post := by
   intro post member
+  rcases List.mem_append.mp member with member | inCursor
+  swap
+  · obtain ⟨held, _, rfl⟩ := List.mem_map.mp inCursor
+    refine ⟨.inboxGeneration, by decide, by decide, by decide, by decide, held.cursor_role, ?_⟩
+    exact payloadOf_image_role _ _ _
   rcases List.mem_append.mp member with front | inClosed
   · rcases List.mem_append.mp front with inInbox | inSlot
     · obtain ⟨held, _, rfl⟩ := List.mem_map.mp inInbox

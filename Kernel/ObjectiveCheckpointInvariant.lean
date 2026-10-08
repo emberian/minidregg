@@ -1364,12 +1364,18 @@ theorem mail_decides_nothing {rootBytes : Bytes → Digest} {config : Config} {s
     (mail : ObjectiveCall.Mail config snapshot) (retired : ∀ closed ∈ mail.closed, closed.decided = none) :
     ∀ post ∈ mail.posts, ¬ DecidesDelivery post.bytes := by
   intro post member
+  rcases List.mem_append.mp member with member | inCursor
+  swap
+  · obtain ⟨held, _, rfl⟩ := List.mem_map.mp inCursor
+    exact not_decidesDelivery_image (role := .inboxGeneration)
+      (key := Inbox.pairKey held.sender held.target)
+      (body := Inbox.encode (Inbox.Inbox.empty held.sender held.target held.nextGeneration)) rfl (by decide)
   rcases List.mem_append.mp member with front | inClosed
   · rcases List.mem_append.mp front with inInbox | inSlot
     · obtain ⟨held, _, rfl⟩ := List.mem_map.mp inInbox
       by_cases empty : held.now.messages = []
       · exact not_decidesDelivery_of_payload_none (by simp [postAt, inboxImage, empty, payloadOf_retired])
-      · exact not_decidesDelivery_image (role := .inbox) (key := Inbox.key held.now.sender held.now.target)
+      · exact not_decidesDelivery_image (role := .inbox) (key := Inbox.key held.now.sender held.now.target held.now.generation)
           (body := Inbox.encode held.now) (by simp [postAt, inboxImage, empty]) (by decide)
     · obtain ⟨held, _, rfl⟩ := List.mem_map.mp inSlot
       exact not_decidesDelivery_slot (slot := held.now) rfl
@@ -1384,6 +1390,10 @@ theorem mail_inboxes_hold {rootBytes : Bytes → Digest} {config : Config} {snap
     (mail : ObjectiveCall.Mail config snapshot) (none_ : mail.inboxes = []) :
     ∀ post ∈ mail.posts, ¬ HoldsInbox post.bytes := by
   intro post member
+  rcases List.mem_append.mp member with member | inCursor
+  swap
+  · rw [none_] at inCursor
+    cases inCursor
   rcases List.mem_append.mp member with front | inClosed
   · rcases List.mem_append.mp front with inInbox | inSlot
     · rw [none_] at inInbox; cases inInbox

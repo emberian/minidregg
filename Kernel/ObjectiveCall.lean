@@ -1212,15 +1212,18 @@ structure HeldInbox {rootBytes : Bytes → Digest} (config : Config) (snapshot :
   sender : Nat
   target : Nat
   read : Option Inbox.Inbox
-  readExact : readInbox snapshot (Inbox.cell config.domain sender target) = some read
-  clean : bodyOf .package (snapshot.canonicalBytes (Inbox.cell config.domain sender target)) = none
+  readExact : readInbox snapshot (inboxCell config.domain snapshot sender target) = some read
+  clean : bodyOf .package (snapshot.canonicalBytes (inboxCell config.domain snapshot sender target)) = none
   now : Inbox.Inbox
-  lawful : Inbox.Lawful (read.getD (Inbox.Inbox.empty sender target)) now
+  lawful : Inbox.Lawful (read.getD (Inbox.Inbox.empty sender target (inboxGeneration config.domain snapshot sender target))) now
   ends : now.sender = sender ∧ now.target = target
+  generationExact : now.generation = inboxGeneration config.domain snapshot sender target
+  cursorExact : readInboxGeneration config.domain snapshot.canonicalBytes sender target =
+    some (inboxGeneration config.domain snapshot sender target)
 
 def HeldInbox.cell {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     (held : HeldInbox config snapshot) : CellId :=
-  Inbox.cell config.domain held.sender held.target
+  inboxCell config.domain snapshot held.sender held.target
 
 /-- A reply slot this turn writes, open: one it opens for a message entering an
 inbox (`read = none`), or an open delivery slot it read and queues a send on. -/
@@ -1296,16 +1299,21 @@ def holdInbox {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snaps
   match mail.inboxes.find? (fun held => held.sender == sender && held.target == target) with
   | some held => .ok (held, mail.inboxes.filter (fun other => !(other.sender == sender && other.target == target)))
   | none =>
-    match readExact : readInbox snapshot (Inbox.cell config.domain sender target) with
+    let generation := inboxGeneration config.domain snapshot sender target
+    if cursorExact : readInboxGeneration config.domain snapshot.canonicalBytes sender target = some generation then
+    match readExact : readInbox snapshot (inboxCell config.domain snapshot sender target) with
     | none => .error (.inboxCodec sender target)
     | some read =>
-      if ends : (read.getD (Inbox.Inbox.empty sender target)).sender = sender ∧
-          (read.getD (Inbox.Inbox.empty sender target)).target = target then
-        if clean : bodyOf .package (snapshot.canonicalBytes (Inbox.cell config.domain sender target)) = none then
-          .ok (⟨sender, target, read, readExact, clean, read.getD (Inbox.Inbox.empty sender target), .refl _, ends⟩,
+      let now := read.getD (Inbox.Inbox.empty sender target generation)
+      if generationExact : now.generation = generation then
+      if ends : now.sender = sender ∧ now.target = target then
+        if clean : bodyOf .package (snapshot.canonicalBytes (inboxCell config.domain snapshot sender target)) = none then
+          .ok (⟨sender, target, read, readExact, clean, now, .refl _, ends, generationExact, cursorExact⟩,
             mail.inboxes)
-        else .error (.packageCell (Inbox.cell config.domain sender target).value)
+        else .error (.packageCell (inboxCell config.domain snapshot sender target).value)
       else .error (.inboxCodec sender target)
+      else .error (.inboxCodec sender target)
+    else .error (.inboxCodec sender target)
 
 /-- Open the reply slot of a message entering the inbox `inbox`: its cell must
 hold nothing (no slot, never retired) and no slot of this turn may name it. -/
@@ -1464,7 +1472,8 @@ def Mail.send {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snaps
       have keeps := (Inbox.push_step pushed).keeps
       let updated : HeldInbox config snapshot :=
         ⟨held.sender, held.target, held.read, held.readExact, held.clean, next,
-          held.lawful.snoc (Inbox.push_step pushed), ⟨keeps.1.trans held.ends.1, keeps.2.1.trans held.ends.2⟩⟩
+          held.lawful.snoc (Inbox.push_step pushed), ⟨keeps.1.trans held.ends.1, keeps.2.1.trans held.ends.2⟩,
+          (Inbox.push_step pushed).generation.trans held.generationExact, held.cursorExact⟩
       .ok { mail with
         inboxes := others ++ [updated]
         slots := mail.slots ++ [slot]
@@ -1668,7 +1677,8 @@ def Mail.control {rootBytes : Bytes → Digest} {config : Config} {snapshot : Sn
         have keeps := step.keeps
         let updated : HeldInbox config snapshot :=
           ⟨inbox.sender, inbox.target, inbox.read, inbox.readExact, inbox.clean, next, inbox.lawful.snoc step,
-            ⟨keeps.1.trans inbox.ends.1, keeps.2.1.trans inbox.ends.2⟩⟩
+            ⟨keeps.1.trans inbox.ends.1, keeps.2.1.trans inbox.ends.2⟩,
+            step.generation.trans inbox.generationExact, inbox.cursorExact⟩
         have named : decided.name = held.name := by
           rw [(AnswerSlot.cancelDelivery_spec cancelled).2.2]; exact held.named
         let closing : ClosedSlot config snapshot :=
@@ -1716,13 +1726,21 @@ theorem controlInbox_spec {rootBytes : Bytes → Digest} {config : Config} {snap
             have hits := List.find?_some hit
             simp only [Bool.and_eq_true, beq_iff_eq] at hits
             exact hits
-          · split at hold
-            · cases hold
-            · split at hold
-              · split at hold
-                · cases hold; exact ⟨rfl, rfl⟩
-                · cases hold
+          · dsimp only at hold
+            by_cases cursor : readInboxGeneration config.domain snapshot.canonicalBytes sender target =
+                some (inboxGeneration config.domain snapshot sender target)
+            · rw [dif_pos cursor] at hold
+              split at hold
               · cases hold
+              · split at hold
+                · split at hold
+                  · split at hold
+                    · cases hold; exact ⟨rfl, rfl⟩
+                    · cases hold
+                  · cases hold
+                · cases hold
+            · rw [dif_neg cursor] at hold
+              cases hold
         rw [sides.1, sides.2]; exact hold
       · cases ok
 
@@ -1959,13 +1977,41 @@ theorem Mail.control_cancel_withdraws {rootBytes : Bytes → Digest} {config : C
       cases refused
     · cases ok; rfl
 
-/-- The posts of the mail: every held inbox, every held slot and every closed slot,
-against the roots the turn read them at. -/
+/-- Next generation after this turn: retirement advances it exactly once. -/
+def HeldInbox.nextGeneration {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    (held : HeldInbox config snapshot) : Nat :=
+  held.now.generation + if held.now.messages.isEmpty then 1 else 0
+
+def HeldInbox.cursorPost {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    (held : HeldInbox config snapshot) : Post :=
+  postAt snapshot (Inbox.generationCell config.domain held.sender held.target)
+    (inboxGenerationImage held.sender held.target held.nextGeneration)
+
+theorem HeldInbox.cursor_role {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    (held : HeldInbox config snapshot) :
+    ∀ payload, payloadOf (snapshot.canonicalBytes (Inbox.generationCell config.domain held.sender held.target)) =
+      some payload → payload.role = .inboxGeneration :=
+  readInboxGeneration_role _ _ _ _ _ held.cursorExact
+
+theorem HeldInbox.cursor_clean {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    (held : HeldInbox config snapshot) :
+    bodyOf .package (snapshot.canonicalBytes (Inbox.generationCell config.domain held.sender held.target)) = none := by
+  unfold bodyOf
+  cases found : payloadOf (snapshot.canonicalBytes (Inbox.generationCell config.domain held.sender held.target)) with
+  | none => rfl
+  | some payload => simp [held.cursor_role payload found]
+
+/-- Queue and cursor update are one atomic intent; no cursor is retired. -/
 def Mail.posts {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     (mail : Mail config snapshot) : List Post :=
-  mail.inboxes.map (fun held => postAt snapshot held.cell (inboxImage held.now)) ++
+  (mail.inboxes.map (fun held => postAt snapshot held.cell (inboxImage held.now)) ++
     mail.slots.map (fun held => slotPost config snapshot held.now) ++
-    mail.closed.map ClosedSlot.post
+    mail.closed.map ClosedSlot.post) ++ mail.inboxes.map HeldInbox.cursorPost
+
+theorem HeldInbox.empty_advances {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    (held : HeldInbox config snapshot) (empty : held.now.messages = []) :
+    held.nextGeneration = inboxGeneration config.domain snapshot held.sender held.target + 1 := by
+  simp [HeldInbox.nextGeneration, empty, held.generationExact]
 
 /-- The purses of inboxes the mail opens: registered on the Book in its batch. -/
 def Mail.registrations {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -1976,7 +2022,7 @@ def Mail.registrations {rootBytes : Bytes → Digest} {config : Config} {snapsho
 (cv 01a113fe-1390): each one the Book admits closing once the batch's operations ran
 (kernel-held, registered, no balance in any asset, no lease naming it). A purse that cannot
 close yet (it holds something a stranger paid in, or a lease names it) stays registered,
-and a later send to the pair reuses it. The inbox cell itself is retired by its image
+and remains attached to that permanently retired generation. The next send opens a fresh-generation purse. The inbox cell itself is retired by its image
 (`inboxImage` of an empty inbox). -/
 def Mail.deregistrations {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     (mail : Mail config snapshot) (book : Book) (registered : List AccountId) (operations : List Operation) :
@@ -2039,13 +2085,19 @@ theorem Mail.posts_shape {rootBytes : Bytes → Digest} {config : Config} {snaps
       ((∃ role key body, role ≠ .record ∧ post = postAt snapshot cell (image role key body)) ∨
         post = postAt snapshot cell retiredImage) := by
   intro post member
+  rcases List.mem_append.mp member with member | inCursor
+  swap
+  · obtain ⟨held, _, rfl⟩ := List.mem_map.mp inCursor
+    exact ⟨Inbox.generationCell config.domain held.sender held.target, held.cursor_clean,
+      .inl ⟨.inboxGeneration, Inbox.pairKey held.sender held.target,
+        Inbox.encode (Inbox.Inbox.empty held.sender held.target held.nextGeneration), by decide, rfl⟩⟩
   rcases List.mem_append.mp member with front | inClosed
   · rcases List.mem_append.mp front with inInbox | inSlot
     · obtain ⟨held, _, rfl⟩ := List.mem_map.mp inInbox
       refine ⟨held.cell, held.clean, ?_⟩
       by_cases empty : held.now.messages = []
       · exact .inr (by simp [inboxImage, empty])
-      · exact .inl ⟨.inbox, Inbox.key held.now.sender held.now.target, Inbox.encode held.now,
+      · exact .inl ⟨.inbox, Inbox.key held.now.sender held.now.target held.now.generation, Inbox.encode held.now,
           (by decide : ObjectiveActivityCell.Role.inbox ≠ .record), by simp [inboxImage, empty]⟩
     · obtain ⟨held, _, rfl⟩ := List.mem_map.mp inSlot
       refine ⟨AnswerSlot.cell config.domain held.name, held.clean, .inl ⟨.slot, AnswerSlot.key held.now.name,
@@ -2070,10 +2122,10 @@ head, at that cell, under that inbox's own key. -/
 theorem Mail.inboxes_lawful {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     (mail : Mail config snapshot) :
     ∀ held ∈ mail.inboxes,
-      readInbox snapshot (Inbox.cell config.domain held.sender held.target) = some held.read ∧
-      Inbox.Lawful (held.read.getD (Inbox.Inbox.empty held.sender held.target)) held.now ∧
+      readInbox snapshot (inboxCell config.domain snapshot held.sender held.target) = some held.read ∧
+      Inbox.Lawful (held.read.getD (Inbox.Inbox.empty held.sender held.target (inboxGeneration config.domain snapshot held.sender held.target))) held.now ∧
       postAt snapshot held.cell (inboxImage held.now) =
-        postAt snapshot (Inbox.cell config.domain held.now.sender held.now.target) (inboxImage held.now) := by
+        postAt snapshot (inboxCell config.domain snapshot held.now.sender held.now.target) (inboxImage held.now) := by
   intro held _
   refine ⟨held.readExact, held.lawful, ?_⟩
   rw [held.ends.1, held.ends.2]; rfl
@@ -3842,6 +3894,7 @@ theorem invocation_delegated_authority {rootBytes : Bytes → Digest} {config : 
   exact each w member
 
 #assert_axioms Journal.posts_state
+#assert_axioms HeldInbox.cursor_role HeldInbox.cursor_clean HeldInbox.empty_advances
 #assert_axioms Invocation.posts_shape
 #assert_axioms touch_read
 #assert_axioms frameReturn_read

@@ -153,7 +153,9 @@ schema reference version (`DeployedCellRegistry.declaredEffectSchemaRef`);
 either moves without this value. A change to any component changes the seed
 frame and refuses every older Store by name. -/
 def StoreEpoch.current : StoreEpoch :=
-  ⟨"state-key/tagged-v4", "schema-refs/v5", logTagLabel,
+  -- REJECT/RECORDED-FAILURE v2 and generation-addressed inbox identifiers.
+  -- Previous Stores must re-genesis; the old coordinate is never reopened.
+  ⟨"state-key/tagged-v4", "schema-refs/v6", logTagLabel,
     "history/mmr-v1;index/trie-v1;checkpoint/v4", "commands/v2"⟩
 
 /-- The label carried in the seed frame: every component, `;`-separated (the
@@ -387,7 +389,7 @@ def labelSpentMap : String :=
 accumulator), never read as this Host's. -/
 theorem seedEpoch_spentMap_refused (rest : List UInt8) :
     (SeedEpoch.ofBytes (bytesStream.encode (labelledFrame labelSpentMap) ++ rest)).refusal =
-      some "this Store was born in another epoch (log tags: Store DREGG/NATIVE-HOST/LOG-TAG/v3, this Host DREGG/NATIVE-HOST/LOG-TAG/v4; history accumulator: Store history/mmr-v1;spent/trie-v1;checkpoint/v3, this Host history/mmr-v1;index/trie-v1;checkpoint/v4); re-genesis the world" := by
+      some "this Store was born in another epoch (cell schema references: Store schema-refs/v5, this Host schema-refs/v6; log tags: Store DREGG/NATIVE-HOST/LOG-TAG/v3, this Host DREGG/NATIVE-HOST/LOG-TAG/v4; history accumulator: Store history/mmr-v1;spent/trie-v1;checkpoint/v3, this Host history/mmr-v1;index/trie-v1;checkpoint/v4); re-genesis the world" := by
   rw [seedEpoch_ofBytes_labelled]
   native_decide
 

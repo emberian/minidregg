@@ -439,7 +439,7 @@ def slotJson (slot : AnswerSlot.Slot) : Json :=
 
 def inboxJson (inbox : Inbox.Inbox) : Json :=
   .mkObj [("sender", decimal inbox.sender), ("target", decimal inbox.target), ("head", decimal inbox.head),
-    ("tail", decimal inbox.tail), ("messages", Json.arr (inbox.messages.map messageJson).toArray)]
+    ("tail", decimal inbox.tail), ("generation", decimal inbox.generation), ("messages", Json.arr (inbox.messages.map messageJson).toArray)]
 
 def cellJson (domain : Digest) (cell : Nat) (root : Digest) (bytes : List UInt8) : Json :=
   let described : List (String × Json) :=
@@ -486,6 +486,10 @@ def cellJson (domain : Digest) (cell : Nat) (root : Digest) (bytes : List UInt8)
       | .inbox => match Inbox.decode payload.body with
         | some inbox => [("kind", "inbox"), ("inbox", inboxJson inbox), ("purseAccount", decimal cell)]
         | none => [("kind", "inbox-undecodable")]
+      | .inboxGeneration => match Inbox.decode payload.body with
+        | some cursor => [("kind", "inbox-generation"), ("generation", decimal cursor.generation),
+            ("sender", decimal cursor.sender), ("target", decimal cursor.target)]
+        | none => [("kind", "inbox-generation-undecodable")]
       | .domain => match ObjectiveActivity.decodeDomain payload.body with
         | some found => [("kind", "invariant-domain"),
             ("members", .arr (found.members.map fun member => decimal member.value).toArray),
@@ -557,14 +561,16 @@ def packageCellOf (domain : Digest) (pin : Nat) : Nat := (ObjectiveActivity.pack
 def recordCellOf (domain : Digest) (object transaction : Nat) : Nat :=
   (ObjectiveActivity.recordCell domain ⟨object⟩ (ObjectiveActivity.activityId ⟨object⟩ ⟨transaction⟩)).value
 
-def inboxCellOf (domain : Digest) (sender target : Nat) : Nat := (Inbox.cell domain sender target).value
+def inboxCellOf (domain : Digest) (sender target generation : Nat) : Nat :=
+  (Inbox.cell domain sender target generation).value
 def slotCellOf (domain : Digest) (name : Nat) : Nat := (AnswerSlot.cell domain ⟨name⟩).value
 
 def viewCells (domain : Digest) (request : ViewRequest) : List Nat :=
   request.cells ++ request.objects.map (stateCellOf domain) ++ request.objects.map (objectCellOf domain) ++
     request.pins.map (packageCellOf domain) ++
     request.births.map (fun (object, transaction) => recordCellOf domain object transaction) ++
-    request.inboxes.map (fun (sender, target) => inboxCellOf domain sender target) ++
+    request.inboxes.flatMap (fun (sender, target) =>
+      [inboxCellOf domain sender target 0, (Inbox.generationCell domain sender target).value]) ++
     request.slots.map (slotCellOf domain)
 
 def viewJson (domain : Digest) (asset : Nat) (request : ViewRequest) (view : NativeHost.ActivityView) : Json :=
@@ -590,8 +596,15 @@ def viewJson (domain : Digest) (asset : Nat) (request : ViewRequest) (view : Nat
           [("frontEnd", .mkObj [("replayBytes", decimal replayBytes), ("coreBytes", decimal coreBytes)])]
         | none => [])).toArray),
     ("inboxes", Json.arr (request.inboxes.map fun (sender, target) =>
+      let bytesAt := fun (cell : DurableDataIntent.CellId) => ((view.cells.find? fun (id, _, _) => id == cell.value).map
+        fun (_, _, bytes) => bytes).getD []
+      let generation := (ObjectiveActivity.readInboxGeneration domain bytesAt sender target).getD 0
       .mkObj [("sender", decimal sender), ("target", decimal target),
-        ("cell", decimal (inboxCellOf domain sender target))]).toArray),
+        ("cell", decimal (inboxCellOf domain sender target generation)),
+        ("generation", decimal generation),
+        ("generationCell", decimal (Inbox.generationCell domain sender target).value),
+        ("lastRetiredCell", if generation = 0 then .null else
+          decimal (inboxCellOf domain sender target (generation - 1)))]).toArray),
     ("slots", Json.arr (request.slots.map fun name =>
       .mkObj [("name", decimal name), ("cell", decimal (slotCellOf domain name))]).toArray),
     ("limits", .mkObj [("extractTicks", match view.extractTicks with

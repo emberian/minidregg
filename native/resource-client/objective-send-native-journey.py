@@ -206,11 +206,25 @@ try:
         r = value.get('report') or {}
         return int(r['value']) if r.get('tag') == 'natural' else None
 
+    retired_inboxes = {}
+
     def inbox(sender, target, label):
         """The inbox (sender, target) and its purse, with the sponsor's, the second's and the collector's balances."""
         first = w.view(label + '-cell', {'inboxes': [{'sender': O[sender], 'target': O[target]}]})
-        cell = first['inboxes'][0]['cell']
+        current = first['inboxes'][0]
+        cell = current['cell']
+        current_bytes = w.cell_of(first, cell)
+        if current_bytes.get('kind') == 'absent' and current.get('lastRetiredCell') is not None:
+            cell = current['lastRetiredCell']
+        if current_bytes.get('kind') == 'inbox' and (sender, target) in retired_inboxes:
+            old_cell, old_generation = retired_inboxes[(sender, target)]
+            w.check(label + '-fresh-generation', current['cell'] != old_cell
+                    and int(current['generation']) > old_generation
+                    and current_bytes.get('atCoordinate') is True,
+                    {'old': old_cell, 'current': current['cell'], 'generation': current['generation']})
         v = w.view(label, {'cells': [cell], 'accounts': [cell, w.SPONSOR_ACCOUNT, w.SECOND, w.COLLECTOR]})
+        if w.cell_of(v, cell).get('kind') == 'retired':
+            retired_inboxes[(sender, target)] = (cell, int(current['generation']) - 1)
         held = w.cell_of(v, cell).get('inbox') or {'head': '0', 'tail': '0', 'messages': []}
         return {'cell': cell, 'head': int(held['head']), 'ids': [m['id'] for m in held['messages']],
                 'retired': w.cell_of(v, cell).get('kind') == 'retired',
