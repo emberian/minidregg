@@ -124,9 +124,11 @@ mark "hosted grain born: parent $TASK owner 8 worker 9, tool $TOOL_TASK owner 9"
 # The host subject grants the worker subject its parent-witness capability
 # through the ordinary workspace client: the child lifetime and ancestry come
 # from the signed parent capability head, and its ID from the namespace.
+# e7d2fb9c00a5: these genesis records commit to no next key; initialization must
+# explicitly select --no-prerotation even though keygen made local next keys.
 "$MINI" workspace --action init --host "$HOST" --config "$CONFIG" --socket "$SOCK" \
   --key "$RUN/keys/hermes-host.key" --subject 8 --namespace-root "$ROOT/namespace" \
-  --dir "$RUN/host-workspace" >/dev/null
+  --no-prerotation --dir "$RUN/host-workspace" >/dev/null
 "$MINI" workspace --action import --dir "$RUN/host-workspace" --name parent --kind object \
   --target "$TASK" --observe-capability 8761 --control-capability 8762 >/dev/null
 jq -n '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"parent",
@@ -173,7 +175,7 @@ H=$RUN/hermes
 mkdir -m 700 "$H" "$H/state" "$H/worker-work" "$H/worker-runtime" "$H/launcher"
 "$MINI" workspace --action init --host "$HOST" --config "$CONFIG" --socket "$SOCK" \
   --key "$RUN/keys/hermes.key" --subject 9 --namespace-root "$ROOT/namespace" \
-  --dir "$H/state/resource-workspace" >/dev/null
+  --no-prerotation --dir "$H/state/resource-workspace" >/dev/null
 cp "$REPO/deploy/grain-host/bwrap" "$H/launcher/bwrap"
 rustc -O --edition 2021 -o "$H/launcher/launch-gate" "$REPO/deploy/grain-host/launch-gate.rs" 2>"$EV/launch-gate-build.log"
 cp "$GRAIN" "$H/worker-runtime/grain-runtime"
@@ -202,6 +204,8 @@ chmod 600 "$H/controller.json"
 CONTROL=$H/state/control.sock
 JOURNAL=$H/state/journal.json
 systemd-run --user --unit="$UNIT" --description="mini-hermes-journey:$RUN" \
+  --setenv=MINI_GRAIN_CONTROLLER_MANAGER=user --setenv=MINI_GRAIN_WORKER_MANAGER=user \
+  --setenv="MINI_GRAIN_CONTROLLER_UNIT=$UNIT.service" \
   --property=Restart=on-failure --property=RestartSec=2s \
   --property=KillMode=control-group --property=RuntimeMaxSec=7200s \
   "$GRAIN" serve "$H/controller.json" >"$EV/unit-start.log" 2>&1
@@ -230,7 +234,8 @@ open_connector() {  # LABEL
 }
 close_connector() {  # LABEL
   exec 3>&-
-  wait "$CONNECTOR_PID" 2>/dev/null || true
+  # Disconnecting after a controller kill can give connect a nonzero status.
+  if wait "$CONNECTOR_PID" 2>/dev/null; then :; fi
   CONNECTOR_PID=
   rm -f "$EV/$1.fifo"
 }
@@ -335,8 +340,8 @@ for _ in $(seq 1 1200); do
   sleep 0.05
 done
 exec 3>&-
-kill "$CONNECTOR_PID" 2>/dev/null || true
-wait "$CONNECTOR_PID" 2>/dev/null || true
+if kill "$CONNECTOR_PID" 2>/dev/null; then :; fi
+if wait "$CONNECTOR_PID" 2>/dev/null; then :; fi
 CONNECTOR_PID=
 rm -f "$fifo"
 mark "phase-d: hard connector dropped while the prompt ran"
