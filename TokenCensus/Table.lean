@@ -414,6 +414,7 @@ Minidregg.Kernel.SubjectKeyRotation.Checked.mk | Kernel.Receivers.SubjectKeyRota
 Minidregg.Kernel.SubjectKeyRotation.DecodedIngress.mk | Kernel.Receivers.SubjectKeyRotation | evidence | L2 | 1 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.SubjectKeyRotation.Prepared.mk | Kernel.Receivers.SubjectKeyRotation | evidence | L1 Minidregg.Kernel.SubjectKeyRotation.Prepared.gated_by_possession | the gate ran under the key of the possession signature it holds; that ReceiverSignature is L2
 Minidregg.Kernel.SystemCellDomain.Loaded.mk | Kernel.SystemCellDomain | evidence | L2 | 2 proof / 2 data fields; layer-1 review pending
+Minidregg.TokenCensus.ProjectionWitness.mk | TokenCensus | evidence | L1 Minidregg.TokenCensus.ProjectionWitness.sound' | positive control: the request/result-indexed statement is carried by every inhabitant and the theorem proof is exactly the `sound` field projection
 Minidregg.Theory.CanonicalReactiveView.PreparedReaction.mk | Theory.CanonicalReactiveView | evidence | L2 | 3 proof / 2 data fields; layer-1 review pending
 Minidregg.Theory.CellState.Materialized.mk | Theory.CellState | evidence | L2 | 0 proof / 1 data fields; layer-1 review pending; mints: materialize (the root is computed from the logical store by the materializer, not asserted)
 Minidregg.Theory.CellState.ValidatedPatch.mk | Theory.CellState | evidence | L2 | 2 proof / 0 data fields; layer-1 review pending
