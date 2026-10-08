@@ -244,7 +244,7 @@ theorem Config.sourceGate_ordinary (config : Config) {own : Option ControlFacet}
   cases layout : config.controlLayoutValid with
   | false =>
       have refused : config.sourceGate own snapshot intent = .error (.durable .transactionConflict) := by
-        simp [Config.sourceGate, layout]; rfl
+        simp [Config.sourceGate, layout]
       rw [refused] at admitted
       cases admitted
   | true =>

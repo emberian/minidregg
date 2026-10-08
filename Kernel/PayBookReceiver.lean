@@ -25,6 +25,7 @@ The decision proper is the pure `decideChange`:
   absent index (`book_write_once`).
 There is no clock in the pay cell; time is the clock cell's (`Kernel.ClockCell`).
 -/
+import Compiler.DurableReceiverIO
 import Kernel.CapabilityRevocationController
 import Kernel.PayCellDomain
 

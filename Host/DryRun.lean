@@ -179,15 +179,16 @@ theorem dryReceive_refusal_agrees (t : DurableReceiverIO.Transport) (reached : I
       loaded.withinLog loaded.resumed intent ≠ .inl ready) :
     DurableReceiverIO.receiveLoadedDetailedWithFresh (dryTransport t reached) rootBytes loaded intent =
       DurableReceiverIO.receiveLoadedDetailedWithFresh t rootBytes loaded intent := by
-  unfold DurableReceiverIO.receiveLoadedDetailedWithFresh
+  unfold DurableReceiverIO.receiveLoadedDetailedWithFresh DurableReceiverIO.receiveCandidateWithFresh
+  simp only [DurableReceiverIO.Candidate.intent]
   split <;> first | rfl | (rename_i h; exact absurd h (refused _))
 
 /-- The dry transport names the Store's system cell, so the tail law
 (`Loaded.judge`, C14) judges a dry run exactly as it judges the submission. -/
 @[simp] theorem dryTransport_judge (t : DurableReceiverIO.Transport) (reached : IO.Ref Bool)
     {rootBytes : List UInt8 → Minidregg.Theory.TypedAuthorization.Digest}
-    (loaded : DurableReceiverIO.Loaded rootBytes) (intent : DurableDataIntent.DataIntent rootBytes) :
-    loaded.judge (dryTransport t reached) intent = loaded.judge t intent := by
+    (loaded : DurableReceiverIO.Loaded rootBytes) (candidate : DurableReceiverIO.Candidate loaded) :
+    loaded.judge (dryTransport t reached) candidate = loaded.judge t candidate := by
   unfold DurableReceiverIO.Loaded.judge dryTransport
   rfl
 
@@ -212,21 +213,23 @@ theorem dryReceive_tail_refusal_agrees (t : DurableReceiverIO.Transport) (reache
     (loaded : DurableReceiverIO.Loaded rootBytes) (intent : DurableDataIntent.DataIntent rootBytes)
     (ready) (admitted : prepare loaded.image loaded.baseHeight loaded.base loaded.snapshot
       loaded.withinLog loaded.resumed intent = .inl ready)
-    (reason) (bounded : loaded.judge t intent = .error reason) :
+    (reason) (bounded : loaded.judge t (.ordinary intent) = .error reason) :
     DurableReceiverIO.receiveLoadedDetailedWithFresh (dryTransport t reached) rootBytes loaded intent =
       DurableReceiverIO.receiveLoadedDetailedWithFresh t rootBytes loaded intent := by
-  unfold DurableReceiverIO.receiveLoadedDetailedWithFresh
+  unfold DurableReceiverIO.receiveLoadedDetailedWithFresh DurableReceiverIO.receiveCandidateWithFresh
+  simp only [DurableReceiverIO.Candidate.intent]
   simp only [admitted, dryTransport_judge, bounded]
 
 /-- The dry transport's only write marks `reached` and observes a conflict,
 which the receiving loop reports as contention (`publishAfter_conflict`). -/
 theorem dryTransport_publish (t : DurableReceiverIO.Transport) (reached : IO.Ref Bool)
     {rootBytes : List UInt8 → Minidregg.Theory.TypedAuthorization.Digest}
-    (loaded : DurableReceiverIO.Loaded rootBytes) {intent : DurableDataIntent.DataIntent rootBytes}
-    (prepared : DurableReceiverIO.PreparedAppend loaded intent) :
-    DurableReceiverIO.publish (dryTransport t reached) rootBytes loaded intent prepared =
+    (loaded : DurableReceiverIO.Loaded rootBytes) {candidate : DurableReceiverIO.Candidate loaded}
+    (commit : DurableReceiverIO.Commit t loaded candidate)
+    (prepared : DurableReceiverIO.PreparedAppend loaded candidate.intent) :
+    DurableReceiverIO.publish (dryTransport t reached) rootBytes loaded commit prepared =
       (do reached.set true; pure .conflict) >>=
-        DurableReceiverIO.publishAfter (dryTransport t reached) rootBytes loaded intent prepared := rfl
+        DurableReceiverIO.publishAfter (dryTransport t reached) rootBytes loaded candidate.intent prepared := rfl
 
 /-- **At the Store writer, admission is exactly reaching the writer.** Where the
 durable admission accepts and the tail law admits, the real path appends; the
@@ -238,7 +241,8 @@ theorem dryReceive_admission_reaches_append (t : DurableReceiverIO.Transport)
     (loaded : DurableReceiverIO.Loaded rootBytes) (intent : DurableDataIntent.DataIntent rootBytes)
     (ready) (admitted : prepare loaded.image loaded.baseHeight loaded.base loaded.snapshot
       loaded.withinLog loaded.resumed intent = .inl ready)
-    (judged : loaded.judge t intent = .ok ()) :
+    (commit : DurableReceiverIO.Commit t loaded (.ordinary intent))
+    (judged : loaded.judge t (.ordinary intent) = .ok commit) :
     DurableReceiverIO.receiveLoadedDetailedWithFresh (dryTransport t reached) rootBytes loaded intent =
       (do
         let .ok key ← t.key
@@ -246,10 +250,19 @@ theorem dryReceive_admission_reaches_append (t : DurableReceiverIO.Transport)
         match ← DurableReceiverIO.prepareAppend t loaded ready key with
         | .error message => return (false, .ordinary (.unavailable message))
         | .ok prepared =>
-            DurableReceiverIO.publish (dryTransport t reached) rootBytes loaded intent prepared) := by
-  unfold DurableReceiverIO.receiveLoadedDetailedWithFresh
+            DurableReceiverIO.publish (dryTransport t reached) rootBytes loaded commit prepared) := by
+  unfold DurableReceiverIO.receiveLoadedDetailedWithFresh DurableReceiverIO.receiveCandidateWithFresh
+  simp only [DurableReceiverIO.Candidate.intent]
   simp only [admitted, dryTransport_judge, judged, dryTransport_key, dryTransport_prepareAppend]
-  rfl
+  simp only [DurableReceiverIO.publish, DurableReceiverIO.Candidate.intent]
+  congr 1
+  funext result
+  cases result
+  · rfl
+  · dsimp only
+    congr 1
+    funext preparedResult
+    cases preparedResult <;> rfl
 
 #assert_axioms dryTransport_writers_irrelevant
 #assert_axioms dryTransport_judge

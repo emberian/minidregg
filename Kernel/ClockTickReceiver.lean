@@ -21,6 +21,7 @@ A tick asserts a new clock value `{now, slot}`.  It is admitted exactly when:
 The patch is one guarded write of the clock value from the exact loaded value;
 the record writes only the clock cell (`intent_writes_clock_cell`).
 -/
+import Compiler.DurableReceiverIO
 import Kernel.CapabilityRevocationController
 import Kernel.ClockCellDomain
 

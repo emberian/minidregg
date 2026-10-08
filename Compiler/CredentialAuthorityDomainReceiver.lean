@@ -15,7 +15,7 @@ cell's logical content alone (`write_of_planes`).
 import Compiler.CanonicalCellRegistry
 import Compiler.CredentialAuthorityDomain
 import Compiler.CredentialAuthorityReplay
-import Compiler.DurableReceiverIO
+import Compiler.DurableReceiverCore
 import Theory.ResourceBirthAuthority
 
 namespace Minidregg.Compiler.CredentialAuthorityDomainReceiver
@@ -182,6 +182,18 @@ theorem Loaded.snapshot_unique {deployment : CanonicalCellRegistry.Deployment}
     (left.domainExact.trans right.domainExact.symm)
     (left.revisionExact.trans right.revisionExact.symm)
     (left.spentExact.trans right.spentExact.symm) cells
+
+/-- The complete held authority is fixed by its deployment and snapshot. -/
+theorem Loaded.unique {deployment : CanonicalCellRegistry.Deployment}
+    {physical : PhysicalSnapshot} (left right : Loaded deployment physical) : left = right := by
+  have same := Loaded.snapshot_unique left right
+  cases left
+  cases right
+  simp only at same
+  subst same
+  rfl
+
+#assert_axioms Loaded.unique
 
 theorem Loaded.root_exact {deployment : CanonicalCellRegistry.Deployment} {physical : PhysicalSnapshot}
     (loaded : Loaded deployment physical) :
