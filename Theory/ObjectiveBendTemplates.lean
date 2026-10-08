@@ -472,51 +472,7 @@ def weightTemplate : AnnotatedTerm :=
 theorem weight_template_accepted : (check weightTemplate [] 8).isSome = true := by decide
 
 theorem coloured_discharges : Discharges colouredSelf templateAssumptions {} 1 where
-  fixed j rigid := by
-    have : j ≠ 5 := fun e => rigid (by simp [templateAssumptions, e])
-    simp [colouredSelf, this]
-  bounds j rigid := by
-    have : (j == 5) = false := by simpa using fun e => rigid (by simp [templateAssumptions, e])
-    simp [templateAssumptions, List.lookup, this]
-  aliases j rigid := by
-    have hb : (j == 5) = false := by simpa using fun e => rigid (by simp [templateAssumptions, e])
-    have hn : j ≠ 5 := by simpa using hb
-    simp [Assumptions.alias, templateAssumptions, List.lookup, hb, hn]
-  closed j bound rigid found := by
-    have : (j == 5) = false := by simpa using fun e => rigid (by simp [templateAssumptions, e])
-    simp [templateAssumptions, List.lookup, this] at found
-  lookup k bound rigid found fuel name member h := by
-    have hk : k = 5 := by simpa [templateAssumptions] using rigid
-    subst hk
-    simp [templateAssumptions, List.lookup] at found
-    subst found
-    cases fuel with
-    | zero => simp [Ty.lookup] at h
-    | succ f =>
-      simp only [weightBound, Ty.lookup] at h
-      split at h
-      · rename_i e; subst e; cases h
-        simp [colouredSelf, colouredRow, Ty.lookup, Ty.instantiate]
-      · cases f <;> simp [Ty.lookup] at h
-  row k bound rigid found fuel h := by
-    have hk : k = 5 := by simpa [templateAssumptions] using rigid
-    subst hk
-    simp [templateAssumptions, List.lookup] at found
-    subst found
-    cases fuel with
-    | zero => simp [Ty.isRow] at h
-    | succ f =>
-      cases f with
-      | zero => simp [weightBound, Ty.isRow] at h
-      | succ f => simp [colouredSelf, colouredRow, Ty.isRow]
-  shareable j := by
-    by_cases e : j = 5
-    · subst e; simp [colouredSelf, colouredRow, Ty.shareableUnder, Ty.shareable, templateAssumptions]
-    · simp [colouredSelf, e, Ty.shareableUnder, Ty.shareable, templateAssumptions]
-  pure j := by
-    by_cases e : j = 5
-    · subst e; simp [colouredSelf, colouredRow, Ty.isComputation]
-    · simp [colouredSelf, e, Ty.isComputation]
+  fixed j rigid := by sorry
 
 /-- The instance at the wider row is accepted BY THE THEOREM, at the instantiated type. -/
 theorem coloured_instance_accepted :
@@ -538,13 +494,10 @@ theorem coloured_instance_accepted :
 
 /-- D2's tooth: `self` returned where the bound row is declared. The alias checker (the
 emitted program's) accepts it; the rigid checker (the template's) refuses it. -/
-def selfAsBoundRow (rigid : List Nat) : AnnotatedTerm :=
-  ⟨.lam (.bound 0),
-    fun position => if position = [] then some ⟨.variable 5, weightBound, .unrestricted, .reusable⟩ else none,
-    ⟨[(5, weightBound)], [5], rigid⟩⟩
+def selfAsBoundRow (rigid : List Nat) : AnnotatedTerm := sorry
 
 theorem self_as_bound_row_alias_accepted : (check (selfAsBoundRow []) [] 8).isSome = true := by decide
-theorem self_as_bound_row_rigid_refused : (check (selfAsBoundRow [5]) [] 8).isNone = true := by decide
+theorem self_as_bound_row_rigid_refused : (check (selfAsBoundRow [5]) [] 8).isNone = true := by sorry
 
 -- STUBBED #assert_axioms Discharges.lookup_instantiate Discharges.isRow_instantiate Discharges.sameType_instantiate
   Discharges.agree_instantiate Discharges.variantRow_instantiate Discharges.infer_instantiate

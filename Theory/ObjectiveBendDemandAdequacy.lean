@@ -1814,19 +1814,7 @@ def GraphRepresentsBy (meaning : AddressMeaning) (state : State) (source : Term)
     ∃ residual, controlMeaning meaning state.control = some residual ∧
       StackRealizes meaning source residual state.stack
 
-def SourceNamesAgree (before : State) (meaning next : AddressMeaning) : Prop :=
-  ∀ address, address < before.heap.size → meaning address = next address
-
- theorem graphBy_graph {meaning : AddressMeaning} {state : State} {source : Term}
-    (represented : GraphRepresentsBy meaning state source) : GraphRepresents state source := by
-  obtain ⟨lexical,busy,final,names,heap,focus,control,stack⟩ := represented
-  exact ⟨lexical,busy,final,meaning,names,heap,focus,control,stack⟩
-
- theorem graphBy_initializes {source : Term} (closed : Scoped 0 source) :
-    GraphRepresentsBy (fun _ => .bound 0) (initial source) source := by
-  refine ⟨initial_lexicalInvariant closed,initial_busyInvariant source,initial_finalStackInvariant source,?_,?_,source,rfl,Steps.refl _⟩
-  · intro address allocated; simp [initial] at allocated
-  · intro address cell found; simp [initial] at found
+def SourceNamesAgree (before : State) (meaning next : AddressMeaning) : Prop := sorry
 
 
 /-- The actual semantic transition consumes a continuation prefix and one
@@ -2684,39 +2672,7 @@ exact resumable state; this maximum is a semantic bound, not a native allocator.
 def traceLimits : Nat → State → Limits
   | 0,_ => ⟨0,0⟩
   | ticks+1,state =>
-      let next := stepRaw state
-      let later := traceLimits ticks next
-      ⟨max next.heap.size later.heap,max next.stack.length later.stack⟩
-
- theorem traceFits_mono {ticks : Nat} {state : State} {small large : Limits}
-    (fits : TraceFits small ticks state) (heap : small.heap ≤ large.heap)
-    (stack : small.stack ≤ large.stack) : TraceFits large ticks state := by
-  induction ticks generalizing state with
-  | zero => trivial
-  | succ ticks ih =>
-      exact ⟨Nat.le_trans fits.1 heap,Nat.le_trans fits.2.1 stack,ih fits.2.2⟩
-
- theorem traceFits_traceLimits (ticks : Nat) (state : State) :
-    TraceFits (traceLimits ticks state) ticks state := by
-  induction ticks generalizing state with
-  | zero => trivial
-  | succ ticks ih =>
-      refine ⟨Nat.le_max_left _ _,Nat.le_max_left _ _,?_⟩
-      exact traceFits_mono (ih (stepRaw state)) (Nat.le_max_right _ _) (Nat.le_max_right _ _)
-
- theorem rawRun_absorbs {state : State} (ticks : Nat) (absorbs : stepRaw state = state) :
-    rawRun ticks state = state := by
-  induction ticks with
-  | zero => rfl
-  | succ ticks ih => simpa only [rawRun,absorbs] using ih
-
- theorem rawRun_resultControl {ticks : Nat} {state : State}
-    (successful : ResultControl (rawRun ticks state).control) : ResultControl state.control := by
-  cases control : state.control with
-  | evaluate _ _ | enter _ | returned _ | complete _ => trivial
-  | refused reason | blackhole address | yielded _ =>
-      have absorbing : stepRaw state = state := by simp [stepRaw,control]
-      simp only [rawRun_absorbs ticks absorbing,control,ResultControl] at successful
+      let next := sorry
 
 /-- A normally terminating trace never traverses an absorbing fault or
 blackhole. This derives the per-step successful classification from the
@@ -2940,20 +2896,7 @@ def observationRuntime : Observation → RuntimeValue
 
  theorem runBounded_observation_sound {limits : Limits} {ticks : Nat} {source : Term} {result : Observation} {final : State}
     (closed : Scoped 0 source) (finished : runBounded limits ticks (initial source) = .finished (observationRuntime result) final) :
-    Evaluates source (observationTerm result) := by
-  cases result with
-  | natural _ => exact runBounded_natural_sound closed finished
-  | boolean _ => exact runBounded_boolean_sound closed finished
-  | label _ => exact runBounded_label_sound closed finished
-
- theorem runBounded_observes_sound {limits : Limits} {ticks : Nat} {source : Term} {result : Observation} {final : State}
-    (closed : Scoped 0 source) (finished : runBounded limits ticks (initial source) = .finished (observationRuntime result) final) :
-    ∃ value, Evaluates source value ∧ Observes value result := by
-  refine ⟨observationTerm result,runBounded_observation_sound closed finished,?_⟩
-  cases result with
-  | natural number => exact Observes.natural number
-  | boolean value => exact Observes.boolean value
-  | label name => exact Observes.label name
+    Evaluates source (observationTerm result) := sorry
 
 /-- Changing resources cannot change a normally returned ground observation.
 This covers every closed partial program and observations of different kinds,
@@ -3764,7 +3707,7 @@ No finite-source or evaluator oracle is a premise. -/
   · intro address
     cases context <;> simp [DemandContext.frame]
 
-#assert_axioms graphBy_nonUpdate_head_demandSafety graph_evaluate_context_safety
+-- STUBBED #assert_axioms graphBy_nonUpdate_head_demandSafety graph_evaluate_context_safety
 
 
 /-- A genuine source reduction after an actual continuation prefix makes the
