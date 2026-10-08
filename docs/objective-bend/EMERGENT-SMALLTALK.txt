@@ -1,13 +1,13 @@
 Emergent Smalltalk: Objective Bend + governed durable objects.
-Core dynamics; surface syntax encodes these terms.
+Core dynamics, not surface syntax.
 Application associates left. \x.t binds x; t[u/x] avoids capture; new binders are fresh.
 Fields/arms are ordered lists keyed by strings; lookup takes the first match.
 Values v: \x.t, Nat, Bool, String, {fields}, spec(m,e), proto(s,t), inj(k,t).
 All components of these values are unevaluated. Scalar types are disjoint.
-Types are structural, with exact row equality; fix has (C->V->C)->V->C.
+Rows compare exactly; recursive records are nominal; fix: (C->V->C)->V->C.
 Specs may bound future Self/Super rows; fix discharges those bounds.
-Activities cannot be shared in fields/arguments/payloads. Affine/linear means
-at most once; reusable closures capture only unrestricted, shareable values.
+Activities cannot be shared in fields/arguments/payloads. Affine/linear use
+is at most once; terminal linear discharge is separate. Reusable captures are shareable/unrestricted.
 
 (\x.t) u -> t[u/x]
 mix(a,b) -> \s.\p.b s (a s p)
@@ -38,16 +38,16 @@ E[perform(p)] yields p with continuation E; response r resumes as E[r].
 A nonvalue with no step or yield is stuck; infinite reduction diverges.
 
 Every layer shares final self s; p is the whole result below it.
-Call-by-name meaning; runtime thunks are shared (call-by-need).
+Call-by-name reference; sharing requires adequacy.
 
 Host object contract:
-Object = durable id, pinned code, versioned state, law, payer.
+Object = durable id, pinned code, versioned state, law.
 A reference names an object; it does not grant access. Reads and writes require
 current authority. Grants face current law; law revision is not revocation.
 A method runs pinned code on typed inputs and a current state view. Its result
 proposes effects. Commit a turn atomically only if its exact read roots still
-match, current authority/laws admit every write, and its budget is funded.
-Failed turns commit no application writes; fees may apply. No owner bypass.
+match and current authority/laws admit every write. No owner bypass.
+Failed turns commit no application writes. Funding/fees belong to the host profile.
 Delegation is explicit, scoped to callee, method, code and arguments.
 Synchronous call trees commit together. Sends enqueue durable messages and
 return answer slots; delivery is a later turn. A slot has one decider, deadline,

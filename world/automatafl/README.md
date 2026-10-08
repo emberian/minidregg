@@ -6,12 +6,16 @@ checker and demand machine. `oracle.rs` calls the existing Automatafl Rust
 implementation. Neither adapter implements the game rules.
 
 The shared language/object description is
-[`EMERGENT-SMALLTALK.txt`](../../docs/objective-bend/EMERGENT-SMALLTALK.txt): **2,996
+[`EMERGENT-SMALLTALK.txt`](../../docs/objective-bend/EMERGENT-SMALLTALK.txt): **2,988
 UTF-8 bytes**, including newlines. The game is a separate package. The capsule
 describes core evaluation, a small typing contract and the host's object contract;
 it is not a replacement for the `.obend` surface grammar, complete typing rules,
 tariff or signed wire formats. Those are implementation interfaces, not extra game
 rules. No compression, external dictionary or URL is used in its byte count.
+There are also [nine compact alternatives](../../docs/objective-bend/capsules/README.md).
+The current capsule separates host funding from intrinsic object identity;
+the qualification below recorded the earlier 2,996-byte version at `91829303`.
+Its recorded hash remains historical evidence, not a hash of the revised prose.
 
 ## The game interface
 
@@ -108,7 +112,8 @@ The agent-facing decomposition is three artifacts:
 1. The <3 KB language/object capsule: what evaluation, objects and effects mean.
 2. A pinned game package: these two-player rules and the chosen initial layout.
 3. An instance descriptor: object id, code pin, player subjects, authorized
-   endpoints, round/version, deadline policy, payer and budget.
+   endpoints, round/version and deadline policy; a separate host profile supplies
+   sponsorship, retention and execution budgets.
 
 Each player submits at most one move to a separately protected input slot for
 the current round. Only its player can submit it; neither opponent can read it
