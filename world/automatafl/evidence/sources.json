@@ -1,0 +1,48 @@
+{
+  "automataflHead": "253bafa5dcad7c40b4d71ac0861ee0c9728a7dcd",
+  "automatafl": {
+    "logic/src/lib.rs": "e128b368a5341e64bb3a82d7887013e15f577188e8c46754d5016ef5a01e93f3",
+    "logic/src/game.rs": "abdd8ceea742cc48afff908c38962cabfc40b3c6143c5f5c7d9c32826b34bf84",
+    "logic/src/board.rs": "46a8e9de932d68c0af7f160899a477df606215bc088fcfa070c59462bf69f81a",
+    "logic/src/automaton.rs": "b7d467348d57556f0bf094d1476c983399dd0f3072b992f930e14dd36cd0bcc5",
+    "logic/src/types.rs": "bdc271b362ff01f78130ebc009419665b3415594a517239e4a73b877d529125d",
+    "logic/README.md": "1e55e6bfffd5131554031f1f0e2fbee4d64373e6d04a60b27f88baa63b9796e9"
+  },
+  "bend": "288fd4424ffc06c59d4695b03f44876b30e6e9674872f871ee42d1f250335efb",
+  "driver": "1162cb2684a291978b35885897b246685b3b0e8893d185acbd92870ca05d77a7",
+  "oracle": "d30a50660805672e8c122a3f69d28275816fd1c64e8374ba6bed389f6fd2ed0d",
+  "harness": "ae95d1e862dcb4dea5fb9f3940f34b30f9d39b665baf3bca7357f722e6f13941",
+  "miniHead": "4ef4e80843842f72d179bc10f1a92d608c26ccc6",
+  "lean": "4.30.0",
+  "scope": "pure source execution, not native admission or deployment",
+  "runtimeSourceClosure": {
+    "Compiler/ObjectiveBendParse.lean": "529b82e04855da2a6a3b0dd2d28aa63f9084d596a061935366840942a4eb60f5",
+    "Theory/AxiomPin.lean": "23bb438981bd7d93299b1d1184dcc5a55784f5789919d68d094fad087ec68dce",
+    "Theory/ObjectiveBendOpenRecursion.lean": "6e0d410ca4d9a0d1e139448cbd290519596ea159a0c5b531e6df43341fd97808",
+    "Compiler/ObjectiveBendC4.lean": "ed5ed80790a89c9f010f5d33eac74ba43f73affb6b3cf9ebf34ff92afb85eecb",
+    "Compiler/ObjectiveBendElaborate.lean": "b0d09afd42eee4d347d777be1dd4a0d7947b8875955f59f65d86b71985b9064c",
+    "Theory/ObjectiveBendTypes.lean": "7947a70676509eba82577f6c86859999002e713ff53150fa43c72dbe8c1bd064",
+    "Theory/ObjectiveBendTyping.lean": "cef31eb29f977d8c032ec75769d75cfaa48af4e6a96089bec1806141536477b8",
+    "Compiler/ObjectiveBendTermWire.lean": "6778e47ca4993aec68cb8ff791860fe44eed43b91a42d13d63dbe3b137a48f94",
+    "Compiler/Sha256.lean": "b212c05aa5cc3ee3a7d431a72bf45c2ee72d8bcd8859bfd12dcf9a4d023fdb6d",
+    "Compiler/ObjectiveBendFrontEnd.lean": "b6b2c7d160be16caafc180dddcac60972e983a95ecf42a481ec7f878f57f64d9",
+    "Compiler/ObjectiveBendFrontEndIdentity.lean": "5e722dd2f08e3a4aa3130a5b3fb5c8b3f36a5dbcd90802777b4dfcd4feee3f97",
+    "Theory/ObjectiveBendDemandMachine.lean": "946c05b26c378dff016368241c34f19d41c456ddec4aa84a8e14224fdc7d67a8",
+    "Theory/ObjectiveBendDemandMachineFast.lean": "3a307bf8b18ffb9500d54604bb6160fdda576c55c161e1a4afedffe576973004",
+    "Theory/ObjectiveBendDemandData.lean": "a76bb2ae035e61c4d755c38ced359ad2d3ce220cf1971243634d9c774e1083bc",
+    "Theory/ObjectiveBendCheckpoint.lean": "ce3cb2f9fc2c583248acdecf4a2d2af964dab534960329c3e60c88f0acfb43ea",
+    "Compiler/ObjectiveBendDataWire.lean": "283c33824d44f64feb43fcd861d4751f2d71477e42f9165b5d4425feefcd6655",
+    "Host/ObjectiveBendPreview.lean": "5c44baa3663811ef6ba12476497890b64ccdaddc8662cfc27c361c314bb61780",
+    "Host/ObjectiveBendFrontEnd.lean": "98671c05360876c19b2d5ecb747cbc04b662a8855ce491a3a00ebd85af0e70eb"
+  },
+  "artifacts": {
+    "cases.json": "fadd720a3a63ead9c96b99d7a6bcaca9a2551833f80372e77f9336cda1548c83",
+    "jobs.json": "d0880ac6c86ce17ef9283482d51549f8c950ecdad5d773776811bd9b9d1e18d7",
+    "rust.jsonl": "7cc3924913cdaa6265dcee711743270aed0930a7186dd297c5efff78d94996f7",
+    "bend.jsonl": "052d1fd609361ead6f9e17b1b697ce7959d913d59df2eba7a3fee47e302c02e2",
+    "report.json": "24df6b6b014d04878f7b58b97be3dc0fccae82352f66e4d89911a322c6c85645"
+  },
+  "frontEnd": "4026f96eee00672eaae6dd87a4fe6d2426fd20951985ff7d024801ab44bb74a6",
+  "capsuleBytes": 2995,
+  "capsuleSha256": "a4a77eb11819e82e004a79bc8f1f7996a74c6bbc905004a185f0f682aae09c4b"
+}

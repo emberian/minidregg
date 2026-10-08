@@ -1,0 +1,59 @@
+Emergent Smalltalk: Objective Bend + governed durable objects.
+Core dynamics; surface syntax is an encoding of these terms.
+Application associates left. \x.t binds x; t[u/x] avoids capture; new binders are fresh.
+Fields/arms are ordered lists keyed by strings; lookup takes the first match.
+Values v: \x.t, Nat, Bool, String, {fields}, spec(m,e), proto(s,t), inj(k,t).
+All components of these values are unevaluated. Scalar types are disjoint.
+Types are structural, with exact row equality; fix has (C->V->C)->V->C.
+Specs may bound future Self/Super rows; fix discharges those bounds.
+Activities cannot be shared in fields/arguments/payloads. Affine/linear means
+at most once; reusable closures capture only unrestricted, shareable values.
+
+(\x.t) u -> t[u/x]
+mix(a,b) -> \s.\p.b s (a s p)
+fix(e,p) -> e (fix(e,p)) p
+spec(m,e) u -> e u
+reflect(proto(s,t)) -> s
+metadata(spec(m,e)) -> m
+target(proto(s,t)) -> t
+{fs}.k -> lookup(fs,k)
+extend({fs},gs) -> {gs ++ [f in fs | key(f) not in keys(gs)]}
+if(true,a,b) -> a
+if(false,a,b) -> b
+natcase(0,z,x.b) -> z
+natcase(n+1,z,x.b) -> b[n/x]
+case(inj(k,t),arms) -> b[t/x] where lookup(arms,k)=x.b
+done(t) -> t
+op(v,w) -> its scalar result, if operand types match
+
+Nat ops: +,*,=,-,/,%,<,<=; unbounded, subtraction saturates at 0,
+division floors, n/0=0, n%0=n. Bool: strict AND. String: equality.
+No other primitive operations.
+
+Reduce only in contexts:
+E ::= [] | E t | E.k | extend(E,fs) | op(E,t) | op(v,E)
+    | if(E,t,u) | natcase(E,z,x.b) | case(E,arms)
+    | reflect(E) | metadata(E) | target(E)
+If a->b then E[a]->E[b]. No other reductions.
+E[perform(p)] yields p with continuation E; response r resumes as E[r].
+A nonvalue with no step or yield is stuck; infinite reduction diverges.
+
+Every layer shares final self s; p is the whole result below it.
+Call-by-name meaning; runtime thunks are shared (call-by-need).
+
+Host object contract:
+Object = durable id, pinned code, versioned state, law, payer.
+A reference names an object; it does not grant access. Reads and writes require
+current authority. Grants face current law; law revision is not revocation.
+A method runs pinned code on typed inputs and a current state view. Its result
+proposes effects. Commit a turn atomically only if its exact read roots still
+match, current authority/laws admit every write, and its budget is funded.
+Otherwise refuse; no partial state change. Never bypass a law for the owner.
+Synchronous call trees commit together. Sends enqueue durable messages and
+return answer slots; delivery is a later turn. A slot has one decider, deadline,
+and terminal outcome. Await/resume consumes one checkpoint generation once.
+Replies distinguish success, refusal, unknown, timeout and breakage.
+No reply is not failure: retain the signed request identity, query its receipt,
+and retry that same attempt; a new identity can repeat the action.
+Pure evaluation grants no effects. Exhaustion is bounded and may cost money;
+it is not success. Private data needs read protection.
