@@ -47,6 +47,13 @@ to the command bytes and to the digest of the decided turn's posts (`Declaration
 computed by the Host at planning: a turn whose outcome changed between the
 signing plan and the submission no longer matches the signed header.
 
+**Receipt retrieval and retries.** Possession of the original signed request is
+enough to retrieve its recorded receipt: replaying those exact bytes takes the
+`exact` route with no fresh signature check, including after the subject rotates
+its key. A retry whose invocation is re-signed under the same operation id takes
+the `retry` route and must pass `verifyRetry` under the subject's **current** key.
+Neither route commits anything, whether retry verification succeeds or fails.
+
 **Configuration** (`Kernel.ObjectiveKernelConfig.configOf`). The kernel's
 envelope ceilings and tariff are the deployment's Objective policy (the
 `objectiveMethod` route binding the genesis pins: `maximum`, `tariff`,
@@ -1871,6 +1878,77 @@ def receiveLoaded (deployment : Deployment) (profile : CanonicalRuntimeProfile.P
       | .unavailable detail => return .unavailable detail
       | .uncertain detail => return .uncertain detail
 
+/-- **The deployed receiver routes every recorded operation by replay kind.**
+An exact replay returns the durable record's receipt and terminal disposition
+unchanged, without running signature verification. A re-signed retry obtains
+its answer from exactly the verdict produced by `verifyRetry`; in particular,
+the receiver cannot return the recorded receipt before that verdict is known. -/
+theorem receiveLoaded_recorded_routes
+    (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig)
+    (transport : DurableReceiverIO.Transport) (durable : Durable)
+    {bytes : List UInt8} {ingress : DecodedIngress} {replayed : Replayed}
+    (decoded : decodeIngress bytes = some ingress)
+    (recorded : replay deployment.domain profile.semantics durable ingress =
+      some (.ok replayed)) :
+    match replayed with
+    | .exact prior disposition =>
+        receiveLoaded deployment profile ambient native transport durable bytes =
+            pure (replayAnswer (.ok ()) (.exact prior disposition)) ∧
+          AnswersRecorded prior disposition
+            (replayAnswer (.ok ()) (.exact prior disposition))
+    | .retry prior disposition =>
+        receiveLoaded deployment profile ambient native transport durable bytes = (do
+          let verified ← verifyRetry deployment profile ambient native durable ingress
+          pure (replayAnswer verified (.retry prior disposition))) := by
+  cases replayed with
+  | exact prior disposition =>
+      constructor
+      · simp [receiveLoaded, decoded, recorded]
+      · exact (replayAnswer_preserves_recorded_disposition prior disposition).1
+  | retry prior disposition =>
+      simp [receiveLoaded, decoded, recorded]
+
+/-- **The deployed receiver's exact route returns the recorded disposition.**
+This is stated over the receiver itself, rather than only over its pure answer
+helper; the second conjunct exposes the durable disposition independently of
+the equality describing the route. -/
+theorem receiveLoaded_exact_returns_recorded_disposition
+    (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig)
+    (transport : DurableReceiverIO.Transport) (durable : Durable)
+    {bytes : List UInt8} {ingress : DecodedIngress} {prior : Receipt}
+    {disposition : RecordedDisposition}
+    (decoded : decodeIngress bytes = some ingress)
+    (recorded : replay deployment.domain profile.semantics durable ingress =
+      some (.ok (.exact prior disposition))) :
+    receiveLoaded deployment profile ambient native transport durable bytes =
+        pure (replayAnswer (.ok ()) (.exact prior disposition)) ∧
+      AnswersRecorded prior disposition
+        (replayAnswer (.ok ()) (.exact prior disposition)) :=
+  receiveLoaded_recorded_routes deployment profile ambient native transport durable decoded recorded
+
+/-- **A failed current-key check on the deployed retry route returns no receipt.**
+The result is the named rejection and cannot be either receipt-bearing result
+constructor. Nothing reaches the durable transport on this recorded route. -/
+theorem receiveLoaded_retry_verification_failure_no_receipt
+    (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig)
+    (transport : DurableReceiverIO.Transport) (durable : Durable)
+    {bytes : List UInt8} {ingress : DecodedIngress} {prior : Receipt}
+    {disposition : RecordedDisposition} {reason : Reject}
+    (decoded : decodeIngress bytes = some ingress)
+    (recorded : replay deployment.domain profile.semantics durable ingress =
+      some (.ok (.retry prior disposition)))
+    (unverified : verifyRetry deployment profile ambient native durable ingress =
+      pure (.error reason)) :
+    receiveLoaded deployment profile ambient native transport durable bytes =
+      pure (.rejected reason) := by
+  have routed := receiveLoaded_recorded_routes deployment profile ambient native transport durable
+    decoded recorded
+  rw [unverified] at routed
+  simpa [replayAnswer, retryAnswer] using routed
+
 /-- **A malformed request is rejected cheaply, with no state change and no charge**: bytes that
 are not a canonical signed ingress are refused `malformedIngress` before anything is read,
 decided or verified, and nothing reaches the durable layer. -/
@@ -2033,6 +2111,9 @@ def signingPlanCodec : LawfulCodec SigningPlan :=
 #assert_axioms replay_exact
 #assert_axioms replayAnswer_preserves_recorded_disposition
 #assert_axioms replay_routes_recorded_disposition
+#assert_axioms receiveLoaded_recorded_routes
+#assert_axioms receiveLoaded_exact_returns_recorded_disposition
+#assert_axioms receiveLoaded_retry_verification_failure_no_receipt
 #assert_axioms callRefusal_encode_roundtrip
 #assert_axioms retry_unverified_refused
 
