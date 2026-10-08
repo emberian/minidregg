@@ -43,9 +43,6 @@ run exe-roots env LEAN_NUM_THREADS=${THREADS:-6} $LAKE_WRAP lake build $exes
 run host-closure    bash scripts/check-host-closure.sh
 # KN2 ratchet: callers of the full verified materialization may only shrink (a text ratchet, not a call-graph proof)
 run full-loaded-ratchet bash scripts/ports/check-full-loaded-callers.sh
-# Every standalone Lean script elaborates, except the shrink-only list scripts/gates/scripts-elab.tsv
-# (ROOT 10-07: the fixture generator replay.lean sat uncompilable b21..b25 unseen).
-run scripts-elab    bash scripts/check-scripts-elab.sh
 # Each planted fault against the pinned history API is refused by the guard it plants
 # (a per-fault expected error, not "any error": API drift does not pass it).
 run api-faults     bash scripts/kn2/check-planted-api-faults.sh
@@ -108,6 +105,11 @@ ledger() {
   echo "hyp-ledger $st rc=$rc $(( $(date +%s) - s ))s :: $(grep -ac 'self-test .*: PASS' "$log") self-tests pass" | tee -a "$S"
 }
 ledger
+# Every standalone Lean script elaborates, except the shrink-only list scripts/gates/scripts-elab.tsv
+# (ROOT 10-07: the fixture generator replay.lean sat uncompilable b21..b25 unseen).
+# Runs AFTER ledger: scripts/NativeTranscripts.lean imports AxiomCensusResearch, which only the
+# ledger builds; before it, a fresh lane is red with "unknown module prefix" (t1 gate 10-08).
+run scripts-elab    bash scripts/check-scripts-elab.sh
 python3 "$H/rust-rows.py" "$SRC" "$FROM" "$TO" "$B/tmp-rust-rows-$TAG.sh" > "$L/gate-$TAG-rust-rows.txt" 2>&1 || { echo "rust-rows RED (selector failed)" | tee -a "$S"; red=$((red+1)); }
 cat "$L/gate-$TAG-rust-rows.txt"
 run rust-rows       $LAKE_WRAP bash "$B/tmp-rust-rows-$TAG.sh"
