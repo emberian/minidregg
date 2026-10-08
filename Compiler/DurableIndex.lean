@@ -618,24 +618,324 @@ theorem changes_exact (records : List Kernel.DurableReceiver.IntentRecord)
     | some found => simp
     | none => simp [mem]
 
+/-- The actual append loop, exposed so its traversal can be proved. Each key
+is checked for freshness before calling the same `set` used by `setAll`. -/
+def insert (height : Nat) (store : List Bool → Option Row) (root : Digest) :
+    List IndexKey → Except String (Digest × List (List Bool × Row))
+  | [] => .ok (root, [])
+  | k :: rest => do
+      let answer ← lookupRows store root k
+      if answer.value.isSome then
+        throw "the index already holds a key this record inserts (it disagrees with the executor)"
+      let (root', rows) ← set store root k (some (heightValue height))
+      let (finalRoot, later) ← insert height (overlay store rows) root' rest
+      return (finalRoot, later ++ rows.filter fun row => !later.any (·.1 = row.1))
+
 /-- Insert the record's keys at `height` on the Store's rows, against `root`:
 the new root and the rows to write. A key already present is refused. -/
 def apply (store : List Bool → Option Row) (root : Digest) (height : Nat)
     (transactionId : TransactionId) (nullifiers : List StableNullifier) :
     Except String (Digest × List (List Bool × Row)) :=
-  let rec insert (store : List Bool → Option Row) (root : Digest) :
-      List IndexKey → Except String (Digest × List (List Bool × Row))
-    | [] => .ok (root, [])
-    | k :: rest => do
-        let answer ← lookupRows store root k
-        if answer.value.isSome then
-          throw "the index already holds a key this record inserts (it disagrees with the executor)"
-        let (root', rows) ← set store root k (some (heightValue height))
-        let (finalRoot, later) ← insert (overlay store rows) root' rest
-        return (finalRoot, later ++ rows.filter fun row => !later.any (·.1 = row.1))
-  insert store root (keys transactionId nullifiers)
+  insert height store root (keys transactionId nullifiers)
 
 end IndexRows
+
+/-! ## Maintained-index proof boundary
+
+`LogicalIndex` is the existing first-record map `IndexRows.declared`; a finite
+map represents it when its lookups agree. Heights are values, not a third key
+family. `Represents` also requires the Store's reachable rows to encode the
+canonical trie (stale rows under empty or compressed subtrees are unrestricted).
+The single-set preservation contract below is an explicit, still-open premise,
+not a claim that the deployed incremental trie has been proved correct. -/
+
+abbrev LogicalIndex := IndexRows.declared
+
+/-- Reachable rows of the canonical compressed trie. Empty subtrees need no
+row; a singleton stops at its leaf, exactly as `walk` and `set` do. -/
+def RowsRepresent (rows : List Bool → Option Row) :
+    List Bool → Nat → List (Theory.AuthTrie.Entry IndexKey (List UInt8)) → Prop
+  | _, _, [] => True
+  | p, _, [e] => rows p = some (.leaf e.1 e.2.2)
+  | _, 0, _ :: _ :: _ => False
+  | p, n + 1, es@(_ :: _ :: _) =>
+      rows p = some (.branch (tree dig n (Theory.AuthTrie.strip false es))
+        (tree dig n (Theory.AuthTrie.strip true es))) ∧
+      RowsRepresent rows (p ++ [false]) n (Theory.AuthTrie.strip false es) ∧
+      RowsRepresent rows (p ++ [true]) n (Theory.AuthTrie.strip true es)
+
+/-- Both the root and its reachable Store rows represent a well-formed map. -/
+def Represents (rows : List Bool → Option Row) (root : Digest)
+    (m : List (IndexKey × List UInt8)) : Prop :=
+  root = rootOf m ∧ WF 520 (entries bitsOf m) ∧ RowsRepresent rows [] 520 (entries bitsOf m)
+
+/-- THE remaining primitive obligation, over the deployed `set`: every successful
+insert/update/delete preserves the canonical root AND reachable rows. The
+collision alternative is necessary because `walk` treats an empty digest as
+empty regardless of rows. This contract is not assumed by an axiom. -/
+def SetPreserves (rows : List Bool → Option Row) (root : Digest)
+    (m : List (IndexKey × List UInt8)) (k : IndexKey) (value : Option (List UInt8)) : Prop :=
+  Represents rows root m →
+  ∀ (next : Digest) (written : List (List Bool × Row)),
+    set rows root k value = .ok (next, written) →
+    Represents (overlay rows written) next (modelSet m k value) ∨ Collision dig
+
+/-- Merging the actual write batches preserves the same Store view as applying
+them sequentially, including repeated writes of the same prefix. -/
+theorem overlay_merge (store : List Bool → Option Row) (early late : List (List Bool × Row)) :
+    overlay store (late ++ early.filter (fun row => !late.any (·.1 = row.1))) =
+      overlay (overlay store early) late := by
+  funext p
+  unfold overlay
+  rw [List.find?_append]
+  cases h : late.find? (fun x => x.1 = p) with
+  | some row => simp [h]
+  | none =>
+      have no : late.any (fun x => x.1 = p) = false :=
+        List.any_eq_false.mpr (List.find?_eq_none.mp h)
+      have same : (early.filter (fun row => !late.any (·.1 = row.1))).find? (fun x => x.1 = p) =
+          early.find? (fun x => x.1 = p) := by
+        rw [List.find?_filter]
+        congr 1
+        funext x
+        by_cases eq : x.1 = p <;> simp [eq, no]
+      simp [h, same]
+
+/-- Genesis satisfies the full row/root representation, even with stale rows. -/
+theorem represents_empty (rows : List Bool → Option Row) : Represents rows emptyDigest [] := by
+  simp [Represents, rootOf, entries, tree, emptyDigest, WF, RowsRepresent]
+
+/-- The primitive contract is proved for insertion/deletion in an empty trie,
+for arbitrary keys, values and stale Store rows. -/
+theorem set_preserves_empty (rows : List Bool → Option Row) (k : IndexKey)
+    (value : Option (List UInt8)) : SetPreserves rows emptyDigest [] k value := by
+  intro _ next written ok
+  left
+  cases value with
+  | none =>
+      have result : set rows emptyDigest k none = .ok (emptyDigest, []) := by
+        simp [set, openingOf, walk, empty_absent, Opening.claims, bind, pure,
+          Except.bind, Except.pure]
+      rw [result] at ok
+      obtain ⟨rfl, rfl⟩ := Prod.mk.inj (Except.ok.inj ok)
+      simpa [modelSet] using represents_empty (overlay rows [])
+  | some v =>
+      have result : set rows emptyDigest k (some v) = .ok (dig (.leaf k v), [([], .leaf k v)]) := by
+        simp [set, openingOf, walk, empty_absent, Opening.claims, rebuild, Sub.digest,
+          bind, pure, Except.bind, Except.pure]
+      rw [result] at ok
+      obtain ⟨rfl, rfl⟩ := Prod.mk.inj (Except.ok.inj ok)
+      simp [modelSet, Represents, rootOf, entries, tree, WF, bitsOf_length, RowsRepresent, overlay]
+
+/-- The primitive contract is also proved for updating or deleting the sole
+member. This covers the deployed compression-to-empty path without a model setter. -/
+theorem set_preserves_singleton (rows : List Bool → Option Row) (root : Digest)
+    (k : IndexKey) (old : List UInt8) (value : Option (List UInt8)) :
+    SetPreserves rows root [(k, old)] k value := by
+  intro before next written ok
+  obtain ⟨rootEq, _, row⟩ := before
+  have rootEq' : root = dig (.leaf k old) := rootEq
+  rw [rootEq'] at ok
+  have row' : rows [] = some (.leaf k old) := row
+  by_cases nonempty : dig (.leaf k old) = emptyDigest
+  · exact Or.inr ⟨.leaf k old, .empty, by simp, nonempty⟩
+  left
+  have opening : openingOf rows (dig (.leaf k old)) k = ⟨[], .leaf k old⟩ := by
+    simp [openingOf, walk, nonempty, row']
+  have verified : verify (dig (.leaf k old)) k (some old) ⟨[], .leaf k old⟩ = true := by
+    simp [verify, Theory.AuthTrie.verify, Theory.AuthTrie.climb, Theory.AuthTrie.Terminal.input]
+  cases value with
+  | none =>
+      have result : set rows (dig (.leaf k old)) k none = .ok (emptyDigest, []) := by
+        simp [set, opening, Opening.claims, verified, rebuild, Sub.digest,
+          bind, pure, Except.bind, Except.pure]
+      rw [result] at ok
+      obtain ⟨rfl, rfl⟩ := Prod.mk.inj (Except.ok.inj ok)
+      simpa [modelSet] using represents_empty (overlay rows [])
+  | some v =>
+      by_cases unchanged : old = v
+      · subst v
+        have result : set rows (dig (.leaf k old)) k (some old) = .ok (dig (.leaf k old), []) := by
+          simp [set, opening, Opening.claims, verified, bind, pure, Except.bind, Except.pure]
+        rw [result] at ok
+        obtain ⟨rfl, rfl⟩ := Prod.mk.inj (Except.ok.inj ok)
+        simp [modelSet, Represents, rootOf, entries, tree, WF, bitsOf_length, RowsRepresent, overlay, row']
+      · have result : set rows (dig (.leaf k old)) k (some v) = .ok (dig (.leaf k v), [([], .leaf k v)]) := by
+          simp [set, opening, Opening.claims, verified, unchanged, rebuild, Sub.digest,
+            bind, pure, Except.bind, Except.pure]
+        rw [result] at ok
+        obtain ⟨rfl, rfl⟩ := Prod.mk.inj (Except.ok.inj ok)
+        simp [modelSet, Represents, rootOf, entries, tree, WF, bitsOf_length, RowsRepresent, overlay]
+
+#assert_axioms set_preserves_empty
+#assert_axioms set_preserves_singleton
+
+theorem lookup_entries (m : List (IndexKey × List UInt8)) (k : IndexKey) :
+    Theory.AuthTrie.lookup (entries bitsOf m) k = mapLookup m k := by
+  simp [Theory.AuthTrie.lookup, entries, mapLookup, List.find?_map, Option.map_map, Function.comp_def]
+
+/-- A maintained history has the canonical root and rows of a finite
+representation of its logical map. This does not assert that a MAC-bound head
+alone establishes maintenance. -/
+def Maintained (records : List Kernel.DurableReceiver.IntentRecord)
+    (rows : List Bool → Option Row) (root : Digest) : Prop :=
+  ∃ m, Represents rows root m ∧ ∀ k, mapLookup m k = LogicalIndex records k
+
+theorem maintained_init (rows : List Bool → Option Row) : Maintained [] rows emptyDigest := by
+  exact ⟨[], represents_empty rows, by intro k; rfl⟩
+
+/-- A verified non-membership answer is absence in the committed logical
+history, provided maintenance holds, or it exhibits a cSHAKE256 collision. -/
+theorem maintained_absent (records : List Kernel.DurableReceiver.IntentRecord)
+    (rows : List Bool → Option Row) (root : Digest) (maintained : Maintained records rows root)
+    (k : IndexKey) (answer : Answer root k) (absent : answer.value = none) :
+    LogicalIndex records k = none ∨
+      ∃ x y : List UInt8, x ≠ y ∧
+        Sp800185Cshake256.hash nodeCustomization x = Sp800185Cshake256.hash nodeCustomization y := by
+  obtain ⟨m, ⟨rfl, wf, _⟩, logical⟩ := maintained
+  rcases Answer.sound wf answer with sound | collision
+  · left
+    rw [lookup_entries, logical, absent] at sound
+    exact sound.symm
+  · exact Or.inr collision
+
+namespace IndexRows
+
+/-- Unconditional link from the deployed append loop to the actual generic
+setter. No single-set correctness assumption is used: success means ALL of
+`changes`, including each consumed nullifier, were sent through `setAll`. -/
+theorem insert_eq_setAll (height : Nat) (ks : List IndexKey)
+    (store : List Bool → Option Row) (root next : Digest) (written : List (List Bool × Row))
+    (ok : insert height store root ks = .ok (next, written)) :
+    setAll store root (ks.map fun k => (k, some (heightValue height))) = .ok (next, written) := by
+  induction ks generalizing store root next written with
+  | nil => simpa [insert, setAll] using ok
+  | cons k rest ih =>
+      simp only [insert] at ok
+      cases look : lookupRows store root k with
+      | error e => simp [look, bind, Except.bind] at ok
+      | ok answer =>
+          simp only [look, bind, Except.bind] at ok
+          split at ok
+          · simp [throw, MonadExceptOf.throw, bind, Except.bind] at ok
+          · cases step : set store root k (some (heightValue height)) with
+            | error e => simp [step, bind, pure, Except.bind, Except.pure] at ok
+            | ok result =>
+                obtain ⟨mid, early⟩ := result
+                cases tail : insert height (overlay store early) mid rest with
+                | error e => simp [step, tail, bind, pure, Except.bind, Except.pure] at ok
+                | ok result =>
+                    obtain ⟨final, late⟩ := result
+                    have recur := ih (overlay store early) mid final late tail
+                    simpa [setAll, step, tail, recur, bind, pure, Except.bind, Except.pure] using ok
+
+/-- The omission-sensitive theorem: the public entry point executes exactly
+its declared changes. This theorem has NO `SetPreserves` hypothesis. -/
+theorem apply_eq_setAll (store : List Bool → Option Row) (root : Digest) (height : Nat)
+    (transactionId : Kernel.DurableDataIntent.TransactionId) (nullifiers : List Kernel.DurableDataIntent.StableNullifier)
+    (next : Digest) (written : List (List Bool × Row))
+    (ok : apply store root height transactionId nullifiers = .ok (next, written)) :
+    setAll store root (changes height transactionId nullifiers) = .ok (next, written) := by
+  exact insert_eq_setAll height (keys transactionId nullifiers) store root next written ok
+
+end IndexRows
+
+/-- Arbitrary insert/update/delete batches preserve the row/root representation
+UNDER the explicit single-set contract. This is induction over deployed `setAll`. -/
+theorem setAll_preserves
+    (step : ∀ rows root m k value, SetPreserves rows root m k value)
+    (changes : List (IndexKey × Option (List UInt8)))
+    (rows : List Bool → Option Row) (root : Digest) (m : List (IndexKey × List UInt8))
+    (before : Represents rows root m) (next : Digest) (written : List (List Bool × Row))
+    (ok : setAll rows root changes = .ok (next, written)) :
+    Represents (overlay rows written) next (modelApply m changes) ∨ Collision dig := by
+  induction changes generalizing rows root m next written with
+  | nil =>
+      simp only [setAll, Except.ok.injEq, Prod.mk.injEq] at ok
+      obtain ⟨rfl, rfl⟩ := ok
+      exact Or.inl (by simpa [modelApply, overlay] using before)
+  | cons change rest ih =>
+      obtain ⟨k, value⟩ := change
+      cases first : set rows root k value with
+      | error e => simp [setAll, first, bind, Except.bind] at ok
+      | ok result =>
+          obtain ⟨mid, early⟩ := result
+          cases tail : setAll (overlay rows early) mid rest with
+          | error e => simp [setAll, first, tail, bind, Except.bind] at ok
+          | ok result =>
+              obtain ⟨final, late⟩ := result
+              rcases step rows root m k value before mid early first with after | collision
+              · have finish := ih (overlay rows early) mid (modelSet m k value) after final late tail
+                simp only [setAll, first, tail, bind, pure, Except.bind, Except.pure, Except.ok.injEq, Prod.mk.injEq] at ok
+                obtain ⟨rfl, rfl⟩ := ok
+                simpa [modelApply, overlay_merge] using finish
+              · exact Or.inr collision
+
+/-- Headline preservation through the REAL Store append path. The missing
+single-set theorem is explicit; freshness is in the logical history, just as
+in `changes_exact`. This is not yet a proof that every committed Store is maintained. -/
+theorem maintained_apply
+    (step : ∀ rows root m k value, SetPreserves rows root m k value)
+    (records : List Kernel.DurableReceiver.IntentRecord)
+    (record : Kernel.DurableReceiver.IntentRecord) (rows : List Bool → Option Row)
+    (root : Digest) (before : Maintained records rows root)
+    (fresh : ∀ k ∈ IndexRows.keys record.transactionId record.nullifiers, LogicalIndex records k = none)
+    (next : Digest) (written : List (List Bool × Row))
+    (ok : IndexRows.apply rows root (records.length + 1) record.transactionId record.nullifiers =
+      .ok (next, written)) :
+    Maintained (records ++ [record]) (overlay rows written) next ∨ Collision dig := by
+  obtain ⟨m, rep, logical⟩ := before
+  rcases setAll_preserves step _ rows root m rep next written
+      (IndexRows.apply_eq_setAll rows root _ _ _ next written ok) with after | collision
+  · exact Or.inl ⟨_, after, IndexRows.changes_exact records record m logical fresh⟩
+  · exact Or.inr collision
+
+/-- With no nullifiers the deployed append path produces exactly the one-leaf
+transaction trie. The omission plant uses this result after dropping the
+consumed nullifier list at the public entry point. -/
+theorem apply_transaction_only (rows : List Bool → Option Row) (height : Nat)
+    (tx : Kernel.DurableDataIntent.TransactionId) :
+    IndexRows.apply rows emptyDigest height tx [] =
+      .ok (dig (.leaf (transactionKey tx) (heightValue height)),
+        [([], .leaf (transactionKey tx) (heightValue height))]) := by
+  have look : lookupRows rows emptyDigest (transactionKey tx) =
+      .ok ⟨none, ⟨⟨[], .empty⟩, empty_absent (transactionKey tx)⟩⟩ := by
+    simp [lookupRows, openingOf, walk, Opening.claims, empty_absent]
+  simp [IndexRows.apply, IndexRows.keys, IndexRows.insert, look, set, openingOf, walk,
+    Opening.claims, empty_absent, rebuild, Sub.digest, bind, pure, Except.bind, Except.pure]
+
+/-- A GENUINE non-membership proof verifies against the wrong transaction-only
+root for every consumed nullifier. Verifier soundness alone cannot establish
+that an authenticated root covers the committed log. -/
+theorem omitted_nullifier_absence (height : Nat) (tx : Kernel.DurableDataIntent.TransactionId)
+    (nullifier : Kernel.DurableDataIntent.StableNullifier) :
+    verify (dig (.leaf (transactionKey tx) (heightValue height))) (nullifierKey nullifier) none
+      ⟨[], .leaf (transactionKey tx) (heightValue height)⟩ = true := by
+  have differ := Ne.symm (nullifierKey_ne_transactionKey nullifier tx)
+  simp [verify, Theory.AuthTrie.verify, differ, Theory.AuthTrie.climb, Theory.AuthTrie.Terminal.input]
+
+/-- The same key is present in the one-record logical history whenever that
+record consumed it, independent of the operational index implementation. -/
+theorem consumed_declared (record : Kernel.DurableReceiver.IntentRecord)
+    (nullifier : Kernel.DurableDataIntent.StableNullifier) (consumed : nullifier ∈ record.nullifiers) :
+    LogicalIndex [record] (nullifierKey nullifier) = some (heightValue 1) := by
+  have mem : nullifierKey nullifier ∈ IndexRows.keys record.transactionId record.nullifiers :=
+    List.mem_cons_of_mem _ (List.mem_map.mpr ⟨nullifier, consumed, rfl⟩)
+  simp [LogicalIndex, IndexRows.declared, mem]
+
+#assert_axioms apply_transaction_only
+#assert_axioms omitted_nullifier_absence
+#assert_axioms consumed_declared
+
+#assert_axioms overlay_merge
+#assert_axioms represents_empty
+#assert_axioms lookup_entries
+#assert_axioms maintained_init
+#assert_axioms maintained_absent
+#assert_axioms IndexRows.insert_eq_setAll
+#assert_axioms IndexRows.apply_eq_setAll
+#assert_axioms setAll_preserves
+#assert_axioms maintained_apply
 
 /-! ## The incremental set against the canonical root (executed probe)
 
