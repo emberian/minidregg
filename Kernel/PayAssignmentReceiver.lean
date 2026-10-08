@@ -29,6 +29,8 @@ receiver uses; the owner-grant fact above is checked on the same stored
 capability.  Binding a deposit address only ever adds credit to `A`, so the
 authority it requires (owning `A`) is not widened by it.
 -/
+import Kernel.PayAssignmentOwner
+import Compiler.DurableReceiverIO
 import Kernel.CapabilityRevocationController
 import Kernel.PayCellDomain
 
@@ -63,33 +65,6 @@ abbrev Durable := DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes
 abbrev Snapshot := CredentialAuthorityDomain.Snapshot
 
 /-! ## The pure decision -/
-
-/-- The two target forms an owner grant on `account` takes: genesis issues
-`explicit {account}`; a workspace birth issues `under account` (the owner holds
-the cell as a room, K-ROOM). An `under R` grant for a room `R` containing the
-account is not ownership of it: it is governed by `R`'s law, not `account`'s. -/
-def OwnerTargets (targets : TargetSet .account) (account : Nat) : Prop :=
-  targets = .explicit {⟨account⟩} ∨ targets = .under account
-
-instance (targets : TargetSet .account) (account : Nat) :
-    Decidable (OwnerTargets targets account) := by
-  unfold OwnerTargets; infer_instance
-
-/-- The owner-grant fact: the presented account capability is held by
-`subject`, targets `{account}` or `under account`, and is governed by `account`'s policy
-(`ResourceBirth.AuthorityGrant.NativeForBirth` with its holder). -/
-def OwnerGrant (stored : Option (StoredCapability .account)) (subject : SubjectId)
-    (account : Nat) : Prop :=
-  match stored with
-  | none => False
-  | some stored =>
-      stored.head.holder = .subject subject ∧ OwnerTargets stored.head.scope.targets account ∧
-        stored.head.policyId.value = account
-
-instance (stored : Option (StoredCapability .account)) (subject : SubjectId) (account : Nat) :
-    Decidable (OwnerGrant stored subject account) := by
-  unfold OwnerGrant
-  split <;> infer_instance
 
 inductive Reject where
   | malformedIngress | directoryUnavailable | authorityUnavailable | payUnavailable

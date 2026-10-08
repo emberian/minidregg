@@ -29,7 +29,7 @@ Producers:
 `Served` is indexed by the opened Store's identity, so a view can only be built
 from a head of the same Store.
 -/
-import Compiler.DurableHistoryStore
+import Compiler.DurableHistoryStoreCore
 import Std.Data.HashMap
 
 namespace Minidregg.Compiler.DurableServed

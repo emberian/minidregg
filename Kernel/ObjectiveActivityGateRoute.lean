@@ -34,20 +34,19 @@ theorem bind_ok_left {ε : Type} {a b : Except ε Unit} (ok : (a >>= fun _ => b)
   | error e => cases ok
   | ok u => cases u; rfl
 
-/-- A record the durable judge admits passed its transport's source gate. -/
+/-- A record admitted by the durable writer carries its source-gate evidence. -/
 theorem judge_source {rootBytes : List UInt8 → TypedAuthorization.Digest}
     (transport : Compiler.DurableReceiverIO.Transport) (loaded : Compiler.DurableReceiverIO.Loaded rootBytes)
-    (intent : DataIntent rootBytes) (ok : loaded.judge transport intent = .ok ()) :
-    transport.sourceGate loaded.snapshot intent = .ok () := by
-  simp only [Compiler.DurableReceiverIO.Loaded.judge] at ok
-  exact bind_ok_left ok
+    (intent : DataIntent rootBytes) (judged : Compiler.DurableReceiverIO.Judged transport loaded intent) :
+    transport.sourceGate loaded.snapshot intent = .ok () :=
+  judged.intentExact ▸ judged.commit.source
 
 /-- **Every judged record is a step of the checkpoint invariant.** A record the
 replay walk re-admits and judges is the kernel activity's own admitted turn, a
 seat turn whose posts touch no kernel-activity cell, or it writes no protected
 coordinate. -/
 theorem derived_route {config : Config} {opened : Opened config} (derived : Derived config opened)
-    (judged : opened.durable.judge derived.transport derived.intent = .ok ()) :
+    (judged : Compiler.DurableReceiverIO.Judged derived.transport opened.durable derived.intent) :
     (∃ (kernel : ObjectiveActivity.Config) (height : Nat)
         (turn : ObjectiveActivity.AdmittedTurn kernel opened.durable.snapshot height)
         (sealing : ObjectiveActivityWire.Seal) (posts : List ObjectiveActivityWire.Post)
@@ -57,48 +56,8 @@ theorem derived_route {config : Config} {opened : Opened config} (derived : Deri
       (∃ posts : List ObjectiveActivityWire.Post,
         derived.intent.writes = posts.map (ObjectiveActivityWire.Post.write Compiler.ResourceBirthCodec.rootBytes) ∧
           SeatStore.Inert opened.durable.snapshot posts) ∨
-      ObjectiveActivityGate.ordinaryGate derived.intent = .ok () := by
-  have source := judge_source _ _ _ judged
-  unfold Derived.transport at source
-  cases held : derived.kernel with
-  | some kernel =>
-    cases kernel with
-    | activity ingress verdict exact =>
-      left
-      cases verdict with
-      | accepted accepted =>
-        exact ⟨_, _, accepted.prepared.decided,
-          ObjectiveActivityReceiver.admissionSeal accepted.prepared ingress, accepted.prepared.final.1,
-          accepted.prepared.final.2, accepted.prepared.finalExact, exact⟩
-      | failed failed =>
-        -- A charged failure is the kernel's own `failed` turn (the Book only), under the same seal.
-        exact ⟨_, _, ObjectiveActivity.AdmittedTurn.failed failed.request failed.failure,
-          { ObjectiveActivityReceiver.sealAt (profile := config.profile) failed.gated.authority
-              ingress.command ingress with
-            event := ObjectiveActivityReceiver.failedEvent
-              (ObjectiveActivityReceiver.event config.deployment.domain config.profile.semantics ingress)
-              failed.cause },
-          failed.final.1, failed.final.2, failed.finalExact, exact⟩
-    | seat ingress accepted exact =>
-      right; left
-      exact ⟨accepted.prepared.decided.posts, by rw [exact]; rfl, accepted.prepared.decided.inert⟩
-  | none =>
-    right; right
-    rw [held] at source
-    simp only at source
-    have joint : ∀ {s : DataSnapshot Minidregg.Compiler.ResourceBirthCodec.rootBytes},
-        config.otherFacetGate .joint s derived.intent = .ok () →
-          ObjectiveActivityGate.ordinaryGate derived.intent = .ok () :=
-      fun ok => config.sourceGate_ordinary (own := some .joint) (by decide) ok
-    split at source
-    · exact joint (bind_ok_left source)
-    · split at source
-      · exact joint (bind_ok_left source)
-      · split at source
-        · exact joint (bind_ok_left source)
-        · unfold Config.transport at source
-          split at source <;>
-          exact config.sourceGate_ordinary (own := none) (by decide) source
+      ObjectiveActivityGate.ordinaryGate derived.intent = .ok () :=
+  judged.route
 
 #assert_axioms bind_ok_left
 #assert_axioms judge_source

@@ -1,4 +1,5 @@
 /- A canonical new signing principal and operation marker publish in one CAS. -/
+import Compiler.DurableReceiverIO
 import Kernel.ParticipantKeyEnrollment
 
 namespace Minidregg.Kernel.ParticipantKeyEnrollmentReceiver

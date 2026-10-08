@@ -33,7 +33,6 @@ theorem select_without_custodian (config : NativeHost.Config) :
     select { config with completionCustodianKey := none } (some config) =
       .ok config.profile := by
   simp [select]
-  rfl
 
 theorem select_unconfigured (config : NativeHost.Config) :
     select config none = .ok config.profile := by
