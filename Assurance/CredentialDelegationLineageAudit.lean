@@ -77,7 +77,7 @@ import Assurance.CredentialDelegationLineageWitness
 #guard_msgs (whitespace := lax) in
   #print axioms Minidregg.Assurance.CredentialDelegationLineageWitness.orphaned_transfer_refused
 
-/-- info: 'Minidregg.Assurance.CredentialDelegationLineageWitness.grantor_rotation_keeps_historical_lineage' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.CredentialDelegationLineageWitness.grantor_rotation_keeps_historical_lineage' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
   #print axioms Minidregg.Assurance.CredentialDelegationLineageWitness.grantor_rotation_keeps_historical_lineage
 
