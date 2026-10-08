@@ -509,6 +509,7 @@ theorem decodes_of_derived {B : Bridge R D} {H : History R TransactionId StableE
   have spec := deltaOf_spec hδ
   cases δ with
   | absent => exact ⟨_, spec.2.1⟩
+  | burn => exact ⟨_, spec.2.1⟩
   | create => exact ⟨_, spec.2⟩
   | change => exact ⟨_, spec.2⟩
   | retire => exact ⟨_, spec.2.1⟩
@@ -1081,6 +1082,7 @@ theorem ofIntent_policySource_birth {D' : Type} [DecidableEq D']
   rw [d.eq]
   cases δ with
   | absent => rw [spec.2.1] at dec; cases dec
+  | burn => rw [spec.2.1] at dec; cases dec
   | change k s s' => exact absurd (spec.1.symm.trans absent) (Option.some_ne_none _)
   | retire k s => exact absurd (spec.1.symm.trans absent) (Option.some_ne_none _)
   | create k s' =>
@@ -1094,7 +1096,7 @@ theorem ofIntent_policySource_birth {D' : Type} [DecidableEq D']
             (Minidregg.Compiler.PolicySourceCell.stateOfOption (some record)) =
           Minidregg.Compiler.PolicySourceCell.stateOfOption (some record) :=
         romPart_of_romOnly (Minidregg.Kernel.DeployedBridge.policySource_romOnly _)
-      exact mem_createsOf.mpr ⟨_, _, _, md,
+      exact mem_createsOf.mpr ⟨_, _, _, .inl md,
         Prod.ext rfl (Prod.ext (congrArg (Cell.mk (R := deployedR) .policySource) rom.symm) rfl)⟩
 
 /-! ### The three inferred rows, traced (T3 §2: 13, 14, 16)

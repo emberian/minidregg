@@ -231,7 +231,9 @@ theorem decodeCell_retired :
 
 /-- The deployed cell codec: the decoder and the canonical address order of
 each kind's wire. -/
-def codec : Codec deployedR := Codec.ofWires decodeCell retiresCell retiresCell_decode wireOf
+def codec : Codec deployedR :=
+  { Codec.ofWires decodeCell retiresCell retiresCell_decode wireOf with
+    retirementKind := some .objectiveActivity }
 
 /-- **The deployed `Bridge`**: the real cell codec and the injective nullifier
 key. -/
