@@ -1,0 +1,15 @@
+[Unit]
+Description=Mini SPK operator broker for store %i
+
+[Service]
+Type=exec
+ExecStart=%h/.local/libexec/mini-spk-broker serve /var/lib/mini-spk-worlds/%i/broker/config.json
+Restart=on-failure
+RestartSec=5
+UMask=0077
+# sudo and the standard mapping helpers are one-shot trusted boundaries.
+# The resident parser/worker set no_new_privs and clear all capability sets.
+NoNewPrivileges=no
+
+[Install]
+WantedBy=default.target

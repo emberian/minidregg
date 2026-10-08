@@ -202,26 +202,10 @@ pub(super) fn render(
     if declared.is_empty() {
         return Ok(String::new());
     }
-    let mut selected = BTreeSet::new();
-    let mut empty_parents = BTreeSet::new();
-    for path in declared {
-        if fs::symlink_metadata(path)?.is_file() || path == socket_parent {
-            selected.insert(text(path)?.to_owned());
-            if home(path) && fs::symlink_metadata(path)?.is_file() {
-                let parent = path.parent().ok_or_else(|| invalid("visible file lacks parent"))?;
-                if parent != socket_parent {
-                    // Keep immediate-parent custody metadata without exposing
-                    // its other contents. systemd mounts exact files atop this
-                    // empty read-only directory, not the original directory.
-                    let meta = fs::symlink_metadata(parent)?;
-                    empty_parents.insert(format!("{}:ro,mode={:04o},uid={},gid={}", text(parent)?, meta.mode() & 0o777, meta.uid(), meta.gid()));
-                }
-            }
-        }
-    }
-    let paths = selected.into_iter().collect::<Vec<_>>().join(" ");
-    let parents = empty_parents.into_iter().collect::<Vec<_>>().join(" ");
-    Ok(format!("# source-rendered exact operator visibility; app bwrap root remains isolated\n[Service]\nProtectHome=tmpfs\nTemporaryFileSystem={parents}\nBindReadOnlyPaths={paths}\n"))
+    // The operator's user unit already sees its own protected inputs. App
+    // bytes receive only the existing bwrap image/var/RPC descriptors; no
+    // system-manager bind mounts or privileged home overlay is rendered.
+    Ok(String::new())
 }
 fn seeds(value: &Value, needed: &mut BTreeSet<PathBuf>) -> io::Result<()> {
     for signer in value

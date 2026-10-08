@@ -135,7 +135,7 @@ impl Frozen {
             if required{return Err(invalid("registered volume is not a distinct mounted filesystem"))}
             return Ok(None)
         }
-        let dir=grains.directory("broker",&[0])?.create_dir("freezes")?;
+        let dir=grains.directory("volume-custody",&[0])?.create_dir("freezes")?;
         let lock=dir.lock()?;
         recover_locked(root,&dir)?;
         let meta=mount.metadata()?;
@@ -200,7 +200,7 @@ fn recover_locked(root:&Path,dir:&Dir)->io::Result<()>{
 }
 pub(super) fn recover(root:&Path)->io::Result<()>{
     let grains=Dir::absolute(root,&[0])?;
-    let dir=grains.directory("broker",&[0])?.create_dir("freezes")?;
+    let dir=grains.directory("volume-custody",&[0])?.create_dir("freezes")?;
     let _lock=dir.lock()?;
     recover_locked(root,&dir)
 }
@@ -253,19 +253,24 @@ pub(super) fn export(root:&Path,store:&str,app:&str,uid:u32,gid:u32)->io::Result
     let stamp=SystemTime::now().duration_since(UNIX_EPOCH).map_err(|_|invalid("clock"))?.as_nanos();
     let leaf=format!("{app}-{stamp}.ext4");
     let mut out=exports.create(&leaf)?;
+    let freeze_started=std::time::Instant::now();
     let frozen=Frozen::begin(root,&name,true)?;
     let copied=(||->io::Result<String>{
         sparse_copy(&mut source,&mut out)?;out.sync_all()?;
         out.seek(SeekFrom::Start(0))?;file_sha256(&mut out)
     })();
     if let Some(guard)=frozen{guard.finish()?}
+    let frozen_ms=freeze_started.elapsed().as_millis();
     let hash=copied?;
     exports.same_leaf(&leaf,&out)?;
+    let fsck=inspect_copy("/usr/sbin/e2fsck",&["-fn"],&out)?;
+    let listing=inspect_copy("/usr/sbin/debugfs",&["-R","ls -l /"],&out)?;
     change_owner(&out,uid,gid)?;
     out.sync_all()?;exports.0.sync_all()?;
     exports.same_leaf(&leaf,&out)?;
     Ok(json!({"image":root.join(store).join("exports").join(leaf),"sha256":hash,
-        "bytes":out.metadata()?.len().to_string()}))
+        "bytes":out.metadata()?.len().to_string(),"frozenMs":frozen_ms.to_string(),"e2fsck":if fsck.status.success(){"clean"}else{"errors"},
+        "rootListing":String::from_utf8_lossy(&listing.stdout).lines().map(str::trim).filter(|line|!line.is_empty()).collect::<Vec<_>>()}))
 }
 
 pub(super) struct BackupTarget {dir:Dir}
@@ -435,7 +440,7 @@ mod tests {
             assert!(std::time::Instant::now()<deadline,"bounded freeze worker readiness");
             std::thread::sleep(Duration::from_millis(10));
         }
-        let intent=root.join("broker/freezes/1111111111111111-990010.json");assert!(intent.is_file());
+        let intent=root.join("volume-custody/freezes/1111111111111111-990010.json");assert!(intent.is_file());
         worker.child.kill().unwrap();let status=worker.child.wait().unwrap();
         use std::os::unix::process::ExitStatusExt;assert_eq!(status.signal(),Some(libc::SIGKILL));
         assert!(intent.is_file(),"SIGKILL must retain durable freeze obligation");

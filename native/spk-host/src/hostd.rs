@@ -349,7 +349,7 @@ struct UnitInstance {
 fn systemd_show(unit: &str) -> io::Result<String> {
     let output = bounded_systemctl(
         &[
-            "--system",
+            "--user",
             "show",
             unit,
             "--property=Id,LoadState,ActiveState,MainPID,Job,InvocationID,ControlGroup",
@@ -363,17 +363,16 @@ fn systemd_show(unit: &str) -> io::Result<String> {
     String::from_utf8(output.stdout).map_err(|_| invalid("systemd unit inspection is not UTF-8"))
 }
 
-/// Resident units are installed and stopped by the root broker; the operator
-/// running STOP holds no unit-manager privilege. Root-run unit tests stop
-/// their own probe units directly.
+/// Resident units are installed and stopped by the store-bound operator broker.
+/// Unit inspection and direct probe control use the operator user manager.
 #[cfg(not(test))]
 fn stop_unit(unit: &str) -> io::Result<()> {
-    crate::broker::call(&crate::broker::Request::Stop { unit: unit.to_owned() }).map(|_| ())
+    Err(invalid(format!("explicit broker endpoint required to stop {unit}")))
 }
 
 #[cfg(test)]
 fn stop_unit(unit: &str) -> io::Result<()> {
-    let output = bounded_systemctl(&["--system", "stop", unit], Duration::from_secs(10))?;
+    let output = bounded_systemctl(&["--user", "stop", unit], Duration::from_secs(10))?;
     if output.status.success() {
         Ok(())
     } else {
@@ -906,7 +905,7 @@ impl Journal {
             let meta = fs::symlink_metadata(ancestor)?;
             if !meta.is_dir()
                 || meta.file_type().is_symlink()
-                || (meta.uid() != 0 && meta.uid() != uid)
+                || (!crate::namespace_identity::root_owned(ancestor, &meta) && meta.uid() != uid)
                 || meta.permissions().mode() & 0o022 != 0
             {
                 return Err(invalid(
@@ -3198,11 +3197,11 @@ mod tests {
     }
 
     #[test]
-    fn installed_system_unit_stop_audit_probe() {
+    fn installed_user_unit_stop_audit_probe() {
         if std::env::var("MINI_SPK_SYSTEMD_AUDIT_PROBE").as_deref() != Ok("1") {
             return;
         }
-        assert_eq!(unsafe { libc::geteuid() }, 0);
+        assert_ne!(unsafe { libc::geteuid() }, 0);
         let identity = VerifiedBegin {
             app: 991005,
             generation: 1,
@@ -3233,7 +3232,7 @@ mod tests {
         };
         UnitStopAudit::before_stop(&record).unwrap();
         let status = Command::new("/usr/bin/systemctl")
-            .args(["--system", "stop", record.unit()])
+            .args(["--user", "stop", record.unit()])
             .status()
             .unwrap();
         assert!(status.success());
@@ -3244,7 +3243,7 @@ mod tests {
         // Simulate a crash after systemd stop but before Stopped fsync. The
         // production retry must recognize the exact cleared manager/cgroup
         // state and finish the durable tombstone without a second stop.
-        let path = Path::new("/run").join(format!("mini-spk-stop-audit-{}", std::process::id()));
+        let path = Path::new("/run/user").join(unsafe { libc::geteuid() }.to_string()).join(format!("mini-spk-stop-audit-{}", std::process::id()));
         fs::DirBuilder::new().mode(0o700).create(&path).unwrap();
         let journal = Journal::open(&path).unwrap();
         journal
@@ -3260,12 +3259,10 @@ mod tests {
         if std::env::var("MINI_SPK_UNIT_INSTANCE_PROBE").as_deref() != Ok("1") {
             return;
         }
-        assert_eq!(unsafe { libc::geteuid() }, 0);
+        assert_ne!(unsafe { libc::geteuid() }, 0);
         let instance = UnitInstance::current("mini-spk-s0123456789abcdef-a991006-g1.service").unwrap();
         assert_eq!(instance.invocation_id.len(), 32);
-        assert_eq!(
-            instance.control_group,
-            "/system.slice/mini-spk-s0123456789abcdef-a991006-g1.service"
-        );
+        assert!(instance.control_group.starts_with("/user.slice/"));
+        assert!(instance.control_group.ends_with("/mini-spk-s0123456789abcdef-a991006-g1.service"));
     }
 }

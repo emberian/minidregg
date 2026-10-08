@@ -12,7 +12,7 @@
 #   grain-journey.sh stop-services RUN_ROOT  stop the Store services
 #
 # Runs as the Store operator (`mini`), never root: every root step is a
-# request to mini-spk-broker, which must be serving. The Store services are
+# one-shot volume helper call by the unprivileged broker. The Store services are
 # child processes of this journey (pid files under RUN/sock). Environment:
 #   BIN          directory holding the Host, mini, spk-host and Store helpers
 #   GRAIN_HOST   the Host binary (default BIN/minidregg-host)
@@ -27,11 +27,11 @@ MODE=$1 RUN=$2
 shift 2
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 BIN=${BIN:-/opt/minidregg-m6-20260930/bin}
-SPK=${SPK:-/home/ember/build/mini-product-20260930/m6-grain/inputs/sntfy.spk}
+SPK=${SPK:-/srv/lanes/prod-spk/cache/sntfy-bc424d5fd3cf60977cacdac328adfbee4de94f88d57383ad38b3d472c0c24f2d.spk}
 HOST=${GRAIN_HOST:-$BIN/minidregg-host}
-GRAINS_ROOT=${GRAINS_ROOT:-/var/lib/mini/grains}
+GRAINS_ROOT=${GRAINS_ROOT:?store-specific grains root required}
 # Explicit native CLI/profile pin; never a native environment-selected endpoint.
-BROKER_SOCKET=${BROKER_SOCKET:-}
+BROKER_SOCKET=${BROKER_SOCKET:?store-specific broker socket required}
 MINI=$BIN/mini
 SPK_HOST=$BIN/spk-host
 BWRAP=${BWRAP:-/usr/bin/bwrap}
@@ -49,9 +49,9 @@ state_paths() {
   if [ -f "$PROFILE_RESULT" ]; then
     jq -e --arg config "$CONFIG" --arg grains "$GRAINS_ROOT" \
       --arg configSha "$(sha256sum "$CONFIG" | cut -d ' ' -f 1)" --arg init "$EV/init-store.json" \
-      --arg broker "${BROKER_SOCKET:-/run/mini-spk-broker.sock}" '
+      --arg broker "$BROKER_SOCKET" '
       .protocol == "mini-spk-grain-profile-result-v1" and
-      (.brokerSocket // "/run/mini-spk-broker.sock") == $broker and
+      .brokerSocket == $broker and
       .miniConfig == $config and .miniConfigSha256 == $configSha and
       .grainsRoot == $grains and .initStoreResult == $init and (.stateRoot | startswith($grains + "/")) and
       .profilePath == (.stateRoot + "/grain-host.json")' "$PROFILE_RESULT" >/dev/null || {
@@ -59,9 +59,9 @@ state_paths() {
       }
     STATE=$(jq -er .stateRoot "$PROFILE_RESULT")
     PROFILE=$(jq -er .profilePath "$PROFILE_RESULT")
-    jq -e --arg state "$STATE" --arg broker "${BROKER_SOCKET:-/run/mini-spk-broker.sock}" '
+    jq -e --arg state "$STATE" --arg broker "$BROKER_SOCKET" '
       .protocol == "mini-spk-grain-init-store-v1" and .stateRoot == $state and
-      (.brokerSocket // "/run/mini-spk-broker.sock") == $broker' "$EV/init-store.json" >/dev/null || {
+      .brokerSocket == $broker' "$EV/init-store.json" >/dev/null || {
         echo "grain journey: retained profile differs from native Store initialization" >&2; exit 1;
       }
     [ "$(realpath -- "$STATE")" = "$STATE" ] && [ -f "$PROFILE" ] || {
@@ -69,8 +69,8 @@ state_paths() {
     }
     jq -e --arg state "$STATE" --arg config "$CONFIG" --arg grains "$GRAINS_ROOT" \
       --arg configSha "$(sha256sum "$CONFIG" | cut -d ' ' -f 1)" \
-      --arg broker "${BROKER_SOCKET:-/run/mini-spk-broker.sock}" '
-      (.brokerSocket // "/run/mini-spk-broker.sock") == $broker and .stateRoot == $state and .miniConfig == $config and
+      --arg broker "$BROKER_SOCKET" '
+      .brokerSocket == $broker and .stateRoot == $state and .miniConfig == $config and
       .miniConfigSha256 == $configSha and .grainsRoot == $grains' "$PROFILE" >/dev/null || {
         echo "grain journey: retained profile contradicts its result" >&2; exit 1;
       }
@@ -514,7 +514,7 @@ http_post() (
   set --
   while IFS= read -r arg; do set -- "$@" "$arg"; done <"$EV/$label.cred"
   rm -f "$EV/$label.cred"
-  curl -sS --max-time 900 --unix-socket "$dir/http.sock" -D "$EV/$label.headers" \
+  curl -sS --fail-with-body --max-time 900 --unix-socket "$dir/http.sock" -D "$EV/$label.headers" \
     -H "Host: grain.test" "$@" -X "$method" \
     -H "Content-Type: $type" --data-binary "$body" \
     -o "$EV/$label.body" -w '%{http_code}\n' "http://grain.test$path"
@@ -529,7 +529,7 @@ http_get() (
   set --
   while IFS= read -r arg; do set -- "$@" "$arg"; done <"$EV/$label.cred"
   rm -f "$EV/$label.cred"
-  curl -sS --max-time 900 --unix-socket "$dir/http.sock" -D "$EV/$label.headers" \
+  curl -sS --fail-with-body --max-time 900 --unix-socket "$dir/http.sock" -D "$EV/$label.headers" \
     -H "Host: grain.test" "$@" \
     -o "$EV/$label.body" -w '%{http_code}\n' "http://grain.test$path"
 )
@@ -542,7 +542,7 @@ floor() (
   app=$1
   unit=$("$SPK_HOST" grain status "$PROFILE" "$app" |
     jq -er '[.runs[] | select(.state == "running")][-1].unit')
-  cg=$(systemctl show "$unit" --property=ControlGroup --value)
+  cg=$(systemctl --user show "$unit" --property=ControlGroup --value)
   [ -n "$cg" ] || { echo "no cgroup for $unit" >&2; exit 1; }
   found=0
   # Processes are told apart by their kernel task name (`Name:` in status is
@@ -556,14 +556,17 @@ floor() (
     echo
     case "$name" in
       spk-host)
-        # The resident: never root, holding exactly CAP_SETUID|CAP_SETGID,
-        # under its setid bound.
+        # Parser and reaper hold no capability set after namespace bootstrap.
         if grep -q '^Uid:[[:space:]]*0[[:space:]]' "$status"; then
           echo "resident runs as root" >&2; exit 1
         fi
-        grep -q '^CapEff:[[:space:]]*00000000000000c0$' "$status" &&
+        for set in CapInh CapPrm CapEff CapBnd CapAmb; do
+          grep -q "^$set:[[:space:]]*0000000000000000$" "$status" ||
+            { echo "resident capability set $set is not empty" >&2; exit 1; }
+        done
+        grep -q '^NoNewPrivs:[[:space:]]*1$' "$status" &&
           grep -q '^Seccomp:[[:space:]]*2$' "$status" ||
-          { echo "resident is not exactly setuid+setgid under its setid bound" >&2; exit 1; }
+          { echo "resident no_new_privs/seccomp floor absent" >&2; exit 1; }
         ;;
       bwrap) ;;
       *) grep -q '^Seccomp:[[:space:]]*2$' "$status" &&
@@ -585,13 +588,13 @@ write_profile() {
   fi
   [ ! -e "$EV/init-store.json" ] || fail "Store init already attempted; inspect retained evidence"
   if [ -n "${BROKER_SOCKET:-}" ]; then
-    [ "$BROKER_SOCKET" = "$GRAINS_ROOT/broker.sock" ] || fail "isolated broker must belong to grains root"
+    [ "$BROKER_SOCKET" = "$GRAINS_ROOT/runtime-${GRAINS_ROOT##*/}/broker.sock" ] || fail "isolated broker must belong to grains root"
     "$SPK_HOST" grain init-store "$GRAINS_ROOT" "$HOST" "$CONFIG" --broker-socket "$BROKER_SOCKET" >"$EV/init-store.json"
   else
     "$SPK_HOST" grain init-store "$GRAINS_ROOT" "$HOST" "$CONFIG" >"$EV/init-store.json"
   fi
-  broker=$(jq -er --arg expected "${BROKER_SOCKET:-/run/mini-spk-broker.sock}" '
-    (.brokerSocket // "/run/mini-spk-broker.sock") | select(. == $expected)' "$EV/init-store.json") || fail "native broker endpoint differs"
+  broker=$(jq -er --arg expected "$BROKER_SOCKET" '
+    .brokerSocket | select(. == $expected)' "$EV/init-store.json") || fail "native broker endpoint differs"
   STATE=$(jq -er 'select(.protocol == "mini-spk-grain-init-store-v1") | .stateRoot' "$EV/init-store.json")
   case "$STATE" in "$GRAINS_ROOT"/*) ;; *) fail "native Store root is outside the pinned grains root" ;; esac
   [ -d "$STATE" ] && [ "$(realpath -- "$STATE")" = "$STATE" ] || fail "native Store root is absent or noncanonical"
@@ -611,7 +614,7 @@ write_profile() {
      managementPublicKeyHex:$public,managementSeed:$seed,
      completionCustodianSeed:$completion,completionSemantics:$semantics,
      bwrap:$bwrap,bwrapSha256:$bwrapSha,spkHost:$spkHost,spkHostSha256:$spkHostSha} +
-    (if $broker == "/run/mini-spk-broker.sock" then {} else {brokerSocket:$broker} end)' >"$PROFILE"
+    {brokerSocket:$broker}' >"$PROFILE"
   chmod 600 "$PROFILE"
   jq -n --arg profile "$PROFILE" --arg state "$STATE" --arg grains "$GRAINS_ROOT" --arg broker "$broker" \
     --arg config "$CONFIG" --arg configSha "$(sha "$CONFIG")" \
@@ -635,7 +638,7 @@ run_phase() {
       return ;;
     services) step services services; return ;;
     workroom) step workroom workroom_ready; return ;;
-    profile) step profile write_profile; return ;;
+    profile) step profile write_profile; state_paths; return ;;
   esac
   phase=$1 verb=${1%-*} tail=${1##*-}
   letter=$(printf '%s' "$tail" | cut -c1) n=${tail#?}
@@ -661,6 +664,10 @@ run_phase() {
   case "$verb" in
     birth) step "$phase" birth_app "$letter" $((base + 1000)) "$app" "3${i}01" ;;
     install)
+      if [ ! -f "$spk" ]; then
+        fetched=$("$HERE/fetch-test-spk.sh")
+        [ "$spk" = "$fetched" ] || fail "requested package absent; fetch supplies only pinned sntfy"
+      fi
       if [ -n "$import" ]; then
         step "$phase" "$SPK_HOST" grain install "$PROFILE" "$EV/$letter-app-author/source.json" \
           "$EV/$letter-app-attempt/outcome.json" "$spk" --class "$class" \

@@ -36,7 +36,7 @@ impl Broker {
         if !store_key(store) {
             return Err(invalid("runtime Store refused"));
         }
-        match read_private_root(&self.runtime_path(store), MAX_CONFIG) {
+        match read_private_operator(&self.runtime_path(store), MAX_CONFIG) {
             Ok(bytes) => {
                 let record: Adoption = serde_json::from_slice(&bytes)?;
                 if record.protocol != RUNTIME_PROTOCOL
@@ -96,7 +96,7 @@ impl Broker {
                 spk_host_sha256: self.config.spk_host_sha256.clone(),
             },
         };
-        custody::root_pin(&pin.spk_host, &pin.spk_host_sha256)?;
+        pinned_root_executable(&pin.spk_host,Some(&pin.spk_host_sha256))?;
         unit_argument(&pin.spk_host)?;
         Ok(pin)
     }
@@ -109,7 +109,7 @@ impl Broker {
                 spk_host: self.config.spk_host.clone(),
                 spk_host_sha256: self.config.spk_host_sha256.clone(),
             });
-        custody::root_pin(&pin.spk_host, &pin.spk_host_sha256)?;
+        pinned_root_executable(&pin.spk_host,Some(&pin.spk_host_sha256))?;
         Ok(
             json!({"protocol":"mini-spk-runtime-status-v1", "brokerProtocol":RUNTIME_PROTOCOL,"store":store,
             "state":record.as_ref().map(|r|r.state.as_str()).unwrap_or("baseline"),
@@ -122,7 +122,7 @@ impl Broker {
         for entry in fs::read_dir(self.broker_dir().join("placements"))? {
             let entry = entry?;
             let placement: Placement =
-                serde_json::from_slice(&read_private_root(&entry.path(), MAX_CONFIG)?)?;
+                serde_json::from_slice(&read_private_operator(&entry.path(), MAX_CONFIG)?)?;
             if placement.store == store {
                 Self::check_coordinates(store, &placement.app)?;
                 apps.insert(placement.app);
@@ -231,7 +231,7 @@ impl Broker {
                 if !stopped {
                     return Err(invalid("runtime adoption requires completed STOP"));
                 }
-                let unit = resident_unit(store, app, generation);
+                let unit = resident_unit(store, app, generation)?;
                 unit_quiescent(&unit)?;
                 checked_units.insert(unit);
             }
@@ -262,7 +262,7 @@ impl Broker {
         match fs::symlink_metadata(&path) {
             Ok(meta) => {
                 if !meta.is_file()
-                    || !crate::os::root_owner(meta.uid())
+                    || meta.uid()!=self.operator_uid
                     || meta.mode() & 0o022 != 0
                     || !fs::read_to_string(&path)?.starts_with(&format!(
                         "# rendered by mini-spk-broker store={store} app={app}\n"
@@ -276,7 +276,7 @@ impl Broker {
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
             Err(e) => return Err(e),
         }
-        write_root_text(&path, &text, 0o644, true)?;
+        write_operator_text(&path, &text, 0o644, true)?;
         Ok(unit)
     }
     pub(super) fn render_adopted_supervisors(&self) -> io::Result<()> {
@@ -339,7 +339,7 @@ impl Broker {
             complete_adoption(
                 &record,
                 |record| {
-                    write_root_text(
+                    write_operator_text(
                         &self.runtime_path(store),
                         &serde_json::to_string_pretty(record)?,
                         0o600,
@@ -364,7 +364,7 @@ impl Broker {
         )
     }
     pub(super) fn save_unit_runtime(&self, unit: &str, pin: &RuntimePin) -> io::Result<()> {
-        write_root_text(
+        write_operator_text(
             &self.broker_dir().join("unit-runtimes").join(unit),
             &serde_json::to_string(pin)?,
             0o600,
@@ -375,7 +375,7 @@ impl Broker {
     pub(super) fn require_unit_runtime(&self, store: &str, unit: &str) -> io::Result<()> {
         let current = self.runtime_for(store)?;
         let saved = self.broker_dir().join("unit-runtimes").join(unit);
-        match read_private_root(&saved, MAX_CONFIG) {
+        match read_private_operator(&saved, MAX_CONFIG) {
             Ok(bytes) => {
                 let pinned: RuntimePin = serde_json::from_slice(&bytes)?;
                 if pinned != current {
@@ -446,7 +446,7 @@ fn unit_argument(path: &Path) -> io::Result<&str> {
 }
 fn supervisor_text(
     config: &BrokerConfig,
-    gid: u32,
+    _gid: u32,
     store: &str,
     app: &str,
     pin: &RuntimePin,
@@ -455,9 +455,9 @@ fn supervisor_text(
     let spk = unit_argument(&pin.spk_host)?;
     let root = unit_argument(&config.grains_root)?;
     Ok(format!("# rendered by mini-spk-broker store={store} app={app}\n[Unit]\nDescription=Mini SPK grain supervisor {store}-{app}\n\
-        StartLimitIntervalSec=1800\nStartLimitBurst=3\n\n[Service]\nType=exec\nUser={user}\nGroup={gid}\nSlice={prefix}-grains.slice\n\
+        StartLimitIntervalSec=1800\nStartLimitBurst=3\n\n[Service]\nType=exec\nSlice=s{store}-{prefix}-grains.slice\n\
         ExecStart={spk} grain supervise-instance {root} {store}-{app}\nRestart=on-failure\nRestartSec=30\nRestartPreventExitStatus=3\n\
-        NoNewPrivileges=yes\nUMask=0077\nPrivateTmp=yes\n",user=config.operator_user,prefix=config.unit_prefix))
+        NoNewPrivileges=yes\nUMask=0077\n",prefix=config.unit_prefix))
 }
 fn quiescent_cgroup(text: &str) -> io::Result<Option<&str>> {
     if !text
@@ -665,7 +665,8 @@ mod tests {
         assert!(check_install_pin(Some("hash"), "hash", true).is_ok());
         let config = BrokerConfig {
             resident_home_read_only_paths: Vec::new(),
-            protocol: "mini-spk-broker-config-v1".into(),
+            protocol: "mini-spk-broker-config-v2".into(),
+            store: "0123456789abcdef".into(),
             grains_root: "/var/lib/grains".into(),
             broker_socket: None,
             spk_root: None,

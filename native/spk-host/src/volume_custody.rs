@@ -240,7 +240,7 @@ fn root_chain(path: &Path) -> io::Result<()> {
         };
         prefix.push(name);
         let meta = fs::symlink_metadata(&prefix)?;
-        if !meta.is_dir() || !crate::os::root_owner(meta.uid()) || meta.permissions().mode() & 0o022 != 0 {
+        if !meta.is_dir() || !crate::namespace_identity::root_owned(&prefix, &meta) || meta.permissions().mode() & 0o022 != 0 {
             return Err(invalid("attestation directory custody refused"));
         }
     }
@@ -260,10 +260,10 @@ fn read_root_witness(
     let mut file = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(path)?;
+        .open(&path)?;
     let meta = file.metadata()?;
     if !meta.is_file()
-        || !crate::os::root_owner(meta.uid())
+        || !crate::namespace_identity::root_owned(&path, &meta)
         || meta.nlink() != 1
         || meta.permissions().mode() & 0o777 != 0o644
         || meta.len() == 0
