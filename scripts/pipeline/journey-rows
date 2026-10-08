@@ -161,29 +161,96 @@ row_upgrade() {
   return $rc
 }
 
-# HOST-UPGRADE is a candidate/Store transition, independent of APP ADOPT/MIGRATE.
-# Both pinned historical pairs are mandatory; missing READY candidates are 98.
-row_hostupgrade() {
+# HOST-UPGRADE exercises the running tip, independent of APP ADOPT/MIGRATE.
+# The previous main reopen is 98 until a READY same-epoch main set is available.
+row_hostupgrade() (
   local d=$SRC/native/resource-client/journey.d/jhostupgrade.sh
   local e=/srv/artifacts/e0a8ba21a39d92b470cc331fd16ea0408f608b1f
-  local f=/srv/artifacts/7220394bae5c72f1ae8468ed7745bdb8547c1cc9
-  local g=/srv/artifacts/0ea31db53c5844c9e1676f1dc6b821ec9993da91
-  local candidate file pair n n1 expected rc status detail t overall=0
+  local artifacts=${ARTIFACT_ROOT:-/srv/artifacts} previous= probe
+  local candidate pair n n1 expected rc status detail t overall=0 i=0
   [ -f "$d" ] || return 99
   echo prod-hostup >"$OUT/owner"
   product_tools jq python3 sha256sum timeout realpath cmp || return $?
-  for candidate in "$e" "$f" "$g"; do
+  hostupgrade_ready() {
+    local candidate=$1 file role binary
     for file in READY manifest.json run.sh genesis.sh genesis-params.example.json; do
-      [ -f "$candidate/$file" ] || { echo "missing hostupgrade candidate: $candidate/$file" >&2; return 98; }
+      [ -f "$candidate/$file" ] || return 1
     done
+    for role in host mini store verifier; do
+      binary=$(jq -er --arg r "$role" '.[$r]' "$candidate/manifest.json") || return 1
+      [ -x "$binary" ] || return 1
+    done
+  }
+  for candidate in "$e" "$SET"; do
+    hostupgrade_ready "$candidate" || { echo "missing hostupgrade candidate input: $candidate" >&2; return 98; }
   done
+  probe=$(mktemp -d "$RUN/hostupgrade-epochs.XXXXXX") || return 1
+  trap 'rm -rf -- "$probe"' EXIT
+  # Read the epoch the candidate actually writes, without opening an old Store.
+  hostupgrade_epoch() {
+    local candidate=$1 tag=$2
+    jq '.clock.genesisNow = 1790000000 | .clock.maxStepSeconds = 300' \
+      "$candidate/genesis-params.example.json" >"$probe/$tag-params.json" || return 1
+    timeout 180 "$candidate/run.sh" init --manifest "$candidate/manifest.json" \
+      --params "$probe/$tag-params.json" --state "$probe/$tag" \
+      >"$OUT/epoch-$tag-init.out" 2>"$OUT/epoch-$tag-init.err" || return 1
+    python3 - "$probe/$tag/store/forward-link.sqlite3" >"$OUT/epoch-$tag.txt" <<'PY_EPOCH'
+import sqlite3, sys
+with sqlite3.connect('file:' + sys.argv[1] + '?mode=ro', uri=True) as db:
+    b = db.execute('select bytes from durable_seed where slot=1').fetchone()[0]
+end = b.index(255); size = sum(x * 255**i for i, x in enumerate(b[:end]))
+f = b[end+1:end+1+size]; prefix = b'DREGG.DURABLE.SEED\x02'
+assert len(f) == size and f.startswith(prefix), 'not a labelled v2 durable seed'
+print(f[len(prefix):].decode('ascii'))
+PY_EPOCH
+  }
+  hostupgrade_epoch "$SET" tip || { echo "cannot read tip Store epoch" >&2; return 1; }
+  # TIPS records '<sha> <main|green|next [+labels]> <tree>'. Search main history
+  # newest first, before this tip when listed. A distinct main symlink is also
+  # an input unless TIPS identifies it as newer than this tip.
+  python3 - "$artifacts" "$SET" >"$OUT/previous-main-candidates.txt" <<'PY_PREVIOUS' || { echo "cannot read previous main artifact index" >&2; return 1; }
+import pathlib, re, sys
+root, tip = map(pathlib.Path, sys.argv[1:])
+tip = tip.resolve()
+tips = root / 'TIPS'
+rows = [line.split() for line in tips.read_text().splitlines()] if tips.is_file() else []
+rows = [row for row in rows if len(row) >= 3 and re.fullmatch('[0-9a-f]{40}', row[0])]
+cut = next((i for i, row in enumerate(rows) if row[0] == tip.name), len(rows))
+candidates = [root / row[0] for row in reversed(rows[:cut]) if 'main' in row[1].split('+')]
+main = root / 'main'
+if main.is_dir():
+    positions = [i for i, row in enumerate(rows) if row[0] == main.resolve().name]
+    if cut == len(rows) or not positions or min(positions) < cut:
+        candidates.insert(0, main)
+seen = {tip}
+for candidate in candidates:
+    candidate = candidate.resolve()
+    if candidate not in seen:
+        seen.add(candidate)
+        print(candidate)
+PY_PREVIOUS
+  while IFS= read -r candidate; do
+    hostupgrade_ready "$candidate" || continue
+    i=$((i+1))
+    printf '%s\n' "$candidate" >"$OUT/epoch-previous-$i.candidate"
+    hostupgrade_epoch "$candidate" "previous-$i" || { echo "cannot read previous main Store epoch: $candidate" >&2; return 1; }
+    if cmp -s "$OUT/epoch-tip.txt" "$OUT/epoch-previous-$i.txt"; then previous=$candidate; break; fi
+  done <"$OUT/previous-main-candidates.txt"
   : >"$OUT/subrows.tsv"
-  for pair in EF FG; do
-    if [ "$pair" = EF ]; then n=$e; n1=$f; expected=refuse
-    else n=$f; n1=$g; expected=reopen; fi
+  for pair in EF REOPEN PREVIOUS; do
+    case "$pair" in
+      EF) n=$e; n1=$SET; expected=refuse ;;
+      REOPEN) n=$SET; n1=$SET; expected=reopen ;;
+      PREVIOUS)
+        if [ -z "$previous" ]; then
+          printf 'HOST-UPGRADE-PREVIOUS\tUNCONFIGURED\t0\tno previous READY main set with the tip Store epoch\n' >>"$OUT/subrows.tsv"
+          [ "$overall" != 0 ] || overall=98
+          continue
+        fi
+        n=$previous; n1=$SET; expected=reopen ;;
+    esac
     t=$(date +%s)
-    bash "$d" "$n" "$n1" "$OUT/$pair" "$expected" >"$OUT/$pair.out" 2>"$OUT/$pair.err"
-    rc=$?
+    if bash "$d" "$n" "$n1" "$OUT/$pair" "$expected" >"$OUT/$pair.out" 2>"$OUT/$pair.err"; then rc=0; else rc=$?; fi
     case "$rc" in 0) status=PASS ;; 98) status=UNCONFIGURED ;; *) status=FAIL ;; esac
     if [ "$rc" = 98 ]; then [ "$overall" != 0 ] || overall=98
     elif [ "$rc" != 0 ]; then overall=1; fi
@@ -193,7 +260,7 @@ row_hostupgrade() {
   done
   echo "hostupgrade: $(cut -f1,2 "$OUT/subrows.tsv" | tr '\n' ';')" >&2
   return "$overall"
-}
+)
 
 # The bounty on the seat kernel (world/bounty/BountyEscrow.obend): escrow, claim, submit, approve / reject /
 # silence / cancel, the first claimer, and the planted double-pay, reward+1 and raid the kernel refuses.
