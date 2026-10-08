@@ -2,7 +2,7 @@
 
 `ObjectiveBendDemandForcingBack` transfers SUCCESS backward along a normalization: a forced
 extraction that succeeds has a lazy one that succeeds alike above a threshold. This module
-transfers FAILURE. Every extraction failure but one is the program's own: a forced
+transfers FAILURE. Every non-resource extraction failure is the program's own: a forced
 extraction that fails with `budget` (the output's nodes or bytes), `duplicateField`,
 `executableValue`, `divergent`, `refused` or `yielded` has a lazy extraction that fails with
 the SAME failure, under every resource vector above a threshold (heap and stack room, ticks,
@@ -10,8 +10,8 @@ extraction ticks), with the same output nodes and bytes (`BackSim.materializeFai
 `BackSim.yieldedPlanFail`, `BackSim.completeFail`, `Chain.failsBack`). The output sizes are
 the deployment's, not a resource: a `budget` failure is a property of the Data.
 
-The one exception is `suspended` (out of extraction ticks, or of heap or stack room while
-forcing): it is a RESOURCE failure, and does not transfer (`suspended_is_resource`: one state
+The exceptions are `tickExhausted` (extraction ticks) and `suspended` (heap/stack room
+or policy): both are RESOURCE failures and do not transfer (`suspended_is_resource`: one state
 whose extraction suspends with no extraction ticks and succeeds with more).
 
 So (`node_malformed_of_chain`) a normalized state whose segment halts in a yield or a
@@ -30,10 +30,19 @@ set_option autoImplicit false
 /-- The failure an extraction throws for a forcing outcome (`none`: it finished). -/
 def failureOf : Outcome → Option Failure
   | .finished _ _ => none
-  | .suspended _ _ => some .suspended
+  | .suspended reason _ => some (suspensionFailure reason)
   | .divergent _ _ => some .divergent
   | .refused _ _ => some .refused
   | .yielded _ _ => some .yielded
+
+@[simp] theorem suspensionFailure_ne_divergent (reason : Suspension) :
+    suspensionFailure reason ≠ .divergent := by cases reason <;> simp [suspensionFailure]
+
+@[simp] theorem suspensionFailure_ne_refused (reason : Suspension) :
+    suspensionFailure reason ≠ .refused := by cases reason <;> simp [suspensionFailure]
+
+@[simp] theorem suspensionFailure_ne_yielded (reason : Suspension) :
+    suspensionFailure reason ≠ .yielded := by cases reason <;> simp [suspensionFailure]
 
 /-- A terminal outcome's failure depends only on the control, up to renaming. -/
 theorem failureOf_rename {L L' : Limits} {x y : State} {G : Nat → Nat}
@@ -46,12 +55,16 @@ theorem failureOf_rename {L L' : Limits} {x y : State} {G : Nat → Nat}
 than `suspended` has a lazy forcing with the same failure above a threshold. -/
 theorem BackSim.forceFail {R : (Nat → Nat) → State → State → Prop} {Dom : Array Cell → Nat → Prop}
     (sim : BackSim R Dom) {F : Nat → Nat} {s t : State} (rel : R F s t) {L' : Limits} {T' : Nat}
-    {f : Failure} (fails : failureOf (ObjectiveBendDemandData.forceWith (fun _ => true) L' T' t).1 = some f) (semantic : f ≠ .suspended) :
+    {f : Failure} (fails : failureOf (ObjectiveBendDemandData.forceWith (fun _ => true) L' T' t).1 = some f) (semantic : f ≠ .suspended ∧ f ≠ .tickExhausted) :
     ∃ (L0 : Limits) (n : Nat), ∀ (L : Limits) (T : Nat), LimitsLe L0 L → n ≤ T →
       failureOf (ObjectiveBendDemandData.forceWith (fun _ => true) L T s).1 = some f := by
   rw [ObjectiveBendDemandDataSoundness.forceWith_unrestricted] at fails
   have notSusp : ∀ r st, ObjectiveBendDemandMachine.runBounded L' T' t ≠ .suspended r st := by
-    intro r st h; rw [h] at fails; simp [failureOf] at fails; exact semantic fails.symm
+    intro r st h
+    rw [h] at fails
+    cases r with
+    | ticks => simp [failureOf, suspensionFailure] at fails; exact semantic.2 fails.symm
+    | capacity => simp [failureOf, suspensionFailure] at fails; exact semantic.1 fails.symm
   obtain ⟨n, n', L0, F', rel', eqT, _, lazy⟩ := sim.runBounded rel notSusp
   have ctl := (sim.renames rel').1
   refine ⟨L0, n, fun L T le nle => ?_⟩
@@ -70,8 +83,8 @@ theorem except_bind_error {ε α β : Type} (x : Except ε α) (k : α → Excep
 /-- Materialization failure backward at one depth. -/
 def MaterializeFailBack (R : (Nat → Nat) → State → State → Prop) (Dom : Array Cell → Nat → Prop)
     (L' : Limits) (depth : Nat) : Prop :=
-  ∀ (budget' : Budget) (v : RuntimeValue) (s t : State) (F : Nat → Nat) (f : Failure) (st' : State),
-    R F s t → AllIn (Dom s.heap) (valueAddresses v) → f ≠ .suspended →
+  ∀ (budget' : Budget) (v : RuntimeValue) (s t : State) (F : Nat → Nat) (f : Failure) (st' : State × Budget),
+    R F s t → AllIn (Dom s.heap) (valueAddresses v) → (f ≠ .suspended ∧ f ≠ .tickExhausted) →
     materializeWith (fun _ => true) L' depth budget' (renameValue F v) t = .error (f, st') →
     ∃ (L0 : Limits) (T0 : Nat), ∀ (L : Limits) (k : Nat), LimitsLe L0 L →
       ∃ st, materializeWith (fun _ => true) L depth ⟨budget'.nodes, T0 + k, budget'.bytes⟩ v s = .error (f, st)
@@ -80,8 +93,8 @@ def MaterializeFailBack (R : (Nat → Nat) → State → State → Prop) (Dom : 
 theorem BackSim.foldFail {R : (Nat → Nat) → State → State → Prop} {Dom : Array Cell → Nat → Prop}
     (sim : BackSim R Dom) {L' : Limits} {depth : Nat} (ih : MaterializeFailBack R Dom L' depth) :
     ∀ (fields : List (String × Nat)) (acc : List (String × Data)) (s t : State) (b' : Budget)
-      (F : Nat → Nat) (f : Failure) (st' : State),
-      R F s t → AllIn (Dom s.heap) (fields.map Prod.snd) → f ≠ .suspended →
+      (F : Nat → Nat) (f : Failure) (st' : State × Budget),
+      R F s t → AllIn (Dom s.heap) (fields.map Prod.snd) → (f ≠ .suspended ∧ f ≠ .tickExhausted) →
       (fields.map fun field => (field.1, F field.2)).foldlM (recordStep (fun _ => true) L' depth)
         (acc, t, b') = .error (f, st') →
       ∃ (L0 : Limits) (T0 : Nat), ∀ (L : Limits) (k : Nat), LimitsLe L0 L →
@@ -106,7 +119,7 @@ theorem BackSim.foldFail {R : (Nat → Nat) → State → State → Prop} {Dom :
         change Except.error _ = Except.error _ at first'
         simp only [Except.error.injEq, Prod.mk.injEq] at first'
         obtain ⟨rfl, -⟩ := first'
-        exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨s, by simp [List.foldlM_cons, recordStep, cond] <;> rfl⟩⟩
+        exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨(s, _), by simp [List.foldlM_cons, recordStep, cond] <;> rfl⟩⟩
       · rename_i cond
         cases forced : ObjectiveBendDemandData.forceWith (fun _ => true) L' ticks' ⟨t.heap, .enter (F field.2), []⟩ with
         | mk outcome rest' =>
@@ -122,10 +135,12 @@ theorem BackSim.foldFail {R : (Nat → Nat) → State → State → Prop} {Dom :
           rw [show n + T2 + k - n = T2 + k by omega] at runL
           obtain ⟨st, childL⟩ := child L k (limitsLe_trans (limitsLe_max_right _ _) le)
           exact ⟨st, by simp [List.foldlM_cons, except_bind_error, except_map_error, recordStep, cond, runL, childL]⟩
-        | suspended _ _ =>
+        | suspended reason _ =>
           change Except.error _ = Except.error _ at first'
           simp only [Except.error.injEq, Prod.mk.injEq] at first'
-          exact absurd first'.1.symm semantic
+          cases reason with
+          | ticks => exact absurd first'.1.symm semantic.2
+          | capacity => exact absurd first'.1.symm semantic.1
         | divergent _ _ =>
           change Except.error _ = Except.error _ at first'
           simp only [Except.error.injEq, Prod.mk.injEq] at first'
@@ -214,7 +229,7 @@ theorem BackSim.materializeFail {R : (Nat → Nat) → State → State → Prop}
     intro budget' v s t F f st' _ _ _ found
     simp [materializeWith] at found
     obtain ⟨rfl, rfl⟩ := found
-    exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨s, by simp [materializeWith]⟩⟩
+    exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨(s, _), by simp [materializeWith] <;> rfl⟩⟩
   | succ depth ih =>
     intro budget' v s t F f st' rel valueIn semantic found
     obtain ⟨nodes, ticks', bytes⟩ := budget'
@@ -226,13 +241,13 @@ theorem BackSim.materializeFail {R : (Nat → Nat) → State → State → Prop}
         change Except.error _ = Except.error _ at found
         simp only [Except.error.injEq, Prod.mk.injEq] at found
         obtain ⟨rfl, -⟩ := found
-        exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨s, by simp [materializeWith, c1] <;> rfl⟩⟩
+        exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨(s, _), by simp [materializeWith, c1] <;> rfl⟩⟩
       · rename_i c1
         split at found
         · rename_i c2
           simp at found
           obtain ⟨rfl, -⟩ := found
-          exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨s, by simp [materializeWith, c1, c2]⟩⟩
+          exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨(s, _), by simp [materializeWith, c1, c2] <;> rfl⟩⟩
         · cases found
     | boolean b =>
       simp [materializeWith, renameValue] at found
@@ -241,13 +256,13 @@ theorem BackSim.materializeFail {R : (Nat → Nat) → State → State → Prop}
         change Except.error _ = Except.error _ at found
         simp only [Except.error.injEq, Prod.mk.injEq] at found
         obtain ⟨rfl, -⟩ := found
-        exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨s, by simp [materializeWith, c1] <;> rfl⟩⟩
+        exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨(s, _), by simp [materializeWith, c1] <;> rfl⟩⟩
       · rename_i c1
         split at found
         · rename_i c2
           simp at found
           obtain ⟨rfl, -⟩ := found
-          exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨s, by simp [materializeWith, c1, c2]⟩⟩
+          exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨(s, _), by simp [materializeWith, c1, c2] <;> rfl⟩⟩
         · cases found
     | label l =>
       simp [materializeWith, renameValue] at found
@@ -256,13 +271,13 @@ theorem BackSim.materializeFail {R : (Nat → Nat) → State → State → Prop}
         change Except.error _ = Except.error _ at found
         simp only [Except.error.injEq, Prod.mk.injEq] at found
         obtain ⟨rfl, -⟩ := found
-        exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨s, by simp [materializeWith, c1] <;> rfl⟩⟩
+        exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨(s, _), by simp [materializeWith, c1] <;> rfl⟩⟩
       · rename_i c1
         split at found
         · rename_i c2
           simp at found
           obtain ⟨rfl, -⟩ := found
-          exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨s, by simp [materializeWith, c1, c2]⟩⟩
+          exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨(s, _), by simp [materializeWith, c1, c2] <;> rfl⟩⟩
         · cases found
     | closure body environment =>
       simp [materializeWith, renameValue] at found
@@ -271,12 +286,12 @@ theorem BackSim.materializeFail {R : (Nat → Nat) → State → State → Prop}
         change Except.error _ = Except.error _ at found
         simp only [Except.error.injEq, Prod.mk.injEq] at found
         obtain ⟨rfl, -⟩ := found
-        exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨s, by simp [materializeWith, c1] <;> rfl⟩⟩
+        exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨(s, _), by simp [materializeWith, c1] <;> rfl⟩⟩
       · rename_i c1
         change Except.error _ = Except.error _ at found
         simp only [Except.error.injEq, Prod.mk.injEq] at found
         obtain ⟨rfl, -⟩ := found
-        exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨s, by simp [materializeWith, c1] <;> rfl⟩⟩
+        exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨(s, _), by simp [materializeWith, c1] <;> rfl⟩⟩
     | specification metadata extension =>
       simp [materializeWith, renameValue] at found
       split at found
@@ -284,12 +299,12 @@ theorem BackSim.materializeFail {R : (Nat → Nat) → State → State → Prop}
         change Except.error _ = Except.error _ at found
         simp only [Except.error.injEq, Prod.mk.injEq] at found
         obtain ⟨rfl, -⟩ := found
-        exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨s, by simp [materializeWith, c1] <;> rfl⟩⟩
+        exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨(s, _), by simp [materializeWith, c1] <;> rfl⟩⟩
       · rename_i c1
         change Except.error _ = Except.error _ at found
         simp only [Except.error.injEq, Prod.mk.injEq] at found
         obtain ⟨rfl, -⟩ := found
-        exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨s, by simp [materializeWith, c1] <;> rfl⟩⟩
+        exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨(s, _), by simp [materializeWith, c1] <;> rfl⟩⟩
     | prototype spec target =>
       simp [materializeWith, renameValue] at found
       split at found
@@ -297,12 +312,12 @@ theorem BackSim.materializeFail {R : (Nat → Nat) → State → State → Prop}
         change Except.error _ = Except.error _ at found
         simp only [Except.error.injEq, Prod.mk.injEq] at found
         obtain ⟨rfl, -⟩ := found
-        exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨s, by simp [materializeWith, c1] <;> rfl⟩⟩
+        exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨(s, _), by simp [materializeWith, c1] <;> rfl⟩⟩
       · rename_i c1
         change Except.error _ = Except.error _ at found
         simp only [Except.error.injEq, Prod.mk.injEq] at found
         obtain ⟨rfl, -⟩ := found
-        exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨s, by simp [materializeWith, c1] <;> rfl⟩⟩
+        exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨(s, _), by simp [materializeWith, c1] <;> rfl⟩⟩
     | variant label payload =>
       have payloadIn : Dom s.heap payload := valueIn payload (by simp [valueAddresses])
       simp [materializeWith, renameValue] at found
@@ -311,14 +326,14 @@ theorem BackSim.materializeFail {R : (Nat → Nat) → State → State → Prop}
         change Except.error _ = Except.error _ at found
         simp only [Except.error.injEq, Prod.mk.injEq] at found
         obtain ⟨rfl, -⟩ := found
-        exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨s, by simp [materializeWith, c1] <;> rfl⟩⟩
+        exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨(s, _), by simp [materializeWith, c1] <;> rfl⟩⟩
       · rename_i c1
         split at found
         · rename_i c2
           change Except.error _ = Except.error _ at found
           simp only [Except.error.injEq, Prod.mk.injEq] at found
           obtain ⟨rfl, -⟩ := found
-          exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨s, by simp [materializeWith, c1, c2] <;> rfl⟩⟩
+          exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨(s, _), by simp [materializeWith, c1, c2] <;> rfl⟩⟩
         · rename_i c2
           have entered := sim.reenter (.enter payload) [] rel (by simpa [controlAddresses] using payloadIn)
             (fun _ m => by cases m)
@@ -336,10 +351,12 @@ theorem BackSim.materializeFail {R : (Nat → Nat) → State → State → Prop}
               rw [show n + T2 + k - n = T2 + k by omega] at runL
               obtain ⟨st, childL⟩ := child L k (limitsLe_trans (limitsLe_max_right _ _) le)
               exact ⟨st, by simp [materializeWith, c1, c2, runL, except_map_error, childL]⟩
-            | suspended _ _ =>
+            | suspended reason _ =>
               change Except.error _ = Except.error _ at found
               simp only [Except.error.injEq, Prod.mk.injEq] at found
-              exact absurd found.1.symm semantic
+              cases reason with
+              | ticks => exact absurd found.1.symm semantic.2
+              | capacity => exact absurd found.1.symm semantic.1
             | divergent _ _ =>
               change Except.error _ = Except.error _ at found
               simp only [Except.error.injEq, Prod.mk.injEq] at found
@@ -391,14 +408,14 @@ theorem BackSim.materializeFail {R : (Nat → Nat) → State → State → Prop}
         change Except.error _ = Except.error _ at found
         simp only [Except.error.injEq, Prod.mk.injEq] at found
         obtain ⟨rfl, -⟩ := found
-        exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨s, by simp [materializeWith_record, c1] <;> rfl⟩⟩
+        exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨(s, _), by simp [materializeWith_record, c1] <;> rfl⟩⟩
       · rename_i c1
         split at found
         · rename_i c2
           change Except.error _ = Except.error _ at found
           simp only [Except.error.injEq, Prod.mk.injEq] at found
           obtain ⟨rfl, -⟩ := found
-          exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨s, by simp [materializeWith_record, c1, c2] <;> rfl⟩⟩
+          exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨(s, _), by simp [materializeWith_record, c1, c2] <;> rfl⟩⟩
         · rename_i c2
           split at found
           · rename_i c3
@@ -409,7 +426,7 @@ theorem BackSim.materializeFail {R : (Nat → Nat) → State → State → Prop}
               change Except.error _ = Except.error _ at found
               simp only [Except.error.injEq, Prod.mk.injEq] at found
               obtain ⟨rfl, -⟩ := found
-              exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨s, by simp [materializeWith_record, c1, c2, c3', c4] <;> rfl⟩⟩
+              exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨(s, _), by simp [materializeWith_record, c1, c2, c3', c4] <;> rfl⟩⟩
             · rename_i c4
               rw [except_map_error] at found
               obtain ⟨L0, T0, fold⟩ := sim.foldFail ih fields [] s t _ F f st' rel fieldsIn semantic found
@@ -422,15 +439,15 @@ theorem BackSim.materializeFail {R : (Nat → Nat) → State → State → Prop}
             change Except.error _ = Except.error _ at found
             simp only [Except.error.injEq, Prod.mk.injEq] at found
             obtain ⟨rfl, -⟩ := found
-            exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨s, by simp [materializeWith_record, c1, c2, c3'] <;> rfl⟩⟩
+            exact ⟨⟨0, 0⟩, 0, fun L k _ => ⟨(s, _), by simp [materializeWith_record, c1, c2, c3'] <;> rfl⟩⟩
 
 /-- **Plan extraction's failure, backward**: a forced yield whose Plan extraction fails with
-a failure other than `suspended` has a lazy yield whose extraction fails with the same
+a failure other than `suspended` or `tickExhausted` has a lazy yield whose extraction fails with the same
 failure above a threshold, with the same output nodes and bytes. -/
 theorem BackSim.yieldedPlanFail {R : (Nat → Nat) → State → State → Prop} {Dom : Array Cell → Nat → Prop}
     (sim : BackSim R Dom) {F : Nat → Nat} {y y' : State} (rel : R F y y') {L' : Limits} {budget' : Budget}
-    {f : Failure} {st' : State} (found : ObjectiveBendDemandData.yieldedPlan L' budget' y' = .error (f, st'))
-    (semantic : f ≠ .suspended) :
+    {f : Failure} {st' : State × Budget} (found : ObjectiveBendDemandData.yieldedPlan L' budget' y' = .error (f, st'))
+    (semantic : (f ≠ .suspended ∧ f ≠ .tickExhausted)) :
     ∃ (L0 : Limits) (E0 : Nat), ∀ (L : Limits) (k : Nat), LimitsLe L0 L →
       ∃ st, ObjectiveBendDemandData.yieldedPlan L ⟨budget'.nodes, E0 + k, budget'.bytes⟩ y = .error (f, st) := by
   obtain ⟨ctlEq, _⟩ := sim.renames rel
@@ -461,10 +478,12 @@ theorem BackSim.yieldedPlanFail {R : (Nat → Nat) → State → State → Prop}
           obtain ⟨st, childL⟩ := child L k (limitsLe_trans (limitsLe_max_right _ _) le)
           exact ⟨st, by simp [runL, childL] <;> rfl⟩
         · cases bad
-      | suspended _ _ =>
+      | suspended reason _ =>
         change Except.error _ = Except.error _ at found
         simp only [Except.error.injEq, Prod.mk.injEq] at found
-        exact absurd found.1.symm semantic
+        cases reason with
+        | ticks => exact absurd found.1.symm semantic.2
+        | capacity => exact absurd found.1.symm semantic.1
       | divergent _ _ =>
         change Except.error _ = Except.error _ at found
         simp only [Except.error.injEq, Prod.mk.injEq] at found
@@ -512,13 +531,13 @@ theorem BackSim.yieldedPlanFail {R : (Nat → Nat) → State → State → Prop}
     simp only [renameControl] at found
     change Except.error _ = Except.error _ at found
     simp only [Except.error.injEq, Prod.mk.injEq] at found
-    exact absurd found.1.symm semantic
+    exact absurd found.1.symm semantic.1
 
 /-- **Completion's failure, backward.** -/
 theorem BackSim.completeFail {R : (Nat → Nat) → State → State → Prop} {Dom : Array Cell → Nat → Prop}
     (sim : BackSim R Dom) {F : Nat → Nat} {y y' : State} (rel : R F y y') {L' : Limits} {budget' : Budget}
-    {f : Failure} {st' : State} (found : ObjectiveBendDemandData.complete L' budget' y' = .error (f, st'))
-    (semantic : f ≠ .suspended) :
+    {f : Failure} {st' : State × Budget} (found : ObjectiveBendDemandData.complete L' budget' y' = .error (f, st'))
+    (semantic : (f ≠ .suspended ∧ f ≠ .tickExhausted)) :
     ∃ (L0 : Limits) (E0 : Nat), ∀ (L : Limits) (k : Nat), LimitsLe L0 L →
       ∃ st, ObjectiveBendDemandData.complete L ⟨budget'.nodes, E0 + k, budget'.bytes⟩ y = .error (f, st) := by
   obtain ⟨ctlEq, stEq⟩ := sim.renames rel
@@ -549,7 +568,7 @@ theorem BackSim.completeFail {R : (Nat → Nat) → State → State → Prop} {D
             change Except.error _ = Except.error _ at rest
             simp only [Except.error.injEq, Prod.mk.injEq] at rest
             obtain ⟨rfl, -⟩ := rest
-            exact ⟨st, by simp [hc, hs, childL, encodedAt, big, bind, Except.bind]⟩
+            exact ⟨(st, _), by simp [hc, hs, childL, encodedAt, big, bind, Except.bind] <;> rfl⟩
           · cases rest
         · rename_i noEnc
           change Except.error _ = Except.error _ at rest
@@ -557,15 +576,15 @@ theorem BackSim.completeFail {R : (Nat → Nat) → State → State → Prop} {D
           obtain ⟨rfl, -⟩ := rest
           cases enc : encoded nodes a'.value with
           | some b => exact absurd enc (noEnc b)
-          | none => exact ⟨st, by simp [hc, hs, childL, enc, bind, Except.bind] <;> rfl⟩
+          | none => exact ⟨(st, _), by simp [hc, hs, childL, enc, bind, Except.bind] <;> rfl⟩
     | cons fr rest =>
       rw [ctlEq, stEq, hc, hs] at found
       simp at found
-      exact absurd found.1.symm semantic
+      exact absurd found.1.symm semantic.1
   | _ =>
     rw [ctlEq, hc] at found
     simp [renameControl] at found
-    exact absurd found.1.symm semantic
+    exact absurd found.1.symm semantic.1
 
 /-! ## Segments that end in a failed extraction -/
 
@@ -618,7 +637,7 @@ theorem endsWith_of_failsWith {L : Limits} {T : Nat} {budget : Budget} {s : Stat
 /-- **A segment's extraction failure, backward.** -/
 theorem BackSim.failsBack {R : (Nat → Nat) → State → State → Prop} {Dom : Array Cell → Nat → Prop}
     (sim : BackSim R Dom) {F : Nat → Nat} {s t : State} (rel : R F s t) {L' : Limits} {T' : Nat}
-    {budget' : Budget} {f : Failure} (ran : failsWith L' T' budget' t = some f) (semantic : f ≠ .suspended) :
+    {budget' : Budget} {f : Failure} (ran : failsWith L' T' budget' t = some f) (semantic : (f ≠ .suspended ∧ f ≠ .tickExhausted)) :
     FailsAbove s budget' f := by
   have notSusp : ∀ r st, ObjectiveBendDemandMachine.runBounded L' T' t ≠ .suspended r st := by
     intro r st h; unfold failsWith at ran; rw [h] at ran; cases ran
@@ -656,12 +675,12 @@ theorem BackSim.failsBack {R : (Nat → Nat) → State → State → Prop} {Dom 
     simp [ObjectiveBendDemandMachine.runBounded, ctl, renameControl] at ran
 
 /-- **Along a chain: a semantic extraction failure is the lazy state's own.** Whatever
-extraction failure other than `suspended` the normalized state's segment ends with (under
+extraction failure other than `suspended` or `tickExhausted` the normalized state's segment ends with (under
 some resources), the lazy state's segment ends with the SAME failure under every resource
 vector above a threshold, with the same output nodes and bytes. -/
 theorem Chain.failsBack {s t : State} (h : Chain s t) :
     ∀ {L' : Limits} {T' : Nat} {budget' : Budget} {f : Failure},
-      failsWith L' T' budget' t = some f → f ≠ .suspended → FailsAbove s budget' f := by
+      failsWith L' T' budget' t = some f → (f ≠ .suspended ∧ f ≠ .tickExhausted) → FailsAbove s budget' f := by
   induction h with
   | forces r => exact fun ran semantic => (forcesSim _).failsBack r ran semantic
   | settles a => exact fun ran semantic => settleSim.failsBack ⟨rfl, a⟩ ran semantic
@@ -675,11 +694,11 @@ theorem Chain.failsBack {s t : State} (h : Chain s t) :
 open Minidregg.Theory.ObjectiveBendInteraction (node ending Node) in
 /-- **A semantic extraction failure is the reference's `malformed`.** A normalized state
 whose segment ends (under some resources) in a yield or a completion whose extraction fails
-with anything but `suspended` is in a chain with a lazy state whose reference node is
+with anything but `suspended` or `tickExhausted` is in a chain with a lazy state whose reference node is
 `malformed`: it halts, and no resources make its Plan or result Data within the output
 sizes. -/
 theorem node_malformed_of_chain {s t : State} (h : Chain s t) {L' : Limits} {T' : Nat} {budget : Budget}
-    {f : Failure} (ran : failsWith L' T' budget t = some f) (semantic : f ≠ .suspended) :
+    {f : Failure} (ran : failsWith L' T' budget t = some f) (semantic : (f ≠ .suspended ∧ f ≠ .tickExhausted)) :
     node budget s = .malformed := by
   obtain ⟨L0, T0, E0, fails⟩ := h.failsBack ran semantic
   obtain ⟨n, halts⟩ := failsWith_halts (fails L0 T0 0 (limitsLe_refl _) (Nat.le_refl _))
@@ -711,7 +730,7 @@ def suspendedYield : State := ⟨#[.suspended ⟨.nat 1, []⟩], .yielded 0, []�
 
 def suspendedCheck : Bool :=
   (match ObjectiveBendDemandData.yieldedPlan ⟨8, 8⟩ ⟨8, 0, 64⟩ suspendedYield with
-    | .error (.suspended, _) => true
+    | .error (.tickExhausted, _) => true
     | _ => false) &&
   (match ObjectiveBendDemandData.yieldedPlan ⟨8, 8⟩ ⟨8, 16, 64⟩ suspendedYield with
     | .ok _ => true
@@ -719,12 +738,12 @@ def suspendedCheck : Bool :=
 
 theorem suspendedCheck_true : suspendedCheck = true := by decide +kernel
 
-/-- **`suspended` does not transfer: it is a resource failure.** One yield, one heap and stack
+/-- **Tick suspension does not transfer: it is a resource failure.** One yield, one heap and stack
 room, the same output nodes and bytes: with no extraction ticks its Plan extraction fails
-`suspended`, with 16 it succeeds. (So the backward theorems above exclude it, and a kernel
-fault "plan extraction: suspended" is a statement about the envelope, not the program.) -/
+`tickExhausted`, with 16 it succeeds. (So the backward theorems above exclude it, and a kernel
+fault "plan extraction: tickExhausted" is a statement about the envelope, not the program.) -/
 theorem suspended_is_resource :
-    ∃ st r, ObjectiveBendDemandData.yieldedPlan ⟨8, 8⟩ ⟨8, 0, 64⟩ suspendedYield = .error (.suspended, st) ∧
+    ∃ st r, ObjectiveBendDemandData.yieldedPlan ⟨8, 8⟩ ⟨8, 0, 64⟩ suspendedYield = .error (.tickExhausted, st) ∧
       ObjectiveBendDemandData.yieldedPlan ⟨8, 8⟩ ⟨8, 16, 64⟩ suspendedYield = .ok r := by
   have checked := suspendedCheck_true
   unfold suspendedCheck at checked

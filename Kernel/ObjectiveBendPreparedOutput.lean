@@ -18,7 +18,7 @@ set_option autoImplicit false
 
 inductive Failure where
   | typing
-  | execution (reason : ObjectiveBendDemandData.Failure) (retained : State)
+  | execution (reason : ObjectiveBendDemandData.Failure) (retained : State) (remaining : Budget)
   | nativeBinding
   deriving Repr
 
@@ -44,7 +44,7 @@ def prepare (deployment : CanonicalCellRegistry.Deployment)
     Except Failure (Prepared deployment loaded command source limits budget capacity) := do
   let some checked := check source [] typeFuel | throw .typing
   match runExact : executeWith (ObjectiveBendDemandCapacity.allows capacity) limits budget source.term with
-  | .error failure => throw (.execution failure.1 failure.2)
+  | .error failure => throw (.execution failure.1 failure.2.1 failure.2.2)
   | .ok execution =>
     match lowerExact : ObjectiveBendPlanAdapter.lower deployment loaded command execution.extraction with
     | none => throw .nativeBinding

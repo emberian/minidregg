@@ -146,7 +146,7 @@ theorem ticksLe_with (b : Budget) {t : Nat} (le : b.ticks ≤ t) : TicksLe b {b 
 side at its image under the map the record was renamed by (later maps extend it). -/
 theorem foldlM_forces {gap : Nat} {base : Nat} {F0 : Nat → Nat}
     {L L' : Limits} {step : Limits → List (String × Data) × State × Budget → String × Nat →
-      Except (Failure × State) (List (String × Data) × State × Budget)}
+      Except (Failure × State × Budget) (List (String × Data) × State × Budget)}
     (stepRel : ∀ (acc : List (String × Data)) (st st' : State) (b b' : Budget) (field : String × Nat)
         (out : List (String × Data) × State × Budget) (F : Nat → Nat),
       ForcesBy gap F st st' → field.2 < st.heap.size → TicksLe b b' → step L (acc, st, b) field = .ok out →

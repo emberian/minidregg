@@ -268,7 +268,7 @@ def FieldsInvariant (origin : State) (meaning : AddressMeaning) (processed : Lis
 
  theorem foldlM_fieldsInvariant {origin : State} {meaning : AddressMeaning}
     {body : List (String × Data) × State × Budget → String × Address →
-      Except (Failure × State) (List (String × Data) × State × Budget)}
+      Except (Failure × State × Budget) (List (String × Data) × State × Budget)}
     (stepOk : ∀ processed accumulated field result, field.2 < origin.heap.size →
       FieldsInvariant origin meaning processed accumulated → body accumulated field = .ok result →
       FieldsInvariant origin meaning (processed ++ [field]) result) :

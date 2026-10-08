@@ -940,6 +940,8 @@ def admissionSeal (prepared : Prepared deployment profile ambient durable comman
 /-- The refusals of a call tree that arise while it runs (after the root's front-end replay):
 every one but a kernel refusal decided cheaply and an absent object. -/
 def callAfterWork : ObjectiveCall.CallRefusal → Bool
+  | .extractionAccount reason _ _ => callAfterWork reason
+  | .extractionAllowanceExhausted | .extractionFailed _ => true
   | .kernel reason => reason.afterWork
   | .notAnObject _ => false
   | .reentry _ _ | .depth _ | .stateMissing _ | .notCallable _ _ _ | .notDeliverable _ _ _ | .continuationDepth _

@@ -255,7 +255,7 @@ theorem good_forceWith {assumptions : Assumptions} {policy : State → Bool} (li
 
 theorem good_foldlM {assumptions : Assumptions} {base : Nat}
     {step : List (String × Data) × State × Budget → String × Nat →
-      Except (Failure × State) (List (String × Data) × State × Budget)}
+      Except (Failure × State × Budget) (List (String × Data) × State × Budget)}
     (stepGood : ∀ (acc : List (String × Data)) (st : State) (b : Budget) (field : String × Nat)
         (out : List (String × Data) × State × Budget) (types : AddressTypes),
       HeapGood assumptions types st.heap → base ≤ st.heap.size → field.2 < base →

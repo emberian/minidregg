@@ -266,7 +266,7 @@ def ResultAgree (r r' : Result) : Prop :=
 
 theorem foldlM_agree
     {step : List (String × Data) × State × Budget → String × Nat →
-      Except (Failure × State) (List (String × Data) × State × Budget)}
+      Except (Failure × State × Budget) (List (String × Data) × State × Budget)}
     (stepAgree : ∀ (acc : List (String × Data)) (st st' : State) (b : Budget) (field : String × Nat)
         (out : List (String × Data) × State × Budget),
       Agree st st' → step (acc, st, b) field = .ok out →

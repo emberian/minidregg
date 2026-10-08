@@ -1026,9 +1026,9 @@ def ResultRel (f : Nat → Nat) (D : Nat → Prop) (r r' : Result) : Prop :=
 /-- One field of a record's materialization (the body of `materializeWith`'s fold). -/
 def recordStep (policy : State → Bool) (limits : Limits) (depth : Nat)
     (prior : List (String × Data) × State × Budget) (field : String × Nat) :
-    Except (Failure × State) (List (String × Data) × State × Budget) := do
+    Except (Failure × State × Budget) (List (String × Data) × State × Budget) := do
   let bytes := field.1.utf8ByteSize+(toString field.1.utf8ByteSize).utf8ByteSize+1
-  if bytes > prior.2.2.bytes || prior.2.2.nodes = 0 then throw (.budget,prior.2.1)
+  if bytes > prior.2.2.bytes || prior.2.2.nodes = 0 then throw (.budget,prior.2.1,prior.2.2)
   let entered : State := {prior.2.1 with control:=.enter field.2,stack:=[]}
   let (outcome,ticks) := forceWith policy limits prior.2.2.ticks entered
   let nextBudget := {prior.2.2 with ticks:=ticks,bytes:=prior.2.2.bytes-bytes}
@@ -1036,27 +1036,27 @@ def recordStep (policy : State → Bool) (limits : Limits) (depth : Nat)
   | .finished forced retained =>
     let child ← materializeWith policy limits depth nextBudget forced retained
     pure ((field.1,child.value)::prior.1,child.state,child.remaining)
-  | .suspended _ retained => throw (.suspended,retained)
-  | .divergent _ retained => throw (.divergent,retained)
-  | .refused _ retained => throw (.refused,retained)
-  | .yielded _ retained => throw (.yielded,retained)
+  | .suspended reason retained => throw (suspensionFailure reason,retained,nextBudget)
+  | .divergent _ retained => throw (.divergent,retained,nextBudget)
+  | .refused _ retained => throw (.refused,retained,nextBudget)
+  | .yielded _ retained => throw (.yielded,retained,nextBudget)
 
 theorem materializeWith_record (policy : State → Bool) (limits : Limits) (depth : Nat) (budget : Budget)
     (fields : List (String × Nat)) (state : State) :
     materializeWith policy limits (depth+1) budget (.record fields) state = (do
-      if budget.nodes = 0 then throw (.budget,state)
+      if budget.nodes = 0 then throw (.budget,state,budget)
       let remaining := {budget with nodes:=budget.nodes-1}
       let headerBytes := (toString fields.length).utf8ByteSize+2
-      if headerBytes > remaining.bytes then throw (.budget,state)
+      if headerBytes > remaining.bytes then throw (.budget,state,remaining)
       let remaining := {remaining with bytes:=remaining.bytes-headerBytes}
-      if (fields.map Prod.fst).eraseDups.length != fields.length then throw (.duplicateField,state)
-      if fields.length > remaining.nodes then throw (.budget,state)
+      if (fields.map Prod.fst).eraseDups.length != fields.length then throw (.duplicateField,state,remaining)
+      if fields.length > remaining.nodes then throw (.budget,state,remaining)
       let pair ← fields.foldlM (recordStep policy limits depth) ([],state,remaining)
       pure ⟨.record pair.1.reverse,pair.2.1,pair.2.2⟩) := rfl
 
 theorem foldlM_related {f : Nat → Nat} {D : Nat → Prop}
     {step step' : List (String × Data) × State × Budget → String × Nat →
-      Except (Failure × State) (List (String × Data) × State × Budget)}
+      Except (Failure × State × Budget) (List (String × Data) × State × Budget)}
     (stepRel : ∀ (acc : List (String × Data)) (st st' : State) (b : Budget) (field : String × Nat)
         (out : List (String × Data) × State × Budget),
       Related f D st st' → D field.2 → step (acc, st, b) field = .ok out →

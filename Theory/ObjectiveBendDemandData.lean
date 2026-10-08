@@ -24,10 +24,20 @@ def encoded : Nat → Data → Option (List UInt8)
   | depth+1,.variant label payload => do
       pure ([4] ++ lengthBytes label.utf8ByteSize ++ label.toUTF8.toList ++ (← encoded depth payload))
 inductive Failure where
-  | budget | duplicateField | executableValue | suspended | divergent | refused
+  /-- Only machine tick suspension: forceWith exhausted its countdown. -/
+  | tickExhausted
+  | budget | duplicateField | executableValue
+  /-- Capacity/policy suspension or an extraction called on the wrong control shape.
+  This does not denote tick exhaustion; that is exclusively tickExhausted. -/
+  | suspended
+  | divergent | refused
   /-- The program yielded a Plan: it is an activity, not a pure value. -/
   | yielded
   deriving Repr
+/-- Tick exhaustion is distinct from capacity/policy suspension. -/
+def suspensionFailure : Suspension → Failure
+  | .ticks => .tickExhausted
+  | .capacity => .suspended
 structure Budget where
   nodes : Nat
   ticks : Nat
@@ -59,32 +69,34 @@ info: 'Minidregg.Theory.ObjectiveBendDemandData.forceWith_eq_fast' depends on ax
 #guard_msgs in
 #print axioms forceWith_eq_fast
 
-def materializeWith (policy : State → Bool) (limits : Limits) : Nat → Budget → RuntimeValue → State → Except (Failure × State) Result
-  | 0, _, _, state => .error (.budget,state)
+/-- Materialization threads the remaining budget through failures as well as successes.
+Tick counts come directly from forceWith; failed children retain all earlier field spend. -/
+def materializeWith (policy : State → Bool) (limits : Limits) : Nat → Budget → RuntimeValue → State → Except (Failure × State × Budget) Result
+  | 0, budget, _, state => .error (.budget,state,budget)
   | depth+1, budget, value, state => do
-    if budget.nodes = 0 then throw (.budget,state)
+    if budget.nodes = 0 then throw (.budget,state,budget)
     let remaining := {budget with nodes:=budget.nodes-1}
     match value with
     | .natural n =>
       let bytes := (toString n).utf8ByteSize + 2
-      if bytes > remaining.bytes then throw (.budget,state)
+      if bytes > remaining.bytes then throw (.budget,state,remaining)
       pure ⟨.natural n,state,{remaining with bytes:=remaining.bytes-bytes}⟩
     | .boolean b =>
-      if remaining.bytes < 2 then throw (.budget,state)
+      if remaining.bytes < 2 then throw (.budget,state,remaining)
       pure ⟨.boolean b,state,{remaining with bytes:=remaining.bytes-2}⟩
     | .label s =>
       let bytes := s.utf8ByteSize + (toString s.utf8ByteSize).utf8ByteSize + 2
-      if bytes > remaining.bytes then throw (.budget,state)
+      if bytes > remaining.bytes then throw (.budget,state,remaining)
       pure ⟨.label s,state,{remaining with bytes:=remaining.bytes-bytes}⟩
     | .record fields =>
       let headerBytes := (toString fields.length).utf8ByteSize+2
-      if headerBytes > remaining.bytes then throw (.budget,state)
+      if headerBytes > remaining.bytes then throw (.budget,state,remaining)
       let remaining := {remaining with bytes:=remaining.bytes-headerBytes}
-      if (fields.map Prod.fst).eraseDups.length != fields.length then throw (.duplicateField,state)
-      if fields.length > remaining.nodes then throw (.budget,state)
+      if (fields.map Prod.fst).eraseDups.length != fields.length then throw (.duplicateField,state,remaining)
+      if fields.length > remaining.nodes then throw (.budget,state,remaining)
       let pair ← fields.foldlM (fun (prior : List (String × Data) × State × Budget) field => do
         let bytes := field.1.utf8ByteSize+(toString field.1.utf8ByteSize).utf8ByteSize+1
-        if bytes > prior.2.2.bytes || prior.2.2.nodes = 0 then throw (.budget,prior.2.1)
+        if bytes > prior.2.2.bytes || prior.2.2.nodes = 0 then throw (.budget,prior.2.1,prior.2.2)
         let entered : State := {prior.2.1 with control:=.enter field.2,stack:=[]}
         let (outcome,ticks) := forceWith policy limits prior.2.2.ticks entered
         let nextBudget := {prior.2.2 with ticks:=ticks,bytes:=prior.2.2.bytes-bytes}
@@ -92,14 +104,14 @@ def materializeWith (policy : State → Bool) (limits : Limits) : Nat → Budget
         | .finished forced retained =>
           let child ← materializeWith policy limits depth nextBudget forced retained
           pure ((field.1,child.value)::prior.1,child.state,child.remaining)
-        | .suspended _ retained => throw (.suspended,retained)
-        | .divergent _ retained => throw (.divergent,retained)
-        | .refused _ retained => throw (.refused,retained)
-        | .yielded _ retained => throw (.yielded,retained)) ([],state,remaining)
+        | .suspended reason retained => throw (suspensionFailure reason,retained,nextBudget)
+        | .divergent _ retained => throw (.divergent,retained,nextBudget)
+        | .refused _ retained => throw (.refused,retained,nextBudget)
+        | .yielded _ retained => throw (.yielded,retained,nextBudget)) ([],state,remaining)
       pure ⟨.record pair.1.reverse,pair.2.1,pair.2.2⟩
     | .variant label payload =>
       let bytes := label.utf8ByteSize+(toString label.utf8ByteSize).utf8ByteSize+2
-      if bytes > remaining.bytes || remaining.nodes = 0 then throw (.budget,state)
+      if bytes > remaining.bytes || remaining.nodes = 0 then throw (.budget,state,remaining)
       let entered : State := {state with control:=.enter payload,stack:=[]}
       let (outcome,ticks) := forceWith policy limits remaining.ticks entered
       let nextBudget := {remaining with ticks:=ticks,bytes:=remaining.bytes-bytes}
@@ -107,21 +119,21 @@ def materializeWith (policy : State → Bool) (limits : Limits) : Nat → Budget
       | .finished forced retained =>
         let child ← materializeWith policy limits depth nextBudget forced retained
         pure ⟨.variant label child.value,child.state,child.remaining⟩
-      | .suspended _ retained => throw (.suspended,retained)
-      | .divergent _ retained => throw (.divergent,retained)
-      | .refused _ retained => throw (.refused,retained)
-      | .yielded _ retained => throw (.yielded,retained)
-    | .closure _ _ | .specification _ _ | .prototype _ _ => throw (.executableValue,state)
+      | .suspended reason retained => throw (suspensionFailure reason,retained,nextBudget)
+      | .divergent _ retained => throw (.divergent,retained,nextBudget)
+      | .refused _ retained => throw (.refused,retained,nextBudget)
+      | .yielded _ retained => throw (.yielded,retained,nextBudget)
+    | .closure _ _ | .specification _ _ | .prototype _ _ => throw (.executableValue,state,remaining)
 
-def completeWith (policy : State → Bool) (limits : Limits) (budget : Budget) (state : State) : Except (Failure × State) Result :=
-  if !policy state then .error (.suspended,state) else
+def completeWith (policy : State → Bool) (limits : Limits) (budget : Budget) (state : State) : Except (Failure × State × Budget) Result :=
+  if !policy state then .error (.suspended,state,budget) else
   match state.control,state.stack with
   | .complete value,[] => do
     let result ← materializeWith policy limits budget.nodes budget value state
-    let some bytes := encoded budget.nodes result.value | throw (.budget,result.state)
-    if bytes.length > budget.bytes then throw (.budget,result.state)
+    let some bytes := encoded budget.nodes result.value | throw (.budget,result.state,result.remaining)
+    if bytes.length > budget.bytes then throw (.budget,result.state,result.remaining)
     pure result
-  | _,_ => .error (.suspended,state)
+  | _,_ => .error (.suspended,state,budget)
 /-- A receiver keeps this exact graph-to-full-data correspondence alongside
 its independently checked source/state-origin evidence. -/
 structure ExtractionWith (policy : State → Bool) (limits : Limits) (budget : Budget) (state : State) where
@@ -130,7 +142,7 @@ structure ExtractionWith (policy : State → Bool) (limits : Limits) (budget : B
   exact : completeWith policy limits budget state = .ok result
 
 def extractWith (policy : State → Bool) (limits : Limits) (budget : Budget) (state : State) :
-    Except (Failure × State) (ExtractionWith policy limits budget state) :=
+    Except (Failure × State × Budget) (ExtractionWith policy limits budget state) :=
   match equation : completeWith policy limits budget state with
   | .error failure => .error failure
   | .ok result => .ok ⟨result,equation⟩
@@ -148,15 +160,15 @@ structure ExecutionWith (policy : State → Bool) (limits : Limits) (budget : Bu
 
 def executeWith (policy : State → Bool) (limits : Limits) (budget : Budget)
     (term : Minidregg.Theory.ObjectiveBendOpenRecursion.Term) :
-    Except (Failure × State) (ExecutionWith policy limits budget term) :=
+    Except (Failure × State × Budget) (ExecutionWith policy limits budget term) :=
   match equation : forceWith policy limits budget.ticks (initial term) with
   | (.finished value state,ticks) => do
     let extraction ← extractWith policy limits {budget with ticks:=ticks} state
     pure ⟨value,state,ticks,equation,extraction⟩
-  | (.suspended _ state,_) => .error (.suspended,state)
-  | (.divergent _ state,_) => .error (.divergent,state)
-  | (.refused _ state,_) => .error (.refused,state)
-  | (.yielded _ state,_) => .error (.yielded,state)
+  | (.suspended reason state,ticks) => .error (suspensionFailure reason,state,{budget with ticks := ticks})
+  | (.divergent _ state,ticks) => .error (.divergent,state,{budget with ticks := ticks})
+  | (.refused _ state,ticks) => .error (.refused,state,{budget with ticks := ticks})
+  | (.yielded _ state,ticks) => .error (.yielded,state,{budget with ticks := ticks})
 /-- Existing clear preview behavior remains the unrestricted raw language. -/
 def force := forceWith (fun _ => true)
 def materialize := materializeWith (fun _ => true)
@@ -217,7 +229,7 @@ end
 /-- Extract the Plan of a yielded state through the same budgeted
 materialization as every other Data: enter its cell with an empty stack. -/
 def yieldedPlanWith (policy : State → Bool) (limits : Limits) (budget : Budget) (state : State) :
-    Except (Failure × State) Result :=
+    Except (Failure × State × Budget) Result :=
   match state.control with
   | .yielded plan =>
     let entered : State := {state with control:=.enter plan,stack:=[]}
@@ -226,11 +238,11 @@ def yieldedPlanWith (policy : State → Bool) (limits : Limits) (budget : Budget
       -- Materialization runs on the scratch copy; the checkpoint keeps its stack.
       let result ← materializeWith policy limits budget.nodes {budget with ticks:=ticks} forced retained
       pure {result with state:={result.state with control:=state.control,stack:=state.stack}}
-    | (.suspended _ retained,_) => .error (.suspended,retained)
-    | (.divergent _ retained,_) => .error (.divergent,retained)
-    | (.refused _ retained,_) => .error (.refused,retained)
-    | (.yielded _ retained,_) => .error (.yielded,retained)
-  | _ => .error (.suspended,state)
+    | (.suspended reason retained,ticks) => .error (suspensionFailure reason,retained,{budget with ticks := ticks})
+    | (.divergent _ retained,ticks) => .error (.divergent,retained,{budget with ticks := ticks})
+    | (.refused _ retained,ticks) => .error (.refused,retained,{budget with ticks := ticks})
+    | (.yielded _ retained,ticks) => .error (.yielded,retained,{budget with ticks := ticks})
+  | _ => .error (.suspended,state,budget)
 def yieldedPlan := yieldedPlanWith (fun _ => true)
 
 end Minidregg.Theory.ObjectiveBendDemandData
