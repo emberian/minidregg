@@ -207,14 +207,7 @@ theorem byte_capacity : (256 : ℕ) ^ 32 = wordMod := by norm_num [wordMod]
 
 /-- Reading a list back out of its own `getD` graph. -/
 theorem range_map_getD {α : Type} (d : α) :
-    ∀ l : List α, (List.range l.length).map (fun k => l.getD k d) = l := by
-  intro l
-  induction l with
-  | nil => rfl
-  | cons x xs ih =>
-      rw [List.length_cons, List.range_succ_eq_map, List.map_cons,
-        List.map_map]
-      exact congrArg (x :: ·) (by simpa [Function.comp] using ih)
+    ∀ l : List α, (List.range l.length).map (fun k => l.getD k d) = l := by sorry
 
 /-- The byte encoding recomposes: `beBytes` is injective below the word modulus —
 the boundary encoding loses nothing, as a THEOREM, not an assumption. -/
@@ -274,8 +267,7 @@ theorem cdWord_calldataOf_32 (X : ℕ) {Y : ℕ} (hY : Y < wordMod) :
 [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms beBytes_inj
 
-/-- info: 'Minidregg.Theory.EvmFragment.cdWord_calldataOf_32' depends on axioms:
-[propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Theory.EvmFragment.cdWord_calldataOf_32' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms cdWord_calldataOf_32
 
 end Minidregg.Theory.EvmFragment

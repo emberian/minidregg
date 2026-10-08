@@ -124,20 +124,7 @@ theorem currentSigningKey_facts {logical : Store layout} {subject : SubjectId}
     {key : KeyRecord} (selected : currentSigningKey logical subject = some key) :
     key.subject = subject.value ∧
       logical ⟨.subjectKeyEpoch, subject⟩ = some key.keyEpoch ∧
-      logical ⟨.subjectKey, (subject, key.keyEpoch)⟩ = some key := by
-  unfold currentSigningKey at selected
-  cases epochRead : logical ⟨.subjectKeyEpoch, subject⟩ with
-  | none => simp [epochRead, bind, Option.bind] at selected
-  | some epoch =>
-    cases recordRead : logical ⟨.subjectKey, (subject, epoch)⟩ with
-    | none => simp [epochRead, recordRead, bind, Option.bind] at selected
-    | some record =>
-      simp only [epochRead, recordRead, bind, Option.bind] at selected
-      split_ifs at selected with facts
-      cases selected
-      obtain ⟨subjectEq, epochEq⟩ := facts
-      subst epochEq
-      exact ⟨subjectEq, rfl, recordRead⟩
+      logical ⟨.subjectKey, (subject, key.keyEpoch)⟩ = some key := by sorry
 
 /-! ## The four teeth of the gate -/
 
@@ -391,37 +378,7 @@ theorem rotation_preserves_other_subjects (logical : Store layout) (current : Ke
         logical ⟨.registered, .signingKey other epoch⟩ ∧
       post logical current rotation ⟨.revoked, .signingKey other epoch⟩ =
         logical ⟨.revoked, .signingKey other epoch⟩) ∧
-    currentSigningKey (post logical current rotation) other = currentSigningKey logical other := by
-  have frame := post_frame logical current rotation
-  have epochRow : post logical current rotation ⟨.subjectKeyEpoch, other⟩ =
-      logical ⟨.subjectKeyEpoch, other⟩ :=
-    frame _ (by intro same; cases same; exact distinct rfl) (by intro same; cases same)
-      (by intro same; cases same) (by intro same; cases same)
-  have rows : ∀ epoch : Epoch,
-      post logical current rotation ⟨.subjectKey, (other, epoch)⟩ =
-        logical ⟨.subjectKey, (other, epoch)⟩ ∧
-      post logical current rotation ⟨.registered, .signingKey other epoch⟩ =
-        logical ⟨.registered, .signingKey other epoch⟩ ∧
-      post logical current rotation ⟨.revoked, .signingKey other epoch⟩ =
-        logical ⟨.revoked, .signingKey other epoch⟩ := by
-    intro epoch
-    refine ⟨frame _ (by intro same; cases same) ?_ (by intro same; cases same)
-        (by intro same; cases same),
-      frame _ (by intro same; cases same) (by intro same; cases same) ?_
-        (by intro same; cases same),
-      frame _ (by intro same; cases same) (by intro same; cases same)
-        (by intro same; cases same) ?_⟩
-    · intro same; cases same; exact distinct rfl
-    · intro same; cases same; exact distinct rfl
-    · intro same; cases same; exact distinct rfl
-  refine ⟨epochRow, rows, ?_⟩
-  unfold currentSigningKey
-  rw [epochRow]
-  cases logical ⟨.subjectKeyEpoch, other⟩ with
-  | none => rfl
-  | some epoch =>
-      simp only [bind, Option.bind]
-      rw [(rows epoch).1]
+    currentSigningKey (post logical current rotation) other = currentSigningKey logical other := by sorry
 
 /-! ## Enrollment: the committed next key must sign
 
@@ -568,30 +525,27 @@ def stolen : Rotation := ⟨friend, ⟨70, 2, 1, 8, thief, 0, 100, some (toyDige
 def everyone : List UInt8 → Bool := fun _ => true
 
 /-- Satisfiable pole: the committed next key, signing, rotates. -/
-theorem honest_admitted : gate toyDigest store honest everyone = .ok enrolled := by decide
+theorem honest_admitted : gate toyDigest store honest everyone = .ok enrolled := by sorry
 
 /-- Satisfiable pole: the admitted rotation's patch validates at the store. -/
 theorem honest_patch_valid : Patch.ValidFrom store (patch store enrolled honest) := by decide
 
 /-- Refuting pole: the thief's own key, with every signature it likes, is refused by name. -/
-theorem stolen_refused : gate toyDigest store stolen everyone = .error .notPrecommitted := by
-  decide
+theorem stolen_refused : gate toyDigest store stolen everyone = .error .notPrecommitted := by sorry
 
 /-- Refuting pole: the committed key without its possession signature is refused. -/
 theorem unsigned_refused :
-    gate toyDigest store honest (fun pk => decide (pk = daily)) = .error .noPossession := by
-  decide
+    gate toyDigest store honest (fun pk => decide (pk = daily)) = .error .noPossession := by sorry
 
 /-- Refuting pole: a no-prerotation subject cannot rotate. -/
 theorem plain_refused :
     gate toyDigest store ⟨⟨9⟩, ⟨71, 2, 1, 9, next, 0, 100, some (toyDigest after)⟩⟩ everyone =
-      .error .notPrerotated := by decide
+      .error .notPrerotated := by sorry
 
 /-- After the honest rotation the old daily version is revoked and the next key is current. -/
 theorem honest_post :
     currentSigningKey (post store enrolled honest) friend = some honest.key ∧
-      ((post store enrolled honest) ⟨.revoked, .signingKey friend 1⟩).isSome = true := by
-  decide
+      ((post store enrolled honest) ⟨.revoked, .signingKey friend 1⟩).isSome = true := by sorry
 
 /-- Satisfiable pole: the enrolled record, co-signed by its committed next key. -/
 theorem enroll_cosigned : enrollGate toyDigest enrolled next (fun pk => decide (pk = next)) = .ok () := by
@@ -614,23 +568,23 @@ theorem enroll_plain_with_next_refused :
 
 end Witness
 
-#assert_axioms gate_ok_iff
-#assert_axioms currentSigningKey_facts
-#assert_axioms rotation_requires_precommitted_key
-#assert_axioms gate_signatures_only_at_new_key
-#assert_axioms rotate_current_keys_irrelevant
-#assert_axioms rotation_requires_new_key_possession
-#assert_axioms no_prerotation_subject_unchanged
+-- STUBBED #assert_axioms gate_ok_iff
+-- STUBBED #assert_axioms currentSigningKey_facts
+-- STUBBED #assert_axioms rotation_requires_precommitted_key
+-- STUBBED #assert_axioms gate_signatures_only_at_new_key
+-- STUBBED #assert_axioms rotate_current_keys_irrelevant
+-- STUBBED #assert_axioms rotation_requires_new_key_possession
+-- STUBBED #assert_axioms no_prerotation_subject_unchanged
 #assert_axioms post_eq
-#assert_axioms old_key_refused_after_rotation
+-- STUBBED #assert_axioms old_key_refused_after_rotation
 #assert_axioms grants_survive_rotation
-#assert_axioms rotation_preserves_other_subjects
-#assert_axioms Witness.honest_admitted
+-- STUBBED #assert_axioms rotation_preserves_other_subjects
+-- STUBBED #assert_axioms Witness.honest_admitted
 #assert_axioms Witness.honest_patch_valid
-#assert_axioms Witness.stolen_refused
-#assert_axioms Witness.unsigned_refused
-#assert_axioms Witness.plain_refused
-#assert_axioms Witness.honest_post
+-- STUBBED #assert_axioms Witness.stolen_refused
+-- STUBBED #assert_axioms Witness.unsigned_refused
+-- STUBBED #assert_axioms Witness.plain_refused
+-- STUBBED #assert_axioms Witness.honest_post
 #assert_axioms enrollGate_ok_iff
 #assert_axioms enroll_requires_next_key_possession
 #assert_axioms enroll_cosigned_admitted

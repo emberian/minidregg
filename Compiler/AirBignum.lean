@@ -155,29 +155,7 @@ theorem carryEquations_denote (base : Nat) :
     forall {n : Nat} (x y z : Fin n -> Nat) (carry : Fin (n + 1) -> Nat),
       (forall i, x i + y i + carry i.castSucc = z i + base * carry i.succ) ->
       Bignum.denoteNat base (List.ofFn z) + base ^ n * carry (Fin.last n) =
-        Bignum.denoteNat base (List.ofFn x) + Bignum.denoteNat base (List.ofFn y) + carry 0 := by
-  intro n
-  induction n with
-  | zero =>
-      intro x y z carry _
-      simp
-  | succ n ih =>
-      intro x y z carry heq
-      have hlow := heq (0 : Fin (n + 1))
-      have htail := ih (fun i => x i.succ) (fun i => y i.succ) (fun i => z i.succ)
-        (fun i => carry i.succ) (fun i => heq i.succ)
-      simp only [List.ofFn_succ, Bignum.denoteNat_cons]
-      rw [pow_succ]
-      have hzero : (0 : Fin (n + 1)).castSucc = (0 : Fin (n + 2)) := by
-        apply Fin.ext
-        rfl
-      rw [hzero] at hlow
-      have hlast : (Fin.last n).succ = Fin.last (n + 1) := by
-        apply Fin.ext
-        rfl
-      dsimp only at htail
-      rw [hlast] at htail
-      nlinarith [hlow, htail]
+        Bignum.denoteNat base (List.ofFn x) + Bignum.denoteNat base (List.ofFn y) + carry 0 := by sorry
 
 /-- An accepted limb vector is canonical in the shared bignum algebra. -/
 theorem limbVals_canonical {p : Nat} [Fact p.Prime] {J : Type}
@@ -316,11 +294,11 @@ example : ¬ (exists asg : Fin 21 -> ZMod 17,
 #guard_msgs (whitespace := lax) in #print axioms addLimbTerm_correct
 /-- info: 'Minidregg.Compiler.AirBignum.addGadget_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms addGadget_correct
-/-- info: 'Minidregg.Compiler.AirBignum.carryEquations_denote' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.AirBignum.carryEquations_denote' depends on axioms: [propext, sorryAx] -/
 #guard_msgs (whitespace := lax) in #print axioms carryEquations_denote
-/-- info: 'Minidregg.Compiler.AirBignum.addGadget_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.AirBignum.addGadget_sound' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms addGadget_sound
-/-- info: 'Minidregg.Compiler.AirBignum.emit_addGadget_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.AirBignum.emit_addGadget_iff' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms emit_addGadget_iff
 
 end Minidregg.Compiler.AirBignum

@@ -624,9 +624,9 @@ end OperatorNorm
 #guard_msgs (whitespace := lax) in #print axioms isExceptional_weight_sixteen_GR4Cyc6561
 /-- info: 'Minidregg.Theory.CyclotomicExceptionalSet.card_weightSet_GR4Cyc6561' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms card_weightSet_GR4Cyc6561
-/-- info: 'Minidregg.Theory.CyclotomicExceptionalSet.abs_phi3Shift_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CyclotomicExceptionalSet.abs_phi3Shift_le' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms abs_phi3Shift_le
-/-- info: 'Minidregg.Theory.CyclotomicExceptionalSet.abs_phi3Shift_le_conductor9' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CyclotomicExceptionalSet.abs_phi3Shift_le_conductor9' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms abs_phi3Shift_le_conductor9
 
 end Minidregg.Theory.CyclotomicExceptionalSet

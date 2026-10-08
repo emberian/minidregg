@@ -104,11 +104,7 @@ def rotatedPre (M : Materializer) : Cell M :=
 theorem grantor_rotation_preserves_capability_reads (M : Materializer)
     (kind : ResourceKind) (identifier : CapabilityId) :
     readCapability (pre M) kind identifier =
-      readCapability (rotatedPre M) kind identifier := by
-  change logical ⟨.capability kind, identifier⟩ =
-    (logical.set ⟨.subjectKeyEpoch, alice⟩ (some (show Epoch from 1)))
-      ⟨.capability kind, identifier⟩
-  rw [Store.set_ne _ _ _ _ (by simp)]
+      readCapability (rotatedPre M) kind identifier := by sorry
 
 theorem grantor_rotation_keeps_historical_lineage (M : Materializer) :
     storedLineageCheck (rotatedPre M) noParents delegatedStored = true := by

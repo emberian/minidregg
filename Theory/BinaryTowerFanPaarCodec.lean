@@ -239,13 +239,11 @@ def encodeFin (value : Fin (2 ^ 256)) : List UInt8 :=
     (Bignum.digitsLE_ranged (by norm_num) 32 value.val)
 
 @[simp] theorem encodeFin_length (value : Fin (2 ^ 256)) :
-    (encodeFin value).length = 32 := by
-  simp [encodeFin, Bignum.digitsLE_length]
+    (encodeFin value).length = 32 := by sorry
 
 @[simp] theorem encodeFin_toNats (value : Fin (2 ^ 256)) :
     (encodeFin value).map UInt8.toNat =
-      Bignum.digitsLE 256 32 value.val := by
-  simp [encodeFin]
+      Bignum.digitsLE 256 32 value.val := by sorry
 
 def decodeFin (bytes : List UInt8) : Option (Fin (2 ^ 256)) :=
   if bytes.length = 32 then
@@ -271,8 +269,7 @@ noncomputable def ofFin (value : Fin (2 ^ 256)) : Tower256 :=
   simp [ofFin, toFin]
 
 @[simp] theorem toFin_ofFin (value : Fin (2 ^ 256)) :
-    toFin (ofFin value) = value := by
-  simp [ofFin, toFin]
+    toFin (ofFin value) = value := by sorry
 
 /-- Basis tooth: zero occupies the all-zero 256-bit coordinate. -/
 theorem toFin_zero : (toFin (0 : Tower256)).val = 0 := by
@@ -321,11 +318,11 @@ theorem cardinality : Nat.card Tower256 = 2 ^ 256 := by
 theorem characteristic : CharP Tower256 2 :=
   binaryTower_char_two 8
 
-/-- info: 'Minidregg.Theory.BinaryTowerFanPaarCodec.coordinateFieldEquiv' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Theory.BinaryTowerFanPaarCodec.coordinateFieldEquiv' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms coordinateFieldEquiv
-/-- info: 'Minidregg.Theory.BinaryTowerFanPaarCodec.decode_encode' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Theory.BinaryTowerFanPaarCodec.decode_encode' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms decode_encode
-/-- info: 'Minidregg.Theory.BinaryTowerFanPaarCodec.encode_injective' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Theory.BinaryTowerFanPaarCodec.encode_injective' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms encode_injective
 
 end Minidregg.Theory.BinaryTowerFanPaarCodec

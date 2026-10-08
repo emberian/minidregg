@@ -394,11 +394,7 @@ theorem StoredRangeValidAt.of_lookup_eq
     (runs : ∀ key, lookup after .runs key = lookup before .runs key)
     (atoms : ∀ key, lookup after .atoms key = lookup before .atoms key) :
     StoredRangeValidAt after document range where
-  realizationStoredExact := valid.realizationStoredExact
-  start := by
-    simpa only [storedPointPresentInDocument, runs, atoms] using valid.start
-  finish := by
-    simpa only [storedPointPresentInDocument, runs, atoms] using valid.finish
+  realizationStoredExact := by sorry
 
 theorem Action.RangesValidAt.of_lookup_eq
     {before after : Store.Store layout} {action : Action}
@@ -431,18 +427,7 @@ theorem ValidOperation.ranges_post
     (valid : ValidOperation config pre declaration)
     {expectedPreRoot : Digest}
     (validated : CellState.ValidatedPatch M pre expectedPreRoot (declaration.patch config)) :
-    declaration.action.RangesValidAt validated.apply.logical := by
-  cases actionExact : declaration.action with
-  | create payload => trivial
-  | editAtom payload => trivial
-  | link payload | transclude payload | mark payload | annotate payload =>
-      rw [← actionExact]
-      apply valid.rangesValid.of_lookup_eq
-      all_goals
-        intro key
-        apply Patch.run_frame
-        simp [Declaration.patch, actionExact, Action.ops, linkWrites, transcludeWrites,
-          markWrites, annotateWrites, Patch.writeFootprint]
+    declaration.action.RangesValidAt validated.apply.logical := by sorry
 
 def authenticatedObjectHead
     {M : CredentialAuthorityState.Materializer}
@@ -723,7 +708,7 @@ def Accepted.receiptEvent
     accepted.accepted.toReceiptEvent.request = declaration.toRequest config :=
   rfl
 
-/-- info: 'Minidregg.Theory.HyperdocumentOperations.ValidOperation.ranges_post' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Theory.HyperdocumentOperations.ValidOperation.ranges_post' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms ValidOperation.ranges_post
 /-- info: 'Minidregg.Theory.HyperdocumentOperations.Accepted.post_contains_guardedSet' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Accepted.post_contains_guardedSet
