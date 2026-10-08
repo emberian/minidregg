@@ -1,0 +1,13 @@
+--- Automatafl.obend
++++ SpecRefused.obend
+@@ -111,7 +111,8 @@
+   t1: Nat
+ record Rules:
+   resolve(turn: Turn) -> Result
+-extension TwoPlayer(self: Rules, super: {}) -> Rules:
+-  {resolve: fn(turn: Turn) -> Result: resolveRound(turn.w, turn.h, turn.b, turn.a, turn.marks, turn.s0, turn.t0, turn.s1, turn.t1)}
++spec TwoPlayer for Rules:
++  def resolve(turn: Turn) -> Result:
++    resolveRound(turn.w, turn.h, turn.b, turn.a, turn.marks, turn.s0, turn.t0, turn.s1, turn.t1)
+ def play(w: Nat, h: Nat, b: Nat, a: Nat, marks: Nat, s0: Nat, t0: Nat, s1: Nat, t1: Nat) -> Result:
+   fix(TwoPlayer, {}).resolve({w: w, h: h, b: b, a: a, marks: marks, s0: s0, t0: t0, s1: s1, t1: t1})
