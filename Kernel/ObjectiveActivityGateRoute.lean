@@ -73,7 +73,11 @@ theorem derived_route {config : Config} {opened : Opened config} (derived : Deri
       | failed failed =>
         -- A charged failure is the kernel's own `failed` turn (the Book only), under the same seal.
         exact ⟨_, _, ObjectiveActivity.AdmittedTurn.failed failed.request failed.failure,
-          ObjectiveActivityReceiver.sealAt (profile := config.profile) failed.gated.authority ingress.command ingress,
+          { ObjectiveActivityReceiver.sealAt (profile := config.profile) failed.gated.authority
+              ingress.command ingress with
+            event := ObjectiveActivityReceiver.failedEvent
+              (ObjectiveActivityReceiver.event config.deployment.domain config.profile.semantics ingress)
+              failed.cause },
           failed.final.1, failed.final.2, failed.finalExact, exact⟩
     | seat ingress accepted exact =>
       right; left

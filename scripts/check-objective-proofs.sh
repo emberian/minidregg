@@ -165,8 +165,10 @@ public_rows() { # public rows of one module in a run's output (the floor of a sc
 }
 
 gate_proofs() {
-  # every module the two manifest scripts import (the scanner, Verify.ObjectiveManifest, is rooted by Verify)
-  local targets="ObjectiveProofs Theory.ObjectiveBendCheckpointRoundTrip Theory.ObjectiveBendExtensions Theory.ObjectiveBendDemandCapacity Verify.ObjectiveManifest"
+  # Every module the two manifest scripts import, plus the collector's raw-projection
+  # regression. Building the named test before scanning makes a dropped `.proj`
+  # dependency edge turn this gate red rather than merely living under the Verify root.
+  local targets="ObjectiveProofs Theory.ObjectiveBendCheckpointRoundTrip Theory.ObjectiveBendExtensions Theory.ObjectiveBendDemandCapacity Verify.ObjectiveManifest Verify.ObjectiveManifestProjectionTest"
   echo "== lake build $targets"
   "$lake" build $targets
   local failed=0 run script s

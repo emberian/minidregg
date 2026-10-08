@@ -1009,7 +1009,155 @@ deriving instance Encodable for Digest
 deriving instance Encodable for ObjectiveCall.FrontEnd
 deriving instance Encodable for ObjectiveActivity.Refusal
 deriving instance Encodable for SeatStore.Refusal
-deriving instance Encodable for ObjectiveCall.CallRefusal
+
+/-- The non-recursive end of a call refusal.  `CallRefusal` itself is recursive only
+because an invocation may attach one or more extraction-account layers to the
+typed refusal that stopped its call tree.  Keeping the terminal separate for the
+encoding avoids asking the generic deriving proof to normalize the large recursive
+sum. -/
+private inductive CallRefusalTerminal where
+  | extractionAllowanceExhausted
+  | extractionFailed (reason : String)
+  | kernel (reason : ObjectiveActivity.Refusal)
+  | reentry (target : Nat) (stack : List Nat)
+  | depth (limit : Nat)
+  | notAnObject (target : Nat)
+  | frontEndExhausted (stage : ObjectiveWorkAccount.Stage) (needed left : Nat)
+  | postageFrontEnd (target : Nat) (stage : ObjectiveWorkAccount.Stage) (needed declared : Nat)
+  | stateMissing (target : Nat)
+  | notCallable (target : Nat) (method : String) (reason : String)
+  | notDeliverable (target : Nat) (method : String) (reason : String)
+  | continuationDepth (limit : Nat)
+  | fanOut (limit : Nat)
+  | allowanceExceeded (needed held : Nat)
+  | messageWide (id : Nat)
+  | argumentType (target : Nat) (method : String)
+  | callShape (target : Nat) (method : String) (reason : String)
+  | frameFault (target : Nat) (method : String) (reason : String)
+  | resultType (caller : Nat) (method : String)
+  | grantSpent (target : Nat) (method : String)
+  | grantMismatch (target : Nat) (method : String) (field : ObjectiveCall.GrantField)
+  | notControllable (slot : Nat)
+  | notSender (slot sender : Nat)
+  | slotInbox (slot : Nat) (reason : String)
+  | lawDenied (target : Nat) (method : String) (reason : ObjectRecord.WriteRefusal)
+  | exhausted
+  | queueFull (sender target : Nat)
+  | slotQueueFull (slot : Nat)
+  | notPipelinable (slot : Nat)
+  | slotTaken (slot : Nat)
+  | inboxCodec (sender target : Nat)
+  | packageCell (cell : Nat)
+  | drainConflict (target : Nat)
+
+deriving instance Encodable for CallRefusalTerminal
+
+private def CallRefusalTerminal.refusal : CallRefusalTerminal → ObjectiveCall.CallRefusal
+  | .extractionAllowanceExhausted => .extractionAllowanceExhausted
+  | .extractionFailed reason => .extractionFailed reason
+  | .kernel reason => .kernel reason
+  | .reentry target stack => .reentry target stack
+  | .depth limit => .depth limit
+  | .notAnObject target => .notAnObject target
+  | .frontEndExhausted stage needed left => .frontEndExhausted stage needed left
+  | .postageFrontEnd target stage needed declared => .postageFrontEnd target stage needed declared
+  | .stateMissing target => .stateMissing target
+  | .notCallable target method reason => .notCallable target method reason
+  | .notDeliverable target method reason => .notDeliverable target method reason
+  | .continuationDepth limit => .continuationDepth limit
+  | .fanOut limit => .fanOut limit
+  | .allowanceExceeded needed held => .allowanceExceeded needed held
+  | .messageWide identifier => .messageWide identifier
+  | .argumentType target method => .argumentType target method
+  | .callShape target method reason => .callShape target method reason
+  | .frameFault target method reason => .frameFault target method reason
+  | .resultType caller method => .resultType caller method
+  | .grantSpent target method => .grantSpent target method
+  | .grantMismatch target method field => .grantMismatch target method field
+  | .notControllable slot => .notControllable slot
+  | .notSender slot sender => .notSender slot sender
+  | .slotInbox slot reason => .slotInbox slot reason
+  | .lawDenied target method reason => .lawDenied target method reason
+  | .exhausted => .exhausted
+  | .queueFull sender target => .queueFull sender target
+  | .slotQueueFull slot => .slotQueueFull slot
+  | .notPipelinable slot => .notPipelinable slot
+  | .slotTaken slot => .slotTaken slot
+  | .inboxCodec sender target => .inboxCodec sender target
+  | .packageCell cell => .packageCell cell
+  | .drainConflict target => .drainConflict target
+
+/-- Normalize the sole recursive constructor into an outer-to-inner list of
+`(remaining, spent)` extraction accounts and a non-recursive terminal. -/
+private def splitCallRefusal : ObjectiveCall.CallRefusal →
+    List (Nat × Nat) × CallRefusalTerminal
+  | .extractionAccount reason remaining spent =>
+      let (accounts, terminal) := splitCallRefusal reason
+      ((remaining, spent) :: accounts, terminal)
+  | .extractionAllowanceExhausted => ([], .extractionAllowanceExhausted)
+  | .extractionFailed reason => ([], .extractionFailed reason)
+  | .kernel reason => ([], .kernel reason)
+  | .reentry target stack => ([], .reentry target stack)
+  | .depth limit => ([], .depth limit)
+  | .notAnObject target => ([], .notAnObject target)
+  | .frontEndExhausted stage needed left => ([], .frontEndExhausted stage needed left)
+  | .postageFrontEnd target stage needed declared => ([], .postageFrontEnd target stage needed declared)
+  | .stateMissing target => ([], .stateMissing target)
+  | .notCallable target method reason => ([], .notCallable target method reason)
+  | .notDeliverable target method reason => ([], .notDeliverable target method reason)
+  | .continuationDepth limit => ([], .continuationDepth limit)
+  | .fanOut limit => ([], .fanOut limit)
+  | .allowanceExceeded needed held => ([], .allowanceExceeded needed held)
+  | .messageWide identifier => ([], .messageWide identifier)
+  | .argumentType target method => ([], .argumentType target method)
+  | .callShape target method reason => ([], .callShape target method reason)
+  | .frameFault target method reason => ([], .frameFault target method reason)
+  | .resultType caller method => ([], .resultType caller method)
+  | .grantSpent target method => ([], .grantSpent target method)
+  | .grantMismatch target method field => ([], .grantMismatch target method field)
+  | .notControllable slot => ([], .notControllable slot)
+  | .notSender slot sender => ([], .notSender slot sender)
+  | .slotInbox slot reason => ([], .slotInbox slot reason)
+  | .lawDenied target method reason => ([], .lawDenied target method reason)
+  | .exhausted => ([], .exhausted)
+  | .queueFull sender target => ([], .queueFull sender target)
+  | .slotQueueFull slot => ([], .slotQueueFull slot)
+  | .notPipelinable slot => ([], .notPipelinable slot)
+  | .slotTaken slot => ([], .slotTaken slot)
+  | .inboxCodec sender target => ([], .inboxCodec sender target)
+  | .packageCell cell => ([], .packageCell cell)
+  | .drainConflict target => ([], .drainConflict target)
+
+private def joinCallRefusal : List (Nat × Nat) × CallRefusalTerminal →
+    ObjectiveCall.CallRefusal
+  | (accounts, terminal) => accounts.foldr
+      (fun (remaining, spent) reason => .extractionAccount reason remaining spent)
+      terminal.refusal
+
+/-- The explicit refusal representation retains the exact typed terminal and
+every extraction-account layer. -/
+private theorem join_split_callRefusal (reason : ObjectiveCall.CallRefusal) :
+    joinCallRefusal (splitCallRefusal reason) = reason := by
+  induction reason <;> try rfl
+  case extractionAccount reason remaining spent ih =>
+      simp only [splitCallRefusal]
+      cases split : splitCallRefusal reason with
+      | mk accounts terminal =>
+          rw [split] at ih
+          change ObjectiveCall.CallRefusal.extractionAccount
+            (joinCallRefusal (accounts, terminal)) remaining spent =
+              ObjectiveCall.CallRefusal.extractionAccount reason remaining spent
+          rw [ih]
+
+instance : Encodable ObjectiveCall.CallRefusal :=
+  Encodable.ofLeftInjection splitCallRefusal (some ∘ joinCallRefusal) (by
+    intro reason
+    simp [join_split_callRefusal])
+
+@[simp] theorem callRefusal_encode_roundtrip (reason : ObjectiveCall.CallRefusal) :
+    (Encodable.decode (Encodable.encode reason) : Option ObjectiveCall.CallRefusal) = some reason :=
+  Encodable.encodek reason
+
 deriving instance Encodable for ObjectiveSend.MessageRefusal
 deriving instance Encodable for CredentialSignatureIO.Error
 deriving instance Encodable for CredentialSignedEnvelopeController.Failure
@@ -1885,6 +2033,7 @@ def signingPlanCodec : LawfulCodec SigningPlan :=
 #assert_axioms replay_exact
 #assert_axioms replayAnswer_preserves_recorded_disposition
 #assert_axioms replay_routes_recorded_disposition
+#assert_axioms callRefusal_encode_roundtrip
 #assert_axioms retry_unverified_refused
 
 end Minidregg.Kernel.ObjectiveActivityReceiver
