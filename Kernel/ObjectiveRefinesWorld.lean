@@ -7,6 +7,7 @@ turn/finalization or checked seat inertness used by the OB invariant proofs.
 import Kernel.HostRefinesWorld
 import Kernel.DeployedHistory
 import Kernel.ObjectiveDomainInvariant
+import Kernel.ObjectiveAdmissible
 
 namespace Minidregg.Kernel.ObjectiveRefinesWorld
 
@@ -382,5 +383,140 @@ theorem changed_body_changes_payload :
   decide
 
 #assert_axioms tamperLast_same_pre lookup_final_post tamper_breaks_payload_view changed_body_changes_payload
+
+/-! World reachability: induction nodes are Worlds, never snapshots. -/
+
+/-- The IO certificate's exact intent supplies the semantic step and the
+post-view of the very World the certified Turn reaches. -/
+theorem admissible_post_view {ob : ObjectiveActivity.Config}
+    {w w' : ObjectiveAdmissible.W} {t : ObjectiveAdmissible.T}
+    (cert : ObjectiveAdmissible.Admissible ob w t)
+    (stepped : World.step DeployedHistory.history w t = some w') :
+    let after := (execute .complete cert.loaded.snapshot cert.commit.intent).storeAfter cert.loaded.snapshot
+    ObjectiveCheckpointInvariant.Step ob cert.loaded.snapshot after ∧
+      payloads cert.loaded.snapshot.canonicalBytes = payloadsOf w ∧
+      payloads after.canonicalBytes = payloadsOf w' := by
+  obtain ⟨next, step, _, view⟩ := (intent_refines_step DeployedHistory.history
+    cert.represents cert.commit.intent cert.commit.derived .complete).1 cert.commit.installs
+  have same : next = w' := Option.some.inj (step.symm.trans stepped)
+  subst next
+  exact ⟨cert.commit.source.step .complete, payloads_of_represents cert.represents, view⟩
+
+theorem world_step_checkpoints {ob : ObjectiveActivity.Config} {w w' : ObjectiveAdmissible.W}
+    (step : ObjectiveAdmissible.WStep ob w w') (prior : CheckpointsTyped ob (payloadsOf w)) :
+    CheckpointsTyped ob (payloadsOf w') := by
+  cases step with
+  | mk cert stepped =>
+    obtain ⟨semantic, before, after⟩ := admissible_post_view cert stepped
+    rw [← after]
+    exact checkpointsTyped_payloads.mpr (semantic.preserves
+      (checkpointsTyped_payloads.mp (before.symm ▸ prior)))
+
+theorem world_step_domains {ob : ObjectiveActivity.Config} {w w' : ObjectiveAdmissible.W}
+    (step : ObjectiveAdmissible.WStep ob w w')
+    (prior : ObjectiveDomainInvariant.DomainsHold ob (payloadsOf w)) :
+    ObjectiveDomainInvariant.DomainsHold ob (payloadsOf w') := by
+  cases step with
+  | mk cert stepped =>
+    obtain ⟨semantic, before, after⟩ := admissible_post_view cert stepped
+    rw [← after]
+    exact ObjectiveDomainInvariant.Step.domainsHold semantic (before.symm ▸ prior)
+
+theorem world_step_upgradable {ob : ObjectiveActivity.Config} {w w' : ObjectiveAdmissible.W}
+    (book : ObjectiveUpgradeInvariant.BookUnprotected ob)
+    (step : ObjectiveAdmissible.WStep ob w w')
+    (prior : ObjectiveUpgradeInvariant.Upgradable ob (payloadsOf w)) :
+    ObjectiveUpgradeInvariant.Upgradable ob (payloadsOf w') := by
+  cases step with
+  | mk cert stepped =>
+    obtain ⟨semantic, before, after⟩ := admissible_post_view cert stepped
+    rw [← after]
+    exact ObjectiveUpgradeInvariant.Step.upgradable book semantic (before.symm ▸ prior)
+
+/-- Every record in a World reached by any finite sequence of certified
+World.step transitions has a typed checkpoint. -/
+theorem reachable_stored_checkpoints_typed {ob : ObjectiveActivity.Config}
+    {genesis w : ObjectiveAdmissible.W}
+    (start : CheckpointsTyped ob (payloadsOf genesis))
+    (reached : ObjectiveAdmissible.Reachable ob genesis w) :
+    CheckpointsTyped ob (payloadsOf w) := by
+  induction reached with
+  | genesis => exact start
+  | step _ step ih => exact world_step_checkpoints step ih
+
+/-- Domain laws hold after every finite certified World execution. -/
+theorem reachable_domain_holds_forever {ob : ObjectiveActivity.Config}
+    {genesis w : ObjectiveAdmissible.W}
+    (start : ObjectiveDomainInvariant.DomainsHold ob (payloadsOf genesis))
+    (reached : ObjectiveAdmissible.Reachable ob genesis w) :
+    ObjectiveDomainInvariant.DomainsHold ob (payloadsOf w) := by
+  induction reached with
+  | genesis => exact start
+  | step _ step ih => exact world_step_domains step ih
+
+theorem reachable_upgradable {ob : ObjectiveActivity.Config} {genesis w : ObjectiveAdmissible.W}
+    (book : ObjectiveUpgradeInvariant.BookUnprotected ob)
+    (start : ObjectiveUpgradeInvariant.Upgradable ob (payloadsOf genesis))
+    (reached : ObjectiveAdmissible.Reachable ob genesis w) :
+    ObjectiveUpgradeInvariant.Upgradable ob (payloadsOf w) := by
+  induction reached with
+  | genesis => exact start
+  | step _ step ih => exact world_step_upgradable book step ih
+
+/-- Live/rebirth/pending counts describe exactly the reached World's records. -/
+theorem reachable_live_counts {ob : ObjectiveActivity.Config} {genesis w : ObjectiveAdmissible.W}
+    (book : ObjectiveUpgradeInvariant.BookUnprotected ob)
+    (start : ObjectiveUpgradeInvariant.Upgradable ob (payloadsOf genesis))
+    (reached : ObjectiveAdmissible.Reachable ob genesis w) :
+    ObjectiveUpgradeInvariant.LiveCounts ob (payloadsOf w) :=
+  (reachable_upgradable book start reached).1
+
+/-- Migration and the successor's state law hold on the reached World view;
+Book payment remains the separate admission premise of the existing theorem. -/
+theorem reachable_migrate_cannot_fail {ob : ObjectiveActivity.Config} {genesis w : ObjectiveAdmissible.W}
+    (book : ObjectiveUpgradeInvariant.BookUnprotected ob)
+    (start : ObjectiveUpgradeInvariant.Upgradable ob (payloadsOf genesis))
+    (reached : ObjectiveAdmissible.Reachable ob genesis w) :
+    ObjectiveUpgradeInvariant.MigratableStates ob (payloadsOf w) :=
+  (reachable_upgradable book start reached).2
+
+/-- The seat receiver supplies the inertness premise for this certified
+World step: every activity payload in the reached World is unchanged. -/
+theorem world_inert_agree {ob : ObjectiveActivity.Config}
+    {w w' : ObjectiveAdmissible.W} {t : ObjectiveAdmissible.T}
+    (cert : ObjectiveAdmissible.Admissible ob w t)
+    {F : Type} [Field F] [DecidableEq F]
+    {deployment : CanonicalCellRegistry.Deployment} {profile : CanonicalRuntimeProfile.Profile F}
+    {ambient : ObjectiveKernelConfig.Ambient} {ingress : SeatReceiver.DecodedIngress}
+    (accepted : SeatReceiver.Accepted deployment profile ambient cert.loaded ingress)
+    (intent : cert.commit.intent = SeatReceiver.intent accepted)
+    (stepped : World.step DeployedHistory.history w t = some w') :
+    payloadsOf w' = payloadsOf w := by
+  obtain ⟨_, before, after⟩ := admissible_post_view cert stepped
+  rw [← after, ← before]
+  rcases execute_no_partial_data_commit .complete cert.loaded.snapshot cert.commit.intent with unchanged | installed
+  · rw [unchanged]
+  · rw [installed, intent, ObjectiveUpgradeInvariant.install_payloads _ rfl,
+      ObjectiveUpgradeInvariant.inert_agree accepted.prepared.decided.inert]
+
+/-- The ordinary gate's frame law on a certified World step. Unlike the OB
+induction headlines, this is deliberately a structural noninterference lemma. -/
+theorem world_foreign_preserves {ob : ObjectiveActivity.Config}
+    {w w' : ObjectiveAdmissible.W} {t : ObjectiveAdmissible.T}
+    (cert : ObjectiveAdmissible.Admissible ob w t)
+    (ordinary : ObjectiveActivityGate.ordinaryGate cert.commit.intent = .ok ())
+    (stepped : World.step DeployedHistory.history w t = some w')
+    (cell : DurableDataIntent.CellId) (isProtected : ObjectiveActivityGate.Protected cell) :
+    payloadsOf w' cell = payloadsOf w cell := by
+  obtain ⟨_, before, after⟩ := admissible_post_view cert stepped
+  rw [← after, ← before]
+  unfold payloads
+  rw [ObjectiveActivityGate.ordinary_execute_protected .complete cert.loaded.snapshot ordinary isProtected]
+
+#assert_axioms world_inert_agree world_foreign_preserves
+
+#assert_axioms admissible_post_view world_step_checkpoints world_step_domains world_step_upgradable
+#assert_axioms reachable_stored_checkpoints_typed reachable_domain_holds_forever
+#assert_axioms reachable_upgradable reachable_live_counts reachable_migrate_cannot_fail
 
 end Minidregg.Kernel.ObjectiveRefinesWorld

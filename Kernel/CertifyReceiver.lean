@@ -25,6 +25,7 @@ tail.
 The patch is one guarded write of the system value from the exact loaded value;
 the record writes only the system cell (`intent_writes_system_cell`).
 -/
+import Compiler.DurableReceiverIO
 import Kernel.CapabilityRevocationController
 import Kernel.SystemCellDomain
 

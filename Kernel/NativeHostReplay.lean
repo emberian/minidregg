@@ -2934,6 +2934,21 @@ theorem matched_record_admitted {config : Config} {opened : Opened config}
       NativeAdmission config opened derived.intent :=
   ⟨(recordMatches_iff record derived.intent).mp matched, derived.admission⟩
 
+/-- Replay reconstructs the same receiver certificate used at live append.
+The stored record cannot supply replacement posts or omitted guards. -/
+def Derived.judge {config : Config} {opened : Opened config} (derived : Derived config opened) :
+    Except String (DurableReceiverIO.Judged derived.transport opened.durable derived.intent) :=
+  match derived.kernel with
+  | none => opened.durable.judgeOrdinary derived.transport derived.intent
+  | some (.activity _ verdict exact) => do
+      let judged ← opened.durable.judgeObjective derived.transport
+        (ObjectiveAdmissible.Proposal.activity verdict)
+      pure (judged.retarget ((ObjectiveAdmissible.Proposal.activity_intent verdict).trans exact.symm))
+  | some (.seat _ accepted exact) => do
+      let judged ← opened.durable.judgeObjective derived.transport
+        (ObjectiveAdmissible.Proposal.seat accepted)
+      pure (judged.retarget exact.symm)
+
 /-- Advance through the same canonical durable executor using the derived
 intent, never the untrusted stored post. This reuses its checked next snapshot
 and append proof instead of replaying the whole physical prefix again. -/
@@ -2942,9 +2957,9 @@ def advance {config : Config} (opened : Opened config) (derived : Derived config
   match DurableCheckpoint.prepare durable.image durable.baseHeight durable.base durable.snapshot
       durable.withinLog durable.resumed derived.intent with
   | .inl ready =>
-      match durable.judge derived.transport derived.intent with
-      | .ok () => .ok (durable.extend ready)
-      | .error reason => .error s!"derived durable intent refused: {repr reason}"
+      match derived.judge with
+      | .ok _ => .ok (durable.extend ready)
+      | .error reason => .error reason
   | .inr (.rejected reason) => .error s!"derived durable intent refused: {repr reason}"
   | .inr (.replayed _) => .error "duplicate accepted history entry"
   | .inr _ => .error "derived durable intent did not make one new commit"
@@ -2960,10 +2975,9 @@ theorem advance_judged {config : Config} {opened : Opened config} {derived : Der
   simp only
   split
   · split
-    · rename_i judged
+    · rename_i certificate judged
       intro _
-      exact DurableReceiverIO.Loaded.judge_tail derived.transport opened.durable derived.intent
-        config.systemCell derived.transport_systemCell judged
+      exact certificate.tail_pinned config.systemCell derived.transport_systemCell
     · intro failed
       cases failed
   all_goals intro failed; cases failed
@@ -3570,7 +3584,8 @@ structure ExactReadback (config : Config) {oldTarget : Durable}
   prepared : DurableCheckpoint.prepare old.opened.durable.image old.opened.durable.baseHeight
     old.opened.durable.base old.opened.durable.snapshot old.opened.durable.withinLog
     old.opened.durable.resumed derived.intent = .inl ready
-  judged : old.opened.durable.judge derived.transport derived.intent = .ok ()
+  certificate : DurableReceiverIO.Judged derived.transport old.opened.durable derived.intent
+  judged : derived.judge = .ok certificate
   appended : DurableReceiverIO.Appended ResourceBirthCodec.rootBytes old.opened.durable
     derived.intent
   after : Opened config
@@ -3589,15 +3604,15 @@ def ExactReadback.ofAppended {config : Config} {oldTarget : Durable}
       old.opened.durable.resumed derived.intent with
   | .inr _ => .error "appended intent no longer prepares at the verified image"
   | .inl ready =>
-      match judged : old.opened.durable.judge derived.transport derived.intent with
+      match judged : derived.judge with
       | .error reason => .error s!"appended intent fails the tail law: {repr reason}"
-      | .ok () =>
+      | .ok certificate =>
         match incremental : validateLoadedFrom config old.opened (exactCandidate old derived ready) with
         | .error detail => .error s!"post-image validation: {detail}"
         | .ok after =>
           have validated : validateLoaded config (exactCandidate old derived ready) = .ok after :=
             (validateLoadedFrom_eq config old.opened (exactCandidate old derived ready)).symm.trans incremental
-          .ok ⟨⟨derived, ready, prepared, judged, appended, after, validated⟩, rfl⟩
+          .ok ⟨⟨derived, ready, prepared, certificate, judged, appended, after, validated⟩, rfl⟩
 
 /-- The verifier-minted old trace plus the same admitted command's exact
 readback gives one new accepted step and its *original-prefix* receipt. -/
@@ -4007,8 +4022,8 @@ private def advanceCarriedIntent {config : Config} (opened : Opened config)
   match DurableCheckpoint.prepare durable.image durable.baseHeight durable.base durable.snapshot
       durable.withinLog durable.resumed intent with
   | .inl ready =>
-      match durable.judge config.transport intent with
-      | .ok () => .ok (durable.extend ready)
+      match durable.judge config.transport (.ordinary intent) with
+      | .ok _ => .ok (durable.extend ready)
       | .error reason => .error s!"carried durable intent refused: {repr reason}"
   | .inr (.rejected reason) => .error s!"carried durable intent refused: {repr reason}"
   | .inr (.replayed _) => .error "duplicate accepted suffix entry"

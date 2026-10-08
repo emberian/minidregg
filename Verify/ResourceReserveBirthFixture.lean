@@ -106,7 +106,7 @@ def initializerPlanAfterBirth (config : NativeHost.Config)
       loaded.withinLog loaded.resumed intent with
   | .inr _ => throw "birth successor refused by the durable executor"
   | .inl ready =>
-      let _ ← (loaded.judge config.transport intent).mapError
+      let _ ← (loaded.judge config.transport (.ordinary intent)).mapError
         (fun reason => s!"birth successor tail law: {repr reason}")
       let predicted ← NativeHost.validateLoadedFrom config opened (loaded.extend ready)
       NativeHost.prepareLoaded config predicted

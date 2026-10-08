@@ -1,4 +1,5 @@
 /- One provisioned factory-observation grant and its operation marker publish in one CAS. -/
+import Compiler.DurableReceiverIO
 import Kernel.ParticipantFactoryProvisioning
 
 namespace Minidregg.Kernel.ParticipantFactoryProvisioningReceiver
