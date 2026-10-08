@@ -3183,6 +3183,24 @@ private def selectedReleaseAfter (config : Config) (after : Opened config)
     ⟨record, receipt⟩ :: releases
   else releases
 
+/-- Charged objective-activity records retain a typed failure envelope in the
+durable event. Historical admission must nevertheless consume the original
+signed ingress stored inside that envelope. Other event families, including
+all ordinary version-1 events, are unchanged. -/
+def historicalSourceEvent (stored : StableEvent) : StableEvent :=
+  match ObjectiveActivityReceiver.recordedDisposition stored with
+  | some (source, _) => source
+  | none => stored
+
+@[simp] theorem historicalSourceEvent_activity_failure
+    (domain semantics : Digest) (ingress : ObjectiveActivityReceiver.DecodedIngress)
+    (cause : ObjectiveActivityReceiver.Reject) :
+    historicalSourceEvent
+      (ObjectiveActivityReceiver.failedEvent
+        (ObjectiveActivityReceiver.event domain semantics ingress) cause) =
+      ObjectiveActivityReceiver.event domain semantics ingress := by
+  simp [historicalSourceEvent]
+
 /-- Diagnostic grouping only, never an ingress decoder or admission choice.
 Fixed labels distinguish the native families sharing event version 1; other
 families retain their recorded codec version. No record bytes are printed. -/
@@ -3233,7 +3251,7 @@ private def walk (config : Config) (opened : Opened config)
       match ← AuditTiming.measure timing (fun _ => admissionPhase record)
           (derive config opened reader issues reserves begins beginsV2 claimsV2
             beginsV3 claimsV3 createdV3 runningV3 grants frontier releases retry
-            record.event.canonicalBytes) with
+            (historicalSourceEvent record.event).canonicalBytes) with
       | .error detail => return .error ⟨index, detail⟩
       | .ok derived =>
         let compared ← AuditTiming.value timing (fun _ => "record-compare")
@@ -3679,7 +3697,7 @@ def SemanticStep (config : Config) (verifier : VerifierSemantics config)
     (before after : Opened config) (record : DurableReceiver.IntentRecord)
     (receipt : NativeHostCodec.Receipt) : Prop :=
   ∃ derived : Derived config before,
-    verifier before record.event.canonicalBytes = some derived ∧
+    verifier before (historicalSourceEvent record.event).canonicalBytes = some derived ∧
     recordMatches record derived.intent = true ∧
     ∃ next : Durable,
       advance before derived = .ok next ∧
@@ -4215,7 +4233,8 @@ private def walkSuffix (config : Config) (anchor : Opened config)
   | [] => pure (.ok ⟨opened, [], .nil opened, context⟩)
   | record :: rest => do
     let index := opened.durable.image.accepted.length
-    match ← deriveSuffixAt config anchor origin opened reader context record.event.canonicalBytes with
+    match ← deriveSuffixAt config anchor origin opened reader context
+        (historicalSourceEvent record.event).canonicalBytes with
     | .error detail => return .error ⟨index, detail⟩
     | .ok derived =>
       if matched : recordMatches record derived.intent = true then

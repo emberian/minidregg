@@ -16,11 +16,10 @@ def draftFrame : List UInt8 := "DREGG/NATIVE-HOST/DRAFT/v5".toUTF8.toList
 /-- Version 6 carries the roster-bound finalized draft. -/
 def signingPlanFrame : List UInt8 := "DREGG/NATIVE-HOST/SIGNING-PLAN/v6".toUTF8.toList
 
-/-- Version 4: receipts bind `(worldRoot, height)` (not the whole-image
-boundary); a refusal carries its closed `RefusalReason` and, for a law
-refusal, the failing clause (`LawLeaf`). Version-1, version-2 and version-3
-outcomes refuse; none is reinterpreted. -/
-def outcomeFrame : List UInt8 := "DREGG/NATIVE-HOST/OUTCOME/v4".toUTF8.toList
+/-- Version 5 adds the committed charged terminal disposition and its canonical
+typed objective-activity cause bytes. Older outcomes refuse; none is
+reinterpreted. -/
+def outcomeFrame : List UInt8 := "DREGG/NATIVE-HOST/OUTCOME/v5".toUTF8.toList
 
 end Minidregg.Compiler.NativeHostCodec
 

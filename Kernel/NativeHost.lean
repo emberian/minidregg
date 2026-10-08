@@ -1251,6 +1251,17 @@ def confirmed (config : Config) (kind : DurableReceiverIO.Confirmation)
       | none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
       | some receipt => return .confirmed kind receipt
 
+/-- Seal the original prefix of a committed charged failure without erasing
+its typed source cause. -/
+def charged (config : Config) (kind : DurableReceiverIO.Confirmation)
+    (transactionId eventId : Digest) (cause : ObjectiveActivityReceiver.Reject) : IO Outcome := do
+  match ← openExisting config with
+  | .error detail => return .uncertain s!"receipt readback: {detail}".toUTF8.toList
+  | .ok opened =>
+      match historicalReceipt config opened.durable transactionId eventId with
+      | none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
+      | some receipt => return .charged kind receipt (ObjectiveActivityReceiver.rejectCodec.encode cause)
+
 def enrollmentSubmitLoaded (config : Config) (opened : Opened config)
     (bytes : List UInt8) : IO Outcome := do
   match ← ParticipantKeyEnrollmentReceiver.receiveLoaded config.deployment config.profile
@@ -2368,9 +2379,8 @@ def activitySubmitLoaded (config : Config) (opened : Opened config) (bytes : Lis
   match ← ObjectiveActivityReceiver.receiveLoaded config.deployment config.profile
       (activityAmbient config opened) config.signature config.kernelTransport opened.durable bytes with
   | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
-  -- A charged failure is a committed receipt (the price posted, nothing else written); its cause is
-  -- the plan's verdict (`planVerdict`), which the signer re-plans from.
-  | .charged kind receipt _ => confirmed config kind receipt.transactionId receipt.eventId
+  | .charged kind receipt cause =>
+      charged config kind receipt.transactionId receipt.eventId cause
   | .rejected reason => return refused .operationRejected "activity" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
   | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
@@ -2389,11 +2399,14 @@ def activityLookupLoaded (config : Config) (opened : Opened config) (bytes : Lis
       match ObjectiveActivityReceiver.replay config.deployment.domain config.profile.semantics
           opened.durable ingress with
       | none => .absent
-      | some (.ok (.retry _)) => .absent
+      | some (.ok (.retry _ _)) => .absent
       | some (.error _) => refused .conflict "replay" "transaction identity conflict"
-      | some (.ok (.exact receipt)) =>
+      | some (.ok (.exact receipt disposition)) =>
           match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
-          | some original => .confirmed .replayed original
+          | some original => match disposition with
+            | .confirmed => .confirmed .replayed original
+            | .charged cause =>
+                .charged .replayed original (ObjectiveActivityReceiver.rejectCodec.encode cause)
           | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
 
 /-- The public activity view's raw material: the logical height, the authority

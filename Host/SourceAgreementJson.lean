@@ -1848,6 +1848,19 @@ private def outcomeJson : Outcome → Lean.Json
       .mkObj [("type", "confirmed"), ("confirmation", confirmation),
       ("transactionId", decimal receipt.transactionId.value), ("eventId", decimal receipt.eventId.value),
       ("acceptedCount", decimal receipt.acceptedCount), ("worldRoot", decimal receipt.worldRoot.value)]
+  | .charged kind receipt causeBytes =>
+      let confirmation : Lean.Json := match kind with
+        | .installed => "installed"
+        | .recoveredAfterUncertainResponse => "recoveredAfterUncertainResponse"
+        | .replayed => "replayed"
+      let cause : Lean.Json :=
+        match ObjectiveActivityReceiver.rejectCodec.decode causeBytes with
+        | some typed => .str (reprStr typed)
+        | none => .null
+      .mkObj [("type", "confirmed"), ("confirmation", confirmation),
+        ("disposition", "charged"), ("cause", cause), ("causeCanonical", hexJson causeBytes),
+        ("transactionId", decimal receipt.transactionId.value), ("eventId", decimal receipt.eventId.value),
+        ("acceptedCount", decimal receipt.acceptedCount), ("worldRoot", decimal receipt.worldRoot.value)]
   | .refused .tailBound phase detail none => .mkObj [("type", "refused"),
       ("reason", RefusalReason.tailBound.name), ("phase", hexJson phase), ("detail", hexJson detail),
       ("explain", .str s!"head/height <= certified/height + L fails: {(String.fromUTF8? (ByteArray.mk detail.toArray)).getD "?"}; certify (mini checkpoint) to resume")]
