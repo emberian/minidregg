@@ -184,3 +184,8 @@ root = "Verify.NativeJointSourceFixture"
 [[lean_exe]]
 name = "generic-simplex-load"
 root = "Verify.GenericSimplexLoad"
+
+# BURN-BENCH: compiled light-Store timings (Host/BenchStoreCompiled.lean). Measurement only.
+[[lean_exe]]
+name = "bench-store-compiled"
+root = "Host.BenchStoreCompiled"
