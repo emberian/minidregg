@@ -23,11 +23,13 @@ ELABORATED TERM of every constant:
 2. **No silent omission.**  Every private constructor of a package type is a row of
    `TokenCensus.Table.table`, and every row names a constructor that exists, with
    its home module.  A new private-mk type fails the build until it is classified.
-3. **Layer-1 rows are backed.**  A row marked `L1 <witness>` names either a PROOF
-   FIELD of the type (the type carries the proposition it asserts) or a theorem that
-   states the guarantee for every inhabitant; a theorem whose body is a bare
-   projection (a field renamed) is refused, and so is a data field.
-5. **No mint that does not name the constructor**, for an `L2` evidence type: no instance of
+3. **Layer-1 rows are backed.**  A row marked `L1 <witness>` names a theorem (a
+   proof-field projection is a theorem) quantified over an inhabitant of the row's
+   type.  Its conclusion is not `True`, reflexive equality, or a repeated premise,
+   refers to the inhabitant or its indices, and mentions every value index of that
+   inhabitant.  The theorem's proof term is irrelevant: projecting the proof the
+   type carries is the intended construction.
+5. **No mint that does not name the constructor**, for an evidence type: no instance of
    a value-producing class (`Inhabited`, `Nonempty`, `Zero`, `One`, `OfNat`,
    `EmptyCollection`) whose conclusion is about the type (a foreign module could mint
    with `default` or `Classical.choice`); no `cast`, `unsafeCast`, `Eq.mp` or
@@ -172,6 +174,83 @@ def justifiedMinters (note : String) : List Name :=
   | [_, rest] => ((rest.splitOn ";").headD "").splitOn "," |>.map (·.trim.toName)
   | _ => []
 
+/-- `true` when a proposition is definitionally just `True`, `x = x`, or one
+of the proposition binders repeated as the conclusion.  These statements carry
+no evidence about the bound token. -/
+def trivialConclusion (binders : Array Expr) (conclusion : Expr) : MetaM Bool := do
+  let conclusion ← whnf conclusion
+  if conclusion.isConstOf ``True then return true
+  if conclusion.isAppOfArity ``Eq 3 then
+    let args := conclusion.getAppArgs
+    if ← isDefEq args[1]! args[2]! then return true
+  for binder in binders do
+    let type ← inferType binder
+    if ← isProp type then
+      if ← isDefEq type conclusion then return true
+  return false
+
+/-- A value index is a free-variable argument of the bound token type other than
+a type, proposition, or instance argument.  Each such index must occur in the
+witness conclusion.  The boolean records whether the conclusion mentions at
+least one such index.  This deliberately checks the statement, never its proof. -/
+def valueIndexCoverage (tokenType conclusion : Expr) : MetaM (Array Name × Bool) := do
+  let mut missing := #[]
+  let mut mentioned := false
+  for arg in tokenType.getAppArgs do
+    unless arg.isFVar do continue
+    let decl ← getFVarLocalDecl arg
+    if decl.binderInfo.isInstImplicit then continue
+    let argType ← whnf decl.type
+    if argType.isSort || (← isProp argType) then continue
+    if conclusion.containsFVar arg.fvarId! then
+      mentioned := true
+    else
+      missing := missing.push decl.userName
+  return (missing, mentioned)
+
+/-- Statement faults for an L1 witness.  The row type must occur as the direct
+type of an inhabitant binder; mentioning it elsewhere is not enough. -/
+def l1WitnessFaults (structName witness : Name) (info : ConstantInfo) : MetaM (Array String) := do
+  unless info matches .thmInfo _ do
+    return #[s!"L1 witness {witness} is not a theorem or proof field"]
+  let mut prefixFaults := #[]
+  if (← getEnv).getProjectionFnInfo? witness |>.isSome then
+    unless witness.getPrefix == structName do
+      prefixFaults := prefixFaults.push s!"L1 witness {witness} is a field of {witness.getPrefix}, not of {structName}"
+  forallTelescopeReducing info.type fun binders conclusion => do
+    let mut faults := prefixFaults
+    let mut inhabitant? : Option (Expr × Expr) := none
+    for binder in binders do
+      let binderType ← whnf (← inferType binder)
+      if binderType.getAppFn.constName? == some structName then
+        inhabitant? := some (binder, binderType)
+        break
+    let some (inhabitant, inhabitantType) := inhabitant?
+      | return faults.push s!"L1 witness {witness} is not quantified over an inhabitant of {structName}"
+    unless ← isProp conclusion do
+      faults := faults.push s!"L1 witness {witness} has a data conclusion"
+    if ← trivialConclusion binders conclusion then
+      faults := faults.push s!"L1 witness {witness} has a trivial conclusion"
+    let (missing, mentionsIndex) ← valueIndexCoverage inhabitantType conclusion
+    unless missing.isEmpty do
+      faults := faults.push s!"L1 witness {witness} ignores the bound token indices: {missing.toList}"
+    unless conclusion.containsFVar inhabitant.fvarId! || mentionsIndex do
+      faults := faults.push s!"L1 witness {witness} has a conclusion closed over the bound inhabitant and its indices"
+    return faults
+
+/-! A positive control for check 3.  `sound'` is intentionally nothing but a
+proof-field projection: this is the good construction the former rule rejected. -/
+
+structure ProjectionWitness (request result : Nat) where
+  private mk ::
+  sound : request = 0 ∧ result = 0
+
+theorem ProjectionWitness.sound' {request result : Nat}
+    (witness : ProjectionWitness request result) : request = 0 ∧ result = 0 :=
+  witness.sound
+
+#assert_axioms ProjectionWitness.sound'
+
 /-- The plant: a definition exporting the bare private constructor, added to the
 current (scratch) environment. -/
 def plantForge (ctor : Name) : MetaM Name := do
@@ -218,35 +297,9 @@ elab "#assert_token_census " table:ident : command => do
           match (← getEnv).find? thm.toName with
           | none => faults := faults.push s!"{row.ctor}: L1 witness {thm} does not exist"
           | some info =>
-              -- a PROOF FIELD of the type is the witness itself (the type carries the
-              -- proposition); a theorem must not be a renamed projection of one
               let structName := row.ctor.getPrefix
-              if (← getEnv).getProjectionFnInfo? thm.toName |>.isSome then
-                unless thm.toName.getPrefix == structName do
-                  faults := faults.push s!"{row.ctor}: L1 witness {thm} is a field of {thm.toName.getPrefix}, not of {structName}"
-                let proofField ← forallTelescopeReducing info.type fun _ body => isProp body
-                unless proofField do
-                  faults := faults.push s!"{row.ctor}: L1 witness {thm} is a data field, not a proof field"
-              else
-                -- a theorem: about this type, and not a projection under binders
-                unless info.type.getUsedConstants.contains structName do
-                  faults := faults.push s!"{row.ctor}: L1 theorem {thm} does not mention {structName}"
-                -- `ConstantInfo.value?` answers `none` for a theorem whose proof is still
-                -- elaborating; read the declared value directly
-                let declared? : Option Expr := match info with
-                  | .thmInfo proved => some proved.value
-                  | .defnInfo definition => some definition.value
-                  | _ => none
-                if let some value := declared? then
-                  let renamed ← lambdaTelescope value fun _ body => do
-                    match body.consumeMData with
-                    | .proj .. => pure true
-                    | body =>
-                        match body.getAppFn.constName? with
-                        | some head => pure ((← getEnv).getProjectionFnInfo? head).isSome
-                        | none => pure false
-                  if renamed then
-                    faults := faults.push s!"{row.ctor}: L1 theorem {thm} is a renamed projection; name the proof field instead"
+              for fault in ← l1WitnessFaults structName thm.toName info do
+                faults := faults.push s!"{row.ctor}: {fault}"
       | _ => faults := faults.push s!"{row.ctor}: layer must be `L2` or `L1 <theorem>`, not `{row.layer}`"
     -- 1. no foreign mint
     let mut homeUses : NameSet := {}
@@ -255,13 +308,13 @@ elab "#assert_token_census " table:ident : command => do
         if moduleOf env name == home then homeUses := homeUses.insert ctor
       for (minter, module, ctor, home) in ← foreignMints privates name info do
         faults := faults.push s!"{ctor} (home {home}) is minted by {minter} in {module}"
-    -- 5. no mint that does not name the constructor (L2 types)
-    let l2Types : NameMap Row := present.foldl (fun map (name, user, _) =>
+    -- 5. no mint that does not name the constructor (all evidence types)
+    let evidenceTypes : NameMap Row := present.foldl (fun map (name, user, _) =>
       match rowMap.find? user, env.find? name with
       | some row, some (.ctorInfo ctor) =>
-          if row.layer == "L2" && row.kind == "evidence" then map.insert ctor.induct row else map
+          if row.kind == "evidence" then map.insert ctor.induct row else map
       | _, _ => map) {}
-    let l2Home : Name → Option Name := fun type => (l2Types.find? type).map (·.home)
+    let evidenceHome : Name → Option Name := fun type => (evidenceTypes.find? type).map (·.home)
     let tokenTypes : NameMap Unit := present.foldl (fun map (name, _, _) =>
       match env.find? name with
       | some (.ctorInfo ctor) => map.insert ctor.induct ()
@@ -274,19 +327,19 @@ elab "#assert_token_census " table:ident : command => do
         if let some cls := conclusionHead info.type then
           if mintingClasses.contains cls then
             for type in conclusionArgs info.type do
-              if (l2Types.find? type).isSome then
-                faults := faults.push s!"{name} in {module}: a {cls} instance mints the L2 token {type} without its constructor"
-      -- casts into an L2 type
+              if (evidenceTypes.find? type).isSome then
+                faults := faults.push s!"{name} in {module}: a {cls} instance mints the evidence token {type} without its constructor"
+      -- casts into an evidence type
       if let some value := info.value? then
         let used := info.getUsedConstantsAsSet
-        if castLike.any used.contains && (used.toList.any fun c => (l2Types.find? c).isSome) then
-          let targets := (← castTargets value).toList.filter fun type => (l2Types.find? type).isSome
+        if castLike.any used.contains && (used.toList.any fun c => (evidenceTypes.find? c).isSome) then
+          let targets := (← castTargets value).toList.filter fun type => (evidenceTypes.find? type).isSome
           unless targets.isEmpty do
             unless info matches .thmInfo _ do
               unless ← isProp info.type do
                 for type in targets.eraseDups do
-                  if l2Home type != some module then
-                    faults := faults.push s!"{name} in {module} casts into the L2 token {type}"
+                  if evidenceHome type != some module then
+                    faults := faults.push s!"{name} in {module} casts into the evidence token {type}"
       -- bare minters at home
       -- (a projection reads a token another value holds; an argument that is itself a census
       -- token, or a proposition, is the verification step a derivation needs)
@@ -294,7 +347,7 @@ elab "#assert_token_census " table:ident : command => do
         unless isInstanceCore env name || (env.getProjectionFnInfo? name).isSome ||
             name.components.any (fun part => part.toString.startsWith "_") do
           if let some type := conclusionHead info.type then
-            if let some row := l2Types.find? type then
+            if let some row := evidenceTypes.find? type then
               if row.home == module then
                 let bare ← forallTelescopeReducing info.type fun binders _ => do
                   for binder in binders do
@@ -305,7 +358,7 @@ elab "#assert_token_census " table:ident : command => do
                   return true
                 let user := (privateToUserName? name).getD name
                 if bare && !((justifiedMinters row.note).any fun listed => listed.isSuffixOf user) then
-                  faults := faults.push s!"{name} in {module} returns the bare L2 token {type} with no proposition among its arguments (justify it under `mints:` in the row's note)"
+                  faults := faults.push s!"{name} in {module} returns the bare evidence token {type} with no proposition among its arguments (justify it under `mints:` in the row's note)"
     -- 6. restricted minting functions are called only where the census allows
     for restriction in restrictions do
       match env.find? restriction.function with

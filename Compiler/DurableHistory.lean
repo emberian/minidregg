@@ -408,6 +408,15 @@ theorem Head.genesis_fields (store : StoreIdentity) (root : Digest) :
     (Head.genesis store root).height = 0 ∧ (Head.genesis store root).chain = store.logStart ∧
       (Head.genesis store root).frontier = [] := ⟨rfl, rfl, rfl⟩
 
+/-- The deployed genesis head carries the root of the empty logical history.
+Arbitrary stale index rows are unreachable at the empty root. -/
+theorem Head.genesis_index_maintained (store : StoreIdentity) (root : Digest)
+    (rows : List Bool → Option DurableIndex.Row) :
+    DurableIndex.Maintained [] rows (Head.genesis store root).indexRoot :=
+  DurableIndex.maintained_init rows
+
+#assert_axioms Head.genesis_index_maintained
+
 /-- **A head is MAC-bound to its Store**: unless it is the empty log's (whose
 chain is the Store's genesis log start), some tag of its height verifies under
 the Store's key for its chain, frontier and index root. -/
