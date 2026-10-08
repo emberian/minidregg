@@ -70,6 +70,7 @@ import Kernel.JointReserveIngress
 import Kernel.JointReceiver
 import Kernel.JointControlBootstrap
 import Kernel.JointControlBootstrapBundle
+import Theory.AssertAxioms
 
 namespace Minidregg.Kernel.NativeHostReplay
 
@@ -2857,6 +2858,33 @@ theorem runningV3After_retry_completion {config : Config} {opened : Opened confi
   simp only [selected]
   simp only [isRunning, isStart, dite_true]
   exact ⟨_, List.mem_cons_self, rfl, rfl, rfl⟩
+
+/-- Every successful v4 create completion contributes its exact ingress,
+index and receipt to both replay caches. This specializes the after-step
+lemmas to the actual Derived emitted by v4 admission, so the caller need not
+assume that dispatch selected a completion cache entry. -/
+theorem CompletionAtV4.replay_lists_include {config : Config} {opened : Opened config}
+    {ingress : ApplicationLifecycleRetryCompletionV4Ingress.Ingress}
+    (admitted : CompletionAtV4 config opened ingress)
+    (created : List (PriorCreatedV3 config)) (running : List (PriorRunningV3 config))
+    (record : DurableReceiver.IntentRecord) (receipt : NativeHostCodec.Receipt)
+    (matched : recordMatches record admitted.toDerived.intent = true)
+    (isCreated : (CompletionIngress.v4 ingress).creationMarker.isSome = true)
+    (isRunning : (CompletionIngress.v4 ingress).physical.outcome = .running)
+    (isStart : (CompletionIngress.v4 ingress).beginSource.kind = .start) :
+    (∃ prior ∈ createdV3After config opened created record receipt admitted.toDerived matched,
+      prior.ingress = .v4 ingress ∧ prior.index = opened.durable.image.accepted.length ∧
+      prior.receipt = receipt) ∧
+    (∃ prior ∈ runningV3After config opened running record receipt admitted.toDerived matched,
+      prior.ingress = .v4 ingress ∧ prior.index = opened.durable.image.accepted.length ∧
+      prior.receipt = receipt) := by
+  exact ⟨createdV3After_retry_completion created record receipt admitted.toDerived matched
+      rfl isCreated,
+    runningV3After_retry_completion running record receipt admitted.toDerived matched
+      rfl isRunning isStart⟩
+
+#assert_axioms CompletionAtV4.replay_lists_include
+#assert_axioms createdV3After_retry_completion runningV3After_retry_completion
 
 /-- Called only after the walk natively admitted, matched in full, advanced and
 validated `record`. Each list gains exactly the element its Derived carries. -/

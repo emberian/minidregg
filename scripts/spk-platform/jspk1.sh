@@ -1,6 +1,6 @@
 #!/bin/sh
 # J-SPK-1: robust SPK hosting on one host, as the Store operator, through the
-# root broker. Every row is decided by an artifact (a JSON field, a /proc
+# operator broker. Every row is decided by an artifact (a JSON field, a /proc
 # line, a systemd property, an HTTP body), never by an exit status alone.
 #
 #   jspk1.sh all RUN_ROOT          every row below, in order
@@ -10,6 +10,8 @@
 #                                  built with integration-qualification
 #                                  (deploy pins it; the rows FAIL by name on a
 #                                  release build, never skip)
+#   jspk1.sh r7 RUN_ROOT           first-create recovery on two prepared Stores
+#                                  (two-world-journey.sh recovery provisions them)
 #
 # Store 1 (RUN_ROOT/s1): grain a (app 7101, class S) is installed through the
 #   broker, started, checked under the floor, reached, written to; its
@@ -78,24 +80,37 @@ row() {
   [ "$verdict" = PASS ] || { echo "jspk1: row $name failed: $detail" >&2; exit 1; }
 }
 
-s1() { GRAIN_A=71 CLASS_A=S "$J" phase "$ROOT/s1" "$@"; }
+# Each Store uses the exact broker/profile returned by its own initialization.
+grain_phase() (
+  world=$1; shift
+  result=$ROOT/$world/evidence/profile-result.json
+  if [ -s "$result" ]; then
+    profile=$(profile_of "$ROOT/$world")
+    GRAINS_ROOT=$(jq -er .grainsRoot "$profile")
+    BROKER_SOCKET=$(jq -er .brokerSocket "$profile")
+    export GRAINS_ROOT BROKER_SOCKET
+  fi
+  "$J" phase "$ROOT/$world" "$@"
+)
+s1() { GRAIN_A=71 CLASS_A=S grain_phase s1 "$@"; }
 s2() { GRAIN_A=71 GRAIN_B=72 GRAIN_C=73 GRAIN_D=74 GRAIN_E=75 CLASS_A=S CLASS_B=M CLASS_C=S CLASS_D=S \
   CLASS_E=S IMPORT_A=${IMPORT_A:-} IMPORT_C=${IMPORT_C:-} IMPORT_D=${IMPORT_D:-} \
   IMPORT_E=${IMPORT_E:-} IMPORT_KEY=${IMPORT_KEY:-} \
-  "$J" phase "$ROOT/s2" "$@"; }
+  grain_phase s2 "$@"; }
 # Store 3 (RUN_ROOT/s3), fresh: added when Store 2 had grown past the Host's
 # 600 s frame deadline under persvati's load; the restored grain and the
 # class-M grain run here.
 s3() { GRAIN_B=72 GRAIN_E=76 NONCE_BASE_E=110000 CLASS_B=M CLASS_E=S IMPORT_E=${IMPORT_E:-} \
-  IMPORT_KEY=${IMPORT_KEY:-} "$J" phase "$ROOT/s3" "$@"; }
+  IMPORT_KEY=${IMPORT_KEY:-} grain_phase s3 "$@"; }
 profile_of() {
-  for p in "$GRAINS_ROOT"/*/host/grain-host.json; do
-    [ -r "$p" ] || continue
-    if [ "$(jq -r .miniConfig "$p")" = "$1/store/base/workroom/deployment/pinned-config.json" ]; then
-      echo "$p"; return 0
-    fi
-  done
-  return 1
+  result=$1/evidence/profile-result.json
+  p=$(jq -er --arg config "$1/store/base/workroom/deployment/pinned-config.json" '
+    select(.protocol == "mini-spk-grain-profile-result-v1" and .miniConfig == $config) |
+    .profilePath' "$result") || return 1
+  jq -e --slurpfile result "$result" '
+    .miniConfig == $result[0].miniConfig and .stateRoot == $result[0].stateRoot and
+    .brokerSocket == $result[0].brokerSocket' "$p" >/dev/null || return 1
+  echo "$p"
 }
 P1() { profile_of "$ROOT/s1"; }
 P2() { profile_of "$ROOT/s2"; }
@@ -104,18 +119,18 @@ status() { "$SPK_HOST" grain status "$1" "$2"; }
 running_unit() { status "$1" "$2" | jq -er '[.runs[] | select(.state == "running")][-1].unit'; }
 broker_raw() { python3 -c '
 import socket, sys
-s = socket.socket(socket.AF_UNIX); s.connect("/run/mini-spk-broker.sock")
+s = socket.socket(socket.AF_UNIX); s.connect(sys.argv[2])
 s.sendall(sys.argv[1].encode() + b"\n"); s.shutdown(socket.SHUT_WR)
-print(s.recv(65536).decode())' "$1"; }
+print(s.recv(65536).decode())' "$1" "${BROKER_SOCKET:?store-specific broker socket required}"; }
 
 # ---- rows -------------------------------------------------------------------
 
 r_identity() {
   echo "client uid=$(id -u) user=$(id -un) groups=$(id -Gn)"
   [ "$(id -u)" != 0 ]
-  ls -l /run/mini-spk-broker.sock
-  stat -c '%U:%G %a' /run/mini-spk-broker.sock | grep -qx 'root:[^ ]* 660'
-  echo "operator $(id -un) is not root; broker socket root-owned 0660"
+  [ -S "${BROKER_SOCKET:?store-specific broker socket required}" ]
+  [ "$(stat -c '%u:%a' "$BROKER_SOCKET")" = "$(id -u):600" ]
+  echo "operator $(id -un) owns broker socket 0600"
 }
 
 r_refusals() {
@@ -140,9 +155,9 @@ r_floor() {
 r_limits() {
   profile=$1 app=$2 class=$3
   unit=$(running_unit "$profile" "$app")
-  slice=$(systemctl show "$unit" --property=Slice --value)
-  cg=$(systemctl show "$unit" --property=ControlGroup --value)
-  limits=$(systemctl show "$slice" --property=MemoryMax,CPUWeight,TasksMax,IOWeight | tr '\n' ' ')
+  slice=$(systemctl --user show "$unit" --property=Slice --value)
+  cg=$(systemctl --user show "$unit" --property=ControlGroup --value)
+  limits=$(systemctl --user show "$slice" --property=MemoryMax,CPUWeight,TasksMax,IOWeight | tr '\n' ' ')
   echo "unit=$unit slice=$slice cgroup=$cg"
   echo "systemctl: $limits"
   mem=$(cat "/sys/fs/cgroup${cg%/*}/memory.max")
@@ -153,7 +168,8 @@ r_limits() {
   esac
   for item in $want; do printf '%s' "$limits" | grep -q "$item" || { echo "missing $item" >&2; exit 1; }; done
   [ "$mem" = "$want_mem" ]
-  case "$cg" in */"$PREFIX"-grains.slice/"$slice"/"$unit") ;; *) echo "cgroup path" >&2; exit 1 ;; esac
+  store=$(basename "$(dirname "$(jq -er .stateRoot "$profile")")")
+  case "$cg" in */"s$store-$PREFIX"-grains.slice/"$slice"/"$unit") ;; *) echo "cgroup path" >&2; exit 1 ;; esac
   echo "class $class limits hold on $slice ($want)"
 }
 
@@ -161,7 +177,7 @@ r_kill() {
   profile=$1 app=$2
   unit=$(running_unit "$profile" "$app")
   gen=$(status "$profile" "$app" | jq -er '[.runs[] | select(.state == "running")][-1].generation')
-  pid=$(systemctl show "$unit" --property=MainPID --value)
+  pid=$(systemctl --user show "$unit" --property=MainPID --value)
   store=$(jq -r .stateRoot "$profile" | awk -F/ '{print $(NF-1)}')
   sup=$PREFIX-spk-supervisor@$store-$app.service
   echo "killing resident pid=$pid unit=$unit generation=$gen (uid $(stat -c %u /proc/$pid))"
@@ -169,22 +185,22 @@ r_kill() {
   kill -9 "$pid"
   # The supervisor starts on the unit's failure (OnFailure=).
   tick=0
-  until [ "$(systemctl show "$sup" --property=ActiveState --value)" = activating ] ||
-      [ "$(systemctl show "$sup" --property=ActiveState --value)" = active ] ||
-      [ -n "$(systemctl show "$sup" --property=ExecMainStartTimestampMonotonic --value | grep -v '^0$')" ]; do
+  until [ "$(systemctl --user show "$sup" --property=ActiveState --value)" = activating ] ||
+      [ "$(systemctl --user show "$sup" --property=ActiveState --value)" = active ] ||
+      [ -n "$(systemctl --user show "$sup" --property=ExecMainStartTimestampMonotonic --value | grep -v '^0$')" ]; do
     tick=$((tick + 1)); [ "$tick" -lt 600 ] || { echo "supervisor never started" >&2; exit 1; }
     sleep 0.1
   done
   activated=$(date +%s.%N)
-  echo "unit after kill: $(systemctl show "$unit" --property=ActiveState,Result,InvocationID | tr '\n' ' ')"
+  echo "unit after kill: $(systemctl --user show "$unit" --property=ActiveState,Result,InvocationID | tr '\n' ' ')"
   echo "supervisor $sup activated $(echo "$activated - $killed" | bc)s after SIGKILL"
   # Wait for the supervisor to STOP the dead generation and continue the next.
   tick=0
   while :; do
-    st=$(systemctl show "$sup" --property=ActiveState,Result,NRestarts --value | tr '\n' ' ')
+    st=$(systemctl --user show "$sup" --property=ActiveState,Result,NRestarts --value | tr '\n' ' ')
     new=$(status "$profile" "$app" | jq -r '[.runs[] | select(.state == "running")][-1].generation // empty')
     if [ -n "$new" ] && [ "$new" -gt "$gen" ] &&
-        [ "$(systemctl show "$(running_unit "$profile" "$app")" --property=ActiveState --value)" = active ]; then
+        [ "$(systemctl --user show "$(running_unit "$profile" "$app")" --property=ActiveState --value)" = active ]; then
       break
     fi
     case "$st" in failed*) echo "supervisor failed: $st" >&2; exit 1 ;; esac
@@ -193,7 +209,7 @@ r_kill() {
   done
   done_at=$(date +%s.%N)
   status "$profile" "$app" | jq -c '[.runs[] | {generation, state, unit, unitActiveState}]'
-  journalctl --no-pager -o cat -u "$sup" 2>/dev/null | tail -n 3 || :
+  journalctl --user --no-pager -n 3 -o cat -u "$sup" 2>/dev/null || :
   echo "generation $gen killed -> supervisor STOP + continue -> generation $new active $(echo "$done_at - $killed" | bc)s after SIGKILL (supervisor activation $(echo "$activated - $killed" | bc)s)"
 }
 
@@ -311,7 +327,7 @@ r_failstart_reconcile() {
   sup=$PREFIX-spk-supervisor@$store-$app.service
   tick=0
   until [ -s "$receipt" ]; do
-    case "$(systemctl show "$sup" --property=ActiveState,Result --value | tr '\n' ' ')" in
+    case "$(systemctl --user show "$sup" --property=ActiveState,Result --value | tr '\n' ' ')" in
       failed*) break ;;
     esac
     tick=$((tick + 1)); [ "$tick" -lt 480 ] || break
@@ -351,8 +367,75 @@ r_failstart_restart() {
   gen=$(status "$profile" "$app" | jq -er '[.runs[] | select(.state == "running")][-1].generation')
   [ "$gen" = "$((failed + 2))" ] ||
     { echo "FAIL: START after reconciliation ran generation $gen, expected $((failed + 2))" >&2; return 1; }
-  [ "$(systemctl show "$unit" --property=ActiveState --value)" = active ]
+  [ "$(systemctl --user show "$unit" --property=ActiveState --value)" = active ]
   echo "Mini admitted the next START of $app at generation $gen ($unit active): the reconciled app was back in phase 2"
+}
+
+# R7 begins before the first CREATE, unlike the later failed continue tested
+# by s1-failstart-a. No completion marker or prior attempt is removed.
+r_first_create_arm() {
+  profile=$(P1)
+  dir=$(app_state "$profile" 7101)
+  status "$profile" 7101 | jq -e '[.runs[] | select(.state != "never-begun")] | length == 0' >/dev/null
+  jq -er '.begin.processGeneration' "$dir/install/install-prepared-v2.json" >"$OUT/failstart-7101.before"
+  [ "$(cat "$OUT/failstart-7101.before")" = 1 ]
+  [ ! -e "$dir/qualification-fail-spawn-v1" ]
+  (umask 077; set -C; : >"$dir/qualification-fail-spawn-v1")
+  echo "first CREATE armed after INSTALL g1"
+}
+
+r_first_create_retry() {
+  r_failstart_restart "$(P1)" 7101 s1 start-a71
+  dir=$(app_state "$(P1)" 7101)/g4
+  [ "$(cat "$OUT/failstart-7101.failed")" = 2 ]
+  jq -e '.protocol == "mini-spk-resident-start-admitted-retry-v4" and
+    .retry.failedGeneration == "2" and .retry.beforeGeneration == "3"' \
+    "$dir/start-admitted-retry-v4.json" >/dev/null
+  jq -e '.protocol == "mini-spk-resident-start-completed-retry-v4" and
+    (.completionReceipt.acceptedCount | test("^[1-9][0-9]*$"))' \
+    "$dir/start-completed-retry-v4.json" >/dev/null
+  cp "$dir/start-completed-retry-v4.json" "$OUT/R7-retry-completion.json"
+  echo "$OUT/R7-retry-completion.json"
+}
+
+r_cold_replay() (
+  profile=$(P1)
+  export GRAINS_ROOT=$(jq -er .grainsRoot "$profile")
+  export BROKER_SOCKET=$(jq -er .brokerSocket "$profile")
+  "$J" stop-services "$ROOT/s1"
+  s1 services
+  echo "fresh Host session; subsequent operation replays retained history"
+)
+
+r_stop_retry() {
+  s1 stop-a71 >/dev/null
+  dir=$(app_state "$(P1)" 7101)/g4
+  receipt=$dir/stop-completion/receipt-anchor.json
+  attempts=0
+  while [ ! -s "$receipt" ] && [ "$attempts" -lt 7 ]; do
+    receipt=$(dirname "$receipt")/replan/receipt-anchor.json
+    attempts=$((attempts + 1))
+  done
+  cp "$receipt" "$OUT/R7-stop-receipt.json"
+  jq -e '[.transactionId,.eventId,.acceptedCount,.worldRoot] |
+    all(type == "string" and test("^(0|[1-9][0-9]*)$"))' "$receipt" >/dev/null || {
+      echo "STOP receipt anchor fields malformed: $OUT/R7-stop-receipt.json" >&2; return 1;
+    }
+  status "$(P1)" 7101 | jq -e '.runs[] | select(.generation == "4") | .state == "stopped"' >/dev/null
+  echo "$OUT/R7-stop-receipt.json"
+}
+
+r_continue_retry() {
+  s1 start-a72 >/dev/null
+  # STOP consumed g5; continue-START consumes g6 under ApplicationGrain's law.
+  result=$ROOT/s1/evidence/start-a72.stdout
+  created=$(jq -er '.completionReceipt.acceptedCount | tonumber - 1 | tostring' "$OUT/R7-retry-completion.json")
+  jq -e --arg created "$created" '.generation == "6" and
+    .startAction == {kind:"continue",createdIndex:$created} and
+    .completion.protocol == "mini-spk-resident-start-completed-v3" and
+    (.completion.completionReceipt.acceptedCount | test("^[1-9][0-9]*$"))' "$result" >/dev/null
+  cp "$result" "$OUT/R7-continue-receipt.json"
+  echo "$OUT/R7-continue-receipt.json"
 }
 
 # r_same_app: app 7101 in Store 1 and Store 2 at once. Mini names the
@@ -368,10 +451,11 @@ r_same_app() {
   case "$unit1" in "mini-spk-s$key1-a7101-g"*.service) ;; *) echo "FAIL: $unit1 does not carry Store 1's key" >&2; return 1 ;; esac
   case "$unit2" in "mini-spk-s$key2-a7101-g"*.service) ;; *) echo "FAIL: $unit2 does not carry Store 2's key" >&2; return 1 ;; esac
   for unit in "$unit1" "$unit2"; do
-    [ "$(systemctl show "$unit" --property=ActiveState --value)" = active ] ||
+    [ "$(systemctl --user show "$unit" --property=ActiveState --value)" = active ] ||
       { echo "FAIL: $unit is not active" >&2; return 1; }
   done
-  ls -d "$GRAINS_ROOT/vars/$key1-7101" "$GRAINS_ROOT/vars/$key2-7101"
+  root1=$(jq -er .grainsRoot "$(P1)") root2=$(jq -er .grainsRoot "$(P2)")
+  ls -d "$root1/vars/$key1-7101" "$root2/vars/$key2-7101"
   s2 stop-a >/dev/null
   echo "app 7101 ran in two Stores at once: $unit1 and $unit2, volumes $key1-7101 and $key2-7101; Store 2's stopped again"
 }
@@ -381,8 +465,8 @@ r_side_by_side() {
     set -- $spec
     unit=$(running_unit "$1" "$2")
     printf '%s %s %s %s\n' "$(jq -r .stateRoot "$1" | awk -F/ '{print $(NF-1)}')" "$2" "$unit" \
-      "$(systemctl show "$unit" --property=ActiveState,Slice --value | tr '\n' ' ')"
-    [ "$(systemctl show "$unit" --property=ActiveState --value)" = active ]
+      "$(systemctl --user show "$unit" --property=ActiveState,Slice --value | tr '\n' ' ')"
+    [ "$(systemctl --user show "$unit" --property=ActiveState --value)" = active ]
   done | tee "$OUT/side-by-side.txt"
   [ "$(cut -d ' ' -f 3 "$OUT/side-by-side.txt" | sort -u | wc -l)" = 3 ]
   echo "three grains of two Stores active at once under three distinct units"
@@ -414,6 +498,12 @@ run_row() {
     s1-failstart-arm) row s1-failstart-arm r_failstart_arm "$(P1)" 7101 ;;
     s1-failstart-a) row s1-failstart-a r_failstart_reconcile "$(P1)" 7101 s1 start-a3 ;;
     s1-failstart-restart) row s1-failstart-restart r_failstart_restart "$(P1)" 7101 s1 start-a4 ;;
+    R7-first-create-arm) row R7-first-create-arm r_first_create_arm ;;
+    R7-first-create-fail) row R7-first-create-fail r_failstart_reconcile "$(P1)" 7101 s1 start-a70 ;;
+    R7-retry-create) row R7-retry-create r_first_create_retry ;;
+    R7-replay-before-stop|R7-replay-before-continue) row "$1" r_cold_replay ;;
+    R7-stop-retry) row R7-stop-retry r_stop_retry ;;
+    R7-continue) row R7-continue r_continue_retry ;;
     s2-store) row s2-store s2 store services workroom profile ;;
     s2-birth-a) row s2-birth-a s2 birth-a ;;
     s2-install-a) row s2-install-a r_install_import a "$ROOT/export-a" ;;
@@ -479,11 +569,17 @@ ALL="identity refusals s1-store s1-birth-a s1-install-a s1-share-a s1-start-a s1
 # The failed-START rows replace s1-start-a3: Store 1's grain a, STOPped and
 # exported, fails one START on purpose and is reconciled through Mini.
 FAILSTART=$(printf '%s\n' $ALL | sed '/^s2-store$/,$d' |
+  sed 's/^s1-start-a$/R7-first-create-arm R7-first-create-fail R7-retry-create R7-replay-before-stop R7-stop-retry R7-replay-before-continue R7-continue/' |
   sed 's/^s1-start-a3$/s1-failstart-arm s1-failstart-a s1-failstart-restart/' | tr '\n' ' ')
 
 case "$MODE" in
   all) for r in $ALL; do run_row "$r"; done ;;
   failstart) for r in $FAILSTART; do run_row "$r"; done ;;
+  r7)
+    for r in R7-first-create-arm R7-first-create-fail R7-retry-create \
+        R7-replay-before-stop R7-stop-retry R7-replay-before-continue R7-continue s2-same-app; do
+      run_row "$r"
+    done ;;
   serve)
     # The Store services for resumed rows, kept alive by this process (run it
     # as its own unit: rows runs then find them alive and leave them).

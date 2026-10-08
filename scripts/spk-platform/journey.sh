@@ -5,6 +5,23 @@
 set -eu
 umask 077
 
+# Standing R7 entrypoint: isolated scratch worlds, with the candidate Host and
+# qualification Rust binaries explicitly selected and recorded by the driver.
+if [ "${1:-}" = r7 ] || [ "${1:-}" = r7-full ]; then
+  mode=recovery
+  [ "$1" != r7-full ] || mode=failstart
+  shift
+  [ "$#" = 4 ] || [ "$#" = 5 ] || {
+    echo 'usage: journey.sh r7|r7-full BASE_BIN QUALIFICATION_RUST_BIN HOST NEW_RUN_ROOT [SIGNED_SPK]' >&2
+    exit 2
+  }
+  HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+  GRAIN_HOST=$3
+  GRAIN_CONSENT=$(dirname "$3")/minidregg-client-consent
+  export GRAIN_HOST GRAIN_CONSENT
+  exec "$HERE/two-world-journey.sh" "$mode" "$1" "$2" "$4" "${5:-}"
+fi
+
 usage() {
   cat >&2 <<'EOF'
 usage: journey.sh status ROOT
