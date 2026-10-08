@@ -191,21 +191,18 @@ def safetyText : DefinitionSafety → String
 def quotText : QuotKind → String
   | .type => "type" | .ctor => "ctor" | .lift => "lift" | .ind => "ind"
 
-private def collectUsedConstants : Expr → Array Name → Array Name
-  | .const n _, acc => acc.push n
-  | .app f a, acc => collectUsedConstants a (collectUsedConstants f acc)
-  | .lam _ type body _, acc => collectUsedConstants body (collectUsedConstants type acc)
-  | .forallE _ type body _, acc => collectUsedConstants body (collectUsedConstants type acc)
-  | .letE _ type value body _, acc =>
-      collectUsedConstants body (collectUsedConstants value (collectUsedConstants type acc))
-  | .proj typeName _ struct, acc => (collectUsedConstants struct acc).push typeName
-  | .mdata _ body, acc => collectUsedConstants body acc
-  | _, acc => acc
+/-- Structure type names stored in raw projections. `Expr.forEach` uses `MonadCacheT` internally,
+so shared subterms of the expression DAG are visited once. -/
+private def projectionTypeNames (e : Expr) : Array Name := runST fun σ => do
+  let acc ← ST.mkRef (σ := σ) #[]
+  e.forEach fun
+    | .proj typeName _ _ => acc.modify (·.push typeName)
+    | _ => pure ()
+  acc.get
 
-/-- Constants named by an expression, including the structure type stored only in a raw
-`Expr.proj`. Lean 4.30's `Expr.getUsedConstants` walks the projection's operand but omits that
-type name, so the manifest keeps its own complete structural walk. -/
-def usedConstants (e : Expr) : Array Name := collectUsedConstants e #[]
+/-- Everything in Lean's optimized, pointer-cached constant fold, plus the structure type stored
+only in each raw `Expr.proj` (which Lean 4.30's fold omits). -/
+def usedConstants (e : Expr) : Array Name := e.getUsedConstants ++ projectionTypeNames e
 
 /-- The roots (types and bodies) of a constant's content, the extra shape it carries, and
 the constants its content mentions. A leaf (`internal = false`, an axiom, an opaque) carries

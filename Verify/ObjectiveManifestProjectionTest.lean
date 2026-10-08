@@ -4,10 +4,13 @@ open Lean
 
 namespace Minidregg.ObjectiveManifestProjectionTest
 
-/-- The manifest collector reaches a structure type carried only by a raw projection. -/
-theorem raw_projection_collects_structure_type :
-    ObjectiveManifest.usedConstants (.proj `ProjectionOnlyStructure 0 (.bvar 0)) =
-      #[`ProjectionOnlyStructure] := by
-  rfl
+/-- A raw projection whose structure type is its only named constant. -/
+def projectionOnly : Expr := .proj `ProjectionOnlyStructure 0 (.bvar 0)
+
+-- `usedConstants` runs a pointer-cached traversal in `ST`, so kernel reduction cannot prove the
+-- result by `rfl`. This elaboration-time check fails the module build if the edge disappears.
+run_meta
+  unless ObjectiveManifest.usedConstants projectionOnly |>.contains `ProjectionOnlyStructure do
+    throwError "objective manifest collector omitted ProjectionOnlyStructure from raw Expr.proj"
 
 end Minidregg.ObjectiveManifestProjectionTest
