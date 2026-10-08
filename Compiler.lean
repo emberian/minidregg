@@ -2,6 +2,8 @@
 # Compiler — the arithmetization spine (ATLAS §7).
 -/
 import Compiler.Placeholder  -- carve marker: syntactic-leaf IR, fold_unique, seqDescr, descriptor + codec
+import Compiler.PersistedCodecTagCensus
+import Kernel.ConsentAnchor
 import Compiler.ResourceTargetAdmission
 import Compiler.ResourceAuthorityProjection
 import Compiler.CanonicalAccountView
