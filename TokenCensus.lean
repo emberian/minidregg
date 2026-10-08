@@ -26,8 +26,9 @@ ELABORATED TERM of every constant:
 3. **Layer-1 rows are backed.**  A row marked `L1 <witness>` names a theorem (a
    proof-field projection is a theorem) quantified over an inhabitant of the row's
    type.  Its conclusion is not `True`, reflexive equality, or a repeated premise,
-   and mentions every value index of that inhabitant.  The theorem's proof term is
-   irrelevant: projecting the proof the type carries is the intended construction.
+   refers to the inhabitant or its indices, and mentions every value index of that
+   inhabitant.  The theorem's proof term is irrelevant: projecting the proof the
+   type carries is the intended construction.
 5. **No mint that does not name the constructor**, for an evidence type: no instance of
    a value-producing class (`Inhabited`, `Nonempty`, `Zero`, `One`, `OfNat`,
    `EmptyCollection`) whose conclusion is about the type (a foreign module could mint
@@ -190,18 +191,22 @@ def trivialConclusion (binders : Array Expr) (conclusion : Expr) : MetaM Bool :=
 
 /-- A value index is a free-variable argument of the bound token type other than
 a type, proposition, or instance argument.  Each such index must occur in the
-witness conclusion.  This deliberately checks the statement, never its proof. -/
-def missingValueIndices (tokenType conclusion : Expr) : MetaM (Array Name) := do
+witness conclusion.  The boolean records whether the conclusion mentions at
+least one such index.  This deliberately checks the statement, never its proof. -/
+def valueIndexCoverage (tokenType conclusion : Expr) : MetaM (Array Name × Bool) := do
   let mut missing := #[]
+  let mut mentioned := false
   for arg in tokenType.getAppArgs do
     unless arg.isFVar do continue
     let decl ← getFVarLocalDecl arg
     if decl.binderInfo.isInstImplicit then continue
     let argType ← whnf decl.type
     if argType.isSort || (← isProp argType) then continue
-    unless conclusion.containsFVar arg.fvarId! do
+    if conclusion.containsFVar arg.fvarId! then
+      mentioned := true
+    else
       missing := missing.push decl.userName
-  return missing
+  return (missing, mentioned)
 
 /-- Statement faults for an L1 witness.  The row type must occur as the direct
 type of an inhabitant binder; mentioning it elsewhere is not enough. -/
@@ -214,21 +219,23 @@ def l1WitnessFaults (structName witness : Name) (info : ConstantInfo) : MetaM (A
       prefixFaults := prefixFaults.push s!"L1 witness {witness} is a field of {witness.getPrefix}, not of {structName}"
   forallTelescopeReducing info.type fun binders conclusion => do
     let mut faults := prefixFaults
-    let mut inhabitantType? : Option Expr := none
+    let mut inhabitant? : Option (Expr × Expr) := none
     for binder in binders do
       let binderType ← whnf (← inferType binder)
       if binderType.getAppFn.constName? == some structName then
-        inhabitantType? := some binderType
+        inhabitant? := some (binder, binderType)
         break
-    let some inhabitantType := inhabitantType?
+    let some (inhabitant, inhabitantType) := inhabitant?
       | return faults.push s!"L1 witness {witness} is not quantified over an inhabitant of {structName}"
     unless ← isProp conclusion do
       faults := faults.push s!"L1 witness {witness} has a data conclusion"
     if ← trivialConclusion binders conclusion then
       faults := faults.push s!"L1 witness {witness} has a trivial conclusion"
-    let missing ← missingValueIndices inhabitantType conclusion
+    let (missing, mentionsIndex) ← valueIndexCoverage inhabitantType conclusion
     unless missing.isEmpty do
       faults := faults.push s!"L1 witness {witness} ignores the bound token indices: {missing.toList}"
+    unless conclusion.containsFVar inhabitant.fvarId! || mentionsIndex do
+      faults := faults.push s!"L1 witness {witness} has a conclusion closed over the bound inhabitant and its indices"
     return faults
 
 /-! A positive control for check 3.  `sound'` is intentionally nothing but a

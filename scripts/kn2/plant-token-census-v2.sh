@@ -5,9 +5,9 @@ cd "$(dirname "$0")/../.."
 
 mode=${1:-}
 case "$mode" in
-  ignored-index|tautology|unlisted-minter|positive|old-rule) ;;
+  ignored-index|tautology|closed|unlisted-minter|positive|old-rule) ;;
   *)
-    echo "usage: $0 {ignored-index|tautology|unlisted-minter|positive|old-rule}" >&2
+    echo "usage: $0 {ignored-index|tautology|closed|unlisted-minter|positive|old-rule}" >&2
     exit 2
     ;;
 esac
@@ -56,6 +56,13 @@ case "$mode" in
     select_witness "Minidregg.TokenCensus.ProjectionWitness.tautological"
     grep -F "theorem ProjectionWitness.tautological" TokenCensus.lean
     expect_red "has a trivial conclusion"
+    ;;
+  closed)
+    insert_after_positive "structure ClosedPlant where\n  private mk ::\n  payload : Nat\n\ntheorem ClosedPlant.w (_witness : ClosedPlant) : ∃ n : Nat, n = 5 := ⟨5, rfl⟩\n\n#assert_axioms ClosedPlant.w"
+    perl -0pi -e 's{Minidregg\.Theory\.CanonicalReactiveView\.PreparedReaction\.mk}{Minidregg.TokenCensus.ClosedPlant.mk | TokenCensus | evidence | L1 Minidregg.TokenCensus.ClosedPlant.w | planted unindexed witness with a closed conclusion\nMinidregg.Theory.CanonicalReactiveView.PreparedReaction.mk}' TokenCensus/Table.lean
+    grep -F "theorem ClosedPlant.w" TokenCensus.lean
+    grep -F "Minidregg.TokenCensus.ClosedPlant.mk |" TokenCensus/Table.lean
+    expect_red "ClosedPlant.mk: L1 witness Minidregg.TokenCensus.ClosedPlant.w has a conclusion closed over the bound inhabitant and its indices"
     ;;
   unlisted-minter)
     insert_after_positive "def ProjectionWitness.unlistedMinter : ProjectionWitness 0 0 := ⟨rfl, rfl⟩"
