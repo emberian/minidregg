@@ -123,6 +123,7 @@ import Kernel.DeployedBridge  -- T3b: the deployed Bridge (lifecycle-image decod
 import Kernel.DeployedHistory  -- Deployed written-value byte accounting and complete turn digest preimage
 import Kernel.ObjectiveRefinesWorld -- Exact payload bridge and receiver-essential OB invariants in reached Worlds
 import Kernel.ObjectiveTurnTotality  -- Constructed seedless-create/stateless-member absence poles
+import Kernel.ObjectiveTurnTotalityStorage  -- exact full-image receiver charge = World value writes + classified framing
 import Kernel.HostRefinesWorld  -- T3/T3b: Represents : Loaded -> World; ofIntent_run; deployed_refines_step; host_trace_represents_fold; confirmed_represents (rebase included); policy_source_birth_is_turn; birth_rom_image; poles appendOnly_rewrite_has_no_turn, policy_source_rewrite_has_no_turn; host_submit_is_step stated for T4
 import Kernel.DurableCheckpoint -- DATAMODEL C2: resume from a materialized checkpoint; honest resume = genesis replay
 import Kernel.DurableView -- KN2: executing against a per-request view; declared-key families
