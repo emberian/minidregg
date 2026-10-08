@@ -6,7 +6,7 @@ checker and demand machine. `oracle.rs` calls the existing Automatafl Rust
 implementation. Neither adapter implements the game rules.
 
 The shared language/object description is
-[`EMERGENT-SMALLTALK.txt`](../../docs/objective-bend/EMERGENT-SMALLTALK.txt): **2,995
+[`EMERGENT-SMALLTALK.txt`](../../docs/objective-bend/EMERGENT-SMALLTALK.txt): **2,996
 UTF-8 bytes**, including newlines. The game is a separate package. The capsule
 describes core evaluation, a small typing contract and the host's object contract;
 it is not a replacement for the `.obend` surface grammar, complete typing rules,
@@ -73,10 +73,12 @@ The ten differences have two causes in current Rust:
 
 The [report](evidence/report.json) preserves every differing input and both
 outputs. [Source hashes](evidence/sources.json) identify the dirty Rust inputs,
-the model, driver and all 18 Mini modules in the runtime closure. The compact
+the model, driver and all 28 Mini modules in the runtime closure. The compact
 per-case [Bend results](evidence/bend-results.jsonl) and
 [Rust results](evidence/rust-results.jsonl) retain actual execution output.
-Mini source base: `4ef4e808`; Lean 4.30.0, independent serial build on Persvati.
+Mini source base: `546c1c88`; Lean 4.30.0, independent serial build on Persvati.
+The earlier checkout at `4ef4e808` produced the same 353 outcomes. The newer
+front end was rebuilt and the corpus re-run after integrating upstream main.
 No native admission, private hosted game or delve.town deployment is claimed.
 
 ## Reproduce

@@ -1,5 +1,5 @@
 Emergent Smalltalk: Objective Bend + governed durable objects.
-Core dynamics; surface syntax is an encoding of these terms.
+Core dynamics; surface syntax encodes these terms.
 Application associates left. \x.t binds x; t[u/x] avoids capture; new binders are fresh.
 Fields/arms are ordered lists keyed by strings; lookup takes the first match.
 Values v: \x.t, Nat, Bool, String, {fields}, spec(m,e), proto(s,t), inj(k,t).
@@ -28,7 +28,6 @@ op(v,w) -> its scalar result, if operand types match
 
 Nat ops: +,*,=,-,/,%,<,<=; unbounded, subtraction saturates at 0,
 division floors, n/0=0, n%0=n. Bool: strict AND. String: equality.
-No other primitive operations.
 
 Reduce only in contexts:
 E ::= [] | E t | E.k | extend(E,fs) | op(E,t) | op(v,E)
@@ -48,12 +47,13 @@ current authority. Grants face current law; law revision is not revocation.
 A method runs pinned code on typed inputs and a current state view. Its result
 proposes effects. Commit a turn atomically only if its exact read roots still
 match, current authority/laws admit every write, and its budget is funded.
-Otherwise refuse; no partial state change. Never bypass a law for the owner.
+Failed turns commit no application writes; fees may apply. No owner bypass.
+Delegation is explicit, scoped to callee, method, code and arguments.
 Synchronous call trees commit together. Sends enqueue durable messages and
 return answer slots; delivery is a later turn. A slot has one decider, deadline,
 and terminal outcome. Await/resume consumes one checkpoint generation once.
 Replies distinguish success, refusal, unknown, timeout and breakage.
 No reply is not failure: retain the signed request identity, query its receipt,
 and retry that same attempt; a new identity can repeat the action.
-Pure evaluation grants no effects. Exhaustion is bounded and may cost money;
-it is not success. Private data needs read protection.
+Pure evaluation grants no effects. Budget exhaustion is not success.
+Private data needs read protection.
