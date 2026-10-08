@@ -120,6 +120,8 @@ import Compiler.TurnCensusCoverage  -- BRAID-PROOF: fails the build unless TurnC
 import Kernel.TurnRecord  -- B2: an AcceptedCellEffect is a Leg (exactPost derived from step); ImplementationRefinement re-indexed by Turn/World, trace_represents_fold (crash recovery = fold of a sublist); model refines, torn install refuted
 import Kernel.TurnOfIntent  -- T3: Turn.ofIntent = the diff of each written cell against the held cell (a G-NORM fixed point; ofIntent_minimal: footprint = the addresses that differ); ofIntent_step; legPatch_valid_iff (refused exactly when no guarded patch reaches the image)
 import Kernel.DeployedBridge  -- T3b: the deployed Bridge (lifecycle-image decoder + one StoreCodec.Wire per registered kind); bridge_decode_total_on_registry, deployed_cells_iff
+import Kernel.DeployedHistory  -- Deployed written-value byte accounting and complete turn digest preimage
+import Kernel.ObjectiveTurnTotality  -- Constructed seedless-create/stateless-member absence poles
 import Kernel.HostRefinesWorld  -- T3/T3b: Represents : Loaded -> World; ofIntent_run; deployed_refines_step; host_trace_represents_fold; confirmed_represents (rebase included); policy_source_birth_is_turn; birth_rom_image; poles appendOnly_rewrite_has_no_turn, policy_source_rewrite_has_no_turn; host_submit_is_step stated for T4
 import Kernel.DurableCheckpoint -- DATAMODEL C2: resume from a materialized checkpoint; honest resume = genesis replay
 import Kernel.DurableView -- KN2: executing against a per-request view; declared-key families
