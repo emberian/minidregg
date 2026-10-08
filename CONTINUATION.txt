@@ -1,0 +1,22 @@
+CONTINUATION (lean434 / slotq), written on ROOT wind-down. NOTHING IS INSTALLED on either box; /srv/pipeline/scripts is untouched.
+State: lane /srv/lanes/lean434-slotq/src (branch lane/lean434-slotq, at cfdaf64d + this file). No code written yet.
+
+TASK: make pipeline_slot (scripts/pipeline/lib.sh) and the small-slot loop in pipeline_build_slot FIFO-fair.
+Cause measured: the polling loop (sleep PIPELINE_SLOT_POLL_S=5) with `flock -n` on each slot lets any faster poller win; a lake-slot waited 35 min behind BURN-MUTATE.
+Workaround that works today: export PIPELINE_SLOT_POLL_S=0.2.
+
+DESIGN (ticket queue, no daemon):
+- queue dir $PIPELINE_ROOT/slotq/<class>/, class = first 12 hex of md5 of the slot list (lane slots, small slots, and the keeper's own PIPELINE_SLOTS each get a queue). NOT under /srv/build-slot-*: `slots` reads /proc/locks for that glob and would misreport.
+- arrival: under flock -x on <q>/.seq take n=$(cat .seq.n)+1, create ticket <q>/%012d.<pid>, open it on a dynamic fd ({TFD}) and flock -x it (owner liveness = ticket lock held), write "pid lane cmd" into it, release .seq. Log "ENQUEUE" to slotq/log.
+- head test (each poll, inside flock .seq): for tickets in sorted order: mine -> head; else open it READ-ONLY (exec 8<t, never create) and `flock -n 8`: fails -> a live waiter is ahead -> not head; succeeds -> owner dead -> rm -f it (reap), continue.
+- head polls slots with `flock -n -E 253` at PIPELINE_SLOT_HEAD_POLL_S (default 0.2); non-heads sleep PIPELINE_SLOT_POLL_S (default 2); the poll interval no longer decides who wins, only arrival order does.
+- on acquiring a slot run CMD through `bash -c 'rm -f -- "$1"; eval "exec $2>&-"; shift 2; exec "$@"' _ "$TICKET" "$TFD" CMD...` so the ticket goes at the moment the build starts and the fd is not inherited by the build. A failing CMD is still never re-run (only 253 moves on).
+- the small-check loop uses the same function with its own class and CMD = `env LEAN_NUM_THREADS=$PIPELINE_SMALL_THREADS "$@"`.
+- slots: add a "queue (FIFO)" section listing live tickets (lane, age, position); holders/idle-reclaim/--free untouched. build-anywhere unchanged (it calls slot.sh, which now queues).
+- ticket files of killed waiters are reaped by the next head test; no trap needed.
+- Caveat: unqueued old-code pollers and hand-typed flock chains can still steal; only the head contending at 0.2 s makes them lose.
+
+PROOF PLAN: (a) private slots: PIPELINE_SLOTS=/tmp/x-slot-1.. ; 3 waiters with PIPELINE_SLOT_POLL_S=30, 5, 0.1 arriving in that order while a holder releases; slotq/log must show SERVED in arrival order. (b) after install, the same 3 waiters running `sleep 1` through slot.sh on the real saturated slots while BURN-MUTATE runs.
+INSTALL: write to a temp file in /srv/pipeline/scripts and mv into place (lib.sh, slots), both boxes; also scripts/burst (burst-up stages scripts/pipeline, so the repo copy is the single source). Then tell MERGE-KEEPER a41926dfb4ce97d3d the lane name lane/lean434-slotq.
+Old pointers: /private/tmp/claude-501/s/{lib.sh,slots} are local copies of the base files (scratch only).
+LEAN TRIAL: finished, see /Users/ember/dev/redregg/work/burn/LEAN-4.34.1-TRIAL.md, branch lane/lean434-trial (resume at 31d439dc).
