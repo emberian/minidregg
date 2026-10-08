@@ -1,5 +1,7 @@
 # KN2 ratchet: callers of the FULL verified materialization (DurableReceiverIO.Loaded with the whole decoded log).
 # May only SHRINK. Checked by scripts/ports/check-full-loaded-callers.sh. Deletion of the full shape: cv 01a11476-4ddb.
+# Approved diagnostic addition (kern gate repair): Host/ObjectiveTurnTotalityRunner.lean
+# replays retained prefixes read-only to measure expressibility; replaces no production path.
 # Includes the fleet head/incoming ops (Kernel/NativeHost.lean, cv 01a114aa-6780).
 Assurance/HyperdocumentLinkFramedRecovery.lean
 Assurance/NativeAcceptedFixture.lean
@@ -20,6 +22,7 @@ Host/FnInboxView.lean
 Host/Json.lean
 Host/Kn2StoreBench.lean
 Host/Main.lean
+Host/ObjectiveTurnTotalityRunner.lean
 Host/SourceAgreementReader.lean
 Kernel/ApplicationAgentLifetimeGrantLookup.lean
 Kernel/ApplicationAgentLifetimeGrantReceiver.lean

@@ -75,7 +75,7 @@ root = "Host.Main"
 
 [[lean_exe]]
 name = "objective-turn-totality"
-root = "Kernel.ObjectiveTurnTotalityRunner"
+root = "Host.ObjectiveTurnTotalityRunner"
 
 # Local custody consent, selected separately from the remote Host image.
 # The base entry refuses unsupported higher lifecycle families explicitly.

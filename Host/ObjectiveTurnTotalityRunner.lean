@@ -6,10 +6,11 @@ import Kernel.HostRefinesWorld
 import Kernel.DeployedBridge
 import Kernel.DeployedHistory
 
-namespace Minidregg.Kernel.ObjectiveTurnTotalityRunner
+namespace Minidregg.Host.ObjectiveTurnTotalityRunner
 
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Compiler
+open Minidregg.Kernel
 open Minidregg.Compiler.ResourceBirthCodec
 open Minidregg.Kernel.World
 open Minidregg.Kernel.DurableDataIntent
@@ -199,29 +200,29 @@ def run (H : DeployedH) (plant : Plant) (manifest : System.FilePath)
   IO.println s!"TOTAL {total.total} ok {total.ok} refused {total.refused}"
   return if healthy && total.refused == 0 then 0 else 1
 
-end Minidregg.Kernel.ObjectiveTurnTotalityRunner
+end Minidregg.Host.ObjectiveTurnTotalityRunner
 
 def main (arguments : List String) : IO UInt32 := do
   let invocation := match arguments with
-    | [manifest] => some (Minidregg.Kernel.ObjectiveTurnTotalityRunner.Plant.none,
-      manifest, Minidregg.Kernel.ObjectiveTurnTotalityRunner.rows)
+    | [manifest] => some (Minidregg.Host.ObjectiveTurnTotalityRunner.Plant.none,
+      manifest, Minidregg.Host.ObjectiveTurnTotalityRunner.rows)
     | ["--row", row, manifest] =>
-      some (Minidregg.Kernel.ObjectiveTurnTotalityRunner.Plant.none, manifest, [row])
+      some (Minidregg.Host.ObjectiveTurnTotalityRunner.Plant.none, manifest, [row])
     | ["--plant-drop-absent", manifest] =>
-      some (Minidregg.Kernel.ObjectiveTurnTotalityRunner.Plant.dropAbsent,
-        manifest, Minidregg.Kernel.ObjectiveTurnTotalityRunner.rows)
+      some (Minidregg.Host.ObjectiveTurnTotalityRunner.Plant.dropAbsent,
+        manifest, Minidregg.Host.ObjectiveTurnTotalityRunner.rows)
     | ["--plant-drop-absent", "--row", row, manifest] =>
-      some (Minidregg.Kernel.ObjectiveTurnTotalityRunner.Plant.dropAbsent, manifest, [row])
+      some (Minidregg.Host.ObjectiveTurnTotalityRunner.Plant.dropAbsent, manifest, [row])
     | ["--plant-absent-refuses", manifest] =>
-      some (Minidregg.Kernel.ObjectiveTurnTotalityRunner.Plant.absentRefuses,
-        manifest, Minidregg.Kernel.ObjectiveTurnTotalityRunner.rows)
+      some (Minidregg.Host.ObjectiveTurnTotalityRunner.Plant.absentRefuses,
+        manifest, Minidregg.Host.ObjectiveTurnTotalityRunner.rows)
     | ["--plant-absent-refuses", "--row", row, manifest] =>
-      some (Minidregg.Kernel.ObjectiveTurnTotalityRunner.Plant.absentRefuses, manifest, [row])
+      some (Minidregg.Host.ObjectiveTurnTotalityRunner.Plant.absentRefuses, manifest, [row])
     | _ => none
   match invocation with
   | some (plant, manifest, selectedRows) =>
     try
-      return ← Minidregg.Kernel.ObjectiveTurnTotalityRunner.run
+      return ← Minidregg.Host.ObjectiveTurnTotalityRunner.run
         Minidregg.Kernel.DeployedHistory.history plant manifest selectedRows
     catch error =>
       IO.eprintln s!"objective-turn-totality: {error}"

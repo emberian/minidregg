@@ -45,6 +45,7 @@
 # updated 2026-10-07: b25: kn2-index, kn2-neutral-births-1  [counts: Minidregg 0 1, Theory 76 178, Kernel 394 545, Pred 7 11, Effects 0 3, Compiler 155 324, Selvage 12 153, Assurance 0 155, Host 87 121, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, TokenCensus 0 2, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-07: b26: plat-quote-probe (Compiler.PayEnrolSignatureIO leaves)  [counts: Minidregg 0 1, Theory 76 178, Kernel 394 545, Pred 7 11, Effects 0 3, Compiler 154 323, Selvage 12 153, Assurance 0 155, Host 87 121, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, TokenCensus 0 2, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-07: b22 kn2-trie-a  [counts: Minidregg 0 1, Theory 78 178, Kernel 394 545, Pred 7 11, Effects 0 3, Compiler 154 323, Selvage 12 153, Assurance 0 155, Host 87 121, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, TokenCensus 0 2, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-08: kern R2 Core extraction: checked durable writer imports receiver evidence and World derivation from moved Core modules; associated OB invariant proof dependencies now enter Host.Main. Diagnostic totality runner moved to Host; no production route added.  [counts: Minidregg 0 1, Theory 106 179, Kernel 405 554, Pred 7 11, Effects 0 3, Compiler 156 325, Selvage 12 153, Assurance 0 155, Host 87 122, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, TokenCensus 0 2, Verify 0 14, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 Compiler.Air
 Compiler.AirBignum
 Compiler.AirFlatten
@@ -89,9 +90,11 @@ Compiler.DurableCheckpointCodec
 Compiler.DurableHistory
 Compiler.DurableHistoryReader
 Compiler.DurableHistoryStore
+Compiler.DurableHistoryStoreCore
 Compiler.DurableIndex
 Compiler.DurableLogTags
 Compiler.DurableReceiverCodec
+Compiler.DurableReceiverCore
 Compiler.DurableReceiverIO
 Compiler.DurableServed
 Compiler.DurableStoreAudit
@@ -458,6 +461,8 @@ Kernel.DeclaredFields
 Kernel.DeclaredResourceController
 Kernel.DeclaredResourceProjection
 Kernel.DeclaredResourceScalar
+Kernel.DeployedBridge
+Kernel.DeployedHistory
 Kernel.DocumentHistory
 Kernel.DomainEpoch
 Kernel.DomainEpochLaw
@@ -524,6 +529,7 @@ Kernel.GrainResourceBirthFamilies
 Kernel.GrainResourceBirthPolicyController
 Kernel.GrainResourceBirthReceiver
 Kernel.GrainResourceBirthTransaction
+Kernel.HostRefinesWorldCore
 Kernel.HyperdocumentEventLog
 Kernel.HyperdocumentIndexSync
 Kernel.Inbox
@@ -577,8 +583,10 @@ Kernel.ObjectiveActivity
 Kernel.ObjectiveActivityCell
 Kernel.ObjectiveActivityGate
 Kernel.ObjectiveActivityReceiver
+Kernel.ObjectiveActivityReceiverCore
 Kernel.ObjectiveActivityUpgrade
 Kernel.ObjectiveActivityWire
+Kernel.ObjectiveAdmissible
 Kernel.ObjectiveAdmittedTurn
 Kernel.ObjectiveBendArtifactSource
 Kernel.ObjectiveBendAuthenticatedInputs
@@ -587,8 +595,10 @@ Kernel.ObjectiveBendNativeInput
 Kernel.ObjectiveBendPreparedOutput
 Kernel.ObjectiveBendPublishedPackage
 Kernel.ObjectiveCall
+Kernel.ObjectiveCheckpointInvariant
 Kernel.ObjectiveDomain
 Kernel.ObjectiveKernelConfig
+Kernel.ObjectiveResumeContract
 Kernel.ObjectiveSend
 Kernel.ObjectiveTariff
 Kernel.ObjectiveWorkAccount
@@ -596,6 +606,7 @@ Kernel.ParticipantFactoryProvisioning
 Kernel.ParticipantFactoryProvisioningReceiver
 Kernel.ParticipantKeyEnrollment
 Kernel.ParticipantKeyEnrollmentReceiver
+Kernel.PayAssignmentOwner
 Kernel.PayAssignmentReceiver
 Kernel.PayBookReceiver
 Kernel.PayCell
@@ -663,6 +674,7 @@ Kernel.RunComputeView
 Kernel.Seat
 Kernel.SeatCell
 Kernel.SeatReceiver
+Kernel.SeatReceiverCore
 Kernel.SeatStore
 Kernel.SessionIndex
 Kernel.SparseAuthenticatedState
@@ -672,6 +684,8 @@ Kernel.SystemCell
 Kernel.SystemCellDomain
 Kernel.TailBound
 Kernel.Turn
+Kernel.TurnOfIntent
+Kernel.TurnRecord
 Kernel.TypedCellHyperedge
 Kernel.World
 Kernel.WorldKindInstance
@@ -749,12 +763,40 @@ Theory.Noun
 Theory.ObjectAudience
 Theory.ObjectAudienceRoster
 Theory.ObjectiveBendCheckpoint
+Theory.ObjectiveBendCheckpointRoundTrip
+Theory.ObjectiveBendDemandAdequacy
 Theory.ObjectiveBendDemandCapacity
 Theory.ObjectiveBendDemandCollect
+Theory.ObjectiveBendDemandCollectProofs
 Theory.ObjectiveBendDemandData
+Theory.ObjectiveBendDemandForceProofs
+Theory.ObjectiveBendDemandForcingAgree
+Theory.ObjectiveBendDemandForcingBack
+Theory.ObjectiveBendDemandForcingChain
+Theory.ObjectiveBendDemandForcingConverse
+Theory.ObjectiveBendDemandForcingDemand
+Theory.ObjectiveBendDemandForcingExtract
+Theory.ObjectiveBendDemandForcingNest
+Theory.ObjectiveBendDemandForcingPend
+Theory.ObjectiveBendDemandForcingRun
+Theory.ObjectiveBendDemandForcingSegment
+Theory.ObjectiveBendDemandForcingSwitch
+Theory.ObjectiveBendDemandInvariant
 Theory.ObjectiveBendDemandMachine
 Theory.ObjectiveBendDemandMachineFast
+Theory.ObjectiveBendDemandPreservation
+Theory.ObjectiveBendDemandPreservation.Base
+Theory.ObjectiveBendDemandPreservation.Cases.Activities
+Theory.ObjectiveBendDemandPreservation.Cases.Arithmetic
+Theory.ObjectiveBendDemandPreservation.Cases.Functions
+Theory.ObjectiveBendDemandPreservation.Cases.Pairs
+Theory.ObjectiveBendDemandPreservation.Cases.Records
+Theory.ObjectiveBendDemandPreservation.Cases.Sums
+Theory.ObjectiveBendDemandSettleProofs
+Theory.ObjectiveBendDemandTyping
+Theory.ObjectiveBendInteraction
 Theory.ObjectiveBendOpenRecursion
+Theory.ObjectiveBendStepCases
 Theory.ObjectiveBendTypes
 Theory.ObjectiveBendTyping
 Theory.PlanBinding
