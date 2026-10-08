@@ -980,42 +980,587 @@ The durable protocol's event is the record-shape extension point for this
 receiver.  A charged failure must retain its typed `Reject`, not merely a
 rendering, so replay can return the exact original terminal disposition. -/
 
-instance : Encodable UInt8 where
-  encode value := value.toNat
-  decode value := some (UInt8.ofNat value)
-  encodek := by intro value; simp
+/-- Empty constructor payload; constructor identity is supplied by the sum tag. -/
+private def unitStream : StreamCodec Unit where
+  encode _ := []
+  decodePrefix suffix := some ((), suffix)
+  decodePrefix_encode := by intro value suffix; cases value; rfl
 
-instance : Encodable UInt32 where
-  encode value := value.toNat
-  decode value := some (UInt32.ofNat value)
-  encodek := by intro value; simp
+private def uint32Stream : StreamCodec UInt32 :=
+  StreamCodec.xmap StreamCodec.nat UInt32.toNat UInt32.ofNat
+    (by intro value; simp)
 
-@[reducible] def encodableOfLawful {A : Type} (codec : LawfulCodec A)
-    [Encodable (List UInt8)] : Encodable A where
-  encode value := Encodable.encode (codec.encode value)
-  decode value := (Encodable.decode value : Option (List UInt8)).bind codec.decode
-  encodek := by
-    intro value
-    rw [Encodable.encodek]
-    exact codec.decode_encode value
+private def stageStream : StreamCodec (ObjectiveWorkAccount.Stage) :=
+  StreamCodec.xmap
+    (StreamCodec.sum (StreamCodec.sum unitStream
+      (StreamCodec.sum unitStream
+      unitStream))
+      (StreamCodec.sum (StreamCodec.sum unitStream
+      unitStream)
+      (StreamCodec.sum unitStream
+      unitStream)))
+    (fun value => match value with
+      | .frontEnd => (.inl (.inl ()))
+      | .core => (.inl (.inr (.inl ())))
+      | .check => (.inl (.inr (.inr ())))
+      | .execution => (.inr (.inl (.inl ())))
+      | .extraction => (.inr (.inl (.inr ())))
+      | .output => (.inr (.inr (.inl ())))
+      | .domain => (.inr (.inr (.inr ())))
+    )
+    (fun wire => match wire with
+      | (.inl (.inl ())) => .frontEnd
+      | (.inl (.inr (.inl ()))) => .core
+      | (.inl (.inr (.inr ()))) => .check
+      | (.inr (.inl (.inl ()))) => .execution
+      | (.inr (.inl (.inr ()))) => .extraction
+      | (.inr (.inr (.inl ()))) => .output
+      | (.inr (.inr (.inr ()))) => .domain
+    )
+    (by intro value; cases value <;> rfl)
 
-instance : Encodable String :=
-  encodableOfLawful Minidregg.Compiler.PolicyRecordCodec.stringStream.toLawful
+private def slotRefusalStream : StreamCodec (AnswerSlot.Refusal) :=
+  StreamCodec.xmap
+    (StreamCodec.sum (StreamCodec.sum unitStream
+      (StreamCodec.sum unitStream
+      (StreamCodec.product StreamCodec.nat StreamCodec.nat)))
+      (StreamCodec.sum (StreamCodec.product StreamCodec.nat StreamCodec.nat)
+      (StreamCodec.sum unitStream
+      unitStream)))
+    (fun value => match value with
+      | .notOpen => (.inl (.inl ()))
+      | .notDecider => (.inl (.inr (.inl ())))
+      | .pastDeadline deadline height => (.inl (.inr (.inr (deadline, height))))
+      | .notYetExpired deadline height => (.inr (.inl (deadline, height)))
+      | .expiryIsKernelOnly => (.inr (.inr (.inl ())))
+      | .deliveryDecides => (.inr (.inr (.inr ())))
+    )
+    (fun wire => match wire with
+      | (.inl (.inl ())) => .notOpen
+      | (.inl (.inr (.inl ()))) => .notDecider
+      | (.inl (.inr (.inr (deadline, height)))) => .pastDeadline deadline height
+      | (.inr (.inl (deadline, height))) => .notYetExpired deadline height
+      | (.inr (.inr (.inl ()))) => .expiryIsKernelOnly
+      | (.inr (.inr (.inr ()))) => .deliveryDecides
+    )
+    (by intro value; cases value <;> rfl)
 
-deriving instance Encodable for ObjectiveInvocationClaim.Capacity
-deriving instance Encodable for ObjectiveWorkAccount.Stage
-deriving instance Encodable for AnswerSlot.Refusal
-deriving instance Encodable for ObjectiveCall.GrantField
-instance : Encodable LawLeaf := encodableOfLawful LawLeaf.stream.toLawful
-deriving instance Encodable for ObjectRecord.WriteRefusal
-deriving instance Encodable for Invitations.Refusal
-deriving instance Encodable for Seats.BookRefusal
-deriving instance Encodable for Seats.Transfer
-deriving instance Encodable for Seats.Refusal
-deriving instance Encodable for Digest
-deriving instance Encodable for ObjectiveCall.FrontEnd
-deriving instance Encodable for ObjectiveActivity.Refusal
-deriving instance Encodable for SeatStore.Refusal
+private def grantFieldStream : StreamCodec (ObjectiveCall.GrantField) :=
+  StreamCodec.xmap
+    (StreamCodec.sum (StreamCodec.sum unitStream
+      unitStream)
+      (StreamCodec.sum unitStream
+      unitStream))
+    (fun value => match value with
+      | .code => (.inl (.inl ()))
+      | .caller => (.inl (.inr ()))
+      | .args => (.inr (.inl ()))
+      | .cap => (.inr (.inr ()))
+    )
+    (fun wire => match wire with
+      | (.inl (.inl ())) => .code
+      | (.inl (.inr ())) => .caller
+      | (.inr (.inl ())) => .args
+      | (.inr (.inr ())) => .cap
+    )
+    (by intro value; cases value <;> rfl)
+
+/-- Store recursive upgrade-conflict depth beside its typed terminal. -/
+private def splitWriteRefusal : ObjectRecord.WriteRefusal →
+    Nat × (Sum Unit (Sum Unit (Sum LawLeaf Unit)))
+  | .illTyped => (0, .inl ())
+  | .unprojectable => (0, .inr (.inl ()))
+  | .lawDenied leaf => (0, .inr (.inr (.inl leaf)))
+  | .unmigrated => (0, .inr (.inr (.inr ())))
+  | .upgradeConflict reason =>
+      let (depth, terminal) := splitWriteRefusal reason
+      (depth + 1, terminal)
+
+private def joinWriteRefusal (depth : Nat)
+    (terminal : Sum Unit (Sum Unit (Sum LawLeaf Unit))) : ObjectRecord.WriteRefusal :=
+  match depth with
+  | 0 => match terminal with
+    | .inl _ => .illTyped
+    | .inr (.inl _) => .unprojectable
+    | .inr (.inr (.inl leaf)) => .lawDenied leaf
+    | .inr (.inr (.inr _)) => .unmigrated
+  | depth + 1 => .upgradeConflict (joinWriteRefusal depth terminal)
+
+private theorem join_split_writeRefusal (reason : ObjectRecord.WriteRefusal) :
+    joinWriteRefusal (splitWriteRefusal reason).1 (splitWriteRefusal reason).2 = reason := by
+  induction reason with
+  | upgradeConflict reason ih =>
+      simp only [splitWriteRefusal]
+      cases found : splitWriteRefusal reason with
+      | mk depth terminal =>
+          rw [found] at ih
+          exact congrArg ObjectRecord.WriteRefusal.upgradeConflict ih
+  | _ => rfl
+
+private def writeRefusalStream : StreamCodec ObjectRecord.WriteRefusal :=
+  StreamCodec.xmap
+    (StreamCodec.product StreamCodec.nat
+      (StreamCodec.sum unitStream (StreamCodec.sum unitStream (StreamCodec.sum LawLeaf.stream unitStream))))
+    splitWriteRefusal (fun wire => joinWriteRefusal wire.1 wire.2) join_split_writeRefusal
+
+private def invitationRefusalStream : StreamCodec (Invitations.Refusal) :=
+  StreamCodec.xmap
+    (StreamCodec.sum (StreamCodec.sum StreamCodec.nat
+      (StreamCodec.sum StreamCodec.nat
+      unitStream))
+      (StreamCodec.sum (StreamCodec.sum StreamCodec.nat
+      StreamCodec.nat)
+      (StreamCodec.sum StreamCodec.nat
+      StreamCodec.nat)))
+    (fun value => match value with
+      | .instanceMissing inst => (.inl (.inl inst))
+      | .notTheInstance inst => (.inl (.inr (.inl inst)))
+      | .packageMismatch => (.inl (.inr (.inr ())))
+      | .idUsed entryId => (.inr (.inl (.inl entryId)))
+      | .invitationMissing entryId => (.inr (.inl (.inr entryId)))
+      | .notHolder entryId => (.inr (.inr (.inl entryId)))
+      | .assayFailed entryId => (.inr (.inr (.inr entryId)))
+    )
+    (fun wire => match wire with
+      | (.inl (.inl inst)) => .instanceMissing inst
+      | (.inl (.inr (.inl inst))) => .notTheInstance inst
+      | (.inl (.inr (.inr ()))) => .packageMismatch
+      | (.inr (.inl (.inl entryId))) => .idUsed entryId
+      | (.inr (.inl (.inr entryId))) => .invitationMissing entryId
+      | (.inr (.inr (.inl entryId))) => .notHolder entryId
+      | (.inr (.inr (.inr entryId))) => .assayFailed entryId
+    )
+    (by intro value; cases value <;> rfl)
+
+private def bookRefusalStream : StreamCodec (Seats.BookRefusal) :=
+  StreamCodec.xmap
+    (StreamCodec.sum StreamCodec.nat
+      (StreamCodec.sum StreamCodec.nat
+      (StreamCodec.product StreamCodec.nat StreamCodec.nat)))
+    (fun value => match value with
+      | .accountNotFresh account => (.inl account)
+      | .missing account => (.inr (.inl account))
+      | .unfunded account asset => (.inr (.inr (account, asset)))
+    )
+    (fun wire => match wire with
+      | (.inl account) => .accountNotFresh account
+      | (.inr (.inl account)) => .missing account
+      | (.inr (.inr (account, asset))) => .unfunded account asset
+    )
+    (by intro value; cases value <;> rfl)
+
+private def transferStream : StreamCodec Seats.Transfer :=
+  StreamCodec.xmap
+    (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product StreamCodec.nat StreamCodec.nat)))
+    (fun value => (value.source, value.destination, value.asset, value.amount))
+    (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2⟩)
+    (by intro value; cases value; rfl)
+
+private def seatRefusalStream : StreamCodec (Seats.Refusal) :=
+  StreamCodec.xmap
+    (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum invitationRefusalStream
+      unitStream)
+      (StreamCodec.sum unitStream
+      StreamCodec.nat))
+      (StreamCodec.sum (StreamCodec.sum StreamCodec.nat
+      StreamCodec.nat)
+      (StreamCodec.sum StreamCodec.nat
+      (StreamCodec.sum StreamCodec.nat
+      bookRefusalStream))))
+      (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum StreamCodec.nat
+      (StreamCodec.product transferStream StreamCodec.nat))
+      (StreamCodec.sum StreamCodec.nat
+      StreamCodec.nat))
+      (StreamCodec.sum (StreamCodec.sum StreamCodec.nat
+      StreamCodec.nat)
+      (StreamCodec.sum StreamCodec.nat
+      (StreamCodec.sum StreamCodec.nat
+      StreamCodec.nat)))))
+    (fun value => match value with
+      | .invitation reason => (.inl (.inl (.inl (.inl reason))))
+      | .notASubject => (.inl (.inl (.inl (.inr ()))))
+      | .notAnInstance => (.inl (.inl (.inr (.inl ()))))
+      | .notTheInstance inst => (.inl (.inl (.inr (.inr inst))))
+      | .seatNotProtected account => (.inl (.inr (.inl (.inl account))))
+      | .fundingProtected account => (.inl (.inr (.inl (.inr account))))
+      | .payeeProtected account => (.inl (.inr (.inr (.inl account))))
+      | .payeeMissing account => (.inl (.inr (.inr (.inr (.inl account)))))
+      | .book reason => (.inl (.inr (.inr (.inr (.inr reason)))))
+      | .offerUnsafe account => (.inr (.inl (.inl (.inl account))))
+      | .outsideSeats transfer inst => (.inr (.inl (.inl (.inr (transfer, inst)))))
+      | .contractClauseRefused inst => (.inr (.inl (.inr (.inl inst))))
+      | .seatMissing account => (.inr (.inl (.inr (.inr account))))
+      | .seatLeased account => (.inr (.inr (.inl (.inl account))))
+      | .donationUnmarked account => (.inr (.inr (.inl (.inr account))))
+      | .donationMarkedWithWant account => (.inr (.inr (.inr (.inl account))))
+      | .exitNotAuthorized account => (.inr (.inr (.inr (.inr (.inl account)))))
+      | .instanceExists inst => (.inr (.inr (.inr (.inr (.inr inst)))))
+    )
+    (fun wire => match wire with
+      | (.inl (.inl (.inl (.inl reason)))) => .invitation reason
+      | (.inl (.inl (.inl (.inr ())))) => .notASubject
+      | (.inl (.inl (.inr (.inl ())))) => .notAnInstance
+      | (.inl (.inl (.inr (.inr inst)))) => .notTheInstance inst
+      | (.inl (.inr (.inl (.inl account)))) => .seatNotProtected account
+      | (.inl (.inr (.inl (.inr account)))) => .fundingProtected account
+      | (.inl (.inr (.inr (.inl account)))) => .payeeProtected account
+      | (.inl (.inr (.inr (.inr (.inl account))))) => .payeeMissing account
+      | (.inl (.inr (.inr (.inr (.inr reason))))) => .book reason
+      | (.inr (.inl (.inl (.inl account)))) => .offerUnsafe account
+      | (.inr (.inl (.inl (.inr (transfer, inst))))) => .outsideSeats transfer inst
+      | (.inr (.inl (.inr (.inl inst)))) => .contractClauseRefused inst
+      | (.inr (.inl (.inr (.inr account)))) => .seatMissing account
+      | (.inr (.inr (.inl (.inl account)))) => .seatLeased account
+      | (.inr (.inr (.inl (.inr account)))) => .donationUnmarked account
+      | (.inr (.inr (.inr (.inl account)))) => .donationMarkedWithWant account
+      | (.inr (.inr (.inr (.inr (.inl account))))) => .exitNotAuthorized account
+      | (.inr (.inr (.inr (.inr (.inr inst))))) => .instanceExists inst
+    )
+    (by intro value; cases value <;> rfl)
+
+private def activityRefusalStream : StreamCodec (ObjectiveActivity.Refusal) :=
+  StreamCodec.xmap
+    (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum unitStream
+      unitStream)
+      (StreamCodec.sum stringStream
+      (StreamCodec.sum unitStream
+      stringStream)))
+      (StreamCodec.sum (StreamCodec.sum stringStream
+      (StreamCodec.sum unitStream
+      stringStream))
+      (StreamCodec.sum unitStream
+      (StreamCodec.sum unitStream
+      unitStream))))
+      (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum unitStream
+      unitStream)
+      (StreamCodec.sum unitStream
+      (StreamCodec.sum unitStream
+      unitStream)))
+      (StreamCodec.sum (StreamCodec.sum (StreamCodec.product StreamCodec.nat StreamCodec.nat)
+      (StreamCodec.sum (StreamCodec.product digestStream digestStream)
+      (StreamCodec.product StreamCodec.nat StreamCodec.nat)))
+      (StreamCodec.sum capacityStream
+      (StreamCodec.sum (StreamCodec.product StreamCodec.nat StreamCodec.nat)
+      (StreamCodec.product StreamCodec.nat StreamCodec.nat))))))
+      (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum (StreamCodec.product stageStream (StreamCodec.product StreamCodec.nat StreamCodec.nat))
+      (StreamCodec.product IntStream.intStream StreamCodec.nat))
+      (StreamCodec.sum stringStream
+      (StreamCodec.sum unitStream
+      stringStream)))
+      (StreamCodec.sum (StreamCodec.sum stringStream
+      (StreamCodec.sum unitStream
+      stringStream))
+      (StreamCodec.sum unitStream
+      (StreamCodec.sum unitStream
+      unitStream))))
+      (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum slotRefusalStream
+      (StreamCodec.sum unitStream
+      (StreamCodec.product StreamCodec.nat StreamCodec.nat)))
+      (StreamCodec.sum (StreamCodec.product StreamCodec.nat StreamCodec.nat)
+      (StreamCodec.sum unitStream
+      unitStream)))
+      (StreamCodec.sum (StreamCodec.sum unitStream
+      (StreamCodec.sum (StreamCodec.product StreamCodec.nat StreamCodec.nat)
+      (StreamCodec.product StreamCodec.nat StreamCodec.nat)))
+      (StreamCodec.sum unitStream
+      (StreamCodec.sum unitStream
+      unitStream))))))
+      (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum stringStream
+      unitStream)
+      (StreamCodec.sum unitStream
+      (StreamCodec.sum (StreamCodec.product StreamCodec.nat StreamCodec.nat)
+      (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat StreamCodec.nat)))))
+      (StreamCodec.sum (StreamCodec.sum unitStream
+      (StreamCodec.sum unitStream
+      unitStream))
+      (StreamCodec.sum unitStream
+      (StreamCodec.sum (StreamCodec.product digestStream digestStream)
+      writeRefusalStream))))
+      (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum unitStream
+      (StreamCodec.sum unitStream
+      unitStream))
+      (StreamCodec.sum stringStream
+      (StreamCodec.sum unitStream
+      unitStream)))
+      (StreamCodec.sum (StreamCodec.sum stringStream
+      (StreamCodec.sum stringStream
+      unitStream))
+      (StreamCodec.sum unitStream
+      (StreamCodec.sum unitStream
+      StreamCodec.nat)))))
+      (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum unitStream
+      unitStream)
+      (StreamCodec.sum unitStream
+      (StreamCodec.sum (StreamCodec.product StreamCodec.nat StreamCodec.nat)
+      unitStream)))
+      (StreamCodec.sum (StreamCodec.sum (StreamCodec.list stringStream)
+      (StreamCodec.sum StreamCodec.nat
+      (StreamCodec.product StreamCodec.nat StreamCodec.nat)))
+      (StreamCodec.sum unitStream
+      (StreamCodec.sum stringStream
+      (StreamCodec.product digestStream LawLeaf.stream)))))
+      (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum digestStream
+      (StreamCodec.sum digestStream
+      digestStream))
+      (StreamCodec.sum digestStream
+      (StreamCodec.sum stringStream
+      StreamCodec.nat)))
+      (StreamCodec.sum (StreamCodec.sum StreamCodec.nat
+      (StreamCodec.sum StreamCodec.nat
+      StreamCodec.nat))
+      (StreamCodec.sum StreamCodec.nat
+      (StreamCodec.sum (StreamCodec.product digestStream StreamCodec.nat)
+      (StreamCodec.product StreamCodec.nat StreamCodec.nat))))))))
+    (fun value => match value with
+      | .packageMissing => (.inl (.inl (.inl (.inl (.inl (.inl ()))))))
+      | .packageIdentity => (.inl (.inl (.inl (.inl (.inl (.inr ()))))))
+      | .packageType reason => (.inl (.inl (.inl (.inl (.inr (.inl reason))))))
+      | .packageExists => (.inl (.inl (.inl (.inl (.inr (.inr (.inl ())))))))
+      | .packageSource reason => (.inl (.inl (.inl (.inl (.inr (.inr (.inr reason)))))))
+      | .packageReplay reason => (.inl (.inl (.inl (.inr (.inl (.inl reason))))))
+      | .inputType => (.inl (.inl (.inl (.inr (.inl (.inr (.inl ())))))))
+      | .outcomeProtocol label => (.inl (.inl (.inl (.inr (.inl (.inr (.inr label)))))))
+      | .recordExists => (.inl (.inl (.inl (.inr (.inr (.inl ()))))))
+      | .recordMissing => (.inl (.inl (.inl (.inr (.inr (.inr (.inl ())))))))
+      | .recordMisplaced => (.inl (.inl (.inl (.inr (.inr (.inr (.inr ())))))))
+      | .notAwaiting => (.inl (.inl (.inr (.inl (.inl (.inl ()))))))
+      | .awaitMismatch => (.inl (.inl (.inr (.inl (.inl (.inr ()))))))
+      | .checkpointDigest => (.inl (.inl (.inr (.inl (.inr (.inl ()))))))
+      | .checkpointCodec => (.inl (.inl (.inr (.inl (.inr (.inr (.inl ())))))))
+      | .recordRetired => (.inl (.inl (.inr (.inl (.inr (.inr (.inr ())))))))
+      | .patience patience maximum => (.inl (.inl (.inr (.inr (.inl (.inl (patience, maximum)))))))
+      | .digestWide object pin => (.inl (.inl (.inr (.inr (.inl (.inr (.inl (object, pin))))))))
+      | .heightWide height patience => (.inl (.inl (.inr (.inr (.inl (.inr (.inr (height, patience))))))))
+      | .uncovered envelope => (.inl (.inl (.inr (.inr (.inr (.inl envelope))))))
+      | .heapUncovered needed declared => (.inl (.inl (.inr (.inr (.inr (.inr (.inl (needed, declared))))))))
+      | .extractUncovered needed declared => (.inl (.inl (.inr (.inr (.inr (.inr (.inr (needed, declared))))))))
+      | .workUncovered stage needed declared => (.inl (.inr (.inl (.inl (.inl (.inl (stage, needed, declared)))))))
+      | .unfunded available price => (.inl (.inr (.inl (.inl (.inl (.inr (available, price)))))))
+      | .plan reason => (.inl (.inr (.inl (.inl (.inr (.inl reason))))))
+      | .messageAwaitNeedsInbox => (.inl (.inr (.inl (.inl (.inr (.inr (.inl ())))))))
+      | .planExtraction reason => (.inl (.inr (.inl (.inl (.inr (.inr (.inr reason)))))))
+      | .resultExtraction reason => (.inl (.inr (.inl (.inr (.inl (.inl reason))))))
+      | .exhausted => (.inl (.inr (.inl (.inr (.inl (.inr (.inl ())))))))
+      | .responseType label => (.inl (.inr (.inl (.inr (.inl (.inr (.inr label)))))))
+      | .slotMissing => (.inl (.inr (.inl (.inr (.inr (.inl ()))))))
+      | .slotFresh => (.inl (.inr (.inl (.inr (.inr (.inr (.inl ())))))))
+      | .slotMismatch => (.inl (.inr (.inl (.inr (.inr (.inr (.inr ())))))))
+      | .slot reason => (.inl (.inr (.inr (.inl (.inl (.inl reason))))))
+      | .slotRetired => (.inl (.inr (.inr (.inl (.inl (.inr (.inl ())))))))
+      | .notYetDecided deadline height => (.inl (.inr (.inr (.inl (.inl (.inr (.inr (deadline, height))))))))
+      | .notYetDue due height => (.inl (.inr (.inr (.inl (.inr (.inl (due, height)))))))
+      | .bookUnavailable => (.inl (.inr (.inr (.inl (.inr (.inr (.inl ())))))))
+      | .purseTaken => (.inl (.inr (.inr (.inl (.inr (.inr (.inr ())))))))
+      | .payerInvalid => (.inl (.inr (.inr (.inr (.inl (.inl ()))))))
+      | .underfunded deposit reserve => (.inl (.inr (.inr (.inr (.inl (.inr (.inl (deposit, reserve))))))))
+      | .awaitsFunding available reserve => (.inl (.inr (.inr (.inr (.inl (.inr (.inr (available, reserve))))))))
+      | .bookRefused => (.inl (.inr (.inr (.inr (.inr (.inl ()))))))
+      | .zeroAmount => (.inl (.inr (.inr (.inr (.inr (.inr (.inl ())))))))
+      | .blindWrite => (.inl (.inr (.inr (.inr (.inr (.inr (.inr ())))))))
+      | .writeShape reason => (.inr (.inl (.inl (.inl (.inl (.inl reason))))))
+      | .stateCodec => (.inr (.inl (.inl (.inl (.inl (.inr ()))))))
+      | .stateMissing => (.inr (.inl (.inl (.inl (.inr (.inl ()))))))
+      | .alreadyExhausted tried envelope => (.inr (.inl (.inl (.inl (.inr (.inr (.inl (tried, envelope))))))))
+      | .notYetAbandonable deadline grace height => (.inr (.inl (.inl (.inl (.inr (.inr (.inr (deadline, grace, height))))))))
+      | .notExhausted => (.inr (.inl (.inl (.inr (.inl (.inl ()))))))
+      | .notAnObject => (.inr (.inl (.inl (.inr (.inl (.inr (.inl ())))))))
+      | .objectCodec => (.inr (.inl (.inl (.inr (.inl (.inr (.inr ())))))))
+      | .objectExists => (.inr (.inl (.inl (.inr (.inr (.inl ()))))))
+      | .pinMismatch pinned requested => (.inr (.inl (.inl (.inr (.inr (.inr (.inl (pinned, requested))))))))
+      | .objectWrite reason => (.inr (.inl (.inl (.inr (.inr (.inr (.inr reason)))))))
+      | .pinUnpublished => (.inr (.inl (.inr (.inl (.inl (.inl ()))))))
+      | .stateExists => (.inr (.inl (.inr (.inl (.inl (.inr (.inl ())))))))
+      | .stateTypeNotData => (.inr (.inl (.inr (.inl (.inl (.inr (.inr ())))))))
+      | .lawField field => (.inr (.inl (.inr (.inl (.inr (.inl field))))))
+      | .draining => (.inr (.inl (.inr (.inl (.inr (.inr (.inl ())))))))
+      | .awaitingRebirth => (.inr (.inl (.inr (.inl (.inr (.inr (.inr ())))))))
+      | .migrationShape reason => (.inr (.inl (.inr (.inr (.inl (.inl reason))))))
+      | .migrationFault reason => (.inr (.inl (.inr (.inr (.inl (.inr (.inl reason)))))))
+      | .frozen => (.inr (.inl (.inr (.inr (.inl (.inr (.inr ())))))))
+      | .notUpgradeAuthority => (.inr (.inl (.inr (.inr (.inr (.inl ()))))))
+      | .policyLoosened => (.inr (.inl (.inr (.inr (.inr (.inr (.inl ())))))))
+      | .floorNotEntailed index => (.inr (.inl (.inr (.inr (.inr (.inr (.inr index)))))))
+      | .samePin => (.inr (.inr (.inl (.inl (.inl (.inl ()))))))
+      | .upgradeUnderWay => (.inr (.inr (.inl (.inl (.inl (.inr ()))))))
+      | .notDraining => (.inr (.inr (.inl (.inl (.inr (.inl ()))))))
+      | .drainPatience patience maximum => (.inr (.inr (.inl (.inl (.inr (.inr (.inl (patience, maximum))))))))
+      | .notSubtype => (.inr (.inr (.inl (.inl (.inr (.inr (.inr ())))))))
+      | .fieldsForgotten fields => (.inr (.inr (.inl (.inr (.inl (.inl fields))))))
+      | .liveActivities count => (.inr (.inr (.inl (.inr (.inl (.inr (.inl count)))))))
+      | .notYetDeadline deadline height => (.inr (.inr (.inl (.inr (.inl (.inr (.inr (deadline, height))))))))
+      | .rebirthDisposition => (.inr (.inr (.inl (.inr (.inr (.inl ()))))))
+      | .rebirthTarget reason => (.inr (.inr (.inl (.inr (.inr (.inr (.inl reason)))))))
+      | .domainLawDenied domain leaf => (.inr (.inr (.inl (.inr (.inr (.inr (.inr (domain, leaf))))))))
+      | .domainUnprojectable domain => (.inr (.inr (.inr (.inl (.inl (.inl domain))))))
+      | .domainMissing domain => (.inr (.inr (.inr (.inl (.inl (.inr (.inl domain)))))))
+      | .domainCodec domain => (.inr (.inr (.inr (.inl (.inl (.inr (.inr domain)))))))
+      | .domainExists domain => (.inr (.inr (.inr (.inl (.inr (.inl domain))))))
+      | .domainShape reason => (.inr (.inr (.inr (.inl (.inr (.inr (.inl reason)))))))
+      | .domainMember object => (.inr (.inr (.inr (.inl (.inr (.inr (.inr object)))))))
+      | .memberFrozen object => (.inr (.inr (.inr (.inr (.inl (.inl object))))))
+      | .memberDenied object => (.inr (.inr (.inr (.inr (.inl (.inr (.inl object)))))))
+      | .memberDomainsFull object => (.inr (.inr (.inr (.inr (.inl (.inr (.inr object)))))))
+      | .domainsDropped object => (.inr (.inr (.inr (.inr (.inr (.inl object))))))
+      | .domainUnindexed domain member => (.inr (.inr (.inr (.inr (.inr (.inr (.inl (domain, member))))))))
+      | .domainUncovered units allowance => (.inr (.inr (.inr (.inr (.inr (.inr (.inr (units, allowance))))))))
+    )
+    (fun wire => match wire with
+      | (.inl (.inl (.inl (.inl (.inl (.inl ())))))) => .packageMissing
+      | (.inl (.inl (.inl (.inl (.inl (.inr ())))))) => .packageIdentity
+      | (.inl (.inl (.inl (.inl (.inr (.inl reason)))))) => .packageType reason
+      | (.inl (.inl (.inl (.inl (.inr (.inr (.inl ()))))))) => .packageExists
+      | (.inl (.inl (.inl (.inl (.inr (.inr (.inr reason))))))) => .packageSource reason
+      | (.inl (.inl (.inl (.inr (.inl (.inl reason)))))) => .packageReplay reason
+      | (.inl (.inl (.inl (.inr (.inl (.inr (.inl ()))))))) => .inputType
+      | (.inl (.inl (.inl (.inr (.inl (.inr (.inr label))))))) => .outcomeProtocol label
+      | (.inl (.inl (.inl (.inr (.inr (.inl ())))))) => .recordExists
+      | (.inl (.inl (.inl (.inr (.inr (.inr (.inl ()))))))) => .recordMissing
+      | (.inl (.inl (.inl (.inr (.inr (.inr (.inr ()))))))) => .recordMisplaced
+      | (.inl (.inl (.inr (.inl (.inl (.inl ())))))) => .notAwaiting
+      | (.inl (.inl (.inr (.inl (.inl (.inr ())))))) => .awaitMismatch
+      | (.inl (.inl (.inr (.inl (.inr (.inl ())))))) => .checkpointDigest
+      | (.inl (.inl (.inr (.inl (.inr (.inr (.inl ()))))))) => .checkpointCodec
+      | (.inl (.inl (.inr (.inl (.inr (.inr (.inr ()))))))) => .recordRetired
+      | (.inl (.inl (.inr (.inr (.inl (.inl (patience, maximum))))))) => .patience patience maximum
+      | (.inl (.inl (.inr (.inr (.inl (.inr (.inl (object, pin)))))))) => .digestWide object pin
+      | (.inl (.inl (.inr (.inr (.inl (.inr (.inr (height, patience)))))))) => .heightWide height patience
+      | (.inl (.inl (.inr (.inr (.inr (.inl envelope)))))) => .uncovered envelope
+      | (.inl (.inl (.inr (.inr (.inr (.inr (.inl (needed, declared)))))))) => .heapUncovered needed declared
+      | (.inl (.inl (.inr (.inr (.inr (.inr (.inr (needed, declared)))))))) => .extractUncovered needed declared
+      | (.inl (.inr (.inl (.inl (.inl (.inl (stage, needed, declared))))))) => .workUncovered stage needed declared
+      | (.inl (.inr (.inl (.inl (.inl (.inr (available, price))))))) => .unfunded available price
+      | (.inl (.inr (.inl (.inl (.inr (.inl reason)))))) => .plan reason
+      | (.inl (.inr (.inl (.inl (.inr (.inr (.inl ()))))))) => .messageAwaitNeedsInbox
+      | (.inl (.inr (.inl (.inl (.inr (.inr (.inr reason))))))) => .planExtraction reason
+      | (.inl (.inr (.inl (.inr (.inl (.inl reason)))))) => .resultExtraction reason
+      | (.inl (.inr (.inl (.inr (.inl (.inr (.inl ()))))))) => .exhausted
+      | (.inl (.inr (.inl (.inr (.inl (.inr (.inr label))))))) => .responseType label
+      | (.inl (.inr (.inl (.inr (.inr (.inl ())))))) => .slotMissing
+      | (.inl (.inr (.inl (.inr (.inr (.inr (.inl ()))))))) => .slotFresh
+      | (.inl (.inr (.inl (.inr (.inr (.inr (.inr ()))))))) => .slotMismatch
+      | (.inl (.inr (.inr (.inl (.inl (.inl reason)))))) => .slot reason
+      | (.inl (.inr (.inr (.inl (.inl (.inr (.inl ()))))))) => .slotRetired
+      | (.inl (.inr (.inr (.inl (.inl (.inr (.inr (deadline, height)))))))) => .notYetDecided deadline height
+      | (.inl (.inr (.inr (.inl (.inr (.inl (due, height))))))) => .notYetDue due height
+      | (.inl (.inr (.inr (.inl (.inr (.inr (.inl ()))))))) => .bookUnavailable
+      | (.inl (.inr (.inr (.inl (.inr (.inr (.inr ()))))))) => .purseTaken
+      | (.inl (.inr (.inr (.inr (.inl (.inl ())))))) => .payerInvalid
+      | (.inl (.inr (.inr (.inr (.inl (.inr (.inl (deposit, reserve)))))))) => .underfunded deposit reserve
+      | (.inl (.inr (.inr (.inr (.inl (.inr (.inr (available, reserve)))))))) => .awaitsFunding available reserve
+      | (.inl (.inr (.inr (.inr (.inr (.inl ())))))) => .bookRefused
+      | (.inl (.inr (.inr (.inr (.inr (.inr (.inl ()))))))) => .zeroAmount
+      | (.inl (.inr (.inr (.inr (.inr (.inr (.inr ()))))))) => .blindWrite
+      | (.inr (.inl (.inl (.inl (.inl (.inl reason)))))) => .writeShape reason
+      | (.inr (.inl (.inl (.inl (.inl (.inr ())))))) => .stateCodec
+      | (.inr (.inl (.inl (.inl (.inr (.inl ())))))) => .stateMissing
+      | (.inr (.inl (.inl (.inl (.inr (.inr (.inl (tried, envelope)))))))) => .alreadyExhausted tried envelope
+      | (.inr (.inl (.inl (.inl (.inr (.inr (.inr (deadline, grace, height)))))))) => .notYetAbandonable deadline grace height
+      | (.inr (.inl (.inl (.inr (.inl (.inl ())))))) => .notExhausted
+      | (.inr (.inl (.inl (.inr (.inl (.inr (.inl ()))))))) => .notAnObject
+      | (.inr (.inl (.inl (.inr (.inl (.inr (.inr ()))))))) => .objectCodec
+      | (.inr (.inl (.inl (.inr (.inr (.inl ())))))) => .objectExists
+      | (.inr (.inl (.inl (.inr (.inr (.inr (.inl (pinned, requested)))))))) => .pinMismatch pinned requested
+      | (.inr (.inl (.inl (.inr (.inr (.inr (.inr reason))))))) => .objectWrite reason
+      | (.inr (.inl (.inr (.inl (.inl (.inl ())))))) => .pinUnpublished
+      | (.inr (.inl (.inr (.inl (.inl (.inr (.inl ()))))))) => .stateExists
+      | (.inr (.inl (.inr (.inl (.inl (.inr (.inr ()))))))) => .stateTypeNotData
+      | (.inr (.inl (.inr (.inl (.inr (.inl field)))))) => .lawField field
+      | (.inr (.inl (.inr (.inl (.inr (.inr (.inl ()))))))) => .draining
+      | (.inr (.inl (.inr (.inl (.inr (.inr (.inr ()))))))) => .awaitingRebirth
+      | (.inr (.inl (.inr (.inr (.inl (.inl reason)))))) => .migrationShape reason
+      | (.inr (.inl (.inr (.inr (.inl (.inr (.inl reason))))))) => .migrationFault reason
+      | (.inr (.inl (.inr (.inr (.inl (.inr (.inr ()))))))) => .frozen
+      | (.inr (.inl (.inr (.inr (.inr (.inl ())))))) => .notUpgradeAuthority
+      | (.inr (.inl (.inr (.inr (.inr (.inr (.inl ()))))))) => .policyLoosened
+      | (.inr (.inl (.inr (.inr (.inr (.inr (.inr index))))))) => .floorNotEntailed index
+      | (.inr (.inr (.inl (.inl (.inl (.inl ())))))) => .samePin
+      | (.inr (.inr (.inl (.inl (.inl (.inr ())))))) => .upgradeUnderWay
+      | (.inr (.inr (.inl (.inl (.inr (.inl ())))))) => .notDraining
+      | (.inr (.inr (.inl (.inl (.inr (.inr (.inl (patience, maximum)))))))) => .drainPatience patience maximum
+      | (.inr (.inr (.inl (.inl (.inr (.inr (.inr ()))))))) => .notSubtype
+      | (.inr (.inr (.inl (.inr (.inl (.inl fields)))))) => .fieldsForgotten fields
+      | (.inr (.inr (.inl (.inr (.inl (.inr (.inl count))))))) => .liveActivities count
+      | (.inr (.inr (.inl (.inr (.inl (.inr (.inr (deadline, height)))))))) => .notYetDeadline deadline height
+      | (.inr (.inr (.inl (.inr (.inr (.inl ())))))) => .rebirthDisposition
+      | (.inr (.inr (.inl (.inr (.inr (.inr (.inl reason))))))) => .rebirthTarget reason
+      | (.inr (.inr (.inl (.inr (.inr (.inr (.inr (domain, leaf)))))))) => .domainLawDenied domain leaf
+      | (.inr (.inr (.inr (.inl (.inl (.inl domain)))))) => .domainUnprojectable domain
+      | (.inr (.inr (.inr (.inl (.inl (.inr (.inl domain))))))) => .domainMissing domain
+      | (.inr (.inr (.inr (.inl (.inl (.inr (.inr domain))))))) => .domainCodec domain
+      | (.inr (.inr (.inr (.inl (.inr (.inl domain)))))) => .domainExists domain
+      | (.inr (.inr (.inr (.inl (.inr (.inr (.inl reason))))))) => .domainShape reason
+      | (.inr (.inr (.inr (.inl (.inr (.inr (.inr object))))))) => .domainMember object
+      | (.inr (.inr (.inr (.inr (.inl (.inl object)))))) => .memberFrozen object
+      | (.inr (.inr (.inr (.inr (.inl (.inr (.inl object))))))) => .memberDenied object
+      | (.inr (.inr (.inr (.inr (.inl (.inr (.inr object))))))) => .memberDomainsFull object
+      | (.inr (.inr (.inr (.inr (.inr (.inl object)))))) => .domainsDropped object
+      | (.inr (.inr (.inr (.inr (.inr (.inr (.inl (domain, member)))))))) => .domainUnindexed domain member
+      | (.inr (.inr (.inr (.inr (.inr (.inr (.inr (units, allowance)))))))) => .domainUncovered units allowance
+    )
+    (by intro value; cases value <;> rfl)
+
+private def seatStoreRefusalStream : StreamCodec (SeatStore.Refusal) :=
+  StreamCodec.xmap
+    (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum seatRefusalStream
+      activityRefusalStream)
+      (StreamCodec.sum unitStream
+      unitStream))
+      (StreamCodec.sum (StreamCodec.sum stringStream
+      StreamCodec.nat)
+      (StreamCodec.sum StreamCodec.nat
+      (StreamCodec.sum StreamCodec.nat
+      StreamCodec.nat))))
+      (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum StreamCodec.nat
+      unitStream)
+      (StreamCodec.sum stringStream
+      unitStream))
+      (StreamCodec.sum (StreamCodec.sum stringStream
+      capacityStream)
+      (StreamCodec.sum StreamCodec.nat
+      (StreamCodec.sum unitStream
+      unitStream)))))
+    (fun value => match value with
+      | .kernel reason => (.inl (.inl (.inl (.inl reason))))
+      | .program reason => (.inl (.inl (.inl (.inr reason))))
+      | .packageMissing => (.inl (.inl (.inr (.inl ()))))
+      | .packageExists => (.inl (.inl (.inr (.inr ()))))
+      | .notAContract reason => (.inl (.inr (.inl (.inl reason))))
+      | .instanceMissing inst => (.inl (.inr (.inl (.inr inst))))
+      | .cellUndecodable cell => (.inl (.inr (.inr (.inl cell))))
+      | .seatRetired account => (.inl (.inr (.inr (.inr (.inl account)))))
+      | .seatExists account => (.inl (.inr (.inr (.inr (.inr account)))))
+      | .activityCellInSeatSpace cell => (.inr (.inl (.inl (.inl cell))))
+      | .inputUndecodable => (.inr (.inl (.inl (.inr ()))))
+      | .plan reason => (.inr (.inl (.inr (.inl reason))))
+      | .methodYielded => (.inr (.inl (.inr (.inr ()))))
+      | .methodFaulted reason => (.inr (.inr (.inl (.inl reason))))
+      | .uncovered envelope => (.inr (.inr (.inl (.inr envelope))))
+      | .payerInvalid account => (.inr (.inr (.inr (.inl account))))
+      | .bookUnavailable => (.inr (.inr (.inr (.inr (.inl ())))))
+      | .bookRefused => (.inr (.inr (.inr (.inr (.inr ())))))
+    )
+    (fun wire => match wire with
+      | (.inl (.inl (.inl (.inl reason)))) => .kernel reason
+      | (.inl (.inl (.inl (.inr reason)))) => .program reason
+      | (.inl (.inl (.inr (.inl ())))) => .packageMissing
+      | (.inl (.inl (.inr (.inr ())))) => .packageExists
+      | (.inl (.inr (.inl (.inl reason)))) => .notAContract reason
+      | (.inl (.inr (.inl (.inr inst)))) => .instanceMissing inst
+      | (.inl (.inr (.inr (.inl cell)))) => .cellUndecodable cell
+      | (.inl (.inr (.inr (.inr (.inl account))))) => .seatRetired account
+      | (.inl (.inr (.inr (.inr (.inr account))))) => .seatExists account
+      | (.inr (.inl (.inl (.inl cell)))) => .activityCellInSeatSpace cell
+      | (.inr (.inl (.inl (.inr ())))) => .inputUndecodable
+      | (.inr (.inl (.inr (.inl reason)))) => .plan reason
+      | (.inr (.inl (.inr (.inr ())))) => .methodYielded
+      | (.inr (.inr (.inl (.inl reason)))) => .methodFaulted reason
+      | (.inr (.inr (.inl (.inr envelope)))) => .uncovered envelope
+      | (.inr (.inr (.inr (.inl account)))) => .payerInvalid account
+      | (.inr (.inr (.inr (.inr (.inl ()))))) => .bookUnavailable
+      | (.inr (.inr (.inr (.inr (.inr ()))))) => .bookRefused
+    )
+    (by intro value; cases value <;> rfl)
 
 /-- The non-recursive end of a call refusal.  `CallRefusal` itself is recursive only
 because an invocation may attach one or more extraction-account layers to the
@@ -1037,7 +1582,7 @@ inductive CallRefusalTerminal where
   | continuationDepth (limit : Nat)
   | fanOut (limit : Nat)
   | allowanceExceeded (needed held : Nat)
-  | messageWide (id : Nat)
+  | messageWide (entryId : Nat)
   | argumentType (target : Nat) (method : String)
   | callShape (target : Nat) (method : String) (reason : String)
   | frameFault (target : Nat) (method : String) (reason : String)
@@ -1056,8 +1601,6 @@ inductive CallRefusalTerminal where
   | inboxCodec (sender target : Nat)
   | packageCell (cell : Nat)
   | drainConflict (target : Nat)
-
-deriving instance Encodable for CallRefusalTerminal
 
 private def CallRefusalTerminal.refusal : CallRefusalTerminal → ObjectiveCall.CallRefusal
   | .extractionAllowanceExhausted => .extractionAllowanceExhausted
@@ -1156,35 +1699,401 @@ private theorem join_split_callRefusal (reason : ObjectiveCall.CallRefusal) :
               ObjectiveCall.CallRefusal.extractionAccount reason remaining spent
           rw [ih]
 
-instance : Encodable ObjectiveCall.CallRefusal :=
-  Encodable.ofLeftInjection splitCallRefusal (some ∘ joinCallRefusal) (by
-    intro reason
-    simp [join_split_callRefusal])
+private def callRefusalTerminalStream : StreamCodec (CallRefusalTerminal) :=
+  StreamCodec.xmap
+    (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum unitStream
+      stringStream)
+      (StreamCodec.sum activityRefusalStream
+      (StreamCodec.product StreamCodec.nat (StreamCodec.list StreamCodec.nat))))
+      (StreamCodec.sum (StreamCodec.sum StreamCodec.nat
+      StreamCodec.nat)
+      (StreamCodec.sum (StreamCodec.product stageStream (StreamCodec.product StreamCodec.nat StreamCodec.nat))
+      (StreamCodec.product StreamCodec.nat (StreamCodec.product stageStream (StreamCodec.product StreamCodec.nat StreamCodec.nat))))))
+      (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum StreamCodec.nat
+      (StreamCodec.product StreamCodec.nat (StreamCodec.product stringStream stringStream)))
+      (StreamCodec.sum (StreamCodec.product StreamCodec.nat (StreamCodec.product stringStream stringStream))
+      StreamCodec.nat))
+      (StreamCodec.sum (StreamCodec.sum StreamCodec.nat
+      (StreamCodec.product StreamCodec.nat StreamCodec.nat))
+      (StreamCodec.sum StreamCodec.nat
+      (StreamCodec.product StreamCodec.nat stringStream)))))
+      (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum (StreamCodec.product StreamCodec.nat (StreamCodec.product stringStream stringStream))
+      (StreamCodec.product StreamCodec.nat (StreamCodec.product stringStream stringStream)))
+      (StreamCodec.sum (StreamCodec.product StreamCodec.nat stringStream)
+      (StreamCodec.product StreamCodec.nat stringStream)))
+      (StreamCodec.sum (StreamCodec.sum (StreamCodec.product StreamCodec.nat (StreamCodec.product stringStream grantFieldStream))
+      StreamCodec.nat)
+      (StreamCodec.sum (StreamCodec.product StreamCodec.nat StreamCodec.nat)
+      (StreamCodec.product StreamCodec.nat stringStream))))
+      (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum (StreamCodec.product StreamCodec.nat (StreamCodec.product stringStream writeRefusalStream))
+      unitStream)
+      (StreamCodec.sum (StreamCodec.product StreamCodec.nat StreamCodec.nat)
+      StreamCodec.nat))
+      (StreamCodec.sum (StreamCodec.sum StreamCodec.nat
+      StreamCodec.nat)
+      (StreamCodec.sum (StreamCodec.product StreamCodec.nat StreamCodec.nat)
+      (StreamCodec.sum StreamCodec.nat
+      StreamCodec.nat))))))
+    (fun value => match value with
+      | .extractionAllowanceExhausted => (.inl (.inl (.inl (.inl (.inl ())))))
+      | .extractionFailed reason => (.inl (.inl (.inl (.inl (.inr reason)))))
+      | .kernel reason => (.inl (.inl (.inl (.inr (.inl reason)))))
+      | .reentry target stack => (.inl (.inl (.inl (.inr (.inr (target, stack))))))
+      | .depth limit => (.inl (.inl (.inr (.inl (.inl limit)))))
+      | .notAnObject target => (.inl (.inl (.inr (.inl (.inr target)))))
+      | .frontEndExhausted stage needed left => (.inl (.inl (.inr (.inr (.inl (stage, needed, left))))))
+      | .postageFrontEnd target stage needed declared => (.inl (.inl (.inr (.inr (.inr (target, stage, needed, declared))))))
+      | .stateMissing target => (.inl (.inr (.inl (.inl (.inl target)))))
+      | .notCallable target method reason => (.inl (.inr (.inl (.inl (.inr (target, method, reason))))))
+      | .notDeliverable target method reason => (.inl (.inr (.inl (.inr (.inl (target, method, reason))))))
+      | .continuationDepth limit => (.inl (.inr (.inl (.inr (.inr limit)))))
+      | .fanOut limit => (.inl (.inr (.inr (.inl (.inl limit)))))
+      | .allowanceExceeded needed held => (.inl (.inr (.inr (.inl (.inr (needed, held))))))
+      | .messageWide entryId => (.inl (.inr (.inr (.inr (.inl entryId)))))
+      | .argumentType target method => (.inl (.inr (.inr (.inr (.inr (target, method))))))
+      | .callShape target method reason => (.inr (.inl (.inl (.inl (.inl (target, method, reason))))))
+      | .frameFault target method reason => (.inr (.inl (.inl (.inl (.inr (target, method, reason))))))
+      | .resultType caller method => (.inr (.inl (.inl (.inr (.inl (caller, method))))))
+      | .grantSpent target method => (.inr (.inl (.inl (.inr (.inr (target, method))))))
+      | .grantMismatch target method field => (.inr (.inl (.inr (.inl (.inl (target, method, field))))))
+      | .notControllable slot => (.inr (.inl (.inr (.inl (.inr slot)))))
+      | .notSender slot sender => (.inr (.inl (.inr (.inr (.inl (slot, sender))))))
+      | .slotInbox slot reason => (.inr (.inl (.inr (.inr (.inr (slot, reason))))))
+      | .lawDenied target method reason => (.inr (.inr (.inl (.inl (.inl (target, method, reason))))))
+      | .exhausted => (.inr (.inr (.inl (.inl (.inr ())))))
+      | .queueFull sender target => (.inr (.inr (.inl (.inr (.inl (sender, target))))))
+      | .slotQueueFull slot => (.inr (.inr (.inl (.inr (.inr slot)))))
+      | .notPipelinable slot => (.inr (.inr (.inr (.inl (.inl slot)))))
+      | .slotTaken slot => (.inr (.inr (.inr (.inl (.inr slot)))))
+      | .inboxCodec sender target => (.inr (.inr (.inr (.inr (.inl (sender, target))))))
+      | .packageCell cell => (.inr (.inr (.inr (.inr (.inr (.inl cell))))))
+      | .drainConflict target => (.inr (.inr (.inr (.inr (.inr (.inr target))))))
+    )
+    (fun wire => match wire with
+      | (.inl (.inl (.inl (.inl (.inl ()))))) => .extractionAllowanceExhausted
+      | (.inl (.inl (.inl (.inl (.inr reason))))) => .extractionFailed reason
+      | (.inl (.inl (.inl (.inr (.inl reason))))) => .kernel reason
+      | (.inl (.inl (.inl (.inr (.inr (target, stack)))))) => .reentry target stack
+      | (.inl (.inl (.inr (.inl (.inl limit))))) => .depth limit
+      | (.inl (.inl (.inr (.inl (.inr target))))) => .notAnObject target
+      | (.inl (.inl (.inr (.inr (.inl (stage, needed, left)))))) => .frontEndExhausted stage needed left
+      | (.inl (.inl (.inr (.inr (.inr (target, stage, needed, declared)))))) => .postageFrontEnd target stage needed declared
+      | (.inl (.inr (.inl (.inl (.inl target))))) => .stateMissing target
+      | (.inl (.inr (.inl (.inl (.inr (target, method, reason)))))) => .notCallable target method reason
+      | (.inl (.inr (.inl (.inr (.inl (target, method, reason)))))) => .notDeliverable target method reason
+      | (.inl (.inr (.inl (.inr (.inr limit))))) => .continuationDepth limit
+      | (.inl (.inr (.inr (.inl (.inl limit))))) => .fanOut limit
+      | (.inl (.inr (.inr (.inl (.inr (needed, held)))))) => .allowanceExceeded needed held
+      | (.inl (.inr (.inr (.inr (.inl entryId))))) => .messageWide entryId
+      | (.inl (.inr (.inr (.inr (.inr (target, method)))))) => .argumentType target method
+      | (.inr (.inl (.inl (.inl (.inl (target, method, reason)))))) => .callShape target method reason
+      | (.inr (.inl (.inl (.inl (.inr (target, method, reason)))))) => .frameFault target method reason
+      | (.inr (.inl (.inl (.inr (.inl (caller, method)))))) => .resultType caller method
+      | (.inr (.inl (.inl (.inr (.inr (target, method)))))) => .grantSpent target method
+      | (.inr (.inl (.inr (.inl (.inl (target, method, field)))))) => .grantMismatch target method field
+      | (.inr (.inl (.inr (.inl (.inr slot))))) => .notControllable slot
+      | (.inr (.inl (.inr (.inr (.inl (slot, sender)))))) => .notSender slot sender
+      | (.inr (.inl (.inr (.inr (.inr (slot, reason)))))) => .slotInbox slot reason
+      | (.inr (.inr (.inl (.inl (.inl (target, method, reason)))))) => .lawDenied target method reason
+      | (.inr (.inr (.inl (.inl (.inr ()))))) => .exhausted
+      | (.inr (.inr (.inl (.inr (.inl (sender, target)))))) => .queueFull sender target
+      | (.inr (.inr (.inl (.inr (.inr slot))))) => .slotQueueFull slot
+      | (.inr (.inr (.inr (.inl (.inl slot))))) => .notPipelinable slot
+      | (.inr (.inr (.inr (.inl (.inr slot))))) => .slotTaken slot
+      | (.inr (.inr (.inr (.inr (.inl (sender, target)))))) => .inboxCodec sender target
+      | (.inr (.inr (.inr (.inr (.inr (.inl cell)))))) => .packageCell cell
+      | (.inr (.inr (.inr (.inr (.inr (.inr target)))))) => .drainConflict target
+    )
+    (by intro value; cases value <;> rfl)
 
+/-- Extraction-account layers are a length-prefixed byte list of pairs. -/
+def callRefusalStream : StreamCodec ObjectiveCall.CallRefusal :=
+  StreamCodec.xmap
+    (StreamCodec.product (StreamCodec.list (StreamCodec.product StreamCodec.nat StreamCodec.nat))
+      callRefusalTerminalStream)
+    splitCallRefusal joinCallRefusal join_split_callRefusal
+
+/-- Every call refusal, including any number of extraction-account layers,
+roundtrips as a prefix while preserving arbitrary following bytes. -/
+theorem callRefusalStream_prefix_roundtrip (reason : ObjectiveCall.CallRefusal)
+    (suffix : List UInt8) :
+    callRefusalStream.decodePrefix (callRefusalStream.encode reason ++ suffix) = some (reason, suffix) :=
+  callRefusalStream.decodePrefix_encode reason suffix
+
+/-- The refusal roundtrip now states the live byte representation rather than
+an unused generic natural-number code. -/
 @[simp] theorem callRefusal_encode_roundtrip (reason : ObjectiveCall.CallRefusal) :
-    (Encodable.decode (Encodable.encode reason) : Option ObjectiveCall.CallRefusal) = some reason :=
-  Encodable.encodek reason
+    callRefusalStream.toLawful.decode (callRefusalStream.encode reason) = some reason :=
+  callRefusalStream.toLawful.decode_encode reason
 
-deriving instance Encodable for ObjectiveSend.MessageRefusal
-deriving instance Encodable for CredentialSignatureIO.Error
-deriving instance Encodable for CredentialSignedEnvelopeController.Failure
-deriving instance Encodable for CredentialSignatureAdmission.Reject
-deriving instance Encodable for Reject
+theorem callRefusalStream_injective : Function.Injective callRefusalStream.encode := by
+  intro first second same
+  have decoded := congrArg callRefusalStream.toLawful.decode same
+  rw [callRefusal_encode_roundtrip, callRefusal_encode_roundtrip] at decoded
+  exact Option.some.inj decoded
 
-/-- The typed, canonical cause codec used by charged durable records and the
-native charged outcome.  `Encodable.encodek` is the full-constructor roundtrip
-law; the outer strict frame rejects aliases and trailing bytes. -/
-def rejectStream : StreamCodec Reject :=
-  StreamCodec.xmap StreamCodec.nat Encodable.encode
-    (fun value => (Encodable.decode value).getD .malformedIngress)
-    (by intro value; simp)
+private def frontEndStream : StreamCodec ObjectiveCall.FrontEnd :=
+  StreamCodec.xmap
+    (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product StreamCodec.nat StreamCodec.nat)))
+    (fun value => (value.source, value.core, value.postageSource, value.postageCore))
+    (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2⟩)
+    (by intro value; cases value; rfl)
+
+private def messageRefusalStream : StreamCodec (ObjectiveSend.MessageRefusal) :=
+  StreamCodec.xmap
+    (StreamCodec.sum (StreamCodec.sum (StreamCodec.product StreamCodec.nat StreamCodec.nat)
+      (StreamCodec.product StreamCodec.nat StreamCodec.nat))
+      (StreamCodec.sum digestStream
+      (StreamCodec.sum stringStream
+      activityRefusalStream)))
+    (fun value => match value with
+      | .noInbox sender target => (.inl (.inl (sender, target)))
+      | .empty sender target => (.inl (.inr (sender, target)))
+      | .staleHead head => (.inr (.inl head))
+      | .replySlot reason => (.inr (.inr (.inl reason)))
+      | .kernel reason => (.inr (.inr (.inr reason)))
+    )
+    (fun wire => match wire with
+      | (.inl (.inl (sender, target))) => .noInbox sender target
+      | (.inl (.inr (sender, target))) => .empty sender target
+      | (.inr (.inl head)) => .staleHead head
+      | (.inr (.inr (.inl reason))) => .replySlot reason
+      | (.inr (.inr (.inr reason))) => .kernel reason
+    )
+    (by intro value; cases value <;> rfl)
+
+private def signatureErrorStream : StreamCodec (CredentialSignatureIO.Error) :=
+  StreamCodec.xmap
+    (StreamCodec.sum (StreamCodec.sum unitStream
+      unitStream)
+      (StreamCodec.sum (StreamCodec.product uint32Stream stringStream)
+      (StreamCodec.sum unitStream
+      stringStream)))
+    (fun value => match value with
+      | .publicKeyLength => (.inl (.inl ()))
+      | .signatureLength => (.inl (.inr ()))
+      | .processFailed exitCode detail => (.inr (.inl (exitCode, detail)))
+      | .malformedResponse => (.inr (.inr (.inl ())))
+      | .unavailable detail => (.inr (.inr (.inr detail)))
+    )
+    (fun wire => match wire with
+      | (.inl (.inl ())) => .publicKeyLength
+      | (.inl (.inr ())) => .signatureLength
+      | (.inr (.inl (exitCode, detail))) => .processFailed exitCode detail
+      | (.inr (.inr (.inl ()))) => .malformedResponse
+      | (.inr (.inr (.inr detail))) => .unavailable detail
+    )
+    (by intro value; cases value <;> rfl)
+
+private def signatureFailureStream : StreamCodec (CredentialSignedEnvelopeController.Failure CredentialSignatureIO.Error) :=
+  StreamCodec.xmap
+    (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum unitStream
+      unitStream)
+      (StreamCodec.sum unitStream
+      (StreamCodec.sum unitStream
+      unitStream)))
+      (StreamCodec.sum (StreamCodec.sum unitStream
+      unitStream)
+      (StreamCodec.sum unitStream
+      (StreamCodec.sum unitStream
+      unitStream))))
+      (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum unitStream
+      unitStream)
+      (StreamCodec.sum unitStream
+      (StreamCodec.sum unitStream
+      unitStream)))
+      (StreamCodec.sum (StreamCodec.sum unitStream
+      (StreamCodec.sum unitStream
+      unitStream))
+      (StreamCodec.sum unitStream
+      (StreamCodec.sum unitStream
+      signatureErrorStream)))))
+    (fun value => match value with
+      | .malformedState => (.inl (.inl (.inl (.inl ()))))
+      | .malformedRegistry => (.inl (.inl (.inl (.inr ()))))
+      | .malformedEnvelope => (.inl (.inl (.inr (.inl ()))))
+      | .wrongStateVersion => (.inl (.inl (.inr (.inr (.inl ())))))
+      | .wrongRegistryVersion => (.inl (.inl (.inr (.inr (.inr ())))))
+      | .wrongEnvelopeVersion => (.inl (.inr (.inl (.inl ()))))
+      | .staleAuthority => (.inl (.inr (.inl (.inr ()))))
+      | .uncommittedRegistry => (.inl (.inr (.inr (.inl ()))))
+      | .staleRegistry => (.inl (.inr (.inr (.inr (.inl ())))))
+      | .footprintStale => (.inl (.inr (.inr (.inr (.inr ())))))
+      | .expired => (.inr (.inl (.inl (.inl ()))))
+      | .wrongDomain => (.inr (.inl (.inl (.inr ()))))
+      | .wrongMessage => (.inr (.inl (.inr (.inl ()))))
+      | .replayedNullifier => (.inr (.inl (.inr (.inr (.inl ())))))
+      | .unknownKey => (.inr (.inl (.inr (.inr (.inr ())))))
+      | .wrongSubject => (.inr (.inr (.inl (.inl ()))))
+      | .wrongKeyEpoch => (.inr (.inr (.inl (.inr (.inl ())))))
+      | .wrongAlgorithm => (.inr (.inr (.inl (.inr (.inr ())))))
+      | .staleKey => (.inr (.inr (.inr (.inl ()))))
+      | .invalidSignature => (.inr (.inr (.inr (.inr (.inl ())))))
+      | .nativeVerify error => (.inr (.inr (.inr (.inr (.inr error)))))
+    )
+    (fun wire => match wire with
+      | (.inl (.inl (.inl (.inl ())))) => .malformedState
+      | (.inl (.inl (.inl (.inr ())))) => .malformedRegistry
+      | (.inl (.inl (.inr (.inl ())))) => .malformedEnvelope
+      | (.inl (.inl (.inr (.inr (.inl ()))))) => .wrongStateVersion
+      | (.inl (.inl (.inr (.inr (.inr ()))))) => .wrongRegistryVersion
+      | (.inl (.inr (.inl (.inl ())))) => .wrongEnvelopeVersion
+      | (.inl (.inr (.inl (.inr ())))) => .staleAuthority
+      | (.inl (.inr (.inr (.inl ())))) => .uncommittedRegistry
+      | (.inl (.inr (.inr (.inr (.inl ()))))) => .staleRegistry
+      | (.inl (.inr (.inr (.inr (.inr ()))))) => .footprintStale
+      | (.inr (.inl (.inl (.inl ())))) => .expired
+      | (.inr (.inl (.inl (.inr ())))) => .wrongDomain
+      | (.inr (.inl (.inr (.inl ())))) => .wrongMessage
+      | (.inr (.inl (.inr (.inr (.inl ()))))) => .replayedNullifier
+      | (.inr (.inl (.inr (.inr (.inr ()))))) => .unknownKey
+      | (.inr (.inr (.inl (.inl ())))) => .wrongSubject
+      | (.inr (.inr (.inl (.inr (.inl ()))))) => .wrongKeyEpoch
+      | (.inr (.inr (.inl (.inr (.inr ()))))) => .wrongAlgorithm
+      | (.inr (.inr (.inr (.inl ())))) => .staleKey
+      | (.inr (.inr (.inr (.inr (.inl ()))))) => .invalidSignature
+      | (.inr (.inr (.inr (.inr (.inr error))))) => .nativeVerify error
+    )
+    (by intro value; cases value <;> rfl)
+
+private def signatureRejectStream : StreamCodec (CredentialSignatureAdmission.Reject) :=
+  StreamCodec.xmap
+    (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum unitStream
+      (StreamCodec.sum unitStream
+      unitStream))
+      (StreamCodec.sum unitStream
+      (StreamCodec.sum unitStream
+      unitStream)))
+      (StreamCodec.sum (StreamCodec.sum unitStream
+      (StreamCodec.sum signatureFailureStream
+      unitStream))
+      (StreamCodec.sum (StreamCodec.sum unitStream
+      (StreamCodec.list StreamCodec.byte))
+      (StreamCodec.sum (StreamCodec.product StreamCodec.nat StreamCodec.nat)
+      unitStream))))
+    (fun value => match value with
+      | .wrongDomain => (.inl (.inl (.inl ())))
+      | .missingCurrentKey => (.inl (.inl (.inr (.inl ()))))
+      | .subjectKeyEpoch => (.inl (.inl (.inr (.inr ()))))
+      | .unregisteredKey => (.inl (.inr (.inl ())))
+      | .revokedKey => (.inl (.inr (.inr (.inl ()))))
+      | .unsupportedAlgorithm => (.inl (.inr (.inr (.inr ()))))
+      | .publicKeyLength => (.inr (.inl (.inl ())))
+      | .envelope reason => (.inr (.inl (.inr (.inl reason))))
+      | .sourceBinding => (.inr (.inl (.inr (.inr ()))))
+      | .malformedFootprint => (.inr (.inr (.inl (.inl ()))))
+      | .footprintStale address => (.inr (.inr (.inl (.inr address))))
+      | .expired height validUntil => (.inr (.inr (.inr (.inl (height, validUntil)))))
+      | .unvouched => (.inr (.inr (.inr (.inr ()))))
+    )
+    (fun wire => match wire with
+      | (.inl (.inl (.inl ()))) => .wrongDomain
+      | (.inl (.inl (.inr (.inl ())))) => .missingCurrentKey
+      | (.inl (.inl (.inr (.inr ())))) => .subjectKeyEpoch
+      | (.inl (.inr (.inl ()))) => .unregisteredKey
+      | (.inl (.inr (.inr (.inl ())))) => .revokedKey
+      | (.inl (.inr (.inr (.inr ())))) => .unsupportedAlgorithm
+      | (.inr (.inl (.inl ()))) => .publicKeyLength
+      | (.inr (.inl (.inr (.inl reason)))) => .envelope reason
+      | (.inr (.inl (.inr (.inr ())))) => .sourceBinding
+      | (.inr (.inr (.inl (.inl ())))) => .malformedFootprint
+      | (.inr (.inr (.inl (.inr address)))) => .footprintStale address
+      | (.inr (.inr (.inr (.inl (height, validUntil))))) => .expired height validUntil
+      | (.inr (.inr (.inr (.inr ())))) => .unvouched
+    )
+    (by intro value; cases value <;> rfl)
+
+/-- Typed byte representation: constructor tags, concatenated fields and
+length-prefixed lists. No payload or recursive layer is a paired Nat code. -/
+def rejectStream : StreamCodec (Reject) :=
+  StreamCodec.xmap
+    (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum unitStream
+      unitStream)
+      (StreamCodec.sum unitStream
+      unitStream))
+      (StreamCodec.sum (StreamCodec.sum unitStream
+      unitStream)
+      (StreamCodec.sum unitStream
+      activityRefusalStream)))
+      (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum seatStoreRefusalStream
+      (StreamCodec.product callRefusalStream frontEndStream))
+      (StreamCodec.sum messageRefusalStream
+      unitStream))
+      (StreamCodec.sum (StreamCodec.sum unitStream
+      unitStream)
+      (StreamCodec.sum (StreamCodec.product digestStream digestStream)
+      signatureRejectStream))))
+    (fun value => match value with
+      | .malformedIngress => (.inl (.inl (.inl (.inl ()))))
+      | .directoryUnavailable => (.inl (.inl (.inl (.inr ()))))
+      | .authorityUnavailable => (.inl (.inl (.inr (.inl ()))))
+      | .staleAuthority => (.inl (.inl (.inr (.inr ()))))
+      | .replayedMarker => (.inl (.inr (.inl (.inl ()))))
+      | .physicalPreparation => (.inl (.inr (.inl (.inr ()))))
+      | .inputUndecodable => (.inl (.inr (.inr (.inl ()))))
+      | .kernel reason => (.inl (.inr (.inr (.inr reason))))
+      | .seats reason => (.inr (.inl (.inl (.inl reason))))
+      | .call reason drawn => (.inr (.inl (.inl (.inr (reason, drawn)))))
+      | .message reason => (.inr (.inl (.inr (.inl reason))))
+      | .staleAwait => (.inr (.inl (.inr (.inr ()))))
+      | .notObjectHolder => (.inr (.inr (.inl (.inl ()))))
+      | .notAccountOwner => (.inr (.inr (.inl (.inr ()))))
+      | .outcomeMoved claimed decided => (.inr (.inr (.inr (.inl (claimed, decided)))))
+      | .signature reason => (.inr (.inr (.inr (.inr reason))))
+    )
+    (fun wire => match wire with
+      | (.inl (.inl (.inl (.inl ())))) => .malformedIngress
+      | (.inl (.inl (.inl (.inr ())))) => .directoryUnavailable
+      | (.inl (.inl (.inr (.inl ())))) => .authorityUnavailable
+      | (.inl (.inl (.inr (.inr ())))) => .staleAuthority
+      | (.inl (.inr (.inl (.inl ())))) => .replayedMarker
+      | (.inl (.inr (.inl (.inr ())))) => .physicalPreparation
+      | (.inl (.inr (.inr (.inl ())))) => .inputUndecodable
+      | (.inl (.inr (.inr (.inr reason)))) => .kernel reason
+      | (.inr (.inl (.inl (.inl reason)))) => .seats reason
+      | (.inr (.inl (.inl (.inr (reason, drawn))))) => .call reason drawn
+      | (.inr (.inl (.inr (.inl reason)))) => .message reason
+      | (.inr (.inl (.inr (.inr ())))) => .staleAwait
+      | (.inr (.inr (.inl (.inl ())))) => .notObjectHolder
+      | (.inr (.inr (.inl (.inr ())))) => .notAccountOwner
+      | (.inr (.inr (.inr (.inl (claimed, decided))))) => .outcomeMoved claimed decided
+      | (.inr (.inr (.inr (.inr reason)))) => .signature reason
+    )
+    (by intro value; cases value <;> rfl)
 
 def rejectCodec : LawfulCodec Reject :=
-  ObjectiveActivityWire.framed "DREGG/OBJECTIVE/ACTIVITY/REJECT/v1".toUTF8.toList rejectStream
+  ObjectiveActivityWire.framed "DREGG/OBJECTIVE/ACTIVITY/REJECT/v2".toUTF8.toList rejectStream
 
 @[simp] theorem rejectCodec_roundtrip (cause : Reject) :
     rejectCodec.decode (rejectCodec.encode cause) = some cause :=
   rejectCodec.decode_encode cause
+
+/-- Universal prefix roundtrip, including arbitrary following bytes. -/
+theorem rejectStream_prefix_roundtrip (cause : Reject) (suffix : List UInt8) :
+    rejectStream.decodePrefix (rejectStream.encode cause ++ suffix) = some (cause, suffix) :=
+  rejectStream.decodePrefix_encode cause suffix
+
+/-- Equal refusal bytes imply the same typed cause; no rendering is discarded. -/
+theorem rejectCodec_injective : Function.Injective rejectCodec.encode := by
+  intro first second same
+  have decoded := congrArg rejectCodec.decode same
+  rw [rejectCodec.decode_encode, rejectCodec.decode_encode] at decoded
+  exact Option.some.inj decoded
+
+/-- The former paired-natural payload is a different codec edition and
+refuses even if its body happens to be valid under the new byte stream. -/
+theorem rejectCodec_v1_refuses (body : List UInt8) :
+    rejectCodec.decode ("DREGG/OBJECTIVE/ACTIVITY/REJECT/v1".toUTF8.toList ++ body) = none := by
+  cases found : rejectCodec.decode ("DREGG/OBJECTIVE/ACTIVITY/REJECT/v1".toUTF8.toList ++ body) with
+  | none => rfl
+  | some value =>
+    have canon := ObjectiveActivityWire.framed_canonical found
+    have cut := congrArg (List.take "DREGG/OBJECTIVE/ACTIVITY/REJECT/v1".toUTF8.toList.length) canon
+    change ("DREGG/OBJECTIVE/ACTIVITY/REJECT/v2".toUTF8.toList ++
+      _).take _ = ("DREGG/OBJECTIVE/ACTIVITY/REJECT/v1".toUTF8.toList ++ body).take _ at cut
+    rw [List.take_append_of_le_length (by decide +kernel), List.take_left' rfl] at cut
+    exact absurd cut (by decide +kernel)
 
 /-- The payload installed in a charged failure's durable `StableEvent`.  The
 source event remains the original ingress event and therefore retains the
@@ -1209,7 +2118,21 @@ def recordedFailureStream : StreamCodec RecordedFailure :=
 
 def recordedFailureCodec : LawfulCodec RecordedFailure :=
   ObjectiveActivityWire.framed
-    "DREGG/OBJECTIVE/ACTIVITY/RECORDED-FAILURE/v1".toUTF8.toList recordedFailureStream
+    "DREGG/OBJECTIVE/ACTIVITY/RECORDED-FAILURE/v2".toUTF8.toList recordedFailureStream
+
+/-- The former paired-natural payload is a different codec edition and
+refuses even if its body happens to be valid under the new byte stream. -/
+theorem recordedFailureCodec_v1_refuses (body : List UInt8) :
+    recordedFailureCodec.decode ("DREGG/OBJECTIVE/ACTIVITY/RECORDED-FAILURE/v1".toUTF8.toList ++ body) = none := by
+  cases found : recordedFailureCodec.decode ("DREGG/OBJECTIVE/ACTIVITY/RECORDED-FAILURE/v1".toUTF8.toList ++ body) with
+  | none => rfl
+  | some value =>
+    have canon := ObjectiveActivityWire.framed_canonical found
+    have cut := congrArg (List.take "DREGG/OBJECTIVE/ACTIVITY/RECORDED-FAILURE/v1".toUTF8.toList.length) canon
+    change ("DREGG/OBJECTIVE/ACTIVITY/RECORDED-FAILURE/v2".toUTF8.toList ++
+      _).take _ = ("DREGG/OBJECTIVE/ACTIVITY/RECORDED-FAILURE/v1".toUTF8.toList ++ body).take _ at cut
+    rw [List.take_append_of_le_length (by decide +kernel), List.take_left' rfl] at cut
+    exact absurd cut (by decide +kernel)
 
 /-- A charged record is a version-2 activity event whose canonical payload is
 the original version-1 ingress event plus the exact typed refusal. -/
@@ -2105,6 +3028,10 @@ def signingPlanCodec : LawfulCodec SigningPlan :=
 #assert_axioms gate_spent_refused
 #assert_axioms command_v9_refuses
 #assert_axioms rejectCodec_roundtrip
+#assert_axioms rejectStream_prefix_roundtrip
+#assert_axioms rejectCodec_injective
+#assert_axioms rejectCodec_v1_refuses
+#assert_axioms recordedFailureCodec_v1_refuses
 #assert_axioms recordedDisposition_event
 #assert_axioms recordedDisposition_failedEvent
 #assert_axioms replay_invoke_recorded
@@ -2115,6 +3042,8 @@ def signingPlanCodec : LawfulCodec SigningPlan :=
 #assert_axioms receiveLoaded_exact_returns_recorded_disposition
 #assert_axioms receiveLoaded_retry_verification_failure_no_receipt
 #assert_axioms callRefusal_encode_roundtrip
+#assert_axioms callRefusalStream_prefix_roundtrip
+#assert_axioms callRefusalStream_injective
 #assert_axioms retry_unverified_refused
 
 end Minidregg.Kernel.ObjectiveActivityReceiver
