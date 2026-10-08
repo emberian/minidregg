@@ -5,6 +5,7 @@
 #   run.sh serve   --state DIR     foreground; for systemd or any supervisor
 #   run.sh start   --state DIR     background, with DIR/public/server.pid
 #   run.sh stop    --state DIR     stop what `start` started (checks the pid's cmdline)
+#   run.sh upgrade --manifest N1_MANIFEST --state DIR   rebind a stopped Store
 #   run.sh status  --state DIR
 #   run.sh sponsor --state DIR     create the genesis sponsor's workspace (Store must be serving)
 #   run.sh unit    --state DIR     print a systemd unit that runs `serve`
@@ -103,6 +104,50 @@ load_state() {
   candidate_state "$1"
   candidate_verify_outputs "$CANDIDATE_MANIFEST"
   candidate_state_bindings
+}
+
+# Upgrade the operator's runtime bindings, never its semantic configuration or Store.
+upgrade() {
+  candidate_require cmp mktemp
+  [ -n "$manifest" ] || candidate_die "upgrade needs --manifest"
+  upgrade_manifest=$(candidate_abs "$manifest")
+  # N may predate the current manifest format. Upgrade loads its state metadata
+  # without weakening start's strict N1 manifest/provenance verification.
+  STATE=$(CDPATH='' cd -- "$state" && pwd -P)
+  jq -e '.type == "minidregg-candidate-state-v1"' "$STATE/state.json" >/dev/null \
+    || candidate_die "not an initialized candidate state"
+  CONFIG=$STATE/deployment/pinned-config.json
+  SOCKET=$STATE/public/mini.sock
+  [ "$(jq -er '.pinnedConfigSha256' "$STATE/state.json")" = "$(candidate_sha256 "$CONFIG")" ] \
+    || candidate_die "pinned config differs from recorded state"
+  candidate_require_stopped
+  service_config=$STATE/public/mini.config
+  if [ -e "$service_config" ] || [ -L "$service_config" ]; then
+    [ -f "$service_config" ] && [ ! -L "$service_config" ] \
+      || candidate_die "retained service config is not a regular file"
+    cmp -s "$CONFIG" "$service_config" \
+      || candidate_die "retained service config differs from pinned config"
+  fi
+  candidate_resolve "$upgrade_manifest"
+  candidate_verify_outputs "$CANDIDATE_MANIFEST"
+  upgrade_tmp=$(mktemp -d "$STATE/tmp/upgrade.XXXXXX")
+  trap 'rm -rf -- "$upgrade_tmp"' EXIT
+  jq --arg store "$STORE" --arg verifier "$VERIFIER" \
+    '.storageBinary = $store | .signatureBinary = $verifier' "$CONFIG" >"$upgrade_tmp/config.json"
+  jq --arg manifest "$CANDIDATE_MANIFEST" --arg host "$(candidate_sha256 "$HOST")" \
+    --arg config "$(candidate_sha256 "$upgrade_tmp/config.json")" \
+    '.manifest = $manifest | .hostSha256 = $host | .pinnedConfigSha256 = $config' \
+    "$STATE/state.json" >"$upgrade_tmp/state.json"
+  candidate_require_stopped
+  if [ -f "$service_config" ]; then
+    cp "$upgrade_tmp/config.json" "$upgrade_tmp/service.json"
+    mv "$upgrade_tmp/service.json" "$service_config"
+  fi
+  mv "$upgrade_tmp/config.json" "$CONFIG"
+  mv "$upgrade_tmp/state.json" "$STATE/state.json"
+  rm -rf -- "$upgrade_tmp"
+  trap - EXIT
+  printf 'upgraded runtime bindings to %s; Store unchanged\n' "$CANDIDATE_MANIFEST"
 }
 
 serve_exec() {
@@ -232,6 +277,7 @@ case "$action" in
   serve) serve_exec ;;
   start) start ;;
   stop) stop ;;
+  upgrade) upgrade ;;
   status) status ;;
   sponsor) sponsor ;;
   unit) unit ;;

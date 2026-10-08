@@ -12,7 +12,7 @@
 # OUT/subrows.tsv (ID<TAB>STATUS<TAB>WALL_S<TAB>DETAIL) to report one table row per step; the
 # last stderr line is the row's detail. Rows generate their own test keys inside RUN; no secret
 # ever reaches the box. OWNER hints: OUT/owner (a lane name) when the row can tell.
-JOURNEY_ROWS=(journey objective rooms activity seats bounty call send domain upgrade objectrecord welcomecontinuity sshe2e m3 m4 hermes m6grain m7 m8 fleetsign jpay exchange chargedfailure growth jserve)
+JOURNEY_ROWS=(journey objective rooms activity seats bounty call send domain upgrade hostupgrade objectrecord welcomecontinuity sshe2e m3 m4 hermes m6grain m7 m8 fleetsign jpay exchange chargedfailure growth jserve)
 
 # J0-J8 + the rotation rows (JROT, JROTL, and JRLANE, JAUDIT and any *SEAT* step when the tip's journey.sh
 # has them), one fresh Store, through native/resource-client/journey.sh.
@@ -159,6 +159,40 @@ row_upgrade() {
   cp -r "$RUN/u/transcript" "$OUT/" 2>/dev/null
   tail -1 "$OUT/upgrade.out" >&2
   return $rc
+}
+
+# HOST-UPGRADE is a candidate/Store transition, independent of APP ADOPT/MIGRATE.
+# Both pinned historical pairs are mandatory; missing READY candidates are 98.
+row_hostupgrade() {
+  local d=$SRC/native/resource-client/journey.d/jhostupgrade.sh
+  local e=/srv/artifacts/e0a8ba21a39d92b470cc331fd16ea0408f608b1f
+  local f=/srv/artifacts/7220394bae5c72f1ae8468ed7745bdb8547c1cc9
+  local g=/srv/artifacts/0ea31db53c5844c9e1676f1dc6b821ec9993da91
+  local candidate file pair n n1 expected rc status detail t overall=0
+  [ -f "$d" ] || return 99
+  echo prod-hostup >"$OUT/owner"
+  product_tools jq python3 sha256sum timeout realpath cmp || return $?
+  for candidate in "$e" "$f" "$g"; do
+    for file in READY manifest.json run.sh genesis.sh genesis-params.example.json; do
+      [ -f "$candidate/$file" ] || { echo "missing hostupgrade candidate: $candidate/$file" >&2; return 98; }
+    done
+  done
+  : >"$OUT/subrows.tsv"
+  for pair in EF FG; do
+    if [ "$pair" = EF ]; then n=$e; n1=$f; expected=refuse
+    else n=$f; n1=$g; expected=reopen; fi
+    t=$(date +%s)
+    bash "$d" "$n" "$n1" "$OUT/$pair" "$expected" >"$OUT/$pair.out" 2>"$OUT/$pair.err"
+    rc=$?
+    case "$rc" in 0) status=PASS ;; 98) status=UNCONFIGURED ;; *) status=FAIL ;; esac
+    if [ "$rc" = 98 ]; then [ "$overall" != 0 ] || overall=98
+    elif [ "$rc" != 0 ]; then overall=1; fi
+    detail=$(awk 'NF {last=$0} END {print last}' "$OUT/$pair.err" | tr '\t\n' '  ')
+    if [ -s "$OUT/$pair/verdict.txt" ]; then detail=$(cat "$OUT/$pair/verdict.txt"); fi
+    printf 'HOST-UPGRADE-%s\t%s\t%s\t%s\n' "$pair" "$status" "$(( $(date +%s)-t ))" "$detail" >>"$OUT/subrows.tsv"
+  done
+  echo "hostupgrade: $(cut -f1,2 "$OUT/subrows.tsv" | tr '\n' ';')" >&2
+  return "$overall"
 }
 
 # The bounty on the seat kernel (world/bounty/BountyEscrow.obend): escrow, claim, submit, approve / reject /

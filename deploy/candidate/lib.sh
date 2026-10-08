@@ -123,6 +123,20 @@ candidate_state_bindings() {
     || candidate_die "pinned config names a different signature verifier than the manifest"
 }
 
+# A foreground serve need not have server.pid. Check every process naming this
+# configuration or socket, including a Host left alive by a departed supervisor.
+# Operators must serialize start/stop/upgrade; this check is not a process lock.
+candidate_require_stopped() {
+  for candidate_proc in /proc/[0-9]*/cmdline; do
+    [ -r "$candidate_proc" ] || continue
+    candidate_cmdline=$(tr '\0' '\n' <"$candidate_proc" 2>/dev/null) || continue
+    case "$candidate_cmdline" in
+      *"$CONFIG"*|*"$SOCKET"*)
+        candidate_die "upgrade requires a stopped Host (process ${candidate_proc#/proc/} names its config or socket)" ;;
+    esac
+  done
+}
+
 # candidate_build_root SRC
 # Cargo hashes the absolute path of every path dependency that lies outside the building package's
 # own directory (native/grain-runtime builds ../signed-api-path, ...; resource-client's `mini` has
