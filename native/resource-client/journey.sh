@@ -14,7 +14,7 @@
 #   J0-J8  the tree-neutral journey (docs/JOURNEY.md, "The steps J0-J8 and growth")
 #   J12X   host-malformed: malformed requests are refused by name and the service
 #          survives (journey.d/j12x.sh, on this Store, between J3 and J4)
-#   G      growth at 10/100/500/1000 accepted records; pass = write median
+#   G      growth at 10/100/500/1000 writes; pass = cumulative write max
 #          <= 5 s and cold reopen <= 60 s at 1000 (list item 1)
 #   K4     one resource holds 32 fields and reads them back (list item 2)
 #   KC     K-CLOCK: journey.d/jclock.sh (ticks move the one clock; a law reads clock/now)
@@ -86,8 +86,7 @@
 # something ran and was wrong. scripts/local-gates.sh gate 5 reads them apart.
 # Tunables: JOURNEY_TIMER_COUNTS (the timers' accepted counts, see accept());
 # JOURNEY_ONLY (space-separated step ids; others SKIPPED); JOURNEY_GROWTH_LEVELS (default "10 100 500 1000");
-# JOURNEY_GROWTH_FULL=1 keeps measuring after two rising levels already exceed
-# the 1000-record thresholds (default stops, see step G);
+# G measures every write through level 1000 even when an earlier level is slow;
 # JOURNEY_GROWTH_BUDGET_S (default 10800, the bake-off's three-hour rule);
 # JOURNEY_BUDGET_S (unset or 0: none): a wall budget for the WHOLE run, started
 # when this script starts. Every `call` and every hook is capped at what is left
@@ -412,18 +411,23 @@ frontier() {
 # certify advances LAST_COUNT (the exact-count bookkeeping of the steps).
 journey_certify() {
   [ -n "${SPONSOR_WS:-}" ] && [ -f "$SPONSOR_WS/workspace.json" ] && [ -f "$W/genesis.json" ] || return 0
-  local out=$S/certify-before-$1.json
+  local out=$S/certify-before-$1.json rc=0
   printf '== before %s: ' "$1" >>"$S/certify.log"
   "$MINI" checkpoint --action certify --workspace "$SPONSOR_WS" \
     --control "$(jq -r .factoryControllerCapability "$W/genesis.json")" \
-    --min-tail "${JOURNEY_CERTIFY_MIN_TAIL:-64}" >"$out" 2>>"$S/certify.log" \
-    || echo "certify failed (rc $?)" >>"$S/certify.log"
+    --min-tail "${2:-${JOURNEY_CERTIFY_MIN_TAIL:-64}}" >"$out" 2>>"$S/certify.log" \
+    || rc=$?
   cat "$out" >>"$S/certify.log" 2>/dev/null
+  if [ "$rc" -ne 0 ]; then
+    echo "certify failed (rc $rc)" >>"$S/certify.log"
+    return "$rc"
+  fi
   # A confirmed certify is a record the operator added: the steps' exact
   # acceptedCount bookkeeping (LAST_COUNT) moves past it.
   if jq -e '.type == "confirmed"' "$out" >/dev/null 2>&1; then
     LAST_COUNT=$(jq -r .acceptedCount "$out")
   fi
+  jq -e '.type == "confirmed" or .type == "not-due"' "$out" >/dev/null 2>&1
 }
 
 run_step() {
@@ -763,22 +767,35 @@ step_J6() {
 # ---------------------------------------------------------------- growth
 
 GROW_N=0
+# Certify before g1, then after at most 252 writes. The checkpoint's own record
+# consumes one tail slot; 252 leaves room within L=256. Reuse the operator path
+# with min-tail=1 so this cadence always certifies, independent of the timer's
+# usual minimum. Its wall time remains inside the triggering write's timer.
+grow_checkpoint() {
+  local id=$1 t0 t1 out=$S/certify-before-G-$1.json
+  [ "$(((GROW_N - 1) % 252))" -eq 0 ] || return 0
+  t0=$(now)
+  journey_certify "G-$id" 1 || { DETAIL="growth checkpoint before $id failed (see $S/certify.log)"; return 1; }
+  t1=$(now)
+  installed "$out" || { DETAIL="growth checkpoint before $id was not installed: $(cat "$out")"; return 1; }
+  printf '%s\t%s\t%s\n' "$id" "$LAST_COUNT" "$(elapsed "$t0" "$t1")" >>"$SD/certifies.tsv"
+}
 # One growth write: the newcomer overwrites field 101 with the next integer.
 grow_write() {
-  local id prev
+  local id prev t0 t1
+  t0=$(now)
   prev=$(cat "$SD/f101")
   GROW_N=$((GROW_N + 1)); id=g$GROW_N
+  grow_checkpoint "$id" || return 1
   scalar shared write 101 "$GROW_N" "$prev" >"$SD/w/$id.json"
-  local t0 t1
-  t0=$(now)
   call "w/$id.propose" "$MINI" workspace --action propose --dir "$NEWCOMER_WS" --request "$SD/w/$id.json" --proposal-id "$id" \
     || { DETAIL="growth write $id propose failed at record $LAST_COUNT: $(tail -1 "$SD/w/$id.propose.err")"; return 1; }
   call "w/$id.submit" "$MINI" workspace --action submit --dir "$NEWCOMER_WS" \
     --intent "$NEWCOMER_WS/proposals/$id/intent.json" --attempt "$NEWCOMER_WS/attempts/$id" \
     || { DETAIL="growth write $id refused at record $LAST_COUNT: $(tail -1 "$SD/w/$id.submit.err")"; return 1; }
-  t1=$(now)
   accept "$NEWCOMER_WS/attempts/$id/outcome.json" || { DETAIL="growth write $id: ${DETAIL:-not installed}"; return 1; }
   echo "$GROW_N" >"$SD/f101"
+  t1=$(now)
   LAST_W=$(elapsed "$t0" "$t1")
   printf '%s\t%s\t%s\t%s\t%s\n' "$id" "$LAST_COUNT" "$(cwall "w/$id.propose")" "$(cwall "w/$id.submit")" "$LAST_W" >>"$SD/writes.tsv"
   gt "$LAST_W" 600 && { DETAIL="abort rule: one write took ${LAST_W}s (> 600 s) at record $LAST_COUNT"; return 1; }
@@ -786,16 +803,23 @@ grow_write() {
 }
 median5() { sort -g | awk '{a[NR]=$1} END{print a[3]}'; }
 worst() { sort -g | tail -1; }
+# Nearest-rank percentiles, over every measured write/certify (not five samples).
+growth_stats() {
+  sort -g | awk '{a[NR]=$1} END{if (NR) {p50=int((NR*50+99)/100); p99=int((NR*99+99)/100); printf "%d %s %s %s\n", NR,a[p50],a[p99],a[NR]} else print "0 0 0 0"}'
+}
 
 step_G() {
   local levels=${JOURNEY_GROWTH_LEVELS:-"10 100 500 1000"} budget=${JOURNEY_GROWTH_BUDGET_S:-10800}
-  local L i t0 t1 wm ww rm rw bytes verdict="" over_prev=0 prev_wm="" g0
+  local L i t0 t1 wn wp50 wp99 wmax cn cp50 cp99 cmax rm rw bytes verdict="" g0 at1000="" red1000=0
   g0=$(now)
   budget=$(cap_s "$budget")
   ARTIFACT=$SD/levels.tsv
   mkdir -p "$SD/w" "$SD/r"
-  printf 'level\twrite_median_s\twrite_worst_s\tread_median_s\tread_worst_s\treopen_s\tstore_bytes\tsampled_records\tloadavg\n' >"$ARTIFACT"
+  printf 'level\twrite_max_s\twrite_p99_s\tread_median_s\tread_worst_s\treopen_s\tstore_bytes\tsampled_records\tloadavg\n' >"$ARTIFACT"
   : >"$SD/writes.tsv"
+  : >"$SD/certifies.tsv"
+  printf 'level\tkind\tcount\tp50_s\tp99_s\tmax_s\n' >"$SD/timing.tsv"
+  GROW_N=0
   # Field 101 is created once; every later growth record is a scalar write to it.
   scalar shared create 101 0 >"$SD/w/create.json"
   call w/create.propose "$MINI" workspace --action propose --dir "$NEWCOMER_WS" --request "$SD/w/create.json" --proposal-id g0 \
@@ -806,14 +830,12 @@ step_G() {
   accept "$NEWCOMER_WS/attempts/g0/outcome.json" || fail "field 101 create: $DETAIL" || return
   echo 0 >"$SD/f101"
   for L in $levels; do
-    while [ "$LAST_COUNT" -lt "$L" ]; do
+    while [ "$GROW_N" -lt "$L" ]; do
       gt "$(elapsed "$g0" "$(now)")" "$budget" && {
         fail "${verdict:+$verdict; }growth budget ${budget}s spent before reaching $L records (at $LAST_COUNT)"; return; }
       grow_write || return 1
     done
-    : >"$SD/L$L.w"; : >"$SD/L$L.r"
-    local first=$((LAST_COUNT + 1))
-    for i in 1 2 3 4 5; do grow_write || return 1; echo "$LAST_W" >>"$SD/L$L.w"; done
+    : >"$SD/L$L.r"
     for i in 1 2 3 4 5; do
       t0=$(now)
       call "r/L$L-$i" "$MINI" workspace --action read --dir "$NEWCOMER_WS" --name shared \
@@ -822,30 +844,25 @@ step_G() {
       [ "$(field_value "$SD/r/L$L-$i.out" 101)" = "$(cat "$SD/f101")" ] || fail "read at level $L returned a stale field 101" || return
     done
     reopen "L$L" "$NEWCOMER_WS" shared || return 1
-    wm=$(median5 <"$SD/L$L.w"); ww=$(worst <"$SD/L$L.w")
+    read -r wn wp50 wp99 wmax < <(cut -f5 "$SD/writes.tsv" | growth_stats)
+    read -r cn cp50 cp99 cmax < <(cut -f3 "$SD/certifies.tsv" | growth_stats)
     rm=$(median5 <"$SD/L$L.r"); rw=$(worst <"$SD/L$L.r")
     bytes=$(du -sb "$W/store" | cut -f1)
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s-%s\t%s\n' "$L" "$wm" "$ww" "$rm" "$rw" "$REOPEN_S" "$bytes" "$first" "$LAST_COUNT" \
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t1-%s\t%s\n' "$L" "$wmax" "$wp99" "$rm" "$rw" "$REOPEN_S" "$bytes" "$GROW_N" \
       "$(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null)" >>"$ARTIFACT"
-    echo "  growth level $L: write median ${wm}s worst ${ww}s, read median ${rm}s, reopen ${REOPEN_S}s, store $bytes B" >&2
-    verdict="${verdict:+$verdict; }at $L: write ${wm}s, reopen ${REOPEN_S}s"
-    if gt "$wm" 5 || gt "$REOPEN_S" 60; then
-      # Early stop: two consecutive levels over the 1000-record thresholds with
-      # the write cost rising between them. One level over is not enough (a
-      # loaded machine can put a small Store over 5 s); a rising second level
-      # says the cost comes from history. JOURNEY_GROWTH_FULL=1 measures on.
-      if [ "$over_prev" = 1 ] && gt "$wm" "$prev_wm" && [ "${JOURNEY_GROWTH_FULL:-0}" != 1 ]; then
-        fail "$verdict — two levels over the 1000-record thresholds (write <= 5 s, reopen <= 60 s), write x$(awk -v a="$prev_wm" -v b="$wm" 'BEGIN{printf "%.1f", b/a}') between them; stopped (JOURNEY_GROWTH_FULL=1 to continue)"; return
-      fi
-      over_prev=1
-    else
-      over_prev=0
+    printf '%s\twrite\t%s\t%s\t%s\t%s\n' "$L" "$wn" "$wp50" "$wp99" "$wmax" >>"$SD/timing.tsv"
+    printf '%s\tcertify\t%s\t%s\t%s\t%s\n' "$L" "$cn" "$cp50" "$cp99" "$cmax" >>"$SD/timing.tsv"
+    echo "  growth level $L: write count $wn p50 ${wp50}s p99 ${wp99}s max ${wmax}s; reopen ${REOPEN_S}s, store $bytes B" >&2
+    echo "  certify wall: count $cn p50 ${cp50}s max ${cmax}s" >&2
+    verdict="${verdict:+$verdict; }at $L: write count $wn p50 ${wp50}s p99 ${wp99}s max ${wmax}s, reopen ${REOPEN_S}s"
+    if [ "$L" = 1000 ]; then
+      at1000="write count $wn p50 ${wp50}s p99 ${wp99}s max ${wmax}s; certify wall count $cn p50 ${cp50}s max ${cmax}s; cold reopen ${REOPEN_S}s"
+      if gt "$wmax" 5 || gt "$REOPEN_S" 60; then red1000=1; fi
     fi
-    prev_wm=$wm
   done
   case " $levels " in *" 1000 "*) ;; *) DETAIL="UNMEASURED: $verdict; level 1000 not in JOURNEY_GROWTH_LEVELS (\"$levels\"), so the exit is not measured"; return 4;; esac
-  if gt "$wm" 5 || gt "$REOPEN_S" 60; then fail "$verdict — over thresholds"; return; fi
-  DETAIL="$verdict — within thresholds"
+  if [ "$red1000" = 1 ]; then fail "$verdict; at 1000: $at1000 — over thresholds (write max <=5s, reopen <=60s)"; return; fi
+  DETAIL="$verdict; at 1000: $at1000 — within thresholds (write max <=5s, reopen <=60s)"
 }
 
 step_J7() {
