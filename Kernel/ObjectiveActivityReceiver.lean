@@ -1015,7 +1015,7 @@ because an invocation may attach one or more extraction-account layers to the
 typed refusal that stopped its call tree.  Keeping the terminal separate for the
 encoding avoids asking the generic deriving proof to normalize the large recursive
 sum. -/
-private inductive CallRefusalTerminal where
+inductive CallRefusalTerminal where
   | extractionAllowanceExhausted
   | extractionFailed (reason : String)
   | kernel (reason : ObjectiveActivity.Refusal)

@@ -74,6 +74,11 @@ def genesis (creatorKey : List UInt8) : NativeHostGenesis.Config where
 
 def describe : NativeHostCodec.Outcome → String
   | .confirmed _ _ => "committed"
+  | .charged _ receipt causeBytes =>
+      let cause := match ObjectiveActivityReceiver.rejectCodec.decode causeBytes with
+        | some typed => reprStr typed
+        | none => s!"invalid canonical cause {repr causeBytes}"
+      s!"charged failure at height {receipt.acceptedCount}: {cause}"
   | .refused _ phase detail _ =>
       s!"refused {String.fromUTF8! ⟨phase.toArray⟩}: {String.fromUTF8! ⟨detail.toArray⟩}"
   | .contention => "contention"

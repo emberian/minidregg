@@ -537,7 +537,7 @@
     {
       "module": "Assurance.NativeAcceptedFixtureData",
       "path": "Assurance/NativeAcceptedFixtureData.lean",
-      "sha256": "5a84c1363a85f5dfcf512c34d19ad36cc04cb61ae374745549c13389ee037ac0",
+      "sha256": "e83a941c9e87e5cf43099ac12045dc37bcd395bc367096f2b9c5ec023e0d2ee0",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -6998,7 +6998,7 @@
     {
       "module": "Kernel.ObjectiveActivityReceiver",
       "path": "Kernel/ObjectiveActivityReceiver.lean",
-      "sha256": "e448d1ee6a80018edc97b040805a4272cc712d2adbc515c55b94a2904386289d",
+      "sha256": "8835fc5a5b8aa1629766000d8a1c65a4c1c4a9ee4a0fe1f021d7e1891ecd4ec3",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
