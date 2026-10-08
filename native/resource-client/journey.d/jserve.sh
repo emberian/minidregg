@@ -8,14 +8,14 @@
 # the path a friend takes — is timed, and asserts expected vs got:
 #   (a) a client sends 3 bytes of a frame and sleeps 30 s: the honest read is
 #       answered in < 2 s; the staller is refused by name at its 10 s deadline;
-#   (b) a long Host request (a large op 7 body the Host parses and refuses):
+#   (b) a long Host request (a maximum admitted op 7 body the Host parses and refuses):
 #       an envelope the socket refuses itself is answered at once while the
 #       Host is busy; the honest read is read, queued, and answered right
 #       after the long request (both measured); 40 requests behind a long one
 #       meet the queue bound (32) and are refused `busy: host queue full`;
-#   (b3) an op 7 object of 1M distinct keys costs the Host linear time (the
-#       duplicate-key scan was quadratic: > 330 s), and a repeated key is
-#       still refused by name;
+#   (b3) a maximum admitted distinct-key object costs the Host linear time
+#       (< 60 s); the old 1M-key object is refused by the socket body bound;
+#       an honest read runs under the admitted load, and a repeat is refused;
 #   (c) 50 connections that send nothing: the honest read is answered;
 #       filled to the connection bound (64), the next is refused
 #       `busy: connection limit`, and is answered once the idle ones expire;
@@ -64,13 +64,14 @@ def frame_of(sock):
 def envelope(request, version=1):
     return bytes([version]) + struct.pack("<I", len(config)) + config + request
 
-def raw(request, body=None, timeout=600):
+def raw(request, body=None, timeout=600, delivered=None):
     s = socket.socket(socket.AF_UNIX); s.settimeout(timeout); s.connect(SOCKET)
     body = envelope(request) if body is None else body
     try:
         s.sendall(struct.pack("<I", len(body)) + body)
     except OSError:
         pass  # a refusal sent before the read is still waiting to be read
+    if delivered is not None: delivered.set()
     try: return frame_of(s)
     finally: s.close()
 
@@ -150,72 +151,100 @@ guarded("(a) a client sends 3 bytes then sleeps 30 s",
         "3 honest reads during the stall, each < 2 s; staller refused `frame read deadline` at ~10 s", trickle)
 
 # ---------------------------------------------------------------- (b) long Host request
-# An op 7 body of 4 M array elements: the Host parses all of it, then refuses
-# it by name (`intent` takes no field `pad`). It occupies the one Host.
-long_body = bytes([7]) + struct.pack("<H", 6) + b"intent" + b'{"pad":[' + b"0," * 4_000_000 + b'0]}'
+# Mirror transport.rs AUTHOR_BODY_MAX (8ac769d7). The kind frame counts
+# toward this bound. Fill exactly to it, so this still exercises the most
+# expensive admitted array rather than a fast prequeue socket refusal.
+AUTHOR_BODY_MAX = 4 * 1024 * 1024 + 2 + 256
+AUTHOR_PREFIX = bytes([7]) + struct.pack("<H", 6) + b"intent"
+SOURCE_MAX = AUTHOR_BODY_MAX - (len(AUTHOR_PREFIX) - 1)
+def full_author(source):
+    assert len(source) <= SOURCE_MAX
+    return AUTHOR_PREFIX + source + b" " * (SOURCE_MAX - len(source))
+long_body = full_author(b'{"pad":[' + b"0," * ((SOURCE_MAX - 11) // 2) + b'0]}')
+assert len(long_body) - 1 == AUTHOR_BODY_MAX
 _, alone = timed(lambda: raw(long_body))
 latencies.append(("(b) the long request alone", alone))
 
 def long_request():
-    out = {}
+    out = {}; delivered = threading.Event()
     def slow():
-        out["reply"], out["wall"] = timed(lambda: raw(long_body))
+        out["reply"], out["wall"] = timed(lambda: raw(long_body, delivered=delivered))
     t = threading.Thread(target=slow); t.start()
-    time.sleep(0.3)
+    if not delivered.wait(30): raise RuntimeError("hostile array frame not delivered")
     bad, bad_wall = timed(lambda: raw(b"", body=bytes([3]) + struct.pack("<I", len(config)) + config + b"\x00", timeout=30))
+    loaded = t.is_alive()
     ok, wall, detail = honest_read()
     t.join()
     latencies.append(("(b) honest read behind the long request", wall))
     slow_named = out["reply"] is not None and out["reply"][0] == 255 and b"op 7" in out["reply"]
-    good = ok and slow_named and socket_refusal(bad, "invalid socket envelope") and bad_wall < 1.0 \
+    good = loaded and ok and slow_named and socket_refusal(bad, "invalid socket envelope") and bad_wall < 1.0 \
         and wall <= out["wall"] + base + 2.0
     return good, (f"long request {out['wall']:.3f} s (alone {alone:.3f} s) -> {show(out['reply'])!r}; "
-                  f"socket refusal while the Host was busy {bad_wall:.3f} s; honest read {wall:.3f} s "
+                  f"Host load pending at read: {loaded}; socket refusal while the Host was busy {bad_wall:.3f} s; honest read {wall:.3f} s "
                   f"({'answered' if ok else detail}), queued behind the long one")
 guarded("(b) a long Host request while an honest client reads",
         "socket refusal < 1 s while the Host is busy; honest read answered right after the long request",
         long_request)
 
 def queue_bound():
-    out = {}
+    out = {}; delivered = threading.Event()
     def slow():
-        out["reply"] = raw(long_body)
+        out["reply"] = raw(long_body, delivered=delivered)
     t = threading.Thread(target=slow); t.start()
-    time.sleep(0.3)
+    if not delivered.wait(30): raise RuntimeError("hostile queue blocker not delivered")
     replies = [None] * 40
     def one(i):
         replies[i] = raw(bytes([0]), timeout=120)
     ts = [threading.Thread(target=one, args=(i,)) for i in range(40)]
-    for x in ts: x.start(); time.sleep(0.005)
+    for x in ts: x.start()
+    loaded = t.is_alive()
     for x in ts: x.join()
     t.join()
     busy = sum(1 for r in replies if socket_refusal(r, "busy: host queue full"))
     answered = sum(1 for r in replies if r is not None and r[0] == 0)
-    good = busy >= 1 and answered >= 30 and busy + answered == 40
-    return good, f"40 describes behind a long request: {answered} answered, {busy} refused `busy: host queue full`"
+    named = out["reply"] is not None and out["reply"][0] == 255 and b"op 7" in out["reply"]
+    good = loaded and named and answered == 32 and busy == 8
+    return good, (f"40 describes behind a long request: {answered} answered, {busy} refused `busy: host queue full`; "
+                  f"Host load pending after submission: {loaded}; blocker -> {show(out['reply'])!r}")
 guarded("(b2) requests beyond the Host queue bound (32)",
         "each extra request refused `busy: host queue full` by name; the rest answered", queue_bound)
 
-# An op 7 object of 1M distinct keys (~12 MB): the duplicate-key scan was
-# quadratic in keys (a list), so this one public request held the Host for
-# longer than mini serve's 600 s deadline. It must now cost linear time.
-keys_body = bytes([7]) + struct.pack("<H", 6) + b"intent" + b'{"pad":{' + \
+# Keep the original million-key attack: the deliberate operation body bound
+# now refuses it before queuing. Separately fill the largest admitted object
+# with distinct keys; both the scan and honest read must complete under load.
+oversized_keys_body = AUTHOR_PREFIX + b'{"pad":{' + \
     b",".join(b'"k%d":0' % i for i in range(1_000_000)) + b"}}"
+key_fields = []; key_size = len(b'{"pad":{}}')
+while True:
+    field = b'"k%d":0' % len(key_fields)
+    added = len(field) + bool(key_fields)
+    if key_size + added > SOURCE_MAX: break
+    key_fields.append(field); key_size += added
+keys_body = full_author(b'{"pad":{' + b",".join(key_fields) + b"}}")
+key_count = len(key_fields)
+assert len(keys_body) - 1 == AUTHOR_BODY_MAX
+
 def many_keys():
-    out = {}
+    out = {}; delivered = threading.Event()
     def slow():
-        out["reply"], out["wall"] = timed(lambda: raw(keys_body))
+        out["reply"], out["wall"] = timed(lambda: raw(keys_body, delivered=delivered))
     t = threading.Thread(target=slow); t.start()
-    time.sleep(0.3)
+    if not delivered.wait(30): raise RuntimeError("hostile key frame not delivered")
+    loaded = t.is_alive()
     ok, wall, detail = honest_read()
     t.join()
-    latencies.append(("(b3) honest read behind a 1M-key object", wall))
+    latencies.append(("(b3) honest read behind a maximum admitted key object", wall))
     named = out["reply"] is not None and out["reply"][0] == 255 and b"op 7" in out["reply"]
-    return named and ok and out["wall"] < 60, \
-        (f"{len(keys_body)} byte body answered in {out['wall']:.3f} s -> {show(out['reply'])!r}; "
-         f"honest read {wall:.3f} s ({'answered' if ok else detail})")
-guarded("(b3) an op 7 object of 1M distinct keys",
-        "refused by name in linear time (< 60 s; the list scan took > 330 s offline); honest read answered after",
+    over, over_wall = timed(lambda: raw(oversized_keys_body))
+    over_named = socket_refusal(over, "author request body exceeds its bound")
+    good = loaded and named and ok and out["wall"] < 60 and wall <= out["wall"] + base + 2.0 \
+        and over_named and over_wall < 1.0
+    return good, \
+        (f"{len(keys_body)} byte admitted body ({key_count} distinct keys) answered in {out['wall']:.3f} s -> {show(out['reply'])!r}; "
+         f"Host load pending at read: {loaded}; honest read {wall:.3f} s ({'answered' if ok else detail}); "
+         f"1M-key body {len(oversized_keys_body)} bytes refused in {over_wall:.3f} s -> {show(over)!r}")
+guarded("(b3) maximum admitted distinct keys and the oversized 1M-key object",
+        "admitted keys refused by Host in < 60 s; honest read answered right after under load; 1M keys socket-refused by name < 1 s",
         many_keys)
 def duplicate_key():
     reply = raw(bytes([7]) + struct.pack("<H", 6) + b"intent" + b'{"a":"1","a":"2"}', timeout=60)
