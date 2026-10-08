@@ -1,4 +1,4 @@
-//! `mini-spk-broker serve CONFIG` — the root unix-socket broker for grain hosts.
+//! `mini-spk-broker serve CONFIG` — the operator unix-socket broker for grain hosts.
 //! `mini-spk-broker backup CONFIG OUT_DIR` — consistent copies of every grain volume.
 
 #[cfg(target_os = "linux")]

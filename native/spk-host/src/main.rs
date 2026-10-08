@@ -115,6 +115,12 @@ fn main() {
             Err(error) => { eprintln!("spk-host: resident bootstrap refused: {error}"); std::process::exit(1); }
         }
     }
+    if args.len()==3 && args[1]=="resident-validate" {
+        match minidregg_spk_host::resident_service::validate_config(Path::new(&args[2])) {
+            Ok(())=>return,
+            Err(error)=>{eprintln!("resident config refused: {error}");std::process::exit(1);}
+        }
+    }
     if args.len() == 3 && args[1] == "resident-run" {
         match minidregg_spk_host::resident_service::run(Path::new(&args[2])) {
             Ok(()) => return,

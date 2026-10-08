@@ -6,7 +6,7 @@ and the shape of the v4 failed-create retry that makes the repeat lawful.
 
 **Status, said plainly.** The v4 retry is source in this tree. What has run, and
 where, is in "Evidence" below. Nothing in this document was executed on the
-public node. On hbox the SPK broker runs as root, which is a tenancy defect
+public node. The historical hbox deployment used a root SPK broker, which is a tenancy defect
 (see "Tenancy findings"). The cutover for the live r2 world is written out at
 the end and has **not** been executed; the root decides when.
 
@@ -114,20 +114,36 @@ read-only (unit journals, attempt files); controls in the lane dir
 
 ## Tenancy findings
 
-- `mini-spk-broker serve` refuses to run unless euid is 0
-  (`native/spk-host/src/broker.rs`, "mini-spk-broker runs as root"), and
-  `spk-host resident-bootstrap` refuses unless root
-  (`resident_privilege.rs`). The broker writes `/run/systemd/system` and drives
-  the system manager. A broker as an unprivileged user is not a configuration
-  of this code; it is a redesign (per-session uids, an unprivileged launcher
-  with a root-held, minimal setuid helper).
-- The resident unit name is pinned by Mini as `mini-spk-a<app>-g<gen>.service`
-  with no Store or deployment identity. Two Stores on one host with the same
-  app id collide, and a scratch copy of a Store collides with its original
-  (the live r2 world already holds a failed system unit
-  `mini-spk-a8502-g4.service`). This is the K-SPK deployment-id defect named
-  in `deploy/spk-host/README.md`; it blocks any scratch replay of r2's app
-  lifecycle on hbox.
+The W3 source replaces the root broker/bootstrap with an operator broker under
+`systemctl --user`. Its 0600 operator socket and state live beneath a Store-named
+world root. `StoreId`/`ResidentUnit` validate the only resident name constructor;
+missing ids and a constructor that loses its id refuse before unit installation.
+User slices also lead with the Store id. The older finding of id-less names was
+already superseded in source before W3; current work makes construction checked.
+
+Volume privilege is deliberately split: one root-installed, one-shot helper
+has seven typed verbs and a root-owned registry binding caller uid, Store,
+deployment, grain path, quota and disjoint subordinate uids. Cross-world volume
+paths refuse. Separate loop ext4, nosuid/nodev/noatime, quota, retained exact
+preimage checks and durable FIFREEZE/FITHAW custody remain. No root broker or
+root daemon is required. `newuidmap`/`newgidmap` establish distinct app identities;
+parser/reaper/app retain the capability, group, no_new_privs and seccomp floor.
+Read-only `volumes-status` enumerates root-owned registrations for checkpoint
+coverage; every running app still requires its complete settled pause.
+
+The native grain author emits resident config and runs the resident's own decoder
+before installing a unit; `prepare-resident-config.sh` delegates to that author.
+The v1 broker config/global socket refuse; re-emit v2 broker configs and native
+profiles for a fresh deployment. [Deployment and acceptance](../deploy/spk-host/USER-TENANCY.md)
+use one installer with explicit root setup/cleanup. On burst3-a, j475058235
+passed both scratch worlds under uid 1001: install, HTTP, stop/restart and second
+instances, disjoint units/sockets/subuids, config decoding and process floors.
+j477802845 planted an id-less constructor and received
+`unit-name-collision: rendered resident name lost store identity`; the helper
+plant received `volume-helper: cross-world-volume-path refused` for both a
+volume request and `volumes-status`. The final run also exercised unmount/remount,
+root volume enumeration and freeze/export. Scratch setup
+was removed with checked cleanup. Live r2 and public nodes remain untouched.
 
 ## Cutover for the live r2 world (NOT executed; the root decides)
 

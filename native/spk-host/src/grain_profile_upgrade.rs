@@ -321,10 +321,10 @@ fn stopped(store: &str, state_root: &Path) -> io::Result<()> {
                     run.generation
                 )));
             }
-            let unit = broker::resident_unit(store, &app, &run.generation.to_string());
+            let unit = broker::resident_unit(store, &app, &run.generation.to_string())?;
             let output = crate::os::systemctl()
                 .args([
-                    "--system",
+                    "--user",
                     "show",
                     &unit,
                     "--property=ActiveState",

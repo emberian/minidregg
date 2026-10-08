@@ -1,4 +1,4 @@
-//! Root checks the resident's retained settled pause before live volume copying.
+//! The operator checks retained settled pauses before the typed helper copies volumes.
 use super::*;
 use crate::checkpoint_control::{Intent, Request as PauseRequest};
 #[derive(Deserialize)]
@@ -135,7 +135,7 @@ fn checked(broker: &Broker, input: &Path) -> io::Result<Checked> {
             &[base[0], base[1], base[2], base[3], &gen, "record.json"],
         )?;
         let record: crate::hostd::Record = serde_json::from_slice(&record_bytes)?;
-        let unit = resident_unit(&entry.store, &b.app, &b.generation);
+        let unit = resident_unit(&entry.store, &b.app, &b.generation)?;
         if format!("{:x}", Sha256::digest(&resident_bytes)) != b.resident_config_sha256
             || format!("{:x}", Sha256::digest(&record_bytes)) != intent.journal_sha256
             || resident["miniConfigSha256"] != b.mini_config_sha256
@@ -160,12 +160,10 @@ fn checked(broker: &Broker, input: &Path) -> io::Result<Checked> {
     }
     // Every running registered app must be paused. Stopped apps remain covered
     // by the original exact stopped-volume path.
-    for entry in fs::read_dir(broker.root().join("volumes"))? {
-        let name = entry?.file_name().to_string_lossy().into_owned();
-        if let Some(name) = name.strip_suffix(".conf") {
-            let (store, app) = name
-                .split_once('-')
-                .ok_or_else(|| invalid("volume registration invalid"))?;
+    for volume in crate::volume_helper::volumes_status(&broker.config.volume_helper,&broker.config.store)? {
+            if !volume.settled {return Err(invalid("checkpoint volume has unresolved freeze obligation"));}
+            let store=volume.request.store.as_str();
+            let app=volume.request.grain.as_str();
             if !broker.app_units_active(store, app)?.is_empty()
                 && !seen.contains(&(store.into(), app.into()))
             {
@@ -173,7 +171,6 @@ fn checked(broker: &Broker, input: &Path) -> io::Result<Checked> {
                     "running app lacks a complete settled checkpoint pause",
                 ));
             }
-        }
     }
     let units: Vec<_> = pins.iter().map(|pin| pin["unit"].clone()).collect();
     Ok(Checked {
@@ -182,16 +179,16 @@ fn checked(broker: &Broker, input: &Path) -> io::Result<Checked> {
     })
 }
 pub(super) fn check(config: &Path, input: &Path) -> io::Result<Value> {
-    if unsafe { libc::geteuid() } != 0 {
-        return Err(invalid("checkpoint check runs as root"));
+    if unsafe { libc::geteuid() } == 0 {
+        return Err(invalid("checkpoint check requires the unprivileged operator"));
     }
     let broker = Broker::load(config)?;
     let checked = checked(&broker, input)?;
     Ok(checked.pins)
 }
 pub(super) fn backup(config: &Path, out: &Path, input: &Path) -> io::Result<Value> {
-    if unsafe { libc::geteuid() } != 0 {
-        return Err(invalid("checkpoint backup runs as root"));
+    if unsafe { libc::geteuid() } == 0 {
+        return Err(invalid("checkpoint backup requires the unprivileged operator"));
     }
     let broker = Broker::load(config)?;
     let checked = checked(&broker, input)?;
@@ -213,7 +210,7 @@ pub(super) fn backup(config: &Path, out: &Path, input: &Path) -> io::Result<Valu
         }
     }
     manifest["checkpointPauseCheck"] = checked.pins;
-    write_root_text(
+    write_operator_text(
         &out.join("checkpoint-grains-backup.json"),
         &serde_json::to_string_pretty(&manifest)?,
         0o600,

@@ -7,12 +7,11 @@ pub(super) fn resolve(root: &Path, configured: Option<&Path>) -> io::Result<Path
     if !custody::canonical(root) {
         return Err(invalid("broker grains root must be canonical"));
     }
-    let socket = configured.unwrap_or_else(|| Path::new(SOCKET));
-    if socket != Path::new(SOCKET) && socket != root.join("broker.sock") {
-        return Err(invalid(
-            "broker socket must be canonical legacy or grains-root broker.sock",
-        ));
-    }
+    let store=root.file_name().and_then(|n|n.to_str()).filter(|id|store_key(id))
+        .ok_or_else(||invalid("broker endpoint requires store id in world root"))?;
+    let expected=root.join(format!("runtime-{store}")).join("broker.sock");
+    let socket=configured.unwrap_or(&expected);
+    if socket!=expected { return Err(invalid("broker socket must be in the store-specific runtime directory")); }
     if !socket
         .as_os_str()
         .as_encoded_bytes()
@@ -28,7 +27,7 @@ pub(super) fn resolve(root: &Path, configured: Option<&Path>) -> io::Result<Path
 }
 fn socket_custody(path: &Path, uid: u32) -> io::Result<()> {
     let meta = fs::symlink_metadata(path)?;
-    if !meta.file_type().is_socket() || meta.uid() != uid || meta.mode() & 0o7777 != 0o660 {
+    if !meta.file_type().is_socket() || meta.uid() != uid || meta.mode() & 0o7777 != 0o600 {
         return Err(invalid("broker socket custody refused"));
     }
     Ok(())
@@ -37,7 +36,7 @@ fn connect(path: &Path, uid: u32) -> io::Result<UnixStream> {
     socket_custody(path, uid)?;
     let stream = UnixStream::connect(path)?;
     if peer_credentials(&stream)?.uid != uid {
-        return Err(invalid("broker peer is not root"));
+        return Err(invalid("broker peer is not the operator"));
     }
     Ok(stream)
 }
@@ -86,29 +85,29 @@ fn selected_call(root: &Path, path: &Path, request: &Request, uid: u32) -> io::R
 }
 pub(super) fn call_at(root: &Path, socket: Option<&Path>, request: &Request) -> io::Result<Value> {
     let path = resolve(root, socket)?;
-    custody::root_ancestors(root)?;
-    let meta = fs::symlink_metadata(root)?;
-    if !meta.is_dir() || !crate::os::root_owner(meta.uid()) || meta.mode() & 0o022 != 0 {
-        return Err(invalid("broker grains root custody refused"));
-    }
-    custody::root_ancestors(&path)?;
-    if path == Path::new(SOCKET) {
-        // Preserve the legacy protocol for an unchanged canonical installation.
-        exchange(connect(&path, crate::os::root_uid())?, request)
-    } else {
-        selected_call(root, &path, request, crate::os::root_uid())
-    }
+    protected_chain(root)?;
+    protected_chain(path.parent().ok_or_else(||invalid("broker runtime parent"))?)?;
+    let uid=unsafe{libc::geteuid()};
+    let parent=fs::symlink_metadata(path.parent().unwrap())?;
+    if !parent.is_dir() || parent.uid()!=uid || parent.mode()&0o7777!=0o700 { return Err(invalid("broker runtime directory custody refused")); }
+    selected_call(root,&path,request,uid)
 }
-pub(super) fn call_legacy(request: &Request) -> io::Result<Value> {
-    custody::root_ancestors(Path::new(SOCKET))?;
-    exchange(connect(Path::new(SOCKET), crate::os::root_uid())?, request)
+fn protected_chain(path: &Path)->io::Result<()> {
+    for ancestor in path.ancestors() {
+        let meta=fs::symlink_metadata(ancestor)?;
+        if !meta.is_dir() || meta.file_type().is_symlink() || meta.mode()&0o022!=0
+            || (!crate::namespace_identity::root_owned(ancestor,&meta) && meta.uid()!=unsafe{libc::geteuid()}) {
+            return Err(invalid("broker endpoint ancestor custody refused"));
+        }
+    }
+    Ok(())
 }
 
-/// A root-private lifetime lock serializes restart/stale socket recovery. Even a
+/// An operator-private lifetime lock serializes restart/stale socket recovery. Even a
 /// pre-lock legacy broker is detected by a successful connection and not unlinked.
 pub(super) fn bind(path: &Path, gid: u32) -> io::Result<(UnixListener, File)> {
-    custody::root_ancestors(path)?;
-    bind_owned(path, gid, crate::os::root_uid())
+    protected_chain(path.parent().ok_or_else(||invalid("runtime parent"))?)?;
+    bind_owned(path, gid, unsafe{libc::geteuid()})
 }
 fn bind_owned(path: &Path, gid: u32, owner: u32) -> io::Result<(UnixListener, File)> {
     let lock_path = path.with_extension("sock.lock");
@@ -143,8 +142,9 @@ fn bind_owned(path: &Path, gid: u32, owner: u32) -> io::Result<(UnixListener, Fi
         Err(error) => return Err(error),
     }
     let listener = UnixListener::bind(path)?;
-    std::os::unix::fs::chown(path, Some(owner), Some(gid))?;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o660))?;
+    let meta=fs::symlink_metadata(path)?;
+    if meta.uid()!=owner || meta.gid()!=gid { return Err(invalid("operator socket ownership differs")); }
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
     Ok((listener, lock))
 }
 
@@ -167,7 +167,7 @@ mod tests {
         fn socket(&self, name: &str) -> (PathBuf, UnixListener) {
             let path = self.0.join(name);
             let listener = UnixListener::bind(&path).unwrap();
-            fs::set_permissions(&path, fs::Permissions::from_mode(0o660)).unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
             (path, listener)
         }
     }
@@ -286,19 +286,14 @@ mod tests {
     }
     #[test]
     fn endpoint_paths_and_custody_fail_closed_without_fallback() {
-        let root = Path::new("/var/lib/grains");
-        assert_eq!(resolve(root, None).unwrap(), Path::new(SOCKET));
-        assert_eq!(
-            resolve(root, Some(Path::new("/var/lib/grains/broker.sock"))).unwrap(),
-            root.join("broker.sock")
-        );
-        for bad in [
-            "/run/other.sock",
-            "/var/lib/other/broker.sock",
-            "/var/lib/grains/../broker.sock",
-        ] {
-            assert!(resolve(root, Some(Path::new(bad))).is_err());
+        let root = Path::new("/var/lib/mini-spk-worlds/0123456789abcdef");
+        let expected=root.join("runtime-0123456789abcdef/broker.sock");
+        assert_eq!(resolve(root,None).unwrap(),expected);
+        assert_eq!(resolve(root,Some(&expected)).unwrap(),expected);
+        for bad in ["/run/mini-spk-broker.sock","/var/lib/mini-spk-worlds/fedcba9876543210/runtime-fedcba9876543210/broker.sock","/var/lib/mini-spk-worlds/0123456789abcdef/broker.sock"] {
+            assert!(resolve(root,Some(Path::new(bad))).is_err());
         }
+        assert!(resolve(Path::new("/var/lib/grains"),None).is_err());
         let fixture = Fixture::new();
         let (socket, _listener) = fixture.socket("broker.sock");
         let uid = unsafe { libc::geteuid() };

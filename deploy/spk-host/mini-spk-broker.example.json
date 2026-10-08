@@ -1,11 +1,15 @@
 {
-  "protocol": "mini-spk-broker-config-v1",
-  "grainsRoot": "/var/lib/mini/grains",
-  "operatorUser": "mini",
+  "protocol": "mini-spk-broker-config-v2",
+  "store": "0123456789abcdef",
+  "grainsRoot": "/var/lib/mini-spk-worlds/0123456789abcdef",
+  "spkRoot": "/var/lib/mini-spk-worlds/0123456789abcdef/spk",
+  "brokerSocket": "/var/lib/mini-spk-worlds/0123456789abcdef/runtime-0123456789abcdef/broker.sock",
+  "operatorUser": "ember",
   "unitPrefix": "mini",
-  "spkHost": "/usr/local/libexec/minidregg/spk-host",
+  "spkHost": "/home/ember/.local/libexec/spk-host",
   "spkHostSha256": "<sha256 of the installed spk-host>",
-  "ingestHelper": "/usr/local/libexec/minidregg/spk-ingest",
-  "volumeHelper": "/usr/local/libexec/minidregg/spk-var-volume",
-  "appUids": [961, 962, 963, 964]
+  "ingestHelper": "/home/ember/.local/libexec/spk-ingest",
+  "volumeHelper": "/usr/local/libexec/mini-spk-volume-helper",
+  "appUids": [165536, 165537, 165538, 165539],
+  "residentHomeReadOnlyPaths": []
 }

@@ -133,3 +133,9 @@ mod checkpoint_control;
 mod os;
 #[cfg(all(target_os = "linux", feature = "fixture-os"))]
 pub mod fixture_os;
+
+#[cfg(target_os = "linux")]
+pub mod volume_helper;
+
+#[cfg(target_os = "linux")]
+mod namespace_identity;
