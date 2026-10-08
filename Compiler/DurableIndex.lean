@@ -669,16 +669,23 @@ def Represents (rows : List Bool → Option Row) (root : Digest)
     (m : List (IndexKey × List UInt8)) : Prop :=
   root = rootOf m ∧ WF 520 (entries bitsOf m) ∧ RowsRepresent rows [] 520 (entries bitsOf m)
 
-/-- THE remaining primitive obligation, over the deployed `set`: every successful
-insert/update/delete preserves the canonical root AND reachable rows. The
-collision alternative is necessary because `walk` treats an empty digest as
-empty regardless of rows. This contract is not assumed by an axiom. -/
-def SetPreserves (rows : List Bool → Option Row) (root : Digest)
+/-- THE remaining primitive obligation, parameterized by the set implementation:
+it must be the deployed `set`, and every successful insert/update/delete must
+preserve the canonical root AND reachable rows. The implementation pin prevents
+an always-refusing or write-dropping substitute from satisfying the preservation
+implication vacuously. The collision alternative is necessary because `walk`
+treats an empty digest as empty regardless of rows. This contract is not assumed
+by an axiom. -/
+def SetPreserves
+    (setFn : (List Bool → Option Row) → Digest → IndexKey → Option (List UInt8) →
+      Except String (Digest × List (List Bool × Row)))
+    (rows : List Bool → Option Row) (root : Digest)
     (m : List (IndexKey × List UInt8)) (k : IndexKey) (value : Option (List UInt8)) : Prop :=
-  Represents rows root m →
-  ∀ (next : Digest) (written : List (List Bool × Row)),
-    set rows root k value = .ok (next, written) →
-    Represents (overlay rows written) next (modelSet m k value) ∨ Collision dig
+  setFn rows root k value = set rows root k value ∧
+    (Represents rows root m →
+    ∀ (next : Digest) (written : List (List Bool × Row)),
+      setFn rows root k value = .ok (next, written) →
+      Represents (overlay rows written) next (modelSet m k value) ∨ Collision dig)
 
 /-- Merging the actual write batches preserves the same Store view as applying
 them sequentially, including repeated writes of the same prefix. -/
@@ -708,7 +715,9 @@ theorem represents_empty (rows : List Bool → Option Row) : Represents rows emp
 /-- The primitive contract is proved for insertion/deletion in an empty trie,
 for arbitrary keys, values and stale Store rows. -/
 theorem set_preserves_empty (rows : List Bool → Option Row) (k : IndexKey)
-    (value : Option (List UInt8)) : SetPreserves rows emptyDigest [] k value := by
+    (value : Option (List UInt8)) : SetPreserves set rows emptyDigest [] k value := by
+  constructor
+  · rfl
   intro _ next written ok
   left
   cases value with
@@ -731,7 +740,9 @@ theorem set_preserves_empty (rows : List Bool → Option Row) (k : IndexKey)
 member. This covers the deployed compression-to-empty path without a model setter. -/
 theorem set_preserves_singleton (rows : List Bool → Option Row) (root : Digest)
     (k : IndexKey) (old : List UInt8) (value : Option (List UInt8)) :
-    SetPreserves rows root [(k, old)] k value := by
+    SetPreserves set rows root [(k, old)] k value := by
+  constructor
+  · rfl
   intro before next written ok
   obtain ⟨rootEq, _, row⟩ := before
   have rootEq' : root = dig (.leaf k old) := rootEq
@@ -769,6 +780,24 @@ theorem set_preserves_singleton (rows : List Bool → Option Row) (root : Digest
 
 #assert_axioms set_preserves_empty
 #assert_axioms set_preserves_singleton
+
+/-- A deliberately wrong setter that acknowledges every request but drops the
+write. It is an executable refuting instance for the parameterized primitive
+contract, not a hypothesis-ledger allowlist entry. -/
+def dropWriteSet (_rows : List Bool → Option Row) (root : Digest) (_k : IndexKey)
+    (_value : Option (List UInt8)) : Except String (Digest × List (List Bool × Row)) :=
+  .ok (root, [])
+
+/-- The write-dropping setter does not satisfy the primitive contract, already
+on an insertion into the empty trie. -/
+theorem dropWriteSet_not_preserves :
+    ¬ SetPreserves dropWriteSet (fun _ => none) emptyDigest [] ⟨0, 0, 0⟩ (some []) := by
+  intro preserves
+  have same := preserves.1
+  simp [dropWriteSet, set, openingOf, walk, empty_absent, Opening.claims, rebuild,
+    Sub.digest, bind, pure, Except.bind, Except.pure] at same
+
+#assert_axioms dropWriteSet_not_preserves
 
 theorem lookup_entries (m : List (IndexKey × List UInt8)) (k : IndexKey) :
     Theory.AuthTrie.lookup (entries bitsOf m) k = mapLookup m k := by
@@ -843,7 +872,7 @@ end IndexRows
 /-- Arbitrary insert/update/delete batches preserve the row/root representation
 UNDER the explicit single-set contract. This is induction over deployed `setAll`. -/
 theorem setAll_preserves
-    (step : ∀ rows root m k value, SetPreserves rows root m k value)
+    (step : ∀ rows root m k value, SetPreserves set rows root m k value)
     (changes : List (IndexKey × Option (List UInt8)))
     (rows : List Bool → Option Row) (root : Digest) (m : List (IndexKey × List UInt8))
     (before : Represents rows root m) (next : Digest) (written : List (List Bool × Row))
@@ -864,7 +893,7 @@ theorem setAll_preserves
           | error e => simp [setAll, first, tail, bind, Except.bind] at ok
           | ok result =>
               obtain ⟨final, late⟩ := result
-              rcases step rows root m k value before mid early first with after | collision
+              rcases (step rows root m k value).2 before mid early first with after | collision
               · have finish := ih (overlay rows early) mid (modelSet m k value) after final late tail
                 simp only [setAll, first, tail, bind, pure, Except.bind, Except.pure, Except.ok.injEq, Prod.mk.injEq] at ok
                 obtain ⟨rfl, rfl⟩ := ok
@@ -875,7 +904,7 @@ theorem setAll_preserves
 single-set theorem is explicit; freshness is in the logical history, just as
 in `changes_exact`. This is not yet a proof that every committed Store is maintained. -/
 theorem maintained_apply
-    (step : ∀ rows root m k value, SetPreserves rows root m k value)
+    (step : ∀ rows root m k value, SetPreserves set rows root m k value)
     (records : List Kernel.DurableReceiver.IntentRecord)
     (record : Kernel.DurableReceiver.IntentRecord) (rows : List Bool → Option Row)
     (root : Digest) (before : Maintained records rows root)

@@ -1825,7 +1825,7 @@
     {
       "module": "Compiler.DurableHistory",
       "path": "Compiler/DurableHistory.lean",
-      "sha256": "4d401b079d725408a2a947bfddd3543bbaef5f468ebef155424983240ca79705",
+      "sha256": "8b06e243c2ad92d594d50e3577c7b609b68376f5c654297158bce43eee6c6c12",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -1846,7 +1846,7 @@
     {
       "module": "Compiler.DurableIndex",
       "path": "Compiler/DurableIndex.lean",
-      "sha256": "f1926a72413402286c590890e648ae86df8384ffdd33008193666bacea63dfa3",
+      "sha256": "20ff0b603bbeee93f11ab2ed56c762bdd900b7e14d740b8dc6e2c31808b1043e",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -6998,7 +6998,7 @@
     {
       "module": "Kernel.ObjectiveActivityReceiver",
       "path": "Kernel/ObjectiveActivityReceiver.lean",
-      "sha256": "8835fc5a5b8aa1629766000d8a1c65a4c1c4a9ee4a0fe1f021d7e1891ecd4ec3",
+      "sha256": "73ad22aa8472d6c8840c575ed81b63e3df8a04fc4632ef11ed5d34bb28a8a48c",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -10512,7 +10512,7 @@
     {
       "module": "TokenCensus",
       "path": "TokenCensus.lean",
-      "sha256": "08d4c159f76dda46cd36cdbc5722e347011af1a51d10b8daa312f91a05a7f16d",
+      "sha256": "6acf8a2ff61c690e8139573f1f2d5462d8abe315e0080d84fc5aea68a1e1fc46",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
