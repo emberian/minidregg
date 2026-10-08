@@ -2087,7 +2087,7 @@ def clockSubmitLoaded (config : Config) (opened : Opened config) (bytes : List U
 /-- The public view of the clock: its value and the two roots a tick pins. -/
 def clockViewLoaded (config : Config) (opened : Opened config) : Except String ClockCellDomain.View := do
   let clock ← need "clock cell unavailable" (ClockCellDomain.load config.deployment opened.durable.snapshot)
-  pure ⟨clock.cell.root, opened.authority.snapshot.cell.root, clock.clock⟩
+  pure ⟨clock.cell.root, opened.authority.snapshot.cell.root, clock.clock, clock.maxStepSeconds⟩
 
 /-- Session operation 112 (PAY P3b): the public enrollment view — the hour of
 the deployment clock and every self-enrolled Mini key with its subject, ssh

@@ -71,6 +71,9 @@ structure Loaded (deployment : CanonicalCellRegistry.Deployment) (physical : Phy
   private mk ::
   cell : ClockCell.Cell
   clock : ClockCell.Clock
+  maxStepSeconds : Nat
+  boundExact : ClockCell.maxStepOf cell.logical = some maxStepSeconds
+  boundPositive : 0 < maxStepSeconds
   observed : physical.canonicalBytes (cellIdOf deployment) = cellBytes cell
   clockExact : ClockCell.clockOf cell.logical = some clock
 
@@ -81,14 +84,24 @@ def load (deployment : CanonicalCellRegistry.Deployment) (physical : PhysicalSna
   | some cell =>
       match present : ClockCell.clockOf cell.logical with
       | none => none
-      | some clock => some ⟨cell, clock, (decodeCell_canonical decoded).symm, present⟩
+      | some clock =>
+          match bounded : ClockCell.maxStepOf cell.logical with
+          | none => none
+          | some bound =>
+              if positive : 0 < bound then
+                some ⟨cell, clock, bound, bounded, positive,
+                  (decodeCell_canonical decoded).symm, present⟩
+              else none
 
 /-- Satisfiable pole: the clock the snapshot holds is loaded exactly. -/
 theorem load_exact (deployment : CanonicalCellRegistry.Deployment) (physical : PhysicalSnapshot)
     (cell : ClockCell.Cell) (clock : ClockCell.Clock)
     (holds : physical.canonicalBytes (cellIdOf deployment) = cellBytes cell)
-    (present : ClockCell.clockOf cell.logical = some clock) :
-    ∃ loaded, load deployment physical = some loaded ∧ loaded.cell = cell ∧ loaded.clock = clock := by
+    (present : ClockCell.clockOf cell.logical = some clock)
+    (bound : Nat) (bounded : ClockCell.maxStepOf cell.logical = some bound)
+    (positive : 0 < bound) :
+    ∃ loaded, load deployment physical = some loaded ∧ loaded.cell = cell ∧
+      loaded.clock = clock ∧ loaded.maxStepSeconds = bound := by
   unfold load
   split
   · rename_i decoded
@@ -103,7 +116,18 @@ theorem load_exact (deployment : CanonicalCellRegistry.Deployment) (physical : P
       cases absent
     · rename_i value same
       rw [present] at same
-      exact ⟨_, rfl, rfl, (Option.some.inj same).symm⟩
+      cases Option.some.inj same
+      split
+      · rename_i absentBound
+        rw [bounded] at absentBound
+        cases absentBound
+      · rename_i loadedBound sameBound
+        rw [bounded] at sameBound
+        cases Option.some.inj sameBound
+        split
+        · exact ⟨_, rfl, rfl, rfl, rfl⟩
+        · rename_i notPositive
+          exact absurd positive notPositive
 
 /-- Refuting pole: an identifier that holds no live clock cell loads nothing. -/
 theorem load_refuses (deployment : CanonicalCellRegistry.Deployment) (physical : PhysicalSnapshot)
@@ -159,6 +183,7 @@ structure View where
   clockRoot : Digest
   authorityRoot : Digest
   clock : ClockCell.Clock
+  maxStepSeconds : Nat
   deriving DecidableEq, Repr
 
 /-- info: 'Minidregg.Kernel.ClockCellDomain.decodeCell_bytes' depends on axioms: [propext, Classical.choice, Quot.sound] -/

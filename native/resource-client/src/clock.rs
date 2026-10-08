@@ -12,7 +12,12 @@
 //! signing plan (op 126), signs its header with the workspace key, assembles (op 127)
 //! and submits (op 128). The slot is carried forward from the view unless `--slot` is
 //! given. The Host decides the rest: the capability and the clock law, the pinned roots,
-//! and that time only moves forward (`ClockTickReceiver.clock_monotone`).
+//! the genesis-fixed maxStepSeconds, and that time only moves forward (`ClockTickReceiver.clock_monotone`).
+//!
+//! Without --now, the ticker catches up to wall time with successive bounded
+//! proposals, reading the bound from the Host's clock view. --catch-up-to SECONDS
+//! chooses a fixed target for catch-up; --now proposes exactly that value (including
+//! an excessive step, which Lean refuses clockStepExceeded). Lean is the sole receiving judge.
 //!
 //! Attempts are ephemeral. The signed ingress is written to `DIR/clock-attempts/` before
 //! it is submitted, and deleted once its outcome is definite (confirmed or refused);
@@ -244,12 +249,25 @@ fn tick(
     now: Option<String>,
     slot: Option<String>,
     abandon: bool,
+    catch_up: bool,
 ) -> Result<Value> {
     let resolved = resolve_pending(ws)?;
     let current = view(ws)?;
     let now = match now {
         Some(now) => now,
         None => unix_now()?.to_string(),
+    };
+    // A bounded candidate is only a proposal. The Lean receiver is the sole judge;
+    // explicit --now remains unmodified so it can be refused by name.
+    let now = if catch_up {
+        let target: u64 = now.parse().map_err(|_| "catch-up target exceeds u64")?;
+        let current_now: u64 = field(&current, "now")?.parse()
+            .map_err(|_| "clock view now exceeds u64")?;
+        let bound: u64 = field(&current, "maxStepSeconds")?.parse()
+            .map_err(|_| "clock view step bound exceeds u64")?;
+        target.min(current_now.saturating_add(bound)).to_string()
+    } else {
+        now
     };
     let slot = slot.unwrap_or(field(&current, "slot")?.to_string());
     let command = author(
@@ -344,10 +362,32 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 (None, None) => return Err("--capability is required outside a clock workspace".into()),
             };
             let now = decimal_arg(&mut args, "now")?;
+            let catch_up_to = decimal_arg(&mut args, "catch-up-to")?;
+            if now.is_some() && catch_up_to.is_some() {
+                return Err("--now and --catch-up-to are mutually exclusive".into());
+            }
             let slot = decimal_arg(&mut args, "slot")?;
             let abandon = bool_arg(&mut args, "abandon-after-submit")?;
             args.finish()?;
-            tick(&ws, &capability, now, slot, abandon)?
+            if now.is_some() {
+                tick(&ws, &capability, now, slot, abandon, false)?
+            } else {
+                let target = catch_up_to.unwrap_or(unix_now()?.to_string());
+                let mut steps = Vec::new();
+                loop {
+                    let mut outcome = tick(&ws, &capability, Some(target.clone()),
+                        slot.clone(), abandon, true)?;
+                    let confirmed = outcome.get("type").and_then(Value::as_str) == Some("confirmed");
+                    let asserted = outcome.get("asserted").cloned();
+                    steps.push(asserted.clone());
+                    let reached = asserted.as_ref().and_then(|v| v.get("now"))
+                        .and_then(Value::as_str) == Some(target.as_str());
+                    if !confirmed || reached {
+                        outcome["catchUpTicks"] = json!(steps);
+                        break outcome;
+                    }
+                }
+            }
         }
         _ => return Err("clock action must be init, tick or view".into()),
     };

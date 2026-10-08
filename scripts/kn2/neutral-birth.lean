@@ -81,6 +81,8 @@ def genesis (creatorKey : List UInt8) (factory : Minidregg.Pred.Pred) : NativeHo
   meterAllowance := fun _ => 10000000
   clockTickers := []
   tailBound := 1000
+  clockGenesisNow := 0
+  clockMaxStepSeconds := 300
 
 /-- The newborn: one empty content cell at 7001, owner 7; neutral (no room, no kind). -/
 def born : Minidregg.Verify.ResourceReserveBirthFixture.Born :=

@@ -93,6 +93,8 @@ def genesis (creatorKey ownerKey : List UInt8) (factory : Minidregg.Pred.Pred) :
   meterAllowance := fun _ => 10000000
   clockTickers := []
   tailBound := 1000
+  clockGenesisNow := 0
+  clockMaxStepSeconds := 300
 
 
 def describe : ResourceBirthReceiver.Result → String
