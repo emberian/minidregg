@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+# host-tee v2: frame-level recording proxy in front of the real minidregg-host (stdio mode).
+# env: TEE_REAL_HOST, TEE_DIR. Records every request/reply, the host config, and a sqlite
+# snapshot of the config's store whenever its head changed (key cfg-hash/height).
+import os, sys, struct, subprocess, hashlib, json, sqlite3, fcntl
+REAL = os.environ['TEE_REAL_HOST']; OUT = os.environ['TEE_DIR']
+os.makedirs(OUT, exist_ok=True)
+if 'stdio' not in sys.argv[1:3]:
+    os.execv(REAL, [REAL] + sys.argv[1:])
+cfgbytes = open(sys.argv[1], 'rb').read()
+cfgh = hashlib.sha256(cfgbytes).hexdigest()[:16]
+cfgpath = os.path.join(OUT, 'cfg-%s.json' % cfgh)
+if not os.path.exists(cfgpath): open(cfgpath, 'wb').write(cfgbytes)
+try: STORE = json.loads(cfgbytes)['storageRoot']
+except Exception: STORE = None
+def next_seq():
+    p = os.path.join(OUT, 'seq'); fd = os.open(p, os.O_RDWR | os.O_CREAT)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    b = os.read(fd, 20); n = int(b or b'0') + 1
+    os.lseek(fd, 0, 0); os.ftruncate(fd, 0); os.write(fd, str(n).encode()); os.close(fd)
+    return n
+def head():
+    if not STORE: return None
+    db = os.path.join(STORE, 'forward-link.sqlite3')
+    if not os.path.exists(db): return None
+    try:
+        c = sqlite3.connect('file:%s?mode=ro' % db, uri=True, timeout=5)
+        r = c.execute('select max(height) from durable_log').fetchone()[0]; c.close(); return r or 0
+    except Exception: return None
+def snap():
+    h = head()
+    if h is None: return None
+    name = 'snap-%s-%d.sqlite3' % (cfgh, h)
+    d = os.path.join(OUT, name)
+    if not os.path.exists(d):
+        a = sqlite3.connect('file:%s?mode=ro' % os.path.join(STORE, 'forward-link.sqlite3'), uri=True, timeout=5)
+        b = sqlite3.connect(d + '.tmp'); a.backup(b); b.close(); a.close(); os.rename(d + '.tmp', d)
+        try:
+            import shutil; shutil.copyfile(STORE + '.head-anchor', d + '.anchor')
+        except Exception as e: open(os.path.join(OUT, 'anchor-errors.txt'), 'a').write(repr(e) + '\n')
+    return name
+p = subprocess.Popen([REAL] + sys.argv[1:], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+def rd(s, n):
+    b = b''
+    while len(b) < n:
+        c = s.read(n - len(b))
+        if not c: return None
+        b += c
+    return b
+sin = sys.stdin.buffer
+while True:
+    h = rd(sin, 4)
+    if h is None: break
+    n = struct.unpack('<I', h)[0]
+    body = rd(sin, n)
+    if body is None: break
+    seq = next_seq()
+    try: sn = snap()
+    except Exception as e: sn = None
+    p.stdin.write(h + body); p.stdin.flush()
+    rh = rd(p.stdout, 4)
+    if rh is None: break
+    rn = struct.unpack('<I', rh)[0]; rb = rd(p.stdout, rn)
+    open(os.path.join(OUT, 'req-%06d.bin' % seq), 'wb').write(body)
+    open(os.path.join(OUT, 'rep-%06d.bin' % seq), 'wb').write(rb)
+    json.dump({'seq': seq, 'cfg': cfgh, 'snap': sn, 'headAfter': head()}, open(os.path.join(OUT, 'req-%06d.meta' % seq), 'w'))
+    sys.stdout.buffer.write(rh + rb); sys.stdout.buffer.flush()
+p.stdin.close(); p.wait()
