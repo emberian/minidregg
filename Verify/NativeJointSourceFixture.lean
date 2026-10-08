@@ -99,7 +99,9 @@ def genesis (config : NativeHost.Config) (alice bob : List UInt8) :
     factoryController := ⟨⟨7⟩, ⟨43⟩⟩
     meterAllowance := fun _ => 10000000
     clockTickers := []
-    tailBound := 10000 }
+    tailBound := 10000
+    clockGenesisNow := 0
+    clockMaxStepSeconds := 300 }
 
 def derive (root : System.FilePath) (helpers : Helpers) (context : Context)
     (alice bob : List UInt8) : IO (NativeHostGenesis.Built

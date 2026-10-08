@@ -13,7 +13,9 @@
 # under its genesis C_tick; the law is an ordinary resource law over
 # `clock/now`, judged by the Host.
 #
-# Rows 1-9 are K-CLOCK's, with the clock subject ticking: the genesis clock is 0;
+# All small timestamps below are offsets from the explicit genesis unix seed.
+# The bound is 300 seconds. The previous 0-to-wall jump is refused as excessive.
+# Rows 1-9 are K-CLOCK's, with the clock subject ticking:
 # a resource whose law is `any [not (verb 2), leSlotsOff field/5/after clock/now 0]`
 # is created; writing 100 before any tick is refused by the law at admission; the
 # clock subject ticks 100 and the view reads now=100; the byte-identical write is
@@ -56,6 +58,8 @@ PASS=0 TOTAL=0
 CONTROL=$(jq -r .factoryControllerCapability "$JOURNEY_WORLD/genesis.json")
 CLOCK_WS=$JOURNEY_WORLD/clock
 OBSERVER_WS=$JOURNEY_WORLD/observer
+ORIGIN=$(jq -er .clockGenesisNow "$JOURNEY_WORLD/genesis.json")
+BOUND=$(jq -er .clockMaxStepSeconds "$JOURNEY_WORLD/genesis.json")
 C_TICK=$(jq -r '.clockTickers[0].capability' "$JOURNEY_WORLD/genesis.json")
 CLOCK_SUBJECT=$(jq -r '.clockTickers[0].subject' "$JOURNEY_WORLD/genesis.json")
 for ws in "$CLOCK_WS" "$OBSERVER_WS"; do
@@ -107,7 +111,7 @@ write_req() {  # write_req VALUE : create field 5 of `timed`
 }
 attempt_write() {  # attempt_write ID VALUE -> rc 0 iff admitted and installed
   write_req "$2" >"$REQ/$1.json"
-  run "$1-propose" "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$REQ/$1.json" --proposal-id "clock-$1" || true
+  run "$1-propose" "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$REQ/$1.json" --proposal-id "clock-$1"
   [ "$(rc "$1-propose")" = 0 ] || return 1
   run "$1-submit" "$MINI" workspace --action submit --dir "$SPONSOR_WS" \
     --intent "$SPONSOR_WS/proposals/clock-$1/intent.json" --attempt "$SPONSOR_WS/attempts/clock-$1"
@@ -116,51 +120,51 @@ attempt_write() {  # attempt_write ID VALUE -> rc 0 iff admitted and installed
 started=$(date +%s)
 
 view v0
-row "genesis clock" "now 0 slot 0" "rc=$(rc v0) now=$(now_of v0) slot=$(jq -r .slot "$D/v0.out" 2>/dev/null)" \
-  "$([ "$(rc v0)" = 0 ] && [ "$(now_of v0)" = 0 ] && [ "$(jq -r .slot "$D/v0.out")" = 0 ]; echo $?)"
+row "genesis clock" "now $ORIGIN slot 0" "rc=$(rc v0) now=$(now_of v0) slot=$(jq -r .slot "$D/v0.out" 2>/dev/null)" \
+  "$([ "$(rc v0)" = 0 ] && [ "$(now_of v0)" = "$ORIGIN" ] && [ "$(jq -r .slot "$D/v0.out")" = 0 ]; echo $?)"
 
 run create "$MINI" workspace --action create --dir "$SPONSOR_WS" --name timed --storage declared --predicate "$REQ/stamp-le-now.json" --fields 5
 row "create resource under law any[not verb 2, leSlotsOff field/5/after clock/now 0]" "created" "rc=$(rc create)" "$([ "$(rc create)" = 0 ]; echo $?)"
 
-attempt_write w-early 100; r=$?; why=$(refusal w-early)
-row "create field 5 = 100 at clock 0" "refused at prepare by the law, naming the clock clause (row 5 is the byte-identical create after the tick)" \
+attempt_write w-early $((ORIGIN + 100)); r=$?; why=$(refusal w-early)
+row "create field 5 = genesis + 100 before its tick" "refused at prepare by the law, naming the clock clause (row 5 is the byte-identical create after the tick)" \
   "admitted=$([ $r = 0 ] && echo yes || echo no) outcome=[$why]" \
   "$([ $r != 0 ] && [[ "$why" == 'prepare: refused: law-denied: '*'clock/now'* ]]; echo $?)"
 
-tick t100 "$CLOCK_WS" --now 100
+tick t100 "$CLOCK_WS" --now $((ORIGIN + 100))
 view v1
-row "clock subject ticks now=100" "confirmed; view now=100 day=0" "rc=$(rc t100) $(jq -r .type "$D/t100.out" 2>/dev/null) now=$(now_of v1) day=$(jq -r .day "$D/v1.out" 2>/dev/null)" \
-  "$([ "$(rc t100)" = 0 ] && [ "$(now_of v1)" = 100 ] && [ "$(jq -r .day "$D/v1.out")" = 0 ]; echo $?)"
+row "clock subject ticks now=genesis + 100" "confirmed; exact now and day" "rc=$(rc t100) $(jq -r .type "$D/t100.out" 2>/dev/null) now=$(now_of v1) day=$(jq -r .day "$D/v1.out" 2>/dev/null)" \
+  "$([ "$(rc t100)" = 0 ] && [ "$(now_of v1)" = $((ORIGIN + 100)) ] && [ "$(jq -r .day "$D/v1.out")" = $(((ORIGIN + 100) / 86400)) ]; echo $?)"
 
-attempt_write w-after 100; r=$?
-row "same create at clock 100" "admitted (confirmed)" "admitted=$([ $r = 0 ] && echo yes || echo no) $(refusal w-after | cut -c1-120)" "$([ $r = 0 ]; echo $?)"
+attempt_write w-after $((ORIGIN + 100)); r=$?
+row "same create after its tick" "admitted (confirmed)" "admitted=$([ $r = 0 ] && echo yes || echo no) $(refusal w-after | cut -c1-120)" "$([ $r = 0 ]; echo $?)"
 
-tick t50 "$CLOCK_WS" --now 50
+tick t50 "$CLOCK_WS" --now $((ORIGIN + 50))
 row "tick behind: now=50" "refused clockNotAdvancing" "rc=$(rc t50) $(reason t50)" \
   "$([ "$(rc t50)" != 0 ] && [ "$(reason t50)" = clockNotAdvancing ]; echo $?)"
-tick t100b "$CLOCK_WS" --now 100
+tick t100b "$CLOCK_WS" --now $((ORIGIN + 100))
 row "tick at the current time: now=100" "refused clockNotAdvancing" "rc=$(rc t100b) $(reason t100b)" \
   "$([ "$(rc t100b)" != 0 ] && [ "$(reason t100b)" = clockNotAdvancing ]; echo $?)"
 
-tick tnew "$NEWCOMER_WS" --capability "$C_TICK" --now 150
+tick tnew "$NEWCOMER_WS" --capability "$C_TICK" --now $((ORIGIN + 150))
 row "newcomer presents the clock subject's C_tick, now=150" "refused capabilityRejected" "rc=$(rc tnew) $(reason tnew)" \
   "$([ "$(rc tnew)" != 0 ] && [ "$(reason tnew)" = capabilityRejected ]; echo $?)"
 
 view v2
-row "clock after refusals" "now=100" "now=$(now_of v2)" "$([ "$(now_of v2)" = 100 ]; echo $?)"
+row "clock after refusals" "now=100" "now=$(now_of v2)" "$([ "$(now_of v2)" = $((ORIGIN + 100)) ]; echo $?)"
 
 # --- CLOCK-SUBJECT -------------------------------------------------------------
-tick tsp "$SPONSOR_WS" --capability "$C_TICK" --now 150
+tick tsp "$SPONSOR_WS" --capability "$C_TICK" --now $((ORIGIN + 150))
 row "sponsor presents C_tick (not its own), now=150" "refused capabilityRejected" "rc=$(rc tsp) $(reason tsp)" \
   "$([ "$(rc tsp)" != 0 ] && [ "$(reason tsp)" = capabilityRejected ]; echo $?)"
-tick tspc "$SPONSOR_WS" --capability "$CONTROL" --now 150
+tick tspc "$SPONSOR_WS" --capability "$CONTROL" --now $((ORIGIN + 150))
 row "sponsor presents its factory control capability (K-CLOCK's route), now=150" "refused capabilityRejected" \
   "rc=$(rc tspc) $(reason tspc)" "$([ "$(rc tspc)" != 0 ] && [ "$(reason tspc)" = capabilityRejected ]; echo $?)"
 
 # The clock subject's key, in a participant workspace of its own, asks for a birth.
 CPW=$D/clock-participant; mkdir -p -m 700 "$D/clock-ns"
 run cinit "$MINI" workspace --action init --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
-  --key "$JOURNEY_WORLD/clock.key" --subject "$CLOCK_SUBJECT" \
+  --key "$JOURNEY_WORLD/clock.key" --subject "$CLOCK_SUBJECT" --no-prerotation \
   --birth-context "$JOURNEY_WORLD/clock-birth-context.json" --namespace-root "$D/clock-ns" --dir "$CPW"
 printf '%s\n' '{"type":"all","predicates":[]}' >"$REQ/permit.json"
 run cbirth "$MINI" workspace --action create --dir "$CPW" --name squat --storage declared --predicate "$REQ/permit.json"
@@ -176,7 +180,7 @@ printf '%s\n' '{"type":"any","predicates":[{"type":"eq","slot":"request/verb","v
 # at 0 and stamped 200, and only then is the clock law installed.
 run ocreate "$MINI" workspace --action create --dir "$SPONSOR_WS" --name opens --storage declared --predicate "$REQ/permit.json" --fields 1
 printf '{"type":"minidregg-workspace-proposal-v1","action":"invoke","targets":[{"name":"opens","payload":{"type":"scalar","actions":[{"type":"create","key":{"type":"object","field":"1"},"value":"0"}]}}]}\n' >"$REQ/o-init.json"
-printf '{"type":"minidregg-workspace-proposal-v1","action":"invoke","targets":[{"name":"opens","payload":{"type":"scalar","actions":[{"type":"write","key":{"type":"object","field":"1"},"expected":"0","value":"200"}]}}]}\n' >"$REQ/o-stamp.json"
+printf '{"type":"minidregg-workspace-proposal-v1","action":"invoke","targets":[{"name":"opens","payload":{"type":"scalar","actions":[{"type":"write","key":{"type":"object","field":"1"},"expected":"0","value":"%s"}]}}]}\n' "$((ORIGIN + 200))" >"$REQ/o-stamp.json"
 jq -n --slurpfile p "$REQ/opens-at.json" '{type:"minidregg-workspace-proposal-v1",action:"install-policy",name:"opens",predicate:$p[0]}' >"$REQ/o-law.json"
 for step in o-init o-stamp o-law; do
   run $step-propose "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$REQ/$step.json" --proposal-id clock-$step
@@ -188,12 +192,12 @@ rwhy=$(grep -m1 '^refused: law-denied' "$D/rbefore.err" 2>/dev/null | cut -c1-14
 row "owner's signed read at clock 100 of a resource opening at 200" "refused law-denied on the clock clause" \
   "create rc=$(rc ocreate) init rc=$(rc o-init-submit) stamp rc=$(rc o-stamp-submit) law rc=$(rc o-law-submit) read rc=$(rc rbefore) [$rwhy]" \
   "$([ "$(rc ocreate)" = 0 ] && [ "$(rc o-init-submit)" = 0 ] && [ "$(rc o-stamp-submit)" = 0 ] && [ "$(rc o-law-submit)" = 0 ] && [ "$(rc rbefore)" != 0 ] && [[ "$rwhy" == *clock/now* ]]; echo $?)"
-tick t200 "$CLOCK_WS" --now 200
+tick t200 "$CLOCK_WS" --now $((ORIGIN + 200))
 run rafter "$MINI" workspace --action read --dir "$SPONSOR_WS" --name opens --ephemeral true
 judged=$(jq -r '.judgedAt.clock.now // empty' "$D/rafter.out" 2>/dev/null)
 row "the same read after the clock subject ticks 200" "answered; judgedAt.clock.now = 200" \
   "tick rc=$(rc t200) read rc=$(rc rafter) judgedAt.now=$judged height=$(jq -r '.judgedAt.height // empty' "$D/rafter.out" 2>/dev/null)" \
-  "$([ "$(rc t200)" = 0 ] && [ "$(rc rafter)" = 0 ] && [ "$judged" = 200 ]; echo $?)"
+  "$([ "$(rc t200)" = 0 ] && [ "$(rc rafter)" = 0 ] && [ "$judged" = $((ORIGIN + 200)) ]; echo $?)"
 
 # These 20 reads run at clock 200; the K-ORDER-WIDE rows below repeat them at real
 # unix time (the native order width was 29 until K-ORDER-WIDE: r1 of CLOCK-SUBJECT).
@@ -210,19 +214,36 @@ row "20 ephemeral signed reads" "20 answered; no new attempt dir or source; 20 r
   "failed=$rfail attempts $before->$after sources $srcs->$srcs1 journal=+$rl" \
   "$([ $rfail = 0 ] && [ "$before" = "$after" ] && [ "$srcs" = "$srcs1" ] && [ $rl = 20 ]; echo $?)"
 
-tick tobs "$OBSERVER_WS" --now 300 --slot 7
+tick tobs "$OBSERVER_WS" --now $((ORIGIN + 300)) --slot 7
 view v4
 row "observer (second ticker) ticks chain time now=300 slot=7" "confirmed; view now=300 slot=7" \
   "rc=$(rc tobs) $(jq -r .type "$D/tobs.out" 2>/dev/null) now=$(now_of v4) slot=$(jq -r .slot "$D/v4.out" 2>/dev/null)" \
-  "$([ "$(rc tobs)" = 0 ] && [ "$(now_of v4)" = 300 ] && [ "$(jq -r .slot "$D/v4.out")" = 7 ]; echo $?)"
+  "$([ "$(rc tobs)" = 0 ] && [ "$(now_of v4)" = $((ORIGIN + 300)) ] && [ "$(jq -r .slot "$D/v4.out")" = 7 ]; echo $?)"
 
-wall=$(date +%s)
-tick twall "$CLOCK_WS"
+# Excessive explicit proposals remain untouched by the client and are refused in Lean.
+current=$(now_of v4)
+tick texceed "$CLOCK_WS" --now $((current + BOUND + 1))
+view v-exceed
+row "tick exceeds genesis step bound" "refused clockStepExceeded; clock unchanged" \
+  "rc=$(rc texceed) $(reason texceed) now=$(now_of v-exceed) bound=$BOUND" \
+  "$([ "$(rc texceed)" != 0 ] && [ "$(reason texceed)" = clockStepExceeded ] && [ "$(now_of v-exceed)" = "$current" ]; echo $?)"
+
+tick twithin "$CLOCK_WS" --now $((current + 1))
+view v-within
+row "tick within genesis step bound" "confirmed; clock advances by one second" \
+  "rc=$(rc twithin) now=$(now_of v-within)" \
+  "$([ "$(rc twithin)" = 0 ] && [ "$(now_of v-within)" = $((current + 1)) ]; echo $?)"
+
+# The actual ticker's catch-up mode uses two proposals, each at most the loaded bound.
+current=$(now_of v-within)
+wall=$ORIGIN
+target=$((current + 2 * BOUND))
+tick twall "$CLOCK_WS" --catch-up-to "$target"
 view v3
 asserted=$(jq -r .asserted.now "$D/twall.out" 2>/dev/null)
-row "wall-clock tick by the clock subject (the v1 ticker)" "confirmed; view now = asserted ≈ date +%s; slot carried 7" \
-  "rc=$(rc twall) asserted=$asserted view=$(now_of v3) wall=$wall slot=$(jq -r .slot "$D/v3.out" 2>/dev/null)" \
-  "$([ "$(rc twall)" = 0 ] && [ "$(now_of v3)" = "$asserted" ] && [ "$asserted" -ge "$wall" ] && [ "$asserted" -le $((wall + 60)) ] && [ "$(jq -r .slot "$D/v3.out")" = 7 ]; echo $?)"
+row "ticker catches up in two bounded ticks" "2 confirmed steps; reaches target; slot carried 7" \
+  "rc=$(rc twall) asserted=$asserted target=$target steps=$(jq -c .catchUpTicks "$D/twall.out")" \
+  "$([ "$(rc twall)" = 0 ] && [ "$(now_of v3)" = "$target" ] && [ "$asserted" = "$target" ] && jq -e --arg first "$((current + BOUND))" --arg last "$target" '.catchUpTicks | length == 2 and .[0].now == $first and .[1].now == $last' "$D/twall.out" >/dev/null && [ "$(jq -r .slot "$D/v3.out")" = 7 ]; echo $?)"
 
 base=$((asserted + 1))
 tick tlost "$CLOCK_WS" --now "$base" --abandon-after-submit true
@@ -249,13 +270,13 @@ row "200 ephemeral ticks by the clock subject" "200 confirmed; at most 1 attempt
 # turn WS ID REQUEST -> rc 0 iff installed; the Host's refusal line is in $D/ID-submit.err
 turn() {
   local ws=$1 id=$2 req=$3
-  run "$id-propose" "$MINI" workspace --action propose --dir "$ws" --request "$req" --proposal-id "clock-$id" || true
+  run "$id-propose" "$MINI" workspace --action propose --dir "$ws" --request "$req" --proposal-id "clock-$id"
   [ "$(rc "$id-propose")" = 0 ] || return 1
   run "$id-submit" "$MINI" workspace --action submit --dir "$ws" \
     --intent "$ws/proposals/clock-$id/intent.json" --attempt "$ws/attempts/clock-$id"
   [ "$(rc "$id-submit")" = 0 ] && jq -e '.type == "confirmed"' "$ws/attempts/clock-$id/outcome.json" >/dev/null 2>&1
 }
-refused_line() { cat "$D/$1-submit.err" "$D/$1-propose.err" 2>/dev/null | grep -m1 '^refused:' | cut -c1-400; }
+refused_line() { cat "$D/$1-submit.err" "$D/$1-propose.err" 2>/dev/null | grep -m1 '^refused:'; }
 writes() {  # writes NAME FIELD:EXPECTED:VALUE... : one invoke of guarded writes
   local name=$1; shift
   printf '%s\n' "$@" | jq -R 'split(":") | {type:"write",key:{type:"object",field:.[0]},expected:.[1],value:.[2]}' \
@@ -275,18 +296,18 @@ row "20 signed reads at real unix time (field 1 = 200, law any[verb 2, field 1 <
   "20 answered, judged at the wall clock" "failed=$rfail journal=+$rl judgedAt.now=$judged view.now=$NOW [$(head -c 160 "$D/rw20.err")]" \
   "$([ $rfail = 0 ] && [ $rl = 20 ] && [ "$judged" = "$NOW" ] && [ "$NOW" -ge "$wall" ]; echo $?)"
 
-writes timed 5:100:200 >"$REQ/w-unix.json"
+writes timed "5:$((ORIGIN + 100)):$((ORIGIN + 200))" >"$REQ/w-unix.json"
 turn "$SPONSOR_WS" w-unix "$REQ/w-unix.json"; r=$?
 row "write field 5 := 200 at clock $NOW (law field 5 <= clock/now)" "admitted (confirmed)" \
   "admitted=$([ $r = 0 ] && echo yes || echo no) [$(refused_line w-unix)]" "$([ $r = 0 ]; echo $?)"
 
-writes timed 5:200:$((NOW + 1000000)) >"$REQ/w-ahead.json"
+writes timed "5:$((ORIGIN + 200)):$((NOW + 1000000))" >"$REQ/w-ahead.json"
 turn "$SPONSOR_WS" w-ahead "$REQ/w-ahead.json"; r=$?; why=$(refused_line w-ahead)
 row "write field 5 := now + 10^6" "refused law-denied on the clock clause (eval refuses; not an input-range refusal)" \
   "admitted=$([ $r = 0 ] && echo yes || echo no) [$why]" \
   "$([ $r != 0 ] && [[ "$why" == 'refused: law-denied: '*'clock/now'* ]]; echo $?)"
 
-writes timed 5:200:$FAR >"$REQ/w-far.json"
+writes timed "5:$((ORIGIN + 200)):$FAR" >"$REQ/w-far.json"
 turn "$SPONSOR_WS" w-far "$REQ/w-far.json"; r=$?; why=$(refused_line w-far)
 row "write field 5 := 2^126 (outside R)" "refused law-input-range naming the clause and both values" \
   "admitted=$([ $r = 0 ] && echo yes || echo no) [$why]" \
@@ -296,7 +317,7 @@ row "write field 5 := 2^126 (outside R)" "refused law-input-range naming the cla
 # ZMod (2^127 - 1) is that of 1: the cast check refuses, and prepare names the two integers.
 run fcreate "$MINI" workspace --action create --dir "$SPONSOR_WS" --name far --storage declared --predicate "$REQ/permit.json" --fields 1
 printf '{"type":"minidregg-workspace-proposal-v1","action":"invoke","targets":[{"name":"%s","payload":{"type":"scalar","actions":[{"type":"create","key":{"type":"object","field":"1"},"value":"0"}]}}]}\n' far >"$REQ/far-init.json"
-turn "$SPONSOR_WS" far-init "$REQ/far-init.json" || true
+turn "$SPONSOR_WS" far-init "$REQ/far-init.json"
 P127=170141183460469231731687303715884105728
 writes far 1:0:$FAR >"$REQ/far-alias.json"
 turn "$SPONSOR_WS" far-alias "$REQ/far-alias.json"; r=$?; why=$(refused_line far-alias)

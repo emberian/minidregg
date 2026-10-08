@@ -7,6 +7,10 @@
 # not involved: the sponsor holds no tick authority, and the clock subject's key can do
 # nothing but tick (the factory law refuses it every birth, enrollment and install).
 #
+# Genesis fixes .clock.maxStepSeconds in the one clock cell and seeds now from
+# the mandatory .clock.genesisNow param (replace the example's zero placeholder).
+# After downtime mini clock catches up with successive proposals of at most the
+# loaded bound; Lean alone admits each step and refuses clockStepExceeded.
 # The Host refuses a tick that does not advance the clock, so a delayed or doubled run
 # cannot move time backwards. Attempts are ephemeral: a tick's signed ingress is kept
 # in /var/lib/mini/clock/clock-attempts only until its outcome is definite, and a tick

@@ -42,6 +42,7 @@ private def genesisWithSemantics (semantics : Nat) : Json := object [
   ("factoryPredicate", emptyRule), ("enrollments", .arr #[]),
   ("factoryControllerSubject", number 8),
   ("factoryControllerCapability", number 53), ("tailBound", number 256),
+  ("clockGenesisNow", number 0), ("clockMaxStepSeconds", number 300),
   ("meterAllowance", meter), ("clockTickers", .arr #[])]
 
 private def genesis : Json := genesisWithSemantics operator.profile.semantics.value

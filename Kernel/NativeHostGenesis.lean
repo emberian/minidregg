@@ -107,6 +107,8 @@ structure Config where
   (`Kernel.SystemCell`, `Kernel.TailBound`).  The operator's tariff line;
   written once into the genesis system cell. -/
   tailBound : Nat
+  clockGenesisNow : Nat
+  clockMaxStepSeconds : Nat
 
 /-- Reuse the policy source's typed postfix language. No Boolean host policy
 or parallel evaluator enters the genesis codec. -/
@@ -165,7 +167,7 @@ def Config.toWire (config : Config) : ConfigWire :=
     config.tariff.perGrant, config.tariff.perInitialPayloadByte,
     config.tariff.collector, config.tariff.asset, config.expectedSemantics.value,
     config.issuerEpoch, config.genesisHeight, config.factoryController.subject.value,
-    config.factoryController.capabilityId.value, config.tailBound] ++
+    config.factoryController.capabilityId.value, config.tailBound, config.clockGenesisNow, config.clockMaxStepSeconds] ++
     (match config.payObserver with
      | none => []
      | some observer => [observer.subject.value, observer.capabilityId.value,
@@ -177,21 +179,21 @@ def Config.ofWire (wire : ConfigWire) : Option Config := do
   let (coordinates, payObserver) ← match wire.1 with
     | [domain, factory, book, authority, federation, base, perBirth, perGrant,
         perByte, collector, asset, semantics, issuerEpoch, height, controller,
-        controlCapability, tailBound] =>
+        controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds] =>
         some ((domain, factory, book, authority, federation, base, perBirth, perGrant,
           perByte, collector, asset, semantics, issuerEpoch, height, controller,
-          controlCapability, tailBound), none)
+          controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds), none)
     | [domain, factory, book, authority, federation, base, perBirth, perGrant,
         perByte, collector, asset, semantics, issuerEpoch, height, controller,
-        controlCapability, tailBound, observer, observerCapability, payControl, enrolCapability] =>
+        controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds, observer, observerCapability, payControl, enrolCapability] =>
         some ((domain, factory, book, authority, federation, base, perBirth, perGrant,
           perByte, collector, asset, semantics, issuerEpoch, height, controller,
-          controlCapability, tailBound),
+          controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds),
           some (⟨⟨observer⟩, ⟨observerCapability⟩, ⟨payControl⟩, ⟨enrolCapability⟩⟩ : PayObserver))
     | _ => none
   let (domain, factory, book, authority, federation, base, perBirth, perGrant,
       perByte, collector, asset, semantics, issuerEpoch, height, controller,
-      controlCapability, tailBound) := coordinates
+      controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds) := coordinates
   let predicate ← PolicyRecordCodec.decodePred wire.2.1
   some
     { deployment := ⟨⟨domain⟩, factory, book, authority⟩
@@ -206,20 +208,23 @@ def Config.ofWire (wire : ConfigWire) : Option Config := do
       meterAllowance := wire.2.2.2.1
       payObserver := payObserver
       clockTickers := wire.2.2.2.2.map tickerOfWire
-      tailBound := tailBound }
+      tailBound := tailBound
+      clockGenesisNow := clockGenesisNow
+      clockMaxStepSeconds := clockMaxStepSeconds }
 
 @[simp] theorem Config.ofWire_toWire (config : Config) :
     Config.ofWire config.toWire = some config := by
-  rcases config with ⟨_, _, _, _, _, _, _, _, _, _, observer, _, _⟩
+  rcases config with ⟨_, _, _, _, _, _, _, _, _, _, observer, _, _, _, _⟩
   cases observer <;> simp [Config.ofWire, Config.toWire]
 
-/-- Version 4 (BRAID-COMPUTE): ONE source for the two version-3 shapes that met at
+/-- Version 5 (CLOCK-BOUND) adds mandatory initial clock time and step bound.
+Version 4 (BRAID-COMPUTE): ONE source for the two version-3 shapes that met at
 the merge: CLOCK-SUBJECT's (the clock tickers, from which the clock cell's law and
 each ticker's `C_tick` are derived, beside the optional payment observer) and C14's
 (the scalar list carries the tail bound `L` after the factory controller).  Every
 version-3 source refuses (`v3_config_refused`); version 2 named the authority cell
 as the fourth deployment coordinate. -/
-def configFrame : List UInt8 := "DREGG/NATIVE-HOST/GENESIS-SOURCE/v4".toUTF8.toList
+def configFrame : List UInt8 := "DREGG/NATIVE-HOST/GENESIS-SOURCE/v5".toUTF8.toList
 
 def configRawCodec : LawfulCodec Config where
   encode config := configFrame ++ configWireStream.encode config.toWire
@@ -257,6 +262,19 @@ theorem v3_config_refused (payload : List UInt8) :
     simp [configRawCodec, lengthExact, different]
   simp [configCodec, ResourceBirthCodec.strictCodec, raw]
 
+/-- The previous genesis shape lacks the bounded seeded clock and refuses. -/
+theorem v4_config_refused (payload : List UInt8) :
+    configCodec.decode ("DREGG/NATIVE-HOST/GENESIS-SOURCE/v4".toUTF8.toList ++ payload) = none := by
+  let retired := "DREGG/NATIVE-HOST/GENESIS-SOURCE/v4".toUTF8.toList
+  have sameLength : configFrame.length = retired.length := by decide +kernel
+  have different : retired ≠ configFrame := by decide +kernel
+  have raw : configRawCodec.decode (retired ++ payload) = none := by
+    simp [configRawCodec, sameLength, different]
+  change configCodec.decode (retired ++ payload) = none
+  simp [configCodec, ResourceBirthCodec.strictCodec, raw]
+
+#assert_axioms v4_config_refused
+
 /-- The authority clock at genesis: no record has been accepted
 (`genesis_revision` below). Key activation uses this clock (the durable
 height, `CredentialAuthorityDomainReceiver.clockOf`), not a key epoch. -/
@@ -264,6 +282,7 @@ def initialAuthorityRevision : Nat := 0
 
 def Config.Valid {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config) : Prop :=
+  0 < config.clockMaxStepSeconds ∧
   config.expectedSemantics = profile.semantics ∧
   config.deployment.Valid ∧
   config.enrollments ≠ [] ∧
@@ -637,9 +656,10 @@ def payCell {F : Type} [Field F]
   let activation : Kernel.PayCell.ComputeActivation := ⟨0, none, history⟩
   let store := Kernel.PayCell.genesisStore.set Kernel.PayCell.computeActivationAddress (some activation)
   ⟨.pay, materialize Kernel.PayCell.materializer store⟩
-/-- The genesis clock cell: the clock at zero (`ClockCell.genesisStore`). -/
-def clockCell : PackedCell CanonicalCellRegistry.registry :=
-  ⟨.clock, materialize Kernel.ClockCell.materializer Kernel.ClockCell.genesisStore⟩
+/-- The genesis clock cell: explicit initial time and its sole fixed step bound. -/
+def clockCell (config : Config) : PackedCell CanonicalCellRegistry.registry :=
+  ⟨.clock, materialize Kernel.ClockCell.materializer
+    (Kernel.ClockCell.genesisStore config.clockGenesisNow config.clockMaxStepSeconds)⟩
 
 /-- The genesis system cell: nothing certified beyond the seed, under the
 operator's tail bound (`SystemCell.genesisStore`). -/
@@ -660,7 +680,7 @@ def baseCells {F : Type} [Field F]
     (PolicySourceCell.physicalId config.deployment.domain (PolicyRecordCodec.digest record),
       CanonicalCellRegistry.policySourceCell record)) ++
   [(Kernel.PayCell.physicalId config.deployment.domain, payCell profile config),
-   (Kernel.ClockCell.physicalId config.deployment.domain, clockCell),
+   (Kernel.ClockCell.physicalId config.deployment.domain, clockCell config),
    (Kernel.SystemCell.physicalId config.deployment.domain, systemCell config)]
 
 def physicalCells (cells : List (Nat × PackedCell CanonicalCellRegistry.registry)) :
@@ -706,7 +726,7 @@ def Built.image {F : Type} [Field F] {profile : CanonicalRuntimeProfile.Profile 
 theorem Built.profile_exact {F : Type} [Field F]
     {profile : CanonicalRuntimeProfile.Profile F} {config : Config}
     (built : Built profile config) : config.expectedSemantics = profile.semantics :=
-  built.configured.1
+  built.configured.2.1
 
 theorem Built.restore {F : Type} [Field F]
     {profile : CanonicalRuntimeProfile.Profile F} {config : Config}
@@ -758,14 +778,14 @@ theorem incompatible_profile_refused {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config)
     (incompatible : config.expectedSemantics ≠ profile.semantics) :
     build profile config = .error .configuration :=
-  invalid_configuration_refused profile config (fun valid => incompatible valid.1)
+  invalid_configuration_refused profile config (fun valid => incompatible valid.2.1)
 
 theorem duplicate_subjects_refused {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config)
     (duplicate : ¬(config.enrollments.map (·.key.subject)).Nodup) :
     build profile config = .error .configuration := by
   apply invalid_configuration_refused profile config
-  rintro ⟨_, _, _, unique, _⟩
+  rintro ⟨_, _, _, _, unique, _⟩
   exact duplicate unique
 
 theorem duplicate_key_ids_refused {F : Type} [Field F]
@@ -773,7 +793,7 @@ theorem duplicate_key_ids_refused {F : Type} [Field F]
     (duplicate : ¬(config.enrollments.map (·.key.keyId)).Nodup) :
     build profile config = .error .configuration := by
   apply invalid_configuration_refused profile config
-  rintro ⟨_, _, _, _, unique, _⟩
+  rintro ⟨_, _, _, _, _, unique, _⟩
   exact duplicate unique
 
 theorem duplicate_public_keys_refused {F : Type} [Field F]
@@ -781,7 +801,7 @@ theorem duplicate_public_keys_refused {F : Type} [Field F]
     (duplicate : ¬(config.enrollments.map (·.key.publicKey)).Nodup) :
     build profile config = .error .configuration := by
   apply invalid_configuration_refused profile config
-  rintro ⟨_, _, _, _, _, unique, _⟩
+  rintro ⟨_, _, _, _, _, _, unique, _⟩
   exact duplicate unique
 
 /-- Decoding supplies no authority. The same builder and checks admit every
@@ -894,7 +914,7 @@ theorem tick_requires_clock_capability {F : Type} [Field F]
           some (Int.ofNat config.factoryController.subject.value) →
         new.get "request/verb" = some (Int.ofNat ClockLaw.tickVerbTag) →
         Minidregg.Pred.eval (clockPolicy profile config).predicate old new = false) := by
-  obtain ⟨-, -, -, -, -, -, -, -, -, -, -, -, -, -, -, notTicker, -⟩ := valid
+  obtain ⟨-, -, -, -, -, -, -, -, -, -, -, -, -, -, -, -, notTicker, -⟩ := valid
   refine ⟨by simp [controlCapability, rootCapability], fun _ _ => by
     simp [accountControlCapability, rootCapability], fun old new named ticking => ?_⟩
   exact clock_law_refuses_nonticker_tick config old new _ named ticking notTicker
