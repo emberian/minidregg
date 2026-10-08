@@ -7,7 +7,7 @@ controllers, app broker and their configuration. The manifest records shipped
 executables; their presence does not establish that those services are configured
 or that a combined deployment has passed its receiving journeys.
 
-Updated October 4, 2026. Three routes produce a candidate directory, and all of them
+Updated October 8, 2026. Three routes produce a candidate directory, and all of them
 go through one packager, `package.py` (section "One packaging format, one packager"
 below): `build.sh` (the procedure here), `lane-build.sh` (an incremental build on a
 build box) and a sealed hbox capsule (`package.py --capsule`). Every candidate carries
@@ -58,7 +58,7 @@ that can find the versioned one) for the Store helper.
 | Lean packages (mathlib and its dependencies) | `lake-manifest.json` revisions | their git URLs in `lake-manifest.json` |
 | mathlib `.olean` + generated C for that revision | the mathlib revision | the mathlib artifact cache (`lake exe cache get`), stored in `OUT/work/mathlib-cache` |
 | Rust toolchain | `rust-toolchain.toml` | rustup's dist server (`--no-self-update`) |
-| Rust crates | each crate's `Cargo.lock` (`--locked`) | crates.io, cached in `$CARGO_HOME` |
+| Rust crates | root workspace `Cargo.lock` (`--locked`) | crates.io, cached in `$CARGO_HOME` |
 
 **Outputs.**
 
@@ -91,46 +91,61 @@ accounts must configure its custody explicitly.
 candidate builder compiles the Host import closure; separately qualify the
 required umbrella/assurance targets when those interfaces change.
 
-Rust binaries are built with `--remap-path-prefix` for the source tree
-(`/minidregg`) and `$CARGO_HOME` (`/cargo`), and every cargo command runs
-through one fixed symlink to the extracted source
-(`$MINI_CANDIDATE_BUILD_ROOT/src`, default `/tmp/minidregg-candidate-build/src`;
-a 0700 directory owned by the builder, serialised with `flock`, recorded in
-`provenance.json`). Both are needed: cargo hashes the absolute path of every path
-dependency outside a package's own directory into `-C metadata`, hence into every
-symbol hash, and remapping does not reach that. Without the fixed path the same
-source built under two `--out` directories gave two different `grain-runtime`
-binaries (cv 01a0f830-42e7). So their bytes do not depend on where the operator
-unpacked the source or keeps the registry, provided two builds being compared use
-the same `MINI_CANDIDATE_BUILD_ROOT`. To check: build twice with different `--out`
-and compare `sha256sum OUT/bin/*`. The Host's bytes
-do not contain build paths. The macOS client additionally maps `OUT` out of its
-C objects and links with `-Wl,-S`, because the Mach-O UUID is computed over the
-linker's output while it still names each object by path; two builds in
-different `OUT` directories give identical bytes (measured).
+Rust candidate crates and their path dependencies share the root Cargo workspace
+and `Cargo.lock`. Each builder runs Cargo in its own absolute source directory,
+with `--locked`, `CARGO_INCREMENTAL=0`, and `--remap-path-prefix` for that source
+(`/minidregg`), `$CARGO_HOME` (`/cargo`) and the Cargo target directory
+(`/target`). Generated `OUT_DIR` sources also participate in LLVM symbol identity;
+remapping their target directory fixes the separately measured SPK difference. Workspace membership makes dependency
+identity relative to the workspace root. Source remapping alone does not fix
+external path dependency identity: the measured direct grain-runtime builds had
+different Cargo path fingerprints and Rust symbol disambiguators. Two cold
+workspace builds from different lexical roots produced identical bytes. The
+old fixed-symlink helper remains for the read-only pipeline diagnostic; candidate
+builders no longer use it. No binary postprocessing is used to obtain identity.
 
-**`manifest.json`** is the format `native/resource-client/journey.sh` reads:
-absolute paths plus SHA-256 pins, one entry per role, and `candidate` naming
-the provenance file.
+**`manifest.json`** has type `minidregg-candidate-manifest-v2`. It retains the
+journey's absolute role paths and SHA-256 pins, and adds `outputs`, keyed by every
+relative executable path below `bin/`, including consent, services, the Linux
+friend bundle and any cross-compiled clients. Every output records:
 
 ```json
-{"host": "/abs/OUT/bin/minidregg-host", "mini": "/abs/OUT/bin/mini",
- "store": "/abs/OUT/bin/minidregg-link-sqlite-store",
- "verifier": "/abs/OUT/bin/minidregg-credential-signature-verifier",
- "candidate": "/abs/OUT/provenance.json",
- "sha256": {"host": "<64 hex>", "mini": "...", "store": "...", "verifier": "...", "candidate": "..."}}
+{"sha256": "<64 hex>",
+ "build": {"sourceTree": "<git rev-parse COMMIT^{tree}>",
+           "rustcVerbose": "<builder rustc -vV>",
+           "leanToolchain": "<exact lean-toolchain file contents>",
+           "cargoLockSha256": {"Cargo.lock": "<64 hex>"},
+           "flags": {"rust": {}, "native": {}}}}
 ```
 
-The full manifest also contains `grainRuntime` (alias `hermes`),
-`grainProviderBridge`, `inferenceScheduler`, `spkHost`, `spkBrowserProxy`
-(alias `browserProxy`), `discord` and `payWatcher`, with SHA-256 pins. The JSON
-above shows the core roles only. `--client-only` produces no service manifest.
+The actual flags objects are nonempty: Rust records its remaps, release profile,
+locked resolution and incremental setting; native records its builder and entry
+modules. Native build manifests separately bind the compiled closure. The tree
+id comes from the archive commit in the packaging repository, never the current
+checkout's HEAD. The packager requires builder toolchain/flag evidence, reads
+pins from the source archive, and writes the same output identities into
+`provenance.json`. Packaging must run in a repository containing that commit.
+Sealed capsules without this evidence refuse and must be rebuilt/repackaged.
 
-Every consumer (`run.sh`, `journey.sh`,
-`native/resource-client/newparticipant-from-manifest.sh`) refuses a file whose
-SHA-256 differs from its pin. Because the paths are absolute, the candidate is
-used where it was built; moving it means rebuilding or rewriting `manifest.json`
-(the pins, and `provenance.json`, stay valid).
+`run.sh` requires v2, verifies the pinned provenance and its complete output map,
+and hashes **every** output before any `init`, `serve`, `start`, or `sponsor`
+launch. A mismatch refuses with `binary NAME sha256 mismatch: manifest X, file Y`.
+There is no bypass flag or environment variable. This protects against binary
+changes relative to an operator-selected manifest; the manifest is the trust
+input, not a cryptographic signature on the publisher. Old manifests refuse.
+Re-emit them with `package.py` and complete builder evidence; initialize a fresh
+Store for a rebuilt executable family. Existing v1 state descriptors can refer
+to a newly emitted v2 manifest only when their Host and helper bindings still
+match. Relative output paths stay valid when copying a candidate; absolute role,
+client and provenance references in its manifest must be relocated together.
+
+M7 compares every output against an independently built candidate, checks both
+sets' actual bytes and compiled inputs, exercises tampered `init` and `serve`,
+then initializes, serves, reads through and stops its own Store. Run the plants
+`scripts/kn2/plant-m7-tamper.sh CANDIDATE NEW_EVIDENCE_DIR` and
+`scripts/kn2/plant-m7-no-verification.sh CANDIDATE NEW_EVIDENCE_DIR`: the latter
+removes verification calls only in a temporary `run.sh` and requires M7's tamper
+check to fail with its pinned refusal-test message.
 
 **`provenance.json`** (`minidregg-candidate-provenance-v1`):
 
@@ -420,7 +435,7 @@ must stay where it was when `init` ran (or re-run `init` on a new Store).
 
 ## 7. Supervision (`run.sh`)
 
-* `serve` validates the manifest hashes, the state's Host pin and the helper
+* `serve` validates every output hash, the state's Host pin and the helper
   paths in the pinned config, sets `TMPDIR`, then `exec`s `mini serve`. Use it
   under systemd (`run.sh unit --state STATE` prints a unit: `Type=simple`,
   `Restart=on-failure`, `KillMode=control-group`, `UMask=0077`,
