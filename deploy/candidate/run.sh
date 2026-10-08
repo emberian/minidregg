@@ -47,6 +47,7 @@ init() {
   [ -n "$manifest" ] || candidate_die "init needs --manifest"
   [ -n "$params" ] || candidate_die "init needs --params (start from genesis-params.example.json)"
   candidate_resolve "$manifest"
+  candidate_verify_outputs "$CANDIDATE_MANIFEST"
   params=$(candidate_abs "$params")
   check_params "$params"
   state=$(candidate_abs "$state")
@@ -95,8 +96,14 @@ init() {
   printf '%s\n' "$state/deployment/pinned-config.json"
 }
 
+load_state() {
+  candidate_state "$1"
+  candidate_verify_outputs "$CANDIDATE_MANIFEST"
+  candidate_state_bindings
+}
+
 serve_exec() {
-  candidate_state "$state"
+  load_state "$state"
   TMPDIR=$STATE/tmp
   export TMPDIR
   exec "$MINI" serve --host "$HOST" --config "$CONFIG" --socket "$SOCKET"
@@ -115,7 +122,7 @@ server_pid() {
 }
 
 start() {
-  candidate_state "$state"
+  load_state "$state"
   if pid=$(server_pid); then candidate_die "already serving as pid $pid"; fi
   TMPDIR=$STATE/tmp
   export TMPDIR
@@ -146,9 +153,9 @@ any_alive() {
 }
 
 stop() {
-  candidate_state "$state"
+  load_state "$state"
   pid=$(server_pid) || { echo "not running (no live server.pid naming $SOCKET)"; return 0; }
-  children=$(ps -o pid= --ppid "$pid" | tr -d ' ' || true)
+  children=$(ps -o pid= --ppid "$pid" | tr -d ' ')
   kill -TERM "$pid"
   waited=0
   # shellcheck disable=SC2086
@@ -162,12 +169,16 @@ stop() {
 }
 
 status() {
-  candidate_state "$state"
+  load_state "$state"
   if pid=$(server_pid); then printf 'serving %s pid %s\n' "$SOCKET" "$pid"; else echo "not running"; fi
 }
 
 sponsor() {
-  candidate_state "$state"
+  load_state "$state"
+  MINI_LOCAL_HOST=$HOST
+  MINI_CONSENT_HOST=$CANDIDATE_DIR/bin/minidregg-client-consent
+  MINI_CONSENT_CONFIG=$CONFIG
+  export MINI_LOCAL_HOST MINI_CONSENT_HOST MINI_CONSENT_CONFIG
   [ -S "$SOCKET" ] || candidate_die "Store is not serving at $SOCKET"
   if [ -f "$STATE/sponsor/workspace.json" ]; then
     echo "sponsor workspace exists: $STATE/sponsor"
@@ -189,7 +200,7 @@ sponsor() {
 }
 
 unit() {
-  candidate_state "$state"
+  load_state "$state"
   cat <<EOF
 # Mini Store for $STATE. Install as a user unit (systemctl --user) under the
 # account that owns $STATE, or as a system unit with User= set to that account.

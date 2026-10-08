@@ -15,4 +15,4 @@ path = "src/main.rs"
 
 [dependencies]
 sha2 = "=0.10.9"
-libc = "=0.2.186"
+libc = "=0.2.189"

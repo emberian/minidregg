@@ -32,7 +32,7 @@ ROLE_FILES = {"host": "minidregg-host", "consent": "minidregg-client-consent"}
 ROLE_FILES.update({role: name for role, _, name in (
     line.split() for line in subprocess.run([sys.executable, str(PACKAGE), "--rust-roles"], check=True,
                                             capture_output=True, text=True).stdout.splitlines())})
-SCRIPTS = ["deploy/candidate/run.sh", "deploy/candidate/lib.sh", "native/resource-client/genesis.sh",
+SCRIPTS = ["deploy/candidate/check-tamper.sh", "lean-toolchain", "Cargo.lock", "deploy/candidate/run.sh", "deploy/candidate/lib.sh", "native/resource-client/genesis.sh",
            "native/resource-client/genesis-params.example.json", "deploy/candidate/INTERFACES.md"]
 failures = []
 
@@ -85,6 +85,9 @@ with tempfile.TemporaryDirectory(prefix="package-test-") as tmp:
     commit = git(repo, "rev-parse", "HEAD").decode().strip()
     archive = tmp / "source.tar"
     archive.write_bytes(git(repo, "archive", "--format=tar", commit))
+    toolchains = tmp / "toolchains.json"
+    toolchains.write_text(json.dumps({"rustc": "rustc test\ncommit-hash: test\nhost: test\nrelease: test\nLLVM version: test",
+        "buildFlags": {"rust": {"profile": "release"}, "native": {"builder": "test stub"}}}))
     binaries = tmp / "built"
     binaries.mkdir()
     for name in ROLE_FILES.values():
@@ -93,7 +96,9 @@ with tempfile.TemporaryDirectory(prefix="package-test-") as tmp:
     def package(manifest, out):
         roles = tmp / (out + ".roles.json")
         roles.write_text(json.dumps(manifest))
-        return run("--roles", str(roles), "--source-archive", str(archive), "--out", str(tmp / out))
+        return subprocess.run([sys.executable, str(PACKAGE), "--roles", str(roles), "--source-archive", str(archive),
+                               "--out", str(tmp / out), "--toolchains", str(toolchains)],
+                              cwd=repo, capture_output=True, text=True)
 
     # 1. the full set
     done = package(roles_manifest(binaries, commit), "cand")
@@ -128,6 +133,19 @@ with tempfile.TemporaryDirectory(prefix="package-test-") as tmp:
         check("manifest.json names consentHost with its pin",
               manifest.get("consentHost") == str(cand / "bin/minidregg-client-consent")
               and manifest["sha256"].get("consentHost") == consent.get("sha256"))
+
+        check("v2 manifest pins every shipped file with build identity",
+              manifest.get("type") == "minidregg-candidate-manifest-v2" and
+              set(manifest["outputs"]) == {str(p.relative_to(cand)) for p in (cand / "bin").rglob("*") if p.is_file()} and
+              all(v["sha256"] == sha(cand / rel) and v["build"]["sourceTree"] ==
+                  git(repo, "rev-parse", "HEAD^{tree}").decode().strip() and
+                  v["build"]["cargoLockSha256"]["Cargo.lock"] == sha(repo / "Cargo.lock")
+                  for rel, v in manifest["outputs"].items()))
+        # Missing builder evidence must refuse, not invent provenance from the current machine.
+        no_evidence = run("--roles", str(tmp / "cand.roles.json"), "--source-archive", str(archive),
+                          "--out", str(tmp / "no-evidence"))
+        check("missing build evidence is refused", no_evidence.returncode != 0 and
+              "requires the builder's rustc -vV" in no_evidence.stderr)
 
     # 2. no consent role: refused by name
     refused = package(roles_manifest(binaries, commit, drop=("consent",)), "cand-no-consent")

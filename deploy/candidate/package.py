@@ -92,7 +92,8 @@ LINUX = "x86_64-unknown-linux-gnu"
 BUNDLE = ("mini", "minidregg-host", "minidregg-client-consent",
           "minidregg-credential-signature-verifier", "minidregg-link-sqlite-store")
 # The operator scripts travel with the binaries, from the same archive.
-SCRIPTS = {"run.sh": ("deploy/candidate/run.sh", 0o555), "lib.sh": ("deploy/candidate/lib.sh", 0o555),
+SCRIPTS = {"check-tamper.sh": ("deploy/candidate/check-tamper.sh", 0o555),
+           "run.sh": ("deploy/candidate/run.sh", 0o555), "lib.sh": ("deploy/candidate/lib.sh", 0o555),
            "genesis.sh": ("native/resource-client/genesis.sh", 0o555),
            "genesis-params.example.json": ("native/resource-client/genesis-params.example.json", 0o444),
            "INTERFACES.md": ("deploy/candidate/INTERFACES.md", 0o444)}
@@ -265,7 +266,42 @@ def capsule(family):
     return chosen, archive, commit, toolchains, origin, native if native.is_file() else None
 
 
+def build_identity(archive, commit, toolchains):
+    """Require builder evidence; never substitute the packager's compiler for it."""
+    rustc = toolchains.get("rustc", "")
+    flags = toolchains.get("buildFlags")
+    if not isinstance(rustc, str) or not all(x in rustc for x in
+            ("rustc ", "commit-hash:", "host:", "release:", "LLVM version:")):
+        die("build provenance requires the builder's rustc -vV")
+    if not isinstance(flags, dict) or not flags.get("rust") or not flags.get("native"):
+        die("build provenance requires buildFlags.rust and buildFlags.native")
+    tree = subprocess.run(["git", "rev-parse", commit + "^{tree}"], capture_output=True, text=True)
+    if tree.returncode or not HEX40.fullmatch(tree.stdout.strip()):
+        die("source tree unavailable: package in a repository containing the archive commit")
+    with tarfile.open(archive) as tar:
+        try:
+            lean = tar.extractfile("lean-toolchain").read().decode()
+        except KeyError:
+            die("source archive lacks lean-toolchain")
+        try:
+            locks = {"Cargo.lock": hashlib.sha256(tar.extractfile("Cargo.lock").read()).hexdigest()}
+        except KeyError:
+            die("source archive lacks workspace Cargo.lock")
+    return {"sourceTree": tree.stdout.strip(), "rustcVerbose": rustc,
+            "leanToolchain": lean, "cargoLockSha256": locks, "flags": flags}
+
+
 def package(chosen, archive, commit, out, toolchains, origin, host_build_manifest, into_existing):
+    if tar_commit(archive) != commit:
+        die(f"source archive commit is not {commit}")
+    identity = build_identity(archive, commit, toolchains)
+    if host_build_manifest is not None:
+        args = Path(host_build_manifest).parent / "compile-args.txt"
+        if not args.is_file():
+            die("native build evidence lacks compile-args.txt")
+        identity["flags"]["native"]["compileArgs"] = args.read_text()
+        identity["flags"]["native"]["linkCommand"] = "leanc -o BINARY @OBJECT_RESPONSE_FILE"
+        identity["flags"]["native"]["manifestSha256"] = sha(host_build_manifest)
     out = Path(out)
     if into_existing:
         if not (out / "bin").is_dir():
@@ -302,7 +338,7 @@ def package(chosen, archive, commit, out, toolchains, origin, host_build_manifes
     floors = [a["glibcRequired"] for a in abis.values() if a["glibcRequired"]]
     provenance = {
         "type": "minidregg-candidate-provenance-v1",
-        "source": {"commit": commit, "archive": "source.tar", "archiveSha256": sha(source_tar),
+        "source": {"commit": commit, "tree": identity["sourceTree"], "archive": "source.tar", "archiveSha256": sha(source_tar),
                    "origin": origin["type"], "fileList": "logs/source-files.sha256",
                    "fileListSha256": sha(out / "logs" / "source-files.sha256")},
         "target": "x86_64-linux",
@@ -339,6 +375,10 @@ def package(chosen, archive, commit, out, toolchains, origin, host_build_manifes
         if client.parent.name != LINUX:
             clients[client.parent.name] = {"path": str(client.relative_to(out)), "sha256": sha(client), "consent": None}
     provenance["clients"] = clients
+    # Include each physical shipping path, including the friend bundle and cross clients.
+    outputs = {str(p.relative_to(out)): {"sha256": sha(p), "build": identity}
+               for p in sorted((out / "bin").rglob("*")) if p.is_file()}
+    provenance["outputs"] = outputs
     write_json(out / "provenance.json", provenance)
     listed = [f"bin/{ROLES[r]}" for r in sorted(chosen)] + [c["path"] for t, c in sorted(clients.items())
                                                             if c["path"] != "bin/mini"]
@@ -352,7 +392,8 @@ def package(chosen, archive, commit, out, toolchains, origin, host_build_manifes
         if role in chosen:
             manifest[alias] = manifest[role]
             pins[alias] = pins[role]
-    manifest.update({"candidate": str(out / "provenance.json"), "sourceCommit": commit,
+    manifest.update({"type": "minidregg-candidate-manifest-v2", "outputs": outputs,
+                     "candidate": str(out / "provenance.json"), "sourceCommit": commit,
                      "spkHostFeatures": [],
                      "clients": {t: str(out / c["path"]) for t, c in clients.items()}})
     pins["candidate"] = sha(out / "provenance.json")

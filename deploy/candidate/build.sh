@@ -132,7 +132,7 @@ esac
 fi
 # rustup chooses a toolchain from the working directory, not from
 # --manifest-path, so every Rust command names the pinned channel explicitly.
-rustc_version=$(rustc "+$rust_pin" -vV | tr '\n' ';')
+rustc_version=$(rustc "+$rust_pin" -vV)
 rustc_line=$(rustc "+$rust_pin" -V)
 cargo_version=$(cargo "+$rust_pin" -V)
 cc_version=$(cc --version | sed -n 1p)
@@ -175,30 +175,24 @@ stamp "native consent: $((t_consent - t_host))s"
 t_host=$t_consent
 fi
 
-# 5. Rust binaries. Paths are remapped so the bytes do not depend on where the
-# operator unpacked the source or keeps the cargo registry. Remapping is not
-# enough: every cargo command runs through the fixed build root (lib.sh
-# candidate_build_root says why). The path is part of the build's identity, so
-# it is recorded in provenance.json, and builds compared for reproducibility
-# must share MINI_CANDIDATE_BUILD_ROOT.
-candidate_build_root "$src"
-bsrc=$CANDIDATE_BUILD_SRC
-trap candidate_build_root_release EXIT
+# 5. Workspace members use relative dependency identity at every absolute build root.
+# Do not compile through a shared symlink: qualification compares distinct lexical roots.
+bsrc=$src
 cargo_home=${CARGO_HOME:-$HOME/.cargo}
 cargo_home=$(CDPATH='' cd -- "$cargo_home" && pwd -P)
-export RUSTFLAGS="--remap-path-prefix=$bsrc=/minidregg --remap-path-prefix=$cargo_home=/cargo"
+export RUSTFLAGS="--remap-path-prefix=$bsrc=/minidregg --remap-path-prefix=$cargo_home=/cargo --remap-path-prefix=$out/work/target=/target"
 export CARGO_INCREMENTAL=0
 build_rust() {
   crate=$1 bin=$2
   (cd "$bsrc" && cargo "+$rust_pin" build --release --locked -j "$cargo_jobs" \
     --manifest-path "$bsrc/native/$crate/Cargo.toml" \
-    --target-dir "$out/work/target/$crate" --bin "$bin" \
+    --target-dir "$out/work/target" --bin "$bin" \
     >"$out/logs/cargo-$crate-$bin.log" 2>&1) \
     || { tail -40 "$out/logs/cargo-$crate-$bin.log" >&2; candidate_die "cargo build failed: $crate/$bin"; }
   # The binary must name the pinned compiler (ELF .comment "rustc version ...").
-  grep -aqF "rustc version ${rustc_line#rustc }" "$out/work/target/$crate/release/$bin" \
+  grep -aqF "rustc version ${rustc_line#rustc }" "$out/work/target/release/$bin" \
     || candidate_die "$bin was not built by $rustc_line"
-  install -m 0555 "$out/work/target/$crate/release/$bin" "$out/bin/$bin"
+  install -m 0555 "$out/work/target/release/$bin" "$out/bin/$bin"
 }
 # The Rust roles are package.py's one list (`--rust-roles`: ROLE CRATE BINARY), read from the archive.
 python3 "$src/deploy/candidate/package.py" --rust-roles >"$out/work/rust-roles.txt" \
@@ -269,18 +263,18 @@ stamp "Rust binaries: $((t_rust - t_host))s"
 
 # 6. Smoke: every binary runs and prints its usage contract; the client names
 # the friend surface (shell, join, --remote).
-"$out/bin/mini" --help >"$out/logs/usage-mini.txt" 2>&1 || true
+"$out/bin/mini" --help >"$out/logs/usage-mini.txt" 2>&1 || usage_status=$?
 grep -q '^mini ' "$out/logs/usage-mini.txt" || candidate_die "mini did not print its usage"
 for word in 'mini shell' 'mini join' '--remote'; do
   grep -qF -- "$word" "$out/logs/usage-mini.txt" || candidate_die "mini --help does not list $word"
 done
 if [ "$client_only" = 1 ]; then
-  file "$out"/bin/mini "$out"/bin/clients/*/mini > "$out/logs/file-types.txt" 2>/dev/null || true
+  file "$out"/bin/mini "$out"/bin/clients/*/mini > "$out/logs/file-types.txt" 2>/dev/null || usage_status=$?
   jq -n \
     --arg commit "$commit" --arg archive "$archive_sha" --arg origin "$source_origin" \
     --arg files "$source_files_sha" --arg rustPin "$rust_pin" --arg rustc "$rustc_version" \
     --arg cargo "$cargo_version" --arg cc "$cc_version" --arg zig "$zig_version" \
-    --arg rustflags "remap source=/minidregg, CARGO_HOME=/cargo, cargo ran through $bsrc" \
+    --arg rustflags "$RUSTFLAGS" \
     --argjson clients "$clients_json" --arg built "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     '{type: "minidregg-client-provenance-v1",
       source: {commit: $commit, archive: "source.tar", archiveSha256: $archive,
@@ -294,21 +288,21 @@ if [ "$client_only" = 1 ]; then
   cat "$out/SHA256SUMS"
   exit 0
 fi
-"$out/bin/minidregg-host" >"$out/logs/usage-host.txt" 2>&1 || true
+"$out/bin/minidregg-host" >"$out/logs/usage-host.txt" 2>&1 || usage_status=$?
 grep -q '^minidregg-host:' "$out/logs/usage-host.txt" || candidate_die "Host did not print its usage"
-"$out/bin/minidregg-client-consent" >"$out/logs/usage-consent.txt" 2>&1 || true
+"$out/bin/minidregg-client-consent" >"$out/logs/usage-consent.txt" 2>&1 || usage_status=$?
 grep -q '^minidregg-client-consent: .*minidregg-client-consent CONFIG stdio' "$out/logs/usage-consent.txt" \
   || candidate_die "consent provider did not print its usage"
 # The Host starts without doing work: every start of `mini serve` pays its initializers.
 "$src/scripts/check-host-cold-start.sh" "$out/bin/minidregg-host" >"$out/logs/host-cold-start.txt" 2>&1 \
   || { cat "$out/logs/host-cold-start.txt" >&2; candidate_die "Host cold start over budget"; }
-"$out/bin/minidregg-link-sqlite-store" >"$out/logs/usage-store.txt" 2>&1 || true
+"$out/bin/minidregg-link-sqlite-store" >"$out/logs/usage-store.txt" 2>&1 || usage_status=$?
 grep -q '^usage:' "$out/logs/usage-store.txt" || candidate_die "Store helper did not print its usage"
-"$out/bin/minidregg-credential-signature-verifier" >"$out/logs/usage-verifier.txt" 2>&1 || true
+"$out/bin/minidregg-credential-signature-verifier" >"$out/logs/usage-verifier.txt" 2>&1 || usage_status=$?
 grep -q '^usage:' "$out/logs/usage-verifier.txt" || candidate_die "verifier did not print its usage"
 file "$out"/bin/minidregg-host "$out"/bin/minidregg-client-consent "$out"/bin/mini "$out"/bin/minidregg-link-sqlite-store \
   "$out"/bin/minidregg-credential-signature-verifier "$out"/bin/clients/*/mini \
-  > "$out/logs/file-types.txt" 2>/dev/null || true
+  > "$out/logs/file-types.txt" 2>/dev/null || usage_status=$?
 
 # 7. Package: the one candidate format, written by deploy/candidate/package.py
 # from THIS archive's bytes (the copy extracted into work/src). The roles are the
@@ -331,13 +325,15 @@ printf '%s' "$roles" | jq --arg c "$commit" '. + {sourceCommit: $c, origin: "bui
 jq -n --arg leanPin "$lean_pin" --arg lean "$lean_version" --arg lake "$lake_version" \
   --arg mathlib "$(jq -r '.packages[] | select(.name == "mathlib") | .rev' "$src/lake-manifest.json")" \
   --arg rustPin "$rust_pin" --arg rustc "$rustc_version" --arg cargo "$cargo_version" \
-  --arg cc "$cc_version" --arg zig "$zig_version" --arg rustflags "remap source=/minidregg, CARGO_HOME=/cargo, cargo ran through $bsrc" \
+  --arg cc "$cc_version" --arg zig "$zig_version" --arg rustflags "$RUSTFLAGS" \
   --arg sourceOrigin "$source_origin" \
   --argjson tCache "$((t_cache - t_lean))" --argjson tHost "$((t_host - t_cache))" \
   --argjson tRust "$((t_rust - t_host))" --argjson tTotal "$(( $(date +%s) - t_start ))" \
   '{recorded: "build.sh", sourceOrigin: $sourceOrigin, leanToolchain: $leanPin, lean: $lean, lake: $lake,
     mathlibRev: $mathlib, rustToolchain: $rustPin, rustc: $rustc, cargo: $cargo, cc: $cc, zig: $zig,
     rustflags: $rustflags,
+    buildFlags: {rust: {RUSTFLAGS: $rustflags, CARGO_INCREMENTAL: "0", profile: "release", locked: true},
+      native: {builder: "scripts/build-native-host.sh", hostRoot: "Host.Main", consentRoot: "Host.ClientConsentSession"}},
     seconds: {leanPackagesAndMathlibCache: $tCache, nativeHost: $tHost, rust: $tRust, total: $tTotal}}' \
   >"$out/work/toolchains.json"
 python3 "$src/deploy/candidate/package.py" --roles "$roles_json" --source-archive "$out/source.tar" \
