@@ -27,7 +27,8 @@ candidate_sha256() {
 # MANIFEST is the journey-format manifest build.sh writes (see INTERFACES.md):
 # absolute "host" "mini" "store" "verifier" "candidate" paths and a "sha256"
 # map. Sets CANDIDATE_MANIFEST, CANDIDATE_DIR, CANDIDATE_PROVENANCE, HOST, MINI,
-# STORE, VERIFIER after checking every file against its pinned SHA-256.
+# STORE, VERIFIER, CONSENT after validating their manifest output entries.
+# Call candidate_verify_outputs before launching any resolved binary.
 candidate_resolve() {
   manifest=$(candidate_abs "$1")
   [ -f "$manifest" ] || candidate_die "manifest not found: $manifest"
@@ -58,14 +59,15 @@ candidate_resolve() {
       (.value.build.flags.rust | type == "object" and length > 0) and
       (.value.build.flags.native | type == "object" and length > 0))) and
     ($p.binaries | to_entries | all(
-      . as $r | $m.outputs[$r.value.path].sha256 == $r.value.sha256 and
+      . as $r | ($m.outputs | has($r.value.path)) and
+      $m.outputs[$r.value.path].sha256 == $r.value.sha256 and
       $m.sha256[$r.key] == $r.value.sha256)) and
     (["host", "consent", "mini", "store", "verifier", "grainRuntime",
       "grainProviderBridge", "inferenceScheduler", "spkHost", "spkBrowserProxy",
       "spkBroker", "spkHostd", "discord", "payWatcher", "keys"] |
       all(. as $r | $p.binaries[$r].path | type == "string"))
     ' "$manifest" >/dev/null || candidate_die "manifest output identity is incomplete or differs from provenance"
-  for role in host mini store verifier; do
+  for role in host mini store verifier consent; do
     rel=$(jq -er --arg role "$role" '.binaries[$role].path' "$CANDIDATE_PROVENANCE")
     path=$CANDIDATE_DIR/$rel
     [ "$(jq -r --arg role "$role" '.[$role]' "$manifest")" = "$path" ] \
@@ -75,12 +77,15 @@ candidate_resolve() {
       mini) MINI=$path ;;
       store) STORE=$path ;;
       verifier) VERIFIER=$path ;;
+      consent) CONSENT=$path ;;
     esac
   done
 }
 
 # Each read happens in this shell (no pipeline that could hide a refusal).
 candidate_verify_outputs() {
+  jq -e '.outputs | type == "object" and length > 0' "$1" >/dev/null \
+    || candidate_die "manifest .outputs must be a nonempty object"
   rows=$(jq -r '.outputs | to_entries[] | [.key, .value.sha256] | @tsv' "$1") \
     || candidate_die "cannot read manifest outputs"
   while read -r rel expected; do

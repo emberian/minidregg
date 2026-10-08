@@ -19,6 +19,9 @@ here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 # shellcheck source=deploy/candidate/lib.sh
 . "$here/lib.sh"
 candidate_require jq sha256sum od tr ps
+# A caller's signing-helper selection cannot introduce an unlisted executable.
+# sponsor selects the verified manifest roles once its state config exists.
+unset MINI_LOCAL_HOST MINI_CONSENT_HOST MINI_CONSENT_CONFIG
 
 [ $# -ge 1 ] || { sed -n '2,15p' "$0" >&2; exit 2; }
 action=$1
@@ -176,7 +179,7 @@ status() {
 sponsor() {
   load_state "$state"
   MINI_LOCAL_HOST=$HOST
-  MINI_CONSENT_HOST=$CANDIDATE_DIR/bin/minidregg-client-consent
+  MINI_CONSENT_HOST=$CONSENT
   MINI_CONSENT_CONFIG=$CONFIG
   export MINI_LOCAL_HOST MINI_CONSENT_HOST MINI_CONSENT_CONFIG
   [ -S "$SOCKET" ] || candidate_die "Store is not serving at $SOCKET"
