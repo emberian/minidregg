@@ -191,6 +191,22 @@ def safetyText : DefinitionSafety → String
 def quotText : QuotKind → String
   | .type => "type" | .ctor => "ctor" | .lift => "lift" | .ind => "ind"
 
+private def collectUsedConstants : Expr → Array Name → Array Name
+  | .const n _, acc => acc.push n
+  | .app f a, acc => collectUsedConstants a (collectUsedConstants f acc)
+  | .lam _ type body _, acc => collectUsedConstants body (collectUsedConstants type acc)
+  | .forallE _ type body _, acc => collectUsedConstants body (collectUsedConstants type acc)
+  | .letE _ type value body _, acc =>
+      collectUsedConstants body (collectUsedConstants value (collectUsedConstants type acc))
+  | .proj typeName _ struct, acc => (collectUsedConstants struct acc).push typeName
+  | .mdata _ body, acc => collectUsedConstants body acc
+  | _, acc => acc
+
+/-- Constants named by an expression, including the structure type stored only in a raw
+`Expr.proj`. Lean 4.30's `Expr.getUsedConstants` walks the projection's operand but omits that
+type name, so the manifest keeps its own complete structural walk. -/
+def usedConstants (e : Expr) : Array Name := collectUsedConstants e #[]
+
 /-- The roots (types and bodies) of a constant's content, the extra shape it carries, and
 the constants its content mentions. A leaf (`internal = false`, an axiom, an opaque) carries
 its type only and mentions nothing. -/
@@ -199,16 +215,16 @@ def content (internal : Bool) (info : ConstantInfo) : Array Expr × String × Ar
   if !internal then leaf else
   match info with
   | .defnInfo d => (#[d.type, d.value], safetyText d.safety,
-      d.type.getUsedConstants ++ d.value.getUsedConstants)
-  | .thmInfo t => (#[t.type], "", t.type.getUsedConstants)
+      usedConstants d.type ++ usedConstants d.value)
+  | .thmInfo t => (#[t.type], "", usedConstants t.type)
   | .inductInfo i => (#[i.type],
       s!"{i.numParams} {i.numIndices} {i.isRec} {i.isUnsafe} {i.isReflexive} all={",".intercalate (i.all.map toString)} ctors={",".intercalate (i.ctors.map toString)}",
-      i.type.getUsedConstants ++ i.all.toArray ++ i.ctors.toArray)
+      usedConstants i.type ++ i.all.toArray ++ i.ctors.toArray)
   | .ctorInfo c => (#[c.type], s!"{c.induct} {c.cidx} {c.numParams} {c.numFields} {c.isUnsafe}",
-      c.type.getUsedConstants.push c.induct)
+      (usedConstants c.type).push c.induct)
   | .recInfo r => (#[r.type], s!"{r.numParams} {r.numIndices} {r.numMotives} {r.numMinors} {r.k} {r.isUnsafe}",
-      r.type.getUsedConstants)
-  | .quotInfo q => (#[q.type], quotText q.kind, q.type.getUsedConstants)
+      usedConstants r.type)
+  | .quotInfo q => (#[q.type], quotText q.kind, usedConstants q.type)
   | .axiomInfo _ => leaf
   | .opaqueInfo _ => leaf
 
