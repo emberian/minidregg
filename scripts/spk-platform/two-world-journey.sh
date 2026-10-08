@@ -1,14 +1,16 @@
 #!/bin/bash
 # full BASE_BIN OWN_RUST_BIN NEW_RUN_ROOT SIGNED_SPK
+# recovery BASE_BIN OWN_RUST_BIN NEW_RUN_ROOT SIGNED_SPK: R7 failed first create.
+# GRAIN_HOST optionally pins the exact-tree Host; copied into the recorded binary set.
 # custody BASE_BIN OWN_RUST_BIN NEW_RUN_ROOT: root volume receiving + plant only.
 # ROOT SETUP and ROOT CLEANUP use the deployment installer. The acceptance phase
 # uses sudo only for the single fixed-verb helper; all long-lived processes are
 # uid 1001 user units. No live Store or public node is selected.
 set -euo pipefail
 umask 077
-[[ $# == 4 || $# == 5 ]] || { echo "usage: $0 full|custody BASE_BIN OWN_RUST_BIN NEW_RUN_ROOT [SIGNED_SPK]" >&2; exit 2; }
+[[ $# == 4 || $# == 5 ]] || { echo "usage: $0 full|recovery|failstart|custody BASE_BIN OWN_RUST_BIN NEW_RUN_ROOT [SIGNED_SPK]" >&2; exit 2; }
 mode=$1 base=$2 own=$3 run=$4 spk=${5:-}
-[[ $mode == full || $mode == custody || $mode == cleanup ]] || exit 2
+[[ $mode == full || $mode == recovery || $mode == failstart || $mode == custody || $mode == cleanup ]] || exit 2
 [[ $(id -u) == 1001 ]] || { echo 'two-world acceptance requires uid 1001' >&2; exit 1; }
 [[ $run == /* && $run != *[!a-zA-Z0-9_./-]* ]] || exit 2
 if [[ $mode == cleanup ]]; then
@@ -26,20 +28,24 @@ fi
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
 installer=$repo/deploy/spk-host/install-user-world
-if [[ $mode == full && -z $spk ]]; then spk=$("$here/fetch-test-spk.sh"); fi
-if [[ $mode == full ]]; then [[ -f $spk && ! -L $spk ]] || { echo 'two-world acceptance requires the staged signed SPK' >&2; exit 1; }; fi
+if [[ ( $mode == full || $mode == recovery || $mode == failstart ) && -z $spk ]]; then spk=$("$here/fetch-test-spk.sh"); fi
+if [[ $mode == full || $mode == recovery || $mode == failstart ]]; then [[ -f $spk && ! -L $spk ]] || { echo 'two-world acceptance requires the staged signed SPK' >&2; exit 1; }; fi
 systemctl --user is-active default.target >/dev/null
 [[ $(loginctl show-user 1001 -p Linger --value) == yes ]] || { echo 'operator linger is required' >&2; exit 1; }
 if [[ $mode != cleanup ]]; then
-mkdir -m 700 -p /run/user/1001/systemd/user "$run/bin" "$run/a/evidence" "$run/b/evidence"
+mkdir -m 700 -p /run/user/1001/systemd/user "$run/bin"
 for binary in mini minidregg-host minidregg-link-sqlite-store minidregg-credential-signature-verifier minidregg-client-consent; do
-  install -m 755 "$base/$binary" "$run/bin/$binary"
+  source_binary=$base/$binary
+  if [[ $binary == minidregg-host ]]; then source_binary=${GRAIN_HOST:-$source_binary}; fi
+  if [[ $binary == minidregg-client-consent ]]; then source_binary=${GRAIN_CONSENT:-$source_binary}; fi
+  install -m 755 "$source_binary" "$run/bin/$binary"
 done
 for binary in spk-host mini-spk-broker mini-spk-volume-helper; do
   install -m 755 "$own/$binary" "$run/bin/$binary"
 done
 install -m 755 "$repo/deploy/spk-host/spk-ingest" "$run/bin/spk-ingest"
 sha256sum "$run/bin/"* >"$run/binary-sha256.txt"
+export GRAIN_HOST="$run/bin/minidregg-host"
 runid=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
 helper=/usr/local/libexec/mini-spk-volume-helper-$runid
 else
@@ -47,13 +53,17 @@ else
   [[ $helper =~ ^/usr/local/libexec/mini-spk-volume-helper-[0-9a-f]{16}$ ]] || exit 2
 fi
 stores=() roots=() configured=()
+worlds=(a b)
+if [[ $mode == recovery || $mode == failstart || -d $run/s1 ]]; then worlds=(s1 s2); fi
+world_app=9101
+if [[ $mode == recovery || $mode == failstart ]]; then export GRAIN_A=71; world_app=7101; fi
 cleanup() {
   local original=$? cleanup_rc=0 store root unit request verb index world
   trap - EXIT INT TERM
   index=0
   for store in "${stores[@]}"; do
     root=/var/lib/mini-spk-worlds/$store
-    world=a; [[ $index == 0 ]] || world=b
+    world=${worlds[$index]}
     if [[ -f $run/$world/store/base/workroom/deployment/pinned-config.json ]]; then
       if ! BIN="$run/bin" GRAINS_ROOT="$root" BROKER_SOCKET="$root/runtime-$store/broker.sock" "$here/grain-journey.sh" stop-services "$run/$world" >>"$run/cleanup-services.log" 2>&1; then cleanup_rc=1; fi
     fi
@@ -102,8 +112,9 @@ if [[ $mode == cleanup ]]; then
   exit 0
 fi
 # Only scratch identities are generated; do not reuse an existing grain profile.
-for world in a b; do
-  if [[ $mode == full ]]; then
+for world in "${worlds[@]}"; do
+  mkdir -m 700 -p "$run/$world/evidence"
+  if [[ $mode == full || $mode == recovery || $mode == failstart ]]; then
     BIN="$run/bin" GRAINS_ROOT=/var/lib/mini-spk-worlds/0000000000000000 \
       BROKER_SOCKET=/var/lib/mini-spk-worlds/0000000000000000/runtime-0000000000000000/broker.sock \
       "$here/grain-journey.sh" phase "$run/$world" store | tee "$run/$world/store-phase.log"
@@ -147,8 +158,7 @@ done
 [[ $(jq -er .unit "$run/name-0.json") != "$(jq -er .unit "$run/name-1.json")" ]] || { echo 'unit-name-collision: two stores rendered one unit' >&2; exit 1; }
 phase() {
   local index=$1; shift
-  local world=a
-  [[ $index == 0 ]] || world=b
+  local world=${worlds[$index]}
   BIN="$run/bin" SPK="$spk" GRAINS_ROOT="${roots[$index]}" \
     BROKER_SOCKET="${roots[$index]}/runtime-${stores[$index]}/broker.sock" \
     "$here/grain-journey.sh" phase "$run/$world" "$@"
@@ -157,7 +167,7 @@ if [[ $mode == full ]]; then
   # Both brokers are already up; both Stores/apps stay up during the restart.
   for index in 0 1; do
     phase "$index" services workroom profile birth-a install-a share-a
-    world=a; [[ $index == 0 ]] || world=b
+    world=${worlds[$index]}
     profile=$(jq -er .profilePath "$run/$world/evidence/profile-result.json")
     "$here/prepare-resident-config.sh" "$run/bin/spk-host" "$profile" 9101 >"$run/$world/evidence/prepared-resident.json"
     resident=$(jq -er .residentConfig "$run/$world/evidence/prepared-resident.json")
@@ -173,7 +183,7 @@ if [[ $mode == full ]]; then
     phase "$index" birth-b install-b share-b start-b floor-b enroll-b get-b status-a status-b
   done
   for index in 0 1; do
-    world=a; [[ $index == 0 ]] || world=b
+    world=${worlds[$index]}
     profile=$(jq -er .profilePath "$run/$world/evidence/profile-result.json")
     "$run/bin/spk-host" grain status "$profile" 9101 >"$run/status-$index.json"
     jq -er '.runs[] | select(.state=="running") | .unit' "$run/status-$index.json" >"$run/units-$index.txt"
@@ -195,6 +205,27 @@ if [[ $mode == full ]]; then
   # Live copy is the original filesystem freeze/copy/thaw transaction.
   sudo -n -- "$helper" "$(jq -c '.verb="freeze"' "${roots[0]}/broker/volume-9101.json")" >>"$run/volume-helper.log" 2>&1
   printf 'PASS two-world uid=1001 install/start/http/stop/restart/second-instance disjoint-units sockets subuids\n' | tee -a "$run/result.log"
+elif [[ $mode == failstart ]]; then
+  # Run the complete historical failstart sequence on Store 1, including
+  # its later continue failure, backup and resident-kill recovery. Store 2
+  # is independently installed for the same-app namespace check afterwards.
+  phase 1 services workroom profile birth-a install-a share-a
+  BIN="$run/bin" SPK="$spk" GRAINS_ROOT="${roots[0]}" \
+    BROKER_SOCKET="${roots[0]}/runtime-${stores[0]}/broker.sock" \
+    "$here/jspk1.sh" failstart "$run"
+  BIN="$run/bin" SPK="$spk" "$here/jspk1.sh" rows "$run" s2-same-app
+  grep -F $'s1-failstart-restart\tPASS\t' "$run/rows.tsv"
+  grep -F $'s2-same-app\tPASS\t' "$run/rows.tsv"
+  printf 'PASS jspk1 failstart and s2-same-app\n' | tee -a "$run/result.log"
+elif [[ $mode == recovery ]]; then
+  for index in 0 1; do
+    phase "$index" services workroom profile birth-a install-a share-a
+  done
+  BIN="$run/bin" SPK="$spk" "$here/jspk1.sh" r7 "$run"
+  grep -F $'R7-stop-retry\tPASS\t' "$run/rows.tsv"
+  grep -F $'R7-continue\tPASS\t' "$run/rows.tsv"
+  grep -F $'s2-same-app\tPASS\t' "$run/rows.tsv"
+  printf 'PASS R7 failed-first-create/retry/replay/STOP/continue and s2-same-app\n' | tee -a "$run/result.log"
 else
   # Actual fixed-verb root receiver with no Mini semantics asserted.
   registry=/etc/mini-spk-volumes/${stores[0]}.json
@@ -207,4 +238,4 @@ else
   echo 'PASS isolated mounted ext4/freeze/export receiving (SPK lifecycle unqualified)' | tee -a "$run/result.log"
 fi
 # Both modes retain the cross-world mutation's receiving evidence.
-"$here/plant-helper-cross-world-volume.sh" "$helper" "${roots[0]}/broker/volume-9101.json" "/etc/mini-spk-volumes/${stores[1]}.json" "$run/cross-world-plant"
+"$here/plant-helper-cross-world-volume.sh" "$helper" "${roots[0]}/broker/volume-$world_app.json" "/etc/mini-spk-volumes/${stores[1]}.json" "$run/cross-world-plant"
