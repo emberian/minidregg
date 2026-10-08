@@ -12,6 +12,7 @@ one `NAME SHA256` line per file under a header line).
 A source package names the front end that lowered it (`ObjectiveSourcePackage.Package.frontEnd`);
 the receiver re-runs THIS front end on the package's sources and admits only a
 package naming this identity (`ObjectiveBendNativeAdmission.SourceSelection`). -/
+import Compiler.PersistedCodecTags
 import Compiler.ObjectiveBendParse
 import Compiler.ObjectiveBendElaborate
 import Compiler.ObjectiveBendC4
@@ -30,17 +31,19 @@ def sources : List String :=
    "ObjectiveBendTermWire.lean", "ObjectiveBendFrontEnd.lean", "Sha256.lean", "ObjectiveBendLaw.lean",
    "ObjectiveBendContract.lean"]
 
-def manifestHeader : String := "DREGG/OBJECTIVE-BEND/FRONT-END/v1"
+def manifestHeader : String := Minidregg.Compiler.PersistedCodecTags.objectivebendfrontendidentity_manifestheader_a8a75167
 
 /-- The manifest text, read at elaboration time. -/
 elab "objective_front_end_manifest%" : term => do
   let some dir := (System.FilePath.mk (← getFileName)).parent
     | throwError "front-end identity: no directory for {← getFileName}"
-  let mut text := manifestHeader ++ "\n"
+  -- Retain the registered header as an expression dependency. Splicing the
+  -- whole manifest into one literal would erase its codec-tag provenance.
+  let mut text := "\n"
   for name in sources do
     let bytes ← IO.FS.readBinFile (dir / name)
     text := text ++ name ++ " " ++ Sha256.hex bytes ++ "\n"
-  return mkStrLit text
+  return mkApp2 (mkConst ``String.append) (mkConst ``manifestHeader) (mkStrLit text)
 
 def manifest : String := objective_front_end_manifest%
 
