@@ -5,6 +5,7 @@ each original Mini record and pairing it with that walk's original receipt.
 Legacy empty-page records are recognized as historical anchors, without
 claiming they enforced this ordering when first accepted.
 -/
+import Theory.PersistedCodecTags
 import Kernel.FnConsumerScope
 import Kernel.DurableDataIntent
 
@@ -56,8 +57,8 @@ def namespaceNullifier (domain semantics : Digest) (consumerNamespace : Namespac
   { codecVersion := 20
     domain := domain
     nullifierId := (Sp800185Cshake256.hash
-      "DREGG/FN/CONSUMER-NAMESPACE-CLAIM/v1".toUTF8.toList bytes).digest
-    canonicalBytes := "DREGG/FN/CONSUMER-NAMESPACE-CLAIM/v1".toUTF8.toList ++ bytes }
+      Minidregg.Theory.PersistedCodecTags.fn_consumer_namespace_claim_v1.toUTF8.toList bytes).digest
+    canonicalBytes := Minidregg.Theory.PersistedCodecTags.fn_consumer_namespace_claim_v1.toUTF8.toList ++ bytes }
 
 def keyStream : StreamCodec Key :=
   StreamCodec.xmap
@@ -91,8 +92,8 @@ def frontierNullifier (domain semantics : Digest) (key : Key)
   { codecVersion := 17
     domain := domain
     nullifierId := (Sp800185Cshake256.hash
-      "DREGG/FN/CONSUMER-FRONTIER-NULLIFIER/v2".toUTF8.toList bytes).digest
-    canonicalBytes := "DREGG/FN/CONSUMER-FRONTIER-NULLIFIER/v2".toUTF8.toList ++
+      Minidregg.Theory.PersistedCodecTags.fn_consumer_frontier_nullifier_v2.toUTF8.toList bytes).digest
+    canonicalBytes := Minidregg.Theory.PersistedCodecTags.fn_consumer_frontier_nullifier_v2.toUTF8.toList ++
       bytes }
 
 /-- Hashes only the exact authenticated fn poll report bytes retained by Host.

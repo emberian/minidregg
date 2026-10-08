@@ -4,6 +4,7 @@ application lifecycle BEGIN. A claim changes the app's pending phase to a
 claimed phase in Mini; it does not assert a host effect or permit a retry after
 uncertain physical execution.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationLifecycleBeginIngress
 
 namespace Minidregg.Kernel.ApplicationLifecycleClaim
@@ -103,7 +104,7 @@ def sourceStream : StreamCodec Source :=
     (by intro source; cases source; rfl)
 
 private def frame : List UInt8 :=
-  "DREGG/APPLICATION/LIFECYCLE-CLAIM/v2".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_lifecycle_claim_v2.toUTF8.toList
 
 private def rawCodec : LawfulCodec Source where
   encode source := frame ++ sourceStream.encode source
@@ -127,7 +128,7 @@ theorem decoded_canonical {bytes : List UInt8} {source : Source}
     source.canonicalBytes = bytes := strictCodec_canonical rawCodec decoded
 
 def sourceDigest (domain semantics : Digest) (source : Source) : Digest :=
-  (Sp800185Cshake256.hash "DREGG/APPLICATION/LIFECYCLE-CLAIM-SOURCE/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.application_lifecycle_claim_source_v1.toUTF8.toList
     ((StreamCodec.product digestStream (StreamCodec.product digestStream bytesStream)).encode
       (domain, semantics, source.canonicalBytes))).digest
 
@@ -152,9 +153,9 @@ def stableNullifier (domain semantics : Digest) (source : Source) : StableNullif
   codecVersion := 16
   domain := domain
   nullifierId := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/LIFECYCLE-CLAIM-KEY/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_lifecycle_claim_key_v1.toUTF8.toList
     (keyBytes domain semantics source)).digest
-  canonicalBytes := "DREGG/APPLICATION/LIFECYCLE-CLAIM-NULLIFIER/v1".toUTF8.toList ++
+  canonicalBytes := Minidregg.Theory.PersistedCodecTags.application_lifecycle_claim_nullifier_v1.toUTF8.toList ++
     keyBytes domain semantics source
 
 end Minidregg.Kernel.ApplicationLifecycleClaim

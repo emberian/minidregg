@@ -10,6 +10,7 @@ The separate checked START admission must obtain an exact completed-create
 certificate from verified history for `continue`, and absence of an earlier
 first-attempt claim for `create`. This pure shape alone is not a launch permit.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationSpkLaunchDescriptor
 import Compiler.NativeHostCodec
 
@@ -31,7 +32,7 @@ contract; host custody must not attach the old protected volume to a new
 deployment. -/
 def volumeIdOutput (domain : Digest) (app : Nat) : Sp800185Cshake256.Output :=
   Sp800185Cshake256.hash
-    "DREGG/APPLICATION/PERSISTENT-VOLUME-ID/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_persistent_volume_id_v1.toUTF8.toList
     ((StreamCodec.product digestStream StreamCodec.nat).encode (domain, app))
 
 def volumeId (domain : Digest) (app : Nat) : Digest :=
@@ -82,7 +83,7 @@ def custodyStream : StreamCodec Custody :=
     (fun (volume, physicalWitness) => ⟨volume, physicalWitness⟩)
     (by intro custody; cases custody; rfl)
 
-def custodyFrame : List UInt8 := "DREGG/SPK-VAR-CUSTODY/v1".toUTF8.toList
+def custodyFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.spk_var_custody_v1.toUTF8.toList
 
 def Custody.validFor (custody : Custody) (volume : Digest) : Bool :=
   custody.volume == volume &&
@@ -121,7 +122,7 @@ def bindingStream : StreamCodec Binding :=
 
 def codec : LawfulCodec Binding :=
   NativeHostCodec.framed
-    "DREGG/APPLICATION/LIFECYCLE-LAUNCH-BINDING/v1".toUTF8.toList bindingStream
+    Minidregg.Theory.PersistedCodecTags.application_lifecycle_launch_binding_v1.toUTF8.toList bindingStream
 
 def Binding.canonicalBytes (binding : Binding) : List UInt8 :=
   codec.encode binding
@@ -159,14 +160,14 @@ successful physical creation report. The eventual special receivers install
 these as distinct stable nullifiers; a mere hash preimage is not a receipt. -/
 def firstAttemptKey (domain : Digest) (binding : Binding) : Digest :=
   (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/FIRST-START-ATTEMPT/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_first_start_attempt_v1.toUTF8.toList
     ((StreamCodec.product digestStream
       (StreamCodec.product StreamCodec.nat digestStream)).encode
       (domain, binding.app, binding.volume))).digest
 
 def createdKey (domain : Digest) (binding : Binding) : Digest :=
   (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/VOLUME-CREATED/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_volume_created_v1.toUTF8.toList
     ((StreamCodec.product digestStream
       (StreamCodec.product StreamCodec.nat digestStream)).encode
       (domain, binding.app, binding.volume))).digest

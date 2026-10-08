@@ -29,6 +29,7 @@ Imports: Init and the leaf `Theory.Sp800185Cshake256Core` (itself Init only, no 
 code). The cSHAKE256 definition lives in the Theory tier, so `Pred` imports no `Compiler` module
 (the Pred row of scripts/check-import-boundary.sh no longer admits one).
 -/
+import Theory.PersistedCodecTags
 import Theory.Sp800185Cshake256Core
 import Theory.HashBytes
 
@@ -218,7 +219,7 @@ theorem preimage_length (o : Opening) :
 def digestWith (H : Hash) (o : Opening) : Int := (ofBE (H o.preimage) : Int)
 
 /-- The customization string of this atom's cSHAKE256. -/
-def customization : List UInt8 := utf8 "DREGG.PRED.HASHEQ/v2"
+def customization : List UInt8 := utf8 Minidregg.Theory.PersistedCodecTags.pred_hasheq_v2
 
 open Minidregg.Compiler.Sp800185Cshake256 (customizationPrefix cshake256Bytes squeeze32
   absorbPadded padForRate natBytesBE bytepad encodeString leftEncode rateBytes) in

@@ -32,6 +32,7 @@ exactly the fields of the cut, canonical decimals, lowercase hex, known routes, 
 magnitude at most 2^53 in payloads. `@[export]`: `minidregg_intent_encode`,
 `minidregg_intent_id_preimage` (one status byte, then the bytes or a UTF-8 refusal).
 -/
+import Theory.PersistedCodecTags
 import Compiler.NockProgramCodec
 import Kernel.Contracts.Identities
 import Lean.Data.Json
@@ -207,10 +208,10 @@ def intentStream : StreamCodec Intent :=
 
 /-- `DREGG/CONTRACT/INTENT/v1` -/
 def intentFrame : List UInt8 :=
-  [68, 82, 69, 71, 71, 47, 67, 79, 78, 84, 82, 65, 67, 84, 47, 73, 78, 84, 69, 78, 84, 47, 118, 49]
+  Minidregg.Theory.PersistedCodecTags.dregg_contract_intent_v1
 /-- `DREGG/CONTRACT/INTENT-ID/v1`: prefixes the bytes the client hashes into an `InvocationId`. -/
 def intentIdFrame : List UInt8 :=
-  [68, 82, 69, 71, 71, 47, 67, 79, 78, 84, 82, 65, 67, 84, 47, 73, 78, 84, 69, 78, 84, 45, 73, 68, 47, 118, 49]
+  Minidregg.Theory.PersistedCodecTags.dregg_contract_intent_id_v1
 
 theorem intent_frames_spell :
     intentFrame = "DREGG/CONTRACT/INTENT/v1".toUTF8.toList ∧

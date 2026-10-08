@@ -40,6 +40,7 @@ Six turns:
 Offerers are protected by offer safety, exit and conservation whoever invokes
 the method; the contract can propose only what its code computes.
 -/
+import Theory.PersistedCodecTags
 import Kernel.Seat
 import Kernel.SeatCell
 import Kernel.ObjectiveKernelConfig
@@ -143,13 +144,13 @@ def seatBodyStream : StreamCodec SeatBody :=
     (fun b => (b.seat, b.role, b.terms, b.opened)) (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2⟩)
     (by intro b; cases b; rfl)
 
-def instanceCodec := framed "DREGG/SEAT/INSTANCE/v1".toUTF8.toList instanceBodyStream
-def invitationCodec := framed "DREGG/SEAT/INVITATION/v1".toUTF8.toList invitationBodyStream
+def instanceCodec := framed Minidregg.Theory.PersistedCodecTags.seat_instance_v1.toUTF8.toList instanceBodyStream
+def invitationCodec := framed Minidregg.Theory.PersistedCodecTags.seat_invitation_v1.toUTF8.toList invitationBodyStream
 /-- Frame v3: a seat body no longer carries an open flag (a closed seat's cell is
 retired, never rewritten) and its proposal carries the donation marker; a v1 or v2 body refuses
 to decode. -/
-def seatCodec := framed "DREGG/SEAT/SEAT/v5".toUTF8.toList seatBodyStream
-def holdingsCodec := framed "DREGG/SEAT/HOLDINGS/v1".toUTF8.toList (StreamCodec.list StreamCodec.nat)
+def seatCodec := framed Minidregg.Theory.PersistedCodecTags.seat_seat_v5.toUTF8.toList seatBodyStream
+def holdingsCodec := framed Minidregg.Theory.PersistedCodecTags.seat_holdings_v1.toUTF8.toList (StreamCodec.list StreamCodec.nat)
 
 /-! ## Cells: protected coordinates -/
 
@@ -404,7 +405,7 @@ def decodePlan (fuel : Nat) (data : Data) : Except Refusal (List PlanAction) :=
 
 /-- The output codec a contract artifact names: its entry is a function from
 the call to a Plan, never an `Activity`. -/
-def contractCodecId : Digest := tagged "DREGG/SEAT/CONTRACT/OUTPUT-CODEC/v1" []
+def contractCodecId : Digest := tagged Minidregg.Theory.PersistedCodecTags.seat_contract_output_codec_v1 []
 
 /-- Re-execute the instance's method: replay its stored package and
 instantiate the replayed definition with the call (typed at its declared
@@ -627,25 +628,25 @@ structure Request where
 is its signer, nonce and exact turn bytes, so a retry finds its record. -/
 def transactionOf (request : Request) : TransactionId :=
   match request.turn with
-  | .publish stored => tagged "DREGG/SEAT/TX/PUBLISH/v1" (digestStream.encode (publishedPin stored))
-  | turn => tagged "DREGG/SEAT/TX/v1"
+  | .publish stored => tagged Minidregg.Theory.PersistedCodecTags.seat_tx_publish_v1 (digestStream.encode (publishedPin stored))
+  | turn => tagged Minidregg.Theory.PersistedCodecTags.seat_tx_v1
       (subjectStream.encode request.subject ++ StreamCodec.nat.encode request.nonce ++ turnStream.encode turn)
 
 /-- The id of the `index`-th member of the Plan an invoking turn performs, if
 it mints: a digest of the turn and the instance, so the contract never chooses
 an id (a re-mint of a spent id would need a digest collision). -/
 def mintId (transaction : TransactionId) (inst : InstanceId) (index : Nat) : InvitationId :=
-  (tagged "DREGG/SEAT/INVITATION-ID/v1"
+  (tagged Minidregg.Theory.PersistedCodecTags.seat_invitation_id_v1
     (digestStream.encode transaction ++ StreamCodec.nat.encode inst ++ StreamCodec.nat.encode index)).value
 
 /-- The domain of seat claims. -/
-def domain : Digest := tagged "DREGG/SEAT/DOMAIN/v1" []
+def domain : Digest := tagged Minidregg.Theory.PersistedCodecTags.seat_domain_v1 []
 
 /-- An invitation's durable claim: an offer consumes it, so an invitation
 is spent at most once whatever its cell says. -/
 def invitationClaim (id : InvitationId) : StableNullifier :=
   { codecVersion := 1, domain := domain,
-    nullifierId := tagged "DREGG/SEAT/CLAIM/invitation" (StreamCodec.nat.encode id),
+    nullifierId := tagged Minidregg.Theory.PersistedCodecTags.seat_claim_invitation (StreamCodec.nat.encode id),
     canonicalBytes := "invitation".toUTF8.toList ++ StreamCodec.nat.encode id }
 
 /-- The one kernel step a signed turn is (an invocation runs a Plan instead;

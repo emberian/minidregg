@@ -11,6 +11,7 @@ source, construct their accepted incidences from the same Descriptor, and bind
 the old authority cell. Nothing here manufactures those semantic proofs or calls
 a host verdict; it is not a public raw-DataIntent endpoint.
 -/
+import Theory.PersistedCodecTags
 import Compiler.ResourceBirthCodec
 import Compiler.CredentialAuthorityReplay
 import Compiler.CredentialAuthorityDomainReceiver
@@ -151,7 +152,7 @@ def allocationRequest {registry : TypeRegistry Digest}
     (height : Height) (descriptor : Descriptor registry) : Request .object :=
   { factoryRequest pins encoding oldAuthority (allocationPre before request).root height descriptor with
     argsDigest := encoding.hashBytes
-      ("DREGG.RESOURCE.BIRTH.ALLOCATION.ARGS/v2".toUTF8.toList ++
+      (Minidregg.Theory.PersistedCodecTags.resource_birth_allocation_args_v2.toUTF8.toList ++
         Minidregg.Compiler.Tower256ConcreteBackend.StreamCodec.nat.encode request.cellId ++
         encoding.codec.encode descriptor) }
 

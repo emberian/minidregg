@@ -8,6 +8,7 @@ and `frontEnd` names the one Lean front end (`ObjectiveBendFrontEndIdentity.iden
 whose output on these sources the receiver recomputes and requires
 (`ObjectiveBendPublication.publishedCore`, `ObjectiveBendNativeAdmission.SourceSelection`).
 An edition-2 package (three tool pins, stored ASTs) does not decode. -/
+import Theory.PersistedCodecTags
 import Compiler.NativeInvocationStatement
 import Compiler.PolicyRecordCodec
 import Theory.AssertAxioms
@@ -51,7 +52,7 @@ def stream : StreamCodec Package :=
     (fun p => (p.frontEnd,p.modules,p.entryModule,p.entryDefinition))
     (fun p => ⟨p.1,p.2.1,p.2.2.1,p.2.2.2⟩)
     (by intro p; cases p; rfl)
-def frame : List UInt8 := "DREGG/OBJECTIVE-BEND/SOURCE-PACKAGE".toUTF8.toList ++ [3]
+def frame : List UInt8 := Minidregg.Theory.PersistedCodecTags.objective_bend_source_package_byte_v3
 def rawCodec : LawfulCodec Package where
   encode p := frame ++ stream.encode p
   decode bytes := if bytes.take frame.length = frame then
@@ -66,7 +67,7 @@ abbrev encode := codec.encode
 abbrev decode := codec.decode
 
 def identity (p : Package) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.OBJECTIVE-BEND.SOURCE-PACKAGE/v3".toUTF8.toList (encode p)).digest
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.objective_bend_source_package_v3.toUTF8.toList (encode p)).digest
 
 def selectedDeclaration (p : Package) : Option String :=
   p.modules[p.entryModule]?.map (fun m => m.name ++ "." ++ p.entryDefinition)

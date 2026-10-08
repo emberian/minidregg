@@ -6,6 +6,7 @@ delegation at the original verifier-authenticated prefix, check current law,
 the installed record, and a fresh parent execution witness at the loaded tip.
 The old event21 ticket and enrollment remain generation-bound.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationShareIssueSource
 
 namespace Minidregg.Kernel.ApplicationAgentLifetimeGrant
@@ -111,7 +112,7 @@ def grantStream : StreamCodec Grant :=
     (by intro grant; cases grant; rfl)
 
 def codec : LawfulCodec Grant := NativeHostCodec.framed
-  "DREGG/APPLICATION/AGENT-LIFETIME-GRANT/v1".toUTF8.toList grantStream
+  Minidregg.Theory.PersistedCodecTags.application_agent_lifetime_grant_v1.toUTF8.toList grantStream
 
 def Grant.canonicalBytes (grant : Grant) : List UInt8 := codec.encode grant
 
@@ -140,7 +141,7 @@ def grantAtom (domain : Digest) (resource : Nat) : AtomId :=
   let preimage := (StreamCodec.product digestStream StreamCodec.nat).encode
     (domain, resource)
   ⟨⟨(Sp800185Cshake256.hash
-    "DREGG/APPLICATION/AGENT-LIFETIME-GRANT-ATOM/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_agent_lifetime_grant_atom_v1.toUTF8.toList
     preimage).digest.value⟩⟩
 
 /-- Decoding present current data is not admission of app delegation. Event27
@@ -162,7 +163,7 @@ def initialAction (domain : Digest) (grant : Grant) : ContentResource.Action :=
 
 def ticketDigest (ticket : Ticket) : Digest :=
   (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/AGENT-LIFETIME-TICKET/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_agent_lifetime_ticket_v1.toUTF8.toList
     (ticketCodec.encode ticket)).digest
 
 /-- Scope equality is deliberately strict for the first lifetime profile:

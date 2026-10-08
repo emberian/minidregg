@@ -12,6 +12,7 @@ the new subject, which the birth controller already admits. This operation
 supplies the remaining permission: reading the factory, which current resource
 birth authoring requires as a signed observation.
 -/
+import Theory.PersistedCodecTags
 import Kernel.CapabilityRevocationController
 
 namespace Minidregg.Kernel.ParticipantFactoryProvisioning
@@ -85,7 +86,7 @@ def framedRaw {α : Type} (frame : List UInt8) (stream : StreamCodec α) : Lawfu
 def framed {α : Type} (frame : List UInt8) (stream : StreamCodec α) : LawfulCodec α :=
   ResourceBirthCodec.strictCodec (framedRaw frame stream)
 
-def commandFrame : List UInt8 := "DREGG/PARTICIPANT/FACTORY-OBSERVE/v1".toUTF8.toList
+def commandFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.participant_factory_observe_v1.toUTF8.toList
 
 def commandCodec : LawfulCodec Command := framed commandFrame commandStream
 
@@ -101,7 +102,7 @@ def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 def ingressCodec : LawfulCodec Ingress :=
-  framed "DREGG/PARTICIPANT/FACTORY-OBSERVE/SIGNED/v1".toUTF8.toList ingressStream
+  framed Minidregg.Theory.PersistedCodecTags.participant_factory_observe_signed_v1.toUTF8.toList ingressStream
 
 structure DecodedIngress where
   private mk ::
@@ -128,7 +129,7 @@ def DecodedIngress.bytes (ingress : DecodedIngress) : List UInt8 :=
   ingressCodec.encode ingress.ingress
 
 def marker (domain semantics : Digest) (command : Command) : Nat :=
-  (Sp800185Cshake256.hash "DREGG.PARTICIPANT.FACTORY-OBSERVE.IDENTITY/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.participant_factory_observe_identity_v1.toUTF8.toList
     ((StreamCodec.product digestStream (StreamCodec.product digestStream
       (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream
         StreamCodec.nat))).encode
@@ -177,7 +178,7 @@ def declarationCodec : LawfulCodec (IssueDeclaration .object) :=
 
 def effectDigest (domain semantics : Digest) (command : Command)
     (d : IssueDeclaration .object) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.PARTICIPANT.FACTORY-OBSERVE.EFFECT/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.participant_factory_observe_effect_v1.toUTF8.toList
     ((StreamCodec.product digestStream (StreamCodec.product digestStream
       (StreamCodec.product bytesStream bytesStream))).encode
       (domain, semantics, commandCodec.encode command, declarationCodec.encode d))).digest
@@ -202,7 +203,7 @@ def context (deployment : Deployment) (snapshot : Snapshot) (semantics : Digest)
       policyRevision := snapshot.authState.policyRevision ⟨deployment.factoryId⟩
       cost := (commandCodec.encode command).length }
   argsDigestBytes := fun bytes =>
-    (Sp800185Cshake256.hash "DREGG.PARTICIPANT.FACTORY-OBSERVE.ARGS/v1".toUTF8.toList
+    (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.participant_factory_observe_args_v1.toUTF8.toList
       (commandCodec.encode command ++ bytes)).digest
 
 abbrev family (deployment : Deployment)
@@ -437,7 +438,7 @@ def signingPlanStream : StreamCodec SigningPlan :=
     (by intro plan; cases plan; rfl)
 
 def signingPlanCodec : LawfulCodec SigningPlan :=
-  framed "DREGG/PARTICIPANT/FACTORY-OBSERVE/PLAN/v1".toUTF8.toList signingPlanStream
+  framed Minidregg.Theory.PersistedCodecTags.participant_factory_observe_plan_v1.toUTF8.toList signingPlanStream
 
 /-! ## Named facts about the admitted grant -/
 

@@ -5,6 +5,7 @@ digest of the fixed canonical request and exact resource coordinates rather
 than the later dispatch signature or a duplicate HTTP body. Decoding it
 does not prove a reserve, payer delegation, or permission to call the app.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationDispatchAdmissionIngress
 
 namespace Minidregg.Kernel.ApplicationDispatchAgentReserveContext
@@ -77,7 +78,7 @@ def contextStream : StreamCodec Context :=
 
 def codec : LawfulCodec Context :=
   Minidregg.Compiler.NativeHostCodec.framed
-    "DREGG/APPLICATION/AGENT-DISPATCH-RESERVE-CONTEXT/v2".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_agent_dispatch_reserve_context_v2.toUTF8.toList
     contextStream
 
 def Context.canonicalBytes (context : Context) : List UInt8 :=

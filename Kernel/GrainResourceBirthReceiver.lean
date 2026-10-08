@@ -3,6 +3,7 @@ One replay-aware durable intent for the admitted grain-backed resource birth.
 The birth Book fee, factory authorization, both current grain incidences, and
 the coalesced authority post all come from the same old loaded image.
 -/
+import Theory.PersistedCodecTags
 import Kernel.GrainResourceBirthAdmission
 import Kernel.ResourceBirthReceiver
 
@@ -33,7 +34,7 @@ def event (domain : Digest)
   codecVersion := 3
   domain := domain
   eventId := commitmentBytes
-    ("DREGG/GRAIN-RESOURCE-BIRTH/EVENT/v1".toUTF8.toList ++
+    (Minidregg.Theory.PersistedCodecTags.grain_resource_birth_event_v1.toUTF8.toList ++
       Tower256ConcreteBackend.digestStream.encode domain ++ ingress.bytes)
   canonicalBytes := ingress.bytes
 

@@ -4,6 +4,7 @@ Route bindings are source policy bytes, not an invocation-supplied allow list.
 This registration is necessary but not sufficient: each nonordinary route still
 requires its closed current native admission producer.
 -/
+import Theory.PersistedCodecTags
 import Theory.AssertAxioms
 import Compiler.NativeInvocationStatement
 import Compiler.ContentControlFrame
@@ -26,7 +27,7 @@ def stream : StreamCodec Policy :=
     (fun p => (p.legacyParameters,p.activityControl,p.bindings))
     (fun (b,a,r) => ⟨b,a,r⟩) (by intro p; cases p; rfl)
 
-def frame : List UInt8 := "DREGG/NATIVE/REGISTERED-INVOCATION-PROFILE/v1".toUTF8.toList
+def frame : List UInt8 := Minidregg.Theory.PersistedCodecTags.native_registered_invocation_profile_v1.toUTF8.toList
 
 def rawCodec : LawfulCodec Policy where
   encode p := frame ++ stream.encode p

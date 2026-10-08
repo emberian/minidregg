@@ -4,6 +4,7 @@ codec describes Mini's checked identity and post-claim physical tip. It does
 not by itself attest a systemd process, package SHA-256 conversion, or a
 completed lifecycle operation; only the exact-CAS receiver may emit it.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationLifecycleClaimIngress
 import Kernel.ApplicationSpkPackageIdentity
 import Compiler.NativeHostCodec
@@ -57,7 +58,7 @@ def committedStream : StreamCodec Committed :=
     (by intro value; cases value; rfl)
 
 private def frame : List UInt8 :=
-  "DREGG/APPLICATION/LIFECYCLE-CLAIM-COMMITTED/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_lifecycle_claim_committed_v1.toUTF8.toList
 
 def codec : LawfulCodec Committed := NativeHostCodec.framed frame committedStream
 
@@ -90,7 +91,7 @@ def committedV2Stream : StreamCodec CommittedV2 :=
     (by intro value; cases value; rfl)
 
 private def frameV2 : List UInt8 :=
-  "DREGG/APPLICATION/LIFECYCLE-CLAIM-COMMITTED/v2".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_lifecycle_claim_committed_v2.toUTF8.toList
 
 def codecV2 : LawfulCodec CommittedV2 :=
   NativeHostCodec.framed frameV2 committedV2Stream

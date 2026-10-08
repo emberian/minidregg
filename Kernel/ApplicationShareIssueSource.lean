@@ -6,6 +6,7 @@ signature/capability/law at the same loaded image, then emit one distinct
 durable issue event. A bare resource birth or this generated draft alone is
 never a dispatch share.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationDispatchAuthority
 import Kernel.ApplicationGrain
 import Kernel.NativeHostContext
@@ -56,7 +57,7 @@ def specStream : StreamCodec Spec :=
     (by intro spec; cases spec; rfl)
 
 private def specFrame : List UInt8 :=
-  "DREGG/APPLICATION/SHARE-ISSUE-SPEC/v2".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_share_issue_spec_v2.toUTF8.toList
 
 private def rawSpecCodec : LawfulCodec Spec where
   encode spec := specFrame ++ specStream.encode spec
@@ -98,7 +99,7 @@ private def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 private def ingressFrame : List UInt8 :=
-  "DREGG/APPLICATION/SHARE-ISSUE-INGRESS/v2".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_share_issue_ingress_v2.toUTF8.toList
 
 private def rawIngressCodec : LawfulCodec Ingress where
   encode ingress := ingressFrame ++ ingressStream.encode ingress
@@ -347,7 +348,7 @@ descriptors stay opaque bytes authenticated by their original profile's record.
 Hash collision resistance is external; digest equality is not byte equality. -/
 def sourceBytesFromDescriptorBytes (spec : Spec) (descriptorBytes : List UInt8) :
     List UInt8 :=
-  "DREGG/APPLICATION/SHARE-ISSUE-SOURCE/v2".toUTF8.toList ++
+  Minidregg.Theory.PersistedCodecTags.application_share_issue_source_v2.toUTF8.toList ++
     (StreamCodec.product bytesStream bytesStream).encode (specCodec.encode spec, descriptorBytes)
 
 def sourceBytes (spec : Spec) (descriptor : Descriptor CanonicalCellRegistry.registry) :
@@ -357,7 +358,7 @@ def sourceBytes (spec : Spec) (descriptor : Descriptor CanonicalCellRegistry.reg
 
 def issueMarker (spec : Spec) (descriptor : Descriptor CanonicalCellRegistry.registry) : Nat :=
   (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/SHARE-ISSUE-MARKER/v2".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_share_issue_marker_v2.toUTF8.toList
     (sourceBytes spec descriptor)).digest.value
 
 def appRequestFromSourceBytes (domain semantics : Digest) (federation : FederationId)
@@ -372,10 +373,10 @@ def appRequestFromSourceBytes (domain semantics : Digest) (federation : Federati
   target := ⟨spec.ticket.scope.app⟩
   verb := .delegateObject
   argsDigest := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/SHARE-ISSUE-ARGS/v2".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_share_issue_args_v2.toUTF8.toList
     originalSourceBytes).digest
   effectsDigest := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/SHARE-ISSUE-EFFECTS/v2".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_share_issue_effects_v2.toUTF8.toList
     originalSourceBytes).digest
   nonce := spec.ticket.issueNonce
   height := height

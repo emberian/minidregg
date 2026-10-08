@@ -5,6 +5,7 @@ also carries the independently signed ticket observation and the
 historical share-issue ingress used to select an admitted issue event. None of
 these bytes are authority until the receiving admission checks one image.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationDispatchCommand
 
 namespace Minidregg.Kernel.ApplicationDispatchAdmissionIngress
@@ -76,7 +77,7 @@ def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 private def frame : List UInt8 :=
-  "DREGG/APPLICATION/DISPATCH-ADMISSION-INGRESS/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_dispatch_admission_ingress_v1.toUTF8.toList
 
 private def rawCodec : LawfulCodec Ingress where
   encode ingress := frame ++ ingressStream.encode ingress
@@ -115,7 +116,7 @@ def event (ingress : Ingress) : StableEvent where
   codecVersion := 11
   domain := ingress.dispatch.domain
   eventId := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/DISPATCH-ADMISSION-EVENT/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_dispatch_admission_event_v1.toUTF8.toList
     ingress.canonicalBytes).digest
   canonicalBytes := ingress.canonicalBytes
 

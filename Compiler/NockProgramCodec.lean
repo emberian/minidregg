@@ -43,6 +43,7 @@ the program's sample and decode its writes (NOCK §2.1, §2.3).
 * **Immutability.** The single address is ROM: after birth no patch changes it
   (`program_immutable`), and the registry's final-post law pins its bytes.
 -/
+import Theory.PersistedCodecTags
 import Compiler.PolicyRecordCodec
 import Theory.ResourceBirth
 import Theory.Noun
@@ -246,11 +247,11 @@ def framed {α : Type} (frame : List UInt8) (stream : StreamCodec α) : LawfulCo
 
 /-- `DREGG/ABI/v5` -/
 def abiFrame : List UInt8 :=
-  [68, 82, 69, 71, 71, 47, 65, 66, 73, 47, 118, 53]
+  Minidregg.Theory.PersistedCodecTags.dregg_abi_v5
 /-- `DREGG/PROGRAM/v1` (E3, EVAL §1.4: the evaluator-generic record — evaluator id, code, ABI,
 params; the `DREGG/NOCK/PROGRAM/v1..v3` frames do not decode, and every `programId` changes). -/
 def programFrame : List UInt8 :=
-  [68, 82, 69, 71, 71, 47, 80, 82, 79, 71, 82, 65, 77, 47, 118, 49]
+  Minidregg.Theory.PersistedCodecTags.dregg_program_v1
 
 theorem abiFrame_spells : abiFrame = "DREGG/ABI/v5".toUTF8.toList := by decide +kernel
 theorem programFrame_spells : programFrame = "DREGG/PROGRAM/v1".toUTF8.toList := by decide +kernel
@@ -263,13 +264,13 @@ theorem abi_roundtrip (abi : Abi) : abiCodec.decode (abiCodec.encode abi) = some
 
 /-- The frames of ABI v1 (K-NOCK), v2 (N11), v3 (K-RUN-PIN's and NC-2's, two shapes), v4 (E2). -/
 def abiFrameV1 : List UInt8 :=
-  [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 65, 66, 73, 47, 118, 49]
+  Minidregg.Theory.PersistedCodecTags.dregg_nock_abi_v1
 def abiFrameV2 : List UInt8 :=
-  [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 65, 66, 73, 47, 118, 50]
+  Minidregg.Theory.PersistedCodecTags.dregg_nock_abi_v2
 def abiFrameV3 : List UInt8 :=
-  [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 65, 66, 73, 47, 118, 51]
+  Minidregg.Theory.PersistedCodecTags.dregg_nock_abi_v3
 def abiFrameV4 : List UInt8 :=
-  [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 65, 66, 73, 47, 118, 52]
+  Minidregg.Theory.PersistedCodecTags.dregg_nock_abi_v4
 
 theorem framedDecode_other_frame {α : Type} {frame old : List UInt8} (stream : StreamCodec α)
     (rest : List UInt8) (long : frame.length ≤ old.length) (differ : old.take frame.length ≠ frame) :
@@ -294,7 +295,7 @@ theorem abi_old_frame_refused (rest : List UInt8) :
 
 /-- `DREGG/NOCK/PROGRAM/v3`: E2's record frame. -/
 def programFrameNockV3 : List UInt8 :=
-  [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 80, 82, 79, 71, 82, 65, 77, 47, 118, 51]
+  Minidregg.Theory.PersistedCodecTags.dregg_nock_program_v3
 
 /-- E2's `DREGG/NOCK/PROGRAM/v3` record does not decode as `DREGG/PROGRAM/v1`. -/
 theorem program_old_frame_refused (rest : List UInt8) :
@@ -325,17 +326,16 @@ theorem programCodec_injective : Function.Injective programCodec.encode := by
 
 /-- `DREGG.NOCK.CODE/v1` -/
 def codeCustomization : List UInt8 :=
-  [68, 82, 69, 71, 71, 46, 78, 79, 67, 75, 46, 67, 79, 68, 69, 47, 118, 49]
+  Minidregg.Theory.PersistedCodecTags.dregg_nock_code_v1
 /-- `DREGG.NOCK.PROGRAM/v1` -/
 def programCustomization : List UInt8 :=
-  [68, 82, 69, 71, 71, 46, 78, 79, 67, 75, 46, 80, 82, 79, 71, 82, 65, 77, 47, 118, 49]
+  Minidregg.Theory.PersistedCodecTags.dregg_nock_program_v1
 /-- `DREGG.NOCK.PROGRAM.STATE/v1` -/
 def rootCustomization : List UInt8 :=
-  [68, 82, 69, 71, 71, 46, 78, 79, 67, 75, 46, 80, 82, 79, 71, 82, 65, 77, 46, 83, 84, 65, 84,
-    69, 47, 118, 49]
+  Minidregg.Theory.PersistedCodecTags.dregg_nock_program_state_v1
 /-- `DREGG.NOCK.PROGRAM.ID/v1` -/
 def idCustomization : List UInt8 :=
-  [68, 82, 69, 71, 71, 46, 78, 79, 67, 75, 46, 80, 82, 79, 71, 82, 65, 77, 46, 73, 68, 47, 118, 49]
+  Minidregg.Theory.PersistedCodecTags.dregg_nock_program_id_v1
 
 theorem customizations_distinct :
     [codeCustomization, programCustomization, rootCustomization, idCustomization].Nodup := by
@@ -520,7 +520,7 @@ def payloadStream := StreamCodec.product StreamCodec.nat (StreamCodec.option pro
 
 /-- `DREGG/NOCK/PROGRAM-CELL` -/
 def wireFrame : List UInt8 :=
-  [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 80, 82, 79, 71, 82, 65, 77, 45, 67, 69, 76, 76]
+  Minidregg.Theory.PersistedCodecTags.dregg_nock_program_cell
 
 def encode (state : Store layout) : List UInt8 :=
   wireFrame ++ payloadStream.encode (wireVersion, programAt state)

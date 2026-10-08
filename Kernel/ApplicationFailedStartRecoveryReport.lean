@@ -1,4 +1,5 @@
 /- Source-owned signed custody audit for the exact failed START incarnation. This does not prove that no earlier physical effect occurred. -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationLifecycleClaimV3Projection
 import Kernel.ApplicationLifecycleCompletionV2Report
 
@@ -70,7 +71,7 @@ def reportStream : StreamCodec Report :=
     (fun (claim, audit) => ⟨claim, audit⟩)
     (by intro report; cases report; rfl)
 
-def frame : List UInt8 := "DREGG/APPLICATION/FAILED-START-REPORT/v1".toUTF8.toList
+def frame : List UInt8 := Minidregg.Theory.PersistedCodecTags.application_failed_start_report_v1.toUTF8.toList
 
 def codec : LawfulCodec Report := NativeHostCodec.framed frame reportStream
 
@@ -98,10 +99,10 @@ def signedStream : StreamCodec Signed :=
     (by intro signed; cases signed; rfl)
 
 def signedCodec : LawfulCodec Signed := NativeHostCodec.framed
-  "DREGG/APPLICATION/FAILED-START-SIGNED-REPORT/v1".toUTF8.toList signedStream
+  Minidregg.Theory.PersistedCodecTags.application_failed_start_signed_report_v1.toUTF8.toList signedStream
 
 def signingFrame (domain semantics : Digest) (report : Report) : List UInt8 :=
-  "DREGG/APPLICATION/FAILED-START-SIGNATURE/v1".toUTF8.toList ++
+  Minidregg.Theory.PersistedCodecTags.application_failed_start_signature_v1.toUTF8.toList ++
     (StreamCodec.product digestStream
       (StreamCodec.product digestStream bytesStream)).encode
       (domain, semantics, report.canonicalBytes)

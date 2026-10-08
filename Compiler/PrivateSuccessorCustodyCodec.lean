@@ -1,5 +1,6 @@
 /- Exact persistence codecs for private custody. Canonical decoding protects
 identity, NOT rollback freshness; the physical store must preserve Extends. -/
+import Theory.PersistedCodecTags
 import Kernel.PrivateSuccessorCustody
 import Compiler.DurableReceiverCodec
 
@@ -63,7 +64,7 @@ def journalStream : StreamCodec Journal :=
     (by intro journal; cases journal; rfl)
 
 /-- Source-owned version/domain framing, not an unbound digest. -/
-def journalFrame : List UInt8 := "DREGG.PRIVATE.CORRELATIONS".toUTF8.toList ++ [1]
+def journalFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.private_correlations_byte_v1
 
 def framedJournalStream : StreamCodec Journal :=
   StreamCodec.xmap (StreamCodec.product bytesStream journalStream)

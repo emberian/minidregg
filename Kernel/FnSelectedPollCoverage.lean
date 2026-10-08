@@ -5,6 +5,7 @@ every article. Native Host authors the spec from the exact retained poll and
 projection; Mini admission separately checks the configured gateway signature,
 current gateway law, accepted owner release, and unified consumer frontier.
 -/
+import Theory.PersistedCodecTags
 import Kernel.FnConsumerFrontierCore
 import Kernel.FnSelectiveReleaseIngress
 
@@ -60,7 +61,7 @@ def evidenceStream : StreamCodec Evidence :=
 
 def evidenceCodec : LawfulCodec Evidence :=
   ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/SELECTED-POLL-COVERAGE/v2".toUTF8.toList
+    (NativeHostCodec.framed Minidregg.Theory.PersistedCodecTags.fn_selected_poll_coverage_v2.toUTF8.toList
       evidenceStream)
 
 def maxEvidenceBytes : Nat := 8192
@@ -113,7 +114,7 @@ def specStream : StreamCodec Spec :=
 
 def specCodec : LawfulCodec Spec :=
   ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/SELECTED-POLL-SPEC/v2".toUTF8.toList
+    (NativeHostCodec.framed Minidregg.Theory.PersistedCodecTags.fn_selected_poll_spec_v2.toUTF8.toList
       specStream)
 
 structure Ingress where
@@ -135,19 +136,19 @@ def ingressStream : StreamCodec Ingress :=
 
 def ingressCodec : LawfulCodec Ingress :=
   ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/SELECTED-POLL-INGRESS/v2".toUTF8.toList
+    (NativeHostCodec.framed Minidregg.Theory.PersistedCodecTags.fn_selected_poll_ingress_v2.toUTF8.toList
       ingressStream)
 
 def transactionId (spec : Spec) : Digest :=
   (Sp800185Cshake256.hash
-    "DREGG/FN/SELECTED-POLL-TRANSACTION/v2".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.fn_selected_poll_transaction_v2.toUTF8.toList
     (specCodec.encode spec)).digest
 
 def event (ingress : Ingress) : StableEvent where
   codecVersion := 17
   domain := ingress.spec.domain
   eventId := (Sp800185Cshake256.hash
-    "DREGG/FN/SELECTED-POLL-EVENT/v2".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.fn_selected_poll_event_v2.toUTF8.toList
     (ingressCodec.encode ingress)).digest
   canonicalBytes := ingressCodec.encode ingress
 

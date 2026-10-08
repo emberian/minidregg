@@ -1,6 +1,7 @@
 /- Objective closed ground returns. Profile metadata comes from the independently
 accepted native method/profile, not a returned record or caller-selected mask.
 This producer creates clear content effects, never encryption or authority. -/
+import Theory.PersistedCodecTags
 import Theory.ObjectiveBendTyping
 import Theory.ObjectiveBendDemandCapacity
 import Compiler.BendWorldPlan
@@ -26,14 +27,14 @@ structure Profile where
   deriving Repr
 
 def codecId : Digest := (Sp800185Cshake256.hash
-  "DREGG.OBJECTIVE-BEND.RESULT-CODEC/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.objective_bend_result_codec_v1.toUTF8.toList
   "complete-checked-ground-data;ordered-record;canonical-DemandData/v1;clear-return-slot;profile-selected-metadata".toUTF8.toList).digest
 
 def storageSchema : Digest := (Sp800185Cshake256.hash
-  "DREGG.OBJECTIVE-BEND.RETURN-STORAGE/v1".toUTF8.toList []).digest
+  Minidregg.Theory.PersistedCodecTags.objective_bend_return_storage_v1.toUTF8.toList []).digest
 
 def valueSchema (profile : Profile) (type : Ty) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.OBJECTIVE-BEND.RESULT-VALUE/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.objective_bend_result_value_v1.toUTF8.toList
     (digestStream.encode profile.sourceArtifact ++ digestStream.encode profile.selectedDeclaration ++ digestStream.encode codecId ++
       PolicyRecordCodec.stringStream.encode profile.sourceEntry ++
       (typeJson type).compress.toUTF8.toList)).digest
@@ -56,7 +57,7 @@ def dataMatches : Nat → Ty → Data → Bool
       else dataMatches fuel (.variant tail) (.variant label payload)
   | _,_,_ => false
 
-def dataFrame : List UInt8 := "DREGG/OBJECTIVE-BEND/CLEAR-DATA/v1".toUTF8.toList
+def dataFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.objective_bend_clear_data_v1.toUTF8.toList
 def encodeData (depth : Nat) (value : Data) : Option (List UInt8) :=
   (encoded depth value).map (fun bytes => dataFrame ++ bytes)
 

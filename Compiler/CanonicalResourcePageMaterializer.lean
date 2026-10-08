@@ -12,6 +12,7 @@ decoding additionally requires exact re-encoding. State roots use the actual
 Lean cSHAKE256 implementation. Hash collision resistance is an explicit
 compared-pair premise, never universal injectivity into a finite digest.
 -/
+import Theory.PersistedCodecTags
 import Compiler.FiniteDependentMapCodec
 import Compiler.IntStream
 import Compiler.Sp800185Cshake256
@@ -142,9 +143,9 @@ def stateStream : StreamCodec (Store CanonicalResourceKernel.layout) :=
   StreamCodec.xmap (StreamCodec.option bookStream) bookAt stateOfOption
     (by intro state; exact (state_ext state).symm)
 
-def wireVersion : Nat := 2
+def wireVersion : Nat := Minidregg.Theory.PersistedCodecTags.dregg_resource__byte_v2.getLast!.toNat
 
-def wireFrame : List UInt8 := [68,82,69,71,71,47,82,69,83,79,85,82,67,69,47,2]
+def wireFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.dregg_resource__byte_v2
 
 def framedCodec {α : Type} (kind : UInt8) (codec : LawfulCodec α) : LawfulCodec α where
   encode value := wireFrame ++ kind :: codec.encode value
@@ -157,7 +158,7 @@ def framedCodec {α : Type} (kind : UInt8) (codec : LawfulCodec α) : LawfulCode
 def stateCodec : LawfulCodec (Store CanonicalResourceKernel.layout) :=
   canonicalCodec (framedCodec 0 stateStream.toLawful)
 
-def rootCustomization : List UInt8 := "DREGG.RESOURCE.STATE/v2".toUTF8.toList
+def rootCustomization : List UInt8 := Minidregg.Theory.PersistedCodecTags.resource_state_v2.toUTF8.toList
 
 def rootBytes (bytes : List UInt8) : Digest :=
   (Sp800185Cshake256.hash rootCustomization bytes).digest

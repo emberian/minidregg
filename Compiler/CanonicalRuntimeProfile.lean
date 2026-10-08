@@ -13,6 +13,7 @@ cryptographic assumption; canonical encoding, profile construction and arithmeti
 premises are explicit here. Concrete native field/range selection lives in
 `NativeHostProfile`; this shared profile remains parameterized.
 -/
+import Theory.PersistedCodecTags
 import Compiler.CanonicalRuntimeProfileCore
 import Compiler.NativeProtocolFrames
 import Compiler.WorldExecutionContract
@@ -44,46 +45,46 @@ set_option autoImplicit false
 /-- Policy replacement keeps current-law composition and its authenticated dependency guards;
 the audience phase change and any roster/catalog preimage are checked against the same image. -/
 def installProjectionVersion : List UInt8 :=
-  "DREGG.RUNTIME.POLICY-INSTALL.PRESERVE-GRANTS-ADVANCE-REVISION.CURRENT-COMPOSED-LAW-CANDIDATE-GRAPH-AUDIENCE-CATALOG-GUARDS/v3".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.runtime_policy_install_preserve_grants_advance_revision_current_c_c1f9612f7f373edc.toUTF8.toList
 
 /-- One source-owned preparation supplies exact old/final views, clock/run/stream and
 target/index joint slots, semantic world-kind fields and composed-law dependencies.
 Protected objects bind the fresh epoch and complete roster at the same receiving image. -/
 def invocationProjectionVersion : List UInt8 :=
-  "DREGG.RUNTIME.JOINT-INVOCATION.EXACT-TARGETS-FINAL-POSTS-CURRENT-SIGNED-READS-CLOCK-SLOTS-RUN-SLOTS.TARGET-AND-INDEX-KEYED-JOINT-SLOTS.STREAM-APPEND-SLOTS.WORLD-KIND-SEMANTIC-FIELDS.COMPOSED-GUARDS-AUDIENCE-ROSTER.ROM-METHOD-OUTPUTS-ATOMIC-QUOTA-BOOK-COMPUTE-FUNDING.OBJECTIVE-ARTIFACT-SLOT-FIRST/v11".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.runtime_joint_invocation_exact_targets_final_posts_current_signed_e349850bee868e43.toUTF8.toList
 
 /-- Content uses the complete typed document tree, revisioned atoms, ordered marks,
 transclusion read guards, event/history/link indexes and live shared-name uniqueness.
 Committed hiding-key material is excluded from the predicate view. -/
 def contentProjectionVersion : List UInt8 :=
-  "DREGG.RUNTIME.CONTENT.FULL-DOCUMENT-TREE-REVISIONED-ATOMS-MARKS-TRANSCLUSION-HISTORY-LINKS.STORE-CELL.LIVE-SHARED-NAME-UNIQUENESS.NO-HIDING-KEY-PROJECTION/v5".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.runtime_content_full_document_tree_revisioned_atoms_marks_transcl_2e227868b68b93a4.toUTF8.toList
 
 /-- The initial next-key commitment is an explicit current-key-authorized
 admission with a separate next-key possession signature and exact record pin. -/
 def keyCommitmentAdoptionVersion : List UInt8 :=
-  "DREGG.SUBJECT-KEY.ADOPT-NEXT/current-live-exact-record+two-signatures+first-commitment-only/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.subject_key_adopt_next_current_live_exact_record_two_signatures_f_aacd68f55051a9ed.toUTF8.toList
 
 /-- Factory, initial source, grants and newborn share one prepared tuple. The authored
 height window, inherited lineage, current kind/descriptor/ROM guards and composed
 exports all contribute; a newborn local law is installed without self-gating birth. -/
 def birthProjectionVersion : List UInt8 :=
-  "DREGG.RUNTIME.RESOURCE-BIRTH.SCOPED-ACCOUNT-FACTORY-USER-COMMAND.AUTHORED-WINDOW-BOUNDED-LAG.INHERITED-LINEAGE.CURRENT-KIND-ROOT-DESCRIPTOR-ROM-GUARDS.COMPOSED-EXPORTS.EXPLICIT-PLACEMENT-OR-UNRESTRICTED-MUTATION.ORDINARY-TWO-GRANTS.EXPLICIT-RESERVE-THREE-GRANTS.INDEPENDENT-CURRENT-OWNER-CONSENT/v6".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.runtime_resource_birth_scoped_account_factory_user_command_author_5431c31fcc5e0a63.toUTF8.toList
 
 /-- Delegation checks current composed resource law and exact parent/child authority
 against authenticated dependencies from the same image. -/
 def delegationProjectionVersion : List UInt8 :=
-  "DREGG.RUNTIME.CAPABILITY-DELEGATION.SCOPED-PARENT-CHILD-AUTHORITY.CURRENT-COMPOSED-LAW-DEPENDENCY-GUARDS/v3".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.runtime_capability_delegation_scoped_parent_child_authority_curre_5e6893b4cf528357.toUTF8.toList
 
 /-- Revocation checks current composed resource law, the exact control grant
 and authenticated dependencies from the same image. -/
 def revocationProjectionVersion : List UInt8 :=
-  "DREGG.RUNTIME.CAPABILITY-REVOCATION.SCOPED-VICTIM-CONTROL-AUTHORITY.CURRENT-COMPOSED-LAW-DEPENDENCY-GUARDS/v3".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.runtime_capability_revocation_scoped_victim_control_authority_cur_25765520cfcff3b0.toUTF8.toList
 
 /-- K-RENOUNCE: the holder a capability names revokes it, signed by its
 current key; no management grant and no policy participate; the holder gate
 runs after the signature, and only its refusal is disclosed to the signer. -/
 def renounceVersion : List UInt8 :=
-  "DREGG.RUNTIME.CAPABILITY-RENOUNCE.HOLDER-SIGNED-NO-POLICY-GATE-AFTER-SIGNATURE/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.runtime_capability_renounce_holder_signed_no_policy_gate_after_signature_v1.toUTF8.toList
 
 /-- Signed queries use committed clock slots, current composed law, semantic world
 fields, exact observe-grant footprints and independently authorized document/index
@@ -94,16 +95,16 @@ def observationProjectionVersion : List UInt8 :=
 /-- Authorization binds exact inner semantic field footprints, current key and
 policy revision, separate grant generation, and current authenticated composed dependencies. -/
 def authorizationVersion : List UInt8 :=
-  "DREGG.RUNTIME.AUTHORIZATION.REVISION-GRANT-GENERATION-DISTINCT-REVOCATION.EXACT-INNER-SEMANTIC-FIELD-FOOTPRINT.CURRENT-COMPOSED-DEPENDENCIES/v5".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.runtime_authorization_revision_grant_generation_distinct_revocati_c1bfcb32cefcf6ea.toUTF8.toList
 
 /-- Native logical time is derived from the very image admitted and CASed.
 Its genesis offset belongs to the source-owned receiver parameters below. -/
 def nativeClockVersion : List UInt8 :=
-  "DREGG.RUNTIME.CLOCK.GENESIS-PLUS-ACCEPTED-COUNT.EXACT-IMAGE/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.runtime_clock_genesis_plus_accepted_count_exact_image_v1.toUTF8.toList
 
 /-- The authority domain is one cell; its clock is the spent-nullifier count. -/
 def authorityDomainVersion : List UInt8 :=
-  "DREGG.RUNTIME.AUTHORITY-DOMAIN.ONE-CELL.SPENT-NULLIFIER-CLOCK/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.runtime_authority_domain_one_cell_spent_nullifier_clock_v1.toUTF8.toList
 
 /-- The actual current codec frames, with explicit component boundaries. This
 replaces the old descriptive host-version label: changing a receiving frame now
@@ -122,7 +123,7 @@ mode. Enrollment/resume authenticates the complete ordered roster against a
 separate content catalog's live atom zero and exact current root. Fresh receiving
 and policy installation retain their source-owned phase checks. -/
 def audienceProjectionVersion : List UInt8 :=
-  "DREGG.RUNTIME.OBJECT-AUDIENCE/v1:state=object,epoch,parent,transition,audience,devices,history,manifest,mode,authoritySnapshot,deviceSnapshot;mode=active|frozen;complete-ordered-roster=subject,capability,deviceSource,deviceGeneration,keyCommitment;catalog=separate-content-live-atom-zero-exact-entry-bytes-and-root;enroll-resume-current-authority;fresh-current-active-epoch;manifest-and-all-holder-post-binding;program-descriptor-not-world-layout".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.runtime_object_audience_v1_state_object_epoch_parent_transition_a_e2d12c4bacbda5e1.toUTF8.toList
 
 /-- Fixed components use a framed list: component boundaries cannot collide by concatenation.
 The receiving registry contributes every actual tag, schema, version and resource
@@ -199,7 +200,7 @@ def sourceComponents : List (List UInt8) :=
    Kernel.ClockCell.idCustomization,
    StoreCodec.frame Kernel.SystemCell.wire,
    Kernel.SystemCell.idCustomization,
-   "DREGG.RUNTIME.TAIL-BOUND.HEAD-LE-CERTIFIED-PLUS-L.EVERY-NON-CERTIFY-RECORD/v1".toUTF8.toList,
+   Minidregg.Theory.PersistedCodecTags.runtime_tail_bound_head_le_certified_plus_l_every_non_certify_record_v1.toUTF8.toList,
    StoreCodec.rootCustomization,
    StoreCodec.saltCustomization,
    StoreCodec.leafCustomization,

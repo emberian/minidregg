@@ -24,6 +24,7 @@ authority. The operation marker is the intent's durable nullifier (the Store's
 consumed set; the authority cell is not written), so an exact repeat replays
 and a changed command under the same identity conflicts.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ParticipantKeyEnrollment
 import Compiler.NativeHostCodec
 import Kernel.StreamWrite
@@ -117,7 +118,7 @@ def commandStream : StreamCodec Command :=
       ⟨subject, payer, spend, nonce, fee, transfer, publication⟩)
     (by intro c; cases c; rfl)
 
-def commandFrame : List UInt8 := "DREGG/FLEET/TURN/v1".toUTF8.toList
+def commandFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.fleet_turn_v1.toUTF8.toList
 
 def commandCodec : LawfulCodec Command :=
   NativeHostCodec.framed commandFrame commandStream
@@ -134,7 +135,7 @@ def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 def ingressCodec : LawfulCodec Ingress :=
-  NativeHostCodec.framed "DREGG/FLEET/TURN/SIGNED/v1".toUTF8.toList ingressStream
+  NativeHostCodec.framed Minidregg.Theory.PersistedCodecTags.fleet_turn_signed_v1.toUTF8.toList ingressStream
 
 structure DecodedIngress where
   private mk ::
@@ -186,14 +187,14 @@ private def cshake (customization : String) (bytes : List UInt8) : Digest :=
 Every other command field is under the signature; a changed field with the same
 identity is a conflict, never a second effect. -/
 def marker (domain semantics : Digest) (command : Command) : Nat :=
-  (cshake "DREGG.FLEET.TURN.IDENTITY/v1"
+  (cshake Minidregg.Theory.PersistedCodecTags.fleet_turn_identity_v1
     ((StreamCodec.product digestStream (StreamCodec.product digestStream
       (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream
         (StreamCodec.product StreamCodec.nat StreamCodec.nat)))).encode
       (domain, semantics, command.subject, command.payer, command.nonce))).value
 
 def streamDigest (domain : Digest) (payer : Nat) (topic : List UInt8) : Digest :=
-  cshake "DREGG.FLEET.TOPIC.STREAM/v1"
+  cshake Minidregg.Theory.PersistedCodecTags.fleet_topic_stream_v1
     ((StreamCodec.product digestStream (StreamCodec.product StreamCodec.nat bytesStream)).encode
       (domain, payer, topic))
 
@@ -231,7 +232,7 @@ structure Mode {M : Materializer} (pre : Cell M) (d : Declaration) : Type where
 its digest is computable from the retained ingress alone. The consumed marker
 and pre-root are bound separately through the signed request. -/
 def effectDigest (domain semantics : Digest) (command : Command) : Digest :=
-  cshake "DREGG.FLEET.TURN.EFFECT/v1"
+  cshake Minidregg.Theory.PersistedCodecTags.fleet_turn_effect_v1
     ((StreamCodec.product digestStream (StreamCodec.product digestStream bytesStream)).encode
       (domain, semantics, commandCodec.encode command))
 
@@ -260,7 +261,7 @@ def context (snapshot : Snapshot) (semantics : Digest) (ambient : Ambient)
       policyRevision := snapshot.authState.policyRevision ⟨command.payer⟩
       cost := command.fee + command.transferAmount }
   argsDigestBytes := fun bytes =>
-    cshake "DREGG.FLEET.TURN.ARGS/v1" (commandCodec.encode command ++ bytes)
+    cshake Minidregg.Theory.PersistedCodecTags.fleet_turn_args_v1 (commandCodec.encode command ++ bytes)
 
 def request (snapshot : Snapshot) (semantics : Digest) (ambient : Ambient)
     (command : Command) : Request .account :=
@@ -593,7 +594,7 @@ def signingPlanStream : StreamCodec SigningPlan :=
     (by intro plan; cases plan; rfl)
 
 def signingPlanCodec : LawfulCodec SigningPlan :=
-  NativeHostCodec.framed "DREGG/FLEET/TURN/PLAN/v1".toUTF8.toList signingPlanStream
+  NativeHostCodec.framed Minidregg.Theory.PersistedCodecTags.fleet_turn_plan_v1.toUTF8.toList signingPlanStream
 
 /-! ## Topic reading -/
 

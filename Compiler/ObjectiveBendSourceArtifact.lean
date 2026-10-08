@@ -2,6 +2,7 @@
 Package/declaration and canonical annotated Core4 packet are distinct identities.
 Checking establishes typed core only; a captured-source elaboration witness and
 current source-read/authority remain receiving obligations. -/
+import Theory.PersistedCodecTags
 import Compiler.NativeInvocationStatement
 import Compiler.PolicyRecordCodec
 import Compiler.ObjectiveBendLawCodec
@@ -41,7 +42,7 @@ def stream : StreamCodec Artifact :=
     (by intro a; cases a; rfl)
 
 /-- Version 2: the artifact carries the package's enforced laws; a version-1 artifact refuses. -/
-def frame : List UInt8 := "DREGG/OBJECTIVE-BEND/SOURCE-ARTIFACT".toUTF8.toList ++ [2]
+def frame : List UInt8 := Minidregg.Theory.PersistedCodecTags.objective_bend_source_artifact_byte_v2
 def rawCodec : LawfulCodec Artifact where
   encode a := frame ++ stream.encode a
   decode bytes := if bytes.take frame.length = frame then
@@ -56,10 +57,10 @@ abbrev encode := codec.encode
 abbrev decode := codec.decode
 
 def identity (a : Artifact) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.OBJECTIVE-BEND.SOURCE-ARTIFACT/v2".toUTF8.toList (encode a)).digest
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.objective_bend_source_artifact_v2.toUTF8.toList (encode a)).digest
 
 def schema : Digest :=
-  (Sp800185Cshake256.hash "DREGG.OBJECTIVE-BEND.SOURCE-ARTIFACT-SCHEMA/v2".toUTF8.toList frame).digest
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.objective_bend_source_artifact_schema_v2.toUTF8.toList frame).digest
 
 /-- The complete packet byte cap precedes UTF8/JSON/natural construction. This
 bounds decoding input size; native scalar-bit and graph-work caps are separate. -/

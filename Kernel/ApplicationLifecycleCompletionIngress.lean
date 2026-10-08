@@ -3,6 +3,7 @@ Strict signed carrier for a checked lifecycle completion. Event family 18 is
 separate from pending BEGIN family 12 and one-shot claim family 16. A replay
 of the same physical report cannot mint another completion nullifier.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationLifecycleCompletionSource
 
 namespace Minidregg.Kernel.ApplicationLifecycleCompletionIngress
@@ -40,7 +41,7 @@ def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 def frame : List UInt8 :=
-  "DREGG/APPLICATION/LIFECYCLE-COMPLETION-INGRESS/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_lifecycle_completion_ingress_v1.toUTF8.toList
 
 def codec : LawfulCodec Ingress := NativeHostCodec.framed frame ingressStream
 
@@ -55,7 +56,7 @@ def event (ingress : Ingress) : StableEvent where
   codecVersion := 18
   domain := ingress.domain
   eventId := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/LIFECYCLE-COMPLETION-EVENT/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_lifecycle_completion_event_v1.toUTF8.toList
     ingress.canonicalBytes).digest
   canonicalBytes := ingress.canonicalBytes
 
@@ -71,10 +72,10 @@ def stableNullifier (ingress : Ingress) : StableNullifier where
   codecVersion := 18
   domain := ingress.domain
   nullifierId := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/LIFECYCLE-COMPLETION-NULLIFIER/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_lifecycle_completion_nullifier_v1.toUTF8.toList
     (nullifierKey ingress)).digest
   canonicalBytes :=
-    "DREGG/APPLICATION/LIFECYCLE-COMPLETION-NULLIFIER-BYTES/v1".toUTF8.toList ++
+    Minidregg.Theory.PersistedCodecTags.application_lifecycle_completion_nullifier_bytes_v1.toUTF8.toList ++
       nullifierKey ingress
 
 theorem stableNullifier_same_claim_nonce (left right : Ingress)

@@ -4,6 +4,7 @@ signed package action descriptor and grain launch binding are retained through
 the original v3 BEGIN and claim. A native claim receipt identifies a durable
 reservation; this projection alone does not attest a process or allow a retry.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationLifecycleClaimProjection
 import Kernel.ApplicationLifecycleClaimV3Ingress
 
@@ -31,7 +32,7 @@ def committedStream : StreamCodec Committed :=
     (by intro committed; cases committed; rfl)
 
 def frame : List UInt8 :=
-  "DREGG/APPLICATION/LIFECYCLE-CLAIM-COMMITTED/v3".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_lifecycle_claim_committed_v3.toUTF8.toList
 
 def codec : LawfulCodec Committed := NativeHostCodec.framed frame committedStream
 

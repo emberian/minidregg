@@ -6,6 +6,7 @@ before adding canonical old-policy authorization. These are the existing
 `FactoryAuthorization` obligations, evaluated here rather than assumed from
 host verdicts. The complete-domain policy adapter consumes this checked result.
 -/
+import Theory.PersistedCodecTags
 import Compiler.ResourceBirthCodec
 import Compiler.DeclaredEffectCell
 import Theory.PolicyInstall
@@ -1753,7 +1754,7 @@ def ingressStream : StreamCodec Ingress :=
     (fun ingress => (ingress.descriptorBytes, ingress.credentials))
     (fun pair => ⟨pair.1, pair.2⟩) (by intro ingress; cases ingress; rfl)
 
-def ingressFrame : List UInt8 := "DREGG/RESOURCE-BIRTH/SIGNED-INGRESS".toUTF8.toList ++ [2]
+def ingressFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.resource_birth_signed_ingress_byte_v2
 
 def ingressRawCodec : LawfulCodec Ingress where
   encode ingress := ingressFrame ++ ingressStream.encode ingress
@@ -1770,7 +1771,7 @@ def ingressCodec : LawfulCodec Ingress := strictCodec ingressRawCodec
 /-- Independent canonical frame for the explicit opted-in source method.
 Every owner envelope is retained by the same birth event on replay. -/
 def reserveIngressFrame : List UInt8 :=
-  "DREGG/RESOURCE-RESERVE-BIRTH/SIGNED-INGRESS".toUTF8.toList ++ [1]
+  Minidregg.Theory.PersistedCodecTags.resource_reserve_birth_signed_ingress_byte_v1
 
 open Minidregg.Compiler.Tower256ConcreteBackend in
 def reserveIngressStream : StreamCodec (Ingress × List (List UInt8)) :=
@@ -1976,7 +1977,7 @@ def ownerConsentRequest
     target := ⟨item.create.cellId⟩
     verb := reserveVerb item.resourceKind
     argsDigest := CanonicalCellRegistry.sourceEncoding.hashBytes
-      ("DREGG/RESOURCE-RESERVE-BIRTH/OWNER-CONSENT/v1".toUTF8.toList ++
+      (Minidregg.Theory.PersistedCodecTags.resource_reserve_birth_owner_consent_v1.toUTF8.toList ++
         CanonicalCellRegistry.sourceEncoding.codec.encode descriptor ++
         Tower256ConcreteBackend.StreamCodec.nat.encode position.val)
     effectsDigest := CanonicalCellRegistry.sourceEncoding.effectsDigest descriptor

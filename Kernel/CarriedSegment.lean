@@ -8,6 +8,7 @@ external operator authorization, the fixed semantic transformation, and actual
 new-profile validation are separate receiving obligations in CarriedSegmentIO;
 a caller cannot obtain those obligations by supplying this manifest alone.
 -/
+import Theory.PersistedCodecTags
 import Compiler.DurableReceiverIO
 import Compiler.ResourceBirthCodec
 import Compiler.NativeHostCodec
@@ -83,7 +84,7 @@ def CapsulePins.wellFormed (pins : CapsulePins) : Bool :=
     (fun value => value.length == 32)
 
 def Body.bytes (body : Body) : List UInt8 :=
-  "DREGG.CARRIED-SEGMENT/v1".toUTF8.toList ++
+  Minidregg.Theory.PersistedCodecTags.carried_segment_v1.toUTF8.toList ++
     (StreamCodec.list bytesStream).encode
       [identityBytes body.source, pointBytes body.cut,
        digestStream.encode body.sourceImage, capsuleBytes body.sourceCapsule,
@@ -106,7 +107,7 @@ structure EdgeSeal where
   deriving DecidableEq, Repr
 
 def EdgeSeal.signingBytes (edge : EdgeSeal) : List UInt8 :=
-  "DREGG.CARRIED-SEGMENT.SEAL/v1".toUTF8.toList ++
+  Minidregg.Theory.PersistedCodecTags.carried_segment_seal_v1.toUTF8.toList ++
     (StreamCodec.list bytesStream).encode [edge.body.bytes, pointBytes edge.targetStart]
 
 /-- Closed, source-owned carry plans. Version 1 changes only policy records;

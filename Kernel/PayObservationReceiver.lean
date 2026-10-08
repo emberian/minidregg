@@ -45,6 +45,7 @@ second credit for the same transfer and a second report at the same tip slot
 (`PayObservationProofs.second_credit_refused`).  A duplicate transfer inside
 one report is refused before that (`duplicateInBatch`).
 -/
+import Theory.PersistedCodecTags
 import Kernel.CapabilityRevocationController
 import Kernel.ResourceBirthController
 import Kernel.PayObservation
@@ -116,7 +117,7 @@ def DecodedIngress.bytes (ingress : DecodedIngress) : List UInt8 :=
   ingressCodec.encode ingress.ingress
 
 def marker (domain semantics : Digest) (command : Command) : Nat :=
-  (Sp800185Cshake256.hash "DREGG.PAY.OBSERVATION.IDENTITY/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.pay_observation_identity_v1.toUTF8.toList
     ((StreamCodec.product digestStream (StreamCodec.product digestStream
       (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream
         StreamCodec.nat))).encode
@@ -162,7 +163,7 @@ structure Mode {M : Materializer PayCell.layout Digest} (pre : Materialized M) (
   rootExact : d.expectedPreRoot = pre.root
 
 def effectDigest (domain semantics : Digest) (command : Command) (d : Declaration) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.PAY.OBSERVATION.EFFECT/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.pay_observation_effect_v1.toUTF8.toList
     ((StreamCodec.product digestStream (StreamCodec.product digestStream
       (StreamCodec.product bytesStream bytesStream))).encode
       (domain, semantics, commandCodec.encode command, declarationCodec.encode d))).digest
@@ -192,7 +193,7 @@ def context (deployment : Deployment) (snapshot : Snapshot) (semantics : Digest)
       policyRevision := snapshot.authState.policyRevision ⟨payTarget deployment⟩
       cost := (commandCodec.encode command).length }
   argsDigestBytes := fun bytes =>
-    (Sp800185Cshake256.hash "DREGG.PAY.OBSERVATION.ARGS/v1".toUTF8.toList
+    (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.pay_observation_args_v1.toUTF8.toList
       (commandCodec.encode command ++ bytes)).digest
 
 def request (deployment : Deployment) (snapshot : Snapshot) (pay : PayCell.Cell) (semantics : Digest)
@@ -644,7 +645,7 @@ def transactionId (domain semantics : Digest) (ingress : DecodedIngress) : Diges
 def event (domain _semantics : Digest) (ingress : DecodedIngress) : StableEvent where
   codecVersion := 1
   domain := domain
-  eventId := (Sp800185Cshake256.hash "DREGG.PAY.OBSERVATION.EVENT/v1".toUTF8.toList
+  eventId := (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.pay_observation_event_v1.toUTF8.toList
     ingress.bytes).digest
   canonicalBytes := ingress.bytes
 

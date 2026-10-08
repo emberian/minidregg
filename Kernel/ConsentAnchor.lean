@@ -26,6 +26,7 @@ chains are equal prefixes, up to a collision of the deployed hash.
 -/
 import Kernel.NativeHostReplay
 import Compiler.DeployedCellRegistry
+import Compiler.PersistedCodecTagCensus
 
 namespace Minidregg.Kernel.ConsentAnchor
 
@@ -267,17 +268,16 @@ def Basis.extendAppended (config : Config) {store : DurableHistory.StoreIdentity
 
 /-! ## The Store epoch names the deployed constants
 
-`DurableCheckpointCodec.StoreEpoch.current` sits below the modules that define
-the state-key codec and the schema references, so it spells them; these two
-equations break the build when either constant moves without the epoch. -/
+The epoch reads the actual state-key identity and the content-derived schema
+digest. The imported census closes that digest's registry over the receiving
+codecs, including frames nested in opaque persisted byte fields. -/
 
 theorem storeEpoch_stateKey :
     DurableCheckpointCodec.StoreEpoch.current.stateKey = DeclaredEffectCell.stateKeyCodecId := rfl
 
 theorem storeEpoch_schemaRefs :
     DurableCheckpointCodec.StoreEpoch.current.schemaRefs =
-      s!"schema-refs/v{DeployedCellRegistry.declaredEffectSchemaRef.version}" := by
-  decide
+      DurableCheckpointCodec.persistedSchemaRefs := rfl
 
 #assert_axioms storeEpoch_stateKey
 #assert_axioms storeEpoch_schemaRefs

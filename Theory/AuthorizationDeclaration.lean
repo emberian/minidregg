@@ -14,6 +14,7 @@ Proofs live below that boundary and show that an accepted executable plan can
 construct the existing `TypedAuthorization.Authorized` type.  There is no
 second semantic authorization relation.
 -/
+import Theory.PersistedCodecTags
 import Theory.IndexedProgram
 import Theory.TypedAuthorization
 
@@ -186,7 +187,7 @@ def requestFieldOrder : List RequestField :=
 
 /-- The complete request wire protocol identity, shared by all emitted artifacts
 and the byte codec without importing any concrete compiler backend. -/
-def requestCodecVersion : Nat := 2
+def requestCodecVersion : Nat := Minidregg.Theory.PersistedCodecTags.requestCodecVersion
 
 /-- Sole canonical projection of the complete signed request, including current source revision. -/
 def requestWords (request : RequestWire) : List Nat :=

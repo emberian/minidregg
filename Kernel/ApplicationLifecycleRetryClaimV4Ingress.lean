@@ -1,6 +1,7 @@
 /- Versioned retry CLAIM carries the full versioned BEGIN and recovery proof
 selector. A receiver may consume its retry token once; no created marker is
 emitted and no old first-attempt marker is cleared. -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationLifecycleRetryBeginV4Ingress
 
 namespace Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Ingress
@@ -26,7 +27,7 @@ def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 def codec : LawfulCodec Ingress := NativeHostCodec.framed
-  "DREGG/APPLICATION/RETRY-CREATE-CLAIM-INGRESS/v4".toUTF8.toList ingressStream
+  Minidregg.Theory.PersistedCodecTags.application_retry_create_claim_ingress_v4.toUTF8.toList ingressStream
 
 def Ingress.canonicalBytes (ingress : Ingress) : List UInt8 := codec.encode ingress
 

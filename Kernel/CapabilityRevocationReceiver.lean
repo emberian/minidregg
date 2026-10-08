@@ -6,6 +6,7 @@ The complete old authority, unchanged resource and selected policy source are
 guarded together; the source-created revocation and operation marker publish in one
 exact-image CAS. Exact historical ingress replays before fresh key/expiry checks.
 -/
+import Theory.PersistedCodecTags
 import Kernel.CapabilityRevocationController
 
 namespace Minidregg.Kernel.CapabilityRevocationReceiver
@@ -34,7 +35,7 @@ def ingressStream : StreamCodec Ingress :=
     (fun (command, envelope) => ⟨command, envelope⟩)
     (by intro ingress; cases ingress; rfl)
 
-def ingressFrame : List UInt8 := "DREGG/CAPABILITY/REVOKE/SIGNED-INGRESS".toUTF8.toList ++ [1]
+def ingressFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.capability_revoke_signed_ingress_byte_v1
 
 def rawIngressCodec : LawfulCodec Ingress where
   encode ingress := ingressFrame ++ ingressStream.encode ingress

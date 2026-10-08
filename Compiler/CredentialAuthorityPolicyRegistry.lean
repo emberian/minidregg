@@ -13,6 +13,7 @@ stale-guard theorems at one concrete authority cell. It is not a receiving
 configuration or decoder fallback. Signature verification remains the
 deployment portal's responsibility.
 -/
+import Theory.PersistedCodecTags
 import Compiler.CredentialAuthorityDomain
 import Compiler.PolicyRecordCodec
 import Compiler.CredentialSignatureAdmission
@@ -149,7 +150,7 @@ def capabilityKindTag : ResourceKind → UInt8
 in one source-owned commitment. This is not a possession proof. -/
 def storedCapabilityDigest (snapshot : Snapshot) {kind : ResourceKind}
     (stored : StoredCapability kind) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.AUTHORITY.CAPABILITY/v2".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.authority_capability_v2.toUTF8.toList
     (capabilityKindTag kind ::
       (StreamCodec.product digestStream
         (CredentialAuthorityEntryCodec.storedCapabilityStream kind)).encode

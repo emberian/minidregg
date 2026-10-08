@@ -4,6 +4,7 @@ v2 BEGIN carrier is repeated so the current signed claim cannot substitute a
 bare v1 historical BEGIN at the same resource and generation. Its canonical
 event remains in the allocated lifecycle claim family (16).
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationLifecycleClaimIngress
 import Kernel.ApplicationLifecycleBeginV2Ingress
 
@@ -33,7 +34,7 @@ def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 def frame : List UInt8 :=
-  "DREGG/APPLICATION/LIFECYCLE-CLAIM-INGRESS/v2".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_lifecycle_claim_ingress_v2.toUTF8.toList
 
 def codec : LawfulCodec Ingress := NativeHostCodec.framed frame ingressStream
 
@@ -57,7 +58,7 @@ def event (ingress : Ingress) : StableEvent where
   codecVersion := 16
   domain := ingress.base.domain
   eventId := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/LIFECYCLE-CLAIM-EVENT/v2".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_lifecycle_claim_event_v2.toUTF8.toList
     ingress.canonicalBytes).digest
   canonicalBytes := ingress.canonicalBytes
 

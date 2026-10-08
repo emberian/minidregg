@@ -6,6 +6,7 @@ decimal value or caller-asserted interface schema is not a package identity.
 The v1 descriptor has no optional or alternative layouts. The v2 API profile
 uses the same field stream with a separate canonical frame and root domain.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationDispatchManifest
 import Compiler.NativeHostCodec
 
@@ -60,11 +61,11 @@ def descriptorStream : StreamCodec Descriptor :=
 
 def codec : LawfulCodec Descriptor :=
   NativeHostCodec.framed
-    "DREGG/APPLICATION/SPK-PACKAGE-IDENTITY/v1".toUTF8.toList descriptorStream
+    Minidregg.Theory.PersistedCodecTags.application_spk_package_identity_v1.toUTF8.toList descriptorStream
 
 def codecV2 : LawfulCodec Descriptor :=
   NativeHostCodec.framed
-    "DREGG/APPLICATION/SPK-PACKAGE-IDENTITY/v2".toUTF8.toList descriptorStream
+    Minidregg.Theory.PersistedCodecTags.application_spk_package_identity_v2.toUTF8.toList descriptorStream
 
 /-- Legacy GitWeb and web-only descriptors retain their v1 identity. Every
 other admitted API prefix has an explicit v2 identity. This choice depends
@@ -93,7 +94,7 @@ def decodeCanonical (bytes : List UInt8) : Option Descriptor :=
 The host must still verify the raw SHA-256 from its single Bread parse and
 bind the launched immutable image to those bytes. -/
 def Descriptor.imageIdentity (descriptor : Descriptor) : List UInt8 :=
-  "DREGG/SPK-IMAGE/v1".toUTF8.toList ++ descriptor.rawSha256
+  Minidregg.Theory.PersistedCodecTags.spk_image_v1.toUTF8.toList ++ descriptor.rawSha256
 
 /-- Sandstorm's signing-key App ID is a 52-character unpadded encoding of a
 32-byte Ed25519 public key in this exact alphabet (Bread `spk.rs::base32`). -/
@@ -258,8 +259,8 @@ descriptor, rather than to a human-readable SHA-256 string alone. -/
 def Descriptor.root (descriptor : Descriptor) : Digest :=
   (Sp800185Cshake256.hash
     (if descriptor.legacyProfile then
-      "DREGG/APPLICATION/SPK-PACKAGE-ROOT/v1".toUTF8.toList
-     else "DREGG/APPLICATION/SPK-PACKAGE-ROOT/v2".toUTF8.toList)
+      Minidregg.Theory.PersistedCodecTags.application_spk_package_root_v1.toUTF8.toList
+     else Minidregg.Theory.PersistedCodecTags.application_spk_package_root_v2.toUTF8.toList)
     descriptor.canonicalBytes).digest
 
 /-- A full raw SHA-256 output is mapped to the repository's little-endian

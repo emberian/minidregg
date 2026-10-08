@@ -28,6 +28,7 @@ check. That is the "no read path returns unverified bytes" property, enforced
 by the compiler; `verifyAt_included`, `verifyAt_bytes` and `verifyAt_sound`
 state what a `Verified` value means.
 -/
+import Theory.PersistedCodecTags
 import Compiler.DurableCheckpointCodec
 import Theory.LogAccumulator
 import Compiler.DurableIndex
@@ -45,9 +46,9 @@ set_option autoImplicit false
 
 /-! ## The deployed hashes -/
 
-def recordCustomization : List UInt8 := "DREGG/NATIVE-HOST/LOG-RECORD/v1".toUTF8.toList
-def leafCustomization : List UInt8 := "DREGG/NATIVE-HOST/LOG-LEAF/v1".toUTF8.toList
-def nodeCustomization : List UInt8 := "DREGG/NATIVE-HOST/LOG-NODE/v1".toUTF8.toList
+def recordCustomization : List UInt8 := Minidregg.Theory.PersistedCodecTags.native_host_log_record_v1.toUTF8.toList
+def leafCustomization : List UInt8 := Minidregg.Theory.PersistedCodecTags.native_host_log_leaf_v1.toUTF8.toList
+def nodeCustomization : List UInt8 := Minidregg.Theory.PersistedCodecTags.native_host_log_node_v1.toUTF8.toList
 def frontierCustomization : List UInt8 := "DREGG/NATIVE-HOST/LOG-FRONTIER/v1".toUTF8.toList
 
 /-- The hash of a record's RAW stored bytes. -/

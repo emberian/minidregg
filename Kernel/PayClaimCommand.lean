@@ -3,6 +3,7 @@ Closed public paid-claim actions. Prepare and seal carry exactly these canonical
 bytes; submit and lookup retain the same ingress. Neither action conveys a
 capability to arbitrary programs or a generic command-execution surface.
 -/
+import Theory.PersistedCodecTags
 import Kernel.PayReceivingContract
 import Kernel.PayEnrolClaim
 import Kernel.Receivers.SubjectKeyRotation
@@ -124,7 +125,7 @@ def decodeIngress (bytes : List UInt8) : Option DecodedIngress := do
     else none
 
 def marker (domain semantics : Digest) (command : Command) : Digest :=
-  (Sp800185Cshake256.hash "DREGG/PAY/CLAIM/OPERATION/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.pay_claim_operation_v1.toUTF8.toList
     (possessionFrame domain semantics command)).digest
 
 structure Checked (domain semantics : Digest) (ingress : DecodedIngress) where

@@ -110,6 +110,7 @@ which then takes no pipelined send (`notPipelinable`) and is retired by its deli
 **The turn** (`invoke`) commits every written object's state cell, its mail and
 the fee and escrow postings, as ONE intent, guarded on every object record,
 package cell and state cell it read, so a concurrent change refuses it. -/
+import Theory.PersistedCodecTags
 import Kernel.ObjectiveActivity
 
 namespace Minidregg.Kernel.ObjectiveCall
@@ -683,7 +684,7 @@ def argsAt : List String → Data → Option Data
   | _ :: _, _ => none
 
 /-- The digest a `.exact` grant names: the canonical bytes of the arguments. -/
-def argsDigest (args : Data) : Digest := tagged "DREGG/OBJECTIVE/CALL/GRANT-ARGS/v1" (dataBytes args)
+def argsDigest (args : Data) : Digest := tagged Minidregg.Theory.PersistedCodecTags.objective_call_grant_args_v1 (dataBytes args)
 
 /-- What a grant admits of a frame's arguments. -/
 inductive ArgsBound where
@@ -2163,7 +2164,7 @@ def grantStream : StreamCodec Grant :=
     (by intro grant; cases grant; rfl)
 
 def invokeTransaction (request : InvokeRequest) : TransactionId :=
-  tagged "DREGG/OBJECTIVE/OBJECT/TX/INVOKE/v1"
+  tagged Minidregg.Theory.PersistedCodecTags.objective_object_tx_invoke_v1
     (subjectStream.encode request.subject ++ digestStream.encode request.object ++
       stringStream.encode request.method ++ bytesStream.encode (dataBytes request.args) ++
       (StreamCodec.list grantStream).encode request.grants ++ StreamCodec.nat.encode request.nonce)

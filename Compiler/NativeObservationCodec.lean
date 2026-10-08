@@ -4,6 +4,7 @@ only explicitly public commitments, clock/key/policy coordinates (inside the
 actual canonical signing headers), and the client's own intent. Protected
 payloads are released only by the source-owned observation controller.
 -/
+import Theory.PersistedCodecTags
 import Compiler.NativeProtocolFrames
 import Compiler.NativeHostCodec
 import Compiler.FnEvidenceCodec
@@ -200,7 +201,7 @@ def retiredDocuverseIntentFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-INTEN
 def intentCodec : LawfulCodec Intent := NativeHostCodec.framed intentFrame intentStream
 
 def intentIdentity (intent : Intent) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.OBSERVE-INTENT/v7".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.native_host_observe_intent_v7.toUTF8.toList
     (intentCodec.encode intent)).digest
 
 def federationStream : StreamCodec FederationId :=
@@ -376,7 +377,7 @@ theorem v6_intent_refused (payload : List UInt8) :
 
 /-- A bounded transport collection of ordinary signed observations. Singleton
 intent/challenge/signed bytes retain their existing source-owned codecs. -/
-def batchFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-BATCH/v1".toUTF8.toList
+def batchFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.native_host_observe_batch_v1.toUTF8.toList
 def batchCodec : LawfulCodec (List (List UInt8)) :=
   NativeHostCodec.framed batchFrame (StreamCodec.list bytesStream)
 def maxBatchReads : Nat := 16

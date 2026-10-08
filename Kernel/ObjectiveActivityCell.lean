@@ -14,6 +14,7 @@ by name if they write any coordinate at or above `reservedBase`
 activity's own typed turns write them (`Kernel.ObjectiveActivityReceiver` under
 `ControlFacet.objectiveActivity`).
 -/
+import Theory.PersistedCodecTags
 import Kernel.ProtectedCell
 
 namespace Minidregg.Kernel.ObjectiveActivityCell
@@ -59,9 +60,9 @@ def roleStream : StreamCodec Role :=
 abbrev spec : ProtectedCell.Spec where
   Role := Role
   roleStream := roleStream
-  idCustomization := "DREGG.OBJECTIVE.ACTIVITY.CELL.ID/v1".toUTF8.toList
-  rootCustomization := "DREGG.OBJECTIVE.ACTIVITY.CELL.STATE/v1".toUTF8.toList
-  wireFrame := "DREGG/OBJECTIVE/ACTIVITY-CELL".toUTF8.toList
+  idCustomization := Minidregg.Theory.PersistedCodecTags.objective_activity_cell_id_v1.toUTF8.toList
+  rootCustomization := Minidregg.Theory.PersistedCodecTags.objective_activity_cell_state_v1.toUTF8.toList
+  wireFrame := Minidregg.Theory.PersistedCodecTags.objective_activity_cell.toUTF8.toList
   wireVersion := wireVersion
 
 abbrev Payload := ProtectedCell.Payload spec

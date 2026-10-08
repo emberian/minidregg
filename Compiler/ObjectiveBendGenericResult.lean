@@ -2,6 +2,7 @@
 native content/durable-append constructor registry; return storage is appended without dropping original
 ordered application effects or physical reads. Current authority/funding belong
 to the native gate; this token cannot accept a caller-authored Plan. -/
+import Theory.PersistedCodecTags
 import Compiler.ObjectiveBendResultAdapter
 import Compiler.ObjectiveBendNativePlanData
 namespace Minidregg.Compiler.ObjectiveBendGenericResult
@@ -12,7 +13,7 @@ open Minidregg.Kernel.DurableDataIntent
 open ObjectiveBendResultAdapter ObjectiveNativeScalarBinding
 set_option autoImplicit false
 
-def codecId : Digest := (Sp800185Cshake256.hash "DREGG.OBJECTIVE-BEND.NATIVE-RESULT-ENVELOPE/v1".toUTF8.toList
+def codecId : Digest := (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.objective_bend_native_result_envelope_v1.toUTF8.toList
   (Minidregg.Compiler.Tower256ConcreteBackend.digestStream.encode ObjectiveBendNativePlanData.codecId ++
    Minidregg.Compiler.Tower256ConcreteBackend.digestStream.encode ObjectiveBendResultAdapter.codecId)).digest
 

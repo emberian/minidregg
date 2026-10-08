@@ -9,6 +9,7 @@ authorization naming that exact parent can complete the semantic family.
 This controller changes authority only. The recipient later invokes through
 the ordinary declared-resource controller with their own current signature.
 -/
+import Theory.PersistedCodecTags
 import Kernel.DeclaredResourceController
 import Theory.CredentialAuthorityEffects
 import Compiler.ResourceTargetAdmission
@@ -85,12 +86,12 @@ def packedCommandStream : StreamCodec PackedCommand where
     | mk kind command =>
       simp [List.append_assoc, StreamCodec.decodePrefix_encode]
 
-def commandFrameName : List UInt8 := "DREGG/CAPABILITY/DELEGATE".toUTF8.toList
+def commandFrameName : List UInt8 := Minidregg.Theory.PersistedCodecTags.capability_delegate.toUTF8.toList
 
 /-- Version 2: the declaration no longer carries the authority-cell root
 (`expectedPreRoot`). Version 1 commands signed that whole root; they refuse by
 name (`retiredCommand`). -/
-def commandFrame : List UInt8 := commandFrameName ++ [2]
+def commandFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.capability_delegate_byte_v2
 
 def rawCommandCodec : LawfulCodec PackedCommand where
   encode command := commandFrame ++ packedCommandStream.encode command
@@ -110,7 +111,7 @@ theorem command_decode_canonical {bytes : List UInt8} {command : PackedCommand}
 
 /-- The version-1 frame: its declaration carried `expectedPreRoot`, the whole
 authority-cell root. -/
-def retiredFrameV1 : List UInt8 := commandFrameName ++ [1]
+def retiredFrameV1 : List UInt8 := Minidregg.Theory.PersistedCodecTags.capability_delegate_byte_v1
 
 /-- Why bytes that do not decode are refused, naming a retired version. -/
 def undecodable (bytes : List UInt8) : String :=
@@ -136,7 +137,7 @@ theorem retired_v1_refused (rest : List UInt8) :
   · simp [undecodable]
 
 def operationMarker {kind : ResourceKind} (domain semantics : Digest) (command : Command kind) : Nat :=
-  (Sp800185Cshake256.hash "DREGG.CAPABILITY.DELEGATE.IDENTITY/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.capability_delegate_identity_v1.toUTF8.toList
     ((StreamCodec.product digestStream
       (StreamCodec.product digestStream
         (StreamCodec.product ResourceBirthCodec.resourceKindStream
@@ -151,7 +152,7 @@ def commandBytes {kind : ResourceKind} (domain semantics : Digest) (command : Co
 
 def effectsDigest {kind : ResourceKind} (domain semantics : Digest) (command : Command kind)
     (declaration : DelegateDeclaration kind) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.CAPABILITY.DELEGATE.EFFECT/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.capability_delegate_effect_v1.toUTF8.toList
     (commandBytes domain semantics command declaration)).digest
 
 structure Ambient where
@@ -168,7 +169,7 @@ def context {kind : ResourceKind} (snapshot : Snapshot) (semantics : Digest)
   height := ambient.height
   cost := (commandCodec.encode ⟨kind, command⟩).length
   argsDigestBytes := fun bytes =>
-    (Sp800185Cshake256.hash "DREGG.CAPABILITY.DELEGATE.ARGS/v1".toUTF8.toList
+    (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.capability_delegate_args_v1.toUTF8.toList
       (commandBytes snapshot.domain semantics command command.declaration ++ bytes)).digest
 
 def request {kind : ResourceKind} (snapshot : Snapshot) (semantics : Digest)

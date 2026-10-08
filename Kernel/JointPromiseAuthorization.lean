@@ -2,6 +2,7 @@
 The original selected effect is admitted normally. EVERY target must additionally
 admit the exact install promise under independently scoped reserve authority.
 No ordinary grant, old AcceptedInvocation, or client Boolean mints this token. -/
+import Theory.PersistedCodecTags
 import Kernel.JointInvocationCandidate
 namespace Minidregg.Kernel.JointPromiseAuthorization
 open Minidregg.Theory
@@ -43,11 +44,11 @@ def declarationStream : StreamCodec Declaration :=
       d.generation,d.nonce,d.capabilities,d.maintenance,d.repairEnvelopes))
     (fun (c,s,i,e,g,n,cs,m,r) => ⟨c,s,i,e,g,n,cs,m,r⟩) (by intro d; cases d; rfl)
 def statement (domain semantics : Digest) (d : Declaration) : List UInt8 :=
-  "DREGG/JOINT/INSTALL-PROMISE/v1".toUTF8.toList ++
+  Minidregg.Theory.PersistedCodecTags.joint_install_promise_v1.toUTF8.toList ++
     (StreamCodec.product digestStream (StreamCodec.product digestStream declarationStream)).encode
       (domain,semantics,d)
 def commitment (domain semantics : Digest) (d : Declaration) : Digest :=
-  (Sp800185Cshake256.hash "DREGG/JOINT/INSTALL-PROMISE/REQUEST/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.joint_install_promise_request_v1.toUTF8.toList
     (statement domain semantics d)).digest
 
 def wanted (domain semantics : Digest) (d : Declaration) (ordinary : PackedEffectRequest) :

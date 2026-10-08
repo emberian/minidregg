@@ -8,6 +8,7 @@ The tool settles a prior reservation. The parent is an exact, no-op witness
 of its reserved generation. The conserved Book birth fee is independent of
 the tool's permission-unit charge.
 -/
+import Theory.PersistedCodecTags
 import Kernel.AgentGrain
 import Kernel.ResourceBirthController
 import Kernel.DeclaredResourceController
@@ -80,7 +81,7 @@ def Source.userDraft (source : Source) :
 
 def Source.grainNonce (source : Source) : Nat :=
   (Sp800185Cshake256.hash
-    "DREGG/GRAIN-RESOURCE-BIRTH/USER-DRAFT-NONCE/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.grain_resource_birth_user_draft_nonce_v1.toUTF8.toList
     ((StreamCodec.product StreamCodec.nat bytesStream).encode
       (source.birth.nonce,
         (ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).encode
@@ -134,7 +135,7 @@ not merely the birth descriptor or a Rust-selected task ID. Both components
 use the existing canonical codecs; the outer length framing prevents an
 ambiguous concatenation. -/
 def Source.canonicalBytes (tariff : Tariff) (source : Source) : List UInt8 :=
-  "DREGG/GRAIN-RESOURCE-BIRTH/SOURCE/v1".toUTF8.toList ++
+  Minidregg.Theory.PersistedCodecTags.grain_resource_birth_source_v1.toUTF8.toList ++
     (StreamCodec.product bytesStream bytesStream).encode
       ((ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).encode source.birth,
         DeclaredResourceController.commandCodec.encode (source.grainCommand tariff))
@@ -149,9 +150,9 @@ def Source.factoryRequest (tariff : Tariff) (source : Source)
     Request .object :=
   { ResourceBirth.factoryRequest pins encoding oldAuthority factoryPreRoot height source.birth with
     argsDigest := encoding.hashBytes
-      ("DREGG/GRAIN-RESOURCE-BIRTH/ARGS/v1".toUTF8.toList ++ source.canonicalBytes tariff)
+      (Minidregg.Theory.PersistedCodecTags.grain_resource_birth_args_v1.toUTF8.toList ++ source.canonicalBytes tariff)
     effectsDigest := encoding.hashBytes
-      ("DREGG/GRAIN-RESOURCE-BIRTH/EFFECTS/v1".toUTF8.toList ++ source.canonicalBytes tariff) }
+      (Minidregg.Theory.PersistedCodecTags.grain_resource_birth_effects_v1.toUTF8.toList ++ source.canonicalBytes tariff) }
 
 theorem Source.factoryRequest_subject (tariff : Tariff) (source : Source)
     (pins : FactoryPins) (encoding : SourceEncoding CanonicalCellRegistry.registry)

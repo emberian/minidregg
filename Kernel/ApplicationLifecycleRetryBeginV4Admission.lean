@@ -2,6 +2,7 @@
 current-management and package checks and adds full failed-recovery evidence.
 Native replay must also prove that the original claim belongs to its same
 chronological walk; this conditional layer exposes no receiving operation. -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationLifecycleRetryBeginV4Ingress
 
 namespace Minidregg.Kernel.ApplicationLifecycleRetryBeginV4Admission
@@ -66,7 +67,7 @@ def event
   codecVersion := 69
   domain := ingress.begin.base.domain
   eventId := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/RETRY-CREATE-BEGIN-EVENT/v4".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_retry_create_begin_event_v4.toUTF8.toList
     ingress.canonicalBytes).digest
   canonicalBytes := ingress.canonicalBytes
 

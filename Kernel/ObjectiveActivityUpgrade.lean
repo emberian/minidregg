@@ -49,6 +49,7 @@ Not built here: the multi-turn `migrating` phase (a cursor over a large state):
 MIGRATE is one turn. Interface compatibility (design C, "the new interface
 contains every facet a holder references") has no substrate: the kernel holds no
 facet table. Both are the next items. -/
+import Theory.PersistedCodecTags
 import Kernel.ObjectiveActivity
 import Pred.Satisfiable
 
@@ -209,7 +210,7 @@ structure AdoptRequest where
   nonce : Nat
 
 def adoptTransaction (request : AdoptRequest) : TransactionId :=
-  tagged "DREGG/OBJECTIVE/OBJECT/TX/ADOPT/v1"
+  tagged Minidregg.Theory.PersistedCodecTags.objectiveactivityupgrade_adopttransaction_c7d4dc2d
     (subjectStream.encode request.subject ++ digestStream.encode request.object ++ digestStream.encode request.pin ++
       StreamCodec.nat.encode request.nonce)
 
@@ -460,7 +461,7 @@ structure MigrateRequest where
 /-- The transaction of a MIGRATE, from the request alone (a retry finds its record by it). A
 second MIGRATE of one upgrade is refused by the kernel (`notDraining`), not by the id. -/
 def migrateTransaction (request : MigrateRequest) : TransactionId :=
-  tagged "DREGG/OBJECTIVE/OBJECT/TX/MIGRATE/v1"
+  tagged Minidregg.Theory.PersistedCodecTags.objectiveactivityupgrade_migratetransaction_b5ffb00b
     (digestStream.encode request.object ++ subjectStream.encode request.subject ++ StreamCodec.nat.encode request.nonce)
 
 /-- The MIGRATE's fee: the migration envelope's public price when a term runs. -/
@@ -542,7 +543,7 @@ structure AbortRequest where
   account : AccountId
 
 def abortTransaction (await : Digest) : TransactionId :=
-  tagged "DREGG/OBJECTIVE/ACTIVITY/TX/ABORT/v1" (digestStream.encode await)
+  tagged Minidregg.Theory.PersistedCodecTags.objectiveactivityupgrade_aborttransaction_1d02e5a5 (digestStream.encode await)
 
 /-- The one segment an aborted activity runs after `upgraded`: it must end. A
 yield ends it `faulted`; a program fault ends it `faulted`; any other refusal
@@ -748,7 +749,7 @@ def rebirthRequest (config : Config) (book : Book) (request : RebirthRequest) (o
     some ⟨old.pin, old.activity, heldAccount request.record, old.escrow.account⟩⟩
 
 def rebirthTransaction (await : Digest) : TransactionId :=
-  tagged "DREGG/OBJECTIVE/ACTIVITY/TX/REBIRTH/v1" (digestStream.encode await)
+  tagged Minidregg.Theory.PersistedCodecTags.objectiveactivityupgrade_rebirthtransaction_897f8ad6 (digestStream.encode await)
 
 structure Rebirth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : RebirthRequest) where

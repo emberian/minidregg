@@ -4,6 +4,7 @@ ordinary DRC command supplies current mutation authority; this carrier binds
 the physical work requested of a later host to that signed command. It does
 not grant a completion slot or permission to launch a process.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationGrain
 import Kernel.DurableDataIntent
 import Compiler.ResourceBirthCodec
@@ -138,7 +139,7 @@ def sourceStream : StreamCodec Source :=
     (by intro s; cases s; rfl)
 
 private def frame : List UInt8 :=
-  "DREGG/APPLICATION/LIFECYCLE-BEGIN/v2".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_lifecycle_begin_v2.toUTF8.toList
 
 private def rawSourceCodec : LawfulCodec Source where
   encode source := frame ++ sourceStream.encode source
@@ -184,7 +185,7 @@ theorem keyBytes_eq_iff_key (domain semantics : Digest) (left right : Source) :
   (lawful_encode_injective keyStream.toLawful).eq_iff
 
 def sourceDigest (domain semantics : Digest) (source : Source) : Digest :=
-  (Sp800185Cshake256.hash "DREGG/APPLICATION/LIFECYCLE-BEGIN-SOURCE/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.application_lifecycle_begin_source_v1.toUTF8.toList
     ((StreamCodec.product digestStream (StreamCodec.product digestStream bytesStream)).encode
       (domain, semantics, source.canonicalBytes))).digest
 
@@ -204,9 +205,9 @@ def stableNullifier (domain semantics : Digest) (source : Source) : StableNullif
   codecVersion := 12
   domain := domain
   nullifierId := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/LIFECYCLE-BEGIN-KEY/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_lifecycle_begin_key_v1.toUTF8.toList
     (keyBytes domain semantics source)).digest
-  canonicalBytes := "DREGG/APPLICATION/LIFECYCLE-BEGIN-NULLIFIER/v1".toUTF8.toList ++
+  canonicalBytes := Minidregg.Theory.PersistedCodecTags.application_lifecycle_begin_nullifier_v1.toUTF8.toList ++
     keyBytes domain semantics source
 
 theorem stableNullifier_same_key (domain semantics : Digest) (left right : Source)

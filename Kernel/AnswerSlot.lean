@@ -44,6 +44,7 @@ awaiting activity's declared response type before it is ever written
 (`ObjectiveActivity.resolve`); `expired` becomes the `timedOut` outcome and
 `broken` the `broken` outcome of the activity. Upgrade-driven `upgraded` and
 kernel-driven `conflict` are outcomes of the activity, never slot decisions. -/
+import Theory.PersistedCodecTags
 import Kernel.ObjectiveActivityWire
 import Kernel.ObjectiveActivityCell
 import Kernel.Inbox
@@ -152,7 +153,7 @@ def slotStream : StreamCodec Slot :=
 /-- v5: a delivery decider names the sending object, and the messages a slot queues carry their
 storage `deposit` (the INBOX v3 message); v4 added `allowance` and `depth` (GPT-6 row F), v3
 `watched` and `cancelled`. A v4 (or older) slot refuses to decode (`v4_refuses`). -/
-def frame : Bytes := "DREGG/OBJECTIVE/ANSWER-SLOT/v5".toUTF8.toList
+def frame : Bytes := Minidregg.Theory.PersistedCodecTags.objective_answer_slot_v5.toUTF8.toList
 def codec := framed frame slotStream
 def encode (slot : Slot) : Bytes := codec.encode slot
 def decode (bytes : Bytes) : Option Slot := codec.decode bytes
@@ -162,7 +163,7 @@ theorem roundTrip (slot : Slot) : decode (encode slot) = some slot := framed_rou
 /-- `H(turn, call site)`: the yielding turn's transaction and the yield's place
 (the activity's record cell and the generation of the yield). -/
 def name (turn : TransactionId) (activity : CellId) (generation : Nat) : Digest :=
-  tagged "DREGG/OBJECTIVE/ANSWER-SLOT/NAME/v1"
+  tagged Minidregg.Theory.PersistedCodecTags.objective_answer_slot_name_v1
     (digestStream.encode turn ++ digestStream.encode activity ++ StreamCodec.nat.encode generation)
 
 /-- The coordinate preimage of a slot cell: its name. -/

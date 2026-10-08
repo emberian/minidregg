@@ -5,6 +5,7 @@ revision, journal length or unrelated resource state can invalidate a quote.
 The receiver supplies its actual account birth fee, computed with its ordinary
 birth descriptor, and uses these same constructors when receiving payment.
 -/
+import Theory.PersistedCodecTags
 import Kernel.PayEnrolClaim
 import Kernel.PayEnrolQuote
 import Compiler.CanonicalRuntimeProfileCore
@@ -33,7 +34,7 @@ The full source profile belongs to pricing, so an upgrade can retain a stale
 quote as pending value instead of misclassifying it as a foreign deployment. Caller-selected chain RPC endpoints are deliberately absent. -/
 def deploymentContextCommitment (domain expectedSeed : Digest)
     (mint tokenProgram recipient : Address32) : Digest :=
-  (Sp800185Cshake256.hash "DREGG/PAY/DEPLOYMENT/v2".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.pay_deployment_v2.toUTF8.toList
     (digestStream.encode domain ++ digestStream.encode expectedSeed ++
       bytesStream.encode mint ++ bytesStream.encode tokenProgram ++
       bytesStream.encode recipient)).digest
@@ -47,7 +48,7 @@ acceptance. Their passage does not change the price commitment itself. -/
 def pricingCommitment (semantics : Digest) (tariff : Tariff)
     (creation : CreationTariff) (template : CanonicalRuntimeProfile.FactoryTemplate)
     (mode : Mode) (quote : FixedQuote) : Digest :=
-  (Sp800185Cshake256.hash "DREGG/PAY/EXACT-WEEKS-PRICING/v2".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.pay_exact_weeks_pricing_v2.toUTF8.toList
     (digestStream.encode semantics ++ tariffStream.encode tariff ++
       (StreamCodec.list StreamCodec.nat).encode (creationTerms creation) ++
       CanonicalRuntimeProfile.factoryTemplateStream.encode template ++

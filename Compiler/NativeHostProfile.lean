@@ -22,6 +22,7 @@ rather than `2^124` because `leSlotsOff a b c` compares `a` with `b + c`.
 Until 2026-10-01 the field was BabyBear and the width 29: every law comparing
 `clock/now` (about 1.79e9) with a field holding a small number refused.
 -/
+import Theory.PersistedCodecTags
 import Compiler.CanonicalRuntimeProfile
 import Compiler.Mersenne127
 import Compiler.PredOrderWide
@@ -48,10 +49,10 @@ theorem noWrap : PredOrder.NoWrap Field orderWidth :=
   PredOrder.noWrap_zmod orderIntervalFits
 
 def fieldDescriptor : List UInt8 :=
-  "DREGG.FIELD.ZMOD.PRIME/v1".toUTF8.toList ++ StreamCodec.nat.encode mersenne127P
+  Minidregg.Theory.PersistedCodecTags.field_zmod_prime_v1.toUTF8.toList ++ StreamCodec.nat.encode mersenne127P
 
 def fieldIdentity : Digest :=
-  (Sp800185Cshake256.hash "DREGG.NATIVE.FIELD.IDENTITY/v1".toUTF8.toList fieldDescriptor).digest
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.native_field_identity_v1.toUTF8.toList fieldDescriptor).digest
 
 def profile (template : CanonicalRuntimeProfile.FactoryTemplate)
     (receiverParameters : List UInt8) (disabledEvaluators : List Digest := []) :

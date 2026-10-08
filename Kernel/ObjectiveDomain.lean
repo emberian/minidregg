@@ -23,6 +23,7 @@ object law can say "these two balances sum to the reserve". A domain can: it nam
   record cell, so a concurrent turn that changes an unwritten member's state, or registers a domain
   over a written object, conflicts instead of slipping past the joint law.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ObjectiveActivityUpgrade
 
 namespace Minidregg.Kernel.ObjectiveActivity
@@ -41,7 +42,7 @@ set_option autoImplicit false
 
 /-- A domain's id: its members and law, content-addressed. -/
 def domainId (members : List CellId) (law : Minidregg.Pred.Pred) : Digest :=
-  tagged "DREGG/OBJECTIVE/DOMAIN/ID/v1"
+  tagged Minidregg.Theory.PersistedCodecTags.objectivedomain_domainid_f11efad9
     ((StreamCodec.product (StreamCodec.list digestStream) LawLeaf.predStream).encode (members, law))
 
 def domainKey (id : Digest) : Bytes := digestStream.encode id
@@ -673,7 +674,7 @@ structure RegisterRequest where
 def RegisterRequest.id (request : RegisterRequest) : Digest := domainId request.members request.law
 
 def registerTransaction (request : RegisterRequest) : TransactionId :=
-  tagged "DREGG/OBJECTIVE/DOMAIN/TX/REGISTER/v1"
+  tagged Minidregg.Theory.PersistedCodecTags.objectivedomain_registertransaction_47bba547
     (subjectStream.encode request.subject ++ digestStream.encode request.id ++ StreamCodec.nat.encode request.nonce)
 
 /-- The facts a member's upgrade authority judges a registration by: turn 10, the member as target. -/

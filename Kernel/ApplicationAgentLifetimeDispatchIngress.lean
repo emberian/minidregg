@@ -3,6 +3,7 @@ The distinct event26 carrier for an app-authorized lifetime agent route. It
 retains the complete app dispatch and grant-bound v3 reserve/payer selectors.
 Event21's v2 carrier and old ticket/session origin stay byte-for-byte intact.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationAgentLifetimeDispatchReserveContext
 import Kernel.ApplicationDispatchAdmissionIngress
 
@@ -54,7 +55,7 @@ def ingressStream : StreamCodec Ingress :=
 
 def codec : LawfulCodec Ingress := ResourceBirthCodec.strictCodec
   (NativeHostCodec.framed
-    "DREGG/APPLICATION/AGENT-LIFETIME-DISPATCH-INGRESS/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_agent_lifetime_dispatch_ingress_v1.toUTF8.toList
     ingressStream)
 
 def Ingress.canonicalBytes (ingress : Ingress) : List UInt8 := codec.encode ingress
@@ -71,7 +72,7 @@ def event (ingress : Ingress) : StableEvent where
   codecVersion := 26
   domain := ingress.dispatch.dispatch.domain
   eventId := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/AGENT-LIFETIME-DISPATCH-EVENT/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_agent_lifetime_dispatch_event_v1.toUTF8.toList
     ingress.canonicalBytes).digest
   canonicalBytes := ingress.canonicalBytes
 

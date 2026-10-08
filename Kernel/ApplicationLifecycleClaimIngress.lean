@@ -3,6 +3,7 @@ Canonical signed one-shot lifecycle claim. The separate current app and
 package observation envelopes are part of the same special event; neither an
 old BEGIN receipt nor a generic DRC invocation can stand in for this ingress.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationLifecycleClaim
 import Compiler.NativeHostCodec
 
@@ -44,7 +45,7 @@ def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 private def frame : List UInt8 :=
-  "DREGG/APPLICATION/LIFECYCLE-CLAIM-INGRESS/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_lifecycle_claim_ingress_v1.toUTF8.toList
 
 private def rawCodec : LawfulCodec Ingress where
   encode ingress := frame ++ ingressStream.encode ingress
@@ -71,7 +72,7 @@ def event (ingress : Ingress) : StableEvent where
   codecVersion := 16
   domain := ingress.domain
   eventId := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/LIFECYCLE-CLAIM-EVENT/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_lifecycle_claim_event_v1.toUTF8.toList
     ingress.canonicalBytes).digest
   canonicalBytes := ingress.canonicalBytes
 

@@ -64,6 +64,7 @@ This file proves round-trip, injectivity and canonicity GENERALLY, for every
 layout and every store; the worked instances at the end are evaluated
 witnesses, not the proofs.
 -/
+import Theory.PersistedCodecTags
 import Compiler.FiniteDependentMapCodec
 import Compiler.FiniteDependentMapCachedOrdering
 import Compiler.Sp800185Cshake256
@@ -167,7 +168,7 @@ theorem descriptor_injective {L' : Layout.{0, 0, 0}} (W' : Wire L')
     (same : descriptor W = descriptor W') : layoutDescriptor W = layoutDescriptor W' :=
   streamEncode_injective layoutDescriptorStream same
 
-def layoutCustomization : List UInt8 := "DREGG.STORE.LAYOUT/v1".toUTF8.toList
+def layoutCustomization : List UInt8 := Minidregg.Theory.PersistedCodecTags.store_layout_v1.toUTF8.toList
 
 def layoutDigest : List UInt8 :=
   (Sp800185Cshake256.hash layoutCustomization (descriptor W)).bytes
@@ -176,7 +177,7 @@ theorem layoutDigest_length : (layoutDigest W).length = 32 :=
   (Sp800185Cshake256.hash layoutCustomization (descriptor W)).length_exact
 
 /-- `"DREGG/STORE"` in UTF-8. -/
-def magic : List UInt8 := [68, 82, 69, 71, 71, 47, 83, 84, 79, 82, 69]
+def magic : List UInt8 := Minidregg.Theory.PersistedCodecTags.dregg_store
 
 /-- Version 3 (K-HIDE-ROTATE): the blinding entry is the CURRENT link of a
 per-write ratchet (`Blinding.patch`), not a birth blinding fixed for the cell's
@@ -184,7 +185,7 @@ life.  The bytes of a version-2 store are the same shape with the other
 meaning, so they refuse rather than be read as a ratchet state.  Version 2
 (K-NARROW-HIDE) made the root salted per entry and the layout descriptor name
 the blinding address; version-1 bytes refuse too. -/
-def storeVersion : UInt8 := 3
+def storeVersion : UInt8 := UInt8.ofNat Minidregg.Theory.PersistedCodecTags.storeWireVersion
 
 def frame : List UInt8 := magic ++ storeVersion :: layoutDigest W
 
@@ -644,12 +645,12 @@ theorem entryBytes_injective : Function.Injective (entryBytes W) :=
 
 end Store
 
-def saltCustomization : List UInt8 := "DREGG.STORE.SALT/v1".toUTF8.toList
-def leafCustomization : List UInt8 := "DREGG.STORE.LEAF/v1".toUTF8.toList
-def rootCustomization : List UInt8 := "DREGG.STORE.ROOT/v2".toUTF8.toList
+def saltCustomization : List UInt8 := Minidregg.Theory.PersistedCodecTags.store_salt_v1.toUTF8.toList
+def leafCustomization : List UInt8 := Minidregg.Theory.PersistedCodecTags.store_leaf_v1.toUTF8.toList
+def rootCustomization : List UInt8 := Minidregg.Theory.PersistedCodecTags.store_root_v2.toUTF8.toList
 /-- Bytes that are not a canonical store of the layout have a root under a
 separate domain; `rootOf` never reaches it (`materializer_rootOf`). -/
-def undecodableCustomization : List UInt8 := "DREGG.STORE.ROOT/undecodable".toUTF8.toList
+def undecodableCustomization : List UInt8 := Minidregg.Theory.PersistedCodecTags.store_root_undecodable.toUTF8.toList
 
 /-- An entry's salt under the cell key: KMAC256 keyed by the blinding bytes over
 the entry's canonical bytes.  No key, no salt. -/
@@ -871,7 +872,7 @@ refused, so the post blinding is exactly one step of the pre blinding
 The client derives the same chain from the birth blinding and the heights of
 the writes (`StoreHiding.ratchet_determined_by_birth`); no new key material. -/
 
-def ratchetCustomization : List UInt8 := "DREGG.CELL.BLIND.RATCHET/v1".toUTF8.toList
+def ratchetCustomization : List UInt8 := Minidregg.Theory.PersistedCodecTags.cell_blind_ratchet_v1.toUTF8.toList
 
 /-- A little-endian natural of bytes (the client's `Nat::from_le_bytes`). -/
 def natOfLE : List UInt8 → Nat

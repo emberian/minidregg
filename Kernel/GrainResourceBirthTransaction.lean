@@ -5,6 +5,7 @@ loaded durable image. Both existing grain targets are then prepared from that
 same directory and old authority, before any policy or native signature can
 be accepted. This is not a receiving endpoint.
 -/
+import Theory.PersistedCodecTags
 import Kernel.GrainResourceBirthFamilies
 
 namespace Minidregg.Kernel.GrainResourceBirthTransaction
@@ -253,7 +254,7 @@ def plan {F : Type} [Field F]
     PreparationPlan (layout birth grain) Unit where
   leg := rawLeg birth grain height
   jointDigest := fun _ => CanonicalCellRegistry.sourceEncoding.hashBytes
-    ("DREGG/GRAIN-RESOURCE-BIRTH/JOINT/v1".toUTF8.toList ++ source.canonicalBytes tariff)
+    (Minidregg.Theory.PersistedCodecTags.grain_resource_birth_joint_v1.toUTF8.toList ++ source.canonicalBytes tariff)
   legEffectsDigest := fun _ incidence =>
     (rawLeg birth grain height () incidence).request.2.effectsDigest
   bindFamily := bindFamily birth grain height

@@ -4,6 +4,7 @@ signed package action descriptor and grain launch binding are retained through
 the full original v4 BEGIN/recovery witness and claim. A native claim receipt identifies a durable
 reservation; this projection alone does not attest a process or allow a retry.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationLifecycleClaimProjection
 import Kernel.ApplicationLifecycleRetryClaimV4Core
 
@@ -31,7 +32,7 @@ def committedStream : StreamCodec Committed :=
     (by intro committed; cases committed; rfl)
 
 def frame : List UInt8 :=
-  "DREGG/APPLICATION/RETRY-CREATE-CLAIM-COMMITTED/v4".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_retry_create_claim_committed_v4.toUTF8.toList
 
 def codec : LawfulCodec Committed := NativeHostCodec.framed frame committedStream
 

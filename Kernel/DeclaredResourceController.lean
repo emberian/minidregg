@@ -3,6 +3,7 @@ an ordinary finite transaction, not a separate admission or persistence path.
 Every target and the authority read incidence form one actual MultiCellHyperedge
 PreparedTuple; all signatures and current policies precede its single CAS.  The
 shared replay marker is the intent's durable nullifier. -/
+import Theory.PersistedCodecTags
 import Kernel.ResourceTransaction
 import Kernel.ResourceInvocationSignatureFirst
 import Kernel.ObjectiveBendNativeAdmission
@@ -183,7 +184,7 @@ def readRequest (prepared : PreparedInvocation deployment profile ambient ground
   { requestFor ground.authority profile.semantics ambient command command.targets[i]
       (prepared.targets i).before.payload.root with
     verb := observeVerb command.targets[i].kind
-    effectsDigest := (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.OBSERVE/v3".toUTF8.toList
+    effectsDigest := (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.resource_transaction_observe_v3.toUTF8.toList
       ((StreamCodec.product bytesStream StreamCodec.nat).encode
         (commandBytes ground.authority.domain profile.semantics command,
           command.targets[i].target))).digest }
@@ -1659,7 +1660,7 @@ theorem readGuards_readonly (prepared : PreparedInvocation deployment profile am
 /-- Every dependency of every retained holder remains a final read guard unless
 this very intent writes that cell under the identical old-root CAS. -/
 
-def signedIngressFrame : List UInt8 := "DREGG/RESOURCE/SIGNED-INGRESS".toUTF8.toList ++ [3]
+def signedIngressFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.resource_signed_ingress_byte_v3
 abbrev SignedIngress := Digest × Digest × SignedCommand
 
 def signedIngressStream : StreamCodec SignedIngress :=

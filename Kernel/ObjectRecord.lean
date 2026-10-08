@@ -49,6 +49,7 @@ value, a boolean 0 or 1, a record's fields nest by `.`, a variant sets
 projects nothing. A field or variant name containing `.`, `@` or `/` does not
 project (no two paths can alias). The request facts sit under `request/`, with
 the names `CanonicalRuntimeProfileCore.requestSlots` uses for the same facts. -/
+import Theory.PersistedCodecTags
 import Pred.Core
 import Pred.Leaf
 import Compiler.RefusalReason
@@ -970,7 +971,7 @@ decode (its frame differs): `readObject` refuses it `objectCodec`, so an older w
 re-genesised, never reinterpreted. -/
 -- v5: the rebirth envelope carries `replayBytes`, `coreBytes` (GPT-6 row E); a v4 record does not decode.
 -- v6: the rebirth envelope carries `domainWork` (A3 domain pricing); a v5 record does not decode.
-def recordFrame : Bytes := "DREGG/OBJECTIVE/OBJECT-RECORD/v6".toUTF8.toList
+def recordFrame : Bytes := Minidregg.Theory.PersistedCodecTags.objective_object_record_v6.toUTF8.toList
 def recordCodec := framed recordFrame recordStream
 def encodeRecord (record : ObjectRecord) : Bytes := recordCodec.encode record
 def decodeRecord (bytes : Bytes) : Option ObjectRecord := recordCodec.decode bytes

@@ -20,6 +20,7 @@ cell of this kind (`UserShape` is false), no birth may choose an id at or above
 kernel refuses a funding or payee account in that space, so no one can own,
 squat or pre-fund a seat account: the offerer never names it.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ProtectedCell
 
 namespace Minidregg.Kernel.SeatCell
@@ -60,9 +61,9 @@ frame `DREGG/SEAT-CELL`. -/
 abbrev spec : ProtectedCell.Spec where
   Role := Role
   roleStream := roleStream
-  idCustomization := "DREGG.SEAT.CELL.ID/v1".toUTF8.toList
-  rootCustomization := "DREGG.SEAT.CELL.STATE/v1".toUTF8.toList
-  wireFrame := "DREGG/SEAT-CELL".toUTF8.toList
+  idCustomization := Minidregg.Theory.PersistedCodecTags.seat_cell_id_v1.toUTF8.toList
+  rootCustomization := Minidregg.Theory.PersistedCodecTags.seat_cell_state_v1.toUTF8.toList
+  wireFrame := Minidregg.Theory.PersistedCodecTags.seat_cell.toUTF8.toList
   wireVersion := wireVersion
 
 abbrev Payload := ProtectedCell.Payload spec

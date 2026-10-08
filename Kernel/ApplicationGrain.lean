@@ -11,6 +11,7 @@ belongs to the installed policy, current capability, signed ingress and durable
 DeclaredResourceController receiver. In particular, it does not grant an HTTP
 dispatch permit or assert that an external app, package or snapshot is sound.
 -/
+import Theory.PersistedCodecTags
 import Kernel.DeclaredFields
 import Kernel.ResourceTransaction
 import Pred.Core
@@ -469,7 +470,7 @@ def dispatchStream : StreamCodec DispatchIntent :=
     (by intro intent; cases intent; rfl)
 
 private def dispatchFrame : List UInt8 :=
-  "DREGG/APPLICATION/DISPATCH/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_dispatch_v1.toUTF8.toList
 
 private def rawDispatchCodec : LawfulCodec DispatchIntent where
   encode intent := dispatchFrame ++ dispatchStream.encode intent

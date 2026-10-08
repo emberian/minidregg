@@ -5,6 +5,7 @@ The native receiver must select that resource from installed session policy,
 read-guard its current root, check current capability lineage, and resolve role
 permissions against the currently installed app manifest before dispatch.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationGrainSession
 import Kernel.ApplicationDispatchCodec
 import Kernel.ContentResource
@@ -107,7 +108,7 @@ def enrollmentStream : StreamCodec Enrollment :=
     (by intro enrollment; cases enrollment; rfl)
 
 private def enrollmentFrame : List UInt8 :=
-  "DREGG/APPLICATION/SESSION-ENROLLMENT/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_session_enrollment_v1.toUTF8.toList
 
 private def rawEnrollmentCodec : LawfulCodec Enrollment where
   encode enrollment := enrollmentFrame ++ enrollmentStream.encode enrollment
@@ -153,7 +154,7 @@ def enrollmentAtom (domain : Digest) (session : Nat) : AtomId :=
   let preimage := (StreamCodec.product digestStream
     StreamCodec.nat).encode (domain, session)
   ⟨⟨(Sp800185Cshake256.hash
-    "DREGG/APPLICATION/SESSION-ENROLLMENT-ATOM/v2".toUTF8.toList preimage).digest.value⟩⟩
+    Minidregg.Theory.PersistedCodecTags.application_session_enrollment_atom_v2.toUTF8.toList preimage).digest.value⟩⟩
 
 /-- Parse the stable atom and require its payload to match the current session
 generation. An old payload fails even though its atom address remains stable.

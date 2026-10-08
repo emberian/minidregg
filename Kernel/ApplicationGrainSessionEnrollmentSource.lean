@@ -4,6 +4,7 @@ mutates only the participant's session and descriptor. A separate checked
 app observation and physical read guard belong to the event28 receiver;
 these request and ingress codecs do not themselves grant enrollment.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationGrainSessionEnrollment
 import Kernel.ApplicationDispatchAuthority
 import Kernel.NativeHostContext
@@ -63,7 +64,7 @@ def requestStream : StreamCodec Request :=
 
 def requestCodec : LawfulCodec Request :=
   NativeHostCodec.framed
-    "DREGG/APPLICATION/SESSION-ENROLLMENT-REQUEST/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_session_enrollment_request_v1.toUTF8.toList
     requestStream
 
 theorem request_decode_encode (request : Request) :
@@ -112,7 +113,7 @@ private def ingressStream : StreamCodec Ingress :=
 
 def ingressCodec : LawfulCodec Ingress :=
   NativeHostCodec.framed
-    "DREGG/APPLICATION/SESSION-ENROLLMENT-INGRESS/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_session_enrollment_ingress_v1.toUTF8.toList
     ingressStream
 
 theorem ingress_decode_encode (ingress : Ingress) :
@@ -133,7 +134,7 @@ def event (domain : Digest) (ingress : Ingress) : StableEvent where
   codecVersion := 28
   domain := domain
   eventId := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/SESSION-ENROLLMENT-EVENT/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_session_enrollment_event_v1.toUTF8.toList
     (digestStream.encode domain ++ ingress.canonicalBytes)).digest
   canonicalBytes := ingress.canonicalBytes
 

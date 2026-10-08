@@ -10,6 +10,7 @@ arbitrary caller-authored initial allowance. The one funded increase is the
 in the same turn, so one micro-unit is one credit. No field is a policy revision or grant
 revocation generation. A stopped status proves admission fencing, not that
 an external process or provider actually stopped. -/
+import Theory.PersistedCodecTags
 import Kernel.DeclaredFields
 import Kernel.ResourceTransaction
 import Pred.Core
@@ -248,7 +249,7 @@ not authorization to dispatch again. This binds bytes, not how Hermes built
 them or the truth of externally reported usage. -/
 def contextNonce (context : List UInt8) : Nat :=
   (Minidregg.Compiler.Sp800185Cshake256.hash
-    "DREGG.AGENT-GRAIN.CONTEXT/v1".toUTF8.toList context).digest.value
+    Minidregg.Theory.PersistedCodecTags.agent_grain_context_v1.toUTF8.toList context).digest.value
 
 def Operation.actions (operation : Operation) (task : Nat) (s : State) : List Action :=
   AgentGrain.actions task s (operation.after s)

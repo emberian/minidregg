@@ -54,6 +54,7 @@ The turn is ONE intent: the inboxes and slots it read and writes (each a lawful
 queue step of what it held), the decided slot, the delivered call tree's state
 writes, and the Book, guarded on every object it read, spending the message's
 claim (`messageClaim`): a message is delivered once. -/
+import Theory.PersistedCodecTags
 import Kernel.ObjectiveCall
 
 namespace Minidregg.Kernel.ObjectiveSend
@@ -78,7 +79,7 @@ structure MessageRequest where
 
 /-- Every delivery of one message shares one transaction id. -/
 def messageTransaction (id : Digest) : TransactionId :=
-  tagged "DREGG/OBJECTIVE/MESSAGE/TX/DELIVER/v1" (digestStream.encode id)
+  tagged Minidregg.Theory.PersistedCodecTags.objective_message_tx_deliver_v1 (digestStream.encode id)
 
 /-- Spent by the turn that delivers the message. -/
 def messageClaim (id : Digest) : StableNullifier := claim "message" (digestStream.encode id)

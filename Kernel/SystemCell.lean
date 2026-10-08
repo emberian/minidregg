@@ -31,6 +31,7 @@ post value is exactly `certifyNext` of the current head and chain
 
 Wire: the store codec with layout name `DREGG/SYSTEM/v1`.
 -/
+import Theory.PersistedCodecTags
 import Compiler.StoreCodec
 import Pred.Core
 
@@ -153,7 +154,7 @@ def keyStream : (space : Namespace) → StreamCodec (Namespace.Key space)
 def valueStream : (space : Namespace) → StreamCodec (Namespace.Value space)
   | .system => systemStream
 
-def wireName : String := "DREGG/SYSTEM/v1"
+def wireName : String := Minidregg.Theory.PersistedCodecTags.system_v1
 
 def wire : Wire layout where
   name := wireName
@@ -165,7 +166,7 @@ def wire : Wire layout where
   keyCodecId
     | .system => "unit"
   valueCodecId
-    | .system => "DREGG/SYSTEM/CERTIFIED-HEIGHT-DIGEST-TAIL-BOUND/v1"
+    | .system => Minidregg.Theory.PersistedCodecTags.system_certified_height_digest_tail_bound_v1
 
 def materializer : Materializer layout Digest := StoreCodec.materializer wire
 
@@ -177,7 +178,7 @@ theorem cell_roundtrip (store : SystemStore) :
 
 /-! ## Identity and genesis -/
 
-def idCustomization : List UInt8 := "DREGG.SYSTEM.CELL.ID/v1".toUTF8.toList
+def idCustomization : List UInt8 := Minidregg.Theory.PersistedCodecTags.system_cell_id_v1.toUTF8.toList
 
 /-- The system cell's physical identifier in deployment `domain`. -/
 def physicalId (domain : Digest) : Nat :=

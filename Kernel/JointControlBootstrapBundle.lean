@@ -7,6 +7,7 @@ Authored WIP; source opcode 61 and replay/ordered receiver joins are pending.
 The predicted prefix is the opened image extended by the first record
 (`Loaded.extend`), never a genesis replay of the whole history.
 -/
+import Theory.PersistedCodecTags
 import Kernel.JointControlBootstrap
 import Kernel.ResourceBirthReceiver
 import Compiler.Sp800185Cshake256
@@ -31,7 +32,7 @@ def sourceStream : StreamCodec Source :=
   StreamCodec.xmap (StreamCodec.product bytesStream bytesStream)
     (fun s => (s.birthIngressBytes,s.initializerSignedBytes))
     (fun s => ⟨s.1,s.2⟩) (by intro s; cases s; rfl)
-def frame : List UInt8 := "DREGG/JOINT/CONTROL-BOOTSTRAP/v1".toUTF8.toList
+def frame : List UInt8 := Minidregg.Theory.PersistedCodecTags.joint_control_bootstrap_v1.toUTF8.toList
 def sourceBytes (s : Source) : List UInt8 := frame ++ sourceStream.encode s
 def decodeSource (bytes : List UInt8) : Option Source := do
   if bytes.take frame.length != frame then none else

@@ -16,6 +16,7 @@ returns: the exact header the subject signs). The command carries no expected
 roots: the signed request quotes the Book's pre-root and the plan's authority
 footprint, so a plan against a moved Book refuses at signature admission.
 -/
+import Theory.PersistedCodecTags
 import Compiler.NativeHostCodec
 
 namespace Minidregg.Compiler.RealmWellCodec
@@ -81,7 +82,7 @@ def commandStream : StreamCodec Command :=
       ⟨subject, capability, well, op, account, amount, nonce⟩)
     (by intro c; cases c; rfl)
 
-def commandFrame : List UInt8 := "DREGG/WELL/COMMAND/v1".toUTF8.toList
+def commandFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.well_command_v1.toUTF8.toList
 
 def commandCodec : LawfulCodec Command := NativeHostCodec.framed commandFrame commandStream
 
@@ -104,7 +105,7 @@ def ingressStream : StreamCodec Ingress :=
     (fun (command, envelope) => ⟨command, envelope⟩)
     (by intro ingress; cases ingress; rfl)
 
-def ingressFrame : List UInt8 := "DREGG/WELL/SIGNED/v1".toUTF8.toList
+def ingressFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.well_signed_v1.toUTF8.toList
 
 def ingressCodec : LawfulCodec Ingress := NativeHostCodec.framed ingressFrame ingressStream
 
@@ -132,7 +133,7 @@ def signingPlanStream : StreamCodec SigningPlan :=
     (fun (domain, semantics, command, header) => ⟨domain, semantics, command, header⟩)
     (by intro plan; cases plan; rfl)
 
-def planFrame : List UInt8 := "DREGG/WELL/PLAN/v1".toUTF8.toList
+def planFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.well_plan_v1.toUTF8.toList
 
 def signingPlanCodec : LawfulCodec SigningPlan :=
   NativeHostCodec.framed planFrame signingPlanStream

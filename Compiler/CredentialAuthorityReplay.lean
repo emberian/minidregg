@@ -9,6 +9,7 @@ identity belongs in the journaled event, not in a second consumed-key namespace.
 This module is only canonical representation. It adds no replay store, no
 authority interpreter and no assumption that a hash is injective.
 -/
+import Theory.PersistedCodecTags
 import Compiler.Tower256ConcreteBackend
 import Compiler.Sp800185Cshake256
 import Kernel.DurableDataIntent
@@ -21,7 +22,7 @@ open Minidregg.Kernel.DurableDataIntent
 
 set_option autoImplicit false
 
-def frame : List UInt8 := "DREGG.AUTHORITY.NULLIFIER/v1".toUTF8.toList
+def frame : List UInt8 := Minidregg.Theory.PersistedCodecTags.authority_nullifier_v1.toUTF8.toList
 
 def bytes (domain : Digest) (marker : Nat) : List UInt8 :=
   frame ++ (StreamCodec.product digestStream StreamCodec.nat).encode (domain, marker)
@@ -61,10 +62,10 @@ theorem bytes_injective (leftDomain rightDomain : Digest) (left right : Nat)
 /-! ## Source-owned birth identity, before any payload or root is chosen -/
 
 def birthIdentityFrame : List UInt8 :=
-  "DREGG/RESOURCE-BIRTH/IDENTITY".toUTF8.toList ++ [1]
+  Minidregg.Theory.PersistedCodecTags.resource_birth_identity_byte_v1
 
 def birthIdentityCustomization : List UInt8 :=
-  "DREGG.RESOURCE.BIRTH.IDENTITY/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.resource_birth_identity_v1.toUTF8.toList
 
 def birthIdentityStream : StreamCodec (Digest × (Digest × (Nat × (Nat × Nat)))) :=
   StreamCodec.product digestStream (StreamCodec.product digestStream

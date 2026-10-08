@@ -3,39 +3,40 @@ CanonicalRuntimeProfile. Keep this leaf free of receivers/NativeHost imports.
 A frame preserves representation; receivingContract also commits the authority,
 freshness, replay, renewal and physical-custody distinctions behind those bytes.
 -/
+import Theory.PersistedCodecTags
 import Init
 
 namespace Minidregg.Compiler.ApplicationReceivingDomain
 
 def streamContinuityChallengeFrame : List UInt8 :=
-  "DREGG/APPLICATION/STREAM-CONTINUITY-CHALLENGE/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_stream_continuity_challenge_v1.toUTF8.toList
 
 def streamContinuityRequestFrame : List UInt8 :=
-  "DREGG/APPLICATION/STREAM-CONTINUITY-REQUEST/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_stream_continuity_request_v1.toUTF8.toList
 
 def streamContinuityAttestationFrame : List UInt8 :=
-  "DREGG/APPLICATION/STREAM-CONTINUITY-ATTESTATION/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_stream_continuity_attestation_v1.toUTF8.toList
 
 def routeAdmissionChallengeFrame : List UInt8 :=
-  "DREGG/APPLICATION/ROUTE-ADMISSION-CHALLENGE/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_route_admission_challenge_v1.toUTF8.toList
 
 def routeAdmissionRequestFrame : List UInt8 :=
-  "DREGG/APPLICATION/ROUTE-ADMISSION-REQUEST/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_route_admission_request_v1.toUTF8.toList
 
 def routeAdmissionAttestationFrame : List UInt8 :=
-  "DREGG/APPLICATION/ROUTE-ADMISSION-ATTESTATION/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_route_admission_attestation_v1.toUTF8.toList
 
 def routeBoundDispatchFrame : List UInt8 :=
-  "DREGG/APPLICATION/ROUTE-BOUND-DISPATCH/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_route_bound_dispatch_v1.toUTF8.toList
 
 def noRecordRefusalFrame : List UInt8 :=
-  "DREGG/APPLICATION/DISPATCH-NO-RECORD-REFUSAL/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_dispatch_no_record_refusal_v1.toUTF8.toList
 
 def dispatchCommittedPermitFrame : List UInt8 :=
-  "DREGG/APPLICATION/DISPATCH-COMMITTED-PERMIT/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_dispatch_committed_permit_v1.toUTF8.toList
 
 def agentDispatchCommittedPermitFrame : List UInt8 :=
-  "DREGG/APPLICATION/AGENT-DISPATCH-COMMITTED-PERMIT/v2".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_agent_dispatch_committed_permit_v2.toUTF8.toList
 
 def streamContinuityProbeProtocol : List UInt8 :=
   "dregg.authority.continuity.v1".toUTF8.toList
@@ -47,7 +48,7 @@ def routeAdmissionProbeProtocol : List UInt8 :=
 permission to reuse a stopped generation. Runtime consumers still enforce its
 root ownership, exact image/config pins and signed source reenrollment. -/
 def receivingContract : List UInt8 :=
-  ("DREGG.APPLICATION-RECEIVING/v2:" ++
+  (Minidregg.Theory.PersistedCodecTags.application_receiving_v2 ++
    "physical-permit-fresh-cas-winner-and-installed;" ++
    "confirmed-recovered-historical-receipt-never-redelivers;" ++
    "exact-historical-call-lookup-before-current-admission;" ++

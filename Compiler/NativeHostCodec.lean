@@ -4,6 +4,7 @@ controller bytes, not a second executor or an authority assertion. Each
 operation's existing strict receiving codec still decodes its inner payload.
 No raw DataIntent, supplied height, profile, or post-state is a call variant.
 -/
+import Theory.PersistedCodecTags
 import Compiler.NativeProtocolFrames
 import Compiler.NativeHostProfile
 import Kernel.DeclaredResourceController
@@ -35,7 +36,7 @@ summary or a digest algorithm. -/
 
 /-- The log root before any turn: binds the deployment and the seed. -/
 def logRoot0 (domain semantics : Digest) (seed : DurableReceiver.Seed) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.GENESIS-LOG/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.native_host_genesis_log_v1.toUTF8.toList
     ((StreamCodec.product digestStream
       (StreamCodec.product digestStream DurableReceiverCodec.seedStream)).encode
         (domain, semantics, seed))).digest

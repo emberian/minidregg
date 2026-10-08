@@ -46,6 +46,7 @@ reallocation whose result, changed between the signing plan and the submission
 no longer matches the signed header and is refused, never settled differently.
 (An offer tolerates movement in the price; the exact signed plan does not.)
 -/
+import Theory.PersistedCodecTags
 import Kernel.CapabilityRevocationController
 import Kernel.ResourceBirthController
 import Kernel.SeatStore
@@ -113,7 +114,7 @@ def commandStream : StreamCodec Command :=
 /-- Frame v2: an offer's proposal carries the donation marker. -/
 -- v5: envelopes carry `replayBytes`, `coreBytes` (GPT-6 row E work account); a v4 command does not decode.
 -- v6: envelopes carry `domainWork` (A3 domain pricing); a v5 command does not decode.
-def commandFrame : List UInt8 := "DREGG/SEAT/COMMAND/v6".toUTF8.toList
+def commandFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.seat_command_v6.toUTF8.toList
 
 def commandCodec : LawfulCodec Command := ObjectiveActivityWire.framed commandFrame commandStream
 
@@ -138,7 +139,7 @@ def ingressStream : StreamCodec Ingress :=
     (fun (command, envelope) => ⟨command, envelope⟩)
     (by intro ingress; cases ingress; rfl)
 
-def ingressFrame : List UInt8 := "DREGG/SEAT/SIGNED/v1".toUTF8.toList
+def ingressFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.seat_signed_v1.toUTF8.toList
 
 def ingressCodec : LawfulCodec Ingress := ObjectiveActivityWire.framed ingressFrame ingressStream
 
@@ -164,7 +165,7 @@ def DecodedIngress.bytes (ingress : DecodedIngress) : List UInt8 :=
   ingressCodec.encode ingress.ingress
 
 def marker (domain semantics : Digest) (command : Command) : Nat :=
-  (Sp800185Cshake256.hash "DREGG.SEAT.IDENTITY/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.seat_identity_v1.toUTF8.toList
     ((StreamCodec.product digestStream (StreamCodec.product digestStream
       (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream StreamCodec.nat))).encode
       (domain, semantics, command.subject, command.nonce))).digest.value
@@ -194,7 +195,7 @@ def postStream : StreamCodec Post :=
 
 /-- The outcome a signer consents to: the decided turn's posts. -/
 def outcomeDigest (posts : List Post) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.SEAT.OUTCOME/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.seat_outcome_v1.toUTF8.toList
     ((StreamCodec.list postStream).encode posts)).digest
 
 /-- What the signature covers besides the command: the decided outcome, and
@@ -212,7 +213,7 @@ def declarationCodec : LawfulCodec Declaration :=
   ResourceBirthCodec.strictCodec declarationStream.toLawful
 
 def effectDigest (domain semantics : Digest) (command : Command) (d : Declaration) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.SEAT.EFFECT/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.seat_effect_v1.toUTF8.toList
     ((StreamCodec.product digestStream (StreamCodec.product digestStream
       (StreamCodec.product bytesStream bytesStream))).encode
       (domain, semantics, commandCodec.encode command, declarationCodec.encode d))).digest
@@ -252,7 +253,7 @@ def contextAt (snapshot : Snapshot) (semantics : Digest) (ambient : Ambient) (co
       policyRevision := snapshot.authState.policyRevision ⟨target⟩
       cost := (commandCodec.encode command).length }
   argsDigestBytes := fun bytes =>
-    (Sp800185Cshake256.hash "DREGG.SEAT.ARGS/v1".toUTF8.toList
+    (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.seat_args_v1.toUTF8.toList
       (commandCodec.encode command ++ bytes)).digest
 
 def requestAt (snapshot : Snapshot) (semantics : Digest) (ambient : Ambient) (command : Command)
@@ -384,7 +385,7 @@ def transactionId (_domain _semantics : Digest) (ingress : DecodedIngress) : Dig
 def event (domain _semantics : Digest) (ingress : DecodedIngress) : StableEvent where
   codecVersion := 1
   domain := domain
-  eventId := (Sp800185Cshake256.hash "DREGG.SEAT.EVENT/v1".toUTF8.toList ingress.bytes).digest
+  eventId := (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.seat_event_v1.toUTF8.toList ingress.bytes).digest
   canonicalBytes := ingress.bytes
 
 def nullifier (domain semantics : Digest) (command : Command) : StableNullifier :=
@@ -681,7 +682,7 @@ def signingPlanStream : StreamCodec SigningPlan :=
     (by intro plan; cases plan; rfl)
 
 def signingPlanCodec : LawfulCodec SigningPlan :=
-  ObjectiveActivityWire.framed "DREGG/SEAT/PLAN/v1".toUTF8.toList signingPlanStream
+  ObjectiveActivityWire.framed Minidregg.Theory.PersistedCodecTags.seat_plan_v1.toUTF8.toList signingPlanStream
 
 #assert_axioms command_roundtrip command_canonical native_turn_is_kernel_turn native_invariant_preserved
   native_turn_conserves intent_writes_seat_or_book intent_writes_lawful offer_requires_account_holder

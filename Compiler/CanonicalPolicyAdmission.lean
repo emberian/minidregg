@@ -19,6 +19,7 @@ authenticated authorization state, verifies its membership under the policy
 root, and requires the witness to name that address.  This module owns the
 canonical `PredCompile` implementation of that committed verifier.
 -/
+import Theory.PersistedCodecTags
 import Compiler.PredCompile
 import Compiler.Tower256ConcreteBackend
 import Compiler.Sp800185Cshake256
@@ -314,7 +315,7 @@ theorem CompilerSemanticDescriptor.encode_injective :
 /-- Domain-separated cSHAKE binds compatible receiving-runtime semantics, version, field and arithmetic
 profile. Hash collision resistance is not asserted as an injectivity theorem. -/
 def CompilerSemanticDescriptor.digest (descriptor : CompilerSemanticDescriptor) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.POLICY.COMPILER.PROFILE/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.policy_compiler_profile_v1.toUTF8.toList
     descriptor.encode).digest
 
 /-- Only receiving source constructs these values. A source profile derives its

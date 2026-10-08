@@ -7,6 +7,7 @@ The source derives a single revocation/nullifier patch from one complete old
 authority snapshot; neither a signature alone nor resource ownership bypasses
 the policy. Descendant admission consults this same canonical revocation plane.
 -/
+import Theory.PersistedCodecTags
 import Kernel.DeclaredResourceController
 import Theory.CredentialAuthorityEffects
 import Compiler.ResourceTargetAdmission
@@ -84,7 +85,7 @@ def packedCommandStream : StreamCodec PackedCommand where
     cases command with
     | mk kind command => simp [List.append_assoc, StreamCodec.decodePrefix_encode]
 
-def commandFrame : List UInt8 := "DREGG/CAPABILITY/REVOKE".toUTF8.toList ++ [1]
+def commandFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.capability_revoke_byte_v1
 
 def rawCommandCodec : LawfulCodec PackedCommand where
   encode command := commandFrame ++ packedCommandStream.encode command
@@ -105,7 +106,7 @@ theorem command_decode_canonical {bytes : List UInt8} {command : PackedCommand}
 /-- Same caller/resource/nonce is one operation even if its victim, authority,
 root or signature changes. The retained exact ingress rejects such substitution. -/
 def operationMarker {kind : ResourceKind} (domain semantics : Digest) (command : Command kind) : Nat :=
-  (Sp800185Cshake256.hash "DREGG.CAPABILITY.REVOKE.IDENTITY/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.capability_revoke_identity_v1.toUTF8.toList
     ((StreamCodec.product digestStream
       (StreamCodec.product digestStream
         (StreamCodec.product ResourceBirthCodec.resourceKindStream
@@ -133,7 +134,7 @@ def commandBytes {kind : ResourceKind} (domain semantics : Digest) (command : Co
 
 def effectsDigest {kind : ResourceKind} (domain semantics : Digest) (command : Command kind)
     (declaration : RevokeDeclaration) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.CAPABILITY.REVOKE.EFFECT/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.capability_revoke_effect_v1.toUTF8.toList
     (commandBytes domain semantics command ++ declarationCodec.encode declaration)).digest
 
 structure Ambient where
@@ -161,7 +162,7 @@ def context {kind : ResourceKind} (snapshot : Snapshot) (semantics : Digest)
       policyRevision := snapshot.authState.policyRevision ⟨command.target.value⟩
       cost := (commandCodec.encode ⟨kind, command⟩).length }
   argsDigestBytes := fun bytes =>
-    (Sp800185Cshake256.hash "DREGG.CAPABILITY.REVOKE.ARGS/v1".toUTF8.toList
+    (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.capability_revoke_args_v1.toUTF8.toList
       (commandBytes snapshot.domain semantics command ++ bytes)).digest
 
 def request {kind : ResourceKind} (snapshot : Snapshot) (semantics : Digest)

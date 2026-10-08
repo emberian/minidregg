@@ -11,6 +11,7 @@ tree has no executable reader of that field. Role assignment uses
 shell/imports/sandstorm-permissions/permissions.js:48-100; missing role bits
 are false. A Mini-governed ticket/share ceiling is a separate authority input.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationGrainSessionEnrollment
 
 namespace Minidregg.Kernel.ApplicationPermissionSchema
@@ -75,7 +76,7 @@ def schemaStream : StreamCodec Schema :=
     (by intro s; cases s; rfl)
 
 private def schemaFrame : List UInt8 :=
-  "DREGG/APPLICATION/PERMISSION-SCHEMA/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_permission_schema_v1.toUTF8.toList
 
 private def rawSchemaCodec : LawfulCodec Schema where
   encode s := schemaFrame ++ schemaStream.encode s
@@ -92,7 +93,7 @@ def schemaCodec : LawfulCodec Schema :=
 
 def Schema.root (s : Schema) : Digest :=
   (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/PERMISSION-SCHEMA-ROOT/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_permission_schema_root_v1.toUTF8.toList
     (schemaCodec.encode s)).digest
 
 theorem schema_decode_encode (s : Schema) :

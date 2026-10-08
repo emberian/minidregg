@@ -56,6 +56,7 @@ not activate compute or assert that historical execution used no allowance.
 Compute requires a separately authenticated fresh-genesis or closed-legacy
 history activation. Its append-only record prevents resetting the free epoch.
 -/
+import Theory.PersistedCodecTags
 import Kernel.PayEnrolClaim
 import Kernel.PayEnrolMemoV2
 import Compiler.StoreCodec
@@ -514,7 +515,7 @@ def valueStream : (space : Namespace) → StreamCodec (Namespace.Value space)
   | .computeUsage => computeUsageStream
   | .computeActivation => computeActivationStream
 
-def wireName : String := "DREGG/PAY/CELL/v6"
+def wireName : String := Minidregg.Theory.PersistedCodecTags.pay_cell_v6
 
 def wire : Wire layout where
   name := wireName
@@ -540,19 +541,19 @@ def wire : Wire layout where
     | .computeUsage => "subject-id/nat"
     | .computeActivation => "unit"
   valueCodecId
-    | .tariff => "DREGG/PAY/TARIFF/v4"
+    | .tariff => Minidregg.Theory.PersistedCodecTags.pay_tariff_v4
     | .book => "address32/bytes"
     | .assignment => "account-id/nat"
-    | .enrolment => "DREGG/PAY/ENROLMENT/v1"
+    | .enrolment => Minidregg.Theory.PersistedCodecTags.pay_enrolment_v1
     | .sshIndex => "mini-key32/bytes"
-    | .journal => "DREGG/PAY/UNATTRIBUTED/v1"
-    | .claim => "DREGG/PAY/CLAIM/v2"
-    | .claimConsumption => "DREGG/PAY/CLAIM/CONSUMPTION/v2"
-    | .pendingOwner => "DREGG/PAY/PENDING-OWNER/v1"
-    | .pendingOwnerHistory => "DREGG/PAY/PENDING-OWNER/v1"
-    | .chainTip => "DREGG/PAY/CHAIN-TIP/v1"
-    | .computeUsage => "DREGG/RUN/COMPUTE-USAGE/v1"
-    | .computeActivation => "DREGG/RUN/COMPUTE-ACTIVATION/v1"
+    | .journal => Minidregg.Theory.PersistedCodecTags.pay_unattributed_v1
+    | .claim => Minidregg.Theory.PersistedCodecTags.pay_claim_v2
+    | .claimConsumption => Minidregg.Theory.PersistedCodecTags.pay_claim_consumption_v2
+    | .pendingOwner => Minidregg.Theory.PersistedCodecTags.pay_pending_owner_v1
+    | .pendingOwnerHistory => Minidregg.Theory.PersistedCodecTags.pay_pending_owner_v1
+    | .chainTip => Minidregg.Theory.PersistedCodecTags.pay_chain_tip_v1
+    | .computeUsage => Minidregg.Theory.PersistedCodecTags.run_compute_usage_v1
+    | .computeActivation => Minidregg.Theory.PersistedCodecTags.run_compute_activation_v1
 
 def materializer : Materializer layout Digest := StoreCodec.materializer wire
 
@@ -568,7 +569,7 @@ theorem cell_canonical {bytes : List UInt8} {store : PayStore}
 
 /-! ## Identity and genesis -/
 
-def idCustomization : List UInt8 := "DREGG.PAY.CELL.ID/v1".toUTF8.toList
+def idCustomization : List UInt8 := Minidregg.Theory.PersistedCodecTags.pay_cell_id_v1.toUTF8.toList
 
 /-- The pay cell's physical identifier in deployment `domain`. -/
 def physicalId (domain : Digest) : Nat :=

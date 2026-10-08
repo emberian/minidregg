@@ -5,6 +5,7 @@ issue provenance, or durable pending commit. The signed no-op is checked at
 the same image as the application dispatch; event21 carries its complete-cell
 physical root as a read guard rather than writing an unchanged purse page.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationDispatchAgentReserveContext
 import Kernel.NativeHostContext
 import Kernel.NativeHostServed
@@ -25,7 +26,7 @@ set_option autoImplicit false
 
 def payerNonce (context : Context) : Nat :=
   AgentGrain.contextNonce
-    ("DREGG/APPLICATION/AGENT-DISPATCH-PAYER/v2".toUTF8.toList ++
+    (Minidregg.Theory.PersistedCodecTags.application_agent_dispatch_payer_v2.toUTF8.toList ++
       context.canonicalBytes)
 
 def stateAt (task : Nat) (cell : PackedCell CanonicalCellRegistry.registry) :

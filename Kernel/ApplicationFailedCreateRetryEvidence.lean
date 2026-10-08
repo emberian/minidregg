@@ -4,6 +4,7 @@ replay must additionally bind the original claim to its admitted chronological
 walk, and the new BEGIN/CLAIM must check current management authority. The
 retained report certifies a dead incarnation, never absence of past effects.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationFailedStartRecoveryCore
 
 namespace Minidregg.Kernel.ApplicationFailedCreateRetryEvidence
@@ -35,7 +36,7 @@ def selectorStream : StreamCodec Selector :=
     (by intro selector; cases selector; rfl)
 
 def selectorCodec : LawfulCodec Selector := NativeHostCodec.framed
-  "DREGG/APPLICATION/FAILED-CREATE-RETRY-SELECTOR/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_failed_create_retry_selector_v1.toUTF8.toList
   selectorStream
 
 def Selector.canonicalBytes (selector : Selector) : List UInt8 :=
@@ -50,10 +51,10 @@ def retryToken (selector : Selector) : StableNullifier where
   codecVersion := 66
   domain := selector.recovery.domain
   nullifierId := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/FAILED-CREATE-RETRY-TOKEN-ID/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_failed_create_retry_token_id_v1.toUTF8.toList
     selector.canonicalBytes).digest
   canonicalBytes :=
-    "DREGG/APPLICATION/FAILED-CREATE-RETRY-TOKEN-BYTES/v1".toUTF8.toList ++
+    Minidregg.Theory.PersistedCodecTags.application_failed_create_retry_token_bytes_v1.toUTF8.toList ++
       selector.canonicalBytes
 
 def bindingMatches (selector : Selector)

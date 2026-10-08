@@ -8,6 +8,7 @@ field and the whole package are bounded before nested native decoders run.
 The historical first-event frame remains separately decodable under its old
 bounds and is never reinterpreted as the current profile.
 -/
+import Theory.PersistedCodecTags
 import Compiler.NativeHostCodec
 
 namespace Minidregg.Compiler.FnEvidenceCodec
@@ -44,10 +45,10 @@ def packageStream : StreamCodec Package :=
     (by intro value; cases value; rfl)
 
 def packageCodec : LawfulCodec Package :=
-  framed "DREGG/FN/NATIVE-PREFIX/v2".toUTF8.toList packageStream
+  framed Minidregg.Theory.PersistedCodecTags.fn_native_prefix_v2.toUTF8.toList packageStream
 
 def historicalPackageCodec : LawfulCodec Package :=
-  framed "DREGG/FN/NATIVE-PREFIX/v1".toUTF8.toList packageStream
+  framed Minidregg.Theory.PersistedCodecTags.fn_native_prefix_v1.toUTF8.toList packageStream
 
 def maxPackageBytes : Nat := 1048576
 def maxCallBytes : Nat := 262144

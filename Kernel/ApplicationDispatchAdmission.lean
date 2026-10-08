@@ -3,6 +3,7 @@ Current-image selectors for special application dispatch. These helpers do not
 admit a request by themselves: the receiver must check signed observations,
 the DRC invocation, accepted historical share issuance, and one durable CAS.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationDispatchAdmissionIngress
 import Kernel.ApplicationDispatchManifest
 import Kernel.ApplicationDispatchWitness
@@ -41,7 +42,7 @@ app. Session reconnect, ticket replacement and app wake do not change it.
 Display names are never inputs to this authority identity. -/
 def principalFor (domain : Digest) (app : Nat) (subject : SubjectId) : List UInt8 :=
   (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/SANDSTORM-PRINCIPAL/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_sandstorm_principal_v1.toUTF8.toList
     ((StreamCodec.product digestStream
       (StreamCodec.product StreamCodec.nat
         TypedAuthorizationRequestCodec.subjectIdStream)).encode
@@ -300,7 +301,7 @@ theorem observedPhysicalRoot_current {deployment : Deployment}
 selected issue/ticket coordinates, without including their own envelopes. -/
 def observationContext (ingress : ApplicationDispatchAdmissionIngress.Ingress) :
     List UInt8 :=
-  "DREGG/APPLICATION/DISPATCH-OBSERVATION/v1".toUTF8.toList ++
+  Minidregg.Theory.PersistedCodecTags.application_dispatch_observation_v1.toUTF8.toList ++
     ((StreamCodec.product digestStream
       (StreamCodec.product StreamCodec.nat
         (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream

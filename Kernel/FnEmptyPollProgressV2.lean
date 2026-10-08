@@ -5,6 +5,7 @@ shares the predecessor nullifier with selected coverage event17. A receipt for
 the old tag9 may be an audited historical anchor, never a claim that the old
 receiver enforced this order at its original admission.
 -/
+import Theory.PersistedCodecTags
 import Kernel.FnConsumerFrontierCore
 
 namespace Minidregg.Kernel.FnEmptyPollProgressV2
@@ -44,7 +45,7 @@ def evidenceStream : StreamCodec Evidence :=
 
 def evidenceCodec : LawfulCodec Evidence :=
   ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/EMPTY-POLL-PROGRESS/v2".toUTF8.toList
+    (NativeHostCodec.framed Minidregg.Theory.PersistedCodecTags.fn_empty_poll_progress_v2.toUTF8.toList
       evidenceStream)
 
 def maxEvidenceBytes : Nat := 4096
@@ -94,7 +95,7 @@ def specStream : StreamCodec Spec :=
 
 def specCodec : LawfulCodec Spec :=
   ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/EMPTY-POLL-SPEC/v2".toUTF8.toList specStream)
+    (NativeHostCodec.framed Minidregg.Theory.PersistedCodecTags.fn_empty_poll_spec_v2.toUTF8.toList specStream)
 
 structure Ingress where
   spec : Spec
@@ -116,19 +117,19 @@ def ingressStream : StreamCodec Ingress :=
 
 def ingressCodec : LawfulCodec Ingress :=
   ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/EMPTY-POLL-INGRESS/v2".toUTF8.toList
+    (NativeHostCodec.framed Minidregg.Theory.PersistedCodecTags.fn_empty_poll_ingress_v2.toUTF8.toList
       ingressStream)
 
 def transactionId (spec : Spec) : Digest :=
   (Sp800185Cshake256.hash
-    "DREGG/FN/EMPTY-POLL-TRANSACTION/v2".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.fn_empty_poll_transaction_v2.toUTF8.toList
     (specCodec.encode spec)).digest
 
 def event (ingress : Ingress) : StableEvent where
   codecVersion := 19
   domain := ingress.spec.domain
   eventId := (Sp800185Cshake256.hash
-    "DREGG/FN/EMPTY-POLL-EVENT/v2".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.fn_empty_poll_event_v2.toUTF8.toList
     (ingressCodec.encode ingress)).digest
   canonicalBytes := ingressCodec.encode ingress
 

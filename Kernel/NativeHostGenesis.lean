@@ -12,6 +12,7 @@ same canonical cell laws and the one-cell authority loader used by turns.
 Key shape/enrollment is checked, not private-key possession or policy liveness.
 A deliberately denying factory policy is valid deployment configuration.
 -/
+import Theory.PersistedCodecTags
 import Compiler.WorldExecutionContract
 import Kernel.ResourceBirthPolicyController
 import Kernel.PayClaimLaw
@@ -224,7 +225,7 @@ each ticker's `C_tick` are derived, beside the optional payment observer) and C1
 (the scalar list carries the tail bound `L` after the factory controller).  Every
 version-3 source refuses (`v3_config_refused`); version 2 named the authority cell
 as the fourth deployment coordinate. -/
-def configFrame : List UInt8 := "DREGG/NATIVE-HOST/GENESIS-SOURCE/v5".toUTF8.toList
+def configFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.native_host_genesis_source_v5.toUTF8.toList
 
 def configRawCodec : LawfulCodec Config where
   encode config := configFrame ++ configWireStream.encode config.toWire

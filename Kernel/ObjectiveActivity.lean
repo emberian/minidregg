@@ -104,6 +104,7 @@ by the Book by name, and the deposit has left only with the record. Every postin
 loaded Book (`AcceptedBatch`), so every turn conserves every asset
 (`Birth.conserves`, `Delivery.conserves`). No amount depends on how much
 computation ran (`refund_measurement_free`). -/
+import Theory.PersistedCodecTags
 import Kernel.AnswerSlot
 import Compiler.ObjectiveBendSourceArtifact
 import Compiler.ObjectiveBendPublication
@@ -310,7 +311,7 @@ v6: the record is FIXED-WIDTH where it is charged (digests 32 octets, heights 8:
 does not depend on the digests or heights (`encodeRecord_length_mask`); v5: the escrow holds declared envelopes (`Capacity`), not tick counts; v4: the record carries `tried` (the envelope its exhausted attempts at the
 current await reached); v3: no recorded reads (resume with view reads the state
 in the resuming turn); v2: the escrow names the payer's Book account. -/
-def recordFrame : Bytes := "DREGG/OBJECTIVE/ACTIVITY-RECORD/v8".toUTF8.toList
+def recordFrame : Bytes := Minidregg.Theory.PersistedCodecTags.objective_activity_record_v8.toUTF8.toList
 
 /-- The record's bytes: the frame, then the fixed-width wire. A record that does not fit has NO
 encoding (`[]`, which `decodeRecord` refuses): nothing is reduced into a different record. `[]` is
@@ -501,7 +502,7 @@ def storedStream : StreamCodec Stored :=
   StreamCodec.xmap (StreamCodec.product bytesStream (StreamCodec.product bytesStream StreamCodec.nat))
     (fun p => (p.artifact, p.package, p.payer)) (fun w => ⟨w.1, w.2.1, w.2.2⟩) (by intro p; cases p; rfl)
 
-def storedFrame : Bytes := "DREGG/OBJECTIVE/ACTIVITY-PACKAGE/v1".toUTF8.toList
+def storedFrame : Bytes := Minidregg.Theory.PersistedCodecTags.objective_activity_package_v1.toUTF8.toList
 def storedCodec := framed storedFrame storedStream
 def encodeStored (stored : Stored) : Bytes := storedCodec.encode stored
 def decodeStored (bytes : Bytes) : Option Stored := storedCodec.decode bytes
@@ -520,7 +521,7 @@ def objectCell (domain : Digest) (object : CellId) : CellId :=
   ⟨ObjectiveActivityCell.coordinate domain .object (objectKey object)⟩
 
 def activityId (object : CellId) (birth : TransactionId) : Digest :=
-  tagged "DREGG/OBJECTIVE/ACTIVITY/ID/v1" (digestStream.encode object ++ digestStream.encode birth)
+  tagged Minidregg.Theory.PersistedCodecTags.objective_activity_id_v1 (digestStream.encode object ++ digestStream.encode birth)
 
 /-- The registry image of an activity cell. -/
 def image (role : Role) (key body : Bytes) : Bytes :=
@@ -541,7 +542,7 @@ def bodyOf (role : Role) (bytes : Bytes) : Option Bytes := do
 /-- The await id: the record cell, the generation of the yield, and the digest
 of the checkpoint it resumes. -/
 def awaitId (cell : CellId) (generation : Nat) (checkpoint : Digest) : Digest :=
-  tagged "DREGG/OBJECTIVE/ACTIVITY/AWAIT/v1"
+  tagged Minidregg.Theory.PersistedCodecTags.objective_activity_await_v1
     (digestStream.encode cell ++ StreamCodec.nat.encode generation ++ digestStream.encode checkpoint)
 
 /-- Spent by every turn that ends the await: the nullifier bound to the
@@ -551,7 +552,7 @@ def awaitClaim (id : Digest) : StableNullifier := claim "await" (digestStream.en
 /-- Every delivery of one await shares one transaction id: an exact retry is a
 replay, any different delivery is a transaction conflict. -/
 def deliveryTransaction (id : Digest) : TransactionId :=
-  tagged "DREGG/OBJECTIVE/ACTIVITY/TX/DELIVER/v1" (digestStream.encode id)
+  tagged Minidregg.Theory.PersistedCodecTags.objective_activity_tx_deliver_v1 (digestStream.encode id)
 
 /-- An activity's purse on the Book: the account whose id is its record cell's
 id. The directory gives that id to the record cell, so no account cell (and so
@@ -2042,10 +2043,10 @@ def settlePurse (config : Config) (book : Book) (held : AccountId) (escrow : Esc
 
 /-- The output codec an activity artifact names: its entry returns an
 `Activity<P,R,A>`, never a native method result. -/
-def codecId : Digest := tagged "DREGG/OBJECTIVE/ACTIVITY/OUTPUT-CODEC/v1" []
+def codecId : Digest := tagged Minidregg.Theory.PersistedCodecTags.objective_activity_output_codec_v1 []
 
 def publishTransaction (pin : Digest) : TransactionId :=
-  tagged "DREGG/OBJECTIVE/ACTIVITY/TX/PUBLISH/v1" (digestStream.encode pin)
+  tagged Minidregg.Theory.PersistedCodecTags.objective_activity_tx_publish_v1 (digestStream.encode pin)
 
 /-- The artifact and its package, posted together into the artifact's package cell. -/
 structure Publication {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
@@ -2248,7 +2249,7 @@ structure BirthRequest where
   predecessor : Option Predecessor
 
 def birthTransaction (request : BirthRequest) : TransactionId :=
-  tagged "DREGG/OBJECTIVE/ACTIVITY/TX/BIRTH/v2"
+  tagged Minidregg.Theory.PersistedCodecTags.objective_activity_tx_birth_v2
     (subjectStream.encode request.subject ++ digestStream.encode request.object ++
       digestStream.encode request.pin ++ bytesStream.encode (dataBytes request.input) ++
       StreamCodec.nat.encode request.nonce)
@@ -2545,7 +2546,7 @@ structure ResolveRequest where
   answer : Answer
 
 def resolveTransaction (slot : Digest) : TransactionId :=
-  tagged "DREGG/OBJECTIVE/ACTIVITY/TX/RESOLVE/v1" (digestStream.encode slot)
+  tagged Minidregg.Theory.PersistedCodecTags.objective_activity_tx_resolve_v1 (digestStream.encode slot)
 
 /-- A reply must be typed at the awaiting activity's own declared reply type. -/
 def replyTyped {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
@@ -2960,7 +2961,7 @@ structure ExhaustRequest where
 /-- Distinct attempts are distinct transactions (the submitter and its nonce);
 an exact retry replays. -/
 def exhaustTransaction (await : Digest) (request : ExhaustRequest) : TransactionId :=
-  tagged "DREGG/OBJECTIVE/ACTIVITY/TX/EXHAUST/v1"
+  tagged Minidregg.Theory.PersistedCodecTags.objective_activity_tx_exhaust_v1
     (digestStream.encode await ++ subjectStream.encode request.subject ++ StreamCodec.nat.encode request.nonce)
 
 /-- The declared charge of an exhausted attempt. -/
@@ -3112,7 +3113,7 @@ structure AbandonRequest where
   record : CellId
 
 def abandonTransaction (await : Digest) : TransactionId :=
-  tagged "DREGG/OBJECTIVE/ACTIVITY/TX/ABANDON/v1" (digestStream.encode await)
+  tagged Minidregg.Theory.PersistedCodecTags.objective_activity_tx_abandon_v1 (digestStream.encode await)
 
 /-- The slot an abandoned await leaves: reclaimed; an open slot's decision
 claim is spent with it. -/
@@ -3222,7 +3223,7 @@ structure TopUpRequest where
   nonce : Nat
 
 def topUpTransaction (request : TopUpRequest) : TransactionId :=
-  tagged "DREGG/OBJECTIVE/ACTIVITY/TX/TOP-UP/v1"
+  tagged Minidregg.Theory.PersistedCodecTags.objective_activity_tx_top_up_v1
     (subjectStream.encode request.subject ++ digestStream.encode request.record ++
       StreamCodec.nat.encode request.account ++ StreamCodec.nat.encode request.amount ++
       StreamCodec.nat.encode request.nonce)
@@ -3390,7 +3391,7 @@ structure CreateRequest where
   payer : AccountId
 
 def createTransaction (request : CreateRequest) : TransactionId :=
-  tagged "DREGG/OBJECTIVE/OBJECT/TX/CREATE/v2" (subjectStream.encode request.subject ++
+  tagged Minidregg.Theory.PersistedCodecTags.objective_object_tx_create_v2 (subjectStream.encode request.subject ++
     digestStream.encode request.object ++ (StreamCodec.option bytesStream).encode (request.seed.map dataBytes))
 
 /-- The record a creation installs: schema version 1, continuity 0, no live
@@ -4971,7 +4972,7 @@ def domainStream : StreamCodec Domain :=
     (StreamCodec.product (StreamCodec.list digestStream) (StreamCodec.product LawLeaf.predStream StreamCodec.nat))
     (fun d => (d.members, d.law, d.payer)) (fun w => ⟨w.1, w.2.1, w.2.2⟩) (by intro d; cases d; rfl)
 
-def domainFrame : Bytes := "DREGG/OBJECTIVE/DOMAIN/v1".toUTF8.toList
+def domainFrame : Bytes := Minidregg.Theory.PersistedCodecTags.objective_domain_v1.toUTF8.toList
 def domainCodec := framed domainFrame domainStream
 def encodeDomain (domain : Domain) : Bytes := domainCodec.encode domain
 def decodeDomain (bytes : Bytes) : Option Domain := domainCodec.decode bytes

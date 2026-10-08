@@ -28,6 +28,7 @@ reports the raw bytes of the one memo instruction, or that there was none, or
 that there were two or more (`unbound`), or that the one memo was not UTF-8 or
 too long (`invalid`).
 -/
+import Theory.PersistedCodecTags
 import Compiler.ResourceBirthCodec
 import Kernel.PayTariff
 import Kernel.Base64
@@ -369,8 +370,7 @@ theorem parse_canonical {bytes : List UInt8} {memo : Memo} (accepted : parse byt
 
 /-- `"DREGG/PAY/ENROL/POSSESSION/v1"` as bytes. -/
 def possessionTag : List UInt8 :=
-  [68, 82, 69, 71, 71, 47, 80, 65, 89, 47, 69, 78, 82, 79, 76, 47, 80, 79, 83, 83, 69, 83, 83,
-    73, 79, 78, 47, 118, 49]
+  Minidregg.Theory.PersistedCodecTags.dregg_pay_enrol_possession_v1
 
 theorem possessionTag_utf8 : possessionTag = "DREGG/PAY/ENROL/POSSESSION/v1".toUTF8.toList := by
   decide +kernel
@@ -494,7 +494,7 @@ def journalReasonStream : StreamCodec JournalReason where
 
 /-! ## The self-enrolled subject -/
 
-def subjectCustomization : List UInt8 := "DREGG.PAY.SELF-ENROL.SUBJECT/v1".toUTF8.toList
+def subjectCustomization : List UInt8 := Minidregg.Theory.PersistedCodecTags.pay_self_enrol_subject_v1.toUTF8.toList
 
 /-- `subjectOf miniKey := cSHAKE("DREGG.PAY.SELF-ENROL.SUBJECT/v1", miniKey) mod 2⁶⁴`. -/
 def subjectOf (miniKey : List UInt8) : Nat :=

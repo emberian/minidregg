@@ -6,6 +6,7 @@ intent as the app phase change. Its presence alone is never a launch permit:
 later continue admission also selects the exact native-admitted creation
 completion from verified history.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationLifecycleRetryCompletionV4Source
 import Kernel.ApplicationLifecycleCompletionIngress
 
@@ -41,7 +42,7 @@ def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 def frame : List UInt8 :=
-  "DREGG/APPLICATION/RETRY-CREATE-COMPLETION-INGRESS/v4".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_retry_create_completion_ingress_v4.toUTF8.toList
 
 def codec : LawfulCodec Ingress := NativeHostCodec.framed frame ingressStream
 
@@ -51,7 +52,7 @@ def event (ingress : Ingress) : StableEvent where
   codecVersion := 72
   domain := ingress.domain
   eventId := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/RETRY-CREATE-COMPLETION-EVENT/v4".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_retry_create_completion_event_v4.toUTF8.toList
     ingress.canonicalBytes).digest
   canonicalBytes := ingress.canonicalBytes
 
@@ -67,10 +68,10 @@ def stableNullifier (ingress : Ingress) : StableNullifier where
   codecVersion := 72
   domain := ingress.domain
   nullifierId := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/RETRY-CREATE-COMPLETION-NULLIFIER/v2".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_retry_create_completion_nullifier_v2.toUTF8.toList
     (nullifierKey ingress)).digest
   canonicalBytes :=
-    "DREGG/APPLICATION/RETRY-CREATE-COMPLETION-NULLIFIER-BYTES/v2".toUTF8.toList ++
+    Minidregg.Theory.PersistedCodecTags.application_retry_create_completion_nullifier_bytes_v2.toUTF8.toList ++
       nullifierKey ingress
 
 def Ingress.creationMarker (ingress : Ingress) : Option StableNullifier :=

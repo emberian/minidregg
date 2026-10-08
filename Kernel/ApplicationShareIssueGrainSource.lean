@@ -4,6 +4,7 @@ joint factory/Book/tool/parent command, not a bare resource birth. The outer
 frame retains the app's independent delegation envelope and complete ticket
 spec for one special durable issue event.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationShareIssueSource
 import Kernel.GrainResourceBirthPolicyController
 
@@ -33,7 +34,7 @@ private def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 def frame : List UInt8 :=
-  "DREGG/APPLICATION/GRAIN-SHARE-ISSUE-INGRESS/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_grain_share_issue_ingress_v1.toUTF8.toList
 
 private def rawCodec : LawfulCodec Ingress where
   encode ingress := frame ++ ingressStream.encode ingress

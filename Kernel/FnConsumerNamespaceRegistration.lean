@@ -6,6 +6,7 @@ grant, so changing that grant cannot silently register the same namespace
 again. Historical v1 adoption is explicit by exact predecessor receipt; this
 record alone does not certify that v1 enforced ordering when admitted.
 -/
+import Theory.PersistedCodecTags
 import Kernel.FnConsumerFrontierCore
 
 namespace Minidregg.Kernel.FnConsumerNamespaceRegistration
@@ -53,7 +54,7 @@ def specStream : StreamCodec Spec :=
 
 def specCodec : LawfulCodec Spec :=
   ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/CONSUMER-NAMESPACE-SPEC/v1".toUTF8.toList
+    (NativeHostCodec.framed Minidregg.Theory.PersistedCodecTags.fn_consumer_namespace_spec_v1.toUTF8.toList
       specStream)
 
 def Spec.valid (spec : Spec) : Bool :=
@@ -94,19 +95,19 @@ def ingressStream : StreamCodec Ingress :=
 
 def ingressCodec : LawfulCodec Ingress :=
   ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/CONSUMER-NAMESPACE-INGRESS/v1".toUTF8.toList
+    (NativeHostCodec.framed Minidregg.Theory.PersistedCodecTags.fn_consumer_namespace_ingress_v1.toUTF8.toList
       ingressStream)
 
 def transactionId (spec : Spec) : Digest :=
   (Sp800185Cshake256.hash
-    "DREGG/FN/CONSUMER-NAMESPACE-TRANSACTION/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.fn_consumer_namespace_transaction_v1.toUTF8.toList
     (specCodec.encode spec)).digest
 
 def event (ingress : Ingress) : StableEvent where
   codecVersion := 20
   domain := ingress.spec.domain
   eventId := (Sp800185Cshake256.hash
-    "DREGG/FN/CONSUMER-NAMESPACE-EVENT/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.fn_consumer_namespace_event_v1.toUTF8.toList
     (ingressCodec.encode ingress)).digest
   canonicalBytes := ingressCodec.encode ingress
 

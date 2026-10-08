@@ -1,6 +1,7 @@
 /- Scalar action lowering used by the joint resource receiver. This module has no signed ingress or durable receiving path. Its command is an internal projection of one scalar target; joint authority and policy are checked only by DeclaredResourceController.
 
 The target is a declared-effect cell (`Compiler.DeclaredEffectCell`): a store over `effectLayout`. Preparation validates the command's own guarded patch against the cell at the quoted root and runs it; the post is `Patch.run`. There is no page, no shard, no capacity: the reject reasons `invalidPage`, `pageMutation` (with its `overflow`/`unsupportedAddress`) and `pageValidation` are removed, and a failed guard is `guardRejected i`, naming the first disabled operation. -/
+import Theory.PersistedCodecTags
 import Compiler.CredentialAuthorityDomainReceiver
 import Compiler.CredentialAuthorityPolicyRegistry
 import Compiler.CredentialAuthorityReplay
@@ -119,7 +120,7 @@ def commandStream : StreamCodec Command :=
   StreamCodec.xmap commandWireStream Command.toWire Command.ofWire Command.ofWire_toWire
 
 /-- Version 2: the command carries no authority root (`Theory.PlanBinding`). -/
-def commandFrame : List UInt8 := "DREGG/RESOURCE/INVOKE".toUTF8.toList ++ [2]
+def commandFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.resource_invoke_byte_v2
 
 def rawCommandCodec : LawfulCodec Command where
   encode command := commandFrame ++ commandStream.encode command
@@ -155,11 +156,11 @@ def commandBytes (domain semantics : Digest) (command : Command) : List UInt8 :=
     (domain, semantics, commandCodec.encode command)
 
 def argsDigest (domain semantics : Digest) (command : Command) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.RESOURCE.INVOKE.ARGS/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.resource_invoke_args_v1.toUTF8.toList
     (commandBytes domain semantics command)).digest
 
 def effectsDigest (domain semantics : Digest) (command : Command) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.RESOURCE.INVOKE.EFFECT/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.resource_invoke_effect_v1.toUTF8.toList
     (commandBytes domain semantics command)).digest
 
 def operationMarker (domain semantics : Digest) (command : Command) : Nat :=

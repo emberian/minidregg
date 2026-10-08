@@ -1,6 +1,7 @@
 /- Stable profile data, arithmetic premises and request projection shared by
 receivers. Current runtime markers and the only current-profile constructor
 remain in CanonicalRuntimeProfile. Native ingress cannot select a manifest. -/
+import Theory.PersistedCodecTags
 import Compiler.CanonicalPolicyAdmission
 import Compiler.ResourceBirthCodec
 
@@ -99,7 +100,7 @@ by the native builder varies. No receiver or request decodes a profile. -/
 def receiverSemanticsFrom (components : List (List UInt8))
     (template : FactoryTemplate) (parameters : List UInt8 := [])
     (disabled : List Digest := []) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.NATIVE.RUNTIME.SEMANTICS/v3".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.canonicalruntimeprofilecore_receiversemanticsfrom_72ae51ea.toUTF8.toList
     ((StreamCodec.product bytesStream (StreamCodec.product bytesStream (StreamCodec.list digestStream))).encode
       (runtimeStream.encode (components, template), parameters, disabled))).digest
 

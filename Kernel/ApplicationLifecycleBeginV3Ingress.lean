@@ -6,6 +6,7 @@ install the reusable package identity, while STOP has no launch command.
 The receiving path must still check current authority, installed package and
 the verified launch-history choice before admitting this pending operation.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationLifecycleBeginIngress
 import Kernel.ApplicationSpkLaunchDescriptor
 import Kernel.ApplicationLifecycleLaunchBinding
@@ -45,7 +46,7 @@ def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 def frame : List UInt8 :=
-  "DREGG/APPLICATION/LIFECYCLE-BEGIN-INGRESS/v3".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_lifecycle_begin_ingress_v3.toUTF8.toList
 
 def codec : LawfulCodec Ingress := NativeHostCodec.framed frame ingressStream
 
@@ -75,7 +76,7 @@ def authorizationStream : StreamCodec AuthorizationTuple :=
 
 def authorizationCodec : LawfulCodec AuthorizationTuple :=
   NativeHostCodec.framed
-    "DREGG/APPLICATION/LIFECYCLE-BEGIN-AUTHORIZATION/v3".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_lifecycle_begin_authorization_v3.toUTF8.toList
     authorizationStream
 
 def authorizationBytes (ingress : Ingress) : List UInt8 :=
@@ -95,7 +96,7 @@ theorem authorizationBytes_start_eq (left right : Ingress)
 
 def Ingress.authorizationOperationId (ingress : Ingress) : Nat :=
   (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/LIFECYCLE-BEGIN-AUTHORIZATION-ID/v3".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_lifecycle_begin_authorization_id_v3.toUTF8.toList
     (authorizationBytes ingress)).digest.value
 
 def Ingress.withAuthorizationId (ingress : Ingress) : Ingress :=
@@ -127,7 +128,7 @@ def event (ingress : Ingress) : StableEvent where
   codecVersion := 23
   domain := ingress.base.domain
   eventId := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/LIFECYCLE-BEGIN-EVENT/v3".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_lifecycle_begin_event_v3.toUTF8.toList
     ingress.canonicalBytes).digest
   canonicalBytes := ingress.canonicalBytes
 

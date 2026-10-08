@@ -1,4 +1,5 @@
 /- Canonical event66 failed START reconciliation ingress. A stable original-claim nullifier prevents repeated reconciliation under distinct audit reports. Recovery creates no volume witness. -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationFailedStartRecoverySource
 import Kernel.ApplicationLifecycleCompletionIngress
 
@@ -34,7 +35,7 @@ def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 def frame : List UInt8 :=
-  "DREGG/APPLICATION/FAILED-START-RECOVERY-INGRESS/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_failed_start_recovery_ingress_v1.toUTF8.toList
 
 def codec : LawfulCodec Ingress := NativeHostCodec.framed frame ingressStream
 
@@ -44,7 +45,7 @@ def event (ingress : Ingress) : StableEvent where
   codecVersion := 66
   domain := ingress.domain
   eventId := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/FAILED-START-RECOVERY-EVENT/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_failed_start_recovery_event_v1.toUTF8.toList
     ingress.canonicalBytes).digest
   canonicalBytes := ingress.canonicalBytes
 
@@ -58,10 +59,10 @@ def stableNullifier (ingress : Ingress) : StableNullifier where
   codecVersion := 66
   domain := ingress.domain
   nullifierId := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/FAILED-START-RECOVERY-NULLIFIER/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_failed_start_recovery_nullifier_v1.toUTF8.toList
     (nullifierKey ingress)).digest
   canonicalBytes :=
-    "DREGG/APPLICATION/FAILED-START-RECOVERY-NULLIFIER-BYTES/v1".toUTF8.toList ++
+    Minidregg.Theory.PersistedCodecTags.application_failed_start_recovery_nullifier_bytes_v1.toUTF8.toList ++
       nullifierKey ingress
 
 /-- Recovery neither establishes a successful launch nor creates a volume witness. -/

@@ -3,6 +3,7 @@ all public resource envelopes. v4: the source enters only through its own
 signed query envelope (no command position). They contain neither a caller-selected term nor
 a claimed result. Native admission independently loads the current source and
 constructs observations from the same authorized snapshot. -/
+import Theory.PersistedCodecTags
 import Theory.AssertAxioms
 import Compiler.NativeInvocationStatement
 
@@ -118,7 +119,7 @@ def stream : StreamCodec Claim :=
 /-- v7: the envelope declares invariant-domain judgment units (`domainWork`); a v6 claim does not
 decode. v6: the envelope declares the front end's work (`replayBytes`, `coreBytes`); a v5 claim does
 not decode. -/
-def frame : List UInt8 := "DREGG/OBJECTIVE/INVOCATION-CLAIM/v7".toUTF8.toList
+def frame : List UInt8 := Minidregg.Theory.PersistedCodecTags.objective_invocation_claim_v7.toUTF8.toList
 
 def rawCodec : LawfulCodec Claim where
   encode claim := frame ++ stream.encode claim
@@ -153,7 +154,7 @@ def decode (bytes : List UInt8) : Option Claim := do
 /-- The bytes here are the actual canonical NativeInput encoding, which does
 NOT include this claim or its expectedInput field. -/
 def inputCommitment (nativeInputBytes : List UInt8) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.OBJECTIVE-BEND.AUTHENTICATED-INPUT/v1".toUTF8.toList nativeInputBytes).digest
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.objective_bend_authenticated_input_v1.toUTF8.toList nativeInputBytes).digest
 
 def family (claim : Claim) : NativeInvocationStatement.Family :=
   ⟨.objectiveMethod,encode claim⟩

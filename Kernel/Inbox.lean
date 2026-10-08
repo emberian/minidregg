@@ -21,6 +21,7 @@ under, the postage (the public price of that envelope) the sending turn moved
 into the purse of the queue holding it, and the account the postage returns to
 if the message is never delivered. Its id is `H(sending turn, index of the send
 in that turn)` (`sendId`), and it is also the name of its reply slot. -/
+import Theory.PersistedCodecTags
 import Kernel.ObjectiveActivityWire
 import Kernel.ObjectiveActivityCell
 import Compiler.ObjectiveInvocationClaim
@@ -393,7 +394,7 @@ def inboxStream : StreamCodec Inbox :=
 `replayBytes`, `coreBytes` (GPT-6 row E work account); v3: a message carries its storage `deposit` (v2 added
 the continuation `allowance` and `depth`, GPT-6 row F); v1 through v4 inboxes refuse to decode
 (`v1_refuses`, `v2_refuses`, `v3_refuses`, `v4_refuses`). -/
-def frame : Bytes := "DREGG/OBJECTIVE/INBOX/v5".toUTF8.toList
+def frame : Bytes := Minidregg.Theory.PersistedCodecTags.objective_inbox_v5.toUTF8.toList
 def codec := framed frame inboxStream
 def encode (inbox : Inbox) : Bytes := codec.encode inbox
 def decode (bytes : Bytes) : Option Inbox := codec.decode bytes
@@ -521,7 +522,7 @@ theorem cell_reserved (domain : Digest) (sender target : Nat) :
 
 /-- The id of the `index`-th send of the turn `turn`: the message's id and its reply slot's name. -/
 def sendId (turn : TransactionId) (index : Nat) : Digest :=
-  tagged "DREGG/OBJECTIVE/SEND/ID/v1" (digestStream.encode turn ++ StreamCodec.nat.encode index)
+  tagged Minidregg.Theory.PersistedCodecTags.objective_send_id_v1 (digestStream.encode turn ++ StreamCodec.nat.encode index)
 
 #assert_axioms Lawful.snoc
 #assert_axioms Lawful.trans

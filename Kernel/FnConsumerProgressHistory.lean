@@ -1,5 +1,6 @@
 /- Exact historical v1 empty-page codec and full signed-command selector,
    factored below NativeHostReplay without changing accepted bytes. -/
+import Theory.PersistedCodecTags
 import Kernel.FnConsumerScope
 import Kernel.FnGatewayPolicy
 import Kernel.DeclaredResourceController
@@ -55,7 +56,7 @@ def evidenceStream : StreamCodec Evidence :=
     (by intro value; cases value; rfl)
 
 def evidenceCodec : LawfulCodec Evidence :=
-  NativeHostCodec.framed "DREGG/FN/EMPTY-PAGE-PROGRESS/v1".toUTF8.toList
+  NativeHostCodec.framed Minidregg.Theory.PersistedCodecTags.fnconsumerprogresshistory_evidencecodec_3c80f283.toUTF8.toList
     evidenceStream
 
 def maxEvidenceBytes : Nat := 4096
@@ -89,7 +90,7 @@ def progressPreimage (domain semantics : Digest) (evidence : Evidence) : List UI
     evidenceStream)).encode (domain, semantics, evidence)
 
 def progressHash (domain semantics : Digest) (evidence : Evidence) : Nat :=
-  (Sp800185Cshake256.hash "DREGG.FN.EMPTY-PAGE-PROGRESS/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.fnconsumerprogresshistory_progresshash_1068692f.toUTF8.toList
     (progressPreimage domain semantics evidence)).digest.value
 
 /-- Above the earlier operation, conflict and A-result nonce namespaces. -/

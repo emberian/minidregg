@@ -4,6 +4,7 @@ ingredient, not an installed Mini effect or a source-history receipt. The
 recipient selects the current key and current policy source from its complete
 opened authority; no fn article or caller-supplied verifier bit selects them.
 -/
+import Theory.PersistedCodecTags
 import Kernel.FnSelectiveRelease
 import Kernel.FnGatewayPolicy
 import Compiler.CredentialSignatureAdmission
@@ -38,7 +39,7 @@ def packetStream : StreamCodec Packet :=
 
 def packetCodec : LawfulCodec Packet :=
   ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/SELECTIVE-OWNER-PACKET/v2".toUTF8.toList packetStream)
+    (NativeHostCodec.framed Minidregg.Theory.PersistedCodecTags.fn_selective_owner_packet_v2.toUTF8.toList packetStream)
 
 theorem packetCodec_accepted_bytes {bytes : List UInt8} {packet : Packet}
     (accepted : packetCodec.decode bytes = some packet) :

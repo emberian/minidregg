@@ -4,6 +4,7 @@ bare birth families remain unchanged. This module supplies no authorization:
 its evidence is indexed to the composite factory request and the exact old
 Book, and must be constructed by the joint receiving admission.
 -/
+import Theory.PersistedCodecTags
 import Kernel.GrainResourceBirthPolicyController
 import Kernel.CanonicalResourceEffect
 
@@ -48,7 +49,7 @@ def factoryFamily (tariff : Tariff) (source : Source)
   ModeEvidence := fun _ _ => Unit
   Postcondition := fun _ _ logical => logical = pre.logical
   effectDigest := fun _ => encoding.hashBytes
-    ("DREGG/GRAIN-RESOURCE-BIRTH/EFFECTS/v1".toUTF8.toList ++
+    (Minidregg.Theory.PersistedCodecTags.grain_resource_birth_effects_v1.toUTF8.toList ++
       source.canonicalBytes tariff)
   patch := fun _ _ => ResourceBirthPolicyController.factoryPatch pre
   nullifier := fun _ _ => none
@@ -122,7 +123,7 @@ def authorityFamily (tariff : Tariff) (source : Source)
   Postcondition := fun _ _ logical =>
     (source.authorityPatch snapshot).ResultAt snapshot.cell.logical logical
   effectDigest := fun _ => encoding.hashBytes
-    ("DREGG/GRAIN-RESOURCE-BIRTH/EFFECTS/v1".toUTF8.toList ++
+    (Minidregg.Theory.PersistedCodecTags.grain_resource_birth_effects_v1.toUTF8.toList ++
       source.canonicalBytes tariff)
   patch := fun _ _ => source.authorityPatch snapshot
   nullifier := fun _ _ => some

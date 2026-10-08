@@ -3,6 +3,7 @@ No effect evaluator lives here. Native current laws, execution, atomic physical
 writes and funding remain the actual receiving transaction's obligations.
 Current constructor registry: ordered content createDocument/createAtom and
 room-stream append. Other constructors are unsupported, never scalar-coerced. -/
+import Theory.PersistedCodecTags
 import Compiler.ObjectiveBendResultAdapter
 import Compiler.ObjectiveBendPlanAdapter
 namespace Minidregg.Compiler.ObjectiveBendNativePlanData
@@ -14,7 +15,7 @@ open Minidregg.Compiler.Tower256ConcreteBackend
 open ObjectiveNativeScalarBinding
 set_option autoImplicit false
 
-def codecId : Digest := (Sp800185Cshake256.hash "DREGG.OBJECTIVE-BEND.NATIVE-DATA-PLAN/v1".toUTF8.toList
+def codecId : Digest := (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.objective_bend_native_data_plan_v1.toUTF8.toList
   "Ref:resource,canonical-lowerhex-root;Plan:reads,effects;Effect:ref,payload;ordered-contiguous-ordinals;content:createDocument,createAtom-inlineObject;append:topic,payload,recipient,ref;byteNat<256;canonical-native-payloadStream;unsupported-constructor-refusal;no-authority".toUTF8.toList).digest
 
 def natural (capacity : ObjectiveBendDemandCapacity.Profile) : Data → Option Nat

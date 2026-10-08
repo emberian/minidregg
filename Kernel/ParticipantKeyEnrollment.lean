@@ -1,3 +1,4 @@
+import Theory.PersistedCodecTags
 import Compiler.SigningKeyCommitment
 /-
 Runtime enrollment of a fresh signing principal. The new key is installed in
@@ -62,7 +63,7 @@ public key; both 32 bytes for Ed25519) so a key made offline by `mini keygen`
 can co-sign before any Host is reachable.  No domain and no command: the
 co-signature is made once, at keygen, and binds the pair only. -/
 def nextPossessionTag : List UInt8 :=
-  "DREGG/PARTICIPANT/KEY-ENROLL/NEXT-POSSESSION/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.participant_key_enroll_next_possession_v1.toUTF8.toList
 
 def nextPossessionFrame (publicKey nextPublicKey : List UInt8) : List UInt8 :=
   nextPossessionTag ++ publicKey ++ nextPublicKey
@@ -103,7 +104,7 @@ def framed {α : Type} (frame : List UInt8) (stream : StreamCodec α) : LawfulCo
   ResourceBirthCodec.strictCodec (framedRaw frame stream)
 
 def commandCodec : LawfulCodec Command :=
-  framed "DREGG/PARTICIPANT/KEY-ENROLL/v1".toUTF8.toList commandStream
+  framed Minidregg.Theory.PersistedCodecTags.participant_key_enroll_v1.toUTF8.toList commandStream
 
 /-- `nextPublicKey` / `nextPossessionSignature` are empty exactly when the
 record commits to no next key (`enrollGate` refuses any other combination). -/
@@ -128,7 +129,7 @@ def ingressStream : StreamCodec Ingress :=
 /-- v2: v1 plus the next key and its co-signature.  A v1 ingress refuses to
 decode (its frame differs). -/
 def ingressCodec : LawfulCodec Ingress :=
-  framed "DREGG/PARTICIPANT/KEY-ENROLL/SIGNED/v2".toUTF8.toList ingressStream
+  framed Minidregg.Theory.PersistedCodecTags.participant_key_enroll_signed_v2.toUTF8.toList ingressStream
 
 structure DecodedIngress where
   private mk ::
@@ -156,14 +157,14 @@ def DecodedIngress.bytes (ingress : DecodedIngress) : List UInt8 :=
   ingressCodec.encode ingress.ingress
 
 def marker (domain semantics : Digest) (command : Command) : Nat :=
-  (Sp800185Cshake256.hash "DREGG.PARTICIPANT.KEY-ENROLL.IDENTITY/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.participant_key_enroll_identity_v1.toUTF8.toList
     ((StreamCodec.product digestStream (StreamCodec.product digestStream
       (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream
         StreamCodec.nat))).encode
       (domain, semantics, command.sponsor, command.nonce))).digest.value
 
 def possessionFrame (domain semantics : Digest) (command : Command) : List UInt8 :=
-  "DREGG/PARTICIPANT/KEY-ENROLL/POSSESSION/v1".toUTF8.toList ++
+  Minidregg.Theory.PersistedCodecTags.participant_key_enroll_possession_v1.toUTF8.toList ++
     (StreamCodec.product digestStream (StreamCodec.product digestStream bytesStream)).encode
       (domain, semantics, commandCodec.encode command)
 
@@ -219,7 +220,7 @@ def allKeys (logical : Store CredentialAuthorityState.layout) (check : KeyRecord
   decide (∀ address ∈ logical.support, keyAt logical check address = true)
 
 def effectDigest (domain semantics : Digest) (command : Command) (d : Declaration) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.PARTICIPANT.KEY-ENROLL.EFFECT/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.participant_key_enroll_effect_v1.toUTF8.toList
     ((StreamCodec.product digestStream (StreamCodec.product digestStream
       (StreamCodec.product bytesStream bytesStream))).encode
       (domain, semantics, commandCodec.encode command, declarationCodec.encode d))).digest
@@ -246,7 +247,7 @@ def context (deployment : Deployment) (snapshot : Snapshot) (semantics : Digest)
       policyRevision := snapshot.authState.policyRevision ⟨deployment.factoryId⟩
       cost := (commandCodec.encode command).length }
   argsDigestBytes := fun bytes =>
-    (Sp800185Cshake256.hash "DREGG.PARTICIPANT.KEY-ENROLL.ARGS/v1".toUTF8.toList
+    (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.participant_key_enroll_args_v1.toUTF8.toList
       (commandCodec.encode command ++ bytes)).digest
 
 def request (deployment : Deployment) (snapshot : Snapshot) (semantics : Digest)
@@ -540,6 +541,6 @@ def signingPlanStream : StreamCodec SigningPlan :=
     (by intro plan; cases plan; rfl)
 
 def signingPlanCodec : LawfulCodec SigningPlan :=
-  framed "DREGG/PARTICIPANT/KEY-ENROLL/PLAN/v1".toUTF8.toList signingPlanStream
+  framed Minidregg.Theory.PersistedCodecTags.participant_key_enroll_plan_v1.toUTF8.toList signingPlanStream
 
 end Minidregg.Kernel.ParticipantKeyEnrollment

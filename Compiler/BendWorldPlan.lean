@@ -1,6 +1,7 @@
 /- Common method result ABI. Ordered native typed payloads are reused wholesale:
 content, append, definitions and world actions do not get separate language
 interpreters. Authority remains the actual receiver's current checks. -/
+import Theory.PersistedCodecTags
 import Kernel.ResourceTransaction
 import Compiler.ObjectiveSourcePackage
 
@@ -56,13 +57,13 @@ def returnStream : StreamCodec ReturnSlot :=
       r.2.2.2.2.2.1, r.2.2.2.2.2.2.1, r.2.2.2.2.2.2.2⟩)
     (by intro r; cases r; rfl)
 
-def returnFrame : List UInt8 := "DREGG/BEND/RETURN-SLOT/v1".toUTF8.toList
+def returnFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.bend_return_slot_v1.toUTF8.toList
 def encodeReturn (r : ReturnSlot) : List UInt8 := returnFrame ++ returnStream.encode r
 def decodeReturn (bytes : List UInt8) : Option ReturnSlot :=
   NockProgramCodec.framedDecode returnFrame returnStream bytes
 
 def returnId (r : ReturnSlot) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.BEND.RETURN/v1".toUTF8.toList (encodeReturn r)).digest
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.bend_return_v1.toUTF8.toList (encodeReturn r)).digest
 
 /-- Compute the exact ordered application effects from a native command.
 Observation and validated accounting legs are not arbitrary application writes. -/

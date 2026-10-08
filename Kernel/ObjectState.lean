@@ -7,6 +7,7 @@ version, read in the resuming turn (`Kernel.ObjectiveActivity`, resume with
 view); the version is what the activity, a card or a later turn can name to say
 which state it saw. The version is a counter of writes, distinct from the
 schema version of the object's declared type. -/
+import Theory.PersistedCodecTags
 import Kernel.ObjectiveActivityWire
 
 namespace Minidregg.Kernel
@@ -22,7 +23,7 @@ structure ObjectState where
 
 namespace ObjectState
 
-def frame : Bytes := "DREGG/OBJECTIVE/OBJECT-STATE/v1".toUTF8.toList
+def frame : Bytes := Minidregg.Theory.PersistedCodecTags.objective_object_state_v1.toUTF8.toList
 
 /-- The wire: the version and the value's exact data bytes, framed and strict. -/
 def wire := framed frame (StreamCodec.product StreamCodec.nat bytesStream)

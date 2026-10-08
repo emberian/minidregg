@@ -10,6 +10,7 @@ event from verified history, read-guard this resource's current page, and check
 the current participant/app/session capabilities and laws at one image.
 Participant-owned enrollment is only a requested role, never the ceiling.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationPermissionSchema
 import Kernel.ApplicationDispatchManifest
 import Kernel.ContentResource
@@ -122,7 +123,7 @@ def ticketStream : StreamCodec Ticket :=
     (by intro t; cases t; rfl)
 
 private def ticketFrame : List UInt8 :=
-  "DREGG/APPLICATION/SHARE-TICKET/v3".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_share_ticket_v3.toUTF8.toList
 
 private def rawTicketCodec : LawfulCodec Ticket where
   encode ticket := ticketFrame ++ ticketStream.encode ticket
@@ -151,7 +152,7 @@ replacement must be independently checked by the receiving selector. -/
 def ticketAtom (domain : Digest) (resource : Nat) : AtomId :=
   let preimage := (StreamCodec.product digestStream StreamCodec.nat).encode (domain, resource)
   ⟨⟨(Sp800185Cshake256.hash
-    "DREGG/APPLICATION/SHARE-TICKET-ATOM/v2".toUTF8.toList preimage).digest.value⟩⟩
+    Minidregg.Theory.PersistedCodecTags.application_share_ticket_atom_v2.toUTF8.toList preimage).digest.value⟩⟩
 
 def decodeInstalled (domain : Digest) (resource : Nat)
     (page : ContentResource.ContentStore) : Option Ticket := do

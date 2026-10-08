@@ -3,6 +3,7 @@ Raw bytes reconstruct a claim only. The receiver repeats the actual selected
 ordinary call, every purpose-specific signature/law, and source control method
 at precisely this source prefix. It never imports an old AcceptedInvocation.
 -/
+import Theory.PersistedCodecTags
 import Kernel.JointReceiverAdmission
 import Kernel.NativeHostContext
 import Compiler.PrivateSuccessorCustodyCodec
@@ -22,7 +23,7 @@ open Minidregg.Kernel.PrivateSuccessorCustody
 set_option autoImplicit false
 set_option maxHeartbeats 800000
 
-def frame : List UInt8 := "DREGG/JOINT/SOURCE-RESERVE/v1".toUTF8.toList
+def frame : List UInt8 := Minidregg.Theory.PersistedCodecTags.joint_source_reserve_v1.toUTF8.toList
 
 def decodeSource (bytes : List UInt8) : Option ReserveSource := do
   if bytes.take frame.length != frame then none else

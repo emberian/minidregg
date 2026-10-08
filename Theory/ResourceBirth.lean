@@ -19,6 +19,7 @@ the exact physical transaction must join this component in the existing
 `MultiCellHyperedge`/`DurableDataIntent` consumer. No semantic or durable
 completion claim follows merely from this allocator succeeding.
 -/
+import Theory.PersistedCodecTags
 import Theory.CellSlot
 import Theory.CanonicalResourceKernel
 
@@ -558,12 +559,12 @@ structure SourceEncoding (registry : TypeRegistry Digest) where
 
 def SourceEncoding.argsDigest {registry : TypeRegistry Digest}
     (encoding : SourceEncoding registry) (descriptor : Descriptor registry) : Digest :=
-  encoding.hashBytes ([68, 82, 69, 71, 71, 47, 66, 73, 82, 84, 72, 47, 65, 82, 71, 83, 1] ++
+  encoding.hashBytes (Minidregg.Theory.PersistedCodecTags.birth_args_byte_v1 ++
     encoding.codec.encode descriptor)
 
 def SourceEncoding.effectsDigest {registry : TypeRegistry Digest}
     (encoding : SourceEncoding registry) (descriptor : Descriptor registry) : Digest :=
-  encoding.hashBytes ([68, 82, 69, 71, 71, 47, 66, 73, 82, 84, 72, 47, 69, 70, 70, 69, 67, 84, 83, 1] ++
+  encoding.hashBytes (Minidregg.Theory.PersistedCodecTags.birth_effects_byte_v1 ++
     encoding.codec.encode descriptor)
 
 /-- The factory pre-root belongs to the actual factory cell. It is not the

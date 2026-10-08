@@ -5,6 +5,7 @@ module does not infer a systemd fact from a Boolean supplied by a caller.
 Mini can verify the bytes and key, while truthful observation of the unit,
 process and package remains an explicit host-custody assumption.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationLifecycleBeginV2Ingress
 import Kernel.ApplicationLifecycleClaimProjection
 import Compiler.CredentialSignatureIO
@@ -81,7 +82,7 @@ def stopAuditStream : StreamCodec StopAudit :=
     (by intro audit; cases audit; rfl)
 
 def stopAuditFrame : List UInt8 :=
-  "DREGG/APPLICATION/LIFECYCLE-STOP-AUDIT/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_lifecycle_stop_audit_v1.toUTF8.toList
 
 def stopAuditCodec : LawfulCodec StopAudit :=
   NativeHostCodec.framed stopAuditFrame stopAuditStream
@@ -136,7 +137,7 @@ def reportStream : StreamCodec Report :=
     (by intro report; cases report; rfl)
 
 def frame : List UInt8 :=
-  "DREGG/APPLICATION/LIFECYCLE-PHYSICAL-REPORT/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_lifecycle_physical_report_v1.toUTF8.toList
 
 def codec : LawfulCodec Report := NativeHostCodec.framed frame reportStream
 
@@ -150,7 +151,7 @@ theorem decoded_canonical {bytes : List UInt8} {report : Report}
 /-- Domain and installed semantics are included even though the claim also
 commits them; this makes the custodian signature unambiguous across deployments. -/
 def signingFrame (domain semantics : Digest) (report : Report) : List UInt8 :=
-  "DREGG/APPLICATION/LIFECYCLE-PHYSICAL-SIGNATURE/v1".toUTF8.toList ++
+  Minidregg.Theory.PersistedCodecTags.application_lifecycle_physical_signature_v1.toUTF8.toList ++
     (StreamCodec.product digestStream
       (StreamCodec.product digestStream bytesStream)).encode
       (domain, semantics, report.canonicalBytes)
@@ -202,7 +203,7 @@ def signedStream : StreamCodec Signed :=
     (by intro signed; cases signed; rfl)
 
 def signedFrame : List UInt8 :=
-  "DREGG/APPLICATION/LIFECYCLE-PHYSICAL-SIGNED/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_lifecycle_physical_signed_v1.toUTF8.toList
 
 def signedCodec : LawfulCodec Signed :=
   NativeHostCodec.framed signedFrame signedStream

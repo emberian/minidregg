@@ -2,6 +2,7 @@
 constructed from actual current signed read tokens. Caller arguments are data
 only and cannot replace that context. Complete input bytes are bounded before
 source term construction. No authority or accepted effect is minted here. -/
+import Theory.PersistedCodecTags
 import Kernel.ObjectiveBendArtifactSource
 import Theory.ObjectiveBendDemandCapacity
 import Kernel.RunComputeBudgetDomain
@@ -140,7 +141,7 @@ def stream : StreamCodec Input :=
     (StreamCodec.product StreamCodec.nat (StreamCodec.product bytesStream (StreamCodec.list observationStream))))
     (fun i => (i.subject,i.nonce,i.arguments,i.observations))
     (fun i => ⟨i.1,i.2.1,i.2.2.1,i.2.2.2⟩) (by intro i; cases i; rfl)
-def frame : List UInt8 := "DREGG/OBJECTIVE-BEND/NATIVE-INPUT".toUTF8.toList ++ [1]
+def frame : List UInt8 := Minidregg.Theory.PersistedCodecTags.objective_bend_native_input_byte_v1
 def encode (i : Input) : List UInt8 := frame ++ stream.encode i
 
 def hex (bytes : List UInt8) : String := String.ofList (bytes.flatMap fun b =>
@@ -154,7 +155,7 @@ def observationTerm (o : Observation) : Term := .record
    ("accountBytes",.label (hex o.accountBytes)),
    ("fields",.record (ordinalFields (o.fields.map fun (field,value) => .record
       [("field",.nat field),("negative",.boolean (value < 0)),("magnitude",.nat value.natAbs)])))]
-def codecId : Digest := (Sp800185Cshake256.hash "DREGG.OBJECTIVE-BEND.INPUT-CODEC/v1".toUTF8.toList
+def codecId : Digest := (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.objective_bend_input_codec_v1.toUTF8.toList
   "Input={subject:Nat,nonce:Nat,arguments:ordinalData,observations:ordinal{resource,root,kind,resourceBytes,accountBytes,fields:ordinal{field,negative,magnitude}}};strict-tagged-data;current-signed-narrowed-reads".toUTF8.toList).digest
 
 def sourceTerm (input : Input) (maxBytes scalarBits : Nat) : Except String Term := do

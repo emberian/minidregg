@@ -20,6 +20,7 @@ through -4 cells refuse to decode (their layout digests differ).  Retirement
 prevents identifier resurrection; physical stable-media installation and
 digest collision resistance remain the existing explicit refinement ceilings.
 -/
+import Theory.PersistedCodecTags
 import Compiler.DeclaredEffectCell
 import Theory.CellSlot
 
@@ -71,8 +72,7 @@ def materializer : (kind : Kind) -> Materializer (layout kind) Digest
 
 /-- `DREGG.EFFECT.CELL.REGISTRY.ROOT/v1`. -/
 def directoryRootCustomization : List UInt8 :=
-  [68, 82, 69, 71, 71, 46, 69, 70, 70, 69, 67, 84, 46, 67, 69, 76, 76, 46,
-    82, 69, 71, 73, 83, 84, 82, 89, 46, 82, 79, 79, 84, 47, 118, 49]
+  Minidregg.Theory.PersistedCodecTags.dregg_effect_cell_registry_root_v1
 
 def directoryRoot (bytes : List UInt8) : Digest :=
   (Sp800185Cshake256.hash directoryRootCustomization bytes).digest

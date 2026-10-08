@@ -25,6 +25,7 @@ evaluator file so that `Kernel.Run` (which imports the evaluator) does not cycle
 
 Nothing here is generic; the generic referee is `Kernel.Run` (`Kernel.Door` for doors).
 -/
+import Theory.PersistedCodecTags
 import Kernel.NockProgramCell.Sample
 import Theory.Nock
 import Theory.Eval
@@ -110,7 +111,7 @@ structure Params where
 
 /-- `DREGG/NOCK/PARAMS/v1` -/
 def paramsFrame : List UInt8 :=
-  [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 80, 65, 82, 65, 77, 83, 47, 118, 49]
+  Minidregg.Theory.PersistedCodecTags.dregg_nock_params_v1
 
 theorem paramsFrame_spells : paramsFrame = "DREGG/NOCK/PARAMS/v1".toUTF8.toList := by
   decide +kernel

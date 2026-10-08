@@ -5,6 +5,7 @@ Only generic `StreamCodec` products/lists are used. Full consumption and exact
 re-encoding reject aliases and trailing bytes. All ten metering lanes, payload
 bytes, read guards, nullifiers, and event envelopes survive persistence.
 -/
+import Theory.PersistedCodecTags
 import Kernel.DurableReceiver
 import Compiler.Tower256ConcreteBackend
 
@@ -115,7 +116,7 @@ def imageStream : StreamCodec Image :=
 
 /-- Version 2: every record carries its signing subject. A version-1 image
 refuses (the frame is compared exactly). -/
-def wireFrame : List UInt8 := "DREGG.DURABLE.IMAGE".toUTF8.toList ++ [2]
+def wireFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.durable_image_byte_v2
 
 /-- A fixed frame is recovered only if the final canonical check succeeds. -/
 def framedStream : StreamCodec Image :=

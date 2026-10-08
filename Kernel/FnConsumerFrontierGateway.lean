@@ -4,6 +4,7 @@ does not decide which article the fn server offered. A Host route must form
 the canonical selected or empty spec from an authenticated pinned poll, and
 Replay must match the event to an admitted predecessor and release receipt.
 -/
+import Theory.PersistedCodecTags
 import Kernel.FnGatewayPolicy
 import Kernel.ResourceObservationAdmission
 import Kernel.PhysicalResourceReadGuard
@@ -54,7 +55,7 @@ def signingBytes (proposal : Proposal) : List UInt8 :=
 
 def marker (proposal : Proposal) : Nat :=
   (Sp800185Cshake256.hash
-    "DREGG/FN/CONSUMER-FRONTIER-GATEWAY-MARKER/v2".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.fn_consumer_frontier_gateway_marker_v2.toUTF8.toList
     (signingBytes proposal)).digest.value
 
 def gatewayRequest (federation : FederationId) (authority : AuthState)
@@ -67,10 +68,10 @@ def gatewayRequest (federation : FederationId) (authority : AuthState)
   target := ⟨proposal.target⟩
   verb := .mutateObject
   argsDigest := (Sp800185Cshake256.hash
-    "DREGG/FN/CONSUMER-FRONTIER-GATEWAY-ARGS/v2".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.fn_consumer_frontier_gateway_args_v2.toUTF8.toList
     (signingBytes proposal)).digest
   effectsDigest := (Sp800185Cshake256.hash
-    "DREGG/FN/CONSUMER-FRONTIER-GATEWAY-EFFECTS/v2".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.fn_consumer_frontier_gateway_effects_v2.toUTF8.toList
     (signingBytes proposal)).digest
   nonce := marker proposal
   height := height

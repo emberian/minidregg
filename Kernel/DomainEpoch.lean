@@ -38,6 +38,7 @@ author is a `SubjectId`), `admitAppend`, `ChannelStoreLaw` and the in-Store chai
 `Kernel.DomainEpochLaw`, under the same names. The `#assert_axioms` pins of both live in
 `Kernel.DomainEpochAudit`.
 -/
+import Theory.PersistedCodecTags
 import Theory.Sp800185Cshake256Core
 import Pred.HashEqDigest
 import Theory.Channel
@@ -68,7 +69,7 @@ def cellTag : List UInt8 := utf8 "DREGG.CHANNEL.CELL/v1"
 /-- A tick vector's root over its cells' digests in slot order. -/
 def tickTag : List UInt8 := utf8 "DREGG.CHANNEL.TICK/v1"
 /-- What the sequencer signs, outside the kernel, when it hands a record to a witness. -/
-def sigTag : List UInt8 := utf8 "DREGG.CHANNEL.EPOCH-SIG/v1"
+def sigTag : List UInt8 := utf8 Minidregg.Theory.PersistedCodecTags.channel_epoch_sig_v1
 
 /-- Equal digests of different inputs are a collision of that cSHAKE256 instance. -/
 theorem collision_of {tag a b : List UInt8} (ne : a ≠ b) (eq : hashWith tag a = hashWith tag b) :
@@ -438,7 +439,7 @@ def EpochRecord.WellFormed (r : EpochRecord) : Prop :=
 /-! ## §6. The channel topic and the kernel's admission of an append -/
 
 /-- The channel topic's magic, 22 bytes. -/
-def topicMagic : List UInt8 := utf8 "DREGG.CHANNEL.EPOCH/v1"
+def topicMagic : List UInt8 := utf8 Minidregg.Theory.PersistedCodecTags.channel_epoch_v1
 
 theorem topicMagic_length : topicMagic.length = 22 := by decide
 

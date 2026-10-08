@@ -1,4 +1,5 @@
 /- Source-derived recovery command for an original START and claimed generation. Recovery advances only to stopped through the installed reconciliation law; no package write or created-volume marker is produced. -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationFailedStartRecoveryReport
 import Kernel.ApplicationLifecycleCompletionSource
 
@@ -55,7 +56,7 @@ def sourceStream : StreamCodec Source :=
     (by intro source; cases source; rfl)
 
 def frame : List UInt8 :=
-  "DREGG/APPLICATION/FAILED-START-RECOVERY-SOURCE/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_failed_start_recovery_source_v1.toUTF8.toList
 
 def codec : LawfulCodec Source := NativeHostCodec.framed frame sourceStream
 
@@ -123,7 +124,7 @@ def Source.command (domain semantics : Digest) (source : Source) :
     else [appTarget]
   { subject := begin.managementSubject
     nonce := (Sp800185Cshake256.hash
-      "DREGG/APPLICATION/FAILED-START-RECOVERY-COMMAND/v1".toUTF8.toList
+      Minidregg.Theory.PersistedCodecTags.application_failed_start_recovery_command_v1.toUTF8.toList
       ((StreamCodec.product digestStream
         (StreamCodec.product digestStream bytesStream)).encode
         (domain, semantics, source.physical.report.canonicalBytes))).digest.value

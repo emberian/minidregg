@@ -55,6 +55,7 @@ without NUL, params).
 field value, and the event a claim carries — EVAL §4. Nock's is N11's (`nockDoor`, from
 `Kernel.NockEntry`); the referee is `Kernel.Door`, generic.
 -/
+import Theory.PersistedCodecTags
 import Kernel.NockEntry
 import Theory.TypedAuthorization
 import Compiler.Sp800185Cshake256
@@ -271,7 +272,7 @@ namespace Evaluator
 
 /-- `DREGG.EVALUATOR/v1` -/
 def idCustomization : List UInt8 :=
-  [68, 82, 69, 71, 71, 46, 69, 86, 65, 76, 85, 65, 84, 79, 82, 47, 118, 49]
+  Minidregg.Theory.PersistedCodecTags.dregg_evaluator_v1
 
 theorem idCustomization_spells : idCustomization = "DREGG.EVALUATOR/v1".toUTF8.toList := by
   decide +kernel

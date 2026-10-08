@@ -7,6 +7,7 @@ and the one constructor of a root-bound `DataIntent` from post images.
 Nothing here decides anything: it is the byte layer the two kernel modules
 judge with. Every decoder is strict (a decoded value re-encodes to exactly the
 bytes it came from), so a cell holds one spelling of each value. -/
+import Theory.PersistedCodecTags
 import Kernel.DurableDataIntent
 import Theory.ObjectiveBendCheckpoint
 import Theory.ObjectiveBendDemandData
@@ -110,7 +111,7 @@ theorem checkpointBytes_tokens (state : State) :
 
 /-- The checkpoint identity bound into the await id and the activity record. -/
 def checkpointDigest (bytes : Bytes) : Digest :=
-  tagged "DREGG/OBJECTIVE/ACTIVITY/CHECKPOINT/v1" bytes
+  tagged Minidregg.Theory.PersistedCodecTags.objective_activity_checkpoint_v1 bytes
 
 theorem checkpointDigest_lt (bytes : Bytes) : (checkpointDigest bytes).value < 256 ^ 32 := tagged_lt _ _
 
@@ -272,11 +273,11 @@ def intentOf (rootBytes : Bytes → Digest) (transaction : TransactionId) (posts
 
 /-- A kernel claim: version, the activity kernel's domain, a tagged id, and the
 exact claim bytes (byte-distinct claims stay distinct under a colliding hash). -/
-def domain : Digest := tagged "DREGG/OBJECTIVE/ACTIVITY/DOMAIN/v1" []
+def domain : Digest := tagged Minidregg.Theory.PersistedCodecTags.objective_activity_domain_v1 []
 
 def claim (kind : String) (bytes : Bytes) : StableNullifier :=
   { codecVersion := 1, domain := domain,
-    nullifierId := tagged ("DREGG/OBJECTIVE/ACTIVITY/CLAIM/" ++ kind) bytes,
+    nullifierId := tagged (Minidregg.Theory.PersistedCodecTags.objective_activity_claim ++ kind) bytes,
     canonicalBytes := kind.toUTF8.toList ++ bytes }
 
 def event (kind : String) (bytes : Bytes) : StableEvent :=

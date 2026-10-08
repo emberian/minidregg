@@ -51,6 +51,7 @@ One intent writing several cells is the existing mechanism: a `DataIntent`'s
 writes are a list over cells and `DurableDataIntent.execute` installs all of
 them or none (`PayEnrolProofs.multi_cell_intent_atomic`).
 -/
+import Theory.PersistedCodecTags
 import Kernel.ClockCellDomain
 import Kernel.PayObservationReceiver
 import Kernel.PayChainTip
@@ -134,7 +135,7 @@ def commandStream : StreamCodec Command :=
       ⟨observer, capability, nonce, authorityRoot, payRoot, tip, observation⟩)
     (by intro c; cases c; rfl)
 
-def commandFrame : List UInt8 := "DREGG/PAY/SELF-ENROL/v1".toUTF8.toList
+def commandFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.pay_self_enrol_v1.toUTF8.toList
 
 def commandCodec : LawfulCodec Command := framed commandFrame commandStream
 
@@ -146,7 +147,7 @@ theorem command_canonical {bytes : List UInt8} {command : Command}
     (accepted : commandCodec.decode bytes = some command) : commandCodec.encode command = bytes :=
   framed_canonical commandFrame commandStream accepted
 
-def ingressFrame : List UInt8 := "DREGG/PAY/SELF-ENROL/SIGNED/v1".toUTF8.toList
+def ingressFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.pay_self_enrol_signed_v1.toUTF8.toList
 
 def ingressCodec : LawfulCodec PayObservation.Ingress :=
   framed ingressFrame PayObservation.ingressStream
@@ -179,7 +180,7 @@ def DecodedIngress.bytes (ingress : DecodedIngress) : List UInt8 :=
   ingressCodec.encode ingress.ingress
 
 def marker (domain semantics : Digest) (command : Command) : Nat :=
-  (Sp800185Cshake256.hash "DREGG.PAY.SELF-ENROL.IDENTITY/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.pay_self_enrol_identity_v1.toUTF8.toList
     ((StreamCodec.product digestStream (StreamCodec.product digestStream
       (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream
         StreamCodec.nat))).encode
@@ -194,7 +195,7 @@ existing identifier refuses at preparation (allocation, grant freshness, key
 freshness); nothing is consumed. -/
 
 def deriveId (tag : String) (domain : Digest) (miniKey : List UInt8) : Nat :=
-  (Sp800185Cshake256.hash ("DREGG.PAY.SELF-ENROL." ++ tag ++ "/v1").toUTF8.toList
+  (Sp800185Cshake256.hash (Minidregg.Theory.PersistedCodecTags.pay_self_enrol ++ tag ++ "/v1").toUTF8.toList
     (digestStream.encode domain ++ miniKey)).digest.value % 2 ^ 64
 
 structure Ids where
@@ -429,7 +430,7 @@ structure Mode {M : Materializer PayCell.layout Digest} (pre : Materialized M) (
   rootExact : d.expectedPreRoot = pre.root
 
 def effectDigest (domain semantics : Digest) (command : Command) (d : Declaration) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.PAY.SELF-ENROL.EFFECT/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.pay_self_enrol_effect_v1.toUTF8.toList
     ((StreamCodec.product digestStream (StreamCodec.product digestStream
       (StreamCodec.product bytesStream bytesStream))).encode
       (domain, semantics, commandCodec.encode command, declarationCodec.encode d))).digest
@@ -459,7 +460,7 @@ def context (deployment : Deployment) (snapshot : Snapshot) (semantics : Digest)
       policyRevision := snapshot.authState.policyRevision ⟨deployment.factoryId⟩
       cost := (commandCodec.encode command).length }
   argsDigestBytes := fun bytes =>
-    (Sp800185Cshake256.hash "DREGG.PAY.SELF-ENROL.ARGS/v1".toUTF8.toList
+    (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.pay_self_enrol_args_v1.toUTF8.toList
       (commandCodec.encode command ++ bytes)).digest
 
 def request (deployment : Deployment) (snapshot : Snapshot) (pay : PayCell.Cell) (semantics : Digest)
@@ -1373,7 +1374,7 @@ def transactionId (domain semantics : Digest) (ingress : DecodedIngress) : Diges
 def event (domain : Digest) (ingress : DecodedIngress) : StableEvent where
   codecVersion := 1
   domain := domain
-  eventId := (Sp800185Cshake256.hash "DREGG.PAY.SELF-ENROL.EVENT/v1".toUTF8.toList
+  eventId := (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.pay_self_enrol_event_v1.toUTF8.toList
     ingress.bytes).digest
   canonicalBytes := ingress.bytes
 

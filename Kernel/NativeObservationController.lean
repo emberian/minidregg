@@ -13,6 +13,7 @@ Account views add only that account's sparse balance cut from the same image;
 neither the policy projection nor the returned value contains the shared Book.
 This is a snapshot read, not a timing-noninterference or malicious-host claim.
 -/
+import Theory.PersistedCodecTags
 import Compiler.NativeObservationCodec
 import Compiler.GrainResourceBirthHostCodec
 import Kernel.ResourceObservationAdmission
@@ -208,7 +209,7 @@ def bindingBytes (context : Context deployment) (semantics : Digest)
 
 def effectIdentityAt (deployment : Deployment) (worldRoot semantics : Digest)
     (intent : Intent) (grant : GrantRef) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.OBSERVE-EFFECT/v4".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.native_host_observe_effect_v4.toUTF8.toList
     (bindingBytesAt deployment worldRoot semantics intent grant)).digest
 
 def effectIdentity (context : Context deployment) (semantics : Digest)
@@ -218,7 +219,7 @@ def effectIdentity (context : Context deployment) (semantics : Digest)
 
 def markerAt (deployment : Deployment) (worldRoot semantics : Digest)
     (intent : Intent) (grant : GrantRef) : Nat :=
-  (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.OBSERVE-SIGNATURE/v4".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.native_host_observe_signature_v4.toUTF8.toList
     (bindingBytesAt deployment worldRoot semantics intent grant)).digest.value
 
 def marker (context : Context deployment) (semantics : Digest)
@@ -724,7 +725,7 @@ def resourceScopeViewStream : StreamCodec ResourceScopeView :=
         resourceViewStream))
 
 def resourceScopeViewCodec : IndexedProgram.LawfulCodec ResourceScopeView :=
-  NativeHostCodec.framed "DREGG/NATIVE-HOST/RESOURCE-SCOPE-VIEW/v1".toUTF8.toList
+  NativeHostCodec.framed Minidregg.Theory.PersistedCodecTags.native_host_resource_scope_view_v1.toUTF8.toList
     resourceScopeViewStream
 
 theorem resourceScopeView_roundtrip (view : ResourceScopeView) :
@@ -820,7 +821,7 @@ def tailViewStream :
 
 /-- v2 carries each entry's payload; a v1 window (records only) refuses
 (`v1_tail_view_refused`). -/
-def tailViewFrame : List UInt8 := "DREGG/NATIVE-HOST/STREAM-TAIL/v2".toUTF8.toList
+def tailViewFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.native_host_stream_tail_v2.toUTF8.toList
 
 def tailViewCodec :
     IndexedProgram.LawfulCodec (Digest × Nat × List (Nat × StreamCell.StreamRecord × Option (List UInt8))) :=
@@ -1179,7 +1180,7 @@ def whoViewStream : StreamCodec (List (Nat × Option Nat × Bool × List (Nat ×
       (StreamCodec.product StreamCodec.bool
         (StreamCodec.list (StreamCodec.product StreamCodec.nat StreamCodec.nat)))))
 
-def whoViewFrame : List UInt8 := "DREGG/NATIVE-HOST/WHO-VIEW/v2".toUTF8.toList
+def whoViewFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.native_host_who_view_v2.toUTF8.toList
 
 def whoViewCodec : IndexedProgram.LawfulCodec (List (Nat × Option Nat × Bool × List (Nat × Nat))) :=
   NativeHostCodec.framed whoViewFrame whoViewStream
@@ -1192,12 +1193,12 @@ def sinceEntryStream : StreamCodec SinceEntry :=
     (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2⟩)
     (by intro entry; cases entry; rfl)
 
-def sinceViewFrame : List UInt8 := "DREGG/NATIVE-HOST/SINCE-VIEW/v1".toUTF8.toList
+def sinceViewFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.native_host_since_view_v1.toUTF8.toList
 
 def sinceViewCodec : IndexedProgram.LawfulCodec (List SinceEntry) :=
   NativeHostCodec.framed sinceViewFrame (StreamCodec.list sinceEntryStream)
 
-def atViewFrame : List UInt8 := "DREGG/NATIVE-HOST/AT-VIEW/v3".toUTF8.toList
+def atViewFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.native_host_at_view_v3.toUTF8.toList
 
 /-- The opening of a packed cell's root under `fields`. -/
 def openingView (fields : Option (Finset CellField))
@@ -1495,7 +1496,7 @@ def linkRowStream : StreamCodec LinkRow :=
       wire.2.2.2.2.2.2.1, wire.2.2.2.2.2.2.2⟩)
     (by intro row; cases row; rfl)
 
-def linkViewFrame : List UInt8 := "DREGG/NATIVE-HOST/LINK-VIEW/v1".toUTF8.toList
+def linkViewFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.native_host_link_view_v1.toUTF8.toList
 
 /-- `(backlinks?, rows)`: which view, then its rows. -/
 def linkViewCodec : IndexedProgram.LawfulCodec (Bool × List LinkRow) :=

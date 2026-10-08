@@ -3,6 +3,7 @@ This establishes source/module/front-end/selection identity. That the selected
 core IS this front end's output on these sources is checked at admission
 (`ObjectiveBendNativeAdmission.SourceSelection.replayExact`, the receiver
 recomputing `ObjectiveBendPublication.publishedCore`). -/
+import Theory.PersistedCodecTags
 import Compiler.ObjectiveSourcePackage
 import Kernel.ContentResource
 namespace Minidregg.Kernel.ObjectiveBendPublishedPackage
@@ -12,7 +13,7 @@ open Minidregg.Theory.TypedAuthorization
 set_option autoImplicit false
 
 def schema : Digest := (Sp800185Cshake256.hash
-  "DREGG.OBJECTIVE-BEND.SOURCE-PACKAGE-SCHEMA/v1".toUTF8.toList ObjectiveSourcePackage.frame).digest
+  Minidregg.Theory.PersistedCodecTags.objective_bend_source_package_schema_v1.toUTF8.toList ObjectiveSourcePackage.frame).digest
 
 structure Loaded (store : ContentResource.ContentStore) (id : AtomId) (maxBytes : Nat) where
   private mk ::

@@ -6,6 +6,7 @@ resource kind and explicit policy revision. Typed and existential codecs share
 this one representation. Exact prefix re-encoding rejects noncanonical natural
 spellings; kind mismatch and omitted revision are refused, never defaulted.
 -/
+import Theory.PersistedCodecTags
 import Compiler.Tower256ConcreteBackend
 import Theory.AuthorizationDeclaration
 
@@ -206,7 +207,14 @@ abbrev requestCodecVersion := Minidregg.Theory.AuthorizationDeclaration.requestC
 /-- The signed frame is the PLAN frame: a signature over the old whole-request
 frame (`DREGG/AUTH/REQUEST`) does not verify against it. -/
 def requestFrame : List UInt8 :=
-  "DREGG/AUTH/PLAN".toUTF8.toList ++ [UInt8.ofNat requestCodecVersion]
+  Minidregg.Theory.PersistedCodecTags.auth_plan_byte_v2
+
+/-- The semantic request version and the registered persisted frame cannot
+move independently. -/
+theorem requestFrame_version :
+    requestFrame.getLast? = some (UInt8.ofNat requestCodecVersion) := by
+  simp [requestFrame, Minidregg.Theory.PersistedCodecTags.auth_plan_byte_v2,
+    requestCodecVersion, Minidregg.Theory.AuthorizationDeclaration.requestCodecVersion]
 
 /-- The request as a plan signs it.  `height` is the admission clock and
 `preStateRoot` is the kernel's own pre-root of the leg's cell

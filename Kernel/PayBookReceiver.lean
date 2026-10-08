@@ -25,6 +25,7 @@ The decision proper is the pure `decideChange`:
   absent index (`book_write_once`).
 There is no clock in the pay cell; time is the clock cell's (`Kernel.ClockCell`).
 -/
+import Theory.PersistedCodecTags
 import Kernel.CapabilityRevocationController
 import Kernel.PayCellDomain
 
@@ -288,7 +289,7 @@ def commandStream : StreamCodec Command :=
       ⟨sponsor, control, nonce, factoryRoot, authorityRoot, payRoot, start, book, tariff⟩)
     (by intro c; cases c; rfl)
 
-def commandFrame : List UInt8 := "DREGG/PAY/BOOK/v1".toUTF8.toList
+def commandFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.pay_book_v1.toUTF8.toList
 
 def commandCodec : LawfulCodec Command := framed commandFrame commandStream
 
@@ -308,7 +309,7 @@ def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 def ingressCodec : LawfulCodec Ingress :=
-  framed "DREGG/PAY/BOOK/SIGNED/v1".toUTF8.toList ingressStream
+  framed Minidregg.Theory.PersistedCodecTags.pay_book_signed_v1.toUTF8.toList ingressStream
 
 structure DecodedIngress where
   private mk ::
@@ -335,7 +336,7 @@ def DecodedIngress.bytes (ingress : DecodedIngress) : List UInt8 :=
   ingressCodec.encode ingress.ingress
 
 def marker (domain semantics : Digest) (command : Command) : Nat :=
-  (Sp800185Cshake256.hash "DREGG.PAY.BOOK.IDENTITY/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.pay_book_identity_v1.toUTF8.toList
     ((StreamCodec.product digestStream (StreamCodec.product digestStream
       (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream
         StreamCodec.nat))).encode
@@ -373,7 +374,7 @@ structure Mode {M : Materializer PayCell.layout Digest} (pre : Materialized M) (
   rootExact : d.expectedPreRoot = pre.root
 
 def effectDigest (domain semantics : Digest) (command : Command) (d : Declaration) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.PAY.BOOK.EFFECT/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.pay_book_effect_v1.toUTF8.toList
     ((StreamCodec.product digestStream (StreamCodec.product digestStream
       (StreamCodec.product bytesStream bytesStream))).encode
       (domain, semantics, commandCodec.encode command, declarationCodec.encode d))).digest
@@ -400,7 +401,7 @@ def context (deployment : Deployment) (snapshot : Snapshot) (semantics : Digest)
       policyRevision := snapshot.authState.policyRevision ⟨deployment.factoryId⟩
       cost := (commandCodec.encode command).length }
   argsDigestBytes := fun bytes =>
-    (Sp800185Cshake256.hash "DREGG.PAY.BOOK.ARGS/v1".toUTF8.toList
+    (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.pay_book_args_v1.toUTF8.toList
       (commandCodec.encode command ++ bytes)).digest
 
 def request (deployment : Deployment) (snapshot : Snapshot) (pay : PayCell.Cell) (semantics : Digest)
@@ -626,7 +627,7 @@ def transactionId (domain semantics : Digest) (ingress : DecodedIngress) : Diges
 def event (domain _semantics : Digest) (ingress : DecodedIngress) : StableEvent where
   codecVersion := 1
   domain := domain
-  eventId := (Sp800185Cshake256.hash "DREGG.PAY.BOOK.EVENT/v1".toUTF8.toList ingress.bytes).digest
+  eventId := (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.pay_book_event_v1.toUTF8.toList ingress.bytes).digest
   canonicalBytes := ingress.bytes
 
 def nullifier (domain semantics : Digest) (ingress : DecodedIngress) : StableNullifier :=

@@ -5,6 +5,7 @@ descriptor is installed. The native receiver must read the governed current
 package-manifest content cell, decode these bytes there, and bind its exact
 cell root before using `matches`; birth/version numbers alone do not do so.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationDispatchCodec
 import Kernel.ApplicationPermissionSchema
 
@@ -45,7 +46,7 @@ def interfaceStream : StreamCodec Interface :=
     (by intro interface; cases interface; rfl)
 
 private def interfaceFrame : List UInt8 :=
-  "DREGG/APPLICATION/INTERFACE/v2".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_interface_v2.toUTF8.toList
 
 private def rawInterfaceCodec : LawfulCodec Interface where
   encode interface := interfaceFrame ++ interfaceStream.encode interface
@@ -62,7 +63,7 @@ def interfaceCodec : LawfulCodec Interface :=
   ResourceBirthCodec.strictCodec rawInterfaceCodec
 
 def Interface.root (interface : Interface) : Digest :=
-  (Sp800185Cshake256.hash "DREGG/APPLICATION/INTERFACE-ROOT/v2".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.application_interface_root_v2.toUTF8.toList
     (interfaceCodec.encode interface)).digest
 
 def Interface.permissionSchemaRoot (interface : Interface) : Digest :=
@@ -87,7 +88,7 @@ def manifestStream : StreamCodec Manifest :=
     (by intro manifest; cases manifest; rfl)
 
 private def manifestFrame : List UInt8 :=
-  "DREGG/APPLICATION/MANIFEST/v2".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_manifest_v2.toUTF8.toList
 
 private def rawManifestCodec : LawfulCodec Manifest where
   encode manifest := manifestFrame ++ manifestStream.encode manifest
@@ -122,7 +123,7 @@ its current physical root; a caller-supplied store is not authority. -/
 def manifestAtom (domain : Digest) (app : Nat) : AtomId :=
   let preimage := (StreamCodec.product digestStream StreamCodec.nat).encode (domain, app)
   ⟨⟨(Sp800185Cshake256.hash
-    "DREGG/APPLICATION/MANIFEST-ATOM/v1".toUTF8.toList preimage).digest.value⟩⟩
+    Minidregg.Theory.PersistedCodecTags.application_manifest_atom_v1.toUTF8.toList preimage).digest.value⟩⟩
 
 def decodeInstalled (domain : Digest) (manifestResource app : Nat) (version : Int)
     (page : ContentResource.ContentStore) : Option Manifest := do

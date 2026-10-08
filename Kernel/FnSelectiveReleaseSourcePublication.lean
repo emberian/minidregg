@@ -5,6 +5,7 @@ distinct from a signed read: it asks the current content resource law for
 source receiver must verify the native envelope/current capability and record
 one durable publication event before any fn POST claims source authorization.
 -/
+import Theory.PersistedCodecTags
 import Kernel.FnSelectiveReleaseIngress
 import Kernel.ContentResource
 
@@ -36,7 +37,7 @@ def specStream : StreamCodec Spec :=
 
 def specCodec : LawfulCodec Spec :=
   ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/SELECTED-SOURCE-SPEC/v1".toUTF8.toList specStream)
+    (NativeHostCodec.framed Minidregg.Theory.PersistedCodecTags.fn_selected_source_spec_v1.toUTF8.toList specStream)
 
 def sourceBytes (spec : Spec) : List UInt8 :=
   specCodec.encode spec
@@ -54,7 +55,7 @@ def ingressStream : StreamCodec Ingress :=
 
 def ingressCodec : LawfulCodec Ingress :=
   ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/SELECTED-SOURCE-INGRESS/v1".toUTF8.toList
+    (NativeHostCodec.framed Minidregg.Theory.PersistedCodecTags.fn_selected_source_ingress_v1.toUTF8.toList
       ingressStream)
 
 def keyBytes (spec : Spec) : List UInt8 :=
@@ -65,27 +66,27 @@ def keyBytes (spec : Spec) : List UInt8 :=
 
 def transactionId (spec : Spec) : Digest :=
   (Sp800185Cshake256.hash
-    "DREGG/FN/SELECTED-SOURCE-TRANSACTION/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.fn_selected_source_transaction_v1.toUTF8.toList
     (keyBytes spec)).digest
 
 def nullifier (spec : Spec) : DurableDataIntent.StableNullifier where
   codecVersion := 14
   domain := spec.packet.release.source.domain
   nullifierId := transactionId spec
-  canonicalBytes := "DREGG/FN/SELECTED-SOURCE-NULLIFIER/v1".toUTF8.toList ++
+  canonicalBytes := Minidregg.Theory.PersistedCodecTags.fn_selected_source_nullifier_v1.toUTF8.toList ++
     keyBytes spec
 
 def event (ingress : Ingress) : DurableDataIntent.StableEvent where
   codecVersion := 14
   domain := ingress.spec.packet.release.source.domain
   eventId := (Sp800185Cshake256.hash
-    "DREGG/FN/SELECTED-SOURCE-EVENT/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.fn_selected_source_event_v1.toUTF8.toList
     (ingressCodec.encode ingress)).digest
   canonicalBytes := ingressCodec.encode ingress
 
 def marker (spec : Spec) : Nat :=
   (Sp800185Cshake256.hash
-    "DREGG/FN/SELECTED-SOURCE-PUBLICATION-MARKER/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.fn_selected_source_publication_marker_v1.toUTF8.toList
     (sourceBytes spec)).digest.value
 
 /-- The existing object-delegation verb is the explicit source publication
@@ -103,10 +104,10 @@ def sourceRequest (domain semantics : Digest) (federation : FederationId)
   target := ⟨spec.packet.release.source.resource⟩
   verb := .delegateObject
   argsDigest := (Sp800185Cshake256.hash
-    "DREGG/FN/SELECTED-SOURCE-PUBLICATION-ARGS/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.fn_selected_source_publication_args_v1.toUTF8.toList
     (sourceBytes spec)).digest
   effectsDigest := (Sp800185Cshake256.hash
-    "DREGG/FN/SELECTED-SOURCE-PUBLICATION-EFFECTS/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.fn_selected_source_publication_effects_v1.toUTF8.toList
     (sourceBytes spec)).digest
   nonce := spec.packet.release.owner.nonce.value
   height := height

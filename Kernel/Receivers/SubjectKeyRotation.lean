@@ -37,6 +37,7 @@ bespoke receiver produced (same writes, guards, nullifier, event, subject and
 charge on every lane; `proofWork` is the one claim), so the journal and its
 replay are unchanged.
 -/
+import Theory.PersistedCodecTags
 import Compiler.SigningKeyCommitment
 import Kernel.ParticipantKeyEnrollment
 import Kernel.Receiving
@@ -92,7 +93,7 @@ def commandStream : StreamCodec Command :=
     (fun (subject, nonce, key) => ⟨subject, nonce, key⟩)
     (by intro command; cases command; rfl)
 
-def commandFrame : List UInt8 := "DREGG/SUBJECT-KEY/ROTATE/v1".toUTF8.toList
+def commandFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.subjectkeyrotation_commandframe_44995621.toUTF8.toList
 
 def commandCodec : LawfulCodec Command :=
   ParticipantKeyEnrollment.framed commandFrame commandStream
@@ -112,7 +113,7 @@ def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 def ingressCodec : LawfulCodec Ingress :=
-  ParticipantKeyEnrollment.framed "DREGG/SUBJECT-KEY/ROTATE/SIGNED/v1".toUTF8.toList ingressStream
+  ParticipantKeyEnrollment.framed Minidregg.Theory.PersistedCodecTags.subjectkeyrotation_ingresscodec_e37f6c40.toUTF8.toList ingressStream
 
 structure DecodedIngress where
   private mk ::
@@ -134,7 +135,7 @@ def DecodedIngress.bytes (ingress : DecodedIngress) : List UInt8 :=
 
 /-- The operation marker: the durable nullifier and the transaction id. -/
 def marker (domain semantics : Digest) (command : Command) : Nat :=
-  (Sp800185Cshake256.hash "DREGG.SUBJECT-KEY.ROTATE.IDENTITY/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.subjectkeyrotation_marker_02658a02.toUTF8.toList
     ((StreamCodec.product digestStream (StreamCodec.product digestStream
       (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream
         (StreamCodec.product StreamCodec.nat StreamCodec.nat)))).encode
@@ -142,7 +143,7 @@ def marker (domain semantics : Digest) (command : Command) : Nat :=
 
 /-- The exact bytes the NEW key signs. -/
 def possessionFrame (domain semantics : Digest) (command : Command) : List UInt8 :=
-  "DREGG/SUBJECT-KEY/ROTATE/POSSESSION/v1".toUTF8.toList ++
+  Minidregg.Theory.PersistedCodecTags.subjectkeyrotation_possessionframe_9f82cb97.toUTF8.toList ++
     (StreamCodec.product digestStream (StreamCodec.product digestStream bytesStream)).encode
       (domain, semantics, commandCodec.encode command)
 
@@ -350,7 +351,7 @@ def transactionId (domain semantics : Digest) (ingress : DecodedIngress) : Diges
 def event (domain semantics : Digest) (ingress : DecodedIngress) : StableEvent where
   codecVersion := 1
   domain := domain
-  eventId := (Sp800185Cshake256.hash "DREGG.SUBJECT-KEY.ROTATE.EFFECT/v1".toUTF8.toList
+  eventId := (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.subjectkeyrotation_event_de2e6044.toUTF8.toList
     ((StreamCodec.product digestStream (StreamCodec.product digestStream bytesStream)).encode
       (domain, semantics, ingress.bytes))).digest
   canonicalBytes := ingress.bytes
@@ -467,7 +468,7 @@ def signingPlanStream : StreamCodec SigningPlan :=
     (by intro plan; cases plan; rfl)
 
 def signingPlanCodec : LawfulCodec SigningPlan :=
-  ParticipantKeyEnrollment.framed "DREGG/SUBJECT-KEY/ROTATE/PLAN/v1".toUTF8.toList signingPlanStream
+  ParticipantKeyEnrollment.framed Minidregg.Theory.PersistedCodecTags.subjectkeyrotation_signingplancodec_9b72f4f8.toUTF8.toList signingPlanStream
 
 /-- A subject's key status as seen by someone holding one public key: the
 current epoch and key line, whether a next key is committed, and whether the

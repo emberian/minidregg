@@ -6,6 +6,7 @@ receipt, an fn article, or a caller-supplied signature result as authority.
 The receiving integration must bind a verified signer and current local law
 to this exact message before it installs any effect.
 -/
+import Theory.PersistedCodecTags
 import Compiler.FnEvidenceCodec
 
 namespace Minidregg.Kernel.FnSelectiveRelease
@@ -137,7 +138,7 @@ def releaseStream : StreamCodec Release :=
 /-- This is a new inner profile. Existing native-prefix packages and fn
 carriers retain their own codecs and meanings. -/
 def releaseCodec : LawfulCodec Release :=
-  NativeHostCodec.framed "DREGG/FN/SELECTIVE-RELEASE/v2".toUTF8.toList releaseStream
+  NativeHostCodec.framed Minidregg.Theory.PersistedCodecTags.fn_selective_release_v2.toUTF8.toList releaseStream
 
 /-- The entire released content and every scope coordinate enter the message
 that a native signature verifier must check. No digest collision assumption is

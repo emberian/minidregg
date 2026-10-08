@@ -11,6 +11,7 @@ are unchanged. Physical custody must compare every command here with the one
 signature-verified SPK parse; a caller's matching SHA assertion is not proof
 of that comparison.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationSpkPackageIdentity
 
 namespace Minidregg.Kernel.ApplicationSpkLaunchDescriptor
@@ -41,14 +42,14 @@ def commandStream : StreamCodec Command :=
 
 def commandCodec : LawfulCodec Command :=
   NativeHostCodec.framed
-    "DREGG/APPLICATION/SPK-LAUNCH-COMMAND/v1".toUTF8.toList commandStream
+    Minidregg.Theory.PersistedCodecTags.application_spk_launch_command_v1.toUTF8.toList commandStream
 
 def Command.canonicalBytes (command : Command) : List UInt8 :=
   commandCodec.encode command
 
 def Command.digest (command : Command) : Digest :=
   (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/SPK-LAUNCH-COMMAND-ROOT/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_spk_launch_command_root_v1.toUTF8.toList
     command.canonicalBytes).digest
 
 def bytesValid (bytes : List UInt8) : Bool :=
@@ -91,11 +92,11 @@ def descriptorStream : StreamCodec Descriptor :=
 
 def codec : LawfulCodec Descriptor :=
   NativeHostCodec.framed
-    "DREGG/APPLICATION/SPK-LAUNCH-DESCRIPTOR/v2".toUTF8.toList descriptorStream
+    Minidregg.Theory.PersistedCodecTags.application_spk_launch_descriptor_v2.toUTF8.toList descriptorStream
 
 def codecV3 : LawfulCodec Descriptor :=
   NativeHostCodec.framed
-    "DREGG/APPLICATION/SPK-LAUNCH-DESCRIPTOR/v3".toUTF8.toList descriptorStream
+    Minidregg.Theory.PersistedCodecTags.application_spk_launch_descriptor_v3.toUTF8.toList descriptorStream
 
 /-- A launch whose signed package uses the new API prefix profile has its own
 frame and root domain. GitWeb and web-only launch identities stay byte-exact. -/
@@ -126,8 +127,8 @@ def Descriptor.valid (descriptor : Descriptor) : Bool :=
 def Descriptor.root (descriptor : Descriptor) : Digest :=
   (Sp800185Cshake256.hash
     (if descriptor.legacyProfile then
-      "DREGG/APPLICATION/SPK-PACKAGE-LAUNCH-ROOT/v2".toUTF8.toList
-     else "DREGG/APPLICATION/SPK-PACKAGE-LAUNCH-ROOT/v3".toUTF8.toList)
+      Minidregg.Theory.PersistedCodecTags.application_spk_package_launch_root_v2.toUTF8.toList
+     else Minidregg.Theory.PersistedCodecTags.application_spk_package_launch_root_v3.toUTF8.toList)
     descriptor.canonicalBytes).digest
 
 def Descriptor.matchesManifest (descriptor : Descriptor)

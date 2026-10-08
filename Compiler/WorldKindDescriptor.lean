@@ -4,6 +4,7 @@ StoreCodec. This module is a source-owned codec/layout implementation, not a
 native endpoint: authentication, birth binding and law admission must be
 connected before a caller may install these values in the serving registry.
 -/
+import Theory.PersistedCodecTags
 import Compiler.StoreCodec
 import Compiler.IntStream
 import Compiler.PolicyRecordCodec
@@ -134,7 +135,7 @@ theorem definition_roundtrip (descriptor : Descriptor) (valid : descriptor.Valid
 
 /-- Exported source identities are part of the runtime profile as well as
 instance decoding; changing field meaning or codec changes the layout hash. -/
-def identityCustomization : List UInt8 := "DREGG.WORLD.KIND.LAYOUT/v1".toUTF8.toList
+def identityCustomization : List UInt8 := Minidregg.Theory.PersistedCodecTags.world_kind_layout_v1.toUTF8.toList
 
 def descriptorContract : List UInt8 :=
   "world-kind-descriptor/v1:kind,revision,ordered-fields(id,name,meaning,codec,discipline);unique-id-and-name;nonempty-name-and-meaning;key=nat;nat=0,int=1,bytes=2;rom=0,ram=1,append=2".toUTF8.toList

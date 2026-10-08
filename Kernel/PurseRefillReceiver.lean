@@ -22,6 +22,7 @@ bytes and the decided plan, so the signature binds the burn, the gain and the
 purse's pre-state.  The pay cell (the tariff's credit asset) and both laws'
 sources enter as read guards.
 -/
+import Theory.PersistedCodecTags
 import Kernel.CapabilityRevocationController
 import Kernel.ResourceBirthController
 import Kernel.PayCellDomain
@@ -91,7 +92,7 @@ def commandStream : StreamCodec Command :=
       ⟨subject, capability, account, task, amount, gain, nonce, authorityRoot⟩)
     (by intro c; cases c; rfl)
 
-def commandFrame : List UInt8 := "DREGG/PAY/REFILL/v1".toUTF8.toList
+def commandFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.pay_refill_v1.toUTF8.toList
 
 def commandCodec : LawfulCodec Command := framed commandFrame commandStream
 
@@ -114,7 +115,7 @@ def ingressStream : StreamCodec Ingress :=
     (fun (command, envelope) => ⟨command, envelope⟩)
     (by intro ingress; cases ingress; rfl)
 
-def ingressFrame : List UInt8 := "DREGG/PAY/REFILL/SIGNED/v1".toUTF8.toList
+def ingressFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.pay_refill_signed_v1.toUTF8.toList
 
 def ingressCodec : LawfulCodec Ingress := framed ingressFrame ingressStream
 
@@ -146,7 +147,7 @@ def DecodedIngress.bytes (ingress : DecodedIngress) : List UInt8 :=
   ingressCodec.encode ingress.ingress
 
 def marker (domain semantics : Digest) (command : Command) : Nat :=
-  (Sp800185Cshake256.hash "DREGG.PAY.REFILL.IDENTITY/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.pay_refill_identity_v1.toUTF8.toList
     ((StreamCodec.product digestStream (StreamCodec.product digestStream
       (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream
         StreamCodec.nat))).encode
@@ -210,7 +211,7 @@ structure Mode {M : Materializer effectLayout Digest} (pre : Materialized M) (d 
   rootExact : d.expectedPreRoot = pre.root
 
 def effectDigest (domain semantics : Digest) (command : Command) (d : Declaration) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.PAY.REFILL.EFFECT/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.pay_refill_effect_v1.toUTF8.toList
     ((StreamCodec.product digestStream (StreamCodec.product digestStream
       (StreamCodec.product bytesStream bytesStream))).encode
       (domain, semantics, commandCodec.encode command, declarationCodec.encode d))).digest
@@ -237,7 +238,7 @@ def context (snapshot : Snapshot) (semantics : Digest) (ambient : Ambient) (comm
       policyRevision := snapshot.authState.policyRevision ⟨command.account⟩
       cost := (commandCodec.encode command).length }
   argsDigestBytes := fun bytes =>
-    (Sp800185Cshake256.hash "DREGG.PAY.REFILL.ARGS/v1".toUTF8.toList
+    (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.pay_refill_args_v1.toUTF8.toList
       (commandCodec.encode command ++ bytes)).digest
 
 def request (snapshot : Snapshot) (purse : PurseCell) (semantics : Digest) (ambient : Ambient)
@@ -614,7 +615,7 @@ def transactionId (domain semantics : Digest) (ingress : DecodedIngress) : Diges
 def event (domain _semantics : Digest) (ingress : DecodedIngress) : StableEvent where
   codecVersion := 1
   domain := domain
-  eventId := (Sp800185Cshake256.hash "DREGG.PAY.REFILL.EVENT/v1".toUTF8.toList
+  eventId := (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.pay_refill_event_v1.toUTF8.toList
     ingress.bytes).digest
   canonicalBytes := ingress.bytes
 

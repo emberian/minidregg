@@ -1,4 +1,5 @@
 /- One provisioned factory-observation grant and its operation marker publish in one CAS. -/
+import Theory.PersistedCodecTags
 import Kernel.ParticipantFactoryProvisioning
 
 namespace Minidregg.Kernel.ParticipantFactoryProvisioningReceiver
@@ -25,7 +26,7 @@ the signed effects digest inside the retained ingress bytes. -/
 def event (domain semantics : Digest) (ingress : DecodedIngress) : StableEvent where
   codecVersion := 1
   domain := domain
-  eventId := (Sp800185Cshake256.hash "DREGG.PARTICIPANT.FACTORY-OBSERVE.EVENT/v1".toUTF8.toList
+  eventId := (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.participant_factory_observe_event_v1.toUTF8.toList
     ((StreamCodec.product digestStream (StreamCodec.product digestStream bytesStream)).encode
       (domain, semantics, ingress.ingress.commandBytes))).digest
   canonicalBytes := ingress.bytes

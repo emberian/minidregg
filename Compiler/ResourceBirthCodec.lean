@@ -16,6 +16,7 @@ The former use one cSHAKE domain for durable CAS; the latter remain the exact
 selected schema materializer's roots. No equality between those functions is
 postulated.
 -/
+import Theory.PersistedCodecTags
 import Theory.ResourceBirth
 import Compiler.CredentialAuthorityEntryCodec
 import Compiler.Sp800185Cshake256
@@ -228,7 +229,7 @@ def descriptorStream (registry : TypeRegistry Digest) :
 version-4 frames refuse to decode (`v3_descriptor_refused`,
 `v4_descriptor_refused`): a v4 room birth named no placing capability, so it is
 never read as one that did. -/
-def descriptorFrame : List UInt8 := [68,82,69,71,71,47,66,73,82,84,72,5]
+def descriptorFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.dregg_birth_byte_v5
 
 def framedDescriptorCodec (registry : TypeRegistry Digest) :
     LawfulCodec (Descriptor registry) where
@@ -294,7 +295,7 @@ theorem descriptor_initial_sources_bound (registry : TypeRegistry Digest)
   congrArg Descriptor.initialPolicies (descriptor_encode_injective registry same)
 
 def commitmentBytes (bytes : List UInt8) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.RESOURCE.BIRTH.COMMIT/v1".toUTF8.toList bytes).digest
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.resource_birth_commit_v1.toUTF8.toList bytes).digest
 
 /-- Fixed once by the receiving deployment. The schema catalog is not a wire
 argument; its match is retained by every FactoryAuthorization. -/
@@ -433,7 +434,7 @@ theorem retired_bytes_ne_fresh :
 
 end LifecycleImage
 
-def rootCustomization : List UInt8 := "DREGG.CELL.LIFECYCLE/v1".toUTF8.toList
+def rootCustomization : List UInt8 := Minidregg.Theory.PersistedCodecTags.cell_lifecycle_v1.toUTF8.toList
 
 def rootBytes (bytes : List UInt8) : Digest :=
   (Sp800185Cshake256.hash rootCustomization bytes).digest

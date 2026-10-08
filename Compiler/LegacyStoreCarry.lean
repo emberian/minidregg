@@ -5,6 +5,7 @@ converters pin old descriptors and are used only after retained-source audit.
 Transform2 begins each retained hiding key's target ratchet at the carry height;
 it does not assert that historical Store2 writes already followed that ratchet.
 -/
+import Theory.PersistedCodecTags
 import Compiler.CanonicalCellRegistry
 import Kernel.PayCellUpgrade
 
@@ -22,7 +23,7 @@ set_option autoImplicit false
 
 /-- Exact source frame. Never uses the target storeVersion. -/
 def frameV2 {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L) : List UInt8 :=
-  [68, 82, 69, 71, 71, 47, 83, 84, 79, 82, 69, 2] ++ layoutDigest wire
+  Minidregg.Theory.PersistedCodecTags.dregg_store_byte_v2 ++ layoutDigest wire
 
 def encodeV2 {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L) (store : Store L) : List UInt8 :=
   frameV2 wire ++ (payloadStream wire).encode store

@@ -25,6 +25,7 @@ tail.
 The patch is one guarded write of the system value from the exact loaded value;
 the record writes only the system cell (`intent_writes_system_cell`).
 -/
+import Theory.PersistedCodecTags
 import Kernel.CapabilityRevocationController
 import Kernel.SystemCellDomain
 
@@ -175,7 +176,7 @@ theorem framed_canonical {A : Type} (frame : List UInt8) (stream : StreamCodec A
     (framed frame stream).encode value = bytes :=
   ResourceBirthCodec.strictCodec_canonical (framedRaw frame stream) decoded
 
-def commandFrame : List UInt8 := "DREGG/CERTIFY/v1".toUTF8.toList
+def commandFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.certify_v1.toUTF8.toList
 
 def commandCodec : LawfulCodec Command := framed commandFrame commandStream
 
@@ -195,7 +196,7 @@ def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 def ingressCodec : LawfulCodec Ingress :=
-  framed "DREGG/CERTIFY/SIGNED/v1".toUTF8.toList ingressStream
+  framed Minidregg.Theory.PersistedCodecTags.certify_signed_v1.toUTF8.toList ingressStream
 
 structure DecodedIngress where
   private mk ::
@@ -222,7 +223,7 @@ def DecodedIngress.bytes (ingress : DecodedIngress) : List UInt8 :=
   ingressCodec.encode ingress.ingress
 
 def marker (domain semantics : Digest) (command : Command) : Nat :=
-  (Sp800185Cshake256.hash "DREGG.CERTIFY.IDENTITY/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.certify_identity_v1.toUTF8.toList
     ((StreamCodec.product digestStream (StreamCodec.product digestStream
       (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream
         StreamCodec.nat))).encode
@@ -257,7 +258,7 @@ structure Mode {M : Materializer SystemCell.layout Digest} (pre : Materialized M
   rootExact : d.expectedPreRoot = pre.root
 
 def effectDigest (domain semantics : Digest) (command : Command) (d : Declaration) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.CERTIFY.EFFECT/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.certify_effect_v1.toUTF8.toList
     ((StreamCodec.product digestStream (StreamCodec.product digestStream
       (StreamCodec.product bytesStream bytesStream))).encode
       (domain, semantics, commandCodec.encode command, declarationCodec.encode d))).digest
@@ -284,7 +285,7 @@ def context (deployment : Deployment) (snapshot : Snapshot) (semantics : Digest)
       policyRevision := snapshot.authState.policyRevision ⟨deployment.factoryId⟩
       cost := (commandCodec.encode command).length }
   argsDigestBytes := fun bytes =>
-    (Sp800185Cshake256.hash "DREGG.CERTIFY.ARGS/v1".toUTF8.toList
+    (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.certify_args_v1.toUTF8.toList
       (commandCodec.encode command ++ bytes)).digest
 
 def request (deployment : Deployment) (snapshot : Snapshot) (system : SystemCell.Cell) (semantics : Digest)
@@ -541,7 +542,7 @@ def transactionId (domain semantics : Digest) (ingress : DecodedIngress) : Diges
 def event (domain _semantics : Digest) (ingress : DecodedIngress) : StableEvent where
   codecVersion := 1
   domain := domain
-  eventId := (Sp800185Cshake256.hash "DREGG.CERTIFY.EVENT/v1".toUTF8.toList ingress.bytes).digest
+  eventId := (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.certify_event_v1.toUTF8.toList ingress.bytes).digest
   canonicalBytes := ingress.bytes
 
 def nullifier (domain semantics : Digest) (ingress : DecodedIngress) : StableNullifier :=
@@ -709,7 +710,7 @@ def signingPlanStream : StreamCodec SigningPlan :=
     (by intro plan; cases plan; rfl)
 
 def signingPlanCodec : LawfulCodec SigningPlan :=
-  framed "DREGG/CERTIFY/PLAN/v1".toUTF8.toList signingPlanStream
+  framed Minidregg.Theory.PersistedCodecTags.certify_plan_v1.toUTF8.toList signingPlanStream
 
 def viewStream : StreamCodec SystemCellDomain.View :=
   StreamCodec.xmap
@@ -723,7 +724,7 @@ def viewStream : StreamCodec SystemCellDomain.View :=
     (by intro view; cases view; rfl)
 
 def viewCodec : LawfulCodec SystemCellDomain.View :=
-  framed "DREGG/CERTIFY/VIEW/v1".toUTF8.toList viewStream
+  framed Minidregg.Theory.PersistedCodecTags.certify_view_v1.toUTF8.toList viewStream
 
 /-- info: 'Minidregg.Kernel.CertifyReceiver.certified_advances' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms certified_advances

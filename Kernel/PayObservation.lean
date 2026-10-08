@@ -33,6 +33,7 @@ This module holds the values and the pure decision; the signed receiver is
   an assigned payer that is not the issuer well, a positive amount at or before
   the tip, and the batch of issuer mints admitted by `Batch.Admission`.
 -/
+import Theory.PersistedCodecTags
 import Kernel.PayCellDomain
 import Kernel.ClockCell
 import Kernel.PayChainTip
@@ -115,7 +116,7 @@ def commandStream : StreamCodec Command :=
       ⟨observer, capability, nonce, authorityRoot, payRoot, tip, observations⟩)
     (by intro c; cases c; rfl)
 
-def commandFrame : List UInt8 := "DREGG/PAY/OBSERVATION/v2".toUTF8.toList
+def commandFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.pay_observation_v2.toUTF8.toList
 
 def commandCodec : LawfulCodec Command := framed commandFrame commandStream
 
@@ -139,7 +140,7 @@ def ingressStream : StreamCodec Ingress :=
     (fun (command, envelope) => ⟨command, envelope⟩)
     (by intro ingress; cases ingress; rfl)
 
-def ingressFrame : List UInt8 := "DREGG/PAY/OBSERVATION/SIGNED/v2".toUTF8.toList
+def ingressFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.pay_observation_signed_v2.toUTF8.toList
 
 def ingressCodec : LawfulCodec Ingress := framed ingressFrame ingressStream
 
@@ -163,7 +164,7 @@ def nullifierBytes (o : Observation) : List UInt8 := soltxPrefix ++ o.signature 
 
 def nullifier (domain : Digest) (o : Observation) : StableNullifier :=
   ⟨1, domain,
-    (Sp800185Cshake256.hash "DREGG.PAY.SOLTX.NULLIFIER/v1".toUTF8.toList (nullifierBytes o)).digest,
+    (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.pay_soltx_nullifier_v1.toUTF8.toList (nullifierBytes o)).digest,
     nullifierBytes o⟩
 
 /-- `"paytick:"` as bytes. -/
@@ -175,7 +176,7 @@ def tickBytes (tip : ChainTip) : List UInt8 := tickPrefix ++ StreamCodec.nat.enc
 
 def tickNullifier (domain : Digest) (tip : ChainTip) : StableNullifier :=
   ⟨1, domain,
-    (Sp800185Cshake256.hash "DREGG.PAY.TICK.NULLIFIER/v1".toUTF8.toList (tickBytes tip)).digest,
+    (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.pay_tick_nullifier_v1.toUTF8.toList (tickBytes tip)).digest,
     tickBytes tip⟩
 
 /-- Every nullifier a report spends: one per observation, then its tick. -/

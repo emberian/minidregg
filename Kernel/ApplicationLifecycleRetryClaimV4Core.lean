@@ -2,6 +2,7 @@
 recovery are reselected at their exact prefixes; legacy first-attempt and
 created-volume markers remain unchanged. Native replay supplies both same-walk
 provenance obligations before receiving this conditional intent. -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationLifecycleRetryClaimV4Ingress
 import Kernel.ApplicationLifecycleRetryBeginV4Admission
 
@@ -79,7 +80,7 @@ def event
   codecVersion := 70
   domain := ingress.base.domain
   eventId := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/RETRY-CREATE-CLAIM-EVENT/v4".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_retry_create_claim_event_v4.toUTF8.toList
     ingress.canonicalBytes).digest
   canonicalBytes := ingress.canonicalBytes
 

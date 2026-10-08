@@ -3,6 +3,7 @@ Tuple-indexed current-law admission for a grain-backed birth. No independent
 bare-birth or marker-only grain acceptance is composed here: every request
 and policy projection is derived from the one composite tuple.
 -/
+import Theory.PersistedCodecTags
 import Kernel.GrainResourceBirthTransaction
 import Compiler.PhysicalLawResolution
 import Compiler.WorldKindLawDependencies
@@ -687,7 +688,7 @@ def readRequest {F : Type} [Field F]
       (grain.targets index).before.payload.root with
     verb := DeclaredResourceController.observeVerb command.targets[index].kind
     effectsDigest := (Sp800185Cshake256.hash
-      "DREGG.RESOURCE.TRANSACTION.OBSERVE/v3".toUTF8.toList
+      Minidregg.Theory.PersistedCodecTags.resource_transaction_observe_v3.toUTF8.toList
       ((Tower256ConcreteBackend.StreamCodec.product
         Tower256ConcreteBackend.bytesStream Tower256ConcreteBackend.StreamCodec.nat).encode
         (DeclaredResourceController.commandBytes birth.prepared.pre.authority.snapshot.domain

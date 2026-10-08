@@ -3,6 +3,7 @@ Source-authored completion command. The current package atom and roots carried
 here are candidates only; the receiving path must bind them to the observed
 old image and authenticate both original lifecycle events before admission.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationLifecycleCompletionPolicy
 import Kernel.ApplicationLifecycleClaimV2Ingress
 import Kernel.ContentResource
@@ -61,7 +62,7 @@ def sourceStream : StreamCodec Source :=
     (by intro source; cases source; rfl)
 
 def frame : List UInt8 :=
-  "DREGG/APPLICATION/LIFECYCLE-COMPLETION-SOURCE/v3".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_lifecycle_completion_source_v3.toUTF8.toList
 
 def codec : LawfulCodec Source := NativeHostCodec.framed frame sourceStream
 
@@ -135,7 +136,7 @@ def Source.command (domain semantics : Digest) (source : Source) :
     else [appTarget]
   { subject := begin.managementSubject
     nonce := (Sp800185Cshake256.hash
-      "DREGG/APPLICATION/LIFECYCLE-COMPLETION-COMMAND/v1".toUTF8.toList
+      Minidregg.Theory.PersistedCodecTags.application_lifecycle_completion_command_v1.toUTF8.toList
       ((StreamCodec.product digestStream
         (StreamCodec.product digestStream bytesStream)).encode
         (domain, semantics, source.physical.report.canonicalBytes))).digest.value

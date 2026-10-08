@@ -5,6 +5,7 @@ inside this canonical event; a v1/v2 BEGIN cannot be substituted. A first
 create claim additionally consumes a stable first-attempt marker in its
 checked native intent, so an uncertain execution cannot silently rearm it.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationLifecycleClaimIngress
 import Kernel.ApplicationLifecycleBeginV3Ingress
 
@@ -33,7 +34,7 @@ def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 def frame : List UInt8 :=
-  "DREGG/APPLICATION/LIFECYCLE-CLAIM-INGRESS/v3".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_lifecycle_claim_ingress_v3.toUTF8.toList
 
 def codec : LawfulCodec Ingress := NativeHostCodec.framed frame ingressStream
 
@@ -55,7 +56,7 @@ def event (ingress : Ingress) : StableEvent where
   codecVersion := 24
   domain := ingress.base.domain
   eventId := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/LIFECYCLE-CLAIM-EVENT/v3".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_lifecycle_claim_event_v3.toUTF8.toList
     ingress.canonicalBytes).digest
   canonicalBytes := ingress.canonicalBytes
 
@@ -65,7 +66,7 @@ def firstAttemptNullifier (domain : Digest)
   domain := domain
   nullifierId := ApplicationLifecycleLaunchBinding.firstAttemptKey domain binding
   canonicalBytes :=
-    "DREGG/APPLICATION/FIRST-START-ATTEMPT-BYTES/v1".toUTF8.toList ++
+    Minidregg.Theory.PersistedCodecTags.application_first_start_attempt_bytes_v1.toUTF8.toList ++
       (StreamCodec.product digestStream
         (StreamCodec.product StreamCodec.nat digestStream)).encode
         (domain, binding.app, binding.volume)
@@ -79,7 +80,7 @@ def createdNullifier (domain : Digest)
   domain := domain
   nullifierId := ApplicationLifecycleLaunchBinding.createdKey domain binding
   canonicalBytes :=
-    "DREGG/APPLICATION/VOLUME-CREATED-BYTES/v1".toUTF8.toList ++
+    Minidregg.Theory.PersistedCodecTags.application_volume_created_bytes_v1.toUTF8.toList ++
       (StreamCodec.product digestStream
         (StreamCodec.product StreamCodec.nat digestStream)).encode
         (domain, binding.app, binding.volume)

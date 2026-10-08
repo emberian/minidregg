@@ -22,6 +22,7 @@ Descendants die by the existing lineage rule. The operation marker is a durable
 nullifier, so an exact retry replays its receipt; a second renounce under a new
 nonce reaches the gate and is refused `alreadyRevoked`.
 -/
+import Theory.PersistedCodecTags
 import Kernel.CapabilityRevocationController
 import Compiler.ServedBasis
 import Theory.Renounce
@@ -68,7 +69,7 @@ def commandStream : StreamCodec Command :=
     (fun (subject, nonce, kind, capability) => ⟨subject, nonce, kind, capability⟩)
     (by intro command; cases command; rfl)
 
-def commandFrame : List UInt8 := "DREGG/CAPABILITY/RENOUNCE".toUTF8.toList ++ [1]
+def commandFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.capability_renounce_byte_v1
 
 def rawCommandCodec : LawfulCodec Command where
   encode command := commandFrame ++ commandStream.encode command
@@ -89,7 +90,7 @@ theorem command_decode_canonical {bytes : List UInt8} {command : Command}
 /-- One operation per (signer, nonce): a substituted capability under the same
 nonce is a transaction-identity conflict, never a second admission. -/
 def operationMarker (domain semantics : Digest) (command : Command) : Nat :=
-  (Sp800185Cshake256.hash "DREGG.CAPABILITY.RENOUNCE.IDENTITY/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.capability_renounce_identity_v1.toUTF8.toList
     ((StreamCodec.product digestStream
       (StreamCodec.product digestStream
         (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream StreamCodec.nat))).encode
@@ -105,11 +106,11 @@ def commandBytes (domain semantics : Digest) (command : Command) : List UInt8 :=
     (domain, semantics, commandCodec.encode command)
 
 def argsDigest (domain semantics : Digest) (command : Command) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.CAPABILITY.RENOUNCE.ARGS/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.capability_renounce_args_v1.toUTF8.toList
     (commandBytes domain semantics command)).digest
 
 def effectsDigest (domain semantics : Digest) (preRoot : Digest) (command : Command) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.CAPABILITY.RENOUNCE.EFFECT/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.capability_renounce_effect_v1.toUTF8.toList
     (commandBytes domain semantics command ++
       CapabilityRevocationController.declarationCodec.encode
         (declaration domain semantics preRoot command))).digest
@@ -148,7 +149,7 @@ def ingressStream : StreamCodec Ingress :=
     (fun (command, envelope) => ⟨command, envelope⟩)
     (by intro ingress; cases ingress; rfl)
 
-def ingressFrame : List UInt8 := "DREGG/CAPABILITY/RENOUNCE/SIGNED-INGRESS".toUTF8.toList ++ [1]
+def ingressFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.capability_renounce_signed_ingress_byte_v1
 
 def rawIngressCodec : LawfulCodec Ingress where
   encode ingress := ingressFrame ++ ingressStream.encode ingress
@@ -363,7 +364,7 @@ def transactionId (domain semantics : Digest) (ingress : DecodedIngress) : Diges
 def event (domain semantics : Digest) (ingress : DecodedIngress) : StableEvent where
   codecVersion := 1
   domain := domain
-  eventId := (Sp800185Cshake256.hash "DREGG.CAPABILITY.RENOUNCE.EVENT/v1".toUTF8.toList
+  eventId := (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.capability_renounce_event_v1.toUTF8.toList
     ((StreamCodec.product digestStream (StreamCodec.product digestStream bytesStream)).encode
       (domain, semantics, ingress.bytes))).digest
   canonicalBytes := ingress.bytes

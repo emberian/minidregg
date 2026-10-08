@@ -33,6 +33,7 @@ resource birth (`room`; its law is the author law installed at birth) or a
 fleet topic (`topic stream`; its cell id is derived from `stream`, and only the
 fleet receiver appends).  Neither family can append to the other's head.
 -/
+import Theory.PersistedCodecTags
 import Compiler.StoreCodec
 import Compiler.TypedAuthorizationRequestCodec
 
@@ -80,7 +81,7 @@ structure Append where
   ref : Option (Nat × Nat)
   deriving DecidableEq, Repr
 
-def payloadCustomization : List UInt8 := "DREGG.STREAM.PAYLOAD/v1".toUTF8.toList
+def payloadCustomization : List UInt8 := Minidregg.Theory.PersistedCodecTags.stream_payload_v1.toUTF8.toList
 
 def payloadDigest (payload : List UInt8) : Digest :=
   (Sp800185Cshake256.hash payloadCustomization (bytesStream.encode payload)).digest
@@ -183,16 +184,16 @@ private def cshake (customization : String) (bytes : List UInt8) : Digest :=
 /-- The key of one entry: a digest of its whole value, so it binds the head,
 the position, the parent and the record. The next entry's `parent` is it. -/
 def entryKey (entry : Entry) : Digest :=
-  cshake "DREGG.STREAM.ENTRY/v1" (streamEntryStream.encode entry)
+  cshake Minidregg.Theory.PersistedCodecTags.stream_entry_v1 (streamEntryStream.encode entry)
 
 /-- The cell of entry `sequence` of the stream whose head is cell `head`. -/
 def entryCellId (head sequence : Nat) : Nat :=
-  (cshake "DREGG.STREAM.ENTRY-CELL/v1"
+  (cshake Minidregg.Theory.PersistedCodecTags.stream_entry_cell_v1
     ((StreamCodec.product StreamCodec.nat StreamCodec.nat).encode (head, sequence))).value
 
 /-- The head cell of a fleet topic stream. -/
 def topicHeadCellId (stream : Digest) : Nat :=
-  (cshake "DREGG.STREAM.TOPIC-HEAD/v1" (digestStream.encode stream)).value
+  (cshake Minidregg.Theory.PersistedCodecTags.stream_topic_head_v1 (digestStream.encode stream)).value
 
 /-! ## The head cell: layout and wire -/
 

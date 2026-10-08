@@ -28,6 +28,7 @@ Every resource-invocation law reads it: `slots` projects `clock/now`,
 Wire: `DREGG/CLOCK/v2`, with immutable `maxStepSeconds : Nat` at its own namespace.
 The old clock cell shape refuses; re-genesis seeds `now` from explicit params.
 -/
+import Theory.PersistedCodecTags
 import Compiler.StoreCodec
 import Theory.AxiomPin
 
@@ -149,7 +150,7 @@ def valueStream : (space : Namespace) → StreamCodec (Namespace.Value space)
   | .clock => clockStream
   | .maxStepSeconds => StreamCodec.nat
 
-def wireName : String := "DREGG/CLOCK/v2"
+def wireName : String := Minidregg.Theory.PersistedCodecTags.clock_v2
 
 def wire : Wire layout where
   name := wireName
@@ -162,7 +163,7 @@ def wire : Wire layout where
     | .clock => "unit"
     | .maxStepSeconds => "unit"
   valueCodecId
-    | .clock => "DREGG/CLOCK/NOW-SLOT/v1"
+    | .clock => Minidregg.Theory.PersistedCodecTags.clock_now_slot_v1
     | .maxStepSeconds => "positive-nat/max-step-seconds/v1"
 
 def materializer : Materializer layout Digest := StoreCodec.materializer wire
@@ -179,7 +180,7 @@ theorem cell_canonical {bytes : List UInt8} {store : ClockStore}
 
 /-! ## Identity and genesis -/
 
-def idCustomization : List UInt8 := "DREGG.CLOCK.CELL.ID/v1".toUTF8.toList
+def idCustomization : List UInt8 := Minidregg.Theory.PersistedCodecTags.clock_cell_id_v1.toUTF8.toList
 
 /-- The clock cell's physical identifier in deployment `domain`. -/
 def physicalId (domain : Digest) : Nat :=

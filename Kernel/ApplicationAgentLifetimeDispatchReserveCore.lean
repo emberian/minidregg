@@ -3,6 +3,7 @@ The original accepted purse reserve for one exact event26 grant/request. This
 component binds a Replay-minted raw ordinary invocation to the distinct v3
 context; it does not itself prove membership in the admitted chronology.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationAgentLifetimeDispatchReserveContext
 import Kernel.ApplicationDispatchAgentReserveCore
 
@@ -117,7 +118,7 @@ def bindContext {config : Config}
 claim namespace. It prevents the same accepted reserve from being claimed
 under both dispatch versions even if a future nonce profile is extended. -/
 def claimBytes {config : Config} (reserved : ReservedEvidence config) : List UInt8 :=
-  "DREGG/APPLICATION/AGENT-DISPATCH-RESERVE-CLAIM/v2".toUTF8.toList ++
+  Minidregg.Theory.PersistedCodecTags.application_agent_dispatch_reserve_claim_v2.toUTF8.toList ++
     (StreamCodec.product digestStream digestStream).encode
       (reserved.receipt.transactionId, reserved.receipt.eventId)
 
@@ -126,7 +127,7 @@ def claimNullifier {config : Config} (reserved : ReservedEvidence config) :
   codecVersion := 21
   domain := reserved.context.base.domain
   nullifierId := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/AGENT-DISPATCH-RESERVE-CLAIM-ID/v2".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_agent_dispatch_reserve_claim_id_v2.toUTF8.toList
     (claimBytes reserved)).digest
   canonicalBytes := claimBytes reserved
 

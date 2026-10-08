@@ -11,6 +11,7 @@ Stable replay identity retains exact ingress bytes and the complete descriptor;
 matching a recorded ingress precedes any new nullifier or state-root admission.
 A replay returns the recorded receipt and performs no new semantic execution.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ResourceBirthPolicyController
 import Compiler.DurableReceiverIO
 import Compiler.CredentialAuthorityReplay
@@ -215,7 +216,7 @@ def event (domain : Digest) (ingress : DecodedIngress) : StableEvent where
   codecVersion := 2
   domain := domain
   eventId := commitmentBytes
-    ("DREGG.RESOURCE.BIRTH.EVENT/v2".toUTF8.toList ++
+    (Minidregg.Theory.PersistedCodecTags.resource_birth_event_v2.toUTF8.toList ++
       digestStream.encode domain ++ ingress.bytes)
   canonicalBytes := ingress.bytes
 

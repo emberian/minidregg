@@ -12,6 +12,7 @@ signature helper is the existing cryptographic execution boundary. Unknown old
 wire versions and unsupported event families refuse rather than becoming opaque
 trusted history. Profile/clock changes require an explicit future migration.
 -/
+import Theory.PersistedCodecTags
 import Kernel.NativeHostContext
 import Kernel.NativeHostServed
 import Kernel.ObjectiveBendAuthenticatedInputs
@@ -3206,18 +3207,18 @@ Fixed labels distinguish the native families sharing event version 1; other
 families retain their recorded codec version. No record bytes are printed. -/
 private def admissionPhase (record : DurableReceiver.IntentRecord) : String :=
   let frames : List (String × String) :=
-    [("delegate", "DREGG/CAPABILITY/DELEGATE/"),
-     ("revoke", "DREGG/CAPABILITY/REVOKE/"),
-     ("renounce", "DREGG/CAPABILITY/RENOUNCE/"),
-     ("policy-install", "DREGG/POLICY/INSTALL/"),
-     ("fleet", "DREGG/FLEET/TURN/"),
-     ("key-enroll", "DREGG/PARTICIPANT/KEY-ENROLL/"),
-     ("factory-provision", "DREGG/PARTICIPANT/FACTORY-OBSERVE/"),
-     ("key-rotate", "DREGG/SUBJECT-KEY/ROTATE/"),
-     ("well", "DREGG/WELL/"), ("clock", "DREGG/CLOCK/TICK/"),
-     ("pay-book", "DREGG/PAY/BOOK/"), ("pay-assign", "DREGG/PAY/ASSIGN/"),
-     ("pay-refill", "DREGG/PAY/REFILL/"), ("pay-enrol", "DREGG/PAY/SELF-ENROL/"),
-     ("job-money", "DREGG/JOB/MONEY/"), ("certify", "DREGG/CERTIFY/")]
+    [("delegate", Minidregg.Theory.PersistedCodecTags.capability_delegate_f4a040a413d07fc2),
+     ("revoke", Minidregg.Theory.PersistedCodecTags.capability_revoke),
+     ("renounce", Minidregg.Theory.PersistedCodecTags.capability_renounce),
+     ("policy-install", Minidregg.Theory.PersistedCodecTags.policy_install),
+     ("fleet", Minidregg.Theory.PersistedCodecTags.fleet_turn),
+     ("key-enroll", Minidregg.Theory.PersistedCodecTags.participant_key_enroll),
+     ("factory-provision", Minidregg.Theory.PersistedCodecTags.participant_factory_observe),
+     ("key-rotate", Minidregg.Theory.PersistedCodecTags.subject_key_rotate),
+     ("well", Minidregg.Theory.PersistedCodecTags.well), ("clock", Minidregg.Theory.PersistedCodecTags.clock_tick),
+     ("pay-book", Minidregg.Theory.PersistedCodecTags.pay_book), ("pay-assign", Minidregg.Theory.PersistedCodecTags.pay_assign),
+     ("pay-refill", Minidregg.Theory.PersistedCodecTags.pay_refill), ("pay-enrol", Minidregg.Theory.PersistedCodecTags.pay_self_enrol_f85e0f7332e65137),
+     ("job-money", Minidregg.Theory.PersistedCodecTags.job_money), ("certify", Minidregg.Theory.PersistedCodecTags.certify)]
   match frames.find? (fun row =>
       let frame := row.2.toUTF8.toList
       record.event.canonicalBytes.take frame.length == frame) with

@@ -37,6 +37,7 @@ decoding is strict (`NockProgramCodec.framed` accepts only its own
 re-encoding), and the first 17 frame bytes already separate every kind, so no
 identity's bytes decode as another's (`invocation_family_frames_separate`).
 -/
+import Theory.PersistedCodecTags
 import Compiler.NockProgramCodec
 import Theory.AssertAxioms
 
@@ -193,28 +194,28 @@ def acceptanceRefStream : StreamCodec AcceptanceRef :=
 
 /-- `DREGG/CONTRACT/OBJECT-REF/v1` -/
 def objectRefFrame : List UInt8 :=
-  [68, 82, 69, 71, 71, 47, 67, 79, 78, 84, 82, 65, 67, 84, 47, 79, 66, 74, 69, 67, 84, 45, 82, 69, 70, 47, 118, 49]
+  Minidregg.Theory.PersistedCodecTags.dregg_contract_object_ref_v1
 /-- `DREGG/CONTRACT/REVISION-REF/v1` -/
 def revisionRefFrame : List UInt8 :=
-  [68, 82, 69, 71, 71, 47, 67, 79, 78, 84, 82, 65, 67, 84, 47, 82, 69, 86, 73, 83, 73, 79, 78, 45, 82, 69, 70, 47, 118, 49]
+  Minidregg.Theory.PersistedCodecTags.dregg_contract_revision_ref_v1
 /-- `DREGG/CONTRACT/INVOCATION/v1` -/
 def invocationFrame : List UInt8 :=
-  [68, 82, 69, 71, 71, 47, 67, 79, 78, 84, 82, 65, 67, 84, 47, 73, 78, 86, 79, 67, 65, 84, 73, 79, 78, 47, 118, 49]
+  Minidregg.Theory.PersistedCodecTags.dregg_contract_invocation_v1
 /-- `DREGG/CONTRACT/ATTEMPT/v1` -/
 def attemptFrame : List UInt8 :=
-  [68, 82, 69, 71, 71, 47, 67, 79, 78, 84, 82, 65, 67, 84, 47, 65, 84, 84, 69, 77, 80, 84, 47, 118, 49]
+  Minidregg.Theory.PersistedCodecTags.dregg_contract_attempt_v1
 /-- `DREGG/CONTRACT/GENERATION/v1` -/
 def generationFrame : List UInt8 :=
-  [68, 82, 69, 71, 71, 47, 67, 79, 78, 84, 82, 65, 67, 84, 47, 71, 69, 78, 69, 82, 65, 84, 73, 79, 78, 47, 118, 49]
+  Minidregg.Theory.PersistedCodecTags.dregg_contract_generation_v1
 /-- `DREGG/CONTRACT/TRANSPORT-NONCE/v1` -/
 def transportNonceFrame : List UInt8 :=
-  [68, 82, 69, 71, 71, 47, 67, 79, 78, 84, 82, 65, 67, 84, 47, 84, 82, 65, 78, 83, 80, 79, 82, 84, 45, 78, 79, 78, 67, 69, 47, 118, 49]
+  Minidregg.Theory.PersistedCodecTags.dregg_contract_transport_nonce_v1
 /-- `DREGG/CONTRACT/ARTIFACT-REF/v1` -/
 def artifactRefFrame : List UInt8 :=
-  [68, 82, 69, 71, 71, 47, 67, 79, 78, 84, 82, 65, 67, 84, 47, 65, 82, 84, 73, 70, 65, 67, 84, 45, 82, 69, 70, 47, 118, 49]
+  Minidregg.Theory.PersistedCodecTags.dregg_contract_artifact_ref_v1
 /-- `DREGG/CONTRACT/ACCEPTANCE-REF/v1` -/
 def acceptanceRefFrame : List UInt8 :=
-  [68, 82, 69, 71, 71, 47, 67, 79, 78, 84, 82, 65, 67, 84, 47, 65, 67, 67, 69, 80, 84, 65, 78, 67, 69, 45, 82, 69, 70, 47, 118, 49]
+  Minidregg.Theory.PersistedCodecTags.dregg_contract_acceptance_ref_v1
 
 theorem frames_spell :
     objectRefFrame = "DREGG/CONTRACT/OBJECT-REF/v1".toUTF8.toList ∧

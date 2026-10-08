@@ -12,6 +12,7 @@ capability controllers. The default oracle refuses with the named
 `Reject.noReadOracle`. The command-free `Core` is what quotation reuses.
 A closed registered policy selects source/input/output and resource envelopes;
 actual full writes and guards are checked before an AcceptedInvocation exists. -/
+import Theory.PersistedCodecTags
 import Kernel.ObjectiveBendNativeInput
 import Kernel.ObjectiveBendPublishedPackage
 import Compiler.ObjectiveBendPublication
@@ -38,7 +39,7 @@ set_option autoImplicit false
 /-- This is a new source-selected receiving edition. It does not relabel the
 historical TT evaluator or assert source ticks are physical processor work. -/
 def semanticsId : Digest := (Sp800185Cshake256.hash
-  "DREGG.OBJECTIVE-BEND.NATIVE-SEMANTICS/v2".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.objective_bend_native_semantics_v2.toUTF8.toList
   "objective-bend-1;Core4;typed-core.v2;lazy-demand-origin-thunks;global-root-and-field-capacity;current-native-authority;explicit-ordered-authenticated-input-footprint".toUTF8.toList).digest
 
 /-- The compiled-in evaluator identity of Core4 (`Compiler.Evaluator.objectiveCore4`):
@@ -92,7 +93,7 @@ Edition 6: the tariff and the maximum envelope carry the front end's work (`repl
 per-turn ceiling is below its per-extraction ceiling does not decode. Edition 4: one front-end identity replaced the parser/frontend/elaborator pins
 (edition 3 joined the tariff). A policy of an earlier frame does not decode; neither
 does one whose tariff is not valid. -/
-def policyFrame : List UInt8 := "DREGG/OBJECTIVE-BEND/NATIVE-POLICY".toUTF8.toList ++ [7]
+def policyFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.objective_bend_native_policy_byte_v7
 def encodePolicy (p : Policy) : List UInt8 := policyFrame ++ policyStream.encode p
 def decodePolicy (bytes : List UInt8) : Option Policy :=
   if bytes.take policyFrame.length != policyFrame then none else
@@ -161,9 +162,9 @@ def readContext {F : Type} [Field F] {deployment : Deployment}
     ResourceObservationAdmission.Context deployment := ground
 
 def clearKeyEpoch : Digest := (Sp800185Cshake256.hash
-  "DREGG.OBJECTIVE-BEND.CLEAR-NO-CRYPTOKEY/v1".toUTF8.toList []).digest
+  Minidregg.Theory.PersistedCodecTags.objective_bend_clear_no_cryptokey_v1.toUTF8.toList []).digest
 def declarationId (name : String) : Digest := (Sp800185Cshake256.hash
-  "DREGG.OBJECTIVE-BEND.SELECTED-DECLARATION/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.objective_bend_selected_declaration_v1.toUTF8.toList
   (PolicyRecordCodec.stringStream.encode name)).digest
 
 private def returnTargets (command : Command) : List Nat := (command.targets.zipIdx).filterMap fun (target,index) =>
@@ -221,7 +222,7 @@ def budget (c : ObjectiveInvocationClaim.Capacity) : Budget := {ticks:=c.sourceT
 def scalarProfile (c : ObjectiveInvocationClaim.Capacity) : ObjectiveBendDemandCapacity.Profile := ⟨c.scalarBits⟩
 
 def combinedCodec : Digest := (Sp800185Cshake256.hash
-  "DREGG.OBJECTIVE-BEND.COMBINED-RESULT/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.objective_bend_combined_result_v1.toUTF8.toList
   (digestStream.encode ObjectiveBendPlanAdapter.codecId ++ digestStream.encode ObjectiveBendResultAdapter.codecId)).digest
 
 inductive Output (deployment : Deployment)
@@ -574,7 +575,7 @@ def Core.applied {F : Type} [Field F] [DecidableEq F] {deployment : Deployment} 
 def Core.contextBytes {F : Type} [Field F] [DecidableEq F] {deployment : Deployment} {ground : Ground deployment}
     {environment : Environment deployment ground} {profile : CanonicalRuntimeProfile.Profile F}
     {claim : ObjectiveInvocationClaim.Claim} (core : Core environment profile claim) : List UInt8 :=
-  "DREGG/OBJECTIVE-BEND/ADMITTED-INPUT-CONTEXT".toUTF8.toList ++ [2] ++
+  Minidregg.Theory.PersistedCodecTags.objective_bend_admitted_input_context_byte_v2 ++
   ObjectiveInvocationClaim.encode claim ++ ObjectiveBendNativeInput.encode core.input ++
   digestStream.encode (ObjectiveBendSourceArtifact.identity core.source.loaded.artifact)
 

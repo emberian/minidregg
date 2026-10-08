@@ -38,6 +38,7 @@ default (`genesisDefault`) is deliberately invalid until the operator sets a
 tariff; while it is invalid, no deposit index is assigned
 (`PayAssignmentReceiver.assignment_requires_valid_tariff`).
 -/
+import Theory.PersistedCodecTags
 import Compiler.ResourceBirthCodec
 import Theory.AssertAxioms
 
@@ -166,7 +167,7 @@ theorem framed_canonical {α : Type} (frame : List UInt8) (stream : StreamCodec 
     (framed frame stream).encode value = bytes :=
   Minidregg.Compiler.ResourceBirthCodec.strictCodec_canonical (framedRaw frame stream) accepted
 
-def tariffFrame : List UInt8 := "DREGG/PAY/TARIFF/v4".toUTF8.toList
+def tariffFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.pay_tariff_v4.toUTF8.toList
 
 def tariffCodec : LawfulCodec Tariff := framed tariffFrame tariffStream
 

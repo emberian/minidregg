@@ -3,6 +3,7 @@ Versioned lifecycle BEGIN carrier for a full signed-SPK descriptor preimage.
 The v1 BEGIN codec and event bytes remain unchanged for historical replay.
 This v2 carrier still records pending physical work, never its completion.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationLifecycleBeginIngress
 import Kernel.ApplicationSpkPackageIdentity
 
@@ -32,7 +33,7 @@ def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 def frame : List UInt8 :=
-  "DREGG/APPLICATION/LIFECYCLE-BEGIN-INGRESS/v2".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_lifecycle_begin_ingress_v2.toUTF8.toList
 
 def codec : LawfulCodec Ingress := NativeHostCodec.framed frame ingressStream
 
@@ -50,7 +51,7 @@ def event (ingress : Ingress) : StableEvent where
   codecVersion := 12
   domain := ingress.base.domain
   eventId := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/LIFECYCLE-BEGIN-EVENT/v2".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_lifecycle_begin_event_v2.toUTF8.toList
     ingress.canonicalBytes).digest
   canonicalBytes := ingress.canonicalBytes
 

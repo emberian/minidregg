@@ -1,6 +1,7 @@
 /- Versioned retry BEGIN. Its source-derived signed operation nonce commits to
 the full exact recovery selector and original launch selection. Legacy v3
 shape/admission and permanent first-attempt refusal are unchanged. -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationFailedCreateRetryEvidence
 
 namespace Minidregg.Kernel.ApplicationLifecycleRetryBeginV4Ingress
@@ -26,13 +27,13 @@ def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 def codec : LawfulCodec Ingress := NativeHostCodec.framed
-  "DREGG/APPLICATION/RETRY-CREATE-BEGIN-INGRESS/v4".toUTF8.toList ingressStream
+  Minidregg.Theory.PersistedCodecTags.application_retry_create_begin_ingress_v4.toUTF8.toList ingressStream
 
 def Ingress.canonicalBytes (ingress : Ingress) : List UInt8 := codec.encode ingress
 
 def authorizationCodec : LawfulCodec (List UInt8 × List UInt8) :=
   NativeHostCodec.framed
-    "DREGG/APPLICATION/RETRY-CREATE-BEGIN-AUTHORIZATION/v4".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_retry_create_begin_authorization_v4.toUTF8.toList
     (StreamCodec.product bytesStream bytesStream)
 
 def authorizationBytes (ingress : Ingress) : List UInt8 :=
@@ -42,7 +43,7 @@ def authorizationBytes (ingress : Ingress) : List UInt8 :=
 
 def Ingress.authorizationOperationId (ingress : Ingress) : Nat :=
   (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/RETRY-CREATE-BEGIN-AUTHORIZATION-ID/v4".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_retry_create_begin_authorization_id_v4.toUTF8.toList
     (authorizationBytes ingress)).digest.value
 
 def Ingress.withAuthorizationId (ingress : Ingress) : Ingress :=

@@ -12,6 +12,7 @@ identity, version zero, absent predecessor, deployment domain and the actual
 receiving compiler profile. It cannot obtain its profile from the submitted
 record. There is no policy interpreter or mutation operation in this module.
 -/
+import Theory.PersistedCodecTags
 import Compiler.PolicyRecordCodec
 import Theory.ResourceBirth
 
@@ -79,7 +80,7 @@ theorem record_immutable (state : Store layout) (patch : Patch layout)
 
 def payloadStream := StreamCodec.product StreamCodec.nat (StreamCodec.option recordStream)
 
-def wireFrame : List UInt8 := "DREGG/POLICY/SOURCE".toUTF8.toList
+def wireFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.policy_source.toUTF8.toList
 
 def encode (state : Store layout) : List UInt8 :=
   wireFrame ++ payloadStream.encode (wireVersion, recordAt state)
@@ -137,8 +138,8 @@ def stateCodec : LawfulCodec (Store layout) where
   decode := decode
   decode_encode := decode_encode
 
-def rootCustomization : List UInt8 := [68, 82, 69, 71, 71, 46, 80, 79, 76, 73, 67, 89, 46, 83, 79, 85, 82, 67, 69, 46, 83, 84, 65, 84, 69, 47, 118, 49]
-def idCustomization : List UInt8 := [68, 82, 69, 71, 71, 46, 80, 79, 76, 73, 67, 89, 46, 83, 79, 85, 82, 67, 69, 46, 73, 68, 47, 118, 49]
+def rootCustomization : List UInt8 := Minidregg.Theory.PersistedCodecTags.dregg_policy_source_state_v1
+def idCustomization : List UInt8 := Minidregg.Theory.PersistedCodecTags.dregg_policy_source_id_v1
 
 def rootBytes (bytes : List UInt8) : Digest :=
   (Sp800185Cshake256.hash rootCustomization bytes).digest

@@ -1,6 +1,7 @@
 /- Core4 scalar-record ABI to the existing complete guarded native Plan binder.
 This decoder confers no authority. Current source/family/law/capacity admission
 remains the native receiver's responsibility. No returns in this explicit slice. -/
+import Theory.PersistedCodecTags
 import Theory.ObjectiveBendDemandData
 import Compiler.ObjectiveNativeScalarBinding
 namespace Minidregg.Compiler.ObjectiveBendPlanAdapter
@@ -15,7 +16,7 @@ set_option autoImplicit false
 /-- Exact public scalar-record output schema. Receiver registration must pin
 this identity; a matching backend name cannot select a different decoder. -/
 def codecId : Digest :=
-  (Sp800185Cshake256.hash "DREGG.OBJECTIVE-BEND.SCALAR-RECORD/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.objective_bend_scalar_record_v1.toUTF8.toList
     "Core4:data;Plan=record[reads,effects];ordinal=contiguous-decimal-zero-based;Ref=record[resource:Nat,root:canonical-lowerhex-digestStream];Write=record[ref,field:Nat,before:Nat,after:Nat];same-resource-ordered-group;conflicting-root-refuse;no-extra-fields;no-returns;no-authority".toUTF8.toList).digest
 
 def nibble (c : Char) : Option Nat :=

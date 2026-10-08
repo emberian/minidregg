@@ -1,6 +1,7 @@
 /- Explicit current-key authorization to establish its first next-key commitment.
 The current and next key sign different frames over the complete command.
 Neither a sponsor nor a carry operator can invent this authority. -/
+import Theory.PersistedCodecTags
 import Kernel.Receivers.SubjectKeyRotation
 import Theory.KeyCommitmentAdoption
 
@@ -46,7 +47,7 @@ def commandStream : StreamCodec Command :=
     (fun (subject, nonce, current, next) => ⟨subject, nonce, current, next⟩)
     (by intro command; cases command; rfl)
 
-def commandFrame : List UInt8 := "DREGG/SUBJECT-KEY/ADOPT-NEXT/v1".toUTF8.toList
+def commandFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.subject_key_adopt_next_v1.toUTF8.toList
 
 def commandCodec : LawfulCodec Command := ParticipantKeyEnrollment.framed commandFrame commandStream
 
@@ -63,7 +64,7 @@ def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 def ingressCodec : LawfulCodec Ingress :=
-  ParticipantKeyEnrollment.framed "DREGG/SUBJECT-KEY/ADOPT-NEXT/SIGNED/v1".toUTF8.toList ingressStream
+  ParticipantKeyEnrollment.framed Minidregg.Theory.PersistedCodecTags.subject_key_adopt_next_signed_v1.toUTF8.toList ingressStream
 
 structure DecodedIngress where
   private mk ::
@@ -84,19 +85,19 @@ def DecodedIngress.bytes (ingress : DecodedIngress) : List UInt8 := ingressCodec
 /-- The marker excludes signatures and binds the current key epoch plus nonce.
 Changing the proposed commitment under the same marker is a conflict. -/
 def marker (domain semantics : Digest) (command : Command) : Nat :=
-  (Sp800185Cshake256.hash "DREGG.SUBJECT-KEY.ADOPT-NEXT.IDENTITY/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.subject_key_adopt_next_identity_v1.toUTF8.toList
     ((StreamCodec.product digestStream (StreamCodec.product digestStream
       (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream
         (StreamCodec.product StreamCodec.nat StreamCodec.nat)))).encode
       (domain, semantics, command.subject, command.expectedCurrent.keyEpoch, command.nonce))).digest.value
 
 def authorizationFrame (domain semantics : Digest) (command : Command) : List UInt8 :=
-  "DREGG/SUBJECT-KEY/ADOPT-NEXT/AUTHORIZE/v1".toUTF8.toList ++
+  Minidregg.Theory.PersistedCodecTags.subject_key_adopt_next_authorize_v1.toUTF8.toList ++
     (StreamCodec.product digestStream (StreamCodec.product digestStream bytesStream)).encode
       (domain, semantics, commandCodec.encode command)
 
 def possessionFrame (domain semantics : Digest) (command : Command) : List UInt8 :=
-  "DREGG/SUBJECT-KEY/ADOPT-NEXT/POSSESSION/v1".toUTF8.toList ++
+  Minidregg.Theory.PersistedCodecTags.subject_key_adopt_next_possession_v1.toUTF8.toList ++
     (StreamCodec.product digestStream (StreamCodec.product digestStream bytesStream)).encode
       (domain, semantics, commandCodec.encode command)
 
@@ -189,7 +190,7 @@ def transactionId (domain semantics : Digest) (ingress : DecodedIngress) : Diges
 def event (domain semantics : Digest) (ingress : DecodedIngress) : StableEvent where
   codecVersion := 1
   domain := domain
-  eventId := (Sp800185Cshake256.hash "DREGG.SUBJECT-KEY.ADOPT-NEXT.EFFECT/v1".toUTF8.toList
+  eventId := (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.subject_key_adopt_next_effect_v1.toUTF8.toList
     ((StreamCodec.product digestStream (StreamCodec.product digestStream bytesStream)).encode
       (domain, semantics, ingress.bytes))).digest
   canonicalBytes := ingress.bytes
@@ -340,6 +341,6 @@ def signingPlanStream : StreamCodec SigningPlan :=
     (by intro plan; cases plan; rfl)
 
 def signingPlanCodec : LawfulCodec SigningPlan :=
-  ParticipantKeyEnrollment.framed "DREGG/SUBJECT-KEY/ADOPT-NEXT/PLAN/v1".toUTF8.toList signingPlanStream
+  ParticipantKeyEnrollment.framed Minidregg.Theory.PersistedCodecTags.subject_key_adopt_next_plan_v1.toUTF8.toList signingPlanStream
 
 end Minidregg.Kernel.SubjectKeyCommitmentAdoption

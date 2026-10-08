@@ -6,6 +6,7 @@ only a session witness and optional agent-parent witness. The accepted special
 event/nullifier is the durable pending request, not a generic content atom.
 Merely decoding this carrier is not authority to hand HTTP to a process.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationDispatchCodec
 import Compiler.NativeHostCodec
 import Kernel.DurableDataIntent
@@ -68,7 +69,7 @@ def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 private def frame : List UInt8 :=
-  "DREGG/APPLICATION/DISPATCH-INGRESS/v2".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_dispatch_ingress_v2.toUTF8.toList
 
 private def rawCodec : LawfulCodec Ingress where
   encode ingress := frame ++ ingressStream.encode ingress
@@ -120,7 +121,7 @@ theorem keyBytes_eq_iff_key (left right : Ingress) :
   (lawful_encode_injective keyStream.toLawful).eq_iff
 
 def keyDigest (ingress : Ingress) : Digest :=
-  (Sp800185Cshake256.hash "DREGG/APPLICATION/DISPATCH-KEY/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.application_dispatch_key_v1.toUTF8.toList
     (keyBytes ingress)).digest
 
 /-- The DRC command signature binds the complete app-visible request and the
@@ -129,7 +130,7 @@ would be circular). The nullifier separately reserves the stable operation
 key. Fresh admission must derive these coordinates from the current image and
 native-check each observation envelope against its source-owned request. -/
 def requestDigest (ingress : Ingress) : Digest :=
-  (Sp800185Cshake256.hash "DREGG/APPLICATION/DISPATCH-REQUEST-BIND/v2".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.application_dispatch_request_bind_v2.toUTF8.toList
     ((StreamCodec.product digestStream
       (StreamCodec.product digestStream
         (StreamCodec.product bytesStream
@@ -148,7 +149,7 @@ def nullifier (ingress : Ingress) : StableNullifier where
   codecVersion := 11
   domain := ingress.domain
   nullifierId := keyDigest ingress
-  canonicalBytes := "DREGG/APPLICATION/DISPATCH-NULLIFIER/v1".toUTF8.toList ++
+  canonicalBytes := Minidregg.Theory.PersistedCodecTags.application_dispatch_nullifier_v1.toUTF8.toList ++
     keyBytes ingress
 
 def event (ingress : Ingress) : StableEvent where

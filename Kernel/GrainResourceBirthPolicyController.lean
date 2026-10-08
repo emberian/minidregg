@@ -4,6 +4,7 @@ admit a request: the complete birth credential bundle and the signed grain
 target, observation, and authority envelopes must still be checked against
 one current loaded image and one joint candidate before any durable intent.
 -/
+import Theory.PersistedCodecTags
 import Compiler.GrainResourceBirthController
 import Compiler.GrainResourceBirthHostCodec
 import Kernel.ResourceBirthPolicyController
@@ -31,7 +32,7 @@ def ingressStream : StreamCodec SignedIngress :=
     (by intro ingress; cases ingress; rfl)
 
 def ingressFrame : List UInt8 :=
-  "DREGG/GRAIN-RESOURCE-BIRTH/SIGNED-INGRESS/v2".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.grain_resource_birth_signed_ingress_v2.toUTF8.toList
 
 def ingressRawCodec : LawfulCodec SignedIngress where
   encode ingress := ingressFrame ++ ingressStream.encode ingress

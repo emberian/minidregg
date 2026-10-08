@@ -4,6 +4,7 @@ grain birth and the older bare share-issue event have different retained
 carriers and nullifier sets. Historical lookup selects only the exact event;
 semantic replay must re-admit this receiver at its original prefix.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationShareIssueGrainAdmission
 import Kernel.GrainResourceBirthReceiver
 
@@ -37,7 +38,7 @@ def event (domain : Digest) (ingress : Ingress) : StableEvent where
   codecVersion := 22
   domain := domain
   eventId := commitmentBytes
-    ("DREGG/APPLICATION/GRAIN-SHARE-ISSUE-EVENT/v1".toUTF8.toList ++
+    (Minidregg.Theory.PersistedCodecTags.application_grain_share_issue_event_v1.toUTF8.toList ++
       digestStream.encode domain ++ ingress.canonicalBytes)
   canonicalBytes := ingress.canonicalBytes
 

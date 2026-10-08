@@ -3,6 +3,7 @@ Canonical source coordinates for the native grain-backed birth draft. This is
 input data, never an authority verdict or a proposed post-state. The receiver
 recomputes the command, checks both old grain cells, and admits signatures.
 -/
+import Theory.PersistedCodecTags
 import Compiler.GrainResourceBirthController
 import Compiler.CanonicalResourcePageMaterializer
 
@@ -25,7 +26,7 @@ def sourceWireStream : StreamCodec SourceWire :=
       (StreamCodec.list IntStream.intStream))
 
 def sourceFrame : List UInt8 :=
-  "DREGG/GRAIN-RESOURCE-BIRTH/HOST-SOURCE/v2".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.grain_resource_birth_host_source_v2.toUTF8.toList
 
 def toWire (source : Source) : SourceWire :=
   ((ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).encode source.birth,
@@ -100,7 +101,7 @@ def finalizedStream : StreamCodec Finalized :=
     (by intro value; cases value; rfl)
 
 def finalizedFrame : List UInt8 :=
-  "DREGG/GRAIN-RESOURCE-BIRTH/FINALIZED-DRAFT/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.grain_resource_birth_finalized_draft_v1.toUTF8.toList
 
 def finalizedRawCodec : LawfulCodec Finalized where
   encode value := finalizedFrame ++ finalizedStream.encode value

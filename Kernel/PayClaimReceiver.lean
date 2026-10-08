@@ -5,6 +5,7 @@ The native signature, current custody, immutable origin, one-time consumption
 and quote gate precede the witness; the actual current composed factory law is
 still mandatory. This is a closed two-action receiving surface.
 -/
+import Theory.PersistedCodecTags
 import Kernel.PayClaimDecision
 import Kernel.PayEnrolV2Receiver
 import Kernel.PayClaimLaw
@@ -44,7 +45,7 @@ def identityKey (command : Command) : List UInt8 :=
 def subject (command : Command) : SubjectId := ⟨PayEnrolMemo.subjectOf (identityKey command)⟩
 
 def effectDigest (domain semantics : Digest) (command : Command) (d : Declaration) : Digest :=
-  (Sp800185Cshake256.hash "DREGG/PAY/CLAIM/EFFECT/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.pay_claim_effect_v1.toUTF8.toList
     (digestStream.encode domain ++ digestStream.encode semantics ++
       bytesStream.encode (PayClaimCommand.commandCodec.encode command) ++
       bytesStream.encode (PayEnrolReceiver.declarationCodec.encode d))).digest
@@ -67,7 +68,7 @@ def context (deployment : Deployment) (snapshot : CredentialAuthorityDomain.Snap
       policyRevision := snapshot.authState.policyRevision ⟨deployment.factoryId⟩
       cost := (PayClaimCommand.commandCodec.encode command).length }
   argsDigestBytes := fun bytes =>
-    (Sp800185Cshake256.hash "DREGG/PAY/CLAIM/ARGS/v1".toUTF8.toList
+    (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.pay_claim_args_v1.toUTF8.toList
       (PayClaimCommand.commandCodec.encode command ++ bytes)).digest
 
 def request (deployment : Deployment) (snapshot : CredentialAuthorityDomain.Snapshot)
@@ -365,7 +366,7 @@ def transactionId (domain semantics : Digest) (ingress : DecodedIngress) : Diges
 def event (domain semantics : Digest) (ingress : DecodedIngress) : StableEvent where
   codecVersion := 1
   domain := domain
-  eventId := (Sp800185Cshake256.hash "DREGG/PAY/CLAIM/EVENT/v1".toUTF8.toList
+  eventId := (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.pay_claim_event_v1.toUTF8.toList
     (digestStream.encode domain ++ digestStream.encode semantics ++ bytesStream.encode (ingressBytes ingress))).digest
   canonicalBytes := ingressBytes ingress
 

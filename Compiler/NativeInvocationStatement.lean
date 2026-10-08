@@ -4,6 +4,7 @@ unsigned invocation body, excluding this framing and its signatures; signatures
 must bind these statement bytes through the actual authorization request.
 This codec does not itself change a legacy profile or grant any admission.
 -/
+import Theory.PersistedCodecTags
 import Theory.AssertAxioms
 import Compiler.Tower256ConcreteBackend
 import Compiler.ResourceBirthCodec
@@ -67,7 +68,7 @@ def stream : StreamCodec Statement :=
 
 /-- The version is part of the exact signed bytes, never an ambient hint. -/
 def version : Nat := 1
-def frame : List UInt8 := "DREGG/NATIVE/INVOCATION-STATEMENT".toUTF8.toList ++ [1]
+def frame : List UInt8 := Minidregg.Theory.PersistedCodecTags.native_invocation_statement_byte_v1
 
 def rawCodec : LawfulCodec Statement where
   encode statement := frame ++ stream.encode statement

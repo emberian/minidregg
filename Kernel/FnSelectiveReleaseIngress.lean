@@ -6,6 +6,7 @@ admission must verify the capability, owner key and current law before this
 derived command may become a durable intent. The distinct event is essential:
 an ordinary DRC mutation of similar content is not a checked release.
 -/
+import Theory.PersistedCodecTags
 import Kernel.FnSelectiveReleaseSignature
 import Kernel.DeclaredResourceController
 
@@ -40,7 +41,7 @@ def ingressStream : StreamCodec Ingress :=
 
 def ingressCodec : LawfulCodec Ingress :=
   ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/SELECTIVE-INGRESS/v3".toUTF8.toList ingressStream)
+    (NativeHostCodec.framed Minidregg.Theory.PersistedCodecTags.fn_selective_ingress_v3.toUTF8.toList ingressStream)
 
 theorem ingressCodec_accepted_bytes {bytes : List UInt8} {ingress : Ingress}
     (accepted : ingressCodec.decode bytes = some ingress) :
@@ -59,14 +60,14 @@ def keyBytes (release : Release) : List UInt8 :=
     (release.destination.domain, release.destination.target, release.owner.nonce)
 
 def keyDigest (release : Release) : Digest :=
-  (Sp800185Cshake256.hash "DREGG/FN/SELECTIVE-RELEASE-KEY/v2".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.fn_selective_release_key_v2.toUTF8.toList
     (keyBytes release)).digest
 
 def releaseNullifier (release : Release) : StableNullifier where
   codecVersion := 13
   domain := release.destination.domain
   nullifierId := keyDigest release
-  canonicalBytes := "DREGG/FN/SELECTIVE-RELEASE-NULLIFIER/v2".toUTF8.toList ++
+  canonicalBytes := Minidregg.Theory.PersistedCodecTags.fn_selective_release_nullifier_v2.toUTF8.toList ++
     keyBytes release
 
 def atomId (release : Release) : AtomId :=
@@ -105,7 +106,7 @@ def event (ingress : Ingress) : StableEvent where
   codecVersion := 13
   domain := ingress.packet.release.destination.domain
   eventId := (Sp800185Cshake256.hash
-    "DREGG/FN/SELECTIVE-RELEASE-EVENT/v2".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.fn_selective_release_event_v2.toUTF8.toList
     (ingressCodec.encode ingress)).digest
   canonicalBytes := ingressCodec.encode ingress
 

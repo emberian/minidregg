@@ -5,6 +5,7 @@ the installed interface and current participant/session grants, then admit the
 exact signed ingress against the loaded Mini image. In particular, a browser
 request is not an AgentGrain child merely because a transport uses an agent.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ResourceTransaction
 
 namespace Minidregg.Kernel.ApplicationDispatchCodec
@@ -167,7 +168,7 @@ layer lets paid reserve signing bind this request before any replay-dependent
 projection is built. -/
 def requestDigest (request : Request) : Digest :=
   (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/PHYSICAL-WEB-REQUEST/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_physical_web_request_v1.toUTF8.toList
     (requestStream.encode request)).digest
 
 /-- App-facing identity and permission bitset. The received bytes are not a
@@ -206,7 +207,7 @@ def dispatchStream : StreamCodec Dispatch :=
     (by intro dispatch; cases dispatch; rfl)
 
 private def frame : List UInt8 :=
-  "DREGG/APPLICATION/DISPATCH-REQUEST/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_dispatch_request_v1.toUTF8.toList
 
 private def rawCodec : LawfulCodec Dispatch where
   encode dispatch := frame ++ dispatchStream.encode dispatch

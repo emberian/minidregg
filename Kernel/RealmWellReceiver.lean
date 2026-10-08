@@ -29,6 +29,7 @@ over an accepted log the well's negation moves by exactly the minted minus the
 burned amount (`well_tracks_mints`), so on a well born at zero,
 `−well = Σ minted − Σ burned = Σ holders` (`Book.holders_sum_eq_neg_well`).
 -/
+import Theory.PersistedCodecTags
 import Kernel.CapabilityRevocationController
 import Kernel.ResourceBirthController
 import Compiler.RealmWellCodec
@@ -357,7 +358,7 @@ structure Ambient where
   credit : AssetId
 
 def marker (domain semantics : Digest) (command : Command) : Nat :=
-  (Sp800185Cshake256.hash "DREGG.WELL.IDENTITY/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.well_identity_v1.toUTF8.toList
     ((StreamCodec.product digestStream (StreamCodec.product digestStream
       (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream
         StreamCodec.nat))).encode
@@ -385,7 +386,7 @@ def declaration (domain semantics : Digest) (command : Command) : Declaration :=
   ⟨command.well, command.op, command.account, command.amount, marker domain semantics command⟩
 
 def effectDigest (domain semantics : Digest) (command : Command) (d : Declaration) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.WELL.EFFECT/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.well_effect_v1.toUTF8.toList
     ((StreamCodec.product digestStream (StreamCodec.product digestStream
       (StreamCodec.product bytesStream bytesStream))).encode
       (domain, semantics, commandCodec.encode command, declarationCodec.encode d))).digest
@@ -410,7 +411,7 @@ def context (snapshot : Snapshot) (semantics : Digest) (ambient : Ambient) (comm
       policyRevision := snapshot.authState.policyRevision ⟨command.target⟩
       cost := (commandCodec.encode command).length }
   argsDigestBytes := fun bytes =>
-    (Sp800185Cshake256.hash "DREGG.WELL.ARGS/v1".toUTF8.toList
+    (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.well_args_v1.toUTF8.toList
       (commandCodec.encode command ++ bytes)).digest
 
 abbrev BookMaterialized := Materialized (CanonicalCellRegistry.materializer .resourceBook)

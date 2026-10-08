@@ -2,6 +2,7 @@
 PENDING preparation and private repair envelopes form ONE existing DataIntent record.
 The constructor consumes current ordinary AND purpose-specific permission and
 a separately source-admitted control edit on the SAME actual Durable image. -/
+import Theory.PersistedCodecTags
 import Kernel.JointPromiseAuthorization
 import Compiler.JointControlFrame
 namespace Minidregg.Kernel.JointReceiverAdmission
@@ -31,7 +32,7 @@ def reserveSourceStream : StreamCodec ReserveSource :=
     (fun s => (s.candidateBytes,s.participant,s.promise,s.controlSignedBytes))
     (fun (c,i,p,s) => ⟨c,i,p,s⟩) (by intro s; cases s; rfl)
 def reserveSourceBytes (source : ReserveSource) : List UInt8 :=
-  "DREGG/JOINT/SOURCE-RESERVE/v1".toUTF8.toList ++ reserveSourceStream.encode source
+  Minidregg.Theory.PersistedCodecTags.joint_source_reserve_v1.toUTF8.toList ++ reserveSourceStream.encode source
 
 def decisionKey (candidate : List UInt8) (participant : Nat) : List UInt8 :=
   (StreamCodec.product bytesStream StreamCodec.nat).encode (candidate,participant)

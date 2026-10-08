@@ -16,6 +16,7 @@ generation. Every later use checks the newly selected source. The current source
 still governs its own replacement, so a deliberately restrictive new law may
 refuse future installations even though the control grant remains current.
 -/
+import Theory.PersistedCodecTags
 import Compiler.NativeProtocolFrames
 import Kernel.ObjectAudienceInstall
 import Kernel.PolicyInstallController
@@ -128,7 +129,7 @@ theorem decodeIngress_canonical {bytes : List UInt8} {ingress : DecodedIngress}
 root, control-capability choice or signature at the same identity conflicts
 with a recorded original ingress; it cannot become a second execution. -/
 def transactionId (domain : Digest) (ingress : DecodedIngress) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.POLICY.INSTALL.TRANSACTION/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.policy_install_transaction_v1.toUTF8.toList
     ((StreamCodec.product digestStream
       (StreamCodec.product digestStream
         (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream
@@ -489,7 +490,7 @@ theorem AcceptedInstall.marker_was_unspent
 def event (domain : Digest) (ingress : DecodedIngress) : StableEvent where
   codecVersion := 1
   domain := domain
-  eventId := commitmentBytes ("DREGG.POLICY.INSTALL.EVENT/v1".toUTF8.toList ++
+  eventId := commitmentBytes (Minidregg.Theory.PersistedCodecTags.policy_install_event_v1.toUTF8.toList ++
     digestStream.encode domain ++ ingress.bytes)
   canonicalBytes := ingress.bytes
 

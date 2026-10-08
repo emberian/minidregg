@@ -4,6 +4,7 @@ AgentGrain reserve and complete record equality are necessary, but this type
 alone does not certify membership in the current admitted history. Replay
 must add it only after the exact step advances and validates.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationDispatchAgentPayer
 
 namespace Minidregg.Kernel.ApplicationDispatchAgentReserveCore
@@ -193,7 +194,7 @@ def RawEvidence.bindContext {config : Config} (raw : RawEvidence config)
 The canonical context is fixed by the admitted nonce; the original tx/event
 pair ensures that a different app transaction cannot claim the same hold. -/
 def claimBytes {config : Config} (reserved : ReservedEvidence config) : List UInt8 :=
-  "DREGG/APPLICATION/AGENT-DISPATCH-RESERVE-CLAIM/v2".toUTF8.toList ++
+  Minidregg.Theory.PersistedCodecTags.application_agent_dispatch_reserve_claim_v2.toUTF8.toList ++
     (StreamCodec.product digestStream digestStream).encode
       (reserved.receipt.transactionId, reserved.receipt.eventId)
 
@@ -202,7 +203,7 @@ def claimNullifier {config : Config} (reserved : ReservedEvidence config) :
   codecVersion := 21
   domain := reserved.context.domain
   nullifierId := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/AGENT-DISPATCH-RESERVE-CLAIM-ID/v2".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_agent_dispatch_reserve_claim_id_v2.toUTF8.toList
     (claimBytes reserved)).digest
   canonicalBytes := claimBytes reserved
 

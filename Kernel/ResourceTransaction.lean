@@ -2,6 +2,7 @@
 operations share one command, exact old directory and authority snapshot, one
 nullifier, one candidate tuple and one durable publication. No wire variant
 contains a proposed post, raw patch, policy decision, or authority snapshot. -/
+import Theory.PersistedCodecTags
 import Compiler.NativeProtocolFrames
 import Compiler.NativeInvocationStatement
 import Compiler.ObjectiveInvocationClaim
@@ -253,7 +254,7 @@ def commandStream : StreamCodec Command :=
 retired signed Bend claim) and frame 12 (a family over a body that still carried
 the Bend claim option) are not decoded: they refuse instead of being
 reinterpreted. -/
-def familyCommandFrame : List UInt8 := "DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ [13]
+def familyCommandFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.resourcetransaction_familycommandframe_13959c0e
 
 /-- Complete unsigned body, excluding only the family, in exact transaction10
 framing: not a lossy projection or a supplied byte string. -/
@@ -409,11 +410,11 @@ theorem statement_body_exact (domain semantics : Digest) (command : Command) :
     (statement domain semantics command).bodyBytes = command.bodyBytes := rfl
 
 def argsDigest (domain semantics : Digest) (command : Command) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.ARGS/v3".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.resourcetransaction_argsdigest_391847ff.toUTF8.toList
     (commandBytes domain semantics command)).digest
 
 def effectsDigest (domain semantics : Digest) (command : Command) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.EFFECT/v3".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.resourcetransaction_effectsdigest_64bbfbbb.toUTF8.toList
     (commandBytes domain semantics command)).digest
 
 /-- The operation identity is (domain, semantics, subject, nonce) for EVERY
@@ -426,7 +427,7 @@ transaction10 vs transaction13); it can only collide with the original
 operation, which the exact ingress lookup refuses as a conflicting use.
 Collision resistance is a cryptographic assumption, not codec injectivity. -/
 def operationMarker (domain semantics : Digest) (command : Command) : Nat :=
-  (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.IDENTITY/v3".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.resourcetransaction_operationmarker_e94810ea.toUTF8.toList
     ((StreamCodec.product digestStream (StreamCodec.product digestStream
       (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream StreamCodec.nat))).encode
       (domain, semantics, command.subject, command.nonce))).digest.value
@@ -495,9 +496,9 @@ def requestFor (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Am
     target := ⟨target.target⟩
     verb := target.verb
     argsDigest := (Sp800185Cshake256.hash
-      "DREGG.RESOURCE.TRANSACTION.ARGS/v3".toUTF8.toList framedBytes).digest
+      Minidregg.Theory.PersistedCodecTags.resourcetransaction_argsdigest_391847ff.toUTF8.toList framedBytes).digest
     effectsDigest := (Sp800185Cshake256.hash
-      "DREGG.RESOURCE.TRANSACTION.EFFECT/v3".toUTF8.toList framedBytes).digest
+      Minidregg.Theory.PersistedCodecTags.resourcetransaction_effectsdigest_64bbfbbb.toUTF8.toList framedBytes).digest
     nonce := command.nonce
     height := ambient.height
     preStateRoot := preRoot
@@ -690,7 +691,7 @@ def streamRecord (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : 
 /-- The source policy identity a transclusion records: the policy id, epoch and
 revision the source cell's read leg is checked against at this height. -/
 def sourcePolicy (snapshot : AuthoritySnapshot) (source : Nat) : Digest :=
-  ContentResource.contentDigest "DREGG/CONTENT/DISCLOSURE-POLICY"
+  ContentResource.contentDigest Minidregg.Theory.PersistedCodecTags.resourcetransaction_sourcepolicy_240922cb
     ((StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat StreamCodec.nat)).encode
       (source, snapshot.authState.policyEpoch ⟨source⟩, snapshot.authState.policyRevision ⟨source⟩))
 

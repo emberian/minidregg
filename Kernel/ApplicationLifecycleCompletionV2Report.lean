@@ -4,6 +4,7 @@ exact selected command digest and the protected persistent-volume mapping
 alongside its process observation. Mini checks the signed shape and current
 authority; it cannot inspect the OS or infer execution from a receipt.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationLifecycleClaimV3Projection
 import Kernel.ApplicationLifecycleCompletionReport
 
@@ -58,7 +59,7 @@ def reportStream : StreamCodec Report :=
     (by intro report; cases report; rfl)
 
 def frame : List UInt8 :=
-  "DREGG/APPLICATION/LIFECYCLE-PHYSICAL-REPORT/v2".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_lifecycle_physical_report_v2.toUTF8.toList
 
 def codec : LawfulCodec Report := NativeHostCodec.framed frame reportStream
 
@@ -134,13 +135,13 @@ def signedStream : StreamCodec Signed :=
     (by intro signed; cases signed; rfl)
 
 def signedFrame : List UInt8 :=
-  "DREGG/APPLICATION/LIFECYCLE-PHYSICAL-SIGNED/v2".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_lifecycle_physical_signed_v2.toUTF8.toList
 
 def signedCodec : LawfulCodec Signed :=
   NativeHostCodec.framed signedFrame signedStream
 
 def signingFrame (domain semantics : Digest) (report : Report) : List UInt8 :=
-  "DREGG/APPLICATION/LIFECYCLE-PHYSICAL-SIGNATURE/v2".toUTF8.toList ++
+  Minidregg.Theory.PersistedCodecTags.application_lifecycle_physical_signature_v2.toUTF8.toList ++
     (StreamCodec.product digestStream
       (StreamCodec.product digestStream bytesStream)).encode
       (domain, semantics, report.canonicalBytes)

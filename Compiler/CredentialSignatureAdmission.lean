@@ -19,6 +19,7 @@ All its incidences may bind that one marker. Native implementation/transport
 and cryptographic custody assumptions remain explicit; the receipt is not a
 Lean proof of Ed25519 or physical commit.
 -/
+import Theory.PersistedCodecTags
 import Compiler.CredentialSignatureIO
 import Compiler.CredentialAuthorityDomain
 import Compiler.TypedAuthorizationRequestCodec
@@ -43,7 +44,7 @@ set_option autoImplicit false
 /-- Source-pinned algorithm code for this receiving adapter. -/
 def ed25519Algorithm : Nat := 1
 
-def signatureDomain : List UInt8 := "DREGG/AUTH/SIGNED-REQUEST".toUTF8.toList ++ [2]
+def signatureDomain : List UInt8 := Minidregg.Theory.PersistedCodecTags.auth_signed_request_byte_v2
 abbrev requestFrame := TypedAuthorizationRequestCodec.requestFrame
 
 /-- Canonical ingress uses the existing signed-envelope parser and encoding.

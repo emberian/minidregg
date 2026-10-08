@@ -29,6 +29,7 @@ receiver uses; the owner-grant fact above is checked on the same stored
 capability.  Binding a deposit address only ever adds credit to `A`, so the
 authority it requires (owning `A`) is not widened by it.
 -/
+import Theory.PersistedCodecTags
 import Kernel.CapabilityRevocationController
 import Kernel.PayCellDomain
 
@@ -275,7 +276,7 @@ def commandStream : StreamCodec Command :=
       ⟨subject, capability, account, index, nonce, authorityRoot, payRoot⟩)
     (by intro c; cases c; rfl)
 
-def commandFrame : List UInt8 := "DREGG/PAY/ASSIGN/v1".toUTF8.toList
+def commandFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.pay_assign_v1.toUTF8.toList
 
 def commandCodec : LawfulCodec Command := framed commandFrame commandStream
 
@@ -295,7 +296,7 @@ def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 def ingressCodec : LawfulCodec Ingress :=
-  framed "DREGG/PAY/ASSIGN/SIGNED/v1".toUTF8.toList ingressStream
+  framed Minidregg.Theory.PersistedCodecTags.pay_assign_signed_v1.toUTF8.toList ingressStream
 
 structure DecodedIngress where
   private mk ::
@@ -322,7 +323,7 @@ def DecodedIngress.bytes (ingress : DecodedIngress) : List UInt8 :=
   ingressCodec.encode ingress.ingress
 
 def marker (domain semantics : Digest) (command : Command) : Nat :=
-  (Sp800185Cshake256.hash "DREGG.PAY.ASSIGN.IDENTITY/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.pay_assign_identity_v1.toUTF8.toList
     ((StreamCodec.product digestStream (StreamCodec.product digestStream
       (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream
         StreamCodec.nat))).encode
@@ -353,7 +354,7 @@ structure Mode {M : Materializer PayCell.layout Digest} (pre : Materialized M) (
   rootExact : d.expectedPreRoot = pre.root
 
 def effectDigest (domain semantics : Digest) (command : Command) (d : Declaration) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.PAY.ASSIGN.EFFECT/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.pay_assign_effect_v1.toUTF8.toList
     ((StreamCodec.product digestStream (StreamCodec.product digestStream
       (StreamCodec.product bytesStream bytesStream))).encode
       (domain, semantics, commandCodec.encode command, declarationCodec.encode d))).digest
@@ -380,7 +381,7 @@ def context (snapshot : Snapshot) (semantics : Digest) (ambient : Ambient) (comm
       policyRevision := snapshot.authState.policyRevision ⟨command.account⟩
       cost := (commandCodec.encode command).length }
   argsDigestBytes := fun bytes =>
-    (Sp800185Cshake256.hash "DREGG.PAY.ASSIGN.ARGS/v1".toUTF8.toList
+    (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.pay_assign_args_v1.toUTF8.toList
       (commandCodec.encode command ++ bytes)).digest
 
 def request (snapshot : Snapshot) (pay : PayCell.Cell) (semantics : Digest) (ambient : Ambient)

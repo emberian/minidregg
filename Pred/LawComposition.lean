@@ -13,6 +13,7 @@ There is no C3 or method-order rule. Identical resolved keys are evaluated once;
 different authenticated revisions are distinct conjuncts. A predecessor-chain
 edge used to authenticate old bytes is not a semantic dependency edge.
 -/
+import Theory.PersistedCodecTags
 import Pred.Core
 import Theory.TypedAuthorization
 
@@ -26,16 +27,16 @@ set_option autoImplicit false
 /-- CanonicalRuntimeProfile binds this receiving contract separately from source
 encoding. Increment when graph resolution or mandatory source projections change. -/
 def receivingContract : List UInt8 :=
-  "DREGG.LAW.COMPOSITION/v1:authenticated-record-dag;key=policy,facet,revision,source-digest;distinct-revisions-conjoin;duplicate-keys-once;cycles-missing-authenticity-refuse;local-explicit-parents;target-ambient-room-exports;export-containing-room-chain;source-owned-kind-exports;selectors=physical-kind,request-kind,verb;all-guards-same-snapshot;old-law-before-candidate-validation;no-candidate-satisfiability;hidden-origin-diagnostics".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.lawcomposition_receivingcontract_fa3f9b0b.toUTF8.toList
 
 def closureCustomization : List UInt8 :=
-  "DREGG.POLICY.EFFECTIVE.CLOSURE/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.lawcomposition_closurecustomization_ef69df21.toUTF8.toList
 
 /-- Birth exports see unchanged factory request slots plus exact source-owned
 newborn coordinates and initial effects. The newborn local law is installed,
 validated as a graph, and deliberately not evaluated against its own birth. -/
 def birthProjectionContract : List UInt8 :=
-  "DREGG.LAW.BIRTH-EXPORT-PROJECTION/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.lawcomposition_birthprojectioncontract_fee33c3e.toUTF8.toList
 
 inductive Facet where
   | local

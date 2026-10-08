@@ -5,6 +5,7 @@ receiver may join that exact birth with current app delegation and install
 the first canonical grant atom in one durable transaction. This source alone
 neither admits a grant nor extends event21's generation-bound ticket.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationAgentLifetimeGrant
 import Kernel.ApplicationShareIssueSource
 
@@ -67,7 +68,7 @@ def specStream : StreamCodec Spec :=
 
 def specCodec : LawfulCodec Spec := ResourceBirthCodec.strictCodec
   (NativeHostCodec.framed
-    "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-SPEC/v1".toUTF8.toList specStream)
+    Minidregg.Theory.PersistedCodecTags.application_agent_lifetime_issue_spec_v1.toUTF8.toList specStream)
 
 theorem spec_decode_encode (spec : Spec) :
     specCodec.decode (specCodec.encode spec) = some spec :=
@@ -90,7 +91,7 @@ def ingressStream : StreamCodec Ingress :=
 
 def ingressCodec : LawfulCodec Ingress := ResourceBirthCodec.strictCodec
   (NativeHostCodec.framed
-    "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-INGRESS/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_agent_lifetime_issue_ingress_v1.toUTF8.toList
     ingressStream)
 
 def Ingress.canonicalBytes (ingress : Ingress) : List UInt8 :=
@@ -111,7 +112,7 @@ def event (domain : Digest) (ingress : Ingress) : StableEvent where
   codecVersion := 27
   domain := domain
   eventId := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-EVENT/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_agent_lifetime_issue_event_v1.toUTF8.toList
     (digestStream.encode domain ++ ingress.canonicalBytes)).digest
   canonicalBytes := ingress.canonicalBytes
 
@@ -125,7 +126,7 @@ theorem event_retains_domain (domain : Digest) (ingress : Ingress) :
 birth descriptor, so a grant payload cannot be spliced into another birth. -/
 def sourceBytes (spec : Spec)
     (descriptor : Descriptor CanonicalCellRegistry.registry) : List UInt8 :=
-  "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-SOURCE/v1".toUTF8.toList ++
+  Minidregg.Theory.PersistedCodecTags.application_agent_lifetime_issue_source_v1.toUTF8.toList ++
     (StreamCodec.product bytesStream bytesStream).encode
       (specCodec.encode spec,
         (ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).encode descriptor)
@@ -133,7 +134,7 @@ def sourceBytes (spec : Spec)
 def issueMarker (spec : Spec)
     (descriptor : Descriptor CanonicalCellRegistry.registry) : Nat :=
   (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-MARKER/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_agent_lifetime_issue_marker_v1.toUTF8.toList
     (sourceBytes spec descriptor)).digest.value
 
 def appRequest (domain semantics : Digest) (federation : FederationId)
@@ -148,10 +149,10 @@ def appRequest (domain semantics : Digest) (federation : FederationId)
   target := ⟨spec.grant.participant.app⟩
   verb := .delegateObject
   argsDigest := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-ARGS/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_agent_lifetime_issue_args_v1.toUTF8.toList
     (sourceBytes spec descriptor)).digest
   effectsDigest := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-EFFECTS/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_agent_lifetime_issue_effects_v1.toUTF8.toList
     (sourceBytes spec descriptor)).digest
   nonce := spec.grant.approval.nonce
   height := height

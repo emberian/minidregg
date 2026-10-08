@@ -55,6 +55,7 @@ whose state holds the opening (`openingHolds`).  A reader sees the transcluded
 bytes only through its own read of the source, current or `at` the opening's
 height (`renderTransclusion`).
 -/
+import Theory.PersistedCodecTags
 import Theory.AssertAxioms
 import Compiler.HyperdocumentCell
 import Compiler.ResourceBirthCodec
@@ -396,10 +397,9 @@ def commandStream : StreamCodec Command :=
     (fun actions => ⟨actions⟩) (by intro command; rfl)
 
 /-- Action grammar version; independent of the content cell's storage wire. -/
-def commandVersion : Nat := 10
+def commandVersion : Nat := Minidregg.Theory.PersistedCodecTags.contentCommandVersion
 
-def commandFrame : List UInt8 := "DREGG/CONTENT/MUTATE".toUTF8.toList ++
-  [UInt8.ofNatLT commandVersion (by decide)]
+def commandFrame : List UInt8 := Minidregg.Theory.PersistedCodecTags.content_mutate_byte_v10
 
 def rawCommandCodec : LawfulCodec Command where
   encode command := commandFrame ++ commandStream.encode command
@@ -689,26 +689,26 @@ def contentDigest (tag : String) (bytes : List UInt8) : Digest :=
   (Sp800185Cshake256.hash tag.toUTF8.toList bytes).digest
 
 /-- The link relation of a transclusion's forward link. -/
-def transcludeRelation : Digest := contentDigest "DREGG/CONTENT/RELATION" "transclude".toUTF8.toList
+def transcludeRelation : Digest := contentDigest Minidregg.Theory.PersistedCodecTags.content_relation "transclude".toUTF8.toList
 
 /-- Names `rangeOpeningStream`, the codec of `OpeningDescriptor.canonicalDescriptor`. -/
 def openingCodecId : Digest :=
-  contentDigest "DREGG/CONTENT/OPENING-CODEC" "range-opening/v1".toUTF8.toList
+  contentDigest Minidregg.Theory.PersistedCodecTags.content_opening_codec "range-opening/v1".toUTF8.toList
 
 /-- Names the relation the admission checked: the pinned atoms are the range's
 live atoms at their revisions, read under an observe capability. -/
 def openingRelationId : Digest :=
-  contentDigest "DREGG/CONTENT/OPENING-RELATION" "live-atoms-at-revisions-under-observe/v1".toUTF8.toList
+  contentDigest Minidregg.Theory.PersistedCodecTags.content_opening_relation "live-atoms-at-revisions-under-observe/v1".toUTF8.toList
 
 /-- Source identities of this kind name a Mini cell and a height. -/
 def sourceHistoryDomain : Digest :=
-  contentDigest "DREGG/CONTENT/SOURCE-HISTORY" "cell-at-height/v1".toUTF8.toList
+  contentDigest Minidregg.Theory.PersistedCodecTags.content_source_history "cell-at-height/v1".toUTF8.toList
 
 def atomDisclosureNamespace : Digest :=
-  contentDigest "DREGG/CONTENT/DISCLOSURE" "atom".toUTF8.toList
+  contentDigest Minidregg.Theory.PersistedCodecTags.content_disclosure "atom".toUTF8.toList
 
 def capabilityDisclosureNamespace : Digest :=
-  contentDigest "DREGG/CONTENT/DISCLOSURE" "observe-capability".toUTF8.toList
+  contentDigest Minidregg.Theory.PersistedCodecTags.content_disclosure "observe-capability".toUTF8.toList
 
 /-- The opening a transclusion stores: the source cell, the range, each pinned
 atom at its revision, and the height whose source state the admission checked.
@@ -740,12 +740,12 @@ revisions, no bytes); `disclosureScope` lists the disclosed atoms;
 `capabilityCeiling` names the observe capability the admission checked. -/
 def referenceOf (opening : RangeOpening) (mode : TransclusionMode) (read : SourceRead) :
     StoredTransclusionRef where
-  referenceRoot := contentDigest "DREGG/CONTENT/TRANSCLUSION-REFERENCE"
+  referenceRoot := contentDigest Minidregg.Theory.PersistedCodecTags.content_transclusion_reference
     (opening.descriptor ++ transclusionModeStream.encode mode)
   source := ⟨sourceHistoryDomain, ⟨opening.source⟩, ⟨opening.height⟩,
-    contentDigest "DREGG/CONTENT/OPENING-VALUE" ((StreamCodec.list pinStream).encode opening.pins)⟩
+    contentDigest Minidregg.Theory.PersistedCodecTags.content_opening_value ((StreamCodec.list pinStream).encode opening.pins)⟩
   opening := ⟨.range, openingCodecId, openingRelationId, opening.descriptor,
-    contentDigest "DREGG/CONTENT/OPENING" opening.descriptor⟩
+    contentDigest Minidregg.Theory.PersistedCodecTags.content_opening opening.descriptor⟩
   mode := mode
   disclosureScope := (opening.pins.map fun pin =>
     (⟨atomDisclosureNamespace, (identifierStream .v1 .atom).encode pin.1⟩ : DisclosureAtom)).toFinset
@@ -939,7 +939,7 @@ def MarkTarget.anchor : MarkTarget → OperationId → MarkAnchor
   | .element target, revision => .element target revision
 
 /-- The link relation of a link mark's link record. -/
-def markRelation : Digest := contentDigest "DREGG/CONTENT/RELATION" "mark".toUTF8.toList
+def markRelation : Digest := contentDigest Minidregg.Theory.PersistedCodecTags.content_relation "mark".toUTF8.toList
 
 def markRecordOf (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
     (request : MarkRequest) : MarkRecord :=

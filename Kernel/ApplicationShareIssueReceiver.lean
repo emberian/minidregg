@@ -3,6 +3,7 @@ One durable candidate intent for a special app-authorized ticket issue. This
 is not wired to the native receiver or semantic replay yet. In particular a
 bare resource birth with identical ticket bytes never implies this event.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationShareIssueAdmission
 
 namespace Minidregg.Kernel.ApplicationShareIssueReceiver
@@ -32,7 +33,7 @@ def event (domain : Digest) (ingress : ApplicationShareIssueSource.Ingress) : St
   codecVersion := 15
   domain := domain
   eventId := commitmentBytes
-    ("DREGG/APPLICATION/SHARE-ISSUE-EVENT/v2".toUTF8.toList ++
+    (Minidregg.Theory.PersistedCodecTags.application_share_issue_event_v2.toUTF8.toList ++
       digestStream.encode domain ++ ingressCodec.encode ingress)
   canonicalBytes := ingressCodec.encode ingress
 

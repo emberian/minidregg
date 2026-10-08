@@ -5,6 +5,7 @@ separately signed current payer witness. Decoding this carrier grants nothing:
 Replay and the live receiver must independently verify all native signatures,
 accepted history, current law, physical purse guard and durable CAS.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationDispatchAgentReserveCore
 
 namespace Minidregg.Kernel.ApplicationDispatchAgentIngress
@@ -47,7 +48,7 @@ def ingressStream : StreamCodec Ingress :=
 
 def codec : LawfulCodec Ingress :=
   NativeHostCodec.framed
-    "DREGG/APPLICATION/AGENT-DISPATCH-ADMISSION-INGRESS/v2".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_agent_dispatch_admission_ingress_v2.toUTF8.toList
     ingressStream
 
 def Ingress.canonicalBytes (ingress : Ingress) : List UInt8 :=
@@ -61,7 +62,7 @@ def event (ingress : Ingress) : StableEvent where
   codecVersion := 21
   domain := ingress.dispatch.dispatch.domain
   eventId := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/AGENT-DISPATCH-ADMISSION-EVENT/v2".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_agent_dispatch_admission_event_v2.toUTF8.toList
     ingress.canonicalBytes).digest
   canonicalBytes := ingress.canonicalBytes
 

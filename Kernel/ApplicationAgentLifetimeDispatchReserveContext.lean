@@ -4,6 +4,7 @@ nonce remain unchanged. This v3 context commits the exact issued grant as
 well as the HTTP request and current parent/purse coordinates before a
 worker can request delivery.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationAgentLifetimeGrant
 import Kernel.ApplicationDispatchAgentReserveContext
 
@@ -21,7 +22,7 @@ set_option autoImplicit false
 
 def grantDigest (grant : ApplicationAgentLifetimeGrant.Grant) : Digest :=
   (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/AGENT-LIFETIME-RESERVE-GRANT/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_agent_lifetime_reserve_grant_v1.toUTF8.toList
     grant.canonicalBytes).digest
 
 structure Context where
@@ -44,7 +45,7 @@ def contextStream : StreamCodec Context :=
 
 def codec : LawfulCodec Context := ResourceBirthCodec.strictCodec
   (Minidregg.Compiler.NativeHostCodec.framed
-    "DREGG/APPLICATION/AGENT-LIFETIME-RESERVE-CONTEXT/v3".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_agent_lifetime_reserve_context_v3.toUTF8.toList
     contextStream)
 
 def Context.canonicalBytes (context : Context) : List UInt8 :=
@@ -63,12 +64,12 @@ theorem canonicalBytes_injective : Function.Injective Context.canonicalBytes := 
 interchangeable with its event21 counterpart at the same app/request bytes. -/
 def reserveNonce (context : Context) : Nat :=
   AgentGrain.contextNonce
-    ("DREGG/APPLICATION/AGENT-LIFETIME-RESERVE/v3".toUTF8.toList ++
+    (Minidregg.Theory.PersistedCodecTags.application_agent_lifetime_reserve_v3.toUTF8.toList ++
       context.canonicalBytes)
 
 def payerNonce (context : Context) : Nat :=
   AgentGrain.contextNonce
-    ("DREGG/APPLICATION/AGENT-LIFETIME-PAYER/v3".toUTF8.toList ++
+    (Minidregg.Theory.PersistedCodecTags.application_agent_lifetime_payer_v3.toUTF8.toList ++
       context.canonicalBytes)
 
 def matchesGrant (context : Context)

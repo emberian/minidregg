@@ -3,6 +3,7 @@ The exact signed carrier for a Mini-owned application lifecycle BEGIN. Its
 event records the pending physical request; a DRC invocation with the same
 state write but the ordinary event is not a lifecycle pending record.
 -/
+import Theory.PersistedCodecTags
 import Kernel.ApplicationLifecycleBegin
 import Compiler.NativeHostCodec
 
@@ -40,7 +41,7 @@ def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 def frame : List UInt8 :=
-  "DREGG/APPLICATION/LIFECYCLE-BEGIN-INGRESS/v1".toUTF8.toList
+  Minidregg.Theory.PersistedCodecTags.application_lifecycle_begin_ingress_v1.toUTF8.toList
 
 private def rawCodec : LawfulCodec Ingress where
   encode ingress := frame ++ ingressStream.encode ingress
@@ -67,7 +68,7 @@ def event (ingress : Ingress) : StableEvent where
   codecVersion := 12
   domain := ingress.domain
   eventId := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/LIFECYCLE-BEGIN-EVENT/v1".toUTF8.toList
+    Minidregg.Theory.PersistedCodecTags.application_lifecycle_begin_event_v1.toUTF8.toList
     ingress.canonicalBytes).digest
   canonicalBytes := ingress.canonicalBytes
 

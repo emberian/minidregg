@@ -21,6 +21,7 @@ balance vector from the installed patch.  Physical settlement, durable CAS,
 cryptographic collision resistance, sharding, and wall-clock lease expiry remain
 outside this bounded logical nucleus.
 -/
+import Theory.PersistedCodecTags
 import Kernel.MultiCellHyperedge
 import Kernel.TypedCellHyperedge
 import Compiler.CanonicalResourcePageMaterializer
@@ -44,9 +45,9 @@ abbrev operationCodec := Compiler.CanonicalResourcePageMaterializer.operationCod
 abbrev postingCodec := Compiler.CanonicalResourcePageMaterializer.postingCodec
 abbrev batchCodec := Compiler.CanonicalResourcePageMaterializer.batchCodec
 
-def argsCustomization : List UInt8 := "DREGG.RESOURCE.ARGUMENT/v2".toUTF8.toList
+def argsCustomization : List UInt8 := Minidregg.Theory.PersistedCodecTags.resource_argument_v2.toUTF8.toList
 def postingCustomization : List UInt8 := "DREGG.RESOURCE.POSTING/v2".toUTF8.toList
-def effectCustomization : List UInt8 := "DREGG.RESOURCE.EFFECT/v2".toUTF8.toList
+def effectCustomization : List UInt8 := Minidregg.Theory.PersistedCodecTags.resource_effect_v2.toUTF8.toList
 def batchCustomization : List UInt8 := "DREGG.RESOURCE.BATCH/v3".toUTF8.toList
 
 def argsDigest (operation : Operation) : Digest :=
@@ -286,7 +287,7 @@ substitute for a payer's authorization, and a payer cannot invent namespace
 authority for newly registered accounts.
 -/
 
-def sourceCustomization : List UInt8 := "DREGG.RESOURCE.BATCH.SOURCE/v3".toUTF8.toList
+def sourceCustomization : List UInt8 := Minidregg.Theory.PersistedCodecTags.resource_batch_source_v3.toUTF8.toList
 
 /-- Full birth bytes, the exact derived batch, and the operation position are
 all committed. Thus identical-looking debits at different positions still

@@ -3,6 +3,7 @@ Shared source-owned host configuration and structural validation. Semantic
 history verification imports this module; ordinary host APIs import the verifier.
 There is one profile, one world-root commitment, and one validation path.
 -/
+import Theory.PersistedCodecTags
 import Compiler.NativeHostCodec
 import Compiler.GenericSimplexSourceAnchor
 import Compiler.GrainResourceBirthController
@@ -95,7 +96,7 @@ def Config.grainBirthTariffValue (config : Config) :
 /-- This manifest enters runtime semantics. The seed commitment is separate
 because the genesis's source policies themselves contain that semantics. -/
 def Config.runtimeParameters (config : Config) : List UInt8 :=
-  "DREGG.NATIVE-HOST.PARAMETERS/v1".toUTF8.toList ++
+  Minidregg.Theory.PersistedCodecTags.nativehostcontext_config_runtimeparameters_df2ffead.toUTF8.toList ++
   (StreamCodec.list StreamCodec.nat).encode
     [config.deployment.domain.value, config.deployment.factoryId,
      config.deployment.resourceBookId, config.deployment.authorityCellId,
@@ -105,25 +106,25 @@ def Config.runtimeParameters (config : Config) : List UInt8 :=
   (match config.grainBirthTariff with
   | none => []
   | some tariff =>
-      "DREGG/NATIVE-HOST/GRAIN-BIRTH-TARIFF/v1".toUTF8.toList ++
+      Minidregg.Theory.PersistedCodecTags.nativehostcontext_config_runtimeparameters_764e3627.toUTF8.toList ++
         (StreamCodec.product StreamCodec.nat StreamCodec.nat).encode
           (tariff.base, tariff.perBirth)) ++
   (match config.completionCustodianKey with
   | none => []
   | some key =>
-      "DREGG/NATIVE-HOST/COMPLETION-CUSTODIAN/v1".toUTF8.toList ++
+      Minidregg.Theory.PersistedCodecTags.nativehostcontext_config_runtimeparameters_59783037.toUTF8.toList ++
         bytesStream.encode key) ++
   (match config.jointControl with
   | none => []
-  | some pin => "DREGG/NATIVE-HOST/JOINT-CONTROL/v2".toUTF8.toList ++
+  | some pin => Minidregg.Theory.PersistedCodecTags.nativehostcontext_config_runtimeparameters_ebe93a95.toUTF8.toList ++
       JointControlFrame.pinStream.encode pin) ++
   (match config.activityControl with
   | none => []
-  | some pin => "DREGG/NATIVE-HOST/ACTIVITY-CONTROL/v1".toUTF8.toList ++
+  | some pin => Minidregg.Theory.PersistedCodecTags.nativehostcontext_config_runtimeparameters_949ab763.toUTF8.toList ++
       ContentControlFrame.pinStream.encode pin) ++
   (match config.jointConsensus with
   | none => []
-  | some context => "DREGG/NATIVE-HOST/SOURCE-CONSENSUS/v1".toUTF8.toList ++
+  | some context => Minidregg.Theory.PersistedCodecTags.nativehostcontext_config_runtimeparameters_6b5bc5c8.toUTF8.toList ++
       GenericSimplexCodec.contextStream.encode { context with instanceBytes := [] })
 
 /-- Disabling the new mode preserves the complete pre-existing parameter
@@ -160,7 +161,7 @@ def Config.profile (config : Config) :=
 attribute [local irreducible] Config.profile CanonicalRuntimeProfile.Profile.compilerProfile
 
 def seedIdentity (seed : DurableReceiver.Seed) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.GENESIS/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Theory.PersistedCodecTags.nativehostcontext_seedidentity_9807f734.toUTF8.toList
     (DurableReceiverCodec.seedStream.encode seed)).digest
 
 /-- The world root of an image under this deployment (`NativeHostCodec.worldRoot`). -/

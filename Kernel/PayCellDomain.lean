@@ -11,6 +11,7 @@ The shared signing plan of the pay receivers (`SigningPlan`) is also here: the
 Host returns it from the plan operation and assembles the signed ingress from
 it and one detached signature.
 -/
+import Theory.PersistedCodecTags
 import Compiler.CredentialAuthorityDomainReceiver
 import Kernel.PayCell
 
@@ -158,7 +159,7 @@ def signingPlanStream : StreamCodec SigningPlan :=
     (by intro plan; cases plan; rfl)
 
 def signingPlanCodec : Minidregg.Theory.IndexedProgram.LawfulCodec SigningPlan :=
-  PayTariff.framed "DREGG/PAY/PLAN/v1".toUTF8.toList signingPlanStream
+  PayTariff.framed Minidregg.Theory.PersistedCodecTags.pay_plan_v1.toUTF8.toList signingPlanStream
 
 /-! ## The public view
 
@@ -193,7 +194,7 @@ def viewStream : StreamCodec View :=
     (by intro view; cases view; rfl)
 
 def viewCodec : Minidregg.Theory.IndexedProgram.LawfulCodec View :=
-  PayTariff.framed "DREGG/PAY/VIEW/v2".toUTF8.toList viewStream
+  PayTariff.framed Minidregg.Theory.PersistedCodecTags.pay_view_v2.toUTF8.toList viewStream
 
 /-! ## The public enrollment view (PAY §11.5; socket op 112)
 
@@ -261,7 +262,7 @@ def enrolmentViewStream : StreamCodec EnrolmentView :=
     (by intro view; cases view; rfl)
 
 def enrolmentViewCodec : Minidregg.Theory.IndexedProgram.LawfulCodec EnrolmentView :=
-  PayTariff.framed "DREGG/PAY/ENROLMENT-VIEW/v3".toUTF8.toList enrolmentViewStream
+  PayTariff.framed Minidregg.Theory.PersistedCodecTags.pay_enrolment_view_v3.toUTF8.toList enrolmentViewStream
 
 theorem enrolmentView_roundtrip (view : EnrolmentView) :
     enrolmentViewCodec.decode (enrolmentViewCodec.encode view) = some view :=
