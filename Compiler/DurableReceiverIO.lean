@@ -1642,6 +1642,8 @@ theorem readSubtrees_history {t t' : Transport} (same : t.history = t'.history) 
       funext frontier found taken
       simp only [readSubtrees, rows, ih]
 
+#assert_axioms readSubtrees_history
+
 /-- The rows of `keys` (paths down to `depth`) and of `prefixes`: every prefix of
 each one's path with its sibling, then the subtree BELOW it, level by level
 (`readSubtrees`: one Store request per level). More than `subtreeRowsMax` subtree

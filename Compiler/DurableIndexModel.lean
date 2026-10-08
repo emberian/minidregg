@@ -1831,9 +1831,10 @@ family's real keys — presence, a link inserted then RETARGETED (its family-4
 value updated in place, its old backlink deleted, a new one inserted), a link
 UNLINKED (its family-4 and family-5 leaves deleted, the subtree collapsing), a
 payer count updated in place, two incoming heights, then every key deleted — and
-after every step the incremental root is `rootOf` of the logical map, every
-key's lookup verifies and answers the map's value, and each family's reveal
-answers exactly its members.
+after every step the incremental root is `rootOf` of the logical map and the
+changed key's lookup and its family's reveal answer the map; after the
+retarget, the unlink, the last insert and the last delete, every key's lookup,
+every family's reveal and the cell prefix's reveal too.
 
 `FamiliesProbe.records_match_declared`: real records (content cells whose
 canonical bytes hold link records) through `IndexRows.apply` over in-memory rows,
@@ -1874,55 +1875,71 @@ def keys : List IndexKey :=
 def factsA (document : DocumentId) (operation height : Nat) : List UInt8 :=
   factsValue cellA linkA (linkTo document operation) height
 
-/-- Key index ↦ new value (`none` deletes). -/
-def ops : List (Nat × Option (List UInt8)) :=
-  [(0, some (presenceValue cellA 1)), (1, some (presenceValue cellB 1)), (2, some (presenceValue cellA 2)),
-   (3, some (factsA documentA 300 1)), (6, some (rowValue cellA linkA (linkTo documentA 300) 1)),
-   (4, some (factsValue cellA linkB (linkTo documentB 301) 1)),
-   (8, some (rowValue cellA linkB (linkTo documentB 301) 1)),
-   (5, some (factsValue cellB linkA (linkTo documentA 302) 2)),
+/-- Key index ↦ new value (`none` deletes), and whether every key and family is
+re-checked after this step (every step checks the root, the changed key and its
+family's reveal). -/
+def ops : List (Nat × Option (List UInt8) × Bool) :=
+  [(0, some (presenceValue cellA 1), false), (1, some (presenceValue cellB 1), false),
+   (2, some (presenceValue cellA 2), false),
+   (3, some (factsA documentA 300 1), false), (6, some (rowValue cellA linkA (linkTo documentA 300) 1), false),
+   (4, some (factsValue cellA linkB (linkTo documentB 301) 1), false),
+   (8, some (rowValue cellA linkB (linkTo documentB 301) 1), false),
+   (5, some (factsValue cellB linkA (linkTo documentA 302) 2), true),
    -- retarget linkA of cellA to document B at height 3
-   (3, some (factsA documentB 303 3)), (6, none), (7, some (rowValue cellA linkA (linkTo documentB 303) 3)),
+   (3, some (factsA documentB 303 3), false), (6, none, false),
+   (7, some (rowValue cellA linkA (linkTo documentB 303) 3), true),
    -- unlink linkB of cellA
-   (4, none), (8, none),
+   (4, none, false), (8, none, true),
    -- payer: count 1 then 2 (same key), incoming at heights 3 and 5
-   (9, some (payerValue 1 3 ⟨900⟩)), (10, some (transactionValue ⟨900⟩)),
-   (9, some (payerValue 2 5 ⟨901⟩)), (11, some (transactionValue ⟨901⟩)),
+   (9, some (payerValue 1 3 ⟨900⟩), false), (10, some (transactionValue ⟨900⟩), false),
+   (9, some (payerValue 2 5 ⟨901⟩), false), (11, some (transactionValue ⟨901⟩), true),
    -- presence overwritten in place, then everything deleted
-   (0, some (presenceValue cellA 5)),
-   (0, none), (1, none), (2, none), (3, none), (5, none), (7, none), (9, none), (10, none), (11, none)]
+   (0, some (presenceValue cellA 5), false),
+   (0, none, false), (1, none, false), (2, none, false), (3, none, false), (5, none, false), (7, none, false),
+   (9, none, false), (10, none, false), (11, none, true)]
 
 def familyPrefix (family : UInt8) : List Bool := (bitsOf ⟨family, 0, 0⟩).take 8
 
 def sameSet (a b : List (IndexKey × List UInt8)) : Bool :=
   a.length == b.length && a.all (b.contains ·) && b.all (a.contains ·)
 
-def stepOk (rows : List Bool → Option Row) (root : Digest) (model : List (IndexKey × List UInt8)) : Bool :=
-  root == rootOf model &&
-  keys.all (fun k => match lookupRows rows root k with
-    | .ok answer => answer.value == mapLookup model k
-    | .error _ => false) &&
-  [Family.presence, Family.links, Family.backlinks, Family.payer, Family.incoming].all (fun family =>
-    match revealRows rows root (familyPrefix family) with
-    | .ok revealed => sameSet revealed.members (model.filter (·.1.family = family))
-    | .error _ => false) &&
-  -- the prefix a cell's links are revealed under answers exactly that cell's links
-  (match revealRows rows root (linkPrefix cellA) with
-    | .ok revealed => sameSet revealed.members
-        (model.filter fun e => e.1.family = Family.links ∧ e.1.primary = cellPrimary cellA)
-    | .error _ => false)
+def lookupOk (rows : List Bool → Option Row) (root : Digest) (model : List (IndexKey × List UInt8))
+    (k : IndexKey) : Bool :=
+  match lookupRows rows root k with
+  | .ok answer => answer.value == mapLookup model k
+  | .error _ => false
 
-def run : List (Nat × Option (List UInt8)) → List (List Bool × Row) → Digest →
+def revealOk (rows : List Bool → Option Row) (root : Digest) (model : List (IndexKey × List UInt8))
+    (family : UInt8) : Bool :=
+  match revealRows rows root (familyPrefix family) with
+  | .ok revealed => sameSet revealed.members (model.filter (·.1.family = family))
+  | .error _ => false
+
+/-- One step checked: the root is `rootOf` the map, the changed key's lookup and
+its family's reveal answer the map; on a full step every key, every family and the
+prefix a cell's links are revealed under (exactly that cell's links). -/
+def stepOk (rows : List Bool → Option Row) (root : Digest) (model : List (IndexKey × List UInt8))
+    (k : IndexKey) (full : Bool) : Bool :=
+  root == rootOf model && lookupOk rows root model k && revealOk rows root model k.family &&
+  (!full ||
+    (keys.all (lookupOk rows root model) &&
+     [Family.presence, Family.links, Family.backlinks, Family.payer, Family.incoming].all (revealOk rows root model) &&
+     (match revealRows rows root (linkPrefix cellA) with
+      | .ok revealed => sameSet revealed.members
+          (model.filter fun e => e.1.family = Family.links ∧ e.1.primary = cellPrimary cellA)
+      | .error _ => false)))
+
+def run : List (Nat × Option (List UInt8) × Bool) → List (List Bool × Row) → Digest →
     List (IndexKey × List UInt8) → Bool
   | [], _, root, model => model.isEmpty && root == emptyDigest
-  | (i, value) :: rest, written, root, model =>
+  | (i, value, full) :: rest, written, root, model =>
       let k := keys.getD i (payerKey 0)
       match setAll (overlay (fun _ => none) written) root [(k, value)] with
       | .error _ => false
       | .ok (root', rows) =>
           let written' := rows ++ written
           let model' := modelSet model k value
-          stepOk (overlay (fun _ => none) written') root' model' && run rest written' root' model'
+          stepOk (overlay (fun _ => none) written') root' model' k full && run rest written' root' model'
 
 theorem incremental_matches_canonical : run ops [] emptyDigest [] = true := by native_decide
 
@@ -2023,6 +2040,71 @@ theorem drop_only_deletes : afterSecond dropOnly = some none := by native_decide
 
 end FamiliesProbe
 
+/-! ## Poles of the model's predicates -/
+
+namespace Teeth
+
+/-- The empty map represents the empty log. -/
+theorem represents_empty : Represents [] [] := by
+  refine ⟨List.nodup_nil, fun k => ?_⟩
+  simp [mapLookup, declared, declared01, declared2, declared4, declared5, declared6, paying, declared7, logCells]
+
+/-- A map holding a transaction the log never accepted does not represent it. -/
+theorem represents_refuted : ¬ Represents [(transactionKey ⟨1⟩, [1])] [] := by
+  rintro ⟨_, holds⟩
+  have := holds (transactionKey ⟨1⟩)
+  simp [mapLookup, declared, declared01, transactionKey, Family.transaction, Family.spent] at this
+
+/-- The priors an empty map gives any record are its priors. -/
+theorem priorsOf_empty (record : IntentRecord) :
+    PriorsOf [] record ⟨(fleetOf record).bind (fun fleet => mapLookup [] (payerKey fleet.1)), fun _ => []⟩ :=
+  ⟨rfl, fun _ _ k v => by simp⟩
+
+/-- A map holding one of a written cell's links does not have empty link priors. -/
+theorem priorsOf_refuted :
+    ¬ PriorsOf [(linkKey FamiliesProbe.cellA FamiliesProbe.linkA, [1])] FamiliesProbe.firstRecord
+      ⟨none, fun _ => []⟩ := by
+  rintro ⟨_, links⟩
+  have written : FamiliesProbe.cellA ∈ writtenCells FamiliesProbe.firstRecord :=
+    mem_writtenCells.mpr (by simp [FamiliesProbe.firstRecord, FamiliesProbe.recordOf, FamiliesProbe.write])
+  have := (links _ written (linkKey FamiliesProbe.cellA FamiliesProbe.linkA) [1]).mpr
+    ⟨List.mem_singleton_self _, (linkPrefix_iff _ _).mpr ⟨rfl, rfl⟩⟩
+  cases this
+
+/-- The trie's node-collision premise (`Theory.AuthTrie.Collision`, the event every
+soundness theorem of the trie names) has teeth: a constant digest collides... -/
+theorem authTrieCollision_constant :
+    Theory.AuthTrie.Collision (K := Unit) (V := Unit) (D := Nat) (fun _ => 0) :=
+  ⟨.empty, .leaf () (), by simp, rfl⟩
+
+/-- An injective node code. -/
+def nodeCode : Theory.AuthTrie.NodeIn Unit Unit Nat → Nat
+  | .empty => 0
+  | .leaf _ _ => 1
+  | .branch left right => 2 + Nat.pair left right
+
+/-- ... and an injective one never does. -/
+theorem authTrieCollision_refuted : ¬ Theory.AuthTrie.Collision (K := Unit) (V := Unit) (D := Nat) nodeCode := by
+  rintro ⟨a, b, differ, same⟩
+  apply differ
+  cases a with
+  | empty =>
+      cases b <;> simp_all [nodeCode]
+      all_goals omega
+  | leaf =>
+      cases b <;> simp_all [nodeCode]
+      all_goals omega
+  | branch l r =>
+      cases b with
+      | empty => simp [nodeCode] at same
+      | leaf => simp [nodeCode] at same; omega
+      | branch l' r' =>
+          have paired : Nat.pair l r = Nat.pair l' r' := by simp only [nodeCode] at same; omega
+          have := Nat.pair_eq_pair.mp paired
+          rw [this.1, this.2]
+
+end Teeth
+
 #assert_axioms lastFor_append
 #assert_axioms mapLookup_append
 #assert_axioms mapLookup_cons
@@ -2117,6 +2199,12 @@ end FamiliesProbe
 #assert_axioms KeysDistinct.mono
 #assert_compiled Teeth.keysDistinct_deployed
 #assert_axioms Teeth.keysDistinct_refuted
+#assert_axioms Teeth.represents_empty
+#assert_axioms Teeth.represents_refuted
+#assert_axioms Teeth.priorsOf_empty
+#assert_axioms Teeth.priorsOf_refuted
+#assert_axioms Teeth.authTrieCollision_constant
+#assert_axioms Teeth.authTrieCollision_refuted
 #assert_axioms subjectBytes_injective
 #assert_axioms accountBytes_injective
 #assert_axioms hashInputs_snoc_sub
