@@ -77,7 +77,7 @@ done
 bin=$root/bin
 sha256sum "$bin"/* >"$root/artifact-sha256"
 git -C "$src" rev-parse HEAD >"$root/source-head"
-sha256sum "$src/Kernel/ObjectiveTurnTotalityRunner.lean" "$runner" >"$root/runner-sha256"
+sha256sum "$src/Host/ObjectiveTurnTotalityRunner.lean" "$runner" >"$root/runner-sha256"
 sha256sum "$src/Kernel/TurnOfIntent.lean" "$src/Kernel/World.lean" \
   "$src/Kernel/DeployedBridge.lean" >"$root/kernel-sha256"
 rows=(activity objectrecord call send seats domain upgrade)

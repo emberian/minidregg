@@ -317,11 +317,11 @@ Minidregg.Kernel.ObjectiveActivity.ResumeHead.mk | Kernel.ObjectiveActivity | ev
 Minidregg.Kernel.ObjectiveActivity.ResumeTail.mk | Kernel.ObjectiveActivity | evidence | L2 | DEPUTY-OB-ENG type; layer-1 review pending (OB-ENG)
 Minidregg.Kernel.ObjectiveActivity.TopUp.mk | Kernel.ObjectiveActivity | evidence | L2 | 3 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivity.TypedData.mk | Kernel.ObjectiveActivity | evidence | L2 | 1 proof / 1 data fields; layer-1 review pending
-Minidregg.Kernel.ObjectiveActivityReceiver.Accepted.mk | Kernel.ObjectiveActivityReceiver | evidence | L2 | 2 proof / 2 data fields; layer-1 review pending
-Minidregg.Kernel.ObjectiveActivityReceiver.DecodedIngress.mk | Kernel.ObjectiveActivityReceiver | evidence | L2 | 2 proof / 3 data fields; layer-1 review pending
-Minidregg.Kernel.ObjectiveActivityReceiver.Failed.mk | Kernel.ObjectiveActivityReceiver | evidence | L2 | 7 proof / 8 data fields; GPT-6 row E charged failure after gate + signature (minted only by admitDecodedNative); layer-1 review pending
-Minidregg.Kernel.ObjectiveActivityReceiver.Gated.mk | Kernel.ObjectiveActivityReceiver | evidence | L2 | 4 proof / 4 data fields; GPT-6 row E gate: authority, capability over the claimed outcome, funds (minted only by gate); layer-1 review pending
-Minidregg.Kernel.ObjectiveActivityReceiver.Prepared.mk | Kernel.ObjectiveActivityReceiver | evidence | L2 | 6 proof / 7 data fields; layer-1 review pending
+Minidregg.Kernel.ObjectiveActivityReceiver.Accepted.mk | Kernel.ObjectiveActivityReceiverCore | evidence | L2 | 2 proof / 2 data fields; layer-1 review pending
+Minidregg.Kernel.ObjectiveActivityReceiver.DecodedIngress.mk | Kernel.ObjectiveActivityReceiverCore | evidence | L2 | 2 proof / 3 data fields; layer-1 review pending
+Minidregg.Kernel.ObjectiveActivityReceiver.Failed.mk | Kernel.ObjectiveActivityReceiverCore | evidence | L2 | 7 proof / 8 data fields; GPT-6 row E charged failure after gate + signature (minted only by admitDecodedNative); layer-1 review pending
+Minidregg.Kernel.ObjectiveActivityReceiver.Gated.mk | Kernel.ObjectiveActivityReceiverCore | evidence | L2 | 4 proof / 4 data fields; GPT-6 row E gate: authority, capability over the claimed outcome, funds (minted only by gate); layer-1 review pending
+Minidregg.Kernel.ObjectiveActivityReceiver.Prepared.mk | Kernel.ObjectiveActivityReceiverCore | evidence | L2 | 6 proof / 7 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveBendArtifactSource.Current.mk | Kernel.ObjectiveBendArtifactSource | evidence | L2 | 3 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveBendArtifactSource.Loaded.mk | Kernel.ObjectiveBendArtifactSource | evidence | L2 | 5 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveBendNativeAdmission.Admitted.mk | Kernel.ObjectiveBendNativeAdmission | evidence | L2 | 7 proof / 5 data fields; layer-1 review pending
@@ -401,9 +401,9 @@ Minidregg.Kernel.RunComputeBudget.PreparedBook.mk | Kernel.RunComputeBudget | ev
 Minidregg.Kernel.RunComputeBudget.PreparedQuota.mk | Kernel.RunComputeBudget | evidence | L2 | 1 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.RunComputeBudgetDomain.LoadedBook.mk | Kernel.RunComputeBudgetDomain | evidence | L2 | 1 proof / 1 data fields; layer-1 review pending
 Minidregg.Kernel.RunComputeBudgetDomain.Prepared.mk | Kernel.RunComputeBudgetDomain | evidence | L2 | 0 proof / 4 data fields; layer-1 review pending
-Minidregg.Kernel.SeatReceiver.Accepted.mk | Kernel.SeatReceiver | evidence | L2 | 2 proof / 2 data fields; layer-1 review pending
-Minidregg.Kernel.SeatReceiver.DecodedIngress.mk | Kernel.SeatReceiver | evidence | L2 | 2 proof / 3 data fields; layer-1 review pending
-Minidregg.Kernel.SeatReceiver.Prepared.mk | Kernel.SeatReceiver | evidence | L2 | 5 proof / 6 data fields; layer-1 review pending
+Minidregg.Kernel.SeatReceiver.Accepted.mk | Kernel.SeatReceiverCore | evidence | L2 | 2 proof / 2 data fields; layer-1 review pending
+Minidregg.Kernel.SeatReceiver.DecodedIngress.mk | Kernel.SeatReceiverCore | evidence | L2 | 2 proof / 3 data fields; layer-1 review pending
+Minidregg.Kernel.SeatReceiver.Prepared.mk | Kernel.SeatReceiverCore | evidence | L2 | 5 proof / 6 data fields; layer-1 review pending
 Minidregg.Kernel.SeatStore.Decided.mk | Kernel.SeatStore | evidence | L2 | 9 proof / 11 data fields; layer-1 review pending
 Minidregg.Kernel.SeatStore.HeldEnd.mk | Kernel.SeatStore | evidence | L2 | 4 proof / 5 data fields; layer-1 review pending
 Minidregg.Kernel.SubjectKeyCommitmentAdoption.Accepted.mk | Kernel.SubjectKeyCommitmentAdoption | evidence | L2 | 3 proof / 2 data fields; layer-1 review pending
@@ -425,9 +425,9 @@ Minidregg.Theory.ReactiveCellTransition.Accepted.mk | Theory.ReactiveCellTransit
 Minidregg.Theory.ReceiptEvent.mk | Theory.AcceptedCellEffect | evidence | L2 | 5 proof / 10 data fields; layer-1 review pending
 Minidregg.Theory.Receiving.Receiver.Accepted.mk | Theory.Receiving | evidence | L1 Minidregg.Theory.Receiving.Receiver.Accepted.admits | carries `admits`: prepared under covering vouchers, shape and laws passed; the vouchers are L2
 Minidregg.Theory.Receiving.Vouchers.mk | Theory.Receiving | evidence | L2 | the claims the Receiver's verifier answered true on, and its true/false answers on the receiver's OBSERVED signatures (admitVia_observed); an oracle (IO) verdict no proof expresses; minted only by Receiver.admitVia; mints: Vouchers.empty (vouches for nothing)
-restrict | Minidregg.Compiler.DurableHistory.Head.genesis | Compiler.DurableHistoryStore, Compiler.DurableReceiverIO, Compiler.DurableServed | a genesis head for a non-empty Store is a replay bypass: only the open mints one
-restrict | Minidregg.Compiler.DurableHistory.StoreIdentity.ofOpen | Compiler.DurableHistoryStore, Compiler.DurableReceiverIO, Compiler.DurableServed | a Store identity comes only from the open
-restrict | Minidregg.Compiler.DurableHistory.StoreIdentity.ofScratch | Compiler.DurableHistoryStore | a scratch Store identity comes only from scratchReader, after the image is checked against its carried commitment
+restrict | Minidregg.Compiler.DurableHistory.Head.genesis | Compiler.DurableHistoryStore, Compiler.DurableReceiverIO, Compiler.DurableServed, Compiler.DurableHistoryStoreCore | a genesis head for a non-empty Store is a replay bypass: only the open mints one
+restrict | Minidregg.Compiler.DurableHistory.StoreIdentity.ofOpen | Compiler.DurableHistoryStore, Compiler.DurableReceiverIO, Compiler.DurableServed, Compiler.DurableHistoryStoreCore, Compiler.DurableReceiverCore | a Store identity comes only from the open
+restrict | Minidregg.Compiler.DurableHistory.StoreIdentity.ofScratch | Compiler.DurableHistoryStore, Compiler.DurableHistoryStoreCore | a scratch Store identity comes only from scratchReader, after the image is checked against its carried commitment
 "
 
 end Minidregg.TokenCensus
