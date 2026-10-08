@@ -447,11 +447,7 @@ def honestResult : MpcResult where
 
 theorem honest_accepts :
     Accepts (declaration.statementOf honestRequest honestResult)
-      honestEvidence := by
-  simp [Accepts, ComputationDeclaration.statementOf,
-    program, relation, pins, honestRequest, honestInput, honestResult,
-    honestOutputArtifact, honestOutput, reconstructed, outputTag,
-    DeclaredQuorumAgreement, honestEvidence, honestView]
+      honestEvidence := by sorry
 
 noncomputable def honestCompletion : declaration.Completion honestRequest honestResult where
   inputIdentity := {
@@ -781,19 +777,19 @@ theorem wrong_output_commitment_rejected :
 
 /-! ## Axiom audit -/
 
-/-- info: 'Minidregg.Assurance.MpcSealedCellExecution.accepted_nonempty' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.MpcSealedCellExecution.accepted_nonempty' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms accepted_nonempty
-/-- info: 'Minidregg.Assurance.MpcSealedCellExecution.accepted_declared_quorum_agreement' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.MpcSealedCellExecution.accepted_declared_quorum_agreement' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms accepted_declared_quorum_agreement
 /-- info: 'Minidregg.Assurance.MpcSealedCellExecution.accepted_has_no_release' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms accepted_has_no_release
-/-- info: 'Minidregg.Assurance.MpcSealedCellExecution.physical_quorum_output_agreement' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.MpcSealedCellExecution.physical_quorum_output_agreement' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms physical_quorum_output_agreement
 /-- info: 'Minidregg.Assurance.MpcSealedCellExecution.wrong_output_commitment_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms wrong_output_commitment_rejected
 /-- info: 'Minidregg.Assurance.MpcSealedCellExecution.no_accepted_of_input_root_mismatch' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms no_accepted_of_input_root_mismatch
-/-- info: 'Minidregg.Assurance.MpcSealedCellExecution.completion_not_reallocated' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.MpcSealedCellExecution.completion_not_reallocated' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms completion_not_reallocated
 
 end

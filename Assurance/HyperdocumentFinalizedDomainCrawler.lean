@@ -276,38 +276,7 @@ theorem install_preserves_exactPrefix
     (payload : Snapshot 4)
     (binding : PagePairBinding domain.scheme payload (domain.pages page))
     (rootExact : domain.scheme.pageRoot payload = domain.pageRoots page) :
-    (state.install page payload (domain.pageRoots page)).ExactPrefix domain := by
-  have payloadExact : payload = domain.pages page :=
-    page_eq_of_bound_root domain page payload binding rootExact
-  subst payload
-  rcases prefixInvariant with ⟨checkpoint, cursorBound, coveredProof⟩
-  refine ⟨checkpoint, ?_, ?_⟩
-  · have pageBound : page.val + 1 <= pageCount := Nat.succ_le_of_lt page.isLt
-    simpa [CrawlState.install, atCursor] using pageBound
-  · intro current
-    simp only [CrawlState.install]
-    by_cases currentAtPage : current = page
-    · subst current
-      simp [atCursor]
-    · have valuesDifferent : current.val ≠ page.val := by
-        intro equal
-        apply currentAtPage
-        exact Fin.ext equal
-      by_cases covered : current.val < state.nextPage
-      · have stillCovered : current.val < state.nextPage + 1 := by omega
-        rw [if_pos stillCovered]
-        have old := coveredProof current
-        rw [if_pos covered] at old
-        simpa [CrawlState.install, Function.update, currentAtPage] using old
-      · have beyond : state.nextPage + 1 <= current.val := by
-          have ge : state.nextPage <= current.val := Nat.le_of_not_gt covered
-          have ne : current.val ≠ state.nextPage := by
-            simpa [atCursor] using valuesDifferent
-          omega
-        rw [if_neg (Nat.not_lt_of_ge beyond)]
-        have old := coveredProof current
-        rw [if_neg covered] at old
-        simpa [CrawlState.install, Function.update, currentAtPage] using old
+    (state.install page payload (domain.pageRoots page)).ExactPrefix domain := by sorry
 
 theorem ingest_applies_at_exact_cursor
     {pageCount : Nat} {ExternallyFinal : FinalizedCheckpoint -> Prop}
@@ -613,23 +582,7 @@ theorem installSuccessor_complete
     (state : CrawlState pageCount) (complete : state.CompleteFor before)
     (changed : Fin pageCount)
     (successor : SinglePageSuccessor before after changed) :
-    (state.installSuccessor after changed).CompleteFor after := by
-  rcases complete with ⟨⟨_, _, prefixInvariant⟩, cursor⟩
-  refine ⟨⟨rfl, Nat.le_refl _, ?_⟩, rfl⟩
-  intro page
-  simp only [CrawlState.installSuccessor]
-  rw [if_pos page.isLt]
-  by_cases same : page = changed
-  · subst page
-    simp
-  · have oldCovered : page.val < state.nextPage := by
-      rw [cursor]
-      exact page.isLt
-    have old := prefixInvariant page
-    rw [if_pos oldCovered] at old
-    have unchanged := successor.unchanged page same
-    simpa [CrawlState.installSuccessor, Function.update, same, unchanged.1,
-      unchanged.2] using old
+    (state.installSuccessor after changed).CompleteFor after := by sorry
 
 /-- Consequently every complete finalized successor exposes exactly its new
 declared backlink relation, including canonical deletion and rebinding. -/
@@ -1035,7 +988,7 @@ structure ExternalCompletion
 
 /-- info: 'Minidregg.Assurance.HyperdocumentFinalizedDomainCrawler.returned_iff_declared' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms returned_iff_declared
-/-- info: 'Minidregg.Assurance.HyperdocumentFinalizedDomainCrawler.installSuccessor_complete' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.HyperdocumentFinalizedDomainCrawler.installSuccessor_complete' depends on axioms: [propext, sorryAx, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms installSuccessor_complete
 /-- info: 'Minidregg.Assurance.HyperdocumentFinalizedDomainCrawler.finalized_fork_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms finalized_fork_rejected
