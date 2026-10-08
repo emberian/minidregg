@@ -1,0 +1,27 @@
+edition ObjectiveBend 1
+import ./Protocol.obend as P
+import ./CatalogReview.obend as Catalog
+# Each reviewer stores the revision it endorsed. The work receipt's serial is
+# submitted as units; CatalogReview binds the candidate's source, program,
+# revision and policy. A different serial or an unendorsed state returns zero.
+record State:
+  revision: Nat
+  endorsed: Nat
+record View:
+  version: Nat
+  state: State
+record Write:
+  revision: P.EditNat
+  endorsed: P.EditNat
+record Return:
+  result: Nat
+  write: Write
+law revision_fixed: writeOnce(revision)
+law endorsement_bit: new.endorsed in [0, 1]
+def candidate(revision: Nat) -> Catalog.Candidate:
+  {source: "commission/work", program: "commission/agent", revision: revision}
+def review(view: View, arg: P.Work) -> Activity<P.Plan, P.Returned, Return>:
+  let work = candidate(arg.units)
+  let selected = candidate(view.state.revision)
+  let eligible = Catalog.eligible(work, "commission/review", {candidate: selected, policy: "commission/review", ready: true}, {candidate: selected, policy: "commission/review", endorsed: view.state.endorsed == 1n})
+  {result: if eligible then 1n else 0n, write: {revision: P.EditNat.keep(), endorsed: P.EditNat.keep()}}

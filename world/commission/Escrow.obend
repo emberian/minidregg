@@ -1,0 +1,7 @@
+edition ObjectiveBend 1
+import ./BountyEscrow.obend as Bounty
+# Reuse the native BountyEscrow contract, including its paired work receipt,
+# whole-allocation exchange, approval, cancellation and deadline exits. The
+# kernel holds the reward; Board is an index and never owns a Book balance.
+def escrow(call: Bounty.Call) -> Bounty.Plan:
+  Bounty.bounty(call)

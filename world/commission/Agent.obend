@@ -1,0 +1,24 @@
+edition ObjectiveBend 1
+import ./Protocol.obend as P
+# The poster signs the fleet invocation with grants only for claim and submit
+# on one board, bound to its pin, this caller and a cumulative unit cap.
+record State:
+  total: Nat
+record View:
+  version: Nat
+  state: State
+record Write:
+  total: P.EditNat
+record Return:
+  result: Nat
+  write: Write
+law calls_grow: request.turn == 4 or monotone(total)
+def run(view: View, route: P.Call) -> Activity<P.Plan, P.Returned, Return>:
+  match perform(P.Plan.call(route)):
+    case returned(got): {result: got.result, write: {total: P.EditNat.add(1n)}}
+# Two calls spend the same grant, so the acceptance can check cumulative use.
+def twice(view: View, route: P.Call) -> Activity<P.Plan, P.Returned, Return>:
+  match perform(P.Plan.call(route)):
+    case returned(first):
+      match perform(P.Plan.call(route)):
+        case returned(second): {result: second.result, write: {total: P.EditNat.add(2n)}}

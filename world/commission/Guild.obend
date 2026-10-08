@@ -1,0 +1,24 @@
+edition ObjectiveBend 1
+import ./Protocol.obend as P
+# Register this object with the boards in a native invariant domain. The joint
+# law admits an unclaimed board or its active member's claim. Domain membership
+# is permanent; required exits at registration have no native representation.
+record State:
+  member: Nat
+  active: Nat
+record View:
+  version: Nat
+  state: State
+record Write:
+  member: P.EditNat
+  active: P.EditNat
+record Return:
+  result: Nat
+  write: Write
+law member_fixed: writeOnce(member)
+law active_bit: new.active in [0, 1]
+def membership(view: View, arg: P.Work) -> Activity<P.Plan, P.Returned, Return>:
+  {result: view.state.member, write: {member: P.EditNat.keep(), active: P.EditNat.keep()}}
+# This attempt is refused by the joint domain while any joined board is claimed.
+def deactivate(view: View, arg: P.Work) -> Activity<P.Plan, P.Returned, Return>:
+  {result: 0n, write: {member: P.EditNat.keep(), active: P.EditNat.set(0n)}}

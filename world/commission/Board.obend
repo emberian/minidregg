@@ -1,0 +1,63 @@
+edition ObjectiveBend 1
+import ./Protocol.obend as P
+# One object is one listed commission. The native view lists these objects;
+# list returns this commission's complete declared state through a call.
+law reward_fixed: writeOnce(reward)
+law claimant_fixed: writeOnce(claimant)
+law submitted_grows: request.turn == 4 or monotone(submitted)
+law submission_bit: new.submitted in [0, 1]
+law approval_bit: new.approved in [0, 1]
+law cancellation_bit: new.cancelled in [0, 1]
+law cancel_before_claim: new.cancelled == 0 or new.claimant == 0
+law submission_requires_claim: new.claimant == 0 implies new.submitted == 0
+law approval_requires_submission: new.approved <= new.submitted
+law reviewer_fixed: writeOnce(reviewer)
+record State:
+  reward: Nat
+  claimant: Nat
+  submitted: Nat
+  approved: Nat
+  cancelled: Nat
+  reviewer: Nat
+record View:
+  version: Nat
+  state: State
+record Write:
+  reward: P.EditNat
+  claimant: P.EditNat
+  submitted: P.EditNat
+  approved: P.EditNat
+  cancelled: P.EditNat
+  reviewer: P.EditNat
+record Return:
+  result: Nat
+  write: Write
+record Listing:
+  result: State
+  write: Write
+
+def keep() -> Write:
+  {reward: P.EditNat.keep(), claimant: P.EditNat.keep(), submitted: P.EditNat.keep(), approved: P.EditNat.keep(), cancelled: P.EditNat.keep(), reviewer: P.EditNat.keep()}
+
+def list(view: View, arg: P.Work) -> Activity<P.Plan, P.Returned, Listing>:
+  {result: view.state, write: keep()}
+
+def claim(view: View, arg: P.Work) -> Activity<P.Plan, P.Returned, Return>:
+  {result: arg.claimant, write: extend(keep(), {claimant: P.EditNat.set(arg.claimant)})}
+
+def submit(view: View, arg: P.Work) -> Activity<P.Plan, P.Returned, Return>:
+  {result: arg.units, write: extend(keep(), {claimant: P.EditNat.set(arg.claimant), submitted: P.EditNat.set(arg.units)})}
+
+# The reviewer is another pinned object. Only its returned decision is written.
+def review(view: View, arg: P.Work) -> Activity<P.Plan, P.Returned, Return>:
+  match perform(P.Plan.call({target: view.state.reviewer, method: "review", args: arg})):
+    case returned(got): {result: got.result, write: extend(keep(), {approved: P.EditNat.set(got.result)})}
+
+# Trying this after a claim reaches cancel_before_claim's enforced law leaf.
+def cancel(view: View, arg: P.Work) -> Activity<P.Plan, P.Returned, Return>:
+  {result: 1n, write: extend(keep(), {cancelled: P.EditNat.set(1n)})}
+
+# A deliberate adversarial write endpoint: the package law must refuse it,
+# including when the creator's own law permits every write.
+def reviseReward(view: View, arg: P.Work) -> Activity<P.Plan, P.Returned, Return>:
+  {result: arg.units, write: extend(keep(), {reward: P.EditNat.set(arg.units)})}

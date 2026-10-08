@@ -1,0 +1,19 @@
+edition ObjectiveBend 1
+# Shared wire types. An agent spends one unit of a method-specific capped grant.
+sum EditNat:
+  keep: {}
+  set: Nat
+  add: Nat
+record Work:
+  units: Nat
+  claimant: Nat
+record Call:
+  target: Nat
+  method: String
+  args: Work
+sum Plan:
+  call: Call
+record Got:
+  result: Nat
+sum Returned:
+  returned: Got
