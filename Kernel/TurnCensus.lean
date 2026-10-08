@@ -551,6 +551,14 @@ theorem turn_negation_refused (c : Ctor) :
     rejectOf (World.admit censusH w0 c.negation) = some c.refusal :=
   turn_negation_refused_all c (Ctor.mem_all c)
 
+/-- The absence negation pole: the previously absent cell has appeared. -/
+theorem turn_negation_refused_cell_appeared :
+    rejectOf (World.admit censusH w0 { Ctor.activity.turn with absent := [cContent] }) =
+      some (.cellPresent cContent) := by
+  decide +kernel
+
+#assert_axioms turn_negation_refused_cell_appeared
+
 /-- The four constructors that write no cell are nullifier-only turns: no
 create, no retire, every leg a pure read guard, one nullifier. -/
 def NullifierOnly (t : CTurn) : Prop :=

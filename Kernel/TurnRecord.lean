@@ -118,7 +118,7 @@ theorem step_single_accepted {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq 
     simp only [t, singleTurn, applyCreates, applyLegs, applyLeg_ofAccepted w.cells c accepted holds,
       applyRetires]
   have shaped : Shaped t := by
-    refine ⟨?_, ?_, ?_, ?_⟩ <;> simp [t, singleTurn]
+    refine ⟨?_, ?_, ?_, ?_⟩ <;> simp [t, singleTurn, AbsentShaped]
   have covered : t.charge ≤ w.meter := by
     intro lane
     by_cases e : lane = .storageBytes
@@ -137,7 +137,7 @@ theorem step_single_accepted {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq 
     cases w.system ⟨SysSpace.allowance, lane⟩ with
     | none => intro pos; exact absurd pos (lt_irrefl 0)
     | some a => intro _; rfl
-  refine ⟨_, (step_eq_some H).2 (admit_of H shaped hh fresh hk hv hcells), ?_⟩
+  refine ⟨_, (step_eq_some H).2 (admit_of H shaped hh fresh hk hv hcells (by rfl)), ?_⟩
   exact cells_update_self _ _ _
 
 end Accepted
