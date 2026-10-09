@@ -1,0 +1,31 @@
+/run/user/1001/pj.4i6pBj/c/w/sponsor/sources/create-relayA.authoring/g0001/intent.bin
+{
+  "acceptedCount": "2",
+  "confirmation": "installed",
+  "eventId": "44810606221273589912603718510729171077505698941669500252988011707359097973545",
+  "transactionId": "14816165617426937569447283260749980372638980579302791740004932463894714835583",
+  "type": "confirmed",
+  "worldRoot": "59934685476988083319958260155435905970139483420773472334743627187965064178993"
+}
+{
+  "authority": "hint-only",
+  "controlCapability": "14122691184836843852",
+  "kind": "object",
+  "name": "relayA",
+  "observeCapability": "12185720315661143814",
+  "operationCapability": "12185720315661143814",
+  "provenance": {
+    "birthReceipt": {
+      "acceptedCount": "2",
+      "confirmation": "installed",
+      "eventId": "44810606221273589912603718510729171077505698941669500252988011707359097973545",
+      "transactionId": "14816165617426937569447283260749980372638980579302791740004932463894714835583",
+      "type": "confirmed",
+      "worldRoot": "59934685476988083319958260155435905970139483420773472334743627187965064178993"
+    },
+    "reservationDigest": "8afa57907fd796e0e0067a89c8d881b596865e413f1bf1775455600b7f28b168",
+    "reservationRecord": "/run/user/1001/pj.4i6pBj/c/w/namespace/request-8afa57907fd796e0e0067a89c8d881b596865e413f1bf1775455600b7f28b168.json"
+  },
+  "target": "15903052161581222858",
+  "type": "minidregg-participant-reference-v1"
+}

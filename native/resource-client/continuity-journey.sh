@@ -79,7 +79,8 @@ run sponsor-key "$MINI" keygen --secret "$RUN/sponsor.key" --public "$RUN/sponso
 run clock-key "$MINI" keygen --secret "$RUN/clock.key" --public "$RUN/clock.pub"
 PUBLIC=$(od -An -tx1 -v "$RUN/sponsor.pub" | tr -d ' \n')
 CLOCK_PUBLIC=$(od -An -tx1 -v "$RUN/clock.pub" | tr -d ' \n')
-cp "$HERE/genesis-params.example.json" "$RUN/params.json"
+. "$HERE/../../deploy/candidate/params.sh"
+candidate_params_now "$HERE/genesis-params.example.json" >"$RUN/params.json"
 run genesis sh "$HERE/genesis.sh" "$RUN/params.json" "$PUBLIC" "$CLOCK_PUBLIC" \
   "$HOST" "$STORE" "$VERIFIER" "$RUN/fixture"
 run bootstrap "$MINI" bootstrap --host "$HOST" --config "$RUN/fixture/operator.json" \

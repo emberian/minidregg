@@ -1,0 +1,31 @@
+/run/user/1001/pj.4i6pBj/c/w/sponsor/sources/create-payee.authoring/g0001/intent.bin
+{
+  "acceptedCount": "5",
+  "confirmation": "installed",
+  "eventId": "85332236830358323077335223067137125839435337189264070778547582710503278710695",
+  "transactionId": "20508301856517404594377339609017152227804437951987038361024533799574932170568",
+  "type": "confirmed",
+  "worldRoot": "52024475904368131338917027458279603287173748354596422425061964849655269074321"
+}
+{
+  "authority": "hint-only",
+  "controlCapability": "17944954177261693812",
+  "kind": "object",
+  "name": "payee",
+  "observeCapability": "9860801452635178329",
+  "operationCapability": "9860801452635178329",
+  "provenance": {
+    "birthReceipt": {
+      "acceptedCount": "5",
+      "confirmation": "installed",
+      "eventId": "85332236830358323077335223067137125839435337189264070778547582710503278710695",
+      "transactionId": "20508301856517404594377339609017152227804437951987038361024533799574932170568",
+      "type": "confirmed",
+      "worldRoot": "52024475904368131338917027458279603287173748354596422425061964849655269074321"
+    },
+    "reservationDigest": "fe6ee506050df2cef6a5f9e9381832178cfc324161d29895cc63d009d1ddc94c",
+    "reservationRecord": "/run/user/1001/pj.4i6pBj/c/w/namespace/request-fe6ee506050df2cef6a5f9e9381832178cfc324161d29895cc63d009d1ddc94c.json"
+  },
+  "target": "15110666232211821241",
+  "type": "minidregg-participant-reference-v1"
+}

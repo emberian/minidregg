@@ -1,0 +1,11 @@
+C1-leaf	PASS	2	4 rows ok
+C2-chain	PASS	4	4 rows ok
+C3-sequence	PASS	4	3 rows ok
+C11-front-end-meter	PASS	12	5 rows ok
+C4-reentry	PASS	3	4 rows ok
+C5-dao	PASS	7	4 rows ok
+C6-authority	FAIL	446	2 of 8 rows red: c6-no-grant, c6-spent
+C7-facet	FAIL	448	1 of 3 rows red: c7-wrong-caller
+C9-grant-args	FAIL	126	3 of 8 rows red: c9-over-cap, c9-cumulative, c9-exact-mismatch
+C10-grant-who	FAIL	83	2 of 5 rows red: c10-wrong-code, c10-wrong-caller
+C8-shape	FAIL	883	2 of 5 rows red: c8-awaits, c8-unknown

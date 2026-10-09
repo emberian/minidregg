@@ -1,0 +1,1 @@
+/srv/artifacts/5896a5945dbce07d17dbbb5b5834318b0f64656e/bin/mini activity --action view --workspace /run/user/1001/pj.HGfYz1/s/w/sponsor --request {"slots": ["92323582185291017290929823701622016934161592994346970485629576923223587103944"]}

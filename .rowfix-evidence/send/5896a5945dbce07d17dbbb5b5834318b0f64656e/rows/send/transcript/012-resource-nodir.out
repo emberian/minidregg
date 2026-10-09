@@ -1,0 +1,31 @@
+/run/user/1001/pj.HGfYz1/s/w/sponsor/sources/create-nodir.authoring/g0001/intent.bin
+{
+  "acceptedCount": "7",
+  "confirmation": "installed",
+  "eventId": "48578751137251814758408504788431361634473588335738740502748343706038892075914",
+  "transactionId": "32176277954225288391128910201276875192390601676642701107051875410310659412574",
+  "type": "confirmed",
+  "worldRoot": "51326655811562247163027348144182805468347822426227797498966557057141201085602"
+}
+{
+  "authority": "hint-only",
+  "controlCapability": "9428270078425090304",
+  "kind": "object",
+  "name": "nodir",
+  "observeCapability": "11340768077745910656",
+  "operationCapability": "11340768077745910656",
+  "provenance": {
+    "birthReceipt": {
+      "acceptedCount": "7",
+      "confirmation": "installed",
+      "eventId": "48578751137251814758408504788431361634473588335738740502748343706038892075914",
+      "transactionId": "32176277954225288391128910201276875192390601676642701107051875410310659412574",
+      "type": "confirmed",
+      "worldRoot": "51326655811562247163027348144182805468347822426227797498966557057141201085602"
+    },
+    "reservationDigest": "735ab43e0fcf706dae167de5d64c4fdfb9a9773417885ba7cd461d9d78ed5ce0",
+    "reservationRecord": "/run/user/1001/pj.HGfYz1/s/w/namespace/request-735ab43e0fcf706dae167de5d64c4fdfb9a9773417885ba7cd461d9d78ed5ce0.json"
+  },
+  "target": "13600887021416285186",
+  "type": "minidregg-participant-reference-v1"
+}

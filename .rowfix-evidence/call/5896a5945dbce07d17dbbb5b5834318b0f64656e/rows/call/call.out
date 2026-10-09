@@ -1,0 +1,64 @@
+extract-quote-is-the-policy-ceiling          check     ok {"published": {"extractTicks": "3200000"}, "policy": 3200000}
+publish                                      installed confirmed  
+create-counter                               installed confirmed  
+create-relayA                                installed confirmed  
+create-relayB                                installed confirmed  
+create-bank                                  installed confirmed  
+create-payee                                 installed confirmed  
+create-thief                                 installed confirmed  
+create-vault                                 installed confirmed  
+create-gated                                 installed confirmed  
+c1-deposit                                   installed confirmed  
+c1-report-5                                  check     ok {"tag": "natural", "value": "5"}
+c1-state-5                                   check     ok null
+c1-next-version                              check     ok ["1", "2"]
+c2-relay                                     installed confirmed  
+c2-counter-8                                 check     ok {"counter": 8, "relayA": 1, "relayB": 1}
+c2-each-hop-counted                          check     ok {"counter": 8, "relayA": 1, "relayB": 1}
+c2-report-8                                  check     ok {"tag": "natural", "value": "8"}
+c3-twice                                     installed confirmed  
+c3-second-sees-first                         check     ok {"tag": "natural", "value": "12"}
+c3-both-land                                 check     ok null
+c11-one-frame                                installed confirmed  
+c11-three-frames                             installed confirmed  
+c11-three-frames-draw-more                   check     ok [[8738, 43544], [26214, 130628]]
+c11-one-byte-short                           charged   confirmed  ccount.Stage.frontEnd) 4369 4368) 3199895 105) { source := 21845, core := 108856, postageSource := 0, postageCore := 0 }
+c11-exactly-one-load                         charged   confirmed  eWorkAccount.Stage.frontEnd) 4369 0) 3199966 34) { source := 8738, core := 43540, postageSource := 0, postageCore := 0 }
+c4-relay-back                                charged   confirmed  94461151990, 15903052161581222858]) 3199918 82) { source := 17476, core := 87084, postageSource := 0, postageCore := 0 }
+c4-nothing-commits                           check     ok {"before": {"counter": 15, "relayA": 1, "relayB": 1}, "after": {"counter": 15, "relayA": 1, "relayB": 1}}
+c4-charged-the-price-only                    check     ok {"paid": 2462381, "price": 2462381}
+c4-refused-plan-reports-draws                check     ok {"coreBytes": "87084", "postageCoreBytes": "0", "postageReplayBytes": "0", "replayBytes": "17476"}
+c5-honest                                    installed confirmed  
+c5-honest-paid                               check     ok {"bank": 70, "payee": 30}
+c5-thief                                     charged   confirmed  8094649402, 12312747984535127426]) 3199893 107) { source := 17476, core := 87086, postageSource := 0, postageCore := 0 }
+c5-bank-kept                                 check     ok {"bank": 70, "thief": 0}
+c6-direct                                    installed confirmed  
+c6-no-grant                                  charged   None  mini: uncertain host response: connection closed
+c6-no-grant-kept                             check     ok null
+c6-granted                                   installed confirmed  
+c6-granted-landed                            check     ok null
+c6-spent                                     charged   None  mini: uncertain host response: connection closed
+c6-stranger                                  refused   refused operation-rejected Minidregg.Kernel.ObjectiveActivityReceiver.Reject.notObjectHolder
+c6-vault-final                               check     ok null
+c7-wrong-caller                              charged   None  mini: uncertain host response: connection closed
+c7-right-caller                              installed confirmed  
+c7-gated-2                                   check     ok null
+c9-over-cap                                  charged   None  mini: uncertain host response: connection closed
+c9-over-cap-kept                             check     ok null
+c9-within-cap                                installed confirmed  
+c9-within-cap-landed                         check     ok null
+c9-cumulative                                charged   None  mini: uncertain host response: connection closed
+c9-cumulative-co-fails                       check     ok null
+c9-exact-mismatch                            charged   None  mini: uncertain host response: connection closed
+c9-vault-final                               check     ok null
+c10-wrong-code                               charged   None  mini: uncertain host response: connection closed
+c10-wrong-caller                             charged   None  mini: uncertain host response: connection closed
+c10-nothing-landed                           check     ok null
+c10-right-caller                             installed confirmed  
+c10-landed                                   check     ok null
+c8-awaits                                    charged   None  mini: uncertain host response: connection closed
+c8-unknown                                   charged   None  mini: uncertain host response: connection closed
+c8-not-object                                refused   refused operation-rejected al.notAnObject 12219386061058196378) 3199966 34) { source := 8738, core := 43544, postageSource := 0, postageCore := 0 }
+c8-exhausted                                 charged   confirmed  .ObjectiveCall.CallRefusal.exhausted) 3200000 0) { source := 8738, core := 43540, postageSource := 0, postageCore := 0 }
+c8-nothing-commits                           check     ok {"counter": 15}
+{"rows": 63, "failed": ["c6-no-grant", "c6-spent", "c7-wrong-caller", "c9-over-cap", "c9-cumulative", "c9-exact-mismatch", "c10-wrong-code", "c10-wrong-caller", "c8-awaits", "c8-unknown"]}

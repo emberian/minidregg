@@ -1,0 +1,31 @@
+/run/user/1001/pj.HGfYz1/s/w/sponsor/sources/create-relayer.authoring/g0001/intent.bin
+{
+  "acceptedCount": "8",
+  "confirmation": "installed",
+  "eventId": "103358344960218814136452657509948378632815575630323635246389945020121866014742",
+  "transactionId": "22090959961467151526602079320812112415983524607741440260842129029700446299731",
+  "type": "confirmed",
+  "worldRoot": "8049079205560810743027155403532882066862137394923001966645154972685323488594"
+}
+{
+  "authority": "hint-only",
+  "controlCapability": "11861643448401486385",
+  "kind": "object",
+  "name": "relayer",
+  "observeCapability": "13976741756896056797",
+  "operationCapability": "13976741756896056797",
+  "provenance": {
+    "birthReceipt": {
+      "acceptedCount": "8",
+      "confirmation": "installed",
+      "eventId": "103358344960218814136452657509948378632815575630323635246389945020121866014742",
+      "transactionId": "22090959961467151526602079320812112415983524607741440260842129029700446299731",
+      "type": "confirmed",
+      "worldRoot": "8049079205560810743027155403532882066862137394923001966645154972685323488594"
+    },
+    "reservationDigest": "589e6a7123a6dd193f12fcbc6655ff1ee8318a729eff3f260a706173a4746fd9",
+    "reservationRecord": "/run/user/1001/pj.HGfYz1/s/w/namespace/request-589e6a7123a6dd193f12fcbc6655ff1ee8318a729eff3f260a706173a4746fd9.json"
+  },
+  "target": "13301454727658436944",
+  "type": "minidregg-participant-reference-v1"
+}

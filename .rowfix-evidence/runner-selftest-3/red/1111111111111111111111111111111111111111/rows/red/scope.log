@@ -1,0 +1,4 @@
+Oct 08 23:26:26 burst3-a systemd[7885]: Starting pj-red-pjVqz0vS.service - /usr/bin/bash -c ". \"\$ROWSFILE\"; cd \"\$RUN\" && \"row_\$ROW\""...
+Oct 08 23:26:26 burst3-a systemd[7885]: Started pj-red-pjVqz0vS.service - /usr/bin/bash -c ". \"\$ROWSFILE\"; cd \"\$RUN\" && \"row_\$ROW\"".
+Oct 08 23:26:26 burst3-a systemd[7885]: pj-red-pjVqz0vS.service: Main process exited, code=exited, status=17/n/a
+Oct 08 23:26:26 burst3-a systemd[7885]: pj-red-pjVqz0vS.service: Failed with result 'exit-code'.

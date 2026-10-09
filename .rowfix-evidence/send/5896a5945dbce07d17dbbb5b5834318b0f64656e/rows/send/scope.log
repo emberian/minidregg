@@ -1,0 +1,7 @@
+Oct 09 00:03:13 burst3-a systemd[7885]: Starting pj-send-pjHGfYz1.service - /usr/bin/bash /srv/lanes/prod-rowfix/src/scripts/pipeline/journey-row-exec...
+Oct 09 00:03:13 burst3-a systemd[7885]: Started pj-send-pjHGfYz1.service - /usr/bin/bash /srv/lanes/prod-rowfix/src/scripts/pipeline/journey-row-exec.
+Oct 09 00:13:04 burst3-a systemd[7885]: pj-send-pjHGfYz1.service: A process of this unit has been killed by the OOM killer.
+Oct 09 00:20:42 burst3-a systemd[7885]: pj-send-pjHGfYz1.service: A process of this unit has been killed by the OOM killer.
+Oct 09 00:26:09 burst3-a systemd[7885]: pj-send-pjHGfYz1.service: Main process exited, code=exited, status=1/FAILURE
+Oct 09 00:26:10 burst3-a systemd[7885]: pj-send-pjHGfYz1.service: Failed with result 'exit-code'.
+Oct 09 00:26:10 burst3-a systemd[7885]: pj-send-pjHGfYz1.service: Consumed 22min 57.797s CPU time, 24.0G memory peak, 0B memory swap peak.

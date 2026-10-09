@@ -1,0 +1,31 @@
+/run/user/1001/pj.4i6pBj/c/w/sponsor/sources/create-bare.authoring/g0001/intent.bin
+{
+  "acceptedCount": "9",
+  "confirmation": "installed",
+  "eventId": "103144010220055061553958524705849829364246718003480293066584944206274207025907",
+  "transactionId": "82681502259326702025179970606299531695478244347752680914118895430953376619924",
+  "type": "confirmed",
+  "worldRoot": "43281744893374786182638560170259744598620829723074439564780924867786536866137"
+}
+{
+  "authority": "hint-only",
+  "controlCapability": "14902567823702643418",
+  "kind": "object",
+  "name": "bare",
+  "observeCapability": "16067372940746097392",
+  "operationCapability": "16067372940746097392",
+  "provenance": {
+    "birthReceipt": {
+      "acceptedCount": "9",
+      "confirmation": "installed",
+      "eventId": "103144010220055061553958524705849829364246718003480293066584944206274207025907",
+      "transactionId": "82681502259326702025179970606299531695478244347752680914118895430953376619924",
+      "type": "confirmed",
+      "worldRoot": "43281744893374786182638560170259744598620829723074439564780924867786536866137"
+    },
+    "reservationDigest": "fac29da2a66e617b931546ce7e5c1a327bd7fb60d95de227a0c0edc4c4312181",
+    "reservationRecord": "/run/user/1001/pj.4i6pBj/c/w/namespace/request-fac29da2a66e617b931546ce7e5c1a327bd7fb60d95de227a0c0edc4c4312181.json"
+  },
+  "target": "12219386061058196378",
+  "type": "minidregg-participant-reference-v1"
+}

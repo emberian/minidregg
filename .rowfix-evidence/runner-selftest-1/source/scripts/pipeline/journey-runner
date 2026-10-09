@@ -1,0 +1,252 @@
+#!/usr/bin/env bash
+# scripts/pipeline/journey-runner -- continuous journeys on the journey box (PIPELINE item 4).
+# tip-dispatch-protocol: 1
+#
+#   scripts/pipeline/journey-runner [--once] [--tip TIP] [--rows-file PATH (test override)] [--results-root PATH] [--row NAME --source-tree PATH (plant overrides)]
+#
+# Every PIPELINE_WATCH_S (60) seconds: for the READY artifact set each label points at (next first,
+# then green, then main; mirrored here by the gate box), not yet run, run every row of
+# journey-rows (the TIP's own copy when its tree has one) and write $JOURNEY_ROOT/TIP/:
+#   results.tsv   ROW<TAB>STATUS<TAB>WALL_S<TAB>OWNER<TAB>DETAIL  (one line per row or sub-row)
+#   table.txt     the same, aligned, with the tip, labels and total wall time
+#   red.txt       one MERGE-QUEUE line per red row (journey-relay appends them to MERGE-QUEUE.md)
+#   rows/<row>/   each row's evidence (stdout/stderr, result json, a red step's logs)
+#   DONE          when complete
+# The tree a row runs from: the tip's lean env ($ARTIFACT_ROOT/.leanenv/TIP, mirrored with its
+# oleans) when present, else source.tar from the set, extracted. Every row gets a fresh SHORT
+# scratch directory that is deleted after it (worlds, Stores, sockets, test keys). Owners: the row's
+# own hint, else the commit (commits.tsv of the set: commits since the previous green) that
+# touched the row's driver files, else "?" (nothing in this batch touched the driver: the red is
+# older than the batch, or comes from a dependency the pattern does not name).
+set -uo pipefail
+PIPELINE_PROG=journey-runner
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+. "$here/lib.sh"
+once=0; only=""; rows_override=""; row_override=""; source_override=""; tip_source=""
+while [ $# -gt 0 ]; do
+  case "$1" in --once) once=1; shift ;; --tip) only=$2; once=1; shift 2 ;; --tip-source) tip_source=$(realpath "$2"); shift 2 ;; --rows-file) rows_override=$(realpath "$2"); shift 2 ;; --results-root) JOURNEY_ROOT=$(realpath -m "$2"); shift 2 ;; --row) row_override=$2; shift 2 ;; --source-tree) source_override=$(realpath "$2"); shift 2 ;; *) pipeline_die "unknown $1" ;; esac
+done
+mkdir -p "$JOURNEY_ROOT"
+if [ "${PIPELINE_JOURNEY_LOCK_ROOT:-}" = "$JOURNEY_ROOT" ]; then
+  [ "$(readlink /proc/$$/fd/8)" = "$JOURNEY_ROOT/.runner.lock" ] || pipeline_die "invalid inherited runner lock"
+  exec 7<&8
+else
+  exec 7>"$JOURNEY_ROOT/.runner.lock"
+fi
+flock -n 7 || pipeline_die "another journey-runner holds $JOURNEY_ROOT/.runner.lock"
+scratch_base=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}; [ -d "$scratch_base" ] && [ -w "$scratch_base" ] || scratch_base=/tmp
+
+# Product driver input plumbing lives here. Paths belong to this artifact set;
+# ancillary inputs have explicit names and no developer-machine defaults.
+product_inputs() {
+  export HOST=$set/bin/minidregg-host MINI=$set/bin/mini STORE=$set/bin/minidregg-link-sqlite-store
+  export VERIFIER=$set/bin/minidregg-credential-signature-verifier SHELL_BIN=$set/bin/mini
+  export GRAIN=$set/bin/grain-runtime SPK_HOST_BIN=$set/bin/spk-host PAY_WATCHER_BIN=$set/bin/pay-watcher
+  export CANDIDATE=$set/provenance.json
+  export M7_REFERENCE=${MINI_M7_REFERENCE:-}
+  export TEST_PROVIDER=${MINI_TEST_PROVIDER_BIN:-$set/bin/mini-hermes-test-provider}
+  export LAUNCH_GATE=${MINI_LAUNCH_GATE_BIN:-$set/bin/launch-gate}
+  export MINI_FN_LAUNCHER=${MINI_FN_LAUNCHER:-} MINI_FN_CORE=${MINI_FN_CORE:-}
+}
+
+owner_for() {  # SET ROW SRC -> a lane or commit naming who last changed the row's driver
+  local set=$1 row=$2 src=$3 pat
+  case "$row" in
+    journey|J*|K*|M*) pat='native/resource-client/journey|native/resource-client/journey.d/' ;;
+    objective) pat='objective-native|Host/Objective|tests/objective-native' ;;
+    rooms|JPRIV*) pat='rooms-e2e|jpriv' ;;
+    activity) pat='activity' ;;
+    seats|*SEAT*) pat='[Ss]eat' ;;
+    *) pat="$row" ;;
+  esac
+  [ -f "$set/commits.tsv" ] || { echo unknown; return; }
+  awk -F'\t' -v p="$pat" '$3 ~ p {print substr($1,1,12)" "substr($2,1,60); exit}' "$set/commits.tsv" | grep . || echo "?"
+}
+
+# column(1) is util-linux/bsdextra and absent on the burst2 boxes (no sudo to install it): align with python3 there.
+tabalign() {
+  if command -v column >/dev/null 2>&1; then column -t -s $'\t'; else
+    python3 -c 'import sys
+rows=[l.rstrip("\n").split("\t") for l in sys.stdin]
+w=[max(len(r[i]) for r in rows if i<len(r)) for i in range(max(map(len,rows)))] if rows else []
+for r in rows: print("  ".join(c.ljust(w[i]) for i,c in enumerate(r)).rstrip())'
+  fi
+}
+
+run_row() {  # ROW: one row in its own scratch world and scope; its lines go to rows/ROW/result.tsv
+  local row=$1 O=$J/rows/$1 R s rc st detail owner res scope_result=unknown memory_peak=unknown
+  mkdir -p "$O"; res=$O/result.tsv; : >"$res"; R=$(mktemp -d "$scratch_base/pj.XXXXXX"); s=$(date +%s)
+  # Retain the transient service after its main process exits. Scopes may vanish
+  # before show can capture Result/MemoryPeak. Stop only after recording evidence.
+  local unit=pj-$row-$(basename "$R" | tr -cd 'A-Za-z0-9')
+  product_inputs
+  if ! command -v systemd-run >/dev/null 2>&1 || ! systemctl --user show-environment >/dev/null 2>&1; then
+    echo "no systemd user session" >"$O/row.err"; rc=98
+  else
+  local env_args=() name value main_code main_status substate
+  export SRC=$src SET=$set BIN=$set/bin MANIFEST=$set/manifest.json RUN=$R OUT=$O LEANENV=$leanenv ROWSFILE=$rowsfile ROW=$row
+  for name in SRC SET BIN MANIFEST RUN OUT LEANENV ROWSFILE ROW PATH HOME XDG_RUNTIME_DIR \
+    HOST MINI STORE VERIFIER SHELL_BIN GRAIN SPK_HOST_BIN PAY_WATCHER_BIN CANDIDATE M7_REFERENCE TEST_PROVIDER LAUNCH_GATE \
+    MINI_FN_LAUNCHER MINI_FN_CORE JOURNEY_PLANT_CALL JOURNEY_PLANT_SEND JOURNEY_PLANT_DOMAIN JOURNEY_PLANT_UPGRADE \
+    CONSENT_HOST MINI_LOCAL_HOST MINI_CONSENT_HOST MINI_CONSENT_CONFIG RUSTUP_HOME CARGO_HOME; do
+    [ -z "${!name+x}" ] || env_args+=("--setenv=$name=${!name}")
+  done
+  systemd-run --user --quiet --unit="$unit" --service-type=exec \
+    -p RemainAfterExit=yes -p KillMode=control-group -p OOMPolicy=kill \
+    -p MemoryAccounting=yes -p MemoryMax="${PIPELINE_ROW_MEM_MAX:-24G}" -p MemorySwapMax=0 \
+    -p RuntimeMaxSec="${PIPELINE_ROW_TIMEOUT_S:-5400}" -p TimeoutStopSec=15 \
+    -p "StandardOutput=append:$O/row.out" -p "StandardError=append:$O/row.err" \
+    "${env_args[@]}" -- bash -c '. "$ROWSFILE"; cd "$RUN" && "row_$ROW"' 2>"$O/launch.err"
+  rc=$?
+  printf '%s\n' "$unit.service" >"$O/scope-unit"
+  if [ "$rc" = 0 ]; then
+    while :; do
+      if ! systemctl --user show "$unit.service" -p Result -p MemoryPeak -p MemoryMax -p ControlGroup \
+        -p ActiveState -p SubState -p ExecMainCode -p ExecMainStatus -p RuntimeMaxUSec >"$O/scope.properties.new" 2>"$O/scope-show.err"; then
+        rc=97; echo "systemd evidence unavailable; see scope-show.err" >>"$O/row.err"; break
+      fi
+      mv "$O/scope.properties.new" "$O/scope.properties"
+      substate=$(sed -n 's/^SubState=//p' "$O/scope.properties")
+      case "$substate" in exited|failed|dead) break ;; esac
+      sleep 1
+    done
+    scope_result=$(sed -n 's/^Result=//p' "$O/scope.properties")
+    memory_peak=$(sed -n 's/^MemoryPeak=//p' "$O/scope.properties")
+    main_code=$(sed -n 's/^ExecMainCode=//p' "$O/scope.properties")
+    main_status=$(sed -n 's/^ExecMainStatus=//p' "$O/scope.properties")
+    if [ "$rc" = 0 ]; then
+      case "$main_code" in
+        1) rc=${main_status:-97} ;;
+        2|3) rc=$((128 + ${main_status:-0})) ;;
+        *) rc=97 ;;
+      esac
+      [ "$scope_result" != timeout ] || rc=124
+    fi
+  else
+    cat "$O/launch.err" >>"$O/row.err"
+  fi
+  journalctl --user -u "$unit.service" --since "@$s" --no-pager -n 60 >"$O/scope.log" 2>"$O/scope-journal.err"
+  systemctl --user stop "$unit.service" 2>"$O/scope-stop.err"
+  # A failed unit must not accumulate in the user manager after its evidence is saved.
+  systemctl --user reset-failed "$unit.service" 2>"$O/scope-reset.err"
+  fi
+  printf '%s\n' "$rc" >"$O/exit-code"
+  case $rc in 0) st=PASS ;; 99) st=ABSENT ;; 98) st=UNCONFIGURED ;; *) st=FAIL ;; esac
+  if [ "$scope_result" = oom-kill ] || grep -q 'killed by the OOM killer' "$O/scope.log" 2>/dev/null; then st=FAIL; fi
+  detail=$(awk 'NF {last=$0} END {print last}' "$O/row.err" | tr '\t' ' ')
+  local cause signal=none sender=none timed_out=no diagnostics
+  if [ "$rc" -gt 128 ] && [ "$rc" -le 192 ]; then
+    signal=$(kill -l "$((rc - 128))"); sender='unknown (driver or external sender; see driver logs)'
+  fi
+  if [ "$scope_result" = timeout ]; then
+    timed_out=yes; signal=TERM; sender="systemd user manager ($unit.service RuntimeMaxSec)"
+  elif [ "$scope_result" = oom-kill ]; then
+    signal=KILL; sender='kernel cgroup OOM killer / systemd OOMPolicy=kill'
+  fi
+  diagnostics="rc=$rc signal=$signal sender=$sender Result=${scope_result:-unknown} MemoryPeak=${memory_peak:-unknown} timeout=$timed_out limit=${PIPELINE_ROW_TIMEOUT_S:-5400}s"
+  if [ "$st" = FAIL ]; then
+    case "$scope_result" in oom-kill) cause='scope OOM-killed' ;; timeout) cause='row timed out' ;; *) cause='row failed' ;; esac
+    detail="$cause; $diagnostics; ${detail:-no driver verdict; evidence: scope.log and driver logs}"
+    echo "$detail" >>"$O/row.err"
+  fi
+  rm -rf "$R"                                   # the scratch world: Stores, sockets, test keys
+  owner=$( [ -s "$O/owner" ] && cat "$O/owner" || owner_for "$set" "$row" "$src")
+  if [ -s "$O/subrows.tsv" ]; then
+    while IFS=$'\t' read -r id sst wall sdet; do
+      local so=$owner
+      sdet=${sdet//"$R/j/steps/"/"$O/step-"}   # the scratch run is gone; its red steps' logs were kept here
+      [[ $sdet =~ \(lane\ ([A-Za-z0-9_-]+)\) ]] && so="lane ${BASH_REMATCH[1]}"
+      [ "$sst" = PASS ] || so=$( [[ $so == lane* ]] && echo "$so" || owner_for "$set" "$id" "$src")
+      if [ "$sst" = FAIL ]; then sdet="$diagnostics; ${sdet:-no subrow verdict}"; fi
+      printf '%s/%s\t%s\t%s\t%s\t%s\n' "$row" "$id" "$sst" "$wall" "$so" "$sdet" >>"$res"
+    done <"$O/subrows.tsv"
+    printf '%s\t%s\t%s\t%s\t%s\n' "$row" "$st" $(( $(date +%s) - s )) "$owner" "$detail" >>"$res"
+  else
+    printf '%s\t%s\t%s\t%s\t%s\n' "$row" "$st" $(( $(date +%s) - s )) "$owner" "$detail" >>"$res"
+  fi
+  pipeline_log "  $row $st $(( $(date +%s) - s ))s"
+}
+
+run_tip() {
+  local tip=$1 set=$ARTIFACT_ROOT/$1 J=$JOURNEY_ROOT/$1 src leanenv=0 rowsfile t0 tmp
+  pipeline_verify_set "$set"
+  # a re-run keeps the earlier run's evidence beside it (TIP.run-<time>), never deletes it first
+  [ -e "$J" ] && mv "$J" "$J.run-$(date -u +%Y%m%dT%H%M%SZ)"
+  mkdir -p "$J/rows"; t0=$(date +%s)
+  labels=$(for l in next green main; do [ "$(readlink "$ARTIFACT_ROOT/$l" 2>/dev/null)" = "$tip" ] && printf '%s ' "$l"; done)
+  if [ -n "$tip_source" ]; then src=$tip_source; [ ! -f "$src/.pipeline-leanenv-complete" ] || leanenv=1
+  elif [ -f "$ARTIFACT_ROOT/.leanenv/$tip/.pipeline-leanenv-complete" ]; then src=$ARTIFACT_ROOT/.leanenv/$tip; leanenv=1
+  else tmp=$(mktemp -d "$scratch_base/pjs.XXXXXX"); tar -xf "$set/source.tar" -C "$tmp"; src=$tmp; fi
+  if [ -n "$source_override" ]; then
+    [ -d "$source_override" ] || pipeline_die "no source override: $source_override"
+    [ "$leanenv" = 1 ] || [ -n "$tip_source" ] || rm -rf "$src"
+    src=$source_override; leanenv=0
+  fi
+  if [ -z "$source_override$rows_override" ]; then
+    local component
+    for component in journey-runner journey-rows lib.sh journey-red-lines; do
+      cmp -s "$here/$component" "$src/scripts/pipeline/$component" ||
+        pipeline_die "runner/tip mismatch: $component for $tip; install the stable journey launcher"
+    done
+  fi
+  rowsfile=$src/scripts/pipeline/journey-rows
+  if [ -n "$rows_override" ]; then
+    [ -f "$rows_override" ] || pipeline_die "no rows override: $rows_override"
+    rowsfile=$rows_override
+  fi
+  unset JOURNEY_ROWS; . "$rowsfile"
+  printf 'source=%s\nrunner=%s\nrows=%s\nsource_override=%s\nrows_override=%s\n' "$src" "$here/journey-runner" "$rowsfile" "$source_override" "$rows_override" >"$J/runner.properties"
+  sha256sum "$here/journey-runner" "$here/lib.sh" "$rowsfile" >"$J/runner.sha256"
+  if [ -n "$row_override" ]; then
+    [[ " ${JOURNEY_ROWS[*]} " == *" $row_override "* ]] || pipeline_die "unknown row: $row_override"
+    JOURNEY_ROWS=("$row_override")
+  fi
+  pipeline_log "tip $tip (${labels% }) from $src (lean env: $leanenv); rows: ${JOURNEY_ROWS[*]}"
+  : >"$J/results.tsv"
+  # Rows are independent (each its own scratch world, sockets, Store and scope): run them in
+  # parallel, PIPELINE_JOURNEY_JOBS at a time (default all), and assemble the table in row order.
+  local jobs=${PIPELINE_JOURNEY_JOBS:-${#JOURNEY_ROWS[@]}} row
+  for row in "${JOURNEY_ROWS[@]}"; do
+    while [ "$(jobs -rp | wc -l)" -ge "$jobs" ]; do wait -n; done
+    run_row "$row" &
+  done
+  wait
+  for row in "${JOURNEY_ROWS[@]}"; do cat "$J/rows/$row/result.tsv" >>"$J/results.tsv"; done
+  if [ "$leanenv" != 1 ] && [ -z "$source_override$tip_source" ]; then rm -rf "$src"; fi
+  local wall=$(( $(date +%s) - t0 ))
+  { printf 'tip %s  labels: %s\njourney wall %s s on %s (%s CPUs), finished %s; set built %s\n\n' "$tip" "${labels% }" \
+      "$wall" "$(hostname)" "$(nproc)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(sed -n 's/.*finished=\([^ ]*\).*/\1/p' "$set/PROVENANCE" 2>/dev/null)"
+    { printf 'ROW\tSTATUS\tWALL_S\tOWNER\tDETAIL\n'; cat "$J/results.tsv"; } | tabalign; } >"$J/table.txt"
+  bash "$here/journey-red-lines" "$JOURNEY_ROOT" "$tip" "${labels% }" >"$J/red.txt"
+  echo "$wall" >"$J/WALL_S"; date -u +%Y-%m-%dT%H:%M:%SZ >"$J/DONE"
+  pipeline_log "DONE $tip in ${wall}s: $(awk -F'\t' '{c[$2]++} END {for (k in c) printf "%s=%d ", k, c[k]}' "$J/results.tsv")"
+  # lean envs: drop those already run and no longer labelled, but keep the newest run one (the
+  # gate links the next copy against it). This box owns its copy of the store.
+  local keep=" $(for l in next green main; do readlink "$ARTIFACT_ROOT/$l" 2>/dev/null; done | paste -sd' ') " e n=0
+  for e in $(ls -1dt "$ARTIFACT_ROOT"/.leanenv/*/ 2>/dev/null); do
+    e=$(basename "$e"); [ -f "$JOURNEY_ROOT/$e/DONE" ] || continue
+    n=$((n + 1)); [ $n = 1 ] && continue
+    [[ $keep == *" $e "* ]] || rm -rf "$ARTIFACT_ROOT/.leanenv/$e"
+  done
+}
+
+while :; do
+  if [ -n "$only" ]; then
+    tip=$(pipeline_full_sha "$only") || exit 1
+    run_tip "$tip"
+  else
+    for l in next green main; do
+      tip=$(readlink "$ARTIFACT_ROOT/$l" 2>/dev/null) || continue
+      [ -f "$ARTIFACT_ROOT/$tip/READY" ] && [ ! -f "$JOURNEY_ROOT/$tip/DONE" ] || continue
+      # the gate mirrors the lean env right after the set; give it PIPELINE_LEANENV_WAIT_S (1800)
+      if [ ! -f "$ARTIFACT_ROOT/.leanenv/$tip/.pipeline-leanenv-complete" ] &&
+         [ $(( $(date +%s) - $(stat -c %Y "$ARTIFACT_ROOT/$tip/READY") )) -lt "${PIPELINE_LEANENV_WAIT_S:-1800}" ]; then
+        continue
+      fi
+      run_tip "$tip"
+      break   # re-read labels: next may have moved while this ran
+    done
+  fi
+  [ "$once" = 1 ] && break
+  sleep "${PIPELINE_WATCH_S:-60}"
+done

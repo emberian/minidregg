@@ -1,0 +1,2269 @@
+{
+ "rows": [
+  {
+   "step": "extract-quote-is-the-policy-ceiling",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "published": {
+     "extractTicks": "3200000"
+    },
+    "policy": 3200000
+   },
+   "group": null
+  },
+  {
+   "step": "publish",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": null
+  },
+  {
+   "step": "create-poster",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": null
+  },
+  {
+   "step": "create-counter",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": null
+  },
+  {
+   "step": "create-fan",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": null
+  },
+  {
+   "step": "create-sink",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": null
+  },
+  {
+   "step": "create-vault",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": null
+  },
+  {
+   "step": "create-dir",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": null
+  },
+  {
+   "step": "create-nodir",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": null
+  },
+  {
+   "step": "create-relayer",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": null
+  },
+  {
+   "step": "create-hopper",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": null
+  },
+  {
+   "step": "s1-postage-short",
+   "expect": "charged",
+   "detailExpected": [
+    "postageFrontEnd",
+    "15450098648352028167"
+   ],
+   "type": "confirmed",
+   "reason": "",
+   "detail": "charged failure: Minidregg.Kernel.ObjectiveActivityReceiver.Reject.call (Minidregg.Kernel.ObjectiveCall.CallRefusal.postageFrontEnd 15450098648352028167 (Minidregg.Kernel.ObjectiveWorkAccount.Stage.frontEnd) 8962 0) { source := 35848, core := 217058, postageSource := 0, postageCore := 0 }",
+   "ok": true,
+   "group": "S1-send"
+  },
+  {
+   "step": "s1-post",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S1-send"
+  },
+  {
+   "step": "s1-queued-one",
+   "expect": "check",
+   "ok": true,
+   "observed": [
+    "23700956220622620837066955051086709119848696965149712964317110577018303447067"
+   ],
+   "group": "S1-send"
+  },
+  {
+   "step": "s1-slot-open-delivery",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "activity": "217386880444448882643954864531803497026318030734892186637704202359879342991354",
+    "deadline": "0",
+    "decider": {
+     "delivery": "23700956220622620837066955051086709119848696965149712964317110577018303447067",
+     "sender": "12473023845127128266"
+    },
+    "name": "23700956220622620837066955051086709119848696965149712964317110577018303447067",
+    "phase": "open",
+    "queued": [],
+    "watched": true
+   },
+   "group": "S1-send"
+  },
+  {
+   "step": "s1-postage-escrowed",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "purse": 2833008,
+    "deposit": 131,
+    "paid": 8495665
+   },
+   "group": "S1-send"
+  },
+  {
+   "step": "s1-not-yet-delivered",
+   "expect": "check",
+   "ok": true,
+   "observed": null,
+   "group": "S1-send"
+  },
+  {
+   "step": "s2-deliver",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S2-deliver"
+  },
+  {
+   "step": "s2-counter-4",
+   "expect": "check",
+   "ok": true,
+   "observed": null,
+   "group": "S2-deliver"
+  },
+  {
+   "step": "s2-popped",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "cell": "217386880444448882643954864531803497026318030734892186637704202359879342991354",
+    "head": 0,
+    "ids": [],
+    "retired": true,
+    "messages": [],
+    "purse": 0,
+    "sponsor": 985841739,
+    "second": 100000000000,
+    "collector": 14158261
+   },
+   "group": "S2-deliver"
+  },
+  {
+   "step": "s2-deposit-refunded",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "refund": 131,
+    "deposit": 131
+   },
+   "group": "S2-deliver"
+  },
+  {
+   "step": "s2-slot-reply-4",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "activity": "217386880444448882643954864531803497026318030734892186637704202359879342991354",
+    "deadline": "0",
+    "decider": {
+     "delivery": "23700956220622620837066955051086709119848696965149712964317110577018303447067",
+     "sender": "12473023845127128266"
+    },
+    "name": "23700956220622620837066955051086709119848696965149712964317110577018303447067",
+    "phase": {
+     "decision": {
+      "kind": "reply",
+      "value": {
+       "tag": "natural",
+       "value": "4"
+      }
+     },
+     "height": "32"
+    },
+    "queued": [],
+    "watched": true
+   },
+   "group": "S2-deliver"
+  },
+  {
+   "step": "s2-purse-paid",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "purse": 0,
+    "collector": 2832877
+   },
+   "group": "S2-deliver"
+  },
+  {
+   "step": "s2-submitter-free",
+   "expect": "check",
+   "ok": true,
+   "observed": null,
+   "group": "S2-deliver"
+  },
+  {
+   "step": "s2-again",
+   "expect": "refused",
+   "detailExpected": null,
+   "type": "refused",
+   "reason": "conflict",
+   "detail": "transaction identity conflict",
+   "ok": true,
+   "group": "S2-deliver"
+  },
+  {
+   "step": "s3-burst-0",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S3-full"
+  },
+  {
+   "step": "s3-burst-1",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S3-full"
+  },
+  {
+   "step": "s3-burst-2",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S3-full"
+  },
+  {
+   "step": "s3-burst-3",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S3-full"
+  },
+  {
+   "step": "s3-burst-4",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S3-full"
+  },
+  {
+   "step": "s3-fifteen",
+   "expect": "check",
+   "ok": true,
+   "observed": 15,
+   "group": "S3-full"
+  },
+  {
+   "step": "s3-overflow",
+   "expect": "charged",
+   "detailExpected": [
+    "queueFull",
+    "11142396324718196247",
+    "13911063039594289753"
+   ],
+   "type": "confirmed",
+   "reason": "",
+   "detail": "charged failure: Minidregg.Kernel.ObjectiveActivityReceiver.Reject.call (Minidregg.Kernel.ObjectiveCall.CallRefusal.queueFull 11142396324718196247 13911063039594289753) { source := 53772, core := 325592, postageSource := 17924, postageCore := 108532 }",
+   "ok": true,
+   "group": "S3-full"
+  },
+  {
+   "step": "s3-nothing-commits",
+   "expect": "check",
+   "ok": true,
+   "observed": 15,
+   "group": "S3-full"
+  },
+  {
+   "step": "s3-sixteenth",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S3-full"
+  },
+  {
+   "step": "s3-full",
+   "expect": "charged",
+   "detailExpected": "queueFull",
+   "type": "confirmed",
+   "reason": "",
+   "detail": "charged failure: Minidregg.Kernel.ObjectiveActivityReceiver.Reject.call (Minidregg.Kernel.ObjectiveCall.CallRefusal.queueFull 11142396324718196247 13911063039594289753) { source := 35848, core := 217058, postageSource := 17924, postageCore := 108532 }",
+   "ok": true,
+   "group": "S3-full"
+  },
+  {
+   "step": "s3-sixteen",
+   "expect": "check",
+   "ok": true,
+   "observed": null,
+   "group": "S3-full"
+  },
+  {
+   "step": "s4-post",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S4-failed"
+  },
+  {
+   "step": "s4-deliver",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S4-failed"
+  },
+  {
+   "step": "s4-slot-broken-law",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "kind": "broken",
+    "reason": "Minidregg.Kernel.ObjectiveCall.CallRefusal.extractionAccount\n  (Minidregg.Kernel.ObjectiveCall.CallRefusal.lawDenied\n    13877080742474546359\n    \"deposit\"\n    (Minidregg.Kernel.ObjectRecord.WriteRefusal.lawDenied\n      { path := [2],\n        clause := Minidregg.Pred.Pred.anyL\n                    (Minidregg.Pred.PredList.cons\n                      (Minidregg.Pred.Pred.eq \"request/subject\" 7)\n                      (Minidregg.Pred.PredList.nil)),\n        before := none,\n        after := none }))\n  3199963\n  37"
+   },
+   "group": "S4-failed"
+  },
+  {
+   "step": "s4-popped",
+   "expect": "check",
+   "ok": true,
+   "observed": [],
+   "group": "S4-failed"
+  },
+  {
+   "step": "s4-no-write",
+   "expect": "check",
+   "ok": true,
+   "observed": null,
+   "group": "S4-failed"
+  },
+  {
+   "step": "s4-paid-from-purse",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "cell": "176838952128993606478082814039818591818389660178166899801341223162950711984898",
+    "head": 0,
+    "ids": [],
+    "retired": true,
+    "messages": [],
+    "purse": 0,
+    "sponsor": 855587993,
+    "second": 100000000000,
+    "collector": 99083879
+   },
+   "group": "S4-failed"
+  },
+  {
+   "step": "s5-pipe",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S5-forward"
+  },
+  {
+   "step": "s5-queued-on-slot",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "queued": 1,
+    "purse": 11325637,
+    "deposits": [
+     128,
+     131
+    ]
+   },
+   "group": "S5-forward"
+  },
+  {
+   "step": "s5-deliver-lookup",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S5-forward"
+  },
+  {
+   "step": "s5-reply-ref",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "activity": "155856610374171914764380642902131309119635430762279770689800924216288865332371",
+    "deadline": "0",
+    "decider": {
+     "delivery": "76518605813553435882119772815224377975155525170244167481881026615138007478397",
+     "sender": "12473023845127128266"
+    },
+    "name": "76518605813553435882119772815224377975155525170244167481881026615138007478397",
+    "phase": {
+     "decision": {
+      "kind": "reply",
+      "value": {
+       "label": "ref",
+       "payload": {
+        "tag": "natural",
+        "value": "15450098648352028167"
+       },
+       "tag": "variant"
+      }
+     },
+     "height": "44"
+    },
+    "queued": [],
+    "watched": true
+   },
+   "group": "S5-forward"
+  },
+  {
+   "step": "s5-slot-emptied",
+   "expect": "check",
+   "ok": true,
+   "observed": [],
+   "group": "S5-forward"
+  },
+  {
+   "step": "s5-forwarded",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "forwarded": [
+     "99896314013678756762981021485610019992284267729781874646321474631576536155756"
+    ],
+    "purse": 5662820,
+    "source": 0
+   },
+   "group": "S5-forward"
+  },
+  {
+   "step": "s5-forward-slot-open",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "activity": "217386880444448882643954864531803497026318030734892186637704202359879342991354",
+    "deadline": "0",
+    "decider": {
+     "delivery": "99896314013678756762981021485610019992284267729781874646321474631576536155756",
+     "sender": "12473023845127128266"
+    },
+    "name": "99896314013678756762981021485610019992284267729781874646321474631576536155756",
+    "phase": "open",
+    "queued": [],
+    "watched": true
+   },
+   "group": "S5-forward"
+  },
+  {
+   "step": "s5-deliver-forward",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S5-forward"
+  },
+  {
+   "step": "s5-deposited",
+   "expect": "check",
+   "ok": true,
+   "observed": null,
+   "group": "S5-forward"
+  },
+  {
+   "step": "s6-pipe",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S6-broken"
+  },
+  {
+   "step": "s6-deliver",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S6-broken"
+  },
+  {
+   "step": "s6-slot-broken",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "kind": "broken",
+    "reason": "Minidregg.Kernel.ObjectiveCall.CallRefusal.extractionAccount\n  (Minidregg.Kernel.ObjectiveCall.CallRefusal.exhausted)\n  3200000\n  0"
+   },
+   "group": "S6-broken"
+  },
+  {
+   "step": "s6-refunded",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "refund": 2830105,
+    "fee": 2829848
+   },
+   "group": "S6-broken"
+  },
+  {
+   "step": "s6-counter-kept",
+   "expect": "check",
+   "ok": true,
+   "observed": null,
+   "group": "S6-broken"
+  },
+  {
+   "step": "s6-pipe-none",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S6-broken"
+  },
+  {
+   "step": "s6-deliver-none",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S6-broken"
+  },
+  {
+   "step": "s6-none-not-a-reference",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "decision": {
+     "kind": "reply",
+     "value": {
+      "label": "none",
+      "payload": {
+       "fields": [],
+       "tag": "record"
+      },
+      "tag": "variant"
+     }
+    },
+    "refund": 2833104
+   },
+   "group": "S6-broken"
+  },
+  {
+   "step": "s6-none-counter-kept",
+   "expect": "check",
+   "ok": true,
+   "observed": null,
+   "group": "S6-broken"
+  },
+  {
+   "step": "s7-decided-slot",
+   "expect": "charged",
+   "detailExpected": [
+    "notPipelinable",
+    "23700956220622620837066955051086709119848696965149712964317110577018303447067"
+   ],
+   "type": "confirmed",
+   "reason": "",
+   "detail": "charged failure: Minidregg.Kernel.ObjectiveActivityReceiver.Reject.call (Minidregg.Kernel.ObjectiveCall.CallRefusal.notPipelinable 23700956220622620837066955051086709119848696965149712964317110577018303447067) { source := 17924, core := 108528, postageSource := 0, postageCore := 0 }",
+   "ok": true,
+   "group": "S7-shape"
+  },
+  {
+   "step": "s7-not-object",
+   "expect": "refused",
+   "detailExpected": [
+    "notAnObject",
+    "11855276553179219497"
+   ],
+   "type": "refused",
+   "reason": "operation-rejected",
+   "detail": "Minidregg.Kernel.ObjectiveActivityReceiver.Reject.call (Minidregg.Kernel.ObjectiveCall.CallRefusal.notAnObject 11855276553179219497) { source := 17924, core := 108526, postageSource := 0, postageCore := 0 }",
+   "ok": true,
+   "group": "S7-shape"
+  },
+  {
+   "step": "s7-no-postage",
+   "expect": "refused",
+   "detailExpected": "uncovered",
+   "type": "refused",
+   "reason": "operation-rejected",
+   "detail": "s := 0, proofWork := 0, feeDebit := 0, turnBytes := 0, witnessBytes := 0, storageBytes := 0, sideEffectCount := 0, networkBytes := 0, leaseByteBlocks := 0, incidences := 0, replayBytes := 0, coreBytes := 0, domainWork := 0 })) { source := 17924, core := 108526, postageSource := 0, postageCore := 0 }",
+   "ok": true,
+   "group": "S7-shape"
+  },
+  {
+   "step": "s7-nothing-commits",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "before": [],
+    "after": []
+   },
+   "group": "S7-shape"
+  },
+  {
+   "step": "s8-sending-method",
+   "expect": "charged",
+   "detailExpected": [
+    "notDeliverable",
+    "15450098648352028167",
+    "bounce",
+    "Plan admits send"
+   ],
+   "type": null,
+   "reason": "",
+   "detail": "mini: uncertain host response: connection closed",
+   "ok": false,
+   "group": "S8-interface"
+  },
+  {
+   "step": "s8-unknown-method",
+   "expect": "charged",
+   "detailExpected": [
+    "notCallable",
+    "nothing"
+   ],
+   "type": null,
+   "reason": "",
+   "detail": "mini: uncertain host response: connection closed",
+   "ok": false,
+   "group": "S8-interface"
+  },
+  {
+   "step": "s8-ill-typed-args",
+   "expect": "charged",
+   "detailExpected": "argumentType",
+   "type": "confirmed",
+   "reason": "",
+   "detail": "charged failure: Minidregg.Kernel.ObjectiveActivityReceiver.Reject.call (Minidregg.Kernel.ObjectiveCall.CallRefusal.argumentType 15450098648352028167 \"post\") { source := 26886, core := 162794, postageSource := 0, postageCore := 0 }",
+   "ok": true,
+   "group": "S8-interface"
+  },
+  {
+   "step": "s8-nothing-escrowed",
+   "expect": "check",
+   "ok": false,
+   "observed": {
+    "ids": [
+     [],
+     []
+    ],
+    "purse": [
+     0,
+     0
+    ],
+    "sponsor": -4247751
+   },
+   "group": "S8-interface"
+  },
+  {
+   "step": "s8-deliverable-control",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S8-interface"
+  },
+  {
+   "step": "s8-deliver-control",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S8-interface"
+  },
+  {
+   "step": "s8-control-delivered",
+   "expect": "check",
+   "ok": true,
+   "observed": null,
+   "group": "S8-interface"
+  },
+  {
+   "step": "s9-relay-via",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S9-resolved"
+  },
+  {
+   "step": "s9-queued-on-slot",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "queued": 1,
+    "purse": 11325635,
+    "deposits": [
+     128,
+     129
+    ]
+   },
+   "group": "S9-resolved"
+  },
+  {
+   "step": "s9-deliver-lookup",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S9-resolved"
+  },
+  {
+   "step": "s9-reply-ref",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "activity": "155856610374171914764380642902131309119635430762279770689800924216288865332371",
+    "deadline": "0",
+    "decider": {
+     "delivery": "98726397716316361046494903581842349895413299161421371015794760147442625572014",
+     "sender": "12473023845127128266"
+    },
+    "name": "98726397716316361046494903581842349895413299161421371015794760147442625572014",
+    "phase": {
+     "decision": {
+      "kind": "reply",
+      "value": {
+       "label": "ref",
+       "payload": {
+        "tag": "natural",
+        "value": "15450098648352028167"
+       },
+       "tag": "variant"
+      }
+     },
+     "height": "55"
+    },
+    "queued": [],
+    "watched": true
+   },
+   "group": "S9-resolved"
+  },
+  {
+   "step": "s9-not-forwarded",
+   "expect": "check",
+   "ok": true,
+   "observed": [],
+   "group": "S9-resolved"
+  },
+  {
+   "step": "s9-refunded",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "purse": 0,
+    "refund": 5662946,
+    "fee": 5662689
+   },
+   "group": "S9-resolved"
+  },
+  {
+   "step": "s9-counter-kept",
+   "expect": "check",
+   "ok": true,
+   "observed": null,
+   "group": "S9-resolved"
+  },
+  {
+   "step": "s10-post-a",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S10-cancel"
+  },
+  {
+   "step": "s10-post-b",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S10-cancel"
+  },
+  {
+   "step": "s10-post-c",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S10-cancel"
+  },
+  {
+   "step": "s10-cancel-b",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S10-cancel"
+  },
+  {
+   "step": "s10-acked",
+   "expect": "check",
+   "ok": true,
+   "observed": 82428180272676514166251516044621676932481586088724577822516818574672047235207,
+   "group": "S10-cancel"
+  },
+  {
+   "step": "s10-withdrawn-fifo-kept",
+   "expect": "check",
+   "ok": true,
+   "observed": [
+    [
+     "40950463427688225256703624094316577952250747960028658323108114341758258098913",
+     "82428180272676514166251516044621676932481586088724577822516818574672047235207",
+     "69879383935912681953978808384720221621717539109935696397723252072019765463076"
+    ],
+    [
+     "40950463427688225256703624094316577952250747960028658323108114341758258098913",
+     "69879383935912681953978808384720221621717539109935696397723252072019765463076"
+    ]
+   ],
+   "group": "S10-cancel"
+  },
+  {
+   "step": "s10-refund-exact",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "refund": 2833008,
+    "fee": 2832909,
+    "purse": [
+     8499024,
+     5666016
+    ]
+   },
+   "group": "S10-cancel"
+  },
+  {
+   "step": "s10-slot-cancelled",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "activity": "217386880444448882643954864531803497026318030734892186637704202359879342991354",
+    "deadline": "0",
+    "decider": {
+     "delivery": "82428180272676514166251516044621676932481586088724577822516818574672047235207",
+     "sender": "12473023845127128266"
+    },
+    "name": "82428180272676514166251516044621676932481586088724577822516818574672047235207",
+    "phase": {
+     "decision": {
+      "kind": "cancelled"
+     },
+     "height": "59"
+    },
+    "queued": [],
+    "watched": true
+   },
+   "group": "S10-cancel"
+  },
+  {
+   "step": "s10-deliver-cancelled-refused",
+   "expect": "refused",
+   "detailExpected": null,
+   "type": "refused",
+   "reason": "operation-rejected",
+   "detail": "Minidregg.Kernel.ObjectiveActivityReceiver.Reject.message (Minidregg.Kernel.ObjectiveSend.MessageRefusal.staleHead { value := 40950463427688225256703624094316577952250747960028658323108114341758258098913 })",
+   "ok": true,
+   "group": "S10-cancel"
+  },
+  {
+   "step": "s10-deliver-a",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S10-cancel"
+  },
+  {
+   "step": "s10-deliver-c",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S10-cancel"
+  },
+  {
+   "step": "s10-others-delivered",
+   "expect": "check",
+   "ok": true,
+   "observed": 14,
+   "group": "S10-cancel"
+  },
+  {
+   "step": "s10-pipe",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S10-cancel"
+  },
+  {
+   "step": "s10-cancel-lookup",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S10-cancel"
+  },
+  {
+   "step": "s10-pipelined-refunded",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "refund": 11325637,
+    "purse": [
+     11325637,
+     0
+    ],
+    "ids": []
+   },
+   "group": "S10-cancel"
+  },
+  {
+   "step": "s10-lookup-cancelled",
+   "expect": "check",
+   "ok": true,
+   "observed": null,
+   "group": "S10-cancel"
+  },
+  {
+   "step": "s10-deliver-lookup-refused",
+   "expect": "refused",
+   "detailExpected": null,
+   "type": "refused",
+   "reason": "operation-rejected",
+   "detail": "Minidregg.Kernel.ObjectiveActivityReceiver.Reject.message (Minidregg.Kernel.ObjectiveSend.MessageRefusal.noInbox 12473023845127128266 17244811421261466695)",
+   "ok": true,
+   "group": "S10-cancel"
+  },
+  {
+   "step": "s11-post",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S11-pole"
+  },
+  {
+   "step": "s11-cancel-prepared",
+   "expect": "prepared",
+   "detailExpected": null,
+   "type": "prepared",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S11-pole"
+  },
+  {
+   "step": "s11-deliver-first",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S11-pole"
+  },
+  {
+   "step": "s11-prepared-cancel-stale",
+   "expect": "charged",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S11-pole"
+  },
+  {
+   "step": "s11-cancel-after",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S11-pole"
+  },
+  {
+   "step": "s11-acked",
+   "expect": "check",
+   "ok": true,
+   "observed": 41206778751862624092857355538276993970580086609759662342892534579060476702541,
+   "group": "S11-pole"
+  },
+  {
+   "step": "s11-noop-refunds-nothing",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "refund": 0,
+    "fee": 2832909,
+    "ids": []
+   },
+   "group": "S11-pole"
+  },
+  {
+   "step": "s11-slot-still-reply",
+   "expect": "check",
+   "ok": true,
+   "observed": null,
+   "group": "S11-pole"
+  },
+  {
+   "step": "s12-pipe",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S12-stop"
+  },
+  {
+   "step": "s12-stop",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S12-stop"
+  },
+  {
+   "step": "s12-acked",
+   "expect": "check",
+   "ok": true,
+   "observed": 43446610721695700229315229218826971737269475810189816212639180376851333180023,
+   "group": "S12-stop"
+  },
+  {
+   "step": "s12-pipelined-refunded",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "refund": 5662820,
+    "purse": [
+     11325637,
+     5662817
+    ]
+   },
+   "group": "S12-stop"
+  },
+  {
+   "step": "s12-open-unwatched",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "activity": "155856610374171914764380642902131309119635430762279770689800924216288865332371",
+    "deadline": "0",
+    "decider": {
+     "delivery": "43446610721695700229315229218826971737269475810189816212639180376851333180023",
+     "sender": "12473023845127128266"
+    },
+    "name": "43446610721695700229315229218826971737269475810189816212639180376851333180023",
+    "phase": "open",
+    "queued": [],
+    "watched": false
+   },
+   "group": "S12-stop"
+  },
+  {
+   "step": "s12-still-delivered",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S12-stop"
+  },
+  {
+   "step": "s12-popped-paid",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "cell": "155856610374171914764380642902131309119635430762279770689800924216288865332371",
+    "head": 0,
+    "ids": [],
+    "retired": true,
+    "messages": [],
+    "purse": 0,
+    "sponsor": 732408796,
+    "second": 100000000000,
+    "collector": 222263076
+   },
+   "group": "S12-stop"
+  },
+  {
+   "step": "s12-delivery-retires",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "cell": "127747166054675884622894625085473360944242211135246379049860727685852800060073",
+    "kind": "retired",
+    "root": "102498708415092841782006624486737695593955345942195696937489392733428909751195"
+   },
+   "group": "S12-stop"
+  },
+  {
+   "step": "s12-counter-kept",
+   "expect": "check",
+   "ok": true,
+   "observed": null,
+   "group": "S12-stop"
+  },
+  {
+   "step": "s12-stop-decided",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S12-stop"
+  },
+  {
+   "step": "s12-decided-retired",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "cell": "207927078436765761634659393977518768519386101522095397210947138174945476091605",
+    "kind": "retired",
+    "root": "102498708415092841782006624486737695593955345942195696937489392733428909751195"
+   },
+   "group": "S12-stop"
+  },
+  {
+   "step": "s13-post",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S13-who"
+  },
+  {
+   "step": "s13-pipe",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S13-who"
+  },
+  {
+   "step": "s13-stop-look",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S13-who"
+  },
+  {
+   "step": "s13-other-cancel",
+   "expect": "charged",
+   "detailExpected": [
+    "notSender",
+    "67762250266743823649325311642852674409217796478368890789235418415858247151894",
+    "15450098648352028167"
+   ],
+   "type": "confirmed",
+   "reason": "",
+   "detail": "charged failure: Minidregg.Kernel.ObjectiveActivityReceiver.Reject.call (Minidregg.Kernel.ObjectiveCall.CallRefusal.notSender 67762250266743823649325311642852674409217796478368890789235418415858247151894 15450098648352028167) { source := 17924, core := 108534, postageSource := 0, postageCore := 0 }",
+   "ok": true,
+   "group": "S13-who"
+  },
+  {
+   "step": "s13-other-stop",
+   "expect": "charged",
+   "detailExpected": [
+    "notSender",
+    "67762250266743823649325311642852674409217796478368890789235418415858247151894",
+    "15450098648352028167"
+   ],
+   "type": "confirmed",
+   "reason": "",
+   "detail": "charged failure: Minidregg.Kernel.ObjectiveActivityReceiver.Reject.call (Minidregg.Kernel.ObjectiveCall.CallRefusal.notSender 67762250266743823649325311642852674409217796478368890789235418415858247151894 15450098648352028167) { source := 17924, core := 108530, postageSource := 0, postageCore := 0 }",
+   "ok": true,
+   "group": "S13-who"
+  },
+  {
+   "step": "s13-no-such-slot",
+   "expect": "charged",
+   "detailExpected": [
+    "notControllable",
+    "987654321"
+   ],
+   "type": "confirmed",
+   "reason": "",
+   "detail": "charged failure: Minidregg.Kernel.ObjectiveActivityReceiver.Reject.call (Minidregg.Kernel.ObjectiveCall.CallRefusal.notControllable 987654321) { source := 17924, core := 108534, postageSource := 0, postageCore := 0 }",
+   "ok": true,
+   "group": "S13-who"
+  },
+  {
+   "step": "s13-chase-stopped",
+   "expect": "charged",
+   "detailExpected": [
+    "notPipelinable",
+    "51625699941924967153804370641467998979827622146146575977062362759256811671970"
+   ],
+   "type": "confirmed",
+   "reason": "",
+   "detail": "charged failure: Minidregg.Kernel.ObjectiveActivityReceiver.Reject.call (Minidregg.Kernel.ObjectiveCall.CallRefusal.notPipelinable 51625699941924967153804370641467998979827622146146575977062362759256811671970) { source := 17924, core := 108528, postageSource := 0, postageCore := 0 }",
+   "ok": true,
+   "group": "S13-who"
+  },
+  {
+   "step": "s13-nothing-commits",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "ids": [
+     [
+      "67762250266743823649325311642852674409217796478368890789235418415858247151894"
+     ],
+     [
+      "67762250266743823649325311642852674409217796478368890789235418415858247151894"
+     ]
+    ]
+   },
+   "group": "S13-who"
+  },
+  {
+   "step": "s14-relay",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S14-continue"
+  },
+  {
+   "step": "s14-escrowed",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "message": {
+     "allowance": "12738799",
+     "args": {
+      "tag": "natural",
+      "value": "15450098648352028167"
+     },
+     "deposit": "139",
+     "depth": "0",
+     "envelope": {
+      "coreBytes": "325590",
+      "domainWork": "0",
+      "extractTicks": "3200000",
+      "feeDebit": "0",
+      "heap": "200000",
+      "incidences": "0",
+      "inputBytes": "0",
+      "leaseByteBlocks": "0",
+      "memoryTouches": "0",
+      "networkBytes": "0",
+      "outputBytes": "200000",
+      "outputNodes": "20000",
+      "proofWork": "0",
+      "replayBytes": "53772",
+      "scalarBits": "0",
+      "sideEffectCount": "0",
+      "sourceTicks": "3000",
+      "stack": "200000",
+      "storageBytes": "0",
+      "turnBytes": "0",
+      "typeFuel": "16384",
+      "witnessBytes": "0"
+     },
+     "id": "95622443166383815564194082687800688129344068707295966948301254234372218247724",
+     "method": "bounce",
+     "postage": "8492533",
+     "refund": "7",
+     "sender": "13301454727658436944"
+    },
+    "purse": 21231471,
+    "paid": 26894160
+   },
+   "group": "S14-continue"
+  },
+  {
+   "step": "s14-deliver",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S14-continue"
+  },
+  {
+   "step": "s14-replied",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "kind": "reply",
+    "value": {
+     "tag": "natural",
+     "value": "36301791095419734078650540189576428462006938982324224192856181084773411791057"
+    }
+   },
+   "group": "S14-continue"
+  },
+  {
+   "step": "s14-onward-queued",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "onward": [
+     "36301791095419734078650540189576428462006938982324224192856181084773411791057"
+    ],
+    "message": {
+     "allowance": "0",
+     "args": {
+      "tag": "natural",
+      "value": "15450098648352028167"
+     },
+     "deposit": "139",
+     "depth": "1",
+     "envelope": {
+      "coreBytes": "325590",
+      "domainWork": "0",
+      "extractTicks": "3200000",
+      "feeDebit": "0",
+      "heap": "200000",
+      "incidences": "0",
+      "inputBytes": "0",
+      "leaseByteBlocks": "0",
+      "memoryTouches": "0",
+      "networkBytes": "0",
+      "outputBytes": "200000",
+      "outputNodes": "20000",
+      "proofWork": "0",
+      "replayBytes": "53772",
+      "scalarBits": "0",
+      "sideEffectCount": "0",
+      "sourceTicks": "3000",
+      "stack": "200000",
+      "storageBytes": "0",
+      "turnBytes": "0",
+      "typeFuel": "16384",
+      "witnessBytes": "0"
+     },
+     "id": "36301791095419734078650540189576428462006938982324224192856181084773411791057",
+     "method": "deposit",
+     "postage": "8492533",
+     "refund": "7",
+     "sender": "15450098648352028167"
+    },
+    "purse": 8492672
+   },
+   "group": "S14-continue"
+  },
+  {
+   "step": "s14-remainder-exact",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "refund": 4246266,
+    "purse": [
+     0,
+     0
+    ],
+    "fee": 8492533
+   },
+   "group": "S14-continue"
+  },
+  {
+   "step": "s14-deliver-onward",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S14-continue"
+  },
+  {
+   "step": "s14-onward-delivered",
+   "expect": "check",
+   "ok": true,
+   "observed": null,
+   "group": "S14-continue"
+  },
+  {
+   "step": "s15-over-declared",
+   "expect": "charged",
+   "detailExpected": [
+    "allowanceExceeded",
+    "12738943 12738942"
+   ],
+   "type": "confirmed",
+   "reason": "",
+   "detail": "charged failure: Minidregg.Kernel.ObjectiveActivityReceiver.Reject.call (Minidregg.Kernel.ObjectiveCall.CallRefusal.allowanceExceeded 12738943 12738942) { source := 17924, core := 108530, postageSource := 0, postageCore := 0 }",
+   "ok": true,
+   "group": "S15-exceed"
+  },
+  {
+   "step": "s15-over-declared-nothing",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "ids": [],
+    "paid": 2832845
+   },
+   "group": "S15-exceed"
+  },
+  {
+   "step": "s15-relay",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S15-exceed"
+  },
+  {
+   "step": "s15-deliver",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S15-exceed"
+  },
+  {
+   "step": "s15-broken-named",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "kind": "broken",
+    "reason": "Minidregg.Kernel.ObjectiveCall.CallRefusal.allowanceExceeded 16985536 12738943"
+   },
+   "group": "S15-exceed"
+  },
+  {
+   "step": "s15-nothing-onward",
+   "expect": "check",
+   "ok": true,
+   "observed": [],
+   "group": "S15-exceed"
+  },
+  {
+   "step": "s15-allowance-refunded",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "refund": 12739084,
+    "fee": 8492629
+   },
+   "group": "S15-exceed"
+  },
+  {
+   "step": "s15-counter-kept",
+   "expect": "check",
+   "ok": true,
+   "observed": null,
+   "group": "S15-exceed"
+  },
+  {
+   "step": "s16-relay",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S16-fanout"
+  },
+  {
+   "step": "s16-deliver",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S16-fanout"
+  },
+  {
+   "step": "s16-broken-fanout",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "kind": "broken",
+    "reason": "Minidregg.Kernel.ObjectiveCall.CallRefusal.fanOut 4"
+   },
+   "group": "S16-fanout"
+  },
+  {
+   "step": "s16-nothing-onward",
+   "expect": "check",
+   "ok": true,
+   "observed": [],
+   "group": "S16-fanout"
+  },
+  {
+   "step": "s16-allowance-refunded",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "refund": 101893686
+   },
+   "group": "S16-fanout"
+  },
+  {
+   "step": "s17-hop",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S17-depth"
+  },
+  {
+   "step": "s17-deliver-0",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S17-depth"
+  },
+  {
+   "step": "s17-deliver-1",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S17-depth"
+  },
+  {
+   "step": "s17-one-hop-deeper",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "m1": {
+     "allowance": "42468728",
+     "args": {
+      "fields": [
+       {
+        "name": "target",
+        "value": {
+         "tag": "natural",
+         "value": "15945247405893296280"
+        }
+       },
+       {
+        "name": "price",
+        "value": {
+         "tag": "natural",
+         "value": "5662497"
+        }
+       },
+       {
+        "name": "allowance",
+        "value": {
+         "tag": "natural",
+         "value": "42468728"
+        }
+       },
+       {
+        "name": "reserve",
+        "value": {
+         "tag": "natural",
+         "value": "1415624"
+        }
+       }
+      ],
+      "tag": "record"
+     },
+     "deposit": "240",
+     "depth": "1",
+     "envelope": {
+      "coreBytes": "217048",
+      "domainWork": "0",
+      "extractTicks": "3200000",
+      "feeDebit": "0",
+      "heap": "200000",
+      "incidences": "0",
+      "inputBytes": "0",
+      "leaseByteBlocks": "0",
+      "memoryTouches": "0",
+      "networkBytes": "0",
+      "outputBytes": "200000",
+      "outputNodes": "20000",
+      "proofWork": "0",
+      "replayBytes": "35848",
+      "scalarBits": "0",
+      "sideEffectCount": "0",
+      "sourceTicks": "3000",
+      "stack": "200000",
+      "storageBytes": "0",
+      "turnBytes": "0",
+      "typeFuel": "16384",
+      "witnessBytes": "0"
+     },
+     "id": "64480302314640253923209120345495827426128185789128107159469711665450604128771",
+     "method": "hop",
+     "postage": "5662497",
+     "refund": "7",
+     "sender": "15945247405893296280"
+    },
+    "m2": {
+     "allowance": "35390607",
+     "args": {
+      "fields": [
+       {
+        "name": "target",
+        "value": {
+         "tag": "natural",
+         "value": "15945247405893296280"
+        }
+       },
+       {
+        "name": "price",
+        "value": {
+         "tag": "natural",
+         "value": "5662497"
+        }
+       },
+       {
+        "name": "allowance",
+        "value": {
+         "tag": "natural",
+         "value": "35390607"
+        }
+       },
+       {
+        "name": "reserve",
+        "value": {
+         "tag": "natural",
+         "value": "1415624"
+        }
+       }
+      ],
+      "tag": "record"
+     },
+     "deposit": "240",
+     "depth": "2",
+     "envelope": {
+      "coreBytes": "217048",
+      "domainWork": "0",
+      "extractTicks": "3200000",
+      "feeDebit": "0",
+      "heap": "200000",
+      "incidences": "0",
+      "inputBytes": "0",
+      "leaseByteBlocks": "0",
+      "memoryTouches": "0",
+      "networkBytes": "0",
+      "outputBytes": "200000",
+      "outputNodes": "20000",
+      "proofWork": "0",
+      "replayBytes": "35848",
+      "scalarBits": "0",
+      "sideEffectCount": "0",
+      "sourceTicks": "3000",
+      "stack": "200000",
+      "storageBytes": "0",
+      "turnBytes": "0",
+      "typeFuel": "16384",
+      "witnessBytes": "0"
+     },
+     "id": "81615321897126476609320214344139462115459553832607975028579462812838892489605",
+     "method": "hop",
+     "postage": "5662497",
+     "refund": "7",
+     "sender": "15945247405893296280"
+    }
+   },
+   "group": "S17-depth"
+  },
+  {
+   "step": "s17-deliver-2",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S17-depth"
+  },
+  {
+   "step": "s17-depth-refused",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "kind": "broken",
+    "reason": "Minidregg.Kernel.ObjectiveCall.CallRefusal.continuationDepth 3"
+   },
+   "group": "S17-depth"
+  },
+  {
+   "step": "s17-depth-refund",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "refund": 35390847,
+    "ids": [],
+    "purse": 0
+   },
+   "group": "S17-depth"
+  },
+  {
+   "step": "s17-two-delivered",
+   "expect": "check",
+   "ok": true,
+   "observed": 2,
+   "group": "S17-depth"
+  },
+  {
+   "step": "s18-relay",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S18-cancel"
+  },
+  {
+   "step": "s18-cancel",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S18-cancel"
+  },
+  {
+   "step": "s18-refund-postage-and-allowance",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "refund": 14156861,
+    "fee": 2832909,
+    "purse": [
+     14156861,
+     0
+    ]
+   },
+   "group": "S18-cancel"
+  },
+  {
+   "step": "s18-slot-cancelled",
+   "expect": "check",
+   "ok": true,
+   "observed": null,
+   "group": "S18-cancel"
+  },
+  {
+   "step": "s19-post",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S19-retry"
+  },
+  {
+   "step": "s19-retry",
+   "expect": "replayed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S19-retry"
+  },
+  {
+   "step": "s19-retry-richer",
+   "expect": "replayed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S19-retry"
+  },
+  {
+   "step": "s19-one-message",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "new": [
+     "13773828246117118795070995184904365764990842668789022083698515884195238429880"
+    ],
+    "first": 13773828246117118795070995184904365764990842668789022083698515884195238429880
+   },
+   "group": "S19-retry"
+  },
+  {
+   "step": "s19-same-answer",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "first": [
+     "65012478788439631693881006379964532366662912166232111557270904209652221499740",
+     "95467335060581315118386047550231470993107692127742816055139277495923099027052",
+     13773828246117118795070995184904365764990842668789022083698515884195238429880
+    ],
+    "retry": [
+     "65012478788439631693881006379964532366662912166232111557270904209652221499740",
+     "95467335060581315118386047550231470993107692127742816055139277495923099027052",
+     null
+    ],
+    "richer": [
+     "65012478788439631693881006379964532366662912166232111557270904209652221499740",
+     "95467335060581315118386047550231470993107692127742816055139277495923099027052"
+    ]
+   },
+   "group": "S19-retry"
+  },
+  {
+   "step": "s19-paid-once",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "paid": 8495665,
+    "deposit": 131,
+    "purse": [
+     2833008,
+     5666016,
+     5666016
+    ]
+   },
+   "group": "S19-retry"
+  },
+  {
+   "step": "s20-post",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S20-same-op-other-call"
+  },
+  {
+   "step": "s20-other-call",
+   "expect": "refused",
+   "detailExpected": "replayedMarker",
+   "type": "refused",
+   "reason": "operation-rejected",
+   "detail": "Minidregg.Kernel.ObjectiveActivityReceiver.Reject.replayedMarker",
+   "ok": true,
+   "group": "S20-same-op-other-call"
+  },
+  {
+   "step": "s20-one-message",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "new": [
+     "44041419782667765141526138839348037158427011835326371613860617367651274153239"
+    ],
+    "deposit": 131,
+    "paid": 8495665
+   },
+   "group": "S20-same-op-other-call"
+  },
+  {
+   "step": "s21-forged",
+   "expect": "refused",
+   "detailExpected": "signature",
+   "type": "refused",
+   "reason": "operation-rejected",
+   "detail": "Minidregg.Kernel.ObjectiveActivityReceiver.Reject.signature (Minidregg.Compiler.CredentialSignatureAdmission.Reject.envelope (Minidregg.Kernel.CredentialSignedEnvelopeController.Failure.invalidSignature))",
+   "ok": true,
+   "group": "S21-forged-retry"
+  },
+  {
+   "step": "s21-no-receipt",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "detail": "4d696e6964726567672e4b65726e656c2e4f626a656374697665416374697669747952656365697665722e52656a6563742e7369676e61747572650a2020284d696e6964726567672e436f6d70696c65722e43726564656e7469616c5369676e617475726541646d697373696f6e2e52656a6563742e656e76656c6f70650a20202020284d696e6964726567672e4b65726e656c2e43726564656e7469616c5369676e6564456e76656c6f7065436f6e74726f6c6c65722e4661696c7572652e696e76616c69645369676e61747572652929",
+    "frontEnd": {
+     "coreBytes": "54266",
+     "postageCoreBytes": "0",
+     "postageReplayBytes": "0",
+     "replayBytes": "8962"
+    },
+    "ingress": "/run/user/1001/pj.HGfYz1/s/attempts/s21-forged/ingress.bin",
+    "phase": "6163746976697479",
+    "reason": "operation-rejected",
+    "report": null,
+    "transaction": "65012478788439631693881006379964532366662912166232111557270904209652221499740",
+    "type": "refused",
+    "verdict": "charged failure: Minidregg.Kernel.ObjectiveActivityReceiver.Reject.call\n  (Minidregg.Kernel.ObjectiveCall.CallRefusal.extractionAccount\n    (Minidregg.Kernel.ObjectiveCall.CallRefusal.frontEndExhausted\n      (Minidregg.Kernel.ObjectiveWorkAccount.Stage.frontEnd)\n      8962\n      0)\n    3200000\n    0)\n  { source := 8962, core := 54266, postageSource := 0, postageCore := 0 }"
+   },
+   "group": "S21-forged-retry"
+  },
+  {
+   "step": "s21-nothing",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "new": []
+   },
+   "group": "S21-forged-retry"
+  },
+  {
+   "step": "s22-altered-outcome-refused",
+   "expect": "refused",
+   "detailExpected": "signature",
+   "type": "refused",
+   "reason": "operation-rejected",
+   "detail": "Minidregg.Kernel.ObjectiveActivityReceiver.Reject.signature (Minidregg.Compiler.CredentialSignatureAdmission.Reject.envelope (Minidregg.Kernel.CredentialSignedEnvelopeController.Failure.wrongMessage))",
+   "ok": true,
+   "group": "S22-retry-outcome-altered"
+  },
+  {
+   "step": "s22-unaltered-replays",
+   "expect": "replayed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "S22-retry-outcome-altered"
+  },
+  {
+   "step": "s22-altered-answered-nothing",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "answer": "refused",
+    "new": []
+   },
+   "group": "S22-retry-outcome-altered"
+  }
+ ],
+ "totals": [
+  {
+   "after": "s1-counter",
+   "height": "32",
+   "total": "0"
+  },
+  {
+   "after": "s2-counter",
+   "height": "33",
+   "total": "0"
+  },
+  {
+   "after": "s3-fan",
+   "height": "39",
+   "total": "0"
+  },
+  {
+   "after": "s4-vault",
+   "height": "43",
+   "total": "0"
+  },
+  {
+   "after": "s5-c0",
+   "height": "43",
+   "total": "0"
+  },
+  {
+   "after": "s5-c1",
+   "height": "46",
+   "total": "0"
+  },
+  {
+   "after": "s6-c0",
+   "height": "46",
+   "total": "0"
+  },
+  {
+   "after": "s6-c1",
+   "height": "48",
+   "total": "0"
+  },
+  {
+   "after": "s6-c2",
+   "height": "50",
+   "total": "0"
+  },
+  {
+   "after": "s8-c0",
+   "height": "51",
+   "total": "0"
+  },
+  {
+   "after": "s8-c1",
+   "height": "54",
+   "total": "0"
+  },
+  {
+   "after": "s9-c0",
+   "height": "54",
+   "total": "0"
+  },
+  {
+   "after": "s9-c1",
+   "height": "56",
+   "total": "0"
+  },
+  {
+   "after": "s10-c0",
+   "height": "56",
+   "total": "0"
+  },
+  {
+   "after": "s10-c1",
+   "height": "62",
+   "total": "0"
+  },
+  {
+   "after": "s10-c1x",
+   "height": "62",
+   "total": "0"
+  },
+  {
+   "after": "s11-c0",
+   "height": "65",
+   "total": "0"
+  },
+  {
+   "after": "s11-c1",
+   "height": "68",
+   "total": "0"
+  },
+  {
+   "after": "s12-c0",
+   "height": "68",
+   "total": "0"
+  },
+  {
+   "after": "s12-c1",
+   "height": "71",
+   "total": "0"
+  },
+  {
+   "after": "s14-c0",
+   "height": "79",
+   "total": "0"
+  },
+  {
+   "after": "s14-c1",
+   "height": "82",
+   "total": "0"
+  },
+  {
+   "after": "s15-c0",
+   "height": "82",
+   "total": "0"
+  },
+  {
+   "after": "s15-c1",
+   "height": "85",
+   "total": "0"
+  },
+  {
+   "after": "s17-h0",
+   "height": "87",
+   "total": "0"
+  },
+  {
+   "after": "s17-h1",
+   "height": "91",
+   "total": "0"
+  },
+  {
+   "after": "s17-h1x",
+   "height": "91",
+   "total": "0"
+  }
+ ],
+ "objects": {
+  "poster": {
+   "object": "12473023845127128266",
+   "capability": "12020232563038550551"
+  },
+  "counter": {
+   "object": "15450098648352028167",
+   "capability": "15451528203785289794"
+  },
+  "fan": {
+   "object": "11142396324718196247",
+   "capability": "17933284935772970320"
+  },
+  "sink": {
+   "object": "13911063039594289753",
+   "capability": "9306035651788745101"
+  },
+  "vault": {
+   "object": "13877080742474546359",
+   "capability": "16926646006721139936"
+  },
+  "dir": {
+   "object": "17244811421261466695",
+   "capability": "17714438724906854789"
+  },
+  "nodir": {
+   "object": "13600887021416285186",
+   "capability": "11340768077745910656"
+  },
+  "relayer": {
+   "object": "13301454727658436944",
+   "capability": "13976741756896056797"
+  },
+  "hopper": {
+   "object": "15945247405893296280",
+   "capability": "15322813844002824135"
+  },
+  "bare": {
+   "object": "11855276553179219497",
+   "capability": "15866051680613326513"
+  }
+ },
+ "allPass": false,
+ "pin": "81367220337079448649272403375540514193766052722061616200025318913652758371841",
+ "plants": []
+}

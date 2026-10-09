@@ -1,0 +1,6 @@
+JOURNEY_ROWS=(ok red signal timed oom)
+row_ok() { echo 'synthetic driver PASS' >&2; }
+row_red() { echo 'synthetic real refusal' >&2; return 17; }
+row_signal() { kill -TERM "$BASHPID"; }
+row_timed() { sleep 20; }
+row_oom() { python3 -c 'allocation = bytearray(256 * 1024 * 1024); print(len(allocation))'; }

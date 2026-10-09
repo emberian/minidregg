@@ -1,0 +1,2 @@
+workspace continuity: legacy; initialize with workspace --action continuity-init --name REF
+workspace birth attempt: /run/user/1001/pj.HGfYz1/s/w/sponsor/attempts/create-hopper

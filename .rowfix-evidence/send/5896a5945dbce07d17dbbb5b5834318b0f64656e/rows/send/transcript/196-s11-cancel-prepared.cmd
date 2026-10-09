@@ -1,0 +1,1 @@
+/srv/artifacts/5896a5945dbce07d17dbbb5b5834318b0f64656e/bin/mini activity --action submit --workspace /run/user/1001/pj.HGfYz1/s/w/sponsor --command /run/user/1001/pj.HGfYz1/s/s11-cancel-prepared.turn.json --out /run/user/1001/pj.HGfYz1/s/attempts/s11-cancel-prepared --prepare-only true

@@ -1,0 +1,16 @@
+This key is the only copy. It signs as you and opens your private rooms.
+If you lose it and have no next key there is no recovery: you enroll a new subject and are re-invited.
+Room content comes back by re-wrap at the current epoch; older epochs come back
+only from a member who kept them. Your old posts stay under the old subject.
+Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB --escrow-subject SUBJECT` writes your seed encrypted
+to your sponsor, which lets your sponsor sign as you.
+next key: /run/user/1001/pj.HGfYz1/s/second.key.next (its public half: /run/user/1001/pj.HGfYz1/s/second.key.next.pub)
+for your sponsor's `enroll plan NAME KEYFILE NEXT-PUB COSIGN` (public, safe to send):
+  next public key: fbdae88e37cc85610612e7f641a7d707f6e0e15648d30b12d784a4e77f50b1b1
+  co-signature:    f8d8a0512de61808f1a351756c793df290fc801bad628122a2679e4729ea53695c73b653c60994db485242a3d184f59a538fe1594e7d237e07c2a8b98b9cea01
+Your NEXT key is the only thing that can rotate this identity. If the daily key
+is lost or stolen, `mini rotate-key --next-key NEXT` moves your subject to it and
+the daily key stops signing; a thief holding only the daily key cannot rotate.
+Keep the next key OFF this machine (other media, paper): if it sits beside the
+daily key, whoever takes one takes both and pre-rotation protects nothing.
+Your blinding key is derived from this seed (`mini key --action export-blinding`); it keys the salts that hide each cell’s fields from readers you have not named.

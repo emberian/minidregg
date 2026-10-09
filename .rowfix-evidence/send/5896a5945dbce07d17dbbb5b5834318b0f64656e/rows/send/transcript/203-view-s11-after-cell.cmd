@@ -1,0 +1,1 @@
+/srv/artifacts/5896a5945dbce07d17dbbb5b5834318b0f64656e/bin/mini activity --action view --workspace /run/user/1001/pj.HGfYz1/s/w/sponsor --request {"inboxes": [{"sender": "12473023845127128266", "target": "15450098648352028167"}]}

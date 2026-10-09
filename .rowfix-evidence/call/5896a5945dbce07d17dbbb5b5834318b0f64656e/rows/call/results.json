@@ -1,0 +1,874 @@
+{
+ "rows": [
+  {
+   "step": "extract-quote-is-the-policy-ceiling",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "published": {
+     "extractTicks": "3200000"
+    },
+    "policy": 3200000
+   },
+   "group": null
+  },
+  {
+   "step": "publish",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": null
+  },
+  {
+   "step": "create-counter",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": null
+  },
+  {
+   "step": "create-relayA",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": null
+  },
+  {
+   "step": "create-relayB",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": null
+  },
+  {
+   "step": "create-bank",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": null
+  },
+  {
+   "step": "create-payee",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": null
+  },
+  {
+   "step": "create-thief",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": null
+  },
+  {
+   "step": "create-vault",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": null
+  },
+  {
+   "step": "create-gated",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": null
+  },
+  {
+   "step": "c1-deposit",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "C1-leaf"
+  },
+  {
+   "step": "c1-report-5",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "tag": "natural",
+    "value": "5"
+   },
+   "group": "C1-leaf"
+  },
+  {
+   "step": "c1-state-5",
+   "expect": "check",
+   "ok": true,
+   "observed": null,
+   "group": "C1-leaf"
+  },
+  {
+   "step": "c1-next-version",
+   "expect": "check",
+   "ok": true,
+   "observed": [
+    "1",
+    "2"
+   ],
+   "group": "C1-leaf"
+  },
+  {
+   "step": "c2-relay",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "C2-chain"
+  },
+  {
+   "step": "c2-counter-8",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "counter": 8,
+    "relayA": 1,
+    "relayB": 1
+   },
+   "group": "C2-chain"
+  },
+  {
+   "step": "c2-each-hop-counted",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "counter": 8,
+    "relayA": 1,
+    "relayB": 1
+   },
+   "group": "C2-chain"
+  },
+  {
+   "step": "c2-report-8",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "tag": "natural",
+    "value": "8"
+   },
+   "group": "C2-chain"
+  },
+  {
+   "step": "c3-twice",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "C3-sequence"
+  },
+  {
+   "step": "c3-second-sees-first",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "tag": "natural",
+    "value": "12"
+   },
+   "group": "C3-sequence"
+  },
+  {
+   "step": "c3-both-land",
+   "expect": "check",
+   "ok": true,
+   "observed": null,
+   "group": "C3-sequence"
+  },
+  {
+   "step": "c11-one-frame",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "C11-front-end-meter"
+  },
+  {
+   "step": "c11-three-frames",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "C11-front-end-meter"
+  },
+  {
+   "step": "c11-three-frames-draw-more",
+   "expect": "check",
+   "ok": true,
+   "observed": [
+    [
+     8738,
+     43544
+    ],
+    [
+     26214,
+     130628
+    ]
+   ],
+   "group": "C11-front-end-meter"
+  },
+  {
+   "step": "c11-one-byte-short",
+   "expect": "charged",
+   "detailExpected": [
+    "frontEndExhausted"
+   ],
+   "type": "confirmed",
+   "reason": "",
+   "detail": "ityReceiver.Reject.call (Minidregg.Kernel.ObjectiveCall.CallRefusal.extractionAccount (Minidregg.Kernel.ObjectiveCall.CallRefusal.frontEndExhausted (Minidregg.Kernel.ObjectiveWorkAccount.Stage.frontEnd) 4369 4368) 3199895 105) { source := 21845, core := 108856, postageSource := 0, postageCore := 0 }",
+   "ok": true,
+   "group": "C11-front-end-meter"
+  },
+  {
+   "step": "c11-exactly-one-load",
+   "expect": "charged",
+   "detailExpected": [
+    "frontEndExhausted",
+    "Stage.frontEnd) 4369 0",
+    "source := 8738,"
+   ],
+   "type": "confirmed",
+   "reason": "",
+   "detail": "eActivityReceiver.Reject.call (Minidregg.Kernel.ObjectiveCall.CallRefusal.extractionAccount (Minidregg.Kernel.ObjectiveCall.CallRefusal.frontEndExhausted (Minidregg.Kernel.ObjectiveWorkAccount.Stage.frontEnd) 4369 0) 3199966 34) { source := 8738, core := 43540, postageSource := 0, postageCore := 0 }",
+   "ok": true,
+   "group": "C11-front-end-meter"
+  },
+  {
+   "step": "c4-relay-back",
+   "expect": "charged",
+   "detailExpected": [
+    "reentry",
+    "15903052161581222858"
+   ],
+   "type": "confirmed",
+   "reason": "",
+   "detail": "ectiveActivityReceiver.Reject.call (Minidregg.Kernel.ObjectiveCall.CallRefusal.extractionAccount (Minidregg.Kernel.ObjectiveCall.CallRefusal.reentry 15903052161581222858 [11874800394461151990, 15903052161581222858]) 3199918 82) { source := 17476, core := 87084, postageSource := 0, postageCore := 0 }",
+   "ok": true,
+   "group": "C4-reentry"
+  },
+  {
+   "step": "c4-nothing-commits",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "before": {
+     "counter": 15,
+     "relayA": 1,
+     "relayB": 1
+    },
+    "after": {
+     "counter": 15,
+     "relayA": 1,
+     "relayB": 1
+    }
+   },
+   "group": "C4-reentry"
+  },
+  {
+   "step": "c4-charged-the-price-only",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "paid": 2462381,
+    "price": 2462381
+   },
+   "group": "C4-reentry"
+  },
+  {
+   "step": "c4-refused-plan-reports-draws",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "coreBytes": "87084",
+    "postageCoreBytes": "0",
+    "postageReplayBytes": "0",
+    "replayBytes": "17476"
+   },
+   "group": "C4-reentry"
+  },
+  {
+   "step": "c5-honest",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "C5-dao"
+  },
+  {
+   "step": "c5-honest-paid",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "bank": 70,
+    "payee": 30
+   },
+   "group": "C5-dao"
+  },
+  {
+   "step": "c5-thief",
+   "expect": "charged",
+   "detailExpected": [
+    "reentry",
+    "12312747984535127426"
+   ],
+   "type": "confirmed",
+   "reason": "",
+   "detail": "ctiveActivityReceiver.Reject.call (Minidregg.Kernel.ObjectiveCall.CallRefusal.extractionAccount (Minidregg.Kernel.ObjectiveCall.CallRefusal.reentry 12312747984535127426 [11831969418094649402, 12312747984535127426]) 3199893 107) { source := 17476, core := 87086, postageSource := 0, postageCore := 0 }",
+   "ok": true,
+   "group": "C5-dao"
+  },
+  {
+   "step": "c5-bank-kept",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "bank": 70,
+    "thief": 0
+   },
+   "group": "C5-dao"
+  },
+  {
+   "step": "c6-direct",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "C6-authority"
+  },
+  {
+   "step": "c6-no-grant",
+   "expect": "charged",
+   "detailExpected": [
+    "lawDenied",
+    "11489554277885030091",
+    "deposit"
+   ],
+   "type": null,
+   "reason": "",
+   "detail": "mini: uncertain host response: connection closed",
+   "ok": false,
+   "group": "C6-authority"
+  },
+  {
+   "step": "c6-no-grant-kept",
+   "expect": "check",
+   "ok": true,
+   "observed": null,
+   "group": "C6-authority"
+  },
+  {
+   "step": "c6-granted",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "C6-authority"
+  },
+  {
+   "step": "c6-granted-landed",
+   "expect": "check",
+   "ok": true,
+   "observed": null,
+   "group": "C6-authority"
+  },
+  {
+   "step": "c6-spent",
+   "expect": "charged",
+   "detailExpected": [
+    "grantSpent",
+    "11489554277885030091"
+   ],
+   "type": null,
+   "reason": "",
+   "detail": "mini: uncertain host response: connection closed",
+   "ok": false,
+   "group": "C6-authority"
+  },
+  {
+   "step": "c6-stranger",
+   "expect": "refused",
+   "detailExpected": "notObjectHolder",
+   "type": "refused",
+   "reason": "operation-rejected",
+   "detail": "Minidregg.Kernel.ObjectiveActivityReceiver.Reject.notObjectHolder",
+   "ok": true,
+   "group": "C6-authority"
+  },
+  {
+   "step": "c6-vault-final",
+   "expect": "check",
+   "ok": true,
+   "observed": null,
+   "group": "C6-authority"
+  },
+  {
+   "step": "c7-wrong-caller",
+   "expect": "charged",
+   "detailExpected": [
+    "lawDenied",
+    "17263701939429280205"
+   ],
+   "type": null,
+   "reason": "",
+   "detail": "mini: uncertain host response: connection closed",
+   "ok": false,
+   "group": "C7-facet"
+  },
+  {
+   "step": "c7-right-caller",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "C7-facet"
+  },
+  {
+   "step": "c7-gated-2",
+   "expect": "check",
+   "ok": true,
+   "observed": null,
+   "group": "C7-facet"
+  },
+  {
+   "step": "c9-over-cap",
+   "expect": "charged",
+   "detailExpected": [
+    "grantMismatch",
+    "11489554277885030091",
+    "deposit",
+    "cap"
+   ],
+   "type": null,
+   "reason": "",
+   "detail": "mini: uncertain host response: connection closed",
+   "ok": false,
+   "group": "C9-grant-args"
+  },
+  {
+   "step": "c9-over-cap-kept",
+   "expect": "check",
+   "ok": true,
+   "observed": null,
+   "group": "C9-grant-args"
+  },
+  {
+   "step": "c9-within-cap",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "C9-grant-args"
+  },
+  {
+   "step": "c9-within-cap-landed",
+   "expect": "check",
+   "ok": true,
+   "observed": null,
+   "group": "C9-grant-args"
+  },
+  {
+   "step": "c9-cumulative",
+   "expect": "charged",
+   "detailExpected": [
+    "grantMismatch",
+    "11489554277885030091",
+    "cap"
+   ],
+   "type": null,
+   "reason": "",
+   "detail": "mini: uncertain host response: connection closed",
+   "ok": false,
+   "group": "C9-grant-args"
+  },
+  {
+   "step": "c9-cumulative-co-fails",
+   "expect": "check",
+   "ok": true,
+   "observed": null,
+   "group": "C9-grant-args"
+  },
+  {
+   "step": "c9-exact-mismatch",
+   "expect": "charged",
+   "detailExpected": [
+    "grantMismatch",
+    "11489554277885030091",
+    "args"
+   ],
+   "type": null,
+   "reason": "",
+   "detail": "mini: uncertain host response: connection closed",
+   "ok": false,
+   "group": "C9-grant-args"
+  },
+  {
+   "step": "c9-vault-final",
+   "expect": "check",
+   "ok": true,
+   "observed": null,
+   "group": "C9-grant-args"
+  },
+  {
+   "step": "c10-wrong-code",
+   "expect": "charged",
+   "detailExpected": [
+    "grantMismatch",
+    "11489554277885030091",
+    "code"
+   ],
+   "type": null,
+   "reason": "",
+   "detail": "mini: uncertain host response: connection closed",
+   "ok": false,
+   "group": "C10-grant-who"
+  },
+  {
+   "step": "c10-wrong-caller",
+   "expect": "charged",
+   "detailExpected": [
+    "grantMismatch",
+    "11489554277885030091",
+    "caller"
+   ],
+   "type": null,
+   "reason": "",
+   "detail": "mini: uncertain host response: connection closed",
+   "ok": false,
+   "group": "C10-grant-who"
+  },
+  {
+   "step": "c10-nothing-landed",
+   "expect": "check",
+   "ok": true,
+   "observed": null,
+   "group": "C10-grant-who"
+  },
+  {
+   "step": "c10-right-caller",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "C10-grant-who"
+  },
+  {
+   "step": "c10-landed",
+   "expect": "check",
+   "ok": true,
+   "observed": null,
+   "group": "C10-grant-who"
+  },
+  {
+   "step": "c8-awaits",
+   "expect": "charged",
+   "detailExpected": [
+    "notCallable",
+    "await"
+   ],
+   "type": null,
+   "reason": "",
+   "detail": "mini: uncertain host response: connection closed",
+   "ok": false,
+   "group": "C8-shape"
+  },
+  {
+   "step": "c8-unknown",
+   "expect": "charged",
+   "detailExpected": "notCallable",
+   "type": null,
+   "reason": "",
+   "detail": "mini: uncertain host response: connection closed",
+   "ok": false,
+   "group": "C8-shape"
+  },
+  {
+   "step": "c8-not-object",
+   "expect": "refused",
+   "detailExpected": [
+    "notAnObject",
+    "12219386061058196378"
+   ],
+   "type": "refused",
+   "reason": "operation-rejected",
+   "detail": "Minidregg.Kernel.ObjectiveActivityReceiver.Reject.call (Minidregg.Kernel.ObjectiveCall.CallRefusal.extractionAccount (Minidregg.Kernel.ObjectiveCall.CallRefusal.notAnObject 12219386061058196378) 3199966 34) { source := 8738, core := 43544, postageSource := 0, postageCore := 0 }",
+   "ok": true,
+   "group": "C8-shape"
+  },
+  {
+   "step": "c8-exhausted",
+   "expect": "charged",
+   "detailExpected": "exhausted",
+   "type": "confirmed",
+   "reason": "",
+   "detail": "charged failure: Minidregg.Kernel.ObjectiveActivityReceiver.Reject.call (Minidregg.Kernel.ObjectiveCall.CallRefusal.extractionAccount (Minidregg.Kernel.ObjectiveCall.CallRefusal.exhausted) 3200000 0) { source := 8738, core := 43540, postageSource := 0, postageCore := 0 }",
+   "ok": true,
+   "group": "C8-shape"
+  },
+  {
+   "step": "c8-nothing-commits",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "counter": 15
+   },
+   "group": "C8-shape"
+  }
+ ],
+ "totals": [
+  {
+   "after": "c1-before",
+   "height": "28",
+   "total": "0"
+  },
+  {
+   "after": "c1-after",
+   "height": "29",
+   "total": "0"
+  },
+  {
+   "after": "c1-version",
+   "height": "29",
+   "total": "0"
+  },
+  {
+   "after": "c2-counter",
+   "height": "30",
+   "total": "0"
+  },
+  {
+   "after": "c2-relayA",
+   "height": "30",
+   "total": "0"
+  },
+  {
+   "after": "c2-relayB",
+   "height": "30",
+   "total": "0"
+  },
+  {
+   "after": "c3-after",
+   "height": "31",
+   "total": "0"
+  },
+  {
+   "after": "c4-before-counter",
+   "height": "35",
+   "total": "0"
+  },
+  {
+   "after": "c4-before-relayA",
+   "height": "35",
+   "total": "0"
+  },
+  {
+   "after": "c4-before-relayB",
+   "height": "35",
+   "total": "0"
+  },
+  {
+   "after": "c4-fee-before",
+   "height": "35",
+   "total": "0"
+  },
+  {
+   "after": "c4-after-counter",
+   "height": "36",
+   "total": "0"
+  },
+  {
+   "after": "c4-after-relayA",
+   "height": "36",
+   "total": "0"
+  },
+  {
+   "after": "c4-after-relayB",
+   "height": "36",
+   "total": "0"
+  },
+  {
+   "after": "c4-fee-after",
+   "height": "36",
+   "total": "0"
+  },
+  {
+   "after": "c5-mid-bank",
+   "height": "37",
+   "total": "0"
+  },
+  {
+   "after": "c5-mid-payee",
+   "height": "37",
+   "total": "0"
+  },
+  {
+   "after": "c5-after-bank",
+   "height": "38",
+   "total": "0"
+  },
+  {
+   "after": "c5-after-thief",
+   "height": "38",
+   "total": "0"
+  },
+  {
+   "after": "c6-a",
+   "height": "39",
+   "total": "0"
+  },
+  {
+   "after": "c6-b",
+   "height": "40",
+   "total": "0"
+  },
+  {
+   "after": "c6-c",
+   "height": "40",
+   "total": "0"
+  },
+  {
+   "after": "c7",
+   "height": "41",
+   "total": "0"
+  },
+  {
+   "after": "c9-before",
+   "height": "41",
+   "total": "0"
+  },
+  {
+   "after": "c9-a",
+   "height": "41",
+   "total": "0"
+  },
+  {
+   "after": "c9-b",
+   "height": "42",
+   "total": "0"
+  },
+  {
+   "after": "c9-c",
+   "height": "42",
+   "total": "0"
+  },
+  {
+   "after": "c9-d",
+   "height": "42",
+   "total": "0"
+  },
+  {
+   "after": "c10-before",
+   "height": "42",
+   "total": "0"
+  },
+  {
+   "after": "c10-a",
+   "height": "42",
+   "total": "0"
+  },
+  {
+   "after": "c10-b",
+   "height": "43",
+   "total": "0"
+  },
+  {
+   "after": "c8-before-counter",
+   "height": "43",
+   "total": "0"
+  },
+  {
+   "after": "c8-after-counter",
+   "height": "44",
+   "total": "0"
+  }
+ ],
+ "objects": {
+  "counter": {
+   "object": "12627792614139832694",
+   "capability": "10138355717098389457"
+  },
+  "relayA": {
+   "object": "15903052161581222858",
+   "capability": "12185720315661143814"
+  },
+  "relayB": {
+   "object": "11874800394461151990",
+   "capability": "9422030327493882518"
+  },
+  "bank": {
+   "object": "12312747984535127426",
+   "capability": "12875919412458844954"
+  },
+  "payee": {
+   "object": "15110666232211821241",
+   "capability": "9860801452635178329"
+  },
+  "thief": {
+   "object": "11831969418094649402",
+   "capability": "15045453613967740410"
+  },
+  "vault": {
+   "object": "11489554277885030091",
+   "capability": "15154769763525486358"
+  },
+  "gated": {
+   "object": "17263701939429280205",
+   "capability": "14197261208414473485"
+  },
+  "bare": {
+   "object": "12219386061058196378",
+   "capability": "16067372940746097392"
+  }
+ },
+ "allPass": false,
+ "pin": "25863103785323510339984935143461908387844450594616326337671162312088206734801",
+ "plants": []
+}

@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Receiving-path evidence while the row parent keeps the original cgroup alive.
+# Stop-hook counters are separate: systemd may recreate the cgroup for that hook.
+set -uo pipefail
+out=${1:?evidence directory}
+cgroup=$(awk -F: '$1=="0" {print $3}' /proc/self/cgroup)
+peak=unknown
+oom_kill=unknown
+if [ -n "$cgroup" ] && [ -r "/sys/fs/cgroup$cgroup/memory.peak" ]; then
+  peak=$(cat "/sys/fs/cgroup$cgroup/memory.peak")
+  oom_kill=$(awk '$1=="oom_kill" {print $2}' "/sys/fs/cgroup$cgroup/memory.events")
+fi
+file=cgroup-final.properties
+[ "${2:-}" != stop ] || file=cgroup-stop.properties
+printf 'Result=%s\nMemoryPeak=%s\nOOMKills=%s\nExitCode=%s\nExitStatus=%s\nControlGroup=%s\n' \
+  "${SERVICE_RESULT:-unknown}" "$peak" "$oom_kill" "${EXIT_CODE:-unknown}" "${EXIT_STATUS:-unknown}" "$cgroup" >"$out/$file"

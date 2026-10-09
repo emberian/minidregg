@@ -1,0 +1,4 @@
+Oct 08 23:27:34 burst3-a systemd[7885]: Starting pj-red-pjmcsU0H.service - /usr/bin/bash /tmp/pj-source.tJxN8n/scripts/pipeline/journey-row-exec...
+Oct 08 23:27:34 burst3-a systemd[7885]: Started pj-red-pjmcsU0H.service - /usr/bin/bash /tmp/pj-source.tJxN8n/scripts/pipeline/journey-row-exec.
+Oct 08 23:27:34 burst3-a systemd[7885]: pj-red-pjmcsU0H.service: Main process exited, code=exited, status=17/n/a
+Oct 08 23:27:34 burst3-a systemd[7885]: pj-red-pjmcsU0H.service: Failed with result 'exit-code'.

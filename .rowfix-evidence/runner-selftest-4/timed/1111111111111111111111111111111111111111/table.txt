@@ -1,0 +1,5 @@
+tip 1111111111111111111111111111111111111111  labels: 
+journey wall 3 s on burst3-a (32 CPUs), finished 2026-10-08T23:27:39Z; set built 
+
+ROW    STATUS  WALL_S  OWNER    DETAIL
+timed  FAIL    3       unknown  row timed out; rc=124 signal=TERM sender=systemd user manager (pj-timed-pjAiUhXF.service RuntimeMaxSec) Result=timeout MemoryPeak=1961984 timeout=yes limit=2s; no driver verdict; evidence: scope.log and driver logs

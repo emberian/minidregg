@@ -1,0 +1,1 @@
+/srv/artifacts/5896a5945dbce07d17dbbb5b5834318b0f64656e/bin/mini activity --action submit --workspace /run/user/1001/pj.HGfYz1/s/second --command /run/user/1001/pj.HGfYz1/s/s14-deliver.turn.json --out /run/user/1001/pj.HGfYz1/s/attempts/s14-deliver

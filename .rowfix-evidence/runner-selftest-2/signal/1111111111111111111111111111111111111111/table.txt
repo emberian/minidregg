@@ -1,0 +1,5 @@
+tip 1111111111111111111111111111111111111111  labels: 
+journey wall 0 s on burst3-a (32 CPUs), finished 2026-10-08T23:26:05Z; set built 
+
+ROW     STATUS  WALL_S  OWNER    DETAIL
+signal  FAIL    0       unknown  row failed; rc=143 signal=TERM sender=unknown (driver or external sender; see driver logs) Result=success MemoryPeak=[not set] timeout=no limit=2s; no driver verdict; evidence: scope.log and driver logs

@@ -1,0 +1,4 @@
+Oct 08 23:26:27 burst3-a systemd[7885]: Starting pj-timed-pjVlBN2j.service - /usr/bin/bash -c ". \"\$ROWSFILE\"; cd \"\$RUN\" && \"row_\$ROW\""...
+Oct 08 23:26:27 burst3-a systemd[7885]: Started pj-timed-pjVlBN2j.service - /usr/bin/bash -c ". \"\$ROWSFILE\"; cd \"\$RUN\" && \"row_\$ROW\"".
+Oct 08 23:26:29 burst3-a systemd[7885]: pj-timed-pjVlBN2j.service: Service reached runtime time limit. Stopping.
+Oct 08 23:26:29 burst3-a systemd[7885]: pj-timed-pjVlBN2j.service: Failed with result 'timeout'.

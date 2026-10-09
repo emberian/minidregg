@@ -1,0 +1,1 @@
+/srv/artifacts/5896a5945dbce07d17dbbb5b5834318b0f64656e/bin/mini activity --action submit --workspace /run/user/1001/pj.4i6pBj/c/w/sponsor --command /run/user/1001/pj.4i6pBj/c/c9-within-cap.front-end-plan-0.json --out /run/user/1001/pj.4i6pBj/c/attempts/c9-within-cap-front-end-plan-0 --prepare-only true

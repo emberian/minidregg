@@ -1,0 +1,31 @@
+/run/user/1001/pj.HGfYz1/s/w/sponsor/sources/create-hopper.authoring/g0001/intent.bin
+{
+  "acceptedCount": "9",
+  "confirmation": "installed",
+  "eventId": "52218758216601980421339518692570575541804988623088941364765468195858838166457",
+  "transactionId": "107207901249605188018903833245634694399405272132510432572235825538962893389697",
+  "type": "confirmed",
+  "worldRoot": "66511659878723413962145530874095306544763071597130406602452086204942370788735"
+}
+{
+  "authority": "hint-only",
+  "controlCapability": "16303673663441199300",
+  "kind": "object",
+  "name": "hopper",
+  "observeCapability": "15322813844002824135",
+  "operationCapability": "15322813844002824135",
+  "provenance": {
+    "birthReceipt": {
+      "acceptedCount": "9",
+      "confirmation": "installed",
+      "eventId": "52218758216601980421339518692570575541804988623088941364765468195858838166457",
+      "transactionId": "107207901249605188018903833245634694399405272132510432572235825538962893389697",
+      "type": "confirmed",
+      "worldRoot": "66511659878723413962145530874095306544763071597130406602452086204942370788735"
+    },
+    "reservationDigest": "aa8d0d559cfb1608f23c0a11f11d4a1ff2a03c0ecce19634ea5e826855531727",
+    "reservationRecord": "/run/user/1001/pj.HGfYz1/s/w/namespace/request-aa8d0d559cfb1608f23c0a11f11d4a1ff2a03c0ecce19634ea5e826855531727.json"
+  },
+  "target": "15945247405893296280",
+  "type": "minidregg-participant-reference-v1"
+}

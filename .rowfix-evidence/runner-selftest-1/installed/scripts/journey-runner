@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Stable service entrypoint. Install as /srv/pipeline/scripts/journey-runner.
+# Per READY tip, execute that tip's runner, rows, lib and formatter under one lock.
+set -euo pipefail
+PIPELINE_ROOT=${PIPELINE_ROOT:-/srv/pipeline}
+[ ! -f "$PIPELINE_ROOT/box.env" ] || . "$PIPELINE_ROOT/box.env"
+ARTIFACT_ROOT=${ARTIFACT_ROOT:-/srv/artifacts}
+JOURNEY_ROOT=${JOURNEY_ROOT:-/srv/journeys}
+once=0 only= args=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --once) once=1; shift ;;
+    --tip) only=$2; once=1; shift 2 ;;
+    --results-root) JOURNEY_ROOT=$(realpath -m "$2"); shift 2 ;;
+    --row|--rows-file|--source-tree) args+=("$1" "$2"); shift 2 ;;
+    *) echo "journey-launcher: unknown $1" >&2; exit 2 ;;
+  esac
+done
+mkdir -p "$JOURNEY_ROOT"
+exec 8>"$JOURNEY_ROOT/.runner.lock"
+flock -n 8 || { echo "journey-launcher: another runner holds the results lock" >&2; exit 1; }
+export PIPELINE_JOURNEY_LOCK_ROOT=$JOURNEY_ROOT
+temporary=
+trap '[ -z "$temporary" ] || rm -rf -- "$temporary"' EXIT
+dispatch() {
+  local tip=$1 set=$ARTIFACT_ROOT/$1 src runner rc=0
+  [[ $tip =~ ^[0-9a-f]{40}$ ]] || { echo "journey-launcher: tip must be 40 hex" >&2; return 2; }
+  [ -f "$set/READY" ] || { echo "journey-launcher: $tip is not READY" >&2; return 1; }
+  (cd "$set" && sha256sum --quiet -c SHA256SUMS) || return 1
+  src=$ARTIFACT_ROOT/.leanenv/$tip
+  if [ ! -f "$src/.pipeline-leanenv-complete" ]; then
+    temporary=$(mktemp -d "${TMPDIR:-/tmp}/pj-source.XXXXXX")
+    tar -xf "$set/source.tar" -C "$temporary"
+    src=$temporary
+  fi
+  runner=$src/scripts/pipeline/journey-runner
+  # Old runners would reopen and contend with our inherited lock, or silently
+  # mix installed code with tip rows. Refuse rather than claiming a run happened.
+  [ -f "$runner" ] && grep -q '^# tip-dispatch-protocol: 1$' "$runner" || {
+    echo "journey-launcher: $tip runner predates tip-dispatch protocol; refusing" >&2; return 1;
+  }
+  bash "$runner" --tip "$tip" --tip-source "$src" --results-root "$JOURNEY_ROOT" "${args[@]}" || rc=$?
+  if [ -n "$temporary" ]; then rm -rf -- "$temporary"; temporary=; fi
+  return "$rc"
+}
+while :; do
+  if [ -n "$only" ]; then dispatch "$only"
+  else
+    for label in next green main; do
+      tip=$(readlink "$ARTIFACT_ROOT/$label") || continue
+      [ -f "$ARTIFACT_ROOT/$tip/READY" ] && [ ! -f "$JOURNEY_ROOT/$tip/DONE" ] || continue
+      if [ ! -f "$ARTIFACT_ROOT/.leanenv/$tip/.pipeline-leanenv-complete" ] &&
+         [ $(( $(date +%s) - $(stat -c %Y "$ARTIFACT_ROOT/$tip/READY") )) -lt "${PIPELINE_LEANENV_WAIT_S:-1800}" ]; then continue; fi
+      dispatch "$tip"
+      break
+    done
+  fi
+  [ "$once" = 0 ] || break
+  sleep "${PIPELINE_WATCH_S:-60}"
+done

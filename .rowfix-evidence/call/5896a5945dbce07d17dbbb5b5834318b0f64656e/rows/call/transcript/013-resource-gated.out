@@ -1,0 +1,31 @@
+/run/user/1001/pj.4i6pBj/c/w/sponsor/sources/create-gated.authoring/g0001/intent.bin
+{
+  "acceptedCount": "8",
+  "confirmation": "installed",
+  "eventId": "38835412990060631375312766234413625459653597991870742506516397812939292641688",
+  "transactionId": "78073935329514301919527120107820084599530088346843370707036370637414377653993",
+  "type": "confirmed",
+  "worldRoot": "31304835078268042453376871419393858689266091251346467766541688505364360865286"
+}
+{
+  "authority": "hint-only",
+  "controlCapability": "16223242041188172948",
+  "kind": "object",
+  "name": "gated",
+  "observeCapability": "14197261208414473485",
+  "operationCapability": "14197261208414473485",
+  "provenance": {
+    "birthReceipt": {
+      "acceptedCount": "8",
+      "confirmation": "installed",
+      "eventId": "38835412990060631375312766234413625459653597991870742506516397812939292641688",
+      "transactionId": "78073935329514301919527120107820084599530088346843370707036370637414377653993",
+      "type": "confirmed",
+      "worldRoot": "31304835078268042453376871419393858689266091251346467766541688505364360865286"
+    },
+    "reservationDigest": "726e1ca4834c50b566fc3f013aa4733b084dafd985f7e28e3dfefe5d089a099a",
+    "reservationRecord": "/run/user/1001/pj.4i6pBj/c/w/namespace/request-726e1ca4834c50b566fc3f013aa4733b084dafd985f7e28e3dfefe5d089a099a.json"
+  },
+  "target": "17263701939429280205",
+  "type": "minidregg-participant-reference-v1"
+}

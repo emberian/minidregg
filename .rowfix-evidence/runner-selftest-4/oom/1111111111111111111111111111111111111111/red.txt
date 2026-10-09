@@ -1,0 +1,1 @@
+- [RED] oom FAIL | tip 111111111111 () | owner: unknown | scope OOM-killed; rc=137 signal=KILL sender=kernel cgroup OOM killer Result=oom-kill MemoryPeak=67108864 timeout=no limit=2s; /tmp/pj-source.uZcydv/scripts/pipeline/journey-rows: line 6: 2730254 Killed                  python3 -c 'allocation = bytearray(256 * 1024 * 1024); print(len(allocation))'

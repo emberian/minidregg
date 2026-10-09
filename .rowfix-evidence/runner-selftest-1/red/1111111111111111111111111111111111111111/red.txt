@@ -1,0 +1,1 @@
+- [RED] red FAIL | tip 111111111111 () | owner: unknown | row failed; rc=17 signal=none sender=none Result=exit-code MemoryPeak=[not set] timeout=no limit=2s; synthetic real refusal

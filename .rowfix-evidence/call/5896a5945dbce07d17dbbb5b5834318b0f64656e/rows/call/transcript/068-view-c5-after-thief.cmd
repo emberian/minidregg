@@ -1,0 +1,1 @@
+/srv/artifacts/5896a5945dbce07d17dbbb5b5834318b0f64656e/bin/mini activity --action view --workspace /run/user/1001/pj.4i6pBj/c/w/sponsor --request {"objects": ["11831969418094649402"], "accounts": ["7", "40", "99"]}

@@ -19,6 +19,7 @@ CANDIDATE_PROG=run.sh
 here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 # shellcheck source=deploy/candidate/lib.sh
 . "$here/lib.sh"
+. "$here/params.sh"
 candidate_require jq sha256sum od tr ps
 # A caller's signing-helper selection cannot introduce an unlisted executable.
 # sponsor selects the verified manifest roles once its state config exists.
@@ -53,7 +54,6 @@ init() {
   candidate_resolve "$manifest"
   candidate_verify_outputs "$CANDIDATE_MANIFEST"
   params=$(candidate_abs "$params")
-  check_params "$params"
   state=$(candidate_abs "$state")
   [ ! -e "$state" ] && [ ! -L "$state" ] || candidate_die "refusing existing state directory: $state"
   # A Unix socket path must fit sockaddr_un.sun_path (108 bytes incl. NUL).
@@ -64,7 +64,8 @@ init() {
   mkdir -m 700 "$state/keys" "$state/public" "$state/namespace" "$state/tmp" "$state/logs"
   TMPDIR=$state/tmp
   export TMPDIR
-  cp "$params" "$state/genesis-params.json"
+  candidate_params_now "$params" >"$state/genesis-params.json"
+  check_params "$state/genesis-params.json"
   p=$state/genesis-params.json
   params=$p
 

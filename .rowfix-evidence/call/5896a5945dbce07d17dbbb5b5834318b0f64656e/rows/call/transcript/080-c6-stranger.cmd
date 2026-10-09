@@ -1,0 +1,1 @@
+/srv/artifacts/5896a5945dbce07d17dbbb5b5834318b0f64656e/bin/mini activity --action submit --workspace /run/user/1001/pj.4i6pBj/c/second --command /run/user/1001/pj.4i6pBj/c/c6-stranger.turn.json --out /run/user/1001/pj.4i6pBj/c/attempts/c6-stranger

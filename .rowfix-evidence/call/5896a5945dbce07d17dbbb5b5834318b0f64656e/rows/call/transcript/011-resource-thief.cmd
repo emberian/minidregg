@@ -1,0 +1,1 @@
+/srv/artifacts/5896a5945dbce07d17dbbb5b5834318b0f64656e/bin/mini workspace --action create --dir /run/user/1001/pj.4i6pBj/c/w/sponsor --name thief --storage content --predicate /run/user/1001/pj.4i6pBj/c/permit-all.json

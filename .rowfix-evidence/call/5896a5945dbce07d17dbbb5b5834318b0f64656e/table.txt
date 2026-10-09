@@ -1,0 +1,16 @@
+tip 5896a5945dbce07d17dbbb5b5834318b0f64656e  labels: main
+journey wall 2052 s on burst3-a (32 CPUs), finished 2026-10-09T00:02:15Z; set built 2026-10-08T23:23:44Z
+
+ROW                       STATUS  WALL_S  OWNER  DETAIL
+call/C1-leaf              PASS    2       ?      4 rows ok
+call/C2-chain             PASS    4       ?      4 rows ok
+call/C3-sequence          PASS    4       ?      3 rows ok
+call/C11-front-end-meter  PASS    12      ?      5 rows ok
+call/C4-reentry           PASS    3       ?      4 rows ok
+call/C5-dao               PASS    7       ?      4 rows ok
+call/C6-authority         FAIL    446     ?      rc=1 signal=KILL sender=kernel cgroup OOM killer Result=oom-kill MemoryPeak=25769803776 timeout=no limit=5400s; 2 of 8 rows red: c6-no-grant, c6-spent
+call/C7-facet             FAIL    448     ?      rc=1 signal=KILL sender=kernel cgroup OOM killer Result=oom-kill MemoryPeak=25769803776 timeout=no limit=5400s; 1 of 3 rows red: c7-wrong-caller
+call/C9-grant-args        FAIL    126     ?      rc=1 signal=KILL sender=kernel cgroup OOM killer Result=oom-kill MemoryPeak=25769803776 timeout=no limit=5400s; 3 of 8 rows red: c9-over-cap, c9-cumulative, c9-exact-mismatch
+call/C10-grant-who        FAIL    83      ?      rc=1 signal=KILL sender=kernel cgroup OOM killer Result=oom-kill MemoryPeak=25769803776 timeout=no limit=5400s; 2 of 5 rows red: c10-wrong-code, c10-wrong-caller
+call/C8-shape             FAIL    883     ?      rc=1 signal=KILL sender=kernel cgroup OOM killer Result=oom-kill MemoryPeak=25769803776 timeout=no limit=5400s; 2 of 5 rows red: c8-awaits, c8-unknown
+call                      FAIL    2052    ?      scope OOM-killed; rc=1 signal=KILL sender=kernel cgroup OOM killer Result=oom-kill MemoryPeak=25769803776 timeout=no limit=5400s; call driver rc=1: {"rows": 63, "failed": ["c6-no-grant", "c6-spent", "c7-wrong-caller", "c9-over-cap", "c9-cumulative", "c9-exact-mismatch", "c10-wrong-code", "c10-wrong-caller", "c8-awaits", "c8-unknown"]}

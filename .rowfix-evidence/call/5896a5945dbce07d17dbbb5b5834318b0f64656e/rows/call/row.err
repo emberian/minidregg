@@ -1,0 +1,2 @@
+call driver rc=1: {"rows": 63, "failed": ["c6-no-grant", "c6-spent", "c7-wrong-caller", "c9-over-cap", "c9-cumulative", "c9-exact-mismatch", "c10-wrong-code", "c10-wrong-caller", "c8-awaits", "c8-unknown"]}
+scope OOM-killed; rc=1 signal=KILL sender=kernel cgroup OOM killer Result=oom-kill MemoryPeak=25769803776 timeout=no limit=5400s; call driver rc=1: {"rows": 63, "failed": ["c6-no-grant", "c6-spent", "c7-wrong-caller", "c9-over-cap", "c9-cumulative", "c9-exact-mismatch", "c10-wrong-code", "c10-wrong-caller", "c8-awaits", "c8-unknown"]}

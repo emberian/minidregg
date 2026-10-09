@@ -1,0 +1,31 @@
+/run/user/1001/pj.HGfYz1/s/w/sponsor/sources/create-sink.authoring/g0001/intent.bin
+{
+  "acceptedCount": "4",
+  "confirmation": "installed",
+  "eventId": "23924580860385583670185626795129576904879062625286302292310227020983863235387",
+  "transactionId": "23925754363648760652424657584045110807925148999200276590056956582392486087063",
+  "type": "confirmed",
+  "worldRoot": "15397133048759898556525863887693864869570546721214196626655525807731845500183"
+}
+{
+  "authority": "hint-only",
+  "controlCapability": "12945213389244886660",
+  "kind": "object",
+  "name": "sink",
+  "observeCapability": "9306035651788745101",
+  "operationCapability": "9306035651788745101",
+  "provenance": {
+    "birthReceipt": {
+      "acceptedCount": "4",
+      "confirmation": "installed",
+      "eventId": "23924580860385583670185626795129576904879062625286302292310227020983863235387",
+      "transactionId": "23925754363648760652424657584045110807925148999200276590056956582392486087063",
+      "type": "confirmed",
+      "worldRoot": "15397133048759898556525863887693864869570546721214196626655525807731845500183"
+    },
+    "reservationDigest": "983f343a0e33cf9e2b8b51238150b7c9a8623fc4158da36f1344c51cfc891d9a",
+    "reservationRecord": "/run/user/1001/pj.HGfYz1/s/w/namespace/request-983f343a0e33cf9e2b8b51238150b7c9a8623fc4158da36f1344c51cfc891d9a.json"
+  },
+  "target": "13911063039594289753",
+  "type": "minidregg-participant-reference-v1"
+}

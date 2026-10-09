@@ -1,0 +1,5 @@
+Oct 08 23:27:36 burst3-a systemd[7885]: Starting pj-timed-pjAiUhXF.service - /usr/bin/bash /tmp/pj-source.9ZbKuX/scripts/pipeline/journey-row-exec...
+Oct 08 23:27:36 burst3-a systemd[7885]: Started pj-timed-pjAiUhXF.service - /usr/bin/bash /tmp/pj-source.9ZbKuX/scripts/pipeline/journey-row-exec.
+Oct 08 23:27:38 burst3-a systemd[7885]: pj-timed-pjAiUhXF.service: Service reached runtime time limit. Stopping.
+Oct 08 23:27:38 burst3-a systemd[7885]: pj-timed-pjAiUhXF.service: Main process exited, code=exited, status=143/n/a
+Oct 08 23:27:38 burst3-a systemd[7885]: pj-timed-pjAiUhXF.service: Failed with result 'timeout'.

@@ -1,0 +1,171 @@
+extract-quote-is-the-policy-ceiling          check     ok {"published": {"extractTicks": "3200000"}, "policy": 3200000}
+publish                                      installed confirmed  
+create-poster                                installed confirmed  
+create-counter                               installed confirmed  
+create-fan                                   installed confirmed  
+create-sink                                  installed confirmed  
+create-vault                                 installed confirmed  
+create-dir                                   installed confirmed  
+create-nodir                                 installed confirmed  
+create-relayer                               installed confirmed  
+create-hopper                                installed confirmed  
+s1-postage-short                             charged   confirmed  l.ObjectiveWorkAccount.Stage.frontEnd) 8962 0) { source := 35848, core := 217058, postageSource := 0, postageCore := 0 }
+s1-post                                      installed confirmed  
+s1-queued-one                                check     ok ["23700956220622620837066955051086709119848696965149712964317110577018303447067"]
+s1-slot-open-delivery                        check     ok {"activity": "217386880444448882643954864531803497026318030734892186637704202359879342991354", "deadline": "0", "decider": {"delivery": "23700956220622620837066
+s1-postage-escrowed                          check     ok {"purse": 2833008, "deposit": 131, "paid": 8495665}
+s1-not-yet-delivered                         check     ok null
+s2-deliver                                   installed confirmed  
+s2-counter-4                                 check     ok null
+s2-popped                                    check     ok {"cell": "217386880444448882643954864531803497026318030734892186637704202359879342991354", "head": 0, "ids": [], "retired": true, "messages": [], "purse": 0, "s
+s2-deposit-refunded                          check     ok {"refund": 131, "deposit": 131}
+s2-slot-reply-4                              check     ok {"activity": "217386880444448882643954864531803497026318030734892186637704202359879342991354", "deadline": "0", "decider": {"delivery": "23700956220622620837066
+s2-purse-paid                                check     ok {"purse": 0, "collector": 2832877}
+s2-submitter-free                            check     ok null
+s2-again                                     refused   refused conflict transaction identity conflict
+s3-burst-0                                   installed confirmed  
+s3-burst-1                                   installed confirmed  
+s3-burst-2                                   installed confirmed  
+s3-burst-3                                   installed confirmed  
+s3-burst-4                                   installed confirmed  
+s3-fifteen                                   check     ok 15
+s3-overflow                                  charged   confirmed  396324718196247 13911063039594289753) { source := 53772, core := 325592, postageSource := 17924, postageCore := 108532 }
+s3-nothing-commits                           check     ok 15
+s3-sixteenth                                 installed confirmed  
+s3-full                                      charged   confirmed  396324718196247 13911063039594289753) { source := 35848, core := 217058, postageSource := 17924, postageCore := 108532 }
+s3-sixteen                                   check     ok null
+s4-post                                      installed confirmed  
+s4-deliver                                   installed confirmed  
+s4-slot-broken-law                           check     ok {"kind": "broken", "reason": "Minidregg.Kernel.ObjectiveCall.CallRefusal.extractionAccount\n  (Minidregg.Kernel.ObjectiveCall.CallRefusal.lawDenied\n    1387708
+s4-popped                                    check     ok []
+s4-no-write                                  check     ok null
+s4-paid-from-purse                           check     ok {"cell": "176838952128993606478082814039818591818389660178166899801341223162950711984898", "head": 0, "ids": [], "retired": true, "messages": [], "purse": 0, "s
+s5-pipe                                      installed confirmed  
+s5-queued-on-slot                            check     ok {"queued": 1, "purse": 11325637, "deposits": [128, 131]}
+s5-deliver-lookup                            installed confirmed  
+s5-reply-ref                                 check     ok {"activity": "155856610374171914764380642902131309119635430762279770689800924216288865332371", "deadline": "0", "decider": {"delivery": "76518605813553435882119
+s5-slot-emptied                              check     ok []
+s5-forwarded                                 check     ok {"forwarded": ["99896314013678756762981021485610019992284267729781874646321474631576536155756"], "purse": 5662820, "source": 0}
+s5-forward-slot-open                         check     ok {"activity": "217386880444448882643954864531803497026318030734892186637704202359879342991354", "deadline": "0", "decider": {"delivery": "99896314013678756762981
+s5-deliver-forward                           installed confirmed  
+s5-deposited                                 check     ok null
+s6-pipe                                      installed confirmed  
+s6-deliver                                   installed confirmed  
+s6-slot-broken                               check     ok {"kind": "broken", "reason": "Minidregg.Kernel.ObjectiveCall.CallRefusal.extractionAccount\n  (Minidregg.Kernel.ObjectiveCall.CallRefusal.exhausted)\n  3200000\
+s6-refunded                                  check     ok {"refund": 2830105, "fee": 2829848}
+s6-counter-kept                              check     ok null
+s6-pipe-none                                 installed confirmed  
+s6-deliver-none                              installed confirmed  
+s6-none-not-a-reference                      check     ok {"decision": {"kind": "reply", "value": {"label": "none", "payload": {"fields": [], "tag": "record"}, "tag": "variant"}}, "refund": 2833104}
+s6-none-counter-kept                         check     ok null
+s7-decided-slot                              charged   confirmed  709119848696965149712964317110577018303447067) { source := 17924, core := 108528, postageSource := 0, postageCore := 0 }
+s7-not-object                                refused   refused operation-rejected .CallRefusal.notAnObject 11855276553179219497) { source := 17924, core := 108526, postageSource := 0, postageCore := 0 }
+s7-no-postage                                refused   refused operation-rejected ytes := 0, coreBytes := 0, domainWork := 0 })) { source := 17924, core := 108526, postageSource := 0, postageCore := 0 }
+s7-nothing-commits                           check     ok {"before": [], "after": []}
+s8-sending-method                            charged   None  mini: uncertain host response: connection closed
+s8-unknown-method                            charged   None  mini: uncertain host response: connection closed
+s8-ill-typed-args                            charged   confirmed  usal.argumentType 15450098648352028167 "post") { source := 26886, core := 162794, postageSource := 0, postageCore := 0 }
+s8-nothing-escrowed                          check     MISMATCH {"ids": [[], []], "purse": [0, 0], "sponsor": -4247751}
+s8-deliverable-control                       installed confirmed  
+s8-deliver-control                           installed confirmed  
+s8-control-delivered                         check     ok null
+s9-relay-via                                 installed confirmed  
+s9-queued-on-slot                            check     ok {"queued": 1, "purse": 11325635, "deposits": [128, 129]}
+s9-deliver-lookup                            installed confirmed  
+s9-reply-ref                                 check     ok {"activity": "155856610374171914764380642902131309119635430762279770689800924216288865332371", "deadline": "0", "decider": {"delivery": "98726397716316361046494
+s9-not-forwarded                             check     ok []
+s9-refunded                                  check     ok {"purse": 0, "refund": 5662946, "fee": 5662689}
+s9-counter-kept                              check     ok null
+s10-post-a                                   installed confirmed  
+s10-post-b                                   installed confirmed  
+s10-post-c                                   installed confirmed  
+s10-cancel-b                                 installed confirmed  
+s10-acked                                    check     ok 82428180272676514166251516044621676932481586088724577822516818574672047235207
+s10-withdrawn-fifo-kept                      check     ok [["40950463427688225256703624094316577952250747960028658323108114341758258098913", "8242818027267651416625151604462167693248158608872457782251681857467204723520
+s10-refund-exact                             check     ok {"refund": 2833008, "fee": 2832909, "purse": [8499024, 5666016]}
+s10-slot-cancelled                           check     ok {"activity": "217386880444448882643954864531803497026318030734892186637704202359879342991354", "deadline": "0", "decider": {"delivery": "82428180272676514166251
+s10-deliver-cancelled-refused                refused   refused operation-rejected end.MessageRefusal.staleHead { value := 40950463427688225256703624094316577952250747960028658323108114341758258098913 })
+s10-deliver-a                                installed confirmed  
+s10-deliver-c                                installed confirmed  
+s10-others-delivered                         check     ok 14
+s10-pipe                                     installed confirmed  
+s10-cancel-lookup                            installed confirmed  
+s10-pipelined-refunded                       check     ok {"refund": 11325637, "purse": [11325637, 0], "ids": []}
+s10-lookup-cancelled                         check     ok null
+s10-deliver-lookup-refused                   refused   refused operation-rejected eceiver.Reject.message (Minidregg.Kernel.ObjectiveSend.MessageRefusal.noInbox 12473023845127128266 17244811421261466695)
+s11-post                                     installed confirmed  
+s11-cancel-prepared                          prepared  prepared  
+s11-deliver-first                            installed confirmed  
+s11-prepared-cancel-stale                    charged   confirmed  
+s11-cancel-after                             installed confirmed  
+s11-acked                                    check     ok 41206778751862624092857355538276993970580086609759662342892534579060476702541
+s11-noop-refunds-nothing                     check     ok {"refund": 0, "fee": 2832909, "ids": []}
+s11-slot-still-reply                         check     ok null
+s12-pipe                                     installed confirmed  
+s12-stop                                     installed confirmed  
+s12-acked                                    check     ok 43446610721695700229315229218826971737269475810189816212639180376851333180023
+s12-pipelined-refunded                       check     ok {"refund": 5662820, "purse": [11325637, 5662817]}
+s12-open-unwatched                           check     ok {"activity": "155856610374171914764380642902131309119635430762279770689800924216288865332371", "deadline": "0", "decider": {"delivery": "43446610721695700229315
+s12-still-delivered                          installed confirmed  
+s12-popped-paid                              check     ok {"cell": "155856610374171914764380642902131309119635430762279770689800924216288865332371", "head": 0, "ids": [], "retired": true, "messages": [], "purse": 0, "s
+s12-delivery-retires                         check     ok {"cell": "127747166054675884622894625085473360944242211135246379049860727685852800060073", "kind": "retired", "root": "10249870841509284178200662448673769559395
+s12-counter-kept                             check     ok null
+s12-stop-decided                             installed confirmed  
+s12-decided-retired                          check     ok {"cell": "207927078436765761634659393977518768519386101522095397210947138174945476091605", "kind": "retired", "root": "10249870841509284178200662448673769559395
+s13-post                                     installed confirmed  
+s13-pipe                                     installed confirmed  
+s13-stop-look                                installed confirmed  
+s13-other-cancel                             charged   confirmed  789235418415858247151894 15450098648352028167) { source := 17924, core := 108534, postageSource := 0, postageCore := 0 }
+s13-other-stop                               charged   confirmed  789235418415858247151894 15450098648352028167) { source := 17924, core := 108530, postageSource := 0, postageCore := 0 }
+s13-no-such-slot                             charged   confirmed  iveCall.CallRefusal.notControllable 987654321) { source := 17924, core := 108534, postageSource := 0, postageCore := 0 }
+s13-chase-stopped                            charged   confirmed  998979827622146146575977062362759256811671970) { source := 17924, core := 108528, postageSource := 0, postageCore := 0 }
+s13-nothing-commits                          check     ok {"ids": [["67762250266743823649325311642852674409217796478368890789235418415858247151894"], ["677622502667438236493253116428526744092177964783688907892354184158
+s14-relay                                    installed confirmed  
+s14-escrowed                                 check     ok {"message": {"allowance": "12738799", "args": {"tag": "natural", "value": "15450098648352028167"}, "deposit": "139", "depth": "0", "envelope": {"coreBytes": "32
+s14-deliver                                  installed confirmed  
+s14-replied                                  check     ok {"kind": "reply", "value": {"tag": "natural", "value": "36301791095419734078650540189576428462006938982324224192856181084773411791057"}}
+s14-onward-queued                            check     ok {"onward": ["36301791095419734078650540189576428462006938982324224192856181084773411791057"], "message": {"allowance": "0", "args": {"tag": "natural", "value": 
+s14-remainder-exact                          check     ok {"refund": 4246266, "purse": [0, 0], "fee": 8492533}
+s14-deliver-onward                           installed confirmed  
+s14-onward-delivered                         check     ok null
+s15-over-declared                            charged   confirmed  llRefusal.allowanceExceeded 12738943 12738942) { source := 17924, core := 108530, postageSource := 0, postageCore := 0 }
+s15-over-declared-nothing                    check     ok {"ids": [], "paid": 2832845}
+s15-relay                                    installed confirmed  
+s15-deliver                                  installed confirmed  
+s15-broken-named                             check     ok {"kind": "broken", "reason": "Minidregg.Kernel.ObjectiveCall.CallRefusal.allowanceExceeded 16985536 12738943"}
+s15-nothing-onward                           check     ok []
+s15-allowance-refunded                       check     ok {"refund": 12739084, "fee": 8492629}
+s15-counter-kept                             check     ok null
+s16-relay                                    installed confirmed  
+s16-deliver                                  installed confirmed  
+s16-broken-fanout                            check     ok {"kind": "broken", "reason": "Minidregg.Kernel.ObjectiveCall.CallRefusal.fanOut 4"}
+s16-nothing-onward                           check     ok []
+s16-allowance-refunded                       check     ok {"refund": 101893686}
+s17-hop                                      installed confirmed  
+s17-deliver-0                                installed confirmed  
+s17-deliver-1                                installed confirmed  
+s17-one-hop-deeper                           check     ok {"m1": {"allowance": "42468728", "args": {"fields": [{"name": "target", "value": {"tag": "natural", "value": "15945247405893296280"}}, {"name": "price", "value"
+s17-deliver-2                                installed confirmed  
+s17-depth-refused                            check     ok {"kind": "broken", "reason": "Minidregg.Kernel.ObjectiveCall.CallRefusal.continuationDepth 3"}
+s17-depth-refund                             check     ok {"refund": 35390847, "ids": [], "purse": 0}
+s17-two-delivered                            check     ok 2
+s18-relay                                    installed confirmed  
+s18-cancel                                   installed confirmed  
+s18-refund-postage-and-allowance             check     ok {"refund": 14156861, "fee": 2832909, "purse": [14156861, 0]}
+s18-slot-cancelled                           check     ok null
+s19-post                                     installed confirmed  
+s19-retry                                    replayed  confirmed  
+s19-retry-richer                             replayed  confirmed  
+s19-one-message                              check     ok {"new": ["13773828246117118795070995184904365764990842668789022083698515884195238429880"], "first": 137738282461171187950709951849043657649908426687890220836985
+s19-same-answer                              check     ok {"first": ["65012478788439631693881006379964532366662912166232111557270904209652221499740", "9546733506058131511838604755023147099310769212774281605513927749592
+s19-paid-once                                check     ok {"paid": 8495665, "deposit": 131, "purse": [2833008, 5666016, 5666016]}
+s20-post                                     installed confirmed  
+s20-other-call                               refused   refused operation-rejected Minidregg.Kernel.ObjectiveActivityReceiver.Reject.replayedMarker
+s20-one-message                              check     ok {"new": ["44041419782667765141526138839348037158427011835326371613860617367651274153239"], "deposit": 131, "paid": 8495665}
+s21-forged                                   refused   refused operation-rejected entialSignatureAdmission.Reject.envelope (Minidregg.Kernel.CredentialSignedEnvelopeController.Failure.invalidSignature))
+s21-no-receipt                               check     ok {"detail": "4d696e6964726567672e4b65726e656c2e4f626a656374697665416374697669747952656365697665722e52656a6563742e7369676e61747572650a2020284d696e6964726567672e43
+s21-nothing                                  check     ok {"new": []}
+s22-altered-outcome-refused                  refused   refused operation-rejected CredentialSignatureAdmission.Reject.envelope (Minidregg.Kernel.CredentialSignedEnvelopeController.Failure.wrongMessage))
+s22-unaltered-replays                        replayed  confirmed  
+s22-altered-answered-nothing                 check     ok {"answer": "refused", "new": []}
+{"rows": 170, "failed": ["s8-sending-method", "s8-unknown-method", "s8-nothing-escrowed"]}

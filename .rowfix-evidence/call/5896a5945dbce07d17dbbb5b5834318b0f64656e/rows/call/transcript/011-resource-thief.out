@@ -1,0 +1,31 @@
+/run/user/1001/pj.4i6pBj/c/w/sponsor/sources/create-thief.authoring/g0001/intent.bin
+{
+  "acceptedCount": "6",
+  "confirmation": "installed",
+  "eventId": "62022276672718484839007883194587740269879032980757896775584938100593643467139",
+  "transactionId": "57608429348503513569871027681379486924506008850588334366879832026503924256969",
+  "type": "confirmed",
+  "worldRoot": "93291344438827811017983328175848605346064541720832353176570998743047559022924"
+}
+{
+  "authority": "hint-only",
+  "controlCapability": "9839884628431543638",
+  "kind": "object",
+  "name": "thief",
+  "observeCapability": "15045453613967740410",
+  "operationCapability": "15045453613967740410",
+  "provenance": {
+    "birthReceipt": {
+      "acceptedCount": "6",
+      "confirmation": "installed",
+      "eventId": "62022276672718484839007883194587740269879032980757896775584938100593643467139",
+      "transactionId": "57608429348503513569871027681379486924506008850588334366879832026503924256969",
+      "type": "confirmed",
+      "worldRoot": "93291344438827811017983328175848605346064541720832353176570998743047559022924"
+    },
+    "reservationDigest": "dd6baff7a46b39415886fcace5cd383e240cf56be79acdd856212581cc071879",
+    "reservationRecord": "/run/user/1001/pj.4i6pBj/c/w/namespace/request-dd6baff7a46b39415886fcace5cd383e240cf56be79acdd856212581cc071879.json"
+  },
+  "target": "11831969418094649402",
+  "type": "minidregg-participant-reference-v1"
+}

@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Keep this small parent alive while the driver runs so the original cgroup's
+# counters can be read before systemd removes it. Semantics stay in the driver.
+set -uo pipefail
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+finish() { bash "$here/journey-row-finish" "$OUT"; }
+trap 'finish; exit 143' TERM
+trap 'finish; exit 130' INT
+bash -c '. "$ROWSFILE"; cd "$RUN" && "row_$ROW"' &
+driver=$!
+rc=0
+wait "$driver" || rc=$?
+finish
+exit "$rc"

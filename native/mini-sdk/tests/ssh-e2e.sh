@@ -29,16 +29,20 @@ cleanup() {
   if [[ -n $SSHD_PID ]] && [[ $(tr '\0' ' ' 2>/dev/null <"/proc/$SSHD_PID/cmdline") == *"$RUN/sshd_config"* ]]; then
     kill -TERM "$SSHD_PID" && echo "stopped sshd $SSHD_PID" >>"$LOG/cleanup.txt"
   fi
-  "$ART/run.sh" stop --state "$STORE" >>"$LOG/cleanup.txt" 2>&1 || true
+  if ! "$ART/run.sh" stop --state "$STORE" >>"$LOG/cleanup.txt" 2>&1; then
+    echo "Store cleanup failed; original exit $status" >>"$LOG/cleanup.txt"
+  fi
   rm -rf "$KEYS" "$RUN/client" "$RUN/host_ed25519" "$RUN/host_ed25519.pub" "$RUN/host_wrong" "$RUN/host_wrong.pub" "$STORE/keys"
-  echo "ssh-e2e: keys deleted; logs in $LOG" >&2
+  echo "ssh-e2e: keys deleted; logs in $LOG" >>"$LOG/cleanup.txt"
   exit "$status"
 }
 trap cleanup EXIT
 
 # --- the scratch Store, served by the candidate's Host --------------------------------------------
-"$ART/run.sh" init --manifest "$ART/manifest.json" --params "$ART/genesis-params.example.json" --state "$STORE" >"$LOG/init.log" 2>&1 \
-  || die "run.sh init failed (see $LOG/init.log)"
+. "$REPO/deploy/candidate/params.sh"
+candidate_params_now "$ART/genesis-params.example.json" >"$RUN/params.json"
+"$ART/run.sh" init --manifest "$ART/manifest.json" --params "$RUN/params.json" --state "$STORE" >"$LOG/init.log" 2>&1 \
+  || die "run.sh init failed: $(awk 'NF {last=$0} END {print last}' "$LOG/init.log") (see $LOG/init.log)"
 "$ART/run.sh" start --state "$STORE" >"$LOG/start.log" 2>&1 || die "run.sh start failed (see $LOG/start.log)"
 SOCKET=$STORE/public/mini.sock
 for _ in $(seq 1 100); do [[ -S $SOCKET ]] && break; sleep 0.1; done

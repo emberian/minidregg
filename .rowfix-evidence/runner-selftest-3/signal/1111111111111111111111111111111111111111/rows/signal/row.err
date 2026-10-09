@@ -1,0 +1,1 @@
+row failed; rc=143 signal=TERM sender=unknown (driver or external sender; see driver logs) Result=success MemoryPeak=1675264 timeout=no limit=2s; no driver verdict; evidence: scope.log and driver logs

@@ -1,0 +1,1 @@
+/srv/artifacts/5896a5945dbce07d17dbbb5b5834318b0f64656e/bin/mini activity --action submit --workspace /run/user/1001/pj.HGfYz1/s/w/sponsor --command /run/user/1001/pj.HGfYz1/s/s3-burst-1.front-end-plan-1.json --out /run/user/1001/pj.HGfYz1/s/attempts/s3-burst-1-front-end-plan-1 --prepare-only true

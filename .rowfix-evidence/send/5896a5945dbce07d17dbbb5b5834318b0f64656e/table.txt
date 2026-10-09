@@ -1,0 +1,27 @@
+tip 5896a5945dbce07d17dbbb5b5834318b0f64656e  labels: main
+journey wall 1378 s on burst3-a (32 CPUs), finished 2026-10-09T00:26:10Z; set built 2026-10-08T23:23:44Z
+
+ROW                             STATUS  WALL_S  OWNER  DETAIL
+send/S1-send                    PASS    9       ?      6 rows ok
+send/S2-deliver                 PASS    4       ?      8 rows ok
+send/S3-full                    PASS    62      ?      11 rows ok
+send/S4-failed                  PASS    8       ?      6 rows ok
+send/S5-forward                 PASS    11      ?      9 rows ok
+send/S6-broken                  PASS    17      ?      9 rows ok
+send/S7-shape                   PASS    10      ?      4 rows ok
+send/S8-interface               FAIL    956     ?      rc=1 signal=KILL sender=kernel cgroup OOM killer Result=oom-kill SystemdResult=exit-code MemoryPeak=25769803776 OOMKills=2 timeout=no limit=5400s state=failed/failed runner-stop=after-verdict; 3 of 7 rows red: s8-sending-method, s8-unknown-method, s8-nothing-escrowed
+send/S9-resolved                PASS    10      ?      7 rows ok
+send/S10-cancel                 PASS    43      ?      17 rows ok
+send/S11-pole                   PASS    20      ?      8 rows ok
+send/S12-stop                   PASS    22      ?      11 rows ok
+send/S13-who                    PASS    45      ?      8 rows ok
+send/S14-continue               PASS    18      ?      8 rows ok
+send/S15-exceed                 PASS    19      ?      8 rows ok
+send/S16-fanout                 PASS    12      ?      5 rows ok
+send/S17-depth                  PASS    24      ?      8 rows ok
+send/S18-cancel                 PASS    15      ?      4 rows ok
+send/S19-retry                  PASS    16      ?      6 rows ok
+send/S20-same-op-other-call     PASS    9       ?      3 rows ok
+send/S21-forged-retry           PASS    2       ?      3 rows ok
+send/S22-retry-outcome-altered  PASS    1       ?      3 rows ok
+send                            FAIL    1377    ?      scope OOM-killed; rc=1 signal=KILL sender=kernel cgroup OOM killer Result=oom-kill SystemdResult=exit-code MemoryPeak=25769803776 OOMKills=2 timeout=no limit=5400s state=failed/failed runner-stop=after-verdict; send driver rc=1: {"rows": 170, "failed": ["s8-sending-method", "s8-unknown-method", "s8-nothing-escrowed"]}

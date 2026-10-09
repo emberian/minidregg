@@ -14,6 +14,17 @@
 # ever reaches the box. OWNER hints: OUT/owner (a lane name) when the row can tell.
 JOURNEY_ROWS=(journey objective rooms activity seats bounty call send domain upgrade hostupgrade objectrecord welcomecontinuity sshe2e m3 m4 hermes m6grain m7 m8 fleetsign jpay exchange chargedfailure growth jserve)
 
+row_verdict() { # NAME RC: preserve stderr failures when stdout is empty.
+  local name=$1 rc=$2 detail
+  if [ "$rc" != 0 ]; then
+    detail=$(awk 'NF {last=$0} END {print last}' "$OUT/$name.err")
+    [ -n "$detail" ] || detail=$(awk 'NF {last=$0} END {print last}' "$OUT/$name.out")
+    echo "$name driver rc=$rc: ${detail:-no driver verdict; see $name.err and $name.out}" >&2
+  else
+    awk 'NF {last=$0} END {print last}' "$OUT/$name.out" >&2
+  fi
+}
+
 # J0-J8 + the rotation rows (JROT, JROTL, and JRLANE, JAUDIT and any *SEAT* step when the tip's journey.sh
 # has them), one fresh Store, through native/resource-client/journey.sh.
 row_journey() {
@@ -107,7 +118,7 @@ row_call() {
   cp "$RUN/c/results.json" "$OUT/" 2>/dev/null
   cp "$RUN/c/groups.tsv" "$OUT/subrows.tsv" 2>/dev/null
   cp -r "$RUN/c/transcript" "$OUT/" 2>/dev/null
-  tail -1 "$OUT/call.out" >&2
+  row_verdict call "$rc"
   return $rc
 }
 
@@ -125,7 +136,7 @@ row_send() {
   cp "$RUN/s/results.json" "$OUT/" 2>/dev/null
   cp "$RUN/s/groups.tsv" "$OUT/subrows.tsv" 2>/dev/null
   cp -r "$RUN/s/transcript" "$OUT/" 2>/dev/null
-  tail -1 "$OUT/send.out" >&2
+  row_verdict send "$rc"
   return $rc
 }
 
@@ -141,7 +152,7 @@ row_domain() {
   cp "$RUN/d/results.json" "$OUT/" 2>/dev/null
   cp "$RUN/d/groups.tsv" "$OUT/subrows.tsv" 2>/dev/null
   cp -r "$RUN/d/transcript" "$OUT/" 2>/dev/null
-  tail -1 "$OUT/domain.out" >&2
+  row_verdict domain "$rc"
   return $rc
 }
 
@@ -223,7 +234,7 @@ row_objectrecord() {
   cp "$RUN/or/results.json" "$OUT/" 2>/dev/null
   cp "$RUN/or/groups.tsv" "$OUT/subrows.tsv" 2>/dev/null
   cp -r "$RUN/or/transcript" "$OUT/" 2>/dev/null   # kept: the exact output of every command of the world
-  tail -1 "$OUT/objectrecord.out" >&2
+  row_verdict objectrecord "$rc"
   return $rc
 }
 

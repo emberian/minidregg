@@ -1,0 +1,31 @@
+/run/user/1001/pj.HGfYz1/s/w/sponsor/sources/create-poster.authoring/g0001/intent.bin
+{
+  "acceptedCount": "1",
+  "confirmation": "installed",
+  "eventId": "78992022091486161079356839509024013870824928650829986111091037217395023899380",
+  "transactionId": "51542864916073231733596552252152461026164911808691750338615502711127255946591",
+  "type": "confirmed",
+  "worldRoot": "97887553601298240567054903895700796841411627739255374371002988062970719302432"
+}
+{
+  "authority": "hint-only",
+  "controlCapability": "14066304111064578342",
+  "kind": "object",
+  "name": "poster",
+  "observeCapability": "12020232563038550551",
+  "operationCapability": "12020232563038550551",
+  "provenance": {
+    "birthReceipt": {
+      "acceptedCount": "1",
+      "confirmation": "installed",
+      "eventId": "78992022091486161079356839509024013870824928650829986111091037217395023899380",
+      "transactionId": "51542864916073231733596552252152461026164911808691750338615502711127255946591",
+      "type": "confirmed",
+      "worldRoot": "97887553601298240567054903895700796841411627739255374371002988062970719302432"
+    },
+    "reservationDigest": "0127608c597e02ff3b9dcaad5a16c83bd00e18d7e0c55ddd5e61c5ba3943c63d",
+    "reservationRecord": "/run/user/1001/pj.HGfYz1/s/w/namespace/request-0127608c597e02ff3b9dcaad5a16c83bd00e18d7e0c55ddd5e61c5ba3943c63d.json"
+  },
+  "target": "12473023845127128266",
+  "type": "minidregg-participant-reference-v1"
+}

@@ -1,0 +1,5 @@
+tip 1111111111111111111111111111111111111111  labels: 
+journey wall 0 s on burst3-a (32 CPUs), finished 2026-10-08T23:25:24Z; set built 
+
+ROW  STATUS  WALL_S  OWNER    DETAIL
+red  FAIL    0       unknown  row failed; rc=17 signal=none sender=none Result=exit-code MemoryPeak=[not set] timeout=no limit=2s; synthetic real refusal

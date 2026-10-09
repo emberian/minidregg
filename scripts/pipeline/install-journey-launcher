@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Deputy/operator only: install the stable entrypoint; does not restart services.
+# Usage: bash scripts/pipeline/install-journey-launcher [PIPELINE_ROOT]
+set -euo pipefail
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+root=${1:-${PIPELINE_ROOT:-/srv/pipeline}}
+mkdir -p "$root/scripts"
+install -m 755 "$here/journey-launcher" "$root/scripts/.journey-runner.new"
+mv -f "$root/scripts/.journey-runner.new" "$root/scripts/journey-runner"
+cmp "$here/journey-launcher" "$root/scripts/journey-runner"
+echo "installed stable journey launcher at $root/scripts/journey-runner; service restart belongs to operator"

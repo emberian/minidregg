@@ -1,0 +1,31 @@
+/run/user/1001/pj.4i6pBj/c/w/sponsor/sources/create-bank.authoring/g0001/intent.bin
+{
+  "acceptedCount": "4",
+  "confirmation": "installed",
+  "eventId": "24085629392994550823783707277214871092312309228096435300688008818877772114966",
+  "transactionId": "101375194992000157864997708971776009631324085190335346492438909065313763504089",
+  "type": "confirmed",
+  "worldRoot": "30810877562876081753945444900043046051504489809988720327241253252684707317852"
+}
+{
+  "authority": "hint-only",
+  "controlCapability": "11357476502813054346",
+  "kind": "object",
+  "name": "bank",
+  "observeCapability": "12875919412458844954",
+  "operationCapability": "12875919412458844954",
+  "provenance": {
+    "birthReceipt": {
+      "acceptedCount": "4",
+      "confirmation": "installed",
+      "eventId": "24085629392994550823783707277214871092312309228096435300688008818877772114966",
+      "transactionId": "101375194992000157864997708971776009631324085190335346492438909065313763504089",
+      "type": "confirmed",
+      "worldRoot": "30810877562876081753945444900043046051504489809988720327241253252684707317852"
+    },
+    "reservationDigest": "6241a79116ec6202034046b496b45584d214bf891371cd3cb049c3409e99295a",
+    "reservationRecord": "/run/user/1001/pj.4i6pBj/c/w/namespace/request-6241a79116ec6202034046b496b45584d214bf891371cd3cb049c3409e99295a.json"
+  },
+  "target": "12312747984535127426",
+  "type": "minidregg-participant-reference-v1"
+}

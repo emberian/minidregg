@@ -1,0 +1,1 @@
+/srv/artifacts/5896a5945dbce07d17dbbb5b5834318b0f64656e/bin/mini activity --action view --workspace /run/user/1001/pj.4i6pBj/c/w/sponsor --request {"pins": ["25863103785323510339984935143461908387844450594616326337671162312088206734801"]}

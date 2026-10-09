@@ -1,0 +1,31 @@
+/run/user/1001/pj.4i6pBj/c/w/sponsor/sources/create-counter.authoring/g0001/intent.bin
+{
+  "acceptedCount": "1",
+  "confirmation": "installed",
+  "eventId": "52559098832910579014320360096371812671981979235504461950990677019103225038701",
+  "transactionId": "22872843357217794530861915393471433434110853651076999474197254189768835028725",
+  "type": "confirmed",
+  "worldRoot": "26325385275602987690481522259456710789147375118299085639472319387138578436366"
+}
+{
+  "authority": "hint-only",
+  "controlCapability": "11511078536078756418",
+  "kind": "object",
+  "name": "counter",
+  "observeCapability": "10138355717098389457",
+  "operationCapability": "10138355717098389457",
+  "provenance": {
+    "birthReceipt": {
+      "acceptedCount": "1",
+      "confirmation": "installed",
+      "eventId": "52559098832910579014320360096371812671981979235504461950990677019103225038701",
+      "transactionId": "22872843357217794530861915393471433434110853651076999474197254189768835028725",
+      "type": "confirmed",
+      "worldRoot": "26325385275602987690481522259456710789147375118299085639472319387138578436366"
+    },
+    "reservationDigest": "7da1bcc9638fbc9859a3100158240e9377958b323bcf249e2cb800d8e3bb63b1",
+    "reservationRecord": "/run/user/1001/pj.4i6pBj/c/w/namespace/request-7da1bcc9638fbc9859a3100158240e9377958b323bcf249e2cb800d8e3bb63b1.json"
+  },
+  "target": "12627792614139832694",
+  "type": "minidregg-participant-reference-v1"
+}

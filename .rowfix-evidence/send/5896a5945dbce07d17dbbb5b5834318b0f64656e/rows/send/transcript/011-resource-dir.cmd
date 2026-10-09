@@ -1,0 +1,1 @@
+/srv/artifacts/5896a5945dbce07d17dbbb5b5834318b0f64656e/bin/mini workspace --action create --dir /run/user/1001/pj.HGfYz1/s/w/sponsor --name dir --storage content --predicate /run/user/1001/pj.HGfYz1/s/permit-all.json

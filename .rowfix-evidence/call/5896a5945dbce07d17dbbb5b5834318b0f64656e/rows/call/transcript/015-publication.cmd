@@ -1,0 +1,1 @@
+/srv/artifacts/5896a5945dbce07d17dbbb5b5834318b0f64656e/bin/minidregg-host /run/user/1001/pj.4i6pBj/c/w/deployment/pinned-config.json objective-publication /run/user/1001/pj.4i6pBj/c/publication/spec.json activity /run/user/1001/pj.4i6pBj/c/publication/out

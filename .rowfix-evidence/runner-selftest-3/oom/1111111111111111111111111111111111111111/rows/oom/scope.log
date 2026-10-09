@@ -1,0 +1,7 @@
+Oct 08 23:26:30 burst3-a systemd[7885]: Starting pj-oom-pjKds4LO.service - /usr/bin/bash -c ". \"\$ROWSFILE\"; cd \"\$RUN\" && \"row_\$ROW\""...
+Oct 08 23:26:30 burst3-a systemd[7885]: Started pj-oom-pjKds4LO.service - /usr/bin/bash -c ". \"\$ROWSFILE\"; cd \"\$RUN\" && \"row_\$ROW\"".
+Oct 08 23:26:30 burst3-a systemd[7885]: pj-oom-pjKds4LO.service: A process of this unit has been killed by the OOM killer.
+Oct 08 23:26:30 burst3-a systemd[7885]: pj-oom-pjKds4LO.service: Killing process 2723326 (bash) with signal SIGKILL.
+Oct 08 23:26:30 burst3-a systemd[7885]: pj-oom-pjKds4LO.service: Killing process 2723327 (python3) with signal SIGKILL.
+Oct 08 23:26:30 burst3-a systemd[7885]: pj-oom-pjKds4LO.service: Main process exited, code=killed, status=9/KILL
+Oct 08 23:26:30 burst3-a systemd[7885]: pj-oom-pjKds4LO.service: Failed with result 'oom-kill'.

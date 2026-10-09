@@ -1,0 +1,66 @@
+This key is the only copy. It signs as you and opens your private rooms.
+If you lose it and have no next key there is no recovery: you enroll a new subject and are re-invited.
+Room content comes back by re-wrap at the current epoch; older epochs come back
+only from a member who kept them. Your old posts stay under the old subject.
+Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB --escrow-subject SUBJECT` writes your seed encrypted
+to your sponsor, which lets your sponsor sign as you.
+next key: /run/user/1001/pj.4i6pBj/c/w/sponsor.key.next (its public half: /run/user/1001/pj.4i6pBj/c/w/sponsor.key.next.pub)
+for your sponsor's `enroll plan NAME KEYFILE NEXT-PUB COSIGN` (public, safe to send):
+  next public key: 014c6a07bc9dc4fc89059d0405772f5359f3eeb40f2fa82484df066b016323d8
+  co-signature:    78571e3c8eb20fc3165a7efdc02dd64b90e99e76b218b92acc21c0f32b90db337cec703cfd06e0718b61c972b63ed50d274579babad071da167bae1a647d9201
+Your NEXT key is the only thing that can rotate this identity. If the daily key
+is lost or stolen, `mini rotate-key --next-key NEXT` moves your subject to it and
+the daily key stops signing; a thief holding only the daily key cannot rotate.
+Keep the next key OFF this machine (other media, paper): if it sits beside the
+daily key, whoever takes one takes both and pre-rotation protects nothing.
+Your blinding key is derived from this seed (`mini key --action export-blinding`); it keys the salts that hide each cell’s fields from readers you have not named.
+This key is the only copy. It signs as you and opens your private rooms.
+If you lose it and have no next key there is no recovery: you enroll a new subject and are re-invited.
+Room content comes back by re-wrap at the current epoch; older epochs come back
+only from a member who kept them. Your old posts stay under the old subject.
+Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB --escrow-subject SUBJECT` writes your seed encrypted
+to your sponsor, which lets your sponsor sign as you.
+next key: /run/user/1001/pj.4i6pBj/c/w/newcomer.key.next (its public half: /run/user/1001/pj.4i6pBj/c/w/newcomer.key.next.pub)
+for your sponsor's `enroll plan NAME KEYFILE NEXT-PUB COSIGN` (public, safe to send):
+  next public key: 49eabc72eef749556e5e529f435794bd908b5cff25decfc05df09da49b5d34af
+  co-signature:    858b00ffb42d17f584da737b279a1cb434b047c68c0e57c0bf332bb623cc0efbceddbc864ea928c02e508e11eeb16b890e45f76603448cd7bd2ebc8089adc30b
+Your NEXT key is the only thing that can rotate this identity. If the daily key
+is lost or stolen, `mini rotate-key --next-key NEXT` moves your subject to it and
+the daily key stops signing; a thief holding only the daily key cannot rotate.
+Keep the next key OFF this machine (other media, paper): if it sits beside the
+daily key, whoever takes one takes both and pre-rotation protects nothing.
+Your blinding key is derived from this seed (`mini key --action export-blinding`); it keys the salts that hide each cell’s fields from readers you have not named.
+This key is the only copy. It signs as you and opens your private rooms.
+If you lose it and have no next key there is no recovery: you enroll a new subject and are re-invited.
+Room content comes back by re-wrap at the current epoch; older epochs come back
+only from a member who kept them. Your old posts stay under the old subject.
+Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB --escrow-subject SUBJECT` writes your seed encrypted
+to your sponsor, which lets your sponsor sign as you.
+next key: /run/user/1001/pj.4i6pBj/c/w/clock.key.next (its public half: /run/user/1001/pj.4i6pBj/c/w/clock.key.next.pub)
+for your sponsor's `enroll plan NAME KEYFILE NEXT-PUB COSIGN` (public, safe to send):
+  next public key: 6ef58b3fd1029a10725e54e440c483d346e87c5799d8cb547a773db503b2015d
+  co-signature:    5d971f484298557bd8790522fa56233226e9c23ac7faf2db67f1a248158e580c90c1237a58d5b6b1d78da22c7751bcfaa2134e7ad1bc1b80a4d99789b8db8905
+Your NEXT key is the only thing that can rotate this identity. If the daily key
+is lost or stolen, `mini rotate-key --next-key NEXT` moves your subject to it and
+the daily key stops signing; a thief holding only the daily key cannot rotate.
+Keep the next key OFF this machine (other media, paper): if it sits beside the
+daily key, whoever takes one takes both and pre-rotation protects nothing.
+Your blinding key is derived from this seed (`mini key --action export-blinding`); it keys the salts that hide each cell’s fields from readers you have not named.
+This key is the only copy. It signs as you and opens your private rooms.
+If you lose it and have no next key there is no recovery: you enroll a new subject and are re-invited.
+Room content comes back by re-wrap at the current epoch; older epochs come back
+only from a member who kept them. Your old posts stay under the old subject.
+Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB --escrow-subject SUBJECT` writes your seed encrypted
+to your sponsor, which lets your sponsor sign as you.
+next key: /run/user/1001/pj.4i6pBj/c/w/pay/observer.key.next (its public half: /run/user/1001/pj.4i6pBj/c/w/pay/observer.key.next.pub)
+for your sponsor's `enroll plan NAME KEYFILE NEXT-PUB COSIGN` (public, safe to send):
+  next public key: 0aa7ab1691a4c51c245ce0df29e72608f1cc745de127f4d4e5832ed4753e4518
+  co-signature:    a08b60370fca013dba1b0bf3c2af91f5e7a02d92f1d77f94bac9139e2c316dab6d66f13128ee41708d3abed20cf0d5d3cb75462fd2a37408b35e8f1aa7ca970d
+Your NEXT key is the only thing that can rotate this identity. If the daily key
+is lost or stolen, `mini rotate-key --next-key NEXT` moves your subject to it and
+the daily key stops signing; a thief holding only the daily key cannot rotate.
+Keep the next key OFF this machine (other media, paper): if it sits beside the
+daily key, whoever takes one takes both and pre-rotation protects nothing.
+Your blinding key is derived from this seed (`mini key --action export-blinding`); it keys the salts that hide each cell’s fields from readers you have not named.
+workspace continuity: legacy; initialize with workspace --action continuity-init --name REF
+workspace read attempt: /run/user/1001/pj.4i6pBj/c/w/sponsor/attempts/a-12647398696918852286989681997163475095

@@ -1,0 +1,4 @@
+Oct 08 23:27:35 burst3-a systemd[7885]: Starting pj-signal-pjaaS2eG.service - /usr/bin/bash /tmp/pj-source.nNh5OR/scripts/pipeline/journey-row-exec...
+Oct 08 23:27:35 burst3-a systemd[7885]: Started pj-signal-pjaaS2eG.service - /usr/bin/bash /tmp/pj-source.nNh5OR/scripts/pipeline/journey-row-exec.
+Oct 08 23:27:35 burst3-a systemd[7885]: pj-signal-pjaaS2eG.service: Main process exited, code=exited, status=143/n/a
+Oct 08 23:27:35 burst3-a systemd[7885]: pj-signal-pjaaS2eG.service: Failed with result 'exit-code'.

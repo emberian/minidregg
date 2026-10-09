@@ -102,10 +102,14 @@ stop() {
   done
   rm -f "$S/public/server.pid"
 }
-# Explicit clock genesis makes F/G's shipped zero example usable; E ignores the
-# added v2 parameters. These are operator inputs, not fixture or artifact edits.
-jq '.clock.genesisNow = 1790000000 | .clock.maxStepSeconds = 300' \
-  "$C0/genesis-params.example.json" >"$SCRATCH/params.json"
+. "$(dirname -- "$0")/../../../deploy/candidate/params.sh"
+# The pre-clock-v2 N image has no genesisNow/maxStepSeconds fields. Only this
+# historical protocol test supplies those absent operator fields before using
+# the shared resolver; the source fixture and candidate remain untouched.
+jq 'if (.clock | has("genesisNow")) then . else .clock.genesisNow = 0 end
+  | if (.clock | has("maxStepSeconds")) then . else .clock.maxStepSeconds = 300 end' \
+  "$C0/genesis-params.example.json" >"$SCRATCH/historical-params.json"
+candidate_params_now "$SCRATCH/historical-params.json" >"$SCRATCH/params.json"
 run init-n "$C0/run.sh" init --manifest "$C0/manifest.json" --params "$SCRATCH/params.json" --state "$S"
 MINI=$(jq -r .mini "$C0/manifest.json") HOST=$(jq -r .host "$C0/manifest.json")
 CONFIG=$S/deployment/pinned-config.json WS=$S/sponsor

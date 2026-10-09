@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# ExecStopPost receiving-path evidence: read the cgroup before systemd removes it.
+# A retained failed unit alone does not retain its memory.peak counter.
+set -uo pipefail
+out=${1:?evidence directory}
+cgroup=$(awk -F: '$1=="0" {print $3}' /proc/self/cgroup)
+peak=unknown
+if [ -n "$cgroup" ] && [ -r "/sys/fs/cgroup$cgroup/memory.peak" ]; then
+  peak=$(cat "/sys/fs/cgroup$cgroup/memory.peak")
+fi
+printf 'Result=%s\nMemoryPeak=%s\nExitCode=%s\nExitStatus=%s\nControlGroup=%s\n' \
+  "${SERVICE_RESULT:-unknown}" "$peak" "${EXIT_CODE:-unknown}" "${EXIT_STATUS:-unknown}" "$cgroup" >"$out/cgroup-final.properties"

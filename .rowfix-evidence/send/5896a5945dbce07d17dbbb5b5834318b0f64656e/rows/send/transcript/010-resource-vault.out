@@ -1,0 +1,31 @@
+/run/user/1001/pj.HGfYz1/s/w/sponsor/sources/create-vault.authoring/g0001/intent.bin
+{
+  "acceptedCount": "5",
+  "confirmation": "installed",
+  "eventId": "32833235375061610239030695982360524489330901130375085228513362606221002513873",
+  "transactionId": "53806441347035094541827248802079961222471426634434378866375742624749223142955",
+  "type": "confirmed",
+  "worldRoot": "40684861796142994151854033896435240985618428073839057023830849910246656910574"
+}
+{
+  "authority": "hint-only",
+  "controlCapability": "15453144731849812437",
+  "kind": "object",
+  "name": "vault",
+  "observeCapability": "16926646006721139936",
+  "operationCapability": "16926646006721139936",
+  "provenance": {
+    "birthReceipt": {
+      "acceptedCount": "5",
+      "confirmation": "installed",
+      "eventId": "32833235375061610239030695982360524489330901130375085228513362606221002513873",
+      "transactionId": "53806441347035094541827248802079961222471426634434378866375742624749223142955",
+      "type": "confirmed",
+      "worldRoot": "40684861796142994151854033896435240985618428073839057023830849910246656910574"
+    },
+    "reservationDigest": "3e9aa5621bad0cc12b7b80d37e0219b5110f2a8c083916753f092caeaf82589a",
+    "reservationRecord": "/run/user/1001/pj.HGfYz1/s/w/namespace/request-3e9aa5621bad0cc12b7b80d37e0219b5110f2a8c083916753f092caeaf82589a.json"
+  },
+  "target": "13877080742474546359",
+  "type": "minidregg-participant-reference-v1"
+}

@@ -1,0 +1,2 @@
+workspace continuity: legacy; initialize with workspace --action continuity-init --name REF
+workspace birth attempt: /run/user/1001/pj.4i6pBj/c/w/sponsor/attempts/create-relayA

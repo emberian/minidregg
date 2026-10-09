@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # scripts/pipeline/journey-runner -- continuous journeys on the journey box (PIPELINE item 4).
+# tip-dispatch-protocol: 1
 #
 #   scripts/pipeline/journey-runner [--once] [--tip TIP] [--rows-file PATH (test override)] [--results-root PATH] [--row NAME --source-tree PATH (plant overrides)]
 #
@@ -21,12 +22,18 @@ set -uo pipefail
 PIPELINE_PROG=journey-runner
 here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 . "$here/lib.sh"
-once=0; only=""; rows_override=""; row_override=""; source_override=""
+once=0; only=""; rows_override=""; row_override=""; source_override=""; tip_source=""
 while [ $# -gt 0 ]; do
-  case "$1" in --once) once=1; shift ;; --tip) only=$2; once=1; shift 2 ;; --rows-file) rows_override=$(realpath "$2"); shift 2 ;; --results-root) JOURNEY_ROOT=$(realpath -m "$2"); shift 2 ;; --row) row_override=$2; shift 2 ;; --source-tree) source_override=$(realpath "$2"); shift 2 ;; *) pipeline_die "unknown $1" ;; esac
+  case "$1" in --once) once=1; shift ;; --tip) only=$2; once=1; shift 2 ;; --tip-source) tip_source=$(realpath "$2"); shift 2 ;; --rows-file) rows_override=$(realpath "$2"); shift 2 ;; --results-root) JOURNEY_ROOT=$(realpath -m "$2"); shift 2 ;; --row) row_override=$2; shift 2 ;; --source-tree) source_override=$(realpath "$2"); shift 2 ;; *) pipeline_die "unknown $1" ;; esac
 done
 mkdir -p "$JOURNEY_ROOT"
-exec 7>"$JOURNEY_ROOT/.runner.lock"; flock -n 7 || pipeline_die "another journey-runner holds $JOURNEY_ROOT/.runner.lock"
+if [ "${PIPELINE_JOURNEY_LOCK_ROOT:-}" = "$JOURNEY_ROOT" ]; then
+  [ "$(readlink /proc/$$/fd/8)" = "$JOURNEY_ROOT/.runner.lock" ] || pipeline_die "invalid inherited runner lock"
+  exec 7<&8
+else
+  exec 7>"$JOURNEY_ROOT/.runner.lock"
+fi
+flock -n 7 || pipeline_die "another journey-runner holds $JOURNEY_ROOT/.runner.lock"
 scratch_base=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}; [ -d "$scratch_base" ] && [ -w "$scratch_base" ] || scratch_base=/tmp
 
 # Product driver input plumbing lives here. Paths belong to this artifact set;
@@ -67,39 +74,90 @@ for r in rows: print("  ".join(c.ljust(w[i]) for i,c in enumerate(r)).rstrip())'
 }
 
 run_row() {  # ROW: one row in its own scratch world and scope; its lines go to rows/ROW/result.tsv
-  local row=$1 O=$J/rows/$1 R s rc st detail owner res scope_result=
+  local row=$1 O=$J/rows/$1 R s rc st detail owner res scope_result=unknown systemd_result=unknown memory_peak=unknown oom_kills=unknown state=unknown substate=unknown runner_stopped=no
   mkdir -p "$O"; res=$O/result.tsv; : >"$res"; R=$(mktemp -d "$scratch_base/pj.XXXXXX"); s=$(date +%s)
-  # Each row runs in its own transient scope: when it ends, everything it started (servers a
-  # hook forgot, setsid'd children) is stopped with it, by cgroup, not by matching command lines.
+  # Retain the transient service after its main process exits. Scopes may vanish
+  # before show can capture Result/MemoryPeak. Stop only after recording evidence.
   local unit=pj-$row-$(basename "$R" | tr -cd 'A-Za-z0-9')
   product_inputs
   if ! command -v systemd-run >/dev/null 2>&1 || ! systemctl --user show-environment >/dev/null 2>&1; then
     echo "no systemd user session" >"$O/row.err"; rc=98
   else
-  SRC=$src SET=$set BIN=$set/bin MANIFEST=$set/manifest.json RUN=$R OUT=$O LEANENV=$leanenv ROWSFILE=$rowsfile ROW=$row \
-    systemd-run --user --scope --quiet --unit="$unit" -p MemoryMax="${PIPELINE_ROW_MEM_MAX:-24G}" -p MemorySwapMax=0 \
-      --setenv=SRC --setenv=SET --setenv=BIN --setenv=MANIFEST --setenv=RUN --setenv=OUT --setenv=LEANENV \
-      -- timeout "${PIPELINE_ROW_TIMEOUT_S:-5400}" bash -c '. "$ROWSFILE"; cd "$RUN" && "row_$ROW"' 2>"$O/row.err" >"$O/row.out"
+  local env_args=() name main_code main_status
+  export SRC=$src SET=$set BIN=$set/bin MANIFEST=$set/manifest.json RUN=$R OUT=$O LEANENV=$leanenv ROWSFILE=$rowsfile ROW=$row
+  for name in SRC SET BIN MANIFEST RUN OUT LEANENV ROWSFILE ROW PATH HOME XDG_RUNTIME_DIR \
+    HOST MINI STORE VERIFIER SHELL_BIN GRAIN SPK_HOST_BIN PAY_WATCHER_BIN CANDIDATE M7_REFERENCE TEST_PROVIDER LAUNCH_GATE \
+    MINI_FN_LAUNCHER MINI_FN_CORE JOURNEY_PLANT_CALL JOURNEY_PLANT_SEND JOURNEY_PLANT_DOMAIN JOURNEY_PLANT_UPGRADE \
+    CONSENT_HOST MINI_LOCAL_HOST MINI_CONSENT_HOST MINI_CONSENT_CONFIG RUSTUP_HOME CARGO_HOME; do
+    [ -z "${!name+x}" ] || env_args+=("--setenv=$name=${!name}")
+  done
+  systemd-run --user --quiet --unit="$unit" --service-type=exec \
+    -p RemainAfterExit=yes -p KillMode=control-group -p OOMPolicy=continue \
+    -p MemoryAccounting=yes -p MemoryMax="${PIPELINE_ROW_MEM_MAX:-24G}" -p MemorySwapMax=0 \
+    -p RuntimeMaxSec="${PIPELINE_ROW_TIMEOUT_S:-5400}" -p TimeoutStopSec=15 \
+    -p "ExecStopPost=/usr/bin/bash \"$here/journey-row-finish\" \"$O\" stop" \
+    -p "StandardOutput=append:$O/row.out" -p "StandardError=append:$O/row.err" \
+    "${env_args[@]}" -- bash "$here/journey-row-exec" 2>"$O/launch.err"
   rc=$?
-  # Failed scopes can kill the row shell before it emits any verdict. Keep the
-  # receiving scope's own result and journal before stopping its remaining children.
-  printf '%s\n' "$unit.scope" >"$O/scope-unit"
-  systemctl --user show "$unit.scope" -p Result -p MemoryPeak -p MemoryMax -p ControlGroup >"$O/scope.properties" 2>"$O/scope-show.err"
-  scope_result=$(sed -n 's/^Result=//p' "$O/scope.properties")
-  journalctl --user -u "$unit.scope" --since "@$s" --no-pager -n 30 >"$O/scope.log" 2>"$O/scope-journal.err"
-  systemctl --user stop "$unit.scope" 2>/dev/null
+  printf '%s\n' "$unit.service" >"$O/scope-unit"
+  if [ "$rc" = 0 ]; then
+    while :; do
+      if ! systemctl --user show "$unit.service" -p Result -p MemoryPeak -p MemoryMax -p ControlGroup \
+        -p ActiveState -p SubState -p ExecMainCode -p ExecMainStatus -p RuntimeMaxUSec >"$O/scope.properties.new" 2>"$O/scope-show.err"; then
+        rc=97; echo "systemd evidence unavailable; see scope-show.err" >>"$O/row.err"; break
+      fi
+      mv "$O/scope.properties.new" "$O/scope.properties"
+      substate=$(sed -n 's/^SubState=//p' "$O/scope.properties")
+      case "$substate" in exited|failed|dead) break ;; esac
+      sleep 1
+    done
+    scope_result=$(sed -n 's/^Result=//p' "$O/scope.properties")
+    systemd_result=$scope_result
+    state=$(sed -n 's/^ActiveState=//p' "$O/scope.properties")
+    memory_peak=$(sed -n 's/^MemoryPeak=//p' "$O/scope.properties")
+    if [ -f "$O/cgroup-final.properties" ]; then
+      memory_peak=$(sed -n 's/^MemoryPeak=//p' "$O/cgroup-final.properties")
+      oom_kills=$(sed -n 's/^OOMKills=//p' "$O/cgroup-final.properties")
+      if grep -Eq '^OOMKills=[1-9][0-9]*$' "$O/cgroup-final.properties"; then scope_result=oom-kill; fi
+    fi
+    main_code=$(sed -n 's/^ExecMainCode=//p' "$O/scope.properties")
+    main_status=$(sed -n 's/^ExecMainStatus=//p' "$O/scope.properties")
+    if [ "$rc" = 0 ]; then
+      case "$main_code" in
+        1) rc=${main_status:-97} ;;
+        2|3) rc=$((128 + ${main_status:-0})) ;;
+        *) rc=97 ;;
+      esac
+      [ "$systemd_result" != timeout ] || rc=124
+    fi
+  else
+    cat "$O/launch.err" >>"$O/row.err"
+  fi
+  journalctl --user -u "$unit.service" --since "@$s" --no-pager -n 60 >"$O/scope.log" 2>"$O/scope-journal.err"
+  systemctl --user stop "$unit.service" 2>"$O/scope-stop.err"
+  [ "$?" != 0 ] || runner_stopped=after-verdict
+  # A failed unit must not accumulate in the user manager after its evidence is saved.
+  systemctl --user reset-failed "$unit.service" 2>"$O/scope-reset.err"
   fi
   printf '%s\n' "$rc" >"$O/exit-code"
-  case $rc in 0) st=PASS ;; 99) st=ABSENT ;; 98) st=UNCONFIGURED ;; 124) st=FAIL; echo "timed out after ${PIPELINE_ROW_TIMEOUT_S:-5400} s" >>"$O/row.err" ;; *) st=FAIL ;; esac
+  case $rc in 0) st=PASS ;; 99) st=ABSENT ;; 98) st=UNCONFIGURED ;; *) st=FAIL ;; esac
   if [ "$scope_result" = oom-kill ] || grep -q 'killed by the OOM killer' "$O/scope.log" 2>/dev/null; then st=FAIL; fi
-  if [ "$st" = FAIL ]; then
-    if [ "$scope_result" = oom-kill ] || grep -q 'killed by the OOM killer' "$O/scope.log" 2>/dev/null; then
-      echo "scope OOM-killed (MemoryMax=${PIPELINE_ROW_MEM_MAX:-24G}); exit $rc; evidence: scope.log" >>"$O/row.err"
-    elif [ -z "$(awk 'NF {last=$0} END {print last}' "$O/row.err")" ]; then
-      echo "row exited $rc without a verdict; evidence: scope.log and driver logs" >>"$O/row.err"
-    fi
+  detail=$(awk 'NF {last=$0} END {print last}' "$O/row.err" | tr '\t' ' ')
+  local cause signal=none sender=none timed_out=no diagnostics
+  if [ "$rc" -gt 128 ] && [ "$rc" -le 192 ]; then
+    signal=$(kill -l "$((rc - 128))"); sender='unknown (driver or external sender; see driver logs)'
   fi
-  detail=$(tail -1 "$O/row.err" | tr '\t' ' ' | cut -c1-300)
+  if [ "$systemd_result" = timeout ]; then
+    timed_out=yes; signal=TERM; sender="systemd user manager ($unit.service RuntimeMaxSec)"
+  elif [ "$scope_result" = oom-kill ]; then
+    signal=KILL; sender='kernel cgroup OOM killer'
+  fi
+  diagnostics="rc=$rc signal=$signal sender=$sender Result=${scope_result:-unknown} SystemdResult=${systemd_result:-unknown} MemoryPeak=${memory_peak:-unknown} OOMKills=${oom_kills:-unknown} timeout=$timed_out limit=${PIPELINE_ROW_TIMEOUT_S:-5400}s state=$state/$substate runner-stop=$runner_stopped"
+  if [ "$st" = FAIL ]; then
+    case "$scope_result" in oom-kill) cause='scope OOM-killed' ;; timeout) cause='row timed out' ;; *) cause='row failed' ;; esac
+    detail="$cause; $diagnostics; ${detail:-no driver verdict; evidence: scope.log and driver logs}"
+    echo "$detail" >>"$O/row.err"
+  fi
   rm -rf "$R"                                   # the scratch world: Stores, sockets, test keys
   owner=$( [ -s "$O/owner" ] && cat "$O/owner" || owner_for "$set" "$row" "$src")
   if [ -s "$O/subrows.tsv" ]; then
@@ -108,7 +166,8 @@ run_row() {  # ROW: one row in its own scratch world and scope; its lines go to 
       sdet=${sdet//"$R/j/steps/"/"$O/step-"}   # the scratch run is gone; its red steps' logs were kept here
       [[ $sdet =~ \(lane\ ([A-Za-z0-9_-]+)\) ]] && so="lane ${BASH_REMATCH[1]}"
       [ "$sst" = PASS ] || so=$( [[ $so == lane* ]] && echo "$so" || owner_for "$set" "$id" "$src")
-      printf '%s/%s\t%s\t%s\t%s\t%s\n' "$row" "$id" "$sst" "$wall" "$so" "${sdet:0:300}" >>"$res"
+      if [ "$sst" = FAIL ]; then sdet="$diagnostics; ${sdet:-no subrow verdict}"; fi
+      printf '%s/%s\t%s\t%s\t%s\t%s\n' "$row" "$id" "$sst" "$wall" "$so" "$sdet" >>"$res"
     done <"$O/subrows.tsv"
     printf '%s\t%s\t%s\t%s\t%s\n' "$row" "$st" $(( $(date +%s) - s )) "$owner" "$detail" >>"$res"
   else
@@ -124,19 +183,29 @@ run_tip() {
   [ -e "$J" ] && mv "$J" "$J.run-$(date -u +%Y%m%dT%H%M%SZ)"
   mkdir -p "$J/rows"; t0=$(date +%s)
   labels=$(for l in next green main; do [ "$(readlink "$ARTIFACT_ROOT/$l" 2>/dev/null)" = "$tip" ] && printf '%s ' "$l"; done)
-  if [ -f "$ARTIFACT_ROOT/.leanenv/$tip/.pipeline-leanenv-complete" ]; then src=$ARTIFACT_ROOT/.leanenv/$tip; leanenv=1
+  if [ -n "$tip_source" ]; then src=$tip_source; [ ! -f "$src/.pipeline-leanenv-complete" ] || leanenv=1
+  elif [ -f "$ARTIFACT_ROOT/.leanenv/$tip/.pipeline-leanenv-complete" ]; then src=$ARTIFACT_ROOT/.leanenv/$tip; leanenv=1
   else tmp=$(mktemp -d "$scratch_base/pjs.XXXXXX"); tar -xf "$set/source.tar" -C "$tmp"; src=$tmp; fi
   if [ -n "$source_override" ]; then
     [ -d "$source_override" ] || pipeline_die "no source override: $source_override"
-    [ "$leanenv" = 1 ] || rm -rf "$src"
+    [ "$leanenv" = 1 ] || [ -n "$tip_source" ] || rm -rf "$src"
     src=$source_override; leanenv=0
   fi
-  rowsfile=$src/scripts/pipeline/journey-rows; [ -f "$rowsfile" ] || rowsfile=$here/journey-rows
+  if [ -z "$source_override$rows_override" ]; then
+    local component
+    for component in journey-runner journey-rows lib.sh journey-red-lines journey-row-finish journey-row-exec; do
+      cmp -s "$here/$component" "$src/scripts/pipeline/$component" ||
+        pipeline_die "runner/tip mismatch: $component for $tip; install the stable journey launcher"
+    done
+  fi
+  rowsfile=$src/scripts/pipeline/journey-rows
   if [ -n "$rows_override" ]; then
     [ -f "$rows_override" ] || pipeline_die "no rows override: $rows_override"
     rowsfile=$rows_override
   fi
   unset JOURNEY_ROWS; . "$rowsfile"
+  printf 'source=%s\nrunner=%s\nrows=%s\nsource_override=%s\nrows_override=%s\n' "$src" "$here/journey-runner" "$rowsfile" "$source_override" "$rows_override" >"$J/runner.properties"
+  sha256sum "$here/journey-runner" "$here/lib.sh" "$rowsfile" >"$J/runner.sha256"
   if [ -n "$row_override" ]; then
     [[ " ${JOURNEY_ROWS[*]} " == *" $row_override "* ]] || pipeline_die "unknown row: $row_override"
     JOURNEY_ROWS=("$row_override")
@@ -152,7 +221,7 @@ run_tip() {
   done
   wait
   for row in "${JOURNEY_ROWS[@]}"; do cat "$J/rows/$row/result.tsv" >>"$J/results.tsv"; done
-  if [ "$leanenv" != 1 ] && [ -z "$source_override" ]; then rm -rf "$src"; fi
+  if [ "$leanenv" != 1 ] && [ -z "$source_override$tip_source" ]; then rm -rf "$src"; fi
   local wall=$(( $(date +%s) - t0 ))
   { printf 'tip %s  labels: %s\njourney wall %s s on %s (%s CPUs), finished %s; set built %s\n\n' "$tip" "${labels% }" \
       "$wall" "$(hostname)" "$(nproc)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(sed -n 's/.*finished=\([^ ]*\).*/\1/p' "$set/PROVENANCE" 2>/dev/null)"

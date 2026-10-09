@@ -79,15 +79,23 @@ done
 journey_shortdir m7
 S=$JOURNEY_D
 cleanup() {
+  local original_rc=$? cleanup_rc=0
   if [ -f "$S/state.json" ]; then
     if ! "$C/run.sh" stop --state "$S" >"$D/operator-cleanup.txt" 2>&1; then
-      echo "M7: operator cleanup failed; see $D/operator-cleanup.txt" >&2
+      echo "M7: operator cleanup failed; original exit $original_rc" >>"$D/operator-cleanup.txt"
+      cleanup_rc=1
     fi
   fi
   journey_shortdir_return
+  if [ "$original_rc" = 0 ] && [ "$cleanup_rc" != 0 ]; then
+    echo "M7: operator cleanup failed; see $D/operator-cleanup.txt" >&2
+    exit "$cleanup_rc"
+  fi
 }
 trap cleanup EXIT
-"$C/run.sh" init --manifest "$C/manifest.json" --params "$C/genesis-params.example.json" --state "$S" >"$D/operator-init.txt" 2>&1 || fail "run.sh init failed: $(tail -1 "$D/operator-init.txt")"
+. "$(dirname -- "$0")/../../../deploy/candidate/params.sh"
+candidate_params_now "$C/genesis-params.example.json" >"$D/operator-params.json"
+"$C/run.sh" init --manifest "$C/manifest.json" --params "$D/operator-params.json" --state "$S" >"$D/operator-init.txt" 2>&1 || fail "run.sh init failed: $(tail -1 "$D/operator-init.txt")"
 "$C/run.sh" start --state "$S" >"$D/operator-start.txt" 2>&1 || fail "run.sh start failed: $(tail -1 "$D/operator-start.txt")"
 "$C/run.sh" sponsor --state "$S" >"$D/operator-sponsor.txt" 2>&1 || fail "run.sh sponsor failed: $(tail -1 "$D/operator-sponsor.txt")"
 jq -e '.type == "resource"' "$S/logs/sponsor-factory-read.json" >/dev/null || fail "sponsor's signed factory read did not answer"

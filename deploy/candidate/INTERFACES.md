@@ -391,12 +391,17 @@ issuerEpoch factoryControllerCapability`, `sponsor {subject keyId keyEpoch
 activeFrom activeUntil accountId spendCapabilityId controlCapabilityId
 factoryObserveCapabilityId initialBalance}`, `clock {subject keyId keyEpoch
 activeFrom activeUntil accountId spendCapabilityId controlCapabilityId
-factoryObserveCapabilityId tickCapabilityId}` (the dedicated clock subject,
+factoryObserveCapabilityId tickCapabilityId genesisNow maxStepSeconds}` (the dedicated clock subject,
 distinct from the sponsor; `tickCapabilityId` is its `C_tick`), and `meterAllowance` with the ten
 keys `incidences turnBytes memoryTouches witnessBytes proofWork storageBytes
 networkBytes sideEffectCount feeDebit leaseByteBlocks`.
-`genesis-params.example.json` holds the values the recorded qualification runs
-used. The sponsor and the clock subject are the identities genesis names; every
+`genesis-params.example.json` uses numeric zero for `clock.genesisNow`.
+`run.sh init` resolves that placeholder to wall-clock Unix seconds and retains
+the resolved input in `state/genesis-params.json`. Direct genesis drivers source
+`deploy/candidate/params.sh` and call `candidate_params_now INPUT > NEW_PARAMS`.
+Explicit positive integer seconds are preserved; missing or invalid clock values
+refuse. `genesis.sh --check` still requires a resolved positive value.
+The sponsor and the clock subject are the identities genesis names; every
 later participant is enrolled through the client and receives Host-allocated
 identifiers. `genesis.sh PARAMS SPONSOR_PUBLIC_HEX CLOCK_PUBLIC_HEX HOST STORE
 VERIFIER DIR` takes both public keys.
