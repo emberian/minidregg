@@ -424,28 +424,70 @@ row_hermes() {
   grep -q $'\tPASS: Hermes J4' "$OUT/evidence/timeline.tsv" || { echo "missing expected evidence: Hermes completion" >&2; return 1; }
   echo "deterministic Hermes restart, recovery and delegation completed" >&2
 }
+# The per-store SPK platform: scripts/spk-platform/two-world-journey.sh full. Two scratch Stores, each with its
+# own store-scoped world (ROOT SETUP by deploy/spk-host/install-user-world: registry, sudoers rule, grains root,
+# subuid range; a broker config v2; the user unit mini-spk-broker@STORE.service), the signed sntfy package
+# installed, started, reached over HTTP, stopped, restarted and a second instance in each world; disjoint units,
+# sockets and subuids; the installed helper refuses A's volume request carrying B's ids by name. The set's own
+# bin/ is both the base and the SPK binaries (spk-host, mini-spk-broker, mini-spk-volume-helper). Root-owned
+# files are made only by the journey's installer and removed by the journey's EXIT trap (which runs on failure
+# too); when that trap never reported (the journey was killed), the row runs the journey's own `cleanup` mode.
+# Inputs a box may lack (uid 1001 with linger, sudo -n, uidmap, a subuid range, bwrap, the pinned SPK) are 98.
 row_m6grain() {
-  local d=$SRC/scripts/spk-platform/grain-journey.sh rc
+  local d=$SRC/scripts/spk-platform/two-world-journey.sh rc w s spk
   [ -f "$d" ] || return 99
   echo prod-spk >"$OUT/owner"
   product_native || return $?
-  product_input SPK_HOST_BIN executable || return $?
-  product_exec m6grain sh "$d" all "$RUN/g"; rc=$?
-  product_keep "$RUN/g/evidence"
+  local SPK_HOST_BIN=$BIN/spk-host SPK_BROKER_BIN=$BIN/mini-spk-broker SPK_VOLUME_HELPER_BIN=$BIN/mini-spk-volume-helper
+  local CONSENT_BIN=$BIN/minidregg-client-consent
+  for w in SPK_HOST_BIN SPK_BROKER_BIN SPK_VOLUME_HELPER_BIN CONSENT_BIN; do product_input "$w" executable || return $?; done
+  product_systemd || return $?
+  product_tools jq curl loginctl sudo install od findmnt bwrap || return $?
+  [ "$(id -u)" = 1001 ] || { echo "missing input: operator uid 1001 (two-world-journey.sh runs as uid 1001; this runner is uid $(id -u))" >&2; return 98; }
+  [ "$(loginctl show-user 1001 -p Linger --value 2>/dev/null)" = yes ] || { echo "missing input: linger for uid 1001" >&2; return 98; }
+  sudo -n true 2>/dev/null || { echo "missing input: sudo -n (ROOT SETUP by deploy/spk-host/install-user-world)" >&2; return 98; }
+  for w in /usr/bin/newuidmap /usr/bin/newgidmap; do [ -x "$w" ] || { echo "missing input: $w (uidmap)" >&2; return 98; }; done
+  awk -F: '$1=="ember" && $3>=32 {ok=1} END {exit !ok}' /etc/subuid 2>/dev/null || { echo "missing input: /etc/subuid range (>=32) for ember" >&2; return 98; }
+  # The pinned signed sntfy package: MINI_TEST_SPK, else the repo's pinned fetcher (sha256 and size checked).
+  TEST_SPK=${MINI_TEST_SPK:-}
+  if [ -z "$TEST_SPK" ]; then
+    if ! TEST_SPK=$(sh "$SRC/scripts/spk-platform/fetch-test-spk.sh" 2>"$OUT/fetch-spk.err"); then
+      grep -q 'mismatch\|custody' "$OUT/fetch-spk.err" && { echo "m6grain test SPK: $(tail -1 "$OUT/fetch-spk.err")" >&2; return 1; }
+      echo "missing input: TEST_SPK (fetch-test-spk.sh: $(tail -1 "$OUT/fetch-spk.err"))" >&2; return 98
+    fi
+  fi
+  product_input TEST_SPK file || return $?
+  product_exec m6grain bash "$d" full "$BIN" "$BIN" "$RUN/g" "$TEST_SPK"; rc=$?
+  if [ -f "$RUN/g/root-setup.log" ] && ! grep -q '^cleanup original=' "$RUN/g/result.log" 2>/dev/null; then
+    bash "$d" cleanup "$BIN" "$BIN" "$RUN/g" >"$OUT/row-cleanup.out" 2>&1 || rc=1
+  fi
+  for w in a b; do [ ! -d "$RUN/g/$w/evidence" ] || cp -r "$RUN/g/$w/evidence" "$OUT/evidence-$w"; done
+  product_keep "$RUN/g/result.log" "$RUN/g/root-setup.log" "$RUN/g/root-cleanup.log" "$RUN/g/cross-world-plant" \
+    "$RUN/g/binary-sha256.txt" "$RUN/g/volume-helper.log" "$RUN/g/cleanup-services.log" "$RUN/g/"broker-*.log
+  # Root custody after the run, whatever its verdict: nothing of either scratch world survives.
+  for s in $(awk '/^ROOT SETUP BEGIN store=/ {sub(/^store=/,"",$4); print $4}' "$RUN/g/root-setup.log" 2>/dev/null); do
+    for w in "/etc/mini-spk-volumes/$s.json" "/etc/sudoers.d/mini-spk-$s" "/var/lib/mini-spk-worlds/$s" \
+        "/run/user/1001/systemd/user/mini-spk-broker@$s.service"; do
+      [ ! -e "$w" ] || { echo "m6grain root cleanup left $w" >&2; return 1; }
+    done
+  done
   if [ "$rc" != 0 ]; then
     local verdict
-    for verdict in "$OUT/evidence/"*.exit; do
+    for verdict in "$OUT"/evidence-a/*.exit "$OUT"/evidence-b/*.exit; do
       [ -s "$verdict" ] || continue
       if [ "$(cat "$verdict")" != 0 ]; then
-        echo "m6grain $(basename "$verdict" .exit) exit $(cat "$verdict"): $(awk 'NF {print; exit}' "${verdict%.exit}.stderr")" >&2
+        echo "m6grain $(basename "$(dirname "$verdict")")/$(basename "$verdict" .exit) exit $(cat "$verdict"): $(awk 'NF {l=$0} END {print l}' "${verdict%.exit}.stderr")" >&2
         break
       fi
     done
     return "$rc"
   fi
-  product_evidence "$OUT/evidence/stop-services.exit" "$OUT/evidence/get-b.exit" || return 1
-  [ "$(cat "$OUT/evidence/stop-services.exit")" = 0 ] && [ "$(cat "$OUT/evidence/get-b.exit")" = 0 ] || return 1
-  echo "SPK lifecycle and second instance completed" >&2
+  product_evidence "$OUT/result.log" "$OUT/evidence-a/get-b.exit" "$OUT/evidence-b/get-b.exit" "$OUT/cross-world-plant/stderr" || return 1
+  [ "$(cat "$OUT/evidence-a/get-b.exit")" = 0 ] && [ "$(cat "$OUT/evidence-b/get-b.exit")" = 0 ] || { echo "invalid expected evidence: m6grain get-b" >&2; return 1; }
+  grep -q '^PASS two-world ' "$OUT/result.log" && grep -q '^cleanup original=0 removal_assertions=0$' "$OUT/result.log" \
+    || { echo "invalid expected evidence: m6grain result.log" >&2; return 1; }
+  [ "$(grep -c 'cross-world-volume-path refused' "$OUT/m6grain.out")" = 2 ] || { echo "missing expected evidence: m6grain cross-world refusals" >&2; return 1; }
+  echo "per-store SPK two-world lifecycle, second instances, cross-world refusal and root cleanup completed" >&2
 }
 product_fleet() {
   local name=$1 driver=$2 type=$3 d=$SRC/native/resource-client/$2 rc

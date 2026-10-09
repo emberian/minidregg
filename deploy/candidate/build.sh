@@ -10,6 +10,7 @@
 #   bin/spk-host                                application custody and broker
 #   bin/spk-browser-proxy                       TLS browser entrance
 #   bin/mini-spk-broker, bin/spk-hostd          SPK broker and grain host daemon (shipped, not installed by default)
+#   bin/mini-spk-volume-helper                  per-store root volume helper (deploy/spk-host/install-user-world installs it)
 #   bin/mini-discord                            Discord entrance
 #   bin/mini-keys                               key broker (seal key, provider and Discord secrets)
 #   bin/pay-watcher                             Solana pay watcher

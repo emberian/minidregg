@@ -10,8 +10,11 @@ fi
 
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 REPO=$(CDPATH='' cd -- "$HERE/../.." && pwd)
-. "$REPO/native/resource-client/journey.d/lib/genesis-params.sh"
-resolve_params_sh "$REPO" || exit 2
+# The grain and share overlays run a STAGED copy of this file, whose own path does not reach the tree:
+# the script that staged it exports GENESIS_PARAMS_TREE (the real source tree) for it.
+GENESIS_PARAMS_TREE=${GENESIS_PARAMS_TREE:-$REPO}
+. "$GENESIS_PARAMS_TREE/native/resource-client/journey.d/lib/genesis-params.sh"
+resolve_params_sh "$GENESIS_PARAMS_TREE" || exit 2
 HOST=$1
 EVIDENCE=$2
 MINI=${MINI:-"$REPO/native/resource-client/target/debug/mini"}

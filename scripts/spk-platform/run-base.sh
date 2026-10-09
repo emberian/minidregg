@@ -11,6 +11,8 @@ if [ "$#" -ne 6 ]; then
 fi
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 REPO=$(CDPATH='' cd -- "$HERE/../.." && pwd)
+# a staged provision.sh resolves its genesis-clock helper from this tree (scripts/workroom/provision.sh)
+export GENESIS_PARAMS_TREE="${GENESIS_PARAMS_TREE:-$REPO}"
 ROOT=$1 HOST=$2 MINI=$3 STORE_BINARY=$4 SIGNATURE_BINARY=$5 SPK_HOST=$6
 canonical_absolute() {
   case "$1" in /*) ;; *) echo "path must be absolute: $1" >&2; exit 2 ;; esac

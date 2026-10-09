@@ -10,6 +10,8 @@ if [ "$#" -ne 2 ]; then
 fi
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 REPO=$(CDPATH='' cd -- "$HERE/../.." && pwd)
+# a staged provision.sh resolves its genesis-clock helper from this tree (scripts/workroom/provision.sh)
+export GENESIS_PARAMS_TREE="${GENESIS_PARAMS_TREE:-$REPO}"
 HOST=$1
 EVIDENCE=$2
 MINI=${MINI:-"$REPO/native/resource-client/target/debug/mini"}
