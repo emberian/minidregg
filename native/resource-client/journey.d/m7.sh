@@ -21,11 +21,12 @@
 set -euo pipefail
 D=$JOURNEY_STEP_DIR
 . "$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/lib/shortdir.sh"
-PARAMS_SH=$(CDPATH='' cd -- "$(dirname -- "$0")/../../../deploy/candidate" && pwd)/params.sh
 fail() { echo "M7: $*" >&2; exit 1; }
 [ -n "${CANDIDATE:-}" ] && [ -f "$CANDIDATE" ] || fail "no candidate provenance in the manifest (build with deploy/candidate/build.sh)"
 jq -e '.type == "minidregg-candidate-provenance-v1"' "$CANDIDATE" >/dev/null || fail "candidate is not minidregg-candidate-provenance-v1"
 C=$(CDPATH='' cd -- "$(dirname -- "$CANDIDATE")" && pwd -P)
+. "$(dirname -- "$0")/lib/genesis-params.sh"
+resolve_params_sh "$(CDPATH='' cd -- "$(dirname -- "$0")/../../.." && pwd)" || fail "the candidate ships no params.sh"
 
 # 1. integrity and identity
 (cd "$C" && sha256sum --check SHA256SUMS) >"$D/sha256sums-check.txt" 2>&1 || fail "candidate files differ from SHA256SUMS"
@@ -89,7 +90,7 @@ cleanup() {
 }
 trap cleanup EXIT
 cp "$C/genesis-params.example.json" "$D/operator-params.json"
-sh "$PARAMS_SH" fill-genesis "$D/operator-params.json"
+sh "$GENESIS_PARAMS_SH" fill-genesis "$D/operator-params.json"
 "$C/run.sh" init --manifest "$C/manifest.json" --params "$D/operator-params.json" --state "$S" >"$D/operator-init.txt" 2>&1 || fail "run.sh init failed: $(tail -1 "$D/operator-init.txt")"
 "$C/run.sh" start --state "$S" >"$D/operator-start.txt" 2>&1 || fail "run.sh start failed: $(tail -1 "$D/operator-start.txt")"
 "$C/run.sh" sponsor --state "$S" >"$D/operator-sponsor.txt" 2>&1 || fail "run.sh sponsor failed: $(tail -1 "$D/operator-sponsor.txt")"

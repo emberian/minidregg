@@ -124,7 +124,9 @@ jq --argjson domain "$DOMAIN" --argjson subject "$SUBJECT" --argjson budget "$OW
    | if ($off | length) > 0 then .disabledEvaluators = $off else . end
    | if $objective != "" then .objectiveInvocation = $objective else . end' \
   "$HERE/genesis-params.example.json" >"$ROOT/genesis-params.json"
-sh "$HERE/../../deploy/candidate/params.sh" fill-genesis "$ROOT/genesis-params.json"
+. "$HERE/journey.d/lib/genesis-params.sh"
+resolve_params_sh "$HERE/../.." || exit 2
+sh "$GENESIS_PARAMS_SH" fill-genesis "$ROOT/genesis-params.json"
 EXTRA_GENESIS_ENROLLMENTS="$ROOT/pay/genesis-enrollments-all.json" \
 GENESIS_PAY_OBSERVER="$ROOT/pay/genesis-observer.json" \
   sh "$HERE/genesis.sh" "$ROOT/genesis-params.json" "$SPONSOR_PUBLIC" "$CLOCK_PUBLIC" \

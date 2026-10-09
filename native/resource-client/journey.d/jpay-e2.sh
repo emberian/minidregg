@@ -36,8 +36,8 @@ DIR="$JOURNEY_STEP_DIR/jpay-e2"
 if [ -e "$DIR" ]; then echo "jpay-e2: refusing to reuse $DIR" >&2; exit 2; fi
 mkdir -p "$DIR"
 # The genesis clock is chosen by the one candidate helper, never written here.
-GENESIS_PARAMS_SH=$(CDPATH='' cd -- "$(dirname -- "$0")/../../../deploy/candidate" && pwd)/params.sh
-export GENESIS_PARAMS_SH
+. "$(dirname -- "$0")/lib/genesis-params.sh"
+resolve_params_sh "$(CDPATH='' cd -- "$(dirname -- "$0")/../../.." && pwd)" || exit 2
 exec python3 - "$DIR" <<'PY'
 import base64, hashlib, json, os, struct, subprocess, sys, time
 import nacl.signing

@@ -57,6 +57,8 @@ for name in HOST MINI STORE VERIFIER JOURNEY_STEP_DIR GRAIN TEST_PROVIDER LAUNCH
   if [ -z "${!name:-}" ]; then echo "jpay6: $name is required" >&2; exit 2; fi
 done
 REPO=$(CDPATH='' cd -- "$(dirname -- "$0")/../../.." && pwd)
+. "$REPO/native/resource-client/journey.d/lib/genesis-params.sh"
+resolve_params_sh "$REPO" || exit 2
 export REPO
 HERMES_STANDIN="$REPO/native/resource-client/journey.d/jpay6-hermes-acp"
 export HERMES_STANDIN
@@ -164,7 +166,7 @@ genesis = {"domain": "8501", "factoryId": "10", "resourceBookId": "11", "authori
                "feeDebit", "leaseByteBlocks")}}
 json.dump(genesis, open(path("genesis.json"), "w"), indent=1)
 # The genesis clock: the one candidate helper (the extractors keep the dump line above as their seam).
-subprocess.run(["sh", os.path.join(REPO, "deploy/candidate/params.sh"), "fill-source", path("genesis.json")], check=True)
+subprocess.run(["sh", os.environ["GENESIS_PARAMS_SH"], "fill-source", path("genesis.json")], check=True)
 boot = subprocess.run([MINI, "bootstrap", "--host", HOST, "--config", path("operator.json"),
                        "--source", path("genesis.json"), "--dir", path("deployment")], capture_output=True)
 if boot.returncode != 0:

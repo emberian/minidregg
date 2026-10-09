@@ -14,6 +14,8 @@ HOST=$1
 EVIDENCE=$2
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 REPO=$(CDPATH='' cd -- "$HERE/../.." && pwd)
+. "$REPO/native/resource-client/journey.d/lib/genesis-params.sh"
+resolve_params_sh "$REPO" || exit 2
 MINI=${MINI:-"$HERE/target/debug/mini"}
 STORE_BINARY=${STORE_BINARY:-"$REPO/native/hyperdocument-link-sqlite-store/target/debug/minidregg-link-sqlite-store"}
 SIGNATURE_BINARY=${SIGNATURE_BINARY:-"$REPO/native/credential-signature-verifier/target/debug/minidregg-credential-signature-verifier"}
@@ -106,7 +108,7 @@ EOF
    "networkBytes":"10000000","sideEffectCount":"10000000",
    "feeDebit":"10000000","leaseByteBlocks":"10000000"}}
 EOF
-  sh "$REPO/deploy/candidate/params.sh" fill-source "$root/genesis.json"   # the genesis clock, chosen at genesis time
+  sh "$GENESIS_PARAMS_SH" fill-source "$root/genesis.json"   # the genesis clock, chosen at genesis time
   "$MINI" bootstrap --host "$HOST" --config "$root/operator.json" \
     --source "$root/genesis.json" --dir "$root/deployment" >"$root/bootstrap.stdout"
   config="$root/deployment/pinned-config.json"

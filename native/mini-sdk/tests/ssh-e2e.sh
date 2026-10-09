@@ -40,8 +40,11 @@ trap cleanup EXIT
 
 # --- the scratch Store, served by the candidate's Host --------------------------------------------
 # The candidate's shipped example, its genesis clock filled now by the candidate's one helper.
+CANDIDATE=$ART   # the set under test: its own shipped helper
+. "$REPO/native/resource-client/journey.d/lib/genesis-params.sh"
+resolve_params_sh "$REPO" 2>>"$LOG/params.err" || die "$(tail -1 "$LOG/params.err")"
 cp "$ART/genesis-params.example.json" "$RUN/genesis-params.json"
-sh "$REPO/deploy/candidate/params.sh" fill-genesis "$RUN/genesis-params.json" 2>"$LOG/params.err" \
+sh "$GENESIS_PARAMS_SH" fill-genesis "$RUN/genesis-params.json" 2>>"$LOG/params.err" \
   || die "params.sh fill-genesis refused the candidate's example: $(tail -1 "$LOG/params.err")"
 "$ART/run.sh" init --manifest "$ART/manifest.json" --params "$RUN/genesis-params.json" --state "$STORE" >"$LOG/init.log" 2>&1 \
   || die "run.sh init failed: $(awk 'NF {last=$0} END {print last}' "$LOG/init.log") (see $LOG/init.log)"

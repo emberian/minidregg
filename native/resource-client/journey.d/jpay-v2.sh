@@ -28,8 +28,8 @@ mkdir -p "$JOURNEY_STEP_DIR"
 DIR=$(mktemp -d /tmp/jpay-v2.XXXXXX)
 ln -s "$DIR" "$JOURNEY_STEP_DIR/jpay-v2"
 # The genesis clock is chosen by the one candidate helper, never written here.
-GENESIS_PARAMS_SH=$(CDPATH='' cd -- "$(dirname -- "$0")/../../../deploy/candidate" && pwd)/params.sh
-export GENESIS_PARAMS_SH
+. "$(dirname -- "$0")/lib/genesis-params.sh"
+resolve_params_sh "$(CDPATH='' cd -- "$(dirname -- "$0")/../../.." && pwd)" || exit 2
 exec python3 - "$DIR" <<'PY'
 import atexit, base64, glob, hashlib, json, os, shutil, signal, socket, struct, subprocess, sys, threading, time
 import nacl.signing

@@ -122,6 +122,7 @@ case "$RUN" in /*) ;; *) echo "journey: run root must be absolute" >&2; exit 2;;
 mf() { jq -r --arg k "$1" '.[$k] // "" | select(type == "string")' "$MANIFEST"; }
 HOST=$(mf host); MINI=$(mf mini); STORE=$(mf store); VERIFIER=$(mf verifier)
 SHELL_BIN=$(mf shell); HERMES_BIN=$(mf hermes); SPK_HOST_BIN=$(mf spkHost); CANDIDATE=$(mf candidate)
+export CANDIDATE   # the bootstrap and every hook take the genesis-clock helper this candidate ships
 for name in host mini store verifier; do
   path=$(mf "$name")
   case "$path" in /*) ;; *) echo "journey: manifest .$name must be an absolute path" >&2; exit 2;; esac
