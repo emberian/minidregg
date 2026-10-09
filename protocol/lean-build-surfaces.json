@@ -537,7 +537,7 @@
     {
       "module": "Assurance.NativeAcceptedFixtureData",
       "path": "Assurance/NativeAcceptedFixtureData.lean",
-      "sha256": "c1cd537f95ee3f1333148bc34bdb2e91b7e2c5b9bf4fbf1815781fd79b78f3a1",
+      "sha256": "0e6dc7ba5db065f96df74fdf2bc8497d554f1a45718a1078ab81bca0f8a73b2b",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -1132,7 +1132,7 @@
     {
       "module": "Compiler",
       "path": "Compiler.lean",
-      "sha256": "9fa8c709e45b8f6e21cab0d23a0c4f32933624e2f3c13a940d121f3c90481f7f",
+      "sha256": "34ee5da5c49579f86115e593a0f983555d81dfee9ee59ba5f2491d48079924e1",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -1531,7 +1531,7 @@
     {
       "module": "Compiler.CanonicalCellRegistry",
       "path": "Compiler/CanonicalCellRegistry.lean",
-      "sha256": "18c7c43117df634b831ef80a8bf0352f2e5d381d2e26cf184fb88491f9272b49",
+      "sha256": "a4814f9afcb428dc02b492f567c8321a1679fe4f3743d4623f1ce68a86c6535a",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -1818,7 +1818,7 @@
     {
       "module": "Compiler.DurableCheckpointCodec",
       "path": "Compiler/DurableCheckpointCodec.lean",
-      "sha256": "e7e3ecfee7cd1777093741d3249d7ce62c13df1604b424cd821cddd2666f0cb7",
+      "sha256": "e063537b37c5d89317f184fc745f4cab7566afdc7a01416cb1c54baffba85757",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -2511,7 +2511,7 @@
     {
       "module": "Compiler.ObjectiveBendFrontEndIdentity",
       "path": "Compiler/ObjectiveBendFrontEndIdentity.lean",
-      "sha256": "a9ca18596cb3bbf22c43f4a661d38a32621c3c5c0c88724c8fafbdd00c75b70d",
+      "sha256": "b5e3d8a6eee8d73c3c78f3eb37e00274b431faed480da15a61ed72260a584b83",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -2808,6 +2808,27 @@
       "sha256": "6cd9c460bb0e7390792e729527e3e35622dc3d62059263f5a34ca3ccbdc976fa",
       "surface": "authored-research",
       "ownerReportedStatus": "qualified compiler/runtime checkpoint; finite 64case conformance, not general simulation"
+    },
+    {
+      "module": "Compiler.PersistedCodecTagCensus",
+      "path": "Compiler/PersistedCodecTagCensus.lean",
+      "sha256": "9c94396ac408810fda0049e3060410f87ff6b7f86309a23d2903ea8c6b2e14ea",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Compiler.PersistedCodecTagRegistry",
+      "path": "Compiler/PersistedCodecTagRegistry.lean",
+      "sha256": "6c91577130dbeee150a0b30cdf5d69738f2deaf08040743676cec0105d794604",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Compiler.PersistedCodecTags",
+      "path": "Compiler/PersistedCodecTags.lean",
+      "sha256": "8bffc0b7e94c8bf5b6d712ceb3bf9dab76e10ed47f5b4c35d66a5d92dd7bd7c4",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Compiler.PhysicalLawResolution",
@@ -4030,7 +4051,7 @@
     {
       "module": "Host.Main",
       "path": "Host/Main.lean",
-      "sha256": "94a82de026df8b6b57fb7ff1b0c2f5106b61bf82a0c0dc2002d88a1fb582d493",
+      "sha256": "9b1bf94931700218dd8b4257b3792fc11ef2d65a92cee8eb4a4301fe72ecee37",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -5556,7 +5577,7 @@
     {
       "module": "Kernel.ConsentAnchor",
       "path": "Kernel/ConsentAnchor.lean",
-      "sha256": "f7ab3409cf5af3cf53e33170b5c8571824a1a03c3360f67c45af5d647eced34e",
+      "sha256": "fb64c8fe0848f4571980fbc3bbe63fbd52d28ea47dcff9069b9e0a9cc8d0b918",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },

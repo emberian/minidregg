@@ -33,6 +33,8 @@ The world root is the parameterised `Checkpoint.check` of DATAMODEL B2 over
 the current cell-root function (`rootBytes`), until C1 supplies the world-root
 function; it is recomputed from the checkpoint's cells, never trusted.
 -/
+import Compiler.PersistedCodecTags
+import Compiler.CanonicalCellRegistry
 import Compiler.DurableReceiverCodec
 import Compiler.Sp800185Cshake256
 import Compiler.Sp800185Kmac256
@@ -126,7 +128,7 @@ reads as `"none"` and is refused naming that component, and a component of
 another version is refused naming it. -/
 
 /-- The log-tag MAC customization; `entryTag` uses exactly this label. -/
-def logTagLabel : String := "DREGG/NATIVE-HOST/LOG-TAG/v4"
+def logTagLabel : String := Minidregg.Compiler.PersistedCodecTags.native_host_log_tag_v4
 
 /-- One Store epoch: the format components its bytes commit to. -/
 structure StoreEpoch where
@@ -146,16 +148,41 @@ structure StoreEpoch where
   commands : String
   deriving DecidableEq, Repr
 
-/-- The epoch this Host writes and reads. `stateKey` is
-`DeclaredEffectCell.stateKeyCodecId` and `schemaRefs` the declared-effect
-schema reference version (`DeployedCellRegistry.declaredEffectSchemaRef`);
-`ConsentAnchor.storeEpoch_stateKey`/`storeEpoch_schemaRefs` fail to build when
-either moves without this value. A change to any component changes the seed
-frame and refuses every older Store by name. -/
+/-- Enumerate the actual receiving registry's byte tags, never a parallel list
+of kinds. `kindAtTag_tag` ensures every kind appears at its own UInt8 tag. The
+descriptor includes namespace tags, key/value codec IDs and the blinding slot. -/
+def persistedCellDescriptors : List (Nat × Nat × Nat × List UInt8) :=
+  (List.range 256).filterMap fun tag => do
+    let kind ← CanonicalCellRegistry.kindAtTag (UInt8.ofNat tag)
+    let schema := CanonicalCellRegistry.schemaRef kind
+    let descriptor := match CanonicalCellRegistry.wire? kind with
+      | some wire => StoreCodec.descriptor wire
+      | none => []
+    pure (tag, schema.schemaId.value, schema.version, descriptor)
+
+/-- Canonical, length-prefixed corpus: the automatically collected source tag
+entries plus the actual exhaustive cell schema/layout descriptors. -/
+def persistedCodecCorpus : List UInt8 :=
+  let entries := PersistedCodecTags.canonicalSet (PersistedCodecTags.entries.map (·.bytes))
+  (StreamCodec.product
+    (StreamCodec.list bytesStream)
+    (StreamCodec.list (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product StreamCodec.nat
+        (StreamCodec.product StreamCodec.nat bytesStream))))).encode
+    (entries, persistedCellDescriptors)
+
+/-- Derived from the content of every registered persisted tag and cell
+descriptor. This is a flag day: every old schema-refs/v5 Store requires
+re-genesis. The late `#assert_persisted_codec_tags` check closes the corpus over
+actual receiving codecs, including byte-erased activity event payloads. -/
+def persistedSchemaRefs : String :=
+  s!"schema-refs/{(Sp800185Cshake256.hash
+    "MINI.PERSISTED-CODEC-CORPUS/v1".toUTF8.toList persistedCodecCorpus).digest.value}"
+
+/-- The epoch this Host writes and reads. The registry supplies the
+schema component, and the named census checks equality against receiving tags. -/
 def StoreEpoch.current : StoreEpoch :=
-  -- REJECT/RECORDED-FAILURE v2 and generation-addressed inbox identifiers.
-  -- Previous Stores must re-genesis; the old coordinate is never reopened.
-  ⟨"state-key/tagged-v4", "schema-refs/v6", logTagLabel,
+  ⟨DeclaredEffectCell.stateKeyCodecId, persistedSchemaRefs, logTagLabel,
     "history/mmr-v1;index/trie-v1;checkpoint/v4", "commands/v2"⟩
 
 /-- The label carried in the seed frame: every component, `;`-separated (the
@@ -177,7 +204,7 @@ def StoreEpoch.accumulatorParts : List String := ["history", "spent", "index", "
 
 /-- Every part name a label may carry, in label order. -/
 def StoreEpoch.partNames : List String :=
-  ["state-key", "schema-refs", "DREGG/NATIVE-HOST/LOG-TAG"] ++ StoreEpoch.accumulatorParts ++ ["commands"]
+  ["state-key", "schema-refs", Minidregg.Compiler.PersistedCodecTags.native_host_log_tag] ++ StoreEpoch.accumulatorParts ++ ["commands"]
 
 /-- The part of a label named `name`, if present. -/
 def StoreEpoch.partNamed (parts : List String) (name : String) : Option String :=
@@ -195,7 +222,7 @@ def StoreEpoch.parse (text : String) : Option StoreEpoch :=
   let names := parts.map StoreEpoch.partName
   if names = StoreEpoch.partNames.filter (names.contains ·) then
     match StoreEpoch.partNamed parts "state-key", StoreEpoch.partNamed parts "schema-refs",
-        StoreEpoch.partNamed parts "DREGG/NATIVE-HOST/LOG-TAG" with
+        StoreEpoch.partNamed parts Minidregg.Compiler.PersistedCodecTags.native_host_log_tag with
     | some stateKey, some schemaRefs, some logTag =>
         let accumulator := match StoreEpoch.accumulatorParts.filterMap (StoreEpoch.partNamed parts) with
           | [] => "none"
@@ -250,14 +277,16 @@ theorem StoreEpoch.differing_logTag (host : StoreEpoch) (logTag : String)
       [s!"log tags: Store {logTag}, this Host {host.logTag}"] := by
   simp [StoreEpoch.differing, changed]
 
-def seedFrameName : List UInt8 := "DREGG.DURABLE.SEED".toUTF8.toList
+def seedFrameName : List UInt8 := Minidregg.Compiler.PersistedCodecTags.durable_seed.toUTF8.toList
 
 /-- Seed frame v2: the name, version byte 2, then the epoch label. The v1 frame
 (name and byte 1) carried no epoch, so a v1 Store's components are unknown (it
 may be of any earlier epoch, including this one's components): it refuses as
 unlabelled. -/
-def seedFrame : Framed Seed :=
-  ⟨seedFrameName ++ [2] ++ StoreEpoch.current.label.toUTF8.toList, seedStream⟩
+def seedFrameFor (epoch : StoreEpoch) : Framed Seed :=
+  ⟨seedFrameName ++ [UInt8.ofNat PersistedCodecTags.seedWireVersion] ++ epoch.label.toUTF8.toList, seedStream⟩
+
+def seedFrame : Framed Seed := seedFrameFor StoreEpoch.current
 
 /-- What a Store's seed bytes say about its epoch, read from the frame alone. -/
 inductive SeedEpoch where
@@ -265,11 +294,11 @@ inductive SeedEpoch where
   | unlabelled (version : UInt8)
   | foreign
 
-def SeedEpoch.ofBytes (bytes : List UInt8) : SeedEpoch :=
+def SeedEpoch.ofBytesFor (host : StoreEpoch) (bytes : List UInt8) : SeedEpoch :=
   match bytesStream.decodePrefix bytes with
   | none => .foreign
   | some (frame, _) =>
-      if frame = seedFrame.frame then .labelled StoreEpoch.current
+      if frame = (seedFrameFor host).frame then .labelled host
       else if frame = seedFrameName ++ [1] then .unlabelled 1
       else if frame.take seedFrameName.length = seedFrameName then
         match frame.drop seedFrameName.length with
@@ -281,44 +310,69 @@ def SeedEpoch.ofBytes (bytes : List UInt8) : SeedEpoch :=
         | _ => .foreign
       else .foreign
 
+def SeedEpoch.ofBytes (bytes : List UInt8) : SeedEpoch :=
+  SeedEpoch.ofBytesFor StoreEpoch.current bytes
+
 /-- The refusal naming a Store's epoch, or `none` when it is this Host's. -/
-def SeedEpoch.refusal : SeedEpoch → Option String
+def SeedEpoch.refusalFor (host : StoreEpoch) : SeedEpoch → Option String
   | .labelled epoch =>
-      match epoch.differing StoreEpoch.current with
+      match epoch.differing host with
       | [] => none
       | named => some s!"this Store was born in another epoch ({String.intercalate "; " named}); re-genesis the world"
   | .unlabelled version =>
-      some s!"this Store's seed frame is version {version}, which carries no epoch label (it was born before Store epochs were labelled, so its state-key codec, schema references and log tags are unknown); this Host reads {StoreEpoch.current.label}; re-genesis the world"
+      some s!"this Store's seed frame is version {version}, which carries no epoch label (it was born before Store epochs were labelled, so its state-key codec, schema references and log tags are unknown); this Host reads {host.label}; re-genesis the world"
   | .foreign => some "the Store's seed is not a durable seed frame"
+
+def SeedEpoch.refusal (epoch : SeedEpoch) : Option String :=
+  epoch.refusalFor StoreEpoch.current
+
+/-- Prove the frame round trip with an arbitrary epoch, so kernel equality
+checking never needs to normalize the concrete corpus digest. -/
+theorem seedEpoch_ofBytes_forCurrent (epoch : StoreEpoch) (rest : List UInt8) :
+    SeedEpoch.ofBytesFor epoch (bytesStream.encode (seedFrameFor epoch).frame ++ rest) =
+      .labelled epoch := by
+  unfold SeedEpoch.ofBytesFor
+  rw [bytesStream.decodePrefix_encode]
+  exact if_pos rfl
 
 /-- The current seed frame reads back as this Host's labelled epoch. -/
 theorem seedEpoch_ofBytes_current (rest : List UInt8) :
     SeedEpoch.ofBytes (bytesStream.encode seedFrame.frame ++ rest) =
       .labelled StoreEpoch.current := by
-  unfold SeedEpoch.ofBytes
-  rw [bytesStream.decodePrefix_encode]
-  simp
+  exact seedEpoch_ofBytes_forCurrent StoreEpoch.current rest
+
+/-- The host's own seed passes for any epoch, without normalizing a digest. -/
+theorem seedEpoch_currentFor (host : StoreEpoch) (seed : Seed) :
+    (SeedEpoch.ofBytesFor host ((seedFrameFor host).encode seed)).refusalFor host = none := by
+  show (SeedEpoch.ofBytesFor host
+    (bytesStream.encode (seedFrameFor host).frame ++ seedStream.encode seed)).refusalFor host = none
+  rw [seedEpoch_ofBytes_forCurrent]
+  simp [SeedEpoch.refusalFor, (StoreEpoch.differing_nil_iff _ _).mpr rfl]
 
 /-- **This Host's own seeds pass the epoch check.** -/
 theorem seedEpoch_current (seed : Seed) :
-    (SeedEpoch.ofBytes (seedFrame.encode seed)).refusal = none := by
-  show (SeedEpoch.ofBytes (bytesStream.encode seedFrame.frame ++ seedStream.encode seed)).refusal = none
-  rw [seedEpoch_ofBytes_current]
-  simp [SeedEpoch.refusal, (StoreEpoch.differing_nil_iff _ _).mpr rfl]
+    (SeedEpoch.ofBytes (seedFrame.encode seed)).refusal = none :=
+  seedEpoch_currentFor StoreEpoch.current seed
+
+/-- The unlabelled v1 frame refuses under every host epoch. -/
+theorem seedEpoch_v1_refusedFor (host : StoreEpoch) (rest : List UInt8) :
+    ∃ named, (SeedEpoch.ofBytesFor host (bytesStream.encode (seedFrameName ++ [1]) ++ rest)).refusalFor host =
+      some named := by
+  have older : seedFrameName ++ [1] ≠ (seedFrameFor host).frame := by
+    intro same
+    have tails := List.append_cancel_left
+      (same.trans (by simp [seedFrameFor, PersistedCodecTags.seedWireVersion, List.append_assoc]) :
+      seedFrameName ++ [1] = seedFrameName ++ (2 :: host.label.toUTF8.toList))
+    simp at tails
+  unfold SeedEpoch.ofBytesFor
+  rw [bytesStream.decodePrefix_encode]
+  simp only [older, if_false, if_true]
+  exact ⟨_, rfl⟩
 
 /-- **Every v1 Store refuses by name**: its frame carries no epoch. -/
 theorem seedEpoch_v1_refused (rest : List UInt8) :
     ∃ named, (SeedEpoch.ofBytes (bytesStream.encode (seedFrameName ++ [1]) ++ rest)).refusal =
-      some named := by
-  have older : seedFrameName ++ [1] ≠ seedFrame.frame := by
-    intro same
-    have tails := List.append_cancel_left (same.trans (by simp [seedFrame]) :
-      seedFrameName ++ [1] = seedFrameName ++ (2 :: StoreEpoch.current.label.toUTF8.toList))
-    simp at tails
-  unfold SeedEpoch.ofBytes
-  rw [bytesStream.decodePrefix_encode]
-  simp only [older, if_false, if_true]
-  exact ⟨_, rfl⟩
+      some named := seedEpoch_v1_refusedFor StoreEpoch.current rest
 
 /-- **An accumulator break is named, and only it.** -/
 theorem StoreEpoch.differing_accumulator (host : StoreEpoch) (accumulator : String)
@@ -342,7 +396,7 @@ from its frame alone (whatever follows). -/
 theorem seedEpoch_ofBytes_labelled (label : String) (rest : List UInt8) :
     SeedEpoch.ofBytes (bytesStream.encode (labelledFrame label) ++ rest) =
       SeedEpoch.ofBytes (bytesStream.encode (labelledFrame label)) := by
-  unfold SeedEpoch.ofBytes
+  unfold SeedEpoch.ofBytes SeedEpoch.ofBytesFor
   rw [bytesStream.decodePrefix_encode, ← List.append_nil (bytesStream.encode (labelledFrame label)),
     bytesStream.decodePrefix_encode]
 
@@ -389,7 +443,7 @@ def labelSpentMap : String :=
 accumulator), never read as this Host's. -/
 theorem seedEpoch_spentMap_refused (rest : List UInt8) :
     (SeedEpoch.ofBytes (bytesStream.encode (labelledFrame labelSpentMap) ++ rest)).refusal =
-      some "this Store was born in another epoch (cell schema references: Store schema-refs/v5, this Host schema-refs/v6; log tags: Store DREGG/NATIVE-HOST/LOG-TAG/v3, this Host DREGG/NATIVE-HOST/LOG-TAG/v4; history accumulator: Store history/mmr-v1;spent/trie-v1;checkpoint/v3, this Host history/mmr-v1;index/trie-v1;checkpoint/v4); re-genesis the world" := by
+      some s!"this Store was born in another epoch (cell schema references: Store schema-refs/v5, this Host {persistedSchemaRefs}; log tags: Store DREGG/NATIVE-HOST/LOG-TAG/v3, this Host DREGG/NATIVE-HOST/LOG-TAG/v4; history accumulator: Store history/mmr-v1;spent/trie-v1;checkpoint/v3, this Host history/mmr-v1;index/trie-v1;checkpoint/v4); re-genesis the world" := by
   rw [seedEpoch_ofBytes_labelled]
   native_decide
 
@@ -405,10 +459,13 @@ theorem seedEpoch_spentMap_refused (rest : List UInt8) :
 #assert_axioms StoreEpoch.differing_schemaRefs
 #assert_axioms StoreEpoch.differing_logTag
 #assert_axioms seedEpoch_current
+#assert_axioms seedEpoch_ofBytes_forCurrent
+#assert_axioms seedEpoch_currentFor
+#assert_axioms seedEpoch_v1_refusedFor
 #assert_axioms seedEpoch_v1_refused
 /-- Version 2: a record carries its signing subject (`IntentRecord.subject`),
 which the presence index folds. A v1 record refuses (`v1_record_refused`). -/
-def recordFrame : Framed IntentRecord := ⟨"DREGG.DURABLE.LOG".toUTF8.toList ++ [2], intentStream⟩
+def recordFrame : Framed IntentRecord := ⟨Minidregg.Compiler.PersistedCodecTags.durable_log_byte_v2, intentStream⟩
 
 def retiredRecordFrameV1 : List UInt8 := "DREGG.DURABLE.LOG".toUTF8.toList ++ [1]
 
@@ -483,7 +540,7 @@ theorem chainAfter_append (start : Digest) (left right : List IntentRecord) :
 /-- The system slot's leaf: the height and the log root (C1's
 `NativeHostCodec.Leaf.system`). -/
 def systemLeaf (height : Nat) (chain : Digest) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.SYSTEM/v1".toUTF8.toList
+  (Sp800185Cshake256.hash Minidregg.Compiler.PersistedCodecTags.native_host_system_v1.toUTF8.toList
     ((StreamCodec.product StreamCodec.nat digestStream).encode (height, chain))).digest
 
 -- The entry tag (v3 trailer: root, chain, frontier digest, spent root, MAC)
@@ -553,7 +610,7 @@ def sealedStream : StreamCodec Sealed :=
 state no consumed nullifiers. An older checkpoint refuses (`malformed`): its
 frame differs; the Store epoch (`StoreEpoch.accumulator`) names the change. -/
 def checkpointFrame : Framed Sealed :=
-  ⟨"DREGG.DURABLE.CHECKPOINT".toUTF8.toList ++ [3], sealedStream⟩
+  ⟨Minidregg.Compiler.PersistedCodecTags.durable_checkpoint_byte_v3, sealedStream⟩
 
 def macInputStream : StreamCodec (List UInt8 × Nat × Digest × List UInt8) :=
   StreamCodec.product bytesStream (StreamCodec.product StreamCodec.nat

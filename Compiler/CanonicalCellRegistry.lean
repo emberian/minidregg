@@ -50,6 +50,7 @@ view of the birth, with no second judge in the family.  A newborn's law source
 (`policySource`) is born the same way (`kernelOnlyOrBorn`).  A birth with no export
 root is NEUTRAL: admitted only when a judged authorizer of the same patch names it.
 -/
+import Compiler.PersistedCodecTags
 import Compiler.WorldKindCell
 import Compiler.DeclaredEffectCell
 import Compiler.CredentialAuthorityCell
@@ -333,7 +334,7 @@ def schemaRef : Kind → SchemaRef
   | .pay => ⟨⟨91010⟩, 4⟩
   | .stream => ⟨⟨91012⟩, 3⟩
   | .nockProgram => ⟨⟨NockProgramCodec.schemaId⟩, NockProgramCodec.wireVersion⟩
-  | .clock => ⟨⟨91013⟩, 1⟩
+  | .clock => ⟨⟨91013⟩, Minidregg.Compiler.PersistedCodecTags.clockWireVersion⟩
   | .streamEntry => ⟨⟨91014⟩, 1⟩
   | .system => ⟨⟨91015⟩, 1⟩
   | .worldKind => ⟨⟨91016⟩, 1⟩
@@ -685,7 +686,7 @@ v9 (CH-EPOCH stream law, store encoding v2, blinded cells) and the compute braid
 (K-FIELD-CLOSURE: declared cells closed by default; C14's tail-bound genesis cell) meet here. Each
 of v9 and v10 named a law set without the other, so a Store under any earlier label refuses. -/
 def logicalLawVersion : List UInt8 :=
-  "DREGG.REGISTRY.LOADED-AND-FINAL.STORE-CELLS/v16".toUTF8.toList
+  Minidregg.Compiler.PersistedCodecTags.registry_loaded_and_final_store_cells_v16.toUTF8.toList
 
 /-- Checked both on the loaded cell and on the ACTUAL final joint post, after
 all effects have composed. Local candidate validity alone does not imply this. -/

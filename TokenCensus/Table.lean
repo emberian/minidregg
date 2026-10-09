@@ -204,6 +204,7 @@ Minidregg.Kernel.ClockTickReceiver.AcceptedTick.mk | Kernel.ClockTickReceiver | 
 Minidregg.Kernel.ClockTickReceiver.DecodedIngress.mk | Kernel.ClockTickReceiver | evidence | L2 | 2 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.ClockTickReceiver.Prepared.mk | Kernel.ClockTickReceiver | evidence | L2 | 1 proof / 6 data fields; layer-1 review pending
 Minidregg.Kernel.ConfidentialAudienceAdmission.Checked.mk | Kernel.ConfidentialAudienceAdmission | evidence | L2 | 6 proof / 3 data fields; layer-1 review pending
+Minidregg.Kernel.ConsentAnchor.Anchored.mk | Kernel.ConsentAnchor | evidence | L2 | 1 proof / 3 data fields; minted only by ConsentAnchor.resume (anchor opening + native suffix replay, an IO verdict); entered the census when Compiler.lean began importing Kernel.ConsentAnchor (it was reachable before only from the consent exe root); layer-1 review pending
 Minidregg.Kernel.ContentResource.PreparedCell.mk | Kernel.ContentResource | evidence | L2 | 3 proof / 1 data fields; layer-1 review pending
 Minidregg.Kernel.DeclaredResourceController.AcceptedInvocation.mk | Kernel.DeclaredResourceController | evidence | L2 | 4 proof / 6 data fields; layer-1 review pending
 Minidregg.Kernel.DeclaredResourceController.AuthorityInvocation.mk | Kernel.DeclaredResourceController | evidence | L2 | 3 proof / 4 data fields; layer-1 review pending
