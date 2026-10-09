@@ -67,6 +67,7 @@ ROLES = {
     "spkBrowserProxy": "spk-browser-proxy",
     "spkBroker": "mini-spk-broker",
     "spkHostd": "spk-hostd",
+    "spkVolumeHelper": "mini-spk-volume-helper",
     "discord": "mini-discord",
     "payWatcher": "pay-watcher",
     "keys": "mini-keys",
@@ -78,7 +79,8 @@ RUST_ROLES = (("mini", "resource-client"), ("store", "hyperdocument-link-sqlite-
               ("verifier", "credential-signature-verifier"), ("grainRuntime", "grain-runtime"),
               ("grainProviderBridge", "grain-runtime"), ("inferenceScheduler", "inference-scheduler"),
               ("spkHost", "spk-host"), ("spkBrowserProxy", "spk-host"), ("spkBroker", "spk-host"),
-              ("spkHostd", "spk-host"), ("discord", "discord-entrance"), ("payWatcher", "pay-watcher"),
+              ("spkHostd", "spk-host"), ("spkVolumeHelper", "spk-host"),
+              ("discord", "discord-entrance"), ("payWatcher", "pay-watcher"),
               ("keys", "mini-keys"))
 # consent is required: a candidate whose friends cannot sign (the client refuses to sign without a
 # locally selected consent pair) is not shippable, so a roles manifest or sealed family without it is refused.

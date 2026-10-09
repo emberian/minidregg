@@ -18,6 +18,8 @@ fi
 ROOT=$1 HOST=$2 MINI=$3 STORE_BINARY=$4 SIGNATURE_BINARY=$5
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 REPO=$(CDPATH='' cd -- "$HERE/../.." && pwd)
+# a staged provision.sh resolves its genesis-clock helper from this tree (scripts/workroom/provision.sh)
+export GENESIS_PARAMS_TREE="${GENESIS_PARAMS_TREE:-$REPO}"
 fail() { echo "grain store: $*" >&2; exit 2; }
 for path in "$ROOT" "$HOST" "$MINI" "$STORE_BINARY" "$SIGNATURE_BINARY"; do
   case "$path" in /*) ;; *) fail "absolute path required: $path" ;; esac

@@ -10,6 +10,8 @@ if [ "$#" -ne 2 ]; then
 fi
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 REPO=$(CDPATH='' cd -- "$HERE/../.." && pwd)
+# a staged provision.sh resolves its genesis-clock helper from this tree (scripts/workroom/provision.sh)
+export GENESIS_PARAMS_TREE="${GENESIS_PARAMS_TREE:-$REPO}"
 HOST=$1
 # The provisioner writes absolute paths into the configs it emits (mini refuses relative consent paths).
 EVIDENCE=$(realpath -m -- "$2")

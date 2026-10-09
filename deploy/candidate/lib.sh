@@ -64,7 +64,7 @@ candidate_resolve() {
       $m.sha256[$r.key] == $r.value.sha256)) and
     (["host", "consent", "mini", "store", "verifier", "grainRuntime",
       "grainProviderBridge", "inferenceScheduler", "spkHost", "spkBrowserProxy",
-      "spkBroker", "spkHostd", "discord", "payWatcher", "keys"] |
+      "spkBroker", "spkHostd", "spkVolumeHelper", "discord", "payWatcher", "keys"] |
       all(. as $r | $p.binaries[$r].path | type == "string"))
     ' "$manifest" >/dev/null || candidate_die "manifest output identity is incomplete or differs from provenance"
   for role in host mini store verifier consent; do

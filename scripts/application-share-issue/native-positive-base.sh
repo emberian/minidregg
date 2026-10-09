@@ -11,6 +11,9 @@ if [ "$#" -ne 2 ]; then
 fi
 HOST=$1
 EVIDENCE=$2
+# a staged provision.sh resolves its genesis-clock helper from this tree (scripts/workroom/provision.sh)
+GENESIS_PARAMS_TREE=${GENESIS_PARAMS_TREE:-$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)}
+export GENESIS_PARAMS_TREE
 PROVISION_SOURCE=${PROVISION_SOURCE:?set exact reviewed provision.sh}
 MEMBER_SOURCE=${MEMBER_SOURCE:?set exact reviewed native-share-member.sh}
 APP_SOURCE=${APP_SOURCE:?set exact reviewed native-share-base.sh}
