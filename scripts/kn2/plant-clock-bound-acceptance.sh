@@ -18,8 +18,8 @@ jq --arg host "$HOST" --arg mini "$MINI" --arg consent "$CONSENT" \
   "$BASE" >"$RUN/manifest.json"
 case "$MODE" in
   genesis)
-    jq --argjson now "$(date +%s)" '.clock.genesisNow=$now' \
-      native/resource-client/genesis-params.example.json >"$RUN/valid.json"
+    cp native/resource-client/genesis-params.example.json "$RUN/valid.json"
+    sh deploy/candidate/params.sh fill-genesis "$RUN/valid.json"
     sh native/resource-client/genesis.sh --check "$RUN/valid.json"
     refuse() {
       local name=$1 edit=$2 expect=$3

@@ -115,7 +115,7 @@ cat "$L/gate-$TAG-rust-rows.txt"
 run rust-rows       $LAKE_WRAP bash "$B/tmp-rust-rows-$TAG.sh"
 # non-Lean, non-Rust tests the change touches: deploy tooling, changed python test files
 if git diff --name-only "$FROM..$TO" | grep -q '^deploy/'; then
-  run deploy-scripts bash -c 'python3 deploy/pay/test-render-enrol.py && python3 deploy/candidate/test-package.py && bash deploy/candidate/test-lane-build.sh'
+  run deploy-scripts bash -c 'python3 deploy/pay/test-render-enrol.py && python3 deploy/candidate/test-package.py && bash deploy/candidate/test-lane-build.sh && sh deploy/candidate/test-params.sh'
   run spk-shell bash scripts/check-spk-shell-tests.sh
 fi
 for f in $(git diff --name-only --diff-filter=AM "$FROM..$TO" | grep -E '(^|/)test_[^/]*\.py$'); do

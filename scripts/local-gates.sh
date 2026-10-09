@@ -123,7 +123,7 @@ g_objective-frontend() { bash scripts/check-objective-frontend.sh; }
 g_world-cohorts() { bash scripts/check-world-cohorts.sh; }
 g_website()       { python3 website/gen-status.py --check; }
 g_rust-tests()    { bash scripts/check-rust-tests.sh; }
-g_deploy-scripts() { python3 deploy/pay/test-render-enrol.py && python3 deploy/candidate/test-package.py && bash deploy/candidate/test-lane-build.sh; }
+g_deploy-scripts() { python3 deploy/pay/test-render-enrol.py && python3 deploy/candidate/test-package.py && bash deploy/candidate/test-lane-build.sh && sh deploy/candidate/test-params.sh; }
 g_spk-shell()     { bash scripts/check-spk-shell-tests.sh; }
 g_journey()       { bash scripts/check-journey.sh; }
 

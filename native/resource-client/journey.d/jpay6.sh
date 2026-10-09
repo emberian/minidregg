@@ -163,6 +163,8 @@ genesis = {"domain": "8501", "factoryId": "10", "resourceBookId": "11", "authori
                "witnessBytes", "proofWork", "storageBytes", "networkBytes", "sideEffectCount",
                "feeDebit", "leaseByteBlocks")}}
 json.dump(genesis, open(path("genesis.json"), "w"), indent=1)
+# The genesis clock: the one candidate helper (the extractors keep the dump line above as their seam).
+subprocess.run(["sh", os.path.join(REPO, "deploy/candidate/params.sh"), "fill-source", path("genesis.json")], check=True)
 boot = subprocess.run([MINI, "bootstrap", "--host", HOST, "--config", path("operator.json"),
                        "--source", path("genesis.json"), "--dir", path("deployment")], capture_output=True)
 if boot.returncode != 0:

@@ -35,6 +35,9 @@ done
 journey_shortdir jpay4
 DIR=$JOURNEY_D
 mkdir -p "$DIR"
+# The genesis clock is chosen by the one candidate helper, never written here.
+GENESIS_PARAMS_SH=$(CDPATH='' cd -- "$(dirname -- "$0")/../../../deploy/candidate" && pwd)/params.sh
+export GENESIS_PARAMS_SH
 python3 - "$DIR" <<'PY'
 import json, os, shutil, signal, subprocess, sys, time
 
@@ -142,7 +145,8 @@ genesis = {"domain": "8501", "factoryId": "10", "resourceBookId": "11", "authori
                "feeDebit", "leaseByteBlocks")},
            "payObserver": {"subject": str(OBSERVER), "capability": str(OBSERVER_CAP),
                            "controlCapability": "4031", "enrolCapability": "4032"}}
-json.dump(genesis, open(path("genesis.json"), "w"))
+with open(path("genesis.json"), "w") as out: json.dump(genesis, out)
+subprocess.run(["sh", os.environ["GENESIS_PARAMS_SH"], "fill-source", path("genesis.json")], check=True)
 mini("bootstrap", "--host", HOST, "--config", path("operator.json"), "--source", path("genesis.json"),
      "--dir", path("deployment"), check=True)
 CONFIG = path("deployment", "pinned-config.json")

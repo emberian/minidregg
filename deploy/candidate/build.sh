@@ -307,7 +307,7 @@ file "$out"/bin/minidregg-host "$out"/bin/minidregg-client-consent "$out"/bin/mi
 # 7. Package: the one candidate format, written by deploy/candidate/package.py
 # from THIS archive's bytes (the copy extracted into work/src). The roles are the
 # binaries built above; package.py copies nothing (they are already in bin/),
-# installs run.sh, lib.sh, genesis.sh, genesis-params.example.json and
+# installs run.sh, lib.sh, params.sh, genesis.sh, genesis-params.example.json and
 # INTERFACES.md from source.tar, records each ELF's glibc needs, and writes
 # provenance.json, SHA256SUMS and manifest.json.
 roles_json="$out/work/roles.json"

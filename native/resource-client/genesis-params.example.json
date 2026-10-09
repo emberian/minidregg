@@ -41,8 +41,8 @@
     "controlCapabilityId": 73,
     "factoryObserveCapabilityId": 74,
     "tickCapabilityId": 71,
-    "genesisNow": 0,
-    "maxStepSeconds": 300
+    "genesisNow": null,
+    "maxStepSeconds": null
   },
   "tailBound": 256,
   "meterAllowance": {

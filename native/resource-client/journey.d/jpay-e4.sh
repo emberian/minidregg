@@ -40,6 +40,9 @@ done
 DIR="$JOURNEY_STEP_DIR/jpay-e4"
 if [ -e "$DIR" ]; then echo "jpay-e4: refusing to reuse $DIR" >&2; exit 2; fi
 mkdir -p "$DIR"
+# The genesis clock is chosen by the one candidate helper, never written here.
+GENESIS_PARAMS_SH=$(CDPATH='' cd -- "$(dirname -- "$0")/../../../deploy/candidate" && pwd)/params.sh
+export GENESIS_PARAMS_SH
 exec python3 - "$DIR" <<'PY'
 import base64, hashlib, http.client, json, os, re, shutil, signal, struct, subprocess, sys, time
 import nacl.signing
@@ -123,7 +126,8 @@ genesis = {"domain": "8501", "factoryId": "10", "resourceBookId": "11", "authori
                "feeDebit", "leaseByteBlocks")},
            "payObserver": {"subject": str(OBSERVER), "capability": str(OBSERVER_CAP),
                            "controlCapability": str(PAY_CONTROL), "enrolCapability": str(ENROL_CAP)}}
-json.dump(genesis, open(path("genesis.json"), "w"))
+with open(path("genesis.json"), "w") as out: json.dump(genesis, out)
+subprocess.run(["sh", os.environ["GENESIS_PARAMS_SH"], "fill-source", path("genesis.json")], check=True)
 mini("bootstrap", "--host", HOST, "--config", path("operator.json"), "--source", path("genesis.json"),
      "--dir", path("deployment"), check=True)
 CONFIG = path("deployment", "pinned-config.json")

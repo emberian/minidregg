@@ -30,6 +30,9 @@ python3 -c 'import nacl.signing' 2>/dev/null || { echo "jpay3: PyNaCl is require
 DIR="$JOURNEY_STEP_DIR/jpay3"
 if [ -e "$DIR" ]; then echo "jpay3: refusing to reuse $DIR" >&2; exit 2; fi
 mkdir -p "$DIR"
+# The genesis clock is chosen by the one candidate helper, never written here.
+GENESIS_PARAMS_SH=$(CDPATH='' cd -- "$(dirname -- "$0")/../../../deploy/candidate" && pwd)/params.sh
+export GENESIS_PARAMS_SH
 exec python3 - "$DIR" <<'PY'
 import hashlib, json, os, struct, subprocess, sys, time
 import nacl.signing
@@ -53,6 +56,10 @@ P1_RECORD = {"address": P1_ADDRESS, "amount": 1000000000, "blockTime": 175924995
              "signature": "e895db8f0638e377a2e3c110b1a7f6266170e27f135964a0aec2df1c5fec95359102463a545e6eac2104ed10ef18980a8a59c9224c8a46b64e571122734f586a",
              "slot": 900, "tokenProgram": P1_PROGRAM, "memo": None, "memoError": None}
 CAP, RATE, MIN_TICK = 2000000000, 1, 1500
+# The vector's chain is fixed in the past (P1 blockTime 1759249950 at slot 900), so this world's
+# genesis is pinned to that chain's epoch (block time of slot 0): the clock's `now` starts there and
+# each tip's later block time advances it. A genesis at the wall clock would sit after every block.
+CHAIN_EPOCH = 1759249000
 
 def path(name): return os.path.join(DIR, name)
 def fail(message):
@@ -93,7 +100,9 @@ genesis = {"domain": "8501", "factoryId": str(FACTORY), "resourceBookId": str(BO
            "payObserver": {"subject": str(OBSERVER), "capability": str(OBSERVER_CAP),
                            "controlCapability": str(OBSERVER_CAP + 1),
                            "enrolCapability": str(OBSERVER_CAP + 2)}}
-json.dump(genesis, open(path("genesis.json"), "w"), indent=1)
+with open(path("genesis.json"), "w") as out: json.dump(genesis, out, indent=1)
+subprocess.run(["sh", os.environ["GENESIS_PARAMS_SH"], "fill-source", path("genesis.json")], check=True,
+               env=dict(os.environ, GENESIS_NOW=str(CHAIN_EPOCH)))
 boot = subprocess.run([MINI, "bootstrap", "--host", HOST, "--config", path("operator.json"),
                        "--source", path("genesis.json"), "--dir", path("deployment")], capture_output=True)
 if boot.returncode != 0:
@@ -202,10 +211,10 @@ def assign_command(v, subject, index):
     return {"subject": str(subject), "capability": str(1000 + subject), "account": str(acct(subject)),
             "index": str(index), "nonce": str(nonce[0]),
             "expectedAuthorityRoot": v["authorityRoot"], "expectedPayRoot": v["payRoot"]}
-def tip(slot): return {"slot": slot, "blockTime": 1759249000 + slot}
+def tip(slot): return {"slot": slot, "blockTime": CHAIN_EPOCH + slot}
 def record(index, addr, sig, slot, amount, mint=P1_MINT):
     return {"index": index, "address": addr, "signature": sig, "slot": slot,
-            "blockTime": 1759249000 + slot, "amount": amount, "mint": mint, "tokenProgram": P1_PROGRAM,
+            "blockTime": CHAIN_EPOCH + slot, "amount": amount, "mint": mint, "tokenProgram": P1_PROGRAM,
             "memo": None, "memoError": None}
 def report(v, t, observations):
     nonce[0] += 1
@@ -222,9 +231,9 @@ def observe(host, t, observations):
 # ---------------------------------------------------------------- the journey
 started = time.time()
 led0 = ledger()
-row("genesis ledger (before any turn)", "clock 0/0, well = -(4 x 100), payers none",
+row("genesis ledger (before any turn)", f"clock 0/{CHAIN_EPOCH} (the genesis time), well = -(4 x 100), payers none",
     f"well={led0['well']} clock={led0['clock']['slot']}/{led0['clock']['now']} payers={len(led0['payers'])}",
-    led0["well"] == "-400" and led0["clock"] == {"now": "0", "slot": "0"} and led0["payers"] == [])
+    led0["well"] == "-400" and led0["clock"] == {"now": str(CHAIN_EPOCH), "slot": "0"} and led0["payers"] == [])
 
 host = Host()
 v = view(host)
@@ -243,8 +252,8 @@ for s, index in ((8, 0), (9, 1)):
 r, first_ingress = observe(host, tip(1000), [P1_RECORD])
 row("P1 happy record (1e9 atomic to index 0) at tip 1000", "confirmed", show(r), r.get("type") == "confirmed")
 c = clock_view(host)
-row("clock is the tip", "clock 1000/1759250000", f"clock={c['slot']}/{c['now']}",
-    c == {"now": "1759250000", "slot": "1000"})
+row("clock is the tip", f"clock 1000/{CHAIN_EPOCH + 1000}", f"clock={c['slot']}/{c['now']}",
+    c == {"now": str(CHAIN_EPOCH + 1000), "slot": "1000"})
 host.stop()
 led1 = ledger()
 host = Host()
@@ -282,7 +291,7 @@ r, _ = observe(host, tip(1300 + MIN_TICK), [])
 c = clock_view(host)
 row("heartbeat 1500 slots after the clock", "confirmed, clock 2800",
     f"{show(r)} clock={c['slot']}/{c['now']}",
-    r.get("type") == "confirmed" and c == {"now": str(1759249000 + 2800), "slot": "2800"})
+    r.get("type") == "confirmed" and c == {"now": str(CHAIN_EPOCH + 2800), "slot": "2800"})
 r, _ = observe(host, tip(2700), [record(0, P1_ADDRESS, signature("late"), 2650, 5)])
 # The pay cell retains the finalized chain tip (2800, PayChainTip): a report at 2700 regresses it and
 # is refused by the chain-tip check, which decideObservations runs before the clock comparison.

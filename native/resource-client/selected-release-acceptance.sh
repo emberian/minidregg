@@ -106,6 +106,7 @@ EOF
    "networkBytes":"10000000","sideEffectCount":"10000000",
    "feeDebit":"10000000","leaseByteBlocks":"10000000"}}
 EOF
+  sh "$REPO/deploy/candidate/params.sh" fill-source "$root/genesis.json"   # the genesis clock, chosen at genesis time
   "$MINI" bootstrap --host "$HOST" --config "$root/operator.json" \
     --source "$root/genesis.json" --dir "$root/deployment" >"$root/bootstrap.stdout"
   config="$root/deployment/pinned-config.json"

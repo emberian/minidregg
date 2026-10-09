@@ -32,7 +32,7 @@ ROLE_FILES = {"host": "minidregg-host", "consent": "minidregg-client-consent"}
 ROLE_FILES.update({role: name for role, _, name in (
     line.split() for line in subprocess.run([sys.executable, str(PACKAGE), "--rust-roles"], check=True,
                                             capture_output=True, text=True).stdout.splitlines())})
-SCRIPTS = ["deploy/candidate/check-tamper.sh", "lean-toolchain", "Cargo.lock", "deploy/candidate/run.sh", "deploy/candidate/lib.sh", "native/resource-client/genesis.sh",
+SCRIPTS = ["deploy/candidate/check-tamper.sh", "lean-toolchain", "Cargo.lock", "deploy/candidate/run.sh", "deploy/candidate/lib.sh", "deploy/candidate/params.sh", "native/resource-client/genesis.sh",
            "native/resource-client/genesis-params.example.json", "deploy/candidate/INTERFACES.md"]
 failures = []
 

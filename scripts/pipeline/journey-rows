@@ -448,6 +448,12 @@ product_pay_step() {
   JOURNEY_STEP_DIR=$RUN/pay$id product_exec "JPAY$id" bash "$d"; rc=$?
   # Drivers name their deciding artifact on their last stdout line.
   artifact=$(tail -1 "$OUT/JPAY$id.out")
+  # A driver that binds sockets runs in a short dir (journey.d/lib/shortdir.sh) copied back to
+  # STEP_DIR/rt on exit; its named artifact moves with it, as journey.sh rewrites a hook's.
+  if [ -f "$RUN/pay$id/rt.origin" ]; then
+    local origin; origin=$(cat "$RUN/pay$id/rt.origin")
+    case "$artifact" in "$origin"/*) artifact=$RUN/pay$id/rt${artifact#"$origin"} ;; esac
+  fi
   if [ -n "$artifact" ] && [[ $artifact == "$RUN/"* ]] && [ -s "$artifact" ]; then cp "$artifact" "$OUT/JPAY$id-result.txt"; fi
   [ "$rc" = 0 ] || return "$rc"
   product_evidence "$OUT/JPAY$id-result.txt" || return 1

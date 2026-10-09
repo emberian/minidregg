@@ -32,6 +32,9 @@ python3 -c 'import nacl.signing' 2>/dev/null || { echo "jpay2: PyNaCl is require
 DIR="$JOURNEY_STEP_DIR/jpay2"
 if [ -e "$DIR" ]; then echo "jpay2: refusing to reuse $DIR" >&2; exit 2; fi
 mkdir -p "$DIR"
+# The genesis clock is chosen by the one candidate helper, never written here.
+GENESIS_PARAMS_SH=$(CDPATH='' cd -- "$(dirname -- "$0")/../../../deploy/candidate" && pwd)/params.sh
+export GENESIS_PARAMS_SH
 exec python3 - "$DIR" <<'PY'
 import hashlib, json, os, struct, subprocess, sys, time
 import nacl.signing
@@ -81,7 +84,8 @@ genesis = {"domain": "8501", "factoryId": str(FACTORY), "resourceBookId": str(BO
            "meterAllowance": {k: "10000000" for k in ("incidences", "turnBytes", "memoryTouches",
                "witnessBytes", "proofWork", "storageBytes", "networkBytes", "sideEffectCount",
                "feeDebit", "leaseByteBlocks")}}
-json.dump(genesis, open(path("genesis.json"), "w"), indent=1)
+with open(path("genesis.json"), "w") as out: json.dump(genesis, out, indent=1)
+subprocess.run(["sh", os.environ["GENESIS_PARAMS_SH"], "fill-source", path("genesis.json")], check=True)
 subprocess.run([MINI, "bootstrap", "--host", HOST, "--config", path("operator.json"),
                 "--source", path("genesis.json"), "--dir", path("deployment")],
                check=True, capture_output=True)

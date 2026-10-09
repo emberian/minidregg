@@ -23,6 +23,7 @@ git clone https://github.com/emberian/minidregg && cd minidregg && git checkout 
 deploy/candidate/build.sh --out /srv/mini/candidate-<commit>          # binaries + manifest
 C=/srv/mini/candidate-<commit>
 cp $C/genesis-params.example.json /srv/mini/genesis-params.json      # edit: operator decisions
+$C/params.sh fill-genesis /srv/mini/genesis-params.json              # the genesis clock, chosen now
 $C/run.sh init  --manifest $C/manifest.json --params /srv/mini/genesis-params.json --state /srv/mini/store-a
 $C/run.sh start --state /srv/mini/store-a                             # or: run.sh unit ... | systemd
 $C/run.sh sponsor --state /srv/mini/store-a
@@ -76,7 +77,7 @@ that can find the versioned one) for the Store helper.
 | `OUT/bin/spk-host`, `OUT/bin/spk-browser-proxy` | Application custody/broker and browser entrance (`native/spk-host`) |
 | `OUT/bin/pay-watcher` | Solana payment observer (`native/pay-watcher`) |
 | `OUT/bin/mini-discord` | Optional Discord entrance (`native/discord-entrance`) |
-| `OUT/run.sh`, `OUT/lib.sh`, `OUT/genesis.sh`, `OUT/INTERFACES.md`, `OUT/genesis-params.example.json` | operator scripts and documents, copied from the same archive; `genesis.sh` and the example params come from `native/resource-client/`, the one genesis template the acceptance fixture also uses |
+| `OUT/run.sh`, `OUT/lib.sh`, `OUT/params.sh`, `OUT/genesis.sh`, `OUT/INTERFACES.md`, `OUT/genesis-params.example.json` | operator scripts and documents, copied from the same archive; `genesis.sh` and the example params come from `native/resource-client/`, the one genesis template the acceptance fixture also uses |
 | `OUT/source.tar` | the exact source archive |
 | `OUT/provenance.json` | source, toolchains, relative binary paths and hashes, timings (below) |
 | `OUT/SHA256SUMS` | `sha256sum` lines for everything above and `logs/source-files.sha256`, relative to `OUT` |
@@ -391,12 +392,21 @@ issuerEpoch factoryControllerCapability`, `sponsor {subject keyId keyEpoch
 activeFrom activeUntil accountId spendCapabilityId controlCapabilityId
 factoryObserveCapabilityId initialBalance}`, `clock {subject keyId keyEpoch
 activeFrom activeUntil accountId spendCapabilityId controlCapabilityId
-factoryObserveCapabilityId tickCapabilityId}` (the dedicated clock subject,
-distinct from the sponsor; `tickCapabilityId` is its `C_tick`), and `meterAllowance` with the ten
-keys `incidences turnBytes memoryTouches witnessBytes proofWork storageBytes
-networkBytes sideEffectCount feeDebit leaseByteBlocks`.
+factoryObserveCapabilityId tickCapabilityId genesisNow maxStepSeconds}` (the dedicated clock subject,
+distinct from the sponsor; `tickCapabilityId` is its `C_tick`; `genesisNow` the genesis's Unix
+second and `maxStepSeconds` the most one clock tick may advance, both positive), and
+`meterAllowance` with the ten keys `incidences turnBytes memoryTouches witnessBytes proofWork
+storageBytes networkBytes sideEffectCount feeDebit leaseByteBlocks`.
 `genesis-params.example.json` holds the values the recorded qualification runs
-used. The sponsor and the clock subject are the identities genesis names; every
+used, except the genesis clock: its `clock.genesisNow` and `clock.maxStepSeconds` are `null`
+(unfilled), and `run.sh init` and `genesis.sh` refuse an unfilled or non-positive value
+(`clockStepBoundInvalid`, `clockGenesisNowInvalid`). They are filled AT GENESIS TIME by the one
+helper, `params.sh fill-genesis PARAMS.json` (in place: `genesisNow` = now or `$GENESIS_NOW`,
+`maxStepSeconds` = `$MAX_STEP_SECONDS` or 300). It never repairs an explicit bad value (0
+refuses) and never re-dates a filled file (a present value other than the one it would write
+refuses). A driver that hand-writes a `mini bootstrap --source` file calls
+`params.sh fill-source SOURCE.json` (`clockGenesisNow`, `clockMaxStepSeconds`, decimal strings)
+instead; no driver writes a clock value itself. The sponsor and the clock subject are the identities genesis names; every
 later participant is enrolled through the client and receives Host-allocated
 identifiers. `genesis.sh PARAMS SPONSOR_PUBLIC_HEX CLOCK_PUBLIC_HEX HOST STORE
 VERIFIER DIR` takes both public keys.

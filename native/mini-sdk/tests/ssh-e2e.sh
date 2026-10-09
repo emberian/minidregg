@@ -31,14 +31,20 @@ cleanup() {
   fi
   "$ART/run.sh" stop --state "$STORE" >>"$LOG/cleanup.txt" 2>&1 || true
   rm -rf "$KEYS" "$RUN/client" "$RUN/host_ed25519" "$RUN/host_ed25519.pub" "$RUN/host_wrong" "$RUN/host_wrong.pub" "$STORE/keys"
-  echo "ssh-e2e: keys deleted; logs in $LOG" >&2
+  # The row's verdict is the script's LAST stderr line (die's message, or the PASS line): the
+  # cleanup note goes to the log, never after it.
+  echo "ssh-e2e: keys deleted after exit $status" >>"$LOG/cleanup.txt"
   exit "$status"
 }
 trap cleanup EXIT
 
 # --- the scratch Store, served by the candidate's Host --------------------------------------------
-"$ART/run.sh" init --manifest "$ART/manifest.json" --params "$ART/genesis-params.example.json" --state "$STORE" >"$LOG/init.log" 2>&1 \
-  || die "run.sh init failed (see $LOG/init.log)"
+# The candidate's shipped example, its genesis clock filled now by the candidate's one helper.
+cp "$ART/genesis-params.example.json" "$RUN/genesis-params.json"
+sh "$REPO/deploy/candidate/params.sh" fill-genesis "$RUN/genesis-params.json" 2>"$LOG/params.err" \
+  || die "params.sh fill-genesis refused the candidate's example: $(tail -1 "$LOG/params.err")"
+"$ART/run.sh" init --manifest "$ART/manifest.json" --params "$RUN/genesis-params.json" --state "$STORE" >"$LOG/init.log" 2>&1 \
+  || die "run.sh init failed: $(awk 'NF {last=$0} END {print last}' "$LOG/init.log") (see $LOG/init.log)"
 "$ART/run.sh" start --state "$STORE" >"$LOG/start.log" 2>&1 || die "run.sh start failed (see $LOG/start.log)"
 SOCKET=$STORE/public/mini.sock
 for _ in $(seq 1 100); do [[ -S $SOCKET ]] && break; sleep 0.1; done

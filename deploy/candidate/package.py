@@ -94,6 +94,7 @@ BUNDLE = ("mini", "minidregg-host", "minidregg-client-consent",
 # The operator scripts travel with the binaries, from the same archive.
 SCRIPTS = {"check-tamper.sh": ("deploy/candidate/check-tamper.sh", 0o555),
            "run.sh": ("deploy/candidate/run.sh", 0o555), "lib.sh": ("deploy/candidate/lib.sh", 0o555),
+           "params.sh": ("deploy/candidate/params.sh", 0o555),
            "genesis.sh": ("native/resource-client/genesis.sh", 0o555),
            "genesis-params.example.json": ("native/resource-client/genesis-params.example.json", 0o444),
            "INTERFACES.md": ("deploy/candidate/INTERFACES.md", 0o444)}

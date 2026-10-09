@@ -116,6 +116,7 @@ cat >"$ROOT/genesis.json" <<EOF
 }
 EOF
 
+sh "$REPO/deploy/candidate/params.sh" fill-source "$ROOT/genesis.json"   # the genesis clock, chosen at genesis time
 "$MINI" bootstrap --host "$HOST" --config "$ROOT/operator.json" \
   --source "$ROOT/genesis.json" --dir "$ROOT/deployment" >"$ROOT/bootstrap.stdout"
 
