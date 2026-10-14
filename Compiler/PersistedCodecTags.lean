@@ -34,7 +34,7 @@ namespace Minidregg.Compiler.PersistedCodecTags
 @[persisted_codec_tag] abbrev application_retry_create_completion_event_v4 : String := "DREGG/APPLICATION/RETRY-CREATE-COMPLETION-EVENT/v4"
 @[persisted_codec_tag] abbrev application_share_issue_event_v2 : String := "DREGG/APPLICATION/SHARE-ISSUE-EVENT/v2"
 @[persisted_codec_tag] abbrev pay_refill_v1 : String := "DREGG/PAY/REFILL/v1"
-@[persisted_codec_tag] abbrev world_root_v1 : String := "DREGG.WORLD-ROOT/v1"
+@[persisted_codec_tag] abbrev world_root_v2 : String := "DREGG.WORLD-ROOT/v2"
 @[persisted_codec_tag] abbrev application_first_start_attempt_bytes_v1 : String := "DREGG/APPLICATION/FIRST-START-ATTEMPT-BYTES/v1"
 @[persisted_codec_tag] abbrev seat_instance_v1 : String := "DREGG/SEAT/INSTANCE/v1"
 @[persisted_codec_tag] abbrev channel_epoch_sig_v1 : String := "DREGG.CHANNEL.EPOCH-SIG/v1"
