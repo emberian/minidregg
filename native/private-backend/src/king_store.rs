@@ -151,7 +151,7 @@ fn king_outbox(ps: &[triple_king::Send]) -> Vec<u8> {
 }
 fn parse_king_outbox(b: &[u8], n: usize) -> Result<Vec<triple_king::Send>> {
     let mut c = Cursor::new(b)?;
-    let len = acss_id_store::count(&mut c)?;
+    let len = c.count()?;
     if len > crate::codec::MAX / 40 {
         return Err(bad("King outbox bound"));
     }

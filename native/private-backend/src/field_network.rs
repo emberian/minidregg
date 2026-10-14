@@ -721,20 +721,6 @@ impl Engine {
         expected_holder: u16,
         anchor: &Path,
     ) -> Result<Self> {
-        fn nat(c: &mut Cursor) -> Result<Nat> {
-            let mut ds = vec![];
-            loop {
-                let v = c.byte()?;
-                ds.push(v);
-                if v == 255 {
-                    break;
-                }
-            }
-            let mut r = crate::codec::Reader::new(&ds)?;
-            let n = r.nat()?;
-            r.finish()?;
-            Ok(n)
-        }
         let mut c = Cursor::new(b)?;
         let tag = b"DREGG.PRIVATE.FIELD.INITIAL\x01";
         if c.take(tag.len())? != tag {
@@ -742,8 +728,8 @@ impl Engine {
         }
         let plan = Plan::decode(&c.bytes()?)?;
         let me = c.u16()?;
-        let n = usize::try_from(nat(&mut c)?.value()?).map_err(|_| bad("field roster"))?;
-        let f = usize::try_from(nat(&mut c)?.value()?).map_err(|_| bad("field faults"))?;
+        let n = usize::try_from(c.nat()?.value()?).map_err(|_| bad("field roster"))?;
+        let f = usize::try_from(c.nat()?.value()?).map_err(|_| bad("field faults"))?;
         if plan != *expected_plan
             || me != expected_holder
             || f > 5
@@ -855,17 +841,7 @@ pub fn decode_message(b: &[u8]) -> Result<Message> {
     let context = c.fixed32()?;
     let body = match c.byte()? {
         0 => {
-            let mut digits = vec![];
-            loop {
-                let v = c.byte()?;
-                digits.push(v);
-                if v == 255 {
-                    break;
-                }
-            }
-            let mut r = crate::codec::Reader::new(&digits)?;
-            let gate = usize::try_from(r.nat()?.value()?).map_err(|_| bad("gate index"))?;
-            r.finish()?;
+            let gate = usize::try_from(c.nat()?.value()?).map_err(|_| bad("gate index"))?;
             Body::Opening {
                 gate,
                 holder: c.u16()?,

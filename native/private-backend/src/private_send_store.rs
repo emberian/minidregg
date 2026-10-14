@@ -113,17 +113,7 @@ fn outbox(ps: &[Send]) -> Vec<u8> {
 }
 fn parse_outbox(b: &[u8], n: usize) -> Result<Vec<Send>> {
     let mut c = Cursor::new(b)?;
-    let mut digits = vec![];
-    loop {
-        let x = c.byte()?;
-        digits.push(x);
-        if x == 255 {
-            break;
-        }
-    }
-    let mut r = crate::codec::Reader::new(&digits)?;
-    let count = r.count()?;
-    r.finish()?;
+    let count = c.count()?;
     if count > crate::codec::MAX / 50 {
         return Err(bad("private outbox count"));
     }

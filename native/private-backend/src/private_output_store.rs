@@ -2,7 +2,7 @@
 //! OS key polynomial coefficients + recursive outbox before publication.
 //! Native current release authority is NOT supplied by these byte codecs.
 use crate::{
-    codec::{bad, bytes, Generation, Nat, Reader},
+    codec::{bad, bytes, Generation, Nat},
     consensus_wire::Cursor,
     custody,
     private_initial::Initial,
@@ -12,20 +12,6 @@ use crate::{
 };
 use std::{io::Result, path::Path};
 const DOMAIN: &[u8] = b"DREGG.PRIVATE.OUTPUT.INIT.FILE\x01";
-fn nat(c: &mut Cursor) -> Result<usize> {
-    let mut ds = vec![];
-    loop {
-        let v = c.byte()?;
-        ds.push(v);
-        if v == 255 {
-            break;
-        }
-    }
-    let mut r = Reader::new(&ds)?;
-    let n = r.count()?;
-    r.finish()?;
-    Ok(n)
-}
 fn outbox(ps: &[Send]) -> Vec<u8> {
     let mut b = vec![];
     Nat::new(ps.len() as u64).put(&mut b);
@@ -37,7 +23,7 @@ fn outbox(ps: &[Send]) -> Vec<u8> {
 }
 fn packets(b: &[u8], n: usize) -> Result<Vec<Send>> {
     let mut c = Cursor::new(b)?;
-    let count = nat(&mut c)?;
+    let count = c.count()?;
     if count > 65536 {
         return Err(bad("output recursive outbox capacity"));
     }

@@ -41,6 +41,14 @@ impl Nat {
         o.extend(&self.0);
         o.push(255);
     }
+    /// A length or element count: the value as a `usize`, at most [`MAX`].
+    pub fn count(&self) -> Result<usize> {
+        let n = usize::try_from(self.value()?).map_err(|_| bad("length overflow"))?;
+        if n > MAX {
+            return Err(bad("count bound"));
+        }
+        Ok(n)
+    }
     pub fn value(&self) -> Result<u64> {
         self.0.iter().rev().try_fold(0u64, |n, b| {
             n.checked_mul(255)
@@ -64,6 +72,9 @@ impl<'a> Reader<'a> {
         }
         Ok(Self { b, i: 0 })
     }
+    /// `StreamCodec.nat` (`decodeNatPrefix`, canonical): digits up to the
+    /// terminator 255. A zero most-significant digit is a second spelling of a
+    /// shorter natural (`[0,255]`, `[5,0,255]`) and is refused, as Lean refuses it.
     pub fn nat(&mut self) -> Result<Nat> {
         let s = self.i;
         while self.i < self.b.len() && self.b[self.i] != 255 {
@@ -93,11 +104,7 @@ impl<'a> Reader<'a> {
         Ok(b)
     }
     pub fn count(&mut self) -> Result<usize> {
-        let n = usize::try_from(self.nat()?.value()?).map_err(|_| bad("length overflow"))?;
-        if n > MAX {
-            return Err(bad("count bound"));
-        }
-        Ok(n)
+        self.nat()?.count()
     }
     pub fn finish(self) -> Result<()> {
         if self.i == self.b.len() {
@@ -377,4 +384,41 @@ pub fn parse_batch_request(b: &[u8]) -> Result<(Vec<Correlation>, Generation, Pu
         return Err(bad("batch canonical"));
     }
     Ok((ids, g, p))
+}
+#[cfg(test)]
+mod stream_nat_canonical {
+    use super::{Nat, Reader};
+    use crate::consensus_wire::Cursor;
+    fn reader_nat(b: &[u8]) -> std::io::Result<u64> {
+        let mut r = Reader::new(b)?;
+        let n = r.nat()?;
+        r.finish()?;
+        n.value()
+    }
+    #[test]
+    fn stream_nat_canonical_refuses_zero_most_significant_digit() {
+        for b in [&[0u8, 255][..], &[5, 0, 255], &[0, 0, 255], &[1, 0, 0, 255]] {
+            assert!(reader_nat(b).is_err(), "{b:?}");
+            assert!(Cursor::new(b).unwrap().nat().is_err(), "{b:?}");
+            assert!(Cursor::new(b).unwrap().count().is_err(), "{b:?}");
+        }
+        // A non-canonical length prefix refuses the byte string it fronts.
+        assert!(Cursor::new(&[1, 0, 255, 9]).unwrap().bytes().is_err());
+    }
+    #[test]
+    fn stream_nat_canonical_accepts_every_encoding() {
+        for (b, v) in [(&[255u8][..], 0u64), (&[5, 255], 5), (&[0, 1, 255], 255), (&[254, 254, 255], 255 * 255 - 1)] {
+            assert_eq!(reader_nat(b).unwrap(), v);
+            let mut c = Cursor::new(b).unwrap();
+            assert_eq!(c.nat().unwrap().value().unwrap(), v);
+            c.finish().unwrap();
+            let mut o = vec![];
+            Nat::new(v).put(&mut o);
+            assert_eq!(o, b);
+        }
+        let mut c = Cursor::new(&[2, 255, 7, 8, 3, 255]).unwrap();
+        assert_eq!(c.bytes().unwrap(), [7, 8]);
+        assert_eq!(c.count().unwrap(), 3);
+        c.finish().unwrap();
+    }
 }

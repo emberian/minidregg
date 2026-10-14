@@ -39,12 +39,22 @@ impl<'a> Cursor<'a> {
     pub fn fixed32(&mut self) -> Result<[u8; 32]> {
         Ok(self.take(32)?.try_into().unwrap())
     }
-    pub fn bytes(&mut self) -> Result<Vec<u8>> {
+    /// `StreamCodec.nat` at the cursor, through the crate's one decoder
+    /// (`codec::Reader::nat`): a zero most-significant digit is refused.
+    pub fn nat(&mut self) -> Result<crate::codec::Nat> {
         let start = self.i;
         while self.byte()? != 255 {}
         let mut r = crate::codec::Reader::new(&self.b[start..self.i])?;
-        let n = r.count()?;
+        let n = r.nat()?;
         r.finish()?;
+        Ok(n)
+    }
+    /// A canonical natural used as a length or count, at most `codec::MAX`.
+    pub fn count(&mut self) -> Result<usize> {
+        self.nat()?.count()
+    }
+    pub fn bytes(&mut self) -> Result<Vec<u8>> {
+        let n = self.count()?;
         Ok(self.take(n)?.to_vec())
     }
     pub fn finish(self) -> Result<()> {
@@ -231,11 +241,7 @@ pub fn encode_outbox(ps: &[acs::Send]) -> Vec<u8> {
 pub fn decode_outbox(b: &[u8], n: usize) -> Result<Vec<acs::Send>> {
     // Output is trusted local machine data but remains bounded and canonical.
     let mut c = Cursor::new(b)?;
-    let start = c.i;
-    while c.byte()? != 255 {}
-    let mut r = crate::codec::Reader::new(&b[start..c.i])?;
-    let count = r.count()?;
-    r.finish()?;
+    let count = c.count()?;
     if count > crate::codec::MAX / 48 {
         return Err(bad("outbox packet bound"));
     }

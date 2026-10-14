@@ -79,13 +79,13 @@ impl CommitteeParty {
         let mut r = Reader::new(&g)?;
         let generation = Generation::get(&mut r)?;
         r.finish()?;
-        let authority_epoch = get_nat(&mut c)?;
+        let authority_epoch = c.nat()?;
         let session = c.bytes()?;
         let party = c.u16()?;
         let recipient = c.u16()?;
         let recipient_role = c.bytes()?;
         let subject = c.bytes()?;
-        let key_epoch = get_nat(&mut c)?;
+        let key_epoch = c.nat()?;
         let key_binding = c.bytes()?;
         let credential_purpose = c.bytes()?;
         c.finish()?;
@@ -115,20 +115,6 @@ impl CommitteeParty {
         }
         Ok(v)
     }
-}
-fn get_nat(c: &mut Cursor<'_>) -> Result<Nat> {
-    let mut b = vec![];
-    loop {
-        let v = c.byte()?;
-        b.push(v);
-        if v == 255 {
-            break;
-        }
-    }
-    let mut r = Reader::new(&b)?;
-    let n = r.nat()?;
-    r.finish()?;
-    Ok(n)
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Envelope {

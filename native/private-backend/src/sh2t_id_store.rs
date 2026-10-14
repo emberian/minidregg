@@ -3,7 +3,7 @@
 //! commit before visibility. Honest crash storage only, no rollback/release authority.
 use crate::{
     asks::PhaseMessage,
-    codec::{bad, bytes, Generation, Nat, Reader},
+    codec::{bad, bytes, Generation, Nat},
     consensus_wire::Cursor,
     private_send_store,
     reconstruction::Field,
@@ -15,20 +15,6 @@ use std::{
     io::{Read, Result},
     path::Path,
 };
-pub(crate) fn count(c: &mut Cursor) -> Result<usize> {
-    let mut b = vec![];
-    loop {
-        let v = c.byte()?;
-        b.push(v);
-        if v == 255 {
-            break;
-        }
-    }
-    let mut r = Reader::new(&b)?;
-    let n = r.count()?;
-    r.finish()?;
-    Ok(n)
-}
 pub(crate) fn put_phase(p: &PhaseMessage, b: &mut Vec<u8>) {
     let (t, v) = match p {
         PhaseMessage::Init(v) => (0, v),
@@ -55,7 +41,7 @@ pub(crate) fn put_fields(v: &[Field], b: &mut Vec<u8>) {
     }
 }
 pub(crate) fn fields(c: &mut Cursor) -> Result<Vec<Field>> {
-    let n = count(c)?;
+    let n = c.count()?;
     if n > 128 {
         return Err(bad("Sh2t point vector capacity"));
     }
@@ -151,7 +137,7 @@ pub fn decode_message(b: &[u8]) -> Result<Message> {
             phase: phase(&mut c)?,
         },
         5 => Body::ReconRequest {
-            group: count(&mut c)?,
+            group: c.count()?,
             receiver: c.u16()?,
             requester: c.u16()?,
             phase: phase(&mut c)?,
@@ -161,7 +147,7 @@ pub fn decode_message(b: &[u8]) -> Result<Message> {
             phase: phase(&mut c)?,
         },
         7 => Body::Point {
-            group: count(&mut c)?,
+            group: c.count()?,
             receiver: c.u16()?,
             values: fields(&mut c)?,
             masks: fields(&mut c)?,
@@ -186,7 +172,7 @@ fn outbox(ps: &[Send]) -> Vec<u8> {
 }
 pub(crate) fn parse_outbox(b: &[u8], n: usize) -> Result<Vec<Send>> {
     let mut c = Cursor::new(b)?;
-    let len = count(&mut c)?;
+    let len = c.count()?;
     if len > crate::codec::MAX / 40 {
         return Err(bad("Sh2t outbox capacity"));
     }
@@ -229,7 +215,7 @@ impl Machine for Sh2tMachine {
         let out = match c.byte()? {
             0 => {
                 let seed = c.fixed32()?;
-                let n = count(&mut c)?;
+                let n = c.count()?;
                 if n != self.state.count() {
                     return Err(bad("Sh2t event polynomial count"));
                 }
@@ -257,7 +243,7 @@ impl Machine for Sh2tMachine {
                 self.state.receive(sender, m)?
             }
             3 => {
-                let group = count(&mut c)?;
+                let group = c.count()?;
                 let receiver = c.u16()?;
                 c.finish()?;
                 self.state.request_private_reconstruction(group, receiver)?

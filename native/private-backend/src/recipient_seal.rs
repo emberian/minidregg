@@ -4,7 +4,7 @@
 //! Decryption proves confidentiality/integrity binding, NOT native source authority.
 use crate::{
     authenticated_ingress::{CommitteeParty, Envelope},
-    codec::{bad, bytes, Nat, Reader},
+    codec::{bad, bytes, Nat},
     crypto_transit,
 };
 use sha2::{Digest, Sha512};
@@ -105,10 +105,10 @@ impl DraftPublic {
         let party = CommitteeParty::decode(&c.bytes()?)?;
         let sequence = c.u64()?;
         let recipient = RecipientSpec {
-            algorithm: cursor_nat(&mut c)?,
-            key_epoch: cursor_nat(&mut c)?,
+            algorithm: c.nat()?,
+            key_epoch: c.nat()?,
             key_id: c.bytes()?,
-            plaintext_bound: usize::try_from(cursor_nat(&mut c)?.value()?)
+            plaintext_bound: usize::try_from(c.nat()?.value()?)
                 .map_err(|_| bad("draft padding bound"))?,
         };
         let semantic_commitment = c.take(64)?.try_into().unwrap();
@@ -208,10 +208,10 @@ impl SealedIngress {
         let mut c = crate::consensus_wire::Cursor::new(&b[FRAME.len()..])?;
         let party = CommitteeParty::decode(&c.bytes()?)?;
         let sequence = c.u64()?;
-        let algorithm = cursor_nat(&mut c)?;
-        let key_epoch = cursor_nat(&mut c)?;
+        let algorithm = c.nat()?;
+        let key_epoch = c.nat()?;
         let key_id = c.bytes()?;
-        let plaintext_bound = cursor_nat(&mut c)?.value()? as usize;
+        let plaintext_bound = c.nat()?.value()? as usize;
         let semantic_commitment = c.take(64)?.try_into().unwrap();
         let hybrid_ciphertext = c.take(crypto_transit::HYBRID_CIPHERTEXT_BYTES)?.try_into().unwrap();
         let nonce = c.take(24)?.try_into().unwrap();
@@ -341,20 +341,6 @@ impl DecryptedEnvelope {
     pub fn into_inner(self) -> Envelope {
         self.inner
     }
-}
-fn cursor_nat(c: &mut crate::consensus_wire::Cursor<'_>) -> Result<Nat> {
-    let mut b = vec![];
-    loop {
-        let v = c.byte()?;
-        b.push(v);
-        if v == 255 {
-            break;
-        }
-    }
-    let mut r = Reader::new(&b)?;
-    let n = r.nat()?;
-    r.finish()?;
-    Ok(n)
 }
 /// Endpoint-local private message commitment. Its nonce is sampled before the
 /// native INNER credential is signed; public commitment is hiding, not merely a
@@ -490,7 +476,7 @@ struct KeyState {
 impl crate::transition_journal::Machine for KeyState {
     fn apply(&mut self, event: &[u8]) -> Result<Vec<u8>> {
         let mut c = crate::consensus_wire::Cursor::new(event)?;
-        let epoch = cursor_nat(&mut c)?;
+        let epoch = c.nat()?;
         let secret = c.bytes()?;
         let public = c.bytes()?;
         c.finish()?;

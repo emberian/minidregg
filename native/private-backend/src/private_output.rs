@@ -395,23 +395,10 @@ impl PrivateOutput {
         let parent = c.fixed32()?;
         let holder = c.u16()?;
         let target = c.u16()?;
-        fn nat(c: &mut Cursor) -> Result<usize> {
-            let mut b = vec![];
-            loop {
-                let v = c.byte()?;
-                b.push(v);
-                if v == 255 {
-                    break;
-                }
-            }
-            let mut r = Reader::new(&b)?;
-            let n = usize::try_from(r.nat()?.value()?).map_err(|_| bad("output Nat capacity"))?;
-            r.finish()?;
-            Ok(n)
-        }
-        let n = nat(&mut c)?;
-        let f = nat(&mut c)?;
-        let count = nat(&mut c)?;
+        let mut nat = || -> Result<usize> {
+            usize::try_from(c.nat()?.value()?).map_err(|_| bad("output Nat capacity"))
+        };
+        let (n, f, count) = (nat()?, nat()?, nat()?);
         let descriptor = c.bytes()?;
         let burn = Journal::decode(&c.bytes()?)?;
         if &g != expected_generation

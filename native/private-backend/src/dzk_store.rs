@@ -41,22 +41,8 @@ fn put_fields(xs: &[Field], b: &mut Vec<u8>) {
         b.extend(x.0.to_le_bytes());
     }
 }
-fn count(c: &mut Cursor) -> Result<usize> {
-    let mut b = vec![];
-    loop {
-        let x = c.byte()?;
-        b.push(x);
-        if x == 255 {
-            break;
-        }
-    }
-    let mut r = crate::codec::Reader::new(&b)?;
-    let n = r.count()?;
-    r.finish()?;
-    Ok(n)
-}
 fn fields(c: &mut Cursor) -> Result<Vec<Field>> {
-    let n = count(c)?;
+    let n = c.count()?;
     if n > 128 {
         return Err(bad("dZK field vector bound"));
     }
@@ -131,7 +117,7 @@ fn outbox(ps: &[Send]) -> Vec<u8> {
 }
 fn parse_outbox(b: &[u8], n: usize) -> Result<Vec<Send>> {
     let mut c = Cursor::new(b)?;
-    let count = count(&mut c)?;
+    let count = c.count()?;
     if count > crate::codec::MAX / 40 {
         return Err(bad("dZK outbox capacity"));
     }
@@ -162,7 +148,7 @@ impl Machine for DzkMachine {
         let out = match c.byte()? {
             0 => {
                 let seed = c.fixed32()?;
-                let n = count(&mut c)?;
+                let n = c.count()?;
                 if n != self.state.profile.count {
                     return Err(bad("dZK event polynomial count"));
                 }

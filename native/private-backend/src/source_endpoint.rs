@@ -193,17 +193,7 @@ impl InnerCredentialOutcome {
         let out = match c.byte()? {
             0 => Self::Refused(c.bytes()?),
             1 => {
-                let mut n = vec![];
-                loop {
-                    let x = c.byte()?;
-                    n.push(x);
-                    if x == 255 {
-                        break;
-                    }
-                }
-                let mut r = Reader::new(&n)?;
-                let source_index = r.nat()?;
-                r.finish()?;
+                let source_index = c.nat()?;
                 Self::CredentialCheckedClaim {
                     source_index,
                     party_bytes: c.bytes()?,
