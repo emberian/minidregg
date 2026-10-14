@@ -66,12 +66,12 @@ end Perm
 
 /-! ## The kept trie -/
 
-/-- The evaluated trie: every branch carries its digest; a key alone under a
+/-- The evaluated trie: every leaf and branch carries its digest; a key alone under a
 prefix is a leaf holding its remaining bits; keys sharing a whole path are a
 `clash` (height 0 only). -/
 inductive Trie (K V D : Type) where
   | empty
-  | leaf (rest : List Bool) (k : K) (v : V)
+  | leaf (d : D) (rest : List Bool) (k : K) (v : V)
   | branch (d : D) (left right : Trie K V D)
   | clash (kvs : List (K × V))
 
@@ -81,7 +81,7 @@ variable {K V D : Type} (dig : NodeIn K V D → D)
 
 def digest : Trie K V D → D
   | .empty => dig .empty
-  | .leaf _ k v => dig (.leaf k v)
+  | .leaf d _ _ _ => d
   | .branch d _ _ => d
   | .clash _ => dig .empty
 
@@ -91,9 +91,12 @@ def consBit (b : Bool) (e : Entry K V) : Entry K V := (e.1, b :: e.2.1, e.2.2)
 /-- The entries a trie holds, with their remaining bits. -/
 def entries : Trie K V D → List (Entry K V)
   | .empty => []
-  | .leaf rest k v => [(k, rest, v)]
+  | .leaf _ rest k v => [(k, rest, v)]
   | .branch _ l r => l.entries.map (consBit false) ++ r.entries.map (consBit true)
   | .clash kvs => kvs.map fun kv => (kv.1, [], kv.2)
+
+/-- A leaf, its digest computed once. -/
+def mkLeaf (rest : List Bool) (k : K) (v : V) : Trie K V D := .leaf (dig (.leaf k v)) rest k v
 
 /-- A branch over two children, its digest computed once. -/
 def mkBranch (l r : Trie K V D) : Trie K V D := .branch (dig (.branch (l.digest dig) (r.digest dig))) l r
@@ -101,7 +104,7 @@ def mkBranch (l r : Trie K V D) : Trie K V D := .branch (dig (.branch (l.digest 
 /-- The cached evaluation is well formed at height `n`. -/
 def Inv : Nat → Trie K V D → Prop
   | _, .empty => True
-  | n, .leaf rest _ _ => rest.length = n
+  | n, .leaf d rest k v => rest.length = n ∧ d = dig (.leaf k v)
   | 0, .branch .. => False
   | n + 1, .branch d l r =>
       Inv n l ∧ Inv n r ∧ d = dig (.branch (l.digest dig) (r.digest dig)) ∧
@@ -120,7 +123,9 @@ theorem strip_true_branch (l r : List (Entry K V)) :
 /-- **The kept digest is the canonical root of the kept entries.** -/
 theorem digest_eq : ∀ (n : Nat) (t : Trie K V D), Inv dig n t → t.digest dig = tree dig n t.entries
   | n, .empty, _ => by simp [digest, entries, tree_nil]
-  | n, .leaf rest k v, _ => by simp [digest, entries, tree_single]
+  | n, .leaf d rest k v, inv => by
+      simp only [Inv] at inv
+      simp [digest, entries, tree_single, inv.2]
   | 0, .branch .., inv => by simp [Inv] at inv
   | n + 1, .branch d l r, inv => by
       obtain ⟨il, ir, hd, two⟩ := inv
@@ -137,7 +142,7 @@ theorem digest_eq : ∀ (n : Nat) (t : Trie K V D), Inv dig n t → t.digest dig
 
 def build : Nat → List (Entry K V) → Trie K V D
   | _, [] => .empty
-  | _, [e] => .leaf e.2.1 e.1 e.2.2
+  | _, [e] => mkLeaf dig e.2.1 e.1 e.2.2
   | 0, es@(_ :: _ :: _) => .clash (es.map fun e => (e.1, e.2.2))
   | n + 1, es@(_ :: _ :: _) => mkBranch dig (build n (strip false es)) (build n (strip true es))
 
@@ -180,7 +185,7 @@ theorem split_perm : ∀ (es : List (Entry K V)), (∀ e ∈ es, e.2.1 ≠ []) �
 theorem build_entries : ∀ (n : Nat) (es : List (Entry K V)), Lengths n es →
     ((build dig n es).entries).Perm es
   | _, [], _ => by simp [build, entries]
-  | _, [e], _ => by simp [build, entries]
+  | _, [e], _ => by simp [build, mkLeaf, entries]
   | 0, a :: b :: rest, h => by
       simp only [build, entries, List.map_map]
       have : ∀ e ∈ a :: b :: rest, e.2.1 = [] := fun e he => List.eq_nil_of_length_eq_zero (h e he)
@@ -200,7 +205,7 @@ theorem build_entries : ∀ (n : Nat) (es : List (Entry K V)), Lengths n es →
 
 theorem build_inv : ∀ (n : Nat) (es : List (Entry K V)), Lengths n es → Inv dig n (build dig n es)
   | _, [], _ => by simp [build, Inv]
-  | n, [e], h => by simpa [build, Inv] using h e (by simp)
+  | n, [e], h => by simpa [build, mkLeaf, Inv] using h e (by simp)
   | 0, a :: b :: rest, _ => by simp [build, Inv]
   | n + 1, a :: b :: rest, h => by
       simp only [build, mkBranch]
@@ -306,23 +311,23 @@ theorem nodupKeys_branch {d : D} {l r : Trie K V D} (nd : NodupKeys (Trie.branch
   exact ⟨(nodupKeys_map_consBit _ false).mp this.1, (nodupKeys_map_consBit _ true).mp this.2.1⟩
 
 /-- The two children of a leaf pushed down one level. -/
-def expand (c : Bool) (cs : List Bool) (k : K) (v : V) : Trie K V D × Trie K V D :=
-  if c then (.empty, .leaf cs k v) else (.leaf cs k v, .empty)
+def expand (c : Bool) (cs : List Bool) (d : D) (k : K) (v : V) : Trie K V D × Trie K V D :=
+  if c then (.empty, .leaf d cs k v) else (.leaf d cs k v, .empty)
 
 def insert (k : K) (v : V) : Nat → List Bool → Trie K V D → Trie K V D
-  | 0, bits, .empty => .leaf bits k v
-  | 0, bits, .leaf _ k' v' => if k' = k then .leaf bits k v else .clash [(k', v'), (k, v)]
+  | 0, bits, .empty => mkLeaf dig bits k v
+  | 0, bits, .leaf _ _ k' v' => if k' = k then mkLeaf dig bits k v else .clash [(k', v'), (k, v)]
   | 0, _, .clash kvs => .clash (dropKey k kvs ++ [(k, v)])
   | 0, _, t@(.branch ..) => t
-  | _ + 1, bits, .empty => .leaf bits k v
-  | n + 1, bits, .leaf rest k' v' =>
-      if k' = k then .leaf bits k v else
+  | _ + 1, bits, .empty => mkLeaf dig bits k v
+  | n + 1, bits, .leaf d' rest k' v' =>
+      if k' = k then mkLeaf dig bits k v else
       match bits, rest with
       | b :: bs, c :: cs =>
-          let lr := expand c cs k' v'
+          let lr := expand c cs d' k' v'
           if b then mkBranch dig lr.1 (insert k v n bs lr.2)
           else mkBranch dig (insert k v n bs lr.1) lr.2
-      | _, _ => .leaf bits k v
+      | _, _ => mkLeaf dig bits k v
   | n + 1, b :: bs, .branch _ l r =>
       if b then mkBranch dig l (insert k v n bs r) else mkBranch dig (insert k v n bs l) r
   | _ + 1, [], t@(.branch ..) => t
@@ -364,19 +369,20 @@ theorem upsert_right (l r : List (Entry K V)) (k : K) (bs : List Bool) (v : V)
   simp only [List.map_append, List.map_cons, List.map_nil, List.append_assoc]
   rfl
 
-theorem expand_entries (c : Bool) (cs : List Bool) (k : K) (v : V) :
-    (expand (D := D) c cs k v).1.entries.map (consBit false) ++
-      (expand (D := D) c cs k v).2.entries.map (consBit true) = [(k, c :: cs, v)] := by
+theorem expand_entries (c : Bool) (cs : List Bool) (d : D) (k : K) (v : V) :
+    (expand c cs d k v).1.entries.map (consBit false) ++
+      (expand c cs d k v).2.entries.map (consBit true) = [(k, c :: cs, v)] := by
   cases c <;> simp [expand, entries, consBit]
 
-theorem expand_inv (c : Bool) (cs : List Bool) (k : K) (v : V) (n : Nat) (h : cs.length = n) :
-    Inv dig n (expand (D := D) c cs k v).1 ∧ Inv dig n (expand (D := D) c cs k v).2 := by
-  cases c <;> simp [expand, Inv, h]
+theorem expand_inv (c : Bool) (cs : List Bool) (d : D) (k : K) (v : V) (n : Nat) (h : cs.length = n)
+    (hd : d = dig (.leaf k v)) :
+    Inv dig n (expand c cs d k v).1 ∧ Inv dig n (expand c cs d k v).2 := by
+  cases c <;> simp [expand, Inv, h, hd]
 
 /-- An expanded child holds nothing or the leaf's one entry. -/
-theorem expand_cases (c : Bool) (cs : List Bool) (k : K) (v : V) :
-    ((expand (D := D) c cs k v).1.entries = [] ∨ (expand (D := D) c cs k v).1.entries = [(k, cs, v)]) ∧
-    ((expand (D := D) c cs k v).2.entries = [] ∨ (expand (D := D) c cs k v).2.entries = [(k, cs, v)]) := by
+theorem expand_cases (c : Bool) (cs : List Bool) (d : D) (k : K) (v : V) :
+    ((expand c cs d k v).1.entries = [] ∨ (expand c cs d k v).1.entries = [(k, cs, v)]) ∧
+    ((expand c cs d k v).2.entries = [] ∨ (expand c cs d k v).2.entries = [(k, cs, v)]) := by
   cases c <;> simp [expand, entries]
 
 theorem small_keyAt {x : Trie K V D} {k k' : K} {cs bs : List Bool} {v' : V} (ne : k' ≠ k)
@@ -393,17 +399,17 @@ theorem small_nodup {x : Trie K V D} {k' : K} {cs : List Bool} {v' : V}
 theorem insert_entries (k : K) (v : V) : ∀ (n : Nat) (bits : List Bool) (t : Trie K V D),
     Inv dig n t → bits.length = n → KeyAt t.entries k bits →
       (insert dig k v n bits t).entries.Perm (upsert t.entries k bits v)
-  | 0, bits, .empty, _, _, _ => by simp [insert, entries, upsert, dropKey_nil]
-  | 0, bits, .leaf rest k' v', inv, len, at_ => by
+  | 0, bits, .empty, _, _, _ => by simp [insert, mkLeaf, entries, upsert, dropKey_nil]
+  | 0, bits, .leaf d' rest k' v', inv, len, at_ => by
       simp only [Inv] at inv
       by_cases same : k' = k
       · subst same
         have := at_ (k', rest, v') (by simp [entries]) rfl
         simp only at this
         subst this
-        simp [insert, entries, upsert, dropKey_cons_eq, dropKey_nil]
+        simp [insert, mkLeaf, entries, upsert, dropKey_cons_eq, dropKey_nil]
       · have hb : bits = [] := List.eq_nil_of_length_eq_zero len
-        have hr : rest = [] := List.eq_nil_of_length_eq_zero inv
+        have hr : rest = [] := List.eq_nil_of_length_eq_zero inv.1
         subst hb hr
         simp [insert, entries, upsert, same, dropKey_cons_ne, dropKey_nil]
   | 0, bits, .clash kvs, _, len, _ => by
@@ -414,23 +420,23 @@ theorem insert_entries (k : K) (v : V) : ∀ (n : Nat) (bits : List Bool) (t : T
       rw [List.filter_map]
       rfl
   | 0, _, .branch .., inv, _, _ => by simp [Inv] at inv
-  | n + 1, bits, .empty, _, _, _ => by simp [insert, entries, upsert, dropKey_nil]
-  | n + 1, bits, .leaf rest k' v', inv, len, at_ => by
+  | n + 1, bits, .empty, _, _, _ => by simp [insert, mkLeaf, entries, upsert, dropKey_nil]
+  | n + 1, bits, .leaf d' rest k' v', inv, len, at_ => by
       simp only [Inv] at inv
       by_cases same : k' = k
       · subst same
         have := at_ (k', rest, v') (by simp [entries]) rfl
         simp only at this
         subst this
-        simp [insert, entries, upsert, dropKey_cons_eq, dropKey_nil]
+        simp [insert, mkLeaf, entries, upsert, dropKey_cons_eq, dropKey_nil]
       · match bits, rest, len, inv with
         | b :: bs, c :: cs, len, inv =>
             have lbs : bs.length = n := by simpa using len
-            have lcs : cs.length = n := by simpa using inv
-            have hEntries := expand_entries (D := D) c cs k' v'
-            have ⟨i1, i2⟩ := expand_inv dig c cs k' v' n lcs
-            have ⟨c1, c2⟩ := expand_cases (D := D) c cs k' v'
-            have target : upsert (Trie.leaf (D := D) (c :: cs) k' v').entries k (b :: bs) v =
+            have lcs : cs.length = n := by simpa using inv.1
+            have hEntries := expand_entries c cs d' k' v'
+            have ⟨i1, i2⟩ := expand_inv dig c cs d' k' v' n lcs inv.2
+            have ⟨c1, c2⟩ := expand_cases c cs d' k' v'
+            have target : upsert (Trie.leaf d' (c :: cs) k' v').entries k (b :: bs) v =
                 [(k', c :: cs, v'), (k, b :: bs, v)] := by
               simp only [entries, upsert, dropKey_cons_ne k (k', c :: cs, v') [] same, dropKey_nil]
               rfl
@@ -491,10 +497,10 @@ theorem nodup_insert (k : K) (v : V) (n : Nat) (bits : List Bool) (t : Trie K V 
 theorem insert_inv (k : K) (v : V) : ∀ (n : Nat) (bits : List Bool) (t : Trie K V D),
     Inv dig n t → bits.length = n → KeyAt t.entries k bits → NodupKeys t.entries →
       Inv dig n (insert dig k v n bits t)
-  | 0, bits, .empty, _, len, _, _ => by simpa [insert, Inv] using len
-  | 0, bits, .leaf rest k' v', inv, len, _, _ => by
+  | 0, bits, .empty, _, len, _, _ => by simpa [insert, mkLeaf, Inv] using len
+  | 0, bits, .leaf d' rest k' v', inv, len, _, _ => by
       by_cases same : k' = k
-      · simpa [insert, Inv, same] using len
+      · simpa [insert, mkLeaf, Inv, same] using len
       · simp [insert, Inv, same]
   | 0, _, .clash kvs, inv, _, _, nd => by
       simp only [Inv] at inv
@@ -504,19 +510,19 @@ theorem insert_inv (k : K) (v : V) : ∀ (n : Nat) (bits : List Bool) (t : Trie 
       simp only [insert, Inv, List.length_append, List.length_singleton]
       omega
   | 0, _, .branch .., inv, _, _, _ => by simp [Inv] at inv
-  | n + 1, bits, .empty, _, len, _, _ => by simpa [insert, Inv] using len
-  | n + 1, bits, .leaf rest k' v', inv, len, at_, nd => by
-      have whole := insert_entries dig k v (n + 1) bits (.leaf rest k' v') inv len at_
+  | n + 1, bits, .empty, _, len, _, _ => by simpa [insert, mkLeaf, Inv] using len
+  | n + 1, bits, .leaf d' rest k' v', inv, len, at_, nd => by
+      have whole := insert_entries dig k v (n + 1) bits (.leaf d' rest k' v') inv len at_
       simp only [Inv] at inv
       by_cases same : k' = k
-      · simpa [insert, Inv, same] using len
+      · simpa [insert, mkLeaf, Inv, same] using len
       · match bits, rest, len, inv, whole with
         | b :: bs, c :: cs, len, inv, whole =>
             have lbs : bs.length = n := by simpa using len
-            have lcs : cs.length = n := by simpa using inv
-            have ⟨i1, i2⟩ := expand_inv dig c cs k' v' n lcs
-            have ⟨c1, c2⟩ := expand_cases (D := D) c cs k' v'
-            have count : (insert dig k v (n + 1) (b :: bs) (.leaf (c :: cs) k' v')).entries.length = 2 := by
+            have lcs : cs.length = n := by simpa using inv.1
+            have ⟨i1, i2⟩ := expand_inv dig c cs d' k' v' n lcs inv.2
+            have ⟨c1, c2⟩ := expand_cases c cs d' k' v'
+            have count : (insert dig k v (n + 1) (b :: bs) (.leaf d' (c :: cs) k' v')).entries.length = 2 := by
               rw [whole.length_eq]
               simp only [entries, upsert, dropKey_cons_ne k (k', c :: cs, v') [] same, dropKey_nil]
               rfl
@@ -746,7 +752,7 @@ def opening : List Bool → Trie K V D → Opening K V D
   | b :: bs, .branch _ l r =>
       if b then ⟨l.digest dig :: (opening bs r).siblings, (opening bs r).terminal⟩
       else ⟨r.digest dig :: (opening bs l).siblings, (opening bs l).terminal⟩
-  | _, .leaf _ k v => ⟨[], .leaf k v⟩
+  | _, .leaf _ _ k v => ⟨[], .leaf k v⟩
   | _, _ => ⟨[], .empty⟩
 
 theorem climb_nil (bits : List Bool) (below : D) : climb dig bits [] below = below := by
@@ -759,8 +765,9 @@ theorem opening_climb : ∀ (n : Nat) (bits : List Bool) (t : Trie K V D), Inv d
         (dig (opening dig bits t).terminal.input) = t.digest dig
   | n, bits, .empty, _, _ => by
       cases bits <;> simp [opening, climb_nil, digest, Terminal.input]
-  | n, bits, .leaf _ k v, _, _ => by
-      cases bits <;> simp [opening, climb_nil, digest, Terminal.input]
+  | n, bits, .leaf d _ k v, inv, _ => by
+      simp only [Inv] at inv
+      cases bits <;> simp [opening, climb_nil, digest, Terminal.input, inv.2]
   | n, bits, .clash _, _, _ => by
       cases bits <;> simp [opening, climb_nil, digest, Terminal.input]
   | 0, _, .branch .., inv, _ => by simp [Inv] at inv
@@ -784,7 +791,7 @@ theorem opening_leaf : ∀ (bits : List Bool) (t : Trie K V D) (k : K) (v : V),
       ∃ rest, (k, bits.take (opening dig bits t).siblings.length ++ rest, v) ∈ t.entries
   | bits, .empty, k, v, h => by cases bits <;> simp [opening] at h
   | bits, .clash _, k, v, h => by cases bits <;> simp [opening] at h
-  | bits, .leaf rest k' v', k, v, h => by
+  | bits, .leaf _ rest k' v', k, v, h => by
       have : k' = k ∧ v' = v := by cases bits <;> simpa [opening] using h
       obtain ⟨rfl, rfl⟩ := this
       exact ⟨rest, by cases bits <;> simp [opening, entries]⟩
@@ -809,7 +816,7 @@ theorem opening_present : ∀ (n : Nat) (bits : List Bool) (t : Trie K V D), Inv
     (t.entries.map (·.2.1)).Nodup → ∀ e ∈ t.entries, e.2.1 = bits →
       (opening dig bits t).terminal = .leaf e.1 e.2.2
   | _, bits, .empty, _, _, e, he, _ => by simp [entries] at he
-  | _, bits, .leaf rest k v, _, _, e, he, _ => by
+  | _, bits, .leaf _ rest k v, _, _, e, he, _ => by
       simp only [entries, List.mem_singleton] at he
       subst he
       cases bits <;> rfl
