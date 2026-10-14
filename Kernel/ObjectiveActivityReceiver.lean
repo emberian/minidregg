@@ -35,30 +35,54 @@ variable {F : Type} [Field F] {deployment : Deployment}
   {command : Command}
 variable [DecidableEq F] {ingress : DecodedIngress}
 
+/-- The receiver, with the exact readback's successor of `durable` when it
+committed fresh work (`DurableReceiverIO.Successor`): a session adopts it rather
+than re-executing the record it just appended. `receiveLoaded` is its answer. -/
+def receiveLoadedDetailed (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig)
+    (transport : DurableReceiverIO.Transport) (durable : Durable)
+    (bytes : List UInt8) :
+    IO (Result × Option (DurableReceiverIO.Successor ResourceBirthCodec.rootBytes durable)) := do
+  let some ingress := decodeIngress bytes
+    | return (.rejected .malformedIngress, none)
+  match replay deployment.domain profile.semantics durable ingress with
+  | some (.ok (.exact prior disposition)) => return (replayAnswer (.ok ()) (.exact prior disposition), none)
+  | some (.ok (.retry prior disposition)) =>
+    return (replayAnswer (← verifyRetry deployment profile ambient native durable ingress)
+      (.retry prior disposition), none)
+  | some (.error _) => return (.transactionConflict, none)
+  | none =>
+    match ← admitDecodedNative deployment profile ambient durable native ingress with
+    | .error reason => return (.rejected reason, none)
+    | .ok verdict =>
+      let (result, successor) ← DurableReceiverIO.receiveObjective transport durable
+        (ObjectiveAdmissible.Proposal.activity verdict)
+      let answer : Result := match result with
+        | .confirmed kind _ => (match verdict with
+          | .accepted _ => .confirmed kind (receipt deployment.domain profile.semantics ingress)
+          | .failed failed => .charged kind (receipt deployment.domain profile.semantics ingress) failed.cause)
+        | .rejected reason => .durableRejected reason
+        | .contention => .contention
+        | .unavailable detail => .unavailable detail
+        | .uncertain detail => .uncertain detail
+      return (answer, successor)
+
+private theorem fst_pure {α β : Type} (a : α) (b : β) :
+    (Prod.fst <$> (pure (a, b) : IO (α × β))) = pure a := rfl
+
+private theorem fst_bind {α β γ : Type} (x : IO γ) (f : γ → α) (b : β) :
+    (Prod.fst <$> (x >>= fun v => pure (f v, b))) = (x >>= fun v => pure (f v)) := by
+  funext s
+  show EST.bind (EST.bind x fun v => EST.pure (f v, b)) (fun p => EST.pure p.1) s =
+    EST.bind x (fun v => EST.pure (f v)) s
+  simp only [EST.bind]
+  cases x s <;> rfl
+
 def receiveLoaded (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig)
     (transport : DurableReceiverIO.Transport) (durable : Durable)
-    (bytes : List UInt8) : IO Result := do
-  let some ingress := decodeIngress bytes
-    | return .rejected .malformedIngress
-  match replay deployment.domain profile.semantics durable ingress with
-  | some (.ok (.exact prior disposition)) => return replayAnswer (.ok ()) (.exact prior disposition)
-  | some (.ok (.retry prior disposition)) =>
-    return replayAnswer (← verifyRetry deployment profile ambient native durable ingress)
-      (.retry prior disposition)
-  | some (.error _) => return .transactionConflict
-  | none =>
-    match ← admitDecodedNative deployment profile ambient durable native ingress with
-    | .error reason => return .rejected reason
-    | .ok verdict =>
-      match ← DurableReceiverIO.receiveObjective transport durable (ObjectiveAdmissible.Proposal.activity verdict) with
-      | .confirmed kind _ => return (match verdict with
-        | .accepted _ => .confirmed kind (receipt deployment.domain profile.semantics ingress)
-        | .failed failed => .charged kind (receipt deployment.domain profile.semantics ingress) failed.cause)
-      | .rejected reason => return .durableRejected reason
-      | .contention => return .contention
-      | .unavailable detail => return .unavailable detail
-      | .uncertain detail => return .uncertain detail
+    (bytes : List UInt8) : IO Result :=
+  Prod.fst <$> receiveLoadedDetailed deployment profile ambient native transport durable bytes
 
 /-- **The deployed receiver routes every recorded operation by replay kind.**
 An exact replay returns the durable record's receipt and terminal disposition
@@ -86,10 +110,10 @@ theorem receiveLoaded_recorded_routes
   cases replayed with
   | exact prior disposition =>
       constructor
-      · simp [receiveLoaded, decoded, recorded]
+      · simp [receiveLoaded, receiveLoadedDetailed, decoded, recorded, fst_pure]
       · exact (replayAnswer_preserves_recorded_disposition prior disposition).1
   | retry prior disposition =>
-      simp [receiveLoaded, decoded, recorded]
+      simp [receiveLoaded, receiveLoadedDetailed, decoded, recorded, fst_bind]
 
 /-- **The deployed receiver's exact route returns the recorded disposition.**
 This is stated over the receiver itself, rather than only over its pure answer
@@ -139,8 +163,7 @@ theorem malformed_no_charge (deployment : Deployment) (profile : CanonicalRuntim
     (transport : DurableReceiverIO.Transport) (durable : Durable) {bytes : List UInt8}
     (malformed : decodeIngress bytes = none) :
     receiveLoaded deployment profile ambient native transport durable bytes = pure (.rejected .malformedIngress) := by
-  unfold receiveLoaded
-  rw [malformed]
+  simp [receiveLoaded, receiveLoadedDetailed, malformed, fst_pure]
 
 /-- **An unauthorized or unfunded request is refused with no state change and no charge**: a
 gate refusal (authority, capability over the claimed outcome, funds) reaches neither the
@@ -153,7 +176,7 @@ theorem gate_refusal_no_charge (deployment : Deployment) (profile : CanonicalRun
     (fresh : replay deployment.domain profile.semantics durable ingress = none)
     (refused : gate deployment profile ambient durable ingress.command ingress.ingress.outcome = .error reason) :
     receiveLoaded deployment profile ambient native transport durable bytes = pure (.rejected reason) := by
-  unfold receiveLoaded
+  unfold receiveLoaded receiveLoadedDetailed
   rw [decoded]
   simp only [fresh]
   rw [gate_refusal_runs_nothing native refused]

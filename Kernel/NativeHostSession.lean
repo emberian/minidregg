@@ -151,6 +151,26 @@ theorem Session.rememberReadback_openingCache {config : Config} (session : Sessi
 /-- info: 'Minidregg.Kernel.NativeHostSession.Session.rememberReadback_openingCache' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Session.rememberReadback_openingCache
 
+/-- Adopt a session route's own exact readback (`DurableReceiverIO.Successor`):
+the successor of `prior` its receiver appended and read back equal. When the
+session still holds `prior`'s image (the same height and the same log chain,
+which commits every record), the successor becomes the opening, validated as
+`refresh` validates it (`validateLoadedFrom_eq`: it is `validateLoaded`) and
+rebased by `refresh`'s rule. The next `refresh` then finds no new entry for the
+full opening, so the record is not read back and re-executed. Anything else, or
+a refused validation, leaves the session as it was; the next `refresh` reads
+the record from the Store as before. The light opening still extends itself. -/
+def Session.adopt {config : Config} (session : Session config) (prior : Opened config)
+    (successor : DurableReceiverIO.Successor ResourceBirthCodec.rootBytes prior.durable) :
+    Session config :=
+  if session.durable.height = prior.durable.height ∧ session.durable.chain = prior.durable.chain then
+    let next := successor.2.next
+    let next := if DurableReceiverIO.rebaseDue config.transport next then next.rebaseD else next
+    match validateLoadedFrom config prior next with
+    | .ok opened => { session with opened }
+    | .error _ => session
+  else session
+
 def start (config : Config) : IO (Except String (Session config)) := do
   match ← openExisting config with
   | .error detail => return .error detail
@@ -163,21 +183,32 @@ def start (config : Config) : IO (Except String (Session config)) := do
 
 def refresh (config : Config) (session : Session config) :
     IO (Except String (Session config)) := do
+  -- Operator measurement: MINIDREGG_HOST_TRACE prints each stage of a refresh that read new entries.
+  let trace := (← IO.getEnv "MINIDREGG_HOST_TRACE").isSome
+  let t0 ← IO.monoMsNow
   match ← DurableReceiverIO.extendFrom config.transport ResourceBirthCodec.rootBytes
       session.durable with
   | .error detail => return .error detail
   | .ok ⟨durable, _⟩ =>
+      let t1 ← IO.monoMsNow
       -- The light opening reads the same new entries, verified as its open verifies them.
       let light ← match ← session.light.refresh with
         | .error detail => return .error detail
         | .ok light => pure light
+      let t2 ← IO.monoMsNow
+      if trace && light.opening.head.height ≠ session.light.opening.head.height then
+        IO.eprintln s!"host-trace refresh light {t2 - t1} ms"
       if durable.height = session.durable.height then
         return .ok { session with light }
       -- `validateLoadedFrom_eq`: the full validation, re-decoding and
       -- re-checking only the cells whose bytes the new records moved.
       match validateLoadedFrom config session.opened durable with
       | .error detail => return .error detail
-      | .ok opened => return .ok { session with opened, light }
+      | .ok opened =>
+          if trace then
+            IO.eprintln s!"host-trace refresh full {t1 - t0} ms"
+            IO.eprintln s!"host-trace refresh validate {(← IO.monoMsNow) - t2} ms"
+          return .ok { session with opened, light }
 
 /-- The one semantic refresh routine. A retained exact tip extends only the
 new authenticated suffix; a first provenance read starts at pinned genesis. -/

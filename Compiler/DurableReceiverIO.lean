@@ -269,15 +269,30 @@ def receiveLoadedDetailedWithFresh (transport : Transport) (rootBytes : List UIn
     IO (Bool × DetailedResult rootBytes loaded intent) :=
   receiveCandidateWithFresh transport rootBytes loaded (.ordinary intent)
 
+/-- A receiver's exact readback: the successor of `loaded` it appended and read
+back equal to what it wrote (`DetailedResult.exact`). A session holding `loaded`
+adopts it instead of reading the record back and re-executing it. -/
+abbrev Successor (rootBytes : List UInt8 → Digest) (loaded : Loaded rootBytes) : Type :=
+  (intent : DataIntent rootBytes) × Appended rootBytes loaded intent
+
+/-- The successor an exact readback carries; every other answer carries none. -/
+def DetailedResult.successor {rootBytes : List UInt8 → Digest} {loaded : Loaded rootBytes}
+    {intent : DataIntent rootBytes} : DetailedResult rootBytes loaded intent → Option (Successor rootBytes loaded)
+  | .exact _ appended => some ⟨intent, appended⟩
+  | .ordinary _ => none
+
 /-- The receiver supplies its checked run; only its derived certificate can
-enter the common writer. The durable record encoding is unchanged. -/
+enter the common writer. The durable record encoding is unchanged. The answer
+comes with the exact readback's successor, when there is one. -/
 def receiveObjective (transport : Transport) (loaded : Loaded ResourceBirthCodec.rootBytes)
-    (proposal : ObjectiveAdmissible.Proposal loaded) : IO (Result ResourceBirthCodec.rootBytes) := do
+    (proposal : ObjectiveAdmissible.Proposal loaded) :
+    IO (Result ResourceBirthCodec.rootBytes × Option (Successor ResourceBirthCodec.rootBytes loaded)) := do
   match proposal.check with
-  | .error detail => return .unavailable detail
+  | .error detail => return (.unavailable detail, none)
   | .ok ⟨_, ⟨certificate, _⟩⟩ =>
-    return (← receiveCandidateWithFresh transport ResourceBirthCodec.rootBytes loaded
-      (.objective rfl certificate)).2.toResult
+    let detailed := (← receiveCandidateWithFresh transport ResourceBirthCodec.rootBytes loaded
+      (.objective rfl certificate)).2
+    return (detailed.toResult, detailed.successor)
 
 def receiveLoadedDetailed (transport : Transport) (rootBytes : List UInt8 → Digest)
     (loaded : Loaded rootBytes) (intent : DataIntent rootBytes) :
@@ -348,6 +363,11 @@ def Loaded.replay {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes
                     started⟩
           | .inr _ => .error "durable log suffix does not replay through the canonical executor"
 
+/-- When a session's opening rebases at its head: two checkpoint intervals past
+its base. `extendFrom` and a session's adoption of an exact readback use this one rule. -/
+def rebaseDue {rootBytes : List UInt8 → Digest} (transport : Transport) (loaded : Loaded rootBytes) : Bool :=
+  loaded.image.accepted.length ≥ loaded.baseHeight + 2 * max 1 transport.checkpointEvery
+
 /-- Extend a live loaded image by entries a concurrent writer appended after
 it: the chain must continue, every new entry's tag must verify, and every new
 record must be accepted by the shared executor in order. The result is the
@@ -400,7 +420,7 @@ def extendFrom (transport : Transport) (rootBytes : List UInt8 → Digest)
             some ((trailerCarried entry.tag).map (·.root) |>.getD ⟨0⟩)) then
           return .error "durable log root tag differs from the replayed root"
         let current := { current with headTag := stored.entries.getLast?.map (·.tag) }
-        if current.image.accepted.length ≥ current.baseHeight + 2 * max 1 transport.checkpointEvery then
+        if rebaseDue transport current then
           match rebased : current.rebase with
           | some next =>
               have kept := Loaded.rebase_image rebased

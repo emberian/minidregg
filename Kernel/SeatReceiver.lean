@@ -44,7 +44,7 @@ def receiveLoaded (deployment : Deployment) (profile : CanonicalRuntimeProfile.P
     match ← admitDecodedNative deployment profile ambient durable native ingress with
     | .error reason => return .rejected reason
     | .ok accepted =>
-      match ← DurableReceiverIO.receiveObjective transport durable (ObjectiveAdmissible.Proposal.seat accepted) with
+      match (← DurableReceiverIO.receiveObjective transport durable (ObjectiveAdmissible.Proposal.seat accepted)).1 with
       | .confirmed kind _ => return .confirmed kind (receipt deployment.domain profile.semantics ingress)
       | .rejected reason => return .durableRejected reason
       | .contention => return .contention

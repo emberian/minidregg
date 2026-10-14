@@ -9,7 +9,7 @@ protected coordinates only through a transport judged under `ControlFacet.object
 (`Config.transport_sourceGate`). So the theorems describe the deployment exactly as long as the only
 code that hands out the kernel facet is the code that commits through `finish`:
 
-* `NativeHost.activitySubmitLoaded` -- `ObjectiveActivityReceiver.receiveLoaded` (finish);
+* `NativeHost.activitySubmitLoaded` -- `ObjectiveActivityReceiver.receiveLoadedDetailed` (finish);
 * `NativeHost.seatSubmitLoaded`     -- `SeatReceiver.receiveLoaded` (checkInert);
 * `NativeHostReplay.Derived.transport` -- replay, only when the record re-derives a `KernelTurn`.
 

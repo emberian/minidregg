@@ -2373,10 +2373,17 @@ def activityAssemble (plan : ObjectiveActivityReceiver.SigningPlan) (signature :
   let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
   pure (ObjectiveActivityReceiver.ingressCodec.encode ⟨plan.commandBytes, plan.outcome, envelope⟩)
 
-def activitySubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config) (bytes : List UInt8) :
-    IO Outcome := do
-  match ← ObjectiveActivityReceiver.receiveLoaded config.deployment config.profile
-      (activityAmbient config opened) config.signature config.kernelTransport opened.durable bytes with
+/-- `adopt` receives the exact readback's successor of `opened.durable` before
+`confirm` reads the receipt back: a session holding `opened` takes it as its
+opening (`NativeHostSession.Session.adopt`) instead of re-executing the record;
+a one-shot process passes `fun _ => pure ()`. -/
+def activitySubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config)
+    (adopt : DurableReceiverIO.Successor ResourceBirthCodec.rootBytes opened.durable → IO Unit)
+    (bytes : List UInt8) : IO Outcome := do
+  let (result, successor) ← ObjectiveActivityReceiver.receiveLoadedDetailed config.deployment config.profile
+      (activityAmbient config opened) config.signature config.kernelTransport opened.durable bytes
+  if let some next := successor then adopt next
+  match result with
   | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
   | .charged kind receipt cause =>
       chargedVia confirm kind receipt.transactionId receipt.eventId cause

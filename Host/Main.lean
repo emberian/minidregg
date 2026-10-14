@@ -1283,6 +1283,16 @@ def sessionConfirmed (config : NativeHost.Config)
     | .ok (some receipt) => return .confirmed kind receipt
   catch error => return .uncertain s!"receipt readback: {error}".toUTF8.toList
 
+/-- A session route's own exact readback becomes the session's opening
+(`NativeHostSession.Session.adopt`), timed under MINIDREGG_HOST_TRACE. -/
+def sessionAdopt (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config))) (prior : NativeHost.Opened config)
+    (successor : DurableReceiverIO.Successor ResourceBirthCodec.rootBytes prior.durable) : IO Unit := do
+  let t0 ← IO.monoMsNow
+  if let some current ← state.get then
+    state.set (some (current.adopt prior successor))
+  phaseTrace "adopt" t0
+
 /-- The exact post-CAS branch already has the verified successor and original
 receipt; retain that verifier-minted tip for the next session request. -/
 def sessionExactConfirmed (config : NativeHost.Config)
@@ -5965,7 +5975,8 @@ def objectKernelOperation (pinnedConfig : NativeHost.Config)
       return ((211 : UInt8), ingress)
   | 212 =>
       let opened ← sessionOpened pinnedConfig state
-      let outcome ← NativeHost.activitySubmitLoaded pinnedConfig (sessionConfirmed pinnedConfig state) opened payload
+      let outcome ← NativeHost.activitySubmitLoaded pinnedConfig (sessionConfirmed pinnedConfig state) opened
+        (sessionAdopt pinnedConfig state opened) payload
       return ((212 : UInt8), outcomeCodec.encode outcome)
   | 213 =>
       let opened ← sessionOpened pinnedConfig state
