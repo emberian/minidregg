@@ -68,7 +68,8 @@ def queryResultUsing {deployment : CanonicalCellRegistry.Deployment} {F : Type} 
     {context : Context deployment} {profile : CanonicalRuntimeProfile.Profile F}
     {federation : FederationId} {genesisHeight : Nat} {intent : Intent}
     (accepted : AuthorizedIntent context profile federation genesisHeight intent)
-    (opening : OpeningProvider) (history : Durable) (bound : context.sourceImage = some history.image) :
+    (opening : OpeningProvider) (history : Durable) (bound : context.sourceImage = some history.image)
+    (kept : Option history.Kept) :
     Except RefusalReason (List UInt8) := do
   let .query query := intent.purpose | throw .malformed
   match query.view with
@@ -86,14 +87,15 @@ def queryResultUsing {deployment : CanonicalCellRegistry.Deployment} {F : Type} 
         else pure (resourceScopeViewCodec.encode
           (grant.kind, grant.capability.value, stored.head.scope.fields, view))
       else throw .malformed
-  | _ => accepted.queryResult history bound
+  | _ => accepted.queryResult history bound kept
 
 theorem queryResultUsing_exact {deployment : CanonicalCellRegistry.Deployment} {F : Type} [Field F] [DecidableEq F]
     {context : Context deployment} {profile : CanonicalRuntimeProfile.Profile F}
     {federation : FederationId} {genesisHeight : Nat} {intent : Intent}
     (accepted : AuthorizedIntent context profile federation genesisHeight intent)
-    (opening : OpeningProvider) (history : Durable) (bound : context.sourceImage = some history.image) :
-    queryResultUsing accepted opening history bound = accepted.queryResult history bound := by
+    (opening : OpeningProvider) (history : Durable) (bound : context.sourceImage = some history.image)
+    (kept : Option history.Kept) :
+    queryResultUsing accepted opening history bound kept = accepted.queryResult history bound kept := by
   cases purpose : intent.purpose with
   | prepare preparation => simp [queryResultUsing, AuthorizedIntent.queryResult, purpose]
   | query query =>
@@ -188,7 +190,10 @@ def queryLoaded (config : NativeHost.Config) (opened : NativeHost.Opened config)
               let packed := (token.grants ⟨0, present⟩).selected.packed
               cache.modify (fun old => retain old packed)
       | _ => pure ()
-      match queryResultUsing token (provider (← cache.get)) opened.durable rfl with
+      let kept ← match ← NativeHost.keptFor config opened.durable signed.challenge.intent.purpose with
+        | .error refusal => return .error refusal
+        | .ok kept => pure kept
+      match queryResultUsing token (provider (← cache.get)) opened.durable rfl kept with
       | .ok view => return .ok view
       | .error reason => return .error (.of reason)
 

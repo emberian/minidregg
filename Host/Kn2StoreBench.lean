@@ -16,6 +16,13 @@ Best of three for each. Not part of the umbrella gate. `KN2_BENCH_CREATES=1`:
 each record instead births a fresh cell, so N records hold N cells (the axis the
 world root's cost grows on).
 
+With `KN2_BENCH_AT=1`, also the past reads (`at h`) on the cold opening, at
+heights a quarter, a half and three quarters of the way up (each below the
+opening's base): `at kept` = `Loaded.keptAt` (the nearest kept checkpoint) +
+`atPrefixFrom`; `at genesis` = `atPrefixFrom none` (the genesis fold), only when
+N ≤ `KN2_BENCH_GENESIS_MAX` (default 3000). Each read is forced by summing the
+cell's bytes inside `IO.lazyPure` (a pure `let` floats out of the timed span).
+
 usage: kn2-store-bench STORE-HELPER N...
 -/
 import Compiler.DurableHistoryStore
@@ -56,6 +63,37 @@ def step (creates : Bool) (number : Nat) : DataIntent rootBytes where
 
 def ms (start : Nat) : IO Nat := return (← IO.monoMsNow) - start
 
+def force (snapshot : Option (DataSnapshot rootBytes)) : Nat :=
+  match snapshot with
+  | some snapshot => (snapshot.canonicalBytes ⟨3⟩).foldl (fun total byte => total + byte.toNat) 0
+  | none => 0
+
+/-- `at h` over a cold opening, the kept-checkpoint way and (bounded) the genesis way. -/
+def pastReads (transport : Transport) (count : Nat) : IO Unit := do
+  let genesisMax := ((← IO.getEnv "KN2_BENCH_GENESIS_MAX").bind String.toNat?).getD 3000
+  let key ← match ← transport.key with
+    | .ok key => pure key
+    | .error detail => throw (IO.userError s!"key: {detail}")
+  let loaded ← match ← load transport rootBytes with
+    | .ok loaded => pure loaded
+    | .error detail => throw (IO.userError s!"open: {detail}")
+  for height in [count / 4, count / 2, 3 * count / 4] do
+    let t0 ← IO.monoMsNow
+    let kept ← match ← loaded.keptAt transport key height with
+      | .ok kept => pure kept
+      | .error detail => throw (IO.userError s!"at {height}: {detail}")
+    let keptSum ← IO.lazyPure fun _ => force (loaded.atPrefixFrom kept height)
+    let keptMs ← ms t0
+    let base := match kept with | some base => base.height | none => 0
+    if count ≤ genesisMax then
+      let t1 ← IO.monoMsNow
+      let genesisSum ← IO.lazyPure fun _ => force (loaded.atPrefixFrom none height)
+      let genesisMs ← ms t1
+      unless genesisSum == keptSum do throw (IO.userError s!"at {height}: kept and genesis disagree")
+      IO.println s!"records {count}: at {height} (open base {loaded.baseHeight}, kept {base}): kept {keptMs} ms, genesis {genesisMs} ms"
+    else
+      IO.println s!"records {count}: at {height} (open base {loaded.baseHeight}, kept {base}): kept {keptMs} ms (sum {keptSum})"
+
 def grow (creates : Bool) (transport : Transport) (count : Nat) : IO (Loaded rootBytes) := do
   let initial ← match ← load transport rootBytes with
     | .ok opened => pure opened
@@ -78,6 +116,7 @@ def run (creates : Bool) (binary : System.FilePath) (directory : System.FilePath
   let growStart ← IO.monoMsNow
   let _ ← grow creates transport count
   let growMs ← ms growStart
+  if (← IO.getEnv "KN2_BENCH_AT") == some "1" then pastReads transport count
   let mut openBest := 1000000000
   let mut readBest := 1000000000
   for _ in [0:3] do

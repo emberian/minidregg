@@ -1123,49 +1123,79 @@ theorem history_complete {visible : DurableDataIntent.CellId → Bool} {after st
 
 /-- The canonical bytes of `target` as of absolute height `height`; refused
 above the current height and below the genesis height (the retention floor:
-the Store keeps every record since the seed). -/
-def atBytes (genesisHeight height target : Nat) : Option (List UInt8) :=
+the Store keeps every record and every checkpoint since the seed). Below the
+open's base the state resumes from `kept`, the kept checkpoint the Host read for
+this height (`Loaded.keptAt`), or from genesis when there is none. -/
+def atBytes (kept : Option (durable.Kept)) (genesisHeight height target : Nat) :
+    Option (List UInt8) :=
   if genesisHeight ≤ height ∧ height - genesisHeight ≤ durable.height then
-    (durable.atPrefix (height - genesisHeight)).map fun snapshot => snapshot.canonicalBytes ⟨target⟩
+    (durable.atPrefixFrom kept (height - genesisHeight)).map fun snapshot =>
+      snapshot.canonicalBytes ⟨target⟩
   else none
 
-theorem atBytes_current (genesisHeight target : Nat) :
-    atBytes (durable := durable) genesisHeight (genesisHeight + durable.height) target =
+theorem atBytes_current (kept : Option (durable.Kept)) (genesisHeight target : Nat) :
+    atBytes (durable := durable) kept genesisHeight (genesisHeight + durable.height) target =
       some (durable.snapshot.canonicalBytes ⟨target⟩) := by
   unfold atBytes
-  rw [if_pos ⟨Nat.le_add_right _ _, by omega⟩, Nat.add_sub_cancel_left, durable.atPrefix_current]
+  rw [if_pos ⟨Nat.le_add_right _ _, by omega⟩, Nat.add_sub_cancel_left, durable.atPrefixFrom_current kept]
   rfl
 
-theorem atBytes_above_refused {genesisHeight height : Nat} (target : Nat)
-    (above : genesisHeight + durable.height < height) :
-    atBytes (durable := durable) genesisHeight height target = none := by
+theorem atBytes_above_refused (kept : Option (durable.Kept)) {genesisHeight height : Nat}
+    (target : Nat) (above : genesisHeight + durable.height < height) :
+    atBytes (durable := durable) kept genesisHeight height target = none := by
   unfold atBytes
   rw [if_neg (by omega)]
 
-theorem atBytes_below_floor {genesisHeight height : Nat} (target : Nat)
-    (below : height < genesisHeight) :
-    atBytes (durable := durable) genesisHeight height target = none := by
+theorem atBytes_below_floor (kept : Option (durable.Kept)) {genesisHeight height : Nat}
+    (target : Nat) (below : height < genesisHeight) :
+    atBytes (durable := durable) kept genesisHeight height target = none := by
   unfold atBytes
   rw [if_neg (by omega)]
 
-/-- **`at` is a fold of the prefix**: below the loaded checkpoint, the bytes
-are the genesis replay of the first `height - genesisHeight` records
-(`Loaded.atPrefix_below`; above it, `Loaded.atPrefix_from_checkpoint`). -/
-theorem at_is_fold_prefix {genesisHeight height : Nat} (target : Nat)
-    (floor : genesisHeight ≤ height)
-    (below : height - genesisHeight < durable.baseHeight) :
-    atBytes (durable := durable) genesisHeight height target =
+/-- **`at` is a fold of the prefix**: below the loaded base, with no kept
+checkpoint at or below the height, the bytes are the genesis replay of the first
+`height - genesisHeight` records (`Loaded.atPrefixFrom_below`). With
+`kept := none` this is the statement `at` had before kept checkpoints. -/
+theorem at_is_fold_prefix (kept : Option (durable.Kept)) {genesisHeight height : Nat}
+    (target : Nat) (floor : genesisHeight ≤ height)
+    (below : height - genesisHeight < durable.baseHeight)
+    (unused : ∀ base ∈ kept, height - genesisHeight < base.height) :
+    atBytes (durable := durable) kept genesisHeight height target =
       ((durable.prefixImage (height - genesisHeight)).restore ResourceBirthCodec.rootBytes).map
         fun snapshot => snapshot.canonicalBytes ⟨target⟩ := by
   unfold atBytes
-  rw [if_pos ⟨floor, Nat.le_trans (Nat.le_of_lt below) durable.withinLog⟩, durable.atPrefix_below below]
+  rw [if_pos ⟨floor, Nat.le_trans (Nat.le_of_lt below) durable.withinLog⟩,
+    durable.atPrefixFrom_below kept below unused]
+
+/-- **`at` from a kept checkpoint is the fold of the prefix**: below the loaded
+base, resuming from a kept checkpoint at or below the height, the bytes are the
+genesis replay of the first `height - genesisHeight` records, for an honest
+checkpoint (`resume_sound`'s premises; `Loaded.atPrefixFrom_kept`). -/
+theorem at_is_fold_prefix_kept (base : durable.Kept) {genesisHeight height : Nat}
+    (target : Nat) (floor : genesisHeight ≤ height)
+    (below : height - genesisHeight < durable.baseHeight)
+    (above : base.height ≤ height - genesisHeight)
+    (atBase : DurableDataIntent.DataSnapshot ResourceBirthCodec.rootBytes)
+    (seedValid : (durable.image.seed.cells.map Prod.fst).Nodup)
+    (stateValid : base.state.Admissible (durable.prefixImage (height - genesisHeight)))
+    (prefixReplay : DurableReceiver.replay ResourceBirthCodec.rootBytes
+      (durable.image.seed.snapshot ResourceBirthCodec.rootBytes)
+      ((durable.image.accepted.take (height - genesisHeight)).take base.height) = some atBase)
+    (honest : base.state.snapshot ResourceBirthCodec.rootBytes
+      ((durable.image.accepted.take (height - genesisHeight)).take base.height) = atBase) :
+    atBytes (durable := durable) (some base) genesisHeight height target =
+      ((durable.prefixImage (height - genesisHeight)).restore ResourceBirthCodec.rootBytes).map
+        fun snapshot => snapshot.canonicalBytes ⟨target⟩ := by
+  unfold atBytes
+  rw [if_pos ⟨floor, Nat.le_trans (Nat.le_of_lt below) durable.withinLog⟩,
+    durable.atPrefixFrom_kept base below above atBase seedValid stateValid prefixReplay honest]
 
 /-- **At the current height, `at` is the ordinary read**: the lifecycle bytes
 of exactly the packed cell a current resource read returns. -/
 theorem at_current_eq_read (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
-    {target : Nat} {packed : PackedCell Registry}
+    (kept : Option (durable.Kept)) {target : Nat} {packed : PackedCell Registry}
     (present : directory.directory.slots target = .present packed) (genesisHeight : Nat) :
-    atBytes (durable := durable) genesisHeight (genesisHeight + durable.height) target =
+    atBytes (durable := durable) kept genesisHeight (genesisHeight + durable.height) target =
       some (ResourceBirthCodec.LifecycleImage.bytes Registry (.live packed)) := by
   rw [atBytes_current, ← directory.bytes_exact target]
   simp [ResourceBirthCodec.LifecycleImage.view, present]
@@ -1307,14 +1337,14 @@ floor is `operationRejected`; a grant that did not stand over the target at
 that height is `noGrant`: the reader's current grant was verified, and a
 capability failure at the asked height discloses no more than a missing grant
 does (`RefusalReason`'s disclosure order). -/
-def atCovered (genesisHeight height : Nat) (subject : SubjectId) (grant : GrantRef) (target : Nat) :
+def atCovered (kept : Option (durable.Kept)) (genesisHeight height : Nat) (subject : SubjectId) (grant : GrantRef) (target : Nat) :
     Except RefusalReason (List UInt8) :=
   if height > genesisHeight + durable.height then
     .error .operationRejected
   else if height < genesisHeight then
     .error .operationRejected
   else
-    match durable.atPrefix (height - genesisHeight) with
+    match durable.atPrefixFrom kept (height - genesisHeight) with
     | none => .error .malformed
     | some snapshot =>
         match grantStanding (deployment := deployment) snapshot subject grant height target with
@@ -1325,18 +1355,18 @@ def atCovered (genesisHeight height : Nat) (subject : SubjectId) (grant : GrantR
 K-INDEX's `atBytes` (the fold of the prefix), narrowed to that grant's fields,
 and the authority cell of that same prefix holds the grant's capability, naming
 the reader and standing over the target at that height. -/
-theorem atCovered_sound {genesisHeight height : Nat} {subject : SubjectId} {grant : GrantRef}
+theorem atCovered_sound {kept : Option (durable.Kept)} {genesisHeight height : Nat} {subject : SubjectId} {grant : GrantRef}
     {target : Nat} {out : List UInt8}
-    (answered : atCovered (deployment := deployment) (durable := durable)
+    (answered : atCovered (deployment := deployment) (durable := durable) kept
       genesisHeight height subject grant target = .ok out) :
     ∃ snapshot authority stored,
-      durable.atPrefix (height - genesisHeight) = some snapshot ∧
+      durable.atPrefixFrom kept (height - genesisHeight) = some snapshot ∧
       CredentialAuthorityDomainReceiver.loadDeployment deployment snapshot = some authority ∧
       CredentialAuthorityState.readCapability authority.snapshot.cell grant.kind grant.capability =
         some stored ∧
       stored.head.holder.Covers subject ∧
       standing authority.snapshot.authState height target stored.head = true ∧
-      atBytes (durable := durable) genesisHeight height target =
+      atBytes (durable := durable) kept genesisHeight height target =
         some (snapshot.canonicalBytes ⟨target⟩) ∧
       out = atViewCodec.encode (height,
         atView stored.head.scope.fields (snapshot.canonicalBytes ⟨target⟩)) := by
@@ -1374,16 +1404,16 @@ theorem atCovered_sound {genesisHeight height : Nat} {subject : SubjectId} {gran
 
 /-- Refuting pole: a grant whose capability the authority cell at that height
 does not hold (a reader added later) is refused `noGrant`. -/
-theorem atCovered_refused_before_grant {genesisHeight height : Nat} {subject : SubjectId}
+theorem atCovered_refused_before_grant {kept : Option (durable.Kept)} {genesisHeight height : Nat} {subject : SubjectId}
     {grant : GrantRef} {target : Nat}
     {snapshot : CredentialAuthorityDomainReceiver.PhysicalSnapshot}
     {authority : CredentialAuthorityDomainReceiver.Loaded deployment snapshot}
     (floor : genesisHeight ≤ height) (within : height ≤ genesisHeight + durable.height)
-    (found : durable.atPrefix (height - genesisHeight) = some snapshot)
+    (found : durable.atPrefixFrom kept (height - genesisHeight) = some snapshot)
     (loaded : CredentialAuthorityDomainReceiver.loadDeployment deployment snapshot = some authority)
     (absent : CredentialAuthorityState.readCapability authority.snapshot.cell grant.kind
       grant.capability = none) :
-    atCovered (deployment := deployment) (durable := durable) genesisHeight height subject grant target =
+    atCovered (deployment := deployment) (durable := durable) kept genesisHeight height subject grant target =
       .error .noGrant := by
   unfold atCovered
   rw [if_neg (by omega), if_neg (by omega)]
@@ -1392,13 +1422,13 @@ theorem atCovered_refused_before_grant {genesisHeight height : Nat} {subject : S
 
 /-- Satisfiable pole: a grant standing at that height is answered, with the
 prefix's bytes narrowed to the grant's fields. -/
-theorem atCovered_answers_standing {genesisHeight height : Nat} {subject : SubjectId}
+theorem atCovered_answers_standing {kept : Option (durable.Kept)} {genesisHeight height : Nat} {subject : SubjectId}
     {grant : GrantRef} {target : Nat} {fields : Option (Finset CellField)}
     {snapshot : CredentialAuthorityDomainReceiver.PhysicalSnapshot}
     (floor : genesisHeight ≤ height) (within : height ≤ genesisHeight + durable.height)
-    (found : durable.atPrefix (height - genesisHeight) = some snapshot)
+    (found : durable.atPrefixFrom kept (height - genesisHeight) = some snapshot)
     (stands : grantStanding (deployment := deployment) snapshot subject grant height target = some fields) :
-    atCovered (deployment := deployment) (durable := durable) genesisHeight height subject grant target =
+    atCovered (deployment := deployment) (durable := durable) kept genesisHeight height subject grant target =
       .ok (atViewCodec.encode (height, atView fields (snapshot.canonicalBytes ⟨target⟩))) := by
   unfold atCovered
   rw [if_neg (by omega), if_neg (by omega)]
@@ -1573,7 +1603,8 @@ def AuthorizedIntent.queryResult
     {context : Context deployment} {profile : CanonicalRuntimeProfile.Profile F}
     {federation : FederationId} {genesisHeight : Nat} {intent : Intent}
     (accepted : AuthorizedIntent context profile federation genesisHeight intent)
-    (history : Durable) (_bound : context.sourceImage = some history.image) :
+    (history : Durable) (_bound : context.sourceImage = some history.image)
+    (kept : Option (history.Kept)) :
     Except RefusalReason (List UInt8) := do
   let .query query := intent.purpose | throw .malformed
   if present : 0 < intent.grants.length then
@@ -1618,7 +1649,7 @@ def AuthorizedIntent.queryResult
         let visible := sees state.parent stored.head query.target
         pure (sinceViewCodec.encode (sinceFrom visible after (genesisHeight + 1) history.image.accepted))
     | .atHeight height =>
-        atCovered (deployment := deployment) (durable := history) genesisHeight height intent.subject
+        atCovered (deployment := deployment) (durable := history) kept genesisHeight height intent.subject
           grant query.target
     | .tail start count =>
         match checked.selected.packed with
@@ -1654,6 +1685,7 @@ def AuthorizedIntent.queryResult
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.atBytes_below_floor
 /-- info: 'Minidregg.Kernel.NativeObservationController.at_is_fold_prefix' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.at_is_fold_prefix
+#assert_axioms at_is_fold_prefix_kept
 /-- info: 'Minidregg.Kernel.NativeObservationController.at_current_eq_read' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.at_current_eq_read
 /-- info: 'Minidregg.Kernel.NativeObservationController.presence_views_share_footprint' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -1666,13 +1698,14 @@ theorem AuthorizedIntent.queryResult_resourceScope
     {federation : FederationId} {genesisHeight : Nat} {intent : Intent}
     (accepted : AuthorizedIntent context profile federation genesisHeight intent)
     {history : Durable} {bound : context.sourceImage = some history.image}
+    {kept : Option (history.Kept)}
     (query : Query) (purpose : intent.purpose = .query query)
     (view : query.view = .resourceScope) (present : 0 < intent.grants.length)
     (stored : CredentialAuthorityState.StoredCapability (intent.grants.get ⟨0, present⟩).kind)
     (read : CredentialAuthorityState.readCapability context.authority.cell
       (intent.grants.get ⟨0, present⟩).kind
       (intent.grants.get ⟨0, present⟩).capability = some stored) :
-    accepted.queryResult history bound = .ok (resourceScopeViewCodec.encode
+    accepted.queryResult history bound kept = .ok (resourceScopeViewCodec.encode
       ((intent.grants.get ⟨0, present⟩).kind,
        (intent.grants.get ⟨0, present⟩).capability.value,
        stored.head.scope.fields,
@@ -1691,9 +1724,10 @@ theorem AuthorizedIntent.queryResult_at
     {federation : FederationId} {genesisHeight : Nat} {intent : Intent}
     (accepted : AuthorizedIntent context profile federation genesisHeight intent)
     {history : Durable} {bound : context.sourceImage = some history.image}
+    {kept : Option (history.Kept)}
     {query : Query} {height : Nat} (purpose : intent.purpose = .query query)
     (view : query.view = .atHeight height) (present : 0 < intent.grants.length) :
-    accepted.queryResult history bound = atCovered (deployment := deployment) (durable := history)
+    accepted.queryResult history bound kept = atCovered (deployment := deployment) (durable := history) kept
       genesisHeight height intent.subject (intent.grants.get ⟨0, present⟩) query.target := by
   unfold AuthorizedIntent.queryResult
   simp only [purpose, view, dif_pos present]
@@ -1707,11 +1741,12 @@ theorem at_respects_coverage_at_height
     {federation : FederationId} {genesisHeight : Nat} {intent : Intent}
     (accepted : AuthorizedIntent context profile federation genesisHeight intent)
     {history : Durable} {bound : context.sourceImage = some history.image}
+    {kept : Option (history.Kept)}
     {query : Query} {height : Nat} {out : List UInt8} (purpose : intent.purpose = .query query)
-    (view : query.view = .atHeight height) (answered : accepted.queryResult history bound = .ok out) :
+    (view : query.view = .atHeight height) (answered : accepted.queryResult history bound kept = .ok out) :
     ∃ present : 0 < intent.grants.length, ∃ snapshot : CredentialAuthorityDomainReceiver.PhysicalSnapshot,
       ∃ authority : CredentialAuthorityDomainReceiver.Loaded deployment snapshot, ∃ stored,
-      history.atPrefix (height - genesisHeight) = some snapshot ∧
+      history.atPrefixFrom kept (height - genesisHeight) = some snapshot ∧
       CredentialAuthorityDomainReceiver.loadDeployment deployment snapshot = some authority ∧
       CredentialAuthorityState.readCapability authority.snapshot.cell
         (intent.grants.get ⟨0, present⟩).kind (intent.grants.get ⟨0, present⟩).capability =

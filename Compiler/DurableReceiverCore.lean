@@ -1512,44 +1512,101 @@ def Loaded.prefixAt {rootBytes : List UInt8 → Digest} (loaded : Loaded rootByt
             loaded.logStart chain chainExact (loaded.rootLog.extract 0 height) sized
   else .error "durable log is shorter than the requested height"
 
-/-- The state at log height `height`: the loaded checkpoint plus the records
-after it up to `height` (D2's resume, on the cut image) when the checkpoint is
-at or below `height`; otherwise the genesis fold of the prefix. The Store keeps
-every record since the seed (the audit walk needs them), so the retention floor
-is height 0. -/
-def Loaded.atPrefix {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
-    (height : Nat) : Option (DataSnapshot rootBytes) :=
+/-- **A kept checkpoint below the open's base**, as the past-read path admits
+it. The Store keeps every checkpoint (`durable-checkpoint-at` returns the latest
+at or below a height); this one opened under the Store's key — exact decode,
+key id, recomputed world root, MAC (`openSealed`) — at a positive height inside
+the log, and its sealed world root is the root the MAC-verified log tag at its
+height carries (`rootLog`). What no check can establish is that the host sealed
+the right state; that is the honesty premise every checkpoint carries
+(`resume_sound`, `Loaded.atPrefixFrom_kept`). -/
+structure Loaded.Kept {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) where
+  /-- The Store's MAC key the checkpoint opened under. -/
+  key : MacKey
+  height : Nat
+  state : State
+  positive : 0 < height
+  within : height ≤ loaded.image.accepted.length
+  authentic : ∃ bytes body, openSealed key rootBytes bytes = .ok body ∧ body.height = height ∧
+    body.state = state ∧
+    loaded.rootLog[height - 1]? = some (some (DurableCheckpointCodec.worldRoot rootBytes body))
+
+/-- **The state at log height `height`.** At or above the open's base: that base
+plus the records after it up to `height` (D2's resume, on the cut image). Below
+it: the kept checkpoint `kept` plus the records after it, when `kept` sits at or
+below `height`; otherwise the genesis fold of the prefix. The Store keeps every
+record since the seed and every checkpoint, so the retention floor is height 0
+and a past read replays at most the distance to the nearest kept checkpoint. -/
+def Loaded.atPrefixFrom {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
+    (kept : Option (loaded.Kept)) (height : Nat) : Option (DataSnapshot rootBytes) :=
   if loaded.baseHeight ≤ height then
     resume rootBytes (loaded.prefixImage height) loaded.baseHeight loaded.base
   else
-    resume rootBytes (loaded.prefixImage height) 0 (State.ofSeed loaded.image.seed)
+    match kept with
+    | some base =>
+        if base.height ≤ height then
+          resume rootBytes (loaded.prefixImage height) base.height base.state
+        else resume rootBytes (loaded.prefixImage height) 0 (State.ofSeed loaded.image.seed)
+    | none => resume rootBytes (loaded.prefixImage height) 0 (State.ofSeed loaded.image.seed)
 
 theorem Loaded.prefixImage_current {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
     loaded.prefixImage loaded.height = loaded.image := by
   unfold prefixImage height
   rw [List.take_length]
 
-/-- **At the current height the past read is the current state**: the same
-snapshot every current read decodes. -/
-theorem Loaded.atPrefix_current {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
-    loaded.atPrefix loaded.height = some loaded.snapshot := by
-  unfold atPrefix
+/-- **At the current height the past read is the current state**, whatever
+kept checkpoint was supplied: the same snapshot every current read decodes. -/
+theorem Loaded.atPrefixFrom_current {rootBytes : List UInt8 → Digest}
+    (loaded : Loaded rootBytes) (kept : Option (loaded.Kept)) :
+    loaded.atPrefixFrom kept loaded.height = some loaded.snapshot := by
+  unfold atPrefixFrom
   rw [if_pos (show loaded.baseHeight ≤ loaded.height from loaded.withinLog), loaded.prefixImage_current]
   exact loaded.resumed
 
-/-- **Below the checkpoint the past read is the genesis fold of the prefix.** -/
-theorem Loaded.atPrefix_below {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
-    {height : Nat} (below : height < loaded.baseHeight) :
-    loaded.atPrefix height = (loaded.prefixImage height).restore rootBytes := by
-  unfold atPrefix
+/-- **Below the base with no kept checkpoint in use, the past read is the
+genesis fold of the prefix** — unconditionally. (With `kept := none` this is
+the pre-kept `atPrefix_below` statement verbatim.) -/
+theorem Loaded.atPrefixFrom_below {rootBytes : List UInt8 → Digest}
+    (loaded : Loaded rootBytes) (kept : Option (loaded.Kept)) {height : Nat}
+    (below : height < loaded.baseHeight)
+    (unused : ∀ base ∈ kept, height < base.height) :
+    loaded.atPrefixFrom kept height = (loaded.prefixImage height).restore rootBytes := by
+  unfold atPrefixFrom
   rw [if_neg (by omega)]
-  exact resume_genesis rootBytes (loaded.prefixImage height)
+  cases kept with
+  | none => exact resume_genesis rootBytes (loaded.prefixImage height)
+  | some base =>
+      simp only
+      rw [if_neg (Nat.not_le_of_lt (unused base rfl))]
+      exact resume_genesis rootBytes (loaded.prefixImage height)
 
-/-- **At or above the checkpoint the past read is the checkpoint plus the
-suffix fold** — and, for an honest checkpoint (`resume_sound`'s premises), the
-genesis fold of the prefix. -/
-theorem Loaded.atPrefix_from_checkpoint {rootBytes : List UInt8 → Digest}
-    (loaded : Loaded rootBytes) {height : Nat} (above : loaded.baseHeight ≤ height)
+/-- **Below the base, from a kept checkpoint, the past read is the genesis fold
+of the prefix** for an honest checkpoint (`resume_sound`'s premises, the same
+ones `atPrefixFrom_from_checkpoint` carries for the open's own base). -/
+theorem Loaded.atPrefixFrom_kept {rootBytes : List UInt8 → Digest}
+    (loaded : Loaded rootBytes) (base : loaded.Kept) {height : Nat}
+    (below : height < loaded.baseHeight) (above : base.height ≤ height)
+    (atBase : DataSnapshot rootBytes)
+    (seedValid : (loaded.image.seed.cells.map Prod.fst).Nodup)
+    (stateValid : base.state.Admissible (loaded.prefixImage height))
+    (prefixReplay : replay rootBytes (loaded.image.seed.snapshot rootBytes)
+      ((loaded.image.accepted.take height).take base.height) = some atBase)
+    (honest : base.state.snapshot rootBytes
+      ((loaded.image.accepted.take height).take base.height) = atBase) :
+    loaded.atPrefixFrom (some base) height = (loaded.prefixImage height).restore rootBytes := by
+  unfold atPrefixFrom
+  rw [if_neg (by omega)]
+  simp only
+  rw [if_pos above]
+  exact resume_sound rootBytes (loaded.prefixImage height) base.height base.state atBase
+    seedValid stateValid prefixReplay honest
+
+/-- **At or above the base the past read is the base plus the suffix fold** —
+and, for an honest base (`resume_sound`'s premises), the genesis fold of the
+prefix. The kept checkpoint plays no part. -/
+theorem Loaded.atPrefixFrom_from_checkpoint {rootBytes : List UInt8 → Digest}
+    (loaded : Loaded rootBytes) (kept : Option (loaded.Kept)) {height : Nat}
+    (above : loaded.baseHeight ≤ height)
     (atBase : DataSnapshot rootBytes)
     (seedValid : (loaded.image.seed.cells.map Prod.fst).Nodup)
     (stateValid : loaded.base.Admissible (loaded.prefixImage height))
@@ -1557,18 +1614,46 @@ theorem Loaded.atPrefix_from_checkpoint {rootBytes : List UInt8 → Digest}
       ((loaded.image.accepted.take height).take loaded.baseHeight) = some atBase)
     (honest : loaded.base.snapshot rootBytes
       ((loaded.image.accepted.take height).take loaded.baseHeight) = atBase) :
-    loaded.atPrefix height = (loaded.prefixImage height).restore rootBytes := by
-  unfold atPrefix
+    loaded.atPrefixFrom kept height = (loaded.prefixImage height).restore rootBytes := by
+  unfold atPrefixFrom
   rw [if_pos above]
   exact resume_sound rootBytes (loaded.prefixImage height) loaded.baseHeight loaded.base atBase
     seedValid stateValid prefixReplay honest
 
-/-- info: 'Minidregg.Compiler.DurableReceiverIO.Loaded.atPrefix_current' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.DurableReceiverIO.Loaded.atPrefix_current
-/-- info: 'Minidregg.Compiler.DurableReceiverIO.Loaded.atPrefix_below' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.DurableReceiverIO.Loaded.atPrefix_below
-/-- info: 'Minidregg.Compiler.DurableReceiverIO.Loaded.atPrefix_from_checkpoint' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.DurableReceiverIO.Loaded.atPrefix_from_checkpoint
+/-- The kept checkpoint a past read at `height` resumes from: the Store's
+latest checkpoint at or below `height`, admitted as a `Kept` (every check named
+in its doc), or `none` when the open's own base already serves `height`, when
+no checkpoint is kept at or below it, or when it is too low to beat genesis.
+A checkpoint that fails a check refuses the read by name; it is never replaced
+by a genesis fold. -/
+def Loaded.keptAt {rootBytes : List UInt8 → Digest} (transport : Transport) (key : MacKey)
+    (loaded : Loaded rootBytes) (height : Nat) : IO (Except String (Option (loaded.Kept))) := do
+  if loaded.baseHeight ≤ height ∨ height < transport.checkpointEvery then return .ok none
+  match ← transport.checkpointAt height with
+  | .error message => return .error s!"past state unavailable: the kept checkpoint read failed: {message}"
+  | .ok none => return .ok none
+  | .ok (some checkpoint) =>
+      match opened : openSealedRooted key rootBytes checkpoint.bytes with
+      | .error reason =>
+          return .error s!"past state refused: the kept checkpoint at {checkpoint.height} does not open ({repr reason})"
+      | .ok (body, root) =>
+          if body.height ≠ checkpoint.height ∨ body.height > height then
+            return .error s!"past state refused: the kept checkpoint at {checkpoint.height} names height {body.height}"
+          if positive : 0 < body.height then
+            if within : body.height ≤ loaded.image.accepted.length then
+              if logged : loaded.rootLog[body.height - 1]? = some (some root) then
+                have plain := openSealedRooted_ok opened
+                return .ok (some ⟨key, body.height, body.state, positive, within,
+                  ⟨checkpoint.bytes, body, plain.1, rfl, rfl, by rw [← plain.2]; exact logged⟩⟩)
+              else
+                return .error s!"past state refused: the kept checkpoint at {body.height} differs from its log entry's root"
+            else return .error s!"past state refused: the kept checkpoint at {body.height} is beyond the log"
+          else return .ok none
+
+#assert_axioms Loaded.atPrefixFrom_current
+#assert_axioms Loaded.atPrefixFrom_below
+#assert_axioms Loaded.atPrefixFrom_kept
+#assert_axioms Loaded.atPrefixFrom_from_checkpoint
 
 /-- The checkpoint state's world-root entries are the served entries. -/
 theorem stateEntries_ofSnapshot {rootBytes : List UInt8 → Digest} (image : Image)

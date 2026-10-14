@@ -897,6 +897,24 @@ def prepare (config : Config) (bytes : List UInt8) : IO (Except Refusal SigningP
   let light ← IO.ofExcept (← NativeHostLight.start config)
   prepareAuthorizedLoaded config opened light bytes
 
+/-- The kept checkpoint an admitted `at h` query resumes from
+(`Loaded.keptAt`: the Store's latest checkpoint at or below `h`, when the
+opening's own base is above `h`). Every other view reads none. A kept
+checkpoint that fails a check refuses the query by name; it never falls back to
+another base. -/
+def keptFor (config : Config) (durable : Durable) (purpose : NativeObservationCodec.Purpose) :
+    IO (Except Refusal (Option durable.Kept)) := do
+  let .query query := purpose | return .ok none
+  let .atHeight height := query.view | return .ok none
+  unless config.genesisHeight ≤ height ∧ height - config.genesisHeight ≤ durable.height do
+    return .ok none
+  let key ← match ← config.transport.key with
+    | .error message => return .error ⟨.operationRejected, message, none⟩
+    | .ok key => pure key
+  match ← durable.keptAt config.transport key (height - config.genesisHeight) with
+  | .error detail => return .error ⟨.operationRejected, detail, none⟩
+  | .ok kept => return .ok kept
+
 /-- The controller projects the authorized logical resource/account cut. Raw
 snapshots, whole Books, and unrelated authority pages never escape this API. -/
 def queryLoaded (config : Config) (opened : Opened config)
@@ -907,8 +925,11 @@ def queryLoaded (config : Config) (opened : Opened config)
       config.profile config.federation config.genesisHeight signed with
   | .error refusal => return .error refusal
   | .ok token =>
+      let kept ← match ← keptFor config opened.durable signed.challenge.intent.purpose with
+        | .error refusal => return .error refusal
+        | .ok kept => pure kept
       -- History queries read the opening's own image (the context's source image).
-      match token.queryResult opened.durable rfl with
+      match token.queryResult opened.durable rfl kept with
       | .ok view => return .ok view
       | .error reason => return .error (.of reason)
 

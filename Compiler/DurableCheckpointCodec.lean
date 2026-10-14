@@ -714,6 +714,43 @@ theorem openSealedWith_fst {α : Body → Type} (key : MacKey) (rootBytes : List
 
 #assert_axioms openSealedWith_fst
 
+/-- `openSealed` that also returns the world root it checked, so a caller that
+compares the checkpoint against a log root does not evaluate the root again. -/
+def openSealedRooted (key : MacKey) (rootBytes : List UInt8 → Digest) (bytes : List UInt8) :
+    Except OpenError (Body × Digest) := do
+  let some sealed := checkpointFrame.decode bytes | throw .malformed
+  unless sealed.body.keyId = key.id do throw .foreignKey
+  unless sealed.root = worldRoot rootBytes sealed.body do throw .rootMismatch
+  unless sealed.mac = checkpointMac key sealed.body sealed.root do throw .badMac
+  pure (sealed.body, sealed.root)
+
+/-- The rooted open is `openSealed` paired with the body's world root. -/
+theorem openSealedRooted_eq (key : MacKey) (rootBytes : List UInt8 → Digest) (bytes : List UInt8) :
+    openSealedRooted key rootBytes bytes =
+      (fun body => (body, worldRoot rootBytes body)) <$> openSealed key rootBytes bytes := by
+  unfold openSealedRooted openSealed
+  cases checkpointFrame.decode bytes with
+  | none => rfl
+  | some sealed =>
+      by_cases keyOk : sealed.body.keyId = key.id
+      · by_cases rootOk : sealed.root = worldRoot rootBytes sealed.body
+        · by_cases macOk : sealed.mac = checkpointMac key sealed.body (worldRoot rootBytes sealed.body)
+          · simp [keyOk, rootOk, macOk] <;> rfl
+          · simp [keyOk, rootOk, macOk]
+        · simp [keyOk, rootOk] <;> rfl
+      · simp [keyOk] <;> rfl
+
+theorem openSealedRooted_ok {key : MacKey} {rootBytes : List UInt8 → Digest} {bytes : List UInt8}
+    {body : Body} {root : Digest} (opened : openSealedRooted key rootBytes bytes = .ok (body, root)) :
+    openSealed key rootBytes bytes = .ok body ∧ root = worldRoot rootBytes body := by
+  rw [openSealedRooted_eq] at opened
+  cases plain : openSealed key rootBytes bytes with
+  | error reason => rw [plain] at opened; cases opened
+  | ok found =>
+      rw [plain] at opened
+      cases opened
+      exact ⟨rfl, rfl⟩
+
 /-- Satisfiable pole: what the host seals, it opens, exactly. -/
 theorem openSealed_seal (key : MacKey) (rootBytes : List UInt8 → Digest) (height : Nat)
     (chain : Digest) (frontier : List (Nat × Digest)) (indexRoot : Digest) (state : State) :
