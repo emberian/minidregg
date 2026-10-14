@@ -803,7 +803,6 @@ structure Gated {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
     (command : Command) (claimed : Digest) where
   private mk ::
-  directory : LoadedDirectory durable
   authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot
   config : Config
   configExact : configOf deployment profile ambient = .ok config
@@ -815,7 +814,6 @@ structure Gated {F : Type} [Field F] (deployment : Deployment)
 def gate {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
     (command : Command) (claimed : Digest) : Except Reject (Gated deployment profile ambient durable command claimed) := do
-  let directory ← requireSome .directoryUnavailable (loadDirectory durable)
   let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable.snapshot)
   let snapshot := authority.snapshot
   if command.expectedAuthorityRoot ≠ snapshot.cell.root then throw .staleAuthority
@@ -829,7 +827,7 @@ def gate {F : Type} [Field F] (deployment : Deployment)
     | .ok () =>
       match funded : funding config durable command with
       | .error reason => throw reason
-      | .ok () => pure ⟨directory, authority, config, configExact, preRoot, rfl, authorizedExact, funded⟩
+      | .ok () => pure ⟨authority, config, configExact, preRoot, rfl, authorizedExact, funded⟩
 
 /-- The signed request a gated command's signature must cover: over the CLAIMED outcome. -/
 def Gated.request {F : Type} [Field F] {deployment : Deployment}
@@ -855,7 +853,6 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
     (command : Command) where
   private mk ::
-  directory : LoadedDirectory durable
   authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot
   config : Config
   configExact : configOf deployment profile ambient = .ok config
@@ -883,7 +880,7 @@ def prepare {F : Type} [Field F] {deployment : Deployment}
     | .error (.kernel reason) => .error (.kernel reason)
     | .ok final =>
       if same : claimed = outcomeDigest final.1 then
-        .ok ⟨gated.directory, gated.authority, gated.config, gated.configExact, decided, decidedExact,
+        .ok ⟨gated.authority, gated.config, gated.configExact, decided, decidedExact,
           gated.preRoot, gated.preRootExact, final, finalExact, claimed, same, gated.authorizedExact⟩
       else .error (.outcomeMoved claimed (outcomeDigest final.1))
 
@@ -898,14 +895,13 @@ def Prepared.request (prepared : Prepared deployment profile ambient durable com
 an invocation, `(subject, opId)`) is spent, the GATE refuses `replayedMarker`
 before verifying or deciding anything, whatever the command's content or the outcome it claims.
 The same op id with a different call is refused here; the same call is answered first by `replay`. -/
-theorem gate_spent_refused {directory : LoadedDirectory durable}
+theorem gate_spent_refused
     {authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot} {claimed : Digest}
-    (dir : loadDirectory durable = some directory)
     (auth : loadDeployment deployment durable.snapshot = some authority)
     (current : command.expectedAuthorityRoot = authority.snapshot.cell.root)
     (spent : authority.snapshot.spent (marker authority.snapshot.domain profile.semantics command) = true) :
     gate deployment profile ambient durable command claimed = .error .replayedMarker := by
-  simp only [gate, requireSome, dir, auth]
+  simp only [gate, requireSome, auth]
   simp [bind, Except.bind, current, spent]
   rfl
 
@@ -2836,9 +2832,8 @@ theorem retry_unverified_refused (reason : Reject) (prior : Receipt)
 /-- Repeating the same gate has one result; signature proof identity is irrelevant. -/
 theorem Gated.unique {claimed : Digest}
     (left right : Gated deployment profile ambient durable command claimed) : left = right := by
-  rcases left with ⟨ld, la, lc, lce, lr, lre, lh, lf⟩
-  rcases right with ⟨rd, ra, rc, rce, rr, rre, rh, rf⟩
-  cases LoadedDirectory.unique ld rd
+  rcases left with ⟨la, lc, lce, lr, lre, lh, lf⟩
+  rcases right with ⟨ra, rc, rce, rr, rre, rh, rf⟩
   cases CredentialAuthorityDomainReceiver.Loaded.unique la ra
   have cfg : lc = rc := Except.ok.inj (lce.symm.trans rce)
   cases cfg

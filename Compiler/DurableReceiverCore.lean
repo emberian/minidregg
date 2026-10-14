@@ -561,6 +561,12 @@ structure RootsExact (cache : RootCache) (es : List (Key × Digest)) where
 def RootsExact.ofEntries (es : List (Key × Digest)) : RootsExact (RootCache.ofEntries es) es :=
   ⟨fun _ => rfl, (RootCache.ofEntries es).injectiveCheck, RootCache.injectiveCheck_sound⟩
 
+/-- The cache of `es` with its exactness, the tree built once: `RootCache.ofEntries`
+paired with `RootsExact.ofEntries` builds the tree a second time inside the latter. -/
+def RootCache.build (es : List (Key × Digest)) : (cache : RootCache) × RootsExact cache es :=
+  let cache := RootCache.ofEntries es
+  ⟨cache, ⟨fun _ => rfl, cache.injectiveCheck, RootCache.injectiveCheck_sound⟩⟩
+
 theorem RootsExact.root_eq {cache : RootCache} {es : List (Key × Digest)}
     (exact : RootsExact cache es) (injective : exact.injective = true) :
     cache.root = deployedRoot es := by
@@ -581,8 +587,8 @@ def RootsExact.advance {cache : RootCache} {es es' : List (Key × Digest)}
           (exact.injectiveSound injective)
         ⟨next, ⟨fun k => by rw [sound.1, lastVal_append, exact.agree, step], true,
           fun _ => sound.2⟩⟩
-    | none => ⟨RootCache.ofEntries es', RootsExact.ofEntries es'⟩
-  else ⟨RootCache.ofEntries es', RootsExact.ofEntries es'⟩
+    | none => RootCache.build es'
+  else RootCache.build es'
 
 /-! ## The served entries, step by step -/
 
@@ -666,6 +672,34 @@ theorem lastVal_writes (writes : List DataWrite) (nodup : (writes.map DataWrite.
         rw [if_neg same]
         simp [ne]
 
+/-- An accepted execution installs the intent, whose writes name distinct cells. -/
+theorem execute_accepted_install {rootBytes : List UInt8 → Digest} {before next : DataSnapshot rootBytes}
+    {intent : DataIntent rootBytes}
+    (executed : DurableDataIntent.execute .complete before intent = .accepted next) :
+    next = DataSnapshot.install before intent ∧ (intent.writes.map DataWrite.cellId).Nodup := by
+  unfold DurableDataIntent.execute at executed
+  split at executed
+  · split at executed <;> cases executed
+  · split at executed
+    · cases executed
+    · rename_i passed
+      cases executed
+      refine ⟨rfl, ?_⟩
+      unfold DataIntent.preflight at passed
+      split at passed
+      · cases passed
+      split at passed
+      · cases passed
+      split at passed
+      · cases passed
+      rename_i lower
+      unfold DurableCommitProtocol.Intent.preflight at lower
+      by_contra repeated
+      have mapped : ¬ (intent.erase.rootWrites.map DurableCommitProtocol.RootWrite.cellId).Nodup := by
+        simpa [DataIntent.erase, List.map_map, Function.comp_def] using repeated
+      simp only [mapped, decide_false, Bool.not_false, if_true] at lower
+      split at lower <;> cases lower
+
 /-- **The served entries after an accepted intent** are the served entries
 before it overwritten by the intent's slot writes (`recordSlots`): the system
 slot's new leaf, and each written cell's post root. -/
@@ -675,31 +709,7 @@ theorem entriesOf_step {rootBytes : List UInt8 → Digest} (image : Image)
     lastVal (entriesOf (image.append intent) next chain') k =
       (lastVal (recordSlots (image.accepted.length + 1) chain' (IntentRecord.ofIntent intent)) k).or
         (lastVal (entriesOf image before chain) k) := by
-  have accepted : next = DataSnapshot.install before intent ∧
-      (intent.writes.map DataWrite.cellId).Nodup := by
-    unfold DurableDataIntent.execute at executed
-    split at executed
-    · split at executed <;> cases executed
-    · split at executed
-      · cases executed
-      · rename_i passed
-        cases executed
-        refine ⟨rfl, ?_⟩
-        unfold DataIntent.preflight at passed
-        split at passed
-        · cases passed
-        split at passed
-        · cases passed
-        split at passed
-        · cases passed
-        rename_i lower
-        unfold DurableCommitProtocol.Intent.preflight at lower
-        by_contra repeated
-        have mapped : ¬ (intent.erase.rootWrites.map DurableCommitProtocol.RootWrite.cellId).Nodup := by
-          simpa [DataIntent.erase, List.map_map, Function.comp_def] using repeated
-        simp only [mapped, decide_false, Bool.not_false, if_true] at lower
-        split at lower <;> cases lower
-  obtain ⟨installed, nodup⟩ := accepted
+  obtain ⟨installed, nodup⟩ := execute_accepted_install executed
   subst installed
   cases k with
   | system =>
@@ -777,6 +787,195 @@ theorem entriesOf_rebase {rootBytes : List UInt8 → Digest} (image : Image)
     rw [seedLookup_map _ _ _ member]
     rfl
   · cases resumed
+
+/-- A checkpoint body's world-root tree, evaluated once by its open
+(`DurableCheckpointCodec.openSealedWith`); the full open and the light open
+both advance it to the head. -/
+abbrev CheckpointRoots (rootBytes : List UInt8 → Digest) (body : DurableCheckpointCodec.Body) : Type :=
+  (cache : RootCache) × RootsExact cache
+    (DurableCheckpointCodec.stateEntries rootBytes body.height body.chain body.state)
+
+/-- A suffix changes one system slot and the cells it actually writes. The
+system leaf is the final height/chain; intermediate system leaves are not
+needed when advancing directly to the verified head. -/
+def suffixSlots (height : Nat) (chain : Digest) (records : List IntentRecord) :
+    List (Key × Digest) :=
+  (.system, systemLeaf height chain) ::
+    records.flatMap fun record => record.writes.map fun write =>
+      (.cell write.cellId.value, write.exactPost)
+
+theorem lastVal_writeSlots_system (records : List IntentRecord) :
+    lastVal (records.flatMap fun record => record.writes.map fun write =>
+      (Key.cell write.cellId.value, write.exactPost)) Key.system = none := by
+  induction records with
+  | nil => rfl
+  | cons record records ih =>
+      rw [List.flatMap_cons, lastVal_append, ih, lastVal_cells_system]
+      rfl
+
+/-- **Replay moves a cell's root to its last written post**, and leaves every
+other cell's root where it was. -/
+theorem replay_roots {rootBytes : List UInt8 → Digest} :
+    ∀ (before after : DataSnapshot rootBytes) (records : List IntentRecord),
+      replay rootBytes before records = some after → ∀ n : Nat,
+        after.model.roots ⟨n⟩ =
+          (lastVal (records.flatMap fun record => record.writes.map fun write =>
+            (Key.cell write.cellId.value, write.exactPost)) (Key.cell n)).getD (before.model.roots ⟨n⟩)
+  | before, after, [], replayed, n => by
+      simp only [replay, Option.some.injEq] at replayed
+      subst replayed
+      simp [lastVal]
+  | before, after, record :: records, replayed, n => by
+      unfold replay at replayed
+      cases bound : record.bind? rootBytes with
+      | none => simp [bound] at replayed
+      | some intent =>
+          simp only [bound, bind, Option.bind] at replayed
+          cases executed : DurableDataIntent.execute .complete before intent with
+          | accepted next =>
+              simp only [executed] at replayed
+              obtain ⟨installed, nodup⟩ := execute_accepted_install executed
+              have recordExact := IntentRecord.bind_exact bound
+              rw [replay_roots next after records replayed n, List.flatMap_cons, lastVal_append]
+              cases (lastVal (records.flatMap fun record => record.writes.map fun write =>
+                  (Key.cell write.cellId.value, write.exactPost)) (Key.cell n)) with
+              | some post => rfl
+              | none =>
+                  subst installed
+                  subst recordExact
+                  simp only [Option.none_or, IntentRecord.ofIntent]
+                  rw [lastVal_writes _ nodup]
+                  rfl
+          | replayed recorded => simp [executed] at replayed
+          | rejected reason => simp [executed] at replayed
+          | crashed point next => simp [executed] at replayed
+
+theorem lookup_of_mem_nodup : ∀ (cells : List (CellId × List UInt8)), (cells.map Prod.fst).Nodup →
+    ∀ cell ∈ cells, Seed.lookup cells cell.1 = some cell.2
+  | [], _, _, member => by simp at member
+  | head :: rest, nodup, cell, member => by
+      rw [List.map_cons, List.nodup_cons] at nodup
+      rcases List.mem_cons.mp member with same | later
+      · subst same
+        simp [Seed.lookup]
+      · have distinct : head.1 ≠ cell.1 := fun same =>
+          nodup.1 (same ▸ List.mem_map_of_mem (f := Prod.fst) later)
+        simp only [Seed.lookup, distinct, if_false]
+        exact lookup_of_mem_nodup rest nodup.2 cell later
+
+theorem lookup_of_not_mem : ∀ (cells : List (CellId × List UInt8)) (cellId : CellId),
+    cellId ∉ cells.map Prod.fst → Seed.lookup cells cellId = none
+  | [], _, _ => rfl
+  | head :: rest, cellId, missing => by
+      rw [List.map_cons, List.mem_cons, not_or] at missing
+      simp only [Seed.lookup, Ne.symm missing.1, if_false]
+      exact lookup_of_not_mem rest cellId missing.2
+
+/-- The cell ids a checkpoint state holds, as a hashed set. -/
+def baseSet (base : State) : Std.HashSet CellId :=
+  (SessionIndex.CellIds.empty.addAll (base.cells.map Prod.fst)).seen
+
+theorem baseSet_contains (base : State) (cellId : CellId) :
+    (baseSet base).contains cellId = true ↔ cellId ∈ base.cells.map Prod.fst := by
+  have := (SessionIndex.CellIds.addAll_exact SessionIndex.CellIds.empty_exact
+    (base.cells.map Prod.fst)).seen cellId
+  simpa [baseSet] using this
+
+/-- What advances a checkpoint's tree (`stateEntries` at its height) to the
+served entries at the head: every enumerable cell the checkpoint does not hold,
+at the absent root (none, for a checkpoint the host sealed), then the suffix's
+slot writes. -/
+def checkpointSlots {rootBytes : List UInt8 → Digest} (image : Image) (base : State)
+    (records : List IntentRecord) (height : Nat) (chain : Digest) : List (Key × Digest) :=
+  ((image.cellIds.filter fun cellId => !(baseSet base).contains cellId).map fun cellId =>
+      (Key.cell cellId.value, rootBytes base.absentBytes)) ++
+    suffixSlots height chain records
+
+/-- **A checkpoint's tree advances to the head**: the served entries after a
+resume from a checkpoint state are the checkpoint's world-root entries
+overwritten by `checkpointSlots` (whatever chain the checkpoint's system slot
+carries: the suffix rewrites it). What lets the full open evaluate the root once
+— at its checkpoint — and advance it by one path per slot. -/
+theorem entriesOf_checkpoint_step {rootBytes : List UInt8 → Digest} (image : Image) (base : State)
+    (height : Nat) (snapshot : DataSnapshot rootBytes)
+    (resumed : resume rootBytes image height base = some snapshot) (baseChain headChain : Digest)
+    (k : Key) :
+    lastVal (entriesOf image snapshot headChain) k =
+      (lastVal (checkpointSlots (rootBytes := rootBytes) image base (image.accepted.drop height)
+          image.accepted.length headChain) k).or
+        (lastVal (DurableCheckpointCodec.stateEntries rootBytes height baseChain base) k) := by
+  unfold resume at resumed
+  have admissible : base.Admissible image := by
+    by_cases holds : base.Admissible image
+    · exact holds
+    · rw [if_neg holds] at resumed
+      cases resumed
+  rw [if_pos admissible] at resumed
+  obtain ⟨baseNodup, _, baseSub⟩ := admissible
+  have enumerated : image.cellIds.Nodup := nodup_eraseDups _
+  cases k with
+  | system =>
+      simp only [entriesOf, checkpointSlots, suffixSlots, lastVal_append, lastVal_cons,
+        lastVal_cells_system, lastVal_writeSlots_system, DurableCheckpointCodec.stateEntries]
+      simp
+  | cell n =>
+      -- the written post, if the suffix writes the cell
+      have written : ∀ post, lastVal ((image.accepted.drop height).flatMap fun record =>
+          record.writes.map fun write => (Key.cell write.cellId.value, write.exactPost)) (Key.cell n) =
+            some post → (⟨n⟩ : CellId) ∈ image.cellIds := by
+        intro post found
+        have some : (lastVal ((image.accepted.drop height).flatMap fun record =>
+            record.writes.map fun write => (Key.cell write.cellId.value, write.exactPost))
+              (Key.cell n)).isSome := by rw [found]; rfl
+        obtain ⟨entry, member, key⟩ := lastVal_isSome.mp some
+        obtain ⟨record, inSuffix, inWrites⟩ := List.mem_flatMap.mp member
+        obtain ⟨write, writeIn, rfl⟩ := List.mem_map.mp inWrites
+        have value : write.cellId.value = n := Key.cell.inj key
+        have cell : write.cellId = ⟨n⟩ := by rw [← value]
+        unfold Image.cellIds
+        rw [List.mem_eraseDups, List.mem_append]
+        exact Or.inr (List.mem_flatMap.mpr ⟨record, List.mem_of_mem_drop inSuffix,
+          List.mem_map.mpr ⟨write, writeIn, cell⟩⟩)
+      have roots := replay_roots _ _ _ resumed n
+      -- the checkpoint's cell part, as its snapshot's roots
+      have stateCells : (base.cells.map fun cell => (Key.cell cell.1.value, rootBytes cell.2)) =
+          (base.cells.map Prod.fst).map fun cellId =>
+            (Key.cell cellId.value, (base.snapshot rootBytes (image.accepted.take height)).model.roots cellId) := by
+        simp only [List.map_map]
+        apply List.map_congr_left
+        intro cell member
+        simp [State.snapshot, tableLookup_rootTable, lookup_of_mem_nodup base.cells baseNodup cell member]
+      have filtered : (image.cellIds.filter fun cellId => !(baseSet base).contains cellId).Nodup :=
+        enumerated.filter _
+      simp only [entriesOf, checkpointSlots, suffixSlots, DurableCheckpointCodec.stateEntries,
+        lastVal_append, lastVal_cons, reduceCtorEq, if_false, Option.or_none]
+      rw [stateCells, lastVal_cellIds _ enumerated, lastVal_cellIds _ baseNodup,
+        lastVal_cellIds _ filtered, roots]
+      have notContains : (baseSet base).contains ⟨n⟩ = false ↔ (⟨n⟩ : CellId) ∉ base.cells.map Prod.fst := by
+        rw [← Bool.not_eq_true, baseSet_contains]
+      cases hw : lastVal ((image.accepted.drop height).flatMap fun record =>
+          record.writes.map fun write => (Key.cell write.cellId.value, write.exactPost)) (Key.cell n) with
+      | some post =>
+          simp [written post hw, List.mem_filter, notContains]
+      | none =>
+          by_cases inBase : (⟨n⟩ : CellId) ∈ base.cells.map Prod.fst
+          · simp [inBase, baseSub _ inBase, List.mem_filter, notContains]
+          · have absent : (base.snapshot rootBytes (image.accepted.take height)).model.roots ⟨n⟩ =
+                rootBytes base.absentBytes := by
+              simp [State.snapshot, tableLookup_rootTable, lookup_of_not_mem base.cells ⟨n⟩ inBase]
+            by_cases inImage : (⟨n⟩ : CellId) ∈ image.cellIds
+            · simp [inBase, inImage, absent, List.mem_filter, notContains]
+            · simp [inBase, inImage, List.mem_filter, notContains]
+
+#assert_axioms entriesOf_checkpoint_step
+
+/-- The base a full open resumes from: its height and state, the accumulator
+frontier and index root there, and the tree its checkpoint's open evaluated (none
+for the seed at height 0). -/
+private abbrev OpenBase (rootBytes : List UInt8 → Digest) : Type :=
+  (height : Nat) × (state : State) × List (Nat × Digest) × Digest ×
+    Option ((chain : Digest) × (cache : RootCache) × RootsExact cache
+      (DurableCheckpointCodec.stateEntries rootBytes height chain state))
 
 /-! ## The loaded, resumed image -/
 
@@ -904,9 +1103,9 @@ def loadImage (rootBytes : List UInt8 → Digest) (logStart : Digest) (image : I
   | none => .error "durable image journal does not replay through the canonical executor"
   | some snapshot =>
       let chain := chainAfter logStart image.accepted
+      let built := RootCache.build (entriesOf image snapshot chain)
       .ok ⟨image, 0, State.ofSeed image.seed, snapshot, Nat.zero_le _, resumed, logStart, chain,
-        rfl, RootCache.ofEntries (entriesOf image snapshot chain),
-        RootsExact.ofEntries (entriesOf image snapshot chain),
+        rfl, built.1, built.2,
         PresenceIndex.ofRecords image.accepted, rfl, LinkIndex.ofRecords image.accepted, rfl,
         SessionIndex.CellIds.ofImage image, SessionIndex.CellIds.ofImage_exact image,
         SessionIndex.TxIndex.ofRecords image.accepted,
@@ -1018,17 +1217,25 @@ def loadChained (transport : Transport) (rootBytes : List UInt8 → Digest) :
       have chainsEq : chains = chainPrefixes logStart records :=
         DurableLogTags.chainPrefixesStored_eq logStart _ _ decoded
       let headChain := chains.getLast?.getD logStart
-      let (baseHeight, base, baseFrontier, baseSpent) ← match stored.checkpoint with
-        | none => pure (0, State.ofSeed seed, [], DurableIndex.emptyDigest)
+      -- The checkpoint's open evaluates its world root once, as a tree the head advances.
+      let opened : OpenBase rootBytes ← match stored.checkpoint with
+        | none => pure (⟨0, State.ofSeed seed, [], DurableIndex.emptyDigest, none⟩ : OpenBase rootBytes)
         | some checkpoint =>
-            match openSealed key rootBytes checkpoint.bytes with
+            match openSealedWith (α := CheckpointRoots rootBytes) key rootBytes checkpoint.bytes
+                (fun _ => RootCache.build _) (fun _ built => built.1.root)
+                (fun _ => (RootCache.root_eq _).trans rfl) with
             | .error reason => return .error s!"checkpoint refused: {repr reason}"
-            | .ok body =>
+            | .ok ⟨body, built⟩ =>
                 if body.height ≠ checkpoint.height ∨ body.height > stored.head then
                   return .error "checkpoint height does not match the log"
                 if body.chain ≠ chains.getD body.height ⟨0⟩ then
                   return .error "checkpoint does not match the log chain"
-                pure (body.height, body.state, body.frontier, body.indexRoot)
+                pure (⟨body.height, body.state, body.frontier, body.indexRoot, some ⟨body.chain, built⟩⟩ :
+                  OpenBase rootBytes)
+      let baseHeight := opened.1
+      let base := opened.2.1
+      let baseFrontier := opened.2.2.1
+      let baseSpent := opened.2.2.2.1
       if stored.entries.length ≠ stored.head then
         return .error "durable log head does not match its entries"
       if let .error message := verifyTags key 0 chains (stored.entries.map (·.tag)) then
@@ -1058,12 +1265,18 @@ def loadChained (transport : Transport) (rootBytes : List UInt8 → Digest) :
         match resumed : resume rootBytes image baseHeight base with
         | none => return .error "durable log suffix does not replay through the canonical executor"
         | some snapshot =>
+            let built : (cache : RootCache) × RootsExact cache (entriesOf image snapshot headChain) :=
+              match opened.2.2.2.2 with
+              | none => RootCache.build (entriesOf image snapshot headChain)
+              | some ⟨baseChain, cache, exact⟩ =>
+                  exact.advance (checkpointSlots (rootBytes := rootBytes) image base (image.accepted.drop baseHeight)
+                      image.accepted.length headChain)
+                    (entriesOf_checkpoint_step image base baseHeight snapshot resumed baseChain headChain)
             let loaded : Loaded rootBytes :=
               ⟨image, baseHeight, base, snapshot, within, resumed, logStart, headChain,
               (by show chains.getLast?.getD logStart = _; rw [chainsEq]
                   exact DurableLogTags.chainPrefixes_getLast? logStart records),
-              RootCache.ofEntries (entriesOf image snapshot headChain),
-              RootsExact.ofEntries (entriesOf image snapshot headChain),
+              built.1, built.2,
               PresenceIndex.ofRecords image.accepted, rfl, LinkIndex.ofRecords image.accepted, rfl,
               SessionIndex.CellIds.ofImage image, SessionIndex.CellIds.ofImage_exact image,
               SessionIndex.TxIndex.ofRecords image.accepted,
@@ -1260,9 +1473,9 @@ def Loaded.build {rootBytes : List UInt8 → Digest} (image : Image) (baseHeight
   match resumed : resume rootBytes image baseHeight base with
   | none => .error "durable image journal does not replay through the canonical executor"
   | some snapshot =>
+      let built := RootCache.build (entriesOf image snapshot chain)
       .ok ⟨⟨image, baseHeight, base, snapshot, withinLog, resumed, logStart, chain, chainExact,
-        RootCache.ofEntries (entriesOf image snapshot chain),
-        RootsExact.ofEntries (entriesOf image snapshot chain),
+        built.1, built.2,
         PresenceIndex.ofRecords image.accepted, rfl, LinkIndex.ofRecords image.accepted, rfl,
         SessionIndex.CellIds.ofImage image, SessionIndex.CellIds.ofImage_exact image,
         SessionIndex.TxIndex.ofRecords image.accepted,

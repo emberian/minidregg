@@ -74,6 +74,33 @@ def set (S : Scheme K V D) (E : Nat → D) (f : Option (K × V) → Option (K ×
       let right := if b then set S E f i bs t.children.2 else t.children.2
       .node (S.nodeHash (left.digest S E i) (right.digest S E i)) left right
 
+/-- Number of internal-node hashes performed by `set`: its recursive call
+follows exactly one child and the sibling digest is read from the cache. This
+cost recurrence has no dependence on the number of occupied leaves. -/
+def setNodeHashes : Nat → List Bool → Nat
+  | 0, _ => 0
+  | _ + 1, [] => 0
+  | i + 1, _ :: bs => setNodeHashes i bs + 1
+
+theorem setNodeHashes_eq : ∀ (i : Nat) (bits : List Bool),
+    setNodeHashes i bits = min i bits.length
+  | 0, _ => by simp [setNodeHashes]
+  | _ + 1, [] => by simp [setNodeHashes]
+  | i + 1, _ :: bs => by
+      simp only [setNodeHashes, setNodeHashes_eq i bs, List.length_cons]
+      omega
+
+theorem setNodeHashes_le (i : Nat) (bits : List Bool) : setNodeHashes i bits ≤ i := by
+  rw [setNodeHashes_eq]
+  exact Nat.min_le_left _ _
+
+/-- A full index update rehashes exactly `S.depth` internal nodes, for every
+tree size. Together with `insertWrite_good` this states both the cost and the
+cached-map invariant preserved by a write. -/
+theorem insertWrite_nodeHashes (S : Scheme K V D) (key : K) :
+    setNodeHashes S.depth (S.ix key) = S.depth := by
+  rw [setNodeHashes_eq, S.ix_length key, Nat.min_self]
+
 end Tree
 
 section Cache

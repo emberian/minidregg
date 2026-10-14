@@ -73,10 +73,10 @@ def payClaimPricing (config : Config) (opened : Opened config) (identity : List 
       config.tariff opened.authority.snapshot.cell (logicalHeight config opened.durable)
       (PayEnrolReceiver.ids config.deployment.domain identity) 0⟩
 
-def payClaimSubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) : IO Outcome := do
+def payClaimSubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config) (bytes : List UInt8) : IO Outcome := do
   match ← PayClaimReceiver.receiveLoaded config.deployment config.profile (payEnrolAmbient config opened)
       config.expectedSeed config.signature config.transport opened.durable bytes with
-  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused .operationRejected "pay-claim" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "claim transaction identity conflict"
   | .durableRejected reason => return durableRefusal reason
@@ -113,13 +113,13 @@ def payEnrolPlanCurrentLoaded (config : Config) (opened : Opened config) (bytes 
         CredentialSignedEnvelopeController.headerCodec.encode header⟩
   else payEnrolPlanLoaded config opened bytes
 
-def payEnrolSubmitCurrentLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) : IO Outcome := do
+def payEnrolSubmitCurrentLoaded (config : Config) (confirm : Confirm) (opened : Opened config) (bytes : List UInt8) : IO Outcome := do
   let some ingress := PayEnrolReceiver.decodeIngress bytes
     | return refused .malformed "pay-enrol" "noncanonical signed enrollment ingress"
   if (PayEnrolV2Receiver.parsedMemo ingress.command.observation).isSome then
-    receivingSubmitLoaded config opened
+    receivingSubmitLoaded config confirm opened
       (PayEnrolV2Receiver.payEnrolV2Family config.deployment config.profile)
       ⟨payEnrolAmbient config opened, config.expectedSeed⟩ "pay-enrol-v2" bytes
-  else payEnrolSubmitLoaded config opened bytes
+  else payEnrolSubmitLoaded config confirm opened bytes
 
 end Minidregg.Kernel.NativeHost

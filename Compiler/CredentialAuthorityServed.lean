@@ -209,9 +209,156 @@ theorem loadServedAuthority_ofLoaded (deployment : CanonicalCellRegistry.Deploym
   · rw [dif_neg valid, dif_neg valid]
     rfl
 
+/-! ## A later served state, loaded against an earlier one
+
+A session's next served state differs from the one it validated in the cells its
+records wrote. These loads reuse the earlier decode wherever a cell's canonical
+bytes are unchanged; each is the plain load (`loadServedDirectoryFrom_eq`,
+`loadServedAuthorityFrom_eq`). -/
+
+/-- Loading a state that has a directory yields that directory. -/
+theorem ServedDirectory.load_eq {store : StoreIdentity} {served : State store}
+    (loaded : ServedDirectory served) : loadServedDirectory served = some loaded := by
+  unfold loadServedDirectory
+  rw [dif_pos loaded.absentDefault]
+  split
+  · rename_i missing
+    rw [loaded.decoded] at missing
+    cases missing
+  · exact congrArg some (ServedDirectory.unique _ loaded)
+
+/-- One directory row of a later state: the held view when the identifier's
+bytes equal the held state's, otherwise the bytes decoded. -/
+def decodeServedRowFrom {earlier : StoreIdentity} {before : State earlier} (held : ServedDirectory before)
+    (identifier : Nat) (bytes : List UInt8) : Option (LifecycleImage registry) :=
+  if before.canonicalBytes ⟨identifier⟩ == bytes then
+    some (LifecycleImage.view registry held.directory identifier)
+  else (LifecycleImage.codec registry).decode bytes
+
+theorem decodeServedRowFrom_eq {earlier : StoreIdentity} {before : State earlier}
+    (held : ServedDirectory before) (identifier : Nat) (bytes : List UInt8) :
+    decodeServedRowFrom held identifier bytes = (LifecycleImage.codec registry).decode bytes := by
+  unfold decodeServedRowFrom
+  split
+  next same =>
+    have exact : LifecycleImage.bytes registry
+        (LifecycleImage.view registry held.directory identifier) = bytes :=
+      (held.bytes_exact identifier).trans (beq_iff_eq.mp same)
+    rw [← exact]
+    exact (LifecycleImage.decode_encode registry _).symm
+  next => rfl
+
+def decodeServedRowsFrom {earlier : StoreIdentity} {before : State earlier} (held : ServedDirectory before) :
+    List (Nat × List UInt8) → Option (DirectoryImage.Rows registry)
+  | [] => some []
+  | (identifier, bytes) :: rest => do
+      let image ← decodeServedRowFrom held identifier bytes
+      let tail ← decodeServedRowsFrom held rest
+      some ((identifier, image) :: tail)
+
+theorem decodeServedRowsFrom_eq {earlier : StoreIdentity} {before : State earlier}
+    (held : ServedDirectory before) :
+    ∀ input : List (Nat × List UInt8),
+      decodeServedRowsFrom held input = DirectoryImage.decodeRows registry input
+  | [] => rfl
+  | (identifier, bytes) :: rest => by
+      simp only [decodeServedRowsFrom, DirectoryImage.decodeRows, decodeServedRowFrom_eq,
+        decodeServedRowsFrom_eq held rest]
+
+def decodeServedFrom {earlier : StoreIdentity} {before : State earlier} (held : ServedDirectory before)
+    (input : List (Nat × List UInt8)) : Option (Directory Nat registry) := do
+  let rows ← decodeServedRowsFrom held input
+  if (rows.map Prod.fst).Nodup then some (DirectoryImage.ofRows registry rows) else none
+
+theorem decodeServedFrom_eq {earlier : StoreIdentity} {before : State earlier}
+    (held : ServedDirectory before) (input : List (Nat × List UInt8)) :
+    decodeServedFrom held input = DirectoryImage.decode registry input := by
+  simp only [decodeServedFrom, DirectoryImage.decode, decodeServedRowsFrom_eq]
+
+/-- `loadServedDirectory` of a later state, decoding only the rows whose bytes
+differ from `held`'s state (`loadServedDirectoryFrom_eq`). -/
+def loadServedDirectoryFrom {earlier store : StoreIdentity} {before : State earlier}
+    (held : ServedDirectory before) (served : State store) : Option (ServedDirectory served) :=
+  if absentDefault : served.absentBytes = [] then
+    match decoded : decodeServedFrom held (servedRows served) with
+    | none => none
+    | some directory =>
+        some ⟨directory, (decodeServedFrom_eq held (servedRows served)).symm.trans decoded, absentDefault⟩
+  else none
+
+/-- **The incremental served load is the served load**: same refusal, same directory. -/
+theorem loadServedDirectoryFrom_eq {earlier store : StoreIdentity} {before : State earlier}
+    (held : ServedDirectory before) (served : State store) :
+    loadServedDirectoryFrom held served = loadServedDirectory served := by
+  cases computed : loadServedDirectory served with
+  | some loaded =>
+      cases incremental : loadServedDirectoryFrom held served with
+      | some other => exact congrArg some (ServedDirectory.unique other loaded)
+      | none =>
+          exfalso
+          unfold loadServedDirectoryFrom at incremental
+          rw [dif_pos loaded.absentDefault] at incremental
+          split at incremental
+          · rename_i missing
+            rw [decodeServedFrom_eq, loaded.decoded] at missing
+            cases missing
+          · cases incremental
+  | none =>
+      cases incremental : loadServedDirectoryFrom held served with
+      | none => rfl
+      | some other =>
+          exfalso
+          rw [ServedDirectory.load_eq other] at computed
+          cases computed
+
+/-- Two authorities of one served state are equal. -/
+theorem ServedAuthority.unique {deployment : CanonicalCellRegistry.Deployment} {store : StoreIdentity}
+    {served : State store} (left right : ServedAuthority deployment served) : left = right := by
+  have same : left.cell = right.cell := by
+    have decoded := congrArg decodeCell (left.observed.symm.trans right.observed)
+    rw [decodeCell_bytes, decodeCell_bytes] at decoded
+    exact Option.some.inj decoded
+  cases left
+  cases right
+  simp only at same
+  subst same
+  rfl
+
+/-- Loading a state that has an authority yields that authority. -/
+theorem ServedAuthority.load_eq {deployment : CanonicalCellRegistry.Deployment} {store : StoreIdentity}
+    {served : State store} (authority : ServedAuthority deployment served) :
+    loadServedAuthority deployment served = some authority := by
+  unfold loadServedAuthority
+  rw [dif_pos authority.valid]
+  split
+  · rename_i missing
+    rw [authority.observed, decodeCell_bytes] at missing
+    cases missing
+  · exact congrArg some (ServedAuthority.unique _ authority)
+
+/-- `loadServedAuthority` of a later state: the held cell when the authority
+cell's bytes are unchanged, otherwise the bytes decoded (`loadServedAuthorityFrom_eq`). -/
+def loadServedAuthorityFrom {deployment : CanonicalCellRegistry.Deployment} {earlier store : StoreIdentity}
+    {before : State earlier} (held : ServedAuthority deployment before) (served : State store) :
+    Option (ServedAuthority deployment served) :=
+  if same : served.canonicalBytes (cellIdOf deployment) == before.canonicalBytes (cellIdOf deployment) then
+    some ⟨held.cell, held.valid, (beq_iff_eq.mp same).trans held.observed⟩
+  else loadServedAuthority deployment served
+
+theorem loadServedAuthorityFrom_eq {deployment : CanonicalCellRegistry.Deployment}
+    {earlier store : StoreIdentity} {before : State earlier} (held : ServedAuthority deployment before)
+    (served : State store) :
+    loadServedAuthorityFrom held served = loadServedAuthority deployment served := by
+  unfold loadServedAuthorityFrom
+  split
+  · exact (ServedAuthority.load_eq _).symm
+  · rfl
+
 #assert_axioms ServedDirectory.bytes_exact
 #assert_axioms ServedDirectory.slots_eq_of_bytes
 #assert_axioms loadServedDirectory_ofLoaded
 #assert_axioms loadServedAuthority_ofLoaded
+#assert_axioms loadServedDirectoryFrom_eq
+#assert_axioms loadServedAuthorityFrom_eq
 
 end Minidregg.Compiler.CredentialAuthorityServed

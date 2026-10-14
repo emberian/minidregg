@@ -195,6 +195,32 @@ theorem Loaded.unique {deployment : CanonicalCellRegistry.Deployment}
 
 #assert_axioms Loaded.unique
 
+/-- `loadDeployment` of a later physical snapshot: when the authority cell's
+bytes equal `held`'s snapshot's, the held cell and its projection are reused
+under this snapshot's clock and spent markers; otherwise the bytes are decoded.
+`loadDeploymentFrom_eq`: it is `loadDeployment`. -/
+def loadDeploymentFrom {deployment : CanonicalCellRegistry.Deployment} {before : PhysicalSnapshot}
+    (held : Loaded deployment before) (physical : PhysicalSnapshot) : Option (Loaded deployment physical) :=
+  if same : physical.canonicalBytes (cellIdOf deployment) == before.canonicalBytes (cellIdOf deployment) then
+    some ⟨⟨deployment.domain, clockOf physical, spentOf deployment.domain physical, held.snapshot.cell,
+        held.snapshot.authState, held.snapshot.authStateExact⟩, held.valid, rfl, rfl, rfl,
+      (beq_iff_eq.mp same).trans held.observed⟩
+  else loadDeployment deployment physical
+
+theorem loadDeploymentFrom_eq {deployment : CanonicalCellRegistry.Deployment} {before : PhysicalSnapshot}
+    (held : Loaded deployment before) (physical : PhysicalSnapshot) :
+    loadDeploymentFrom held physical = loadDeployment deployment physical := by
+  unfold loadDeploymentFrom
+  split
+  · rename_i same
+    obtain ⟨loaded, found, _⟩ := loadDeployment_exact deployment physical held.valid held.snapshot.cell
+      ((beq_iff_eq.mp same).trans held.observed)
+    rw [found]
+    exact congrArg some (Loaded.unique _ loaded)
+  · rfl
+
+#assert_axioms loadDeploymentFrom_eq
+
 theorem Loaded.root_exact {deployment : CanonicalCellRegistry.Deployment} {physical : PhysicalSnapshot}
     (loaded : Loaded deployment physical) :
     cellRoot loaded.snapshot.cell = physical.model.roots (cellIdOf deployment) := by

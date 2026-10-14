@@ -1242,8 +1242,12 @@ theorem historicalReceipt_exactCandidate_fresh (config : Config)
     DurableReceiverIO.Loaded.extend, DurableReceiver.Image.append, List.findIdx?_append, fresh,
     DurableReceiver.IntentRecord.ofIntent, DurableReceiverIO.Loaded.height]
 
-def confirmed (config : Config) (kind : DurableReceiverIO.Confirmation)
-    (transactionId eventId : Digest) : IO Outcome := do
+/-- How a submit route reads its committed receipt back. A one-shot process
+passes `confirmed config` (a cold open); a session passes its own readback
+over the opening it holds, so a submit never re-opens the Store. -/
+abbrev Confirm := DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome
+
+def confirmed (config : Config) : Confirm := fun kind transactionId eventId => do
   match ← openExisting config with
   | .error detail => return .uncertain s!"receipt readback: {detail}".toUTF8.toList
   | .ok opened =>
@@ -1252,22 +1256,20 @@ def confirmed (config : Config) (kind : DurableReceiverIO.Confirmation)
       | some receipt => return .confirmed kind receipt
 
 /-- Seal the original prefix of a committed charged failure without erasing
-its typed source cause. -/
-def charged (config : Config) (kind : DurableReceiverIO.Confirmation)
+its typed source cause: the receipt `confirm` reads back, as a charge. -/
+def chargedVia (confirm : Confirm) (kind : DurableReceiverIO.Confirmation)
     (transactionId eventId : Digest) (cause : ObjectiveActivityReceiver.Reject) : IO Outcome := do
-  match ← openExisting config with
-  | .error detail => return .uncertain s!"receipt readback: {detail}".toUTF8.toList
-  | .ok opened =>
-      match historicalReceipt config opened.durable transactionId eventId with
-      | none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
-      | some receipt => return .charged kind receipt (ObjectiveActivityReceiver.rejectCodec.encode cause)
+  match ← confirm kind transactionId eventId with
+  | .confirmed kind receipt =>
+      return .charged kind receipt (ObjectiveActivityReceiver.rejectCodec.encode cause)
+  | other => return other
 
-def enrollmentSubmitLoaded (config : Config) (opened : Opened config)
+def enrollmentSubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config)
     (bytes : List UInt8) : IO Outcome := do
   match ← ParticipantKeyEnrollmentReceiver.receiveLoaded config.deployment config.profile
       ⟨config.federation, logicalHeight config opened.durable⟩ config.signature
       config.transport opened.durable bytes with
-  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused .operationRejected "enroll-key" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
   | .durableRejected reason => return durableRefusal reason
@@ -1278,7 +1280,7 @@ def enrollmentSubmitLoaded (config : Config) (opened : Opened config)
 def enrollmentSubmit (config : Config) (bytes : List UInt8) : IO Outcome := do
   match ← openExisting config with
   | .error detail => return .unavailable detail.toUTF8.toList
-  | .ok opened => enrollmentSubmitLoaded config opened bytes
+  | .ok opened => enrollmentSubmitLoaded config (confirmed config) opened bytes
 
 /-- Receipt-only historical lookup. Absence never submits fresh work. -/
 def enrollmentLookupLoaded (config : Config) (opened : Opened config)
@@ -1302,27 +1304,27 @@ def enrollmentLookup (config : Config) (bytes : List UInt8) : IO Outcome := do
 
 /-- The Host settlement of every `Kernel.Receiving` family, one copy: a
 confirmed outcome is sealed against its original accepted prefix. -/
-def receivingOutcome (config : Config) (family : Receiving.Family) (label : String)
+def receivingOutcome (config : Config) (confirm : Confirm) (family : Receiving.Family) (label : String)
     {laws : ReceivingLaw.Laws Durable} {native : CredentialSignatureIO.NativeConfig}
     {env : family.Env} {durable : Durable} :
     family.Outcome laws native env durable → IO Outcome
   | .replayed (transactionId, (event : DurableDataIntent.StableEvent)) =>
-      confirmed config .replayed transactionId event.eventId
+      confirm .replayed transactionId event.eventId
   | .conflict => return refused .conflict "replay" "transaction identity conflict"
   | .refused reason => return refused .operationRejected label s!"{repr reason}"
   | .committed ingress _ witness =>
-      confirmed config witness.kind (family.txId env ingress) (family.event env ingress).eventId
+      confirm witness.kind (family.txId env ingress) (family.event env ingress).eventId
   | .durable ingress (.journaled kind) =>
-      confirmed config kind (family.txId env ingress) (family.event env ingress).eventId
+      confirm kind (family.txId env ingress) (family.event env ingress).eventId
   | .durable _ (.rejected reason) => return durableRefusal reason
   | .durable _ .contention => return .contention
   | .durable _ (.unavailable detail) => return .unavailable detail.toUTF8.toList
   | .durable _ (.uncertain detail) => return .uncertain detail.toUTF8.toList
 
 /-- Fresh submission through a `Kernel.Receiving` family. -/
-def receivingSubmitLoaded (config : Config) (opened : Opened config) (family : Receiving.Family)
+def receivingSubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config) (family : Receiving.Family)
     (env : family.Env) (label : String) (bytes : List UInt8) : IO Outcome := do
-  receivingOutcome config family label
+  receivingOutcome config confirm family label
     (← family.receiveLoaded config.profile.compilerProfile config.deployment config.signature
       config.transport env opened.durable bytes)
 
@@ -1341,12 +1343,12 @@ def receivingLookupLoaded (config : Config) (opened : Opened config) (family : R
     | some (.error _) => refused .conflict "replay" "transaction identity conflict"
     | none => .absent
 
-def provisionSubmitLoaded (config : Config) (opened : Opened config)
+def provisionSubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config)
     (bytes : List UInt8) : IO Outcome := do
   match ← ParticipantFactoryProvisioningReceiver.receiveLoaded config.deployment config.profile
       ⟨config.federation, logicalHeight config opened.durable⟩ config.signature
       config.transport opened.durable bytes with
-  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused .operationRejected "provision-factory-observe" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
   | .durableRejected reason => return durableRefusal reason
@@ -1898,13 +1900,13 @@ def payAssemble (plan : PayCellDomain.SigningPlan) (signature : List UInt8) :
     pure (PayAssignmentReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
   else .error "noncanonical pay plan command"
 
-def paySubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+def paySubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config) (bytes : List UInt8) :
     IO Outcome := do
   let ambient := logicalHeight config opened.durable
   if (PayBookReceiver.decodeIngress bytes).isSome then
     match ← PayBookReceiver.receiveLoaded config.deployment config.profile
         ⟨config.federation, ambient⟩ config.signature config.transport opened.durable bytes with
-    | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+    | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
     | .rejected reason => return refused .operationRejected "pay-book" s!"{repr reason}"
     | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
     | .durableRejected reason => return durableRefusal reason
@@ -1914,7 +1916,7 @@ def paySubmitLoaded (config : Config) (opened : Opened config) (bytes : List UIn
   else
     match ← PayAssignmentReceiver.receiveLoaded config.deployment config.profile
         ⟨config.federation, ambient⟩ config.signature config.transport opened.durable bytes with
-    | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+    | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
     | .rejected reason => return refused .operationRejected "pay-assign" s!"{repr reason}"
     | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
     | .durableRejected reason => return durableRefusal reason
@@ -1987,11 +1989,11 @@ def wellAssemble (plan : RealmWellCodec.SigningPlan) (signature : List UInt8) :
   let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
   pure (RealmWellCodec.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
 
-def wellSubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+def wellSubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config) (bytes : List UInt8) :
     IO Outcome := do
   match ← RealmWellReceiver.receiveLoaded config.deployment config.profile
       (wellAmbient config opened) config.signature config.transport opened.durable bytes with
-  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused .operationRejected "realm-well" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
   | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
@@ -2071,12 +2073,12 @@ def clockAssemble (plan : ClockTickReceiver.SigningPlan) (signature : List UInt8
     pure (ClockTickReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
   else .error "noncanonical clock plan command"
 
-def clockSubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+def clockSubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config) (bytes : List UInt8) :
     IO Outcome := do
   let ambient := logicalHeight config opened.durable
   match ← ClockTickReceiver.receiveLoaded config.deployment config.profile
       ⟨config.federation, ambient⟩ config.signature config.transport opened.durable bytes with
-  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused .operationRejected "clock-tick" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
   | .durableRejected reason => return durableRefusal reason
@@ -2128,9 +2130,9 @@ def payObservationAssemble (plan : PayCellDomain.SigningPlan) (signature : List 
 
 /-- Fresh submission of a report: the `Kernel.Receiving` family, verified by the
 pinned process, judged by the deployment's laws. -/
-def payObservationSubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+def payObservationSubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config) (bytes : List UInt8) :
     IO Outcome :=
-  receivingSubmitLoaded config opened
+  receivingSubmitLoaded config confirm opened
     (PayObservationReceiver.family config.deployment config.profile)
     ⟨config.federation, logicalHeight config opened.durable⟩ "pay-observation" bytes
 
@@ -2174,9 +2176,9 @@ def payEnrolAssemble (plan : PayCellDomain.SigningPlan) (signature : List UInt8)
   let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
   pure (PayEnrolReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
 
-def payEnrolSubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+def payEnrolSubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config) (bytes : List UInt8) :
     IO Outcome :=
-  receivingSubmitLoaded config opened
+  receivingSubmitLoaded config confirm opened
     (PayEnrolReceiver.payEnrolFamily config.deployment config.profile)
     (payEnrolAmbient config opened) "pay-enrol" bytes
 
@@ -2253,12 +2255,12 @@ def payRefillAssemble (plan : PayCellDomain.SigningPlan) (signature : List UInt8
   let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
   pure (PurseRefillReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
 
-def payRefillSubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+def payRefillSubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config) (bytes : List UInt8) :
     IO Outcome := do
   match ← PurseRefillReceiver.receiveLoaded config.deployment config.profile
       ⟨config.federation, logicalHeight config opened.durable⟩ config.signature config.transport
       opened.durable bytes with
-  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused .operationRejected "pay-refill" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
   | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
@@ -2306,12 +2308,12 @@ def jobMoneyAssemble (plan : PayCellDomain.SigningPlan) (signature : List UInt8)
   let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
   pure (JobMoneyReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
 
-def jobMoneySubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+def jobMoneySubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config) (bytes : List UInt8) :
     IO Outcome := do
   match ← JobMoneyReceiver.receiveLoaded config.deployment config.profile
       ⟨config.federation, logicalHeight config opened.durable⟩ config.signature config.transport
       opened.durable bytes with
-  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused .operationRejected "job-money" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
   | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
@@ -2351,18 +2353,15 @@ def activityPlanLoaded (config : Config) (opened : Opened config) (commandBytes 
     Except String ObjectiveActivityReceiver.SigningPlan := do
   let command ← need "noncanonical activity command"
     (ObjectiveActivityReceiver.commandCodec.decode commandBytes)
-  let header ← ObjectiveActivityReceiver.signingHeader config.deployment config.profile
-    (activityAmbient config opened) opened.durable command
+  let ambient := activityAmbient config opened
+  -- one decision, five projections (`ObjectiveActivityReceiver.planDecision_*`)
+  let decision := ObjectiveActivityReceiver.planDecision config.deployment config.profile ambient
+    opened.durable command
+  let header ← ObjectiveActivityReceiver.signingHeaderFor config.deployment config.profile ambient
+    opened.durable command decision.outcome
   pure ⟨config.deployment.domain, config.profile.semantics, commandBytes,
     CredentialSignedEnvelopeController.headerCodec.encode header,
-    ObjectiveActivityReceiver.planReport config.deployment config.profile (activityAmbient config opened)
-      opened.durable command,
-    ObjectiveActivityReceiver.planOutcome config.deployment config.profile (activityAmbient config opened)
-      opened.durable command,
-    (ObjectiveActivityReceiver.planVerdict config.deployment config.profile (activityAmbient config opened)
-      opened.durable command).toUTF8.toList,
-    ObjectiveActivityReceiver.planFrontEnd config.deployment config.profile (activityAmbient config opened)
-      opened.durable command⟩
+    decision.report, decision.outcome, decision.verdict.toUTF8.toList, decision.frontEnd⟩
 
 def activityAssemble (plan : ObjectiveActivityReceiver.SigningPlan) (signature : List UInt8) :
     Except String (List UInt8) := do
@@ -2374,13 +2373,13 @@ def activityAssemble (plan : ObjectiveActivityReceiver.SigningPlan) (signature :
   let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
   pure (ObjectiveActivityReceiver.ingressCodec.encode ⟨plan.commandBytes, plan.outcome, envelope⟩)
 
-def activitySubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+def activitySubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config) (bytes : List UInt8) :
     IO Outcome := do
   match ← ObjectiveActivityReceiver.receiveLoaded config.deployment config.profile
       (activityAmbient config opened) config.signature config.kernelTransport opened.durable bytes with
-  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
   | .charged kind receipt cause =>
-      charged config kind receipt.transactionId receipt.eventId cause
+      chargedVia confirm kind receipt.transactionId receipt.eventId cause
   | .rejected reason => return refused .operationRejected "activity" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
   | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
@@ -2427,12 +2426,12 @@ structure ActivityView where
 
 def activityViewLoaded (config : Config) (opened : Opened config) (cells : List Nat)
     (quotes : List (Nat × Nat)) : Except String ActivityView := do
-  let authority ← need "authority unavailable"
-    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment opened.durable.snapshot)
+  -- The opening holds its authority load (`Loaded.unique`: the one `loadDeployment` returns).
+  let authority := opened.authority
   let snapshot := opened.durable.snapshot
   let height := logicalHeight config opened.durable
-  let extractTicks := match ObjectiveKernelConfig.configOf config.deployment config.profile
-      (activityAmbient config opened) with
+  let kernel? := ObjectiveKernelConfig.configOf config.deployment config.profile (activityAmbient config opened)
+  let extractTicks := match kernel? with
     | .ok kernel => some kernel.maxExtractTicks
     | .error _ => none
   let cells := (cells ++ cells.flatMap fun cell =>
@@ -2455,7 +2454,7 @@ def activityViewLoaded (config : Config) (opened : Opened config) (cells : List 
     | none => []).dedup
   let quoted := quotes.map fun (record, await) =>
     (record, await,
-      match ObjectiveKernelConfig.configOf config.deployment config.profile (activityAmbient config opened) with
+      match kernel? with
       | .error reason => .error s!"{repr reason}"
       | .ok kernel =>
         match ObjectiveActivity.resumeQuote kernel snapshot height ⟨record⟩ ⟨await⟩ with
@@ -2494,10 +2493,10 @@ def seatAssemble (plan : SeatReceiver.SigningPlan) (signature : List UInt8) :
   let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
   pure (SeatReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
 
-def seatSubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) : IO Outcome := do
+def seatSubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config) (bytes : List UInt8) : IO Outcome := do
   match ← SeatReceiver.receiveLoaded config.deployment config.profile
       (seatAmbient config opened) config.signature config.kernelTransport opened.durable bytes with
-  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused .operationRejected "seat" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
   | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
@@ -2629,12 +2628,12 @@ def certifyAssemble (plan : CertifyReceiver.SigningPlan) (signature : List UInt8
     pure (CertifyReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
   else .error "noncanonical certify plan command"
 
-def certifySubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+def certifySubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config) (bytes : List UInt8) :
     IO Outcome := do
   let ambient := logicalHeight config opened.durable
   match ← CertifyReceiver.receiveLoaded config.deployment config.profile
       ⟨config.federation, ambient⟩ config.signature config.transport opened.durable bytes with
-  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused .operationRejected "certify" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
   | .durableRejected reason => return durableRefusal reason

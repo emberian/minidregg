@@ -43,7 +43,7 @@ open Minidregg.Kernel.DurableCommitProtocol (Intent Snapshot)
 open Minidregg.Kernel.DurableReceiver (IntentRecord Seed replay)
 open Minidregg.Kernel.DurableCheckpoint (State)
 open Minidregg.Kernel.DurableView (Keys AgreesOnKeys)
-open Minidregg.Compiler.DurableReceiverIO (Loaded)
+open Minidregg.Compiler.DurableReceiverIO (Loaded suffixSlots CheckpointRoots lookup_of_mem_nodup)
 open Minidregg.Compiler.DurableHistory (Head StoreIdentity)
 open Minidregg.Compiler.DurableHistoryReader (StateAt VerifiedFootprint TxAnswer ByTx Spent)
 open Minidregg.Compiler.DurableCheckpointCodec (systemLeaf)
@@ -62,6 +62,15 @@ def bare (snapshot : DataSnapshot rootBytes) : DataSnapshot rootBytes where
 written id in record order (`Image.cellIds`'s order when the base is the seed). -/
 def extendIds (ids : List CellId) (records : List IntentRecord) : List CellId :=
   (ids ++ records.flatMap fun record => record.writes.map DataWrite.cellId).eraseDups
+
+/-- `extendIds`, compiled as one hashed pass: it runs on every light append
+(`Served.advance`) over every enumerable cell, where `eraseDups` is quadratic. -/
+def extendIdsFast (ids : List CellId) (records : List IntentRecord) : List CellId :=
+  SessionIndex.dedup (ids ++ records.flatMap fun record => record.writes.map DataWrite.cellId)
+
+@[csimp] theorem extendIds_eq_fast : @extendIds = @extendIdsFast := by
+  funext ids records
+  rw [extendIdsFast, SessionIndex.dedup_eq, extendIds]
 
 theorem not_mem_extendIds {ids : List CellId} {records : List IntentRecord} {cellId : CellId}
     (missing : cellId ∉ extendIds ids records) :
@@ -550,6 +559,83 @@ theorem entries_step (ids : List CellId) (nodup : ids.Nodup) (before next : Data
 
 end Served
 
+/-- The canonical executor's suffix changes exactly `suffixSlots`. This is
+the refinement used by refresh, rather than a second replay implementation. -/
+theorem replay_entries_step (ids : List CellId) (nodup : ids.Nodup)
+    (before after : DataSnapshot rootBytes) (records : List IntentRecord)
+    (replayed : replay rootBytes before records = some after)
+    (height height' : Nat) (chain chain' : Digest) (k : WorldRoot.Key) :
+    WorldRootCache.lastVal
+      (Served.entriesOf after.model.roots (extendIds ids records) height' chain') k =
+    (WorldRootCache.lastVal (suffixSlots height' chain' records) k).or
+      (WorldRootCache.lastVal (Served.entriesOf before.model.roots ids height chain) k) := by
+  cases k with
+  | system =>
+      have cells : WorldRootCache.lastVal
+          (records.flatMap fun record => record.writes.map fun write =>
+            (WorldRoot.Key.cell write.cellId.value, write.exactPost)) .system = none := by
+        clear replayed
+        induction records with
+        | nil => rfl
+        | cons record records ih =>
+            rw [List.flatMap_cons, WorldRootCache.lastVal_append, ih,
+              DurableReceiverIO.lastVal_cells_system]
+            rfl
+      simp [Served.entriesOf, suffixSlots, WorldRootCache.lastVal_cons,
+        DurableReceiverIO.lastVal_cells_system, cells]
+  | cell n =>
+      induction records generalizing ids before height chain with
+      | nil =>
+          cases Option.some.inj replayed
+          simp only [Served.entriesOf, WorldRootCache.lastVal_cons]
+          simp only [DurableReceiverIO.lastVal_cellIds (extendIds ids [])
+            (DurableCheckpoint.nodup_eraseDups _) after.model.roots n,
+            DurableReceiverIO.lastVal_cellIds ids nodup after.model.roots n]
+          simp [suffixSlots, extendIds, WorldRootCache.lastVal_cons,
+            show WorldRootCache.lastVal ([] : List (WorldRoot.Key × Digest)) (.cell n) = none from rfl]
+      | cons record records ih =>
+          unfold replay at replayed
+          cases bound : record.bind? rootBytes with
+          | none => simp [bound] at replayed
+          | some intent =>
+              simp only [bound, bind, Option.bind] at replayed
+              have recordExact := IntentRecord.bind_exact bound
+              cases executed : DurableDataIntent.execute .complete before intent with
+              | accepted next =>
+                  simp only [executed] at replayed
+                  have step := Served.entries_step ids nodup before next intent height chain chain executed (.cell n)
+                  rw [recordExact] at step
+                  have tail := ih (extendIds ids [record]) (DurableCheckpoint.nodup_eraseDups _)
+                    next replayed (height + 1) chain
+                  have member : ∀ cellId,
+                      cellId ∈ extendIds (extendIds ids [record]) records ↔
+                      cellId ∈ extendIds ids (record :: records) := by
+                    intro cellId
+                    simp [extendIds, List.mem_append, List.mem_flatMap, or_assoc]
+                  have same := DurableReceiverIO.lastVal_cellIds
+                    (extendIds (extendIds ids [record]) records) (DurableCheckpoint.nodup_eraseDups _)
+                    after.model.roots n
+                  have same' := DurableReceiverIO.lastVal_cellIds
+                    (extendIds ids (record :: records)) (DurableCheckpoint.nodup_eraseDups _)
+                    after.model.roots n
+                  have enumeration : WorldRootCache.lastVal
+                      (Served.entriesOf after.model.roots (extendIds (extendIds ids [record]) records) height' chain') (.cell n) =
+                      WorldRootCache.lastVal
+                      (Served.entriesOf after.model.roots (extendIds ids (record :: records)) height' chain') (.cell n) := by
+                    simp only [Served.entriesOf, WorldRootCache.lastVal_cons]
+                    rw [same, same']
+                    simp only [member]
+                  rw [enumeration] at tail
+                  rw [step] at tail
+                  simpa [suffixSlots, DurableReceiverIO.recordSlots,
+                    WorldRootCache.lastVal_cons, WorldRootCache.lastVal_append,
+                    List.flatMap_cons, Option.or_assoc] using tail
+              | replayed recorded => simp [executed] at replayed
+              | rejected reason => simp [executed] at replayed
+              | crashed point next => simp [executed] at replayed
+
+#assert_axioms replay_entries_step
+
 /-! ## The light opening of the head (KN2 2b-1, step 3)
 
 The open reads the seed, the latest checkpoint and the entries from it to the
@@ -621,6 +707,12 @@ private def checkIndex (rows : List Bool → Option DurableIndex.Row) :
         throw s!"the tag at height {height} carries an index root the log does not reach"
       checkIndex rows (writes.foldl (fun map row => map.insert row.1 row.2) written) next (height + 1) rest
 
+/-- A root cache already verified for a start's enumeration. -/
+private structure CachedRoots (ids : List CellId) (entries : List (WorldRoot.Key × Digest)) where
+  nodup : ids.Nodup
+  cache : DurableReceiverIO.RootCache
+  exact : DurableReceiverIO.RootsExact cache entries
+
 /-- What an extension starts from: a verified state (bare snapshot, its
 enumeration, the fresh-cell bytes) at `height`, with the chain, accumulator
 frontier and index root there, and the head tag there when it is not 0. -/
@@ -636,6 +728,9 @@ private structure Start (rootBytes : List UInt8 → Digest) where
   indexRoot : Digest
   tag : Option (List UInt8)
   checkpoint : Nat
+  /-- A root tree already evaluated for this start: the predecessor's (a
+  refresh) or the checkpoint's, evaluated by its open (`openSealedWith`). -/
+  roots : Option (CachedRoots ids (Served.entriesOf before.model.roots ids height chain)) := none
 
 /-- **The one verification of new entries**, used by the open (from its
 checkpoint) and by a session's refresh (from its head): every entry after
@@ -683,8 +778,16 @@ private def extendVerified (transport : DurableReceiverIO.Transport) (rootBytes 
   | some snapshot =>
       let cellIds := extendIds start.ids records
       let entries := Served.entriesOf snapshot.model.roots cellIds headHeight headChain
-      let roots := DurableReceiverIO.RootCache.ofEntries entries
-      let rootsExact := DurableReceiverIO.RootsExact.ofEntries entries
+      let rooted : (cache : DurableReceiverIO.RootCache) × DurableReceiverIO.RootsExact cache entries :=
+        match start.roots with
+        | none => ⟨DurableReceiverIO.RootCache.ofEntries entries,
+            DurableReceiverIO.RootsExact.ofEntries entries⟩
+        | some ⟨nodup, cache, exact⟩ =>
+            exact.advance (suffixSlots headHeight headChain records)
+              (replay_entries_step start.ids nodup start.before snapshot records replayed
+                start.height headHeight start.chain headChain)
+      let roots := rooted.1
+      let rootsExact := rooted.2
       let worldRoot := if rootsExact.injective then roots.root else WorldRoot.deployedRoot entries
       let served : Served rootBytes store :=
         Served.ofReplay start.seed start.absentBytes start.ids start.before start.outside records snapshot
@@ -708,6 +811,30 @@ private def extendVerified (transport : DurableReceiverIO.Transport) (rootBytes 
             have fields := Head.verify_fields verified
             return .ok ⟨store, live, head, served, fields.1.symm, fields.2.1.symm, roots, rootsExact,
               start.checkpoint⟩
+
+/-- A checkpoint state's served entries are its world-root entries (`stateEntries`). -/
+theorem state_entries (base : State) (nodup : (base.cells.map Prod.fst).Nodup) (height : Nat)
+    (chain : Digest) :
+    Served.entriesOf (base.snapshot rootBytes []).model.roots (base.cells.map Prod.fst) height chain =
+      DurableCheckpointCodec.stateEntries rootBytes height chain base := by
+  simp only [Served.entriesOf, DurableCheckpointCodec.stateEntries, List.map_map, List.cons.injEq,
+    true_and]
+  apply List.map_congr_left
+  intro cell member
+  simp [State.snapshot, DurableCheckpoint.tableLookup_rootTable,
+    lookup_of_mem_nodup base.cells nodup cell member]
+
+#assert_axioms state_entries
+
+/-- The start of an open at a base state, with the base's tree when its open evaluated one. -/
+private def startOf (seed : Seed) (base : State) (height : Nat) (chain : Digest)
+    (frontier : List (Nat × Digest)) (indexRoot : Digest) (tag : Option (List UInt8))
+    (nodup : (base.cells.map Prod.fst).Nodup)
+    (roots : Option ((cache : DurableReceiverIO.RootCache) × DurableReceiverIO.RootsExact cache
+      (DurableCheckpointCodec.stateEntries rootBytes height chain base))) : Start rootBytes :=
+  ⟨seed, base.absentBytes, base.cells.map Prod.fst, base.snapshot rootBytes [], Served.state_snapshot_outside base,
+    height, chain, frontier, indexRoot, tag, height,
+    roots.map fun built => ⟨nodup, built.1, (state_entries base nodup height chain).symm ▸ built.2⟩⟩
 
 /-- The light opening of an opened Store's head: its checkpoint (or the seed),
 then `extendVerified` over the entries after it. -/
@@ -737,36 +864,42 @@ def openHead (transport : DurableReceiverIO.Transport) (rootBytes : List UInt8 �
   let logStart := transport.logStart seed
   let store := StoreIdentity.ofOpen key logStart
   let headHeight := stored.head
-  -- The base: the seed at height 0, or the checkpoint sitting on the log.
-  let ((base, baseHeight, baseChain, baseFrontier, baseSpent, baseTag, suffix) :
-      State × Nat × Digest × List (Nat × Digest) × Digest × Option (List UInt8) ×
-        List DurableReceiverIO.Entry) ←
-    match stored.checkpoint with
-    | none =>
-        if stored.entries.length ≠ headHeight then
-          return .error "durable log head does not match its entries"
-        pure (State.ofSeed seed, 0, logStart, [], DurableIndex.emptyDigest, none, stored.entries)
-    | some checkpoint =>
-        match DurableCheckpointCodec.openSealed key rootBytes checkpoint.bytes with
-        | .error reason => return .error s!"checkpoint refused: {repr reason}"
-        | .ok body =>
-            if body.height ≠ checkpoint.height ∨ body.height = 0 ∨ body.height > headHeight then
-              return .error "checkpoint height does not match the log"
-            if stored.entries.length ≠ headHeight - body.height + 1 then
-              return .error "durable log head does not match its entries"
-            let some atCheckpoint := stored.entries.head? | return .error "checkpoint height has no log entry"
-            match DurableHistory.verifyTagged key body.height atCheckpoint.tag body.chain
-                (DurableHistory.frontierDigest body.height body.frontier) body.indexRoot with
-            | .error refusal => return .error s!"checkpoint does not sit on the log: {refusal.message}"
-            | .ok _ =>
-                pure (body.state, body.height, body.chain, body.frontier, body.indexRoot,
-                  some atCheckpoint.tag, stored.entries.drop 1)
-  lap "checkpoint"
-  if !((base.cells.map Prod.fst).Nodup ∧ base.absentBytes = seed.absentBytes) then
-    return .error "checkpoint state is not admissible for this Store's seed"
-  extendVerified transport rootBytes store rfl
-    ⟨seed, base.absentBytes, base.cells.map Prod.fst, base.snapshot rootBytes [], Served.state_snapshot_outside base,
-      baseHeight, baseChain, baseFrontier, baseSpent, baseTag, baseHeight⟩ suffix lap
+  -- The base: the seed at height 0, or the checkpoint sitting on the log. The
+  -- checkpoint's open evaluates its world root once, as a tree the extension advances.
+  match stored.checkpoint with
+  | none =>
+      if stored.entries.length ≠ headHeight then
+        return .error "durable log head does not match its entries"
+      let base := State.ofSeed seed
+      lap "checkpoint"
+      if admissible : SessionIndex.nodupFast (base.cells.map Prod.fst) = true ∧
+            base.absentBytes = seed.absentBytes then
+        extendVerified transport rootBytes store rfl
+          (startOf seed base 0 logStart [] DurableIndex.emptyDigest none ((SessionIndex.nodupFast_iff _).mp admissible.1) none) stored.entries lap
+      else return .error "checkpoint state is not admissible for this Store's seed"
+  | some checkpoint =>
+      match DurableCheckpointCodec.openSealedWith (α := CheckpointRoots rootBytes) key rootBytes
+          checkpoint.bytes (fun body => DurableReceiverIO.RootCache.build _)
+          (fun _ built => built.1.root) (fun body => (DurableReceiverIO.RootCache.root_eq _).trans rfl) with
+      | .error reason => return .error s!"checkpoint refused: {repr reason}"
+      | .ok ⟨body, built⟩ =>
+          if body.height ≠ checkpoint.height ∨ body.height = 0 ∨ body.height > headHeight then
+            return .error "checkpoint height does not match the log"
+          if stored.entries.length ≠ headHeight - body.height + 1 then
+            return .error "durable log head does not match its entries"
+          let some atCheckpoint := stored.entries.head? | return .error "checkpoint height has no log entry"
+          match DurableHistory.verifyTagged key body.height atCheckpoint.tag body.chain
+              (DurableHistory.frontierDigest body.height body.frontier) body.indexRoot with
+          | .error refusal => return .error s!"checkpoint does not sit on the log: {refusal.message}"
+          | .ok _ =>
+              lap "checkpoint"
+              let base := body.state
+              if admissible : SessionIndex.nodupFast (base.cells.map Prod.fst) = true ∧
+            base.absentBytes = seed.absentBytes then
+                extendVerified transport rootBytes store rfl
+                  (startOf seed base body.height body.chain body.frontier body.indexRoot
+                    (some atCheckpoint.tag) ((SessionIndex.nodupFast_iff _).mp admissible.1) (some built)) (stored.entries.drop 1) lap
+              else return .error "checkpoint state is not admissible for this Store's seed"
 
 /-- **A session's refresh**: the entries another writer appended after this
 opening's head, verified exactly as the open verifies the entries after its
@@ -787,7 +920,9 @@ def Opening.extend (transport : DurableReceiverIO.Transport) (rootBytes : List U
       extendVerified transport rootBytes opening.store opening.live
         ⟨served.seed, served.absentBytes, served.cellIds, served.state,
           fun cellId missing => served.outsideAbsent cellId missing, height, opening.head.chain,
-          opening.head.frontier, opening.head.indexRoot, none, opening.baseHeight⟩
+          opening.head.frontier, opening.head.indexRoot, none, opening.baseHeight,
+          some ⟨served.cellIds_nodup, opening.roots, by
+            simpa [served, Served.roots, opening.heightExact, opening.chainExact] using opening.rootsExact⟩⟩
         stored.entries (fun _ => pure ())
 
 /-! ## The light receive (KN2 2b-1, step 4)
@@ -891,8 +1026,9 @@ def receiveServed (transport : DurableReceiverIO.Transport) (rootBytes : List UI
       let roots := opening.rootsExact.advance (DurableReceiverIO.recordSlots height chain record)
         (Served.entries_step served.cellIds served.cellIds_nodup view next intent served.height
           served.chain chain executed)
-      let entries := Served.entriesOf next.model.roots (extendIds served.cellIds [record]) height chain
-      let worldRoot := if roots.2.injective then roots.1.root else WorldRoot.deployedRoot entries
+      -- The full entry list only on an index collision (its enumeration is Θ(cells²)).
+      let worldRoot := if roots.2.injective then roots.1.root else
+        WorldRoot.deployedRoot (Served.entriesOf next.model.roots (extendIds served.cellIds [record]) height chain)
       let leaf := DurableHistory.leafDigest height recordBytes chain worldRoot
       let frontierAfter := DurableHistory.Frontier.push head.frontier leaf
       let nodes := DurableReceiverIO.appendNodes
@@ -942,5 +1078,6 @@ def receiveServed (transport : DurableReceiverIO.Transport) (rootBytes : List UI
 #assert_axioms Served.ofStateAt_chain
 #assert_axioms Served.entries_step
 #assert_axioms receive_executes_as_full
+#assert_axioms extendIds_eq_fast
 
 end Minidregg.Compiler.DurableServed

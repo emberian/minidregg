@@ -124,7 +124,7 @@ theorem validateServed_ofLoaded (config : Config) {store : StoreIdentity} (durab
       rfl)
   have sameSeed : (Served.ofLoaded durable sameStart).seed = durable.image.seed := rfl
   have sameLog : (Served.ofLoaded durable sameStart).logStart = durable.logStart := sameStart
-  unfold validateServed validateLoaded validateParts validatePartsWith
+  unfold validateServed validateLoaded validateParts validatePartsWith validatePartsVia
   rw [sameSeed, sameLog]
   revert served
   generalize validateCore config durable.image.seed durable.logStart
@@ -160,6 +160,95 @@ for the ratchet-listed full-shape callers (the audit walk). -/
 def _root_.Minidregg.Kernel.NativeHost.Opened.ground {config : Config} (opened : Opened config) :
     ServedBasis.Ground config.deployment :=
   .ofLoaded opened.durable opened.directory opened.authority
+
+/-- The cell-law check of a later served state of a session: a cell whose
+canonical bytes equal the prior validated state's passed already
+(`OpenedServed.cellLawful_all`) and is not re-checked.
+`cellsLawfulServedFrom_eq`: it decides `cellsLawfulServed`. -/
+def cellsLawfulServedFrom (config : Config) {earlier store : StoreIdentity}
+    (prior : OpenedServed config earlier) (served : State store) (loaded : ServedDirectory served) : Bool :=
+  served.cellIds.all fun identifier =>
+    prior.served.canonicalBytes identifier == served.canonicalBytes identifier ||
+      cellLawful config loaded.directory identifier
+
+theorem cellsLawfulServedFrom_eq (config : Config) {earlier store : StoreIdentity}
+    (prior : OpenedServed config earlier) (served : State store) (loaded : ServedDirectory served) :
+    cellsLawfulServedFrom config prior served loaded = cellsLawfulServed config served loaded.directory := by
+  unfold cellsLawfulServedFrom cellsLawfulServed
+  apply Bool.eq_iff_iff.mpr
+  simp only [List.all_eq_true, Bool.or_eq_true, beq_iff_eq]
+  constructor
+  · intro accepted identifier member
+    rcases accepted identifier member with same | lawful
+    · have held := prior.cellLawful_all identifier
+      have views : ResourceBirthCodec.LifecycleImage.view CanonicalCellRegistry.registry
+            prior.directory.directory identifier.value =
+          ResourceBirthCodec.LifecycleImage.view CanonicalCellRegistry.registry
+            loaded.directory identifier.value := by
+        have bytes := (prior.directory.bytes_exact identifier.value).trans
+          (same.trans (loaded.bytes_exact identifier.value).symm)
+        have decoded := congrArg (ResourceBirthCodec.LifecycleImage.rawDecode CanonicalCellRegistry.registry) bytes
+        rw [ResourceBirthCodec.LifecycleImage.rawDecode_bytes,
+          ResourceBirthCodec.LifecycleImage.rawDecode_bytes] at decoded
+        exact Option.some.inj decoded
+      have slots : prior.directory.directory.slots identifier.value = loaded.directory.slots identifier.value := by
+        rw [← ResourceBirthCodec.LifecycleImage.view_slot CanonicalCellRegistry.registry
+            prior.directory.directory identifier.value, views,
+          ResourceBirthCodec.LifecycleImage.view_slot]
+      unfold cellLawful at held ⊢
+      rwa [← slots]
+    · exact lawful
+  · intro lawful identifier member
+    exact Or.inr (lawful identifier member)
+
+/-- The served validation over a supplied directory, authority and cell-law
+check. When the directory and authority are the state's own loads and the check
+decides `cellsLawfulServed`, it is `validateServed` (`validateServedWith_eq`). -/
+def validateServedWith (config : Config) {store : StoreIdentity} (served : State store)
+    (directory? : Option (ServedDirectory served))
+    (authority? : Option (ServedAuthority config.deployment served))
+    (lawfulCheck : ServedDirectory served → Bool)
+    (lawfulExact : ∀ loaded, lawfulCheck loaded = cellsLawfulServed config served loaded.directory) :
+    Except String (OpenedServed config store) :=
+  (validateCore config served.seed served.logStart directory? authority? (·.directory) (·.cell.logical)
+    lawfulCheck).map fun parts =>
+      ⟨served, parts.1.1, parts.1.2.1, parts.1.2.2, (lawfulExact parts.1.1) ▸ parts.2⟩
+
+theorem validateServedWith_eq (config : Config) {store : StoreIdentity} (served : State store)
+    (directory? : Option (ServedDirectory served))
+    (authority? : Option (ServedAuthority config.deployment served))
+    (lawfulCheck : ServedDirectory served → Bool)
+    (lawfulExact : ∀ loaded, lawfulCheck loaded = cellsLawfulServed config served loaded.directory)
+    (directoryExact : directory? = loadServedDirectory served)
+    (authorityExact : authority? = loadServedAuthority config.deployment served) :
+    validateServedWith config served directory? authority? lawfulCheck lawfulExact =
+      validateServed config served := by
+  subst directoryExact
+  subst authorityExact
+  have same : lawfulCheck = fun loaded => cellsLawfulServed config served loaded.directory :=
+    funext lawfulExact
+  subst same
+  rfl
+
+/-- **Validation of a session's next served state, incrementally**: the
+directory decodes only rows whose bytes moved (`loadServedDirectoryFrom`), the
+authority cell is decoded only when its bytes moved (`loadServedAuthorityFrom`)
+and the cell law runs only on cells whose bytes moved (`cellsLawfulServedFrom`).
+`validateServedFrom_eq`: it is `validateServed` -- the same result, the same refusal. -/
+def validateServedFrom (config : Config) {earlier store : StoreIdentity}
+    (prior : OpenedServed config earlier) (served : State store) :
+    Except String (OpenedServed config store) :=
+  validateServedWith config served (loadServedDirectoryFrom prior.directory served)
+    (loadServedAuthorityFrom prior.authority served) (cellsLawfulServedFrom config prior served)
+    (cellsLawfulServedFrom_eq config prior served)
+
+theorem validateServedFrom_eq (config : Config) {earlier store : StoreIdentity}
+    (prior : OpenedServed config earlier) (served : State store) :
+    validateServedFrom config prior served = validateServed config served :=
+  validateServedWith_eq config served _ _ _ _ (loadServedDirectoryFrom_eq prior.directory served)
+    (loadServedAuthorityFrom_eq prior.authority served)
+
+#assert_axioms validateServedFrom_eq
 
 #assert_axioms validateServed_served
 #assert_axioms OpenedServed.cellLawful_all

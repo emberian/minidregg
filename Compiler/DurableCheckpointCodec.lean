@@ -665,6 +665,45 @@ def openSealed (key : MacKey) (rootBytes : List UInt8 → Digest) (bytes : List 
   unless sealed.mac = checkpointMac key sealed.body sealed.root do throw .badMac
   pure sealed.body
 
+/-- `openSealed` with the world-root evaluation handed to the caller: `derive`
+evaluates something from which `rootOf` reads the body's world root (`exact`);
+the open compares the sealed root against it and returns it beside the body, so
+a caller that needs the evaluated tree (`DurableServed.openHead`) does not
+evaluate the root a second time. The checks and their order are `openSealed`'s
+(`openSealedWith_fst`). -/
+def openSealedWith {α : Body → Type} (key : MacKey) (rootBytes : List UInt8 → Digest)
+    (bytes : List UInt8) (derive : (body : Body) → α body) (rootOf : (body : Body) → α body → Digest)
+    (_exact : ∀ body, rootOf body (derive body) = worldRoot rootBytes body) :
+    Except OpenError ((body : Body) × α body) := do
+  let some sealed := checkpointFrame.decode bytes | throw .malformed
+  unless sealed.body.keyId = key.id do throw .foreignKey
+  let derived := derive sealed.body
+  unless sealed.root = rootOf sealed.body derived do throw .rootMismatch
+  unless sealed.mac = checkpointMac key sealed.body sealed.root do throw .badMac
+  pure ⟨sealed.body, derived⟩
+
+/-- **The cached open is the open**: same refusals, same body. -/
+theorem openSealedWith_fst {α : Body → Type} (key : MacKey) (rootBytes : List UInt8 → Digest)
+    (bytes : List UInt8) (derive : (body : Body) → α body) (rootOf : (body : Body) → α body → Digest)
+    (exact : ∀ body, rootOf body (derive body) = worldRoot rootBytes body) :
+    (openSealedWith key rootBytes bytes derive rootOf exact).map Sigma.fst =
+      openSealed key rootBytes bytes := by
+  unfold openSealedWith openSealed
+  cases checkpointFrame.decode bytes with
+  | none => rfl
+  | some sealed =>
+      simp only [exact]
+      by_cases keyOk : sealed.body.keyId = key.id
+      · by_cases rootOk : sealed.root = worldRoot rootBytes sealed.body
+        · by_cases macOk : sealed.mac = checkpointMac key sealed.body (worldRoot rootBytes sealed.body) <;>
+            simp [keyOk, rootOk, macOk] <;> rfl
+        · simp [keyOk, rootOk]
+          rfl
+      · simp [keyOk]
+        rfl
+
+#assert_axioms openSealedWith_fst
+
 /-- Satisfiable pole: what the host seals, it opens, exactly. -/
 theorem openSealed_seal (key : MacKey) (rootBytes : List UInt8 → Digest) (height : Nat)
     (chain : Digest) (frontier : List (Nat × Digest)) (indexRoot : Digest) (state : State) :

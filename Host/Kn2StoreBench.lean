@@ -12,7 +12,9 @@ cell with 1000 bytes and spending one nullifier. Then, timed (compiled code):
 * `append`: one more record through `receiveLoaded` on the fresh opening;
 * `light open`: `DurableServed.openHead` (checkpoint + the records after it);
 * `light open+append`: one more record through `DurableServed.receiveServed` on it.
-Best of three for each. Not part of the umbrella gate.
+Best of three for each. Not part of the umbrella gate. `KN2_BENCH_CREATES=1`:
+each record instead births a fresh cell, so N records hold N cells (the axis the
+world root's cost grows on).
 
 usage: kn2-store-bench STORE-HELPER N...
 -/
@@ -38,31 +40,34 @@ def seed : Seed := { absentBytes := [], cells := [(⟨3⟩, cellBytes 0)], avail
 
 def nullifier (number : Nat) : StableNullifier := ⟨1, ⟨700⟩, ⟨number⟩, [UInt8.ofNat number]⟩
 
-def step (number : Nat) : DataIntent rootBytes where
+/-- Record `number`: an update of cell 3, or (`creates`) the birth of cell `1000 + number`,
+so the Store holds `number` cells after `number` records (the cell-count axis). -/
+def step (creates : Bool) (number : Nat) : DataIntent rootBytes where
   transactionId := ⟨1000000 + number⟩
-  writes := [⟨⟨3⟩, rootBytes (cellBytes (number - 1)), rootBytes (cellBytes number), cellBytes number⟩]
+  writes := if creates then [⟨⟨1000 + number⟩, rootBytes [], rootBytes (cellBytes number), cellBytes number⟩]
+    else [⟨⟨3⟩, rootBytes (cellBytes (number - 1)), rootBytes (cellBytes number), cellBytes number⟩]
   readGuards := []
   nullifiers := [nullifier number]
   exactCharge := fun _ => 1
   event := ⟨1, ⟨800⟩, ⟨number⟩, [UInt8.ofNat number]⟩
   subject := none
-  postRootsBound := by simp
+  postRootsBound := by split <;> simp
   guardsReadOnly := by simp
 
 def ms (start : Nat) : IO Nat := return (← IO.monoMsNow) - start
 
-def grow (transport : Transport) (count : Nat) : IO (Loaded rootBytes) := do
+def grow (creates : Bool) (transport : Transport) (count : Nat) : IO (Loaded rootBytes) := do
   let initial ← match ← load transport rootBytes with
     | .ok opened => pure opened
     | .error detail => throw (IO.userError s!"open: {detail}")
   let mut loaded := initial
   for number in List.range' (loaded.image.accepted.length + 1) (count - loaded.image.accepted.length) do
-    match ← receiveLoadedDetailed transport rootBytes loaded (step number) with
+    match ← receiveLoadedDetailed transport rootBytes loaded (step creates number) with
     | .exact _ appended => loaded := appended.next
     | .ordinary _ => throw (IO.userError s!"append {number} did not confirm")
   return loaded
 
-def run (binary : System.FilePath) (directory : System.FilePath) (count : Nat) : IO Unit := do
+def run (creates : Bool) (binary : System.FilePath) (directory : System.FilePath) (count : Nat) : IO Unit := do
   IO.FS.writeBinFile (directory / "key") ((List.range 32).map (fun i => UInt8.ofNat (i * 7 + 3))).toByteArray
   let config : NativeConfig :=
     { binary := binary, root := directory / "store", key := directory / "key", checkpointEvery := 64 }
@@ -71,7 +76,7 @@ def run (binary : System.FilePath) (directory : System.FilePath) (count : Nat) :
   | .error message => throw (IO.userError message)
   | .ok () => pure ()
   let growStart ← IO.monoMsNow
-  let _ ← grow transport count
+  let _ ← grow creates transport count
   let growMs ← ms growStart
   let mut openBest := 1000000000
   let mut readBest := 1000000000
@@ -106,7 +111,7 @@ def run (binary : System.FilePath) (directory : System.FilePath) (count : Nat) :
   let loaded ← match ← load transport rootBytes with
     | .ok loaded => pure loaded
     | .error detail => throw (IO.userError s!"open: {detail}")
-  match ← receiveLoadedDetailed transport rootBytes loaded (step (count + 1)) with
+  match ← receiveLoadedDetailed transport rootBytes loaded (step creates (count + 1)) with
   | .exact _ _ => pure ()
   | .ordinary _ => throw (IO.userError "the measured append did not confirm")
   let appendMs ← ms t2
@@ -114,17 +119,18 @@ def run (binary : System.FilePath) (directory : System.FilePath) (count : Nat) :
   match ← DurableServed.openHead transport rootBytes with
   | .error detail => throw (IO.userError s!"light open: {detail}")
   | .ok opening =>
-      match ← DurableServed.receiveServed transport rootBytes opening (step (count + 2)) with
+      match ← DurableServed.receiveServed transport rootBytes opening (step creates (count + 2)) with
       | .appended .. => pure ()
       | _ => throw (IO.userError "the measured light append did not confirm")
   let lightAppendMs ← ms t3
-  IO.println s!"records {count}: open {openBest} ms, first read (reader + 1 record + 1 byTx) {readBest} ms, open+append {appendMs} ms, light open {lightBest} ms, light open+append {lightAppendMs} ms (grown in {growMs} ms)"
+  IO.println s!"records {count}{if creates then " (each a cell birth)" else ""}: open {openBest} ms, first read (reader + 1 record + 1 byTx) {readBest} ms, open+append {appendMs} ms, light open {lightBest} ms, light open+append {lightAppendMs} ms (grown in {growMs} ms)"
 
 end Kn2StoreBench
 
 def main (arguments : List String) : IO Unit := do
   match arguments with
   | binary :: counts =>
+      let creates := (← IO.getEnv "KN2_BENCH_CREATES") == some "1"
       for count in counts.filterMap String.toNat? do
-        IO.FS.withTempDir fun directory => Kn2StoreBench.run binary directory count
+        IO.FS.withTempDir fun directory => Kn2StoreBench.run creates binary directory count
   | _ => throw (IO.userError "usage: kn2-store-bench STORE-HELPER N...")

@@ -167,6 +167,11 @@ def refresh (config : Config) (session : Session config) :
       session.durable with
   | .error detail => return .error detail
   | .ok ⟨durable, _⟩ =>
+      -- Nothing new on the Store's log, and the light opening is at the same head:
+      -- the Store is not read a second time to learn it.
+      if durable.height = session.durable.height ∧
+          session.light.opening.head.height = session.durable.height then
+        return .ok session
       -- The light opening reads the same new entries, verified as its open verifies them.
       let light ← match ← session.light.refresh with
         | .error detail => return .error detail

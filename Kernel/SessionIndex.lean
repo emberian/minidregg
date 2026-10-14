@@ -132,6 +132,60 @@ def CellIds.ofImage (image : Image) : CellIds :=
 theorem CellIds.ofImage_exact (image : Image) : (CellIds.ofImage image).Exact (rawIds image) := by
   simpa using CellIds.addAll_exact CellIds.empty_exact (rawIds image)
 
+/-- `List.eraseDups` of a list of cell ids in one hashed pass (linear, not quadratic). -/
+def dedup (raw : List CellId) : List CellId := (CellIds.empty.addAll raw).order.toList
+
+theorem dedup_eq (raw : List CellId) : dedup raw = raw.eraseDups := by
+  have := (CellIds.addAll_exact CellIds.empty_exact raw).order
+  simpa [dedup] using this
+
+/-- `Image.cellIds`, compiled as one hashed pass (every compiled caller that sees
+this module runs it; the definition and every theorem about it are unchanged). -/
+def cellIdsFast (image : Image) : List CellId := dedup (rawIds image)
+
+@[csimp] theorem cellIds_eq_fast : @Image.cellIds = @cellIdsFast := by
+  funext image
+  rw [cellIdsFast, dedup_eq, cellIds_eq_rawIds]
+
+#assert_axioms cellIds_eq_fast
+
+/-- Whether a list of cell ids has no repeat, in one hashed pass (`List.Nodup`'s
+decision is quadratic). -/
+def nodupFrom : List CellId → Std.HashSet CellId → Bool
+  | [], _ => true
+  | id :: rest, seen => if seen.contains id then false else nodupFrom rest (seen.insert id)
+
+def nodupFast (ids : List CellId) : Bool := nodupFrom ids ∅
+
+theorem nodupFrom_iff : ∀ (ids : List CellId) (seen : Std.HashSet CellId),
+    nodupFrom ids seen = true ↔ ids.Nodup ∧ ∀ id ∈ ids, seen.contains id = false
+  | [], seen => by simp [nodupFrom]
+  | id :: rest, seen => by
+      unfold nodupFrom
+      by_cases hit : seen.contains id = true
+      · simp only [hit, if_true, Bool.false_eq_true, false_iff, not_and]
+        intro _ fresh
+        have := fresh id List.mem_cons_self
+        simp [hit] at this
+      · simp only [hit, if_false, Bool.false_eq_true]
+        rw [nodupFrom_iff rest (seen.insert id), List.nodup_cons]
+        simp only [Std.HashSet.contains_insert, Bool.or_eq_false_iff, beq_eq_false_iff_ne,
+          List.mem_cons, forall_eq_or_imp]
+        constructor
+        · rintro ⟨nodup, fresh⟩
+          refine ⟨⟨fun member => (fresh id member).1 rfl, nodup⟩, by simpa using hit,
+            fun other member => (fresh other member).2⟩
+        · rintro ⟨⟨missing, nodup⟩, _, fresh⟩
+          refine ⟨nodup, fun other member => ⟨?_, fresh other member⟩⟩
+          rintro rfl
+          exact missing member
+
+theorem nodupFast_iff (ids : List CellId) : nodupFast ids = true ↔ ids.Nodup := by
+  rw [nodupFast, nodupFrom_iff]
+  simp
+
+#assert_axioms nodupFast_iff
+
 /-- One accepted record's writes, added at append. -/
 def CellIds.admit (ids : CellIds) (record : IntentRecord) : CellIds :=
   ids.addAll (record.writes.map DataWrite.cellId)

@@ -178,18 +178,24 @@ def planVerdict (deployment : Deployment) (profile : CanonicalRuntimeProfile.Pro
       | .error (.seats reason) => refusal (.seats reason)
       | .error (.kernel reason) => refusal (.kernel reason)
 
-/-- The exact header the signer signs: the signed request over the planned outcome (`planOutcome`). -/
-def signingHeader (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
-    (ambient : Ambient) (durable : Durable) (command : Command) :
+/-- The exact header the signer signs over `outcome`: the signed request at this snapshot. -/
+def signingHeaderFor (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (ambient : Ambient) (durable : Durable) (command : Command) (outcome : Digest) :
     Except String CredentialSignedEnvelopeController.SignedHeader := do
   let some authority := loadDeployment deployment durable.snapshot
     | .error "authority unavailable"
-  let outcome := planOutcome deployment profile ambient durable command
   let preRoot := durable.snapshot.model.roots ⟨(signedTarget deployment.domain command).2⟩
   (CredentialSignatureAdmission.signingHeader authority.snapshot
     (marker deployment.domain profile.semantics command)
     (signedRequest authority.snapshot profile.semantics ambient command preRoot outcome)).mapError
       (fun reason => s!"activity signer key: {repr reason}")
+
+/-- The exact header the signer signs: the signed request over the planned outcome (`planOutcome`). -/
+def signingHeader (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (ambient : Ambient) (durable : Durable) (command : Command) :
+    Except String CredentialSignedEnvelopeController.SignedHeader :=
+  signingHeaderFor deployment profile ambient durable command
+    (planOutcome deployment profile ambient durable command)
 
 /-- What the decided turn returns to its signer, shown before it signs: an
 invocation's root result, a delivered message's reply (their data bytes);
@@ -233,6 +239,102 @@ def planFrontEnd (deployment : Deployment) (profile : CanonicalRuntimeProfile.Pr
     | .error (.call _ drawn) => drawn
     | .error _ => ⟨0, 0, 0, 0⟩
   | .error _ => ⟨0, 0, 0, 0⟩
+
+/-- What a plan shows its signer, from ONE decision of the command: `planReport`,
+`planOutcome`, `planVerdict` and `planFrontEnd` each decide it again; the
+`planDecision_*` theorems state that each field is that projection. -/
+structure PlanDecision where
+  report : List UInt8
+  outcome : Digest
+  verdict : String
+  frontEnd : ObjectiveCall.FrontEnd
+
+def planDecision (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (ambient : Ambient) (durable : Durable) (command : Command) : PlanDecision :=
+  let refusal (reason : Reject) : String :=
+    if chargedCause reason && (failureRequest deployment.domain profile.semantics command).isSome then
+      s!"charged failure: {repr reason}" else s!"refused: {repr reason}"
+  match configOf deployment profile ambient with
+  | .error reason => ⟨[], outcomeDigest [], refusal (.kernel reason), ⟨0, 0, 0, 0⟩⟩
+  | .ok config => match decideTurn config durable.snapshot ambient.height command with
+    | .error (.call reason drawn) => ⟨[], outcomeDigest [], refusal (.call reason drawn), drawn⟩
+    | .error reason => ⟨[], outcomeDigest [], refusal reason, ⟨0, 0, 0, 0⟩⟩
+    | .ok decided => match ActivitySeatEnd.finish config durable.snapshot ambient.height decided with
+      | .ok final => ⟨decided.report, outcomeDigest final.1, "", decided.frontEnd⟩
+      | .error (.seats reason) =>
+          ⟨decided.report, outcomeDigest [], refusal (.seats reason), decided.frontEnd⟩
+      | .error (.kernel reason) =>
+          ⟨decided.report, outcomeDigest [], refusal (.kernel reason), decided.frontEnd⟩
+
+theorem planDecision_report (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (ambient : Ambient) (durable : Durable) (command : Command) :
+    (planDecision deployment profile ambient durable command).report =
+      planReport deployment profile ambient durable command := by
+  unfold planDecision planReport
+  cases configOf deployment profile ambient with
+  | error reason => rfl
+  | ok config =>
+    dsimp only
+    cases decideTurn config durable.snapshot ambient.height command with
+    | error reason => cases reason <;> rfl
+    | ok decided =>
+      dsimp only
+      cases ActivitySeatEnd.finish config durable.snapshot ambient.height decided with
+      | ok final => rfl
+      | error failure => cases failure <;> rfl
+
+theorem planDecision_outcome (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (ambient : Ambient) (durable : Durable) (command : Command) :
+    (planDecision deployment profile ambient durable command).outcome =
+      planOutcome deployment profile ambient durable command := by
+  unfold planDecision planOutcome
+  cases configOf deployment profile ambient with
+  | error reason => rfl
+  | ok config =>
+    dsimp only
+    cases decideTurn config durable.snapshot ambient.height command with
+    | error reason => cases reason <;> rfl
+    | ok decided =>
+      dsimp only
+      cases ActivitySeatEnd.finish config durable.snapshot ambient.height decided with
+      | ok final => rfl
+      | error failure => cases failure <;> rfl
+
+theorem planDecision_verdict (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (ambient : Ambient) (durable : Durable) (command : Command) :
+    (planDecision deployment profile ambient durable command).verdict =
+      planVerdict deployment profile ambient durable command := by
+  unfold planDecision planVerdict
+  cases configOf deployment profile ambient with
+  | error reason => rfl
+  | ok config =>
+    dsimp only
+    cases decideTurn config durable.snapshot ambient.height command with
+    | error reason => cases reason <;> rfl
+    | ok decided =>
+      dsimp only
+      cases ActivitySeatEnd.finish config durable.snapshot ambient.height decided with
+      | ok final => rfl
+      | error failure => cases failure <;> rfl
+
+theorem planDecision_frontEnd (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (ambient : Ambient) (durable : Durable) (command : Command) :
+    (planDecision deployment profile ambient durable command).frontEnd =
+      planFrontEnd deployment profile ambient durable command := by
+  unfold planDecision planFrontEnd
+  cases configOf deployment profile ambient with
+  | error reason => rfl
+  | ok config =>
+    dsimp only
+    cases decideTurn config durable.snapshot ambient.height command with
+    | error reason => cases reason <;> rfl
+    | ok decided =>
+      dsimp only
+      cases ActivitySeatEnd.finish config durable.snapshot ambient.height decided with
+      | ok final => rfl
+      | error failure => cases failure <;> rfl
+
+#assert_axioms planDecision_report planDecision_outcome planDecision_verdict planDecision_frontEnd
 
 structure SigningPlan where
   domain : Digest

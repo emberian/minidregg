@@ -371,6 +371,47 @@ def policiesSourced (config : Config) (directory : Directory Nat CanonicalCellRe
     (logical : Store.Store CredentialAuthorityState.layout) : Bool :=
   decide (∀ address ∈ logical.support, policySourced config directory logical address = true)
 
+/-- `policySourced` against a given semantics digest. The profile's digest is a
+hash of the runtime manifest, recomputed at every call, so `policiesSourced`
+computes it once (`policiesSourced_eq_once`) rather than once per recorded policy. -/
+def policySourcedAt (config : Config) (semantics : Digest)
+    (directory : Directory Nat CanonicalCellRegistry.registry)
+    (logical : Store.Store CredentialAuthorityState.layout) :
+    Store.Address CredentialAuthorityState.layout → Bool
+  | ⟨.policyRevision, identifier⟩ =>
+      match CredentialAuthorityDomain.headAt logical identifier with
+      | none => false
+      | some head =>
+          match CanonicalCellRegistry.loadPolicySource config.deployment.domain directory head.address with
+          | none => false
+          | some source => decide (source.record.policyId = identifier ∧
+              source.record.version = head.version ∧ source.record.semantics = semantics)
+  | _ => true
+
+theorem policySourced_eq_at (config : Config) (directory : Directory Nat CanonicalCellRegistry.registry)
+    (logical : Store.Store CredentialAuthorityState.layout) :
+    policySourced config directory logical =
+      policySourcedAt config config.profile.semantics directory logical := by
+  funext address
+  rcases address with ⟨kind, identifier⟩
+  cases kind <;> rfl
+
+@[noinline] def policiesSourcedAt (config : Config) (semantics : Digest)
+    (directory : Directory Nat CanonicalCellRegistry.registry)
+    (logical : Store.Store CredentialAuthorityState.layout) : Bool :=
+  decide (∀ address ∈ logical.support, policySourcedAt config semantics directory logical address = true)
+
+def policiesSourcedOnce (config : Config) (directory : Directory Nat CanonicalCellRegistry.registry)
+    (logical : Store.Store CredentialAuthorityState.layout) : Bool :=
+  policiesSourcedAt config config.profile.semantics directory logical
+
+@[csimp] theorem policiesSourced_eq_once : @policiesSourced = @policiesSourcedOnce := by
+  funext config directory logical
+  unfold policiesSourced policiesSourcedOnce policiesSourcedAt
+  rw [policySourced_eq_at]
+
+#assert_axioms policiesSourced_eq_once
+
 /-- One stored cell obeys its role and domain law (vacuous for an absent slot). -/
 def cellLawful (config : Config) (directory : Directory Nat CanonicalCellRegistry.registry)
     (identifier : Digest) : Bool :=
@@ -515,20 +556,30 @@ theorem validateCore_map {D A D' A' : Type} (config : Config) (seed : DurableRec
           · rw [dif_neg verdict, dif_neg (lawfuls ▸ verdict)]
             rfl
 
-/-- The one validation of the full shape, over a supplied directory and
-cell-law check. The caller's directory must be the image's
-(`validatePartsWith_eq`) and its check must decide `cellsLawful`
-(`lawfulExact`); then this is `validateParts`, the same result and the same
-refusal in the same order. -/
+/-- The one validation of the full shape, over a supplied directory, authority
+and cell-law check. When the directory and authority are the image's own loads
+and the check decides `cellsLawful` (`lawfulExact`), this is `validateParts`,
+the same result and the same refusal in the same order (`validatePartsVia_eq`). -/
+def validatePartsVia (config : Config) (durable : Durable)
+    (directory? : Option (CredentialAuthorityDomainReceiver.LoadedDirectory durable))
+    (authority? : Option (CredentialAuthorityDomainReceiver.Loaded config.deployment durable.snapshot))
+    (lawfulCheck : CredentialAuthorityDomainReceiver.LoadedDirectory durable → Bool)
+    (lawfulExact : ∀ loaded, lawfulCheck loaded = cellsLawful config durable loaded.directory) :
+    Except String (Validated config durable) :=
+  (validateCore config durable.image.seed durable.logStart directory? authority?
+    (·.directory) (·.snapshot.logical) lawfulCheck).map fun parts =>
+      ⟨parts.1.1, parts.1.2.1, parts.1.2.2, (lawfulExact parts.1.1) ▸ parts.2⟩
+
+/-- `validatePartsVia` over the image's own authority load. The caller's
+directory must be the image's (`validatePartsWith_eq`). -/
 def validatePartsWith (config : Config) (durable : Durable)
     (directory? : Option (CredentialAuthorityDomainReceiver.LoadedDirectory durable))
     (lawfulCheck : CredentialAuthorityDomainReceiver.LoadedDirectory durable → Bool)
     (lawfulExact : ∀ loaded, lawfulCheck loaded = cellsLawful config durable loaded.directory) :
     Except String (Validated config durable) :=
-  (validateCore config durable.image.seed durable.logStart directory?
+  validatePartsVia config durable directory?
     (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot)
-    (·.directory) (·.snapshot.logical) lawfulCheck).map fun parts =>
-      ⟨parts.1.1, parts.1.2.1, parts.1.2.2, (lawfulExact parts.1.1) ▸ parts.2⟩
+    lawfulCheck lawfulExact
 
 def validateParts (config : Config) (durable : Durable) :
     Except String (Validated config durable) :=
@@ -546,6 +597,17 @@ theorem validatePartsWith_eq (config : Config) (durable : Durable)
     funext lawfulExact
   subst same
   rfl
+
+theorem validatePartsVia_eq (config : Config) (durable : Durable)
+    (directory? : Option (CredentialAuthorityDomainReceiver.LoadedDirectory durable))
+    (authority? : Option (CredentialAuthorityDomainReceiver.Loaded config.deployment durable.snapshot))
+    (lawfulCheck : CredentialAuthorityDomainReceiver.LoadedDirectory durable → Bool)
+    (lawfulExact : ∀ loaded, lawfulCheck loaded = cellsLawful config durable loaded.directory)
+    (loaded : directory? = CredentialAuthorityDomainReceiver.loadDirectory durable)
+    (authorityLoaded : authority? = CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot) :
+    validatePartsVia config durable directory? authority? lawfulCheck lawfulExact = validateParts config durable := by
+  subst authorityLoaded
+  exact validatePartsWith_eq config durable directory? lawfulCheck lawfulExact loaded
 
 def validateLoaded (config : Config) (durable : Durable) : Except String (Opened config) :=
   (validateParts config durable).map fun parts =>
@@ -619,21 +681,24 @@ theorem cellsLawfulFrom_eq (config : Config) (prior : Opened config) (durable : 
     exact Or.inr (lawful identifier member)
 
 /-- **Validation of a session's next image, incrementally**: the directory
-decodes only rows whose bytes moved (`loadDirectoryFrom`) and the cell law runs
-only on those cells (`cellsLawfulFrom`). `validateLoadedFrom_eq`: it is
-`validateLoaded` -- the same `Opened`, the same refusal. -/
+decodes only rows whose bytes moved (`loadDirectoryFrom`), the authority cell is
+decoded only when its bytes moved (`loadDeploymentFrom`) and the cell law runs
+only on cells whose bytes moved (`cellsLawfulFrom`). `validateLoadedFrom_eq`: it
+is `validateLoaded` -- the same `Opened`, the same refusal. -/
 def validateLoadedFrom (config : Config) (prior : Opened config) (durable : Durable) :
     Except String (Opened config) :=
-  (validatePartsWith config durable
+  (validatePartsVia config durable
     (CredentialAuthorityDomainReceiver.loadDirectoryFrom prior.directory durable)
+    (CredentialAuthorityDomainReceiver.loadDeploymentFrom prior.authority durable.snapshot)
     (cellsLawfulFrom config prior durable) (cellsLawfulFrom_eq config prior durable)).map
     fun parts => ⟨durable, parts.directory, parts.authority, parts.pins, parts.lawful⟩
 
 theorem validateLoadedFrom_eq (config : Config) (prior : Opened config) (durable : Durable) :
     validateLoadedFrom config prior durable = validateLoaded config durable := by
   unfold validateLoadedFrom validateLoaded
-  rw [validatePartsWith_eq config durable _ _ _
-    (CredentialAuthorityDomainReceiver.loadDirectoryFrom_eq prior.directory durable)]
+  rw [validatePartsVia_eq config durable _ _ _ _
+    (CredentialAuthorityDomainReceiver.loadDirectoryFrom_eq prior.directory durable)
+    (CredentialAuthorityDomainReceiver.loadDeploymentFrom_eq prior.authority durable.snapshot)]
 
 /-- Validation wraps exactly the image it was given. -/
 theorem validateLoaded_durable {config : Config} {durable : Durable} {opened : Opened config}
