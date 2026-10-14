@@ -121,6 +121,10 @@ import Kernel.TurnRecord  -- B2: an AcceptedCellEffect is a Leg (exactPost deriv
 import Kernel.TurnOfIntent  -- T3: Turn.ofIntent = the diff of each written cell against the held cell (a G-NORM fixed point; ofIntent_minimal: footprint = the addresses that differ); ofIntent_step; legPatch_valid_iff (refused exactly when no guarded patch reaches the image)
 import Kernel.DeployedBridge  -- T3b: the deployed Bridge (lifecycle-image decoder + one StoreCodec.Wire per registered kind); bridge_decode_total_on_registry, deployed_cells_iff
 import Kernel.DeployedHistory  -- Deployed written-value byte accounting and complete turn digest preimage
+import Kernel.DeployedTurnCodec  -- FD-1 R4a: decodeTurn, the inverse of encodeTurn (decodeTurn_encodeTurn)
+import Kernel.DeployedTurnCompact  -- FD-1 R4b/FD-2: the persisted Turn: digest guards, new values only (decodeTurnAt_encodeTurnAt)
+import Kernel.WorldSystemCodec  -- checkpoint = World v1: the system cell sub-codec, all six namespaces
+import Kernel.TurnLog  -- FD-1 R4a: deployed genesis World of a Seed; the Turn-log follower IS World.fold
 import Kernel.ObjectiveAdmissible -- Exact receiver intent certificates consumed by the durable writer
 import Kernel.ObjectiveRefinesWorld -- Exact payload bridge and receiver-essential OB invariants in reached Worlds
 import Kernel.ObjectiveTurnTotality  -- Constructed seedless-create/stateless-member absence poles

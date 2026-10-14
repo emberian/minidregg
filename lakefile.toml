@@ -77,6 +77,11 @@ root = "Host.Main"
 name = "objective-turn-totality"
 root = "Host.ObjectiveTurnTotalityRunner"
 
+# FD-1 R4a: export a Store as a Turn log; a second process follows it to the root.
+[[lean_exe]]
+name = "turn-log-follower"
+root = "Host.TurnLogFollower"
+
 # Local custody consent, selected separately from the remote Host image.
 # The base entry refuses unsupported higher lifecycle families explicitly.
 [[lean_exe]]

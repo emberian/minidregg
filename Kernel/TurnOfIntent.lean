@@ -514,18 +514,26 @@ theorem bytesCode_injective : Function.Injective bytesCode := by
       subst byte'
       exact congrArg (List.cons byte) (ih tailSame)
 
-/-- **An injective nullifier code**: every field of the stable nullifier,
-including its canonical bytes, by `Nat.pair`.  No hash, so no collision
-premise: `spent` keyed by it is the deployed consumed set exactly. -/
+/-- The stable nullifier as one length-delimited byte string. -/
+def nullifierFields : Compiler.Tower256ConcreteBackend.StreamCodec (Nat × Nat × Nat × List UInt8) :=
+  .product .nat (.product .nat (.product .nat Compiler.Tower256ConcreteBackend.bytesStream))
+
+/-- **An injective nullifier code, linear in the nullifier**: the base-256
+positional value (`bytesCode`) of the nullifier's fields as one prefix-free
+byte string.  No hash, so no collision premise: `spent` keyed by it is the
+deployed consumed set exactly.  (It was a three-deep `Nat.pair`, whose bit
+length roughly doubles per level: measured 488 bytes per nullifier in a Turn
+log against 60 canonical bytes.) -/
 def nullifierCode (n : StableNullifier) : Nat :=
-  Nat.pair n.codecVersion
-    (Nat.pair n.domain.value (Nat.pair n.nullifierId.value (bytesCode n.canonicalBytes)))
+  bytesCode (nullifierFields.encode (n.codecVersion, n.domain.value, n.nullifierId.value,
+    n.canonicalBytes))
 
 theorem nullifierCode_injective : Function.Injective nullifierCode := by
   rintro ⟨v, ⟨d⟩, ⟨i⟩, b⟩ ⟨v', ⟨d'⟩, ⟨i'⟩, b'⟩ h
-  simp only [nullifierCode, Nat.pair_eq_pair] at h
-  obtain ⟨rfl, rfl, rfl, hb⟩ := h
-  rw [bytesCode_injective hb]
+  have := Compiler.StoreCodec.streamEncode_injective nullifierFields (bytesCode_injective h)
+  simp only [Prod.mk.injEq] at this
+  obtain ⟨rfl, rfl, rfl, rfl⟩ := this
+  rfl
 
 /-- The bridge between the deployed objects and the model: the cell codec and
 an injective nullifier key. -/
