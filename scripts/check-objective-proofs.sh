@@ -50,7 +50,8 @@
 # usage: scripts/check-objective-proofs.sh [proofs|c|cgen|transparency|all] [--pin|--draft]
 #   --pin    (proofs only) after a run whose every change is admitted, write the manifests: add the
 #            new rows, apply the admitted changes and removals, refresh re-rendered text. It cannot
-#            remove or change a row the ledger does not admit; commit the manifests it writes.
+#            remove or change a row the ledger does not admit; commit the manifests it writes. Then it
+#            archives the ledger's live segment (scripts/gates/ledger-rotation.py rotate): commit that too.
 #   --draft  (proofs only) print a ledger line (reason TODO, which the ledger refuses) for every
 #            unadmitted change, to review, give a commit and a reason, and append.
 #   --draft FROM..TO  the same lines with commit and reason attributed from the commits of FROM..TO
@@ -256,6 +257,11 @@ gate_proofs() {
   local extra=()
   [ -n "$attribute" ] && extra=(--attribute "$attribute" --out "$logs/draft-ledger.txt" --review "$logs/draft-review.txt")
   if "${tool[@]}" "$mode" "${extra[@]}" "$tmp/theory.out" "$tmp/mathlib.out" | tee "$logs/manifest-$mode.log"; then :; else failed=1; fi
+  # the pins now hold every admitted change: archive the live ledger segment and empty it
+  # (scripts/gates/ledger-rotation.py; the gate refuses an un-archived rotation)
+  if [ "$mode" = pin ] && [ "$failed" = 0 ]; then
+    python3 scripts/gates/ledger-rotation.py rotate "$ledger" scripts/gates/ledger-archive "$(git rev-parse HEAD)" || failed=1
+  fi
   [ "$failed" = 0 ]
 }
 
