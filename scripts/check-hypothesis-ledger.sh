@@ -33,6 +33,10 @@
 #       and no instance; the run must turn RED.
 # The copies are written to a temporary directory; the tree is never edited.
 #
+# The seven elaborations (six plants + the real run) are independent: each reads the built
+# environment and writes its own log under the temporary directory. They run HYP_LEDGER_JOBS at a
+# time (default 1); every verdict is read after all of them finish, in the order (a)..(g), (c).
+#
 # usage: scripts/check-hypothesis-ledger.sh [--no-self-test]
 # Requires the research umbrella built (scripts/lane/rb.sh); never rebuilds it.
 set -euo pipefail
@@ -45,15 +49,20 @@ export HYP_TRIVIAL_ALLOW="$root/scripts/trivial-structure-allow.txt"
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/hyp-ledger.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 
-run() { # run <file> <log>; prints the exit status, never fails the script
-  set +e
-  # Give scratch copies an explicit package root while retaining the project
-  # toolchain and imported environment selected by lake env.
-  lake env lean --root="$(dirname "$1")" "$1" >"$2" 2>&1
-  local status=$?
-  set -e
-  echo "$status"
+# Give scratch copies an explicit package root while retaining the project
+# toolchain and imported environment selected by lake env.
+jobs_max=${HYP_LEDGER_JOBS:-1}
+pids=()
+# launch <name> <file> [VAR=value...]: elaborate <file> in the background into $tmp/<name>.log,
+# its exit status into $tmp/<name>.status; at most $jobs_max at once.
+launch() {
+  local name=$1 file=$2; shift 2
+  while [ "$(jobs -rp | wc -l)" -ge "$jobs_max" ]; do wait -n || true; done
+  ( env "$@" bash -c 'lake env lean --root="$(dirname "$1")" "$1" >"$2" 2>&1; echo $? >"$3"' _ \
+      "$file" "$tmp/$name.log" "$tmp/$name.status" ) &
+  pids+=($!)
 }
+status_of() { cat "$tmp/$1.status" 2>/dev/null || echo missing; }
 
 # Report a failed prerequisite as such; it is not an instrument refutation.
 if ! lake env lean --deps "$ledger" >"$tmp/dependencies.log" 2>&1; then
@@ -88,13 +97,7 @@ end Minidregg.Scratch
 """
 open(sys.argv[2], "w").write(src.replace(anchor, plant + anchor))
 EOF
-  status=$(run "$tmp/plant.lean" "$tmp/plant.log")
-  row=$(grep -a "^Minidregg.Scratch.Bogus | REFUTED | VACUOUS \[RED\]" "$tmp/plant.log" || true)
-  if [ "$status" != 0 ] && [ -n "$row" ] && grep -aq "RED: Minidregg.Scratch.Bogus is VACUOUS" "$tmp/plant.log"; then
-    echo "self-test (a) planted refuted family: PASS (exit $status; ${row%%  \[*})"
-  else
-    echo "self-test (a) planted refuted family: FAIL (exit $status)"; cat "$tmp/plant.log"; failed=1
-  fi
+  launch plant "$tmp/plant.lean"
 
   # (b) delete the scan
   python3 - "$ledger" "$tmp/noscan.lean" <<'EOF'
@@ -105,12 +108,7 @@ assert src.count(begin) == 1 and src.count(end) == 1, "self-test: scan markers n
 i, j = src.index(begin), src.index(end) + len(end)
 open(sys.argv[2], "w").write(src[:i] + src[j:])
 EOF
-  status=$(run "$tmp/noscan.lean" "$tmp/noscan.log")
-  if [ "$status" != 0 ] && grep -aq "hypothesis-ledger: instrument:" "$tmp/noscan.log"; then
-    echo "self-test (b) scan deleted: PASS (exit $status; $(grep -ac "hypothesis-ledger: instrument:" "$tmp/noscan.log") instrument failures, first: $(grep -a -m1 "hypothesis-ledger: instrument:" "$tmp/noscan.log"))"
-  else
-    echo "self-test (b) scan deleted: FAIL (exit $status)"; cat "$tmp/noscan.log"; failed=1
-  fi
+  launch noscan "$tmp/noscan.lean"
 
   # (d) the probe outside the plant namespace: a PackedRefinement-shaped structure
   #     (the zk-truth lane's 2026-10-04 finding) bound by a theorem must turn the run RED
@@ -130,12 +128,7 @@ end Minidregg.Scratch
 """
 open(sys.argv[2], "w").write(src.replace(anchor, plant + anchor))
 EOF
-  status=$(run "$tmp/trivial.lean" "$tmp/trivial.log")
-  if [ "$status" != 0 ] && grep -aq "RED: structure Minidregg.Scratch.Refinement is TRIVIAL" "$tmp/trivial.log"; then
-    echo "self-test (d) planted trivial structure: PASS (exit $status)"
-  else
-    echo "self-test (d) planted trivial structure: FAIL (exit $status)"; cat "$tmp/trivial.log"; failed=1
-  fi
+  launch trivial "$tmp/trivial.lean"
 
   # (e) delete the covered-consumer pass: the un-fixed Polishchuk-Spielman plant
   #     (refuted at ZMod 5, consumed at ZMod 5) must stop reading VACUOUS
@@ -147,12 +140,7 @@ assert src.count(begin) == 1 and src.count(end) == 1, "self-test: cover markers 
 i, j = src.index(begin), src.index(end) + len(end)
 open(sys.argv[2], "w").write(src[:i] + src[j:])
 EOF
-  status=$(run "$tmp/nocover.lean" "$tmp/nocover.log")
-  if [ "$status" != 0 ] && grep -aq "instrument: plant Minidregg.HypothesisLedger.Plant.UnfixedPolishchukSpielman expected VACUOUS" "$tmp/nocover.log"; then
-    echo "self-test (e) covered-consumer pass deleted: PASS (exit $status; $(grep -a -m1 'UnfixedPolishchukSpielman expected' "$tmp/nocover.log"))"
-  else
-    echo "self-test (e) covered-consumer pass deleted: FAIL (exit $status)"; cat "$tmp/nocover.log"; failed=1
-  fi
+  launch nocover "$tmp/nocover.lean"
 
   # (f) delete the inhabitation check: an instance quantified over an unshown carrier
   #     (plant Unshowable) must then read GREEN, which the instrument refuses
@@ -164,12 +152,7 @@ assert src.count(begin) == 1 and src.count(end) == 1, "self-test: inhabitation m
 i, j = src.index(begin), src.index(end) + len(end)
 open(sys.argv[2], "w").write(src[:i] + src[j:])
 EOF
-  status=$(run "$tmp/noinhabit.lean" "$tmp/noinhabit.log")
-  if [ "$status" != 0 ] && grep -aq "instrument: plant Minidregg.HypothesisLedger.Plant.Unshowable expected TOOTHLESS" "$tmp/noinhabit.log"; then
-    echo "self-test (f) instance inhabitation check deleted: PASS (exit $status; $(grep -a -m1 'Unshowable expected' "$tmp/noinhabit.log"))"
-  else
-    echo "self-test (f) instance inhabitation check deleted: FAIL (exit $status)"; cat "$tmp/noinhabit.log"; failed=1
-  fi
+  launch noinhabit "$tmp/noinhabit.lean"
 
   # (g) a PREMISE entry with neither a non-triviality field nor an instance and a theorem
   #     must turn the run RED (the allowlist is a classification, not a pardon list)
@@ -186,16 +169,52 @@ for line in lines:
 assert done, "self-test: no allowlist entry to rewrite"
 open(sys.argv[2], "w").write("\n".join(out) + "\n")
 EOF
-  status=$(HYP_TRIVIAL_ALLOW="$tmp/premise-allow.txt" run "$ledger" "$tmp/premise.log")
+  launch premise "$ledger" HYP_TRIVIAL_ALLOW="$tmp/premise-allow.txt"
+fi
+
+# (c) the real run
+launch real "$ledger"
+for pid in "${pids[@]}"; do wait "$pid" || true; done
+if [ "$self_test" = 1 ]; then
+  status=$(status_of plant)
+  row=$(grep -a "^Minidregg.Scratch.Bogus | REFUTED | VACUOUS \[RED\]" "$tmp/plant.log" || true)
+  if [ "$status" != 0 ] && [ -n "$row" ] && grep -aq "RED: Minidregg.Scratch.Bogus is VACUOUS" "$tmp/plant.log"; then
+    echo "self-test (a) planted refuted family: PASS (exit $status; ${row%%  \[*})"
+  else
+    echo "self-test (a) planted refuted family: FAIL (exit $status)"; cat "$tmp/plant.log"; failed=1
+  fi
+  status=$(status_of noscan)
+  if [ "$status" != 0 ] && grep -aq "hypothesis-ledger: instrument:" "$tmp/noscan.log"; then
+    echo "self-test (b) scan deleted: PASS (exit $status; $(grep -ac "hypothesis-ledger: instrument:" "$tmp/noscan.log") instrument failures, first: $(grep -a -m1 "hypothesis-ledger: instrument:" "$tmp/noscan.log"))"
+  else
+    echo "self-test (b) scan deleted: FAIL (exit $status)"; cat "$tmp/noscan.log"; failed=1
+  fi
+  status=$(status_of trivial)
+  if [ "$status" != 0 ] && grep -aq "RED: structure Minidregg.Scratch.Refinement is TRIVIAL" "$tmp/trivial.log"; then
+    echo "self-test (d) planted trivial structure: PASS (exit $status)"
+  else
+    echo "self-test (d) planted trivial structure: FAIL (exit $status)"; cat "$tmp/trivial.log"; failed=1
+  fi
+  status=$(status_of nocover)
+  if [ "$status" != 0 ] && grep -aq "instrument: plant Minidregg.HypothesisLedger.Plant.UnfixedPolishchukSpielman expected VACUOUS" "$tmp/nocover.log"; then
+    echo "self-test (e) covered-consumer pass deleted: PASS (exit $status; $(grep -a -m1 'UnfixedPolishchukSpielman expected' "$tmp/nocover.log"))"
+  else
+    echo "self-test (e) covered-consumer pass deleted: FAIL (exit $status)"; cat "$tmp/nocover.log"; failed=1
+  fi
+  status=$(status_of noinhabit)
+  if [ "$status" != 0 ] && grep -aq "instrument: plant Minidregg.HypothesisLedger.Plant.Unshowable expected TOOTHLESS" "$tmp/noinhabit.log"; then
+    echo "self-test (f) instance inhabitation check deleted: PASS (exit $status; $(grep -a -m1 'Unshowable expected' "$tmp/noinhabit.log"))"
+  else
+    echo "self-test (f) instance inhabitation check deleted: FAIL (exit $status)"; cat "$tmp/noinhabit.log"; failed=1
+  fi
+  status=$(status_of premise)
   if [ "$status" != 0 ] && grep -aq "PREMISE has no non-triviality field" "$tmp/premise.log"; then
     echo "self-test (g) unclassified PREMISE: PASS (exit $status)"
   else
     echo "self-test (g) unclassified PREMISE: FAIL (exit $status)"; cat "$tmp/premise.log"; failed=1
   fi
 fi
-
-# (c) the real run
-status=$(run "$ledger" "$tmp/real.log")
+status=$(status_of real)
 grep -av "^Note:\|linter\|warning: unused variable\|^$" "$tmp/real.log" || true
 if [ "$self_test" = 1 ]; then
   if grep -aq "Minidregg.Scratch" "$tmp/real.log"; then
