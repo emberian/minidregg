@@ -322,6 +322,8 @@ fn leaf(salt: &[u8], entry: &[u8]) -> [u8; 32] {
 
 
 /// One `StreamCodec.nat` prefix: base-255 digits up to the terminator 255.
+/// Canonical, as Lean `decodeNatPrefix` is: a zero most-significant digit
+/// (`[0,255]`, `[5,0,255]`) is a second spelling and is refused.
 fn nat_prefix(bytes: &[u8]) -> Result<(Nat, &[u8])> {
     let end = bytes.iter().position(|byte| *byte == 255).ok_or("unterminated natural")?;
     let mut value = Nat::zero();
@@ -598,6 +600,18 @@ mod tests {
         assert_eq!(int_bytes("3").unwrap(), vec![6, 255]);
         assert_eq!(int_bytes("-1").unwrap(), vec![1, 255]);
         assert_eq!(int_bytes("-2").unwrap(), vec![3, 255]);
+    }
+
+    #[test]
+    fn stream_nat_canonical_nat_prefix_refuses_zero_most_significant_digit() {
+        for bytes in [&[0u8, 255][..], &[5, 0, 255], &[0, 0, 255], &[5, 0, 255, 9]] {
+            assert!(nat_prefix(bytes).is_err(), "{bytes:?}");
+        }
+        assert!(nat_prefix(&[5, 7]).is_err());
+        for (bytes, value, rest) in [(&[255u8][..], "0", &[][..]), (&[5, 255, 9], "5", &[9][..]), (&[0, 1, 255], "255", &[][..])] {
+            let (decoded, suffix) = nat_prefix(bytes).unwrap();
+            assert_eq!((decoded.to_decimal().as_str(), suffix), (value, rest));
+        }
     }
 
     #[test]
