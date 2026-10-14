@@ -16,6 +16,7 @@
 # account's law (B's purse: permit-all), with B's own owner grant.
 #
 # Rows (expect admitted|refused; a refusal is the Host's encoded reason):
+#   a-caps-gold-100/kelp-100 the founder sets each well's issuance cap     -> admitted
 #   r-mints-20-gold-to-b     R's delegated mintAsset on gold, law names R  -> admitted
 #   r-mints-kelp-no-grant    R presents its gold grant for kelp            -> refused noGrant
 #   b-mints-gold-no-grant    B presents its purse grant for gold           -> refused noGrant
@@ -23,6 +24,7 @@
 #   a-mints-5-kelp-to-b      the founder's owner grant on kelp             -> admitted
 #   b-burns-5-gold           B burns from its own purse                    -> admitted
 #   b-overburns-gold         B burns 100 holding 15                        -> refused bookRefused
+#   r-mints-past-cap-gold    15 outstanding of gold's cap 100; 86 more     -> refused bookRefused
 #   r-burns-b-gold           R presents its gold grant to debit B's purse  -> refused noGrant
 #   mint-credit-asset        a mint naming the credit asset's well         -> refused creditWell
 #   mint-root-account        a mint naming a root account (no realm)       -> refused notRealmWell
@@ -144,6 +146,12 @@ bpurse=$(jq -r .operationCapability "$NEWCOMER_WS/refs/purse.json")
 ledger "$D/ledger-before.json"
 credit=$(jq -r .creditAsset "$D/ledger-before.json")
 creditBefore=$(jq -r .creditWell "$D/ledger-before.json")
+# Issuance is capped: a well's own floor is its cap, set by a floor command on
+# the well (verb mintAsset, the founder's owner grant). Gold and kelp get 100.
+run a-caps-gold-100 "$MINI" well --action floor --dir "$SPONSOR_WS" --well gold --account gold --amount 100
+row a-caps-gold-100 admitted
+run a-caps-kelp-100 "$MINI" well --action floor --dir "$SPONSOR_WS" --well kelp --account kelp --amount 100
+row a-caps-kelp-100 admitted
 # a root account: B's purse has no realm
 run r-mints-20-gold-to-b "$MINI" well --action mint --dir "$TW" --well gold --account "$purse" --amount 20
 row r-mints-20-gold-to-b admitted
@@ -161,6 +169,8 @@ run b-burns-5-gold "$MINI" well --action burn --dir "$NEWCOMER_WS" --well "$gold
 row b-burns-5-gold admitted
 run b-overburns-gold "$MINI" well --action burn --dir "$NEWCOMER_WS" --well "$gold" --account purse --amount 100
 row b-overburns-gold refused bookRefused
+run r-mints-past-cap-gold "$MINI" well --action mint --dir "$TW" --well gold --account "$purse" --amount 86
+row r-mints-past-cap-gold refused bookRefused
 run r-burns-b-gold "$MINI" well --action burn --dir "$TW" --well "$gold" --account "$purse" --amount 1 \
   --capability "$rgold"
 row r-burns-b-gold refused noGrant

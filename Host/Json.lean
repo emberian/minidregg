@@ -1206,7 +1206,21 @@ private def moneyOperation (path : String) (json : Lean.Json) :
         (← nat (path ++ ".rate") (← field path "rate" obj))
         (← nat (path ++ ".epochs") (← field path "epochs" obj))
         (← nat (path ++ ".startsAt") (← field path "startsAt" obj)))
-  | _ => failAt (path ++ ".type") "expected transfer, mint, burn, fee or lease"
+  | "setFloor" =>
+      let obj ← exactObject path ["type", "asset", "account", "floor"] json
+      pure (.setFloor (← nat (path ++ ".asset") (← field path "asset" obj))
+        (← nat (path ++ ".account") (← field path "account" obj))
+        (← nat (path ++ ".floor") (← field path "floor" obj)))
+  | "sweep" =>
+      let obj ← exactObject path
+        ["type", "holder", "commons", "asset", "permille", "epochs", "amount"] json
+      pure (.sweep (← nat (path ++ ".holder") (← field path "holder" obj))
+        (← nat (path ++ ".commons") (← field path "commons" obj))
+        (← nat (path ++ ".asset") (← field path "asset" obj))
+        (← nat (path ++ ".permille") (← field path "permille" obj))
+        (← nat (path ++ ".epochs") (← field path "epochs" obj))
+        (← nat (path ++ ".amount") (← field path "amount" obj)))
+  | _ => failAt (path ++ ".type") "expected transfer, mint, burn, fee, lease, setFloor or sweep"
 
 private def moneyFunding (path : String) (json : Lean.Json) :
     Result Minidregg.Kernel.ResourceMoneyWire.FundingConsent := do
@@ -1239,6 +1253,13 @@ private def moneyOperationJson : Minidregg.Theory.CanonicalResourceKernel.Operat
       [("type", .str "lease"), ("leaseId", decimal leaseId), ("holder", decimal holder),
        ("lessor", decimal lessor), ("asset", decimal asset), ("rate", decimal rate),
        ("epochs", decimal epochs), ("startsAt", decimal startsAt)]
+  | .setFloor asset account floor => .mkObj
+      [("type", .str "setFloor"), ("asset", decimal asset), ("account", decimal account),
+       ("floor", decimal floor)]
+  | .sweep holder commons asset permille epochs amount => .mkObj
+      [("type", .str "sweep"), ("holder", decimal holder), ("commons", decimal commons),
+       ("asset", decimal asset), ("permille", decimal permille), ("epochs", decimal epochs),
+       ("amount", decimal amount)]
 
 /-- Complete typed declaration view. Values become authoritative only through
 canonical native preparation, signatures, current law and joint admission. -/
@@ -1551,7 +1572,7 @@ private def genesis (path : String) (json : Lean.Json) : Result NativeHostGenesi
     "tariffBase", "tariffPerBirth", "tariffPerGrant", "tariffPerInitialPayloadByte",
     "collector", "asset", "expectedSemantics", "issuerEpoch", "genesisHeight",
     "factoryPredicate", "enrollments", "factoryControllerSubject",
-    "factoryControllerCapability", "meterAllowance", "clockTickers", "tailBound", "clockGenesisNow", "clockMaxStepSeconds"]
+    "factoryControllerCapability", "meterAllowance", "clockTickers", "tailBound", "clockGenesisNow", "clockMaxStepSeconds", "issuanceCap"]
   let observed := (json.getObjVal? "payObserver").toOption.isSome
   let obj ← exactObject path (if observed then names ++ ["payObserver"] else names) json
   let payObserver ← if observed then do
@@ -1600,7 +1621,8 @@ private def genesis (path : String) (json : Lean.Json) : Result NativeHostGenesi
     clockTickers := ← list (path ++ ".clockTickers") clockTicker (← field path "clockTickers" obj)
     tailBound := tailBound
     clockGenesisNow := clockGenesisNow
-    clockMaxStepSeconds := clockMaxStepSeconds }
+    clockMaxStepSeconds := clockMaxStepSeconds
+    issuanceCap := ← nat (path ++ ".issuanceCap") (← field path "issuanceCap" obj) }
 
 private def funding (path : String) (json : Lean.Json) : Result ResourceBirth.InitialFunding := do
   let obj ← exactObject path ["source", "destination", "asset", "amount"] json
@@ -3401,13 +3423,14 @@ private def participantFactoryProvisioning (json : Lean.Json) : Result (List UIn
       capability := ⟨← nat "$.capability" (← field "$" "capability" obj)⟩ }
   return ParticipantFactoryProvisioning.commandCodec.encode command
 
-/-- A realm-well command (lane K-WELL): `op` is `mint` or `burn`. -/
+/-- A realm-well command (lane K-WELL): `op` is `mint`, `burn` or `floor`. -/
 private def wellCommand (json : Lean.Json) : Result (List UInt8) := do
   let obj ← exactObject "$" ["subject", "capability", "well", "op", "account", "amount", "nonce"] json
   let op ← match ← string "$.op" (← field "$" "op" obj) with
     | "mint" => pure RealmWellCodec.WellOp.mint
     | "burn" => pure RealmWellCodec.WellOp.burn
-    | _ => failAt "$.op" "expected mint or burn"
+    | "floor" => pure RealmWellCodec.WellOp.floor
+    | _ => failAt "$.op" "expected mint, burn or floor"
   let command : RealmWellCodec.Command :=
     { subject := ⟨← nat "$.subject" (← field "$" "subject" obj)⟩
       capability := ⟨← nat "$.capability" (← field "$" "capability" obj)⟩
@@ -5159,7 +5182,7 @@ private def resourceJson (value : NativeObservationController.ResourceView) : Re
 private def wellCommandJson (command : RealmWellCodec.Command) : Lean.Json :=
   .mkObj [("type", "well-command-v1"), ("subject", decimal command.subject.value),
     ("capability", decimal command.capability.value), ("well", decimal command.well),
-    ("op", match command.op with | .mint => "mint" | .burn => "burn"),
+    ("op", match command.op with | .mint => "mint" | .burn => "burn" | .floor => "floor"),
     ("account", decimal command.account), ("amount", decimal command.amount),
     ("nonce", decimal command.nonce)]
 

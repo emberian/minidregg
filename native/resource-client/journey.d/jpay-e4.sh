@@ -117,7 +117,7 @@ genesis = {"domain": "8501", "factoryId": "10", "resourceBookId": "11", "authori
            "federation": "9", "tariffBase": "3", "tariffPerBirth": "2", "tariffPerGrant": "1",
            "tariffPerInitialPayloadByte": "0", "collector": "99", "asset": "0",
            "expectedSemantics": profile["semantics"], "issuerEpoch": "2", "genesisHeight": "10",
-           "clockTickers": [], "tailBound":"1000000",
+           "clockTickers": [], "tailBound":"1000000", \"issuanceCap\":\"1000000000000000",
            "factoryPredicate": {"type": "all", "predicates": []},
            "enrollments": [enrollment(s) for s in SUBJECTS],
            "factoryControllerSubject": str(EMBER), "factoryControllerCapability": str(FACTORY_CONTROL),

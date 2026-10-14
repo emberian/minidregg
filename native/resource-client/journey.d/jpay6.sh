@@ -161,6 +161,7 @@ genesis = {"domain": "8501", "factoryId": "10", "resourceBookId": "11", "authori
            "enrollments": [enrollment(s) for s in SUBJECTS],
            "factoryControllerSubject": str(OPERATOR),
            "factoryControllerCapability": str(FACTORY_CONTROL),
+           "issuanceCap": "1000000000000000",
            "meterAllowance": {k: "10000000" for k in ("incidences", "turnBytes", "memoryTouches",
                "witnessBytes", "proofWork", "storageBytes", "networkBytes", "sideEffectCount",
                "feeDebit", "leaseByteBlocks")}}

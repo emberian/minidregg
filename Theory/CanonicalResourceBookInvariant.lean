@@ -1,7 +1,8 @@
 /-
 # Canonical resource Book support
 
-Canonical resource cells may contain balances only for registered accounts.
+Canonical resource cells may contain balances and floors only for registered
+accounts.
 This is a semantic cell law, not a codec restriction: malformed books remain
 representable so loading can reject them explicitly. On supported books,
 registration depends only on the public account namespace, never on hidden
@@ -17,10 +18,12 @@ open Minidregg.Theory.TypedAuthorization (Digest)
 
 set_option autoImplicit false
 
-/-- Only account membership is constrained. Asset balances can be negative
-for issuer wells, and this law does not make any balance public. -/
+/-- Only account membership is constrained: every nonzero balance and every
+nonzero floor names a registered account. Balances can be negative down to the
+floor, and this law does not make any balance public. -/
 def Book.AccountSupported (book : Book) : Prop :=
-  ∀ coordinate ∈ book.balances.support, coordinate.1 ∈ book.accounts
+  (∀ coordinate ∈ book.balances.support, coordinate.1 ∈ book.accounts) ∧
+    ∀ coordinate ∈ book.floors.support, coordinate.1 ∈ book.accounts
 
 instance (book : Book) : Decidable book.AccountSupported := by
   unfold Book.AccountSupported
@@ -31,32 +34,48 @@ theorem Book.AccountSupported.balance_zero {book : Book}
     (absent : account ∉ book.accounts) (asset : AssetId) :
     book.balance account asset = 0 := by
   by_contra nonzero
-  exact absent (supported (account, asset)
+  exact absent (supported.1 (account, asset)
+    ((DFinsupp.mem_support_toFun _ _).mpr nonzero))
+
+theorem Book.AccountSupported.floor_zero {book : Book}
+    (supported : book.AccountSupported) {account : AccountId}
+    (absent : account ∉ book.accounts) (asset : AssetId) :
+    book.floor account asset = 0 := by
+  by_contra nonzero
+  exact absent (supported.2 (account, asset)
     ((DFinsupp.mem_support_toFun _ _).mpr nonzero))
 
 theorem Book.accountSupported_iff_zero_outside (book : Book) :
     book.AccountSupported ↔
-      ∀ account ∉ book.accounts, ∀ asset, book.balance account asset = 0 := by
+      ∀ account ∉ book.accounts, ∀ asset,
+        book.balance account asset = 0 ∧ book.floor account asset = 0 := by
   constructor
-  · exact fun supported account absent asset => supported.balance_zero absent asset
-  · intro outside coordinate member
-    by_contra absent
-    exact ((DFinsupp.mem_support_toFun _ _).mp member)
-      (outside coordinate.1 absent coordinate.2)
+  · exact fun supported account absent asset =>
+      ⟨supported.balance_zero absent asset, supported.floor_zero absent asset⟩
+  · intro outside
+    constructor
+    · intro coordinate member
+      by_contra absent
+      exact ((DFinsupp.mem_support_toFun _ _).mp member)
+        (outside coordinate.1 absent coordinate.2).1
+    · intro coordinate member
+      by_contra absent
+      exact ((DFinsupp.mem_support_toFun _ _).mp member)
+        (outside coordinate.1 absent coordinate.2).2
 
 theorem Book.empty_accountSupported : Book.empty.AccountSupported := by
   simp [Book.AccountSupported, Book.empty]
 
 theorem Book.zero_accountSupported (accounts : Finset AccountId)
     (leases : Π₀ _ : LeaseId, Option LeaseRecord) :
-    (Book.mk accounts 0 leases).AccountSupported := by
+    (Book.mk accounts 0 leases 0).AccountSupported := by
   simp [Book.AccountSupported]
 
 theorem Book.registerAccount_accountSupported (book : Book) (account : AccountId)
     (supported : book.AccountSupported) :
-    (book.registerAccount account).AccountSupported := by
-  intro coordinate member
-  exact Finset.mem_insert_of_mem (supported coordinate member)
+    (book.registerAccount account).AccountSupported :=
+  ⟨fun coordinate member => Finset.mem_insert_of_mem (supported.1 coordinate member),
+    fun coordinate member => Finset.mem_insert_of_mem (supported.2 coordinate member)⟩
 
 theorem Book.applyPosting_accountSupported (book : Book) (posting : Posting)
     (supported : book.AccountSupported)
@@ -65,6 +84,7 @@ theorem Book.applyPosting_accountSupported (book : Book) (posting : Posting)
     (book.applyPosting posting).AccountSupported := by
   rw [Book.accountSupported_iff_zero_outside]
   intro account absent asset
+  refine ⟨?_, supported.floor_zero absent asset⟩
   have oldZero := supported.balance_zero absent asset
   have sourceDifferent : account ≠ posting.source := by
     intro same
@@ -81,7 +101,20 @@ theorem Operation.apply_accountSupported (operation : Operation) (book : Book)
     (operation.apply book).AccountSupported := by
   have posting := book.applyPosting_accountSupported operation.posting supported
     admitted.sourcePresent admitted.destinationPresent
-  cases operation <;> exact posting
+  cases operation with
+  | setFloor wellAsset target floor =>
+      rw [Book.accountSupported_iff_zero_outside]
+      intro account absent asset
+      have present : target ∈ book.accounts := admitted.destinationPresent
+      have other : (account, asset) ≠ (target, wellAsset) := by
+        intro same
+        exact absent ((Prod.mk.inj same).1 ▸ present)
+      refine ⟨?_, ?_⟩
+      · rw [setFloor_moves_no_value]
+        exact supported.balance_zero absent asset
+      · rw [setFloor_floor, if_neg other]
+        exact supported.floor_zero absent asset
+  | _ => exact posting
 
 theorem Accepted.accountSupported {M : CellState.Materializer layout Digest}
     {pre : CellState.Materialized M} {operation : Operation}
@@ -100,9 +133,11 @@ theorem registrationAdmission_iff_fresh {book : Book} (supported : book.AccountS
   constructor
   · exact And.left
   · intro absent
-    refine ⟨absent, ?_⟩
-    intro coordinate member same
-    exact absent (same ▸ supported coordinate member)
+    refine ⟨absent, ?_, ?_⟩
+    · intro coordinate member same
+      exact absent (same ▸ supported.1 coordinate member)
+    · intro coordinate member same
+      exact absent (same ▸ supported.2 coordinate member)
 
 def RegistrationsFresh (accounts : Finset AccountId) : List AccountId → Prop
   | [] => True
@@ -155,8 +190,10 @@ the account to be zero, so no balance is left outside the accounts. -/
 theorem Book.deregisterAccount_accountSupported (book : Book) (account : AccountId)
     (supported : book.AccountSupported) (admitted : DeregistrationAdmission book account) :
     (book.deregisterAccount account).AccountSupported := by
-  intro coordinate member
-  exact Finset.mem_erase.mpr ⟨admitted.2.2.1 coordinate member, supported coordinate member⟩
+  exact ⟨fun coordinate member =>
+      Finset.mem_erase.mpr ⟨admitted.2.2.1 coordinate member, supported.1 coordinate member⟩,
+    fun coordinate member =>
+      Finset.mem_erase.mpr ⟨admitted.2.2.2.2 coordinate member, supported.2 coordinate member⟩⟩
 
 theorem deregisterAccounts_accountSupported (book : Book) (accounts : List AccountId)
     (supported : book.AccountSupported) (admitted : DeregistrationsAdmitted book accounts) :

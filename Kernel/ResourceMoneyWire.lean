@@ -108,11 +108,13 @@ def assets (batch : ApplicationBatch) (entry : Entry) : List AssetId :=
     (batch.operations[position]?).map fun operation => operation.posting.asset
 
 /-- Reuse the production verb distinctions; ordinary payment authority does
-not issue an asset or destroy it. These are required from the SAME admitted
+not issue an asset, extend credit in it (a floor is set from the issuer well,
+under the same `mintAsset` verb as a mint), or destroy it. These are required from the SAME admitted
 account capability in addition to whole-command/current-law admission. -/
 def operationVerb : Operation → Verb .account
   | .mint _ _ _ => .mintAsset
   | .burn _ _ _ => .burnAsset
+  | .setFloor _ _ _ => .mintAsset
   | _ => .transfer
 
 def verbs (batch : ApplicationBatch) (entry : Entry) : List (Verb .account) :=

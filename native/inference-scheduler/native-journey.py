@@ -64,7 +64,7 @@ def insert(anchor, extra):
     if code.count(anchor) != 1: raise RuntimeError('bootstrap seam changed: ' + anchor)
     code = code.replace(anchor, extra + '\n' + anchor, 1)
 insert('json.dump(genesis, open(path("genesis.json"), "w"), indent=1)',
-       'genesis["clockTickers"]=[]\ngenesis["tailBound"]="256"')
+       'genesis["clockTickers"]=[]\ngenesis["tailBound"]="256"\ngenesis["issuanceCap"]="1000000000000000"')
 insert('json.dump(birth, open(path("birth-intent.json"), "w"))',
        'birth["birth"]["resources"][0]["budget"]="1000"\nbirth["birth"]["resources"][3]["budget"]="300000"')
 os.environ.update(HOST=manifest['host'], MINI=a.mini, STORE=manifest['store'],

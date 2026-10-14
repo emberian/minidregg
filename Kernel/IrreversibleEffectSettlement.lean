@@ -22,11 +22,15 @@ This module supplies the smaller missing semantics:
   observed as performed.  It does NOT assert that the physical world was
   restored.  Such a claim needs an application-specific physical relation.
 
-The last section states that ceiling as an explicit implementation-refinement
+A later section states that ceiling as an explicit implementation-refinement
 premise over real physical states and steps.  This file constructs no instance
-for a database, payment rail, mail server, device, or network.
+for a database, payment rail, mail server, device, or network.  It does
+construct one for a toy keyed-idempotent target (`KeyedTarget`, class 1 of the
+taxonomy there), and `Settlement.reconcile` resolves a forward quarantine with
+new evidence for the same command.
 -/
 import Mathlib.Data.Finset.Basic
+import Theory.AssertAxioms
 
 namespace Minidregg.Kernel.IrreversibleEffectSettlement
 
@@ -641,5 +645,296 @@ theorem authorization_executes : Grant.authorize grant intent = .ok authorized :
   rfl
 
 end ClosedInstance
+
+/-! ## Reconciling an uncertain forward observation
+
+`quarantinedForward` is not final when the target can answer for the exact
+command later.  `Settlement.reconcile` takes new evidence for the SAME forward
+command (the `Observed` type is indexed by it, so evidence about any other
+command does not typecheck) and settles again: performed against a still-fresh
+pre-root commits, not performed refuses, still indeterminate stays
+quarantined, and performed against a stale pre-root is quarantined as stale.
+Only a forward-quarantined settlement is reconciled; a committed, refused or
+compensated one is final. -/
+
+namespace Settlement
+
+variable
+    {TxId : Type uTx} {GrantId : Type uGrant}
+    {Principal : Type uPrincipal} {EffectClass : Type uClass}
+    {Target : Type uTarget} {Action : Type uAction}
+    {Compensation : Type uComp} {Root : Type uRoot}
+    {Result : Type uResult} {Failure : Type uFailure}
+    {Uncertainty : Type uUncertainty}
+    {boundary : HandlerBoundary TxId Principal EffectClass Target Action
+      Compensation Root Result Failure Uncertainty}
+    {grant : Grant GrantId Principal EffectClass Target Action Compensation}
+    {intent : Intent TxId Principal EffectClass Target Action Compensation Root}
+    {authorized : grant.Authorizes intent} {currentRoot : Root}
+
+def reconcile [DecidableEq Root] :
+    (settlement : Settlement boundary grant intent authorized currentRoot) →
+      settlement.status = .quarantinedForward →
+      Observed boundary (.forward intent) →
+      Settlement boundary grant intent authorized currentRoot
+  | .quarantinedForward .., _, again =>
+      settle boundary grant intent authorized currentRoot again .commit
+  | .committed .., quarantined, _ => nomatch quarantined
+  | .refused .., quarantined, _ => nomatch quarantined
+  | .compensated .., quarantined, _ => nomatch quarantined
+  | .quarantinedStale .., quarantined, _ => nomatch quarantined
+  | .quarantinedCompensationNotPerformed .., quarantined, _ => nomatch quarantined
+  | .quarantinedCompensationIndeterminate .., quarantined, _ => nomatch quarantined
+
+/-- Reconciliation still exposes a whole root: the current one or the exact
+intended post. -/
+theorem reconcile_no_partial_commit [DecidableEq Root]
+    (settlement : Settlement boundary grant intent authorized currentRoot)
+    (quarantined : settlement.status = .quarantinedForward)
+    (again : Observed boundary (.forward intent)) :
+    (settlement.reconcile quarantined again).logicalRoot = currentRoot ∨
+      (settlement.reconcile quarantined again).logicalRoot = intent.exactPostRoot :=
+  no_partial_logical_commit _
+
+/-- Reconciliation never manufactures a compensation: its status is one of the
+four outcomes of the forward command alone. -/
+theorem reconcile_status [DecidableEq Root]
+    (settlement : Settlement boundary grant intent authorized currentRoot)
+    (quarantined : settlement.status = .quarantinedForward)
+    (again : Observed boundary (.forward intent)) :
+    (settlement.reconcile quarantined again).status ∈
+      [Status.committed, .refused, .quarantinedForward, .quarantinedStale] := by
+  cases settlement <;> simp only [status, reduceCtorEq] at quarantined
+  obtain ⟨observation, evidence⟩ := again
+  cases observation <;> simp only [reconcile, settle] <;> (try split) <;> simp [status]
+
+/-- Performed evidence against a fresh pre-root commits the exact post. -/
+theorem reconcile_performed_commits [DecidableEq Root]
+    (settlement : Settlement boundary grant intent authorized currentRoot)
+    (quarantined : settlement.status = .quarantinedForward)
+    (result : Result) (evidence : boundary.Evidence (.forward intent) (.performed result))
+    (fresh : currentRoot = intent.expectedPreRoot) :
+    (settlement.reconcile quarantined ⟨.performed result, evidence⟩).logicalRoot =
+      intent.exactPostRoot := by
+  cases settlement <;> simp only [status, reduceCtorEq] at quarantined
+  simp [reconcile, settle, fresh, logicalRoot]
+
+/-- Not-performed evidence refuses; the current root stays. -/
+theorem reconcile_notPerformed_refuses [DecidableEq Root]
+    (settlement : Settlement boundary grant intent authorized currentRoot)
+    (quarantined : settlement.status = .quarantinedForward)
+    (failure : Failure) (evidence : boundary.Evidence (.forward intent) (.notPerformed failure)) :
+    (settlement.reconcile quarantined ⟨.notPerformed failure, evidence⟩).status = .refused ∧
+      (settlement.reconcile quarantined ⟨.notPerformed failure, evidence⟩).logicalRoot =
+        currentRoot := by
+  cases settlement <;> simp only [status, reduceCtorEq] at quarantined
+  exact ⟨rfl, rfl⟩
+
+end Settlement
+
+/-! ## Class 1: a keyed-idempotent target, refined
+
+Targets differ in what they can attest about an uncertain command, and the
+ledger can promise no more than the target attests:
+
+1. **keyed-idempotent**: the target deduplicates by the intent key and answers
+   for a key on request, so an indeterminate observation can be reconciled;
+2. **readable-state**: resolvable only when the effect is distinguishable from
+   concurrent changes in the state the target exposes;
+3. **fire-and-forget** (an actuator, a service performed in person):
+   indeterminate is final for the logic and goes to compensation or human
+   policy.
+
+This section is the first `ImplementationRefinement` instance, for class 1,
+over a toy keyed target.  Its physical state is the list of transaction keys
+it has applied; a key's physical effect count is its multiplicity there.  The
+instance shows the target applies each key at most once in every represented
+state, a duplicate forward command changes nothing physical, and a lost reply
+is reconciled by asking again. -/
+
+namespace KeyedTarget
+
+abbrev KIntent := Intent Nat Nat Nat Nat Nat Nat Nat
+abbrev KCommand := Command Nat Nat Nat Nat Nat Nat Nat
+abbrev KTraceEntry := TraceEntry Nat Nat Nat Nat Nat Nat Nat Nat Nat Nat
+
+/-- The keys this target has applied, in order. -/
+structure Physical where
+  applied : List Nat
+
+/-- The intent key a command is about. -/
+def key : KCommand → Nat
+  | .forward intent => intent.transactionId
+  | .compensate intent _ => intent.transactionId
+
+/-- The physical steps of the target.  A new key is applied, with the reply
+delivered or lost; a known key is answered from the key table and nothing is
+applied; a new key may be refused unapplied.  The target has no compensating
+action: every compensation is refused without effect. -/
+inductive Step : Physical → KCommand → Physical → Type
+  | apply (intent : KIntent) (state : Physical)
+      (fresh : intent.transactionId ∉ state.applied) :
+      Step state (.forward intent) ⟨state.applied ++ [intent.transactionId]⟩
+  | applyReplyLost (intent : KIntent) (state : Physical)
+      (fresh : intent.transactionId ∉ state.applied) :
+      Step state (.forward intent) ⟨state.applied ++ [intent.transactionId]⟩
+  | answer (intent : KIntent) (state : Physical)
+      (known : intent.transactionId ∈ state.applied) :
+      Step state (.forward intent) state
+  | refuse (intent : KIntent) (state : Physical)
+      (fresh : intent.transactionId ∉ state.applied) :
+      Step state (.forward intent) state
+  | refuseCompensation (intent : KIntent) (request : Nat) (state : Physical) :
+      Step state (.compensate intent request) state
+
+/-- A performed forward observation carries the target's receipt, which must
+be the intent's own key; no other observation carries evidence beyond the
+represented physical state. -/
+def boundary : HandlerBoundary Nat Nat Nat Nat Nat Nat Nat Nat Nat Nat where
+  Evidence
+    | .forward intent, .performed receipt => PLift (receipt = intent.transactionId)
+    | _, _ => Unit
+
+def isForward : KCommand → Bool
+  | .forward _ => true
+  | .compensate _ _ => false
+
+def isNotPerformed : HandlerObservation Nat Nat Nat → Bool
+  | .notPerformed _ => true
+  | _ => false
+
+def isPerformed : HandlerObservation Nat Nat Nat → Bool
+  | .performed _ => true
+  | _ => false
+
+/-- What the trace says about the target: no key applied twice; every applied
+key was the subject of a forward command not observed as not performed; and
+every forward command observed as performed was applied. -/
+def Represents (state : Physical) (trace : List KTraceEntry) : Prop :=
+  state.applied.Nodup ∧
+    (∀ k ∈ state.applied, ∃ entry ∈ trace,
+      isForward entry.command = true ∧ key entry.command = k ∧
+        isNotPerformed entry.observation = false) ∧
+    ∀ entry ∈ trace, isForward entry.command = true → isPerformed entry.observation = true →
+      key entry.command ∈ state.applied
+
+theorem represents_empty : Represents ⟨[]⟩ [] := by
+  simp [Represents]
+
+/-- **The class-1 refinement**: every physical step of the keyed target is
+simulated by an evidence-backed observation of the same command. -/
+theorem refinement : ImplementationRefinement boundary Physical Step Represents where
+  simulates := by
+    intro before after trace command represented step
+    obtain ⟨nodup, applied, performed⟩ := represented
+    cases step with
+    | apply intent state fresh =>
+        refine ⟨⟨.performed intent.transactionId, PLift.up rfl⟩, ?_, ?_, ?_⟩
+        · exact List.nodup_append.mpr ⟨nodup, List.nodup_singleton _,
+            fun a member b same => by simp at same; subst same; exact fun e => fresh (e ▸ member)⟩
+        · intro k member
+          rcases List.mem_append.mp member with old | new
+          · obtain ⟨entry, inTrace, facts⟩ := applied k old
+            exact ⟨entry, List.mem_append_left _ inTrace, facts⟩
+          · simp at new; subst new
+            exact ⟨_, List.mem_append_right _ (List.mem_singleton_self _), rfl, rfl, rfl⟩
+        · intro entry member forward isPerf
+          rcases List.mem_append.mp member with old | new
+          · exact List.mem_append_left _ (performed entry old forward isPerf)
+          · simp at new; subst new; simp [key]
+    | applyReplyLost intent state fresh =>
+        refine ⟨⟨.indeterminate 0, ()⟩, ?_, ?_, ?_⟩
+        · exact List.nodup_append.mpr ⟨nodup, List.nodup_singleton _,
+            fun a member b same => by simp at same; subst same; exact fun e => fresh (e ▸ member)⟩
+        · intro k member
+          rcases List.mem_append.mp member with old | new
+          · obtain ⟨entry, inTrace, facts⟩ := applied k old
+            exact ⟨entry, List.mem_append_left _ inTrace, facts⟩
+          · simp at new; subst new
+            exact ⟨_, List.mem_append_right _ (List.mem_singleton_self _), rfl, rfl, rfl⟩
+        · intro entry member forward isPerf
+          rcases List.mem_append.mp member with old | new
+          · exact List.mem_append_left _ (performed entry old forward isPerf)
+          · simp at new; subst new; simp [isPerformed] at isPerf
+    | answer intent state known =>
+        refine ⟨⟨.performed intent.transactionId, PLift.up rfl⟩, nodup, ?_, ?_⟩
+        · intro k member
+          obtain ⟨entry, inTrace, facts⟩ := applied k member
+          exact ⟨entry, List.mem_append_left _ inTrace, facts⟩
+        · intro entry member forward isPerf
+          rcases List.mem_append.mp member with old | new
+          · exact performed entry old forward isPerf
+          · simp at new; subst new; exact known
+    | refuse intent state fresh =>
+        refine ⟨⟨.notPerformed 0, ()⟩, nodup, ?_, ?_⟩
+        · intro k member
+          obtain ⟨entry, inTrace, facts⟩ := applied k member
+          exact ⟨entry, List.mem_append_left _ inTrace, facts⟩
+        · intro entry member forward isPerf
+          rcases List.mem_append.mp member with old | new
+          · exact performed entry old forward isPerf
+          · simp at new; subst new; simp [isPerformed] at isPerf
+    | refuseCompensation intent request state =>
+        refine ⟨⟨.notPerformed 0, ()⟩, nodup, ?_, ?_⟩
+        · intro k member
+          obtain ⟨entry, inTrace, facts⟩ := applied k member
+          exact ⟨entry, List.mem_append_left _ inTrace, facts⟩
+        · intro entry member forward isPerf
+          rcases List.mem_append.mp member with old | new
+          · exact performed entry old forward isPerf
+          · simp at new; subst new; simp [isForward] at forward
+
+/-- **A duplicate forward command produces no second physical effect**: once a
+key is applied, every step on a forward command for it leaves the target's
+state unchanged. -/
+theorem duplicate_forward_no_second_effect {state after : Physical} {intent : KIntent}
+    (known : intent.transactionId ∈ state.applied)
+    (step : Step state (.forward intent) after) : after = state := by
+  cases step with
+  | apply _ _ fresh => exact absurd known fresh
+  | applyReplyLost _ _ fresh => exact absurd known fresh
+  | answer => rfl
+  | refuse _ _ fresh => exact absurd known fresh
+
+/-- **At most once, in every represented state**: the target has applied each
+key at most once. -/
+theorem applied_at_most_once {state : Physical} {trace : List KTraceEntry}
+    (represented : Represents state trace) (k : Nat) :
+    state.applied.count k ≤ 1 :=
+  List.nodup_iff_count_le_one.mp represented.1 k
+
+/-- The first forward command of the closed intent (key 99): applied, reply lost. -/
+def lostReplyFirst : Step ⟨[]⟩ (.forward ClosedInstance.intent) ⟨[99]⟩ :=
+  .applyReplyLost ClosedInstance.intent ⟨[]⟩ (by decide)
+
+/-- The retry: key 99 is known, so the target answers from its key table. -/
+def lostReplyRetry : Step ⟨[99]⟩ (.forward ClosedInstance.intent) ⟨[99]⟩ :=
+  .answer ClosedInstance.intent ⟨[99]⟩ (by decide)
+
+/-- The quarantine the lost reply leaves: the logical root stays at 100. -/
+def lostReplySettlement :
+    Settlement boundary ClosedInstance.grant ClosedInstance.intent ClosedInstance.authorized 100 :=
+  settle boundary ClosedInstance.grant ClosedInstance.intent ClosedInstance.authorized 100
+    ⟨.indeterminate 0, ()⟩ .commit
+
+/-- **The class-1 story**: the lost reply quarantines (root 100 stays); the
+retry's answer, a receipt for the same key, reconciles it to the exact post
+101; and the retry applied nothing (`duplicate_forward_no_second_effect`), so
+key 99 was applied once. -/
+theorem lost_reply_reconciled :
+    lostReplySettlement.status = .quarantinedForward ∧
+      lostReplySettlement.logicalRoot = 100 ∧
+      (lostReplySettlement.reconcile rfl ⟨.performed 99, PLift.up rfl⟩).logicalRoot = 101 ∧
+      (⟨[99]⟩ : Physical).applied.count 99 = 1 := by
+  refine ⟨rfl, rfl, rfl, by decide⟩
+
+end KeyedTarget
+
+#assert_axioms Settlement.reconcile_status
+#assert_axioms Settlement.reconcile_performed_commits
+#assert_axioms KeyedTarget.refinement
+#assert_axioms KeyedTarget.duplicate_forward_no_second_effect
+#assert_axioms KeyedTarget.applied_at_most_once
+#assert_axioms KeyedTarget.lost_reply_reconciled
 
 end Minidregg.Kernel.IrreversibleEffectSettlement

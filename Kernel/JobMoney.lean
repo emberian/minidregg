@@ -505,8 +505,12 @@ def plainOp : Operation → Prop
 theorem apply_balance (op : Operation) (plain : plainOp op) (book : Book) (a : AccountId)
     (asset : AssetId) :
     (op.apply book).balance a asset = book.balance a asset + flowIn a asset op := by
-  cases op <;> simp only [plainOp] at plain <;>
-    simp [Operation.apply, Operation.leaseRecord?, applyPosting_balance, flowIn]
+  have posting : (op.apply book).balance a asset = (book.applyPosting op.posting).balance a asset := by
+    unfold Book.balance
+    congr 1
+    cases op <;> rfl
+  rw [posting]
+  cases op <;> simp only [plainOp] at plain <;> simp [applyPosting_balance, flowIn]
 
 theorem applyOperations_balance (book : Book) (ops : List Operation)
     (plain : ∀ op ∈ ops, plainOp op) (a : AccountId) (asset : AssetId) :
@@ -591,7 +595,7 @@ theorem decideMoney_plan {tariff : Option Tariff} {stored : Option (StoredCapabi
     simp only [Plan.batch, RegistrationsAdmitted, RegistrationAdmission] at absent
     have zero : book.balance job t.asset = 0 := by
       by_contra nonzero
-      exact absent.1.2 (job, t.asset) (DFinsupp.mem_support_iff.mpr nonzero) rfl
+      exact absent.1.2.1 (job, t.asset) (DFinsupp.mem_support_iff.mpr nonzero) rfl
     simp [zero, Job.held, escrow, bond]
   · obtain ⟨rfl, -, -, -, -, -, -, -, payer, held, -, agrees, admitted, balanced⟩ :=
       decideClaim_ok claim
@@ -797,7 +801,7 @@ theorem griefing_cost_bounded (split : Nat) (j : Job) (book : Book) (submitter a
       payouts split j = some ⟨j.price + j.bond, j.escrow - j.price, 0⟩ := by
   refine ⟨?_, Batch.conservation book _ admitted asset, ?_⟩
   · simp [truthFee, Batch.apply, registerAccounts, applyOperations, Operation.apply,
-      Operation.posting, Operation.leaseRecord?, Book.applyPosting, Book.balance,
+      Operation.posting, Operation.leaseRecord?, Operation.floorSetting?, Book.applyPosting, Book.balance,
       DFinsupp.single_apply, Ne.symm notWell, sub_eq_add_neg]
   · simp [payouts, upheld, Nat.min_eq_left funded]
 
@@ -877,11 +881,11 @@ theorem isJobLaw_refuses_trimmed :
 def fixtureTariff : Tariff := PayTariff.exampleTariff
 
 /-- Account 108 (subject 8, the caller) and 109 (subject 9, the provider) hold
-60 credits each of asset 0; the well 0 is at −120.  Job 50's held account does
+60 credits each of asset 0; the well 0 is at −120 of its issuance cap 1000.  Job 50's held account does
 not exist yet. -/
 def fixtureBook : Book :=
   ⟨{0, 108, 109}, DFinsupp.single (108, 0) 60 + DFinsupp.single (109, 0) 60 +
-    DFinsupp.single (0, 0) (-120), 0⟩
+    DFinsupp.single (0, 0) (-120), 0, DFinsupp.single (0, 0) 1000⟩
 
 def callerCap : StoredCapability .account := PayAssignmentReceiver.ownerCapability 8 108
 def providerCap : StoredCapability .account := PayAssignmentReceiver.ownerCapability 9 109

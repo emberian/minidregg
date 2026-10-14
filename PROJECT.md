@@ -97,6 +97,12 @@ parallel authorization semantics.
 6. `AcceptedCellEffectRequestBinding` completes common binding with a lawful family-selected
    argument projection; digest reflection/CR remains an explicit premise.
 7. A validated patch derives one canonical post-state and exact footprint.
+   Value admission has one solvency rule (`Theory/CanonicalResourceKernel.lean`): a debit may
+   take its source to minus its floor and no further. Floor 0 is an ordinary account, a floor L
+   a credit limit, the issuer well's floor C its issuance cap; floors are Book state set only by
+   `setFloor`, a zero-value posting from the issuer well (verb `mintAsset`). Under the floor law
+   an asset's positive balances never exceed the sum of its floors (`outstanding_le_sum_floors`).
+   The cap bounds net issuance; a lifetime gross-mint ceiling is a counter, not value.
 8. A multi-resource action is a flat finite hyperedge with one shared apex and aggregate law—not a
    hidden call forest.
 9. Rejection has no post-state unless explicitly modeled as a charged committed effect.
@@ -108,6 +114,18 @@ parallel authorization semantics.
     to an output commitment.
 12. An intent/admission receipt is not proof that external I/O happened; completion/refusal is a
     later event.
+    What a later event can establish depends on the target, never on the ledger
+    (`Kernel/IrreversibleEffectSettlement.lean`). The ledger promises at-most-once authorization,
+    bounded attempts (`maxAttempt`) and an explicit uncertain terminal (`quarantinedForward`).
+    Exactly-once of the physical effect is a property of the target, in three classes:
+    **class 1, keyed-idempotent** (the target deduplicates by intent key and answers for a key:
+    an indeterminate forward is reconciled with new evidence for the same command,
+    `Settlement.reconcile`; refined for a toy target by `KeyedTarget.refinement`,
+    `duplicate_forward_no_second_effect`); **class 2, readable-state** (resolvable only when the
+    effect is distinguishable from concurrent changes in what the target exposes; no instance);
+    **class 3, fire-and-forget** (actuators, a service performed in person: indeterminate is final
+    for the logic and goes to compensation or human policy). No class-2 or class-3 refinement and
+    no production class-1 target exists here.
 
 ### History and storage
 

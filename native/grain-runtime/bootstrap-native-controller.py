@@ -58,7 +58,7 @@ def main():
     anchor = 'json.dump(genesis, open(path("genesis.json"), "w"), indent=1)'
     if code.count(anchor) != 1:
         parser.error('source genesis publication seam changed; inspect rather than guess')
-    code = code.replace(anchor, 'genesis["clockTickers"] = []\ngenesis["tailBound"] = "256"\n' + anchor, 1)
+    code = code.replace(anchor, 'genesis["clockTickers"] = []\ngenesis["tailBound"] = "256"\ngenesis["issuanceCap"] = "1000000000000000"\n' + anchor, 1)
     artifacts = {name: {'path': str(getattr(a, name)), 'sha256': digest(getattr(a, name))}
                  for name in ('host', 'mini', 'store', 'verifier', 'runtime')}
     for name in artifacts:

@@ -289,20 +289,37 @@ theorem ops_credit_only {book : Book} {transfers : List Transfer} {account : Acc
 
 /-- Admitted transfers keep an account's balances non-negative: every debit is
 funded on the intermediate book. -/
+theorem ops_floors (transfers : List Transfer) :
+    ∀ book : Book, (applyOperations book (opsOf transfers)).floors = book.floors := by
+  induction transfers with
+  | nil => intro book; rfl
+  | cons transfer rest ih =>
+    intro book
+    simp only [opsOf, List.map_cons, applyOperations]
+    rw [show List.map Transfer.op rest = opsOf rest from rfl, ih]
+    rfl
+
 theorem ops_nonneg {book : Book} {transfers : List Transfer} {account : AccountId}
     (admitted : OperationsAdmitted book (opsOf transfers)) (nonneg : ∀ asset, 0 ≤ book.balance account asset)
+    (noFloor : ∀ asset, book.floor account asset = 0)
     (asset : AssetId) : 0 ≤ (applyOperations book (opsOf transfers)).balance account asset := by
   induction transfers generalizing book with
   | nil => exact nonneg asset
   | cons transfer rest ih =>
     simp only [opsOf, List.map_cons, applyOperations, OperationsAdmitted] at admitted ⊢
-    have funded : (transfer.amount : Int) ≤ book.balance transfer.source transfer.asset :=
-      admitted.1.sourceSolvent.resolve_left (by simp [Transfer.op, Operation.isIssuerMint])
+    have funded : (transfer.amount : Int) ≤ book.balance transfer.source transfer.asset +
+        (book.floor transfer.source transfer.asset : Int) := by
+      have within := admitted.1.sourceWithinFloor
+      simpa only [Transfer.op, Operation.posting, Int.ofNat_eq_natCast] using within
     apply ih admitted.2
-    intro asset'
-    rw [balance_op]
-    have := nonneg asset'
-    split_ifs with h1 h2 <;> (try obtain ⟨rfl, rfl⟩ := h1) <;> omega
+    · intro asset'
+      rw [balance_op]
+      have := nonneg asset'
+      have zero := noFloor transfer.asset
+      split_ifs with h1 h2 <;> (try obtain ⟨rfl, rfl⟩ := h1) <;> omega
+    · intro asset'
+      exact (Operation.apply_floor_of_not_setFloor _ _ _ _ (by intros; exact nofun)).trans
+        (noFloor asset')
 
 /-! ## Closing an account commutes with postings that do not name it
 
@@ -375,13 +392,16 @@ theorem Admission.of_deregistered {book : Book} {accounts : List AccountId} {ope
     (admitted : Admission (deregisterAccounts book accounts) operation) : Admission book operation where
   sourcePresent := mem_of_mem_deregisterAccounts admitted.sourcePresent
   destinationPresent := mem_of_mem_deregisterAccounts admitted.destinationPresent
-  sourceSolvent := by
-    have solvent := admitted.sourceSolvent
-    simpa only [Book.balance, deregisterAccounts_balances] using solvent
-  leaseWellFormed := by
-    have formed := admitted.leaseWellFormed
+  sourceWithinFloor := by
+    have within := admitted.sourceWithinFloor
+    simpa only [Book.balance, Book.floor, deregisterAccounts_balances, deregisterAccounts_floors]
+      using within
+  wellFormed := by
+    have formed := admitted.wellFormed
     cases operation with
-    | lease => simpa only [Book.leases, deregisterAccounts_leaseRecords] using formed
+    | lease => simpa only [Operation.WellFormed, Book.leases, deregisterAccounts_leaseRecords] using formed
+    | setFloor => simpa only [Operation.WellFormed, Book.balance, deregisterAccounts_balances] using formed
+    | sweep => simpa only [Operation.WellFormed, Book.balance, deregisterAccounts_balances] using formed
     | _ => trivial
 
 theorem OperationsAdmitted.of_deregistered (accounts : List AccountId) :
@@ -416,8 +436,8 @@ theorem deregistrationAdmission_apply {book : Book} {account : AccountId} {opera
     (admitted : DeregistrationAdmission book account)
     (source : operation.posting.source ≠ account) (destination : operation.posting.destination ≠ account) :
     DeregistrationAdmission (operation.apply book) account := by
-  obtain ⟨kernel, present, noBalance, noLease⟩ := admitted
-  refine ⟨kernel, by rw [Operation.apply_accounts]; exact present, ?_, ?_⟩
+  obtain ⟨kernel, present, noBalance, noLease, noFloor⟩ := admitted
+  refine ⟨kernel, by rw [Operation.apply_accounts]; exact present, ?_, ?_, ?_⟩
   · intro coordinate member same
     obtain ⟨named, asset⟩ := coordinate
     simp only at same
@@ -446,6 +466,20 @@ theorem deregistrationAdmission_apply {book : Book} {account : AccountId} {opera
         rw [DFinsupp.mem_support_iff] at member ⊢
         rwa [records, if_neg same] at member
     | _ => exact noLease
+  · intro coordinate member same
+    obtain ⟨named, asset⟩ := coordinate
+    simp only at same
+    subst same
+    have nonzero := (DFinsupp.mem_support_toFun _ _).mp member
+    have unchanged : (operation.apply book).floor named asset = book.floor named asset := by
+      cases operation with
+      | setFloor wellAsset target floor =>
+          rw [setFloor_floor, if_neg]
+          intro same
+          exact destination ((Prod.mk.inj same).1).symm
+      | _ => rfl
+    have held : book.floor named asset ≠ 0 := by rw [← unchanged]; exact nonzero
+    exact noFloor _ ((DFinsupp.mem_support_toFun _ _).mpr held) rfl
 
 theorem deregistrationsAdmitted_apply {operation : Operation} :
     ∀ {book : Book} {accounts : List AccountId}, DeregistrationsAdmitted book accounts →
@@ -609,7 +643,7 @@ theorem payout_admitted_from (pre : Book) (account payee : AccountId) (different
   | first :: rest, book, nodup, accountIn, payeeIn, agree => by
     rw [List.nodup_cons] at nodup
     obtain ⟨same, nonneg⟩ := agree first (by simp)
-    refine ⟨⟨accountIn, payeeIn, Or.inr ?_, trivial⟩, ?_⟩
+    refine ⟨⟨accountIn, payeeIn, withinFloor_of_funded ?_, trivial⟩, ?_⟩
     · show ((pre.balance account first).toNat : Int) ≤ book.balance account first
       rw [Int.toNat_of_nonneg nonneg, same]
     · apply payout_admitted_from pre account payee different rest _ nodup.2
@@ -1183,6 +1217,9 @@ structure Inv (world : World) : Prop where
   distinct : (world.seats.map Seat.account).Nodup
   /-- No lease names a seat account: the closing's deregistration is admitted. -/
   leases : ∀ seat ∈ world.seats, LeaseFree world.book seat.account
+  /-- A seat account has no floor: its debits are funded by its balance, so
+  its balances stay non-negative, and its closing is admitted. -/
+  floorFree : ∀ seat ∈ world.seats, ∀ asset, world.book.floor seat.account asset = 0
 
 theorem Inv.genesis (world : World) (empty : world.seats = []) : Inv world := by
   constructor <;> simp [empty]
@@ -1233,7 +1270,7 @@ lease names it. -/
 theorem closeDeregistration {world : World} {seat : Seat} (inv : Inv world) (member : seat ∈ world.seats) :
     DeregistrationAdmission (applyOperations world.book (opsOf (payoutTransfers world.book seat.account
       seat.payee (heldAssets world.book seat.account)))) seat.account := by
-  refine ⟨(inv.protect seat member).1, ?_, ?_, ?_⟩
+  refine ⟨(inv.protect seat member).1, ?_, ?_, ?_, ?_⟩
   · rw [applyOperations_accounts_eq]; exact (inv.member seat member).1
   · intro coordinate hmem same
     obtain ⟨named, asset⟩ := coordinate
@@ -1244,6 +1281,13 @@ theorem closeDeregistration {world : World} {seat : Seat} (inv : Inv world) (mem
   · have free : LeaseFree world.book seat.account := inv.leases seat member
     exact LeaseFree.of_eq (book' := applyOperations world.book (opsOf (payoutTransfers world.book seat.account
       seat.payee (heldAssets world.book seat.account)))) (ops_leaseRecords _ _).symm free
+  · intro coordinate hmem same
+    obtain ⟨named, asset⟩ := coordinate
+    simp only at same
+    subst same
+    have nonzero := (DFinsupp.mem_support_toFun _ _).mp hmem
+    rw [ops_floors] at nonzero
+    exact nonzero (inv.floorFree seat member asset)
 
 /-- Closing one seat of the world preserves the invariant. -/
 theorem closeSeat_inv {world next : World} {seat : Seat} {batch : Batch} (inv : Inv world)
@@ -1282,6 +1326,13 @@ theorem closeSeat_inv {world next : World} {seat : Seat} {batch : Batch} (inv : 
   · intro s hs
     rw [seatsEq] at hs
     exact LeaseFree.of_eq leasesEq.symm (inv.leases s (mem_removeSeat.mp hs).1)
+  · intro s hs asset
+    rw [seatsEq] at hs
+    have floorsEq : next.book.floors = world.book.floors := by
+      rw [book, deregisterAccounts_floors, ops_floors]
+    show next.book.floors (s.account, asset) = 0
+    rw [floorsEq]
+    exact inv.floorFree s (mem_removeSeat.mp hs).1 asset
 
 theorem closeAll_inv {world next : World} {seats : List Seat} {batch : Batch} (inv : Inv world)
     (member : ∀ s ∈ seats, s ∈ world.seats) (nodup : (seats.map Seat.account).Nodup)
@@ -1436,6 +1487,18 @@ theorem offer_inv {world : World} (inv : Inv world) {seatAccount funding payee :
     rcases List.mem_cons.mp hs with rfl | old
     · exact LeaseFree.of_eq leasesEq.symm leaseFree
     · exact LeaseFree.of_eq leasesEq.symm (inv.leases s old)
+  · have floorsEq : (Batch.apply (offerBatch funding seatAccount proposal) world.book).floors =
+        world.book.floors := by
+      show (applyOperations (registerAccounts world.book [seatAccount])
+        (opsOf (giveTransfers funding seatAccount proposal))).floors = _
+      rw [ops_floors]
+      rfl
+    intro s hs asset
+    show (Batch.apply (offerBatch funding seatAccount proposal) world.book).floors (s.account, asset) = 0
+    rw [floorsEq]
+    rcases List.mem_cons.mp hs with rfl | old
+    · exact RegistrationAdmission.floor_zero registered asset
+    · exact inv.floorFree s old asset
 
 theorem reallocate_inv {world : World} (inv : Inv world) {transfers : List Transfer} {book : Book}
     (admitted : admit world.book ⟨[], opsOf transfers, []⟩ = .ok book)
@@ -1460,7 +1523,7 @@ theorem reallocate_inv {world : World} (inv : Inv world) {transfers : List Trans
       rw [safeAt_congr (fun asset _ => ops_untouched away asset)]
       exact inv.safe s hs
   · intro s hs asset
-    exact ops_nonneg ops (inv.nonneg s hs) asset
+    exact ops_nonneg ops (inv.nonneg s hs) (inv.floorFree s hs) asset
   · intro s hs
     show s.account ∈ (applyOperations world.book (opsOf transfers)).accounts ∧
       s.payee ∈ (applyOperations world.book (opsOf transfers)).accounts
@@ -1469,6 +1532,10 @@ theorem reallocate_inv {world : World} (inv : Inv world) {transfers : List Trans
   · exact inv.distinct
   · intro s hs
     exact LeaseFree.of_eq (ops_leaseRecords _ _).symm (inv.leases s hs)
+  · intro s hs asset
+    show (applyOperations world.book (opsOf transfers)).floors (s.account, asset) = 0
+    rw [ops_floors]
+    exact inv.floorFree s hs asset
 
 /-! ## T3 (a): every open seat of every reachable world satisfies its law -/
 
@@ -1480,21 +1547,21 @@ theorem step_inv {world next : World} {height : Nat} {actor : Actor} {action : A
     split at admitted
     · split at admitted
       · cases admitted
-      · cases admitted; exact ⟨inv.safe, inv.nonneg, inv.member, inv.protect, inv.distinct, inv.leases⟩
+      · cases admitted; exact ⟨inv.safe, inv.nonneg, inv.member, inv.protect, inv.distinct, inv.leases, inv.floorFree⟩
     · cases admitted
   | mint invitation =>
     simp only [step] at admitted
     split at admitted
     · split at admitted
       · cases admitted
-      · cases admitted; exact ⟨inv.safe, inv.nonneg, inv.member, inv.protect, inv.distinct, inv.leases⟩
+      · cases admitted; exact ⟨inv.safe, inv.nonneg, inv.member, inv.protect, inv.distinct, inv.leases, inv.floorFree⟩
     · cases admitted
   | handOver id recipient =>
     simp only [step] at admitted
     split at admitted
     · split at admitted
       · cases admitted
-      · cases admitted; exact ⟨inv.safe, inv.nonneg, inv.member, inv.protect, inv.distinct, inv.leases⟩
+      · cases admitted; exact ⟨inv.safe, inv.nonneg, inv.member, inv.protect, inv.distinct, inv.leases, inv.floorFree⟩
     · cases admitted
   | offer id expect seatAccount funding payee proposal holder =>
     simp only [step] at admitted
@@ -1565,7 +1632,7 @@ theorem step_inv {world next : World} {height : Nat} {actor : Actor} {action : A
         cases admitted
         have := closeAll_inv inv (fun s hs => (openSeatsOf_sub world instId).subset hs)
           (inv.distinct.sublist ((openSeatsOf_sub world instId).map _)) hclosed
-        exact ⟨this.safe, this.nonneg, this.member, this.protect, this.distinct, this.leases⟩
+        exact ⟨this.safe, this.nonneg, this.member, this.protect, this.distinct, this.leases, this.floorFree⟩
     · cases admitted
 
 inductive Reachable (genesis : World) : World → Prop
@@ -2174,6 +2241,7 @@ def genesisBook : Book where
   accounts := {aliceAccount, bobAccount}
   balances := DFinsupp.single (aliceAccount, X) 10 + DFinsupp.single (bobAccount, Y) 7
   leaseRecords := 0
+  floors := 0
 
 def genesis : World := ⟨genesisBook, ⟨[], [], [], []⟩, []⟩
 

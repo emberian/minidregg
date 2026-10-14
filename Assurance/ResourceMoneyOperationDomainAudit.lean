@@ -37,11 +37,12 @@ theorem stale_book_cannot_be_sampled
 theorem ordered_overdraft_cannot_be_prepared
     (prior suffix : List Operation) (operation : Operation)
     (position : operations = prior ++ operation :: suffix)
-    (notMint : operation.isIssuerMint ≠ true)
     (overdrawn : (applyOperations prepared.applicationPre prior).balance
-      operation.posting.source operation.posting.asset < Int.ofNat operation.posting.amount) :
+        operation.posting.source operation.posting.asset +
+      Int.ofNat ((applyOperations prepared.applicationPre prior).floor
+        operation.posting.source operation.posting.asset) < Int.ofNat operation.posting.amount) :
     False :=
-  (not_le_of_gt overdrawn) (prepared.source_solvent_at prior suffix operation position notMint)
+  (not_le_of_gt overdrawn) (prepared.source_within_floor_at prior suffix operation position)
 
 #assert_axioms applyOperations_append
 #assert_axioms combined_admitted
@@ -52,7 +53,7 @@ theorem ordered_overdraft_cannot_be_prepared
 #assert_axioms Prepared.writes_pre_exact
 #assert_axioms Prepared.writes_roots_bound
 #assert_axioms stale_root_refused
-#assert_axioms Prepared.source_solvent_at
+#assert_axioms Prepared.source_within_floor_at
 #assert_axioms spoofed_balance_cannot_be_checked
 #assert_axioms absent_account_cannot_be_checked
 #assert_axioms stale_book_cannot_be_sampled

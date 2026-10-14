@@ -108,7 +108,7 @@ cat >"$ROOT/genesis.json" <<EOF
     "accountPredicate":{"type":"all","predicates":[]}
   }],
   "factoryControllerSubject":"$GATEWAY_SUBJECT","factoryControllerCapability":"53","clockTickers":[],
-  "tailBound":"256",
+  "tailBound":"256", \"issuanceCap\":\"1000000000000000",
   "meterAllowance":{
     "incidences":"10000000","turnBytes":"10000000","memoryTouches":"10000000",
     "witnessBytes":"10000000","proofWork":"10000000","storageBytes":"10000000",

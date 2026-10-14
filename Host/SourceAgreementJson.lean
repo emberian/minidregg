@@ -1326,7 +1326,7 @@ private def genesis (path : String) (json : Lean.Json) : Result NativeHostGenesi
     "tariffBase", "tariffPerBirth", "tariffPerGrant", "tariffPerInitialPayloadByte",
     "collector", "asset", "expectedSemantics", "issuerEpoch", "genesisHeight",
     "factoryPredicate", "enrollments", "factoryControllerSubject",
-    "factoryControllerCapability", "meterAllowance", "clockTickers", "tailBound", "clockGenesisNow", "clockMaxStepSeconds"]
+    "factoryControllerCapability", "meterAllowance", "clockTickers", "tailBound", "clockGenesisNow", "clockMaxStepSeconds", "issuanceCap"]
   let observed := (json.getObjVal? "payObserver").toOption.isSome
   let obj ← exactObject path (if observed then names ++ ["payObserver"] else names) json
   let payObserver ← if observed then do
@@ -1375,7 +1375,8 @@ private def genesis (path : String) (json : Lean.Json) : Result NativeHostGenesi
     clockTickers := ← list (path ++ ".clockTickers") clockTicker (← field path "clockTickers" obj)
     tailBound := tailBound
     clockGenesisNow := clockGenesisNow
-    clockMaxStepSeconds := clockMaxStepSeconds }
+    clockMaxStepSeconds := clockMaxStepSeconds
+    issuanceCap := ← nat (path ++ ".issuanceCap") (← field path "issuanceCap" obj) }
 
 private def funding (path : String) (json : Lean.Json) : Result ResourceBirth.InitialFunding := do
   let obj ← exactObject path ["source", "destination", "asset", "amount"] json

@@ -16,9 +16,24 @@ minted patch.  Every admitted operation normalizes to one debit/credit posting:
 * mint moves value out of the asset's issuer well (negative supply);
 * burn returns value to that issuer well;
 * fee moves value to an explicit collector;
-* lease prepays `rate * epochs` to a lessor and installs the exact lease record.
+* lease prepays `rate * epochs` to a lessor and installs the exact lease record;
+* setFloor is a zero-value posting from the asset's issuer well to an account
+  that installs that account's floor in the asset;
+* sweep moves the exact `recycle` amount of an idle holder's balance to a
+  commons account (or, with the issuer well as destination, destroys it).
 
-Thus all five operations share one per-asset conservation theorem.  A separate
+Thus all seven operations share one per-asset conservation theorem.
+
+Admission has one solvency rule for every account, the issuer well included:
+a debit may take the source down to minus its floor
+(`amount ≤ balance + floor`).  A floor of 0 is an ordinary account; a floor L
+is a credit limit; the well's floor C is its issuance cap, so mint is capped
+like every other debit and nets against burns (a lifetime gross-mint ceiling
+is a monotone counter, not value, and is not modelled here).  Floors are Book
+state, set only by `setFloor`, whose posting source is the issuer well: the
+authority that may issue an asset is the authority that may extend credit in
+it.  `outstanding_le_sum_floors` bounds the positive balances of an asset by
+the sum of its floors.  A separate
 credit-only operation is deliberately excluded and proved to break the law.
 Physical payment finality, wall-clock expiry, eviction, and durable CAS remain
 handler obligations; a logical lease record does not pretend those occurred.
@@ -31,6 +46,7 @@ same operation normalization and conservation law.
 import Mathlib.Data.DFinsupp.Encodable
 import Theory.CellState
 import Theory.TypedAuthorization
+import Theory.AssertAxioms
 
 namespace Minidregg.Theory.CanonicalResourceKernel
 
@@ -62,12 +78,14 @@ structure LeaseRecord where
 
 deriving instance Countable for LeaseRecord
 
-/-- A signed account book.  Issuer wells may be negative; ordinary admission
-below prevents non-minting spenders from overdrawing. -/
+/-- A signed account book.  Any account may be negative down to minus its
+floor in that asset (`floors`, absent = 0); admission below refuses every debit
+that would take its source further. -/
 structure Book where
   accounts : Finset AccountId
   balances : Π₀ _ : AccountId × AssetId, Int
   leaseRecords : Π₀ _ : LeaseId, Option LeaseRecord
+  floors : Π₀ _ : AccountId × AssetId, Nat
   deriving DecidableEq
 
 deriving instance Countable for Book
@@ -78,10 +96,16 @@ def Book.balance (book : Book) (account : AccountId) (asset : AssetId) : Int :=
 def Book.leases (book : Book) (leaseId : LeaseId) : Option LeaseRecord :=
   book.leaseRecords leaseId
 
+/-- How far below zero `account` may go in `asset`: 0 for an ordinary account,
+a credit limit for a member, the issuance cap for the asset's issuer well. -/
+def Book.floor (book : Book) (account : AccountId) (asset : AssetId) : Nat :=
+  book.floors (account, asset)
+
 def Book.empty : Book where
   accounts := ∅
   balances := 0
   leaseRecords := 0
+  floors := 0
 
 /-- The conserved total for one asset, including its issuer well. -/
 def Book.totalAsset (book : Book) (asset : AssetId) : Int :=
@@ -104,6 +128,7 @@ def Book.applyPosting (book : Book) (posting : Posting) : Book where
       DFinsupp.single (posting.source, posting.asset) (-(Int.ofNat posting.amount)) +
       DFinsupp.single (posting.destination, posting.asset) (Int.ofNat posting.amount)
   leaseRecords := book.leaseRecords
+  floors := book.floors
 
 /-- Every posting between present endpoints preserves the per-asset total. -/
 theorem Book.applyPosting_conserves
@@ -130,6 +155,12 @@ inductive Operation
   | fee (payer collector : AccountId) (asset : AssetId) (amount : Nat)
   | lease (leaseId : LeaseId) (holder lessor : AccountId) (asset : AssetId)
       (rate epochs : Nat) (startsAt : Epoch)
+  /-- Set `account`'s floor in `asset`. Its posting is zero value out of the
+  issuer well `asset`, so the well's authority is the authority required. -/
+  | setFloor (asset : AssetId) (account : AccountId) (floor : Nat)
+  /-- Move `amount = recycle (balance holder asset) permille epochs` from
+  `holder` to `commons`; with `commons = asset` it is destruction. -/
+  | sweep (holder commons : AccountId) (asset : AssetId) (permille epochs amount : Nat)
   deriving DecidableEq, Repr
 
 /-- Every operation has exactly one value posting. -/
@@ -144,6 +175,10 @@ def Operation.posting : Operation -> Posting
       ⟨payer, collector, asset, amount⟩
   | .lease _ holder lessor asset rate epochs _ =>
       ⟨holder, lessor, asset, rate * epochs⟩
+  | .setFloor asset account _ =>
+      ⟨asset, account, asset, 0⟩
+  | .sweep holder commons asset _ _ amount =>
+      ⟨holder, commons, asset, amount⟩
 
 /-- Exact fee-like debit visible to metering.  Ordinary transfers, mint, and
 burn have no intrinsic fee in this nucleus; fee and lease payments are exact. -/
@@ -164,13 +199,22 @@ def Operation.leaseRecord? : Operation -> Option (LeaseId × LeaseRecord)
           expiresAt := startsAt + epochs })
   | _ => none
 
-/-- Apply the conserved posting, then install the lease metadata when present. -/
+/-- The floor coordinate and value this operation installs, when it is a
+`setFloor`. -/
+def Operation.floorSetting? : Operation -> Option ((AccountId × AssetId) × Nat)
+  | .setFloor asset account floor => some ((account, asset), floor)
+  | _ => none
+
+/-- Apply the conserved posting, then install the lease record or the floor
+when the operation carries one. -/
 def Operation.apply (operation : Operation) (book : Book) : Book :=
   let paid := book.applyPosting operation.posting
-  match operation.leaseRecord? with
-  | none => paid
-  | some (leaseId, record) =>
+  match operation.leaseRecord?, operation.floorSetting? with
+  | some (leaseId, record), _ =>
       { paid with leaseRecords := paid.leaseRecords.update leaseId (some record) }
+  | none, some (coordinate, floor) =>
+      { paid with floors := paid.floors.update coordinate floor }
+  | none, none => paid
 
 @[simp] theorem Operation.apply_accounts (operation : Operation) (book : Book) :
     (operation.apply book).accounts = book.accounts := by
@@ -184,7 +228,7 @@ theorem Operation.apply_total_eq_posting
   cases operation <;> rfl
 
 /-- The common conservation theorem for transfer, issuer-backed mint, burn,
-fee, and prepaid lease. -/
+fee, prepaid lease, floor setting and sweep. -/
 theorem Operation.apply_conserves
     (operation : Operation) (book : Book)
     (sourcePresent : operation.posting.source ∈ book.accounts)
@@ -197,26 +241,57 @@ theorem Operation.apply_conserves
 
 /-! ## Admission: conservation plus the non-algebraic policy checks -/
 
-/-- Mint alone may intentionally drive its issuer well farther negative. -/
-def Operation.isIssuerMint : Operation -> Bool
-  | .mint _ _ _ => true
-  | _ => false
+/-- The balance a holder keeps after `epochs` demurrage steps of `permille`
+per mille each.  Each step rounds the removed part down, so every rounding
+remainder stays with the holder. -/
+def retained (permille : Nat) (balance : Nat) : Nat → Nat
+  | 0 => balance
+  | epochs + 1 =>
+      let kept := retained permille balance epochs
+      kept - kept * permille / 1000
+
+/-- The amount a sweep moves: the part of a positive balance that `epochs`
+demurrage steps remove. A balance at or below zero (credit in use) recycles
+nothing. -/
+def recycle (balance : Int) (permille epochs : Nat) : Nat :=
+  balance.toNat - retained permille balance.toNat epochs
+
+/-- The per-operation shape checks beside solvency: a lease has positive
+duration and a fresh identifier; a floor is never set below the balance the
+account already holds; a sweep moves exactly `recycle` of the pre-book
+balance. -/
+def Operation.WellFormed (book : Book) : Operation → Prop
+  | .lease leaseId _ _ _ _ epochs _ => 0 < epochs ∧ book.leases leaseId = none
+  | .setFloor asset account floor => -(Int.ofNat floor) ≤ book.balance account asset
+  | .sweep holder _ asset permille epochs amount =>
+      amount = recycle (book.balance holder asset) permille epochs
+  | _ => True
+
+instance Operation.wellFormedDecidable (book : Book) (operation : Operation) :
+    Decidable (operation.WellFormed book) := by
+  cases operation <;> unfold Operation.WellFormed <;> infer_instance
 
 /-- Policy admission is indexed by the exact pre-book and operation.  Endpoint
-membership makes the finite-sum law applicable.  Non-minting sources must fund
-the debit.  A lease additionally has positive duration and a fresh identifier. -/
+membership makes the finite-sum law applicable.  Every source, the issuer well
+included, may debit down to minus its floor and no further.  The operation's
+own shape checks (`Operation.WellFormed`) also hold. -/
 structure Admission (book : Book) (operation : Operation) : Prop where
   sourcePresent : operation.posting.source ∈ book.accounts
   destinationPresent : operation.posting.destination ∈ book.accounts
-  sourceSolvent :
-    operation.isIssuerMint = true \/
-      Int.ofNat operation.posting.amount <=
-        book.balance operation.posting.source operation.posting.asset
-  leaseWellFormed :
-    match operation with
-    | .lease leaseId _ _ _ _ epochs _ =>
-        0 < epochs /\ book.leases leaseId = none
-    | _ => True
+  sourceWithinFloor :
+    Int.ofNat operation.posting.amount <=
+      book.balance operation.posting.source operation.posting.asset +
+        Int.ofNat (book.floor operation.posting.source operation.posting.asset)
+  wellFormed : operation.WellFormed book
+
+/-- A debit funded by the balance alone is within any floor. -/
+theorem withinFloor_of_funded {book : Book} {operation : Operation}
+    (funded : Int.ofNat operation.posting.amount ≤
+      book.balance operation.posting.source operation.posting.asset) :
+    Int.ofNat operation.posting.amount ≤
+      book.balance operation.posting.source operation.posting.asset +
+        Int.ofNat (book.floor operation.posting.source operation.posting.asset) :=
+  le_trans funded (le_add_of_nonneg_right (Int.natCast_nonneg _))
 
 /-! ## Canonical typed-cell embedding -/
 
@@ -341,10 +416,12 @@ total. The finite support check below therefore precedes every insertion.
 def Book.registerAccount (book : Book) (account : AccountId) : Book :=
   { book with accounts := insert account book.accounts }
 
-/-- Freshness and absence of every hidden nonzero balance are both checked. -/
+/-- Freshness and absence of every hidden nonzero balance and hidden floor
+are checked: a registered account starts at zero with floor zero. -/
 def RegistrationAdmission (book : Book) (account : AccountId) : Prop :=
   account ∉ book.accounts ∧
-    ∀ coordinate ∈ book.balances.support, coordinate.1 ≠ account
+    (∀ coordinate ∈ book.balances.support, coordinate.1 ≠ account) ∧
+    ∀ coordinate ∈ book.floors.support, coordinate.1 ≠ account
 
 instance (book : Book) (account : AccountId) :
     Decidable (RegistrationAdmission book account) := by
@@ -356,7 +433,15 @@ theorem RegistrationAdmission.balance_zero
     (admitted : RegistrationAdmission book account) (asset : AssetId) :
     book.balance account asset = 0 := by
   by_contra nonzero
-  exact admitted.2 (account, asset)
+  exact admitted.2.1 (account, asset)
+    ((DFinsupp.mem_support_toFun _ _).mpr nonzero) rfl
+
+theorem RegistrationAdmission.floor_zero
+    {book : Book} {account : AccountId}
+    (admitted : RegistrationAdmission book account) (asset : AssetId) :
+    book.floor account asset = 0 := by
+  by_contra nonzero
+  exact admitted.2.2 (account, asset)
     ((DFinsupp.mem_support_toFun _ _).mpr nonzero) rfl
 
 theorem Book.registerAccount_conserves
@@ -388,22 +473,18 @@ instance registrationsDecidable (book : Book) (accounts : List AccountId) :
 private def admissionConditions (book : Book) (operation : Operation) : Prop :=
   operation.posting.source ∈ book.accounts ∧
     operation.posting.destination ∈ book.accounts ∧
-    (operation.isIssuerMint = true ∨
-      Int.ofNat operation.posting.amount ≤
-        book.balance operation.posting.source operation.posting.asset) ∧
-    (match operation with
-     | .lease leaseId _ _ _ _ epochs _ => 0 < epochs ∧ book.leases leaseId = none
-     | _ => True)
+    Int.ofNat operation.posting.amount ≤
+      book.balance operation.posting.source operation.posting.asset +
+        Int.ofNat (book.floor operation.posting.source operation.posting.asset) ∧
+    operation.WellFormed book
 
 instance admissionDecidable (book : Book) (operation : Operation) :
     Decidable (Admission book operation) := by
   haveI : Decidable (admissionConditions book operation) := by
-    cases operation <;> unfold admissionConditions <;> infer_instance
+    unfold admissionConditions; infer_instance
   apply decidable_of_iff (admissionConditions book operation)
-  cases operation <;>
-    exact ⟨fun h => ⟨h.1, h.2.1, h.2.2.1, h.2.2.2⟩,
-      fun h => ⟨h.sourcePresent, h.destinationPresent, h.sourceSolvent,
-        h.leaseWellFormed⟩⟩
+  exact ⟨fun h => ⟨h.1, h.2.1, h.2.2.1, h.2.2.2⟩,
+    fun h => ⟨h.sourcePresent, h.destinationPresent, h.sourceWithinFloor, h.wellFormed⟩⟩
 
 def applyOperations (book : Book) : List Operation → Book
   | [] => book
@@ -456,8 +537,9 @@ def LeaseRecord.names (record : LeaseRecord) (account : AccountId) : Bool :=
 def DeregistrationAdmission (book : Book) (account : AccountId) : Prop :=
   protectedBase ≤ account ∧ account ∈ book.accounts ∧
     (∀ coordinate ∈ book.balances.support, coordinate.1 ≠ account) ∧
-    ∀ leaseId ∈ book.leaseRecords.support,
-      ((book.leaseRecords leaseId).all fun record => !record.names account) = true
+    (∀ leaseId ∈ book.leaseRecords.support,
+      ((book.leaseRecords leaseId).all fun record => !record.names account) = true) ∧
+    ∀ coordinate ∈ book.floors.support, coordinate.1 ≠ account
 
 instance (book : Book) (account : AccountId) :
     Decidable (DeregistrationAdmission book account) := by
@@ -516,6 +598,12 @@ theorem deregisterAccounts_conserves
 
 @[simp] theorem deregisterAccounts_balances (book : Book) (accounts : List AccountId) :
     (deregisterAccounts book accounts).balances = book.balances := by
+  induction accounts generalizing book with
+  | nil => rfl
+  | cons account rest ih => exact ih _
+
+@[simp] theorem deregisterAccounts_floors (book : Book) (accounts : List AccountId) :
+    (deregisterAccounts book accounts).floors = book.floors := by
   induction accounts generalizing book with
   | nil => rfl
   | cons account rest ih => exact ih _
@@ -586,18 +674,18 @@ theorem operationsAdmitted_append (book : Book) (priorOps suffix : List Operatio
     simp [OperationsAdmitted, applyOperations, ih, and_assoc]
 
 /-- Every debit reads the exact book after all earlier operations, not the
-initial balance reused for each leg. Mint's sole exception is the issuer well
-selected by the operation constructor. -/
-theorem Batch.source_solvent_at (book : Book) (batch : Batch)
+initial balance reused for each leg, and no source (the issuer well included)
+is excepted from its floor. -/
+theorem Batch.source_within_floor_at (book : Book) (batch : Batch)
     (admitted : batch.Admission book) (priorOps suffix : List Operation)
-    (operation : Operation) (position : batch.operations = priorOps ++ operation :: suffix)
-    (notMint : operation.isIssuerMint ≠ true) :
+    (operation : Operation) (position : batch.operations = priorOps ++ operation :: suffix) :
+    let at_ := applyOperations (registerAccounts book batch.registrations) priorOps
     Int.ofNat operation.posting.amount ≤
-      (applyOperations (registerAccounts book batch.registrations) priorOps).balance
-        operation.posting.source operation.posting.asset := by
+      at_.balance operation.posting.source operation.posting.asset +
+        Int.ofNat (at_.floor operation.posting.source operation.posting.asset) := by
   have ordered := admitted.2.1
   rw [position, operationsAdmitted_append] at ordered
-  exact ordered.2.1.sourceSolvent.resolve_left notMint
+  exact ordered.2.1.sourceWithinFloor
 
 theorem Batch.conservation : Batch.ConservationStatement := by
   intro book batch admitted asset
@@ -617,8 +705,14 @@ inductive OperationRefusal where
   | sourceUnregistered (account : AccountId)
   /-- The credited account is not registered (never opened, or closed). -/
   | destinationUnregistered (account : AccountId)
-  | overdrawn (account : AccountId) (asset : AssetId)
+  /-- The debit would take the source below minus its floor in the asset
+  (for the issuer well: past its issuance cap). -/
+  | belowFloor (account : AccountId) (asset : AssetId)
   | leaseMalformed (leaseId : LeaseId)
+  /-- The new floor is below what the account already owes. -/
+  | floorBelowBalance (account : AccountId) (asset : AssetId)
+  /-- The sweep amount is not `recycle` of the holder's balance. -/
+  | sweepInexact (holder : AccountId) (asset : AssetId)
   deriving DecidableEq, Repr
 
 inductive DeregistrationRefusal where
@@ -629,6 +723,8 @@ inductive DeregistrationRefusal where
   | balanceRemains
   /-- A lease record names the account. -/
   | leaseNames
+  /-- A nonzero floor remains in some asset: close the credit line first. -/
+  | floorRemains
   deriving DecidableEq, Repr
 
 inductive BatchRefusal where
@@ -642,13 +738,19 @@ def Operation.refusal? (operation : Operation) (book : Book) : Option OperationR
     some (.sourceUnregistered operation.posting.source)
   else if operation.posting.destination ∉ book.accounts then
     some (.destinationUnregistered operation.posting.destination)
-  else if ¬ (operation.isIssuerMint = true ∨
-      Int.ofNat operation.posting.amount ≤
-        book.balance operation.posting.source operation.posting.asset) then
-    some (.overdrawn operation.posting.source operation.posting.asset)
+  else if ¬ (Int.ofNat operation.posting.amount ≤
+      book.balance operation.posting.source operation.posting.asset +
+        Int.ofNat (book.floor operation.posting.source operation.posting.asset)) then
+    some (.belowFloor operation.posting.source operation.posting.asset)
   else match operation with
     | .lease leaseId _ _ _ _ epochs _ =>
         if 0 < epochs ∧ book.leases leaseId = none then none else some (.leaseMalformed leaseId)
+    | .setFloor asset account floor =>
+        if -(Int.ofNat floor) ≤ book.balance account asset then none
+        else some (.floorBelowBalance account asset)
+    | .sweep holder _ asset permille epochs amount =>
+        if amount = recycle (book.balance holder asset) permille epochs then none
+        else some (.sweepInexact holder asset)
     | _ => none
 
 theorem Operation.refusal?_eq_none_iff (operation : Operation) (book : Book) :
@@ -658,22 +760,38 @@ theorem Operation.refusal?_eq_none_iff (operation : Operation) (book : Book) :
   · rw [if_neg (not_not.mpr source)]
     by_cases destination : operation.posting.destination ∈ book.accounts
     · rw [if_neg (not_not.mpr destination)]
-      by_cases solvent : operation.isIssuerMint = true ∨
-          Int.ofNat operation.posting.amount ≤
-            book.balance operation.posting.source operation.posting.asset
-      · rw [if_neg (not_not.mpr solvent)]
+      by_cases within : Int.ofNat operation.posting.amount ≤
+          book.balance operation.posting.source operation.posting.asset +
+            Int.ofNat (book.floor operation.posting.source operation.posting.asset)
+      · rw [if_neg (not_not.mpr within)]
         cases operation with
         | lease leaseId holder lessor asset rate epochs startsAt =>
             simp only
-            by_cases wellFormed : 0 < epochs ∧ book.leases leaseId = none
-            · rw [if_pos wellFormed]
-              exact ⟨fun _ => ⟨source, destination, solvent, wellFormed⟩, fun _ => rfl⟩
-            · rw [if_neg wellFormed]
+            by_cases formed : 0 < epochs ∧ book.leases leaseId = none
+            · rw [if_pos formed]
+              exact ⟨fun _ => ⟨source, destination, within, formed⟩, fun _ => rfl⟩
+            · rw [if_neg formed]
               exact ⟨fun refused => (by cases refused),
-                fun admitted => absurd admitted.leaseWellFormed wellFormed⟩
-        | _ => exact ⟨fun _ => ⟨source, destination, solvent, trivial⟩, fun _ => rfl⟩
-      · rw [if_pos solvent]
-        exact ⟨fun refused => (by cases refused), fun admitted => absurd admitted.sourceSolvent solvent⟩
+                fun admitted => absurd admitted.wellFormed formed⟩
+        | setFloor asset account floor =>
+            simp only
+            by_cases formed : -(Int.ofNat floor) ≤ book.balance account asset
+            · rw [if_pos formed]
+              exact ⟨fun _ => ⟨source, destination, within, formed⟩, fun _ => rfl⟩
+            · rw [if_neg formed]
+              exact ⟨fun refused => (by cases refused),
+                fun admitted => absurd admitted.wellFormed formed⟩
+        | sweep holder commons asset permille epochs amount =>
+            simp only
+            by_cases formed : amount = recycle (book.balance holder asset) permille epochs
+            · rw [if_pos formed]
+              exact ⟨fun _ => ⟨source, destination, within, formed⟩, fun _ => rfl⟩
+            · rw [if_neg formed]
+              exact ⟨fun refused => (by cases refused),
+                fun admitted => absurd admitted.wellFormed formed⟩
+        | _ => exact ⟨fun _ => ⟨source, destination, within, trivial⟩, fun _ => rfl⟩
+      · rw [if_pos within]
+        exact ⟨fun refused => (by cases refused), fun admitted => absurd admitted.sourceWithinFloor within⟩
     · rw [if_pos destination]
       exact ⟨fun refused => (by cases refused),
         fun admitted => absurd admitted.destinationPresent destination⟩
@@ -725,6 +843,7 @@ def deregistrationRefusal? (book : Book) (account : AccountId) : Option Deregist
   else if ¬ ∀ leaseId ∈ book.leaseRecords.support,
       ((book.leaseRecords leaseId).all fun record => !record.names account) = true then
     some .leaseNames
+  else if ¬ ∀ coordinate ∈ book.floors.support, coordinate.1 ≠ account then some .floorRemains
   else none
 
 theorem deregistrationRefusal?_eq_none_iff (book : Book) (account : AccountId) :
@@ -739,9 +858,13 @@ theorem deregistrationRefusal?_eq_none_iff (book : Book) (account : AccountId) :
         by_cases leases : ∀ leaseId ∈ book.leaseRecords.support,
             ((book.leaseRecords leaseId).all fun record => !record.names account) = true
         · rw [if_neg (not_not.mpr leases)]
-          exact ⟨fun _ => ⟨kernel, present, empty, leases⟩, fun _ => rfl⟩
+          by_cases floors : ∀ coordinate ∈ book.floors.support, coordinate.1 ≠ account
+          · rw [if_neg (not_not.mpr floors)]
+            exact ⟨fun _ => ⟨kernel, present, empty, leases, floors⟩, fun _ => rfl⟩
+          · rw [if_pos floors]
+            exact ⟨fun refused => (by cases refused), fun admitted => absurd admitted.2.2.2.2 floors⟩
         · rw [if_pos leases]
-          exact ⟨fun refused => (by cases refused), fun admitted => absurd admitted.2.2.2 leases⟩
+          exact ⟨fun refused => (by cases refused), fun admitted => absurd admitted.2.2.2.1 leases⟩
       · rw [if_pos empty]
         exact ⟨fun refused => (by cases refused), fun admitted => absurd admitted.2.2.1 empty⟩
     · rw [if_pos present]
@@ -841,14 +964,14 @@ theorem AcceptedBatch.conserves {M : CellState.Materializer layout Digest}
   rw [accepted.post_logicalBook]
   exact Batch.conservation _ _ accepted.admission asset
 
-/-! ## Positive poles: the five constructors do real work -/
+/-! ## Positive poles: the value constructors do real work -/
 
 theorem mint_debits_issuer
     (book : Book) (asset : AssetId) (destination : AccountId) (amount : Nat)
     (different : asset ≠ destination) :
     ((Operation.mint asset destination amount).apply book).balance asset asset =
       book.balance asset asset - Int.ofNat amount := by
-  simp [Operation.apply, Operation.posting, Operation.leaseRecord?,
+  simp [Operation.apply, Operation.posting, Operation.leaseRecord?, Operation.floorSetting?,
     Book.applyPosting, Book.balance, DFinsupp.single_apply,
     Ne.symm different, sub_eq_add_neg]
 
@@ -857,7 +980,7 @@ theorem mint_credits_destination
     (different : destination ≠ asset) :
     ((Operation.mint asset destination amount).apply book).balance destination asset =
       book.balance destination asset + Int.ofNat amount := by
-  simp [Operation.apply, Operation.posting, Operation.leaseRecord?,
+  simp [Operation.apply, Operation.posting, Operation.leaseRecord?, Operation.floorSetting?,
     Book.applyPosting, Book.balance, DFinsupp.single_apply,
     Ne.symm different]
 
@@ -866,7 +989,7 @@ theorem burn_returns_to_issuer
     (different : asset ≠ source) :
     ((Operation.burn source asset amount).apply book).balance asset asset =
       book.balance asset asset + Int.ofNat amount := by
-  simp [Operation.apply, Operation.posting, Operation.leaseRecord?,
+  simp [Operation.apply, Operation.posting, Operation.leaseRecord?, Operation.floorSetting?,
     Book.applyPosting, Book.balance, DFinsupp.single_apply,
     Ne.symm different]
 
@@ -875,7 +998,7 @@ theorem fee_debits_payer
     (different : payer ≠ collector) :
     ((Operation.fee payer collector asset amount).apply book).balance payer asset =
       book.balance payer asset - Int.ofNat amount := by
-  simp [Operation.apply, Operation.posting, Operation.leaseRecord?,
+  simp [Operation.apply, Operation.posting, Operation.leaseRecord?, Operation.floorSetting?,
     Book.applyPosting, Book.balance, DFinsupp.single_apply,
     Ne.symm different, sub_eq_add_neg]
 
@@ -890,7 +1013,7 @@ theorem fee_debits_payer
           prepaid := rate * epochs
           startsAt := startsAt
           expiresAt := startsAt + epochs } := by
-  simp [Operation.apply, Operation.posting, Operation.leaseRecord?,
+  simp [Operation.apply, Operation.posting, Operation.leaseRecord?, Operation.floorSetting?,
     Book.applyPosting, Book.leases]
 
 /-! ## One-operation batches and the per-asset frame (K-WELL)
@@ -904,7 +1027,7 @@ theorem burn_debits_source
     (different : asset ≠ source) :
     ((Operation.burn source asset amount).apply book).balance source asset =
       book.balance source asset - Int.ofNat amount := by
-  simp [Operation.apply, Operation.posting, Operation.leaseRecord?,
+  simp [Operation.apply, Operation.posting, Operation.leaseRecord?, Operation.floorSetting?,
     Book.applyPosting, Book.balance, DFinsupp.single_apply,
     different, sub_eq_add_neg]
 
@@ -952,6 +1075,7 @@ def Book.creditOnly (book : Book) (destination : AccountId)
   balances := book.balances +
     DFinsupp.single (destination, asset) (Int.ofNat amount)
   leaseRecords := book.leaseRecords
+  floors := book.floors
 
 theorem Book.creditOnly_adds
     (book : Book) (destination : AccountId) (asset : AssetId) (amount : Nat)
@@ -976,6 +1100,339 @@ theorem Book.creditOnly_breaks_conservation
   intro unchanged
   omega
 
+/-! ## Floors: one solvency rule for wells, credit and ordinary accounts
+
+`Admission.sourceWithinFloor` is the only solvency check.  The four facts below
+are what it buys: the floor law is an invariant of admitted operations and
+batches; under it the positive balances of an asset never exceed the sum of
+its floors; with ordinary floors at zero and a well whose floor covers its
+mints, it decides exactly what the deleted `isIssuerMint ∨ amount ≤ balance`
+rule decided; and the decayed display of a swept balance is what the sweep
+writes. -/
+
+/-- Every account holds at least minus its floor in `asset`. -/
+def Book.WithinFloors (book : Book) (asset : AssetId) : Prop :=
+  ∀ account, -(Int.ofNat (book.floor account asset)) ≤ book.balance account asset
+
+private theorem single_pair_apply (p q : AccountId × AssetId) (v : Int) :
+    (DFinsupp.single p v : Π₀ _ : AccountId × AssetId, Int) q = if p = q then v else 0 := by
+  by_cases h : p = q
+  · subst h; simp
+  · rw [if_neg h, DFinsupp.single_apply, dif_neg h]
+
+/-- One posting's effect on one coordinate, for every operation. -/
+theorem Operation.apply_balance (operation : Operation) (book : Book)
+    (account : AccountId) (asset : AssetId) :
+    (operation.apply book).balance account asset =
+      book.balance account asset
+        - (if (operation.posting.source, operation.posting.asset) = (account, asset)
+            then Int.ofNat operation.posting.amount else 0)
+        + (if (operation.posting.destination, operation.posting.asset) = (account, asset)
+            then Int.ofNat operation.posting.amount else 0) := by
+  have balances :
+      (operation.apply book).balances = (book.applyPosting operation.posting).balances := by
+    cases operation <;> rfl
+  unfold Book.balance
+  rw [balances]
+  simp only [Book.applyPosting, DFinsupp.add_apply, single_pair_apply]
+  split_ifs <;> ring
+
+/-- Only `setFloor` writes a floor. -/
+theorem Operation.apply_floor_of_not_setFloor (operation : Operation) (book : Book)
+    (account : AccountId) (asset : AssetId)
+    (notSet : ∀ wellAsset target floor, operation ≠ .setFloor wellAsset target floor) :
+    (operation.apply book).floor account asset = book.floor account asset := by
+  cases operation with
+  | setFloor wellAsset target floor => exact absurd rfl (notSet wellAsset target floor)
+  | _ => rfl
+
+theorem setFloor_floor (book : Book) (wellAsset target : AccountId) (floor : Nat)
+    (account : AccountId) (asset : AssetId) :
+    ((Operation.setFloor wellAsset target floor).apply book).floor account asset =
+      if (account, asset) = (target, wellAsset) then floor else book.floor account asset := by
+  simp [Operation.apply, Operation.leaseRecord?, Operation.floorSetting?, Book.floor,
+    Book.applyPosting, DFinsupp.coe_update, Function.update_apply]
+
+/-- A floor setting moves no value. -/
+theorem setFloor_moves_no_value (book : Book) (wellAsset target : AccountId) (floor : Nat)
+    (account : AccountId) (asset : AssetId) :
+    ((Operation.setFloor wellAsset target floor).apply book).balance account asset =
+      book.balance account asset := by
+  rw [Operation.apply_balance]
+  simp [Operation.posting]
+
+/-- **Admitted operations preserve the floor law.** -/
+theorem admitted_preserves_floors (book : Book) (operation : Operation) (asset : AssetId)
+    (within : book.WithinFloors asset) (admitted : Admission book operation) :
+    (operation.apply book).WithinFloors asset := by
+  intro account
+  have moved : -(Int.ofNat (book.floor account asset)) ≤
+      (operation.apply book).balance account asset := by
+    rw [Operation.apply_balance]
+    have old := within account
+    have debit := admitted.sourceWithinFloor
+    have credit : (0 : Int) ≤
+        (if (operation.posting.destination, operation.posting.asset) = (account, asset)
+          then Int.ofNat operation.posting.amount else 0) := by
+      split_ifs <;> simp
+    by_cases source : (operation.posting.source, operation.posting.asset) = (account, asset)
+    · rw [if_pos source]
+      obtain ⟨sameAccount, sameAsset⟩ := Prod.mk.inj source
+      rw [sameAccount, sameAsset] at debit
+      linarith
+    · rw [if_neg source]
+      linarith
+  cases operation with
+  | setFloor wellAsset target floor =>
+      rw [setFloor_floor]
+      by_cases same : (account, asset) = (target, wellAsset)
+      · rw [if_pos same, setFloor_moves_no_value]
+        obtain ⟨sameAccount, sameAsset⟩ := Prod.mk.inj same
+        rw [sameAccount, sameAsset]
+        exact admitted.wellFormed
+      · rw [if_neg same]
+        exact moved
+  | _ => exact moved
+
+theorem applyOperations_preserves_floors (book : Book) (operations : List Operation)
+    (asset : AssetId) (within : book.WithinFloors asset)
+    (admitted : OperationsAdmitted book operations) :
+    (applyOperations book operations).WithinFloors asset := by
+  induction operations generalizing book with
+  | nil => exact within
+  | cons operation rest ih =>
+      exact ih _ (admitted_preserves_floors book operation asset within admitted.1) admitted.2
+
+theorem registerAccounts_withinFloors (book : Book) (accounts : List AccountId)
+    (asset : AssetId) (within : book.WithinFloors asset) :
+    (registerAccounts book accounts).WithinFloors asset := by
+  induction accounts generalizing book with
+  | nil => exact within
+  | cons account rest ih => exact ih _ within
+
+theorem deregisterAccounts_withinFloors (book : Book) (accounts : List AccountId)
+    (asset : AssetId) (within : book.WithinFloors asset) :
+    (deregisterAccounts book accounts).WithinFloors asset := by
+  induction accounts generalizing book with
+  | nil => exact within
+  | cons account rest ih => exact ih _ within
+
+/-- **An admitted batch preserves the floor law.** -/
+theorem Batch.apply_withinFloors (book : Book) (batch : Batch) (asset : AssetId)
+    (within : book.WithinFloors asset) (admitted : batch.Admission book) :
+    (batch.apply book).WithinFloors asset :=
+  deregisterAccounts_withinFloors _ _ asset
+    (applyOperations_preserves_floors _ _ asset
+      (registerAccounts_withinFloors _ _ asset within) admitted.2.1)
+
+/-- **Outstanding value is bounded by the floors.**  Over a conserved asset
+(its total, issuer well included, is zero) the positive balances sum to at
+most the sum of the floors: the issuance cap plus every credit limit. -/
+theorem outstanding_le_sum_floors (book : Book) (asset : AssetId)
+    (within : book.WithinFloors asset) (conserved : book.totalAsset asset = 0) :
+    ∑ account ∈ book.accounts, max 0 (book.balance account asset) ≤
+      ∑ account ∈ book.accounts, Int.ofNat (book.floor account asset) := by
+  have split : ∀ account, max 0 (book.balance account asset) =
+      book.balance account asset + max 0 (-(book.balance account asset)) := by
+    intro account
+    simp only [max_def]
+    split_ifs <;> linarith
+  calc ∑ account ∈ book.accounts, max 0 (book.balance account asset)
+      = ∑ account ∈ book.accounts,
+          (book.balance account asset + max 0 (-(book.balance account asset))) :=
+        Finset.sum_congr rfl (fun account _ => split account)
+    _ = book.totalAsset asset +
+          ∑ account ∈ book.accounts, max 0 (-(book.balance account asset)) := by
+        rw [Finset.sum_add_distrib]; rfl
+    _ = ∑ account ∈ book.accounts, max 0 (-(book.balance account asset)) := by
+        rw [conserved, zero_add]
+    _ ≤ ∑ account ∈ book.accounts, Int.ofNat (book.floor account asset) := by
+        apply Finset.sum_le_sum
+        intro account _
+        have bound := within account
+        exact max_le (by simp) (by linarith)
+
+/-- **Floors reproduce the deleted solvency rule.**  Admission used to read
+`isIssuerMint ∨ amount ≤ balance`: a mint was solvent unconditionally and
+every other debit needed its balance.  When every non-mint source has floor 0
+and the issuer well's floor covers the mint (the finite form of the old
+unbounded well), the floor rule admits exactly the same debits. -/
+theorem sourceWithinFloor_iff_preFloorRule (book : Book) (operation : Operation)
+    (ordinaryZero : (∀ asset destination amount, operation ≠ .mint asset destination amount) →
+      book.floor operation.posting.source operation.posting.asset = 0)
+    (wellCovers : ∀ asset destination amount, operation = .mint asset destination amount →
+      Int.ofNat amount ≤ book.balance asset asset + Int.ofNat (book.floor asset asset)) :
+    (Int.ofNat operation.posting.amount ≤
+        book.balance operation.posting.source operation.posting.asset +
+          Int.ofNat (book.floor operation.posting.source operation.posting.asset)) ↔
+      ((∃ asset destination amount, operation = .mint asset destination amount) ∨
+        Int.ofNat operation.posting.amount ≤
+          book.balance operation.posting.source operation.posting.asset) := by
+  by_cases mint : ∃ asset destination amount, operation = .mint asset destination amount
+  · obtain ⟨asset, destination, amount, rfl⟩ := mint
+    exact ⟨fun _ => Or.inl ⟨asset, destination, amount, rfl⟩,
+      fun _ => wellCovers asset destination amount rfl⟩
+  · have zero := ordinaryZero
+      (fun asset destination amount same => mint ⟨asset, destination, amount, same⟩)
+    rw [zero]
+    simp only [Int.ofNat_eq_natCast, Nat.cast_zero, add_zero]
+    exact ⟨Or.inr, fun admitted => admitted.resolve_left mint⟩
+
+/-- The same equivalence at the level of the whole admission: the remaining
+clauses (endpoints present, lease shape) are the ones the pre-floor admission
+had, and `setFloor`/`sweep` did not exist before. -/
+theorem admission_iff_preFloorRule (book : Book) (operation : Operation)
+    (ordinaryZero : (∀ asset destination amount, operation ≠ .mint asset destination amount) →
+      book.floor operation.posting.source operation.posting.asset = 0)
+    (wellCovers : ∀ asset destination amount, operation = .mint asset destination amount →
+      Int.ofNat amount ≤ book.balance asset asset + Int.ofNat (book.floor asset asset)) :
+    Admission book operation ↔
+      (operation.posting.source ∈ book.accounts ∧
+        operation.posting.destination ∈ book.accounts ∧
+        ((∃ asset destination amount, operation = .mint asset destination amount) ∨
+          Int.ofNat operation.posting.amount ≤
+            book.balance operation.posting.source operation.posting.asset) ∧
+        operation.WellFormed book) := by
+  rw [← sourceWithinFloor_iff_preFloorRule book operation ordinaryZero wellCovers]
+  exact ⟨fun admitted => ⟨admitted.sourcePresent, admitted.destinationPresent,
+      admitted.sourceWithinFloor, admitted.wellFormed⟩,
+    fun ⟨source, destination, within, formed⟩ => ⟨source, destination, within, formed⟩⟩
+
+/-! ### Sweep: commons recycling (or destruction) as a posting -/
+
+theorem retained_le (permille balance epochs : Nat) :
+    retained permille balance epochs ≤ balance := by
+  induction epochs with
+  | zero => exact le_refl _
+  | succ epochs ih =>
+      simp only [retained]
+      exact le_trans (Nat.sub_le _ _) ih
+
+/-- A sweep is the posting `holder → commons` of exactly its amount. -/
+@[simp] theorem sweep_posting (holder commons : AccountId) (asset : AssetId)
+    (permille epochs amount : Nat) :
+    (Operation.sweep holder commons asset permille epochs amount).posting =
+      ⟨holder, commons, asset, amount⟩ := rfl
+
+/-- What a holder's balance reads as after `epochs` demurrage steps: a view
+computed from the Book, never stored in it. -/
+def displayBalance (balance : Int) (permille epochs : Nat) : Int :=
+  balance - Int.ofNat (recycle balance permille epochs)
+
+/-- For a positive balance the display is exactly the retained amount. -/
+theorem displayBalance_eq_retained (balance permille epochs : Nat) :
+    displayBalance (Int.ofNat balance) permille epochs =
+      Int.ofNat (retained permille balance epochs) := by
+  have kept := retained_le permille balance epochs
+  simp only [displayBalance, recycle, Int.toNat_natCast, Int.ofNat_eq_natCast]
+  omega
+
+/-- **The display is honest**: an admitted sweep writes exactly the displayed
+balance into the Book. -/
+theorem sweep_materializes_display (book : Book) (holder commons : AccountId)
+    (asset : AssetId) (permille epochs amount : Nat) (distinct : holder ≠ commons)
+    (admitted : Admission book (.sweep holder commons asset permille epochs amount)) :
+    ((Operation.sweep holder commons asset permille epochs amount).apply book).balance
+        holder asset =
+      displayBalance (book.balance holder asset) permille epochs := by
+  have exact : amount = recycle (book.balance holder asset) permille epochs :=
+    admitted.wellFormed
+  rw [Operation.apply_balance]
+  simp [Ne.symm distinct, displayBalance, exact]
+
+/-! ### A mutual-credit book: capped issuance, credit limits, one sweep -/
+
+/-- Issuer well 10 (so asset 10), members 11 and 12, commons 13, all at zero
+with no floors. -/
+def creditBook : Book where
+  accounts := {10, 11, 12, 13}
+  balances := 0
+  leaseRecords := 0
+  floors := 0
+
+theorem creditBook_withinFloors : creditBook.WithinFloors 10 := by
+  intro account
+  simp [creditBook, Book.balance, Book.floor]
+
+/-- The well caps issuance at 100 and grants each member a credit limit of 20,
+mints 50 to member 11, member 12 pays 15 on credit, and an idle-epoch sweep at
+100 per mille moves 6 of member 11's 65 to the commons (6.5, rounded down; the
+half stays with the holder). -/
+def creditBatch : Batch where
+  registrations := []
+  operations :=
+    [.setFloor 10 10 100, .setFloor 10 11 20, .setFloor 10 12 20,
+     .mint 10 11 50,
+     .transfer 12 11 10 15,
+     .sweep 11 13 10 100 1 6]
+  deregistrations := []
+
+theorem creditBatch_admitted : creditBatch.Admission creditBook := by decide
+
+def creditPost : Book := creditBatch.apply creditBook
+
+theorem creditPost_balances :
+    creditPost.balance 10 10 = -50 ∧ creditPost.balance 11 10 = 59 ∧
+      creditPost.balance 12 10 = -15 ∧ creditPost.balance 13 10 = 6 := by decide
+
+/-- The sweep wrote the displayed balance: 65 shown after one epoch is 59. -/
+theorem creditPost_holder_display :
+    creditPost.balance 11 10 = displayBalance 65 100 1 := by decide
+
+theorem creditPost_withinFloors : creditPost.WithinFloors 10 :=
+  Batch.apply_withinFloors _ _ 10 creditBook_withinFloors creditBatch_admitted
+
+theorem creditPost_conserved : creditPost.totalAsset 10 = 0 := by
+  rw [creditPost, Batch.conservation _ _ creditBatch_admitted]
+  simp [Book.totalAsset, Book.balance, creditBook]
+
+/-- 65 outstanding, bounded by the cap and both limits, 140. -/
+theorem creditPost_outstanding :
+    ∑ account ∈ creditPost.accounts, max 0 (creditPost.balance account 10) ≤
+      ∑ account ∈ creditPost.accounts, Int.ofNat (creditPost.floor account 10) :=
+  outstanding_le_sum_floors _ 10 creditPost_withinFloors creditPost_conserved
+
+/-- **A debit past a credit limit is refused by name**: member 12 owes 15 of
+its 20; paying 6 more would leave it at -21. -/
+theorem credit_limit_refused :
+    (⟨[], [.transfer 12 11 10 6], []⟩ : Batch).refusal? creditPost =
+      some (.operation 0 (.belowFloor 12 10)) := by decide
+
+/-- Paying 5 reaches the limit exactly and is admitted. -/
+theorem credit_limit_reached_admitted :
+    (⟨[], [.transfer 12 11 10 5], []⟩ : Batch).refusal? creditPost = none := by decide
+
+/-- **A mint past the issuance cap is refused by name**: the well has issued 50
+of 100; 51 more would leave it at -101. -/
+theorem issuance_cap_refused :
+    (⟨[], [.mint 10 11 51], []⟩ : Batch).refusal? creditPost =
+      some (.operation 0 (.belowFloor 10 10)) := by decide
+
+/-- Burns restore headroom: the cap bounds net issuance. -/
+theorem issuance_cap_nets_burns :
+    (⟨[], [.burn 11 10 10, .mint 10 11 60], []⟩ : Batch).refusal? creditPost = none := by
+  decide
+
+/-- A limit is never lowered under what the member already owes. -/
+theorem floor_under_debt_refused :
+    (⟨[], [.setFloor 10 12 10], []⟩ : Batch).refusal? creditPost =
+      some (.operation 0 (.floorBelowBalance 12 10)) := by decide
+
+/-- The book just before the sweep: member 11 holds 65. -/
+def creditBeforeSweep : Book := (⟨[], creditBatch.operations.take 5, []⟩ : Batch).apply creditBook
+
+/-- A sweep that moves anything but `recycle` of the balance is refused. -/
+theorem sweep_inexact_refused :
+    (⟨[], [.sweep 11 13 10 100 1 7], []⟩ : Batch).refusal? creditBeforeSweep =
+      some (.operation 0 (.sweepInexact 11 10)) := by decide
+
+/-- Destruction is the same posting with the issuer well as destination: the 6
+return to the well, whose debt falls from 50 to 44. -/
+theorem sweep_to_well_destroys :
+    (⟨[], [.sweep 11 10 10 100 1 6], []⟩ : Batch).refusal? creditBeforeSweep = none ∧
+      ((Operation.sweep 11 10 10 100 1 6).apply creditBeforeSweep).balance 10 10 = -44 := by
+  decide
+
 /-! ## A concrete non-vacuity witness -/
 
 def witnessBook : Book where
@@ -985,6 +1442,7 @@ def witnessBook : Book where
       DFinsupp.single (1, 0) 5 +
       DFinsupp.single (2, 0) 3
   leaseRecords := 0
+  floors := DFinsupp.single (0, 0) 10
 
 def witnessLogical : Store layout :=
   (0 : Store layout).set bookAddress (some witnessBook)
@@ -1005,8 +1463,8 @@ def witnessMintAdmission :
     Admission witnessBook (.mint 0 1 2) where
   sourcePresent := by decide
   destinationPresent := by decide
-  sourceSolvent := Or.inl rfl
-  leaseWellFormed := trivial
+  sourceWithinFloor := by decide
+  wellFormed := trivial
 
 /-- An inhabited creation/payment batch: account 3 is opened at zero, a real
 fee is paid, then the same payer funds the new account. -/
@@ -1117,6 +1575,7 @@ def witnessHiddenBook : Book where
   accounts := ∅
   balances := DFinsupp.single (9, 0) 7
   leaseRecords := 0
+  floors := 0
 
 theorem registration_rejects_hidden_balance {book : Book} {account : AccountId}
     {asset : AssetId} (hidden : book.balance account asset ≠ 0) :
@@ -1186,5 +1645,19 @@ example :
 #guard_msgs (whitespace := lax) in #print axioms Batch.apply_deregistered
 /-- info: 'Minidregg.Theory.CanonicalResourceKernel.witness_closed_purse_refuses_posting' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms witness_closed_purse_refuses_posting
+
+#assert_axioms admitted_preserves_floors
+#assert_axioms Batch.apply_withinFloors
+#assert_axioms outstanding_le_sum_floors
+#assert_axioms sourceWithinFloor_iff_preFloorRule
+#assert_axioms admission_iff_preFloorRule
+#assert_axioms sweep_materializes_display
+#assert_axioms displayBalance_eq_retained
+#assert_axioms creditPost_outstanding
+#assert_axioms credit_limit_refused
+#assert_axioms issuance_cap_refused
+#assert_axioms floor_under_debt_refused
+#assert_axioms sweep_inexact_refused
+#assert_axioms sweep_to_well_destroys
 
 end Minidregg.Theory.CanonicalResourceKernel

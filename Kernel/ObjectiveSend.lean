@@ -458,6 +458,8 @@ def debited : Operation → Option AccountId
   | .burn source _ _ => some source
   | .lease _ holder _ _ _ _ _ => some holder
   | .mint _ _ _ => none
+  | .setFloor _ _ _ => none
+  | .sweep holder _ _ _ _ _ => some holder
 
 theorem creditTransfers_debit (config : Config) (source : AccountId) (credits : List (AccountId × Nat)) :
     ∀ op ∈ creditTransfers config source credits, debited op = some source := by

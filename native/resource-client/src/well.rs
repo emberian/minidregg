@@ -1,6 +1,6 @@
 //! Realm wells (lane K-WELL), minimal client. A well is an account born in a
 //! realm (`well new` = `workspace create --kind account --in REALM`); its law is
-//! the predicate it is born with. `well mint|burn` authors the command with the
+//! the predicate it is born with. `well mint|burn|floor` authors the command with the
 //! Host (`author well-command`), asks the Host for the exact header to sign
 //! (op 123), signs it with the workspace key, has the Host assemble the ingress
 //! (op 124) and submits it (op 125). The Host decides everything; this module
@@ -95,7 +95,7 @@ fn command(root: &Path, mut args: Args, op: &str) -> Result<()> {
     }
     let capability = match args.optional("capability") {
         Some(value) => text(value, "capability")?,
-        None if op == "mint" => reference_capability(&well_ref, "well")?,
+        None if op == "mint" || op == "floor" => reference_capability(&well_ref, "well")?,
         None => reference_capability(&account_ref, "account")?,
     };
     if !mini_sdk::decimal::is_canonical_max(&capability, 80) {
@@ -231,9 +231,9 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 None,
             )
         }
-        "mint" | "burn" => command(&root, args, &action),
+        "mint" | "burn" | "floor" => command(&root, args, &action),
         "ledger" => ledger(&root, args),
-        _ => Err("well action must be new, mint, burn or ledger".into()),
+        _ => Err("well action must be new, mint, burn, floor or ledger".into()),
     }
 }
 

@@ -39,6 +39,7 @@ def book : Book where
     DFinsupp.single (0, 0) (-10) +
       DFinsupp.single (1, 0) 10
   leaseRecords := DFinsupp.single 8 (some expiredRecord)
+  floors := 0
 
 def logical : Store.Store CanonicalResourceKernel.layout :=
   (0 : Store.Store CanonicalResourceKernel.layout).set bookAddress (some book)
@@ -82,8 +83,8 @@ def resourceAdmission :
     CanonicalResourceKernel.Admission book (command.resourceOperation config) where
   sourcePresent := by decide
   destinationPresent := by decide
-  sourceSolvent := Or.inr (by decide)
-  leaseWellFormed := trivial
+  sourceWithinFloor := Minidregg.Theory.CanonicalResourceKernel.withinFloor_of_funded (by decide)
+  wellFormed := trivial
 
 noncomputable def accepted :
     Accepted resourcePre (command.resourceOperation config) :=

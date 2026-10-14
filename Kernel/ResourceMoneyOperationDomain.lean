@@ -250,18 +250,20 @@ theorem CheckedSamples.account_present
     sample.account ∈ prepared.applicationPre.accounts := (checked.exact sample member).1
 
 /-- Every application debit is checked after funding AND all earlier source
-operations. Repeating a solvent initial snapshot cannot admit a later overdraft. -/
-theorem Prepared.source_solvent_at
+operations, against the source's floor on that intermediate book. Repeating a
+solvent initial snapshot cannot admit a later overdraft. -/
+theorem Prepared.source_within_floor_at
     (prepared : Prepared book expectedOriginalRoot funding operations)
     (prior suffix : List Operation) (operation : Operation)
-    (position : operations = prior ++ operation :: suffix)
-    (notMint : operation.isIssuerMint ≠ true) :
+    (position : operations = prior ++ operation :: suffix) :
     Int.ofNat operation.posting.amount ≤
       (applyOperations prepared.applicationPre prior).balance
-        operation.posting.source operation.posting.asset := by
+        operation.posting.source operation.posting.asset +
+      Int.ofNat ((applyOperations prepared.applicationPre prior).floor
+        operation.posting.source operation.posting.asset) := by
   have ordered := prepared.applicationAdmitted
   rw [position, operationsAdmitted_append] at ordered
-  exact ordered.2.1.sourceSolvent.resolve_left notMint
+  exact ordered.2.1.sourceWithinFloor
 
 /-- The parent uses this list instead of accounting.writes: usage is retained,
 and the funding Book post is replaced by the ONE funding+application Book post.

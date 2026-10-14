@@ -68,7 +68,7 @@ if a.ssh:
     """)
     code=code.replace('"nextKeyDigest": None','"nextKeyDigest": next_digest if s==20 else None')
 insert('json.dump(genesis, open(path("genesis.json"), "w"), indent=1)',
-       'genesis["clockTickers"]=[]\ngenesis["tailBound"]="256"')
+       'genesis["clockTickers"]=[]\ngenesis["tailBound"]="256"\ngenesis["issuanceCap"]="1000000000000000"')
 insert('json.dump(birth, open(path("birth-intent.json"), "w"))',
        'birth["birth"]["resources"][0]["budget"]="1000"\nbirth["birth"]["resources"][3]["budget"]="300000"')
 os.environ.update(HOST=manifest['host'], MINI=a.mini, STORE=manifest['store'],

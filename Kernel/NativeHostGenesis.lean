@@ -109,6 +109,10 @@ structure Config where
   tailBound : Nat
   clockGenesisNow : Nat
   clockMaxStepSeconds : Nat
+  /-- `C`: the issuance cap of the tariff asset, installed as its issuer
+  well's floor in the genesis Book. Every mint of the asset (initial funds and
+  later paid credit) nets against it; burns restore headroom. -/
+  issuanceCap : Nat
 
 /-- Reuse the policy source's typed postfix language. No Boolean host policy
 or parallel evaluator enters the genesis codec. -/
@@ -167,7 +171,8 @@ def Config.toWire (config : Config) : ConfigWire :=
     config.tariff.perGrant, config.tariff.perInitialPayloadByte,
     config.tariff.collector, config.tariff.asset, config.expectedSemantics.value,
     config.issuerEpoch, config.genesisHeight, config.factoryController.subject.value,
-    config.factoryController.capabilityId.value, config.tailBound, config.clockGenesisNow, config.clockMaxStepSeconds] ++
+    config.factoryController.capabilityId.value, config.tailBound, config.clockGenesisNow, config.clockMaxStepSeconds,
+    config.issuanceCap] ++
     (match config.payObserver with
      | none => []
      | some observer => [observer.subject.value, observer.capabilityId.value,
@@ -179,21 +184,21 @@ def Config.ofWire (wire : ConfigWire) : Option Config := do
   let (coordinates, payObserver) ← match wire.1 with
     | [domain, factory, book, authority, federation, base, perBirth, perGrant,
         perByte, collector, asset, semantics, issuerEpoch, height, controller,
-        controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds] =>
+        controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds, issuanceCap] =>
         some ((domain, factory, book, authority, federation, base, perBirth, perGrant,
           perByte, collector, asset, semantics, issuerEpoch, height, controller,
-          controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds), none)
+          controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds, issuanceCap), none)
     | [domain, factory, book, authority, federation, base, perBirth, perGrant,
         perByte, collector, asset, semantics, issuerEpoch, height, controller,
-        controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds, observer, observerCapability, payControl, enrolCapability] =>
+        controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds, issuanceCap, observer, observerCapability, payControl, enrolCapability] =>
         some ((domain, factory, book, authority, federation, base, perBirth, perGrant,
           perByte, collector, asset, semantics, issuerEpoch, height, controller,
-          controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds),
+          controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds, issuanceCap),
           some (⟨⟨observer⟩, ⟨observerCapability⟩, ⟨payControl⟩, ⟨enrolCapability⟩⟩ : PayObserver))
     | _ => none
   let (domain, factory, book, authority, federation, base, perBirth, perGrant,
       perByte, collector, asset, semantics, issuerEpoch, height, controller,
-      controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds) := coordinates
+      controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds, issuanceCap) := coordinates
   let predicate ← PolicyRecordCodec.decodePred wire.2.1
   some
     { deployment := ⟨⟨domain⟩, factory, book, authority⟩
@@ -210,21 +215,24 @@ def Config.ofWire (wire : ConfigWire) : Option Config := do
       clockTickers := wire.2.2.2.2.map tickerOfWire
       tailBound := tailBound
       clockGenesisNow := clockGenesisNow
-      clockMaxStepSeconds := clockMaxStepSeconds }
+      clockMaxStepSeconds := clockMaxStepSeconds
+      issuanceCap := issuanceCap }
 
 @[simp] theorem Config.ofWire_toWire (config : Config) :
     Config.ofWire config.toWire = some config := by
-  rcases config with ⟨_, _, _, _, _, _, _, _, _, _, observer, _, _, _, _⟩
+  rcases config with ⟨_, _, _, _, _, _, _, _, _, _, observer, _, _, _, _, _⟩
   cases observer <;> simp [Config.ofWire, Config.toWire]
 
-/-- Version 5 (CLOCK-BOUND) adds mandatory initial clock time and step bound.
+/-- Version 6 (FLOORS) adds the mandatory issuance cap `C` after the clock
+bound; a version-5 source, which had none, refuses (`v5_config_refused`).
+Version 5 (CLOCK-BOUND) adds mandatory initial clock time and step bound.
 Version 4 (BRAID-COMPUTE): ONE source for the two version-3 shapes that met at
 the merge: CLOCK-SUBJECT's (the clock tickers, from which the clock cell's law and
 each ticker's `C_tick` are derived, beside the optional payment observer) and C14's
 (the scalar list carries the tail bound `L` after the factory controller).  Every
 version-3 source refuses (`v3_config_refused`); version 2 named the authority cell
 as the fourth deployment coordinate. -/
-def configFrame : List UInt8 := "DREGG/NATIVE-HOST/GENESIS-SOURCE/v5".toUTF8.toList
+def configFrame : List UInt8 := "DREGG/NATIVE-HOST/GENESIS-SOURCE/v6".toUTF8.toList
 
 def configRawCodec : LawfulCodec Config where
   encode config := configFrame ++ configWireStream.encode config.toWire
@@ -275,6 +283,20 @@ theorem v4_config_refused (payload : List UInt8) :
 
 #assert_axioms v4_config_refused
 
+/-- A version-5 source has no issuance cap and refuses; it is never read as an
+uncapped or zero-capped deployment. -/
+theorem v5_config_refused (payload : List UInt8) :
+    configCodec.decode ("DREGG/NATIVE-HOST/GENESIS-SOURCE/v5".toUTF8.toList ++ payload) = none := by
+  let retired := "DREGG/NATIVE-HOST/GENESIS-SOURCE/v5".toUTF8.toList
+  have sameLength : configFrame.length = retired.length := by decide +kernel
+  have different : retired ≠ configFrame := by decide +kernel
+  have raw : configRawCodec.decode (retired ++ payload) = none := by
+    simp [configRawCodec, sameLength, different]
+  change configCodec.decode (retired ++ payload) = none
+  simp [configCodec, ResourceBirthCodec.strictCodec, raw]
+
+#assert_axioms v5_config_refused
+
 /-- The authority clock at genesis: no record has been accepted
 (`genesis_revision` below). Key activation uses this clock (the durable
 height, `CredentialAuthorityDomainReceiver.clockOf`), not a key epoch. -/
@@ -322,7 +344,8 @@ def Config.Valid {F : Type} [Field F]
        enrollment.factoryObserveCapabilityId]) ++
     (config.payObserver.map (·.capabilityId)).toList ++
     (config.payObserver.map (·.controlCapabilityId)).toList ++
-    (config.payObserver.map (·.enrolCapabilityId)).toList).Nodup
+    (config.payObserver.map (·.enrolCapabilityId)).toList).Nodup ∧
+  (config.enrollments.map (·.initialBalance)).sum ≤ config.issuanceCap
 
 instance configValidDecidable {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config) :
@@ -364,8 +387,14 @@ theorem fund_conserves (asset : Nat) (book : Book) (enrollments : List Enrollmen
       exact Book.applyPosting_conserves book _ issuerPresent
         (recipientsPresent enrollment (List.mem_cons_self)) selectedAsset
 
+/-- The genesis Book before funding: every account at zero, and the tariff
+asset's issuer well with floor `issuanceCap`. -/
+def Config.unfundedBook (config : Config) : Book :=
+  ⟨config.accounts, 0, 0,
+    DFinsupp.single (config.tariff.asset, config.tariff.asset) config.issuanceCap⟩
+
 def Config.initialBook (config : Config) : Book :=
-  fund config.tariff.asset ⟨config.accounts, 0, 0⟩ config.enrollments
+  fund config.tariff.asset config.unfundedBook config.enrollments
 
 /-- Every asset, including the explicit issuer well, starts with total zero.
 This holds for all configurations, not just one allocation fixture. -/
@@ -373,11 +402,83 @@ theorem initialBook_conserved (config : Config) (asset : Nat) :
     config.initialBook.totalAsset asset = 0 := by
   unfold Config.initialBook
   rw [fund_conserves]
-  · simp [Book.totalAsset, Book.balance]
-  · simp [Config.accounts]
+  · simp [Book.totalAsset, Book.balance, Config.unfundedBook]
+  · simp [Config.accounts, Config.unfundedBook]
   · intro enrollment member
-    simp only [Config.accounts, List.mem_toFinset, List.mem_append]
+    simp only [Config.unfundedBook, Config.accounts, List.mem_toFinset, List.mem_append]
     exact Or.inl (List.mem_map.mpr ⟨enrollment, member, rfl⟩)
+
+/-- Each funding step is the admitted mint it names: while the well has
+headroom for the remaining initial balances, funding preserves the floor law. -/
+theorem fund_withinFloors (asset : Nat) (book : Book) (enrollments : List Enrollment)
+    (target : AssetId) (within : book.WithinFloors target)
+    (issuerPresent : asset ∈ book.accounts)
+    (recipientsPresent : ∀ enrollment ∈ enrollments, enrollment.accountId ∈ book.accounts)
+    (notWell : ∀ enrollment ∈ enrollments, enrollment.accountId ≠ asset)
+    (headroom : Int.ofNat (enrollments.map (·.initialBalance)).sum ≤
+      book.balance asset asset + Int.ofNat (book.floor asset asset)) :
+    (fund asset book enrollments).WithinFloors target := by
+  induction enrollments generalizing book with
+  | nil => exact within
+  | cons enrollment rest ih =>
+      have step : book.applyPosting ⟨asset, enrollment.accountId, asset, enrollment.initialBalance⟩ =
+          (Operation.mint asset enrollment.accountId enrollment.initialBalance).apply book := rfl
+      have sum : Int.ofNat ((enrollment :: rest).map (·.initialBalance)).sum =
+          Int.ofNat enrollment.initialBalance + Int.ofNat (rest.map (·.initialBalance)).sum := by
+        simp only [List.map_cons, List.sum_cons, Int.ofNat_eq_natCast]
+        push_cast; ring
+      rw [sum] at headroom
+      have restNonneg : (0 : Int) ≤ Int.ofNat (rest.map (·.initialBalance)).sum :=
+        Int.natCast_nonneg _
+      have admitted : Admission book (.mint asset enrollment.accountId enrollment.initialBalance) :=
+        { sourcePresent := issuerPresent
+          destinationPresent := recipientsPresent enrollment (List.mem_cons_self)
+          sourceWithinFloor := by
+            show Int.ofNat enrollment.initialBalance ≤
+              book.balance asset asset + Int.ofNat (book.floor asset asset)
+            linarith
+          wellFormed := trivial }
+      change (fund asset (book.applyPosting
+        ⟨asset, enrollment.accountId, asset, enrollment.initialBalance⟩) rest).WithinFloors target
+      rw [step]
+      apply ih _ (admitted_preserves_floors book _ target within admitted)
+      · exact issuerPresent
+      · exact fun selected member => recipientsPresent selected (List.mem_cons_of_mem _ member)
+      · exact fun selected member => notWell selected (List.mem_cons_of_mem _ member)
+      · have different : enrollment.accountId ≠ asset := notWell enrollment (List.mem_cons_self)
+        have wellAfter :
+            ((Operation.mint asset enrollment.accountId enrollment.initialBalance).apply book).balance
+              asset asset = book.balance asset asset - Int.ofNat enrollment.initialBalance := by
+          rw [Operation.apply_balance]
+          simp [Operation.posting, different]
+        rw [wellAfter, Operation.apply_floor_of_not_setFloor _ _ _ _ (by intros; exact nofun)]
+        linarith
+
+/-- **The genesis Book satisfies the floor law** in every asset, so every
+Book reached from it by admitted batches does (`Batch.apply_withinFloors`),
+and the tariff asset's outstanding balances never exceed the issuance cap plus
+the credit limits (`outstanding_le_sum_floors`). -/
+theorem initialBook_withinFloors (config : Config)
+    (capped : (config.enrollments.map (·.initialBalance)).sum ≤ config.issuanceCap)
+    (notWell : config.tariff.asset ∉ config.enrollments.map (·.accountId))
+    (target : AssetId) :
+    config.initialBook.WithinFloors target := by
+  unfold Config.initialBook
+  apply fund_withinFloors
+  · intro account
+    simp only [Config.unfundedBook, Book.balance, Book.floor, DFinsupp.coe_zero, Pi.zero_apply]
+    exact neg_nonpos.mpr (Int.natCast_nonneg _)
+  · simp [Config.accounts, Config.unfundedBook]
+  · intro enrollment member
+    simp only [Config.unfundedBook, Config.accounts, List.mem_toFinset, List.mem_append]
+    exact Or.inl (List.mem_map.mpr ⟨enrollment, member, rfl⟩)
+  · intro enrollment member same
+    exact notWell (same ▸ List.mem_map.mpr ⟨enrollment, member, rfl⟩)
+  · simp only [Config.unfundedBook, Book.balance, Book.floor, DFinsupp.coe_zero, Pi.zero_apply,
+      DFinsupp.single_eq_same, zero_add, Int.ofNat_eq_natCast]
+    exact_mod_cast capped
+
+#assert_axioms initialBook_withinFloors
 
 def policy {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
     (config : Config) (identifier : Nat) (predicate : Minidregg.Pred.Pred) : PolicyRecord where

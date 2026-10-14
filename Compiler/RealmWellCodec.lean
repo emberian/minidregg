@@ -3,14 +3,19 @@
 
 A realm well is an account born in a realm (a room) whose cell id names an
 asset (`CanonicalResourceKernel`: an asset is named by its issuer-well
-account). One signed command mints from, or burns into, one well:
+account). One signed command mints from, burns into, or sets a floor in one
+well:
 
 * `mint`: `Operation.mint well account amount` — the request targets the WELL
   (verb `mintAsset`) and is admitted under the well's law;
 * `burn`: `Operation.burn account well amount` — the request targets the
-  debited ACCOUNT (verb `burnAsset`) and is admitted under that account's law.
+  debited ACCOUNT (verb `burnAsset`) and is admitted under that account's law;
+* `floor`: `Operation.setFloor well account amount` — sets `account`'s floor in
+  the well's asset to `amount` (the well's own floor is its issuance cap, a
+  member's is its credit limit); the request targets the WELL (verb
+  `mintAsset`: extending credit is issuing).
 
-Frames: `DREGG/WELL/COMMAND/v1`, `DREGG/WELL/SIGNED/v1` (command bytes and the
+Frames: `DREGG/WELL/COMMAND/v2` (v2 adds the floor op; v1 commands refuse), `DREGG/WELL/SIGNED/v1` (command bytes and the
 canonical signed envelope) and `DREGG/WELL/PLAN/v1` (the signing plan the Host
 returns: the exact header the subject signs). The command carries no expected
 roots: the signed request quotes the Book's pre-root and the plan's authority
@@ -31,17 +36,20 @@ set_option autoImplicit false
 inductive WellOp where
   | mint
   | burn
+  | floor
   deriving DecidableEq, Repr
 
-def WellOp.isMint : WellOp → Bool
-  | .mint => true
-  | .burn => false
-
-def WellOp.ofIsMint (isMint : Bool) : WellOp := if isMint then .mint else .burn
-
-def wellOpStream : StreamCodec WellOp :=
-  StreamCodec.xmap StreamCodec.bool WellOp.isMint WellOp.ofIsMint
-    (by intro op; cases op <;> rfl)
+def wellOpStream : StreamCodec WellOp where
+  encode
+    | .mint => [0]
+    | .burn => [1]
+    | .floor => [2]
+  decodePrefix
+    | 0 :: suffix => some (.mint, suffix)
+    | 1 :: suffix => some (.burn, suffix)
+    | 2 :: suffix => some (.floor, suffix)
+    | _ => none
+  decodePrefix_encode := by intro op suffix; cases op <;> rfl
 
 /-- `subject` signs, presenting stored capability `capability`; `well` is the
 asset (its issuer-well account); `account` is the credited (mint) or debited
@@ -56,17 +64,19 @@ structure Command where
   nonce : Nat
   deriving DecidableEq, Repr
 
-/-- The resource the request targets: the well for a mint, the debited account
-for a burn. -/
+/-- The resource the request targets: the well for a mint or a floor, the
+debited account for a burn. -/
 def Command.target (command : Command) : Nat :=
   match command.op with
   | .mint => command.well
   | .burn => command.account
+  | .floor => command.well
 
 def Command.verb (command : Command) : Verb .account :=
   match command.op with
   | .mint => .mintAsset
   | .burn => .burnAsset
+  | .floor => .mintAsset
 
 def commandStream : StreamCodec Command :=
   StreamCodec.xmap
@@ -81,7 +91,7 @@ def commandStream : StreamCodec Command :=
       ⟨subject, capability, well, op, account, amount, nonce⟩)
     (by intro c; cases c; rfl)
 
-def commandFrame : List UInt8 := "DREGG/WELL/COMMAND/v1".toUTF8.toList
+def commandFrame : List UInt8 := "DREGG/WELL/COMMAND/v2".toUTF8.toList
 
 def commandCodec : LawfulCodec Command := NativeHostCodec.framed commandFrame commandStream
 

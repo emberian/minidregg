@@ -388,7 +388,9 @@ Everything is created owner-only (`umask 077`, directories `0700`).
 integer, 0 ≤ n < 2^53): `domain federation factoryId resourceBookId
 authorityCellId issuer ownerBudget lifetime tariffBase tariffPerBirth
 tariffPerGrant tariffPerInitialPayloadByte collector asset genesisHeight
-issuerEpoch factoryControllerCapability`, `sponsor {subject keyId keyEpoch
+issuerEpoch factoryControllerCapability tailBound issuanceCap` (`issuanceCap` is the tariff asset's
+issuance cap C, installed as its issuer well's floor; the sponsor's initial balance counts against it),
+`sponsor {subject keyId keyEpoch
 activeFrom activeUntil accountId spendCapabilityId controlCapabilityId
 factoryObserveCapabilityId initialBalance}`, `clock {subject keyId keyEpoch
 activeFrom activeUntil accountId spendCapabilityId controlCapabilityId

@@ -1960,7 +1960,7 @@ def payViewLoaded (config : Config) (opened : Opened config) : Except String Pay
 
 /-! ## Realm wells (lane K-WELL): session operations 123–125
 
-123 = signing plan for a `DREGG/WELL/COMMAND/v1` command (`DREGG/WELL/PLAN/v1`),
+123 = signing plan for a `DREGG/WELL/COMMAND/v2` command (`DREGG/WELL/PLAN/v1`),
 124 = detached assembly `pair(plan, sig64)` → `DREGG/WELL/SIGNED/v1` ingress,
 125 = submit (an exact resubmission of an accepted ingress returns its original
 receipt as `replayed`). The well ledger is the operator-local CLI `well-ledger`. -/

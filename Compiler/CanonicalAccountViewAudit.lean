@@ -12,6 +12,7 @@ def book (own other : Int) : CanonicalResourceKernel.Book where
   accounts := {7, 8}
   balances := DFinsupp.single (7, 3) own + DFinsupp.single (8, 3) other
   leaseRecords := 0
+  floors := 0
 
 theorem selected_balance_map (own other : Int) :
     accountBalanceMap (book own other) 7 = DFinsupp.single 3 own := by

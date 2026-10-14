@@ -413,6 +413,7 @@ def genesisBook : Book where
   balances := DFinsupp.single (aliceAccount, C) 10 + DFinsupp.single (bobAccount, C) 12 +
     DFinsupp.single (carolAccount, G) 2 + DFinsupp.single (daveAccount, G) 3
   leaseRecords := 0
+  floors := 0
 
 def genesis : World := ⟨genesisBook, ⟨[], [], [], []⟩, []⟩
 

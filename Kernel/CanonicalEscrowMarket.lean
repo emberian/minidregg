@@ -1028,6 +1028,7 @@ def book : Book where
       DFinsupp.single (4, 4) (-20) +
       DFinsupp.single (3, 4) 20
   leaseRecords := 0
+  floors := 0
 
 example : book.totalAsset 0 = 0 := by decide
 example : book.totalAsset 4 = 0 := by decide
@@ -1058,8 +1059,8 @@ noncomputable def cell : Materialized CanonicalResourceKernel.materializer :=
 def depositAdmission : Admission book terms.depositOperation where
   sourcePresent := by decide
   destinationPresent := by decide
-  sourceSolvent := Or.inr (by decide)
-  leaseWellFormed := trivial
+  sourceWithinFloor := Minidregg.Theory.CanonicalResourceKernel.withinFloor_of_funded (by decide)
+  wellFormed := trivial
 
 noncomputable def depositAccepted : Accepted cell terms.depositOperation :=
   Accepted.ofAdmission (by simpa using depositAdmission)
@@ -1136,10 +1137,10 @@ def releaseAdmission :
   destinationPresent := by
     rw [depositAccepted.post_logicalBook, Operation.apply_accounts]
     decide
-  sourceSolvent := Or.inr (by
+  sourceWithinFloor := Minidregg.Theory.CanonicalResourceKernel.withinFloor_of_funded (by
     rw [depositAccepted.post_logicalBook]
     decide)
-  leaseWellFormed := trivial
+  wellFormed := trivial
 
 noncomputable def releaseAccepted :
     Accepted depositAccepted.post (terms.releaseOperation 3 2) :=
@@ -1156,10 +1157,10 @@ def paymentAdmission :
     rw [releaseAccepted.post_logicalBook, depositAccepted.post_logicalBook,
       Operation.apply_accounts, Operation.apply_accounts]
     decide
-  sourceSolvent := Or.inr (by
+  sourceWithinFloor := Minidregg.Theory.CanonicalResourceKernel.withinFloor_of_funded (by
     rw [releaseAccepted.post_logicalBook, depositAccepted.post_logicalBook]
     decide)
-  leaseWellFormed := trivial
+  wellFormed := trivial
 
 noncomputable def paymentAccepted :
     Accepted releaseAccepted.post (terms.paymentOperation 3 2) :=
@@ -1178,11 +1179,11 @@ def feeAdmission :
       depositAccepted.post_logicalBook, Operation.apply_accounts,
       Operation.apply_accounts, Operation.apply_accounts]
     decide
-  sourceSolvent := Or.inr (by
+  sourceWithinFloor := Minidregg.Theory.CanonicalResourceKernel.withinFloor_of_funded (by
     rw [paymentAccepted.post_logicalBook, releaseAccepted.post_logicalBook,
       depositAccepted.post_logicalBook]
     decide)
-  leaseWellFormed := trivial
+  wellFormed := trivial
 
 noncomputable def feeAccepted :
     Accepted paymentAccepted.post (terms.feeOperation 3 2) :=
@@ -1295,11 +1296,11 @@ def refundAdmission :
       Operation.apply_accounts, Operation.apply_accounts,
       Operation.apply_accounts, Operation.apply_accounts]
     decide
-  sourceSolvent := Or.inr (by
+  sourceWithinFloor := Minidregg.Theory.CanonicalResourceKernel.withinFloor_of_funded (by
     rw [feeAccepted.post_logicalBook, paymentAccepted.post_logicalBook,
       releaseAccepted.post_logicalBook, depositAccepted.post_logicalBook]
     decide)
-  leaseWellFormed := trivial
+  wellFormed := trivial
 
 noncomputable def refundAccepted :
     Accepted feeAccepted.post

@@ -393,7 +393,7 @@ def leaseAdmission :
       Operation.apply_accounts, Operation.apply_accounts, Operation.apply_accounts,
       Operation.apply_accounts]
     decide
-  sourceSolvent := Or.inr (by
+  sourceWithinFloor := Minidregg.Theory.CanonicalResourceKernel.withinFloor_of_funded (by
     change Int.ofNat terms.operation.posting.amount ≤
       (logicalBook CanonicalEscrowMarket.Witness.feeAccepted.post.logical).balance
         terms.operation.posting.source terms.operation.posting.asset
@@ -402,7 +402,7 @@ def leaseAdmission :
       CanonicalEscrowMarket.Witness.releaseAccepted.post_logicalBook,
       CanonicalEscrowMarket.Witness.depositAccepted.post_logicalBook]
     decide)
-  leaseWellFormed := by
+  wellFormed := by
     change 0 < terms.epochs /\
       (logicalBook marketFill.feeAccepted.post.logical).leases terms.leaseId = none
     constructor
@@ -785,7 +785,7 @@ def refundAdmission :
       Operation.apply_accounts, Operation.apply_accounts, Operation.apply_accounts,
       Operation.apply_accounts]
     decide
-  sourceSolvent := Or.inr (by
+  sourceWithinFloor := Minidregg.Theory.CanonicalResourceKernel.withinFloor_of_funded (by
     change Int.ofNat terms.refundOperation.posting.amount ≤
       (terms.operation.apply
         (logicalBook CanonicalEscrowMarket.Witness.feeAccepted.post.logical)).balance
@@ -795,7 +795,7 @@ def refundAdmission :
       CanonicalEscrowMarket.Witness.releaseAccepted.post_logicalBook,
       CanonicalEscrowMarket.Witness.depositAccepted.post_logicalBook]
     decide)
-  leaseWellFormed := trivial
+  wellFormed := trivial
 
 noncomputable def refundAccepted :
     Accepted accepted.post terms.refundOperation :=

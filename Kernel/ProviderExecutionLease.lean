@@ -895,8 +895,8 @@ def runtime : Runtime where
 def leaseAdmission : Admission witnessBook terms.operation where
   sourcePresent := by decide
   destinationPresent := by decide
-  sourceSolvent := Or.inr (by decide)
-  leaseWellFormed := by
+  sourceWithinFloor := Minidregg.Theory.CanonicalResourceKernel.withinFloor_of_funded (by decide)
+  wellFormed := by
     change 0 < terms.epochs /\ witnessBook.leases terms.leaseId = none
     decide
 
@@ -1197,10 +1197,10 @@ def refundAdmission :
   destinationPresent := by
     rw [accepted.post_logicalBook]
     decide
-  sourceSolvent := Or.inr (by
+  sourceWithinFloor := Minidregg.Theory.CanonicalResourceKernel.withinFloor_of_funded (by
     rw [accepted.post_logicalBook]
     decide)
-  leaseWellFormed := trivial
+  wellFormed := trivial
 
 noncomputable def refundAccepted :
     Accepted accepted.post terms.refundOperation :=

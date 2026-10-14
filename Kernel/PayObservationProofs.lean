@@ -43,7 +43,7 @@ theorem mint_well_balance (book : Book) (asset destination : AccountId) (amount 
     rw [if_pos rfl]
     exact mint_debits_issuer book asset destination amount (Ne.symm different)
   · rw [if_neg same, sub_zero]
-    simp [Operation.apply, Operation.posting, Operation.leaseRecord?, Book.applyPosting,
+    simp [Operation.apply, Operation.posting, Operation.leaseRecord?, Operation.floorSetting?, Book.applyPosting,
       Book.balance, DFinsupp.single_apply, same]
 
 theorem mint_account_balance (book : Book) (asset destination : AccountId) (amount : Nat)
@@ -55,7 +55,7 @@ theorem mint_account_balance (book : Book) (asset destination : AccountId) (amou
     rw [if_pos rfl]
     exact mint_credits_destination book asset destination amount notWell
   · rw [if_neg same, add_zero]
-    simp [Operation.apply, Operation.posting, Operation.leaseRecord?, Book.applyPosting,
+    simp [Operation.apply, Operation.posting, Operation.leaseRecord?, Operation.floorSetting?, Book.applyPosting,
       Book.balance, DFinsupp.single_apply, Ne.symm notWell, same]
 
 /-- The mints of a list of credits. -/
@@ -349,8 +349,8 @@ def cappedStore : PayStore :=
 /-- The deployment clock at slot 1000, `now` 1759250000. -/
 def tickedClock : ClockCell.Clock := ⟨1759250000, 1000⟩
 
-/-- A Book holding the well 0 and the payers 8 and 9. -/
-def fixtureBook : Book := ⟨{0, 8, 9}, 0, 0⟩
+/-- A Book holding the well 0 (issuance cap 1000000) and the payers 8 and 9. -/
+def fixtureBook : Book := ⟨{0, 8, 9}, 0, 0, DFinsupp.single (0, 0) 1000000⟩
 
 def fixtureTip : ChainTip := ⟨1000, 1759250000⟩
 
@@ -424,7 +424,7 @@ theorem zero_amount_refused :
 
 /-- A payer the Book does not hold is refused by the Book admission. -/
 theorem unknown_payer_refused :
-    decideObservations fixtureStore ClockCell.genesisClock ⟨{0, 8}, 0, 0⟩ fixtureTip [observed 1 rowB signature₁ 5] =
+    decideObservations fixtureStore ClockCell.genesisClock ⟨{0, 8}, 0, 0, DFinsupp.single (0, 0) 1000000⟩ fixtureTip [observed 1 rowB signature₁ 5] =
       .error .bookAdmission := by
   decide +kernel
 

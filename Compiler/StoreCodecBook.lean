@@ -10,9 +10,10 @@ list of namespace-tagged addresses in address-BYTE order.  The bytes differ,
 so this module states the smallest adapter instead of a byte equality:
 
 * `layout` — namespaces `account : AccountId ↦ Unit`,
-  `balance : AccountId × AssetId ↦ Int`, `lease : LeaseId ↦ LeaseRecord`;
+  `balance : AccountId × AssetId ↦ Int`, `lease : LeaseId ↦ LeaseRecord`,
+  `floor : AccountId × AssetId ↦ Nat`;
 * `bookStore` / `bookOfStore` — the Book's exact pointwise meaning as a store
-  (a zero balance is absence, as in the Book), with
+  (a zero balance or floor is absence, as in the Book), with
   `bookOfStore_bookStore : bookOfStore (bookStore book) = book`;
 * `decodeBook` — `StoreCodec.decode` at this layout, then canonical re-encoding
   of the Book, so a store that is not the image of a Book (an explicit zero
@@ -39,17 +40,20 @@ inductive Space
   | account
   | balance
   | lease
+  | floor
   deriving DecidableEq, Repr
 
 def Space.Key : Space → Type
   | .account => AccountId
   | .balance => AccountId × AssetId
   | .lease => LeaseId
+  | .floor => AccountId × AssetId
 
 def Space.Value : Space → Type
   | .account => Unit
   | .balance => Int
   | .lease => LeaseRecord
+  | .floor => Nat
 
 /-- Every Book namespace is RAM here; whether registrations and leases become
 append-only is a kernel decision for the Book's own lane, not a codec fact. -/
@@ -57,11 +61,13 @@ instance Space.keyDecEq : (space : Space) → DecidableEq (Space.Key space)
   | .account => inferInstanceAs (DecidableEq Nat)
   | .balance => inferInstanceAs (DecidableEq (Nat × Nat))
   | .lease => inferInstanceAs (DecidableEq Nat)
+  | .floor => inferInstanceAs (DecidableEq (Nat × Nat))
 
 instance Space.valueDecEq : (space : Space) → DecidableEq (Space.Value space)
   | .account => inferInstanceAs (DecidableEq Unit)
   | .balance => inferInstanceAs (DecidableEq Int)
   | .lease => inferInstanceAs (DecidableEq LeaseRecord)
+  | .floor => inferInstanceAs (DecidableEq Nat)
 
 def layout : Layout.{0, 0, 0} where
   Namespace := Space
@@ -74,10 +80,12 @@ def spaceStream : StreamCodec Space where
     | .account => [0]
     | .balance => [1]
     | .lease => [2]
+    | .floor => [3]
   decodePrefix
     | 0 :: suffix => some (.account, suffix)
     | 1 :: suffix => some (.balance, suffix)
     | 2 :: suffix => some (.lease, suffix)
+    | 3 :: suffix => some (.floor, suffix)
     | _ => none
   decodePrefix_encode := by intro space suffix; cases space <;> rfl
 
@@ -85,15 +93,17 @@ def keyStream : (space : Space) → StreamCodec (Space.Key space)
   | .account => StreamCodec.nat
   | .balance => StreamCodec.product StreamCodec.nat StreamCodec.nat
   | .lease => StreamCodec.nat
+  | .floor => StreamCodec.product StreamCodec.nat StreamCodec.nat
 
 def valueStream : (space : Space) → StreamCodec (Space.Value space)
   | .account => unitStream
   | .balance => IntStream.intStream
   | .lease => CanonicalResourcePageMaterializer.leaseStream
+  | .floor => StreamCodec.nat
 
 def wire : Wire layout where
-  name := "dregg/book/v1"
-  namespaces := [.account, .balance, .lease]
+  name := "dregg/book/v2"
+  namespaces := [.account, .balance, .lease, .floor]
   namespaces_complete := by intro space; cases space <;> simp
   namespaceStream := spaceStream
   keyStream := keyStream
@@ -102,10 +112,12 @@ def wire : Wire layout where
     | .account => "nat/base255"
     | .balance => "nat/base255 x nat/base255"
     | .lease => "nat/base255"
+    | .floor => "nat/base255 x nat/base255"
   valueCodecId
     | .account => "unit/empty"
     | .balance => IntStream.intCodecId
     | .lease => "lease-record/v1"
+    | .floor => "nat/base255"
 
 /-! ## The Book's pointwise meaning as a store -/
 
@@ -115,6 +127,9 @@ def bookValue (book : Book) : (address : Address layout) → Option (layout.Valu
       if book.balances (coordinate : AccountId × AssetId) = 0 then none
       else some (book.balances coordinate)
   | ⟨.lease, lease⟩ => book.leaseRecords (lease : LeaseId)
+  | ⟨.floor, coordinate⟩ =>
+      if book.floors (coordinate : AccountId × AssetId) = 0 then none
+      else some (book.floors coordinate)
 
 def accountAddress : AccountId ↪ Address layout := ⟨fun account => ⟨.account, account⟩, by
   intro left right same; simpa using same⟩
@@ -125,9 +140,12 @@ def balanceAddress : (AccountId × AssetId) ↪ Address layout := ⟨fun coordin
 def leaseAddress : LeaseId ↪ Address layout := ⟨fun lease => ⟨.lease, lease⟩, by
   intro left right same; simpa using same⟩
 
+def floorAddress : (AccountId × AssetId) ↪ Address layout := ⟨fun coordinate => ⟨.floor, coordinate⟩, by
+  intro left right same; simpa using same⟩
+
 def bookSupport (book : Book) : Finset (Address layout) :=
   book.accounts.map accountAddress ∪ book.balances.support.map balanceAddress ∪
-    book.leaseRecords.support.map leaseAddress
+    book.leaseRecords.support.map leaseAddress ∪ book.floors.support.map floorAddress
 
 def bookStore (book : Book) : Store layout :=
   DFinsupp.mk (bookSupport book) fun address => bookValue book address.1
@@ -141,22 +159,29 @@ theorem bookStore_apply (book : Book) (address : Address layout) :
   · rcases address with ⟨space, key⟩
     cases space
     · have absent : key ∉ book.accounts := by
-        simpa [bookSupport, accountAddress, balanceAddress, leaseAddress] using member
+        simpa [bookSupport, accountAddress, balanceAddress, leaseAddress, floorAddress] using member
       change (0 : Option Unit) = if key ∈ book.accounts then some () else none
       rw [if_neg absent]
       rfl
     · have absent : book.balances key = 0 := by
-        simpa [bookSupport, accountAddress, balanceAddress, leaseAddress,
+        simpa [bookSupport, accountAddress, balanceAddress, leaseAddress, floorAddress,
           DFinsupp.mem_support_toFun] using member
       change (0 : Option Int) =
         if book.balances key = 0 then none else some (book.balances key)
       rw [if_pos absent]
       rfl
     · have absent : book.leaseRecords key = none := by
-        simpa [bookSupport, accountAddress, balanceAddress, leaseAddress,
+        simpa [bookSupport, accountAddress, balanceAddress, leaseAddress, floorAddress,
           DFinsupp.mem_support_toFun] using member
       change (0 : Option LeaseRecord) = book.leaseRecords key
       rw [absent]
+      rfl
+    · have absent : book.floors key = 0 := by
+        simpa [bookSupport, accountAddress, balanceAddress, leaseAddress, floorAddress,
+          DFinsupp.mem_support_toFun] using member
+      change (0 : Option Nat) =
+        if book.floors key = 0 then none else some (book.floors key)
+      rw [if_pos absent]
       rfl
 
 def accountOf : Address layout → AccountId
@@ -170,6 +195,10 @@ def balanceOf : Address layout → AccountId × AssetId
 def leaseOf : Address layout → LeaseId
   | ⟨.lease, lease⟩ => lease
   | _ => 0
+
+def floorOf : Address layout → AccountId × AssetId
+  | ⟨.floor, coordinate⟩ => coordinate
+  | _ => (0, 0)
 
 /-- The store's `account` namespace, re-indexed by account. -/
 def accountsOf (store : Store layout) : Π₀ _ : AccountId, Option Unit :=
@@ -187,12 +216,20 @@ def leasesOf (store : Store layout) : Π₀ _ : LeaseId, Option LeaseRecord :=
     (fun lease : LeaseId => (⟨Space.lease, lease⟩ : Address layout))
     (h' := leaseOf) (fun _ => rfl) store
 
-/-- Read a store at the Book layout as a Book; absence of a balance is zero. -/
+def floorsOf (store : Store layout) : Π₀ _ : AccountId × AssetId, Option Nat :=
+  DFinsupp.comapDomain' (β := fun address : Address layout => Option (layout.Value address.1))
+    (fun coordinate : AccountId × AssetId => (⟨Space.floor, coordinate⟩ : Address layout))
+    (h' := floorOf) (fun _ => rfl) store
+
+/-- Read a store at the Book layout as a Book; absence of a balance or a floor
+is zero. -/
 def bookOfStore (store : Store layout) : Book where
   accounts := (accountsOf store).support
   balances := DFinsupp.mapRange (β₁ := fun _ : AccountId × AssetId => Option Int)
     (β₂ := fun _ => Int) (fun _ value => value.getD 0) (fun _ => rfl) (balancesOf store)
   leaseRecords := leasesOf store
+  floors := DFinsupp.mapRange (β₁ := fun _ : AccountId × AssetId => Option Nat)
+    (β₂ := fun _ => Nat) (fun _ value => value.getD 0) (fun _ => rfl) (floorsOf store)
 
 theorem bookOfStore_account (store : Store layout) (account : AccountId) :
     account ∈ (bookOfStore store).accounts ↔
@@ -216,14 +253,27 @@ theorem bookOfStore_lease (store : Store layout) (lease : LeaseId) :
     (bookOfStore store).leaseRecords lease = store ⟨Space.lease, lease⟩ :=
   rfl
 
+theorem floorsOf_apply (store : Store layout) (coordinate : AccountId × AssetId) :
+    floorsOf store coordinate = store ⟨Space.floor, coordinate⟩ :=
+  rfl
+
+theorem bookOfStore_floor (store : Store layout) (coordinate : AccountId × AssetId) :
+    (bookOfStore store).floors coordinate = (floorsOf store coordinate).getD 0 := by
+  change (DFinsupp.mapRange (β₁ := fun _ : AccountId × AssetId => Option Nat)
+    (β₂ := fun _ => Nat) (fun _ value => value.getD 0) (fun _ => rfl) (floorsOf store))
+      coordinate = _
+  rw [DFinsupp.mapRange_apply]
+
 theorem book_ext {left right : Book} (accounts : left.accounts = right.accounts)
     (balances : left.balances = right.balances)
-    (leases : left.leaseRecords = right.leaseRecords) : left = right := by
+    (leases : left.leaseRecords = right.leaseRecords)
+    (floors : left.floors = right.floors) : left = right := by
   cases left
   cases right
   cases accounts
   cases balances
   cases leases
+  cases floors
   rfl
 
 theorem bookOfStore_bookStore (book : Book) : bookOfStore (bookStore book) = book := by
@@ -244,6 +294,14 @@ theorem bookOfStore_bookStore (book : Book) : bookOfStore (bookStore book) = boo
     intro lease
     rw [bookOfStore_lease, bookStore_apply]
     rfl
+  · apply DFinsupp.ext
+    intro coordinate
+    rw [bookOfStore_floor, floorsOf_apply, bookStore_apply]
+    change (if book.floors coordinate = 0 then none
+      else some (book.floors coordinate)).getD 0 = book.floors coordinate
+    split_ifs with zero
+    · exact zero.symm
+    · rfl
 
 /-! ## The Book codec as an instance of the store codec -/
 

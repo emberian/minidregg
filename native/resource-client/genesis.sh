@@ -56,7 +56,7 @@ check_params() {
     and ([.domain, .federation, .factoryId, .resourceBookId, .authorityCellId, .issuer,
           .ownerBudget, .lifetime, .tariffBase, .tariffPerBirth, .tariffPerGrant,
           .tariffPerInitialPayloadByte, .collector, .asset, .genesisHeight, .issuerEpoch,
-          .factoryControllerCapability, .tailBound] | all(int))
+          .factoryControllerCapability, .tailBound, .issuanceCap] | all(int))
     and .tailBound > 0
     and (.sponsor | [.subject, .keyId, .keyEpoch, .activeFrom, .activeUntil, .accountId,
           .spendCapabilityId, .controlCapabilityId, .factoryObserveCapabilityId,
@@ -148,6 +148,7 @@ jq -n --slurpfile p "$params" --arg semantics "$semantics" --arg public "$public
    factoryControllerCapability: ($p.factoryControllerCapability|s),
    meterAllowance: ($p.meterAllowance | map_values(s)),
    tailBound: ($p.tailBound|s),
+   issuanceCap: ($p.issuanceCap|s),
    clockGenesisNow: ($p.clock.genesisNow|s),
    clockMaxStepSeconds: ($p.clock.maxStepSeconds|s),
    clockTickers: [{subject: ($p.clock.subject|s), capability: ($p.clock.tickCapabilityId|s)}]}' \

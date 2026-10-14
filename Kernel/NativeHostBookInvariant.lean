@@ -31,12 +31,22 @@ theorem fund_accountSupported (asset : Nat) (book : Book) (enrollments : List En
 
 /-- No configuration can bootstrap hidden balances through source funding.
 This is independent of balance amounts, enrollment count, or policy contents. -/
+theorem unfundedBook_accountSupported (config : Config) : config.unfundedBook.AccountSupported := by
+  refine ⟨by simp [Config.unfundedBook], ?_⟩
+  intro coordinate member
+  have nonzero := (DFinsupp.mem_support_toFun _ _).mp member
+  have well : coordinate = (config.tariff.asset, config.tariff.asset) := by
+    by_contra other
+    exact nonzero (by simp [Config.unfundedBook, DFinsupp.single_apply, Ne.symm other])
+  subst well
+  simp [Config.unfundedBook, Config.accounts]
+
 theorem initialBook_accountSupported (config : Config) : config.initialBook.AccountSupported := by
   apply fund_accountSupported
-  · exact Book.zero_accountSupported _ _
-  · simp [Config.accounts]
+  · exact unfundedBook_accountSupported config
+  · simp [Config.accounts, Config.unfundedBook]
   · intro enrollment member
-    simp only [Config.accounts, List.mem_toFinset, List.mem_append]
+    simp only [Config.unfundedBook, Config.accounts, List.mem_toFinset, List.mem_append]
     exact Or.inl (List.mem_map.mpr ⟨enrollment, member, rfl⟩)
 
 end Minidregg.Kernel.NativeHostGenesis

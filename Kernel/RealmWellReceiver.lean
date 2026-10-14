@@ -17,7 +17,11 @@ operation (`Compiler.RealmWellCodec`):
 * **burn** `Operation.burn account well amount`: the request targets the
   debited account with verb `burnAsset` under that account's law, so only the
   holder (or whoever the holder delegated `burnAsset` to) destroys value; the
-  Book admission requires the balance (`well_burn_requires_balance`).
+  Book admission keeps the holder within its floor (`well_burn_within_floor`);
+* **floor** `Operation.setFloor well account amount`: like a mint, the request
+  targets the well with verb `mintAsset` under the well's law; the well's own
+  floor is its issuance cap, which every mint nets against
+  (`pole_mint_past_cap_refused`), and a member's floor is its credit limit.
 
 The pure decision `decideWell` refuses, in order: the credit asset
 (`creditWell` — credit buys, never mints: `credit_well_untouched`), a well with
@@ -82,6 +86,7 @@ def Plan.operation (plan : Plan) : Operation :=
   match plan.op with
   | .mint => .mint plan.asset plan.account plan.amount
   | .burn => .burn plan.account plan.asset plan.amount
+  | .floor => .setFloor plan.asset plan.account plan.amount
 
 def Plan.batch (plan : Plan) : Batch := ⟨[], [plan.operation], []⟩
 
@@ -108,8 +113,8 @@ def decideWell (book : Book) (realmOf : Nat → Option Nat) (credit : AssetId) (
   else match realmOf command.well with
     | none => .error .notRealmWell
     | some realm =>
-      if command.account = command.well then .error .accountIsWell
-      else if command.amount = 0 then .error .zeroAmount
+      if command.op ≠ .floor ∧ command.account = command.well then .error .accountIsWell
+      else if command.op ≠ .floor ∧ command.amount = 0 then .error .zeroAmount
       else if (Plan.batch ⟨command.well, realm, command.op, command.account, command.amount⟩).Admission
           book then
         .ok ⟨command.well, realm, command.op, command.account, command.amount⟩
@@ -119,7 +124,8 @@ def decideWell (book : Book) (realmOf : Nat → Option Nat) (credit : AssetId) (
 theorem decideWell_ok {book : Book} {realmOf : Nat → Option Nat} {credit : AssetId}
     {command : Command} {plan : Plan}
     (accepted : decideWell book realmOf credit command = .ok plan) :
-    command.well ≠ credit ∧ command.account ≠ command.well ∧ 0 < command.amount ∧
+    command.well ≠ credit ∧
+      (command.op ≠ .floor → command.account ≠ command.well ∧ 0 < command.amount) ∧
       ∃ realm, realmOf command.well = some realm ∧
         plan = ⟨command.well, realm, command.op, command.account, command.amount⟩ ∧
         plan.batch.Admission book := by
@@ -132,16 +138,17 @@ theorem decideWell_ok {book : Book} {realmOf : Nat → Option Nat} {credit : Ass
     | some r =>
       rw [realm] at accepted
       simp only at accepted
-      by_cases same : command.account = command.well
+      by_cases same : command.op ≠ .floor ∧ command.account = command.well
       · rw [if_pos same] at accepted; cases accepted
       · rw [if_neg same] at accepted
-        by_cases zero : command.amount = 0
+        by_cases zero : command.op ≠ .floor ∧ command.amount = 0
         · rw [if_pos zero] at accepted; cases accepted
         · rw [if_neg zero] at accepted
           split at accepted
           · rename_i admitted
             cases accepted
-            exact ⟨credited, same, Nat.pos_of_ne_zero zero, r, rfl, rfl, admitted⟩
+            exact ⟨credited, fun notFloor => ⟨fun eq => same ⟨notFloor, eq⟩,
+              Nat.pos_of_ne_zero fun eq => zero ⟨notFloor, eq⟩⟩, r, rfl, rfl, admitted⟩
           · cases accepted
 
 /-- **Credit buys, never mints.** An admitted realm command never moves any
@@ -150,23 +157,24 @@ theorem credit_well_untouched {book : Book} {realmOf : Nat → Option Nat} {cred
     {command : Command} {plan : Plan}
     (accepted : decideWell book realmOf credit command = .ok plan) (holder : AccountId) :
     (plan.batch.apply book).balance holder credit = book.balance holder credit := by
-  obtain ⟨notCredit, -, -, realm, -, rfl, -⟩ := decideWell_ok accepted
+  obtain ⟨notCredit, -, realm, -, rfl, -⟩ := decideWell_ok accepted
   rw [Plan.batch_apply]
   exact CanonicalResourceKernel.Operation.apply_balance_other_asset _ book holder credit
     (by simpa using notCredit)
 
-/-- **A burn requires the balance**: the debited holder held at least the
-burned amount of the well's asset before the burn. -/
-theorem well_burn_requires_balance {book : Book} {realmOf : Nat → Option Nat} {credit : AssetId}
+/-- **A burn stays within the holder's floor**: the debited holder held at
+least the burned amount less its floor (zero for an ordinary holder) before the
+burn. -/
+theorem well_burn_within_floor {book : Book} {realmOf : Nat → Option Nat} {credit : AssetId}
     {command : Command} {plan : Plan}
     (accepted : decideWell book realmOf credit command = .ok plan) (burn : command.op = .burn) :
-    Int.ofNat command.amount ≤ book.balance command.account command.well := by
-  obtain ⟨-, -, -, realm, -, rfl, admitted⟩ := decideWell_ok accepted
+    Int.ofNat command.amount ≤ book.balance command.account command.well +
+      Int.ofNat (book.floor command.account command.well) := by
+  obtain ⟨-, -, realm, -, rfl, admitted⟩ := decideWell_ok accepted
   have single := (CanonicalResourceKernel.Batch.single_admission _ book).mp admitted
-  have solvent := single.sourceSolvent
-  simp only [Plan.operation, burn, CanonicalResourceKernel.Operation.isIssuerMint,
-    CanonicalResourceKernel.Operation.posting] at solvent
-  simpa using solvent
+  have within := single.sourceWithinFloor
+  simp only [Plan.operation, burn, CanonicalResourceKernel.Operation.posting] at within
+  exact within
 
 /-- The one posting of a decided plan, applied to the Book. -/
 theorem decided_apply {book : Book} {realmOf : Nat → Option Nat} {credit : AssetId}
@@ -174,7 +182,7 @@ theorem decided_apply {book : Book} {realmOf : Nat → Option Nat} {credit : Ass
     (accepted : decideWell book realmOf credit command = .ok plan) :
     plan.batch.apply book = plan.operation.apply book ∧ plan.asset = command.well ∧
       plan.account = command.account ∧ plan.amount = command.amount ∧ plan.op = command.op := by
-  obtain ⟨-, -, -, realm, -, rfl, -⟩ := decideWell_ok accepted
+  obtain ⟨-, -, realm, -, rfl, -⟩ := decideWell_ok accepted
   exact ⟨rfl, rfl, rfl, rfl, rfl⟩
 
 /-! ## The audit identity over an accepted log -/
@@ -183,7 +191,7 @@ theorem decided_apply {book : Book} {realmOf : Nat → Option Nat} {credit : Ass
 inductive AcceptedLog : Book → List Plan → Book → Prop
   | nil (book : Book) : AcceptedLog book [] book
   | cons {book final : Book} {plan : Plan} {rest : List Plan}
-      (distinct : plan.account ≠ plan.asset)
+      (distinct : plan.op ≠ .floor → plan.account ≠ plan.asset)
       (admitted : plan.batch.Admission book)
       (tail : AcceptedLog (plan.batch.apply book) rest final) :
       AcceptedLog book (plan :: rest) final
@@ -198,9 +206,9 @@ def burned (asset : AssetId) : List Plan → Int
   | plan :: rest =>
       (if plan.asset = asset ∧ plan.op = .burn then Int.ofNat plan.amount else 0) + burned asset rest
 
-/-- One step of the well: a mint lowers it by the amount, a burn raises it,
-any other asset's plan leaves it. -/
-theorem well_step (plan : Plan) (distinct : plan.account ≠ plan.asset) (book : Book)
+/-- One step of the well: a mint lowers it by the amount, a burn raises it, a
+floor setting and any other asset's plan leave it. -/
+theorem well_step (plan : Plan) (distinct : plan.op ≠ .floor → plan.account ≠ plan.asset) (book : Book)
     (asset : AssetId) :
     -((plan.batch.apply book).balance asset asset) =
       -(book.balance asset asset) +
@@ -213,15 +221,19 @@ theorem well_step (plan : Plan) (distinct : plan.account ≠ plan.asset) (book :
     | mint =>
       simp only [Plan.operation, op]
       rw [CanonicalResourceKernel.mint_debits_issuer book plan.asset plan.account plan.amount
-        (Ne.symm distinct)]
+        (Ne.symm (distinct (by simp [op])))]
       simp [sub_eq_add_neg]
       ring
     | burn =>
       simp only [Plan.operation, op]
       rw [CanonicalResourceKernel.burn_returns_to_issuer book plan.account plan.asset plan.amount
-        (Ne.symm distinct)]
+        (Ne.symm (distinct (by simp [op])))]
       simp [sub_eq_add_neg]
       ring
+    | floor =>
+      simp only [Plan.operation, op]
+      rw [CanonicalResourceKernel.setFloor_moves_no_value]
+      simp
   · rw [CanonicalResourceKernel.Operation.apply_balance_other_asset _ book asset asset
       (by simpa using same)]
     simp [same]
@@ -271,7 +283,7 @@ theorem realm_holders_eq_neg_well {initial final : Book} {log : List Plan}
     ((realm_conservation accepted asset).trans zero)
 
 theorem AcceptedLog.snoc {initial book : Book} {log : List Plan} {plan : Plan}
-    (prior : AcceptedLog initial log book) (distinct : plan.account ≠ plan.asset)
+    (prior : AcceptedLog initial log book) (distinct : plan.op ≠ .floor → plan.account ≠ plan.asset)
     (admitted : plan.batch.Admission book) :
     AcceptedLog initial (log ++ [plan]) (plan.batch.apply book) := by
   induction prior with
@@ -285,8 +297,8 @@ theorem decided_extends_log {initial book : Book} {log : List Plan}
     (prior : AcceptedLog initial log book)
     (accepted : decideWell book realmOf credit command = .ok plan) :
     AcceptedLog initial (log ++ [plan]) (plan.batch.apply book) := by
-  obtain ⟨-, distinct, -, realm, -, rfl, admitted⟩ := decideWell_ok accepted
-  exact prior.snoc distinct admitted
+  obtain ⟨-, distinct, realm, -, rfl, admitted⟩ := decideWell_ok accepted
+  exact prior.snoc (fun notFloor => (distinct notFloor).1) admitted
 
 /-! ### Concrete poles (kernel `decide` on a real Book) -/
 
@@ -295,6 +307,7 @@ def poleBook : Book where
   accounts := {0, 5, 7, 9}
   balances := DFinsupp.single (0, 0) (-10) + DFinsupp.single (7, 0) 10
   leaseRecords := 0
+  floors := DFinsupp.single (0, 0) 10 + DFinsupp.single (5, 5) 100
 
 def poleRealm : Nat → Option Nat
   | 5 => some 3
@@ -312,10 +325,33 @@ theorem pole_mint_then_burn_admitted :
       (poleCommand 5 .burn 7 5) = .ok ⟨5, 3, .burn, 7, 5⟩ := by
   decide +kernel
 
-/-- Refuting pole of `well_burn_requires_balance`. -/
+/-- Refuting pole of `well_burn_within_floor`. -/
 theorem pole_overburn_refused :
     decideWell ((Plan.batch ⟨5, 3, .mint, 7, 20⟩).apply poleBook) poleRealm 0
       (poleCommand 5 .burn 7 21) = .error .bookRefused := by
+  decide +kernel
+
+/-- The well's own floor is its issuance cap (100 here): minting 101 into a
+well that has issued nothing refuses. -/
+theorem pole_mint_past_cap_refused :
+    decideWell poleBook poleRealm 0 (poleCommand 5 .mint 7 101) = .error .bookRefused := by
+  decide +kernel
+
+/-- Raising the cap is a floor command on the well itself (a floor command may
+name the well as its account), after which the same mint is admitted. -/
+theorem pole_raise_cap_then_mint :
+    decideWell poleBook poleRealm 0 (poleCommand 5 .floor 5 200) = .ok ⟨5, 3, .floor, 5, 200⟩ ∧
+      decideWell ((Plan.batch ⟨5, 3, .floor, 5, 200⟩).apply poleBook) poleRealm 0
+        (poleCommand 5 .mint 7 101) = .ok ⟨5, 3, .mint, 7, 101⟩ := by
+  decide +kernel
+
+/-- A credit limit of 5 lets holder 7, who holds none of the asset, burn 5 and
+not 6. -/
+theorem pole_credit_limit :
+    decideWell ((Plan.batch ⟨5, 3, .floor, 7, 5⟩).apply poleBook) poleRealm 0
+        (poleCommand 5 .burn 7 5) = .ok ⟨5, 3, .burn, 7, 5⟩ ∧
+      decideWell ((Plan.batch ⟨5, 3, .floor, 7, 5⟩).apply poleBook) poleRealm 0
+        (poleCommand 5 .burn 7 6) = .error .bookRefused := by
   decide +kernel
 
 /-- Refuting pole of `credit_well_untouched`: the credit asset is never a realm well. -/
@@ -539,7 +575,7 @@ def project (prepared : Prepared deployment profile ambient durable command)
     [("authority/operation/well", 1),
      ("well/asset", Int.ofNat command.well),
      ("well/realm", Int.ofNat prepared.plan.realm),
-     ("well/op", match command.op with | .mint => 0 | .burn => 1),
+     ("well/op", match command.op with | .mint => 0 | .burn => 1 | .floor => 2),
      ("well/account", Int.ofNat command.account),
      ("well/amount", Int.ofNat command.amount),
      ("well/supply", -((CanonicalResourceKernel.logicalBook logical).balance command.well command.well))] ++
@@ -933,8 +969,10 @@ def receiveLoaded (deployment : Deployment) (profile : CanonicalRuntimeProfile.P
 #guard_msgs (whitespace := lax) in #print axioms decideWell_ok
 /-- info: 'Minidregg.Kernel.RealmWellReceiver.credit_well_untouched' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms credit_well_untouched
-/-- info: 'Minidregg.Kernel.RealmWellReceiver.well_burn_requires_balance' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms well_burn_requires_balance
+#assert_axioms well_burn_within_floor
+#assert_axioms pole_mint_past_cap_refused
+#assert_axioms pole_raise_cap_then_mint
+#assert_axioms pole_credit_limit
 /-- info: 'Minidregg.Kernel.RealmWellReceiver.decided_apply' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms decided_apply
 /-- info: 'Minidregg.Kernel.RealmWellReceiver.well_step' depends on axioms: [propext, Classical.choice, Quot.sound] -/

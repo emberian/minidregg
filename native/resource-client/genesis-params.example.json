@@ -45,6 +45,7 @@
     "maxStepSeconds": null
   },
   "tailBound": 256,
+  "issuanceCap": 1000000000000000,
   "meterAllowance": {
     "incidences": 10000000,
     "turnBytes": 10000000,
