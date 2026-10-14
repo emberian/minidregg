@@ -8,7 +8,12 @@
 //! a signed read. The client re-plans: it retires the definitely unadmitted
 //! attempt's evidence and observes again, at most `max()` times.
 //!
-//! The default predicate retries only the Host's own `stale-root` answer.
+//! The default predicate retries the Host's own `stale-root` answer and the
+//! local consent provider's `stale observation` refusal: the provider admitted a
+//! newer source than the Host's challenge was built over, for this exact intent
+//! (`Kernel.NativeClientConsent.classify_stale`). Nothing was signed; the next
+//! attempt asks for a challenge on the current source. A challenge for another
+//! intent stays a terminal refusal (`remote challenge differs ...`).
 //! Workspace text append additionally requires a final decoded admission
 //! refusal or the controller's exact typed prepare staleTarget refusal, plus
 //! a fresh authorized read proving its client-selected preimage changed.
@@ -140,6 +145,7 @@ pub(crate) fn replan<T>(
         // The previous verdict remains available to callers until a new
         // attempt starts, but cannot classify its local error or lost reply.
         let _ = take_host_decision();
+        let _ = crate::client_consent::take_stale_observation();
         let began = Instant::now();
         let error = match attempt() {
             Ok(value) => {
@@ -205,7 +211,9 @@ fn measure(what: &str, replans: u32, ending: &str, started: Instant, superseded:
 
 /// The default race test: the Host's own `stale-root` answer.
 pub(crate) fn stale_root(_error: &str, decision: Option<&HostDecision>) -> bool {
-    is_stale_root(decision)
+    // Both are read so the local record never outlives this attempt.
+    let local = crate::client_consent::take_stale_observation();
+    is_stale_root(decision) || local
 }
 
 /// Move every entry of `directory` except `keep` (and earlier retirements)

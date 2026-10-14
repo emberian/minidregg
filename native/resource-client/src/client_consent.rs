@@ -70,8 +70,26 @@ fn round_trip(session: &mut Session, operation: u8, payload: &[u8]) -> Result<Ve
     let size=u32::from_le_bytes(width) as usize;
     if size==0||size>CAP {return Err("local consent response frame refused".into());}
     let mut frame=vec![0;size];session.output.read_exact(&mut frame).map_err(|e|e.to_string())?;
-    if frame[0]!=operation {return Err(format!("local consent refused before signing: {}",String::from_utf8_lossy(&frame[1..])));}
+    if frame[0]!=operation {
+        let detail=String::from_utf8_lossy(&frame[1..]);
+        if operation==221&&frame[0]==255&&detail.starts_with(STALE_OBSERVATION_TAG) {
+            STALE_OBSERVATION.store(true,std::sync::atomic::Ordering::Relaxed);
+        }
+        return Err(format!("local consent refused before signing: {detail}"));
+    }
     Ok(frame[1..].to_vec())
+}
+
+/// `Kernel.NativeClientConsent.staleObservationTag`: the provider's refusal of an
+/// observation challenge that answers this exact retained intent and signature at
+/// another source height than the one it admitted (the source moved between the
+/// Host's challenge and the local check). Every other refusal stays terminal.
+pub(crate) const STALE_OBSERVATION_TAG: &str = "stale observation:";
+/// Set only from a provider's observation (221) refusal frame carrying the tag.
+static STALE_OBSERVATION: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Whether the last observation consent was refused as stale; clears the record.
+pub(crate) fn take_stale_observation() -> bool {
+    STALE_OBSERVATION.swap(false, std::sync::atomic::Ordering::Relaxed)
 }
 fn invoke(host: &Path, config: &Path, operation:u8, payload:&[u8]) -> Result<Vec<u8>> {
     let executable=PINS.get().map(|pins|pins.consent.clone()).or_else(||std::env::var_os("MINI_CONSENT_HOST").map(PathBuf::from))
@@ -351,6 +369,35 @@ mod tests {
         let input=child.stdin.take().unwrap();let output=child.stdout.take().unwrap();
         let mut session=Session{child,input,output,executable:"/bin/sh".into(),settings_bytes:vec![],anchor:None};
         assert!(round_trip(&mut session,222,b"retained").is_err());
+    }
+
+    /// A provider stub answering one refusal frame (255) carrying `detail`.
+    fn refusing(detail:&str)->Session {
+        let mut body=vec![255u8];body.extend_from_slice(detail.as_bytes());
+        let mut frame=(body.len() as u32).to_le_bytes().to_vec();frame.extend_from_slice(&body);
+        // Read the whole request (4 + 1 + 8 bytes) first, so the answer never races a closed pipe.
+        let script=format!("dd bs=1 count=13 >/dev/null 2>&1; printf '{}'",frame.iter().map(|b|format!("\\{b:03o}")).collect::<String>());
+        let mut child=Command::new("/bin/sh").args(["-c",&script])
+            .stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
+        let input=child.stdin.take().unwrap();let output=child.stdout.take().unwrap();
+        Session{child,input,output,executable:"/bin/sh".into(),settings_bytes:vec![],anchor:None}
+    }
+    #[test]
+    fn only_a_provider_stale_observation_refusal_is_recorded_as_stale() {
+        let _guard=crate::replan::TEST_LOCK.lock().unwrap_or_else(|e|e.into_inner());
+        let _=take_stale_observation();
+        let stale="stale observation: the remote challenge answers this intent at source height 36; the locally admitted source is at height 37";
+        let error=round_trip(&mut refusing(stale),221,b"retained").unwrap_err();
+        assert!(error.contains(stale),"{error}");
+        assert!(take_stale_observation());
+        assert!(!take_stale_observation());
+        // A changed intent is refused by name and is never stale.
+        let error=round_trip(&mut refusing("remote challenge differs from locally prepared intent"),221,b"retained").unwrap_err();
+        assert!(error.ends_with("remote challenge differs from locally prepared intent"),"{error}");
+        assert!(!take_stale_observation());
+        // The tag counts only on an observation frame.
+        let _=round_trip(&mut refusing(stale),222,b"retained").unwrap_err();
+        assert!(!take_stale_observation());
     }
 
     /// A provider stub that logs each request's opcode and answers every frame

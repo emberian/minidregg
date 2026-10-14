@@ -38,21 +38,118 @@ structure ObservationConsent (config : Config) {target : Durable}
     config.genesisHeight wanted intentSignature = .ok challenge
   exactBytes : challengeCodec.encode challenge = candidate
 
+/-- Why a proposed observation challenge received no consent. Every refusal
+releases nothing; the reason only tells custody what to do next. -/
+inductive ObservationRefusal where
+  /-- The local observation planner refused the retained intent on the admitted source. -/
+  | localPreparation
+  /-- The proposal answers this exact retained intent and intent signature,
+  under the same domain, semantics and federation, at another source height than
+  the one custody admitted: the source moved between the Host's challenge and
+  this check. Custody observes again on the new source and consents afresh. -/
+  | staleObservation (remoteHeight localHeight : Nat)
+  /-- Anything else: the proposal is not this custody's intent on its source. -/
+  | differs
+  deriving DecidableEq, Repr
+
+/-- The prefix every stale-observation refusal carries on the consent wire; the
+Rust client re-observes on it and on nothing else from this check. -/
+def staleObservationTag : String := "stale observation:"
+
+def ObservationRefusal.message : ObservationRefusal → String
+  | .localPreparation => "local observation preparation refused"
+  | .staleObservation remote here =>
+      s!"{staleObservationTag} the remote challenge answers this intent at source height {remote}; " ++
+        s!"the locally admitted source is at height {here}"
+  | .differs => "remote challenge differs from locally prepared intent"
+
+/-- The reason for a candidate that is not the local derivation's bytes. Stale
+only when the decoded proposal carries the retained intent and signature, the
+local domain, semantics and federation, and a different height; a proposal at
+the SAME height that differs anywhere is the operator proposing other bytes. -/
+def classifyMismatch (here : Challenge) (wanted : Intent)
+    (intentSignature candidate : List UInt8) : ObservationRefusal :=
+  match challengeCodec.decode candidate with
+  | some remote =>
+      if remote.intent = wanted ∧ remote.intentSignature = intentSignature ∧
+          remote.domain = here.domain ∧ remote.semantics = here.semantics ∧
+          remote.federation = here.federation ∧ remote.height ≠ here.height then
+        .staleObservation remote.height here.height
+      else .differs
+  | none => .differs
+
 /-- The entire challenge is compared: intent, ordered headers, signature,
 profile, world/authority coordinates and clock. A remotely rendered JSON view
-is neither read nor trusted. No header escapes on mismatch. -/
+is neither read nor trusted. No header escapes on mismatch. A mismatch is only
+classified (`classifyMismatch`); acceptance is exactly byte equality. -/
 def checkObservation (config : Config) {target : Durable}
     (basis : ConsentAnchor.Basis config target) (wanted : Intent)
     (intentSignature candidate : List UInt8) :
-    Except String (ObservationConsent config basis wanted intentSignature candidate) :=
+    Except ObservationRefusal (ObservationConsent config basis wanted intentSignature candidate) :=
   match derived : NativeObservationController.challenge
       (observationContext config basis.opened) config.profile config.federation
       config.genesisHeight wanted intentSignature with
-  | .error _ => .error "local observation preparation refused"
+  | .error _ => .error .localPreparation
   | .ok challenge =>
       if exactBytes : challengeCodec.encode challenge = candidate then
         .ok ⟨challenge, derived, exactBytes⟩
-      else .error "remote challenge differs from locally prepared intent"
+      else .error (classifyMismatch challenge wanted intentSignature candidate)
+
+/-- A stale label is given only to a proposal that decodes to THIS retained
+intent and intent signature at another height. An intent changed anywhere
+between custody's preparation and the Host's challenge is never stale. -/
+theorem classify_stale {here : Challenge} {wanted : Intent}
+    {intentSignature candidate : List UInt8} {remoteHeight localHeight : Nat}
+    (stale : classifyMismatch here wanted intentSignature candidate =
+      .staleObservation remoteHeight localHeight) :
+    ∃ remote, challengeCodec.decode candidate = some remote ∧ remote.intent = wanted ∧
+      remote.intentSignature = intentSignature ∧ remote.height = remoteHeight ∧
+      localHeight = here.height ∧ remoteHeight ≠ localHeight := by
+  unfold classifyMismatch at stale
+  split at stale
+  next remote decoded =>
+    split at stale
+    next same =>
+      injection stale with remoteExact localExact
+      subst remoteExact
+      subst localExact
+      exact ⟨remote, decoded, same.1, same.2.1, rfl, rfl, same.2.2.2.2.2⟩
+    next => cases stale
+  next => cases stale
+
+theorem stale_observation_is_this_intent {config : Config} {target : Durable}
+    {basis : ConsentAnchor.Basis config target} {wanted : Intent}
+    {intentSignature candidate : List UInt8} {remoteHeight localHeight : Nat}
+    (refused : checkObservation config basis wanted intentSignature candidate =
+      .error (.staleObservation remoteHeight localHeight)) :
+    ∃ remote, challengeCodec.decode candidate = some remote ∧ remote.intent = wanted ∧
+      remote.intentSignature = intentSignature ∧ remote.height = remoteHeight ∧
+      remoteHeight ≠ localHeight := by
+  unfold checkObservation at refused
+  split at refused
+  next => cases refused
+  next =>
+    split at refused
+    next => cases refused
+    next =>
+      obtain ⟨remote, decoded, intentExact, signatureExact, heightExact, _, apart⟩ :=
+        classify_stale (Except.error.inj refused)
+      exact ⟨remote, decoded, intentExact, signatureExact, heightExact, apart⟩
+
+/-- A proposal whose decoded intent is not the retained one is refused as
+`differs` (when it is not the local bytes at all), never as stale. -/
+theorem changed_intent_not_stale {config : Config} {target : Durable}
+    {basis : ConsentAnchor.Basis config target} {wanted : Intent}
+    {intentSignature candidate : List UInt8} {remote : Challenge}
+    (decoded : challengeCodec.decode candidate = some remote)
+    (changed : remote.intent ≠ wanted) (remoteHeight localHeight : Nat) :
+    checkObservation config basis wanted intentSignature candidate ≠
+      .error (.staleObservation remoteHeight localHeight) := by
+  intro refused
+  obtain ⟨other, decodedOther, intentExact, _⟩ := stale_observation_is_this_intent refused
+  rw [decoded] at decodedOther
+  cases decodedOther
+  exact changed intentExact
 
 def ObservationConsent.headers {config : Config} {target : Durable}
     {basis : ConsentAnchor.Basis config target} {wanted : Intent}
@@ -139,5 +236,9 @@ theorem changed_plan_refused {config : Config} {target : Durable}
     have same : plan = expected := Except.ok.inj (derived.symm.trans actual)
     subst expected
     simp only [dif_neg different]
+
+#assert_axioms classify_stale
+#assert_axioms stale_observation_is_this_intent
+#assert_axioms changed_intent_not_stale
 
 end Minidregg.Kernel.NativeClientConsent

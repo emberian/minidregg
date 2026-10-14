@@ -338,7 +338,8 @@ def consent (config : NativeHost.Config) (session : Session config) (operation :
       pure intentBytes
   | 221 =>
       let (signature, candidate) ← splitPair rest
-      let checked ← IO.ofExcept (NativeClientConsent.checkObservation config session.2 wanted signature candidate)
+      let checked ← IO.ofExcept ((NativeClientConsent.checkObservation config session.2 wanted signature candidate).mapError
+        NativeClientConsent.ObservationRefusal.message)
       selectedHeaders config session wanted checked.headers
   | 222 =>
       let headers ← IO.ofExcept (NativeClientConsent.checkIntentPlan config session.2 wanted rest)
