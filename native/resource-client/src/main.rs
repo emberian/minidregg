@@ -3302,6 +3302,13 @@ fn run(mut args: Args) -> Result<()> {
             }
         }
         #[cfg(unix)]
+        "consent-resident" => {
+            let consent = path(args.required("consent")?);
+            let settings = path(args.required("settings")?);
+            args.finish()?;
+            client_consent::resident(consent, settings)
+        }
+        #[cfg(unix)]
         "serve-operator" => {
             let host = path(args.required("host")?);
             let config = path(args.required("config")?);

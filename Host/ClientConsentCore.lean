@@ -495,7 +495,9 @@ def objectiveHeaders (extraObjective : ExtraObjective) (settings : Settings)
   pure (headersBytes headers)
 
 /-- Frame 228 offers custody's retained anchor before the first admission;
-frame 229 returns the anchor of the current admission. Possession (226) is a
+frame 229 returns the anchor of the current admission; frame 233 re-checks the
+Store against the held admission (a resident provider sends it once per client
+connection, `ConsentAnchor.recheckStore`). Possession (226) is a
 function of the retained command and the configuration, and thin consent
 frames (230–232) read no Store: they admit nothing. This process serves no
 codec frames: the one pure codec implementation is the Host's storeless
@@ -532,6 +534,20 @@ partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjecti
       | .ok anchor =>
           writeSessionFrame output 228 []
           serve extraExpected extraObjective settings config (some anchor) held input output
+  else if operation == 233 then
+    -- A resident provider's per-connection re-check: the Store still carries
+    -- the prefix this provider admitted (`ConsentAnchor.recheckStore`). Before
+    -- any admission there is nothing to re-check: the first admission compares
+    -- the retained anchor itself. A refusal ends the provider.
+    match held with
+    | none => writeSessionFrame output 233 []
+    | some session =>
+        match ← ConsentAnchor.recheckStore config.transport session.2.anchor with
+        | .ok () => writeSessionFrame output 233 []
+        | .error detail =>
+            writeSessionFrame output 255 s!"consent refused: {detail}".toUTF8.toList
+            throw (IO.userError s!"consent refused: {detail}")
+    serve extraExpected extraObjective settings config retained held input output
   else if operation == 229 then
     match held with
     | none =>

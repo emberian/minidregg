@@ -133,6 +133,66 @@ theorem checkStore_refuses_rewritten {anchor : Anchor} {loaded : Durable} {chain
 #assert_axioms checkStore_ok
 #assert_axioms checkStore_refuses_rewritten
 
+/-- `checkStore` over a chain-only read of the Store: its genesis log start,
+its head height and the chain after every stored record. -/
+def checkStored (anchor : Anchor) (logStart : Digest) (head : Nat) (chains : List Digest) :
+    Except String Unit :=
+  if logStart ≠ anchor.logStart then
+    .error "the Store's genesis log differs from the retained consent anchor's"
+  else if head < anchor.height then
+    .error s!"the Store's head {head} is below the retained consent anchor at {anchor.height}: the accepted history was rolled back"
+  else if chains[anchor.height]? ≠ some anchor.chain then
+    .error s!"the Store's accepted history up to height {anchor.height} differs from the retained consent anchor: the prefix this client admitted was rewritten"
+  else .ok ()
+
+/-- **The re-check is the resume's comparison**: on a full open's head and
+chain prefixes, `checkStored` is `checkStore`, refusal text included. -/
+theorem checkStore_eq_checkStored (anchor : Anchor) (loaded : Durable) (chains : List Digest) :
+    checkStore anchor loaded chains =
+      checkStored anchor loaded.logStart loaded.image.accepted.length chains := rfl
+
+/-- An accepted re-check: the same genesis log, a head at or above the anchor,
+and the anchor's chain after its height of records. -/
+theorem checkStored_ok {anchor : Anchor} {logStart : Digest} {head : Nat} {chains : List Digest}
+    (accepted : checkStored anchor logStart head chains = .ok ()) :
+    logStart = anchor.logStart ∧ anchor.height ≤ head ∧ chains[anchor.height]? = some anchor.chain := by
+  unfold checkStored at accepted
+  by_cases started : logStart = anchor.logStart
+  · by_cases low : head < anchor.height
+    · simp [started, low] at accepted
+    · by_cases same : chains[anchor.height]? = some anchor.chain
+      · exact ⟨started, Nat.le_of_not_lt low, same⟩
+      · simp [started, low, same] at accepted
+  · simp [started] at accepted
+
+#assert_axioms checkStore_eq_checkStored
+#assert_axioms checkStored_ok
+
+/-- Re-check, from the Store's stored bytes alone, that it still carries the
+prefix an anchor commits to: the seed's log start, the head, and the chain over
+every STORED record (`chainPrefixesStored`, which equals the specification
+chain over the records the bytes decode to: `chainPrefixesStored_eq`). Nothing
+is decoded, replayed or validated beyond that: the caller holds its own admitted
+image and never re-reads one from the Store. A resident consent provider runs it
+once per client connection, so a rollback or prefix rewrite between commands is
+refused exactly as a per-process `resume` refuses it (`checkStore_eq_checkStored`). -/
+def recheckStore (transport : DurableReceiverIO.Transport) (anchor : Anchor) :
+    IO (Except String Unit) := do
+  match ← transport.read 1 true with
+  | .error message => return .error message
+  | .ok none => return .error "durable store is not initialized"
+  | .ok (some stored) =>
+      let some seedBytes := stored.seed | return .error "durable seed missing"
+      if let some refusal := (DurableCheckpointCodec.SeedEpoch.ofBytes seedBytes).refusal then
+        return .error s!"durable store refused: {refusal}"
+      let some seed := DurableCheckpointCodec.seedFrame.decode seedBytes
+        | return .error "noncanonical durable seed"
+      if stored.entries.length ≠ stored.head then
+        return .error "durable log head does not match its entries"
+      let logStart := transport.logStart seed
+      return checkStored anchor logStart stored.head
+        (DurableLogTags.chainPrefixesStored logStart (stored.entries.map (·.record)))
+
 /-- A target admitted after a retained anchor: the anchor's exact opening, cut
 from this target and validated, then native admission of every later record.
 Constructed only by `resume`. -/
