@@ -10,9 +10,9 @@ open Minidregg.Theory.TypedAuthorization (Digest)
 open Minidregg.Kernel.WorldRoot
 
 private def witness (height : Nat) (chain : Digest) : RootWitness :=
-  let roots := DurableReceiverIO.RootCache.ofEntries
+  let roots := WorldRootCache.RootCache.ofEntries
     [(.system, DurableCheckpointCodec.systemLeaf height chain), (.cell 7, ⟨91⟩)]
-  ⟨⟨height, roots.root⟩, chain, cachedSiblings roots.tree (deployed.ix .system)⟩
+  ⟨⟨height, roots.root⟩, chain, systemSiblings roots⟩
 
 private def check (name : String) (okay : Bool) : IO Unit := do
   unless okay do throw (IO.userError s!"receipt continuity: {name}")

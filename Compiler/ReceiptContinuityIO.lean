@@ -28,27 +28,37 @@ structure RootWitness where
   chain : Digest
   siblings : List Digest
 
-/-- Read cached sibling hashes in O(tree depth), without rehashing the world. -/
-def cachedSiblings : DeployedTree → List Bool → List Digest
-  | _, [] => []
-  | tree, bit :: rest =>
-      let (left, right) := tree.children
-      let sibling := if bit then left else right
-      sibling.digest deployed deployedEmpties rest.length ::
-        cachedSiblings (if bit then right else left) rest
+/-- The system slot's siblings, read off the kept trie (no hashing): one per
+branch on its walk. -/
+def systemSiblings (cache : RootCache) : List Digest := (cache.opening .system).siblings
 
-theorem cachedSiblings_length (tree : DeployedTree) (bits : List Bool) :
-    (cachedSiblings tree bits).length = bits.length := by
-  induction bits generalizing tree with
-  | nil => rfl
-  | cons bit rest ih => simp [cachedSiblings, ih]
+theorem systemSiblings_length (cache : RootCache) : (systemSiblings cache).length ≤ 256 :=
+  Theory.AuthTrie.Cache.opening_length deployedIx_length cache .system
+
+/-- **The witness read off an exact cache opens** (`ReceiptContinuity.opens`)
+whenever the cache's entries give the system slot that leaf — or the deployed
+hash collides. -/
+theorem systemSiblings_open {cache : RootCache} {es : List (Key × Digest)} (exact : RootsExact cache es)
+    (height : Nat) (chain : Digest)
+    (system : Theory.AuthTrie.lastVal es .system = some (DurableCheckpointCodec.systemLeaf height chain)) :
+    opens ⟨height, cache.root⟩ chain (systemSiblings cache) = true ∨
+      ∃ x y, x ≠ y ∧ deployedHash x = deployedHash y := by
+  rcases deployed_paths es with inj | collision
+  · left
+    have opened := exact.opening_complete inj .system
+    have terminal := Theory.AuthTrie.Cache.opening_terminal exact inj system
+    rw [system] at opened
+    unfold opens systemSiblings
+    rw [← terminal]
+    exact opened
+  · exact Or.inr collision
 
 def identityOf (config : NativeHost.Config) : Identity :=
   ⟨config.deployment.domain, config.profile.semantics, config.expectedSeed⟩
 
 def current (loaded : NativeHost.Durable) : RootWitness :=
   ⟨⟨loaded.height, loaded.worldRoot⟩, loaded.chain,
-    cachedSiblings loaded.roots.tree (deployed.ix .system)⟩
+    systemSiblings loaded.roots⟩
 
 /-- Cache only already loaded roots, so the extra proof request for a just-issued
 challenge need not replay history if the clock ticked in between. Bounded and
@@ -74,8 +84,8 @@ def pastWitness {rootBytes : List UInt8 → Digest} {seed : DurableReceiver.Seed
     past.reads.flatMap fun read => read.2.record.writes.map DurableDataIntent.DataWrite.cellId).eraseDups
   let entries := (Key.system, DurableCheckpointCodec.systemLeaf height chain) ::
     ids.map fun cellId => (Key.cell cellId.value, past.snapshot.model.roots cellId)
-  let roots := DurableReceiverIO.RootCache.ofEntries entries
-  ⟨⟨height, roots.root⟩, chain, cachedSiblings roots.tree (deployed.ix .system)⟩
+  let roots := RootCache.ofEntries entries
+  ⟨⟨height, roots.root⟩, chain, systemSiblings roots⟩
 
 /-- Historical fallback reads the authentic state after `height` records from
 the Store's `Reader` (latest retained checkpoint plus at most 63 verified

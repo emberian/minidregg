@@ -63,25 +63,34 @@ theorem chainAfterDigests_records (start : Digest)
   simp only [chainAfterDigests, DurableCheckpointCodec.chainAfter, List.foldl_map]
   rfl
 
-/-- Membership (not absence) of the committed `(height, chain)` system slot.
-An opening is bounded to exactly the deployed tree's 256 siblings. -/
+/-- Membership (not absence) of the committed `(height, chain)` system slot:
+the walk ends at the system slot's own leaf. An opening carries at most one
+sibling per index bit (256; the compressed trie usually needs about log₂ of
+the number of slots). -/
 def opens (point : Point) (chain : Digest) (siblings : List Digest) : Bool :=
-  deployed.verify point.worldRoot .system
-    (some (DurableCheckpointCodec.systemLeaf point.height chain)) ⟨none, siblings⟩
+  Theory.AuthTrie.verify worldDig deployedIx point.worldRoot .system
+    (some (DurableCheckpointCodec.systemLeaf point.height chain))
+    ⟨siblings, .leaf .system (DurableCheckpointCodec.systemLeaf point.height chain)⟩
 
-/-- Under the authenticated-map hash-separation carrier, an accepted opening
-is the actual system slot of the world named by the receipt. This is the
-cryptographic assumption; increasing heights are not a substitute for it. -/
+/-- **An accepted opening is the actual system slot** of the world named by the
+receipt — the last value the world's slot list gives the system key — or the
+deployed hash collides. Increasing heights are not a substitute for it. -/
 theorem opens_sound (point : Point) (chain : Digest) (siblings : List Digest)
-    (world : Minidregg.Theory.AuthMap.Map Key Digest)
-    (root : point.worldRoot = deployed.root world)
-    (binding : deployed.PathBinding world .system
-      (some (DurableCheckpointCodec.systemLeaf point.height chain)) ⟨none, siblings⟩)
+    (es : List (Key × Digest)) (root : point.worldRoot = deployedRoot es)
     (checked : opens point chain siblings = true) :
-    some (DurableCheckpointCodec.systemLeaf point.height chain) =
-      Minidregg.Theory.AuthMap.lookup deployed.ix world .system := by
-  apply deployed.verify_sound world .system _ ⟨none, siblings⟩ binding
-  simpa only [opens, root] using checked
+    some (DurableCheckpointCodec.systemLeaf point.height chain) = Theory.AuthTrie.lastVal es .system ∨
+      ∃ x y, x ≠ y ∧ deployedHash x = deployedHash y := by
+  rcases deployed_paths es with inj | collision
+  · have accepted : Theory.AuthTrie.verify worldDig deployedIx
+        (deployedRoot es)
+        .system (some (DurableCheckpointCodec.systemLeaf point.height chain))
+        ⟨siblings, .leaf .system (DurableCheckpointCodec.systemLeaf point.height chain)⟩ = true := by
+      rw [← root]; exact checked
+    rcases Theory.AuthTrie.verify_sound worldDig deployedIx 256 deployedIx_length _
+        (Theory.AuthTrie.Cache.wf_canon deployedIx_length inj) _ _ _ accepted with read | nodes
+    · exact Or.inl (by rwa [Theory.AuthTrie.Cache.lookup_canon] at read)
+    · exact Or.inr (worldDig_collision nodes)
+  · exact Or.inr collision
 
 /-- All client-verifiable continuity conditions. New roots cannot be accepted
 merely because their heights increase, and a same-height fork is never an advance.
