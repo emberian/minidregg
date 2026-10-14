@@ -65,31 +65,24 @@ def worldEntries (domain semantics : Digest) (image : DurableReceiver.Image) :
   (.system, .system (height image) (logRoot domain semantics image)) ::
     image.cellIds.map fun cellId => (.cell cellId.value, .cell (image.currentBytes cellId))
 
-/-- **The world root** of an image, evaluated sparsely. -/
+/-- The image's slot roots: the system slot, then every cell it names. -/
+def worldSlotRoots (domain semantics : Digest) (image : DurableReceiver.Image) : List (WorldRoot.Key × Digest) :=
+  (worldEntries domain semantics image).map fun e => (e.1, leafRoot e.2)
+
+/-- **The world root** of an image: the compressed trie over its slot roots. -/
 def worldRoot (domain semantics : Digest) (image : DurableReceiver.Image) : Digest :=
-  WorldRoot.deployedRoot ((worldEntries domain semantics image).map fun e => (e.1, leafRoot e.2))
+  WorldRoot.deployedRoot (worldSlotRoots domain semantics image)
 
-/-- The world root is A3's two-level `worldRoot` over (slot ↦ leaf root) at the
-deployed scheme. -/
-theorem worldRoot_eq_entryRoot (domain semantics : Digest) (image : DurableReceiver.Image) :
-    worldRoot domain semantics image =
-      WorldRoot.entryRoot WorldRoot.deployed leafRoot (worldEntries domain semantics image) :=
-  (WorldRoot.entryRoot_deployed leafRoot _).symm
-
-/-- **Openings (§3.4).**  When no two of the image's slots share an index path,
-a named cell's current root opens at the world root. -/
+/-- **Openings (§3.4).**  When no two of the image's slots share an index path
+(else the deployed hash collides, `WorldRoot.deployed_paths`), a named cell's
+current root opens at the world root, by the opening read off the kept trie. -/
 theorem cell_opens (domain semantics : Digest) (image : DurableReceiver.Image)
     (cellId : DurableDataIntent.CellId) (named : cellId ∈ image.cellIds)
-    (hix : ∀ e ∈ worldEntries domain semantics image,
-      WorldRoot.deployed.ix e.1 = WorldRoot.deployed.ix (.cell cellId.value) → e.1 = .cell cellId.value) :
-    WorldRoot.deployed.verify (worldRoot domain semantics image) (.cell cellId.value)
-      (some (ResourceBirthCodec.rootBytes (image.currentBytes cellId)))
-      (WorldRoot.deployed.opening (Theory.AuthMap.worldSlots leafRoot
-        (WorldRoot.slotsOf WorldRoot.deployed.ix (worldEntries domain semantics image))) (.cell cellId.value)) =
-      true := by
-  have opens := Theory.AuthMap.world_opening WorldRoot.deployed leafRoot
-    (WorldRoot.slotsOf WorldRoot.deployed.ix (worldEntries domain semantics image)) (.cell cellId.value)
-  rw [WorldRoot.lookup_slotsOf _ _ _ hix] at opens
+    (inj : Theory.AuthTrie.Cache.PathsInjective WorldRoot.deployedIx (worldSlotRoots domain semantics image)) :
+    Theory.AuthTrie.verify WorldRoot.worldDig WorldRoot.deployedIx (worldRoot domain semantics image)
+      (.cell cellId.value) (some (ResourceBirthCodec.rootBytes (image.currentBytes cellId)))
+      ((Theory.AuthTrie.Cache.build (dig := WorldRoot.worldDig) WorldRoot.deployedIx_length
+        (worldSlotRoots domain semantics image)).opening (.cell cellId.value)) = true := by
   have hall : ∀ e ∈ (worldEntries domain semantics image).filter
       (fun e => decide (e.1 = WorldRoot.Key.cell cellId.value)),
       e = (.cell cellId.value, .cell (image.currentBytes cellId)) := by
@@ -118,8 +111,17 @@ theorem cell_opens (domain semantics : Digest) (image : DurableReceiver.Image)
         some (.cell cellId.value, .cell (image.currentBytes cellId)) := by
     rw [List.getLast?_eq_getLast hne]
     exact congrArg some (hall _ (List.getLast_mem hne))
-  rw [hone] at opens
-  simpa [leafRoot, worldRoot_eq_entryRoot, WorldRoot.entryRoot] using opens
+  have hv : Theory.AuthTrie.lastVal (worldSlotRoots domain semantics image) (.cell cellId.value) =
+      some (ResourceBirthCodec.rootBytes (image.currentBytes cellId)) := by
+    rw [worldSlotRoots, Theory.AuthTrie.lastVal_map]
+    unfold Theory.AuthTrie.lastVal
+    rw [hone]
+    rfl
+  have built := Theory.AuthTrie.Cache.build_holds (dig := WorldRoot.worldDig) WorldRoot.deployedIx_length
+    (worldSlotRoots domain semantics image)
+  have opened := Theory.AuthTrie.Cache.opening_complete WorldRoot.deployedIx_length built inj (.cell cellId.value)
+  rw [Theory.AuthTrie.Cache.digest_eq built, hv] at opened
+  exact opened
 
 def framedRaw {α : Type} (frame : List UInt8) (stream : StreamCodec α) : LawfulCodec α :=
     { encode value := frame ++ stream.encode value
@@ -499,8 +501,6 @@ theorem outcome_canonical {bytes : List UInt8} {value : Outcome}
 #guard_msgs (whitespace := lax) in #print axioms v3_draft_refused
 /-- info: 'Minidregg.Compiler.NativeHostCodec.v3_call_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms v3_call_refused
-/-- info: 'Minidregg.Compiler.NativeHostCodec.worldRoot_eq_entryRoot' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms worldRoot_eq_entryRoot
 /-- info: 'Minidregg.Compiler.NativeHostCodec.cell_opens' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms cell_opens
 
