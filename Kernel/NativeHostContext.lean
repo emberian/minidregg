@@ -743,10 +743,10 @@ theorem servedRoot_eq_worldRoot (config : Config) (image : DurableReceiver.Image
     (snapshot : DurableDataIntent.DataSnapshot ResourceBirthCodec.rootBytes) (chain : Digest)
     (restored : image.restore ResourceBirthCodec.rootBytes = some snapshot)
     (rooted : chain = NativeHostCodec.logRoot config.deployment.domain config.profile.semantics image) :
-    (DurableReceiverIO.RootCache.ofEntries (DurableReceiverIO.entriesOf image snapshot chain)).root =
+    (WorldRootCache.RootCache.ofEntries (DurableReceiverIO.entriesOf image snapshot chain)).root =
       worldRoot config image := by
-  rw [DurableReceiverIO.RootCache.root_eq, entriesOf_worldEntries config image snapshot chain restored rooted]
-  simp only [worldRoot, NativeHostCodec.worldRoot, DurableReceiverIO.RootCache.ofEntries]
+  rw [WorldRootCache.RootCache.ofEntries_root, entriesOf_worldEntries config image snapshot chain restored rooted]
+  simp only [worldRoot, NativeHostCodec.worldRoot, NativeHostCodec.worldSlotRoots]
 
 /-- **Every root a Loaded serves is C1's specification root of its image** —
 after open, after any number of appends (one cached path each), after any
@@ -760,7 +760,7 @@ theorem loadedRoot_eq_worldRoot (config : Config) (durable : Durable)
     durable.worldRoot = worldRoot config durable.image := by
   rw [DurableReceiverIO.Loaded.worldRoot_eq,
     entriesOf_worldEntries config durable.image durable.snapshot durable.chain restored rooted]
-  simp only [worldRoot, NativeHostCodec.worldRoot]
+  simp only [worldRoot, NativeHostCodec.worldRoot, NativeHostCodec.worldSlotRoots]
 
 /-- info: 'Minidregg.Kernel.NativeHost.loadedRoot_eq_worldRoot' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms loadedRoot_eq_worldRoot

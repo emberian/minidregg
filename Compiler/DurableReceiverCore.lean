@@ -439,34 +439,14 @@ instance : DecidableEq Image := fun left right =>
     ((byteArray_beq_exact _ _).trans
       ⟨fun same => DurableReceiverCodec.encode_injective same, congrArg _⟩)
 
-/-! ## The world root, cached -/
+/-! ## The world root, kept
 
-open Minidregg.Theory.AuthMap (write)
-open Minidregg.Kernel.WorldRoot (Key deployed deployedRoot slotsOf)
+The cache and its exactness live in `Kernel.WorldRootCache` (`RootCache`,
+`RootsExact`): a compressed trie, exact for the served entries with no
+injectivity flag and no fallback rebuild. -/
+
+open Minidregg.Kernel.WorldRoot (Key deployedRoot)
 open Minidregg.Kernel.WorldRootCache
-
-/-- The world root, cached. `entries` lists the slot writes since the tree was
-built, in order; the tree is good for their slot map, so its digest is C1's
-`deployedRoot entries` (`RootCache.root_eq`). A write rehashes one path. -/
-structure RootCache where
-  entries : List (Key × Digest)
-  tree : DeployedTree
-  good : Good deployed deployedEmpties (slotsOf deployed.ix entries) deployed.depth [] tree
-
-def RootCache.ofEntries (entries : List (Key × Digest)) : RootCache :=
-  ⟨entries, deployedOf entries, ofEntries_good deployed deployedEmpties entries⟩
-
-def RootCache.write (cache : RootCache) (key : Key) (value : Digest) : RootCache :=
-  ⟨cache.entries ++ [(key, value)], deployedWrite cache.tree key (some value), by
-    rw [slotsOf_snoc]
-    exact insertWrite_good deployed deployedEmpties cache.good key (some value)⟩
-
-def RootCache.root (cache : RootCache) : Digest := deployedDigest cache.tree
-
-/-- The cached root is the specification root of the cache's entries. -/
-theorem RootCache.root_eq (cache : RootCache) : cache.root = deployedRoot cache.entries := by
-  rw [Kernel.WorldRoot.deployedRoot_eq]
-  exact digest_eq deployed deployedEmpties deployedEmpties_eq _ _ _ _ cache.good
 
 /-- The world-root entries of a served state: the system slot (height, log
 root), then every enumerable cell's current root — C1's `worldEntries`, read
@@ -481,114 +461,6 @@ written cell's exact post root. -/
 def recordSlots (height : Nat) (chain : Digest) (record : IntentRecord) : List (Key × Digest) :=
   (.system, systemLeaf height chain) ::
     record.writes.map fun write => (.cell write.cellId.value, write.exactPost)
-
-/-- The slot the cache holds at `k`'s index path, read down the tree (no hashing). -/
-def RootCache.occupant (cache : RootCache) (k : Key) : Option (Key × Digest) :=
-  cache.tree.find deployed.depth (deployed.ix k)
-
-theorem RootCache.occupant_eq (cache : RootCache) (k : Key) :
-    cache.occupant k = slotsOf deployed.ix cache.entries (deployed.ix k) := by
-  have := find_good deployed deployedEmpties _ deployed.depth (deployed.ix k) [] cache.tree
-    (deployed.ix_length k) cache.good
-  simpa [RootCache.occupant] using this
-
-/-- Writing `k` evicts no other key: its index path is empty or already holds `k`. -/
-def RootCache.fresh (cache : RootCache) (k : Key) : Bool :=
-  match cache.occupant k with
-  | none => true
-  | some x => decide (x.1 = k)
-
-theorem RootCache.fresh_sound {cache : RootCache} {k : Key} (fresh : cache.fresh k = true) :
-    ∀ x, slotsOf deployed.ix cache.entries (deployed.ix k) = some x → x.1 = k := by
-  intro x hx
-  unfold RootCache.fresh at fresh
-  rw [cache.occupant_eq, hx] at fresh
-  simpa using fresh
-
-/-- Every key of the cache is found at its own index path: no two keys share one. -/
-def RootCache.injectiveCheck (cache : RootCache) : Bool :=
-  cache.entries.all fun e => match cache.occupant e.1 with
-    | some x => decide (x.1 = e.1)
-    | none => false
-
-theorem RootCache.injectiveCheck_sound {cache : RootCache} (checked : cache.injectiveCheck = true) :
-    KeysInjective deployed.ix cache.entries := by
-  apply keysInjective_of_occupants
-  intro e he
-  have found := List.all_eq_true.mp checked e he
-  rw [cache.occupant_eq] at found
-  cases hx : slotsOf deployed.ix cache.entries (deployed.ix e.1) with
-  | none => simp [hx] at found
-  | some x => exact ⟨x, rfl, by simpa [hx] using found⟩
-
-/-- Write the slots while none evicts another key: the advanced cache, or
-`none` at the first slot whose index path holds a different key. -/
-def RootCache.writeAllFresh? (cache : RootCache) : List (Key × Digest) → Option RootCache
-  | [] => some cache
-  | slot :: slots =>
-      if cache.fresh slot.1 then (cache.write slot.1 slot.2).writeAllFresh? slots else none
-
-theorem RootCache.writeAllFresh?_sound :
-    ∀ (cache : RootCache) (slots : List (Key × Digest)) (next : RootCache),
-      cache.writeAllFresh? slots = some next → KeysInjective deployed.ix cache.entries →
-      next.entries = cache.entries ++ slots ∧ KeysInjective deployed.ix next.entries
-  | cache, [], next, wrote, inj => by
-      simp only [writeAllFresh?, Option.some.injEq] at wrote
-      subst wrote
-      exact ⟨by simp, inj⟩
-  | cache, slot :: slots, next, wrote, inj => by
-      simp only [writeAllFresh?] at wrote
-      split at wrote
-      next fresh =>
-        have inj' : KeysInjective deployed.ix (cache.write slot.1 slot.2).entries :=
-          keysInjective_snoc deployed.ix inj slot (RootCache.fresh_sound fresh)
-        obtain ⟨entries, inj''⟩ := writeAllFresh?_sound _ slots next wrote inj'
-        refine ⟨?_, inj''⟩
-        rw [entries]
-        simp [RootCache.write]
-      next => cases wrote
-
-/-- **The cache holds the served entries `es`**: it gives every key the value
-`es` last gives it, and a checked flag says whether no two of its keys share an
-index path. Under the flag the cached root is the root of `es`
-(`RootsExact.root_eq`), though the cache was written in log order and `es` is
-in enumeration order. -/
-structure RootsExact (cache : RootCache) (es : List (Key × Digest)) where
-  agree : ∀ k, lastVal cache.entries k = lastVal es k
-  injective : Bool
-  injectiveSound : injective = true → KeysInjective deployed.ix cache.entries
-
-def RootsExact.ofEntries (es : List (Key × Digest)) : RootsExact (RootCache.ofEntries es) es :=
-  ⟨fun _ => rfl, (RootCache.ofEntries es).injectiveCheck, RootCache.injectiveCheck_sound⟩
-
-/-- The cache of `es` with its exactness, the tree built once: `RootCache.ofEntries`
-paired with `RootsExact.ofEntries` builds the tree a second time inside the latter. -/
-def RootCache.build (es : List (Key × Digest)) : (cache : RootCache) × RootsExact cache es :=
-  let cache := RootCache.ofEntries es
-  ⟨cache, ⟨fun _ => rfl, cache.injectiveCheck, RootCache.injectiveCheck_sound⟩⟩
-
-theorem RootsExact.root_eq {cache : RootCache} {es : List (Key × Digest)}
-    (exact : RootsExact cache es) (injective : exact.injective = true) :
-    cache.root = deployedRoot es := by
-  rw [cache.root_eq, Kernel.WorldRoot.deployedRoot_eq, Kernel.WorldRoot.deployedRoot_eq,
-    slotsOf_eq_of_lastVal deployed.ix (exact.injectiveSound injective) exact.agree]
-
-/-- Advance a cache holding `es` by the slot writes that take `es` to `es'`:
-one path per slot while no slot evicts another key; on an index collision (a
-collision of the deployed hash) a full rebuild of `es'`. -/
-def RootsExact.advance {cache : RootCache} {es es' : List (Key × Digest)}
-    (exact : RootsExact cache es) (slots : List (Key × Digest))
-    (step : ∀ k, lastVal es' k = (lastVal slots k).or (lastVal es k)) :
-    (next : RootCache) × RootsExact next es' :=
-  if injective : exact.injective = true then
-    match wrote : cache.writeAllFresh? slots with
-    | some next =>
-        let sound := RootCache.writeAllFresh?_sound cache slots next wrote
-          (exact.injectiveSound injective)
-        ⟨next, ⟨fun k => by rw [sound.1, lastVal_append, exact.agree, step], true,
-          fun _ => sound.2⟩⟩
-    | none => RootCache.build es'
-  else RootCache.build es'
 
 /-! ## The served entries, step by step -/
 
@@ -792,7 +664,7 @@ theorem entriesOf_rebase {rootBytes : List UInt8 → Digest} (image : Image)
 (`DurableCheckpointCodec.openSealedWith`); the full open and the light open
 both advance it to the head. -/
 abbrev CheckpointRoots (rootBytes : List UInt8 → Digest) (body : DurableCheckpointCodec.Body) : Type :=
-  (cache : RootCache) × RootsExact cache
+  (cache : RootCache) ×' RootsExact cache
     (DurableCheckpointCodec.stateEntries rootBytes body.height body.chain body.state)
 
 /-- A suffix changes one system slot and the cells it actually writes. The
@@ -974,7 +846,7 @@ frontier and index root there, and the tree its checkpoint's open evaluated (non
 for the seed at height 0). -/
 private abbrev OpenBase (rootBytes : List UInt8 → Digest) : Type :=
   (height : Nat) × (state : State) × List (Nat × Digest) × Digest ×
-    Option ((chain : Digest) × (cache : RootCache) × RootsExact cache
+    Option ((chain : Digest) × (cache : RootCache) ×' RootsExact cache
       (DurableCheckpointCodec.stateEntries rootBytes height chain state))
 
 /-! ## The loaded, resumed image -/
@@ -1030,20 +902,14 @@ structure Loaded (rootBytes : List UInt8 → Digest) where
 def Loaded.height {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) : Nat :=
   loaded.image.accepted.length
 
-/-- The served world root: read off the cache, not recomputed, while no two
-cached keys share an index path; after an index collision (a collision of the
-deployed hash) evaluated in full. -/
+/-- The served world root: read off the cache, never recomputed. -/
 def Loaded.worldRoot {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) : Digest :=
-  if loaded.rootsExact.injective then loaded.roots.root
-  else deployedRoot (entriesOf loaded.image loaded.snapshot loaded.chain)
+  loaded.roots.root
 
-/-- **The served root is C1's root of the served entries**, either way. -/
+/-- **The served root is C1's root of the served entries.** -/
 theorem Loaded.worldRoot_eq {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
-    loaded.worldRoot = deployedRoot (entriesOf loaded.image loaded.snapshot loaded.chain) := by
-  unfold Loaded.worldRoot
-  split
-  next injective => exact loaded.rootsExact.root_eq injective
-  next => rfl
+    loaded.worldRoot = deployedRoot (entriesOf loaded.image loaded.snapshot loaded.chain) :=
+  loaded.rootsExact.root_eq
 
 /-- Reuse the already resumed snapshot when a controller reconstructs its
 typed directory; this performs no second replay or cell update. -/
@@ -1223,7 +1089,7 @@ def loadChained (transport : Transport) (rootBytes : List UInt8 → Digest) :
         | some checkpoint =>
             match openSealedWith (α := CheckpointRoots rootBytes) key rootBytes checkpoint.bytes
                 (fun _ => RootCache.build _) (fun _ built => built.1.root)
-                (fun _ => (RootCache.root_eq _).trans rfl) with
+                (fun _ => RootCache.ofEntries_root _) with
             | .error reason => return .error s!"checkpoint refused: {repr reason}"
             | .ok ⟨body, built⟩ =>
                 if body.height ≠ checkpoint.height ∨ body.height > stored.head then
@@ -1265,7 +1131,7 @@ def loadChained (transport : Transport) (rootBytes : List UInt8 → Digest) :
         match resumed : resume rootBytes image baseHeight base with
         | none => return .error "durable log suffix does not replay through the canonical executor"
         | some snapshot =>
-            let built : (cache : RootCache) × RootsExact cache (entriesOf image snapshot headChain) :=
+            let built : (cache : RootCache) ×' RootsExact cache (entriesOf image snapshot headChain) :=
               match opened.2.2.2.2 with
               | none => RootCache.build (entriesOf image snapshot headChain)
               | some ⟨baseChain, cache, exact⟩ =>
@@ -1346,8 +1212,7 @@ def Loaded.extend {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes
     (entriesOf_step loaded.image loaded.snapshot ready.next intent loaded.chain chain ready.executed)
   -- The served root after this record (`Loaded.worldRoot` of the result), kept
   -- as its receipt root.
-  let served := if roots.2.injective then roots.1.root
-    else deployedRoot (entriesOf (loaded.image.append intent) ready.next chain)
+  let served := roots.1.root
   ⟨loaded.image.append intent, loaded.baseHeight, loaded.base, ready.next,
     by simp only [Image.append, List.length_append]; exact Nat.le_add_right_of_le loaded.withinLog,
     ready.resumed, loaded.logStart, chain,
@@ -1405,8 +1270,7 @@ def Loaded.rebase {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes
       have same := entriesOf_rebase loaded.image loaded.snapshot snapshot loaded.chain resumed
       some ⟨loaded.image, height, state, snapshot, Nat.le_refl _, resumed, loaded.logStart,
         loaded.chain, loaded.chainExact, loaded.roots,
-        ⟨fun k => by rw [same]; exact loaded.rootsExact.agree k, loaded.rootsExact.injective,
-          loaded.rootsExact.injectiveSound⟩,
+        by rw [same]; exact loaded.rootsExact,
         loaded.index, loaded.indexExact, loaded.links, loaded.linksExact,
         loaded.ids, loaded.idsExact, loaded.txs, loaded.txsExact,
         loaded.rootLog, loaded.rootLogSize, loaded.frontier, loaded.headTag⟩
@@ -1611,14 +1475,8 @@ theorem cachedSeal_root {rootBytes : List UInt8 → Digest} (key : MacKey)
 #guard_msgs (whitespace := lax) in #print axioms entriesOf_step
 /-- info: 'Minidregg.Compiler.DurableReceiverIO.cachedSeal_root' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms cachedSeal_root
-/-- info: 'Minidregg.Compiler.DurableReceiverIO.RootsExact.root_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms RootsExact.root_eq
 /-- info: 'Minidregg.Compiler.DurableReceiverIO.entriesOf_rebase' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms entriesOf_rebase
-/-- info: 'Minidregg.Compiler.DurableReceiverIO.RootCache.writeAllFresh?_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms RootCache.writeAllFresh?_sound
-/-- info: 'Minidregg.Compiler.DurableReceiverIO.RootCache.injectiveCheck_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms RootCache.injectiveCheck_sound
 /-- info: 'Minidregg.Compiler.DurableReceiverIO.stateEntries_ofSnapshot' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms stateEntries_ofSnapshot
 

@@ -669,8 +669,8 @@ structure Opening (rootBytes : List UInt8 → Digest) where
   heightExact : served.height = head.height
   chainExact : served.chain = head.chain
   /-- The world root, cached; advanced by one path per written cell. -/
-  roots : DurableReceiverIO.RootCache
-  rootsExact : DurableReceiverIO.RootsExact roots
+  roots : WorldRootCache.RootCache
+  rootsExact : WorldRootCache.RootsExact roots
     (Served.entriesOf served.roots served.cellIds served.height served.chain)
   /-- The height of the checkpoint the opening resumed from (the cadence). -/
   baseHeight : Nat
@@ -710,8 +710,8 @@ private def checkIndex (rows : List Bool → Option DurableIndex.Row) :
 /-- A root cache already verified for a start's enumeration. -/
 private structure CachedRoots (ids : List CellId) (entries : List (WorldRoot.Key × Digest)) where
   nodup : ids.Nodup
-  cache : DurableReceiverIO.RootCache
-  exact : DurableReceiverIO.RootsExact cache entries
+  cache : WorldRootCache.RootCache
+  exact : WorldRootCache.RootsExact cache entries
 
 /-- What an extension starts from: a verified state (bare snapshot, its
 enumeration, the fresh-cell bytes) at `height`, with the chain, accumulator
@@ -778,17 +778,17 @@ private def extendVerified (transport : DurableReceiverIO.Transport) (rootBytes 
   | some snapshot =>
       let cellIds := extendIds start.ids records
       let entries := Served.entriesOf snapshot.model.roots cellIds headHeight headChain
-      let rooted : (cache : DurableReceiverIO.RootCache) × DurableReceiverIO.RootsExact cache entries :=
+      let rooted : (cache : WorldRootCache.RootCache) ×' WorldRootCache.RootsExact cache entries :=
         match start.roots with
-        | none => ⟨DurableReceiverIO.RootCache.ofEntries entries,
-            DurableReceiverIO.RootsExact.ofEntries entries⟩
+        | none => ⟨WorldRootCache.RootCache.ofEntries entries,
+            WorldRootCache.RootsExact.ofEntries entries⟩
         | some ⟨nodup, cache, exact⟩ =>
             exact.advance (suffixSlots headHeight headChain records)
               (replay_entries_step start.ids nodup start.before snapshot records replayed
                 start.height headHeight start.chain headChain)
       let roots := rooted.1
       let rootsExact := rooted.2
-      let worldRoot := if rootsExact.injective then roots.root else WorldRoot.deployedRoot entries
+      let worldRoot := roots.root
       let served : Served rootBytes store :=
         Served.ofReplay start.seed start.absentBytes start.ids start.before start.outside records snapshot
           replayed headHeight headChain worldRoot
@@ -830,7 +830,7 @@ theorem state_entries (base : State) (nodup : (base.cells.map Prod.fst).Nodup) (
 private def startOf (seed : Seed) (base : State) (height : Nat) (chain : Digest)
     (frontier : List (Nat × Digest)) (indexRoot : Digest) (tag : Option (List UInt8))
     (nodup : (base.cells.map Prod.fst).Nodup)
-    (roots : Option ((cache : DurableReceiverIO.RootCache) × DurableReceiverIO.RootsExact cache
+    (roots : Option ((cache : WorldRootCache.RootCache) ×' WorldRootCache.RootsExact cache
       (DurableCheckpointCodec.stateEntries rootBytes height chain base))) : Start rootBytes :=
   ⟨seed, base.absentBytes, base.cells.map Prod.fst, base.snapshot rootBytes [], Served.state_snapshot_outside base,
     height, chain, frontier, indexRoot, tag, height,
@@ -879,8 +879,8 @@ def openHead (transport : DurableReceiverIO.Transport) (rootBytes : List UInt8 �
       else return .error "checkpoint state is not admissible for this Store's seed"
   | some checkpoint =>
       match DurableCheckpointCodec.openSealedWith (α := CheckpointRoots rootBytes) key rootBytes
-          checkpoint.bytes (fun body => DurableReceiverIO.RootCache.build _)
-          (fun _ built => built.1.root) (fun body => (DurableReceiverIO.RootCache.root_eq _).trans rfl) with
+          checkpoint.bytes (fun body => WorldRootCache.RootCache.build _)
+          (fun _ built => built.1.root) (fun _ => WorldRootCache.RootCache.ofEntries_root _) with
       | .error reason => return .error s!"checkpoint refused: {repr reason}"
       | .ok ⟨body, built⟩ =>
           if body.height ≠ checkpoint.height ∨ body.height = 0 ∨ body.height > headHeight then
@@ -1026,9 +1026,7 @@ def receiveServed (transport : DurableReceiverIO.Transport) (rootBytes : List UI
       let roots := opening.rootsExact.advance (DurableReceiverIO.recordSlots height chain record)
         (Served.entries_step served.cellIds served.cellIds_nodup view next intent served.height
           served.chain chain executed)
-      -- The full entry list only on an index collision (its enumeration is Θ(cells²)).
-      let worldRoot := if roots.2.injective then roots.1.root else
-        WorldRoot.deployedRoot (Served.entriesOf next.model.roots (extendIds served.cellIds [record]) height chain)
+      let worldRoot := roots.1.root
       let leaf := DurableHistory.leafDigest height recordBytes chain worldRoot
       let frontierAfter := DurableHistory.Frontier.push head.frontier leaf
       let nodes := DurableReceiverIO.appendNodes

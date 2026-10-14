@@ -105,11 +105,11 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
       | throw (IO.userError s!"FAIL genesis replay at {height}")
     let image := loaded.prefixImage height
     let chain := DurableCheckpointCodec.chainAfter loaded.logStart image.accepted
-    let roots := RootCache.ofEntries (entriesOf image snapshot chain)
+    let roots := WorldRootCache.RootCache.ofEntries (entriesOf image snapshot chain)
     require s!"witness at {height}: root equals the genesis-replay root" (witness.point.worldRoot == roots.root)
     require s!"witness at {height}: chain equals the genesis-replay chain" (witness.chain == chain)
     require s!"witness at {height}: siblings equal the genesis-replay siblings"
-      (witness.siblings == ReceiptContinuityIO.cachedSiblings roots.tree (WorldRoot.deployed.ix .system))
+      (witness.siblings == ReceiptContinuityIO.systemSiblings roots)
     require s!"witness at {height}: height" (witness.point.height == height)
   match ← NativeHistorySelection.foldRange reader 1 41 (0 : Nat) fun (count : Nat) window => (Except.ok (count + window.length) : Except String Nat) with
   | .ok count => require "the windowed fold sees 41 records" (count == 41)

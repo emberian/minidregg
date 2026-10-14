@@ -1039,7 +1039,7 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
   discard <| timed "root rebuild x3" do
     let mut r := 0
     for _ in [0:3] do
-      r := r + (DurableReceiverIO.RootCache.ofEntries
+      r := r + (Minidregg.Kernel.WorldRootCache.RootCache.ofEntries
         (DurableReceiverIO.entriesOf durable.image durable.snapshot durable.chain)).root.value % 7
     pure r
   let some authority := CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot
@@ -1084,9 +1084,8 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
       discard <| timedPure "open: resume (materialize + replay the suffix)" fun _ =>
         (DurableCheckpoint.resume ResourceBirthCodec.rootBytes durable.image body.height body.state).isSome
   discard <| timedPure "open: root cache build (full evaluation)" fun _ =>
-    (DurableReceiverIO.RootCache.ofEntries
+    (Minidregg.Kernel.WorldRootCache.RootCache.ofEntries
       (DurableReceiverIO.entriesOf durable.image durable.snapshot durable.chain)).root.value % 7
-  discard <| timedPure "open: cache injectivity check" fun _ => durable.roots.injectiveCheck
   let state ← timedPure "checkpoint: state (ofSnapshot)" fun _ =>
     DurableCheckpoint.State.ofSnapshot durable.image durable.snapshot
   IO.println s!"  state cells {state.cells.length}"

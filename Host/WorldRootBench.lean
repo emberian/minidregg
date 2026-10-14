@@ -2,8 +2,8 @@
 # world-root-bench -- wall-clock of the compiled deployed world root
 
 Builds `n` entries (the system slot and `n - 1` cells with distinct roots) and
-times `Kernel.WorldRoot.deployedRoot` over them, `reps` times.  The entries are
-built outside the timed region; the empty-subtree table is forced first.
+times `Kernel.WorldRoot.deployedRoot` (the compressed trie) over them, `reps`
+times.  The entries are built outside the timed region.
 -/
 import Kernel.WorldRoot
 
@@ -15,7 +15,7 @@ def main (args : List String) : IO UInt32 := do
   let reps := (args[1]? >>= String.toNat?).getD 3
   let cells : List (Key × Digest) :=
     (List.range (n - 1)).map fun i => (Key.cell (i * 7919 + 13), ⟨i + 1⟩)
-  IO.println s!"entries={cells.length + 1} table={deployedTable.size}"
+  IO.println s!"entries={cells.length + 1}"
   for rep in [0:reps] do
     let t0 ← IO.monoNanosNow
     -- the system slot depends on the clock read, so the root cannot be hoisted
