@@ -1,45 +1,47 @@
 /-
-# Kernel.WorldRoot -- the world root: an authenticated map over cell roots
+# Kernel.WorldRoot -- the world root: the compressed trie over the world's slot roots
 
-DATAMODEL §3.2/§3.4, step C1.  The world root is `Theory.AuthMap`'s two-level
-form: an authenticated map whose keys are the world's slots (`Key.system` and
-`Key.cell c`) and whose leaves are the slots' roots.  `Kernel.World` left the
+DATAMODEL §3.2/§3.4, step C1.  The world root is `Theory.AuthTrie`'s compressed
+trie over the world's slots (`Key.system` and `Key.cell c`), each slot holding
+its root.  A key alone under a prefix is a leaf at the highest level where it is
+alone; a branch is hashed only over two or more keys.  `Kernel.World` left the
 root function a parameter of `Checkpoint`; this module supplies it.
 
-* `slotsOf ix es` is the slot map of an entry list (the last entry at each index
-  path).  `entryRoot S leafRoot es := worldRoot S leafRoot (slotsOf S.ix es)` is
-  A3's `worldRoot` over it, so `world_opening`, `worldRoot_write` and
-  `world_sound` apply to every root this module defines.
-* `sparse` evaluates `Scheme.root` in one hash per nonempty tree node instead of
-  one per node of the full tree (`entryRoot_eq_sparse`).  It is what runs.
-* `rootOf cellRoot sysRoot S w` is the root of a `Kernel.World`: the system cell
-  at `Key.system`, each present cell at `Key.cell c`.
+* `rootOf cellRoot sysRoot dig ix L w` is the root of a `Kernel.World`:
+  `AuthTrie.root` of its slot roots (`slotRoots`), the LAST value per key.  It
+  is a function of each key's last value (`AuthTrie.root_congr`), so it does
+  not depend on the order slots were written in, with no premise.
 * **Binding.**  `rootOf_binds` turns root equality into world equality under
-  `RootBinding`, which is A3's `PathBinding` at every key plus the index and
-  leaf-root carriers, each scoped to the pairs the comparison names.
-  `rootOf_eq_exhibits_collision` is the same fact with no premise: equal roots
-  of different worlds exhibit an explicit collision.  `resume_sound_rootOf` is
+  `RootBinding` (per key: the honest opening of one world, checked against the
+  other's root, reads what the other reads; index paths distinct; leaf roots
+  separate contents).  `rootOf_eq_exhibits_collision` is the same fact with no
+  premise: equal roots of different worlds exhibit a node collision, an index
+  collision or a leaf-root collision.  `resume_sound_rootOf` is
   `Kernel.World.resume_sound` with its `binds` premise discharged this way.
-* `deployed` is the scheme the host runs: cSHAKE256 under
-  `DREGG.WORLD-ROOT/v1`, a 256-bit hashed index (A3's Q2), digests framed by
-  `digestStream`.  `deployedIx_collision` reduces an index collision to a hash
-  collision.
+* `deployedRoot` is the root the host runs: nodes framed by `nodeBytes` (tag
+  0 empty / 1 leaf key ++ digest / 2 branch left ++ right) under cSHAKE256
+  `DREGG.WORLD-ROOT/v2`, keys at a 256-bit hashed index.  `worldDig_collision`
+  and `deployedIx_collision` reduce a node or index collision to a collision of
+  the deployed hash, so `deployedRoot_binds` is premise-free up to one.
 * `cshakeHistory` is the turn digest and log chain `Kernel.World.History`
   handed on: cSHAKE over a turn's canonical bytes, chained.
 
-Poles (toy scheme at a one-bit hash, over `Kernel.World`'s toy worlds):
+Poles (toy world root at a constant hash, over `Kernel.World`'s toy worlds):
 `honest_checkpoint_resumes` (the carrier holds at the honest checkpoint at
 every hash) and `tampered_checkpoint_accepted` (a tampered world with the
 honest root: the check passes, the resume disagrees with the fold, and the
 carrier fails).
 -/
 import Theory.AuthMap
+import Theory.AuthTrieCache
 import Kernel.World
 import Compiler.Tower256ConcreteBackend
+import Compiler.PersistedCodecTags
 
 namespace Minidregg.Kernel.WorldRoot
 
-open Minidregg.Theory.AuthMap
+open Minidregg.Theory
+open Minidregg.Theory.AuthMap (PrefixFree PrefixFree.injective unaryFrame unaryFrame_prefixFree)
 open Minidregg.Theory.Store
 open Minidregg.Kernel.World
 open Minidregg.Compiler.Tower256ConcreteBackend
@@ -130,241 +132,11 @@ theorem bytesBits_injective : Function.Injective bytesBits := by
           obtain ⟨hab, hrest⟩ := List.append_inj h (by simp)
           rw [byteBits_injective hab, ih hrest]
 
-/-! ## The slot map of an entry list -/
-
-section Entries
-
-variable {K C : Type} [DecidableEq K] (ix : K → List Bool)
-
-/-- The slot map of an entry list: at each index path, the last entry whose
-key indexes there.  A function of the list; `lookup` reads it. -/
-def slotsOf (es : List (K × C)) : Map K C :=
-  fun p => (es.filter fun e => decide (ix e.1 = p)).getLast?
-
-omit [DecidableEq K] in
-theorem slotsOf_wf (es : List (K × C)) : WF ix (slotsOf ix es) := by
-  intro p k x h
-  have hm := List.mem_of_getLast? h
-  simp only [List.mem_filter, decide_eq_true_eq] at hm
-  exact hm.2
-
-/-- Reading key `k` returns the last entry at `k`, when no other entry key
-shares `k`'s index. -/
-theorem lookup_slotsOf (es : List (K × C)) (k : K)
-    (hix : ∀ e ∈ es, ix e.1 = ix k → e.1 = k) :
-    lookup ix (slotsOf ix es) k = ((es.filter fun e => decide (e.1 = k)).getLast?).map (·.2) := by
-  have hf : (es.filter fun e => decide (ix e.1 = ix k)) = es.filter fun e => decide (e.1 = k) := by
-    apply List.filter_congr
-    intro e he
-    by_cases h : e.1 = k
-    · simp [h]
-    · simp only [h, decide_false, decide_eq_false_iff_not]
-      exact fun hi => h (hix e he hi)
-  unfold lookup slotsOf
-  rw [hf]
-  rcases hl : (es.filter fun e => decide (e.1 = k)).getLast? with _ | ⟨k', x⟩
-  · simp [hl, readAt]
-  · have hm := List.mem_of_getLast? hl
-    simp only [List.mem_filter, decide_eq_true_eq] at hm
-    simp [hl, readAt, hm.2]
-
-theorem worldSlots_slotsOf {V : Type} (leafRoot : C → V) (es : List (K × C)) :
-    worldSlots leafRoot (slotsOf ix es) = slotsOf ix (es.map fun e => (e.1, leafRoot e.2)) := by
-  funext p
-  simp only [worldSlots, slotsOf, List.filter_map, List.getLast?_map]
-  rfl
-
-end Entries
-
-/-! ## Evaluating the root sparsely -/
-
-section Sparse
-
-variable {K V D : Type} [DecidableEq K] (S : Scheme K V D)
-
-/-- The root of the empty subtree with `i` levels. -/
-def empties : Nat → D
-  | 0 => S.leafDigest none
-  | i + 1 => S.nodeHash (empties i) (empties i)
-
-theorem subRoot_empty : ∀ (i : Nat) (p : List Bool), S.subRoot Map.empty i p = empties S i
-  | 0, _ => rfl
-  | i + 1, p => by simp only [Scheme.subRoot, empties, subRoot_empty i]
-
-/-- Entries below one branch, with the branch bit removed. -/
-def strip (b : Bool) (e : List Bool × (K × V)) : Option (List Bool × (K × V)) :=
-  match e.1 with
-  | c :: r => if c = b then some (r, e.2) else none
-  | [] => none
-
-/-- The root of the subtree with `i` levels holding the given (remaining path,
-entry) pairs.  An empty subtree costs a table lookup; a nonempty one costs one
-node hash plus its children. -/
-def sparse (E : Nat → D) : Nat → List (List Bool × (K × V)) → D
-  | 0, L => S.leafDigest (L.getLast?.map (·.2))
-  | i + 1, L =>
-    if L.isEmpty then E (i + 1)
-    else S.nodeHash (sparse E i (L.filterMap (strip false))) (sparse E i (L.filterMap (strip true)))
-
-omit [DecidableEq K] in
-theorem filter_strip (b : Bool) (q : List Bool) :
-    ∀ L : List (List Bool × (K × V)),
-      ((L.filterMap (strip b)).filter fun e => decide (e.1 = q)).map (·.2) =
-        (L.filter fun e => decide (e.1 = b :: q)).map (·.2)
-  | [] => rfl
-  | e :: L => by
-      rcases e with ⟨bits, entry⟩
-      have ih := filter_strip b q L
-      cases bits with
-      | nil =>
-          rw [List.filterMap_cons, show strip b (([] : List Bool), entry) = none from rfl]
-          simpa using ih
-      | cons c r =>
-          rw [List.filterMap_cons,
-            show strip b ((c :: r, entry) : List Bool × (K × V)) =
-              if c = b then some (r, entry) else none from rfl]
-          by_cases hc : c = b
-          · subst hc
-            rw [if_pos rfl]
-            by_cases hr : r = q
-            · subst hr; simp [ih]
-            · simp [List.filter_cons, hr, ih]
-          · rw [if_neg hc]; simp [List.filter_cons, hc, ih]
-
-/-- `L` represents the subtree of `m` at prefix `p` with `i` levels. -/
-def Represents (m : Map K V) (p : List Bool) (i : Nat) (L : List (List Bool × (K × V))) : Prop :=
-  (∀ e ∈ L, e.1.length = i) ∧
-    ∀ q : List Bool, q.length = i → m (p ++ q) = ((L.filter fun e => decide (e.1 = q)).getLast?).map (·.2)
-
-theorem sparse_eq (E : Nat → D) (hE : ∀ i, E i = empties S i) :
-    ∀ (i : Nat) (p : List Bool) (L : List (List Bool × (K × V))) (m : Map K V),
-      Represents m p i L → sparse S E i L = S.subRoot m i p
-  | 0, p, L, m, ⟨hlen, hm⟩ => by
-      have hall : (L.filter fun e => decide (e.1 = [])) = L := by
-        apply List.filter_eq_self.mpr
-        intro e he
-        simpa using List.length_eq_zero_iff.mp (hlen e he)
-      have := hm [] rfl
-      rw [hall, List.append_nil] at this
-      simp only [sparse, Scheme.subRoot, this]
-  | i + 1, p, L, m, ⟨hlen, hm⟩ => by
-      by_cases hL : L.isEmpty
-      · have hnil : L = [] := List.isEmpty_iff.mp hL
-        subst hnil
-        simp only [sparse, List.isEmpty_nil, if_true, hE]
-        rw [← subRoot_empty S (i + 1) p]
-        apply S.subRoot_congr
-        intro q hq
-        simp [hm q hq, Map.empty]
-      · simp only [sparse, hL, Bool.false_eq_true, if_false, Scheme.subRoot]
-        have rep : ∀ b : Bool, Represents m (p ++ [b]) i (L.filterMap (strip b)) := by
-          intro b
-          refine ⟨?_, ?_⟩
-          · intro e he
-            rcases List.mem_filterMap.mp he with ⟨e0, he0, hs⟩
-            rcases e0 with ⟨bits, entry⟩
-            cases bits with
-            | nil => simp [strip] at hs
-            | cons c r =>
-                simp only [strip] at hs
-                split_ifs at hs
-                cases hs
-                have := hlen _ he0
-                simpa using this
-          · intro q hq
-            have h1 := hm (b :: q) (by simp [hq])
-            rw [List.append_assoc, List.singleton_append, h1, ← List.getLast?_map, ← List.getLast?_map,
-              filter_strip]
-        rw [sparse_eq E hE i (p ++ [false]) _ m (rep false),
-          sparse_eq E hE i (p ++ [true]) _ m (rep true)]
-
-/-- The root of an entry list, evaluated sparsely. -/
-def sparseRoot (E : Nat → D) (es : List (K × V)) : D :=
-  sparse S E S.depth (es.map fun e => (S.ix e.1, e))
-
-theorem sparseRoot_eq (E : Nat → D) (hE : ∀ i, E i = empties S i) (es : List (K × V)) :
-    sparseRoot S E es = S.root (slotsOf S.ix es) := by
-  apply sparse_eq S E hE
-  refine ⟨?_, ?_⟩
-  · intro e he
-    rcases List.mem_map.mp he with ⟨e0, _, rfl⟩
-    exact S.ix_length _
-  · intro q _
-    simp only [slotsOf, List.nil_append, List.filter_map, List.map_map, ← List.getLast?_map]
-    congr 1
-    simp only [Function.comp_def, List.map_id']
-    exact List.filter_congr (fun x _ => by simp)
-
-/-- A table of empty-subtree roots, `table[i] = empties i`. -/
-def emptyTable (n : Nat) : Array D :=
-  (List.iterate (fun e => S.nodeHash e e) (S.leafDigest none) n).toArray
-
-theorem empties_iterate : ∀ i, empties S i = (fun e => S.nodeHash e e)^[i] (S.leafDigest none)
-  | 0 => rfl
-  | i + 1 => by rw [Function.iterate_succ_apply', ← empties_iterate i]; rfl
-
-/-- The table-backed lookup that `sparse` runs with. -/
-def tableEmpties (table : Array D) (i : Nat) : D := (table[i]?).getD (empties S i)
-
-theorem tableEmpties_emptyTable (n i : Nat) : tableEmpties S (emptyTable S n) i = empties S i := by
-  unfold tableEmpties emptyTable
-  by_cases hi : i < n
-  · have hlen : i < (List.iterate (fun e => S.nodeHash e e) (S.leafDigest none) n).length := by
-      simpa using hi
-    rw [List.getElem?_toArray, List.getElem?_eq_getElem hlen, List.getElem_iterate, Option.getD_some,
-      empties_iterate]
-  · rw [List.getElem?_toArray, List.getElem?_eq_none (by simpa using hi)]; rfl
-
-end Sparse
-
-/-! ## The root of an entry list, and why it binds -/
-
-section Binding
-
-variable {K C V D : Type} [DecidableEq K] [DecidableEq D] (S : Scheme K V D) (leafRoot : C → V)
-
-/-- A3's two-level `worldRoot` over the slot map of an entry list. -/
-def entryRoot (es : List (K × C)) : D := worldRoot S leafRoot (slotsOf S.ix es)
-
-omit [DecidableEq D] in
-theorem entryRoot_eq_sparse (E : Nat → D) (hE : ∀ i, E i = empties S i) (es : List (K × C)) :
-    entryRoot S leafRoot es = sparseRoot S E (es.map fun e => (e.1, leafRoot e.2)) := by
-  rw [sparseRoot_eq S E hE, entryRoot, worldRoot, worldSlots_slotsOf]
-
-/-- The carrier at a pair of slot maps: at every key, the opening in `m'`
-checked against `m`'s root meets A3's `PathBinding`.  It names, per key, the
-pairs of hash inputs one opening check compares; it is not global injectivity. -/
-def MapBinding (m m' : Map K V) : Prop :=
-  ∀ k, S.PathBinding m k (lookup S.ix m' k) (S.opening m' k)
-
-omit [DecidableEq D] in
-/-- Satisfiable at every hash: a map against itself (A3's `honest_binding`). -/
-theorem mapBinding_self (m : Map K V) : MapBinding S m m := fun k => S.honest_binding m k
-
-/-- Under the carrier, one root means one logical map. -/
-theorem lookup_eq_of_root_eq {m m' : Map K V} (hb : MapBinding S m m')
-    (hr : S.root m = S.root m') (k : K) : lookup S.ix m' k = lookup S.ix m k := by
-  have hv := S.verify_opening m' k
-  rw [← hr] at hv
-  exact S.verify_sound m k _ _ (hb k) hv
-
-/-- With no premise: two maps with one root and different readings at a key
-exhibit two distinct inputs of `H` with one digest. -/
-theorem root_eq_exhibits_collision {m m' : Map K V} (hr : S.root m = S.root m') (k : K)
-    (hne : lookup S.ix m' k ≠ lookup S.ix m k) : ∃ x y, x ≠ y ∧ S.H x = S.H y := by
-  have hv := S.verify_opening m' k
-  rw [← hr] at hv
-  obtain ⟨_, _, x, y, _, hxy, hH⟩ := S.forgery_exhibits_collision m k _ _ hv hne
-  exact ⟨x, y, hxy, hH⟩
-
-end Binding
-
-/-! ## The world instance -/
 
 section WorldRoot
 
 variable {R : Registry} {TxId D : Type} [DecidableEq TxId] [DecidableEq D]
-variable {V Dg : Type} [DecidableEq Dg]
+variable {V Dg : Type} [DecidableEq V] [DecidableEq Dg]
 
 /-- A slot's content: the system cell or a cell. -/
 inductive Slot (R : Registry) (TxId D : Type) [DecidableEq TxId] [DecidableEq D]
@@ -405,9 +177,6 @@ def entries (w : World R TxId D) : List (Key × Slot R TxId D) :=
   (Key.system, .system w.system) ::
     (presentIds w).filterMap fun c => (w.cells c).map fun cell => (Key.cell c, .cell cell)
 
-/-- **The world root.**  A3's `worldRoot` over (slot ↦ slot root). -/
-def rootOf (S : Scheme Key V Dg) (w : World R TxId D) : Dg :=
-  entryRoot S (slotRoot cellRoot sysRoot) (entries w)
 
 /-- The keys the world's entries name. -/
 def keys (w : World R TxId D) : List Key := (entries w).map (·.1)
@@ -434,31 +203,19 @@ theorem mem_keys_cell (w : World R TxId D) (c : CellId) :
       exact ⟨(Key.cell c, Slot.cell cell), ⟨c, (mem_presentIds w c).2 h, by simp [hw]⟩, rfl⟩
 
 /-- Index paths do not collide among one world's keys. -/
-def IndexInjective (S : Scheme Key V Dg) (w : World R TxId D) : Prop :=
-  ∀ k ∈ keys w, ∀ k' ∈ keys w, S.ix k = S.ix k' → k = k'
-
 theorem system_mem_keys (w : World R TxId D) : Key.system ∈ keys w := by
   simp [keys, entries]
 
-/-- A slot map never reads a key no entry carries. -/
-theorem lookup_slotsOf_absent {K C : Type} [DecidableEq K] (ix : K → List Bool)
-    (es : List (K × C)) (k : K) (habs : ∀ e ∈ es, e.1 ≠ k) : lookup ix (slotsOf ix es) k = none := by
-  unfold lookup slotsOf
-  rcases hl : (es.filter fun e => decide (ix e.1 = ix k)).getLast? with _ | ⟨k', x⟩
-  · simp [hl, readAt]
-  · have hm := List.mem_of_getLast? hl
-    simp only [List.mem_filter] at hm
-    simp [hl, readAt, habs _ hm.1]
 
-/-- The world's reading at a slot. -/
-theorem lookup_entries (S : Scheme Key V Dg) (w : World R TxId D) (hix : IndexInjective S w) :
-    ∀ k, lookup S.ix (slotsOf S.ix (entries w)) k =
+/-- The world's reading at a slot: the last entry its entries give the key. -/
+theorem lastVal_entries (w : World R TxId D) :
+    ∀ k, AuthTrie.lastVal (entries w) k =
       match k with
       | .system => some (.system w.system)
       | .cell c => (w.cells c).map .cell := by
   intro k
   by_cases hk : k ∈ keys w
-  · rw [lookup_slotsOf S.ix _ k (fun e he hi => hix e.1 (List.mem_map_of_mem he) k hk hi)]
+  · unfold AuthTrie.lastVal
     cases k with
     | system =>
         simp only [entries, List.filter_cons, decide_true, if_true]
@@ -507,7 +264,14 @@ theorem lookup_entries (S : Scheme Key V Dg) (w : World R TxId D) (hix : IndexIn
             simp [hl] at hin
         · obtain ⟨cell, hw, rfl⟩ := hsub e (List.mem_of_getLast? hl)
           simp [hw, hl]
-  · rw [lookup_slotsOf_absent S.ix _ k (fun e he hek => hk (hek ▸ List.mem_map_of_mem he))]
+  · have absent : AuthTrie.lastVal (entries w) k = none := by
+      cases h : AuthTrie.lastVal (entries w) k with
+      | none => rfl
+      | some x =>
+          exfalso
+          obtain ⟨e, he, hek⟩ := (AuthTrie.lastVal_isSome (es := entries w) (k := k)).mp (by rw [h]; rfl)
+          exact hk (by rw [← hek]; exact List.mem_map_of_mem he)
+    rw [absent]
     cases k with
     | system => exact absurd (system_mem_keys w) hk
     | cell c =>
@@ -515,6 +279,36 @@ theorem lookup_entries (S : Scheme Key V Dg) (w : World R TxId D) (hix : IndexIn
           by_contra h
           exact hk ((mem_keys_cell w c).2 h)
         simp [this]
+
+variable (dig : AuthTrie.NodeIn Key V Dg → Dg) (ix : Key → List Bool) (L : Nat)
+
+/-- The world's slot roots: the system slot, then every present cell. -/
+def slotRoots (w : World R TxId D) : List (Key × V) :=
+  (entries w).map fun e => (e.1, slotRoot cellRoot sysRoot e.2)
+
+/-- **The world root**: the compressed trie over the slot roots. -/
+def rootOf (w : World R TxId D) : Dg := AuthTrie.root dig ix L (slotRoots cellRoot sysRoot w)
+
+omit [DecidableEq V] in
+theorem lastVal_slotRoots (w : World R TxId D) (k : Key) :
+    AuthTrie.lastVal (slotRoots cellRoot sysRoot w) k =
+      (AuthTrie.lastVal (entries w) k).map (slotRoot cellRoot sysRoot) :=
+  AuthTrie.lastVal_map _ _ k
+
+/-- Index paths do not collide among one world's keys. -/
+def IndexInjective (w : World R TxId D) : Prop :=
+  ∀ k ∈ keys w, ∀ k' ∈ keys w, ix k = ix k' → k = k'
+
+omit [DecidableEq V] in
+theorem pathsInjective {w : World R TxId D} (hix : IndexInjective ix w) :
+    AuthTrie.Cache.PathsInjective ix (slotRoots cellRoot sysRoot w) := by
+  have mem : ∀ k, (AuthTrie.lastVal (slotRoots cellRoot sysRoot w) k).isSome → k ∈ keys w := by
+    intro k h
+    obtain ⟨e, he, rfl⟩ := AuthTrie.lastVal_isSome.mp h
+    obtain ⟨x, hx, rfl⟩ := List.mem_map.mp he
+    exact List.mem_map_of_mem hx
+  intro k k' hk hk' same
+  exact hix k (mem k hk) k' (mem k' hk') same
 
 theorem world_ext {w w' : World R TxId D} (hc : ∀ c, w.cells c = w'.cells c)
     (hs : w.system = w'.system) : w = w' := by
@@ -526,150 +320,230 @@ theorem world_ext {w w' : World R TxId D} (hc : ∀ c, w.cells c = w'.cells c)
   subst this
   rfl
 
-/-- Two worlds with the same slot-root reading at every key, no index
-collision in either, and leaf roots that separate their contents, are equal. -/
-theorem eq_of_lookups (S : Scheme Key V Dg) {w w' : World R TxId D}
-    (hix : IndexInjective S w) (hix' : IndexInjective S w')
+omit [DecidableEq V] in
+/-- Two worlds giving every key the same slot root, whose leaf roots separate
+their contents, are equal. -/
+theorem eq_of_lastVals {w w' : World R TxId D}
     (cells : ∀ c a b, w.cells c = some a → w'.cells c = some b → cellRoot a = cellRoot b → a = b)
     (system : sysRoot w.system = sysRoot w'.system → w.system = w'.system)
-    (hl : ∀ k, lookup S.ix (worldSlots (slotRoot cellRoot sysRoot) (slotsOf S.ix (entries w'))) k =
-      lookup S.ix (worldSlots (slotRoot cellRoot sysRoot) (slotsOf S.ix (entries w))) k) :
+    (hl : ∀ k, AuthTrie.lastVal (slotRoots cellRoot sysRoot w') k =
+      AuthTrie.lastVal (slotRoots cellRoot sysRoot w) k) :
     w = w' := by
-  have read : ∀ k, (lookup S.ix (slotsOf S.ix (entries w')) k).map (slotRoot cellRoot sysRoot) =
-      (lookup S.ix (slotsOf S.ix (entries w)) k).map (slotRoot cellRoot sysRoot) := by
+  have read : ∀ k, (AuthTrie.lastVal (entries w') k).map (slotRoot cellRoot sysRoot) =
+      (AuthTrie.lastVal (entries w) k).map (slotRoot cellRoot sysRoot) := by
     intro k
     have := hl k
-    rwa [lookup_worldSlots, lookup_worldSlots] at this
+    rwa [lastVal_slotRoots, lastVal_slotRoots] at this
   refine world_ext (fun c => ?_) ?_
   · have := read (Key.cell c)
-    rw [lookup_entries S w hix, lookup_entries S w' hix'] at this
+    rw [lastVal_entries w, lastVal_entries w'] at this
     rcases ha : w.cells c with _ | a <;> rcases hb : w'.cells c with _ | b <;>
       simp only [ha, hb, Option.map_none, Option.map_some, reduceCtorEq, Option.some.injEq,
         slotRoot] at this ⊢
     exact (cells c a b ha hb this.symm)
   · have := read Key.system
-    rw [lookup_entries S w hix, lookup_entries S w' hix'] at this
+    rw [lastVal_entries w, lastVal_entries w'] at this
     simp only [Option.map_some, Option.some.injEq, slotRoot] at this
     exact system this.symm
 
 /-- **The carrier** for comparing two worlds by root.  Each field names only
 the pairs the comparison uses:
-* `paths` — A3's `PathBinding` at every key, between the two slot-root maps;
-* `index`, `index'` — no two keys of one world share an index path;
+* `openings` — at every key, the honest opening of `w'`, checked against `w`'s
+  root, reads what `w` reads (the node inputs one opening check compares);
+* `index'` — no two keys of `w'` share an index path (so its honest openings exist);
 * `cells`, `system` — the leaf roots separate the two worlds' contents at the
   same slot. -/
-structure RootBinding (S : Scheme Key V Dg) (w w' : World R TxId D) : Prop where
-  paths : MapBinding S (worldSlots (slotRoot cellRoot sysRoot) (slotsOf S.ix (entries w)))
-    (worldSlots (slotRoot cellRoot sysRoot) (slotsOf S.ix (entries w')))
-  index : IndexInjective S w
-  index' : IndexInjective S w'
+structure RootBinding (lengths : ∀ k, (ix k).length = L) (w w' : World R TxId D) : Prop where
+  openings : ∀ k, AuthTrie.verify dig ix (rootOf cellRoot sysRoot dig ix L w) k
+      (AuthTrie.lastVal (slotRoots cellRoot sysRoot w') k)
+      ((AuthTrie.Cache.build (dig := dig) lengths (slotRoots cellRoot sysRoot w')).opening k) = true →
+    AuthTrie.lastVal (slotRoots cellRoot sysRoot w') k = AuthTrie.lastVal (slotRoots cellRoot sysRoot w) k
+  index' : IndexInjective ix w'
   cells : ∀ c a b, w.cells c = some a → w'.cells c = some b → cellRoot a = cellRoot b → a = b
   system : sysRoot w.system = sysRoot w'.system → w.system = w'.system
 
 /-- **Binding.**  Under the carrier, equal world roots mean equal worlds. -/
-theorem rootOf_binds (S : Scheme Key V Dg) {w w' : World R TxId D}
-    (hb : RootBinding cellRoot sysRoot S w w')
-    (hr : rootOf cellRoot sysRoot S w = rootOf cellRoot sysRoot S w') : w = w' :=
-  eq_of_lookups cellRoot sysRoot S hb.index hb.index' hb.cells hb.system
-    (lookup_eq_of_root_eq S hb.paths hr)
+theorem rootOf_binds (lengths : ∀ k, (ix k).length = L) {w w' : World R TxId D}
+    (hb : RootBinding cellRoot sysRoot dig ix L lengths w w')
+    (hr : rootOf cellRoot sysRoot dig ix L w = rootOf cellRoot sysRoot dig ix L w') : w = w' := by
+  refine eq_of_lastVals cellRoot sysRoot hb.cells hb.system (fun k => hb.openings k ?_)
+  have built := AuthTrie.Cache.build_holds (dig := dig) lengths (slotRoots cellRoot sysRoot w')
+  have opened := AuthTrie.Cache.opening_complete lengths built
+    (pathsInjective cellRoot sysRoot ix hb.index') k
+  have root : (AuthTrie.Cache.build (dig := dig) lengths (slotRoots cellRoot sysRoot w')).digest =
+      rootOf cellRoot sysRoot dig ix L w := (AuthTrie.Cache.digest_eq built).trans hr.symm
+  rwa [root] at opened
 
 /-- **Satisfiable at every hash:** a world against itself meets the carrier
 whenever its own keys do not collide in the index. -/
-theorem rootBinding_self (S : Scheme Key V Dg) (w : World R TxId D) (hix : IndexInjective S w) :
-    RootBinding cellRoot sysRoot S w w where
-  paths := mapBinding_self S _
-  index := hix
+theorem rootBinding_self (lengths : ∀ k, (ix k).length = L) (w : World R TxId D)
+    (hix : IndexInjective ix w) : RootBinding cellRoot sysRoot dig ix L lengths w w where
+  openings := fun _ _ => rfl
   index' := hix
-  cells := fun _ a b ha hb _ => Option.some.inj (ha.symm.trans hb)
+  cells := fun _ _ _ ha hb _ => Option.some.inj (ha.symm.trans hb)
   system := fun _ => rfl
 
+/-- The carrier holds when no two node inputs share a digest and neither
+world's keys collide in the index. -/
+theorem rootBinding_of_noCollision (lengths : ∀ k, (ix k).length = L) {w w' : World R TxId D}
+    (nodes : ¬ AuthTrie.Collision dig) (hix : IndexInjective ix w) (hix' : IndexInjective ix w')
+    (cells : ∀ c a b, w.cells c = some a → w'.cells c = some b → cellRoot a = cellRoot b → a = b)
+    (system : sysRoot w.system = sysRoot w'.system → w.system = w'.system) :
+    RootBinding cellRoot sysRoot dig ix L lengths w w' where
+  openings := fun k accepted => by
+    rcases AuthTrie.verify_sound dig ix L lengths _
+        (AuthTrie.Cache.wf_canon lengths (pathsInjective cellRoot sysRoot ix hix)) k _ _ accepted with
+      read | collision
+    · rwa [AuthTrie.Cache.lookup_canon] at read
+    · exact absurd collision nodes
+  index' := hix'
+  cells := cells
+  system := system
+
 /-- **The reduction, with no premise.**  Different worlds with one root exhibit
-one of: two distinct inputs of `H` with one digest; two keys of one world at one
+one of: two distinct node inputs with one digest; two keys of one world at one
 index path; two different cells at one id with one cell root; two different
 system cells with one system root. -/
-theorem rootOf_eq_exhibits_collision (S : Scheme Key V Dg) {w w' : World R TxId D}
-    (hr : rootOf cellRoot sysRoot S w = rootOf cellRoot sysRoot S w') (hne : w ≠ w') :
-    (∃ x y, x ≠ y ∧ S.H x = S.H y) ∨ ¬ IndexInjective S w ∨ ¬ IndexInjective S w' ∨
+theorem rootOf_eq_exhibits_collision (lengths : ∀ k, (ix k).length = L) {w w' : World R TxId D}
+    (hr : rootOf cellRoot sysRoot dig ix L w = rootOf cellRoot sysRoot dig ix L w') (hne : w ≠ w') :
+    AuthTrie.Collision dig ∨ ¬ IndexInjective ix w ∨ ¬ IndexInjective ix w' ∨
       (∃ c a b, w.cells c = some a ∧ w'.cells c = some b ∧ a ≠ b ∧ cellRoot a = cellRoot b) ∨
       (w.system ≠ w'.system ∧ sysRoot w.system = sysRoot w'.system) := by
   by_contra hno
   simp only [not_or, not_exists, not_and, not_not] at hno
   obtain ⟨hH, hix, hix', hcells, hsys⟩ := hno
-  apply hne
-  refine eq_of_lookups cellRoot sysRoot S hix hix'
-    (fun c a b ha hb he => by_contra fun hab => hcells c a b ha hb hab he)
-    (fun he => by_contra fun hs => hsys hs he) (fun k => ?_)
-  by_contra hk
-  obtain ⟨x, y, hxy, hxyH⟩ := root_eq_exhibits_collision S hr k hk
-  exact hH x y hxy hxyH
+  exact hne (rootOf_binds cellRoot sysRoot dig ix L lengths
+    (rootBinding_of_noCollision cellRoot sysRoot dig ix L lengths hH hix hix'
+      (fun c a b ha hb he => by_contra fun hab => hcells c a b ha hb hab he)
+      (fun he => by_contra fun hs => hsys hs he)) hr)
 
 /-- **Checkpoint soundness at the world root (§4.4).**  `Kernel.World.resume_sound`
 with the root supplied and its `binds` premise discharged by the carrier. -/
-theorem resume_sound_rootOf {Ev : Type} (H : History R TxId Ev D) (S : Scheme Key V Dg)
+theorem resume_sound_rootOf {Ev : Type} (H : History R TxId Ev D) (lengths : ∀ k, (ix k).length = L)
     (g W_h : World R TxId D) (log : List (Turn R TxId Ev D)) (c : Checkpoint R TxId D Dg)
     (prefixed : fold H g (log.take c.height) = some W_h)
-    (honestRoot : c.root = rootOf cellRoot sysRoot S W_h)
-    (carrier : RootBinding cellRoot sysRoot S c.world W_h)
-    (checks : c.check (rootOf cellRoot sysRoot S) = true) :
-    c.resume H (rootOf cellRoot sysRoot S) (log.drop c.height) = fold H g log :=
-  resume_sound H (rootOf cellRoot sysRoot S) g W_h log c prefixed honestRoot
-    (rootOf_binds cellRoot sysRoot S carrier) checks
+    (honestRoot : c.root = rootOf cellRoot sysRoot dig ix L W_h)
+    (carrier : RootBinding cellRoot sysRoot dig ix L lengths c.world W_h)
+    (checks : c.check (rootOf cellRoot sysRoot dig ix L) = true) :
+    c.resume H (rootOf cellRoot sysRoot dig ix L) (log.drop c.height) = fold H g log :=
+  resume_sound H (rootOf cellRoot sysRoot dig ix L) g W_h log c prefixed honestRoot
+    (rootOf_binds cellRoot sysRoot dig ix L lengths carrier) checks
 
 end WorldRoot
 
-/-! ## The deployed scheme -/
+/-! ## The deployed root -/
 
 section Deployed
 
 open Minidregg.Compiler.Sp800185Cshake256
 
-def worldCustomization : List UInt8 := "DREGG.WORLD-ROOT/v1".toUTF8.toList
+/-- The registered world-root tag (`PersistedCodecTags.world_root_v2`): it enters the persisted
+codec corpus, so the Store epoch's schema component moves with it and a Store of the v1 root
+refuses to open naming `schema-refs`. -/
+def worldCustomization : List UInt8 := Minidregg.Compiler.PersistedCodecTags.world_root_v2.toUTF8.toList
 
 /-- The deployed hash: cSHAKE256 under the world-root customization. -/
 def deployedHash (x : List UInt8) : Digest := (hash worldCustomization x).digest
 
+/-- A node of the deployed trie: keys, slot-root digests, child digests. -/
+abbrev Node := AuthTrie.NodeIn Key Digest Digest
+
+/-- A node's hash input: a tag byte, then its fields, each prefix-free. -/
+def nodeBytes : Node → List UInt8
+  | .empty => [0]
+  | .leaf k v => 1 :: (keyBytes k ++ digestStream.encode v)
+  | .branch l r => 2 :: (digestStream.encode l ++ digestStream.encode r)
+
+theorem nodeBytes_injective : Function.Injective nodeBytes := by
+  intro a b h
+  cases a with
+  | empty => cases b <;> simp_all [nodeBytes]
+  | leaf k v =>
+      cases b with
+      | empty => simp [nodeBytes] at h
+      | branch => simp [nodeBytes] at h
+      | leaf k' v' =>
+          simp only [nodeBytes, List.cons.injEq, true_and] at h
+          obtain ⟨hk, hv⟩ := keyBytes_prefixFree k k' _ _ h
+          rw [hk, (streamPrefixFree digestStream).injective hv]
+  | branch l r =>
+      cases b with
+      | empty => simp [nodeBytes] at h
+      | leaf => simp [nodeBytes] at h
+      | branch l' r' =>
+          simp only [nodeBytes, List.cons.injEq, true_and] at h
+          obtain ⟨hl, hr⟩ := streamPrefixFree digestStream l l' _ _ h
+          rw [hl, (streamPrefixFree digestStream).injective hr]
+
+/-- The empty node's digest, computed once. -/
+def emptyDigest : Digest := deployedHash (nodeBytes .empty)
+
+/-- **The deployed node hash.** -/
+def worldDig : Node → Digest
+  | .empty => emptyDigest
+  | .leaf k v => deployedHash (nodeBytes (.leaf k v))
+  | .branch l r => deployedHash (nodeBytes (.branch l r))
+
+theorem worldDig_eq : ∀ n : Node, worldDig n = deployedHash (nodeBytes n)
+  | .empty => rfl
+  | .leaf .. => rfl
+  | .branch .. => rfl
+
+/-- A node collision is a collision of the deployed hash on two distinct inputs. -/
+theorem worldDig_collision (h : AuthTrie.Collision worldDig) :
+    ∃ x y, x ≠ y ∧ deployedHash x = deployedHash y := by
+  obtain ⟨a, b, hne, heq⟩ := h
+  exact ⟨nodeBytes a, nodeBytes b, fun e => hne (nodeBytes_injective e), by
+    rwa [worldDig_eq, worldDig_eq] at heq⟩
+
 /-- A3's Q2 index: the 256 bits of the hash of the tagged key bytes. -/
 def deployedIx (k : Key) : List Bool := bytesBits (cshake256Bytes worldCustomization (3 :: keyBytes k))
 
-def deployed : Scheme Key Digest Digest where
-  H := deployedHash
-  digestBytes := digestStream.encode
-  keyBytes := keyBytes
-  valBytes := digestStream.encode
-  digestBytes_prefixFree := streamPrefixFree digestStream
-  keyBytes_prefixFree := keyBytes_prefixFree
-  valBytes_injective := (streamPrefixFree digestStream).injective
-  depth := 256
-  ix := deployedIx
-  ix_length := fun k => by simp [deployedIx, bytesBits_length]
+theorem deployedIx_length (k : Key) : (deployedIx k).length = 256 := by
+  simp [deployedIx, bytesBits_length]
 
 /-- An index collision of two distinct keys is a collision of the deployed hash
 on two distinct inputs. -/
 theorem deployedIx_collision {k k' : Key} (hne : k ≠ k') (h : deployedIx k = deployedIx k') :
     (3 :: keyBytes k) ≠ (3 :: keyBytes k') ∧
-      deployed.H (3 :: keyBytes k) = deployed.H (3 :: keyBytes k') := by
+      deployedHash (3 :: keyBytes k) = deployedHash (3 :: keyBytes k') := by
   refine ⟨fun e => hne (keyBytes_prefixFree.injective (List.cons.inj e).2), ?_⟩
   have hb := bytesBits_injective h
   show digestOfBytesLE (cshake256Bytes worldCustomization (3 :: keyBytes k)) =
     digestOfBytesLE (cshake256Bytes worldCustomization (3 :: keyBytes k'))
   rw [hb]
 
-/-- The empty-subtree roots of the deployed scheme, computed once. -/
-def deployedTable : Array Digest := emptyTable deployed (deployed.depth + 1)
+/-- **The deployed root** of an entry list of slot roots: the compressed trie
+over each key's last value. -/
+def deployedRoot (es : List (Key × Digest)) : Digest := AuthTrie.root worldDig deployedIx 256 es
 
-/-- The deployed root of an entry list of slot roots, evaluated sparsely. -/
-def deployedRoot (es : List (Key × Digest)) : Digest :=
-  sparseRoot deployed (tableEmpties deployed deployedTable) es
+/-- The deployed root depends only on each key's last value. -/
+theorem deployedRoot_congr {es es' : List (Key × Digest)}
+    (same : ∀ k, AuthTrie.lastVal es k = AuthTrie.lastVal es' k) : deployedRoot es = deployedRoot es' :=
+  AuthTrie.root_congr worldDig deployedIx 256 same
 
-theorem deployedRoot_eq (es : List (Key × Digest)) :
-    deployedRoot es = deployed.root (slotsOf deployed.ix es) :=
-  sparseRoot_eq deployed _ (tableEmpties_emptyTable deployed _) es
+/-- Distinct keys of any list have distinct paths, up to a deployed-hash collision. -/
+theorem deployed_paths (es : List (Key × Digest)) :
+    AuthTrie.Cache.PathsInjective deployedIx es ∨ ∃ x y, x ≠ y ∧ deployedHash x = deployedHash y := by
+  by_cases h : AuthTrie.Cache.PathsInjective deployedIx es
+  · exact Or.inl h
+  · right
+    simp only [AuthTrie.Cache.PathsInjective, not_forall] at h
+    obtain ⟨k, k', _, _, same, hne⟩ := h
+    exact ⟨_, _, deployedIx_collision hne same⟩
 
-/-- The deployed root is A3's two-level `worldRoot` over any entry list and leaf
-root function, evaluated sparsely. -/
-theorem entryRoot_deployed {C : Type} (leafRoot : C → Digest) (es : List (Key × C)) :
-    entryRoot deployed leafRoot es = deployedRoot (es.map fun e => (e.1, leafRoot e.2)) :=
-  entryRoot_eq_sparse deployed leafRoot _ (tableEmpties_emptyTable deployed _) es
+/-- **Binding of the deployed root, premise-free.**  Two lists with one deployed
+root give every key the same last value, or the deployed hash collides. -/
+theorem deployedRoot_binds {es es' : List (Key × Digest)} (hr : deployedRoot es = deployedRoot es')
+    (k : Key) :
+    AuthTrie.lastVal es' k = AuthTrie.lastVal es k ∨ ∃ x y, x ≠ y ∧ deployedHash x = deployedHash y := by
+  rcases deployed_paths es with inj | c
+  · rcases deployed_paths es' with inj' | c
+    · rcases AuthTrie.Cache.root_lastVal_eq deployedIx_length inj inj' hr k with same | c
+      · exact Or.inl same
+      · exact Or.inr (worldDig_collision c)
+    · exact Or.inr c
+  · exact Or.inr c
 
 end Deployed
 
@@ -720,45 +594,15 @@ namespace Example
 
 open Minidregg.Kernel.World.Example
 
-theorem prefixFree_comp {α β : Type} {f : β → List UInt8} {g : α → β} (hf : PrefixFree f)
-    (hg : Function.Injective g) : PrefixFree (f ∘ g) := by
-  intro a b s t h
-  obtain ⟨hab, hst⟩ := hf _ _ s t h
-  exact ⟨hg hab, hst⟩
-
-def toyNatRender (n : Nat) : List UInt8 := List.replicate n 0
-
-theorem toyNatRender_injective : Function.Injective toyNatRender := by
-  intro a b h
-  simpa [toyNatRender] using congrArg List.length h
-
-def toyKeyRender : Key → List UInt8
-  | .system => []
-  | .cell c => List.replicate (c + 1) 0
-
-theorem toyKeyRender_injective : Function.Injective toyKeyRender := by
-  intro a b h
-  have hl := congrArg List.length h
-  cases a <;> cases b <;> simp_all [toyKeyRender]
-
 /-- Two index bits: the system slot at `00`, cells 0, 1, 2 at `01`, `10`, `11`. -/
 def toyIx : Key → List Bool
   | .system => [false, false]
   | .cell c => [decide ((c + 1) / 2 % 2 = 1), decide ((c + 1) % 2 = 1)]
 
-/-- A toy scheme at a one-bit hash (the parity of the input length):
-deliberately NOT binding. -/
-def toyScheme : Scheme Key Nat Nat where
-  H := fun bs => bs.length % 2
-  digestBytes := unaryFrame ∘ toyNatRender
-  keyBytes := unaryFrame ∘ toyKeyRender
-  valBytes := unaryFrame ∘ toyNatRender
-  digestBytes_prefixFree := prefixFree_comp unaryFrame_prefixFree toyNatRender_injective
-  keyBytes_prefixFree := prefixFree_comp unaryFrame_prefixFree toyKeyRender_injective
-  valBytes_injective := (prefixFree_comp unaryFrame_prefixFree toyNatRender_injective).injective
-  depth := 2
-  ix := toyIx
-  ix_length := fun k => by cases k <;> rfl
+theorem toyIx_length (k : Key) : (toyIx k).length = 2 := by cases k <;> rfl
+
+/-- A constant node hash: deliberately NOT binding. -/
+def toyDig : AuthTrie.NodeIn Key Nat Nat → Nat := fun _ => 0
 
 /-- A cell's toy root: its value at key 0. -/
 def toyCellRoot (cell : Cell toyR) : Nat :=
@@ -768,9 +612,9 @@ def toyCellRoot (cell : Cell toyR) : Nat :=
 def toySysRoot (s : Store (sysLayout Nat Nat)) : Nat :=
   ((s ⟨SysSpace.head, ()⟩).map fun hv => hv.1).getD 0
 
-abbrev toyRootOf : ToyWorld → Nat := rootOf toyCellRoot toySysRoot toyScheme
+abbrev toyRootOf : ToyWorld → Nat := rootOf toyCellRoot toySysRoot toyDig toyIx 2
 
-theorem w1_index : IndexInjective toyScheme w1 := by unfold IndexInjective; decide +kernel
+theorem w1_index : IndexInjective toyIx w1 := by unfold IndexInjective; decide +kernel
 
 def honestCk : Checkpoint toyR Nat Nat Nat := ⟨1, w1, toyRootOf w1⟩
 
@@ -780,8 +624,9 @@ theorem honest_checkpoint_resumes :
     honestCk.check toyRootOf = true ∧
       honestCk.resume toyH toyRootOf (log2.drop honestCk.height) = fold toyH g log2 :=
   ⟨by decide +kernel,
-    resume_sound_rootOf toyCellRoot toySysRoot toyH toyScheme g w1 log2 honestCk w1_prefix rfl
-      (rootBinding_self toyCellRoot toySysRoot toyScheme w1 w1_index) (by decide +kernel)⟩
+    resume_sound_rootOf toyCellRoot toySysRoot toyDig toyIx 2 toyH toyIx_length g w1 log2 honestCk
+      w1_prefix rfl (rootBinding_self toyCellRoot toySysRoot toyDig toyIx 2 toyIx_length w1 w1_index)
+      (by decide +kernel)⟩
 
 theorem tampered_root_eq : toyRootOf tamperedWorld = toyRootOf w1 := by decide +kernel
 
@@ -795,9 +640,9 @@ theorem tampered_checkpoint_accepted :
     tamperedCk.check toyRootOf = true ∧
       ((tamperedCk.resume toyH toyRootOf (log2.drop 1)).map fun w => val w 1) ≠
         (fold toyH g log2).map (fun w => val w 1) ∧
-      ¬ RootBinding toyCellRoot toySysRoot toyScheme tamperedWorld w1 := by
+      ¬ RootBinding toyCellRoot toySysRoot toyDig toyIx 2 toyIx_length tamperedWorld w1 := by
   refine ⟨by decide +kernel, by decide +kernel, fun hb => ?_⟩
-  have heq := rootOf_binds toyCellRoot toySysRoot toyScheme hb tampered_root_eq
+  have heq := rootOf_binds toyCellRoot toySysRoot toyDig toyIx 2 toyIx_length hb tampered_root_eq
   have hv : val tamperedWorld 1 ≠ val w1 1 := by decide +kernel
   exact hv (by rw [heq])
 
@@ -805,83 +650,32 @@ end Example
 
 /-! ## Axiom pins -/
 
-/-- info: 'Minidregg.Kernel.WorldRoot.streamPrefixFree' depends on axioms: [propext] -/
-#guard_msgs (whitespace := lax) in #print axioms streamPrefixFree
-/-- info: 'Minidregg.Kernel.WorldRoot.keyBytes_prefixFree' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms keyBytes_prefixFree
-/-- info: 'Minidregg.Kernel.WorldRoot.byteBits_injective' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms byteBits_injective
-/-- info: 'Minidregg.Kernel.WorldRoot.bytesBits_injective' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms bytesBits_injective
-/-- info: 'Minidregg.Kernel.WorldRoot.slotsOf_wf' depends on axioms: [propext] -/
-#guard_msgs (whitespace := lax) in #print axioms slotsOf_wf
-/-- info: 'Minidregg.Kernel.WorldRoot.lookup_slotsOf' depends on axioms: [propext] -/
-#guard_msgs (whitespace := lax) in #print axioms lookup_slotsOf
-/-- info: 'Minidregg.Kernel.WorldRoot.lookup_slotsOf_absent' depends on axioms: [propext] -/
-#guard_msgs (whitespace := lax) in #print axioms lookup_slotsOf_absent
-/-- info: 'Minidregg.Kernel.WorldRoot.worldSlots_slotsOf' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms worldSlots_slotsOf
-/-- info: 'Minidregg.Kernel.WorldRoot.subRoot_empty' depends on axioms: [propext] -/
-#guard_msgs (whitespace := lax) in #print axioms subRoot_empty
-/-- info: 'Minidregg.Kernel.WorldRoot.filter_strip' depends on axioms: [propext] -/
-#guard_msgs (whitespace := lax) in #print axioms filter_strip
-/-- info: 'Minidregg.Kernel.WorldRoot.sparse_eq' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms sparse_eq
-/-- info: 'Minidregg.Kernel.WorldRoot.sparseRoot_eq' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms sparseRoot_eq
-/-- info: 'Minidregg.Kernel.WorldRoot.empties_iterate' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms empties_iterate
-/-- info: 'Minidregg.Kernel.WorldRoot.tableEmpties_emptyTable' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms tableEmpties_emptyTable
-/-- info: 'Minidregg.Kernel.WorldRoot.entryRoot_eq_sparse' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms entryRoot_eq_sparse
-/-- info: 'Minidregg.Kernel.WorldRoot.mapBinding_self' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms mapBinding_self
-/-- info: 'Minidregg.Kernel.WorldRoot.lookup_eq_of_root_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms lookup_eq_of_root_eq
-/-- info: 'Minidregg.Kernel.WorldRoot.root_eq_exhibits_collision' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms root_eq_exhibits_collision
-/-- info: 'Minidregg.Kernel.WorldRoot.mem_presentIds' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms mem_presentIds
-/-- info: 'Minidregg.Kernel.WorldRoot.mem_keys_cell' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms mem_keys_cell
-/-- info: 'Minidregg.Kernel.WorldRoot.system_mem_keys' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms system_mem_keys
-/-- info: 'Minidregg.Kernel.WorldRoot.lookup_entries' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms lookup_entries
-/-- info: 'Minidregg.Kernel.WorldRoot.world_ext' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms world_ext
-/-- info: 'Minidregg.Kernel.WorldRoot.eq_of_lookups' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms eq_of_lookups
-/-- info: 'Minidregg.Kernel.WorldRoot.rootOf_binds' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms rootOf_binds
-/-- info: 'Minidregg.Kernel.WorldRoot.rootBinding_self' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms rootBinding_self
-/-- info: 'Minidregg.Kernel.WorldRoot.rootOf_eq_exhibits_collision' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms rootOf_eq_exhibits_collision
-/-- info: 'Minidregg.Kernel.WorldRoot.resume_sound_rootOf' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms resume_sound_rootOf
-/-- info: 'Minidregg.Kernel.WorldRoot.deployedIx_collision' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms deployedIx_collision
-/-- info: 'Minidregg.Kernel.WorldRoot.deployedRoot_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms deployedRoot_eq
-/-- info: 'Minidregg.Kernel.WorldRoot.entryRoot_deployed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms entryRoot_deployed
-/-- info: 'Minidregg.Kernel.WorldRoot.cshakeHistory_separates' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms cshakeHistory_separates
-/-- info: 'Minidregg.Kernel.WorldRoot.Example.prefixFree_comp' does not depend on any axioms -/
-#guard_msgs (whitespace := lax) in #print axioms Example.prefixFree_comp
-/-- info: 'Minidregg.Kernel.WorldRoot.Example.toyNatRender_injective' depends on axioms: [propext] -/
-#guard_msgs (whitespace := lax) in #print axioms Example.toyNatRender_injective
-/-- info: 'Minidregg.Kernel.WorldRoot.Example.toyKeyRender_injective' depends on axioms: [propext] -/
-#guard_msgs (whitespace := lax) in #print axioms Example.toyKeyRender_injective
-/-- info: 'Minidregg.Kernel.WorldRoot.Example.w1_index' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Example.w1_index
-/-- info: 'Minidregg.Kernel.WorldRoot.Example.honest_checkpoint_resumes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Example.honest_checkpoint_resumes
-/-- info: 'Minidregg.Kernel.WorldRoot.Example.tampered_root_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Example.tampered_root_eq
-/-- info: 'Minidregg.Kernel.WorldRoot.Example.tampered_checkpoint_accepted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Example.tampered_checkpoint_accepted
+#assert_axioms streamPrefixFree
+#assert_axioms keyBytes_prefixFree
+#assert_axioms byteBits_injective
+#assert_axioms bytesBits_injective
+#assert_axioms mem_presentIds
+#assert_axioms mem_keys_cell
+#assert_axioms system_mem_keys
+#assert_axioms lastVal_entries
+#assert_axioms pathsInjective
+#assert_axioms world_ext
+#assert_axioms eq_of_lastVals
+#assert_axioms rootOf_binds
+#assert_axioms rootBinding_self
+#assert_axioms rootBinding_of_noCollision
+#assert_axioms rootOf_eq_exhibits_collision
+#assert_axioms resume_sound_rootOf
+#assert_axioms nodeBytes_injective
+#assert_axioms worldDig_collision
+#assert_axioms deployedIx_collision
+#assert_axioms deployedRoot_congr
+#assert_axioms deployed_paths
+#assert_axioms deployedRoot_binds
+#assert_axioms cshakeHistory_separates
+#assert_axioms Example.w1_index
+#assert_axioms Example.honest_checkpoint_resumes
+#assert_axioms Example.tampered_root_eq
+#assert_axioms Example.tampered_checkpoint_accepted
 
 end Minidregg.Kernel.WorldRoot

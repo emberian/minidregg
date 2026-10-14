@@ -128,11 +128,11 @@ import Kernel.ObjectiveTurnTotalityStorage  -- exact full-image receiver charge 
 import Kernel.HostRefinesWorld  -- T3/T3b: Represents : Loaded -> World; ofIntent_run; deployed_refines_step; host_trace_represents_fold; confirmed_represents (rebase included); policy_source_birth_is_turn; birth_rom_image; poles appendOnly_rewrite_has_no_turn, policy_source_rewrite_has_no_turn; host_submit_is_step stated for T4
 import Kernel.DurableCheckpoint -- DATAMODEL C2: resume from a materialized checkpoint; honest resume = genesis replay
 import Kernel.DurableView -- KN2: executing against a per-request view; declared-key families
-import Kernel.WorldRoot  -- DATAMODEL §3.2/§3.4 C1: world root = AuthMap two-level root over (slot -> slot root), sparse evaluator = Scheme.root, RootBinding carrier discharging resume_sound, explicit-collision reduction, deployed cSHAKE scheme (256-bit hashed index), cSHAKE History; honest/tampered poles
+import Kernel.WorldRoot  -- DATAMODEL §3.2/§3.4 C1: world root = AuthTrie compressed trie over (slot -> slot root), last value per key; RootBinding carrier discharging resume_sound, explicit-collision reduction, deployed cSHAKE node hash WORLD-ROOT/v2 (256-bit hashed index), deployedRoot_binds premise-free up to a cSHAKE collision, cSHAKE History; honest/tampered poles
 import Kernel.DocumentHistory  -- K-DOC-HISTORY: doc diff = DocumentHistory.diff over the two doc show line lists (added_iff, removed_iff, changed_iff)
 import Kernel.PresenceIndex  -- PLACE K-INDEX: lastSeen (cell, subject) and touched cell as exact folds of the accepted log (lastSeen_exact, touched_exact, index_monotone)
 import Kernel.LinkIndex  -- K-DOC-INDEX: links and backlinks as an exact fold of the accepted log (ofRecords_exact, backlinks_sound, backlinks_complete, backlinks_covered)
-import Kernel.WorldRootCache -- C2: the world root cached, one path per write; cache = spec root (insertWrite_root, deployedOf_root), stale cache refuted
+import Kernel.WorldRootCache -- C2: the world root kept (RootCache = AuthTrie.Cache): one walk per write, RootsExact a Prop, no injectivity flag or fallback rebuild; cache = spec root, honest openings verify, stale cache refuted
 import Kernel.ApplicationGrainLaws
 import Kernel.ApplicationLifecycleBeginCheck
 import Kernel.ApplicationLifecycleClaimPolicyCheck

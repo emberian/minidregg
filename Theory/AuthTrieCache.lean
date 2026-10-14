@@ -589,6 +589,34 @@ theorem lastVal_snoc (es : List (K × V)) (e : K × V) (k : K) :
   rw [lastVal_append]
   by_cases h : e.1 = k <;> simp [lastVal, h]
 
+theorem lastVal_isSome {es : List (K × V)} {k : K} :
+    (lastVal es k).isSome ↔ ∃ e ∈ es, e.1 = k := by
+  unfold lastVal
+  rw [Option.isSome_map]
+  constructor
+  · intro h
+    obtain ⟨x, hx⟩ := Option.isSome_iff_exists.mp h
+    have hm := List.mem_of_getLast? hx
+    rw [List.mem_filter, decide_eq_true_eq] at hm
+    exact ⟨x, hm.1, hm.2⟩
+  · rintro ⟨e, he, hk⟩
+    rw [Option.isSome_iff_ne_none, Ne, List.getLast?_eq_none_iff]
+    exact List.ne_nil_of_mem (List.mem_filter.mpr ⟨he, by simpa using hk⟩)
+
+theorem lastVal_cons (e : K × V) (es : List (K × V)) (k : K) :
+    lastVal (e :: es) k = (lastVal es k).or (if e.1 = k then some e.2 else none) := by
+  have := lastVal_append [e] es k
+  rw [List.singleton_append] at this
+  rw [this]
+  by_cases h : e.1 = k <;> simp [lastVal, h]
+
+/-- Mapping the values maps every key's last value. -/
+theorem lastVal_map {C : Type} (f : V → C) (es : List (K × V)) (k : K) :
+    lastVal (es.map fun e => (e.1, f e.2)) k = (lastVal es k).map f := by
+  unfold lastVal
+  rw [List.filter_map, List.getLast?_map, Option.map_map, Option.map_map]
+  rfl
+
 /-- One entry per key, its last value. -/
 def canon (es : List (K × V)) : List (K × V) := es.foldl (fun L e => dropKey e.1 L ++ [e]) []
 
@@ -857,6 +885,11 @@ variable {K V D : Type} [DecidableEq K] [DecidableEq V] [DecidableEq D] {dig : N
 /-- The honest opening of key `k`, read off the kept trie (no hashing). -/
 def opening (cache : Cache dig bitsOf L) (k : K) : Opening K V D := cache.trie.opening dig (bitsOf k)
 
+/-- An opening has at most one sibling per path bit. -/
+theorem opening_length (lengths : ∀ k, (bitsOf k).length = L) (cache : Cache dig bitsOf L) (k : K) :
+    (cache.opening k).siblings.length ≤ L :=
+  (Trie.opening_climb dig L (bitsOf k) cache.trie cache.inv (lengths k)).1
+
 /-- No two keys the list gives a value share a path. -/
 def PathsInjective (bitsOf : K → List Bool) (es : List (K × V)) : Prop :=
   ∀ k k', (lastVal es k).isSome → (lastVal es k').isSome → bitsOf k = bitsOf k' → k = k'
@@ -867,17 +900,29 @@ theorem mem_holds {cache : Cache dig bitsOf L} {es : List (K × V)} (h : cache.H
   obtain ⟨kv, hkv, rfl⟩ := List.mem_map.mp this
   exact ⟨(mem_canon es kv).mp hkv, rfl⟩
 
+/-- Under distinct paths the kept entries have distinct paths. -/
+theorem paths_nodup {cache : Cache dig bitsOf L} {es : List (K × V)} (h : cache.Holds es)
+    (inj : PathsInjective bitsOf es) : (cache.trie.entries.map (·.2.1)).Nodup := by
+  refine List.Nodup.map_on ?_ (List.Nodup.of_map _ cache.nodup)
+  intro x hx y hy same
+  have ⟨vx, px⟩ := mem_holds h hx
+  have ⟨vy, py⟩ := mem_holds h hy
+  have keys : x.1 = y.1 := inj _ _ (by simp [vx]) (by simp [vy]) (by rw [← px, ← py]; exact same)
+  exact List.inj_on_of_nodup_map cache.nodup hx hy keys
+
+/-- A present key's opening ends at its own leaf. -/
+theorem opening_terminal {cache : Cache dig bitsOf L} {es : List (K × V)} (h : cache.Holds es)
+    (inj : PathsInjective bitsOf es) {k : K} {v : V} (hv : lastVal es k = some v) :
+    (cache.opening k).terminal = .leaf k v := by
+  have mem : (k, bitsOf k, v) ∈ cache.trie.entries :=
+    h.symm.subset (List.mem_map.mpr ⟨(k, v), (mem_canon es (k, v)).mpr hv, rfl⟩)
+  exact Trie.opening_present dig L (bitsOf k) cache.trie cache.inv (paths_nodup h inj) _ mem rfl
+
 /-- **Completeness**: the honest opening verifies, answering the list's last value. -/
 theorem opening_complete (lengths : ∀ k, (bitsOf k).length = L) {cache : Cache dig bitsOf L}
     {es : List (K × V)} (h : cache.Holds es) (inj : PathsInjective bitsOf es) (k : K) :
     verify dig bitsOf cache.digest k (lastVal es k) (cache.opening k) = true := by
-  have ndPaths : (cache.trie.entries.map (·.2.1)).Nodup := by
-    refine List.Nodup.map_on ?_ (List.Nodup.of_map _ cache.nodup)
-    intro x hx y hy same
-    have ⟨vx, px⟩ := mem_holds h hx
-    have ⟨vy, py⟩ := mem_holds h hy
-    have keys : x.1 = y.1 := inj _ _ (by simp [vx]) (by simp [vy]) (by rw [← px, ← py]; exact same)
-    exact List.inj_on_of_nodup_map cache.nodup hx hy keys
+  have ndPaths := paths_nodup h inj
   have ⟨short, up⟩ := Trie.opening_climb dig L (bitsOf k) cache.trie cache.inv (lengths k)
   unfold verify opening digest
   simp only [Bool.and_eq_true, decide_eq_true_eq]
@@ -903,6 +948,54 @@ theorem opening_complete (lengths : ∀ k, (bitsOf k).length = L) {cache : Cache
           simp only [decide_eq_true_eq]
           exact ⟨ne, by rw [← po, List.take_left' takeLen]⟩
 
+/-- The canonical entries answer `lookup` with the list's last value. -/
+theorem lookup_canon (es : List (K × V)) (k : K) :
+    lookup (entries bitsOf (canon es)) k = lastVal es k := by
+  unfold lookup
+  cases hfind : (entries bitsOf (canon es)).find? (fun e => e.1 = k) with
+  | none =>
+      rw [List.find?_eq_none] at hfind
+      cases hl : lastVal es k with
+      | none => rfl
+      | some v =>
+          exfalso
+          have mem : (k, bitsOf k, v) ∈ entries bitsOf (canon es) :=
+            List.mem_map.mpr ⟨(k, v), (mem_canon es (k, v)).mpr hl, rfl⟩
+          exact hfind _ mem (by simp)
+  | some f =>
+      have hk : f.1 = k := by simpa using List.find?_some hfind
+      obtain ⟨kv, hkv, rfl⟩ := List.mem_map.mp (List.mem_of_find?_eq_some hfind)
+      simp only at hk
+      subst hk
+      simp [(mem_canon es kv).mp hkv]
+
+/-- Under distinct paths the canonical entries are well formed. -/
+theorem wf_canon (lengths : ∀ k, (bitsOf k).length = L) {es : List (K × V)}
+    (inj : PathsInjective bitsOf es) : WF L (entries bitsOf (canon es)) := by
+  refine ⟨fun e he => ?_, ?_⟩
+  · obtain ⟨kv, _, rfl⟩ := List.mem_map.mp he
+    exact lengths kv.1
+  · simp only [entries, List.map_map, Function.comp_def]
+    refine List.Nodup.map_on ?_ (nodup_of_nodupKeys (nodupKeys_canon es))
+    intro x hx y hy same
+    have vx := (mem_canon es x).mp hx
+    have vy := (mem_canon es y).mp hy
+    have keys : x.1 = y.1 := inj _ _ (by simp [vx]) (by simp [vy]) same
+    exact List.inj_on_of_nodup_map (nodupKeys_canon es) hx hy keys
+
+/-- **Binding of the root of a list.**  Two lists with distinct paths and one
+root give every key the same last value — or two different node inputs share
+a digest. -/
+theorem root_lastVal_eq (lengths : ∀ k, (bitsOf k).length = L) {es es' : List (K × V)}
+    (inj : PathsInjective bitsOf es) (inj' : PathsInjective bitsOf es')
+    (hr : root dig bitsOf L es = root dig bitsOf L es') (k : K) :
+    lastVal es' k = lastVal es k ∨ Collision dig := by
+  have built := build_holds (dig := dig) lengths es'
+  have opened := opening_complete lengths built inj' k
+  rw [digest_eq built, ← hr, root] at opened
+  have := verify_sound dig bitsOf L lengths (canon es) (wf_canon lengths inj) k _ _ opened
+  rwa [lookup_canon] at this
+
 end Cache
 
 end Minidregg.Theory.AuthTrie
@@ -915,3 +1008,4 @@ end Minidregg.Theory.AuthTrie
 #assert_axioms Minidregg.Theory.AuthTrie.Cache.digest_eq
 #assert_axioms Minidregg.Theory.AuthTrie.Cache.insertAll_holds
 #assert_axioms Minidregg.Theory.AuthTrie.Cache.opening_complete
+#assert_axioms Minidregg.Theory.AuthTrie.Cache.root_lastVal_eq
