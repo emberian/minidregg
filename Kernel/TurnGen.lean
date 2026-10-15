@@ -418,6 +418,25 @@ def retiredWrite (sz : Sizes) (v : View) : GenM (Option (DataIntent RB)) := do
   let tx ← fresh
   return assemble v.world tx [honestWrite v.snap c (bytesOfCell (contentCell 0))] [] [] 0
 
+/-- A claim asserting a live content cell absent: its read guard's root is
+the absent slot's.  The pin of the absent slot's digest is asserted absence,
+so the World refuses it as `guardFailed` (and the receiver's preflight). -/
+def absentClaimPresent (sz : Sizes) (v : View) : GenM (Option (DataIntent RB)) := do
+  let some c ← pick (← live v .content) | birth sz v
+  let n ← fresh
+  let tx ← fresh
+  return assemble v.world tx [] [{ cellId := ⟨c⟩, expectedRoot := RB (encodeCell none) }]
+    [nullifier n] 1
+
+/-- A claim asserting a never-born cell present: its read guard's root is a
+content cell's. -/
+def presentClaimAbsent (_sz : Sizes) (v : View) : GenM (Option (DataIntent RB)) := do
+  let n ← fresh
+  let tx ← fresh
+  return assemble v.world tx []
+    [{ cellId := ⟨cellBase + 999999⟩, expectedRoot := RB (bytesOfCell (contentCell 0)) }]
+    [nullifier n] 1
+
 /-- No writes, no nullifiers. -/
 def emptyIntent (_sz : Sizes) (v : View) : GenM (Option (DataIntent RB)) := do
   let tx ← fresh
@@ -442,17 +461,19 @@ def mutated (sz : Sizes) (v : View) : GenM (Option (String × DTurn deployedR Di
   let spent := (← get).spent
   let accepted := (← get).accepted
   let absentId := cellBase + 999999
+  let coin ← below 2
   let n ← below 12
   let named : Option (String × DTurn deployedR Digest) :=
     if n = 0 then some ("empty", { t with legs := [], creates := [], retires := [], pins := [] })
     else if n = 1 then some ("dup-leg", { t with legs := t.legs ++ t.legs.take 1 })
     else if n = 2 then
-      (match others.head? with
-      | some c => some ("absent-present", { t with absent := [c] })
-      | none => some ("absent-dup", { t with absent := [absentId, absentId] }))
+      (match others.head?, coin with
+      | some c, 0 => some ("absent-present", { t with pins := t.pins ++ [(c, history.cellDigest none)] })
+      | _, _ => some ("present-absent",
+          { t with pins := t.pins ++ [(absentId, history.cellDigest (some (contentCell 0)))] }))
     else if n = 3 then
       (match gone.head? with
-      | some c => some ("absent-retired", { t with absent := [c] })
+      | some c => some ("absent-retired", { t with pins := t.pins ++ [(c, history.cellDigest none)] })
       | none => some ("missing-cell", { t with legs := t.legs ++ [⟨absentId, .content, []⟩] }))
     else if n = 4 then
       (match others.find? (fun c => (contentOf v.world c).any fun s => s ≠ 0) with
@@ -501,7 +522,9 @@ def intentClasses (sz : Sizes) : List (Nat × String × (View → GenM (Option (
     (2, "over-budget", overBudget sz), (2, "undecodable", undecodable sz),
     (2, "kind-change", kindChange sz), (1, "rom-rewrite", romRewrite sz),
     (1, "append-rewrite", appendRewrite sz), (1, "retired-write", retiredWrite sz),
-    (1, "empty", emptyIntent sz) ]
+    (1, "empty", emptyIntent sz),
+    (2, "absent-claim-present", absentClaimPresent sz),
+    (2, "present-claim-absent", presentClaimAbsent sz) ]
 
 /-- Probe weights: 6 stale turns, 9 mutations, out of 100 with the intents' 85. -/
 def probeWeight : Nat := 15

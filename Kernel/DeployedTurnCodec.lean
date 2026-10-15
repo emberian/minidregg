@@ -134,11 +134,10 @@ theorem decodeCreate_createBytes (c : CellId × Cell deployedR × Option CellId)
 
 /-! ## The turn -/
 
-/-- **The inverse of `encodeTurn`.**  The absence pins, then exactly the
+/-- **The inverse of `encodeTurn`.**  Exactly the
 thirteen `turnFields` slots (the last the digest pins), each consumed whole. -/
 def decodeTurn (bytes : List UInt8) : Option (DTurn deployedR Digest) := do
-  let (absent, fields) ← full (StreamCodec.product (StreamCodec.list StreamCodec.nat)
-    (StreamCodec.list bytesStream)) bytes
+  let fields ← full (StreamCodec.list bytesStream) bytes
   match fields with
   | [fTx, fCreates, fLegs, fRetires, fEvent, fNull, fCharge, fSubject, fEpoch, fCap,
       fBefore, fUntil, fPins] =>
@@ -158,7 +157,7 @@ def decodeTurn (bytes : List UInt8) : Option (DTurn deployedR Digest) := do
     let validUntil ← full (StreamCodec.option StreamCodec.nat) fUntil
     let pins ← full (StreamCodec.list (StreamCodec.product StreamCodec.nat digestStream)) fPins
     some { txId, creates, legs, retires, event, nullifiers, charge, subject, keyEpoch,
-           capability, notBefore, validUntil, absent, pins }
+           capability, notBefore, validUntil, pins }
   | _ => none
 
 theorem mapM_decodeCreate (cs : List (CellId × Cell deployedR × Option CellId)) :
@@ -184,8 +183,7 @@ theorem decodeTurn_encodeTurn (t : DTurn deployedR Digest) :
       bytesStream.encode (encodeCell (some c.2.1)) ++
         (StreamCodec.option StreamCodec.nat).encode c.2.2).mapM decodeCreate = some t.creates :=
     mapM_decodeCreate t.creates
-  have hp := full_encode (StreamCodec.product (StreamCodec.list StreamCodec.nat)
-    (StreamCodec.list bytesStream)) (t.absent, turnFields t)
+  have hp := full_encode (StreamCodec.list bytesStream) (turnFields t)
   unfold decodeTurn encodeTurn
   rw [hp]
   simp only [turnFields, bind, Option.bind, full_encode]

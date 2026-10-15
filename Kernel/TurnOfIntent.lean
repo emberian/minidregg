@@ -1000,15 +1000,6 @@ theorem cellIds_eraseDups_nodup : ∀ ids : List CellId, ids.eraseDups.Nodup
 termination_by ids => ids.length
 decreasing_by exact Nat.lt_succ_of_le (List.length_filter_le _ _)
 
-/-- A derived turn carries no exact absence pins: an unwritten guarded cell's
-asserted absence is its digest pin (`pinsOf`), so the absence shape holds
-vacuously. -/
-theorem turnOf_absentShaped (B : Bridge R D) (H : History R TransactionId StableEvent D)
-    (cells : CellId → Option (Cell R)) (intent : DataIntent rootBytes) :
-    AbsentShaped (turnOf B H cells intent) := by
-  change ([] : List CellId).Nodup ∧ List.Disjoint [] _ ∧ List.Disjoint [] _
-  simp
-
 /-! ## 6. `ofIntent_minimal`: the leg is the normal form, its footprint the diff -/
 
 /-- **`ofIntent_minimal`.**  Every leg of a derived turn is a fixed point of
@@ -1423,10 +1414,8 @@ theorem ofCells_step (B : Bridge R D) (H : History R TransactionId StableEvent D
     exact h3
   -- the system half
   have shaped : Shaped t := by
-    refine ⟨fun e => d.nonempty ⟨e.1, e.2.1, e.2.2.2⟩, d.legs_nodup, d.creates_nodup,
-      d.retires_nodup, ?_⟩
-    rw [d.eq]
-    exact turnOf_absentShaped B H cells intent
+    exact ⟨fun e => d.nonempty ⟨e.1, e.2.1, e.2.2.2⟩, d.legs_nodup, d.creates_nodup,
+      d.retires_nodup⟩
   have funded' : t.charge ≤ w.meter := by
     intro l
     rw [hcharge]
@@ -1463,11 +1452,7 @@ theorem ofCells_step (B : Bridge R D) (H : History R TransactionId StableEvent D
       cases w.system ⟨SysSpace.allowance, l⟩ with
       | none => intro pos; exact absurd pos (lt_irrefl 0)
       | some a => intro _; rfl
-  have ha : absentCheck w t = none := by
-    rw [absentCheck_eq_none_iff]
-    intro c m
-    simp [d.eq, turnOf] at m
-  have hadmit := admit_of H shaped hh (by rw [htx]; exact fresh) hk hv hcellsOk ha
+  have hadmit := admit_of H shaped hh (by rw [htx]; exact fresh) hk hv hcellsOk
   refine ⟨_, (step_eq_some H).2 hadmit, fun c => ?_, rfl⟩
   show c3 c = _
   by_cases hr : c ∈ t.retires
@@ -1585,10 +1570,8 @@ theorem ofIntent_step (B : Bridge R D) (H : History R TransactionId StableEvent 
 theorem derived_shaped {B : Bridge R D} {H : History R TransactionId StableEvent D}
     {cells : CellId → Option (Cell R)} {retired : CellId → Bool} {intent : DataIntent rootBytes}
     {t : DTurn R D} (d : Derived B H cells retired intent t) : Shaped t := by
-  refine ⟨fun e => d.nonempty ⟨e.1, e.2.1, e.2.2.2⟩, d.legs_nodup, d.creates_nodup,
-    d.retires_nodup, ?_⟩
-  rw [d.eq]
-  exact turnOf_absentShaped B H cells intent
+  exact ⟨fun e => d.nonempty ⟨e.1, e.2.1, e.2.2.2⟩, d.legs_nodup, d.creates_nodup,
+    d.retires_nodup⟩
 
 /-- **`ofIntent_stale_refused`: staleness is refused by the World, as
 `guardFailed`.**  An intent whose derivation succeeds against the world, at a
@@ -1690,7 +1673,6 @@ end Derive
 #assert_axioms deltaOf_fresh_retirement
 #assert_axioms ofCells_ok
 #assert_axioms ofIntent_minimal
-#assert_axioms turnOf_absentShaped
 #assert_axioms ofCells_step
 #assert_axioms ofIntent_step
 #assert_axioms derived_shaped

@@ -366,8 +366,9 @@ nothing is written as before):
   journaled in (`valid_until` is a block height, 09-29).  The wall clock is
   the K-CLOCK cell, pinned like any other read: by a read leg.
 
-The footprint includes the absence pins, the digest pins and the read ops of
-the legs (`Turn.footprint`), so it cannot disagree with what `admit` checks. -/
+The footprint includes the digest pins (asserted absence is the pin of the
+absent slot's digest, `H.cellDigest none`) and the read ops of the legs
+(`Turn.footprint`), so it cannot disagree with what `admit` checks. -/
 structure Turn (R : Registry) (TxId Ev D : Type) where
   txId : TxId
   creates : List (CellId × Cell R × Option CellId)
@@ -381,8 +382,6 @@ structure Turn (R : Registry) (TxId Ev D : Type) where
   capability : Option D := none
   notBefore : Nat := 0
   validUntil : Option Nat := none
-  /-- Cells pinned absent and never retired, checked before creates. -/
-  absent : List CellId := []
   /-- The pre-state the turn asserts: each a cell and the digest
   (`History.cellDigest`) its pre-slot must have, the cell unretired.  Checked
   first of the turn's checks (`pinCheck`), so a turn whose asserted pre-state
@@ -410,7 +409,7 @@ def Leg.guards {R : Registry} (leg : Leg R) : Patch (R.layout leg.kind) :=
 
 /-- The cells the turn's footprint pins. -/
 def Turn.footprint {R : Registry} {TxId Ev D : Type} (t : Turn R TxId Ev D) : List CellId :=
-  t.absent ++ t.pins.map Prod.fst ++ (t.legs.filter fun leg => !leg.guards.isEmpty).map Leg.cell
+  t.pins.map Prod.fst ++ (t.legs.filter fun leg => !leg.guards.isEmpty).map Leg.cell
 
 /-- The hash surface history needs: a turn digest and the log chain.  Stage F
 instantiates both with cSHAKE over the turn's canonical bytes (C1). -/
@@ -443,7 +442,6 @@ inductive Reject
   | duplicateLegCell
   | duplicateCreate
   | duplicateRetire
-  | invalidAbsenceGuard
   | noHead
   | replayedTransaction
   | retiredIdentifier
@@ -611,37 +609,11 @@ def applyCells (cells : Cells R) (t : Turn R TxId Ev D) : Except Reject (Cells R
       | .error r => .error r
       | .ok c2 => applyRetires c2 t.retires
 
-/-- Absence pins are unique and cannot also be created or patched. -/
-abbrev AbsentShaped (t : Turn R TxId Ev D) : Prop :=
-  t.absent.Nodup ∧ List.Disjoint t.absent (t.creates.map Prod.fst) ∧
-    List.Disjoint t.absent (t.legs.map Leg.cell)
-
-instance (t : Turn R TxId Ev D) : Decidable (AbsentShaped t) :=
-  decidable_of_iff
-    (t.absent.Nodup ∧ (∀ c ∈ t.absent, c ∉ t.creates.map Prod.fst) ∧
-      (∀ c ∈ t.absent, c ∉ t.legs.map Leg.cell))
-    (by simp only [AbsentShaped, List.disjoint_left])
-
-/-- Absence is checked against the pre-world, including permanent retirement. -/
-def absentCheck (w : World R TxId D) (t : Turn R TxId Ev D) : Option Reject :=
-  t.absent.findSome? fun c =>
-    if (w.cells c).isSome then some (.cellPresent c)
-    else if (w.retired c).isSome then some .retiredIdentifier else none
-
-theorem absentCheck_eq_none_iff (w : World R TxId D) (t : Turn R TxId Ev D) :
-    absentCheck w t = none ↔ ∀ c ∈ t.absent, w.cells c = none ∧ w.retired c = none := by
-  simp only [absentCheck, List.findSome?_eq_none_iff]
-  apply forall_congr'
-  intro c
-  apply forall_congr'
-  intro _
-  cases w.cells c <;> cases w.retired c <;> simp
-
 /-- A turn is well-shaped: it does or pins something, and names each cell at
 most once per role. -/
 def Shaped (t : Turn R TxId Ev D) : Prop :=
   ¬ (t.legs.isEmpty ∧ t.creates.isEmpty ∧ t.retires.isEmpty ∧ t.pins.isEmpty) ∧
-    (t.legs.map Leg.cell).Nodup ∧ (t.creates.map Prod.fst).Nodup ∧ t.retires.Nodup ∧ AbsentShaped t
+    (t.legs.map Leg.cell).Nodup ∧ (t.creates.map Prod.fst).Nodup ∧ t.retires.Nodup
 
 /-- **The one transition.**  Fail-closed: every error branch returns no world. -/
 def World.admit (w : World R TxId D) (t : Turn R TxId Ev D) : Except Reject (World R TxId D) :=
@@ -649,7 +621,6 @@ def World.admit (w : World R TxId D) (t : Turn R TxId Ev D) : Except Reject (Wor
   else if ¬ (t.legs.map Leg.cell).Nodup then .error .duplicateLegCell
   else if ¬ (t.creates.map Prod.fst).Nodup then .error .duplicateCreate
   else if ¬ t.retires.Nodup then .error .duplicateRetire
-  else if ¬ AbsentShaped t then .error .invalidAbsenceGuard
   else
     match w.head with
     | none => .error .noHead
@@ -658,7 +629,6 @@ def World.admit (w : World R TxId D) (t : Turn R TxId Ev D) : Except Reject (Wor
         else match turnCheck H w t height with
         | some r => .error r
         | none =>
-          if let some reason := absentCheck w t then .error reason else
           if ¬ Patch.ValidFrom w.system (sysPatch H t height logRoot w.meter) then
             .error .retiredIdentifier
           else
@@ -779,32 +749,6 @@ theorem step_eq_some {w w' : World R TxId D} {t : Turn R TxId Ev D} :
   unfold World.step
   cases World.admit H w t <;> simp [Except.toOption]
 
-/-- Every admitted absence guard held in the pre-world, including non-retirement. -/
-theorem admit_ok_absent {w w' : World R TxId D} {t : Turn R TxId Ev D}
-    (h : World.admit H w t = .ok w') :
-    ∀ c ∈ t.absent, w.cells c = none ∧ w.retired c = none := by
-  cases ha : absentCheck w t with
-  | none => exact (absentCheck_eq_none_iff w t).mp ha
-  | some r =>
-      unfold World.admit at h
-      simp only [ha] at h
-      split_ifs at h
-      all_goals cases hh : w.head with
-      | none => simp [hh] at h
-      | some pair =>
-          simp only [hh] at h
-          all_goals cases hk : turnCheck H w t pair.1 <;> simp [hk] at h
-
-/-- A concurrent creation of a pinned-absent cell refuses the turn. -/
-theorem absent_present_refused {w : World R TxId D} {t : Turn R TxId Ev D}
-    {c : CellId} (pin : c ∈ t.absent) (present : (w.cells c).isSome = true) :
-    World.step H w t = none := by
-  cases hs : World.step H w t with
-  | none => rfl
-  | some w' =>
-      have missing := (admit_ok_absent H ((step_eq_some H).mp hs) c pin).1
-      simp [missing] at present
-
 /-- An accepted turn: well-shaped, the head present, the transaction id
 absent from the journal, the system patch valid, the cell half accepted, and
 the post system cell exactly `run` of the system patch. -/
@@ -831,11 +775,7 @@ theorem admit_ok {w w' : World R TxId D} {t : Turn R TxId Ev D}
   swap
   · rw [if_pos hR] at h; cases h
   rw [if_neg (not_not.mpr hR)] at h
-  by_cases hA : AbsentShaped t
-  swap
-  · rw [if_pos hA] at h; cases h
-  rw [if_neg (not_not.mpr hA)] at h
-  refine ⟨⟨hE, hL, hC, hR, hA⟩, ?_⟩
+  refine ⟨⟨hE, hL, hC, hR⟩, ?_⟩
   cases hh : w.head with
   | none => simp [hh] at h
   | some p =>
@@ -848,20 +788,16 @@ theorem admit_ok {w w' : World R TxId D} {t : Turn R TxId Ev D}
       | some r => rw [hk] at h; cases h
       | none =>
       rw [hk] at h
-      cases ha : absentCheck w t with
-      | some r => simp [ha] at h
-      | none =>
-        simp only [ha] at h
-        by_cases hV : Patch.ValidFrom w.system (sysPatch H t height logRoot w.meter)
-        swap
-        · rw [if_pos hV] at h; cases h
-        rw [if_neg (not_not.mpr hV)] at h
-        cases hc : applyCells w.cells t with
-        | error r => rw [hc] at h; cases h
-        | ok cells =>
-            rw [hc] at h
-            cases h
-            exact ⟨height, logRoot, rfl, by simpa using hJ, hV, rfl, rfl⟩
+      by_cases hV : Patch.ValidFrom w.system (sysPatch H t height logRoot w.meter)
+      swap
+      · rw [if_pos hV] at h; cases h
+      rw [if_neg (not_not.mpr hV)] at h
+      cases hc : applyCells w.cells t with
+      | error r => rw [hc] at h; cases h
+      | ok cells =>
+          rw [hc] at h
+          cases h
+          exact ⟨height, logRoot, rfl, by simpa using hJ, hV, rfl, rfl⟩
 
 /-- The T1 half of an accepted turn: its checks passed at the height it was
 journaled at. -/
@@ -884,10 +820,6 @@ theorem admit_ok_turnCheck {w w' : World R TxId D} {t : Turn R TxId Ev D}
   swap
   · rw [if_pos hR] at h; cases h
   rw [if_neg (not_not.mpr hR)] at h
-  by_cases hA : AbsentShaped t
-  swap
-  · rw [if_pos hA] at h; cases h
-  rw [if_neg (not_not.mpr hA)] at h
   cases hh : w.head with
   | none => simp [hh] at h
   | some p =>
@@ -906,16 +838,13 @@ theorem admit_of {w : World R TxId D} {t : Turn R TxId Ev D} {height : Nat} {log
     (hj : w.journal t.txId = none)
     (hk : turnCheck H w t height = none)
     (hv : Patch.ValidFrom w.system (sysPatch H t height logRoot w.meter))
-    (hc : applyCells w.cells t = .ok cells)
-    (ha : absentCheck w t = none) :
+    (hc : applyCells w.cells t = .ok cells) :
     World.admit H w t = .ok ⟨cells, Patch.run w.system (sysPatch H t height logRoot w.meter)⟩ := by
-  obtain ⟨hE, hL, hC, hR, hA⟩ := shaped
+  obtain ⟨hE, hL, hC, hR⟩ := shaped
   unfold World.admit
-  rw [if_neg hE, if_neg (not_not.mpr hL), if_neg (not_not.mpr hC), if_neg (not_not.mpr hR),
-    if_neg (not_not.mpr hA)]
+  rw [if_neg hE, if_neg (not_not.mpr hL), if_neg (not_not.mpr hC), if_neg (not_not.mpr hR)]
   simp only [hh]
   rw [if_neg (by simp [hj]), hk]
-  simp only [ha]
   rw [if_neg (not_not.mpr hv)]
   simp only [hc]
 
@@ -1620,7 +1549,7 @@ theorem step_create_romOnly {w w' : World R TxId D} {t : Turn R TxId Ev D}
 theorem step_retire {w w' : World R TxId D} {t : Turn R TxId Ev D}
     (h : World.step H w t = some w') (c : CellId) (m : c ∈ t.retires) :
     w'.cells c = none ∧ w'.retired c = some () := by
-  obtain ⟨⟨_, _, _, hnd, _⟩, height, logRoot, _, _, _, hcells, hsys⟩ :=
+  obtain ⟨⟨_, _, _, hnd⟩, height, logRoot, _, _, _, hcells, hsys⟩ :=
     admit_ok H ((step_eq_some H).1 h)
   obtain ⟨c1, c2, h1, h2, h3⟩ := applyCells_ok hcells
   refine ⟨(applyRetires_mem h3 hnd c m).2, ?_⟩
@@ -1633,7 +1562,7 @@ read-guarded never-retired id, and retired ids are exactly the old ones plus
 this turn's retires, which are absent after it. -/
 theorem step_wf {w w' : World R TxId D} {t : Turn R TxId Ev D}
     (hwf : w.WF) (h : World.step H w t = some w') : w'.WF := by
-  obtain ⟨⟨_, _, _, hnd, _⟩, height, logRoot, _, _, hv, hcells, hsys⟩ :=
+  obtain ⟨⟨_, _, _, hnd⟩, height, logRoot, _, _, hv, hcells, hsys⟩ :=
     admit_ok H ((step_eq_some H).1 h)
   obtain ⟨c1, c2, h1, h2, h3⟩ := applyCells_ok hcells
   intro c hc
@@ -1726,7 +1655,7 @@ theorem step_rom_preserved {w w' : World R TxId D} {t : Turn R TxId Ev D}
     (w'.cells c = none ∧ w'.retired c = some ()) ∨
       ∃ s', w'.cells c = some ⟨k, s'⟩ ∧
         ∀ a : Address (R.layout k), (R.layout k).discipline a.1 = .rom → s' a = s a := by
-  obtain ⟨⟨_, hnd, hcnd, hrnd, _⟩, height, logRoot, _, _, hv, hcells, hsys⟩ :=
+  obtain ⟨⟨_, hnd, hcnd, hrnd⟩, height, logRoot, _, _, hv, hcells, hsys⟩ :=
     admit_ok H ((step_eq_some H).1 h)
   obtain ⟨c1, c2, h1, h2, h3⟩ := applyCells_ok hcells
   by_cases hr : c ∈ t.retires
@@ -1977,7 +1906,7 @@ world it produced is refused as a replay. -/
 theorem admit_retry_refused {w w' : World R TxId D} {t : Turn R TxId Ev D}
     (h : World.step H w t = some w') :
     World.admit H w' t = .error .replayedTransaction := by
-  obtain ⟨⟨hE, hL, hC, hR, hA⟩, height, logRoot, _, _, _, _, hsys⟩ :=
+  obtain ⟨⟨hE, hL, hC, hR⟩, height, logRoot, _, _, _, _, hsys⟩ :=
     admit_ok H ((step_eq_some H).1 h)
   have hj : (w'.journal t.txId).isSome := by
     show (w'.system _).isSome
@@ -1986,7 +1915,7 @@ theorem admit_retry_refused {w w' : World R TxId D} {t : Turn R TxId Ev D}
     show w'.system _ = _
     rw [hsys, sysPost_head]
   unfold World.admit
-  rw [if_neg hE, if_neg (not_not.mpr hL), if_neg (not_not.mpr hC), if_neg (not_not.mpr hR), if_neg (not_not.mpr hA)]
+  rw [if_neg hE, if_neg (not_not.mpr hL), if_neg (not_not.mpr hC), if_neg (not_not.mpr hR)]
   simp only [hh]
   rw [if_pos hj]
 
@@ -2119,7 +2048,7 @@ theorem admit_pin_refused {w : World R TxId D} {t : Turn R TxId Ev D} {height : 
     (shaped : Shaped t) (hh : w.head = some (height, logRoot)) (hj : w.journal t.txId = none)
     (stale : ∃ p ∈ t.pins, w.retired p.1 ≠ none ∨ H.cellDigest (w.cells p.1) ≠ p.2) :
     ∃ c i, World.admit H w t = .error (.guardFailed c i) := by
-  obtain ⟨hE, hL, hC, hR, hA⟩ := shaped
+  obtain ⟨hE, hL, hC, hR⟩ := shaped
   cases hp : pinCheck H w t with
   | none =>
       obtain ⟨p, m, bad⟩ := stale
@@ -2133,10 +2062,47 @@ theorem admit_pin_refused {w : World R TxId D} {t : Turn R TxId Ev D} {height : 
       have hk : turnCheck H w t height = some (.guardFailed c i) := by
         unfold turnCheck; rw [hp]
       unfold World.admit
-      rw [if_neg hE, if_neg (not_not.mpr hL), if_neg (not_not.mpr hC), if_neg (not_not.mpr hR),
-        if_neg (not_not.mpr hA)]
+      rw [if_neg hE, if_neg (not_not.mpr hL), if_neg (not_not.mpr hC), if_neg (not_not.mpr hR)]
       simp only [hh]
       rw [if_neg (by simp [hj]), hk]
+
+/-- Every pin of an admitted turn held at the pre-world: its cell unretired,
+its slot's digest the asserted one. -/
+theorem step_pins {w w' : World R TxId D} {t : Turn R TxId Ev D}
+    (h : World.step H w t = some w') :
+    ∀ p ∈ t.pins, w.retired p.1 = none ∧ H.cellDigest (w.cells p.1) = p.2 := by
+  obtain ⟨height, logRoot, -, hk⟩ := admit_ok_turnCheck H ((step_eq_some H).1 h)
+  exact ((turnCheck_eq_none_iff H).1 hk).1
+
+/-- **Asserted absence, cell present.**  A turn pinning `c` to the absent
+slot's digest is refused at a world where `c` holds a cell whose digest is not
+the absent slot's.  Asserted absence is that digest pin (there is no separate
+absence list): its exactness is the digest's collision resistance, the
+`distinct` premise. -/
+theorem absent_present_refused {w : World R TxId D} {t : Turn R TxId Ev D}
+    {c : CellId} {cell : Cell R} (pin : (c, H.cellDigest none) ∈ t.pins)
+    (present : w.cells c = some cell) (distinct : H.cellDigest (some cell) ≠ H.cellDigest none) :
+    World.step H w t = none := by
+  cases hs : World.step H w t with
+  | none => rfl
+  | some w' =>
+      have held := (step_pins H hs _ pin).2
+      rw [present] at held
+      exact absurd held distinct
+
+/-- **Asserted presence, cell absent.**  A turn pinning `c` to a present
+cell's digest is refused at a world where `c` is absent, under the same
+collision premise. -/
+theorem present_absent_refused {w : World R TxId D} {t : Turn R TxId Ev D}
+    {c : CellId} {cell : Cell R} (pin : (c, H.cellDigest (some cell)) ∈ t.pins)
+    (absent : w.cells c = none) (distinct : H.cellDigest (some cell) ≠ H.cellDigest none) :
+    World.step H w t = none := by
+  cases hs : World.step H w t with
+  | none => rfl
+  | some w' =>
+      have held := (step_pins H hs _ pin).2
+      rw [absent] at held
+      exact absurd held.symm distinct
 
 /-- The meter, read off the system cell. -/
 theorem meter_system {w : World R TxId D} (l : Lane) :
@@ -2484,6 +2450,18 @@ theorem admit_truePins :
 not empty. -/
 theorem admit_pinOnly :
     rejectOf (World.admit toyH w1 { turn 5 [] [] with pins := [(0, 1)] }) = none := by
+  decide +kernel
+/-- Asserted absence of a present cell: the pin of cell 0 at the absent
+slot's digest (0) is refused, cell 0 holding kind `false` (digest 1). -/
+theorem reject_absentPinPresent :
+    rejectOf (World.admit toyH w1 { turn 5 [] [] with pins := [(0, 0)] }) =
+      some (.guardFailed 0 0) := by
+  decide +kernel
+/-- Asserted presence of an absent cell: the pin of cell 7 at a present
+cell's digest (1) is refused, cell 7 being absent (digest 0). -/
+theorem reject_presentPinAbsent :
+    rejectOf (World.admit toyH w1 { turn 5 [] [] with pins := [(7, 1)] }) =
+      some (.guardFailed 7 0) := by
   decide +kernel
 theorem reject_retireNonEmpty :
     rejectOf (World.admit toyH w1 (turn 5 [] [] [0])) = some (.retireNonEmpty 0) := by
@@ -2924,8 +2902,9 @@ end RomExample
 
 /-! ### T1 pins -/
 
-#assert_axioms admit_ok_absent
+#assert_axioms step_pins
 #assert_axioms absent_present_refused
+#assert_axioms present_absent_refused
 #assert_axioms admit_ok_turnCheck
 #assert_axioms turnCheck_eq_none_iff
 #assert_axioms pinFails_eq_false_iff
@@ -2935,6 +2914,8 @@ end RomExample
 #assert_axioms Example.reject_stalePin
 #assert_axioms Example.admit_truePins
 #assert_axioms Example.admit_pinOnly
+#assert_axioms Example.reject_absentPinPresent
+#assert_axioms Example.reject_presentPinAbsent
 #assert_axioms meter_system
 #assert_axioms spent_monotone
 #assert_axioms fold_spent_monotone

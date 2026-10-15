@@ -71,15 +71,11 @@ def turnFields (t : DTurn deployedR Digest) : List (List UInt8) :=
    (StreamCodec.option StreamCodec.nat).encode t.validUntil,
    (StreamCodec.list (StreamCodec.product StreamCodec.nat digestStream)).encode t.pins]
 
-/-- Greenfield v2 turn shape: absence pins are in the digest preimage. -/
+/-- The turn's canonical bytes: the thirteen `turnFields` slots.  Asserted
+absence is a digest pin (`Turn.pins`), so it is in the digest preimage with
+every other pin. -/
 def encodeTurn (t : DTurn deployedR Digest) : List UInt8 :=
-  (StreamCodec.product (StreamCodec.list StreamCodec.nat) (StreamCodec.list bytesStream)).encode
-    (t.absent, turnFields t)
-
-/-- Equal turn bytes imply equal absence pins: no field outside the digest. -/
-theorem encodeTurn_absent {a b : DTurn deployedR Digest}
-    (same : encodeTurn a = encodeTurn b) : a.absent = b.absent :=
-  (Prod.mk.inj (StoreCodec.streamEncode_injective _ same)).1
+  (StreamCodec.list bytesStream).encode (turnFields t)
 
 /-- The bytes a turn's event retains: the event's canonical bytes, archived
 with the turn (the admitted ingress they carry), charged like a written value. -/
@@ -179,7 +175,6 @@ theorem objective_free_below_retired (c : CellId) (old : ObjectiveActivityCell.P
 #assert_axioms imageBytes_empty objective_romPart_empty objective_birth_image_bytes
 #assert_axioms objective_write_below_post objective_free_below_retired
 
-#assert_axioms encodeTurn_absent
 #assert_axioms deployed_pinCoherent
 #assert_axioms objective_allocate_bytes objective_write_bytes objective_free_bytes read_bytes
 #assert_axioms objective_post_bytes objective_allocate_below_post

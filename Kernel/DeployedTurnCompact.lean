@@ -295,8 +295,7 @@ def heldOf (w : World deployedR TransactionId Digest)
 `encodeLegAt` against the cells it runs from. -/
 def encodeTurnAt (w : World deployedR TransactionId Digest) (t : DTurn deployedR Digest) :
     List UInt8 :=
-  (StreamCodec.product (StreamCodec.list StreamCodec.nat) (StreamCodec.list bytesStream)).encode
-    (t.absent,
+  (StreamCodec.list bytesStream).encode
       [digestStream.encode t.txId,
        (StreamCodec.list bytesStream).encode (t.creates.map createBytes),
        (StreamCodec.list bytesStream).encode (t.legs.map (encodeLegAt (heldOf w t.creates))),
@@ -309,13 +308,12 @@ def encodeTurnAt (w : World deployedR TransactionId Digest) (t : DTurn deployedR
        (StreamCodec.option digestStream).encode t.capability,
        StreamCodec.nat.encode t.notBefore,
        (StreamCodec.option StreamCodec.nat).encode t.validUntil,
-       (StreamCodec.list (StreamCodec.product StreamCodec.nat digestStream)).encode t.pins])
+       (StreamCodec.list (StreamCodec.product StreamCodec.nat digestStream)).encode t.pins]
 
 /-- Decode a persisted turn against the follower's world. -/
 def decodeTurnAt (w : World deployedR TransactionId Digest) (bytes : List UInt8) :
     Option (DTurn deployedR Digest) := do
-  let (absent, fields) ← full (StreamCodec.product (StreamCodec.list StreamCodec.nat)
-    (StreamCodec.list bytesStream)) bytes
+  let fields ← full (StreamCodec.list bytesStream) bytes
   match fields with
   | [fTx, fCreates, fLegs, fRetires, fEvent, fNull, fCharge, fSubject, fEpoch, fCap,
       fBefore, fUntil, fPins] =>
@@ -335,7 +333,7 @@ def decodeTurnAt (w : World deployedR TransactionId Digest) (bytes : List UInt8)
     let validUntil ← full (StreamCodec.option StreamCodec.nat) fUntil
     let pins ← full (StreamCodec.list (StreamCodec.product StreamCodec.nat digestStream)) fPins
     some { txId, creates, legs, retires, event, nullifiers, charge, subject, keyEpoch,
-           capability, notBefore, validUntil, absent, pins }
+           capability, notBefore, validUntil, pins }
   | _ => none
 
 theorem mapM_decodeLegAt (held : CellId → Option (Cell deployedR)) (legs : List (Leg deployedR)) :

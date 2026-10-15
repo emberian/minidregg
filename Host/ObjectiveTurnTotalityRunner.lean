@@ -60,24 +60,32 @@ def checkIntent (H : DeployedH) (plant : Plant) (row : String) (index : Nat)
           DeployedBridge.retiresCell bytes then
         IO.eprintln s!"OFFENDER {row} {index} guard cell {guard.cellId.value} first {guard.cellId.value == offending} retired true retirement-kind untyped-lifecycle bytes {reprStr (bytes.map UInt8.toNat)} root-matches {guard.expectedRoot == opened.snapshot.model.roots guard.cellId}"
   | _ => pure ()
+  -- A turn asserts absence when a guarded cell that is absent carries the pin
+  -- of the absent slot's digest (asserted absence is that pin).
+  let absentPinned (turn : TurnOfIntent.DTurn DeployedBridge.deployedR Digest) : Bool :=
+    (TurnOfIntent.guardIds intent.writes intent.readGuards).any fun cell =>
+      (HostRefinesWorld.cellsOf DeployedBridge.bridge opened.snapshot cell).isNone &&
+        turn.pins.contains (cell, H.cellDigest none)
   let nonemptyAbsent := match ordinary with
-    | .ok turn => if turn.absent.isEmpty then 0 else 1
+    | .ok turn => if absentPinned turn then 1 else 0
     | .error _ => 0
   let measured : Except TurnOfIntent.Refusal (TurnOfIntent.DTurn DeployedBridge.deployedR Digest) :=
     match ordinary, plant with
-    | .ok turn, .dropAbsent => .ok { turn with absent := [] }
+    | .ok turn, .dropAbsent =>
+      .ok { turn with pins := turn.pins.filter fun p => decide (p.2 ≠ H.cellDigest none) }
     | .ok _, .absentRefuses =>
       TurnOfIntent.ofCells DeployedBridge.bridge H
         (HostRefinesWorld.cellsOf DeployedBridge.bridge opened.snapshot) (fun _ => true) intent
     | _, _ => ordinary
   match measured with
   | .ok turn =>
-    -- Compute the required pins directly from the intent and loaded cells;
-    -- do not call absentOf, so a lost mapping cannot make the pole blind.
+    -- Compute the required pins directly from the intent and loaded cells:
+    -- every guarded cell that is absent must carry a pin at the absent
+    -- slot's digest (asserted absence is that pin), so dropping them is seen.
     let guarded := TurnOfIntent.guardIds intent.writes intent.readGuards
     let missing := guarded.filter fun cell =>
       (HostRefinesWorld.cellsOf DeployedBridge.bridge opened.snapshot cell).isNone &&
-        !turn.absent.contains cell
+        !turn.pins.contains (cell, H.cellDigest none)
     if missing.isEmpty then
       IO.println s!"{row} {index} ok"
       (← IO.getStdout).flush
