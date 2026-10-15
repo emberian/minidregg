@@ -176,6 +176,10 @@ sh('create-realm', mini, 'workspace', '--action', 'create', '--dir', alice_ws, '
 for name in ['gold', 'receipt']:
     sh(f'well-new-{name}', mini, 'well', '--action', 'new', '--dir', alice_ws, '--name', name, '--in', 'bazaar',
        '--law', permit)
+# Issuance is capped: a well's own floor is its cap (a floor command on the well, verb mintAsset).
+for name in ['gold', 'receipt']:
+    sh(f'cap-{name}', mini, 'well', '--action', 'floor', '--dir', alice_ws, '--well', name, '--account', name,
+       '--amount', '1000000')
 X = json.loads((alice_ws / 'refs' / 'gold.json').read_text())['target']
 D = json.loads((alice_ws / 'refs' / 'receipt.json').read_text())['target']
 
