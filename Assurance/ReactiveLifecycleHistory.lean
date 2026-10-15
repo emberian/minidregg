@@ -163,7 +163,7 @@ variable
 `spec` index, so the token has no late shape fields. -/
 structure Promise
     (spec : PromiseSpec U family Height Condition Continuation) where
-  private mk ::
+  mk ::
   opened : Unit
 
 /-- Open the unique logical promise shape.  This schedules no physical work. -/
@@ -293,6 +293,25 @@ structure Finalized
   accepted : AcceptedCellEffect (portal := portal) (authState := authState)
     family spec.request spec.pre spec.declaration
       (spec.interpretAdvice reaction.advice)
+/-- Finalization carries the notification condition, the advice admission and the
+accepted effect's postcondition at the promise's exact indices. -/
+theorem Finalized.sound
+    {portal : Portal} {authState : AuthState}
+    {rules : HistoryRules n F Height Condition BreakReason}
+    {spec : PromiseSpec U family Height Condition Continuation}
+    (finalized : Finalized (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (entryFamily := entryFamily)
+      (headerCells := headerCells) (C := C)
+      (portal := portal) (authState := authState) rules spec) :
+    rules.Matches spec.condition finalized.reaction.notification.entry.context
+        finalized.reaction.notification.entry.claim ∧
+      rules.AdviceAllowed spec.condition finalized.reaction.notification.entry.context
+        finalized.reaction.notification.entry.claim
+        (spec.encodeAdvice finalized.reaction.advice) ∧
+      family.Postcondition spec.declaration (spec.interpretAdvice finalized.reaction.advice)
+        finalized.accepted.validated.apply.logical :=
+  ⟨finalized.reaction.notification.conditionHolds, finalized.reaction.adviceAllowed,
+    finalized.accepted.postcondition⟩
 
 /-- Finalize only with an already accepted semantic cell effect.  Durable
 installation remains outside this function. -/

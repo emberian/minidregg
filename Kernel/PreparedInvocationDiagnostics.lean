@@ -35,6 +35,13 @@ structure PreparedPolicyLeg [DecidableEq F]
   predicateExact : predicate = law.predicate
   witness : ComposedPolicyAdmission.Witness F
   witnessExact : witness = law.witness
+theorem PreparedPolicyLeg.resolvedAtStep [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient ground command}
+    {tuple : PreparedTuple (plan prepared)} {incidence : Incidence command}
+    (leg : PreparedPolicyLeg prepared tuple incidence) :
+    leg.context = step prepared tuple incidence ∧
+      (policyConfigFromStep prepared incidence leg.context).resolve? = some leg.law :=
+  ⟨leg.contextExact, leg.resolved⟩
 
 def preparePolicyLeg [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient ground command)

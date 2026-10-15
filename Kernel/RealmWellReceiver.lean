@@ -702,6 +702,11 @@ structure Accepted [DecidableEq F]
   receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
   envelopeExact : receipt.envelopeBytes = ingress.envelope
   semantic : prepared.SemanticAccepted
+theorem Accepted.bound [DecidableEq F]
+    {prepared : Prepared deployment profile ambient durable command} {ingress : Ingress}
+    (accepted : Accepted prepared ingress) :
+    accepted.receipt.envelopeBytes = ingress.envelope ∧ Nonempty prepared.SemanticAccepted :=
+  ⟨accepted.envelopeExact, ⟨accepted.semantic⟩⟩
 
 /-! ## Decoded ingress -/
 
@@ -713,6 +718,11 @@ structure DecodedIngress where
   envelope : CredentialSignedEnvelopeController.SignedEnvelope
   envelopeExact : CredentialSignatureAdmission.canonicalEnvelopeCodec.decode ingress.envelope =
     some envelope
+theorem DecodedIngress.decoded (ingress : DecodedIngress) :
+    commandCodec.encode ingress.command = ingress.ingress.commandBytes ∧
+      CredentialSignatureAdmission.canonicalEnvelopeCodec.decode ingress.ingress.envelope =
+        some ingress.envelope :=
+  ⟨ingress.canonical, ingress.envelopeExact⟩
 
 def decodeIngress (bytes : List UInt8) : Option DecodedIngress := do
   let ingress ← ingressCodec.decode bytes
@@ -818,6 +828,10 @@ structure AcceptedWell [DecidableEq F] (deployment : Deployment)
   prepared : Prepared deployment profile ambient durable ingress.command
   accepted : RealmWellReceiver.Accepted prepared ingress.ingress
   physical : PhysicalShape prepared
+theorem AcceptedWell.sound [DecidableEq F] {ingress : DecodedIngress}
+    (accepted : AcceptedWell deployment profile ambient durable ingress) :
+    Nonempty (Accepted accepted.prepared ingress.ingress) ∧ PhysicalShape accepted.prepared :=
+  ⟨⟨accepted.accepted⟩, accepted.physical⟩
 
 def admitDecodedNative [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)

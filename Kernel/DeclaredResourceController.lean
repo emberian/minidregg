@@ -1844,6 +1844,13 @@ structure AuthorityInvocation [DecidableEq F]
   only authorization is its `ReadLeg` in `observations`. -/
   checked : (incidence : Incidence command) → incidenceObserveOnly command incidence = false →
     CheckedLeg prepared tuple incidence (signed.envelope command incidence)
+theorem AuthorityInvocation.incidence_authorized [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient ground command} {signed : SignedCommand}
+    (authority : AuthorityInvocation prepared signed) :
+    commandCodec.encode command = signed.commandBytes ∧
+    ∀ incidence, incidenceObserveOnly command incidence = false →
+      Nonempty (CheckedLeg prepared authority.tuple incidence (signed.envelope command incidence)) :=
+  ⟨authority.ingressExact, fun incidence written => ⟨authority.checked incidence written⟩⟩
 
 structure AcceptedInvocation [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient ground command) (signed : SignedCommand) where

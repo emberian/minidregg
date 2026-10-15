@@ -716,7 +716,7 @@ private structure CachedRoots (ids : List CellId) (entries : List (WorldRoot.Key
 /-- What an extension starts from: a verified state (bare snapshot, its
 enumeration, the fresh-cell bytes) at `height`, with the chain, accumulator
 frontier and index root there, and the head tag there when it is not 0. -/
-private structure Start (rootBytes : List UInt8 → Digest) where
+structure Start (rootBytes : List UInt8 → Digest) where
   seed : Seed
   absentBytes : List UInt8
   ids : List CellId

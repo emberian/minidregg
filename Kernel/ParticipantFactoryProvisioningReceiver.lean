@@ -90,6 +90,15 @@ structure AcceptedProvisioning [DecidableEq F] (deployment : Deployment)
   prepared : Prepared deployment profile ambient durable ingress.command
   accepted : ParticipantFactoryProvisioning.Accepted prepared ingress
   physical : PhysicalShape prepared
+theorem AcceptedProvisioning.sound [DecidableEq F] {ingress : DecodedIngress}
+    (accepted : AcceptedProvisioning deployment profile ambient durable ingress) :
+    accepted.accepted.receipt.envelopeBytes = ingress.ingress.sponsorEnvelope ∧
+      Nonempty (Authorized (ParticipantFactoryProvisioning.policyConfig accepted.prepared).portal
+        accepted.prepared.authority.snapshot.authState
+        (ParticipantFactoryProvisioning.request deployment profile.template accepted.prepared.authority.snapshot
+          profile.semantics ambient ingress.command)) ∧
+      PhysicalShape accepted.prepared :=
+  ⟨accepted.accepted.envelopeExact, ⟨accepted.accepted.semantic.authorization⟩, accepted.physical⟩
 
 def admitDecodedNative [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)

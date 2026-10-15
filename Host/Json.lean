@@ -107,7 +107,7 @@ theorem admitKey_records (keys : Std.HashSet String) (key : String)
 #assert_axioms admitKey_refuses_held
 #assert_axioms admitKey_records
 
-private structure ScanFrame where
+structure ScanFrame where
   object : Bool
   expectKey : Bool := false
   keys : Std.HashSet String := {}
@@ -1831,7 +1831,7 @@ private def agentLifetimeGrantRequest (json : Lean.Json) : Result (List UInt8) :
       (← field "$" "sourceCapabilities" obj) }
   return ApplicationAgentLifetimeGrantAuthoring.requestCodec.encode request
 
-private structure BirthParts where
+structure BirthParts where
   item : ResourceBirth.BirthItem CanonicalCellRegistry.registry
   ownerGrant : ResourceBirth.AuthorityGrant
   controlGrant : ResourceBirth.AuthorityGrant
@@ -2495,7 +2495,7 @@ private def applicationSessionBirth (path : String) (json : Lean.Json)
   pure (.birth ((ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).encode descriptor)
     context.sourceCapabilities)
 
-private structure GrainBirthPeer where
+structure GrainBirthPeer where
   task : Nat
   capability : CapabilityId
   observeCapability : CapabilityId

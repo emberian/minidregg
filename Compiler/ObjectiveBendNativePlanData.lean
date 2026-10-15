@@ -115,6 +115,17 @@ structure BoundEffect (deployment : CanonicalCellRegistry.Deployment)
   payloadExact : command.targets[index].payload = source.payload
   pre : TargetCell command.targets[index]
   selected : selectTarget deployment command.targets[index] read.packed = some pre
+/-- The bound effect sits at the command's target for its resource, quotes that
+target's root and payload, and its pre cell is selected from the bound read. -/
+theorem BoundEffect.sound {deployment : CanonicalCellRegistry.Deployment}
+    {loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry}
+    {command : Command} {source : Effect}
+    (bound : BoundEffect deployment loaded command source) :
+    indexOf command source.ref.resourceID = some bound.index ∧
+      command.targets[bound.index].expectedTargetRoot = source.ref.root ∧
+      command.targets[bound.index].payload = source.payload ∧
+      selectTarget deployment command.targets[bound.index] bound.read.packed = some bound.pre :=
+  ⟨bound.indexExact, bound.rootExact, bound.payloadExact, bound.selected⟩
 
 def BoundEffect.native {deployment : CanonicalCellRegistry.Deployment}
     {loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry}

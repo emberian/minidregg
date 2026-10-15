@@ -163,6 +163,11 @@ structure DecodedIngress where
   envelope : CredentialSignedEnvelopeController.SignedEnvelope
   envelopeExact : CredentialSignatureAdmission.canonicalEnvelopeCodec.decode ingress.envelope =
     some envelope
+theorem DecodedIngress.sound (decoded : DecodedIngress) :
+    commandCodec.encode decoded.command = decoded.ingress.commandBytes ∧
+      CredentialSignatureAdmission.canonicalEnvelopeCodec.decode decoded.ingress.envelope =
+        some decoded.envelope :=
+  ⟨decoded.canonical, decoded.envelopeExact⟩
 
 def decodeIngress (bytes : List UInt8) : Option DecodedIngress := do
   let ingress ← ingressCodec.decode bytes
@@ -607,6 +612,18 @@ structure EnrolLegs (directory : LoadedDirectory durable)
   allocated : ResourceBirthController.Allocated Registry directory.directory descriptor
   resources : CanonicalResourceKernel.AcceptedBatch book.payload
     (enrolBatch tariff ambient.tariff.collector plan descriptor)
+theorem EnrolLegs.sound {directory : LoadedDirectory durable}
+    {authority : Loaded deployment durable.snapshot} {book : BookCell deployment directory.directory}
+    {tariff : Tariff} {price : Price} {plan : EnrolPlan}
+    (legs : EnrolLegs deployment profile ambient directory authority book tariff price plan) :
+    legs.descriptor =
+        { enrolDraft deployment profile ambient authority tariff price plan with
+          auxiliaryCreates := legs.descriptor.auxiliaryCreates } ∧
+      legs.descriptor.auxiliaryCreates = legs.grants.auxiliaryCreates ∧
+      KeyFresh authority.snapshot (enrolKey deployment authority plan) ∧
+      ((authorityEntries legs.descriptor (enrolKey deployment authority plan)
+        (enrolObserve deployment profile ambient authority plan)).map Sigma.fst).Nodup :=
+  ⟨legs.descriptorExact, legs.auxiliaryExact, legs.keyFresh, legs.entriesDistinct⟩
 
 def prepareEnrolLegs (directory : LoadedDirectory durable)
     (authority : Loaded deployment durable.snapshot) (book : BookCell deployment directory.directory)

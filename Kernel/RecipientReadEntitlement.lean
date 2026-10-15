@@ -123,6 +123,18 @@ structure CheckedView (genesisHeight : Nat) (prepared : Preparation (context := 
     config.verifies (viewRequest (wanted := wanted) view) witness = true
   guards : List ReadGuard
   guardsExact : readGuards prepared = some guards
+theorem CheckedView.entitled {genesisHeight : Nat}
+    {prepared : Preparation (context := context) (profile := profile)
+      (wanted := wanted) (marker := marker) (capability := capability) (contextBytes := contextBytes)}
+    {entry : Entry} {view : Minidregg.Theory.CellRegistry.PackedCell CanonicalCellRegistry.registry}
+    (checked : CheckedView genesisHeight prepared entry view) :
+    entryMatches (wanted := wanted) (capability := capability) (context := context) entry checked.stored ∧
+      capabilityAdmissibleCheck checked.stored.head context.authority.authState
+        (viewRequest (wanted := wanted) view) = true ∧
+      ∃ config : ComposedPolicyAdmission.Config F,
+        viewConfig prepared view = some config ∧
+        config.verifies (viewRequest (wanted := wanted) view) checked.witness = true :=
+  ⟨checked.principal, checked.admissible, checked.law⟩
 
 def checkView (genesisHeight : Nat) (prepared : Preparation (context := context) (profile := profile)
     (wanted := wanted) (marker := marker) (capability := capability) (contextBytes := contextBytes)) (entry : Entry)

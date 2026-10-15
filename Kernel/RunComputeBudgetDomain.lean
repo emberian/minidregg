@@ -90,6 +90,13 @@ structure Prepared (deployment : Deployment) (physical : Physical) (subject : Su
   book : LoadedBook deployment physical
   budget : RunComputeBudget.Prepared subject pay.cell pay.cell.root book.cell
   fundingIndex : Option Nat
+theorem Prepared.bound {deployment : Deployment} {physical : Physical} {subject : SubjectId}
+    (prepared : Prepared deployment physical subject) :
+    physical.canonicalBytes (bookId deployment) = bookBytes prepared.book.cell ∧
+      CanonicalResourceKernel.AcceptedBatch prepared.book.cell
+        (RunComputeBudget.burnBatch prepared.budget.book.funding) ∧
+      prepared.budget.book.credits = prepared.budget.quota.quoted.credits :=
+  ⟨prepared.book.observed, prepared.budget.book.accepted, prepared.budget.sameCharge⟩
 
 /-- Proposal assembly may discover the funding target position only after the
 source runs. Relocation changes only that bookkeeping position: the exact

@@ -51,6 +51,12 @@ structure Candidate (config : Config) {store : StoreIdentity} (head : Head store
   groundedLight : grounded.ground = .light prior
   priorPast : ∃ (seed : DurableReceiver.Seed) (state : StateAt rootBytes seed head index),
     prior.served = Served.ofStateAt state
+theorem Candidate.selectedUnderHead {config : Config} {store : StoreIdentity} {head : Head store}
+    {index : Nat} (candidate : Candidate config head index) :
+    (∃ read : Record head (index + 1), read.record = candidate.record) ∧
+      ∃ (seed : DurableReceiver.Seed) (state : StateAt rootBytes seed head index),
+        candidate.prior.served = Served.ofStateAt state :=
+  ⟨⟨candidate.read, candidate.recordExact⟩, candidate.priorPast⟩
 
 /-- The ground a historical admission re-runs on: the prior basis. -/
 def Candidate.ground {config : Config} {store : StoreIdentity} {head : Head store} {index : Nat}
@@ -130,6 +136,11 @@ structure Matched {config : Config} {store : StoreIdentity} {head : Head store} 
   selectedRecord : DurableReceiver.IntentRecord
   selected : selectedRecord = candidate.record
   exact : selectedRecord = DurableReceiver.IntentRecord.ofIntent intent
+theorem Matched.candidateRecord {config : Config} {store : StoreIdentity} {head : Head store}
+    {index : Nat} {candidate : Candidate config head index} {intent : DataIntent rootBytes}
+    (matched : Matched candidate intent) :
+    candidate.record = DurableReceiver.IntentRecord.ofIntent intent :=
+  matched.selected.symm.trans matched.exact
 
 def matchIntent {config : Config} {store : StoreIdentity} {head : Head store} {index : Nat}
     (candidate : Candidate config head index) (intent : DataIntent rootBytes) :

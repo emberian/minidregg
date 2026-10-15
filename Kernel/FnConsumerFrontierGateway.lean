@@ -103,6 +103,16 @@ structure Prepared (context : Context deployment)
   domainExact : proposal.domain = deployment.domain
   semanticsExact : proposal.semantics = profile.semantics
   pinExact : proposal.matchesPin pin = true
+omit [DecidableEq F] in
+theorem Prepared.sound {context : Context deployment}
+    {profile : CanonicalRuntimeProfile.Profile F} {federation : FederationId}
+    {height : Nat} {pin : FnGatewayPolicy.Pin} {proposal : Proposal}
+    (prepared : Prepared context profile federation height pin proposal) :
+    ResourceBirthCodec.physicalRoot (.live prepared.observed.before) =
+      context.view.model.roots ⟨proposal.target⟩ ∧
+    proposal.domain = deployment.domain ∧ proposal.semantics = profile.semantics ∧
+    proposal.matchesPin pin = true :=
+  ⟨prepared.physicalCurrent, prepared.domainExact, prepared.semanticsExact, prepared.pinExact⟩
 
 def prepare (context : Context deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (federation : FederationId)
@@ -257,6 +267,15 @@ structure CheckedOpened (config : NativeHost.Config)
   prepared : Prepared (contextOf opened) config.profile config.federation
     (NativeHost.logicalHeight config opened.durable) pin proposal
   signature : Checked prepared envelope
+theorem CheckedOpened.sound {config : NativeHost.Config} {opened : NativeHost.Opened config}
+    {proposal : Proposal} {envelope : List UInt8}
+    (checked : CheckedOpened config opened proposal envelope) :
+    config.fnGateway = some checked.pin ∧
+    FnGatewayPolicy.checkCurrent config opened checked.pin = .ok () ∧
+    checked.signature.signature.envelopeBytes = envelope ∧
+    authorize checked.prepared checked.signature.signature = some checked.signature.authorization :=
+  ⟨checked.pinExact, checked.current, checked.signature.envelopeExact,
+    checked.signature.authorized⟩
 
 def checkOpened (config : NativeHost.Config) (opened : NativeHost.Opened config)
     (proposal : Proposal) (envelope : List UInt8) :

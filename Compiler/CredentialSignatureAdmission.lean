@@ -297,6 +297,14 @@ structure CheckedSignature (snapshot : Snapshot) where
   admission : CredentialSignedEnvelopeController.Admission
   admitted : CredentialSignedEnvelopeController.finish prepared.controller (Except.ok true : Except CredentialSignatureIO.Error Bool) =
     .ok admission
+/-- The receipt's admission is the controller's finish of the preparation of exactly
+its envelope against the snapshot index. -/
+theorem CheckedSignature.admittedFrom {snapshot : Snapshot}
+    (receipt : CheckedSignature snapshot) :
+    prepare snapshot receipt.nullifier receipt.request receipt.envelopeBytes = .ok receipt.prepared ∧
+      CredentialSignedEnvelopeController.finish receipt.prepared.controller
+        (Except.ok true : Except CredentialSignatureIO.Error Bool) = .ok receipt.admission :=
+  ⟨receipt.preparedFrom, receipt.admitted⟩
 
 def verifyNative {m : Type → Type} [Monad m] (config : CredentialSignatureIO.Oracle m) (snapshot : Snapshot) (nullifier : Nat)
     {kind : ResourceKind} (request : Request kind) (envelopeBytes : List UInt8) :

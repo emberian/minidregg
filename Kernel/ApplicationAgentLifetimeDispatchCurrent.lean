@@ -126,6 +126,30 @@ structure Checked {F : Type} [Field F] [DecidableEq F]
     ingress.dispatch spec selection descriptor prepared = true
   invocation : DeclaredResourceController.AcceptedInvocation prepared
     ingress.dispatch.dispatch.signed
+/-- The checked current dispatch is the certified grant's issued ticket route, at the
+certified grant root, with the signed command derived from the ingress. -/
+theorem Checked.sound {F : Type} [Field F] [DecidableEq F]
+    {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
+    {ambient : Ambient} {ground : Ground deployment} {ingress : Ingress}
+    {spec : ApplicationShareIssueSource.Spec}
+    {descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry}
+    {grant : ApplicationAgentLifetimeGrant.Grant}
+    {ticketIssueIndex : Nat} {ticketIssueReceipt : NativeHostCodec.Receipt}
+    {issuedIngressBytes : List UInt8} {certifiedGrantIssueIndex : Nat}
+    {certifiedGrantRoot : Digest}
+    (checked : Checked deployment profile ambient ground ingress spec descriptor grant
+      ticketIssueIndex ticketIssueReceipt issuedIngressBytes certifiedGrantIssueIndex
+      certifiedGrantRoot) :
+    grant.matchesIssued spec ticketIssueIndex ticketIssueReceipt = true ∧
+      ingress.dispatch.issueIngressBytes = issuedIngressBytes ∧
+      ResourceBirthCodec.physicalRoot (.live checked.grantRead.selected.observed.before) =
+        certifiedGrantRoot ∧
+      grantAt deployment.domain ingress.reserveContext.grantResource
+        checked.grantRead.selected.observed.before = some grant ∧
+      checked.signedCommand = command ingress.dispatch.dispatch checked.selection
+        ingress.dispatch.parent :=
+  ⟨checked.issued, checked.issueBytesExact, checked.grantPhysical, checked.grantExact,
+    checked.commandExact⟩
 
 /-- All five current observations share the exact prepared DRC image. The
 grant read uses the participant's separately issued selector; its signed

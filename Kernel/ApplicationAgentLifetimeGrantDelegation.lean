@@ -153,6 +153,13 @@ structure Checked (prepared : Prepared context profile federation height spec de
   guardsPresent : (lawReadGuards prepared).isSome = true
   guardsCurrent : ∀ guard ∈ readGuards prepared,
     guard.expectedRoot = context.view.model.roots guard.cellId
+/-- The delegation's signature is over exactly the envelope index, and its
+authorization is what `authorize` derives from the prepared app request. -/
+theorem Checked.sound {prepared : Prepared context profile federation height spec descriptor}
+    {envelope : List UInt8} (checked : Checked prepared envelope) :
+    checked.signature.envelopeBytes = envelope ∧
+      authorize prepared checked.signature = some checked.authorization :=
+  ⟨checked.envelopeExact, checked.authorized⟩
 
 def check (native : CredentialSignatureIO.NativeConfig)
     (prepared : Prepared context profile federation height spec descriptor)

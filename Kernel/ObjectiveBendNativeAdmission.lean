@@ -444,6 +444,18 @@ structure SourceSelection {F : Type} [Field F] [DecidableEq F] {deployment : Dep
   claimInputExact : claim.inputCodec = loaded.artifact.inputCodec
   outputCodecExact : claim.outputCodec = loaded.artifact.outputCodec
   outputRegistered : loaded.artifact.outputCodec ∈ policy.outputs
+theorem SourceSelection.sound {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
+    {ground : Ground deployment} {environment : Environment deployment ground}
+    {profile : CanonicalRuntimeProfile.Profile F} {claim : ObjectiveInvocationClaim.Claim}
+    {read : Read environment profile} {policy : Policy} (source : SourceSelection claim read policy) :
+    ResourceObservationAdmission.readerFields environment.context claim.source.kind claim.source.capability = none ∧
+      read.prepared.observed.before = ⟨.content,source.payload⟩ ∧
+      ObjectiveSourcePackage.selectedDeclaration source.package.package = some source.loaded.artifact.declaration ∧
+      source.package.package.frontEnd = policy.frontEnd ∧ policy.frontEnd = ObjectiveBendFrontEndIdentity.identity ∧
+      claim.inputCodec = source.loaded.artifact.inputCodec ∧ claim.outputCodec = source.loaded.artifact.outputCodec ∧
+      source.loaded.artifact.outputCodec ∈ policy.outputs :=
+  ⟨source.fullScope, source.observedExact, source.declarationExact, source.frontEndExact, source.frontEndOwn,
+    source.claimInputExact, source.outputCodecExact, source.outputRegistered⟩
 
 private def selectSource {F : Type} [Field F] [DecidableEq F] {deployment : Deployment} {ground : Ground deployment}
     {environment : Environment deployment ground} {profile : CanonicalRuntimeProfile.Profile F}
@@ -551,6 +563,17 @@ structure Core {F : Type} [Field F] [DecidableEq F] {deployment : Deployment} {g
   inputTerm : ObjectiveBendOpenRecursion.Term
   inputTermExact : ObjectiveBendNativeInput.sourceTerm input claim.capacity.inputBytes claim.capacity.scalarBits = .ok inputTerm
   typed : Checked (ObjectiveBendNativeInput.instantiate source.replayed.accepted.source inputTerm) []
+theorem Core.sound {F : Type} [Field F] [DecidableEq F] {deployment : Deployment} {ground : Ground deployment}
+    {environment : Environment deployment ground} {profile : CanonicalRuntimeProfile.Profile F}
+    {claim : ObjectiveInvocationClaim.Claim} (core : Core environment profile claim) :
+    NativeInvocationProfile.binding profile.receiverParameters .objectiveMethod = some (encodePolicy core.policy) ∧
+      capacityWithin claim.capacity core.policy.maximum = true ∧
+      claim.capacity.proofWork = core.policy.tariff.workOf claim.capacity ∧
+      (∃ funded, environment.compute = some funded ∧
+        funded.steps = claim.capacity.proofWork ∧ funded.credits = claim.capacity.feeDebit) ∧
+      core.input = inputOf core.authenticated ∧
+      ObjectiveInvocationClaim.inputCommitment (ObjectiveBendNativeInput.encode core.input) = claim.expectedInput :=
+  ⟨core.policyExact, core.capacities, core.tariffExact, core.funding, core.inputExact, core.inputCommitted⟩
 
 /-- Every admitted Objective invocation is charged positive work: the signed
 `proofWork` (which `checkedFunding` binds to the fee-first compute preparation)
@@ -650,6 +673,20 @@ structure Admitted {F : Type} [Field F] [DecidableEq F] {deployment : Deployment
     ∃ write ∈ writes, guard.cellId = write.cellId ∧ guard.expectedRoot = write.expectedPre
   fits : usage output (ObjectiveBendNativeInput.encode core.input)
     (core.source.loaded.record.payload ++ core.source.package.record.payload) ingress writes guards ≤ charge claim.capacity
+theorem Admitted.sound {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {ground : Ground deployment} {command : Command}
+    {prepared : PreparedInvocation deployment profile ambient ground command}
+    {ingress : List UInt8} {writes : List DataWrite} {guards : List ReadGuard}
+    (admitted : Admitted prepared ingress writes guards) :
+    command.objectiveClaim = .ok (some admitted.claim) ∧ admitted.genesisHeight + ground.height = ambient.height ∧
+      (∀ guard ∈ admitted.core.guards, guard ∈ guards ∨
+        ∃ write ∈ writes, guard.cellId = write.cellId ∧ guard.expectedRoot = write.expectedPre) ∧
+      (∀ guard ∈ admitted.output.plan.reads, guard ∈ guards ∨
+        ∃ write ∈ writes, guard.cellId = write.cellId ∧ guard.expectedRoot = write.expectedPre) ∧
+      usage admitted.output (ObjectiveBendNativeInput.encode admitted.core.input)
+        (admitted.core.source.loaded.record.payload ++ admitted.core.source.package.record.payload) ingress writes
+        guards ≤ charge admitted.claim.capacity :=
+  ⟨admitted.selected, admitted.heightExact, admitted.inputsCurrent, admitted.readsCurrent, admitted.fits⟩
 
 private def selectResult (policy : Policy) (artifact : ObjectiveBendSourceArtifact.Artifact)
     (command : Command) (codec : Digest) : Option ObjectiveBendResultAdapter.Profile :=
@@ -697,6 +734,11 @@ structure Selection {F : Type} [Field F] [DecidableEq F] {deployment : Deploymen
   genesisHeight : Nat
   heightExact : genesisHeight + ground.height = ambient.height
   core : Core (environment prepared genesisHeight) profile claim
+theorem Selection.sound {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {ground : Ground deployment} {command : Command}
+    {prepared : PreparedInvocation deployment profile ambient ground command} (selection : Selection prepared) :
+    command.objectiveClaim = .ok (some selection.claim) ∧ selection.genesisHeight + ground.height = ambient.height :=
+  ⟨selection.selected, selection.heightExact⟩
 
 /-- Called ONLY after current original native authority checks. Signature,
 policy and source typing work; no source demand runs here. -/

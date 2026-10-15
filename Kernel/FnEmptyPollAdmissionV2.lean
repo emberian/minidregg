@@ -42,6 +42,15 @@ structure Checked {config : NativeHost.Config} {target : NativeHost.Durable}
     config.profile config.federation
     (NativeHost.logicalHeight config verified.opened.durable) pin (proposal ingress)
   signature : FnConsumerFrontierGateway.Checked prepared ingress.gatewayEnvelope
+theorem Checked.sound {config : NativeHost.Config} {target : NativeHost.Durable}
+    {verified : NativeHostReplay.Verified config target} {ingress : Ingress}
+    (checked : Checked verified ingress) :
+    config.fnGateway = some checked.pin ∧
+    FnGatewayPolicy.checkCurrent config verified.opened checked.pin = .ok () ∧
+    checked.signature.signature.envelopeBytes = ingress.gatewayEnvelope ∧
+    FnConsumerFrontierGateway.authorize checked.prepared checked.signature.signature = some checked.signature.authorization :=
+  ⟨checked.pinExact, checked.current, checked.signature.envelopeExact,
+    checked.signature.authorized⟩
 
 def check {config : NativeHost.Config} {target : NativeHost.Durable}
     (verified : NativeHostReplay.Verified config target) (ingress : Ingress) :
@@ -84,6 +93,14 @@ structure AcceptedVerified {config : NativeHost.Config} {target : NativeHost.Dur
     ingress.spec.registrationReceipt = .ok registration
   lower : FnEmptyPollAdmissionAtV2.Accepted config verified.opened cursor
     registration ingress
+theorem AcceptedVerified.sound {config : NativeHost.Config} {target : NativeHost.Durable}
+    {verified : NativeHostReplay.Verified config target} {ingress : Ingress}
+    (accepted : AcceptedVerified verified ingress) :
+    verified.frontierCursor ingress.spec.evidence.key = .ok accepted.cursor ∧
+    verified.frontierRegistration ingress.spec.evidence.key
+      ingress.spec.registrationReceipt = .ok accepted.registration ∧
+    FnConsumerFrontierCore.checkAfter accepted.cursor (candidate ingress.spec) = .ok () :=
+  ⟨accepted.cursorExact, accepted.registrationExact, accepted.lower.frontierExact⟩
 
 def admitVerified {config : NativeHost.Config} {target : NativeHost.Durable}
     (verified : NativeHostReplay.Verified config target) (ingress : Ingress) :

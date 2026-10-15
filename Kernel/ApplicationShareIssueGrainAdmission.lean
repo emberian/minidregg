@@ -69,6 +69,17 @@ structure Accepted {F : Type} [Field F] [DecidableEq F]
   appReadOnly : ∀ guard ∈ ApplicationShareIssueDelegation.readGuards appPrepared, guard.cellId ∉
     (GrainResourceBirthTransaction.writes birth grain).map
       DurableDataIntent.DataWrite.cellId
+theorem Accepted.sound {profile : CanonicalRuntimeProfile.Profile F}
+    {config : NativeHost.Config} {pins : FactoryPins} {durable : Durable}
+    {ambient : Ambient} {ingress : ApplicationShareIssueGrainSource.Ingress}
+    (accepted : Accepted profile config pins durable ambient ingress) :
+    accepted.decoded.bytes = ingress.grainIngress ∧
+    accepted.decoded.source.birth =
+      { accepted.sourceReady.expectedDescriptor profile config
+          accepted.birth.prepared.pre.authority.snapshot.authState ambient.height
+          accepted.decoded.source.birth.fee.payer accepted.decoded.source.birth.funding with
+        auxiliaryCreates := accepted.birth.prepared.authorityCombined.auxiliaryCreates } :=
+  ⟨accepted.grainBytes, accepted.sourceDescriptor⟩
 
 private def refused : String := "grain-backed app share issue refused"
 

@@ -114,6 +114,19 @@ structure Checked (context : Context deployment) (ambient : DeclaredResourceCont
   recordsExact : registryPayload.2 = (StreamCodec.list ObjectAudienceRoster.entryStream).encode roster.entries
   sourcesExact : ∀ entry ∈ roster.entries, entry.deviceSource = source
   all : (entry : {e : Entry // e ∈ roster.entries}) → One (profile := profile) context ambient object preRoot roster entry.val view disclosure
+theorem Checked.sound {context : Context deployment} {ambient : DeclaredResourceController.Ambient}
+    {object : Nat} {preRoot : Digest} {state : Minidregg.Theory.ObjectAudience.State}
+    {roster : Roster} {view : PackedCell Registry} {disclosure : List UInt8}
+    (checked : Checked (profile := profile) context ambient object preRoot state roster view disclosure) :
+    Minidregg.Theory.ObjectAudience.Fresh state object (some roster.epoch) ∧
+    ObjectAudienceRoster.Bound state roster roster.entries ∧
+    devicePayload context checked.source = some checked.registryPayload ∧
+    checked.registryPayload.2 =
+      (StreamCodec.list ObjectAudienceRoster.entryStream).encode roster.entries ∧
+    ∀ (entry : Entry) (member : entry ∈ roster.entries),
+      Nonempty (One (profile := profile) context ambient object preRoot roster entry view disclosure) :=
+  ⟨checked.active, checked.bound, checked.registryExact, checked.recordsExact,
+    fun entry member => ⟨checked.all ⟨entry, member⟩⟩⟩
 
 /-- Guard roots derive from the same physical image as registry resolution.
 The outer receiver must refuse writes to `checked.source` and protect authority,

@@ -92,6 +92,30 @@ structure PriorIssue (config : Config) where
   index : Nat
   receipt : NativeHostCodec.Receipt
   evidence : ApplicationDispatchHistoricalCore.IssuedEvidence config
+theorem PriorIssue.sourceExact {config : Config} (prior : PriorIssue config) :
+    (∃ (pins : Minidregg.Theory.ResourceBirth.FactoryPins)
+       (original : ResourceBirthController.Concrete.Durable)
+       (height : Minidregg.Theory.TypedAuthorization.Height)
+       (ingress : ApplicationShareIssueSource.Ingress)
+       (accepted : ApplicationShareIssueAdmission.Accepted config.profile config
+         pins original height ingress),
+       prior.evidence.spec = ingress.spec ∧
+         prior.evidence.ingressBytes = ApplicationShareIssueSource.ingressCodec.encode ingress ∧
+         prior.evidence.descriptor = accepted.birth.descriptor ∧
+         prior.evidence.record = DurableReceiver.IntentRecord.ofIntent
+           (ApplicationShareIssueReceiver.intent accepted)) ∨
+    (∃ (pins : Minidregg.Theory.ResourceBirth.FactoryPins)
+       (original : ResourceBirthController.Concrete.Durable)
+       (ambient : DeclaredResourceController.Ambient)
+       (ingress : ApplicationShareIssueGrainSource.Ingress)
+       (accepted : ApplicationShareIssueGrainAdmission.Accepted config.profile config
+         pins original ambient ingress),
+       prior.evidence.spec = ingress.spec ∧
+         prior.evidence.ingressBytes = ingress.canonicalBytes ∧
+         prior.evidence.descriptor = accepted.decoded.source.birth ∧
+         prior.evidence.record = DurableReceiver.IntentRecord.ofIntent
+           (ApplicationShareIssueGrainReceiver.intent accepted)) :=
+  prior.evidence.sourceExact
 
 /-- An enrollment may use only an event22 ticket minted by this replay walk.
 The three current signed observations are checked by the lower admission. -/
@@ -106,6 +130,15 @@ structure SessionEnrollmentAt (config : Config) (opened : Opened config)
   present : opened.durable.image.accepted[issue.index]? = some issue.evidence.record
   checked : ApplicationGrainSessionEnrollmentAdmission.Checked config opened ingress
     issue.evidence.spec issue.receipt
+theorem SessionEnrollmentAt.ticket_record_at {config : Config} {opened : Opened config}
+    {ingress : ApplicationGrainSessionEnrollmentSource.Ingress}
+    (admitted : SessionEnrollmentAt config opened ingress) :
+    opened.durable.image.accepted[ingress.request.issueIndex]? =
+        some admitted.issue.evidence.record ∧
+      admitted.issue.receipt = ingress.issueReceipt := by
+  refine ⟨?_, admitted.issueReceipt⟩
+  rw [← admitted.issueIndex]
+  exact admitted.present
 
 def SessionEnrollmentAt.intent {config : Config} {opened : Opened config}
     {ingress : ApplicationGrainSessionEnrollmentSource.Ingress}
@@ -120,6 +153,14 @@ structure PriorDispatchReserve (config : Config) where
   private mk ::
   index : Nat
   raw : ApplicationDispatchAgentReserveCore.RawEvidence config
+theorem PriorDispatchReserve.sourceExact {config : Config} (reserve : PriorDispatchReserve config) :
+    ∃ (original : DeclaredResourceController.Ground config.deployment)
+      (prepared : DeclaredResourceController.PreparedInvocation config.deployment config.profile
+        ⟨config.federation, config.genesisHeight + original.height⟩ original reserve.raw.command)
+      (shape : DeclaredResourceController.PhysicalShape prepared)
+      (accepted : DeclaredResourceController.AcceptedInvocation prepared reserve.raw.signed),
+      reserve.raw.record = DurableReceiver.IntentRecord.ofIntent (accepted.dataIntent shape) :=
+  reserve.raw.sourceExact
 
 /-- The admitted suffix has no write to this purse cell. A final-value-only
 comparison would admit settlement followed by a reserve that restores the
@@ -313,6 +354,16 @@ structure RunningAt (config : Config) (opened : Opened config)
   unitExact : prior.ingress.physical.unit = source.processIdentity
   imageExact : prior.ingress.physical.materializedImage =
     source.imageIdentity
+theorem RunningAt.running_record_at {config : Config} {opened : Opened config}
+    {source : ApplicationLifecycleBegin.Source}
+    (admitted : RunningAt config opened source) :
+    opened.durable.image.accepted[admitted.prior.index]? = some admitted.prior.record ∧
+      admitted.prior.ingress.beginSource.app = source.app ∧
+      admitted.prior.ingress.beginSource.processGeneration = source.before.generation ∧
+      admitted.prior.ingress.physical.unit = source.processIdentity ∧
+      admitted.prior.ingress.physical.materializedImage = source.imageIdentity :=
+  ⟨admitted.present, admitted.appExact, admitted.generationExact, admitted.unitExact,
+    admitted.imageExact⟩
 
 /-- The conditional source-level reconstruction of a completed create at its
 original prefix: the event25 first-create completion or the event72 retry
@@ -367,6 +418,16 @@ structure CreatedAt (config : Config) (opened : Opened config)
   ingressExact : prior.ingress = selected.ingress
   recordExact : prior.record = selected.record
   present : opened.durable.image.accepted[prior.index]? = some prior.record
+theorem CreatedAt.created_record_at {config : Config} {opened : Opened config}
+    {binding : ApplicationLifecycleLaunchBinding.Binding}
+    (admitted : CreatedAt config opened binding) :
+    opened.durable.image.accepted[admitted.selected.index]? = some admitted.selected.record := by
+  calc
+    opened.durable.image.accepted[admitted.selected.index]? =
+        opened.durable.image.accepted[admitted.prior.index]? := by
+          rw [admitted.indexExact]
+    _ = some admitted.prior.record := admitted.present
+    _ = some admitted.selected.record := by rw [admitted.recordExact]
 
 /-- The chronology required by the signed BEGIN choice is retained as data,
 including the original completed-create witness for every continue. -/
@@ -391,6 +452,16 @@ structure BeginAtV3 (config : Config) (opened : Opened config)
     config.deployment config.profile
     ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground ingress
   history : BeginV3History config opened ingress
+theorem BeginAtV3.signed_invocation_at {config : Config} {opened : Opened config}
+    {ingress : ApplicationLifecycleBeginV3Ingress.Ingress}
+    (admitted : BeginAtV3 config opened ingress) :
+    ingress.base.source.operationId = ingress.authorizationOperationId ∧
+      ∃ prepared : DeclaredResourceController.PreparedInvocation config.deployment config.profile
+          ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground
+          (ApplicationLifecycleBegin.command config.deployment.domain config.profile.semantics
+            ingress.base.source),
+        Nonempty (DeclaredResourceController.AcceptedInvocation prepared ingress.base.signed) :=
+  admitted.accepted.signedInvocationBound
 
 def BeginAtV3.intent {config : Config} {opened : Opened config}
     {ingress : ApplicationLifecycleBeginV3Ingress.Ingress}
@@ -420,6 +491,20 @@ structure ClaimAtV3 (config : Config) (opened : Opened config)
   conditional : ApplicationLifecycleClaimV3Core.Conditional config head opened.ground ingress
   recordExact : prior.record =
     DurableReceiver.IntentRecord.ofIntent conditional.originalAccepted.intent
+theorem ClaimAtV3.original_record_at {config : Config} {opened : Opened config}
+    {ingress : ApplicationLifecycleClaimV3Ingress.Ingress}
+    (admitted : ClaimAtV3 config opened ingress) :
+    opened.durable.image.accepted[ingress.base.source.originalIndex]? =
+      some (DurableReceiver.IntentRecord.ofIntent
+        admitted.conditional.originalAccepted.intent) := by
+  calc
+    opened.durable.image.accepted[ingress.base.source.originalIndex]? =
+        opened.durable.image.accepted[admitted.prior.index]? :=
+      congrArg (fun index => opened.durable.image.accepted[index]?)
+        admitted.indexExact.symm
+    _ = some (DurableReceiver.IntentRecord.ofIntent
+          admitted.conditional.originalAccepted.intent) := by
+      rw [admitted.present, admitted.recordExact]
 
 def ClaimAtV3.intent {config : Config} {opened : Opened config}
     {ingress : ApplicationLifecycleClaimV3Ingress.Ingress}
@@ -626,6 +711,20 @@ structure FailedStartRecoveryAt (config : Config) (opened : Opened config)
   ingressExact : prior.ingress = ingress.source.originalClaim
   recordExact : prior.record = conditional.historical.selected.record
   present : opened.durable.image.accepted[prior.index]? = some prior.record
+theorem FailedStartRecoveryAt.original_claim_at {config : Config} {opened : Opened config}
+    {ingress : ApplicationFailedStartRecoveryIngress.Ingress}
+    (admitted : FailedStartRecoveryAt config opened ingress) :
+    opened.durable.image.accepted[admitted.conditional.historical.index]? =
+        some admitted.conditional.historical.selected.record ∧
+      admitted.prior.ingress = ingress.source.originalClaim := by
+  refine ⟨?_, admitted.ingressExact⟩
+  calc
+    opened.durable.image.accepted[admitted.conditional.historical.index]? =
+        opened.durable.image.accepted[admitted.prior.index]? := by
+          rw [admitted.indexExact]
+    _ = some admitted.prior.record := admitted.present
+    _ = some admitted.conditional.historical.selected.record := by
+      rw [admitted.recordExact]
 
 def FailedStartRecoveryAt.intent {config : Config} {opened : Opened config}
     {ingress : ApplicationFailedStartRecoveryIngress.Ingress}
@@ -658,6 +757,20 @@ structure BeginAtV4 (config : Config) (opened : Opened config)
   accepted : ApplicationLifecycleRetryBeginV4Admission.Accepted config head opened.ground ingress
   recoveryExact : prior.record = accepted.evidence.selected.record
   present : opened.durable.image.accepted[prior.index]? = some prior.record
+theorem BeginAtV4.recovery_record_at {config : Config} {opened : Opened config}
+    {ingress : ApplicationLifecycleRetryBeginV4Ingress.Ingress}
+    (admitted : BeginAtV4 config opened ingress) :
+    opened.durable.image.accepted[ingress.retry.recoveryIndex]? =
+        some admitted.accepted.evidence.selected.record ∧
+      admitted.prior.ingress = ingress.retry.recovery := by
+  refine ⟨?_, admitted.ingressExact⟩
+  calc
+    opened.durable.image.accepted[ingress.retry.recoveryIndex]? =
+        opened.durable.image.accepted[admitted.prior.index]? :=
+      congrArg (fun index => opened.durable.image.accepted[index]?)
+        admitted.indexExact.symm
+    _ = some admitted.accepted.evidence.selected.record := by
+      rw [admitted.present, admitted.recoveryExact]
 
 def BeginAtV4.intent {config : Config} {opened : Opened config}
     {ingress : ApplicationLifecycleRetryBeginV4Ingress.Ingress}
@@ -686,6 +799,20 @@ structure ClaimAtV4 (config : Config) (opened : Opened config)
   conditional : ApplicationLifecycleRetryClaimV4Core.Conditional config head opened.ground ingress
   recordExact : prior.record =
     DurableReceiver.IntentRecord.ofIntent conditional.originalAccepted.intent
+theorem ClaimAtV4.original_record_at {config : Config} {opened : Opened config}
+    {ingress : ApplicationLifecycleRetryClaimV4Ingress.Ingress}
+    (admitted : ClaimAtV4 config opened ingress) :
+    opened.durable.image.accepted[ingress.base.source.originalIndex]? =
+      some (DurableReceiver.IntentRecord.ofIntent
+        admitted.conditional.originalAccepted.intent) := by
+  calc
+    opened.durable.image.accepted[ingress.base.source.originalIndex]? =
+        opened.durable.image.accepted[admitted.prior.index]? :=
+      congrArg (fun index => opened.durable.image.accepted[index]?)
+        admitted.indexExact.symm
+    _ = some (DurableReceiver.IntentRecord.ofIntent
+          admitted.conditional.originalAccepted.intent) := by
+      rw [admitted.present, admitted.recordExact]
 
 def ClaimAtV4.intent {config : Config} {opened : Opened config}
     {ingress : ApplicationLifecycleRetryClaimV4Ingress.Ingress}
@@ -714,6 +841,20 @@ structure CompletionAtV4 (config : Config) (opened : Opened config)
   ingressExact : prior.ingress = ingress.source.originalClaim
   recordExact : prior.record = conditional.historical.selected.record
   present : opened.durable.image.accepted[prior.index]? = some prior.record
+theorem CompletionAtV4.original_claim_at {config : Config} {opened : Opened config}
+    {ingress : ApplicationLifecycleRetryCompletionV4Ingress.Ingress}
+    (admitted : CompletionAtV4 config opened ingress) :
+    opened.durable.image.accepted[admitted.conditional.historical.index]? =
+        some admitted.conditional.historical.selected.record ∧
+      admitted.prior.ingress = ingress.source.originalClaim := by
+  refine ⟨?_, admitted.ingressExact⟩
+  calc
+    opened.durable.image.accepted[admitted.conditional.historical.index]? =
+        opened.durable.image.accepted[admitted.prior.index]? := by
+          rw [admitted.indexExact]
+    _ = some admitted.prior.record := admitted.present
+    _ = some admitted.conditional.historical.selected.record := by
+      rw [admitted.recordExact]
 
 def CompletionAtV4.intent {config : Config} {opened : Opened config}
     {ingress : ApplicationLifecycleRetryCompletionV4Ingress.Ingress}
@@ -753,6 +894,20 @@ structure CompletionAtV2 (config : Config) (opened : Opened config)
   recordExact : prior.record = conditional.historical.selected.record
   present : opened.durable.image.accepted[prior.index]? = some prior.record
   running : CompletionV2Running config opened ingress
+theorem CompletionAtV2.original_claim_at {config : Config} {opened : Opened config}
+    {ingress : ApplicationLifecycleCompletionV2Ingress.Ingress}
+    (admitted : CompletionAtV2 config opened ingress) :
+    opened.durable.image.accepted[admitted.conditional.historical.index]? =
+        some admitted.conditional.historical.selected.record ∧
+      admitted.prior.ingress = ingress.source.originalClaim := by
+  refine ⟨?_, admitted.ingressExact⟩
+  calc
+    opened.durable.image.accepted[admitted.conditional.historical.index]? =
+        opened.durable.image.accepted[admitted.prior.index]? := by
+          rw [admitted.indexExact]
+    _ = some admitted.prior.record := admitted.present
+    _ = some admitted.conditional.historical.selected.record := by
+      rw [admitted.recordExact]
 
 def CompletionAtV2.intent {config : Config} {opened : Opened config}
     {ingress : ApplicationLifecycleCompletionV2Ingress.Ingress}
@@ -821,6 +976,12 @@ structure DispatchAt (config : Config) (opened : Opened config)
   present : opened.durable.image.accepted[prior.index]? = some prior.evidence.record
   checked : ApplicationDispatchHistoricalCore.CheckedCandidate config opened.ground
     ingress prior.evidence
+theorem DispatchAt.issue_record_at {config : Config} {opened : Opened config}
+    {ingress : ApplicationDispatchAdmissionIngress.Ingress}
+    (admitted : DispatchAt config opened ingress) :
+    opened.durable.image.accepted[admitted.prior.index]? = some admitted.prior.evidence.record ∧
+      ingress.issueIngressBytes = admitted.prior.evidence.ingressBytes :=
+  ⟨admitted.present, admitted.checked.issueBytesExact⟩
 
 def DispatchAt.intent {config : Config} {opened : Opened config}
     {ingress : ApplicationDispatchAdmissionIngress.Ingress}
@@ -853,6 +1014,16 @@ structure LifetimeGrantIssueAt (config : Config) (opened : Opened config)
   scope : ingress.spec.grant.matchesIssued prior.evidence.spec prior.index prior.receipt = true
   current : ApplicationAgentLifetimeGrantAdmission.Accepted config.profile config
     opened.pins opened.durable (logicalHeight config opened.durable) ingress
+theorem LifetimeGrantIssueAt.ticket_record_at {config : Config} {opened : Opened config}
+    {ingress : ApplicationAgentLifetimeGrantSource.Ingress}
+    (admitted : LifetimeGrantIssueAt config opened ingress) :
+    opened.durable.image.accepted[ingress.spec.grant.source.issueIndex]? =
+        some admitted.prior.evidence.record ∧
+      ingress.spec.grant.matchesIssued admitted.prior.evidence.spec admitted.prior.index
+        admitted.prior.receipt = true := by
+  refine ⟨?_, admitted.scope⟩
+  rw [← admitted.originalIndex]
+  exact admitted.present
 
 def LifetimeGrantIssueAt.intent {config : Config} {opened : Opened config}
     {ingress : ApplicationAgentLifetimeGrantSource.Ingress}

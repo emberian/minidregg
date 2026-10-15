@@ -248,6 +248,27 @@ structure Accepted {F : Type} [Field F] [DecidableEq F]
   legs : (incidence : DeclaredResourceController.Incidence command) →
     DeclaredResourceController.incidenceObserveOnly command incidence = false →
     CheckedLeg prepared tuple physical incidence (signed.envelope command incidence)
+theorem Accepted.sound {F : Type} [Field F] [DecidableEq F]
+    {deployment : CanonicalCellRegistry.Deployment}
+    {profile : CanonicalRuntimeProfile.Profile F}
+    {ambient : DeclaredResourceController.Ambient}
+    {ground : Ground deployment}
+    {command : DeclaredResourceController.Command}
+    {prepared : DeclaredResourceController.PreparedInvocation
+      deployment profile ambient ground command}
+    {signed : DeclaredResourceController.SignedCommand}
+    {domain semantics : Digest} {publicKey : List UInt8}
+    {begin : ApplicationLifecycleRetryBeginV4Ingress.Ingress}
+    {physical : Checked domain semantics publicKey begin}
+    (accepted : Accepted prepared signed physical) :
+    DeclaredResourceController.commandCodec.encode command = signed.commandBytes ∧
+    ∀ (incidence : DeclaredResourceController.Incidence command)
+      (live : DeclaredResourceController.incidenceObserveOnly command incidence = false),
+      (accepted.legs incidence live).receipt.envelopeBytes = signed.envelope command incidence ∧
+      authorizeLeg prepared accepted.tuple incidence physical (accepted.legs incidence live).receipt =
+        .ok (accepted.legs incidence live).authorization :=
+  ⟨accepted.ingressExact, fun incidence live =>
+    ⟨(accepted.legs incidence live).envelopeExact, (accepted.legs incidence live).admitted⟩⟩
 
 def admit {F : Type} [Field F] [DecidableEq F]
     {deployment : CanonicalCellRegistry.Deployment}

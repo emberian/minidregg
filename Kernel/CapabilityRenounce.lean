@@ -163,7 +163,7 @@ def rawIngressCodec : LawfulCodec Ingress where
 def ingressCodec : LawfulCodec Ingress := strictCodec rawIngressCodec
 
 structure DecodedIngress where
-  private mk ::
+  mk ::
   ingress : Ingress
   command : Command
   commandExact : commandCodec.encode command = ingress.commandBytes
@@ -303,6 +303,14 @@ structure Accepted (prepared : Prepared deployment semantics ambient ground comm
     command.subject = .ok victim
   validated : ValidatedPatch AuthorityMaterializer ground.authority.cell
     ground.authority.cell.root (prepared.declaration.patch ground.authority.logical)
+theorem Accepted.sound {prepared : Prepared deployment semantics ambient ground command}
+    {envelope : List UInt8} (accepted : Accepted prepared envelope) :
+    accepted.receipt.envelopeBytes = envelope ∧
+    CredentialSignatureAdmission.verifySignature ground.authority prepared.marker
+      prepared.request accepted.receipt = true ∧
+    Renounce.gateAt ground.authority.cell command.kind command.capability
+      command.subject = .ok accepted.victim :=
+  ⟨accepted.envelopeExact, accepted.bound, accepted.gated⟩
 
 /-- A gate refusal carries the checked signature that preceded it. It is said
 only to the authenticated signer, and it is about the signer's own holding:
@@ -318,6 +326,14 @@ structure HolderRefusal (prepared : Prepared deployment semantics ambient ground
   reason : Renounce.Reject
   gated : Renounce.gateAt ground.authority.cell command.kind command.capability
     command.subject = .error reason
+theorem HolderRefusal.sound {prepared : Prepared deployment semantics ambient ground command}
+    {envelope : List UInt8} (refusal : HolderRefusal prepared envelope) :
+    refusal.receipt.envelopeBytes = envelope ∧
+    CredentialSignatureAdmission.verifySignature ground.authority prepared.marker
+      prepared.request refusal.receipt = true ∧
+    Renounce.gateAt ground.authority.cell command.kind command.capability
+      command.subject = .error refusal.reason :=
+  ⟨refusal.envelopeExact, refusal.bound, refusal.gated⟩
 
 inductive Admission (prepared : Prepared deployment semantics ambient ground command)
     (envelope : List UInt8) where
@@ -412,6 +428,13 @@ structure AcceptedRenounce (deployment : Deployment) (semantics : Digest) (ambie
   prepared : Prepared deployment semantics ambient ground ingress.command
   accepted : Accepted prepared ingress.ingress.envelopeBytes
   physical : PhysicalShape accepted
+theorem AcceptedRenounce.sound {ingress : DecodedIngress}
+    (accepted : AcceptedRenounce deployment semantics ambient ground ingress) :
+    accepted.accepted.receipt.envelopeBytes = ingress.ingress.envelopeBytes ∧
+    Renounce.gateAt ground.authority.cell ingress.command.kind ingress.command.capability
+      ingress.command.subject = .ok accepted.accepted.victim ∧
+    PhysicalShape accepted.accepted :=
+  ⟨accepted.accepted.envelopeExact, accepted.accepted.gated, accepted.physical⟩
 
 inductive DecodedAdmission (deployment : Deployment) (semantics : Digest) (ambient : Ambient)
     (ground : Ground deployment) (ingress : DecodedIngress) where

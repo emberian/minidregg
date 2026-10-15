@@ -38,6 +38,20 @@ structure Accepted (config : NativeHost.Config) (opened : NativeHost.Opened conf
     ingress.spec.evidence.messageId
   groupExact : original.ingress.packet.release.destination.group =
     ingress.spec.evidence.key.scope.query
+theorem Accepted.sound {config : NativeHost.Config} {opened : NativeHost.Opened config}
+    {cursor : FnConsumerFrontierCore.Cursor} {original : FnSelectedPollReleaseShape.Original}
+    {registration : FnConsumerNamespaceHistory.Original} {ingress : Ingress}
+    (accepted : Accepted config opened cursor original registration ingress) :
+    FnConsumerFrontierCore.checkAfter cursor (candidate ingress.spec) = .ok () ∧
+    registration.receipt = ingress.spec.registrationReceipt ∧
+    original.receipt = ingress.spec.evidence.releaseReceipt ∧
+    FnSelectiveReleaseIngress.transactionId original.ingress = ingress.spec.evidence.releaseKey ∧
+    original.ingress.packet.release.destination.messageId = ingress.spec.evidence.messageId ∧
+    original.ingress.packet.release.destination.group = ingress.spec.evidence.key.scope.query ∧
+    FnConsumerFrontierGateway.authorize accepted.gateway.prepared
+      accepted.gateway.signature.signature = some accepted.gateway.signature.authorization :=
+  ⟨accepted.frontierExact, accepted.registrationExact, accepted.receiptExact, accepted.keyExact,
+    accepted.messageExact, accepted.groupExact, accepted.gateway.signature.authorized⟩
 
 def admitAt (config : NativeHost.Config) (opened : NativeHost.Opened config)
     (cursor : FnConsumerFrontierCore.Cursor)

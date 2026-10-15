@@ -142,7 +142,7 @@ def trailerCarried (tag : List UInt8) : Option Carried :=
 /-- One stored entry as the Store returned it. Its bytes are readable only in
 this module (`verifyAt`, `verifyTagged`). -/
 structure RawEntry where
-  private mk ::
+  mk ::
   private height : Nat
   private record : List UInt8
   private tag : List UInt8
@@ -154,7 +154,7 @@ def RawEntry.claimedHeight (entry : RawEntry) : Nat := entry.height
 
 /-- One stored accumulator node `(level, end)` as the Store returned it. -/
 structure RawNode where
-  private mk ::
+  mk ::
   private level : Nat
   private finish : Nat
   private value : List UInt8
@@ -337,7 +337,7 @@ inductive StoreOrigin where
   deriving DecidableEq, Repr
 
 structure StoreIdentity where
-  private mk ::
+  mk ::
   origin : StoreOrigin
   key : MacKey
   logStart : Digest

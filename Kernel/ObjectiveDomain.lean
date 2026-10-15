@@ -736,6 +736,16 @@ structure Registration {rootBytes : Bytes → Digest} (config : Config) (snapsho
     ((request.members.zip records).map (fun (member, record) =>
       postAt snapshot (objectCell config.domain member) (objectImage member (joined record request.id))) ++
       [posted.write config snapshot])
+theorem Registration.sound {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : RegisterRequest} (registered : Registration config snapshot height request) :
+    (request.members ≠ [] ∧ request.members.Nodup ∧ request.members.length ≤ domainMemberCap) ∧
+      readDomain config snapshot request.id = .ok none ∧
+      request.members.mapM (readMember config snapshot) = .ok registered.records ∧
+      consentAll request height (request.members.zip registered.records) = .ok () ∧
+      request.members.mapM (readState config snapshot) = .ok registered.states ∧
+      judgeJoint request.law request.id registered.states = .ok () :=
+  ⟨registered.shape, registered.absent, registered.recordsExact, registered.consented, registered.statesExact,
+    registered.judged⟩
 
 def register {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (height : Nat)
     (request : RegisterRequest) : Except Refusal (Registration config snapshot height request) :=

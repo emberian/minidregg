@@ -59,6 +59,13 @@ structure Accepted (config : NativeHost.Config) (opened : NativeHost.Opened conf
     (sourceContext config opened) config.profile config.federation
     (NativeHost.logicalHeight config opened.durable) ingress.spec
   checked : FnSelectiveReleaseSourceAuthority.Checked prepared ingress.nativeEnvelope
+theorem Accepted.sound {config : NativeHost.Config} {opened : NativeHost.Opened config}
+    {ingress : Ingress} (accepted : Accepted config opened ingress) :
+    accepted.checked.signature.envelopeBytes = ingress.nativeEnvelope ∧
+    FnSelectiveReleaseSourceAuthority.authorize accepted.prepared accepted.checked.signature =
+      some accepted.checked.authorization ∧
+    ingress.spec.packet.release.source.parent = accepted.prepared.root :=
+  ⟨accepted.checked.envelopeExact, accepted.checked.authorized, accepted.prepared.sourceRoot⟩
 
 def admitLoaded (config : NativeHost.Config) (opened : NativeHost.Opened config)
     (ingress : Ingress) : IO (Except String (Accepted config opened ingress)) := do

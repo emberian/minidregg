@@ -386,6 +386,14 @@ structure Adoption {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
   guardsExact : guards = guardAt snapshot (packageCell config.domain request.pin) ::
     guardAt snapshot (stateCell config.domain request.object) ::
     request.rebirth.map (fun activity => guardAt snapshot (recordCell config.domain request.object activity))
+theorem Adoption.sound {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : AdoptRequest} (adopted : Adoption config snapshot height request) :
+    readObject config snapshot request.object = .ok (some adopted.record) ∧
+      adoptPolicy adopted.record.upgrade (adoptFacts request height) request = .ok () ∧
+      adopted.record.phase = .steady ∧ adopted.record.rebirths = 0 ∧ request.pin ≠ adopted.record.pin ∧
+      migrationCheck config snapshot adopted.record (request.pending height adopted.laws) = .ok () :=
+  ⟨adopted.recordExact, adopted.policy, adopted.steady, adopted.noRebirths, adopted.distinct,
+    adopted.migrationChecked⟩
 
 def adopt {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (height : Nat)
     (request : AdoptRequest) : Except Refusal (Adoption config snapshot height request) :=
@@ -499,6 +507,14 @@ structure Migrated {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
   postsExact : posts = postAt snapshot (objectCell config.domain request.object)
       (objectImage request.object (record.successor next)) ::
     (migratedStatePosts config snapshot request.object current migrated ++ [posted.write config snapshot])
+theorem Migrated.sound {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : MigrateRequest} (migrated : Migrated config snapshot height request) :
+    readObject config snapshot request.object = .ok (some migrated.record) ∧
+      migrated.record.phase = .draining migrated.next migrated.deadline ∧ migrated.record.live = 0 ∧
+      readState config snapshot request.object = .ok migrated.current ∧
+      migrateCurrent config snapshot migrated.record request.object migrated.next migrated.current =
+        .ok migrated.migrated :=
+  ⟨migrated.recordExact, migrated.draining, migrated.drained, migrated.currentExact, migrated.migratedExact⟩
 
 def migrate {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (height : Nat)
     (request : MigrateRequest) : Except Refusal (Migrated config snapshot height request) :=
@@ -638,6 +654,15 @@ structure Abort {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
       countPosts config snapshot record.object object record.pin record.activity true false)
   claims : List StableNullifier
   claimsExact : claims = awaitClaim await.id :: slotClaims
+theorem Abort.sound {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : AbortRequest} (aborted : Abort config snapshot height request) :
+    readRecord snapshot request.record = some aborted.record ∧
+      readObject config snapshot aborted.record.object = .ok (some aborted.object) ∧
+      aborted.object.phase = .draining aborted.next aborted.deadline ∧ aborted.deadline ≤ height ∧
+      aborted.record.pin = aborted.object.pin ∧ aborted.record.activity ∉ aborted.next.rebirth ∧
+      resume (responseData .upgraded aborted.view).term aborted.state = some aborted.resumed :=
+  ⟨aborted.recordExact, aborted.objectExact, aborted.draining, aborted.due, aborted.old, aborted.notChosen,
+    aborted.resumeExact⟩
 
 def abortDrained {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (height : Nat)
     (request : AbortRequest) : Except Refusal (Abort config snapshot height request) :=
@@ -778,6 +803,15 @@ structure Rebirth {rootBytes : Bytes → Digest} (config : Config) (snapshot : S
   postsExact : posts = born.posts ++ (postAt snapshot request.record retiredImage :: slotPosts)
   claims : List StableNullifier
   claimsExact : claims = awaitClaim await.id :: slotClaims
+theorem Rebirth.sound {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : RebirthRequest} (reborn : Rebirth config snapshot height request) :
+    readRecord snapshot request.record = some reborn.old ∧
+      readObject config snapshot reborn.old.object = .ok (some reborn.object) ∧
+      reborn.object.phase = .steady ∧ reborn.old.pin ≠ reborn.object.pin ∧
+      birth config snapshot height
+          (rebirthRequest config (logicalBook reborn.book.logical) request reborn.old reborn.object reborn.input) =
+        .ok reborn.born :=
+  ⟨reborn.oldExact, reborn.objectExact, reborn.steady, reborn.frozen, reborn.bornExact⟩
 
 def rebirth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (height : Nat)
     (request : RebirthRequest) : Except Refusal (Rebirth config snapshot height request) :=

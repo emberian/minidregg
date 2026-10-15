@@ -296,6 +296,12 @@ structure Accepted (l : Lowering) where
   sourceExact : source = { packet.source with term := erased }
   typed : Checked source []
   checkedExact : check source [] packet.fuel = some typed
+/-- The checker accepted, closed, the decoded packet of this lowering, whose term is
+the lowering's own erasure. -/
+theorem Accepted.sound {l : Lowering} (a : Accepted l) :
+    l.term.erase = .ok a.erased ∧ decodePacket l.packet = .ok a.packet ∧
+      a.packet.source.term = a.erased ∧ check a.source [] a.packet.fuel = some a.typed :=
+  ⟨a.erasure, a.decoded, a.packetTerm, a.checkedExact⟩
 
 /-- The checked source IS the decoded packet's source. -/
 theorem Accepted.source_eq_packet {l : Lowering} (a : Accepted l) : a.source = a.packet.source := by

@@ -49,7 +49,7 @@ def rawIngressCodec : LawfulCodec Ingress where
 def ingressCodec : LawfulCodec Ingress := strictCodec rawIngressCodec
 
 structure DecodedIngress where
-  private mk ::
+  mk ::
   ingress : Ingress
   command : PackedCommand
   commandExact : commandCodec.encode command = ingress.commandBytes
@@ -137,6 +137,14 @@ structure AcceptedDelegation [DecidableEq F] (deployment : Deployment)
   prepared : Prepared deployment profile ambient ground ingress.command.2
   accepted : Accepted prepared ingress.ingress.envelopeBytes
   physical : PhysicalShape prepared
+theorem AcceptedDelegation.sound [DecidableEq F] {ingress : DecodedIngress}
+    (accepted : AcceptedDelegation deployment profile ambient ground ingress) :
+    accepted.accepted.receipt.envelopeBytes = ingress.ingress.envelopeBytes ∧
+    accepted.accepted.authorization.evidence.capabilityValue =
+      some (accepted.prepared.parent.head,
+        storedCapabilityDigest ground.authority accepted.prepared.parent) ∧
+    PhysicalShape accepted.prepared :=
+  ⟨accepted.accepted.envelopeExact, accepted.accepted.parentNamed, accepted.physical⟩
 
 def admitDecodedNative [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (ground : Ground deployment)

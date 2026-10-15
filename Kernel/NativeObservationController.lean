@@ -398,6 +398,16 @@ structure CheckedGrant (context : Context deployment) (profile : CanonicalRuntim
   balancesExact : preparation.accountBalances = selected.accountBalances
   envelope : List UInt8
   checked : ResourceObservationAdmission.Checked preparation envelope
+theorem CheckedGrant.observedPresent {context : Context deployment}
+    {profile : CanonicalRuntimeProfile.Profile F} {federation : FederationId} {genesisHeight : Nat}
+    {intent : Intent} {grant : GrantRef}
+    (granted : CheckedGrant context profile federation genesisHeight intent grant) :
+    context.directory.slots grant.target = .present granted.preparation.observed.before ∧
+      ResourceObservationAdmission.authorize granted.preparation granted.checked.signature =
+        some granted.checked.authorization := by
+  refine ⟨?_, granted.checked.authorized⟩
+  rw [granted.selectedExact]
+  exact granted.selected.present
 
 private def headerAt (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (worldRoot : Digest)

@@ -51,7 +51,7 @@ cap applies only to grain-backed birth, not to the legacy bare-birth route. -/
 def maxSourceBytes : Nat := 8 * 1024 * 1024
 
 structure DecodedIngress where
-  private mk ::
+  mk ::
   raw : SignedIngress
   sourceSizeBound : raw.sourceBytes.length ≤ maxSourceBytes
   source : GrainResourceBirthController.Source

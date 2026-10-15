@@ -338,6 +338,18 @@ structure MessageDelivery {rootBytes : Bytes → Digest} (config : Config) (snap
   posts : List Post
   postsExact : posts = outcome.posts config snapshot ++ mail.posts ++
     [replyPost config snapshot slot decided, posted.write config snapshot]
+theorem MessageDelivery.sound {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : MessageRequest} (delivered : MessageDelivery config snapshot height request) :
+    readInbox snapshot (inboxCell config.domain snapshot request.sender request.target) = some (some delivered.inbox) ∧
+      (delivered.inbox.sender = request.sender ∧ delivered.inbox.target = request.target) ∧
+      delivered.inbox.pop = some (delivered.message, delivered.remaining) ∧ delivered.message.id = request.message ∧
+      readSlot config snapshot delivered.message.id = some delivered.slot ∧
+      delivered.slot.activity = inboxCell config.domain snapshot request.sender request.target ∧
+      runMessage config snapshot height request.target delivered.message = delivered.run ∧
+      AnswerSlot.decideDelivery delivered.slot delivered.message.id delivered.message.sender height
+        delivered.outcome.decision = .ok delivered.decided :=
+  ⟨delivered.readExact, delivered.ends, delivered.popped, delivered.named, delivered.slotExact,
+    delivered.activityExact, delivered.runExact, delivered.decidedExact⟩
 
 /-- **An unwatched slot's delivery retires it; a watched one's writes the decision.** -/
 theorem replyPost_spec {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)

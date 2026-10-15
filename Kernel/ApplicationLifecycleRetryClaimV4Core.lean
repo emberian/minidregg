@@ -33,6 +33,14 @@ structure Conditional (config : Config) {store : StoreIdentity} (head : Head sto
   markers : ApplicationFailedCreateRetryEvidence.markersCurrent config ground
     ingress.originalBegin.retry = true
 
+theorem Conditional.original_record_exact {config : Config} {store : StoreIdentity}
+    {head : Head store} {ground : Ground config.deployment}
+    {ingress : ApplicationLifecycleRetryClaimV4Ingress.Ingress}
+    (conditional : Conditional config head ground ingress) :
+    conditional.original.record =
+      DurableReceiver.IntentRecord.ofIntent conditional.originalAccepted.intent :=
+  conditional.originalMatch.selected.symm.trans conditional.originalMatch.exact
+
 /-- Every key the current part of a retry claim reads: the claim's and the retry markers'. -/
 def keys (ingress : ApplicationLifecycleRetryClaimV4Ingress.Ingress) : DurableView.Keys :=
   let current := ApplicationLifecycleClaimCurrent.keys ingress.base

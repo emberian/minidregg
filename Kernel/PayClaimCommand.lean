@@ -105,6 +105,10 @@ structure DecodedIngress where
   canonical : commandCodec.encode command = ingress.commandBytes
   signatureShape : ingress.possessionSignature.length = 64
   commandShape : command.valid
+theorem DecodedIngress.sound (decoded : DecodedIngress) :
+    commandCodec.encode decoded.command = decoded.ingress.commandBytes ∧
+      decoded.ingress.possessionSignature.length = 64 ∧ decoded.command.valid :=
+  ⟨decoded.canonical, decoded.signatureShape, decoded.commandShape⟩
 
 def maxIngressBytes : Nat := 4096
 

@@ -1385,6 +1385,16 @@ structure Deliverable {rootBytes : Bytes → Digest} (config : Config) (snapshot
   /-- The message's postage pays the front end its delivery's root frame replays: the same draws,
   replayed on a fresh meter over the postage envelope (GPT-6 row E). -/
   postagePays : ((ObjectiveWorkAccount.Meter.start message.envelope).drawAll (meterAfter.since meter)).toBool = true
+theorem Deliverable.sound {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {target : Nat} {message : Inbox.Message} {meter : ObjectiveWorkAccount.Meter}
+    (d : Deliverable config snapshot target message meter) :
+    readObject config snapshot ⟨target⟩ = .ok (some d.record) ∧
+      readState config snapshot ⟨target⟩ = .ok (some d.view) ∧ decodeDataBytes message.args = some d.args ∧
+      loadMethod config target (packageBytes config snapshot d.record.activePin) d.record.activePin
+        message.method (viewData d.view) d.args meter = .ok (d.method, d.meterAfter) ∧
+      labelsWithin d.method.applied.assumptions d.method.planType (deliveredPlans message) = true ∧
+      ((ObjectiveWorkAccount.Meter.start message.envelope).drawAll (d.meterAfter.since meter)).toBool = true :=
+  ⟨d.recordExact, d.viewExact, d.argsExact, d.methodExact, d.callsOnly, d.postagePays⟩
 
 /-- Decide `Deliverable`, refusing by name: `notAnObject`, `stateMissing` (an object with no
 declared state: its delivery could not enter it), `argumentType` (arguments that do not

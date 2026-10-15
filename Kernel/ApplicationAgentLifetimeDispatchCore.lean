@@ -56,6 +56,22 @@ structure Checked (config : Config) (opened : Opened config)
   purseDistinctGrant : ingress.reserveContext.base.purseTask ≠ ingress.reserveContext.grantResource
   purseReadonly : (purseGuard payer).cellId ∉
     (DeclaredResourceController.writes current.prepared).map DataWrite.cellId
+/-- The checked dispatch core's reserve evidence is the ingress's, and the payer's
+current hold is exactly that reserve applied to its before state. -/
+theorem Checked.reserveBound {config : Config} {opened : Opened config}
+    {ingress : Ingress} {spec : ApplicationShareIssueSource.Spec}
+    {descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry}
+    {grant : ApplicationAgentLifetimeGrant.Grant}
+    {ticketIssueIndex : Nat} {ticketIssueReceipt : NativeHostCodec.Receipt}
+    {issuedIngressBytes : List UInt8} {certifiedGrantIssueIndex : Nat}
+    {certifiedGrantRoot : Digest}
+    {reserved : ApplicationAgentLifetimeDispatchReserveCore.ReservedEvidence config}
+    (checked : Checked config opened ingress spec descriptor grant ticketIssueIndex
+      ticketIssueReceipt issuedIngressBytes certifiedGrantIssueIndex certifiedGrantRoot reserved) :
+    reserved.context = ingress.reserveContext ∧
+      checked.payer.state = AgentGrain.reserve reserved.beforeState
+        ingress.reserveContext.base.reserveAmount :=
+  ⟨checked.contextExact, checked.holdExact⟩
 
 def checkCurrent (config : Config) (opened : Opened config)
     (ingress : Ingress) (spec : ApplicationShareIssueSource.Spec)

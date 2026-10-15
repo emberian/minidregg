@@ -62,7 +62,7 @@ structure AdmittedRead {F : Type} [Field F] [DecidableEq F]
     {deployment : ResourceObservationAdmission.Deployment}
     (context : ResourceObservationAdmission.Context deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (subject : SubjectId) where
-  private mk ::
+  mk ::
   kind : ResourceKind
   request : Request kind
   subjectExact : request.subject = subject
@@ -181,7 +181,7 @@ structure Bound {F : Type} [Field F] [DecidableEq F]
     {deployment : ResourceObservationAdmission.Deployment}
     (context : ResourceObservationAdmission.Context deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (input : Input) where
-  private mk ::
+  mk ::
   reads : List (AdmittedRead context profile input.subject)
   exact : input.observations = reads.map AdmittedRead.value
 

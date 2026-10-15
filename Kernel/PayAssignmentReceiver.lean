@@ -280,6 +280,11 @@ structure DecodedIngress where
   envelope : CredentialSignedEnvelopeController.SignedEnvelope
   envelopeExact : CredentialSignatureAdmission.canonicalEnvelopeCodec.decode ingress.envelope =
     some envelope
+theorem DecodedIngress.sound (decoded : DecodedIngress) :
+    commandCodec.encode decoded.command = decoded.ingress.commandBytes ∧
+      CredentialSignatureAdmission.canonicalEnvelopeCodec.decode decoded.ingress.envelope =
+        some decoded.envelope :=
+  ⟨decoded.canonical, decoded.envelopeExact⟩
 
 def decodeIngress (bytes : List UInt8) : Option DecodedIngress := do
   let ingress ← ingressCodec.decode bytes
@@ -542,6 +547,13 @@ structure Accepted [DecidableEq F]
   receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
   envelopeExact : receipt.envelopeBytes = ingress.ingress.envelope
   semantic : prepared.SemanticAccepted
+theorem Accepted.sound [DecidableEq F]
+    {prepared : Prepared deployment profile ambient durable command} {ingress : DecodedIngress}
+    (accepted : Accepted prepared ingress) :
+    accepted.receipt.envelopeBytes = ingress.ingress.envelope ∧
+      Nonempty (Authorized (policyConfig prepared).portal prepared.authority.snapshot.authState
+        (request prepared.authority.snapshot prepared.pay.cell profile.semantics ambient command)) :=
+  ⟨accepted.envelopeExact, ⟨accepted.semantic.authorization⟩⟩
 
 def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
     (prepared : Prepared deployment profile ambient durable command)
@@ -631,6 +643,18 @@ structure AcceptedAssignment [DecidableEq F] (deployment : Deployment)
   prepared : Prepared deployment profile ambient durable ingress.command
   accepted : PayAssignmentReceiver.Accepted prepared ingress
   physical : PhysicalShape prepared
+theorem AcceptedAssignment.sound [DecidableEq F] {ingress : DecodedIngress}
+    (accepted : AcceptedAssignment deployment profile ambient durable ingress) :
+    accepted.accepted.receipt.envelopeBytes = ingress.ingress.envelope ∧
+      decideAssignment accepted.prepared.pay.cell.logical
+        (readCapability accepted.prepared.authority.snapshot.cell .account ingress.command.capability)
+        ingress.command.subject ingress.command.account ingress.command.index = .ok () ∧
+      Nonempty (Authorized (policyConfig accepted.prepared).portal accepted.prepared.authority.snapshot.authState
+        (request accepted.prepared.authority.snapshot accepted.prepared.pay.cell profile.semantics ambient
+          ingress.command)) ∧
+      PhysicalShape accepted.prepared :=
+  ⟨accepted.accepted.envelopeExact, accepted.prepared.decided, ⟨accepted.accepted.semantic.authorization⟩,
+    accepted.physical⟩
 
 def admitDecodedNative [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)

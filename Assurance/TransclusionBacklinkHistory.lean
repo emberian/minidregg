@@ -542,6 +542,14 @@ local notation "Event" =>
     (clauseEvidence := clauseEvidence) (family := family)
     (headerCells := headerCells) (C := C) FinalityEvidence PCSOpeningSound
     CommitmentBindingCR RandomOracleModel encoding linkRelationId
+/-- The event occurs in a committed entry of the link relation, and its exact opening
+of that entry's word encodes the destination reference. -/
+theorem sound (event : Event) :
+    event.entry.context.outcome = .committed ∧
+      event.entry.context.semanticRelationId = linkRelationId ∧
+      event.eventOpening.Exact event.entry.word ∧
+      event.eventOpening.cells = encoding.cells event.target :=
+  ⟨event.committed, event.relationExact, event.openingExact, event.targetEncodingExact⟩
 
 /-- Exact source identity derived from the retained verified entry. -/
 def source (event : Event) : SourceIdentity where

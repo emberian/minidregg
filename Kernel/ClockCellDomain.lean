@@ -76,6 +76,11 @@ structure Loaded (deployment : CanonicalCellRegistry.Deployment) (physical : Phy
   boundPositive : 0 < maxStepSeconds
   observed : physical.canonicalBytes (cellIdOf deployment) = cellBytes cell
   clockExact : ClockCell.clockOf cell.logical = some clock
+theorem Loaded.sound {deployment : CanonicalCellRegistry.Deployment} {physical : PhysicalSnapshot}
+    (loaded : Loaded deployment physical) :
+    physical.canonicalBytes (cellIdOf deployment) = cellBytes loaded.cell ∧
+    ClockCell.clockOf loaded.cell.logical = some loaded.clock :=
+  ⟨loaded.observed, loaded.clockExact⟩
 
 def load (deployment : CanonicalCellRegistry.Deployment) (physical : PhysicalSnapshot) :
     Option (Loaded deployment physical) :=

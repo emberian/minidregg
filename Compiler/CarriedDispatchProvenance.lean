@@ -25,6 +25,14 @@ structure CarriedDispatchIssue (config : Config) (current : Durable) where
   wire : GrainResourceBirthHostCodec.SourceWire
   sourceCanonical : GrainResourceBirthHostCodec.sourceFrame ++
     GrainResourceBirthHostCodec.sourceWireStream.encode wire = raw.sourceBytes
+/-- The carried dispatch issue's record is in the current image, and its raw signed
+ingress is exactly the decode of that issue's grain ingress. -/
+theorem CarriedDispatchIssue.carried {config : Config} {current : Durable}
+    (selected : CarriedDispatchIssue config current) :
+    current.image.accepted[selected.issue.index]? = some selected.issue.record ∧
+      GrainResourceBirthPolicyController.ingressCodec.decode
+        selected.issue.ingress.grainIngress = some selected.raw :=
+  ⟨selected.issue.currentPresent, selected.rawExact⟩
 
 def CarriedDispatchIssue.originalSourceBytes {config : Config} {current : Durable}
     (selected : CarriedDispatchIssue config current) : List UInt8 :=

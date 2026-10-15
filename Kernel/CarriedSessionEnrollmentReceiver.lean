@@ -57,6 +57,12 @@ structure Confirmed (config : Config) (anchor : Opened config) where
   receipt : Receipt
   receiptExact : verified.receiptAt old.opened.durable.height = some receipt
   confirmation : DurableReceiverIO.Confirmation
+theorem Confirmed.sound {config : Config} {anchor : Opened config}
+    (confirmed : Confirmed config anchor) :
+    confirmed.derived.intent.event =
+      ApplicationGrainSessionEnrollmentSource.event config.deployment.domain confirmed.ingress ∧
+    confirmed.verified.receiptAt confirmed.old.opened.durable.height = some confirmed.receipt :=
+  ⟨confirmed.derivedEvent, confirmed.receiptExact⟩
 
 def Confirmed.target {config : Config} {anchor : Opened config}
     (confirmed : Confirmed config anchor) : Durable := confirmed.appended.next

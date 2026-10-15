@@ -17,7 +17,7 @@ open Minidregg.Theory.TypedAuthorization
 set_option autoImplicit false
 
 structure Original where
-  private mk ::
+  mk ::
   ingress : Ingress
   receipt : Receipt
   transactionExact : transactionId ingress.spec = receipt.transactionId

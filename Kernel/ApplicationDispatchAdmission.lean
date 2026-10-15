@@ -355,6 +355,26 @@ theorem CheckedRead.signedInnerRoot {F : Type} [Field F] [DecidableEq F]
       resource capability root envelope) :
     root = read.selected.observed.before.payload.root :=
   ResourceObservationAdmission.preparation_actual_root read.selected
+/-- The checked read quotes the signed root, is the ground's current cell at the
+resource, and is not written by the prepared invocation. -/
+theorem CheckedRead.sound {F : Type} [Field F] [DecidableEq F]
+    {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
+    {ambient : Ambient} {ground : Ground deployment}
+    {ingress : ApplicationDispatchAdmissionIngress.Ingress}
+    {selection : Selection}
+    {prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient ground
+      (command ingress.dispatch selection ingress.parent)}
+    {resource : Nat} {capability : CapabilityId} {root : Digest}
+    {envelope : List UInt8}
+    (read : CheckedRead deployment profile ambient ground ingress selection prepared
+      resource capability root envelope) :
+    root = read.selected.observed.before.payload.root ∧
+      ResourceBirthCodec.physicalRoot (.live read.selected.observed.before) =
+        ground.view.model.roots ⟨resource⟩ ∧
+      (observationGuard resource
+          (ResourceBirthCodec.physicalRoot (.live read.selected.observed.before))).cellId ∉
+        (DeclaredResourceController.writes prepared).map DataWrite.cellId :=
+  ⟨read.signedInnerRoot, read.current, read.readonly⟩
 
 def checkRead {F : Type} [Field F] [DecidableEq F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
@@ -563,6 +583,25 @@ structure CheckedCurrentForSourceBytes {F : Type} [Field F] [DecidableEq F]
   issuerCurrent : issuerLineageCurrentFromSourceBytes deployment profile ambient ground ingress spec
     selection originalSourceBytes prepared = true
   invocation : DeclaredResourceController.AcceptedInvocation prepared ingress.dispatch.signed
+/-- The current checks bind the ingress to the deployment profile, its signed command,
+the live installed ticket of the spec, and the issuer lineage from the source bytes. -/
+theorem CheckedCurrentForSourceBytes.sound {F : Type} [Field F] [DecidableEq F]
+    {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
+    {ambient : Ambient} {ground : Ground deployment}
+    {ingress : ApplicationDispatchAdmissionIngress.Ingress}
+    {spec : Spec} {originalSourceBytes : List UInt8}
+    (checked : CheckedCurrentForSourceBytes deployment profile ambient ground ingress spec
+      originalSourceBytes) :
+    (ingress.dispatch.domain = deployment.domain ∧
+        ingress.dispatch.semantics = profile.semantics) ∧
+      matchesCommand ingress.dispatch checked.selection ingress.parent checked.signedCommand = true ∧
+      installedTicket deployment.domain spec.ticket.resource
+        checked.ticketRead.selected.observed.before = some checked.ticket ∧
+      checked.ticket.liveAt ambient.height = true ∧
+      issuerLineageCurrentFromSourceBytes deployment profile ambient ground ingress spec
+        checked.selection originalSourceBytes checked.prepared = true :=
+  ⟨checked.profileExact, checked.commandExact, checked.ticketExact, checked.ticketLive,
+    checked.issuerCurrent⟩
 
 /-- The original API remains definitionally the same admission over its own
 canonical descriptor commitment. Carried users require separate provenance. -/

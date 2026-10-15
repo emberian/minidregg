@@ -46,7 +46,7 @@ def Materializer.rootOf {L : Layout.{u, v, w}} {Root : Type y}
 constructor prevents alternate root/encoding fields from being introduced. -/
 structure Materialized {L : Layout.{u, v, w}} {Root : Type y}
     (M : Materializer L Root) where
-  private mk ::
+  mk ::
   logical : Store L
 
 /-- The one constructor for canonical cells. -/

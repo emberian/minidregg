@@ -41,6 +41,23 @@ structure Prepared (deployment : CanonicalCellRegistry.Deployment)
   planExact : plan = ⟨effects++[returnEffect profile slot],[slot],reads⟩
   nativeExact : BendWorldPlan.matchesCommand plan command = true
   returnsStored : plan.returns.all (storesReturn command) = true
+/-- The prepared plan is the checked term's actual run, its result slot and the
+command-matching plan built from them. -/
+theorem Prepared.sound {deployment : CanonicalCellRegistry.Deployment}
+    {loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry}
+    {profile : ObjectiveBendResultAdapter.Profile} {command : Command} {source : AnnotatedTerm}
+    {limits : Limits} {budget : Budget} {capacity : ObjectiveBendDemandCapacity.Profile}
+    (prepared : Prepared deployment loaded profile command source limits budget capacity) :
+    executeWith (ObjectiveBendDemandCapacity.allows capacity) limits budget source.term =
+        .ok prepared.execution ∧
+      prepared.execution.extraction.result.value =
+        .record [("plan", prepared.planData), ("result", prepared.resultData)] ∧
+      prepared.slot = returnSlot profile prepared.resultType prepared.bytes ∧
+      prepared.plan = ⟨prepared.effects ++ [returnEffect profile prepared.slot], [prepared.slot],
+        prepared.reads⟩ ∧
+      BendWorldPlan.matchesCommand prepared.plan command = true :=
+  ⟨prepared.runExact, prepared.dataShape, prepared.slotExact, prepared.planExact,
+    prepared.nativeExact⟩
 
 def prepare (deployment : CanonicalCellRegistry.Deployment)
     (loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry)

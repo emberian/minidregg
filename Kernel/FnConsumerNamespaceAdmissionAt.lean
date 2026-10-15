@@ -56,6 +56,15 @@ structure Conditional (config : NativeHost.Config) (opened : NativeHost.Opened c
   anchorExact : anchorMatches ingress.spec legacy = true
   gateway : FnConsumerFrontierGateway.CheckedOpened config opened
     (proposal ingress) ingress.gatewayEnvelope
+theorem Conditional.sound {config : NativeHost.Config} {opened : NativeHost.Opened config}
+    {legacy : Option Legacy} {ingress : Ingress}
+    (conditional : Conditional config opened legacy ingress) :
+    anchorMatches ingress.spec legacy = true ∧
+    conditional.gateway.signature.signature.envelopeBytes = ingress.gatewayEnvelope ∧
+    FnConsumerFrontierGateway.authorize conditional.gateway.prepared
+      conditional.gateway.signature.signature = some conditional.gateway.signature.authorization :=
+  ⟨conditional.anchorExact, conditional.gateway.signature.envelopeExact,
+    conditional.gateway.signature.authorized⟩
 
 def prepareConditional (config : NativeHost.Config) (opened : NativeHost.Opened config)
     (legacy : Option Legacy) (ingress : Ingress) :

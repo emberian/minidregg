@@ -94,6 +94,11 @@ structure DecodedIngress where
   envelope : CredentialSignedEnvelopeController.SignedEnvelope
   envelopeExact : CredentialSignatureAdmission.canonicalEnvelopeCodec.decode
     ingress.envelopeBytes = some envelope
+theorem DecodedIngress.sound (decoded : DecodedIngress) :
+    PolicyInstallController.decodeDeclaration decoded.ingress.declarationBytes = some decoded.declaration ∧
+      CredentialSignatureAdmission.canonicalEnvelopeCodec.decode decoded.ingress.envelopeBytes =
+        some decoded.envelope :=
+  ⟨decoded.declarationExact, decoded.envelopeExact⟩
 
 def decodeIngress (bytes : List UInt8) : Option DecodedIngress := do
   let ingress ← ingressCodec.decode bytes
@@ -242,6 +247,19 @@ structure Prepared (profile : CanonicalRuntimeProfile.Profile F) (deployment : D
   physicalShape : PhysicalShape deployment ground
     (planWrites (representationCreates deployment semantic.declaration)
       (ground.authorityWrites semantic.update.validated.apply))
+theorem Prepared.sound {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
+    {ground : Ground deployment} {federation : FederationId} {height : Height} {ingress : DecodedIngress}
+    (prepared : Prepared profile deployment ground federation height ingress) :
+    WorldKindLawDependencies.loadTarget deployment ground.directory
+        ingress.declaration.source.policyId.value = some prepared.structural ∧
+      prepared.semantic.additional = prepared.structural.additional ∧
+      prepared.semantic.declaration = ingress.declaration ∧
+      ingress.marker = (PolicyInstallController.requestDigest profile ground.authority
+        (context federation height ground.authority ingress) prepared.semantic.declaration).value ∧
+      ResourceBirth.allocate Registry ground.directory
+        (representationCreates deployment prepared.semantic.declaration) = .ok prepared.allocated :=
+  ⟨prepared.structuralExact, prepared.additionalExact, prepared.declarationExact, prepared.markerExact,
+    prepared.allocationExact⟩
 
 def prepare (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployment)
     (ground : Ground deployment) (federation : FederationId) (height : Height)
@@ -394,6 +412,13 @@ structure AcceptedInstall (profile : CanonicalRuntimeProfile.Profile F) (deploym
   /-- Every birth write the installation commits (its successor source) is named by
   the step the old source's law admitted. -/
   named : ResourceBirthController.Concrete.Named prepared.semantic.step prepared.writes
+theorem AcceptedInstall.sound (accepted : AcceptedInstall profile deployment ground federation height) :
+    accepted.receipt.envelopeBytes = accepted.ingress.ingress.envelopeBytes ∧
+      accepted.prepared.semantic.admit (payloadStore ground) accepted.ingress.ingress.controlCapability
+        accepted.receipt = .ok accepted.semantic ∧
+      dependencyGuards accepted.prepared accepted.semantic = some accepted.lawGuards ∧
+      accepted.lawGuards.all (fun guard => decide (guard.2 = ground.view.model.roots ⟨guard.1⟩)) = true :=
+  ⟨accepted.envelopeExact, accepted.admitted, accepted.lawGuardsExact, accepted.lawGuardsBound⟩
 
 /-- Admission on a ground. The marker's spent bit is answered declared and
 unspent by `prepare` before the native verifier reads the authority's spent set

@@ -28,6 +28,17 @@ structure Accepted (config : NativeHost.Config) (opened : NativeHost.Opened conf
   registrationKeyExact : registration.ingress.spec.key = ingress.spec.evidence.key
   gateway : FnConsumerFrontierGateway.CheckedOpened config opened
     (FnConsumerFrontierProposal.empty ingress) ingress.gatewayEnvelope
+theorem Accepted.sound {config : NativeHost.Config} {opened : NativeHost.Opened config}
+    {cursor : FnConsumerFrontierCore.Cursor} {registration : FnConsumerNamespaceHistory.Original}
+    {ingress : Ingress} (accepted : Accepted config opened cursor registration ingress) :
+    FnConsumerFrontierCore.checkAfter cursor (candidate ingress.spec) = .ok () ∧
+    registration.receipt = ingress.spec.registrationReceipt ∧
+    registration.ingress.spec.key = ingress.spec.evidence.key ∧
+    accepted.gateway.signature.signature.envelopeBytes = ingress.gatewayEnvelope ∧
+    FnConsumerFrontierGateway.authorize accepted.gateway.prepared
+      accepted.gateway.signature.signature = some accepted.gateway.signature.authorization :=
+  ⟨accepted.frontierExact, accepted.registrationExact, accepted.registrationKeyExact,
+    accepted.gateway.signature.envelopeExact, accepted.gateway.signature.authorized⟩
 
 def admitAt (config : NativeHost.Config) (opened : NativeHost.Opened config)
     (cursor : FnConsumerFrontierCore.Cursor)

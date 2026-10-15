@@ -46,6 +46,16 @@ structure Checked (config : Config) (opened : Opened config)
     context.base.maximumCharge ≤ context.base.reserveAmount
   physicalCurrent : ResourceBirthCodec.physicalRoot (.live cell) =
     opened.durable.snapshot.model.roots ⟨context.base.purseTask⟩
+/-- The payer's purse state is read from the opened image's current purse cell and
+carries the context's generation and reserved amount. -/
+theorem Checked.sound {config : Config} {opened : Opened config} {context : Context}
+    (checked : Checked config opened context) :
+    ApplicationDispatchAgentPayer.stateAt context.base.purseTask checked.cell = some checked.state ∧
+      ResourceBirthCodec.physicalRoot (.live checked.cell) =
+        opened.durable.snapshot.model.roots ⟨context.base.purseTask⟩ ∧
+      checked.state.generation = context.base.purseGeneration ∧
+      checked.state.reserved = context.base.reserveAmount :=
+  ⟨checked.stateExact, checked.physicalCurrent, checked.stateGeneration, checked.stateAmount⟩
 
 def checkCurrent (config : Config) (opened : Opened config)
     (context : Context) (payerCapability payerObserve : CapabilityId)

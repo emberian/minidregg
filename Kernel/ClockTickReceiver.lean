@@ -214,7 +214,7 @@ def ingressCodec : LawfulCodec Ingress :=
   framed "DREGG/CLOCK/TICK/SIGNED/v1".toUTF8.toList ingressStream
 
 structure DecodedIngress where
-  private mk ::
+  mk ::
   ingress : Ingress
   command : Command
   canonical : commandCodec.encode command = ingress.commandBytes
@@ -517,6 +517,24 @@ structure Accepted [DecidableEq F]
   receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
   envelopeExact : receipt.envelopeBytes = ingress.ingress.sponsorEnvelope
   semantic : prepared.SemanticAccepted
+theorem Accepted.sound [DecidableEq F]
+    {prepared : Prepared deployment profile ambient durable command} {ingress : DecodedIngress}
+    (accepted : Accepted prepared ingress) :
+    accepted.receipt.envelopeBytes = ingress.ingress.sponsorEnvelope ∧
+    ∃ graph : PolicyComponentResolution.LoadedGraph
+        (policyConfig prepared).snapshot (policyConfig prepared).store
+        (policyConfig prepared).profile.semantics (policyConfig prepared).target
+        (policyConfig prepared).additional,
+      PolicyComponentResolution.loadTarget (policyConfig prepared).snapshot
+        (policyConfig prepared).store (policyConfig prepared).profile.semantics
+        (policyConfig prepared).target (policyConfig prepared).resolutionBudget
+        (policyConfig prepared).additional = .ok graph ∧
+      Minidregg.Pred.eval (ResolvedLawCompilation.predicate graph.resolved)
+        (step prepared).oldState (step prepared).newState = true :=
+  ⟨accepted.envelopeExact, ComposedPolicyAdmission.authorized_effective_law (policyConfig prepared)
+    (request deployment prepared.authority.snapshot prepared.clock.cell profile.semantics ambient
+      command prepared.plan)
+    accepted.semantic.authorization⟩
 
 def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
     (prepared : Prepared deployment profile ambient durable command)
@@ -608,6 +626,14 @@ structure AcceptedTick [DecidableEq F] (deployment : Deployment)
   prepared : Prepared deployment profile ambient durable ingress.command
   accepted : ClockTickReceiver.Accepted prepared ingress
   physical : PhysicalShape prepared
+theorem AcceptedTick.sound [DecidableEq F] {ingress : DecodedIngress}
+    (accepted : AcceptedTick deployment profile ambient durable ingress) :
+    accepted.accepted.receipt.envelopeBytes = ingress.ingress.sponsorEnvelope ∧
+    clockOf accepted.prepared.clockPost.logical = some ingress.command.tick ∧
+    accepted.prepared.clock.clock.now < ingress.command.now ∧
+    PhysicalShape accepted.prepared :=
+  ⟨accepted.accepted.envelopeExact, (clock_monotone accepted.prepared).1,
+    (clock_monotone accepted.prepared).2.1, accepted.physical⟩
 
 def admitDecodedNative [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)

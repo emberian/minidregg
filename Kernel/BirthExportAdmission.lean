@@ -199,6 +199,17 @@ structure Evaluated (profile : PolicyCompilerProfile F) (deployment : Deployment
     (rootedItems deployment directory.directory descriptor.births)
   guardsExact : ∀ guard ∈ clock.readGuard :: items.guards,
     guard.expectedRoot = durable.snapshot.model.roots guard.cellId
+theorem Evaluated.items_judged {profile : PolicyCompilerProfile F} {deployment : Deployment}
+    {pins : FactoryPins} {durable : Durable}
+    {directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
+    {authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot}
+    {factoryRoot : Digest} {height : Height} {descriptor : Descriptor Registry}
+    (evaluated : Evaluated profile deployment pins durable directory authority factoryRoot height descriptor)
+    {item : BirthItem Registry}
+    (member : item ∈ rootedItems deployment directory.directory descriptor.births) :
+    Nonempty (ItemChecked profile deployment pins durable directory authority factoryRoot height
+      descriptor evaluated.clock.clock item) :=
+  evaluated.items.item member
 
 def Evaluated.readGuards {profile : PolicyCompilerProfile F} {deployment : Deployment}
     {pins : FactoryPins} {durable : Durable}
@@ -230,6 +241,12 @@ structure NeutralItem (deployment : Deployment)
   dependencies : WorldKindLawDependencies.Dependencies
   dependenciesExact : WorldKindLawDependencies.loadBirth deployment directory item = some dependencies
   rootsEmpty : roots item dependencies = []
+theorem NeutralItem.neutral {deployment : Deployment}
+    {directory : CellRegistry.Directory Nat Registry} {item : BirthItem Registry}
+    (neutral : NeutralItem deployment directory item) :
+    WorldKindLawDependencies.loadBirth deployment directory item = some neutral.dependencies ∧
+    roots item neutral.dependencies = [] :=
+  ⟨neutral.dependenciesExact, neutral.rootsEmpty⟩
 
 inductive NeutralItems (deployment : Deployment)
     (directory : CellRegistry.Directory Nat Registry) : List (BirthItem Registry) → Type

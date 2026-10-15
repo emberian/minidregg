@@ -766,6 +766,17 @@ structure HistoryBcsGameSecurity
   historyPcs : ledger.Good .historyPcs omega
   commitmentBinding : ledger.Good .commitmentBinding omega
   oracleTransport : ledger.Good .oracleTransport omega
+/-- The admission carries the three cryptographic good events on its coin. -/
+theorem HistoryBcsGameSecurity.goodEvents {Omega : Type} [Fintype Omega]
+    {ledger : FailureLedger Omega} {omega : Omega}
+    {head : HistoryHead} {historyHasLink : 0 < head.foldRounds}
+    {deltaStar : Real} {domain : BoundReceiptIx n ↪ F} {degree openedCount : Nat}
+    {openings : HistoryBcsOpenings (S := S) head domain degree openedCount}
+    (security : HistoryBcsGameSecurity ledger omega head historyHasLink deltaStar
+      domain degree openedCount openings) :
+    ledger.Good .historyPcs omega ∧ ledger.Good .commitmentBinding omega ∧
+      ledger.Good .oracleTransport omega :=
+  ⟨security.historyPcs, security.commitmentBinding, security.oracleTransport⟩
 
 /-- A proof-relevant conditional deployment record: it retains the exact
 three common-coin good events beside (rather than pretending they imply) the

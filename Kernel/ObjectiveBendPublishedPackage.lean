@@ -25,6 +25,15 @@ structure Loaded (store : ContentResource.ContentStore) (id : AtomId) (maxBytes 
   decoded : ObjectiveSourcePackage.decode record.payload = some package
   identityExact : ObjectiveSourcePackage.identity package = id.digest
   wellFormed : ObjectiveSourcePackage.wellFormed package = true
+theorem Loaded.sound {store : ContentResource.ContentStore} {id : AtomId} {maxBytes : Nat}
+    (loaded : Loaded store id maxBytes) :
+    Hyperdocument.lookup store .atoms id = some loaded.record ∧ loaded.record.tombstonedAt.isNone = true ∧
+      loaded.record.kind = .inlineObject schema ∧ loaded.record.payload.length ≤ maxBytes ∧
+      ObjectiveSourcePackage.decode loaded.record.payload = some loaded.package ∧
+      ObjectiveSourcePackage.identity loaded.package = id.digest ∧
+      ObjectiveSourcePackage.wellFormed loaded.package = true :=
+  ⟨loaded.recordExact, loaded.live, loaded.schemaExact, loaded.bounded, loaded.decoded, loaded.identityExact,
+    loaded.wellFormed⟩
 
 def lookup (store : ContentResource.ContentStore) (id : AtomId) (maxBytes : Nat) :
     Option (Loaded store id maxBytes) := do

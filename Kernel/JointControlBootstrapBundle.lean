@@ -91,6 +91,13 @@ structure Initialization (config : Config) (predicted : Opened config) where
   intent : DataIntent ResourceBirthCodec.rootBytes
   intentExact : intent = accepted.dataIntent shape
   bootstrap : JointControlBootstrap.Admission config predicted intent
+theorem Initialization.currentPermission {config : Config} {predicted : Opened config}
+    (initialization : Initialization config predicted) :
+    config.jointControl = some initialization.bootstrap.pin ∧
+      initialization.bootstrap.current.intent =
+        initialization.accepted.dataIntent initialization.shape :=
+  ⟨initialization.bootstrap.pinned,
+    initialization.bootstrap.intentExact.trans initialization.intentExact⟩
 
 /-- A bare source prefix is admitted only together with a CURRENT lawful,
 funded, exact initializer, retained verbatim in the first source record. -/

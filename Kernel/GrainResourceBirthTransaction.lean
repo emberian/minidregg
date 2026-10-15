@@ -38,6 +38,16 @@ structure PreparedTargets
   targets : (i : DeclaredResourceController.TargetIndex command) →
     DeclaredResourceController.PreparedTarget deployment directory snapshot
       semantics ambient command command.targets[i]
+theorem PreparedTargets.present {deployment : Deployment}
+    {directory : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry}
+    {snapshot : CredentialAuthorityDomain.Snapshot} {semantics : Digest} {ambient : Ambient}
+    {command : DeclaredResourceController.Command}
+    (prepared : PreparedTargets deployment directory snapshot semantics ambient command)
+    (i : DeclaredResourceController.TargetIndex command) :
+    directory.slots command.targets[i].target = .present (prepared.targets i).before ∧
+      DeclaredResourceController.selectTarget deployment command.targets[i]
+        (prepared.targets i).before = some (prepared.targets i).pre :=
+  ⟨(prepared.targets i).present, (prepared.targets i).selected⟩
 
 def prepareTargets {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployment)

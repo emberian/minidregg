@@ -268,6 +268,16 @@ structure PreparedOn {F : Type} [Field F] (deployment : Deployment)
   source : CanonicalCellRegistry.LoadedPolicySource authority.domain directory
     (authority.authState.policyAddress command.declaration.child.policyId
       (authority.authState.policyRevision command.declaration.child.policyId))
+theorem PreparedOn.sound {F : Type} [Field F] {deployment : Deployment}
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient}
+    {directory : Directory Nat Registry} {authority : Snapshot}
+    {kind : ResourceKind} {command : Command kind}
+    (prepared : PreparedOn deployment profile ambient directory authority command) :
+    readCapability authority.cell kind command.declaration.parentId = some prepared.parent ∧
+    CredentialAuthorityFamily.DelegationShape
+      (request authority profile.semantics ambient command) command.declaration.child
+      prepared.parent.head (parentage authority command) :=
+  ⟨prepared.descent.parentExact, prepared.shape⟩
 
 /-- The preparation over what it reads: the directory, the authority snapshot and
 the operation marker's spent answer (`none`: not declared by the request, refused

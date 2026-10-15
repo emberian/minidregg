@@ -187,7 +187,7 @@ private def frameLength (bytes : List UInt8) : Nat :=
   bytes.foldr (fun byte rest => byte.toNat + 256 * rest) 0
 
 /-- The retained process exposes only this closed read-only opcode set. -/
-private inductive ReadonlyOperation where
+inductive ReadonlyOperation where
   | continuity
   | receiptByTransaction
   | dispatchLookup

@@ -49,7 +49,7 @@ def rawIngressCodec : LawfulCodec Ingress where
 def ingressCodec : LawfulCodec Ingress := strictCodec rawIngressCodec
 
 structure DecodedIngress where
-  private mk ::
+  mk ::
   ingress : Ingress
   command : PackedCommand
   commandExact : commandCodec.encode command = ingress.commandBytes
@@ -137,6 +137,13 @@ structure AcceptedRevocation [DecidableEq F] (deployment : Deployment)
   prepared : Prepared deployment profile ambient ground ingress.command.2
   accepted : Accepted prepared ingress.ingress.envelopeBytes
   physical : PhysicalShape prepared
+theorem AcceptedRevocation.sound [DecidableEq F] {ingress : DecodedIngress}
+    (accepted : AcceptedRevocation deployment profile ambient ground ingress) :
+    accepted.accepted.receipt.envelopeBytes = ingress.ingress.envelopeBytes ∧
+    RevocationKey.capability ingress.command.2.capability ∈
+      (authState accepted.accepted.semantic.prepared.post).revoked ∧
+    PhysicalShape accepted.prepared :=
+  ⟨accepted.accepted.envelopeExact, accepted.accepted.revoked, accepted.physical⟩
 
 def admitDecodedNative [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (ground : Ground deployment)

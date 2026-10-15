@@ -49,6 +49,11 @@ structure Prepared (deployment : Deployment) (physical : Physical) (entries : Li
   covered : Covered entries batch
   financial : ResourceMoneyOperationDomain.Prepared loaded.book batch.expectedBookRoot
     loaded.funding batch.operations
+theorem Prepared.consented {deployment : Deployment} {physical : Physical} {entries : List Entry}
+    (prepared : Prepared deployment physical entries) :
+    entries.filterMap (fun entry => entry.consent.batch) = [prepared.batch] ∧
+      Covered entries prepared.batch :=
+  ⟨prepared.batchExact, prepared.covered⟩
 
 def prepare {deployment : Deployment} {physical : Physical} {subject : SubjectId}
     (accounting : Option (RunComputeBudgetDomain.Prepared deployment physical subject))

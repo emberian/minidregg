@@ -408,7 +408,7 @@ structure CanonicalReceipt
     (settlement : AcceptedSettlement (law := law) cut)
     (fieldProjection : FieldProjection (L := L) n F)
     (headerCells : AcceptedSettlement (law := law) cut -> BindingIx -> F) where
-  private mk ::
+  mk ::
   semanticHyperedge :
     Minidregg.Kernel.TypedCellHyperedge.Commit.SemanticHyperedge law declaration
   semanticHyperedgeExact : semanticHyperedge = settlement.hyperedge

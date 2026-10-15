@@ -138,6 +138,11 @@ structure DecodedIngress where
   envelope : CredentialSignedEnvelopeController.SignedEnvelope
   envelopeExact : CredentialSignatureAdmission.canonicalEnvelopeCodec.decode ingress.sponsorEnvelope =
     some envelope
+theorem DecodedIngress.sound (decoded : DecodedIngress) :
+    commandCodec.encode decoded.command = decoded.ingress.commandBytes ∧
+      CredentialSignatureAdmission.canonicalEnvelopeCodec.decode decoded.ingress.sponsorEnvelope =
+        some decoded.envelope :=
+  ⟨decoded.canonical, decoded.envelopeExact⟩
 
 def decodeIngress (bytes : List UInt8) : Option DecodedIngress := do
   let ingress ← ingressCodec.decode bytes
@@ -313,6 +318,20 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
     command.key.activeFrom ≤ authority.snapshot.revision + 1 ∧
     authority.snapshot.revision + 1 ≤ command.key.activeUntil ∧
     command.key.subject ≠ command.sponsor.value
+theorem Prepared.sound {F : Type} [Field F] {deployment : Deployment}
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
+    {command : Command} (prepared : Prepared deployment profile ambient durable command) :
+    command.expectedFactoryRoot = prepared.factory.before.payload.root ∧
+      allKeys prepared.authority.snapshot.logical (fun key => key.subject != command.key.subject) = true ∧
+      allKeys prepared.authority.snapshot.logical (fun key => key.keyId != command.key.keyId) = true ∧
+      allKeys prepared.authority.snapshot.logical (fun key => key.publicKey != command.key.publicKey) = true ∧
+      (command.key.algorithm = CredentialSignatureAdmission.ed25519Algorithm ∧
+        command.key.publicKey.length = 32 ∧
+        command.key.activeFrom ≤ prepared.authority.snapshot.revision + 1 ∧
+        prepared.authority.snapshot.revision + 1 ≤ command.key.activeUntil ∧
+        command.key.subject ≠ command.sponsor.value) :=
+  ⟨prepared.factory.rootExact, prepared.subjectFresh, prepared.keyIdFresh, prepared.publicKeyFresh,
+    prepared.keyShape⟩
 
 def prepare {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
@@ -466,6 +485,15 @@ structure Accepted [DecidableEq F]
   nextVerified : Bool
   nextGated : KeyPreRotation.enrollGate nextKeyDigest command.key ingress.ingress.nextPublicKey
     (presentedNext ingress.ingress.nextPublicKey nextVerified) = .ok ()
+theorem Accepted.sound [DecidableEq F]
+    {prepared : Prepared deployment profile ambient durable command} {ingress : DecodedIngress}
+    (accepted : Accepted prepared ingress) :
+    accepted.receipt.envelopeBytes = ingress.ingress.sponsorEnvelope ∧
+      Nonempty (Authorized (policyConfig prepared).portal prepared.authority.snapshot.authState
+        (request deployment prepared.authority.snapshot profile.semantics ambient command)) ∧
+      KeyPreRotation.enrollGate nextKeyDigest command.key ingress.ingress.nextPublicKey
+        (presentedNext ingress.ingress.nextPublicKey accepted.nextVerified) = .ok () :=
+  ⟨accepted.envelopeExact, ⟨accepted.semantic.authorization⟩, accepted.nextGated⟩
 
 /-- The native verdict on the next-possession signature: `false` (and no call)
 when no next key is presented. -/

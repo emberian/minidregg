@@ -901,6 +901,15 @@ structure PreparedTarget (deployment : Deployment) (directory : Directory Nat Re
   source : CanonicalCellRegistry.LoadedPolicySource snapshot.domain directory
     (snapshot.authState.policyAddress ⟨target.target⟩ (snapshot.authState.policyRevision ⟨target.target⟩))
   audienceFresh : ObjectAudience.checkFresh source.record.audience target.target target.audienceEpoch = .ok ()
+theorem PreparedTarget.bound {deployment : Deployment}
+    {directory : Directory Nat Registry} {snapshot : AuthoritySnapshot} {semantics : Digest}
+    {ambient : Ambient} {command : Command} {target : Target}
+    (prepared : PreparedTarget deployment directory snapshot semantics ambient command target) :
+    directory.slots target.target = .present prepared.before ∧
+      selectTarget deployment target prepared.before = some prepared.pre ∧
+      CanonicalCellRegistry.FinalPostLaw deployment target.target prepared.before
+        (packTarget target prepared.candidate.post) :=
+  ⟨prepared.present, prepared.selected, prepared.postLaw⟩
 
 /-- An observe-only content read computes only when its named capability is its
 observe capability: the read's one authorization is its observation. -/
@@ -1446,6 +1455,17 @@ structure PreparedOn {F : Type} [Field F]
   runChecked : checkCommandRun profile.disabledEvaluators deployment.domain directory
     ambient command (fun i => (targets i).pre.logical) (computeFundingIndex compute) = .ok run
   computeRunExact : computeExecutionMatches command compute run = true
+theorem PreparedOn.checked {F : Type} [Field F]
+    {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
+    {ambient : Ambient} {directory : Directory Nat Registry} {authority : AuthoritySnapshot}
+    {cells : RunComputeBudgetDomain.Physical} {declared : Bool} {command : Command}
+    (prepared : PreparedOn deployment profile ambient directory authority cells declared command) :
+    prepareCompute deployment cells prepared.clock.clock command = .ok prepared.compute ∧
+      prepareMoney deployment cells command prepared.compute = .ok prepared.money ∧
+      checkCommandRun profile.disabledEvaluators deployment.domain directory ambient command
+        (fun i => (prepared.targets i).pre.logical) (computeFundingIndex prepared.compute) =
+          .ok prepared.run :=
+  ⟨prepared.computeChecked, prepared.moneyChecked, prepared.runChecked⟩
 
 /-- Whether a ground answers an invocation's operation marker replay nullifier.
 Irreducible: its argument is a cSHAKE256 digest, which elaboration must never

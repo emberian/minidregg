@@ -112,6 +112,12 @@ structure Attestation (config : Config) where
   human : ingress.dispatch.dispatch.session.origin = .human
   signedChallenge : ingress.dispatch.dispatch.request = probeRequest challenge
   selectorExact : select (bindingFor admitted) ingress.dispatch.dispatch.session.kind = challenge.selector
+theorem Attestation.sound {config : Config} (a : Attestation config) :
+    (a.challenge.domain = config.deployment.domain ∧
+      a.challenge.semantics = config.profile.semantics) ∧
+    a.ingress.dispatch.dispatch.request = probeRequest a.challenge ∧
+    select (bindingFor a.admitted) a.ingress.dispatch.dispatch.session.kind = a.challenge.selector :=
+  ⟨a.namespaceExact, a.signedChallenge, a.selectorExact⟩
 
 def Attestation.verified {config : Config} (a : Attestation config) :
     NativeHostReplay.Verified config a.target := a.old

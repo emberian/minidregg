@@ -86,6 +86,15 @@ structure AcceptedEnrollment [DecidableEq F] (deployment : Deployment)
   prepared : Prepared deployment profile ambient durable ingress.command
   accepted : ParticipantKeyEnrollment.Accepted prepared ingress
   physical : PhysicalShape prepared
+theorem AcceptedEnrollment.sound [DecidableEq F] {ingress : DecodedIngress}
+    (accepted : AcceptedEnrollment deployment profile ambient durable ingress) :
+    accepted.accepted.receipt.envelopeBytes = ingress.ingress.sponsorEnvelope ∧
+      Nonempty (Authorized (ParticipantKeyEnrollment.policyConfig accepted.prepared).portal
+        accepted.prepared.authority.snapshot.authState
+        (ParticipantKeyEnrollment.request deployment accepted.prepared.authority.snapshot profile.semantics ambient
+          ingress.command)) ∧
+      PhysicalShape accepted.prepared :=
+  ⟨accepted.accepted.envelopeExact, ⟨accepted.accepted.semantic.authorization⟩, accepted.physical⟩
 
 def admitDecodedNative [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)

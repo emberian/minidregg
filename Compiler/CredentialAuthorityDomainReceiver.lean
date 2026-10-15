@@ -596,6 +596,17 @@ structure PreparedGrantBatch {F : Type} [Field F]
   initialSources : PolicySourceCell.CheckedInitials deployment.domain profile descriptor.initialPolicies
   mode : ResourceBirthAuthority.BatchEvidence
     loaded.snapshot.cell descriptor
+/-- The prepared batch is fresh at the loaded authority cell. -/
+theorem PreparedGrantBatch.batchFresh {F : Type} [Field F]
+    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
+    {deployment : CanonicalCellRegistry.Deployment} {loaded : Loaded deployment durable.snapshot}
+    {descriptor : Descriptor registry}
+    (prepared : PreparedGrantBatch profile deployment loaded descriptor) :
+    ((ResourceBirthAuthority.entries descriptor).map Sigma.fst).Nodup ∧
+      descriptor.GrantIdsDistinct ∧
+      (∀ row ∈ descriptor.parentRows, loaded.snapshot.cell.logical ⟨.parent, row.1⟩ = none) :=
+  ⟨prepared.mode.slotsDistinct, prepared.mode.grantIdsDistinct, prepared.mode.parentsFresh⟩
 
 def prepareGrantBatch {F : Type} [Field F]
     {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}

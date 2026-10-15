@@ -35,6 +35,14 @@ structure Conditional (config : NativeHost.Config) {store : StoreIdentity} (head
     ⟨config.federation, config.genesisHeight + ground.height⟩
     ground ingress
 
+theorem Conditional.original_current_exact {config : NativeHost.Config} {store : StoreIdentity}
+    {head : Head store} {ground : Ground config.deployment} {ingress : Ingress}
+    (conditional : Conditional config head ground ingress) :
+    conditional.original.selected.record =
+      DurableReceiver.IntentRecord.ofIntent conditional.original.admitted.intent ∧
+    ingress.source.currentWorldRoot = ground.worldRoot :=
+  ⟨conditional.original.original_record_exact, conditional.current.boundary⟩
+
 /-- `current` is the ground the claim is checked on (the light basis or, for the
 audit walk, the full shape); `reader` supplies the original BEGIN's record and
 prefix state. -/

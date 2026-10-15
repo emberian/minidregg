@@ -169,6 +169,13 @@ structure Attestation (config : Config) where
   signedChallenge : ingress.dispatch.dispatch.request = probeRequest challenge
   bindingExact : bindingFor admitted = challenge.binding
   minimumExact : minimumCurrent challenge (tipFor old) = true
+theorem Attestation.sound {config : Config} (a : Attestation config) :
+    (a.challenge.domain = config.deployment.domain ∧
+      a.challenge.semantics = config.profile.semantics) ∧
+    a.ingress.dispatch.dispatch.request = probeRequest a.challenge ∧
+    bindingFor a.admitted = a.challenge.binding ∧
+    minimumCurrent a.challenge (tipFor a.old) = true :=
+  ⟨a.namespaceExact, a.signedChallenge, a.bindingExact, a.minimumExact⟩
 
 /-- Renewal retains the same verified image; it does not extend history. -/
 def Attestation.verified {config : Config} (a : Attestation config) :

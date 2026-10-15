@@ -110,7 +110,7 @@ def requestFrame (args : Array String) : ByteArray :=
     (beBytes 4 args.size)
 
 /-- A reply being read: the pipe and the bytes taken from it so far. -/
-private structure Reader where
+structure Reader where
   handle : IO.FS.Handle
   read : Nat
 

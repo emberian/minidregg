@@ -46,6 +46,17 @@ structure Candidate (config : Config) {store : StoreIdentity} (head : Head store
   receiptEvent : selected.record.event.eventId = receipt.eventId
   receiptBoundary : after.opened.served.worldRoot = receipt.worldRoot
 
+theorem Candidate.prior_receipt_record {config : Config} {store : StoreIdentity} {head : Head store}
+    {binding : ApplicationLifecycleLaunchBinding.Binding}
+    (candidate : Candidate config head binding) :
+    binding.priorCreate = some (candidate.receipt, candidate.custody) ∧
+    candidate.selected.record.transactionId = candidate.receipt.transactionId ∧
+    candidate.selected.record.event.eventId = candidate.receipt.eventId ∧
+    candidate.selected.record = DurableReceiver.IntentRecord.ofIntent
+      (ApplicationLifecycleCompletionV2Core.intent candidate.accepted) :=
+  ⟨candidate.priorExact, candidate.receiptTransaction, candidate.receiptEvent,
+    candidate.recordExact⟩
+
 /-- Creation may have used an older package version. The reusable certificate
 joins app identity, the permanent volume ID, exact signed custody and original
 receipt; a later BEGIN independently authorizes its current package root. -/

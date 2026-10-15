@@ -249,7 +249,7 @@ def step (prepared : Prepared deployment profile ambient durable ingress checked
 /-- The witness is only available for this private, checked source preparation.
 It retains the actual native-checked decision equality, not a caller boolean. -/
 structure SourceWitness (prepared : Prepared deployment profile ambient durable ingress checked) : Type where
-  private mk ::
+  mk ::
   admitted : PayClaimDecision.decide prepared.pay.cell.logical prepared.authority.snapshot
     prepared.clock.clock (pricingAt deployment profile ambient prepared.expectedSeed
       prepared.authority.snapshot ingress.command) ingress checked = .ok prepared.decision

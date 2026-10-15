@@ -182,6 +182,19 @@ structure PreparedResult (profile : Profile) (command : Command) (source : Annot
   planExact : plan = ⟨[returnEffect profile slot],[slot],[]⟩
   nativeExact : BendWorldPlan.matchesCommand plan command = true
   returnsStored : plan.returns.all (storesReturn command) = true
+/-- The prepared result is the checked term's actual run, encoded into the profile's
+return slot of a command-matching plan. -/
+theorem PreparedResult.sound {profile : Profile} {command : Command} {source : AnnotatedTerm}
+    {limits : Limits} {budget : Budget} {capacity : ObjectiveBendDemandCapacity.Profile}
+    (prepared : PreparedResult profile command source limits budget capacity) :
+    executeWith (ObjectiveBendDemandCapacity.allows capacity) limits budget source.term =
+        .ok prepared.execution ∧
+      encodeData budget.nodes prepared.execution.extraction.result.value = some prepared.bytes ∧
+      prepared.slot = returnSlot profile prepared.checked.type prepared.bytes ∧
+      prepared.plan = ⟨[returnEffect profile prepared.slot], [prepared.slot], []⟩ ∧
+      BendWorldPlan.matchesCommand prepared.plan command = true :=
+  ⟨prepared.runExact, prepared.bytesExact, prepared.slotExact, prepared.planExact,
+    prepared.nativeExact⟩
 
 inductive Failure where
   | typing | execution (reason : ObjectiveBendDemandData.Failure) (state : State) (remaining : Budget)

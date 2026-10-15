@@ -99,6 +99,13 @@ structure AcceptedTurn [DecidableEq F] (deployment : Deployment)
   prepared : Prepared deployment profile tariff ambient durable ingress.command
   accepted : FleetTurn.Accepted prepared ingress
   physical : PhysicalShape prepared
+theorem AcceptedTurn.sound [DecidableEq F] {ingress : DecodedIngress}
+    (accepted : AcceptedTurn deployment profile tariff ambient durable ingress) :
+    accepted.accepted.receipt.envelopeBytes = ingress.ingress.envelope ∧
+    CanonicalResourceKernel.AcceptedBatch accepted.prepared.book.payload
+      (batch tariff ingress.command) ∧
+    PhysicalShape accepted.prepared :=
+  ⟨accepted.accepted.envelopeExact, accepted.prepared.resources, accepted.physical⟩
 
 def admitDecodedNative [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (tariff : CreationTariff) (ambient : Ambient)

@@ -413,6 +413,11 @@ structure DecodedIngress where
   envelope : CredentialSignedEnvelopeController.SignedEnvelope
   envelopeExact : CredentialSignatureAdmission.canonicalEnvelopeCodec.decode ingress.envelope =
     some envelope
+theorem DecodedIngress.sound (decoded : DecodedIngress) :
+    commandCodec.encode decoded.command = decoded.ingress.commandBytes ∧
+      CredentialSignatureAdmission.canonicalEnvelopeCodec.decode decoded.ingress.envelope =
+        some decoded.envelope :=
+  ⟨decoded.canonical, decoded.envelopeExact⟩
 
 def decodeIngress (bytes : List UInt8) : Option DecodedIngress := do
   let ingress ← ingressCodec.decode bytes
@@ -810,6 +815,14 @@ structure Gated {F : Type} [Field F] (deployment : Deployment)
   preRootExact : preRoot = durable.snapshot.model.roots ⟨(signedTarget deployment.domain command).2⟩
   authorizedExact : authorized authority.snapshot profile.semantics ambient command preRoot claimed = .ok ()
   funded : funding config durable command = .ok ()
+theorem Gated.sound {F : Type} [Field F] {deployment : Deployment}
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
+    {command : Command} {claimed : Digest} (gated : Gated deployment profile ambient durable command claimed) :
+    configOf deployment profile ambient = .ok gated.config ∧
+      gated.preRoot = durable.snapshot.model.roots ⟨(signedTarget deployment.domain command).2⟩ ∧
+      authorized gated.authority.snapshot profile.semantics ambient command gated.preRoot claimed = .ok () ∧
+      funding gated.config durable command = .ok () :=
+  ⟨gated.configExact, gated.preRootExact, gated.authorizedExact, gated.funded⟩
 
 def gate {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
@@ -865,6 +878,15 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
   outcome : Digest
   outcomeExact : outcome = outcomeDigest final.1
   authorizedExact : authorized authority.snapshot profile.semantics ambient command preRoot outcome = .ok ()
+theorem Prepared.sound {F : Type} [Field F] {deployment : Deployment}
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
+    {command : Command} (prepared : Prepared deployment profile ambient durable command) :
+    decideTurn prepared.config durable.snapshot ambient.height command = .ok prepared.decided ∧
+      ActivitySeatEnd.finish prepared.config durable.snapshot ambient.height prepared.decided = .ok prepared.final ∧
+      prepared.outcome = outcomeDigest prepared.final.1 ∧
+      authorized prepared.authority.snapshot profile.semantics ambient command prepared.preRoot prepared.outcome =
+        .ok () :=
+  ⟨prepared.decidedExact, prepared.finalExact, prepared.outcomeExact, prepared.authorizedExact⟩
 
 /-- The decision of a gated command (after its signature verified): the kernel turn, the seat
 and domain end, and the outcome, which must be the one the signer claimed. -/
@@ -2312,6 +2334,11 @@ structure Accepted [DecidableEq F] (deployment : Deployment)
   prepared : Prepared deployment profile ambient durable ingress.command
   preparedExact : prepare gated = .ok prepared
   physical : PhysicalShape prepared ingress
+theorem Accepted.sound [DecidableEq F] {ingress : DecodedIngress}
+    (accepted : Accepted deployment profile ambient durable ingress) :
+    accepted.receipt.envelopeBytes = ingress.ingress.envelope ∧
+      prepare accepted.gated = .ok accepted.prepared ∧ PhysicalShape accepted.prepared ingress :=
+  ⟨accepted.envelopeExact, accepted.preparedExact, accepted.physical⟩
 
 /-- The intent of a charged failure: the kernel's `failed` turn (the Book only) under this
 receiver's seal. -/
@@ -2348,6 +2375,12 @@ structure Failed [DecidableEq F] (deployment : Deployment)
   physical : IntentShape deployment durable
     (failedIntent (profile := profile) (ambient := ambient) gated.authority gated.config ingress cause
       request failure final)
+theorem Failed.sound [DecidableEq F] {ingress : DecodedIngress}
+    (failed : Failed deployment profile ambient durable ingress) :
+    failed.receipt.envelopeBytes = ingress.ingress.envelope ∧
+      prepare failed.gated = .error failed.cause ∧ chargedCause failed.cause = true ∧
+      failureRequest deployment.domain profile.semantics ingress.command = some failed.request :=
+  ⟨failed.envelopeExact, failed.causeExact, failed.charged, failed.requestExact⟩
 
 /-- What admission decides for a signed ingress: an accepted turn, or a charged failure. -/
 inductive Verdict [DecidableEq F] (deployment : Deployment)

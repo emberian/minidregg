@@ -24,7 +24,7 @@ def admitKey (keys : Std.HashSet String) (key : String) : Result (Std.HashSet St
   if keys.contains key then .error s!"duplicate JSON object field: {key}"
   else .ok (keys.insert key)
 
-private structure ScanFrame where
+structure ScanFrame where
   object : Bool
   expectKey : Bool := false
   keys : Std.HashSet String := {}
@@ -1384,7 +1384,7 @@ private def funding (path : String) (json : Lean.Json) : Result ResourceBirth.In
     ← nat (path ++ ".asset") (← field path "asset" obj),
     ← nat (path ++ ".amount") (← field path "amount" obj)⟩
 
-private structure BirthParts where
+structure BirthParts where
   item : ResourceBirth.BirthItem CanonicalCellRegistry.registry
   ownerGrant : ResourceBirth.AuthorityGrant
   controlGrant : ResourceBirth.AuthorityGrant

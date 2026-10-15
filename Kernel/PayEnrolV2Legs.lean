@@ -242,6 +242,19 @@ structure EnrolLegs (directory : LoadedDirectory durable)
   allocated : ResourceBirthController.Allocated Registry directory.directory descriptor
   resources : CanonicalResourceKernel.AcceptedBatch book.payload
     (enrolBatch tariff ambient.tariff.collector input descriptor)
+theorem EnrolLegs.sound {directory : LoadedDirectory durable}
+    {authority : Loaded deployment durable.snapshot} {pay : PayCellDomain.Loaded deployment durable.snapshot}
+    {book : BookCell deployment directory.directory} {tariff : Tariff} {input : EnrolInput}
+    (legs : EnrolLegs deployment profile ambient directory authority pay book tariff input) :
+    EconomicReady pay.cell.logical tariff input.economic ∧ OwnerReady pay.cell.logical input ∧
+      input.economic.consumption.terms.mode = .enroll ∧
+      enrolmentAt pay.cell.logical input.economic.identityKey = none ∧
+      input.economic.consumption.birthFee = (enrolDraft deployment profile ambient authority input).fee.amount ∧
+      legs.descriptor =
+        { enrolDraft deployment profile ambient authority input with
+          auxiliaryCreates := legs.descriptor.auxiliaryCreates } ∧
+      PayEnrolReceiver.KeyFresh authority.snapshot (enrolKey deployment authority.snapshot.revision input) :=
+  ⟨legs.economics, legs.owner, legs.mode, legs.absent, legs.feeExact, legs.descriptorExact, legs.keyFresh⟩
 
 def prepareEnrolLegs (directory : LoadedDirectory durable)
     (authority : Loaded deployment durable.snapshot)
@@ -305,6 +318,14 @@ structure RenewLegs (directory : LoadedDirectory durable)
   noBirth : input.economic.consumption.birthFee = 0
   resources : CanonicalResourceKernel.AcceptedBatch book.payload
     (renewBatch tariff ambient.tariff.collector input)
+theorem RenewLegs.sound {directory : LoadedDirectory durable}
+    {pay : PayCellDomain.Loaded deployment durable.snapshot}
+    {book : BookCell deployment directory.directory} {tariff : Tariff} {input : RenewInput}
+    (legs : RenewLegs deployment ambient directory pay book tariff input) :
+    EconomicReady pay.cell.logical tariff input.economic ∧ input.economic.consumption.terms.mode = .renew ∧
+      enrolmentAt pay.cell.logical input.economic.identityKey = some input.before ∧
+      input.economic.consumption.birthFee = 0 :=
+  ⟨legs.economics, legs.mode, legs.recordExact, legs.noBirth⟩
 
 def prepareRenewLegs (directory : LoadedDirectory durable)
     (pay : PayCellDomain.Loaded deployment durable.snapshot)
