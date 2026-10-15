@@ -101,7 +101,7 @@ def exportLog (config out : String) : IO UInt32 := do
           else
             verbatimN := verbatimN + 1; verbatimB := verbatimB + b.length
         fieldB := (fieldB.zip (DeployedHistory.turnFields t)).map fun (n, f) => n + f.length
-        absentB := absentB + t.absent.length
+        absentB := absentB + (t.pins.filter fun p => decide (p.2 = DeployedHistory.history.cellDigest none)).length
         eventB := eventB + (DurableReceiverCodec.eventStream.encode t.event).length
         recWritesB := recWritesB + (record.writes.map fun x => x.canonicalPostBytes.length).sum
         recGuardsN := recGuardsN + record.readGuards.length

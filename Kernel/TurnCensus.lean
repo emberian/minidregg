@@ -146,7 +146,7 @@ def censusH : History R Nat Unit Nat where
   imageBytes := fun b => if b.store = 0 then 0 else 16
   -- A census event is `()`: it retains no bytes.
   eventBytes := fun _ => 0
-  -- Census turns carry no pins; a slot's digest is whether it is present.
+  -- Census constructor turns carry no pins; a slot's digest is whether it is present.
   cellDigest := fun o => if o.isSome then 1 else 0
 
 /-! ## The census world -/
@@ -555,10 +555,12 @@ theorem turn_negation_refused (c : Ctor) :
     rejectOf (World.admit censusH w0 c.negation) = some c.refusal :=
   turn_negation_refused_all c (Ctor.mem_all c)
 
-/-- The absence negation pole: the previously absent cell has appeared. -/
+/-- The absence negation pole: a turn asserting `cContent` absent (its pin at
+the absent slot's digest) is refused as a failed pin, `cContent` being present. -/
 theorem turn_negation_refused_cell_appeared :
-    rejectOf (World.admit censusH w0 { Ctor.activity.turn with absent := [cContent] }) =
-      some (.cellPresent cContent) := by
+    rejectOf (World.admit censusH w0
+      { Ctor.activity.turn with pins := (cContent, censusH.cellDigest none) :: Ctor.activity.turn.pins }) =
+      some (.guardFailed cContent 0) := by
   decide +kernel
 
 #assert_axioms turn_negation_refused_cell_appeared
