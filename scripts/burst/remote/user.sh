@@ -72,7 +72,7 @@ systemctl --user show pipeline-sccache.service -p FragmentPath 2>/dev/null | gre
 PIPELINE_SCCACHE_PORT=$port "$P/install-sccache" --cache-dir "$SRV/sccache" 2>&1 | tail -1
 
 # --- box.env ---
-args=(--slots "$BURST_LANE_SLOTS" --lean-threads "$BURST_LEAN_THREADS" --small-slots "$BURST_SMALL_SLOTS")
+args=(--slots "$BURST_LANE_SLOTS" --lean-threads "$BURST_LEAN_THREADS" --small-slots "$BURST_SMALL_SLOTS" --lake-cache "$SRV/lake-cache")
 [ -n "$BURST_GATE_SLOTS" ] && args+=(--gate-slots "$BURST_GATE_SLOTS")
 [ -n "$origin" ] && args+=(--origin "$origin"); [ -n "$mirrors" ] && args+=(--mirrors "$mirrors")
 [ -n "$peer" ] && args+=(--peer "$peer"); [ -n "$from" ] && args+=(--fetch-from "$from")

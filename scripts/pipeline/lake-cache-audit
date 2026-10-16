@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""scripts/pipeline/lake-cache-audit -- refuse C objects with the wrong initializer prefix in the shared Lake cache.
+"""scripts/pipeline/lake-cache-audit -- refuse poisoned or written-through entries in the shared Lake cache.
 
     lake-cache-audit [--cache DIR] [--tree SRC] [--since] [--purge] [--quiet]
     lake-cache-audit --scan-tree TREE           list the bad .c / .c.o.* files in a lane tree's .lake/build/ir
@@ -16,8 +16,19 @@ its .c (or, for a single-artifact entry, the compiled .o) is read and every `ini
 warm base by default) without the `minidregg_` prefix makes the entry BAD. --purge deletes a bad
 entry's outputs json and each of its artifacts (.c, .olean*, .ilean, .ir) no remaining entry
 references, and appends a line to $ARTIFACT_ROOT/ALERTS. Exit 1 when a bad entry was found.
-The lake shim runs `--since --purge --quiet` before every Lake invocation in a cache-enabled tree, so a
-poisoned entry is removed before the next reader can fetch it; a full audit runs from burst-up.
+WRITE-THROUGH (second class). Lake stores an artifact by hard-linking the built file into
+artifacts/<content-hash>.<ext> and never rewrites an existing one; with restoreAllArtifacts a restored
+.olean/.ilean/.c in a lane's .lake/build IS that inode (Lake marks both read-only). Anything that opens
+such a file for writing in place (a chmod'ed tool, a cp onto it, a shared-.lake race of the cp -al kind)
+changes the bytes behind every lane's next fetch while the name still claims the old content hash.
+Lake itself never moves an artifact's mtime past the entries that record it, so an artifact modified
+AFTER an outputs entry that references it was written is BAD for that entry (and, with --purge, the
+entry and the artifact go: the next build misses and recompiles). With --since only artifacts whose
+mtime is newer than the last audit are examined, so the check costs a stat walk.
+
+Exit 0: clean. 1: bad entries found (purged with --purge). 2: the audit could not run (no in-tree
+module list, unreadable cache): callers (scripts/pipeline/lib.sh pipeline_cache_audit, which every slot
+build, lane-check, landing gate and publish runs from the tip tree) refuse to build on it.
 """
 import json, os, re, sys, time
 
@@ -81,7 +92,7 @@ def arts(entry):
 def main():
     local = local_modules(TREE)
     if not local:
-        sys.exit(f"lake-cache-audit: no in-tree modules found under {TREE}")
+        print(f"lake-cache-audit: no in-tree modules found under {TREE}", file=sys.stderr); sys.exit(2)
     if "--scan-tree" in args:
         t = opt("--scan-tree"); bad = 0
         for dp, _, fn in os.walk(os.path.join(t, ".lake/build/ir")):
@@ -127,6 +138,35 @@ def main():
             continue
         if toks:
             bad[p] = sorted(toks)
+    # write-through: artifacts modified since the last audit, against every entry that records them
+    artdir = os.path.join(CACHE, "artifacts")
+    changed = {}
+    for dp, _, fn in os.walk(artdir):
+        for f in fn:
+            ap = os.path.join(dp, f)
+            try:
+                m = os.stat(ap).st_mtime
+            except OSError:
+                continue
+            if m >= since:
+                changed[os.path.relpath(ap, artdir)] = m
+    if changed:
+        for f in names:
+            p = os.path.join(outdir, f)
+            if p not in entries:
+                e = load(p)
+                if e is not None:
+                    entries[p] = e
+            e = entries.get(p)
+            if e is None:
+                continue
+            try:
+                em = os.stat(p).st_mtime
+            except OSError:
+                continue
+            late = [a for a in arts(e) if a in changed and changed[a] > em + 1]
+            if late:
+                bad.setdefault(p, []).extend(f"written-through:{a}" for a in late)
     if bad and "--purge" in args:
         for f in names:                         # the keep set needs every entry
             p = os.path.join(outdir, f)
@@ -137,7 +177,7 @@ def main():
     for p, toks in sorted(bad.items()):
         if not quiet:
             d = entries[p]['data']
-            print(f"BAD {os.path.basename(p)} {d if isinstance(d, str) else d.get('c')} unprefixed: {' '.join(toks[:4])}{' ...' if len(toks) > 4 else ''}")
+            print(f"BAD {os.path.basename(p)} {d if isinstance(d, str) else d.get('c')} bad: {' '.join(toks[:4])}{' ...' if len(toks) > 4 else ''}")
     if bad and "--purge" in args:
         keep = {}
         for p, e in entries.items():
@@ -152,7 +192,7 @@ def main():
             try: os.remove(p)
             except OSError: pass
         msg = (f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} LAKE CACHE PURGED {len(bad)} entries "
-               f"({gone} artifacts) in {CACHE}: C with unprefixed initializers, e.g. {next(iter(bad.values()))[0]}\n")
+               f"({gone} artifacts) in {CACHE}: unprefixed initializers or written-through artifacts, e.g. {next(iter(bad.values()))[0]}\n")
         try:
             open(os.path.join(os.environ.get("ARTIFACT_ROOT", "/srv/artifacts"), "ALERTS"), "a").write(msg)
         except OSError:
@@ -167,4 +207,10 @@ def main():
               f"{len(bad)} bad{', purged' if bad and '--purge' in args else ''}; {len(local)} in-tree modules from {TREE}")
     sys.exit(1 if bad else 0)
 
-main()
+try:
+    main()
+except SystemExit:
+    raise
+except Exception as exc:                        # an audit that crashed did not audit: say so, exit 2
+    print(f"lake-cache-audit: failed: {exc!r}", file=sys.stderr)
+    sys.exit(2)

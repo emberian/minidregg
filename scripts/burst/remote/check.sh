@@ -33,7 +33,7 @@ if [ -f "$SRV/pipeline/box.env" ]; then . "$SRV/pipeline/box.env"
   stray=$(ls "$SRV"/build-slot-* 2>/dev/null | grep -vxF -f <(printf '%s\n' $PIPELINE_SLOTS ${PIPELINE_SMALL_SLOTS:-} ${PIPELINE_GATE_SLOTS:-}) | tr '\n' ' '); [ -z "$stray" ] && ok slots-no-strays || diff slots-no-strays "slot files not in box.env: $stray"
   [ "$role" = gate ] && { [ -n "${PIPELINE_GATE_SLOTS:-}" ] && ok gate-slots "$PIPELINE_GATE_SLOTS" || diff gate-slots "none declared"; }
   [ -n "${PIPELINE_PEER:-}" ] && ok peer "$PIPELINE_PEER" || { [ "$single" = 1 ] && ok peer "(single box)" || diff peer "PIPELINE_PEER unset"; }
-  echo "$PATH" | grep -q lake-shim && ok lake-shim || diff lake-shim "not on PATH via box.env"
+  [ "${LAKE_ARTIFACT_CACHE:-}" = true ] && [ -d "${LAKE_CACHE_DIR:-/nonexistent}" ] && ok lake-cache "$LAKE_CACHE_DIR" || diff lake-cache "box.env does not turn the shared Lake cache on (box-env --lake-cache)"
 fi
 P=$SRV/pipeline/scripts
 for f in lib.sh slot.sh slots build-anywhere peer-build box-peer-gate lane-check lean-ask mk-lane.sh publish-artifacts fetch-artifacts journey-runner install-sccache; do [ -x "$P/$f" ] || [ -f "$P/$f" ] || diff "script:$f" missing; done; ok scripts "$(ls "$P" | wc -l) files, from $(cat "$P/.installed-from" 2>/dev/null | cut -c1-8 || echo '? (hand-installed)')"
@@ -69,6 +69,6 @@ else diff warm-base "no FROZEN"; fi
 if [ -x "$P/lake-cache-audit" ]; then
   [ -d "$SRV/lake-cache" ] && { out=$("$P/lake-cache-audit" --cache "$SRV/lake-cache" --tree "$SRV/warm-base/src" 2>&1 | tail -1); [ $? -eq 0 ] && grep -q ' 0 bad' <<<"$out" && ok lake-cache:clean "$(cut -c1-80 <<<"$out")" || diff lake-cache:clean "$out (purge: lake-cache-audit --purge)"; }
   [ -d "$SRV/warm-base/src/.lake/build/ir" ] && { n=$("$P/lake-cache-audit" --tree "$SRV/warm-base/src" --scan-tree "$SRV/warm-base/src" 2>/dev/null | wc -l); [ "$n" = 0 ] && ok warm-base:prefixed-c || diff warm-base:prefixed-c "$n .c/.o files with unprefixed initializers"; }
-  grep -q lake-cache-audit "$P/lake-shim/lake" 2>/dev/null && ok lake-shim:guard || diff lake-shim:guard "the shim does not audit the cache before Lake reads it"
+  grep -q 'pipeline_cache_audit()' "$P/lib.sh" 2>/dev/null && ok lake-cache:guard || diff lake-cache:guard "lib.sh has no pipeline_cache_audit: slot builds would read the cache unguarded"
 else diff lake-cache-audit missing; fi
 echo "== burst-check $(hostname): $ndiff DIFF"; exit $ndiff

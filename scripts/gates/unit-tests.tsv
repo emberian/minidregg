@@ -35,3 +35,4 @@ testing/test_generic_simplex_session.py	5
 @known-red	scripts/spk-platform/tests/test_ticket_preflight.py	01a108ba-55a3
 @elsewhere	scripts/test_build_gate_boundaries.py	local-gates build-closure
 @elsewhere	scripts/test_lean_build_surfaces.py	local-gates build-closure
+scripts/pipeline/test_lake_cache_audit.py	4

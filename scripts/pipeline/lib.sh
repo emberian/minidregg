@@ -15,7 +15,17 @@ PIPELINE_ROOT=${PIPELINE_ROOT:-/srv/pipeline}
 # its Lean thread count) lives in ONE box-local file, written when the box is provisioned
 # (scripts/pipeline/box-env); nothing about a particular box is hard-coded here.
 export PATH=$HOME/.elan/bin:$HOME/.cargo/bin:$PATH
-[ -f "$PIPELINE_ROOT/box.env" ] && . "$PIPELINE_ROOT/box.env"   # after PATH: it may put the lake shim first
+[ -f "$PIPELINE_ROOT/box.env" ] && . "$PIPELINE_ROOT/box.env"   # after PATH
+# The shared Lake cache (box.env: LAKE_CACHE_DIR, LAKE_ARTIFACT_CACHE=true) is only for a tree whose
+# lakefile restores every artifact into .lake/build (restoreAllArtifacts): without it a cache hit leaves
+# no .olean in .lake/build and `lake env lean`, lane-check and lean-ask break. A tree without it gets a
+# private, empty cache (Lake READS its cache by default, so the directory moves too).
+pipeline_lib_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+pipeline_tree_root=$(git -C "$pipeline_lib_dir" rev-parse --show-toplevel 2>/dev/null || true)
+if [ "${LAKE_ARTIFACT_CACHE:-}" = true ] && [ -n "$pipeline_tree_root" ] &&
+   ! grep -qE '^restoreAllArtifacts *= *true' "$pipeline_tree_root/lakefile.toml" 2>/dev/null; then
+  export LAKE_ARTIFACT_CACHE=false LAKE_CACHE_DIR=$HOME/.cache/lake-private-unshared
+fi
 ARTIFACT_ROOT=${ARTIFACT_ROOT:-/srv/artifacts}
 JOURNEY_ROOT=${JOURNEY_ROOT:-/srv/journeys}
 PIPELINE_REPO_URL=${PIPELINE_REPO_URL:-https://github.com/emberian/minidregg.git}
@@ -74,6 +84,7 @@ pipeline_build_slot() {
   local mods=() n rc s
   while [ $# -gt 0 ] && [ "$1" != -- ]; do mods+=("$1"); shift; done
   shift
+  pipeline_cache_audit || pipeline_die "the shared Lake cache is unguarded (lake-cache-audit failed): not building on it"
   n=$(PIPELINE_PROG=stale-modules "$(dirname -- "${BASH_SOURCE[0]}")/stale-modules" "${mods[@]}" 2>/dev/null | head -1)
   if [ -n "${PIPELINE_SMALL_SLOTS:-}" ] && [ -n "$n" ] && [ "$n" -le "${PIPELINE_SMALL_MAX:-50}" ]; then
     pipeline_log "small rebuild ($n stale modules): small-check slot, ${PIPELINE_SMALL_THREADS:-2} threads" >&2
@@ -107,4 +118,26 @@ pipeline_label() {
   local label=$1 tip=$2
   [ -f "$ARTIFACT_ROOT/$tip/READY" ] || pipeline_die "label $label: $tip is not READY"
   ln -sfn "$tip" "$ARTIFACT_ROOT/.$label.new" && mv -Tf "$ARTIFACT_ROOT/.$label.new" "$ARTIFACT_ROOT/$label"
+}
+
+# pipeline_cache_audit [TREE]: the guard of the box's shared Lake cache, run from THIS (the tip's) tree
+# before every slot build, lane-check, landing gate and publish. lake-cache-audit --since --purge drops,
+# before the next reader can fetch it, every cache entry written since the last audit that (a) holds C
+# naming an in-tree initializer or declaration without the package prefix (a compile outside Lake's
+# package setup, burst2-b 10-07: 79 poisoned .c, no lean_exe linked) or (b) records an artifact whose
+# bytes were modified after the entry stored it (a write through a restored hard link: the cache file
+# IS the lane's .lake/build file). Returns 0 when the cache is clean or was purged clean (a purge is
+# logged here and in $ARTIFACT_ROOT/ALERTS), 2 when the audit itself could not run: the caller refuses
+# rather than build on an unguarded cache. A no-op when the cache is off or still empty.
+pipeline_cache_audit() {
+  local tree=${1:-$pipeline_tree_root} rc=0
+  [ "${LAKE_ARTIFACT_CACHE:-}" = true ] && [ -n "${LAKE_CACHE_DIR:-}" ] && [ -d "$LAKE_CACHE_DIR" ] || return 0
+  [ -d "$LAKE_CACHE_DIR/outputs" ] || return 0      # an empty cache: nothing to guard yet
+  python3 "$pipeline_lib_dir/lake-cache-audit" --cache "$LAKE_CACHE_DIR" --tree "$tree" \
+    --since --purge --quiet || rc=$?
+  case $rc in
+    0) return 0 ;;
+    1) pipeline_log "lake-cache-audit PURGED entries from $LAKE_CACHE_DIR (see \$ARTIFACT_ROOT/ALERTS); continuing on the clean cache" >&2; return 0 ;;
+    *) pipeline_log "lake-cache-audit could not run (rc $rc) on $LAKE_CACHE_DIR" >&2; return 2 ;;
+  esac
 }

@@ -24,18 +24,23 @@ copied script.
 The shared git remote is the bundles mirror `/tank/dregg-build/claude-lanes/bundles/burst3-minidregg.git`
 (`PIPELINE_SHARED_GIT`).
 
-### box.env (as written 2026-10-14)
+### box.env (as written 2026-10-14; re-run with the cache line below)
 
 ```
 scripts/pipeline/box-env --layout /tank/dregg-build/pipeline \
   --slots "/tank/dregg-build/pipeline/slots/build-slot-1 /tank/dregg-build/pipeline/slots/build-slot-2" \
   --gate-slots /tank/dregg-build/pipeline/slots/build-slot-mk --lean-threads 8 \
-  --shared-git /tank/dregg-build/claude-lanes/bundles/burst3-minidregg.git --no-lake-shim \
+  --shared-git /tank/dregg-build/claude-lanes/bundles/burst3-minidregg.git \
+  --lake-cache /tank/dregg-build/pipeline/lake-cache \
   --set "PIPELINE_LEANENV_WAIT_S=0 PIPELINE_JOURNEY_JOBS=8 PYTHONPATH=/tank/dregg-build/pipeline/pylib"
 ```
 
-- `--no-lake-shim`: hbox has no `$PIPELINE_ROOT/scripts/lake-shim`. A PATH entry pointing there would be an
-  installed-copy path waiting for someone to plant a file in it.
+- `--lake-cache DIR`: the box's one shared Lake artifact cache. box.env exports `LAKE_CACHE_DIR=DIR` and
+  `LAKE_ARTIFACT_CACHE=true`; there is no shim and no PATH entry (the old `--no-lake-shim` refused the
+  installed-copy PATH entry and, with it, the cache: hbox lanes recompiled each other's modules, e.g. 823
+  modules / 8,046 s in land-perffix4, CYCLE-TIME-20261016 §2 T2). The guard, `lake-cache-audit --since
+  --purge`, runs from the tip tree's `lib.sh` (`pipeline_cache_audit`) before every slot build, lane-check,
+  landing gate and publish.
 - `PIPELINE_LEANENV_WAIT_S=0`: hbox has no lean envs, so `objective` is UNCONFIGURED. It was UNCONFIGURED on
   burst3 too, and it is not a required row.
 
@@ -45,7 +50,7 @@ The /srv paths were defaults. Each edit makes a default come from box.env:
 
 - `box-env --layout DIR` sets `PIPELINE_ROOT` and the roots `ARTIFACT_ROOT`, `JOURNEY_ROOT`, `PIPELINE_LANES`,
   `PIPELINE_WARM_BASE`, `PIPELINE_NEXT_BASE` and `PIPELINE_GATE_SLOT`, all under DIR. It also gains
-  `--shared-git`, `--set` and `--no-lake-shim`.
+  `--shared-git`, `--set` and `--lake-cache`.
 - `lib.sh` `pipeline_find_tree`: the next base comes from `PIPELINE_NEXT_BASE`.
 - `mk-lane.sh`: the `shared` remote comes from `PIPELINE_SHARED_GIT`.
 - `advance-base-burst.sh`: the probe lane goes under `$LANES`. `$W/mk-lane.sh` is now a **relative symlink**

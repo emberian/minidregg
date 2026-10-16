@@ -203,6 +203,11 @@ done
 
 # --- 2. gate ----------------------------------------------------------------------------------------
 tag=land-${tip:0:8}
+# The shared Lake cache's guard, from the tip's own tree (lib.sh pipeline_cache_audit): poisoned or
+# written-through entries are purged before the gate's builds can fetch them; an audit that cannot run
+# refuses the landing.
+pipeline_cache_audit "$L/src" || pipeline_die "lake-cache-audit could not run on ${LAKE_CACHE_DIR:-?}: the gate does not build on an unguarded cache"
+pipeline_log "cache-audit done (${LAKE_CACHE_DIR:-cache off})"
 while :; do
   load=$(cut -d' ' -f1 /proc/loadavg)
   awk -v l="$load" -v m="${PIPELINE_GATE_MAX_LOAD:-20}" 'BEGIN {exit !(l <= m)}' && break

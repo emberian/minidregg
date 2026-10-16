@@ -77,6 +77,7 @@ else
 fi
 cd "$W/src"
 t_clone=$(date +%s)
+pipeline_cache_audit "$W/src" || pipeline_die "lake-cache-audit could not run: not publishing from an unguarded cache"
 pipeline_log "building $tip ($label) from $from$moved"
 
 # --- the build chain, one slot, one memory cap ------------------------------------------------
