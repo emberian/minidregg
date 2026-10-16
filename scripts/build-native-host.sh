@@ -15,7 +15,7 @@ usage() {
   cat <<'EOF'
 usage: scripts/build-native-host.sh [--root MODULE --usage-prefix TEXT [--companion-of BUILD_OUTPUT]] [--umbrella [--umbrella-target MODULE]] [--incremental-host-from SNAPSHOT BUILD_OUTPUT] [--incremental-suffix-from SNAPSHOT BUILD_OUTPUT MODULE [--allow-suffix-change MODULE ...] [--allow-inserted-module MODULE ...] [--allow-unchanged-restart]] [--checkpoint-resume | --resume-failed BUILD_OUTPUT | --resume-complete-lean BUILD_OUTPUT BUILDER_SHA256 | --reuse-success-prefix-from SNAPSHOT BUILD_OUTPUT] [--output DIR] [--binary PATH]
 
-  --umbrella  run the literal `lake build Minidregg` gate through a serialized
+  --umbrella  run the literal `lake build Minidregg` gate through the seated
               Lean wrapper, build Host.Main leanArts, then link the native host
   --umbrella-target MODULE
               with --umbrella: the Lake target of that step instead of Minidregg (the
@@ -75,13 +75,17 @@ usage: scripts/build-native-host.sh [--root MODULE --usage-prefix TEXT [--compan
 
 Environment:
   MINIDREGG_NATIVE_ALLOW_SHARED=1  permit a tree without the snapshot marker
-  MINIDREGG_NATIVE_JOBS=1|2        concurrent C compiler processes (default: 2)
-  MINIDREGG_LEAN_THREADS=1|2       threads in each serialized Lean process (default: 2)
+  MINIDREGG_NATIVE_JOBS=N          concurrent C compiler processes (positive integer; default: 2)
+  MINIDREGG_LEAN_THREADS=N         threads in each Lean process (positive integer; default: 2)
   MINIDREGG_NATIVE_LAKE_CC=PATH    optional bounded compiler wrapper for Lake C jobs
   MINIDREGG_CYCLE_DIR=DIR          evidence parent (default below /tmp)
   MINIDREGG_LEAN_SEAT_ROOT=DIR     host-wide compiler seats (default /tmp/minidregg-lean-seats)
-  MINIDREGG_LEAN_SEATS=N           how many host-wide compiler seats this box carries (default: 2)
-  MINIDREGG_LEAN_SEAT_WAIT=S       seconds to wait for a free seat before refusing (default 7200; 0 = refuse at once)
+  MINIDREGG_LEAN_SEATS=N           host-wide compiler seats: at most N real Lean processes run at once on
+                                   this host, across every build sharing MINIDREGG_LEAN_SEAT_ROOT (default: 2).
+                                   The seats are the ONLY Lean concurrency bound: Lake builds the closure
+                                   in parallel and each real Lean holds one seat while it runs.
+  MINIDREGG_LEAN_SEAT_WAIT=S       seconds one Lean process waits for a free seat before it fails with 75
+                                   (default 7200; 0 = refuse at once)
 EOF
 }
 
@@ -283,13 +287,6 @@ for command in jq lake file find sort join comm xargs shasum uname cmp head awk 
   }
 done
 
-if [[ "$build_umbrella" == 1 ]]; then
-  command -v flock >/dev/null 2>&1 || {
-    printf 'build-native-host: umbrella requires flock\n' >&2
-    exit 69
-  }
-fi
-
 # The source root is this script's parent directory. It is a git checkout only
 # when git names that same directory as its top level: an extracted
 # `git archive` tree has no .git (and may sit inside an unrelated repository),
@@ -332,8 +329,10 @@ fi
 
 native_jobs=${MINIDREGG_NATIVE_JOBS:-2}
 lean_threads=${MINIDREGG_LEAN_THREADS:-2}
-case "$native_jobs" in 1|2) ;; *) printf 'MINIDREGG_NATIVE_JOBS must be 1 or 2\n' >&2; exit 64 ;; esac
-case "$lean_threads" in 1|2) ;; *) printf 'MINIDREGG_LEAN_THREADS must be 1 or 2\n' >&2; exit 64 ;; esac
+# Positive integers, bounded only so a typo cannot ask for a thousand compilers. The memory bound is
+# the cgroup the caller runs in (swarm-build) and the host-wide seat count below.
+case "$native_jobs" in [1-9]|[1-9][0-9]|[1-2][0-9][0-9]) ;; *) printf 'MINIDREGG_NATIVE_JOBS must be a positive integer (<= 299)\n' >&2; exit 64 ;; esac
+case "$lean_threads" in [1-9]|[1-9][0-9]) ;; *) printf 'MINIDREGG_LEAN_THREADS must be a positive integer (<= 99)\n' >&2; exit 64 ;; esac
 
 cycle_dir=${MINIDREGG_CYCLE_DIR:-/tmp/minidregg-cycle-20260919}
 # Compiler capacity belongs to the host, not to one candidate's evidence.
@@ -360,41 +359,12 @@ if [[ -s "$symlink_report" ]]; then
   exit 73
 fi
 
-seat_dir=""
-release_seat() {
-  if [[ -n "$seat_dir" ]]; then
-    rm -f "$seat_dir/owner.txt"
-    rmdir "$seat_dir" 2>/dev/null || true
-    seat_dir=""
-  fi
-}
-on_exit() {
-  code=$?
-  trap - EXIT HUP INT TERM
-  release_seat
-  exit "$code"
-}
-on_signal() {
-  code=$1
-  trap - EXIT HUP INT TERM
-  release_seat
-  exit "$code"
-}
-try_seat() {
-  local seat_number candidate
-  for seat_number in $(seq 1 "$lean_seats"); do
-    candidate="$seat_root/lean-seat-$seat_number"
-    # Acquire with one syscall, independent of utility-level race handling.
-    if python3 -c 'import os, sys; os.mkdir(sys.argv[1])' "$candidate" 2>/dev/null; then
-      seat_dir=$(cd "$candidate" && pwd -P)
-      printf 'pid=%s\nstarted_utc=%s\nroot=%s\n' \
-        "$BASHPID" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$root" \
-        > "$seat_dir/owner.txt"
-      return 0
-    fi
-  done
-  return 1
-}
+# Seats are taken per real Lean process by the wrapper below (make_lean_wrapper), not by this build:
+# a build waits only while a compiler would exceed the host's seat count, and releases the seat the
+# moment that compiler exits. A full set of seats is contention, not failure: the wrapper waits up to
+# MINIDREGG_LEAN_SEAT_WAIT (MINIDREGG_LEAN_SEAT_WAIT=0 restores the immediate refusal, exit 75).
+seat_wait=${MINIDREGG_LEAN_SEAT_WAIT:-7200}
+case "$seat_wait" in ''|*[!0-9]*) printf 'MINIDREGG_LEAN_SEAT_WAIT must be a number of seconds\n' >&2; exit 64 ;; esac
 seat_owners() {
   local d
   for d in "$seat_root"/lean-seat-*; do
@@ -402,36 +372,10 @@ seat_owners() {
     printf '  %s: %s\n' "${d##*/}" "$(tr '\n' ' ' < "$d/owner.txt" 2>/dev/null)"
   done
 }
-# A full set of seats is contention, not failure: wait for one, so a landing's publish does not fail
-# because a lane holds the compiler. MINIDREGG_LEAN_SEAT_WAIT=0 restores the immediate refusal.
-seat_wait=${MINIDREGG_LEAN_SEAT_WAIT:-7200}
-case "$seat_wait" in ''|*[!0-9]*) printf 'MINIDREGG_LEAN_SEAT_WAIT must be a number of seconds\n' >&2; exit 64 ;; esac
-seat_t0=$SECONDS
-seat_said=-1
-until try_seat; do
-  waited=$(( SECONDS - seat_t0 ))
-  if (( waited >= seat_wait )); then
-    printf 'build-native-host: all %s Lean compiler seats are occupied under %s after %s s; owners:\n' \
-      "$lean_seats" "$seat_root" "$waited" >&2
-    seat_owners >&2
-    exit 75
-  fi
-  if (( seat_said < 0 || waited - seat_said >= 600 )); then
-    printf 'build-native-host: all %s Lean compiler seats are occupied; waiting (%s/%s s); owners:\n' \
-      "$lean_seats" "$waited" "$seat_wait" >&2
-    seat_owners >&2
-    seat_said=$waited
-  fi
-  sleep 30
-done
-trap on_exit EXIT
-trap 'on_signal 129' HUP
-trap 'on_signal 130' INT
-trap 'on_signal 143' TERM
 
 start_epoch=$(date +%s)
-printf 'start_utc=%s\nroot=%s\nlean_threads=%s\nnative_jobs=%s\nseat_root=%s\nseat=%s\n' \
-  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$root" "$lean_threads" "$native_jobs" "$seat_root" "$seat_dir" \
+printf 'start_utc=%s\nroot=%s\nlean_threads=%s\nnative_jobs=%s\nseat_root=%s\nlean_seats=%s\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$root" "$lean_threads" "$native_jobs" "$seat_root" "$lean_seats" \
   > "$output_dir/build.log"
 
 # `transImports` is a nonbuildable Lake facet: it parses source headers and
@@ -1328,17 +1272,118 @@ if [[ -n "$companion_output" ]]; then
     | tee -a "$output_dir/build.log"
 fi
 
+# --- the seated Lean wrapper: every Lake build below runs through it --------------------------
+# Lake (Lean 4.30) has no jobs flag: it starts one `lean` per ready module, so LEAN_NUM_THREADS alone
+# does not bound a build. Every Lake build of this script therefore runs with a fake sysroot whose
+# bin/lean is a wrapper: it takes one of the host's MINIDREGG_LEAN_SEATS seats (an atomic mkdir under
+# MINIDREGG_LEAN_SEAT_ROOT, shared by every build on the host), runs the real compiler with
+# -j $LEAN_NUM_THREADS, logs START/END and releases the seat only after the compiler has exited.
+# Lake runs the closure in parallel; the seats are the only bound on concurrent compilers. The fake
+# sysroot points every library back at the real immutable toolchain (so the outputs and Lake's traces
+# are the real compiler's: publish-artifacts' --umbrella step replays a tree plain Lake built).
+toolchain=$(lake env lean --print-prefix)
+wrapper_root="$output_dir/seated-lean-toolchain"
+mkdir -p "$wrapper_root/bin"
+ln -s "$toolchain/include" "$wrapper_root/include"
+ln -s "$toolchain/lib" "$wrapper_root/lib"
+ln -s "$toolchain/src" "$wrapper_root/src"
+while IFS= read -r executable; do
+  name=${executable##*/}
+  [[ "$name" == lean ]] || ln -s "$executable" "$wrapper_root/bin/$name"
+done < <(find "$toolchain/bin" -maxdepth 1 -type f -print)
+cat > "$wrapper_root/bin/lean" <<'EOF'
+#!/usr/bin/env bash
+# build-native-host.sh's seated Lean: one real compiler per host-wide seat.
+set -u
+: "${MINIDREGG_REAL_LEAN:?}" "${MINIDREGG_LEAN_SEAT_ROOT:?}" "${MINIDREGG_LEAN_SEATS:?}"
+: "${MINIDREGG_LEAN_SEAT_WAIT:?}" "${MINIDREGG_LEAN_WRAPPER_LOG:?}" "${MINIDREGG_LEAN_BUILD_ROOT:?}"
+source_file=-
+for arg in "$@"; do case "$arg" in *.lean) source_file=$arg ;; esac; done
+seat=""
+release() {
+  if [[ -n "$seat" ]]; then rm -f "$seat/owner.txt"; rmdir "$seat" 2>/dev/null || true; seat=""; fi
+}
+trap release EXIT
+waited=0
+until [[ -n "$seat" ]]; do
+  for number in $(seq 1 "$MINIDREGG_LEAN_SEATS"); do
+    candidate="$MINIDREGG_LEAN_SEAT_ROOT/lean-seat-$number"
+    # One mkdir(2): the seat is taken or it is not; no utility-level race handling.
+    if mkdir "$candidate" 2>/dev/null; then
+      seat=$candidate
+      printf 'pid=%s\nstarted_utc=%s\nroot=%s\nsource=%s\n' "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        "$MINIDREGG_LEAN_BUILD_ROOT" "$source_file" > "$seat/owner.txt"
+      break
+    fi
+  done
+  [[ -n "$seat" ]] && break
+  if (( waited >= MINIDREGG_LEAN_SEAT_WAIT )); then
+    printf 'build-native-host: all %s Lean compiler seats under %s are occupied after %s s (%s)\n' \
+      "$MINIDREGG_LEAN_SEATS" "$MINIDREGG_LEAN_SEAT_ROOT" "$waited" "$source_file" >&2
+    exit 75
+  fi
+  sleep 2
+  waited=$((waited + 2))
+done
+child=""
+forward_signal() { [[ -z "$child" ]] || kill -"$1" "$child" 2>/dev/null || true; }
+trap 'forward_signal HUP' HUP
+trap 'forward_signal INT' INT
+trap 'forward_signal TERM' TERM
+# Each log line is ONE write (O_APPEND): concurrent wrappers never interleave a line.
+line=$(printf 'START\t%s\t%s\t' "$(date +%s)" "$$"; printf '%q ' "$@")
+printf '%s\n' "$line" >> "$MINIDREGG_LEAN_WRAPPER_LOG"
+"$MINIDREGG_REAL_LEAN" -j "$LEAN_NUM_THREADS" "$@" &
+child=$!
+# A trapped signal returns `wait` early while the compiler still runs: keep the seat until it exits.
+wait "$child"
+code=$?
+while kill -0 "$child" 2>/dev/null; do
+  wait "$child"
+  code=$?
+done
+printf 'END\t%s\t%s\t%s\n' "$(date +%s)" "$$" "$code" >> "$MINIDREGG_LEAN_WRAPPER_LOG"
+exit "$code"
+EOF
+chmod +x "$wrapper_root/bin/lean"
+wrapper_log="$output_dir/lake-lean-wrapper.tsv"
+: > "$wrapper_log"
+lake_cc=${MINIDREGG_NATIVE_LAKE_CC:-$toolchain/bin/clang}
+# seated_lake LOG TARGET...: `lake build TARGET...` through the seated wrapper, output to LOG.
+seated_lake() {
+  local log=$1
+  shift
+  env \
+    LAKE_OVERRIDE_LEAN=true \
+    LEAN_SYSROOT="$wrapper_root" \
+    LEAN_CC="$lake_cc" \
+    LEAN_AR="$toolchain/bin/llvm-ar" \
+    LEAN_NUM_THREADS="$lean_threads" \
+    MINIDREGG_REAL_LEAN="$toolchain/bin/lean" \
+    MINIDREGG_LEAN_SEAT_ROOT="$seat_root" \
+    MINIDREGG_LEAN_SEATS="$lean_seats" \
+    MINIDREGG_LEAN_SEAT_WAIT="$seat_wait" \
+    MINIDREGG_LEAN_WRAPPER_LOG="$wrapper_log" \
+    MINIDREGG_LEAN_BUILD_ROOT="$root" \
+    lake build "$@" > "$log" 2>&1
+}
+
 compiled_sources=0
-if [[ "$build_umbrella" == 0 ]]; then
+# The modes that reuse a byte-checked PREFIX of the import order (--checkpoint-resume, --resume-failed,
+# --resume-complete-lean, --reuse-success-prefix-from) or start at a named module of it
+# (--incremental-host-from, --incremental-suffix-from) checkpoint and skip module by module, so they
+# keep the ordered loop (still seated). Every other non-umbrella build is ONE parallel Lake build of
+# the same per-module facet set the loop requested.
+ordered_loop=0
+if [[ "$checkpoint_resume" == 1 || -n "$incremental_baseline_root" ]]; then
+  ordered_loop=1
+fi
+if [[ "$build_umbrella" == 0 && "$ordered_loop" == 1 ]]; then
   index=0
   incremental_started=0
   total=$(wc -l < "$build_modules" | tr -d ' ')
   while IFS= read -r module; do
     if [[ "$resume_prefix" -gt 0 && "$index" -lt "$resume_prefix" ]]; then
-      index=$((index + 1))
-      continue
-    fi
-    if [[ -n "$companion_output" ]] && grep -qxF "$module" "$companion_reused"; then
       index=$((index + 1))
       continue
     fi
@@ -1356,7 +1401,6 @@ if [[ "$build_umbrella" == 0 ]]; then
     log="$output_dir/lean/$(printf '%04d' "$index")-$safe.log"
     one_start=$(date +%s)
     printf 'lean[%s/%s] %s start\n' "$index" "$total" "$module" | tee -a "$output_dir/build.log"
-    source=${module//./\/}.lean
     stem=${module//./\/}
     mkdir -p ".lake/build/lib/lean/$(dirname "$stem")" ".lake/build/ir/$(dirname "$stem")"
     # LAKE compiles the module (its leanArts facet: .olean, .ilean, .c), never a bare
@@ -1366,7 +1410,7 @@ if [[ "$build_umbrella" == 0 ]]; then
     # a later Lake build in that tree stored those files in the shared artifact cache, and every
     # lane that fetched them failed to link any lean_exe (79 poisoned .c on burst2-b, 10-07).
     # Lake also replaces its outputs instead of writing through a cache-restored hard link.
-    if env LEAN_NUM_THREADS="$lean_threads" lake build "+$module:leanArts" > "$log" 2>&1; then
+    if seated_lake "$log" "+$module:leanArts"; then
       printf 'lean[%s/%s] %s PASS %ss\n' \
         "$index" "$total" "$module" "$(( $(date +%s) - one_start ))" | tee -a "$output_dir/build.log"
       if [[ "$checkpoint_resume" == 1 ]]; then
@@ -1385,77 +1429,60 @@ if [[ "$build_umbrella" == 0 ]]; then
       exit "$code"
     fi
   done < "$build_modules"
+elif [[ "$build_umbrella" == 0 ]]; then
+  # Every module's leanArts (.olean, .ilean, .c) in ONE Lake build: Lake compiles what is stale in
+  # parallel (the seats bound it), replays the rest, and is still the only writer of its outputs (the
+  # loop's poisoning guard above holds unchanged). A companion's reused modules are not requested;
+  # Lake reads them as imports, and their bytes are checked again after the build.
+  lake_targets="$output_dir/lake-leanarts-targets.txt"
+  if [[ -n "$companion_output" ]]; then
+    grep -vxF -f "$companion_reused" "$build_modules" > "$lake_targets.modules" || true
+  else
+    cp "$build_modules" "$lake_targets.modules"
+  fi
+  sed 's/^/+/; s/$/:leanArts/' "$lake_targets.modules" > "$lake_targets"
+  rm -f "$lake_targets.modules"
+  while IFS= read -r module; do
+    stem=${module//./\/}
+    mkdir -p ".lake/build/lib/lean/$(dirname "$stem")" ".lake/build/ir/$(dirname "$stem")"
+  done < <(sed 's/^+//; s/:leanArts$//' "$lake_targets")
+  if [[ -s "$lake_targets" ]]; then
+    lake_target_args=()
+    while IFS= read -r target; do lake_target_args+=("$target"); done < "$lake_targets"
+    leanarts_log="$output_dir/lake-build-leanArts.log"
+    printf 'lake build %s +MODULE:leanArts targets\n' "${#lake_target_args[@]}" \
+      > "$output_dir/lake-build-leanArts.command.txt"
+    one_start=$(date +%s)
+    printf 'lean-closure %s modules start (seats=%s threads=%s)\n' \
+      "${#lake_target_args[@]}" "$lean_seats" "$lean_threads" | tee -a "$output_dir/build.log"
+    if seated_lake "$leanarts_log" "${lake_target_args[@]}"; then
+      printf 'lean-closure %s modules PASS %ss\n' \
+        "${#lake_target_args[@]}" "$(( $(date +%s) - one_start ))" | tee -a "$output_dir/build.log"
+    else
+      code=$?
+      printf 'lean-closure FAIL(%s) log=%s\n' "$code" "$leanarts_log" | tee -a "$output_dir/build.log" >&2
+      tail -100 "$leanarts_log" >&2
+      exit "$code"
+    fi
+  fi
+  if [[ -n "$companion_output" ]] &&
+     ! shasum -a 256 -c "$companion_check" > "$output_dir/companion-recheck.log" 2>&1; then
+    printf 'build-native-host: companion artifacts changed during the build; see %s\n' \
+      "$output_dir/companion-recheck.log" >&2
+    exit 65
+  fi
+  # Lake may reuse the entire warm closure; count actual source invocations.
+  compiled_sources=$(awk -F '\t' '$1 == "START" && $4 ~ /\.lean( |$)/ { n++ } END { print n+0 }' "$wrapper_log")
 fi
 
 if [[ "$build_umbrella" == 1 ]]; then
-  # Lake 5 has no scheduler-width field in BuildConfig and no CLI jobs flag.
-  # Keep the literal repository gate while bounding it externally: Lake itself
-  # is one Lean process and this wrapper admits at most one real Lean compiler.
-  # The fake sysroot points all libraries back at the real immutable toolchain,
-  # but substitutes the serialized wrapper for bin/lean.
-  toolchain=$(lake env lean --print-prefix)
-  wrapper_root="$output_dir/serialized-lean-toolchain"
-  wrapper_lock="$output_dir/lake-lean-serial.lock"
-  mkdir -p "$wrapper_root/bin"
-  ln -s "$toolchain/include" "$wrapper_root/include"
-  ln -s "$toolchain/lib" "$wrapper_root/lib"
-  ln -s "$toolchain/src" "$wrapper_root/src"
-  while IFS= read -r executable; do
-    name=${executable##*/}
-    [[ "$name" == lean ]] || ln -s "$executable" "$wrapper_root/bin/$name"
-  done < <(find "$toolchain/bin" -maxdepth 1 -type f -print)
-  cat > "$wrapper_root/bin/lean" <<'EOF'
-#!/usr/bin/env bash
-set -u
-: "${MINIDREGG_REAL_LEAN:?}"
-: "${MINIDREGG_LEAN_LOCK:?}"
-: "${MINIDREGG_LEAN_WRAPPER_LOG:?}"
-
-# Keep the descriptor inherited by the compiler, so interruption of its shell
-# cannot release the seat while the real compiler is still running.
-exec 8>"${MINIDREGG_LEAN_LOCK}.flock"
-flock 8
-
-child=""
-forward_signal() {
-  signal=$1
-  [[ -z "$child" ]] || kill -"$signal" "$child" 2>/dev/null || true
-}
-trap 'forward_signal HUP' HUP
-trap 'forward_signal INT' INT
-trap 'forward_signal TERM' TERM
-
-printf 'START\t%s\t%s\t' "$(date +%s)" "$$" >> "$MINIDREGG_LEAN_WRAPPER_LOG"
-printf '%q ' "$@" >> "$MINIDREGG_LEAN_WRAPPER_LOG"
-printf '\n' >> "$MINIDREGG_LEAN_WRAPPER_LOG"
-"$MINIDREGG_REAL_LEAN" -j "$LEAN_NUM_THREADS" "$@" &
-child=$!
-set +e
-wait "$child"
-code=$?
-set -e
-printf 'END\t%s\t%s\t%s\n' "$(date +%s)" "$$" "$code" >> "$MINIDREGG_LEAN_WRAPPER_LOG"
-exit "$code"
-EOF
-  chmod +x "$wrapper_root/bin/lean"
-  wrapper_log="$output_dir/lake-lean-wrapper.tsv"
-  : > "$wrapper_log"
   lake_gate_log="$output_dir/lake-build-$umbrella_target.log"
   cat > "$output_dir/lake-build-$umbrella_target.command.txt" <<EOF
-LAKE_OVERRIDE_LEAN=true LEAN_SYSROOT=$wrapper_root LEAN_NUM_THREADS=$lean_threads lake build "$umbrella_target"
+LAKE_OVERRIDE_LEAN=true LEAN_SYSROOT=$wrapper_root LEAN_NUM_THREADS=$lean_threads MINIDREGG_LEAN_SEATS=$lean_seats lake build "$umbrella_target"
 EOF
   gate_start=$(date +%s)
   printf 'lake-gate %s start\n' "$umbrella_target" | tee -a "$output_dir/build.log"
-  if env \
-      LAKE_OVERRIDE_LEAN=true \
-      LEAN_SYSROOT="$wrapper_root" \
-      LEAN_CC="${MINIDREGG_NATIVE_LAKE_CC:-$toolchain/bin/clang}" \
-      LEAN_AR="$toolchain/bin/llvm-ar" \
-      LEAN_NUM_THREADS="$lean_threads" \
-      MINIDREGG_REAL_LEAN="$toolchain/bin/lean" \
-      MINIDREGG_LEAN_LOCK="$wrapper_lock" \
-      MINIDREGG_LEAN_WRAPPER_LOG="$wrapper_log" \
-      lake build "$umbrella_target" > "$lake_gate_log" 2>&1; then
+  if seated_lake "$lake_gate_log" "$umbrella_target"; then
     printf 'lake-gate %s PASS %ss\n' "$umbrella_target" \
       "$(( $(date +%s) - gate_start ))" | tee -a "$output_dir/build.log"
   else
@@ -1471,20 +1498,11 @@ EOF
   # resulting C files feed the native link below without a duplicate source pass.
   host_gate_log="$output_dir/lake-build-Host.Main-leanArts.log"
   cat > "$output_dir/lake-build-Host.Main-leanArts.command.txt" <<EOF
-LAKE_OVERRIDE_LEAN=true LEAN_SYSROOT=$wrapper_root LEAN_NUM_THREADS=$lean_threads lake build +Host.Main:leanArts
+LAKE_OVERRIDE_LEAN=true LEAN_SYSROOT=$wrapper_root LEAN_NUM_THREADS=$lean_threads MINIDREGG_LEAN_SEATS=$lean_seats lake build +Host.Main:leanArts
 EOF
   gate_start=$(date +%s)
   printf 'lake-gate Host.Main:leanArts start\n' | tee -a "$output_dir/build.log"
-  if env \
-      LAKE_OVERRIDE_LEAN=true \
-      LEAN_SYSROOT="$wrapper_root" \
-      LEAN_CC="${MINIDREGG_NATIVE_LAKE_CC:-$toolchain/bin/clang}" \
-      LEAN_AR="$toolchain/bin/llvm-ar" \
-      LEAN_NUM_THREADS="$lean_threads" \
-      MINIDREGG_REAL_LEAN="$toolchain/bin/lean" \
-      MINIDREGG_LEAN_LOCK="$wrapper_lock" \
-      MINIDREGG_LEAN_WRAPPER_LOG="$wrapper_log" \
-      lake build +Host.Main:leanArts > "$host_gate_log" 2>&1; then
+  if seated_lake "$host_gate_log" +Host.Main:leanArts; then
     printf 'lake-gate Host.Main:leanArts PASS %ss\n' \
       "$(( $(date +%s) - gate_start ))" | tee -a "$output_dir/build.log"
   else
@@ -1494,25 +1512,31 @@ EOF
     tail -100 "$host_gate_log" >&2
     exit "$code"
   fi
-
-  if ! awk -F '\t' '
-    $1 == "START" { if (active) exit 1; active = 1; starts++ }
-    $1 == "END" { if (!active) exit 1; active = 0; ends++ }
-    END { if (active || starts == 0 || starts != ends) exit 1 }
-  ' "$wrapper_log"; then
-    printf 'build-native-host: serialized Lean wrapper log is unbalanced: %s\n' \
-      "$wrapper_log" >&2
+  # The umbrella gate must have run the wrapper at all (a Lake that bypassed the sysroot would compile
+  # unseated and unlogged).
+  grep -q '^START' "$wrapper_log" || {
+    printf 'build-native-host: the umbrella gate never ran the seated Lean wrapper: %s\n' "$wrapper_log" >&2
     exit 70
-  fi
+  }
   # Lake may reuse the entire warm closure; count actual source invocations.
   compiled_sources=$(awk -F '\t' '$1 == "START" && $4 ~ /\.lean( |$)/ { n++ } END { print n+0 }' "$wrapper_log")
-  printf 'max_concurrent_real_lean=1\nwrapper_invocations=%s\n' \
-    "$(grep -c '^START' "$wrapper_log")" > "$output_dir/lake-wrapper-summary.txt"
 fi
 
-# The seat covers compiler invocations, not bounded pure-C work.
-release_seat
-trap - EXIT HUP INT TERM
+# Every compiler the wrapper started has ended, each pid once, and at no point did this build hold
+# more compilers than the host has seats (START is logged after a seat is taken, END before it is
+# released, so the file order bounds the overlap).
+if ! max_concurrent_lean=$(awk -F '\t' -v seats="$lean_seats" '
+    $1 == "START" { if ($3 in open) bad = 1; open[$3] = 1; n++; if (n > m) m = n; starts++ }
+    $1 == "END" { if (!($3 in open)) bad = 1; delete open[$3]; n--; ends++ }
+    END { if (bad || n != 0 || starts != ends || m > seats) exit 1; print m + 0 }
+  ' "$wrapper_log"); then
+  printf 'build-native-host: seated Lean wrapper log is unbalanced or exceeds %s seats: %s\n' \
+    "$lean_seats" "$wrapper_log" >&2
+  exit 70
+fi
+printf 'lean_seats=%s\nmax_concurrent_real_lean=%s\nwrapper_invocations=%s\n' \
+  "$lean_seats" "$max_concurrent_lean" "$(grep -c '^START' "$wrapper_log")" \
+  > "$output_dir/lake-wrapper-summary.txt"
 
 toolchain=$(lake env lean --print-prefix)
 clang="$toolchain/bin/clang"
@@ -1839,9 +1863,11 @@ fi
   fi
   if [[ "$build_umbrella" == 1 ]]; then
     printf 'lake_gate=lake build %s\n' "$umbrella_target"
-    printf 'max_concurrent_real_lean=1\n'
-    printf 'wrapper_invocations=%s\n' "$(grep -c '^START' "$wrapper_log")"
   fi
+  printf 'lean_seats=%s\n' "$lean_seats"
+  printf 'lean_threads=%s\n' "$lean_threads"
+  printf 'max_concurrent_real_lean=%s\n' "$max_concurrent_lean"
+  printf 'wrapper_invocations=%s\n' "$(grep -c '^START' "$wrapper_log")"
   if [[ -n "$incremental_baseline_root" ]]; then
     printf 'compiled_source_modules=%s\n' "$compiled_sources"
   else

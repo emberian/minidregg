@@ -1,100 +1,85 @@
 #!/usr/bin/env python3
-"""Exercise the actual native builder lock snippets without invoking Lean."""
+"""Exercise build-native-host.sh's seated Lean wrapper (the real heredoc text) without invoking Lean.
+
+16 concurrent "compilers" over 3 host-wide seats: at most 3 run at once and 3 do; every START has
+its END; every seat directory is gone afterwards. Occupied seats with MINIDREGG_LEAN_SEAT_WAIT=0:
+the wrapper refuses with 75 and leaves the owners' directories intact. A TERM delivered to the
+wrapper while its compiler runs does not release the seat before the compiler exits.
+"""
 import os
 from pathlib import Path
+import signal
 import subprocess
 import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = (ROOT / "scripts/build-native-host.sh").read_text()
-WRAPPER = SOURCE.split('cat > "$wrapper_root/bin/lean" <<\'EOF\'\n', 1)[1].split("\nEOF", 1)[0]
-SEATS = "for seat_number in 1 2; do\n" + SOURCE.split("for seat_number in 1 2; do\n", 1)[1].split("\ndone", 1)[0] + "\ndone\n"
+WRAPPER = SOURCE.split('cat > "$wrapper_root/bin/lean" <<\'EOF\'\n', 1)[1].split("\nEOF\n", 1)[0] + "\n"
 
-def wait_for(predicate, timeout=10):
-    deadline = time.monotonic() + timeout
-    while not predicate():
-        if time.monotonic() > deadline:
-            raise AssertionError("bounded lock test timed out")
-        time.sleep(0.01)
-
-with tempfile.TemporaryDirectory(prefix="mini-native-locks-") as temporary:
+with tempfile.TemporaryDirectory(prefix="mini-native-seats-") as temporary:
     root = Path(temporary)
     wrapper = root / "lean"
     wrapper.write_text(WRAPPER)
     fake = root / "fake-lean"
-    fake.write_text("#!/bin/sh\nsleep 0.05\n")
+    fake.write_text("#!/bin/sh\nsleep 0.3\n")
     fake.chmod(0o755)
+    seats = root / "seats"
+    seats.mkdir()
     log = root / "wrapper.tsv"
     env = os.environ | {
         "MINIDREGG_REAL_LEAN": str(fake),
-        "MINIDREGG_LEAN_LOCK": str(root / "compiler"),
+        "MINIDREGG_LEAN_SEAT_ROOT": str(seats),
+        "MINIDREGG_LEAN_SEATS": "3",
+        "MINIDREGG_LEAN_SEAT_WAIT": "60",
         "MINIDREGG_LEAN_WRAPPER_LOG": str(log),
+        "MINIDREGG_LEAN_BUILD_ROOT": str(root),
         "LEAN_NUM_THREADS": "2",
     }
-    workers = [subprocess.Popen(["bash", str(wrapper), str(i)], env=env) for i in range(16)]
-    assert all(worker.wait(timeout=10) == 0 for worker in workers)
-    active = set()
-    maximum = 0
+    workers = [subprocess.Popen(["bash", str(wrapper), f"M{i}.lean"], env=env) for i in range(16)]
+    assert all(worker.wait(timeout=120) == 0 for worker in workers)
+    active, maximum, starts = set(), 0, 0
     for line in log.read_text().splitlines():
         event, _, pid, *_ = line.split("\t")
         if event == "START":
+            assert pid not in active
             active.add(pid)
+            starts += 1
             maximum = max(maximum, len(active))
         else:
-            assert pid in active
+            assert event == "END" and pid in active, line
             active.remove(pid)
-    assert maximum == 1 and not active, (maximum, active)
-    print("PASS: 16 compiler jobs, exactly one active, balanced START/END")
+    assert starts == 16 and not active, (starts, active)
+    assert maximum == 3, maximum
+    assert not list(seats.iterdir()), list(seats.iterdir())
+    print("PASS: 16 compiler jobs over 3 seats, at most and at least 3 at once, balanced, seats released")
 
-    def seat_round(name, occupied=False):
-        seats = root / name
-        seats.mkdir()
-        if occupied:
-            for number in (1, 2):
-                seat = seats / f"lean-seat-{number}"
-                seat.mkdir()
-                (seat / "owner.txt").write_text("retained owner\n")
-        script = root / f"{name}.sh"
-        script.write_text("""#!/bin/bash
-set -eu
-seat_root=$1
-result=$2
-release=$3
-root=$4
-cycle_dir=$5
-seat_dir=""
-""" + SEATS + """
-printf '%s\\n' "$seat_dir" > "$result"
-while [[ ! -e "$release" ]]; do sleep 0.01; done
-if [[ -n "$seat_dir" ]]; then
-  rm "$seat_dir/owner.txt"
-  rmdir "$seat_dir"
-fi
-""")
-        release = root / f"{name}.release"
-        results = [root / f"{name}.{i}.result" for i in range(16)]
-        evidence = [root / f"{name}.evidence.{i}" for i in range(16)]
-        for directory in evidence:
-            directory.mkdir()
-        workers = [subprocess.Popen(["bash", str(script), str(seats), str(result),
-                                    str(release), str(ROOT), str(directory)])
-                   for result, directory in zip(results, evidence)]
-        try:
-            wait_for(lambda: all(result.exists() for result in results))
-            winners = [result.read_text().strip() for result in results if result.read_text().strip()]
-            assert len(winners) == (0 if occupied else 2), winners
-            assert len(set(winners)) == len(winners)
-            if occupied:
-                assert all((seats / f"lean-seat-{i}/owner.txt").read_text() == "retained owner\n"
-                           for i in (1, 2))
-        finally:
-            release.touch()
-            assert all(worker.wait(timeout=10) == 0 for worker in workers)
-        if not occupied:
-            assert not list(seats.iterdir())
-            assert all(not list(directory.iterdir()) for directory in evidence)
-    seat_round("contended")
-    print("PASS: 16 independent evidence directories, two global seats, exact cleanup")
-    seat_round("occupied", occupied=True)
-    print("PASS: existing/stale owner directories refuse and remain intact")
+    # occupied seats, no wait: refuse 75, owners untouched
+    for number in (1, 2, 3):
+        seat = seats / f"lean-seat-{number}"
+        seat.mkdir()
+        (seat / "owner.txt").write_text("retained owner\n")
+    refused = subprocess.run(["bash", str(wrapper), "X.lean"], env=env | {"MINIDREGG_LEAN_SEAT_WAIT": "0"})
+    assert refused.returncode == 75, refused.returncode
+    assert all((seats / f"lean-seat-{n}/owner.txt").read_text() == "retained owner\n" for n in (1, 2, 3))
+    for number in (1, 2, 3):
+        (seats / f"lean-seat-{number}/owner.txt").unlink()
+        (seats / f"lean-seat-{number}").rmdir()
+    print("PASS: occupied seats refuse with 75 at MINIDREGG_LEAN_SEAT_WAIT=0 and stay intact")
+
+    # TERM to the wrapper: the seat outlives the compiler's own exit, never the other way round
+    slow = root / "slow-lean"
+    slow.write_text("#!/bin/sh\ntrap '' TERM\nsleep 1.5\n")
+    slow.chmod(0o755)
+    held = subprocess.Popen(["bash", str(wrapper), "S.lean"], env=env | {"MINIDREGG_REAL_LEAN": str(slow)})
+    deadline = time.monotonic() + 10
+    while not (seats / "lean-seat-1").exists():
+        assert time.monotonic() < deadline
+        time.sleep(0.02)
+    time.sleep(0.2)
+    held.send_signal(signal.SIGTERM)
+    time.sleep(0.5)
+    assert (seats / "lean-seat-1").exists(), "seat released while the compiler still ran"
+    held.wait(timeout=10)
+    assert not list(seats.iterdir())
+    print("PASS: a TERMed wrapper holds its seat until the compiler exits, then releases it")

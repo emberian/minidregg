@@ -146,9 +146,12 @@ scripts/build-native-host.sh --help
 ```
 
 The native route runs in an independent snapshot with independent writable
-package/build state. `MINIDREGG_NATIVE_JOBS` and `MINIDREGG_LEAN_THREADS` accept 1
-or 2; the script serializes Lean processes. `LEAN_NUM_THREADS` alone does not
-limit Lake's process fanout. A full deliberate qualification uses:
+package/build state. Lake builds the import closure in parallel; every real Lean
+process holds one of the host's `MINIDREGG_LEAN_SEATS` seats (shared by every build
+under `MINIDREGG_LEAN_SEAT_ROOT`), which is the only bound on concurrent compilers.
+`MINIDREGG_LEAN_THREADS` (threads per Lean) and `MINIDREGG_NATIVE_JOBS` (concurrent C
+compiles) take positive integers. `LEAN_NUM_THREADS` alone does not limit Lake's
+process fanout. A full deliberate qualification uses:
 
 ```sh
 scripts/build-native-host.sh --umbrella \

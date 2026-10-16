@@ -15,8 +15,9 @@ that older architecture or status text is current.
   or blanket staging. Inspect full-file diffs before committing named paths.
 - Use `scripts/build-native-host.sh` for the recorded native route, and the
   journey (`native/resource-client/journey.sh`) for acceptance. Read their help first. Build in independent
-  snapshots with independent writable package state. At most two local Lean
-  compiler seats; `LEAN_NUM_THREADS` alone does not bound Lake process fanout.
+  snapshots with independent writable package state. Lean concurrency is
+  `MINIDREGG_LEAN_SEATS` host-wide compiler seats (default 2; box.env sizes it from measured RSS);
+  `LEAN_NUM_THREADS` alone does not bound Lake process fanout.
 - Preserve admitted-history, current-authority, exact-preimage and uncertain-reply
   semantics when optimizing. General proofs and actual receiving-path evidence
   are separate obligations; a source check does not establish deployment.
