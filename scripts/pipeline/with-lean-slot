@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# scripts/pipeline/with-lean-slot CMD... -- run a Lean build holding one of this box's N Lean slots, in FIFO order.
+#
+# THE ONE COPY. It replaces the hand-installed $PIPELINE_ROOT/slots/with-lean-slot (hbox, 2026-10-14
+# 23:04, FIFO since 10-15 03:05Z) and interoperates with it while both exist: same slot locks
+# (SLOTS/lean-K.lock), same queue (SLOTS/waiters/<pid>.pid, ordered by mtime, dead pids pruned).
+#
+# FIFO: a waiter takes a slot only when its ticket is the OLDEST live ticket, so a 3-hour waiter is
+# never passed by a 5-minute one. The ticket is ALWAYS SLOTS/waiters/<own pid>.pid. The installed copy
+# used $WITH_LEAN_SLOT_PIDFILE as the ticket itself, so a waiter whose PID file lived elsewhere never
+# entered the queue and never got a slot (CONSENT-3 b1, 10-15); that path is now only the PID file to
+# stop the waiter by. The lock fd is held by this wrapper only (the build and its children never
+# inherit it).
+#
+# Env (box.env or the caller):
+#   PIPELINE_LEAN_SLOT_DIR   SLOTS (default $PIPELINE_ROOT/slots)
+#   PIPELINE_LEAN_SLOTS      N (default 3: hbox's count)
+#   PIPELINE_LEAN_SLOT_THREADS  LEAN_NUM_THREADS of the build (default 4); exported as THREADS too
+#   WITH_LEAN_SLOT_PIDFILE   also write this wrapper's PID here (stop the waiter by it)
+#   WITH_LEAN_SLOT_PRIORITY=1  queue ahead of every ordinary ticket (the tip service / integrator); a
+#                            priority ticket is backdated one day, so among priority tickets FIFO holds
+#   WITH_LEAN_SLOT_DEADLINE_S  give up after this many seconds without a slot (default 14400; exit 75)
+# Every grant is measured: SLOTS/waits.tsv gets one line per run
+#   pid  enqueued  granted  released  slot  rc  command   (epoch seconds; the CYCLE-TIME F5 instrument)
+# Before the build: the shared Lake cache's guard, from THIS tree (lib.sh pipeline_cache_audit).
+set -uo pipefail
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+PIPELINE_PROG=with-lean-slot
+. "$here/lib.sh"
+[ $# -ge 1 ] || pipeline_die "usage: with-lean-slot CMD..."
+SLOTS=${PIPELINE_LEAN_SLOT_DIR:-$PIPELINE_ROOT/slots}
+N=${PIPELINE_LEAN_SLOTS:-3}
+case "$N" in [1-9]|[1-9][0-9]) ;; *) pipeline_die "PIPELINE_LEAN_SLOTS must be a positive integer" ;; esac
+W=$SLOTS/waiters
+mkdir -p "$W" || pipeline_die "cannot create $W"
+ticket=$W/$$.pid
+echo $$ > "$ticket"
+enq=$(date +%s)
+if [ "${WITH_LEAN_SLOT_PRIORITY:-0}" = 1 ]; then touch -d "@$(( enq - 86400 ))" "$ticket"; else touch -d "@$enq" "$ticket"; fi
+[ -n "${WITH_LEAN_SLOT_PIDFILE:-}" ] && [ "$WITH_LEAN_SLOT_PIDFILE" != "$ticket" ] && echo $$ > "$WITH_LEAN_SLOT_PIDFILE"
+trap 'rm -f "$ticket"; [ -n "${WITH_LEAN_SLOT_PIDFILE:-}" ] && rm -f "$WITH_LEAN_SLOT_PIDFILE"' EXIT
+deadline=$(( enq + ${WITH_LEAN_SLOT_DEADLINE_S:-14400} ))
+cmd="$*"; cmd=${cmd:0:200}
+oldest_live() {
+  local f p
+  for f in $(ls -tr "$W"/*.pid 2>/dev/null); do
+    p=$(cat "$f" 2>/dev/null)
+    if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then echo "$p"; return; fi
+    rm -f "$f"
+  done
+}
+pipeline_cache_audit || pipeline_die "the shared Lake cache is unguarded (lake-cache-audit failed): not building on it"
+told=0
+while :; do
+  if [ "$(oldest_live)" = "$$" ]; then
+    for s in $(seq 1 "$N"); do
+      exec {fd}>"$SLOTS/lean-$s.lock"
+      if flock -n "$fd"; then
+        rm -f "$ticket"
+        granted=$(date +%s)
+        export LEAN_NUM_THREADS=${PIPELINE_LEAN_SLOT_THREADS:-4}
+        export THREADS=$LEAN_NUM_THREADS
+        ( exec {fd}>&-; exec "$@" ); rc=$?
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$$" "$enq" "$granted" "$(date +%s)" "$s" "$rc" "$cmd" >> "$SLOTS/waits.tsv"
+        exit "$rc"
+      fi
+      exec {fd}>&-
+    done
+  fi
+  if [ "$(date +%s)" -ge "$deadline" ]; then
+    printf '%s\t%s\t-\t%s\t-\t75\t%s\n' "$$" "$enq" "$(date +%s)" "$cmd" >> "$SLOTS/waits.tsv"
+    pipeline_log "no Lean slot in $(( deadline - enq )) s" >&2
+    exit 75
+  fi
+  if [ "$told" = 0 ]; then told=1; pipeline_log "queued for one of $N Lean slots under $SLOTS (ticket $ticket)" >&2; fi
+  sleep 15
+done

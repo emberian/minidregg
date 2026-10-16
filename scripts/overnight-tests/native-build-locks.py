@@ -16,11 +16,13 @@ import time
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = (ROOT / "scripts/build-native-host.sh").read_text()
 WRAPPER = SOURCE.split('cat > "$wrapper_root/bin/lean" <<\'EOF\'\n', 1)[1].split("\nEOF\n", 1)[0] + "\n"
+RUSAGE = SOURCE.split('cat > "$wrapper_root/lean-rusage.py" <<\'EOF\'\n', 1)[1].split("\nEOF\n", 1)[0] + "\n"
 
 with tempfile.TemporaryDirectory(prefix="mini-native-seats-") as temporary:
     root = Path(temporary)
     wrapper = root / "lean"
     wrapper.write_text(WRAPPER)
+    (root / "lean-rusage.py").write_text(RUSAGE)
     fake = root / "fake-lean"
     fake.write_text("#!/bin/sh\nsleep 0.3\n")
     fake.chmod(0o755)
@@ -35,12 +37,19 @@ with tempfile.TemporaryDirectory(prefix="mini-native-seats-") as temporary:
         "MINIDREGG_LEAN_WRAPPER_LOG": str(log),
         "MINIDREGG_LEAN_BUILD_ROOT": str(root),
         "LEAN_NUM_THREADS": "2",
+        "MINIDREGG_LEAN_RUSAGE": str(root / "lean-rusage.py"),
     }
     workers = [subprocess.Popen(["bash", str(wrapper), f"M{i}.lean"], env=env) for i in range(16)]
     assert all(worker.wait(timeout=120) == 0 for worker in workers)
     active, maximum, starts = set(), 0, 0
+    rss = []
     for line in log.read_text().splitlines():
         event, _, pid, *_ = line.split("\t")
+        if event == "RSS":
+            _, _, source, wall, maxrss, rc = line.split("\t")
+            assert source.endswith(".lean") and float(wall) >= 0.3 and int(maxrss) > 0 and rc == "0", line
+            rss.append(source)
+            continue
         if event == "START":
             assert pid not in active
             active.add(pid)
@@ -51,8 +60,9 @@ with tempfile.TemporaryDirectory(prefix="mini-native-seats-") as temporary:
             active.remove(pid)
     assert starts == 16 and not active, (starts, active)
     assert maximum == 3, maximum
+    assert sorted(rss) == sorted(f"M{i}.lean" for i in range(16)), rss
     assert not list(seats.iterdir()), list(seats.iterdir())
-    print("PASS: 16 compiler jobs over 3 seats, at most and at least 3 at once, balanced, seats released")
+    print("PASS: 16 compiler jobs over 3 seats, at most and at least 3 at once, balanced, seats released, one RSS line each (wall, maxrss)")
 
     # occupied seats, no wait: refuse 75, owners untouched
     for number in (1, 2, 3):

@@ -44,6 +44,19 @@ scripts/pipeline/box-env --layout /tank/dregg-build/pipeline \
 - `PIPELINE_LEANENV_WAIT_S=0`: hbox has no lean envs, so `objective` is UNCONFIGURED. It was UNCONFIGURED on
   burst3 too, and it is not a required row.
 
+### Lean slots: `scripts/pipeline/with-lean-slot`
+
+Lanes run every hbox Lean build as `<lane tree>/scripts/pipeline/with-lean-slot swarm-build lake build …`. This is the
+repo copy, run from the lane's own tree. It replaces the hand-installed `pipeline/slots/with-lean-slot`, and while both
+exist they share its locks (`slots/lean-K.lock`) and queue (`slots/waiters/<pid>.pid`).
+- **Queue:** FIFO by ticket age. `WITH_LEAN_SLOT_PRIORITY=1` puts the integrator or tip service ahead of every ordinary
+  ticket.
+- **Box settings:** `PIPELINE_LEAN_SLOTS` (count) and `PIPELINE_LEAN_SLOT_THREADS` (threads per slot) come from box.env
+  via `--set`.
+- **Wait log:** every run appends `pid enqueued granted released slot rc command` to `slots/waits.tsv`.
+- **Sizing:** native builds write per-module peak RSS (`lean-module-rss.tsv`, the `lean-rss` lines of `build.log`, and
+  `lean_maxrss_kib_p95` in the manifest). Size slots × threads from those numbers.
+
 ### What was generalized, not forked
 
 The /srv paths were defaults. Each edit makes a default come from box.env:

@@ -1291,12 +1291,35 @@ while IFS= read -r executable; do
   name=${executable##*/}
   [[ "$name" == lean ]] || ln -s "$executable" "$wrapper_root/bin/$name"
 done < <(find "$toolchain/bin" -maxdepth 1 -type f -print)
+# The compiler's own resource use, measured by its parent: wait4(2) returns the child's rusage, whose
+# ru_maxrss is the peak resident set (KiB on Linux, bytes on macOS; recorded in KiB). Signals the
+# wrapper forwards reach the compiler through this runner; its exit status is the compiler's.
+cat > "$wrapper_root/lean-rusage.py" <<'EOF'
+import os, signal, subprocess, sys, time
+out, argv = sys.argv[1], sys.argv[2:]
+child = subprocess.Popen(argv)
+for sig in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
+    signal.signal(sig, lambda n, _f: child.send_signal(n))
+t0 = time.monotonic()
+while True:
+    try:
+        _, status, usage = os.wait4(child.pid, 0)
+        break
+    except InterruptedError:
+        continue
+child.returncode = 0          # reaped here: keep Popen from waiting again
+rss = usage.ru_maxrss // 1024 if sys.platform == "darwin" else usage.ru_maxrss
+with open(out, "w") as f:
+    f.write(f"{time.monotonic() - t0:.1f}\t{rss}\n")
+sys.exit(os.waitstatus_to_exitcode(status) if os.WIFEXITED(status) else 128 + os.WTERMSIG(status))
+EOF
 cat > "$wrapper_root/bin/lean" <<'EOF'
 #!/usr/bin/env bash
 # build-native-host.sh's seated Lean: one real compiler per host-wide seat.
 set -u
 : "${MINIDREGG_REAL_LEAN:?}" "${MINIDREGG_LEAN_SEAT_ROOT:?}" "${MINIDREGG_LEAN_SEATS:?}"
 : "${MINIDREGG_LEAN_SEAT_WAIT:?}" "${MINIDREGG_LEAN_WRAPPER_LOG:?}" "${MINIDREGG_LEAN_BUILD_ROOT:?}"
+: "${MINIDREGG_LEAN_RUSAGE:?}"
 source_file=-
 for arg in "$@"; do case "$arg" in *.lean) source_file=$arg ;; esac; done
 seat=""
@@ -1333,7 +1356,8 @@ trap 'forward_signal TERM' TERM
 # Each log line is ONE write (O_APPEND): concurrent wrappers never interleave a line.
 line=$(printf 'START\t%s\t%s\t' "$(date +%s)" "$$"; printf '%q ' "$@")
 printf '%s\n' "$line" >> "$MINIDREGG_LEAN_WRAPPER_LOG"
-"$MINIDREGG_REAL_LEAN" -j "$LEAN_NUM_THREADS" "$@" &
+usage_file=$(mktemp "${TMPDIR:-/tmp}/lean-rusage.XXXXXX")
+python3 "$MINIDREGG_LEAN_RUSAGE" "$usage_file" "$MINIDREGG_REAL_LEAN" -j "$LEAN_NUM_THREADS" "$@" &
 child=$!
 # A trapped signal returns `wait` early while the compiler still runs: keep the seat until it exits.
 wait "$child"
@@ -1342,6 +1366,10 @@ while kill -0 "$child" 2>/dev/null; do
   wait "$child"
   code=$?
 done
+# RSS<TAB>pid<TAB>source<TAB>wall_s<TAB>maxrss_kib<TAB>rc, then END (one write each).
+usage=$(cat "$usage_file" 2>/dev/null || true)
+rm -f "$usage_file"
+printf 'RSS\t%s\t%s\t%s\t%s\n' "$$" "$source_file" "${usage:--	-}" "$code" >> "$MINIDREGG_LEAN_WRAPPER_LOG"
 printf 'END\t%s\t%s\t%s\n' "$(date +%s)" "$$" "$code" >> "$MINIDREGG_LEAN_WRAPPER_LOG"
 exit "$code"
 EOF
@@ -1365,6 +1393,7 @@ seated_lake() {
     MINIDREGG_LEAN_SEAT_WAIT="$seat_wait" \
     MINIDREGG_LEAN_WRAPPER_LOG="$wrapper_log" \
     MINIDREGG_LEAN_BUILD_ROOT="$root" \
+    MINIDREGG_LEAN_RUSAGE="$wrapper_root/lean-rusage.py" \
     lake build "$@" > "$log" 2>&1
 }
 
@@ -1534,9 +1563,24 @@ if ! max_concurrent_lean=$(awk -F '\t' -v seats="$lean_seats" '
     "$lean_seats" "$wrapper_log" >&2
   exit 70
 fi
-printf 'lean_seats=%s\nmax_concurrent_real_lean=%s\nwrapper_invocations=%s\n' \
-  "$lean_seats" "$max_concurrent_lean" "$(grep -c '^START' "$wrapper_log")" \
+# Per compiled module: wall and peak RSS, so seats and threads are sized from data (CYCLE-TIME F10).
+# lean-module-rss.tsv: module<TAB>wall_s<TAB>maxrss_kib<TAB>rc, heaviest first; one line each into build.log.
+rss_table="$output_dir/lean-module-rss.tsv"
+awk -F '\t' -v root="$root/" '$1 == "RSS" && $3 ~ /\.lean$/ {
+    m = $3; if (index(m, root) == 1) m = substr(m, length(root) + 1); sub(/^\.\//, "", m)
+    sub(/\.lean$/, "", m); gsub(/\//, ".", m); print m "\t" $4 "\t" $5 "\t" $6 }' "$wrapper_log" \
+  | sort -t "$(printf '\t')" -k3,3nr > "$rss_table"
+awk -F '\t' '{ printf "lean-rss %s wall=%ss maxrss=%sKiB rc=%s\n", $1, $2, $3, $4 }' "$rss_table" >> "$output_dir/build.log"
+rss_stats=$(awk -F '\t' '$3 ~ /^[0-9]+$/ { v[n++] = $3 } END {
+    if (!n) { print "0 0 0"; exit }
+    # sorted descending already: p50 and p95 by rank
+    print v[int(n * 0.5)], v[int(n * 0.05)], v[0] }' "$rss_table")
+read -r rss_p50 rss_p95 rss_max <<< "$rss_stats"
+printf 'lean_seats=%s\nmax_concurrent_real_lean=%s\nwrapper_invocations=%s\nlean_maxrss_kib_p50=%s\nlean_maxrss_kib_p95=%s\nlean_maxrss_kib_max=%s\n' \
+  "$lean_seats" "$max_concurrent_lean" "$(grep -c '^START' "$wrapper_log")" "$rss_p50" "$rss_p95" "$rss_max" \
   > "$output_dir/lake-wrapper-summary.txt"
+printf 'lean-rss summary: %s compiled modules, maxrss p50=%sKiB p95=%sKiB max=%sKiB (%s)\n' \
+  "$(wc -l < "$rss_table" | tr -d ' ')" "$rss_p50" "$rss_p95" "$rss_max" "$rss_table" | tee -a "$output_dir/build.log"
 
 toolchain=$(lake env lean --print-prefix)
 clang="$toolchain/bin/clang"
@@ -1867,6 +1911,8 @@ fi
   printf 'lean_seats=%s\n' "$lean_seats"
   printf 'lean_threads=%s\n' "$lean_threads"
   printf 'max_concurrent_real_lean=%s\n' "$max_concurrent_lean"
+  printf 'lean_maxrss_kib_p95=%s\n' "$rss_p95"
+  printf 'lean_maxrss_kib_max=%s\n' "$rss_max"
   printf 'wrapper_invocations=%s\n' "$(grep -c '^START' "$wrapper_log")"
   if [[ -n "$incremental_baseline_root" ]]; then
     printf 'compiled_source_modules=%s\n' "$compiled_sources"
