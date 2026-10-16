@@ -548,6 +548,108 @@ theorem entries_step (ids : List CellId) (nodup : ids.Nodup) (before next : Data
             rw [← newIds] at absent
             simp [absent, old]
 
+/-- The cell slot writes of `records`, in record order. -/
+def cellSlots (records : List IntentRecord) : List (WorldRoot.Key × Digest) :=
+  records.flatMap fun record => record.writes.map fun write => (.cell write.cellId.value, write.exactPost)
+
+/-- A cell key's entry in an enumeration without repeats: its root when the
+cell is enumerated, nothing otherwise (the height and chain name only the
+system slot). -/
+theorem lastVal_entriesOf_cell (roots : CellId → Digest) (cellIds : List CellId) (nodup : cellIds.Nodup)
+    (height : Nat) (chain : Digest) (n : Nat) :
+    lastVal (entriesOf roots cellIds height chain) (.cell n) =
+      if (⟨n⟩ : CellId) ∈ cellIds then some (roots ⟨n⟩) else none := by
+  simp only [entriesOf, lastVal_cons, reduceCtorEq, if_false, Option.or_none]
+  exact lastVal_cellIds _ nodup _ n
+
+/-- Two enumerations without repeats of the same cells give a cell key the same
+entry, whatever their order, height and chain. -/
+theorem lastVal_entriesOf_cell_congr (roots : CellId → Digest) {ids ids' : List CellId}
+    (nodup : ids.Nodup) (nodup' : ids'.Nodup) (same : ∀ cellId, cellId ∈ ids ↔ cellId ∈ ids')
+    (height height' : Nat) (chain chain' : Digest) (n : Nat) :
+    lastVal (entriesOf roots ids height chain) (.cell n) =
+      lastVal (entriesOf roots ids' height' chain') (.cell n) := by
+  rw [lastVal_entriesOf_cell _ _ nodup, lastVal_entriesOf_cell _ _ nodup']
+  by_cases member : (⟨n⟩ : CellId) ∈ ids
+  · simp [member, (same _).mp member]
+  · simp [member, mt (same _).mpr member]
+
+/-- **`entries_step` over a whole replay, for the cells**: after replaying
+`records` from `before`, a cell's served entry is the last of the records' cell
+writes to it, else its entry before them. What lets a held root cache advance
+by one path per written cell across a refresh. -/
+theorem entries_replay_cells :
+    ∀ (records : List IntentRecord) (ids : List CellId), ids.Nodup →
+      ∀ (before after : DataSnapshot rootBytes),
+      replay rootBytes before records = some after →
+      ∀ (height height' : Nat) (chain chain' : Digest) (n : Nat),
+        lastVal (entriesOf after.model.roots (extendIds ids records) height' chain') (.cell n) =
+          (lastVal (cellSlots records) (.cell n)).or
+            (lastVal (entriesOf before.model.roots ids height chain) (.cell n))
+  | [], ids, nodup, before, after, replayed, height, height', chain, chain', n => by
+      cases Option.some.inj replayed
+      have extended : (extendIds ids []).Nodup := DurableCheckpoint.nodup_eraseDups _
+      rw [lastVal_entriesOf_cell _ _ extended, lastVal_entriesOf_cell _ _ nodup]
+      simp [extendIds, cellSlots, lastVal, List.mem_eraseDups]
+  | record :: records, ids, nodup, before, after, replayed, height, height', chain, chain', n => by
+      unfold replay at replayed
+      cases bound : record.bind? rootBytes with
+      | none => simp [bound] at replayed
+      | some intent =>
+          simp only [bound, bind, Option.bind] at replayed
+          cases executed : DurableDataIntent.execute .complete before intent with
+          | accepted next =>
+              simp only [executed] at replayed
+              have exact := IntentRecord.bind_exact bound
+              have middle : (extendIds ids [record]).Nodup := DurableCheckpoint.nodup_eraseDups _
+              have rest := entries_replay_cells records (extendIds ids [record]) middle next after replayed
+                (height + 1) height' chain chain' n
+              have step := entries_step ids nodup before next intent height chain chain executed (.cell n)
+              rw [exact] at step
+              have extended : (extendIds ids (record :: records)).Nodup := DurableCheckpoint.nodup_eraseDups _
+              have nested : (extendIds (extendIds ids [record]) records).Nodup :=
+                DurableCheckpoint.nodup_eraseDups _
+              have same : ∀ cellId : CellId,
+                  cellId ∈ extendIds ids (record :: records) ↔
+                    cellId ∈ extendIds (extendIds ids [record]) records := by
+                intro cellId
+                simp only [extendIds, List.mem_eraseDups, List.mem_append, List.flatMap_cons,
+                  List.flatMap_nil, List.append_nil]
+                tauto
+              have written : lastVal (recordSlots (height + 1) chain record) (.cell n) =
+                  lastVal (record.writes.map fun write => (WorldRoot.Key.cell write.cellId.value, write.exactPost))
+                    (.cell n) := by
+                simp only [recordSlots, lastVal_cons, reduceCtorEq, if_false, Option.or_none]
+              rw [lastVal_entriesOf_cell_congr after.model.roots extended nested same height' height' chain' chain' n,
+                rest, step, written]
+              simp only [cellSlots, List.flatMap_cons, Kernel.WorldRootCache.lastVal_append, Option.or_assoc]
+          | replayed recorded => simp [executed] at replayed
+          | rejected reason => simp [executed] at replayed
+          | crashed point next => simp [executed] at replayed
+
+/-- **The served entries after a replay** are the entries before it overwritten
+by the records' cell writes, then the head's system slot: what lets a held root
+cache advance by one path per written cell, and one for the system slot. -/
+theorem entries_replay (records : List IntentRecord) (ids : List CellId) (nodup : ids.Nodup)
+    (before after : DataSnapshot rootBytes) (replayed : replay rootBytes before records = some after)
+    (height height' : Nat) (chain chain' : Digest) (k : WorldRoot.Key) :
+    lastVal (entriesOf after.model.roots (extendIds ids records) height' chain') k =
+      (lastVal (cellSlots records ++ [(.system, systemLeaf height' chain')]) k).or
+        (lastVal (entriesOf before.model.roots ids height chain) k) := by
+  rw [Kernel.WorldRootCache.lastVal_append]
+  cases k with
+  | system =>
+      have head : lastVal [((WorldRoot.Key.system : WorldRoot.Key), systemLeaf height' chain')] .system =
+          some (systemLeaf height' chain') := by simp [lastVal]
+      rw [head]
+      simp only [entriesOf, lastVal_cons, lastVal_cells_system]
+      simp
+  | cell n =>
+      have head : lastVal [((WorldRoot.Key.system : WorldRoot.Key), systemLeaf height' chain')] (.cell n) =
+          none := by simp [lastVal]
+      rw [head, entries_replay_cells records ids nodup before after replayed height height' chain chain' n]
+      simp
+
 end Served
 
 /-! ## The light opening of the head (KN2 2b-1, step 3)
@@ -621,6 +723,13 @@ private def checkIndex (rows : List Bool → Option DurableIndex.Row) :
         throw s!"the tag at height {height} carries an index root the log does not reach"
       checkIndex rows (writes.foldl (fun map row => map.insert row.1 row.2) written) next (height + 1) rest
 
+/-- A root cache holding a start's served entries (`Served.entriesOf`). -/
+private structure Held (rootBytes : List UInt8 → Digest) (ids : List CellId) (before : DataSnapshot rootBytes)
+    (height : Nat) (chain : Digest) where
+  roots : DurableReceiverIO.RootCache
+  nodup : ids.Nodup
+  rootsExact : DurableReceiverIO.RootsExact roots (Served.entriesOf before.model.roots ids height chain)
+
 /-- What an extension starts from: a verified state (bare snapshot, its
 enumeration, the fresh-cell bytes) at `height`, with the chain, accumulator
 frontier and index root there, and the head tag there when it is not 0. -/
@@ -636,6 +745,10 @@ private structure Start (rootBytes : List UInt8 → Digest) where
   indexRoot : Digest
   tag : Option (List UInt8)
   checkpoint : Nat
+  /-- The world-root cache at `height`, when the start is a live opening's
+  head (a session's refresh): advanced by the new records' slot writes rather
+  than rebuilt over every cell. -/
+  held : Option (Held rootBytes ids before height chain)
 
 /-- **The one verification of new entries**, used by the open (from its
 checkpoint) and by a session's refresh (from its head): every entry after
@@ -683,8 +796,14 @@ private def extendVerified (transport : DurableReceiverIO.Transport) (rootBytes 
   | some snapshot =>
       let cellIds := extendIds start.ids records
       let entries := Served.entriesOf snapshot.model.roots cellIds headHeight headChain
-      let roots := DurableReceiverIO.RootCache.ofEntries entries
-      let rootsExact := DurableReceiverIO.RootsExact.ofEntries entries
+      -- A held cache advances by one path per written cell (`Served.entries_replay`); an open builds it.
+      let ⟨roots, rootsExact⟩ : (roots : DurableReceiverIO.RootCache) × DurableReceiverIO.RootsExact roots entries :=
+        match start.held with
+        | some held =>
+            held.rootsExact.advance (Served.cellSlots records ++ [(.system, systemLeaf headHeight headChain)])
+              (Served.entries_replay records start.ids held.nodup start.before snapshot replayed
+                start.height headHeight start.chain headChain)
+        | none => ⟨DurableReceiverIO.RootCache.ofEntries entries, DurableReceiverIO.RootsExact.ofEntries entries⟩
       let worldRoot := if rootsExact.injective then roots.root else WorldRoot.deployedRoot entries
       let served : Served rootBytes store :=
         Served.ofReplay start.seed start.absentBytes start.ids start.before start.outside records snapshot
@@ -766,7 +885,7 @@ def openHead (transport : DurableReceiverIO.Transport) (rootBytes : List UInt8 �
     return .error "checkpoint state is not admissible for this Store's seed"
   extendVerified transport rootBytes store rfl
     ⟨seed, base.absentBytes, base.cells.map Prod.fst, base.snapshot rootBytes [], Served.state_snapshot_outside base,
-      baseHeight, baseChain, baseFrontier, baseSpent, baseTag, baseHeight⟩ suffix lap
+      baseHeight, baseChain, baseFrontier, baseSpent, baseTag, baseHeight, none⟩ suffix lap
 
 /-- **A session's refresh**: the entries another writer appended after this
 opening's head, verified exactly as the open verifies the entries after its
@@ -787,7 +906,11 @@ def Opening.extend (transport : DurableReceiverIO.Transport) (rootBytes : List U
       extendVerified transport rootBytes opening.store opening.live
         ⟨served.seed, served.absentBytes, served.cellIds, served.state,
           fun cellId missing => served.outsideAbsent cellId missing, height, opening.head.chain,
-          opening.head.frontier, opening.head.indexRoot, none, opening.baseHeight⟩
+          opening.head.frontier, opening.head.indexRoot, none, opening.baseHeight,
+          some ⟨opening.roots, served.cellIds_nodup, by
+            have exact := opening.rootsExact
+            rw [opening.heightExact, opening.chainExact] at exact
+            exact exact⟩⟩
         stored.entries (fun _ => pure ())
 
 /-! ## The light receive (KN2 2b-1, step 4)

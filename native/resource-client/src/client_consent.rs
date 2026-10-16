@@ -11,7 +11,7 @@
 //! replaced provider file or changed settings never see the anchor: they admit
 //! from genesis.
 use super::*;
-use std::process::{Child, ChildStdin, ChildStdout, Stdio};
+use std::process::{Child, Stdio};
 
 const CAP: usize = 12_102_760;
 /// Custody framing of a retained anchor: this tag, a 32-byte binding of the
@@ -19,9 +19,11 @@ const CAP: usize = 12_102_760;
 const ANCHOR_TAG: &[u8] = b"MINI-CONSENT-ANCHOR-CUSTODY/v1\n";
 const ANCHOR_CAP: u64 = 4096;
 struct Session {
-    child: Child,
-    input: ChildStdin,
-    output: ChildStdout,
+    /// The provider this process started; `None` when the frames go to a
+    /// consent holder's provider (`hold`), which keeps its own custody.
+    child: Option<Child>,
+    input: Box<dyn Write + Send>,
+    output: Box<dyn Read + Send>,
     executable: PathBuf,
     settings_bytes: Vec<u8>,
     /// Where this provider's anchor is retained and what it is bound to; `None`
@@ -35,8 +37,10 @@ struct AnchorCustody {
 }
 impl Drop for Session {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        if let Some(child) = self.child.as_mut() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
     }
 }
 static SESSION: Mutex<Option<Session>> = Mutex::new(None);
@@ -87,7 +91,16 @@ fn invoke(host: &Path, config: &Path, operation:u8, payload:&[u8]) -> Result<Vec
             return Err("local consent executable or settings changed within signing session".into());
         }
     } else {
-        *slot=Some(start(executable,&settings,settings_bytes)?);
+        *slot=Some(match hold_socket()? {
+            Some(socket)=>match attach(&socket,&executable,&settings,&settings_bytes)? {
+                Some(session)=>session,
+                None=>{
+                    eprintln!("mini: warning: no consent holder listens on {}; starting a provider for this process",socket.display());
+                    start(executable,&settings,settings_bytes)?
+                }
+            },
+            None=>start(executable,&settings,settings_bytes)?,
+        });
     }
     // Keep the same provider after candidate refusal; restarting would discard
     // its independently verified frontier. A dead provider remains failed for
@@ -113,7 +126,7 @@ fn start_in(anchors:&Path,executable:PathBuf,settings:&Path,settings_bytes:Vec<u
         .spawn().map_err(|e|format!("cannot start local consent provider {}: {e}",executable.display()))?;
     let input=child.stdin.take().ok_or("local consent stdin missing")?;
     let output=child.stdout.take().ok_or("local consent stdout missing")?;
-    let mut session=Session{child,input,output,executable,settings_bytes,
+    let mut session=Session{child:Some(child),input:Box::new(input),output:Box::new(output),executable,settings_bytes,
         anchor:Some(AnchorCustody{path:path.clone(),binding,retained:retained.clone()})};
     if let Some(anchor)=retained {
         round_trip(&mut session,228,&anchor)
@@ -121,6 +134,172 @@ fn start_in(anchors:&Path,executable:PathBuf,settings:&Path,settings_bytes:Vec<u
     }
     Ok(session)
 }
+
+/// A consent holder (`mini consent-hold`) keeps one provider warm across `mini`
+/// processes, so each request admits only the records appended since the
+/// previous one (`ClientConsentCore.refresh`) instead of re-opening the whole
+/// Store. It is selected by `MINI_CONSENT_SOCKET`, an owner-private socket.
+fn hold_socket()->Result<Option<PathBuf>> {
+    let Some(socket)=std::env::var_os("MINI_CONSENT_SOCKET") else {return Ok(None)};
+    let socket=PathBuf::from(socket);
+    if !socket.is_absolute() {return Err("MINI_CONSENT_SOCKET must be absolute".into());}
+    Ok(Some(socket))
+}
+const HOLD_TAG: &[u8] = b"MINI-CONSENT-HOLD/v1\n";
+const HOLD_PATH_CAP: usize = 4096;
+fn write_field(out:&mut dyn Write,bytes:&[u8])->io::Result<()> {
+    out.write_all(&(bytes.len() as u32).to_le_bytes())?;out.write_all(bytes)
+}
+fn read_field(input:&mut dyn Read,cap:usize)->Result<Vec<u8>> {
+    let mut width=[0u8;4];input.read_exact(&mut width).map_err(|e|format!("consent holder frame: {e}"))?;
+    let size=u32::from_le_bytes(width) as usize;
+    if size>cap {return Err("consent holder field exceeds bound".into());}
+    let mut bytes=vec![0;size];input.read_exact(&mut bytes).map_err(|e|format!("consent holder frame: {e}"))?;
+    Ok(bytes)
+}
+/// Attach to the holder on `socket`. `None` when nothing listens there (the
+/// caller starts its own provider). A holder of another user, or one whose
+/// provider is not bound to exactly this executable file and these settings
+/// bytes (`anchor_binding`), refuses: frames go only to the provider this
+/// process selected.
+fn attach(socket:&Path,executable:&Path,settings:&Path,settings_bytes:&[u8])->Result<Option<Session>> {
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::net::UnixStream;
+    let mut stream=match UnixStream::connect(socket) {
+        Ok(stream)=>stream,
+        Err(e) if matches!(e.kind(),io::ErrorKind::NotFound|io::ErrorKind::ConnectionRefused)=>return Ok(None),
+        Err(e)=>return Err(format!("consent holder {}: {e}",socket.display())),
+    };
+    if crate::transport::peer_uid(&stream)?!=unsafe{libc::geteuid()} {
+        return Err(format!("consent holder {} runs as another user",socket.display()));
+    }
+    let binding=anchor_binding(executable,settings_bytes)?;
+    let mut hello=HOLD_TAG.to_vec();
+    write_field(&mut hello,executable.as_os_str().as_bytes()).and_then(|_|write_field(&mut hello,settings.as_os_str().as_bytes()))
+        .map_err(|e|e.to_string())?;
+    stream.write_all(&hello).map_err(|e|format!("consent holder {}: {e}",socket.display()))?;
+    let answer=read_field(&mut stream,HOLD_PATH_CAP)?;
+    match answer.split_first() {
+        Some((0,held)) if held==binding.as_slice()=>{}
+        Some((0,_))=>return Err(format!("consent holder {} holds a provider bound to another file or settings",socket.display())),
+        Some((_,detail))=>return Err(format!("consent holder {}: {}",socket.display(),String::from_utf8_lossy(detail))),
+        None=>return Err(format!("consent holder {} answered nothing",socket.display())),
+    }
+    let output=stream.try_clone().map_err(|e|e.to_string())?;
+    Ok(Some(Session{child:None,input:Box::new(stream),output:Box::new(output),executable:executable.to_path_buf(),
+        settings_bytes:settings_bytes.to_vec(),anchor:None}))
+}
+
+/// `mini consent-hold --socket PATH`: serve one warm provider per binding to
+/// this user's `mini` processes, one connection at a time.
+///
+/// The holder is the custody the per-process path already is, kept alive: the
+/// provider it starts is offered this binding's retained anchor exactly as
+/// `start` does, every relayed frame first makes the provider admit what the
+/// Store appended (`extendFrom`: the chain continues from the held one, every
+/// new tag verifies, every new record replays), and after each answer the
+/// holder retains the provider's new anchor. Anchor frames (228, 229) are the
+/// holder's alone. A provider that refused an admission has ended; the next
+/// connection starts a new one from the retained anchor, as the next `mini`
+/// process would. A changed provider file or settings bytes binds differently
+/// and gets a new provider.
+pub(crate) fn hold(socket:&Path)->Result<()> {
+    hold_in(socket,&anchor_dir()?)
+}
+fn hold_in(socket:&Path,anchors:&Path)->Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::net::UnixListener;
+    let parent=socket.parent().ok_or("consent holder socket needs a parent directory")?;
+    crate::fsio::check_private_dir(parent)?;
+    let _lock=crate::transport::service_lock(&socket.with_extension("lock"))?;
+    crate::transport::clear_stale_socket(socket)?;
+    let listener=UnixListener::bind(socket).map_err(|e|format!("cannot bind {}: {e}",socket.display()))?;
+    fs::set_permissions(socket,fs::Permissions::from_mode(0o600)).map_err(|e|format!("cannot protect socket {}: {e}",socket.display()))?;
+    eprintln!("mini: holding consent on {}",socket.display());
+    let mut held:Option<([u8;32],Session)>=None;
+    for stream in listener.incoming() {
+        let stream=match stream {Ok(stream)=>stream,Err(e)=>{eprintln!("mini: consent holder accept: {e}");continue}};
+        if let Err(e)=serve_holder_connection(stream,anchors,&mut held) {
+            eprintln!("mini: consent holder: {e}");
+        }
+    }
+    Ok(())
+}
+fn serve_holder_connection(mut stream:std::os::unix::net::UnixStream,anchors:&Path,
+    held:&mut Option<([u8;32],Session)>)->Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(HOLD_IDLE_SECS))).map_err(|e|e.to_string())?;
+    if crate::transport::peer_uid(&stream)?!=unsafe{libc::geteuid()} {return Err("refused a peer of another user".into());}
+    let mut tag=vec![0;HOLD_TAG.len()];
+    stream.read_exact(&mut tag).map_err(|e|format!("hello: {e}"))?;
+    if tag!=HOLD_TAG {return Err("hello is not MINI-CONSENT-HOLD/v1".into());}
+    let executable=PathBuf::from(OsStr::from_bytes(&read_field(&mut stream,HOLD_PATH_CAP)?));
+    let settings=PathBuf::from(OsStr::from_bytes(&read_field(&mut stream,HOLD_PATH_CAP)?));
+    let binding=match select_held(anchors,&executable,&settings,held) {
+        Ok(binding)=>binding,
+        Err(e)=>{
+            let mut answer=Vec::new();write_field(&mut answer,&[[1u8].as_slice(),e.as_bytes()].concat()).map_err(|e|e.to_string())?;
+            let _=stream.write_all(&answer);
+            return Err(e);
+        }
+    };
+    let mut answer=Vec::new();
+    write_field(&mut answer,&[[0u8].as_slice(),binding.as_slice()].concat()).map_err(|e|e.to_string())?;
+    stream.write_all(&answer).map_err(|e|e.to_string())?;
+    loop {
+        let mut width=[0u8;4];
+        match stream.read_exact(&mut width) {
+            Ok(())=>{}
+            Err(e) if e.kind()==io::ErrorKind::UnexpectedEof=>return Ok(()),
+            Err(e)=>return Err(format!("request: {e}")),
+        }
+        let size=u32::from_le_bytes(width) as usize;
+        if size==0||size>CAP {return Err("request frame exceeds bound".into());}
+        let mut body=vec![0;size];stream.read_exact(&mut body).map_err(|e|format!("request: {e}"))?;
+        let operation=body[0];
+        let reply=if operation==228||operation==229 {
+            [[255u8].as_slice(),b"the consent holder keeps the retained anchor".as_slice()].concat()
+        } else {
+            let session=&mut held.as_mut().ok_or("no held provider")?.1;
+            match relay(session,&body) {
+                Ok(reply)=>{retain_anchor(session);reply}
+                Err(e)=>{*held=None;return Err(e)}
+            }
+        };
+        let mut framed=(reply.len() as u32).to_le_bytes().to_vec();framed.extend(reply);
+        stream.write_all(&framed).map_err(|e|format!("answer: {e}"))?;
+    }
+}
+/// The live provider for this executable and settings, started (with this
+/// binding's retained anchor offered) when there is none, its file or settings
+/// changed, or it ended.
+fn select_held(anchors:&Path,executable:&Path,settings:&Path,held:&mut Option<([u8;32],Session)>)->Result<[u8;32]> {
+    if !executable.is_absolute()||!settings.is_absolute() {return Err("local consent executable/settings must be absolute".into());}
+    let settings_bytes=crate::fsio::read_bounded_or_empty(settings,CAP)?;
+    let binding=anchor_binding(executable,&settings_bytes)?;
+    let live=match held.as_mut() {
+        Some((bound,session)) if *bound==binding=>session.child.as_mut().is_some_and(|child|matches!(child.try_wait(),Ok(None))),
+        _=>false,
+    };
+    if !live {
+        *held=None;
+        *held=Some((binding,start_in(anchors,executable.to_path_buf(),settings,settings_bytes)?));
+    }
+    Ok(binding)
+}
+/// One request frame to the provider and its whole answer frame back, unread:
+/// the attached process checks it (`round_trip`).
+fn relay(session:&mut Session,body:&[u8])->Result<Vec<u8>> {
+    session.input.write_all(&(body.len() as u32).to_le_bytes()).and_then(|_|session.input.write_all(body))
+        .and_then(|_|session.input.flush()).map_err(|e|format!("held provider request: {e}"))?;
+    let mut width=[0u8;4];session.output.read_exact(&mut width).map_err(|e|format!("held provider ended: {e}"))?;
+    let size=u32::from_le_bytes(width) as usize;
+    if size==0||size>CAP {return Err("held provider answer frame refused".into());}
+    let mut frame=vec![0;size];session.output.read_exact(&mut frame).map_err(|e|format!("held provider ended: {e}"))?;
+    Ok(frame)
+}
+/// How long an attached process may leave the holder waiting for its next frame.
+const HOLD_IDLE_SECS: u64 = 600;
 
 /// The private directory of retained anchors.
 fn anchor_dir()->Result<PathBuf> {
@@ -349,7 +528,7 @@ mod tests {
         let mut child=Command::new("/bin/sh").args(["-c","printf '\\015\\000\\000\\000\\377changed-plan'"])
             .stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
         let input=child.stdin.take().unwrap();let output=child.stdout.take().unwrap();
-        let mut session=Session{child,input,output,executable:"/bin/sh".into(),settings_bytes:vec![],anchor:None};
+        let mut session=Session{child:Some(child),input:Box::new(input),output:Box::new(output),executable:"/bin/sh".into(),settings_bytes:vec![],anchor:None};
         assert!(round_trip(&mut session,222,b"retained").is_err());
     }
 
@@ -362,12 +541,14 @@ mod tests {
         let path = dir.join("provider");
         fs::write(&path, format!(concat!(
             "#!/bin/sh\n",
+            "echo start >> '{starts}'; echo $$ > '{pid}'\n",
             "while :; do\n",
             "  n=$(dd bs=1 count=4 2>/dev/null | od -An -tu4 | tr -d ' \\n')\n",
             "  [ -n \"$n\" ] || exit 0\n",
             "  dd bs=1 count=\"$n\" of='{frame}' 2>/dev/null\n",
             "  op=$(od -An -tu1 -N1 '{frame}' | tr -d ' \\n')\n",
             "  echo \"$op\" >> '{log}'\n",
+            "  [ \"$op\" = 221 ] && exit 3\n",
             "  if [ \"$op\" = 229 ]; then\n",
             "    m=$(( $(wc -c < '{body}') + 1 ))\n",
             "    printf \"$(printf '\\\\%03o\\\\000\\\\000\\\\000\\\\%03o' \"$m\" 229)\"; cat '{body}'\n",
@@ -375,7 +556,8 @@ mod tests {
             "    printf \"$(printf '\\\\001\\\\000\\\\000\\\\000\\\\%03o' \"$op\")\"\n",
             "  fi\n",
             "done\n"), log = dir.join("opcodes").display(), body = dir.join("anchor-body").display(),
-            frame = dir.join("frame").display())).unwrap();
+            frame = dir.join("frame").display(), starts = dir.join("starts").display(),
+            pid = dir.join("pid").display())).unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
         path
     }
@@ -416,6 +598,116 @@ mod tests {
         fs::copy(&provider, &copy).unwrap();
         fs::rename(&copy, &provider).unwrap();
         assert_ne!(anchor_binding(&provider, b"{}").unwrap(), binding);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+
+    fn starts(dir: &Path) -> usize {
+        fs::read_to_string(dir.join("starts")).unwrap_or_default().lines().count()
+    }
+    /// A holder on a private socket in `dir`, serving from a background thread.
+    fn holder(dir: &Path) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let private = dir.join("run");
+        fs::create_dir(&private).unwrap();
+        fs::set_permissions(&private, fs::Permissions::from_mode(0o700)).unwrap();
+        let socket = private.join("consent.sock");
+        let (anchors, bound) = (dir.join("anchors"), socket.clone());
+        std::thread::spawn(move || hold_in(&bound, &anchors));
+        for _ in 0..200 {
+            if std::os::unix::net::UnixStream::connect(&socket).is_ok() { break; }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        socket
+    }
+
+    /// The holder keeps ONE provider across attached processes: the second
+    /// process's frame reaches the provider the first one warmed (no new start,
+    /// no anchor offer), and the holder retains the anchor after each frame.
+    #[test]
+    fn consent_holder_keeps_one_provider_across_processes() {
+        let dir = stub_dir("hold-warm");
+        let provider = opcode_stub(&dir, b"ANCHOR-AFTER");
+        let settings = dir.join("consent.json");
+        fs::write(&settings, b"{}").unwrap();
+        let socket = holder(&dir);
+        for _ in 0..3 {
+            let mut session = attach(&socket, &provider, &settings, b"{}").unwrap().expect("holder listens");
+            assert!(session.anchor.is_none() && session.child.is_none());
+            round_trip(&mut session, 220, b"intent").unwrap();
+        }
+        assert_eq!(starts(&dir), 1);
+        assert_eq!(opcodes(&dir), vec![220, 229, 220, 229, 220, 229]);
+        let binding = anchor_binding(&provider, b"{}").unwrap();
+        assert_eq!(read_anchor(&anchor_path(&dir.join("anchors"), &binding), &binding).unwrap().as_deref(), Some(&b"ANCHOR-AFTER"[..]));
+        // Anchor custody is the holder's: an attached process cannot offer or read one.
+        let mut session = attach(&socket, &provider, &settings, b"{}").unwrap().unwrap();
+        assert!(round_trip(&mut session, 228, b"forged").is_err());
+        assert!(round_trip(&mut session, 229, b"").is_err());
+        assert_eq!(opcodes(&dir), vec![220, 229, 220, 229, 220, 229]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A provider that ended (an admission refusal ends it) is not revived for
+    /// the refused process; the next process gets a new provider offered the
+    /// retained anchor, exactly as a new `mini` process would.
+    #[test]
+    fn consent_holder_restarts_an_ended_provider_from_the_retained_anchor() {
+        let dir = stub_dir("hold-ended");
+        let provider = opcode_stub(&dir, b"ANCHOR-AFTER");
+        let settings = dir.join("consent.json");
+        fs::write(&settings, b"{}").unwrap();
+        let socket = holder(&dir);
+        let mut session = attach(&socket, &provider, &settings, b"{}").unwrap().unwrap();
+        round_trip(&mut session, 220, b"intent").unwrap();
+        assert!(round_trip(&mut session, 221, b"refused").is_err());
+        let mut session = attach(&socket, &provider, &settings, b"{}").unwrap().unwrap();
+        round_trip(&mut session, 220, b"intent").unwrap();
+        assert_eq!(starts(&dir), 2);
+        assert_eq!(opcodes(&dir), vec![220, 229, 221, 228, 220, 229]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A held provider that died while idle (killed, crashed) is not relayed to:
+    /// the next process gets a new provider offered the retained anchor.
+    #[test]
+    fn consent_holder_replaces_a_provider_that_died_idle() {
+        let dir = stub_dir("hold-died");
+        let provider = opcode_stub(&dir, b"ANCHOR-AFTER");
+        let settings = dir.join("consent.json");
+        fs::write(&settings, b"{}").unwrap();
+        let socket = holder(&dir);
+        round_trip(&mut attach(&socket, &provider, &settings, b"{}").unwrap().unwrap(), 220, b"intent").unwrap();
+        let pid: i32 = fs::read_to_string(dir.join("pid")).unwrap().trim().parse().unwrap();
+        unsafe { libc::kill(pid, libc::SIGKILL); }
+        for _ in 0..200 {
+            let state = fs::read_to_string(format!("/proc/{pid}/stat")).unwrap_or_default();
+            if state.is_empty() || state.contains(") Z ") { break; }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        round_trip(&mut attach(&socket, &provider, &settings, b"{}").unwrap().unwrap(), 220, b"intent").unwrap();
+        assert_eq!(starts(&dir), 2);
+        assert_eq!(opcodes(&dir), vec![220, 229, 228, 220, 229]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Frames go only to a provider bound to exactly the selected file and
+    /// settings: the holder reads the settings itself, so bytes that differ
+    /// from the attaching process's refuse; a changed settings file gets a new
+    /// provider; nothing listening leaves the process to start its own.
+    #[test]
+    fn consent_holder_serves_only_the_selected_binding() {
+        let dir = stub_dir("hold-binding");
+        let provider = opcode_stub(&dir, b"ANCHOR-AFTER");
+        let settings = dir.join("consent.json");
+        fs::write(&settings, b"{}").unwrap();
+        assert!(attach(&dir.join("absent.sock"), &provider, &settings, b"{}").unwrap().is_none());
+        let socket = holder(&dir);
+        assert!(attach(&socket, &provider, &settings, b"{ }").is_err());
+        round_trip(&mut attach(&socket, &provider, &settings, b"{}").unwrap().unwrap(), 220, b"intent").unwrap();
+        fs::write(&settings, b"{ }").unwrap();
+        round_trip(&mut attach(&socket, &provider, &settings, b"{ }").unwrap().unwrap(), 220, b"intent").unwrap();
+        assert_eq!(starts(&dir), 2);
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -568,7 +860,7 @@ fn local_frame(host:&Path,config:&Path,operation:u8,payload:&[u8])->Result<Vec<u
         .spawn().map_err(|e|format!("cannot start local native codec: {e}"))?;
     let input=child.stdin.take().ok_or("local codec stdin missing")?;
     let output=child.stdout.take().ok_or("local codec stdout missing")?;
-    let mut session=Session{child,input,output,executable,settings_bytes:settings_bytes.clone(),anchor:None};
+    let mut session=Session{child:Some(child),input:Box::new(input),output:Box::new(output),executable,settings_bytes:settings_bytes.clone(),anchor:None};
     let body=round_trip(&mut session,operation,payload)?;
     if crate::fsio::read_bounded_or_empty(&settings, CAP)?!=settings_bytes{return Err("local native settings changed during codec operation".into());}
     Ok([vec![operation],body].concat())

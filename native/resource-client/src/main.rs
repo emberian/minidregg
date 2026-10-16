@@ -3175,6 +3175,12 @@ fn run(mut args: Args) -> Result<()> {
         "clock" => clock::run(args),
         "checkpoint" => checkpoint::run(args),
         #[cfg(unix)]
+        "consent-hold" => {
+            args.finish()?;
+            let socket = SOCKET.get().ok_or("consent-hold requires --socket")?;
+            client_consent::hold(socket)
+        }
+        #[cfg(unix)]
         "job" => job::run(args),
         "activity" => activity::run(args),
         "seat" => seat::run(args),
