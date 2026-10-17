@@ -220,6 +220,38 @@ fn profile(flags: &Flags) -> Result<Profile> {
     Ok(Profile { name, dir })
 }
 
+/// The one Host socket the retained pins (`(file, member)`) share: `--node-url` when given,
+/// else the first one's. A pin naming another socket is refused here, before a key is made,
+/// an enrollment is planned or resumed, or value moves; a `--node-url` that agrees is pinned
+/// for the process, and every later reader of those files rechecks against that pin.
+fn bind_socket(flags: &Flags, pins: &[(PathBuf, &str)]) -> Result<()> {
+    let mut selected = flags.socket.clone().map(|socket| (socket, "--node-url".to_owned()));
+    for (file, member) in pins {
+        if !file.exists() {
+            continue;
+        }
+        let pin = PathBuf::from(field(&read_json(file)?, member)?);
+        match &selected {
+            Some((socket, source)) if *socket != pin => {
+                return Err(format!(
+                    "{} is pinned to {}, but {source} names {}",
+                    file.display(),
+                    pin.display(),
+                    socket.display()
+                ))
+            }
+            Some(_) => {}
+            None => selected = Some((pin, file.display().to_string())),
+        }
+    }
+    if let Some(socket) = &flags.socket {
+        if SOCKET.get() != Some(socket) {
+            SOCKET.set(socket.clone()).map_err(|_| "cannot pin the selected socket")?;
+        }
+    }
+    Ok(())
+}
+
 /// A joined profile's agent, with the socket check `--node-url` asks for.
 fn joined(flags: &Flags, profile: &Profile) -> Result<(fleet::Agent, Value, Value)> {
     if !profile.record().exists() {
@@ -229,9 +261,7 @@ fn joined(flags: &Flags, profile: &Profile) -> Result<(fleet::Agent, Value, Valu
             profile.record().display()
         ));
     }
-    if let Some(socket) = &flags.socket {
-        let _ = SOCKET.set(socket.clone());
-    }
+    bind_socket(flags, &[(profile.workspace().join("workspace.json"), "socket")])?;
     let agent = fleet::agent(&profile.workspace())?;
     let reference = fleet::account(&agent, ACCOUNT)?;
     let record = read_json(&profile.record())?;
@@ -291,6 +321,17 @@ fn join(flags: &Flags) -> Result<Value> {
         .sponsor
         .clone()
         .ok_or("join needs the sponsor's workspace: --sponsor-workspace or MINI_FLEET_SPONSOR")?;
+    // Enrollment and funding go to the sponsor's pinned socket, and the profile's workspace
+    // inherits it: a `--node-url`, or an enrollment attempt or workspace an interrupted join
+    // left, naming another socket is refused now, not after a key is made and value has moved.
+    bind_socket(
+        flags,
+        &[
+            (sponsor.join("workspace.json"), "socket"),
+            (profile.enroll().join("pin.json"), "publicSocket"),
+            (profile.workspace().join("workspace.json"), "socket"),
+        ],
+    )?;
     crate::fsio::ensure_private_dir_all(&profile.dir)?;
     if !profile.key().exists() {
         // K-PREROTATE: the agent key commits to a next key made beside it
@@ -943,5 +984,118 @@ mod tests {
         assert!(transfer(&flags).unwrap_err().contains("Bread cell id"));
         flags.to = Some("007".into());
         assert!(transfer(&flags).unwrap_err().contains("canonical decimal"));
+    }
+
+    fn scratch(label: &str) -> PathBuf {
+        use std::os::unix::fs::DirBuilderExt;
+        let root = env::temp_dir().join(format!(
+            "mini-fleet-sign-{label}-{}-{}",
+            std::process::id(),
+            crate::fsio::random_nonce().unwrap()
+        ));
+        fs::DirBuilder::new().mode(0o700).recursive(true).create(&root).unwrap();
+        root
+    }
+
+    /// A workspace directory holding only the `workspace.json` pin the socket check reads.
+    fn pinned_workspace(root: &Path, socket: &str) {
+        crate::fsio::ensure_private_dir_all(root).unwrap();
+        crate::participant_enrollment::save_json(
+            &root.join("workspace.json"),
+            &json!({"type":"minidregg-participant-workspace-v1","socket":socket}),
+        )
+        .unwrap();
+    }
+
+    fn join_flags(home: &Path, sponsor: &Path, node_url: Option<&str>) -> Flags {
+        let (home, sponsor) = (home.to_str().unwrap(), sponsor.to_str().unwrap());
+        let mut words = vec!["join", "--home", home, "--profile", "p", "--sponsor-workspace", sponsor];
+        if let Some(url) = node_url {
+            words.extend(["--node-url", url]);
+        }
+        parse(argv(&words)).unwrap()
+    }
+
+    #[test]
+    fn join_refuses_a_node_url_the_sponsor_is_not_pinned_to_before_any_key_or_enrollment() {
+        let base = scratch("socket-mismatch");
+        let sponsor = base.join("sponsor");
+        pinned_workspace(&sponsor, "/run/mini-sponsor.sock");
+        let home = base.join("home");
+        let flags = join_flags(&home, &sponsor, Some("unix:/run/mini-other.sock"));
+        let error = join(&flags).unwrap_err();
+        assert!(error.contains("but --node-url names /run/mini-other.sock"), "{error}");
+        let profile = profile(&flags).unwrap();
+        assert!(!profile.dir.exists(), "no key, enrollment or workspace is made");
+        assert_ne!(SOCKET.get(), Some(&PathBuf::from("/run/mini-other.sock")));
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn join_refuses_a_workspace_an_interrupted_join_left_on_another_socket_before_funding() {
+        let base = scratch("socket-leftover");
+        let sponsor = base.join("sponsor");
+        pinned_workspace(&sponsor, "/run/mini-sponsor.sock");
+        let home = base.join("home");
+        let profile = profile(&join_flags(&home, &sponsor, None)).unwrap();
+        pinned_workspace(&profile.workspace(), "/run/mini-stale.sock");
+        for node_url in [Some("unix:/run/mini-sponsor.sock"), None] {
+            let flags = join_flags(&home, &sponsor, node_url);
+            let error = join(&flags).unwrap_err();
+            assert!(error.contains("is pinned to /run/mini-stale.sock"), "{node_url:?}: {error}");
+            assert!(!profile.key().exists(), "{node_url:?}: no key is made");
+            assert!(!profile.enroll().exists(), "{node_url:?}: no enrollment is planned");
+        }
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn join_refuses_an_enrollment_attempt_retained_for_another_socket_before_resuming_it() {
+        let base = scratch("socket-retained");
+        let sponsor = base.join("sponsor");
+        pinned_workspace(&sponsor, "/run/mini-sponsor.sock");
+        let home = base.join("home");
+        let profile = profile(&join_flags(&home, &sponsor, None)).unwrap();
+        crate::fsio::ensure_private_dir_all(&profile.enroll()).unwrap();
+        crate::participant_enrollment::save_json(
+            &profile.enroll().join("pin.json"),
+            &json!({"publicSocket":"/run/mini-stale.sock","operationSocket":"/run/mini-stale.sock"}),
+        )
+        .unwrap();
+        for node_url in [Some("unix:/run/mini-sponsor.sock"), None] {
+            let error = join(&join_flags(&home, &sponsor, node_url)).unwrap_err();
+            assert!(error.contains("pin.json is pinned to /run/mini-stale.sock"), "{node_url:?}: {error}");
+            assert!(!profile.key().exists(), "{node_url:?}: no key is made");
+            assert_eq!(fs::read_dir(profile.enroll()).unwrap().count(), 1, "{node_url:?}: nothing resumes");
+        }
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn join_with_the_sponsors_socket_pins_it_and_proceeds() {
+        crate::in_child(
+            "fleet_sign::tests::join_with_the_sponsors_socket_pins_it_and_proceeds_child",
+            "MINI_FLEET_SIGN_SOCKET_CHILD",
+        );
+    }
+
+    #[test]
+    fn join_with_the_sponsors_socket_pins_it_and_proceeds_child() {
+        if env::var_os("MINI_FLEET_SIGN_SOCKET_CHILD").is_none() {
+            return;
+        }
+        let base = scratch("socket-match");
+        let sponsor = base.join("sponsor");
+        let socket = base.join("host.sock");
+        pinned_workspace(&sponsor, socket.to_str().unwrap());
+        let home = base.join("home");
+        let flags = join_flags(&home, &sponsor, Some(&format!("unix:{}", socket.display())));
+        // The fixture sponsor is only a socket pin, so the join stops at loading it: past the
+        // socket check and before any Host call.
+        let error = join(&flags).unwrap_err();
+        assert!(!error.contains("selected socket"), "{error}");
+        assert!(profile(&flags).unwrap().key().exists());
+        assert_eq!(SOCKET.get(), Some(&socket));
+        fs::remove_dir_all(base).unwrap();
     }
 }
