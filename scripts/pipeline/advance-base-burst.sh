@@ -28,11 +28,15 @@ if [ -z "$GL" ]; then
   git checkout -q -B main "$TIP"
   ( LEAN_NUM_THREADS=${THREADS:-${LEAN_NUM_THREADS:-8}} SWARM_MEM_MAX=${SWARM_MEM_MAX:-64G} SWARM_BUILD_TAG="advance-${TIP:0:8}" \
       "$here/slot-mk.sh" swarm-build lake build $(bash scripts/pipeline/umbrella-targets || echo umbrella-targets-missing) ) > "$GL/logs/advance-umbrella.log" 2>&1 \
-    || { echo "advance: umbrella RED in $GL (logs/advance-umbrella.log)"; exit 4; }
+    && arc=0 || arc=$?
+  # ONE known-red rule (scripts/pipeline/known-red-verdict, as mk-lane --verify): the failed set must EQUAL
+  # the tip tree's own scripts/pipeline/known-red-modules; any other red, or a listed module that builds, refuses.
+  bash scripts/pipeline/known-red-verdict "$GL/logs/advance-umbrella.log" "$GL/src" "$arc" || { echo "advance: umbrella RED in $GL (logs/advance-umbrella.log)"; exit 4; }
   green=$GL/logs/advance-umbrella.log
 else
   cd "$GL/src"; [ "$(git rev-parse HEAD)" = "$TIP" ] || { echo "advance: $GL HEAD != $TIP"; exit 3; }
-  green=$(ls -t "$GL"/logs/gate-*-umbrella.log | head -1); grep -q "^UMBRELLA rc=0" "$green" || { echo "advance: $green not green"; exit 4; }
+  green=$(ls -t "$GL"/logs/gate-*-umbrella.log | head -1)
+  bash scripts/pipeline/known-red-verdict "$green" "$GL/src" || { echo "advance: $green not green beyond the known-red list"; exit 4; }
 fi
 cd "$GL/src"
 [ -z "$(git status --porcelain --untracked-files=no)" ] || { echo "advance: tracked tree dirty in $GL"; exit 5; }

@@ -162,6 +162,8 @@ readers() {
   run host-closure    bash scripts/check-host-closure.sh
   # The umbrella builds every Lean root the candidate ships, and the recorded runs (Fixtures).
   run umbrella-targets bash scripts/pipeline/umbrella-targets --check
+  # The one known-red rule for built bases (mk-lane --verify, advance-base-burst): its plants.
+  run known-red-verdict bash scripts/pipeline/known-red-verdict --selftest
   # KN2 ratchet: callers of the full verified materialization may only shrink (a text ratchet, not a call-graph proof)
   run full-loaded-ratchet bash scripts/ports/check-full-loaded-callers.sh
   # Each planted fault against the pinned history API is refused by the guard it plants

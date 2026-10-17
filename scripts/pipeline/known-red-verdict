@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# scripts/pipeline/known-red-verdict LOG BASE_TREE [EXIT_STATUS]  -- the ONE known-red rule for a built base.
+#
+# LOG is a `lake build` log of the umbrella target list, BASE_TREE the tree it built (its own
+# scripts/pipeline/known-red-modules: MODULE<TAB>CV-TASK<TAB>note), EXIT_STATUS lake's exit code (default:
+# read from a trailing "UMBRELLA rc=N" line of LOG, as run-gate-burst writes it). The base is READY iff the
+# set of modules Lake lists under "Some required targets logged failures:" EQUALS that list: an unlisted
+# failure refuses, and so does a listed module that did not fail (it builds now: its line goes in the commit
+# that fixed it). Exit 0 = ready (prints each carried known-red with its cv and unbuilt importers), 65 = refuse.
+# Used by mk-lane.sh --verify and advance-base-burst.sh: one rule, not two (ROOT 10-17).
+#   known-red-verdict --selftest   plants: an unlisted red refuses; a stale listed module refuses; rc!=0 with
+#                                  no failure list refuses; rc=0 with a failure list refuses; equality passes.
+set -uo pipefail
+if [ "${1:-}" = --selftest ]; then
+  self=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/$(basename -- "$0")
+  t=$(mktemp -d); trap 'rm -rf "$t"' EXIT
+  mkdir -p "$t/tree/scripts/pipeline"; ( cd "$t/tree" && git init -q . )
+  printf '# h\nFixtures.Foo\tcv-1\tnote\n' > "$t/tree/scripts/pipeline/known-red-modules"
+  log() { printf 'x\nSome required targets logged failures:\n'; for m in "$@"; do printf -- '- %s\n' "$m"; done; printf 'error: build failed\n'; }
+  log Fixtures.Foo > "$t/eq.log";            bash "$self" "$t/eq.log" "$t/tree" 1 >/dev/null || { echo "known-red-verdict: self-test FAIL: equality refused"; exit 1; }
+  log Fixtures.Foo Kernel.Bar > "$t/new.log"; bash "$self" "$t/new.log" "$t/tree" 1 >/dev/null && { echo "known-red-verdict: self-test FAIL: an unlisted red module passed"; exit 1; }
+  printf 'Build completed successfully\n' > "$t/ok.log"; bash "$self" "$t/ok.log" "$t/tree" 0 >/dev/null && { echo "known-red-verdict: self-test FAIL: a listed module that builds passed"; exit 1; }
+  printf 'error: something\n' > "$t/nolist.log"; bash "$self" "$t/nolist.log" "$t/tree" 1 >/dev/null && { echo "known-red-verdict: self-test FAIL: rc!=0 without a failure list passed"; exit 1; }
+  log Fixtures.Foo > "$t/rc0.log";           bash "$self" "$t/rc0.log" "$t/tree" 0 >/dev/null && { echo "known-red-verdict: self-test FAIL: rc=0 with a failure list passed"; exit 1; }
+  echo "known-red-verdict: self-test PASS (equality ok; unlisted red, stale row, rc!=0 without list, rc=0 with list: all refused)"; exit 0
+fi
+log=${1:?usage: known-red-verdict LOG BASE_TREE [EXIT_STATUS] | --selftest}; base=${2:?usage}
+vrc=${3:-$(sed -n 's/^UMBRELLA rc=\([0-9]*\).*/\1/p' "$log" | tail -1)}
+[ -n "$vrc" ] || { echo "known-red-verdict: no exit status given and no UMBRELLA rc= line in $log"; exit 65; }
+kr=$base/scripts/pipeline/known-red-modules
+listed=$( [ -f "$kr" ] && awk -F'\t' '$0 !~ /^#/ && NF >= 2 {print $1}' "$kr" | LC_ALL=C sort -u || true )
+failed=$(sed -n '/^Some required targets logged failures:/,$ s/^- //p' "$log" | LC_ALL=C sort -u)
+refuse() { echo "known-red-verdict: REFUSED: $*"; exit 65; }
+[ "$vrc" = 0 ] || [ -n "$failed" ] || refuse "build failed (rc $vrc, no failed-module list): $log"
+[ "$vrc" != 0 ] || [ -z "$failed" ] || refuse "Lake exited 0 but listed failed modules: $log"
+unlisted=$(LC_ALL=C comm -23 <(printf '%s\n' $failed) <(printf '%s\n' $listed) | grep . || true)
+[ -z "$unlisted" ] || refuse "$(echo $unlisted) failed and is not on the base's known-red list ($kr): $log"
+stale=$(LC_ALL=C comm -13 <(printf '%s\n' $failed) <(printf '%s\n' $listed) | grep . || true)
+[ -z "$stale" ] || refuse "known-red $(echo $stale) did not fail: it builds now, delete its line in $kr: $log"
+for m in $failed; do
+  imp=$(git -C "$base" grep -l -E "^[[:space:]]*import[[:space:]]+(.*[[:space:]])?${m//./\\.}([[:space:]]|\$)" -- '*.lean' 2>/dev/null | sed 's/\.lean$//; s#/#.#g' | paste -sd' ' - || true)
+  echo "known-red-verdict: base carries known-red $m (cv $(awk -F'\t' -v m="$m" '$1==m {print $2}' "$kr")); unbuilt importers: ${imp:-none}"
+done
+echo "known-red-verdict: READY ($(printf '%s\n' $failed | grep -c . || true) known-red carried)"

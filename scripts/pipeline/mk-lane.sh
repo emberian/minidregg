@@ -177,23 +177,8 @@ echo "mk-lane: OK $DEST at $TIP"
 if [ "$verify" = 1 ]; then
   log=$DEST/logs/verify-replay.log
   ( LEAN_NUM_THREADS=$threads SWARM_MEM_MAX=${SWARM_MEM_MAX:-48G} SWARM_BUILD_TAG="mk-verify-$lane" swarm-build lake build $(bash scripts/pipeline/umbrella-targets || echo umbrella-targets-missing) ) > "$log" 2>&1 && vrc=0 || vrc=$?   # set -e: the status is judged below, not here
-  # Known-red modules: the base tree's OWN scripts/pipeline/known-red-modules (MODULE<TAB>CV-TASK<TAB>note). The base is
-  # READY iff the set of modules Lake reports as failed EQUALS that list: an unlisted failure refuses, and so does a
-  # listed module that did not fail (it builds now: its line goes, in the commit that fixed it).
-  kr=$BASE/scripts/pipeline/known-red-modules
-  listed=$( [ -f "$kr" ] && awk -F'\t' '$0 !~ /^#/ && NF >= 2 {print $1}' "$kr" | LC_ALL=C sort -u || true )
-  failed=$(sed -n '/^Some required targets logged failures:/,$ s/^- //p' "$log" | LC_ALL=C sort -u)
-  [ "$vrc" = 0 ] || [ -n "$failed" ] || refuse "verify build failed (rc $vrc, no failed-module list): $log"
-  [ "$vrc" != 0 ] || [ -z "$failed" ] || refuse "verify: Lake exited 0 but listed failed modules: $log"
-  unlisted=$(LC_ALL=C comm -23 <(printf '%s\n' $failed) <(printf '%s\n' $listed) | grep . || true)
-  [ -z "$unlisted" ] || refuse "verify build failed: $(echo $unlisted) not on the base's known-red list ($kr): $log"
-  stale=$(LC_ALL=C comm -13 <(printf '%s\n' $failed) <(printf '%s\n' $listed) | grep . || true)
-  [ -z "$stale" ] || refuse "verify: known-red $(echo $stale) did not fail: it builds now, delete its line in $kr: $log"
-  for m in $failed; do
-    # its importers cannot build either: named, so a lane knows what the base does NOT vouch for
-    imp=$(git -C "$BASE" grep -l -E "^[[:space:]]*import[[:space:]]+(.*[[:space:]])?${m//./\\.}([[:space:]]|\$)" -- '*.lean' | sed 's/\.lean$//; s#/#.#g' | paste -sd' ' - || true)
-    echo "mk-lane: base carries known-red $m (cv $(awk -F'\t' -v m="$m" '$1==m {print $2}' "$kr")); unbuilt importers: ${imp:-none}"
-  done
+  # Known-red modules: ONE rule, scripts/pipeline/known-red-verdict (also advance-base-burst.sh).
+  bash "$BASE/scripts/pipeline/known-red-verdict" "$log" "$BASE" "$vrc" || refuse "verify: $log (known-red-verdict above)"
   # Locale-independent pattern; positive control against the base green log.
   ctl=$(cat "$W"/logs/green*.log 2>/dev/null | grep -c '\] Built ' || true)
   [ "$ctl" -gt 0 ] || refuse "verify: the Built-line pattern matches nothing in the base green logs; check disarmed"
