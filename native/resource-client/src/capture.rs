@@ -109,6 +109,9 @@ mod tests {
 
     #[test]
     fn captured_streams_never_reach_the_callers_descriptors_and_are_restored() {
+        // libtest prints other tests' result lines to descriptor 1 while this test has it
+        // redirected; holding the (reentrant) stdout lock keeps them out of the capture.
+        let _report = std::io::stdout().lock();
         // libtest captures the print macros per thread; the descriptors are what a
         // command's output reaches outside a test.
         let ((), out, err) = streams(|| {
