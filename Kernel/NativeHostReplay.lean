@@ -4485,9 +4485,15 @@ private def walkSuffix (config : Config) (anchor : Opened config)
         match advanced : advanceSuffix opened derived with
         | .error detail => return .error ⟨index, detail⟩
         | .ok next =>
-          match validated : validateLoaded config next with
+          -- As in the genesis walk: the prior image was just validated, so
+          -- unchanged decoded rows and cell laws are reused, and
+          -- `validateLoadedFrom_eq` makes this the full validation -- the
+          -- same `Opened`, the same refusal.
+          match incremental : validateLoadedFrom config opened next with
           | .error detail => return .error ⟨index, s!"suffix native post image: {detail}"⟩
           | .ok after =>
+            have validated : validateLoaded config next = .ok after :=
+              (validateLoadedFrom_eq config opened next).symm.trans incremental
             let receipt : NativeHostCodec.Receipt :=
               ⟨derived.intent.transactionId, derived.intent.event.eventId, index + 1, next.worldRoot⟩
             match suffixContextAfter config opened after context record receipt derived matched with
