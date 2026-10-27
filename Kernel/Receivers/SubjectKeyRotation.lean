@@ -424,8 +424,8 @@ theorem admitted_possession (admission : (receiver laws oracle).Admitted env dur
 rotation whose possession signature the oracle does not accept is refused --
 `verifier` or `unauthenticated` -- before the gate runs. -/
 theorem refused_possession_before_gate {transcript : CredentialSignatureIO.Transcript}
-    (refused : CredentialSignatureAdmission.receiverVerify (.recorded transcript) (claim env ingress) ≠
-      pure (.ok true)) :
+    (refused : ¬ (CredentialSignatureAdmission.receiverVerifier (.recorded transcript)).Answered
+      (claim env ingress) true) :
     (∃ detail, (receiver laws (.recorded transcript)).admitVia env durable ingress =
         (pure (.error (.verifier detail)) : Id _)) ∨
       ∃ selected ∈ [claim env ingress],

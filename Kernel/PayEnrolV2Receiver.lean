@@ -815,12 +815,12 @@ theorem committed_verified {laws : ReceivingLaw.Laws Durable}
       admission.accepted)}
     (committed : ((payEnrolV2Family deployment profile).receiver laws oracle).receive append env
       durable bytes = pure (.committed ingress admission witness)) :
-    CredentialSignatureAdmission.receiverVerify oracle
-        (miniQuery ingress.command.observation admission.accepted.prepared.memo) =
-      pure (.ok admission.accepted.prepared.verified.mini) ∧
-    CredentialSignatureAdmission.receiverVerify oracle
-        (sshQuery ingress.command.observation admission.accepted.prepared.memo) =
-      pure (.ok admission.accepted.prepared.verified.ssh) := by
+    (CredentialSignatureAdmission.receiverVerifier oracle).Answered
+        (miniQuery ingress.command.observation admission.accepted.prepared.memo)
+        (admission.accepted.prepared.verified.mini) ∧
+    (CredentialSignatureAdmission.receiverVerifier oracle).Answered
+        (sshQuery ingress.command.observation admission.accepted.prepared.memo)
+        (admission.accepted.prepared.verified.ssh) := by
   have admitted := (((payEnrolV2Family deployment profile).receiver laws oracle).receive_committed
     committed).2.2.1
   obtain ⟨queries, observing, keys, answers⟩ :=
@@ -840,11 +840,11 @@ def signingHeader {F : Type} [Field F] [DecidableEq F] (deployment : Deployment)
     IO (Except String CredentialSignedEnvelopeController.SignedHeader) := do
   let some memo := parsedMemo command.observation | return .error "v2 payment memo malformed"
   match ← Minidregg.Theory.Receiving.Receiver.observeAll
-      (CredentialSignatureAdmission.receiverVerify (.live native))
+      (CredentialSignatureAdmission.receiverVerifier (.live native))
       [miniQuery command.observation memo, sshQuery command.observation memo] with
   | .error detail => return .error s!"v2 payment possession: {detail}"
   | .ok answered =>
-    let answer := fun query => (answered.find? fun given => given.1 == query).map Prod.snd
+    let answer := fun query => (answered.1.find? fun given => given.1 == query).map Prod.snd
     match verifiedOf answer command.observation memo with
     | .error reason => return .error s!"v2 payment possession: {repr reason}"
     | .ok verified =>

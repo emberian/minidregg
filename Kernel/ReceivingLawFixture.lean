@@ -170,7 +170,7 @@ def oracle : CredentialSignatureIO.Oracle Id := .recorded CredentialSignatureIO.
 abbrev judged (F : Family) := F.receiver laws oracle
 
 /-- The same receiver with the law judgement REMOVED: the mutation the tooth runs. -/
-def unjudged (F : Family) : Receiver journal (CredentialSignatureAdmission.receiverVerify oracle) :=
+def unjudged (F : Family) : Receiver journal (CredentialSignatureAdmission.receiverVerifier oracle) :=
   { F.receiver laws oracle with lawFault := fun _ => none }
 
 abbrev Exact : Durable → DataIntent rootBytes → Type := fun _ _ => Unit
@@ -245,7 +245,7 @@ theorem fault_pin :
 
 section Pipeline
 
-variable {verify : SigQuery → Id (Except String Bool)} (R : Receiver journal verify)
+variable {V : Theory.Receiving.Verifier Id} (R : Receiver journal V)
   {env : R.Env} {ingress : R.Ingress} {prepared : R.Prepared env durable (R.command ingress)}
 
 theorem admitVia_error {reason : Theory.Receiving.Refusal R.Reject R.Fault}
@@ -257,11 +257,11 @@ theorem admitVia_error {reason : Theory.Receiving.Refusal R.Reject R.Fault}
   simp only [noClaims, noObserved, Receiver.verifyAll, Receiver.observeAll, pure_bind]
   split
   · rename_i reason' admitted
-    rw [refused] at admitted
+    erw [refused] at admitted
     cases admitted
     rfl
   · rename_i accepted admitted
-    rw [refused] at admitted
+    erw [refused] at admitted
     cases admitted
 
 theorem admitVia_ok
@@ -275,7 +275,7 @@ theorem admitVia_ok
   split
   · rename_i reason admitted
     obtain ⟨accepted, ok, -⟩ := R.admit_ok_of noClaims (by simp) prepares shaped lawful
-    rw [ok] at admitted
+    erw [ok] at admitted
     cases admitted
   · exact ⟨_, rfl⟩
 

@@ -1179,7 +1179,7 @@ theorem verifiedOf_answers {answer : SigQuery → Option Bool} {deployment : Dep
 
 /-- **The live answers**: the memo's observed queries under `mint`, asked of the
 pinned native verifier through the Receiver's own `observeAll`
-(`receiverVerify (.live native)`), read by `verifiedAt`.  A verifier error or
+(`receiverVerifier (.live native)`), read by `verifiedAt`.  A verifier error or
 an unanswered query is an `.error` (never a `false` bit).  The submission
 path's signing header and the operator's local quote probe both read the bits
 here, so neither has a verifier path of its own. -/
@@ -1189,10 +1189,10 @@ def verifiedLive (native : CredentialSignatureIO.NativeConfig) (mint : Option Ad
   | .error reason => return .error s!"{repr reason}"
   | .ok queries =>
     match ← Minidregg.Theory.Receiving.Receiver.observeAll
-        (CredentialSignatureAdmission.receiverVerify (.live native)) queries with
+        (CredentialSignatureAdmission.receiverVerifier (.live native)) queries with
     | .error detail => return .error detail
     | .ok answered =>
-      let answer := fun query => (answered.find? fun given => given.1 == query).map Prod.snd
+      let answer := fun query => (answered.1.find? fun given => given.1 == query).map Prod.snd
       return (verifiedAt answer mint observation).mapError fun reason => s!"{repr reason}"
 
 /-- The native transport returns what the verifier computes, for the SSHSIG verb. -/
@@ -1593,12 +1593,12 @@ theorem committed_verified {laws : ReceivingLaw.Laws Durable}
       durable bytes = pure (.committed ingress admission witness))
     {memo : Memo} (parsed : parsedMemo ingress.command.observation = some memo) :
     ∃ mint,
-      CredentialSignatureAdmission.receiverVerify oracle
-          (miniQuery mint ingress.command.observation.address memo) =
-        pure (.ok admission.accepted.prepared.verified.mini) ∧
-      CredentialSignatureAdmission.receiverVerify oracle
-          (sshQuery mint ingress.command.observation.address memo) =
-        pure (.ok admission.accepted.prepared.verified.ssh) := by
+      (CredentialSignatureAdmission.receiverVerifier oracle).Answered
+          (miniQuery mint ingress.command.observation.address memo)
+          (admission.accepted.prepared.verified.mini) ∧
+      (CredentialSignatureAdmission.receiverVerifier oracle).Answered
+          (sshQuery mint ingress.command.observation.address memo)
+          (admission.accepted.prepared.verified.ssh) := by
   have admitted := (((payEnrolFamily deployment profile).receiver laws oracle).receive_committed
     committed).2.2.1
   obtain ⟨queries, observing, keys, answers⟩ :=

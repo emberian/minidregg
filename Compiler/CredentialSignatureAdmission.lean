@@ -329,34 +329,78 @@ def verifyNative {m : Type → Type} [Monad m] (config : CredentialSignatureIO.O
 A `Kernel.Receiving` family's signature claims are verified by the Receiver
 BEFORE its `prepare` runs (`Theory.Receiving.Receiver.admitVia`); `prepare`
 receives the accepted claims as `Theory.Receiving.Vouchers` of the Receiver's
-verifier.  `receiverVerify` is that verifier over a `CredentialSignatureIO.Oracle`
+verifier.  `receiverVerifier` is that verifier over a `CredentialSignatureIO.Oracle`
 -- the same closed family of oracles `verifyNative` takes, so at `IO` the
 verdict is the pinned process's (`Oracle.io_process`).  `ReceiverSignature` and
 `CheckedSignature.ofReceiverClaim` turn a voucher into a value a gate can hold;
 neither can be built without one. -/
 
-open Minidregg.Theory.Receiving (SigQuery Vouchers)
+open Minidregg.Theory.Receiving (SigQuery Vouchers Verifier)
 
-/-- **The Receiver's verifier over one oracle**: the oracle's verdict on the
-claim's exact key, message and signature, its error printed. -/
-def receiverVerify : {m : Type → Type} → CredentialSignatureIO.Oracle m → SigQuery →
-    m (Except String Bool)
-  | _, .live config, claim => do
-      let answer ← match claim.scheme with
-        | .ed25519 => CredentialSignatureIO.verify config claim.publicKey claim.message claim.signature
-        | .sshsig nameSpace =>
-          CredentialSignatureIO.verifySshsig config claim.publicKey nameSpace claim.message claim.signature
-      match answer with
-      | .error reason => pure (.error s!"{repr reason}")
-      | .ok verdict => pure (.ok verdict)
-  | _, .recorded transcript, claim =>
-      (match claim.scheme with
-        | .sshsig _ => .error "a recorded transcript holds Ed25519 verdicts only"
-        | .ed25519 =>
-          match CredentialSignatureIO.recordedVerdict transcript claim.publicKey claim.message
-              claim.signature with
-          | .error reason => .error s!"{repr reason}"
-          | .ok verdict => .ok verdict : Except String Bool)
+/-- **The oracle ran and answered.**  The live half of `Verifier.Answered`: the pinned native process
+answered `answer` on exactly `query`.  The constructor is private and its ONLY construction site is the
+live branch of `receiverVerifier` below, right after `CredentialSignatureIO.verify`/`verifySshsig`
+returned `.ok answer`; `TokenCensus` pins that no constant elsewhere mints one.  This is the one
+remaining layer-2 trust of the receiving pipeline: the process told the truth. -/
+structure Ran (config : CredentialSignatureIO.NativeConfig) (query : SigQuery) (answer : Bool) :
+    Prop where
+  private mk ::
+
+/-- What it means for an oracle to have answered `answer` on `query`: for the live process, `Ran`; for a
+recorded run, the Ed25519 transcript verdict. -/
+def oracleAnswered : {m : Type → Type} → CredentialSignatureIO.Oracle m → SigQuery → Bool → Prop
+  | _, .live config, query, answer => Ran config query answer
+  | _, .recorded transcript, query, answer =>
+      query.scheme = .ed25519 ∧
+        CredentialSignatureIO.recordedVerdict transcript query.publicKey query.message query.signature =
+          .ok answer
+
+/-- **The Receiver's verifier over one oracle** (the ONE verifier a Host receiver is indexed by): the
+oracle's verdict on the claim's exact key, message and signature, its error printed, returned with the
+fact `oracleAnswered` that the oracle gave it. -/
+def receiverVerifier : {m : Type → Type} → CredentialSignatureIO.Oracle m → Verifier m
+  | _, .live config =>
+      { Answered := fun query answer => Ran config query answer
+        ask := fun claim => do
+          let answer ← match claim.scheme with
+            | .ed25519 =>
+                CredentialSignatureIO.verify config claim.publicKey claim.message claim.signature
+            | .sshsig nameSpace =>
+                CredentialSignatureIO.verifySshsig config claim.publicKey nameSpace claim.message
+                  claim.signature
+          match answer with
+          | .error reason => pure (.error s!"{repr reason}")
+          | .ok verdict => pure (.ok ⟨verdict, Ran.mk⟩) }
+  | _, .recorded transcript =>
+      { Answered := fun query answer =>
+          query.scheme = .ed25519 ∧
+            CredentialSignatureIO.recordedVerdict transcript query.publicKey query.message
+              query.signature = .ok answer
+        ask := fun claim =>
+          match scheme : claim.scheme with
+          | .sshsig _ => pure (.error "a recorded transcript holds Ed25519 verdicts only")
+          | .ed25519 =>
+            match verdict : CredentialSignatureIO.recordedVerdict transcript claim.publicKey
+                claim.message claim.signature with
+            | .error reason => pure (.error s!"{repr reason}")
+            | .ok answer => pure (.ok ⟨answer, rfl, rfl⟩) }
+
+/-- **Live teeth, over the type**: a voucher set of the live verifier holds a query only with its `Ran`
+witness.  Since `Ran`'s constructor is private to this module and used once, a `Vouchers (receiverVerifier
+(.live config))` holding a query the process never answered `true` on is not a term of the type. -/
+theorem live_voucher_has_ran {config : CredentialSignatureIO.NativeConfig}
+    (vouchers : Vouchers (receiverVerifier (.live config))) {query : SigQuery}
+    (member : query ∈ vouchers.verified) : Ran config query true :=
+  vouchers.verifiedAnswered query member
+
+/-- And the recorded side: the transcript said `true` on Ed25519. -/
+theorem recorded_voucher_in_transcript {transcript : CredentialSignatureIO.Transcript}
+    (vouchers : Vouchers (receiverVerifier (.recorded transcript))) {query : SigQuery}
+    (member : query ∈ vouchers.verified) :
+    query.scheme = .ed25519 ∧
+      CredentialSignatureIO.recordedVerdict transcript query.publicKey query.message query.signature =
+        .ok true :=
+  vouchers.verifiedAnswered query member
 
 /-- **What a family's `prepare` receives from the Receiver**: the oracle that
 answered and the vouchers of the claims it accepted, typed by that oracle's
@@ -364,7 +408,7 @@ verifier. -/
 structure Received where
   {m : Type → Type}
   oracle : CredentialSignatureIO.Oracle m
-  vouchers : Vouchers (receiverVerify oracle)
+  vouchers : Vouchers (receiverVerifier oracle)
 
 /-- A signature the Receiver's verifier accepted before `prepare` ran: the
 exact claim, and the oracle that answered (`Source.receiver`).  The constructor

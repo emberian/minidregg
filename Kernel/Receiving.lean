@@ -50,7 +50,7 @@ open Minidregg.Kernel.DurableDataIntent
 open Minidregg.Theory.ResourceCost (Charge Lane)
 open Minidregg.Theory.TypedAuthorization (Digest SubjectId)
 open Minidregg.Theory.Receiving (SigQuery Journal Recorded Refusal Receiver Vouchers)
-open Minidregg.Compiler.CredentialSignatureAdmission (Received receiverVerify)
+open Minidregg.Compiler.CredentialSignatureAdmission (Received receiverVerifier)
 open Minidregg.Kernel.ReceivingLaw (Laws LawFault Lawful)
 open Minidregg.Compiler.CanonicalCellRegistry (FamilyId Kind LawClass)
 open Minidregg.Compiler.CanonicalPolicyAdmission (PolicyStepContext PolicyCompilerProfile)
@@ -279,9 +279,9 @@ def payload (laws : Laws Durable) {env : F.Env} {durable : Durable} (ingress : F
   guardsReadOnly := fun _ member => Receiver.guardsOff_readonly member
 
 /-- The family as a `Theory.Receiving.Receiver` over the deployed journal,
-judged by `laws`, its claims verified by `oracle` (`receiverVerify`). -/
+judged by `laws`, its claims verified by `oracle` (`receiverVerifier`). -/
 def receiver (laws : Laws Durable) {m : Type → Type} (oracle : CredentialSignatureIO.Oracle m) :
-    Receiver journal (receiverVerify oracle) where
+    Receiver journal (receiverVerifier oracle) where
   Env := F.Env
   Ingress := F.Ingress
   Command := F.Command
@@ -495,8 +495,8 @@ theorem kernelOnly_writers_sound {laws : Laws Durable}
 family (any oracle, any monad) was prepared by `F.prepare` given exactly the
 admission's vouchers under the receiver's own oracle, and every claim the family
 named is among them.  A family reads a signature only through that `Received`
-value (`Vouchers` has a private constructor, and `admitVia` is its only
-producer), so a gate holds a signature verdict only when the oracle gave it. -/
+value (a `Vouchers` carries the proposition that the oracle answered each claim, and
+`admitVia` obtains it from `Verifier.ask`), so a gate holds a signature verdict only when the oracle gave it. -/
 theorem admitted_prepared_received {laws : Laws Durable} {m : Type → Type}
     {oracle : CredentialSignatureIO.Oracle m} {env : F.Env} {durable : Durable}
     {ingress : F.Ingress} (admission : (F.receiver laws oracle).Admitted env durable ingress) :
@@ -506,8 +506,20 @@ theorem admitted_prepared_received {laws : Laws Durable} {m : Type → Type}
         ∀ claim ∈ claims, claim ∈ admission.vouchers.verified :=
   admission.prepared
 
+/-- **Top-level, at the live verifier**: every claim the deployed `IO` receiver of any family prepared
+under was answered `true` by the pinned process (`Ran`), and every observation it holds was answered as
+recorded.  Stated at `receiverVerifier (.live config)`, the one verifier Host receivers are indexed by. -/
+theorem admitted_live_ran {laws : Laws Durable} {config : CredentialSignatureIO.NativeConfig}
+    {env : F.Env} {durable : Durable} {ingress : F.Ingress}
+    (admission : (F.receiver laws (.live config)).Admitted env durable ingress) :
+    (∀ claim ∈ admission.vouchers.verified, CredentialSignatureAdmission.Ran config claim true) ∧
+      ∀ answered ∈ admission.vouchers.observed,
+        CredentialSignatureAdmission.Ran config answered.1 answered.2 :=
+  admission.vouchers.answered
+
 end Family
 
+#assert_axioms Family.admitted_live_ran
 #assert_axioms lookup_install
 #assert_axioms execute_accepted_install
 #assert_axioms Family.shape_sound

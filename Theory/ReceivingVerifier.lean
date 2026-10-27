@@ -69,9 +69,14 @@ def pureVerifier (v : SigQuery → Bool) : Verifier Id where
 answer: `verifiedAnswered` (each voucher is a query the verifier answered `true`) and
 `observedAnswered` (each observation carries the answer the verifier gave).  Indexed by the
 verifier: a value minted under one verifier is not a value of another's type.  The constructor is
-private to this module and its only use is `Receiver.admitVia`, which has the proofs only from
-`Verifier.ask`.  **Layer 1**: a forged value must supply the propositions, so it cannot claim an
-answer the verifier did not give; the oracle's own truthfulness is the verifier's layer. -/
+private to this module; `Vouchers.empty` and `Vouchers.ofAnswered` are the only constructor calls, and
+`ofAnswered` is public BY DESIGN: it demands the two propositions, so it mints nothing the verifier
+did not answer.  `Receiver.admitVia` is the one caller that obtains those propositions, from
+`Verifier.ask`.  **Layer 1**: the guarantee is the propositions, stated about the verifier's `Answered`.
+`Verifier` is an open structure, so the guarantee is only as strong as the `Answered` of the verifier
+a receiver is indexed by: Theory cannot name the live one, so `Kernel.Receiving.Family.receiver` fixes it
+to `receiverVerifier` (Answered = `Ran`, one private-constructor site) and
+`scripts/check-receiver-verifier.sh` refuses any other. -/
 structure Vouchers {m : Type → Type} (V : Verifier m) where
   private mk ::
   verified : List SigQuery
@@ -132,6 +137,13 @@ theorem answer?_some {vouchers : Vouchers V} {query : SigQuery} {answer : Bool}
   cases same
   exact member
 
+/-- **The census witness**: a voucher set states, about its own verifier `V`, that every voucher was
+answered `true` and every observation was answered as recorded. -/
+theorem Vouchers.answered {m : Type → Type} {V : Verifier m} (vouchers : Vouchers V) :
+    (∀ query ∈ vouchers.verified, V.Answered query true) ∧
+      ∀ answered ∈ vouchers.observed, V.Answered answered.1 answered.2 :=
+  ⟨vouchers.verifiedAnswered, vouchers.observedAnswered⟩
+
 /-! ### The statement's poles -/
 
 /-- **Teeth (general).** A voucher for a query the verifier did not answer `true` cannot exist. -/
@@ -186,6 +198,7 @@ theorem Verifier.exists_refuting :
     have : false = true := answered
     cases this⟩
 
+#assert_axioms Vouchers.answered
 #assert_axioms Vouchers.vouches_iff
 #assert_axioms Vouchers.signed?_some
 #assert_axioms Vouchers.answer?_some
