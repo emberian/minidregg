@@ -147,10 +147,11 @@ fn protected_agent_socket_parent(
     let owner_uid = unsafe { libc::geteuid() };
     for (depth, ancestor) in parent.ancestors().enumerate() {
         let metadata = fs::symlink_metadata(ancestor)?;
-        let sticky_root = depth > 0 && metadata.uid() == 0 && metadata.mode() & 0o1000 != 0;
+        let root_owned = crate::namespace_identity::root_owned(ancestor, &metadata);
+        let sticky_root = depth > 0 && root_owned && metadata.mode() & 0o1000 != 0;
         if !metadata.is_dir()
             || metadata.mode() & 0o022 != 0 && !sticky_root
-            || !matches!(metadata.uid(), 0)
+            || !root_owned
                 && metadata.uid() != owner_uid
                 && metadata.uid() != controller_uid
         {

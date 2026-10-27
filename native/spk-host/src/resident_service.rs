@@ -1364,6 +1364,9 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     let bound = ResidentBound::from_unit_environment()?;
     let mut config = ResidentConfig::load(config_path)?;
     bound.validate(&config)?;
+    for agent in &config.agents {
+        crate::namespace_identity::require_registered_controller(agent.controller_uid)?;
+    }
     crate::checkpoint_control::refuse_retained_pause(&config.journal_dir)?;
     resident_route_control::refuse_retained_registrations(&config.journal_dir)?;
     let journal = Journal::open(&config.journal_dir)?

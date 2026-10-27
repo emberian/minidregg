@@ -217,10 +217,11 @@ impl ReverseCustodyClient {
             .enumerate()
         {
             let meta = std::fs::symlink_metadata(ancestor)?;
-            let sticky_root = depth > 0 && meta.uid() == 0 && meta.mode() & 0o1000 != 0;
+            let root_owned = crate::namespace_identity::root_owned(ancestor, &meta);
+            let sticky_root = depth > 0 && root_owned && meta.mode() & 0o1000 != 0;
             if !meta.is_dir()
                 || meta.mode() & 0o022 != 0 && !sticky_root
-                || !matches!(meta.uid(), 0)
+                || !root_owned
                     && meta.uid() != self.controller_uid
                     && meta.uid() != unsafe { libc::geteuid() }
             {

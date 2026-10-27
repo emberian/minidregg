@@ -12,9 +12,10 @@ usage: scripts/oracle-shared-data-journey.sh [--resume] BASE_BIN OWN_BIN NEW_RUN
 Linux operator account with user systemd/linger, subordinate UID/GID allocation,
 passwordless access to deploy/spk-host/install-user-world, bwrap, jq, curl, python3.
 BASE_BIN: qualified Host, mini, sqlite-store, signature verifier, client consent.
-OWN_BIN: current spk-host, mini-spk-broker, mini-spk-volume-helper, spk-data-publish.
+OWN_BIN: current spk-host, mini-spk-broker, mini-spk-volume-helper, spk-data-publish, grain-runtime.
 All paths absolute; NEW_RUN_ROOT must have protected ancestors. Without --resume
-it must not exist. --resume uses its exact retained Store and prepared receipts.
+it must not exist. --resume requires the exact U3 initial allocation/authoring
+selectors and a retained prepared INSTALL; older receiving-only worlds refuse.
 Creates and removes only a fresh scratch Store namespace. Keeps evidence in RUN.
 The input data is read only; publication copies it once into this Store's custody.
 No public deployment and no direct fd3 calls. Uses the same current receiving
@@ -38,6 +39,35 @@ if [[ $mode == new ]]; then
   [[ ! -e $run && ! -L $run ]] || fail 'run directory already exists'
 else
   [[ -d $run && ! -L $run && $(stat -c '%u:%a' "$run") == "$(id -u):700" ]] || fail 'retained run custody differs'
+  # This recipe cannot extend historical receiving-only worlds. Check the
+  # exact fresh U3 allocation and initial authoring selectors before any phase.
+  python3 - "$run" "$repo/deploy/oracle/acceptance/agent-allocation.json" <<'PYRESUME'
+import json, pathlib, sys
+run, source = map(pathlib.Path, sys.argv[1:])
+raw = source.read_bytes()
+for retained in ('agent-lifetime/allocation.json', 'world/store/source-stage/agent-allocation.json'):
+    path = run / retained
+    if not path.is_file() or path.is_symlink() or path.read_bytes() != raw:
+        raise SystemExit('resume refused: exact initial U3 agent allocation absent')
+a = json.loads(raw)
+expected = []
+for agent in a['agents']:
+    c = agent['plannedCaps']
+    expected.append({'legacy': {
+        'ticketResource': int(agent['ticket']), 'packageManifest': int(a['packageManifest']),
+        'snapshotManifest': int(a['snapshotManifest']), 'sessionObserve': int(c['sessionOwner']),
+        'manifestObserve': int(c['controllerManifestObserve']), 'enrollmentObserve': int(c['descriptorOwner']),
+        'parentTask': int(agent['controller']['task']), 'parentCapability': int(c['parentOwner']),
+        'parentObserve': int(c['parentOwner']), 'purseTask': int(agent['dispatch']['task']),
+        'purseCapability': int(c['dispatchOwner']), 'purseObserve': int(c['dispatchOwner']),
+        'payerSubject': int(agent['dispatch']['subject']), 'reserveAmount': 1, 'maximumCharge': 1},
+        'grantResource': int(agent['persistentGrant']), 'grantObserveCapability': int(c['grantObserve'])})
+config = json.loads((run / 'world/store/base/workroom/deployment/pinned-config.json').read_bytes())
+if config.get('agentLifetimeDispatchTargets') != expected:
+    raise SystemExit('resume refused: initial U3 lifetime authoring selectors differ')
+if not (run / 'bin/grain-runtime').is_file():
+    raise SystemExit('resume refused: retained U3 controller runtime absent')
+PYRESUME
   [[ -f $run/initial-attempt/input-sha256.txt ]] || fail 'preserve original attempt evidence before resume'
   [[ $(sha256sum "$spk" | cut -d ' ' -f1) == $(awk 'NR==1{print $1}' "$run/initial-attempt/input-sha256.txt") ]] || fail 'resume package differs'
   [[ $(sha256sum "$inventory" | cut -d ' ' -f1) == $(awk 'NR==2{print $1}' "$run/initial-attempt/input-sha256.txt") ]] || fail 'resume inventory differs'
@@ -66,24 +96,40 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 export ORACLE_IMPORT_PROFILE=${ORACLE_IMPORT_PROFILE:-operator-appliance-v1}
 case "$ORACLE_IMPORT_PROFILE" in standard-v1|operator-appliance-v1) ;; *) fail 'unknown operator import profile';; esac
+disk_plan=$(world_disk_plan) || fail 'fresh journey does not fit unchanged import and later verification space guards'
 if [[ $mode == new ]]; then
   world_prepare "$base" "$own" "$run" "$repo"
 else
   world_resume "$run" "$repo"
 fi
+printf '%s\n' "$disk_plan" >"$run/disk-plan.json"
 jq --argjson bytes "$(stat -c '%s' "$spk")" '
   {selected_profile:(.importProfile // "standard-v1"),
    deadline_seconds:(if .importProfile=="operator-appliance-v1" then 1800 else 120 end),
    signed_spk_bytes:$bytes,mini_raw_admission_cap_bytes:268435456}'   "$GRAINS_ROOT/broker/config.json" >"$run/import-profile.json"
-sha256sum "$spk" "$inventory" "$0" "$repo/deploy/oracle/acceptance/world.sh" "$repo/deploy/oracle/acceptance/report.py" >"$run/input-sha256.txt"
+sha256sum "$spk" "$inventory" "$0" "$repo/deploy/oracle/acceptance/world.sh" "$repo/deploy/oracle/acceptance/report.py" "$repo/scripts/oracle-stop-inspection-probe.py" \
+  "$repo/scripts/oracle-agent-lifetime-journey.sh" "$repo/deploy/oracle/acceptance/agent-allocation.json" "$repo/deploy/oracle/acceptance/agent.py" \
+  "$repo/deploy/oracle/acceptance/agent-cases.json" "$installer" "$repo/deploy/spk-host/controller-world.py" >"$run/input-sha256.txt"
 cp "$inventory" "$run/inventory.json"
 phase() { timeout 1800 "$journey" phase "$run/world" "$@"; }
+# INSTALL does not launch the app or open its signed data attachment. Complete
+# both installations while the large-profile spool reserve is available, then
+# publish data before either START. The native guards remain unchanged.
+world_disk_snapshot before-install
+phase birth-a install-a birth-b install-b
+world_disk_snapshot after-install
 # Publication is physical custody; it does not manufacture a Mini grant.
 timeout 3600 "$BIN/spk-data-publish" publish --store "$GRAINS_ROOT/spk/public-data" \
   --source "$source" --inventory "$inventory" >"$run/publication.json" 2>"$run/publication.stderr"
 publication=$GRAINS_ROOT/spk/public-data/sha256-$inventory_sha
 [[ -d $publication && ! -L $publication ]] || fail 'publisher did not produce exact inventory slot'
-phase birth-a install-a share-a start-a floor-a enroll-a get-a
+world_disk_snapshot after-publication
+phase share-a
+world_controller_prepare
+phase start-a
+world_controller_activate "$run/world/evidence/start-a.stdout" initial
+world_controller_probe initial probe
+phase floor-a enroll-a get-a
 # This HTTP route invokes the current Mini request admission on every call.
 # A process/socket existing is not counted as admission or query success.
 request() {
@@ -105,7 +151,7 @@ request a 11 oracle-salinger oracle-dates 'When was J. D. Salinger born?'
 request a 12 oracle-order-salinger oracle-order-salinger 'Who is older, J. D. Salinger or Jimmy Carter?'
 request a 13 oracle-order-shakespeare oracle-order-shakespeare 'Who is older, William Shakespeare or Isaac Newton?'
 request a 14 oracle-order-uncertain oracle-order-uncertain 'Who is older, Hildegard of Bingen or William Shakespeare?'
-phase birth-b install-b share-b start-b floor-b enroll-b get-b
+phase share-b start-b floor-b enroll-b get-b
 # Reusing both IDs with a different body would conflict in a shared journal.
 request b 1 oracle-isolation oracle-acceptance 'Who wrote Emma?'
 request a 6 oracle-isolation oracle-acceptance 'Who wrote Leaves of Grass?'
@@ -124,6 +170,9 @@ retain() {
     for file in "$(dirname "$configfile")"/*completed*.json "$(dirname "$configfile")"/*admitted*.json; do
       [[ ! -f $file ]] || cp "$file" "$run/receiving/$app/$generation/"
     done
+    if [[ -d $(dirname "$configfile")/stop-completion ]]; then
+      cp -a "$(dirname "$configfile")/stop-completion" "$run/receiving/$app/$generation/"
+    fi
   done
   cp "$state/apps/$app/install/launch-descriptor/launch-inspection.json" "$run/receiving/$app/launch-inspection.json"
   cp "$state/apps/$app/install/install-completed-v2.json" "$run/receiving/$app/install-completed-v2.json"
@@ -135,6 +184,12 @@ retain() {
 retain 9101; retain 9201
 # Native config and Linux mount evidence: inspect only processes in these two
 # Store-qualified units. sudo is read-only here, never a mount or app launch.
+read_proc_evidence() {
+  local path=$1 output=$2
+  # Some qualified hosts permit the operator's namespace-parent observation;
+  # hosts with stricter proc policy use their existing read-only sudo grant.
+  cat "$path" >"$output" 2>/dev/null || sudo -n cat "$path" >"$output"
+}
 capture_mounts() {
   local app=$1 unit cg pid resident
   unit=$("$BIN/spk-host" grain status "$profile" "$app" | jq -er '[.runs[] | select(.state=="running")][-1].unit')
@@ -143,15 +198,21 @@ capture_mounts() {
   mkdir -p -m 700 "$run/receiving/$app/namespaces"
   resident=$(systemctl --user show "$unit" -p MainPID --value)
   [[ $resident =~ ^[1-9][0-9]*$ ]] || fail 'running resident PID absent'
-  sudo -n cat "/proc/$resident/uid_map" >"$run/receiving/$app/namespaces/$resident.uid_map"
-  sudo -n cat "/proc/$resident/gid_map" >"$run/receiving/$app/namespaces/$resident.gid_map"
+  read_proc_evidence "/proc/$resident/uid_map" "$run/receiving/$app/namespaces/$resident.uid_map"
+  read_proc_evidence "/proc/$resident/gid_map" "$run/receiving/$app/namespaces/$resident.gid_map"
   while read -r pid; do
     [[ $pid =~ ^[1-9][0-9]*$ ]] || continue
-    sudo -n cat "/proc/$pid/mountinfo" >"$run/receiving/$app/mounts/$pid.txt" || fail 'cannot inspect app mount custody'
+    read_proc_evidence "/proc/$pid/mountinfo" "$run/receiving/$app/mounts/$pid.txt" || fail 'cannot inspect app mount custody'
   done <"/sys/fs/cgroup$cg/cgroup.procs"
 }
 capture_mounts 9101; capture_mounts 9201
+a_generation=$(jq -er '[.runs[] | select(.state=="running")][-1].generation' "$run/before-stop-a.json")
+world_controller_stop before-app-stop
 phase stop-a
+world_operator_identity >"$run/op155-operator-before.json"
+world_stop_probe 9101 "$a_generation" "$run/op155-a"
+world_operator_identity >"$run/op155-operator-after-a.json"
+cmp "$run/op155-operator-before.json" "$run/op155-operator-after-a.json"
 # These mutations affect only this journey's freshly published directory.
 # Rename preserves the original files/inodes/fingerprints exactly for restore.
 held=$GRAINS_ROOT/spk/public-data/withheld-$inventory_sha
@@ -197,7 +258,10 @@ chmod 555 "$publication"
 refuse_start wrong-data
 grep -q "published inventory differs from signed attachment digest" "$run/wrong-data.stderr" "$run/wrong-data.unit.log" || fail 'wrong inventory refused for an unrelated reason'
 restore_publication
-phase start-a2 floor-a2 enroll-a2 get-a2
+phase start-a2
+world_controller_activate "$run/world/evidence/start-a2.stdout" restart
+world_controller_probe restart probe-after-restart
+phase floor-a2 enroll-a2 get-a2
 capture_mounts 9101
 request a 7 oracle-isolation oracle-acceptance 'Who wrote Leaves of Grass?'
 cmp "$run/world/evidence/post-a1-body.body" "$run/world/evidence/post-a7-body.body"
@@ -205,8 +269,40 @@ request a 8 oracle-pronoun oracle-followup 'When was she born?'
 cmp "$run/world/evidence/post-a3-body.body" "$run/world/evidence/post-a8-body.body"
 request b 2 oracle-isolation oracle-acceptance 'Who wrote Emma?'
 cmp "$run/world/evidence/post-b1-body.body" "$run/world/evidence/post-b2-body.body"
+
+# Reproduce the prior recovery gap in this fresh Store: physically stop B's
+# exact owned unit while retaining its completed START/Running journal, then
+# ask the normal source-bound STOP path to reconcile that same incarnation.
+mkdir -m 700 "$run/reconcile-b"
+"$BIN/spk-host" grain status "$profile" 9201 >"$run/reconcile-b/before.json"
+generation=$(jq -er '[.runs[] | select(.state=="running")][-1].generation' "$run/reconcile-b/before.json")
+unit=$(jq -er '[.runs[] | select(.state=="running")][-1].unit' "$run/reconcile-b/before.json")
+[[ $generation =~ ^[1-9][0-9]*$ && $unit == mini-spk-s$store-a9201-g$generation.service ]] || fail 'reconciliation target outside this Store'
+cp "$state/apps/9201/g$generation/record.json" "$run/reconcile-b/record-before.json"
+systemctl --user show "$unit" -p Id -p LoadState -p ActiveState -p MainPID -p InvocationID -p ControlGroup -p Job >"$run/reconcile-b/manager-before.txt"
+timeout 120 systemctl --user stop "$unit"
+systemctl --user show "$unit" -p Id -p LoadState -p ActiveState -p MainPID -p InvocationID -p ControlGroup -p Job >"$run/reconcile-b/manager-inactive.txt"
+cp "$state/apps/9201/g$generation/record.json" "$run/reconcile-b/record-inactive.json"
+cmp "$run/reconcile-b/record-before.json" "$run/reconcile-b/record-inactive.json"
+"$BIN/spk-host" grain status "$profile" 9201 >"$run/reconcile-b/after-manager.json"
+phase stop-b
+world_operator_identity >"$run/op155-operator-before-b.json"
+cmp "$run/op155-operator-before.json" "$run/op155-operator-before-b.json"
+world_stop_probe 9201 "$generation" "$run/op155-b" \
+  "$state/apps/9101/g$a_generation/stop-claim/committed-v3.bin"
+world_operator_identity >"$run/op155-operator-after-b.json"
+cmp "$run/op155-operator-before.json" "$run/op155-operator-after-b.json"
+"$BIN/spk-host" grain status "$profile" 9201 >"$run/reconcile-b/after-native-stop.json"
+cp "$state/apps/9201/g$generation/record.json" "$run/reconcile-b/record-stopped.json"
+phase start-b2 floor-b2 enroll-b2 get-b2
+capture_mounts 9201
+request b 3 oracle-isolation oracle-acceptance 'Who wrote Emma?'
+cmp "$run/world/evidence/post-b1-body.body" "$run/world/evidence/post-b3-body.body"
 retain 9101; retain 9201
-phase status-a status-b stop-a2 stop-b
+world_controller_stop before-final-stops
+phase stop-a2 stop-b2 status-a status-b
+retain 9101; retain 9201
+world_disk_snapshot after-stops
 sha256sum -c "$run/input-sha256.txt" >"$run/input-recheck.txt"
 if [[ -f $run/resume-retained-install-sha256.txt ]]; then
   sha256sum -c "$run/resume-retained-install-sha256.txt" >"$run/resume-retained-install-recheck.txt"
