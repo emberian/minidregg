@@ -179,6 +179,23 @@ mod object_epoch_packages;
 mod well;
 
 static SOCKET: OnceLock<PathBuf> = OnceLock::new();
+
+/// SOCKET is process-global: a test case that pins it runs alone in a child test process,
+/// which runs exactly `test` with `var` set (the case returns at once without it).
+#[cfg(test)]
+fn in_child(test: &str, var: &str) {
+    let output = std::process::Command::new(env::current_exe().unwrap())
+        .args(["--exact", test, "--nocapture"])
+        .env(var, "1")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success() && stdout.contains("1 passed"),
+        "{stdout}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
 static SSH_IDENTITY: OnceLock<PathBuf> = OnceLock::new();
 #[cfg(unix)]
 static EXPECTED_HOST_SHA: OnceLock<String> = OnceLock::new();

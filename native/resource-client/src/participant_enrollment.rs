@@ -384,6 +384,15 @@ fn public_key_file(path: &Path) -> Result<VerifyingKey> {
     VerifyingKey::from_bytes(&bytes).map_err(|_| "enrollment public key is not a valid Ed25519 point".into())
 }
 
+/// An enrollment is planned, sealed and submitted on its sponsor's public socket. A process
+/// already pinned to another socket is refused, never silently pointed at the enrollment's.
+fn selected_socket(public_socket: &Path, whose: &str) -> Result<()> {
+    if SOCKET.get().is_some_and(|selected| selected != public_socket) {
+        return Err(format!("selected socket differs from {whose} pinned socket"));
+    }
+    Ok(())
+}
+
 fn load_pin(directory: &Path) -> Result<Pin> {
     crate::fsio::ensure_private_dir_durable(directory)?;
     let pin = json_private(&directory.join("pin.json"))?;
@@ -392,6 +401,7 @@ fn load_pin(directory: &Path) -> Result<Pin> {
     let config = member_path(&pin, "config")?;
     let public_socket = member_path(&pin, "publicSocket")?;
     let operation_socket = member_path(&pin, "operationSocket")?;
+    selected_socket(&public_socket, "the retained enrollment's")?;
     let sponsor_key = member_path(&pin, "sponsorKey")?;
     let home = pin.get("homeSubject").and_then(Value::as_bool) == Some(true);
     let new_key = if pin.get("newKey").is_some_and(Value::is_null) {
@@ -731,6 +741,7 @@ fn plan(mut args: Args) -> Result<()> {
     let host = member_path(&workspace_pin, "host")?;
     let config = member_path(&workspace_pin, "config")?;
     let public_socket = member_path(&workspace_pin, "socket")?;
+    selected_socket(&public_socket, "the sponsor workspace's")?;
     let sponsor_key = member_path(&workspace_pin, "key")?;
     let namespace_root = member_path(&workspace_pin, "namespaceRoot")?;
     let operation_socket = operator_override
@@ -2040,5 +2051,64 @@ mod tests {
             "2"
         );
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn enrollment_refuses_a_process_pinned_to_another_socket_than_its_sponsors() {
+        const CHILD: &str = "MINI_ENROLLMENT_SOCKET_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            return crate::in_child(
+                "participant_enrollment::tests::enrollment_refuses_a_process_pinned_to_another_socket_than_its_sponsors",
+                CHILD,
+            );
+        }
+        let base = scratch("socket-pin");
+        let sponsor = base.join("sponsor");
+        crate::fsio::ensure_private_dir_all(&sponsor.join("refs")).unwrap();
+        save_json(&sponsor.join("workspace.json"), &json!({
+            "type":"minidregg-participant-workspace-v1","host":base.join("host"),
+            "config":base.join("config.json"),"socket":base.join("sponsor.sock")})).unwrap();
+        save_json(&sponsor.join("refs/factory.json"), &json!({
+            "type":"minidregg-participant-reference-v1","name":"factory","kind":"object"})).unwrap();
+        let public = base.join("new.pub");
+        fs::write(&public, ed25519_dalek::SigningKey::from_bytes(&[7; 32]).verifying_key().to_bytes()).unwrap();
+        let directory = base.join("enroll");
+        let enroll = |values: &[(&str, &OsStr)]| {
+            run(Args {
+                command: OsString::from("enroll"),
+                values: values
+                    .iter()
+                    .map(|(key, value)| (OsString::from(format!("--{key}")), value.to_os_string()))
+                    .collect(),
+            })
+            .unwrap_err()
+        };
+        SOCKET.set(base.join("other.sock")).unwrap();
+        let error = enroll(&[
+            ("action", OsStr::new("plan")),
+            ("sponsor-workspace", sponsor.as_os_str()),
+            ("factory-ref", OsStr::new("factory")),
+            ("name", OsStr::new("alice")),
+            ("new-public-key", public.as_os_str()),
+            ("no-prerotation", OsStr::new("")),
+            ("dir", directory.as_os_str()),
+        ]);
+        assert_eq!(error, "selected socket differs from the sponsor workspace's pinned socket");
+        assert!(!directory.exists(), "nothing is planned");
+        // An attempt retained from an earlier run names its own sockets: resuming it on a
+        // process pinned elsewhere is refused before anything is sealed or submitted.
+        let retained = base.join("retained");
+        crate::fsio::ensure_private_dir_all(&retained).unwrap();
+        save_json(&retained.join("pin.json"), &json!({"format":FORMAT,
+            "host":base.join("host"),"config":base.join("config.json"),
+            "publicSocket":base.join("sponsor.sock"),"operationSocket":base.join("sponsor.sock")})).unwrap();
+        for action in ["seal", "submit", "lookup", "offer"] {
+            let error = enroll(&[("action", OsStr::new(action)), ("dir", retained.as_os_str())]);
+            assert_eq!(error, "selected socket differs from the retained enrollment's pinned socket", "{action}");
+        }
+        for written in ["seal.json", "submit-marker.json"] {
+            assert!(!retained.join(written).exists(), "{written}: nothing is sealed or submitted");
+        }
+        fs::remove_dir_all(base).unwrap();
     }
 }

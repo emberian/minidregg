@@ -137,7 +137,7 @@ refuse tentative transfer 'one commitment level' -- $FS transfer --profile alpha
   --accept-tentative
 refuse not-joined send 'has not joined' -- $FS send --profile delta x
 step node-url-unix send -- $FS send --profile alpha --node-url "unix:$SOCKET" --topic news via unix url
-refuse wrong-socket send 'differs from pinned' -- $FS send --profile alpha --node-url unix:/nonexistent/mini.sock x
+refuse wrong-socket send 'but --node-url names' -- $FS send --profile alpha --node-url unix:/nonexistent/mini.sock x
 
 # --- J5 restart + exact retry of the committed transfer
 stop_server

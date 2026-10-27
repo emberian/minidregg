@@ -1029,6 +1029,10 @@ pub(crate) fn join(mut args: Args) -> Result<()> {
         .unwrap_or_else(|| "account".into());
     args.finish()?;
     canonical_decimal(&fund, "--fund")?;
+    // Loaded first: it pins the process to the sponsor's socket (or refuses a selected one
+    // that differs), so a planned, retained or resumed enrollment and the funding all go to
+    // the one Host the new workspace will name.
+    let sponsor_workspace = workspace::load(&sponsor_root)?;
     let enrollment = enrollment_dir.join("enrollment.json");
     if !enrollment.exists() {
         let owned = |values: &[(&str, &OsStr)]| Args {
@@ -1064,7 +1068,6 @@ pub(crate) fn join(mut args: Args) -> Result<()> {
     }
     let admitted = read_json(&enrollment)?;
     let subject = field(&admitted, "subject")?.to_owned();
-    let sponsor_workspace = workspace::load(&sponsor_root)?;
     if !agent_root.join("workspace.json").exists() {
         workspace::init(
             &agent_root,
@@ -1081,6 +1084,9 @@ pub(crate) fn join(mut args: Args) -> Result<()> {
             Some(&workspace::member_path(&sponsor_workspace, "namespaceRoot")?),
         )?;
     }
+    // Loaded before funding: a workspace an interrupted join left pinned to another socket
+    // is refused before value moves to an account it cannot reach.
+    let agent_workspace = workspace::load(&agent_root)?;
     let handoff = workspace::create_funded_account(
         &sponsor_root,
         &sponsor_workspace,
@@ -1092,7 +1098,6 @@ pub(crate) fn join(mut args: Args) -> Result<()> {
     if field(&handoff, "owner")? != subject {
         return Err("account handoff names another owner".into());
     }
-    let agent_workspace = workspace::load(&agent_root)?;
     if !agent_root.join("refs").join(format!("{account_name}.json")).exists() {
         let provenance = sponsor_root
             .join("sources")
@@ -1306,6 +1311,53 @@ mod tests {
         assert!(transfer_value("12", "0", "0").is_err());
         assert!(transfer_value("012", "5", "0").is_err());
         assert!(transfer_value("12", "5", "0").is_ok());
+    }
+
+    #[test]
+    fn join_refuses_a_selected_socket_the_sponsor_is_not_pinned_to_before_enrolling() {
+        const CHILD: &str = "MINI_FLEET_JOIN_SOCKET_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            return crate::in_child(
+                "fleet::tests::join_refuses_a_selected_socket_the_sponsor_is_not_pinned_to_before_enrolling",
+                CHILD,
+            );
+        }
+        let base = std::env::temp_dir()
+            .join(format!("mini-fleet-join-socket-{}-{}", std::process::id(), workspace::random_nonce().unwrap()));
+        let sponsor = base.join("sponsor");
+        for directory in [&base, &sponsor] {
+            workspace::make_private_dir(directory).unwrap();
+        }
+        for name in ["refs", "attempts", "sources", "proposals"] {
+            workspace::make_private_dir(&sponsor.join(name)).unwrap();
+        }
+        crate::create_private(&sponsor.join("workspace.json"), &serde_json::to_vec(&json!({
+            "type":"minidregg-participant-workspace-v1","subject":"7","host":base.join("host"),
+            "config":base.join("config.json"),"key":base.join("key"),"socket":base.join("sponsor.sock")
+        })).unwrap()).unwrap();
+        // `mini --socket OTHER fleet --action join`: the process is pinned before the join.
+        SOCKET.set(base.join("other.sock")).unwrap();
+        let enroll = base.join("enroll");
+        let error = join(Args {
+            command: OsString::from("fleet"),
+            values: [
+                ("sponsor-workspace", sponsor.as_os_str()),
+                ("factory-ref", OsStr::new("factory")),
+                ("name", OsStr::new("alice")),
+                ("new-key", base.join("new.key").as_os_str()),
+                ("enroll-dir", enroll.as_os_str()),
+                ("dir", base.join("agent").as_os_str()),
+                ("fund", OsStr::new("5")),
+            ]
+            .iter()
+            .map(|(key, value)| (OsString::from(format!("--{key}")), value.to_os_string()))
+            .collect(),
+        })
+        .unwrap_err();
+        // The sponsor workspace's own check refuses first, before an enrollment is planned.
+        assert_eq!(error, "selected socket differs from pinned workspace socket");
+        assert!(!enroll.exists(), "no enrollment is planned");
+        fs::remove_dir_all(base).unwrap();
     }
 }
 
