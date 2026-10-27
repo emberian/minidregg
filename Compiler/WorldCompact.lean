@@ -1,4 +1,6 @@
 import Kernel.World
+import Kernel.DeployedBridge
+import Compiler.StoreCodec
 import Compiler.FiniteDependentMapCachedOrdering
 
 /-!
@@ -20,15 +22,18 @@ open Minidregg.Compiler.FiniteDependentMapCodec (fromEntries)
 section Generic
 
 variable {K : Type} [DecidableEq K] {V : K → Type} [∀ key, Zero (V key)]
-  (keyOf : K → Nat) (keyExact : Function.Injective keyOf)
+  {O : Type} [LinearOrder O] (keyOf : K → O) (keyExact : Function.Injective keyOf)
+  (g : (key : K) → V key → V key) (identity : ∀ key value, g key value = value)
 
-/-- The map read at the keys of `keys`, as a tree. -/
+/-- The map read at the keys of `keys`, each value passed through `g`, as a tree. The values are computed here,
+once: the tree holds them, not a closure over `f`. -/
 def buildFrom (f : Π₀ key : K, V key) (keys : List K) : Π₀ key : K, V key :=
-  fromEntriesCached keyOf keyExact (keys.map fun key => ⟨key, f key⟩)
+  fromEntriesCached keyOf keyExact (keys.map fun key => ⟨key, g key (f key)⟩)
 
 omit [DecidableEq K] in
 theorem fromEntries_map_apply [DecidableEq K] (f : Π₀ key : K, V key) (keys : List K) (key : K) :
-    fromEntries (keys.map fun k => (⟨k, f k⟩ : Sigma V)) key = if key ∈ keys then f key else 0 := by
+    fromEntries (keys.map fun k => (⟨k, g k (f k)⟩ : Sigma V)) key =
+      if key ∈ keys then g key (f key) else 0 := by
   induction keys with
   | nil => rfl
   | cons head rest ih =>
@@ -37,19 +42,21 @@ theorem fromEntries_map_apply [DecidableEq K] (f : Π₀ key : K, V key) (keys :
         simp [fromEntries, DFinsupp.update]
       · simp [fromEntries, DFinsupp.update, same, ih]
 
+include identity in
 theorem buildFrom_apply (f : Π₀ key : K, V key) (keys : List K) (key : K) :
-    buildFrom keyOf keyExact f keys key = if key ∈ keys then f key else 0 := by
-  rw [buildFrom, fromEntriesCached_eq, fromEntries_map_apply]
+    buildFrom keyOf keyExact g f keys key = if key ∈ keys then f key else 0 := by
+  rw [buildFrom, fromEntriesCached_eq, fromEntries_map_apply, identity]
 
-/-- Rebuild a map from its own support: the same map (`compactBy_eq`), one tree lookup per read. -/
-def compactBy (f : Π₀ key : K, V key) : Π₀ key : K, V key :=
+/-- Rebuild a map from its own support, each value passed through `g` (an identity): the same map
+(`compactWith_eq`), one tree lookup per read. -/
+def compactWith (f : Π₀ key : K, V key) : Π₀ key : K, V key :=
   Trunc.lift
     (fun (support : {s : Multiset K // ∀ i, i ∈ s ∨ f i = 0}) =>
-      Quot.lift (buildFrom keyOf keyExact f)
+      Quot.lift (buildFrom keyOf keyExact g f)
         (fun left right (perm : List.Perm left right) => by
           apply DFinsupp.ext
           intro key
-          simp only [buildFrom_apply, perm.mem_iff])
+          simp only [buildFrom_apply keyOf keyExact g identity, perm.mem_iff])
         support.1)
     (fun left right => by
       rcases left with ⟨left, leftCovers⟩
@@ -60,8 +67,8 @@ def compactBy (f : Π₀ key : K, V key) : Π₀ key : K, V key :=
       | h rightKeys =>
       apply DFinsupp.ext
       intro key
-      show buildFrom keyOf keyExact f leftKeys key = buildFrom keyOf keyExact f rightKeys key
-      rw [buildFrom_apply, buildFrom_apply]
+      show buildFrom keyOf keyExact g f leftKeys key = buildFrom keyOf keyExact g f rightKeys key
+      rw [buildFrom_apply keyOf keyExact g identity, buildFrom_apply keyOf keyExact g identity]
       rcases leftCovers key with inLeft | zero
       · rcases rightCovers key with inRight | zero
         · simp [show key ∈ leftKeys from inLeft, show key ∈ rightKeys from inRight]
@@ -69,21 +76,28 @@ def compactBy (f : Π₀ key : K, V key) : Π₀ key : K, V key :=
       · split <;> split <;> simp [zero])
     f.support'
 
-@[simp] theorem compactBy_eq (f : Π₀ key : K, V key) : compactBy keyOf keyExact f = f := by
+@[simp] theorem compactWith_eq (f : Π₀ key : K, V key) : compactWith keyOf keyExact g identity f = f := by
   apply DFinsupp.ext
   intro key
-  unfold compactBy
+  unfold compactWith
   rcases f with ⟨toFun, support'⟩
   induction support' using Trunc.induction_on with
   | h support =>
   rcases support with ⟨keys, covers⟩
   induction keys using Quot.induction_on with
   | h keys =>
-  show buildFrom keyOf keyExact _ keys key = _
-  rw [buildFrom_apply]
+  show buildFrom keyOf keyExact g _ keys key = _
+  rw [buildFrom_apply keyOf keyExact g identity]
   rcases covers key with present | zero
   · simp [show key ∈ keys from present]
   · split <;> simp_all
+
+/-- `compactWith` with no value change. -/
+def compactBy (f : Π₀ key : K, V key) : Π₀ key : K, V key :=
+  compactWith keyOf keyExact (fun _ value => value) (fun _ _ => rfl) f
+
+@[simp] theorem compactBy_eq (f : Π₀ key : K, V key) : compactBy keyOf keyExact f = f :=
+  compactWith_eq keyOf keyExact _ _ f
 
 end Generic
 
@@ -92,7 +106,6 @@ end Generic
 open Minidregg.Kernel.World
 open Minidregg.Theory.ResourceCost (Lane)
 
-variable {R : Registry}
 
 def laneIndex : Lane → Nat
   | .incidences => 0 | .turnBytes => 1 | .memoryTouches => 2 | .witnessBytes => 3 | .proofWork => 4
@@ -132,22 +145,37 @@ theorem sysKey_injective : Function.Injective sysKey := by
     have same := laneIndex_injective (show laneIndex k = laneIndex l by omega)
     subst same; rfl
 
-/-- The World's cell map and system store rebuilt from their supports: the same World (`compact_eq`). -/
-def compact (w : World R Digest Digest) : World R Digest Digest :=
-  ⟨compactBy id Function.injective_id w.cells, compactBy sysKey sysKey_injective w.system⟩
+open Minidregg.Kernel.DeployedBridge (deployedR wireOf)
+open Minidregg.Compiler.StoreCodec (addressKey addressKey_injective)
 
-@[simp] theorem compact_eq (w : World R Digest Digest) : compact w = w := by
+/-- A deployed cell's store rebuilt from its support, keyed by its kind's canonical address bytes: the same cell. -/
+def compactCell (cell : Cell deployedR) : Cell deployedR :=
+  ⟨cell.kind, compactBy (addressKey (wireOf cell.kind)) (addressKey_injective (wireOf cell.kind)) cell.store⟩
+
+@[simp] theorem compactCell_eq (cell : Cell deployedR) : compactCell cell = cell := by
+  rcases cell with ⟨kind, store⟩
+  simp [compactCell]
+
+/-- The World's cell map, every cell's own store, and the system store, each rebuilt from its support: the same
+World (`compact_eq`). Cells are compacted while the map's tree is built, so no closure over the old map remains. -/
+def compact (w : World deployedR Digest Digest) : World deployedR Digest Digest :=
+  ⟨compactWith id Function.injective_id (fun _ slot => slot.map compactCell)
+      (fun _ slot => by cases slot <;> simp) w.cells,
+    compactBy sysKey sysKey_injective w.system⟩
+
+@[simp] theorem compact_eq (w : World deployedR Digest Digest) : compact w = w := by
   rcases w with ⟨cells, system⟩
   simp [compact]
 
 /-- Compact every 32nd height: a lookup then walks at most 32 heights' writes before its tree. -/
-def compactEvery (height : Nat) (w : World R Digest Digest) : World R Digest Digest :=
+def compactEvery (height : Nat) (w : World deployedR Digest Digest) : World deployedR Digest Digest :=
   if height % 32 = 0 then compact w else w
 
-@[simp] theorem compactEvery_eq (height : Nat) (w : World R Digest Digest) : compactEvery height w = w := by
+@[simp] theorem compactEvery_eq (height : Nat) (w : World deployedR Digest Digest) : compactEvery height w = w := by
   unfold compactEvery; split <;> simp
 
-#assert_axioms compactBy_eq
+#assert_axioms compactWith_eq
+#assert_axioms compactCell_eq
 #assert_axioms compact_eq
 #assert_axioms compactEvery_eq
 
