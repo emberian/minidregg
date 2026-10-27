@@ -37,6 +37,7 @@ import Kernel.DeployedRepresentsCheck
 import Kernel.DeployedCharge
 import Kernel.TurnLog
 import Kernel.DurableEngine
+import Compiler.WorldCompact
 
 namespace Minidregg.Compiler.DurableReceiverIO
 
@@ -858,8 +859,8 @@ def WorldTrack.advance {rootBytes : List UInt8 → Digest} {snapshot next : Data
           | none =>
           match admitted : Minidregg.Kernel.World.World.admit DeployedHistory.history w t with
           | .error reason => .lost s!"height {height'}: the World refuses the turn: {repr reason}"
-          | .ok w' => .held w' (by
-              rw [up]
+          | .ok w' => .held (WorldCompact.compactEvery height' w') (by
+              rw [WorldCompact.compactEvery_eq, up]
               exact HostRefinesWorld.represents_of_admitted DeployedBridge.bridge
                 DeployedHistory.history rep derived (DeployedCharge.mismatch_none charged) executed
                 admitted)
@@ -946,7 +947,7 @@ def foldRecords (rootBytes : List UInt8 → Digest) :
               | none =>
               match Minidregg.Kernel.World.World.admit DeployedHistory.history w t with
               | .error reason => .error s!"height {height + 1}: the World refuses the turn: {repr reason}"
-              | .ok w' => foldRecords rootBytes w' (height + 1) rest
+              | .ok w' => foldRecords rootBytes (WorldCompact.compactEvery (height + 1) w') (height + 1) rest
 
 /-- **The World of a resumed image**: the seed's genesis World, the log folded
 as turns, and the representation decided against the resumed snapshot. -/
