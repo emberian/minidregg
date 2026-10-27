@@ -53,6 +53,7 @@ import Kernel.SubjectKeyCommitmentAdoption
 import Kernel.ParticipantFactoryProvisioningReceiver
 import Kernel.FleetTurnReceiver
 import Kernel.PayBookReceiver
+import Kernel.PlatformInstallReceiver
 import Kernel.PayAssignmentReceiver
 import Kernel.RealmWellReceiver
 import Kernel.ClockTickReceiver
@@ -1216,6 +1217,10 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       (accepted : PayBookReceiver.AcceptedChange config.deployment config.profile
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
       NativeAdmission config opened (PayBookReceiver.intent accepted)
+  | platformInstall {ingress : PlatformInstallReceiver.DecodedIngress}
+      (accepted : PlatformInstallReceiver.AcceptedInstall config.deployment config.profile
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+      NativeAdmission config opened (PlatformInstallReceiver.intent accepted)
   | payAssignment {ingress : PayAssignmentReceiver.DecodedIngress}
       (accepted : PayAssignmentReceiver.AcceptedAssignment config.deployment config.profile
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
@@ -2440,6 +2445,13 @@ private def derive (config : Config) (opened : Opened config)
     | .ok accepted =>
         return .ok ⟨PayBookReceiver.intent accepted,
           .payBook accepted, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
+  if let some ingress := PlatformInstallReceiver.decodeIngress bytes then
+    match ← PlatformInstallReceiver.admitDecodedNative config.deployment config.profile
+        ⟨config.federation, height⟩ opened.durable config.signature ingress with
+    | .error reason => return .error s!"platform install refused: {repr reason}"
+    | .ok accepted =>
+        return .ok ⟨PlatformInstallReceiver.intent accepted,
+          .platformInstall accepted, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := PayAssignmentReceiver.decodeIngress bytes then
     match ← PayAssignmentReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height⟩ opened.durable config.signature ingress with

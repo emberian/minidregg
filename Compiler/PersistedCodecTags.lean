@@ -141,6 +141,7 @@ namespace Minidregg.Compiler.PersistedCodecTags
 @[persisted_codec_tag] abbrev platform_cell_id_v1 : String := "DREGG.PLATFORM.CELL.ID/v1"
 @[persisted_codec_tag] abbrev platform_v1 : String := "DREGG/PLATFORM/v1"
 @[persisted_codec_tag] abbrev platform_record_v1 : String := "DREGG/PLATFORM/RECORD/v1"
+@[persisted_codec_tag] abbrev platform_plan_v1 : String := "DREGG/PLATFORM/PLAN/v1"
 @[persisted_codec_tag] abbrev well : String := "DREGG/WELL/"
 @[persisted_codec_tag] abbrev pay_observation_v2 : String := "DREGG/PAY/OBSERVATION/v2"
 @[persisted_codec_tag] abbrev objective_activity_cell_state_v1 : String := "DREGG.OBJECTIVE.ACTIVITY.CELL.STATE/v3"

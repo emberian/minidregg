@@ -136,6 +136,34 @@ theorem Loaded.write_decodes {deployment : CanonicalCellRegistry.Deployment}
     decodeCell (loaded.write post).canonicalPostBytes = some post :=
   decodeCell_bytes post
 
+/-! ## The signing plan
+
+What the controller signs: the exact source-derived header over the command. The Host
+returns it from the plan operation (240) and assembles the signed ingress from it, one
+detached signature and, for a custodian rotation, the custodian's cosignature (241). -/
+structure SigningPlan where
+  domain : Digest
+  semantics : Digest
+  commandBytes : List UInt8
+  header : List UInt8
+  deriving DecidableEq, Repr
+
+def signingPlanStream : StreamCodec SigningPlan :=
+  StreamCodec.xmap (StreamCodec.product digestStream
+    (StreamCodec.product digestStream (StreamCodec.product bytesStream bytesStream)))
+    (fun plan => (plan.domain, plan.semantics, plan.commandBytes, plan.header))
+    (fun (domain, semantics, command, header) => ⟨domain, semantics, command, header⟩)
+    (by intro plan; cases plan; rfl)
+
+def signingPlanCodec : Minidregg.Theory.IndexedProgram.LawfulCodec SigningPlan :=
+  (StreamCodec.framed "DREGG/PLATFORM/PLAN/v1".toUTF8.toList signingPlanStream).toLawful
+
+theorem signingPlan_roundtrip (plan : SigningPlan) :
+    signingPlanCodec.decode (signingPlanCodec.encode plan) = some plan :=
+  signingPlanCodec.decode_encode plan
+
+#assert_axioms signingPlan_roundtrip
+
 #assert_axioms decodeCell_bytes
 #assert_axioms decodeCell_canonical
 #assert_axioms load_exact

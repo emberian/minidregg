@@ -7100,6 +7100,36 @@ def run (arguments : List String) : IO UInt32 := do
                             let opened ← sessionOpened pinnedConfig state
                             let outcome := NativeHost.payLookupLoaded pinnedConfig opened payload
                             return ((106 : UInt8), outcomeCodec.encode outcome)
+                        | 240 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let plan ← IO.ofExcept (NativeHost.platformPlanLoaded pinnedConfig opened payload)
+                            let bytes := PlatformCellDomain.signingPlanCodec.encode plan
+                            unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "platform plan exceeds host frame bound")
+                            return ((240 : UInt8), bytes)
+                        | 241 =>
+                            -- plan, then the controller's signature, then the custodian's
+                            -- cosignature (empty when the key does not rotate).
+                            let (planBytes, signed) ← splitPair payload
+                            let (signature, cosign) ← splitPair signed
+                            let some plan := PlatformCellDomain.signingPlanCodec.decode planBytes
+                              | throw (RequestRefusal.malformed "noncanonical platform plan")
+                            let ingress ← IO.ofExcept (NativeHost.platformAssemble plan signature
+                              (if cosign.isEmpty then none else some cosign))
+                            unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "platform ingress exceeds host frame bound")
+                            return ((241 : UInt8), ingress)
+                        | 242 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let outcome ← NativeHost.platformSubmitLoaded pinnedConfig
+                              (sessionConfirmed pinnedConfig state) opened payload
+                            -- Blind, as the pay submission (105): the operator's log keeps the reason.
+                            return ((242 : UInt8),
+                              outcomeCodec.encode (NativeHost.publicSubmissionOutcome outcome))
+                        | 243 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let outcome := NativeHost.platformLookupLoaded pinnedConfig opened payload
+                            return ((243 : UInt8), outcomeCodec.encode outcome)
                         | 193 =>
                             let (planBytes, signatureBytes) ← splitPair payload
                             let signatures ← decodeSignatures signatureBytes

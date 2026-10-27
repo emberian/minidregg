@@ -2026,6 +2026,63 @@ def payLookupLoaded (config : Config) (opened : Opened config) (bytes : List UIn
   | _, _, some (.error _) => refused .conflict "replay" "transaction identity conflict"
   | _, _, none => .absent
 
+/-! ## The platform cell (GENESIS-COUPLING L1): session operations 240–243
+
+The controller's install of a new platform record: plan, assembly, submission and a
+receipt-only lookup, as the pay quartet (103–106). -/
+
+/-- The signing plan for a platform install on one opened image. It discloses no decision;
+a signer key the authority cell does not hold is refused. -/
+def platformPlanLoaded (config : Config) (opened : Opened config) (commandBytes : List UInt8) :
+    Except String PlatformCellDomain.SigningPlan := do
+  let some command := PlatformInstallReceiver.commandCodec.decode commandBytes
+    | .error "noncanonical platform install command"
+  let header ← PlatformInstallReceiver.signingHeader config.deployment config.profile
+    ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable command
+  pure ⟨config.deployment.domain, config.profile.semantics, commandBytes,
+    CredentialSignedEnvelopeController.headerCodec.encode header⟩
+
+/-- Assembly transports the controller's detached signature and, for a custodian rotation,
+the current custodian's cosignature over the command bytes; submission rechecks both, the
+current law, the exact roots and the whole decision. -/
+def platformAssemble (plan : PlatformCellDomain.SigningPlan) (signature : List UInt8)
+    (cosign : Option (List UInt8)) : Except String (List UInt8) := do
+  check (decide (signature.length = 64)) "platform signature must be 64 bytes"
+  check (decide (∀ s ∈ cosign, s.length = 64)) "custodian cosignature must be 64 bytes"
+  check (PlatformInstallReceiver.commandCodec.decode plan.commandBytes).isSome
+    "noncanonical platform plan command"
+  let header ← need "noncanonical platform header"
+    (CredentialSignedEnvelopeController.headerCodec.decode plan.header)
+  let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
+  pure (PlatformInstallReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope, cosign⟩)
+
+def platformSubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config)
+    (bytes : List UInt8) : IO Outcome := do
+  match ← PlatformInstallReceiver.receiveLoaded config.deployment config.profile
+      ⟨config.federation, logicalHeight config opened.durable⟩ config.signature config.transport
+      opened.durable bytes with
+  | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
+  | .rejected reason => return refused .operationRejected "platform-install" s!"{repr reason}"
+  | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
+  | .durableRejected reason => return durableRefusal reason
+  | .contention => return .contention
+  | .unavailable detail => return .unavailable detail.toUTF8.toList
+  | .uncertain detail => return .uncertain detail.toUTF8.toList
+
+/-- Receipt-only historical lookup of a platform install. Absence never submits fresh work. -/
+def platformLookupLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) : Outcome :=
+  match PlatformInstallReceiver.decodeIngress bytes with
+  | none => refused .malformed "platform-install" "noncanonical signed ingress"
+  | some ingress =>
+      match PlatformInstallReceiver.replay config.deployment.domain config.profile.semantics
+          opened.durable ingress with
+      | none => .absent
+      | some (.error _) => refused .conflict "replay" "transaction identity conflict"
+      | some (.ok receipt) =>
+          match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
+          | some original => .confirmed .replayed original
+          | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
+
 /-- The public view of the pay cell (no assignment map). -/
 def payViewLoaded (config : Config) (opened : Opened config) : Except String PayCellDomain.View := do
   let pay ← need "pay cell unavailable" (PayCellDomain.load config.deployment opened.durable.snapshot)
