@@ -527,8 +527,9 @@ pub fn run(path: &Path) -> io::Result<()> {
     { return Err(refused("namespace bootstrap differs from root-registered world")); }
     let bwrap=std::env::var_os("MINI_SPK_BWRAP").ok_or_else(||refused("broker namespace bwrap absent"))?;
     let bwrap_sha256=std::env::var("MINI_SPK_BWRAP_SHA256").map_err(|_|refused("broker namespace bwrap pin absent"))?;
+    let controller=crate::namespace_identity::load_registered_controller(&registry)?;
     crate::namespace_identity::prepare_root_handles(path,&registry.grains_root,&store,&grain)?;
-    crate::namespace_identity::enter(Path::new(&bwrap),&bwrap_sha256,operator.uid,operator.gid,app.uid,app.gid)?;
+    crate::namespace_identity::enter_registered(Path::new(&bwrap),&bwrap_sha256,operator.uid,operator.gid,app.uid,app.gid,controller.as_ref())?;
     let (parent, child) = UnixStream::pair()?;
     let pid = unsafe { libc::fork() };
     if pid < 0 {

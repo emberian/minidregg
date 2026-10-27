@@ -78,14 +78,21 @@ cargo test -p minidregg-resource-client stop_inspection
 
 `scripts/oracle-stop-inspection-probe.py` compares a cold inspection with two
 served reads of the exact same inputs, requires identical response bytes, and
-checks malformed input, a changed claim and optional public-socket denial. It
-records times and source/config hashes. Run it against an isolated qualification
+checks malformed input, a changed claim and required public-socket denial,
+then requires the original valid inspection to succeed again. It records times and source/config hashes. Run it against an isolated qualification
 Store with the exact new Host pinned at its private endpoint. It does not submit
-a lifecycle operation or mutate a retained Store. To check refresh, make one
-separately authorized disposable append and repeat the comparison; retain the
-Host trace and both reports. Never replace a retained Store's pinned executable
-to perform this comparison.
+a lifecycle operation or mutate a retained Store. To check refresh, inspect one
+completed STOP, then START and STOP the same disposable app again while keeping
+the resident Host alive. Compare the new plan and claim: an old verified history
+cannot contain that new claim. On this post-append pass, supply the previous
+canonical claim with `--mismatched-committed`; the mixed plan/claim must refuse,
+and the report must say `canonical_wrong_claim_checked: true`. This argument
+is optional only so the initial warm-up can run before a second claim exists.
+Retain both reports and the accepted append evidence. Never replace a retained
+Store's pinned executable to perform this comparison.
 
-Source registry and diff checks pass. Linux build, receiving comparisons and
-measured speedup are pending in the combined qualification lane; removing the
-two call sites alone is not a measured latency result.
+Source registry and diff checks pass. On the isolated Linux snapshot, the three
+STOP inspection Rust tests and one resource-client operator/public routing test
+pass. Lean build, receiving comparisons and measured speedup are pending in the
+combined qualification lane; removing cold subprocess calls alone is not a
+measured latency result.
