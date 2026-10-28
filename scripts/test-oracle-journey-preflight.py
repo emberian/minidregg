@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 @unittest.skipUnless(sys.platform.startswith('linux'), 'journey uses Linux stat and custody paths')
 class PreflightTests(unittest.TestCase):
     def test_stop_receipt_must_match_selected_host_before_world_creation(self):
-        for case in ('matching', 'old-host', 'failed'):
+        for case in ('matching', 'old-host', 'failed', 'named-acl', 'default-acl'):
             with self.subTest(case=case), tempfile.TemporaryDirectory(prefix='oracle-preflight-', dir=ROOT) as tmp:
                 root = Path(tmp)
                 base = root / 'base'
@@ -38,6 +38,13 @@ class PreflightTests(unittest.TestCase):
                     'host_sha256': '0' * 64 if case == 'old-host' else hashlib.sha256(host.read_bytes()).hexdigest(),
                 }))
                 run = root / 'run'
+                if case == 'named-acl':
+                    # Named self adds no other principal; it still carries the
+                    # extended ACL that controller-stage must not rewrite.
+                    subprocess.run(['setfacl', '-m', f'u:{os.getuid()}:--x', str(root)], check=True)
+                elif case == 'default-acl':
+                    subprocess.run(['setfacl', '-m', 'd:u::rwx,d:g::---,d:o::---', str(root)], check=True)
+
                 env = {k: v for k, v in os.environ.items() if not k.startswith('ORACLE_')}
                 # A matching receipt reaches the next independent refusal. This
                 # control avoids ever starting native work or creating a Store.
@@ -46,7 +53,9 @@ class PreflightTests(unittest.TestCase):
                     str(base), str(own), str(run), str(spk), str(source), str(inventory)],
                     env=env, capture_output=True, text=True, timeout=15)
                 self.assertEqual(result.returncode, 1, result.stderr)
-                expected = 'explicit browser port required' if case == 'matching' else 'STOP benchmark must qualify the selected Host binary'
+                expected = ('private ancestor has extended ACL' if case.endswith('-acl') else
+                            'explicit browser port required' if case == 'matching' else
+                            'STOP benchmark must qualify the selected Host binary')
                 self.assertIn(expected, result.stderr)
                 self.assertFalse(run.exists())
 

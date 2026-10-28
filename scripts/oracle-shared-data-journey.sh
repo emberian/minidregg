@@ -115,14 +115,25 @@ PYRESUME
     sha256sum -c "$run/binary-sha256.txt" >"$run/resume-binary-check.txt"
   fi
 fi
+for tool in jq curl python3 sha256sum timeout; do command -v "$tool" >/dev/null || fail "missing $tool"; done
+[[ $mode != new ]] || command -v getfacl >/dev/null || fail 'missing getfacl'
 ancestor=$(dirname "$run")
 while :; do
   [[ -d $ancestor && ! -L $ancestor ]] || fail "ancestor absent or linked: $ancestor"
-  (( (8#$(stat -c '%a' "$ancestor") & 8#022) == 0 )) || fail "writable ancestor: $ancestor"
+  ancestor_mode=$(stat -c '%a' "$ancestor")
+  (( (8#$ancestor_mode & 8#022) == 0 )) || fail "writable ancestor: $ancestor"
+  # controller-stage grants traversal only on private ancestors. Its existing
+  # guard refuses extended ACLs rather than changing another world's access.
+  # Detect that same conflict before genesis or a large data publication.
+  if [[ $mode == new ]] && (( (8#$ancestor_mode & 1) == 0 )); then
+    ancestor_acl=$(getfacl -c -p -n -- "$ancestor") || fail "cannot inspect ancestor ACL: $ancestor"
+    if printf '%s\n' "$ancestor_acl" | awk '/^(mask:|default:|(user|group):[^:]+:)/ { found=1 } END { exit !found }'; then
+      fail "private ancestor has extended ACL: $ancestor; use an independent run root outside preserved worlds"
+    fi
+  fi
   [[ $ancestor == / ]] && break
   ancestor=$(dirname "$ancestor")
 done
-for tool in jq curl python3 sha256sum timeout; do command -v "$tool" >/dev/null || fail "missing $tool"; done
 [[ -f $spk && ! -L $spk && -f $inventory && ! -L $inventory && -d $source && ! -L $source ]] || fail 'inputs absent or linked'
 [[ -f $benchmark && ! -L $benchmark ]] || fail 'qualified STOP benchmark absent or linked'
 # Refuse a receipt from an older Host before creating a Store or copying data.
