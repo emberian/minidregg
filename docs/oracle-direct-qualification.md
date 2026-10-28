@@ -1,7 +1,7 @@
 # Oracle direct appliance qualification
 
-The direct agent, browser and restart journey remains in progress. Q4 replaces
-Q3 with a fresh world; it will use the coherent `349e59ef1` Host and consent
+The direct agent, browser and restart qualification is incomplete. Q4 replaced
+Q3 with a fresh world using the coherent `349e59ef1` Host and consent
 provider, the qualified `6c7a9b6a78cf` Mini, and runtime `76ce018ebd84` from
 `7947ea1e7`. These are explicit tested overlays, not a claim that all of main
 was built together. The standard eight-controller profile is sufficient here.
@@ -18,16 +18,21 @@ app volumes and removed its controller and physical namespace
 The removal receipt fences that controller identity against silent reuse;
 we will not reconstruct its authority by copying files back.
 
-The logical Store, failed attempts and native-state archive remain under
+Before the host was deleted, the logical Store, failed attempts and native-state
+archive were retained under
 `/build/lanes/oracle-v7-q3-20261028/oracle-run`. The last controller export and
 scoped cleanup records are under `/build/lanes/oq3-activation-20261028`.
 SQLite's read-only quick check passed after removal. The controller archive
 retains its receipt, stage and consent anchors, not a restorable full home.
 Q3 is incomplete: no paid agent query or browser pass is claimed.
 
-Q4's run marker and current physical identity live under
-`/build/lanes/o7q4-20261028`. It is owned by the Oracle qualification lane;
-stopped services during repair do not make its world disposable.
+Q4 created logical Store `26aaa9ecdb7c66e9` in 91.96 seconds under
+`/build/lanes/o7q4-20261028`. Its physical installer result was not retrieved.
+The runner subsequently showed failed with no PID. Then human-approved deletion
+of `dregg-build` ended the qualification environment; no reconnection or host
+recreation is pending. Remote paths above are last observed locations, not a
+claim that those files survived server deletion. Local source and checkpoints
+remain; the parent lane is checking rescue artifacts before choosing a new host.
 
 Q4 preflight pins the prior same-Host native J14 STOP. Its own cold/served
 inspection comparison runs immediately after its first STOP, before a successor
