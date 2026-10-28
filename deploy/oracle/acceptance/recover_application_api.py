@@ -7,6 +7,8 @@ This harness preserves evidence; it never edits a native journal or Store.
 import base64
 import hashlib
 import json
+import re
+import tempfile
 from pathlib import Path
 import shutil
 import sys
@@ -208,7 +210,9 @@ def checked_boundary(run, observations, request_id):
             and manager['Id'] == start['unit'] and manager['MainPID'] == '0'
             and manager['ActiveState'] in ('inactive', 'failed') and manager['Job'] in ('', '0'),
             'retained app incarnation is not physically stopped')
-    native = app / 'agent-oracle-agent-v1-attempts'
+    route_name=read(root/'registered-agent-route.json')['registration']['name']
+    require(isinstance(route_name,str) and re.fullmatch(r'[A-Za-z0-9_-]{1,48}',route_name), 'registered route name differs')
+    native = app / ('agent-'+route_name+'-attempts')
     if api is None:
         require(not native.exists() or not list(native.iterdir()), 'startup refusal has resident API evidence')
     else:
@@ -310,8 +314,95 @@ def check_native(directory, terminal=False):
     return proof
 
 
+def checked_stopped_resume(run, directory, observations):
+    """Resume only an audited original call whose native STOP finished before START."""
+    require(directory == recovery_directories(run)[-1], 'resume must name latest API recovery')
+    prepared = read(directory/'prepared.json'); b = prepared['boundary']
+    require(b.get('kind') == 'unreserved-api', 'resume requires native unreserved API recovery')
+    proof = check_native(directory, terminal=True)
+    require(read(directory/'exit.json') == {'execution_exit':143,'cleanup_exit':0,'namespace_preserved':True},
+            'resume requires recorded operator interruption and successful cleanup')
+    require((directory/'phases/retire-incarnation.started.json').is_file()
+            and not any((directory/name).exists() for name in
+                ('phases/retire-incarnation.completed.json','phases/successor-start.started.json',
+                 'successor-start.json','resumption')), 'resume boundary has already advanced')
+    for entry in [*prepared['preserved'].values(), *prepared['archived'].values()]:
+        require(sha(Path(entry['path'])) == entry['sha256'], 'preserved original evidence changed')
+    for line in (directory/'recovery-input-sha256.txt').read_text().splitlines():
+        digest,name=line.split(None,1); require(sha(Path(name))==digest,'original recovery source changed')
+    status=read(observations/'controller-status.json')
+    export=read(observations/'controller-export.json'); journal=json.loads(exported(export,'journal.json'))
+    terminal=read(directory/'terminal-journal.json')
+    active_config=run/'agent-lifetime/controller-active-initial.json'
+    retained_config=Path(prepared['archived'].get(str(active_config),{'path':str(active_config)})['path'])
+    require(status['store']==b['store'] and status['stopped'] is True
+            and status['runtimeSha256']==sha(directory/'bin/grain-runtime')
+            and status['controllerConfigSha256']==sha(retained_config),
+            'stopped controller pin differs')
+    require(journal['binding']==terminal['binding'] and proof in journal['reconciliationLog']
+            and journal['applicationApiHistory']==terminal['applicationApiHistory']
+            and journal['foregroundHistory']==terminal['foregroundHistory']
+            and journal['connection'] in ('fenced','detached')
+            and all(journal.get(k) is None for k in ('foregroundAttempt','applicationApiAttempt','parentHold',
+                'dispatchAttempt','dispatchPending','dispatchHold','toolPending','toolHold','pending','child',
+                'birthPending','birthOperation','providerPending','providerHold','providerAttempt','settlementDue',
+                'workspaceAttempt','roomAttempt','workspaceBirth')) and not journal.get('unresolvedExternal'),
+            'stopped controller custody changed after audit')
+    state=Path(read(run/'world/evidence/profile-result.json')['stateRoot'])
+    app=state/'apps/9101'; old=app/('g'+b['old_generation']); record=read(old/'record.json')
+    stop=read(directory/'stop.json')
+    manager=dict(line.split('=',1) for line in (observations/'manager.txt').read_text().splitlines() if '=' in line)
+    require(stop['protocol']=='mini-spk-grain-stop-v1' and stop['app']=='9101'
+            and stop['generation']==b['old_generation'] and stop['unit']==b['old_record']['identity']['unit']
+            and record['phase']=='stopped' and record['identity']==b['old_record']['identity']
+            and record['invocation_id']==b['old_record']['invocation_id']
+            and manager['Id']==stop['unit'] and manager['MainPID']=='0'
+            and manager['ActiveState'] in ('inactive','failed') and manager['Job'] in ('','0'),
+            'native STOP and physical stopped identity differ')
+    require(all(not p.name[1:].isdigit() or int(p.name[1:])<=int(b['old_generation']) for p in app.glob('g*')),
+            'successor generation already exists')
+    anchors=list((old/'stop-completion').rglob('receipt-anchor.json'))
+    require(anchors and all(read(p).get('eventId') and read(p).get('worldRoot') for p in anchors),
+            'native STOP receipt anchors absent')
+    require(not any((run/name).exists() for name in ('browser','world/evidence/post-a1.stdout','agent-lifetime/probe-restart'))
+            and not (run/'agent-lifetime/probe/discover-core-query.request-id').exists(),
+            'later qualification already began')
+    return {'schema':'mini-oracle-api-stopped-resumption-v1','store':b['store'],
+            'request_id':b['request_id'],'old_generation':b['old_generation'],
+            'original_prepared_sha256':sha(directory/'prepared.json'),'stop_sha256':sha(directory/'stop.json'),
+            'journal_sha256':export['files']['journal.json']['sha256'],'runtime_sha256':status['runtimeSha256'],
+            'retransmit':False}
+
+
+def prepare_stopped_resume(run, directory, observations):
+    value=checked_stopped_resume(run,directory,observations)
+    evidence={}
+    for phase in (directory/'phases').glob('*.completed.json'):
+        for name,digest in read(phase)['evidence'].items():
+            require(sha(Path(name))==digest,'prior recovery phase evidence changed')
+            evidence[name]=digest
+    output=directory/'resumption'
+    staging=Path(tempfile.mkdtemp(prefix='resumption-prepared.',dir=directory))
+    shutil.copytree(observations,staging/'observations')
+    preserved={}
+    for name,digest in evidence.items():
+        relative=Path('prior-evidence')/hashlib.sha256(name.encode()).hexdigest()
+        target=staging/relative; target.parent.mkdir(mode=0o700,exist_ok=True)
+        shutil.copyfile(name,target)
+        require(sha(target)==digest,'copied recovery phase evidence changed')
+        preserved[name]={'path':str(output/relative),'sha256':digest}
+    value['preserved']=preserved
+    shutil.copyfile(directory/'exit.json',staging/'prior-exit.json')
+    (staging/'prepared.json').write_text(json.dumps(value,indent=2)+'\n')
+    require(not output.exists(),'resumption was concurrently prepared')
+    staging.rename(output)
+    print(output)
+
+
 if __name__ == '__main__':
     try:
+        if len(sys.argv) == 5 and sys.argv[1] == '--resume-after-stop':
+            prepare_stopped_resume(*map(Path,sys.argv[2:])); raise SystemExit(0)
         if len(sys.argv) == 3 and sys.argv[1] == '--previous':
             print(previous_execution(Path(sys.argv[2])))
             raise SystemExit(0)

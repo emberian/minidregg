@@ -8,7 +8,7 @@ umask 077
 invocation_args=("$@")
 usage() {
   cat <<'HELP'
-usage: scripts/oracle-shared-data-journey.sh [--resume|--continue-controller|--continue-session|--continue-activation|--recover-application-api REQUEST_ID|--recover-readiness|--continue-checkpoint CHECKPOINT_JSON|--recover-foreground PLAN_JSON] BASE_BIN OWN_BIN RUN_ROOT SIGNED_RUNTIME_SPK DATA_SOURCE INVENTORY_JSON
+usage: scripts/oracle-shared-data-journey.sh [--resume|--continue-controller|--continue-session|--continue-activation|--recover-application-api REQUEST_ID|--recover-readiness|--resume-api-recovery DIRECTORY|--continue-checkpoint CHECKPOINT_JSON|--recover-foreground PLAN_JSON] BASE_BIN OWN_BIN RUN_ROOT SIGNED_RUNTIME_SPK DATA_SOURCE INVENTORY_JSON
 
 Linux operator account with user systemd/linger, subordinate UID/GID allocation,
 passwordless access to deploy/spk-host/install-user-world, bwrap, jq, curl, python3.
@@ -26,6 +26,8 @@ with a durable backup, identical stopped state, and no repair or tool attempt.
 --continue-activation preserves an admitted session/grant and failed pre-commit
 route enrollment. It upgrades the stopped runtime, supervises the dead app into
 a native STOP and successor START, then enrolls a newly checked route.
+--resume-api-recovery resumes only a native-audited call whose STOP completed before
+any successor START; it preserves the interrupted execution and adopts checked source.
 --recover-readiness preserves the exact signed attached-idle readiness refusal before
 any tool request exists, then uses the same native stopped-controller recovery.
 --continue-checkpoint accepts an explicitly sealed unstarted phase boundary;
@@ -54,6 +56,7 @@ case ${1:-} in
   --continue-controller) mode=continue-controller; shift ;;
   --continue-session) mode=continue-session; shift ;;
   --continue-activation) mode=continue-activation; shift ;;
+  --resume-api-recovery) mode=recover-application-api; api_recovery_resume=${2:?completed STOP recovery directory required}; shift 2 ;;
   --recover-readiness) mode=recover-application-api; api_recovery_request=--readiness; shift ;;
   --recover-application-api) mode=recover-application-api; api_recovery_request=${2:?request ID required}; shift 2 ;;
   --continue-checkpoint) mode=continue-checkpoint; checkpoint=${2:?checkpoint required}; shift 2 ;;

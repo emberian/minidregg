@@ -22,6 +22,7 @@ class ApplicationRecoveryBoundary(unittest.TestCase):
             path.write_text(json.dumps(value)); return path
         self.save = save
         save('world-identity.json', {'store': 'test-store'})
+        save('agent-lifetime/registered-agent-route.json', {'registration':{'name':'oracle-agent-v1'}})
         save('continuations/activation-successor-1/exit.json', {'execution_exit': 2, 'cleanup_exit': 0, 'namespace_preserved': True})
         save('continuations/activation-successor-1/successor-start.json', {'generation':'4', 'unit':'test.service'})
         request_path = self.run / 'agent-lifetime/probe/discover-core-query.request-id'
@@ -112,6 +113,66 @@ class ApplicationRecoveryBoundary(unittest.TestCase):
         self.save('continuation/terminal-journal.json',journal)
         recovery.check_native(output,terminal=True)
         return output, journal
+
+    def stopped_resumption_fixture(self):
+        output,journal=self.native_terminal()
+        directory=self.run/'continuations/application-api-recovery-1'; output.rename(directory)
+        prepared=recovery.read(directory/'prepared.json'); prepared.update(preserved={},archived={})
+        active=self.run/'agent-lifetime/controller-active-initial.json'
+        archived=directory/'prior-controller.json'; active.rename(archived)
+        prepared['archived'][str(active)]={'path':str(archived),'sha256':recovery.sha(archived)}
+        self.save(str((directory/'prepared.json').relative_to(self.run)),prepared)
+        (directory/'recovery-input-sha256.txt').write_text('')
+        self.save('continuations/application-api-recovery-1/exit.json',{'execution_exit':143,'cleanup_exit':0,'namespace_preserved':True})
+        self.save('continuations/application-api-recovery-1/phases/retire-incarnation.started.json',{'state':'started'})
+        self.save('continuations/application-api-recovery-1/stop.json',{'protocol':'mini-spk-grain-stop-v1','app':'9101','generation':'4','unit':'test.service'})
+        runtime=directory/'bin/grain-runtime'; runtime.parent.mkdir(); runtime.write_bytes(b'qualified runtime')
+        status=recovery.read(self.observations/'controller-status.json');status['runtimeSha256']=recovery.sha(runtime)
+        self.save('observations/controller-status.json',status)
+        journal['connection']='detached'
+        raw=json.dumps(journal).encode()
+        self.save('observations/controller-export.json',{'files':{'journal.json':{'base64':base64.b64encode(raw).decode(),'sha256':hashlib.sha256(raw).hexdigest()}}})
+        record=recovery.read(self.run/'state/apps/9101/g4/record.json'); record['phase']='stopped'
+        self.save('state/apps/9101/g4/record.json',record)
+        self.save('state/apps/9101/g4/stop-completion/receipt-anchor.json',{'eventId':'native','worldRoot':'root'})
+        (self.run/'agent-lifetime/probe/discover-core-query.request-id').unlink()
+        return directory
+
+    def test_stopped_resumption_preserves_native_terminal_and_rejects_successor(self):
+        directory=self.stopped_resumption_fixture()
+        original=(directory/'native-recovery.json').read_bytes()
+        result=recovery.checked_stopped_resume(self.run,directory,self.observations)
+        self.assertFalse(result['retransmit'])
+        self.assertEqual((directory/'native-recovery.json').read_bytes(),original)
+        self.assertFalse((directory/'resumption').exists())
+        (self.run/'state/apps/9101/g6').mkdir()
+        with self.assertRaisesRegex(ValueError,'successor generation'):
+            recovery.checked_stopped_resume(self.run,directory,self.observations)
+
+    def test_stopped_resumption_rejects_live_or_uncompleted_stop(self):
+        directory=self.stopped_resumption_fixture()
+        manager=self.observations/'manager.txt'; old=manager.read_text();manager.write_text(old.replace('MainPID=0','MainPID=1'))
+        with self.assertRaisesRegex(ValueError,'physical stopped'):
+            recovery.checked_stopped_resume(self.run,directory,self.observations)
+        manager.write_text(old)
+        self.save('continuations/application-api-recovery-1/stop.json',{'protocol':'mini-spk-grain-stop-v1','app':'9101','generation':'2','unit':'test.service'})
+        with self.assertRaisesRegex(ValueError,'physical stopped'):
+            recovery.checked_stopped_resume(self.run,directory,self.observations)
+
+    def test_stopped_resumption_preflight_failure_does_not_consume_boundary(self):
+        directory=self.stopped_resumption_fixture()
+        self.save('continuations/application-api-recovery-1/phases/services.completed.json',
+            {'evidence':{str(self.run/'world-identity.json'):'bad-digest'}})
+        with self.assertRaisesRegex(ValueError,'phase evidence changed'):
+            recovery.prepare_stopped_resume(self.run,directory,self.observations)
+        self.assertFalse((directory/'resumption').exists())
+        self.assertEqual(list(directory.glob('resumption-prepared.*')),[])
+
+    def test_recovery_selects_current_registered_successor_route(self):
+        original=self.run/'state/apps/9101/g4/agent-oracle-agent-v1-attempts'
+        original.rename(original.with_name('agent-oracle-agent-v2-attempts'))
+        self.save('agent-lifetime/registered-agent-route.json',{'registration':{'name':'oracle-agent-v2'}})
+        self.assertFalse(self.check()['retransmit'])
 
     def test_native_proof_and_audited_terminal_do_not_claim_an_answer(self):
         output, journal = self.native_terminal()

@@ -707,7 +707,78 @@ world_recovery_operator_upgrades() {
   fi
 }
 
+world_resume_api_recovery() {
+  local fresh resumed old_generation expected_runtime
+  op_uid=$(id -u)
+  export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$op_uid} BIN=$run/bin
+  store=$(jq -er '.store | select(test("^[0-9a-f]{16}$"))' "$run/world-identity.json")
+  helper=$(jq -er .helper "$run/world-identity.json")
+  export GRAINS_ROOT=/var/lib/mini-spk-worlds/$store BROKER_SOCKET=/var/lib/mini-spk-worlds/$store/runtime-$store/broker.sock
+  [[ $(jq -er .root "$run/world-identity.json") == "$GRAINS_ROOT" && $helper =~ ^/usr/local/libexec/mini-spk-volume-helper-[0-9a-f]{16}$ ]] || fail 'API resumption namespace differs'
+  installer=$repo/deploy/spk-host/install-user-world
+  units=$XDG_RUNTIME_DIR/systemd/user
+  config=$run/world/store/base/workroom/deployment/pinned-config.json
+  profile=$(jq -er .profilePath "$run/world/evidence/profile-result.json")
+  state=$(jq -er .stateRoot "$run/world/evidence/profile-result.json")
+  expected_runtime=${ORACLE_RECOVERY_RUNTIME_SHA256:?qualified runtime required}
+  [[ $expected_runtime =~ ^[0-9a-f]{64}$ && $(sha256sum "$own/grain-runtime" | cut -d ' ' -f1) == "$expected_runtime" ]] || fail 'resumption runtime pin differs'
+  [[ ${ORACLE_SOCKET_RECLAIM_BIN:-} == /* && ${ORACLE_SOCKET_RECLAIM_SHA256:-} =~ ^[0-9a-f]{64}$
+      && $(sha256sum "$ORACLE_SOCKET_RECLAIM_BIN" | cut -d ' ' -f1) == "$ORACLE_SOCKET_RECLAIM_SHA256" ]] || fail 'resumption reclaimer pin differs'
+  [[ $api_recovery_resume == "$run/continuations/application-api-recovery-"* && ${api_recovery_resume##*-} =~ ^[0-9]+$ ]] || fail 'resumption directory differs'
+  [[ -f $repo/scripts/application-payer-successor.py ]] || fail 'native custody successor helper absent'
+  sha256sum -c "$run/binary-sha256.txt" >"$run/api-resumption-original-binary-check.txt"
+  fresh=$(mktemp -d "$run/api-resumption-preflight.XXXXXXXX")
+  timeout 120 sudo -n -- "$installer" controller-export "$store" "$helper" >"$fresh/controller-export.json"
+  timeout 120 sudo -n -- "$installer" controller-status "$store" "$helper" >"$fresh/controller-status.json"
+  systemctl --user show "$(jq -er .boundary.old_record.identity.unit "$api_recovery_resume/prepared.json")" -p Id -p MainPID -p ActiveState -p Job >"$fresh/manager.txt"
+  [[ ! -S $BROKER_SOCKET && ! -S $run/world/sock/operator/host.sock && ! -S $run/world/sock/participant/host.sock ]] || fail 'API resumption services are not stopped'
+  world_source_manifest >"$fresh/source-input-sha256.txt"
+  sha256sum "$own/grain-runtime" "$ORACLE_SOCKET_RECLAIM_BIN" "$repo/scripts/application-payer-successor.py" >>"$fresh/source-input-sha256.txt"
+  resumed=$(python3 -B "$repo/deploy/oracle/acceptance/recover_application_api.py" --resume-after-stop "$run" "$api_recovery_resume" "$fresh")
+  [[ $resumed == "$api_recovery_resume/resumption" ]] || fail 'resumption output differs'
+  continuation=$api_recovery_resume
+  mkdir -m700 "$resumed/bin"
+  install -m500 "$own/grain-runtime" "$resumed/bin/grain-runtime"
+  controller_runtime=$resumed/bin/grain-runtime
+  cp "$fresh/source-input-sha256.txt" "$resumed/source-input-sha256.txt"
+  sha256sum "$controller_runtime" >>"$resumed/source-input-sha256.txt"
+  preserve_existing_exit=0 configured=1 controller_created=1 controller_staged=1
+  world_phase_record resume-runtime-upgrade started
+  timeout 120 sudo -n -- "$installer" controller-runtime-upgrade "$store" "$helper" "$controller_runtime" >"$resumed/runtime-upgrade.json"
+  jq -e --arg expected "$expected_runtime" --arg previous "$(jq -er .runtime_sha256 "$resumed/prepared.json")" '.runtimeSha256 == $expected and .previousRuntimeSha256 == $previous' "$resumed/runtime-upgrade.json" >/dev/null || fail 'resumption runtime upgrade differs'
+  world_phase_record resume-runtime-upgrade completed "$resumed/runtime-upgrade.json" "$resumed/prepared.json" "$resumed/prior-exit.json"
+  cp "$fresh/controller-status.json" "$resumed/public-listener.json"
+  jq -e --arg binary "$GRAINS_ROOT/controller/public-listener/mini" --arg digest "$(sha256sum "$BIN/mini" | cut -d ' ' -f1)" --arg socket "$run/world/sock/participant/host.sock" '.publicListener.binary == $binary and .publicListener.binarySha256 == $digest and .publicListener.socket == $socket and .publicListener.controllerUid == .controllerUid' "$resumed/public-listener.json" >/dev/null || fail 'resumption listener differs'
+  export SPK_PUBLIC_LISTENER_RECEIPT=$resumed/public-listener.json
+  world_phase_record resume-services started
+  systemctl --user start "mini-spk-broker@$store.service"
+  for ((i=0;i<100;i++)); do [[ ! -S $BROKER_SOCKET ]] || break; sleep .1; done
+  [[ -S $BROKER_SOCKET && $(stat -c '%u:%a' "$BROKER_SOCKET") == "$op_uid:600" ]] || fail 'resumption broker differs'
+  "$journey" phase "$run/world" services >"$resumed/services.log" 2>&1
+  world_phase_record resume-services completed "$run/world/sock/operator.pid.identity.json" "$run/world/sock/participant.pid.identity.json"
+  world_phase_record payer-route-successor started
+  timeout 120 sudo -n -- "$installer" controller-status "$store" "$helper" >"$resumed/controller-status.json"
+  timeout 120 sudo -n -- "$installer" controller-journal "$store" "$helper" >"$resumed/controller-journal.json"
+  timeout 120 sudo -n -- "$installer" controller-export "$store" "$helper" >"$resumed/controller-export.json"
+  jq -n --arg root "$run/agent-lifetime" --arg allocation "$run/agent-lifetime/allocation.json" --arg profile "$profile" --arg host "$BIN/minidregg-host" --arg config "$config" --arg spkHost "$BIN/spk-host" --arg repo "$repo" --arg status "$resumed/controller-status.json" --arg journal "$resumed/controller-journal.json" --arg stop "$continuation/stop.json" --arg evidence "$resumed/controller-export.json" --arg output "$run/agent-lifetime/repair-payer-custody" '{protocol:"mini-application-payer-successor-v1",attachmentRoot:$root,allocation:$allocation,profile:$profile,host:$host,hostConfig:$config,spkHost:$spkHost,correctedRepo:$repo,controllerStatus:$status,controllerJournal:$journal,controllerEvidence:$evidence,inspectionMode:"detached",stopReceipt:$stop,outputDir:$output,successorName:"oracle-agent-v2"}' >"$resumed/payer-successor-request.json"
+  timeout 1800 python3 -B "$repo/scripts/application-payer-successor.py" "$resumed/payer-successor-request.json" >"$resumed/payer-successor.stdout" 2>"$resumed/payer-successor.stderr"
+  [[ $(cat "$resumed/payer-successor.stdout") == "$run/agent-lifetime/repair-payer-custody/complete.json" ]] || fail 'payer successor output differs'
+  jq -e '.protocol == "mini-application-payer-successor-complete-v1" and .app == "9101" and .successor == "oracle-agent-v2" and .grantChanged == false and .sessionChanged == false' "$run/agent-lifetime/repair-payer-custody/complete.json" >/dev/null || fail 'payer successor receipt differs'
+  world_phase_record payer-route-successor completed "$resumed/payer-successor-request.json" "$run/agent-lifetime/repair-payer-custody/complete.json" "$run/agent-lifetime/registered-agent-route.json"
+  old_generation=$(jq -er .boundary.old_generation "$continuation/prepared.json")
+  cp "$state/apps/9101/g$old_generation/record.json" "$continuation/old-record-after-stop.json"
+  cp -a "$state/apps/9101/g$old_generation/stop-completion" "$continuation/stop-completion"
+  world_reclaim_stopped_agent_socket 9101 "$old_generation" api-recovery-${continuation##*-}
+  world_phase_record retire-incarnation completed "$continuation/stop.json" "$continuation/old-record-after-stop.json" "$run/native-agent-socket-reclaims/api-recovery-${continuation##*-}/result.json"
+  world_phase_record successor-start started
+  timeout 1800 "$BIN/spk-host" grain start "$profile" 9101 >"$continuation/successor-start.json" 2>"$continuation/successor-start.stderr"
+  jq -e --arg old "$old_generation" '.protocol == "mini-spk-grain-start-v1" and .app == "9101" and (.generation | tonumber) > ($old | tonumber) and .startAction.kind == "continue" and .completion.completionReceipt.eventId' "$continuation/successor-start.json" >/dev/null || fail 'resumption successor differs'
+  world_phase_record successor-start completed "$continuation/successor-start.json"
+  world_phase_record enrollment started
+}
+
 world_recover_application_api() {
+  if [[ -n ${api_recovery_resume:-} ]]; then world_resume_api_recovery; return; fi
   local fresh expected_runtime current_unit previous_execution reclaim_label
   op_uid=$(id -u)
   export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$op_uid} BIN=$run/bin
