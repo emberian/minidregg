@@ -628,8 +628,18 @@ def application_api_recovery_attempt(run, directory, require):
             and all(read(path).get('eventId') and read(path).get('worldRoot') for path in stops))
     journal = prior_journal if startup else read(directory / 'terminal-journal.json')
     binding = hashlib.sha256(json.dumps(journal['binding'],sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()).hexdigest()
-    enrollment = read(original(run / 'agent-lifetime/enrollment-initial/request.json'))
-    require('api_recovery_successor_binding_enrolled', enrollment['expectedBindingSha256'] == binding)
+    read_recovery=run/'continuations'/('activation-read-'+start['generation'])
+    interrupted_enrollment=read_recovery.is_dir()
+    if interrupted_enrollment:
+        recovered=read(read_recovery/'prepared.json')
+        require('api_recovery_preserved_pre_enrollment_refusal',
+            recovered['schema']=='mini-oracle-activation-read-recovery-v1'
+            and recovered['boundary']['previous_execution']==str(directory)
+            and recovered['boundary']['start_sha256']==sha(directory/'successor-start.json')
+            and not (directory/'phases/enrollment.completed.json').exists())
+    else:
+        enrollment = read(original(run / 'agent-lifetime/enrollment-initial/request.json'))
+        require('api_recovery_successor_binding_enrolled', enrollment['expectedBindingSha256'] == binding)
     require('api_recovery_original_grant_preserved',
             read(run / 'agent-lifetime/issued-grant.json')['grantReceipt'] == boundary['grant_receipt'])
     require('api_recovery_new_discovery_id_after_preserved_outcome',
@@ -665,7 +675,7 @@ def application_api_recovery_attempt(run, directory, require):
     phases = [*extra_phases, 'runtime-upgrade','services']
     if not startup:
         phases += ['controller-start','native-recovery','native-reconciliation']
-    phases += ['retire-incarnation','successor-start','enrollment']
+    phases += ['retire-incarnation','successor-start'] + ([] if interrupted_enrollment else ['enrollment'])
     for phase in phases:
         value = read(directory / 'phases' / (phase+'.completed.json'))
         require('api_recovery_phase_'+phase, value['phase']==phase and value['state']=='completed'
@@ -685,6 +695,46 @@ def application_api_recovery_attempt(run, directory, require):
                         'native pre-admission refusal; no tool operation allocated' if startup else
                         'audited, already reported; no definitive answer or separate ACK'),
             'retransmitted':False,'successor_start':start,'execution_exit_path':str(directory / 'exit.json')}
+
+
+def activation_read_recoveries(run, require):
+    from recover_application_api import retained_paths, exported
+    values=[]
+    for directory in sorted((run/'continuations').glob('activation-read-*')):
+        prepared=read(directory/'prepared.json'); b=prepared['boundary']
+        require('activation_read_exact_boundary',prepared['schema']=='mini-oracle-activation-read-recovery-v1'
+            and prepared['automatic_retry'] is False and b['permits_same_generation_relaunch'] is False
+            and b['permits_enrollment_replay'] is False)
+        for entry in [*prepared['preserved'].values(),*prepared['archived'].values()]:
+            require('activation_read_preserved_'+entry['path'],sha(Path(entry['path']))==entry['sha256'])
+        failed=directory/'prior'/('native-activate-'+b['old_generation'])
+        for name,digest in prepared['failed_attempt_sha256'].items():
+            require('activation_read_failed_attempt_'+name,sha(failed/name)==digest)
+        query=failed/'session-before-enrollment'
+        require('activation_read_unsigned_query_only',set(p.name for p in query.iterdir())=={'intent.json','config.json','attempt.json'}
+            and read(query/'attempt.json')['operation']=='query' and read(query/'intent.json')['purpose']['type']=='query'
+            and sha(query/'intent.json')==b['failed_query_intent_sha256'])
+        journal=json.loads(exported(read(directory/'observations/controller-export.json'),'journal.json'))
+        status=read(directory/'observations/controller-status.json')
+        require('activation_read_unchanged_stopped_runtime',status['stopped'] is True
+            and status['runtimeSha256']==b['runtime_sha256']==sha(directory/'bin/grain-runtime')
+            and status['controllerConfigSha256']==b['controller_config_sha256'] and journal['connection']=='detached')
+        stop=read(directory/'stop.json'); stopped=read(directory/'old-record-after-stop.json'); start=read(directory/'successor-start.json')
+        require('activation_read_native_successor',stop['protocol']=='mini-spk-grain-stop-v1' and stop['generation']==b['old_generation']
+            and stopped['phase']=='stopped' and stopped['identity']==b['old_record']['identity']
+            and start['startAction']['kind']=='continue' and int(start['generation'])>int(b['old_generation'])
+            and start['completion']['completionReceipt']['eventId'])
+        retained=retained_paths(run,after=directory)
+        for phase in ('services','retire-incarnation','successor-start','enrollment'):
+            completed=read(directory/'phases'/(phase+'.completed.json'))
+            require('activation_read_phase_'+phase,completed['started_sha256']==sha(directory/'phases'/(phase+'.started.json')))
+            for name,digest in completed['evidence'].items():
+                path=Path(retained.get(name,{'path':name})['path'])
+                require('activation_read_phase_evidence_'+name,sha(path)==digest)
+        for line in (directory/'recovery-input-sha256.txt').read_text().splitlines():
+            digest,name=line.split(None,1);require('activation_read_source_'+name,sha(Path(name))==digest)
+        values.append({'boundary':b,'successor_start':start,'execution_exit_path':str(directory/'exit.json')})
+    return values
 
 
 def pooled_tenant_probe(run, require):
@@ -974,6 +1024,7 @@ def main():
     checkpoint_result = checkpoint_continuation(run, require, recovered_foreground)
     activation_result = activation_recovery(run, require)
     api_recovery_result = application_api_recovery(run, require)
+    activation_read_result = activation_read_recoveries(run, require)
     enrollments = controller_enrollments(run, require)
     agent_stages = {}
     for stage in ('probe', 'probe-after-restart'):
@@ -1089,6 +1140,7 @@ def main():
               'session_continuation': resumed_session, 'checkpoint_continuation': checkpoint_result,
               'activation_recovery': activation_result,
               'application_api_recovery': api_recovery_result,
+              'activation_read_recovery': activation_read_result,
               'controller_enrollment': enrollments, 'foreground_recovery': recovered_foreground,
               'stopped_running_reconciliation': {'before': prior, 'inactive_manager': manager,
                                                  'source_stopped': stopped},

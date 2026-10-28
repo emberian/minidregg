@@ -76,6 +76,16 @@ fail() { echo "Oracle shared-data journey: $*" >&2; exit 1; }
 for path in "$base" "$own" "$run" "$spk" "$source" "$inventory" "$benchmark"; do
   [[ $path == /* && $path != *[!a-zA-Z0-9_./-]* && $path != */../* && $path != */./* && $path != *//* ]] || fail "simple absolute canonical path required: $path"
 done
+# The frozen client uses a pathname Unix socket under its anchor directory.
+# Refuse an unusable operator layout before creating a Store or lifecycle phase.
+python3 - <<'PYANCHOR'
+import os
+anchor = os.environ.get('MINI_CONSENT_ANCHOR_DIR', os.path.expanduser('~/.mini/consent-anchors'))
+if os.environ.get('MINI_CODEC_RESIDENT', '1') != '0':
+    endpoint = os.path.join(anchor, 'c-' + '0' * 32 + '.sock')
+    if len(os.fsencode(endpoint)) >= 108:
+        raise SystemExit('Oracle shared-data journey: codec socket path exceeds Linux budget; select a short private MINI_CONSENT_ANCHOR_DIR')
+PYANCHOR
 if [[ $mode != new ]]; then
   if [[ -z ${ORACLE_ACCEPTANCE_LOCK_FD:-} ]]; then
     exec python3 -B "$repo/deploy/oracle/acceptance/continue_controller.py" \

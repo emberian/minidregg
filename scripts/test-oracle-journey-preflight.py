@@ -14,6 +14,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @unittest.skipUnless(sys.platform.startswith('linux'), 'journey uses Linux stat and custody paths')
 class PreflightTests(unittest.TestCase):
+    def test_long_codec_socket_fails_before_run_creation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run=Path(tmp)/'run'
+            env={**os.environ,'MINI_CONSENT_ANCHOR_DIR':tmp+'/'+('a'*110),
+                 'ORACLE_STOP_BENCHMARK_JSON':tmp+'/unused.json','MINI_CODEC_RESIDENT':'1'}
+            result=subprocess.run(['bash',str(ROOT/'scripts/oracle-shared-data-journey.sh'),
+                tmp,tmp,str(run),tmp+'/runtime.spk',tmp,tmp+'/inventory.json'],
+                env=env,capture_output=True,text=True,timeout=15)
+            self.assertNotEqual(result.returncode,0)
+            self.assertIn('codec socket path exceeds Linux budget',result.stderr)
+            self.assertFalse(run.exists())
+
     def test_stop_receipt_must_match_selected_host_before_world_creation(self):
         for case in ('matching', 'old-host', 'failed', 'named-acl', 'default-acl'):
             with self.subTest(case=case), tempfile.TemporaryDirectory(prefix='oracle-preflight-', dir=ROOT) as tmp:

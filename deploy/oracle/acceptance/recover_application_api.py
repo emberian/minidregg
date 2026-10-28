@@ -48,6 +48,11 @@ def recovery_directories(run):
 
 def previous_execution(run):
     paths = recovery_directories(run)
+    reads = sorted((run/'continuations').glob('activation-read-*/successor-start.json'), key=lambda p:int(read(p)['generation']))
+    if reads and (not paths or int(read(reads[-1])['generation']) > int(read(paths[-1]/'successor-start.json')['generation'])):
+        previous=reads[-1].parent
+        require((previous/'phases/enrollment.completed.json').is_file(), 'activation recovery did not reach enrollment')
+        return previous
     if not paths:
         return run / 'continuations/activation-successor-1'
     previous = paths[-1]
@@ -69,8 +74,10 @@ def previous_execution(run):
 def retained_paths(run, after=None):
     """Find the first preserved version after an execution, before later overwrites."""
     retained = {}
-    for directory in recovery_directories(run):
-        if after is not None and int(directory.name.rsplit('-', 1)[-1]) <= int(after.name.rsplit('-', 1)[-1]):
+    directories=[*recovery_directories(run),*(run/'continuations').glob('activation-read-*')]
+    directories.sort(key=lambda p:int(read(p/'prepared.json')['boundary']['old_generation']))
+    for directory in directories:
+        if after is not None and int(read(directory/'prepared.json')['boundary']['old_generation']) <= int(read(after/'prepared.json')['boundary']['old_generation']):
             continue
         prepared = read(directory / 'prepared.json')
         for name, entry in {**prepared['preserved'], **prepared['archived']}.items():
@@ -200,7 +207,7 @@ def checked_boundary(run, observations, request_id):
                 and hold['reserve'] == '1' and hold['charge'] == '0', 'foreground hold differs')
     status = read(observations / 'controller-status.json')
     require(status['store'] == world['store'] and status['stopped'] is True
-            and status['runtimeSha256'] == sha((previous if previous.name.startswith('application-api-recovery-') else run / 'continuations/activation-recovery-1') / 'bin/grain-runtime')
+            and status['runtimeSha256'] == sha((previous if (previous/'bin/grain-runtime').is_file() else run / 'continuations/activation-recovery-1') / 'bin/grain-runtime')
             and status['controllerConfigSha256'] == sha(root / 'controller-active-initial.json'),
             'stopped controller pins differ')
     start = read(previous / 'successor-start.json')

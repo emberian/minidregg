@@ -506,7 +506,7 @@ world_continue_session() {
 # session, grant and START remain admitted; a dead incarnation is supervised
 # through native STOP and successor START, never relaunched in place.
 world_continue_activation() {
-  local run=$1 repo=$2 fresh unit expected_runtime
+  local run=$1 repo=$2 fresh unit expected_runtime latest_start
   op_uid=$(id -u)
   export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$op_uid}
   export BIN=$run/bin
@@ -529,11 +529,17 @@ world_continue_activation() {
   fresh=$(mktemp -d "$run/activation-preflight.XXXXXXXX")
   timeout 120 sudo -n -- "$installer" controller-export "$store" "$helper" >"$fresh/controller-export.json"
   timeout 120 sudo -n -- "$installer" controller-status "$store" "$helper" >"$fresh/controller-status.json"
-  unit=$(jq -er .unit "$run/world/evidence/start-a.stdout")
+  latest_start=$(python3 -B "$repo/deploy/oracle/acceptance/recover_activation.py" --latest-start "$run")
+  unit=$(jq -er .unit "$latest_start")
   [[ $unit == mini-spk-s"$store"-a9101-g*.service ]] || fail 'old app unit differs'
   systemctl --user show "$unit" -p Id -p LoadState -p ActiveState -p SubState -p MainPID -p InvocationID -p Job >"$fresh/manager.txt"
-  [[ $(systemctl --user show "mini-spk-broker@$store.service" -p ActiveState --value) == inactive ]] || fail 'broker is not stopped'
+  systemctl --user show "mini-spk-broker@$store.service" -p Id -p ActiveState -p MainPID -p ControlGroup >"$fresh/broker-manager.txt"
+  python3 -B "$repo/deploy/oracle/acceptance/recover_application_api.py" --check-stopped-broker "$fresh" "$BROKER_SOCKET" "mini-spk-broker@$store.service" "$op_uid" >"$fresh/broker-stopped.json"
   [[ ! -S $run/world/sock/operator/host.sock && ! -S $run/world/sock/participant/host.sock ]] || fail 'operator services are not stopped'
+  if [[ $latest_start != "$run/world/evidence/start-a.stdout" && -d $run/agent-lifetime/native-activate-$(jq -er .generation "$latest_start") ]]; then
+    world_continue_read_only_activation "$fresh"
+    return
+  fi
   if [[ -f $run/continuations/activation-recovery-1/socket-failure/boundary.json ]]; then
     local next_generation
     next_generation=$(jq -er '.successor_generation | select(test("^[0-9]+$"))' "$run/continuations/activation-recovery-1/socket-failure/boundary.json")
@@ -597,6 +603,51 @@ world_continue_activation() {
   cp "$state/apps/9101/g$old_generation/record.json" "$continuation/old-record-after-stop.json"
   cp -a "$state/apps/9101/g$old_generation/stop-completion" "$continuation/stop-completion"
   world_phase_record supervise completed "$continuation/supervise.json" "$continuation/successor-start.json"
+  world_phase_record enrollment started
+}
+
+# Same pre-enrollment seam at any later generation: a first read failed before
+# enrollment began. Keep the installed controller cohort and all prior attempts.
+world_continue_read_only_activation() {
+  local fresh=$1 old_generation reclaim_label
+  [[ ${ORACLE_SOCKET_RECLAIM_BIN:-} == /* && ${ORACLE_SOCKET_RECLAIM_SHA256:-} =~ ^[0-9a-f]{64}$
+      && $(sha256sum "$ORACLE_SOCKET_RECLAIM_BIN" | cut -d ' ' -f1) == "$ORACLE_SOCKET_RECLAIM_SHA256" ]] || fail 'qualified socket reclaimer required'
+  printf '%s\n' "$expected_runtime" >"$fresh/runtime.sha256"
+  world_source_manifest >"$fresh/source-input-sha256.txt"
+  sha256sum "$own/grain-runtime" "$ORACLE_SOCKET_RECLAIM_BIN" >>"$fresh/source-input-sha256.txt"
+  continuation=$(python3 -B "$repo/deploy/oracle/acceptance/recover_activation.py" --read-only "$run" "$fresh")
+  [[ $continuation == "$run/continuations/activation-read-"* ]] || fail 'read-only activation recovery path differs'
+  mkdir -m700 "$continuation/bin"
+  install -m500 "$own/grain-runtime" "$continuation/bin/grain-runtime"
+  controller_runtime=$continuation/bin/grain-runtime
+  cp "$fresh/source-input-sha256.txt" "$continuation/recovery-input-sha256.txt"
+  sha256sum "$controller_runtime" >>"$continuation/recovery-input-sha256.txt"
+  preserve_existing_exit=0
+  configured=1 controller_created=1 controller_staged=1
+  cp "$fresh/controller-status.json" "$continuation/public-listener.json"
+  jq -e --arg binary "$GRAINS_ROOT/controller/public-listener/mini" --arg digest "$(sha256sum "$BIN/mini" | cut -d ' ' -f1)" --arg socket "$run/world/sock/participant/host.sock" '
+    .stopped == true and .publicListener.binary == $binary and .publicListener.binarySha256 == $digest and
+    .publicListener.socket == $socket and .publicListener.controllerUid == .controllerUid' "$continuation/public-listener.json" >/dev/null || fail 'activation public listener pin differs'
+  export SPK_PUBLIC_LISTENER_RECEIPT=$continuation/public-listener.json
+  world_phase_record services started
+  systemctl --user start "mini-spk-broker@$store.service"
+  for ((i=0;i<100;i++)); do [[ ! -S $BROKER_SOCKET ]] || break; sleep .1; done
+  [[ -S $BROKER_SOCKET && $(stat -c '%u:%a' "$BROKER_SOCKET") == "$op_uid:600" ]] || fail 'activation broker readiness failed'
+  "$journey" phase "$run/world" services >"$continuation/services.log" 2>&1
+  world_phase_record services completed "$run/world/sock/operator.pid.identity.json" "$run/world/sock/participant.pid.identity.json"
+  world_phase_record retire-incarnation started
+  timeout 1800 "$BIN/spk-host" grain stop "$profile" 9101 >"$continuation/stop.json" 2>"$continuation/stop.stderr"
+  old_generation=$(jq -er .boundary.old_generation "$continuation/prepared.json")
+  jq -e --arg old "$old_generation" '.protocol == "mini-spk-grain-stop-v1" and .app == "9101" and .generation == $old' "$continuation/stop.json" >/dev/null || fail 'activation STOP identity differs'
+  cp "$state/apps/9101/g$old_generation/record.json" "$continuation/old-record-after-stop.json"
+  cp -a "$state/apps/9101/g$old_generation/stop-completion" "$continuation/stop-completion"
+  reclaim_label=activation-read-$old_generation
+  world_reclaim_stopped_agent_socket 9101 "$old_generation" "$reclaim_label"
+  world_phase_record retire-incarnation completed "$continuation/stop.json" "$continuation/old-record-after-stop.json" "$run/native-agent-socket-reclaims/$reclaim_label/result.json"
+  world_phase_record successor-start started
+  timeout 1800 "$BIN/spk-host" grain start "$profile" 9101 >"$continuation/successor-start.json" 2>"$continuation/successor-start.stderr"
+  jq -e --arg old "$old_generation" '.protocol == "mini-spk-grain-start-v1" and .app == "9101" and (.generation | tonumber) > ($old | tonumber) and .startAction.kind == "continue" and .completion.completionReceipt.eventId' "$continuation/successor-start.json" >/dev/null || fail 'activation successor START differs'
+  world_phase_record successor-start completed "$continuation/successor-start.json"
   world_phase_record enrollment started
 }
 

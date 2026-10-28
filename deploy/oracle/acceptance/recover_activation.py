@@ -101,6 +101,118 @@ def checked_boundary(run, exported, status, manager, enrollment=None, runtime_sh
             'permits_same_generation_relaunch': False, 'permits_enrollment_replay': False}
 
 
+def latest_start(run):
+    paths = [run / 'world/evidence/start-a.stdout',
+             *(run / 'continuations').glob('*/successor-start.json')]
+    values = [(int(read(p)['generation']), p) for p in paths if p.is_file()]
+    require(values and len({n for n, _ in values}) == len(values), 'ambiguous admitted START lineage')
+    return max(values)[1]
+
+
+def checked_read_only_activation(run, observations):
+    """The first read of activation failed before any session or route mutation."""
+    from recover_application_api import exported
+    start_path = latest_start(run)
+    previous = start_path.parent
+    start = read(start_path); generation = start['generation']
+    root = run / 'agent-lifetime'; attempt = root / ('native-activate-' + generation)
+    require(read(previous / 'exit.json') == {'execution_exit':1,'cleanup_exit':0,'namespace_preserved':True},
+            'activation predecessor did not stop cleanly')
+    require(start['protocol']=='mini-spk-grain-start-v1' and start['app']=='9101'
+            and start['completion']['completionReceipt']['eventId'], 'admitted START absent')
+    require({p.name for p in attempt.iterdir()} == {
+        'current-start-before-enrollment.stdout','current-start-before-enrollment.stderr',
+        'session-before-enrollment','session-before-enrollment-intent.json',
+        'session-before-enrollment.stdout','session-before-enrollment.stderr'},
+        'activation progressed beyond its first read')
+    query = attempt / 'session-before-enrollment'
+    require({p.name for p in query.iterdir()} == {'attempt.json','intent.json','config.json'},
+            'read-only query may have signed or received a response')
+    a = read(root / 'allocation.json')['agents'][0]
+    intent = read(query / 'intent.json')
+    require(intent == read(attempt / 'session-before-enrollment-intent.json')
+        and intent == {'subject':a['controller']['subject'],'nonce':intent['nonce'],
+        'purpose':{'type':'query','kind':'object','target':a['session'],'view':'resource'},
+        'grants':[{'kind':'object','target':a['session'],'capability':a['plannedCaps']['sessionOwner']}]},
+        'failed activation is not the exact read-only session query')
+    call=read(query/'attempt.json')
+    require(call['operation']=='query' and call['config']==str(query/'config.json')
+        and call['host']==str(run/'bin/minidregg-host')
+        and call['socket']==str(run/'world/sock/participant/host.sock'), 'query tool pins differ')
+    require((attempt/'session-before-enrollment.stdout').read_bytes()==b''
+        and 'resident codec Host failed to start' in (attempt/'session-before-enrollment.stderr').read_text(),
+        'not a definite pre-query codec startup refusal')
+    require(not any((root/name).exists() for name in ('enrollment-initial','controller-active-initial.json','probe'))
+        and not (run/'browser').exists(), 'later enrollment or probe exists')
+    status=read(observations/'controller-status.json'); export=read(observations/'controller-export.json')
+    world=read(run/'world-identity.json')
+    require(export['protocol']=='mini-spk-controller-evidence-v1' and export['store']==world['store'], 'export identity differs')
+    journal=json.loads(exported(export,'journal.json'))
+    before_candidates=[previous/'terminal-journal.json',
+        previous/'resumption/controller-journal.json',
+        *(previous/'resumption/retries').glob('*/controller-journal.json'),
+        previous/'observations/controller-journal.json']
+    require(any(p.is_file() and read(p)==journal for p in before_candidates)
+        and journal==read(root/'controller-final-journal.json'), 'controller changed during failed activation')
+    require(journal['connection']=='detached' and all(journal.get(k) is None for k in (
+        'foregroundAttempt','applicationApiAttempt','parentHold','dispatchAttempt','dispatchPending',
+        'dispatchHold','toolPending','toolHold','pending','child','birthPending','birthOperation',
+        'providerPending','providerHold','providerAttempt','settlementDue','workspaceAttempt','roomAttempt','workspaceBirth'))
+        and not journal.get('unresolvedExternal'), 'controller has retained custody')
+    require(status['store']==world['store'] and status['stopped'] is True
+        and status['runtimeSha256']==(observations/'runtime.sha256').read_text().strip(), 'stopped runtime pins differ')
+    config_candidates=[previous/'resumption/controller-status.json',
+        *(previous/'resumption/retries').glob('*/controller-status.json'),previous/'observations/controller-status.json']
+    require(any(p.is_file() and p.stat().st_size > 0 and read(p)['controllerConfigSha256']==status['controllerConfigSha256']
+        for p in config_candidates), 'stopped controller config changed')
+    state=Path(read(run/'world/evidence/profile-result.json')['stateRoot'])
+    app=state/'apps/9101'/('g'+generation); record=read(app/'record.json')
+    manager=dict(line.split('=',1) for line in (observations/'manager.txt').read_text().splitlines() if '=' in line)
+    require(record['phase']=='running' and record.get('dispatch_in_flight') is None
+        and record['identity']['unit']==start['unit'] and record['identity']['generation']==int(generation)
+        and manager['Id']==start['unit'] and manager['MainPID']=='0'
+        and manager['ActiveState'] in ('inactive','failed') and manager['Job'] in ('','0'), 'app is not physically stopped')
+    native=app/('agent-'+read(root/'registered-agent-route.json')['registration']['name']+'-attempts')
+    require(not native.exists() or not list(native.iterdir()), 'application has API delivery evidence')
+    require(not list((state/'apps/9201').glob('g[0-9]*')), 'browser app already started')
+    return {'kind':'activation-read-only-refusal','store':world['store'],'old_generation':generation,
+        'old_unit':start['unit'],'old_record':record,'previous_execution':str(previous),
+        'start_path':str(start_path),'start_sha256':sha(start_path),'journal_sha256':export['files']['journal.json']['sha256'],
+        'runtime_sha256':status['runtimeSha256'],'controller_config_sha256':status['controllerConfigSha256'],
+        'failed_query':str(query),'failed_query_intent_sha256':sha(query/'intent.json'),
+        'permits_same_generation_relaunch':False,'permits_enrollment_replay':False}
+
+
+def prepare_read_only_activation(run, observations):
+    boundary=checked_read_only_activation(run,observations)
+    for line in (run/'input-sha256.txt').read_text().splitlines():
+        digest,name=line.split(None,1)
+        require(sha(Path(name))==digest,'retained input changed')
+    output=run/'continuations'/('activation-read-'+boundary['old_generation'])
+    require(not output.exists(), 'activation continuation already prepared; inspect retained phase')
+    output.mkdir(mode=0o700); (output/'phases').mkdir(mode=0o700)
+    shutil.copytree(observations,output/'observations')
+    exported=read(observations/'controller-export.json')['files']['journal.json']
+    (output/'observations/controller-journal.json').write_bytes(base64.b64decode(exported['base64'],validate=True))
+    prior=output/'prior'; prior.mkdir(mode=0o700)
+    preserved={}; archived={}
+    for path in [Path(boundary['previous_execution'])/'exit.json',run/'agent-lifetime/controller-final-journal.json',
+                 run/'agent-lifetime/issued-grant.json',run/'agent-lifetime/registered-agent-route.json']:
+        target=prior/(str(len(preserved))+'-'+path.name); shutil.copy2(path,target)
+        preserved[str(path)]={'path':str(target),'sha256':sha(target)}
+    for path in sorted((run/'agent-lifetime').glob('*initial*')):
+        require(path.is_file(),'unexpected initial activation output directory')
+        target=prior/path.name; shutil.copy2(path,target)
+        archived[str(path)]={'path':str(target),'sha256':sha(target)}
+    failed=run/'agent-lifetime'/('native-activate-'+boundary['old_generation'])
+    shutil.copytree(failed,prior/failed.name)
+    value={'schema':'mini-oracle-activation-read-recovery-v1','boundary':boundary,'automatic_retry':False,
+        'preserved':preserved,'archived':archived,
+        'failed_attempt_sha256':{str(p.relative_to(failed)):sha(p) for p in failed.rglob('*') if p.is_file()}}
+    (output/'prepared.json').write_text(json.dumps(value,indent=2)+'\n')
+    print(output)
+
+
 def prepare_successor(run, observations, predecessor, check_only=False):
     """A completed native STOP and a never-admitted successor; no STOP replay."""
     failure = predecessor / 'socket-failure'
@@ -260,6 +372,10 @@ def prepare(run, observations):
 
 if __name__ == '__main__':
     try:
+        if len(sys.argv)==3 and sys.argv[1]=='--latest-start':
+            print(latest_start(Path(sys.argv[2]))); raise SystemExit(0)
+        if len(sys.argv)==4 and sys.argv[1]=='--read-only':
+            prepare_read_only_activation(Path(sys.argv[2]),Path(sys.argv[3])); raise SystemExit(0)
         require(len(sys.argv) == 3, 'usage: recover_activation.py RUN OBSERVATIONS')
         prepare(Path(sys.argv[1]), Path(sys.argv[2]))
     except (ValueError, OSError, KeyError) as error:

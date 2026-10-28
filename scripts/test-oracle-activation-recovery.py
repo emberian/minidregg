@@ -17,6 +17,7 @@ import unittest
 
 spec = importlib.util.spec_from_file_location('recovery', Path(__file__).resolve().parents[1] /
                                             'deploy/oracle/acceptance/recover_activation.py')
+sys.path.insert(0, str(Path(spec.origin).parent))
 recovery = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(recovery)
 
@@ -68,6 +69,78 @@ class RecoveryBoundary(unittest.TestCase):
         save('agent-lifetime/session-birth.retained-result.json', {'isError': False})
         save('agent-lifetime/issued-grant.json', {'protocol': 'mini-oracle-issued-agent-grant-v1',
              'sessionToolResultSha256': recovery.sha(birth), 'grantReceipt': {'acceptedCount': '50'}})
+
+    def read_only_fixture(self):
+        self.journal['connection']='detached'
+        self.save('agent-lifetime/controller-final-journal.json',self.journal)
+        previous=self.run/'continuations/application-api-recovery-6'
+        start=self.save('continuations/application-api-recovery-6/successor-start.json', {
+            'protocol':'mini-spk-grain-start-v1','app':'9101','generation':'16','unit':'sixteen.service',
+            'completion':{'completionReceipt':{'eventId':'actual','acceptedCount':'136'}}})
+        self.save(str(previous.relative_to(self.run)/'exit.json'), {'execution_exit':1,'cleanup_exit':0,'namespace_preserved':True})
+        self.save(str(previous.relative_to(self.run)/'terminal-journal.json'),self.journal)
+        self.save(str(previous.relative_to(self.run)/'observations/controller-status.json'),self.status)
+        self.save('state/apps/9101/g16/record.json',{'phase':'running','dispatch_in_flight':None,
+            'identity':{'unit':'sixteen.service','generation':16}})
+        self.save('agent-lifetime/registered-agent-route.json',{'registration':{'name':'oracle-agent-v2'}})
+        self.save('agent-lifetime/allocation.json',{'agents':[{'controller':{'subject':'20010'},'session':'29420',
+            'plannedCaps':{'sessionOwner':'20241'}}]})
+        attempt=self.run/'agent-lifetime/native-activate-16';attempt.mkdir()
+        for name in ('current-start-before-enrollment.stdout','current-start-before-enrollment.stderr',
+                     'session-before-enrollment.stdout'):(attempt/name).write_text('')
+        (attempt/'session-before-enrollment.stderr').write_text('mini: resident codec Host failed to start (exit status: 1)')
+        intent={'subject':'20010','nonce':'7','purpose':{'type':'query','kind':'object','target':'29420','view':'resource'},
+                'grants':[{'kind':'object','target':'29420','capability':'20241'}]}
+        self.save('agent-lifetime/native-activate-16/session-before-enrollment-intent.json',intent)
+        self.save('agent-lifetime/native-activate-16/session-before-enrollment/intent.json',intent)
+        self.save('agent-lifetime/native-activate-16/session-before-enrollment/config.json',{})
+        self.save('agent-lifetime/native-activate-16/session-before-enrollment/attempt.json',{'operation':'query',
+            'config':str(attempt/'session-before-enrollment/config.json'),'host':str(self.run/'bin/minidregg-host'),
+            'socket':str(self.run/'world/sock/participant/host.sock')})
+        shutil.rmtree(self.run/'agent-lifetime/enrollment-initial')
+        observations=self.run/'read-observations';observations.mkdir()
+        raw=json.dumps(self.journal).encode()
+        self.export['files']['journal.json']={'base64':base64.b64encode(raw).decode(),'sha256':hashlib.sha256(raw).hexdigest()}
+        (observations/'controller-export.json').write_text(json.dumps(self.export))
+        (observations/'controller-status.json').write_text(json.dumps(self.status))
+        (observations/'runtime.sha256').write_text(self.status['runtimeSha256'])
+        (observations/'manager.txt').write_text('Id=sixteen.service\nMainPID=0\nActiveState=inactive\nJob=\n')
+        return observations,attempt
+
+    def test_read_only_activation_requires_no_enrollment_or_signed_query(self):
+        observations,attempt=self.read_only_fixture()
+        result=recovery.checked_read_only_activation(self.run,observations)
+        self.assertEqual(result['old_generation'],'16')
+        self.assertFalse(result['permits_same_generation_relaunch'])
+        for relative in ('session-close.json','session-before-enrollment/challenge.json',
+                         'session-before-enrollment/signed-observation.bin'):
+            path=attempt/relative;path.write_text('{}')
+            with self.assertRaises(ValueError):recovery.checked_read_only_activation(self.run,observations)
+            path.unlink()
+        path=self.run/'agent-lifetime/enrollment-initial';path.mkdir()
+        with self.assertRaisesRegex(ValueError,'later enrollment'):recovery.checked_read_only_activation(self.run,observations)
+
+    def test_read_only_prepare_preserves_failure_and_refuses_second_preparation(self):
+        observations,attempt=self.read_only_fixture()
+        (self.run/'input-sha256.txt').write_text('')
+        (self.run/'agent-lifetime/activate-initial.stderr').write_text('retained startup refusal')
+        with contextlib.redirect_stdout(io.StringIO()): recovery.prepare_read_only_activation(self.run,observations)
+        output=self.run/'continuations/activation-read-16'
+        prepared=recovery.read(output/'prepared.json')
+        self.assertEqual(prepared['boundary']['old_generation'],'16')
+        self.assertEqual((output/'prior/activate-initial.stderr').read_text(),'retained startup refusal')
+        self.assertTrue((attempt/'session-before-enrollment/intent.json').is_file())
+        with self.assertRaisesRegex(ValueError,'already prepared'):
+            recovery.prepare_read_only_activation(self.run,observations)
+
+    def test_read_only_activation_refuses_changed_journal_or_live_incarnation(self):
+        observations,attempt=self.read_only_fixture()
+        (observations/'manager.txt').write_text('Id=sixteen.service\nMainPID=87\nActiveState=active\nJob=\n')
+        with self.assertRaisesRegex(ValueError,'physically stopped'):recovery.checked_read_only_activation(self.run,observations)
+        (observations/'manager.txt').write_text('Id=sixteen.service\nMainPID=0\nActiveState=inactive\nJob=\n')
+        self.journal['nextOperationId']=999
+        self.save('agent-lifetime/controller-final-journal.json',self.journal)
+        with self.assertRaisesRegex(ValueError,'controller changed'):recovery.checked_read_only_activation(self.run,observations)
 
     def check(self):
         return recovery.checked_boundary(self.run, self.export, self.status, self.manager)
