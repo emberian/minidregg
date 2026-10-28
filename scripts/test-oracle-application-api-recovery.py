@@ -159,6 +159,15 @@ class ApplicationRecoveryBoundary(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'physical stopped'):
             recovery.checked_stopped_resume(self.run,directory,self.observations)
 
+    def test_stopped_resumption_refuses_fenced_controller(self):
+        directory=self.stopped_resumption_fixture()
+        export=recovery.read(self.observations/'controller-export.json')
+        journal=json.loads(recovery.exported(export,'journal.json')); journal['connection']='fenced'
+        raw=json.dumps(journal).encode();export['files']['journal.json']={'base64':base64.b64encode(raw).decode(),'sha256':hashlib.sha256(raw).hexdigest()}
+        self.save('observations/controller-export.json',export)
+        with self.assertRaisesRegex(ValueError,'custody changed'):
+            recovery.checked_stopped_resume(self.run,directory,self.observations)
+
     def test_stopped_resumption_preflight_failure_does_not_consume_boundary(self):
         directory=self.stopped_resumption_fixture()
         self.save('continuations/application-api-recovery-1/phases/services.completed.json',

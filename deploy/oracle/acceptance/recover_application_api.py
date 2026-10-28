@@ -342,7 +342,7 @@ def checked_stopped_resume(run, directory, observations):
     require(journal['binding']==terminal['binding'] and proof in journal['reconciliationLog']
             and journal['applicationApiHistory']==terminal['applicationApiHistory']
             and journal['foregroundHistory']==terminal['foregroundHistory']
-            and journal['connection'] in ('fenced','detached')
+            and journal['connection']=='detached'
             and all(journal.get(k) is None for k in ('foregroundAttempt','applicationApiAttempt','parentHold',
                 'dispatchAttempt','dispatchPending','dispatchHold','toolPending','toolHold','pending','child',
                 'birthPending','birthOperation','providerPending','providerHold','providerAttempt','settlementDue',
