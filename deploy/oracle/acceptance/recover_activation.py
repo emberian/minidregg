@@ -30,7 +30,7 @@ def binding_sha(value):
                                     ensure_ascii=False).encode()).hexdigest()
 
 
-def checked_boundary(run, exported, status, manager, enrollment=None):
+def checked_boundary(run, exported, status, manager, enrollment=None, runtime_sha=None):
     root = run / 'agent-lifetime'
     world = read(run / 'world-identity.json')
     require(read(run / 'exit.json') == {'execution_exit': 1, 'cleanup_exit': 0,
@@ -66,7 +66,7 @@ def checked_boundary(run, exported, status, manager, enrollment=None):
     require(request['expectedBindingSha256'] == binding_sha(journal['binding']), 'old binding differs')
     require(status.get('stopped') is True and status.get('store') == world['store']
             and status.get('controllerConfigSha256') == request['targetConfigSha256']
-            and status.get('runtimeSha256') == sha(run / 'bin/grain-runtime'), 'stopped controller pins differ')
+            and status.get('runtimeSha256') == (runtime_sha or sha(run / 'bin/grain-runtime')), 'stopped controller pins differ')
     require(not journal['binding']['config']['toolTask'].get('allowedApplicationLifetimeRoutes'),
             'controller already has a lifetime route')
     start = read(run / 'world/evidence/start-a.stdout')
@@ -106,7 +106,10 @@ def prepare(run, observations):
     output = run / 'continuations/activation-recovery-1'
     existing = output.exists()
     enrollment = output / 'prior/enrollment-initial' if existing else None
-    boundary = checked_boundary(run, exported, read(observations / 'controller-status.json'), manager, enrollment)
+    upgraded = existing and (output / 'phases/runtime-upgrade.completed.json').exists()
+    runtime_sha = sha(output / 'bin/grain-runtime') if upgraded else None
+    boundary = checked_boundary(run, exported, read(observations / 'controller-status.json'), manager,
+                                enrollment, runtime_sha)
     # Check every retained input pin before moving any evidence. The dataset's
     # physical custody is independently rechecked by the native successor START.
     for line in (run / 'input-sha256.txt').read_text().splitlines():
@@ -119,8 +122,23 @@ def prepare(run, observations):
     if existing:
         prepared = read(output / 'prepared.json')
         require(prepared['boundary'] == boundary, 'prepared boundary changed')
-        require(not list((output / 'phases').glob('*'))
-                and not (output / 'runtime-upgrade.json').exists(), 'an effect may have started')
+        phases = {p.name for p in (output / 'phases').glob('*')}
+        if upgraded:
+            require(phases == {'runtime-upgrade.started.json', 'runtime-upgrade.completed.json',
+                               'services.started.json'}, 'a lifecycle effect may have started')
+            upgrade = read(output / 'runtime-upgrade.json')
+            completed = read(output / 'phases/runtime-upgrade.completed.json')
+            require(upgrade['store'] == boundary['store']
+                    and upgrade['previousRuntimeSha256'] == sha(run / 'bin/grain-runtime')
+                    and upgrade['runtimeSha256'] == runtime_sha
+                    and completed['started_sha256'] == sha(output / 'phases/runtime-upgrade.started.json')
+                    and completed['evidence'] == {str(output / 'runtime-upgrade.json'): sha(output / 'runtime-upgrade.json')},
+                    'completed runtime upgrade differs')
+            require(not any((output / name).exists() for name in
+                            ('supervise.json', 'successor-start.json', 'public-listener.json')),
+                    'later recovery work exists')
+        else:
+            require(not phases and not (output / 'runtime-upgrade.json').exists(), 'an effect may have started')
         require(read(output / 'exit.json') == {'execution_exit': 1, 'cleanup_exit': 0,
                                                'namespace_preserved': True}, 'prepared cleanup differs')
         for entry in [*prepared['snapshots'].values(), *prepared['archived'].values()]:
@@ -135,6 +153,8 @@ def prepare(run, observations):
             if (output / name).exists():
                 shutil.copy2(output / name, attempt / name)
         shutil.copytree(observations, attempt / 'observations')
+        if upgraded:
+            (output / 'phases/services.started.json').rename(attempt / 'services.started.json')
         (output / 'phases').mkdir(mode=0o700, exist_ok=True)
         print(output)
         return

@@ -469,7 +469,7 @@ def activation_recovery(run, require):
     require('activation_new_request_for_successor', enrollment != prior_request
             and enrollment['expectedBindingSha256'] == boundary['old_binding_sha256']
             and sha(run / 'agent-lifetime/enrollment-initial/request.json') != boundary['request_sha256'])
-    for phase in ('runtime-upgrade', 'services', 'supervise', 'enrollment'):
+    for phase in ('runtime-upgrade', 'public-listener', 'services', 'supervise', 'enrollment'):
         value = read(directory / 'phases' / (phase + '.completed.json'))
         require('activation_phase_' + phase, value['phase'] == phase and value['state'] == 'completed'
                 and value['started_sha256'] == sha(directory / 'phases' / (phase + '.started.json')))

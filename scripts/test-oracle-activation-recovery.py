@@ -104,6 +104,36 @@ class RecoveryBoundary(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Store changed'):
             recovery.prepare(self.run, observations)
 
+    def test_completed_upgrade_reuses_receipt_before_retrying_stopped_services(self):
+        observations, output = self.prepare_fixture()
+        (output / 'bin').mkdir()
+        (output / 'bin/grain-runtime').write_bytes(b'corrected runtime')
+        self.status['runtimeSha256'] = recovery.sha(output / 'bin/grain-runtime')
+        (observations / 'controller-status.json').write_text(json.dumps(self.status))
+        upgrade = output / 'runtime-upgrade.json'
+        upgrade.write_text(json.dumps({'store': 'test-store',
+            'previousRuntimeSha256': recovery.sha(self.run / 'bin/grain-runtime'),
+            'runtimeSha256': self.status['runtimeSha256']}))
+        controller = Path(__file__).resolve().parents[1] / 'deploy/oracle/acceptance/continue_controller.py'
+        def phase(name, action, *evidence):
+            subprocess.run([sys.executable, str(controller), '--locked-exec', str(self.run),
+                sys.executable, str(controller), '--phase', str(self.run), str(output / 'phases'),
+                name, action, *map(str, evidence)], check=True)
+        phase('runtime-upgrade', 'started')
+        phase('runtime-upgrade', 'completed', upgrade)
+        phase('services', 'started')
+        (output / 'exit.json').write_text(json.dumps({'execution_exit': 1, 'cleanup_exit': 0,
+                                                      'namespace_preserved': True}))
+        with contextlib.redirect_stdout(io.StringIO()):
+            recovery.prepare(self.run, observations)
+        self.assertTrue((output / 'pre-effect-attempts/1/services.started.json').is_file())
+        self.assertTrue((output / 'phases/runtime-upgrade.completed.json').is_file())
+        self.assertFalse((output / 'phases/services.started.json').exists())
+        phase('services', 'started')
+        phase('supervise', 'started')
+        with self.assertRaisesRegex(ValueError, 'lifecycle effect may have started'):
+            recovery.prepare(self.run, observations)
+
     def test_exact_stopped_boundary_is_inspection_only(self):
         value = self.check()
         self.assertFalse(value['permits_same_generation_relaunch'])

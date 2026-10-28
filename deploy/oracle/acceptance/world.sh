@@ -540,11 +540,25 @@ world_continue_activation() {
   sha256sum "$controller_runtime" >>"$continuation/recovery-input-sha256.txt"
   preserve_existing_exit=0
   configured=1 controller_created=1 controller_staged=1
-  world_phase_record runtime-upgrade started
-  timeout 120 sudo -n -- "$installer" controller-runtime-upgrade "$store" "$helper" "$controller_runtime" >"$continuation/runtime-upgrade.json"
-  jq -e --arg expected "$expected_runtime" --arg previous "$(sha256sum "$BIN/grain-runtime" | cut -d ' ' -f1)" \
-    '.runtimeSha256 == $expected and .previousRuntimeSha256 == $previous' "$continuation/runtime-upgrade.json" >/dev/null || fail 'runtime upgrade differs'
-  world_phase_record runtime-upgrade completed "$continuation/runtime-upgrade.json"
+  if [[ ! -f $continuation/phases/runtime-upgrade.completed.json ]]; then
+    world_phase_record runtime-upgrade started
+    timeout 120 sudo -n -- "$installer" controller-runtime-upgrade "$store" "$helper" "$controller_runtime" >"$continuation/runtime-upgrade.json"
+    jq -e --arg expected "$expected_runtime" --arg previous "$(sha256sum "$BIN/grain-runtime" | cut -d ' ' -f1)" \
+      '.runtimeSha256 == $expected and .previousRuntimeSha256 == $previous' "$continuation/runtime-upgrade.json" >/dev/null || fail 'runtime upgrade differs'
+    world_phase_record runtime-upgrade completed "$continuation/runtime-upgrade.json"
+  fi
+  world_phase_record public-listener started
+  timeout 120 sudo -n -- "$installer" controller-public-listener "$store" "$helper" "$BIN/mini" \
+    >"$continuation/public-listener.json"
+  jq -e --arg binary "$GRAINS_ROOT/controller/public-listener/mini" \
+    --arg digest "$(sha256sum "$BIN/mini" | cut -d ' ' -f1)" --arg socket "$run/world/sock/participant/host.sock" \
+    --slurpfile before "$fresh/controller-status.json" '
+    .store == $before[0].store and .controllerUid == $before[0].controllerUid and
+    .publicListener.binary == $binary and .publicListener.binarySha256 == $digest and
+    .publicListener.socket == $socket and .publicListener.controllerUid == .controllerUid' \
+    "$continuation/public-listener.json" >/dev/null || fail 'activation listener registration pins differ'
+  export SPK_PUBLIC_LISTENER_RECEIPT=$continuation/public-listener.json
+  world_phase_record public-listener completed "$continuation/public-listener.json"
   world_phase_record services started
   systemctl --user start "mini-spk-broker@$store.service"
   for ((i=0;i<100;i++)); do [[ ! -S $BROKER_SOCKET ]] || break; sleep .1; done
