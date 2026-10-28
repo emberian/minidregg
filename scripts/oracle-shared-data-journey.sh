@@ -73,6 +73,9 @@ repo=$(cd "$(dirname "$0")/.." && pwd)
 journey=$repo/scripts/spk-platform/grain-journey.sh
 fail() { echo "Oracle shared-data journey: $*" >&2; exit 1; }
 [[ $(uname -s) == Linux ]] || fail 'Linux required'
+ORACLE_CONSENT_MEMORY_MIB=${ORACLE_CONSENT_MEMORY_MIB:-4096}
+[[ $ORACLE_CONSENT_MEMORY_MIB =~ ^[1-9][0-9]{2,4}$ && $ORACLE_CONSENT_MEMORY_MIB -ge 256 && $ORACLE_CONSENT_MEMORY_MIB -le 16384 && $((ORACLE_CONSENT_MEMORY_MIB % 256)) == 0 ]] || fail 'consent memory must be 256..16384 MiB in 256 MiB increments'
+export ORACLE_CONSENT_MEMORY_MIB
 for path in "$base" "$own" "$run" "$spk" "$source" "$inventory" "$benchmark"; do
   [[ $path == /* && $path != *[!a-zA-Z0-9_./-]* && $path != */../* && $path != */./* && $path != *//* ]] || fail "simple absolute canonical path required: $path"
 done

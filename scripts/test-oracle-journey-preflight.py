@@ -14,6 +14,16 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @unittest.skipUnless(sys.platform.startswith('linux'), 'journey uses Linux stat and custody paths')
 class PreflightTests(unittest.TestCase):
+    def test_invalid_operator_memory_refuses_before_world_creation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for mib in ('0','257','16385','unlimited'):
+                with self.subTest(mib=mib):
+                    env={**os.environ,'ORACLE_CONSENT_MEMORY_MIB':mib,'ORACLE_STOP_BENCHMARK_JSON':tmp+'/unused.json'}
+                    result=subprocess.run(['bash',str(ROOT/'scripts/oracle-shared-data-journey.sh'),tmp,tmp,tmp+'/run',tmp+'/runtime.spk',tmp,tmp+'/inventory.json'],env=env,capture_output=True,text=True,timeout=15)
+                    self.assertNotEqual(result.returncode,0)
+                    self.assertIn('consent memory must be',result.stderr)
+                    self.assertFalse((Path(tmp)/'run').exists())
+
     def test_long_codec_socket_fails_before_run_creation(self):
         with tempfile.TemporaryDirectory() as tmp:
             run=Path(tmp)/'run'

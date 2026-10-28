@@ -58,6 +58,17 @@ def consent_evidence(run, require):
             and created['operatorUid'] != created['controllerUid']
             and created.get('consentSocket') == expected['socket']
             and created.get('consentPeerUid') == 0)
+    if (directory/'consent-memory.json').exists():
+        memory=read(directory/'consent-memory.json')
+        props=lambda suffix:dict(line.split('=',1) for line in (directory/('consent-memory-'+suffix+'.properties')).read_text().splitlines() if '=' in line)
+        before,after=props('before'),props('after')
+        require('initial_consent_operator_budget',memory['store']==world['store']
+            and memory['nativeOperationSubmitted'] is False
+            and before['Id']==after['Id']==expected['serviceUnit']
+            and before['MainPID']==after['MainPID']=='0'
+            and before['ActiveState'] in ('inactive','failed') and after['ActiveState'] in ('inactive','failed')
+            and before['MemorySwapMax']==after['MemorySwapMax']
+            and int(after['MemoryMax'])==memory['memoryMiB']*1024*1024)
     session = run / 'continuations/session-refusal-1'
     repair = None
     if session.exists():

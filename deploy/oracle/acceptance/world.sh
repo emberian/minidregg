@@ -117,6 +117,12 @@ world_controller_prepare() {
     "$run/world/sock/operator/host.sock" "$run/world/sock/participant/host.sock" \
     >"$run/agent-lifetime/controller-stage-receipt.json"
   controller_staged=1
+  # Operator verification gets an explicit budget before the first controller
+  # start; this is a supported stopped-unit revision, not an admission change.
+  systemctl show "mini-spk-controller-consent-$store.service" -p Id -p MainPID -p ActiveState -p MemoryMax -p MemorySwapMax >"$run/agent-lifetime/consent-memory-before.properties"
+  timeout 120 sudo -n -- "$installer" controller-consent-memory "$store" "$helper" "$ORACLE_CONSENT_MEMORY_MIB" >"$run/agent-lifetime/consent-memory.json"
+  systemctl show "mini-spk-controller-consent-$store.service" -p Id -p MainPID -p ActiveState -p MemoryMax -p MemorySwapMax >"$run/agent-lifetime/consent-memory-after.properties"
+  jq -e --arg store "$store" --argjson mib "$ORACLE_CONSENT_MEMORY_MIB" '.store == $store and .memoryMiB == $mib and .nativeOperationSubmitted == false' "$run/agent-lifetime/consent-memory.json" >/dev/null || fail 'initial consent budget revision differs'
   timeout 240 sudo -n -- "$installer" controller-start "$store" "$helper" >"$run/agent-lifetime/controller-bootstrap-start.json"
   world_controller_birth
 }
