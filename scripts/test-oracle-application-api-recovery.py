@@ -311,6 +311,24 @@ class ApplicationRecoveryBoundary(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'dispatch evidence'): self.check()
 
 
+class BrokerStoppedEvidence(unittest.TestCase):
+    def test_stale_socket_is_observed_without_unlinking_and_live_socket_refuses(self):
+        import socket,os
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);endpoint=root/'broker.sock'
+            (root/'broker-manager.txt').write_text('Id=own.service\nMainPID=0\nControlGroup=\nActiveState=inactive\n')
+            self.assertEqual(recovery.checked_stopped_broker(root,endpoint,'own.service',os.getuid())['state'],'absent')
+            with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as server:
+                server.bind(str(endpoint));endpoint.chmod(0o600);server.listen()
+                with self.assertRaisesRegex(ValueError,'accepts connections'):
+                    recovery.checked_stopped_broker(root,endpoint,'own.service',os.getuid())
+            inode=endpoint.stat().st_ino
+            result=recovery.checked_stopped_broker(root,endpoint,'own.service',os.getuid())
+            self.assertEqual(result['state'],'stale-refused');self.assertEqual(endpoint.stat().st_ino,inode)
+            (root/'broker-manager.txt').write_text('Id=own.service\nMainPID=123\nControlGroup=\nActiveState=inactive\n')
+            with self.assertRaisesRegex(ValueError,'owner unit'):
+                recovery.checked_stopped_broker(root,endpoint,'own.service',os.getuid())
+
 class OperatorUpgradeEvidence(unittest.TestCase):
     def setUp(self):
         spec = importlib.util.spec_from_file_location('report', Path(__file__).resolve().parents[1] /

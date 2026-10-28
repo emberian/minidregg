@@ -7,6 +7,9 @@ This harness preserves evidence; it never edits a native journal or Store.
 import base64
 import hashlib
 import json
+import errno
+import socket
+import stat
 import re
 import tempfile
 from pathlib import Path
@@ -314,6 +317,26 @@ def check_native(directory, terminal=False):
     return proof
 
 
+def checked_stopped_broker(observations, endpoint, unit, uid):
+    manager=dict(line.split('=',1) for line in (observations/'broker-manager.txt').read_text().splitlines() if '=' in line)
+    require(manager['Id']==unit and manager['MainPID']=='0' and manager['ControlGroup']==''
+            and manager['ActiveState'] in ('inactive','failed'), 'broker owner unit is not stopped')
+    try: before=endpoint.lstat()
+    except FileNotFoundError: return {'unit':unit,'socket':str(endpoint),'state':'absent','nativeReclaimRequired':False}
+    require(stat.S_ISSOCK(before.st_mode) and before.st_uid==uid and stat.S_IMODE(before.st_mode)==0o600
+            and before.st_nlink==1,'retained broker socket custody differs')
+    with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as probe:
+        probe.settimeout(1)
+        try: probe.connect(str(endpoint))
+        except OSError as error: require(error.errno==errno.ECONNREFUSED,'broker endpoint liveness is uncertain')
+        else: raise ValueError('broker endpoint still accepts connections')
+    after=endpoint.lstat()
+    identity=lambda s:(s.st_dev,s.st_ino,s.st_uid,s.st_mode,s.st_ctime_ns)
+    require(identity(before)==identity(after),'broker endpoint changed during inspection')
+    return {'unit':unit,'socket':str(endpoint),'state':'stale-refused','nativeReclaimRequired':True,
+            'device':before.st_dev,'inode':before.st_ino,'uid':before.st_uid,'mode':stat.S_IMODE(before.st_mode)}
+
+
 def checked_stopped_resume(run, directory, observations):
     """Resume only an audited original call whose native STOP finished before START."""
     require(directory == recovery_directories(run)[-1], 'resume must name latest API recovery')
@@ -401,6 +424,8 @@ def prepare_stopped_resume(run, directory, observations):
 
 if __name__ == '__main__':
     try:
+        if len(sys.argv)==6 and sys.argv[1]=='--check-stopped-broker':
+            print(json.dumps(checked_stopped_broker(Path(sys.argv[2]),Path(sys.argv[3]),sys.argv[4],int(sys.argv[5])))); raise SystemExit(0)
         if len(sys.argv) == 5 and sys.argv[1] == '--resume-after-stop':
             prepare_stopped_resume(*map(Path,sys.argv[2:])); raise SystemExit(0)
         if len(sys.argv) == 3 and sys.argv[1] == '--previous':

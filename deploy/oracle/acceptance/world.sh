@@ -731,7 +731,9 @@ world_resume_api_recovery() {
   timeout 120 sudo -n -- "$installer" controller-export "$store" "$helper" >"$fresh/controller-export.json"
   timeout 120 sudo -n -- "$installer" controller-status "$store" "$helper" >"$fresh/controller-status.json"
   systemctl --user show "$(jq -er .boundary.old_record.identity.unit "$api_recovery_resume/prepared.json")" -p Id -p MainPID -p ActiveState -p Job >"$fresh/manager.txt"
-  [[ ! -S $BROKER_SOCKET && ! -S $run/world/sock/operator/host.sock && ! -S $run/world/sock/participant/host.sock ]] || fail 'API resumption services are not stopped'
+  systemctl --user show "mini-spk-broker@$store.service" -p Id -p MainPID -p ActiveState -p ControlGroup >"$fresh/broker-manager.txt"
+  python3 -B "$repo/deploy/oracle/acceptance/recover_application_api.py" --check-stopped-broker "$fresh" "$BROKER_SOCKET" "mini-spk-broker@$store.service" "$op_uid" >"$fresh/broker-stopped.json"
+  [[ ! -S $run/world/sock/operator/host.sock && ! -S $run/world/sock/participant/host.sock ]] || fail 'API resumption services are not stopped'
   world_source_manifest >"$fresh/source-input-sha256.txt"
   sha256sum "$own/grain-runtime" "$ORACLE_SOCKET_RECLAIM_BIN" "$repo/scripts/application-payer-successor.py" >>"$fresh/source-input-sha256.txt"
   resumed=$(python3 -B "$repo/deploy/oracle/acceptance/recover_application_api.py" --resume-after-stop "$run" "$api_recovery_resume" "$fresh")
