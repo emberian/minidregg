@@ -120,8 +120,11 @@ def controlGroupWithin (group : List UInt8) : Bool :=
 
 example : controlGroupBound = 317 := by decide
 /-- The 260-byte group observed on dregg-build is accepted. -/
+set_option maxRecDepth 4000 in
 example : controlGroupWithin (List.replicate 260 0) = true := by decide
+set_option maxRecDepth 4000 in
 example : controlGroupWithin (List.replicate controlGroupBound 0) = true := by decide
+set_option maxRecDepth 4000 in
 example : controlGroupWithin (List.replicate (controlGroupBound + 1) 0) = false := by decide
 example : controlGroupWithin [] = false := by decide
 
