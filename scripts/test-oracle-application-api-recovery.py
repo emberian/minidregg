@@ -87,7 +87,7 @@ class ApplicationRecoveryBoundary(unittest.TestCase):
         (self.observations/'manager.txt').write_text('Id=test.service\nMainPID=99\nActiveState=active\nJob=\n')
         with self.assertRaisesRegex(ValueError,'physically stopped'): self.check()
 
-    def test_native_proof_and_audited_terminal_do_not_claim_an_answer(self):
+    def native_terminal(self):
         boundary = self.check()
         output = self.run / 'continuation'; output.mkdir()
         self.save('continuation/prepared.json', {'boundary':boundary})
@@ -109,10 +109,54 @@ class ApplicationRecoveryBoundary(unittest.TestCase):
             journal[key]=None
         self.save('continuation/terminal-journal.json',journal)
         recovery.check_native(output,terminal=True)
+        return output, journal
+
+    def test_native_proof_and_audited_terminal_do_not_claim_an_answer(self):
+        output, journal = self.native_terminal()
+        foreground = journal['foregroundHistory'][0]
         foreground['resultPath']='/fabricated/result.json'
         self.save('continuation/terminal-journal.json',journal)
         with self.assertRaisesRegex(ValueError,'fabricated result'):
             recovery.check_native(output,terminal=True)
+
+    def test_second_recovery_preserves_prior_proof_and_selects_exact_successor(self):
+        import contextlib
+        import io
+        import shutil
+        output, journal = self.native_terminal()
+        previous = self.run / 'continuations/application-api-recovery-1'
+        output.rename(previous)
+        prepared = recovery.read(previous/'prepared.json')
+        prepared.update(preserved={}, archived={})
+        self.save(str((previous/'prepared.json').relative_to(self.run)), prepared)
+        self.save('continuations/application-api-recovery-1/exit.json',
+                  {'execution_exit':2, 'cleanup_exit':0, 'namespace_preserved':True})
+        self.save('continuations/application-api-recovery-1/phases/enrollment.completed.json', {'evidence':{}})
+        self.save('continuations/application-api-recovery-1/successor-start.json',
+                  {'generation':'6','unit':'test.service'})
+        runtime = previous/'bin/grain-runtime'; runtime.parent.mkdir(); runtime.write_bytes(b'new runtime')
+        status = recovery.read(self.observations/'controller-status.json')
+        status['runtimeSha256'] = recovery.sha(runtime)
+        self.save('observations/controller-status.json',status)
+        shutil.copytree(self.run/'state/apps/9101/g4',self.run/'state/apps/9101/g6')
+        with self.assertRaisesRegex(ValueError,'audited request'): self.check()
+        self.request_id = 'b'*32; self.request['requestId'] = self.request_id
+        self.journal['foregroundAttempt']['requestId'] = self.request_id
+        (self.run/'agent-lifetime/probe/discover-core-query.request-id').write_text(self.request_id)
+        self.refresh()
+        self.assertEqual(self.check()['old_generation'],'6')
+        self.assertEqual(self.check()['previous_execution'],str(previous))
+        (self.run/'input-sha256.txt').write_text('')
+        original_proof = (previous/'native-recovery.json').read_bytes()
+        with contextlib.redirect_stdout(io.StringIO()):
+            recovery.prepare(self.run,self.observations,self.request_id)
+        self.assertTrue((self.run/'continuations/application-api-recovery-2/prepared.json').exists())
+        self.assertEqual((previous/'native-recovery.json').read_bytes(), original_proof)
+        self.assertEqual(recovery.retained_paths(self.run,after=previous)[str(self.run/'agent-lifetime/probe/discover-core-query.request-id')]['sha256'],hashlib.sha256(self.request_id.encode()).hexdigest())
+
+    def test_incomplete_recovery_sequence_refuses(self):
+        (self.run/'continuations/application-api-recovery-2').mkdir()
+        with self.assertRaisesRegex(ValueError,'sequence is incomplete'): self.check()
 
     def test_resident_dispatch_artifact_refuses(self):
         self.save('state/apps/9101/g4/agent-oracle-agent-v1-attempts/agent-lifetime-dispatch-op-41/reserve.json', {'possible':'reserve'})

@@ -32,11 +32,43 @@ def exported(export, name):
     return raw
 
 
+def recovery_directories(run):
+    paths = list((run / 'continuations').glob('application-api-recovery-*'))
+    require(all(p.name.rsplit('-', 1)[-1].isdigit() for p in paths), 'unknown API recovery directory')
+    paths.sort(key=lambda p: int(p.name.rsplit('-', 1)[-1]))
+    require([int(p.name.rsplit('-', 1)[-1]) for p in paths] == list(range(1, len(paths)+1)),
+            'API recovery sequence is incomplete')
+    return paths
+
+
+def previous_execution(run):
+    paths = recovery_directories(run)
+    if not paths:
+        return run / 'continuations/activation-successor-1'
+    previous = paths[-1]
+    check_native(previous, terminal=True)
+    require((previous / 'phases/enrollment.completed.json').is_file(),
+            'previous API recovery did not reach enrollment')
+    return previous
+
+
+def retained_paths(run, after=None):
+    """Find the first preserved version after an execution, before later overwrites."""
+    retained = {}
+    for directory in recovery_directories(run):
+        if after is not None and int(directory.name.rsplit('-', 1)[-1]) <= int(after.name.rsplit('-', 1)[-1]):
+            continue
+        prepared = read(directory / 'prepared.json')
+        for name, entry in {**prepared['preserved'], **prepared['archived']}.items():
+            retained.setdefault(name, entry)
+    return retained
+
+
 def checked_boundary(run, observations, request_id):
     root = run / 'agent-lifetime'
-    previous = run / 'continuations/activation-successor-1'
+    previous = previous_execution(run)
     require(read(previous / 'exit.json') == {'execution_exit': 2, 'cleanup_exit': 0,
-                                           'namespace_preserved': True}, 'not stopped after first API failure')
+                                           'namespace_preserved': True}, 'not stopped after the retained API failure')
     require((root / 'probe/discover-core-query.request-id').read_text().strip() == request_id,
             'foreground request ID differs')
     export = read(observations / 'controller-export.json')
@@ -46,6 +78,9 @@ def checked_boundary(run, observations, request_id):
     journal = json.loads(exported(export, 'journal.json'))
     require(journal == read(root / 'controller-final-journal.json'), 'retained controller journal differs')
     foreground = journal['foregroundAttempt']; api = journal['applicationApiAttempt']
+    if previous.name.startswith('application-api-recovery-'):
+        require(request_id != read(previous / 'prepared.json')['boundary']['request_id'],
+                'original audited request cannot be submitted again')
     require(foreground['requestId'] == request_id and foreground['name'] == 'mini_oracle_discover'
             and foreground['phase'] == 'uncertain' and foreground['resultPath'] is None
             and foreground['resultSha256'] is None and foreground['reported'] is False,
@@ -74,7 +109,7 @@ def checked_boundary(run, observations, request_id):
             and hold['reserve'] == '1' and hold['charge'] == '0', 'foreground hold differs')
     status = read(observations / 'controller-status.json')
     require(status['store'] == world['store'] and status['stopped'] is True
-            and status['runtimeSha256'] == sha(run / 'continuations/activation-recovery-1/bin/grain-runtime')
+            and status['runtimeSha256'] == sha((previous if previous.name.startswith('application-api-recovery-') else run / 'continuations/activation-recovery-1') / 'bin/grain-runtime')
             and status['controllerConfigSha256'] == sha(root / 'controller-active-initial.json'),
             'stopped controller pins differ')
     start = read(previous / 'successor-start.json')
@@ -98,7 +133,7 @@ def checked_boundary(run, observations, request_id):
     require(not any((run / path).exists() for path in ('browser', 'world/evidence/post-a1.stdout',
                                                      'agent-lifetime/probe-restart')),
             'later qualification work already exists')
-    return {'store': world['store'], 'request_id': request_id, 'foreground': foreground, 'api': api,
+    return {'previous_execution': str(previous), 'store': world['store'], 'request_id': request_id, 'foreground': foreground, 'api': api,
             'parent_hold': hold, 'old_generation': start['generation'], 'old_record': record,
             'journal_sha256': export['files']['journal.json']['sha256'],
             'grant_receipt': read(root / 'issued-grant.json')['grantReceipt'],
@@ -108,7 +143,7 @@ def checked_boundary(run, observations, request_id):
 
 def prepare(run, observations, request_id):
     boundary = checked_boundary(run, observations, request_id)
-    output = run / 'continuations/application-api-recovery-1'
+    output = run / 'continuations' / ('application-api-recovery-' + str(len(recovery_directories(run)) + 1))
     require(not output.exists(), 'API recovery already prepared; inspect retained phases')
     for line in (run / 'input-sha256.txt').read_text().splitlines():
         digest, path = line.split(None, 1)
@@ -119,8 +154,9 @@ def prepare(run, observations, request_id):
     shutil.copytree(observations, output / 'observations')
     # Freeze earlier phase evidence before services/initial labels change.
     preserved = {}
-    for directory in ('activation-recovery-1', 'activation-successor-1'):
-        for phase in (run / 'continuations' / directory / 'phases').glob('*.completed.json'):
+    for directory in [run / 'continuations/activation-recovery-1', run / 'continuations/activation-successor-1',
+                      *[p for p in recovery_directories(run) if p != output]]:
+        for phase in (directory / 'phases').glob('*.completed.json'):
             for name, digest in read(phase)['evidence'].items():
                 source = Path(name)
                 if source.is_file() and sha(source) == digest and name not in preserved:
@@ -185,6 +221,9 @@ def check_native(directory, terminal=False):
 
 if __name__ == '__main__':
     try:
+        if len(sys.argv) == 3 and sys.argv[1] == '--previous':
+            print(previous_execution(Path(sys.argv[2])))
+            raise SystemExit(0)
         if len(sys.argv) == 3 and sys.argv[1] in ('--check-native', '--check-terminal'):
             check_native(Path(sys.argv[2]), sys.argv[1] == '--check-terminal')
             raise SystemExit(0)

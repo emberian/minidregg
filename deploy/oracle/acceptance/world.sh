@@ -675,7 +675,7 @@ PYSTOPSOCKET
 }
 
 world_recover_application_api() {
-  local fresh expected_runtime current_unit
+  local fresh expected_runtime current_unit previous_execution reclaim_label
   op_uid=$(id -u)
   export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$op_uid} BIN=$run/bin
   store=$(jq -er '.store | select(test("^[0-9a-f]{16}$"))' "$run/world-identity.json")
@@ -696,7 +696,8 @@ world_recover_application_api() {
   fresh=$(mktemp -d "$run/api-preflight.XXXXXXXX")
   timeout 120 sudo -n -- "$installer" controller-export "$store" "$helper" >"$fresh/controller-export.json"
   timeout 120 sudo -n -- "$installer" controller-status "$store" "$helper" >"$fresh/controller-status.json"
-  current_unit=$(jq -er .unit "$run/continuations/activation-successor-1/successor-start.json")
+  previous_execution=$(python3 -B "$repo/deploy/oracle/acceptance/recover_application_api.py" --previous "$run")
+  current_unit=$(jq -er .unit "$previous_execution/successor-start.json")
   [[ $current_unit == mini-spk-s"$store"-a9101-g*.service ]] || fail 'API recovery unit differs'
   systemctl --user show "$current_unit" -p Id -p ActiveState -p MainPID -p Job >"$fresh/manager.txt"
   [[ $(systemctl --user show "mini-spk-broker@$store.service" -p ActiveState --value) == inactive
@@ -704,7 +705,7 @@ world_recover_application_api() {
   world_source_manifest >"$fresh/source-input-sha256.txt"
   sha256sum "$own/grain-runtime" "$ORACLE_SOCKET_RECLAIM_BIN" >>"$fresh/source-input-sha256.txt"
   continuation=$(python3 -B "$repo/deploy/oracle/acceptance/recover_application_api.py" "$run" "$fresh" "$api_recovery_request")
-  [[ $continuation == "$run/continuations/application-api-recovery-1" ]] || fail 'API recovery output differs'
+  [[ $continuation == "$run/continuations/application-api-recovery-"* && ${continuation##*-} =~ ^[0-9]+$ ]] || fail 'API recovery output differs'
   mkdir -m700 "$continuation/bin"
   install -m500 "$own/grain-runtime" "$continuation/bin/grain-runtime"
   controller_runtime=$continuation/bin/grain-runtime
@@ -755,8 +756,9 @@ world_recover_application_api() {
   jq -e --arg old "$old_generation" '.protocol == "mini-spk-grain-stop-v1" and .app == "9101" and .generation == $old' "$continuation/stop.json" >/dev/null || fail 'API recovery STOP identity differs'
   cp "$state/apps/9101/g$old_generation/record.json" "$continuation/old-record-after-stop.json"
   cp -a "$state/apps/9101/g$old_generation/stop-completion" "$continuation/stop-completion"
-  world_reclaim_stopped_agent_socket 9101 "$old_generation" api-recovery
-  world_phase_record retire-incarnation completed "$continuation/stop.json" "$continuation/old-record-after-stop.json" "$run/native-agent-socket-reclaims/api-recovery/result.json"
+  reclaim_label=api-recovery-${continuation##*-}
+  world_reclaim_stopped_agent_socket 9101 "$old_generation" "$reclaim_label"
+  world_phase_record retire-incarnation completed "$continuation/stop.json" "$continuation/old-record-after-stop.json" "$run/native-agent-socket-reclaims/$reclaim_label/result.json"
   world_phase_record successor-start started
   timeout 1800 "$BIN/spk-host" grain start "$profile" 9101 >"$continuation/successor-start.json" 2>"$continuation/successor-start.stderr"
   jq -e --arg old "$old_generation" '.protocol == "mini-spk-grain-start-v1" and .app == "9101" and (.generation | tonumber) > ($old | tonumber) and .startAction.kind == "continue" and .completion.completionReceipt.eventId' "$continuation/successor-start.json" >/dev/null || fail 'API successor START differs'

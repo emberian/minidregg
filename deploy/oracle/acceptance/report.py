@@ -420,11 +420,8 @@ def activation_recovery(run, require):
     directory = run / 'continuations/activation-recovery-1'
     if not directory.exists():
         return None
-    api_directory = run / 'continuations/application-api-recovery-1'
-    retained = {}
-    if (api_directory / 'prepared.json').exists():
-        api_prepared = read(api_directory / 'prepared.json')
-        retained = {**api_prepared['preserved'], **api_prepared['archived']}
+    from recover_application_api import retained_paths
+    retained = retained_paths(run)
     def original(path):
         entry = retained.get(str(path))
         return Path(entry['path']) if entry else Path(path)
@@ -546,10 +543,17 @@ def activation_recovery(run, require):
 
 
 def application_api_recovery(run, require):
-    directory = run / 'continuations/application-api-recovery-1'
-    if not directory.exists():
-        return None
-    from recover_application_api import check_native
+    from recover_application_api import recovery_directories
+    return [application_api_recovery_attempt(run, directory, require)
+            for directory in recovery_directories(run)]
+
+
+def application_api_recovery_attempt(run, directory, require):
+    from recover_application_api import check_native, retained_paths
+    retained = retained_paths(run, after=directory)
+    def original(path):
+        entry = retained.get(str(path))
+        return Path(entry['path']) if entry else Path(path)
     proof = check_native(directory, terminal=True)
     prepared = read(directory / 'prepared.json'); boundary = prepared['boundary']
     require('api_recovery_explicit_original_request',
@@ -574,22 +578,22 @@ def application_api_recovery(run, require):
             and all(read(path).get('eventId') and read(path).get('worldRoot') for path in stops))
     journal = read(directory / 'terminal-journal.json')
     binding = hashlib.sha256(json.dumps(journal['binding'],sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()).hexdigest()
-    enrollment = read(run / 'agent-lifetime/enrollment-initial/request.json')
+    enrollment = read(original(run / 'agent-lifetime/enrollment-initial/request.json'))
     require('api_recovery_successor_binding_enrolled', enrollment['expectedBindingSha256'] == binding)
     require('api_recovery_original_grant_preserved',
             read(run / 'agent-lifetime/issued-grant.json')['grantReceipt'] == boundary['grant_receipt'])
     require('api_recovery_new_discovery_id_after_terminal_audit',
-            (run / 'agent-lifetime/probe/discover-core-query.request-id').read_text().strip() != boundary['request_id'])
+            original(run / 'agent-lifetime/probe/discover-core-query.request-id').read_text().strip() != boundary['request_id'])
     for phase in ('runtime-upgrade','services','controller-start','native-recovery','native-reconciliation',
                   'retire-incarnation','successor-start','enrollment'):
         value = read(directory / 'phases' / (phase+'.completed.json'))
         require('api_recovery_phase_'+phase, value['phase']==phase and value['state']=='completed'
                 and value['started_sha256']==sha(directory / 'phases' / (phase+'.started.json')))
         for name,digest in value['evidence'].items():
-            require('api_recovery_evidence_'+name,sha(Path(name))==digest)
+            require('api_recovery_evidence_'+name,sha(original(name))==digest)
     for line in (directory / 'recovery-input-sha256.txt').read_text().splitlines():
         digest,name=line.split(None,1)
-        require('api_recovery_source_'+name,sha(Path(name))==digest)
+        require('api_recovery_source_'+name,sha(original(name))==digest)
     return {'proof':proof,'original_request_id':boundary['request_id'],
             'terminal':'audited, already reported; no definitive answer or separate ACK',
             'retransmitted':False,'successor_start':start,'execution_exit_path':str(directory / 'exit.json')}
