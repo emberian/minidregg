@@ -11,7 +11,7 @@
 world_source_manifest() {
   sha256sum "$repo/scripts/oracle-shared-data-journey.sh" \
     "$repo/deploy/oracle/acceptance/world.sh" "$repo/deploy/oracle/acceptance/report.py" "$repo/deploy/oracle/acceptance/browser_edge.py" \
-    "$repo/deploy/oracle/acceptance/continue_controller.py" "$repo/deploy/oracle/acceptance/recover_foreground.py" "$repo/deploy/oracle/acceptance/volume_cleanup.py" \
+    "$repo/deploy/oracle/acceptance/continue_controller.py" "$repo/deploy/oracle/acceptance/recover_foreground.py" "$repo/deploy/oracle/acceptance/recover_activation.py" "$repo/deploy/oracle/acceptance/volume_cleanup.py" \
     "$repo/deploy/oracle/acceptance/agent.py" "$repo/deploy/oracle/acceptance/agent-cases.json" \
     "$repo/deploy/oracle/acceptance/agent-allocation.json" "$repo/scripts/oracle-agent-lifetime-journey.sh" \
     "$repo/scripts/oracle-stop-inspection-probe.py" "$repo/scripts/oracle-agent-authority-probe.py" \
@@ -491,6 +491,75 @@ world_continue_session() {
   # Original null-operation error is archived, not ACKable. Only this new tool
   # ID may create a session; its successful native result uses normal ACK.
   world_controller_birth
+}
+
+# Continue only the failed, pre-commit lifetime-route enrollment. The old
+# session, grant and START remain admitted; a dead incarnation is supervised
+# through native STOP and successor START, never relaunched in place.
+world_continue_activation() {
+  local run=$1 repo=$2 fresh unit expected_runtime
+  op_uid=$(id -u)
+  export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$op_uid}
+  export BIN=$run/bin
+  store=$(jq -er '.store | select(test("^[0-9a-f]{16}$"))' "$run/world-identity.json")
+  helper=$(jq -er .helper "$run/world-identity.json")
+  export GRAINS_ROOT=/var/lib/mini-spk-worlds/$store
+  export BROKER_SOCKET=$GRAINS_ROOT/runtime-$store/broker.sock
+  [[ $(jq -er .root "$run/world-identity.json") == "$GRAINS_ROOT"
+      && $helper =~ ^/usr/local/libexec/mini-spk-volume-helper-[0-9a-f]{16}$ ]] || fail 'activation namespace differs'
+  installer=$repo/deploy/spk-host/install-user-world
+  units=$XDG_RUNTIME_DIR/systemd/user
+  config=$run/world/store/base/workroom/deployment/pinned-config.json
+  profile=$(jq -er .profilePath "$run/world/evidence/profile-result.json")
+  state=$(jq -er .stateRoot "$run/world/evidence/profile-result.json")
+  expected_runtime=${ORACLE_RECOVERY_RUNTIME_SHA256:?qualified recovery runtime digest required}
+  [[ $expected_runtime =~ ^[0-9a-f]{64}$
+      && $(sha256sum "$own/grain-runtime" | cut -d ' ' -f1) == "$expected_runtime" ]] || fail 'recovery runtime pin differs'
+  sha256sum -c "$run/binary-sha256.txt" >"$run/activation-original-binary-check.txt"
+  [[ $(sha256sum "$base/minidregg-host" | cut -d ' ' -f1) == $(sha256sum "$BIN/minidregg-host" | cut -d ' ' -f1) ]] || fail 'recovery Host changed'
+  fresh=$(mktemp -d "$run/activation-preflight.XXXXXXXX")
+  timeout 120 sudo -n -- "$installer" controller-export "$store" "$helper" >"$fresh/controller-export.json"
+  timeout 120 sudo -n -- "$installer" controller-status "$store" "$helper" >"$fresh/controller-status.json"
+  unit=$(jq -er .unit "$run/world/evidence/start-a.stdout")
+  [[ $unit == mini-spk-s"$store"-a9101-g*.service ]] || fail 'old app unit differs'
+  systemctl --user show "$unit" -p Id -p LoadState -p ActiveState -p SubState -p MainPID -p InvocationID -p Job >"$fresh/manager.txt"
+  [[ $(systemctl --user show "mini-spk-broker@$store.service" -p ActiveState --value) == inactive ]] || fail 'broker is not stopped'
+  [[ ! -S $run/world/sock/operator/host.sock && ! -S $run/world/sock/participant/host.sock ]] || fail 'operator services are not stopped'
+  world_source_manifest >"$fresh/source-input-sha256.txt"
+  sha256sum "$own/grain-runtime" >>"$fresh/source-input-sha256.txt"
+  continuation=$(python3 -B "$repo/deploy/oracle/acceptance/recover_activation.py" "$run" "$fresh")
+  [[ $continuation == "$run/continuations/activation-recovery-1" ]] || fail 'activation recovery path differs'
+  mkdir -m700 "$continuation/bin"
+  install -m500 "$own/grain-runtime" "$continuation/bin/grain-runtime"
+  controller_runtime=$continuation/bin/grain-runtime
+  cp "$fresh/source-input-sha256.txt" "$continuation/recovery-input-sha256.txt"
+  sha256sum "$controller_runtime" >>"$continuation/recovery-input-sha256.txt"
+  preserve_existing_exit=0
+  configured=1 controller_created=1 controller_staged=1
+  world_phase_record runtime-upgrade started
+  timeout 120 sudo -n -- "$installer" controller-runtime-upgrade "$store" "$helper" "$controller_runtime" >"$continuation/runtime-upgrade.json"
+  jq -e --arg expected "$expected_runtime" --arg previous "$(sha256sum "$BIN/grain-runtime" | cut -d ' ' -f1)" \
+    '.runtimeSha256 == $expected and .previousRuntimeSha256 == $previous' "$continuation/runtime-upgrade.json" >/dev/null || fail 'runtime upgrade differs'
+  world_phase_record runtime-upgrade completed "$continuation/runtime-upgrade.json"
+  world_phase_record services started
+  systemctl --user start "mini-spk-broker@$store.service"
+  for ((i=0;i<100;i++)); do [[ ! -S $BROKER_SOCKET ]] || break; sleep .1; done
+  [[ -S $BROKER_SOCKET && $(stat -c '%u:%a' "$BROKER_SOCKET") == "$op_uid:600" ]] || fail 'recovery broker readiness failed'
+  "$journey" phase "$run/world" services >"$continuation/services.log" 2>&1
+  world_phase_record services completed "$run/world/sock/operator.pid.identity.json" "$run/world/sock/participant.pid.identity.json"
+  world_phase_record supervise started
+  timeout 1800 "$BIN/spk-host" grain supervise "$profile" 9101 >"$continuation/supervise.json" 2>"$continuation/supervise.stderr"
+  jq -e --arg old "$(jq -er .boundary.old_generation "$continuation/prepared.json")" \
+    '.action == "stop-and-continue" and .crashed.generation == $old and .start.app == "9101"
+     and (.start.generation | tonumber) > ($old | tonumber) and .start.completion.completionReceipt.eventId' \
+    "$continuation/supervise.json" >/dev/null || fail 'supervision did not admit successor START'
+  jq .start "$continuation/supervise.json" >"$continuation/successor-start.json"
+  local old_generation
+  old_generation=$(jq -er .boundary.old_generation "$continuation/prepared.json")
+  cp "$state/apps/9101/g$old_generation/record.json" "$continuation/old-record-after-stop.json"
+  cp -a "$state/apps/9101/g$old_generation/stop-completion" "$continuation/stop-completion"
+  world_phase_record supervise completed "$continuation/supervise.json" "$continuation/successor-start.json"
+  world_phase_record enrollment started
 }
 
 world_phase_record() {

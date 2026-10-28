@@ -8,7 +8,7 @@ umask 077
 invocation_args=("$@")
 usage() {
   cat <<'HELP'
-usage: scripts/oracle-shared-data-journey.sh [--resume|--continue-controller|--continue-session|--continue-checkpoint CHECKPOINT_JSON|--recover-foreground PLAN_JSON] BASE_BIN OWN_BIN RUN_ROOT SIGNED_RUNTIME_SPK DATA_SOURCE INVENTORY_JSON
+usage: scripts/oracle-shared-data-journey.sh [--resume|--continue-controller|--continue-session|--continue-activation|--continue-checkpoint CHECKPOINT_JSON|--recover-foreground PLAN_JSON] BASE_BIN OWN_BIN RUN_ROOT SIGNED_RUNTIME_SPK DATA_SOURCE INVENTORY_JSON
 
 Linux operator account with user systemd/linger, subordinate UID/GID allocation,
 passwordless access to deploy/spk-host/install-user-world, bwrap, jq, curl, python3.
@@ -23,6 +23,9 @@ failure after both installs, publication and share. It never repeats those phase
 qualified stopped-controller repairs, and uses a new tool ID after native enrollment.
 Its --resume-prepared suffix is limited to the recorded source-manifest refusal
 with a durable backup, identical stopped state, and no repair or tool attempt.
+--continue-activation preserves an admitted session/grant and failed pre-commit
+route enrollment. It upgrades the stopped runtime, supervises the dead app into
+a native STOP and successor START, then enrolls a newly checked route.
 --continue-checkpoint accepts an explicitly sealed unstarted phase boundary;
 completed effects remain retained and any started phase requires inspection.
 --recover-foreground requires an independently qualified binary manifest and
@@ -47,6 +50,7 @@ case ${1:-} in
   --resume) mode=resume; shift ;;
   --continue-controller) mode=continue-controller; shift ;;
   --continue-session) mode=continue-session; shift ;;
+  --continue-activation) mode=continue-activation; shift ;;
   --continue-checkpoint) mode=continue-checkpoint; checkpoint=${2:?checkpoint required}; shift 2 ;;
   --recover-foreground) mode=recover-foreground; recovery_plan=${2:?recovery plan required}; shift 2 ;;
 esac
@@ -74,7 +78,7 @@ fi
 if [[ $mode == new ]]; then
   [[ ! -e $run && ! -L $run ]] || fail 'run directory already exists'
 else
-  if [[ $mode == continue-session || $mode == continue-checkpoint || $mode == recover-foreground ]]; then
+  if [[ $mode == continue-session || $mode == continue-activation || $mode == continue-checkpoint || $mode == recover-foreground ]]; then
     python3 -B "$repo/deploy/oracle/acceptance/continue_controller.py" --check-session-custody "$run" >/dev/null
   else
     [[ -d $run && ! -L $run && $(stat -c '%u:%a' "$run") == "$(id -u):700" ]] || fail 'retained run custody differs'
@@ -150,7 +154,7 @@ inventory_sha=$(sha256sum "$inventory" | cut -d ' ' -f1)
 export SPK=$spk CLASS_A=L CLASS_B=L GET_PATH_A=/health GET_PATH_B=/health
 export KIND_A=api KIND_B=api ROLE_BASIS_A='{"type":"role","id":"0"}' ROLE_BASIS_B='{"type":"role","id":"0"}'
 if [[ ${ORACLE_BROWSER_B:-0} == 1 ]]; then
-  [[ $mode == new ]] || fail 'browser-B is only supported for a fresh qualification'
+  [[ $mode == new || $mode == continue-activation ]] || fail 'browser-B requires a fresh or unstarted activation qualification'
   [[ ${ORACLE_BROWSER_PORT:-} =~ ^[1-9][0-9]{3,4}$ ]] && ((ORACLE_BROWSER_PORT>=1024 && ORACLE_BROWSER_PORT<=65535)) || fail 'explicit browser port required'
   [[ ${ORACLE_CADDY_BIN:-} == /* && -x $ORACLE_CADDY_BIN && ! -L $ORACLE_CADDY_BIN
       && ${ORACLE_CADDY_SHA256:-} =~ ^[0-9a-f]{64}$ ]] || fail 'pinned Caddy executable required'
@@ -161,14 +165,14 @@ elif [[ ${ORACLE_BROWSER_B:-0} != 0 ]]; then
 fi
 case ${ORACLE_POOLED_TENANT_PROBE:-0} in
   0) ;;
-  1) [[ $mode == new ]] || fail 'pooled tenant probe requires a fresh qualification' ;;
+  1) [[ $mode == new || $mode == continue-activation ]] || fail 'pooled tenant probe requires a fresh or unstarted activation qualification' ;;
   *) fail 'ORACLE_POOLED_TENANT_PROBE must be 0 or 1' ;;
 esac
 export POST_PATH_A=/query POST_PATH_B=/query POST_TYPE_A=application/json POST_TYPE_B=application/json
 . "$repo/deploy/oracle/acceptance/world.sh"
 configured=0
 preserve_existing_exit=0
-[[ $mode != continue-controller && $mode != continue-session && $mode != continue-checkpoint && $mode != recover-foreground ]] || preserve_existing_exit=1
+[[ $mode != continue-controller && $mode != continue-session && $mode != continue-activation && $mode != continue-checkpoint && $mode != recover-foreground ]] || preserve_existing_exit=1
 trap world_cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
@@ -180,6 +184,8 @@ if [[ $mode == recover-foreground ]]; then
   # A recovered definite refusal concludes this retained failed journey. It
   # never creates a grant or starts an application; cleanup preserves the Store.
   if [[ ${foreground_settlement_only:-0} == 1 ]]; then exit 0; fi
+elif [[ $mode == continue-activation ]]; then
+  world_continue_activation "$run" "$repo"
 elif [[ $mode == continue-checkpoint ]]; then
   world_continue_checkpoint "$run" "$repo"
 elif [[ $mode == continue-session ]]; then
@@ -206,7 +212,7 @@ cp "$inventory" "$run/inventory.json"
 cp "$benchmark" "$run/copied-store-stop-benchmark.json"
 fi
 phase() { timeout 1800 "$journey" phase "$run/world" "$@"; }
-if [[ $mode != continue-controller && $mode != continue-session && $mode != continue-checkpoint && $mode != recover-foreground ]]; then
+if [[ $mode != continue-controller && $mode != continue-session && $mode != continue-activation && $mode != continue-checkpoint && $mode != recover-foreground ]]; then
 # INSTALL does not launch the app or open its signed data attachment. Complete
 # both installations while the large-profile spool reserve is available, then
 # publish data before either START. The native guards remain unchanged.
@@ -222,10 +228,15 @@ world_disk_snapshot after-publication
 phase share-a
 fi
 publication=$GRAINS_ROOT/spk/public-data/sha256-$inventory_sha
-if [[ $mode != continue-session && $mode != continue-checkpoint && $mode != recover-foreground ]]; then world_controller_prepare; fi
+if [[ $mode != continue-session && $mode != continue-activation && $mode != continue-checkpoint && $mode != recover-foreground ]]; then world_controller_prepare; fi
 if [[ $mode == continue-checkpoint || $mode == recover-foreground ]]; then world_phase_record admitted-application-journey started; fi
-phase start-a
-world_controller_activate "$run/world/evidence/start-a.stdout" initial
+if [[ $mode == continue-activation ]]; then
+  world_controller_activate "$continuation/successor-start.json" initial
+  world_phase_record enrollment completed "$run/agent-lifetime/enrollment-initial/result.json"
+else
+  phase start-a
+  world_controller_activate "$run/world/evidence/start-a.stdout" initial
+fi
 world_controller_probe initial probe
 world_authority_probe
 phase floor-a enroll-a get-a
