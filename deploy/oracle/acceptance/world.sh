@@ -708,7 +708,7 @@ world_recovery_operator_upgrades() {
 }
 
 world_resume_api_recovery() {
-  local fresh resumed old_generation expected_runtime
+  local fresh resumed resume_root service_phase old_generation expected_runtime
   op_uid=$(id -u)
   export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$op_uid} BIN=$run/bin
   store=$(jq -er '.store | select(test("^[0-9a-f]{16}$"))' "$run/world-identity.json")
@@ -737,31 +737,40 @@ world_resume_api_recovery() {
   world_source_manifest >"$fresh/source-input-sha256.txt"
   sha256sum "$own/grain-runtime" "$ORACLE_SOCKET_RECLAIM_BIN" "$repo/scripts/application-payer-successor.py" >>"$fresh/source-input-sha256.txt"
   resumed=$(python3 -B "$repo/deploy/oracle/acceptance/recover_application_api.py" --resume-after-stop "$run" "$api_recovery_resume" "$fresh")
-  [[ $resumed == "$api_recovery_resume/resumption" ]] || fail 'resumption output differs'
+  resume_root=$api_recovery_resume/resumption
+  [[ $resumed == "$resume_root" || ( $resumed == "$resume_root/retries/"* && ${resumed##*/} =~ ^[0-9]+$ ) ]] || fail 'resumption output differs'
   continuation=$api_recovery_resume
-  mkdir -m700 "$resumed/bin"
-  install -m500 "$own/grain-runtime" "$resumed/bin/grain-runtime"
-  controller_runtime=$resumed/bin/grain-runtime
+  controller_runtime=$resume_root/bin/grain-runtime
+  preserve_existing_exit=0 configured=1 controller_created=1 controller_staged=1
+  if [[ $resumed == "$resume_root" ]]; then
+    mkdir -m700 "$resumed/bin"
+    install -m500 "$own/grain-runtime" "$controller_runtime"
+    world_phase_record resume-runtime-upgrade started
+    timeout 120 sudo -n -- "$installer" controller-runtime-upgrade "$store" "$helper" "$controller_runtime" >"$resumed/runtime-upgrade.json"
+    jq -e --arg expected "$expected_runtime" --arg previous "$(jq -er .runtime_sha256 "$resumed/prepared.json")" '.runtimeSha256 == $expected and .previousRuntimeSha256 == $previous' "$resumed/runtime-upgrade.json" >/dev/null || fail 'resumption runtime upgrade differs'
+    world_phase_record resume-runtime-upgrade completed "$resumed/runtime-upgrade.json" "$resumed/prepared.json" "$resumed/prior-exit.json"
+    service_phase=resume-services
+  else
+    [[ $(sha256sum "$controller_runtime" | cut -d ' ' -f1) == "$expected_runtime" && $(jq -er .runtimeSha256 "$fresh/controller-status.json") == "$expected_runtime" ]] || fail 'prepared runtime differs'
+    service_phase=resume-services-retry-${resumed##*/}
+  fi
   cp "$fresh/source-input-sha256.txt" "$resumed/source-input-sha256.txt"
   sha256sum "$controller_runtime" >>"$resumed/source-input-sha256.txt"
-  preserve_existing_exit=0 configured=1 controller_created=1 controller_staged=1
-  world_phase_record resume-runtime-upgrade started
-  timeout 120 sudo -n -- "$installer" controller-runtime-upgrade "$store" "$helper" "$controller_runtime" >"$resumed/runtime-upgrade.json"
-  jq -e --arg expected "$expected_runtime" --arg previous "$(jq -er .runtime_sha256 "$resumed/prepared.json")" '.runtimeSha256 == $expected and .previousRuntimeSha256 == $previous' "$resumed/runtime-upgrade.json" >/dev/null || fail 'resumption runtime upgrade differs'
-  world_phase_record resume-runtime-upgrade completed "$resumed/runtime-upgrade.json" "$resumed/prepared.json" "$resumed/prior-exit.json"
+  # controller-status proves the public listener is stopped too. Capture this
+  # evidence before starting that listener; a live listener must still refuse.
+  timeout 120 sudo -n -- "$installer" controller-status "$store" "$helper" >"$resumed/controller-status.json"
+  timeout 120 sudo -n -- "$installer" controller-journal "$store" "$helper" >"$resumed/controller-journal.json"
+  timeout 120 sudo -n -- "$installer" controller-export "$store" "$helper" >"$resumed/controller-export.json"
   cp "$fresh/controller-status.json" "$resumed/public-listener.json"
   jq -e --arg binary "$GRAINS_ROOT/controller/public-listener/mini" --arg digest "$(sha256sum "$BIN/mini" | cut -d ' ' -f1)" --arg socket "$run/world/sock/participant/host.sock" '.publicListener.binary == $binary and .publicListener.binarySha256 == $digest and .publicListener.socket == $socket and .publicListener.controllerUid == .controllerUid' "$resumed/public-listener.json" >/dev/null || fail 'resumption listener differs'
   export SPK_PUBLIC_LISTENER_RECEIPT=$resumed/public-listener.json
-  world_phase_record resume-services started
+  world_phase_record "$service_phase" started
   systemctl --user start "mini-spk-broker@$store.service"
   for ((i=0;i<100;i++)); do [[ ! -S $BROKER_SOCKET ]] || break; sleep .1; done
   [[ -S $BROKER_SOCKET && $(stat -c '%u:%a' "$BROKER_SOCKET") == "$op_uid:600" ]] || fail 'resumption broker differs'
   "$journey" phase "$run/world" services >"$resumed/services.log" 2>&1
-  world_phase_record resume-services completed "$run/world/sock/operator.pid.identity.json" "$run/world/sock/participant.pid.identity.json"
-  world_phase_record payer-route-successor started
-  timeout 120 sudo -n -- "$installer" controller-status "$store" "$helper" >"$resumed/controller-status.json"
-  timeout 120 sudo -n -- "$installer" controller-journal "$store" "$helper" >"$resumed/controller-journal.json"
-  timeout 120 sudo -n -- "$installer" controller-export "$store" "$helper" >"$resumed/controller-export.json"
+  world_phase_record "$service_phase" completed "$run/world/sock/operator.pid.identity.json" "$run/world/sock/participant.pid.identity.json" "$resumed/prepared.json" "$resumed/prior-exit.json" "$resumed/source-input-sha256.txt"
+  if [[ ! -e $continuation/phases/payer-route-successor.started.json ]]; then world_phase_record payer-route-successor started; fi
   jq -n --arg root "$run/agent-lifetime" --arg allocation "$run/agent-lifetime/allocation.json" --arg profile "$profile" --arg host "$BIN/minidregg-host" --arg config "$config" --arg spkHost "$BIN/spk-host" --arg repo "$repo" --arg status "$resumed/controller-status.json" --arg journal "$resumed/controller-journal.json" --arg stop "$continuation/stop.json" --arg evidence "$resumed/controller-export.json" --arg output "$run/agent-lifetime/repair-payer-custody" '{protocol:"mini-application-payer-successor-v1",attachmentRoot:$root,allocation:$allocation,profile:$profile,host:$host,hostConfig:$config,spkHost:$spkHost,correctedRepo:$repo,controllerStatus:$status,controllerJournal:$journal,controllerEvidence:$evidence,inspectionMode:"detached",stopReceipt:$stop,outputDir:$output,successorName:"oracle-agent-v2"}' >"$resumed/payer-successor-request.json"
   timeout 1800 python3 -B "$repo/scripts/application-payer-successor.py" "$resumed/payer-successor-request.json" >"$resumed/payer-successor.stdout" 2>"$resumed/payer-successor.stderr"
   [[ $(cat "$resumed/payer-successor.stdout") == "$run/agent-lifetime/repair-payer-custody/complete.json" ]] || fail 'payer successor output differs'

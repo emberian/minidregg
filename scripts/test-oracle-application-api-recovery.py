@@ -159,6 +159,25 @@ class ApplicationRecoveryBoundary(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'physical stopped'):
             recovery.checked_stopped_resume(self.run,directory,self.observations)
 
+    def test_prepared_resumption_can_continue_only_before_custody_migration(self):
+        import contextlib,io
+        directory=self.stopped_resumption_fixture()
+        with contextlib.redirect_stdout(io.StringIO()): recovery.prepare_stopped_resume(self.run,directory,self.observations)
+        resumed=directory/'resumption'; (resumed/'bin').mkdir(); runtime=resumed/'bin/grain-runtime';runtime.write_bytes(b'new exact runtime')
+        self.save(str((resumed/'runtime-upgrade.json').relative_to(self.run)),{'previousRuntimeSha256':recovery.sha(directory/'bin/grain-runtime'),'runtimeSha256':recovery.sha(runtime)})
+        self.save(str((directory/'phases/resume-runtime-upgrade.completed.json').relative_to(self.run)),{'evidence':{}})
+        (resumed/'source-input-sha256.txt').write_text('')
+        status=recovery.read(self.observations/'controller-status.json');status['runtimeSha256']=recovery.sha(runtime)
+        self.save('observations/controller-status.json',status)
+        self.save(str((directory/'exit.json').relative_to(self.run)),{'execution_exit':1,'cleanup_exit':0,'namespace_preserved':True})
+        self.assertEqual(recovery.checked_stopped_resume(self.run,directory,self.observations)['runtime_sha256'],recovery.sha(runtime))
+        with contextlib.redirect_stdout(io.StringIO()): recovery.prepare_stopped_resume(self.run,directory,self.observations)
+        self.assertEqual(recovery.read(resumed/'retries/1/prior-exit.json')['execution_exit'],1)
+        self.assertEqual(recovery.read(resumed/'retries/1/prepared.json')['runtime_sha256'],recovery.sha(runtime))
+        (resumed/'payer-successor-request.json').write_text('{}')
+        with self.assertRaisesRegex(ValueError,'migration was prepared'):
+            recovery.checked_stopped_resume(self.run,directory,self.observations)
+
     def test_stopped_resumption_refuses_fenced_controller(self):
         directory=self.stopped_resumption_fixture()
         export=recovery.read(self.observations/'controller-export.json')

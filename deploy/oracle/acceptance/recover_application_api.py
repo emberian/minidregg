@@ -343,12 +343,33 @@ def checked_stopped_resume(run, directory, observations):
     prepared = read(directory/'prepared.json'); b = prepared['boundary']
     require(b.get('kind') == 'unreserved-api', 'resume requires native unreserved API recovery')
     proof = check_native(directory, terminal=True)
-    require(read(directory/'exit.json') == {'execution_exit':143,'cleanup_exit':0,'namespace_preserved':True},
+    resumption=directory/'resumption'
+    prepared_resume=resumption.is_dir()
+    require(read(resumption/'prior-exit.json' if prepared_resume else directory/'exit.json') ==
+            {'execution_exit':143,'cleanup_exit':0,'namespace_preserved':True},
             'resume requires recorded operator interruption and successful cleanup')
+    expected_runtime=directory/'bin/grain-runtime'
+    if prepared_resume:
+        interrupted=read(directory/'exit.json')
+        require(interrupted['execution_exit']!=0 and interrupted['cleanup_exit']==0
+                and interrupted['namespace_preserved'] is True, 'prepared resumption did not stop cleanly')
+        adopted=read(resumption/'prepared.json')
+        require(adopted['original_prepared_sha256']==sha(directory/'prepared.json')
+                and adopted['stop_sha256']==sha(directory/'stop.json'), 'prepared resumption source boundary changed')
+        upgrade=read(resumption/'runtime-upgrade.json'); expected_runtime=resumption/'bin/grain-runtime'
+        require(upgrade['previousRuntimeSha256']==sha(directory/'bin/grain-runtime')
+                and upgrade['runtimeSha256']==sha(expected_runtime)
+                and (directory/'phases/resume-runtime-upgrade.completed.json').is_file(),
+                'prepared runtime upgrade is incomplete')
+        require(not (run/'agent-lifetime/repair-payer-custody').exists(), 'payer migration already began')
+        for attempt in [resumption,*sorted((resumption/'retries').glob('*'))]:
+            require(not (attempt/'payer-successor-request.json').exists(), 'payer migration was prepared; inspect its command')
+            for line in (attempt/'source-input-sha256.txt').read_text().splitlines():
+                digest,name=line.split(None,1);require(sha(Path(name))==digest,'prepared resumption source changed')
     require((directory/'phases/retire-incarnation.started.json').is_file()
             and not any((directory/name).exists() for name in
                 ('phases/retire-incarnation.completed.json','phases/successor-start.started.json',
-                 'successor-start.json','resumption')), 'resume boundary has already advanced')
+                 'successor-start.json')), 'resume boundary has already advanced')
     for entry in [*prepared['preserved'].values(), *prepared['archived'].values()]:
         require(sha(Path(entry['path'])) == entry['sha256'], 'preserved original evidence changed')
     for line in (directory/'recovery-input-sha256.txt').read_text().splitlines():
@@ -359,7 +380,7 @@ def checked_stopped_resume(run, directory, observations):
     active_config=run/'agent-lifetime/controller-active-initial.json'
     retained_config=Path(prepared['archived'].get(str(active_config),{'path':str(active_config)})['path'])
     require(status['store']==b['store'] and status['stopped'] is True
-            and status['runtimeSha256']==sha(directory/'bin/grain-runtime')
+            and status['runtimeSha256']==sha(expected_runtime)
             and status['controllerConfigSha256']==sha(retained_config),
             'stopped controller pin differs')
     require(journal['binding']==terminal['binding'] and proof in journal['reconciliationLog']
@@ -400,18 +421,31 @@ def checked_stopped_resume(run, directory, observations):
 def prepare_stopped_resume(run, directory, observations):
     value=checked_stopped_resume(run,directory,observations)
     evidence={}
-    for phase in (directory/'phases').glob('*.completed.json'):
+    for phase in sorted((directory/'phases').glob('*.completed.json'), key=lambda p:read(p).get('unix_time_ns',0)):
         for name,digest in read(phase)['evidence'].items():
-            require(sha(Path(name))==digest,'prior recovery phase evidence changed')
-            evidence[name]=digest
+            source=Path(name)
+            if not source.is_file() or sha(source)!=digest:
+                candidates=[directory/'resumption',*sorted((directory/'resumption/retries').glob('*'))]
+                for candidate in candidates:
+                    if not (candidate/'prepared.json').is_file(): continue
+                    entry=read(candidate/'prepared.json').get('preserved',{}).get(name)
+                    if entry and entry['sha256']==digest:
+                        source=Path(entry['path']);break
+            require(source.is_file() and sha(source)==digest,'prior recovery phase evidence changed')
+            evidence[(name,digest)]=source
     output=directory/'resumption'
+    if output.exists():
+        retries=output/'retries'; retries.mkdir(mode=0o700,exist_ok=True)
+        existing=list(retries.iterdir())
+        require(all(p.name.isdigit() for p in existing),'unknown resumption retry directory')
+        output=retries/str(len(existing)+1)
     staging=Path(tempfile.mkdtemp(prefix='resumption-prepared.',dir=directory))
     shutil.copytree(observations,staging/'observations')
     preserved={}
-    for name,digest in evidence.items():
-        relative=Path('prior-evidence')/hashlib.sha256(name.encode()).hexdigest()
+    for (name,digest),source in evidence.items():
+        relative=Path('prior-evidence')/hashlib.sha256((name+digest).encode()).hexdigest()
         target=staging/relative; target.parent.mkdir(mode=0o700,exist_ok=True)
-        shutil.copyfile(name,target)
+        shutil.copyfile(source,target)
         require(sha(target)==digest,'copied recovery phase evidence changed')
         preserved[name]={'path':str(output/relative),'sha256':digest}
     value['preserved']=preserved

@@ -586,6 +586,7 @@ def application_api_recovery_attempt(run, directory, require):
     def resumed_original(path):
         return Path(later_retained.get(str(path), {'path':str(path)})['path'])
     resumption = directory / 'resumption'
+    resumptions = [resumption,*sorted((resumption/'retries').glob('*'))] if resumption.is_dir() else []
     if resumption.is_dir():
         retained.update(read(resumption/'prepared.json')['preserved'])
     def original(path):
@@ -642,10 +643,20 @@ def application_api_recovery_attempt(run, directory, require):
                 and read(resumption/'prior-exit.json')=={'execution_exit':143,'cleanup_exit':0,'namespace_preserved':True})
         require('api_resumption_exact_runtime_successor', next_runtime['previousRuntimeSha256']==upgrade['runtimeSha256']
                 and next_runtime['runtimeSha256']==sha(resumption/'bin/grain-runtime'))
-        for entry in resumed['preserved'].values():
-            require('api_resumption_preserved_'+entry['path'],sha(Path(entry['path']))==entry['sha256'])
-        for line in (resumption/'source-input-sha256.txt').read_text().splitlines():
-            digest,name=line.split(None,1);require('api_resumption_source_'+name,sha(Path(name))==digest)
+        for attempt in resumptions:
+            preparation=read(attempt/'prepared.json')
+            require('api_resumption_boundary_'+str(attempt),preparation['original_prepared_sha256']==sha(directory/'prepared.json')
+                    and preparation['stop_sha256']==sha(directory/'stop.json') and preparation['retransmit'] is False)
+            if attempt!=resumption:
+                prior=read(attempt/'prior-exit.json')
+                require('api_resumption_clean_pre_migration_retry_'+str(attempt),prior['execution_exit']!=0
+                        and prior['cleanup_exit']==0 and prior['namespace_preserved'] is True
+                        and preparation['runtime_sha256']==next_runtime['runtimeSha256'])
+                extra_phases.append('resume-services-retry-'+attempt.name)
+            for entry in preparation['preserved'].values():
+                require('api_resumption_preserved_'+entry['path'],sha(Path(entry['path']))==entry['sha256'])
+            for line in (attempt/'source-input-sha256.txt').read_text().splitlines():
+                digest,name=line.split(None,1);require('api_resumption_source_'+name,sha(Path(name))==digest)
         repair=run/'agent-lifetime/repair-payer-custody'
         complete=read(repair/'complete.json')
         require('api_resumption_native_payer_route_successor', complete['protocol']=='mini-application-payer-successor-complete-v1'
@@ -660,7 +671,11 @@ def application_api_recovery_attempt(run, directory, require):
         require('api_recovery_phase_'+phase, value['phase']==phase and value['state']=='completed'
                 and value['started_sha256']==sha(directory / 'phases' / (phase+'.started.json')))
         for name,digest in value['evidence'].items():
-            require('api_recovery_evidence_'+name,sha(resumed_original(name) if phase in ('resume-runtime-upgrade','resume-services','payer-route-successor') else original(name))==digest)
+            candidates=[original(name),resumed_original(name)]
+            for attempt in resumptions:
+                entry=read(attempt/'prepared.json')['preserved'].get(name)
+                if entry and entry['sha256']==digest: candidates.append(Path(entry['path']))
+            require('api_recovery_evidence_'+name,any(p.is_file() and sha(p)==digest for p in candidates))
     for line in (directory / 'recovery-input-sha256.txt').read_text().splitlines():
         digest,name=line.split(None,1)
         require('api_recovery_source_'+name,sha(original(name))==digest)
