@@ -1,5 +1,5 @@
 /-
-STATEMENT ONLY, not elaborated, no proof. For the auditor (af7a93e7b8ba729d4) before any proof work.
+STATEMENT ONLY, no proofs: every Prop below is stated and unproven (no `sorry` is used; they are `def ... : Prop`). For the auditor (af7a93e7b8ba729d4) before any proof work.
 
 Problem. A grain-backed share issue is planned at height p: the ticket's root grants carry
 `notBefore := p` and `notAfter := p + record.lifetime`
@@ -20,7 +20,8 @@ births, policies).
 import Kernel.ApplicationShareIssueGrainAdmission
 
 namespace Minidregg.Kernel.ApplicationShareIssueGrainAdmission
-open Minidregg.Compiler Minidregg.Theory Minidregg.Kernel.ApplicationShareIssueSource
+open Minidregg.Compiler Minidregg.Theory Minidregg.Theory.ResourceBirth Minidregg.Theory.TypedAuthorization
+open Minidregg.Theory.CellRegistry Minidregg.Theory.CellState Minidregg.Kernel.ApplicationShareIssueSource
 
 variable {F : Type} [Field F] [DecidableEq F]
 
@@ -32,7 +33,7 @@ def descriptorPlannedAt {profile : CanonicalRuntimeProfile.Profile F} {config : 
       (ResourceBirthController.Concrete.sourceIdentity profile.compilerProfile
         config.deployment spec.issuer spec.ticket.issueNonce).value)
     (record : PlatformCellLayout.Platform) (authority : AuthState) (p : Nat)
-    (payer : Nat) (funding : List InitialFunding) (auxiliaryCreates : _) :
+    (payer : Nat) (funding : List InitialFunding) (auxiliaryCreates : List (CreateRequest (CellId := Nat) CanonicalCellRegistry.registry)) :
     Descriptor CanonicalCellRegistry.registry :=
   { ready.expectedDescriptor profile config record authority p payer funding with
     auxiliaryCreates := auxiliaryCreates }
@@ -45,7 +46,7 @@ def PlannedWithinWindow {profile : CanonicalRuntimeProfile.Profile F} {config : 
       (ResourceBirthController.Concrete.sourceIdentity profile.compilerProfile
         config.deployment spec.issuer spec.ticket.issueNonce).value)
     (record : PlatformCellLayout.Platform) (authority : AuthState) (h : Nat)
-    (signed : Descriptor CanonicalCellRegistry.registry) (auxiliaryCreates : _) : Prop :=
+    (signed : Descriptor CanonicalCellRegistry.registry) (auxiliaryCreates : List (CreateRequest (CellId := Nat) CanonicalCellRegistry.registry)) : Prop :=
   ∃ p, p ≤ h ∧ h < p + record.lifetime ∧
     signed = descriptorPlannedAt ready record authority p signed.fee.payer signed.funding auxiliaryCreates
 
@@ -57,7 +58,7 @@ def pole_admits_after_one_tick : Prop :=
       (ResourceBirthController.Concrete.sourceIdentity profile.compilerProfile
         config.deployment spec.issuer spec.ticket.issueNonce).value)
     (record : PlatformCellLayout.Platform) (authority : AuthState) (p : Nat)
-    (payer : Nat) (funding : List InitialFunding) (aux : _),
+    (payer : Nat) (funding : List InitialFunding) (aux : List (CreateRequest (CellId := Nat) CanonicalCellRegistry.registry)),
     1 < record.lifetime →
     PlannedWithinWindow ready record authority (p + 1)
       (descriptorPlannedAt ready record authority p payer funding aux) aux
@@ -69,7 +70,7 @@ def pole_refuses_expired : Prop :=
       (ResourceBirthController.Concrete.sourceIdentity profile.compilerProfile
         config.deployment spec.issuer spec.ticket.issueNonce).value)
     (record : PlatformCellLayout.Platform) (authority : AuthState) (p h : Nat)
-    (payer : Nat) (funding : List InitialFunding) (aux : _),
+    (payer : Nat) (funding : List InitialFunding) (aux : List (CreateRequest (CellId := Nat) CanonicalCellRegistry.registry)),
     p + record.lifetime ≤ h →
     ¬ PlannedWithinWindow ready record authority h
         (descriptorPlannedAt ready record authority p payer funding aux) aux
@@ -82,7 +83,7 @@ def pole_refuses_altered : Prop :=
       (ResourceBirthController.Concrete.sourceIdentity profile.compilerProfile
         config.deployment spec.issuer spec.ticket.issueNonce).value)
     (record : PlatformCellLayout.Platform) (authority : AuthState) (h : Nat)
-    (signed : Descriptor CanonicalCellRegistry.registry) (aux : _),
+    (signed : Descriptor CanonicalCellRegistry.registry) (aux : List (CreateRequest (CellId := Nat) CanonicalCellRegistry.registry)),
     (∀ p, signed ≠ descriptorPlannedAt ready record authority p signed.fee.payer signed.funding aux) →
     ¬ PlannedWithinWindow ready record authority h signed aux
 
@@ -94,7 +95,7 @@ def pole_refuses_future_plan : Prop :=
       (ResourceBirthController.Concrete.sourceIdentity profile.compilerProfile
         config.deployment spec.issuer spec.ticket.issueNonce).value)
     (record : PlatformCellLayout.Platform) (authority : AuthState) (p h : Nat)
-    (payer : Nat) (funding : List InitialFunding) (aux : _),
+    (payer : Nat) (funding : List InitialFunding) (aux : List (CreateRequest (CellId := Nat) CanonicalCellRegistry.registry)),
     h < p →
     (∀ q, q ≤ h → descriptorPlannedAt ready record authority q payer funding aux ≠
       descriptorPlannedAt ready record authority p payer funding aux) →
@@ -106,7 +107,7 @@ production profile (the platform record's `lifetime` pin is positive; the existi
 fixtures instantiate `Ready`). To be discharged against `Fixtures.NativeAcceptedFixture`. -/
 def premise_inhabited : Prop :=
   ∃ (profile : CanonicalRuntimeProfile.Profile F) (config : NativeHost.Config) (spec : Spec)
-    (ready : Ready config.deployment.domain spec
+    (_ready : Ready config.deployment.domain spec
       (ResourceBirthController.Concrete.sourceIdentity profile.compilerProfile
         config.deployment spec.issuer spec.ticket.issueNonce).value)
     (record : PlatformCellLayout.Platform), 1 < record.lifetime
@@ -120,41 +121,61 @@ def lemma_plan_height_determined : Prop :=
       (ResourceBirthController.Concrete.sourceIdentity profile.compilerProfile
         config.deployment spec.issuer spec.ticket.issueNonce).value)
     (record : PlatformCellLayout.Platform) (authority : AuthState) (p q : Nat)
-    (payer : Nat) (funding : List InitialFunding) (aux : _),
+    (payer : Nat) (funding : List InitialFunding) (aux : List (CreateRequest (CellId := Nat) CanonicalCellRegistry.registry)),
     descriptorPlannedAt ready record authority p payer funding aux =
       descriptorPlannedAt ready record authority q payer funding aux → p = q
 
-/- App-delegation leg. `ApplicationShareIssueDelegation.appRequestFromSourceBytes` puts `height`
-into the signed request (`height := height`, ApplicationShareIssueSource.lean, field `height`), and
-`Prepared`/`Checked` are built at `ambient.height` (Accepted.appPrepared/appChecked, lines 69-72 of
-ApplicationShareIssueGrainAdmission.lean). The signature in `ingress.appEnvelope` was made over the
-request at the PLAN height, so this leg has the same submit-height equality: it must be rebuilt at
-the plan height p as well. The policy epoch and revision of that request come from the authority
-at the loaded image (`authority.policyEpoch`, `.policyRevision`) and are checked current at submit,
-not at p; that part stays as it is. -/
+/- App-delegation leg. `ApplicationShareIssueDelegation.prepare` is called at `ambient.height`
+(admitNative, line 141) and `appRequest` puts that `height` into the signed request, so the
+signature in `ingress.appEnvelope` (made at the PLAN height) has the same submit-height mismatch.
+The leg is therefore windowed by the same `p`. Its policy epoch and revision come from the loaded
+authority and stay checked at submit. NOT covered here, flagged for the auditor:
+`GrainResourceBirthController.prepareSourceBirth ... ambient.height` (admitNative, line 117) also
+reads the submit height; whether that height reaches the descriptor bytes is not established by
+this statement. -/
 
-/- The real change to `Accepted`. In `ApplicationShareIssueGrainAdmission.Accepted` three fields
-read `ambient.height`: `sourceDescriptor` (byte equality of the ticket descriptor), `appPrepared`
-(the delegation request) and, through it, `appChecked`. They are replaced by the fields below, with
-`planHeight` existential in `Accepted` itself (no wire change, no new signed field); the rest of
-`Accepted` is unchanged.
+/-- The relaxed `Accepted.sourceDescriptor` field: it replaces the strict field (descriptor rebuilt
+at `ambient.height`) and the strict `appPrepared`/`appChecked` fields (request built at
+`ambient.height`) by one conjunction over a single plan height `p`, existential, no wire change.
+`Accepted` itself would carry `p` and the three conjuncts as fields; this Prop is that field set.
+The grain-side `birth` and the `Checked` read guards stay as they are in `Accepted`. -/
+def AcceptedWindowFields {profile : CanonicalRuntimeProfile.Profile F} {config : NativeHost.Config}
+    {spec : Spec}
+    (ready : Ready config.deployment.domain spec
+      (ResourceBirthController.Concrete.sourceIdentity profile.compilerProfile
+        config.deployment spec.issuer spec.ticket.issueNonce).value)
+    (record : PlatformCellLayout.Platform) (authority : AuthState)
+    (context : ApplicationShareIssueDelegation.Context config.deployment)
+    (h : Nat) (signed : Descriptor CanonicalCellRegistry.registry) (aux : List (CreateRequest (CellId := Nat) CanonicalCellRegistry.registry))
+    (envelope : List UInt8) : Prop :=
+  ∃ p, p ≤ h ∧ h < p + record.lifetime ∧
+    signed = descriptorPlannedAt ready record authority p signed.fee.payer signed.funding aux ∧
+    ∃ prepared : ApplicationShareIssueDelegation.Prepared context profile config.federation p spec signed,
+      Nonempty (ApplicationShareIssueDelegation.Checked prepared envelope)
 
-    planHeight : Nat
-    planHeight_not_future : planHeight ≤ ambient.height
-    planHeight_open : ambient.height < planHeight + grainAccepted.pending.record.lifetime
-    sourceDescriptor : decoded.source.birth =
-      { sourceReady.expectedDescriptor profile config grainAccepted.pending.record
-          birth.prepared.pre.authority.snapshot.authState planHeight
-          decoded.source.birth.fee.payer decoded.source.birth.funding with
-        auxiliaryCreates := birth.prepared.authorityCombined.auxiliaryCreates }
-    appPrepared : ApplicationShareIssueDelegation.Prepared
-      (Minidregg.Compiler.ServedBasis.Ground.full _ birth.prepared.pre.directory birth.prepared.pre.authority)
-        profile config.federation planHeight ingress.spec decoded.source.birth
-    appChecked : ApplicationShareIssueDelegation.Checked appPrepared ingress.appEnvelope
+/-- The descriptor leg of `AcceptedWindowFields` is exactly `PlannedWithinWindow`. -/
+def AcceptedWindowFields.descriptor_leg : Prop :=
+  ∀ {profile : CanonicalRuntimeProfile.Profile F} {config : NativeHost.Config} {spec : Spec}
+    (ready : Ready config.deployment.domain spec
+      (ResourceBirthController.Concrete.sourceIdentity profile.compilerProfile
+        config.deployment spec.issuer spec.ticket.issueNonce).value)
+    (record : PlatformCellLayout.Platform) (authority : AuthState)
+    (context : ApplicationShareIssueDelegation.Context config.deployment)
+    (h : Nat) (signed : Descriptor CanonicalCellRegistry.registry) (aux : List (CreateRequest (CellId := Nat) CanonicalCellRegistry.registry)) (envelope : List UInt8),
+    AcceptedWindowFields (profile := profile) ready record authority context h signed aux envelope →
+      PlannedWithinWindow ready record authority h signed aux
 
-`Accepted.sound` then states `decoded.source.birth` is the descriptor rebuilt at `planHeight`.
-`admitNative` finds `planHeight` by reading the grants' `notBefore` of the decoded birth (the
-determinacy lemma above makes it the only candidate), then tests the three conditions.
-`PlannedWithinWindow` is the corresponding predicate on the descriptor. -/
+/-- Backward compatibility: the strict (submit-height) acceptance is the window with `p = h`, so
+every issue the old `Accepted` admitted is still admitted. -/
+def strict_implies_window : Prop :=
+  ∀ {profile : CanonicalRuntimeProfile.Profile F} {config : NativeHost.Config} {spec : Spec}
+    (ready : Ready config.deployment.domain spec
+      (ResourceBirthController.Concrete.sourceIdentity profile.compilerProfile
+        config.deployment spec.issuer spec.ticket.issueNonce).value)
+    (record : PlatformCellLayout.Platform) (authority : AuthState)
+    (h : Nat) (signed : Descriptor CanonicalCellRegistry.registry) (aux : List (CreateRequest (CellId := Nat) CanonicalCellRegistry.registry)),
+    1 ≤ record.lifetime →
+    signed = descriptorPlannedAt ready record authority h signed.fee.payer signed.funding aux →
+    PlannedWithinWindow ready record authority h signed aux
 
 end Minidregg.Kernel.ApplicationShareIssueGrainAdmission
