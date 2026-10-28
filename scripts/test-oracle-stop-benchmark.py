@@ -31,6 +31,33 @@ class BenchmarkGuards(unittest.TestCase):
             config.write_text(json.dumps({"storageRoot": str(root), "expectedSeed": 7}))
             self.configs.append(config)
 
+    def test_native_reference_requires_actual_success_and_same_host_bytes(self):
+        paths={key:self.root/(key+'.json') for key in ('host_binary','stop_receipt','command_result','control_claim')}
+        paths['host_binary'].write_bytes(b'qualified Host')
+        paths['control_claim'].write_bytes(b'canonical claim checked by later native negative control')
+        paths['stop_receipt'].write_text(json.dumps({'protocol':'mini-spk-grain-stop-v1','activeState':'inactive','generation':'2'}))
+        paths['command_result'].write_text(json.dumps({'exitCode':0}))
+        value={'schema':'mini-oracle-native-stop-reference-v1','host_sha256':probe.file_digest(paths['host_binary']).hex(),
+               **{key:{'path':str(path),'sha256':probe.file_digest(path).hex()} for key,path in paths.items()}}
+        reference=self.root/'reference.json';reference.write_text(json.dumps(value))
+        self.assertEqual(probe.checked_native_reference(reference,paths['host_binary']),value)
+        value['host_sha256']='0'*64;reference.write_text(json.dumps(value))
+        with self.assertRaisesRegex(RuntimeError,'selected Host'):probe.checked_native_reference(reference,paths['host_binary'])
+        value['host_sha256']=value['host_binary']['sha256'];reference.write_text(json.dumps(value))
+        paths['command_result'].write_text(json.dumps({'exitCode':1}))
+        with self.assertRaisesRegex(RuntimeError,'file differs'):probe.checked_native_reference(reference,paths['host_binary'])
+        value['command_result']['sha256']=probe.file_digest(paths['command_result']).hex();reference.write_text(json.dumps(value))
+        with self.assertRaisesRegex(RuntimeError,'completed native stop'):probe.checked_native_reference(reference,paths['host_binary'])
+
+    def test_current_snapshot_refuses_wal_before_any_native_process(self):
+        config=self.configs[0];root=Path(json.loads(config.read_bytes())['storageRoot'])
+        (root/'forward-link.sqlite3-wal').write_bytes(b'uncheckpointed write')
+        out=self.root/'snapshot'
+        with self.assertRaisesRegex(RuntimeError,'quiescent WAL'):
+            probe.snapshot_current(['--host','/missing','--mini','/missing','--source-config',str(config),
+                '--plan','/missing','--committed','/missing','--mismatched-committed','/missing','--out',str(out)])
+        self.assertFalse(list(out.glob('*.pid')))
+
     def test_authority_refusal_requires_exact_current_reason(self):
         reason = "lifetime grant absent from admitted history"
         outcome = {"type": "refused", "effect": "no-record", "phase": b"op 80".hex(),

@@ -28,3 +28,8 @@ Q3 is incomplete: no paid agent query or browser pass is claimed.
 Q4's run marker and current physical identity live under
 `/build/lanes/o7q4-20261028`. It is owned by the Oracle qualification lane;
 stopped services during repair do not make its world disposable.
+
+Q4 preflight pins the prior same-Host native J14 STOP. Its own cold/served
+inspection comparison runs immediately after its first STOP, before a successor
+START can make that plan historical. A trial against J14's older generation
+correctly refused; that refusal is retained and is not counted as a pass.

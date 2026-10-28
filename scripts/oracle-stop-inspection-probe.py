@@ -16,6 +16,8 @@ import socket
 import struct
 import subprocess
 import time
+import sys
+import shutil
 
 OP = 155
 MAX_FRAME = 12_102_760
@@ -169,6 +171,76 @@ def cold(args, output):
     return raw
 
 
+def checked_native_reference(path, host):
+    value=json.loads(path.read_bytes())
+    if value.get('schema')!='mini-oracle-native-stop-reference-v1' or value.get('host_sha256')!=file_digest(host).hex():
+        raise RuntimeError('native STOP reference must pin the selected Host')
+    for key in ('host_binary','stop_receipt','command_result','control_claim'):
+        source=Path(value[key]['path'])
+        if not source.is_file() or source.is_symlink() or file_digest(source).hex()!=value[key]['sha256']:
+            raise RuntimeError('native STOP reference file differs: '+key)
+    if value['host_binary']['sha256']!=value['host_sha256']:
+        raise RuntimeError('native STOP producer Host differs')
+    stop=json.loads(Path(value['stop_receipt']['path']).read_bytes())
+    result=json.loads(Path(value['command_result']['path']).read_bytes())
+    if (stop.get('protocol')!='mini-spk-grain-stop-v1' or stop.get('activeState')!='inactive'
+            or not stop.get('generation','').isdecimal() or result!={'exitCode':0}):
+        raise RuntimeError('native STOP reference is not a completed native stop')
+    return value
+
+
+def snapshot_current(argv):
+    """Compare on a copy while the calling journey waits before successor START."""
+    parser=argparse.ArgumentParser()
+    for name in ('host','mini','source-config','plan','committed','mismatched-committed','out'):
+        parser.add_argument('--'+name,type=Path,required=True)
+    args=parser.parse_args(argv); args.out.mkdir(mode=0o700)
+    config=json.loads(args.source_config.read_bytes()); root=Path(config['storageRoot'])
+    source_files=(args.source_config,root/'forward-link.sqlite3',Path(str(root)+'.head-anchor'))
+    wal=root/'forward-link.sqlite3-wal'
+    if wal.exists() and wal.stat().st_size: raise RuntimeError('snapshot needs a quiescent WAL checkpoint')
+    before={str(p):file_digest(p).hex() for p in source_files}
+    database=source_files[1].read_bytes();anchor=source_files[2].read_bytes()
+    if (before!={str(p):file_digest(p).hex() for p in source_files}
+            or digest(database)!=before[str(source_files[1])] or digest(anchor)!=before[str(source_files[2])]
+            or (wal.exists() and wal.stat().st_size)):
+        raise RuntimeError('source changed during read-only snapshot')
+    store=args.out/'store';store.mkdir(mode=0o700)
+    (store/'forward-link.sqlite3').write_bytes(database);Path(str(store)+'.head-anchor').write_bytes(anchor)
+    copied=args.out/'config.json';copied.write_text(json.dumps({**config,'storageRoot':str(store)},indent=2)+'\n')
+    (args.out/'snapshot.json').write_text(json.dumps({'source':before,'copyDatabaseSha256':digest(database),
+        'copyAnchorSha256':digest(anchor),'walBytes':0,'writerBoundary':'journey waits after native STOP, before successor START',
+        'nativeOperationSubmitted':False},indent=2)+'\n')
+    processes=[]
+    try:
+        for name,command in (
+            ('operator',[str(args.mini),'serve-operator','--host',str(args.host),'--config',str(copied),'--socket',str(args.out/'op.sock')]),
+            ('public',[str(args.mini),'serve-public-proxy','--config',str(copied),'--socket',str(args.out/'pub.sock'),'--upstream',str(args.out/'op.sock')])):
+            with (args.out/(name+'.log')).open('xb') as log:
+                process=subprocess.Popen(command,stdin=subprocess.DEVNULL,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
+            processes.append(process);(args.out/(name+'.pid')).write_text(str(process.pid)+'\n')
+            endpoint=args.out/('op.sock' if name=='operator' else 'pub.sock');deadline=time.monotonic()+60
+            while not endpoint.is_socket():
+                if process.poll() is not None or time.monotonic()>deadline: raise RuntimeError('copied '+name+' failed readiness')
+                time.sleep(.1)
+        command=[sys.executable,str(Path(__file__).resolve()),'--host',str(args.host),'--config',str(copied),
+            '--operator-socket',str(args.out/'op.sock'),'--public-socket',str(args.out/'pub.sock'),
+            '--plan',str(args.plan),'--committed',str(args.committed),'--mismatched-committed',str(args.mismatched_committed),
+            '--benchmark-source-config',str(args.source_config),'--out',str(args.out/'probe'),'--deadline','1200']
+        with (args.out/'probe.log').open('xb') as log:
+            process=subprocess.Popen(command,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
+            processes.append(process);(args.out/'probe.pid').write_text(str(process.pid)+'\n')
+            if process.wait(timeout=3600):raise RuntimeError('copied STOP comparison failed; see probe/report.json')
+    finally:
+        for process in reversed(processes):
+            if process.poll() is None:os.killpg(process.pid,signal.SIGTERM)
+        for process in processes:
+            try:process.wait(timeout=20)
+            except subprocess.TimeoutExpired:os.killpg(process.pid,signal.SIGKILL);process.wait()
+        (args.out/'process-cleanup.json').write_text(json.dumps({'owned':[{'pid':p.pid,'exit':p.returncode} for p in processes]})+'\n')
+    shutil.copy2(args.out/'probe/benchmark.json',args.out/'benchmark.json')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("host", "config", "operator-socket", "public-socket", "plan", "committed", "out"):
@@ -314,4 +386,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv)>1 and sys.argv[1]=='--snapshot-current':
+        snapshot_current(sys.argv[2:])
+    elif len(sys.argv)==4 and sys.argv[1]=='--check-native-reference':
+        checked_native_reference(Path(sys.argv[2]),Path(sys.argv[3]))
+    else:
+        main()

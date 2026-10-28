@@ -41,7 +41,10 @@ keeps its retained namespace and volumes after stopping services. Keeps evidence
 The input data is read only; publication copies it once into this Store's custody.
 No public deployment and no direct fd3 calls. Uses the same current receiving
 path as the grain API: event22 share, event28 enrollment and admitted dispatch.
-ORACLE_STOP_BENCHMARK_JSON must name the qualified same-Host copied-Store cold/served receipt.
+ORACLE_STOP_BENCHMARK_JSON names a qualified same-Host copied-Store receipt.
+Alternatively ORACLE_STOP_NATIVE_REFERENCE_JSON pins a prior native STOP with this
+Host; copied cold/served comparison then runs at this journey's first STOP before
+its successor START. Final success still requires all canonical/refusal checks.
 Fresh STOP probes check resident refresh and refusals, without duplicate cold walks.
 Run inside a bounded operator unit, e.g. RuntimeMaxSec=10800 CPUQuota=200%.
 HELP
@@ -68,7 +71,7 @@ if [[ ${1:-} == --resume-prepared ]]; then
 fi
 [[ $# == 6 ]] || { usage >&2; exit 2; }
 base=$1 own=$2 run=$3 spk=$4 source=$5 inventory=$6
-benchmark=${ORACLE_STOP_BENCHMARK_JSON:?qualified copied-Store STOP benchmark receipt required}
+benchmark=${ORACLE_STOP_BENCHMARK_JSON:-${ORACLE_STOP_NATIVE_REFERENCE_JSON:?same-Host STOP benchmark or native reference required}}
 repo=$(cd "$(dirname "$0")/.." && pwd)
 journey=$repo/scripts/spk-platform/grain-journey.sh
 fail() { echo "Oracle shared-data journey: $*" >&2; exit 1; }
@@ -164,10 +167,13 @@ done
 # Refuse a receipt from an older Host before creating a Store or copying data.
 # The final report still checks the full cold/served comparison and controls.
 [[ -f $base/minidregg-host && -x $base/minidregg-host ]] || fail 'Host executable absent'
-jq -e --arg host "$(sha256sum "$base/minidregg-host" | cut -d ' ' -f1)" '
-  .schema == "mini-stop-inspection-continuation-v1" and .passed == true
-  and .host_sha256 == $host
-' "$benchmark" >/dev/null || fail 'STOP benchmark must qualify the selected Host binary'
+if [[ $(jq -r .schema "$benchmark") == mini-oracle-native-stop-reference-v1 ]]; then
+  python3 -B "$repo/scripts/oracle-stop-inspection-probe.py" --check-native-reference "$benchmark" "$base/minidregg-host"
+else
+  jq -e --arg host "$(sha256sum "$base/minidregg-host" | cut -d ' ' -f1)" '
+    .schema == "mini-stop-inspection-continuation-v1" and .passed == true and .host_sha256 == $host
+  ' "$benchmark" >/dev/null || fail 'STOP benchmark must qualify the selected Host binary'
+fi
 [[ $(stat -c '%s' "$spk") -le 268435456 ]] || fail 'runtime exceeds Mini signed package admission cap'
 # The publisher, signed package inspector and Mini decide identity/acceptance.
 # These are preflight and evidence pins only.
@@ -235,7 +241,11 @@ jq --argjson bytes "$(stat -c '%s' "$spk")" '
   world_source_manifest
 } >"$run/input-sha256.txt"
 cp "$inventory" "$run/inventory.json"
-cp "$benchmark" "$run/copied-store-stop-benchmark.json"
+if [[ $(jq -r .schema "$benchmark") == mini-oracle-native-stop-reference-v1 ]]; then
+  cp "$benchmark" "$run/native-stop-reference.json"
+else
+  cp "$benchmark" "$run/copied-store-stop-benchmark.json"
+fi
 fi
 phase() { timeout 1800 "$journey" phase "$run/world" "$@"; }
 if [[ $mode != continue-controller && $mode != continue-session && $mode != continue-activation && $mode != recover-application-api && $mode != continue-checkpoint && $mode != recover-foreground ]]; then
@@ -355,6 +365,17 @@ phase stop-a
 world_reclaim_stopped_agent_socket 9101 "$a_generation" before-data-refusals
 world_operator_identity >"$run/op155-operator-before.json"
 world_stop_probe 9101 "$a_generation" "$run/op155-a"
+if [[ -f $run/native-stop-reference.json ]]; then
+  # The newest admitted RUNNING completion is still this incarnation. The
+  # calling writer waits here; a later successor would invalidate its STOP plan.
+  timeout 3700 python3 -B "$repo/scripts/oracle-stop-inspection-probe.py" --snapshot-current \
+    --host "$BIN/minidregg-host" --mini "$BIN/mini" --source-config "$config" \
+    --plan "$state/apps/9101/g$a_generation/stop-claim/stop-plan-v2.bin" \
+    --committed "$state/apps/9101/g$a_generation/stop-claim/committed-v3.bin" \
+    --mismatched-committed "$(jq -er .control_claim.path "$run/native-stop-reference.json")" \
+    --out "$run/stop-copy" >"$run/stop-copy.stdout" 2>"$run/stop-copy.stderr"
+  cp "$run/stop-copy/benchmark.json" "$run/copied-store-stop-benchmark.json"
+fi
 world_operator_identity >"$run/op155-operator-after-a.json"
 cmp "$run/op155-operator-before.json" "$run/op155-operator-after-a.json"
 # These mutations affect only this journey's freshly published directory.

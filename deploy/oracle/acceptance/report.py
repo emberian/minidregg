@@ -881,6 +881,14 @@ def main():
         and item.get('mode') == 'resident-only' and item.get('served_checks_passed') is True
         and item.get('cold_comparison') == 'not-performed'
         for item in op155.values()))
+    if (run/'native-stop-reference.json').exists():
+        reference=read(run/'native-stop-reference.json')
+        require('same_host_native_STOP_preflight_reference',reference['schema']=='mini-oracle-native-stop-reference-v1'
+            and reference['host_sha256']==sha(run/'bin/minidregg-host'))
+        for key in ('host_binary','stop_receipt','command_result','control_claim'):
+            require('native_STOP_preflight_'+key,sha(Path(reference[key]['path']))==reference[key]['sha256'])
+        require('native_STOP_reference_definite_success',read(Path(reference['command_result']['path']))=={'exitCode':0}
+            and read(Path(reference['stop_receipt']['path']))['protocol']=='mini-spk-grain-stop-v1')
     copied_benchmark = read(run / 'copied-store-stop-benchmark.json')
     require('separate_copied_store_cold_comparison_same_host',
             copied_benchmark.get('schema') == 'mini-stop-inspection-continuation-v1'
