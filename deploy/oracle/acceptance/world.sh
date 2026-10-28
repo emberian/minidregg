@@ -235,6 +235,13 @@ world_controller_activate() {
 
 world_controller_probe() {
   local label=$1 directory=$2
+  timeout 1800 sudo -n -- "$installer" controller-prepare-idle "$store" "$helper" \
+    >"$run/agent-lifetime/readiness-$directory.json" 2>"$run/agent-lifetime/readiness-$directory.stderr"
+  jq -e --arg task "$(jq -er .task "$run/agent-lifetime/controller-active-$label.json")" '
+    .type == "mini-grain-idle-readiness-v1" and .ready == true and .task == $task and
+    .signedTask.grain.task == $task and .signedTask.grain.status == "1" and
+    .signedTask.grain.reserved == "0"' "$run/agent-lifetime/readiness-$directory.json" >/dev/null \
+    || fail 'controller has not reached signed idle readiness'
   timeout 1800 sh "$repo/scripts/oracle-agent-lifetime-journey.sh" \
     "${controller_runtime:-$BIN/grain-runtime}" "$run/agent-lifetime/controller-active-$label.json" oracle-app \
     "$repo/deploy/oracle/acceptance/agent-cases.json" "$run/agent-lifetime/$directory" \
@@ -728,26 +735,28 @@ world_recover_application_api() {
   [[ -S $BROKER_SOCKET && $(stat -c '%u:%a' "$BROKER_SOCKET") == "$op_uid:600" ]] || fail 'API recovery broker readiness failed'
   "$journey" phase "$run/world" services >"$continuation/services.log" 2>&1
   world_phase_record services completed "$run/world/sock/operator.pid.identity.json" "$run/world/sock/participant.pid.identity.json"
-  world_phase_record controller-start started
-  timeout 240 sudo -n -- "$installer" controller-start "$store" "$helper" >"$continuation/controller-start.json"
-  world_phase_record controller-start completed "$continuation/controller-start.json"
-  world_phase_record native-recovery started
-  timeout 1850 sudo -n -- "$installer" controller-recover-api-unreserved "$store" "$helper" "$api_recovery_request" >"$continuation/native-recovery.json" 2>"$continuation/native-recovery.stderr"
-  timeout 120 sudo -n -- "$installer" controller-journal "$store" "$helper" >"$continuation/after-api-journal.json"
-  python3 -B "$repo/deploy/oracle/acceptance/recover_application_api.py" --check-native "$continuation"
-  world_phase_record native-recovery completed "$continuation/native-recovery.json" "$continuation/after-api-journal.json"
-  world_phase_record native-reconciliation started
-  if jq -e '.parentHold != null' "$continuation/after-api-journal.json" >/dev/null; then
-    timeout 1850 sudo -n -- "$installer" controller-reconcile "$store" "$helper" parent >"$continuation/reconcile-parent.stdout" 2>"$continuation/reconcile-parent.stderr"
+  if [[ $(jq -er '.boundary.kind // "unreserved-api"' "$continuation/prepared.json") == unreserved-api ]]; then
+    world_phase_record controller-start started
+    timeout 240 sudo -n -- "$installer" controller-start "$store" "$helper" >"$continuation/controller-start.json"
+    world_phase_record controller-start completed "$continuation/controller-start.json"
+    world_phase_record native-recovery started
+    timeout 1850 sudo -n -- "$installer" controller-recover-api-unreserved "$store" "$helper" "$api_recovery_request" >"$continuation/native-recovery.json" 2>"$continuation/native-recovery.stderr"
+    timeout 120 sudo -n -- "$installer" controller-journal "$store" "$helper" >"$continuation/after-api-journal.json"
+    python3 -B "$repo/deploy/oracle/acceptance/recover_application_api.py" --check-native "$continuation"
+    world_phase_record native-recovery completed "$continuation/native-recovery.json" "$continuation/after-api-journal.json"
+    world_phase_record native-reconciliation started
+    if jq -e '.parentHold != null' "$continuation/after-api-journal.json" >/dev/null; then
+      timeout 1850 sudo -n -- "$installer" controller-reconcile "$store" "$helper" parent >"$continuation/reconcile-parent.stdout" 2>"$continuation/reconcile-parent.stderr"
+    fi
+    timeout 1850 sudo -n -- "$installer" controller-reconcile "$store" "$helper" effects >"$continuation/reconcile-effects.stdout" 2>"$continuation/reconcile-effects.stderr"
+    timeout 1850 sudo -n -- "$installer" controller-reconcile "$store" "$helper" foreground-audited >"$continuation/reconcile-foreground.stdout" 2>"$continuation/reconcile-foreground.stderr"
+    timeout 120 sudo -n -- "$installer" controller-journal "$store" "$helper" >"$continuation/terminal-journal.json"
+    timeout 120 sudo -n -- "$installer" controller-export "$store" "$helper" >"$continuation/terminal-export.json"
+    python3 -B "$repo/deploy/oracle/acceptance/recover_application_api.py" --check-terminal "$continuation"
+    world_phase_record native-reconciliation completed "$continuation/terminal-journal.json" "$continuation/terminal-export.json"
+    # Audited is already reported and has no definitive response: no result ACK
+    # applies. The native audit remains the retained terminal observation.
   fi
-  timeout 1850 sudo -n -- "$installer" controller-reconcile "$store" "$helper" effects >"$continuation/reconcile-effects.stdout" 2>"$continuation/reconcile-effects.stderr"
-  timeout 1850 sudo -n -- "$installer" controller-reconcile "$store" "$helper" foreground-audited >"$continuation/reconcile-foreground.stdout" 2>"$continuation/reconcile-foreground.stderr"
-  timeout 120 sudo -n -- "$installer" controller-journal "$store" "$helper" >"$continuation/terminal-journal.json"
-  timeout 120 sudo -n -- "$installer" controller-export "$store" "$helper" >"$continuation/terminal-export.json"
-  python3 -B "$repo/deploy/oracle/acceptance/recover_application_api.py" --check-terminal "$continuation"
-  world_phase_record native-reconciliation completed "$continuation/terminal-journal.json" "$continuation/terminal-export.json"
-  # Audited is already reported and has no definitive response: no result ACK
-  # applies. The native audit remains the retained terminal observation.
   world_controller_stop before-api-incarnation-retirement
   world_phase_record retire-incarnation started
   timeout 1800 "$BIN/spk-host" grain stop "$profile" 9101 >"$continuation/stop.json" 2>"$continuation/stop.stderr"

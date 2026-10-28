@@ -60,11 +60,13 @@ class ApplicationRecoveryBoundary(unittest.TestCase):
         def entry(raw):
             return {'base64':base64.b64encode(raw).decode(), 'sha256':hashlib.sha256(raw).hexdigest()}
         request = json.dumps(self.request).encode(); forward = json.dumps(self.forward).encode()
-        self.journal['foregroundAttempt']['requestSha256'] = hashlib.sha256(request).hexdigest()
-        self.journal['applicationApiAttempt']['requestSha256'] = hashlib.sha256(forward).hexdigest()
+        if self.journal['foregroundAttempt'] is not None:
+            self.journal['foregroundAttempt']['requestSha256'] = hashlib.sha256(request).hexdigest()
+        if self.journal['applicationApiAttempt'] is not None:
+            self.journal['applicationApiAttempt']['requestSha256'] = hashlib.sha256(forward).hexdigest()
         self.save('agent-lifetime/controller-final-journal.json', self.journal)
         self.save('observations/controller-export.json', {'protocol':'mini-spk-controller-evidence-v1','store':'test-store',
-            'files':{'journal.json':entry(json.dumps(self.journal).encode()),'foreground.json':entry(request),'api.json':entry(forward)}})
+            'files':{'journal.json':entry(json.dumps(self.journal).encode()),'foreground.json':entry(request),'api.json':entry(forward),**{k:entry(json.dumps(v).encode()) for k,v in getattr(self,'extra_files',{}).items()}}})
 
     def check(self):
         return recovery.checked_boundary(self.run,self.observations,self.request_id)
@@ -157,6 +159,44 @@ class ApplicationRecoveryBoundary(unittest.TestCase):
     def test_incomplete_recovery_sequence_refuses(self):
         (self.run/'continuations/application-api-recovery-2').mkdir()
         with self.assertRaisesRegex(ValueError,'sequence is incomplete'): self.check()
+
+    def make_startup_refusal(self):
+        import shutil
+        self.journal.update(connection='fenced',nextOperationId=153,foregroundAttempt=None,
+                            applicationApiAttempt=None,parentHold=None)
+        self.journal['binding']['config'].update(task='27920',subject='20010',queryCapability='20201')
+        self.query = {'grants':[{'capability':'20201','kind':'object','target':'27920'}],
+                      'nonce':'152','purpose':{'kind':'object','target':'27920','type':'query','view':'resource'},
+                      'subject':'20010'}
+        self.extra_files = {'query-0000000000000152/intent-source.json':self.query,
+                            'query-0000000000000152/attempt/attempt.json':{'operation':'query'}}
+        self.save('agent-lifetime/probe/discover-core-query.request.json',self.request)
+        self.refusal = {'isError':True,'operationId':None,'requestId':self.request_id,
+                        'result':'foreground tool requires an attached, reconciled idle task',
+                        'type':'tool-complete','v':1}
+        self.save('agent-lifetime/probe/discover-core-query.result.json',self.refusal)
+        shutil.rmtree(self.run/'state/apps/9101/g4/agent-oracle-agent-v1-attempts')
+        self.refresh()
+
+    def test_read_only_startup_refusal_has_no_fabricated_api_audit(self):
+        self.make_startup_refusal()
+        boundary = self.check()
+        self.assertEqual(boundary['kind'],'startup-refusal')
+        self.assertIsNone(boundary['api']); self.assertIsNone(boundary['foreground'])
+        self.assertEqual(boundary['pre_admission']['query'],'query-0000000000000152')
+        self.assertFalse(boundary['retransmit'])
+
+    def test_startup_refusal_rejects_pending_effect_or_nonquery_helper(self):
+        self.make_startup_refusal()
+        self.journal['pending']={'uncertain':'effect'};self.refresh()
+        with self.assertRaisesRegex(ValueError,'retained native custody'):self.check()
+        self.journal['pending']=None
+        self.query['purpose']['type']='admit';self.refresh()
+        with self.assertRaisesRegex(ValueError,'read-only query'):self.check()
+        self.query['purpose']['type']='query';self.refresh()
+        self.refusal['operationId']='153'
+        self.save('agent-lifetime/probe/discover-core-query.result.json',self.refusal)
+        with self.assertRaisesRegex(ValueError,'pre-admission refusal'):self.check()
 
     def test_resident_dispatch_artifact_refuses(self):
         self.save('state/apps/9101/g4/agent-oracle-agent-v1-attempts/agent-lifetime-dispatch-op-41/reserve.json', {'possible':'reserve'})

@@ -46,7 +46,14 @@ def previous_execution(run):
     if not paths:
         return run / 'continuations/activation-successor-1'
     previous = paths[-1]
-    check_native(previous, terminal=True)
+    boundary = read(previous / 'prepared.json')['boundary']
+    if boundary.get('kind') == 'startup-refusal':
+        export = read(previous / 'observations/controller-export.json')
+        journal = json.loads(exported(export, 'journal.json'))
+        require(startup_refusal(export, journal, previous / 'prior/probe', boundary['request_id']) == boundary['pre_admission'],
+                'previous startup refusal evidence differs')
+    else:
+        check_native(previous, terminal=True)
     require((previous / 'phases/enrollment.completed.json').is_file(),
             'previous API recovery did not reach enrollment')
     return previous
@@ -62,6 +69,37 @@ def retained_paths(run, after=None):
         for name, entry in {**prepared['preserved'], **prepared['archived']}.items():
             retained.setdefault(name, entry)
     return retained
+
+
+def startup_refusal(export, journal, probe, request_id):
+    """Recognize a native refusal before tool allocation and its timed-out read."""
+    require(journal['connection'] == 'fenced' and all(journal.get(key) is None for key in (
+        'foregroundAttempt','applicationApiAttempt','parentHold','dispatchAttempt','dispatchPending',
+        'dispatchHold','toolPending','toolHold','pending','child','birthPending','birthOperation',
+        'providerPending','providerHold','providerAttempt','settlementDue',
+        'workspaceAttempt','roomAttempt','workspaceBirth')) and not journal.get('unresolvedExternal'),
+        'startup refusal has retained native custody')
+    result = read(probe / 'discover-core-query.result.json')
+    require(result == {'isError':True,'operationId':None,'requestId':request_id,
+        'result':'foreground tool requires an attached, reconciled idle task',
+        'type':'tool-complete','v':1}, 'not an exact native pre-admission refusal')
+    require(read(probe / 'discover-core-query.request.json') == {
+        'requestId':request_id,'name':'mini_oracle_discover','arguments':{
+        'application':'oracle-app','availability':'live_direct','limit':1,'query':'core.query'}},
+        'pre-admission discovery arguments differ')
+    require(not any(x.get('requestId') == request_id for x in journal.get('foregroundHistory', [])),
+            'refused request has a retained foreground operation')
+    nonce = journal['nextOperationId'] - 1
+    directory = 'query-%016d' % nonce
+    config = journal['binding']['config']
+    intent = json.loads(exported(export, directory + '/intent-source.json'))
+    require(intent == {'grants':[{'capability':config['queryCapability'],'kind':'object','target':config['task']}],
+        'nonce':str(nonce),'purpose':{'kind':'object','target':config['task'],'type':'query','view':'resource'},
+        'subject':config['subject']}, 'last interrupted helper was not the bound read-only query')
+    attempt = json.loads(exported(export, directory + '/attempt/attempt.json'))
+    require(attempt['operation'] == 'query' and directory + '/attempt/challenge.json' not in export['files'],
+            'read-only startup observation boundary differs')
+    return {'result':result,'query':directory,'query_intent_sha256':export['files'][directory+'/intent-source.json']['sha256']}
 
 
 def checked_boundary(run, observations, request_id):
@@ -81,32 +119,38 @@ def checked_boundary(run, observations, request_id):
     if previous.name.startswith('application-api-recovery-'):
         require(request_id != read(previous / 'prepared.json')['boundary']['request_id'],
                 'original audited request cannot be submitted again')
-    require(foreground['requestId'] == request_id and foreground['name'] == 'mini_oracle_discover'
-            and foreground['phase'] == 'uncertain' and foreground['resultPath'] is None
-            and foreground['resultSha256'] is None and foreground['reported'] is False,
-            'foreground is not the original uncertain discovery')
-    request = exported(export, Path(foreground['requestPath']).name)
-    require(hashlib.sha256(request).hexdigest() == foreground['requestSha256'], 'foreground request changed')
-    request_value = json.loads(request)
-    require(request_value == {'requestId': request_id, 'name': 'mini_oracle_discover',
-            'arguments': {'application': 'oracle-app', 'availability': 'live_direct', 'limit': 1,
-                          'query': 'core.query'}}, 'original discovery arguments differ')
-    require(api['routeName'] == 'oracle-app' and api['phase'] == 'uncertain' and api['reported'] is False
-            and all(api[key] is None for key in ('operationFingerprint', 'lifetimeCommittedReceipt',
-                    'lifetimeSettledResponseSha256', 'lifetimeSettlement', 'replyPath', 'replySha256')),
-            'API has a possible delivery or settlement marker')
-    forward = exported(export, Path(api['requestPath']).name)
-    require(hashlib.sha256(forward).hexdigest() == api['requestSha256'], 'forward bytes changed')
-    require(json.loads(forward) == {'bindingSha256': api['bindingSha256'], 'bodyHex': '',
-        'headers': [{'name': 'accept', 'value': 'application/json'}], 'method': 'GET',
-        'operationId': str(api['operationId']), 'path': 'operations', 'protocol': 'mini-spk-agent-api-v3',
-        'query': 'offset=0&limit=1&q=core.query&availability=live_direct', 'type': 'dispatch-v3'},
-        'retained API request differs')
-    require(all(journal[key] is None for key in ('dispatchAttempt', 'dispatchPending', 'dispatchHold',
-                'toolPending', 'toolHold', 'pending', 'child')), 'additional native custody is pending')
-    hold = journal['parentHold']
-    require(hold['reserveConfirmed'] is True and hold['reserveRefused'] is False
-            and hold['reserve'] == '1' and hold['charge'] == '0', 'foreground hold differs')
+    pre_admission = None
+    if foreground is None and api is None:
+        pre_admission = startup_refusal(export, journal, root / 'probe', request_id)
+        hold = None
+    else:
+        require(isinstance(foreground, dict) and isinstance(api, dict), 'partial foreground/API custody is not recoverable here')
+        require(foreground['requestId'] == request_id and foreground['name'] == 'mini_oracle_discover'
+                and foreground['phase'] == 'uncertain' and foreground['resultPath'] is None
+                and foreground['resultSha256'] is None and foreground['reported'] is False,
+                'foreground is not the original uncertain discovery')
+        request = exported(export, Path(foreground['requestPath']).name)
+        require(hashlib.sha256(request).hexdigest() == foreground['requestSha256'], 'foreground request changed')
+        request_value = json.loads(request)
+        require(request_value == {'requestId': request_id, 'name': 'mini_oracle_discover',
+                'arguments': {'application': 'oracle-app', 'availability': 'live_direct', 'limit': 1,
+                              'query': 'core.query'}}, 'original discovery arguments differ')
+        require(api['routeName'] == 'oracle-app' and api['phase'] == 'uncertain' and api['reported'] is False
+                and all(api[key] is None for key in ('operationFingerprint', 'lifetimeCommittedReceipt',
+                        'lifetimeSettledResponseSha256', 'lifetimeSettlement', 'replyPath', 'replySha256')),
+                'API has a possible delivery or settlement marker')
+        forward = exported(export, Path(api['requestPath']).name)
+        require(hashlib.sha256(forward).hexdigest() == api['requestSha256'], 'forward bytes changed')
+        require(json.loads(forward) == {'bindingSha256': api['bindingSha256'], 'bodyHex': '',
+            'headers': [{'name': 'accept', 'value': 'application/json'}], 'method': 'GET',
+            'operationId': str(api['operationId']), 'path': 'operations', 'protocol': 'mini-spk-agent-api-v3',
+            'query': 'offset=0&limit=1&q=core.query&availability=live_direct', 'type': 'dispatch-v3'},
+            'retained API request differs')
+        require(all(journal[key] is None for key in ('dispatchAttempt', 'dispatchPending', 'dispatchHold',
+                    'toolPending', 'toolHold', 'pending', 'child')), 'additional native custody is pending')
+        hold = journal['parentHold']
+        require(hold['reserveConfirmed'] is True and hold['reserveRefused'] is False
+                and hold['reserve'] == '1' and hold['charge'] == '0', 'foreground hold differs')
     status = read(observations / 'controller-status.json')
     require(status['store'] == world['store'] and status['stopped'] is True
             and status['runtimeSha256'] == sha((previous if previous.name.startswith('application-api-recovery-') else run / 'continuations/activation-recovery-1') / 'bin/grain-runtime')
@@ -118,22 +162,26 @@ def checked_boundary(run, observations, request_id):
     record = read(app / 'record.json')
     manager = dict(line.split('=', 1) for line in (observations / 'manager.txt').read_text().splitlines() if '=' in line)
     require(record['phase'] == 'running' and record['identity']['unit'] == start['unit']
-            and record['invocation_id'] == api['hostInvocation']
+            and (api is None or record['invocation_id'] == api['hostInvocation'])
             and manager['Id'] == start['unit'] and manager['MainPID'] == '0'
             and manager['ActiveState'] in ('inactive', 'failed') and manager['Job'] in ('', '0'),
             'retained app incarnation is not physically stopped')
     native = app / 'agent-oracle-agent-v1-attempts'
-    dispatch = native / ('agent-lifetime-dispatch-op-' + str(api['operationId']))
-    require(dispatch.is_dir() and not list(dispatch.iterdir()), 'resident native dispatch evidence exists')
-    client = native / ('agent-lifetime-client-op-' + str(api['operationId']))
-    require({p.name for p in client.iterdir()} == {'received-v3.json', 'forward-request-v3.json'}
-            and read(client / 'forward-request-v3.json') == json.loads(forward)
-            and read(client / 'received-v3.json')['forwardSha256'] == sha(client / 'forward-request-v3.json'),
-            'resident forward evidence differs')
+    if api is None:
+        require(not native.exists() or not list(native.iterdir()), 'startup refusal has resident API evidence')
+    else:
+        dispatch = native / ('agent-lifetime-dispatch-op-' + str(api['operationId']))
+        require(dispatch.is_dir() and not list(dispatch.iterdir()), 'resident native dispatch evidence exists')
+        client = native / ('agent-lifetime-client-op-' + str(api['operationId']))
+        require({p.name for p in client.iterdir()} == {'received-v3.json', 'forward-request-v3.json'}
+                and read(client / 'forward-request-v3.json') == json.loads(forward)
+                and read(client / 'received-v3.json')['forwardSha256'] == sha(client / 'forward-request-v3.json'),
+                'resident forward evidence differs')
     require(not any((run / path).exists() for path in ('browser', 'world/evidence/post-a1.stdout',
                                                      'agent-lifetime/probe-restart')),
             'later qualification work already exists')
-    return {'previous_execution': str(previous), 'store': world['store'], 'request_id': request_id, 'foreground': foreground, 'api': api,
+    return {'kind': 'startup-refusal' if pre_admission else 'unreserved-api', 'pre_admission': pre_admission,
+            'previous_execution': str(previous), 'store': world['store'], 'request_id': request_id, 'foreground': foreground, 'api': api,
             'parent_hold': hold, 'old_generation': start['generation'], 'old_record': record,
             'journal_sha256': export['files']['journal.json']['sha256'],
             'grant_receipt': read(root / 'issued-grant.json')['grantReceipt'],
@@ -166,7 +214,8 @@ def prepare(run, observations, request_id):
     archived = {}
     for path in [*(run / 'agent-lifetime').glob('*initial*'),
                  run / 'agent-lifetime/probe', run / 'agent-lifetime/probe.stderr',
-                 run / 'agent-lifetime/probe.stdout']:
+                 run / 'agent-lifetime/probe.stdout', run / 'agent-lifetime/readiness-probe.json',
+                 run / 'agent-lifetime/readiness-probe.stderr']:
         if not path.exists():
             continue
         target = prior / path.name

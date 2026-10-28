@@ -549,13 +549,22 @@ def application_api_recovery(run, require):
 
 
 def application_api_recovery_attempt(run, directory, require):
-    from recover_application_api import check_native, retained_paths
+    from recover_application_api import check_native, retained_paths, exported, startup_refusal
     retained = retained_paths(run, after=directory)
     def original(path):
         entry = retained.get(str(path))
         return Path(entry['path']) if entry else Path(path)
-    proof = check_native(directory, terminal=True)
     prepared = read(directory / 'prepared.json'); boundary = prepared['boundary']
+    startup = boundary.get('kind') == 'startup-refusal'
+    if startup:
+        export = read(directory / 'observations/controller-export.json')
+        prior_journal = json.loads(exported(export, 'journal.json'))
+        refused = startup_refusal(export, prior_journal, directory / 'prior/probe', boundary['request_id'])
+        require('startup_refusal_exact_no_tool_admission', refused == boundary['pre_admission']
+                and not (directory / 'native-recovery.json').exists())
+        proof = None
+    else:
+        proof = check_native(directory, terminal=True)
     require('api_recovery_explicit_original_request',
             prepared['schema'] == 'mini-oracle-application-api-recovery-v1'
             and prepared['automatic_retry'] is False and boundary['retransmit'] is False)
@@ -576,16 +585,19 @@ def application_api_recovery_attempt(run, directory, require):
     stops = list((directory / 'stop-completion').rglob('receipt-anchor.json'))
     require('api_recovery_native_STOP_receipts', bool(stops)
             and all(read(path).get('eventId') and read(path).get('worldRoot') for path in stops))
-    journal = read(directory / 'terminal-journal.json')
+    journal = prior_journal if startup else read(directory / 'terminal-journal.json')
     binding = hashlib.sha256(json.dumps(journal['binding'],sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()).hexdigest()
     enrollment = read(original(run / 'agent-lifetime/enrollment-initial/request.json'))
     require('api_recovery_successor_binding_enrolled', enrollment['expectedBindingSha256'] == binding)
     require('api_recovery_original_grant_preserved',
             read(run / 'agent-lifetime/issued-grant.json')['grantReceipt'] == boundary['grant_receipt'])
-    require('api_recovery_new_discovery_id_after_terminal_audit',
+    require('api_recovery_new_discovery_id_after_preserved_outcome',
             original(run / 'agent-lifetime/probe/discover-core-query.request-id').read_text().strip() != boundary['request_id'])
-    for phase in ('runtime-upgrade','services','controller-start','native-recovery','native-reconciliation',
-                  'retire-incarnation','successor-start','enrollment'):
+    phases = ['runtime-upgrade','services']
+    if not startup:
+        phases += ['controller-start','native-recovery','native-reconciliation']
+    phases += ['retire-incarnation','successor-start','enrollment']
+    for phase in phases:
         value = read(directory / 'phases' / (phase+'.completed.json'))
         require('api_recovery_phase_'+phase, value['phase']==phase and value['state']=='completed'
                 and value['started_sha256']==sha(directory / 'phases' / (phase+'.started.json')))
@@ -594,8 +606,9 @@ def application_api_recovery_attempt(run, directory, require):
     for line in (directory / 'recovery-input-sha256.txt').read_text().splitlines():
         digest,name=line.split(None,1)
         require('api_recovery_source_'+name,sha(original(name))==digest)
-    return {'proof':proof,'original_request_id':boundary['request_id'],
-            'terminal':'audited, already reported; no definitive answer or separate ACK',
+    return {'kind':boundary.get('kind','unreserved-api'),'proof':proof,'original_request_id':boundary['request_id'],
+            'terminal':('native pre-admission refusal; no tool operation allocated' if startup else
+                        'audited, already reported; no definitive answer or separate ACK'),
             'retransmitted':False,'successor_start':start,'execution_exit_path':str(directory / 'exit.json')}
 
 
@@ -890,6 +903,14 @@ def main():
     agent_stages = {}
     for stage in ('probe', 'probe-after-restart'):
         agent_dir = run / 'agent-lifetime' / stage
+        readiness = read(run / 'agent-lifetime' / ('readiness-' + stage + '.json'))
+        active = read(run / 'agent-lifetime' / ('controller-active-' + ('initial' if stage == 'probe' else 'restart') + '.json'))
+        require('agent_' + stage + '_signed_idle_readiness',
+                readiness.get('type') == 'mini-grain-idle-readiness-v1' and readiness.get('ready') is True
+                and readiness.get('task') == active['task']
+                and readiness.get('signedTask', {}).get('grain', {}).get('task') == active['task']
+                and readiness['signedTask']['grain']['status'] == '1'
+                and readiness['signedTask']['grain']['reserved'] == '0')
         agent_probe = read(agent_dir / 'result.json')
         agent_cases = read(agent_dir / 'cases.json')
         require(f'agent_{stage}_lifetime_probe_completed',
