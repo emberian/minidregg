@@ -198,6 +198,44 @@ class ApplicationRecoveryBoundary(unittest.TestCase):
         self.save('agent-lifetime/probe/discover-core-query.result.json',self.refusal)
         with self.assertRaisesRegex(ValueError,'pre-admission refusal'):self.check()
 
+    def make_readiness_refusal(self):
+        import shutil
+        self.make_startup_refusal()
+        self.journal['connection'] = 'soft'
+        shutil.rmtree(self.run/'agent-lifetime/probe')
+        self.save('continuations/activation-successor-1/exit.json',
+                  {'execution_exit':1,'cleanup_exit':0,'namespace_preserved':True})
+        (self.run/'agent-lifetime/readiness-probe.json').write_bytes(b'')
+        (self.run/'agent-lifetime/readiness-probe.stderr').write_text(
+            'grain-runtime admin: error: controller readiness lacks a signed idle task\n')
+        self.extra_files.update({
+            'query-0000000000000152/attempt/view.json': {'type':'resource','cell':{
+                'grain':{'task':'27920','status':'2','reserved':'0'}}},
+            'query-0000000000000152/attempt/challenge.json':{'intent':self.query,'height':'125','worldRoot':'999'},
+            'query-0000000000000152/attempt/signed-observation.bin':'retained native bytes'})
+        self.refresh()
+        self.request_id = None
+
+    def test_readiness_refusal_is_exact_and_allocates_no_request(self):
+        self.make_readiness_refusal()
+        boundary = self.check()
+        self.assertEqual(boundary['kind'],'readiness-refusal')
+        self.assertIsNone(boundary['request_id'])
+        self.assertTrue(boundary['pre_admission']['no_tool_request'])
+        self.assertIsNone(boundary['api'])
+        self.assertFalse((self.run/'continuations/application-api-recovery-1').exists())
+        self.save('agent-lifetime/probe/request.json',{'new':'request'})
+        with self.assertRaisesRegex(ValueError,'already has a tool probe'): self.check()
+
+    def test_readiness_refusal_rejects_pending_and_wrong_signed_state(self):
+        self.make_readiness_refusal()
+        self.journal['parentHold'] = {'reserve':'1'}; self.refresh()
+        with self.assertRaisesRegex(ValueError,'retained native custody'): self.check()
+        self.journal['parentHold'] = None
+        self.extra_files['query-0000000000000152/attempt/view.json']['cell']['grain']['status']='4'
+        self.refresh()
+        with self.assertRaisesRegex(ValueError,'signed attached-idle evidence'): self.check()
+
     def test_resident_dispatch_artifact_refuses(self):
         self.save('state/apps/9101/g4/agent-oracle-agent-v1-attempts/agent-lifetime-dispatch-op-41/reserve.json', {'possible':'reserve'})
         with self.assertRaisesRegex(ValueError,'dispatch evidence'): self.check()

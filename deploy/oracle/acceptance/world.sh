@@ -239,7 +239,9 @@ world_controller_probe() {
     >"$run/agent-lifetime/readiness-$directory.json" 2>"$run/agent-lifetime/readiness-$directory.stderr"
   jq -e --arg task "$(jq -er .task "$run/agent-lifetime/controller-active-$label.json")" '
     .type == "mini-grain-idle-readiness-v1" and .ready == true and .task == $task and
-    .signedTask.grain.task == $task and .signedTask.grain.status == "1" and
+    .signedTask.grain.task == $task and
+    ((.connection == "hard" and .signedTask.grain.status == "1") or
+     (.connection == "soft" and .signedTask.grain.status == "2")) and
     .signedTask.grain.reserved == "0"' "$run/agent-lifetime/readiness-$directory.json" >/dev/null \
     || fail 'controller has not reached signed idle readiness'
   timeout 1800 sh "$repo/scripts/oracle-agent-lifetime-journey.sh" \
@@ -695,7 +697,7 @@ world_recover_application_api() {
   profile=$(jq -er .profilePath "$run/world/evidence/profile-result.json")
   state=$(jq -er .stateRoot "$run/world/evidence/profile-result.json")
   expected_runtime=${ORACLE_RECOVERY_RUNTIME_SHA256:?qualified runtime required}
-  [[ $api_recovery_request =~ ^[0-9a-f]{32}$ && $expected_runtime =~ ^[0-9a-f]{64}$
+  [[ ( $api_recovery_request == --readiness || $api_recovery_request =~ ^[0-9a-f]{32}$ ) && $expected_runtime =~ ^[0-9a-f]{64}$
       && $(sha256sum "$own/grain-runtime" | cut -d ' ' -f1) == "$expected_runtime" ]] || fail 'API recovery request/runtime pin differs'
   [[ ${ORACLE_SOCKET_RECLAIM_BIN:-} == /* && ${ORACLE_SOCKET_RECLAIM_SHA256:-} =~ ^[0-9a-f]{64}$
       && $(sha256sum "$ORACLE_SOCKET_RECLAIM_BIN" | cut -d ' ' -f1) == "$ORACLE_SOCKET_RECLAIM_SHA256" ]] || fail 'native socket reclaimer pin differs'

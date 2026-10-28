@@ -549,17 +549,19 @@ def application_api_recovery(run, require):
 
 
 def application_api_recovery_attempt(run, directory, require):
-    from recover_application_api import check_native, retained_paths, exported, startup_refusal
+    from recover_application_api import check_native, retained_paths, exported, startup_refusal, readiness_refusal
     retained = retained_paths(run, after=directory)
     def original(path):
         entry = retained.get(str(path))
         return Path(entry['path']) if entry else Path(path)
     prepared = read(directory / 'prepared.json'); boundary = prepared['boundary']
-    startup = boundary.get('kind') == 'startup-refusal'
+    startup = boundary.get('kind') in ('startup-refusal','readiness-refusal')
     if startup:
         export = read(directory / 'observations/controller-export.json')
         prior_journal = json.loads(exported(export, 'journal.json'))
-        refused = startup_refusal(export, prior_journal, directory / 'prior/probe', boundary['request_id'])
+        refused = (readiness_refusal(export, prior_journal, directory / 'prior')
+                   if boundary['kind'] == 'readiness-refusal' else
+                   startup_refusal(export, prior_journal, directory / 'prior/probe', boundary['request_id']))
         require('startup_refusal_exact_no_tool_admission', refused == boundary['pre_admission']
                 and not (directory / 'native-recovery.json').exists())
         proof = None
@@ -607,7 +609,8 @@ def application_api_recovery_attempt(run, directory, require):
         digest,name=line.split(None,1)
         require('api_recovery_source_'+name,sha(original(name))==digest)
     return {'kind':boundary.get('kind','unreserved-api'),'proof':proof,'original_request_id':boundary['request_id'],
-            'terminal':('native pre-admission refusal; no tool operation allocated' if startup else
+            'terminal':('native readiness refusal; no tool request allocated' if boundary.get('kind') == 'readiness-refusal' else
+                        'native pre-admission refusal; no tool operation allocated' if startup else
                         'audited, already reported; no definitive answer or separate ACK'),
             'retransmitted':False,'successor_start':start,'execution_exit_path':str(directory / 'exit.json')}
 
@@ -909,7 +912,8 @@ def main():
                 readiness.get('type') == 'mini-grain-idle-readiness-v1' and readiness.get('ready') is True
                 and readiness.get('task') == active['task']
                 and readiness.get('signedTask', {}).get('grain', {}).get('task') == active['task']
-                and readiness['signedTask']['grain']['status'] == '1'
+                and (readiness.get('connection'), readiness['signedTask']['grain']['status']) in
+                    (('hard','1'),('soft','2'))
                 and readiness['signedTask']['grain']['reserved'] == '0')
         agent_probe = read(agent_dir / 'result.json')
         agent_cases = read(agent_dir / 'cases.json')

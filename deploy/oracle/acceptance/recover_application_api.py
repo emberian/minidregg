@@ -47,10 +47,12 @@ def previous_execution(run):
         return run / 'continuations/activation-successor-1'
     previous = paths[-1]
     boundary = read(previous / 'prepared.json')['boundary']
-    if boundary.get('kind') == 'startup-refusal':
+    if boundary.get('kind') in ('startup-refusal', 'readiness-refusal'):
         export = read(previous / 'observations/controller-export.json')
         journal = json.loads(exported(export, 'journal.json'))
-        require(startup_refusal(export, journal, previous / 'prior/probe', boundary['request_id']) == boundary['pre_admission'],
+        refused = (readiness_refusal(export, journal, previous / 'prior') if boundary['kind'] == 'readiness-refusal'
+                   else startup_refusal(export, journal, previous / 'prior/probe', boundary['request_id']))
+        require(refused == boundary['pre_admission'],
                 'previous startup refusal evidence differs')
     else:
         check_native(previous, terminal=True)
@@ -102,13 +104,50 @@ def startup_refusal(export, journal, probe, request_id):
     return {'result':result,'query':directory,'query_intent_sha256':export['files'][directory+'/intent-source.json']['sha256']}
 
 
+def readiness_refusal(export, journal, root):
+    """Exact failed maintenance query, before the harness allocated a tool ID."""
+    require(not (root / 'probe').exists(), 'readiness failure already has a tool probe')
+    require((root / 'readiness-probe.json').read_bytes() == b'' and
+            (root / 'readiness-probe.stderr').read_text() ==
+            'grain-runtime admin: error: controller readiness lacks a signed idle task\n',
+            'readiness refusal differs')
+    require(journal['connection'] == 'soft' and all(journal.get(key) is None for key in (
+        'foregroundAttempt','applicationApiAttempt','parentHold','dispatchAttempt','dispatchPending',
+        'dispatchHold','toolPending','toolHold','pending','child','birthPending','birthOperation',
+        'providerPending','providerHold','providerAttempt','settlementDue',
+        'workspaceAttempt','roomAttempt','workspaceBirth')) and not journal.get('unresolvedExternal'),
+        'readiness refusal has retained native custody')
+    nonce = journal['nextOperationId'] - 1
+    directory = 'query-%016d' % nonce
+    config = journal['binding']['config']
+    intent = json.loads(exported(export, directory + '/intent-source.json'))
+    require(intent == {'grants':[{'capability':config['queryCapability'],'kind':'object','target':config['task']}],
+        'nonce':str(nonce),'purpose':{'kind':'object','target':config['task'],'type':'query','view':'resource'},
+        'subject':config['subject']}, 'readiness helper is not the bound read-only query')
+    attempt = json.loads(exported(export, directory + '/attempt/attempt.json'))
+    view = json.loads(exported(export, directory + '/attempt/view.json'))
+    challenge = json.loads(exported(export, directory + '/attempt/challenge.json'))
+    require(attempt['operation'] == 'query' and view['type'] == 'resource' and
+            view['cell']['grain']['task'] == config['task'] and
+            view['cell']['grain']['status'] == '2' and view['cell']['grain']['reserved'] == '0' and
+            challenge['intent'] == intent and challenge.get('height') and challenge.get('worldRoot') and
+            bool(exported(export, directory + '/attempt/signed-observation.bin')),
+            'readiness signed attached-idle evidence differs')
+    return {'query':directory, 'query_intent_sha256':export['files'][directory+'/intent-source.json']['sha256'],
+            'view_sha256':export['files'][directory+'/attempt/view.json']['sha256'],
+            'signed_observation_sha256':export['files'][directory+'/attempt/signed-observation.bin']['sha256'],
+            'no_tool_request':True}
+
+
 def checked_boundary(run, observations, request_id):
     root = run / 'agent-lifetime'
+    readiness = request_id is None
     previous = previous_execution(run)
-    require(read(previous / 'exit.json') == {'execution_exit': 2, 'cleanup_exit': 0,
+    require(read(previous / 'exit.json') == {'execution_exit': 1 if readiness else 2, 'cleanup_exit': 0,
                                            'namespace_preserved': True}, 'not stopped after the retained API failure')
-    require((root / 'probe/discover-core-query.request-id').read_text().strip() == request_id,
-            'foreground request ID differs')
+    if not readiness:
+        require((root / 'probe/discover-core-query.request-id').read_text().strip() == request_id,
+                'foreground request ID differs')
     export = read(observations / 'controller-export.json')
     world = read(run / 'world-identity.json')
     require(export['protocol'] == 'mini-spk-controller-evidence-v1' and export['store'] == world['store'],
@@ -116,11 +155,14 @@ def checked_boundary(run, observations, request_id):
     journal = json.loads(exported(export, 'journal.json'))
     require(journal == read(root / 'controller-final-journal.json'), 'retained controller journal differs')
     foreground = journal['foregroundAttempt']; api = journal['applicationApiAttempt']
-    if previous.name.startswith('application-api-recovery-'):
+    if not readiness and previous.name.startswith('application-api-recovery-'):
         require(request_id != read(previous / 'prepared.json')['boundary']['request_id'],
                 'original audited request cannot be submitted again')
     pre_admission = None
-    if foreground is None and api is None:
+    if readiness:
+        pre_admission = readiness_refusal(export, journal, root)
+        hold = None
+    elif foreground is None and api is None:
         pre_admission = startup_refusal(export, journal, root / 'probe', request_id)
         hold = None
     else:
@@ -180,7 +222,7 @@ def checked_boundary(run, observations, request_id):
     require(not any((run / path).exists() for path in ('browser', 'world/evidence/post-a1.stdout',
                                                      'agent-lifetime/probe-restart')),
             'later qualification work already exists')
-    return {'kind': 'startup-refusal' if pre_admission else 'unreserved-api', 'pre_admission': pre_admission,
+    return {'kind': 'readiness-refusal' if readiness else ('startup-refusal' if pre_admission else 'unreserved-api'), 'pre_admission': pre_admission,
             'previous_execution': str(previous), 'store': world['store'], 'request_id': request_id, 'foreground': foreground, 'api': api,
             'parent_hold': hold, 'old_generation': start['generation'], 'old_record': record,
             'journal_sha256': export['files']['journal.json']['sha256'],
@@ -277,6 +319,6 @@ if __name__ == '__main__':
             check_native(Path(sys.argv[2]), sys.argv[1] == '--check-terminal')
             raise SystemExit(0)
         require(len(sys.argv) == 4, 'usage: recover_application_api.py RUN OBSERVATIONS REQUEST_ID')
-        prepare(Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3])
+        prepare(Path(sys.argv[1]), Path(sys.argv[2]), None if sys.argv[3] == '--readiness' else sys.argv[3])
     except (ValueError, OSError, KeyError) as error:
         raise SystemExit('application API recovery refused: ' + str(error))
