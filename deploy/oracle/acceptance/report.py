@@ -516,8 +516,23 @@ def activation_recovery(run, require):
         for line in (manifest_directory / 'recovery-input-sha256.txt').read_text().splitlines():
             digest, name = line.split(None, 1)
             require('activation_source_' + name, sha(Path(name)) == digest)
+    transport_repairs = []
+    for repair in sorted((run / 'native-agent-socket-reclaims').glob('*')):
+        before, result = read(repair / 'before.json'), read(repair / 'result.json')
+        require('activation_after_STOP_transport_' + repair.name,
+                before['record']['phase'] == 'stopped' and before['stopReceipts']
+                and all(receipt.get('eventId') and receipt.get('worldRoot') for receipt in before['stopReceipts'])
+                and result['protocol'] == 'mini-spk-agent-socket-reclaim-v1'
+                and result['nativeOperationSubmitted'] is False
+                and result['socket'] == before['socket'] and result['controllerUid'] == before['controllerUid']
+                and result['previous'] == before['previous'] and result['removed'] == (before['previous'] is not None))
+        for line in (repair / 'binary-sha256.txt').read_text().splitlines():
+            digest, name = line.split(None, 1)
+            require('activation_transport_binary_' + repair.name, sha(Path(name)) == digest)
+        transport_repairs.append({'after_STOP': before['record']['identity'], 'receipt': result})
     return {'prepared': prepared, 'runtime_upgrade': upgrade, 'supervision': supervised,
             'successor_start': start, 'socket_reclaim': reclaim if recovered_socket else None,
+            'after_STOP_transport_repairs': transport_repairs,
             'scope': 'Preserved grant and failed pre-commit enrollment; native STOP/START and fresh route enrollment.',
             'execution_exit_path': str(execution / 'exit.json')}
 

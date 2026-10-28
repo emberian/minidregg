@@ -636,6 +636,44 @@ PYRECLAIM
   world_phase_record enrollment started
 }
 
+# Compatibility for a retained old resident binary. The new native reclaimer
+# owns transport cleanup; the native completed STOP remains the prerequisite.
+world_reclaim_stopped_agent_socket() {
+  local app=$1 generation=$2 label=$3 directory socket uid
+  [[ -n ${ORACLE_SOCKET_RECLAIM_BIN:-} ]] || return 0
+  [[ $app == 9101 && $generation =~ ^[0-9]+$ && $label =~ ^[a-z0-9-]+$ ]] || fail 'socket reclamation selector differs'
+  [[ $(sha256sum "$ORACLE_SOCKET_RECLAIM_BIN" | cut -d ' ' -f1) == "$ORACLE_SOCKET_RECLAIM_SHA256" ]] || fail 'socket reclaimer changed'
+  directory=$run/native-agent-socket-reclaims/$label
+  mkdir -p -m700 "$run/native-agent-socket-reclaims"
+  mkdir -m700 "$directory"
+  python3 - "$state/apps/$app/g$generation" "$directory" <<'PYSTOPSOCKET'
+import json,pathlib,stat,subprocess,sys
+p,out=map(pathlib.Path,sys.argv[1:]); read=lambda name:json.loads((p/name).read_bytes())
+record=read('record.json'); assert record['phase']=='stopped' and record.get('dispatch_in_flight') is None
+unit=record['identity']['unit']
+manager=dict(line.split('=',1) for line in subprocess.check_output(['systemctl','--user','show',unit,'-p','Id','-p','ActiveState','-p','MainPID','-p','Job'],text=True).splitlines())
+assert manager['Id']==unit and manager['ActiveState'] in ('inactive','failed') and manager['MainPID']=='0' and manager['Job'] in ('','0')
+receipts=[json.loads(x.read_bytes()) for x in (p/'stop-completion').rglob('receipt-anchor.json')]
+assert receipts and all(x.get('eventId') and x.get('worldRoot') for x in receipts)
+agents=read('resident.json')['agents']; assert len(agents)==1
+agent=agents[0]; socket=pathlib.Path(agent['socket']); before=None
+try:
+ m=socket.lstat(); assert stat.S_ISSOCK(m.st_mode)
+ before={'device':m.st_dev,'inode':m.st_ino,'mode':stat.S_IMODE(m.st_mode),'uid':m.st_uid}
+except FileNotFoundError: pass
+value={'socket':str(socket),'controllerUid':agent['controllerUid'],'previous':before,'record':record,'manager':manager,'stopReceipts':receipts}
+(out/'before.json').write_text(json.dumps(value,indent=2)+'\n')
+PYSTOPSOCKET
+  socket=$(jq -er .socket "$directory/before.json")
+  uid=$(jq -er .controllerUid "$directory/before.json")
+  timeout 30 "$ORACLE_SOCKET_RECLAIM_BIN" grain reclaim-agent-socket "$socket" "$uid" >"$directory/result.json" 2>"$directory/stderr"
+  jq -e --slurpfile before "$directory/before.json" '
+    .protocol == "mini-spk-agent-socket-reclaim-v1" and .nativeOperationSubmitted == false and
+    .socket == $before[0].socket and .controllerUid == $before[0].controllerUid and
+    .previous == $before[0].previous and .removed == ($before[0].previous != null)' "$directory/result.json" >/dev/null || fail 'after-STOP native socket receipt differs'
+  sha256sum "$ORACLE_SOCKET_RECLAIM_BIN" >"$directory/binary-sha256.txt"
+}
+
 world_phase_record() {
   python3 -B "$repo/deploy/oracle/acceptance/continue_controller.py" --phase \
     "$run" "$continuation/phases" "$@"

@@ -326,6 +326,7 @@ capture_mounts 9101; capture_mounts 9201
 a_generation=$(jq -er '[.runs[] | select(.state=="running")][-1].generation' "$run/before-stop-a.json")
 world_controller_stop before-app-stop
 phase stop-a
+world_reclaim_stopped_agent_socket 9101 "$a_generation" before-data-refusals
 world_operator_identity >"$run/op155-operator-before.json"
 world_stop_probe 9101 "$a_generation" "$run/op155-a"
 world_operator_identity >"$run/op155-operator-after-a.json"
@@ -418,6 +419,7 @@ cmp "$run/world/evidence/post-b1-body.body" "$run/world/evidence/post-b3-body.bo
 retain 9101; retain 9201
 world_controller_stop before-final-stops
 phase stop-a2 stop-b2 status-a status-b
+world_reclaim_stopped_agent_socket 9101 "$(jq -er .generation "$run/world/evidence/stop-a2.stdout")" final-stop
 retain 9101; retain 9201
 world_disk_snapshot after-stops
 sha256sum -c "$run/input-sha256.txt" >"$run/input-recheck.txt"
