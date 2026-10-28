@@ -683,6 +683,30 @@ PYSTOPSOCKET
   sha256sum "$ORACLE_SOCKET_RECLAIM_BIN" >"$directory/binary-sha256.txt"
 }
 
+world_recovery_operator_upgrades() {
+  local memory=${ORACLE_RECOVERY_CONSENT_MEMORY_MIB:-} mini=${ORACLE_RECOVERY_MINI_BIN:-} unit
+  if [[ -n $memory ]]; then
+    unit=mini-spk-controller-consent-$store.service
+    jq -e --arg unit "$unit" '.stoppedUnits | index($unit) != null' "$continuation/observations/controller-status.json" >/dev/null || fail 'consent unit not in stopped controller'
+    world_phase_record consent-memory started
+    systemctl show "$unit" -p Id -p ActiveState -p MainPID -p MemoryMax -p MemorySwapMax >"$continuation/consent-memory-before.properties"
+    timeout 120 sudo -n -- "$installer" controller-consent-memory "$store" "$helper" "$memory" >"$continuation/consent-memory.json"
+    jq -e --arg store "$store" --argjson memory "$memory" '.store == $store and .memoryMiB == $memory and .nativeOperationSubmitted == false' "$continuation/consent-memory.json" >/dev/null || fail 'consent memory revision differs'
+    systemctl show "$unit" -p Id -p ActiveState -p MainPID -p MemoryMax -p MemorySwapMax >"$continuation/consent-memory-after.properties"
+    [[ $(sed -n 's/^MemoryMax=//p' "$continuation/consent-memory-after.properties") == $((memory * 1024 * 1024)) ]] || fail 'consent memory manager limit differs'
+    world_phase_record consent-memory completed "$continuation/consent-memory.json" "$continuation/consent-memory-before.properties" "$continuation/consent-memory-after.properties"
+  fi
+  if [[ -n $mini ]]; then
+    world_phase_record mini-upgrade started
+    sha256sum "$GRAINS_ROOT/controller/bin/mini" >"$continuation/mini-before.sha256"
+    timeout 120 sudo -n -- "$installer" controller-mini-upgrade "$store" "$helper" "$continuation/bin/mini" >"$continuation/mini-upgrade.json"
+    jq -e --arg store "$store" --arg expected "$ORACLE_RECOVERY_MINI_SHA256" --arg previous "$(cut -d ' ' -f1 "$continuation/mini-before.sha256")" '
+      .store == $store and .miniSha256 == $expected and
+      (.previousMiniSha256 == $previous or (.alreadyConfigured == true and $previous == $expected))' "$continuation/mini-upgrade.json" >/dev/null || fail 'controller Mini revision differs'
+    world_phase_record mini-upgrade completed "$continuation/mini-upgrade.json" "$continuation/mini-before.sha256"
+  fi
+}
+
 world_recover_application_api() {
   local fresh expected_runtime current_unit previous_execution reclaim_label
   op_uid=$(id -u)
@@ -701,6 +725,13 @@ world_recover_application_api() {
       && $(sha256sum "$own/grain-runtime" | cut -d ' ' -f1) == "$expected_runtime" ]] || fail 'API recovery request/runtime pin differs'
   [[ ${ORACLE_SOCKET_RECLAIM_BIN:-} == /* && ${ORACLE_SOCKET_RECLAIM_SHA256:-} =~ ^[0-9a-f]{64}$
       && $(sha256sum "$ORACLE_SOCKET_RECLAIM_BIN" | cut -d ' ' -f1) == "$ORACLE_SOCKET_RECLAIM_SHA256" ]] || fail 'native socket reclaimer pin differs'
+  if [[ -n ${ORACLE_RECOVERY_MINI_BIN:-}${ORACLE_RECOVERY_MINI_SHA256:-} ]]; then
+    [[ ${ORACLE_RECOVERY_MINI_BIN:-} == /* && -f $ORACLE_RECOVERY_MINI_BIN && ! -L $ORACLE_RECOVERY_MINI_BIN && ${ORACLE_RECOVERY_MINI_SHA256:-} =~ ^[0-9a-f]{64}$
+        && $(sha256sum "$ORACLE_RECOVERY_MINI_BIN" | cut -d ' ' -f1) == "$ORACLE_RECOVERY_MINI_SHA256" ]] || fail 'qualified Mini input differs'
+  fi
+  if [[ -n ${ORACLE_RECOVERY_CONSENT_MEMORY_MIB:-} ]]; then
+    [[ $ORACLE_RECOVERY_CONSENT_MEMORY_MIB =~ ^[1-9][0-9]{2,4}$ && $ORACLE_RECOVERY_CONSENT_MEMORY_MIB -ge 256 && $ORACLE_RECOVERY_CONSENT_MEMORY_MIB -le 16384 && $((ORACLE_RECOVERY_CONSENT_MEMORY_MIB % 256)) == 0 ]] || fail 'consent memory input differs'
+  fi
   sha256sum -c "$run/binary-sha256.txt" >"$run/api-original-binary-check.txt"
   fresh=$(mktemp -d "$run/api-preflight.XXXXXXXX")
   timeout 120 sudo -n -- "$installer" controller-export "$store" "$helper" >"$fresh/controller-export.json"
@@ -713,6 +744,7 @@ world_recover_application_api() {
       && ! -S $run/world/sock/operator/host.sock && ! -S $run/world/sock/participant/host.sock ]] || fail 'API recovery services are not stopped'
   world_source_manifest >"$fresh/source-input-sha256.txt"
   sha256sum "$own/grain-runtime" "$ORACLE_SOCKET_RECLAIM_BIN" >>"$fresh/source-input-sha256.txt"
+  [[ -z ${ORACLE_RECOVERY_MINI_BIN:-} ]] || sha256sum "$ORACLE_RECOVERY_MINI_BIN" >>"$fresh/source-input-sha256.txt"
   continuation=$(python3 -B "$repo/deploy/oracle/acceptance/recover_application_api.py" "$run" "$fresh" "$api_recovery_request")
   [[ $continuation == "$run/continuations/application-api-recovery-"* && ${continuation##*-} =~ ^[0-9]+$ ]] || fail 'API recovery output differs'
   mkdir -m700 "$continuation/bin"
@@ -720,8 +752,13 @@ world_recover_application_api() {
   controller_runtime=$continuation/bin/grain-runtime
   cp "$fresh/source-input-sha256.txt" "$continuation/recovery-input-sha256.txt"
   sha256sum "$controller_runtime" >>"$continuation/recovery-input-sha256.txt"
+  if [[ -n ${ORACLE_RECOVERY_MINI_BIN:-} ]]; then
+    install -m500 "$ORACLE_RECOVERY_MINI_BIN" "$continuation/bin/mini"
+    sha256sum "$continuation/bin/mini" >>"$continuation/recovery-input-sha256.txt"
+  fi
   preserve_existing_exit=0
   configured=1 controller_created=1 controller_staged=1
+  world_recovery_operator_upgrades
   world_phase_record runtime-upgrade started
   timeout 120 sudo -n -- "$installer" controller-runtime-upgrade "$store" "$helper" "$controller_runtime" >"$continuation/runtime-upgrade.json"
   jq -e --arg expected "$expected_runtime" --arg previous "$(jq -er .boundary.runtime_sha256 "$continuation/prepared.json")" '.runtimeSha256 == $expected and .previousRuntimeSha256 == $previous' "$continuation/runtime-upgrade.json" >/dev/null || fail 'API runtime upgrade differs'

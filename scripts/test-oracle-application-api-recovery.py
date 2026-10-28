@@ -241,4 +241,37 @@ class ApplicationRecoveryBoundary(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'dispatch evidence'): self.check()
 
 
+class OperatorUpgradeEvidence(unittest.TestCase):
+    def setUp(self):
+        spec = importlib.util.spec_from_file_location('report', Path(__file__).resolve().parents[1] /
+            'deploy/oracle/acceptance/report.py')
+        self.report = importlib.util.module_from_spec(spec); spec.loader.exec_module(self.report)
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup); self.root = Path(tmp.name)
+        (self.root/'bin').mkdir(); (self.root/'bin/mini').write_bytes(b'new qualified client')
+        self.old = 'a'*64; self.new = self.report.sha(self.root/'bin/mini')
+        (self.root/'mini-before.sha256').write_text(self.old+'  /exact/controller/bin/mini\n')
+        self.write('mini-upgrade.json', {'store':'s','miniSha256':self.new,'previousMiniSha256':self.old})
+        self.write('consent-memory.json', {'store':'s','memoryMiB':4096,'nativeOperationSubmitted':False})
+        for name, memory in [('before',2147483648),('after',4294967296)]:
+            (self.root/f'consent-memory-{name}.properties').write_text(
+                f'Id=mini-spk-controller-consent-s.service\nMainPID=0\nActiveState=inactive\nMemoryMax={memory}\nMemorySwapMax=0\n')
+    def write(self, name, value): (self.root/name).write_text(json.dumps(value))
+    def check(self):
+        def require(label, condition): self.assertTrue(condition, label)
+        return self.report.operator_upgrade_evidence(self.root, 's', require)
+    def test_exact_pair_and_memory_receipts(self):
+        result, phases = self.check()
+        self.assertEqual(phases, ['consent-memory','mini-upgrade'])
+        self.assertEqual(result['consent_memory']['receipt']['memoryMiB'],4096)
+    def test_wrong_client_or_old_pin_refuses(self):
+        for key in ('miniSha256','previousMiniSha256'):
+            receipt={'store':'s','miniSha256':self.new,'previousMiniSha256':self.old}; receipt[key]='f'*64
+            self.write('mini-upgrade.json',receipt)
+            with self.assertRaisesRegex(AssertionError,'controller_mini'): self.check()
+    def test_live_or_wrong_memory_manager_refuses(self):
+        p=self.root/'consent-memory-after.properties'; original=p.read_text()
+        for old,new in [('MainPID=0','MainPID=123'),('MemoryMax=4294967296','MemoryMax=2147483648'),('MemorySwapMax=0','MemorySwapMax=1')]:
+            p.write_text(original.replace(old,new))
+            with self.assertRaisesRegex(AssertionError,'consent_memory'): self.check()
+
 if __name__ == '__main__': unittest.main()

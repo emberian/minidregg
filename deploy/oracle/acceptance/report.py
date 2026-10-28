@@ -548,6 +548,37 @@ def application_api_recovery(run, require):
             for directory in recovery_directories(run)]
 
 
+def operator_upgrade_evidence(directory, store, require):
+    operator_upgrades = {}
+    extra_phases = []
+    if (directory / 'consent-memory.json').exists():
+        memory = read(directory / 'consent-memory.json')
+        def properties(name):
+            return dict(line.split('=', 1) for line in (directory / name).read_text().splitlines() if '=' in line)
+        before = properties('consent-memory-before.properties')
+        after = properties('consent-memory-after.properties')
+        unit = 'mini-spk-controller-consent-' + store + '.service'
+        require('operator_consent_memory_revision', memory['store'] == store
+                and memory['nativeOperationSubmitted'] is False
+                and before['Id'] == after['Id'] == unit
+                and before['MainPID'] == after['MainPID'] == '0'
+                and before['ActiveState'] in ('inactive','failed') and after['ActiveState'] in ('inactive','failed')
+                and int(after['MemoryMax']) == memory['memoryMiB'] * 1024 * 1024
+                and before['MemorySwapMax'] == after['MemorySwapMax'])
+        operator_upgrades['consent_memory'] = {'receipt':memory, 'before':before, 'after':after}
+        extra_phases.append('consent-memory')
+    if (directory / 'mini-upgrade.json').exists():
+        client = read(directory / 'mini-upgrade.json')
+        previous = (directory / 'mini-before.sha256').read_text().split()[0]
+        require('operator_exact_controller_mini_revision', client['store'] == store
+                and client['miniSha256'] == sha(directory / 'bin/mini')
+                and (client.get('previousMiniSha256') == previous or
+                     (client.get('alreadyConfigured') is True and previous == client['miniSha256'])))
+        operator_upgrades['mini'] = client
+        extra_phases.append('mini-upgrade')
+    return operator_upgrades, extra_phases
+
+
 def application_api_recovery_attempt(run, directory, require):
     from recover_application_api import check_native, retained_paths, exported, startup_refusal, readiness_refusal
     retained = retained_paths(run, after=directory)
@@ -572,6 +603,7 @@ def application_api_recovery_attempt(run, directory, require):
             and prepared['automatic_retry'] is False and boundary['retransmit'] is False)
     for entry in [*prepared['preserved'].values(), *prepared['archived'].values()]:
         require('api_recovery_preserved_' + entry['path'], sha(Path(entry['path'])) == entry['sha256'])
+    operator_upgrades, extra_phases = operator_upgrade_evidence(directory, boundary['store'], require)
     upgrade = read(directory / 'runtime-upgrade.json')
     require('api_recovery_exact_runtime_upgrade', upgrade['previousRuntimeSha256'] == boundary['runtime_sha256']
             and upgrade['runtimeSha256'] == sha(directory / 'bin/grain-runtime'))
@@ -595,7 +627,7 @@ def application_api_recovery_attempt(run, directory, require):
             read(run / 'agent-lifetime/issued-grant.json')['grantReceipt'] == boundary['grant_receipt'])
     require('api_recovery_new_discovery_id_after_preserved_outcome',
             original(run / 'agent-lifetime/probe/discover-core-query.request-id').read_text().strip() != boundary['request_id'])
-    phases = ['runtime-upgrade','services']
+    phases = [*extra_phases, 'runtime-upgrade','services']
     if not startup:
         phases += ['controller-start','native-recovery','native-reconciliation']
     phases += ['retire-incarnation','successor-start','enrollment']
@@ -609,6 +641,7 @@ def application_api_recovery_attempt(run, directory, require):
         digest,name=line.split(None,1)
         require('api_recovery_source_'+name,sha(original(name))==digest)
     return {'kind':boundary.get('kind','unreserved-api'),'proof':proof,'original_request_id':boundary['request_id'],
+            'operator_upgrades':operator_upgrades,
             'terminal':('native readiness refusal; no tool request allocated' if boundary.get('kind') == 'readiness-refusal' else
                         'native pre-admission refusal; no tool operation allocated' if startup else
                         'audited, already reported; no definitive answer or separate ACK'),
