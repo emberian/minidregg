@@ -32,6 +32,13 @@ HOST=${GRAIN_HOST:-$BIN/minidregg-host}
 GRAINS_ROOT=${GRAINS_ROOT:?store-specific grains root required}
 # Explicit native CLI/profile pin; never a native environment-selected endpoint.
 BROKER_SOCKET=${BROKER_SOCKET:?store-specific broker socket required}
+# Every resident `mini` starts (consent, codec) keeps its socket, lock and PID file in the world's
+# own anchor directory, never in the operator's shared $HOME: worlds share no state, and
+# stop-residents.sh stops a world's residents from these PID files alone. Short on purpose:
+# a Unix socket path is bounded.
+MINI_CONSENT_ANCHOR_DIR=${MINI_CONSENT_ANCHOR_DIR:-$RUN/a}
+mkdir -p -m 700 "$MINI_CONSENT_ANCHOR_DIR"
+export MINI_CONSENT_ANCHOR_DIR
 MINI=$BIN/mini
 SPK_HOST=$BIN/spk-host
 STORE=$RUN/store

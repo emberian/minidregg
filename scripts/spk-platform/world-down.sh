@@ -19,6 +19,7 @@ rc=0
 if [[ -f $CONFIG ]]; then
   BIN="$BIN" GRAINS_ROOT="$GRAINS_ROOT" BROKER_SOCKET="$BROKER_SOCKET" "$here/grain-journey.sh" stop-services "$RUN" >>"$run/cleanup-services.log" 2>&1 || rc=1
 fi
+"$here/stop-residents.sh" "$RUN" >>"$run/cleanup-services.log" 2>&1 || rc=1
 : >"$run/residents-$STORE.log"
 while read -r unit; do
   [[ -n $unit ]] || continue

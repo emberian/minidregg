@@ -301,6 +301,32 @@ pub fn connect_resident(executable: &Path, settings_bytes: Vec<u8>, launch: Comm
     connect_resident_kind(ResidentKind::Consent, executable, settings_bytes, launch)
 }
 
+/// Make `command` a daemon of its own session that inherits nothing from its caller but stdio: every
+/// fd above 2 is marked close-on-exec, so a lock or socket the caller holds (a `flock` wrapper's
+/// fd, a journey's pipe) is never kept alive by a resident that outlives it. Marking, rather than
+/// closing, leaves the standard library's exec-error pipe intact.
+fn detach(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            #[cfg(target_os = "linux")]
+            if libc::syscall(libc::SYS_close_range, 3u32, u32::MAX, 4u32 /* CLOSE_RANGE_CLOEXEC */) == 0 {
+                return Ok(());
+            }
+            for fd in 3..4096 {
+                let flags = libc::fcntl(fd, libc::F_GETFD);
+                if flags >= 0 {
+                    libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC);
+                }
+            }
+            Ok(())
+        });
+    }
+}
+
 /// Connect to this binding's resident of `kind`, starting it when none listens. `launch` is the
 /// command that serves [`serve_resident_kind`] of this kind for this executable and settings (the
 /// client binary's own `consent-resident` or `codec-resident` verb).
@@ -318,9 +344,7 @@ pub fn connect_resident_kind(kind: ResidentKind, executable: &Path, settings_byt
                 .open(&log).map_err(|e| format!("{}: {e}", log.display()))?;
             let mut command = launch;
             command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(errors);
-            unsafe {
-                command.pre_exec(|| if libc::setsid() < 0 { Err(io::Error::last_os_error()) } else { Ok(()) });
-            }
+            detach(&mut command);
             let mut daemon = command.spawn().map_err(|e| format!("cannot start the {}: {e}", kind.name()))?;
             let began = std::time::Instant::now();
             loop {
@@ -645,6 +669,28 @@ impl Consent {
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+
+    /// A resident started while its caller holds an fd (a `flock` wrapper's lock, a journey's pipe)
+    /// must not inherit it, or the resident keeps the caller's lock for as long as it lives.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_detached_resident_inherits_no_fd_from_its_caller() {
+        use std::os::unix::io::AsRawFd;
+        let dir = stub_dir("detach");
+        let held = fs::File::create(dir.join("held.lock")).unwrap();
+        let fd = held.as_raw_fd();
+        // an fd inherited across exec, as a `flock` wrapper's is
+        unsafe { libc::fcntl(fd, libc::F_SETFD, 0) };
+        assert_eq!(unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) }, 0);
+        let listing = dir.join("fds");
+        let mut command = Command::new("/bin/sh");
+        command.arg("-c").arg(format!("ls -1 /proc/$$/fd > {}", listing.display()));
+        detach(&mut command);
+        assert!(command.status().unwrap().success());
+        let seen = fs::read_to_string(&listing).unwrap();
+        let open: Vec<&str> = seen.lines().collect();
+        assert!(open.iter().all(|n| matches!(*n, "0" | "1" | "2")), "the resident inherited fds: {open:?} (caller held {fd})");
+    }
 
     fn stub_dir(label: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("mini-sdk-consent-{label}-{}-{}", std::process::id(),
