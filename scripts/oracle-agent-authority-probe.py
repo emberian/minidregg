@@ -66,8 +66,10 @@ def exchange(path, envelope, timeout):
 
 def classify_refusal(outcome, expected):
     require(outcome.get("type") == "refused", "source did not decode a refusal")
+    require(outcome.get("effect") == "no-record", "source did not decide no-record")
+    require(outcome.get("phase") == b"op 80".hex(), "source refusal belongs to another operation")
     detail = bytes.fromhex(outcome["detail"]).decode("utf-8")
-    require(any(reason in detail for reason in expected),
+    require(detail in expected,
             "refusal does not establish the selected history-index check: " + detail)
     return detail
 
@@ -204,7 +206,7 @@ def main():
             binary = args.out / (label + ".request.bin")
             native(label + "-author", "author", REQUEST_KIND, request_path, binary)
             response = invoke(label, args.operator_socket, 80, bounded(binary, MAX_FRAME))
-            require(response[:1] == b"\xff", label + " did not explicitly refuse")
+            require(response[:1] == b"\xfd", label + " did not explicitly refuse")
             outcome = inspect(label + "-outcome", "outcome", response[1:])
             report[label] = {"passed": True, "detail": classify_refusal(outcome, expected[label])}
             save()

@@ -32,15 +32,87 @@ def file_digest(path):
         return hashlib.file_digest(source, "sha256").digest()
 
 
-def require_refusal(label, reply):
+def benchmark_snapshot(source_config, copy_config):
+    """Bind two quiescent SQLite stores; the copy changes only its storage path.
+
+    SQLite shared-memory/lock files are process coordination, not admitted data.
+    A nonempty WAL is refused: hashing only the main database would miss it.
+    """
+    configs = [json.loads(path.read_bytes()) for path in (source_config, copy_config)]
+    roots = [Path(config["storageRoot"]) for config in configs]
+    if roots[0].resolve() == roots[1].resolve():
+        raise RuntimeError("benchmark requires a separate copied Store")
+    normalized = [dict(config, storageRoot="<copied>") for config in configs]
+    if normalized[0] != normalized[1]:
+        raise RuntimeError("benchmark configurations differ beyond storageRoot")
+    result = {}
+    for label, config_path, root in zip(("source", "copy"),
+                                       (source_config, copy_config), roots):
+        database = root / "forward-link.sqlite3"
+        anchor = Path(str(root) + ".head-anchor")
+        wal = root / "forward-link.sqlite3-wal"
+        if wal.exists() and wal.stat().st_size:
+            raise RuntimeError("benchmark Store has an uncheckpointed WAL")
+        for path in (config_path, database, anchor):
+            if path.is_symlink() or not path.is_file():
+                raise RuntimeError("benchmark requires regular configuration/database/anchor files")
+        result[label] = {"config": str(config_path), "config_sha256": file_digest(config_path).hex(),
+                         "database": str(database), "database_sha256": file_digest(database).hex(),
+                         "anchor": str(anchor), "anchor_sha256": file_digest(anchor).hex()}
+    if (source_config.samefile(copy_config) or
+            Path(result["source"]["database"]).samefile(result["copy"]["database"]) or
+            Path(result["source"]["anchor"]).samefile(result["copy"]["anchor"])):
+        raise RuntimeError("benchmark source and copy must not share files")
+    for field in ("database_sha256", "anchor_sha256"):
+        if result["source"][field] != result["copy"][field]:
+            raise RuntimeError("benchmark copied Store differs from source")
+    return result
+
+
+def write_benchmark(args, report, before):
+    """Emit the existing journey receipt from this run's full comparison only."""
+    after = benchmark_snapshot(args.benchmark_source_config, args.config)
+    if after != before:
+        raise RuntimeError("benchmark source or copied Store/config/anchor changed")
+    if not (report["passed"] and report["cold_comparison"] == "passed"
+            and report["canonical_wrong_claim_checked"]):
+        raise RuntimeError("benchmark requires cold equivalence and canonical wrong-claim refusal")
+    receipt = {"schema": "mini-stop-inspection-continuation-v1", "passed": True,
+               "scope": "Fresh same-Host cold/resident comparison on an unchanged copied Store; no lifecycle submission",
+               "probe_report_sha256": file_digest(args.out / "report.json").hex(),
+               "cold_sha256": file_digest(args.out / "cold.json").hex(),
+               **{key: report[key] for key in ("host_sha256", "config_sha256", "plan_sha256", "committed_sha256")},
+               "cold_seconds": report["measurements"]["cold"]["seconds"],
+               "first_served_seconds": report["measurements"]["served-first"]["seconds"],
+               "warm_repeat_seconds": report["measurements"]["served-repeat"]["seconds"],
+               "controls": report["refusal_boundaries"], "canonical_wrong_claim_checked": True,
+               "source_and_copied_store_and_anchor": "hashes unchanged", "store_files": after}
+    with (args.out / "benchmark.json").open("x") as output:
+        json.dump(receipt, output, indent=2)
+        output.write("\n")
+
+
+def require_refusal(label, reply, inspect=None):
     if label in ("malformed-pair", "public-denied"):
         # Transport checks pair framing and socket routing before Lean. Busy,
         # peer/config mismatch and all other transport errors fail here.
         if reply != ROUTE_REFUSAL:
             raise RuntimeError(label + " did not return the exact transport routing refusal")
         return "transport-routing"
-    if reply[:1] != b"\xff":
-        raise RuntimeError(label + " did not return a source refusal")
+    # Current Host distinguishes a definite no-record refusal (253) from an
+    # undecided outcome (255). Ask that same pinned Host to decode the frame;
+    # an arbitrary error or a valid outcome for another operation cannot pass.
+    if reply[:1] != b"\xfd" or inspect is None:
+        raise RuntimeError(label + " did not return a definite source refusal")
+    outcome = inspect(reply[1:])
+    expected_detail = {
+        "trailing-claim": "noncanonical committed launch claim-v3",
+        "mismatched-committed": "admitted STOP BEGIN differs from retained operator plan",
+    }[label]
+    if (outcome.get("type") != "refused" or outcome.get("effect") != "no-record"
+            or outcome.get("phase") != b"op 155".hex()
+            or outcome.get("detail") != expected_detail.encode().hex()):
+        raise RuntimeError(label + " did not return the expected STOP source refusal")
     return "source"
 
 
@@ -72,6 +144,7 @@ def cold(args, output):
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         start_new_session=True,
     )
+    (args.out / "cold.pid").write_text(str(process.pid) + "\n")
     timed_out = False
     try:
         stdout, stderr = process.communicate(timeout=args.deadline)
@@ -104,11 +177,17 @@ def main():
                         help="a different canonical claim; required on the post-append qualification pass")
     parser.add_argument("--resident-only", action="store_true",
                         help="check the resident and refusals without claiming cold equivalence")
+    parser.add_argument("--benchmark-source-config", type=Path,
+                        help="quiescent source config for this copied Store; emit benchmark.json after full comparison")
     parser.add_argument("--deadline", type=float, default=1200)
     args = parser.parse_args()
     if not 0 < args.deadline <= 1800:
         parser.error("deadline must be positive and at most 1800 seconds")
+    if args.benchmark_source_config and (args.resident_only or not args.mismatched_committed):
+        parser.error("benchmark requires cold comparison and --mismatched-committed")
     args.out.mkdir(mode=0o700, parents=False, exist_ok=False)
+    before = (benchmark_snapshot(args.benchmark_source_config, args.config)
+              if args.benchmark_source_config else None)
     config, plan, committed = (p.read_bytes() for p in (args.config, args.plan, args.committed))
     host_sha = file_digest(args.host)
     pair = struct.pack("<I", len(plan)) + plan + committed
@@ -154,6 +233,14 @@ def main():
     def served(payload):
         return exchange(args.operator_socket, binding + bytes([OP]) + payload, args.deadline)
 
+    def inspect_refusal(label, raw):
+        payload = struct.pack("<H", 7) + b"outcome" + raw
+        reply = exchange(args.operator_socket, binding + b"\x08" + payload, args.deadline)
+        (args.out / (label + "-inspected.bin")).write_bytes(reply)
+        if reply[:1] != b"\x08" or not 0 < len(reply) - 1 <= MAX_JSON:
+            raise RuntimeError("Host could not decode " + label + " refusal")
+        return json.loads(reply[1:])
+
     try:
         first = measured("served-first", lambda: served(pair))
         (args.out / "served-first.bin").write_bytes(first)
@@ -172,13 +259,15 @@ def main():
                                ("malformed-pair", b"\xff\xff\xff\xff")):
             reply = measured(label, lambda: served(payload))
             (args.out / (label + ".bin")).write_bytes(reply)
-            report["refusal_boundaries"][label] = require_refusal(label, reply)
+            report["refusal_boundaries"][label] = require_refusal(
+                label, reply, lambda raw: inspect_refusal(label, raw))
         if mismatched is not None:
             wrong_pair = struct.pack("<I", len(plan)) + plan + mismatched
             reply = measured("mismatched-committed", lambda: served(wrong_pair))
             (args.out / "mismatched-committed.bin").write_bytes(reply)
             report["refusal_boundaries"]["mismatched-committed"] = require_refusal(
-                "mismatched-committed", reply)
+                "mismatched-committed", reply,
+                lambda raw: inspect_refusal("mismatched-committed", raw))
             report["canonical_wrong_claim_checked"] = True
             report["mismatched_committed_sha256"] = digest(mismatched)
         # A valid config/image envelope is essential: malformed-envelope denial
@@ -205,8 +294,16 @@ def main():
             raise RuntimeError("Host image changed during comparison")
         if args.config.read_bytes() != config:
             raise RuntimeError("Host config changed during comparison")
+        if args.plan.read_bytes() != plan or args.committed.read_bytes() != committed:
+            raise RuntimeError("retained STOP inputs changed during comparison")
+        if mismatched is not None and args.mismatched_committed.read_bytes() != mismatched:
+            raise RuntimeError("canonical wrong claim changed during comparison")
         report["passed"] = True
+        if before is not None:
+            save_report()
+            write_benchmark(args, report, before)
     except Exception as error:
+        report["passed"] = False
         report["error"] = str(error)
         if report["cold_comparison"] == "running":
             report["cold_comparison"] = "failed"
