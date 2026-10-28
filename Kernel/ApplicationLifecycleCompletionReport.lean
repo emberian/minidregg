@@ -86,11 +86,44 @@ def stopAuditFrame : List UInt8 :=
 def stopAuditCodec : LawfulCodec StopAudit :=
   NativeHostCodec.framed stopAuditFrame stopAuditStream
 
-/-- A control group is an absolute cgroup path, so its bound is the kernel's path bound, not the
-256 bytes of a unit name. The nested class slice tree
-`s{store}-mini-grains-{class}-a{app}.slice` repeats the 16-hex store tag five times and reaches 260
-bytes for a four-digit app (dregg-build, 2026-10-28). -/
-def controlGroupBound : Nat := 4096
+/-- The longest control group a resident unit of ours can have, computed from the naming scheme
+(native/spk-host broker `grains_slice`/`class_slice`/`app_slice` and `parse_resident_unit`):
+
+  /user.slice/user-U.slice/user@U.service          U = uid, at most 10 digits (u32)
+  /s{T}.slice                                      T = Store tag, exactly 16 hex
+  /s{T}-mini.slice
+  /s{T}-mini-grains.slice
+  /s{T}-mini-grains-C.slice                        C = size class name, one letter (S, M, L)
+  /s{T}-mini-grains-C-a{A}.slice                   A = app, at most 18 digits
+  /mini-spk-s{T}-a{A}-g{G}.service                 G = generation, at most 18 digits
+
+systemd nests a slice under its dash-prefix, so the Store tag recurs five times in the path (it
+reached 260 bytes for a four-digit app on dregg-build, 2026-10-28, against the old bound of 256).
+The sum below is 317. Every component is far under NAME_MAX (255; the longest is the 75-byte unit
+file) and the whole path far under PATH_MAX (4096). It assumes the units run under the operator's
+user manager, which is how the broker places them. -/
+def controlGroupBound : Nat :=
+  let uid := 10
+  let tag := 16
+  let digits := 18
+  "/user.slice/user-".length + uid + ".slice/user@".length + uid + ".service".length
+  + ("/s".length + tag + ".slice".length)
+  + ("/s".length + tag + "-mini.slice".length)
+  + ("/s".length + tag + "-mini-grains.slice".length)
+  + ("/s".length + tag + "-mini-grains-C.slice".length)
+  + ("/s".length + tag + "-mini-grains-C-a".length + digits + ".slice".length)
+  + ("/mini-spk-s".length + tag + "-a".length + digits + "-g".length + digits + ".service".length)
+
+/-- A control group a report may carry: present and within the bound derived above. -/
+def controlGroupWithin (group : List UInt8) : Bool :=
+  !group.isEmpty && decide (group.length ≤ controlGroupBound)
+
+example : controlGroupBound = 317 := by decide
+/-- The 260-byte group observed on dregg-build is accepted. -/
+example : controlGroupWithin (List.replicate 260 0) = true := by decide
+example : controlGroupWithin (List.replicate controlGroupBound 0) = true := by decide
+example : controlGroupWithin (List.replicate (controlGroupBound + 1) 0) = false := by decide
+example : controlGroupWithin [] = false := by decide
 
 def stopAuditValid (unit invocationId controlGroup : List UInt8)
     (bytes : List UInt8) : Bool :=
@@ -180,11 +213,11 @@ def Report.validFor (report : Report)
         report.pid == 0 && report.stopAudit.isEmpty
   | .start, .running =>
       !report.invocationId.isEmpty && decide (report.invocationId.length ≤ 256) &&
-        !report.controlGroup.isEmpty && decide (report.controlGroup.length ≤ controlGroupBound) &&
+        controlGroupWithin report.controlGroup &&
         decide (report.pid > 0) && report.stopAudit.isEmpty
   | .stop, .stopped =>
       !report.invocationId.isEmpty && decide (report.invocationId.length ≤ 256) &&
-        !report.controlGroup.isEmpty && decide (report.controlGroup.length ≤ controlGroupBound) &&
+        controlGroupWithin report.controlGroup &&
         !report.stopAudit.isEmpty && decide (report.stopAudit.length ≤ 4096) &&
         report.pid == 0 &&
         stopAuditValid report.unit report.invocationId report.controlGroup report.stopAudit

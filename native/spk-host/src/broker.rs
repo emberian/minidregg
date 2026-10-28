@@ -1492,6 +1492,26 @@ mod tests {
         format!("{}.slice", stem.rsplit_once('-').unwrap().0)
     }
 
+    /// Mirrors Kernel `ApplicationLifecycleCompletionReport.controlGroupBound` (317): the longest
+    /// control group a resident unit can have, built from the real naming functions at their
+    /// maximum components (10-digit uid, 16-hex Store tag, 18-digit app and generation).
+    #[test]
+    fn resident_control_group_stays_within_the_lean_bound() {
+        let (uid, st, big) = ("4294967295", "0123456789abcdef", "999999999999999999");
+        let longest = CLASSES.iter().map(|c| {
+            let unit = format!("mini-spk-s{st}-a{big}-g{big}.service");
+            assert!(parse_resident_unit(&unit).is_some(), "the unit is a resident unit");
+            let path = format!("/user.slice/user-{uid}.slice/user@{uid}.service/s{st}.slice/s{st}-mini.slice/{}/{}/{}/{unit}",
+                grains_slice("mini", st), class_slice("mini", st, c), app_slice("mini", st, c, big));
+            assert!(path.split('/').all(|part| part.len() <= 255), "NAME_MAX");
+            path.len()
+        }).max().unwrap();
+        assert_eq!(longest, 317);
+        // the 260-byte group observed on dregg-build (app 9101, generation 2, uid 1000)
+        let seen = format!("/user.slice/user-1000.slice/user@1000.service/s{st}.slice/s{st}-mini.slice/{}/{}/{}/mini-spk-s{st}-a9101-g2.service",
+            grains_slice("mini", st), class_slice("mini", st, &class("S").unwrap()), app_slice("mini", st, &class("S").unwrap(), "9101"));
+        assert_eq!(seen.len(), 260);
+    }
     #[test]
     fn grain_class_slices_nest_by_class() {
         let (p, st) = ("mini", "0123456789abcdef");
