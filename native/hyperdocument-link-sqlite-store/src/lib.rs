@@ -136,6 +136,10 @@ pub enum StoreError {
     /// `EDQUOT`, `SQLITE_FULL`) or read-only (`EROFS`, `SQLITE_READONLY`).
     /// Distinct from `Missing` (absent) and from an opaque failure.
     Unwritable(String),
+    /// SQLITE_PROTOCOL (15) on every one of the bounded retries: the WAL lock could not be
+    /// taken. SQLite returns it after repeated failed WAL-lock attempts and says to try again;
+    /// the busy handler never covers it.
+    WalLockProtocol(u32),
     Sqlite {
         code: i32,
         message: String,
@@ -170,6 +174,10 @@ impl fmt::Display for StoreError {
             Self::InvalidPath => formatter.write_str("store path cannot be passed to SQLite"),
             Self::Bound(what) => write!(formatter, "append refused: {what} (a bound, not contention; the same bytes never succeed)"),
             Self::Unwritable(what) => write!(formatter, "store disk refused a write (full or read-only): {what}"),
+            Self::WalLockProtocol(attempts) => write!(
+                formatter,
+                "WAL lock protocol retries exhausted after {attempts} attempts (SQLITE_PROTOCOL)"
+            ),
             Self::Sqlite { code, message } => {
                 write!(formatter, "opaque SQLite failure {code}: {message}")
             }
@@ -201,6 +209,36 @@ impl StoreError {
     pub fn is_unwritable(&self) -> bool {
         matches!(self, Self::Unwritable(_))
     }
+}
+
+/// SQLITE_PROTOCOL: returned after repeated failed WAL-lock attempts, never handled by the busy
+/// handler; SQLite's guidance is to try again.
+const SQLITE_PROTOCOL: c_int = 15;
+/// Attempts at a step that met SQLITE_PROTOCOL, with a doubling backoff from 25 ms: at most
+/// 25+50+...+1600 = 3175 ms of waiting in all, under the 5 s busy timeout.
+const PROTOCOL_ATTEMPTS: u32 = 8;
+
+/// Run `attempt` again while it fails with SQLITE_PROTOCOL, `PROTOCOL_ATTEMPTS` times in all,
+/// then refuse by name. Only for a step that has applied nothing when it fails that way: the
+/// WAL lock is taken at the start of a read or write transaction, before the statement runs.
+fn retry_protocol<T>(
+    mut attempt: impl FnMut() -> Result<T, StoreError>,
+    mut wait: impl FnMut(std::time::Duration),
+) -> Result<T, StoreError> {
+    let mut delay = std::time::Duration::from_millis(25);
+    for made in 1..=PROTOCOL_ATTEMPTS {
+        match attempt() {
+            Err(StoreError::Sqlite { code, .. }) if code & 0xff == SQLITE_PROTOCOL => {
+                if made == PROTOCOL_ATTEMPTS {
+                    return Err(StoreError::WalLockProtocol(made));
+                }
+                wait(delay);
+                delay *= 2;
+            }
+            other => return other,
+        }
+    }
+    unreachable!("the loop returns on its last attempt")
 }
 
 struct Database {
@@ -237,6 +275,10 @@ impl Database {
     }
 
     fn exec(&self, sql: &'static [u8]) -> Result<(), StoreError> {
+        retry_protocol(|| self.exec_once(sql), std::thread::sleep)
+    }
+
+    fn exec_once(&self, sql: &'static [u8]) -> Result<(), StoreError> {
         debug_assert_eq!(sql.last(), Some(&0));
         // SAFETY: `sql` is nul terminated and the database handle is live.
         let code = unsafe {
@@ -256,6 +298,10 @@ impl Database {
     }
 
     fn prepare(&self, sql: &'static [u8]) -> Result<Statement<'_>, StoreError> {
+        retry_protocol(|| self.prepare_once(sql), std::thread::sleep)
+    }
+
+    fn prepare_once(&self, sql: &'static [u8]) -> Result<Statement<'_>, StoreError> {
         debug_assert_eq!(sql.last(), Some(&0));
         let mut raw = ptr::null_mut();
         // SAFETY: arguments satisfy SQLite's prepare contract and `raw` is an
@@ -307,6 +353,23 @@ impl Statement<'_> {
     }
 
     fn step(&self) -> Result<c_int, StoreError> {
+        // A first step that meets SQLITE_PROTOCOL failed taking the WAL lock and has returned
+        // no row, so it is reset and stepped again; SQLITE_PROTOCOL can not come later.
+        let mut retried = false;
+        retry_protocol(
+            || {
+                if std::mem::take(&mut retried) {
+                    // SAFETY: a live prepared statement; its bindings are kept by reset.
+                    unsafe { sqlite3_reset(self.raw.as_ptr()) };
+                }
+                retried = true;
+                self.step_once()
+            },
+            std::thread::sleep,
+        )
+    }
+
+    fn step_once(&self) -> Result<c_int, StoreError> {
         // SAFETY: `raw` is a prepared, non-finalized statement.
         let code = unsafe { sqlite3_step(self.raw.as_ptr()) };
         if code == SQLITE_ROW || code == SQLITE_DONE {
@@ -1587,6 +1650,33 @@ pub fn encode_journal_read(read: &JournalRead) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+    fn protocol() -> StoreError {
+        StoreError::Sqlite { code: SQLITE_PROTOCOL, message: "locking protocol".to_owned() }
+    }
+
+    #[test]
+    fn sqlite_protocol_is_retried_and_exhaustion_names_itself() {
+        let mut waits = Vec::new();
+        let mut calls = 0;
+        let got = retry_protocol(|| { calls += 1; if calls < 3 { Err(protocol()) } else { Ok(calls) } }, |d| waits.push(d));
+        assert_eq!(got.unwrap(), 3);
+        assert_eq!(waits.len(), 2, "two waits before the third attempt");
+
+        let mut waits = std::time::Duration::ZERO;
+        let mut calls = 0;
+        let error = retry_protocol::<()>(|| { calls += 1; Err(protocol()) }, |d| waits += d).unwrap_err();
+        assert_eq!(calls, PROTOCOL_ATTEMPTS);
+        assert!(matches!(error, StoreError::WalLockProtocol(n) if n == PROTOCOL_ATTEMPTS));
+        assert!(error.to_string().contains("WAL lock protocol retries exhausted after 8 attempts"), "{error}");
+        assert!(waits < std::time::Duration::from_millis(5_000), "within the busy timeout: {waits:?}");
+
+        // any other failure is returned at once, unretried
+        let mut calls = 0;
+        let other = retry_protocol::<()>(|| { calls += 1; Err(StoreError::Sqlite { code: 1, message: "x".into() }) }, |_| panic!("no wait"));
+        assert!(matches!(other, Err(StoreError::Sqlite { code: 1, .. })));
+        assert_eq!(calls, 1);
+    }
+
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 
