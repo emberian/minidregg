@@ -447,20 +447,53 @@ def activation_recovery(run, require):
             and upgrade.get('previousRuntimeSha256') == sha(run / 'bin/grain-runtime')
             and upgrade.get('runtimeSha256') == sha(directory / 'bin/grain-runtime')
             and upgrade['runtimeSha256'] != upgrade['previousRuntimeSha256'])
-    supervised = read(directory / 'supervise.json')
-    stopped = read(directory / 'old-record-after-stop.json')
+    successor = run / 'continuations/activation-successor-1'
+    recovered_socket = successor.exists()
+    execution = successor if recovered_socket else directory
     old = boundary['old_record']
+    if recovered_socket:
+        continuation = read(successor / 'prepared.json')
+        require('activation_successor_explicit_boundary',
+                continuation['schema'] == 'mini-oracle-activation-successor-v1'
+                and continuation['automatic_retry'] is False
+                and continuation['predecessor'] == str(directory)
+                and continuation['boundary']['grant_receipt'] == boundary['grant_receipt'])
+        for name, digest in continuation['prior_sha256'].items():
+            require('activation_successor_preserved_' + name, sha(successor / 'prior' / name) == digest)
+        failed = read(successor / 'prior/boundary.json')
+        require('activation_successor_was_never_admitted', all(failed['g4_absent'].values())
+                and failed['successor_generation'] == continuation['successor_generation']
+                and (directory / 'supervise.json').read_bytes() == b'')
+        reclaim = read(successor / 'socket-reclaim.json')
+        socket = continuation['socket']
+        require('activation_exact_native_socket_reclaim',
+                reclaim['protocol'] == 'mini-spk-agent-socket-reclaim-v1'
+                and reclaim['removed'] is True and reclaim['nativeOperationSubmitted'] is False
+                and reclaim['socket'] == socket['path'] and reclaim['ownerUid'] == socket['uid']
+                and reclaim['controllerUid'] == continuation['controller_uid']
+                and reclaim['previous'] == {key: (int(socket[key], 8) if key == 'mode' else socket[key])
+                                           for key in ('device', 'inode', 'mode', 'uid')})
+        stopped = read(successor / 'prior/g2-stopped-record.json')
+        start = read(successor / 'successor-start.json')
+        require('activation_native_never_begun_successor_reused', start['generation'] == continuation['successor_generation'])
+        stop_directory = successor / 'prior/stop-completion'
+        supervised = None
+    else:
+        supervised = read(directory / 'supervise.json')
+        stopped = read(directory / 'old-record-after-stop.json')
+        require('activation_native_supervision', supervised.get('action') == 'stop-and-continue'
+                and supervised['crashed']['unit'] == boundary['old_unit']
+                and supervised['stop']['protocol'] == 'mini-spk-grain-stop-v1'
+                and supervised['stop']['generation'] == boundary['old_generation'])
+        start = supervised['start']
+        stop_directory = directory / 'stop-completion'
     require('activation_native_STOP_then_successor_START',
-            supervised.get('action') == 'stop-and-continue'
-            and supervised['crashed']['unit'] == boundary['old_unit']
-            and supervised['stop']['protocol'] == 'mini-spk-grain-stop-v1'
-            and supervised['stop']['generation'] == boundary['old_generation']
-            and stopped['phase'] == 'stopped' and stopped['identity'] == old['identity']
+            stopped['phase'] == 'stopped' and stopped['identity'] == old['identity']
             and stopped['invocation_id'] == old['invocation_id']
-            and supervised['start']['startAction']['kind'] == 'continue'
-            and int(supervised['start']['generation']) > int(boundary['old_generation'])
-            and supervised['start']['completion']['completionReceipt']['eventId'])
-    stop_receipts = list((directory / 'stop-completion').rglob('receipt-anchor.json'))
+            and start['startAction']['kind'] == 'continue'
+            and int(start['generation']) > int(boundary['old_generation'])
+            and start['completion']['completionReceipt']['eventId'])
+    stop_receipts = list(stop_directory.rglob('receipt-anchor.json'))
     require('activation_native_STOP_completion_retained', bool(stop_receipts)
             and all(read(path).get('eventId') and read(path).get('worldRoot') for path in stop_receipts))
     issued = read(run / 'agent-lifetime/issued-grant.json')
@@ -469,18 +502,24 @@ def activation_recovery(run, require):
     require('activation_new_request_for_successor', enrollment != prior_request
             and enrollment['expectedBindingSha256'] == boundary['old_binding_sha256']
             and sha(run / 'agent-lifetime/enrollment-initial/request.json') != boundary['request_sha256'])
-    for phase in ('runtime-upgrade', 'public-listener', 'services', 'supervise', 'enrollment'):
-        value = read(directory / 'phases' / (phase + '.completed.json'))
+    phases = [(directory, phase) for phase in ('runtime-upgrade', 'public-listener')]
+    phases += [(execution, phase) for phase in
+               (('socket-reclaim', 'services', 'successor-start', 'enrollment') if recovered_socket
+                else ('services', 'supervise', 'enrollment'))]
+    for phase_directory, phase in phases:
+        value = read(phase_directory / 'phases' / (phase + '.completed.json'))
         require('activation_phase_' + phase, value['phase'] == phase and value['state'] == 'completed'
-                and value['started_sha256'] == sha(directory / 'phases' / (phase + '.started.json')))
+                and value['started_sha256'] == sha(phase_directory / 'phases' / (phase + '.started.json')))
         for name, digest in value['evidence'].items():
             require('activation_phase_evidence_' + name, sha(Path(name)) == digest)
-    for line in (directory / 'recovery-input-sha256.txt').read_text().splitlines():
-        digest, name = line.split(None, 1)
-        require('activation_source_' + name, sha(Path(name)) == digest)
+    for manifest_directory in ([directory, successor] if recovered_socket else [directory]):
+        for line in (manifest_directory / 'recovery-input-sha256.txt').read_text().splitlines():
+            digest, name = line.split(None, 1)
+            require('activation_source_' + name, sha(Path(name)) == digest)
     return {'prepared': prepared, 'runtime_upgrade': upgrade, 'supervision': supervised,
+            'successor_start': start, 'socket_reclaim': reclaim if recovered_socket else None,
             'scope': 'Preserved grant and failed pre-commit enrollment; native STOP/START and fresh route enrollment.',
-            'execution_exit_path': str(directory / 'exit.json')}
+            'execution_exit_path': str(execution / 'exit.json')}
 
 
 def pooled_tenant_probe(run, require):

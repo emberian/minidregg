@@ -525,9 +525,20 @@ world_continue_activation() {
   systemctl --user show "$unit" -p Id -p LoadState -p ActiveState -p SubState -p MainPID -p InvocationID -p Job >"$fresh/manager.txt"
   [[ $(systemctl --user show "mini-spk-broker@$store.service" -p ActiveState --value) == inactive ]] || fail 'broker is not stopped'
   [[ ! -S $run/world/sock/operator/host.sock && ! -S $run/world/sock/participant/host.sock ]] || fail 'operator services are not stopped'
+  if [[ -f $run/continuations/activation-recovery-1/socket-failure/boundary.json ]]; then
+    local next_generation
+    next_generation=$(jq -er '.successor_generation | select(test("^[0-9]+$"))' "$run/continuations/activation-recovery-1/socket-failure/boundary.json")
+    systemctl --user show "mini-spk-s$store-a9101-g$next_generation.service" -p Id -p ActiveState -p MainPID -p Job >"$fresh/manager-successor.txt"
+    [[ ${ORACLE_SOCKET_RECLAIM_BIN:-} == /* && ${ORACLE_SOCKET_RECLAIM_SHA256:-} =~ ^[0-9a-f]{64}$
+        && $(sha256sum "$ORACLE_SOCKET_RECLAIM_BIN" | cut -d ' ' -f1) == "$ORACLE_SOCKET_RECLAIM_SHA256" ]] || fail 'qualified native socket reclaimer pin required'
+  fi
   world_source_manifest >"$fresh/source-input-sha256.txt"
   sha256sum "$own/grain-runtime" >>"$fresh/source-input-sha256.txt"
   continuation=$(python3 -B "$repo/deploy/oracle/acceptance/recover_activation.py" "$run" "$fresh")
+  if [[ $continuation == "$run/continuations/activation-successor-1" ]]; then
+    world_finish_activation_successor "$fresh"
+    return
+  fi
   [[ $continuation == "$run/continuations/activation-recovery-1" ]] || fail 'activation recovery path differs'
   if [[ -d $continuation/bin ]]; then
     [[ $(sha256sum "$continuation/bin/grain-runtime" | cut -d ' ' -f1) == "$expected_runtime" ]] || fail 'prepared runtime changed'
@@ -577,6 +588,51 @@ world_continue_activation() {
   cp "$state/apps/9101/g$old_generation/record.json" "$continuation/old-record-after-stop.json"
   cp -a "$state/apps/9101/g$old_generation/stop-completion" "$continuation/stop-completion"
   world_phase_record supervise completed "$continuation/supervise.json" "$continuation/successor-start.json"
+  world_phase_record enrollment started
+}
+
+world_finish_activation_successor() {
+  local fresh=$1 socket controller_uid
+  controller_runtime=$run/continuations/activation-recovery-1/bin/grain-runtime
+  [[ $(sha256sum "$controller_runtime" | cut -d ' ' -f1) == "$expected_runtime" ]] || fail 'successor controller runtime differs'
+  cp "$fresh/source-input-sha256.txt" "$continuation/recovery-input-sha256.txt"
+  sha256sum "$ORACLE_SOCKET_RECLAIM_BIN" >>"$continuation/recovery-input-sha256.txt"
+  preserve_existing_exit=0
+  configured=1 controller_created=1 controller_staged=1
+  socket=$(jq -er .socket.path "$continuation/prepared.json")
+  controller_uid=$(jq -er .controller_uid "$continuation/prepared.json")
+  world_phase_record socket-reclaim started
+  timeout 30 "$ORACLE_SOCKET_RECLAIM_BIN" grain reclaim-agent-socket "$socket" "$controller_uid" \
+    >"$continuation/socket-reclaim.json" 2>"$continuation/socket-reclaim.stderr"
+  python3 - "$continuation" <<'PYRECLAIM'
+import json,pathlib,sys
+p=pathlib.Path(sys.argv[1]); before=json.loads((p/'prepared.json').read_bytes()); result=json.loads((p/'socket-reclaim.json').read_bytes())
+assert result['protocol']=='mini-spk-agent-socket-reclaim-v1' and result['removed'] is True
+assert result['nativeOperationSubmitted'] is False and result['socket']==before['socket']['path']
+assert result['controllerUid']==before['controller_uid'] and result['ownerUid']==before['socket']['uid']
+assert result['previous']=={key:(int(before['socket'][key],8) if key=='mode' else before['socket'][key]) for key in ('device','inode','mode','uid')}
+PYRECLAIM
+  world_phase_record socket-reclaim completed "$continuation/socket-reclaim.json"
+  cp "$fresh/controller-status.json" "$continuation/public-listener.json"
+  jq -e --arg binary "$GRAINS_ROOT/controller/public-listener/mini" \
+    --arg digest "$(sha256sum "$BIN/mini" | cut -d ' ' -f1)" --arg socket "$run/world/sock/participant/host.sock" '
+    .stopped == true and .publicListener.binary == $binary and .publicListener.binarySha256 == $digest and
+    .publicListener.socket == $socket and .publicListener.controllerUid == .controllerUid' \
+    "$continuation/public-listener.json" >/dev/null || fail 'successor listener registration differs'
+  export SPK_PUBLIC_LISTENER_RECEIPT=$continuation/public-listener.json
+  world_phase_record services started
+  systemctl --user start "mini-spk-broker@$store.service"
+  for ((i=0;i<100;i++)); do [[ ! -S $BROKER_SOCKET ]] || break; sleep .1; done
+  [[ -S $BROKER_SOCKET && $(stat -c '%u:%a' "$BROKER_SOCKET") == "$op_uid:600" ]] || fail 'successor broker readiness failed'
+  "$journey" phase "$run/world" services >"$continuation/services.log" 2>&1
+  world_phase_record services completed "$run/world/sock/operator.pid.identity.json" "$run/world/sock/participant.pid.identity.json"
+  world_phase_record successor-start started
+  timeout 1800 "$BIN/spk-host" grain start "$profile" 9101 >"$continuation/successor-start.json" 2>"$continuation/successor-start.stderr"
+  jq -e --arg generation "$(jq -er .successor_generation "$continuation/prepared.json")" '
+    .protocol == "mini-spk-grain-start-v1" and .app == "9101" and .generation == $generation and
+    .startAction.kind == "continue" and .completion.completionReceipt.eventId' \
+    "$continuation/successor-start.json" >/dev/null || fail 'native never-begun successor START differs'
+  world_phase_record successor-start completed "$continuation/successor-start.json"
   world_phase_record enrollment started
 }
 

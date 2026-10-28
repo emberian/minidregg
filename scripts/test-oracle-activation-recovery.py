@@ -4,6 +4,9 @@ import contextlib
 import io
 import subprocess
 import sys
+import os
+import socket
+import shutil
 import base64
 import hashlib
 import importlib.util
@@ -56,7 +59,7 @@ class RecoveryBoundary(unittest.TestCase):
         save('world/evidence/start-a.stdout', {'protocol': 'mini-spk-grain-start-v1', 'app': '9101',
              'generation': '2', 'unit': 'recorded.service', 'completion': {'completionReceipt': {'acceptedCount': '53'}}})
         save('world/evidence/profile-result.json', {'stateRoot': str(self.run / 'state')})
-        save('state/apps/9101/g2/record.json', {'phase': 'running', 'dispatch_in_flight': None,
+        save('state/apps/9101/g2/record.json', {'phase': 'running', 'dispatch_in_flight': None, 'invocation_id': 'original-invocation',
              'identity': {'unit': 'recorded.service', 'generation': 2}})
         (self.run / 'state/apps/9201').mkdir(parents=True)
         self.manager = {'Id': 'recorded.service', 'LoadState': 'loaded', 'ActiveState': 'inactive',
@@ -133,6 +136,55 @@ class RecoveryBoundary(unittest.TestCase):
         phase('supervise', 'started')
         with self.assertRaisesRegex(ValueError, 'lifecycle effect may have started'):
             recovery.prepare(self.run, observations)
+
+    def successor_fixture(self):
+        observations, predecessor = self.prepare_fixture()
+        old_record = json.loads((self.run / 'state/apps/9101/g2/record.json').read_bytes())
+        old_record['phase'] = 'stopped'
+        self.save('state/apps/9101/g2/record.json', old_record)
+        (predecessor / 'bin').mkdir(); (predecessor / 'bin/grain-runtime').write_bytes(b'corrected runtime')
+        self.status['runtimeSha256'] = recovery.sha(predecessor / 'bin/grain-runtime')
+        (observations / 'controller-status.json').write_text(json.dumps(self.status))
+        failure = predecessor / 'socket-failure'; failure.mkdir()
+        stale = self.run / 'stale.sock'
+        listener = socket.socket(socket.AF_UNIX); listener.bind(str(stale)); listener.close()
+        metadata = stale.lstat()
+        config = self.save('state/apps/9101/g4/resident.json', {'agents': [{'socket': str(stale), 'controllerUid': os.getuid()+1}]})
+        retained = {'store': 'test-store', 'old_generation': '2', 'successor_generation': '4',
+                    'old_record': old_record, 'g4_config_sha256': recovery.sha(config),
+                    'socket': {'path': str(stale), 'device': metadata.st_dev, 'inode': metadata.st_ino,
+                               'uid': metadata.st_uid, 'mode': oct(metadata.st_mode & 0o777)}}
+        (failure / 'boundary.json').write_text(json.dumps(retained))
+        (failure / 'g4-unit.log').write_text('resident bootstrap refused: agent socket preflight pin refused')
+        for name in ('runtime-upgrade', 'public-listener', 'services'):
+            for action in ('started', 'completed'):
+                (predecessor / 'phases' / (name+'.'+action+'.json')).write_text('{}')
+        (predecessor / 'phases/supervise.started.json').write_text('{}')
+        (predecessor / 'supervise.json').write_bytes(b'')
+        (predecessor / 'supervise.stderr').write_text('resident unit failed before START completion')
+        (predecessor / 'exit.json').write_text(json.dumps({'execution_exit':1,'cleanup_exit':0,'namespace_preserved':True}))
+        receipt = self.save('state/apps/9101/g2/stop-completion/receipt-anchor.json', {'eventId':'stopped','worldRoot':'root'})
+        shutil.copytree(receipt.parent, failure / 'stop-completion')
+        pins = {str(self.run/'store/forward-link.sqlite3'):recovery.sha(self.run/'store/forward-link.sqlite3'),
+                str(self.run/'store.head-anchor'):recovery.sha(self.run/'store.head-anchor')}
+        (failure / 'native-store-pins.json').write_text(json.dumps(pins))
+        (observations / 'manager-successor.txt').write_text('Id=mini-spk-stest-store-a9101-g4.service\nActiveState=failed\nMainPID=0\nJob=\n')
+        return observations, predecessor
+
+    def test_stopped_predecessor_and_never_begun_successor_boundary(self):
+        observations, predecessor = self.successor_fixture()
+        result = recovery.prepare_successor(self.run, observations, predecessor, check_only=True)
+        self.assertEqual(result['old_record']['phase'], 'stopped')
+        self.assertFalse((self.run / 'continuations/activation-successor-1').exists())
+        self.save('state/apps/9101/g4/start-admitted-v3.json', {'unexpected': 'admission'})
+        with self.assertRaisesRegex(ValueError, 'may have begun START'):
+            recovery.prepare_successor(self.run, observations, predecessor, check_only=True)
+
+    def test_successor_refuses_changed_stopped_store(self):
+        observations, predecessor = self.successor_fixture()
+        (self.run / 'store/forward-link.sqlite3').write_bytes(b'changed after refusal')
+        with self.assertRaisesRegex(ValueError, 'Store changed after successor refusal'):
+            recovery.prepare_successor(self.run, observations, predecessor, check_only=True)
 
     def test_exact_stopped_boundary_is_inspection_only(self):
         value = self.check()

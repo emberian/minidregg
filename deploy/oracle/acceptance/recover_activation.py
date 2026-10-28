@@ -9,6 +9,7 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
+import stat
 import sys
 
 
@@ -30,7 +31,7 @@ def binding_sha(value):
                                     ensure_ascii=False).encode()).hexdigest()
 
 
-def checked_boundary(run, exported, status, manager, enrollment=None, runtime_sha=None):
+def checked_boundary(run, exported, status, manager, enrollment=None, runtime_sha=None, old_phase="running"):
     root = run / 'agent-lifetime'
     world = read(run / 'world-identity.json')
     require(read(run / 'exit.json') == {'execution_exit': 1, 'cleanup_exit': 0,
@@ -74,7 +75,7 @@ def checked_boundary(run, exported, status, manager, enrollment=None, runtime_sh
             and start.get('generation', '').isdecimal(), 'original START differs')
     state = Path(read(run / 'world/evidence/profile-result.json')['stateRoot'])
     record = read(state / 'apps/9101' / ('g' + start['generation']) / 'record.json')
-    require(record['phase'] == 'running' and record.get('dispatch_in_flight') is None
+    require(record['phase'] == old_phase and record.get('dispatch_in_flight') is None
             and record['identity']['unit'] == start['unit']
             and record['identity']['generation'] == int(start['generation']), 'old app lifecycle differs')
     require(manager.get('Id') == start['unit'] and manager.get('LoadState') == 'loaded'
@@ -100,11 +101,84 @@ def checked_boundary(run, exported, status, manager, enrollment=None, runtime_sh
             'permits_same_generation_relaunch': False, 'permits_enrollment_replay': False}
 
 
+def prepare_successor(run, observations, predecessor, check_only=False):
+    """A completed native STOP and a never-admitted successor; no STOP replay."""
+    failure = predecessor / 'socket-failure'
+    retained = read(failure / 'boundary.json')
+    original = read(predecessor / 'prepared.json')['boundary']
+    manager = dict(line.split('=', 1) for line in (observations / 'manager.txt').read_text().splitlines() if '=' in line)
+    boundary = checked_boundary(run, read(observations / 'controller-export.json'),
+        read(observations / 'controller-status.json'), manager, predecessor / 'prior/enrollment-initial',
+        sha(predecessor / 'bin/grain-runtime'), old_phase='stopped')
+    require(retained['store'] == original['store'] == boundary['store']
+            and retained['old_generation'] == original['old_generation'] == boundary['old_generation']
+            and boundary['old_record']['identity'] == original['old_record']['identity']
+            and boundary['old_record']['invocation_id'] == original['old_record']['invocation_id']
+            and boundary['old_record'] == retained['old_record']
+            and boundary['grant_receipt'] == original['grant_receipt'], 'native stopped predecessor differs')
+    require(read(predecessor / 'exit.json') == {'execution_exit': 1, 'cleanup_exit': 0,
+                                               'namespace_preserved': True}, 'successor cleanup differs')
+    require((predecessor / 'supervise.json').read_bytes() == b''
+            and 'before START completion' in (predecessor / 'supervise.stderr').read_text()
+            and 'agent socket preflight pin refused' in (failure / 'g4-unit.log').read_text(),
+            'not the recorded successor preflight failure')
+    phases = {path.name for path in (predecessor / 'phases').iterdir()}
+    require(phases == {name + '.' + state + '.json' for name in
+        ('runtime-upgrade', 'public-listener', 'services') for state in ('started', 'completed')}
+        | {'supervise.started.json'}, 'predecessor recovery advanced')
+    state = Path(read(run / 'world/evidence/profile-result.json')['stateRoot'])
+    generation = retained['successor_generation']
+    require(generation.isdecimal() and int(generation) > int(boundary['old_generation']), 'successor generation differs')
+    successor = state / 'apps/9101' / ('g' + generation)
+    effect_files = ('record.json', 'start-admitted-v3.json', 'start-completed-v3.json', 'begin-attempt',
+                    'lifecycle-begin-v3-active.json', 'begin-attempt-retry-v4', 'lifecycle-begin-retry-v4-active.json')
+    require(all(not (successor / name).exists() for name in effect_files), 'successor may have begun START')
+    require(sha(successor / 'resident.json') == retained['g4_config_sha256'], 'successor configuration changed')
+    manager = dict(line.split('=', 1) for line in (observations / 'manager-successor.txt').read_text().splitlines() if '=' in line)
+    require(manager.get('Id') == 'mini-spk-s' + boundary['store'] + '-a9101-g' + generation + '.service'
+            and manager.get('ActiveState') in ('failed', 'inactive') and manager.get('MainPID') == '0'
+            and manager.get('Job') in ('', '0'), 'successor process may be live')
+    for path in (failure / 'stop-completion').rglob('*'):
+        if path.is_file():
+            source = state / 'apps/9101' / ('g' + boundary['old_generation']) / 'stop-completion' / path.relative_to(failure / 'stop-completion')
+            require(sha(source) == sha(path), 'native STOP evidence changed')
+    receipts = list((failure / 'stop-completion').rglob('receipt-anchor.json'))
+    require(bool(receipts) and all(read(path).get('eventId') and read(path).get('worldRoot') for path in receipts),
+            'native STOP completion absent')
+    for path, digest in read(failure / 'native-store-pins.json').items():
+        require(sha(Path(path)) == digest, 'Store changed after successor refusal')
+    for line in (run / 'input-sha256.txt').read_text().splitlines():
+        digest, path = line.split(None, 1)
+        require(sha(Path(path)) == digest, 'original input changed')
+    socket = Path(retained['socket']['path']); metadata = socket.lstat()
+    require(stat.S_ISSOCK(metadata.st_mode) and (metadata.st_dev, metadata.st_ino, metadata.st_uid)
+            == tuple(retained['socket'][key] for key in ('device', 'inode', 'uid')), 'retained socket identity changed')
+    require(read(successor / 'resident.json')['agents'][0]['socket'] == str(socket), 'successor socket differs')
+    if check_only:
+        return boundary
+    output = run / 'continuations/activation-successor-1'
+    output.mkdir(mode=0o700)
+    (output / 'phases').mkdir(mode=0o700)
+    shutil.copytree(observations, output / 'observations')
+    shutil.copytree(failure, output / 'prior')
+    value = {'schema': 'mini-oracle-activation-successor-v1', 'predecessor': str(predecessor),
+             'boundary': boundary, 'successor_generation': generation, 'socket': retained['socket'],
+             'controller_uid': read(successor / 'resident.json')['agents'][0]['controllerUid'],
+             'automatic_retry': False, 'requires_native_socket_reclaim': True,
+             'prior_sha256': {str(p.relative_to(output / 'prior')): sha(p)
+                              for p in (output / 'prior').rglob('*') if p.is_file()}}
+    (output / 'prepared.json').write_text(json.dumps(value, indent=2) + '\n')
+    print(output)
+
+
 def prepare(run, observations):
     exported = read(observations / 'controller-export.json')
     manager = dict(line.split('=', 1) for line in (observations / 'manager.txt').read_text().splitlines() if '=' in line)
     output = run / 'continuations/activation-recovery-1'
     existing = output.exists()
+    if (output / 'socket-failure/boundary.json').exists():
+        prepare_successor(run, observations, output)
+        return
     enrollment = output / 'prior/enrollment-initial' if existing else None
     upgraded = existing and (output / 'phases/runtime-upgrade.completed.json').exists()
     runtime_sha = sha(output / 'bin/grain-runtime') if upgraded else None
