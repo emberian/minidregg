@@ -34,7 +34,8 @@ completed effects remain retained and any started phase requires inspection.
 an explicitly reviewed recovery plan for the retained uncertain session. It
 invokes one native recovery of the same foreground ID and parent reservation;
 it never resends the tool request. A failed recovery remains inspect-only.
-Creates and removes only a fresh scratch Store namespace. Keeps evidence in RUN.
+Creates and removes only a fresh scratch Store namespace. Every continuation
+keeps its retained namespace and volumes after stopping services. Keeps evidence in RUN.
 The input data is read only; publication copies it once into this Store's custody.
 No public deployment and no direct fd3 calls. Uses the same current receiving
 path as the grain API: event22 share, event28 enrollment and admitted dispatch.
@@ -176,6 +177,9 @@ export POST_PATH_A=/query POST_PATH_B=/query POST_TYPE_A=application/json POST_T
 . "$repo/deploy/oracle/acceptance/world.sh"
 configured=0
 preserve_existing_exit=0
+# A continuation inherits retained custody; successful checks do not authorize
+# deleting that earlier namespace or its state volumes.
+[[ $mode == new ]] || preserve_retained_namespace=1
 [[ $mode != continue-controller && $mode != continue-session && $mode != continue-activation && $mode != recover-application-api && $mode != continue-checkpoint && $mode != recover-foreground ]] || preserve_existing_exit=1
 trap world_cleanup EXIT
 trap 'exit 130' INT
