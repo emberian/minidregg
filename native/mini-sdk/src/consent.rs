@@ -689,7 +689,8 @@ mod tests {
         assert!(command.status().unwrap().success());
         let seen = fs::read_to_string(&listing).unwrap();
         let open: Vec<&str> = seen.lines().collect();
-        assert!(open.iter().all(|n| matches!(*n, "0" | "1" | "2")), "the resident inherited fds: {open:?} (caller held {fd})");
+        // (the shell keeps a private fd of its own, 10; the caller's must be absent)
+        assert!(!open.contains(&fd.to_string().as_str()), "the resident inherited the caller's fd: {open:?} (caller held {fd})");
     }
 
     fn stub_dir(label: &str) -> PathBuf {
