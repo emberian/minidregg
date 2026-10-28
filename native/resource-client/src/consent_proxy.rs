@@ -207,14 +207,20 @@ impl Lifeline {
         if self.failed.load(Ordering::Acquire) {
             return false;
         }
+        // POLLRDHUP is Linux/Android only; POLLHUP is always reported and a closed peer reads as POLLIN.
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        let events = libc::POLLIN | libc::POLLRDHUP;
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
+        let events = libc::POLLIN;
         let mut fd = libc::pollfd {
             fd: self.socket.as_raw_fd(),
-            events: libc::POLLIN | libc::POLLRDHUP,
+            events,
             revents: 0,
         };
         // Between requests nothing is owed to us: readable or hung up means EOF (the worker or
         // its deadline closed the connection) or stray bytes (desynchronized); either is unusable.
-        unsafe { libc::poll(&mut fd, 1, 0) == 0 }
+        let ready = unsafe { libc::poll(&mut fd, 1, 0) };
+        ready == 0 && fd.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) == 0
     }
 }
 
