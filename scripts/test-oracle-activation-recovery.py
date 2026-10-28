@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 """Exercise recovery boundary refusals; native lifecycle acceptance is separate."""
+import contextlib
+import io
+import subprocess
+import sys
 import base64
 import hashlib
 import importlib.util
@@ -64,6 +68,41 @@ class RecoveryBoundary(unittest.TestCase):
 
     def check(self):
         return recovery.checked_boundary(self.run, self.export, self.status, self.manager)
+
+    def prepare_fixture(self):
+        observations = self.run / 'observations'; observations.mkdir()
+        (observations / 'controller-export.json').write_text(json.dumps(self.export))
+        (observations / 'controller-status.json').write_text(json.dumps(self.status))
+        (observations / 'manager.txt').write_text('\n'.join(k + '=' + v for k, v in self.manager.items()))
+        (self.run / 'input-sha256.txt').write_text('')
+        store = self.run / 'store'; store.mkdir()
+        (store / 'forward-link.sqlite3').write_bytes(b'retained fixture')
+        Path(str(store) + '.head-anchor').write_bytes(b'anchor')
+        self.save('world/store/base/workroom/deployment/pinned-config.json', {'storageRoot': str(store)})
+        with contextlib.redirect_stdout(io.StringIO()):
+            recovery.prepare(self.run, observations)
+        return observations, self.run / 'continuations/activation-recovery-1'
+
+    def test_prepared_directory_can_record_real_phase_and_refuses_retry_after_marker(self):
+        observations, output = self.prepare_fixture()
+        controller = Path(__file__).resolve().parents[1] / 'deploy/oracle/acceptance/continue_controller.py'
+        subprocess.run([sys.executable, str(controller), '--locked-exec', str(self.run),
+                        sys.executable, str(controller), '--phase', str(self.run),
+                        str(output / 'phases'), 'runtime-upgrade', 'started'], check=True)
+        self.assertTrue((output / 'phases/runtime-upgrade.started.json').is_file())
+        with self.assertRaisesRegex(ValueError, 'effect may have started'):
+            recovery.prepare(self.run, observations)
+
+    def test_prepared_untouched_boundary_resumes_but_store_change_refuses(self):
+        observations, output = self.prepare_fixture()
+        (output / 'exit.json').write_text(json.dumps({'execution_exit': 1, 'cleanup_exit': 0,
+                                                      'namespace_preserved': True}))
+        with contextlib.redirect_stdout(io.StringIO()):
+            recovery.prepare(self.run, observations)
+        self.assertTrue((output / 'pre-effect-attempts/1/exit.json').is_file())
+        (self.run / 'store/forward-link.sqlite3').write_bytes(b'changed')
+        with self.assertRaisesRegex(ValueError, 'Store changed'):
+            recovery.prepare(self.run, observations)
 
     def test_exact_stopped_boundary_is_inspection_only(self):
         value = self.check()

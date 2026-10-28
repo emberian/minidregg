@@ -30,17 +30,18 @@ def binding_sha(value):
                                     ensure_ascii=False).encode()).hexdigest()
 
 
-def checked_boundary(run, exported, status, manager):
+def checked_boundary(run, exported, status, manager, enrollment=None):
     root = run / 'agent-lifetime'
     world = read(run / 'world-identity.json')
     require(read(run / 'exit.json') == {'execution_exit': 1, 'cleanup_exit': 0,
                                       'namespace_preserved': True}, 'not a cleanly stopped failed run')
-    request_path = root / 'enrollment-initial/request.json'
+    enrollment = enrollment or root / 'enrollment-initial'
+    request_path = enrollment / 'request.json'
     request = read(request_path)
     identity = sha(request_path)
     require(request.get('protocol') == 'mini-controller-application-enrollment-v1'
             and request.get('mode') == 'application', 'not an application enrollment')
-    require('unknown variant `binding-v3`' in (root / 'enrollment-initial/stderr').read_text(),
+    require('unknown variant `binding-v3`' in (enrollment / 'stderr').read_text(),
             'not the retained lifetime wire refusal')
     require(exported.get('protocol') == 'mini-spk-controller-evidence-v1'
             and exported.get('store') == world['store'], 'controller export differs')
@@ -50,7 +51,7 @@ def checked_boundary(run, exported, status, manager):
         require(hashlib.sha256(value).hexdigest() == files[name]['sha256'], 'export digest differs')
         return value
     journal = json.loads(raw('journal.json'))
-    require(journal == read(root / 'enrollment-initial/before.json')
+    require(journal == read(enrollment / 'before.json')
             == read(root / 'controller-final-journal.json'), 'enrollment journal changed')
     require(journal['connection'] == 'soft', 'controller is not softly detached')
     pending = ('pending', 'toolPending', 'providerPending', 'child', 'settlementDue',
@@ -102,7 +103,10 @@ def checked_boundary(run, exported, status, manager):
 def prepare(run, observations):
     exported = read(observations / 'controller-export.json')
     manager = dict(line.split('=', 1) for line in (observations / 'manager.txt').read_text().splitlines() if '=' in line)
-    boundary = checked_boundary(run, exported, read(observations / 'controller-status.json'), manager)
+    output = run / 'continuations/activation-recovery-1'
+    existing = output.exists()
+    enrollment = output / 'prior/enrollment-initial' if existing else None
+    boundary = checked_boundary(run, exported, read(observations / 'controller-status.json'), manager, enrollment)
     # Check every retained input pin before moving any evidence. The dataset's
     # physical custody is independently rechecked by the native successor START.
     for line in (run / 'input-sha256.txt').read_text().splitlines():
@@ -112,9 +116,31 @@ def prepare(run, observations):
     store = Path(config['storageRoot'])
     wal = store / 'forward-link.sqlite3-wal'
     require(not wal.exists() or wal.stat().st_size == 0, 'stopped Store has a nonempty WAL')
-    output = run / 'continuations/activation-recovery-1'
+    if existing:
+        prepared = read(output / 'prepared.json')
+        require(prepared['boundary'] == boundary, 'prepared boundary changed')
+        require(not list((output / 'phases').glob('*'))
+                and not (output / 'runtime-upgrade.json').exists(), 'an effect may have started')
+        require(read(output / 'exit.json') == {'execution_exit': 1, 'cleanup_exit': 0,
+                                               'namespace_preserved': True}, 'prepared cleanup differs')
+        for entry in [*prepared['snapshots'].values(), *prepared['archived'].values()]:
+            require(sha(Path(entry['path'])) == entry['sha256'], 'preserved evidence changed')
+        for path in (store / 'forward-link.sqlite3', Path(str(store) + '.head-anchor')):
+            require(sha(path) == prepared['snapshots'][str(path)]['sha256'], 'Store changed after preparation')
+        attempts = output / 'pre-effect-attempts'
+        attempts.mkdir(mode=0o700, exist_ok=True)
+        attempt = attempts / str(len(list(attempts.iterdir())) + 1)
+        attempt.mkdir(mode=0o700)
+        for name in ('exit.json', 'recovery-input-sha256.txt'):
+            if (output / name).exists():
+                shutil.copy2(output / name, attempt / name)
+        shutil.copytree(observations, attempt / 'observations')
+        (output / 'phases').mkdir(mode=0o700, exist_ok=True)
+        print(output)
+        return
     output.parent.mkdir(mode=0o700, exist_ok=True)
     output.mkdir(mode=0o700)
+    (output / 'phases').mkdir(mode=0o700)
     prior = output / 'prior'; prior.mkdir(mode=0o700)
     snapshots = {}
     originals = [run / 'exit.json', run / 'agent-lifetime/controller-final-journal.json',

@@ -529,8 +529,12 @@ world_continue_activation() {
   sha256sum "$own/grain-runtime" >>"$fresh/source-input-sha256.txt"
   continuation=$(python3 -B "$repo/deploy/oracle/acceptance/recover_activation.py" "$run" "$fresh")
   [[ $continuation == "$run/continuations/activation-recovery-1" ]] || fail 'activation recovery path differs'
-  mkdir -m700 "$continuation/bin"
-  install -m500 "$own/grain-runtime" "$continuation/bin/grain-runtime"
+  if [[ -d $continuation/bin ]]; then
+    [[ $(sha256sum "$continuation/bin/grain-runtime" | cut -d ' ' -f1) == "$expected_runtime" ]] || fail 'prepared runtime changed'
+  else
+    mkdir -m700 "$continuation/bin"
+    install -m500 "$own/grain-runtime" "$continuation/bin/grain-runtime"
+  fi
   controller_runtime=$continuation/bin/grain-runtime
   cp "$fresh/source-input-sha256.txt" "$continuation/recovery-input-sha256.txt"
   sha256sum "$controller_runtime" >>"$continuation/recovery-input-sha256.txt"
