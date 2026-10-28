@@ -69,6 +69,9 @@ class Operator:
     def __init__(self, run, phase="setup"):
         self.run = run
         self.root = run / "agent-lifetime"
+        repair = self.root / "repair-payer-custody"
+        if repair.exists() and not (repair / "complete.json").is_file():
+            raise ValueError("payer custody successor publication is incomplete")
         self.workroom = run / "world/store/base/workroom"
         self.config = self.workroom / "deployment/pinned-config.json"
         self.host = run / "bin/minidregg-host"
@@ -485,7 +488,7 @@ class Operator:
         # then authority; ApplicationDispatchAuthoring adds four observations.
         app_signers = [pin(role, index, "controller") for role, index in
                        [(4, 0), (4, 1), (8, 0), (8, 1), (1, 0), (9, 0), (9, 1), (9, 2), (9, 3)]]
-        payer = [pin(role, 0, "dispatch") for role in (4, 8, 1)]
+        payer = [pin(role, 0, "dispatch") for role in (4, 1)]
         for signer in payer:
             del signer["seedPath"]
         pins = {"controllerRouteName": "oracle-app", "socketPath": layout["listenerSocket"],

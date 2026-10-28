@@ -420,6 +420,34 @@ else: raise SystemExit('unexpected native command: '+repr(args))
             with self.subTest(runs=runs), self.assertRaises(ValueError):
                 module.require_current_start(start, status(runs))
 
+    def test_native_route_payer_pins_match_two_source_slots(self):
+        spec = importlib.util.spec_from_file_location("oracle_route_pins", ROOT / "deploy/oracle/acceptance/agent.py")
+        module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+        allocation = json.loads((ROOT / "deploy/oracle/acceptance/agent-allocation.json").read_text())
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); op=object.__new__(module.Operator)
+            op.agent=allocation["agents"][0]; op.allocation=allocation
+            op.root=op.calls=op.workroom=root
+            identity=root/"agents"/op.agent["route"]; identity.mkdir(parents=True)
+            for actor in ("controller","dispatch"):
+                (identity/(actor+".pub")).write_bytes(bytes([7 if actor=="dispatch" else 8])*32)
+            grant=root/"grant"; grant.mkdir(); (grant/"lookup-0000.outcome.json").write_text('{}')
+            (root/"issued-grant.json").write_text(json.dumps({"grantAttempt":str(grant)}))
+            layout=root/"layout.json"; layout.write_text(json.dumps({
+                "controllerHome":"/home/controller","listenerSocket":"/private/api.sock",
+                "reverseSocket":"/private/reverse.sock","operatorSocket":"/private/operator.sock", "controllerUid":os.getuid()+10001}))
+            op.mini=op.host=op.config=Path(__file__)
+            class BeforeNative(Exception): pass
+            def call(label,args):
+                self.assertEqual(label,"render-custody"); raise BeforeNative()
+            op.call=call
+            with self.assertRaises(BeforeNative): op.prepare_route(ROOT,layout)
+            pins=json.loads((root/"operator-pins.json").read_text())
+            self.assertEqual(pins["payerPins"],[{"role":role,"index":"0","keyId":op.agent["dispatch"]["keyId"],
+                "keyEpoch":"2","publicKeyHex":(bytes([7])*32).hex()} for role in ("4","1")])
+            self.assertEqual([(p["role"],p["index"]) for p in pins["appSigners"]],
+                [("4","0"),("4","1"),("8","0"),("8","1"),("1","0"),("9","0"),("9","1"),("9","2"),("9","3")])
+
     def test_route_renderer_legacy_and_explicit_allocation_guards(self):
         source = (ROOT / "scripts/spk-platform/prepare-lifetime-route.sh").read_text()
         # Execute the renderer's actual jq guard, not a parallel validator.
@@ -429,7 +457,7 @@ else: raise SystemExit('unexpected native command: '+repr(args))
             "enrollmentObserveCapability", "manifestObserveCapability", "maximumCharge",
             "parentCapability", "parentObserve", "purseCapability", "purseObserve",
             "reserveAmount", "sessionObserveCapability"], "1")
-        pins.update(appSigners=[{}], grantSigner={}, payerPins=[{}, {}, {}],
+        pins.update(appSigners=[{}], grantSigner={}, payerPins=[{"role":"4","index":"0"},{"role":"1","index":"0"}],
                     hostUid=1000, hostUnit="oracle.service", socketPath="/private/agent.sock",
                     controllerRouteName="workroom-app", signedApiPath="/repo.git/",
                     packageManifest="8402", snapshotManifest="8403", purseResource="7940", payerSubject="10")
@@ -444,6 +472,9 @@ else: raise SystemExit('unexpected native command: '+repr(args))
             self.assertTrue(check(pins, None))
             modern = dict(pins, **expected, controllerRouteName="oracle-app", signedApiPath="/")
             self.assertTrue(check(modern, expected))
+            for payer in [list(reversed(modern["payerPins"])), modern["payerPins"][:1],
+                          [modern["payerPins"][0], {"role":"8","index":"0"}, modern["payerPins"][1]]]:
+                self.assertFalse(check(dict(modern, payerPins=payer), expected))
             self.assertTrue(check(dict(modern, hostUnit=None), expected, True))
             self.assertFalse(check(dict(modern, hostUnit=None), expected))
             self.assertFalse(check(modern, None))

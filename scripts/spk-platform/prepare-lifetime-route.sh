@@ -123,7 +123,8 @@ jq -e --argjson expected "$EXPECTED" --argjson custodyOnly "$CUSTODY_ONLY" '
   (.socketPath | type == "string" and startswith("/")) and
   (.appSigners | type == "array" and length > 0 and length <= 64) and
   (.grantSigner | type == "object") and
-  (.payerPins | type == "array" and length == 3) and
+  (.payerPins | type == "array" and length == 2 and
+    map({role,index}) == [{role:"4",index:"0"},{role:"1",index:"0"}]) and
   ([.packageManifest,.snapshotManifest,.sessionObserveCapability,
     .manifestObserveCapability,.enrollmentObserveCapability,.parentCapability,
     .parentObserve,.purseCapability,.purseObserve,.purseResource,
