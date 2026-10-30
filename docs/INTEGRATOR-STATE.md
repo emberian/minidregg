@@ -1,131 +1,94 @@
 # Integrator state
 
-Present-state record of the integration lane, rewritten whole when its shape changes. A successor reads this,
-then `hbox:/home/hbox/lanes/integ/COMMANDS.log` (every build stage, gate verdict and tidy act, one line each).
-dregg-build and dregg-ref were deleted 2026-10-28; their history is in this file's git history.
+Present-state record of the integration lane, rewritten whole when its shape changes. A successor reads this, then
+`hbox:/home/hbox/lanes/integ/COMMANDS.log` (every build stage, gate verdict, world teardown and process stop, one line
+each). Older history is in this file's git history.
 
-## Shape
+## Goal and the one blocker
 
-One integrator (Opus). Kimi (`claude-kimi -p`, read-only) reviews a batch of landings every few plus anything big or
-risky. Kimi cannot read the session scratchpad: put a patch inline in the prompt (keep it under ~60 KB) or ask it to
-read repo paths. Lanes push branches and send shas; the integrator merges into `integration/staging` on the Mac,
-builds staging's tip on hbox, moves main to it once its host stage is green, gates, reports. No codec pins/census.
-Statements may be rephrased, never weakened. ATLAS law 17: never slower over time (flatness bench = the one perf
-gate; hot-path sends it, wire it into the gate).
+Rehearsal 3 ships through infra (`demo-mini.sh ship` into the forge `demo` container) when the gate is fully green:
+tour + j14-apps on hbox gate12, composed (all phases, distinct mode) on infra's forge composed container. Flatness
+(law 17) is reported, never blocking (root ruling 2026-10-30: the submit ratchet preimage is ember's decision).
+**Only red before the ship: composed restart, step `continuous`.** The resident opens a maintenance turn after its last
+delivered request because its maintenance fingerprint moved (room_resident.rs `assignment_fingerprint` over
+prepare_resident minus sourceRequests/sourceRoom/roomStatus). Ruling: diagnose, never teach the fixture to answer it.
+Staging carries a diagnostic: when maintenance is due, grain-runtime writes `maintenance-input.json` (and the one it
+replaced as `maintenance-input.prev.json`) beside the resident's requests.json. Infra runs the first candidate with it
+(4e5faa8d8 or later) with KEEP_WORLD in distinct mode, diffs the two, sends the moving field; the integrator fixes the
+fingerprint (likely the resident's own say in contextProjection, or recentMemberChanges).
 
-## Where things are
+## Lanes (send shas; name every new candidate to infra and the scout)
 
-- Mac landing worktree `/Users/ember/dev/minidregg-lanes/integration-r2` (branch `integ/main` = staging, pushed to
-  `origin/integration/staging`); a scratch worktree of main at the session scratchpad `integ2/wt-main`.
-  Mac checks: `CARGO_TARGET_DIR=/Users/ember/dev/minidregg-lanes/target-integ`, filtered `cargo test --bin mini -- apps::`
-  etc. (the apps_front connector test fails only inside the group).
-- hbox tree `/home/hbox/lanes/integ/src` (NVMe `/`; rpool/othersys is not ours). Build `integ-build2.sh SHA`
-  (pid file integ/build.pid): rust-check, host, consent, umbrellas (non-fatal), rust, pack -> `integ/candidates/<sha>/READY`.
-  Run with `SEATS=4 MEM=40G`; keep combined Lean caps on hbox near 60 GB so ~30 GB stays for test worlds, and stagger
-  host stages with the hot-path lane (a9bba0bc5f114fc06). Incremental build 6-10 min; a deep StoreCodec change ~40-60 min.
-- Gate `integ/gate9.sh SHA` (newest; never edit a script in place, number the next one). Env: PHASES ("tour composed
-  enrol"), SUF, HARNESS (overlay scripts/ + resource-client scripts + journey.d from a sha), EDGE_REV=69c17a3 (dregg-infra
-  tree integ/dregg-infra-<rev>), PORT and JWORLD_ROUTE_FRONT_PORT unique per concurrent run, JWORLD_MANAGEMENT=sponsor
-  (distinct breaks app births; see reds), JWORLD_ROOT_HANDOFFS=1 default, TOUR_FROM, KEEP_WORLD=1 (leave the composed world
-  up; the log line says how to take it down). Results integ/gate-<sha8><SUF>/; runs under /ci. Playwright
-  /tank/dregg-build/rows-0ce31391/pw/node_modules (browsers ~/.cache/ms-playwright). Infra also offers `ssh composed-box`
-  (a container on dregg-forge) for composed if hbox root setup gets crowded; not used yet.
+| lane | agent | owns |
+|---|---|---|
+| infra (successor; predecessor add189844d158e3a7 handed off at dregg-infra edge/demo/CHECKLIST.md 712d404) | a104b94c2643e9c5d | forge composed container (composed-sync + composed-gate; residents/restart need root), the ship |
+| scout (Sonnet) | a3d575cdd7a822f6b | every journey row + stress on the newest candidate; routes faults; docs/SCOUT-FINDINGS.md on lane/scout |
+| proofs (Opus) | af4b3ea612564dea5 | umbrella reds, statement fixes, accepted-fixture re-records |
+| app-reds (Sonnet) | a17f4172949caca14 | app packages and declarations, Hummingbird, grain-runtime app tests |
+| iteration speed (Opus) | a141a9c535501bbd7 | Lean v4.30.0 -> v4.35.0 bump, then codec/store/world-root seams, lane-tree warm pool, hot-swap; will provide a second-tree umbrella stage |
+| SPK freshening | a58fcf100f4438710 | queue complete (all FEATURED repacks landed) |
 
-## Main and candidates (2026-10-30 ~12:10 EDT)
+## Lean 4.35 bump protocol (what is held)
 
-Main = staging = 06831831c (+docs). Builds: integ-build3.sh (packs straight into candidates/<sha>, so manifest.json names
-final paths; holds integ/build.lock for the whole build including the umbrella subshell). queue-build.sh SHA (queue.pid)
-waits for the running build, then starts integ-build3.sh SHA. Umbrellas take 20-25 min and hold the lock; asked the
-iteration-speed lane for a second-tree or cached umbrella stage.
+The bump comes as one sha off main. On its "HOLD LEAN" message, hold every other Lean landing (proofs batches) until
+the bump's candidate is READY; then they rebase. Rust-only and harness landings keep flowing. Build the bump alone.
+Required in its commit message: every #assert_axioms pin whose set changed (Classical.choice joining is fine; sorryAx,
+ofReduceBool, trustCompiler or new axioms are not), what replaced native_decide sites, any moved #assert_compiled output
+(lean-intents.json "lean" field expected). Kimi reviews its pin and statement diff before landing. Not yet declared.
 
-| candidate | verdict |
+## Build and gate (hbox, as user hbox, /home/hbox/lanes/integ)
+
+- `integ-build3.sh SHA` (SEATS=4 MEM=40G): rust-check, host, consent, umbrellas (non-fatal, --unshipped targets: Fixtures
+  ObjectiveProofs CensusChecks), rust, pack straight into candidates/<sha> (manifest.json names final paths) -> READY.
+  Holds build.lock for the whole run including the umbrella subshell (two builds once collided in one tree).
+  PID in build.pid. Never launch while build.pid is alive.
+- `queue-build.sh SHA` (queue.pid): waits for the running build, then starts integ-build3.sh SHA.
+- `umbrella-minidregg.sh SHA` (minidregg.pid): after SHA's build, elaborates the whole `Minidregg` umbrella in the same
+  tree (the pipeline otherwise never does). Logs "MINIDREGG umbrella" lines.
+- Umbrellas take 20-30 min and hold the lock: candidate cadence is about one per 30 min until iteration speed's
+  second-tree umbrella stage exists (they will send the command; switch in integ-build4.sh).
+- `gate12.sh SHA`: tour + composed + enrol + j14-apps + flatness. Env: EDGE_REV=69c17a3 JWORLD_MANAGEMENT=distinct|sponsor
+  KEEP_WORLD=1 PORT=.. JWORLD_ROUTE_FRONT_PORT=.. (unique), PHASES subset, HARNESS=<sha>. j14 inputs staged once:
+  integ/j14-hroot (rebound per candidate), j14-data, j14-secrets; runs under /ci (broker-world-up refuses a group-writable
+  ancestor and integ/ is 775). Never edit a gate script in place; number the next one. hbox composed cannot judge
+  residents/restart (no root).
+- Kept world teardown: the candidate's scripts/spk-platform/world-down.sh RUN/inputs, then
+  dregg-infra-69c17a3/edge/mini/journey/jworld-scratch.sh down RUN/w (XDG_RUNTIME_DIR and DBUS set); log DOWN.
+  No world is kept up now.
+- Mac landing worktree /Users/ember/dev/minidregg-lanes/integration-r2 (branch integ/main = origin/integration/staging);
+  main moves to staging once a build's host stage is green. CARGO_TARGET_DIR=/Users/ember/dev/minidregg-lanes/target-integ
+  for filtered Mac tests (apps_front connector test fails only inside the apps:: group; SUN_LEN socket fixtures fail on
+  macOS temp-path length: both known).
+- Market adopt set: dregg-forge:/var/lib/spk-fresh/qualified-2026-10-29/out (local.json, adopt.tsv; 22 packages). Add a
+  package as apps/<app>/out/<app>.spk (+ verify.txt or build-date-utc.txt), move out aside, run
+  `python3 -I repo/deploy/market/fresh-index.py --apps $Q/apps --recipes $Q/repo/apps/packages --spk-tool
+  /var/lib/spk-fresh/tools/spk --out $Q/out`, copy local.json to native/resource-client/tests/fixtures/
+  fresh-local-index-2026-10-29.json, run `cargo test --bin mini -- apps::tests`.
+
+## Candidates
+
+| candidate | state |
 |---|---|
-| 41590f420 | gate12 distinct: tour 73/73, j14-apps PASS (5 rows), composed rooms/churn/documents/apps/connector/store-restart PASS; residents/restart judged on forge only |
-| c7aa7e8c4 | scout full pass (docs/SCOUT-FINDINGS.md on lane/scout): reds JPAY6 (2 plant rows), KC (fixed, landed), fleetsign 1/100 under load, JWF parity (apps verb) |
-| ee29d4fa7, 1890a6647 | proofs-only (umbrella fixes) |
-| 719d7b7aa | READY 11:35, first clean manifest: app-reds batch 1 (OwnTracks, WBO, controller-world tests), proofs 0ca243107, scout KC |
-| 719d7b7aa umbrellas | red: Fixtures.NativeDocWriteFixture, NativeAcceptedFixture (fixed in 06831831c), TokenCensus (unlisted private PersistentHistory.mk; fixed by 274a2534c) |
-| 4e5faa8d8 | queued (staging; main after host green): + TokenCensus fix 274a2534c, room_resident maintenance-input diagnostic, scout JPAY6 fix 7d29a02d6, app-reds JWF ad58a4b9e and Hummingbird f6fa7c19d, proofs statement-fixes 80fd08d01 (deep Lean). Then umbrella-minidregg.sh (minidregg.pid) builds the whole Minidregg umbrella at the same sha: the pipeline otherwise never elaborates it. Kimi statement review: scratchpad integ2/kimi-stmt.md. birth_refusal tests on hbox: integ/tests-birth.out (tests-wt worktree) |
-| 06831831c | READY 12:08 (named to infra and scout): + app-reds declarations eb4b396f6 (Mercurial, Sudoku, Blockstack), proofs fixtures f5d351a96 (NativeAccepted/NativeDocWrite under ruling (c)) |
+| 41590f420 | gate12 distinct: tour 73/73, j14-apps PASS, composed all but residents/restart PASS; forge: residents PASS, restart red at `continuous` (on later harness) |
+| 719d7b7aa | READY, first clean manifest; umbrellas: Native fixtures (fixed later), TokenCensus (fixed later) red |
+| 06831831c | READY (named to scout and infra): app declarations, re-recorded Native fixtures; scout full pass running on it |
+| 4e5faa8d8 | building (deep: statement fixes): TokenCensus fix 274a2534c, maintenance-input diagnostic, JPAY6 7d29a02d6, JWF ad58a4b9e, Hummingbird f6fa7c19d, statement fixes 80fd08d01 (Kimi review: no defects). Then the Minidregg umbrella. Name its full sha to a104b94c2643e9c5d and a3d575cdd7a822f6b when READY |
+| staging tip c32e35e9a+ | + birth_refusal fixture fix c5905db60 (tests only), state docs: queue after 4e5faa8d8 and its Minidregg check |
 
-JPAY6: bisect shows every candidate back to d9661be99 fails the same two plant rows; likely the row's own fixture
-(consent_230 authors the purse via `author birth-intent`, the plain canonical kind, not a grain-backed source). Scout is
-checking and will fix the row with teeth on both sides, never weaker.
-Owners of open reds: JWF parity `apps` verb web face, Hummingbird (app-reds a17f4172949caca14); fleetsign load race
-(scout reproducing; core client attempt dirs, mine if confirmed).
+## Open reds and owners
 
-Composed authority: infra's forge composed container (residents needs root). There, residents passes through
-registration, summon, requests, prepoll, provider custody copy and the Hermes turn reaching the provider, then the
-fixture ACP closes its stream at prompt 11 (infra digging; my pointers: release-end-turn visibility, MCP closed after each
-prompt, the fixture's own refusals). hbox gate12 covers tour, j14-apps, flatness.
+- composed restart `continuous` (above): infra diff, then integrator.
+- flatness-submit (law 17): reported, not blocking; ember's design decision.
+- Hummingbird live receiving path: app-reds building a j14apps()-style run.
+- fleetsign 1/100 under full parallel load (attempt plan.frame missing): scout reproducing; core client if confirmed.
+- Scout's twelve demo steps never ran on c7aa7e8c4 (journey budget spent); rerunning on 06831831c with a 12000 s timeout.
+- Decisions for root/ember (from proofs): genesis accepts a `witnessed` factory predicate (world then refuses every birth,
+  fail-closed); objective-native-acceptance.py publish-variant runs lean --run without the kernel dynlib (proofs may fix).
+- PredCompile.lean:832 comment cites the wrong theorem name (proofs, next batch).
 
-Lanes that send shas (2026-10-30): proofs Opus af4b3ea612564dea5 (umbrella reds, statement fixes), app-reds Sonnet
-a17f4172949caca14 (OwnTracks, Hummingbird, controller-world tests, WBO, missing declarations), scout Sonnet
-a3d575cdd7a822f6b (every journey row + stress on the newest candidate; routes faults), infra add189844d158e3a7,
-iteration speed Opus a141a9c535501bbd7 (Lean seams at codec/store/world-root: deep batched landings, warned ahead so
-other Lean landings hold for one closure; lane-tree warm pool; hot-swap of one crate into a KEEP_WORLD world, on top of
-gate12 KEEP_WORLD and infra's composed-gate resume). First: Lean v4.30.0 -> v4.35.0 + Mathlib as one sha off main;
-on its "HOLD LEAN" message hold all other Lean landings (proofs lane) until the bump's candidate is READY, then they
-rebase; Rust-only landings keep flowing; build the bump alone on hbox.
-Name every new candidate to infra and the scout. Infra add189844d158e3a7 hit its context limit and handed off
-(dregg-infra edge/demo/CHECKLIST.md at 712d404); its successor is a104b94c2643e9c5d. The restart `continuous` plan is
-in that hand-off: run distinct composed with KEEP_WORLD on the first candidate carrying the room_resident
-maintenance-input diagnostic (4e5faa8d8 or later), diff maintenance-input.json vs maintenance-input.prev.json beside
-requests.json, send the moving field to the integrator, who fixes the fingerprint. Cut a candidate per landing batch (about 5 min Rust-only).
+## Rules
 
-gate12: `EDGE_REV=69c17a3 JWORLD_MANAGEMENT=distinct KEEP_WORLD=1 PORT=.. JWORLD_ROUTE_FRONT_PORT=.. bash gate12.sh SHA`
-(gate10 + j14-apps; j14 inputs integ/j14-hroot, j14-data, j14-secrets; run under /ci). Down a kept world with the
-candidate's scripts/spk-platform/world-down.sh RUN/inputs, then dregg-infra-69c17a3/edge/mini/journey/jworld-scratch.sh
-down RUN/w (as hbox with XDG_RUNTIME_DIR/DBUS); log DOWN. No world kept up.
-Stray jweb-frontend `mini web --body` children of old gates (pids 806516, 2013999, 1482603, 1728806) were stopped
-2026-10-30 by exact PID after checking their command lines (root ruling: stale leftovers of our own runs).
-
-## The connector red: two causes, both fixed
-
-1. spk-browser-proxy is TLS 1.3 + X25519MLKEM768 only; the export shelled out to /usr/bin/curl (OpenSSL < 3.5 has no
-   hybrid group). 69251145d/6b1c05490: the export runs on rustls/aws-lc-rs in the client (Kimi-reviewed; overflow,
-   deadline and framing fixes taken).
-2. Sheet jd3 was never written, so EtherCalc answered 404 and the entrance 503. Infra's 552a316e7 seeds it
-   (connector:sheet step); 27c274052 makes publish print one JSON document. Connector PASS on 994e36d08.
-
-## Market packages for the demo box
-
-dregg-forge:/var/lib/spk-fresh/qualified-2026-10-29/out/{local.json,adopt.tsv}: 20 packages; files under
-../apps/<app>/out/<app>.spk; earlier outs kept as out.prev-N (session-made, removable). Regenerate: link or copy the
-package into apps/<app>/out/<app>.spk (spk-fresh's forge copies live under /srv/spk-build/<app>/out/), move out aside,
-`python3 -I repo/deploy/market/fresh-index.py --apps $Q/apps --recipes $Q/repo/apps/packages --spk-tool
-/var/lib/spk-fresh/tools/spk --out $Q/out`, copy local.json to native/resource-client/tests/fixtures/
-fresh-local-index-2026-10-29.json, run `cargo test --bin mini -- apps::tests` (24). FEATURED still upstream: WBO
-rhtntjye (wbo.json names upstream), r8y55acm, zxent02j, uws252ya. SPK-fresh (a58fcf100f4438710): queue complete (Firefly last); all eight reruns pass the forged-identity row.
-
-## In flight
-
-- Infra (add189844d158e3a7): distinct composed residents/restart on 41590f420 (forge container).
-- deploy/spk-host/tests/test_controller_world.py: 8 errors, 2 failures on hbox (ancestor custody refused under
-  /home/hbox, ProtectHome=tmpfs expectation); environment or regression unknown, for lane/apps-agents.
-
-## Reds
-
-- Flatness submit (law 17): submit wall 4.97x, propose CPU 9.27x over 1000 ops (bound 2x); GET PASS. The hot-path
-  codex batch is landed; its HOT-PATH-STATE.md names the remaining costs (cold-start snapshots, persistent whole-cell
-  writes). No lane is on it now; a hot-path successor starts from docs/HOT-PATH-STATE.md.
-- Composed: residents (sponsor-mode refusal by design) and restart, pending distinct-mode births (infra).
-- Umbrellas: Fixtures.NativeAcceptedFixture, NativeDocWriteFixture, BirthPlanPoles, Effects.Revival.EngineProofs.
-- OwnTracks username normalization; Hummingbird native conversation qualification.
-
-## Not landed / held
-
-cx-oracle dd80466a1 and codex/oracle-v7-qualification b32f15604 (conflict; wait for oracle7); statement-fixes (WIP);
-qualify-doc-contention (WIP).
-
-## Next steps
-
-1. Read gate-41590f42 (j14-apps row, composed distinct); merge infra's fix shas, rebuild, regate until residents and
-   restart pass; hand the green candidate to infra for the ship.
-2. Down kept worlds when done (/ci/c-41590f).
-
-## Hygiene done 2026-10-29
-
-/var/lib/mini-spk-worlds emptied through install-user-world remove (each logged in COMMANDS.log); my old rpool tree
-/othersys/lanes/integ removed. Rules: named-file commits with `git commit -F`; never `git add -A` or `git stash`;
-filtered tests; PID files; stop only by PID file; lake/git on hbox as hbox; disk pressure = stop and tell ember.
+Named-file commits with `git commit -F <file>`; never `git add -A` or `git stash`; filtered tests only; every detached
+job has a PID file and is stopped only by it (stale leftovers of our own runs may be stopped by exact PID after reading
+the command line: root ruling 2026-10-30); lake/git on hbox as hbox; never search from / or ~; disk pressure = stop and
+tell ember (hbox / had about 84 GB free on 10-30).
