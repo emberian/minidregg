@@ -117,7 +117,7 @@ theorem prepareFactors : PrepareFactors contentSpec := by
     cases found
     split
     · rename_i refused
-      simp only [Handler.fire, contentHandlerOf, header_of_select_none refused]
+      simp only [Handler.fire, Handler.admits, contentHandlerOf, header_of_select_none refused]
       rfl
     · rename_i pre selected
       obtain ⟨object, law, rfl⟩ := select_some selected
@@ -127,23 +127,32 @@ theorem prepareFactors : PrepareFactors contentSpec := by
       by_cases sameVersion : version = contentSpec.version
       · subst sameVersion
         change ContentResource.ContentCell at pre
-        by_cases sameRoot : root = pre.root
-        · subst sameRoot
-          have header : contentHeader (hostCtxOf ctx deployment contentSpec.version pre.root observe epoch roster)
+        have header : contentHeader (hostCtxOf ctx deployment contentSpec.version root observe epoch roster)
+            (⟨.content, pre⟩ : HostCell) = .ok () := by
+          unfold contentHeader
+          rw [if_neg (by simp only [hostCtxOf]; rintro (h | h) <;> simp_all)]
+          simp [hostCtxOf]
+        by_cases fresh : root = pre.root ∨ contentSpec.commutes command = true
+        · have admitted : (contentHandlerOf contentSpec).admits 1
+              (hostCtxOf ctx deployment contentSpec.version root observe epoch roster) command
               (⟨.content, pre⟩ : HostCell) = .ok () := by
-            unfold contentHeader
-            rw [if_neg (by simp only [hostCtxOf]; rintro (h | h) <;> simp_all)]
-            simp [hostCtxOf]
-            rfl
-          obtain ⟨accept, refuse, descriptor⟩ := live accepts
-          simp only [Handler.fire, contentHandlerOf, header]
+            simp only [Handler.admits, contentHandlerOf, header]
+            rcases fresh with same | commuting
+            · subst same
+              dsimp only [contentFresh, hostCtxOf]
+              rw [if_pos (by simp only [Bool.or_eq_true, decide_eq_true_eq]; exact Or.inr rfl)]
+            · simp [EffectSpec.comap, commuting]
+          obtain ⟨accept, refuse, descriptor⟩ := live root accepts fresh
+          unfold Handler.fire
+          rw [admitted]
+          dsimp only [contentHandlerOf]
           rw [exec_comap, hostCtxOf_toLiveCtx]
           cases executed : EffectSpec.exec contentSpec 1 ctx command pre.logical with
           | error e =>
             have refusedLive : ∃ r, DeclaredResourceController.computeTarget ctx.snapshot ctx.semantics
-                ctx.ambient ctx.command (contentTarget ctx contentSpec.version pre.root command observe epoch roster)
+                ctx.ambient ctx.command (contentTarget ctx contentSpec.version root command observe epoch roster)
                 pre = .error (.content r) := by
-              rw [computeTarget_content_header ctx command pre observe epoch roster object]
+              rw [computeTarget_content_header ctx command pre observe epoch roster root object fresh]
               split
               · exact ⟨_, rfl⟩
               · rename_i prepared _
@@ -176,7 +185,7 @@ theorem prepareFactors : PrepareFactors contentSpec := by
             have patch := descriptor ps emitted
             have postRun : Patch.run pre.logical (DeclaredResourceController.targetPatch ctx.snapshot
                 ctx.semantics ctx.ambient ctx.command
-                (contentTarget ctx contentSpec.version pre.root command observe epoch roster) pre) = post := by
+                (contentTarget ctx contentSpec.version root command observe epoch roster) pre) = post := by
               obtain ⟨inFrame, -⟩ := contentComplete ctx command pre.logical ps emitted
               unfold EffectSpec.exec at executed
               rw [emitted] at executed
@@ -196,7 +205,7 @@ theorem prepareFactors : PrepareFactors contentSpec := by
               rw [computedOk] at computed
               cases computed
               obtain ⟨validated, accepted⟩ := validate_accepts
-                (contentTarget ctx contentSpec.version pre.root command observe epoch roster).materializer
+                (contentTarget ctx contentSpec.version root command observe epoch roster).materializer
                 pre pre.root _ rfl valid
               split
               · rename_i reason rejected
@@ -247,18 +256,25 @@ theorem prepareFactors : PrepareFactors contentSpec := by
                     rfl
                 · rename_i notExact
                   exact absurd postRun notExact
-        · have header : contentHeader (hostCtxOf ctx deployment contentSpec.version root observe epoch roster)
+        · have sameRoot : root ≠ pre.root := fun same => fresh (Or.inl same)
+          have commutes : contentSpec.commutes command = false := by
+            cases commuting : contentSpec.commutes command
+            · rfl
+            · exact absurd (Or.inr commuting) fresh
+          have admitted : (contentHandlerOf contentSpec).admits 1
+              (hostCtxOf ctx deployment contentSpec.version root observe epoch roster) command
               (⟨.content, pre⟩ : HostCell) = .error (.staleTarget 1) := by
-            unfold contentHeader
-            rw [if_neg (by simp only [hostCtxOf]; rintro (h | h) <;> simp_all)]
-            simp [hostCtxOf]
+            have commutes' : (contentSpec.comap HostCtx.toLiveCtx).commutes command = false := commutes
+            simp only [Handler.admits, contentHandlerOf, header]
+            simp [contentFresh, hostCtxOf, commutes']
             exact sameRoot
-          have computedStale := stale root accepts sameRoot
+          have computedStale := stale root accepts commutes sameRoot
           split
           · rename_i reason computed
             rw [computedStale] at computed
             cases computed
-            simp only [Handler.fire, contentHandlerOf, header]
+            unfold Handler.fire
+            rw [admitted]
             rfl
           · rename_i post computed
             rw [computedStale] at computed
@@ -273,7 +289,7 @@ theorem prepareFactors : PrepareFactors contentSpec := by
         · rename_i reason computed
           rw [computedVersion] at computed
           cases computed
-          simp only [Handler.fire, contentHandlerOf, header]
+          simp only [Handler.fire, Handler.admits, contentHandlerOf, header]
           rfl
         · rename_i post computed
           rw [computedVersion] at computed
