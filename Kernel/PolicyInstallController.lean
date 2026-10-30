@@ -756,8 +756,29 @@ theorem checkReady_witnessed_unsupported (profile : RuntimeProfile F) (snapshot 
   simp [checkReady, rootExact, headExact, domainExact, semanticsExact,
     unsupported_of_mentionsWitnessed profile.compilerProfile.compiler witnessed]
 
+/-- The deny-if-credential declaration over `snapshot`: "refuse when credential `vk` is
+presented", at the snapshot's own root, head, domain and the profile's semantics. -/
+def denyIfCredential (profile : RuntimeProfile F) (snapshot : Snapshot) (policyId : PolicyId)
+    (version : PolicyRevision) (vk : Minidregg.Pred.Vk) : Declaration where
+  expectedPreRoot := snapshot.cell.root
+  expected := snapshot.currentHead policyId
+  nonce := 0
+  source :=
+    { policyId := policyId, version := version, domain := snapshot.domain,
+      semantics := profile.semantics, previous := none,
+      predicate := .not (.witnessed vk) }
+
+/-- Premise inhabitation for `checkReady_witnessed_unsupported`: on EVERY snapshot and profile
+the deny-if-credential declaration meets the root, head, domain and semantics premises, so the
+install path reaches the refusal and names it. -/
+theorem checkReady_denyIfCredential (profile : RuntimeProfile F) (snapshot : Snapshot)
+    (policyId : PolicyId) (version : PolicyRevision) (vk : Minidregg.Pred.Vk) :
+    checkReady profile snapshot (denyIfCredential profile snapshot policyId version vk) =
+      .error .unsupportedPolicy :=
+  checkReady_witnessed_unsupported profile snapshot _ rfl rfl rfl rfl rfl
+
 #assert_axioms Ready.no_witnessed Installed.source_no_witnessed checkReady_witnessed_never_ok
-  checkReady_witnessed_unsupported
+  checkReady_witnessed_unsupported checkReady_denyIfCredential
 
 /-- info: 'Minidregg.Kernel.PolicyInstallController.Installed.old_policy_evaluated' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Installed.old_policy_evaluated
