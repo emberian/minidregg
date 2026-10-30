@@ -58,6 +58,12 @@ door stranger/invite/lobby, public cold/first/warm; https://demo.dregg.online/ =
   resident state dir, units enabled) and seed reveal.js deck step 929eac696 (integrator, from revealjs.json). Main =
   929eac696 (7d90da717 + those two scripts). Explorer F2 (member lacks a `welcome`
   ref), F5 (first action after idle 30-38 s, re-plan; likely consent catch-up, hot-path).
+- Clean one-shot world (~20:30): smoke (a) door GREEN, (b) story GREEN, (d) Hermes lobby chain GREEN to resident (ask/reply
+  untested), (e) public / 200; (c) apps install RED: EtherCalc and Etherpad each hit op66-plan "launch BEGIN authorization,
+  descriptor or action shape refused" on one clean install (product red; app-reds has verdicts + worker journal; Davros
+  installs through launch on hbox j14-apps, so compare the demo worker's draft). Etherpad's opcode mismatch was world state.
+  /doc/welcome 404 publicly because the seed stops at the installs. Infra fixed: frame apt-get update before
+  dbus-user-session.
 Ruling: deploy-script fixes keep be4ef7510's verdicts (no composed rerun); a Rust fix means a new cut.
 The restart `continuous` red was the resident's own output document moving its maintenance revision; be4ef7510's
 maintenance_fingerprint leaves out documents the resident writes.
