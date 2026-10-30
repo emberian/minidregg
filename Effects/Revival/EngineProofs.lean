@@ -41,10 +41,11 @@ set_option autoImplicit false
 
 /-! ## Proofs, step 1: the materialize lemma. -/
 
-/-- A materialized cell is its logical store, re-materialized (structure eta). -/
+/-- A materialized cell is its logical store, re-materialized: two packages
+with the same logical store are equal (`Materialized.ext`). -/
 theorem materialize_logical {L : Layout.{0, 0, 0}} {Root : Type} (M : Materializer L Root)
-    (v : Materialized M) : CellState.materialize M v.logical = v := by
-  cases v; rfl
+    (v : Materialized M) : CellState.materialize M v.logical = v :=
+  CellState.Materialized.ext rfl
 
 /-! ## Step 3a: substrate lemmas. -/
 
