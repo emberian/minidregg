@@ -97,7 +97,7 @@ ofReduceBool, trustCompiler or new axioms are not), what replaced native_decide 
 | 719d7b7aa | READY, first clean manifest; umbrellas: Native fixtures (fixed later), TokenCensus (fixed later) red |
 | 06831831c | READY (named to scout and infra): app declarations, re-recorded Native fixtures; scout full pass running on it |
 | 4e5faa8d8 | READY 13:20; main contains it. hbox gate12: tour 73/73, j14-apps PASS, enrol PASS, flatness-submit FAIL (reported). CONFIRMED on hbox; infra c-4e5f-d1 distinct composed running: if fully green this is the rehearsal-3 ship. Umbrellas then Minidregg umbrella running |
-| 06665f052 | building (integ-build4 then umbrella-minidregg, one sequential job, build.pid): be4ef7510 + install-hermes HOME fix + docs. A stale queue rebuilt the old 274a2534c at 15:01 (stopped); the tree had moved, so this build redoes the host stage. Rule: one sequential job per tree; kill every queue before launching |
+| 06665f052 | READY 16:17; every bin/ checksum identical to be4ef7510 (only provenance and source differ: install-hermes HOME fix, scout docs/stress, docs). Not shipped (root: ship be4ef7510 with the hotpatch). Umbrellas then Minidregg umbrella running in the same job |
 | 2e3d16ef7 | READY 14:18 (umbrellas stopped: superseded) |
 | be4ef7510 | READY 14:23 = 2e3d16ef7 + continuous fix. GATE GREEN (composed fully green on forge, tour 73/73, j14-apps PASS): REHEARSAL 3 SHIP. Umbrellas rc=0 (every umbrella green, TokenCensus included); rerecord `unchanged`. |
 
