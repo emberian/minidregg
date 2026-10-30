@@ -59,8 +59,9 @@ ofReduceBool, trustCompiler or new axioms are not), what replaced native_decide 
 (lean-intents.json "lean" field expected). Kimi reviews its pin and statement diff before landing. Not yet declared.
 Status 10-30 evening: WIP origin/lane/iter-speed 4cf4181ce (not landable; rebase to one sha), ~330 files, 139 pins gained
 only Classical.choice; decide -> `decide +kernel`/`rfl` (root cause fixed by Theory/ExceptDecidableEq.lean); open reds
-Kernel/SnapRepresents:146, Selvage/OracleLogLinkedTwoPhaseGame:209. Asked: AssertAxioms must name 4.35's native_decide
-`_native` auxiliary axioms (ofReduceBool is gone) and a planted native_decide under a standard-three pin must still fail.
+Kernel/SnapRepresents:146, Selvage/OracleLogLinkedTwoPhaseGame:209. Confirmed (000a36610): TokenCensus/NativePinSelfTest.lean plants a native_decide twin of a decide theorem; #assert_axioms
+refuses it, naming `..._native.native_decide.ax_1_1`; native_decide pins list their `_native` axiom by name and stay
+unchanged; AssertAxioms recognises compiler trust only through the `_native` component.
 
 ## Build and gate (hbox, as user hbox, /home/hbox/lanes/integ)
 
