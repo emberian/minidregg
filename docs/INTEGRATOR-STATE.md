@@ -13,6 +13,10 @@ tour + j14-apps on hbox gate12, composed (all phases, distinct mode) on infra's 
 connector, residents, restart, store-restart all PASS. hbox gate12: tour 73/73, j14-apps PASS (5 rows), enrol-resume PASS,
 flatness-get PASS; flatness-submit FAIL (reported, not blocking). Confirmed to infra a104b94c2643e9c5d, which ships
 rehearsal 3 from be4ef7510 (demo-mini.sh ship on forge, market adopt set 22 packages) and reports smoke + URL.
+Ship status: ship, pins, health, members, apps bootstrap, reenroll, grain-world, hermes preflight/route/subjects GREEN on
+forge. hermes.room red: install-hermes as_member had no HOME (consent anchors); fixed on main 1447b883f (deploy script
+only; ruling: binaries, composed and tour/j14 verdicts of be4ef7510 stand, no composed rerun). Infra runs the fixed
+script against the be4ef7510 ship and keeps walking (market adopt, seed, door, public) for further reds.
 The restart `continuous` red was the resident's own output document moving its maintenance revision; be4ef7510's
 maintenance_fingerprint leaves out documents the resident writes.
 
