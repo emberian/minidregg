@@ -1,129 +1,66 @@
-# HOT-PATH state — 2026-10-29, codex
+# HOT-PATH state — 2026-10-30, hot-path successor (Opus, agent a86738fc)
 
 Law 17: a fixed-size operation may cost at most O(log n) in accumulated history
 and state, or O(changed · log n) for a multi-entry change. Full exports must be
-charged for their output; silently making every append a full export is a
-violation. Ember explicitly made flatness a gate for this task. K-HIDE-ROTATE
-stays. Operator-MAC sealed walk snapshots on our own filesystem are approved.
+charged for their output. K-HIDE-ROTATE stays. Ember approved trusting sealed
+snapshots on our own filesystem (the Host already opens from its MAC'd checkpoint).
 
-**This batch is partial. Cold certificate restore is not implemented. The
-whole-cell write path remains linear.** Implemented: persistent receipt history
-with unchanged admission propositions; a checked exact root-preimage size
-lemma; submit/propose and real SandMD GET flatness instruments and gate wiring.
-Do not describe those as completion of the persistent-state layer.
+Branch `lane/hot-path-cold` (Mac worktree `/Users/ember/dev/minidregg-lanes/hot-path-cold`;
+hbox warm tree `/home/hbox/lanes/hpc/src`, packages hard-linked from the integrator's,
+native outputs `/home/hbox/lanes/hpc/{native-out,consent-out,artifacts}`; hbox scratch
+`/ci/hpc`, where `x1s/` is a copy of the explorer's x1 Store at head 769).
 
-## Tree, integration and checks
+## The restart / certify / story reds: what they are
 
-- Local tree: `/Users/ember/dev/minidregg-lanes/hot-path`, `lane/hot-path`, Git HEAD
-  `a523d87b1e359f47610593dca50979564bd8a164`. The sandbox refuses `.git/ORIG_HEAD.lock`.
-  Main at task start was `636b1baebb7d0b94a330cab6d5e6109f0c961f6b`. It merged cleanly
-  in an independent scratch clone. Its binary diff is applied to the local files;
-  Git metadata still names the old tip. Incoming main changes are not lane work.
-  `target/hp-commit.sh` checks hashes, removes that exact overlay, performs the real
-  merge, commits named lane paths in themes with the required attribution, and pushes.
-- Warm Lean tree: hbox `/home/hbox/lanes/hot-path/src` (not `/home/hbox/lanes/hp`).
-  Only the receipt changes were overlaid there on its `1e207e402` base. The exact
-  modified StoreCodec file was checked separately as `target/hp-codex/StoreCodecUpdated.lean`.
-  This is scoped checking, not a whole merged-tree candidate build.
-- Own hbox scratch: `/home/hbox/lanes/hp-codex/scratch`. Processes have individual
-  `.pid` files there. Builds use non-root hbox, `swarm-build`, `SWARM_MEM_MAX=28G`,
-  `XDG_RUNTIME_DIR=/run/user/1000`, `DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus`.
-  Native builds use two Lean seats and two C jobs. No outer closure-lock on lane-check.
-- `check-root-cost.log`: REPL and lane-check of the exact modified StoreCodec, EXIT=0.
-- `check-history.log`: REPL-first PersistentHistory, then lane-check of NativeHostReplay,
-  the initial 12 changed receipt selectors, CarriedApplicationDispatchReceiver and NativeHostSession,
-  EXIT=0. The list-specified `AdmittedReplay`/`AdmittedSuffix` propositions are unchanged.
-- `build-receipts.log`: native Host + consent both built, EXIT=0. Host sha256
-  `4f1f2d88f3e007d890ac16d0540ea1a05cab6d6720a3b93160d2a37738e15c65`;
-  consent sha256 `9b77510fc2ce528d74aa53d53321a560e8b8b10261f49f159cf0f1b1d4f31fc7`.
-  A final review converted the legacy ApplicationDispatchLookup selector too:
-  `check-final-receipts.log` checks that and final Host.Main/ClientConsentSession,
-  EXIT=0. That last selector and formatting cleanup postdate these native binaries.
-  No claim of an exact final merged-tree candidate is made by these development builds.
-- Benchmark verdict unit tests: 11 pass. Linear growth, missing/duplicate samples,
-  non-growing history, invalid/under-resolution costs and incomplete passes are rejected.
-  Shell syntax checks pass. No Lean was run on the Mac; no sorry/admit/new axiom was added.
+Measured on hbox against the explorer's x1 world (be4ef7510, heads 769 to 1,000).
 
-## Receiving and opening paths traced
+- **The Host restart is not the cost.** It seals a checkpoint every 64 heights and at a
+  clean stop and opens checkpoint + suffix: restart + first signed read 2.4 s at head
+  769, the read 0.13 s.
+- **The client's local consent provider is.** `minidregg-client-consent` (a resident per
+  client, 10-minute idle) re-admits natively every record written since it last looked:
+  ~47 ms per record at head ~800 on be4ef7510. 20 foreign writes then a sponsor read
+  0.95 s; 60 then a read 2.8 s; the next read 0.17 s. The explorer's 23.4 s was ~500
+  records of catch-up after member-1's 512 says.
+- **Certify is 0.21 s.** Certify after 60 foreign writes 2.9 s; read first (2.9 s of
+  catch-up) then certify 0.22 s. "12-32 s per 256 tail" is 256 × 47 ms of the sponsor
+  consent's catch-up plus, when the resident had idled out, its cold start.
+- **A fresh provider is O(height)** (law 17): head 849, retained anchor: 6.5 s (the
+  `Loaded.prefixOwn` genesis fold to the anchor, CONSENT-OWN); no anchor: 38.7 s (the
+  genesis re-admission walk). The Host's own genesis audit at 769: 38 s.
+- **`story new --from tale`** = 22 submissions (19 template lines, then table + map),
+  each ~0.9 s unloaded (~1.7 s with the box busy); the first line also pays the
+  member's consent catch-up (12 s in a traced run after ~250 foreign writes). Per line,
+  Host ops are ~1 s of ~1.7 s; the rest is client-side (consent frames, codec resident).
+  Trace: `/ci/hpc/r6.trace` (MINI_TRACE through `mini-shell-ssh` as the sponsor).
 
-`NativeHostSession.start` calls `openExisting`, which reaches
-`DurableReceiverIO.loadChained`. Despite its checkpoint fold, this function still
-calls `transport.read 1 true`, decodes the whole journal, verifies the prefix
-chain and rebuilds history indexes. `openState` folds only the suffix;
-`openLoaded` still consumes the entire prefix. The separate light path,
-`DurableServed.openHead`, really does read from the checkpoint. Optimizing only
-`walkPhysical` does not make the full session's startup suffix-only.
+Per admitted record, the genesis audit's own timing (`MINI_AUDIT_TIMING=1`, x1s, head 769):
+admission (event-v3) ~17 ms flat, advance ~6-9 ms flat, post-validation **grew 5 → 17.5 ms
+with height** on be4ef7510.
 
-The first walk-family request calls `walkPhysical` and `NativeHostReplay.verifyLoaded`
-from genesis. Retained exact readback uses `extendExact`; recovery/refresh may use
-`extendVerified` and its whole-prefix comparisons before the suffix walk. Current
-validation uses `validateLoadedFrom`/`validateServedFrom` to limit which cells are
-checked, but still decodes each changed cell in full.
+## Landed on lane/hot-path-cold
 
-`Host.ClientConsentCore.verifyInitial` also opens the full log. Its retained-anchor
-route, `ConsentAnchor.resume`, deliberately uses `Loaded.prefixOwn` to fold from
-genesis: the old rule rejects the operator checkpoint as a client base. Failed
-resume, and an upgrade requiring full lifecycle context, use `verifyLoaded`.
-The newly approved same-filesystem snapshot trust must be connected to this
-provider as well as the Host; leaving it unchanged preserves the cold replay.
+| sha | what | measured |
+|---|---|---|
+| dbe692893 | `bytesBEq`: whole-cell byte comparisons (cellsLawfulFrom, decodeRowFrom, loadDeploymentFromAt, the served twins) by object identity first. `==` on `List UInt8` is `List.beq`, which `listDecEq`'s csimp never reached, so every advance walked every cell's bytes. `bytesBEq_eq` keeps every `_eq` statement. | genesis audit at 769: 38.3 → 32.6 s; post-validation flat 4.4-4.9 ms per record at every height (was 5 → 17.5) |
 
-`workspace.rs::propose_summary_once` reads full signed resource views.
-`document_actions` then calls `host_document` even for a fixed append, renders the
-whole document and scans `runs_at_tail`; guard refresh scans page entries too.
-The growing client work is therefore identified, not an unexplained timing residual.
-Lean must provide a current authorized append context (root, tail, covering runs,
-required guards); Rust must not reconstruct semantic permission decisions.
+Checked: lane-check of the four files and 65 rebuilt importers on hbox; native Host and
+consent built (`lane-build.sh host`, `consent`, EXIT 0).
 
-## Design: one persistent-state layer
+## Open, in order
 
-The process-resident Host already holds a validated opening and a lazily admitted
-walk. The missing layer is persistent indexed data shared by open, receiving,
-projection, certificates and checkpoint publication, with exact list/codec specs.
-
-The receipt part now uses `Kernel.PersistentHistory`: a newest-first immutable
-list plus `Std.ExtTreeMap Nat α`. Push shares the list tail and changes a tree
-path; lookup follows a tree path. `get?_eq`, `toList_push`, `toList_append`,
-`get?_push_last` and `get?_push_before` connect it to the old chronological list.
-`Verified` and `SuffixVerified` retain this structure. Operational selectors use
-`receiptAt`; proof/full-export `receipts` still materializes the list. Suffix
-extension counts by retained height plus suffix length, without concatenating
-or counting the old receipts. This fixes receipt storage and selection only.
-
-### Cold snapshots: implementation still required
-
-Use a versioned certificate-data codec, bound to checkpoint height, log start,
-chain, world root, configuration/semantics identity and operator key id, with a
-separate MAC domain. Store it beside that checkpoint, never as an unbound latest
-file. Write data first and publish the manifest last; an interrupted publication
-leaves the previous complete checkpoint/snapshot pair usable. Wrong MAC, schema,
-configuration, root or chain must refuse reuse; rollback must still refuse.
-
-Restoring ids alone is insufficient. Replay retains issue/reserve/begin/claim/
-created/running/grant/retry families, Fn frontier audit and selected releases.
-`IssuedEvidence.sourceExact` contains original native admission, with record,
-ingress and descriptor equalities. `RawEvidence.sourceExact` is destructured by
-`RawEvidence.bindContext` (and lifetime dispatch). `PriorLifetimeGrant.finalRoot`
-also derives its exact root from original admission. These are proof-erased
-existentials, not serializable witnesses that a MAC check can synthesize.
-
-Decision: keep the existing pure admitted-history types/theorems for the audit
-path. The restore path needs explicit sealed provenance, paired with independently
-checked data equalities (receipt/record, ingress, descriptor, root, context).
-A theorem turning sealed provenance into original admission must name the
-operator's custody/writer premise; do not silently redefine original admission
-as “admitted or sealed”, add an axiom, or unsafe-cast a decoded record into Verified.
-Current authority, policy revision vs revocation, exact preimages and uncertain
-reply recovery continue to be checked by the same receiving rules after restore.
-
-A complete implementation must also avoid serializing all certificate lists at
-every checkpoint: persistent keyed certificate pages, a sealed root manifest,
-and changed pages only. Restore the manifest/index and load selected pages; walk
-the suffix while extending the same indexes. Reuse the checkpoint/suffix physical
-open rather than the current `read 1 true` path. Genesis audit remains available.
-Missing snapshots may rebuild once and publish, but a good snapshot must not
-silently trigger genesis admission. Required receiving tests: restart after
-pre-checkpoint issue/reserve/grant, consume each afterward, repeat with consent,
-tamper each binding, rollback, partial publication, and unknown reply readback.
+1. **Consent cold start** (ruling requested from root, 10-30): option 1 = the provider seals
+   its own state under a client key in its anchor directory and resumes from it (keeps
+   CONSENT-OWN; draft statement in the session scratchpad `hpc-consent-sealed-statement.md`;
+   statement to the auditor first; Rust frames in mini-sdk consent.rs); option 2 = resume
+   from the Store's MAC'd checkpoint (retires CONSENT-OWN: a weakening, needs explicit approval).
+2. **Per-record admission** (~17 ms event-v3, ~140 ms each event-v2): profile with call graphs
+   (frame pointers are absent; dwarf perf of the whole audit captured only start-up).
+3. **Consent catch-up is O(records since the client last looked)** for every client: N
+   members' residents each re-admit every record. Design question for ember/council.
+4. **story new**: fewer submissions (the index edits, binds and links are 8 of 22) and the
+   per-line client overhead.
+5. The whole-cell write path (inventory below); blinded-cell re-salting is private cells'.
 
 ## Remaining accumulated-size costs (source inventory)
 
@@ -260,38 +197,3 @@ All processes started for the completed fixtures have been stopped through
 their own PID files/normal teardown. The lane's Lean REPL was stopped as well.
 No other lane's processes, files or caches were removed.
 
-## Batch 1 (integrated on main; historical comparison)
-
-Contents: perf-batch1 (codec writer, cell bytes/root cached per cell value, decodeFast) + its two reds fixed (CellSlot,
-DeployedBridge); contentlaw d81cb88ce (one-pass document laws); index 8c78cc96a (packBits single pass, deployedRoot one-pass
-canonicalization); charge e403b95bf (historical records identity-first, charges materialized once); pred f463d78f2 + owner fix
-0bcf19b71 (policy-state index built once per law check: the first version rebuilt it per wire read, a 15x regression, caught
-by the bench); profile 346136236 + owner 2009a6eb8 (profile and receiver-semantics digest cached per config); seed 95ab8cc3b
-(genesis evidence reused on session advance); history a6e414ce8 + owner fixes (journal newest-first, `Loaded.height` =
-`rootLog.size`); verifier 172d90188 + owner c733612ec (Ed25519/SSHSIG in-process through mini-kernels; opaque externs);
-merge of main 64fa47015 + owner fixes 6e11bed52, 1e207e402 (journal x chainLog proofs). Host.Main + ClientConsentSession were checked on hbox. This is the previous batch's record, not a claim about the current tree.
-
-Numbers (hbox; baseline candidate 2b8f75dcb):
-| measure | before | after |
-|---|---|---|
-| doc submit CPU, append 1 / 10 / 20 | 280 / 490 / 780 ms | 50 / 130 / 200 ms |
-| doc submit wall, append 1 / 19 | 384 / 842 ms | 133 / 303 ms |
-| per-append growth (submit CPU) | ~26 ms | ~8 ms |
-| GET / via SandMD route, serving-Host CPU | 1,100-1,200 ms | 150-170 ms |
-| GET / wall (fresh world, /tank Store) | 1.3-1.5 s | 0.53-1.1 s |
-| POST /new (qualify write) | 4.6 s | 1.3 s |
-| SandMD qualify (create..page) | 367 s | 136 s |
-Left on the turn after batch 1 (append 20 profile): encoding ~16%, policy-state index ~13% (once per law check, several
-checks per turn), store decode/lookup ~10%; GET wall is now mostly outside the Host (Store fsync on HDD, app, spk-host).
-Propose wall grew 254 -> 555 ms over 20 appends with 10-60 ms Host CPU. The source of growing client work is now traced below.
-
-## Next work, in order
-
-1. Implement checkpoint-bound certificate restore and consent reuse, using the
-   explicit provenance boundary above; make the physical full open suffix-only.
-2. Change the actual receiving write representation to persistent patches/cells,
-   then connect incremental laws, demand-driven policy state, keyed certificates
-   and incremental checkpoint publication. The root/ratchet limitation remains
-   explicit until a replacement hiding commitment is proved and integrated.
-3. Build the whole merged tree once in the integrator lane and run gate10's tour,
-   composed scenario and both flatness paths. No lane source check substitutes for it.
