@@ -44,8 +44,17 @@ with height** on be4ef7510.
 |---|---|---|
 | dbe692893 | `bytesBEq`: whole-cell byte comparisons (cellsLawfulFrom, decodeRowFrom, loadDeploymentFromAt, the served twins) by object identity first. `==` on `List UInt8` is `List.beq`, which `listDecEq`'s csimp never reached, so every advance walked every cell's bytes. `bytesBEq_eq` keeps every `_eq` statement. | genesis audit at 769: 38.3 → 32.6 s; post-validation flat 4.4-4.9 ms per record at every height (was 5 → 17.5) |
 
-Checked: lane-check of the four files and 65 rebuilt importers on hbox; native Host and
-consent built (`lane-build.sh host`, `consent`, EXIT 0).
+| d78ee272b | a consent provider's own bases (`retainOwn` -> `ownOfGenesis`, after every admission) read cells off the cached enumeration (`ConsentAnchor.headState`, `headState_eq` is `rfl`) instead of `State.ofSnapshot`, whose `Image.cellIds` flattens and dedups every write of the log: 68% of the provider's CPU per write (dwarf call graphs of the sponsor's resident). | sponsor shell write (doc append + submit) through a copied workspace, x1 near head 1,000: 2.6 s → 1.65 s each, flat over 6 writes |
+
+Checked: lane-check of every changed file and its direct importers on hbox; native Host and
+consent built at d78ee272b (`lane-build.sh host`, `consent`, EXIT 0).
+
+After both, a shell write's CPU splits about evenly between the codec resident (JSON hex
+rendering, ByteArray/List marshalling; flat profile) and the consent provider (cell-table
+lookups with big-Nat keys; flat); the serving Host is ~3%. A retained anchor is bound to the
+exact consent executable and settings, so **every candidate upgrade makes every client's next
+provider walk from genesis** (48 s at head ~1,000 with the new binary vs 9.2 s resuming): one
+more reason for option 1 below to carry across binaries of the same Store epoch.
 
 ## Open, in order
 
