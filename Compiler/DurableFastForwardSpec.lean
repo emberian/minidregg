@@ -226,6 +226,10 @@ structure Opened (impl : Impl rootBytes) where
   records : List IntentRecord
   /-- The receipt root after each record, read from its verified tag. -/
   rootLog : List Digest
+  /-- The gated entries below the checkpoint, as opaque bytes: the session build reads their tags
+  (the accumulator at the checkpoint's height, the head tag) and their bytes (the chain proof);
+  nothing executes them. -/
+  below : List Entry
 
 variable {rootBytes} in
 /-- `ff`: the executing part, then the gate over the prefix entries (their count is the checkpoint
@@ -244,8 +248,8 @@ def Impl.ff (impl : Impl rootBytes) : FastForward (Opened impl) :=
             (impl.stateBase state).2 then .error "the prefix's chain is not the checkpoint's"
         else match ((below ++ suffix).map (·.record)).mapM recordFrame.decode with
           | none => .error "a stored record does not decode"
-          | some records => .ok ⟨seed, state, records, (below ++ suffix).map fun entry =>
-              ((DurableHistory.trailerCarried entry.tag).map (·.root)).getD ⟨0⟩⟩
+          | some records => .ok ⟨seed, state, records, (below ++ suffix).map (fun entry =>
+              ((DurableHistory.trailerCarried entry.tag).map (·.root)).getD ⟨0⟩), below⟩
 
 variable {rootBytes} in
 /-- The view of an open: the executed part paired with the non-executing rebuild. -/
