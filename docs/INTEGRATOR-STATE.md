@@ -9,13 +9,11 @@ each). Older history is in this file's git history.
 Rehearsal 3 ships through infra (`demo-mini.sh ship` into the forge `demo` container) when the gate is fully green:
 tour + j14-apps on hbox gate12, composed (all phases, distinct mode) on infra's forge composed container. Flatness
 (law 17) is reported, never blocking (root ruling 2026-10-30: the submit ratchet preimage is ember's decision).
-**Only red before the ship: composed restart, step `continuous`.** The resident opens a maintenance turn after its last
-delivered request because its maintenance fingerprint moved (room_resident.rs `assignment_fingerprint` over
-prepare_resident minus sourceRequests/sourceRoom/roomStatus). Ruling: diagnose, never teach the fixture to answer it.
-Staging carries a diagnostic: when maintenance is due, grain-runtime writes `maintenance-input.json` (and the one it
-replaced as `maintenance-input.prev.json`) beside the resident's requests.json. Infra runs the first candidate with it
-(4e5faa8d8 or later) with KEEP_WORLD in distinct mode, diffs the two, sends the moving field; the integrator fixes the
-fingerprint (likely the resident's own say in contextProjection, or recentMemberChanges).
+**Last red before the ship, fixed in be4ef7510:** composed restart `continuous`. Infra's c-4e5f-d1 diff showed the
+maintenance revision moved only on the resident's own output document (resident-summary-8802 rows/root). be4ef7510's
+maintenance_fingerprint leaves out the context of docs the resident writes (verbs include `mutate`), teeth both ways.
+Infra a104b94c2643e9c5d reruns distinct composed fresh on be4ef7510; hbox gate12 (tour enrol j14) on be4ef7510 running.
+If both green: infra ships be4ef7510 (demo-mini.sh ship) and reports the smoke.
 
 ## Lanes (send shas; name every new candidate to infra and the scout)
 
@@ -77,7 +75,8 @@ ofReduceBool, trustCompiler or new axioms are not), what replaced native_decide 
 | 719d7b7aa | READY, first clean manifest; umbrellas: Native fixtures (fixed later), TokenCensus (fixed later) red |
 | 06831831c | READY (named to scout and infra): app declarations, re-recorded Native fixtures; scout full pass running on it |
 | 4e5faa8d8 | READY 13:20; main contains it. hbox gate12: tour 73/73, j14-apps PASS, enrol PASS, flatness-submit FAIL (reported). CONFIRMED on hbox; infra c-4e5f-d1 distinct composed running: if fully green this is the rehearsal-3 ship. Umbrellas then Minidregg umbrella running |
-| 2e3d16ef7 | queued (integ-build4, first rerecord stage): + c5905db60, proofs rulings fa4193808, commuting-append proofs 04840919d (additive; Kimi review scratchpad integ2/kimi-commute.md) |
+| 2e3d16ef7 | READY 14:18 (umbrellas stopped: superseded) |
+| be4ef7510 | READY 14:23 = 2e3d16ef7 + continuous fix; main. THE SHIP CANDIDATE pending infra composed + hbox gate12. Umbrellas + rerecord (build4) running, then Minidregg umbrella (minidregg.pid) |
 
 ## Open reds and owners
 
