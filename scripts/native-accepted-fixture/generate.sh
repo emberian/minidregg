@@ -10,7 +10,9 @@
 # dishonest-r01-source-is-package) a refused one admitted right after it.
 #
 # It re-runs both admissions in Lean (replay.lean) against the Store prefix each was
-# admitted at, with the world's own verifier binary behind verify-logger.py, and
+# admitted at (signatures by the linked native kernel, every check recorded by verify-shim.c), submits
+# every check the kernel verified to the world's own verifier binary (each must be `verified`: the
+# transcript), and
 # refuses unless the accepted call's record is byte for byte the Host's appended
 # record, its world root the Host's, and the refused call refused with the Host's
 # reason. Then it writes the data module: the Store prefix, the two calls, the Host's
@@ -51,10 +53,11 @@ PY
 height=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["height"])' "$work/meta.json")
 ulimit -s unlimited
 cd "$root"
+cc -shared -fPIC -O1 -I "$(lake env lean --print-prefix)/include" -o "$work/verify-shim.so" "$here/verify-shim.c" -ldl
 for name in first refused; do
   h=$height; [ "$name" = refused ] && h=$((height + 1))
-  REAL_VERIFIER=$verifier VERIFY_LOG=$work/$name-verify.jsonl \
-    lake env lean --load-dynlib=.lake/native/libmini_kernels_lean.so --run "$here/replay.lean" "$work/$name" "$settings" "$here/verify-logger.py" "$h" \
+  VERIFY_LOG=$work/$name-verify.log MINI_KERNELS_LIB=$root/.lake/native/libmini_kernels_lean.so lake env lean --load-dynlib="$work/verify-shim.so" \
+    --load-dynlib=.lake/native/libmini_kernels_lean.so --run "$here/replay.lean" "$work/$name" "$settings" "$verifier" "$h" \
     >"$work/$name.out" 2>"$work/$name.err" || { cat "$work/$name.err" >&2; echo "generate: replay of $name failed" >&2; exit 1; }
   echo "replay $name: $(cat "$work/$name.out")"
 done
@@ -100,13 +103,27 @@ if diff or len(projection) != len(authority):
     sys.exit(1)
 assert ro[0] == "REFUSED", f"refused call was not refused in Lean: {ro}"
 assert host_reason and host_reason.endswith("Reject." + ro[1].split(".")[-1]), f"Lean reason {ro[1]} != Host reason {host_reason}"
+def verified_triples(log, verifier):
+    """Every check the re-run asked the linked kernel (verify-shim.c's log: KEY FRAME SIGNATURE
+    VERDICT) that the kernel verified (verdict 0, `CredentialSignatureIO.nativeVerified`), each
+    re-submitted to the pinned verifier binary, which must answer exactly `verified`."""
+    import subprocess, tempfile
+    out = []
+    for line in (log.read_text().splitlines() if log.exists() else []):
+        key, frame, signature, verdict = line.split()
+        if verdict != "0": continue
+        with tempfile.TemporaryDirectory() as d:
+            paths = []
+            for name, value in (("key", key), ("frame", frame), ("signature", signature)):
+                p = pathlib.Path(d) / name; p.write_bytes(bytes.fromhex(value)); paths.append(str(p))
+            r = subprocess.run([verifier, "verify", *paths], capture_output=True, text=True)
+        assert (r.returncode, r.stdout, r.stderr) == (0, "verified\n", ""), (key, frame, signature, r)
+        out.append((key, frame, signature))
+    return out
 triples, seen = [], set()
-for name in ("first", "refused"):
-    for line in (work / f"{name}-verify.jsonl").read_text().splitlines():
-        d = json.loads(line)
-        assert (d["code"], d["stdout"], d["stderr"]) == (0, "verified\n", ""), d
-        t = (d["key"], d["frame"], d["signature"])
-        if t not in seen: seen.add(t); triples.append(t)
+for t in verified_triples(work / "first-verify.log", verifier) + verified_triples(work / "refused-verify.log", verifier):
+    if t not in seen: seen.add(t); triples.append(t)
+assert triples, "the re-runs asked the kernel nothing"
 cfg = json.loads((world / "w/deployment/pinned-config.json").read_text())
 for k in ("disabledEvaluators", "birthSlack", "grainBirthTariff", "completionCustodianKey", "jointConsensus", "fnGateway"):
     assert cfg.get(k) is None, f"pinned config sets {k}; the fixture's config does not read it"

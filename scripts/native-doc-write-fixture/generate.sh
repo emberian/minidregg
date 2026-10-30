@@ -12,8 +12,9 @@
 # FIXTURE_LEAN_PATH_EXTRA adds module search roots (a tree whose Fixtures oleans are not built yet).
 #
 # It re-runs the admission in Lean (the same scripts/native-accepted-fixture/replay.lean, `doc`
-# mode) against the Store prefix it was admitted at, with the verifier behind
-# scripts/native-accepted-fixture/verify-logger.py, and refuses unless the Lean admission's record is
+# mode) against the Store prefix it was admitted at (signatures by the linked native kernel, every check
+# recorded by scripts/native-accepted-fixture/verify-shim.c), submits every check the kernel verified to
+# the verifier binary (each `verified`: the transcript), and refuses unless the Lean admission's record is
 # byte for byte the Host's appended record, its world root the Host's, and its projection the
 # hand-written Fixtures/NativeDocWriteFixtureAuthority.lean. Then it writes the data module.
 set -euo pipefail
@@ -48,10 +49,10 @@ PY
 height=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["height"])' "$work/meta.json")
 ulimit -s unlimited 2>/dev/null || true
 cd "$root"
+cc -shared -fPIC -O1 -I "$(lake env lean --print-prefix)/include" -o "$work/verify-shim.so" "$root/scripts/native-accepted-fixture/verify-shim.c" -ldl
 extra=$(lake env printenv LEAN_PATH)${FIXTURE_LEAN_PATH_EXTRA:+:$FIXTURE_LEAN_PATH_EXTRA}
-REAL_VERIFIER=$verifier VERIFY_LOG=$work/verify.jsonl \
-  lake env env LEAN_PATH="$extra" lean --load-dynlib=.lake/native/libmini_kernels_lean.so --run "$root/scripts/native-accepted-fixture/replay.lean" \
-  "$work/first" "$settings" "$root/scripts/native-accepted-fixture/verify-logger.py" "$height" doc \
+  VERIFY_LOG=$work/verify.log MINI_KERNELS_LIB=$root/.lake/native/libmini_kernels_lean.so lake env env LEAN_PATH="$extra" lean --load-dynlib="$work/verify-shim.so" --load-dynlib=.lake/native/libmini_kernels_lean.so --run "$root/scripts/native-accepted-fixture/replay.lean" \
+  "$work/first" "$settings" "$verifier" "$height" doc \
   >"$work/first.out" 2>"$work/first.err" || { cat "$work/first.err" >&2; echo "generate: replay failed" >&2; exit 1; }
 echo "replay: $(head -1 "$work/first.out")"
 
@@ -85,13 +86,27 @@ if diff or len(projection) != len(authority):
     print("\n".join(diff), file=sys.stderr)
     print("Fix the implementation, or change the authority in its own reviewed commit (Authority-Change: <reason>).", file=sys.stderr)
     sys.exit(1)
+def verified_triples(log, verifier):
+    """Every check the re-run asked the linked kernel (verify-shim.c's log: KEY FRAME SIGNATURE
+    VERDICT) that the kernel verified (verdict 0, `CredentialSignatureIO.nativeVerified`), each
+    re-submitted to the pinned verifier binary, which must answer exactly `verified`."""
+    import subprocess, tempfile
+    out = []
+    for line in (log.read_text().splitlines() if log.exists() else []):
+        key, frame, signature, verdict = line.split()
+        if verdict != "0": continue
+        with tempfile.TemporaryDirectory() as d:
+            paths = []
+            for name, value in (("key", key), ("frame", frame), ("signature", signature)):
+                p = pathlib.Path(d) / name; p.write_bytes(bytes.fromhex(value)); paths.append(str(p))
+            r = subprocess.run([verifier, "verify", *paths], capture_output=True, text=True)
+        assert (r.returncode, r.stdout, r.stderr) == (0, "verified\n", ""), (key, frame, signature, r)
+        out.append((key, frame, signature))
+    return out
 triples, seen = [], set()
-for line in (work / "verify.jsonl").read_text().splitlines():
-    d = json.loads(line)
-    assert (d["code"], d["stdout"], d["stderr"]) == (0, "verified\n", ""), d
-    t = (d["key"], d["frame"], d["signature"])
+for t in verified_triples(work / "verify.log", verifier):
     if t not in seen: seen.add(t); triples.append(t)
-assert triples, "the admission asked the verifier nothing"
+assert triples, "the re-run asked the kernel nothing"
 cfg = json.loads((world / "w/deployment/pinned-config.json").read_text())
 # Fields the fixture's config does not carry: they must be unset. grainBirthTariff and
 # completionCustodianKey ARE carried (they enter the runtime parameters, hence the profile).
@@ -116,9 +131,11 @@ for lean, key in (("pinDomain","domain"),("pinFactoryId","factoryId"),("pinResou
     ("pinTariffPerInitialPayloadByte","tariffPerInitialPayloadByte"),("pinCollector","collector"),
     ("pinAsset","asset"),("pinGenesisHeight","genesisHeight"),("pinExpectedSeed","expectedSeed")):
     lines.append(f"def {lean} : Nat := {int(cfg[key])}")
-lines += [f"def pinGrainBirthBase : Nat := {int(cfg['grainBirthTariff']['base'])}",
-          f"def pinGrainBirthPerBirth : Nat := {int(cfg['grainBirthTariff']['perBirth'])}",
-          f'def pinCompletionCustodianKeyHex : String := "{cfg["completionCustodianKey"]}"']
+grain, custodian = cfg.get("grainBirthTariff"), cfg.get("completionCustodianKey")
+lines += ["def pinGrainBirthTariff : Option (Nat × Nat) := " +
+          ("none" if grain is None else f"some ({int(grain['base'])}, {int(grain['perBirth'])})"),
+          "def pinCompletionCustodianKeyHex : Option String := " +
+          ("none" if custodian is None else f'some "{custodian}"')]
 lines += ["", "/-! The Store prefix of the document write (its own seed and log frames). -/",
           f'def seedHex : String := "{rd(d / "seed.bin")}"',
           "def recordHexes : List String := ["]

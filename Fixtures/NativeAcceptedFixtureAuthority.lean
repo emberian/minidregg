@@ -45,27 +45,36 @@ first.guards.writtenCells = false
 first.nullifiers = 1
 # the pay cell's compute row for the subject holds the request's capacity proofWork (the compute it
 # bought): price(tariff, capacity) on a fresh world's first invocation, with the acceptance tariff
-# (base 1, sourceTicks 1, replayBytes 61, coreBytes 16, every other rate 0) and the capacity =
-# ENVELOPE (sourceTicks 100000) plus the publication's front-end quote for world/NativeReceipt.obend
-# (replayBytes 1741 = its source bytes, coreBytes 7193): 1 + 100000 + 61*1741 + 16*7193 = 321290
-first.pay.computeSteps = 321290
+# (activity_world.TARIFF: base 1, sourceTicks 1, replayBytes 6, coreBytes 2, every other rate 0) and
+# the capacity = ENVELOPE (sourceTicks 100000) plus the publication's front-end quote for
+# world/NativeReceipt.obend (replayBytes 1741 = its source bytes, coreBytes 7193):
+# 1 + 100000 + 6*1741 + 2*7193 = 124833
+first.pay.computeSteps = 124833
 # the created atom: build_request's arguments {atom: <random label>, schema: digest_hex(4242), byte: 7};
 # the method (world/NativeReceipt.obend `note`) creates it as an inline object of that schema whose
 # bytes are [byte]
 first.created.requestedSchema = 4242
 first.created.requestedByte = 7
 first.created.atom = inlineObject=true payload=[7]
-# the charge is the request's capacity: the driver's ENVELOPE, with proofWork = price(tariff, ENVELOPE)
-# = base 1 + sourceTicks-tariff 1 * ENVELOPE.sourceTicks 100000 (world: --tariff-base/--tariff-tick
-# unset, so both 1; every other tariff key 0). The exception is storageBytes: the measured retained
-# bytes (legs + born images + the event's canonical bytes, DeployedCharge.storageCharge); the signed
-# capacity is only its ceiling (7877e6e7).
+# The byte lines are relations to the run, never numbers: the call, the digests and ids it carries
+# and the values it writes are encoded at their natural width, so their lengths move by a few bytes
+# from run to run (Fixtures.NativeAcceptedFixtureProjection, `relativeToCall`, `storageRelation`).
+# The retained event is the signed call reframed for the log: the call's length plus a constant the
+# two codecs fix.
+first.event = call + 33
+# the World's legs, by operation (reads carry no bytes): the notes document writes its result and
+# allocates the created atom and the result atom; the pay cell allocates the subject's compute row
+first.legs = write, allocate, allocate; read, read, allocate
+# the charge is the request's capacity: the driver's ENVELOPE, with proofWork = price(tariff, capacity)
+# above. The exception is storageBytes: the retained bytes (DeployedCharge.storageCharge), exactly the
+# retained event plus the legs' written values -- no born image, no post image, no framing; the
+# signed capacity is only its ceiling (7877e6e7).
 first.charge.incidences = 8
 first.charge.turnBytes = 2000000
 first.charge.memoryTouches = 1000000
-first.charge.storageBytes = 3969
+first.charge.storageBytes = event + legs
 first.charge.witnessBytes = 2000000
-first.charge.proofWork = 321290
+first.charge.proofWork = 124833
 first.charge.feeDebit = 0
 first.charge.networkBytes = 0
 first.charge.sideEffectCount = 8

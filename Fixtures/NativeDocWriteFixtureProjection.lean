@@ -20,7 +20,7 @@ open Minidregg.Compiler
 open Minidregg.Kernel
 open Minidregg.Kernel.DurableReceiver
 open Minidregg.Kernel.DurableDataIntent
-open Minidregg.Fixtures.NativeAcceptedFixtureProjection (Line kindOf lanes)
+open Minidregg.Fixtures.NativeAcceptedFixtureProjection (Line kindOf chargeLines)
 
 set_option autoImplicit false
 
@@ -38,11 +38,16 @@ def targetPayloadBytes (command : DeclaredResourceController.Command) (record : 
           | some (.live ⟨.content, payload⟩) => toString (ContentResource.contentPayloadBytes payload.logical)
           | _ => "not a content cell"
 
+/-- The lane of a document write that measures the call besides storage: its signed bytes
+(`turnBytes`). -/
+def docWriteRelative : List Theory.ResourceCost.Lane := [.turnBytes]
+
 /-- **The projection of an accepted document write**: who signed and how many signature
 checks, which cells it writes (by kind) and guards, what the document holds afterwards,
 and what it is charged. -/
 def projectDocWrite (deployment : CanonicalCellRegistry.Deployment)
-    (command : DeclaredResourceController.Command) (record : IntentRecord) (receipts : List Nat) :
+    (command : DeclaredResourceController.Command) (record : IntentRecord) (receipts : List Nat)
+    (callBytes : Nat) (legs : List (World.Leg Minidregg.Kernel.DeployedBridge.deployedR)) :
     List Line :=
   let targetCells := command.targets.map fun target => target.target
   [("write.verdict", "accepted"),
@@ -59,6 +64,6 @@ def projectDocWrite (deployment : CanonicalCellRegistry.Deployment)
       record.writes.any fun write => write.cellId == guard.cellId)),
    ("write.nullifiers", toString record.nullifiers.length),
    ("write.document.payloadBytes", targetPayloadBytes command record)] ++
-  lanes.map fun (name, lane) => (s!"write.charge.{name}", toString (record.exactCharge lane))
+  chargeLines "write" docWriteRelative callBytes legs record
 
 end Minidregg.Fixtures.NativeDocWriteFixtureProjection
