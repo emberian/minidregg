@@ -46,6 +46,7 @@ another until a real batch has accumulated. Rehearsal 3 ships be4ef7510 with the
 | app-reds (Sonnet) | a17f4172949caca14 | app packages and declarations, Hummingbird, grain-runtime app tests |
 | iteration speed (Opus) | a141a9c535501bbd7 | Lean v4.30.0 -> v4.35.0 bump, then codec/store/world-root seams, lane-tree warm pool, hot-swap; will provide a second-tree umbrella stage |
 | private cells (Opus) | a74ad8d84ada5627a | receipt-fingerprint leak first, then the O(log n) blinded-cell hiding (docs/RATCHET-LOG-DESIGN.md; Prop-only draft Kernel/BlindedCellHiding.lean, merged 20d3cd965, not imported by any lake target: lean_lib roots are the umbrella modules only) |
+| explorer | a3e5d6dbcd68e616c | perf and behaviour probes on candidates; docs/EXPLORER-FINDINGS.md |
 | SPK freshening | a58fcf100f4438710 | queue complete (all FEATURED repacks landed) |
 
 ## Lean 4.35 bump protocol (what is held)
@@ -106,6 +107,10 @@ ofReduceBool, trustCompiler or new axioms are not), what replaced native_decide 
 
 - composed restart `continuous` (above): infra diff, then integrator.
 - flatness-submit (law 17): reported, not blocking; ember's design decision.
+- Perf queue (explorer, be4ef7510; no hot-path lane is live, so unowned until root assigns): E10 `story new --from tale`
+  19.9 s (one submit per template line; batch into one proposal), `chat new` 3.0 s, `chat invite` 2.4 s, first credit
+  2.0 s vs 0.5 s warm write; E11 restart 9.6 s and first signed read after it 8.0-8.6 s at height 160-190 (cold-start
+  snapshots); certify 16.9 s at a 256 tail with writes halted meanwhile, about 2.7 writes/s from three members.
 - Hummingbird live receiving path: app-reds building a j14apps()-style run.
 - fleetsign 1/100 under full parallel load (attempt plan.frame missing): scout reproducing; core client if confirmed.
 - Scout's twelve demo steps never ran on c7aa7e8c4 (journey budget spent); rerunning on 06831831c with a 12000 s timeout.
