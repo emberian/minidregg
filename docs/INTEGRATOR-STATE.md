@@ -54,8 +54,9 @@ door stranger/invite/lobby, public cold/first/warm; https://demo.dregg.online/ =
 - ~19:00: Hermes lobby create..resident GREEN on the clean world (infra fixes in dregg-infra main, CHECKLIST ea60c81).
   Apps: ingest passes; EtherCalc op66-plan "launch BEGIN authorization, descriptor or action shape refused", Etherpad
   "operator reply opcode mismatch" (maybe half-born births from earlier refused attempts). Infra rebuilds a one-shot
-  fresh world with one install per app to separate world state from product. Infra commits to minidregg: install-hermes
-  step_resident state dir + enable controller/resident units, seed.sh reveal.js. Explorer F2 (member lacks a `welcome`
+  fresh world with one install per app to separate world state from product. Landed on main: install-hermes 460ad0fd7 (infra:
+  resident state dir, units enabled) and seed reveal.js deck step 929eac696 (integrator, from revealjs.json). Main =
+  929eac696 (7d90da717 + those two scripts). Explorer F2 (member lacks a `welcome`
   ref), F5 (first action after idle 30-38 s, re-plan; likely consent catch-up, hot-path).
 Ruling: deploy-script fixes keep be4ef7510's verdicts (no composed rerun); a Rust fix means a new cut.
 The restart `continuous` red was the resident's own output document moving its maintenance revision; be4ef7510's
@@ -179,7 +180,9 @@ unchanged; AssertAxioms recognises compiler trust only through the `_native` com
   not monotone (box load); at least ~12 s of halted writes per tail. Driver hbox:/ci/xp-log/f1.sh.
 - Hummingbird live receiving path: app-reds building a j14apps()-style run.
 - Scout full pass on be4ef7510: PASS 162, FAIL 2, UNCONFIGURED 7, UNJUDGED 3 (jpay 6/6, KC, JWF now pass). Reds:
-  demo/J14 36/211: a stale mini-hermes-test-provider in the scout's run (app-reds traced "attach brief is not JSON";
+  demo/J14 36/211 RETRACTED by the scout: its copied hbox pipeline box.env exports MINI_TEST_PROVIDER_BIN and
+  MINI_LAUNCH_GATE_BIN pinned to stale 7ffd6524 fixtures (a hazard for any runner that sources it), overriding the
+  candidate's own; JDV row 140 and its 13 shadows are UNPROVEN until rerun with both unset. Was: a stale mini-hermes-test-provider in the scout's run (app-reds traced "attach brief is not JSON";
   the candidate's own fixtures/mini-hermes-test-provider is current), rerun owed; demo/JDV row 140 "Host child outlived
   its server" on stop -> hot-path a86738fc1dfae6429 (13 later demo steps are shadows behind it). Evidence
   hbox:/ci/scout/rbe/be4ef751*/rows/demo/journey.err.
