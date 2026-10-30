@@ -2,20 +2,20 @@
   "format": "mini-app-interface-v1",
   "name": "wbo",
   "interfaceVersion": 1,
-  "appId": "rhtntjye2n7p71vrcq0ae4f6n9nr139fdk4n884tw55k40vy4uph",
-  "packageId": "ac72e0d103d7f5c21e79dc74fc616b33",
-  "appVersion": "1.20",
+  "appId": "j4jvn386t7un76qu6yyw1vwc5ke50t07e38r82kzy4qqg6qq7msh",
+  "packageId": "d3b06718d12bc377db7b494679440b91",
+  "appVersion": "2.18.26",
   "status": "prototype-unqualified",
   "limits": {
     "bodyBytes": 16384,
-    "replyBytes": 1048576,
+    "replyBytes": 4194304,
     "snapshotDocuments": 1000,
     "seconds": 120
   },
   "$defs": {},
   "operations": {
     "board.read": {
-      "description": "Read the complete bounded in-memory board snapshot; empty board is []. Board identity is grain plus name. This does not prove disk persistence and has no pagination.",
+      "description": "Read the board's replay as a fresh socket.io connection receives it: the complete bounded list of stored mutations (WBO 2.18 joins by connecting with board and baselineSeq=0). Empty board is []. This is the live replay, not the saved file.",
       "input": {
         "type": "object",
         "properties": {
@@ -40,8 +40,10 @@
               "maxLength": 128
             },
             "tool": {
-              "type": "string",
-              "maxLength": 128
+              "type": [
+                "integer",
+                "string"
+              ]
             }
           },
           "required": [
@@ -58,16 +60,13 @@
         "path": [
           "socket.io/"
         ],
-        "query": {},
-        "steps": [
-          {
-            "emit": "getboard",
-            "args": [
-              {
-                "arg": "board"
-              }
-            ]
+        "query": {
+          "board": {
+            "arg": "board"
           },
+          "baselineSeq": "0"
+        },
+        "steps": [
           {
             "id": "board",
             "receive": {
@@ -94,7 +93,7 @@
       }
     },
     "rectangle.write": {
-      "description": "Send rectangle data into this board; an existing ID may be replaced. Package has no sender acknowledgement: delivery=sent is physical send only. Require independent board.read and saved-file readback for persistence; never replay uncertain send.",
+      "description": "Create a rectangle on this board: join, wait for the replay, send one numeric create mutation (tool 3, type 1) and wait for the server's broadcast of that exact mutation id. An acknowledged id is not saved-file evidence; read the saved board separately. Never replay an uncertain send.",
       "input": {
         "type": "object",
         "properties": {
@@ -134,6 +133,11 @@
             "type": "number",
             "minimum": -1000000,
             "maximum": 1000000
+          },
+          "opacity": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
           }
         },
         "required": [
@@ -141,6 +145,7 @@
           "id",
           "color",
           "size",
+          "opacity",
           "x",
           "y",
           "x2",
@@ -152,7 +157,7 @@
         "type": "object",
         "properties": {
           "delivery": {
-            "const": "sent"
+            "const": "acknowledged"
           },
           "id": {
             "type": "string",
@@ -172,16 +177,13 @@
         "path": [
           "socket.io/"
         ],
-        "query": {},
-        "steps": [
-          {
-            "emit": "getboard",
-            "args": [
-              {
-                "arg": "board"
-              }
-            ]
+        "query": {
+          "board": {
+            "arg": "board"
           },
+          "baselineSeq": "0"
+        },
+        "steps": [
           {
             "id": "board",
             "receive": {
@@ -201,40 +203,59 @@
             "emit": "broadcast",
             "args": [
               {
-                "board": {
-                  "arg": "board"
+                "tool": 3,
+                "type": 1,
+                "id": {
+                  "arg": "id"
                 },
-                "data": {
-                  "tool": "Rectangle",
-                  "type": "rect",
-                  "id": {
-                    "arg": "id"
-                  },
-                  "color": {
-                    "arg": "color"
-                  },
-                  "size": {
-                    "arg": "size"
-                  },
-                  "x": {
-                    "arg": "x"
-                  },
-                  "y": {
-                    "arg": "y"
-                  },
-                  "x2": {
-                    "arg": "x2"
-                  },
-                  "y2": {
-                    "arg": "y2"
-                  }
+                "clientMutationId": {
+                  "arg": "id"
+                },
+                "color": {
+                  "arg": "color"
+                },
+                "size": {
+                  "arg": "size"
+                },
+                "opacity": {
+                  "arg": "opacity"
+                },
+                "x": {
+                  "arg": "x"
+                },
+                "y": {
+                  "arg": "y"
+                },
+                "x2": {
+                  "arg": "x2"
+                },
+                "y2": {
+                  "arg": "y2"
                 }
               }
             ]
+          },
+          {
+            "id": "ack",
+            "receive": {
+              "event": "broadcast",
+              "where": [
+                {
+                  "path": [
+                    0,
+                    "mutation",
+                    "id"
+                  ],
+                  "equals": {
+                    "arg": "id"
+                  }
+                }
+              ]
+            }
           }
         ],
         "result": {
-          "delivery": "sent",
+          "delivery": "acknowledged",
           "id": {
             "arg": "id"
           }
@@ -242,7 +263,7 @@
       }
     },
     "board.saved.read": {
-      "description": "Read the saved board JSON object, keyed by element ID. Save is asynchronous and errors can be logged by package; memory delivery is not saved-file evidence. Missing or unreadable history refuses.",
+      "description": "Read the saved board as WBO's SVG export (GET /download/<board>). Saving is asynchronous: an empty or missing export refuses, and a replayed mutation is not saved-file evidence.",
       "input": {
         "type": "object",
         "properties": {
@@ -257,25 +278,8 @@
         "additionalProperties": false
       },
       "output": {
-        "type": "object",
-        "additionalProperties": {
-          "type": "object",
-          "properties": {
-            "id": {
-              "type": "string",
-              "maxLength": 128
-            },
-            "tool": {
-              "type": "string",
-              "maxLength": 128
-            }
-          },
-          "required": [
-            "id",
-            "tool"
-          ],
-          "additionalProperties": true
-        }
+        "type": "string",
+        "maxLength": 4194304
       },
       "write": false,
       "binding": {
@@ -288,7 +292,7 @@
             "encoding": "segment"
           }
         ],
-        "decode": "json",
+        "decode": "text",
         "status": [
           200
         ]
@@ -303,9 +307,12 @@
         "board": {
           "context": "runId"
         },
-        "id": "typed-rectangle",
+        "id": {
+          "context": "runId"
+        },
         "color": "#123456",
         "size": 4,
+        "opacity": 1,
         "x": 10,
         "y": 10,
         "x2": 120,
@@ -323,12 +330,9 @@
       "assert": [
         {
           "contains": {
-            "id": "typed-rectangle",
-            "tool": "Rectangle",
-            "x": 10,
-            "y": 10,
-            "x2": 120,
-            "y2": 90
+            "id": {
+              "context": "runId"
+            }
           }
         }
       ],
@@ -353,25 +357,10 @@
       },
       "assert": [
         {
-          "path": [
-            "typed-rectangle",
-            "tool"
-          ],
-          "equals": "Rectangle"
-        },
-        {
-          "path": [
-            "typed-rectangle",
-            "x2"
-          ],
-          "equals": 120
-        },
-        {
-          "path": [
-            "typed-rectangle",
-            "y2"
-          ],
-          "equals": 90
+          "path": [],
+          "containsText": {
+            "context": "runId"
+          }
         }
       ]
     }
@@ -380,9 +369,10 @@
     "kind": "member-route"
   },
   "sources": [
-    "https://github.com/ocdtrekkie/whitebophir-sandstorm",
-    "package:ac72e0d103d7f5c21e79dc74fc616b33/opt/app/whitebophir/server/sockets.js",
-    "package:ac72e0d103d7f5c21e79dc74fc616b33/opt/app/whitebophir/server/boardData.js",
-    "package:ac72e0d103d7f5c21e79dc74fc616b33/opt/app/whitebophir/node_modules/engine.io-parser/build/cjs/index.js"
+    "https://github.com/lovasoa/whitebophir/releases/tag/v2.18.26",
+    "apps/packages/wbo/qualify-writes/wbo-sio.py",
+    "package:d3b06718d12bc377db7b494679440b91/opt/app/whitebophir/server/socket/replay.mjs",
+    "package:d3b06718d12bc377db7b494679440b91/opt/app/whitebophir/server/socket/message_validation.mjs",
+    "package:d3b06718d12bc377db7b494679440b91/opt/app/whitebophir/server/routes/board_assets.mjs"
   ]
 }
