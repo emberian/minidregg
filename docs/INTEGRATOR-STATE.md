@@ -31,34 +31,34 @@ gate; hot-path sends it, wire it into the gate).
   /tank/dregg-build/rows-0ce31391/pw/node_modules (browsers ~/.cache/ms-playwright). Infra also offers `ssh composed-box`
   (a container on dregg-forge) for composed if hbox root setup gets crowded; not used yet.
 
-## Main and candidates (2026-10-30 ~03:05 EDT)
+## Main and candidates (2026-10-30 ~10:55 EDT)
 
-Main = staging = 21a117df3 (= 41590f420 binaries + harness: infra df0ea4252 room-operations, 21a117df3 root hand-offs; 5f18b9f50 reverted): everything below plus lane/apps-agents 06e6c30eb (native paid planner Lean, controller-world,
-grain-runtime, spk-host, j14-apps green on hbox run 25), infra's residents fixes e365dd7e6 (current-height births,
-owner keeps its factory capability) and c3d17f136 (chat join for a member the roster already names), Firefly III, and
-the 20-pin fixture.
+Main = staging = c7aa7e8c4. Newest READY candidate: c7aa7e8c413de0231f4734d2acc27efc5dea3c20 (binaries = 41590f420's:
+everything through apps-agents 06e6c30eb, infra c3d17f136 chat join, Firefly; harness through infra's residents work:
+e365dd7e6, df0ea4252, 21a117df3, d9d3bdfc2 Hermes account adopt, 2418692c7/1531ec571 root hand-off, c7aa7e8c4 fixture ACP).
 
 | candidate | verdict |
 |---|---|
-| 994e36d08 | tour 73/73; composed all PASS except residents (sponsor-mode refusal) and restart; flatness GET PASS, submit FAIL (7.79x CPU, 5.08x wall vs 2x) |
-| 0feb2b026 | distinct mode: tour 73/73; composed residents red at the room join (fixed by c3d17f136); j14-apps red: broker-world-up refuses a group-writable output ancestor (integ/ is 775), fixed in gate12 by rooting j14 under /ci |
-| 41590f420 | THE CANDIDATE. gate12 distinct: tour 73/73, j14-apps PASS (5 rows), composed rooms/churn/documents/apps/connector/store-restart PASS; residents stops at summon: the Hermes account birth refused PreparationReject.resourceBatch (batch admission, ResourceBirthController.lean:789); restart blocked |
-| 5f18b9f50 | infra's dedup of source capabilities: RED (kernel pairs capabilities 1:1 with operations, NativeHost.lean:353; scratch world could not provision). Reverted on main as aa5a80b2a |
+| 41590f420 | gate12 distinct: tour 73/73, j14-apps PASS (5 rows), composed rooms/churn/documents/apps/connector/store-restart PASS; residents/restart judged on forge only |
+| 5f18b9f50 | RED (source-capability dedup broke births); reverted aa5a80b2a |
+| c7aa7e8c4 | READY 10:51; named to infra and the scout |
 
-Composed authority is infra's forge composed container (hbox has no root: residents needs a root custody chain, a key
-broker, a certifier). On it, distinct composed on 41590f420 reaches residents phase `cut` (balance read of the Hermes
-account that the tool workspace never imported); infra (add189844d158e3a7) is doing that import, then sends candidate +
-HARNESS rev. Members are funded 10000 in dregg-infra jworld-scratch.sh (the summon's resourceBatch refusal was the 1000
-default). hbox gate12 covers tour, j14-apps and flatness. When those pass, the green candidate goes to infra for `demo-mini.sh ship` (rehearsal 3).
-flatness-submit is reported, not blocking (root ruling; the ratchet preimage is ember's decision).
+Composed authority: infra's forge composed container (residents needs root). There, residents passes through
+registration, summon, requests, prepoll, provider custody copy and the Hermes turn reaching the provider, then the
+fixture ACP closes its stream at prompt 11 (infra digging; my pointers: release-end-turn visibility, MCP closed after each
+prompt, the fixture's own refusals). hbox gate12 covers tour, j14-apps, flatness.
 
-Gate scripts: gate12.sh = gate10 + j14-apps row (inputs staged once: integ/j14-hroot, rebound per candidate by
-deploy/hermes/build-runtime-root --rebind; integ/j14-data davros.spk + inventory.json; integ/j14-secrets/openrouter.key).
-`EDGE_REV=69c17a3 JWORLD_MANAGEMENT=distinct KEEP_WORLD=1 PORT=.. JWORLD_ROUTE_FRONT_PORT=.. bash gate12.sh SHA`.
-Down a kept world with the candidate's scripts/spk-platform/world-down.sh RUN/inputs, then
-dregg-infra-69c17a3/edge/mini/journey/jworld-scratch.sh down RUN/w (as hbox with XDG_RUNTIME_DIR/DBUS); log DOWN.
-Forge composed container: on hbox `/home/hbox/lanes/infra/composed-sync CAND_DIR [EDGE]`, then
-`ssh composed-box 'JWORLD_MANAGEMENT=distinct KEEP_WORLD=1 /ci/composed-gate SRC8 CAND12 [TAG]'`.
+Lanes that send shas (2026-10-30): proofs Opus af4b3ea612564dea5 (umbrella reds, statement fixes), app-reds Sonnet
+a17f4172949caca14 (OwnTracks, Hummingbird, controller-world tests, WBO, missing declarations), scout Sonnet
+a3d575cdd7a822f6b (every journey row + stress on the newest candidate; routes faults), infra add189844d158e3a7.
+Name every new candidate to infra and the scout. Cut a candidate per landing batch (about 5 min Rust-only).
+
+gate12: `EDGE_REV=69c17a3 JWORLD_MANAGEMENT=distinct KEEP_WORLD=1 PORT=.. JWORLD_ROUTE_FRONT_PORT=.. bash gate12.sh SHA`
+(gate10 + j14-apps; j14 inputs integ/j14-hroot, j14-data, j14-secrets; run under /ci). Down a kept world with the
+candidate's scripts/spk-platform/world-down.sh RUN/inputs, then dregg-infra-69c17a3/edge/mini/journey/jworld-scratch.sh
+down RUN/w (as hbox with XDG_RUNTIME_DIR/DBUS); log DOWN. Kept now: /ci/c-41590f (down when convenient).
+Stray processes with no PID file (not killed; tell ember): four `mini web --body` jweb-frontend children from old gates
+(pids 806516, 2013999 from the predecessor's candidates; 1482603 from 8cb74aba5, 1728806 from c4264f9cb).
 
 ## The connector red: two causes, both fixed
 
