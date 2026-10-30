@@ -634,6 +634,12 @@ fn author_birth(spec: &Spec, socket: &Path, source: &Path, genesis: &Value, work
             .arg("--dir").arg(&author), "mini author current grain birth") {
             Ok(_) if author.join("intent.bin").is_file() => return Ok(author.join("intent.bin")),
             Ok(_) => last = format!("mini author current grain birth left no intent in {}", author.display()),
+            // A Host refusal decided before any append does not change on a retry: say it once. The
+            // usual cause is a birth that already happened whose evidence directory was removed.
+            Err(error) if error.contains("NO_RECORD") => return Err(format!(
+                "grain birth refused by the Host ({}): if this task was born by an earlier attempt, \
+                 that attempt's birth directory is the evidence and must not be removed; {error}",
+                author.display())),
             Err(error) => last = error,
         }
     }

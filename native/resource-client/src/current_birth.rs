@@ -65,6 +65,12 @@ fn intent_from_frame(route: Route, frame: &[u8]) -> Result<&[u8]> {
             "current {} birth authoring refused; retained encoded Host outcome",
             route.label()
         )),
+        [mini_sdk::host_operations::RESPONSE_NO_RECORD, ..] => Err(format!(
+            "current {} birth authoring refused by the Host before any append (NO_RECORD, a fresh attempt is safe once the cause is fixed); \
+             the encoded outcome is retained as reply.frame, read it with `minidregg-host CONFIG inspect outcome` \
+             (a birth whose target already exists answers here: its earlier birth evidence is not this directory's)",
+            route.label()
+        )),
         [operation, bytes @ ..]
             if *operation == route.operation()
                 && !bytes.is_empty()
