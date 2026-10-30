@@ -34,7 +34,9 @@ door stranger/invite/lobby, public cold/first/warm; https://demo.dregg.online/ =
   set them aside. Open question for app-reds: should a refusal recorded under a since-changed host config be re-sweepable
   by the operator (a named `apps sweep`), rather than needing records moved by hand?
 - private-cells: 55a00e330 (fix: 0 < queryBound, teeth public_signature_refutes) merged as 4db04df8e; READY as its own
-  candidate 7d90da717 (17:40; main moved to it); umbrellas + rerecord + Minidregg umbrella running in the same job. Was HELD on 0e43b648c: Kimi found DeclaredReceiptHiding vacuous at queryBound = 0 (ReceiptEventHiding.lean:222-238);
+  candidate 7d90da717 (17:40; main moved to it). Minidregg umbrella GREEN; Fixtures umbrella RED: NativeAcceptedFixture and
+  NativeDocWriteFixture stale against the new event ids; rerecord.sh said `unchanged` (keys on front-end identity only).
+  Proofs re-records both from 7d90da717 and makes rerecord.sh detect stale data (replay or codec/event-id digests). Was HELD on 0e43b648c: Kimi found DeclaredReceiptHiding vacuous at queryBound = 0 (ReceiptEventHiding.lean:222-238);
   lane fixing (require 0 < queryBound). Codec epoch change; lands as its own candidate; fresh genesis after.
 - Interim smoke 21:22 (fresh be4ef7510 world): (a) door GREEN, (b) story GREEN, (e) public GREEN (200, cold 0.3 s);
   (c) apps in flight (EtherCalc, Etherpad accepted after config hotpatch + refusals cleared + frame's missing
@@ -139,6 +141,7 @@ unchanged; AssertAxioms recognises compiler trust only through the `_native` com
 
 - composed restart `continuous` (above): infra diff, then integrator.
 - flatness-submit (law 17): reported, not blocking; hot-path successor owns it, the blinded-cell ratchet part goes to private cells.
+- Hot-path batch 3 24a14656f merged (40750bc0e): OwnBase.state is a Thunk (16% of consent CPU per write); measurement pending.
 - Hot-path batch 1 fb0899ff8 merged on staging a75b373bf (bytesBEq: withPtrEq before whole-cell byte compares; per-record
   post-validation flat 4.4-4.9 ms at every height vs 5 -> 17.5 ms; genesis audit at head 769 38.3 -> 32.6 s). Next batch.
   Batch 2 b57ceceab merged (c019b8756): ConsentAnchor.headState reads Loaded.cells (cached) instead of flattening every
