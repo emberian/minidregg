@@ -33,8 +33,8 @@ door stranger/invite/lobby, public cold/first/warm; https://demo.dregg.online/ =
   recorded per-package refusals (/var/lib/mini-apps/verdicts, mini-market/refused) replayed the old failure until infra
   set them aside. Open question for app-reds: should a refusal recorded under a since-changed host config be re-sweepable
   by the operator (a named `apps sweep`), rather than needing records moved by hand?
-- private-cells: 55a00e330 (fix: 0 < queryBound, teeth public_signature_refutes) merged as 4db04df8e; building as its own
-  candidate 7d90da717 (integ-build4 + Minidregg umbrella, build.pid); main after host green. Was HELD on 0e43b648c: Kimi found DeclaredReceiptHiding vacuous at queryBound = 0 (ReceiptEventHiding.lean:222-238);
+- private-cells: 55a00e330 (fix: 0 < queryBound, teeth public_signature_refutes) merged as 4db04df8e; READY as its own
+  candidate 7d90da717 (17:40; main moved to it); umbrellas + rerecord + Minidregg umbrella running in the same job. Was HELD on 0e43b648c: Kimi found DeclaredReceiptHiding vacuous at queryBound = 0 (ReceiptEventHiding.lean:222-238);
   lane fixing (require 0 < queryBound). Codec epoch change; lands as its own candidate; fresh genesis after.
 - Interim smoke 21:22 (fresh be4ef7510 world): (a) door GREEN, (b) story GREEN, (e) public GREEN (200, cold 0.3 s);
   (c) apps in flight (EtherCalc, Etherpad accepted after config hotpatch + refusals cleared + frame's missing
@@ -133,6 +133,9 @@ unchanged; AssertAxioms recognises compiler trust only through the `_native` com
 
 - composed restart `continuous` (above): infra diff, then integrator.
 - flatness-submit (law 17): reported, not blocking; hot-path successor owns it, the blinded-cell ratchet part goes to private cells.
+- Hot-path batch 1 fb0899ff8 merged on staging a75b373bf (bytesBEq: withPtrEq before whole-cell byte compares; per-record
+  post-validation flat 4.4-4.9 ms at every height vs 5 -> 17.5 ms; genesis audit at head 769 38.3 -> 32.6 s). Next batch.
+  Hot-path asks the root: may CONSENT-OWN change (for the consent provider's cold start from its own snapshot)?
 - Perf queue (explorer, be4ef7510; owner: hot-path successor, blinded-cell flatness to private cells): E10 `story new --from tale`
   19.9 s (one submit per template line; batch into one proposal), `chat new` 3.0 s, `chat invite` 2.4 s, first credit
   2.0 s vs 0.5 s warm write; E11 restart 9.6 s and first signed read after it 8.0-8.6 s at height 160-190 (cold-start
