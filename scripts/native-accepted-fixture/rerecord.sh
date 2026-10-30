@@ -87,6 +87,11 @@ front end (front_end_current). scripts/native-accepted-fixture/rerecord.sh re-ra
 driver steps on a fresh world with the candidate's binaries ($cand) and generate.sh replayed both
 admissions in Lean: record and world root the Host's, projection the hand-written authority.
 EOF
+# A build box may have no git identity: name the commit after this script when none is configured.
+if [ -z "$(git config user.email || true)" ]; then
+  export GIT_AUTHOR_NAME=${GIT_AUTHOR_NAME:-minidregg fixture rerecord} GIT_AUTHOR_EMAIL=${GIT_AUTHOR_EMAIL:-rerecord@minidregg.invalid}
+  export GIT_COMMITTER_NAME=${GIT_COMMITTER_NAME:-$GIT_AUTHOR_NAME} GIT_COMMITTER_EMAIL=${GIT_COMMITTER_EMAIL:-$GIT_AUTHOR_EMAIL}
+fi
 commit=$(git commit-tree "$tree" -p "$head" -F "$scratch/message")
 git update-ref "refs/heads/fixture-regen/${head:0:12}" "$commit"
 echo "recorded fixture-regen/${head:0:12} $commit"
