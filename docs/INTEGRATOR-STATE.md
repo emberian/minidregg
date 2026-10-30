@@ -76,7 +76,7 @@ ofReduceBool, trustCompiler or new axioms are not), what replaced native_decide 
 | 41590f420 | gate12 distinct: tour 73/73, j14-apps PASS, composed all but residents/restart PASS; forge: residents PASS, restart red at `continuous` (on later harness) |
 | 719d7b7aa | READY, first clean manifest; umbrellas: Native fixtures (fixed later), TokenCensus (fixed later) red |
 | 06831831c | READY (named to scout and infra): app declarations, re-recorded Native fixtures; scout full pass running on it |
-| 4e5faa8d8 | building (deep: statement fixes): TokenCensus fix 274a2534c, maintenance-input diagnostic, JPAY6 7d29a02d6, JWF ad58a4b9e, Hummingbird f6fa7c19d, statement fixes 80fd08d01 (Kimi review: no defects). Then the Minidregg umbrella. Name its full sha to a104b94c2643e9c5d and a3d575cdd7a822f6b when READY |
+| 4e5faa8d8 | READY 13:20 (host stage 33 min, deep); main contains it. Named to infra successor (distinct composed + continuous diff) and scout. hbox gate12 PHASES="tour enrol j14" running (gate-4e5faa8d, pid gate-4e5f.pid); Minidregg umbrella queued after its umbrellas (minidregg.pid) |
 | staging tip c32e35e9a+ | + birth_refusal fixture fix c5905db60 (tests only), state docs: queue after 4e5faa8d8 and its Minidregg check |
 
 ## Open reds and owners
