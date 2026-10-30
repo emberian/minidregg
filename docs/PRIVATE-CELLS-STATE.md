@@ -38,6 +38,13 @@ Transaction ids, nullifiers and authorization declarations are unchanged. New pe
 tags registered (`PersistedCodecTags`): this is a codec batch; the accepted fixture's
 event ids change. Old histories carry the old ids; a fresh genesis moves over.
 
+**Landed** on main as 7d90da717 (Kimi's review found that bound 0 admitted only
+the constant reader; fixed by `0 < queryBound` and `public_signature_refutes`).
+The Fixtures umbrella went red because the accepted fixtures carried the old event ids,
+and the proofs lane re-recorded them. **Rule for the next codec or event-id batch:**
+the fixture re-record goes in this lane's own sha, recorded from a candidate built
+from this tree.
+
 **Planted test**: `tests/lean/ReceiptEventLinking.lean` (run with
 `--load-dynlib=.lake/native/libmini_kernels_lean.so`).
 
@@ -84,8 +91,21 @@ tree-shape invariant from binding. Owed before it can carry cells (astra round 2
   would expose a leaf of another class;
 * **index collisions**: admission preserves `PathsInjective` or counts them.
 
+**Increment 1 statements** (`Theory/PrivateCellTrie.lean`, astra round 3 applied):
+`EraseCorrect` (a `Cache` erase keeps `Holds (dropKey k es)`), `EraseCost` (counted,
+`perBit * L + fixed` on injective live paths) and `ClassRevealComplete`
+(a verifying reveal at a class tag answers exactly that class's live entries, or a
+collision among the comparison's nodes `revealNodes`, scoped, unlike `reveal_sound`'s
+global `Collision`; astra: the answer is exact, `members` are not bounded, so bounded
+disclosure is the ZK opening's job). Owed from round 3: the Store adapter (namespace-
+qualified address, canonical value bytes, layout binding; `StoreCodec.fromEntries` is
+first-wins while the trie is last-wins); the projection target is `Visible`/`narrowPacked`,
+NOT `narrowStore` (which keeps blinding under full scope), and the private index omits the
+blinding entry (mask custody is separate); scope coverage equals a bounded prefix union
+(`body` must cover every `atomsOf low`); multi-class, overwrite and deletion witnesses.
+
 **Next increments** (in order):
-1. Trie delete; hierarchical class keys and the prefix-selection = `narrowStore` theorem;
+1. Prove the increment-1 statements: trie delete; hierarchical class keys and the prefix-selection = `narrowStore` theorem;
    the incremental cache path for `maskedTrieCommitment` (the bulk root is the spec only).
 2. The opening relation in the compiler's vocabulary (compiler-emitted AIR; grow the
    compiler where it lacks a trie-path or cSHAKE gadget), not a hand-written circuit.
