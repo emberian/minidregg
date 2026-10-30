@@ -176,6 +176,17 @@ theorem toyDispatchBfalse :
     EffectSpec.exec, entryBSpec, toyWrite, toyEmpty, EffectSpec.InFrame, Substrate.footprint,
     storeSubstrate, toyField, Op.writeAddress?, Op.address, Except.map]
 
+theorem freshnessGate : FreshnessGate := by
+  have decoded : entryASpec.opStream.toLawful.decode (StreamCodec.nat.encode 5) = some 5 :=
+    entryASpec.opStream.toLawful.decode_encode 5
+  refine ⟨?_, ?_⟩
+  · simp [dispatch, List.lookup, decoded, Handler.fire, Handler.admits, staleToyEntry, toyEntry]
+  · rw [toyDispatchA5]
+    simp [dispatch, List.lookup, decode_encode_op, Handler.fire, Handler.admits, staleToyEntry,
+      toyEntry, EffectSpec.exec, entryASpec, toyWrite, toyEmpty, EffectSpec.InFrame,
+      Substrate.footprint, Substrate.run, storeSubstrate, Op.Enabled, Op.apply, Store.Fresh,
+      toyField, Op.writeAddress?, Op.address, Except.map]
+
 theorem engineSatisfiable : EngineSatisfiable :=
   ⟨engineKeystone Unit ToyStore toyPole enginePremise, toyDispatchA5, toyDispatchBfalse⟩
 
@@ -427,5 +438,6 @@ theorem prefixTeeth : PrefixTeeth := by
 #assert_axioms completenessTeeth
 #assert_axioms completenessPremise
 #assert_axioms materialize_logical
+#assert_axioms freshnessGate
 
 end Minidregg.Effects.Revival
