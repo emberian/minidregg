@@ -1290,7 +1290,8 @@ def main(argv=None):
         completion_requests = sorted((state / 'resident').glob('completion-request-*.json'), key=lambda q: q.stat().st_mtime_ns)[-1:]
         for request_path in completion_requests:
             run('replay-' + request_path.stem, [grain, 'resident-completion', 'receive', state / 'admin.sock', request_path])
-        for request_path in sorted((state / 'resident').glob('delivery-request-*.json')):
+        # Likewise a delivery request is bound to the resident state it was reviewed against ("delivery resident state changed").
+        for request_path in sorted((state / 'resident').glob('delivery-request-*.json'), key=lambda q: q.stat().st_mtime_ns)[-1:]:
             run('replay-' + request_path.stem, [grain, 'resident-delivery', 'deliver', state / 'admin.sock', request_path])
         third = driver('driver-repeat')
         status = driver_exit('driver-repeat', third, a.native_timeout_seconds)
