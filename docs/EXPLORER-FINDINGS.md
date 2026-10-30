@@ -2,7 +2,7 @@
 
 Present-state table, rewritten whole at each batch. Lane `lane/explorer`. Subject: candidate
 be4ef7510 (hbox `/home/hbox/lanes/integ/candidates/be4ef751074ca28c7d306c2f2bcf61cda03893c8`),
-explored as test members only. Batch 2, 2026-10-30.
+explored as test members only. Batch 3, 2026-10-30.
 
 ## Worlds (all on hbox, all mine; torn down when the lane ends)
 
@@ -47,7 +47,19 @@ Test members dw-10302104 and dw-10302056 only, driven by `/root/explorer/dm USER
 | F1 | Hosted accounts have passwd home `/var/lib/mini` (root 0755). Running `mini-shell-ssh` as `mini-s-NAME` with HOME as sshd would set it, any write (`credit`, `say`) fails `/var/lib/mini/.mini/consent-anchors: Permission denied`. With HOME set to the session home it works (my hotpatch in `dm`). NOT verified over a real sshd login: needs a real ssh member to confirm or clear. | infra |
 | F2 | The lobby's first line says "Start with the document called welcome", but `doc show welcome` as a member fails `cannot read .../refs/welcome.json`; a stranger holds no `welcome` reference. | infra/seed, door |
 | F3 | Under load average 10 (installs running): first `say` 12.5 s and 44.8 s, `tail -n 3` 11.4 s; warm `say` 2.0 s, `tail` 1.7 s (hbox is 0.5 s). | integrator perf |
+| F1 status | fixed by infra (mini-shell-ssh puts consent anchors in the session home); confirmed in code, member `say` works | infra |
 | F4 | `ask lobby ...` -> `there is no Hermes in lobby` (infra already knows; summon blocked). | infra |
+
+
+## Rebuilt forge world (be4ef7510, fresh genesis), test members dw-10302208 and dw-10302219
+
+| id | repro | owner |
+|---|---|---|
+| F5 | First action of an idle session is very slow: `credit` 37.8 s (with `signed read batch: the observed source changed before the plan landed; observing again (re-plan 1)`), first `say` 29.8 s; later `say` 2.1-2.3 s, `tail` 2.3 s with two app installs ingesting (load 4 to 7). Re-time on a quiet box. | infra, integrator perf |
+| F2 | still open: member `doc show welcome` fails, public /doc/welcome is 200. | seed/door grants |
+| F6 | `ask lobby hello` is admitted (`#10 unacknowledged`) but no reply arrives: `mini-grain-resident@9872001` is `failed`. Infra knows (resident exits while installs ingest; restart pending). | infra |
+
+Held: tale story with two players on the forge (key gate refuses `take key`/`go 3` out of order, GM narration shown on `look`); `chat new/invite/join/say/tail` between two members (writes 2.0-2.4 s warm, `chat new` 13 s, `doc new` 6.2 s under load); public pages from outside (/ 2.0 s steady, /doc/welcome 1.6 s, /tour /verb /story 0.5-0.7 s, /apps 1.3 s, 404s 0.5 s). Probe artefact: curl to the public URL from inside demo-dry hangs, use an outside probe.
 
 ## Exercised and held
 
