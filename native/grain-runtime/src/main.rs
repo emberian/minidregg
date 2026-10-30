@@ -1047,7 +1047,7 @@ fn operator_foreground_tool(name: &str) -> bool {
                 | "mini_application_api"
                 | "mini_oracle_discover"
                 | "mini_oracle_call"
-    )
+    ) || typed_applications::is_foreground_name(name)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -4472,7 +4472,8 @@ impl Runtime {
                 || self.child.is_some() || self.journal.child.is_some()
                 || attempt.operation_id != operation_id || budget.operation_id != operation_id
                 || attempt.phase != ForegroundPhase::Executing
-                || !(attempt.name == "mini_application_api" || oracle_tools::is_tool(&attempt.name)) {
+                || !(attempt.name == "mini_application_api" || oracle_tools::is_tool(&attempt.name)
+                    || typed_applications::is_foreground_name(&attempt.name)) {
                 return Err("lifetime reserve differs from active foreground API invocation".into());
             }
             return budget.tighten(requested);
@@ -13165,7 +13166,6 @@ impl Runtime {
             }
             "mini_application_api" | "mini_oracle_discover" | "mini_oracle_call" => {
                 let mapped = self.application_tool_arguments(&request.name, arguments)?;
-                let arguments = &mapped;
                 let mut allowed = tool
                     .allowed_application_api_routes
                     .iter()
@@ -13176,50 +13176,64 @@ impl Runtime {
                         .iter()
                         .map(|route| route.name.clone()),
                 );
-                let input = application_api_tools::parse_input(arguments, &allowed)?;
-                let lifetime = tool
-                    .allowed_application_lifetime_routes
-                    .iter()
-                    .find(|route| route.name == input.application);
-                let pin = if lifetime.is_some() {
-                    tool.lifetime_api_host_sha256.as_deref().ok_or(
-                        "lifetime application Host pin absent; agent delivery is unavailable",
-                    )?
-                } else {
-                    tool.agent_api_host_sha256.as_deref().ok_or(
-                        "application API event21 Host pin is absent; agent delivery is unavailable",
-                    )?
-                };
-                if self.config.host_socket.is_none() || sha256_pinned_file(&self.config.host)? != pin {
-                    return Err(
-                        "application API event21 Host image or socket differs from pin".into(),
-                    );
-                }
-                let (name, app_target) = if let Some(route) = lifetime {
-                    (&route.name, &route.app_resource)
-                } else {
-                    let route = tool
-                        .allowed_application_api_routes
-                        .iter()
-                        .find(|route| route.name == input.application)
-                        .ok_or("application API route is absent")?;
-                    (&route.name, &route.app_resource)
-                };
-                if !tool
-                    .registered_shared_applications
-                    .iter()
-                    .any(|entry| entry.name == *name && entry.app_target == *app_target)
-                    && !self.journal.born_resources.iter().any(|born| {
-                        born.pending.born.name == *name && born.pending.born.target == *app_target
-                    })
-                {
-                    return Err(
-                        "application API route has no recorded app birth or shared registration"
-                            .into(),
-                    );
-                }
+                let input = application_api_tools::parse_input(&mapped, &allowed)?;
+                self.preflight_application_route(tool, &input.application)?;
+            }
+            name if typed_applications::is_foreground_name(name) => {
+                // A typed foreground call runs the declaration's executor in this controller; every
+                // request it prepares is one ordinary lifetime-API dispatch on the attachment's route,
+                // so the route gets the same Host-pin and birth checks as `mini_application_api`.
+                let catalog = typed_applications::catalog(&tool.typed_applications, &tool.allowed_application_lifetime_routes)?;
+                let (entry, qualify) = typed_applications::foreground_entry(&catalog, name)
+                    .ok_or("refused: typed-app-not-attached: no attachment on this controller owns that tool")?;
+                typed_applications::foreground_arguments(entry, arguments, qualify)?;
+                let attachment = tool.typed_applications.iter().find(|a| a.alias == entry.alias)
+                    .ok_or("refused: typed-app-not-attached: attachment absent")?;
+                self.preflight_application_route(tool, &attachment.route_name)?;
             }
             _ => return Err("foreground tool is not delegated".into()),
+        }
+        Ok(())
+    }
+
+    /// The Host pin and recorded-birth checks every foreground application dispatch needs, for the
+    /// route named `application` (a lifetime route, or an event21 agent route).
+    fn preflight_application_route(&self, tool: &ToolTask, application: &str) -> Result<()> {
+        let lifetime = tool
+            .allowed_application_lifetime_routes
+            .iter()
+            .find(|route| route.name == application);
+        let pin = if lifetime.is_some() {
+            tool.lifetime_api_host_sha256.as_deref().ok_or(
+                "lifetime application Host pin absent; agent delivery is unavailable",
+            )?
+        } else {
+            tool.agent_api_host_sha256.as_deref().ok_or(
+                "application API event21 Host pin is absent; agent delivery is unavailable",
+            )?
+        };
+        if self.config.host_socket.is_none() || sha256_pinned_file(&self.config.host)? != pin {
+            return Err("application API event21 Host image or socket differs from pin".into());
+        }
+        let (name, app_target) = if let Some(route) = lifetime {
+            (&route.name, &route.app_resource)
+        } else {
+            let route = tool
+                .allowed_application_api_routes
+                .iter()
+                .find(|route| route.name == application)
+                .ok_or("application API route is absent")?;
+            (&route.name, &route.app_resource)
+        };
+        if !tool
+            .registered_shared_applications
+            .iter()
+            .any(|entry| entry.name == *name && entry.app_target == *app_target)
+            && !self.journal.born_resources.iter().any(|born| {
+                born.pending.born.name == *name && born.pending.born.target == *app_target
+            })
+        {
+            return Err("application API route has no recorded app birth or shared registration".into());
         }
         Ok(())
     }
@@ -13410,6 +13424,8 @@ impl Runtime {
             let result = if request.name == "mini_application_api" || oracle_tools::is_tool(&request.name) {
                 let arguments = self.application_tool_arguments(&request.name, &request.arguments)?;
                 self.foreground_application_api(&arguments, input)?
+            } else if typed_applications::is_foreground_name(&request.name) {
+                self.foreground_typed_application(&request.name, &request.arguments, input)?
             } else {
                 self.tool_call_from(ToolSurface::OperatorForeground, &request.name, &request.arguments)
                     .map(|value| json!({"isError":false,"text":value.to_string()}))?
@@ -13788,6 +13804,37 @@ impl Runtime {
         }
         self.journal.foreground_history.push(finished);
         self.save()
+    }
+
+    /// A typed application tool from the operator's shell (`mini app-interface --action call|qualify`):
+    /// the SDK executor runs here and each request it prepares re-enters `foreground_application_api`,
+    /// one fresh admission and settlement apiece, exactly as the Hermes worker's `__mini_typed_http_raw`
+    /// path does. The result is the same MCP-shaped tool result; no request is ever replayed here.
+    fn foreground_typed_application(
+        &mut self,
+        name: &str,
+        arguments: &Value,
+        input: &Receiver<Input>,
+    ) -> Result<Value> {
+        let tool = self.config.tool_task.as_ref().ok_or("toolTask absent")?;
+        let attachments = tool.typed_applications.clone();
+        let catalog = typed_applications::catalog(&attachments, &tool.allowed_application_lifetime_routes)?;
+        let (entry, qualify) = typed_applications::foreground_entry(&catalog, name)
+            .ok_or("refused: typed-app-not-attached: no attachment on this controller owns that tool")?;
+        let payload = typed_applications::foreground_arguments(entry, arguments, qualify)?;
+        let mut forward = |request: Value| -> Value {
+            let reply = typed_applications::raw_arguments(&attachments, &request)
+                .and_then(|mapped| self.foreground_application_api(&mapped, input));
+            match reply {
+                Ok(value) => value,
+                Err(error) => json!({"isError":true,"text":error}),
+            }
+        };
+        Ok(if qualify {
+            typed_applications::qualify_tool(entry, &payload, &mut forward)
+        } else {
+            typed_applications::call_tool(entry, name, &payload, &mut forward)
+        })
     }
 
     fn foreground_application_api(

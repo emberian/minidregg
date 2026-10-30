@@ -232,31 +232,13 @@ fn entropy<const N: usize>() -> std::io::Result<[u8; N]> {
     Ok(bytes)
 }
 
-/// Run one typed tool call in the MCP worker. `forward` sends one prepared request to the
-/// controller and returns its `{isError, text}` reply. The result is the MCP tool result:
-/// `isError`, `text`, and for a success `structured` (`{value}`, the declared output).
-pub fn call_tool(entry: &CatalogEntry, tool_name: &str, arguments: &Value, forward: &mut dyn FnMut(Value) -> Value) -> Value {
-    let refuse = |name: &str, uncertain: bool, references: &[Value]| json!({
-        "isError": true,
-        "text": json!({"refusal": name, "uncertain": uncertain, "nativeReceipts": references}).to_string(),
-    });
-    let Ok(declaration) = Declaration::load(entry.declaration.as_bytes()) else {
-        return refuse("declaration-invalid", false, &[]);
-    };
-    if declaration.sha256 != entry.declaration_sha256 || declaration.package_id != entry.package_id {
-        return refuse("declaration-binding-mismatch", false, &[]);
-    }
-    let operation = declaration.bound_tools(&entry.alias).ok().and_then(|tools| {
-        tools.into_iter().find(|t| t["name"] == tool_name).and_then(|t| t["operation"].as_str().map(str::to_owned))
-    });
-    let Some(operation) = operation else {
-        return refuse("typed-tool-unknown", false, &[]);
-    };
+/// Trusted per-invocation inputs for the executor: a fresh operation id, time and rendezvous seed
+/// (never from the model's arguments) and the session binding the SDK compares across callbacks.
+fn trusted_inputs(entry: &CatalogEntry) -> std::result::Result<(Value, SessionBinding), &'static str> {
     let (Ok(seed), Ok(operation_id)) = (entropy::<32>(), entropy::<8>()) else {
-        return refuse("entropy-unavailable", false, &[]);
+        return Err("entropy-unavailable");
     };
     let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
-    // Trusted context: fresh per invocation, never from the model's arguments.
     let context = json!({
         "operationId": mini_sdk::hex::encode(&operation_id),
         "nowMs": now_ms,
@@ -267,12 +249,10 @@ pub fn call_tool(entry: &CatalogEntry, tool_name: &str, arguments: &Value, forwa
         generation: entry.generation.clone(), session: entry.session.clone(),
         session_generation: entry.session_generation.clone(),
     };
-    let execution = declaration.execute(&operation, arguments, &context, &binding, |same, call| {
-        if same != &binding {
-            return Err(Refusal { name: "session-binding-changed".into(), uncertain: false });
-        }
-        native_reply(&forward(prepared_request(entry, call)))
-    });
+    Ok((context, binding))
+}
+
+fn finish(execution: mini_sdk::app_interface::Execution) -> Value {
     let references: Vec<Value> = execution.receipts.iter().map(receipt_reference).collect();
     match execution.outcome {
         Ok(value) => json!({
@@ -280,8 +260,106 @@ pub fn call_tool(entry: &CatalogEntry, tool_name: &str, arguments: &Value, forwa
             "text": json!({"value": value, "nativeReceipts": references}).to_string(),
             "structured": {"value": value},
         }),
-        Err(refusal) => refuse(&refusal.name, refusal.uncertain, &references),
+        Err(refusal) => refusal_result(&refusal.name, refusal.uncertain, &references),
     }
+}
+
+fn refusal_result(name: &str, uncertain: bool, references: &[Value]) -> Value {
+    json!({
+        "isError": true,
+        "text": json!({"refusal": name, "uncertain": uncertain, "nativeReceipts": references}).to_string(),
+    })
+}
+
+fn checked_declaration(entry: &CatalogEntry) -> std::result::Result<Declaration, Value> {
+    let Ok(declaration) = Declaration::load(entry.declaration.as_bytes()) else {
+        return Err(refusal_result("declaration-invalid", false, &[]));
+    };
+    if declaration.sha256 != entry.declaration_sha256 || declaration.package_id != entry.package_id {
+        return Err(refusal_result("declaration-binding-mismatch", false, &[]));
+    }
+    Ok(declaration)
+}
+
+/// Run one typed tool call in the MCP worker. `forward` sends one prepared request to the
+/// controller and returns its `{isError, text}` reply. The result is the MCP tool result:
+/// `isError`, `text`, and for a success `structured` (`{value}`, the declared output).
+pub fn call_tool(entry: &CatalogEntry, tool_name: &str, arguments: &Value, forward: &mut dyn FnMut(Value) -> Value) -> Value {
+    let declaration = match checked_declaration(entry) { Ok(d) => d, Err(refusal) => return refusal };
+    let operation = declaration.bound_tools(&entry.alias).ok().and_then(|tools| {
+        tools.into_iter().find(|t| t["name"] == tool_name).and_then(|t| t["operation"].as_str().map(str::to_owned))
+    });
+    let Some(operation) = operation else {
+        return refusal_result("typed-tool-unknown", false, &[]);
+    };
+    let (context, binding) = match trusted_inputs(entry) { Ok(v) => v, Err(name) => return refusal_result(name, false, &[]) };
+    let execution = declaration.execute(&operation, arguments, &context, &binding, |same, call| {
+        if same != &binding {
+            return Err(Refusal { name: "session-binding-changed".into(), uncertain: false });
+        }
+        native_reply(&forward(prepared_request(entry, call)))
+    });
+    finish(execution)
+}
+
+/// The operator-foreground tools: the attachment's bound tools and its hidden qualification tool
+/// (`mini_app_<alias>_qualify`, mini_sdk::app_interface::qualification_tool_name).
+pub(crate) fn is_foreground_name(name: &str) -> bool {
+    name.starts_with("mini_app_") && name.len() <= 64 && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+}
+
+/// The catalog entry a foreground tool name belongs to, and whether it is the qualification tool.
+pub(crate) fn foreground_entry<'a>(entries: &'a [CatalogEntry], name: &str) -> Option<(&'a CatalogEntry, bool)> {
+    entries.iter().find_map(|entry| {
+        if mini_sdk::app_interface::qualification_tool_name(&entry.alias).is_ok_and(|q| q == name) {
+            Some((entry, true))
+        } else if owns_tool(entry, name) {
+            Some((entry, false))
+        } else {
+            None
+        }
+    })
+}
+
+/// Foreground arguments carry the operator shell's `_miniInterfaceDigest`, which must equal the
+/// attachment's pinned declaration digest and is stripped before the executor validates the rest.
+/// Qualification arrives as `{context: ARGS}`.
+pub(crate) fn foreground_arguments(entry: &CatalogEntry, arguments: &Value, qualify: bool) -> std::result::Result<Value, String> {
+    let mut object = arguments.as_object().cloned().ok_or("refused: typed-arguments-invalid: arguments must be an object")?;
+    match object.remove("_miniInterfaceDigest").as_ref().and_then(Value::as_str) {
+        Some(digest) if digest == entry.declaration_sha256 => {}
+        _ => return Err("refused: typed-declaration-mismatch: the call names a declaration digest other than the attachment's pin".into()),
+    }
+    if !qualify {
+        return Ok(Value::Object(object));
+    }
+    if object.len() != 1 {
+        return Err("refused: typed-arguments-invalid: qualification takes only {context}".into());
+    }
+    object.remove("context").filter(Value::is_object).ok_or_else(|| "refused: typed-arguments-invalid: qualification context must be an object".into())
+}
+
+/// Run the declaration's qualification scenario through the same executor and the same per-request
+/// callback as a bound call (one fresh admission and settlement each). `context` is the operator's
+/// scenario context (`runId`); the trusted operation id, time and seed are the controller's own.
+pub fn qualify_tool(entry: &CatalogEntry, operator_context: &Value, forward: &mut dyn FnMut(Value) -> Value) -> Value {
+    let declaration = match checked_declaration(entry) { Ok(d) => d, Err(refusal) => return refusal };
+    let (mut context, binding) = match trusted_inputs(entry) { Ok(v) => v, Err(name) => return refusal_result(name, false, &[]) };
+    if let (Some(trusted), Some(given)) = (context.as_object_mut(), operator_context.as_object()) {
+        for (key, value) in given {
+            if trusted.contains_key(key) {
+                return refusal_result("context-key-reserved", false, &[]);
+            }
+            trusted.insert(key.clone(), value.clone());
+        }
+    }
+    let execution = declaration.qualify(&context, &binding, |same, call| {
+        if same != &binding {
+            return Err(Refusal { name: "session-binding-changed".into(), uncertain: false });
+        }
+        native_reply(&forward(prepared_request(entry, call)))
+    });
+    finish(execution)
 }
 
 #[cfg(test)]
@@ -332,6 +410,73 @@ mod tests {
             log.push(mapped);
             replies.remove(0)
         }
+    }
+
+    const WBO: &str = include_str!("../../../apps/interfaces/wbo.json");
+
+    #[test]
+    fn foreground_names_digest_and_qualification_context_are_checked() {
+        let wbo = entry("wbo", WBO);
+        let catalog = vec![wbo.clone()];
+        assert!(is_foreground_name("mini_app_wbo_qualify") && !is_foreground_name("mini_app_wbo-qualify"));
+        let (found, qualify) = foreground_entry(&catalog, "mini_app_wbo_qualify").expect("hidden qualification tool");
+        assert!(qualify && found.alias == "wbo");
+        let (_, qualify) = foreground_entry(&catalog, "mini_app_wbo_board_read").expect("bound tool");
+        assert!(!qualify);
+        assert!(foreground_entry(&catalog, "mini_app_other_board_read").is_none());
+        let digest = json!(wbo.declaration_sha256);
+        assert_eq!(foreground_arguments(&wbo, &json!({"board":"b","_miniInterfaceDigest":digest}), false).unwrap(), json!({"board":"b"}));
+        assert!(foreground_arguments(&wbo, &json!({"board":"b","_miniInterfaceDigest":"00"}), false).unwrap_err().contains("typed-declaration-mismatch"));
+        assert!(foreground_arguments(&wbo, &json!({"board":"b"}), false).unwrap_err().contains("typed-declaration-mismatch"));
+        assert_eq!(foreground_arguments(&wbo, &json!({"context":{"runId":"r1"},"_miniInterfaceDigest":digest}), true).unwrap(), json!({"runId":"r1"}));
+        assert!(foreground_arguments(&wbo, &json!({"context":{},"extra":1,"_miniInterfaceDigest":digest}), true).is_err());
+        let mut never = |_: Value| -> Value { panic!("a reserved context key refuses before any dispatch") };
+        let refused = qualify_tool(&wbo, &json!({"operationId":"x"}), &mut never);
+        assert!(refused["text"].as_str().unwrap().contains("context-key-reserved"));
+    }
+
+    /// The WBO declaration's conversation qualification through the controller's real request mapping:
+    /// every prepared CONVERSATION request passes `raw_arguments` and the native HTTP profile.
+    #[test]
+    fn qualification_runs_a_conversation_declaration_through_the_controller_mapping() {
+        let wbo = entry("wbo", WBO);
+        let pins = pins(&[&wbo]);
+        let routes = vec![pins[0].route_name.clone()];
+        let mut item = Value::Null;
+        let mut sent = 0;
+        let mut forward = |request: Value| -> Value {
+            let mapped = raw_arguments(&pins, &request).expect("the controller accepts what the executor prepared");
+            crate::application_api_tools::parse_input(&mapped, &routes).expect("CONVERSATION satisfies the native HTTP profile");
+            if mapped["method"] == "GET" {
+                assert_eq!(mapped["path"], "download/abc123", "the saved-export read");
+                return http(200, br#"<svg><rect id="abc123"/></svg>"#, "12");
+            }
+            assert_eq!(mapped["method"], "CONVERSATION", "{mapped}");
+            let q: Value = serde_json::from_slice(&mini_sdk::hex::decode(mapped["bodyHex"].as_str().unwrap()).unwrap()).unwrap();
+            let mut frames: Vec<String> = vec![];
+            if q["op"] == "open" { frames.push(r#"0{"sid":"s","pingInterval":25000}"#.into()); }
+            if q["op"] == "send" {
+                let text = q["text"].as_str().unwrap();
+                if text == "40" {
+                    frames.push("40".into());
+                    frames.push(r#"42["broadcast",{"type":0,"fromSeq":0,"seq":0,"_children":[]}]"#.into());
+                } else {
+                    let v: Value = serde_json::from_str(text.strip_prefix("42").unwrap()).unwrap();
+                    item = v[1].clone();
+                    sent += 1;
+                    frames.push(format!("42{}", json!(["broadcast", {"seq":1,"mutation":item}])));
+                }
+            }
+            // Later connections (the read-back) replay the stored item.
+            if q["op"] == "send" && q["text"] == "40" && !item.is_null() {
+                frames.pop();
+                frames.push(format!("42{}", json!(["broadcast", {"type":0,"fromSeq":0,"seq":1,"_children":[item]}])));
+            }
+            http(200, &serde_json::to_vec(&json!({"version":1,"channel":q["channel"],"op":q["op"],"frames":frames})).unwrap(), "11")
+        };
+        let result = qualify_tool(&wbo, &json!({"runId":"abc123"}), &mut forward);
+        assert_eq!(result["isError"], false, "{result}");
+        assert_eq!(sent, 1, "the write is sent exactly once");
     }
 
     #[test]
