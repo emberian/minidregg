@@ -651,6 +651,13 @@ fn submit_birth(spec: &Spec, socket: &Path, source: &Path, genesis: &Value, work
     })
 }
 
+/// Whether the running user owns the shared namespace root (the operator's whole-create does; the
+/// resident half of a split create does not).
+fn shared_namespace_owned(path: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    fs::metadata(path).map(|m| m.uid() == unsafe { libc::geteuid() }).unwrap_or(false)
+}
+
 fn init_workspace(spec: &Spec, key: &Key, dir: &Path) -> Result<()> {
     if dir.join("workspace.json").exists() {
         return Ok(());
@@ -661,8 +668,16 @@ fn init_workspace(spec: &Spec, key: &Key, dir: &Path) -> Result<()> {
     let mut command = Command::new(&spec.mini);
     command.args(["workspace", "--action", "init", "--host"]).arg(&spec.host)
         .arg("--config").arg(&spec.host_config).arg("--socket").arg(&spec.host_socket)
-        .arg("--key").arg(&key.key).arg("--subject").arg(&key.subject)
-        .arg("--namespace-root").arg(&spec.namespace_root).arg("--dir").arg(dir);
+        .arg("--key").arg(&key.key).arg("--subject").arg(&key.subject);
+    // The shared namespace root is a directory the workspace's own principal must own (mini refuses
+    // any other). Split create hands the resident a root the operator allocated from, so the resident
+    // phase does not own it: its workspaces then reserve in their own private ROOT/namespace, which is
+    // mini's default. That is disjoint from the operator's by the reservation law, not by directory:
+    // ids are random 63-bit draws and the Host refuses a collision (workspace.rs namespace_root).
+    if shared_namespace_owned(&spec.namespace_root) {
+        command.arg("--namespace-root").arg(&spec.namespace_root);
+    }
+    command.arg("--dir").arg(dir);
     if key.no_prerotation {
         command.arg("--no-prerotation");
     }
@@ -838,6 +853,18 @@ pub(crate) fn client(args: &[std::ffi::OsString]) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_namespace_root_the_user_does_not_own_is_not_passed_to_workspace_init() {
+        let own = std::env::temp_dir().join(format!("gc-ns-{}", std::process::id()));
+        fs::create_dir_all(&own).unwrap();
+        assert!(shared_namespace_owned(&own));
+        assert!(!shared_namespace_owned(&own.join("absent")));
+        if unsafe { libc::geteuid() } != 0 {
+            assert!(!shared_namespace_owned(Path::new("/")), "a root-owned directory is the operator's, not ours");
+        }
+        fs::remove_dir(own).unwrap();
+    }
+
     use super::*;
 
     fn spec_json() -> Value {
