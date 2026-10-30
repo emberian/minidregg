@@ -22,7 +22,8 @@ assert cmd=='submit'
 if 'grainBirth' in i:
  (d/'config.json').write_bytes(pathlib.Path(args['--config']).read_bytes())
  (d/'signed-observation.bin').write_bytes(b'signed prepare request')
- (d/'pre-submit-refusal.frame').write_bytes(b'\xffcanonical native prepare refusal')
+ # a prepare refusal is decided before any append: the Host answers it under NO_RECORD (253), never HOST_OUTCOME (255)
+ (d/'pre-submit-refusal.frame').write_bytes(b'\xfdcanonical native prepare refusal')
  out('attempt.json',{'format':'minidregg-resource-client-attempt-v1','operation':'submit','host':args['--host'],'config':str(d/'config.json'),'socket':args['--socket']})
  out('pre-submit-refusal.json',{'type':'minidregg-pre-submit-refusal-v1','stage':'prepare','operation':1,'frameSha256':digest('pre-submit-refusal.frame'),'requestSha256':digest('signed-observation.bin'),'hostConfigSha256':digest('config.json'),'attemptManifestSha256':digest('attempt.json')})
  sys.exit(3)
