@@ -102,7 +102,14 @@ for line in sys.stdin:
         if written.get('isError'):raise RuntimeError('source protected summary write failed: '+str(written))
         verified=call('tools/call',{'name':'mini_doc_show','arguments':{'doc':output}})
         save('shared-summary-readback-'+tag+'.json',verified)
-        if verified.get('isError') or text not in json.dumps(verified):raise RuntimeError('source summary readback did not verify body')
+        # The provider echoes the captured document, which has several lines in a composed world; the document renders a
+        # newline as U+2424, so the appended body is looked for in that rendering, not as the raw text.
+        def body_present():
+            if text in json.dumps(verified): return True
+            try: rendered=json.loads(verified['content'][0]['text']).get('text','')
+            except (ValueError,KeyError,IndexError,TypeError,AttributeError): return False
+            return text.replace('\n','\u2424') in rendered
+        if verified.get('isError') or not body_present():raise RuntimeError('source summary readback did not verify body')
         # Later turns exercise ordinary native model-say deduplication; the
         # first still requires the delayed final delivery after the held rows.
         if ordinal>1:
