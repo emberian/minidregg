@@ -77,7 +77,7 @@ ofReduceBool, trustCompiler or new axioms are not), what replaced native_decide 
 | 719d7b7aa | READY, first clean manifest; umbrellas: Native fixtures (fixed later), TokenCensus (fixed later) red |
 | 06831831c | READY (named to scout and infra): app declarations, re-recorded Native fixtures; scout full pass running on it |
 | 4e5faa8d8 | READY 13:20 (host stage 33 min, deep); main contains it. Named to infra successor (distinct composed + continuous diff) and scout. hbox gate12 PHASES="tour enrol j14" running (gate-4e5faa8d, pid gate-4e5f.pid); Minidregg umbrella queued after its umbrellas (minidregg.pid) |
-| staging tip c32e35e9a+ | + birth_refusal fixture fix c5905db60 (tests only), state docs: queue after 4e5faa8d8 and its Minidregg check |
+| 103c6002a | queued (integ-build4, first rerecord stage; expect `unchanged`): + birth_refusal fixture fix c5905db60, proofs rulings fa4193808 (genesis refuses `witnessed` a7a0b3722, objective driver dynlib d8ceb3891, front_end_current + rerecord.sh ff9cf7df6). Proofs verified it with a full candidate incl. the Minidregg umbrella on its side |
 
 ## Open reds and owners
 
@@ -86,7 +86,7 @@ ofReduceBool, trustCompiler or new axioms are not), what replaced native_decide 
 - Hummingbird live receiving path: app-reds building a j14apps()-style run.
 - fleetsign 1/100 under full parallel load (attempt plan.frame missing): scout reproducing; core client if confirmed.
 - Scout's twelve demo steps never ran on c7aa7e8c4 (journey budget spent); rerunning on 06831831c with a 12000 s timeout.
-- Ruled 2026-10-30 (root), owned by proofs af4b3ea612564dea5, land as shas: (1) genesis refuses a factory predicate
+- Ruled 2026-10-30 (root), implemented by proofs in fa4193808 (merged; building as 103c6002a): (1) genesis refuses a factory predicate
   containing `witnessed`, loudly and by name (not fail-closed at every birth); (2) objective-native-acceptance.py
   publish-variant harness bug fixed (lean --run without the kernel dynlib); (3) the integrator's build regenerates the
   accepted fixture automatically whenever the Objective front-end identity changes, the Authority-Change commit staying
