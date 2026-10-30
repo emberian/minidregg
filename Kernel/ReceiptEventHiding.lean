@@ -216,12 +216,16 @@ def Challenge.eventIdOf {tapes : Nat} {View : Type} (challenge : Challenge tapes
     (challenge.signedOf world tape)).eventId
 
 /-- **Keystone statement (K-RECEIPT-HIDE).** For a legal challenge, a gap below
-one, and a budget that admits the reader's own hashing (both the retired effects
-hash and the current event hash), the receipts of the current code are
-unlinkable at `num/den` given the common view. -/
+one, a positive query bound (at bound 0 only the constant reader is a hash test,
+so the budget premises would admit a budget of that reader alone), and a budget
+that admits the reader's own hashing (both the retired effects hash and the
+current event hash), the receipts of the current code are unlinkable at
+`num/den` given the common view. `public_signature_refutes` is its teeth on the
+current code: a publicly computable signature makes it false at every admitted
+bound. -/
 def DeclaredReceiptHiding {View : Type} (tapes queryBound num den : Nat)
     (challenge : Challenge tapes View) (budgeted : Reader View → Prop) : Prop :=
-  num < den ∧
+  num < den ∧ 0 < queryBound ∧
   BudgetAdmitsPublicHash queryBound effectsHash budgeted ∧
   BudgetAdmitsPublicHash queryBound eventIdOfSigned budgeted ∧
   ReceiptUnlinkable tapes num den challenge.viewOf challenge.eventIdOf budgeted
@@ -229,15 +233,46 @@ def DeclaredReceiptHiding {View : Type} (tapes queryBound num den : Nat)
 /-- The keystone follows from the named cryptographic obligation. -/
 theorem declaredReceiptHiding_of_idealReplacement {View : Type} {tapes queryBound num den : Nat}
     (challenge : Challenge tapes View) {budgeted : Reader View → Prop}
-    (small : num + num < den)
+    (small : num + num < den) (queries : 0 < queryBound)
     (effects : BudgetAdmitsPublicHash queryBound effectsHash budgeted)
     (current : BudgetAdmitsPublicHash queryBound eventIdOfSigned budgeted)
     {ideal : Fin tapes → Digest}
     (replace : IdealReplacement tapes num den challenge.viewOf challenge.eventIdOf ideal budgeted) :
     DeclaredReceiptHiding tapes queryBound (num + num) den challenge budgeted :=
-  ⟨small, effects, current, unlinkable_of_idealReplacement replace⟩
+  ⟨small, queries, effects, current, unlinkable_of_idealReplacement replace⟩
 
 #assert_axioms declaredReceiptHiding_of_idealReplacement
+
+/-- A budget admitting the hash tests of some positive bound admits the one-query
+tests. -/
+theorem BudgetAdmitsPublicHash.one {View : Type} {queryBound : Nat} {hash : List UInt8 → Digest}
+    {budgeted : Reader View → Prop} (admits : BudgetAdmitsPublicHash queryBound hash budgeted)
+    (positive : 0 < queryBound) : BudgetAdmitsPublicHash 1 hash budgeted := by
+  rintro reader ⟨queries, short, rfl⟩
+  exact admits _ ⟨queries, fun view => (short view).trans positive, rfl⟩
+
+/-- **Teeth on the current code.** If the signer's ingress is publicly computable
+(the same signed command on every tape, as with a constant public signature) and
+the two worlds' event ids differ, `DeclaredReceiptHiding` fails at every query
+bound and every gap: the reader hashes the left world's signed ingress. -/
+theorem public_signature_refutes {View : Type} {tapes queryBound num den : Nat}
+    (challenge : Challenge tapes View) (signed : Bool → SignedCommand)
+    (computable : ∀ world tape, challenge.signedOf world tape = signed world)
+    (distinct : eventIdOfSigned (signedBytes challenge.domain challenge.semantics (signed false)) ≠
+      eventIdOfSigned (signedBytes challenge.domain challenge.semantics (signed true)))
+    (budgeted : Reader View → Prop) :
+    ¬ DeclaredReceiptHiding tapes queryBound num den challenge budgeted := by
+  rintro ⟨small, positive, _, current, unlinkable⟩
+  have computed : challenge.eventIdOf =
+      fun world _ => eventIdOfSigned (signedBytes challenge.domain challenge.semantics (signed world)) := by
+    funext world tape
+    simp [Challenge.eventIdOf, computable]
+  rw [computed] at unlinkable
+  exact fingerprint_links challenge.viewOf eventIdOfSigned
+    (fun world => signedBytes challenge.domain challenge.semantics (signed world))
+    distinct (current.one positive) small unlinkable
+
+#assert_axioms public_signature_refutes
 
 /-! ## Witnesses
 
