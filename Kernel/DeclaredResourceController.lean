@@ -1714,12 +1714,40 @@ def admissionGuards [DecidableEq F] (prepared : PreparedInvocation deployment pr
   readGuards prepared ++ (audienceGuards audience.targets).filter fun guard =>
     guard.cellId ∉ (writes prepared).map DataWrite.cellId
 
-/-- The invocation's retained event: the signed bytes. -/
-def invocationEvent (domain semantics : Digest) (command : Command) (signed : SignedCommand) : StableEvent where
-  codecVersion := 3
-  domain := domain
-  eventId := effectsDigest domain semantics command
-  canonicalBytes := signedBytes domain semantics signed
+/-- The event id of a declared invocation: a digest of the exact signed ingress
+(`signedBytes`, which carries the authority signature `withAcceptedOn`
+authenticates first), not of the unsigned command. The receipt carries this id
+to any reader holding the transaction id; the former `effectsDigest command`
+let that reader test a guessed command (K-RECEIPT-HIDE,
+`Kernel.ReceiptEventHiding`). -/
+def eventIdOfSigned (bytes : List UInt8) : Digest :=
+  (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.EVENT/v5".toUTF8.toList bytes).digest
+
+/-- The invocation's retained event: the signed bytes, identified by their own
+digest. `command` fixes the family; it no longer enters the id. -/
+def invocationEvent (domain semantics : Digest) (_command : Command) (signed : SignedCommand) : StableEvent :=
+  StableEvent.retained 3 domain eventIdOfSigned (signedBytes domain semantics signed)
+
+@[simp] theorem invocationEvent_eventId (domain semantics : Digest) (command : Command)
+    (signed : SignedCommand) :
+    (invocationEvent domain semantics command signed).eventId =
+      eventIdOfSigned (signedBytes domain semantics signed) := rfl
+
+@[simp] theorem invocationEvent_codecVersion (domain semantics : Digest) (command : Command)
+    (signed : SignedCommand) : (invocationEvent domain semantics command signed).codecVersion = 3 := rfl
+
+/-- **Replay and idempotence are unchanged.** Two invocation events are equal
+exactly when their signed ingresses are, so `recordedInvocation`'s exact-retry
+recognition (and its conflict on any other ingress for a recorded transaction id)
+is the same relation it was when the id was `effectsDigest command`: that old
+event already retained, and was compared on, these signed bytes. -/
+theorem invocationEvent_eq_iff (domain semantics : Digest) (command command' : Command)
+    (signed signed' : SignedCommand) :
+    invocationEvent domain semantics command signed = invocationEvent domain semantics command' signed' ↔
+      signedBytes domain semantics signed = signedBytes domain semantics signed' :=
+  StableEvent.retained_eq_iff
+
+#assert_axioms invocationEvent_eq_iff
 
 /- Current signature, observation and law checks only. This token cannot create
 an effect intent and carries no accepted source execution. -/

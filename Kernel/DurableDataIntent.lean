@@ -87,6 +87,39 @@ structure StableEvent where
   canonicalBytes : List UInt8
   deriving DecidableEq, Repr
 
+/-- An event whose id is a function of its own retained bytes, never of a
+public projection of them (K-RECEIPT-HIDE, `Kernel.ReceiptEventHiding`). When
+the retained bytes are a signed ingress, a reader holding the receipt but not
+the signature cannot recompute the id from a guessed command. -/
+def StableEvent.retained (codecVersion : Nat) (domain : TypedAuthorization.Digest)
+    (idOf : List UInt8 → TypedAuthorization.Digest) (canonicalBytes : List UInt8) : StableEvent :=
+  ⟨codecVersion, domain, idOf canonicalBytes, canonicalBytes⟩
+
+@[simp] theorem StableEvent.retained_codecVersion (codecVersion : Nat) (domain : TypedAuthorization.Digest)
+    (idOf : List UInt8 → TypedAuthorization.Digest) (canonicalBytes : List UInt8) :
+    (StableEvent.retained codecVersion domain idOf canonicalBytes).codecVersion = codecVersion := rfl
+@[simp] theorem StableEvent.retained_domain (codecVersion : Nat) (domain : TypedAuthorization.Digest)
+    (idOf : List UInt8 → TypedAuthorization.Digest) (canonicalBytes : List UInt8) :
+    (StableEvent.retained codecVersion domain idOf canonicalBytes).domain = domain := rfl
+@[simp] theorem StableEvent.retained_eventId (codecVersion : Nat) (domain : TypedAuthorization.Digest)
+    (idOf : List UInt8 → TypedAuthorization.Digest) (canonicalBytes : List UInt8) :
+    (StableEvent.retained codecVersion domain idOf canonicalBytes).eventId = idOf canonicalBytes := rfl
+@[simp] theorem StableEvent.retained_canonicalBytes (codecVersion : Nat) (domain : TypedAuthorization.Digest)
+    (idOf : List UInt8 → TypedAuthorization.Digest) (canonicalBytes : List UInt8) :
+    (StableEvent.retained codecVersion domain idOf canonicalBytes).canonicalBytes = canonicalBytes := rfl
+
+/-- Two retained events of one family and domain are equal exactly when their
+retained bytes are: the id adds no identity the bytes do not already carry. -/
+theorem StableEvent.retained_eq_iff {codecVersion : Nat} {domain : TypedAuthorization.Digest}
+    {idOf : List UInt8 → TypedAuthorization.Digest} {left right : List UInt8} :
+    StableEvent.retained codecVersion domain idOf left =
+      StableEvent.retained codecVersion domain idOf right ↔ left = right := by
+  constructor
+  · intro same
+    exact congrArg StableEvent.canonicalBytes same
+  · intro same
+    rw [same]
+
 /-- A canonical post image.  `exactPost` is not trusted independently: a
 `DataIntent` below proves that `rootBytes canonicalPostBytes = exactPost`. -/
 structure DataWrite where

@@ -1,8 +1,11 @@
 /-
-Statement-only research draft: docs/RATCHET-LOG-DESIGN.md, §§2–4 and 9.
-NOT imported by Minidregg, Kernel, a lake target, or any receiving path.
-No theorem, axiom, sorry, crypto instance, or executable replacement is supplied.
-Every declaration below is a Prop. Function arguments specify an eventual model;
+Statement draft: docs/RATCHET-LOG-DESIGN.md, §§2–4 and 9. Imported by the
+Kernel umbrella so every statement elaborates and every pin is checked; no
+receiving path imports it.
+No axiom, sorry, crypto instance, or executable replacement is supplied. The
+declarations are Props except `hybridReduction_holds`, which proves that the
+hybrid composition's arithmetic holds for every instantiation (the open
+obligations are its antecedents). Function arguments specify an eventual model;
 they are not implementations or permission to treat arbitrary functions as live code.
 
 Probability is exact finite counting, not an uninterpreted `Indistinguishable`.
@@ -23,7 +26,10 @@ These definitions do not enforce those interpretations without ReceivingRealizat
 -/
 module
 
-public import Init.Data.List.OfFn
+public import Theory.FiniteTapeGap
+public import Mathlib.Tactic.Ring
+public import Theory.AssertAxioms
+public import Theory.AuthTrieCache
 public import Init.Data.Nat.Log2
 
 @[expose] public section
@@ -32,14 +38,7 @@ namespace Minidregg.Kernel.BlindedCellHidingDraft
 
 set_option autoImplicit false
 
-/-- Absolute probability gap <= num/den, using both cross-multiplied inequalities.
-An empty experiment or a zero denominator never satisfies this predicate. -/
-def GapAtMost (tapes num den : Nat) (left right : Fin tapes → Bool) : Prop :=
-  0 < tapes ∧ 0 < den ∧
-    (List.ofFn left).count true * den ≤
-      (List.ofFn right).count true * den + num * tapes ∧
-    (List.ofFn right).count true * den ≤
-      (List.ofFn left).count true * den + num * tapes
+open Minidregg.Theory.FiniteTapeGap
 
 /-- Online leakage equality: a challenge contains BOTH candidate operations and
 `choose` depends only on the common observable prefix. `reachable` must be the
@@ -52,8 +51,8 @@ def OnlineSameLeakage {Prefix State Challenge Leakage : Type}
     (reachable : Prefix → State → State → Prop)
     (choose : Prefix → Challenge)
     (release : State → Challenge → Bool → Leakage) : Prop :=
-  ∀ prefix left right, reachable prefix left right →
-    release left (choose prefix) false = release right (choose prefix) true
+  ∀ history left right, reachable history left right →
+    release left (choose history) false = release right (choose history) true
 
 /-- Target: indistinguishability of complete, adaptively generated transcripts.
 The observable final bit includes arbitrary efficient processing of all views. -/
@@ -118,16 +117,59 @@ def HybridReduction {Strategy : Type}
       2 * versions * queries * den)
     (den * (2 ^ lambda - queries)) real legal budgeted
 
-/-- Statement (H), in rational form. Finite probability gaps are already <= 1,
-so this uncapped rational bound is equivalent to capping its RHS at 1.
+/-- **The hybrid composition holds for every instantiation**: it is the
+triangle inequality over seven hybrids put over the common denominator
+`den * (2^λ - Q)`. What remains open is exactly its antecedents (the PRF/RNG,
+ZK and ROM-coupling gaps of the concrete algorithms) and `ideal`'s world
+independence, never the arithmetic. -/
+theorem hybridReduction_holds {Strategy : Type}
+    (tapes lambda versions queries fNum zNum den : Nat)
+    (real uniform simulated ideal : Strategy → Bool → Fin tapes → Bool)
+    (legal budgeted : Strategy → Prop) :
+    HybridReduction tapes lambda versions queries fNum zNum den
+      real uniform simulated ideal legal budgeted := by
+  intro _ denominator below hybrids identical a isLegal isBudgeted
+  have margin : 0 < 2 ^ lambda - queries := Nat.sub_pos_of_lt below
+  have step := fun b => hybrids a isLegal isBudgeted b
+  have toCommon := fun b =>
+    (((step b).1.scale margin).trans ((step b).2.1.scale margin)).trans
+      (((step b).2.2.scale denominator).cast rfl (Nat.mul_comm _ _))
+  have middle := ((identical a isLegal isBudgeted).scale
+    (Nat.mul_pos denominator margin)).cast (Nat.zero_mul _) (Nat.one_mul _)
+  have chain := ((toCommon false).trans middle).trans (toCommon true).symm
+  exact chain.mono (le_of_eq (by ring))
+
+#assert_axioms hybridReduction_holds
+
+/-- A budget is meaningful only if it admits the named distinguishers (the
+teeth strategies: the stable-token equality test against an exposed old leaf,
+the d-decoy membership test, and every public-hash test of a receipt field).
+Without this, `TranscriptHiding` holds for a budget admitting only
+constant-output strategies, even when `HasHiddenChoice` is inhabited. Every
+hiding goal below carries it. -/
+def BudgetMeaningful {Strategy : Type} (budgeted distinguisher : Strategy → Prop) : Prop :=
+  ∀ a, distinguisher a → budgeted a
+
+/-- Statement (H), in rational form. The hidden-choice witness must be one of
+the named distinguishers (so a legal challenge with a genuine hidden difference
+is attacked by the teeth tests), the budget must admit every distinguisher, and
+the bound must be below one (a bound of one or more accepts perfect
+disclosure). Open: `distinguisher` must be instantiated by concrete attack
+strategies of the game interpreter; a predicate that merely labels a constant
+strategy does not close the hole.
+Finite probability gaps are already <= 1, so this uncapped rational bound is
+equivalent to capping its RHS at 1.
 For independent uniform masks, take fNum = 0. No numerical budget is supplied
 for cSHAKE, KMAC, or an existing Mini proof system. -/
 def RatchetHidingGoal {Strategy : Type}
     (tapes lambda versions queries fNum zNum den : Nat)
     (run : Strategy → Bool → Fin tapes → Bool)
-    (legal budgeted hiddenDiff : Strategy → Prop) : Prop :=
+    (legal budgeted hiddenDiff distinguisher : Strategy → Prop) : Prop :=
   0 < den ∧ queries < 2 ^ lambda ∧
-  HasHiddenChoice legal budgeted hiddenDiff ∧
+  2 * (fNum + zNum) * (2 ^ lambda - queries) + 2 * versions * queries * den <
+    den * (2 ^ lambda - queries) ∧
+  BudgetMeaningful budgeted distinguisher ∧
+  HasHiddenChoice legal distinguisher hiddenDiff ∧
   TranscriptHiding tapes
     (2 * (fNum + zNum) * (2 ^ lambda - queries) +
       2 * versions * queries * den)
@@ -140,8 +182,10 @@ with an ideal-oracle circuit. Binding needs its independent collision premise. -
 def StandardModelHidingGoal {Strategy : Type}
     (tapes versions fNum pNum zNum den : Nat)
     (run : Strategy → Bool → Fin tapes → Bool)
-    (legal budgeted hiddenDiff : Strategy → Prop) : Prop :=
-  0 < den ∧ HasHiddenChoice legal budgeted hiddenDiff ∧
+    (legal budgeted hiddenDiff distinguisher : Strategy → Prop) : Prop :=
+  0 < den ∧ 2 * (fNum + versions * pNum + zNum) < den ∧
+  BudgetMeaningful budgeted distinguisher ∧
+  HasHiddenChoice legal distinguisher hiddenDiff ∧
   TranscriptHiding tapes (2 * (fNum + versions * pNum + zNum)) den
     run legal budgeted
 
@@ -247,6 +291,77 @@ def PremisesInhabited {Model Strategy : Type}
     (legal budgeted hiddenDiff : Model → Strategy → Prop) : Prop :=
   ∃ model, primitivePremises model ∧
     ∃ a, legal model a ∧ budgeted model a ∧ hiddenDiff model a
+
+/-! ## The instantiation: one fresh mask over the existing compressed trie
+
+The private inner index is `Theory.AuthTrie` (already the world root's map): its
+root is a function of the logical map (`AuthTrie.root_congr`), an insert touches
+one walk (`AuthTrie.Cache.insert`), honest openings verify
+(`AuthTrie.Cache.opening_complete`). Canonicity is why `validIndex` is `True`
+below: no tree-shape invariant stands between an accepted root and its logical
+store, only hash collisions. Keys are `visibilityClass ++ hash(address)` bits,
+so a visibility class is a subtree and its complete opening is that subtree
+plus one path, padded to the public key-bit length `L`. -/
+
+/-- The published commitment of one accepted cell version: one outer hash over
+the version context, a fresh mask and the private trie root. -/
+def maskedTrieCommitment {K V D Context Mask : Type} [DecidableEq K]
+    (dig : Minidregg.Theory.AuthTrie.NodeIn K V D → D) (bitsOf : K → List Bool) (L : Nat)
+    (outer : Context → Mask → D → D) (context : Context) (mask : Mask)
+    (entries : List (K × V)) : D :=
+  outer context mask (Minidregg.Theory.AuthTrie.root dig bitsOf L entries)
+
+section MaskedTrie
+
+open Minidregg.Theory.AuthTrie (NodeIn root lastVal CollisionAmong TreeNode ClimbNode entries canon)
+open Minidregg.Theory.AuthTrie.Cache (PathsInjective build root_lastVal_eq)
+
+variable {K V D Context Mask : Type} [DecidableEq K] [DecidableEq V] [DecidableEq D]
+
+/-- The nodes one binding comparison hashes: the canonical tree over `entries`
+and the climb of the honest opening of `k` built from `entries'`. A collision
+must be AMONG these (finitely many, fixed by the two lists), never an unrelated
+global collision, which a fixed-width digest always has. -/
+def bindingNodes (dig : NodeIn K V D → D) (bitsOf : K → List Bool) (L : Nat)
+    (lengths : ∀ k, (bitsOf k).length = L) (entries' entries'' : List (K × V)) (k : K) :
+    NodeIn K V D → Prop := fun x =>
+  TreeNode dig L (entries bitsOf (canon entries')) x ∨
+    ClimbNode dig ((build (dig := dig) lengths entries'').opening k).terminal
+      ((bitsOf k).take ((build (dig := dig) lengths entries'').opening k).siblings.length)
+      ((build (dig := dig) lengths entries'').opening k).siblings x
+
+/-- **Binding (proved).** Two entry lists with one commitment under one context:
+either the two compared outer inputs `(mask, inner root)` differ (an outer
+collision ON THOSE INPUTS), or every key has the same last value unless two
+distinct nodes among that key's comparison nodes share a digest. Premises: every
+path has the public length `L` and paths are injective on each list's live keys
+(index collisions are excluded here and must be preserved by admission or
+counted). Teeth: a constant `outer` always takes the first disjunct; with an
+injective `outer` and an injective `dig` (`AuthTrie.spelled`) only the second
+remains with no collision, so lists with different last values must commit
+differently. -/
+def MaskedTrieBinding (dig : NodeIn K V D → D) (bitsOf : K → List Bool) (L : Nat)
+    (outer : Context → Mask → D → D) : Prop :=
+  ∀ (lengths : ∀ k, (bitsOf k).length = L) context mask mask' (entries' entries'' : List (K × V)),
+    PathsInjective bitsOf entries' → PathsInjective bitsOf entries'' →
+    maskedTrieCommitment dig bitsOf L outer context mask entries' =
+      maskedTrieCommitment dig bitsOf L outer context mask' entries'' →
+    (mask, root dig bitsOf L entries') ≠ (mask', root dig bitsOf L entries'') ∨
+      ∀ k, lastVal entries'' k = lastVal entries' k ∨
+        CollisionAmong dig (bindingNodes dig bitsOf L lengths entries' entries'' k)
+
+theorem maskedTrieBinding_holds (dig : NodeIn K V D → D) (bitsOf : K → List Bool) (L : Nat)
+    (outer : Context → Mask → D → D) : MaskedTrieBinding dig bitsOf L outer := by
+  intro lengths context mask mask' entries' entries'' inj inj' _
+  by_cases same : (mask, root dig bitsOf L entries') = (mask', root dig bitsOf L entries'')
+  · right
+    intro k
+    exact root_lastVal_eq lengths inj inj' (Prod.mk.inj same).2 k
+  · exact Or.inl same
+
+#assert_axioms maskedTrieBinding_holds
+
+end MaskedTrie
 
 /-
 SATISFIABLE / TEETH / PREMISE-INHABITATION SKETCHES (not proved here)
