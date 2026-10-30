@@ -929,6 +929,218 @@ theorem ofMultiCell_cellIds_nodup
 
 end Intent
 
+/-! ## The joint turn, read from the durable journal
+
+A multi-cell commit is one turn because one durable transaction writes every leg's root. The
+wide-pullback reading (`Kernel.Hyperedge`) therefore takes each leg's turn id from the journal:
+the transaction that last wrote that leg's cell root. Agreement of the legs then says every
+leg was last written by the one joint intent, which a split install (two legs written by two
+transactions) fails (`lastWriter_split`, `split_install_no_apex`). -/
+
+namespace Snapshot
+
+variable {TxId : Type u} {CellId : Type v} {Nullifier : Type w} {Event : Type x}
+
+/-- The transaction that last wrote `cellId`'s root: the newest journal entry whose intent
+writes that cell (the journal is newest first). -/
+def lastWriter [DecidableEq CellId] (cellId : CellId) :
+    List (TxId × Intent TxId CellId Nullifier Event) -> Option TxId
+  | [] => none
+  | (recordedId, recorded) :: rest =>
+      if recorded.rootWrites.any (fun write => decide (write.cellId = cellId)) then
+        some recordedId
+      else lastWriter cellId rest
+
+/-- An install that writes `cellId` becomes its last writer. -/
+theorem lastWriter_install_writes [DecidableEq CellId] [DecidableEq Nullifier]
+    (before : Snapshot TxId CellId Nullifier Event)
+    (intent : Intent TxId CellId Nullifier Event) (cellId : CellId)
+    (writes : exists write, write ∈ intent.rootWrites /\ write.cellId = cellId) :
+    lastWriter cellId (install before intent).journal = some intent.transactionId := by
+  obtain ⟨write, mem, rfl⟩ := writes
+  have hit : intent.rootWrites.any (fun other => decide (other.cellId = write.cellId)) = true :=
+    List.any_eq_true.mpr ⟨write, mem, decide_eq_true rfl⟩
+  rw [install_journal]
+  simp [lastWriter, hit]
+
+/-- An install that does not write `cellId` leaves its last writer unchanged. -/
+theorem lastWriter_install_skips [DecidableEq CellId] [DecidableEq Nullifier]
+    (before : Snapshot TxId CellId Nullifier Event)
+    (intent : Intent TxId CellId Nullifier Event) (cellId : CellId)
+    (absent : forall write, write ∈ intent.rootWrites -> write.cellId ≠ cellId) :
+    lastWriter cellId (install before intent).journal = lastWriter cellId before.journal := by
+  have miss : intent.rootWrites.any (fun other => decide (other.cellId = cellId)) = false := by
+    rw [List.any_eq_false]
+    intro write mem
+    simpa using absent write mem
+  rw [install_journal]
+  simp [lastWriter, miss]
+
+/-- **Teeth: a split install has no single writer.** Two cells written by two transactions
+with different ids, the later one not touching the first cell, read different last writers. -/
+theorem lastWriter_split [DecidableEq CellId] [DecidableEq Nullifier]
+    (before : Snapshot TxId CellId Nullifier Event)
+    (first second : Intent TxId CellId Nullifier Event) (left right : CellId)
+    (firstWritesLeft : exists write, write ∈ first.rootWrites /\ write.cellId = left)
+    (secondWritesRight : exists write, write ∈ second.rootWrites /\ write.cellId = right)
+    (secondSkipsLeft : forall write, write ∈ second.rootWrites -> write.cellId ≠ left)
+    (different : first.transactionId ≠ second.transactionId) :
+    lastWriter left (install (install before first) second).journal ≠
+      lastWriter right (install (install before first) second).journal := by
+  rw [lastWriter_install_skips _ second left secondSkipsLeft,
+    lastWriter_install_writes _ first left firstWritesLeft,
+    lastWriter_install_writes _ second right secondWritesRight]
+  exact fun same => different (Option.some.inj same)
+
+end Snapshot
+
+namespace JointJournal
+
+variable {Incidence : Type z} [Fintype Incidence] [DecidableEq Incidence]
+variable {Nullifier : Type p} {Event : Type q} [DecidableEq Nullifier]
+
+/-- Leg `incidence` reads, from the durable journal, the transaction that last wrote its
+cell's root. -/
+def turnId (cells : MultiCellHyperedge.CellFamily.{u, v, w, z} Incidence)
+    (incidence : Incidence)
+    (state : Snapshot TypedAuthorization.Digest TypedAuthorization.Digest Nullifier Event) :
+    Option TypedAuthorization.Digest :=
+  Snapshot.lastWriter (cells.cellId incidence) state.journal
+
+/-- A durable intent writes the joint turn: it carries the declaration's turn id and writes
+every leg's cell root. -/
+structure WritesJointTurn
+    {cells : MultiCellHyperedge.CellFamily.{u, v, w, z} Incidence}
+    (declaration : MultiCellHyperedge.Declaration.{u, v, w, y, z} cells)
+    (intent : Intent TypedAuthorization.Digest TypedAuthorization.Digest Nullifier Event) :
+    Prop where
+  transactionExact : intent.transactionId = declaration.header.turnId
+  writesEveryLeg : forall incidence,
+    exists write, write ∈ intent.rootWrites /\ write.cellId = cells.cellId incidence
+
+/-- **The multi-cell commit as one wide-pullback turn over the durable journal.** Each leg
+starts from the durable snapshot `before`; the turn is the durable install of `intent`; leg
+`incidence`'s apex is the last writer of its cell root. `agree` holds because the one intent
+writes every leg under the declaration's turn id. `balanced` is the commit's resource
+equation. -/
+def toHyperedge
+    {cells : MultiCellHyperedge.CellFamily.{u, v, w, z} Incidence}
+    {declaration : MultiCellHyperedge.Declaration.{u, v, w, y, z} cells}
+    {Coordinate : Type y} {Balance : Type b} [AddCommMonoid Balance]
+    {law : MultiCellHyperedge.ResourceLaw.{u, v, w, y, z, b} declaration Coordinate Balance}
+    {accepted : declaration.AcceptedLegs}
+    {boundary : MultiCellHyperedge.HandlerBoundary.{u, v, w, y, z, h} declaration}
+    (commit : MultiCellHyperedge.Commit law accepted boundary)
+    (before : Snapshot TypedAuthorization.Digest TypedAuthorization.Digest Nullifier Event)
+    (intent : Intent TypedAuthorization.Digest TypedAuthorization.Digest Nullifier Event)
+    (writes : WritesJointTurn declaration intent) :
+    Hyperedge Incidence
+      (Snapshot TypedAuthorization.Digest TypedAuthorization.Digest Nullifier Event)
+      (Intent TypedAuthorization.Digest TypedAuthorization.Digest Nullifier Event)
+      (Option TypedAuthorization.Digest) (Coordinate -> Balance)
+      Snapshot.install (turnId cells)
+      (fun incidence _ _ => law.delta incidence (accepted incidence)) where
+  x := fun _ => before
+  t := intent
+  tid := some declaration.header.turnId
+  agree := fun incidence => by
+    simp only [turnId]
+    rw [Snapshot.lastWriter_install_writes before intent _ (writes.writesEveryLeg incidence),
+      writes.transactionExact]
+  balanced := by
+    funext coordinate
+    simpa only [MultiCellHyperedge.aggregateDelta, Finset.sum_apply, Pi.zero_apply] using
+      congrFun commit.aggregateBalanced coordinate
+
+/-- The deployed adapter writes the joint turn: `Intent.ofMultiCellWithOpaqueEvent` carries
+the declaration's turn id and one root write per incidence. -/
+theorem ofMultiCell_writesJointTurn
+    {cells : MultiCellHyperedge.CellFamily.{u, v, w, z} Incidence}
+    {declaration : MultiCellHyperedge.Declaration.{u, v, w, y, z} cells}
+    {Coordinate : Type y} {Balance : Type b} [AddCommMonoid Balance]
+    {law : MultiCellHyperedge.ResourceLaw.{u, v, w, y, z, b} declaration Coordinate Balance}
+    {accepted : declaration.AcceptedLegs}
+    {boundary : MultiCellHyperedge.HandlerBoundary.{u, v, w, y, z, h} declaration}
+    {EventT : Type q}
+    (commit : MultiCellHyperedge.Commit law accepted boundary) (event : EventT)
+    (bounded : BoundedMultiCellCommit commit EventT event)
+    (available : Charge)
+    (funding : ChargeReceipt available bounded.quote) :
+    WritesJointTurn declaration
+      (Intent.ofMultiCellWithOpaqueEvent commit event bounded available funding) :=
+  ⟨rfl, fun incidence =>
+    ⟨{ cellId := cells.cellId incidence
+       expectedPre := (declaration.pre incidence).root
+       exactPost := (commit.post incidence).root },
+      List.mem_map.mpr ⟨incidence, Finset.mem_toList.mpr (Finset.mem_univ incidence), rfl⟩,
+      rfl⟩⟩
+
+/-- **Teeth: two legs written by two different intents have no common apex.** If the first
+install writes leg `left` and the second writes leg `right` but not `left`, under different
+transaction ids, no apex id agrees with every leg after the second install. -/
+theorem split_install_no_apex
+    (cells : MultiCellHyperedge.CellFamily.{u, v, w, z} Incidence)
+    (before : Snapshot TypedAuthorization.Digest TypedAuthorization.Digest Nullifier Event)
+    (first second : Intent TypedAuthorization.Digest TypedAuthorization.Digest Nullifier Event)
+    (left right : Incidence)
+    (firstWritesLeft : exists write, write ∈ first.rootWrites /\ write.cellId = cells.cellId left)
+    (secondWritesRight :
+      exists write, write ∈ second.rootWrites /\ write.cellId = cells.cellId right)
+    (secondSkipsLeft : forall write, write ∈ second.rootWrites -> write.cellId ≠ cells.cellId left)
+    (different : first.transactionId ≠ second.transactionId)
+    (tid : Option TypedAuthorization.Digest) :
+    ¬ forall incidence,
+      turnId cells incidence (Snapshot.install (Snapshot.install before first) second) = tid :=
+  fun agree => Snapshot.lastWriter_split before first second _ _ firstWritesLeft
+    secondWritesRight secondSkipsLeft different ((agree left).trans (agree right).symm)
+
+end JointJournal
+
+/-! ### Computed poles of the journal reading
+
+Two cells, `0` and `1`. One joint intent writing both gives both the same last writer
+(satisfiable); the same two writes split over two intents give two last writers (teeth). -/
+
+namespace JointJournalPoles
+
+def write (cellId : Nat) : RootWrite Nat :=
+  { cellId := cellId, expectedPre := ⟨0⟩, exactPost := ⟨cellId + 1⟩ }
+
+def empty : Snapshot Nat Nat Nat Nat :=
+  { roots := fun _ => ⟨0⟩, consumed := fun _ => false, available := fun _ => 0,
+    history := [], journal := [] }
+
+def intentWriting (transactionId : Nat) (cells : List Nat) : Intent Nat Nat Nat Nat :=
+  { transactionId := transactionId, rootWrites := cells.map write, nullifiers := [],
+    exactCharge := fun _ => 0, event := transactionId }
+
+def joint : Snapshot Nat Nat Nat Nat := Snapshot.install empty (intentWriting 7 [0, 1])
+
+def splitInstall : Snapshot Nat Nat Nat Nat :=
+  Snapshot.install (Snapshot.install empty (intentWriting 7 [0])) (intentWriting 8 [1])
+
+theorem joint_one_writer :
+    Snapshot.lastWriter 0 joint.journal = some 7 ∧
+      Snapshot.lastWriter 1 joint.journal = some 7 := by decide
+
+theorem split_two_writers :
+    Snapshot.lastWriter 0 splitInstall.journal = some 7 ∧
+      Snapshot.lastWriter 1 splitInstall.journal = some 8 := by decide
+
+/-- The general split tooth fires on the computed instance. -/
+example :
+    Snapshot.lastWriter 0 splitInstall.journal ≠ Snapshot.lastWriter 1 splitInstall.journal :=
+  Snapshot.lastWriter_split empty (intentWriting 7 [0]) (intentWriting 8 [1]) 0 1
+    ⟨write 0, by decide, rfl⟩ ⟨write 1, by decide, rfl⟩ (by decide) (by decide)
+
+#assert_axioms joint_one_writer split_two_writers
+
+end JointJournalPoles
+
+#assert_axioms Snapshot.lastWriter_install_writes Snapshot.lastWriter_install_skips
+  Snapshot.lastWriter_split JointJournal.toHyperedge JointJournal.ofMultiCell_writesJointTurn
+  JointJournal.split_install_no_apex
+
 /-! ## Explicit physical implementation refinement premise -/
 
 /-- A real DB/network/filesystem handler refines this protocol only by

@@ -58,10 +58,11 @@ first.created.requestedByte = 7
 first.created.atom = inlineObject=true payload=[7]
 # The byte lines are relations to the run, never numbers: the call, the digests and ids it carries
 # and the values it writes are encoded at their natural width, so their lengths move by a few bytes
-# from run to run (Fixtures.NativeAcceptedFixtureProjection, `relativeToCall`, `storageRelation`).
-# The retained event is the signed call reframed for the log: the call's length plus a constant the
-# two codecs fix.
-first.event = call + 33
+# from run to run, and the ingress framing moves with the width of the semantics digest
+# (Fixtures.NativeAcceptedFixtureProjection, `eventRelation`, `storageRelation`).
+# The retained event is exactly the call's signed ingress: the deployment's domain, the semantics
+# and the signed command (DeclaredResourceController.signedBytes), nothing more.
+first.event = ingress
 # the World's legs, by operation (reads carry no bytes): the notes document writes its result and
 # allocates the created atom and the result atom; the pay cell allocates the subject's compute row
 first.legs = write, allocate, allocate; read, read, allocate

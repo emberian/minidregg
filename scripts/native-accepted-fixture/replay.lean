@@ -93,10 +93,10 @@ def main (args : List String) : IO UInt32 := do
         IO.println s!"ACCEPTED record={if record == host then "same" else "DIFFERENT"} root={root.value}"
         if doc then
           printProjection (projectDocWrite config.deployment command (IntentRecord.ofIntent intent)
-            (receiptSubjects accepted) call.length (recordLegs ground.view (IntentRecord.ofIntent intent)))
+            (receiptSubjects accepted) (signedBytes ground.authority.domain config.profile.semantics signed) (recordLegs ground.view (IntentRecord.ofIntent intent)))
         else
           printProjection (projectAccepted config.deployment command (IntentRecord.ofIntent intent)
-            (receiptSubjects accepted) call.length (recordLegs ground.view (IntentRecord.ofIntent intent)))
+            (receiptSubjects accepted) (signedBytes ground.authority.domain config.profile.semantics signed) (recordLegs ground.view (IntentRecord.ofIntent intent)))
         return 0
     else
       IO.println "REFUSED physicalPreparation"

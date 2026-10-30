@@ -249,15 +249,15 @@ def authority : List NativeAcceptedFixtureProjection.Line :=
 
 open Minidregg.Fixtures.NativeAcceptedFixtureProjection in
 /-- The re-run's projection, its record passed through `alter` first: the accepted call's
-record and receipts (its run-dependent storage lane relative to the call's length), then
+record and receipts (its run-dependent byte lanes relative to the run), then
 the refused call's verdict. -/
 def projectionRunWith (alter : IntentRecord → IntentRecord) :
     Option (List NativeAcceptedFixtureProjection.Line) := do
-  let ⟨_, run⟩ ← firstRun
+  let ⟨signed, run⟩ ← firstRun
   let reason ← refusedRun
   pure (projectAccepted config.deployment run.command
       (alter (IntentRecord.ofIntent (run.accepted.dataIntent run.shape))) (receiptSubjects run.accepted)
-      (hexBytes firstCallHex).length
+      (signedBytes run.ground.authority.domain config.profile.semantics signed)
       (recordLegs run.ground.view (IntentRecord.ofIntent (run.accepted.dataIntent run.shape))) ++
     projectRefused (reasonName (reprStr reason)))
 
@@ -278,7 +278,7 @@ def bumped (lane : Theory.ResourceCost.Lane) (record : IntentRecord) : IntentRec
       if other = lane then record.exactCharge other + 1 else record.exactCharge other }
 
 /-- **Teeth of the relational storage line.** The authority states the storage lane as its
-relation to the call (`call + k`), not as a number; a record whose storage is one byte off
+relation to the run (`event + legs`), not as a number; a record whose storage is one byte off
 that relation is refused. -/
 theorem storage_off_by_one_refused :
     projectionRunWith (bumped .storageBytes) ≠ some authority := by native_decide

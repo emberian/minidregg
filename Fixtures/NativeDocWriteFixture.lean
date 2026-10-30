@@ -173,13 +173,13 @@ def authority : List NativeAcceptedFixtureProjection.Line :=
   parseAuthority NativeDocWriteFixtureAuthority.text
 
 /-- The re-run's projection of the accepted write, its record passed through `alter` first
-(the run-dependent lanes relative to the call's length). -/
+(the run-dependent byte lanes relative to the run). -/
 def projectionRunWith (alter : IntentRecord → IntentRecord) :
     Option (List NativeAcceptedFixtureProjection.Line) := do
-  let ⟨_, run⟩ ← writeRun
+  let ⟨signed, run⟩ ← writeRun
   pure (projectDocWrite config.deployment run.command
     (alter (IntentRecord.ofIntent (run.accepted.dataIntent run.shape))) (receiptSubjects run.accepted)
-    (hexBytes callHex).length
+    (signedBytes run.ground.authority.domain config.profile.semantics signed)
     (NativeAcceptedFixtureProjection.recordLegs run.ground.view
       (IntentRecord.ofIntent (run.accepted.dataIntent run.shape))))
 
@@ -198,8 +198,8 @@ def bumped (lane : Theory.ResourceCost.Lane) (record : IntentRecord) : IntentRec
       if other = lane then record.exactCharge other + 1 else record.exactCharge other }
 
 /-- **Teeth of the relational byte lines.** The authority states the turn and storage lanes as
-their relations to the call (`call + k`), not as numbers; a record whose turn bytes, or whose
-storage, is one byte off that relation is refused. -/
+their relations to the run (`ingress`, `event + legs`), not as numbers; a record whose turn
+bytes, or whose storage, is one byte off that relation is refused. -/
 theorem turn_off_by_one_refused :
     projectionRunWith (bumped .turnBytes) ≠ some authority := by native_decide
 

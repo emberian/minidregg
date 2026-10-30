@@ -540,71 +540,10 @@ noncomputable def nullifiers (commit : Commit law accepted boundary) :
     List (JointNullifier accepted) :=
   jointNullifiers accepted
 
-/-! ### Projection to the abstract wide pullback -/
-
-/-- A dependent carrier keeps each heterogeneous cell in its own layout while
-retaining the joint apex installed by the logical step. -/
-structure Carrier where
-  incidence : Incidence
-  state : CellState.Materialized (cells.materializer incidence)
-  jointApex : Digest
-
-def step (state : Carrier (cells := cells))
-    (turn : Commit law accepted boundary) : Carrier (cells := cells) where
-  incidence := state.incidence
-  state := turn.post state.incidence
-  jointApex := declaration.header.apex
-
-def turnId (_incidence : Incidence) (state : Carrier (cells := cells)) : Digest :=
-  state.jointApex
-
-def halfEdge (incidence : Incidence) (_state : Carrier (cells := cells))
-    (turn : Commit law accepted boundary) : Coordinate -> Balance :=
-  law.delta incidence (accepted incidence)
-
-abbrev SemanticHyperedge (commit : Commit law accepted boundary) :=
-  Hyperedge
-    Incidence
-    (ULift.{max u v w y z b h, max u v w z}
-      (Carrier (cells := cells)))
-    (ULift.{max u v w y z b h, max u v w y z b h}
-      (Commit law accepted boundary))
-    (ULift.{max u v w y z b h, 0} Digest)
-    (ULift.{max u v w y z b h, max y b} (Coordinate -> Balance))
-    (fun state turn =>
-      ⟨{ incidence := state.down.incidence
-         state := turn.down.post state.down.incidence
-         jointApex := declaration.header.apex }⟩)
-    (fun _incidence state => ⟨state.down.jointApex⟩)
-    (fun incidence _state _turn =>
-      ⟨law.delta incidence (accepted incidence)⟩)
-
-/-- The heterogeneous accepted family is one flat wide-pullback turn.  Each
-incidence steps its own canonical cell; all observe the one joint apex. -/
-def toHyperedge (commit : Commit law accepted boundary) :
-    SemanticHyperedge commit where
-  x := fun incidence =>
-    ⟨{ incidence := incidence
-       state := declaration.pre incidence
-       jointApex := declaration.header.turnId }⟩
-  t := ⟨commit⟩
-  tid := ⟨declaration.header.apex⟩
-  agree := by
-    intro incidence
-    rfl
-  balanced := by
-    apply (AddEquiv.ulift :
-      ULift.{max u v w y z b h, max y b} (Coordinate -> Balance) ≃+
-        (Coordinate -> Balance)).injective
-    rw [map_sum]
-    funext coordinate
-    simpa only [aggregateDelta, Finset.sum_apply, Pi.zero_apply] using
-      congrFun commit.aggregateBalanced coordinate
-
-@[simp] theorem hyperedge_pre_state (commit : Commit law accepted boundary)
-    (incidence : Incidence) :
-    (commit.toHyperedge.x incidence).down.state = declaration.pre incidence :=
-  rfl
+/- The wide-pullback reading of a commit is `DurableCommitProtocol.JointJournal.toHyperedge`:
+each leg's turn id is read from the durable journal (the transaction that last wrote that
+leg's cell root), so agreement says every leg was written by the one joint intent. This
+module holds no durable state, so it states no apex agreement of its own. -/
 
 end Commit
 
@@ -723,8 +662,6 @@ theorem no_commit_of_conflicting_cell
 #guard_msgs (whitespace := lax) in #print axioms PreparedTuple.declaration_source_exact
 /-- info: 'Minidregg.Kernel.MultiCellHyperedge.PreparedTuple.declaration_joint_identity_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms PreparedTuple.declaration_joint_identity_exact
-/-- info: 'Minidregg.Kernel.MultiCellHyperedge.Commit.toHyperedge' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Commit.toHyperedge
 /-- info: 'Minidregg.Kernel.MultiCellHyperedge.Admission.rejected_atomic' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Admission.rejected_atomic
 /-- info: 'Minidregg.Kernel.MultiCellHyperedge.binaryCommit' depends on axioms: [propext, Classical.choice, Quot.sound] -/

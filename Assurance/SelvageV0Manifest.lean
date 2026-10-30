@@ -1235,12 +1235,16 @@ theorem manifest_leaky_step_leaks :
 /-! ## §12. Deployment hardening — grinding adversaries, hidden witnesses -/
 
 /-- **`lightClientGrinding_sound`** (`Selvage/LightClientGrinding.lean`,
-[LC-fs-adaptive] CLOSED) — **THE GRINDING HEADLINE**: the FS light client
-against an adversary issuing `t` oracle queries and choosing its chain
-AFTER seeing the answers forges with probability at most
-`(t + n)·[n·(err⋆(δ) + 1/|F|)]` — the WARP grinding factor scaling the
-fixed-chain bound. Residual: `[LC-grinding-native]` (transporting the
-`n`-sharper native per-round accounting into this event vocabulary). -/
+[LC-fs-adaptive] PARTIAL: adaptive in the output chain; the query sequence is
+fixed before the oracle answers; adaptive (tree) query strategies are owed) —
+**THE GRINDING HEADLINE, at that scope**: the FS light client against an
+adversary that issues a duplicate-free list of `t` oracle queries, fixed before
+any answer, and chooses its chain AFTER seeing the answers, forges with
+probability at most `(t + n)·[n·(err⋆(δ) + 1/|F|)]` — the WARP grinding factor
+scaling the fixed-chain bound. An adversary whose query `k+1` depends on answer
+`k` is NOT covered. Residuals: the adaptive-query strategies (owed), and
+`[LC-grinding-native]` (transporting the `n`-sharper native per-round
+accounting of `accFsSound_native` into this event vocabulary). -/
 theorem manifest_lightClientGrinding_sound {Root ι F : Type} [Field F] {r : ℕ}
     (foldRoot : Root → F → Root → Root)
     [Fintype ι] [DecidableEq ι] [DecidableEq F] [Fintype F] [Nonempty ι]
@@ -1346,9 +1350,11 @@ consolidation §§8–12 index:
   by `accFsSound_native`, which BUILDS the literal WARP-Def-4.2 instance on
   the accumulator's own reduction. The BCS root-and-columns re-packaging is
   `[ACC-rbr-bcs]`, beyond v0.
-* **`[LC-fs-adaptive]`** — CLOSED by `lightClientGrinding_sound` at the
-  `(t+n)`-scaled bound; `phantomGrind_beats_fixed_bound` is the tooth that
-  the try-count factor is necessary.
+* **`[LC-fs-adaptive]`** — PARTIAL: `lightClientGrinding_sound` gives the
+  `(t+n)`-scaled bound for an adversary adaptive in the output chain whose
+  query sequence is fixed before the oracle answers;
+  `phantomGrind_beats_fixed_bound` is the tooth that the try-count factor is
+  necessary. Adaptive (tree) query strategies are owed.
 * **`[SC-reshape]`** — DISCHARGED: the MLE realizer is BUILT
   (`MultilinearExtension`; `mle_retires_constraint`, consumed by the
   arithmetization apex).

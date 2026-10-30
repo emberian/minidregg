@@ -225,6 +225,40 @@ theorem erased_nullifiers_nodup : intent.erase.nullifiers.Nodup := by
   change (commit.nullifiers.map stableNullifier).Nodup
   exact publication_nullifiers_nodup.map stableNullifier_injective
 
+/-! ## The publication as one turn over the durable journal
+
+Premise inhabitation for `DurableCommitProtocol.JointJournal.toHyperedge`: the concrete link
+publication's erased durable intent carries the header's turn id and writes both legs' cells,
+so after its install each leg's last writer is that one transaction. -/
+
+theorem intent_writesJointTurn :
+    JointJournal.WritesJointTurn
+      (HyperdocumentPublication.declaration linkAccepted eventAccepted header
+        contentCellId eventCellId) intent.erase where
+  transactionExact := rfl
+  writesEveryLeg := by
+    intro incidence
+    cases incidence
+    · exact ⟨{ cellId := contentCellId
+               expectedPre := genesisPost.root
+               exactPost := (commit.post .content).root },
+        by simp [DataIntent.erase_rootWrites, intent_payloads_exact], rfl⟩
+    · exact ⟨{ cellId := eventCellId
+               expectedPre := eventAccepted.accepted.prepared.preRoot
+               exactPost := (commit.post .eventLog).root },
+        by simp [DataIntent.erase_rootWrites, intent_payloads_exact], rfl⟩
+
+/-- The publication read as one wide-pullback turn: both legs start from the checkpoint and
+read, after the install, the same last writer. -/
+noncomputable def journalHyperedge :=
+  JointJournal.toHyperedge commit checkpointModel intent.erase intent_writesJointTurn
+
+theorem journalHyperedge_tid : journalHyperedge.tid = some header.turnId := rfl
+
+/-- `Hyperedge.legs_agree` fires on the publication: the content leg and the event-log leg
+read the same last writer from the journal. -/
+example := journalHyperedge.legs_agree .content .eventLog
+
 @[simp] theorem erased_roots_match :
     intent.erase.rootsMatchCheck checkpoint.model = true := by
   rw [Intent.rootsMatchCheck_eq_true_iff]

@@ -15,7 +15,7 @@ at that root plus one refuses.
 **Evaluated natively (law 9, confessed).** Every root on the path is a cSHAKE digest, and
 kernel evaluation costs about 0.13 s per hashed byte (measured on hbox, 2026-10-28). So the
 poles are decided by `native_decide`. Lean 4.30 records each native evaluation as its own
-auxiliary axiom (`…._native.native_decide.ax_…`), and the pin at the end names exactly those two. It lives in
+auxiliary axiom (`…._native.native_decide.ax_…`), and the pin at the end names exactly those. It lives in
 `Fixtures`, which no keystone module, umbrella or axiom census imports. The umbrella target
 list builds `Fixtures` (`scripts/pipeline/umbrella-targets`), so the merge gate elaborates
 this file and checks its pin (audit pass 24). `scripts/kn2/neutral-birth.lean` remains the end-to-end run against a
@@ -183,7 +183,38 @@ theorem plan_refuses_inhabited :
       pending.factoryVerdict = some false :=
   inhabited_of_verdict _ refuse_verdict
 
-/-! ## The axiom pin: the standard three plus exactly the two native evaluations. -/
+/-! ## The deny-if-credential law on the real plan path
+
+`not (witnessed vk)` reads "refuse when credential `vk` is presented". First-party `eval` fails a
+`witnessed` leaf closed, so its negation is true on every step, and before
+`Compiler.supported_no_witnessed` this factory law admitted every birth. The plan path now
+refuses it: the leaf is outside `supported`, so `planVerdict` is false. -/
+
+/-- The deny-if-credential factory law. -/
+def denyIfCredentialLaw : Minidregg.Pred.Pred := .not (.witnessed ⟨"vk"⟩)
+
+/-- The fail-open reading that the refusal closes: first-party `eval` admits this step. -/
+example : Minidregg.Pred.eval denyIfCredentialLaw ⟨[]⟩ ⟨[]⟩ = true := by decide
+
+theorem witnessed_verdict : verdictIs false (pendingOf denyIfCredentialLaw) = true := by
+  native_decide
+
+/-- **Teeth for the `witnessed` refusal at birth admission (audit: Pred.witnessed).** The
+concrete `Pending` whose factory law is `not (witnessed vk)` has verdict `some false`: the
+deny-if-credential rule no longer admits everyone (`PlanRefusalSound` then empties its factory
+branch). -/
+theorem plan_refuses_witnessed_inhabited :
+    ∃ (config : NativeHost.Config) (pins : FactoryPins)
+      (durable : ResourceBirthController.Concrete.Durable)
+      (descriptor : Descriptor ResourceBirthController.Concrete.Registry) (height : Height)
+      (prepared : ResourceBirthController.Concrete.PreparedBirth config.profile.compilerProfile
+        config.deployment pins durable descriptor)
+      (pending : ResourceBirthPolicyController.Concrete.Pending (profile := config.profile)
+        prepared height),
+      pending.factoryVerdict = some false :=
+  inhabited_of_verdict _ witnessed_verdict
+
+/-! ## The axiom pin: the standard three plus exactly the native evaluations. -/
 
 /--
 info: 'Minidregg.Fixtures.BirthPlanPoles.plan_passes_inhabited' depends on axioms: [propext,
@@ -200,5 +231,13 @@ info: 'Minidregg.Fixtures.BirthPlanPoles.plan_refuses_inhabited' depends on axio
  refuse_verdict._native.native_decide.ax_1_1]
 -/
 #guard_msgs (whitespace := lax) in #print axioms plan_refuses_inhabited
+
+/--
+info: 'Minidregg.Fixtures.BirthPlanPoles.plan_refuses_witnessed_inhabited' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ witnessed_verdict._native.native_decide.ax_1_1]
+-/
+#guard_msgs (whitespace := lax) in #print axioms plan_refuses_witnessed_inhabited
 
 end Minidregg.Fixtures.BirthPlanPoles

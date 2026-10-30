@@ -720,6 +720,66 @@ theorem Installed.source_supported [DecidableEq F]
     Minidregg.Compiler.supported profile.compilerProfile.compiler installed.prepared.declaration.source.predicate = true :=
   installed.accepted.modeEvidence.ready.supported
 
+/-- **No installed policy contains a `witnessed` leaf.** The leaf has no discharge on the
+deployed path, so under negation it would admit every step; `supported` refuses it at every
+depth (`Compiler.supported_no_witnessed`), and installation requires `supported`. -/
+theorem Ready.no_witnessed {profile : RuntimeProfile F} {snapshot : Snapshot}
+    {declaration : Declaration} (ready : Ready profile snapshot declaration) :
+    mentionsWitnessed declaration.source.predicate = false :=
+  supported_no_witnessed _ _ ready.supported
+
+theorem Installed.source_no_witnessed [DecidableEq F]
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {markers : Nat → Option Bool} {context : RequestContext} {store : PayloadStore}
+    (installed : Installed profile snapshot markers context store) :
+    mentionsWitnessed installed.prepared.declaration.source.predicate = false :=
+  supported_no_witnessed _ _ installed.source_supported
+
+/-- Teeth at install: a declaration whose predicate mentions `witnessed` (for instance
+`not (witnessed vk)`) is never ready, and once its root, head, domain and semantics match
+it is refused by name, `unsupportedPolicy`. -/
+theorem checkReady_witnessed_never_ok (profile : RuntimeProfile F) (snapshot : Snapshot)
+    (declaration : Declaration)
+    (witnessed : mentionsWitnessed declaration.source.predicate = true)
+    (update : ReadyUpdate profile snapshot declaration) : False := by
+  have := update.ready.no_witnessed
+  rw [witnessed] at this
+  cases this
+
+theorem checkReady_witnessed_unsupported (profile : RuntimeProfile F) (snapshot : Snapshot)
+    (declaration : Declaration)
+    (rootExact : declaration.expectedPreRoot = snapshot.cell.root)
+    (headExact : snapshot.currentHead declaration.source.policyId = declaration.expected)
+    (domainExact : declaration.source.domain = snapshot.domain)
+    (semanticsExact : declaration.source.semantics = profile.semantics)
+    (witnessed : mentionsWitnessed declaration.source.predicate = true) :
+    checkReady profile snapshot declaration = .error .unsupportedPolicy := by
+  simp [checkReady, rootExact, headExact, domainExact, semanticsExact,
+    unsupported_of_mentionsWitnessed profile.compilerProfile.compiler witnessed]
+
+/-- The deny-if-credential declaration over `snapshot`: "refuse when credential `vk` is
+presented", at the snapshot's own root, head, domain and the profile's semantics. -/
+def denyIfCredential (profile : RuntimeProfile F) (snapshot : Snapshot) (policyId : PolicyId)
+    (version : PolicyRevision) (vk : Minidregg.Pred.Vk) : Declaration where
+  expectedPreRoot := snapshot.cell.root
+  expected := snapshot.currentHead policyId
+  nonce := 0
+  source :=
+    { policyId := policyId, version := version, domain := snapshot.domain,
+      semantics := profile.semantics, previous := none,
+      predicate := .not (.witnessed vk) }
+
+/-- Premise inhabitation for `checkReady_witnessed_unsupported`: on EVERY snapshot and profile
+the deny-if-credential declaration meets the root, head, domain and semantics premises, so the
+install path reaches the refusal and names it. -/
+theorem checkReady_denyIfCredential (profile : RuntimeProfile F) (snapshot : Snapshot)
+    (policyId : PolicyId) (version : PolicyRevision) (vk : Minidregg.Pred.Vk) :
+    checkReady profile snapshot (denyIfCredential profile snapshot policyId version vk) =
+      .error .unsupportedPolicy :=
+  checkReady_witnessed_unsupported profile snapshot _ rfl rfl rfl rfl rfl
+
+#assert_axioms Ready.no_witnessed Installed.source_no_witnessed checkReady_witnessed_never_ok
+  checkReady_witnessed_unsupported checkReady_denyIfCredential
+
 /-- info: 'Minidregg.Kernel.PolicyInstallController.Installed.old_policy_evaluated' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Installed.old_policy_evaluated
 /-- info: 'Minidregg.Kernel.PolicyInstallController.Installed.source_selected_in_post' depends on axioms: [propext, Classical.choice, Quot.sound] -/
