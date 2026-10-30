@@ -60,6 +60,9 @@ printf 'verdict\tstep\texpected\tobserved\n' >"$ROWS"
 PASS=0 TOTAL=0
 CONTROL=$(jq -r .factoryControllerCapability "$JOURNEY_WORLD/genesis.json")
 CLOCK_WS=$JOURNEY_WORLD/clock
+# The operator's checkpoint timer, run inline: the long phases below spend the Store's tail (L = 256)
+# faster than journey.sh's between-step certify keeps up with, so each certifies the head first.
+certify() { "$MINI" checkpoint --action certify --workspace "$SPONSOR_WS" --control "$CONTROL" --min-tail 1 >"$D/certify-$1.out" 2>"$D/certify-$1.err"; }
 OBSERVER_WS=$JOURNEY_WORLD/observer
 ORIGIN=$(jq -er .clockGenesisNow "$JOURNEY_WORLD/genesis.json")
 BOUND=$(jq -er .clockMaxStepSeconds "$JOURNEY_WORLD/genesis.json")
@@ -258,6 +261,7 @@ row "a tick whose reply is lost, then the next run" "1 attempt held; next run re
   "abandoned=$(jq -r .type "$D/tlost.out" 2>/dev/null) held=$held retained=$replayed next=$(jq -r .confirmation "$D/tnext.out" 2>/dev/null) now=$(now_of v5) left=$(attempt_dirs "$CLOCK_WS")" \
   "$([ "$(jq -r .type "$D/tlost.out")" = abandoned ] && [ "$held" = 1 ] && [ "$replayed" = replayed ] && [ "$(rc tnext)" = 0 ] && [ "$(now_of v5)" = $((base + 1)) ] && [ "$(attempt_dirs "$CLOCK_WS")" = 0 ]; echo $?)"
 
+certify before-200
 lines0=$(journal_lines "$CLOCK_WS"); failed=0; maxheld=0; t0=$(date +%s)
 for i in $(seq 1 200); do
   "$MINI" clock --action tick --workspace "$CLOCK_WS" --now $((base + 1 + i)) >"$D/t200x.out" 2>"$D/t200x.err" || failed=$((failed + 1))
@@ -269,6 +273,7 @@ row "200 ephemeral ticks by the clock subject" "200 confirmed; at most 1 attempt
   "failed=$failed maxHeld=$maxheld left=$(attempt_dirs "$CLOCK_WS") journal=+$lines now=$(now_of v6) ($(( $(date +%s) - t0 )) s)" \
   "$([ $failed = 0 ] && [ "$maxheld" -le 1 ] && [ "$(attempt_dirs "$CLOCK_WS")" = 0 ] && [ $lines = 200 ] && [ "$(now_of v6)" = $((base + 201)) ]; echo $?)"
 
+certify before-race
 # A tick pins the authority root it observed; births move that root. Ticks run while the
 # sponsor births resources: each tick re-observes on staleAuthority/staleClock within its run
 # (clock.rs, the client re-plan loop), so every tick confirms; staleRefusals counts the races it met.
