@@ -45,6 +45,7 @@ another until a real batch has accumulated. Rehearsal 3 ships be4ef7510 with the
 | proofs (Opus) | af4b3ea612564dea5 | umbrella reds, statement fixes, accepted-fixture re-records |
 | app-reds (Sonnet) | a17f4172949caca14 | app packages and declarations, Hummingbird, grain-runtime app tests |
 | iteration speed (Opus) | a141a9c535501bbd7 | Lean v4.30.0 -> v4.35.0 bump, then codec/store/world-root seams, lane-tree warm pool, hot-swap; will provide a second-tree umbrella stage |
+| private cells (Opus) | a74ad8d84ada5627a | receipt-fingerprint leak first, then the O(log n) blinded-cell hiding (docs/RATCHET-LOG-DESIGN.md; Prop-only draft Kernel/BlindedCellHiding.lean, merged 20d3cd965, not imported by any lake target: lean_lib roots are the umbrella modules only) |
 | SPK freshening | a58fcf100f4438710 | queue complete (all FEATURED repacks landed) |
 
 ## Lean 4.35 bump protocol (what is held)
@@ -114,6 +115,7 @@ ofReduceBool, trustCompiler or new axioms are not), what replaced native_decide 
   accepted fixture automatically whenever the Objective front-end identity changes, the Authority-Change commit staying
   reviewed (proofs implements it with the integrator: a build stage or a pre-candidate step that re-records from the
   candidate just built and proposes the Authority-Change commit for review).
+- scripts/check-proof-hygiene.sh fails on scripts/oracle-cold-replay-budget.lean:55 (bare `#print axioms`); owner: proofs.
 - PredCompile.lean:832 comment cites the wrong theorem name (proofs, next batch).
 
 ## Rules
