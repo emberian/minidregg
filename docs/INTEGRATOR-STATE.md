@@ -13,10 +13,16 @@ tour + j14-apps on hbox gate12, composed (all phases, distinct mode) on infra's 
 connector, residents, restart, store-restart all PASS. hbox gate12: tour 73/73, j14-apps PASS (5 rows), enrol-resume PASS,
 flatness-get PASS; flatness-submit FAIL (reported, not blocking). Confirmed to infra a104b94c2643e9c5d, which ships
 rehearsal 3 from be4ef7510 (demo-mini.sh ship on forge, market adopt set 22 packages) and reports smoke + URL.
-Ship status: ship, pins, health, members, apps bootstrap, reenroll, grain-world, hermes preflight/route/subjects GREEN on
-forge. hermes.room red: install-hermes as_member had no HOME (consent anchors); fixed on main 1447b883f (deploy script
-only; ruling: binaries, composed and tour/j14 verdicts of be4ef7510 stand, no composed rerun). Infra runs the fixed
-script against the be4ef7510 ship and keeps walking (market adopt, seed, door, public) for further reds.
+Ship status (be4ef7510 on forge, world kept, ssh demo-dry): GREEN ship, pins, health, members, apps bootstrap, reenroll,
+grain-world, hermes preflight/route/subjects, seed (rooms, docs, grants, story/GM/narrate, bend, welcome, public reader),
+door stranger/invite/lobby, public cold/first/warm; https://demo.dregg.online/ = 200 in 2.3 s. Smoke (a) door, (b) story,
+(e) public green; (c) apps install and (d) Hermes lobby red:
+- hermes.room: HOME fix 1447b883f got past consent anchors; now the lobby-index law `subject == A` refuses house
+  (A=15415858564414735804 recorded, signer 11760394916816638647). Likely stale subject-founder.json after `reenroll`
+  (step_subjects marked done). Infra probing; fix is install-hermes re-reading the founder's whoami each run.
+- apps install: EtherCalc da9d64ca and Hacker Slides f0277a5d "Not a directory (os error 20)", Etherpad e6d71fa0 "SPK
+  exceeds decoded bound" (seed.log 27-29, walk-be4ef751074c-20261030T1917). App-reds a17f4172949caca14 owns.
+Ruling: deploy-script fixes keep be4ef7510's verdicts (no composed rerun); a Rust fix means a new cut.
 The restart `continuous` red was the resident's own output document moving its maintenance revision; be4ef7510's
 maintenance_fingerprint leaves out documents the resident writes.
 
