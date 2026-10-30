@@ -40,8 +40,9 @@ door stranger/invite/lobby, public cold/first/warm; https://demo.dregg.online/ =
   (c) apps in flight (EtherCalc, Etherpad accepted after config hotpatch + refusals cleared + frame's missing
   dbus-user-session; Etherpad earlier hit op66-plan "launch BEGIN authorization, descriptor or action shape refused";
   Hacker Slides not in quarantine: seed may still use the old appId instead of reveal.js); (d) Hermes RED: with the
-  namespace hotfix, hermes.create now fails "current birth Host reply has the wrong opcode or intent bound" (8
-  generations, no signed call retained). Both product reds to app-reds a17f4172949caca14.
+  namespace hotfix, hermes.create hit "op 91: resource birth target already present": world state (the 20:54 birth had
+  completed, then lobby/g/create was removed); recover by restoring that dir or a fresh BASE; 659301aa4 (staging) names
+  the NO_RECORD refusal and stops at once. Both product reds to app-reds a17f4172949caca14.
 Ruling: deploy-script fixes keep be4ef7510's verdicts (no composed rerun); a Rust fix means a new cut.
 The restart `continuous` red was the resident's own output document moving its maintenance revision; be4ef7510's
 maintenance_fingerprint leaves out documents the resident writes.
