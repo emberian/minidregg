@@ -980,7 +980,17 @@ inductive Error where
   | authorityEntries
   | cellLaws
   | physicalAuthority
+  /-- A genesis law (the factory predicate or an enrollment's account predicate) names
+  `witnessed`, which no host discharges: refused by name (design law 10) rather than a world
+  whose factory refuses every birth. -/
+  | witnessedLaw
   deriving DecidableEq, Repr
+
+/-- Some genesis law names `witnessed` at any depth (`Compiler.mentionsWitnessed`). -/
+def Config.mentionsWitnessed (config : Config) : Bool :=
+  Minidregg.Compiler.mentionsWitnessed config.factoryPredicate ||
+    config.enrollments.any fun enrollment =>
+      Minidregg.Compiler.mentionsWitnessed enrollment.accountPredicate
 
 /-- Source derivation followed by the actual receiving checks. A profile
 disagreement, duplicate enrollment or physical collision refuses before a
@@ -988,6 +998,7 @@ native write can be requested. -/
 def build {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
     (config : Config) : Except Error (Built profile config) := do
   if valid : config.Valid profile then
+    if config.mentionsWitnessed then throw .witnessedLaw
     if !decide ((entries profile config).map Sigma.fst).Nodup then
       throw .authorityEntries
     let authorityCell := materialize CredentialAuthorityCell.materializer (authorityStore profile config)
@@ -1008,6 +1019,29 @@ theorem invalid_configuration_refused {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config)
     (invalid : ¬config.Valid profile) : build profile config = .error .configuration := by
   simp [build, invalid]
+
+/-- **A genesis law naming `witnessed` is refused by name.** Every install and admission path
+refuses the leaf (`Compiler.supported_no_witnessed`), so a world born with it would refuse every
+birth its factory law judges; genesis refuses it instead (`witnessedLaw`). Teeth and premise
+inhabitation: `Fixtures.BirthPlanPoles.genesis_refuses_witnessed` (a valid genesis whose factory
+law is `not (witnessed vk)`). -/
+theorem witnessed_law_refused {F : Type} [Field F]
+    (profile : CanonicalRuntimeProfile.Profile F) (config : Config)
+    (valid : config.Valid profile) (witnessed : config.mentionsWitnessed = true) :
+    build profile config = .error .witnessedLaw := by
+  simp [build, valid, witnessed, throw, throwThe, MonadExceptOf.throw, bind, Except.bind]
+
+/-- A built genesis carries no law naming `witnessed`. -/
+theorem Built.no_witnessed {F : Type} [Field F]
+    {profile : CanonicalRuntimeProfile.Profile F} {config : Config} {built : Built profile config}
+    (ok : build profile config = .ok built) : config.mentionsWitnessed = false := by
+  cases witnessed : config.mentionsWitnessed
+  · rfl
+  · have valid : config.Valid profile := built.configured
+    rw [witnessed_law_refused profile config valid witnessed] at ok
+    cases ok
+
+#assert_axioms witnessed_law_refused Built.no_witnessed
 
 theorem incompatible_profile_refused {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config)

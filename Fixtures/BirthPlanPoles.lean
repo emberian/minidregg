@@ -183,12 +183,12 @@ theorem plan_refuses_inhabited :
       pending.factoryVerdict = some false :=
   inhabited_of_verdict _ refuse_verdict
 
-/-! ## The deny-if-credential law on the real plan path
+/-! ## The deny-if-credential law at genesis
 
 `not (witnessed vk)` reads "refuse when credential `vk` is presented". First-party `eval` fails a
-`witnessed` leaf closed, so its negation is true on every step, and before
-`Compiler.supported_no_witnessed` this factory law admitted every birth. The plan path now
-refuses it: the leaf is outside `supported`, so `planVerdict` is false. -/
+`witnessed` leaf closed, so its negation is true on every step: before
+`Compiler.supported_no_witnessed` this factory law admitted every birth, and with that refusal
+alone the world's factory would refuse every birth. Genesis now refuses the law by name. -/
 
 /-- The deny-if-credential factory law. -/
 def denyIfCredentialLaw : Minidregg.Pred.Pred := .not (.witnessed ⟨"vk"⟩)
@@ -196,23 +196,19 @@ def denyIfCredentialLaw : Minidregg.Pred.Pred := .not (.witnessed ⟨"vk"⟩)
 /-- The fail-open reading that the refusal closes: first-party `eval` admits this step. -/
 example : Minidregg.Pred.eval denyIfCredentialLaw ⟨[]⟩ ⟨[]⟩ = true := by decide
 
-theorem witnessed_verdict : verdictIs false (pendingOf denyIfCredentialLaw) = true := by
-  native_decide
+/-- Whether genesis refused with `witnessedLaw`. -/
+def refusedWitnessed {α : Type} : Except NativeHostGenesis.Error α → Bool
+  | .error .witnessedLaw => true
+  | _ => false
 
-/-- **Teeth for the `witnessed` refusal at birth admission (audit: Pred.witnessed).** The
-concrete `Pending` whose factory law is `not (witnessed vk)` has verdict `some false`: the
-deny-if-credential rule no longer admits everyone (`PlanRefusalSound` then empties its factory
-branch). -/
-theorem plan_refuses_witnessed_inhabited :
-    ∃ (config : NativeHost.Config) (pins : FactoryPins)
-      (durable : ResourceBirthController.Concrete.Durable)
-      (descriptor : Descriptor ResourceBirthController.Concrete.Registry) (height : Height)
-      (prepared : ResourceBirthController.Concrete.PreparedBirth config.profile.compilerProfile
-        config.deployment pins durable descriptor)
-      (pending : ResourceBirthPolicyController.Concrete.Pending (profile := config.profile)
-        prepared height),
-      pending.factoryVerdict = some false :=
-  inhabited_of_verdict _ witnessed_verdict
+/-- **Teeth and premise inhabitation for `NativeHostGenesis.witnessed_law_refused` (audit:
+Pred.witnessed).** The same genesis that births the plan poles (a valid configuration:
+`pass_verdict` opens it with `passLaw`), with the deny-if-credential factory law, is refused by
+name. -/
+theorem genesis_refuses_witnessed :
+    refusedWitnessed (NativeHostGenesis.build hostTemplate.profile (genesis denyIfCredentialLaw)) =
+      true := by
+  native_decide
 
 /-! ## The axiom pin: the standard three plus exactly the native evaluations. -/
 
@@ -233,11 +229,11 @@ info: 'Minidregg.Fixtures.BirthPlanPoles.plan_refuses_inhabited' depends on axio
 #guard_msgs (whitespace := lax) in #print axioms plan_refuses_inhabited
 
 /--
-info: 'Minidregg.Fixtures.BirthPlanPoles.plan_refuses_witnessed_inhabited' depends on axioms: [propext,
+info: 'Minidregg.Fixtures.BirthPlanPoles.genesis_refuses_witnessed' depends on axioms: [propext,
  Classical.choice,
  Quot.sound,
- witnessed_verdict._native.native_decide.ax_1_1]
+ genesis_refuses_witnessed._native.native_decide.ax_1_1]
 -/
-#guard_msgs (whitespace := lax) in #print axioms plan_refuses_witnessed_inhabited
+#guard_msgs (whitespace := lax) in #print axioms genesis_refuses_witnessed
 
 end Minidregg.Fixtures.BirthPlanPoles
