@@ -148,8 +148,10 @@ as_res() {
 resident_subject() { case $1 in hermes|hhost|hprov) return 0 ;; *) return 1 ;; esac; }
 # A hosted founder (FOUNDER_MEMBER) acts as its own tenant account, as its shell does.
 hosted_founder() { [ "$1" = founder ] && [ -n "$FOUNDER_MEMBER" ]; }
+# Its HOME is its hosted home, as in its shell: the client's retained consent anchors live there
+# (native/mini-sdk consent.rs refuses without $HOME or MINI_CONSENT_ANCHOR_DIR).
 as_member() { setpriv --reuid="mini-s-$FOUNDER_MEMBER" --regid="$TENANT_GROUP" --init-groups --reset-env -- \
-  env -i PATH=/usr/bin:/bin LANG=C.UTF-8 "$@"; }
+  env -i PATH=/usr/bin:/bin LANG=C.UTF-8 HOME="$MEMBER_ROOT/$FOUNDER_MEMBER" "$@"; }
 as_owner() { local who=$1; shift; if hosted_founder "$who"; then as_member "$@"; elif resident_subject "$who"; then as_res "$@"; else as_op "$@"; fi; }
 home_of() { if hosted_founder "$1"; then echo "$MEMBER_ROOT/$FOUNDER_MEMBER"; elif resident_subject "$1"; then echo "$H/$1"; else echo "$HO/$1"; fi; }
 ws_of() { if [ "$1" = sponsor ]; then echo "$SPONSOR_WS"; elif hosted_founder "$1"; then echo "$MEMBER_ROOT/$FOUNDER_MEMBER/workspace"; elif resident_subject "$1"; then echo "$WS/$1"; else echo "$WO/$1"; fi; }
