@@ -24,6 +24,11 @@ door stranger/invite/lobby, public cold/first/warm; https://demo.dregg.online/ =
   needs importProfile market-large-v1 (Etherpad > standard-v1's 768 MiB); grain-host.json must pin the resolved candidate
   path, not /var/lib/mini/candidate/current (a symlink; spk-host's O_NOFOLLOW parent walk is deliberate custody -> ENOTDIR),
   rewritten on each candidate switch. No candidate cut needed.
+- Fresh be4ef7510 world (true regenesis, infra f8f7bc1): hermes.create red: install-hermes:447 sets the grain-create
+  spec namespaceRoot=$NODE/namespace (operator-owned); the resident-run `grain-runtime create` propose refuses it (mini-sdk
+  private.rs:44). Not a chmod: the namespace keeps the sponsor's ids collision-free. Routed to app-reds a17f4172949caca14.
+- private-cells 0e43b648c HELD: Kimi found DeclaredReceiptHiding vacuous at queryBound = 0 (ReceiptEventHiding.lean:222-238);
+  lane fixing (require 0 < queryBound). Codec epoch change; lands as its own candidate; fresh genesis after.
 Ruling: deploy-script fixes keep be4ef7510's verdicts (no composed rerun); a Rust fix means a new cut.
 The restart `continuous` red was the resident's own output document moving its maintenance revision; be4ef7510's
 maintenance_fingerprint leaves out documents the resident writes.
@@ -118,6 +123,10 @@ unchanged; AssertAxioms recognises compiler trust only through the `_native` com
   19.9 s (one submit per template line; batch into one proposal), `chat new` 3.0 s, `chat invite` 2.4 s, first credit
   2.0 s vs 0.5 s warm write; E11 restart 9.6 s and first signed read after it 8.0-8.6 s at height 160-190 (cold-start
   snapshots); certify 16.9 s at a 256 tail with writes halted meanwhile, about 2.7 writes/s from three members.
+  Hot-path diagnosis (a86738fc1dfae6429): both restart and certify costs are the client consent provider's catch-up
+  re-admission (~47 ms per record since it last admitted; a fresh provider folds from genesis: 6.5 s with anchor, 38.7 s
+  without at head 849); Host restart + first read is 2.4 s, certify itself 0.21 s. Fix in progress: provider resumes from
+  its own sealed snapshot; cut the per-record constant; no codec change so far.
   Follow-up: restart's first signed read is O(height), a law-17 red: 8.0-8.6 s at head 160-190, 23.4 s at head 769
   (restart.sh 26.0 s); cold-start snapshots fix it. Certify at a fixed 256 tail: 16.9 / 32.2 / 12.2 s at heads 257/512/768,
   not monotone (box load); at least ~12 s of halted writes per tail. Driver hbox:/ci/xp-log/f1.sh.
