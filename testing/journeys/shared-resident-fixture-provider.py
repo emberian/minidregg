@@ -24,7 +24,7 @@ def summary(body):
     read=json.loads(content[0]['text']);doc=read['doc'];text=read['text']
     if not isinstance(doc,str) or not isinstance(text,str) or not text.strip():raise ValueError('native document input absent')
     excerpt=''.join(c if c=='\n' or unicodedata.category(c)!='Cc' else ' ' for c in text).encode()[:2000].decode('utf-8','ignore')
-    reply='Verified current captured input '+doc+'.\n'+excerpt
+    reply=('Verified current captured input '+doc+'.\n'+excerpt).rstrip()  # a native say trims trailing whitespace; the final must equal what the room holds
     return reply,hashlib.sha256(text.encode()).hexdigest()
 class Endpoint(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
