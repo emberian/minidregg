@@ -39,7 +39,7 @@ set_option autoImplicit false
 
 def tariff : CreationTariff := ⟨0, 0, 0, 0, 99, 0⟩
 
-def hostTemplate : NativeHost.Config where
+def hostTemplate : NativeHost.Config := NativeHost.Config.ofInputs {
   deployment := ⟨⟨8500⟩, 10, 11, 12⟩
   federation := ⟨9⟩
   template := ⟨⟨5⟩, 100000, 10000, 64⟩
@@ -47,7 +47,7 @@ def hostTemplate : NativeHost.Config where
   genesisHeight := 10
   expectedSeed := ⟨0⟩
   storage := { binary := "unused", root := "unused", key := "unused", checkpointEvery := 16 }
-  signature := ⟨"unused"⟩
+  signature := ⟨"unused"⟩ }
 
 /-- A 32-byte creator key. The plan poles need no signature, so any key bytes serve. -/
 def creatorKey : List UInt8 := (List.range 32).map fun i => UInt8.ofNat (i + 1)
@@ -84,7 +84,8 @@ def opened (factory : Minidregg.Pred.Pred) :
     | .ok value => pure value
   let some key := DurableCheckpointCodec.MacKey.ofBytes?
       ((List.range 32).map fun i => UInt8.ofNat (i * 7 + 3)) | throw "mac key"
-  let config : NativeHost.Config := { hostTemplate with expectedSeed := NativeHost.seedIdentity built.seed }
+  let config : NativeHost.Config :=
+    NativeHost.Config.ofInputs { hostTemplate.toInputs with expectedSeed := NativeHost.seedIdentity built.seed }
   let logStart := config.logStart built.seed
   let state ← DurableReceiverIO.openState key ResourceBirthCodec.rootBytes logStart built.seed none [] 0
   let ⟨loaded, _⟩ ← DurableReceiverIO.openLoaded key ResourceBirthCodec.rootBytes logStart built.seed
