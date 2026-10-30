@@ -58,8 +58,9 @@ Required in its commit message: every #assert_axioms pin whose set changed (Clas
 ofReduceBool, trustCompiler or new axioms are not), what replaced native_decide sites, any moved #assert_compiled output
 (lean-intents.json "lean" field expected). Kimi reviews its pin and statement diff before landing. Not yet declared.
 Status 10-30 evening: WIP origin/lane/iter-speed 4cf4181ce (not landable; rebase to one sha), ~330 files, 139 pins gained
-only Classical.choice; decide -> `decide +kernel`/`rfl` (root cause fixed by Theory/ExceptDecidableEq.lean); open reds
-Kernel/SnapRepresents:146, Selvage/OracleLogLinkedTwoPhaseGame:209. Confirmed (000a36610): TokenCensus/NativePinSelfTest.lean plants a native_decide twin of a decide theorem; #assert_axioms
+only Classical.choice; decide -> `decide +kernel`/`rfl` (root cause fixed by Theory/ExceptDecidableEq.lean); the two open reds (SnapRepresents:146,
+OracleLogLinkedTwoPhaseGame:209-210) fixed by the successor ab2786fe1172f5683; full Mac umbrella round 13 running. Order:
+the private-cells receipt-leak batch (codec epoch) lands first, then the bump rebases onto it. Confirmed (000a36610): TokenCensus/NativePinSelfTest.lean plants a native_decide twin of a decide theorem; #assert_axioms
 refuses it, naming `..._native.native_decide.ax_1_1`; native_decide pins list their `_native` axiom by name and stay
 unchanged; AssertAxioms recognises compiler trust only through the `_native` component.
 
