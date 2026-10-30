@@ -30,11 +30,20 @@ Present-state record of the proofs lane, rewritten whole when its shape changes.
   exactly the signed ingress, and the accepted run re-recorded from candidate 3b88b1954 (the grammar
   change rotates the Objective front-end identity).
 
-## Open for a decision
+- `lane/proofs` fa4193808 (sent; verified at ff9cf7df6, full candidate build + umbrellas, only red the
+  known TokenCensus `PersistentHistory.mk` row): the root rulings of 2026-10-30. Genesis refuses a law
+  naming `witnessed` by name (`witnessedLaw`, `witnessed_law_refused`, `Built.no_witnessed`, pole
+  `BirthPlanPoles.genesis_refuses_witnessed`); objective-native-acceptance.py runs Lean scripts with the
+  kernel library (`lean_run`); `front_end_current` plus `scripts/native-accepted-fixture/rerecord.sh`,
+  which the integrator's integ-build4.sh runs after READY (`unchanged` / `recorded fixture-regen/<sha>` /
+  `authority-differs <diff>` exit 4; the authority is never script-written).
 
-- Genesis does not refuse a factory predicate that mentions `witnessed`; such a world refuses every
-  birth (fail-closed) instead of refusing at genesis.
-- objective-native-acceptance.py `all` fails at `publish-variant` (it runs `lean --run` without the
-  kernel dynlib); after the steps the fixture uses.
-- Any later change to the Objective front-end sources rotates its identity and needs the accepted
-  fixture re-recorded from a candidate built with it (generate.sh, fresh world).
+## Held
+
+- Compiler/PredCompile.lean:832 comment cites `lower_witnessed_refuses` (the theorem is
+  `lower_not_witnessed_refuses`): rides the Lean 4.35 whole-tree rebuild.
+
+## Open
+
+- The doc-write fixture is not front-end dependent and is not in rerecord.sh; regenerate it with
+  scripts/native-doc-write-fixture/generate.sh when its own replay breaks.
