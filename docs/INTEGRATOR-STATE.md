@@ -46,7 +46,7 @@ another until a real batch has accumulated. Rehearsal 3 ships be4ef7510 with the
 | app-reds (Sonnet) | a17f4172949caca14 | app packages and declarations, Hummingbird, grain-runtime app tests |
 | iteration speed (Opus) | a141a9c535501bbd7 | Lean v4.30.0 -> v4.35.0 bump, then codec/store/world-root seams, lane-tree warm pool, hot-swap; will provide a second-tree umbrella stage |
 | private cells (Opus) | a74ad8d84ada5627a | receipt-fingerprint leak first, then the O(log n) blinded-cell hiding (docs/RATCHET-LOG-DESIGN.md; Prop-only draft Kernel/BlindedCellHiding.lean, merged 20d3cd965, not imported by any lake target: lean_lib roots are the umbrella modules only) |
-| hot path successor (Opus) | (id from root when it first writes) | the perf queue's law-17 reds: restart growth, certify, story new, flatness rows except the blinded-cell part (private cells); batched shas |
+| hot path successor (Opus) | a86738fc1dfae6429 | the perf queue's law-17 reds: restart growth, certify, story new, flatness rows except the blinded-cell part (private cells); batched shas |
 | explorer | a3e5d6dbcd68e616c | perf and behaviour probes on candidates; docs/EXPLORER-FINDINGS.md |
 | SPK freshening | a58fcf100f4438710 | queue complete (all FEATURED repacks landed) |
 
