@@ -24,19 +24,40 @@ Qualified on hbox, attempt 1 in `/ci/ar-ot/qualification-1/rows.tsv`: lifecycle 
 GET /api/0/last returns this run's timestamp, descriptor lists api and web; forged Sandstorm identity headers
 refused. OwnTracks is in the local market index fixture; it is not in FEATURED (it never was).
 
-## 2. Hummingbird: native conversation qualification (NOT DONE; gap named)
+## 2. Hummingbird: native conversation qualification (controller side BUILT; live run OWED)
 
 `featured-qualify.sh` -> `binding.py` drives only http and ddp, so `protocol: conversation` returns
-`binding-protocol-unsupported`; DEMO-PATH-STATE says not to add a second Python interpreter. The native
-executor (`mini_sdk::app_interface::Declaration::qualify/execute`, `app_interface_transport.rs`) and the Host's
-CONVERSATION method (`spk-host/src/hosted_conversation.rs`, accepted by the lifetime API wire) both exist. What
-is not attached is the controller's receiving end for the shell: `mini app-interface --action call|qualify`
-sends `grain-runtime tool SOCKET hard ID mini_app_<alias>_qualify`, but `grain-runtime` `foreground_tool`
-(main.rs) dispatches only `mini_application_api` and the Oracle tools; typed tools run only inside the Hermes
-MCP worker (`typed_applications::call_tool` through `__mini_typed_http_raw`). There is no hidden `_qualify`
-foreground tool, and no foreground typed tool. Closing it is a grain-runtime feature (a foreground typed executor
-whose per-request callback re-enters `foreground_application_api`, with its one-reservation-per-attempt journal
-invariants), then a j14-apps-style world with Hummingbird attached. See the report to the integrator.
+`binding-protocol-unsupported`; DEMO-PATH-STATE says not to add a second Python interpreter, and none was added.
+What was missing was the controller's receiving end for the shell: `mini app-interface --action call|qualify`
+sends `grain-runtime tool SOCKET hard ID mini_app_<alias>[_<op>|_qualify]`, but `foreground_tool` dispatched only
+`mini_application_api` and the Oracle tools. Now (grain-runtime `main.rs`, `typed_applications.rs`,
+`application_api_tools.rs`):
+
+- `mini_app_*` names are operator-foreground tools when a typed attachment owns them (the attachment's bound tools
+  and the hidden `mini_app_<alias>_qualify`); preflight checks the attachment, the declaration digest the shell sends
+  (`_miniInterfaceDigest`, stripped before validation) and the route's Host pin and recorded birth (the route check is
+  now one helper, `preflight_application_route`, shared with `mini_application_api`).
+- `foreground_typed_application` runs the SDK executor (`call_tool`, or the new `qualify_tool` over
+  `Declaration::qualify`) inside the controller; each request it prepares re-enters `foreground_application_api`: one
+  fresh admission and settlement apiece, as the Hermes worker's `__mini_typed_http_raw` path does. A lost reply is
+  uncertain and never replayed. Trusted context (operation id, time, rendezvous seed) is the controller's; the
+  operator's `runId` may not shadow it.
+- The controller's application-API method list gained `CONVERSATION` (the Host's lifetime wire already accepts it and
+  validates the descriptor body against `protocol/hosted-conversation.json`).
+
+Tests (filtered): `typed_applications` 15 pass on the Mac and on hbox, including the WBO conversation declaration
+qualified end to end through the real `raw_arguments` and `parse_input`, and the foreground name, digest and context
+checks. The `foreground` filter on hbox: 62 pass, 8 `birth_refusal` tests fail; they drive a scripted
+`controlled-mini` through the birth-refusal producer, never reach the typed code, and also fail on the Mac with the
+child exiting 3. I did not baseline them (no stash); treat them as the standing birth_refusal environment red until
+someone shows otherwise.
+
+OWED, not claimed: the live receiving-path run. It needs a Hermes controller world with Hummingbird attached as a
+typed application (the apps-agents j14-apps journey, `docs/APPS-AGENTS-STATE.md`), a rebuilt `grain-runtime`, then
+`mini app-interface --action qualify --declaration apps/interfaces/hummingbird.json --attachment hb ...` with its
+native receipts and the correlated socket hit retained. Unproven there: that the Host's lifetime reserve plan accepts
+the CONVERSATION method code end to end, and the reply shape of a hosted frame batch through `http-v3`. Once that run
+exists the same command qualifies the WBO and Scrumblr declarations.
 
 ## 3. deploy/spk-host/tests/test_controller_world.py: environment AND stale tests, all fixed
 
@@ -70,7 +91,9 @@ test already asserted. Result on hbox: 86 tests OK. On the Mac one error remains
   hg-wire push read back through raw-file and rev, descriptor api+web). The Mercurial push driver and recipe
   (`apps/packages/mercurial/qualify*`) were only on the hbox lane before; they are now in the repo.
 
-## Not this lane
+## Scout's parity red (JWF 1/72, "without a face: apps(apps list j)"): FIXED
 
-Scout a3d575cdd7a822f6b reports the demo row JWF failing 1/72 on web parity: verb `apps` (`apps list j`) has no
-visual web face (hook.out at hbox:/ci/scout/ev/demo/JWF). Not one of the four reds; routed to the integrator.
+Not a missing face: `/verb/apps` renders its leaves. `jweb-frontend.sh` split each usage alternative with an
+unquoted `for w in $alt`, so `[--json]` was a glob that matched a one-letter file named `j` in the working directory
+and turned `apps list [--json]` into `apps list j`. Globbing is now off around the split (ad58a4b9e). Reproduced
+the glob in bash; not re-run through the whole JWF step.

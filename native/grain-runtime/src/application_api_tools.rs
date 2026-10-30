@@ -2044,7 +2044,9 @@ pub(crate) fn parse_input(
         return Err("application API name is not operator-selected".into());
     }
     let method = string("method")?;
-    if !matches!(method, "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE") {
+    // CONVERSATION is the hosted-conversation descriptor method (protocol/hosted-conversation.json); the
+    // Host validates its body against that vocabulary before anything reaches the app.
+    if !matches!(method, "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "CONVERSATION") {
         return Err("application API method is unavailable".into());
     }
     let path = string("path")?;
