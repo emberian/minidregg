@@ -51,7 +51,10 @@ prompt, the fixture's own refusals). hbox gate12 covers tour, j14-apps, flatness
 
 Lanes that send shas (2026-10-30): proofs Opus af4b3ea612564dea5 (umbrella reds, statement fixes), app-reds Sonnet
 a17f4172949caca14 (OwnTracks, Hummingbird, controller-world tests, WBO, missing declarations), scout Sonnet
-a3d575cdd7a822f6b (every journey row + stress on the newest candidate; routes faults), infra add189844d158e3a7.
+a3d575cdd7a822f6b (every journey row + stress on the newest candidate; routes faults), infra add189844d158e3a7,
+iteration speed Opus a141a9c535501bbd7 (Lean seams at codec/store/world-root: deep batched landings, warned ahead so
+other Lean landings hold for one closure; lane-tree warm pool; hot-swap of one crate into a KEEP_WORLD world, on top of
+gate12 KEEP_WORLD and infra's composed-gate resume).
 Name every new candidate to infra and the scout. Cut a candidate per landing batch (about 5 min Rust-only).
 
 gate12: `EDGE_REV=69c17a3 JWORLD_MANAGEMENT=distinct KEEP_WORLD=1 PORT=.. JWORLD_ROUTE_FRONT_PORT=.. bash gate12.sh SHA`
