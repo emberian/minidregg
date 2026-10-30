@@ -118,9 +118,18 @@ theorem ghost_exec_blinded :
 
 theorem sample_header : contentHeader sampleHostCtx (⟨.content, cellOf blindedStore⟩ : HostCell) = .ok () := by
   have law := blindedCell_law
-  simp [contentHeader, sampleHostCtx, hostCtxOf, contentSpec, sampleCtx] at law ⊢
-  rw [if_pos law]
-  exact if_pos rfl
+  simpa [contentHeader, sampleHostCtx, hostCtxOf, contentSpec, sampleCtx] using law
+
+/-- The sample's planned root is the blinded cell's own root, so the handler's gate admits. -/
+theorem sample_admits (E : ContentSpec) :
+    (contentHandlerOf E).admits 1 sampleHostCtx sampleLinkCommand
+      (⟨.content, cellOf blindedStore⟩ : HostCell) = .ok () := by
+  unfold Handler.admits
+  rw [show (contentHandlerOf E).header = contentHeader from rfl, sample_header]
+  dsimp only
+  rw [if_pos (by
+    rw [Bool.or_eq_true]
+    exact Or.inr (decide_eq_true (rfl : sampleHostCtx.root = (cellOf blindedStore).root)))]
 
 /-- A packed content cell's blinding key. -/
 def contentKey : Except DispatchRefusal HostCell → Option (List UInt8)
@@ -138,7 +147,7 @@ theorem hostGhost_disagrees :
         .ok ⟨.content, CellState.materialize HyperdocumentCell.contentMaterializer
           (Patch.run blindedStore sampleLinkOps)⟩ := by
     unfold Handler.fire
-    rw [show (contentHandlerOf contentGhost).header = contentHeader from rfl, sample_header]
+    rw [sample_admits]
     show (EffectSpec.exec contentGhost 1 sampleCtx sampleLinkCommand blindedStore).map _ = _
     rw [ghost_exec_blinded]
     rfl
