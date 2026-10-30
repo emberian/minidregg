@@ -1088,7 +1088,7 @@ def main(argv=None):
     def ensure_controller(label):
         """A controller start/restart is an ordinary service operation; its journal decides recovery."""
         if not controller_active():
-            run(label, [*starter, '--collect', '--unit=' + controller_unit, '--property=Nice=10', '--property=KillMode=control-group',
+            run(label, [*starter, '--collect', '--unit=' + controller_unit, '--property=UMask=0077', '--property=Nice=10', '--property=KillMode=control-group',
                         *['--setenv=' + k + '=' + v for k, v in environment.items()],
                         '--property=StandardOutput=append:' + str(root / 'controller.stdout'), '--property=StandardError=append:' + str(root / 'controller.stderr'),
                         grain, 'serve', controller_config])
@@ -1352,7 +1352,7 @@ def main(argv=None):
             raise Refused('root resident launch coordinates differ')
         resident_entry = base / 'usr/local/lib/mini/controller-entry.py'
         if subprocess.run(manager_query + ['is-active', resident_unit], capture_output=True, text=True).stdout.strip() != 'active':
-            run('retain-continuous-resident', [*starter, '--collect', '--unit=' + resident_unit, '--property=Nice=10', '--property=KillMode=control-group',
+            run('retain-continuous-resident', [*starter, '--collect', '--unit=' + resident_unit, '--property=UMask=0077', '--property=Nice=10', '--property=KillMode=control-group',
                                                '--setenv=MINI_ROOT=' + str(base), '--property=StandardOutput=append:' + str(root / 'resident-live.stdout'),
                                                '--property=StandardError=append:' + str(root / 'resident-live.stderr'), resident_entry, 'resident', str(a.task)])
         wait('retained resident unit active', lambda: subprocess.run(manager_query + ['is-active', resident_unit], capture_output=True, text=True).stdout.strip() == 'active', 60)
