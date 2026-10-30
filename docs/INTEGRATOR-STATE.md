@@ -31,18 +31,26 @@ gate; hot-path sends it, wire it into the gate).
   /tank/dregg-build/rows-0ce31391/pw/node_modules (browsers ~/.cache/ms-playwright). Infra also offers `ssh composed-box`
   (a container on dregg-forge) for composed if hbox root setup gets crowded; not used yet.
 
-## Main and candidates (2026-10-30 ~10:55 EDT)
+## Main and candidates (2026-10-30 ~12:10 EDT)
 
-Main = staging = ee29d4fa7 (+docs). Newest READY candidate: ee29d4fa7d4a46f11f5ee6d0d4bee2a2c2df32e8 (proofs only over c7aa7e8c4) (binaries = 41590f420's:
-everything through apps-agents 06e6c30eb, infra c3d17f136 chat join, Firefly; harness through infra's residents work:
-e365dd7e6, df0ea4252, 21a117df3, d9d3bdfc2 Hermes account adopt, 2418692c7/1531ec571 root hand-off, c7aa7e8c4 fixture ACP).
+Main = staging = 06831831c (+docs). Builds: integ-build3.sh (packs straight into candidates/<sha>, so manifest.json names
+final paths; holds integ/build.lock for the whole build including the umbrella subshell). queue-build.sh SHA (queue.pid)
+waits for the running build, then starts integ-build3.sh SHA. Umbrellas take 20-25 min and hold the lock; asked the
+iteration-speed lane for a second-tree or cached umbrella stage.
 
 | candidate | verdict |
 |---|---|
 | 41590f420 | gate12 distinct: tour 73/73, j14-apps PASS (5 rows), composed rooms/churn/documents/apps/connector/store-restart PASS; residents/restart judged on forge only |
-| 5f18b9f50 | RED (source-capability dedup broke births); reverted aa5a80b2a |
-| c7aa7e8c4 | READY 10:51; named to infra and the scout |
-| ee29d4fa7 | READY 11:05 = c7aa7e8c4 + proofs 75cd46376 (Lean only). Umbrellas: EngineProofs and BirthPlanPoles fixed; now red: Fixtures.NativeAcceptedFixture, NativeDocWriteFixture, Effects.Revival.PrepareProofs (prepareFactors sorryAx at :282), HostTeethProofs (imports it); proofs lane has them |
+| c7aa7e8c4 | scout full pass (docs/SCOUT-FINDINGS.md on lane/scout): reds JPAY6 (2 plant rows), KC (fixed, landed), fleetsign 1/100 under load, JWF parity (apps verb) |
+| ee29d4fa7, 1890a6647 | proofs-only (umbrella fixes) |
+| 719d7b7aa | READY 11:35, first clean manifest: app-reds batch 1 (OwnTracks, WBO, controller-world tests), proofs 0ca243107, scout KC |
+| 06831831c | queued: + app-reds declarations eb4b396f6 (Mercurial, Sudoku, Blockstack), proofs fixtures f5d351a96 (NativeAccepted/NativeDocWrite under ruling (c)) |
+
+JPAY6: bisect shows every candidate back to d9661be99 fails the same two plant rows; likely the row's own fixture
+(consent_230 authors the purse via `author birth-intent`, the plain canonical kind, not a grain-backed source). Scout is
+checking and will fix the row with teeth on both sides, never weaker.
+Owners of open reds: JWF parity `apps` verb web face, Hummingbird (app-reds a17f4172949caca14); fleetsign load race
+(scout reproducing; core client attempt dirs, mine if confirmed).
 
 Composed authority: infra's forge composed container (residents needs root). There, residents passes through
 registration, summon, requests, prepoll, provider custody copy and the Hermes turn reaching the provider, then the
