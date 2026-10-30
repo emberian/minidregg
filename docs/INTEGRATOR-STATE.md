@@ -179,11 +179,19 @@ unchanged; AssertAxioms recognises compiler trust only through the `_native` com
   not monotone (box load); at least ~12 s of halted writes per tail. Driver hbox:/ci/xp-log/f1.sh.
 - Hummingbird live receiving path: app-reds building a j14apps()-style run.
 - Scout full pass on be4ef7510: PASS 162, FAIL 2, UNCONFIGURED 7, UNJUDGED 3 (jpay 6/6, KC, JWF now pass). Reds:
-  demo/J14 36/211 (resident prompt 11 undecided; also on 06831831c) -> app-reds; demo/JDV row 140 "Host child outlived
+  demo/J14 36/211: a stale mini-hermes-test-provider in the scout's run (app-reds traced "attach brief is not JSON";
+  the candidate's own fixtures/mini-hermes-test-provider is current), rerun owed; demo/JDV row 140 "Host child outlived
   its server" on stop -> hot-path a86738fc1dfae6429 (13 later demo steps are shadows behind it). Evidence
   hbox:/ci/scout/rbe/be4ef751*/rows/demo/journey.err.
 - fleetsign 1/100 under full parallel load (attempt plan.frame missing): scout reproducing; core client if confirmed.
 - Scout's twelve demo steps never ran on c7aa7e8c4 (journey budget spent); rerunning on 06831831c with a 12000 s timeout.
+- Owed (integrator, next gate script): gate12's j14apps sets TEST_PROVIDER=$J/bin/mini-hermes-test-provider, which the
+  candidate keeps under fixtures/; point it at $C/fixtures/ (harmless today: Davros uses the real pool provider).
+- Import boundary (scripts/check-import-boundary.sh) RED on main, 16 edges: Effects -> Theory/Lean (AssertAxioms, Store,
+  CellState, TypedAuthorization, AxiomPin, Lean.Data.Json) and Kernel/Compiler -> Effects.Revival.HostedDav/
+  HostedConversation (apps-agents 445a691f6, 0b4b39de7, 289e0088b). The tier table makes Effects a sink below nothing it
+  now imports; needs a ruling (root): either Effects may import Theory/Lean and the derived Hosted* descriptors move
+  below Kernel (or Effects leaves the sink row), or the edges are undone.
 - Ruled 2026-10-30 (root), implemented by proofs in fa4193808 (merged; building as 103c6002a): (1) genesis refuses a factory predicate
   containing `witnessed`, loudly and by name (not fail-closed at every birth); (2) objective-native-acceptance.py
   publish-variant harness bug fixed (lean --run without the kernel dynlib); (3) the integrator's build regenerates the
