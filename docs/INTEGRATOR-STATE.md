@@ -33,7 +33,7 @@ gate; hot-path sends it, wire it into the gate).
 
 ## Main and candidates (2026-10-30 ~10:55 EDT)
 
-Main = staging = c7aa7e8c4. Newest READY candidate: c7aa7e8c413de0231f4734d2acc27efc5dea3c20 (binaries = 41590f420's:
+Main = staging = ee29d4fa7 (+docs). Newest READY candidate: ee29d4fa7d4a46f11f5ee6d0d4bee2a2c2df32e8 (proofs only over c7aa7e8c4) (binaries = 41590f420's:
 everything through apps-agents 06e6c30eb, infra c3d17f136 chat join, Firefly; harness through infra's residents work:
 e365dd7e6, df0ea4252, 21a117df3, d9d3bdfc2 Hermes account adopt, 2418692c7/1531ec571 root hand-off, c7aa7e8c4 fixture ACP).
 
@@ -42,6 +42,7 @@ e365dd7e6, df0ea4252, 21a117df3, d9d3bdfc2 Hermes account adopt, 2418692c7/1531e
 | 41590f420 | gate12 distinct: tour 73/73, j14-apps PASS (5 rows), composed rooms/churn/documents/apps/connector/store-restart PASS; residents/restart judged on forge only |
 | 5f18b9f50 | RED (source-capability dedup broke births); reverted aa5a80b2a |
 | c7aa7e8c4 | READY 10:51; named to infra and the scout |
+| ee29d4fa7 | READY 11:05 = c7aa7e8c4 + proofs 75cd46376 (Lean only). Umbrellas: EngineProofs and BirthPlanPoles fixed; now red: Fixtures.NativeAcceptedFixture, NativeDocWriteFixture, Effects.Revival.PrepareProofs (prepareFactors sorryAx at :282), HostTeethProofs (imports it); proofs lane has them |
 
 Composed authority: infra's forge composed container (residents needs root). There, residents passes through
 registration, summon, requests, prepoll, provider custody copy and the Hermes turn reaching the provider, then the
