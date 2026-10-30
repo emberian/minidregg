@@ -216,7 +216,7 @@ canonical bytes equal the prior validated state's passed already
 def cellsLawfulServedFrom (config : Config) {earlier store : StoreIdentity}
     (prior : OpenedServed config earlier) (served : State store) (loaded : ServedDirectory served) : Bool :=
   served.cellIds.all fun identifier =>
-    prior.served.canonicalBytes identifier == served.canonicalBytes identifier ||
+    Minidregg.Compiler.CredentialAuthorityDomainReceiver.bytesBEq (prior.served.canonicalBytes identifier) (served.canonicalBytes identifier) ||
       cellLawful config loaded.directory identifier
 
 theorem cellsLawfulServedFrom_eq (config : Config) {earlier store : StoreIdentity}
@@ -224,7 +224,7 @@ theorem cellsLawfulServedFrom_eq (config : Config) {earlier store : StoreIdentit
     cellsLawfulServedFrom config prior served loaded = cellsLawfulServed config served loaded.directory := by
   unfold cellsLawfulServedFrom cellsLawfulServed
   apply Bool.eq_iff_iff.mpr
-  simp only [List.all_eq_true, Bool.or_eq_true, beq_iff_eq]
+  simp only [List.all_eq_true, Bool.or_eq_true, Minidregg.Compiler.CredentialAuthorityDomainReceiver.bytesBEq_eq, beq_iff_eq]
   constructor
   · intro accepted identifier member
     rcases accepted identifier member with same | lawful

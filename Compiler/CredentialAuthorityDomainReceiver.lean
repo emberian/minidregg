@@ -34,6 +34,7 @@ import all Init.Data.Nat.Bitwise.Basic
 import all Init.Data.String.Bootstrap
 import all Init.Data.Format.Basic
 import all Init.Data.List.Scan.Basic
+import all Init.Util
 
 @[expose] public section
 
@@ -238,6 +239,21 @@ theorem Loaded.unique {deployment : CanonicalCellRegistry.Deployment}
 
 #assert_axioms Loaded.unique
 
+/-- `==` on byte lists, object identity first. `==` on `List UInt8` is `List.beq`
+(`List.instBEq`), which `CompiledListOps.listDecEq`'s swap never reaches; the
+comparisons of whole cell images on every session advance (`loadDeploymentFromAt`,
+`decodeRowFrom`, the served twins, `cellsLawfulFrom`) call this, and an unchanged
+cell's bytes in the next image are the very object of the prior image's. It is
+`left == right` (`withPtrEq a b k h = k ()`, `bytesBEq_eq`). -/
+@[inline] def bytesBEq (left right : List UInt8) : Bool :=
+  withPtrEq left right (fun _ => left == right) (fun same => by subst same; exact beq_self_eq_true left)
+
+@[simp] theorem bytesBEq_eq (left right : List UInt8) : bytesBEq left right = (left == right) := by
+  simp only [bytesBEq, withPtrEq]
+
+theorem bytesBEq_iff {left right : List UInt8} : bytesBEq left right = true ↔ left = right := by
+  rw [bytesBEq_eq, beq_iff_eq]
+
 /-- `loadDeployment` of a later physical snapshot: when the authority cell's
 bytes equal `held`'s snapshot's, the held cell and its projection are reused
 under this snapshot's clock and spent markers; otherwise the bytes are decoded.
@@ -245,10 +261,11 @@ under this snapshot's clock and spent markers; otherwise the bytes are decoded.
 def loadDeploymentFromAt {deployment : CanonicalCellRegistry.Deployment} {before : PhysicalSnapshot}
     (held : Loaded deployment before) (physical : PhysicalSnapshot)
     (height : Nat) (heightExact : height = clockOf physical) : Option (Loaded deployment physical) :=
-  if same : physical.canonicalBytes (cellIdOf deployment) == before.canonicalBytes (cellIdOf deployment) then
+  if same : bytesBEq (physical.canonicalBytes (cellIdOf deployment))
+      (before.canonicalBytes (cellIdOf deployment)) then
     some ⟨⟨deployment.domain, height, spentOf deployment.domain physical, held.snapshot.cell,
         held.snapshot.authState, held.snapshot.authStateExact⟩, held.valid, rfl, heightExact, rfl,
-      (beq_iff_eq.mp same).trans held.observed⟩
+      (bytesBEq_iff.mp same).trans held.observed⟩
   else loadDeploymentAt deployment physical height heightExact
 
 def loadDeploymentFrom {deployment : CanonicalCellRegistry.Deployment} {before : PhysicalSnapshot}
@@ -264,7 +281,7 @@ theorem loadDeploymentFromAt_eq {deployment : CanonicalCellRegistry.Deployment} 
   split
   · rename_i same
     obtain ⟨loaded, found, _⟩ := loadDeploymentAt_exact deployment physical height heightExact
-      held.valid held.snapshot.cell ((beq_iff_eq.mp same).trans held.observed)
+      held.valid held.snapshot.cell ((bytesBEq_iff.mp same).trans held.observed)
     rw [found]
     exact congrArg some (Loaded.unique _ loaded)
   · rfl
@@ -476,7 +493,7 @@ bytes are decoded. `decodeRowFrom_eq`: both are what decoding the bytes returns.
 def decodeRowFrom {prior : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     (held : LoadedDirectory prior) (identifier : Nat) (bytes : List UInt8) :
     Option (LifecycleImage registry) :=
-  if prior.snapshot.canonicalBytes ⟨identifier⟩ == bytes then
+  if bytesBEq (prior.snapshot.canonicalBytes ⟨identifier⟩) bytes then
     some (LifecycleImage.view registry held.directory identifier)
   else (LifecycleImage.codec registry).decode bytes
 
@@ -488,7 +505,7 @@ theorem decodeRowFrom_eq {prior : DurableReceiverIO.Loaded ResourceBirthCodec.ro
   next same =>
     have exact : LifecycleImage.bytes registry
         (LifecycleImage.view registry held.directory identifier) = bytes :=
-      (held.bytes_exact identifier).trans (beq_iff_eq.mp same)
+      (held.bytes_exact identifier).trans (bytesBEq_iff.mp same)
     rw [← exact]
     exact (LifecycleImage.decode_encode registry _).symm
   next => rfl
