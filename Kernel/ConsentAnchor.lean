@@ -328,12 +328,12 @@ def ownOfGenesis (durable : Durable)
       durable.base = DurableCheckpoint.State.ofSeed durable.image.seed) :
     DurableHistoryReader.OwnBase ResourceBirthCodec.rootBytes :=
   ⟨durable.image.seed, durable.logStart, durable.image.accepted.length, durable.chain,
-    headState durable,
+    Thunk.mk fun _ => headState durable,
     ⟨durable.image.accepted, rfl, durable.chainExact.symm, durable.snapshot, by
       have folded := durable.resumed
       rw [genesis.1, genesis.2, DurableCheckpoint.resume_genesis] at folded
       simpa only [DurableReceiver.Image.ofAccepted_accepted] using folded,
-      by rw [headState_eq, DurableReceiver.Image.ofAccepted_accepted]⟩⟩
+      by show headState durable = _; rw [headState_eq, DurableReceiver.Image.ofAccepted_accepted]⟩⟩
 
 /-- **The held image of an anchored admission is genesis-based**: the suffix
 walk keeps its anchor's base (`AdmittedSuffix.base`), and the anchor's is the
