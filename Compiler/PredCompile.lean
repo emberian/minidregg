@@ -15,7 +15,10 @@ under negation and disjunction:
 * `writeOnce`: the existing combination of two zero indicators.
 * `le`/`monotone`: the forced order gadget from `PredOrderGadget`, selected by an
   explicit scalar width. Missing operands force false and impose no unused range.
-* `witnessed`: the first-party false indicator; negation composes faithfully.
+* `witnessed`: REFUSED. It has no deployed discharge, and its first-party false
+  indicator would make `not (witnessed vk)` constantly true, so it is outside `supported`
+  at every depth (`supported_no_witnessed`) and its lowering refuses every assignment
+  (`lower_not_witnessed_refuses`). Deleting the constructor (ZK D1) is open.
 * `ran program`: exactly the `eq (ranSlot program) 1` gadget. Re-execution is a
   controller fact (`Kernel.Run`); the circuit reads the slot the controller
   projects after the check, it does not re-run Nock.
@@ -44,9 +47,8 @@ and check source ranges before accepting a compiled result. Neither witnesses no
 requests may select their own width. This file does not choose a deployment field
 or product range. Larger integer promises require a bounded-limb extension.
 
-`Compiler → Pred.Core` preserves the source/emitter import boundary. Oracle-backed
-`witnessed` remains distinct from first-party semantics; new source vocabulary must
-be lowered here rather than added through a second policy verifier.
+`Compiler → Pred.Core` preserves the source/emitter import boundary. New source
+vocabulary must be lowered here rather than added through a second policy verifier.
 -/
 module
 
@@ -827,7 +829,7 @@ def lowerA (profile : CompilerProfile) : Pred → Term (AirSig F Wire) × Constr
   | .sumEq _ _ =>
       (cst 0, [cst 1])   -- not lowered: the system refuses every assignment (`lower_sumEq_refuses`)
   | .witnessed _ =>
-      (cst 0, [])        -- first-party fail-closed: the indicator is constant 0
+      (cst 0, [cst 1])   -- refused: no assignment satisfies it, under any polarity (`lower_witnessed_refuses`)
   | .hashEq v b c =>
       (mul' (vr (.opened v b c)) (mul' (vr (.pres true c)) (vr (.aux [] 0))),
        isZero (hashD v b c) (.aux [] 0) (.aux [] 1))
@@ -872,7 +874,7 @@ def supported (profile : CompilerProfile) : Pred → Bool
   | .leSlots _ _  => match profile.order with | .disabled => false | .scalar _ => true
   | .leSlotsOff _ _ _ => match profile.order with | .disabled => false | .scalar _ => true
   | .sumEq _ _    => false
-  | .witnessed _  => true
+  | .witnessed _  => false
   | .hashEq _ _ _ => true
   | .ran _        => true
   | .not p        => supported profile p
@@ -883,6 +885,71 @@ def supportedL (profile : CompilerProfile) : PredList → Bool
   | .nil       => true
   | .cons p ps => supported profile p && supportedL profile ps
 end
+
+mutual
+/-- `p` contains a `witnessed` leaf at any depth, under any polarity. -/
+def mentionsWitnessed : Pred → Bool
+  | .witnessed _ => true
+  | .not p       => mentionsWitnessed p
+  | .allL ps     => mentionsWitnessedL ps
+  | .anyL ps     => mentionsWitnessedL ps
+  | _            => false
+
+def mentionsWitnessedL : PredList → Bool
+  | .nil       => false
+  | .cons p ps => mentionsWitnessed p || mentionsWitnessedL ps
+end
+
+/-! ### `witnessed` is outside the supported fragment
+
+A `witnessed` leaf has no discharge on the deployed path: first-party `eval` fails it closed, and
+its compiled indicator is constant `0`. Under negation that is constant TRUE, so a law reading
+"deny when credential X is presented" would admit every step. The leaf is therefore refused
+(design law 10): `supported` is false on it at every depth, and every admission and install path
+gates on `supported` (`Kernel/PolicyInstallController.checkReady`,
+`Kernel/ResourceBirthPolicyController.Pending.judgeBranch`, `Kernel/BirthCandidateAdmission`,
+`Kernel/ReceivingLaw`). Its lowering also refuses every assignment, so a caller that bypassed
+`supported` still could not obtain an accepting system. Open: deleting the constructor
+(ZK D1). -/
+
+mutual
+/-- **No supported law contains a `witnessed` leaf.** -/
+theorem supported_no_witnessed (profile : CompilerProfile) :
+    ∀ p : Pred, supported profile p = true → mentionsWitnessed p = false
+  | .witnessed _, h => by simp [supported] at h
+  | .not p, h => by
+      simp only [supported] at h
+      simpa only [mentionsWitnessed] using supported_no_witnessed profile p h
+  | .allL ps, h => by
+      simp only [supported] at h
+      simpa only [mentionsWitnessed] using supportedL_no_witnessed profile ps h
+  | .anyL ps, h => by
+      simp only [supported] at h
+      simpa only [mentionsWitnessed] using supportedL_no_witnessed profile ps h
+  | .eq _ _, _ | .le _ _, _ | .memberOf _ _, _ | .writeOnce _, _ | .monotone _, _
+  | .eqSlots _ _, _ | .leSlots _ _, _ | .leSlotsOff _ _ _, _ | .sumEq _ _, _
+  | .hashEq _ _ _, _ | .ran _, _ => rfl
+
+theorem supportedL_no_witnessed (profile : CompilerProfile) :
+    ∀ ps : PredList, supportedL profile ps = true → mentionsWitnessedL ps = false
+  | .nil, _ => rfl
+  | .cons p ps, h => by
+      simp only [supportedL, Bool.and_eq_true] at h
+      simp only [mentionsWitnessedL, supported_no_witnessed profile p h.1,
+        supportedL_no_witnessed profile ps h.2, Bool.or_self]
+end
+
+/-- The contrapositive the admission paths use: a law mentioning `witnessed` is unsupported. -/
+theorem unsupported_of_mentionsWitnessed (profile : CompilerProfile) {p : Pred}
+    (h : mentionsWitnessed p = true) : supported profile p = false := by
+  cases hs : supported profile p
+  · rfl
+  · simp [supported_no_witnessed profile p hs] at h
+
+/-- Teeth: the fail-open shape, "deny when credential `vk` is presented", is unsupported under
+every profile. -/
+theorem supported_not_witnessed (profile : CompilerProfile) (vk : Vk) :
+    supported profile (.not (.witnessed vk)) = false := rfl
 
 mutual
 /-- The `Int` literals a predicate mentions (for the injectivity label). -/
@@ -1446,9 +1513,7 @@ theorem lowerA_forced (profile : CompilerProfile)
   | .leSlotsOff a b c, old, new, A, _, hsup, hrange, h =>
     lowerA_forced_leSlotsOff profile hprofile a b c old new A hsup hrange h
   | .sumEq _ _, _, _, _, _, hsup, _, _ => by simp [supported] at hsup
-  | .witnessed vk, old, new, A, _, _, _, _ => by
-    simp [lowerA, eval_cst, Minidregg.Pred.eval, Minidregg.Pred.evalWith,
-      Minidregg.Pred.failClosed]
+  | .witnessed _, _, _, _, _, hsup, _, _ => by simp [supported] at hsup
   | .hashEq v b c, old, new, A, hinj, _, _, h => by
     simp only [lowerA] at h ⊢
     have hb := isZero_forced h
@@ -1636,9 +1701,7 @@ theorem lowerA_complete (profile : CompilerProfile) :
   | .leSlotsOff a b c, old, new, hsup, hrange =>
     lowerA_complete_leSlotsOff profile a b c old new hsup hrange
   | .sumEq _ _, _, _, hsup, _ => by simp [supported] at hsup
-  | .witnessed vk, old, new, _, _ => by
-    simp only [lowerA]
-    exact systemAccepts_nil _
+  | .witnessed _, _, _, hsup, _ => by simp [supported] at hsup
   | .hashEq v b c, old, new, _, _ => by
     simp only [lowerA]
     apply isZero_complete
@@ -1868,6 +1931,12 @@ theorem lower_leSlotsOff_disabled_refuses (a b : Slot) (c : Int) (asg : Wire →
     ¬ systemAccepts asg (lower CompilerProfile.disabled (.leSlotsOff a b c)) := fun h =>
   one_ne_zero (h (cst 1) (List.mem_append_left _ (List.mem_cons_self)))
 
+/-- The `witnessed` lowering refuses every assignment, under negation too: the fail-open
+shape "deny when credential `vk` is presented" has no accepting circuit. -/
+theorem lower_not_witnessed_refuses (profile : CompilerProfile) (vk : Vk) (asg : Wire → F) :
+    ¬ systemAccepts asg (lower profile (.not (.witnessed vk))) := fun h =>
+  one_ne_zero (h (cst 1) (List.mem_append_left _ (List.mem_cons_self)))
+
 /-- `sumEq` is not lowered: under every profile its system refuses every assignment, so a law
 using it is never accepted by a circuit (the kernel judges it by `Pred.eval`). -/
 theorem lower_sumEq_refuses (profile : CompilerProfile) (l r : List Slot) (asg : Wire → F) :
@@ -1927,11 +1996,11 @@ def kOld : State := ⟨[("x", 3), ("z", 0)]⟩
 /-- Keystone post-state: `x = 5`, `y = 2`, `z = 4`. -/
 def kNew : State := ⟨[("x", 5), ("y", 2), ("z", 4)]⟩
 
-/-- A compound policy exercising every equality-fragment constructor: two atoms, membership,
-write-once, negation, and the fail-closed `witnessed` under `not`. -/
+/-- A compound policy exercising the equality fragment: two atoms, membership, write-once,
+and two negations. -/
 def kPol : Pred :=
   Pred.all [.eq "y" 2, .memberOf "x" [1, 3, 5], .writeOnce "z",
-            .not (.eq "x" 6), .not (.witnessed ⟨"vk"⟩)]
+            .not (.eq "x" 6), .not (.eq "y" 4)]
 
 /-- A hostile post-state: `x = 6` violates BOTH the membership and the negated equality. -/
 def kBad : State := ⟨[("x", 6), ("y", 2), ("z", 4)]⟩
@@ -1996,11 +2065,21 @@ example : ¬ systemAccepts (stepAsg kOld kNew (fun _ _ => (0 : ZMod 7)))
     (lower CompilerProfile.disabled (.le "x" 9)) :=
   lower_le_disabled_refuses "x" 9 _
 
-/-- *Fail-closed composition, COMPUTED*: `¬witnessed` is first-party TRUE and its
-compilation accepts — the escape hatch's fail-closed indicator composes under negation. -/
-example : systemAccepts
+/-- *Refusal, COMPUTED*: the very step on which first-party `eval` reads `¬witnessed` as true
+(below) is refused by the compiled system at the honest generator's aux values. -/
+example : ¬ systemAccepts
     (stepAsg kOld kNew (wit CompilerProfile.disabled (.not (.witnessed ⟨"vk"⟩)) kOld kNew (F := ZMod 7)))
-    (lower CompilerProfile.disabled (.not (.witnessed ⟨"vk"⟩))) := by decide
+    (lower CompilerProfile.disabled (.not (.witnessed ⟨"vk"⟩))) :=
+  lower_not_witnessed_refuses _ _ _
+
+/-- Why the refusal is needed: first-party `eval` fails `witnessed` closed, so its negation
+is true on every step. -/
+example : Minidregg.Pred.eval (.not (.witnessed ⟨"vk"⟩)) kOld kNew = true := by decide
+
+/-- Premise inhabitation for `supported_no_witnessed`: the keystone law is supported and,
+accordingly, mentions no `witnessed` leaf. -/
+example : mentionsWitnessed kPol = false :=
+  supported_no_witnessed CompilerProfile.disabled kPol (by decide)
 
 /-- *Subsumption, instantiated (ZMod 7)*: on `kNew` (where `x = 5`), the compiled
 booleanity POLICY and the hand `boolGadget` on the same value agree — here both REJECT

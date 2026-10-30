@@ -2078,6 +2078,59 @@ theorem BranchAccepted.planVerdict_true [DecidableEq F]
 #assert_axioms admit_some_of_bind planVerdict_of_verifies BranchAccepted.planVerdict_true
 #assert_axioms Pending.judgeBranch_policyRejected Pending.admitBranch_policyRejected
 
+/-- A law mentioning `witnessed` fails the plan verdict: it is outside `supported`. -/
+theorem planVerdict_witnessed_false [DecidableEq F] {config : ComposedPolicyAdmission.Config F}
+    (law : ComposedPolicyAdmission.PreparedLaw config)
+    (witnessed : mentionsWitnessed law.predicate = true) : planVerdict law = false := by
+  simp [planVerdict, unsupported_of_mentionsWitnessed config.profile.compiler witnessed]
+
+/-- **No accepted branch resolves a law with a `witnessed` leaf.** -/
+theorem BranchAccepted.no_witnessed [DecidableEq F]
+    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {height : Height} {pending : Pending prepared height} {branch : Branch descriptor}
+    (accepted : BranchAccepted pending branch)
+    (law : ComposedPolicyAdmission.PreparedLaw (pending.branchConfig branch)) :
+    mentionsWitnessed law.predicate = false := by
+  cases witnessed : mentionsWitnessed law.predicate
+  · rfl
+  · have verdict := accepted.planVerdict_true law
+    rw [planVerdict_witnessed_false law witnessed] at verdict
+    cases verdict
+
+/-- Teeth at admission: a branch whose law mentions `witnessed` (for instance
+`not (witnessed vk)`) is never judged admitted. It is refused before the law is read
+(`policyUnavailable`, `policyBinding`) or, past binding, by name as `policyUnsupported`. -/
+theorem Pending.judgeBranch_witnessed [DecidableEq F]
+    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {height : Height} (pending : Pending prepared height) (branch : Branch descriptor)
+    (evidence : Evidence (pending.branchConfig branch).portal (oldAuthority prepared)
+      (branchRequest prepared height branch).2)
+    (law : ComposedPolicyAdmission.PreparedLaw (pending.branchConfig branch))
+    (resolved : (pending.branchConfig branch).resolve? = some law)
+    (witnessed : mentionsWitnessed law.predicate = true) :
+    ∃ reason, pending.judgeBranch branch evidence = .error reason ∧
+      (reason = .policyUnavailable ∨ reason = .policyBinding ∨ reason = .policyUnsupported) := by
+  unfold Pending.judgeBranch
+  try dsimp only
+  split
+  next =>
+    split
+    next =>
+      split
+      next => exact ⟨_, rfl, .inl rfl⟩
+      next resolvedLaw resolvedExact =>
+        obtain rfl := Option.some.inj (resolved.symm.trans resolvedExact)
+        split
+        next => exact ⟨_, rfl, .inr (.inl rfl)⟩
+        next =>
+          rw [if_pos (unsupported_of_mentionsWitnessed
+            (pending.branchConfig branch).profile.compiler witnessed)]
+          exact ⟨_, rfl, .inr (.inr rfl)⟩
+    next => exact ⟨_, rfl, .inl rfl⟩
+  next => exact ⟨_, rfl, .inl rfl⟩
+
+#assert_axioms planVerdict_witnessed_false BranchAccepted.no_witnessed Pending.judgeBranch_witnessed
+
 def Pending.admitBranchNative [DecidableEq F]
     {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
     {height : Height} (pending : Pending prepared height) (branch : Branch descriptor)

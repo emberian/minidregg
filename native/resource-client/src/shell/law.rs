@@ -28,7 +28,9 @@
 //! install 4, revoke 5, append 7, place 10 (bearing a cell into a room). `monotone` and `writeOnce` compare the old and new
 //! views of one slot; they take only a field's `after` view, because the old
 //! and new views of `before` and `delta` coincide and the atom could never
-//! refuse. The Host renders a refused clause in this same grammar.
+//! refuse. `writeOnce` protects only a NONZERO value: 0 is the unwritten
+//! sentinel (`Pred.eval_writeOnce_zero_rewritable`), so a field holding 0 may be
+//! rewritten. The Host renders a refused clause in this same grammar.
 //!
 //! `ran N` (K-RAN, policy tag 14) holds when the controller projects
 //! `run/program/N`: the command carried a run claim for program N that the
@@ -36,9 +38,10 @@
 //! The Host renders it `ran N`.
 //!
 //! There is no `witnessed` clause: Mini admits by re-execution, and with no
-//! proof system in admission (decision 10-01) the `witnessed` atom compiles to
-//! false, so a law that named it would refuse every write. The grammar refuses
-//! the word instead of offering a clause that can never hold.
+//! proof system in admission (decision 10-01) the `witnessed` atom has no
+//! discharge. Under `not` it would hold on every write, so the compiler refuses
+//! any law containing it (`Compiler.supported_no_witnessed`), and the grammar
+//! refuses the word.
 //!
 //! The slot-to-slot atoms (`eqSlots`, `leSlots`, `leSlotsOff`) are spelled the way
 //! the Host renders them (`Compiler/RefusalReason.lean` `renderClause`):
