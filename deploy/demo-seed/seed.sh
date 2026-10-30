@@ -228,24 +228,28 @@ if install_app Etherpad; then
     else fail_ "Etherpad pad import: HTTP $c $(tail -c 400 "$T/body" | tr '\n' ' ')"; fi
   else fail_ "Etherpad: could not open $G"; fi
 fi
-if install_app "Hacker Slides"; then
+# The featured deck app is our reveal.js package (apps/interfaces/revealjs.json, app vku2z...): the grain keeps one
+# deck at /var/deck.md and its web root renders it. deck.replace is PUT /deck.md (204); deck.read is GET /deck.md.
+DECK_APP="reveal.js markdown decks"
+if install_app "$DECK_APP"; then
   if open_grain "$G"; then
     www=$(sed -E 's#^(https?://[^./]+)\.#\1-www.#' <<<"$ORIGIN")
-    # The editor's PUT saves /var/slides.md and republishes it as /var/www/slides.md.
-    # There is no separate publish endpoint; the static deck loads this public markdown.
-    c=$(web "$G" PUT /slides.md -H 'Content-Type: text/markdown' --data-binary @"$D/apps/slides/slides.md")
-    if [ "$c" = 200 ]; then
-      c=$(curl -sS --max-time 120 -o "$T/deck" -w '%{http_code}' "$www/slides.md")
-      if [ "$c" = 200 ] && grep -Fq '# Mini, in four slides' "$T/deck"; then DECK_URL=$www; ok_ "Hacker Slides deck saved and published at $www"
-      else fail_ "Hacker Slides public slides.md: HTTP $c"; fi
-    else fail_ "Hacker Slides save: HTTP $c"; fi
-  else fail_ "Hacker Slides: could not open $G"; fi
+    c=$(web "$G" PUT /deck.md -H 'Content-Type: text/markdown' --data-binary @"$D/apps/slides/slides.md")
+    if [ "$c" = 204 ] || [ "$c" = 200 ]; then
+      c=$(web "$G" GET /deck.md)
+      if [ "$c" = 200 ] && grep -Fq '# Mini, in four slides' "$T/body"; then
+        c=$(curl -sS --max-time 120 -o "$T/deck" -w '%{http_code}' "$www/")
+        if [ "$c" = 200 ]; then DECK_URL=$www; ok_ "reveal.js deck written, read back and published at $www"
+        else fail_ "reveal.js public deck page: HTTP $c"; fi
+      else fail_ "reveal.js deck readback: HTTP $c"; fi
+    else fail_ "reveal.js deck write: HTTP $c"; fi
+  else fail_ "reveal.js: could not open $G"; fi
 fi
 # a deck already published by an earlier run
-if [ -z "$DECK_URL" ] && G=$(grain_of "Hacker Slides") && [ -n "$G" ]; then
+if [ -z "$DECK_URL" ] && G=$(grain_of "reveal.js") && [ -n "$G" ]; then
   as "$BOX" "apps status $G --json" && o=$(jq -r '.. | .origin? // empty' <<<"$OUT" | head -1)
   if [ -n "${o:-}" ]; then w=$(sed -E 's#^(https?://[^./]+)\.#\1-www.#' <<<"$o")
-    c=$(curl -sS --max-time 60 -o "$T/deck" -w '%{http_code}' "$w/") && [ "$c" = 200 ] && grep -qi 'Mini, in' "$T/deck" && DECK_URL=$w; fi
+    c=$(curl -sS --max-time 60 -o "$T/deck" -w '%{http_code}' "$w/") && [ "$c" = 200 ] && DECK_URL=$w; fi
 fi
 
 # --- 8. the welcome document (last: it links everything and names the deck), then the public front page
