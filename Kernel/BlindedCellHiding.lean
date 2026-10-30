@@ -152,7 +152,11 @@ def BudgetMeaningful {Strategy : Type} (budgeted distinguisher : Strategy → Pr
 
 /-- Statement (H), in rational form. The hidden-choice witness must be one of
 the named distinguishers (so a legal challenge with a genuine hidden difference
-is attacked by the teeth tests), and the budget must admit every distinguisher.
+is attacked by the teeth tests), the budget must admit every distinguisher, and
+the bound must be below one (a bound of one or more accepts perfect
+disclosure). Open: `distinguisher` must be instantiated by concrete attack
+strategies of the game interpreter; a predicate that merely labels a constant
+strategy does not close the hole.
 Finite probability gaps are already <= 1, so this uncapped rational bound is
 equivalent to capping its RHS at 1.
 For independent uniform masks, take fNum = 0. No numerical budget is supplied
@@ -162,6 +166,8 @@ def RatchetHidingGoal {Strategy : Type}
     (run : Strategy → Bool → Fin tapes → Bool)
     (legal budgeted hiddenDiff distinguisher : Strategy → Prop) : Prop :=
   0 < den ∧ queries < 2 ^ lambda ∧
+  2 * (fNum + zNum) * (2 ^ lambda - queries) + 2 * versions * queries * den <
+    den * (2 ^ lambda - queries) ∧
   BudgetMeaningful budgeted distinguisher ∧
   HasHiddenChoice legal distinguisher hiddenDiff ∧
   TranscriptHiding tapes
@@ -177,7 +183,8 @@ def StandardModelHidingGoal {Strategy : Type}
     (tapes versions fNum pNum zNum den : Nat)
     (run : Strategy → Bool → Fin tapes → Bool)
     (legal budgeted hiddenDiff distinguisher : Strategy → Prop) : Prop :=
-  0 < den ∧ BudgetMeaningful budgeted distinguisher ∧
+  0 < den ∧ 2 * (fNum + versions * pNum + zNum) < den ∧
+  BudgetMeaningful budgeted distinguisher ∧
   HasHiddenChoice legal distinguisher hiddenDiff ∧
   TranscriptHiding tapes (2 * (fNum + versions * pNum + zNum)) den
     run legal budgeted
@@ -304,32 +311,57 @@ def maskedTrieCommitment {K V D Context Mask : Type} [DecidableEq K]
     (entries : List (K × V)) : D :=
   outer context mask (Minidregg.Theory.AuthTrie.root dig bitsOf L entries)
 
-/-- The outer wrapper's binding event: two distinct (mask, inner root) inputs
-under one context with one output. -/
-def OuterCollision {D Context Mask : Type} (outer : Context → Mask → D → D)
-    (context : Context) : Prop :=
-  ∃ mask mask' inner inner', (mask, inner) ≠ (mask', inner') ∧
-    outer context mask inner = outer context mask' inner'
+section MaskedTrie
 
-/-- **Binding target (statement).** Two entry lists with one commitment under one
-context give every key the same last value, or exhibit an outer collision, or a
-trie-node collision. Premises: every path has the public length `L`, and paths
-are injective on each list's live keys (index collisions are a separate,
-counted event in `AuthTrie`). Teeth: with `outer` constant the outer-collision
-disjunct is always available (a constant commitment hides and does not bind);
-with an injective `outer` and an injective `dig` (`AuthTrie.spelled`) both
-collision disjuncts are false, so two lists with different last values must have
-different commitments. Satisfiable: equal lists. -/
-def MaskedTrieBinding {K V D Context Mask : Type} [DecidableEq K]
-    (dig : Minidregg.Theory.AuthTrie.NodeIn K V D → D) (bitsOf : K → List Bool) (L : Nat)
+open Minidregg.Theory.AuthTrie (NodeIn root lastVal CollisionAmong TreeNode ClimbNode entries canon)
+open Minidregg.Theory.AuthTrie.Cache (PathsInjective build root_lastVal_eq)
+
+variable {K V D Context Mask : Type} [DecidableEq K] [DecidableEq V] [DecidableEq D]
+
+/-- The nodes one binding comparison hashes: the canonical tree over `entries`
+and the climb of the honest opening of `k` built from `entries'`. A collision
+must be AMONG these (finitely many, fixed by the two lists), never an unrelated
+global collision, which a fixed-width digest always has. -/
+def bindingNodes (dig : NodeIn K V D → D) (bitsOf : K → List Bool) (L : Nat)
+    (lengths : ∀ k, (bitsOf k).length = L) (entries' entries'' : List (K × V)) (k : K) :
+    NodeIn K V D → Prop := fun x =>
+  TreeNode dig L (entries bitsOf (canon entries')) x ∨
+    ClimbNode dig ((build (dig := dig) lengths entries'').opening k).terminal
+      ((bitsOf k).take ((build (dig := dig) lengths entries'').opening k).siblings.length)
+      ((build (dig := dig) lengths entries'').opening k).siblings x
+
+/-- **Binding (proved).** Two entry lists with one commitment under one context:
+either the two compared outer inputs `(mask, inner root)` differ (an outer
+collision ON THOSE INPUTS), or every key has the same last value unless two
+distinct nodes among that key's comparison nodes share a digest. Premises: every
+path has the public length `L` and paths are injective on each list's live keys
+(index collisions are excluded here and must be preserved by admission or
+counted). Teeth: a constant `outer` always takes the first disjunct; with an
+injective `outer` and an injective `dig` (`AuthTrie.spelled`) only the second
+remains with no collision, so lists with different last values must commit
+differently. -/
+def MaskedTrieBinding (dig : NodeIn K V D → D) (bitsOf : K → List Bool) (L : Nat)
     (outer : Context → Mask → D → D) : Prop :=
-  (∀ k, (bitsOf k).length = L) →
-  ∀ context mask mask' (entries entries' : List (K × V)),
-    Minidregg.Theory.AuthTrie.Cache.PathsInjective bitsOf entries → Minidregg.Theory.AuthTrie.Cache.PathsInjective bitsOf entries' →
-    maskedTrieCommitment dig bitsOf L outer context mask entries =
-      maskedTrieCommitment dig bitsOf L outer context mask' entries' →
-    (∀ k, Minidregg.Theory.AuthTrie.lastVal entries k = Minidregg.Theory.AuthTrie.lastVal entries' k) ∨
-      OuterCollision outer context ∨ Minidregg.Theory.AuthTrie.Collision dig
+  ∀ (lengths : ∀ k, (bitsOf k).length = L) context mask mask' (entries' entries'' : List (K × V)),
+    PathsInjective bitsOf entries' → PathsInjective bitsOf entries'' →
+    maskedTrieCommitment dig bitsOf L outer context mask entries' =
+      maskedTrieCommitment dig bitsOf L outer context mask' entries'' →
+    (mask, root dig bitsOf L entries') ≠ (mask', root dig bitsOf L entries'') ∨
+      ∀ k, lastVal entries'' k = lastVal entries' k ∨
+        CollisionAmong dig (bindingNodes dig bitsOf L lengths entries' entries'' k)
+
+theorem maskedTrieBinding_holds (dig : NodeIn K V D → D) (bitsOf : K → List Bool) (L : Nat)
+    (outer : Context → Mask → D → D) : MaskedTrieBinding dig bitsOf L outer := by
+  intro lengths context mask mask' entries' entries'' inj inj' _
+  by_cases same : (mask, root dig bitsOf L entries') = (mask', root dig bitsOf L entries'')
+  · right
+    intro k
+    exact root_lastVal_eq lengths inj inj' (Prod.mk.inj same).2 k
+  · exact Or.inl same
+
+#assert_axioms maskedTrieBinding_holds
+
+end MaskedTrie
 
 /-
 SATISFIABLE / TEETH / PREMISE-INHABITATION SKETCHES (not proved here)

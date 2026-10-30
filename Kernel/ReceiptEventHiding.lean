@@ -40,7 +40,8 @@ ids of the two worlds are indistinguishable to budgeted readers
 same-leakage rule).
 
 A meaningful budget admits at least the reader's own hashing of byte strings
-it chooses (`BudgetAdmitsPublicHash`: point and support-membership tests), and a
+it chooses, up to a query bound (`BudgetAdmitsPublicHash`: point and
+support-membership tests; unbounded lists would enumerate a finite support), and a
 meaningful gap is below one; every statement here that claims hiding carries
 both premises.
 
@@ -110,14 +111,17 @@ def ReceiptUnlinkable {View : Type} (tapes num den : Nat) (viewOf : Fin tapes �
 /-- The reader's own hashing: test whether the event id is among the hashes of
 byte strings it chooses from its view. Point tests (one query) and
 support-membership tests (many) are both of this form. -/
-def PublicHashTest {View : Type} (hash : List UInt8 → Digest) (reader : Reader View) : Prop :=
-  ∃ queries : View → List (List UInt8),
+def PublicHashTest {View : Type} (queryBound : Nat) (hash : List UInt8 → Digest)
+    (reader : Reader View) : Prop :=
+  ∃ queries : View → List (List UInt8), (∀ view, (queries view).length ≤ queryBound) ∧
     reader = fun view eventId => decide (eventId ∈ (queries view).map hash)
 
-/-- A budget is meaningful only if it admits every public-hash test. -/
-def BudgetAdmitsPublicHash {View : Type} (hash : List UInt8 → Digest)
+/-- A budget is meaningful only if it admits every public-hash test of up to
+`queryBound` queries. The bound is essential: an unbounded query list can
+enumerate a whole finite support, which no real reader can. -/
+def BudgetAdmitsPublicHash {View : Type} (queryBound : Nat) (hash : List UInt8 → Digest)
     (budgeted : Reader View → Prop) : Prop :=
-  ∀ reader, PublicHashTest hash reader → budgeted reader
+  ∀ reader, PublicHashTest queryBound hash reader → budgeted reader
 
 /-- The cryptographic obligation, as a hybrid: each world's event ids are
 indistinguishable, to budgeted readers holding the common view, from ONE
@@ -147,11 +151,11 @@ holds, whatever the common view. -/
 theorem fingerprint_links {View : Type} {tapes num den : Nat} (viewOf : Fin tapes → View)
     (hash : List UInt8 → Digest) (named : Bool → List UInt8)
     (distinct : hash (named false) ≠ hash (named true))
-    {budgeted : Reader View → Prop} (meaningful : BudgetAdmitsPublicHash hash budgeted)
+    {budgeted : Reader View → Prop} (meaningful : BudgetAdmitsPublicHash 1 hash budgeted)
     (small : num < den) :
     ¬ ReceiptUnlinkable tapes num den viewOf (fun world _ => hash (named world)) budgeted := by
   intro unlinkable
-  have admitted := meaningful _ ⟨fun _ => [named false], rfl⟩
+  have admitted := meaningful _ ⟨fun _ => [named false], fun _ => le_refl _, rfl⟩
   exact not_gapAtMost_of_separating small (by simp) (fun _ => by simpa using distinct.symm)
     (unlinkable _ admitted)
 
@@ -175,7 +179,7 @@ theorem legacy_receipt_links {View : Type} {tapes num den : Nat} (viewOf : Fin t
     (domain semantics : Digest) (command : Bool → Command)
     (distinct : effectsDigest domain semantics (command false) ≠
       effectsDigest domain semantics (command true))
-    {budgeted : Reader View → Prop} (meaningful : BudgetAdmitsPublicHash effectsHash budgeted)
+    {budgeted : Reader View → Prop} (meaningful : BudgetAdmitsPublicHash 1 effectsHash budgeted)
     (small : num < den) :
     ¬ ReceiptUnlinkable tapes num den viewOf
       (fun world _ => effectsDigest domain semantics (command world)) budgeted :=
@@ -202,6 +206,8 @@ structure Challenge (tapes : Nat) (View : Type) where
   signsCommand : ∀ world tape, (signedOf world tape).commandBytes = commandCodec.encode (command world)
   honestSigner : ∀ world tape,
     (signedOf world tape).authorityEnvelope = sign tape (commandCodec.encode (command world))
+  /-- Native verification takes a 64-byte signature (`CredentialSignatureIO`). -/
+  signatureWidth : ∀ tape message, (sign tape message).length = 64
 
 /-- The event ids a challenge's receipts carry under the current code. -/
 def Challenge.eventIdOf {tapes : Nat} {View : Type} (challenge : Challenge tapes View)
@@ -213,22 +219,22 @@ def Challenge.eventIdOf {tapes : Nat} {View : Type} (challenge : Challenge tapes
 one, and a budget that admits the reader's own hashing (both the retired effects
 hash and the current event hash), the receipts of the current code are
 unlinkable at `num/den` given the common view. -/
-def DeclaredReceiptHiding {View : Type} (tapes num den : Nat) (challenge : Challenge tapes View)
-    (budgeted : Reader View → Prop) : Prop :=
+def DeclaredReceiptHiding {View : Type} (tapes queryBound num den : Nat)
+    (challenge : Challenge tapes View) (budgeted : Reader View → Prop) : Prop :=
   num < den ∧
-  BudgetAdmitsPublicHash effectsHash budgeted ∧
-  BudgetAdmitsPublicHash eventIdOfSigned budgeted ∧
+  BudgetAdmitsPublicHash queryBound effectsHash budgeted ∧
+  BudgetAdmitsPublicHash queryBound eventIdOfSigned budgeted ∧
   ReceiptUnlinkable tapes num den challenge.viewOf challenge.eventIdOf budgeted
 
 /-- The keystone follows from the named cryptographic obligation. -/
-theorem declaredReceiptHiding_of_idealReplacement {View : Type} {tapes num den : Nat}
+theorem declaredReceiptHiding_of_idealReplacement {View : Type} {tapes queryBound num den : Nat}
     (challenge : Challenge tapes View) {budgeted : Reader View → Prop}
     (small : num + num < den)
-    (effects : BudgetAdmitsPublicHash effectsHash budgeted)
-    (current : BudgetAdmitsPublicHash eventIdOfSigned budgeted)
+    (effects : BudgetAdmitsPublicHash queryBound effectsHash budgeted)
+    (current : BudgetAdmitsPublicHash queryBound eventIdOfSigned budgeted)
     {ideal : Fin tapes → Digest}
     (replace : IdealReplacement tapes num den challenge.viewOf challenge.eventIdOf ideal budgeted) :
-    DeclaredReceiptHiding tapes (num + num) den challenge budgeted :=
+    DeclaredReceiptHiding tapes queryBound (num + num) den challenge budgeted :=
   ⟨small, effects, current, unlinkable_of_idealReplacement replace⟩
 
 #assert_axioms declaredReceiptHiding_of_idealReplacement
@@ -266,12 +272,12 @@ worlds' ids differ on every tape. -/
 theorem pad_unlinkable_with_hidden_choice :
     ReceiptUnlinkable 2 0 1 (fun _ => ()) (padEventId 2 fun world => if world then 1 else 0)
       (fun _ => True) ∧
-    BudgetAdmitsPublicHash (View := Unit) effectsHash (fun _ => True) ∧
-    BudgetAdmitsPublicHash (View := Unit) eventIdOfSigned (fun _ => True) ∧
+    (∀ queryBound, BudgetAdmitsPublicHash (View := Unit) queryBound effectsHash (fun _ => True)) ∧
+    (∀ queryBound, BudgetAdmitsPublicHash (View := Unit) queryBound eventIdOfSigned (fun _ => True)) ∧
     ∀ tape, padEventId 2 (fun world => if world then 1 else 0) false tape ≠
       padEventId 2 (fun world => if world then 1 else 0) true tape := by
-  refine ⟨unlinkable_of_idealReplacement (pad_idealReplacement 2 _), fun _ _ => trivial,
-    fun _ _ => trivial, ?_⟩
+  refine ⟨unlinkable_of_idealReplacement (pad_idealReplacement 2 _), fun _ _ _ => trivial,
+    fun _ _ _ => trivial, ?_⟩
   decide
 
 #assert_axioms pad_unlinkable_with_hidden_choice
