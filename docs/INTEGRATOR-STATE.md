@@ -46,7 +46,7 @@ iteration-speed lane for a second-tree or cached umbrella stage.
 | 719d7b7aa | READY 11:35, first clean manifest: app-reds batch 1 (OwnTracks, WBO, controller-world tests), proofs 0ca243107, scout KC |
 | 719d7b7aa umbrellas | red: Fixtures.NativeDocWriteFixture, NativeAcceptedFixture (fixed in 06831831c), TokenCensus (unlisted private PersistentHistory.mk; fixed by 274a2534c) |
 | 274a2534c | queued behind 06831831c (staging only until built): PersistentHistory constructor public |
-| 06831831c | building 12:04: + app-reds declarations eb4b396f6 (Mercurial, Sudoku, Blockstack), proofs fixtures f5d351a96 (NativeAccepted/NativeDocWrite under ruling (c)) |
+| 06831831c | READY 12:08 (named to infra and scout): + app-reds declarations eb4b396f6 (Mercurial, Sudoku, Blockstack), proofs fixtures f5d351a96 (NativeAccepted/NativeDocWrite under ruling (c)) |
 
 JPAY6: bisect shows every candidate back to d9661be99 fails the same two plant rows; likely the row's own fixture
 (consent_230 authors the purse via `author birth-intent`, the plain canonical kind, not a grain-backed source). Scout is
