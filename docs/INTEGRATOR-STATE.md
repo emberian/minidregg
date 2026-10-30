@@ -36,6 +36,12 @@ door stranger/invite/lobby, public cold/first/warm; https://demo.dregg.online/ =
 - private-cells: 55a00e330 (fix: 0 < queryBound, teeth public_signature_refutes) merged as 4db04df8e; building as its own
   candidate 7d90da717 (integ-build4 + Minidregg umbrella, build.pid); main after host green. Was HELD on 0e43b648c: Kimi found DeclaredReceiptHiding vacuous at queryBound = 0 (ReceiptEventHiding.lean:222-238);
   lane fixing (require 0 < queryBound). Codec epoch change; lands as its own candidate; fresh genesis after.
+- Interim smoke 21:22 (fresh be4ef7510 world): (a) door GREEN, (b) story GREEN, (e) public GREEN (200, cold 0.3 s);
+  (c) apps in flight (EtherCalc, Etherpad accepted after config hotpatch + refusals cleared + frame's missing
+  dbus-user-session; Etherpad earlier hit op66-plan "launch BEGIN authorization, descriptor or action shape refused";
+  Hacker Slides not in quarantine: seed may still use the old appId instead of reveal.js); (d) Hermes RED: with the
+  namespace hotfix, hermes.create now fails "current birth Host reply has the wrong opcode or intent bound" (8
+  generations, no signed call retained). Both product reds to app-reds a17f4172949caca14.
 Ruling: deploy-script fixes keep be4ef7510's verdicts (no composed rerun); a Rust fix means a new cut.
 The restart `continuous` red was the resident's own output document moving its maintenance revision; be4ef7510's
 maintenance_fingerprint leaves out documents the resident writes.
