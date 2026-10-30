@@ -161,7 +161,7 @@ def root_handoffs(binding, receiving):
         # table) and, outside a systemd root, cannot restart the broker: the harness's broker supervisor does that within a
         # few seconds. The act is idempotent until its ack exists, so a broker that is not yet ready is retried.
         for attempt in range(6):
-            done = subprocess.run(["sudo", "-n", *env, sys.executable, "-I", str(entry), *words],
+            done = subprocess.run(["sudo", "-n", "sh", "-c", 'umask 022; exec "$@"', "sh", *env, sys.executable, "-I", str(entry), *words],
                                   stdin=subprocess.DEVNULL, capture_output=True, check=False)
             if done.returncode == 0 or not any(m in done.stderr for m in (b"credentials-not-configured", b"broker-unavailable", b"did not come up")):
                 break
