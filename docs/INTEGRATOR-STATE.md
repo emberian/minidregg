@@ -115,6 +115,9 @@ Kernel/SnapRepresents:146, Selvage/OracleLogLinkedTwoPhaseGame:209. Asked: Asser
   19.9 s (one submit per template line; batch into one proposal), `chat new` 3.0 s, `chat invite` 2.4 s, first credit
   2.0 s vs 0.5 s warm write; E11 restart 9.6 s and first signed read after it 8.0-8.6 s at height 160-190 (cold-start
   snapshots); certify 16.9 s at a 256 tail with writes halted meanwhile, about 2.7 writes/s from three members.
+  Follow-up: restart's first signed read is O(height), a law-17 red: 8.0-8.6 s at head 160-190, 23.4 s at head 769
+  (restart.sh 26.0 s); cold-start snapshots fix it. Certify at a fixed 256 tail: 16.9 / 32.2 / 12.2 s at heads 257/512/768,
+  not monotone (box load); at least ~12 s of halted writes per tail. Driver hbox:/ci/xp-log/f1.sh.
 - Hummingbird live receiving path: app-reds building a j14apps()-style run.
 - fleetsign 1/100 under full parallel load (attempt plan.frame missing): scout reproducing; core client if confirmed.
 - Scout's twelve demo steps never ran on c7aa7e8c4 (journey budget spent); rerunning on 06831831c with a 12000 s timeout.
