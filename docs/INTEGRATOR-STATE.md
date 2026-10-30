@@ -56,7 +56,7 @@ Name every new candidate to infra and the scout. Cut a candidate per landing bat
 gate12: `EDGE_REV=69c17a3 JWORLD_MANAGEMENT=distinct KEEP_WORLD=1 PORT=.. JWORLD_ROUTE_FRONT_PORT=.. bash gate12.sh SHA`
 (gate10 + j14-apps; j14 inputs integ/j14-hroot, j14-data, j14-secrets; run under /ci). Down a kept world with the
 candidate's scripts/spk-platform/world-down.sh RUN/inputs, then dregg-infra-69c17a3/edge/mini/journey/jworld-scratch.sh
-down RUN/w (as hbox with XDG_RUNTIME_DIR/DBUS); log DOWN. Kept now: /ci/c-41590f (down when convenient).
+down RUN/w (as hbox with XDG_RUNTIME_DIR/DBUS); log DOWN. No world kept up.
 Stray processes with no PID file (not killed; tell ember): four `mini web --body` jweb-frontend children from old gates
 (pids 806516, 2013999 from the predecessor's candidates; 1482603 from 8cb74aba5, 1728806 from c4264f9cb).
 
