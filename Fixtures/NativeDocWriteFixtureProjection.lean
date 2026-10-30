@@ -47,7 +47,7 @@ checks, which cells it writes (by kind) and guards, what the document holds afte
 and what it is charged. -/
 def projectDocWrite (deployment : CanonicalCellRegistry.Deployment)
     (command : DeclaredResourceController.Command) (record : IntentRecord) (receipts : List Nat)
-    (callBytes : Nat) (legs : List (World.Leg Minidregg.Kernel.DeployedBridge.deployedR)) :
+    (ingress : List UInt8) (legs : List (World.Leg Minidregg.Kernel.DeployedBridge.deployedR)) :
     List Line :=
   let targetCells := command.targets.map fun target => target.target
   [("write.verdict", "accepted"),
@@ -64,6 +64,6 @@ def projectDocWrite (deployment : CanonicalCellRegistry.Deployment)
       record.writes.any fun write => write.cellId == guard.cellId)),
    ("write.nullifiers", toString record.nullifiers.length),
    ("write.document.payloadBytes", targetPayloadBytes command record)] ++
-  chargeLines "write" docWriteRelative callBytes legs record
+  chargeLines "write" docWriteRelative ingress legs record
 
 end Minidregg.Fixtures.NativeDocWriteFixtureProjection
