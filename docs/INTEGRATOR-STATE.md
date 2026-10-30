@@ -26,8 +26,12 @@ door stranger/invite/lobby, public cold/first/warm; https://demo.dregg.online/ =
   rewritten on each candidate switch. No candidate cut needed.
 - Fresh be4ef7510 world (true regenesis, infra f8f7bc1): hermes.create red: install-hermes:447 sets the grain-create
   spec namespaceRoot=$NODE/namespace (operator-owned); the resident-run `grain-runtime create` propose refuses it (mini-sdk
-  private.rs:44). Not a chmod: the namespace keeps the sponsor's ids collision-free. Routed to app-reds a17f4172949caca14.
-- private-cells 0e43b648c HELD: Kimi found DeclaredReceiptHiding vacuous at queryBound = 0 (ReceiptEventHiding.lean:222-238);
+  private.rs:44). Fixed by app-reds 5f22e6324 (resident phase uses its own private namespace;
+  disjointness from the Host's collision refusal of random 63-bit reservations). Hotpatch: grain-runtime built from
+  be4ef7510 + 5f22e6324 at hbox:/home/hbox/lanes/integ/tests-target/release/grain-runtime (sha256 99917187...), overlaid by
+  infra on the live world. Apps installs hotpatched in the live grain-host.json (real candidate dir, market-large-v1).
+- private-cells: 55a00e330 (fix: 0 < queryBound, teeth public_signature_refutes) merged as 4db04df8e; building as its own
+  candidate 7d90da717 (integ-build4 + Minidregg umbrella, build.pid); main after host green. Was HELD on 0e43b648c: Kimi found DeclaredReceiptHiding vacuous at queryBound = 0 (ReceiptEventHiding.lean:222-238);
   lane fixing (require 0 < queryBound). Codec epoch change; lands as its own candidate; fresh genesis after.
 Ruling: deploy-script fixes keep be4ef7510's verdicts (no composed rerun); a Rust fix means a new cut.
 The restart `continuous` red was the resident's own output document moving its maintenance revision; be4ef7510's
