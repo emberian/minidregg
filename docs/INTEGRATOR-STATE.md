@@ -44,7 +44,9 @@ iteration-speed lane for a second-tree or cached umbrella stage.
 | c7aa7e8c4 | scout full pass (docs/SCOUT-FINDINGS.md on lane/scout): reds JPAY6 (2 plant rows), KC (fixed, landed), fleetsign 1/100 under load, JWF parity (apps verb) |
 | ee29d4fa7, 1890a6647 | proofs-only (umbrella fixes) |
 | 719d7b7aa | READY 11:35, first clean manifest: app-reds batch 1 (OwnTracks, WBO, controller-world tests), proofs 0ca243107, scout KC |
-| 06831831c | queued: + app-reds declarations eb4b396f6 (Mercurial, Sudoku, Blockstack), proofs fixtures f5d351a96 (NativeAccepted/NativeDocWrite under ruling (c)) |
+| 719d7b7aa umbrellas | red: Fixtures.NativeDocWriteFixture, NativeAcceptedFixture (fixed in 06831831c), TokenCensus (unlisted private PersistentHistory.mk; fixed by 274a2534c) |
+| 274a2534c | queued behind 06831831c (staging only until built): PersistentHistory constructor public |
+| 06831831c | building 12:04: + app-reds declarations eb4b396f6 (Mercurial, Sudoku, Blockstack), proofs fixtures f5d351a96 (NativeAccepted/NativeDocWrite under ruling (c)) |
 
 JPAY6: bisect shows every candidate back to d9661be99 fails the same two plant rows; likely the row's own fixture
 (consent_230 authors the purse via `author birth-intent`, the plain canonical kind, not a grain-backed source). Scout is
