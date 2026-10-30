@@ -593,9 +593,19 @@ CONSENT = os.path.join(os.path.dirname(HOST), "minidregg-client-consent")
 rogue = json.load(open(CONFIG_B))
 rogue["providerServices"][0]["tariff"]["routes"]["user"]["perOp"] = str(USER_FEE + 1)
 json.dump(rogue, open(path("rogue-tariff-config.json"), "w"), indent=1)
-def consent_230(author_config, label, source="birth-intent.json"):
+def grain_peer(task, capability):
+    return {"task": str(task), "capability": str(capability), "observeCapability": str(capability),
+            "targetRoot": "0", "before": {"generation": "1", "status": "0", "remaining": "100", "reserved": "0"}}
+# The purse's birth is a grain-backed source (the tool/parent composite, `grain-birth-intent`): that is
+# what the 230 frame consents by the provider-route check alone. The plain `birth-intent` kind authors an
+# ordinary birth, which the thin birth arm owns (234/235) and frame 230 refuses by name.
+json.dump({"subject": birth["subject"], "nonce": birth["nonce"],
+           "grainBirth": {"tariff": {"base": "5", "perBirth": "2"}, "birth": birth["birth"],
+                          "tool": grain_peer(TOOL_TASK, 81), "parent": grain_peer(PARENT, 71)},
+           "grants": birth["grants"]}, open(path("grain-birth-intent.json"), "w"))
+def consent_230(author_config, label, source="grain-birth-intent.json", kind="grain-birth-intent"):
     out = path(f"{label}-birth-intent.bin")
-    subprocess.run([HOST, author_config, "author", "birth-intent", path(source), out],
+    subprocess.run([HOST, author_config, "author", kind, path(source), out],
                    check=True, capture_output=True)
     intent = open(out, "rb").read()
     signer = keys[OPERATOR].verify_key.encode()
@@ -622,7 +632,7 @@ ordinary = json.loads(json.dumps(birth))
 ordinary["nonce"] = ordinary["birth"]["nonce"] = "22001"
 ordinary["birth"]["resources"] = [r for r in ordinary["birth"]["resources"] if r["storage"] == "declared"]
 json.dump(ordinary, open(path("ordinary-birth-intent.json"), "w"))
-plain_op, plain_body = consent_230(CONFIG_B, "ordinary", "ordinary-birth-intent.json")
+plain_op, plain_body = consent_230(CONFIG_B, "ordinary", "ordinary-birth-intent.json", "birth-intent")
 row("discriminator (plant): an ordinary birth on frame 230 is refused for its source; the grain purse birth is not",
     f"ordinary: op 255 '{THIN_BIRTH_REFUSAL}'; purse: op 230, no thin birth refusal",
     f"ordinary: op {plain_op} ({plain_body}); purse: op {ok_op} ({ok_body})",
