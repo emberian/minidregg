@@ -29,6 +29,7 @@ import Theory.LogAccumulator  -- Merkle mountain range over log heights: increme
 import Theory.AuthTrie  -- compressed authenticated binary trie: O(log n) openings, soundness up to a node collision
 import Theory.AuthTrieRange  -- subtree reveals: every member under a key prefix, soundness up to a node collision
 import Theory.AuthTrieCache  -- the compressed trie kept: inserts in O(depth), proved equal to the canonical root; honest openings verify
+import Theory.FiniteTapeGap  -- distinguishing gaps over finite equally likely tapes: triangle, rescaling, permutation invariance
 import Theory.AuthMapCellRoot  -- AuthMap's world level instantiated at `cellRoot := Materializer.rootOf`: materialized cell roots open at the world root, world soundness names the cell store, a validated patch moves the world root along one path
 import Theory.PlanBinding  -- a plan binds (address, value) reads, not a cell root: admission refuses footprintStale only when a read address moved; whole-cell footprint = root binding under the pair carrier; no-TOCTOU; independent plans admitted in both orders and commute; openings at the cell root under the world root, and why signed openings would re-bind the root
 import Theory.CellSlot  -- stable heterogeneous absent/present slots, canonical payload decoding, and monotone identifiers make creation and retirement first-class transitions
