@@ -150,7 +150,7 @@ structure Base (rootBytes : List UInt8 → Digest) (seed : Seed) {store : StoreI
         body.height = height ∧ body.chain = chain ∧ body.state = state) ∧
       ∃ base : Record head height, base.verified.chain = chain) ∨
     ((∃ own : OwnBase rootBytes, own.seed = seed ∧ own.logStart = store.logStart ∧
-        own.height = height ∧ own.chain = chain ∧ own.state = state) ∧
+        own.height = height ∧ own.chain = chain ∧ own.state.get = state) ∧
       ∃ base : Record head height, base.verified.chain = chain)
 
 /-- The latest retained checkpoint at or below `height` (MAC verified under the
@@ -233,7 +233,7 @@ def ownBaseOf (transport : Transport) (rootBytes : List UInt8 → Digest) (seed 
       | .error refusal => return .error refusal
       | .ok baseRecord =>
           if onLog : baseRecord.verified.chain = base.chain then
-            return .ok ⟨base.height, base.chain, base.state,
+            return .ok ⟨base.height, base.chain, base.state.get,
               Or.inr (Or.inr ⟨⟨base, seedExact, started, rfl, rfl, rfl⟩, baseRecord, onLog⟩)⟩
           else return .error (.notIncluded base.height)
     else return .ok genesis

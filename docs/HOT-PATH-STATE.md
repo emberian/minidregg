@@ -63,6 +63,16 @@ more reason for option 1 below to carry across binaries of the same Store epoch.
    CONSENT-OWN; draft statement in the session scratchpad `hpc-consent-sealed-statement.md`;
    statement to the auditor first; Rust frames in mini-sdk consent.rs); option 2 = resume
    from the Store's MAC'd checkpoint (retires CONSENT-OWN: a weakening, needs explicit approval).
+1b. **Anchors across a ship** (for the root, with item 1). `mini_sdk::local::binding` hashes the
+   provider's path, inode, size and mtimes with the settings bytes, so even a byte-identical
+   re-install voids every client's anchor, and every ship makes each client's next provider
+   walk from genesis. Choices: (a) bind to the bytes' sha256 plus settings: as sound as today,
+   but it hashes a ~170 MB provider on every command and saves only same-path re-installs
+   (each candidate installs under its own path): not worth it; (b) bind to the Store epoch, the factory template and the
+   settings (not to `receiverSemanticsFrom`, which hashes the compiled manifest and moves every
+   ship): an anchor admitted by any provider of the same epoch and template is then trusted.
+   That is a new trust premise (an older provider's admission stands until the next epoch), and
+   it needs an explicit rule. `mini consent-full-ready` remains the full re-verification.
 2. **Per-record admission** (~17 ms event-v3, ~140 ms each event-v2): profile with call graphs
    (frame pointers are absent; dwarf perf of the whole audit captured only start-up).
 3. **Consent catch-up is O(records since the client last looked)** for every client: N

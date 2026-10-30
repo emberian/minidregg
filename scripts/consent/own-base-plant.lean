@@ -71,11 +71,13 @@ the probe's root function). -/
 def ownOf (cut : Loaded rootBytes) (zero : cut.baseHeight = 0)
     (seeded : cut.base = DurableCheckpoint.State.ofSeed cut.image.seed) : OwnBase rootBytes :=
   ⟨cut.image.seed, cut.logStart, cut.image.accepted.length, cut.chain,
-    DurableCheckpoint.State.ofSnapshot cut.image cut.snapshot,
+    Thunk.mk fun _ => DurableCheckpoint.State.ofSnapshot cut.image cut.snapshot,
     ⟨cut.image.accepted, rfl, cut.chainExact.symm, cut.snapshot, by
       have folded := cut.resumed
       rw [zero, seeded, DurableCheckpoint.resume_genesis] at folded
-      exact folded, rfl⟩⟩
+      simpa only [Image.ofAccepted_accepted] using folded,
+      by show DurableCheckpoint.State.ofSnapshot cut.image cut.snapshot = _
+         rw [Image.ofAccepted_accepted]⟩⟩
 
 def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   IO.FS.writeBinFile (directory / "key") ((List.range 32).map (fun i => UInt8.ofNat (i * 7 + 3))).toByteArray
@@ -101,7 +103,8 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   require "the honest checkpoint is at 32" (body.height == 32)
   let forged := { body.state with available := fun lane => body.state.available lane + 777 }
   match ← transport.putCheckpoint 32 (DurableCheckpointCodec.checkpointFrame.encode
-      (DurableCheckpointCodec.sealCheckpoint key rootBytes 32 body.chain body.frontier body.indexRoot forged)) with
+      (DurableCheckpointCodec.sealCheckpoint key rootBytes 32 body.chain body.frontier body.indexRoot forged
+        body.system)) with
   | .ok () => pure ()
   | .error detail => throw (IO.userError s!"FAIL put: {detail}")
   let ⟨target, chains, chainsExact⟩ ← match ← loadChained transport rootBytes with
@@ -132,7 +135,7 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
         match ← reader.stateAt height with
         | .ok state => pure (state.baseHeight, budget state.snapshot)
         | .error refusal => throw (IO.userError s!"FAIL stateAt {height}: {refusal.message}")
-      let ownBase := ownOf own zero (by rw [seeded, imaged])
+      let ownBase := ownOf own zero (by rw [seeded, imaged, Image.ofAccepted_seed])
       let operator ← readAt reader 34
       let ownGenesis ← readAt (reader.ownOnly transport []) 34
       let ownAt38 ← readAt (reader.ownOnly transport [ownBase]) 38
