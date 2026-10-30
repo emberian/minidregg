@@ -385,6 +385,11 @@ fn public_front_with_welcome(site: &Site, welcome: Option<Page>) -> Page {
 fn place_index(site: &Site, place: &str) -> Page {
     let mut rows = String::new();
     for name in site.names() {
+        // The shell's `room list` shows only references that name a room; every other reference
+        // (an account, a document, a story cast) is not a room and is not offered as one.
+        if place == "room" && crate::workspace::reference(&site.root, &name).ok().is_none_or(|r| r.get("room").and_then(Value::as_str).is_none()) {
+            continue;
+        }
         rows.push_str(&format!("<li><a href=\"/{place}/{n}\">{n}</a></li>\n", n = escape(&name)));
     }
     let (title, note) = match place {

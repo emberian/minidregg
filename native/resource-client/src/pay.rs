@@ -574,6 +574,9 @@ fn account_reference(session: &Session, name: Option<&str>) -> Result<Value> {
         let entry = entry.map_err(|error| error.to_string())?;
         let file = entry.file_name().to_string_lossy().into_owned();
         if let Some(name) = file.strip_suffix(".json") {
+            // Files that are not reference names (the session also keeps other records, e.g. a
+            // dotted `tl.cast`) cannot be an account reference; they must not abort the scan.
+            if workspace::validate_ref_name(name).is_err() { continue; }
             let reference = workspace::reference(&session.root, name)?;
             if workspace::member(&reference, "kind")? == "account" {
                 accounts.push(reference);
