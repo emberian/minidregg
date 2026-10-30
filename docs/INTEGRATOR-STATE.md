@@ -82,8 +82,12 @@ ofReduceBool, trustCompiler or new axioms are not), what replaced native_decide 
 - Hummingbird live receiving path: app-reds building a j14apps()-style run.
 - fleetsign 1/100 under full parallel load (attempt plan.frame missing): scout reproducing; core client if confirmed.
 - Scout's twelve demo steps never ran on c7aa7e8c4 (journey budget spent); rerunning on 06831831c with a 12000 s timeout.
-- Decisions for root/ember (from proofs): genesis accepts a `witnessed` factory predicate (world then refuses every birth,
-  fail-closed); objective-native-acceptance.py publish-variant runs lean --run without the kernel dynlib (proofs may fix).
+- Ruled 2026-10-30 (root), owned by proofs af4b3ea612564dea5, land as shas: (1) genesis refuses a factory predicate
+  containing `witnessed`, loudly and by name (not fail-closed at every birth); (2) objective-native-acceptance.py
+  publish-variant harness bug fixed (lean --run without the kernel dynlib); (3) the integrator's build regenerates the
+  accepted fixture automatically whenever the Objective front-end identity changes, the Authority-Change commit staying
+  reviewed (proofs implements it with the integrator: a build stage or a pre-candidate step that re-records from the
+  candidate just built and proposes the Authority-Change commit for review).
 - PredCompile.lean:832 comment cites the wrong theorem name (proofs, next batch).
 
 ## Rules
