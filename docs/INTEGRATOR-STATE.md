@@ -43,6 +43,12 @@ door stranger/invite/lobby, public cold/first/warm; https://demo.dregg.online/ =
   namespace hotfix, hermes.create hit "op 91: resource birth target already present": world state (the 20:54 birth had
   completed, then lobby/g/create was removed); recover by restoring that dir or a fresh BASE; 659301aa4 (staging) names
   the NO_RECORD refusal and stops at once. Both product reds to app-reds a17f4172949caca14.
+- 22:17 clean pass (fresh be4ef7510 world, fixes up front): Hermes create, handoff, summon GREEN (with the grain-runtime
+  hotfix, then reverted: overlaying a pinned role binary breaks store-entry's manifest-digest check on the next Store
+  restart; hot-swap must re-pin manifest + SHA256SUMS + Hermes root together; told iteration speed). Many infra fixes in
+  dregg-infra main (registry umask, controller root, PATH, dbus-user-session, broker NoNewPrivileges). Red: hermes.controller
+  "operator control peer UID mismatch": dregg-infra controller-entry runs controller-launch as mini-h-lobby without
+  MINI_OPERATOR_PEER_UID (as_res pins 0); infra fixing. Seed must install reveal.js not Hacker Slides f0277a5d (infra).
 Ruling: deploy-script fixes keep be4ef7510's verdicts (no composed rerun); a Rust fix means a new cut.
 The restart `continuous` red was the resident's own output document moving its maintenance revision; be4ef7510's
 maintenance_fingerprint leaves out documents the resident writes.
