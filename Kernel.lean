@@ -87,6 +87,7 @@ import Kernel.NativeHostServed -- KN2 2b-1: a validated served state (no history
 import Kernel.NativeHostLight -- KN2 2b-1: the validated light opening a session serves ported operations from
 import Kernel.NativeThinConsent  -- thin consent: what a member signs without replaying is what commits (opened_display_is_commit), lying Hosts refused by name
 import Kernel.ContentCommutingAppend  -- appends to one document commute: a commuting content command is computed at the cell it meets (statements; the ruling of 2026-10-28)
+import Kernel.ContentCommutingAppendProofs  -- the commuting-append statements PROVED: the content arm reads the planned root only for commands that do not commute; kept pin, exact exemption, the marker spent, replay refused, the blinded witness and two appenders from one observation
 import Kernel.NativeHostSession
 import Kernel.NativeReserveContinuity
 import Kernel.NativeHostGenesis
