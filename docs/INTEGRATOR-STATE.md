@@ -141,6 +141,10 @@ unchanged; AssertAxioms recognises compiler trust only through the `_native` com
 - flatness-submit (law 17): reported, not blocking; hot-path successor owns it, the blinded-cell ratchet part goes to private cells.
 - Hot-path batch 1 fb0899ff8 merged on staging a75b373bf (bytesBEq: withPtrEq before whole-cell byte compares; per-record
   post-validation flat 4.4-4.9 ms at every height vs 5 -> 17.5 ms; genesis audit at head 769 38.3 -> 32.6 s). Next batch.
+  Batch 2 b57ceceab merged (c019b8756): ConsentAnchor.headState reads Loaded.cells (cached) instead of flattening every
+  write per admission (68% of consent CPU per write); sponsor shell write 2.6 -> 1.65 s flat near head 1,000.
+  For the root: a retained consent anchor is bound to the exact consent executable, so every client walks from genesis
+  after each ship (48 s vs 9.2 s resuming at head ~1,000).
   Hot-path asks the root: may CONSENT-OWN change (for the consent provider's cold start from its own snapshot)?
 - Perf queue (explorer, be4ef7510; owner: hot-path successor, blinded-cell flatness to private cells): E10 `story new --from tale`
   19.9 s (one submit per template line; batch into one proposal), `chat new` 3.0 s, `chat invite` 2.4 s, first credit
