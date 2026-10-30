@@ -76,8 +76,8 @@ ofReduceBool, trustCompiler or new axioms are not), what replaced native_decide 
 | 41590f420 | gate12 distinct: tour 73/73, j14-apps PASS, composed all but residents/restart PASS; forge: residents PASS, restart red at `continuous` (on later harness) |
 | 719d7b7aa | READY, first clean manifest; umbrellas: Native fixtures (fixed later), TokenCensus (fixed later) red |
 | 06831831c | READY (named to scout and infra): app declarations, re-recorded Native fixtures; scout full pass running on it |
-| 4e5faa8d8 | READY 13:20 (host stage 33 min, deep); main contains it. Named to infra successor (distinct composed + continuous diff) and scout. hbox gate12 PHASES="tour enrol j14" running (gate-4e5faa8d, pid gate-4e5f.pid); Minidregg umbrella queued after its umbrellas (minidregg.pid) |
-| 103c6002a | queued (integ-build4, first rerecord stage; expect `unchanged`): + birth_refusal fixture fix c5905db60, proofs rulings fa4193808 (genesis refuses `witnessed` a7a0b3722, objective driver dynlib d8ceb3891, front_end_current + rerecord.sh ff9cf7df6). Proofs verified it with a full candidate incl. the Minidregg umbrella on its side |
+| 4e5faa8d8 | READY 13:20; main contains it. hbox gate12: tour 73/73, j14-apps PASS, enrol PASS, flatness-submit FAIL (reported). CONFIRMED on hbox; infra c-4e5f-d1 distinct composed running: if fully green this is the rehearsal-3 ship. Umbrellas then Minidregg umbrella running |
+| 2e3d16ef7 | queued (integ-build4, first rerecord stage): + c5905db60, proofs rulings fa4193808, commuting-append proofs 04840919d (additive; Kimi review scratchpad integ2/kimi-commute.md) |
 
 ## Open reds and owners
 
