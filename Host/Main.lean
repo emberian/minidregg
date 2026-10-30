@@ -3099,6 +3099,17 @@ def serveFrame (config : NativeHost.Config)
   if (← state.get).isNone then
     throw (IO.userError s!"op {operation}: native host session invalidated")
 
+/-- Seal a checkpoint of a session's own opening at its head (`sealHead` without its second
+cold open). The session first reads any suffix its refresh has not seen; a failed refresh or
+seal loses nothing (the log is complete), and `sealHead` stays the operator verb. -/
+def sealSession (config : NativeHost.Config) (session : NativeHostSession.Session config) : IO Unit := do
+  let .ok current ← NativeHostSession.refresh config session | return
+  let loaded := current.durable
+  if loaded.height = 0 then return
+  let .ok key ← config.transport.key | return
+  let .ok indexRoot ← loaded.headIndexRoot config.transport key | return
+  discard <| DurableReceiverIO.storeCheckpoint config.transport ResourceBirthCodec.rootBytes loaded indexRoot
+
 partial def serveSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (meteringProfile : Lean.Json)
@@ -3109,10 +3120,11 @@ partial def serveSession (config : NativeHost.Config)
     (input output : IO.FS.Stream) : IO Unit := do
   let first ← input.read 1
   if first.isEmpty then
-    -- A clean end of a session that opened its Store seals at the head (HOT-PATH §2(h) item 6);
-    -- a failed seal loses nothing.
-    if (← state.get).isSome then
-      discard <| DurableReceiverIO.sealHead config.transport ResourceBirthCodec.rootBytes
+    -- A clean end of a session that opened its Store seals at the head (HOT-PATH §2(h) item 6),
+    -- from the opening it holds: `sealHead` opened the Store a second time, cold (seconds, growing
+    -- with the log), and a stopped server's Host outlived it (JDV row 140 on a loaded box).
+    if let some session := ← state.get then
+      sealSession config session
     return
   let lengthWire ← readExactly input 4 first
   let length := frameLength lengthWire
