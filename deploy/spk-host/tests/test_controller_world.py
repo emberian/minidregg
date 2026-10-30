@@ -24,6 +24,12 @@ spec.loader.exec_module(c)
 
 class ControllerWorldTests(unittest.TestCase):
     def setUp(self):
+        # Custody refuses group-writable ancestors, and the directories these
+        # tests create inherit the process umask: a 0002 login umask (hbox's
+        # default) would make every fixture directory refusable. The tests
+        # state their own precondition instead of trusting the environment.
+        previous_umask = os.umask(0o022)
+        self.addCleanup(os.umask, previous_umask)
         # /tmp has intentionally untrusted world-write ancestry, so a custody
         # positive belongs beneath the actual operator's protected home.
         self.temp = tempfile.TemporaryDirectory(prefix='.mini-controller-test-', dir=Path.home())
@@ -156,7 +162,9 @@ class ControllerWorldTests(unittest.TestCase):
         self.assertIn('MINI_GRAIN_CONTROLLER_REGISTRATION=' + str(base / 'registrations/9870001.json'), runtime)
         self.assertIn('XDG_RUNTIME_DIR=/run/user/' + str(r['uid']), runtime)
         self.assertIn('ProtectHome=tmpfs\nBindPaths=/run/user/' + str(r['uid']) + '\n', runtime)
-        self.assertNotIn('ProtectHome=tmpfs', units[r['units'][2]].decode())
+        # The operator proxy reaches the controller's private upstream socket under
+        # the home, so it too runs on an empty home tmpfs with only that directory bound.
+        self.assertIn('ProtectHome=tmpfs\n', units[r['units'][2]].decode())
         self.assertEqual(c.worker_state(r), Path(r['home']) / 'grain/state')
         self.assertEqual(c.worker_state(self.record()), Path(r['home']) / 'state')
 
@@ -448,7 +456,8 @@ class ControllerWorldTests(unittest.TestCase):
             with self.assertRaises((ValueError, OSError)):
                 c.copy_worker_tree(source, self.root / 'copied-runtime', self.uid)
         self.assertEqual(secret.read_bytes(), b'private')
-        self.assertEqual(list((self.root / 'copied-runtime').iterdir()), [])
+        # The inventory refuses the link before any destination is created.
+        self.assertFalse((self.root / 'copied-runtime').exists())
 
     def test_birth_transfer_refuses_hardlinks_before_ownership_changes(self):
         root = self.root / 'birth'; root.mkdir(mode=0o700)
@@ -768,6 +777,12 @@ class ControllerWorldTests(unittest.TestCase):
                 reservation.write_text('{"protocol":"broken"}')
                 with self.assertRaises(ValueError):c.occupied_ids()
         with patch.object(c,'occupied_ids',return_value={100032}),patch.object(c,'delegated',return_value=([(100000,165536)],[])), \
+             patch.object(c,'nss_ids',return_value=set()),patch.object(c,'nss_free',return_value=True),patch.dict(c.os.environ,{'SUDO_UID':'1000'}):
+            # A taken START moves to the next free aligned range of the delegation (f8243aba9); the
+            # tombstoned range itself is never handed out again.
+            got=c.check_app_allocation('cd'*8,'/usr/local/libexec/mini-spk-volume-helper','1000','100032','2')
+            self.assertEqual((got['appRangeRequested'],got['appRangeChecked']),([100032,100034],[100034,100036]))
+        with patch.object(c,'occupied_ids',return_value=set(range(100000,165536))),patch.object(c,'delegated',return_value=([(100000,165536)],[])), \
              patch.object(c,'nss_ids',return_value=set()),patch.object(c,'nss_free',return_value=True),patch.dict(c.os.environ,{'SUDO_UID':'1000'}):
             with self.assertRaises(ValueError):c.check_app_allocation('cd'*8,'/usr/local/libexec/mini-spk-volume-helper','1000','100032','2')
 

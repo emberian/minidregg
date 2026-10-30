@@ -1,0 +1,84 @@
+diff --git a/http.c b/http.c
+index c4b9b7a..3f32cf0 100644
+--- a/http.c
++++ b/http.c
+@@ -93,6 +93,15 @@ static char *field(struct mg_connection *conn, char *fieldname)
+ 
+ 	if ((h = (char *)mg_get_header(conn, buf)) != NULL) {
+ 		p = strdup(h);
++		if (strcmp(buf, "X-Sandstorm-Username") == 0) {
++			/*
++			 * Sandstorm sends the display name percent-encoded. Store
++			 * and lookup both use the storage name of the decoded
++			 * value, so a write and its read agree on one principal.
++			 */
++			percent_decode(p);
++			storage_name(p);
++		}
+ 		lowercase(p);
+ 		return (p);
+ 	}
+diff --git a/util.c b/util.c
+index 949fd6e..1b8c4d0 100644
+--- a/util.c
++++ b/util.c
+@@ -441,17 +441,42 @@ int tac(char *filename, long lines, int (*func)(char *, void *), void *param)
+ 	return (0);
+ }
+ 
+-static void ut_lower(UT_string *us)
++/*
++ * The one rule that turns a user or device name into a storage path
++ * component: lowercase alphanumerics, every other byte becomes '-'.
++ */
++void storage_name(char *s)
+ {
+-        char *p;
++        unsigned char *p;
+ 
+-        for (p = UB(us); p && *p; p++) {
+-                if (!isalnum(*p) || isspace(*p))
++        for (p = (unsigned char *)s; p && *p; p++) {
++                if (!isalnum(*p))
+                         *p = '-';
+                 else if (isupper(*p))
+                         *p = tolower(*p);
++        }
++}
+ 
++/* Decode %XX escapes in place; malformed escapes are left as they are. */
++void percent_decode(char *s)
++{
++        char *r, *w;
++
++        for (r = w = s; *r; r++) {
++                if (r[0] == '%' && isxdigit((unsigned char)r[1]) && isxdigit((unsigned char)r[2])) {
++                        char hex[3] = { r[1], r[2], 0 };
++                        *w++ = (char)strtol(hex, NULL, 16);
++                        r += 2;
++                } else {
++                        *w++ = *r;
++                }
+         }
++        *w = 0;
++}
++
++static void ut_lower(UT_string *us)
++{
++        storage_name(UB(us));
+ }
+ 
+ static void ut_clean(UT_string *us)
+diff --git a/util.h b/util.h
+index 9245759..336c765 100644
+--- a/util.h
++++ b/util.h
+@@ -35,6 +35,8 @@ void olog(int level, char *fmt, ...);
+ void geohash_setprec(int precision);
+ int geohash_prec(void);
+ void lowercase(char *s);
++void storage_name(char *s);
++void percent_decode(char *s);
+ double haversine_dist(double th1, double ph1, double th2, double ph2);
+ void debug(struct udata *, char *fmt, ...);
+ void chomp(char *s);

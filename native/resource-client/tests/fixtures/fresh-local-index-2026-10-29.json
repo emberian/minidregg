@@ -314,6 +314,28 @@
    "webLink": "https://www.navidrome.org"
   },
   {
+   "appId": "1zzj5zrt8f0vwf5q1rmm09fff9y9684mcq79me6kmjrks1acfmqh",
+   "author": {
+    "name": "Mini"
+   },
+   "categories": [
+    "other"
+   ],
+   "class": "M",
+   "codeLink": "https://github.com/mnutt/owntracks-recorder",
+   "isOpenSource": true,
+   "name": "OwnTracks",
+   "packageBuiltAt": "2026-10-30T15:03:21Z",
+   "packageId": "779a8d94e36bf3d481c432100ecc61ad",
+   "sha256": "779a8d94e36bf3d481c432100ecc61ad08155a99e44d69e1a2be91fe795f96e2",
+   "shortDescription": "Location tracker",
+   "upstreamAuthor": "OwnTracks Team",
+   "upstreamVersion": "0.6.9-1",
+   "version": "0.6.9-1",
+   "versionNumber": 6,
+   "webLink": "https://owntracks.org"
+  },
+  {
    "appId": "1xs63fcv99c08dv2tgv0dcehjka9141e1egcafffuu0txskvzmq0",
    "author": {
     "name": "Mini"
@@ -424,6 +446,28 @@
    "version": "5.10.0-2",
    "versionNumber": 2,
    "webLink": "https://editor.swagger.io/"
+  },
+  {
+   "appId": "j4jvn386t7un76qu6yyw1vwc5ke50t07e38r82kzy4qqg6qq7msh",
+   "author": {
+    "name": "Mini"
+   },
+   "categories": [
+    "graphics"
+   ],
+   "class": "S",
+   "codeLink": "https://github.com/lovasoa/whitebophir",
+   "isOpenSource": true,
+   "name": "WBO",
+   "packageBuiltAt": "2026-10-29T09:22:25Z",
+   "packageId": "d3b06718d12bc377db7b494679440b91",
+   "sha256": "d3b06718d12bc377db7b494679440b91f4e6623a96f7856f6c7ba144c4a98303",
+   "shortDescription": "Collaborative whiteboard",
+   "upstreamAuthor": "Ophir Lojkine",
+   "upstreamVersion": "2.18.26",
+   "version": "2.18.26",
+   "versionNumber": 21826,
+   "webLink": "https://wbo.ophir.dev"
   },
   {
    "appId": "wpe8yvzdpjsst9314ucecmpmyzju0830ujm815ew5mjuen173kg0",

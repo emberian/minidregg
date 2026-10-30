@@ -54,9 +54,9 @@
       "write": false,
       "binding": {
         "protocol": "conversation",
-        "wire": "socket.io-eio3",
+        "wire": "socket.io-eio4",
         "path": [
-          "socket.io/"
+          "socketio/"
         ],
         "query": {},
         "steps": [
@@ -192,9 +192,9 @@
       "write": true,
       "binding": {
         "protocol": "conversation",
-        "wire": "socket.io-eio3",
+        "wire": "socket.io-eio4",
         "path": [
-          "socket.io/"
+          "socketio/"
         ],
         "query": {},
         "steps": [
@@ -321,6 +321,6 @@
   "sources": [
     "https://github.com/ocdtrekkie/scrumblr",
     "package:57fa8aab611f5e0ab656e73324d48879/server.js",
-    "package:57fa8aab611f5e0ab656e73324d48879/node_modules/socket.io/node_modules/engine.io/node_modules/engine.io-parser/lib/index.js"
+    "package:57fa8aab611f5e0ab656e73324d48879/opt/app/server.js"
   ]
 }
