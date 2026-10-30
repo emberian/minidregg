@@ -28,6 +28,14 @@ Ruling: deploy-script fixes keep be4ef7510's verdicts (no composed rerun); a Rus
 The restart `continuous` red was the resident's own output document moving its maintenance revision; be4ef7510's
 maintenance_fingerprint leaves out documents the resident writes.
 
+## Candidate cadence (ember, 2026-10-30)
+
+Cut candidates only for meaningful batches or deep Lean changes; never make anyone wait 40 minutes for one tiny fix.
+Between cuts, test on hotpatched worlds: script and config fixes applied directly, Rust fixes overlaid onto a kept world
+(the overlay/hot-swap path; iteration speed is building the one-crate hot-swap). Let a running build finish; do not queue
+another until a real batch has accumulated. Rehearsal 3 ships be4ef7510 with the install-hermes HOME fix hotpatched
+(infra), not 06665f052.
+
 ## Lanes (send shas; name every new candidate to infra and the scout)
 
 | lane | agent | owns |
