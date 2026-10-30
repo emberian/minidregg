@@ -83,7 +83,7 @@ where
 /-- The deployment's pinned config (`w/deployment/pinned-config.json`, read the way
 `Host.Main`'s `Settings.config` reads it). Its verifier binary is never run: the
 admission below is handed `.recorded transcript`, not this config. -/
-def config : NativeHost.Config where
+def config : NativeHost.Config := NativeHost.Config.ofInputs {
   deployment := ⟨⟨pinDomain⟩, pinFactoryId, pinResourceBookId, pinAuthorityCellId⟩
   federation := ⟨pinFederation⟩
   template := ⟨⟨pinIssuer⟩, pinOwnerBudget, pinLifetime, CanonicalRuntimeProfile.defaultBirthSlack⟩
@@ -94,13 +94,13 @@ def config : NativeHost.Config where
   storage := { binary := "", root := "", key := "" }
   signature := ⟨""⟩
   invocationBindings := (ObjectiveBendNativeAdmission.decodePolicy (hexBytes pinObjectivePolicyHex)).map
-    fun policy => [(.objectiveMethod, ObjectiveBendNativeAdmission.encodePolicy policy)]
+    fun policy => [(.objectiveMethod, ObjectiveBendNativeAdmission.encodePolicy policy)] }
 
 /-- The Store prefix the first invocation was admitted at. -/
 def image : Option Image := do
   let seed ← seedFrame.decode (hexBytes seedHex)
   let records ← recordHexes.mapM fun record => recordFrame.decode (hexBytes record)
-  pure ⟨seed, records⟩
+  pure (Image.ofAccepted seed records)
 
 /-- The signed command of an op-2 call. -/
 def invoked (call : String) : Option SignedCommand :=
@@ -248,14 +248,21 @@ def authority : List NativeAcceptedFixtureProjection.Line :=
   parseAuthority NativeAcceptedFixtureAuthority.text
 
 open Minidregg.Fixtures.NativeAcceptedFixtureProjection in
-/-- The re-run's projection: the accepted call's record and receipts, then the
-refused call's verdict. -/
-def projectionRun : Option (List NativeAcceptedFixtureProjection.Line) := do
+/-- The re-run's projection, its record passed through `alter` first: the accepted call's
+record and receipts (its run-dependent storage lane relative to the call's length), then
+the refused call's verdict. -/
+def projectionRunWith (alter : IntentRecord → IntentRecord) :
+    Option (List NativeAcceptedFixtureProjection.Line) := do
   let ⟨_, run⟩ ← firstRun
   let reason ← refusedRun
   pure (projectAccepted config.deployment run.command
-      (IntentRecord.ofIntent (run.accepted.dataIntent run.shape)) (receiptSubjects run.accepted) ++
+      (alter (IntentRecord.ofIntent (run.accepted.dataIntent run.shape))) (receiptSubjects run.accepted)
+      (hexBytes firstCallHex).length
+      (recordLegs run.ground.view (IntentRecord.ofIntent (run.accepted.dataIntent run.shape))) ++
     projectRefused (reasonName (reprStr reason)))
+
+/-- The re-run's projection. -/
+def projectionRun : Option (List NativeAcceptedFixtureProjection.Line) := projectionRunWith id
 
 /-- **The re-run means what the driver asked for.**  The projection of the
 accepted call's record (signer, signature checks, written cells by kind and role,
@@ -264,6 +271,17 @@ exactly the hand-written authority.  A regeneration that changes what the
 invocation records turns this red until the authority is changed in its own
 reviewed commit. -/
 theorem first_projection : projectionRun = some authority := by native_decide
+
+/-- `record` with one charge lane a byte over its measured value. -/
+def bumped (lane : Theory.ResourceCost.Lane) (record : IntentRecord) : IntentRecord :=
+  { record with exactCharge := fun other =>
+      if other = lane then record.exactCharge other + 1 else record.exactCharge other }
+
+/-- **Teeth of the relational storage line.** The authority states the storage lane as its
+relation to the call (`call + k`), not as a number; a record whose storage is one byte off
+that relation is refused. -/
+theorem storage_off_by_one_refused :
+    projectionRunWith (bumped .storageBytes) ≠ some authority := by native_decide
 
 /-- **The same admission refuses `r01` with the Host's reason.** -/
 theorem refused_admission : isObjectiveSource refusedRun = true := by native_decide
@@ -321,6 +339,8 @@ set_option maxHeartbeats 4000000 in
 #assert_axioms rekeyed_commandBytes
 set_option maxHeartbeats 4000000 in
 #assert_compiled refused_admission
+set_option maxHeartbeats 4000000 in
+#assert_compiled storage_off_by_one_refused
 set_option maxHeartbeats 4000000 in
 #assert_compiled first_projection
 set_option maxHeartbeats 4000000 in

@@ -18,10 +18,22 @@ write data whose projection differs from it (`replay.lean` prints the same
 projection, this definition).  An authority change is its own reviewed commit
 (`scripts/pipeline/check-fixture-authority.sh`).
 
-Every line is a function of the record and the command alone, never of a byte
-the run chose (an id, a root, a digest).
+Every line is a function of the record, the command, the call's length and the
+write's legs, never of a byte the run chose (an id, a root, a digest).  A byte lane
+measures bytes whose length the run chooses: digests, ids and nonces are encoded at
+their natural width, so the call and the written values move by a few bytes from run
+to run.  Such a lane is stated as its relation to the run, never as a number:
+* the call's signed bytes and the retained event, `call + k` (`relativeToCall`), where
+  `call` is the length of the op-2 call the Host received and `k` is fixed by the
+  deployed framing (the domain and semantics digests the ingress adds);
+* the storage lane, `event + legs` (`storageRelation`): the retained event plus the
+  written values of the World's legs (`DeployedHistory.legBytes`) and nothing else (no
+  born image, no post image, no per-kind framing);
+* the legs' shape (`legShape`: each leg's operations by kind), which the run does not
+  choose.
 -/
 import Kernel.DeclaredResourceController
+import Kernel.DeployedCharge
 import Kernel.DurableReceiver
 import Kernel.PayCellDomain
 import Kernel.ObjectiveBendNativeInput
@@ -57,6 +69,34 @@ def kindOf (bytes : List UInt8) : String :=
   | some .retired => "retired"
   | some .fresh => "fresh"
   | none => "undecodable"
+
+/-- A run-dependent byte lane, stated as its relation to the run's call: `call + k`
+(`call - k` below it), where `call` is the length of the op-2 call bytes the Host
+received. -/
+def relativeToCall (callBytes value : Nat) : String :=
+  if callBytes ≤ value then s!"call + {value - callBytes}" else s!"call - {callBytes - value}"
+
+open Minidregg.Kernel.DeployedBridge (deployedR bridge) in
+/-- The World's legs of a record's writes against the cells of the snapshot it was admitted
+at (`DeployedCharge.storageAt`'s legs). -/
+def recordLegs {rootBytes : List UInt8 → Digest} (snap : DataSnapshot rootBytes)
+    (record : IntentRecord) : List (World.Leg deployedR) :=
+  (TurnOfIntent.deltas bridge.codec (HostRefinesWorld.cellsOf bridge snap) record.writes).filterMap
+    fun d => d.2.leg? bridge.codec d.1
+
+/-- A leg's operations by kind, in order (`write`, `allocate`, `free`, `read`). -/
+def legShape (legs : List (World.Leg Minidregg.Kernel.DeployedBridge.deployedR)) : String :=
+  "; ".intercalate (legs.map fun leg => ", ".intercalate (leg.patch.map fun
+    | .write .. => "write" | .allocate .. => "allocate" | .free .. => "free" | .read .. => "read"))
+
+/-- The storage lane stated as its relation to the run: `event + legs` when it is exactly
+the retained event's canonical bytes plus the legs' written values, else the offset. -/
+def storageRelation (record : IntentRecord)
+    (legs : List (World.Leg Minidregg.Kernel.DeployedBridge.deployedR)) : String :=
+  let base := record.event.canonicalBytes.length + (legs.map DeployedHistory.legBytes).sum
+  let value := record.exactCharge .storageBytes
+  if value = base then "event + legs"
+  else if base ≤ value then s!"event + legs + {value - base}" else s!"event + legs - {base - value}"
 
 /-- The charge lanes, in a fixed order. -/
 def lanes : List (String × Theory.ResourceCost.Lane) :=
@@ -142,11 +182,30 @@ def createdAtom (command : DeclaredResourceController.Command) (record : IntentR
        ("first.created.atom", atomLine)]
   | _, _ => [("first.created.atom", "no requested atom")]
 
+/-- The byte lines of a record under `pre`: the retained event against the call, the legs'
+shape, then each charge lane: storage as `storageRelation`, a lane in `relative` as its
+relation to the call (`relativeToCall`), every other lane its value. -/
+def chargeLines (pre : String) (relative : List Theory.ResourceCost.Lane) (callBytes : Nat)
+    (legs : List (World.Leg Minidregg.Kernel.DeployedBridge.deployedR)) (record : IntentRecord) :
+    List Line :=
+  [(s!"{pre}.event", relativeToCall callBytes record.event.canonicalBytes.length),
+   (s!"{pre}.legs", legShape legs)] ++
+  lanes.map fun (name, lane) => (s!"{pre}.charge.{name}",
+    if lane = .storageBytes then storageRelation record legs
+    else if relative.contains lane then relativeToCall callBytes (record.exactCharge lane)
+    else toString (record.exactCharge lane))
+
+/-- The lanes of an accepted Objective invocation that measure the call besides storage:
+none (every other lane is the request's capacity). -/
+def acceptedRelative : List Theory.ResourceCost.Lane := []
+
 /-- **The projection of an accepted invocation** onto what the driver asked for:
 who signed and how many signature checks, which cells it writes (by kind and by
-role), what it guards, what it spends, and what it is charged. -/
+role), what it guards, what it spends, and what it is charged. `callBytes` is the
+length of the call the Host received. -/
 def projectAccepted (deployment : CanonicalCellRegistry.Deployment)
-    (command : DeclaredResourceController.Command) (record : IntentRecord) (receipts : List Nat) :
+    (command : DeclaredResourceController.Command) (record : IntentRecord) (receipts : List Nat)
+    (callBytes : Nat) (legs : List (World.Leg Minidregg.Kernel.DeployedBridge.deployedR)) :
     List Line :=
   let targetCells := command.targets.map fun target => target.target
   [("first.verdict", "accepted"),
@@ -166,7 +225,7 @@ def projectAccepted (deployment : CanonicalCellRegistry.Deployment)
    ("first.nullifiers", toString record.nullifiers.length),
    ("first.pay.computeSteps", payComputeSteps deployment record command.subject.value)] ++
   createdAtom command record ++
-  lanes.map fun (name, lane) => (s!"first.charge.{name}", toString (record.exactCharge lane))
+  chargeLines "first" acceptedRelative callBytes legs record
 
 /-- The projection of a refused call: its verdict and the refusal's name. -/
 def projectRefused (reason : String) : List Line :=
