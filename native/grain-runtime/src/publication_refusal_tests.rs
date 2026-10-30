@@ -7,13 +7,17 @@ pub(super) fn fixture(
     fail_disconnect: bool,
     pre_submit: bool,
 ) -> (Runtime, PathBuf) {
+    // Tests run on parallel threads and a coarse clock can repeat a nanosecond reading, so the
+    // process-wide counter, not the clock, makes the name unique.
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let root = PathBuf::from("/tmp").join(format!(
-        "gpr-{}-{}",
+        "gpr-{}-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_nanos()
+            .as_nanos(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
     ));
     fs::create_dir(&root).unwrap();
     let state = root.join("state");
