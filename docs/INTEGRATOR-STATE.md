@@ -29,7 +29,10 @@ door stranger/invite/lobby, public cold/first/warm; https://demo.dregg.online/ =
   private.rs:44). Fixed by app-reds 5f22e6324 (resident phase uses its own private namespace;
   disjointness from the Host's collision refusal of random 63-bit reservations). Hotpatch: grain-runtime built from
   be4ef7510 + 5f22e6324 at hbox:/home/hbox/lanes/integ/tests-target/release/grain-runtime (sha256 99917187...), overlaid by
-  infra on the live world. Apps installs hotpatched in the live grain-host.json (real candidate dir, market-large-v1).
+  infra on the live world. Apps installs hotpatched in the live grain-host.json (real candidate dir, market-large-v1); the market's
+  recorded per-package refusals (/var/lib/mini-apps/verdicts, mini-market/refused) replayed the old failure until infra
+  set them aside. Open question for app-reds: should a refusal recorded under a since-changed host config be re-sweepable
+  by the operator (a named `apps sweep`), rather than needing records moved by hand?
 - private-cells: 55a00e330 (fix: 0 < queryBound, teeth public_signature_refutes) merged as 4db04df8e; building as its own
   candidate 7d90da717 (integ-build4 + Minidregg umbrella, build.pid); main after host green. Was HELD on 0e43b648c: Kimi found DeclaredReceiptHiding vacuous at queryBound = 0 (ReceiptEventHiding.lean:222-238);
   lane fixing (require 0 < queryBound). Codec epoch change; lands as its own candidate; fresh genesis after.
