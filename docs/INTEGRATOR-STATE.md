@@ -51,6 +51,12 @@ door stranger/invite/lobby, public cold/first/warm; https://demo.dregg.online/ =
   dregg-infra main (registry umask, controller root, PATH, dbus-user-session, broker NoNewPrivileges). Red: hermes.controller
   "operator control peer UID mismatch": dregg-infra controller-entry runs controller-launch as mini-h-lobby without
   MINI_OPERATOR_PEER_UID (as_res pins 0); infra fixing. Seed must install reveal.js not Hacker Slides f0277a5d (infra).
+- ~19:00: Hermes lobby create..resident GREEN on the clean world (infra fixes in dregg-infra main, CHECKLIST ea60c81).
+  Apps: ingest passes; EtherCalc op66-plan "launch BEGIN authorization, descriptor or action shape refused", Etherpad
+  "operator reply opcode mismatch" (maybe half-born births from earlier refused attempts). Infra rebuilds a one-shot
+  fresh world with one install per app to separate world state from product. Infra commits to minidregg: install-hermes
+  step_resident state dir + enable controller/resident units, seed.sh reveal.js. Explorer F2 (member lacks a `welcome`
+  ref), F5 (first action after idle 30-38 s, re-plan; likely consent catch-up, hot-path).
 Ruling: deploy-script fixes keep be4ef7510's verdicts (no composed rerun); a Rust fix means a new cut.
 The restart `continuous` red was the resident's own output document moving its maintenance revision; be4ef7510's
 maintenance_fingerprint leaves out documents the resident writes.
