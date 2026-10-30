@@ -9,11 +9,12 @@ each). Older history is in this file's git history.
 Rehearsal 3 ships through infra (`demo-mini.sh ship` into the forge `demo` container) when the gate is fully green:
 tour + j14-apps on hbox gate12, composed (all phases, distinct mode) on infra's forge composed container. Flatness
 (law 17) is reported, never blocking (root ruling 2026-10-30: the submit ratchet preimage is ember's decision).
-**Last red before the ship, fixed in be4ef7510:** composed restart `continuous`. Infra's c-4e5f-d1 diff showed the
-maintenance revision moved only on the resident's own output document (resident-summary-8802 rows/root). be4ef7510's
-maintenance_fingerprint leaves out the context of docs the resident writes (verbs include `mutate`), teeth both ways.
-Infra a104b94c2643e9c5d reruns distinct composed fresh on be4ef7510; hbox gate12 (tour enrol j14) on be4ef7510 running.
-If both green: infra ships be4ef7510 (demo-mini.sh ship) and reports the smoke.
+**Gate GREEN on be4ef7510 (2026-10-30 14:46).** Infra's distinct composed c-be4e-d1: rooms, churn, documents, apps,
+connector, residents, restart, store-restart all PASS. hbox gate12: tour 73/73, j14-apps PASS (5 rows), enrol-resume PASS,
+flatness-get PASS; flatness-submit FAIL (reported, not blocking). Confirmed to infra a104b94c2643e9c5d, which ships
+rehearsal 3 from be4ef7510 (demo-mini.sh ship on forge, market adopt set 22 packages) and reports smoke + URL.
+The restart `continuous` red was the resident's own output document moving its maintenance revision; be4ef7510's
+maintenance_fingerprint leaves out documents the resident writes.
 
 ## Lanes (send shas; name every new candidate to infra and the scout)
 
@@ -76,7 +77,7 @@ ofReduceBool, trustCompiler or new axioms are not), what replaced native_decide 
 | 06831831c | READY (named to scout and infra): app declarations, re-recorded Native fixtures; scout full pass running on it |
 | 4e5faa8d8 | READY 13:20; main contains it. hbox gate12: tour 73/73, j14-apps PASS, enrol PASS, flatness-submit FAIL (reported). CONFIRMED on hbox; infra c-4e5f-d1 distinct composed running: if fully green this is the rehearsal-3 ship. Umbrellas then Minidregg umbrella running |
 | 2e3d16ef7 | READY 14:18 (umbrellas stopped: superseded) |
-| be4ef7510 | READY 14:23 = 2e3d16ef7 + continuous fix; main. THE SHIP CANDIDATE pending infra composed + hbox gate12. Umbrellas + rerecord (build4) running, then Minidregg umbrella (minidregg.pid) |
+| be4ef7510 | READY 14:23 = 2e3d16ef7 + continuous fix. GATE GREEN (composed fully green on forge, tour 73/73, j14-apps PASS): REHEARSAL 3 SHIP. Umbrellas + rerecord (build4) running, then Minidregg umbrella (minidregg.pid) |
 
 ## Open reds and owners
 
