@@ -47,3 +47,15 @@ perf.
 
 Not yet probed: aged worlds beyond 200 records (AGE), many page loads (the ~206-GET budget), Hermes under load,
 store restart under load (the single in-flight kill above is the only restart probe).
+
+## Full pass on be4ef751 (rehearsal-3 candidate)
+
+PASS=162 FAIL=2 UNCONFIGURED=7 UNJUDGED=3. Green: every row except the demo row and exchange (jpay 6/6, JPAY6 42/42; demo steps KC and JWF now pass).
+
+| fault | repro | evidence | owner | status |
+|---|---|---|---|---|
+| demo/J14 36 of 211: `room resident: resident prompt 11 is undecided; resolve it with admin ["reconcile effects"]` (first row 122, hermes resident pass) | demo set, step J14 after J0-J8 | `hbox:/ci/scout/rbe/*/rows/demo/journey.err` | integrator (core: resident maintenance) | open, sent; same on 06831831 |
+| demo/JDV row 140 `AUDIT OPERATOR: stop the journey's service, run the Host's cold audit, start it again`: "Host child outlived its server"; the service stays stopped, so JPD JCHAT JFEEDBACK JPAYE1-3 JP2 JDISCLOSE JESC JFLEETIN JSLK JSGM JR17 all fail as shadows ("hook left the journey service stopped") | demo set, step JDV | same | integrator (core: Host stop/child lifetime) | open, sent; those 13 steps are unproven until it is fixed |
+| exchange `wrong-root unexpectedly installed` | row exchange | `rows/exchange` | fn (out of the demo) | open, low |
+
+hbox `/` hit 95% (25 G free) during this pass; all scout writes stopped. `/ci/scout` is 2.7 G of scout-created files, nothing deleted pending ember.
