@@ -309,6 +309,17 @@ theorem Anchored.prefix_committed {config : Config} {target : Durable}
 
 #assert_axioms Anchored.prefix_committed
 
+/-- The head state of an opening, `State.ofSnapshot` of its image and snapshot
+(`headState_eq`), with the cells read off the opening's cached enumeration
+(`Loaded.cells`, compiled to `cellsCached`): `Image.cellIds` itself flattens every
+write of the log and deduplicates it, and a consent provider builds its own bases
+after every admission. -/
+def headState (durable : Durable) : DurableCheckpoint.State :=
+  ⟨durable.image.seed.absentBytes, durable.cells, durable.snapshot.model.available⟩
+
+theorem headState_eq (durable : Durable) :
+    headState durable = DurableCheckpoint.State.ofSnapshot durable.image durable.snapshot := rfl
+
 /-- **The own base of a genesis-based image** (CONSENT-OWN): its head state,
 which is the genesis fold of its records (`resume_genesis` on the image's own
 `resumed`), so a past read from it needs no premise about who sealed it. -/
@@ -317,12 +328,12 @@ def ownOfGenesis (durable : Durable)
       durable.base = DurableCheckpoint.State.ofSeed durable.image.seed) :
     DurableHistoryReader.OwnBase ResourceBirthCodec.rootBytes :=
   ⟨durable.image.seed, durable.logStart, durable.image.accepted.length, durable.chain,
-    DurableCheckpoint.State.ofSnapshot durable.image durable.snapshot,
+    headState durable,
     ⟨durable.image.accepted, rfl, durable.chainExact.symm, durable.snapshot, by
       have folded := durable.resumed
       rw [genesis.1, genesis.2, DurableCheckpoint.resume_genesis] at folded
       simpa only [DurableReceiver.Image.ofAccepted_accepted] using folded,
-      by rw [DurableReceiver.Image.ofAccepted_accepted]⟩⟩
+      by rw [headState_eq, DurableReceiver.Image.ofAccepted_accepted]⟩⟩
 
 /-- **The held image of an anchored admission is genesis-based**: the suffix
 walk keeps its anchor's base (`AdmittedSuffix.base`), and the anchor's is the
