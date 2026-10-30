@@ -45,7 +45,7 @@ iteration-speed lane for a second-tree or cached umbrella stage.
 | ee29d4fa7, 1890a6647 | proofs-only (umbrella fixes) |
 | 719d7b7aa | READY 11:35, first clean manifest: app-reds batch 1 (OwnTracks, WBO, controller-world tests), proofs 0ca243107, scout KC |
 | 719d7b7aa umbrellas | red: Fixtures.NativeDocWriteFixture, NativeAcceptedFixture (fixed in 06831831c), TokenCensus (unlisted private PersistentHistory.mk; fixed by 274a2534c) |
-| 274a2534c | queued behind 06831831c (staging only until built): PersistentHistory constructor public |
+| 4e5faa8d8 | queued (staging; main after host green): + TokenCensus fix 274a2534c, room_resident maintenance-input diagnostic, scout JPAY6 fix 7d29a02d6, app-reds JWF ad58a4b9e and Hummingbird f6fa7c19d, proofs statement-fixes 80fd08d01 (deep Lean). Then umbrella-minidregg.sh (minidregg.pid) builds the whole Minidregg umbrella at the same sha: the pipeline otherwise never elaborates it. Kimi statement review: scratchpad integ2/kimi-stmt.md. birth_refusal tests on hbox: integ/tests-birth.out (tests-wt worktree) |
 | 06831831c | READY 12:08 (named to infra and scout): + app-reds declarations eb4b396f6 (Mercurial, Sudoku, Blockstack), proofs fixtures f5d351a96 (NativeAccepted/NativeDocWrite under ruling (c)) |
 
 JPAY6: bisect shows every candidate back to d9661be99 fails the same two plant rows; likely the row's own fixture
