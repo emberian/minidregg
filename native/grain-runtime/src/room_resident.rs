@@ -47,6 +47,11 @@ struct ResidentState {
 // Keep the content root and body; only the renderer's bounded decimal height is
 // irrelevant to whether a new member request or role edit needs another turn.
 fn assignment_fingerprint(prepared: &Value) -> Result<String> {
+    sha256_bytes(&serde_json::to_vec(&assignment_stable(prepared)).map_err(|e| e.to_string())?)
+}
+
+/// The value the fingerprint hashes: the assignment without its height-only and budget-only fields.
+fn assignment_stable(prepared: &Value) -> Value {
     let mut stable = prepared.clone();
     // Fresh balance/lease observations inform this assignment, but do not
     // create another paid turn merely because our own turn changed its budget.
@@ -65,7 +70,19 @@ fn assignment_fingerprint(prepared: &Value) -> Result<String> {
             }
         }
     }
-    sha256_bytes(&serde_json::to_vec(&stable).map_err(|e| e.to_string())?)
+    stable
+}
+
+/// Retains the maintenance input that opens a maintenance turn, beside the request queue, with the
+/// one it replaced (`maintenance-input.json`, `maintenance-input.prev.json`), so an unexpected
+/// maintenance turn shows which assignment field moved. Controller-private state, bounded to two files.
+fn retain_maintenance_input(state: &Path, maintenance: &Value, revision: &str) {
+    let current = state.join("maintenance-input.json");
+    if let Ok(bytes) = std::fs::read(&current) {
+        if serde_json::from_slice::<Value>(&bytes).ok().and_then(|v| v["revision"].as_str().map(str::to_owned)).as_deref() == Some(revision) { return; }
+        let _ = std::fs::rename(&current, state.join("maintenance-input.prev.json"));
+    }
+    let _ = crate::atomic_json(&current, &json!({"revision":revision,"input":assignment_stable(maintenance)}));
 }
 
 fn prompt_assignment(prepared: &Value) -> Value {
@@ -412,7 +429,9 @@ pub(crate) fn main(path: &Path) -> Result<()> {
         // Queued, cancelled and refused notices from this selection go out
         // before the prompt, so a waiting author sees its place first.
         publish_notices(&room, &options.state);
-        if prepared.get("selectedRequest").is_some() || resident_requests::maintenance_needed(&options.state,&maintenance_input)? {
+        let maintenance_due = resident_requests::maintenance_needed(&options.state,&maintenance_input)?;
+        if maintenance_due { retain_maintenance_input(&options.state, &maintenance, &maintenance_input); }
+        if prepared.get("selectedRequest").is_some() || maintenance_due {
             let prompt_bytes=format!("{ASSIGNMENT_PREFIX}{}",prompt_assignment(&prepared)).len();
             if prepared.get("selectedRequest").is_some() && prompt_bytes+256>16_384 {
                 resident_requests::refuse_selected(&options.state,json!({"basis":"prompt-frame-byte-bound","promptBytes":prompt_bytes,"frameBytes":16384,"metadataReserve":256}))?;
