@@ -55,6 +55,17 @@ Ruling: deploy-script fixes keep be4ef7510's verdicts (no composed rerun); a Rus
 The restart `continuous` red was the resident's own output document moving its maintenance revision; be4ef7510's
 maintenance_fingerprint leaves out documents the resident writes.
 
+## DISK PRESSURE (2026-10-30 ~18:45): hbox / at 95%, 25G free
+
+Writing to hbox paused (ember's rule: stop, tell, wait; delete nothing without ember's word). The batch build 9b3417120
+was stopped (pgid). Not started: proofs' fixture re-record (deep build), any new build or gate. Ranked, integ lane:
+candidates/ 16G (30 x ~524M; 2b8f75dc, 7001c0a9, b39563f1, c7a632f7, 86f8d3e7, d9661be9, f34b0309 from the predecessor,
+the rest this session; keep be4ef7510 = rehearsal 3, 7d90da717 = main, 06665f052), src 12G (the warm tree; keep),
+old/ 11G (set-aside build outputs, artifacts.* ~400M each, made by integ-build this session), /ci gate worlds 21G (63 c-/j-/t-/
+f-/e- dirs from gates; none kept up), tests-target 1.0G, rust-target 0.9G, gate-* ~2.4G. Other lanes: hot-path 16G, hpc
+13G, proofs 11G (msrc 12G unused), iter-speed 7.4G, infra 4.0G, private-cells 3.9G, hp-seed 2.5G; /ci/ar-ot 3.2G,
+/ci/scout 2.7G, /ci/hp-codex 2.1G, /ci/ar-ec 1.4G, /ci/hb-dav-1/2 2G. Waiting for ember's choice.
+
 ## Candidate cadence (ember, 2026-10-30)
 
 Cut candidates only for meaningful batches or deep Lean changes; never make anyone wait 40 minutes for one tiny fix.
