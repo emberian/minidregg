@@ -57,8 +57,8 @@ gate12: `EDGE_REV=69c17a3 JWORLD_MANAGEMENT=distinct KEEP_WORLD=1 PORT=.. JWORLD
 (gate10 + j14-apps; j14 inputs integ/j14-hroot, j14-data, j14-secrets; run under /ci). Down a kept world with the
 candidate's scripts/spk-platform/world-down.sh RUN/inputs, then dregg-infra-69c17a3/edge/mini/journey/jworld-scratch.sh
 down RUN/w (as hbox with XDG_RUNTIME_DIR/DBUS); log DOWN. No world kept up.
-Stray processes with no PID file (not killed; tell ember): four `mini web --body` jweb-frontend children from old gates
-(pids 806516, 2013999 from the predecessor's candidates; 1482603 from 8cb74aba5, 1728806 from c4264f9cb).
+Stray jweb-frontend `mini web --body` children of old gates (pids 806516, 2013999, 1482603, 1728806) were stopped
+2026-10-30 by exact PID after checking their command lines (root ruling: stale leftovers of our own runs).
 
 ## The connector red: two causes, both fixed
 
