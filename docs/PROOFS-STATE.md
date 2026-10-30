@@ -20,20 +20,15 @@ Present-state record of the proofs lane, rewritten whole when its shape changes.
 ## Landed or sent
 
 - 75cd46376 EngineProofs + BirthPlanPoles (landed).
-- 0ca243107 PrepareProofs + HostTeethProofs against the admission gate (sent).
-- f5d351a96 (three commits) both Native fixtures (sent): journal-order images (`Image.ofAccepted`;
-  `acceptedRev` is newest first), `Config.ofInputs`, byte lanes as relations to the run (`call + k`,
-  storage `event + legs`, legs' shape) with off-by-one teeth, Authority-Change 7dac6a293, transcripts
-  recorded by `scripts/native-accepted-fixture/verify-shim.c` (live verification is in-process).
-
-## In flight
-
-- `lane/proofs` 3b88b1954 = fixtures + statement fixes (ce8b058d5: witnessed refused, journal apex,
-  writeOnceNonzero, [LC-fs-adaptive] PARTIAL) + 3b88b1954 (install premise inhabitation
-  `checkReady_denyIfCredential`, BirthPlanPoles teeth `plan_refuses_witnessed_inhabited`). Lean green on
-  hbox except the accepted fixture: the bend-grammar change rotates the Objective front-end identity
-  (`ObjectiveBendFrontEndIdentity` fingerprints the front-end sources), so the accepted run must be
-  re-recorded from a candidate that includes it. That candidate is building (`build-cand.sh`).
+- 0ca243107 PrepareProofs + HostTeethProofs against the admission gate (landed).
+- f5d351a96 both Native fixtures (landed as 06831831c): journal-order images (`Image.ofAccepted`;
+  `acceptedRev` is newest first), `Config.ofInputs`, byte lanes as relations to the run with
+  off-by-one teeth, transcripts recorded by `scripts/native-accepted-fixture/verify-shim.c`.
+- `lane/proofs` bf716681b (sent, one sha over main ceae90623): the statement fixes (witnessed refused
+  at install and admission, journal apex, writeOnceNonzero, [LC-fs-adaptive] PARTIAL), their witnesses
+  (`checkReady_denyIfCredential`, `plan_refuses_witnessed_inhabited`), the retained event stated as
+  exactly the signed ingress, and the accepted run re-recorded from candidate 3b88b1954 (the grammar
+  change rotates the Objective front-end identity).
 
 ## Open for a decision
 
@@ -41,3 +36,5 @@ Present-state record of the proofs lane, rewritten whole when its shape changes.
   birth (fail-closed) instead of refusing at genesis.
 - objective-native-acceptance.py `all` fails at `publish-variant` (it runs `lean --run` without the
   kernel dynlib); after the steps the fixture uses.
+- Any later change to the Objective front-end sources rotates its identity and needs the accepted
+  fixture re-recorded from a candidate built with it (generate.sh, fresh world).
