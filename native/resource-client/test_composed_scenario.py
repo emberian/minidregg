@@ -215,6 +215,8 @@ class ComposedTests(unittest.TestCase):
                 (target / "result.json").write_text(json.dumps({"protocol": "mini-app-document-provisioned-v1",
                     "subject": binding["delegate"]["subject"], "fixture": str(connector_fixture)}))
                 output = b"{}"
+            elif calls[-1] == "connector-sheet-seed.py":
+                output = b"{}"
             else:
                 self.assertEqual(calls[-1], "app-document-journey.py")
                 output = json.dumps({"protocol": "mini-app-document-journey-result-v1", "status": "saved", "operation": binding["operation"],
@@ -226,7 +228,7 @@ class ComposedTests(unittest.TestCase):
             self.assertEqual(first["phases"], {"apps": "pass", "connector": "pass"})
             second = c.Scenario(value, "spec.json").run()
             self.assertEqual(second["phases"], first["phases"])
-        self.assertEqual(calls, ["same-store-app.py", "app-document-provision.py", "app-document-journey.py"])
+        self.assertEqual(calls, ["same-store-app.py", "app-document-provision.py", "connector-sheet-seed.py", "app-document-journey.py"])
         state = c.read(self.state / "state.json")
         self.assertEqual(set(state["derivedInputPins"]), {"sheet:attach", "sheet:connector", "sheet:journey"})
         (root / "selection.json").write_text("{}")
