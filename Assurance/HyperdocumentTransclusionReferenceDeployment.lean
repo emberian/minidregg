@@ -411,15 +411,18 @@ def capabilityAdmissible :
   holder := rfl
   scope :=
     { target := by
-        simpa [forwardDeclaration, forwardIntent, Prior.config,
-          Declaration.toRequest] using
+        have hsimpa :=
           Minidregg.Theory.HyperdocumentCausalFamily.Witness.namedCapabilityAdmissible.scope.target
+        simp [forwardDeclaration, forwardIntent, Prior.config, Declaration.toRequest] at hsimpa ⊢
+        exact hsimpa
       verb := by
         simpa [forwardDeclaration, forwardIntent, Prior.config,
           Declaration.toRequest] using
           Minidregg.Theory.HyperdocumentCausalFamily.Witness.namedCapabilityAdmissible.scope.verb
       cost := by
-        simpa [forwardDeclaration, forwardIntent, Prior.config,
+        simpa [Prior.requestEnvelope, Prior.capability,
+          HyperdocumentCausalFamily.Witness.declaration, HyperdocumentCausalFamily.Witness.capability,
+          forwardDeclaration, forwardIntent, Prior.config,
           Declaration.toRequest] using
           Minidregg.Theory.HyperdocumentCausalFamily.Witness.namedCapabilityAdmissible.scope.cost }
   validFrom := by decide
@@ -483,15 +486,19 @@ def forwardRecord : LinkRecord :=
 @[simp] theorem accepted_post_contains_forward :
     Hyperdocument.lookup accepted.accepted.prepared.post.logical .links
       forwardLinkId = some forwardRecord := by
-  simpa [forwardRecord, forwardDeclaration, forwardIntent] using
+  have hsimpa :=
     accepted.post_contains_link forwardPayload rfl
+  simp [forwardRecord, forwardDeclaration, forwardIntent] at hsimpa ⊢
+  exact hsimpa
 
 def forwardQuery : ContentQuery := .link forwardLinkId
 
 @[simp] theorem query_reopens_exact_forward :
     ContentQuery.project forwardQuery accepted.accepted.prepared.post.logical =
       some forwardRecord := by
-  simpa [forwardQuery, ContentQuery.project] using accepted_post_contains_forward
+  have hsimpa := accepted_post_contains_forward
+  simp [forwardQuery, ContentQuery.project] at hsimpa ⊢
+  exact hsimpa
 
 noncomputable def responseBytes : List UInt8 :=
   HyperdocumentLinkEndpointController.linkRecordCodec.encode forwardRecord

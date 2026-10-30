@@ -118,9 +118,11 @@ theorem accepts_idealAtReceipt_or_collision
 theorem reply_idealAtOwnCoin_or_collision (reply : Reply) :
     ReceiptCollision pcs statement reply.receipt ∨
       IdealAccept statement (idealCoin reply).1 (idealCoin reply).2 := by
-  simpa only [idealCoin, idealQuerySeed] using
+  have hsimpa :=
     accepts_idealAtReceipt_or_collision (verifier := verifier)
       reply.receipt reply.accepted
+  simp only [idealCoin, idealQuerySeed] at hsimpa ⊢
+  exact hsimpa
 
 /-! ## Actual raw execution, not a selected Option -/
 
@@ -145,6 +147,7 @@ theorem execute_eq_some_iff
 
 /-! ## Exact three-event ledger -/
 
+set_option backward.isDefEq.respectTransparency false in
 inductive FailureClass where
   | additiveProximity
   | extractedCshakeCollision

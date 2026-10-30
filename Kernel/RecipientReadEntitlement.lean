@@ -156,6 +156,7 @@ theorem CheckedView.entitled {genesisHeight : Nat}
         config.verifies (viewRequest (wanted := wanted) view) checked.witness = true :=
   ⟨checked.principal, checked.admissible, checked.law⟩
 
+set_option backward.isDefEq.respectTransparency false in
 def checkView (genesisHeight : Nat) (prepared : Preparation (context := context) (profile := profile)
     (wanted := wanted) (marker := marker) (capability := capability) (contextBytes := contextBytes)) (entry : Entry)
     (view : Minidregg.Theory.CellRegistry.PackedCell CanonicalCellRegistry.registry) :

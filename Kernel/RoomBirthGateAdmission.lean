@@ -111,17 +111,37 @@ theorem birth_under_room_requires_grant_at {profile : CanonicalPolicyAdmission.P
 
 /-! ## Axiom pins: every K-ROOM 3c theorem (verb, J7 pole, codec, gate, poles) -/
 
-/-- info: 'Minidregg.Theory.TypedAuthorization.Verb.place_allowedBy_iff' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.TypedAuthorization.Verb.place_allowedBy_iff' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.Verb.place_allowedBy_iff
-/-- info: 'Minidregg.Theory.TypedAuthorization.Verb.place_grant_cannot_mutate' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.TypedAuthorization.Verb.place_grant_cannot_mutate' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.Verb.place_grant_cannot_mutate
-/-- info: 'Minidregg.Theory.TypedAuthorization.Verb.observe_grant_cannot_place' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.TypedAuthorization.Verb.observe_grant_cannot_place' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.Verb.observe_grant_cannot_place
-/-- info: 'Minidregg.Theory.RoomAuthorization.room_cap_survives_law_change' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.RoomAuthorization.room_cap_survives_law_change' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.RoomAuthorization.room_cap_survives_law_change
 /-- info: 'Minidregg.Theory.RoomAuthorization.generationPreserved_of_rows' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.RoomAuthorization.generationPreserved_of_rows
-/-- info: 'Minidregg.Theory.RoomAuthorization.room_cap_revoked_by_generation' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.RoomAuthorization.room_cap_revoked_by_generation' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.RoomAuthorization.room_cap_revoked_by_generation
 /-- info: 'Minidregg.Theory.RoomAuthorization.room_grant_reads' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.RoomAuthorization.room_grant_reads

@@ -72,11 +72,11 @@ structure Clock where
   slot : Nat
   deriving DecidableEq, Repr
 
-def Namespace.Key : Namespace → Type
+@[reducible] def Namespace.Key : Namespace → Type
   | .clock => Unit
   | .maxStepSeconds => Unit
 
-def Namespace.Value : Namespace → Type
+@[reducible] def Namespace.Value : Namespace → Type
   | .clock => Clock
   | .maxStepSeconds => Nat
 

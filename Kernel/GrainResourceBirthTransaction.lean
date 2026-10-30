@@ -207,6 +207,7 @@ def rawLeg {F : Type} [Field F]
             (source.grainCommand tariff).targets[index] (grain.targets index).pre).ResultAt
               (grain.targets index).pre.logical post }
 
+set_option backward.isDefEq.respectTransparency false in
 def bindFamily {F : Type} [Field F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
     {pins : ResourceBirth.FactoryPins} {durable : Durable}

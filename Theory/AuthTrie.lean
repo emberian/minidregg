@@ -259,7 +259,7 @@ theorem climb_sound :
       have : climb dig bits [] (dig t.input) = dig t.input := by cases bits <;> rfl
       rw [this] at climbed
       have r := tree_dig_terminal dig n es wf t climbed
-      simp only [select, List.take_zero] at r ⊢
+      simp only [List.length_nil, select, List.take_zero] at r ⊢
       exact r.imp_right (CollisionAmong.mono dig fun x hx => by
         rcases hx with rfl | hx
         · exact Or.inr (ClimbNode.terminal _ _)

@@ -139,7 +139,7 @@ theorem manifest_wellFormed : manifest.WellFormed where
         MinidreggV1Artifact.manifest.dialectClauses.map
           DialectClauseDecl.clauseId) old
   receiptCodecClosed := by
-    simpa [manifest, Manifest.lookupCodec] using
+    exact 
       MinidreggV1Artifact.manifest_wellFormed.receiptCodecClosed
   mpcBasesClosed := by
     intro profile member
@@ -167,8 +167,8 @@ theorem manifest_wellFormed : manifest.WellFormed where
     exact
       ⟨⟨source, base_lookupCarrier_preserved sourceFound⟩,
        ⟨target, base_lookupCarrier_preserved targetFound⟩,
-       ⟨sourceCodec, by simpa [manifest] using sourceCodecFound⟩,
-       ⟨targetCodec, by simpa [manifest] using targetCodecFound⟩⟩
+       ⟨sourceCodec, by exact sourceCodecFound⟩,
+       ⟨targetCodec, by exact targetCodecFound⟩⟩
   dialectClausesClosed := by
     intro clause member
     simp only [manifest, List.mem_append, List.mem_singleton] at member
@@ -178,10 +178,10 @@ theorem manifest_wellFormed : manifest.WellFormed where
          ⟨proofCodec, proofCodecFound⟩, bridgesClosed⟩
       refine
         ⟨⟨carrier, base_lookupCarrier_preserved carrierFound⟩,
-         ⟨statementCodec, by simpa [manifest] using statementCodecFound⟩,
-         ⟨proofCodec, by simpa [manifest] using proofCodecFound⟩, ?_⟩
+         ⟨statementCodec, by exact statementCodecFound⟩,
+         ⟨proofCodec, by exact proofCodecFound⟩, ?_⟩
       intro bridgeId bridgeMember
-      simpa [manifest] using bridgesClosed bridgeId bridgeMember
+      exact bridgesClosed bridgeId bridgeMember
     · refine
         ⟨⟨babyBearArithmeticCarrier, by decide⟩,
          ⟨MinidreggV1Artifact.dialectStatementCodec, by decide⟩,

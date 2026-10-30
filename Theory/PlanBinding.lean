@@ -528,14 +528,14 @@ theorem two_agents_disjoint :
 theorem two_agents_disjoint_computed :
     admit (Patch.run start planA.patch) planB.footprint = .ok () ∧
       admit (Patch.run start planB.patch) planA.footprint = .ok () := by
-  decide
+  exact ⟨rfl, rfl⟩
 
 /-- Overlapping: after A commits, C (which read `heap[1] = 10`) is refused
 `footprintStale heap[1]`. -/
 theorem overlap_refused_computed :
     admit (Patch.run start planA.patch) planC.footprint =
       .error (.footprintStale (at_ .heap 1)) := by
-  decide
+  rfl
 
 /-- …while under whole-root binding even B, which A never touched, is refused
 (any root that separates these two stores refuses it). -/

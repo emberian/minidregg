@@ -484,7 +484,7 @@ end StraightlineCheckpointExtraction
 
 /-- info: 'Minidregg.Assurance.SemanticAdditiveFriCheckpoint.CoordinatePadding.paddedCommitment' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms CoordinatePadding.paddedCommitment
-/-- info: 'Minidregg.Assurance.SemanticAdditiveFriCheckpoint.checkpointClausePin_registered' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Assurance.SemanticAdditiveFriCheckpoint.checkpointClausePin_registered' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms checkpointClausePin_registered
 /-- info: 'Minidregg.Assurance.SemanticAdditiveFriCheckpoint.Checkpoint.initial_root_eq_semantic_head' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Checkpoint.initial_root_eq_semantic_head

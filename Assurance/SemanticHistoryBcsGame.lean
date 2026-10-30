@@ -305,7 +305,9 @@ theorem traceLinkWord_mem
       linkWord prior entry gamma rootExact ih =>
       intro j
       refine Fin.lastCases ?_ (fun priorIndex => ?_) j
-      · simpa using entry.codeword
+      · have hsimpa := entry.codeword
+        simp at hsimpa ⊢
+        exact hsimpa
       · simpa using ih priorIndex
 
 /-- The genesis word and every trace-derived link word satisfy exactly the
@@ -356,7 +358,9 @@ theorem traceSource_aligned
             ⟨entry.codeword, rfl⟩
         refine ⟨entry.codeword, fun channel => ?_⟩
         rw [traceGenesis_weights prior]
-        simpa [traceLinkChain, entryLink] using hsat.2 channel
+        have hsimpa := hsat.2 channel
+        simp [traceLinkChain, entryLink] at hsimpa ⊢
+        exact hsimpa
       · have hprior := ih.2 priorIndex
         have hindex :
             Fin.cast (traceLinkChain_length
@@ -487,9 +491,10 @@ theorem history_source_aligned (head : HistoryHead) :
         TypedLinkAligned C (historyGenesisClaim head) (historyChain head) k
           (historyLinkWitness head k) := by
   refine ⟨(traceSource_aligned head.foldTrace).1, fun k => ?_⟩
-  simpa [historyGenesisClaim, historyChain, historyLinkWitness,
-    historyRoundEquiv] using
+  have hsimpa :=
     (traceSource_aligned head.foldTrace).2 (historyRoundEquiv head k)
+  simp [historyGenesisClaim, historyChain, historyLinkWitness, historyRoundEquiv] at hsimpa ⊢
+  exact hsimpa
 
 /-- Semantic receipt coordinates are nonempty independently of history
 depth: the binding/header summand has constructors. -/

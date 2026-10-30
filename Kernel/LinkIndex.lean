@@ -367,6 +367,7 @@ theorem refresh_keys (old : List Entry) (height : Nat) (links : List LinkKey) :
     (refresh old height links).map Entry.key = links := by
   simp [refresh, Entry.key, Function.comp_def]
 
+set_option backward.isDefEq.respectTransparency false in
 theorem mem_refresh {old : List Entry} {height : Nat} {links : List LinkKey} {entry : Entry}
     (member : entry ∈ refresh old height links) :
     entry.key ∈ links ∧

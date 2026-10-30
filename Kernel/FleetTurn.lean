@@ -727,6 +727,7 @@ theorem fleet_refuses_foreign_head (stream : Digest) (cellId : Nat) (current : T
     planFrom stream cellId current publication author height txId = .error .topicUnavailable := by
   unfold planFrom
   simp [foreign, bind, Except.bind]
+  rfl
 
 /-- A position the head already counts is refused `sequenceTaken`. -/
 theorem fleet_refuses_taken_position (stream : Digest) (cellId : Nat) (current : TopicRead)

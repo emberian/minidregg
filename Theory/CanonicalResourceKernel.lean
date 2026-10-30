@@ -1082,7 +1082,6 @@ theorem Book.holders_sum_eq_neg_well (book : Book) (asset : AssetId)
     ∑ account ∈ book.accounts.erase asset, book.balance account asset =
       -(book.balance asset asset) := by
   have split := Finset.add_sum_erase book.accounts (fun account => book.balance account asset) present
-  simp only at split
   unfold Book.totalAsset at zero
   linarith
 

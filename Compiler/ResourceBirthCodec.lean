@@ -256,7 +256,9 @@ def framedDescriptorCodec (registry : TypeRegistry Digest) :
     | _ => none
   decode_encode := by
     intro descriptor
-    simpa [descriptorFrame] using (descriptorStream registry).toLawful.decode_encode descriptor
+    have hsimpa := (descriptorStream registry).toLawful.decode_encode descriptor
+    simp [descriptorFrame] at hsimpa ⊢
+    exact hsimpa
 
 theorem v3_descriptor_refused (registry : TypeRegistry Digest) (payload : List UInt8) :
     (framedDescriptorCodec registry).decode

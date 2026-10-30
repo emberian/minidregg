@@ -470,7 +470,8 @@ theorem receive_committed_lawful {laws : Laws Durable}
       Lawful laws F.id durable (F.writes admission.accepted.prepared) write
         (F.lawStep admission.accepted.prepared write member) := by
   obtain ⟨shaped, faultless⟩ := (F.receiver laws oracle).receive_committed_lawFault committed
-  exact (shape_lawful laws shaped (by simpa [lawful, Option.isNone_iff_eq_none] using faultless)).2
+  have faultless' : lawFault laws admission.accepted.prepared = none := faultless
+  exact (shape_lawful laws shaped (by simpa [lawful, Option.isNone_iff_eq_none] using faultless')).2
 
 /-- **A committed outcome passed the physical shape**: its written cells are
 distinct, each write's pre-root and each guard's root were current, and the

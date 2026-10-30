@@ -261,6 +261,7 @@ theorem custodianCheck_congr (v w : List UInt8 → List UInt8 → List UInt8 →
   · rfl
   · simp [agree k s rfl rfl]
 
+set_option backward.isDefEq.respectTransparency false in
 /-- **`admitsObserved` is exactly `PlatformCell.Admits`** of any deployment whose oracles
 answered `o` and whose controller is the one the cell names, over a history whose current
 record the cell holds. -/
@@ -285,7 +286,6 @@ theorem admitsObserved_decides (ctx : PlatformCell.Context) (h : PlatformCell.Hi
   simp only [installOf] at sponsor custodian
   simp only [admitsObserved, cellHolds, controllerHolds, PlatformCell.decideInstall, installOf,
     sponsor, held, custodian, ← unexpired]
-  simp only [Bool.and_eq_true, decide_eq_true_eq]
 
 /-- The oracle answers a deployment gives for an install over a history. -/
 def oracle (ctx : PlatformCell.Context) (h : PlatformCell.History) (i : PlatformCell.Install) :

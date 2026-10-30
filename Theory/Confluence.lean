@@ -133,6 +133,7 @@ every pair has a coproduct there — but the coproduct of `a` and `b` is `⊤`, 
 merge `c`. So "the lawful subcategory has binary coproducts" is strictly weaker than
 I-confluence; only `iconfluent_iff_join_closed` is the correct iff. -/
 
+set_option backward.isDefEq.respectTransparency false in
 /-- The five-point lattice `⊥ < a, b < c < ⊤`. -/
 inductive Five
   | bot | a | b | c | top

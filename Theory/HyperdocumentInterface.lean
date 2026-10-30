@@ -108,13 +108,17 @@ def lens : ObserverLens layout ContentQuery View where
     intro query left right fieldsExact
     cases query with
     | link id =>
-        simpa [project, Hyperdocument.lookup] using
+        have hsimpa :=
           fieldsExact (⟨.links, id⟩ : Address)
             (Finset.mem_singleton.mpr rfl)
+        simp [project, Hyperdocument.lookup] at hsimpa ⊢
+        exact hsimpa
     | annotation id =>
-        simpa [project, Hyperdocument.lookup] using
+        have hsimpa :=
           fieldsExact (⟨.annotations, id⟩ : Address)
             (Finset.mem_singleton.mpr rfl)
+        simp [project, Hyperdocument.lookup] at hsimpa ⊢
+        exact hsimpa
 
 @[simp] theorem lens_dependencies (query : ContentQuery) :
     lens.dependencies query = query.footprint :=

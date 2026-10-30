@@ -298,7 +298,7 @@ def sched : Schedule :=
 def prf : FillPrf := fun _ => []
 
 /-- A regular cell of `sched` at epoch 1, tick 3, slot `ρ`, its sealed bytes all `b`. -/
-def cellAt (ρ : Nat) (b : UInt8) : Cell P1 :=
+def cellAt (ρ : Nat) (b : UInt8) : Cell sched.profile :=
   Cell.ofRaw (sched.headerAt 1 3 ρ) (fit P1.bodyLen (List.replicate 248 b))
 
 /-- Subject 11 (holder of slot 1) also sends a cell under slot 0's header; subject 10 is silent. -/

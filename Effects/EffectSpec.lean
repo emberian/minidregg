@@ -283,7 +283,7 @@ instance : Countable MoveArgs :=
 /-- **The first real declaration** — the kernel's conserving ledger `move`
 (`Kernel.State.move`, REUSED — the conservation spine) as an effect. This record is the
 ENTIRE authored surface; term, executor, descriptor, and their laws are `derive`d. -/
-def moveEffect : EffectSpec where
+@[reducible] def moveEffect : EffectSpec where
   Op := MoveArgs
   State := KernelState
   sem := fun m k => move k m.src m.dst m.asset m.δ

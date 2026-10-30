@@ -468,7 +468,9 @@ theorem deployed_refines_step (B : Bridge R D) (H : History R TransactionId Stab
   · left
     unfold Represents
     rw [st.snapshot, after, st.height, hi]
-    simpa using rep
+    have hsimpa := rep
+    simp at hsimpa ⊢
+    exact hsimpa
 
 /-- **`host_trace_represents_fold`.**  Whatever refusals and crashes the
 deployed Host went through, its state represents the fold, from the world it
@@ -704,7 +706,7 @@ inductive Space
   deriving DecidableEq, Repr
 
 /-- One append-only and one RAM address. -/
-def toyLayout : Layout.{0, 0, 0} where
+@[reducible] def toyLayout : Layout.{0, 0, 0} where
   Namespace := Space
   Key := fun _ => Unit
   Value := fun _ => Nat

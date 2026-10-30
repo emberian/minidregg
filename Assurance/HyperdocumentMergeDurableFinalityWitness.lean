@@ -179,6 +179,7 @@ theorem content_event_cells_distinct :
         Bool.false_eq_true, if_false, erased_roots_match,
         erased_nullifiers_fresh, erased_charge_funded]
 
+set_option backward.isDefEq.respectTransparency false in
 @[simp] theorem data_preflight_ready :
     Merge.durableIntent.preflight before = .ok () := by
   have guards : Merge.durableIntent.readGuardsMatchCheck before = true := by

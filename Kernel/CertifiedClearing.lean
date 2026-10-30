@@ -494,6 +494,7 @@ theorem suboptimal_refused :
     (clear opened 6 1 market partialClearing honest).map balances = .error (.uncertified 6 0) := by
   decide +kernel
 
+set_option backward.isDefEq.respectTransparency false in
 /-- And no dual at all certifies it at `ε = 0`: the full clearing is feasible and
 trades 6 more. -/
 theorem suboptimal_not_certifiable (π : Fin 2 → Int) (s : Fin book.length → Int) :

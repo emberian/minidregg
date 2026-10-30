@@ -142,7 +142,6 @@ theorem Session.rememberReadback_newer {config : Config} (session : Session conf
   apply Session.rememberReadback_stale
   intro same
   have heights := congrArg (fun image : DurableReceiver.Image => image.accepted.length) same
-  dsimp only at heights
   simp only [DurableReceiverIO.Loaded.height_eq] at newer
   omega
 

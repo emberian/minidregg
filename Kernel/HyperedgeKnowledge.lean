@@ -198,10 +198,18 @@ end Keystones
 
 /-! ### Axiom pins. -/
 
-/-- info: 'Minidregg.Kernel.HyperedgeKnowledge.agreement_is_distributed_knowledge' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Kernel.HyperedgeKnowledge.agreement_is_distributed_knowledge' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in #print axioms agreement_is_distributed_knowledge
 
-/-- info: 'Minidregg.Kernel.HyperedgeKnowledge.legs_agree_is_distributed_knowledge' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Kernel.HyperedgeKnowledge.legs_agree_is_distributed_knowledge' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in #print axioms legs_agree_is_distributed_knowledge
 
 /-- info: 'Minidregg.Kernel.HyperedgeKnowledge.distKnows_apex_iff_honest_agree' does not depend on any axioms -/

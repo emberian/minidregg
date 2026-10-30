@@ -350,7 +350,7 @@ noncomputable def storedCapabilityCodec :
 
 def attenuateEvidence :
     AttenuateEvidence issuedCell attenuateDeclaration parentStored where
-  parentExact := by simpa [parentStored] using issued_root_exact
+  parentExact := by exact issued_root_exact
   parentIdExact := rfl
   parentLineageValid := .root rootCapability rfl rfl
   parentLineageAnchored := True.intro
@@ -591,7 +591,9 @@ noncomputable abbrev finalCell : Cell AuthorityMaterializer :=
 
 @[simp] theorem final_policy_epoch_three :
     policyEpochAt finalCell examplePolicy = 3 := by
-  simpa [rotateDeclaration, EpochTarget.read] using rotation_post_exact rotated
+  have hsimpa := rotation_post_exact rotated
+  simp [rotateDeclaration, EpochTarget.read] at hsimpa ⊢
+  exact hsimpa
 
 /-- Grant generation changes independently of the current resource law. -/
 @[simp] theorem final_policy_revision_two :
@@ -880,8 +882,9 @@ theorem authority_update_rejects_old_use
   apply policy_registry_rotation_rejects_old_intent attenuatedCell
     authorityCellId sharedFullDigest baseUseIntent authority_read_only
     afterAuthorityUpdate
-  simpa [afterAuthorityUpdate, afterAuthorityUpdateModel,
-    afterAuthorityUpdateBytes, authorityCellId] using authority_update_moves_root binding
+  have hsimpa := authority_update_moves_root binding
+  simp [afterAuthorityUpdate, afterAuthorityUpdateModel, afterAuthorityUpdateBytes, authorityCellId] at hsimpa ⊢
+  exact hsimpa
 
 /-- No filesystem, database, RPC stack, or physical transport is claimed here.
 Such a claim must inhabit the existing simulation boundary. -/

@@ -93,7 +93,7 @@ theorem decode_json : (t : ATerm) → (n : Nat) → (e : CoreTerm) → depth t �
     decodeTerm n t.json = .ok e
   | t, 0, _, hd, _ => absurd hd (by have := depth_pos t; omega)
   | .bound i, n+1, e, _, he => by
-    simp [ATerm.erase] at he; subst he; rw [decodeTerm]; simp [ATerm.json, jsonNat, toJson, Json.getNat?, JsonNumber.fromNat]
+    simp [ATerm.erase] at he; subst he; rw [decodeTerm]; simp [ATerm.json, jsonNat, toJson, Json.getNat?, JsonNumber.fromNat, ← Int.ofNat_eq_coe, -Int.ofNat_eq_natCast]
   | .lam _ b, n+1, e, hd, he => by
     simp only [ATerm.erase, bind_ok] at he
     obtain ⟨eb, hb, he⟩ := he
@@ -308,7 +308,7 @@ theorem decodePacket_term {v j : Json} {p : DecodedPacket} (decoded : decodePack
   split at rest
   · simp [bind, Except.bind] at rest
   · simp only [bind_ok, term, pure, Except.pure] at rest
-    obtain ⟨_, _, _, _, _, _, j', hj, t, ht, _, _, rest⟩ := rest
+    obtain ⟨_, _, _, _, j', hj, t, ht, _, _, rest⟩ := rest
     cases hj; cases rest; exact ht
 
 #assert_axioms getObjVal_mkObj

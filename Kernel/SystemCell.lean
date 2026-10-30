@@ -75,10 +75,10 @@ structure System where
   tailBound : Nat
   deriving DecidableEq, Repr
 
-def Namespace.Key : Namespace → Type
+@[reducible] def Namespace.Key : Namespace → Type
   | .system => Unit
 
-def Namespace.Value : Namespace → Type
+@[reducible] def Namespace.Value : Namespace → Type
   | .system => System
 
 instance Namespace.keyDecEq : (space : Namespace) → DecidableEq (Namespace.Key space)
@@ -213,11 +213,11 @@ def genesisStore (tailBound : Nat) : SystemStore :=
   (0 : SystemStore).set systemAddress (some (genesisSystem tailBound))
 
 theorem genesis_law (tailBound : Nat) : Law (genesisStore tailBound) := by
-  simp [Law, systemOf, genesisStore, systemAddress, Store.set]; rfl
+  simp [Law, systemOf, genesisStore, systemAddress, Store.set]
 
 theorem genesis_system (tailBound : Nat) :
     systemOf (genesisStore tailBound) = some (genesisSystem tailBound) := by
-  simp [systemOf, genesisStore, systemAddress, Store.set]; rfl
+  simp [systemOf, genesisStore, systemAddress, Store.set]
 
 /-- Refuting pole of the law: an empty system cell is not lawful. -/
 theorem empty_unlawful : ¬ Law (0 : SystemStore) := by decide +kernel

@@ -448,9 +448,8 @@ theorem byteArray_beq_exact (left right : List UInt8) :
     | mk data =>
       cases b with
       | mk other =>
-        unfold BEq.beq ByteArray.instBEq
-        unfold ByteArray.instBEq.beq
-        simp only [ByteArray.mk.injEq, beq_iff_eq]
+        show ByteArray.beq _ _ = true ↔ _
+        simp [ByteArray.beq]
   rw [byteArrayBEq]
   constructor
   · intro exact
@@ -1716,7 +1715,7 @@ def Loaded.rebase {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes
   ⟨loaded.image, loaded.height,
     ⟨loaded.image.seed.absentBytes, loaded.cells, loaded.snapshot.model.available⟩,
     loaded.engine, loaded.snapshot, loaded.snapshotExact, by rw [Loaded.height_eq],
-    by simpa only [Loaded.height_eq] using DurableEngine.resume_rebase loaded.resumed,
+    by exact DurableEngine.resume_rebase loaded.resumed,
     loaded.logStart,
     loaded.chain, loaded.chainExact, loaded.roots, loaded.rootsExact,
     loaded.index, loaded.indexExact, loaded.links, loaded.linksExact,

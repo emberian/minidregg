@@ -203,6 +203,7 @@ def readGuards {height : Height}
     (sourceReadGuards accepted ++ platformGuards deployment durable).filter fun guard =>
       guard.cellId ∉ accepted.prepared.writes.map DataWrite.cellId
 
+set_option backward.isDefEq.respectTransparency false in
 private theorem branch_read_exact {height : Height}
     (accepted : AcceptedBirth profile deployment pins durable height)
     (branch : Branch accepted.descriptor) :
@@ -267,6 +268,7 @@ private theorem slot_of_live {durable : ResourceBirthController.Concrete.Durable
   try rfl
 
 omit [DecidableEq F] in
+set_option backward.isDefEq.respectTransparency false in
 /-- **No birth writes the platform cell.** Every write a birth commits is a fresh allocation
 (its identifier unused in the loaded directory), the factory cell, the resource book or the
 credential-authority cell; the platform cell is live in the same directory with kind

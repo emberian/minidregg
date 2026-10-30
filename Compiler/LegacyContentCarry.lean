@@ -276,7 +276,7 @@ def AnnotationRecord.toCurrent (record : AnnotationRecord) : Hyperdocument.Annot
     tombstonedAt := record.tombstonedAt }
 
 
-def Value : Hyperdocument.Namespace → Type
+@[reducible] def Value : Hyperdocument.Namespace → Type
   | .elements => ElementRecord
   | .marks => MarkRecord
   | .documents => Hyperdocument.DocumentRecord

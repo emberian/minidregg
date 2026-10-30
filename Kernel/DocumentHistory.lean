@@ -245,6 +245,7 @@ def lineOf (store : ContentStore) (marks : List (MarkId × MarkRecord)) (element
       | .runs _ => .runs
       | .opaque _ _ => .opaque
 
+set_option backward.isDefEq.respectTransparency false in
 /-- A source-admitted wrapping update creates no semantic line difference. -/
 theorem lineOf_rewrapAtom (author : PrincipalRef) (operation : OperationId)
     (document : DocumentId) (progress next : Progress) (atom : AtomId)

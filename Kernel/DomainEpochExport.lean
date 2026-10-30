@@ -48,7 +48,7 @@ theorem slices_flatMap {α : Type} {w : Nat} (f : α → List UInt8) (hf : ∀ a
     ∀ (xs : List α) (rest : List UInt8), slices w xs.length (xs.flatMap f ++ rest) = xs.map f
   | [], _ => rfl
   | a :: xs, rest => by
-    simp only [slices, List.flatMap_cons, List.append_assoc, List.map_cons]
+    simp only [List.length_cons, slices, List.flatMap_cons, List.append_assoc, List.map_cons]
     rw [List.take_left' (hf a), List.drop_left' (hf a), slices_flatMap f hf xs rest]
 
 theorem length_flatMap_const {α : Type} {w : Nat} (f : α → List UInt8) (hf : ∀ a, (f a).length = w) :

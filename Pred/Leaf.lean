@@ -233,13 +233,13 @@ theorem negation_named : firstFailingLeaf (.not (Pred.all [])) (read 1) (read 1)
 
 end LeafSample
 
-/-- info: 'Minidregg.Pred.firstFailingLeaf_none_iff_eval' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Pred.firstFailingLeaf_none_iff_eval' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms firstFailingLeaf_none_iff_eval
 
-/-- info: 'Minidregg.Pred.firstFailingLeaf_some_leaf' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Pred.firstFailingLeaf_some_leaf' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms firstFailingLeaf_some_leaf
 
-/-- info: 'Minidregg.Pred.LeafSample.refused_two_to_one' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Pred.LeafSample.refused_two_to_one' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms LeafSample.refused_two_to_one
 
 end Minidregg.Pred

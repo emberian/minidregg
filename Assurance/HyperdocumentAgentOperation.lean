@@ -526,6 +526,7 @@ variable
       authorityPre documentPre
       contentPortal contentDeclaration)
 
+set_option backward.isDefEq.respectTransparency false in
 theorem selected_address_touched (selection : Selection contentDeclaration) :
     selection.selected.address ∈
       content.accepted.prepared.delta.footprint := by

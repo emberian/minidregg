@@ -402,6 +402,7 @@ def authorization : Authorized permissivePortal
   policyMembershipVerified := rfl
   policyVerified := rfl
 
+set_option backward.isDefEq.respectTransparency false in
 def semantic : HyperdocumentOperations.ValidOperation config
     hyperdocumentCell declaration where
   canonical :=

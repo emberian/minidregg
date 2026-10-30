@@ -375,29 +375,29 @@ end Guarantees
 
 /-! ## §5. Axiom pins — `Pred.eval` reaches the Keccak sponge (`[propext, Quot.sound]`). -/
 
-/-- info: 'Minidregg.Kernel.SealedMarket.sealed_moves_no_opening' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.SealedMarket.sealed_moves_no_opening' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms sealed_moves_no_opening
-/-- info: 'Minidregg.Kernel.SealedMarket.early_reveal_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.SealedMarket.early_reveal_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms early_reveal_refused
-/-- info: 'Minidregg.Kernel.SealedMarket.moved_opening_opens' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.SealedMarket.moved_opening_opens' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms moved_opening_opens
-/-- info: 'Minidregg.Kernel.SealedMarket.market_reveal_binds' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.SealedMarket.market_reveal_binds' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms market_reveal_binds
-/-- info: 'Minidregg.Kernel.SealedMarket.wrong_opening_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.SealedMarket.wrong_opening_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms wrong_opening_refused
-/-- info: 'Minidregg.Kernel.SealedMarket.bid_only_sealed_empty_by_bidder' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.SealedMarket.bid_only_sealed_empty_by_bidder' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms bid_only_sealed_empty_by_bidder
-/-- info: 'Minidregg.Kernel.SealedMarket.late_bid_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.SealedMarket.late_bid_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms late_bid_refused
-/-- info: 'Minidregg.Kernel.SealedMarket.fill_only_settling_within_qty' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.SealedMarket.fill_only_settling_within_qty' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms fill_only_settling_within_qty
-/-- info: 'Minidregg.Kernel.SealedMarket.overfill_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.SealedMarket.overfill_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms overfill_refused
-/-- info: 'Minidregg.Kernel.SealedMarket.settles_once_by_founder_after_reveals' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.SealedMarket.settles_once_by_founder_after_reveals' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms settles_once_by_founder_after_reveals
-/-- info: 'Minidregg.Kernel.SealedMarket.early_settle_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.SealedMarket.early_settle_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms early_settle_refused
-/-- info: 'Minidregg.Kernel.SealedMarket.no_install_no_revoke' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.SealedMarket.no_install_no_revoke' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms no_install_no_revoke
 
 end Minidregg.Kernel.SealedMarket

@@ -279,8 +279,10 @@ abbrev intent : DataIntent Link.materializer.rootBytes := settlement.intent
 @[simp] theorem terminal_trigger_is_authenticated_link_pre :
     settlement.terminalPlan.triggerRoot = wakeEntry.context.postStateRoot :=
   by
-    simpa [finalized, acceptedOperation, reactiveRequest] using
+    have hsimpa :=
       settlement.trigger_is_authenticated_observation
+    simp [finalized, acceptedOperation, reactiveRequest] at hsimpa ⊢
+    exact hsimpa
 
 /-! ## Provider-lease scheduler admission -/
 
@@ -441,6 +443,7 @@ theorem crash_after_then_retry_replays {command : LinkCommand} {before : Store}
 
 /-! ## Dependency invalidation is the trigger read guard -/
 
+set_option backward.isDefEq.respectTransparency false in
 /-- A scheduler snapshot whose dependency cell no longer has the authenticated
 trigger root fails closed.  The changed snapshot must itself come from the
 store refinement boundary; this theorem does not fabricate a physical write. -/
@@ -451,7 +454,9 @@ theorem invalidated_dependency_preflight_rejects (before : Store)
   apply DurableDataIntent.stale_read_guard_rejected
   refine ⟨settlement.terminalPlan.triggerGuard, ?_, ?_⟩
   · simp [intent, ReactiveDurableSettlement.FinalizeSettlement.intent]
-  · simpa [ReactiveTerminalCell.Plan.triggerGuard] using changed
+  · have hsimpa := changed
+    simp [ReactiveTerminalCell.Plan.triggerGuard] at hsimpa ⊢
+    exact hsimpa
 
 theorem invalidated_dependency_cannot_finalize (before : Store)
     (changed : before.model.roots openCell.triggerCell ≠

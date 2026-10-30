@@ -108,7 +108,6 @@ theorem getObjVal_mkObj (l : List (String × Json)) (k : String) (v : Json)
 theorem natOf_decimal (path : String) (n : Nat) : natOf path (decimal n) = .ok n := by
   have h : (decimal n).getStr? = .ok n.repr := rfl
   simp [natOf, h, Nat.toNat?_repr, Except.toOption, pure, Except.pure]
-  rfl
 
 theorem lane_names_nodup : ["typeFuel", "sourceTicks", "heap", "stack", "outputNodes", "outputBytes",
     "extractTicks", "inputBytes", "scalarBits", "memoryTouches", "proofWork", "feeDebit", "turnBytes", "witnessBytes",

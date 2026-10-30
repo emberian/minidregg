@@ -310,8 +310,10 @@ theorem alternative_after_finalize_conflicts
     change Snapshot.lookupRecorded settlement.intent.transactionId
       (DataSnapshot.install before settlement.intent).model.journal =
         some settlement.intent.erase
-    simpa only [DataSnapshot.install_model] using
+    have hsimpa :=
       Snapshot.lookupRecorded_install before.model settlement.intent.erase
+    simp only [DataSnapshot.install_model] at hsimpa ⊢
+    exact hsimpa
   unfold DurableDataIntent.execute
   have alternativeTransaction :
       alternative.intent.transactionId = binding.openCell.transactionId := rfl

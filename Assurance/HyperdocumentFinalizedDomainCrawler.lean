@@ -265,6 +265,7 @@ theorem page_eq_of_bound_root
   apply binding.eq_of_root_eq
   simpa [domain.pageRootExact page] using rootExact
 
+set_option backward.isDefEq.respectTransparency false in
 /-- Installing the exact page at the exact cursor grows the exact prefix by one.
 The pair binding premise is precisely the collision-resistance obligation used
 to turn the checked page root into page equality. -/
@@ -607,6 +608,7 @@ def CrawlState.installSuccessor
     roots := Function.update state.roots changed
       (some (after.pageRoots changed)) }
 
+set_option backward.isDefEq.respectTransparency false in
 theorem installSuccessor_complete
     {pageCount : Nat} {ExternallyFinal : FinalizedCheckpoint -> Prop}
     (before after : DeclaredDomain pageCount ExternallyFinal)

@@ -48,6 +48,7 @@ universe u v w y z
 
 /-! ## The additive resource algebra -/
 
+set_option backward.isDefEq.respectTransparency false in
 /-- Independently budgeted semantic resource lanes.  `incidences` counts the
 flat requests participating in one joint turn; it deliberately does not encode
 parent/child call-forest structure.  Lease usage is byte-block time, hence is
@@ -493,5 +494,5 @@ end Minidregg.Theory.ResourceCost
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.ResourceCost.Quote.compose
 /-- info: 'Minidregg.Theory.ResourceCost.WordLayout.encode?_none_of_overflow' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.ResourceCost.WordLayout.encode?_none_of_overflow
-/-- info: 'Minidregg.Theory.ResourceCost.SettledDecision.admitted_exact' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.ResourceCost.SettledDecision.admitted_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.ResourceCost.SettledDecision.admitted_exact

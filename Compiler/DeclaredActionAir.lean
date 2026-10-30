@@ -339,6 +339,7 @@ def system {kind : ResourceKind} {target : ResourceId kind}
       guardSystem context declaration fields
   else [cst 1]
 
+set_option backward.isDefEq.respectTransparency false in
 theorem guardSystem_correct {kind : ResourceKind}
     {target : ResourceId kind} (context : RequestContext)
     (declaration : Declaration target) (fields : EffectFields)

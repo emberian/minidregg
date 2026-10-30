@@ -609,13 +609,13 @@ inductive IndexSpace where
   | derived
   deriving DecidableEq, Repr
 
-def IndexSpace.Key (capacity : Nat) : IndexSpace → Type
+@[reducible] def IndexSpace.Key (capacity : Nat) : IndexSpace → Type
   | .checkpoints => Bool
   | .cursor => Unit
   | .source => Fin capacity
   | .derived => Fin capacity
 
-def IndexSpace.Value : IndexSpace → Type
+@[reducible] def IndexSpace.Value : IndexSpace → Type
   | .checkpoints => CausalCheckpoint
   | .cursor => SyncCursor
   | .source => SourceEntry

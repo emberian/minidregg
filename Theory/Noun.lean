@@ -542,7 +542,7 @@ theorem readBits_spec (B : Array Bool) : ∀ (L : List Bool) (i acc pw : Nat),
   | [], _, acc, _, _ => by simp [readBits, ofBits]
   | b :: L, i, acc, pw, h => by
     rw [Matches.cons] at h
-    simp only [readBits, h.1]
+    simp only [List.length_cons, readBits, h.1]
     rw [readBits_spec B L (i + 1) _ _ h.2]
     congr 1
     cases b <;> simp [ofBits] <;> ring
@@ -1447,13 +1447,13 @@ theorem edit_into_atom_refused : edit 2 (atom 9) (atom 1) = none := by decide
 
 /-- info: 'Minidregg.Theory.Noun.natBits_length' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms natBits_length
-/-- info: 'Minidregg.Theory.Noun.ofBits_natBits' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Theory.Noun.ofBits_natBits' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms ofBits_natBits
 /-- info: 'Minidregg.Theory.Noun.ofBits_append' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms ofBits_append
 /-- info: 'Minidregg.Theory.Noun.ofBits_lt' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms ofBits_lt
-/-- info: 'Minidregg.Theory.Noun.natBits_ofBits' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Theory.Noun.natBits_ofBits' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms natBits_ofBits
 /-- info: 'Minidregg.Theory.Noun.lt_two_pow_bitLen' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms lt_two_pow_bitLen
@@ -1467,7 +1467,7 @@ theorem edit_into_atom_refused : edit 2 (atom 9) (atom 1) = none := by decide
 #guard_msgs (whitespace := lax) in #print axioms jamAux_table_new
 /-- info: 'Minidregg.Theory.Noun.decode_jamAux' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms decode_jamAux
-/-- info: 'Minidregg.Theory.Noun.fromBytes_toBytes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Theory.Noun.fromBytes_toBytes' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms fromBytes_toBytes
 /-- info: 'Minidregg.Theory.Noun.cue_jam' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms cue_jam
@@ -1571,9 +1571,9 @@ theorem edit_into_atom_refused : edit 2 (atom 9) (atom 1) = none := by decide
 #guard_msgs (whitespace := lax) in #print axioms BitW.push_spec
 /-- info: 'Minidregg.Theory.Noun.BitW.pushAll_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms BitW.pushAll_spec
-/-- info: 'Minidregg.Theory.Noun.toBytesAux_fromBytes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Theory.Noun.toBytesAux_fromBytes' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms toBytesAux_fromBytes
-/-- info: 'Minidregg.Theory.Noun.BitW.finish_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Theory.Noun.BitW.finish_eq' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms BitW.finish_eq
 /-- info: 'Minidregg.Theory.Noun.jamFastAux_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms jamFastAux_spec

@@ -363,6 +363,7 @@ abbrev Durable := ResourceBirthController.Concrete.Durable
 abbrev PreparedBirth {F : Type} [Field F] :=
   ResourceBirthController.Concrete.PreparedBirth (F := F)
 
+set_option backward.isDefEq.respectTransparency false in
 /-- The authority incidence is the one authority cell at the deployment's pinned
 identifier. Allocation incidences are already outer lifecycle slots and are
 never packed into a second envelope. -/
@@ -1018,7 +1019,11 @@ theorem refused_before_authored :
 
 end WindowExample
 
-/-- info: 'Minidregg.Kernel.ResourceBirthPolicyController.Concrete.rootGrantShape_window' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Kernel.ResourceBirthPolicyController.Concrete.rootGrantShape_window' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs (whitespace := lax) in #print axioms rootGrantShape_window
 /-- info: 'Minidregg.Kernel.ResourceBirthPolicyController.Concrete.templateBound_height_move' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms templateBound_height_move
@@ -1352,6 +1357,7 @@ theorem accepted_policy_view_exact
 
 /-! ## Source-owned request dispatch over one checked joint candidate -/
 
+set_option backward.isDefEq.respectTransparency false in
 /-- The Book's fee request is already one of its source requests; it is not
 repeated as a second ambiguous policy branch. Every allocation has its own
 source-bound coordinate in the complete signed request. -/
@@ -1392,7 +1398,10 @@ theorem mapped_policyBranches_nodup_iff {allocations sources : Nat} {Value : Typ
   rw [List.nodup_map_iff_inj_on (policyBranches_nodup allocations sources)]
   simp only [mem_policyBranches, forall_const, Function.Injective]
 
-/-- info: 'Minidregg.Kernel.ResourceBirthPolicyController.Concrete.mapped_policyBranches_nodup_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/--
+info: 'Minidregg.Kernel.ResourceBirthPolicyController.Concrete.mapped_policyBranches_nodup_iff' depends on axioms: [propext,
+ Quot.sound]
+-/
 #guard_msgs (whitespace := lax) in #print axioms mapped_policyBranches_nodup_iff
 
 def branchPrimary : Branch descriptor → Legs descriptor
@@ -2511,10 +2520,10 @@ def verifyOwnerConsentsNative
     (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
     (height : Height) (native : CredentialSignatureIO.NativeConfig)
     (envelopes : Option (List (List UInt8))) :
-    IO (Except Reject (OwnerConsents prepared height envelopes)) := do
+    IO (Except Reject (OwnerConsents prepared height envelopes)) :=
   match envelopes with
   | none => return .ok ()
-  | some owners =>
+  | some owners => do
       if count : owners.length = descriptor.births.length then
         let action := fun (position : Fin descriptor.births.length) => do
           let envelope := owners[position.val]?.getD []

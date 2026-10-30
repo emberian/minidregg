@@ -1399,15 +1399,15 @@ end Poles
 -- Pins re-read on merging into the K-HASHEQ line (sealed-market): `Pred.eval` reaches the Keccak-f[1600]
 -- sponge since K-HASHEQ (`[propext, Quot.sound]`), so statements that mention `eval` gain `Quot.sound`.
 -- It is the closure of a definition, not a step of any proof here; `Classical.choice` stays out.
-/-- info: 'Minidregg.Kernel.Job.job_clause' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.job_clause' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.job_clause
-/-- info: 'Minidregg.Kernel.Job.present_iff' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.present_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.present_iff
-/-- info: 'Minidregg.Kernel.Job.present_false_on_absent' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.present_false_on_absent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.present_false_on_absent
 /-- info: 'Minidregg.Kernel.Job.caller_cannot_forge_truth' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.caller_cannot_forge_truth
-/-- info: 'Minidregg.Kernel.Job.truth_needs_ran' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.truth_needs_ran' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.truth_needs_ran
 /-- info: 'Minidregg.Kernel.Job.bond_slashed_iff_mismatch' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.bond_slashed_iff_mismatch
@@ -1415,11 +1415,11 @@ end Poles
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.slashed_only_by_mismatch_or_stall
 /-- info: 'Minidregg.Kernel.Job.upheld_requires_match_or_timeout' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.upheld_requires_match_or_timeout
-/-- info: 'Minidregg.Kernel.Job.close_empties_cell' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.close_empties_cell' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.close_empties_cell
-/-- info: 'Minidregg.Kernel.Job.ev_ran' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.ev_ran' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.ev_ran
-/-- info: 'Minidregg.Kernel.Job.money_frozen_without_slot' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.money_frozen_without_slot' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.money_frozen_without_slot
 /-- info: 'Minidregg.Kernel.Job.escrow_moves_only_on_fund_or_close' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.escrow_moves_only_on_fund_or_close
@@ -1455,9 +1455,9 @@ end Poles
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.no_double_settle
 /-- info: 'Minidregg.Kernel.Job.enters_upheld_from' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.enters_upheld_from
-/-- info: 'Minidregg.Kernel.Job.Accepted.tail' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.Accepted.tail' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.Accepted.tail
-/-- info: 'Minidregg.Kernel.Job.Accepted.head' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.Accepted.head' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.Accepted.head
 /-- info: 'Minidregg.Kernel.Job.upheld_by' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.upheld_by
@@ -1471,113 +1471,113 @@ end Poles
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.demo_ranSlot
 /-- info: 'Minidregg.Kernel.Job.demo_fresh' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.demo_fresh
-/-- info: 'Minidregg.Kernel.Job.order_admitted' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.order_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.order_admitted
-/-- info: 'Minidregg.Kernel.Job.order_by_stranger_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.order_by_stranger_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.order_by_stranger_refused
-/-- info: 'Minidregg.Kernel.Job.order_without_clock_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.order_without_clock_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.order_without_clock_refused
-/-- info: 'Minidregg.Kernel.Job.order_prefunded_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.order_prefunded_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.order_prefunded_refused
-/-- info: 'Minidregg.Kernel.Job.fund_admitted' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.fund_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.fund_admitted
-/-- info: 'Minidregg.Kernel.Job.fund_without_receiver_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.fund_without_receiver_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.fund_without_receiver_refused
-/-- info: 'Minidregg.Kernel.Job.fund_short_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.fund_short_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.fund_short_refused
-/-- info: 'Minidregg.Kernel.Job.claim_without_receiver_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.claim_without_receiver_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.claim_without_receiver_refused
-/-- info: 'Minidregg.Kernel.Job.close_without_receiver_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.close_without_receiver_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.close_without_receiver_refused
-/-- info: 'Minidregg.Kernel.Job.claim_admitted' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.claim_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.claim_admitted
-/-- info: 'Minidregg.Kernel.Job.claim_late_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.claim_late_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.claim_late_refused
-/-- info: 'Minidregg.Kernel.Job.claim_for_another_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.claim_for_another_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.claim_for_another_refused
-/-- info: 'Minidregg.Kernel.Job.claim_underbonded_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.claim_underbonded_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.claim_underbonded_refused
-/-- info: 'Minidregg.Kernel.Job.answer_admitted' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.answer_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.answer_admitted
-/-- info: 'Minidregg.Kernel.Job.answer_by_caller_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.answer_by_caller_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.answer_by_caller_refused
-/-- info: 'Minidregg.Kernel.Job.answer_late_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.answer_late_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.answer_late_refused
-/-- info: 'Minidregg.Kernel.Job.answer_short_window_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.answer_short_window_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.answer_short_window_refused
-/-- info: 'Minidregg.Kernel.Job.second_answer_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.second_answer_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.second_answer_refused
-/-- info: 'Minidregg.Kernel.Job.truth_admitted' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.truth_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.truth_admitted
-/-- info: 'Minidregg.Kernel.Job.forged_truth_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.forged_truth_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.forged_truth_refused
-/-- info: 'Minidregg.Kernel.Job.truth_late_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.truth_late_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.truth_late_refused
-/-- info: 'Minidregg.Kernel.Job.sync_truth_admitted' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.sync_truth_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.sync_truth_admitted
-/-- info: 'Minidregg.Kernel.Job.sync_truth_by_stranger_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.sync_truth_by_stranger_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.sync_truth_by_stranger_refused
-/-- info: 'Minidregg.Kernel.Job.truth_with_decide_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.truth_with_decide_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.truth_with_decide_refused
-/-- info: 'Minidregg.Kernel.Job.upheld_match_admitted' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.upheld_match_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.upheld_match_admitted
-/-- info: 'Minidregg.Kernel.Job.early_upheld_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.early_upheld_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.early_upheld_refused
-/-- info: 'Minidregg.Kernel.Job.upheld_timeout_admitted' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.upheld_timeout_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.upheld_timeout_admitted
-/-- info: 'Minidregg.Kernel.Job.upheld_mismatch_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.upheld_mismatch_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.upheld_mismatch_refused
-/-- info: 'Minidregg.Kernel.Job.upheld_sync_admitted' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.upheld_sync_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.upheld_sync_admitted
-/-- info: 'Minidregg.Kernel.Job.upheld_from1_without_run_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.upheld_from1_without_run_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.upheld_from1_without_run_refused
-/-- info: 'Minidregg.Kernel.Job.slashed_mismatch_admitted' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.slashed_mismatch_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.slashed_mismatch_admitted
-/-- info: 'Minidregg.Kernel.Job.slashed_match_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.slashed_match_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.slashed_match_refused
-/-- info: 'Minidregg.Kernel.Job.stall_admitted' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.stall_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.stall_admitted
-/-- info: 'Minidregg.Kernel.Job.stall_early_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.stall_early_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.stall_early_refused
-/-- info: 'Minidregg.Kernel.Job.void_by_caller_admitted' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.void_by_caller_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.void_by_caller_admitted
-/-- info: 'Minidregg.Kernel.Job.void_by_stranger_early_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.void_by_stranger_early_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.void_by_stranger_early_refused
-/-- info: 'Minidregg.Kernel.Job.void_by_stranger_late_admitted' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.void_by_stranger_late_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.void_by_stranger_late_admitted
-/-- info: 'Minidregg.Kernel.Job.close_upheld_admitted' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.close_upheld_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.close_upheld_admitted
-/-- info: 'Minidregg.Kernel.Job.close_slashed_admitted' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.close_slashed_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.close_slashed_admitted
-/-- info: 'Minidregg.Kernel.Job.close_void_admitted' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.close_void_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.close_void_admitted
-/-- info: 'Minidregg.Kernel.Job.close_holding_bond_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.close_holding_bond_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.close_holding_bond_refused
-/-- info: 'Minidregg.Kernel.Job.close_undecided_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.close_undecided_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.close_undecided_refused
-/-- info: 'Minidregg.Kernel.Job.reopen_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.reopen_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.reopen_refused
-/-- info: 'Minidregg.Kernel.Job.truth_after_close_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.truth_after_close_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.truth_after_close_refused
-/-- info: 'Minidregg.Kernel.Job.closed_job_refuses_undeclared_field' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.closed_job_refuses_undeclared_field' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.closed_job_refuses_undeclared_field
-/-- info: 'Minidregg.Kernel.Job.order_inside_declaration' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.order_inside_declaration' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.order_inside_declaration
-/-- info: 'Minidregg.Kernel.Job.kernelAdmits_inside' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.kernelAdmits_inside' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.kernelAdmits_inside
-/-- info: 'Minidregg.Kernel.Job.delegate_by_caller_admitted' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.delegate_by_caller_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.delegate_by_caller_admitted
-/-- info: 'Minidregg.Kernel.Job.delegate_by_provider_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.delegate_by_provider_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.delegate_by_provider_refused
-/-- info: 'Minidregg.Kernel.Job.install_by_caller_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.install_by_caller_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.install_by_caller_refused
-/-- info: 'Minidregg.Kernel.Job.revoke_by_caller_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.revoke_by_caller_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.revoke_by_caller_refused
-/-- info: 'Minidregg.Kernel.Job.read_admitted' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.read_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.read_admitted
-/-- info: 'Minidregg.Kernel.Job.negated_timeout_fails_open' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.negated_timeout_fails_open' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.negated_timeout_fails_open
-/-- info: 'Minidregg.Kernel.Job.negated_price_fails_open' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Job.negated_price_fails_open' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.negated_price_fails_open
 
 /-- info: 'Minidregg.Kernel.Job.demo_ran_not_clock' depends on axioms: [propext] -/

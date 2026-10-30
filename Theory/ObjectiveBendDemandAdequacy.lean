@@ -1265,7 +1265,7 @@ def GraphRepresents (state : State) (source : Term) : Prop :=
   have empty := final _ complete
   simp [complete,controlMeaning,valueMeaning] at control
   subst residual
-  simpa [empty,StackRealizes] using And.intro steps (Value.natural number)
+  simpa [Evaluates,empty,StackRealizes] using And.intro steps (Value.natural number)
 
  theorem graph_complete_label_sound {state : State} {source : Term} {name : String}
     (represented : GraphRepresents state source)
@@ -1275,7 +1275,7 @@ def GraphRepresents (state : State) (source : Term) : Prop :=
   have empty := final _ complete
   simp [complete,controlMeaning,valueMeaning] at control
   subst residual
-  simpa [empty,StackRealizes] using And.intro steps (Value.label name)
+  simpa [Evaluates,empty,StackRealizes] using And.intro steps (Value.label name)
 
  theorem graph_complete_boolean_sound {state : State} {source : Term} {value : Bool}
     (represented : GraphRepresents state source)
@@ -1285,7 +1285,7 @@ def GraphRepresents (state : State) (source : Term) : Prop :=
   have empty := final _ complete
   simp [complete,controlMeaning,valueMeaning] at control
   subst residual
-  simpa [empty,StackRealizes] using And.intro steps (Value.boolean value)
+  simpa [Evaluates,empty,StackRealizes] using And.intro steps (Value.boolean value)
 
 /-- Finished closures, records, specifications and prototypes have source
 values through the same concrete heap graph assignment as scalars. The
@@ -2049,7 +2049,7 @@ def SourceDispatch (meaning next : AddressMeaning) (state : State) : Prop :=
   · simpa [stepRaw,enter,found] using names
   · simpa [stepRaw,enter,found] using heapRealizes_set heap newCell
   · simp [stepRaw,enter,found,controlMeaning,closeOrigin]
-  · simpa [stepRaw,enter,found,StackRealizes] using And.intro oldCell.1 stack
+  · simpa [stepRaw,enter,found,cellOrigin,StackRealizes] using And.intro oldCell.1 stack
 
  theorem graph_cache_update_names {meaning : AddressMeaning} {state : State} {source : Term} {address : Nat}
     {rest : List Frame} {value : RuntimeValue}
@@ -4232,7 +4232,7 @@ is general heap/closure preservation, including actual tied Fix origins. -/
     DemandSafety meaning (stepRaw state) := by
   intro other old found nameValue nameCost nameDemand focus current focusValue focusCost focusDemand
   have focusEq : focus = closeOrigin meaning origin := by
-    simpa only [budgetFocus,stepRaw,enter,suspended,controlMeaning,Option.some.injEq] using current.symm
+    simpa only [closeOrigin,budgetFocus,stepRaw,enter,suspended,controlMeaning,Option.some.injEq] using current.symm
   subst focus
   have oldFocus : budgetFocus meaning state = some (closeOrigin meaning origin) := by simp [budgetFocus,enter,suspended]
   have capEq : budgetCap (stepRaw state) = budgetCap state := by simp [budgetCap,stepRaw,enter,suspended]
@@ -4253,7 +4253,7 @@ is general heap/closure preservation, including actual tied Fix origins. -/
       · exact Or.inl strict
       · right
         refine ⟨by omega,?_⟩
-        simpa [budgetCap,stepRaw,enter,suspended] using captureCap_le captures
+        simpa [budgetCap,stepRaw,enter,suspended,cellOrigin] using captureCap_le captures
     · have aligned := sourceDerivation_cost_unique tail focusDemand
       exact Or.inl (aligned ▸ less)
 
@@ -4284,7 +4284,7 @@ is general heap/closure preservation, including actual tied Fix origins. -/
       cases cell with
       | evaluating origin | cached origin value => simp [budgetCap,enter,found]
       | suspended origin =>
-          simpa only [budgetCap,enter,found] using captureCap_le (originBorn_capture_bound (born address _ found))
+          simpa only [budgetCap,enter,found,cellOrigin] using captureCap_le (originBorn_capture_bound (born address _ found))
 
 /-- Bare lexical lookup preserves active source/capture safety. Suspended and
 cached phases reduce source budget; every origin's cap is bounded by the

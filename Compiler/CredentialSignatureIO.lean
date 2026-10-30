@@ -235,20 +235,20 @@ theorem decodeNative_true_exact (verdict : UInt8)
   unfold decodeNativeVerdict at accepted
   split at accepted
   next verified => exact eq_of_beq verified
-  next => split at accepted <;> contradiction
+  next => split at accepted <;> cases accepted
 
-theorem decodeNative_verified : decodeNativeVerdict nativeVerified = .ok true := by decide
+theorem decodeNative_verified : decodeNativeVerdict nativeVerified = .ok true := by rfl
 
-theorem decodeNative_invalid : decodeNativeVerdict nativeInvalid = .ok false := by decide
+theorem decodeNative_invalid : decodeNativeVerdict nativeInvalid = .ok false := by rfl
 
 theorem decodeNative_input_error_refuses :
     decodeNativeVerdict nativeInputError =
       .error (.unavailable "mini-kernels 0.1.0 rejected the signature verification inputs") := by
-  decide
+  rfl
 
 theorem decodeNative_unknown_refuses :
     decodeNativeVerdict 3 =
       .error (.unavailable "mini-kernels 0.1.0 rejected the signature verification inputs") := by
-  decide
+  rfl
 
 end Minidregg.Compiler.CredentialSignatureIO

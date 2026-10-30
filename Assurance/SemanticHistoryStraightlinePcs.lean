@@ -222,9 +222,9 @@ theorem FoldRootSchedule.wordAt_historyTrace
       have priorLinkExact : ∀ j, priorSchedule.linkWord j =
           priorLink j := by
         intro j
-        simpa [priorSchedule, FoldRootSchedule.truncate,
-          Fin.snoc_castSucc] using
-          linkWordExact j.castSucc
+        have linked := linkWordExact j.castSucc
+        rw [Fin.snoc_castSucc] at linked
+        exact linked
       have priorFinal := ih priorSchedule priorInitialExact priorLinkExact
       have priorFinal' :
           schedule.wordAt priorRounds priorChallenges = priorWord := by

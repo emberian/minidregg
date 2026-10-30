@@ -496,7 +496,7 @@ theorem corrupted_commit_not_represent_install :
   intro represented
   apply install_ne device.recovered intent
   simpa [Represents, DeviceState.recovered, DeviceState.decodeAll,
-    afterCorruption, corruptFrame, corruptFrame_rejected] using represented.symm
+    afterCorruption, corruptFrame_rejected, device, DurableWalHandler.WalState.recovered] using represented.symm
 
 /-- The same intent becomes stale when its expected root no longer matches the
 checkpoint, so no sync proof can be constructed for the moved device. -/
@@ -518,28 +518,28 @@ end ClosedInstance
 
 /-! ## Axiom audit -/
 
-/-- info: 'Minidregg.Kernel.FramedWalRefinement.FrameCodec.decodeFrame_badChecksum' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Kernel.FramedWalRefinement.FrameCodec.decodeFrame_badChecksum' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms FrameCodec.decodeFrame_badChecksum
-/-- info: 'Minidregg.Kernel.FramedWalRefinement.DeviceState.decodeAll_append_frame' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.FramedWalRefinement.DeviceState.decodeAll_append_frame' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms DeviceState.decodeAll_append_frame
-/-- info: 'Minidregg.Kernel.FramedWalRefinement.step_refines_wal' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.FramedWalRefinement.step_refines_wal' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms step_refines_wal
-/-- info: 'Minidregg.Kernel.FramedWalRefinement.recovered_after_sync' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.FramedWalRefinement.recovered_after_sync' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms recovered_after_sync
-/-- info: 'Minidregg.Kernel.FramedWalRefinement.deviceRefinement' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.FramedWalRefinement.deviceRefinement' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms deviceRefinement
-/-- info: 'Minidregg.Kernel.FramedWalRefinement.ClosedInstance.afterSync_recovers_install' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Kernel.FramedWalRefinement.ClosedInstance.afterSync_recovers_install' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms ClosedInstance.afterSync_recovers_install
 /-- info: 'Minidregg.Kernel.FramedWalRefinement.ClosedInstance.corrupted_commit_not_represent_install' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms ClosedInstance.corrupted_commit_not_represent_install
-/-- info: 'Minidregg.Kernel.FramedWalRefinement.ClosedInstance.stale_cannot_sync' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Kernel.FramedWalRefinement.ClosedInstance.stale_cannot_sync' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms ClosedInstance.stale_cannot_sync
 

@@ -931,6 +931,7 @@ instance logicalLawDecidable (deployment : Deployment) (cellId : Nat)
 def CellLaw (deployment : Deployment) (cellId : Nat) (cell : PackedCell registry) : Prop :=
   deployment.Valid ∧ LogicalLaw deployment cellId cell.kind cell.payload.logical
 
+set_option backward.isDefEq.respectTransparency false in
 instance cellLawDecidable (deployment : Deployment) (cellId : Nat) (cell : PackedCell registry) :
     Decidable (CellLaw deployment cellId cell) := by
   unfold CellLaw
@@ -1012,6 +1013,7 @@ def FinalPostLaw (deployment : Deployment) (cellId : Nat)
     (before.kind = .policySource ∨ before.kind = .nockProgram →
       PackedCell.bytes registry before = PackedCell.bytes registry after)
 
+set_option backward.isDefEq.respectTransparency false in
 instance finalPostLawDecidable (deployment : Deployment) (cellId : Nat)
     (before after : PackedCell registry) : Decidable (FinalPostLaw deployment cellId before after) := by
   unfold FinalPostLaw
@@ -1041,6 +1043,7 @@ def UserInitial (deployment : Deployment) (cellId : Nat) (cell : PackedCell regi
   (CellLaw deployment cellId cell ∧ UserShape cell.kind cell.payload.logical) ∧
     cellId < Kernel.ProtectedCell.reservedBase
 
+set_option backward.isDefEq.respectTransparency false in
 instance userInitialDecidable (deployment : Deployment) (cellId : Nat) (cell : PackedCell registry) :
     Decidable (UserInitial deployment cellId cell) := by
   unfold UserInitial
@@ -1175,7 +1178,9 @@ theorem initialSourceCreates_ids {F : Type} [Field F] {domain : Digest}
     (checked : PolicySourceCell.CheckedInitials domain profile initials) :
     (initialSourceCreates domain checked.records).map CreateRequest.cellId =
       PolicySourceCell.initialIds domain initials := by
-  simpa [initialSourceCreates, policySourceCreate, List.map_map] using checked.ids_exact
+  have hsimpa := checked.ids_exact
+  simp [initialSourceCreates, policySourceCreate, List.map_map] at hsimpa ⊢
+  exact hsimpa
 
 structure LoadedPolicySource (domain : Digest) (directory : Directory Nat registry)
     (address : Digest) where
@@ -1268,6 +1273,7 @@ def fetchPolicySource (domain : Digest) (directory : Directory Nat registry) (ad
     Option (List UInt8) :=
   (loadPolicySource domain directory address).map LoadedPolicySource.canonicalBytes
 
+set_option backward.isDefEq.respectTransparency false in
 theorem fetchPolicySource_exact (domain : Digest) (directory : Directory Nat registry)
     (address : Digest) (record : CanonicalPolicyAdmission.PolicyRecord)
     (present : directory.slots (PolicySourceCell.physicalId domain address) =
@@ -1291,12 +1297,14 @@ theorem fetchPolicySource_exact (domain : Digest) (directory : Directory Nat reg
       simp [domainExact, addressExact, LoadedPolicySource.canonicalBytes]
   next => simp_all [policySourceCell]
 
+set_option backward.isDefEq.respectTransparency false in
 theorem missing_policy_source_refused (domain : Digest) (directory : Directory Nat registry)
     (address : Digest)
     (missing : directory.slots (PolicySourceCell.physicalId domain address) = .absent) :
     fetchPolicySource domain directory address = none := by
   simp [fetchPolicySource, loadPolicySource, missing]
 
+set_option backward.isDefEq.respectTransparency false in
 theorem wrong_policy_source_kind_refused (domain : Digest) (directory : Directory Nat registry)
     (address : Digest) (cell : PackedCell registry)
     (present : directory.slots (PolicySourceCell.physicalId domain address) = .present cell)

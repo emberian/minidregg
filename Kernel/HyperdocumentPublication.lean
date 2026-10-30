@@ -24,6 +24,7 @@ open Minidregg.Theory.Hyperdocument
 
 set_option autoImplicit false
 
+set_option backward.isDefEq.respectTransparency false in
 inductive Incidence where
   | content
   | eventLog

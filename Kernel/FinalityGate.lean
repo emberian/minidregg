@@ -258,28 +258,32 @@ end ClosedInstance
 
 /-! ## §8. Axiom pins (exact-output, self-verifying -- State §8's discipline). -/
 
-/-- info: 'Minidregg.Kernel.FinalityGate.check_eq_true_iff' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.FinalityGate.check_eq_true_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms check_eq_true_iff
 
-/-- info: 'Minidregg.Kernel.FinalityGate.check_sound' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.FinalityGate.check_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms check_sound
 
-/-- info: 'Minidregg.Kernel.FinalityGate.check_complete' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.FinalityGate.check_complete' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms check_complete
 
-/-- info: 'Minidregg.Kernel.FinalityGate.check_eq_true_iff_exists_finalized' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Kernel.FinalityGate.check_eq_true_iff_exists_finalized' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in #print axioms check_eq_true_iff_exists_finalized
 
-/-- info: 'Minidregg.Kernel.FinalityGate.checked_logs_comparable' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.FinalityGate.checked_logs_comparable' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms checked_logs_comparable
 
-/-- info: 'Minidregg.Kernel.FinalityGate.checked_no_conflict' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.FinalityGate.checked_no_conflict' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms checked_no_conflict
 
-/-- info: 'Minidregg.Kernel.FinalityGate.check_false_of_not_quorum' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.FinalityGate.check_false_of_not_quorum' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms check_false_of_not_quorum
 
-/-- info: 'Minidregg.Kernel.FinalityGate.check_false_of_unvoted' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.FinalityGate.check_false_of_unvoted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms check_false_of_unvoted
 
 /-- info: 'Minidregg.Kernel.FinalityGate.ClosedInstance.honest_accepted' depends on axioms: [propext, Classical.choice, Quot.sound] -/

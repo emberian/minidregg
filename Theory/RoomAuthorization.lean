@@ -427,19 +427,19 @@ theorem room_cap_survives_member_rotation :
 
 /-! ## Axiom audit -/
 
-/-- info: 'Minidregg.Theory.TypedAuthorization.Scope.narrows_stable' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorization.Scope.narrows_stable' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Scope.narrows_stable
-/-- info: 'Minidregg.Theory.TypedAuthorization.Capability.attenuation_admits_subset' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorization.Capability.attenuation_admits_subset' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Capability.attenuation_admits_subset
-/-- info: 'Minidregg.Theory.TypedAuthorization.Capability.strict_attenuation_admits_subset' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorization.Capability.strict_attenuation_admits_subset' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Capability.strict_attenuation_admits_subset
 /-- info: 'Minidregg.Theory.RoomAuthorization.covers_under_chain' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms covers_under_chain
-/-- info: 'Minidregg.Theory.RoomAuthorization.covers_cases' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.RoomAuthorization.covers_cases' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms covers_cases
-/-- info: 'Minidregg.Theory.RoomAuthorization.room_confidentiality' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.RoomAuthorization.room_confidentiality' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms room_confidentiality
-/-- info: 'Minidregg.Theory.RoomAuthorization.room_admission_traces_to_root' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.RoomAuthorization.room_admission_traces_to_root' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms room_admission_traces_to_root
 /-- info: 'Minidregg.Theory.RoomAuthorization.member_reads' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms member_reads
@@ -479,5 +479,5 @@ theorem room_cap_survives_member_rotation :
 #guard_msgs (whitespace := lax) in #print axioms invite_cannot_widen
 
 end Minidregg.Theory.RoomAuthorization
-/-- info: 'Minidregg.Theory.RoomAuthorization.room_confidentiality_write' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.RoomAuthorization.room_confidentiality_write' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.RoomAuthorization.room_confidentiality_write

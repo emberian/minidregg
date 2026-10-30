@@ -194,6 +194,7 @@ noncomputable def checkpoint : DataSnapshot rootBytes where
     Genesis.authorityMaterializer.rootBytes Genesis.authorityPre.bytes
   rw [authority_rootBytes_exact]
 
+set_option backward.isDefEq.respectTransparency false in
 theorem stableNullifier_injective : Function.Injective stableNullifier := by
   intro left right equal
   rcases left with ⟨incidence, value⟩

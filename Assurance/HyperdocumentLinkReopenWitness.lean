@@ -62,6 +62,7 @@ abbrev width := linkScope.width
 def linkAddress : Hyperdocument.Address :=
   ⟨.links, linkId⟩
 
+set_option backward.isDefEq.respectTransparency false in
 theorem linkAddress_named :
     linkAddress ∈ Store.Patch.writeFootprint (linkDeclaration.patch config) := by
   simp [linkAddress, linkDeclaration, linkAction, linkPayload,
@@ -442,9 +443,12 @@ def query : ContentQuery := .link linkId
 @[simp] theorem query_exact :
     ContentQuery.project query linkAccepted.accepted.prepared.post.logical =
       some record := by
-  simpa [query, ContentQuery.project, record] using
+  have hsimpa :=
     link_post_contains_forward
+  simp [query, ContentQuery.project, record] at hsimpa ⊢
+  exact hsimpa
 
+set_option backward.isDefEq.respectTransparency false in
 theorem query_dirty : ContentQuery.lens.Dirty query
     linkAccepted.accepted.prepared.delta := by
   exact ⟨linkAddress, Finset.mem_inter.mpr ⟨by simp [query, linkAddress,

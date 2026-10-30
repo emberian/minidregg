@@ -70,6 +70,7 @@ def fromEntriesFast [LinearOrder K] (items : List (Sigma V)) : (Π₀ key : K, V
       · exact Or.inl (by simpa using (Std.DTreeMap.mem_keys.mpr present))
       · exact Or.inr (Std.DTreeMap.getD_eq_fallback present)⟩)
 
+set_option backward.isDefEq.respectTransparency false in
 /-- Representation changes no map value, even for duplicates, arbitrary order, or zeros. -/
 @[simp] theorem fromEntriesFast_eq [LinearOrder K] (items : List (Sigma V)) :
     fromEntriesFast items = fromEntries items := by
@@ -217,6 +218,7 @@ theorem entries_canonical [LinearOrder K] [∀ key, DecidableEq (V key)]
     obtain ⟨key, present, rfl⟩ := member
     simpa using present
 
+set_option backward.isDefEq.respectTransparency false in
 theorem mem_keys_of_fromEntries_ne {items : List (Sigma V)} {key : K}
     (nonzero : fromEntries items key ≠ 0) : key ∈ items.map Sigma.fst := by
   induction items with
@@ -229,6 +231,7 @@ theorem mem_keys_of_fromEntries_ne {items : List (Sigma V)} {key : K}
           simpa [fromEntries, DFinsupp.update, Function.update, Ne.symm same] using nonzero
         simp [ih restNonzero]
 
+set_option backward.isDefEq.respectTransparency false in
 theorem entries_fromEntries_of_canonical [LinearOrder K] [∀ key, DecidableEq (V key)]
     (items : List (Sigma V)) (canonical : CanonicalEntries items) :
     entries (fromEntries items) = items := by

@@ -181,7 +181,7 @@ instance (activation : ComputeActivation) : Decidable activation.valid := by
   unfold ComputeActivation.valid
   cases activation.legacyThroughDay <;> infer_instance
 
-def Namespace.Key : Namespace → Type
+@[reducible] def Namespace.Key : Namespace → Type
   | .tariff => Unit
   | .book => Nat
   | .assignment => Nat
@@ -196,7 +196,7 @@ def Namespace.Key : Namespace → Type
   | .computeUsage => Nat
   | .computeActivation => Unit
 
-def Namespace.Value : Namespace → Type
+@[reducible] def Namespace.Value : Namespace → Type
   | .tariff => Tariff
   | .book => Address32
   | .assignment => Nat
@@ -469,6 +469,8 @@ def namespaceListStream : StreamCodec Namespace where
     | _ => none
   decodePrefix_encode := by intro space suffix; cases space <;> rfl
 
+-- The tag-cursor proof unfolds the reducible namespace type families (v4.35); twice the default budget.
+set_option maxHeartbeats 400000 in
 def namespaceStream : StreamCodec Namespace :=
   withTagCursor namespaceListStream rfl (by unfold namespaceListStream; one_octet_tag)
 

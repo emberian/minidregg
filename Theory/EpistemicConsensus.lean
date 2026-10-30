@@ -340,7 +340,11 @@ end Keystone
 /-- info: 'Minidregg.Theory.EpistemicConsensus.Frame.honest_dist_knowledge_composes' does not depend on any axioms -/
 #guard_msgs in #print axioms Frame.honest_dist_knowledge_composes
 
-/-- info: 'Minidregg.Theory.EpistemicConsensus.Keystone.agent1_not_knows' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.EpistemicConsensus.Keystone.agent1_not_knows' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in #print axioms Keystone.agent1_not_knows
 
 /--
@@ -357,7 +361,11 @@ info: 'Minidregg.Theory.EpistemicConsensus.Keystone.faulty_alone_not_distKnows' 
 -/
 #guard_msgs in #print axioms Keystone.faulty_alone_not_distKnows
 
-/-- info: 'Minidregg.Theory.EpistemicConsensus.Keystone.both_know_verified' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.EpistemicConsensus.Keystone.both_know_verified' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in #print axioms Keystone.both_know_verified
 
 /-- info: 'Minidregg.Theory.EpistemicConsensus.Keystone.Y_unrealizable' depends on axioms: [propext, Quot.sound] -/

@@ -198,6 +198,7 @@ theorem settlementFieldFocus_exact
       Store.Patch.writeFootprint declaration.jointPatch :=
   cut.addressesExact
 
+set_option backward.isDefEq.respectTransparency false in
 theorem settlementScopedFrame
     {F : Type*} (settlement : AcceptedSettlement (law := law) cut)
     (scalarizer : Scalarizer L F)

@@ -705,7 +705,9 @@ theorem Accepted.policy_evaluated_actual_post [DecidableEq F]
         (step prepared).oldState (step prepared).newState = true := by
   apply ComposedPolicyAdmission.authorized_effective_law (policyConfig prepared)
     (request ground.authority profile.semantics ambient command)
-  simpa only [portal] using accepted.authorization
+  have hsimpa := accepted.authorization
+  simp only [portal] at hsimpa ⊢
+  exact hsimpa
 
 /-- **The delegation an envelope authorizes.** The checked signature is over exactly
 `envelope`, it is for this delegation's complete request (built from `ground`'s authority,

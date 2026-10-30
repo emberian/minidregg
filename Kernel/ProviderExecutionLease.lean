@@ -216,7 +216,9 @@ theorem rekeyed_prepay_cannot_accept_twice
   have lookup : Snapshot.lookupRecorded newTransaction
       (DataSnapshot.install before lease.prepayIntent).model.journal = none := by
     have oldNe : lease.prepayIntent.transactionId ≠ newTransaction := by
-      simpa [prepayIntent] using different.symm
+      have hsimpa := different.symm
+      simp [prepayIntent] at hsimpa ⊢
+      exact hsimpa
     simp [DataSnapshot.install, Snapshot.install, Snapshot.lookupRecorded,
       oldNe, newUnrecorded]
   unfold DurableDataIntent.execute

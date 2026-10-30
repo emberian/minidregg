@@ -933,7 +933,7 @@ def demoWitness : CompiledPolicyWitness (ZMod 13) :=
 /-- Positive pole: the exact versioned policy, state commitment, effect
 commitment, and emitted AIR witness are accepted. -/
 theorem demo_policy_accepts : demoConfig.verifies demoRequest demoWitness = true := by
-  decide
+  decide +kernel
 
 def demoWrongPolicyRequest : Request .object :=
   { demoRequest with policyId := ⟨999⟩ }
@@ -970,7 +970,7 @@ def demoEvidence : Evidence demoConfig.portal demoAuthState demoRequest :=
 compiled gate; this is not merely a standalone Boolean-verifier example. -/
 theorem demo_admission_isSome :
     (admit demoConfig demoAuthState demoRequest demoEvidence demoWitness () rfl rfl).isSome = true := by
-  decide
+  decide +kernel
 
 /-- The theorem-level reflection really fires on the deployed keystone. -/
 theorem demo_reflects_source :

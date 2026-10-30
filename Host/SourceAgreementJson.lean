@@ -420,8 +420,8 @@ private def holder (path : String) (json : Lean.Json) : Result Holder := do
       pure (.subject ⟨← nat (path ++ ".subject") (← field path "subject" obj)⟩)
   | _ => failAt (path ++ ".type") "expected bearer or subject"
 
-private def verb (kind : ResourceKind) (path : String) (json : Lean.Json) : Result (Verb kind) := do
-  let name ← string path json
+private def verb (kind : ResourceKind) (path : String) (json : Lean.Json) : Result (Verb kind) :=
+  string path json >>= fun name =>
   match kind, name with
   | .object, "observe" => pure .observeObject
   | .object, "mutate" => pure .mutateObject
@@ -1562,7 +1562,11 @@ theorem grainPolicy_stale_worker_refused (owner : Nat) (subjects : List Nat)
           intro worker named
           exact workerFalseWith worker (by simp [named])
 
-/-- info: 'Minidregg.Host.SourceAgreementJson.grainPolicy_stale_worker_refused' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Host.SourceAgreementJson.grainPolicy_stale_worker_refused' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs (whitespace := lax) in #print axioms grainPolicy_stale_worker_refused
 
 /-- A non-owner subject absent from the bounded worker list cannot mutate
@@ -1606,7 +1610,11 @@ theorem grainPolicy_unnamed_worker_refused (owner : Nat) (subjects : List Nat)
           intro worker named
           exact workerFalseWith worker (by simp [named])
 
-/-- info: 'Minidregg.Host.SourceAgreementJson.grainPolicy_unnamed_worker_refused' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Host.SourceAgreementJson.grainPolicy_unnamed_worker_refused' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs (whitespace := lax) in #print axioms grainPolicy_unnamed_worker_refused
 
 /-! ### Any holder of a delegated grant may make the birth witness (ruling Option A)

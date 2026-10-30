@@ -436,7 +436,7 @@ theorem toy_admits (host : NativeHost.Config) (genesis : Config) (key env : List
   · simp only [toyContext, Deployment.verifies, Deployment.controller, toyDeployment, if_pos rfl]
     exact decide_eq_true recorded
   · simp [toyContext, toyDeployment, Deployment.controller]
-  · simpa [installOf, Platform.valid] using valid
+  · exact valid
   · simp only [installOf]
     cases h.current.completionCustodianKey with
     | none => trivial
@@ -498,7 +498,7 @@ theorem trustsSubjectField_not_decides (host : NativeHost.Config) (genesis : Con
     simp only [trustsSubjectField, i, installOf, toyContext, Deployment.controller,
       Bool.and_eq_true, decide_eq_true_eq]
     exact ⟨⟨rfl, Nat.lt_succ_self _⟩, by
-      simpa [Platform.valid, h, History.current, History.records] using valid⟩)
+      exact valid⟩)
   exact forged_refused _ _ _ (by
     simp [toyContext, Deployment.verifies, Deployment.controller, toyDeployment]) admitted
 

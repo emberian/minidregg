@@ -5,6 +5,7 @@ Everything here must be the metatheory of *any* system built this way: abstract
 parameters only, no imports outside Mathlib + Theory itself (enforced by
 `scripts/check-import-boundary.sh`).
 -/
+import Theory.ExceptDecidableEq  -- `DecidableEq (Except ε α)` with an exposed body (Batteries derives it unexposed, so decide and the kernel cannot evaluate it)
 import Theory.Knowledge  -- the verify/find seam: Verifiable/Discharged/Searchable, Claim/Holds/Knower
 import Theory.PrivacyProfile  -- observer-indexed privacy axes, typed same-opening/release joins, and compositional noninterference
 import Theory.DisclosureDeclaration  -- first-order observer releases require both request-indexed authorization and a checked same-opening witness before VerifiedRelease exists

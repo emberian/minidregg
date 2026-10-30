@@ -447,7 +447,9 @@ theorem receiptEvent_bfv_semantics
   have accepted : Accepts
       (authority.declaration.statementOf event.privateRequest event.outcome)
       event.evidence.checked.witness := by
-    simpa only [Authority.declaration] using event.evidence.checked.accepts
+    have hsimpa := event.evidence.checked.accepts
+    simp only [Authority.declaration] at hsimpa ⊢
+    exact hsimpa
   rcases accepted with ⟨-, -, -, outputEq, -, -⟩
   have outputEq' : event.outcome.output.representation =
       event.evidence.checked.witness.outputRepresentation := by

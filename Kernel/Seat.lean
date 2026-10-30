@@ -61,6 +61,7 @@ Not here: fees (the receiver charges them), non-fungible (set) amounts. -/
 module
 
 public import Kernel.Invitation
+public import Theory.ExceptDecidableEq
 public import Kernel.ProtectedCell
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).

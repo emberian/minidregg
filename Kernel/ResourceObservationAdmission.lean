@@ -302,6 +302,7 @@ theorem authorizeChecked_capability_reason
     authorizeChecked prepared signature = .error (.of reason) := by
   simp only [authorizeChecked, ComposedPolicyAdmission.PreparedLaw.admit_eq, refused]
 
+set_option backward.isDefEq.respectTransparency false in
 /-- With admissible capability evidence and a resolved committed law whose order
 clauses are all in range and whose step's integers have distinct field images, a law that does not accept is reported as `lawDenied`,
 naming the failing clause of that law on the same witness states the admission
@@ -333,6 +334,7 @@ theorem authorizeChecked_lawDenied
     ComposedLawDiagnostics.publicRefusal, ComposedLawDiagnostics.localRefusal]
   simp only [policyConfig, PhysicalLawResolution.config, none_, noAlias]
 
+set_option backward.isDefEq.respectTransparency false in
 /-- With every order clause in range, a law refused because two integers of its
 step share a field image is reported as `lawInputRange` naming the two integers,
 never a bare `lawDenied`. -/
@@ -359,6 +361,7 @@ theorem authorizeChecked_castAlias
     ComposedLawDiagnostics.publicRefusal, ComposedLawDiagnostics.localRefusal]
   simp only [policyConfig, PhysicalLawResolution.config, none_, alias_]
 
+set_option backward.isDefEq.respectTransparency false in
 /-- A law refused while one of its order clauses compares two values outside the
 native order range is reported as `lawInputRange`, naming that clause and the two
 values, never a bare `lawDenied`. -/
@@ -410,6 +413,7 @@ theorem authorizeChecked_leaf_fails
         exact ⟨at_, fails⟩
   · cases refused
 
+set_option backward.isDefEq.respectTransparency false in
 /-- The admitted pole: the law's acceptance is returned unchanged. -/
 theorem authorizeChecked_admitted
     (prepared : Prepared context profile wanted marker capability contextBytes)
@@ -587,6 +591,8 @@ theorem controller_room_confidentiality
       exact ⟨cap, commitment, rfl, semantic,
         RoomAuthorization.covers_cases semantic.scope.target⟩
 
+set_option backward.isDefEq.respectTransparency false in
+unseal portal in
 /-- The capability an authorization invokes is exactly the stored record at
 the requested capability identifier of the loaded authority cell. -/
 theorem authorize_names_stored
@@ -615,7 +621,7 @@ theorem authorize_names_stored
         simp only [Except.toOption] at accepted
         injection accepted with same
         subst same
-        simp only [portal, policyConfig, PhysicalLawResolution.config] at evidence supplied admitted ⊢
+        simp only [portal, policyConfig, PhysicalLawResolution.config] at supplied admitted ⊢
         have named := ComposedPolicyAdmission.Config.capabilityEvidence_names_stored
           (policyConfig prepared) wanted capability () signature () (fun _ => ())
           (evidence := evidence) (by simpa only [capabilityEvidenceChecked] using supplied)
@@ -857,12 +863,14 @@ instance visibleDecidable (fields : Option (Finset CellField)) (kind : Canonical
     (address : Address (CanonicalCellRegistry.layout kind)) : Decidable (Visible fields kind address) := by
   unfold Visible; infer_instance
 
+set_option backward.isDefEq.respectTransparency false in
 /-- A packed resource cell as a reader under `fields` receives it: the named
 fields, never the blinding. -/
 def narrowPacked (fields : Option (Finset CellField))
     (packed : PackedCell CanonicalCellRegistry.registry) : PackedCell CanonicalCellRegistry.registry :=
   ⟨packed.kind, materialize _ (DFinsupp.filter (Visible fields packed.kind) packed.payload.logical)⟩
 
+set_option backward.isDefEq.respectTransparency false in
 /-- Every address a reader receives is one its scope keeps. -/
 theorem narrowPacked_only_kept {fields : Option (Finset CellField)}
     {packed : PackedCell CanonicalCellRegistry.registry}
@@ -872,6 +880,7 @@ theorem narrowPacked_only_kept {fields : Option (Finset CellField)}
   by_contra dropped
   exact present (DFinsupp.filter_apply_neg _ (fun visible => dropped visible.1))
 
+set_option backward.isDefEq.respectTransparency false in
 /-- No reader receives the hiding key. -/
 theorem narrowPacked_erases_blinding (fields : Option (Finset CellField))
     (packed : PackedCell CanonicalCellRegistry.registry)
@@ -925,7 +934,11 @@ end Minidregg.Kernel.ResourceObservationAdmission
 #assert_axioms Minidregg.Kernel.ResourceObservationAdmission.atoms_reader_sees_only_its_own_atoms Minidregg.Kernel.ResourceObservationAdmission.atoms_reader_sees_no_link
 /-- info: 'Minidregg.Theory.StoreFootprint.mem_changed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceObservationAdmission.mem_changed
-/-- info: 'Minidregg.Kernel.ResourceObservationAdmission.narrowBalances_only_named' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Kernel.ResourceObservationAdmission.narrowBalances_only_named' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceObservationAdmission.narrowBalances_only_named
 /-- info: 'Minidregg.Theory.StoreFootprint.changedWithin_eq_changed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceObservationAdmission.changedWithin_eq_changed

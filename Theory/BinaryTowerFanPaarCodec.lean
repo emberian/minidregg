@@ -259,12 +259,12 @@ def encodeFin (value : Fin (2 ^ 256)) : List UInt8 :=
 
 @[simp] theorem encodeFin_length (value : Fin (2 ^ 256)) :
     (encodeFin value).length = 32 := by
-  simp [encodeFin, Bignum.digitsLE_length]
+  simp [encodeFin, bytesOfDigits, Bignum.digitsLE_length]
 
 @[simp] theorem encodeFin_toNats (value : Fin (2 ^ 256)) :
     (encodeFin value).map UInt8.toNat =
       Bignum.digitsLE 256 32 value.val := by
-  simp [encodeFin]
+  simp [encodeFin, bytesOfDigits, byteOfDigit]
 
 def decodeFin (bytes : List UInt8) : Option (Fin (2 ^ 256)) :=
   if bytes.length = 32 then
@@ -290,8 +290,8 @@ noncomputable def ofFin (value : Fin (2 ^ 256)) : Tower256 :=
   simp [ofFin, toFin]
 
 @[simp] theorem toFin_ofFin (value : Fin (2 ^ 256)) :
-    toFin (ofFin value) = value := by
-  simp [ofFin, toFin]
+    toFin (ofFin value) = value :=
+  (fieldFinEquiv 8).apply_symm_apply value
 
 /-- Basis tooth: zero occupies the all-zero 256-bit coordinate. -/
 theorem toFin_zero : (toFin (0 : Tower256)).val = 0 := by

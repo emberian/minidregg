@@ -377,19 +377,19 @@ end ClosedInstance
 
 /-! ## Pinned axiom audit -/
 
-/-- info: 'Minidregg.Compiler.FramedWalRecoveryController.run_success_reader_bytes' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Compiler.FramedWalRecoveryController.run_success_reader_bytes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms run_success_reader_bytes
-/-- info: 'Minidregg.Compiler.FramedWalRecoveryController.run_success_integrity' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Compiler.FramedWalRecoveryController.run_success_integrity' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms run_success_integrity
-/-- info: 'Minidregg.Compiler.FramedWalRecoveryController.ClosedInstance.honest_run_accepts' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.FramedWalRecoveryController.ClosedInstance.honest_run_accepts' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms ClosedInstance.honest_run_accepts
-/-- info: 'Minidregg.Compiler.FramedWalRecoveryController.ClosedInstance.corrupt_checksum_rejected' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.FramedWalRecoveryController.ClosedInstance.corrupt_checksum_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms ClosedInstance.corrupt_checksum_rejected
-/-- info: 'Minidregg.Compiler.FramedWalRecoveryController.ClosedInstance.truncated_frame_rejected' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.FramedWalRecoveryController.ClosedInstance.truncated_frame_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms ClosedInstance.truncated_frame_rejected
 /-- info: 'Minidregg.Compiler.FramedWalRecoveryController.ClosedInstance.stale_guard_rejected' depends on axioms: [propext, Quot.sound] -/

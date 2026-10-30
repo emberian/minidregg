@@ -146,6 +146,7 @@ import all Init.Data.String.Slice
 import all Init.Data.String.TakeDrop
 import all Init.Prelude
 import all Lean.Data.Json.Basic
+import all Init.Data.Ord.String
 import all Lean.Data.Json.FromToJson.Basic
 import all Lean.Data.Json.Parser
 import all Lean.Data.Json.Printer
@@ -610,8 +611,8 @@ private def holder (path : String) (json : Lean.Json) : Result Holder := do
       pure (.subject ⟨← nat (path ++ ".subject") (← field path "subject" obj)⟩)
   | _ => failAt (path ++ ".type") "expected bearer or subject"
 
-private def verb (kind : ResourceKind) (path : String) (json : Lean.Json) : Result (Verb kind) := do
-  let name ← string path json
+private def verb (kind : ResourceKind) (path : String) (json : Lean.Json) : Result (Verb kind) :=
+  string path json >>= fun name =>
   match kind, name with
   | .object, "observe" => pure .observeObject
   | .object, "mutate" => pure .mutateObject

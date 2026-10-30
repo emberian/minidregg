@@ -365,7 +365,9 @@ def wrongRootObservation : ReactiveController.HostObservation controllerTypes :=
   have wrongVerify : GuardedAdvice.verifyFill
       (declaration.verifier wrongRootObservation proofData)
       wrongRootObservation.now declaration.hole advice = .accepted verified := by
-    simpa [wrongRootObservation] using verifyExact
+    have hsimpa := verifyExact
+    simp [wrongRootObservation] at hsimpa ⊢
+    exact hsimpa
   apply control_stale_of_verified wrongVerify
   simpa [wrongRootObservation, observation, declaration, hole] using wrongRoot_ne
 
@@ -385,10 +387,10 @@ def expiredObservation : ReactiveController.HostObservation controllerTypes :=
     unfold GuardedAdvice.verifyFill
     simp only [show (declaration.verifier expiredObservation proofData).supports
         declaration.hole = true by
-          simpa [expiredObservation] using supports_exact,
+          exact supports_exact,
       show (declaration.verifier expiredObservation proofData).backendAvailable
         declaration.hole = true by
-          simpa [expiredObservation] using backend_exact]
+          exact backend_exact]
     simp [expiredObservation, observation, declaration, hole]
   exact control_expired_of_verify expiredVerify
 
@@ -406,7 +408,9 @@ def replayObservation : ReactiveController.HostObservation controllerTypes :=
   have replayVerify : GuardedAdvice.verifyFill
       (declaration.verifier replayObservation proofData)
       replayObservation.now declaration.hole advice = .accepted verified := by
-    simpa [replayObservation] using verifyExact
+    have hsimpa := verifyExact
+    simp [replayObservation] at hsimpa ⊢
+    exact hsimpa
   apply control_replay_of_verified replayVerify
   · rfl
   · simp [replayObservation]

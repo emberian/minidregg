@@ -172,7 +172,7 @@ theorem leBytes_leValue : ∀ (xs : List UInt8), leBytes xs.length (leValue xs) 
   | [] => rfl
   | b :: bs => by
       have hb := b.toNat_lt
-      simp only [leBytes, leValue]
+      simp only [List.length_cons, leBytes, leValue]
       have h1 : (b.toNat + 256 * leValue bs) % 256 = b.toNat := by omega
       have h2 : (b.toNat + 256 * leValue bs) / 256 = leValue bs := by omega
       rw [h1, h2, leBytes_leValue bs, UInt8.ofNat_toNat]

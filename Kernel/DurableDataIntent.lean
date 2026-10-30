@@ -204,6 +204,12 @@ def erase (intent : DataIntent rootBytes) :
 @[simp] theorem erase_nullifiers (intent : DataIntent rootBytes) :
     intent.erase.nullifiers = intent.nullifiers := rfl
 
+@[simp] theorem erase_exactCharge (intent : DataIntent rootBytes) :
+    intent.erase.exactCharge = intent.exactCharge := rfl
+
+@[simp] theorem erase_credit (intent : DataIntent rootBytes) :
+    intent.erase.credit = intent.credit := rfl
+
 @[simp] theorem erase_event (intent : DataIntent rootBytes) :
     intent.erase.event =
       { writes := intent.writes
@@ -731,11 +737,11 @@ def claimOnlyIntent : DataIntent lengthRoot where
   postRootsBound := by simp
   guardsReadOnly := by simp
 
-theorem claim_only_ready : claimOnlyIntent.preflight before = .ok () := by decide
+theorem claim_only_ready : claimOnlyIntent.preflight before = .ok () := rfl
 
 theorem claim_only_spent_claim_refused :
     claimOnlyIntent.preflight (DataSnapshot.install before claimOnlyIntent) =
-      .error (.durable .alreadyConsumed) := by decide
+      .error (.durable .alreadyConsumed) := rfl
 
 def claimOnlyNoGuard : DataIntent lengthRoot where
   transactionId := ⟨93⟩
@@ -749,7 +755,7 @@ def claimOnlyNoGuard : DataIntent lengthRoot where
   guardsReadOnly := by simp
 
 theorem claim_only_no_guard_refused :
-    claimOnlyNoGuard.preflight before = .error .unguardedEventOnly := by decide
+    claimOnlyNoGuard.preflight before = .error .unguardedEventOnly := rfl
 
 def claimOnlyNoClaim : DataIntent lengthRoot where
   transactionId := ⟨94⟩
@@ -763,9 +769,9 @@ def claimOnlyNoClaim : DataIntent lengthRoot where
   guardsReadOnly := by simp
 
 theorem claim_only_no_claim_refused :
-    claimOnlyNoClaim.preflight before = .error (.durable .noCells) := by decide
+    claimOnlyNoClaim.preflight before = .error (.durable .noCells) := rfl
 
-@[simp] theorem ready : intent.preflight before = .ok () := by decide
+@[simp] theorem ready : intent.preflight before = .ok () := rfl
 
 @[simp] theorem positive_install :
     execute .complete before intent =
@@ -798,10 +804,10 @@ def afterConcurrentReadMove : DataSnapshot lengthRoot where
   coherent := fun _ => rfl
 
 theorem claim_only_stale_guard :
-    claimOnlyIntent.preflight afterConcurrentReadMove = .error .staleReadGuard := by decide
+    claimOnlyIntent.preflight afterConcurrentReadMove = .error .staleReadGuard := rfl
 
 @[simp] theorem stale_after_concurrent_read_move :
-    intent.preflight afterConcurrentReadMove = .error .staleReadGuard := by decide
+    intent.preflight afterConcurrentReadMove = .error .staleReadGuard := rfl
 
 /-- **TOCTOU tooth.**  The same intent is ready at the snapshot it observed and
 rejected at a coherent snapshot in which only its read guard moved. -/
@@ -839,7 +845,7 @@ canonical post bytes differ.  Erased replay identity still rejects it. -/
 the same transaction id with colliding post bytes is a conflict, not a replay. -/
 @[simp] theorem byte_tamper_rejected_after_install :
     execute .complete (DataSnapshot.install before intent) tamperedIntent =
-      .rejected (.durable .transactionConflict) := by rfl
+      .rejected (.durable .transactionConflict) := rfl
 
 /-! ### Poles of `ImplementationRefinement`
 
@@ -872,9 +878,9 @@ end Minidregg.Kernel.DurableDataIntent
 
 /-! Kernel-facing theorem audit. -/
 
-/-- info: 'Minidregg.Kernel.DurableDataIntent.execute_no_partial_data_commit' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Kernel.DurableDataIntent.execute_no_partial_data_commit' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableDataIntent.execute_no_partial_data_commit
-/-- info: 'Minidregg.Kernel.DurableDataIntent.physical_step_no_partial_data_commit' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Kernel.DurableDataIntent.physical_step_no_partial_data_commit' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableDataIntent.physical_step_no_partial_data_commit
 /-- info: 'Minidregg.Kernel.DurableDataIntent.Witness.no_toctou_reuse' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableDataIntent.Witness.no_toctou_reuse

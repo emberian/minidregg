@@ -182,7 +182,6 @@ theorem octetsOnto_eq (bytes : ByteArray) (index : Nat) (fits : index ≤ bytes.
         rw [Array.getElem?_toList, Array.getElem?_eq_getElem inside,
           ByteArray.getElem_eq_getElem_data]
       simp only [octet, Option.toList_some, List.append_assoc, List.singleton_append]
-      rfl
 
 /-- The octets of a buffer as a list. -/
 def octetsOf (bytes : ByteArray) : List UInt8 := octetsOnto bytes bytes.size (Nat.le_refl _) []
@@ -1644,7 +1643,7 @@ theorem sliceOnto_eq (bytes : ByteArray) (start count : Nat) (fits : start + cou
       have octet : (bytes.data.toList.drop start)[count]? = some bytes[start + count] := by
         rw [List.getElem?_drop, Array.getElem?_toList, Array.getElem?_eq_getElem inside,
           ByteArray.getElem_eq_getElem_data]
-      simp only [octet, Option.toList_some, List.append_assoc, List.singleton_append]; rfl
+      simp only [octet, Option.toList_some, List.append_assoc, List.singleton_append]
 
 /-- Same length-prefixed bytes as `StreamCodec.list StreamCodec.byte`, with
 one list split instead of one recursive codec call per payload byte. -/

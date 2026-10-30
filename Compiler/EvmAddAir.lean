@@ -249,7 +249,7 @@ theorem schoolbook_digit_eq (B : ℕ) (hB : 2 ≤ B) {w : ℕ} (X Y : ℕ)
   -- the per-limb division identities, definitionally aligned with `carryChain`
   have hstep : ∀ j : Fin w, natDigit B X j.1 + natDigit B Y j.1 + c j.1
       = z j + B * c (j.1 + 1) := fun j => by
-    simpa [hzdef] using (Nat.mod_add_div (natDigit B X j.1 + natDigit B Y j.1 + c j.1) B).symm
+    exact (Nat.mod_add_div (natDigit B X j.1 + natDigit B Y j.1 + c j.1) B).symm
   -- telescope against the shared denotation
   have htel := carryEquations_denote B
     (fun j : Fin w => natDigit B X j.1) (fun j => natDigit B Y j.1) z

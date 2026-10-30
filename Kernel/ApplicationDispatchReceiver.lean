@@ -339,7 +339,6 @@ theorem mismatched_route_never_submits (config : Config) {target : Durable}
     receiveAdmitted config old ingress admitted (some constraint) refusal =
       pure (.noRecordRefused refusal) := by
   simp [receiveAdmitted, absent, mismatch]
-  rfl
 
 private def receiveVerifiedWith (config : Config) {target : Durable}
     (old : NativeHostReplay.Verified config target)
@@ -425,7 +424,6 @@ theorem continuity_probe_never_submits (config : Config) {target : Durable}
       pure (.noRecordRefused refusal) := by
   simp [receiveVerified, receiveVerifiedWith, ApplicationDispatchAdmissionIngress.codec.decode_encode,
     lookupAbsent, refusalExact, probe, ApplicationStreamContinuity.probe_reserved]
-  rfl
 
 theorem route_probe_never_submits (config : Config) {target : Durable}
     (old : NativeHostReplay.Verified config target)
@@ -440,7 +438,6 @@ theorem route_probe_never_submits (config : Config) {target : Durable}
       pure (.noRecordRefused refusal) := by
   simp [receiveVerified, receiveVerifiedWith, ApplicationDispatchAdmissionIngress.codec.decode_encode,
     lookupAbsent, refusalExact, probe, ApplicationRouteAdmission.probe_reserved]
-  rfl
 
 #assert_axioms route_probe_never_submits
 #assert_axioms continuity_probe_never_submits

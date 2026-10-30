@@ -58,6 +58,7 @@ import all Init.Data.Nat.Bitwise.Basic
 import all Init.Data.String.Bootstrap
 import all Init.Data.Format.Basic
 import all Init.Data.List.Scan.Basic
+import all Kernel.NativeHost
 
 @[expose] public section
 
@@ -676,8 +677,6 @@ end Proofs
 /-! ## Completeness: the honest Host passes -/
 
 section Completeness
-
-open private Minidregg.Kernel.NativeHost.slot from Kernel.NativeHost
 
 local notation "hostSlot" => Minidregg.Kernel.NativeHost.slot
 

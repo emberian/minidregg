@@ -242,15 +242,15 @@ private def five : Prefixes := ⟨[⟨10⟩, ⟨11⟩, ⟨12⟩, ⟨13⟩, ⟨14
 
 /-- **Satisfiable** (and the new liveness): certified at 2, head 5, a certify of the
 prefix 3 at its chain is admitted. -/
-theorem prefix_below_head_admitted : certifiable 2 five 3 ⟨13⟩ = .ok () := by decide
+theorem prefix_below_head_admitted : certifiable 2 five 3 ⟨13⟩ = .ok () := rfl
 
 /-- The head itself is still admitted. -/
-theorem head_admitted : certifiable 2 five 5 ⟨15⟩ = .ok () := by decide
+theorem head_admitted : certifiable 2 five 5 ⟨15⟩ = .ok () := rfl
 
 /-- Teeth, concrete: past the head, a wrong chain, at the certified height. -/
-theorem past_head_refused_6 : certifiable 2 five 6 ⟨16⟩ = .error .heightUnavailable := by decide
-theorem wrong_chain_refused_3 : certifiable 2 five 3 ⟨15⟩ = .error .chainMismatch := by decide
-theorem at_certified_refused_2 : certifiable 2 five 2 ⟨12⟩ = .error .notAdvancing := by decide
+theorem past_head_refused_6 : certifiable 2 five 6 ⟨16⟩ = .error .heightUnavailable := rfl
+theorem wrong_chain_refused_3 : certifiable 2 five 3 ⟨15⟩ = .error .chainMismatch := rfl
+theorem at_certified_refused_2 : certifiable 2 five 2 ⟨12⟩ = .error .notAdvancing := rfl
 
 /-- The witness history is the faithful history of its log. -/
 theorem five_faithful : Faithful five (fun h => ⟨10 + h⟩) := by

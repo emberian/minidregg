@@ -430,7 +430,7 @@ theorem factoredRounds_terminal
   rw [quadraticTable_sum_eq_gammaBatchedDescriptorResidual d wv enc gamma] at h
   calc
     _ = factoredGatePolynomial d wv enc gamma r := by
-      simpa only [factoredRounds, factoredGatePolynomial] using h
+      exact h
     _ = _ := factoredGatePolynomial_expanded d wv enc gamma r
 
 /-- The same terminal identity on the zero-anchored valid-trace chain. -/
@@ -513,6 +513,7 @@ theorem mle_operandTable_eq_selectorFunctional_eval {t : Nat}
   rw [← hw]
   ring
 
+set_option backward.isDefEq.respectTransparency false in
 /-- The fixed seven terminal functionals. -/
 inductive TerminalKind
   | mulA | mulB | mulC | addA | addB | addC | zero

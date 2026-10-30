@@ -46,7 +46,7 @@ inductive ScalarCodec where
   | bytes
   deriving DecidableEq, Repr
 
-def ScalarCodec.Value : ScalarCodec → Type
+@[reducible] def ScalarCodec.Value : ScalarCodec → Type
   | .natural => Nat
   | .integer => Int
   | .bytes => List UInt8
@@ -168,7 +168,7 @@ def Descriptor.identity (descriptor : Descriptor) : Digest :=
 /-- One namespace per named field; a scalar uses key zero, a map uses arbitrary
 natural keys. Both use precisely Store's existing ROM/RAM/append-only rules.
 No blob cast or host-provided decoder is involved. -/
-def layout (descriptor : Descriptor) : Layout.{0, 0, 0} where
+@[reducible] def layout (descriptor : Descriptor) : Layout.{0, 0, 0} where
   Namespace := Fin descriptor.fields.length
   Key := fun _ => Nat
   Value := fun space => (descriptor.fields.get space).codec.Value

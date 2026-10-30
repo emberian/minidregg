@@ -132,6 +132,7 @@ structure Entry where
   render : Option (Finset CellField) → OpeningView
   renderExact : ∀ fields, render fields = openingView fields packed
 
+set_option backward.isDefEq.respectTransparency false in
 def Entry.prepare (packed : PackedCell CanonicalCellRegistry.registry) : Entry :=
   match selected : CanonicalCellRegistry.wire? packed.kind with
   | none => ⟨packed, PackedCell.bytes _ packed, rfl,

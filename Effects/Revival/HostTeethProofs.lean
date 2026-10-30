@@ -56,11 +56,13 @@ theorem ratchet_moves :
     (HyperdocumentCell.contentBlinding.step 0 zeroBlindingKey != zeroBlindingKey) = true := by
   decide +kernel
 
+set_option backward.isDefEq.respectTransparency false in
 theorem blindedStore_key :
     StoreCodec.blindingKey HyperdocumentCell.contentWire blindedStore = some zeroBlindingKey := by
   rw [HyperdocumentCell.contentBlinding.blindingKey_eq]
   simp [blindedStore, StoreCodec.Blinding.address, HyperdocumentCell.contentBlinding, zeroBlindingKey]
 
+set_option backward.isDefEq.respectTransparency false in
 /-- The link's allocation leaves the blinding where it was. -/
 theorem sampleLinkOps_key :
     StoreCodec.blindingKey HyperdocumentCell.contentWire (Patch.run blindedStore sampleLinkOps) =
@@ -113,7 +115,7 @@ theorem ghost_exec_blinded :
       rfl
   · rename_i outside
     exact absurd (fun loc member unrotated =>
-      inFrame loc (footprint_append_left _ _ loc (by simpa [contentGhost] using member)) unrotated)
+      inFrame loc (footprint_append_left _ _ loc (by exact member)) unrotated)
       outside
 
 theorem sample_header : contentHeader sampleHostCtx (⟨.content, cellOf blindedStore⟩ : HostCell) = .ok () := by

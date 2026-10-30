@@ -386,6 +386,7 @@ theorem Discharges.reusableAllowed_instantiate (reuse : Reuse) (context : Contex
     reusableAllowed instance_ reuse (instantiateContext σ context) uses = reusableAllowed template reuse context uses := by
   simp [reusableAllowed, reusableCaptures_instantiate D.shareable]
 
+set_option backward.isDefEq.respectTransparency false in
 /-- The template theorem (MODULAR-TYPING §6): every term the checker accepts under rigid
 bounds is accepted at every instance that discharges them, at the instantiated type, with
 the same usage. By induction on fuel, mirroring `infer`, `inferFields`, `inferArms`. -/

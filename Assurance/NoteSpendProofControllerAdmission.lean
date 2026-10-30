@@ -239,6 +239,7 @@ theorem RelationWitness.validSpend
 
 /-! ## Separately priced same-coin premises -/
 
+set_option backward.isDefEq.respectTransparency false in
 /-- Each tag names one real deployment theorem.  Arithmetic satisfaction is
 not silently renamed as PCS soundness or proof of knowledge, and hiding is a
 separate privacy event. -/

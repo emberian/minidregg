@@ -183,6 +183,7 @@ def chainIndexEquiv (chain : Chain Root F iota r) :
   left_inv := fun k => Fin.ext rfl
   right_inv := fun k => Fin.ext rfl
 
+set_option backward.isDefEq.respectTransparency false in
 @[simp] theorem reindexChain_get (chain : Chain Root F iota r)
     (k : Fin (reindexChain chain).length) :
     (reindexChain chain).get k =

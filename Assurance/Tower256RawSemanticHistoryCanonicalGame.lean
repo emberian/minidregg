@@ -208,6 +208,7 @@ structure HistoryPriceCertificate {checkpoint : BoundCheckpoint}
   transportPrice : Real
   transportBound : uniformProb Coin lane.TransportEvent <= transportPrice
 
+set_option backward.isDefEq.respectTransparency false in
 inductive FailureClass where
   | historyPcsMca
   | additiveProximity

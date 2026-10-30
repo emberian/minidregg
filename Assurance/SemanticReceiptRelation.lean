@@ -44,6 +44,7 @@ structure ReceiptWitness (Key F : Type*) where
   cases htouched
   rfl
 
+set_option backward.isDefEq.respectTransparency false in
 /-- The two individual-degree-two constraints at every key. -/
 inductive ConstraintKind
   | boolean
@@ -135,6 +136,7 @@ theorem ReceiptWitness.ofDelta_toDelta (w : ReceiptWitness Key F)
 
 /-! ## One canonical fixed-shape word -/
 
+set_option backward.isDefEq.respectTransparency false in
 inductive ReceiptSlot
   | pre
   | post

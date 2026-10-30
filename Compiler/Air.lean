@@ -71,7 +71,7 @@ inductive AirOp (F : Type u) (Idx : Type u)
 
 /-- The arithmetization signature: `const`/`var` are leaves (empty arity), `add`/`mul` are
 binary (`Bool`-indexed), matching `Compiler/Signature`'s container convention. -/
-def AirSig (F : Type u) (Idx : Type u) : Signature where
+@[reducible] def AirSig (F : Type u) (Idx : Type u) : Signature where
   Op := AirOp F Idx
   ar := fun s => match s with
     | .const _ | .var _ => Empty

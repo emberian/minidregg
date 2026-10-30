@@ -2373,7 +2373,9 @@ theorem KeepsAt.trans {revision : OperationId} {first second third : ContentStor
   obtain ⟨middle, middleFound, middleSame⟩ := right atom record found pinned
   have middleRevision : middle.revision = revision := by
     have equal := congrArg AtomRecord.revision middleSame
-    simpa only [AtomRecord.semantic_revision, pinned] using equal
+    have hsimpa := equal
+    simp only [AtomRecord.semantic_revision, pinned] at hsimpa ⊢
+    exact hsimpa
   obtain ⟨previous, previousFound, previousSame⟩ := left atom middle middleFound middleRevision
   exact ⟨previous, previousFound, previousSame.trans middleSame⟩
 

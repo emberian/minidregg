@@ -115,6 +115,7 @@ def rawLeg (prepared : PreparedInvocation deployment profile ambient ground comm
         Postcondition := fun logical =>
           authorityReadPatch.ResultAt ground.authority.logical logical }
 
+set_option backward.isDefEq.respectTransparency false in
 def bindFamily (prepared : PreparedInvocation deployment profile ambient ground command)
     (source : Source command) (_portals : Incidence command → Portal) :
     (incidence : Incidence command) → SemanticLegBinding.{0,0,0,0,0} (rawLeg prepared source incidence)
@@ -654,6 +655,7 @@ def step (prepared : PreparedInvocation deployment profile ambient ground comman
     (policyPreCell prepared) (policyPostState prepared)
     (policyPreCell_exact prepared tuple) (policyPostState_exact prepared tuple)
 
+set_option backward.isDefEq.respectTransparency false in
 theorem step_prepared_exact
     (prepared : PreparedInvocation deployment profile ambient ground command)
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) :
@@ -2575,11 +2577,15 @@ def prepareAuthenticated {F : Type} [Field F] [DecidableEq F]
 #assert_axioms castAliasLeg_none_iff_castInjOn
 
 end Minidregg.Kernel.DeclaredResourceController
-/-- info: 'Minidregg.Kernel.DeclaredResourceController.fieldsCheck_ok' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.DeclaredResourceController.fieldsCheck_ok' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DeclaredResourceController.fieldsCheck_ok
 /-- info: 'Minidregg.Kernel.DeclaredResourceController.legFootprint_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DeclaredResourceController.legFootprint_exact
-/-- info: 'Minidregg.Kernel.DeclaredResourceController.fieldsCheck_unnamed' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Kernel.DeclaredResourceController.fieldsCheck_unnamed' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DeclaredResourceController.fieldsCheck_unnamed
 /-- info: 'Minidregg.Kernel.DeclaredResourceController.CheckedLeg.fields_covered' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DeclaredResourceController.CheckedLeg.fields_covered

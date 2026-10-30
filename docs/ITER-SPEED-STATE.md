@@ -1,72 +1,74 @@
 # Iteration-speed lane: state (present-state; rewrite whole, never append)
 
-The Host closure is on Lean 4.30's module system (landed on `lane/iter-speed`, merged by the integrator).
-Agent: the iter-speed successor (lane continuation by about 580k tokens, hand off at about 600k).
+Agent: the iter-speed lane (successor, 2026-10-30 evening). Order of work, from ember: step 0 the Lean bump,
+then (1) interface seams, (2) lane-tree warm pool, (3) hot-swap into a kept world. The integrator asked that,
+right after the bump, the umbrella stage get its own warm tree (item 2 first).
 
-## What makes an edit expensive (measured, Lake/Lean 4.30)
+## Step 0: Lean v4.30.0 -> v4.35.0 (HOLD LEAN declared; waiting on the hbox build)
 
-- Under `module`, a theorem's proof lives in the module's private olean. A proof edit that keeps the
-  theorem's exported facts leaves the public olean byte-identical, and no importer rebuilds. Measured on
-  the real tree: a proof edit in `Theory/Store.set_ne` rebuilds 9 modules (Store itself plus the persisted-codec
-  census and its 7 non-module importers), not 631.
-- Exceptions (each changes the public olean, so every importer rebuilds): a changed statement or definition;
-  a proof whose rfl-lemma status changes (`:= rfl` to a tactic proof: the first NativeHost probe, 98
-  modules); a new public auxiliary (first `simp [f]` creating `f.eq_1`); a changed exported axiom set.
-- Lake keys a rebuild on the TRANSITIVE import closure's oleans: a data change (a pin value, a new registry
-  tag) rebuilds every module below it even when their own outputs would not change. Measured on the warm
-  converted tree: one pin value 438 modules / 1,531 s / 22.3 GB; one new tag in
-  `Compiler.PersistedCodecTags` 479 modules / 2,114 s. The cure is dependency inversion (below), not more seats.
-- A non-module importer of a module rebuilds on every edit below it (it reads the private part too):
-  the census (`KEEP`, 235 s) and its importers. `Kernel/ConsentAnchor` imports the census only as a build-order
-  gate; cutting that import takes the census and the 7 consent files out of every lane closure.
-- `lake build <Module>` compiles no C objects; only exe targets do.
-- Per file: `scripts/pipeline/lane-check FILE` is the only entry point (its own stale check, rebuilds through
-  the slot/closure-lock, then `lake lean`, which applies leanOptions; `lake env lean` does not, and a bare
-  `lake lean` builds stale imports outside any lock).
+- Pins: `lean-toolchain` v4.35.0; Mathlib tag v4.35.0; deps by `lake update mathlib`; REPL pin v4.35.0 in
+  `scripts/pipeline/lean-ask-install-repl`. v4.35.0 is installed in both `~/.elan`s.
+- The bump is ONE commit on `origin/lane/iter-speed`, rebased on main 929eac696. Mac working tree:
+  `/Users/ember/dev/minidregg-lanes/iter-speed-land` (shared packages, Mathlib oleans by cache).
+- Mac result: the whole closure (`lake build Minidregg Fixtures ObjectiveProofs CensusChecks
+  +Host.Main:leanArts +Host.ClientConsentSession:leanArts`) builds, except `Fixtures/NativeAcceptedFixture` and
+  `Fixtures/NativeDocWriteFixture`. Both are red on main 7d90da717 itself, from the private-cells event-id/codec
+  change (integrator log hbox:/home/hbox/lanes/integ/umbrellas-out/20261030T214013Z). The proofs lane re-records
+  them. The bump also rotates the Objective front-end identity (below), so the accepted fixture needs one more
+  re-record, which integ-build4's rerecord stage produces on the bump candidate.
+- Integrator protocol: HOLD LEAN sent 10-30 evening. The integrator builds the bump alone on hbox. That build is
+  blocked while hbox `/` is at 95% (writes paused, awaiting ember). Kimi reviews the statement and pin diff
+  (`claude-kimi -p`, the prompt and output are in the session scratchpad `iter/kimi-*`).
+- What 4.35 broke, and the fixes used (statements unchanged throughout):
+  - `backward.isDefEq.respectTransparency` is on by default: terms whose types mention non-reducible type-level
+    defs no longer unify in instance search, `rw`, `simp`, `exact`. Real fixes where they exist: layouts and their
+    Key/Value families `@[reducible]` (35 attributes); explicit `have h : T := e` bridges; `subst` before `exact`;
+    simp lemmas (`DataIntent.erase_exactCharge`, `erase_credit`; a file-local `throw e = .error e` in
+    Effects/Revival/ContentProofs; `Candidate.intent` of `.ordinary` in Host/DryRun). Where only the old unifier works
+    (Mathlib's own `deriving Fintype`, classical `decide` in instances, dependent `rw`s), the declaration carries
+    `set_option backward.isDefEq.respectTransparency false in`. There are 187 of these, each on one declaration and
+    never file-wide, the same pattern Mathlib v4.35 uses in 1,470 files. One irreducible def needed it too:
+    `unseal portal in` for `authorize_names_stored` in Kernel/ResourceObservationAdmission.
+  - `throw` in `Except` no longer unfolds under `simp`; proofs that relied on it end with `rfl` or use the lemma.
+  - A `match` on a variable inside `do` no longer refines a dependent return type: the match moved outside the
+    `do` (ResourceBirthPolicyController, NativeObservationController.checkGrants, Host/Json and
+    Host/SourceAgreementJson `verb`).
+  - Module visibility: Batteries' derived `DecidableEq (Except ..)` is hidden, so `decide` on `Except` equalities
+    became `rfl`, or the file imports `Theory/ExceptDecidableEq.lean`. `String.compare` is hidden in
+    `Init.Data.Ord.String`, so Host/Json imports it `all`, the same pattern as its other `Init` imports. ZMod and
+    big-Nat `decide` became `decide +kernel` (34 sites). `open private ... from` is gone, replaced by
+    `import all Kernel.NativeHost` (NativeThinBirth).
+  - Removed core axioms `Lean.ofReduceBool`/`Lean.trustCompiler`: `Theory/AssertAxioms`, `Theory/AssertCompiled`,
+    and `scripts/module-hidden-bodies.sh` recognise native_decide by its `_native` auxiliary axiom only.
+    `TokenCensus/NativePinSelfTest.lean` plants a native_decide under a standard-three pin and must fail.
+  - API: `Std.Internal.Async.TCP` became `Std.Async.TCP` (Host/FnArchivePublisher); `String.trim` became
+    `trimAscii.toString`; `alias` is a keyword, so the local identifier in Compiler/ObjectiveBendElaborate became
+    `importAlias` (comments and messages keep "alias"; this rotates the Objective front-end identity). Also: the
+    Kummer lemma takes irreducibility over `AdjoinRoot`; `dvd_of_fraction_map_dvd_fraction_map` lost a premise;
+    `Finset.mem_antidiagonal` became `HasAntidiagonal.mem_antidiagonal`; `HashSet.distinct_toList` uses `==`;
+    `Mathlib.Util.MemoFix` is gone; `AddMonoidAlgebra` is a structure; `simp` no longer computes `List.length` of a
+    literal cons; norm_num primality of 31-bit primes needs `maxRecDepth 8192`.
+  - Slow modules: CommittedTerminalCompose and CommittedTerminalFiatShamir went through `Nat.card` (they took 45+
+    minutes after the bump). TokenCensus takes 1,818 s of the Mac umbrella run.
+  - Axiom pins: 324 pin sets changed, all within propext/Classical.choice/Quot.sound: 300 gained Classical.choice,
+    8 gained Classical.choice and Quot.sound, 3 gained Quot.sound, 8 lost Classical.choice, 4 lost Classical.choice
+    and Quot.sound, and 1 lost Quot.sound. 4.35 also wraps long axiom lists across lines, which `#guard_msgs`
+    compares, so pins print in the wrapped form.
+- Repair tooling (session scratchpad `iter/`): `round.sh N` (build, pin refresh, per-error autofix), `loop4.sh N`
+  (rounds until green, the two main-red fixtures excepted), `try.sh FILE` (elaborate one file with the lakefile's
+  options), `pins.py BASE` (pin changes, flagging non-standard axioms). Lesson: `guardfix.py` writes the pin text
+  verbatim, because 4.35's wrapping matters to `#guard_msgs`.
 
-## Numbers (dregg-ref, closure-lock, cache off)
+## After the bump
 
-See the landing commit message for the before/after table (filled from `scratch/after2/summary.txt`,
-`scratch/deep-conv/summary.txt`, `scratch/leanask/`, `scratch/regen-probe/summary.txt` in `/build/lanes/iter-speed`).
-
-## The conversion (scripts/lean-modularize.py; statement-preserving)
-
-`module`; `public import` of every import; `meta import` where the file evaluates code or defines an
-elaborator/macro; `@[expose] public section`; RULES and PER_FILE header lines (each printed by
-`scripts/module-hidden-bodies.sh FILE` on a box, never guessed); KEEP: files that stay non-modules (the
-persisted-codec census and its importers). lakefile: `backward.privateInPublic`, `backward.proofsInPublic`,
-`compiler.relaxedMetaCheck`. Hand-written: `Theory/DeriveEncodable.lean` (Mathlib's Encodable handler with
-`S` public; delete when Mathlib exposes `S`). `Host.run` is a dispatcher over one `runCommand<Name>` per
-command (the single 2,900-line declaration ran past its heartbeat budget as a module; same profile as the
-non-module build). Re-derivation over a newer main: `scratch/land.py wip/iter-speed-modules` in a clean
-worktree on the tip (it 3-way merges COORDINATION and the census, applies the split, converts, regenerates).
-
-## The codec census (StoreEpoch moved once at this landing)
-
-The census hashes compiler auxiliaries (`match_N`, `_sparseCasesOn_N`, `_proof_N`) by structure, recursively,
-so a module and a non-module build agree; teeth in `Compiler/PersistedCodecTagCensusSelfTest.lean`. Pins were
-re-emitted once from the tree's own census (never a saved copy of it: a stale copy without A11's owners fix
-emitted placeholder fingerprints) and are byte-identical from hbox and dregg-ref; no identity bumped; the
-derived StoreEpoch moved: the next candidate re-geneses (DEMO-PREFIX §5).
-
-## Next (the build-time quest; ember's ruling: one seam end to end first)
-
-1. Codec registry seam, as interface plus instance (`docs/BUILD-INVERSION-2026-10-28.md`, to write first):
-   pins and the concrete `StoreEpoch.current`/`persistedCodecCorpus` leave `Compiler.DurableCheckpointCodec`
-   for one downstream module; kernel code uses the existing `...For epoch` forms; identities are spelled at
-   their owners and the registry becomes a downstream manifest imported only by the census and emitters;
-   ConsentAnchor→census import cut. Before/after: pin change 438 modules / 1,531 s; new tag 479 / 2,114 s.
-2. Theory.Store and WorldRoot seams only if (1) takes a pin regen to seconds or minutes.
-3. RAM build on hbox (tmpfs tree, seats by memory) vs dregg-build's 4x2; shared input-keyed Lake cache with
-   locked writes only.
-4. mk-lane: `.lake/build` as a real copy (`cp -a --reflink=auto`), never hard links (drafted in the lane's
-   scratch; hbox ZFS has block cloning enabled on the pool but `zfs_bclone_enabled=0`, so real copies there).
-   Trace check on hbox (2026-10-28): every trace in the pipeline base and 9 lane trees agrees with its olean;
-   no re-seeding needed.
-
-## Lane pool (stopped mid-quest, 2026-10-28, on the root's word)
-
-- `scripts/pipeline/lane-tree` (acquire LANE [REF] | release | renew | status | gc | init SEED N), configured per box by `pool.env`; `lane-check` renews a pooled tree's lease and both refuse loudly when swarm-build cannot reach the user bus (lib.sh `pipeline_user_bus`). Not yet in COORDINATION or the lane brief.
-- dregg-ref only: `/build/pool/{pool.env,bin/lane-tree,repo.git,t1,t2,t3}`; shared read-only packages `/build/shared/packages-ed3deb884a05` (7.6 GB, one copy: 516 s, today's per-lane packages cost); cache `/build/lake-cache`. t1 holds a real-copied `.lake/build` from 694415d5d; t2/t3 have none. No leases held.
-- Use: `. /build/pool/pool.env; t=$(/build/pool/bin/lane-tree acquire <lane> origin/lane/<lane>)`, sync or check out there, `scripts/pipeline/lane-check FILE`, `lane-tree release <lane>`. Never as root, never inside closure-lock.
-- Not done: the measurement (t1 cache fill, t2 build from the cache, incremental lane-check), hbox and dregg-build pools, reclaim, docs. A queued `closure-lock swarm-build lake build Host.Main Host.ClientConsentSession` from the stopped measurement (PID 2023359, cwd /build/pool, no PID file) is still waiting for the lock: when it runs it fails at once (not a Lake project); left for the owner to stop.
+1. Umbrella stage in a second warm tree (the integrator's 25-30 min umbrella stage holds the main tree's lock):
+   send the integrator the command.
+2. Seams (design `docs/BUILD-INVERSION-2026-10-28.md`): on main, StoreCodec has 537 Host-closure dependents,
+   Theory.Store 630, WorldRoot 443, PersistedCodecTags 478. Measure the recompile count of a representative edit
+   before and after each seam; continue only where it moves.
+3. lane-tree warm pool: fix the empty-path acquire bug; shared packages plus Lake cache; pools on hbox NVMe and the
+   Mac.
+4. Hot-swap (rebuild one crate or the Host, swap it into a kept world, rerun one phase). Integrator requirement: the
+   swap replaces the binary and re-pins it in the candidate's manifest.json, SHA256SUMS and the Hermes runtime root
+   (`deploy/hermes/build-runtime-root --rebind`) together, atomically, and records the overlay in provenance. A
+   Store restart otherwise crash-loops on the sha256 mismatch (seen on the rehearsal-3 world).

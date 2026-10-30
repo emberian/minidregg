@@ -124,7 +124,9 @@ theorem foreign_reference_refuted {claim : PublicStatement}
     (prepared : PreparedBatch claim) (rowIndex : Fin equationsPerOwner)
     (foreign : WitnessReference) (different : foreign ≠ claim.input.reference) :
     foreign ≠ (prepared.rowTemplate rowIndex).rowReference := by
-  simpa using different
+  have hsimpa := different
+  simp at hsimpa ⊢
+  exact hsimpa
 
 end PreparedBatch
 

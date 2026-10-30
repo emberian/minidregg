@@ -131,7 +131,9 @@ theorem exclusive_upper_endpoint_refused (asg : Wire 2 → ZMod 17)
     (gadget_correct 2 asg (vr .present) (vr .left) (vr .right) .shifted Wire.bit).mp h
   have hlt := rangeGadget_val_lt (by decide : 2 ^ 3 ≤ 17) asg .shifted Wire.bit hRange
   have hshift : asg .shifted = (8 : ZMod 17) := by
-    simpa [shiftedTerm, hp, ha, hb] using hbind
+    have hsimpa := hbind
+    simp [shiftedTerm, hp, ha, hb] at hsimpa ⊢
+    exact hsimpa
   rw [hshift] at hlt
   have hv : (8 : ZMod 17).val = 8 := by decide
   rw [hv] at hlt

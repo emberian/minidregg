@@ -82,6 +82,7 @@ def Prepared.wanted {context : Context deployment}
 
 private def refused : String := "agent lifetime grant delegation refused"
 
+set_option backward.isDefEq.respectTransparency false in
 def prepare (context : Context deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (federation : FederationId)
     (height : Nat) (spec : Spec)

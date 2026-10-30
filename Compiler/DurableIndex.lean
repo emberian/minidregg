@@ -908,9 +908,13 @@ theorem dropWriteSet_not_preserves :
   · simp [Represents, modelSet, rootOf, entries, tree, RowsRepresent, overlay] at represented
   · obtain ⟨a, b, observedA, observedB, differ, _⟩ := collision
     have emptyA : a = .empty := by
-      simpa [ObservedNode, openingOf, walk] using observedA
+      have hsimpa := observedA
+      simp [ObservedNode, openingOf, walk] at hsimpa ⊢
+      exact hsimpa
     have emptyB : b = .empty := by
-      simpa [ObservedNode, openingOf, walk] using observedB
+      have hsimpa := observedB
+      simp [ObservedNode, openingOf, walk] at hsimpa ⊢
+      exact hsimpa
     exact differ (emptyA.trans emptyB.symm)
 
 #assert_axioms dropWriteSet_not_preserves
@@ -994,7 +998,7 @@ theorem setAll_preserves
   | nil =>
       simp only [setAll, Except.ok.injEq, Prod.mk.injEq] at ok
       obtain ⟨rfl, rfl⟩ := ok
-      exact Or.inl (by simpa [modelApply, overlay] using before)
+      exact Or.inl (by exact before)
   | cons change rest ih =>
       obtain ⟨k, value⟩ := change
       cases first : set rows root k value with

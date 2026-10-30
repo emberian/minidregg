@@ -187,7 +187,7 @@ def frozenGenesisDefault : FrozenTariff where
   journalFloor := 1000000
   slashCallerPermille := 500
 
-def Namespace.Key : Namespace → Type
+@[reducible] def Namespace.Key : Namespace → Type
   | .tariff => Unit
   | .book => Nat
   | .assignment => Nat
@@ -195,7 +195,7 @@ def Namespace.Key : Namespace → Type
   | .sshIndex => List UInt8
   | .journal => List UInt8
 
-def Namespace.Value : Namespace → Type
+@[reducible] def Namespace.Value : Namespace → Type
   | .tariff => FrozenTariff
   | .book => Address32
   | .assignment => Nat

@@ -302,13 +302,13 @@ certify of the prefix 5 (not the head) is admitted, and after it the record is a
 theorem prefix_certify_reopens_writes :
     judge ⟨4, ⟨4⟩, 2⟩ six [] = .error (.tailBound 7 4 2) ∧
       judge ⟨4, ⟨4⟩, 2⟩ six [some ⟨5, ⟨5⟩, 2⟩] = .ok () ∧
-      judge ⟨5, ⟨5⟩, 2⟩ six [] = .ok () := by decide
+      judge ⟨5, ⟨5⟩, 2⟩ six [] = .ok () := ⟨rfl, rfl, rfl⟩
 
 /-- A certify of a prefix at or below the certified height, or past the head, is refused. -/
 theorem prefix_certify_teeth :
     judge ⟨4, ⟨4⟩, 2⟩ six [some ⟨4, ⟨4⟩, 2⟩] = .error .systemWriteRefused ∧
       judge ⟨4, ⟨4⟩, 2⟩ six [some ⟨7, ⟨7⟩, 2⟩] = .error .systemWriteRefused ∧
-      judge ⟨4, ⟨4⟩, 2⟩ six [some ⟨5, ⟨6⟩, 2⟩] = .error .systemWriteRefused := by decide
+      judge ⟨4, ⟨4⟩, 2⟩ six [some ⟨5, ⟨6⟩, 2⟩] = .error .systemWriteRefused := ⟨rfl, rfl, rfl⟩
 
 #assert_axioms judge_none_ok judge_write_ok tail_bounded certified_written_only_by_checkpoint
   certified_true certified_monotone unavailable_refuses beyond_bound_refused at_bound_admitted

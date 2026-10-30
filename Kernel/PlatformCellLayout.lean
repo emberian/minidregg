@@ -96,11 +96,11 @@ inductive Namespace
   | record | controller
   deriving DecidableEq, Repr
 
-def Namespace.Key : Namespace → Type
+@[reducible] def Namespace.Key : Namespace → Type
   | .record => Unit
   | .controller => Unit
 
-def Namespace.Value : Namespace → Type
+@[reducible] def Namespace.Value : Namespace → Type
   | .record => Platform
   | .controller => SubjectId
 
@@ -250,11 +250,11 @@ def genesisStore (controller : SubjectId) (p : Platform) : PlatformStore :=
 
 @[simp] theorem recordOf_genesisStore (controller : SubjectId) (p : Platform) :
     recordOf (genesisStore controller p) = some p := by
-  simp [recordOf, genesisStore, recordAddress, controllerAddress, Store.set]; rfl
+  simp [recordOf, genesisStore, recordAddress, controllerAddress, Store.set]
 
 @[simp] theorem controllerOf_genesisStore (controller : SubjectId) (p : Platform) :
     controllerOf (genesisStore controller p) = some controller := by
-  simp [controllerOf, genesisStore, controllerAddress, Store.set]; rfl
+  simp [controllerOf, genesisStore, controllerAddress, Store.set]
 
 theorem law_iff (store : PlatformStore) :
     Law store ↔ (∃ p, recordOf store = some p ∧ p.valid = true) ∧ (controllerOf store).isSome := by
@@ -289,7 +289,7 @@ theorem controllerOf_installPatch (store : PlatformStore) (current next : Platfo
 
 theorem recordOf_installPatch (store : PlatformStore) (current next : Platform) :
     recordOf (Patch.run store (installPatch current next)) = some next := by
-  simp [installPatch, Patch.run, Op.apply, recordOf, recordAddress, Store.set]; rfl
+  simp [installPatch, Patch.run, Op.apply, recordOf, recordAddress, Store.set]
 
 /-- **The cell's writers.** A platform cell is born at genesis holding the deployment's
 controller and is written afterwards only by installs: the kind is kernelOnly with the one

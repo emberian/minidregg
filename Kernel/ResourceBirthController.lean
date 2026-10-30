@@ -285,6 +285,7 @@ structure ObservedCell (deployment : Deployment) (directory : Directory Nat Regi
   present : directory.slots identifier = .present ⟨kind, payload⟩
   law : CanonicalCellRegistry.CellLaw deployment identifier ⟨kind, payload⟩
 
+set_option backward.isDefEq.respectTransparency false in
 /-- The kind is selected by receiver code. Merely presenting a valid Book or
 factory elsewhere in the directory cannot select it for this deployment. -/
 def observeCell (deployment : Deployment) (directory : Directory Nat Registry)
@@ -601,6 +602,7 @@ def InitialsAdmissible (deployment : Deployment) (sourced : List (Nat × PackedC
     CanonicalCellRegistry.UserInitial deployment item.create.cellId item.create.cell ∨
       SourcedInitial deployment sourced item.create.cellId item.create.cell
 
+set_option backward.isDefEq.respectTransparency false in
 instance initialsAdmissibleDecidable (deployment : Deployment)
     (sourced : List (Nat × PackedCell Registry)) (descriptor : Descriptor Registry) :
     Decidable (InitialsAdmissible deployment sourced descriptor) := by

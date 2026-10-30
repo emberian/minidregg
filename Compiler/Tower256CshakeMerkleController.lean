@@ -422,7 +422,7 @@ theorem checkedXofCall_reply_exact (cshake : Cshake256)
       (cshake.xofDigest request.customization request.input) := by
   simp only [checkedXofCall, NativeCall.acceptsReply, Bool.and_eq_true,
     decide_eq_true_eq] at accepted
-  exact accepted.1.1
+  exact of_decide_eq_true accepted.1.1
 
 /-- info: 'Minidregg.Compiler.Tower256CshakeMerkleController.recompute_cubePath' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms recompute_cubePath

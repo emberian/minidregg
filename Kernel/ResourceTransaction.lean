@@ -634,7 +634,7 @@ def requireSome {α : Type} (reason : Reject) : Option α → Except Reject α
 
 /-- The store layout of the target's role: a declared-effect cell for scalar
 actions, a hyperdocument content cell for content commands. -/
-def Target.layout (target : Target) : Layout.{0, 0, 0} := match target.payload with
+@[reducible] def Target.layout (target : Target) : Layout.{0, 0, 0} := match target.payload with
   | .scalar _ | .computeFunding _ | .moneyConsent _ => EffectDeclaration.effectLayout
   | .content _ | .read => Hyperdocument.layout
   | .append _ => StreamCell.headLayout

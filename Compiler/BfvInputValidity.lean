@@ -274,10 +274,12 @@ end AcceptedBatch
 example : (optionIndex ⟨7, by norm_num [kindCount]⟩
     ⟨15, by norm_num [quantityCount]⟩).val = 127 := by decide
 
+set_option backward.isDefEq.respectTransparency false in
 example : semanticSlotValue ⟨2, by norm_num [kindCount]⟩
     ⟨5, by norm_num [quantityCount]⟩ =
     ![5, 5, 5, 0, 0, 0, 0, 0, 42] := by decide
 
+set_option backward.isDefEq.respectTransparency false in
 example : semanticSlotValue ⟨6, by norm_num [kindCount]⟩
     ⟨3, by norm_num [quantityCount]⟩ =
     ![0, 0, 0, 0, 0, 0, 3, 3, 30] := by decide

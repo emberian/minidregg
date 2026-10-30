@@ -290,7 +290,9 @@ theorem wellFormed (job : FeeFirstJob lease) : job.request.WellFormed where
   distinctBodyTransaction := job.admissionPrepayDistinct.symm
   exactAdmissionNonce := rfl
   positiveFee := by
-    simpa [prologue, AuthorizedResourceCharge.admissionCharge] using job.positiveFee
+    have hsimpa := job.positiveFee
+    simp [prologue, AuthorizedResourceCharge.admissionCharge] at hsimpa ⊢
+    exact hsimpa
   bodyChargesNoAdmissionFee := AuthorizedResourceCharge.admissionBodyIntent_no_second_fee
     lease.runtime.prepayTransaction lease.runtime.resourceCell
       lease.manifest lease.accepted

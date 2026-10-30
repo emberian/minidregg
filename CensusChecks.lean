@@ -7,4 +7,5 @@ Neither may be imported by `TokenCensus` (the first would put forgeries in the c
 environment, the second a recording). The merge gate builds each by name.
 -/
 import TokenCensus.SelfTest
+import TokenCensus.NativePinSelfTest
 import TokenCensus.Fixtures

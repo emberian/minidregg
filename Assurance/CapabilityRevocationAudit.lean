@@ -117,7 +117,11 @@ theorem selected_revocation_visible :
 
 /-- info: 'Minidregg.Assurance.CapabilityRevocationAudit.canonical_command_roundtrip' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms canonical_command_roundtrip
-/-- info: 'Minidregg.Assurance.CapabilityRevocationAudit.revoked_parent_denies_every_verb' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Assurance.CapabilityRevocationAudit.revoked_parent_denies_every_verb' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs (whitespace := lax) in #print axioms revoked_parent_denies_every_verb
 
 end Minidregg.Assurance.CapabilityRevocationAudit

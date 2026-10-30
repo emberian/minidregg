@@ -42,6 +42,7 @@ def created : ContentStore := postOf (run author operation document ctx empty cr
 theorem create_accepted : refusalOf (run author operation document ctx empty create) = none := by
   decide
 
+set_option backward.isDefEq.respectTransparency false in
 theorem create_exact_bytes_and_provenance :
     Hyperdocument.lookup created .atoms atom = some original := by decide
 
@@ -50,6 +51,7 @@ def edit : EditAtomPayload :=
 def editCommand : Command := ⟨[.editAtom edit]⟩
 def edited : ContentStore := postOf (run author nextOperation document ctx created editCommand)
 
+set_option backward.isDefEq.respectTransparency false in
 theorem edit_exact_bytes_and_provenance :
     refusalOf (run author nextOperation document ctx created editCommand) = none ∧
       Hyperdocument.lookup edited .atoms atom = some (editAtomRecord nextOperation edit) := by
@@ -123,6 +125,7 @@ theorem neutral_content_birth_admitted :
     exact ((DFinsupp.mem_support_toFun _ _).mp member rfl).elim
   · unfold Kernel.ProtectedCell.reservedBase; decide
 
+set_option backward.isDefEq.respectTransparency false in
 theorem authored_history_cannot_be_injected_at_birth :
     ¬CanonicalCellRegistry.UserInitial deployment 100
       ⟨.content, CellState.materialize HyperdocumentCell.contentMaterializer created⟩ := by

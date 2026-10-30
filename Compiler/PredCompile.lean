@@ -533,9 +533,11 @@ theorem eval_renameT (asg : Idx' → F) (f : Idx → Idx') :
   | .mk .add k       => by
       simp only [renameT, eval_add', eval_mkAdd,
         eval_renameT asg f (k false), eval_renameT asg f (k true)]
+      rfl
   | .mk .mul k       => by
       simp only [renameT, eval_mul', eval_mkMul,
         eval_renameT asg f (k false), eval_renameT asg f (k true)]
+      rfl
 
 theorem accepts_renameT (asg : Idx' → F) (f : Idx → Idx') (t : Term (AirSig F Idx)) :
     accepts asg (renameT f t) ↔ accepts (asg ∘ f) t := by
@@ -2036,11 +2038,11 @@ example : Minidregg.Pred.eval kPol kOld kBad = false := by decide
 /-- *Satisfiable, COMPUTED (ZMod 7)*: the compiled system accepts the emitted witness —
 lowering fold, witness generator, and constraint evaluation all reduced in the kernel. -/
 example : systemAccepts (stepAsg kOld kNew (wit CompilerProfile.disabled kPol kOld kNew (F := ZMod 7)))
-    (lower CompilerProfile.disabled kPol) := by decide
+    (lower CompilerProfile.disabled kPol) := by decide +kernel
 
 /-- *Satisfiable, COMPUTED (ZMod 13)*: same pipeline, second field. -/
 example : systemAccepts (stepAsg kOld kNew (wit CompilerProfile.disabled kPol kOld kNew (F := ZMod 13)))
-    (lower CompilerProfile.disabled kPol) := by decide
+    (lower CompilerProfile.disabled kPol) := by decide +kernel
 
 /-- *The general theorem FIRES on the instance (ZMod 7)*: `lower_correct` (the ∀-predicate
 refinement, not a bespoke argument) yields the acceptance from the source-level eval. -/
@@ -2058,7 +2060,7 @@ example : ¬ ∃ A : List ℕ → ℕ → ZMod 7,
 /-- *Teeth, COMPUTED (ZMod 13)*: the hostile step rejects even at the honest generator's
 own aux values. -/
 example : ¬ systemAccepts (stepAsg kOld kBad (wit CompilerProfile.disabled kPol kOld kBad (F := ZMod 13)))
-    (lower CompilerProfile.disabled kPol) := by decide
+    (lower CompilerProfile.disabled kPol) := by decide +kernel
 
 /-- The explicitly disabled research profile refuses order on every assignment. -/
 example : ¬ systemAccepts (stepAsg kOld kNew (fun _ _ => (0 : ZMod 7)))

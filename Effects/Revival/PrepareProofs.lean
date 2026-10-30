@@ -42,6 +42,7 @@ open Minidregg.Kernel
 
 set_option autoImplicit false
 
+set_option backward.isDefEq.respectTransparency false in
 theorem dispatch_content (ctx : HostCtx) (cell : HostCell) (command : ContentResource.Command) :
     dispatch [(1, contentHandlerOf contentSpec)] 1 (ContentResource.commandStream.encode command) ctx cell =
       (contentHandlerOf contentSpec).fire 1 ctx command cell := by
@@ -104,6 +105,7 @@ theorem hostCtxOf_toLiveCtx (ctx : LiveCtx) (deployment : DeclaredResourceContro
     (roster : Option ObjectAudienceRoster.Roster) :
     (hostCtxOf ctx deployment version root observe epoch roster).toLiveCtx = ctx := rfl
 
+set_option backward.isDefEq.respectTransparency false in
 theorem prepareFactors : PrepareFactors contentSpec := by
   intro deployment directory ctx command version root observe epoch roster before present
   rw [dispatch_content]
@@ -140,7 +142,7 @@ theorem prepareFactors : PrepareFactors contentSpec := by
             rcases fresh with same | commuting
             · subst same
               dsimp only [contentFresh, hostCtxOf]
-              rw [if_pos (by simp only [Bool.or_eq_true, decide_eq_true_eq]; exact Or.inr rfl)]
+              rw [if_pos (by simp)]
             · simp [EffectSpec.comap, commuting]
           obtain ⟨accept, refuse, descriptor⟩ := live root accepts fresh
           unfold Handler.fire
@@ -159,7 +161,6 @@ theorem prepareFactors : PrepareFactors contentSpec := by
                 exfalso
                 have emitted : contentSpec.sem ctx command pre.logical = .ok prepared.progress.2 := by
                   simp [contentSpec, contentSem, prepared.nonempty, prepared.computed, Except.map]
-                  rfl
                 obtain ⟨s', admitted⟩ := exec_ok_of_complete (code := 1) contentComplete emitted
                 rw [admitted] at executed
                 cases executed

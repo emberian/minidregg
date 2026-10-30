@@ -120,6 +120,7 @@ theorem execute_cases (schedule : Schedule) (before : DataSnapshot rootBytes)
           · exact .inr ⟨rfl, rfl⟩
           · exact .inl ⟨rfl, hl, hp, rfl⟩
 
+set_option backward.isDefEq.respectTransparency false in
 /-- What a passing preflight establishes about the nullifiers and the meter. -/
 theorem preflight_facts {before : DataSnapshot rootBytes} {intent : DataIntent rootBytes}
     (ok : intent.preflight before = .ok ()) :

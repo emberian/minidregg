@@ -4641,6 +4641,7 @@ theorem stateWrite_unviewed_never_sets {rootBytes : Bytes → Digest} {config : 
     (sets : edits.any (fun edit => edit.2.isSet) = true) :
     stateWrite config snapshot object (some present) false write = .error .blindWrite := by
   simp [stateWrite, decoded, sets, bind, Except.bind]
+  rfl
 
 /-- **An admitted delivery's fields bind the stored checkpoint.** A projection
 of the `Delivery` witness, not a computation: its content is that `Delivery` is

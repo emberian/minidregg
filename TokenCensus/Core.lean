@@ -88,12 +88,12 @@ def parseCensus (text : String) : Except String (Array Row × Array Restriction)
   let mut rows := #[]
   let mut restrictions := #[]
   for raw in text.splitOn "\n" do
-    let line := raw.trim
+    let line := raw.trimAscii.toString
     if line.isEmpty || line.startsWith "#" then continue
-    match (line.splitOn "|").map String.trim with
+    match (line.splitOn "|").map (·.trimAscii.toString) with
     | ["restrict", function, allowed, note] =>
         restrictions := restrictions.push
-          ⟨function.toName, (allowed.splitOn ",").map (·.trim.toName), note⟩
+          ⟨function.toName, (allowed.splitOn ",").map (·.trimAscii.toString.toName), note⟩
     | [ctor, home, layer, note] =>
         -- `[anonymous]` is the home of a declaration elaborated outside any module (a plant)
         let home := if home == "[anonymous]" then Name.anonymous else home.toName
@@ -175,7 +175,7 @@ def castTargets (expr : Expr) : MetaM (Array Name) := do
 /-- The names a row's note justifies as bare minters (`mints: a, b`). -/
 def justifiedMinters (note : String) : List Name :=
   match note.splitOn "mints:" with
-  | [_, rest] => ((rest.splitOn ";").headD "").splitOn "," |>.map (·.trim.toName)
+  | [_, rest] => ((rest.splitOn ";").headD "").splitOn "," |>.map (·.trimAscii.toString.toName)
   | _ => []
 
 /-- `true` when a proposition is, up to REDUCIBLE unfolding, just `True`, `x = x`, or
@@ -473,7 +473,7 @@ def runTokenCensus (table : Name) (scope : Option Name) : CommandElabM Unit := d
     for row in (if scope.isNone then rows else #[]) do
       unless presentUsers.contains row.ctor do
         faults := faults.push s!"stale census row: {row.ctor} (no such private constructor)"
-      if row.note.trim.isEmpty then
+      if row.note.trimAscii.toString.isEmpty then
         faults := faults.push s!"{row.ctor}: the row gives no reason"
       -- 3. every row is backed: an L1 witness, or a reviewed defect with its task
       match row.layer.splitOn " " with
@@ -502,7 +502,7 @@ def runTokenCensus (table : Name) (scope : Option Name) : CommandElabM Unit := d
       | ["defect", task] => defects := defects.push s!"{row.ctor} (cv {task})"
       | ["restricted", functions] =>
           for function in functions.splitOn "," do
-            unless restrictions.any (·.function == function.trim.toName) do
+            unless restrictions.any (·.function == function.trimAscii.toString.toName) do
               faults := faults.push s!"{row.ctor}: restricted by {function}, which has no `restrict` row"
       | _ => faults := faults.push s!"{row.ctor}: layer must be `L1 <theorem>`, `restricted <function,…>` or `defect <cv task>`, not `{row.layer}` (there is no unreviewed layer)"
     -- 1. no foreign mint

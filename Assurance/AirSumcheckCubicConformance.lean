@@ -114,31 +114,31 @@ check leaves no term the writer can be held to and is invisible to axiom account
 
 /-- The claimed total `Σ_b E(b)·(A(b)·B(b) + C(b)·D(b))`, decided. -/
 theorem cubClaim_value :
-    (∑ b, (cubE b * (cubA b * cubB b + cubC b * cubD b))) = 908613629 := by decide
+    (∑ b, (cubE b * (cubA b * cubB b + cubC b * cubD b))) = 908613629 := by decide +kernel
 
 /-- The five FACTORED terminal openings at the challenge point, decided — the values the
 Rust verifier combines itself as `Ê·(Â·B̂ + Ĉ·D̂)`. -/
 theorem cubOpenings_value :
     (mle cubE cubR, mle cubA cubR, mle cubB cubR, mle cubC cubR, mle cubD cubR)
-      = (22389050, 975840412, 347111176, 1905187762, 1473416475) := by decide
+      = (22389050, 975840412, 347111176, 1905187762, 1473416475) := by decide +kernel
 
 /-- Round 0's message at the four wire nodes `t ∈ {0,1,2,3}`, decided. -/
 theorem cubRound0_value :
     (roundSum cubForm cubR ⟨0, by norm_num⟩ 0, roundSum cubForm cubR ⟨0, by norm_num⟩ 1,
      roundSum cubForm cubR ⟨0, by norm_num⟩ 2, roundSum cubForm cubR ⟨0, by norm_num⟩ 3)
-      = (373836789, 534776840, 798195441, 1809927178) := by decide
+      = (373836789, 534776840, 798195441, 1809927178) := by decide +kernel
 
 /-- Round 1's message at the four wire nodes — the INTERIOR round, decided. -/
 theorem cubRound1_value :
     (roundSum cubForm cubR ⟨1, by norm_num⟩ 0, roundSum cubForm cubR ⟨1, by norm_num⟩ 1,
      roundSum cubForm cubR ⟨1, by norm_num⟩ 2, roundSum cubForm cubR ⟨1, by norm_num⟩ 3)
-      = (44197611, 374231620, 1996722578, 509539619) := by decide
+      = (44197611, 374231620, 1996722578, 509539619) := by decide +kernel
 
 /-- Round 2's message at the four wire nodes, decided. -/
 theorem cubRound2_value :
     (roundSum cubForm cubR ⟨2, by norm_num⟩ 0, roundSum cubForm cubR ⟨2, by norm_num⟩ 1,
      roundSum cubForm cubR ⟨2, by norm_num⟩ 2, roundSum cubForm cubR ⟨2, by norm_num⟩ 3)
-      = (1744416197, 497217055, 1827514357, 1307544482) := by decide
+      = (1744416197, 497217055, 1827514357, 1307544482) := by decide +kernel
 
 /-- **TEETH — the round message is genuinely CUBIC.** The third finite difference
 `h(3) − 3h(2) + 3h(1) − h(0)` is `6·(leading coefficient)`; it is NONZERO in every round, so
@@ -153,7 +153,7 @@ theorem cubRounds_are_cubic :
      ≠ 0)
     ∧ (roundSum cubForm cubR ⟨2, by norm_num⟩ 3 - 3 * roundSum cubForm cubR ⟨2, by norm_num⟩ 2
        + 3 * roundSum cubForm cubR ⟨2, by norm_num⟩ 1 - roundSum cubForm cubR ⟨2, by norm_num⟩ 0
-     ≠ 0) := by decide
+     ≠ 0) := by decide +kernel
 
 /-! ## §4. The writer -/
 

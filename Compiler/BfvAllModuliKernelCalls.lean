@@ -129,9 +129,9 @@ example : (kernelCallAt 1).calls =
 example : (kernelCallAt 2).calls =
     [scalarMulWitnessCall 137438822401 11 6 24] := by decide
 
-/-- info: 'Minidregg.Compiler.BfvAllModuliKernelCalls.all_modulus_products_fit' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.BfvAllModuliKernelCalls.all_modulus_products_fit' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms all_modulus_products_fit
-/-- info: 'Minidregg.Compiler.BfvAllModuliKernelCalls.q2_max_product_not_width10' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.BfvAllModuliKernelCalls.q2_max_product_not_width10' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms q2_max_product_not_width10
 /-- info: 'Minidregg.Compiler.BfvAllModuliKernelCalls.kernelCallAt_schema' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms kernelCallAt_schema

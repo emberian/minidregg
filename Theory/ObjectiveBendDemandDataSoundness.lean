@@ -364,8 +364,6 @@ the value's source meaning, and leaves a settled heap extending the names. -/
               | suspended _ _ | divergent _ _ | refused _ _ | yielded _ _ => simp [forced] at h
               | finished forcedValue retained =>
                   simp only [forced] at h
-                  obtain ⟨_,_,h⟩ := except_bind_ok h
-                  obtain ⟨_,_,h⟩ := except_bind_ok h
                   obtain ⟨child,childEq,h⟩ := except_bind_ok h
                   cases h
                   obtain ⟨next,same,nextSettled,grows,forcedValid,steps⟩ :=
@@ -378,55 +376,54 @@ the value's source meaning, and leaves a settled heap extending the names. -/
                   exact (same address old).trans (lastSame address (Nat.lt_of_lt_of_le old grows))
       | record fields =>
           simp only [materializeWith] at h
-          split at h
-          · cases h
-          · split at h
-            · cases h
-            · split at h
-              · cases h
-              · split at h
-                · cases h
-                · obtain ⟨_,_,h⟩ := except_bind_ok h
-                  obtain ⟨_,_,h⟩ := except_bind_ok h
-                  obtain ⟨_,_,h⟩ := except_bind_ok h
-                  obtain ⟨_,_,h⟩ := except_bind_ok h
-                  obtain ⟨pair,folded,h⟩ := except_bind_ok h
-                  cases h
-                  have fieldsValid : ∀ field ∈ fields, field.2 < state.heap.size := valid
-                  have done := foldlM_fieldsInvariant (origin := state) (meaning := meaning) ?stepOk fields [] _ pair
-                    fieldsValid ?start folded
-                  case start => exact ⟨by simpa using DeepFields.nil,meaning,fun _ _ => rfl,settled,Nat.le_refl _⟩
-                  case stepOk =>
-                    intro processed accumulated field stepResult allocatedField invariant body
-                    try dsimp only at body
-                    obtain ⟨deepPrefix,current,agree,currentSettled,grown⟩ := invariant
-                    split at body
-                    · cases body
-                    · obtain ⟨_,_,body⟩ := except_bind_ok body
-                      cases forced : (forceWith policy limits accumulated.2.2.ticks
-                          {heap := accumulated.2.1.heap,control := .enter field.2,stack := []}).1 with
-                      | suspended _ _ | divergent _ _ | refused _ _ | yielded _ _ => rw [forced] at body; cases body
-                      | finished forcedValue retained =>
-                          rw [forced] at body
-                          obtain ⟨child,childEq,body⟩ := except_bind_ok body
-                          cases body
-                          have allocated : field.2 < accumulated.2.1.heap.size := Nat.lt_of_lt_of_le allocatedField grown
-                          obtain ⟨next,same,nextSettled,grows,forcedValid,steps⟩ :=
-                            force_field_sound currentSettled allocated forced
-                          obtain ⟨childDeep,last,lastSame,lastSettled,lastGrows⟩ :=
-                            ih _ forcedValue retained next child nextSettled forcedValid childEq
-                          have named : current field.2 = meaning field.2 := (agree field.2 allocatedField).symm
-                          refine ⟨?_,last,?_,lastSettled,?_⟩
-                          · simp only [List.map_append,List.map_cons,List.map_nil,List.reverse_cons]
-                            exact deepFields_append deepPrefix (named ▸ deepEvaluates_steps steps childDeep)
-                          · intro address old
-                            have a1 := agree address old
-                            have a2 := same address (Nat.lt_of_lt_of_le old grown)
-                            have a3 := lastSame address (Nat.lt_of_lt_of_le (Nat.lt_of_lt_of_le old grown) grows)
-                            exact a1.trans (a2.trans a3)
-                          · exact Nat.le_trans grown (Nat.le_trans grows lastGrows)
-                  obtain ⟨deepFields,current,agree,currentSettled,grown⟩ := done
-                  refine ⟨.record ⟨.refl _,.record _⟩ (by simpa using deepFields),current,agree,currentSettled,grown⟩
+          by_cases h0 : budget.nodes = 0
+          · rw [if_pos h0] at h; cases h
+          rw [if_neg h0] at h
+          by_cases h1 : (toString fields.length).utf8ByteSize + 2 > budget.bytes
+          · rw [if_pos h1] at h; cases h
+          rw [if_neg h1] at h
+          by_cases h2 : ((List.map Prod.fst fields).eraseDups.length != fields.length) = true
+          · rw [if_pos h2] at h; cases h
+          rw [if_neg h2] at h
+          by_cases h3 : fields.length > budget.nodes - 1
+          · rw [if_pos h3] at h; cases h
+          rw [if_neg h3] at h
+          obtain ⟨pair,folded,h⟩ := except_bind_ok h
+          cases h
+          have fieldsValid : ∀ field ∈ fields, field.2 < state.heap.size := valid
+          have done := foldlM_fieldsInvariant (origin := state) (meaning := meaning) ?stepOk fields [] _ pair
+            fieldsValid ?start folded
+          case start => exact ⟨by simpa using DeepFields.nil,meaning,fun _ _ => rfl,settled,Nat.le_refl _⟩
+          case stepOk =>
+            intro processed accumulated field stepResult allocatedField invariant body
+            try dsimp only at body
+            obtain ⟨deepPrefix,current,agree,currentSettled,grown⟩ := invariant
+            split at body
+            · cases body
+            · cases forced : (forceWith policy limits accumulated.2.2.ticks
+                  {heap := accumulated.2.1.heap,control := .enter field.2,stack := []}).1 with
+              | suspended _ _ | divergent _ _ | refused _ _ | yielded _ _ => rw [forced] at body; cases body
+              | finished forcedValue retained =>
+                  rw [forced] at body
+                  obtain ⟨child,childEq,body⟩ := except_bind_ok body
+                  cases body
+                  have allocated : field.2 < accumulated.2.1.heap.size := Nat.lt_of_lt_of_le allocatedField grown
+                  obtain ⟨next,same,nextSettled,grows,forcedValid,steps⟩ :=
+                    force_field_sound currentSettled allocated forced
+                  obtain ⟨childDeep,last,lastSame,lastSettled,lastGrows⟩ :=
+                    ih _ forcedValue retained next child nextSettled forcedValid childEq
+                  have named : current field.2 = meaning field.2 := (agree field.2 allocatedField).symm
+                  refine ⟨?_,last,?_,lastSettled,?_⟩
+                  · simp only [List.map_append,List.map_cons,List.map_nil,List.reverse_cons]
+                    exact deepFields_append deepPrefix (named ▸ deepEvaluates_steps steps childDeep)
+                  · intro address old
+                    have a1 := agree address old
+                    have a2 := same address (Nat.lt_of_lt_of_le old grown)
+                    have a3 := lastSame address (Nat.lt_of_lt_of_le (Nat.lt_of_lt_of_le old grown) grows)
+                    exact a1.trans (a2.trans a3)
+                  · exact Nat.le_trans grown (Nat.le_trans grows lastGrows)
+          obtain ⟨deepFields,current,agree,currentSettled,grown⟩ := done
+          refine ⟨.record ⟨.refl _,.record _⟩ (by simpa using deepFields),current,agree,currentSettled,grown⟩
 
 /-- The extracted Data deep-evaluates the source term (the soundness half of
 `execution_source_semantics`). -/

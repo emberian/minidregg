@@ -58,10 +58,10 @@ abbrev Line := String × String
 /-- Parse `key = value` lines; blank lines and `#` comments are skipped. -/
 def parseAuthority (text : String) : List Line :=
   (text.splitOn "\n").filterMap fun raw =>
-    let line := raw.trim
+    let line := raw.trimAscii.toString
     if line.isEmpty || line.startsWith "#" then none
     else match line.splitOn " = " with
-      | [key, value] => some (key.trim, value.trim)
+      | [key, value] => some (key.trimAscii.toString, value.trimAscii.toString)
       | _ => some ("malformed", line)
 
 /-- The registry kind of a write's live post cell, by its stable tag. -/
@@ -241,7 +241,7 @@ def projectRefused (reason : String) : List Line :=
 
 /-- The last component of a refusal's printed name (`…Reject.objectiveSource`). -/
 def reasonName (printed : String) : String :=
-  ((printed.splitOn ".").getLast?.getD printed).trim
+  ((printed.splitOn ".").getLast?.getD printed).trimAscii.toString
 
 /-- The field-by-field difference of two projections (empty when equal). -/
 def diff (expected actual : List Line) : List String :=

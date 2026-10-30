@@ -106,6 +106,7 @@ def PrepareRefusal.describe : PrepareRefusal → String
   | .staleParent => "selected source publication refused: the release's parent root is not the source's current root"
   | .selectedNotCurrent => "selected source publication refused: the selected atom's current payload differs from the release content (or the atom is absent or tombstoned)"
 
+set_option backward.isDefEq.respectTransparency false in
 def prepare (context : Context deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (federation : FederationId)
     (height : Nat) (spec : Spec) :
@@ -200,6 +201,7 @@ def authorize (prepared : Prepared context profile federation height spec)
     (.policy prepared.wanted.policyId prepared.wanted.policyRevision)
     (by rfl) (by rfl)
 
+set_option backward.isDefEq.respectTransparency false in
 /-- A public success cannot be obtained with missing source custody. -/
 theorem authorize_requires_sources (prepared : Prepared context profile federation height spec)
     (signature : CredentialSignatureAdmission.CheckedSignature context.authority)

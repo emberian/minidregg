@@ -83,7 +83,6 @@ theorem parent_present (M : Materializer) :
   rw [logical, Store.set_ne _ _ _ _
     (show (⟨.capability .object, parent.id⟩ : Address layout) ≠
       ⟨.capability .object, child.id⟩ by decide), Store.set_eq]
-  rfl
 
 theorem explicit_transfer_shape : DelegationShape request child parent noParents := by decide
 

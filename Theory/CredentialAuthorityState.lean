@@ -84,7 +84,7 @@ inductive AuthorityPlane where
   deriving DecidableEq, Repr
 
 /-- The key of each plane: the identifiers that name one record in it. -/
-def AuthorityPlane.Key : AuthorityPlane → Type
+@[reducible] def AuthorityPlane.Key : AuthorityPlane → Type
   | .capability _ => CapabilityId
   | .issuerEpoch => IssuerId
   | .policyEpoch => PolicyId
@@ -123,7 +123,7 @@ def StoredCapability.IsStrict {kind : ResourceKind} (stored : StoredCapability k
   strictAncestry stored.ancestry
 
 /-- The value stored in each plane. -/
-def AuthorityPlane.Value : AuthorityPlane → Type
+@[reducible] def AuthorityPlane.Value : AuthorityPlane → Type
   | .capability kind => StoredCapability kind
   | .issuerEpoch => Epoch
   | .policyEpoch => Epoch
@@ -397,7 +397,7 @@ theorem mem_parentKeys_iff (logical : Store layout) (cell : Nat) :
   · intro member
     obtain ⟨⟨plane, stored⟩, supported, contributes⟩ := Finset.mem_biUnion.mp member
     cases plane <;> simp [parentKeyAt] at contributes
-    have same : cell = stored := Finset.mem_singleton.mp contributes
+    have same : cell = stored := contributes
     subst same
     exact Option.isSome_iff_ne_none.mpr (DFinsupp.mem_support_iff.mp supported)
   · intro present
@@ -441,7 +441,7 @@ theorem mem_revokedKeys_iff (logical : Store layout) (key : RevocationKey) :
   · intro member
     obtain ⟨⟨plane, stored⟩, supported, contributes⟩ := Finset.mem_biUnion.mp member
     cases plane <;> simp [revokedKeyAt] at contributes
-    have same : key = stored := Finset.mem_singleton.mp contributes
+    have same : key = stored := contributes
     subst same
     exact Option.isSome_iff_ne_none.mpr (DFinsupp.mem_support_iff.mp supported)
   · intro present
@@ -703,7 +703,7 @@ theorem keyStanding_revoked_permanent {M N : Materializer} (pre : Cell M) (post 
   rw [kept]
   rfl
 
-/-- info: 'Minidregg.Theory.CredentialAuthorityState.LineageValid.root_admissible_of_strict' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CredentialAuthorityState.LineageValid.root_admissible_of_strict' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms LineageValid.root_admissible_of_strict
 /-- info: 'Minidregg.Theory.CredentialAuthorityState.mem_authState_revoked_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms mem_authState_revoked_iff

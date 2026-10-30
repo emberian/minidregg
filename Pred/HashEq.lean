@@ -373,25 +373,25 @@ theorem identity_not_hashEqHiding : ¬ HashEqHiding id (· = ·) := by
 
 /-! ## §6. Axiom pins -/
 
-/-- info: 'Minidregg.Pred.hashEq_sound' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Pred.hashEq_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms hashEq_sound
-/-- info: 'Minidregg.Pred.hashEq_admits' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Pred.hashEq_admits' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms hashEq_admits
-/-- info: 'Minidregg.Pred.hashEq_opens_every_field' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Pred.hashEq_opens_every_field' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms hashEq_opens_every_field
-/-- info: 'Minidregg.Pred.hashEq_absent_value_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Pred.hashEq_absent_value_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms hashEq_absent_value_refused
-/-- info: 'Minidregg.Pred.hashEq_binds_or_collides' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Pred.hashEq_binds_or_collides' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms hashEq_binds_or_collides
-/-- info: 'Minidregg.Pred.hashEq_reveal_binds' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Pred.hashEq_reveal_binds' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms hashEq_reveal_binds
-/-- info: 'Minidregg.Pred.hashEq_reveal_binds_each' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Pred.hashEq_reveal_binds_each' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms hashEq_reveal_binds_each
-/-- info: 'Minidregg.Pred.hashEq_context_bound' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Pred.hashEq_context_bound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms hashEq_context_bound
 /-- info: 'Minidregg.Pred.lengthHash_admits_any_reveal' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms lengthHash_admits_any_reveal
-/-- info: 'Minidregg.Pred.hashEq_wide_blinder_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Pred.hashEq_wide_blinder_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms hashEq_wide_blinder_refused
 /-- info: 'Minidregg.Pred.hiding_at_equality_is_a_collision' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms hiding_at_equality_is_a_collision

@@ -287,9 +287,11 @@ private theorem uniformProb_function_coordinate_eq {q N : Nat}
   calc
     uniformProb (Fin q -> Fin N) (fun answers => answers i = value) =
         uniformProb (Rest × Fin N) (fun split => split.2 = value) := by
-      simpa [Rest] using
+      have hsimpa :=
         (uniformProb_equiv (splitCoord i)
           (fun split : Rest × Fin N => split.2 = value))
+      simp [Rest] at hsimpa ⊢
+      exact hsimpa
     _ = uniformProb (Fin N) (fun candidate => candidate = value) :=
       uniformProb_snd_marginal (A := Rest) (B := Fin N)
         (fun candidate : Fin N => candidate = value)

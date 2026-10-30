@@ -480,6 +480,7 @@ theorem pinned_claim_stale_on_field_change {E : Evaluator} {program : Program}
   unfold checkRun
   simp only [bind, Except.bind]
   rw [if_pos hne, hstale]
+  rfl
 
 /-! ## The same theorems at Nock (K-RAN's and K-RUN-PIN's statements)
 
@@ -709,7 +710,7 @@ end Minidregg.Kernel.Run
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Run.steps_equal_oracle
 /-- info: 'Minidregg.Kernel.Run.nock.steps_equal_oracle' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Run.nock.steps_equal_oracle
-/-- info: 'Minidregg.Kernel.Run.pinned_claim_stale_on_field_change' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.Run.pinned_claim_stale_on_field_change' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Run.pinned_claim_stale_on_field_change
 /-- info: 'Minidregg.Kernel.Run.nock.pinned_claim_stale_on_field_change' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Run.nock.pinned_claim_stale_on_field_change

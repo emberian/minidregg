@@ -3985,7 +3985,7 @@ def extendExact {config : Config} {store : DurableHistory.StoreIdentity}
   exact ⟨old.origin, readback.after, exactImage, old.receiptHistory.push receipt,
     by simpa only [List.length_append, List.length_singleton, Verified.receipts,
       PersistentHistory.length_toList, PersistentHistory.size_push] using countExact,
-    by simpa only [PersistentHistory.toList_push] using admitted, issues, reserves, begins, beginsV2, claimsV2, frontier, releases,
+    by rw [PersistentHistory.toList_push]; exact admitted, issues, reserves, begins, beginsV2, claimsV2, frontier, releases,
     beginsV3, claimsV3, createdV3, runningV3, grants, retry, _, reader⟩
 
 /-- Exact readback keeps the original accepted-prefix receipt, even when a
@@ -4131,7 +4131,8 @@ def verifyLoaded (config : Config) {store : DurableHistory.StoreIdentity}
             (validateLoaded_durable (openedValue.property.symm.trans openedValidated)) walked.trace
         if countExact : walked.receipts.length = target.height then
           return .ok ⟨opened, walked.final, exactImage, PersistentHistory.ofList walked.receipts,
-            by simpa only [← PersistentHistory.length_toList, PersistentHistory.toList_ofList] using countExact,
+            by simpa only [← PersistentHistory.length_toList, PersistentHistory.toList_ofList,
+              DurableReceiverIO.Loaded.height_eq] using countExact,
             by simpa only [PersistentHistory.toList_ofList] using walked.trace, walked.issues, walked.reserves, walked.begins,
             walked.beginsV2, walked.claimsV2, walked.frontier, walked.releases,
             walked.beginsV3, walked.claimsV3, walked.createdV3,
@@ -4213,7 +4214,8 @@ def verifyLoadedSelected (config : Config) {store : DurableHistory.StoreIdentity
             if indexExact : selected.priorRecords.length = index then
               let verified : Verified config target :=
                 ⟨opened, walked.final, exactImage, PersistentHistory.ofList walked.receipts,
-                  by simpa only [← PersistentHistory.length_toList, PersistentHistory.toList_ofList] using countExact,
+                  by simpa only [← PersistentHistory.length_toList, PersistentHistory.toList_ofList,
+              DurableReceiverIO.Loaded.height_eq] using countExact,
                   by simpa only [PersistentHistory.toList_ofList] using walked.trace, walked.issues, walked.reserves, walked.begins,
                   walked.beginsV2, walked.claimsV2, walked.frontier, walked.releases,
                   walked.beginsV3, walked.claimsV3, walked.createdV3,
@@ -4788,8 +4790,12 @@ def verifySuffixFrom (config : Config) (anchor : Opened config) {store : Durable
             openedLogStartExact := openedLogStartExact
             receiptHistory := PersistentHistory.ofList walked.receipts
             countExact := by
-              simpa only [← PersistentHistory.length_toList, PersistentHistory.toList_ofList] using countExact
-            admitted := by simpa only [PersistentHistory.toList_ofList] using walked.trace
+              have hsimpa := countExact
+              simp only [← PersistentHistory.length_toList, PersistentHistory.toList_ofList] at hsimpa ⊢
+              exact hsimpa
+            admitted := by have hsimpa := walked.trace
+                           simp only [PersistentHistory.toList_ofList] at hsimpa ⊢
+                           exact hsimpa
             issues := walked.context.issues
             reserves := walked.context.reserves
             begins := walked.context.begins

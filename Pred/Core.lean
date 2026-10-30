@@ -599,7 +599,7 @@ example : (Pred.eq "x" 5 ≠ Pred.eq "x" 6) := by decide
 
 end Minidregg.Pred
 
-/-- info: 'Minidregg.Pred.ran_tooth_fires' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Pred.ran_tooth_fires' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Pred.ran_tooth_fires
-/-- info: 'Minidregg.Pred.ran_tooth_refuses' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Pred.ran_tooth_refuses' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Pred.ran_tooth_refuses

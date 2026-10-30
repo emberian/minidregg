@@ -195,9 +195,11 @@ theorem duplicate_create_rejected :
 theorem recreate_after_delete_rejected :
     create registry afterDelete createRequest =
       .error RejectReason.retiredIdentifier := by
-  simpa [afterDelete, afterCreate] using
+  have hsimpa :=
     (CellRegistry.recreate_after_retire_rejected registry emptyDirectory
       createRequest createRequest rfl)
+  simp [afterDelete, afterCreate] at hsimpa ⊢
+  exact hsimpa
 
 /-- Logical lifecycle success is not a stable-media claim. -/
 abbrev PersistenceCeiling (PhysicalState InstallError : Type) :=

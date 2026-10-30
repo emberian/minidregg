@@ -145,6 +145,7 @@ theorem ratchet_frame (S pre : ContentResource.ContentStore) (height : Nat) {n :
   HyperdocumentCell.contentBlinding.run_patch_frame S pre height ⟨n, k⟩
     (fun same => other (Sigma.mk.inj same).1)
 
+set_option backward.isDefEq.respectTransparency false in
 theorem childrenOf_ratchet (S pre : ContentResource.ContentStore) (height : Nat) (element : ElementId) :
     ContentResource.childrenOf (Store.Patch.run S (HyperdocumentCell.contentBlinding.patch pre height)) element =
       ContentResource.childrenOf S element := by
@@ -227,6 +228,7 @@ theorem commutingPrepare : CommutingPrepare := by
                   next e₂ => exact absurd e₂ e₁
                   next e₂ => rfl
 
+set_option backward.isDefEq.respectTransparency false in
 /-- **`MovedRootAccepted`** on the witness document: a line planned over a root the cell does not
 have lands, it is the document's one line, and the post blinding is one ratchet step of the
 blinding of the cell the line met. -/
@@ -266,6 +268,7 @@ theorem movedRootAccepted : MovedRootAccepted := by
       simp [witnessCell, witnessStore, Store.Store.set_ne, StoreCodec.Blinding.address,
         HyperdocumentCell.contentBlinding]
 
+set_option backward.isDefEq.respectTransparency false in
 /-- **`TwoAppendersOneObservation`**: two members plan from one observation of the witness
 document; either may land first and the other lands over the moved cell, each line once, in
 landing order. -/

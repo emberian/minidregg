@@ -235,7 +235,9 @@ theorem length_le_cordValue : ∀ {bytes : List UInt8}, LastNonzero bytes →
     cases rest with
     | nil =>
       have := cordValue_pos h (by simp)
-      simpa [cordValue] using this
+      have hsimpa := this
+      simp [cordValue] at hsimpa ⊢
+      exact hsimpa
     | cons c more =>
       have ih := length_le_cordValue h.tail
       have pos := cordValue_pos h.tail (by simp)
@@ -671,9 +673,11 @@ theorem byteArray_toList_loop (bs : ByteArray) (i : Nat) (r : List UInt8) :
     congr 1
     have hl : i < bs.data.toList.length := by simpa using h
     rw [List.drop_eq_getElem_cons hl]
-    simp [ByteArray.get!, h]; rfl
+    simp [ByteArray.get!, h]
   | case2 i r h =>
-    simp [List.drop_eq_nil_of_le (by simpa using h)]
+    have hle : bs.data.toList.length ≤ i := by
+      simp only [Array.length_toList]; exact Nat.le_of_not_lt h
+    simp [List.drop_eq_nil_of_le hle]
 
 theorem byteArray_toList_eq_data (bs : ByteArray) : bs.toList = bs.data.toList := by
   simp [ByteArray.toList, byteArray_toList_loop]

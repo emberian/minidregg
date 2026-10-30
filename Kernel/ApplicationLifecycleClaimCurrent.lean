@@ -203,6 +203,7 @@ theorem stale_image_boundary_has_no_admission {F : Type} [Field F] [DecidableEq 
   rintro ⟨accepted⟩
   exact stale accepted.boundary
 
+set_option backward.isDefEq.respectTransparency false in
 def admitLoaded {F : Type} [Field F] [DecidableEq F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig)

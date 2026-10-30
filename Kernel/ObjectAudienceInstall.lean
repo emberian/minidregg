@@ -113,7 +113,7 @@ def prepare (deployment : Deployment) (ground : Ground deployment)
             · rcases equal with equal | impossible
               · subst guard; exact roster.checked.deviceGuard_exact
               · cases impossible),
-          (by intro _; exact ⟨next, bytes, rfl, roster, by simp, rfl⟩),
+          (by intro _; exact ⟨next, bytes, afterExact, roster, by simp, rfl⟩),
           (by intro _; exact supported.down),
           (by intro _; simp [objectGuard])⟩
     else

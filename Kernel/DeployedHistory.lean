@@ -179,6 +179,7 @@ theorem objective_romPart_empty (s : Store ObjectiveActivityCell.layout) : romPa
   rw [romPart_apply]
   rfl
 
+set_option backward.isDefEq.respectTransparency false in
 theorem objective_birth_image_bytes (s : Store ObjectiveActivityCell.layout) :
     imageBytes ⟨.objectiveActivity, romPart s⟩ = 0 := by
   have empty : @romPart (deployedR.layout .objectiveActivity) s = 0 := objective_romPart_empty s

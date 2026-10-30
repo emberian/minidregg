@@ -245,7 +245,7 @@ theorem byteDecodeGadget_sound (asg : Idx → BabyBear) (w : DecodeWires Idx)
         Bignum.denoteNat byteBase (List.ofFn fun i => (asg (w.raw i)).val) +
           (asg (w.borrow 0)).val at htel
     rw [hbrTopVal, Nat.mul_zero, Nat.add_zero, hbr0Val, babyBearBytes_denote] at htel
-    simpa only [rawVals, diffVals] using htel
+    exact htel
   have hrawLt : Bignum.denoteNat byteBase (rawVals asg w) < babyBearP := by omega
   have hdecodeCast : asg w.decoded =
       (Bignum.denoteNat byteBase (rawVals asg w) : BabyBear) := by

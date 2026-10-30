@@ -193,9 +193,13 @@ theorem stream_under_room {registry : TypeRegistry Digest}
       ⟨item.create.cellId⟩ :=
   Parentage.Descends.ofParent (ResourceBirthAuthority.birth_parent_recorded final member inRoom)
 
-/-- info: 'Minidregg.Kernel.StreamResource.authorLaw_refuses_other_writer' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Kernel.StreamResource.authorLaw_refuses_other_writer' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs (whitespace := lax) in #print axioms authorLaw_refuses_other_writer
-/-- info: 'Minidregg.Kernel.StreamResource.authorLaw_admits_author' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.StreamResource.authorLaw_admits_author' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms authorLaw_admits_author
 /-- info: 'Minidregg.Kernel.StreamResource.append_footprint' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms append_footprint

@@ -976,7 +976,7 @@ theorem steps_stable {fuel fuel' : Nat} {s f : Noun} (h : run fuel s f ≠ .erro
 /-- **Exhaustion says nothing**: a term with a value, run out of fuel. -/
 theorem exhausted_says_nothing :
     ∃ s f fuel v, run fuel s f = .error .exhausted ∧ Step s f v :=
-  ⟨atom 42, op 4 (op 0 (atom 1)), 1, atom 43, by decide,
+  ⟨atom 42, op 4 (op 0 (atom 1)), 1, atom 43, rfl,
     Step.lus (Step.slot (by simp [axis, axisAux]))⟩
 
 /-- `Reduces sf v` ≙ `*sf = v` on the cell `sf = [subject formula]`. -/
@@ -1072,18 +1072,18 @@ theorem loop_no_crash : ¬ Crash loopF loopF := fun h => by
 /-! ## Poles: the classic terms, by `decide` -/
 
 /-- `*[42 4 0 1] = 43` in 2 steps. -/
-theorem pole_increment : run 10 (atom 42) (op 4 (op 0 (atom 1))) = .ok (atom 43) := by decide
+theorem pole_increment : run 10 (atom 42) (op 4 (op 0 (atom 1))) = .ok (atom 43) := by rfl
 theorem pole_increment_steps : steps 10 (atom 42) (op 4 (op 0 (atom 1))) = 2 := by decide
 
 /-- `%9`: a core `[[4 0 3] 7]` whose arm at axis 2 increments the payload. -/
 theorem pole_core_call :
     run 10 (cell (op 4 (op 0 (atom 3))) (atom 7)) (op 9 (cell (atom 2) (op 0 (atom 1)))) =
-      .ok (atom 8) := by decide
+      .ok (atom 8) := by rfl
 
 /-- `%10`: `*[[1 2] 10 [2 1 9] 0 1] = [9 2]`. -/
 theorem pole_edit :
     run 10 (cell (atom 1) (atom 2)) (op 10 (cell (cell (atom 2) (op 1 (atom 9))) (op 0 (atom 1)))) =
-      .ok (cell (atom 9) (atom 2)) := by decide
+      .ok (cell (atom 9) (atom 2)) := by rfl
 
 /-- The decrement formula from Urbit's Nock documentation,
 `[8 [1 0] 8 [1 6 [5 [0 7] 4 0 6] [0 6] 9 2 [0 2] [4 0 6] 0 7] 9 2 0 1]`. -/
@@ -1094,50 +1094,50 @@ set_option maxRecDepth 20000 in
 theorem decF_jam : jam decF = [65, 176, 216, 38, 139, 195, 46, 220, 18, 63, 204, 196, 110, 252, 26, 36, 67, 150, 200, 198, 155, 227, 193, 32, 25, 50, 25] := by decide
 theorem decF_cue : cue [65, 176, 216, 38, 139, 195, 46, 220, 18, 63, 204, 196, 110, 252, 26, 36, 67, 150, 200, 198, 155, 227, 193, 32, 25, 50, 25] = some decF := by rw [← decF_jam]; exact cue_jam decF
 
-theorem pole_decrement : run 100 (atom 3) decF = .ok (atom 2) := by decide
+theorem pole_decrement : run 100 (atom 3) decF = .ok (atom 2) := by rfl
 theorem pole_decrement_steps : steps 100 (atom 3) decF = 36 := by decide
 /-- The refutable pole of exhaustion: the same run at fuel 5 is `exhausted`,
 at 50 it answers. -/
-theorem pole_decrement_exhausted_5 : run 5 (atom 3) decF = .error .exhausted := by decide
-theorem pole_decrement_answers_50 : run 50 (atom 3) decF = .ok (atom 2) := by decide
+theorem pole_decrement_exhausted_5 : run 5 (atom 3) decF = .error .exhausted := by rfl
+theorem pole_decrement_answers_50 : run 50 (atom 3) decF = .ok (atom 2) := by rfl
 
 /-- NockApp's slam: subject `[core sample]`, the core's arm 2 produces the gate
 `[[4 0 6] 0 0]` (battery: increment the sample); slammed with 41. -/
 theorem pole_slam :
     run 30 (cell (cell (op 1 (cell (op 4 (op 0 (atom 6))) (cell (atom 0) (atom 0)))) (atom 0))
-      (atom 41)) (slam 2) = .ok (atom 42) := by decide
+      (atom 41)) (slam 2) = .ok (atom 42) := by rfl
 
 /-- `%6` picks its branch; `%5` compares; `%3` tests. -/
 theorem pole_six_yes :
     run 10 (atom 0) (op 6 (cell (op 5 (cell (op 1 (atom 1)) (op 1 (atom 1))))
-      (cell (op 1 (atom 7)) (op 1 (atom 8))))) = .ok (atom 7) := by decide
-theorem pole_wut : run 10 (cell (atom 1) (atom 2)) (op 3 (op 0 (atom 1))) = .ok (atom 0) := by decide
+      (cell (op 1 (atom 7)) (op 1 (atom 8))))) = .ok (atom 7) := by rfl
+theorem pole_wut : run 10 (cell (atom 1) (atom 2)) (op 3 (op 0 (atom 1))) = .ok (atom 0) := by rfl
 theorem pole_hints_dropped :
     run 10 (atom 5) (op 11 (cell (cell (atom 1) (op 1 (atom 99))) (op 0 (atom 1)))) =
-      .ok (atom 5) := by decide
+      .ok (atom 5) := by rfl
 
 /-! ## Poles: crashes (each a `Crash` of the spec and so no value) -/
 
-theorem pole_axis_zero_crash : run 10 (atom 5) (op 0 (atom 0)) = .error .crash := by decide
+theorem pole_axis_zero_crash : run 10 (atom 5) (op 0 (atom 0)) = .error .crash := by rfl
 theorem pole_axis_zero_no_value (v : Noun) : ¬ Step (atom 5) (op 0 (atom 0)) v :=
   fun h => crash_not_step (run_crash_sound pole_axis_zero_crash) h
 theorem pole_lus_cell_crash :
-    run 10 (cell (atom 1) (atom 2)) (op 4 (op 0 (atom 1))) = .error .crash := by decide
+    run 10 (cell (atom 1) (atom 2)) (op 4 (op 0 (atom 1))) = .error .crash := by rfl
 theorem pole_six_nonloobean_crash :
     run 10 (atom 0) (op 6 (cell (op 1 (atom 2)) (cell (op 1 (atom 3)) (op 1 (atom 4))))) =
-      .error .crash := by decide
+      .error .crash := by rfl
 theorem pole_scry_refused : run 10 (atom 0) (op 12 (cell (op 1 (atom 0)) (op 1 (atom 0)))) =
-    .error .crash := by decide
-theorem pole_bad_opcode_crash : run 10 (atom 0) (op 13 (atom 0)) = .error .crash := by decide
-theorem pole_atom_formula_crash : run 10 (atom 0) (atom 7) = .error .crash := by decide
+    .error .crash := by rfl
+theorem pole_bad_opcode_crash : run 10 (atom 0) (op 13 (atom 0)) = .error .crash := by rfl
+theorem pole_atom_formula_crash : run 10 (atom 0) (atom 7) = .error .crash := by rfl
 /-- `nockvm` PANICS here (`edit_with_space`: "0 is not allowed as an edit axis"); the spec crashes. -/
 theorem pole_edit_axis_zero_crash :
     run 10 (atom 1) (op 10 (cell (cell (atom 0) (op 1 (atom 9))) (op 0 (atom 1)))) =
-      .error .crash := by decide
+      .error .crash := by rfl
 /-- A crashing clue in a dynamic hint crashes: nothing in a hint is skipped. -/
 theorem pole_hint_clue_crash :
     run 10 (atom 5) (op 11 (cell (cell (atom 1) (op 0 (atom 0))) (op 0 (atom 1)))) =
-      .error .crash := by decide
+      .error .crash := by rfl
 
 
 /-! ## Axiom pins -/

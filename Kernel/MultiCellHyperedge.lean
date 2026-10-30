@@ -334,8 +334,10 @@ def boundValidated (prepared : PreparedTuple plan) (portals : Incidence -> Porta
       ((prepared.binding portals incidence).family.patch
         (prepared.binding portals incidence).declaration
         (prepared.binding portals incidence).outcome) := by
-  simpa only [(prepared.binding portals incidence).patchExact] using
+  have hsimpa :=
     prepared.validated incidence
+  simp only [(prepared.binding portals incidence).patchExact] at hsimpa ⊢
+  exact hsimpa
 
 theorem bound_post_exact (prepared : PreparedTuple plan) (portals : Incidence -> Portal)
     (incidence : Incidence) :

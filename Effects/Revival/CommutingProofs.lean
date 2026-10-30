@@ -83,6 +83,7 @@ theorem movedRoot_moved : movedRoot ≠ (cellOf blindedStore).root := by
   · rename_i nonzero
     exact fun same => nonzero same.symm
 
+set_option backward.isDefEq.respectTransparency false in
 /-- The host dispatch at the blinded cell for any operation the derived executor admits,
 under a plan that names the cell's root or whose operation commutes. -/
 theorem hostDispatch_blinded_of (op : ContentResource.Command) (root : Digest)
@@ -108,7 +109,6 @@ theorem hostDispatch_blinded_of (op : ContentResource.Command) (root : Digest)
     simp only [DeclaredResourceController.selectTarget, hostTarget, hostCtxOf]
     have object : sampleCtx.kind = .object := rfl
     rw [if_pos object, if_pos blindedCell_law]
-    rfl
   unfold hostTargetDispatch
   rw [if_neg (by decide), decoded]
   simp only
@@ -127,6 +127,7 @@ theorem hostDispatch_blinded_of (op : ContentResource.Command) (root : Digest)
           (.content op)) (cellOf blindedStore)) := valid
   exact if_pos valid'
 
+set_option backward.isDefEq.respectTransparency false in
 /-- **A line over a moved root lands** (kernel proof): the host dispatch admits the commuting
 line at the blinded cell under a plan naming a root the cell does not have. -/
 theorem hostMovedRootAccepted : HostMovedRootAccepted := by

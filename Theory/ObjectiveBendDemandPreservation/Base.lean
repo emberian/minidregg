@@ -684,7 +684,7 @@ theorem natural_value_form {assumptions : Assumptions} {types : AddressTypes}
   obtain ⟨head,normal,kind⟩ := value_head_correct typed
   have same := head_normalizes_unique normal (.direct .natural rfl)
   subst head
-  have scalarKind : valueHead value = .natural := by simpa [typeHead] using kind.symm
+  have scalarKind : valueHead value = .natural := by exact kind.symm
   cases value with
   | natural number => exact ⟨number,rfl⟩
   | _ => cases scalarKind
@@ -695,7 +695,7 @@ theorem boolean_value_form {assumptions : Assumptions} {types : AddressTypes}
   obtain ⟨head,normal,kind⟩ := value_head_correct typed
   have same := head_normalizes_unique normal (.direct .boolean rfl)
   subst head
-  have scalarKind : valueHead value = .boolean := by simpa [typeHead] using kind.symm
+  have scalarKind : valueHead value = .boolean := by exact kind.symm
   cases value with
   | boolean boolean => exact ⟨boolean,rfl⟩
   | _ => cases scalarKind
@@ -706,7 +706,7 @@ theorem label_value_form {assumptions : Assumptions} {types : AddressTypes}
   obtain ⟨head,normal,kind⟩ := value_head_correct typed
   have same := head_normalizes_unique normal (.direct .label rfl)
   subst head
-  have scalarKind : valueHead value = .label := by simpa [typeHead] using kind.symm
+  have scalarKind : valueHead value = .label := by exact kind.symm
   cases value with
   | label name => exact ⟨name,rfl⟩
   | _ => cases scalarKind
@@ -1109,8 +1109,10 @@ theorem source_insert_binding {assumptions : Assumptions} {context : Context}
     have safeNext := safe_uses_insert _ uses (depth+1) binding safe bodyBound
     have validNext := valid_context_insert _ _ (depth+1) binding valid bindingValid bodyBound
     have capturesNext := reusable_allowed_insert assumptions annotation.reuse context uses.tail depth binding captures bound
-    simpa only [Term.rename,lift_shift_index,List.insertIdx_succ_cons,uses_tail_insert nonempty] using
-      (PartialTyping.lambda bodyNext safeNext validNext (by simpa only [List.insertIdx_succ_cons,uses_tail_insert nonempty] using capturesNext))
+    have typed := PartialTyping.lambda bodyNext safeNext validNext
+      (by rw [uses_tail_insert nonempty]; exact capturesNext)
+    simp only [Term.rename,lift_shift_index,List.insertIdx_succ_cons,uses_tail_insert nonempty] at typed ⊢
+    exact typed
   case conversion =>
     intro context term actual expected uses prior agreement ih depth binding bound bindingValid
     exact .conversion (ih depth binding bound bindingValid) agreement

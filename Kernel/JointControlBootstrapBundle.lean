@@ -87,6 +87,7 @@ def birthIntent {config : Config} {opened : Opened config}
       else ordinary.exactCharge lane + overhead source lane
     event := event }
 
+set_option backward.isDefEq.respectTransparency false in
 /-- Bootstrap is a creator-owned source resource: the ordinary current creator
 signature is also the configured current owner permission. General separately
 owned application birth remains the independently consented birth method. -/

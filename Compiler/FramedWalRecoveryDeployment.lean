@@ -473,16 +473,16 @@ end Recovery
 
 /-! ## Pinned axiom audit -/
 
-/-- info: 'Minidregg.Compiler.FramedWalRecoveryDeployment.Recovery.manifest_wellFormed' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.FramedWalRecoveryDeployment.Recovery.manifest_wellFormed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms Recovery.manifest_wellFormed
-/-- info: 'Minidregg.Compiler.FramedWalRecoveryDeployment.Recovery.registry_wellFormed' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.FramedWalRecoveryDeployment.Recovery.registry_wellFormed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms Recovery.registry_wellFormed
-/-- info: 'Minidregg.Compiler.FramedWalRecoveryDeployment.Recovery.registered_honest_recovery' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.FramedWalRecoveryDeployment.Recovery.registered_honest_recovery' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms Recovery.registered_honest_recovery
-/-- info: 'Minidregg.Compiler.FramedWalRecoveryDeployment.Recovery.reader_failure_blocks' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.FramedWalRecoveryDeployment.Recovery.reader_failure_blocks' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms Recovery.reader_failure_blocks
 

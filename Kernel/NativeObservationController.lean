@@ -627,10 +627,10 @@ private def checkGrants {m : Type → Type} [Monad m] (native : CredentialSignat
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent)
     (grants : List GrantRef) (signatures : List (List UInt8)) :
     m (Except Refusal ((index : Fin grants.length) →
-      CheckedGrant context profile federation genesisHeight intent (grants.get index))) := do
+      CheckedGrant context profile federation genesisHeight intent (grants.get index))) :=
   match grants, signatures with
   | [], [] => return .ok (fun index => Fin.elim0 index)
-  | grant :: rest, signature :: remaining =>
+  | grant :: rest, signature :: remaining => do
       match ← checkGrant native context profile federation genesisHeight intent grant signature with
       | .error reason => return .error reason
       | .ok first =>
@@ -1256,6 +1256,7 @@ def sinceViewCodec : IndexedProgram.LawfulCodec (List SinceEntry) :=
 
 def atViewFrame : List UInt8 := "DREGG/NATIVE-HOST/AT-VIEW/v3".toUTF8.toList
 
+set_option backward.isDefEq.respectTransparency false in
 /-- The opening of a packed cell's root under `fields`. -/
 def openingView (fields : Option (Finset CellField))
     (packed : PackedCell CanonicalCellRegistry.registry) : OpeningView :=
@@ -1265,6 +1266,7 @@ def openingView (fields : Option (Finset CellField))
         packed.payload.logical)
   | none => ([], [])
 
+set_option backward.isDefEq.respectTransparency false in
 /-- **The root a reader receives opens.**  For every kind with a store wire,
 the view's root is recomputed from the opening's frame and items alone. -/
 theorem root_opens (fields : Option (Finset CellField))

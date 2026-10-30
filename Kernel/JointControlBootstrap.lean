@@ -38,6 +38,7 @@ set_option autoImplicit false
 
 inductive Phase | absent | bare | initialized deriving DecidableEq, BEq
 
+set_option backward.isDefEq.respectTransparency false in
 def phase (pin : JointControlFrame.Pin) (bytes : List UInt8) : Option Phase := do
   let image ← (ResourceBirthCodec.LifecycleImage.codec CanonicalCellRegistry.registry).decode bytes
   match image with
@@ -53,6 +54,7 @@ def emptyControl : JointControlCell.Control := ⟨[],[],[],0⟩
 def initializer (pin : JointControlFrame.Pin) : ContentResource.Command :=
   ⟨[.createAtom pin.atom (.inlineObject pin.schema) (JointControlCell.controlStream.encode emptyControl)]⟩
 
+set_option backward.isDefEq.respectTransparency false in
 private def birthCheck {config : Config} {opened : Opened config}
     (pin : JointControlFrame.Pin)
     (accepted : ResourceBirthPolicyController.Concrete.AcceptedBirth config.profile config.deployment

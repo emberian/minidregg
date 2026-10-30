@@ -194,7 +194,6 @@ theorem carryEquations_denote (base : Nat) :
       have hlast : (Fin.last n).succ = Fin.last (n + 1) := by
         apply Fin.ext
         rfl
-      dsimp only at htail
       rw [hlast] at htail
       nlinarith [hlow, htail]
 

@@ -15,8 +15,7 @@ cat >> "$f" <<'LEAN'
 open Lean Elab Command in
 run_cmd do
   let env ← getEnv
-  let real : NameSet := [``propext, ``Classical.choice, ``Quot.sound, ``sorryAx, ``Lean.ofReduceBool,
-    ``Lean.ofReduceNat, ``Lean.trustCompiler].foldl (·.insert ·) {}
+  let real : NameSet := [``propext, ``Classical.choice, ``Quot.sound, ``sorryAx].foldl (·.insert ·) {}
   let mut seen : NameSet := {}
   let mut stack : Array Name := env.constants.map₂.toList.map (·.1) |>.toArray
   let mut hidden : Std.HashMap Name (Array Name) := {}

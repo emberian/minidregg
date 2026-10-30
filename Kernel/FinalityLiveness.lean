@@ -180,7 +180,7 @@ end ClosedInstance
 
 /-! ## §5. Axiom pins. -/
 
-/-- info: 'Minidregg.Kernel.FinalityLiveness.checked_of_progress' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.FinalityLiveness.checked_of_progress' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms checked_of_progress
 
 /--
@@ -190,13 +190,25 @@ info: 'Minidregg.Kernel.FinalityLiveness.ClosedInstance.realizer_checked' depend
 -/
 #guard_msgs in #print axioms ClosedInstance.realizer_checked
 
-/-- info: 'Minidregg.Kernel.FinalityLiveness.ClosedInstance.partition_stalls' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Kernel.FinalityLiveness.ClosedInstance.partition_stalls' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in #print axioms ClosedInstance.partition_stalls
 
-/-- info: 'Minidregg.Kernel.FinalityLiveness.ClosedInstance.never_not_fair' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Kernel.FinalityLiveness.ClosedInstance.never_not_fair' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in #print axioms ClosedInstance.never_not_fair
 
-/-- info: 'Minidregg.Kernel.FinalityLiveness.ClosedInstance.never_stalls' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Kernel.FinalityLiveness.ClosedInstance.never_stalls' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in #print axioms ClosedInstance.never_stalls
 
 end Minidregg.Kernel.FinalityLiveness
