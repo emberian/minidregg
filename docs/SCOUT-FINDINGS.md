@@ -31,3 +31,19 @@ was not judged because the box was not quiet).
 journey, rooms, activity, seats, bounty, call, send, domain, upgrade, objectrecord, welcomecontinuity,
 m3, m4, m8, jbend, chargedfailure, jserve, jprivate, rate, births (N=64: p50 382 ms, p99 1072 ms),
 perf.
+
+## Off-script stress (candidate 06831831, one J0-J4 world, `scripts/scout/stress.sh`)
+
+| probe | result | verdict |
+|---|---|---|
+| 8 concurrent writers, same field, same expected value | exactly 1 wins; 7 refused `stale-target` ("target moved since the plan was signed") | PASS, no lost update |
+| 200 000-digit scalar value | refused by the client: "scalar value must be a canonical signed decimal"; Host answers on | PASS |
+| 5000-action request | refused client-side: request must be 1..=262144 bytes | PASS |
+| malformed JSON request | refused by name (EOF while parsing) | PASS |
+| 200 silent connections on the Host socket, then an honest read | read answered (value unchanged) | PASS |
+| `kill -9` of the Host mid-write, restart | client reports "uncertain host response: connection closed"; after restart the write is present exactly once (102 to 1102); a reused attempt directory is refused ("unused direct child") | PASS (retry must go through the lookup path; my script reused the directory) |
+| aging: 200 sequential write+read, certify every 100 | write p50 233 / 216 / 199 / 271 ms per block of 50 (max 415); read mean 114 ms (first 50) to 141 ms (last 50) | watch (law 17): mild growth in the last block, inside noise at this size; a 1000-record run is the nightly growth row |
+| jcertify on 4e5faa8d (infra's fixed script) | PASS: 320 records, zero tail-bound refusals, certify confirmed under 120 concurrent writes, racedRefusals=0 | PASS |
+
+Not yet probed: aged worlds beyond 200 records (AGE), many page loads (the ~206-GET budget), Hermes under load,
+store restart under load (the single in-flight kill above is the only restart probe).
