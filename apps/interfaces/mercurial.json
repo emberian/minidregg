@@ -1,0 +1,196 @@
+{
+  "format": "mini-app-interface-v1",
+  "name": "mercurial",
+  "interfaceVersion": 1,
+  "appId": "1mvdqjv5z596dtyg5fh0p9573x32u5anrfze9rs6wpxthhyejk50",
+  "packageId": "56a636adfcd3f6977de2fc2b82ee68d2",
+  "appVersion": "7.2.4-2",
+  "status": "prototype-unqualified",
+  "limits": {
+    "bodyBytes": 1048576,
+    "replyBytes": 4194304,
+    "snapshotDocuments": 1000,
+    "seconds": 120
+  },
+  "operations": {
+    "repo.summary": {
+      "description": "Read one repository's summary: tip node, last change, branches, tags, bookmarks and the short log. The repository name is the grain title slug (repo when the grain has no title). Pushing changesets is the Mercurial wire protocol on the same URLs (use an hg client against the api route); it is not a typed call.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "repo": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.-]{1,64}$"
+          }
+        },
+        "required": [
+          "repo"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "node": {
+            "type": "string",
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "node"
+        ],
+        "additionalProperties": true
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          {
+            "arg": "repo",
+            "encoding": "segment"
+          },
+          "/json-summary"
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ]
+      }
+    },
+    "changeset.read": {
+      "description": "Read one changeset (a revision number, node prefix, tip or a branch name): author, date, description, parents, files and diff.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "repo": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.-]{1,64}$"
+          },
+          "rev": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.-]{1,64}$"
+          }
+        },
+        "required": [
+          "repo",
+          "rev"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "node": {
+            "type": "string",
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "node"
+        ],
+        "additionalProperties": true
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          {
+            "arg": "repo",
+            "encoding": "segment"
+          },
+          "/json-rev/",
+          {
+            "arg": "rev",
+            "encoding": "segment"
+          }
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ]
+      }
+    },
+    "file.read": {
+      "description": "Read one file's bytes at a revision (base64).",
+      "input": {
+        "type": "object",
+        "properties": {
+          "repo": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.-]{1,64}$"
+          },
+          "rev": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.-]{1,64}$"
+          },
+          "path": {
+            "type": "string",
+            "maxLength": 1024
+          }
+        },
+        "required": [
+          "repo",
+          "rev",
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string",
+        "maxLength": 5592405
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          {
+            "arg": "repo",
+            "encoding": "segment"
+          },
+          "/raw-file/",
+          {
+            "arg": "rev",
+            "encoding": "segment"
+          },
+          "/",
+          {
+            "arg": "path",
+            "encoding": "path"
+          }
+        ],
+        "decode": "base64",
+        "status": [
+          200
+        ]
+      }
+    }
+  },
+  "qualification": [
+    {
+      "id": "summary",
+      "op": "repo.summary",
+      "args": {
+        "repo": "repo"
+      },
+      "assert": [
+        {
+          "path": [
+            "node"
+          ],
+          "equals": "0000000000000000000000000000000000000000"
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "kind": "member-route"
+  },
+  "sources": [
+    "https://www.mercurial-scm.org/release/mercurial-7.2.4.tar.gz",
+    "apps/packages/mercurial/runner.py"
+  ],
+  "$defs": {}
+}

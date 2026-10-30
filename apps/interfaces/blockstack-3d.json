@@ -1,0 +1,121 @@
+{
+  "format": "mini-app-interface-v1",
+  "name": "blockstack-3d",
+  "interfaceVersion": 1,
+  "appId": "reh7pa3e7jt8ryvjgje97ke5rkyztfg70grru8dewevmunj6ugn0",
+  "packageId": "adb71c8edd499b6926d5a89e15adc865",
+  "appVersion": "0.0.2-2",
+  "status": "prototype-unqualified",
+  "limits": {
+    "bodyBytes": 1048576,
+    "replyBytes": 4194304,
+    "snapshotDocuments": 1000,
+    "seconds": 120
+  },
+  "operations": {
+    "score.submit": {
+      "description": "Submit a score for the signed-in member. The app keeps only the member's best: a lower score is accepted and ignored, so read the best score back to see the effect.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "score": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000000
+          }
+        },
+        "required": [
+          "score"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 599
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "write": true,
+      "binding": {
+        "protocol": "http",
+        "method": "POST",
+        "path": [
+          "api.php"
+        ],
+        "decode": "status",
+        "status": [
+          200
+        ],
+        "json": {
+          "bestScore": {
+            "arg": "score"
+          }
+        }
+      }
+    },
+    "score.best": {
+      "description": "Read the signed-in member's best score. The app answers text/html carrying the JSON object {\"value\":\"<decimal>\"} (0 when none), so it is returned as that exact text.",
+      "input": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string",
+        "maxLength": 64
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "api.php"
+        ],
+        "query": {
+          "action": "getbestscore"
+        },
+        "decode": "text",
+        "status": [
+          200
+        ]
+      }
+    }
+  },
+  "qualification": [
+    {
+      "id": "submit",
+      "op": "score.submit",
+      "args": {
+        "score": 77
+      }
+    },
+    {
+      "id": "best",
+      "op": "score.best",
+      "args": {},
+      "assert": [
+        {
+          "path": [],
+          "equals": "{\"value\":\"77\"}"
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "kind": "member-session"
+  },
+  "sources": [
+    "https://github.com/ocdtrekkie/3D-Blockstack-sandstorm/blob/2c1ecb27ee5dc1a8a787b7feffa380986f2f1972/api.php",
+    "apps/packages/blockstack-3d/qualify-writes/blockstack.sh"
+  ],
+  "$defs": {}
+}

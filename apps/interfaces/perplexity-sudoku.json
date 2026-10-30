@@ -1,0 +1,408 @@
+{
+  "format": "mini-app-interface-v1",
+  "name": "perplexity-sudoku",
+  "interfaceVersion": 1,
+  "appId": "1xs63fcv99c08dv2tgv0dcehjka9141e1egcafffuu0txskvzmq0",
+  "packageId": "f03718ec2cfa35ea14eda2eb948c288c",
+  "appVersion": "0.0.1-2",
+  "status": "prototype-unqualified",
+  "limits": {
+    "bodyBytes": 1048576,
+    "replyBytes": 4194304,
+    "snapshotDocuments": 1000,
+    "seconds": 120
+  },
+  "operations": {
+    "game.new": {
+      "description": "Start a saved game for the signed-in member: the app generates a puzzle of the given difficulty and returns its game id and starting board.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "difficulty": {
+            "enum": [
+              "easy",
+              "medium",
+              "hard"
+            ]
+          }
+        },
+        "required": [
+          "difficulty"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "const": true
+          },
+          "game_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "puzzle": {
+            "type": "array",
+            "minItems": 9,
+            "maxItems": 9,
+            "items": {
+              "type": "array",
+              "minItems": 9,
+              "maxItems": 9,
+              "items": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9
+              }
+            }
+          },
+          "difficulty": {
+            "type": "string",
+            "maxLength": 20
+          }
+        },
+        "required": [
+          "success",
+          "game_id",
+          "puzzle",
+          "difficulty"
+        ],
+        "additionalProperties": true
+      },
+      "write": true,
+      "binding": {
+        "protocol": "http",
+        "method": "POST",
+        "path": [
+          "api/new-game"
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ],
+        "json": {
+          "difficulty": {
+            "arg": "difficulty"
+          }
+        }
+      }
+    },
+    "game.save": {
+      "description": "Save a board, the seconds spent and whether it is complete into one of the member's own games (the app answers 404 for another member's game id).",
+      "input": {
+        "type": "object",
+        "properties": {
+          "game_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "board_state": {
+            "type": "array",
+            "minItems": 9,
+            "maxItems": 9,
+            "items": {
+              "type": "array",
+              "minItems": 9,
+              "maxItems": 9,
+              "items": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9
+              }
+            }
+          },
+          "time_spent": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 31536000
+          },
+          "is_complete": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "game_id",
+          "board_state",
+          "time_spent",
+          "is_complete"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "const": true
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "success"
+        ],
+        "additionalProperties": true
+      },
+      "write": true,
+      "binding": {
+        "protocol": "http",
+        "method": "PUT",
+        "path": [
+          "api/game/",
+          {
+            "arg": "game_id",
+            "encoding": "segment"
+          }
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ],
+        "json": {
+          "board_state": {
+            "arg": "board_state"
+          },
+          "time_spent": {
+            "arg": "time_spent"
+          },
+          "is_complete": {
+            "arg": "is_complete"
+          }
+        }
+      }
+    },
+    "game.read": {
+      "description": "Read one of the member's own games: current board, original puzzle, difficulty, completion and seconds spent.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "game_id": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "game_id"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "const": true
+          },
+          "game": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "board_state": {
+                "type": "array",
+                "minItems": 9,
+                "maxItems": 9,
+                "items": {
+                  "type": "array",
+                  "minItems": 9,
+                  "maxItems": 9,
+                  "items": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9
+                  }
+                }
+              },
+              "original_puzzle": {
+                "type": "array",
+                "minItems": 9,
+                "maxItems": 9,
+                "items": {
+                  "type": "array",
+                  "minItems": 9,
+                  "maxItems": 9,
+                  "items": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9
+                  }
+                }
+              },
+              "difficulty": {
+                "type": "string",
+                "maxLength": 20
+              },
+              "is_complete": {
+                "type": "boolean"
+              },
+              "time_spent": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "id",
+              "board_state",
+              "difficulty",
+              "is_complete",
+              "time_spent"
+            ],
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "success",
+          "game"
+        ],
+        "additionalProperties": true
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "api/game/",
+          {
+            "arg": "game_id",
+            "encoding": "segment"
+          }
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ]
+      }
+    },
+    "games.list": {
+      "description": "List the member's own games, newest first.",
+      "input": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "const": true
+          },
+          "games": {
+            "type": "array",
+            "maxItems": 10000,
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "difficulty": {
+                  "type": "string",
+                  "maxLength": 20
+                },
+                "is_complete": {
+                  "type": "boolean"
+                },
+                "time_spent": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "id",
+                "difficulty",
+                "is_complete",
+                "time_spent"
+              ],
+              "additionalProperties": true
+            }
+          }
+        },
+        "required": [
+          "success",
+          "games"
+        ],
+        "additionalProperties": true
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "api/games"
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ]
+      }
+    }
+  },
+  "qualification": [
+    {
+      "id": "new",
+      "op": "game.new",
+      "args": {
+        "difficulty": "easy"
+      }
+    },
+    {
+      "id": "save",
+      "op": "game.save",
+      "args": {
+        "game_id": {
+          "result": [
+            "new",
+            "game_id"
+          ]
+        },
+        "board_state": {
+          "result": [
+            "new",
+            "puzzle"
+          ]
+        },
+        "time_spent": 4242,
+        "is_complete": false
+      }
+    },
+    {
+      "id": "read",
+      "op": "game.read",
+      "args": {
+        "game_id": {
+          "result": [
+            "new",
+            "game_id"
+          ]
+        }
+      },
+      "assert": [
+        {
+          "path": [
+            "game",
+            "time_spent"
+          ],
+          "equals": 4242
+        },
+        {
+          "path": [
+            "game",
+            "is_complete"
+          ],
+          "equals": false
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "kind": "member-session"
+  },
+  "sources": [
+    "https://github.com/ocdtrekkie/perplexity-sudoku",
+    "package:f03718ec2cfa35ea14eda2eb948c288c/opt/app/app.py",
+    "apps/packages/perplexity-sudoku/qualify-writes/sudoku.sh"
+  ],
+  "$defs": {}
+}
