@@ -17,9 +17,9 @@ Ship status (be4ef7510 on forge, world kept, ssh demo-dry): GREEN ship, pins, he
 grain-world, hermes preflight/route/subjects, seed (rooms, docs, grants, story/GM/narrate, bend, welcome, public reader),
 door stranger/invite/lobby, public cold/first/warm; https://demo.dregg.online/ = 200 in 2.3 s. Smoke (a) door, (b) story,
 (e) public green; (c) apps install and (d) Hermes lobby red:
-- hermes.room: HOME fix 1447b883f got past consent anchors; now the lobby-index law `subject == A` refuses house
-  (A=15415858564414735804 recorded, signer 11760394916816638647). Likely stale subject-founder.json after `reenroll`
-  (step_subjects marked done). Infra probing; fix is install-hermes re-reading the founder's whoami each run.
+- hermes.room: HOME fix 1447b883f got past consent anchors; the next refusal was infra's: /var/lib/mini/lobby held the
+  10-29 world's install state (steps marked done, old founder subject). dregg-infra walk prep now sets it aside; infra
+  reran hermes from preflight, then seed, door, public. Result pending.
 - apps install: EtherCalc da9d64ca and Hacker Slides f0277a5d "Not a directory (os error 20)", Etherpad e6d71fa0 "SPK
   exceeds decoded bound" (seed.log 27-29, walk-be4ef751074c-20261030T1917). App-reds a17f4172949caca14 owns.
 Ruling: deploy-script fixes keep be4ef7510's verdicts (no composed rerun); a Rust fix means a new cut.
