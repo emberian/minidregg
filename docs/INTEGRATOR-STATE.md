@@ -184,7 +184,7 @@ unchanged; AssertAxioms recognises compiler trust only through the `_native` com
   MINI_LAUNCH_GATE_BIN pinned to stale 7ffd6524 fixtures (a hazard for any runner that sources it), overriding the
   candidate's own; JDV row 140 cause found by hot-path: on SIGTERM `mini serve` dies and the Host's EOF clean end ran
   DurableReceiverIO.sealHead, a second full cold load of the Store (3.6 s idle at head 769, longer under load; the journey
-  allows 10 s). Fix 79f0c9a41 (lane/hot-path-cold, Host/Main.lean: sealSession seals the held opening, no second open)
+  allows 10 s). Fix 2dfa8372e (lane/hot-path-cold, Host/Main.lean: sealSession seals the held opening, no second open)
   is UNCHECKED; do not merge until hot-path reports its lane-check (blocked on hbox disk). Was: a stale mini-hermes-test-provider in the scout's run (app-reds traced "attach brief is not JSON";
   the candidate's own fixtures/mini-hermes-test-provider is current), rerun owed; demo/JDV row 140 "Host child outlived
   its server" on stop -> hot-path a86738fc1dfae6429 (13 later demo steps are shadows behind it). Evidence
