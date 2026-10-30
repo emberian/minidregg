@@ -402,6 +402,9 @@ help=$("$MINI" shell --socket "$SOCKET" --workspace "$WS" --home "${HOMEDIR:-$R/
 # form in the body; a leaf without one is red by name.
 verbs=$(awk '/^  [a-z][a-z-]* / {print $1}' <<<"$help" | sort -u)
 missing=""; count=0; leaves=0
+# The usage words below are split unquoted; a bracketed flag such as [--json] is a glob that matches a
+# one-letter file in the working directory (a file named j turned `apps list [--json]` into `apps list j`).
+set -f
 for v in $verbs; do
   count=$((count + 1))
   page=$(req GET "/verb/$v")
@@ -414,6 +417,7 @@ for v in $verbs; do
     grep -qF "<h2><code>$lits</code></h2>" <<<"$page" || missing="$missing $v($lits)"
   done < <(sed 's/ | /\n/g' <<<"$usage")
 done
+set +f
 # PARITY = every leaf has a route and a no-JS form (above) AND its placeholder-filled form assembles
 # to a line the shell's planner accepts (`/verb/NAME/dry`: the real parser and plan builder, no Host).
 mkdir -p "${HOMEDIR:-$R/home}/requests" "${HOMEDIR:-$R/home}/keys"; printf 'hello\n' >"${HOMEDIR:-$R/home}/requests/x.txt"; printf '{}\n' >"${HOMEDIR:-$R/home}/requests/x.json"; printf 'k\n' >"${HOMEDIR:-$R/home}/keys/x.txt"
