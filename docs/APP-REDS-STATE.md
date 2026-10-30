@@ -62,4 +62,15 @@ test already asserted. Result on hbox: 86 tests OK. On the Mac one error remains
   `native/mini-sdk/tests/app_interface_knowledge.rs` were red on origin/main (old package ids) and now pass.
   Neither conversation declaration can be live-qualified until item 2 closes.
 - Mercurial, Perplexity Sudoku, 3D Blockstack: typed declarations written (`apps/interfaces/mercurial.json`,
-  `perplexity-sudoku.json`, `blockstack-3d.json`); their recipes' write rows now run through them. Results below.
+  `perplexity-sudoku.json`, `blockstack-3d.json`); their recipes' write rows now run through them. Qualified live on hbox (`/ci/ar-ot`, worlds down,
+  `removal_assertions=0`): Perplexity Sudoku 3/3 (typed new/save/read through the declaration, descriptor api+web,
+  forged identity refused); 3D Blockstack 3/3 (typed submit/best; the app answers JSON as text/html, so
+  `score.best` decodes as text); Mercurial 3/3 (typed read-only `repo.summary` of the empty repo via
+  `row.py call`, because the typed qualify gate refuses a declaration with no write, as for Datasette; then the
+  hg-wire push read back through raw-file and rev, descriptor api+web). The Mercurial push driver and recipe
+  (`apps/packages/mercurial/qualify*`) were only on the hbox lane before; they are now in the repo.
+
+## Not this lane
+
+Scout a3d575cdd7a822f6b reports the demo row JWF failing 1/72 on web parity: verb `apps` (`apps list j`) has no
+visual web face (hook.out at hbox:/ci/scout/ev/demo/JWF). Not one of the four reds; routed to the integrator.
