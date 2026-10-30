@@ -42,7 +42,11 @@ ofReduceBool, trustCompiler or new axioms are not), what replaced native_decide 
   ObjectiveProofs CensusChecks), rust, pack straight into candidates/<sha> (manifest.json names final paths) -> READY.
   Holds build.lock for the whole run including the umbrella subshell (two builds once collided in one tree).
   PID in build.pid. Never launch while build.pid is alive.
-- `queue-build.sh SHA` (queue.pid): waits for the running build, then starts integ-build3.sh SHA.
+- `integ-build4.sh SHA` (current; queue-build uses it): integ-build3 + after the umbrellas, under the lock,
+  `swarm-build scripts/native-accepted-fixture/rerecord.sh candidates/<sha> integ/rerecord/<sha12>-<t>` when the script
+  exists (proofs ff9cf7df6): `unchanged` (0) | `recorded fixture-regen/<sha12> <commit>` (0; pushed for review) |
+  `authority-differs <diff>` (4; a person writes the Authority-Change commit) | 1 (step failed; logs in that dir).
+- `queue-build.sh SHA` (queue.pid): waits for the running build, then starts integ-build4.sh SHA.
 - `umbrella-minidregg.sh SHA` (minidregg.pid): after SHA's build, elaborates the whole `Minidregg` umbrella in the same
   tree (the pipeline otherwise never does). Logs "MINIDREGG umbrella" lines.
 - Umbrellas take 20-30 min and hold the lock: candidate cadence is about one per 30 min until iteration speed's
