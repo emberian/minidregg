@@ -54,7 +54,9 @@ a17f4172949caca14 (OwnTracks, Hummingbird, controller-world tests, WBO, missing 
 a3d575cdd7a822f6b (every journey row + stress on the newest candidate; routes faults), infra add189844d158e3a7,
 iteration speed Opus a141a9c535501bbd7 (Lean seams at codec/store/world-root: deep batched landings, warned ahead so
 other Lean landings hold for one closure; lane-tree warm pool; hot-swap of one crate into a KEEP_WORLD world, on top of
-gate12 KEEP_WORLD and infra's composed-gate resume).
+gate12 KEEP_WORLD and infra's composed-gate resume). First: Lean v4.30.0 -> v4.35.0 + Mathlib as one sha off main;
+on its "HOLD LEAN" message hold all other Lean landings (proofs lane) until the bump's candidate is READY, then they
+rebase; Rust-only landings keep flowing; build the bump alone on hbox.
 Name every new candidate to infra and the scout. Cut a candidate per landing batch (about 5 min Rust-only).
 
 gate12: `EDGE_REV=69c17a3 JWORLD_MANAGEMENT=distinct KEEP_WORLD=1 PORT=.. JWORLD_ROUTE_FRONT_PORT=.. bash gate12.sh SHA`
