@@ -172,6 +172,10 @@ unchanged; AssertAxioms recognises compiler trust only through the `_native` com
   (restart.sh 26.0 s); cold-start snapshots fix it. Certify at a fixed 256 tail: 16.9 / 32.2 / 12.2 s at heads 257/512/768,
   not monotone (box load); at least ~12 s of halted writes per tail. Driver hbox:/ci/xp-log/f1.sh.
 - Hummingbird live receiving path: app-reds building a j14apps()-style run.
+- Scout full pass on be4ef7510: PASS 162, FAIL 2, UNCONFIGURED 7, UNJUDGED 3 (jpay 6/6, KC, JWF now pass). Reds:
+  demo/J14 36/211 (resident prompt 11 undecided; also on 06831831c) -> app-reds; demo/JDV row 140 "Host child outlived
+  its server" on stop -> hot-path a86738fc1dfae6429 (13 later demo steps are shadows behind it). Evidence
+  hbox:/ci/scout/rbe/be4ef751*/rows/demo/journey.err.
 - fleetsign 1/100 under full parallel load (attempt plan.frame missing): scout reproducing; core client if confirmed.
 - Scout's twelve demo steps never ran on c7aa7e8c4 (journey budget spent); rerunning on 06831831c with a 12000 s timeout.
 - Ruled 2026-10-30 (root), implemented by proofs in fa4193808 (merged; building as 103c6002a): (1) genesis refuses a factory predicate
