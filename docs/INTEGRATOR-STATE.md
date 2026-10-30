@@ -68,7 +68,7 @@ gate12 KEEP_WORLD and infra's composed-gate resume). First: Lean v4.30.0 -> v4.3
 on its "HOLD LEAN" message hold all other Lean landings (proofs lane) until the bump's candidate is READY, then they
 rebase; Rust-only landings keep flowing; build the bump alone on hbox.
 Name every new candidate to infra and the scout. Infra add189844d158e3a7 hit its context limit and handed off
-(dregg-infra edge/demo/CHECKLIST.md at 712d404); its successor's id comes from the root. The restart `continuous` plan is
+(dregg-infra edge/demo/CHECKLIST.md at 712d404); its successor is a104b94c2643e9c5d. The restart `continuous` plan is
 in that hand-off: run distinct composed with KEEP_WORLD on the first candidate carrying the room_resident
 maintenance-input diagnostic (4e5faa8d8 or later), diff maintenance-input.json vs maintenance-input.prev.json beside
 requests.json, send the moving field to the integrator, who fixes the fingerprint. Cut a candidate per landing batch (about 5 min Rust-only).
