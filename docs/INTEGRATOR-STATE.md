@@ -57,7 +57,8 @@ ofReduceBool, trustCompiler or new axioms are not), what replaced native_decide 
   `swarm-build scripts/native-accepted-fixture/rerecord.sh candidates/<sha> integ/rerecord/<sha12>-<t>` when the script
   exists (proofs ff9cf7df6): `unchanged` (0) | `recorded fixture-regen/<sha12> <commit>` (0; pushed for review) |
   `authority-differs <diff>` (4; a person writes the Authority-Change commit) | 1 (step failed; logs in that dir).
-- `queue-build.sh SHA` (queue.pid): waits for the running build, then starts integ-build4.sh SHA.
+- `queue-build.sh SHA` (queue.pid): waits for the running build, then starts integ-build4.sh SHA. Prefer one sequential
+  job (`bash -c "./integ-build4.sh SHA; ./umbrella-minidregg.sh SHA"`, PID in build.pid): stale queues have rebuilt old shas.
 - `umbrella-minidregg.sh SHA` (minidregg.pid): after SHA's build, elaborates the whole `Minidregg` umbrella in the same
   tree (the pipeline otherwise never does). Logs "MINIDREGG umbrella" lines.
 - Umbrellas take 20-30 min and hold the lock: candidate cadence is about one per 30 min until iteration speed's
@@ -88,8 +89,9 @@ ofReduceBool, trustCompiler or new axioms are not), what replaced native_decide 
 | 719d7b7aa | READY, first clean manifest; umbrellas: Native fixtures (fixed later), TokenCensus (fixed later) red |
 | 06831831c | READY (named to scout and infra): app declarations, re-recorded Native fixtures; scout full pass running on it |
 | 4e5faa8d8 | READY 13:20; main contains it. hbox gate12: tour 73/73, j14-apps PASS, enrol PASS, flatness-submit FAIL (reported). CONFIRMED on hbox; infra c-4e5f-d1 distinct composed running: if fully green this is the rehearsal-3 ship. Umbrellas then Minidregg umbrella running |
+| 06665f052 | building (integ-build4 then umbrella-minidregg, one sequential job, build.pid): be4ef7510 + install-hermes HOME fix + docs. A stale queue rebuilt the old 274a2534c at 15:01 (stopped); the tree had moved, so this build redoes the host stage. Rule: one sequential job per tree; kill every queue before launching |
 | 2e3d16ef7 | READY 14:18 (umbrellas stopped: superseded) |
-| be4ef7510 | READY 14:23 = 2e3d16ef7 + continuous fix. GATE GREEN (composed fully green on forge, tour 73/73, j14-apps PASS): REHEARSAL 3 SHIP. Umbrellas + rerecord (build4) running, then Minidregg umbrella (minidregg.pid) |
+| be4ef7510 | READY 14:23 = 2e3d16ef7 + continuous fix. GATE GREEN (composed fully green on forge, tour 73/73, j14-apps PASS): REHEARSAL 3 SHIP. Umbrellas rc=0 (every umbrella green, TokenCensus included); rerecord `unchanged`. |
 
 ## Open reds and owners
 
