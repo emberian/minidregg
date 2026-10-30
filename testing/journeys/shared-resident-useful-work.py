@@ -1284,7 +1284,11 @@ def main(argv=None):
     # ------------------------------------------------------------ replay
     phase('replay')
     if journal.state('replay') != 'done':
-        for request_path in sorted((state / 'resident').glob('completion-request-*.json')):
+        # `resident-completion receive` is bound to the controller's CURRENT completion turn (completion_turn(): the newest);
+        # a request retained for an earlier turn is refused 'completion source changed after review' by design, so only the
+        # newest retained request replays. (Earlier turns' exactly-once is what the verify phase already checked.)
+        completion_requests = sorted((state / 'resident').glob('completion-request-*.json'), key=lambda q: q.stat().st_mtime_ns)[-1:]
+        for request_path in completion_requests:
             run('replay-' + request_path.stem, [grain, 'resident-completion', 'receive', state / 'admin.sock', request_path])
         for request_path in sorted((state / 'resident').glob('delivery-request-*.json')):
             run('replay-' + request_path.stem, [grain, 'resident-delivery', 'deliver', state / 'admin.sock', request_path])
