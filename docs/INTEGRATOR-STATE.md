@@ -20,8 +20,10 @@ door stranger/invite/lobby, public cold/first/warm; https://demo.dregg.online/ =
 - hermes.room: HOME fix 1447b883f got past consent anchors; the next refusal was infra's: /var/lib/mini/lobby held the
   10-29 world's install state (steps marked done, old founder subject). dregg-infra walk prep now sets it aside; infra
   reran hermes from preflight, then seed, door, public. Result pending.
-- apps install: EtherCalc da9d64ca and Hacker Slides f0277a5d "Not a directory (os error 20)", Etherpad e6d71fa0 "SPK
-  exceeds decoded bound" (seed.log 27-29, walk-be4ef751074c-20261030T1917). App-reds a17f4172949caca14 owns.
+- apps install: demo-world config (app-reds diagnosis), both fixes in dregg-infra demo-grain-world (infra): grain-host.json
+  needs importProfile market-large-v1 (Etherpad > standard-v1's 768 MiB); grain-host.json must pin the resolved candidate
+  path, not /var/lib/mini/candidate/current (a symlink; spk-host's O_NOFOLLOW parent walk is deliberate custody -> ENOTDIR),
+  rewritten on each candidate switch. No candidate cut needed.
 Ruling: deploy-script fixes keep be4ef7510's verdicts (no composed rerun); a Rust fix means a new cut.
 The restart `continuous` red was the resident's own output document moving its maintenance revision; be4ef7510's
 maintenance_fingerprint leaves out documents the resident writes.
