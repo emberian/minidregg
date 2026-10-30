@@ -69,8 +69,8 @@ was stopped (pgid). Not started: proofs' fixture re-record (deep build), any new
 candidates/ 16G (30 x ~524M; 2b8f75dc, 7001c0a9, b39563f1, c7a632f7, 86f8d3e7, d9661be9, f34b0309 from the predecessor,
 the rest this session; keep be4ef7510 = rehearsal 3, 7d90da717 = main, 06665f052), src 12G (the warm tree; keep),
 old/ 11G (set-aside build outputs, artifacts.* ~400M each, made by integ-build this session), /ci gate worlds 21G (63 c-/j-/t-/
-f-/e- dirs from gates; none kept up), tests-target 1.0G, rust-target 0.9G, gate-* ~2.4G. Other lanes: hot-path 16G, hpc
-13G, proofs 11G (msrc 12G unused), iter-speed 7.4G, infra 4.0G, private-cells 3.9G, hp-seed 2.5G; /ci/ar-ot 3.2G,
+f-/e- dirs from gates; none kept up), tests-target 1.0G, rust-target 0.9G, gate-* ~2.4G. Other lanes: hot-path 16G (predecessor's, unused), hpc
+13G (hot-path's warm tree; artifacts-1/-b3 ~330M each), /ci/hpc few hundred MB, proofs 11G (msrc 12G unused), iter-speed 7.4G, infra 4.0G, private-cells 3.9G, hp-seed 2.5G; /ci/ar-ot 3.2G,
 /ci/scout 2.7G, /ci/hp-codex 2.1G, /ci/ar-ec 1.4G, /ci/hb-dav-1/2 2G. Waiting for ember's choice.
 
 ## Candidate cadence (ember, 2026-10-30)
@@ -182,7 +182,10 @@ unchanged; AssertAxioms recognises compiler trust only through the `_native` com
 - Scout full pass on be4ef7510: PASS 162, FAIL 2, UNCONFIGURED 7, UNJUDGED 3 (jpay 6/6, KC, JWF now pass). Reds:
   demo/J14 36/211 RETRACTED by the scout: its copied hbox pipeline box.env exports MINI_TEST_PROVIDER_BIN and
   MINI_LAUNCH_GATE_BIN pinned to stale 7ffd6524 fixtures (a hazard for any runner that sources it), overriding the
-  candidate's own; JDV row 140 and its 13 shadows are UNPROVEN until rerun with both unset. Was: a stale mini-hermes-test-provider in the scout's run (app-reds traced "attach brief is not JSON";
+  candidate's own; JDV row 140 cause found by hot-path: on SIGTERM `mini serve` dies and the Host's EOF clean end ran
+  DurableReceiverIO.sealHead, a second full cold load of the Store (3.6 s idle at head 769, longer under load; the journey
+  allows 10 s). Fix 79f0c9a41 (lane/hot-path-cold, Host/Main.lean: sealSession seals the held opening, no second open)
+  is UNCHECKED; do not merge until hot-path reports its lane-check (blocked on hbox disk). Was: a stale mini-hermes-test-provider in the scout's run (app-reds traced "attach brief is not JSON";
   the candidate's own fixtures/mini-hermes-test-provider is current), rerun owed; demo/JDV row 140 "Host child outlived
   its server" on stop -> hot-path a86738fc1dfae6429 (13 later demo steps are shadows behind it). Evidence
   hbox:/ci/scout/rbe/be4ef751*/rows/demo/journey.err.
