@@ -1014,12 +1014,14 @@ def cellsLawfulFrom (config : Config) (prior : Opened config) (durable : Durable
 def cellsLawfulFromCached (config : Config) (prior : Opened config) (durable : Durable)
     (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable) : Bool :=
   durable.cellIds.all fun identifier =>
-    prior.durable.snapshot.canonicalBytes identifier == durable.snapshot.canonicalBytes identifier ||
+    Minidregg.Compiler.CredentialAuthorityDomainReceiver.bytesBEq (prior.durable.snapshot.canonicalBytes identifier)
+        (durable.snapshot.canonicalBytes identifier) ||
       cellLawful config loaded.directory identifier
 
 @[csimp] theorem cellsLawfulFrom_eq_cached : @cellsLawfulFrom = @cellsLawfulFromCached := by
   funext config prior durable loaded
   unfold cellsLawfulFrom cellsLawfulFromCached
+  simp only [Minidregg.Compiler.CredentialAuthorityDomainReceiver.bytesBEq_eq]
   rw [DurableReceiverIO.Loaded.cellIds_eq]
 
 #assert_axioms cellsLawful_eq_cached
