@@ -314,12 +314,19 @@ def verifyInitial (config : NativeHost.Config) (retained : Option ConsentAnchor.
   | .ok verified => pure ⟨target, .full verified⟩
 
 /-- Admit only the records the Store appended since `old` (`extendFrom`: the
-chain continues from the held one and every new tag verifies). An anchored
-basis whose suffix admission fails is re-admitted from genesis. -/
+chain continues from the held one and every new tag verifies). A resident that
+lags by a checkpoint interval or more starts again where a fresh provider does,
+at the Store's checkpoint (`verifyInitial`): a quiet member's next command costs
+at most one interval of admissions, not every record since it last looked. An
+anchored basis whose suffix admission fails is re-admitted from the checkpoint
+walk (`verifyStart`). -/
 def refresh (config : NativeHost.Config) (old : Session config) : IO (Session config) := do
   let ⟨target, seedExact, acceptedExact, logStartExact⟩ ← IO.ofExcept
     (← DurableReceiverIO.extendFrom config.transport ResourceBirthCodec.rootBytes old.1)
   if target.height = old.1.image.accepted.length then return old
+  if 0 < config.transport.checkpointEvery &&
+      old.1.image.accepted.length + config.transport.checkpointEvery ≤ target.height then
+    return ← verifyInitial config none
   let ⟨_, reader⟩ ← storeReader config target
   match ← old.2.extendAppended config reader target seedExact acceptedExact logStartExact with
   | .ok basis => pure ⟨target, basis⟩
