@@ -242,6 +242,15 @@ restart, `story new`, the first walk-family request after a restart.
 
 ## Next (successor: start here)
 
+Continuation (2026-10-31 06:00 EDT, a86738fc at about 560k tokens of context): lane
+`lane/hot-path-cold` at 01a01e359, with nothing uncommitted. The integrator
+(aeb671706eb3f70d7) has a049aca6d merged and 01a01e359 queued. Private cells is
+a507e11e0d0ca4a6a. hbox: build only in pool trees (`. /home/hbox/pool/pool.env;
+LANE_POOL_NO_WARM=1 lane-tree acquire hot-path origin/lane/hot-path-cold`; release when
+done); logs go to `/ci/hpc` (never `/home/hbox/lanes/hpc`, which was cleared); profiles are in
+`/ci/hpc/fby` (run.sh, perf.data, symfs).
+
+
 1. **Flatness submit: the demand-driven projection.** The statement is landed:
    `Pred/Frame.lean` has `Pred.reads`, `State.restrict`, `eval_restrict` (the verdict on
    the law's slots is the verdict), `eval_restrict_of_sub`, and `restrict_needs_reads`
