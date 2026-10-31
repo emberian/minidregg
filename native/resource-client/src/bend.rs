@@ -415,12 +415,30 @@ fn refusal_hint(meta: &Value, r: &str) -> String {
             answer with exactly the response type the asking program names, or {\"refused\": REASON})".to_owned(),
         // The same answer to the same slot (a retry after a restart or a lost reply, typed again) is the
         // same transaction identity under a fresh ingress: the slot was already decided by it.
-        "resolve" if r.contains("transaction identity conflict") => format!(
-            " (slot {} is already answered with this answer; nothing changed: `bend deliver` resumes the activity)", m("slot")),
-        // The same delivery of the same await: the await was already delivered and spent.
-        "deliver" if r.contains("transaction identity conflict") => format!(
-            " (await {} is already delivered; nothing changed: `bend await` shows where the activity is now)", m("await")),
+        "resolve" | "deliver" if r.contains("transaction identity conflict") => format!(" ({})", already_done(meta)),
         _ => String::new(),
+    }
+}
+
+/// What an exact repeat of an admitted answer or delivery is: the slot already answered, the await
+/// already delivered (the same answer again changes nothing; another answer is refused by the slot).
+fn already_done(meta: &Value) -> String {
+    let m = |k: &str| meta.get(k).and_then(Value::as_str).unwrap_or("?").to_owned();
+    if m("kind") == "deliver" {
+        format!("await {} is already delivered; nothing changed: `bend await` shows where the activity is now", m("await"))
+    } else {
+        format!("slot {} is already answered with this answer; nothing changed: `bend deliver` resumes the activity", m("slot"))
+    }
+}
+
+/// The activity client refuses to sign an exact repeat of a turn this workspace already had decided
+/// (`activity::turn_nonce`). For an answer or a delivery that repeat is never a second decision, so it
+/// is refused by name (nothing is submitted) rather than offered `--again`.
+fn repeated(meta: &Value, error: String) -> String {
+    if error.starts_with("activity: this turn was already submitted (confirmed;") {
+        format!("refused: {}", already_done(meta))
+    } else {
+        error
     }
 }
 
@@ -699,7 +717,7 @@ fn deliver_cmd(bend: &Bend, mut args: Args) -> Result<()> {
     let name = deliver_name(&await_id);
     let meta = json!({"kind": "deliver", "object": object, "transaction": transaction, "await": await_id});
     match bend.submit(&name, "deliver", &turn, &meta, false) {
-        Err(e) => ending_for(&name, e),
+        Err(e) => ending_for(&name, repeated(&meta, e)),
         Ok((d, _)) => report(bend, &name, &meta, None, "bend deliver", d),
     }
 }
@@ -767,7 +785,7 @@ fn answer_cmd(bend: &Bend, mut args: Args) -> Result<()> {
     let turn = json!({"kind": "resolve", "slot": &slot, "answer": &answer});
     let meta = json!({"kind": "resolve", "slot": &slot});
     match bend.submit(&name, "resolve", &turn, &meta, false) {
-        Err(e) => ending_for(&name, e),
+        Err(e) => ending_for(&name, repeated(&meta, e)),
         Ok((d, _)) => report(bend, &name, &meta, None, "bend answer", d),
     }
 }
@@ -888,6 +906,11 @@ mod tests {
         assert!(h.contains("already published: artifact 1 package 2"), "{h}");
         assert!(refusal_hint(&json!({"kind": "resolve", "slot": "5551"}), "notDecider").is_empty(), "other refusals keep the Host's words alone");
         assert!(refusal_hint(&json!({"kind": "run"}), conflict).is_empty());
+        let guard = "activity: this turn was already submitted (confirmed; /ws/bend/answer-1/attempts/resolve-2); a second one is your decision: --again true";
+        let r = repeated(&json!({"kind": "resolve", "slot": "5551"}), guard.into());
+        assert!(r.starts_with("refused: slot 5551 is already answered") && !r.contains("--again"), "{r}");
+        let refused_before = "activity: this turn was already submitted (refused; /x); a second one is your decision: --again true";
+        assert_eq!(repeated(&json!({"kind": "resolve", "slot": "1"}), refused_before.into()), refused_before, "a refused answer is not an answer");
     }
 
     #[test]
