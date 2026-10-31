@@ -2,7 +2,7 @@
 
 Present-state table, rewritten whole at each batch. Lane `lane/explorer`. Subject: candidate
 be4ef7510 (hbox `/home/hbox/lanes/integ/candidates/be4ef751074ca28c7d306c2f2bcf61cda03893c8`),
-explored as test members only. Batch 5, 2026-10-30.
+explored as test members only. Batch 6, 2026-10-30.
 
 ## Worlds (all on hbox, all mine; torn down when the lane ends)
 
@@ -82,6 +82,18 @@ Worlds x1, x2, xw1, xweb and the e2e workers are down (x1's down listed one surv
 | G4 | Two height scales: a run/answer/deliver receipt says height 86/87/88 while `bend await` in the same minute says height 96 and deadline 99 (about +10). The await window is `patience: 4`; on a busy world (two writers) `await` read height 78 against deadline 77 yet the answer was still admitted, so the printed heights are not the clock the deadline is judged in. Not shown too tight in practice, but unreadable. | shell `bend await` rendering |
 | G5 | Store restart with a `bend answer` in flight: the in-flight call gets a clean `cannot connect`; the retry after the restart is admitted once; a third try is `conflict: transaction identity conflict (phase replay)` (same unhelpful wording as G1 for a double answer). Nothing doubled. | refusal wording, app-reds |
 | G6 | Web as member (alice, bob over the dev helper): login 303, `/doc/new` 200 (8.7 s the first time), append 0.7 s, `/doc/webdoc` shows the text, `/bend` lists t1..t4 with their awaits, bob gets 404 for alice's doc (`no usable workspace reference`), anonymous `/doc/webdoc` 404. A re-posted append form appends again (no idempotency on a repeated form; two distinct proposals). `POST /verb/credit` without an alternative returns 400 `which alternative of the usage?`. | web (idempotent forms: decision) |
+
+
+## Reshipped forge world (be4ef7510, fresh), test member dw-10310244
+
+| id | observation | owner |
+|---|---|---|
+| H1 | F5 persists: the first signed read of a fresh session took 20.7 s (`credit`); the next `say` 1.3 s, `tail` 1.6 s; after an idle gap `say` 1.4 s and `credit` 1.5 s. Only the very first signed read of a new member is slow, which is the stranger's first minute. | infra/integrator perf |
+| H2 | Public `/doc/welcome` answers 200 (1.7 s) on this world, against the handed-over "404" known red: stale or fixed. Member-side `doc show welcome` (F2) still fails, no `welcome` ref. | seed/door grants |
+| H3 | `ask lobby ...` is admitted as a lobby turn ("said in lobby") and `hermes status lobby` prints only `#8 unacknowledged`; the member is never told why (`no-credential` is the cause, known). Whatever message ember's key decision ends up with, the asker needs a visible reason in the room. | Hermes dispatch (member-visible refusal) |
+| H4 | `apps search` lists every app as `[unverified; not swept]` with `typed tools: declaration-unavailable`, and `apps list` fails `appsWorkerUnavailable` until the worker is up (known). Fine for the known red, but the unswept label on all 22 adopted packages will read as broken to a stranger. | app-reds |
+| H5 | `reports -n 2` as the sender of a `feedback` report: `this session founded no feedback-NAME room`. The member who files feedback gets no way to read it back. | shell |
+| Public | / 2.4 s, /doc/welcome 1.7 s, /apps 1.3 s, /doc 0.7 s, /receipts 0.7 s, /tour /verb /story /healthz 0.5-0.7 s, /join 503 (held). | n/a |
 
 ## Exercised and held
 
