@@ -287,11 +287,26 @@ applied):
    only from the mask). Owed with it: receipt/event hiding re-established over the new roots
    (their joint view factorization), mask substitution preserving context and index in
    `ServesWithin`.
-   **Next code:** `Materializer` gains `aux : AuxCache (rootBytes ∘ codec.encode)` defaulting to
-   `flat`; `Materialized` gains `carried`; `materialize` uses `build`; `ValidatedPatch.apply` uses
-   `Carried.run`; `rootCache := Carried.rootOr carried ⟨bytes root⟩`. Then the private instance
-   and `RootAvailable` at `FitStore`; insert as a heap program through the same walk compiled code
-   runs (cost via the interpreter, path injectivity throughout the patch). Linear paths outside the
+   **Done (whole tree green):** `Materializer.aux` (default `flat`), `Materialized.carried`,
+   `materialize`/`materializeCanonical` build it (eager: a private kind pays one bulk build per
+   materialization from bytes, on open), `ValidatedPatch.apply` follows the patch by `Carried.run`
+   and reads the root by `Carried.rootOr` (fallback a `Thunk`, forced only for flat kinds);
+   `apply_eq_materialize`. Consumers repaired by `apply_eq_materialize ▸` / `Materialized.ext`;
+   axiom pins gained `Classical.choice, Quot.sound` (Trunc). `Kernel/PrivateCellMaterializer.lean`:
+   the private instance (`Kept` = index + blinding bytes; `keptSet`; `keptRoot_eq`;
+   `rootAvailable` at every store; `set_index`; bulk build by `Cache.buildNodup`, no
+   canonicalization, astra round 12). **Not switched on:** the registry still selects the flat
+   materializers.
+   **Next (the FORMAT switch), from astra round 12 and the integrator's round-15 conditions:**
+   factor the instance below `CanonicalCellRegistry` (it imports the registry today); the
+   canonical injective encoding of `(cell id, version, mask)` in the blinding value with an exact
+   decode (the version inside equals the accepted version); the receiver inserts the custody op
+   from `prf (version + 1)` into the validated patch, patches still refused at the blinding
+   address (`accept_spec` / `accept_isSome_iff` restated over the composite patch); `rootBytes`
+   with `agree` for the private kinds; the receiver's hiding proofs bridged to the new context
+   split (kind-level `ctx`, per-cell context in the blinding bytes; λ = the mask's entropy only);
+   receipt/event hiding over the new preimage; insert as a heap program through the compiled
+   walk. Linear paths outside the
    aux, to note at the flatness bench: `Store.set` is `DFinsupp.update` (lookups can traverse
    update history); validation runs the patch and application runs it again; whole-cell
    `canonicalPostBytes` per durable write.

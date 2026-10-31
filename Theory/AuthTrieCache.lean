@@ -743,6 +743,24 @@ theorem canonFast_perm [Hashable K] [LawfulHashable K] (es : List (K × V)) :
   (List.perm_ext_iff_of_nodup (nodup_of_nodupKeys (nodupKeys_canonFast es))
     (nodup_of_nodupKeys (nodupKeys_canon es))).mpr fun x => by rw [mem_canonFast, mem_canon]
 
+/-- A key-distinct list is its own canonical form, up to order. -/
+theorem canon_perm_self : ∀ (es : List (K × V)), NodupKeys es → (canon es).Perm es := by
+  intro es
+  induction es using List.reverseRecOn with
+  | nil => intro _; simp [canon]
+  | append_singleton es e ih =>
+      intro nd
+      rw [canon_snoc]
+      have split := List.nodup_append.mp (by simpa [NodupKeys, List.map_append] using nd)
+      have nd' : NodupKeys es := split.1
+      have notin : ∀ x ∈ es, x.1 ≠ e.1 := fun x hx same =>
+        split.2.2 x.1 (List.mem_map_of_mem hx) e.1 (List.mem_singleton_self _) same
+      have drop : dropKey e.1 es = es := List.filter_eq_self.mpr fun x hx => by
+        simpa using notin x hx
+      have perm : (dropKey e.1 (canon es)).Perm (dropKey e.1 es) := (ih nd').filter _
+      rw [drop] at perm
+      exact perm.append_right [e]
+
 /-- **Order does not matter**: lists giving every key the same last value have
 one canonical form, up to order. -/
 theorem canon_perm {es es' : List (K × V)} (same : ∀ k, lastVal es k = lastVal es' k) :
@@ -853,6 +871,24 @@ def buildFast [Hashable K] [LawfulHashable K] (es : List (K × V)) : Cache dig b
     refine p.nodup_iff.mpr ?_
     have := nodupKeys_canonFast es
     simpa [NodupKeys, entries, List.map_map, Function.comp_def] using this
+
+/-- Bulk build of a key-distinct list: no canonicalization, one digest per branch and leaf. -/
+def buildNodup (es : List (K × V)) (nd : NodupKeys es) : Cache dig bitsOf L where
+  trie := Trie.build dig L (entries bitsOf es)
+  inv := build_inv dig L _ (lengths_entries lengths _)
+  paths := by
+    intro e he
+    have := ((build_entries dig L _ (lengths_entries lengths _)).subset he)
+    obtain ⟨kv, _, rfl⟩ := List.mem_map.mp this
+    rfl
+  nodup := by
+    have p := (build_entries dig L _ (lengths_entries lengths es)).map (·.1)
+    refine p.nodup_iff.mpr ?_
+    simpa [NodupKeys, entries, List.map_map, Function.comp_def] using nd
+
+theorem buildNodup_holds (es : List (K × V)) (nd : NodupKeys es) :
+    (buildNodup (dig := dig) lengths es nd).Holds es :=
+  (build_entries dig L _ (lengths_entries lengths es)).trans ((canon_perm_self es nd).symm.map _)
 
 theorem buildFast_holds [Hashable K] [LawfulHashable K] (es : List (K × V)) :
     (buildFast (dig := dig) lengths es).Holds es :=
@@ -1138,6 +1174,7 @@ end Minidregg.Theory.AuthTrie
 #assert_axioms Minidregg.Theory.AuthTrie.Trie.insert_inv
 #assert_axioms Minidregg.Theory.AuthTrie.root_congr
 #assert_axioms Minidregg.Theory.AuthTrie.canonFast_perm
+#assert_axioms Minidregg.Theory.AuthTrie.canon_perm_self
 #assert_axioms Minidregg.Theory.AuthTrie.root_eq_rootFast
 #assert_axioms Minidregg.Theory.AuthTrie.Cache.digest_eq
 #assert_axioms Minidregg.Theory.AuthTrie.Cache.buildFast_holds

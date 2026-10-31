@@ -154,7 +154,7 @@ def canonicalPost
     {pre : Materialized M} {operation : Operation}
     (accepted : Accepted pre operation) :
     accepted.post = canonicalPost pre operation :=
-  rfl
+  Materialized.ext rfl
 
 /-- Exact footprint cardinality of the accepted canonical patch. -/
 def memoryTouches
