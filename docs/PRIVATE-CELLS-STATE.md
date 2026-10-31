@@ -239,14 +239,21 @@ applied):
    goal's `run`. `hiding_of_hybrids`: `TranscriptHiding` of `real` FROM the open hybrids; the PRF hop
    is discharged (`receiver_prf_hop_view`); `zk`, `rom`, `identical` are open premises that jointly
    say "hiding with uniform masks" (`lambda` is the mask encoding's entropy, `versions = rounds + 1`
-   at the use). `hidingGoal_of_hybrids`: `RatchetHidingGoal` of `real` from the same hybrids, its
-   distinguishers the decoy-membership attacks (`Distinguisher`: `decide` is `decoyTest` with a
-   decoy), its hidden difference differing patches (`HiddenDiff`), the witness the concrete
-   `pairAttack` (one store, patches `p₀ ≠ p₁`, a decoy test), assumed only legal. Round 11 found the
-   previous form vacuous (a caller-chosen `game` reading the world bit, caller-labelled
-   distinguishers). Owed in the hiding argument: the ZK hybrid over an independent coin tape, the ROM
-   coupling, `identical` for the deployed service, a concrete leakage model for `legal`, the host
-   corollary over the accepted set and its observable event trace (`PublishesRun`).
+   at the use). `hidingGoal_of_hybrids`: `RatchetHidingGoal` of `real` from the same hybrids, with
+   every non-vacuity witness concrete (round 12): `legal` is the setting's `Legal`, the same-leakage
+   rule (under every key and round, the two worlds publish versions whose reader-authorized views,
+   `narrowPacked`'s store under the setting's `fields`, agree version by version); the
+   distinguishers are decoy attacks on the other world (`Distinguisher`: `decide` is membership in
+   world `true`'s view under a fixed exposed mask list); the hidden difference compares the two
+   worlds' accepted effects (`HiddenDiff`, `effect`); the witness `pairAttack` with two
+   `HiddenPatch`es (invisible, fitting, non-blinding writes) whose effects differ is proved legal
+   (`pairAttack_legal`, by `hidden_run`). Concretely `witness_hidden_write`: the slot-2 field of
+   `PrivateCellView.Witness` is hidden from the slot-1 reader. Teeth `unmasked_refuted`: a service
+   that does not read the mask, with separated world views, refutes hiding below one. Rounds 11 and
+   12 found the earlier forms vacuous (a caller-chosen game reading the world bit; caller-labelled
+   distinguishers; caller-chosen `legal`; decoys no run produces; syntactic hidden difference).
+   Owed in the hiding argument: the ZK hybrid over an independent coin tape, the ROM
+   coupling, `identical` for the deployed service, the host corollary over the accepted set and its observable event trace (`PublishesRun`).
 1. **The cell representation carries `KeptCell`**: `Materialized.rootCache := KeptCell.root`,
    `rootExact` by `root_eq` and a materializer whose `rootOf` is `privateRoot` (context made
    explicit in the specification: `rootOf : Store → Root` cannot see the accepted version), patch
