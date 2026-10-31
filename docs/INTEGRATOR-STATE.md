@@ -53,6 +53,8 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   7, 0/500 says) -> 186/557 ms (batch 8 + birth plan); growth ~+370 ms in both = the per-request session refresh
   (35% at 500: WorldTrack.advance / deltaOf decode of the Host's own post). hot-path takes refresh before op66 (law 17),
   with retained-mode.
+  + perf-apps 4315513a7 (66ccd307a: launch qualification's six steps share one storeless codec child; Host processes
+  6 -> 1, steps 1.63 -> 0.69 s; detached-verb fallback = a twin path, asked to delete or justify after batch 9).
   + perf-apps 106b73251 (spk-host: one SPK verification per file per process, prepare 2.5 -> 0.013 s; Host pin per
   inode, qualification 3.0 -> 1.4 s; create-to-page profile: op66 3.3-6.3 s largest, sent to hot-path).
   + perf-client 36612f028/6a088183f (Store open's represents decision linear via hash sets, @[csimp]
@@ -151,6 +153,7 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 
 ## Reports sent (do not resend)
 
+- 10-31 13:05: perf-apps a70a7655df79c4335: 4315513a7 merged; fallback twin note.
 - 10-31 12:55: C1 a9e738baf merged; auditor round requested; hot-path: refresh first; explorer: rerun on batch 9.
 - 10-31 12:45: perf-client: af0dcfb18 merged; shared crate for the other binaries.
 - 10-31 12:35: perf-apps: keep the broker parse, no reorder (ruling).
@@ -191,7 +194,7 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 | explorer | a3e5d6dbcd68e616c | multi-member exploration of each READY candidate; docs/EXPLORER-FINDINGS.md on lane/explorer |
 | infra | aa72653a8ce442178 | forge demo container, forge composed (judges residents/restart), dregg-infra (ship.sh, world-down finding) |
 | exorcist | a97dba51f72535cb9 (a76808829fc8e4836, a6ad40ce192354deb, a31f4ba5028d24a92 retired) | no fsync anywhere (lane/exorcism); filtered set `nextest -E 'test(durable) \| test(anchor) \| test(signing_wire) \| test(attempt_state) \| test(receipt_continuity)'` |
-| perf-apps | a25df305cfd551d8b | apps install, grain HTTP path, typed-tool path (perf) |
+| perf-apps | a70a7655df79c4335 (a25df305cfd551d8b retired) | apps install, grain HTTP path, typed-tool path (perf) |
 | perf-client | a778bbda6509944a5 (a8d456c6e773efbb8 retired) | client, consent provider per-record cost, web page loads, idle cold start (perf) |
 | retained-mode | a9b54e85e4a194b91 (a13f0c9ab4513b2d7 retired) | incremental-computation architecture: a Lean incremental node with one generic "maintained = recomputed" theorem, the Host's derived structures as maintained nodes persisted in checkpoints, emission from Effects/, a lint for whole-state functions on per-request paths, one hot path migrated end to end |
 | demo-reds (sub-Opus of the integrator) | a64c387f3e638aa63 | bend/web/door/Hermes product reds as routed |
