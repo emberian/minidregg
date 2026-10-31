@@ -1,8 +1,8 @@
 # Seat: host-execution
 
-Agent: a24974e84d3c540d1 (distilled from a0fee5643746e520c, 2026-10-31 17:27)
+Agent: none (a24974e84d3c540d1 handed over 2026-10-31 night; distilled from a0fee5643746e520c; a fresh seat starts here, `cv show a24974e84d3c540d1` for detail)
 Worktree: /Users/ember/dev/minidregg-lanes/host-execution (branch seat/host-execution, rebased onto main and pushed to main;
-no side branch). Box tree: hbox pool t3 (`ssh hbox`, `. ~/.minidregg-env`, `lane-tree acquire host-execution origin/main`), native Host builds via
+no side branch). Box tree: none held (hbox pool: `ssh hbox`, `. ~/.minidregg-env`, `lane-tree acquire host-execution origin/main`, then `swarm-build scripts/pipeline/lane-check FILES`; dregg-build2 is obend's now), native Host builds via
 `scripts/pipeline/native-loop hot-path <base candidate> <label>` from t7 (~3-15 min; candidates land in
 /home/hbox/pool/lanes/hot-path/candidates/<id>).
 
@@ -48,14 +48,22 @@ build ~12% (store-retained/privacy), checkpoint seal 5%.
 1. The served state as a persistent map (bytes/roots/available), advanced per write, `DataSnapshot` built from it
    with an exactness equation (asked store-retained a9b54e85e4a194b91 whether it is theirs: DataSnapshot,
    State.snapshot, DurableServed.Served/advance/viewAt).
-2. KN2 2b remainder: the walk families (`sessionWalked`, NativeHostReplay `Verified` over the light opening; the 81
-   `accepted[i]?` premises become Reader reads; one-shot `startWalked` loads the Store in full twice); fn/carried
+2. KN2 2b remainder: the walk families (`sessionWalked`, NativeHostReplay `Verified` over the light opening; the 79
+   `opened.durable.image.accepted[i]?` premises become `DurableHistoryReader.Record` reads at the light head;
+   82 files depend on `Verified`; scripts/ports/KN2-PORT-PARTITION.txt PORT-C); fn/carried
    ops; op 130 dry run; the per-family receivers that still take `opened` (share-issue, selected release, fn).
 3. App-create turns (op66 BEGIN, route, enrolment, START): mostly the walk families (2).
 4. GET read-path contract (draft + astra review paths below).
 5. Owed from audits: `append_ref_ahead_refused` decided witness; ref-0/cross-stream scope docstring; positive
    pipeline statement for two appends planned from one read.
-6. Ruled for apps-hermes (afb920b22b17049cd): a lifetime paid plan's re-check compares the signed parts, not the
+6. Owed review: apps-hermes (a990f9e07566fd55c) implemented the paid-plan ruling in 7acbdd878 and wrote in this
+   seat's area: new Kernel/SigningPlanImage.lean (`imageFree`), PaidPlan.imageFree, the grant assembleCurrent and
+   the three session-enrollment assembleCurrent*. Read the diff and statements. Same pattern still open:
+   Host/FnConsumerFrontierPlan.lean:155 and Host/FnConsumerNamespacePlan.lean:166 (whole-plan compare with image).
+7. member-side (ab7b4fe7fb687e0ca) measured `doc new` 174 -> 540 ms over ~80 writes on persvati overlay 93b31c1c33d6
+   (pre-slice-2): expected from the full-image birth path plus the closure chain; remeasure on store-retained's
+   SparseMap served state and on main.
+8. Ruled for apps-hermes: a lifetime paid plan's re-check compares the signed parts, not the
    image coordinates (paid.rs:350); theirs to implement.
 GET contract draft: /private/tmp/claude-501/-Users-ember-dev-minidregg/01a192eb-6b7b-70ef-8cad-095d745dabe5/scratchpad/ApplicationReadPermit.lean.draft;
 astra review: /private/tmp/claude-501/-Users-ember-dev-minidregg/01a18fa5-51c4-7992-906c-97cb89814dae/scratchpad/done/astra-readpermit-review.md.
@@ -67,3 +75,17 @@ astra review: /private/tmp/claude-501/-Users-ember-dev-minidregg/01a18fa5-51c4-7
 - perf-client (a778bbda6509944a5): walk side.
 - perf-apps (a70a7655df79c4335): reruns ctp.sh on any candidate I name.
 - explorer (a3e5d6dbcd68e616c): reruns the 16-parallel-say rows.
+
+
+## Tooling (for the next seat)
+- persvati measurement kit: /home/ember/mdpool/hx/{up.sh,grow.sh,pcm.py,restart.sh,incl.py}, candidates copied to
+  /home/ember/mdpool/hx/candidates (16262d3573a2 = round 3, 430c4f577a31 = round 4 / main 2e85f5676, 938079d85810 =
+  slices 1+2, 93b31c1c33d6 = slice 1 + consent fix); copy a new one with `ssh hbox tar ... | ssh persvati-remote tar
+  ...` then `python3 /home/ember/mdpool/candidate-relocate DIR`. `bash up.sh CAND NAME PORT`, `./grow.sh NAME TAG 0 500`,
+  `./restart.sh NAME TAG`; worlds under /home/ember/mdpool/hx/w (none up). `MINIDREGG_HOST_TRACE=1` in the env of
+  up/restart logs per-op ms to W/log/store.log. persvati has no perf (paranoid 4).
+- hbox profiling: same kit at /home/hbox/hx (perf works, paranoid 1): `perf record -F 499 --call-graph dwarf,32768 -p
+  <Host pid = child of W/pid/store.pid>`, symbolize with `cp minidregg-host "symfs/memfd:mini-pinned-image (deleted)"`,
+  `perf script --symfs symfs -F ip,sym > x.txt`, `python3 incl.py x.txt REGEX`.
+- native-loop on hbox: `/home/hbox/hx/nl.sh` (lane-tree native, then swarm-build native-loop host-execution BASE
+  LABEL); base: newest READY in /home/hbox/lanes/integ/candidates.
