@@ -301,6 +301,7 @@ theorem deployed_cells_iff (bytes : Nat → List UInt8) (cells : Nat → Option 
     · rw [absent]
       exact retiresCell_decode _ retired
 
+set_option backward.isDefEq.respectTransparency false in
 /-- Reading the activity payload after the deployed lifecycle decoder agrees with
 reading the protected store. This includes fresh and retired images and all
 other registry kinds; no injectivity assumption about cell roots is needed. -/

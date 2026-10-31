@@ -6,17 +6,26 @@
 #   lane-tree release LANE         save the tree's uncommitted diff (if any) and free it
 #   lane-tree renew LANE|TREE      extend the lease (lane-check calls this for the tree it checks)
 #   lane-tree status               every tree: holder, lease age, HEAD, dirty or not
+#   lane-tree tripwire LANE|TREE   report files shared with the warm source but written in place since the
+#                                  warm (release runs it too); the pool's packages are a read-only real copy
 #   lane-tree gc                   free every lease older than LANE_POOL_TTL_H hours (default 12), diff saved
-#   lane-tree init SEED_TREE N     (once per box) the shared packages, the pool's repo and N trees, warm from
-#                                  SEED_TREE's .lake/build (a real copy, never hard links)
+#   lane-tree warm LANE|TREE [SRC]   make the tree's build outputs as warm as SRC's (default $LANE_POOL_WARM),
+#                                  by hard links (scripts/pipeline/warm-link); acquire does this itself
+#   lane-tree init SEED_TREE N     (once per box) pool.env, the shared packages, the pool's repo and N trees,
+#                                  each warm from SEED_TREE's .lake/build by warm-link
 #
 # The box's pool is described by one file, pool.env, found at $LANE_POOL_ENV, else /build/pool/pool.env,
-# else /tank/dregg-build/pool/pool.env. It sets:
+# else /tank/dregg-build/pool/pool.env, else $HOME/pool/pool.env (hbox's NVMe pool; the Mac's). `init`
+# writes it from the environment when none exists. It sets:
 #   LANE_POOL_ROOT      the pool's directory: trees t1..tN, leases/, saved/, pool.lock
 #   LANE_POOL_REPO      the pool's own bare repo the trees are worktrees of (init clones it; origin GitHub)
 #   LANE_POOL_PACKAGES  the box's ONE shared .lake/packages (read-only, keyed by lake-manifest.json); every
 #                       tree's .lake/packages is a symlink to it
-#   LAKE_CACHE_DIR      the box's ONE Lake artifact cache; LAKE_ARTIFACT_CACHE=true for every pooled build
+#   LAKE_CACHE_DIR      the box's Lake artifact cache directory; pool.env sets LAKE_ARTIFACT_CACHE=false (the
+#                       cache would also cache the read-only shared packages and fail; warm-link warms trees)
+#   LANE_POOL_WARM      optional: a built tree kept current at main (hbox: the integration tree); acquire
+#                       links its newer outputs into the tree it hands out, so a lane starts warm at main
+#                       (LANE_POOL_NO_WARM=1 in the caller's environment skips that while the source builds)
 #
 # Sharing over isolation (ember, 2026-10-28: "we'd rather risk accidental interference, which is easy to
 # converge"): trees are reused lane after lane and every build shares the box's artifact cache, so a lane
@@ -39,20 +48,46 @@ if command -v swarm-build >/dev/null 2>&1 && command -v systemctl >/dev/null 2>&
    ! systemctl --user show-environment >/dev/null 2>&1; then
   die "swarm-build cannot reach the systemd user bus (XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-unset}): a build here would exit 1 and compile nothing; log in as $(id -un) or enable lingering"
 fi
-for f in "${LANE_POOL_ENV:-}" /build/pool/pool.env /tank/dregg-build/pool/pool.env; do
-  [ -n "$f" ] && [ -f "$f" ] && { . "$f"; break; }
+pool_env=
+for f in "${LANE_POOL_ENV:-}" /build/pool/pool.env /tank/dregg-build/pool/pool.env "$HOME/pool/pool.env"; do
+  [ -n "$f" ] && [ -f "$f" ] && { pool_env=$f; . "$f"; break; }
 done
+if [ -z "$pool_env" ] && [ "${1:-}" = init ]; then
+  : "${LANE_POOL_ROOT:?init without a pool.env: set LANE_POOL_ROOT LANE_POOL_REPO LANE_POOL_PACKAGES LAKE_CACHE_DIR}"
+  : "${LANE_POOL_REPO:?}" "${LANE_POOL_PACKAGES:?}" "${LAKE_CACHE_DIR:?}"
+  mkdir -p "$LANE_POOL_ROOT"
+  { for v in LANE_POOL_ROOT LANE_POOL_REPO LANE_POOL_PACKAGES LAKE_CACHE_DIR LANE_POOL_WARM; do
+      [ -n "${!v:-}" ] && printf 'export %s=%q\n' "$v" "${!v}"; done
+    # No Lake artifact cache in pool trees: with it on, lake also caches the read-only shared packages'
+    # artifacts and fails on every package module (EACCES, hbox 2026-10-31). Warmth comes from warm-link.
+    echo 'export LAKE_ARTIFACT_CACHE=false'; } > "$LANE_POOL_ROOT/pool.env"
+  pool_env=$LANE_POOL_ROOT/pool.env
+  echo "lane-tree: wrote $pool_env"
+fi
 : "${LANE_POOL_ROOT:?no pool.env on this box (lane-tree init creates one)}"
 TTL_H=${LANE_POOL_TTL_H:-12}
 leases=$LANE_POOL_ROOT/leases; saved=$LANE_POOL_ROOT/saved
 mkdir -p "$leases" "$saved"
 exec 8>"$LANE_POOL_ROOT/pool.lock"
-lock() { flock 8; }
+# flock(1) where it exists; elsewhere (macOS) the same flock(2) on fd 8 from python: the lock belongs to the
+# open file description this shell holds, so it outlives the helper process.
+if command -v flock >/dev/null 2>&1; then lock() { flock 8; }
+else lock() { python3 -c 'import fcntl; fcntl.flock(8, fcntl.LOCK_EX)' 8>&8; }; fi
+sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi; }
+clone_dir() {   # SRC DST: a real copy, by reflink/clonefile where the filesystem has it
+  cp -a --reflink=auto "$1" "$2" 2>/dev/null || cp -Rpc "$1" "$2" 2>/dev/null || cp -Rp "$1" "$2"; }
+warm() {        # TREE SRC_TREE: link SRC's newer build outputs into TREE (never while a build runs in TREE)
+  [ -n "$2" ] && [ -d "$2/.lake/build" ] || return 0
+  python3 "$here/warm-link" "$2/.lake/build" "$1/.lake/build" >&2; touch "$1/.lake/warm.stamp"; }
+tripwire() {    # TREE: a file still shared with the warm source but written after the warm (an in-place write)
+  [ -f "$1/.lake/warm.stamp" ] || return 0
+  find "$1/.lake/build" -type f -links +1 -newer "$1/.lake/warm.stamp" 2>/dev/null |
+    sed "s|^|lane-tree: RED shared-inode-written-in-place |" >&2 || true; }
 now() { date +%s; }
 trees() { ls -d "$LANE_POOL_ROOT"/t[0-9]* 2>/dev/null | sort -V || true; }
 holder() { [ -f "$leases/$(basename "$1")" ] && cut -f1 "$leases/$(basename "$1")" || true; }
 lease_age_h() { local f=$leases/$(basename "$1"); [ -f "$f" ] && echo $(( ($(now) - $(cut -f2 "$f")) / 3600 )) || echo -; }
-held_by() { local t; for t in $(trees); do [ "$(holder "$t")" = "$1" ] && { echo "$t"; return; }; done; }
+held_by() { local t; for t in $(trees); do [ "$(holder "$t")" = "$1" ] && { echo "$t"; return 0; }; done; return 0; }
 save_diff() {   # TREE REASON: keep any uncommitted work before a tree changes hands
   local t=$1 why=$2 d
   d=$(git -C "$t" status --porcelain --untracked-files=normal 2>/dev/null | grep -v '^?? \.lake' || true)
@@ -68,12 +103,13 @@ case ${1:-} in
     lock
     t=$(held_by "$lane")
     if [ -z "$t" ]; then
+      [ -n "$(trees)" ] || die "the pool at $LANE_POOL_ROOT has no trees (lane-tree init SEED N)"
       # a free tree, else the oldest expired lease; the least recently used first
-      for c in $(ls -tr -d $(trees) 2>/dev/null); do
+      for c in $(ls -tr -d $(trees)); do
         h=$(holder "$c"); a=$(lease_age_h "$c")
         if [ -z "$h" ] || { [ "$a" != - ] && [ "$a" -ge "$TTL_H" ]; }; then t=$c; break; fi
       done
-      [ -n "$t" ] || die "no free tree: $(lane-tree status 2>/dev/null | tr '\n' ';') (wait, or gc expired leases)"
+      [ -n "$t" ] || die "no free tree: $("$0" status 2>/dev/null | tr '\n' ';') (wait, or gc expired leases)"
       [ -z "$(holder "$t")" ] || save_diff "$t" "lease of $(holder "$t") expired; taken by $lane"
     fi
     printf '%s\t%s\t%s\n' "$lane" "$(now)" "$ref" > "$leases/$(basename "$t")"
@@ -83,18 +119,32 @@ case ${1:-} in
       git -C "$t" checkout -q -f --detach "$ref" || die "cannot check out $ref"
       git -C "$t" clean -q -fd -e .lake
     fi
+    # LANE_POOL_NO_WARM=1: the warm source is mid-build (its outputs would be torn); take the tree as it is
+    [ "${LANE_POOL_NO_WARM:-0}" = 1 ] || warm "$t" "${LANE_POOL_WARM:-}"
     touch "$t"
     echo "$t" ;;
+  warm)
+    x=${2:?LANE or TREE}; from=${3:-${LANE_POOL_WARM:-}}
+    [ -n "$from" ] || die "warm: no SRC and no LANE_POOL_WARM"
+    if [ -d "$x" ]; then t=$(cd "$x" && pwd -P); else t=$(held_by "$x"); [ -n "$t" ] || die "$x holds no tree"; fi
+    warm "$t" "$from" ;;
   release)
     lane=${2:?LANE}; lock
     t=$(held_by "$lane"); [ -n "$t" ] || die "$lane holds no tree"
+    tripwire "$t"
     save_diff "$t" "released by $lane"
+    # a free tree is a clean tree: the work is in saved/ (above), never handed to the next holder
+    git -C "$t" checkout -q -f HEAD && git -C "$t" clean -q -fd -e .lake
     rm -f "$leases/$(basename "$t")"; echo "released $t" ;;
   renew)
     lane=${2:?LANE or TREE}; lock
     if [ -d "$lane" ]; then t=$(cd "$lane" && pwd -P); [ -f "$leases/$(basename "$t")" ] || exit 0
     else t=$(held_by "$lane"); [ -n "$t" ] || exit 0; fi
     awk -v n="$(now)" 'BEGIN{FS=OFS="\t"} {$2=n; print}' "$leases/$(basename "$t")" > "$leases/.r" && mv "$leases/.r" "$leases/$(basename "$t")" ;;
+  tripwire)
+    x=${2:?LANE or TREE}
+    if [ -d "$x" ]; then t=$(cd "$x" && pwd -P); else t=$(held_by "$x"); [ -n "$t" ] || die "$x holds no tree"; fi
+    tripwire "$t" ;;
   status)
     for t in $(trees); do
       d=$(git -C "$t" status --porcelain --untracked-files=no 2>/dev/null | wc -l)
@@ -105,7 +155,7 @@ case ${1:-} in
     lock
     for t in $(trees); do
       h=$(holder "$t"); a=$(lease_age_h "$t")
-      if [ -n "$h" ] && [ "$a" -ge "$TTL_H" ]; then save_diff "$t" "lease of $h expired (${a}h)"; rm -f "$leases/$(basename "$t")"; echo "freed $(basename "$t") ($h, ${a}h)"; fi
+      if [ -n "$h" ] && [ "$a" -ge "$TTL_H" ]; then save_diff "$t" "lease of $h expired (${a}h)"; git -C "$t" checkout -q -f HEAD; git -C "$t" clean -q -fd -e .lake; rm -f "$leases/$(basename "$t")"; echo "freed $(basename "$t") ($h, ${a}h)"; fi
     done ;;
   init)
     seed=${2:?SEED_TREE}; n=${3:?N}
@@ -113,9 +163,11 @@ case ${1:-} in
     [ -d "$seed/.lake/packages" ] && [ -d "$seed/.lake/build" ] || die "$seed is not a built tree"
     lock
     if [ ! -d "$LANE_POOL_PACKAGES" ]; then
-      key=$(cat "$seed/lake-manifest.json" "$seed/lean-toolchain" | sha256sum | cut -c1-12)
+      key=$(cat "$seed/lake-manifest.json" "$seed/lean-toolchain" | sha256 | cut -c1-12)
       case $LANE_POOL_PACKAGES in *"$key"*) ;; *) die "LANE_POOL_PACKAGES must name the manifest key $key";; esac
-      s=$(now); cp -a --reflink=auto "$seed/.lake/packages" "$LANE_POOL_PACKAGES.tmp"
+      s=$(now); mkdir -p "$LANE_POOL_PACKAGES.tmp"
+      for p in "$seed/.lake/packages"/*; do   # a symlinked package (the Mac's shared checkouts) by its target
+        clone_dir "$(CDPATH='' cd -- "$p" && pwd -P)" "$LANE_POOL_PACKAGES.tmp/$(basename -- "$p")"; done
       chmod -R a-w "$LANE_POOL_PACKAGES.tmp"; mv "$LANE_POOL_PACKAGES.tmp" "$LANE_POOL_PACKAGES"
       echo "shared packages: $(du -sh "$LANE_POOL_PACKAGES" | cut -f1) in $(( $(now) - s )) s"
     fi
@@ -123,8 +175,13 @@ case ${1:-} in
     if [ ! -d "$LANE_POOL_REPO" ]; then
       # the pool's own bare repo, owned by the lanes user (a shared clone's object store can hold
       # root-owned directories, and then no fetch succeeds); objects are borrowed from the seed's repo
-      ref=$(git -C "$seed" rev-parse --git-common-dir)
-      git clone -q --bare --reference "$ref" "${LANE_POOL_ORIGIN:-https://github.com/emberian/minidregg.git}" "$LANE_POOL_REPO"
+      ref=$(CDPATH='' cd -- "$seed" && CDPATH='' cd -- "$(git rev-parse --git-common-dir)" && pwd -P)
+      if [ -n "$(git -C "$seed" config --get remote.origin.partialclonefilter)" ]; then
+        # a partial clone cannot lend objects (--reference fails on its missing blobs): a partial clone of its own
+        git clone -q --bare --filter=blob:none "${LANE_POOL_ORIGIN:-https://github.com/emberian/minidregg.git}" "$LANE_POOL_REPO"
+      else
+        git clone -q --bare --reference "$ref" "${LANE_POOL_ORIGIN:-https://github.com/emberian/minidregg.git}" "$LANE_POOL_REPO"
+      fi
       git -C "$LANE_POOL_REPO" config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
       git -C "$LANE_POOL_REPO" fetch -q origin
     fi
@@ -133,7 +190,7 @@ case ${1:-} in
       i=$((i + 1)); t=$LANE_POOL_ROOT/t$i; s=$(now)
       git -C "$LANE_POOL_REPO" worktree add -q --detach "$t" origin/main
       mkdir -p "$t/.lake"; ln -sfn "$LANE_POOL_PACKAGES" "$t/.lake/packages"
-      [ "$i" = 1 ] && cp -a --reflink=auto "$seed/.lake/build" "$t/.lake/build"
+      warm "$t" "$seed"
       echo "t$i: $(( $(now) - s )) s, $(du -sh "$t" | cut -f1)"
     done ;;
   *) sed -n 2,12p "$0" >&2; exit 2 ;;

@@ -34,6 +34,8 @@ theorem babyBearP_eq : babyBearP = 2 ^ 31 - 2 ^ 27 + 1 := by decide
 
 instance : NeZero babyBearP := ⟨by norm_num [babyBearP]⟩
 
+-- norm_num's primality certificate for a 31-bit prime nests past the default kernel depth.
+set_option maxRecDepth 8192 in
 instance : Fact (Nat.Prime babyBearP) := ⟨by norm_num [babyBearP]⟩
 
 abbrev BabyBear := ZMod babyBearP

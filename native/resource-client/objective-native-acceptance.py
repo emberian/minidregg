@@ -75,6 +75,14 @@ def digest_hex(decimal):return enc_nat(int(decimal)).hex()
 def canonical(obj):return json.dumps(obj,sort_keys=True,separators=(',',':'),ensure_ascii=False)
 def ref(s,name):return json.loads((pathlib.Path(s['sponsor'])/'refs'/f'{name}.json').read_text())
 
+# Every Lean evaluation of this tree loads the native kernel library (the lakefile's
+# --load-dynlib): cSHAKE, Ed25519 and the seam closure are linked natively, so a script run by
+# `lean --run` without it fails at its first kernel call.
+KERNELS=REPO/'.lake'/'native'/'libmini_kernels_lean.so'
+def lean_run(tag,script,*args):
+    """`lake env lean --run SCRIPT ARGS` from the repo, with the native kernel library loaded."""
+    return sh(tag,'lake','env','lean',f'--load-dynlib={KERNELS}','--run',script,*args,cwd=REPO)
+
 CAP_KEYS=['typeFuel','sourceTicks','heap','stack','outputNodes','outputBytes','extractTicks','inputBytes','scalarBits',
   'memoryTouches','proofWork','feeDebit','turnBytes','witnessBytes','storageBytes','sideEffectCount',
   'networkBytes','leaseByteBlocks','incidences','replayBytes','coreBytes','domainWork']
@@ -349,8 +357,8 @@ elif a.verb=='refuse':
         if name.endswith('-operation'):return ref(s,name[:-len('-operation')])['operationCapability']
         return s['variants'][name]
     argument=[resolve(x) for x in argument]
-    sh(f'{label}-mutate','lake','env','lean','--run',REPO/'tests/objective-native/Mutate.lean',a.mutation,
-       d/'quote.json',str(secrets.randbelow(2**62)+1),d/'mutated-intent.bin',*argument,cwd=REPO)
+    lean_run(f'{label}-mutate',REPO/'tests/objective-native/Mutate.lean',a.mutation,
+       d/'quote.json',str(secrets.randbelow(2**62)+1),d/'mutated-intent.bin',*argument)
     attempt=pathlib.Path(s['sponsor'])/'attempts'/f'dishonest-{label}'
     before=height_and_root(f'{label}-before')
     r=sh(f'{label}-submit',mini,'submit','--socket',s['socket'],'--host',host,'--config',s['config'],
@@ -384,9 +392,9 @@ elif a.verb=='publish-variant':
     other=hashlib.sha256(f'not-this-front-end:{a.label}'.encode()).hexdigest()
     (v/'package.bin').write_bytes(honest.replace(own,framed(other)))
     (v/'out').mkdir()
-    sh(f'variant-{a.label}-publication','lake','env','lean','--run',REPO/'Host/ObjectiveStudioPublication.lean',
+    lean_run(f'variant-{a.label}-publication',REPO/'Host/ObjectiveStudioPublication.lean',
        v/'package.bin',v/'package.bin',pub/'out'/'core.canonical.json',pub/'out'/'core.canonical.json',
-       pub/'out'/'output-codec.bin',v/'out'/'publication.json',cwd=REPO)
+       pub/'out'/'output-codec.bin',v/'out'/'publication.json')
     out=json.loads((v/'out'/'publication.json').read_text())
     (v/'proposal.json').write_text(json.dumps({'type':'minidregg-workspace-proposal-v1','action':'invoke',
         'targets':[{'name':'source','payload':out['payload']}]}))

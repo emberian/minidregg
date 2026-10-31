@@ -490,7 +490,7 @@ theorem Accepted.revoked [DecidableEq F]
     (accepted : Accepted prepared envelope) :
     RevocationKey.capability command.capability ∈
       (authState accepted.semantic.prepared.post).revoked :=
-  by simpa using (revocation_post_is_authorizer_member
+  by exact (revocation_post_is_authorizer_member
     (accepted.semantic.recast ground.authority.authStateExact))
 
 theorem Accepted.rejects_victim [DecidableEq F]
@@ -543,6 +543,7 @@ theorem Accepted.grants_preserved [DecidableEq F]
       have impossible := Finset.mem_singleton.mp member
       cases impossible)
 
+set_option backward.isDefEq.respectTransparency false in
 theorem Accepted.policy_generation_preserved [DecidableEq F]
     {prepared : Prepared deployment profile ambient ground command} {envelope : List UInt8}
     (accepted : Accepted prepared envelope) (policy : PolicyId) :

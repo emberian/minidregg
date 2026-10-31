@@ -21,7 +21,7 @@ open Minidregg.Kernel.World
 
 set_option autoImplicit false
 
-def benchLayout : Layout.{0, 0, 0} where
+@[reducible] def benchLayout : Layout.{0, 0, 0} where
   Namespace := Unit
   Key := fun _ => Nat
   Value := fun _ => Nat

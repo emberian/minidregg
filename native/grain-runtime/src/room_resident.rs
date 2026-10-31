@@ -47,6 +47,11 @@ struct ResidentState {
 // Keep the content root and body; only the renderer's bounded decimal height is
 // irrelevant to whether a new member request or role edit needs another turn.
 fn assignment_fingerprint(prepared: &Value) -> Result<String> {
+    sha256_bytes(&serde_json::to_vec(&assignment_stable(prepared)).map_err(|e| e.to_string())?)
+}
+
+/// The value the fingerprint hashes: the assignment without its height-only and budget-only fields.
+fn assignment_stable(prepared: &Value) -> Value {
     let mut stable = prepared.clone();
     // Fresh balance/lease observations inform this assignment, but do not
     // create another paid turn merely because our own turn changed its budget.
@@ -65,7 +70,39 @@ fn assignment_fingerprint(prepared: &Value) -> Result<String> {
             }
         }
     }
-    sha256_bytes(&serde_json::to_vec(&stable).map_err(|e| e.to_string())?)
+    stable
+}
+
+/// The maintenance revision: the stable assignment without the context of the documents this
+/// resident writes (manifest docs whose verbs include `mutate`). Its own turn appends to those, so
+/// counting them made every delivered turn open another maintenance turn: an extra paid call on an
+/// unchanged assignment (composed restart `continuous`, run c-4e5f-d1: only the resident's own
+/// summary document's rows and root moved). Inputs it only observes, the program and the room still count.
+fn maintenance_stable(prepared: &Value) -> Value {
+    let mut stable = assignment_stable(prepared);
+    let outputs: Vec<Value> = prepared["docs"].as_array().into_iter().flatten()
+        .filter(|doc| doc["verbs"].as_array().is_some_and(|verbs| verbs.iter().any(|v| v == "mutate")))
+        .map(|doc| doc["target"].clone()).collect();
+    if let Some(sources) = stable.pointer_mut("/contextProjection/sources").and_then(Value::as_array_mut) {
+        sources.retain(|source| !outputs.contains(&source["source"]));
+    }
+    stable
+}
+
+fn maintenance_fingerprint(prepared: &Value) -> Result<String> {
+    sha256_bytes(&serde_json::to_vec(&maintenance_stable(prepared)).map_err(|e| e.to_string())?)
+}
+
+/// Retains the maintenance input that opens a maintenance turn, beside the request queue, with the
+/// one it replaced (`maintenance-input.json`, `maintenance-input.prev.json`), so an unexpected
+/// maintenance turn shows which assignment field moved. Controller-private state, bounded to two files.
+fn retain_maintenance_input(state: &Path, maintenance: &Value, revision: &str) {
+    let current = state.join("maintenance-input.json");
+    if let Ok(bytes) = std::fs::read(&current) {
+        if serde_json::from_slice::<Value>(&bytes).ok().and_then(|v| v["revision"].as_str().map(str::to_owned)).as_deref() == Some(revision) { return; }
+        let _ = std::fs::rename(&current, state.join("maintenance-input.prev.json"));
+    }
+    let _ = crate::atomic_json(&current, &json!({"revision":revision,"input":maintenance_stable(maintenance)}));
 }
 
 fn prompt_assignment(prepared: &Value) -> Value {
@@ -404,7 +441,7 @@ pub(crate) fn main(path: &Path) -> Result<()> {
         let mut maintenance=prepared.clone();
         maintenance.as_object_mut().unwrap().remove("sourceRequests");
         maintenance.as_object_mut().unwrap().remove("sourceRoom");
-        let maintenance_input=assignment_fingerprint(&maintenance)?;
+        let maintenance_input=maintenance_fingerprint(&maintenance)?;
         let prepared = match resident_requests::select(&prepared,&options.state,limits)? {
             Some(selected) => selected,
             None => {
@@ -419,7 +456,9 @@ pub(crate) fn main(path: &Path) -> Result<()> {
         // Queued, cancelled and refused notices from this selection go out
         // before the prompt, so a waiting author sees its place first.
         publish_notices(&room, &options.state);
-        if prepared.get("selectedRequest").is_some() || resident_requests::maintenance_needed(&options.state,&maintenance_input)? {
+        let maintenance_due = resident_requests::maintenance_needed(&options.state,&maintenance_input)?;
+        if maintenance_due { retain_maintenance_input(&options.state, &maintenance, &maintenance_input); }
+        if prepared.get("selectedRequest").is_some() || maintenance_due {
             let prompt_bytes=format!("{ASSIGNMENT_PREFIX}{}",prompt_assignment(&prepared)).len();
             if prepared.get("selectedRequest").is_some() && prompt_bytes+256>16_384 {
                 resident_requests::refuse_selected(&options.state,json!({"basis":"prompt-frame-byte-bound","promptBytes":prompt_bytes,"frameBytes":16384,"metadataReserve":256}))?;
@@ -469,6 +508,30 @@ mod tests {
         let mut member = later;
         member["recentMemberEntries"] = json!([{"author":"20","text":"please index my note"}]);
         assert_ne!(assignment_fingerprint(&before).unwrap(), assignment_fingerprint(&member).unwrap());
+    }
+
+    #[test]
+    fn maintenance_revision_ignores_the_residents_own_output_but_not_its_inputs() {
+        let source = |target: &str, root: &str, rows: u64| json!({"name":target,"source":target,"sourceRoot":root,
+            "sourceRows":rows,"rows":[{"text":"x","sourceRoot":root}]});
+        let base = json!({"program":"p","docs":[
+                {"name":"summary","target":"17","verbs":["observe","mutate"]},
+                {"name":"notes","target":"15","verbs":["observe"]}],
+            "contextProjection":{"type":"mini-context-bundle-v1","sources":[
+                source("prog","a",1), source("17","b",1), source("15","c",1)]}});
+        // The resident appended to its own summary: no new maintenance revision.
+        let mut own = base.clone();
+        own["contextProjection"]["sources"][1] = source("17","b2",2);
+        assert_eq!(maintenance_fingerprint(&base).unwrap(), maintenance_fingerprint(&own).unwrap());
+        // ...though the request-turn fingerprint still sees it.
+        assert_ne!(assignment_fingerprint(&base).unwrap(), assignment_fingerprint(&own).unwrap());
+        // A changed observed input or program is new maintenance work.
+        let mut input = base.clone();
+        input["contextProjection"]["sources"][2] = source("15","c2",2);
+        assert_ne!(maintenance_fingerprint(&base).unwrap(), maintenance_fingerprint(&input).unwrap());
+        let mut program = base.clone();
+        program["contextProjection"]["sources"][0] = source("prog","a2",2);
+        assert_ne!(maintenance_fingerprint(&base).unwrap(), maintenance_fingerprint(&program).unwrap());
     }
 
     #[test]

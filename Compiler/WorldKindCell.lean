@@ -44,7 +44,7 @@ def definitionStream : StreamCodec Definition :=
     (fun definition => (definition.descriptor, definition.defaults))
     (fun pair => ⟨pair.1, pair.2⟩) (by intro definition; cases definition; rfl)
 
-def definitionLayout : Layout.{0, 0, 0} where
+@[reducible] def definitionLayout : Layout.{0, 0, 0} where
   Namespace := Unit
   Key := fun _ => Unit
   Value := fun _ => Definition
@@ -103,14 +103,14 @@ inductive InstanceSpace where
   | payload
   deriving DecidableEq, Repr
 
-def InstanceSpace.Value : InstanceSpace → Type
+@[reducible] def InstanceSpace.Value : InstanceSpace → Type
   | .descriptor => Binding
   | .payload => List UInt8
 
 instance instanceValueDecidable (space : InstanceSpace) : DecidableEq space.Value := by
   cases space <;> unfold InstanceSpace.Value <;> infer_instance
 
-def instanceLayout : Layout.{0, 0, 0} where
+@[reducible] def instanceLayout : Layout.{0, 0, 0} where
   Namespace := InstanceSpace
   Key := fun _ => Unit
   Value := InstanceSpace.Value

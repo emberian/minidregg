@@ -1115,21 +1115,21 @@ end Poles
 
 /-! ## Axiom pins -/
 
-/-- info: 'Minidregg.Assurance.SheetLaw.stranger_write_bounded' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.SheetLaw.stranger_write_bounded' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms stranger_write_bounded
-/-- info: 'Minidregg.Assurance.SheetLaw.deaths_monotone_step' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.SheetLaw.deaths_monotone_step' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms deaths_monotone_step
-/-- info: 'Minidregg.Assurance.SheetLaw.alive_after_range' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.SheetLaw.alive_after_range' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms alive_after_range
-/-- info: 'Minidregg.Assurance.SheetLaw.alive_raised_only_by_revive' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.SheetLaw.alive_raised_only_by_revive' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms alive_raised_only_by_revive
-/-- info: 'Minidregg.Assurance.SheetLaw.revive_needs_clock' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.SheetLaw.revive_needs_clock' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms revive_needs_clock
-/-- info: 'Minidregg.Assurance.SheetLaw.owner_cannot_raise_alive' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.SheetLaw.owner_cannot_raise_alive' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms owner_cannot_raise_alive
-/-- info: 'Minidregg.Assurance.SheetLaw.death_needs_hp' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.SheetLaw.death_needs_hp' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms death_needs_hp
-/-- info: 'Minidregg.Assurance.SheetLaw.death_needs_clock' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.SheetLaw.death_needs_clock' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms death_needs_clock
 /-- info: 'Minidregg.Assurance.SheetLaw.deaths_monotone_over_history' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms deaths_monotone_over_history
@@ -1147,44 +1147,60 @@ end Poles
 #guard_msgs (whitespace := lax) in #print axioms kernel_deaths_monotone
 /-- info: 'Minidregg.Assurance.SheetLaw.kernel_alive_raised_only_by_revive' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms kernel_alive_raised_only_by_revive
-/-- info: 'Minidregg.Assurance.SheetLaw.death_reachable_by_strike' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.SheetLaw.death_reachable_by_strike' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms death_reachable_by_strike
-/-- info: 'Minidregg.Assurance.SheetLaw.death_is_reachable' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.SheetLaw.death_is_reachable' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms death_is_reachable
-/-- info: 'Minidregg.Assurance.SheetLaw.combat_death_refused_without_joint' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Assurance.SheetLaw.combat_death_refused_without_joint' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs (whitespace := lax) in #print axioms combat_death_refused_without_joint
-/-- info: 'Minidregg.Assurance.SheetLaw.smite_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.SheetLaw.smite_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms smite_refused
-/-- info: 'Minidregg.Assurance.SheetLaw.owner_revive_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.SheetLaw.owner_revive_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms owner_revive_refused
-/-- info: 'Minidregg.Assurance.SheetLaw.shrine_revive_admitted' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.SheetLaw.shrine_revive_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms shrine_revive_admitted
-/-- info: 'Minidregg.Assurance.SheetLaw.shrine_revive_refused_without_clock' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Assurance.SheetLaw.shrine_revive_refused_without_clock' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs (whitespace := lax) in #print axioms shrine_revive_refused_without_clock
-/-- info: 'Minidregg.Assurance.SheetLaw.dead_owner_pray_admitted' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.SheetLaw.dead_owner_pray_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms dead_owner_pray_admitted
-/-- info: 'Minidregg.Assurance.SheetLaw.stranger_write_poles' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.SheetLaw.stranger_write_poles' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms stranger_write_poles
-/-- info: 'Minidregg.Assurance.SheetLaw.owner_strike_refused_without_clock' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Assurance.SheetLaw.owner_strike_refused_without_clock' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs (whitespace := lax) in #print axioms owner_strike_refused_without_clock
-/-- info: 'Minidregg.Assurance.SheetLaw.a_life_accepted' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.SheetLaw.a_life_accepted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms a_life_accepted
-/-- info: 'Minidregg.Assurance.SheetLaw.owner_revive_history_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.SheetLaw.owner_revive_history_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms owner_revive_history_refused
 
-/-- info: 'Minidregg.Assurance.SheetLaw.bal_raise_needs_clock' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.SheetLaw.bal_raise_needs_clock' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms bal_raise_needs_clock
-/-- info: 'Minidregg.Assurance.SheetLaw.eq_raise_needs_clock' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.SheetLaw.eq_raise_needs_clock' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms eq_raise_needs_clock
 /-- info: 'Minidregg.Assurance.SheetLaw.alive_stays_alive_without_clock' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms alive_stays_alive_without_clock
 /-- info: 'Minidregg.Assurance.SheetLaw.alive_constant_without_clock' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms alive_constant_without_clock
-/-- info: 'Minidregg.Assurance.SheetLaw.bal_eq_raise_poles' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.SheetLaw.bal_eq_raise_poles' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms bal_eq_raise_poles
-/-- info: 'Minidregg.Assurance.SheetLaw.bal_eq_raise_refused_without_clock' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Assurance.SheetLaw.bal_eq_raise_refused_without_clock' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs (whitespace := lax) in #print axioms bal_eq_raise_refused_without_clock
-/-- info: 'Minidregg.Assurance.SheetLaw.alive_constant_poles' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.SheetLaw.alive_constant_poles' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms alive_constant_poles
 
 end Minidregg.Assurance.SheetLaw

@@ -295,8 +295,7 @@ def receiveAdmitted (config : Config) {target : Durable}
     (constraint : Option RouteConstraint)
     (refusal : RefusalAtTip config old ingress) : IO (Result config) := do
   let derived := admitted.toDerived
-  if old.opened.durable.image.accepted.findIdx?
-      (fun record => record.transactionId == derived.intent.transactionId) != none then
+  if old.opened.durable.firstIndex derived.intent.transactionId != none then
     return .rejected "dispatch transaction identity already used"
   if constraint.isSome && !(constraint.all (routeMatches config admitted)) then
     return .noRecordRefused refusal
@@ -338,8 +337,7 @@ theorem mismatched_route_never_submits (config : Config) {target : Durable}
     (mismatch : routeMatches config admitted constraint = false) :
     receiveAdmitted config old ingress admitted (some constraint) refusal =
       pure (.noRecordRefused refusal) := by
-  simp [receiveAdmitted, absent, mismatch]
-  rfl
+  simp [receiveAdmitted, DurableReceiverIO.Loaded.firstIndex_eq, absent, mismatch]
 
 private def receiveVerifiedWith (config : Config) {target : Durable}
     (old : NativeHostReplay.Verified config target)
@@ -425,7 +423,6 @@ theorem continuity_probe_never_submits (config : Config) {target : Durable}
       pure (.noRecordRefused refusal) := by
   simp [receiveVerified, receiveVerifiedWith, ApplicationDispatchAdmissionIngress.codec.decode_encode,
     lookupAbsent, refusalExact, probe, ApplicationStreamContinuity.probe_reserved]
-  rfl
 
 theorem route_probe_never_submits (config : Config) {target : Durable}
     (old : NativeHostReplay.Verified config target)
@@ -440,7 +437,6 @@ theorem route_probe_never_submits (config : Config) {target : Durable}
       pure (.noRecordRefused refusal) := by
   simp [receiveVerified, receiveVerifiedWith, ApplicationDispatchAdmissionIngress.codec.decode_encode,
     lookupAbsent, refusalExact, probe, ApplicationRouteAdmission.probe_reserved]
-  rfl
 
 #assert_axioms route_probe_never_submits
 #assert_axioms continuity_probe_never_submits

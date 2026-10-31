@@ -47,6 +47,7 @@ theorem Accepted.head {law : Pred} {v : Values} {t : Turn} {ts : List Turn}
     (h : Accepted law v (t :: ts)) : t.verb = 2 ∧ admits law v t = true :=
   h (v, t) (by simp [stepsOf])
 
+set_option backward.isDefEq.respectTransparency false in
 /-- Any value of the canonical `Authorized` type forces the resolved committed predicate to hold on
 the bound step context. -/
 theorem authorized_policy_eval {F : Type} [Field F] [DecidableEq F]
@@ -154,9 +155,9 @@ theorem checked_leg_component_eval
   obtain ⟨graph, resolved, holds⟩ := checked_leg_policy_eval leg
   exact installed.evaluated graph resolved holds
 
-/-- info: 'Minidregg.Kernel.LawHistory.Accepted.tail' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.LawHistory.Accepted.tail' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Accepted.tail
-/-- info: 'Minidregg.Kernel.LawHistory.Accepted.head' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.LawHistory.Accepted.head' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Accepted.head
 /-- info: 'Minidregg.Kernel.LawHistory.authorized_policy_eval' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms authorized_policy_eval

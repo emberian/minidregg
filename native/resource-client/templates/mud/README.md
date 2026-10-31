@@ -45,7 +45,7 @@ Each is in the code today; the table says where.
 | `clock/now` | `Kernel/DeclaredResourceController.lean:512-517` |
 | `joint/index/{i}/resource/field/{n}/{view}` (i = the command's 0-based target order) and `joint/target/{id}/...` | `Kernel/DeclaredResourceController.lean:274` |
 | delegation scope `fields` and `maxDelta` | `native/resource-client/src/workspace.rs:3405-3420` |
-| `witnessed` | first-party `eval` is always false; admission needs an oracle (`Pred/Core.lean:191-193`); `law.sheet-witnessed` therefore cannot admit today |
+| `witnessed` | no host discharges it, so the compiler refuses any law containing it (`Compiler.supported_no_witnessed`); `law.sheet-witnessed` therefore cannot be installed today |
 
 A clause that reads an absent slot is false (`Pred/Core.lean:166`), so a clause that
 needs a slot fails closed. Never put a clock or joint atom under `not`: that turns "absent" into

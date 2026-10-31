@@ -208,15 +208,20 @@ theorem lookup_sound (kvs : List (IndexKey × List UInt8)) (wf : WF 520 (entries
 
 /-- **A verified reveal answers exactly the members under its prefix** — none
 omitted (so an empty answer is a verified absence of the whole family member
-set), none forged — or a cSHAKE256 collision is exhibited. -/
+set), none forged — or a cSHAKE256 collision between the node bytes of two
+nodes of this comparison's finite scope (the walk's path and the selected subtree,
+the reveal's climb, the revealed members' tree: `Theory.AuthTrie.revealNodes`). -/
 theorem reveal_sound (kvs : List (IndexKey × List UInt8)) (wf : WF 520 (entries bitsOf kvs))
     (p : List Bool) (reveal : Theory.AuthTrie.Reveal IndexKey (List UInt8) Digest)
     (accepted : Theory.AuthTrie.revealVerify dig bitsOf 520 (rootOf kvs) p reveal = true) :
     (∀ k v, (k, v) ∈ reveal.answer bitsOf p ↔ (k, v) ∈ kvs ∧ (bitsOf k).take p.length = p) ∨
-      ∃ x y : List UInt8, x ≠ y ∧
-        Sp800185Cshake256.hash nodeCustomization x = Sp800185Cshake256.hash nodeCustomization y :=
+      ∃ a b, Theory.AuthTrie.revealNodes dig bitsOf 520 (entries bitsOf kvs) p reveal a ∧
+        Theory.AuthTrie.revealNodes dig bitsOf 520 (entries bitsOf kvs) p reveal b ∧
+        nodeBytes a ≠ nodeBytes b ∧
+        Sp800185Cshake256.hash nodeCustomization (nodeBytes a) =
+          Sp800185Cshake256.hash nodeCustomization (nodeBytes b) :=
   (Theory.AuthTrie.reveal_sound dig bitsOf 520 bitsOf_length kvs wf p reveal accepted).imp_right
-    collision_is_cshake
+    collisionAmong_is_cshake
 
 /-! ## Families and their keys
 
@@ -908,9 +913,13 @@ theorem dropWriteSet_not_preserves :
   · simp [Represents, modelSet, rootOf, entries, tree, RowsRepresent, overlay] at represented
   · obtain ⟨a, b, observedA, observedB, differ, _⟩ := collision
     have emptyA : a = .empty := by
-      simpa [ObservedNode, openingOf, walk] using observedA
+      have hsimpa := observedA
+      simp [ObservedNode, openingOf, walk] at hsimpa ⊢
+      exact hsimpa
     have emptyB : b = .empty := by
-      simpa [ObservedNode, openingOf, walk] using observedB
+      have hsimpa := observedB
+      simp [ObservedNode, openingOf, walk] at hsimpa ⊢
+      exact hsimpa
     exact differ (emptyA.trans emptyB.symm)
 
 #assert_axioms dropWriteSet_not_preserves
@@ -994,7 +1003,7 @@ theorem setAll_preserves
   | nil =>
       simp only [setAll, Except.ok.injEq, Prod.mk.injEq] at ok
       obtain ⟨rfl, rfl⟩ := ok
-      exact Or.inl (by simpa [modelApply, overlay] using before)
+      exact Or.inl (by exact before)
   | cons change rest ih =>
       obtain ⟨k, value⟩ := change
       cases first : set rows root k value with

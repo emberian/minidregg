@@ -12,14 +12,21 @@ The fragment, exactly (G1B-ENFORCED-LAW-DESIGN; anything else refuses
     EXPR  ::= EXPR implies EXPR | EXPR or EXPR | EXPR and EXPR | not EXPR | ( EXPR ) | ATOM
     ATOM  ::= REF == INT | REF <= INT | REF in [INT, …]
             | REF == REF | REF <= REF | REF <= REF + INT
-            | monotone(FIELD) | writeOnce(FIELD)
+            | monotone(FIELD) | writeOnceNonzero(FIELD)
     REF   ::= new.FIELD | request.subject | request.caller | request.height | request.turn
     INT   ::= -?[0-9]+
 
 `implies` binds loosest and associates to the right; `or` then `and` associate to the left;
 `not` applies to the atom (or parenthesised expression) after it. Edition 1 reads TOP-LEVEL
 fields only: `new.a.b` refuses by name. `old.` is readable only through `monotone` and
-`writeOnce` (all the kernel's predicate can say about the old state). -/
+`writeOnceNonzero` (all the kernel's predicate can say about the old state).
+
+`writeOnceNonzero(FIELD)`: a NONZERO value of FIELD, once written, never changes; 0 reads as
+unwritten, so a field holding 0 may be rewritten (`Pred.eval_writeOnce_zero_rewritable`). Every
+field a law reads is a natural or a boolean (`Kernel.ObjectLaw.scalarOf`), and both domains
+contain 0, so the bare spelling `writeOnce(FIELD)` refuses by name: the author must write the
+spelling that states the sentinel. A field whose legitimate value is 0 (a status, an owner id,
+a counter) is not protected by it. -/
 module
 
 public import Theory.AssertCompiled
@@ -45,7 +52,8 @@ inductive LawRef where
   | turn
   deriving DecidableEq, Repr, Inhabited
 
-/-- The enforced fragment. `old.` appears only through `monotone` and `writeOnce`. -/
+/-- The enforced fragment. `old.` appears only through `monotone` and `writeOnce` (surface
+`writeOnceNonzero`: 0 is the unwritten sentinel). -/
 inductive LawExpr where
   | eqC (ref : LawRef) (value : Int)
   | leC (ref : LawRef) (value : Int)
@@ -141,7 +149,7 @@ def LawExpr.render : LawExpr → String
   | .leR left right => s!"{left.render} <= {right.render}"
   | .leROff left right offset => s!"{left.render} <= {right.render} + {offset}"
   | .monotone field => s!"monotone({field})"
-  | .writeOnce field => s!"writeOnce({field})"
+  | .writeOnce field => s!"writeOnceNonzero({field})"
   | .not body => s!"not ({body.render})"
   | .and left right => s!"({left.render}) and ({right.render})"
   | .or left right => s!"({left.render}) or ({right.render})"
@@ -226,7 +234,7 @@ def parseRef : List Tok → Except String (LawRef × List Tok)
     | some ref => .ok (ref, rest)
     | none => refuse ("request." ++ fact ++ " (a law reads request.subject, request.caller, request.height and \
         request.turn)")
-  | .ident "old" :: _ => refuse "old.FIELD outside monotone(FIELD) and writeOnce(FIELD)"
+  | .ident "old" :: _ => refuse "old.FIELD outside monotone(FIELD) and writeOnceNonzero(FIELD)"
   | t :: _ => refuse (t.render ++ " where a reference new.FIELD or request.FACT was expected")
   | [] => refuse "a comparison missing its reference"
 
@@ -315,9 +323,14 @@ def parseUnary : Nat → List Tok → Except String (LawExpr × List Tok)
       let (inner, after) ← parseImplies fuel more
       return (inner, ← expectSym ")" after)
     | .ident "monotone" :: .sym "(" :: .ident field :: .sym ")" :: after => .ok (.monotone field, after)
-    | .ident "writeOnce" :: .sym "(" :: .ident field :: .sym ")" :: after => .ok (.writeOnce field, after)
+    | .ident "writeOnceNonzero" :: .sym "(" :: .ident field :: .sym ")" :: after =>
+        .ok (.writeOnce field, after)
     | .ident "monotone" :: _ => refuse "monotone takes one top-level field name: monotone(FIELD)"
-    | .ident "writeOnce" :: _ => refuse "writeOnce takes one top-level field name: writeOnce(FIELD)"
+    | .ident "writeOnce" :: _ => refuse "writeOnce(FIELD): 0 is the unwritten sentinel and every \
+        law field (a natural or a boolean) can hold 0, so a field holding 0 is not write-once; \
+        write writeOnceNonzero(FIELD) (a nonzero value, once written, never changes)"
+    | .ident "writeOnceNonzero" :: _ =>
+        refuse "writeOnceNonzero takes one top-level field name: writeOnceNonzero(FIELD)"
     | _ => parseComparison fuel toks
 end
 
@@ -353,8 +366,16 @@ theorem parse_refuses_nested :
       (parse "new.a == 1 claim").toBool = false ∧ (parse "request.target == 1").toBool = false := by
   native_decide
 
+/-- The sentinel is acknowledged in the grammar: the bare `writeOnce(FIELD)` refuses, the
+spelling that states it parses. -/
+theorem parse_writeOnce_acknowledged :
+    (parse "writeOnce(owner)").toBool = false ∧
+      (parse "writeOnceNonzero(owner)").toOption = some (.writeOnce "owner") := by
+  native_decide
+
 end Minidregg.Compiler.ObjectiveBendLaw
 
+#assert_compiled Minidregg.Compiler.ObjectiveBendLaw.parse_writeOnce_acknowledged
 #assert_compiled Minidregg.Compiler.ObjectiveBendLaw.parse_tally
 #assert_compiled Minidregg.Compiler.ObjectiveBendLaw.parse_precedence
 #assert_compiled Minidregg.Compiler.ObjectiveBendLaw.parse_refuses_nested

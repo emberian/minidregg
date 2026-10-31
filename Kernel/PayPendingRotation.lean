@@ -148,6 +148,7 @@ theorem patch_requires_new_history (pay : PayCell.PayStore) (before after : Pend
   rw [Store.set_ne _ _ _ _ (by intro same; cases same)] at fresh
   exact fresh
 
+set_option backward.isDefEq.respectTransparency false in
 /-- Allocating a distinct successor epoch leaves the historical predecessor
 byte-for-byte available for provenance checks after eventual admission. -/
 theorem patch_preserves_previous_history (pay : PayCell.PayStore) (before after : PendingOwner)
@@ -159,8 +160,8 @@ theorem patch_preserves_previous_history (pay : PayCell.PayStore) (before after 
   simp only [patch, Patch.writeFootprint, Op.writeAddress?, Op.address,
     PayCell.pendingOwnerHistoryAddress]
   simp
-  intro same
-  exact different (congrArg Prod.snd same)
+  intro _
+  exact different
 
 /-- The source gate, rather than an alternative custody-specific crypto recipe,
 requires the exact previously committed successor and its possession signature. -/

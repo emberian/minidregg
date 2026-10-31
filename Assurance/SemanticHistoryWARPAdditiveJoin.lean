@@ -320,8 +320,10 @@ theorem historyDualRootSchedule_linkWord_exact
     (j : Fin checkpoint.head.foldRounds) :
     (historyDualRootSchedule friS checkpoint joined).base.linkWord j =
       checkpoint.head.foldLinkWord j := by
-  simpa [historyDualRootSchedule, historyLinkWord] using
+  have hsimpa :=
     joined.scheduleBinding.linkWordExact j
+  simp [historyDualRootSchedule, historyLinkWord] at hsimpa ⊢
+  exact hsimpa
 
 /-- The semantic schedule's terminal post-challenge fold root is exactly the
 existing additive-FRI checkpoint's level-zero root.  No root-bridge premise is

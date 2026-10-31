@@ -208,6 +208,7 @@ def padWord (word : Fin m -> Representation) :
     Fin (2 ^ cover.exponent) -> Representation :=
   fun index => if inside : index.val < m then word ⟨index.val, inside⟩ else cover.filler
 
+set_option backward.isDefEq.respectTransparency false in
 @[simp] theorem padWord_leaf (word : Fin m -> Representation) (index : Fin m) :
     cover.padWord word (cover.leaf index) = word index := by
   simp only [padWord, leaf, index.isLt, dif_pos]
@@ -242,7 +243,9 @@ theorem columnEquivocation_leaf
       (cover.padWord word) := by
   obtain ⟨i, submitted, honest, unequal⟩ := equivocation
   refine ⟨i, submitted, ?_, ?_⟩
-  · simpa only [Function.comp_apply, padWord_leaf] using honest
+  · have hsimpa := honest
+    simp only [Function.comp_apply, padWord_leaf] at hsimpa ⊢
+    exact hsimpa
   · simpa only [Function.comp_apply, padWord_leaf] using unequal
 
 end PowerTwoCover

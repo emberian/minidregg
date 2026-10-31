@@ -5,6 +5,7 @@ Everything here must be the metatheory of *any* system built this way: abstract
 parameters only, no imports outside Mathlib + Theory itself (enforced by
 `scripts/check-import-boundary.sh`).
 -/
+import Theory.ExceptDecidableEq  -- `DecidableEq (Except ε α)` with an exposed body (Batteries derives it unexposed, so decide and the kernel cannot evaluate it)
 import Theory.Knowledge  -- the verify/find seam: Verifiable/Discharged/Searchable, Claim/Holds/Knower
 import Theory.PrivacyProfile  -- observer-indexed privacy axes, typed same-opening/release joins, and compositional noninterference
 import Theory.DisclosureDeclaration  -- first-order observer releases require both request-indexed authorization and a checked same-opening witness before VerifiedRelease exists
@@ -29,6 +30,9 @@ import Theory.LogAccumulator  -- Merkle mountain range over log heights: increme
 import Theory.AuthTrie  -- compressed authenticated binary trie: O(log n) openings, soundness up to a node collision
 import Theory.AuthTrieRange  -- subtree reveals: every member under a key prefix, soundness up to a node collision
 import Theory.AuthTrieCache  -- the compressed trie kept: inserts in O(depth), proved equal to the canonical root; honest openings verify
+import Theory.FiniteTapeGap  -- distinguishing gaps over finite equally likely tapes: triangle, rescaling, permutation invariance
+import Theory.AuthTrieReveal  -- honest reveals verify; the kept trie serves them in walked depth plus answer
+import Theory.PrivateCellTrie  -- statements the compressed trie owes before it carries a blinded cell: erase, complete class openings with scoped collisions
 import Theory.AuthMapCellRoot  -- AuthMap's world level instantiated at `cellRoot := Materializer.rootOf`: materialized cell roots open at the world root, world soundness names the cell store, a validated patch moves the world root along one path
 import Theory.PlanBinding  -- a plan binds (address, value) reads, not a cell root: admission refuses footprintStale only when a read address moved; whole-cell footprint = root binding under the pair carrier; no-TOCTOU; independent plans admitted in both orders and commute; openings at the cell root under the world root, and why signed openings would re-bind the root
 import Theory.CellSlot  -- stable heterogeneous absent/present slots, canonical payload decoding, and monotone identifiers make creation and retirement first-class transitions
@@ -113,3 +117,5 @@ import Theory.ObjectiveBendDemandDataBudget  -- executable witnesses for remaini
 import Theory.ObjectiveBendDemandCollect  -- collection of the demand heap at a yield: trace from the roots, compact, rename (B4/T5; behaviour theorem in ObjectiveProofs)
 import Theory.ObjectiveBendDemandCapacity
 import Theory.ObjectiveBendExtensions
+import Theory.Signature    -- N3: abstract signatures, Term (= WType), fold_unique, agree_by_initiality, the syntactic-leaves-forced obligation
+import Theory.StreamCodec  -- the compact streaming-codec nucleus: prefix-decodable byte codecs with their laws (compact naturals over NatDigits255Fast, sequences, products, sums, tags, fixed-width streams, digests, bytesStream); re-exported by Compiler.Tower256ConcreteBackend

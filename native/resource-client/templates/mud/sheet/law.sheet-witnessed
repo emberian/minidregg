@@ -1,7 +1,7 @@
 -- kind: sheet
--- Level 3 (docs/MUD.md §2.3; docs/NOCK.md §1.2). No host supplies a `witnessed` oracle: Pred.eval is
--- evalWith failClosed and `witnessed` is constant false, so installing this clause refuses every referee
--- write. K-RAN shipped the checked run as the atom `ran P` (Pred.ran, docs/NOCK.md §2.4), not as
+-- Level 3 (docs/MUD.md §2.3; docs/NOCK.md §1.2). No host supplies a `witnessed` oracle, so the compiler
+-- refuses any law containing the leaf (Compiler.supported_no_witnessed): installing this clause is refused
+-- as an unsupported policy. K-RAN shipped the checked run as the atom `ran P` (Pred.ran, docs/NOCK.md §2.4), not as
 -- `witnessed`; this clause has not been moved to it. {VK_RESOLVER} = "nock:" ++ hex H(resolver jam), which rotates whenever
 -- affliction-table.json changes (the table is compiled into the program, programs/README.md).
 -- 34 witnessed [J-MUD-9]: a referee write IS the resolver's run on the observed sheets.

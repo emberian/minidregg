@@ -481,7 +481,9 @@ theorem image_equality :
   have h := posts_bytes_eq_storage_plus_framing cells posts supported
   have gap : framing (rootBytes := ResourceBirthCodec.rootBytes) cells posts = 43 := by
     simp [framing, counts.1, counts.2.1, counts.2.2.1, counts.2.2.2.1, counts.2.2.2.2.2]
-  simpa only [gap] using h
+  have hsimpa := h
+  simp only [gap] at hsimpa ⊢
+  exact hsimpa
 
 /-- The witness's own storage lane IS the real derived storage: no framing. -/
 theorem intent_equality :

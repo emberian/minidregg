@@ -275,6 +275,7 @@ theorem RelationWitness.every_exact_integer_equation
 
 /-! ## Separately priced same-coin deployment obligations -/
 
+set_option backward.isDefEq.respectTransparency false in
 /-- These are five distinct proof obligations.  In particular relation
 satisfaction is not renamed as proof of knowledge. -/
 inductive FailureClass

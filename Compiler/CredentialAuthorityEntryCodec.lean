@@ -68,7 +68,7 @@ def labeledSetStream {alpha : Type} [DecidableEq alpha]
       change (values.image label).image ofLabel = values
       rw [Finset.image_image]
       simpa only [Function.comp_def, roundtrip] using
-        (Finset.image_id : Finset.image _root_.id values = values))
+        (Finset.image_id' : Finset.image (fun x => x) values = values))
     (by
       intro labels
       apply Subtype.ext

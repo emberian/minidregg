@@ -135,6 +135,7 @@ theorem Prepared.sound {context : Context deployment}
     proposal.matchesPin pin = true :=
   ⟨prepared.physicalCurrent, prepared.domainExact, prepared.semanticsExact, prepared.pinExact⟩
 
+set_option backward.isDefEq.respectTransparency false in
 def prepare (context : Context deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (federation : FederationId)
     (height : Nat) (pin : FnGatewayPolicy.Pin) (proposal : Proposal) :
@@ -221,6 +222,7 @@ def authorize (prepared : Prepared context profile federation height pin proposa
     (.policy prepared.wanted.policyId prepared.wanted.policyRevision)
     (by rfl) (by rfl)
 
+set_option backward.isDefEq.respectTransparency false in
 /-- A public success cannot be obtained with missing source custody. -/
 theorem authorize_requires_sources (prepared : Prepared context profile federation height pin proposal)
     (signature : CredentialSignatureAdmission.CheckedSignature context.authority)

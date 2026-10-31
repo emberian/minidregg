@@ -71,7 +71,8 @@ noncomputable instance ext6Finite : Finite Ext6Q := Module.finite_of_finite Baby
 noncomputable instance ext6Fintype : Fintype Ext6Q := Fintype.ofFinite Ext6Q
 
 theorem card_ext6 : Fintype.card Ext6Q = babyBearP ^ 6 := by
-  rw [Module.card_eq_pow_finrank (K := BabyBear) (V := Ext6Q), ext6Q_finrank, ZMod.card]
+  rw [Fintype.card_eq_nat_card, Module.natCard_eq_pow_finrank (K := BabyBear), ext6Q_finrank,
+    Nat.card_zmod]
 
 /-! ### The lane carrier reads injectively: lane equality is field equality
 

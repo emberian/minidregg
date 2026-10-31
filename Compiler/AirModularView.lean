@@ -231,7 +231,6 @@ theorem mulCarryEquations_denote (base q : Nat) :
       have hlast : (Fin.last n).succ = Fin.last (n + 1) := by
         apply Fin.ext
         rfl
-      dsimp only at htail
       rw [hlast] at htail
       nlinarith [hlow, htail]
 
@@ -513,7 +512,6 @@ theorem scalarMulCarryEquations_denote (base scalar : Nat) :
       have hlast : (Fin.last n).succ = Fin.last (n + 1) := by
         apply Fin.ext
         rfl
-      dsimp only at htail
       rw [hlast] at htail
       nlinarith [hlow, htail]
 

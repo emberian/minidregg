@@ -122,7 +122,9 @@ theorem accepted_value_eq_or_extractedCollision
     refine ⟨accepted, ?_, equal⟩
     have honest := (pcs.finiteScheme n).verifyOpening_commit
       (finiteWord n word) (additiveFriLevelEquivPowerTwo ell n coordinate)
-    simpa [attemptAgainstWord, opening, finiteScheme, finiteWord, rootExact] using honest
+    have hsimpa := honest
+    simp [attemptAgainstWord, opening, finiteScheme, finiteWord, rootExact] at hsimpa ⊢
+    exact hsimpa
 
 end RawMerklePcs
 

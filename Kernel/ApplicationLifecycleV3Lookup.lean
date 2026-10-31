@@ -29,8 +29,7 @@ private def select {config : Config} {target : Durable}
     (event : Minidregg.Kernel.DurableDataIntent.StableEvent)
     (nullifier : Minidregg.Kernel.DurableDataIntent.StableNullifier) :
     Except Error (Option Receipt) := do
-  let some index := verified.opened.durable.image.accepted.findIdx?
-      (fun record => record.transactionId == transactionId)
+  let some index := verified.opened.durable.firstIndex (transactionId)
     | .ok none
   let some record := verified.opened.durable.image.accepted[index]?
     | .error .nativeHistoryUnavailable

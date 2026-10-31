@@ -31,7 +31,7 @@ module
 public import Kernel.FnArchiveJournal
 public import Kernel.NativeHost
 public import Host.FnOutcome
-public import Std.Internal.Async.TCP
+public import Std.Async.TCP
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr
@@ -461,7 +461,7 @@ def bundleAt (config : NativeHost.Config) (opened : NativeHost.Opened config) (f
 
 /-! ## NNTP `ARTICLE` (fn's served bytes; no POST ever) -/
 
-open Std.Internal.IO.Async in
+open Std.Async in
 private partial def recvUntil (client : TCP.Socket.Client) (acc : ByteArray) (limit : Nat)
     (done : ByteArray → Bool) : Async ByteArray := do
   if done acc then return acc
@@ -489,7 +489,7 @@ private def splitCrlfAux : List UInt8 → List UInt8 → List (List UInt8)
 
 private def splitCrlf (bytes : List UInt8) : List (List UInt8) := splitCrlfAux bytes []
 
-open Std.Internal.IO.Async in
+open Std.Async in
 /-- One `ARTICLE <msgid>` on the loopback listener. -/
 def fetchArticle (port : Nat) (messageIdText : String) (limit : Nat) : IO Served := do
   let raw : ByteArray ← (do

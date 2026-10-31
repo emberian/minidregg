@@ -5,37 +5,37 @@ signature provenance, an available receiver, or a complete umbrella build.
 -/
 import Theory.CredentialAuthorityEffects
 
-/-- info: 'Minidregg.Theory.CredentialAuthorityFamily.DelegationShape.recipient_is_subject' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CredentialAuthorityFamily.DelegationShape.recipient_is_subject' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.CredentialAuthorityFamily.DelegationShape.recipient_is_subject
 
-/-- info: 'Minidregg.Theory.CredentialAuthorityFamily.DelegationShape.requires_delegate_verb' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CredentialAuthorityFamily.DelegationShape.requires_delegate_verb' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.CredentialAuthorityFamily.DelegationShape.requires_delegate_verb
 
-/-- info: 'Minidregg.Theory.CredentialAuthorityFamily.DelegationShape.no_other_target' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CredentialAuthorityFamily.DelegationShape.no_other_target' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.CredentialAuthorityFamily.DelegationShape.no_other_target
 
-/-- info: 'Minidregg.Theory.TypedAuthorization.Capability.LineageBounds.refl' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorization.Capability.LineageBounds.refl' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.Capability.LineageBounds.refl
 
-/-- info: 'Minidregg.Theory.TypedAuthorization.Capability.LineageBounds.trans' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorization.Capability.LineageBounds.trans' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.Capability.LineageBounds.trans
 
-/-- info: 'Minidregg.Theory.TypedAuthorization.Capability.Attenuates.lineageBounds' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorization.Capability.Attenuates.lineageBounds' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.Capability.Attenuates.lineageBounds
 
-/-- info: 'Minidregg.Theory.TypedAuthorization.Capability.Lineage.root_bounds' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorization.Capability.Lineage.root_bounds' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.Capability.Lineage.root_bounds
 
-/-- info: 'Minidregg.Theory.TypedAuthorization.Capability.Lineage.root_admissible_of_strict' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorization.Capability.Lineage.root_admissible_of_strict' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.Capability.Lineage.root_admissible_of_strict
 
-/-- info: 'Minidregg.Theory.CredentialAuthorityState.LineageValid.root_bounds' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CredentialAuthorityState.LineageValid.root_bounds' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.CredentialAuthorityState.LineageValid.root_bounds
 
-/-- info: 'Minidregg.Theory.CredentialAuthorityState.LineageValid.nonempty_lineage' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CredentialAuthorityState.LineageValid.nonempty_lineage' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.CredentialAuthorityState.LineageValid.nonempty_lineage
 
-/-- info: 'Minidregg.Theory.CredentialAuthorityState.LineageValid.root_admissible_of_strict' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CredentialAuthorityState.LineageValid.root_admissible_of_strict' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.CredentialAuthorityState.LineageValid.root_admissible_of_strict
 
 /-- info: 'Minidregg.Theory.CredentialAuthorityEffects.IssueEvidence.reject_existing_id' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -95,13 +95,13 @@ import Theory.CredentialAuthorityEffects
 /-- info: 'Minidregg.Theory.CredentialAuthorityEffects.attenuation_post_lineage_anchored' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.CredentialAuthorityEffects.attenuation_post_lineage_anchored
 
-/-- info: 'Minidregg.Theory.TypedAuthorization.Capability.Admissible.at_policy_revision' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorization.Capability.Admissible.at_policy_revision' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.Capability.Admissible.at_policy_revision
 
-/-- info: 'Minidregg.Theory.TypedAuthorization.wrong_policy_revision_rejected' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorization.wrong_policy_revision_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.wrong_policy_revision_rejected
 
-/-- info: 'Minidregg.Theory.TypedAuthorization.Authorized.current_policy_address' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorization.Authorized.current_policy_address' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.Authorized.current_policy_address
 
 /-- info: 'Minidregg.Theory.TypedAuthorization.demo_generation_revision_independent' does not depend on any axioms -/
@@ -110,10 +110,10 @@ import Theory.CredentialAuthorityEffects
 /-- info: 'Minidregg.Theory.TypedAuthorization.demo_existing_grant_survives_source_update' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.demo_existing_grant_survives_source_update
 
-/-- info: 'Minidregg.Theory.TypedAuthorization.demo_stale_revision_rejected' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorization.demo_stale_revision_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.demo_stale_revision_rejected
 
-/-- info: 'Minidregg.Theory.TypedAuthorization.demo_explicit_generation_rotation_revokes' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorization.demo_explicit_generation_rotation_revokes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.demo_explicit_generation_rotation_revokes
 
 /-- info: 'Minidregg.Theory.AuthorizationDeclaration.verify_wrong_policy_revision_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/

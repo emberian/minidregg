@@ -485,7 +485,7 @@ def restricted (q : String) : Bool := q == "affine" || q == "linear"
 
 def duplicate (names : List String) : Bool := names.eraseDups.length != names.length
 
-def importOf (m : Module) (alias : String) : Option String := (m.imports.find? (·.1 == alias)).map (·.2)
+def importOf (m : Module) (importAlias : String) : Option String := (m.imports.find? (·.1 == importAlias)).map (·.2)
 def moduleNamed (c : Ctx) (name : String) : Option Module := c.modules.find? (·.name == name)
 
 def isIdentStart (ch : Char) : Bool := ch.isAlpha || ch == '_'
@@ -587,11 +587,11 @@ def sumCase (c : Ctx) (callee : Expr) (env : List Binding) (m : Module) : Option
   | .member target caseLabel =>
     let typeName : Option String := match target with
       | .var n => if env.any (·.name == n) then none else some n
-      | .member (.var alias) n => if env.any (·.name == alias) || (importOf m alias).isNone then none else some (alias ++ "." ++ n)
+      | .member (.var importAlias) n => if env.any (·.name == importAlias) || (importOf m importAlias).isNone then none else some (importAlias ++ "." ++ n)
       | _ => none
     typeName.bind fun typeName =>
       let resolved : Option (String × String) := match qualifiedName typeName with
-        | some (alias, n) => (importOf m alias).map fun mod => (mod ++ "." ++ n, mod)
+        | some (importAlias, n) => (importOf m importAlias).map fun mod => (mod ++ "." ++ n, mod)
         | none => if builtinTypeNames.contains typeName then some (builtinModuleName ++ "." ++ typeName, builtinModuleName)
             else some (m.name ++ "." ++ typeName, m.name)
       resolved.bind fun (key, moduleName) =>
@@ -749,8 +749,8 @@ def sourceType (c : Ctx) : Nat → String → String → List String → M (Opti
         if isExtension then return some (extensionTy target)
         let some metaTy ← sourceType c fuel specMetaName builtinModuleName [] | return none
         return some (.specification metaTy (extensionTy target))
-    if let some (alias, typeName) := qualifiedName name then
-      let imported := (moduleNamed c moduleName).bind (importOf · alias)
+    if let some (importAlias, typeName) := qualifiedName name then
+      let imported := (moduleNamed c moduleName).bind (importOf · importAlias)
       let some importedModule := imported | do typeError ("unresolved source type import " ++ name); return none
       return ← sourceType c fuel typeName importedModule seen
     let moduleName := if builtinTypeNames.contains name then builtinModuleName else moduleName
@@ -940,9 +940,9 @@ def synth (c : Ctx) : Nat → Expr → List Binding → Module → M (Option PTy
       | some key => globalType c fuel key
       | none => return none
     | .member target name =>
-      if let .var alias := target then
-        if !env.any (·.name == alias) then
-          if let some importedModule := importOf m alias then
+      if let .var importAlias := target then
+        if !env.any (·.name == importAlias) then
+          if let some importedModule := importOf m importAlias then
             return ← globalType c fuel (importedModule ++ "." ++ name)
       return lookupRow (← synth c fuel target env m) name
     | .record fields =>
@@ -1195,7 +1195,7 @@ def specOf (c : Ctx) (key : String) : Option (Spec × Module) :=
 
 def specKey (c : Ctx) (name : String) (m : Module) : M String := do
   let key ← match qualifiedName name with
-    | some (alias, n) => match importOf m alias with
+    | some (importAlias, n) => match importOf m importAlias with
       | some mod => pure (mod ++ "." ++ n)
       | none => fail ("unknown import alias in spec parent " ++ name)
     | none => pure (m.name ++ "." ++ name)
@@ -1250,7 +1250,7 @@ def selfSuperEnv (target : Option PTy) : List Binding :=
 def chainOp (c : Ctx) (e : Expr) (env : List Binding) (m : Module) : Option (String × Decl × Module) :=
   let key? : Option String := match e with
     | .var n => if env.any (·.name == n) then none else lookupGlobal c n m
-    | .member (.var alias) n => if env.any (·.name == alias) then none else (importOf m alias).map (· ++ "." ++ n)
+    | .member (.var importAlias) n => if env.any (·.name == importAlias) then none else (importOf m importAlias).map (· ++ "." ++ n)
     | _ => none
   key?.bind fun key => match declOf c key with
     | some (d@(.spec s), sm) => if plainSpec s then some (key, d, sm) else none
@@ -1346,9 +1346,9 @@ def expression (c : Ctx) : Nat → Expr → List Binding → Module → M ATerm
     | .str v => return .label v
     | .unit => return .record []
     | .member target name =>
-      if let .var alias := target then
-        if !env.any (·.name == alias) then
-          if let some importedModule := importOf m alias then
+      if let .var importAlias := target then
+        if !env.any (·.name == importAlias) then
+          if let some importedModule := importOf m importAlias then
             let key := importedModule ++ "." ++ name
             if (declOf c key).isNone then fail ("missing imported declaration " ++ key)
             return ← globalRef env key

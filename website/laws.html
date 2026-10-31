@@ -42,7 +42,8 @@ its request. It is the judge of admission.</li>
 <li><strong>A package <code>law</code></strong> in <code>.obend</code> is enforced: the kernel
 installs it on every object created from the package and judges every write of the object's
 declared state by it. Only a fragment compiles (comparisons, membership, <code>monotone</code>,
-<code>writeOnce</code> and their Boolean combinations); anything else is refused at parse.</li>
+<code>writeOnceNonzero</code> (a nonzero value, once written, never changes; 0 reads as
+unwritten) and their Boolean combinations); anything else is refused at parse.</li>
 <li><strong>A domain law</strong> is a cell law over several objects' joint state, judged at the
 end of every turn that writes a member.</li>
 <li><strong>A spec <code>claim</code></strong> is listed in a specification's metadata as

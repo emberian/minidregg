@@ -265,7 +265,7 @@ instance sysValueDecEq : (s : SysSpace) → DecidableEq (SysValue D s)
   | .allowance => inferInstanceAs (DecidableEq Nat)
 
 /-- The system cell's layout. -/
-def sysLayout : Layout.{0, 0, 0} where
+@[reducible] def sysLayout : Layout.{0, 0, 0} where
   Namespace := SysSpace
   Key := SysKey TxId D
   Value := SysValue D
@@ -329,7 +329,7 @@ theorem mem_parentKeys (s : Store (sysLayout TxId D)) (c : CellId) :
   · intro member
     obtain ⟨⟨space, key⟩, supported, contributes⟩ := Finset.mem_biUnion.mp member
     cases space <;> simp [parentKeyAt] at contributes
-    have same : c = key := Finset.mem_singleton.mp contributes
+    have same : c = key := contributes
     subst same
     exact Option.isSome_iff_ne_none.mpr (DFinsupp.mem_support_iff.mp supported)
   · intro present
@@ -1670,7 +1670,6 @@ theorem sysPatch_valid_plain {s : Store (sysLayout TxId D)} {t : Turn R TxId Ev 
     refine ⟨⟨fun e => Discipline.noConfusion e, hj⟩, ⟨rfl, ?_⟩, trivial⟩
     show (s.set ⟨SysSpace.journal, t.txId⟩ (some (height, H.turnDigest t))) ⟨SysSpace.head, ()⟩ = _
     rw [Store.set_ne _ _ _ _ (sys_space_ne (fun e => SysSpace.noConfusion e)), hh]
-    rfl
   · rw [validFrom_spentAllocs]
     exact ⟨hn.1, fun n m => (run_sysCore_spent H s t height logRoot n).trans (hn.2 n m)⟩
   · rw [validFrom_meterPatch _ _ _ _ _ (meteredLanes_nodup _ _)]
@@ -2458,7 +2457,7 @@ end Checkpoints
 namespace Example
 
 /-- One namespace, `Nat` keys and values, RAM. -/
-def toyLayout : Layout.{0, 0, 0} where
+@[reducible] def toyLayout : Layout.{0, 0, 0} where
   Namespace := Unit
   Key := fun _ => Nat
   Value := fun _ => Nat

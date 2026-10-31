@@ -14,7 +14,7 @@ top=$(git rev-parse --show-toplevel 2>/dev/null || { CDPATH='' cd -- "$here/../.
 [ -f "$top/lean-toolchain" ] || pipeline_die "run from inside a Mini clone (no lean-toolchain at $top)"
 tc=$(cat "$top/lean-toolchain")
 case "$tc" in
-  leanprover/lean4:v4.30.0) rev=dde7dd4397951755f1f6c2b4b3a83a26911d63ad ;;   # repl tag v4.30.0
+  leanprover/lean4:v4.35.0) rev=58bdde1ff173117960083cc5a052a11d51c49ff1 ;;   # repl tag v4.35.0
   *) pipeline_die "no pinned REPL revision for $tc: add the repl tag's commit id here" ;;
 esac
 dest=${1:-$PIPELINE_ROOT/repl}

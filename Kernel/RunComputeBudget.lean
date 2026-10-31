@@ -135,8 +135,10 @@ theorem usagePatch_frame (store : PayCell.PayStore) (subject : SubjectId)
     Patch.run store (usagePatch subject before after) address = store address := by
   apply Patch.run_frame
   cases before <;>
-    simpa [usagePatch, Patch.writeFootprint, Minidregg.Theory.Store.Op.writeAddress?,
-      PayCell.computeUsageAddress] using outside
+    (have hsimpa := outside
+     simp [usagePatch, Patch.writeFootprint, Minidregg.Theory.Store.Op.writeAddress?,
+       PayCell.computeUsageAddress] at hsimpa ⊢
+     exact hsimpa)
 
 structure PreparedQuota (subject : SubjectId) (pre : PayCell.Cell)
     (expectedRoot : Digest) where

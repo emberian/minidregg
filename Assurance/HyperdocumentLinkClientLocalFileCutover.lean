@@ -45,10 +45,11 @@ noncomputable def storeEndpointCall {Error : Type}
     (attempt : Attempt) :
     storeEndpointCall boundary (command.issuedCall attempt) =
       .ok Endpoint.resultBytes := by
-  simpa [storeEndpointCall, LinkCommand.issuedCall,
-    LinkCommand.requestBytes] using
+  have hsimpa :=
     endpoint_accepts_exact_restarted_read command.origin boundary.reader
       boundary.observed
+  simp [storeEndpointCall, LinkCommand.issuedCall, LinkCommand.requestBytes] at hsimpa ⊢
+  exact hsimpa
 
 noncomputable def deliverStore {Error : Type}
     (boundary : RestartedBoundary Error) :

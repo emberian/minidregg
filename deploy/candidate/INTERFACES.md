@@ -311,10 +311,10 @@ length` then `operation byte (or a marker) + payload`. Direct CLI use
 
 ## 4. Wire codecs
 
-All binary messages are Lean `StreamCodec` values (`Compiler/Tower256ConcreteBackend.lean`),
+All binary messages are Lean `StreamCodec` values (`Theory/StreamCodec.lean`),
 decoded strictly: a message is accepted only if re-encoding the decoded value gives
 back exactly the input bytes. A nat is little-endian base-255 digits (each 0..254)
-followed by byte `0xFF` (`encodeNat`, `Tower256ConcreteBackend.lean:778`); bytes,
+followed by byte `0xFF` (`encodeNat`, `Theory/StreamCodec.lean`); bytes,
 lists, products, sums and bool are defined beside it, and a framed message is an
 ASCII magic then the stream encoding.
 

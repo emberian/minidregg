@@ -236,10 +236,14 @@ Every footprint here is within `{propext, Classical.choice, Quot.sound}`. -/
 /-- info: 'Minidregg.Kernel.HyperedgeTier.commitTier_eq_causal_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms commitTier_eq_causal_iff
 
-/-- info: 'Minidregg.Kernel.HyperedgeTier.hyperedge_commit_at_join' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.HyperedgeTier.hyperedge_commit_at_join' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms hyperedge_commit_at_join
 
-/-- info: 'Minidregg.Kernel.HyperedgeTier.conservation_tier_independent' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Kernel.HyperedgeTier.conservation_tier_independent' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in #print axioms conservation_tier_independent
 
 /-- info: 'Minidregg.Kernel.HyperedgeTier.binding_tooth_tier_blind' depends on axioms: [propext, Classical.choice, Quot.sound] -/

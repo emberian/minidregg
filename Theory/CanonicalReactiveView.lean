@@ -394,7 +394,7 @@ theorem underDeclared_lens_impossible
 
 end Example
 
-/-- info: 'Minidregg.Theory.CanonicalReactiveView.ObserverLens.project_eq_of_clean' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CanonicalReactiveView.ObserverLens.project_eq_of_clean' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms ObserverLens.project_eq_of_clean
 /-- info: 'Minidregg.Theory.CanonicalReactiveView.PreparedReaction.changed_has_cause' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms PreparedReaction.changed_has_cause

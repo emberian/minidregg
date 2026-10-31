@@ -501,7 +501,7 @@ def append
   have hsatisfies : AccClaim.Satisfies C accumulator word :=
     foldClaims_satisfies foldRoot gamma hshare head.satisfies hentry
   have hroot : accumulator.rt = S.commit word := by
-    simpa [accumulator, word, linkClaim] using recommit.rootExact
+    exact recommit.rootExact
   have hfixed : ∀ index,
       accumulator.weights index = boundEvalAt (boundReceiptCoord index) := by
     intro index

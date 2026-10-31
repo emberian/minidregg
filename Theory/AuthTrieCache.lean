@@ -23,7 +23,6 @@ then the cache is the specification: no premise, no fallback rebuild.
 module
 
 public import Theory.AuthTrie
-public import Mathlib.Util.MemoFix
 public import Mathlib.Data.List.Induction
 public import Mathlib.Data.List.Nodup
 public import Mathlib.Data.List.Perm.Basic

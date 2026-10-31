@@ -574,6 +574,7 @@ theorem entry_index_exact (event : Event) :
     head.entries.get event.membership.index = event.entry :=
   event.membership.entryExact
 
+set_option backward.isDefEq.respectTransparency false in
 /-- The history word is the exact projection of the retained accepted content
 effect, not merely an unrelated entry with a colliding post root. -/
 theorem entry_post_is_accepted_projection (event : Event) :

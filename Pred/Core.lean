@@ -9,7 +9,7 @@ cost, explainer).
 
 ## Why syntactic-only — the N3 trap this file refuses
 
-`Compiler/Signature.lean` proves the converse of N3 (`N3_opaque_payloads_forbid_second_reading`,
+`Theory/Signature.lean` proves the converse of N3 (`N3_opaque_payloads_forbid_second_reading`,
 faces `OpaqueConflation` / `NoFaithfulSyntacticReading`): a signature whose leaves carry OPAQUE
 semantic payloads (`σ → Bool` closures) admits interpretations (`opaqueRun`) with **no faithful
 compositional second reading** into any countable/syntactic target — there are `2^ℵ₀` guard
@@ -30,6 +30,12 @@ It carries an opaque IDENTIFIER (`Vk`, a code/key), NOT a function. The first-pa
 supply a discharge oracle EXPLICITLY to `evalWith` — the oracle is an argument, never embedded in
 the tree, so the AST stays first-order and serializable. (Conceptually the oracle is the trusted,
 decidable `Verify` side of `Theory.Knowledge`'s verify/find seam, applied to `vk`.)
+
+The deployed path has no discharge oracle, so the compiler REFUSES the leaf: it is outside
+`Compiler.supported` at every depth (`Compiler.supported_no_witnessed`), and every install and
+admission path gates on `supported`. Without that refusal `not (witnessed vk)` would be constantly
+true and a "deny when credential `vk` is presented" law would admit every step. Open (ZK D1):
+delete the constructor.
 
 ## Shape note — why `PredList`, not `List Pred`, inside the node
 
@@ -193,7 +199,9 @@ inductive Pred where
   | le        (slot : Slot) (value : Int)
   /-- `new[slot] ∈ set` (membership in a finite `Int` set). -/
   | memberOf  (slot : Slot) (set : List Int)
-  /-- Write-once / register-once: absent-old or `old[slot] = 0` ⇒ any; else `new[slot] = old[slot]`. -/
+  /-- Write-once for NONZERO values: absent-old or `old[slot] = 0` ⇒ any; else
+  `new[slot] = old[slot]`. 0 is the unwritten sentinel, so a slot holding 0 can be rewritten
+  (`eval_writeOnce_zero_rewritable`). -/
   | writeOnce (slot : Slot)
   /-- Monotone: `old[slot] ≤ new[slot]` (append-only counter). -/
   | monotone  (slot : Slot)
@@ -208,7 +216,8 @@ inductive Pred where
   `sumEq [reserve] [a/balance, b/balance]` is "the reserve backs every balance". -/
   | sumEq     (left right : List Slot)
   /-- **The escape hatch** — a third-party-discharged claim named by the opaque code `vk`.
-  First-party `eval` FAILS CLOSED; admission requires an explicit oracle via `evalWith`. -/
+  First-party `eval` FAILS CLOSED; only an explicit oracle via `evalWith` discharges it. The
+  compiler refuses it (`Compiler.supported_no_witnessed`): no deployed law may contain it. -/
   | witnessed (vk : Vk)
   /-- **Commit–reveal of a tuple**: `new[commit]` is the cSHAKE256 digest of the opening
   (`request/target`, the slot names, `new[v]` for each value slot `v` in order, `new[blinder]`);
@@ -540,6 +549,11 @@ theorem eval_le_absent : eval (.le "absent" 99) sX3 sX5 = false := by decide
 -- write-once: absent old ⇒ first write admitted; changing a set nonzero value ⇒ refused
 theorem eval_writeOnce_first : eval (.writeOnce "x") ⟨[]⟩ sX5 = true := by decide
 theorem eval_writeOnce_change : eval (.writeOnce "x") sX3 sX5 = false := by decide
+/-- **A 0 slot can be rewritten**: 0 is the unwritten sentinel (a field element has no "absent"),
+so `writeOnce` protects only a NONZERO value. A slot whose legitimate value is 0 is not
+write-once: `{x:0}` → `{x:5}` is admitted. -/
+theorem eval_writeOnce_zero_rewritable :
+    eval (.writeOnce "x") ⟨[("x", 0)]⟩ sX5 = true := by decide
 -- membership atom, both poles
 theorem eval_memberOf_in : eval (.memberOf "x" [3, 5, 7]) sX3 sX5 = true := by decide
 theorem eval_memberOf_out : eval (.memberOf "x" [1, 2]) sX3 sX5 = false := by decide
@@ -585,7 +599,7 @@ example : (Pred.eq "x" 5 ≠ Pred.eq "x" 6) := by decide
 
 end Minidregg.Pred
 
-/-- info: 'Minidregg.Pred.ran_tooth_fires' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Pred.ran_tooth_fires' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Pred.ran_tooth_fires
-/-- info: 'Minidregg.Pred.ran_tooth_refuses' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Pred.ran_tooth_refuses' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Pred.ran_tooth_refuses

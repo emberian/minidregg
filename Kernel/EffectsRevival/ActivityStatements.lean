@@ -1,5 +1,5 @@
 /-
-# `Effects/Revival/ActivityStatements.lean` — an activity effect refuses at two levels, STATED
+# `Kernel/EffectsRevival/ActivityStatements.lean` — an activity effect refuses at two levels, STATED
 
 The review's §6 hazard for migration step 2 (`docs/EFFECTS-REVIVAL.md` §5), stated before
 that step.  A yield that asks the kernel for a transfer can be refused at two levels:

@@ -1248,10 +1248,10 @@ end Minidregg.Compiler
 /-- info: 'Minidregg.Compiler.RefusalReason.sample_revoked' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.RefusalReason.sample_revoked
 
-/-- info: 'Minidregg.Compiler.LawLeaf.of_fails' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.LawLeaf.of_fails' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Minidregg.Compiler.LawLeaf.of_fails
 
-/-- info: 'Minidregg.Compiler.LawLeaf.of_none_iff' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.LawLeaf.of_none_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Minidregg.Compiler.LawLeaf.of_none_iff
 
 /-- info: 'Minidregg.Compiler.refusal_leaf_depends_only_on_covered_fields' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -1260,5 +1260,9 @@ end Minidregg.Compiler
 /-- info: 'Minidregg.Compiler.lawDeniedFor_fails' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.lawDeniedFor_fails
 
-/-- info: 'Minidregg.Compiler.LawLeaf.NarrowSample.old_leaf_discloses_uncovered' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Compiler.LawLeaf.NarrowSample.old_leaf_discloses_uncovered' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in #print axioms Minidregg.Compiler.LawLeaf.NarrowSample.old_leaf_discloses_uncovered

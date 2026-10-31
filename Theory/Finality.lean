@@ -372,7 +372,7 @@ theorem naiveTier_unsound :
 
 /-! ## §6. Axiom pins. -/
 
-/-- info: 'Minidregg.Theory.Finality.commit_at_join_of_tiers' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.Finality.commit_at_join_of_tiers' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms commit_at_join_of_tiers
 
 /-- info: 'Minidregg.Theory.Finality.reachable_no_downgrade' depends on axioms: [propext] -/

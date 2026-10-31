@@ -13,7 +13,8 @@ universe u
 path; it never copies a shared flat array. The list projection is for proofs
 and explicitly requested full exports. Operational selection uses `get?`. -/
 structure PersistentHistory (α : Type u) where
-  private mk ::
+  -- Not private: the exactness fields carry the guarantee, so any construction must prove them
+  -- (TokenCensus: no guarantee rests on who builds it).
   newest : List α
   size : Nat
   sizeExact : newest.length = size

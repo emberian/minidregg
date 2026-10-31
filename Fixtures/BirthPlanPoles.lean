@@ -15,7 +15,7 @@ at that root plus one refuses.
 **Evaluated natively (law 9, confessed).** Every root on the path is a cSHAKE digest, and
 kernel evaluation costs about 0.13 s per hashed byte (measured on hbox, 2026-10-28). So the
 poles are decided by `native_decide`. Lean 4.30 records each native evaluation as its own
-auxiliary axiom (`…._native.native_decide.ax_…`), and the pin at the end names exactly those two. It lives in
+auxiliary axiom (`…._native.native_decide.ax_…`), and the pin at the end names exactly those. It lives in
 `Fixtures`, which no keystone module, umbrella or axiom census imports. The umbrella target
 list builds `Fixtures` (`scripts/pipeline/umbrella-targets`), so the merge gate elaborates
 this file and checks its pin (audit pass 24). `scripts/kn2/neutral-birth.lean` remains the end-to-end run against a
@@ -183,7 +183,34 @@ theorem plan_refuses_inhabited :
       pending.factoryVerdict = some false :=
   inhabited_of_verdict _ refuse_verdict
 
-/-! ## The axiom pin: the standard three plus exactly the two native evaluations. -/
+/-! ## The deny-if-credential law at genesis
+
+`not (witnessed vk)` reads "refuse when credential `vk` is presented". First-party `eval` fails a
+`witnessed` leaf closed, so its negation is true on every step: before
+`Compiler.supported_no_witnessed` this factory law admitted every birth, and with that refusal
+alone the world's factory would refuse every birth. Genesis now refuses the law by name. -/
+
+/-- The deny-if-credential factory law. -/
+def denyIfCredentialLaw : Minidregg.Pred.Pred := .not (.witnessed ⟨"vk"⟩)
+
+/-- The fail-open reading that the refusal closes: first-party `eval` admits this step. -/
+example : Minidregg.Pred.eval denyIfCredentialLaw ⟨[]⟩ ⟨[]⟩ = true := by decide
+
+/-- Whether genesis refused with `witnessedLaw`. -/
+def refusedWitnessed {α : Type} : Except NativeHostGenesis.Error α → Bool
+  | .error .witnessedLaw => true
+  | _ => false
+
+/-- **Teeth and premise inhabitation for `NativeHostGenesis.witnessed_law_refused` (audit:
+Pred.witnessed).** The same genesis that births the plan poles (a valid configuration:
+`pass_verdict` opens it with `passLaw`), with the deny-if-credential factory law, is refused by
+name. -/
+theorem genesis_refuses_witnessed :
+    refusedWitnessed (NativeHostGenesis.build hostTemplate.profile (genesis denyIfCredentialLaw)) =
+      true := by
+  native_decide
+
+/-! ## The axiom pin: the standard three plus exactly the native evaluations. -/
 
 /--
 info: 'Minidregg.Fixtures.BirthPlanPoles.plan_passes_inhabited' depends on axioms: [propext,
@@ -200,5 +227,13 @@ info: 'Minidregg.Fixtures.BirthPlanPoles.plan_refuses_inhabited' depends on axio
  refuse_verdict._native.native_decide.ax_1_1]
 -/
 #guard_msgs (whitespace := lax) in #print axioms plan_refuses_inhabited
+
+/--
+info: 'Minidregg.Fixtures.BirthPlanPoles.genesis_refuses_witnessed' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ genesis_refuses_witnessed._native.native_decide.ax_1_1]
+-/
+#guard_msgs (whitespace := lax) in #print axioms genesis_refuses_witnessed
 
 end Minidregg.Fixtures.BirthPlanPoles

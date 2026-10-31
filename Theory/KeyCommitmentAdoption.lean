@@ -176,19 +176,19 @@ private def store : Store layout :=
     ⟨.subjectKey, (⟨9⟩, 4)⟩ (some old)).set ⟨.registered, .signingKey ⟨9⟩ 4⟩ (some ())
 private def yes : List UInt8 → Bool := fun _ => true
 private def digestOf (_ : List UInt8) : Digest := ⟨77⟩
-theorem admitted : gate store 7 adoption yes yes = .ok () := by decide
-theorem no_current_signature : gate store 7 adoption (fun _ => false) yes = .error .currentNotSigned := by decide
-theorem no_next_possession : gate store 7 adoption yes (fun _ => false) = .error .nextNotSigned := by decide
+theorem admitted : gate store 7 adoption yes yes = .ok () := rfl
+theorem no_current_signature : gate store 7 adoption (fun _ => false) yes = .error .currentNotSigned := rfl
+theorem no_next_possession : gate store 7 adoption yes (fun _ => false) = .error .nextNotSigned := rfl
 theorem patch_valid : Patch.ValidFrom store (patch digestOf adoption) := by decide
 theorem same_key_committed : currentSigningKey (post digestOf store adoption) ⟨9⟩ =
     some { old with nextKeyDigest := some ⟨77⟩ } := by decide
-theorem replay_not_fresh : gate (post digestOf store adoption) 8 adoption yes yes = .error .ineligible := by decide
-theorem wrong_subject : gate store 7 { adoption with subject := ⟨10⟩ } yes yes = .error .ineligible := by decide
+theorem replay_not_fresh : gate (post digestOf store adoption) 8 adoption yes yes = .error .ineligible := rfl
+theorem wrong_subject : gate store 7 { adoption with subject := ⟨10⟩ } yes yes = .error .ineligible := rfl
 theorem revoked : gate (store.set ⟨.revoked, .signingKey ⟨9⟩ 4⟩ (some ())) 7 adoption yes yes =
-    .error .ineligible := by decide
+    .error .ineligible := rfl
 theorem same_key_refused : gate store 7 { adoption with nextPublicKey := daily } yes yes =
-    .error .ineligible := by decide
-theorem expired : gate store 101 adoption yes yes = .error .ineligible := by decide
+    .error .ineligible := rfl
+theorem expired : gate store 101 adoption yes yes = .error .ineligible := rfl
 end Witness
 
 #assert_axioms gate_ok_iff

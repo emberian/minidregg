@@ -300,6 +300,7 @@ def orFailure {Omega : Type} [Fintype Omega]
     have union := uniformProb_or_le left.event right.event
     linarith [left.bound, right.bound]
 
+set_option backward.isDefEq.respectTransparency false in
 /-- The four names are intentionally narrower than the repository-wide common
 ledger.  In particular collision means an exact extracted cSHAKE collision,
 not a universal binding assumption. -/

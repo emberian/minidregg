@@ -366,3 +366,50 @@ fn the_operations_room_is_a_note_until_this_session_joined_it_and_the_turns_afte
     fs::remove_dir_all(root).unwrap();
     assert!(after.contains("From the operations room") && after.contains("alice: shipped"), "{after}");
 }
+
+/// G6: a re-posted form is the same attempt (its rendered `attempt` field), as the shell's exact retry
+/// is: the second post of the same append runs `retry ID` (never a second proposal), and the same
+/// attempt with other text is refused with nothing submitted.
+#[test]
+fn a_reposted_form_is_the_same_attempt() {
+    let (root, site) = site("repost");
+    let ran: std::rc::Rc<RefCell<Vec<Vec<String>>>> = Default::default();
+    let seen = ran.clone();
+    let ws = root.clone();
+    FAKE_SHELL.with(|f| *f.borrow_mut() = Some(Box::new(move |lines: &[String]| {
+        seen.borrow_mut().push(lines.to_vec());
+        // what the shell leaves behind: the proposal the append authors, the attempt its submit writes
+        if let Some(id) = lines.iter().find_map(|l| l.strip_prefix("doc append ").and_then(|r| r.split(' ').next())) {
+            fs::create_dir_all(ws.join("proposals").join(id)).unwrap();
+        }
+        if let Some(id) = lines.iter().find_map(|l| l.strip_prefix("submit ")) {
+            fs::create_dir_all(ws.join("attempts").join(id)).unwrap();
+        }
+        Ending { code: 0, stdout: "admitted".into(), stderr: String::new() }
+    })));
+    let page = post(&site, &["doc", "notes", "append"], b"attempt=w-0123456789ab&text=hello");
+    assert_eq!(page.status, 200, "{}", page.body);
+    let again = post(&site, &["doc", "notes", "append"], b"attempt=w-0123456789ab&text=hello");
+    assert_eq!(again.status, 200, "{}", again.body);
+    let other = post(&site, &["doc", "notes", "append"], b"attempt=w-0123456789ab&text=bye");
+    FAKE_SHELL.with(|f| *f.borrow_mut() = None);
+    let ran = ran.borrow();
+    assert_eq!(ran.len(), 2, "the other text ran nothing: {ran:?}");
+    assert!(ran[0][0].starts_with("doc append w-0123456789ab notes @web-w-0123456789ab.txt") && ran[0][1] == "submit w-0123456789ab", "{:?}", ran[0]);
+    assert_eq!(ran[1], vec!["retry w-0123456789ab".to_owned()], "the same form again is the exact retry");
+    assert_eq!(other.status, 409, "{}", other.body);
+    assert!(other.body.contains("already submitted as attempt w-0123456789ab"), "{}", other.body);
+    assert_eq!(fs::read_to_string(root.join("home/requests/web-w-0123456789ab.txt")).unwrap(), "hello", "the attempt's text is never rewritten");
+    // a form without an attempt (a client that sent none) is a fresh attempt each time
+    assert_ne!(form_attempt(&Default::default()), form_attempt(&Default::default()));
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn every_post_form_carries_its_own_attempt() {
+    let html = with_attempts("<form method=\"post\" action=\"/a\"><button></button></form><form method=get action=/b></form><form method=post action=/c></form>");
+    assert_eq!(html.matches("name=\"attempt\"").count(), 2, "{html}");
+    let ids: Vec<&str> = html.match_indices("name=\"attempt\" value=\"").map(|(i, m)| &html[i + m.len()..i + m.len() + 14]).collect();
+    assert_ne!(ids[0], ids[1]);
+    assert!(html.contains("<form method=get action=/b></form>"), "a GET form is a read: {html}");
+}

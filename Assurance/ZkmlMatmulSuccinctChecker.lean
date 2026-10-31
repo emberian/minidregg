@@ -399,7 +399,9 @@ theorem checked_sumcheckAccepts
     have h := hchecked.rounds i hi
     simp only [RoundMessage.boolSum] at h
     rw [chain_eq_scChain, ← RoundMessage.poly_eval, ← RoundMessage.poly_eval] at h
-    simpa [Transcript.prover, hH] using h
+    have hsimpa := h
+    simp [Transcript.prover, hH] at hsimpa ⊢
+    exact hsimpa
   · have hterm : scChain value tr.prover (chalOf tr.challenges) κ =
         tr.claims.left.val * tr.claims.right.val := by
       show scChain value (fun j => (tr.rounds j).poly) (chalOf tr.challenges) κ = _

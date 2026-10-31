@@ -404,6 +404,7 @@ structure ValidOperation
   guardsValid : Patch.ValidFrom pre.logical (declaration.patch config)
   rangesValid : declaration.action.RangesValidAt pre.logical
 
+set_option backward.isDefEq.respectTransparency false in
 /-- Stored endpoints depend on the source-owned run and atom namespaces.
 Changing unrelated content does not alter their meaning. -/
 theorem StoredRangeValidAt.of_lookup_eq
@@ -441,6 +442,7 @@ theorem Action.RangesValidAt.of_lookup_eq
       intro range exact
       exact StoredRangeValidAt.of_lookup_eq (valid range exact) runs atoms
 
+set_option backward.isDefEq.respectTransparency false in
 /-- A range-bearing source action writes link/transclusion/mark/annotation
 data and preserves its run/atom dependencies. The enduring range obligation
 is therefore proved on the actual local post, ready for joint rechecking. -/

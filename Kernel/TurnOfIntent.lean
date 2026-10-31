@@ -1119,7 +1119,6 @@ theorem sysCore_unroomed (H : History R TransactionId StableEvent D) {t : DTurn 
   unfold sysCore
   rw [hrows, hr]
   simp only [List.map_nil, List.append_nil, List.append_assoc, List.singleton_append]
-  rfl
 
 /-- The system patch of a turn whose creates name no room and which retires
 nothing is valid when the journal id is fresh, the head is where the patch
@@ -1148,7 +1147,6 @@ theorem sysPatch_valid_unroomed (H : History R TransactionId StableEvent D)
       ⟨rfl, ?_⟩, trivial⟩
     show (s.set ⟨SysSpace.journal, t.txId⟩ (some (height, H.turnDigest t))) ⟨SysSpace.head, ()⟩ = _
     rw [Store.set_ne _ _ _ _ (sys_space_ne (fun e => SysSpace.noConfusion e)), hh]
-    rfl
   · rw [validFrom_spentAllocs]
     exact ⟨hn.1, fun n m => (run_sysCore_spent H s t height logRoot n).trans (hn.2 n m)⟩
   · rw [validFrom_meterPatch _ _ _ _ _ (meteredLanes_nodup _ _)]
@@ -1173,7 +1171,8 @@ theorem postCell_written {C : Codec R} {cells : CellId → Option (Cell R)}
     (hv : C.decode w0.canonicalPostBytes = some v) :
     postCell C cells intent w0.cellId.value = v := by
   have nd' : (intent.writes.map DataWrite.cellId).Nodup :=
-    List.Nodup.of_map Theory.TypedAuthorization.Digest.value (by simpa [writeIds, List.map_map] using nd)
+    List.Nodup.of_map Theory.TypedAuthorization.Digest.value
+      (by simpa [writeIds, List.map_map, Function.comp_def] using nd)
   have look := DataSnapshot.lookupPostBytes_of_member intent.writes nd' w0 hw
   unfold postCell
   rw [show (⟨w0.cellId.value⟩ : Theory.TypedAuthorization.Digest) = w0.cellId from rfl, look]
@@ -1251,7 +1250,6 @@ theorem sysPatch_valid_derived (H : History R TransactionId StableEvent D)
       rw [run_retireAllocs_ne _ _ _ (fun e => SysSpace.noConfusion e)]
       show (s.set ⟨SysSpace.journal, t.txId⟩ (some (height, H.turnDigest t))) ⟨SysSpace.head, ()⟩ = _
       rw [Store.set_ne _ _ _ _ (sys_space_ne (fun e => SysSpace.noConfusion e)), hh]
-      rfl
   · rw [validFrom_spentAllocs]
     exact ⟨hn.1, fun n m => (run_sysCore_spent H s t height logRoot n).trans (hn.2 n m)⟩
   · rw [validFrom_meterPatch _ _ _ _ _ (meteredLanes_nodup _ _)]

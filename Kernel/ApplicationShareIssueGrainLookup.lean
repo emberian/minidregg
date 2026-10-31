@@ -38,8 +38,7 @@ def lookupVerified {config : Config} {target : Durable}
   let some grain := ingress.decodeGrain
     | .error .malformed
   let transactionId := grain.source.birth.transactionId
-  let some index := verified.opened.durable.image.accepted.findIdx?
-      (fun record => record.transactionId == transactionId)
+  let some index := verified.opened.durable.firstIndex (transactionId)
     | .ok none
   let some record := verified.opened.durable.image.accepted[index]?
     | .error .nativeHistoryUnavailable
@@ -67,8 +66,7 @@ def lookupOriginal (config : Config) (target : Durable) (bytes : List UInt8) :
   let some grain := ingress.decodeGrain
     | return .error .malformed
   let transactionId := grain.source.birth.transactionId
-  let some index := target.image.accepted.findIdx?
-      (fun record => record.transactionId == transactionId)
+  let some index := target.firstIndex (transactionId)
     | return .ok none
   let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf config.transport ResourceBirthCodec.rootBytes target with
     | .error _ => return .error .nativeHistoryUnavailable

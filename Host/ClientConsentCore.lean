@@ -1,8 +1,9 @@
 /- Local full-peer consent process. Settings and executable are selected by
 local custody. The operator supplies proposed frames only. History is admitted
-before the first full-peer consent frame: from genesis, or,
-when custody offers its retained anchor (frame 228) first, natively after that
-anchor once the Store is shown to extend it (`Kernel.ConsentAnchor`). Later
+before the first full-peer consent frame: natively, every record after the
+Store's MAC-verified checkpoint, or after custody's retained anchor (frame 228)
+when that is above it and the Store is shown to extend it (`Kernel.ConsentAnchor`,
+CONSENT-STORE). Later
 frames admit only the exact new suffix (`DurableReceiverIO.extendFrom`). Frame
 229 returns the anchor of what this provider admitted, for custody to retain.
 No protected Store is transmitted by this process. Frames 230-232 are thin
@@ -275,81 +276,74 @@ def withPinnedSignature {α : Type} (config : NativeHost.Config)
 
 
 
-/-- The retained proof is updated only by independent native admission. The
-physical Store/MAC is merely an input reader, never a semantic trust source.
-The basis is the full re-admission from genesis, or native admission of every
-record after this client's retained anchor (`ConsentAnchor.Basis`). -/
+/-- The retained proof is updated only by independent native admission of every
+record after the Store's snapshot (CONSENT-STORE: the storage device is trusted,
+`Kernel.ConsentAnchor`). The basis is native admission after the Store's checkpoint
+or this client's retained anchor above it (`ConsentAnchor.Basis.anchored`), or, for
+consent that selects from chronology, the full re-admission from genesis. -/
 abbrev Session (config : NativeHost.Config) := Sigma (ConsentAnchor.Basis config)
 
 /-- The full re-admission, for consent that selects from chronology. -/
 abbrev FullSession (config : NativeHost.Config) := Sigma (NativeHostReplay.Verified config)
 
 /-- The Reader of the Store the consent provider opened, at `target`'s head: the
-replay walk reads lifecycle history through it. Its records are the Store's,
-verified under the head; its past STATES are the provider's own (`own`, the
-bases it computed) or the seed's fold, never a Store checkpoint
-(`Reader.ownOnly`, CONSENT-OWN). -/
-def storeReader (config : NativeHost.Config) (target : NativeHost.Durable)
-    (own : List (DurableHistoryReader.OwnBase ResourceBirthCodec.rootBytes) := []) :
+replay walk reads lifecycle history through it, records verified under the head and
+past states resumed from the Store's checkpoints (CONSENT-STORE). -/
+def storeReader (config : NativeHost.Config) (target : NativeHost.Durable) :
     IO ((store : DurableHistory.StoreIdentity) × DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store) := do
   match ← DurableHistoryStore.readerOf config.transport ResourceBirthCodec.rootBytes target with
-  | .ok ⟨store, reader⟩ => pure ⟨store, reader.ownOnly config.transport own⟩
+  | .ok found => pure found
   | .error detail => throw (IO.userError s!"consent history reader: {detail}")
 
-/-- How many own bases a provider retains (newest first). -/
-def retainedOwnBound : Nat := 16
-
-/-- Retain the own bases a new admission holds ahead of the older ones. -/
-def retainOwn {config : NativeHost.Config} (session : Session config)
-    (retained : List (DurableHistoryReader.OwnBase ResourceBirthCodec.rootBytes)) :
-    List (DurableHistoryReader.OwnBase ResourceBirthCodec.rootBytes) :=
-  (session.2.own ++ retained.filter fun base =>
-    !(session.2.own.any fun held => held.height == base.height)).take retainedOwnBound
-
-/-- First admission. A retained anchor the Store contradicts (another genesis
-log, a rolled-back head, a rewritten prefix, another root at the anchor)
-refuses and terminates the provider. A suffix whose admission fails after the
-anchor is re-admitted from genesis instead, which accepts or refuses it. -/
+/-- First admission: from the Store's snapshot, or a retained anchor above it. A
+retained anchor the Store contradicts (another genesis log, a rolled-back head, a
+rewritten prefix, another root at the anchor) refuses and terminates the provider.
+A suffix whose admission fails (one that needs history before the start) is
+re-admitted from genesis instead, which accepts or refuses it. -/
 def verifyInitial (config : NativeHost.Config) (retained : Option ConsentAnchor.Anchor) :
     IO (Session config) := do
-  let ⟨target, chains, chainsExact⟩ ← IO.ofExcept
-    (← DurableReceiverIO.loadChained config.transport ResourceBirthCodec.rootBytes)
+  let opened ← IO.ofExcept (← DurableReceiverIO.loadChained config.transport ResourceBirthCodec.rootBytes)
+  let target := opened.loaded
   let ⟨_, reader⟩ ← storeReader config target
-  if let some anchor := retained then
-    match ← ConsentAnchor.resume config reader anchor target chains chainsExact with
-    | .ok anchored => return ⟨target, .anchored anchored⟩
-    | .error (.contradicted detail) => throw (IO.userError s!"consent refused: {detail}")
-    | .error (.suffix _) => pure ()
-  match ← NativeHostReplay.verifyLoaded config reader target with
+  match ← ConsentAnchor.resume config reader retained opened with
+  | .ok anchored => return ⟨target, .anchored anchored⟩
+  | .error (.contradicted detail) => throw (IO.userError s!"consent refused: {detail}")
+  | .error (.suffix _) => pure ()
+  match ← NativeHostReplay.verifyStart config reader target with
   | .error failure => throw (IO.userError s!"consent prefix refused at {failure.index}: {failure.detail}")
   | .ok verified => pure ⟨target, .full verified⟩
 
 /-- Admit only the records the Store appended since `old` (`extendFrom`: the
-chain continues from the held one and every new tag verifies). An anchored
-basis whose suffix admission fails is re-admitted from genesis. -/
-def refresh (config : NativeHost.Config) (old : Session config)
-    (own : List (DurableHistoryReader.OwnBase ResourceBirthCodec.rootBytes) := []) : IO (Session config) := do
+chain continues from the held one and every new tag verifies). A resident that
+lags by a checkpoint interval or more starts again where a fresh provider does,
+at the Store's checkpoint (`verifyInitial`): a quiet member's next command costs
+at most one interval of admissions, not every record since it last looked. An
+anchored basis whose suffix admission fails is re-admitted from the checkpoint
+walk (`verifyStart`). -/
+def refresh (config : NativeHost.Config) (old : Session config) : IO (Session config) := do
   let ⟨target, seedExact, acceptedExact, logStartExact⟩ ← IO.ofExcept
     (← DurableReceiverIO.extendFrom config.transport ResourceBirthCodec.rootBytes old.1)
   if target.height = old.1.image.accepted.length then return old
-  let ⟨_, reader⟩ ← storeReader config target own
+  if 0 < config.transport.checkpointEvery &&
+      old.1.image.accepted.length + config.transport.checkpointEvery ≤ target.height then
+    return ← verifyInitial config none
+  let ⟨_, reader⟩ ← storeReader config target
   match ← old.2.extendAppended config reader target seedExact acceptedExact logStartExact with
   | .ok basis => pure ⟨target, basis⟩
   | .error failure =>
       match old.2 with
       | .full _ => throw (IO.userError s!"consent extension refused at {failure.index}: {failure.detail}")
       | .anchored _ =>
-          match ← NativeHostReplay.verifyLoaded config reader target with
+          match ← NativeHostReplay.verifyStart config reader target with
           | .error failure =>
               throw (IO.userError s!"consent extension refused at {failure.index}: {failure.detail}")
           | .ok verified => pure ⟨target, .full verified⟩
 
 /-- The full re-admission of the held target; an anchored session is
 re-admitted from genesis once and then held in full. -/
-def upgrade (config : NativeHost.Config) (session : Session config)
-    (own : List (DurableHistoryReader.OwnBase ResourceBirthCodec.rootBytes) := []) :
+def upgrade (config : NativeHost.Config) (session : Session config) :
     IO (FullSession config × Session config) := do
-  let ⟨_, reader⟩ ← storeReader config session.1 own
+  let ⟨_, reader⟩ ← storeReader config session.1
   match ← session.2.full? config reader with
   | .error failure =>
       throw (IO.userError s!"consent prefix refused at {failure.index}: {failure.detail}")
@@ -617,8 +611,7 @@ once, then `refresh`); a failed admission terminates the provider, so no cached
 success survives an observed rollback, rewritten prefix, or failed suffix. -/
 partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjective) (settings : Settings)
     (config : NativeHost.Config) (retained : Option ConsentAnchor.Anchor)
-    (held : Option (Session config)) (input output : IO.FS.Stream)
-    (own : List (DurableHistoryReader.OwnBase ResourceBirthCodec.rootBytes) := []) : IO Unit := do
+    (held : Option (Session config)) (input output : IO.FS.Stream) : IO Unit := do
   let first ← input.read 1
   if first.isEmpty then return
   let lengthWire ← readExactly input 4 first
@@ -634,23 +627,25 @@ partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjecti
         pure (operation, reply)
       catch error => pure (255, error.toString.toUTF8.toList)
     writeSessionFrame output answer.1 answer.2
-    serve extraExpected extraObjective settings config retained held input output own
+    serve extraExpected extraObjective settings config retained held input output
   else if operation == 236 && !payload.isEmpty then
     writeSessionFrame output 255 "full consent readiness requires empty input".toUTF8.toList
-    serve extraExpected extraObjective settings config retained held input output own
+    serve extraExpected extraObjective settings config retained held input output
   else if operation == 228 then
     if held.isSome then
       writeSessionFrame output 255
         "a retained consent anchor is offered only before the first admission".toUTF8.toList
-      serve extraExpected extraObjective settings config retained held input output own
+      serve extraExpected extraObjective settings config retained held input output
     else
       match ConsentAnchor.decode payload with
       | .error detail =>
           writeSessionFrame output 255 detail.toUTF8.toList
-          serve extraExpected extraObjective settings config retained held input output own
+          serve extraExpected extraObjective settings config retained held input output
       | .ok anchor =>
+          -- `none`: a record of another consent epoch, set aside (`ConsentAnchor.decode_other_epoch`);
+          -- the first admission then starts from the Store's snapshot.
           writeSessionFrame output 228 []
-          serve extraExpected extraObjective settings config (some anchor) held input output own
+          serve extraExpected extraObjective settings config anchor held input output
   else if operation == 233 then
     -- A resident provider's per-connection re-check: the Store still carries
     -- the prefix this provider admitted (`ConsentAnchor.recheckStore`). Before
@@ -669,21 +664,20 @@ partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjecti
         | .error detail =>
             writeSessionFrame output 255 s!"consent refused: {detail}".toUTF8.toList
             throw (IO.userError s!"consent refused: {detail}")
-    serve extraExpected extraObjective settings config retained held input output own
+    serve extraExpected extraObjective settings config retained held input output
   else if operation == 229 then
     match held with
     | none =>
         writeSessionFrame output 255 "no admitted prefix to anchor yet".toUTF8.toList
     | some session =>
         writeSessionFrame output 229 (ConsentAnchor.encode session.2.anchor)
-    serve extraExpected extraObjective settings config retained held input output own
+    serve extraExpected extraObjective settings config retained held input output
   else
     let admitted ← match held with
       | none => verifyInitial config retained
-      | some session => refresh config session own
-    let own := retainOwn admitted own
+      | some session => refresh config session
     let (full, updated) ← if operation == 236 || operation == 224 && specializedNeedsFull payload then do
-        let (full, upgraded) ← upgrade config admitted own
+        let (full, upgraded) ← upgrade config admitted
         pure (some full, upgraded)
       else pure (none, admitted)
     let answer ← try
@@ -696,7 +690,7 @@ partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjecti
         pure (operation, reply)
       catch error => pure (255, error.toString.toUTF8.toList)
     writeSessionFrame output answer.1 answer.2
-    serve extraExpected extraObjective settings config retained (some updated) input output own
+    serve extraExpected extraObjective settings config retained (some updated) input output
 
 def run (extraExpected : ExtraExpected) (arguments : List String)
     (extraObjective : ExtraObjective := refuseObjective) : IO UInt32 := do

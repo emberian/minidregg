@@ -51,10 +51,10 @@ What still holds for a commuting append, each by the existing code, not by this 
 * Premise inhabitation: `TwoAppendersOneObservation` (two members plan from one
   observation; both land, in either order, each line once, in landing order).
 * `CommutingPrepare`'s accepting pole is the Effects one over `ContentProofs.blindedStore`
-  (`Effects.Revival.Statements.HostMovedRootAccepted`, through `PrepareFactors`).
+  (`Kernel.EffectsRevival.Statements.HostMovedRootAccepted`, through `PrepareFactors`).
 
 Scope, said in the same breath: per target, at the controller.  The Effects declaration of
-the same arm (`Effects.Revival.Statements.ContentAgreement`, `contentSpec.commutes`) states
+the same arm (`Kernel.EffectsRevival.Statements.ContentAgreement`, `contentSpec.commutes`) states
 the agreement and carries its own teeth (`ContentCommuteTeeth`).
 -/
 module
@@ -165,7 +165,7 @@ def ReplayRefused : Prop :=
 def witnessRoot : ElementId := ⟨⟨0⟩⟩
 
 /-- A blinded cell holding one empty document, as birth (the blinding, `⟨0⟩`, the store of
-`Effects.Revival.ContentProofs.blindedStore`) and then `createDocument` leave it. -/
+`Kernel.EffectsRevival.ContentProofs.blindedStore`) and then `createDocument` leave it. -/
 def witnessStore (document : DocumentId) (author : PrincipalRef) (operation : OperationId) :
     ContentResource.ContentStore :=
   (((0 : ContentResource.ContentStore).set ⟨.blinding, ()⟩ (some (⟨0⟩ : Digest))).set

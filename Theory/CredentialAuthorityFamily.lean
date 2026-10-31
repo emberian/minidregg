@@ -610,13 +610,13 @@ theorem demoToken_is_capability_evidence :
 #guard_msgs (whitespace := lax) in #print axioms encodeRequest_injective
 /-- info: 'Minidregg.Theory.CredentialAuthorityFamily.retarget_changes_wire' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms retarget_changes_wire
-/-- info: 'Minidregg.Theory.TypedAuthorization.Capability.strict_attenuation_admits_subset' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorization.Capability.strict_attenuation_admits_subset' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Capability.strict_attenuation_admits_subset
-/-- info: 'Minidregg.Theory.TypedAuthorization.Capability.Lineage.root_admissible_of_strict' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorization.Capability.Lineage.root_admissible_of_strict' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Capability.Lineage.root_admissible_of_strict
-/-- info: 'Minidregg.Theory.CredentialAuthorityFamily.AcceptedCredential.token_has_no_bypass' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CredentialAuthorityFamily.AcceptedCredential.token_has_no_bypass' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms AcceptedCredential.token_has_no_bypass
-/-- info: 'Minidregg.Theory.CredentialAuthorityFamily.AcceptedCredential.reject_over_budget' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CredentialAuthorityFamily.AcceptedCredential.reject_over_budget' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms AcceptedCredential.reject_over_budget
 /-- info: 'Minidregg.Theory.CredentialAuthorityFamily.demoToken_is_capability_evidence' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms demoToken_is_capability_evidence

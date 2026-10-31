@@ -176,6 +176,7 @@ def orderOperands (p : Pred) (old new : State) : Int × Int :=
   | .leSlotsOff a b c => (intOf new a, intOf new b + c)
   | _ => (0, 0)
 
+set_option backward.isDefEq.respectTransparency false in
 /-- At a scalar width, an order atom whose range check fails compares two integers
 outside the band `[-2^width, 2^width)` of differences. -/
 theorem orderOperands_out_of_range {width : Nat} {q : Pred} {old new : State}

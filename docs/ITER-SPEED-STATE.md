@@ -1,72 +1,81 @@
 # Iteration-speed lane: state (present-state; rewrite whole, never append)
 
-The Host closure is on Lean 4.30's module system (landed on `lane/iter-speed`, merged by the integrator).
-Agent: the iter-speed successor (lane continuation by about 580k tokens, hand off at about 600k).
+Agent: the iter-speed lane (2026-10-31). Order of work, from ember: step 0 the Lean bump, then the umbrella
+second tree (integrator's ask), then (1) interface seams, (2) lane-tree warm pool, (3) hot-swap. Integrator:
+aeb671706eb3f70d7 (send shas there). Hot path: a86738fc1dfae6429. Private cells: a74ad8d84ada5627a.
 
-## What makes an edit expensive (measured, Lake/Lean 4.30)
+## Step 0: Lean v4.30.0 -> v4.35.0: LANDED
 
-- Under `module`, a theorem's proof lives in the module's private olean. A proof edit that keeps the
-  theorem's exported facts leaves the public olean byte-identical, and no importer rebuilds. Measured on
-  the real tree: a proof edit in `Theory/Store.set_ne` rebuilds 9 modules (Store itself plus the persisted-codec
-  census and its 7 non-module importers), not 631.
-- Exceptions (each changes the public olean, so every importer rebuilds): a changed statement or definition;
-  a proof whose rfl-lemma status changes (`:= rfl` to a tactic proof: the first NativeHost probe, 98
-  modules); a new public auxiliary (first `simp [f]` creating `f.eq_1`); a changed exported axiom set.
-- Lake keys a rebuild on the TRANSITIVE import closure's oleans: a data change (a pin value, a new registry
-  tag) rebuilds every module below it even when their own outputs would not change. Measured on the warm
-  converted tree: one pin value 438 modules / 1,531 s / 22.3 GB; one new tag in
-  `Compiler.PersistedCodecTags` 479 modules / 2,114 s. The cure is dependency inversion (below), not more seats.
-- A non-module importer of a module rebuilds on every edit below it (it reads the private part too):
-  the census (`KEEP`, 235 s) and its importers. `Kernel/ConsentAnchor` imports the census only as a build-order
-  gate; cutting that import takes the census and the 7 consent files out of every lane closure.
-- `lake build <Module>` compiles no C objects; only exe targets do.
-- Per file: `scripts/pipeline/lane-check FILE` is the only entry point (its own stale check, rebuilds through
-  the slot/closure-lock, then `lake lean`, which applies leanOptions; `lake env lean` does not, and a bare
-  `lake lean` builds stale imports outside any lock).
+- main = `cdb399b47` (bump READY on hbox 23:54 10-30; the integrator moved main and lifted HOLD LEAN). The
+  integrator's batch `integ/batch-435` (bump + staging + import-boundary + hot-path) follows.
+- ResearchWip (outside the bump's closure check) under 4.35: `edad15301` on `origin/lane/iter-speed-hosted`
+  (16 files fixed, statements unchanged). Still red there and NOT from the bump (API rot, for their owners):
+  Kernel/RoomReleaseCurrent, Kernel/JointReservationFunding, Compiler/PortableJointCustodyIO (pre-date the DRC
+  verified-ground refactor 2b9956c53/efbac239d) and Compiler/PrivateCircuitAllocationFast.stream_ext (false
+  as stated since StreamCodec gained data fields in 58b3ae509).
+- The Mac tree `/Users/ember/dev/minidregg-lanes/iter-speed-land` is back with this lane; the seam-1 sub-agent
+  works there on `lane/seam1-epoch`. Commit other work by plumbing (a temporary GIT_INDEX_FILE).
 
-## Numbers (dregg-ref, closure-lock, cache off)
+## Umbrella stage in a second tree: done, wired in
 
-See the landing commit message for the before/after table (filled from `scratch/after2/summary.txt`,
-`scratch/deep-conv/summary.txt`, `scratch/leanask/`, `scratch/regen-probe/summary.txt` in `/build/lanes/iter-speed`).
+- `scripts/pipeline/umbrella-tree SHA` on `origin/lane/iter-speed-tools` (2535ea2e1, then 7143777f0); the
+  integrator merged both into the batch (staging 5bad63e84) and calls it from hbox
+  `/home/hbox/lanes/integ/integ-build5.sh` after READY (SEATS 4, MEM 32G), then runs rerecord.sh in TREE.
+  TREE = `/home/hbox/lanes/integ/umbrella-src` (created by the first run, a git worktree of integ/src).
+- Mechanism: `scripts/pipeline/warm-link SRC/.lake/build DST/.lake/build`, per module newest trace wins;
+  outputs hard-linked, .trace/.hash copied, .setup.json never shared. Safe because Lean 4.35 and leanc write
+  .olean/.olean.private/.olean.server/.ilean/.ir/.ir.sig/.c/.o by rename(2) (measured: a rebuilt module's
+  outputs split, untouched ones stay shared); Lake writes .trace and .setup.json in place. Tripwire: a
+  multiply-linked file written after the sync is reported `RED shared-inode-written-in-place`.
+- Mac test at cdb399b47: only the two main-red fixtures red, no tripwire, 3,568 s (TokenCensus 1,859 s; 327
+  modules rebuilt because the source tree held outputs of 7 staged files, caught by Lake). Disk, own inodes:
+  packages 37 MB, build 1.57 GB, mini-kernels target 59 MB. hbox steady state: 1-2 GB, never a second 12 GB.
 
-## The conversion (scripts/lean-modularize.py; statement-preserving)
+## Lane pool (lane-tree): LIVE on hbox
 
-`module`; `public import` of every import; `meta import` where the file evaluates code or defines an
-elaborator/macro; `@[expose] public section`; RULES and PER_FILE header lines (each printed by
-`scripts/module-hidden-bodies.sh FILE` on a box, never guessed); KEEP: files that stay non-modules (the
-persisted-codec census and its importers). lakefile: `backward.privateInPublic`, `backward.proofsInPublic`,
-`compiler.relaxedMetaCheck`. Hand-written: `Theory/DeriveEncodable.lean` (Mathlib's Encodable handler with
-`S` public; delete when Mathlib exposes `S`). `Host.run` is a dispatcher over one `runCommand<Name>` per
-command (the single 2,900-line declaration ran past its heartbeat budget as a module; same profile as the
-non-module build). Re-derivation over a newer main: `scratch/land.py wip/iter-speed-modules` in a clean
-worktree on the tip (it 3-way merges COORDINATION and the census, applies the split, converts, regenerates).
+- `scripts/pipeline/lane-tree` + `warm-link` on `origin/lane/iter-speed-tools` (latest 2261c5faa): empty-lookup
+  acquire bug fixed, init writes pool.env, every tree warmed by warm-link, LANE_POOL_WARM, `warm`, `tripwire`
+  (also run by release), macOS support, partial-clone seeds get a partial pool repo.
+- hbox pool `/home/hbox/pool` (created 2026-10-31 00:0x): pool.env, bin/{lane-tree,warm-link}, repo.git
+  (blob:none clone of GitHub; integ/src is itself a partial clone), packages-3a3779933df4 (7.4 GB real copy,
+  read-only; verified by `lake build --no-build` Mathlib Batteries Aesop Qq Host.Main before copying),
+  lake-cache, t1..t3 (each warmed from integ/src at cdb399b47: 1,375 modules, 175 MB own inodes),
+  LANE_POOL_WARM=/home/hbox/lanes/integ/src. Init took 29 s after the 24 s packages copy. hbox / 34 GB free after.
+- Use: `. /home/hbox/pool/pool.env; t=$(/home/hbox/pool/bin/lane-tree acquire LANE REF)`; `lane-tree release
+  LANE`. Never acquire while a build runs in integ/src (acquire reads it). Hot path takes the first tree.
+- Mac pool: not yet (the only built Mac tree is in use by the seam-1 sub-agent).
 
-## The codec census (StoreEpoch moved once at this landing)
+## Seam 1 (next): the codec registry and the Store epoch
 
-The census hashes compiler auxiliaries (`match_N`, `_sparseCasesOn_N`, `_proof_N`) by structure, recursively,
-so a module and a non-module build agree; teeth in `Compiler/PersistedCodecTagCensusSelfTest.lean`. Pins were
-re-emitted once from the tree's own census (never a saved copy of it: a stale copy without A11's owners fix
-emitted placeholder fingerprints) and are byte-identical from hbox and dregg-ref; no identity bumped; the
-derived StoreEpoch moved: the next candidate re-geneses (DEMO-PREFIX §5).
+Measured on main 929eac696 (static import graph, `scratchpad/graph.py`; Lake rebuilds on the transitive
+closure, BUILD-INVERSION-2026-10-28.md):
+- `Compiler/PersistedCodecTags` is the most-edited high module (19 edits in 10 days); one edit rebuilds 671
+  modules (478 in the Host closure). It holds 657 tags; only 14 are referenced by name anywhere else: the 9
+  the epoch/checkpoint code uses (DurableCheckpointCodec), clockWireVersion and
+  registry_loaded_and_final_store_cells_v17 (CanonicalCellRegistry), clock_v4 (ClockCell), world_root_v2
+  (WorldRoot), the front-end manifest header (ObjectiveBendFrontEndIdentity). The other 643 are a census of
+  literals their consumers spell themselves; they matter only to the epoch's manifest.
+- The epoch: `StoreEpoch.current`/`persistedCodecCorpus` live in DurableCheckpointCodec (609 dependents). The
+  current-epoch definitions are used by: DurableReceiverCore (SeedEpoch.ofBytes, .refusal; 604 dependents),
+  DurableServed (seedFrame, SeedEpoch.ofBytes; 577), ConsentAnchor (19), Host.Main (12),
+  DurableFastForwardProofs (7), the two Fixtures and scripts.
+- Design: (a) the 14 named tags move to an owner leaf (still `@[persisted_codec_tag]` in the same namespace);
+  the 643-tag registry becomes the aggregate imported only by the epoch assembly; (b) DurableReceiverCore and
+  DurableServed take the epoch as data (a `StoreEpoch` in their config, using the existing `...For epoch`
+  forms), and one assembly module above them defines `StoreEpoch.current` and the current-epoch instances,
+  imported by Host.Main, ConsentAnchor, DurableFastForwardProofs and the Fixtures. Statements generalise
+  (ember 10-28: statements may change); the current-epoch theorems stay by name as instances.
+- Prediction: a census tag edit rebuilds ~27 modules (1 in the Host closure) instead of 671; an edit to one
+  of the 14 owner-leaf tags still rebuilds that tag's importers' closure. Measure before/after with a real
+  build in a pool tree (an edit to PersistedCodecTags, `lake build Host.Main`, count `Built` lines) before
+  starting, and continue only if the measured number moves as predicted.
+- Seams 2 and 3 (StoreCodec 763 dependents, Theory.Store 1,038, WorldRoot 618) wait for seam 1's number;
+  their edit rates are far lower (StoreCodec 8 edits in 10 days, Theory.Store and WorldRoot rare).
 
-## Next (the build-time quest; ember's ruling: one seam end to end first)
+## Hot-swap (after the seams)
 
-1. Codec registry seam, as interface plus instance (`docs/BUILD-INVERSION-2026-10-28.md`, to write first):
-   pins and the concrete `StoreEpoch.current`/`persistedCodecCorpus` leave `Compiler.DurableCheckpointCodec`
-   for one downstream module; kernel code uses the existing `...For epoch` forms; identities are spelled at
-   their owners and the registry becomes a downstream manifest imported only by the census and emitters;
-   ConsentAnchor→census import cut. Before/after: pin change 438 modules / 1,531 s; new tag 479 / 2,114 s.
-2. Theory.Store and WorldRoot seams only if (1) takes a pin regen to seconds or minutes.
-3. RAM build on hbox (tmpfs tree, seats by memory) vs dregg-build's 4x2; shared input-keyed Lake cache with
-   locked writes only.
-4. mk-lane: `.lake/build` as a real copy (`cp -a --reflink=auto`), never hard links (drafted in the lane's
-   scratch; hbox ZFS has block cloning enabled on the pool but `zfs_bclone_enabled=0`, so real copies there).
-   Trace check on hbox (2026-10-28): every trace in the pipeline base and 9 lane trees agrees with its olean;
-   no re-seeding needed.
-
-## Lane pool (stopped mid-quest, 2026-10-28, on the root's word)
-
-- `scripts/pipeline/lane-tree` (acquire LANE [REF] | release | renew | status | gc | init SEED N), configured per box by `pool.env`; `lane-check` renews a pooled tree's lease and both refuse loudly when swarm-build cannot reach the user bus (lib.sh `pipeline_user_bus`). Not yet in COORDINATION or the lane brief.
-- dregg-ref only: `/build/pool/{pool.env,bin/lane-tree,repo.git,t1,t2,t3}`; shared read-only packages `/build/shared/packages-ed3deb884a05` (7.6 GB, one copy: 516 s, today's per-lane packages cost); cache `/build/lake-cache`. t1 holds a real-copied `.lake/build` from 694415d5d; t2/t3 have none. No leases held.
-- Use: `. /build/pool/pool.env; t=$(/build/pool/bin/lane-tree acquire <lane> origin/lane/<lane>)`, sync or check out there, `scripts/pipeline/lane-check FILE`, `lane-tree release <lane>`. Never as root, never inside closure-lock.
-- Not done: the measurement (t1 cache fill, t2 build from the cache, incremental lane-check), hbox and dregg-build pools, reclaim, docs. A queued `closure-lock swarm-build lake build Host.Main Host.ClientConsentSession` from the stopped measurement (PID 2023359, cwd /build/pool, no PID file) is still waiting for the lock: when it runs it fails at once (not a Lake project); left for the owner to stop.
+Rebuild one crate or the Host, swap it into a kept world, rerun one phase. Integrator requirement (rehearsal-3
+world): the swap replaces the binary and re-pins it in the candidate's manifest.json, SHA256SUMS and the
+Hermes runtime root (`deploy/hermes/build-runtime-root --rebind`) together, atomically, and records the
+overlay in provenance; otherwise the Store restart crash-loops on the sha256 check. Ember: hotpatched worlds
+between batch candidates.

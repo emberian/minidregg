@@ -540,6 +540,7 @@ example : ¬ Satisfies (wireWord (N := 2) exAsg exWrong)
 `5·3 = 1 ≠ 0` — precisely to fake the root pin). -/
 def exMulCheat : ℕ → ZMod 7 := fun n => if n = 0 then 5 else 0
 
+set_option backward.isDefEq.respectTransparency false in
 /-- **`[AIR-sumcheck-quadratic]` is REAL, not decorative**: `exMulCheat` satisfies EVERY
 constraint of the linear system (root pin included!) while violating the mul gate — the
 linear face alone does NOT carry full gate soundness; the degree-2 channel is load-bearing.

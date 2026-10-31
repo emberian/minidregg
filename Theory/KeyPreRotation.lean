@@ -275,8 +275,6 @@ theorem post_eq (logical : Store layout) (current : KeyRecord) (rotation : Rotat
           Store.set_ne _ _ _ _ (by intro same; cases same)]
         show logical ⟨.revoked, .signingKey rotation.subject current.keyEpoch⟩ = some ()
         rw [present]
-        cases value
-        rfl
       · rw [Store.set_ne _ _ _ _ at_revoked]
         rfl
 
@@ -587,24 +585,24 @@ def stolen : Rotation := ⟨friend, ⟨70, 2, 1, 8, thief, 0, 100, some (toyDige
 def everyone : List UInt8 → Bool := fun _ => true
 
 /-- Satisfiable pole: the committed next key, signing, rotates. -/
-theorem honest_admitted : gate toyDigest store honest everyone = .ok enrolled := by decide
+theorem honest_admitted : gate toyDigest store honest everyone = .ok enrolled := rfl
 
 /-- Satisfiable pole: the admitted rotation's patch validates at the store. -/
 theorem honest_patch_valid : Patch.ValidFrom store (patch store enrolled honest) := by decide
 
 /-- Refuting pole: the thief's own key, with every signature it likes, is refused by name. -/
 theorem stolen_refused : gate toyDigest store stolen everyone = .error .notPrecommitted := by
-  decide
+  rfl
 
 /-- Refuting pole: the committed key without its possession signature is refused. -/
 theorem unsigned_refused :
     gate toyDigest store honest (fun pk => decide (pk = daily)) = .error .noPossession := by
-  decide
+  rfl
 
 /-- Refuting pole: a no-prerotation subject cannot rotate. -/
 theorem plain_refused :
     gate toyDigest store ⟨⟨9⟩, ⟨71, 2, 1, 9, next, 0, 100, some (toyDigest after)⟩⟩ everyone =
-      .error .notPrerotated := by decide
+      .error .notPrerotated := rfl
 
 /-- After the honest rotation the old daily version is revoked and the next key is current. -/
 theorem honest_post :
@@ -614,22 +612,22 @@ theorem honest_post :
 
 /-- Satisfiable pole: the enrolled record, co-signed by its committed next key. -/
 theorem enroll_cosigned : enrollGate toyDigest enrolled next (fun pk => decide (pk = next)) = .ok () := by
-  decide
+  rfl
 
 /-- Refuting pole: the sponsor names the next key but holds only the daily key
 (and its own): every signature it can make is at a key other than `next`. -/
 theorem enroll_named_only_refused :
     enrollGate toyDigest enrolled next (fun pk => decide (pk = daily) || decide (pk = thief)) =
-      .error .nextNoPossession := by decide
+      .error .nextNoPossession := rfl
 
 /-- Refuting pole: a key it holds, presented as the next key, is not the commitment. -/
 theorem enroll_other_key_refused :
-    enrollGate toyDigest enrolled thief everyone = .error .nextNotCommitted := by decide
+    enrollGate toyDigest enrolled thief everyone = .error .nextNotCommitted := rfl
 
 /-- A record without a commitment takes no next key, and admits none. -/
-theorem enroll_plain_admitted : enrollGate toyDigest plain [] everyone = .ok () := by decide
+theorem enroll_plain_admitted : enrollGate toyDigest plain [] everyone = .ok () := rfl
 theorem enroll_plain_with_next_refused :
-    enrollGate toyDigest plain next everyone = .error .nextUnexpected := by decide
+    enrollGate toyDigest plain next everyone = .error .nextUnexpected := rfl
 
 end Witness
 

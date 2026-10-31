@@ -63,7 +63,7 @@ theorem typed_metadata_preserved {assumptions : Assumptions} {types : AddressTyp
     value_specification_fields specTyped metadata extension rfl
   have same := head_normalizes_unique normal (.direct (.specification metadataType extensionType) rfl)
   have component : actualMetadata.canonical = metadataType.canonical := by
-    simpa [Ty.canonical] using congrArg (fun type => match type with | .specification metadata _ => metadata | _ => type) same
+    simpa [Ty.canonical] using congrArg (fun type : Ty => (match type with | .specification metadata _ => metadata | _ => type : Ty)) same
   refine ⟨step_certificate typed actualMetadata ?_ ?_ ?_⟩
   · simpa [stepRaw,returned,stack] using typed.heap
   · simpa [stepRaw,returned,stack] using (ControlTyping.enter metadataAssigned)
@@ -110,9 +110,9 @@ theorem typed_prototype_projection_preserved {assumptions : Assumptions} {types 
   obtain ⟨actualSpec,actualTarget,specAssigned,targetAssigned,normal⟩ := value_prototype_fields protoTyped spec target rfl
   have same := head_normalizes_unique normal (.direct (.prototype specType targetType) rfl)
   have specComponent : actualSpec.canonical = specType.canonical := by
-    simpa [Ty.canonical] using congrArg (fun type => match type with | .prototype spec _ => spec | _ => type) same
+    simpa [Ty.canonical] using congrArg (fun type : Ty => (match type with | .prototype spec _ => spec | _ => type : Ty)) same
   have targetComponent : actualTarget.canonical = targetType.canonical := by
-    simpa [Ty.canonical] using congrArg (fun type => match type with | .prototype _ target => target | _ => type) same
+    simpa [Ty.canonical] using congrArg (fun type : Ty => (match type with | .prototype _ target => target | _ => type : Ty)) same
   cases specification
   · refine ⟨step_certificate typed actualTarget ?_ ?_ ?_⟩
     · simpa [stepRaw,returned,stack,projectionFrame] using typed.heap

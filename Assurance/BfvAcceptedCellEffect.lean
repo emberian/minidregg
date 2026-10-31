@@ -83,7 +83,9 @@ noncomputable def completionOfBatchAdmission
         (authority.declaration.computationStatementOf request outcome) := by
       rw [statementExact]
       exact admission.checkedPrivateEvidence commitmentId
-    simpa only [Authority.declaration] using checked
+    have hsimpa := checked
+    simp only [Authority.declaration] at hsimpa ⊢
+    exact hsimpa
 
 /-- The accepted private completion retains all exact signed integer BFV
 equations.  This theorem attributes them to the checked token inside mode

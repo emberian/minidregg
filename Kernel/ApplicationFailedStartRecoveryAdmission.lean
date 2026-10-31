@@ -261,7 +261,7 @@ def checkPackage (config : Config) (ground : Ground config.deployment)
             have physicalCurrent := Ground.physicalCurrent context source.originalBegin.base.source.packageManifest
               selected.observed.before selected.observed.present
             return .ok ⟨selected, checked, observedExact,
-              by simpa only [observedExact] using physicalCurrent⟩
+              by subst observedExact; exact physicalCurrent⟩
           else return .error "signed package observation differs from current old image"
 
 /-- This conditional candidate is not constructed from a valid report alone. It also

@@ -99,6 +99,7 @@ theorem jointPostExact :
   rw [CellState.ValidatedPatch.apply_logical, jointPatch_exact]
   rfl
 
+set_option backward.isDefEq.respectTransparency false in
 /-- The accepted link patch writes the link's address. -/
 theorem linkFieldWritten :
     (⟨.links, linkId⟩ : Hyperdocument.Address) ∈ Store.Patch.writeFootprint linkLeg.patch := by

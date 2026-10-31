@@ -234,9 +234,9 @@ end Sample
 #guard_msgs (whitespace := lax) in #print axioms kick_revokes_born_descendants
 /-- info: 'Minidregg.Kernel.RoomKick.accepted_kick_revokes_room_born_authority' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms accepted_kick_revokes_room_born_authority
-/-- info: 'Minidregg.Kernel.RoomKick.old_root_shape_survives_kick' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.RoomKick.old_root_shape_survives_kick' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms old_root_shape_survives_kick
-/-- info: 'Minidregg.Kernel.RoomKick.founder_keeps_room_after_kick' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.RoomKick.founder_keeps_room_after_kick' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms founder_keeps_room_after_kick
 /-- info: 'Minidregg.Kernel.RoomKick.Sample.bob_doc_refused_after_kick' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Sample.bob_doc_refused_after_kick

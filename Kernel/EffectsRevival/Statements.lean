@@ -1,5 +1,5 @@
 /-
-# `Effects/Revival/Statements.lean` — the widened declaration and the dispatch keystone, STATED
+# `Kernel/EffectsRevival/Statements.lean` — the widened declaration and the dispatch keystone, STATED
 
 The statement half of `docs/EFFECTS-REVIVAL.md` (the deputy's Phase-3 design,
 `docs/review/2026-10-27-untouched-areas/EFFECTS.md`, made concrete).  Every keystone below
@@ -10,7 +10,9 @@ verdict.
 ## What is stated
 
 * §1-§5 live in `Effects/Revival/Engine.lean` (kernel-free, small closure); this file
-  imports it and holds §6-§7.
+  imports it and holds §6-§7.  It lives under `Kernel/` because §6-§7 are stated over the
+  deployed controller: a consumer of the Effects engine, never part of it (the namespace stays
+  `Minidregg.Effects.Revival`).
 * §1 `Substrate`: the guarded primitive algebra an effect emits into.  `storeSubstrate L` is
   the deployed one (`Theory.Store`'s guarded `Op`s); the Book's posting algebra is the second
   (transfer, migration step 2).

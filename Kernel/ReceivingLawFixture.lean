@@ -186,6 +186,7 @@ noncomputable def objectStep (artifact : Int) : Nat → Option PolicyStepContext
 
 /-! ## The teeth -/
 
+set_option backward.isDefEq.respectTransparency false in
 /-- The fixture's laws read no source cell: they add no guard. -/
 theorem writeGuards_nil (patch : List DataWrite) (written : DataWrite)
     (step : Option PolicyStepContext) :
@@ -405,6 +406,7 @@ theorem noStep_refused :
     ReceivingLaw.judgeLaw, ReceivingLaw.lawOf, write, laws, CanonicalCellRegistry.Kind.lawClass]
   rfl
 
+set_option backward.isDefEq.respectTransparency false in
 /-- A family not named in the `streamEntry` row writing one is refused. -/
 theorem foreignWriter_refused :
     ((bypass .clockTick [1, 2] (objectStep pinned)).receiver laws oracle).receive
@@ -421,6 +423,7 @@ theorem foreignWriter_refused :
     stepAt_old, stepAt_new]
   decide
 
+set_option backward.isDefEq.respectTransparency false in
 /-- A step offered for a kernel-only cell is a registry mismatch. -/
 theorem registryMismatch_refused :
     ((bypass .declaredResourceController [1, 2] (fun _ => some (stepAt pinned))).receiver laws oracle).receive
@@ -455,6 +458,7 @@ theorem unclassified_refused :
 noncomputable def bornStep (artifact : Int) (born : Nat := 5) : Nat → Option PolicyStepContext :=
   fun cell => if cell = born then some (stepAt artifact) else none
 
+set_option backward.isDefEq.respectTransparency false in
 /-- **A birth is judged by its export law, not skipped**: a family that bears cell
 5 and judges nothing is refused by the Receiver at the export law's clause. -/
 theorem birth_denied_names_pin :
@@ -480,6 +484,7 @@ theorem birth_commits_without_judgement :
   receive_lawful _ rfl (bypass_fresh' .declaredResourceController (bornStep (-1)) 5 2) rfl rfl
     (shape_ok .declaredResourceController (bornStep (-1)) 5 2) rfl
 
+set_option backward.isDefEq.respectTransparency false in
 /-- A birth its export law admits commits. -/
 theorem birth_lawful_commits :
     ∃ admission witness,
@@ -510,6 +515,7 @@ theorem birth_noStep_refused :
 
 /-! ### Law sources (`kernelOnlyOrBorn`): born under the export law, else only `PolicyInstall` -/
 
+set_option backward.isDefEq.respectTransparency false in
 /-- **A law source born by a family that is not its writer is judged by its export
 law**: the pay-enrol family bearing law source 6 under a step its export law
 refuses is refused at the export law's clause. -/
@@ -532,6 +538,7 @@ theorem lawSource_birth_denied_names_pin :
 noncomputable def sourceStep (artifact : Int) : Nat → Option PolicyStepContext :=
   fun cell => if cell = 1 ∨ cell = 6 then some (stepAt artifact) else none
 
+set_option backward.isDefEq.respectTransparency false in
 /-- The same law-source birth, admitted by its export law (beside a lawful write of
 the object it governs), commits. -/
 theorem lawSource_birth_lawful_commits :
@@ -562,7 +569,7 @@ theorem lawSource_inPlace_foreign_refused :
   simp [ReceivingLaw.judgeWrite, ReceivingLaw.judgeKernel,
     ReceivingLaw.judgeLaw, ReceivingLaw.lawOf, write, laws,
     CanonicalCellRegistry.Kind.lawClass]
-  decide
+  rfl
 
 /-! ### Neutral births: named by a judged authorizer, or refused -/
 
@@ -602,6 +609,7 @@ theorem neutral_unauthorized_refused :
     bornStep, CanonicalCellRegistry.Kind.lawClass]
   rfl
 
+set_option backward.isDefEq.respectTransparency false in
 /-- **Smuggling is refused**: a patch with a legitimate, judged object write (cell
 1 under the pin) and a neutral newborn 8 its step does NOT name refuses the
 newborn by name. -/
@@ -622,6 +630,7 @@ theorem neutral_smuggled_refused :
     Minidregg.Pred.State.get]
   decide
 
+set_option backward.isDefEq.respectTransparency false in
 /-- **The control commits**: the same newborn, named (id and post root) by the
 step the object's pin law judged. -/
 theorem neutral_named_commits :

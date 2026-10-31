@@ -61,7 +61,7 @@ where
 /-- The deployment's pinned config (`w/deployment/pinned-config.json`, read the way `Host.Main`'s
 `Settings.config` reads it; this world pins no Objective policy). Its verifier binary is never run:
 the admission below is handed `.recorded transcript`. -/
-def config : NativeHost.Config where
+def config : NativeHost.Config := NativeHost.Config.ofInputs {
   deployment := ⟨⟨pinDomain⟩, pinFactoryId, pinResourceBookId, pinAuthorityCellId⟩
   federation := ⟨pinFederation⟩
   template := ⟨⟨pinIssuer⟩, pinOwnerBudget, pinLifetime, CanonicalRuntimeProfile.defaultBirthSlack⟩
@@ -72,14 +72,14 @@ def config : NativeHost.Config where
   storage := { binary := "", root := "", key := "" }
   signature := ⟨""⟩
   invocationBindings := none
-  grainBirthTariff := some ⟨pinGrainBirthBase, pinGrainBirthPerBirth⟩
-  completionCustodianKey := some (hexBytes pinCompletionCustodianKeyHex)
+  grainBirthTariff := pinGrainBirthTariff.map fun (base, perBirth) => ⟨base, perBirth⟩
+  completionCustodianKey := pinCompletionCustodianKeyHex.map hexBytes }
 
 /-- The Store prefix the write was admitted at. -/
 def image : Option Image := do
   let seed ← seedFrame.decode (hexBytes seedHex)
   let records ← recordHexes.mapM fun record => recordFrame.decode (hexBytes record)
-  pure ⟨seed, records⟩
+  pure (Image.ofAccepted seed records)
 
 /-- The signed command of an op-2 call. -/
 def invoked (call : String) : Option SignedCommand :=
@@ -172,17 +172,39 @@ open Minidregg.Fixtures.NativeAcceptedFixtureProjection (receiptSubjects)
 def authority : List NativeAcceptedFixtureProjection.Line :=
   parseAuthority NativeDocWriteFixtureAuthority.text
 
-/-- The re-run's projection of the accepted write. -/
-def projectionRun : Option (List NativeAcceptedFixtureProjection.Line) := do
-  let ⟨_, run⟩ ← writeRun
+/-- The re-run's projection of the accepted write, its record passed through `alter` first
+(the run-dependent byte lanes relative to the run). -/
+def projectionRunWith (alter : IntentRecord → IntentRecord) :
+    Option (List NativeAcceptedFixtureProjection.Line) := do
+  let ⟨signed, run⟩ ← writeRun
   pure (projectDocWrite config.deployment run.command
-    (IntentRecord.ofIntent (run.accepted.dataIntent run.shape)) (receiptSubjects run.accepted))
+    (alter (IntentRecord.ofIntent (run.accepted.dataIntent run.shape))) (receiptSubjects run.accepted)
+    (signedBytes run.ground.authority.domain config.profile.semantics signed)
+    (NativeAcceptedFixtureProjection.recordLegs run.ground.view
+      (IntentRecord.ofIntent (run.accepted.dataIntent run.shape))))
+
+/-- The re-run's projection of the accepted write. -/
+def projectionRun : Option (List NativeAcceptedFixtureProjection.Line) := projectionRunWith id
 
 /-- **The re-run means what the member asked for.**  The projection of the accepted write's record
 (signer, signature checks, written cells, guards, nullifiers, the document's payload bytes, every
 charge lane) is exactly the hand-written authority.  A regeneration that changes what the write
 records turns this red until the authority is changed in its own reviewed commit. -/
 theorem write_projection : projectionRun = some authority := by native_decide
+
+/-- `record` with one charge lane a byte over its measured value. -/
+def bumped (lane : Theory.ResourceCost.Lane) (record : IntentRecord) : IntentRecord :=
+  { record with exactCharge := fun other =>
+      if other = lane then record.exactCharge other + 1 else record.exactCharge other }
+
+/-- **Teeth of the relational byte lines.** The authority states the turn and storage lanes as
+their relations to the run (`ingress`, `event + legs`), not as numbers; a record whose turn
+bytes, or whose storage, is one byte off that relation is refused. -/
+theorem turn_off_by_one_refused :
+    projectionRunWith (bumped .turnBytes) ≠ some authority := by native_decide
+
+theorem storage_off_by_one_refused :
+    projectionRunWith (bumped .storageBytes) ≠ some authority := by native_decide
 
 /-- `signed` with the last byte of its first target leg's signed envelope flipped. -/
 def tamper (signed : SignedCommand) : SignedCommand :=
@@ -212,5 +234,9 @@ set_option maxHeartbeats 4000000 in
 #assert_compiled write_projection
 set_option maxHeartbeats 4000000 in
 #assert_compiled tampered_refused
+set_option maxHeartbeats 4000000 in
+#assert_compiled turn_off_by_one_refused
+set_option maxHeartbeats 4000000 in
+#assert_compiled storage_off_by_one_refused
 
 end Minidregg.Fixtures.NativeDocWriteFixture

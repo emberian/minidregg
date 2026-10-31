@@ -1112,6 +1112,7 @@ theorem blindingKey_eq (store : Store L) :
     blindingKey W store = (store B.address).map (W.valueStream B.space).encode := by
   simp [blindingKey, B.isBlinding, address]
 
+set_option backward.isDefEq.respectTransparency false in
 /-- **The post blinding is one step of the pre blinding.**  Whatever store the
 ratchet runs on (the pre-state after the source patch), the post blinding is
 `step` of the PRE blinding: the operation's value is computed from `pre`. -/
@@ -1165,7 +1166,7 @@ inductive Space
   | label
   deriving DecidableEq, Repr
 
-def Space.Value : Space → Type
+@[reducible] def Space.Value : Space → Type
   | .field => Nat
   | .label => List UInt8
 
@@ -1173,7 +1174,7 @@ instance Space.valueDecEq : (space : Space) → DecidableEq (Space.Value space)
   | .field => inferInstanceAs (DecidableEq Nat)
   | .label => inferInstanceAs (DecidableEq (List UInt8))
 
-def layout : Layout.{0, 0, 0} where
+@[reducible] def layout : Layout.{0, 0, 0} where
   Namespace := Space
   Key := fun _ => Nat
   Value := Space.Value

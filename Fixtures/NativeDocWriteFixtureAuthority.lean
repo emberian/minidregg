@@ -40,14 +40,24 @@ write.nullifiers = 1
 # the document holds exactly the text the member appended, nothing else:
 # 'first paragraph' (15 bytes) + 'second paragraph, appended by the same member' (45 bytes)
 write.document.payloadBytes = 60
+# The byte lines are relations to the run, never numbers: the call, the digests and ids it carries
+# and the values it writes are encoded at their natural width, so their lengths move by a few bytes
+# from run to run (recordings with 1015- and 1013-byte calls), and the ingress framing moves with
+# the width of the semantics digest. The retained event is exactly the call's signed ingress (the
+# deployment's domain, the semantics and the signed command, DeclaredResourceController.signedBytes).
+write.event = ingress
+# the World's leg on the document cell, by operation (reads carry no bytes): two writes and two
+# allocations, one of them the atom holding the appended paragraph
+write.legs = read, read, read, write, write, allocate, allocate
 # an append is not metered compute and pays no fee in this world: only the structural lanes move.
 # The incidences are the authority leg and the one target. The other three lanes are the Host charge
-# rule's measurements of this write (DeployedCharge, 7877e6e7): the call's turn bytes, the retained
-# bytes (legs + the post image + the event), and the cells touched.
+# rule's measurements of this write (DeployedCharge, 7877e6e7): the call's turn bytes (the length of
+# its signed ingress), the retained bytes (exactly the event plus the leg's written values:
+# no post image, no framing), and the cells touched.
 write.charge.incidences = 2
-write.charge.turnBytes = 1047
+write.charge.turnBytes = ingress
 write.charge.memoryTouches = 6
-write.charge.storageBytes = 1474
+write.charge.storageBytes = event + legs
 write.charge.witnessBytes = 0
 write.charge.proofWork = 0
 write.charge.feeDebit = 0

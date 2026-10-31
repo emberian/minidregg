@@ -127,6 +127,39 @@ def _root_.Minidregg.Kernel.NativeHost.payEnrolAmbient (config : Config) (opened
     | some record => ResourceBirthPolicyController.Concrete.templateAt config.profile.template record
     | none => config.profile.template⟩
 
+/-- Charged objective-activity records retain a typed failure envelope in the
+durable event. Historical admission must nevertheless consume the original
+signed ingress stored inside that envelope. Other event families, including
+all ordinary version-1 events, are unchanged. -/
+def historicalSourceEvent (stored : StableEvent) : StableEvent :=
+  match ObjectiveActivityReceiver.recordedDisposition stored with
+  | some (source, _) => source
+  | none => stored
+
+@[simp] theorem historicalSourceEvent_activity_failure
+    (domain semantics : Digest) (ingress : ObjectiveActivityReceiver.DecodedIngress)
+    (cause : ObjectiveActivityReceiver.Reject) :
+    historicalSourceEvent
+      (ObjectiveActivityReceiver.failedEvent
+        (ObjectiveActivityReceiver.event domain semantics ingress) cause) =
+      ObjectiveActivityReceiver.event domain semantics ingress := by
+  simp [historicalSourceEvent]
+
+/-- The signed ingress bytes a record's event carries: what every family's
+admission decodes (`walk`), and what a stored certificate's ingress is read from. -/
+def sourceBytes (record : DurableReceiver.IntentRecord) : List UInt8 :=
+  (historicalSourceEvent record.event).canonicalBytes
+
+/-- **A walk certificate's provenance** (ember 2026-10-31: the storage device is
+trusted). `admitted`: this walk natively admitted the record at its prefix.
+`stored`: the record lies below the walk's start, the trusted Store's sealed
+checkpoint, and `carried` holds of it: its event carries exactly this
+certificate's ingress. It was decoded and classified, never executed. A consumer
+binds either one to the current image by its own presence check (`…_record_at`). -/
+inductive Provenance (admitted carried : Prop) : Prop
+  | admitted (h : admitted)
+  | stored (h : carried)
+
 /-- An issue certificate is retained only after the replay walk has admitted
 its original command, matched its complete durable record, and validated the
 next physical image. The index records where that step entered the history. -/
@@ -228,10 +261,12 @@ structure PriorBegin (config : Config) where
   index : Nat
   ingress : ApplicationLifecycleBeginIngress.Ingress
   record : DurableReceiver.IntentRecord
-  admitted : ∃ original : Opened config,
+  admitted : Provenance
+    (∃ original : Opened config,
     ∃ accepted : ApplicationLifecycleBeginReceiver.Accepted config.deployment config.profile
       ⟨config.federation, logicalHeight config original.durable⟩ original.ground ingress,
-      record = DurableReceiver.IntentRecord.ofIntent accepted.intent
+      record = DurableReceiver.IntentRecord.ofIntent accepted.intent)
+    (ApplicationLifecycleBeginIngress.codec.decode (sourceBytes record) = some ingress)
 
 /-- The v2 descriptor-bound BEGIN is retained separately from the historical
 v1 grammar. A v2 claim cannot select a v1 pending record. -/
@@ -240,12 +275,14 @@ structure PriorBeginV2 (config : Config) where
   index : Nat
   ingress : ApplicationLifecycleBeginV2Ingress.Ingress
   record : DurableReceiver.IntentRecord
-  admitted : ∃ original : Opened config,
+  admitted : Provenance
+    (∃ original : Opened config,
     ∃ accepted : ApplicationLifecycleBeginV2Admission.Accepted
       config.deployment config.profile
       ⟨config.federation, logicalHeight config original.durable⟩
       original.ground ingress,
-      record = DurableReceiver.IntentRecord.ofIntent accepted.intent
+      record = DurableReceiver.IntentRecord.ofIntent accepted.intent)
+    (ApplicationLifecycleBeginV2Ingress.codec.decode (sourceBytes record) = some ingress)
 
 /-- Compact selected-release evidence retained only after the same replay
 walk has admitted the original event13, matched its full durable record, and
@@ -358,6 +395,11 @@ def Admitted (config : Config) (record : DurableReceiver.IntentRecord) :
         record = DurableReceiver.IntentRecord.ofIntent
           (ApplicationLifecycleRetryCompletionV4Core.intent accepted)
 
+/-- What a stored completion record carries: its event decodes to exactly this ingress. -/
+def Carried (record : DurableReceiver.IntentRecord) : CompletionIngress → Prop
+  | .v2 ingress => ApplicationLifecycleCompletionV2Ingress.codec.decode (sourceBytes record) = some ingress
+  | .v4 ingress => ApplicationLifecycleRetryCompletionV4Ingress.codec.decode (sourceBytes record) = some ingress
+
 end CompletionIngress
 
 /-- A successful create completion is retained only after the complete
@@ -369,7 +411,7 @@ structure PriorCreatedV3 (config : Config) where
   ingress : CompletionIngress
   record : DurableReceiver.IntentRecord
   created : ingress.creationMarker.isSome = true
-  admitted : ingress.Admitted config record
+  admitted : Provenance (ingress.Admitted config record) (ingress.Carried record)
 
 /-- A physical running incarnation is retained only after the exact event25 (or
 event72 retry) record and successor image were admitted by this verified replay
@@ -383,7 +425,7 @@ structure PriorRunningV3 (config : Config) where
   record : DurableReceiver.IntentRecord
   running : ingress.physical.outcome = .running
   started : ingress.beginSource.kind = .start
-  admitted : ingress.Admitted config record
+  admitted : Provenance (ingress.Admitted config record) (ingress.Carried record)
 
 structure RunningAt (config : Config) (opened : Opened config)
     (source : ApplicationLifecycleBegin.Source) where
@@ -518,9 +560,11 @@ structure PriorBeginV3 (config : Config) where
   index : Nat
   ingress : ApplicationLifecycleBeginV3Ingress.Ingress
   record : DurableReceiver.IntentRecord
-  admitted : ∃ original : Opened config,
+  admitted : Provenance
+    (∃ original : Opened config,
     ∃ accepted : BeginAtV3 config original ingress,
-      record = DurableReceiver.IntentRecord.ofIntent accepted.intent
+      record = DurableReceiver.IntentRecord.ofIntent accepted.intent)
+    (ApplicationLifecycleBeginV3Ingress.codec.decode (sourceBytes record) = some ingress)
 
 structure ClaimAtV3 (config : Config) (opened : Opened config)
     (ingress : ApplicationLifecycleClaimV3Ingress.Ingress) where
@@ -559,9 +603,11 @@ structure PriorClaimV3 (config : Config) where
   index : Nat
   ingress : ApplicationLifecycleClaimV3Ingress.Ingress
   record : DurableReceiver.IntentRecord
-  admitted : ∃ original : Opened config,
+  admitted : Provenance
+    (∃ original : Opened config,
     ∃ accepted : ClaimAtV3 config original ingress,
-      record = DurableReceiver.IntentRecord.ofIntent accepted.intent
+      record = DurableReceiver.IntentRecord.ofIntent accepted.intent)
+    (ApplicationLifecycleClaimV3Ingress.codec.decode (sourceBytes record) = some ingress)
 
 /-- The full opening at its own height is a ground of the history `reader` reads (its
 chain is the Store's after that many records), or refused by name. -/
@@ -680,9 +726,11 @@ structure PriorClaimV2 (config : Config) where
   index : Nat
   ingress : ApplicationLifecycleClaimV2Ingress.Ingress
   record : DurableReceiver.IntentRecord
-  admitted : ∃ original : Opened config,
+  admitted : Provenance
+    (∃ original : Opened config,
     ∃ accepted : ClaimAtV2 config original ingress,
-      record = DurableReceiver.IntentRecord.ofIntent accepted.conditional.intent
+      record = DurableReceiver.IntentRecord.ofIntent accepted.conditional.intent)
+    (ApplicationLifecycleClaimV2Ingress.codec.decode (sourceBytes record) = some ingress)
 
 def ClaimAtV2.intent {config : Config} {opened : Opened config}
     {ingress : ApplicationLifecycleClaimV2Ingress.Ingress}
@@ -773,9 +821,11 @@ structure PriorRecovery (config : Config) where
   index : Nat
   ingress : ApplicationFailedStartRecoveryIngress.Ingress
   record : DurableReceiver.IntentRecord
-  admitted : ∃ original : Opened config,
+  admitted : Provenance
+    (∃ original : Opened config,
     ∃ accepted : FailedStartRecoveryAt config original ingress,
-      record = DurableReceiver.IntentRecord.ofIntent accepted.intent
+      record = DurableReceiver.IntentRecord.ofIntent accepted.intent)
+    (ApplicationFailedStartRecoveryIngress.codec.decode (sourceBytes record) = some ingress)
 
 /-- Versioned repeat-CREATE BEGIN (event69). The lower admission re-admits the
 named recovery at its structural prefix; this join additionally requires that
@@ -816,9 +866,11 @@ structure PriorBeginV4 (config : Config) where
   index : Nat
   ingress : ApplicationLifecycleRetryBeginV4Ingress.Ingress
   record : DurableReceiver.IntentRecord
-  admitted : ∃ original : Opened config,
+  admitted : Provenance
+    (∃ original : Opened config,
     ∃ accepted : BeginAtV4 config original ingress,
-      record = DurableReceiver.IntentRecord.ofIntent accepted.intent
+      record = DurableReceiver.IntentRecord.ofIntent accepted.intent)
+    (ApplicationLifecycleRetryBeginV4Ingress.codec.decode (sourceBytes record) = some ingress)
 
 /-- One-use retry CLAIM (event70) joined to a v4 BEGIN retained by this walk. -/
 structure ClaimAtV4 (config : Config) (opened : Opened config)
@@ -858,9 +910,11 @@ structure PriorClaimV4 (config : Config) where
   index : Nat
   ingress : ApplicationLifecycleRetryClaimV4Ingress.Ingress
   record : DurableReceiver.IntentRecord
-  admitted : ∃ original : Opened config,
+  admitted : Provenance
+    (∃ original : Opened config,
     ∃ accepted : ClaimAtV4 config original ingress,
-      record = DurableReceiver.IntentRecord.ofIntent accepted.intent
+      record = DurableReceiver.IntentRecord.ofIntent accepted.intent)
+    (ApplicationLifecycleRetryClaimV4Ingress.codec.decode (sourceBytes record) = some ingress)
 
 /-- Retry completion (event72) joined to a v4 claim retained by this walk. The
 retry is always a START create, so there is no STOP running-incarnation leg. -/
@@ -2902,7 +2956,7 @@ private def beginsAfter (config : Config) (opened : Opened config)
         rw [← intentExact]
         exact (recordMatches_iff record derived.intent).mp matched
       ⟨opened.durable.height, ingress, record,
-        ⟨opened, accepted, recordExact⟩⟩ :: begins
+        .admitted ⟨opened, accepted, recordExact⟩⟩ :: begins
 
 private def beginsV2After (config : Config) (opened : Opened config)
     (begins : List (PriorBeginV2 config)) (record : DurableReceiver.IntentRecord)
@@ -2917,7 +2971,7 @@ private def beginsV2After (config : Config) (opened : Opened config)
         rw [← intentExact]
         exact (recordMatches_iff record derived.intent).mp matched
       ⟨opened.durable.height, ingress, record,
-        ⟨opened, accepted, recordExact⟩⟩ :: begins
+        .admitted ⟨opened, accepted, recordExact⟩⟩ :: begins
 
 /-- Called only after complete record matching, durable advance and successor
 validation by `walk` or `extendExact`. This retains the actual source-admitted
@@ -2935,7 +2989,7 @@ private def claimsV2After (config : Config) (opened : Opened config)
         rw [← intentExact]
         exact (recordMatches_iff record derived.intent).mp matched
       ⟨opened.durable.height, ingress, record,
-        ⟨opened, admitted, recordExact⟩⟩ :: claims
+        .admitted ⟨opened, admitted, recordExact⟩⟩ :: claims
 
 private def beginsV3After (config : Config) (opened : Opened config)
     (begins : List (PriorBeginV3 config)) (record : DurableReceiver.IntentRecord)
@@ -2950,7 +3004,7 @@ private def beginsV3After (config : Config) (opened : Opened config)
         rw [← intentExact]
         exact (recordMatches_iff record derived.intent).mp matched
       ⟨opened.durable.height, ingress, record,
-        ⟨opened, admitted, recordExact⟩⟩ :: begins
+        .admitted ⟨opened, admitted, recordExact⟩⟩ :: begins
 
 private def claimsV3After (config : Config) (opened : Opened config)
     (claims : List (PriorClaimV3 config)) (record : DurableReceiver.IntentRecord)
@@ -2965,7 +3019,7 @@ private def claimsV3After (config : Config) (opened : Opened config)
         rw [← intentExact]
         exact (recordMatches_iff record derived.intent).mp matched
       ⟨opened.durable.height, ingress, record,
-        ⟨opened, admitted, recordExact⟩⟩ :: claims
+        .admitted ⟨opened, admitted, recordExact⟩⟩ :: claims
 
 private def createdV3After (config : Config) (opened : Opened config)
     (created : List (PriorCreatedV3 config))
@@ -2982,7 +3036,7 @@ private def createdV3After (config : Config) (opened : Opened config)
     | some ⟨ingress, ⟨admitted, intentExact⟩⟩ =>
         if isCreated : ingress.creationMarker.isSome = true then
           ⟨opened.durable.height, receipt, .v2 ingress, record,
-            isCreated, ⟨admitted.store, admitted.head, opened, admitted.conditional,
+            isCreated, .admitted ⟨admitted.store, admitted.head, opened, admitted.conditional,
               exactFor admitted.intent intentExact⟩⟩ :: created
         else created
   match derived.completionV4 with
@@ -2990,7 +3044,7 @@ private def createdV3After (config : Config) (opened : Opened config)
   | some ⟨ingress, ⟨admitted, intentExact⟩⟩ =>
       if isCreated : ingress.creationMarker.isSome = true then
         ⟨opened.durable.height, receipt, .v4 ingress, record,
-          isCreated, ⟨admitted.store, admitted.head, opened, admitted.conditional,
+          isCreated, .admitted ⟨admitted.store, admitted.head, opened, admitted.conditional,
             exactFor admitted.intent intentExact⟩⟩ :: created
       else created
 
@@ -3010,7 +3064,7 @@ private def runningV3After (config : Config) (opened : Opened config)
         if isRunning : (CompletionIngress.v2 ingress).physical.outcome = .running then
           if isStart : (CompletionIngress.v2 ingress).beginSource.kind = .start then
             ⟨opened.durable.height, receipt, .v2 ingress, record,
-              isRunning, isStart, ⟨admitted.store, admitted.head, opened, admitted.conditional,
+              isRunning, isStart, .admitted ⟨admitted.store, admitted.head, opened, admitted.conditional,
                 exactFor admitted.intent intentExact⟩⟩ :: running
           else running
         else running
@@ -3020,7 +3074,7 @@ private def runningV3After (config : Config) (opened : Opened config)
       if isRunning : (CompletionIngress.v4 ingress).physical.outcome = .running then
         if isStart : (CompletionIngress.v4 ingress).beginSource.kind = .start then
           ⟨opened.durable.height, receipt, .v4 ingress, record,
-            isRunning, isStart, ⟨admitted.store, admitted.head, opened, admitted.conditional,
+            isRunning, isStart, .admitted ⟨admitted.store, admitted.head, opened, admitted.conditional,
               exactFor admitted.intent intentExact⟩⟩ :: running
         else running
       else running
@@ -3084,17 +3138,17 @@ private def retryAfter (config : Config) (opened : Opened config)
       | none => retry.recoveries
       | some ⟨ingress, ⟨admitted, intentExact⟩⟩ =>
           ⟨index, ingress, record,
-            ⟨opened, admitted, exactFor admitted.intent intentExact⟩⟩ :: retry.recoveries
+            .admitted ⟨opened, admitted, exactFor admitted.intent intentExact⟩⟩ :: retry.recoveries
     beginsV4 := match derived.beginV4 with
       | none => retry.beginsV4
       | some ⟨ingress, ⟨admitted, intentExact⟩⟩ =>
           ⟨index, ingress, record,
-            ⟨opened, admitted, exactFor admitted.intent intentExact⟩⟩ :: retry.beginsV4
+            .admitted ⟨opened, admitted, exactFor admitted.intent intentExact⟩⟩ :: retry.beginsV4
     claimsV4 := match derived.claimV4 with
       | none => retry.claimsV4
       | some ⟨ingress, ⟨admitted, intentExact⟩⟩ =>
           ⟨index, ingress, record,
-            ⟨opened, admitted, exactFor admitted.intent intentExact⟩⟩ :: retry.claimsV4 }
+            .admitted ⟨opened, admitted, exactFor admitted.intent intentExact⟩⟩ :: retry.claimsV4 }
 
 private def grantsAfter (config : Config) (opened : Opened config)
     (grants : List (PriorLifetimeGrant config))
@@ -3480,23 +3534,6 @@ private def selectedReleaseAfter (config : Config) (after : Opened config)
     ⟨record, receipt⟩ :: releases
   else releases
 
-/-- Charged objective-activity records retain a typed failure envelope in the
-durable event. Historical admission must nevertheless consume the original
-signed ingress stored inside that envelope. Other event families, including
-all ordinary version-1 events, are unchanged. -/
-def historicalSourceEvent (stored : StableEvent) : StableEvent :=
-  match ObjectiveActivityReceiver.recordedDisposition stored with
-  | some (source, _) => source
-  | none => stored
-
-@[simp] theorem historicalSourceEvent_activity_failure
-    (domain semantics : Digest) (ingress : ObjectiveActivityReceiver.DecodedIngress)
-    (cause : ObjectiveActivityReceiver.Reject) :
-    historicalSourceEvent
-      (ObjectiveActivityReceiver.failedEvent
-        (ObjectiveActivityReceiver.event domain semantics ingress) cause) =
-      ObjectiveActivityReceiver.event domain semantics ingress := by
-  simp [historicalSourceEvent]
 
 /-- Diagnostic grouping only, never an ingress decoder or admission choice.
 Fixed labels distinguish the native families sharing event version 1; other
@@ -3614,17 +3651,31 @@ private def walk (config : Config) (opened : Opened config)
         else
           return .error ⟨index, "retained intent differs from native-admitted intent"⟩
 
+/-- The receipts the trusted Store's verified tags carry for `loaded`'s records:
+transaction, event, height, and the world root the tag after each record carries. -/
+def storedReceipts (loaded : Durable) : Option (List NativeHostCodec.Receipt) :=
+  loaded.image.accepted.zipIdx.mapM fun (record, index) =>
+    match loaded.rootLog[index]? with
+    | some (some root) => some ⟨record.transactionId, record.event.eventId, index + 1, root⟩
+    | _ => none
+
 /-- Constructed only after all original ingresses are freshly native-admitted
 at their prefixes and all exact expected records reconstruct the supplied tip.
 Receipts are recomputed from those same expected prefix images. -/
 structure Verified (config : Config) (target : Durable) where
   private mk ::
   origin : Opened config
+  /-- Where the walk starts: genesis, or the base of the Store's open (its
+  MAC-verified checkpoint; ember 2026-10-31: the storage device is trusted). The
+  origin is its own base (`startBase`): nothing below the start was executed. -/
+  start : Nat
   opened : Opened config
   exactImage : opened.durable.image = target.image
   receiptHistory : PersistentHistory NativeHostCodec.Receipt
   countExact : receiptHistory.size = target.image.accepted.length
-  admitted : AdmittedReplay config origin target.image.accepted opened receiptHistory.toList
+  /-- Every record from the start on, natively admitted at its original height. -/
+  admitted : AdmittedReplay config origin (target.image.accepted.drop start) opened
+    (receiptHistory.toList.drop start)
   issues : List (PriorIssue config)
   reserves : List (PriorDispatchReserve config)
   begins : List (PriorBegin config)
@@ -3640,6 +3691,11 @@ structure Verified (config : Config) (target : Durable) where
   retry : RetryHistory config
   store : DurableHistory.StoreIdentity
   reader : DurableHistoryReader.Reader rootBytes store
+  startBase : origin.durable.baseHeight = start
+  originExact : origin.durable.image.accepted = target.image.accepted.take start
+  startWithin : start ≤ target.image.accepted.length
+  /-- The receipts below the start are the ones the trusted Store's tags carry. -/
+  prefixReceipts : storedReceipts origin.durable = some (receiptHistory.toList.take start)
 
 /-- The original chronological list, retained as the proof/export interface. -/
 def Verified.receipts {config : Config} {target : Durable}
@@ -3846,19 +3902,55 @@ def admitLifetimeDispatchVerified {config : Config} {target : Durable}
     IO (Except String (LifetimeDispatchAt config old.opened ingress)) :=
   admitLifetimeDispatchAt config old.opened old.grants old.reserves ingress
 
+/-- An extension of a verified tip by `more` records keeps its start: the
+records and receipts from the start on gain exactly the new ones, and nothing
+below the start moves. -/
+private theorem Verified.extendFacts {config : Config} {oldTarget : Durable}
+    (old : Verified config oldTarget) (more : List DurableReceiver.IntentRecord)
+    (moreReceipts : List NativeHostCodec.Receipt) (accepted : List DurableReceiver.IntentRecord)
+    (acceptedExact : accepted = oldTarget.image.accepted ++ more) :
+    accepted.drop old.start = oldTarget.image.accepted.drop old.start ++ more ∧
+      (old.receipts ++ moreReceipts).drop old.start =
+        old.receipts.drop old.start ++ moreReceipts ∧
+      old.origin.durable.image.accepted = accepted.take old.start ∧
+      old.start ≤ accepted.length ∧
+      storedReceipts old.origin.durable = some ((old.receipts ++ moreReceipts).take old.start) := by
+  have within := old.startWithin
+  have count : old.receipts.length = oldTarget.image.accepted.length := by
+    rw [Verified.receipts, PersistentHistory.length_toList]; exact old.countExact
+  have withinReceipts : old.start ≤ old.receipts.length := count ▸ within
+  subst acceptedExact
+  refine ⟨List.drop_append_of_le_length within, List.drop_append_of_le_length withinReceipts,
+    ?_, ?_, ?_⟩
+  · rw [List.take_append_of_le_length within]; exact old.originExact
+  · rw [List.length_append]; exact Nat.le_trans within (Nat.le_add_right _ _)
+  · rw [List.take_append_of_le_length withinReceipts]; exact old.prefixReceipts
+
 /-- The final comparison binds the full finite image, not merely a digest or
 its materialized state. No collision-resistance hypothesis is involved. -/
 theorem Verified.image_exact {config : Config} {target : Durable}
     (verified : Verified config target) : verified.opened.durable.image = target.image :=
   verified.exactImage
 
-/-- A successful operational verification carries every accepted transition,
-including its original receipt, from the checked genesis to the exact tip. -/
+/-- A successful operational verification carries every accepted transition
+from its start, including its original receipt, to the exact tip. The start is
+genesis or the Store's sealed base, the records below it are the trusted Store's
+(`Verified.start_trusted`), and their receipts are the ones its tags carry. -/
 theorem Verified.accepted_history {config : Config} {target : Durable}
     (verified : Verified config target) :
-    AdmittedReplay config verified.origin target.image.accepted
-      verified.opened verified.receipts :=
+    AdmittedReplay config verified.origin (target.image.accepted.drop verified.start)
+      verified.opened (verified.receipts.drop verified.start) :=
   verified.admitted
+
+/-- **The walk starts at a sealed state**: the origin is its own base (the seed at
+height 0, or the Store's checkpoint), it is exactly the target's records below the
+start, and the receipts below the start are the Store's tags'. -/
+theorem Verified.start_trusted {config : Config} {target : Durable}
+    (verified : Verified config target) :
+    verified.origin.durable.baseHeight = verified.start ∧
+      verified.origin.durable.image.accepted = target.image.accepted.take verified.start ∧
+      storedReceipts verified.origin.durable = some (verified.receipts.take verified.start) :=
+  ⟨verified.startBase, verified.originExact, verified.prefixReceipts⟩
 
 /-- The sole candidate produced from a previously verified image and the
 receiver's checked `Ready`; it contains no caller-supplied post snapshot. -/
@@ -3949,11 +4041,12 @@ def extendExact {config : Config} {store : DurableHistory.StoreIdentity}
   have countExact : (old.receipts ++ [receipt]).length = target.image.accepted.length := by
     simp [target, exactCandidate, DurableReceiverIO.Loaded.extend, DurableReceiver.Image.append,
       Verified.receipts, PersistentHistory.length_toList, old.countExact, ← old.image_exact]
-  have admitted : AdmittedReplay config old.origin target.image.accepted
-      readback.after (old.receipts ++ [receipt]) := by
-    rw [show target.image.accepted = old.opened.durable.image.accepted ++ [record] by
-      simp [target, exactCandidate, DurableReceiverIO.Loaded.extend, record]]
-    rw [old.image_exact]
+  have facts := old.extendFacts [record] [receipt] target.image.accepted (by
+    rw [← old.image_exact]
+    simp [target, exactCandidate, DurableReceiverIO.Loaded.extend, record])
+  have admitted : AdmittedReplay config old.origin (target.image.accepted.drop old.start)
+      readback.after ((old.receipts ++ [receipt]).drop old.start) := by
+    rw [facts.1, facts.2.1]
     exact old.admitted.append (.cons step (.nil readback.after))
   let issues := issuesAfter config old.opened old.issues record receipt readback.derived matched
   let reserves := reservesAfter config old.opened old.reserves record receipt
@@ -3982,11 +4075,13 @@ def extendExact {config : Config} {store : DurableHistory.StoreIdentity}
     | .ok next => next
     | .error _ => { old.frontier with fault := true }
   let releases := selectedReleaseAfter config readback.after old.releases record receipt
-  exact ⟨old.origin, readback.after, exactImage, old.receiptHistory.push receipt,
+  exact ⟨old.origin, old.start, readback.after, exactImage, old.receiptHistory.push receipt,
     by simpa only [List.length_append, List.length_singleton, Verified.receipts,
       PersistentHistory.length_toList, PersistentHistory.size_push] using countExact,
-    by simpa only [PersistentHistory.toList_push] using admitted, issues, reserves, begins, beginsV2, claimsV2, frontier, releases,
-    beginsV3, claimsV3, createdV3, runningV3, grants, retry, _, reader⟩
+    by rw [PersistentHistory.toList_push]; exact admitted, issues, reserves, begins, beginsV2, claimsV2, frontier, releases,
+    beginsV3, claimsV3, createdV3, runningV3, grants, retry, _, reader,
+    old.startBase, facts.2.2.1, facts.2.2.2.1,
+    by rw [PersistentHistory.toList_push]; exact facts.2.2.2.2⟩
 
 /-- Exact readback keeps the original accepted-prefix receipt, even when a
 subsequent current tip will contain more accepted entries. -/
@@ -4107,6 +4202,21 @@ theorem genesisWalk_image {config : Config} {target initial : Durable}
   rw [trace.image.1, wraps, start]
   simp
 
+/-- A genesis walk starts at its own base: the seed at height 0, no record below. -/
+private theorem genesis_start {config : Config} {target initial : Durable} {opened : Opened config}
+    (genesis : DurableReceiverIO.loadSeed rootBytes (config.logStart target.image.seed)
+      target.image.seed = .ok initial)
+    (wraps : opened.durable = initial) (receipts : List NativeHostCodec.Receipt) :
+    opened.durable.baseHeight = 0 ∧
+      opened.durable.image.accepted = target.image.accepted.take 0 ∧
+      storedReceipts opened.durable = some (receipts.take 0) := by
+  have image : initial.image = DurableReceiver.Image.ofAccepted target.image.seed [] :=
+    DurableReceiverIO.loadImage_image genesis
+  have empty : opened.durable.image.accepted = [] := by
+    rw [wraps, image]; simp
+  refine ⟨by rw [wraps]; exact DurableReceiverIO.loadImage_baseHeight genesis, by simp [empty], ?_⟩
+  simp [storedReceipts, empty]
+
 def verifyLoaded (config : Config) {store : DurableHistory.StoreIdentity}
     (reader : DurableHistoryReader.Reader rootBytes store) (target : Durable)
     (timing : AuditTiming.Handle := none) : IO (Except Failure (Verified config target)) := do
@@ -4130,12 +4240,17 @@ def verifyLoaded (config : Config) {store : DurableHistory.StoreIdentity}
           genesisWalk_image (initialValue.property.symm.trans initialLoaded)
             (validateLoaded_durable (openedValue.property.symm.trans openedValidated)) walked.trace
         if countExact : walked.receipts.length = target.height then
-          return .ok ⟨opened, walked.final, exactImage, PersistentHistory.ofList walked.receipts,
-            by simpa only [← PersistentHistory.length_toList, PersistentHistory.toList_ofList] using countExact,
-            by simpa only [PersistentHistory.toList_ofList] using walked.trace, walked.issues, walked.reserves, walked.begins,
+          have started := genesis_start (initialValue.property.symm.trans initialLoaded)
+            (validateLoaded_durable (openedValue.property.symm.trans openedValidated))
+            (PersistentHistory.ofList walked.receipts).toList
+          return .ok ⟨opened, 0, walked.final, exactImage, PersistentHistory.ofList walked.receipts,
+            by simpa only [← PersistentHistory.length_toList, PersistentHistory.toList_ofList,
+              DurableReceiverIO.Loaded.height_eq] using countExact,
+            by simpa only [PersistentHistory.toList_ofList, List.drop_zero] using walked.trace, walked.issues, walked.reserves, walked.begins,
             walked.beginsV2, walked.claimsV2, walked.frontier, walked.releases,
             walked.beginsV3, walked.claimsV3, walked.createdV3,
-            walked.runningV3, walked.grants, walked.retry, _, reader⟩
+            walked.runningV3, walked.grants, walked.retry, _, reader,
+            started.1, started.2.1, Nat.zero_le _, started.2.2⟩
         else return .error ⟨target.height, "verified history count mismatch"⟩
 
 /-- **The audit walk rebuilds the stored index**: the genesis re-admission
@@ -4211,13 +4326,17 @@ def verifyLoadedSelected (config : Config) {store : DurableHistory.StoreIdentity
           | none => return .error ⟨index, "selected native checkpoint unavailable"⟩
           | some selected =>
             if indexExact : selected.priorRecords.length = index then
+              have started := genesis_start genesis (validateLoaded_durable validated)
+                (PersistentHistory.ofList walked.receipts).toList
               let verified : Verified config target :=
-                ⟨opened, walked.final, exactImage, PersistentHistory.ofList walked.receipts,
-                  by simpa only [← PersistentHistory.length_toList, PersistentHistory.toList_ofList] using countExact,
-                  by simpa only [PersistentHistory.toList_ofList] using walked.trace, walked.issues, walked.reserves, walked.begins,
+                ⟨opened, 0, walked.final, exactImage, PersistentHistory.ofList walked.receipts,
+                  by simpa only [← PersistentHistory.length_toList, PersistentHistory.toList_ofList,
+              DurableReceiverIO.Loaded.height_eq] using countExact,
+                  by simpa only [PersistentHistory.toList_ofList, List.drop_zero] using walked.trace, walked.issues, walked.reserves, walked.begins,
                   walked.beginsV2, walked.claimsV2, walked.frontier, walked.releases,
                   walked.beginsV3, walked.claimsV3, walked.createdV3,
-                  walked.runningV3, walked.grants, walked.retry, _, reader⟩
+                  walked.runningV3, walked.grants, walked.retry, _, reader,
+                  started.1, started.2.1, Nat.zero_le _, started.2.2⟩
               let selection : {s : SelectedStep config verified.origin verified.opened
                   target.image.accepted verified.receipts // s.priorRecords.length = index} := by
                 change {s : SelectedStep config opened walked.final target.image.accepted
@@ -4270,14 +4389,17 @@ def extendVerifiedAppended (config : Config) {store : DurableHistory.StoreIdenti
         rw [← PersistentHistory.length_toList, receiptList, List.length_append,
           Verified.receipts, PersistentHistory.length_toList, old.countExact]
         exact countExact
-      have admitted : AdmittedReplay config old.origin target.image.accepted
-          walked.final receipts.toList := by
-        rw [receiptList, acceptedExact]
+      have facts := old.extendFacts (target.image.accepted.drop oldTarget.image.accepted.length)
+        walked.receipts target.image.accepted acceptedExact
+      have admitted : AdmittedReplay config old.origin (target.image.accepted.drop old.start)
+          walked.final (receipts.toList.drop old.start) := by
+        rw [receiptList, facts.1, facts.2.1]
         exact old.admitted.append walked.trace
-      return .ok ⟨old.origin, walked.final, exactImage, receipts, receiptCount,
+      return .ok ⟨old.origin, old.start, walked.final, exactImage, receipts, receiptCount,
         admitted, walked.issues, walked.reserves, walked.begins, walked.beginsV2, walked.claimsV2,
         walked.frontier, walked.releases, walked.beginsV3, walked.claimsV3,
-        walked.createdV3, walked.runningV3, walked.grants, walked.retry, _, reader⟩
+        walked.createdV3, walked.runningV3, walked.grants, walked.retry, _, reader,
+        old.startBase, facts.2.2.1, facts.2.2.2.1, by rw [receiptList]; exact facts.2.2.2.2⟩
     else return .error ⟨target.height, "verified history count mismatch"⟩
 
 /-- Continue from a previously verified exact tip after an external read.
@@ -4788,8 +4910,12 @@ def verifySuffixFrom (config : Config) (anchor : Opened config) {store : Durable
             openedLogStartExact := openedLogStartExact
             receiptHistory := PersistentHistory.ofList walked.receipts
             countExact := by
-              simpa only [← PersistentHistory.length_toList, PersistentHistory.toList_ofList] using countExact
-            admitted := by simpa only [PersistentHistory.toList_ofList] using walked.trace
+              have hsimpa := countExact
+              simp only [← PersistentHistory.length_toList, PersistentHistory.toList_ofList] at hsimpa ⊢
+              exact hsimpa
+            admitted := by have hsimpa := walked.trace
+                           simp only [PersistentHistory.toList_ofList] at hsimpa ⊢
+                           exact hsimpa
             issues := walked.context.issues
             reserves := walked.context.reserves
             begins := walked.context.begins
@@ -4980,6 +5106,195 @@ def verifyBytes (config : Config)
 #guard_msgs (whitespace := lax) in #print axioms AdmittedStep.tail_bounded
 
 #assert_axioms validateLoaded_headTag
+
+/-! ## The walk from the Store's checkpoint (sweep rows 4, 9, 13)
+
+Ember 2026-10-31: the storage device is trusted. A walk starts where the Store's open
+started, at its MAC-verified checkpoint, and natively admits every record after it.
+The walk families' certificates for the records below the checkpoint are read off the
+records (`Provenance.stored`), never executed. -/
+
+/-- A single object target whose fourth scalar action writes: the decodable shape of an
+AgentGrain reserve (`reservesAfter`), whose certificate reads the purse cell's state. -/
+private def reserveShaped (bytes : List UInt8) : Bool :=
+  match DeclaredResourceController.decodeSignedBytes bytes with
+  | none => false
+  | some (_, _, signed) =>
+      match DeclaredResourceController.commandCodec.decode signed.commandBytes with
+      | none => false
+      | some command =>
+          match command.targets with
+          | [target] =>
+              target.kind == .object && target.observeCapability.isSome &&
+                (match target.payload with
+                  | .scalar actions => match actions[3]? with
+                    | some (Minidregg.Theory.DeclaredActionLowering.Action.write _ _ _) => true
+                    | _ => false
+                  | _ => false)
+          | _ => false
+
+/-- Whether a record's certificate reads the state at its height (an issue, a lifetime
+grant, a selected release, an AgentGrain reserve), so a record below the start cannot
+be classified by decoding alone. -/
+private def stateDependent (record : DurableReceiver.IntentRecord) : Bool :=
+  let bytes := sourceBytes record
+  (ApplicationShareIssueSource.ingressCodec.decode bytes).isSome ||
+    (ApplicationShareIssueGrainSource.codec.decode bytes).isSome ||
+    (ApplicationAgentLifetimeGrantSource.ingressCodec.decode bytes).isSome ||
+    record.event.codecVersion == 13 || reserveShaped bytes
+
+/-- The certificates one record below the start contributes, by decoding alone, in
+`derive`'s family order. `none`: a state-dependent record (the walk then starts at
+genesis) or a Fn frontier transition that refuses. -/
+private def storedAfter (config : Config) (context : SuffixContext config)
+    (index : Nat) (record : DurableReceiver.IntentRecord) (receipt : NativeHostCodec.Receipt) :
+    Option (SuffixContext config) := do
+  if stateDependent record then none
+  let frontier ← (frontierAfter config context.frontier record receipt).toOption
+  let context := { context with frontier }
+  let bytes := sourceBytes record
+  match h : ApplicationFailedStartRecoveryIngress.codec.decode bytes with
+  | some ingress => return { context with retry := { context.retry with
+      recoveries := ⟨index, ingress, record, .stored h⟩ :: context.retry.recoveries } }
+  | none =>
+  match h : ApplicationLifecycleRetryBeginV4Ingress.codec.decode bytes with
+  | some ingress => return { context with retry := { context.retry with
+      beginsV4 := ⟨index, ingress, record, .stored h⟩ :: context.retry.beginsV4 } }
+  | none =>
+  match h : ApplicationLifecycleRetryClaimV4Ingress.codec.decode bytes with
+  | some ingress => return { context with retry := { context.retry with
+      claimsV4 := ⟨index, ingress, record, .stored h⟩ :: context.retry.claimsV4 } }
+  | none =>
+  let completion : Option {ingress : CompletionIngress // ingress.Carried record} :=
+    match h : ApplicationLifecycleRetryCompletionV4Ingress.codec.decode bytes with
+    | some ingress => some ⟨.v4 ingress, h⟩
+    | none =>
+      match h : ApplicationLifecycleCompletionV2Ingress.codec.decode bytes with
+      | some ingress => some ⟨.v2 ingress, h⟩
+      | none => none
+  match completion with
+  | some ⟨ingress, carried⟩ =>
+      let created := if isCreated : ingress.creationMarker.isSome = true then
+          ⟨index, receipt, ingress, record, isCreated, .stored carried⟩ :: context.createdV3
+        else context.createdV3
+      let running := if isRunning : ingress.physical.outcome = .running then
+          if isStart : ingress.beginSource.kind = .start then
+            ⟨index, receipt, ingress, record, isRunning, isStart, .stored carried⟩ :: context.runningV3
+          else context.runningV3
+        else context.runningV3
+      return { context with createdV3 := created, runningV3 := running }
+  | none =>
+  match h : ApplicationLifecycleClaimV3Ingress.codec.decode bytes with
+  | some ingress => return { context with
+      claimsV3 := ⟨index, ingress, record, .stored h⟩ :: context.claimsV3 }
+  | none =>
+  match h : ApplicationLifecycleBeginV3Ingress.codec.decode bytes with
+  | some ingress => return { context with
+      beginsV3 := ⟨index, ingress, record, .stored h⟩ :: context.beginsV3 }
+  | none =>
+  if (ApplicationLifecycleCompletionIngress.codec.decode bytes).isSome then return context
+  match h : ApplicationLifecycleClaimV2Ingress.codec.decode bytes with
+  | some ingress => return { context with
+      claimsV2 := ⟨index, ingress, record, .stored h⟩ :: context.claimsV2 }
+  | none =>
+  if (ApplicationLifecycleClaimIngress.codec.decode bytes).isSome then return context
+  match h : ApplicationLifecycleBeginV2Ingress.codec.decode bytes with
+  | some ingress => return { context with
+      beginsV2 := ⟨index, ingress, record, .stored h⟩ :: context.beginsV2 }
+  | none =>
+  match h : ApplicationLifecycleBeginIngress.codec.decode bytes with
+  | some ingress => return { context with
+      begins := ⟨index, ingress, record, .stored h⟩ :: context.begins }
+  | none => return context
+
+/-- The certificates of every record below the start, with the receipts the Store's
+tags carry for them; `none` when one of them is state-dependent. -/
+private def storedContext (config : Config) :
+    Nat → List DurableReceiver.IntentRecord → List NativeHostCodec.Receipt →
+    SuffixContext config → Option (SuffixContext config)
+  | index, record :: records, receipt :: receipts, context => do
+      let next ← storedAfter config context index record receipt
+      storedContext config (index + 1) records receipts next
+  | _, [], [], context => some context
+  | _, _, _, _ => none
+
+/-- **The walk from the Store's checkpoint.** Its origin is the opening cut at the
+open's own base (`Chained.cutAbove`: nothing below it executed); every record above
+it is natively admitted (`walk`), and the certificates below it are the stored
+records'. `none` when the start cannot be the base (a state-dependent record below
+it, or no checkpoint): the caller walks from genesis. -/
+def verifyFrom (config : Config) {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader rootBytes store) (chained : DurableReceiverIO.Chained rootBytes)
+    (timing : AuditTiming.Handle := none) :
+    IO (Option (Except Failure (Verified config chained.loaded))) := do
+  let target := chained.loaded
+  let start := target.baseHeight
+  if start = 0 then return none
+  match cut : chained.cutAbove start with
+  | .error _ => return none
+  | .ok ⟨base, image, _, baseHeight, _⟩ =>
+  match validated : validateLoaded config base with
+  | .error detail => return some (.error ⟨start, s!"checkpoint base: {detail}"⟩)
+  | .ok origin =>
+  have originDurable : origin.durable = base := validateLoaded_durable validated
+  let below := target.image.accepted.take start
+  match storedExact : storedReceipts origin.durable with
+  | none => return none
+  | some prefixReceipts =>
+  let some sizedLift := (if h : prefixReceipts.length = start then some (PLift.up h) else none)
+    | return none
+  let some context := storedContext config 0 below prefixReceipts {} | return none
+  match ← walk config origin reader context.issues context.reserves context.begins
+      context.beginsV2 context.claimsV2 context.beginsV3 context.claimsV3 context.createdV3
+      context.runningV3 context.grants context.frontier context.releases context.retry none timing
+      (target.image.accepted.drop start) with
+  | .error failure => return some (.error failure)
+  | .ok walked =>
+    have sized : prefixReceipts.length = start := sizedLift.down
+    have within : start ≤ target.image.accepted.length := target.withinLog
+    have originAccepted : origin.durable.image.accepted = target.image.accepted.take start := by
+      rw [originDurable, image, DurableReceiver.Image.accepted_ofAccepted]
+    have exactImage : walked.final.durable.image = target.image := by
+      rw [walked.trace.image.1, originAccepted, List.take_append_drop, originDurable, image]
+      simp only [DurableReceiver.Image.ofAccepted_seed]
+      exact DurableReceiver.Image.ofAccepted_accepted _
+    let receipts := PersistentHistory.ofList (prefixReceipts ++ walked.receipts)
+    have receiptList : receipts.toList = prefixReceipts ++ walked.receipts :=
+      PersistentHistory.toList_ofList _
+    if countExact : start + walked.receipts.length = target.image.accepted.length then
+      have receiptCount : receipts.size = target.image.accepted.length := by
+        rw [← PersistentHistory.length_toList, receiptList, List.length_append, sized]
+        exact countExact
+      have admitted : AdmittedReplay config origin (target.image.accepted.drop start)
+          walked.final (receipts.toList.drop start) := by
+        rw [receiptList, List.drop_left' sized]
+        exact walked.trace
+      have prefixExact : storedReceipts origin.durable = some (receipts.toList.take start) := by
+        rw [receiptList, List.take_left' sized]; exact storedExact
+      return some (.ok ⟨origin, start, walked.final, exactImage, receipts, receiptCount,
+        admitted, walked.issues, walked.reserves, walked.begins, walked.beginsV2, walked.claimsV2,
+        walked.frontier, walked.releases, walked.beginsV3, walked.claimsV3,
+        walked.createdV3, walked.runningV3, walked.grants, walked.retry, _, reader,
+        by rw [originDurable]; exact baseHeight, originAccepted, within, prefixExact⟩)
+    else return some (.error ⟨target.height, "verified history count mismatch"⟩)
+
+/-- **The walk of the current Store, from its checkpoint** (rows 4, 9, 13): open the
+Store (`loadChained`), walk from its base (`verifyFrom`), and continue over exactly the
+records `target` has after that head (`extendVerified`, which refuses a rewritten
+prefix). A Store whose base cannot start the walk (no checkpoint, a state-dependent
+record below it), or which moved past `target`, walks from genesis (`verifyLoaded`).
+The audits (`audit`, `store-audit`) stay genesis walks by design. -/
+def verifyStart (config : Config) {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader rootBytes store) (target : Durable)
+    (timing : AuditTiming.Handle := none) : IO (Except Failure (Verified config target)) := do
+  match ← DurableReceiverIO.loadChained config.transport rootBytes with
+  | .error _ => verifyLoaded config reader target timing
+  | .ok chained =>
+    if target.height < chained.loaded.height then return ← verifyLoaded config reader target timing
+    match ← verifyFrom config reader chained timing with
+    | none => verifyLoaded config reader target timing
+    | some (.error failure) => return .error failure
+    | some (.ok verified) => extendVerified config reader verified target
 
 end Minidregg.Kernel.NativeHostReplay
 

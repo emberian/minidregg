@@ -85,7 +85,7 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
     | throw (IO.userError "FAIL the fixture's first record no longer decodes")
   -- The image through objective-first: its carried commitment is the root the native Host reported.
   let records := records ++ [first]
-  let image : Image := ⟨seed, records⟩
+  let image : Image := Image.ofAccepted seed records
   let cfg := a
   let logStart := cfg.logStart seed
   let rootOf := NativeHostCodec.worldRoot cfg.deployment.domain cfg.profile.semantics
@@ -112,7 +112,7 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   expectRefused "a non-empty Store" "scratch Store"
     (← DurableHistoryStore.scratchReader cfg.physicalTransport rootBytes image logStart carried)
   -- plant 3: an altered record
-  let altered : Image := ⟨seed, records.map alter⟩
+  let altered : Image := Image.ofAccepted seed (records.map alter)
   require "the plant alters the first record" (records.head?.map (·.writes.length) != some 0)
   expectRefused "an altered record" "record 1 does not bind"
     (← DurableHistoryStore.scratchReader c.physicalTransport rootBytes altered logStart

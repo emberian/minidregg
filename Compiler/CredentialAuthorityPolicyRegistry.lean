@@ -898,8 +898,11 @@ def payloadAvailability {F : Type} [Field F] [DecidableEq F]
     | some value =>
         have equal : value.committed = committed := by
           simpa [config, policyRegistry, loaded] using resolved
-        simpa only [equal] using value.fetched
+        have hsimpa := value.fetched
+        simp only [equal] at hsimpa ⊢
+        exact hsimpa
 
+set_option backward.isDefEq.respectTransparency false in
 def membershipSemantics {F : Type} [Field F] [DecidableEq F]
     (profile : PolicyCompilerProfile F)
     (snapshot : Snapshot) (store : PayloadStore) (base : Portal) (step : PolicyStepContext) :
@@ -949,12 +952,12 @@ theorem policyStore_epoch :
     policyStore ⟨.policyEpoch, demoRequest.policyId⟩ = some demoRequest.policyEpoch := by
   unfold policyStore
   rw [Store.Store.set_ne _ _ _ _ (by simp [policyAt]),
-    Store.Store.set_ne _ _ _ _ (by simp), Store.Store.set_eq]; rfl
+    Store.Store.set_ne _ _ _ _ (by simp), Store.Store.set_eq]
 
 theorem policyStore_revision :
     policyStore ⟨.policyRevision, demoRequest.policyId⟩ = some demoRequest.policyRevision := by
   unfold policyStore
-  rw [Store.Store.set_ne _ _ _ _ (by simp [policyAt]), Store.Store.set_eq]; rfl
+  rw [Store.Store.set_ne _ _ _ _ (by simp [policyAt]), Store.Store.set_eq]
 
 theorem policyStore_address : policyStore policyAt = some committedPolicy.address := by
   unfold policyStore
@@ -1079,7 +1082,7 @@ noncomputable def membershipSemantics (base : Portal) :
     have claim : root = authorityCell.root /\
         address = committedPolicy.address /\ Contains := by
       apply of_decide_eq_true
-      simpa only [config_verifyMembership] using accepted
+      exact accepted
     exact claim
 
 noncomputable def policyWitness : CompiledPolicyWitness (ZMod 13) :=

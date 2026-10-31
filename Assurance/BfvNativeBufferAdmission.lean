@@ -497,7 +497,9 @@ theorem RowAdmission.systemsAccept {statement : InputStatement}
     (fun i => template.candidate response i.val)
     (rowArithmeticSystem rowIndex template.equation template.width template.carryBits)).mp
   refine ⟨template.candidate response, fun _ => rfl, ?_⟩
-  simpa [RowTemplate.instruction, rowKernelCall] using admission.descriptorAcceptance
+  have hsimpa := admission.descriptorAcceptance
+  simp [RowTemplate.instruction, rowKernelCall] at hsimpa ⊢
+  exact hsimpa
 
 theorem RowAdmission.threeSystemsAccept {statement : InputStatement}
     {input : ValidCommittedWitness statement} {rowIndex : Fin equationsPerOwner}
@@ -527,6 +529,7 @@ theorem RowAdmission.threeSystemsAccept {statement : InputStatement}
           (rowRightWires rowIndex template.width template.carryBits)) := by
   simpa [rowArithmeticSystem, systemAccepts_append] using admission.systemsAccept
 
+set_option backward.isDefEq.respectTransparency false in
 noncomputable def RowAdmission.toAcceptedRowCall {statement : InputStatement}
     {input : ValidCommittedWitness statement} {rowIndex : Fin equationsPerOwner}
     {manifest : Manifest} {template : RowTemplate statement input rowIndex}
@@ -755,7 +758,9 @@ noncomputable def concreteBinding
   inputBridge := bfvInputBridge
   inputBridgeRegistered := by decide
   inputBridgeNameExact := by
-    simpa [Authority.declaration] using inputBridgeExact
+    have hsimpa := inputBridgeExact
+    simp [Authority.declaration] at hsimpa ⊢
+    exact hsimpa
   inputBridgeRequired := by
     simp [bfvAdmissionClauseDecl, bfvClauseDecl, bfvInputBridge, bfvInputBridgeId,
       bfvOutputBridgeId]
@@ -809,7 +814,9 @@ theorem receiptEvent_every_exact_integer_equation
   have accepted : Accepts
       (authority.declaration.statementOf event.privateRequest event.outcome)
       event.evidence.checked.witness := by
-    simpa only [Authority.declaration] using event.evidence.checked.accepts
+    have hsimpa := event.evidence.checked.accepts
+    simp only [Authority.declaration] at hsimpa ⊢
+    exact hsimpa
   rcases accepted with ⟨-, -, -, outputEq, -, -⟩
   have outputEq' : event.outcome.output.representation =
       event.evidence.checked.witness.outputRepresentation := by
@@ -829,7 +836,7 @@ theorem receiptEvent_every_exact_integer_equation
 #guard_msgs (whitespace := lax) in #print axioms RowAdmission.toCheckedRowBuffer
 /-- info: 'Minidregg.Assurance.BfvNativeBufferAdmission.BatchAdmission.every_exact_integer_equation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms BatchAdmission.every_exact_integer_equation
-/-- info: 'Minidregg.Assurance.BfvNativeBufferAdmission.bfvManifest_wellFormed' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.BfvNativeBufferAdmission.bfvManifest_wellFormed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms bfvManifest_wellFormed
 /-- info: 'Minidregg.Assurance.BfvNativeBufferAdmission.issueReceiptEvent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms issueReceiptEvent

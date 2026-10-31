@@ -383,7 +383,7 @@ def success : QuerySuccess queryConfig portal authState pre declaration request
         record.sourceDocument = Publication.documentId
     intro record opened
     rw [show Hyperdocument.lookup pre.logical .links Publication.linkId =
-        some Reopen.record by simpa [Reopen.query, ContentQuery.project] using
+        some Reopen.record by exact 
           bounded_query_exact] at opened
     have recordExact : Reopen.record = record := Option.some.inj opened
     subst record
@@ -647,7 +647,9 @@ theorem wrong_target_rejected :
     IsEmpty (QuerySuccess queryConfig portal authState Content.pre
       Content.declaration wrongTargetRequest Content.capability) := by
   apply no_query_success_wrong_target
-  simpa [wrongTargetRequest] using wrong_target_ne
+  have hsimpa := wrong_target_ne
+  simp [wrongTargetRequest] at hsimpa ⊢
+  exact hsimpa
 
 def staleRoot : Digest := ⟨Content.pre.root.value + 1⟩
 

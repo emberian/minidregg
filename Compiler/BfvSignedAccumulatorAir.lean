@@ -244,7 +244,9 @@ theorem weightedSumGadget_sound {p n width limbBits carryBits constant : Nat}
     exact Bignum.denoteNat_digitsLE hbase width (coefficient j) (hcoefficient j)
   simp_rw [hcoeffDenote] at hlinear
   rw [← hlinear]
-  simpa [base, AirBignum.limbVals, hc0v, hctopv] using htel
+  have hsimpa := htel
+  simp [base, AirBignum.limbVals, hc0v, hctopv] at hsimpa ⊢
+  exact hsimpa
 
 /-- The generic weighted accumulator is consumed by the existing descriptor emitter. -/
 theorem emit_weightedSumGadget_iff (ix : Idx -> Nat) (hinj : Function.Injective ix)
@@ -607,7 +609,7 @@ theorem deployed_column_budget :
 #guard_msgs (whitespace := lax) in #print axioms shiftedScalar_lt_64
 /-- info: 'Minidregg.Compiler.BfvSignedAccumulatorAir.eval_eq_shifted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms eval_eq_shifted
-/-- info: 'Minidregg.Compiler.BfvSignedAccumulatorAir.deployed_column_budget' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.BfvSignedAccumulatorAir.deployed_column_budget' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms deployed_column_budget
 
 end Minidregg.Compiler.BfvSignedAccumulatorAir

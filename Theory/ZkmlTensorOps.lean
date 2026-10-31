@@ -25,7 +25,7 @@ than re-derives:
 
 ## The N3 constraint, and what it forced
 
-`Compiler/Signature.lean`'s `[N3-converse]` (`opaqueConflation_proved`) proves by
+`Theory/Signature.lean`'s `[N3-converse]` (`opaqueConflation_proved`) proves by
 Cantor that a signature whose constructor payloads are **semantic objects**
 admits no faithful compositional second reading into any countable target. The
 consequence here is not cosmetic: **no operation in this vocabulary carries tensor
@@ -156,8 +156,7 @@ theorem mem_idxList : ∀ {s : List ℕ} (i : Idx s), i ∈ idxList s := by
   | nil => intro i; cases i; exact List.mem_singleton_self _
   | cons n s ih =>
       rintro ⟨i, j⟩
-      simp only [idxList, List.mem_flatMap, List.mem_map]
-      exact ⟨i, List.mem_finRange i, j, ih j, rfl⟩
+      exact List.mem_flatMap.mpr ⟨i, List.mem_finRange i, List.mem_map.mpr ⟨j, ih j, rfl⟩⟩
 
 /-- ...and it has exactly the element count the shape declares. -/
 theorem length_idxList : ∀ s : List ℕ, (idxList s).length = size s := by

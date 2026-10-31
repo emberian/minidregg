@@ -140,9 +140,9 @@ theorem lift_apply (store : OldStore) (address : OldAddress) :
 
 @[simp] theorem tariff_lifted (store : OldStore) :
     PayCell.tariffOf (lift store) = (PayCellLegacyV4.tariffOf store).map liftTariff := by
-  simpa [PayCell.tariffOf, PayCellLegacyV4.tariffOf,
-    PayCell.tariffAddress, PayCellLegacyV4.tariffAddress, addressMap, valueMap]
-    using lift_apply store PayCellLegacyV4.tariffAddress
+  have hsimpa := lift_apply store PayCellLegacyV4.tariffAddress
+  simp [PayCell.tariffOf, PayCellLegacyV4.tariffOf, PayCell.tariffAddress, PayCellLegacyV4.tariffAddress, addressMap, valueMap] at hsimpa ⊢
+  exact hsimpa
 
 /-- The week price survives the unit change exactly. -/
 theorem liftTariff_week (row : PayCellLegacyV4.FrozenTariff) :
@@ -169,9 +169,9 @@ theorem liftTariff_week (row : PayCellLegacyV4.FrozenTariff) :
 @[simp] theorem enrolment_preserved (store : OldStore) (key : List UInt8) :
     PayCell.enrolmentAt (lift store) key =
       (PayCellLegacyV4.enrolmentAt store key).map liftEnrolRecord := by
-  simpa [PayCell.enrolmentAt, PayCellLegacyV4.enrolmentAt,
-    PayCell.enrolmentAddress, PayCellLegacyV4.enrolmentAddress, addressMap, valueMap]
-    using lift_apply store (PayCellLegacyV4.enrolmentAddress key)
+  have hsimpa := lift_apply store (PayCellLegacyV4.enrolmentAddress key)
+  simp [PayCell.enrolmentAt, PayCellLegacyV4.enrolmentAt, PayCell.enrolmentAddress, PayCellLegacyV4.enrolmentAddress, addressMap, valueMap] at hsimpa ⊢
+  exact hsimpa
 
 @[simp] theorem sshIndex_preserved (store : OldStore) (blob : List UInt8) :
     PayCell.sshIndexAt (lift store) blob = PayCellLegacyV4.sshIndexAt store blob := by
@@ -185,9 +185,9 @@ theorem liftTariff_week (row : PayCellLegacyV4.FrozenTariff) :
 @[simp] theorem journal_preserved (store : OldStore) (nullifier : List UInt8) :
     PayCell.journalAt (lift store) nullifier =
       (PayCellLegacyV4.journalAt store nullifier).map liftUnattributed := by
-  simpa [PayCell.journalAt, PayCellLegacyV4.journalAt,
-    PayCell.journalAddress, PayCellLegacyV4.journalAddress, addressMap, valueMap]
-    using lift_apply store (PayCellLegacyV4.journalAddress nullifier)
+  have hsimpa := lift_apply store (PayCellLegacyV4.journalAddress nullifier)
+  simp [PayCell.journalAt, PayCellLegacyV4.journalAt, PayCell.journalAddress, PayCellLegacyV4.journalAddress, addressMap, valueMap] at hsimpa ⊢
+  exact hsimpa
 
 private theorem new_address_absent (store : OldStore) (address : NewAddress)
     (fresh : ∀ old, addressMap old ≠ address) : lift store address = none := by
@@ -269,7 +269,9 @@ private theorem legacy_row_everywhere (store : OldStore) (law : PayCellLegacyV4.
   by_cases member : address ∈ store.support
   · exact law.2 address member
   · have absent : store address = none := by
-      simpa only [DFinsupp.mem_support_toFun, not_not] using member
+      have hsimpa := member
+      simp only [DFinsupp.mem_support_toFun, not_not] at hsimpa ⊢
+      exact hsimpa
     rcases address with ⟨space, key⟩
     cases space <;>
       simp [PayCellLegacyV4.rowShaped, PayCellLegacyV4.bookAt,

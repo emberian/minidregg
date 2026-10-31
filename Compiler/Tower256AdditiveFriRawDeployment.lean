@@ -18,6 +18,7 @@ the general controller.
 
 import Compiler.Tower256AdditiveFriRawController
 import Mathlib.Data.Finsupp.Encodable
+import Mathlib.Algebra.MonoidAlgebra.Cardinal
 
 namespace Minidregg.Compiler.Tower256AdditiveFriRawDeployment
 
@@ -200,9 +201,7 @@ theorem receiptWire_injective : Function.Injective receiptWire := by
 
 noncomputable instance receiptEncodable : Encodable (Receipt 1 0 0) := by
   classical
-  letI : Countable (AddMonoidAlgebra Tower256 Nat) := by
-    change Countable (Nat →₀ Tower256)
-    infer_instance
+  letI : Countable (AddMonoidAlgebra Tower256 Nat) := inferInstance
   letI : Encodable (AddMonoidAlgebra Tower256 Nat) :=
     Encodable.ofCountable _
   exact Encodable.ofInj receiptWire receiptWire_injective

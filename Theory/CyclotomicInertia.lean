@@ -119,10 +119,16 @@ theorem babyBear_eq : babyBear = 2013265921 := by norm_num [babyBear]
 
 theorem mersenne31_eq : mersenne31 = 2147483647 := by norm_num [mersenne31]
 
+-- norm_num's primality certificate for a 31-bit prime nests past the default kernel depth (v4.35).
+set_option maxRecDepth 8192 in
 theorem koalaBear_prime : Nat.Prime koalaBear := by rw [koalaBear_eq]; norm_num
 
+-- norm_num's primality certificate for a 31-bit prime nests past the default kernel depth (v4.35).
+set_option maxRecDepth 8192 in
 theorem babyBear_prime : Nat.Prime babyBear := by rw [babyBear_eq]; norm_num
 
+-- norm_num's primality certificate for a 31-bit prime nests past the default kernel depth (v4.35).
+set_option maxRecDepth 8192 in
 theorem mersenne31_prime : Nat.Prime mersenne31 := by rw [mersenne31_eq]; norm_num
 
 instance : Fact (Nat.Prime koalaBear) := ⟨koalaBear_prime⟩

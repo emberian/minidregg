@@ -307,7 +307,7 @@ theorem flatten_scoped (t : Term (AirSig F Idx)) (n₀ : ℕ) :
       obtain ⟨hn₂, _, hgr⟩ := ih true (flatten (k false) n₀).next
       obtain ⟨_, hol, _⟩ := ih false n₀
       obtain ⟨_, hor, _⟩ := ih true (flatten (k false) n₀).next
-      simp only [flatten_mk_add]
+      rw [flatten_mk_add]; dsimp only
       refine ⟨by omega, ⟨by omega, by omega⟩, ?_⟩
       intro g hg
       rcases List.mem_append.mp hg with hg' | hg'
@@ -327,7 +327,7 @@ theorem flatten_scoped (t : Term (AirSig F Idx)) (n₀ : ℕ) :
       obtain ⟨hn₂, _, hgr⟩ := ih true (flatten (k false) n₀).next
       obtain ⟨_, hol, _⟩ := ih false n₀
       obtain ⟨_, hor, _⟩ := ih true (flatten (k false) n₀).next
-      simp only [flatten_mk_mul]
+      rw [flatten_mk_mul]; dsimp only
       refine ⟨by omega, ⟨by omega, by omega⟩, ?_⟩
       intro g hg
       rcases List.mem_append.mp hg with hg' | hg'
@@ -398,7 +398,7 @@ theorem flatten_sound (asg : Idx → F) (t : Term (AirSig F Idx)) (n₀ : ℕ) :
       obtain ⟨auxv₂, hg₂, ho₂⟩ := ih true (flatten (k false) n₀).next
       obtain ⟨hle₁, hol, hsl⟩ := flatten_scoped (k false) n₀
       obtain ⟨hle₂, hor, hsr⟩ := flatten_scoped (k true) (flatten (k false) n₀).next
-      simp only [flatten_mk_add]
+      rw [flatten_mk_add]; dsimp only
       set n₁ := (flatten (k false) n₀).next with hn₁
       set n₂ := (flatten (k true) n₁).next with hn₂
       set v : ℕ → F := fun m => if m < n₁ then auxv₁ m else if m < n₂ then auxv₂ m
@@ -428,7 +428,7 @@ theorem flatten_sound (asg : Idx → F) (t : Term (AirSig F Idx)) (n₀ : ℕ) :
       obtain ⟨auxv₂, hg₂, ho₂⟩ := ih true (flatten (k false) n₀).next
       obtain ⟨hle₁, hol, hsl⟩ := flatten_scoped (k false) n₀
       obtain ⟨hle₂, hor, hsr⟩ := flatten_scoped (k true) (flatten (k false) n₀).next
-      simp only [flatten_mk_mul]
+      rw [flatten_mk_mul]; dsimp only
       set n₁ := (flatten (k false) n₀).next with hn₁
       set n₂ := (flatten (k true) n₁).next with hn₂
       set v : ℕ → F := fun m => if m < n₁ then auxv₁ m else if m < n₂ then auxv₂ m
@@ -482,7 +482,7 @@ theorem flatten_covers (t : Term (AirSig F Idx)) (n₀ : ℕ) :
     | add =>
       obtain ⟨hle₁, -, -⟩ := flatten_scoped (k false) n₀
       obtain ⟨hle₂, -, -⟩ := flatten_scoped (k true) (flatten (k false) n₀).next
-      simp only [flatten_mk_add]
+      rw [flatten_mk_add]; dsimp only
       intro m h₁ h₂
       by_cases hm₁ : m < (flatten (k false) n₀).next
       · obtain ⟨g, hg, hgo⟩ := ih false n₀ m h₁ hm₁
@@ -496,7 +496,7 @@ theorem flatten_covers (t : Term (AirSig F Idx)) (n₀ : ℕ) :
     | mul =>
       obtain ⟨hle₁, -, -⟩ := flatten_scoped (k false) n₀
       obtain ⟨hle₂, -, -⟩ := flatten_scoped (k true) (flatten (k false) n₀).next
-      simp only [flatten_mk_mul]
+      rw [flatten_mk_mul]; dsimp only
       intro m h₁ h₂
       by_cases hm₁ : m < (flatten (k false) n₀).next
       · obtain ⟨g, hg, hgo⟩ := ih false n₀ m h₁ hm₁

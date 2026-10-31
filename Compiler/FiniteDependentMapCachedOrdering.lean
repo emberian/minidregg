@@ -164,6 +164,7 @@ def uniqueKeysCached [LinearOrder O] [FastKeyOrder O] (keyExact : Function.Injec
   let unique : Finset (CachedKey keyOf) := ⟨tree.keys, tree.nodup_keys⟩
   unique.map ⟨CachedKey.value, value_injective keyOf⟩
 
+set_option backward.isDefEq.respectTransparency false in
 @[simp] theorem mem_uniqueKeysCached [LinearOrder O] [FastKeyOrder O] (keyExact : Function.Injective keyOf)
     (keys : List K) (key : K) :
     key ∈ uniqueKeysCached keyOf keyExact keys ↔ key ∈ keys := by
@@ -221,6 +222,7 @@ def cachedEntries (items : List (Sigma V)) :
     List (Sigma (fun cached : CachedKey keyOf => V cached.value)) :=
   items.map fun item => ⟨cache keyOf item.1, item.2⟩
 
+set_option backward.isDefEq.respectTransparency false in
 /-- For any decision of cached-key equality (they all agree). -/
 theorem fromEntries_cached_apply [DecidableEq (CachedKey keyOf)] (items : List (Sigma V)) (key : K) :
     FiniteDependentMapCodec.fromEntries (cachedEntries keyOf items) (cache keyOf key) =
@@ -277,7 +279,7 @@ end Minidregg.Compiler.FiniteDependentMapCachedOrdering
 
 /-- info: 'Minidregg.Compiler.FiniteDependentMapCachedOrdering.fromEntriesCached_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.FiniteDependentMapCachedOrdering.fromEntriesCached_eq
-/-- info: 'Minidregg.Compiler.FiniteDependentMapCachedOrdering.sortedFinsetCached_eq' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.FiniteDependentMapCachedOrdering.sortedFinsetCached_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.FiniteDependentMapCachedOrdering.sortedFinsetCached_eq
 /-- info: 'Minidregg.Compiler.FiniteDependentMapCachedOrdering.supportCached_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.FiniteDependentMapCachedOrdering.supportCached_eq

@@ -185,7 +185,7 @@ def Decision.logicalPost {L : Layout.{u, v, w}} {Root : Type y}
       (pre := pre) reason).logicalPost = pre :=
   rfl
 
-/-- info: 'Minidregg.Theory.CanonicalTransition.CellDelta.changed_only_declared' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CanonicalTransition.CellDelta.changed_only_declared' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms CellDelta.changed_only_declared
 
 end Minidregg.Theory.CanonicalTransition

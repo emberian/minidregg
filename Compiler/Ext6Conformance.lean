@@ -230,19 +230,13 @@ theorem ext3Polynomial_irreducible :
 theorem ext6Polynomial_irreducible : Irreducible ext6Polynomial := by
   unfold ext6Polynomial
   rw [show 6 = 2 * 3 by norm_num]
+  haveI : Fact (Irreducible ((X : Polynomial BabyBear) ^ 3 - C 31)) := ⟨ext3Polynomial_irreducible⟩
   apply X_pow_mul_sub_C_irreducible ext3Polynomial_irreducible
-  intro E _ _ x hx
   apply X_pow_sub_C_irreducible_of_prime (by norm_num)
   intro b hb
-  have hxint : IsIntegral BabyBear x := by
-    rw [← minpoly.ne_zero_iff]
-    rw [hx]
-    exact X_pow_sub_C_ne_zero (by norm_num) _
   have hnorm := congrArg (Algebra.norm BabyBear) hb
-  simp only [map_pow] at hnorm
-  rw [← IntermediateField.adjoin.powerBasis_gen hxint,
-      Algebra.PowerBasis.norm_gen_eq_coeff_zero_minpoly] at hnorm
-  simp [minpoly_gen, hx] at hnorm
+  rw [map_pow, norm_root_X_pow_sub_C (by norm_num)] at hnorm
+  norm_num at hnorm
   exact thirty_one_not_square (Algebra.norm BabyBear b) hnorm
 
 noncomputable instance : Fact (Irreducible ext6Polynomial) :=

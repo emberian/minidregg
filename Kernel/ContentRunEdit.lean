@@ -310,6 +310,7 @@ theorem insertRun_live_order {document : DocumentId} {progress next : Progress} 
   rw [whole, ← List.map_take, ← List.map_drop, List.take_left' rfl, List.drop_left' rfl]
   simp [List.filter_append, List.map_append]
 
+set_option backward.isDefEq.respectTransparency false in
 /-- Every stored point that names its slot still does: ranges stored in links,
 marks and other records of this document stay valid. -/
 theorem insertRun_preserves_point {document : DocumentId} {progress next : Progress} {runId : RunId}

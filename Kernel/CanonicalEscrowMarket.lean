@@ -828,7 +828,9 @@ theorem rekey_cannot_release_twice
   have lookup : Snapshot.lookupRecorded transactionId
       (DataSnapshot.install before refund.intent).model.journal = none := by
     have oldNe : refund.intent.transactionId ≠ transactionId := by
-      simpa [intent] using different.symm
+      have hsimpa := different.symm
+      simp [intent] at hsimpa ⊢
+      exact hsimpa
     simp [DataSnapshot.install, Snapshot.install, Snapshot.lookupRecorded,
       oldNe, newUnrecorded]
   unfold DurableDataIntent.execute

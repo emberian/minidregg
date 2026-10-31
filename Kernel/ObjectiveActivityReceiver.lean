@@ -150,7 +150,9 @@ theorem receiveLoaded_retry_verification_failure_no_receipt
   have routed := receiveLoaded_recorded_routes deployment profile ambient native transport durable
     decoded recorded
   rw [unverified] at routed
-  simpa [replayAnswer, retryAnswer] using routed
+  have hsimpa := routed
+  simp [replayAnswer, retryAnswer] at hsimpa ⊢
+  exact hsimpa
 
 /-- **A malformed request is rejected cheaply, with no state change and no charge**: bytes that
 are not a canonical signed ingress are refused `malformedIngress` before anything is read,

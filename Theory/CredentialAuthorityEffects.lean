@@ -373,7 +373,7 @@ theorem assignableAll_creation {M : Materializer} (pre : Cell M) (record : Entry
   refine ⟨Or.inl recordRam, ?_, trivial⟩
   unfold Assignable
   rw [Store.set_ne _ _ _ _ recordNotRegistration]
-  exact Or.inr (Option.not_isSome_iff_eq_none.mp (by simpa [isRegistered] using unregistered))
+  exact Or.inr (Option.not_isSome_iff_eq_none.mp (by simpa [isRegistered, registrationEntry] using unregistered))
 
 /-- The two addresses of a creating family are distinct whenever its record is
 on a RAM plane. -/
@@ -1026,8 +1026,7 @@ end DelegationObligations
       ⟨.registered, .capability declaration.child.id⟩ = some () :=
     apply_creation_member accepted.validated rfl
       (registrationEntry (.capability declaration.child.id)) (by simp)
-  simp only [isRegistered, AcceptedCellEffect.prepared_post, written]
-  rfl
+  exact (congrArg Option.isSome written).trans rfl
 
 theorem delegation_post_lineage_valid {M : Materializer}
     {pre : Cell M} {portal : Portal}
@@ -1340,8 +1339,7 @@ the `registered` plane of the post-cell, allocated by the same patch. -/
       ⟨.registered, .capability declaration.capability.id⟩ = some () :=
     apply_creation_member accepted.validated rfl
       (registrationEntry (.capability declaration.capability.id)) (by simp)
-  simp only [isRegistered, AcceptedCellEffect.prepared_post, written]
-  rfl
+  exact (congrArg Option.isSome written).trans rfl
 
 theorem issue_post_lineage_valid
     {M : Materializer} {pre : Cell M}
@@ -1392,8 +1390,7 @@ theorem issue_post_lineage_valid
       ⟨.registered, .capability declaration.child.id⟩ = some () :=
     apply_creation_member accepted.validated rfl
       (registrationEntry (.capability declaration.child.id)) (by simp)
-  simp only [isRegistered, AcceptedCellEffect.prepared_post, written]
-  rfl
+  exact (congrArg Option.isSome written).trans rfl
 
 /-- The written child is not just present: its retained first-order ancestry is
 validated by the exact strict edge and parent lineage read from canonical pre. -/
@@ -1443,8 +1440,7 @@ theorem attenuation_post_lineage_anchored
     isRevoked accepted.prepared.post declaration.key = true := by
   have written : accepted.validated.apply.logical ⟨.revoked, declaration.key⟩ = some () :=
     apply_single (record := declaration.revokedEntry) accepted.validated
-  simp only [isRevoked, AcceptedCellEffect.prepared_post, written]
-  rfl
+  exact (congrArg Option.isSome written).trans rfl
 
 /-- A committed revocation is immediately visible to the next canonical
 authorization projection; there is no stale host revocation cache. -/
@@ -1494,8 +1490,8 @@ theorem revocation_post_registered_and_revoked
     exact present.trans (congrArg some (Subsingleton.elim (α := Unit) value ()))
   have kept := registration_permanent pre.logical _ declaration.key
     accepted.validated.valid present
-  simp only [isRegistered, AcceptedCellEffect.prepared_post,
-    CellState.ValidatedPatch.apply_logical, kept]
+  show (accepted.validated.apply.logical ⟨.registered, declaration.key⟩).isSome = true
+  rw [CellState.ValidatedPatch.apply_logical, kept]
   rfl
 
 @[simp] theorem rotation_post_exact

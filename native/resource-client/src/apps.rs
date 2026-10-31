@@ -401,6 +401,8 @@ pub(crate) fn suggested_class(raw_bytes: Option<u64>) -> &'static str {
 }
 
 pub(crate) fn entry_json(entry: &Entry, verdict: &Verdict) -> Value {
+    let mut interface = typed_interface(entry);
+    interface["says"] = json!(tools_says(interface["status"].as_str().unwrap_or("unavailable")));
     json!({
         "appId":entry.app_id,"packageId":entry.package_id,"name":entry.name,"version":entry.version,
         "interface":interfaces::summary(&entry.app_id, &entry.package_id),
@@ -409,11 +411,11 @@ pub(crate) fn entry_json(entry: &Entry, verdict: &Verdict) -> Value {
         "shortDescription":entry.short_description,"categories":entry.categories,"webLink":entry.web_link,
         "codeLink":entry.code_link,"packageUrl":package_url(entry),
         "verdict":{"state":verdict.state,"reason":verdict.reason,"rawBytes":verdict.raw_bytes,
-            "signedAppId":verdict.signed_app_id,"running":verdict.running},
+            "signedAppId":verdict.signed_app_id,"running":verdict.running,"says":verdict_says(verdict)},
         "suggestedClass":entry.pinned.as_ref().and_then(|p| p.class.as_deref()).unwrap_or_else(|| suggested_class(verdict.raw_bytes)),
         "pinned":entry.pinned.as_ref().map(|p| json!({"sha256":p.sha256,"packageUrl":p.package_url,"class":p.class})),
         "featured":featured(&entry.app_id).map(|rank| json!({"rank":rank})),
-        "typedInterface":typed_interface(entry),
+        "typedInterface":interface,
         "claims":"name, version, publisher and links are the index's claims; identity is the signed package's"
     })
 }
@@ -454,7 +456,7 @@ fn interface_summary(entry: &Entry) -> String {
     let interface = typed_interface(entry);
     match interface["tools"].as_array() {
         Some(tools) => format!("\n      {} typed tools; native attachment required", tools.len()),
-        None => format!("\n      typed tools: {}", interface["status"].as_str().unwrap_or("unavailable")),
+        None => format!("\n      {}", tools_says(interface["status"].as_str().unwrap_or("unavailable"))),
     }
 }
 fn print_interface(entry: &Entry) {
@@ -476,6 +478,30 @@ fn package_url(entry: &Entry) -> String {
         Some(Pinned { package_url: Some(url), .. }) => url.clone(),
         Some(_) => format!("file: adopted by the operator (mini-market-fetch adopt {} SHA256 FILE)", entry.package_id),
         None => format!("{PACKAGE_URL}{}", entry.package_id),
+    }
+}
+
+/// The verdict as a member reads it, with what they can do. `unverified` is not a fault: nothing on
+/// this box has parsed the package yet, and the install is what checks it (signature, signed app id,
+/// size) before anything runs, so it can be installed now. `refused` keeps its reason.
+pub(crate) fn verdict_says(verdict: &Verdict) -> String {
+    match verdict.state.as_str() {
+        "unverified" => "not checked on this box yet: installing it checks its signature and size first (`apps install`)".into(),
+        "refused" => format!("refused here{}: an install is refused the same way",
+            verdict.reason.as_deref().map(|r| format!(" ({r})")).unwrap_or_default()),
+        _ => verdict_line(verdict),
+    }
+}
+
+/// The typed-tools status as a member reads it: an app without a declaration is used through its
+/// own web page (an agent cannot call typed tools on it), never broken.
+pub(crate) fn tools_says(status: &str) -> String {
+    match status {
+        "declaration-unavailable" => "no typed tools declared: use it through its own page; agents cannot call it as tools".into(),
+        "package-mismatch" => "typed tools are declared for another version of this package, not this one".into(),
+        "declaration-invalid" => "its typed-tool declaration does not parse here; use it through its own page".into(),
+        "native-attachment-required" => "typed tools declared; an agent can call them once the app is installed and attached".into(),
+        other => other.to_owned(),
     }
 }
 
@@ -768,7 +794,7 @@ fn catalogue(action: &str, mut args: Args, paths: &Paths, as_json: bool) -> Resu
                     truncate(&e.version, 22),
                     truncate(&e.author, 24),
                     e.app_id,
-                    format!("{}; {}", verdict_line(&v), qualification::line(qualification.get(e))),
+                    format!("{}; {}", verdict_says(&v), qualification::line(qualification.get(e))),
                     interface_summary(e)
                 );
             }
@@ -1887,6 +1913,22 @@ mod tests {
         shadow["apps"][0]["sha256"] = json!("5830d70137cdae158118884da879087000000000000000000000000000000000");
         let shadow = parse_index(&serde_json::to_vec(&shadow).unwrap()).unwrap();
         assert!(merge_local(upstream, shadow).unwrap_err().contains("collides"));
+    }
+
+    #[test]
+    fn a_listing_says_what_each_state_means_and_what_a_member_can_do() {
+        let v = |state: &str, reason: Option<&str>| Verdict { state: state.into(), reason: reason.map(str::to_owned), raw_bytes: None, signed_app_id: None, running: 0 };
+        let fresh = verdict_says(&v("unverified", None));
+        assert!(fresh.contains("not checked on this box yet") && fresh.contains("`apps install`") && !fresh.contains("unverified"), "{fresh}");
+        assert_eq!(verdict_says(&v("refused", Some("sizeOverProfile"))), "refused here (sizeOverProfile): an install is refused the same way");
+        assert!(tools_says("declaration-unavailable").starts_with("no typed tools declared: use it through its own page"));
+        assert!(!tools_says("declaration-unavailable").contains("unavailable"), "the state reads as a choice, not a failure");
+        assert_eq!(qualification::line(None), "its lifecycle not yet tried on this box");
+        let entry = parse_index(include_bytes!("../tests/fixtures/sandstorm-index-2026-10-27.json")).unwrap().remove(0);
+        let shown = entry_json(&entry, &v("unverified", None));
+        assert_eq!(shown["verdict"]["state"], "unverified", "the JSON keeps the machine state");
+        assert!(shown["verdict"]["says"].as_str().unwrap().contains("installing it checks"));
+        assert!(shown["typedInterface"]["says"].as_str().is_some());
     }
 
     #[test]

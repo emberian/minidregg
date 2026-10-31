@@ -832,12 +832,13 @@ def signingHeader (deployment : Deployment) (profile : CanonicalRuntimeProfile.P
 def transactionId (domain semantics : Digest) (ingress : DecodedIngress) : Digest :=
   ⟨marker domain semantics ingress.command⟩
 
-def event (domain semantics : Digest) (ingress : DecodedIngress) : StableEvent where
-  codecVersion := 1
-  domain := domain
-  eventId := effectDigest domain semantics ingress.command
-    (declaration domain semantics ingress.command)
-  canonicalBytes := ingress.bytes
+/-- The event id is a digest of the retained signed ingress, never of the
+unsigned command (K-RECEIPT-HIDE, `Kernel.ReceiptEventHiding`). -/
+def eventIdOfIngress (bytes : List UInt8) : Digest :=
+  (Sp800185Cshake256.hash "DREGG.REALM.WELL.EVENT/v2".toUTF8.toList bytes).digest
+
+def event (domain _semantics : Digest) (ingress : DecodedIngress) : StableEvent :=
+  StableEvent.retained 1 domain eventIdOfIngress ingress.bytes
 
 def nullifier (domain semantics : Digest) (ingress : DecodedIngress) : StableNullifier :=
   CredentialAuthorityReplay.nullifier domain (marker domain semantics ingress.command)

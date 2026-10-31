@@ -268,7 +268,7 @@ theorem Meter.Reaches.within {envelope : Capacity} {m : Meter} (reached : Meter.
 and 8 core bytes; a third is refused naming the source stage with nothing left. -/
 theorem meter_third_replay_refused :
     ((Meter.start { ObjectiveTariff.zeroCapacity with replayBytes := 20, coreBytes := 8 }).draw 10 4 >>=
-      (·.draw 10 4) >>= (·.draw 10 4)) = .error (.frontEnd, 10, 0) := by decide
+      (·.draw 10 4) >>= (·.draw 10 4)) = .error (.frontEnd, 10, 0) := by rfl
 
 /-! ### Instances: the refusal and its plant -/
 

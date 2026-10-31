@@ -46,6 +46,9 @@ pub(super) fn run(mut args: Args, root: PathBuf) -> Result<()> {
         .filter(|fd| *fd >= 3)
         .ok_or("--listen-fd takes an inherited descriptor number (3 or above)")?;
     let anonymous = args.optional("anonymous").is_some();
+    let parent: Option<i32> = args.optional("parent-fd")
+        .map(|v| v.to_str().and_then(|s| s.parse().ok()).filter(|fd: &i32| *fd > 3).ok_or("--parent-fd takes an inherited descriptor number other than the listener's"))
+        .transpose()?;
     let home = absolute(&path(args.required("home")?))?;
     let host = absolute(&path(args.required("host")?))?;
     let config = absolute(&path(args.required("config")?))?;
@@ -71,6 +74,18 @@ pub(super) fn run(mut args: Args, root: PathBuf) -> Result<()> {
         face: Face::Body,
         shell: Some(Shell { host, config, home, public_subject, front_doc }),
     });
+    // Neither inherited descriptor reaches what this body starts (the shell it runs each verb in, the
+    // residents those start): a resident that held the listener or the lifeline would keep either alive.
+    for inherited in std::iter::once(fd).chain(parent) {
+        unsafe { libc::fcntl(inherited, libc::F_SETFD, libc::FD_CLOEXEC) };
+    }
+    if let Some(line) = parent {
+        std::thread::spawn(move || {
+            until_closed(line);
+            eprintln!("mini web --body: the helper that started this body is gone (its lifeline closed); exiting");
+            std::process::exit(0);
+        });
+    }
     let listener = unsafe { UnixListener::from_raw_fd(fd) };
     eprintln!("mini web --body: subject {} serving fd {fd}{}", site.subject, if anonymous { " (anonymous)" } else { "" });
     let handler: Arc<dyn Fn(UnixStream, Instant) + Send + Sync> = Arc::new(move |stream, deadline| {
@@ -90,6 +105,18 @@ pub(super) fn run(mut args: Args, root: PathBuf) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Block until the lifeline `fd` reads EOF (every write end closed: the helper is gone) or fails.
+/// The helper never writes it; any bytes are ignored.
+fn until_closed(fd: i32) {
+    let mut byte = [0u8; 64];
+    loop {
+        let n = unsafe { libc::read(fd, byte.as_mut_ptr().cast(), byte.len()) };
+        if n == 0 || (n < 0 && std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted) {
+            return;
+        }
+    }
 }
 
 const ANONYMOUS: &str = "the public reader shows what members published; writing needs your own session (Join, then open the link the door gives you)";
@@ -163,7 +190,7 @@ fn serve(site: &Site, mut stream: UnixStream, deadline: Instant) -> Result<()> {
     if site.front.read_only && page.status >= 400 {
         log_public_failure(&format!("{} {target}", request.method), &page);
     }
-    page.body = page.body.replace(PAGE_MARK, &pct(&target));
+    page.body = with_attempts(&page.body.replace(PAGE_MARK, &pct(&target)));
     answer(&mut stream, &page, site)
 }
 
@@ -806,7 +833,7 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
         // would any line typed at it.
         ["paste"] => {
             let raw = field("line");
-            let id = fresh_id();
+            let id = form_attempt(&form);
             let line = raw.split_whitespace().map(|w| if w == "ID" { id.as_str() } else { w }).collect::<Vec<_>>().join(" ");
             let proposes = crate::shell::words(&line).ok().and_then(|w| {
                 let g = crate::shell_grammar::grammar(w.first()?)?;
@@ -823,7 +850,7 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
             // The member's own turns on their own fact: a write from the value read now (the
             // compare-and-write refuses if it changed meanwhile), or the cell's birth if absent.
             let want = if form.get("choice").map(String::as_str) == Some("cc0") { 1 } else { 0 };
-            let id = fresh_id();
+            let id = form_attempt(&form);
             let lines = match research_consent(site) {
                 Some(now) if now == want => {
                     return export_page(site, Some(format!("Your world already records that choice (field 1 = {want}).")));
@@ -872,22 +899,22 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
             act(site, &format!("New document {name}"), vec![line], "", &[("the document", &format!("/doc/{name}")), ("documents", "/doc")])
         }
         ["doc", name, "append"] => {
-            let id = fresh_id();
+            let id = form_attempt(&form);
             let Some(file) = text_file(site, &id, &field("text")) else { return simple(400, "Append", "text must be 1..4096 bytes") };
             act(site, &format!("Append to {name}"), vec![format!("doc append {id} {} @{file}", quote(name)), format!("submit {id}")], &id, &[("the document", &format!("/doc/{name}"))])
         }
         ["doc", name, "publish"] => {
             let Some(subject) = site.shell.as_ref().and_then(|s| s.public_subject.clone()) else { return simple(400, "Publish", "this box has no public reader") };
-            let id = fresh_id();
+            let id = form_attempt(&form);
             act(site, &format!("Publish {name}"), vec![format!("delegate {id} {} {subject} observe {}", quote(name), PUBLIC_READ_MAX_COST.trim()), format!("submit {id}"), format!("publish {id}")], &id, &[("the document", &format!("/doc/{name}"))])
         }
         ["doc", name, "unpublish"] => {
             let Some(subject) = site.shell.as_ref().and_then(|s| s.public_subject.clone()) else { return simple(400, "Unpublish", "this box has no public reader") };
-            let id = fresh_id();
+            let id = form_attempt(&form);
             act(site, &format!("Unpublish {name}"), vec![format!("revoke {id} {} {subject}", quote(name)), format!("submit {id}")], &id, &[("the document", &format!("/doc/{name}"))])
         }
         ["doc", name, "link"] => {
-            let id = fresh_id();
+            let id = form_attempt(&form);
             let relation = field("relation");
             let mut line = format!("doc link {id} {} {}", quote(name), quote(&field("to")));
             if !relation.is_empty() {
@@ -896,7 +923,7 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
             act(site, &format!("Link from {name}"), vec![line, format!("submit {id}")], &id, &[("the document", &format!("/doc/{name}"))])
         }
         ["board", name, op @ ("add" | "move" | "take")] => {
-            let id = fresh_id();
+            let id = form_attempt(&form);
             let line = match *op {
                 "add" => format!("board add {id} {} {}", quote(name), quote(&field("task"))),
                 "move" => format!("board move {id} {} {} {} {}", quote(name), quote(&field("task")), quote(&field("from")), quote(&field("to"))),
@@ -950,7 +977,7 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
             Err(e) => simple(400, "Receipts", &e),
         },
         ["grants", "delegate"] => {
-            let id = fresh_id();
+            let id = form_attempt(&form);
             act(
                 site,
                 "Delegate",
@@ -960,11 +987,11 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
             )
         }
         ["grants", "revoke"] => {
-            let id = fresh_id();
+            let id = form_attempt(&form);
             act(site, "Revoke", vec![format!("revoke {id} {} {}", quote(&field("ref")), quote(&field("recipient"))), format!("submit {id}")], &id, &[("grants", "/grants")])
         }
         ["laws", "install"] => {
-            let id = fresh_id();
+            let id = form_attempt(&form);
             let clauses = field("clauses");
             let Some(file) = text_file(site, &id, &clauses) else { return simple(400, "Laws", "clauses must be 1..4096 bytes") };
             act(site, "Install a law", vec![format!("law {id} {} @{file}", quote(&field("ref"))), format!("submit {id}")], &id, &[("laws", "/laws")])
@@ -980,6 +1007,10 @@ pub(super) fn act(site: &Site, title: &str, lines: Vec<String>, id: &str, next: 
 
 /// `act` for lines that are reads or local verbs: their endings are answers, not transitions.
 pub(super) fn act_as(site: &Site, title: &str, lines: Vec<String>, id: &str, next: &[(&str, &str)], transition: bool) -> Page {
+    let lines = match exact_attempt(site, id, lines) {
+        Ok(lines) => lines,
+        Err(page) => return page,
+    };
     let Some(ending) = verb(site, &lines) else {
         return simple(500, title, "this body has no shell paths");
     };
@@ -1583,6 +1614,73 @@ pub(super) fn query(target: &str, key: &str) -> Option<String> {
 }
 
 /// A fresh proposal id: `w-` and 12 hex digits (the shell's `workspace_name` rule).
+/// The hidden field every POST form carries (`with_attempts`): an attempt id drawn when the page was
+/// rendered, so the form IS one attempt. A write names its proposal with it (`form_attempt`), and
+/// posting the same form again is that attempt again (`exact_attempt`), as typing `submit ID` or
+/// `retry ID` again is in the shell; a fresh page draws a fresh one.
+const ATTEMPT: &str = "attempt";
+
+/// Every POST form of a rendered page, with its own fresh `attempt` field.
+fn with_attempts(body: &str) -> String {
+    let mut out = String::with_capacity(body.len() + 256);
+    let mut rest = body;
+    while let Some(at) = rest.find("<form") {
+        let Some(close) = rest[at..].find('>').map(|c| at + c + 1) else { break };
+        out.push_str(&rest[..close]);
+        let tag = rest[at..close].to_ascii_lowercase();
+        if tag.contains("method=\"post\"") || tag.contains("method=post") {
+            out.push_str(&format!("<input type=\"hidden\" name=\"{ATTEMPT}\" value=\"{}\">", fresh_id()));
+        }
+        rest = &rest[close..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The attempt a posted form names (its `attempt` field), or a fresh one for a client that sent none.
+pub(super) fn form_attempt(form: &std::collections::BTreeMap<String, String>) -> String {
+    form.get(ATTEMPT).map(|a| a.trim()).filter(|a| workspace_id(a).is_ok()).map(str::to_owned).unwrap_or_else(fresh_id)
+}
+
+/// The lines a proposal-bound write (one whose lines `submit ID`) runs under its attempt ID. The first
+/// post retains its lines beside the attempt (`requests/web-ID.lines`) and runs them. A post of the
+/// same lines once `proposals/ID` exists is the same attempt: the proposal is not authored again, and
+/// its submit is the shell's exact retry (`retry ID`, the same retained bytes: the Host answers the
+/// decided outcome once more) or, if it never reached an attempt, `submit ID`. Other lines under an
+/// attempt already proposed are refused: nothing is submitted.
+fn exact_attempt(site: &Site, id: &str, lines: Vec<String>) -> std::result::Result<Vec<String>, Page> {
+    let submit = format!("submit {id}");
+    let Some(at) = lines.iter().position(|l| *l == submit || l.starts_with(&format!("{submit} "))) else { return Ok(lines) };
+    let Some(shell) = site.shell.as_ref() else { return Ok(lines) };
+    if workspace_id(id).is_err() {
+        return Ok(lines);
+    }
+    let record = shell.home.join("requests").join(format!("web-{id}.lines"));
+    let said = lines.join("\n");
+    let proposed = site.root.join("proposals").join(id).exists();
+    match fs::read_to_string(&record) {
+        Ok(first) if proposed && first == said => {
+            let again = if site.root.join("attempts").join(id).exists() { format!("retry {id}") } else { submit };
+            Ok(std::iter::once(again).chain(lines[at + 1..].iter().cloned()).collect())
+        }
+        Ok(_) if proposed => {
+            let receipt = format!("/receipts/{id}");
+            let mut page = outcome_page("Already submitted", "refused",
+                &format!("This form was already submitted as attempt {id}, with other content; nothing was submitted again."),
+                "Reload the page for a new form, or read the attempt's receipt.", &[("the receipt", &receipt)]);
+            page.status = 409;
+            Err(page)
+        }
+        // A proposal of this id the web did not make (the shell's): the shell answers as it would.
+        Err(_) if proposed => Ok(lines),
+        // A first post, or an earlier one that authored nothing: these lines are the attempt.
+        _ => {
+            let kept = crate::fsio::ensure_private_dir(&shell.home.join("requests")).is_ok() && fs::write(&record, &said).is_ok();
+            if kept { Ok(lines) } else { Err(simple(500, "Attempt", "the attempt's record could not be kept; nothing was submitted")) }
+        }
+    }
+}
+
 pub(super) fn fresh_id() -> String {
     format!("w-{}", crate::fsio::random::<6>().map(|b| hex(&b)).unwrap_or_else(|_| "000000000000".into()))
 }
@@ -1603,7 +1701,17 @@ pub(super) fn text_file(site: &Site, id: &str, text: &str) -> Option<String> {
     let shell = site.shell.as_ref()?;
     let dir = shell.home.join("requests");
     crate::fsio::ensure_private_dir(&dir).ok()?;
-    let file = format!("web-{id}.txt");
+    // A request file is never rewritten with other text: a re-post of one attempt's form with other
+    // text names another file, so its lines differ from the attempt's (`exact_attempt`).
+    let mut file = format!("web-{id}.txt");
+    let mut n = 1;
+    while let Ok(was) = fs::read(dir.join(&file)) {
+        if was == text.as_bytes() {
+            return Some(file);
+        }
+        n += 1;
+        file = format!("web-{id}-{n}.txt");
+    }
     fs::write(dir.join(&file), text).ok()?;
     Some(file)
 }
@@ -1635,6 +1743,21 @@ mod design_preview;
 
 #[cfg(test)]
 mod tests {
+    /// A body outlives nothing: its lifeline's EOF (the helper gone, however it ended) is what it waits on.
+    #[test]
+    fn the_lifeline_returns_when_its_last_writer_closes_and_not_before() {
+        let mut fds = [0i32; 2];
+        assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
+        let (read, write) = (fds[0], fds[1]);
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || { super::until_closed(read); tx.send(()).unwrap(); });
+        assert_eq!(unsafe { libc::write(write, b"x".as_ptr().cast(), 1) }, 1);
+        assert!(rx.recv_timeout(std::time::Duration::from_millis(200)).is_err(), "bytes are not a death");
+        unsafe { libc::close(write) };
+        assert!(rx.recv_timeout(std::time::Duration::from_secs(5)).is_ok(), "the writer's close is");
+        unsafe { libc::close(read) };
+    }
+
     #[test]
     fn a_second_export_inside_the_window_is_refused_with_the_time_named() {
         let home = std::env::temp_dir().join(format!("mini-export-cooldown-{}", std::process::id()));

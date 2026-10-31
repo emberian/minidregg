@@ -346,6 +346,7 @@ noncomputable def history : CausalVersionDag.History (scheme := addressing)
 @[simp] theorem history_events : history.events = [baseNode, leftNode, rightNode] :=
   rfl
 
+set_option backward.isDefEq.respectTransparency false in
 @[simp] theorem current_frontier :
     CausalVersionDag.frontier history.events = {leftNode.entryId, rightNode.entryId} := by
   ext id
@@ -586,6 +587,7 @@ noncomputable def selectedBase : HyperdocumentMerge.SelectedBase parentEvidence 
   realization := baseCell
   realizationRootExact := rfl
 
+set_option backward.isDefEq.respectTransparency false in
 noncomputable def parentContent : HyperdocumentMerge.ParentContentEvidence parentEvidence where
   fieldSources := by
     intro selected selectedPresent source sourcePresent

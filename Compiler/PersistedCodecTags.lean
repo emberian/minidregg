@@ -670,6 +670,11 @@ namespace Minidregg.Compiler.PersistedCodecTags
 @[persisted_codec_tag] abbrev resourcetransaction_familycommandframe_13959c0e : List UInt8 := "DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ [15]
 @[persisted_codec_tag] abbrev resourcetransaction_argsdigest_391847ff : String := "DREGG.RESOURCE.TRANSACTION.ARGS/v4"
 @[persisted_codec_tag] abbrev resourcetransaction_effectsdigest_64bbfbbb : String := "DREGG.RESOURCE.TRANSACTION.EFFECT/v4"
+@[persisted_codec_tag] abbrev capabilitydelegationreceiver_eventidofingress_v2 : String := "DREGG.CAPABILITY.DELEGATE.EVENT/v2"
+@[persisted_codec_tag] abbrev capabilityrevocationreceiver_eventidofingress_v2 : String := "DREGG.CAPABILITY.REVOKE.EVENT/v2"
+@[persisted_codec_tag] abbrev realmwellreceiver_eventidofingress_v2 : String := "DREGG.REALM.WELL.EVENT/v2"
+@[persisted_codec_tag] abbrev participantkeyenrollmentreceiver_eventidofingress_v2 : String := "DREGG.PARTICIPANT.KEY-ENROLLMENT.EVENT/v2"
+@[persisted_codec_tag] abbrev declaredresourcecontroller_eventidofsigned_v5 : String := "DREGG.RESOURCE.TRANSACTION.EVENT/v5"
 @[persisted_codec_tag] abbrev resourcetransaction_operationmarker_e94810ea : String := "DREGG.RESOURCE.TRANSACTION.IDENTITY/v3"
 @[persisted_codec_tag] abbrev resourcetransaction_sourcepolicy_240922cb : String := "DREGG/CONTENT/DISCLOSURE-POLICY"
 @[persisted_codec_tag] abbrev lawcomposition_receivingcontract_fa3f9b0b : String := "DREGG.LAW.COMPOSITION/v1:authenticated-record-dag;key=policy,facet,revision,source-digest;distinct-revisions-conjoin;duplicate-keys-once;cycles-missing-authenticity-refuse;local-explicit-parents;target-ambient-room-exports;export-containing-room-chain;source-owned-kind-exports;selectors=physical-kind,request-kind,verb;all-guards-same-snapshot;old-law-before-candidate-validation;no-candidate-satisfiability;hidden-origin-diagnostics"

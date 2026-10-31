@@ -52,4 +52,4 @@ private def checks (lane : Lane) : Bool :=
 -- intents rather than only the ten executable boundary fixtures above.
 #check Engine.view_install
 #check Engine.available_install
-#print axioms Engine.available_install
+#assert_axioms Engine.available_install

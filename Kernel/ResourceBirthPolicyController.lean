@@ -363,6 +363,7 @@ abbrev Durable := ResourceBirthController.Concrete.Durable
 abbrev PreparedBirth {F : Type} [Field F] :=
   ResourceBirthController.Concrete.PreparedBirth (F := F)
 
+set_option backward.isDefEq.respectTransparency false in
 /-- The authority incidence is the one authority cell at the deployment's pinned
 identifier. Allocation incidences are already outer lifecycle slots and are
 never packed into a second envelope. -/
@@ -1018,7 +1019,11 @@ theorem refused_before_authored :
 
 end WindowExample
 
-/-- info: 'Minidregg.Kernel.ResourceBirthPolicyController.Concrete.rootGrantShape_window' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Kernel.ResourceBirthPolicyController.Concrete.rootGrantShape_window' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs (whitespace := lax) in #print axioms rootGrantShape_window
 /-- info: 'Minidregg.Kernel.ResourceBirthPolicyController.Concrete.templateBound_height_move' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms templateBound_height_move
@@ -1352,6 +1357,7 @@ theorem accepted_policy_view_exact
 
 /-! ## Source-owned request dispatch over one checked joint candidate -/
 
+set_option backward.isDefEq.respectTransparency false in
 /-- The Book's fee request is already one of its source requests; it is not
 repeated as a second ambiguous policy branch. Every allocation has its own
 source-bound coordinate in the complete signed request. -/
@@ -1392,7 +1398,10 @@ theorem mapped_policyBranches_nodup_iff {allocations sources : Nat} {Value : Typ
   rw [List.nodup_map_iff_inj_on (policyBranches_nodup allocations sources)]
   simp only [mem_policyBranches, forall_const, Function.Injective]
 
-/-- info: 'Minidregg.Kernel.ResourceBirthPolicyController.Concrete.mapped_policyBranches_nodup_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/--
+info: 'Minidregg.Kernel.ResourceBirthPolicyController.Concrete.mapped_policyBranches_nodup_iff' depends on axioms: [propext,
+ Quot.sound]
+-/
 #guard_msgs (whitespace := lax) in #print axioms mapped_policyBranches_nodup_iff
 
 def branchPrimary : Branch descriptor → Legs descriptor
@@ -2078,6 +2087,59 @@ theorem BranchAccepted.planVerdict_true [DecidableEq F]
 #assert_axioms admit_some_of_bind planVerdict_of_verifies BranchAccepted.planVerdict_true
 #assert_axioms Pending.judgeBranch_policyRejected Pending.admitBranch_policyRejected
 
+/-- A law mentioning `witnessed` fails the plan verdict: it is outside `supported`. -/
+theorem planVerdict_witnessed_false [DecidableEq F] {config : ComposedPolicyAdmission.Config F}
+    (law : ComposedPolicyAdmission.PreparedLaw config)
+    (witnessed : mentionsWitnessed law.predicate = true) : planVerdict law = false := by
+  simp [planVerdict, unsupported_of_mentionsWitnessed config.profile.compiler witnessed]
+
+/-- **No accepted branch resolves a law with a `witnessed` leaf.** -/
+theorem BranchAccepted.no_witnessed [DecidableEq F]
+    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {height : Height} {pending : Pending prepared height} {branch : Branch descriptor}
+    (accepted : BranchAccepted pending branch)
+    (law : ComposedPolicyAdmission.PreparedLaw (pending.branchConfig branch)) :
+    mentionsWitnessed law.predicate = false := by
+  cases witnessed : mentionsWitnessed law.predicate
+  · rfl
+  · have verdict := accepted.planVerdict_true law
+    rw [planVerdict_witnessed_false law witnessed] at verdict
+    cases verdict
+
+/-- Teeth at admission: a branch whose law mentions `witnessed` (for instance
+`not (witnessed vk)`) is never judged admitted. It is refused before the law is read
+(`policyUnavailable`, `policyBinding`) or, past binding, by name as `policyUnsupported`. -/
+theorem Pending.judgeBranch_witnessed [DecidableEq F]
+    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {height : Height} (pending : Pending prepared height) (branch : Branch descriptor)
+    (evidence : Evidence (pending.branchConfig branch).portal (oldAuthority prepared)
+      (branchRequest prepared height branch).2)
+    (law : ComposedPolicyAdmission.PreparedLaw (pending.branchConfig branch))
+    (resolved : (pending.branchConfig branch).resolve? = some law)
+    (witnessed : mentionsWitnessed law.predicate = true) :
+    ∃ reason, pending.judgeBranch branch evidence = .error reason ∧
+      (reason = .policyUnavailable ∨ reason = .policyBinding ∨ reason = .policyUnsupported) := by
+  unfold Pending.judgeBranch
+  try dsimp only
+  split
+  next =>
+    split
+    next =>
+      split
+      next => exact ⟨_, rfl, .inl rfl⟩
+      next resolvedLaw resolvedExact =>
+        obtain rfl := Option.some.inj (resolved.symm.trans resolvedExact)
+        split
+        next => exact ⟨_, rfl, .inr (.inl rfl)⟩
+        next =>
+          rw [if_pos (unsupported_of_mentionsWitnessed
+            (pending.branchConfig branch).profile.compiler witnessed)]
+          exact ⟨_, rfl, .inr (.inr rfl)⟩
+    next => exact ⟨_, rfl, .inl rfl⟩
+  next => exact ⟨_, rfl, .inl rfl⟩
+
+#assert_axioms planVerdict_witnessed_false BranchAccepted.no_witnessed Pending.judgeBranch_witnessed
+
 def Pending.admitBranchNative [DecidableEq F]
     {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
     {height : Height} (pending : Pending prepared height) (branch : Branch descriptor)
@@ -2458,10 +2520,10 @@ def verifyOwnerConsentsNative
     (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
     (height : Height) (native : CredentialSignatureIO.NativeConfig)
     (envelopes : Option (List (List UInt8))) :
-    IO (Except Reject (OwnerConsents prepared height envelopes)) := do
+    IO (Except Reject (OwnerConsents prepared height envelopes)) :=
   match envelopes with
   | none => return .ok ()
-  | some owners =>
+  | some owners => do
       if count : owners.length = descriptor.births.length then
         let action := fun (position : Fin descriptor.births.length) => do
           let envelope := owners[position.val]?.getD []

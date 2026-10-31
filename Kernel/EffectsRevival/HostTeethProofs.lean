@@ -1,7 +1,7 @@
 /-
-# `Effects/Revival/HostTeethProofs.lean` — `HostTeeth`, PROVED
+# `Kernel/EffectsRevival/HostTeethProofs.lean` — `HostTeeth`, PROVED
 
-`Effects/Revival/Statements.lean` §7 (audited): the host dispatch does not dispatch through a
+`Kernel/EffectsRevival/Statements.lean` §7 (audited): the host dispatch does not dispatch through a
 registry whose content handler drops the rotation, nor through one that keeps code 1 as a
 hand arm.
 
@@ -15,7 +15,7 @@ is kernel-checked.
 -/
 module
 
-public import Effects.Revival.ContentProofs
+public import Kernel.EffectsRevival.ContentProofs
 public import Theory.AssertAxioms
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
@@ -56,11 +56,13 @@ theorem ratchet_moves :
     (HyperdocumentCell.contentBlinding.step 0 zeroBlindingKey != zeroBlindingKey) = true := by
   decide +kernel
 
+set_option backward.isDefEq.respectTransparency false in
 theorem blindedStore_key :
     StoreCodec.blindingKey HyperdocumentCell.contentWire blindedStore = some zeroBlindingKey := by
   rw [HyperdocumentCell.contentBlinding.blindingKey_eq]
   simp [blindedStore, StoreCodec.Blinding.address, HyperdocumentCell.contentBlinding, zeroBlindingKey]
 
+set_option backward.isDefEq.respectTransparency false in
 /-- The link's allocation leaves the blinding where it was. -/
 theorem sampleLinkOps_key :
     StoreCodec.blindingKey HyperdocumentCell.contentWire (Patch.run blindedStore sampleLinkOps) =
@@ -113,7 +115,7 @@ theorem ghost_exec_blinded :
       rfl
   · rename_i outside
     exact absurd (fun loc member unrotated =>
-      inFrame loc (footprint_append_left _ _ loc (by simpa [contentGhost] using member)) unrotated)
+      inFrame loc (footprint_append_left _ _ loc (by exact member)) unrotated)
       outside
 
 theorem sample_header : contentHeader sampleHostCtx (⟨.content, cellOf blindedStore⟩ : HostCell) = .ok () := by

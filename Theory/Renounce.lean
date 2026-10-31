@@ -404,13 +404,13 @@ theorem demo_other_unaffected :
 #guard_msgs (whitespace := lax) in #print axioms renounce_requires_holder
 /-- info: 'Minidregg.Theory.Renounce.holder_cannot_renounce_others' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms holder_cannot_renounce_others
-/-- info: 'Minidregg.Theory.Renounce.renounce_preserves_others' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.Renounce.renounce_preserves_others' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms renounce_preserves_others
-/-- info: 'Minidregg.Theory.Renounce.renounce_then_use_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.Renounce.renounce_then_use_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms renounce_then_use_refused
-/-- info: 'Minidregg.Theory.Renounce.renounce_kills_delegates' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.Renounce.renounce_kills_delegates' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms renounce_kills_delegates
-/-- info: 'Minidregg.Theory.Renounce.renounce_revokes_exactly_lineage' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.Renounce.renounce_revokes_exactly_lineage' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms renounce_revokes_exactly_lineage
 /-- info: 'Minidregg.Theory.Renounce.revokedOne_of_patch' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms revokedOne_of_patch
@@ -422,7 +422,7 @@ theorem demo_other_unaffected :
 #guard_msgs (whitespace := lax) in #print axioms holder_renounce_admitted
 /-- info: 'Minidregg.Theory.Renounce.delegate_cannot_renounce_parent' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms delegate_cannot_renounce_parent
-/-- info: 'Minidregg.Theory.Renounce.demo_delegate_dies' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.Renounce.demo_delegate_dies' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms demo_delegate_dies
 /-- info: 'Minidregg.Theory.Renounce.demo_other_unaffected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms demo_other_unaffected
@@ -436,7 +436,7 @@ theorem demo_other_unaffected :
 #guard_msgs (whitespace := lax) in #print axioms bearer_renounce_refused
 /-- info: 'Minidregg.Theory.Renounce.demo_second_renounce_refused' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms demo_second_renounce_refused
-/-- info: 'Minidregg.Theory.Renounce.demo_renounced_use_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.Renounce.demo_renounced_use_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms demo_renounced_use_refused
 
 end Minidregg.Theory.Renounce

@@ -419,7 +419,7 @@ theorem inhabited_acceptance :
       .accepted (DataSnapshot.install (seed.snapshot lengthRoot) intent) := by
   apply execute_complete_ready
   · rfl
-  · decide
+  · rfl
 
 theorem acceptance_premises_inhabited :
     ∃ (stored : Image) (initial next : DataSnapshot lengthRoot)
@@ -435,7 +435,7 @@ theorem duplicate_journal_append_refused :
 theorem stale_read_refuses :
     intent.preflight
       ({ seed with cells := [(readCell, [1]), (writeCell, [4, 5])] }.snapshot lengthRoot) =
-        .error .staleReadGuard := by decide
+        .error .staleReadGuard := rfl
 
 end Witness
 
@@ -443,7 +443,7 @@ end Minidregg.Kernel.DurableReceiver
 
 /-- info: 'Minidregg.Kernel.DurableReceiver.Image.outside_support' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableReceiver.Image.outside_support
-/-- info: 'Minidregg.Kernel.DurableReceiver.execute_accepted_install' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Kernel.DurableReceiver.execute_accepted_install' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableReceiver.execute_accepted_install
 /-- info: 'Minidregg.Kernel.DurableReceiver.replay_canonicalBytes' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableReceiver.replay_canonicalBytes

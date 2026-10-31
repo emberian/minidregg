@@ -961,7 +961,7 @@ end Sample
 
 end Minidregg.Pred.Sat
 
-/-- info: 'Minidregg.Pred.Sat.witness_sound' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Pred.Sat.witness_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Minidregg.Pred.Sat.witness_sound
 /-- info: 'Minidregg.Pred.Sat.certificate_unsat' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Minidregg.Pred.Sat.certificate_unsat

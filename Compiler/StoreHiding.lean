@@ -636,6 +636,7 @@ theorem slots_shape_congr (B : Blinding W) {left right : Store L}
     · by_cases atKey : addressKey W address = addressKey W B.address <;>
         simp [slotOf, atKey, shown, Slot.shape]
 
+set_option backward.isDefEq.respectTransparency false in
 /-- Slots of one shape render, under one key, the same opened items. -/
 theorem opened_of_shape (scheme : LeafScheme) (self : List UInt8 → List UInt8) (key : List UInt8) :
     ∀ (left right : List Slot), left.map Slot.shape = right.map Slot.shape →

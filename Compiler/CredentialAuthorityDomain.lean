@@ -388,9 +388,9 @@ theorem policyPatch_head (logical : Store layout) (policy : PolicyId)
       retirePolicy_run logical policy revision _ (fun _ _ _ => sigma_ne (by decide))]
     exact generation
   · simp only [policyEntries, setAll]
-    rw [Store.set_ne _ _ _ _ (sigma_ne (by decide)), Store.set_eq]; rfl
+    rw [Store.set_ne _ _ _ _ (sigma_ne (by decide)), Store.set_eq]
   · simp only [policyEntries, setAll]
-    rw [Store.set_eq]; rfl
+    rw [Store.set_eq]
 
 /-- The generation is framed. -/
 theorem policyPatch_generation (logical : Store layout) (policy : PolicyId)

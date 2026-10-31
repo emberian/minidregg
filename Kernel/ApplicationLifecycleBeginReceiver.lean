@@ -395,6 +395,7 @@ theorem package_write_overlap_has_no_admission {F : Type} [Field F] [DecidableEq
   rintro ⟨accepted⟩
   exact accepted.guardReadOnly (overlap accepted.prepared)
 
+set_option backward.isDefEq.respectTransparency false in
 /-- A replay verifier can call this same admission without writing to the
 Store. All selected policy heads, the package observation, the DRC invocation,
 and their physical guards come from this one supplied loaded image. -/

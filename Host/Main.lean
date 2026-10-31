@@ -1142,7 +1142,7 @@ def inspectStopClaimCurrent (config : NativeHost.Config)
           ResourceBirthCodec.rootBytes durable with
         | .error detail => return .error s!"STOP claim history reader: {detail}"
         | .ok reader => pure reader
-      match ← NativeHostReplay.verifyLoaded config reader durable with
+      match ← NativeHostReplay.verifyStart config reader durable with
       | .error failure =>
           return .error s!"STOP claim history refused at entry {failure.index}: {failure.detail}"
       | .ok verified =>
@@ -3099,6 +3099,17 @@ def serveFrame (config : NativeHost.Config)
   if (← state.get).isNone then
     throw (IO.userError s!"op {operation}: native host session invalidated")
 
+/-- Seal a checkpoint of a session's own opening at its head (`sealHead` without its second
+cold open). The session first reads any suffix its refresh has not seen; a failed refresh or
+seal loses nothing (the log is complete), and `sealHead` stays the operator verb. -/
+def sealSession (config : NativeHost.Config) (session : NativeHostSession.Session config) : IO Unit := do
+  let .ok current ← NativeHostSession.refresh config session | return
+  let loaded := current.durable
+  if loaded.height = 0 then return
+  let .ok key ← config.transport.key | return
+  let .ok indexRoot ← loaded.headIndexRoot config.transport key | return
+  discard <| DurableReceiverIO.storeCheckpoint config.transport ResourceBirthCodec.rootBytes loaded indexRoot
+
 partial def serveSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (meteringProfile : Lean.Json)
@@ -3109,10 +3120,11 @@ partial def serveSession (config : NativeHost.Config)
     (input output : IO.FS.Stream) : IO Unit := do
   let first ← input.read 1
   if first.isEmpty then
-    -- A clean end of a session that opened its Store seals at the head (HOT-PATH §2(h) item 6);
-    -- a failed seal loses nothing.
-    if (← state.get).isSome then
-      discard <| DurableReceiverIO.sealHead config.transport ResourceBirthCodec.rootBytes
+    -- A clean end of a session that opened its Store seals at the head (HOT-PATH §2(h) item 6),
+    -- from the opening it holds: `sealHead` opened the Store a second time, cold (seconds, growing
+    -- with the log), and a stopped server's Host outlived it (JDV row 140 on a loaded box).
+    if let some session := ← state.get then
+      sealSession config session
     return
   let lengthWire ← readExactly input 4 first
   let length := frameLength lengthWire
@@ -4944,7 +4956,7 @@ def selectedReleaseFnAck (config : NativeHost.Config) (service : FnPollService)
         ResourceBirthCodec.rootBytes target with
       | .ok reader => pure reader
       | .error detail => throw (IO.userError s!"selected-release Mini history reader: {detail}")
-    let verified ← match ← NativeHostReplay.verifyLoaded config reader target with
+    let verified ← match ← NativeHostReplay.verifyStart config reader target with
       | .ok verified => pure verified
       | .error failure =>
           throw (IO.userError s!"selected-release Mini history refused at {failure.index}: {failure.detail}")
@@ -5056,7 +5068,7 @@ def selectedEmptyFnAck (config : NativeHost.Config) (service : FnPollService)
         ResourceBirthCodec.rootBytes target with
       | .ok reader => pure reader
       | .error detail => throw (IO.userError s!"empty fn Mini history reader: {detail}")
-    let verified ← match ← NativeHostReplay.verifyLoaded config reader target with
+    let verified ← match ← NativeHostReplay.verifyStart config reader target with
       | .ok verified => pure verified
       | .error failure =>
           throw (IO.userError s!"empty fn Mini history refused at {failure.index}: {failure.detail}")
@@ -6821,9 +6833,11 @@ def runCommandObjectiveQuote (_arguments : List String) (_configPath _command : 
           let some nonce := intentNonce.toNat?
             | throw (IO.userError "intent nonce must be canonical decimal")
           unless toString nonce == intentNonce do throw (IO.userError "intent nonce must be canonical decimal")
-          let walked ← IO.ofExcept (← NativeHostSession.startWalked config)
+          -- The quote reads the validated opening only: the checkpoint + suffix open, not a
+          -- genesis re-admission walk (law 17; the admission of the invocation checks it all).
+          let opened ← IO.ofExcept (← NativeHost.openExisting config)
           writeJson outputPath (← IO.ofExcept
-            (← Minidregg.Host.ObjectiveInvocationQuote.quoteBytes config walked.verified.opened bytes nonce))
+            (← Minidregg.Host.ObjectiveInvocationQuote.quoteBytes config opened bytes nonce))
           pure 0
   | _ => throw (IO.userError usage)
 
@@ -6934,9 +6948,9 @@ def runCommandPayClaimStatus (_arguments : List String) (_configPath _command : 
           let some text := String.fromUTF8? bytes.toByteArray
             | throw (IO.userError "paid status JSON is not UTF-8")
           let source ← IO.ofExcept (Minidregg.Host.Json.parse text)
-          let walked ← IO.ofExcept (← NativeHostSession.startWalked config)
+          let opened ← IO.ofExcept (← NativeHost.openExisting config)
           writeJson output (← IO.ofExcept
-            (Minidregg.Host.PayClaims.statusLoadedJson config walked.verified.opened source))
+            (Minidregg.Host.PayClaims.statusLoadedJson config opened source))
           pure 0
   | _ => throw (IO.userError usage)
 

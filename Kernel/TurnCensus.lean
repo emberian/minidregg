@@ -104,7 +104,7 @@ inductive Space
   deriving DecidableEq, Repr
 
 /-- Census layout: `Nat` keys, `Int` values (a Book row is a signed balance). -/
-def layout : Layout.{0, 0, 0} where
+@[reducible] def layout : Layout.{0, 0, 0} where
   Namespace := Space
   Key := fun _ => Nat
   Value := fun _ => Int

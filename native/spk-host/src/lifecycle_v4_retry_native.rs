@@ -72,9 +72,9 @@ fn invalid(reason: &'static str) -> io::Error {
 }
 
 // ---------------------------------------------------------------------------
-// StreamCodec encoders (Compiler/Tower256ConcreteBackend.lean)
+// StreamCodec encoders (Theory/StreamCodec.lean)
 
-/// `StreamCodec.nat` (Tower256ConcreteBackend.lean:151-206): base-255
+/// `StreamCodec.nat` (Theory/StreamCodec.lean): base-255
 /// little-endian digits of a canonical decimal, then terminator byte 255.
 /// Zero is the single byte 255 (`Nat.digits 255 0 = []`).
 pub(crate) fn encode_nat_decimal(value: &str) -> io::Result<Vec<u8>> {
@@ -111,7 +111,7 @@ pub(crate) fn encode_nat_usize(mut value: usize) -> Vec<u8> {
     encoded
 }
 
-/// `bytesStream` (Tower256ConcreteBackend.lean:291-293): nat length, then bytes.
+/// `bytesStream` (Theory/StreamCodec.lean): nat length, then bytes.
 pub(crate) fn encode_bytes(bytes: &[u8]) -> Vec<u8> {
     let mut encoded = encode_nat_usize(bytes.len());
     encoded.extend_from_slice(bytes);

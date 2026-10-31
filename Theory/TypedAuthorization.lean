@@ -202,9 +202,9 @@ theorem Verb.place_grant_cannot_mutate : ¬ Verb.mutateObject.AllowedBy {Verb.pl
 theorem Verb.observe_grant_cannot_place : ¬ Verb.placeObject.AllowedBy {Verb.observeObject} := by
   simp [Verb.AllowedBy, Verb.grantors]
 
-/-- info: 'Minidregg.Theory.TypedAuthorization.Verb.append_allowedBy_iff' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorization.Verb.append_allowedBy_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Verb.append_allowedBy_iff
-/-- info: 'Minidregg.Theory.TypedAuthorization.Verb.append_grant_cannot_mutate' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorization.Verb.append_grant_cannot_mutate' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Verb.append_grant_cannot_mutate
 
 /-- The complete semantic authorization request.  Verifiers receive this value
@@ -1534,28 +1534,28 @@ theorem demo_explicit_generation_rotation_revokes :
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.Parentage.ancestor_bounded
 /-- info: 'Minidregg.Theory.TypedAuthorization.Parentage.ofList_append_extends' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.Parentage.ofList_append_extends
-/-- info: 'Minidregg.Theory.TypedAuthorization.TargetSet.covers_of_narrows' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorization.TargetSet.covers_of_narrows' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.TargetSet.covers_of_narrows
-/-- info: 'Minidregg.Theory.TypedAuthorization.TargetSet.Narrows.trans' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorization.TargetSet.Narrows.trans' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.TargetSet.Narrows.trans
-/-- info: 'Minidregg.Theory.TypedAuthorization.Parentage.under_fresh_covers_only_self' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorization.Parentage.under_fresh_covers_only_self' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.Parentage.under_fresh_covers_only_self
 end Minidregg.Theory.TypedAuthorization
-/-- info: 'Minidregg.Theory.TypedAuthorization.fields_cover_write' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorization.fields_cover_write' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.fields_cover_write
-/-- info: 'Minidregg.Theory.TypedAuthorization.maxDelta_bounds_write' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorization.maxDelta_bounds_write' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.maxDelta_bounds_write
-/-- info: 'Minidregg.Theory.TypedAuthorization.narrows_fields_monotone' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorization.narrows_fields_monotone' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.narrows_fields_monotone
-/-- info: 'Minidregg.Theory.TypedAuthorization.Scope.coversWrite_of_narrows' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorization.Scope.coversWrite_of_narrows' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.Scope.coversWrite_of_narrows
-/-- info: 'Minidregg.Theory.TypedAuthorization.Capability.attenuation_admits_write_subset' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorization.Capability.attenuation_admits_write_subset' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.Capability.attenuation_admits_write_subset
-/-- info: 'Minidregg.Theory.TypedAuthorization.Capability.admissible_fields_orthogonal' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorization.Capability.admissible_fields_orthogonal' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.Capability.admissible_fields_orthogonal
-/-- info: 'Minidregg.Theory.TypedAuthorization.CellField.SetNarrows.trans' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorization.CellField.SetNarrows.trans' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.CellField.SetNarrows.trans
-/-- info: 'Minidregg.Theory.TypedAuthorization.CellField.BoundsNarrow.trans' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorization.CellField.BoundsNarrow.trans' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.CellField.BoundsNarrow.trans
 
 namespace Minidregg.Theory.TypedAuthorization

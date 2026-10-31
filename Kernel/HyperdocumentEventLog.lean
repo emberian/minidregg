@@ -56,7 +56,7 @@ inductive Namespace where
   | events
   deriving DecidableEq, Repr
 
-def layout : Store.Layout.{0, 0, 0} where
+@[reducible] def layout : Store.Layout.{0, 0, 0} where
   Namespace := Namespace
   Key := fun _ => VersionEventId
   Value := fun _ => VersionEventRecord
@@ -90,7 +90,6 @@ theorem appendOp_enabled_iff
   simp only [appendOp, Minidregg.Theory.Store.Op.Enabled, layout,
     Minidregg.Theory.Store.Store.Fresh, eventAddress, ne_eq, reduceCtorEq,
     not_false_eq_true, true_and]
-  exact Iff.rfl
 
 /-- The log's discipline refuses every overwrite of a recorded event. -/
 theorem overwrite_refused (store : Store) (key : VersionEventId)
@@ -143,7 +142,6 @@ theorem AcceptedAppend.pre_fresh
     accepted.apply.logical (eventAddress event.key) = some event.record := by
   simp [CellState.ValidatedPatch.apply_logical, appendOp, eventAddress,
     Minidregg.Theory.Store.Op.apply]
-  rfl
 
 /-- Allocation has teeth: the exact same event key cannot be appended again to
 the accepted post, independently of any digest-binding assumption. -/

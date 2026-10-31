@@ -2942,6 +2942,7 @@ theorem Adoption.upgradable {rootBytes : Bytes → Digest} {config : Config} {sn
 
 /-! ## MIGRATE: the pending activities become live -/
 
+set_option backward.isDefEq.respectTransparency false in
 /-- **MIGRATE keeps both invariants.** The record turns steady on the next pin: the activities
 born on it while draining (`pending`) are now `live`, the chosen ones stay `rebirths`, and no
 old activity outside them awaits (`live = 0`, by the census). The object is steady, so its

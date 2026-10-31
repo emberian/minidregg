@@ -72,10 +72,10 @@ theorem io_pure_bind {α β : Type} (a : α) (f : α → IO β) : (pure a >>= f)
 /-- An early-exit loop whose body, from the running state, yields on `ok` and stops with `false`
 otherwise, returns `none` exactly when every element is `ok`. -/
 theorem forIn_early_exit {α : Type} (l : List α) (ok : α → Bool)
-    (body : α → MProd (Option Bool) PUnit → IO (ForInStep (MProd (Option Bool) PUnit)))
+    (body : α → (Option Bool × PUnit) → IO (ForInStep ((Option Bool × PUnit))))
     (hbody : ∀ a, body a ⟨none, PUnit.unit⟩ =
       pure (if ok a then .yield ⟨none, PUnit.unit⟩ else .done ⟨some false, PUnit.unit⟩)) :
-    forIn l (⟨none, PUnit.unit⟩ : MProd (Option Bool) PUnit) body =
+    forIn l (⟨none, PUnit.unit⟩ : (Option Bool × PUnit)) body =
       pure ⟨if l.all ok then none else some false, PUnit.unit⟩ := by
   induction l with
   | nil => simp

@@ -525,11 +525,11 @@ theorem declaration_one_tail_entry (cellId : Nat) (fields : List Nat) (first : N
 
 end Minidregg.Kernel.FieldClosure
 
-/-- info: 'Minidregg.Kernel.FieldClosure.firstUndeclared_none_iff' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.FieldClosure.firstUndeclared_none_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.FieldClosure.firstUndeclared_none_iff
-/-- info: 'Minidregg.Kernel.FieldClosure.firstUndeclared_some' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.FieldClosure.firstUndeclared_some' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.FieldClosure.firstUndeclared_some
-/-- info: 'Minidregg.Kernel.FieldClosure.open_admits_every_field' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.FieldClosure.open_admits_every_field' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.FieldClosure.open_admits_every_field
 /-- info: 'Minidregg.Kernel.FieldClosure.get_values' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.FieldClosure.get_values
@@ -539,11 +539,11 @@ end Minidregg.Kernel.FieldClosure
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.FieldClosure.admitted_writes_no_declaration
 /-- info: 'Minidregg.Kernel.FieldClosure.admitted_preserves_declared' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.FieldClosure.admitted_preserves_declared
-/-- info: 'Minidregg.Kernel.FieldClosure.closed_names_created_field' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.FieldClosure.closed_names_created_field' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.FieldClosure.closed_names_created_field
-/-- info: 'Minidregg.Kernel.FieldClosure.open_admits_created_field' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.FieldClosure.open_admits_created_field' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.FieldClosure.open_admits_created_field
-/-- info: 'Minidregg.Kernel.FieldClosure.closed_admits_declared_write' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.FieldClosure.closed_admits_declared_write' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.FieldClosure.closed_admits_declared_write
 #assert_axioms Minidregg.Kernel.FieldClosure.tail_admits_rows_at_and_above
 #assert_axioms Minidregg.Kernel.FieldClosure.tail_names_field_below

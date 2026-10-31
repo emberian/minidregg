@@ -44,7 +44,7 @@ def lookupCurrent (config : NativeHost.Config) (bytes : List UInt8) :
       let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf config.transport ResourceBirthCodec.rootBytes opened.durable with
         | .error _ => return .error "agent lifetime grant history reader unavailable"
         | .ok reader => pure reader
-      match ← NativeHostReplay.verifyLoaded config reader opened.durable with
+      match ← NativeHostReplay.verifyStart config reader opened.durable with
       | .error _ => return .error "agent lifetime grant history unverified"
       | .ok verified => return lookupVerified verified bytes
 

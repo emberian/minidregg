@@ -627,10 +627,10 @@ private def checkGrants {m : Type → Type} [Monad m] (native : CredentialSignat
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent)
     (grants : List GrantRef) (signatures : List (List UInt8)) :
     m (Except Refusal ((index : Fin grants.length) →
-      CheckedGrant context profile federation genesisHeight intent (grants.get index))) := do
+      CheckedGrant context profile federation genesisHeight intent (grants.get index))) :=
   match grants, signatures with
   | [], [] => return .ok (fun index => Fin.elim0 index)
-  | grant :: rest, signature :: remaining =>
+  | grant :: rest, signature :: remaining => do
       match ← checkGrant native context profile federation genesisHeight intent grant signature with
       | .error reason => return .error reason
       | .ok first =>
@@ -1115,6 +1115,38 @@ theorem sinceFrom_complete {visible : DurableDataIntent.CellId → Bool} {after 
       simp only [sinceFrom, List.mem_append]
       exact Or.inr member
 
+/-- **The records at or below `after` contribute nothing**, so `since` may start at
+the first record above it: the view skips the `after - genesisHeight` records the
+reader has already seen instead of decoding each one's writes (law 17). -/
+theorem sinceFrom_skip (visible : DurableDataIntent.CellId → Bool) (after : Nat) :
+    ∀ (count start : Nat) (log : List DurableReceiver.IntentRecord), start + count ≤ after + 1 →
+      sinceFrom visible after start log = sinceFrom visible after (start + count) (log.drop count)
+  | 0, start, log, _ => by simp
+  | _ + 1, _, [], _ => by simp [sinceFrom]
+  | count + 1, start, record :: rest, within => by
+      have seen : ¬ (after < start ∧
+          (PresenceIndex.cellsOf record).filter visible ≠ []) := fun ⟨above, _⟩ => by omega
+      rw [sinceFrom, if_neg seen, List.nil_append, List.drop_succ_cons,
+        sinceFrom_skip visible after count (start + 1) rest (by omega)]
+      congr 1
+      omega
+
+/-- The `since` view's evaluation: from the first record above `after`
+(`sinceFrom_skip`), or from the first record when `after` is below it. -/
+def sinceView (visible : DurableDataIntent.CellId → Bool) (after first : Nat)
+    (log : List DurableReceiver.IntentRecord) : List SinceEntry :=
+  sinceFrom visible after (first + (after + 1 - first)) (log.drop (after + 1 - first))
+
+theorem sinceView_eq (visible : DurableDataIntent.CellId → Bool) (after first : Nat)
+    (log : List DurableReceiver.IntentRecord) :
+    sinceView visible after first log = sinceFrom visible after first log := by
+  unfold sinceView
+  by_cases below : first ≤ after + 1
+  · exact (sinceFrom_skip visible after _ first log (by omega)).symm
+  · have zero : after + 1 - first = 0 := by omega
+    rw [zero]
+    simp
+
 /-- `history DOC` (K-DOC-HISTORY): the `since` entries that wrote the document
 cell itself. On the host this is `since DOC 0` cut to `DOC`, so it is K-INDEX's
 `who` rule: only cells the reader's current grant covers. -/
@@ -1256,6 +1288,7 @@ def sinceViewCodec : IndexedProgram.LawfulCodec (List SinceEntry) :=
 
 def atViewFrame : List UInt8 := "DREGG/NATIVE-HOST/AT-VIEW/v3".toUTF8.toList
 
+set_option backward.isDefEq.respectTransparency false in
 /-- The opening of a packed cell's root under `fields`. -/
 def openingView (fields : Option (Finset CellField))
     (packed : PackedCell CanonicalCellRegistry.registry) : OpeningView :=
@@ -1265,6 +1298,7 @@ def openingView (fields : Option (Finset CellField))
         packed.payload.logical)
   | none => ([], [])
 
+set_option backward.isDefEq.respectTransparency false in
 /-- **The root a reader receives opens.**  For every kind with a store wire,
 the view's root is recomputed from the opening's frame and items alone. -/
 theorem root_opens (fields : Option (Finset CellField))
@@ -1672,7 +1706,8 @@ def AuthorizedIntent.queryResult
     | .since after => do
         let some stored := reader | throw .malformed
         let visible := sees state.parent stored.head query.target
-        pure (sinceViewCodec.encode (sinceFrom visible after (genesisHeight + 1) history.image.accepted))
+        -- `sinceView_eq`: the same entries, without decoding the records at or below `after`.
+        pure (sinceViewCodec.encode (sinceView visible after (genesisHeight + 1) history.image.accepted))
     | .atHeight height =>
         atCovered (deployment := deployment) (durable := history) kept genesisHeight height intent.subject
           grant query.target

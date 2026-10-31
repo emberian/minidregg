@@ -391,7 +391,7 @@ def intent : DataIntent rootBytes where
       rw [DurableCommitProtocol.Intent.nullifiersFreshCheck_eq_true_iff]
       intro nullifier member
       rfl
-    have funded : intent.erase.exactCharge.fundedCheck
+    have funded : intent.exactCharge.fundedCheck
         before.model.available = true := by
       rw [ResourceCost.Charge.fundedCheck_eq_true_iff]
       intro lane

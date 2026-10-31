@@ -228,7 +228,9 @@ theorem receipt_core_relation :
 
 theorem receipt_post_is_contraction (key : Key) :
     receipt.post key = matmulTable eA eB (rowBits key) (columnBits key) := by
-  simpa [receipt] using output_is_contraction key
+  have hsimpa := output_is_contraction key
+  simp [receipt] at hsimpa ⊢
+  exact hsimpa
 
 /-! ## Canonical durable settlement -/
 

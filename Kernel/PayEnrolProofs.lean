@@ -464,7 +464,7 @@ theorem enrol_descriptor_fee {F : Type} [Field F] {deployment : CanonicalCellReg
       enrolRemainder tariff price plan⟩] := by
   have fee := congrArg Descriptor.fee legs.descriptorExact
   have funding := congrArg Descriptor.funding legs.descriptorExact
-  exact ⟨by simpa [enrolDraft, draft, birthFee] using fee, by simpa [enrolDraft, draft] using funding⟩
+  exact ⟨by exact fee, by simpa [enrolDraft, draft] using funding⟩
 
 /-- **`enrol_float_net_zero`**: the enrollment's Book batch leaves the float
 where it started — it mints the credit to the float and pays out exactly the

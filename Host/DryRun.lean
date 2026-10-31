@@ -55,6 +55,12 @@ open Minidregg.Compiler.NativeHostCodec
 open Minidregg.Kernel
 open Minidregg.Kernel.DurableCheckpoint
 
+/-- An ordinary candidate's intent is its own. Unfolding `Candidate.intent` itself drives `whnf`
+through the objective arm's `cast`, which Lean 4.35 does not finish within the heartbeat budget. -/
+private theorem candidate_ordinary_intent {rootBytes : List UInt8 → Minidregg.Theory.TypedAuthorization.Digest}
+    {loaded : DurableReceiverIO.Loaded rootBytes} (intent : DurableDataIntent.DataIntent rootBytes) :
+    (DurableReceiverIO.Candidate.ordinary (loaded := loaded) intent).intent = intent := rfl
+
 /-- The Store writer of a dry run: reads pass through; the one append records
 that admission reached it and reports `conflict`; no checkpoint, no seed. -/
 def dryTransport (t : DurableReceiverIO.Transport) (reached : IO.Ref Bool) :
@@ -201,8 +207,8 @@ theorem dryReceive_refusal_agrees (t : DurableReceiverIO.Transport) (reached : I
     DurableReceiverIO.receiveLoadedDetailedWithFresh (dryTransport t reached) rootBytes loaded intent =
       DurableReceiverIO.receiveLoadedDetailedWithFresh t rootBytes loaded intent := by
   unfold DurableReceiverIO.receiveLoadedDetailedWithFresh DurableReceiverIO.receiveCandidateWithFresh
-  simp only [DurableReceiverIO.Candidate.intent, DurableReceiverIO.Loaded.prepare_eq]
-  split <;> first | rfl | (rename_i h; exact absurd h (refused _))
+  simp only [candidate_ordinary_intent, DurableReceiverIO.Loaded.prepare_eq]
+  split <;> first | rfl | (rename_i h; exact absurd h (refused _)) | (rename_i v _ _ _; cases v <;> simp_all)
 
 /-- The dry transport names the Store's system cell, so the tail law
 (`Loaded.judge`, C14) judges a dry run exactly as it judges the submission. -/
@@ -238,7 +244,7 @@ theorem dryReceive_tail_refusal_agrees (t : DurableReceiverIO.Transport) (reache
     DurableReceiverIO.receiveLoadedDetailedWithFresh (dryTransport t reached) rootBytes loaded intent =
       DurableReceiverIO.receiveLoadedDetailedWithFresh t rootBytes loaded intent := by
   unfold DurableReceiverIO.receiveLoadedDetailedWithFresh DurableReceiverIO.receiveCandidateWithFresh
-  simp only [DurableReceiverIO.Candidate.intent, DurableReceiverIO.Loaded.prepare_eq]
+  simp only [candidate_ordinary_intent, DurableReceiverIO.Loaded.prepare_eq]
   simp only [admitted, dryTransport_judge, bounded]
 
 /-- The dry transport's only write marks `reached` and observes a conflict,
@@ -273,9 +279,9 @@ theorem dryReceive_admission_reaches_append (t : DurableReceiverIO.Transport)
         | .ok prepared =>
             DurableReceiverIO.publish (dryTransport t reached) rootBytes loaded commit prepared) := by
   unfold DurableReceiverIO.receiveLoadedDetailedWithFresh DurableReceiverIO.receiveCandidateWithFresh
-  simp only [DurableReceiverIO.Candidate.intent, DurableReceiverIO.Loaded.prepare_eq]
+  simp only [candidate_ordinary_intent, DurableReceiverIO.Loaded.prepare_eq]
   simp only [admitted, dryTransport_judge, judged, dryTransport_key, dryTransport_prepareAppend]
-  simp only [DurableReceiverIO.publish, DurableReceiverIO.Candidate.intent]
+  simp only [DurableReceiverIO.publish, candidate_ordinary_intent]
   congr 1
   funext result
   cases result

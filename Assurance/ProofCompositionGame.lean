@@ -134,6 +134,7 @@ end SharedOracleSchedule
 
 /-! ## One tagged failure ledger on one coin space -/
 
+set_option backward.isDefEq.respectTransparency false in
 /-- The cryptographic/probabilistic seams currently exposed by the composed
 proof stack.  Algebraic semantic failure is not a tag here: deterministic
 Lean theorems reduce it to these deployment events. -/

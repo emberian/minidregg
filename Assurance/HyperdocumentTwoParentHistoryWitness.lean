@@ -432,8 +432,10 @@ theorem conflict_opening_authenticated :
     HeadWitness.scheme.verifyOpen
       (mergeEntry.receiptRoot HeadWitness.scheme) conflictCoordinate 1
       conflictProof := by
-  simpa [conflictProof, conflict_coordinate_value] using
+  have hsimpa :=
     (HeadWitness.scheme.verifyOpen_commit mergeEntry.word conflictCoordinate)
+  simp [conflictProof, conflict_coordinate_value] at hsimpa ⊢
+  exact hsimpa
 
 /-- The complete non-vacuity package: an exact version-effects configuration,
 its derived merge declaration, proof-relevant head position, canonical post
@@ -473,6 +475,7 @@ noncomputable def missingConflictCell : PostCell where
   key := conflictId
   value := none
 
+set_option backward.isDefEq.respectTransparency false in
 theorem missing_value_cannot_masquerade :
     missingConflictCell ≠ layout.cellAt conflictSlot := by
   simp [missingConflictCell, layout, conflictCell]

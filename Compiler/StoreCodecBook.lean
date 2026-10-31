@@ -43,13 +43,13 @@ inductive Space
   | floor
   deriving DecidableEq, Repr
 
-def Space.Key : Space → Type
+@[reducible] def Space.Key : Space → Type
   | .account => AccountId
   | .balance => AccountId × AssetId
   | .lease => LeaseId
   | .floor => AccountId × AssetId
 
-def Space.Value : Space → Type
+@[reducible] def Space.Value : Space → Type
   | .account => Unit
   | .balance => Int
   | .lease => LeaseRecord
@@ -69,7 +69,7 @@ instance Space.valueDecEq : (space : Space) → DecidableEq (Space.Value space)
   | .lease => inferInstanceAs (DecidableEq LeaseRecord)
   | .floor => inferInstanceAs (DecidableEq Nat)
 
-def layout : Layout.{0, 0, 0} where
+@[reducible] def layout : Layout.{0, 0, 0} where
   Namespace := Space
   Key := Space.Key
   Value := Space.Value
@@ -150,6 +150,7 @@ def bookSupport (book : Book) : Finset (Address layout) :=
 def bookStore (book : Book) : Store layout :=
   DFinsupp.mk (bookSupport book) fun address => bookValue book address.1
 
+set_option backward.isDefEq.respectTransparency false in
 theorem bookStore_apply (book : Book) (address : Address layout) :
     (bookStore book) address = bookValue book address := by
   unfold bookStore
@@ -165,20 +166,21 @@ theorem bookStore_apply (book : Book) (address : Address layout) :
       rfl
     · have absent : book.balances key = 0 := by
         simpa [bookSupport, accountAddress, balanceAddress, leaseAddress, floorAddress,
-          DFinsupp.mem_support_toFun] using member
+          DFinsupp.mem_support_toFun, Function.Embedding.coeFn_mk] using member
       change (0 : Option Int) =
         if book.balances key = 0 then none else some (book.balances key)
       rw [if_pos absent]
       rfl
     · have absent : book.leaseRecords key = none := by
-        simpa [bookSupport, accountAddress, balanceAddress, leaseAddress, floorAddress,
-          DFinsupp.mem_support_toFun] using member
+        have hsimpa := member
+        simp [bookSupport, accountAddress, balanceAddress, leaseAddress, floorAddress, DFinsupp.mem_support_toFun, Function.Embedding.coeFn_mk] at hsimpa ⊢
+        exact hsimpa
       change (0 : Option LeaseRecord) = book.leaseRecords key
       rw [absent]
       rfl
     · have absent : book.floors key = 0 := by
         simpa [bookSupport, accountAddress, balanceAddress, leaseAddress, floorAddress,
-          DFinsupp.mem_support_toFun] using member
+          DFinsupp.mem_support_toFun, Function.Embedding.coeFn_mk] using member
       change (0 : Option Nat) =
         if book.floors key = 0 then none else some (book.floors key)
       rw [if_pos absent]
@@ -339,6 +341,7 @@ theorem encodeBook_injective : Function.Injective encodeBook := by
   have decoded := congrArg decodeBook same
   rwa [decodeBook_encodeBook, decodeBook_encodeBook, Option.some.injEq] at decoded
 
+set_option backward.isDefEq.respectTransparency false in
 /-- A well-formed store cell is a Book cell exactly when it is the image of
 its own Book reading. -/
 theorem decodeBook_store_eq_none_iff (store : Store layout) :

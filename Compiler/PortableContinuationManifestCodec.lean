@@ -123,7 +123,6 @@ def successorCandidate (request : SuccessorRequest) : Bytes :=
 theorem successorCore_injective : Function.Injective successorStream.encode := by
   intro left right same
   have decoded := congrArg (fun bytes => successorStream.decodePrefix (bytes ++ [])) same
-  dsimp only at decoded
   rw [successorStream.decodePrefix_encode, successorStream.decodePrefix_encode] at decoded
   exact congrArg Prod.fst (Option.some.inj decoded)
 

@@ -404,7 +404,6 @@ theorem Accepted.pre_fresh (accepted : Accepted content M store config portal de
   change Minidregg.Theory.Store.Patch.run store [declaration.appendOp config]
     (eventAddress (declaration.key config)) = some declaration.record
   simp [Declaration.appendOp, Minidregg.Theory.Store.Op.apply, eventAddress]
-  rfl
 
 /-- The same event cannot be appended again to the accepted post. -/
 theorem Accepted.duplicate_rejected

@@ -214,7 +214,7 @@ theorem range_map_getD {α : Type} (d : α) :
   | cons x xs ih =>
       rw [List.length_cons, List.range_succ_eq_map, List.map_cons,
         List.map_map]
-      exact congrArg (x :: ·) (by simpa [Function.comp] using ih)
+      exact congrArg (x :: ·) (by simpa [Function.comp_def] using ih)
 
 /-- The byte encoding recomposes: `beBytes` is injective below the word modulus —
 the boundary encoding loses nothing, as a THEOREM, not an assumption. -/

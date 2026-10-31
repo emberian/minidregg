@@ -173,6 +173,7 @@ theorem decodeOps_canonical (k : deployedR.Kind) (ops : List (List UInt8))
       rw [opStream_encode] at h1
       simp [h1, ih tail tailOk]
 
+set_option backward.isDefEq.respectTransparency false in
 /-- The leg stream; its `encode` is `encodeLeg`. -/
 def legStream : StreamCodec (Leg deployedR) where
   encode := encodeLeg

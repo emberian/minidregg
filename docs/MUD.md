@@ -36,8 +36,8 @@ through a compiler (`programs/README.md`). The only place a MUD template meets a
 **What is trusted.** The referee subject. Laws bound its writes (§2.3: damage per turn, the
 attacker's balance, death only at hp ≤ 0), but its choice among lawful writes is accountable, not
 judged: the `witnessed` clause that would make the resolver's run part of admission
-(`sheet/law.sheet-witnessed`) refuses every write today, because first-party `Pred.eval` treats
-`witnessed` as false.
+(`sheet/law.sheet-witnessed`) cannot be installed today: no host discharges `witnessed`, so the
+compiler refuses any law containing it (`Compiler.supported_no_witnessed`).
 
 ## 2. The constructs
 

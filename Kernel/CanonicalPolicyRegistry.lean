@@ -118,6 +118,7 @@ structure MembershipSemantics (portal : Portal) where
 
 /-! ## Exact selection extracted from `Authorized` -/
 
+set_option backward.isDefEq.respectTransparency false in
 /-- The canonical compiler gate necessarily accepted whenever the specialized
 `Authorized` exists. -/
 theorem authorized_verifies
@@ -198,8 +199,10 @@ theorem authorized_address_exact_of_resolved
   have verified := authorized_resolved_exact authorized resolved
   have selectedByCell : authorized.policyWitness.address =
       addressAt cell request.policyId request.policyRevision := by
-    simpa [CanonicalPolicyConfig.portal] using
+    have hsimpa :=
       authorized.policyAddressExact
+    simp [CanonicalPolicyConfig.portal] at hsimpa ⊢
+    exact hsimpa
   exact selectedByCell.symm.trans verified.witnessAddressExact
 
 /-- One proof-relevant, canonical policy selection.  Its source bytes and

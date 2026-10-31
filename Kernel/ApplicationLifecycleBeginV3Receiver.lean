@@ -78,8 +78,7 @@ def receiveVerified (config : Config) {target : Durable}
   let .ok derived ← NativeHostReplay.admitBeginV3Verified old ingress
     | return .rejected "current launch-bound lifecycle BEGIN refused"
   if eventExact : derived.intent.event = ApplicationLifecycleBeginV3Ingress.event ingress then
-    if old.opened.durable.image.accepted.findIdx?
-        (fun record => record.transactionId == derived.intent.transactionId) != none then
+    if old.opened.durable.firstIndex derived.intent.transactionId != none then
       return .rejected "launch-bound BEGIN transaction identity already used"
     let result ← DurableReceiverIO.receiveLoadedDetailed config.transport
       ResourceBirthCodec.rootBytes old.opened.durable derived.intent

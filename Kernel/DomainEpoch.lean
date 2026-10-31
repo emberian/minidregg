@@ -142,7 +142,7 @@ theorem chunks_flat : ∀ (xs : List Digest) (rest : List UInt8),
   | [], _ => rfl
   | x :: xs, rest => by
       have hx := x.property
-      simp only [chunks, List.flatMap_cons, List.append_assoc]
+      simp only [List.length_cons, chunks, List.flatMap_cons, List.append_assoc]
       rw [List.drop_left' hx, chunks_flat xs rest]
       congr 1
       apply Blob.ext
@@ -339,7 +339,7 @@ theorem absentOpening_decode_encode (E n : Nat) (o : AbsentOpening) (len : o.mas
     ne_eq, not_true_eq_false, if_false]
   have ht : (mask.map bit ++ salt.val).take (E * n) = mask.map bit := List.take_left' (by simp [len])
   have hd : (mask.map bit ++ salt.val).drop (E * n) = salt.val := List.drop_left' (by simp [len])
-  rw [ht, hd]
+  simp only [ht, hd]
   have hall : (mask.map bit).all (· ≤ 1) = true := by
     simp only [List.all_map, List.all_eq_true, Function.comp]
     intro b _; cases b <;> decide
@@ -608,7 +608,6 @@ theorem shaped_header {e t : Nat} {v : List (Cell sched.profile)} (h : Shaped sc
 theorem headerAt_injective {e t j k : Nat} (hj : j < sched.n) (hk : k < sched.n)
     (h : sched.headerAt e t j = sched.headerAt e t k) : j = k := by
   have := congrArg (fun x => x.slot.val) h
-  simp only at this
   rwa [sched.headerAt_slot hj, sched.headerAt_slot hk] at this
 
 /-- One cell per position: in a checked vector, a cell under position `ρ`'s header is the cell at `ρ`. -/

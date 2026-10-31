@@ -445,6 +445,7 @@ def honestResult : MpcResult where
   outputRepresentation := honestOutputArtifact
   privateOutput := honestOutput
 
+set_option backward.isDefEq.respectTransparency false in
 theorem honest_accepts :
     Accepts (declaration.statementOf honestRequest honestResult)
       honestEvidence := by

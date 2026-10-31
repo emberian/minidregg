@@ -49,6 +49,7 @@ structure Dependencies where
   additional : List PolicyRef
   readGuards : List (Nat × Digest)
 
+set_option backward.isDefEq.respectTransparency false in
 private def ofCell (deployment : CanonicalCellRegistry.Deployment)
     (directory : Directory Nat Registry) (cell : PackedCell Registry) : Option Dependencies :=
   match cell with

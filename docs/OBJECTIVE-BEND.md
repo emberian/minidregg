@@ -727,7 +727,9 @@ above), so the creator's own law can read `objective/artifact` too.
   kernel installs it on every object created from the package and judges every write of the
   object's declared state by it. The fragment (`Compiler/ObjectiveBendLaw.lean`) is exactly
   what compiles to `Pred`: `REF == INT`, `REF <= INT`, `REF in [INT, ...]`, `REF == REF`,
-  `REF <= REF`, `REF <= REF + INT`, `monotone(FIELD)`, `writeOnce(FIELD)`, combined with
+  `REF <= REF`, `REF <= REF + INT`, `monotone(FIELD)`, `writeOnceNonzero(FIELD)` (a nonzero
+  value, once written, never changes; 0 reads as unwritten, so a field holding 0 may be
+  rewritten, and the bare `writeOnce(FIELD)` refuses by name), combined with
   `not`, `and`, `or`, `implies`; `REF` is `new.FIELD` (a top-level natural or boolean field of
   the declared state) or `request.subject`/`caller`/`height`/`turn`. Anything else refuses at
   parse (`law outside the enforced fragment: ...`). The source artifact carries the laws and its
@@ -812,7 +814,7 @@ records that a value came from the call that produced it.
   the evidence is compiled vector theorems (`Compiler/ObjectiveBendC4Vectors.lean`: published
   precedence vectors and 4000 seeded DAGs).
 - **Laws** (LT6, OB5): a package `law` is enforced, but only its fragment (no nested paths, no
-  `old.` beyond `monotone`/`writeOnce`, no witnessed or hashed atoms); a spec `claim` is never
+  `old.` beyond `monotone`/`writeOnceNonzero`, no witnessed or hashed atoms); a spec `claim` is never
   checked; laws are not re-checked at each template instance's types.
 - **Ecosystem** (LT5, OB5): no surface form names another package's root; no dynamic
   selection by label; no generative identity beyond the kernel's object ids.

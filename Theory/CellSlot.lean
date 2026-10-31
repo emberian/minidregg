@@ -638,7 +638,7 @@ structure PersistenceRefinement
 #guard_msgs (whitespace := lax) in #print axioms duplicate_create_rejected
 /-- info: 'Minidregg.Theory.CellRegistry.stale_create_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms stale_create_rejected
-/-- info: 'Minidregg.Theory.CellRegistry.stale_delete_rejected' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CellRegistry.stale_delete_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms stale_delete_rejected
 /-- info: 'Minidregg.Theory.CellRegistry.recreate_after_retire_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms recreate_after_retire_rejected

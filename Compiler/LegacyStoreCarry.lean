@@ -139,7 +139,7 @@ def liftKey : LegacyKey → CredentialSigningKey.KeyRecord
   rcases key with ⟨_, _, _, _, _, _, _⟩
   rfl
 
-def LegacyValue : AuthorityPlane → Type
+@[reducible] def LegacyValue : AuthorityPlane → Type
   | .subjectKey => LegacyKey
   | plane => plane.Value
 

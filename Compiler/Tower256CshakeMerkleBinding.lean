@@ -317,6 +317,7 @@ theorem recompute_equal_root_implies_leaf_eq_or_node_collision :
 
 variable {Semantic : Type} {k : Nat}
 
+set_option backward.isDefEq.respectTransparency false in
 /-- An accepted proof byte string decodes to a digest path of exactly depth
 `k`.  This is the codec/path-length seam used by the binding reduction. -/
 theorem accepted_proof_decodes_at_exact_depth

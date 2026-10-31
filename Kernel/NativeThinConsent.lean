@@ -1061,6 +1061,7 @@ theorem openedBytes_items {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L)
           Option.map_none, decide_eq_false shown, Bool.false_eq_true, if_false]
         exact induction
 
+set_option backward.isDefEq.respectTransparency false in
 theorem honest_scalar_view_accepted : HonestScalarViewAcceptedStatement := by
   intro deployment command kind id capability version actions observe audienceEpoch audienceRoster
     fields payload balances quote narrowed target selected valid
@@ -1072,7 +1073,7 @@ theorem honest_scalar_view_accepted : HonestScalarViewAcceptedStatement := by
       ResourceObservationAdmission.narrowPacked] at selected
     split at selected
     · cases kind <;> simp at selected
-      rw [← Option.some.inj selected]
+      rw [← selected]
       exact materialize_logical _ _
     · cases selected
   have served : servedOpening target (NativeObservationController.resourceViewCodec.encode
@@ -1180,6 +1181,7 @@ theorem visible_full {kind : CanonicalCellRegistry.Kind}
   unfold ResourceObservationAdmission.Kept
   split <;> trivial
 
+set_option backward.isDefEq.respectTransparency false in
 theorem honest_account_scalar_view_accepted : HonestAccountScalarViewAcceptedStatement := by
   intro deployment command kind id capability version actions observe audienceEpoch audienceRoster
     fields payload balances quote narrowed target selected valid
@@ -1191,7 +1193,7 @@ theorem honest_account_scalar_view_accepted : HonestAccountScalarViewAcceptedSta
       ResourceObservationAdmission.narrowPacked] at selected
     split at selected
     · cases kind <;> simp at selected
-      rw [← Option.some.inj selected]
+      rw [← selected]
       exact materialize_logical _ _
     · cases selected
   refine ⟨Patch.run narrowed.logical
@@ -1207,6 +1209,7 @@ theorem honest_account_scalar_view_accepted : HonestAccountScalarViewAcceptedSta
         (ResourceObservationAdmission.Visible fields .accountMetadata) payload.logical)
     rw [narrowedLogical, entries_filter, openedBytes_items]
 
+set_option backward.isDefEq.respectTransparency false in
 theorem honest_world_view_accepted : HonestWorldViewAcceptedStatement := by
   intro deployment command kind id capability version actions observe audienceEpoch audienceRoster
     payload balances quote narrowed patch target view selected prepared valid
@@ -1240,6 +1243,7 @@ theorem honest_world_view_accepted : HonestWorldViewAcceptedStatement := by
     rw [none_sealed]
     rfl
 
+set_option backward.isDefEq.respectTransparency false in
 theorem honest_kind_definition_view_accepted : HonestKindDefinitionViewAcceptedStatement := by
   intro deployment command kind id capability version definition observe audienceEpoch audienceRoster
     payload balances quote narrowed patch target view selected prepared valid
@@ -1273,6 +1277,7 @@ theorem honest_kind_definition_view_accepted : HonestKindDefinitionViewAcceptedS
     rw [none_sealed]
     rfl
 
+set_option backward.isDefEq.respectTransparency false in
 theorem honest_content_read_view_accepted : HonestContentReadViewAcceptedStatement := by
   intro deployment command kind id capability version observe audienceEpoch audienceRoster
     fields payload balances quote narrowed target selected
@@ -1295,6 +1300,7 @@ theorem honest_content_read_view_accepted : HonestContentReadViewAcceptedStateme
         (ResourceObservationAdmission.Visible fields .content) payload.logical)
     rw [narrowedLogical, entries_filter, openedBytes_items]
 
+set_option backward.isDefEq.respectTransparency false in
 theorem honest_kind_read_view_accepted : HonestKindReadViewAcceptedStatement := by
   intro deployment command kind id capability version observe audienceEpoch audienceRoster
     fields payload balances quote narrowed target selected
@@ -1317,6 +1323,7 @@ theorem honest_kind_read_view_accepted : HonestKindReadViewAcceptedStatement := 
         (ResourceObservationAdmission.Visible fields .worldKind) payload.logical)
     rw [narrowedLogical, entries_filter, openedBytes_items]
 
+set_option backward.isDefEq.respectTransparency false in
 theorem honest_content_stream_write_named : HonestContentStreamWriteNamedStatement := by
   refine ⟨?_, ?_⟩
   · intro deployment command kind id capability version contentCommand observe audienceEpoch

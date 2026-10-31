@@ -830,7 +830,7 @@ theorem spent_accept_iff (α : ZMod 5) :
       ∈ reedSolomonCode ProximityExample.dom1 1 ↔ α = 4
   rw [mem_reedSolomonCode_one_iff]
   revert α
-  decide
+  decide +kernel
 
 /-- The tooth FIRES: at the good challenge 1 the far spent word is REJECTED. -/
 example : ¬ rcSpent₄.proxAccepts () T₄ ProximityExample.degSched

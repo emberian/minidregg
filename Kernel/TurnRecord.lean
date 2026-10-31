@@ -103,7 +103,7 @@ theorem step_ofAccepted_root {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq 
   obtain ⟨pre', hpre, _, hpost⟩ := step_leg H h (Leg.ofAccepted c accepted) m hc hr
   simp only [Leg.ofAccepted, holds, Option.bind_some, Cell.storeAt_self,
     Option.some.injEq] at hpre
-  subst hpre
+  cases hpre
   refine ⟨hpost, ?_⟩
   simp only [Leg.ofAccepted] at hpost
   rw [hpost]

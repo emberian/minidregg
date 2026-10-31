@@ -119,8 +119,7 @@ def receiveVerified (config : Config) {target : Durable}
   let .ok admitted ← NativeHostReplay.admitRetryClaimV4Verified old ingress
     | return .rejected "retry BEGIN absent or current retry claim authority refused"
   let derived := admitted.toDerived
-  if old.opened.durable.image.accepted.findIdx?
-      (fun record => record.transactionId == derived.intent.transactionId) != none then
+  if old.opened.durable.firstIndex derived.intent.transactionId != none then
     return .rejected "retry claim transaction identity already used"
   let (freshCasWinner, result) ← DurableReceiverIO.receiveLoadedDetailedWithFresh
     config.transport

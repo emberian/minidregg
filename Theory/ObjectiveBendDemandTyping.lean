@@ -278,7 +278,7 @@ theorem source_uses_length {assumptions : Assumptions} {context : Context}
   · intros; simp [zeroUses]
   · intros; simp [zeroUses]
   · intros; simp [zeroUses]
-  · intros; rename_i ih; simpa using congrArg (fun n => n-1) ih
+  · intros; rename_i ih; simp only [List.length_tail, List.length_cons] at ih ⊢; omega
   · intros; assumption
   · intros; simp_all [addUses,List.length_zipWith]
   · intros; assumption

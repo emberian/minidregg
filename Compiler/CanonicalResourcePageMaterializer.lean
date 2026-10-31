@@ -60,8 +60,10 @@ def fromEntries (values : List (K × V)) : Π₀ _ : K, V :=
 theorem fromEntries_map (keys : List K) (f : Π₀ _ : K, V) (key : K) :
     fromEntries (keys.map (fun k => (k, f k))) key =
       if key ∈ keys then f key else 0 := by
-  simpa [fromEntries, List.map_map] using
+  have hsimpa :=
     FiniteDependentMapCodec.fromEntries_map keys f key
+  simp [fromEntries, List.map_map] at hsimpa ⊢
+  exact hsimpa
 
 /-- The product view preserves the existing resource wire tuple exactly. -/
 def entries [LinearOrder K] [DecidableEq V] (f : Π₀ _ : K, V) : List (K × V) :=

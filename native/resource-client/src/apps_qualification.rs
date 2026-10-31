@@ -76,7 +76,7 @@ impl Qualification {
 
 pub(super) fn line(row: Option<&Value>) -> String {
     match row {
-        None => "not swept".into(),
+        None => "its lifecycle not yet tried on this box".into(),
         Some(v) => {
             let candidate = v["candidate"].as_str().unwrap_or_default();
             if v["state"] == "known-working" {

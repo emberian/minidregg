@@ -481,25 +481,25 @@ end ClosedInstance
 
 /-! ## Pinned axiom audit -/
 
-/-- info: 'Minidregg.Kernel.ReplicatedSettlementFinality.finalized_transaction_unique_at_slot' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.ReplicatedSettlementFinality.finalized_transaction_unique_at_slot' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms finalized_transaction_unique_at_slot
-/-- info: 'Minidregg.Kernel.ReplicatedSettlementFinality.no_conflicting_finalized_transactions' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.ReplicatedSettlementFinality.no_conflicting_finalized_transactions' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms no_conflicting_finalized_transactions
-/-- info: 'Minidregg.Kernel.ReplicatedSettlementFinality.DurableReplica.failover_same_recovery' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Kernel.ReplicatedSettlementFinality.DurableReplica.failover_same_recovery' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms DurableReplica.failover_same_recovery
-/-- info: 'Minidregg.Kernel.ReplicatedSettlementFinality.DurableReplica.retry_after_failover_replays' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.ReplicatedSettlementFinality.DurableReplica.retry_after_failover_replays' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms DurableReplica.retry_after_failover_replays
-/-- info: 'Minidregg.Kernel.ReplicatedSettlementFinality.finalized_of_available_fair_responsive' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.ReplicatedSettlementFinality.finalized_of_available_fair_responsive' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms finalized_of_available_fair_responsive
-/-- info: 'Minidregg.Kernel.ReplicatedSettlementFinality.ClosedInstance.closed_no_conflicting_finalization' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.ReplicatedSettlementFinality.ClosedInstance.closed_no_conflicting_finalization' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms ClosedInstance.closed_no_conflicting_finalization
-/-- info: 'Minidregg.Kernel.ReplicatedSettlementFinality.ClosedInstance.retry_on_backup_is_idempotent' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.ReplicatedSettlementFinality.ClosedInstance.retry_on_backup_is_idempotent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms ClosedInstance.retry_on_backup_is_idempotent
 

@@ -153,8 +153,8 @@ not positive is closed: the refill repays a debt before it reopens anything. -/
 theorem Lane.refill_closed (policy : Policy) (lane : Lane) (later : Nat)
     (owed : lane.balanceUs + (((later - lane.stampMs) * policy.refillPerSecondMs : Nat) : Int) ≤ 0) :
     (lane.refill policy later).isOpen = false := by
-  simp only [Lane.refill, Lane.isOpen, decide_eq_false_iff_not, Int.not_lt]
-  exact Int.le_trans (Int.min_le_right _ _) owed
+  simp only [Lane.refill, Lane.isOpen]
+  exact decide_eq_false (Int.not_lt.mpr (Int.le_trans (Int.min_le_right _ _) owed))
 
 /-- Reading a lane back after a charge: the charged lane, refilled. -/
 theorem current_charge (policy : Policy) (lanes : Lanes) (subject now costMs later : Nat) :

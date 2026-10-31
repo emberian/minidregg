@@ -152,6 +152,7 @@ theorem Source.command_subject (domain semantics : Digest) (source : Source) :
     (source.command domain semantics).subject =
       source.originalBegin.base.source.managementSubject := rfl
 
+set_option backward.isDefEq.respectTransparency false in
 theorem Source.command_has_app_first (domain semantics : Digest) (source : Source) :
     (source.command domain semantics).targets.head? =
       some (source.operation.target source.app source.appCapability

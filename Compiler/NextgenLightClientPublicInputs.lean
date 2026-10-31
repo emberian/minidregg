@@ -624,7 +624,9 @@ theorem towerSuiteTag_cellsBelow : CellsBelow towerSuiteTag := by decide
 
 @[simp] theorem encodeBody_cellsBelow (x : Join) : CellsBelow (encodeBody x) := by
   simp [encodeBody, encodingTag_cellsBelow, binarySuiteTag_cellsBelow,
-    binaryProtocolTag_cellsBelow, towerSuiteTag_cellsBelow, babyBearP]
+    binaryProtocolTag_cellsBelow, towerSuiteTag_cellsBelow,
+    encodeEvaluation_cellsBelow 2 (by norm_num [babyBearP]),
+    encodeEvaluation_cellsBelow 3 (by norm_num [babyBearP]), babyBearP]
 
 /-- **Canonical public inputs.** No encoded cell reduces modulo BabyBear. -/
 theorem encode_cell_lt_babyBearP (x : Join) :

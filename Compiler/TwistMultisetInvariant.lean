@@ -206,6 +206,7 @@ only match the audit tuple at its own address -- pinning `row.before` to the
 actual store content.  Cancel the matched pair, absorb the head's write tuple
 into the audit of the updated store, recurse. -/
 
+set_option backward.isDefEq.respectTransparency false in
 /-- **Adversarial direction.** A row list whose grand equation holds under the
 stamp discipline, whose rows have the discipline shapes, and whose addresses
 are covered by an audit domain outside of which the claimed post-state stands

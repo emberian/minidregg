@@ -103,8 +103,7 @@ def receiveVerified (config : Config) {target : Durable}
     | .error detail => return .rejected detail
     | .ok admitted => pure admitted
   let derived := admitted.toDerived
-  if old.opened.durable.image.accepted.findIdx?
-      (fun record => record.transactionId == derived.intent.transactionId) != none then
+  if old.opened.durable.firstIndex derived.intent.transactionId != none then
     return .rejected "retry BEGIN transaction identity already used"
   let result ← DurableReceiverIO.receiveLoadedDetailed config.transport
     ResourceBirthCodec.rootBytes old.opened.durable derived.intent

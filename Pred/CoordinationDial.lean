@@ -531,7 +531,7 @@ theorem leSlotsOff_merge_closed (a b : Slot) (c : Int) : MergeClosed (.leSlotsOf
 
 /-! ## §8 — Axiom pins. -/
 
-/-- info: 'Minidregg.Pred.CoordinationDial.toFun_mergeState' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Pred.CoordinationDial.toFun_mergeState' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms toFun_mergeState
 
 -- `eval_congr_toFun` and `inv_rep_independent` gained `Quot.sound` with `hashEq`: their
@@ -539,31 +539,35 @@ theorem leSlotsOff_merge_closed (a b : Slot) (c : Int) : MergeClosed (.leSlotsOf
 -- (`Theory.Sp800185Cshake256Core.absorbPadded`, itself `[propext, Quot.sound]`). It is the
 -- closure of a definition, not a step of either proof; `Classical.choice` stays out
 -- (`Pred.HashEqDigest.frame` keeps `Nat.digits` out of the evaluator).
-/-- info: 'Minidregg.Pred.CoordinationDial.eval_congr_toFun' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Pred.CoordinationDial.eval_congr_toFun' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms eval_congr_toFun
 
-/-- info: 'Minidregg.Pred.CoordinationDial.inv_rep_independent' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Pred.CoordinationDial.inv_rep_independent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms inv_rep_independent
 
-/-- info: 'Minidregg.Pred.CoordinationDial.single_slot_closed' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Pred.CoordinationDial.single_slot_closed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms single_slot_closed
 
-/-- info: 'Minidregg.Pred.CoordinationDial.dial_sound' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Pred.CoordinationDial.dial_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms dial_sound
 
-/-- info: 'Minidregg.Pred.CoordinationDial.dial_tier1_sound' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Pred.CoordinationDial.dial_tier1_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms dial_tier1_sound
 
-/-- info: 'Minidregg.Pred.CoordinationDial.Witness.demoFree_confluent' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Pred.CoordinationDial.Witness.demoFree_confluent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Witness.demoFree_confluent
 
-/-- info: 'Minidregg.Pred.CoordinationDial.Witness.demoAny_not_confluent' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Pred.CoordinationDial.Witness.demoAny_not_confluent' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in #print axioms Witness.demoAny_not_confluent
 
 /-- info: 'Minidregg.Pred.CoordinationDial.Witness.monotone_refused' depends on axioms: [propext] -/
 #guard_msgs in #print axioms Witness.monotone_refused
 
-/-- info: 'Minidregg.Pred.CoordinationDial.leSlotsOff_merge_closed' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Pred.CoordinationDial.leSlotsOff_merge_closed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms leSlotsOff_merge_closed
 
 end Minidregg.Pred.CoordinationDial

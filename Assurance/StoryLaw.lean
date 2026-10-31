@@ -444,13 +444,13 @@ end Kernel
 
 /-! ## Axiom pins: every theorem rests on the standard three or fewer. -/
 
-/-- info: 'Minidregg.Assurance.StoryLaw.law_step' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.StoryLaw.law_step' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms law_step
-/-- info: 'Minidregg.Assurance.StoryLaw.law_needs' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.StoryLaw.law_needs' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms law_needs
-/-- info: 'Minidregg.Assurance.StoryLaw.law_read_or_write' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.StoryLaw.law_read_or_write' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms law_read_or_write
-/-- info: 'Minidregg.Assurance.StoryLaw.law_no_install' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.StoryLaw.law_no_install' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms law_no_install
 /-- info: 'Minidregg.Assurance.StoryLaw.scene_step' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms scene_step
@@ -460,7 +460,7 @@ end Kernel
 #guard_msgs (whitespace := lax) in #print axioms stepsOf_append
 /-- info: 'Minidregg.Assurance.StoryLaw.final_append' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms final_append
-/-- info: 'Minidregg.Assurance.StoryLaw.accepted_prefix' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.StoryLaw.accepted_prefix' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms accepted_prefix
 /-- info: 'Minidregg.Assurance.StoryLaw.sealed_story_scene_monotone' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms sealed_story_scene_monotone
@@ -472,9 +472,9 @@ end Kernel
 #guard_msgs (whitespace := lax) in #print axioms never_relawed
 /-- info: 'Minidregg.Assurance.StoryLaw.sealed_story_never_relawed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms sealed_story_never_relawed
-/-- info: 'Minidregg.Assurance.StoryLaw.table_refuses_write' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.StoryLaw.table_refuses_write' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms table_refuses_write
-/-- info: 'Minidregg.Assurance.StoryLaw.table_no_install' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.StoryLaw.table_no_install' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms table_no_install
 /-- info: 'Minidregg.Assurance.StoryLaw.sealed_table_never_relawed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms sealed_table_never_relawed
@@ -484,45 +484,49 @@ end Kernel
 #guard_msgs (whitespace := lax) in #print axioms table_refusal_rendered
 /-- info: 'Minidregg.Kernel.StoryLaw.tale_embedded_is_law' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms tale_embedded_is_law
-/-- info: 'Minidregg.Assurance.StoryLaw.legal_step_admitted' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.StoryLaw.legal_step_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms legal_step_admitted
-/-- info: 'Minidregg.Assurance.StoryLaw.take_key_admitted' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.StoryLaw.take_key_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms take_key_admitted
-/-- info: 'Minidregg.Assurance.StoryLaw.conditional_with_key_admitted' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.StoryLaw.conditional_with_key_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms conditional_with_key_admitted
-/-- info: 'Minidregg.Assurance.StoryLaw.skip_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.StoryLaw.skip_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms skip_refused
-/-- info: 'Minidregg.Assurance.StoryLaw.skip_names_exits' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.StoryLaw.skip_names_exits' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms skip_names_exits
-/-- info: 'Minidregg.Assurance.StoryLaw.rewind_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.StoryLaw.rewind_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms rewind_refused
-/-- info: 'Minidregg.Assurance.StoryLaw.rewind_turn_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.StoryLaw.rewind_turn_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms rewind_turn_refused
-/-- info: 'Minidregg.Assurance.StoryLaw.rewind_turn_names_turn' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.StoryLaw.rewind_turn_names_turn' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms rewind_turn_names_turn
-/-- info: 'Minidregg.Assurance.StoryLaw.conditional_without_key_refused' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Assurance.StoryLaw.conditional_without_key_refused' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs (whitespace := lax) in #print axioms conditional_without_key_refused
-/-- info: 'Minidregg.Assurance.StoryLaw.conditional_names_needs' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.StoryLaw.conditional_names_needs' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms conditional_names_needs
-/-- info: 'Minidregg.Assurance.StoryLaw.take_absent_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.StoryLaw.take_absent_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms take_absent_refused
-/-- info: 'Minidregg.Assurance.StoryLaw.take_twice_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.StoryLaw.take_twice_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms take_twice_refused
-/-- info: 'Minidregg.Assurance.StoryLaw.drop_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.StoryLaw.drop_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms drop_refused
-/-- info: 'Minidregg.Assurance.StoryLaw.other_player_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.StoryLaw.other_player_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms other_player_refused
-/-- info: 'Minidregg.Assurance.StoryLaw.install_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.StoryLaw.install_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms install_refused
-/-- info: 'Minidregg.Assurance.StoryLaw.read_admitted' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.StoryLaw.read_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms read_admitted
-/-- info: 'Minidregg.Assurance.StoryLaw.table_read_admitted' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.StoryLaw.table_read_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms table_read_admitted
-/-- info: 'Minidregg.Assurance.StoryLaw.table_edit_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.StoryLaw.table_edit_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms table_edit_refused
-/-- info: 'Minidregg.Assurance.StoryLaw.table_relaw_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.StoryLaw.table_relaw_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms table_relaw_refused
-/-- info: 'Minidregg.Assurance.StoryLaw.playthrough_accepted' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.StoryLaw.playthrough_accepted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms playthrough_accepted
 /-- info: 'Minidregg.Assurance.StoryLaw.kernel_story_step' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms kernel_story_step

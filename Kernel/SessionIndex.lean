@@ -149,7 +149,9 @@ def CellIds.ofImage (image : Image) : CellIds :=
   CellIds.empty.addAll (rawIds image)
 
 theorem CellIds.ofImage_exact (image : Image) : (CellIds.ofImage image).Exact (rawIds image) := by
-  simpa using CellIds.addAll_exact CellIds.empty_exact (rawIds image)
+  have hsimpa := CellIds.addAll_exact CellIds.empty_exact (rawIds image)
+  simp at hsimpa ⊢
+  exact hsimpa
 
 /-- `List.eraseDups` of a list of cell ids in one hashed pass (linear, not quadratic). -/
 def dedup (raw : List CellId) : List CellId := (CellIds.empty.addAll raw).order.toList
@@ -309,7 +311,9 @@ def TxIndex.ofRecords (records : List IntentRecord) : TxIndex :=
 
 theorem TxIndex.ofRecords_exact (records : List IntentRecord) :
     (TxIndex.ofRecords records).Exact records := by
-  simpa using TxIndex.extendFrom_exact TxIndex.empty_exact records
+  have hsimpa := TxIndex.extendFrom_exact TxIndex.empty_exact records
+  simp at hsimpa ⊢
+  exact hsimpa
 
 /-- **Refinement (receipt selection)**: a cached lookup is the `findIdx?` the
 receipt lookup specifies. -/
@@ -410,7 +414,9 @@ def KeyIndex.ofRecords (keys : IntentRecord → List K) (records : List IntentRe
 
 theorem KeyIndex.ofRecords_exact (keys : IntentRecord → List K) (records : List IntentRecord) :
     (KeyIndex.ofRecords keys records).Exact keys records := by
-  simpa using KeyIndex.extendFrom_exact (KeyIndex.empty_exact keys) records
+  have hsimpa := KeyIndex.extendFrom_exact (KeyIndex.empty_exact keys) records
+  simp at hsimpa ⊢
+  exact hsimpa
 
 end KeyIndex
 

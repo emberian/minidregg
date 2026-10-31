@@ -209,6 +209,7 @@ theorem encodeOps_injective (k : deployedR.Kind) {p q : Patch (deployedR.layout 
   rw [hp] at hq
   exact Option.some.inj hq
 
+set_option backward.isDefEq.respectTransparency false in
 theorem decodeLegAt_encodeLegAt (held : CellId → Option (Cell deployedR)) (leg : Leg deployedR) :
     decodeLegAt held (encodeLegAt held leg) = some leg := by
   have verbatim : decodeLegAt held ([1] ++ encodeLeg leg) = some leg := by
@@ -243,6 +244,7 @@ theorem decodeLegAt_encodeLegAt (held : CellId → Option (Cell deployedR)) (leg
     · rw [if_neg hc]
       exact verbatim
 
+set_option backward.isDefEq.respectTransparency false in
 /-- **A digest guard is a guard, up to one exhibited collision.**  If a
 persisted leg, decoded against DIFFERENT held cells, yields a leg other than
 the one written, then the operation itself exhibits two DIFFERENT canonical

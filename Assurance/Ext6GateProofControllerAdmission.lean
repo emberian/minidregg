@@ -30,6 +30,7 @@ noncomputable section
 
 /-! ## One honestly named Ext6 failure ledger -/
 
+set_option backward.isDefEq.respectTransparency false in
 inductive Ext6FailureClass
   | gateAlgebra
   | gatePcs

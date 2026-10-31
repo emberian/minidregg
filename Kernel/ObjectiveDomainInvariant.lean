@@ -432,8 +432,8 @@ theorem domain_holds_forever {rootBytes : Bytes → Digest} {config : Config} {g
     exact ⟨record, objectView_readObject held, named⟩
   · have same : states = memberStates config (payloads snapshot.canonicalBytes) domain.members := by
       have := mapM_finalState (config := config) (snapshot := snapshot) (posts := []) domain.members states
-        (by simpa [finalState, firstAt] using mapped)
-      simpa [afterPosts] using this
+        (by exact mapped)
+      exact this
     rw [same]
     exact holds.2
 

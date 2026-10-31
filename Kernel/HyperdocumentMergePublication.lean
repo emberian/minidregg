@@ -206,7 +206,6 @@ def acceptEvent
       some (derivedEventDeclaration merge expectedLogRoot).record
   simp [Minidregg.Kernel.HyperdocumentVersionEffects.Declaration.appendOp,
     Minidregg.Theory.Store.Op.apply, Minidregg.Kernel.HyperdocumentEventLog.Sparse.eventAddress]
-  rfl
 
 theorem EventAccepted.pre_fresh
     {MDoc : Hyperdocument.Materializer Digest}
@@ -252,6 +251,7 @@ theorem EventAccepted.domain_exact
 
 /-! ## One two-incidence merge publication -/
 
+set_option backward.isDefEq.respectTransparency false in
 inductive Incidence where
   | content
   | eventLog

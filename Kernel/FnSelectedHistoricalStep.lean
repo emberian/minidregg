@@ -133,15 +133,18 @@ theorem select_at {config : Config} {origin tip : Opened config}
           exact ⟨signedIngress, originalReceipt, lifted, by simpa [lifted] using count⟩
 
 /-- A verified native image supplies the admitted history used by selection;
-no package-supplied trace can construct `Verified` on its own. -/
+no package-supplied trace can construct `Verified` on its own. Selection is over
+the records the walk admitted, from its start (`Verified.start_trusted`): `index`
+counts from the start. -/
 theorem select_verified {config : Config} {target : Durable}
     (verified : Verified config target) (index : Nat)
-    (within : index < target.image.accepted.length) :
+    (within : verified.start + index < target.image.accepted.length) :
     ∃ (signedIngress : List UInt8) (originalReceipt : Receipt)
       (selected : Selected config verified.origin verified.opened
-        target.image.accepted verified.receipts signedIngress originalReceipt),
+        (target.image.accepted.drop verified.start) (verified.receipts.drop verified.start)
+        signedIngress originalReceipt),
       selected.priorRecords.length = index :=
-  select_at verified.accepted_history index within
+  select_at verified.accepted_history index (by rw [List.length_drop]; omega)
 
 /-- info: 'Minidregg.Kernel.FnSelectedHistoricalStep.Selected.admitted_record' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Selected.admitted_record

@@ -17,6 +17,7 @@ only Lean decoding and `Accepts` can produce an accepted receipt.
 
 import Compiler.Ext6GateProofController
 import Mathlib.Data.Finsupp.Encodable
+import Mathlib.Algebra.MonoidAlgebra.Cardinal
 import Mathlib.Logic.Equiv.List
 
 namespace Minidregg.Compiler.Ext6GateProofDeployment
@@ -96,9 +97,6 @@ def etaCustomization : List UInt8 :=
 
 local instance polynomialCountable (alpha : Type*) [Countable alpha] [Semiring alpha] :
     Countable (Polynomial alpha) := by
-  letI : Countable (AddMonoidAlgebra alpha Nat) := by
-    change Countable (Nat →₀ alpha)
-    infer_instance
   exact Polynomial.toFinsupp_injective.countable
 
 local instance ext6Countable : Countable Ext6Q := by

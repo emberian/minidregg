@@ -132,10 +132,10 @@ theorem typed_argument_return_preserved {assumptions : Assumptions} {types : Add
     have same := head_normalizes_unique normal (.direct (.arrow reuse quantity domain codomain) rfl)
     have domainEq : captured.annotation.domain.canonical = domain.canonical := by
       simpa [CapturedFunction.arrow,Ty.canonical] using
-        congrArg (fun type => match type with | .arrow _ _ domain _ => domain | _ => type) same
+        congrArg (fun type : Ty => (match type with | .arrow _ _ domain _ => domain | _ => type : Ty)) same
     have codomainEq : captured.annotation.codomain.canonical = codomain.canonical := by
       simpa [CapturedFunction.arrow,Ty.canonical] using
-        congrArg (fun type => match type with | .arrow _ _ _ codomain => codomain | _ => type) same
+        congrArg (fun type : Ty => (match type with | .arrow _ _ _ codomain => codomain | _ => type : Ty)) same
     let after := types ++ [captured.annotation.domain]
     have extension : TypeExtension types after := type_extension_append types _
     have assigned : after[state.heap.size]? = some captured.annotation.domain := by rw [← typed.heap.length]; simp [after]
@@ -159,7 +159,7 @@ theorem typed_argument_return_preserved {assumptions : Assumptions} {types : Add
     have same := head_normalizes_unique normal (.direct (.specification metadataType extensionType) rfl)
     have extensionEq : actualExtension.canonical = extensionType.canonical := by
       simpa [Ty.canonical] using
-        congrArg (fun type => match type with | .specification _ extension => extension | _ => type) same
+        congrArg (fun type : Ty => (match type with | .specification _ extension => extension | _ => type : Ty)) same
     have extensionCallable : callable extensionType = .arrow reuse quantity domain codomain := callableEq
     refine ⟨types,type_extension_refl types,⟨step_certificate typed actualExtension ?_ ?_ ?_⟩⟩
     · simpa [stepRaw,returned,stack] using typed.heap

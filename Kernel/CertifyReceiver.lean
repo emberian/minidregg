@@ -149,7 +149,7 @@ theorem certify_other_chain_refused {H : Type} [ChainHistory H] (current : Syste
 theorem certify_installs (store : SystemStore) (plan : Plan) :
     SystemCell.systemOf (Patch.run store plan.patch) = some plan.next := by
   simp [Plan.patch, certifyPatch, Patch.run, Op.apply, SystemCell.systemOf, SystemCell.systemAddress,
-    Store.set]; rfl
+    Store.set]
 
 /-! ## Command and ingress -/
 

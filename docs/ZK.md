@@ -4,9 +4,14 @@
 re-execution. The receiver runs the checked source with `runBounded` under the signed
 envelope's limits and budget, and `admitted_source_semantics`
 (`Kernel/ObjectiveBendAdmissionSemantics.lean`) states what the admitted output is in source
-terms. No proof carrier gates any effect. The predicate atom `witnessed` lowers to the
-constant indicator 0 (`Compiler/PredCompile.lean`, `lowerA (.witnessed _) = (cst 0, [])`), so
-no law that names a proof can pass.
+terms. No proof carrier gates any effect. The predicate atom `witnessed` is refused: it is
+outside the compiler's supported fragment at every depth (`Compiler/PredCompile.lean`,
+`supported_no_witnessed`), so no law that names a proof installs or is admitted, under either
+polarity (`Kernel/PolicyInstallController.lean` `checkReady_witnessed_unsupported`,
+`Kernel/ResourceBirthPolicyController.lean` `Pending.judgeBranch_witnessed`). Its lowering
+refuses every assignment (`lower_not_witnessed_refuses`). Before this refusal the leaf lowered to
+the constant indicator 0, so `not (witnessed vk)` was constantly true. Deleting the constructor
+(D1) is still open.
 
 This document has two parts:
 

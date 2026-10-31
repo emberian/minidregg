@@ -173,15 +173,18 @@ def genesisCapabilityAdmissible :
   holder := rfl
   scope :=
     { target := by
-        simpa [genesisDeclaration, genesisIntent, config,
-          HyperdocumentOperations.Declaration.toRequest] using
+        have hsimpa :=
           Minidregg.Theory.HyperdocumentCausalFamily.Witness.namedCapabilityAdmissible.scope.target
+        simp [genesisDeclaration, genesisIntent, config, HyperdocumentOperations.Declaration.toRequest] at hsimpa ⊢
+        exact hsimpa
       verb := by
         simpa [genesisDeclaration, genesisIntent, config,
           HyperdocumentOperations.Declaration.toRequest] using
           Minidregg.Theory.HyperdocumentCausalFamily.Witness.namedCapabilityAdmissible.scope.verb
       cost := by
-        simpa [genesisDeclaration, genesisIntent, config,
+        simpa [Genesis.requestEnvelope, Genesis.capability,
+          HyperdocumentCausalFamily.Witness.declaration, HyperdocumentCausalFamily.Witness.capability,
+          genesisDeclaration, genesisIntent, config,
           HyperdocumentOperations.Declaration.toRequest] using
           Minidregg.Theory.HyperdocumentCausalFamily.Witness.namedCapabilityAdmissible.scope.cost }
   validFrom := by decide
@@ -205,6 +208,7 @@ def genesisAuthorization : Authorized Genesis.permissivePortal
   policyMembershipVerified := rfl
   policyVerified := rfl
 
+set_option backward.isDefEq.respectTransparency false in
 def genesisSemantic : HyperdocumentOperations.ValidOperation config
     Genesis.documentPre genesisDeclaration where
   canonical :=
@@ -244,6 +248,7 @@ noncomputable def genesisAccepted : HyperdocumentOperations.Accepted config
 
 abbrev genesisPost := genesisAccepted.accepted.prepared.post
 
+set_option backward.isDefEq.respectTransparency false in
 /-- Genesis writes only its document and root element. -/
 theorem genesis_frame (address : Hyperdocument.Address)
     (notDocument : address ≠ ⟨.documents, Genesis.documentId⟩)
@@ -328,15 +333,18 @@ def linkCapabilityAdmissible :
   holder := rfl
   scope :=
     { target := by
-        simpa [linkDeclaration, linkIntent, config,
-          HyperdocumentOperations.Declaration.toRequest] using
+        have hsimpa :=
           Minidregg.Theory.HyperdocumentCausalFamily.Witness.namedCapabilityAdmissible.scope.target
+        simp [linkDeclaration, linkIntent, config, HyperdocumentOperations.Declaration.toRequest] at hsimpa ⊢
+        exact hsimpa
       verb := by
         simpa [linkDeclaration, linkIntent, config,
           HyperdocumentOperations.Declaration.toRequest] using
           Minidregg.Theory.HyperdocumentCausalFamily.Witness.namedCapabilityAdmissible.scope.verb
       cost := by
-        simpa [linkDeclaration, linkIntent, config,
+        simpa [Genesis.requestEnvelope, Genesis.capability,
+          HyperdocumentCausalFamily.Witness.declaration, HyperdocumentCausalFamily.Witness.capability,
+          linkDeclaration, linkIntent, config,
           HyperdocumentOperations.Declaration.toRequest] using
           Minidregg.Theory.HyperdocumentCausalFamily.Witness.namedCapabilityAdmissible.scope.cost }
   validFrom := by decide
@@ -484,6 +492,7 @@ noncomputable def genesisHistory : CausalVersionDag.History
   change [genesisStored.key.digest] = [genesisStored.key.digest]
   rfl
 
+set_option backward.isDefEq.respectTransparency false in
 noncomputable def linkValid :
     CausalVersionDag.ValidAppend anchor genesisHistory.events linkNode where
   anchorExact := ⟨rfl, rfl⟩
@@ -623,16 +632,19 @@ def eventCapabilityAdmissible :
   holder := rfl
   scope :=
     { target := by
-        simpa [eventDeclaration,
-          HyperdocumentVersionEffects.Declaration.toRequest, linkDeclaration,
-          linkIntent] using
+        have hsimpa :=
           Minidregg.Theory.HyperdocumentCausalFamily.Witness.namedCapabilityAdmissible.scope.target
+        simp [eventDeclaration, HyperdocumentVersionEffects.Declaration.toRequest, linkDeclaration, linkIntent] at hsimpa ⊢
+        exact hsimpa
       verb := by
-        simpa [eventDeclaration,
-          HyperdocumentVersionEffects.Declaration.toRequest] using
+        have hsimpa :=
           Minidregg.Theory.HyperdocumentCausalFamily.Witness.namedCapabilityAdmissible.scope.verb
+        simp [eventDeclaration, HyperdocumentVersionEffects.Declaration.toRequest] at hsimpa ⊢
+        exact hsimpa
       cost := by
-        simpa [eventDeclaration, linkDeclaration,
+        simpa [Genesis.requestEnvelope, Genesis.capability,
+          HyperdocumentCausalFamily.Witness.declaration, HyperdocumentCausalFamily.Witness.capability,
+          eventDeclaration, linkDeclaration, HyperdocumentOperations.Declaration.toRequest,
           HyperdocumentVersionEffects.Declaration.toRequest] using
           Minidregg.Theory.HyperdocumentCausalFamily.Witness.namedCapabilityAdmissible.scope.cost }
   validFrom := by decide
@@ -835,14 +847,17 @@ theorem revoked_capability_rejected :
   intro admitted
   exact admitted.selfNotRevoked (by simp [revokedState])
 
+set_option backward.isDefEq.respectTransparency false in
 theorem causal_entry_replay_tooth :
     genesisNode.entryId ≠ linkNode.entryId :=
   linkValid.no_entry_replay (old := genesisNode) (by simp [genesisHistory])
 
+set_option backward.isDefEq.respectTransparency false in
 theorem causal_request_replay_tooth :
     genesisNode.requestId ≠ linkNode.requestId :=
   linkValid.no_request_replay (old := genesisNode) (by simp [genesisHistory])
 
+set_option backward.isDefEq.respectTransparency false in
 theorem causal_effect_replay_tooth :
     genesisNode.effectId ≠ linkNode.effectId :=
   linkValid.no_effect_replay (old := genesisNode) (by simp [genesisHistory])

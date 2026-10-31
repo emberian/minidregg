@@ -46,10 +46,15 @@ const BASE: u128 = 1;
 const TICK_RATE: u128 = 1;
 const REPLAY_RATE: u128 = 6;
 const CORE_RATE: u128 = 2;
-/// The source ticks a bend's birth declares (`activity_world.TICKS`) and the multiple of its price the
-/// default deposit reserves: the pair of envelopes the first await escrows (resume and timeout: the Host quoted 63,392 for the pair at 30,443 a price, so 2 prices fall short) and one more price (`activity_world.BEND_PURSE_PRICES`). A larger purse is `--deposit N`; a program that awaits again needs one.
+/// The source ticks a bend's birth declares (`activity_world.BEND_TICKS`) and the multiple of its price the
+/// default deposit reserves (`activity_world.BEND_PURSE_PRICES`, whose comment carries the measurement). Every leg
+/// declares the same envelope, so every resume costs the purse one price; every yield must leave the await's pair
+/// (two prices) and the record's storage deposit in it. The default carries `ANSWERS` delivered replies through to
+/// the activity's end: the pair, one price per answer, and one price that covers the storage deposit (2,568 for the
+/// Tally). A program that is answered more often needs `--deposit N`; the unspent purse returns when it ends.
 const TICKS: u128 = 300;
-const DEPOSIT_PRICES: u128 = 3;
+const ANSWERS: u128 = 1;
+const DEPOSIT_PRICES: u128 = ANSWERS + 3;
 /// The declared state type `{total: Nat}` (the checker's type JSON) `Tally` and its siblings keep.
 const TOTAL_STATE: &str = r#"{"tag":"field","name":"total","member":{"tag":"natural"},"tail":{"tag":"emptyRow"}}"#;
 
@@ -124,11 +129,15 @@ fn birth_turn(object: &str, object_cap: &str, account: &str, account_cap: &str, 
         "envelope": envelope, "resume": envelope, "timeout": envelope, "deposit": deposit.to_string()})
 }
 
-/// What `Tally` starts from: `{init: set 0, decider: SUBJECT}` (the member answers their own awaits).
+/// What `Tally` starts from: `{init: set 0, decider: SUBJECT}` (the member answers their own awaits) on an
+/// object with no declared state yet, and `{init: keep}` on one that has it: the kernel admits a `set` only
+/// from the birth that creates the state (`blindWrite`), so a later run on the same object joins its total.
 /// Any other program names its input with `--input`.
-fn default_input(subject: &str) -> Value {
+fn default_input(subject: &str, state_exists: bool) -> Value {
+    let init = if state_exists { json!({"tag": "variant", "label": "keep", "payload": {"tag": "record", "fields": []}}) }
+        else { json!({"tag": "variant", "label": "set", "payload": {"tag": "natural", "value": "0"}}) };
     json!({"tag": "record", "fields": [
-        {"name": "init", "value": {"tag": "variant", "label": "set", "payload": {"tag": "natural", "value": "0"}}},
+        {"name": "init", "value": init},
         {"name": "decider", "value": {"tag": "natural", "value": subject}}]})
 }
 
@@ -148,20 +157,31 @@ fn data_text(v: &Value) -> String {
 /// How the Host decided a submitted turn.
 #[derive(Debug, PartialEq)]
 enum Decided {
-    /// Admitted: height, world root, receipt (transaction, event), how it confirmed.
+    /// Admitted: the height the turn was judged at (`judged_height`), world root, receipt (transaction, event),
+    /// how it confirmed.
     Admitted { height: String, root: String, receipt: String, how: String },
     Refused(String),
     Undecided(String),
 }
 
-fn decided(outcome: &Value) -> Decided {
+/// The logical height a turn was judged at, from its receipt's accepted count: the Host's clock is
+/// `genesisHeight + |accepted|` (`NativeHost.logicalHeight`), a turn is judged at the height before it is
+/// appended, so the receipt of the k-th accepted turn reads `genesisHeight + k - 1`. It is the clock an await's
+/// `yieldedAt` and `deadline` and the view's `height` are on (the view's height is the one the NEXT turn is judged
+/// at), so a receipt, `bend await` and `bend show` print one scale.
+fn judged_height(genesis: u128, accepted: &str) -> String {
+    accepted.parse::<u128>().ok().and_then(|k| genesis.checked_add(k.checked_sub(1)?)).map(|h| h.to_string())
+        .unwrap_or_else(|| "?".into())
+}
+
+fn decided(outcome: &Value, genesis: u128) -> Decided {
     let s = |k: &str| outcome.get(k).and_then(Value::as_str).unwrap_or("?").to_owned();
     if let Some(line) = crate::charged_line(outcome) {
         return Decided::Refused(line);
     }
     match outcome.get("type").and_then(Value::as_str) {
         Some("confirmed") => Decided::Admitted {
-            height: s("acceptedCount"),
+            height: judged_height(genesis, &s("acceptedCount")),
             root: s("worldRoot"),
             receipt: format!("tx {} event {}", s("transactionId"), s("eventId")),
             how: s("confirmation"),
@@ -221,13 +241,23 @@ fn ending_for(name: &str, error: String) -> Result<()> {
 struct Bend {
     ws: Ws,
     pin: Value,
+    /// The deployment's `genesisHeight` (its pinned config): receipts print heights on the Host's logical clock.
+    genesis: u128,
 }
 
 impl Bend {
     fn open(root: PathBuf) -> Result<Self> {
         let bytes = fs::read(root.join("workspace.json")).map_err(|e| format!("bend: cannot read workspace.json: {e}"))?;
         let pin: Value = serde_json::from_slice(&bytes).map_err(|e| format!("bend: invalid workspace.json: {e}"))?;
-        Ok(Self { ws: activity::ws(root)?, pin })
+        let ws = activity::ws(root)?;
+        let config: Value = serde_json::from_slice(&fs::read(&ws.config).map_err(|e| format!("bend: cannot read {}: {e}", ws.config.display()))?)
+            .map_err(|e| format!("bend: {}: {e}", ws.config.display()))?;
+        let genesis = match &config["genesisHeight"] {
+            Value::Number(n) => n.as_u64().map(u128::from),
+            Value::String(t) => t.parse().ok(),
+            _ => None,
+        }.ok_or_else(|| format!("bend: {} names no genesisHeight", ws.config.display()))?;
+        Ok(Self { ws, pin, genesis })
     }
 
     fn dir(&self, name: &str) -> PathBuf {
@@ -264,6 +294,12 @@ impl Bend {
     /// `lose`, the Host's reply to the submission is deliberately not read (the shell's lost-reply
     /// switch, `transport`): the attempt stays retained and undecided.
     fn submit(&self, name: &str, step: &str, turn: &Value, meta: &Value, lose: bool) -> Result<(Decided, Value)> {
+        self.submit_again(name, step, turn, meta, lose, false)
+    }
+
+    /// `submit`, with `again`: the member's decision to sign once more a turn whose identical twin this workspace
+    /// already had decided (`activity::turn_nonce`; `bend run --again`).
+    fn submit_again(&self, name: &str, step: &str, turn: &Value, meta: &Value, lose: bool, again: bool) -> Result<(Decided, Value)> {
         let attempts = self.dir(name).join("attempts");
         crate::fsio::ensure_private_dir_all(&attempts)?;
         let out = attempts.join(format!("{step}-{}", &crate::fsio::random_nonce()?[..8]));
@@ -273,10 +309,10 @@ impl Bend {
         if lose {
             std::env::set_var(mini_sdk::operator::LOSE_REPLY_ENV, mini_sdk::host_operations::ACTIVITY_SUBMIT.to_string());
         }
-        let outcome = activity::submit(&self.ws, turn, &out, false, None, false);
+        let outcome = activity::submit(&self.ws, turn, &out, false, None, again);
         std::env::remove_var(mini_sdk::operator::LOSE_REPLY_ENV);
         let outcome = outcome?;
-        Ok((decided(&outcome), outcome))
+        Ok((decided(&outcome, self.genesis), outcome))
     }
 
     /// The newest attempt of NAME that reached an ingress: (its directory, its meta).
@@ -379,21 +415,68 @@ fn lose_flag(args: &mut Args) -> Result<bool> {
     Ok(opt(args, "lose-reply-once")?.as_deref() == Some("true"))
 }
 
+/// What the shell adds to a Host refusal of an attempt described by `meta`, when the Host's words are true but
+/// do not say what happened (an exact repeat of an admitted turn is `transaction identity conflict`).
+fn refusal_hint(meta: &Value, r: &str) -> String {
+    let m = |k: &str| meta.get(k).and_then(Value::as_str).unwrap_or("?").to_owned();
+    match m("kind").as_str() {
+        // A second publish of the same source names the same artifact and package, so the Host
+        // sees a replay of an admitted transaction identity.
+        "publish" if r.contains("transaction identity conflict") => format!(
+            " (this package is already published: artifact {} package {}; `bend run` it)", m("artifactId"), m("packageId")),
+        "resolve" if r.contains("responseType") => " (the reply's DATA does not have the shape this slot's ask declared; \
+            answer with exactly the response type the asking program names, or {\"refused\": REASON})".to_owned(),
+        // The same answer to the same slot (a retry after a restart or a lost reply, typed again) is the
+        // same transaction identity under a fresh ingress: the slot was already decided by it.
+        "resolve" | "deliver" if r.contains("transaction identity conflict") => format!(" ({})", already_done(meta)),
+        _ => String::new(),
+    }
+}
+
+/// What an exact repeat of an admitted answer or delivery is: the slot already answered, the await
+/// already delivered (the same answer again changes nothing; another answer is refused by the slot).
+fn already_done(meta: &Value) -> String {
+    let m = |k: &str| meta.get(k).and_then(Value::as_str).unwrap_or("?").to_owned();
+    if m("kind") == "deliver" {
+        format!("await {} is already delivered; nothing changed: `bend await` shows where the activity is now", m("await"))
+    } else {
+        format!("slot {} is already answered with this answer; nothing changed: `bend deliver` resumes the activity", m("slot"))
+    }
+}
+
+/// A run identical to one this workspace already had decided (same bend, object, input and deposit) is not
+/// signed again by accident; running it once more is the member's decision, and the line that makes it is
+/// `bend run NAME OBJECT --again` (the activity client's own words name its `--again true`, not a bend verb).
+fn run_again(name: &str, object_ref: &str, error: String) -> String {
+    match error.strip_prefix("activity: this turn was already submitted (") {
+        Some(rest) => {
+            let kind = rest.split(';').next().unwrap_or("decided");
+            let kind = if kind == "confirmed" { "admitted" } else { kind };
+            format!("refused: run {name} on {object_ref}: this exact run was already {kind}; nothing was submitted. \
+                A second run with the same input is a new activity: `bend run {name} {object_ref} --again`")
+        }
+        None => error,
+    }
+}
+
+/// The activity client refuses to sign an exact repeat of a turn this workspace already had decided
+/// (`activity::turn_nonce`). For an answer or a delivery that repeat is never a second decision, so it
+/// is refused by name (nothing is submitted) rather than offered `--again`.
+fn repeated(meta: &Value, error: String) -> String {
+    if error.starts_with("activity: this turn was already submitted (confirmed;") {
+        format!("refused: {}", already_done(meta))
+    } else {
+        error
+    }
+}
+
 /// Print the Host's decision on an attempt described by `meta`, or record its refusal / undecided ending.
 /// `lead` names the verb (`bend publish`, `bend lookup`, `bend retry`).
 fn report(bend: &Bend, name: &str, meta: &Value, transaction: Option<String>, lead: &str, d: Decided) -> Result<()> {
     let m = |k: &str| meta.get(k).and_then(Value::as_str).unwrap_or("?").to_owned();
     match d {
         Decided::Refused(r) => {
-            let hint = match m("kind").as_str() {
-                // A second publish of the same source names the same artifact and package, so the Host
-                // sees a replay of an admitted transaction identity.
-                "publish" if r.contains("transaction identity conflict") => format!(
-                    " (this package is already published: artifact {} package {}; `bend run` it)", m("artifactId"), m("packageId")),
-                "resolve" if r.contains("responseType") => " (the reply's DATA does not have the shape this slot's ask declared; \
-                    answer with exactly the response type the asking program names, or {\"refused\": REASON})".to_owned(),
-                _ => String::new(),
-            };
+            let hint = refusal_hint(meta, &r);
             ending(format!("refused: {r}{hint}"))
         }
         Decided::Undecided(r) => ending_for(name, format!("undecided: {r}")),
@@ -452,7 +535,7 @@ fn lookup_cmd(bend: &Bend, mut args: Args, retry: bool) -> Result<()> {
         Ok(o) => o,
         Err(e) => return ending_for(&name, e),
     };
-    let d = decided(&outcome);
+    let d = decided(&outcome, bend.genesis);
     let transaction = if matches!(d, Decided::Admitted { .. }) && meta.get("kind").and_then(Value::as_str) == Some("run") { Some(transaction_of(bend, &dir)?) } else { None };
     report(bend, &name, &meta, transaction, if retry { "bend retry" } else { "bend lookup" }, d)
 }
@@ -481,6 +564,7 @@ fn run_bend(bend: &Bend, mut args: Args) -> Result<()> {
     let deposit = opt(&mut args, "deposit")?;
     let account = opt(&mut args, "account")?;
     let lose = lose_flag(&mut args)?;
+    let again = opt(&mut args, "again")?.as_deref() == Some("true");
     args.finish()?;
     name_ok(&name)?;
     if let Some(refusal) = bend.no_object(&object_ref) {
@@ -525,11 +609,13 @@ fn run_bend(bend: &Bend, mut args: Args) -> Result<()> {
     }
     let envelope = envelope(extract, replay, core, TICKS);
     let deposit = deposit.unwrap_or(DEPOSIT_PRICES * price(TICKS, replay, core));
-    let input = input.unwrap_or_else(|| default_input(&bend.ws.subject));
+    let state_exists = view.pointer("/objects/0/stateCell").and_then(Value::as_str).and_then(|c| cell_of(&view, c))
+        .is_some_and(|c| c.get("value").is_some_and(|v| !v.is_null()));
+    let input = input.unwrap_or_else(|| default_input(&bend.ws.subject, state_exists));
     let turn = birth_turn(&object, &object_cap, &payer, &payer_cap, &pin, &input, &envelope, deposit);
     let meta = json!({"kind": "run", "bend": name, "objectRef": object_ref, "object": object, "pin": pin, "payer": payer, "deposit": deposit.to_string()});
-    let (how, outcome) = match bend.submit(&name, "birth", &turn, &meta, lose) {
-        Err(e) => return ending_for(&name, e),
+    let (how, outcome) = match bend.submit_again(&name, "birth", &turn, &meta, lose, again) {
+        Err(e) => return ending_for(&name, run_again(&name, &object_ref, e)),
         Ok((Decided::Refused(m), _)) => return ending(format!("refused: run {name} on {object_ref}: {m}")),
         Ok((Decided::Undecided(m), _)) => return ending_for(&name, format!("undecided: run {name} on {object_ref}: {m}")),
         Ok((admitted, outcome)) => (admitted, outcome),
@@ -562,8 +648,11 @@ fn finish_run(bend: &Bend, name: &str, meta: &Value, transaction: &str, lead: &s
     }
     let registry = bend.ws.root.join("bend").join("objects");
     crate::fsio::ensure_private_dir_all(&registry)?;
-    let _ = crate::fsio::retain_json(&registry.join(format!("{}.json", workspace::ref_file(&object_ref))),
-        &json!({"bend": name, "pin": pin, "object": object, "transaction": transaction, "record": record_cell}));
+    // The object's newest birth is the row (a later run on the same object replaces an ended one's).
+    let path = registry.join(format!("{}.json", workspace::ref_file(&object_ref)));
+    let old: Option<Value> = fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok());
+    let row = next_row(old.as_ref(), json!({"bend": name, "pin": pin, "object": object, "transaction": transaction, "record": record_cell}));
+    let _ = crate::fsio::replace_private(&path, &row_bytes(&row));
     println!("{line}");
     Ok(())
 }
@@ -598,12 +687,23 @@ fn show(bend: &Bend, mut args: Args) -> Result<()> {
     if let Some(k) = known {
         let record_cell = k.get("record").and_then(Value::as_str).unwrap_or_default();
         let purse = activity::view(&bend.ws, &json!({"accounts": [record_cell]}))?;
-        let phase = cell_of(&view, record_cell).and_then(|c| c.pointer("/record/phase")).map(|p| p.to_string()).unwrap_or_else(|| "?".into());
+        let phase = phase_text(cell_of(&view, record_cell), k.get("ended").and_then(Value::as_str));
         println!("  bend {}: activity record {record_cell}, purse {}, phase {phase}",
             k.get("bend").and_then(Value::as_str).unwrap_or("?"),
             balance(&purse, record_cell).map(|b| b.to_string()).unwrap_or_else(|| "?".into()));
     }
     Ok(())
+}
+
+/// What `bend show` says of an activity's phase: the record's own phase while it is retained (awaiting
+/// with its await, or how it ended), and, once the turn that ended it retired the record (no phase is
+/// left to read), that it ended and where its purse went.
+fn phase_text(cell: Option<&Value>, ended_at: Option<&str>) -> String {
+    match cell.and_then(|c| c.pointer("/record/phase")) {
+        Some(phase) => phase.to_string(),
+        None => format!("ended{}: its record is retired and its purse returned to the payer",
+            ended_at.map(|h| format!(" (seen at height {h})")).unwrap_or_default()),
+    }
 }
 
 // ------------------------------------------------------------------ await / answer
@@ -613,7 +713,8 @@ fn decimal_arg(value: &str, what: &str) -> Result<()> {
 }
 
 /// `bend await OBJECT TRANSACTION`: the activity that birth made, as one JSON line (the read a
-/// resident's `mini_pending_awaits` is built on). Absent record: phase `none`.
+/// resident's `mini_pending_awaits` is built on). Absent record: phase `none`. Its `height` is the view's: the
+/// height the next turn is judged at, the clock of `deadline` and of every receipt's height (`judged_height`).
 fn await_cmd(bend: &Bend, mut args: Args) -> Result<()> {
     let object = text(&mut args, "object")?;
     let transaction = text(&mut args, "transaction")?;
@@ -652,22 +753,174 @@ fn deliver_cmd(bend: &Bend, mut args: Args) -> Result<()> {
     decimal_arg(&object, "OBJECT")?;
     decimal_arg(&transaction, "TRANSACTION")?;
     let view = activity::view(&bend.ws, &json!({"objects": [&object], "births": [{"object": &object, "transaction": &transaction}]}))?;
-    let (record, await_id) = deliverable(&view)?;
-    let (payer, payer_cap) = bend.payer(account.as_deref())?;
+    // Nothing to deliver (not awaiting; the await not yet decided nor past its deadline) is the Host's
+    // view refusing, by name: a refusal ending, not a client error.
+    let found = match deliverable(&view) { Ok(found) => found, Err(e) => return ending(e) };
+    match deliver_turn(bend, &object, &transaction, found, account.as_deref())? {
+        Delivery::Refused(e) => ending(e),
+        Delivery::Submitted(name, meta, Err(e)) => ending_for(&name, repeated(&meta, e)),
+        Delivery::Submitted(name, meta, Ok(d)) => report(bend, &name, &meta, None, "bend deliver", d),
+    }
+}
+
+/// A delivery's turn: refused before anything was signed (the quote), or submitted under its fixed
+/// attempt name with its meta and the Host's decision (or the client's error).
+enum Delivery {
+    Refused(String),
+    Submitted(String, Value, Result<Decided>),
+}
+
+/// One deliver turn for the awaiting `(record, await)` of OBJECT's birth TRANSACTION, paid from my account.
+fn deliver_turn(bend: &Bend, object: &str, transaction: &str, (record, await_id): (String, String), account: Option<&str>) -> Result<Delivery> {
+    let (payer, payer_cap) = bend.payer(account)?;
     let mut turn = json!({"kind": "deliver", "record": record, "await": await_id, "account": payer, "accountCapability": payer_cap});
     // The resumed segment runs over the stored checkpoint: when it needs more heap than the
     // escrowed envelope carries, the deliverer adds the difference (`heapUncovered`; priced,
     // paid by me). The Host's read-only quote is the kernel's own `ResumeTail.needed`.
     let quoted = activity::view(&bend.ws, &json!({"quotes": [{"record": &record, "await": &await_id}]}))?;
-    if let Some(heap) = extra_heap(&quoted, &record, &await_id)? {
+    let extra = match extra_heap(&quoted, &record, &await_id) { Ok(extra) => extra, Err(e) => return Ok(Delivery::Refused(e)) };
+    if let Some(heap) = extra {
         turn["extra"] = extra_envelope(heap);
     }
     let name = deliver_name(&await_id);
     let meta = json!({"kind": "deliver", "object": object, "transaction": transaction, "await": await_id});
-    match bend.submit(&name, "deliver", &turn, &meta, false) {
-        Err(e) => ending_for(&name, e),
-        Ok((d, _)) => report(bend, &name, &meta, None, "bend deliver", d),
+    let decided = bend.submit(&name, "deliver", &turn, &meta, false).map(|(d, _)| d);
+    Ok(Delivery::Submitted(name, meta, decided))
+}
+
+/// The registry rows: (reference, bend, object, transaction), from `bend/objects/*.json` (an
+/// admitted `bend run` writes one per object).
+pub(crate) fn registry(root: &Path) -> Vec<(String, String, String, String)> {
+    let mut rows: Vec<_> = fs::read_dir(root.join("bend").join("objects"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .take(256)
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().strip_suffix(".json")?.to_owned();
+            let v: Value = serde_json::from_slice(&fs::read(e.path()).ok()?).ok()?;
+            let s = |k: &str| v[k].as_str().map(str::to_owned);
+            Some((name, s("bend").unwrap_or_default(), s("object")?, s("transaction")?))
+        })
+        .collect();
+    rows.sort();
+    rows
+}
+
+/// The await of a view that is past its deadline: `(record, await)` when the activity awaits and the
+/// height the next turn is judged at is beyond the deadline, so a delivery settles it now (`timedOut`, or
+/// the decider's answer if the slot was decided in time). `None` while it may still be answered, or when
+/// nothing awaits.
+fn overdue(view: &Value) -> Option<(String, String)> {
+    let record = view.pointer("/births/0/record").and_then(Value::as_str)?;
+    let phase = cell_of(view, record)?.pointer("/record/phase")?;
+    if phase.get("kind").and_then(Value::as_str) != Some("awaiting") {
+        return None;
     }
+    let deadline: u128 = phase.pointer("/await/deadline")?.as_str()?.parse().ok()?;
+    let height: u128 = view.get("height")?.as_str()?.parse().ok()?;
+    (height > deadline).then(|| Some((record.to_owned(), phase.pointer("/await/id")?.as_str()?.to_owned()))).flatten()
+}
+
+fn row_bytes(row: &Value) -> Vec<u8> {
+    let mut bytes = serde_json::to_vec_pretty(row).expect("JSON values serialise");
+    bytes.push(b'\n');
+    bytes
+}
+
+/// The view's height when the birth's activity is over (its record retired, or ended or faulted), so a
+/// settle never reads it again; `None` while it awaits.
+fn ended(view: &Value) -> Option<String> {
+    let record = view.pointer("/births/0/record").and_then(Value::as_str)?;
+    let kind = cell_of(view, record).and_then(|c| c.pointer("/record/phase/kind")).and_then(Value::as_str);
+    (kind != Some("awaiting")).then(|| view.get("height").and_then(Value::as_str).unwrap_or("?").to_owned())
+}
+
+/// `bend settle [--account REF]`: deliver every activity this workspace ran (`bend/objects/`) whose await
+/// is past its deadline, so a run reaches its end and its purse returns without anyone typing
+/// `bend deliver`; one line per activity. The door's tick runs it for every enrolled member
+/// (`mini-door-process`), so a tally nobody delivers still completes at its deadline.
+fn settle_cmd(bend: &Bend, mut args: Args) -> Result<()> {
+    let account = opt(&mut args, "account")?;
+    args.finish()?;
+    let mut settled = 0;
+    let rows = bend.ws.root.join("bend").join("objects");
+    for (name, _, object, _) in registry(&bend.ws.root) {
+        if decimal_arg(&object, "OBJECT").is_err() {
+            continue;
+        }
+        let file = rows.join(format!("{}.json", workspace::ref_file(&name)));
+        let Ok(mut row) = fs::read(&file).map_err(|e| e.to_string()).and_then(|b| serde_json::from_slice::<Value>(&b).map_err(|e| e.to_string())) else { continue };
+        let before = row.clone();
+        // An activity seen ended is never read again: a settle costs one view per LIVE activity, not per run ever made.
+        for transaction in live_births(&row) {
+            if decimal_arg(&transaction, "TRANSACTION").is_err() {
+                continue;
+            }
+            let view = match activity::view(&bend.ws, &json!({"objects": [&object], "births": [{"object": &object, "transaction": &transaction}]})) {
+                Ok(view) => view,
+                Err(e) => { eprintln!("{name}: not read: {e}"); continue; }
+            };
+            if let Some(height) = ended(&view) {
+                mark_ended(&mut row, &transaction, &height);
+                continue;
+            }
+            let Some(found) = overdue(&view) else { continue };
+            match deliver_turn(bend, &object, &transaction, found, account.as_deref()) {
+                Ok(Delivery::Submitted(_, _, Ok(Decided::Admitted { height, receipt, .. }))) => {
+                    settled += 1;
+                    println!("settled {name}: delivered past its deadline at height {height}, receipt {receipt}");
+                }
+                Ok(Delivery::Submitted(_, meta, Ok(Decided::Refused(r)))) => eprintln!("{name}: delivery refused: {r}{}", refusal_hint(&meta, &r)),
+                Ok(Delivery::Submitted(_, _, Ok(Decided::Undecided(r)))) => eprintln!("{name}: delivery undecided: {r}; `bend settle` again retries it"),
+                Ok(Delivery::Submitted(_, meta, Err(e))) => eprintln!("{name}: {}", repeated(&meta, e)),
+                Ok(Delivery::Refused(e)) | Err(e) => eprintln!("{name}: {e}"),
+            }
+        }
+        if row != before {
+            let _ = crate::fsio::replace_private(&file, &row_bytes(&row));
+        }
+    }
+    println!("bend settle: {settled} delivered");
+    Ok(())
+}
+
+/// The births of an object's registry row a settle still reads: the newest (`transaction`, unless
+/// `ended`) and every earlier run on the same object not yet seen ended (`earlier`).
+fn live_births(row: &Value) -> Vec<String> {
+    let mut out: Vec<String> = row.get("earlier").and_then(Value::as_array).into_iter().flatten()
+        .filter_map(|e| e.as_str().map(str::to_owned)).collect();
+    if row.get("ended").is_none() {
+        if let Some(t) = row.get("transaction").and_then(Value::as_str) {
+            out.push(t.to_owned());
+        }
+    }
+    out
+}
+
+fn mark_ended(row: &mut Value, transaction: &str, height: &str) {
+    if row.get("transaction").and_then(Value::as_str) == Some(transaction) {
+        row["ended"] = json!(height);
+    } else if let Some(earlier) = row.get_mut("earlier").and_then(Value::as_array_mut) {
+        earlier.retain(|e| e.as_str() != Some(transaction));
+    }
+}
+
+/// An object's registry row after a new birth on it: the newest birth names the row, and an earlier one
+/// not seen ended stays in `earlier`, so `bend settle` still ends it at its deadline.
+fn next_row(old: Option<&Value>, row: Value) -> Value {
+    let mut row = row;
+    let Some(old) = old else { return row };
+    let mut earlier: Vec<Value> = old.get("earlier").and_then(Value::as_array).cloned().unwrap_or_default();
+    let (was, now) = (old.get("transaction"), row.get("transaction"));
+    if was.is_some() && was != now && old.get("ended").is_none() {
+        earlier.extend(was.cloned());
+    }
+    earlier.retain(|e| Some(e) != now);
+    if !earlier.is_empty() {
+        row["earlier"] = json!(earlier);
+    }
+    row
 }
 
 /// The record cell and the await id of an activity that is awaiting, from its public view.
@@ -733,7 +986,7 @@ fn answer_cmd(bend: &Bend, mut args: Args) -> Result<()> {
     let turn = json!({"kind": "resolve", "slot": &slot, "answer": &answer});
     let meta = json!({"kind": "resolve", "slot": &slot});
     match bend.submit(&name, "resolve", &turn, &meta, false) {
-        Err(e) => ending_for(&name, e),
+        Err(e) => ending_for(&name, repeated(&meta, e)),
         Ok((d, _)) => report(bend, &name, &meta, None, "bend answer", d),
     }
 }
@@ -748,9 +1001,10 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         "await" => await_cmd(&bend, args),
         "answer" => answer_cmd(&bend, args),
         "deliver" => deliver_cmd(&bend, args),
+        "settle" => settle_cmd(&bend, args),
         "lookup" => lookup_cmd(&bend, args, false),
         "retry" => lookup_cmd(&bend, args, true),
-        _ => Err("bend --action must be publish, run, show, await, answer, lookup or retry".into()),
+        _ => Err("bend --action must be publish, run, show, await, answer, deliver, settle, lookup or retry".into()),
     }
 }
 
@@ -770,6 +1024,49 @@ mod tests {
         let e = extra_envelope(18);
         assert_eq!(e.as_object().unwrap().len(), ENVELOPE_KEYS.len());
         assert_eq!((e["heap"].as_str(), e["stack"].as_str()), (Some("18"), Some("0")));
+    }
+
+    #[test]
+    fn an_earlier_run_on_the_same_object_is_still_settled() {
+        let first = json!({"bend": "tally", "object": "7", "transaction": "100"});
+        let second = next_row(Some(&first), json!({"bend": "tally", "object": "7", "transaction": "200"}));
+        assert_eq!(live_births(&second), ["100", "200"], "the first run is still read");
+        let mut third = next_row(Some(&second), json!({"bend": "tally", "object": "7", "transaction": "300"}));
+        assert_eq!(live_births(&third), ["100", "200", "300"]);
+        assert_eq!(next_row(Some(&third), json!({"transaction": "300"}))["earlier"], json!(["100", "200"]), "a lookup of the same birth adds nothing");
+        mark_ended(&mut third, "100", "40");
+        mark_ended(&mut third, "300", "41");
+        assert_eq!(live_births(&third), ["200"]);
+        let mut ended_first = first.clone();
+        mark_ended(&mut ended_first, "100", "9");
+        assert!(next_row(Some(&ended_first), json!({"transaction": "200"})).get("earlier").is_none(), "an ended run is not carried");
+    }
+
+    #[test]
+    fn an_ended_activity_reads_as_ended_not_as_a_question_mark() {
+        let awaiting = json!({"cell": "41", "record": {"phase": {"kind": "awaiting", "await": {"id": "55"}}}});
+        assert!(phase_text(Some(&awaiting), None).contains("\"awaiting\""));
+        let retired = json!({"cell": "41", "kind": "retired"});
+        for cell in [Some(&retired), None] {
+            let t = phase_text(cell, Some("47"));
+            assert!(t.starts_with("ended (seen at height 47): its record is retired") && !t.contains('?'), "{t}");
+        }
+        assert_eq!(phase_text(None, None), "ended: its record is retired and its purse returned to the payer");
+    }
+
+    #[test]
+    fn only_an_await_past_its_deadline_is_settled() {
+        let view = |kind: &str, height: &str| json!({"height": height, "births":[{"object":"7","transaction":"9","record":"41"}],
+            "cells":[{"cell":"41","record":{"phase":{"kind":kind,"await":{"id":"55","deadline":"90","yieldedAt":"86",
+                "source":{"kind":"reply","slot":"66","decider":"8"}}}}}]});
+        assert_eq!(overdue(&view("awaiting", "91")), Some(("41".to_owned(), "55".to_owned())), "the next turn is judged past the deadline");
+        assert_eq!(overdue(&view("awaiting", "90")), None, "at the deadline the decider may still answer");
+        assert_eq!(overdue(&view("awaiting", "87")), None);
+        assert_eq!(overdue(&view("done", "200")), None, "an ended activity is not delivered again");
+        assert_eq!(overdue(&json!({"height":"5","births":[{"record":"41"}],"cells":[]})), None, "a retired record: nothing awaits");
+        assert_eq!(ended(&view("awaiting", "91")), None);
+        assert_eq!(ended(&view("done", "200")).as_deref(), Some("200"));
+        assert_eq!(ended(&json!({"height":"5","births":[{"record":"41"}],"cells":[]})).as_deref(), Some("5"), "a retired record is over");
     }
 
     #[test]
@@ -793,7 +1090,7 @@ mod tests {
         let refused = json!({"type":"refused","refusal":"operation-rejected: pastDeadline"});
         fs::write(dir.join("outcome.json"), refused.to_string()).unwrap();
         assert_eq!(retained_decision(&dir), Some(refused.clone()));
-        assert!(matches!(decided(&refused), Decided::Refused(_)));
+        assert!(matches!(decided(&refused, 10), Decided::Refused(_)));
         // An undecided answer is not a decision: the Host is asked.
         fs::write(dir.join("outcome.json"), json!({"type":"undecided"}).to_string()).unwrap();
         assert!(retained_decision(&dir).is_none());
@@ -821,7 +1118,7 @@ mod tests {
     #[test]
     fn the_turn_bodies_are_the_hosts_turns() {
         let env = envelope(1, 2, 3, 3000);
-        let birth = birth_turn("90", "91", "130", "1030", "777", &default_input("40"), &env, 1234);
+        let birth = birth_turn("90", "91", "130", "1030", "777", &default_input("40", false), &env, 1234);
         assert_eq!((birth["kind"].as_str(), birth["deposit"].as_str(), birth["pin"].as_str()), (Some("birth"), Some("1234"), Some("777")));
         assert_eq!(birth["resume"], birth["envelope"]);
         assert_eq!(birth["timeout"], birth["envelope"]);
@@ -840,16 +1137,47 @@ mod tests {
     fn data_reads_as_the_member_writes_it() {
         let state = json!({"tag": "record", "fields": [{"name": "total", "value": {"tag": "natural", "value": "3"}}]});
         assert_eq!(data_text(&state), "{total=3}");
-        assert_eq!(data_text(&default_input("40")), "{init=set(0), decider=40}");
+        assert_eq!(data_text(&default_input("40", false)), "{init=set(0), decider=40}");
+        assert_eq!(data_text(&default_input("40", true)), "{init=keep({}), decider=40}", "a later run joins the object's total");
+    }
+
+    #[test]
+    fn an_exact_repeat_is_named_for_what_happened() {
+        let conflict = "conflict: transaction identity conflict (phase replay)";
+        let h = refusal_hint(&json!({"kind": "resolve", "slot": "5551"}), conflict);
+        assert!(h.contains("slot 5551 is already answered") && h.contains("`bend deliver`"), "{h}");
+        let h = refusal_hint(&json!({"kind": "deliver", "await": "55"}), conflict);
+        assert!(h.contains("await 55 is already delivered"), "{h}");
+        let h = refusal_hint(&json!({"kind": "publish", "artifactId": "1", "packageId": "2"}), conflict);
+        assert!(h.contains("already published: artifact 1 package 2"), "{h}");
+        assert!(refusal_hint(&json!({"kind": "resolve", "slot": "5551"}), "notDecider").is_empty(), "other refusals keep the Host's words alone");
+        assert!(refusal_hint(&json!({"kind": "run"}), conflict).is_empty());
+        let guard = "activity: this turn was already submitted (confirmed; /ws/bend/answer-1/attempts/resolve-2); a second one is your decision: --again true";
+        let r = repeated(&json!({"kind": "resolve", "slot": "5551"}), guard.into());
+        assert!(r.starts_with("refused: slot 5551 is already answered") && !r.contains("--again"), "{r}");
+        let guard_run = "activity: this turn was already submitted (confirmed; /ws/bend/tally/attempts/birth-1); a second one is your decision: --again true";
+        let r = run_again("tally", "t1", guard_run.into());
+        assert!(r.starts_with("refused: run tally on t1: this exact run was already admitted") && r.ends_with("`bend run tally t1 --again`"), "{r}");
+        assert!(!r.contains("--again true"), "the line named is a bend verb: {r}");
+        let line = format!("bend run tally t1 --again");
+        let s = crate::shell::words(&line).unwrap();
+        assert!(crate::shell_grammar::parse(&crate::shell_grammar::BEND, &s).is_ok(), "the suggested line parses");
+        assert_eq!(run_again("tally", "t1", "bend: x".into()), "bend: x");
+        let refused_before = "activity: this turn was already submitted (refused; /x); a second one is your decision: --again true";
+        assert_eq!(repeated(&json!({"kind": "resolve", "slot": "1"}), refused_before.into()), refused_before, "a refused answer is not an answer");
     }
 
     #[test]
     fn the_hosts_outcomes_are_decided_by_name() {
         let ok = json!({"type": "confirmed", "confirmation": "installed", "transactionId": "7", "eventId": "9", "acceptedCount": "12", "worldRoot": "55"});
-        assert_eq!(decided(&ok), Decided::Admitted { height: "12".into(), root: "55".into(), receipt: "tx 7 event 9".into(), how: "installed".into() });
+        // the 12th accepted turn of a world born at height 10 was judged at height 21 (the view then reads 22)
+        assert_eq!(decided(&ok, 10), Decided::Admitted { height: "21".into(), root: "55".into(), receipt: "tx 7 event 9".into(), how: "installed".into() });
+        assert_eq!(judged_height(0, "1"), "0");
+        assert_eq!(judged_height(10, "0"), "?", "no turn is the 0th");
+        assert_eq!(judged_height(10, "x"), "?");
         let no = json!({"type": "refused", "reason": "notObjectHolder", "phase": "", "detail": ""});
-        assert!(matches!(decided(&no), Decided::Refused(m) if m.starts_with("notObjectHolder")));
-        assert!(matches!(decided(&json!({"type": "uncertain"})), Decided::Undecided(_)));
+        assert!(matches!(decided(&no, 10), Decided::Refused(m) if m.starts_with("notObjectHolder")));
+        assert!(matches!(decided(&json!({"type": "uncertain"}), 10), Decided::Undecided(_)));
     }
 
     #[test]
@@ -931,6 +1259,7 @@ mod tests {
         assert!(world.contains(&format!("'replayBytes': '{REPLAY_RATE}'")) && world.contains(&format!("'coreBytes': '{CORE_RATE}'")));
         assert!(world.contains(&format!("'base': '{BASE}', 'typeFuel': '0', 'sourceTicks': '{TICK_RATE}'")));
         assert!(world.contains(&format!("BEND_TICKS = {TICKS}")) && world.contains(&format!("BEND_PURSE_PRICES = {DEPOSIT_PRICES}")));
+        assert!(world.contains(&format!("BEND_ANSWERS = {ANSWERS}")));
         for k in ENVELOPE_KEYS {
             assert!(world.contains(&format!("'{k}':")), "{k} is not an envelope member of activity_world.MAXIMUM");
         }

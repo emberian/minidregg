@@ -521,6 +521,7 @@ def plainOp : Operation → Prop
   | .lease .. => False
   | _ => True
 
+set_option backward.isDefEq.respectTransparency false in
 theorem apply_balance (op : Operation) (plain : plainOp op) (book : Book) (a : AccountId)
     (asset : AssetId) :
     (op.apply book).balance a asset = book.balance a asset + flowIn a asset op := by

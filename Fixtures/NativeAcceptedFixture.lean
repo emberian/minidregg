@@ -44,8 +44,8 @@ The `NativeBinding` poles (`Assurance.PrivateEvaluatorCustodyJoin`):
   does not.
 
 Regenerate the data (a wire or semantics change turns this module red, by design):
-`scripts/native-accepted-fixture/generate.sh WORLD` after the acceptance driver ran
-on a fresh world with this tree's binaries.
+`scripts/native-accepted-fixture/rerecord.sh CANDIDATE SCRATCH` with a candidate built from this
+tree (fresh worlds, both drivers, both generate.sh); `front_end_current` names the common cause.
 -/
 import Assurance.PrivateEvaluatorCustodyJoin
 import Fixtures.NativeAcceptedFixtureData
@@ -56,6 +56,7 @@ import Kernel.ObjectiveBendAuthenticatedInputs
 import Compiler.NativeHostCodec
 import Theory.Sp800185Cshake256Native
 import Theory.AssertCompiled
+import Compiler.ObjectiveBendFrontEndIdentity
 
 namespace Minidregg.Fixtures.NativeAcceptedFixture
 open Minidregg.Theory Minidregg.Theory.TypedAuthorization
@@ -83,7 +84,7 @@ where
 /-- The deployment's pinned config (`w/deployment/pinned-config.json`, read the way
 `Host.Main`'s `Settings.config` reads it). Its verifier binary is never run: the
 admission below is handed `.recorded transcript`, not this config. -/
-def config : NativeHost.Config where
+def config : NativeHost.Config := NativeHost.Config.ofInputs {
   deployment := ⟨⟨pinDomain⟩, pinFactoryId, pinResourceBookId, pinAuthorityCellId⟩
   federation := ⟨pinFederation⟩
   template := ⟨⟨pinIssuer⟩, pinOwnerBudget, pinLifetime, CanonicalRuntimeProfile.defaultBirthSlack⟩
@@ -94,13 +95,23 @@ def config : NativeHost.Config where
   storage := { binary := "", root := "", key := "" }
   signature := ⟨""⟩
   invocationBindings := (ObjectiveBendNativeAdmission.decodePolicy (hexBytes pinObjectivePolicyHex)).map
-    fun policy => [(.objectiveMethod, ObjectiveBendNativeAdmission.encodePolicy policy)]
+    fun policy => [(.objectiveMethod, ObjectiveBendNativeAdmission.encodePolicy policy)] }
+
+/-- **The recording is of this tree's front end.** The recorded policy pins the Objective
+front-end identity of the candidate that ran (`ObjectiveBendFrontEndIdentity.identity`, a
+fingerprint of the front-end sources). A change to those sources rotates it, and the recorded
+honest call would refuse `objectiveSource`; this refuses first, by name. Re-record with
+`scripts/native-accepted-fixture/rerecord.sh CANDIDATE SCRATCH` from a candidate of this tree. -/
+theorem front_end_current :
+    ((ObjectiveBendNativeAdmission.decodePolicy (hexBytes pinObjectivePolicyHex)).map (·.frontEnd)) =
+      some ObjectiveBendFrontEndIdentity.identity := by
+  native_decide
 
 /-- The Store prefix the first invocation was admitted at. -/
 def image : Option Image := do
   let seed ← seedFrame.decode (hexBytes seedHex)
   let records ← recordHexes.mapM fun record => recordFrame.decode (hexBytes record)
-  pure ⟨seed, records⟩
+  pure (Image.ofAccepted seed records)
 
 /-- The signed command of an op-2 call. -/
 def invoked (call : String) : Option SignedCommand :=
@@ -248,14 +259,21 @@ def authority : List NativeAcceptedFixtureProjection.Line :=
   parseAuthority NativeAcceptedFixtureAuthority.text
 
 open Minidregg.Fixtures.NativeAcceptedFixtureProjection in
-/-- The re-run's projection: the accepted call's record and receipts, then the
-refused call's verdict. -/
-def projectionRun : Option (List NativeAcceptedFixtureProjection.Line) := do
-  let ⟨_, run⟩ ← firstRun
+/-- The re-run's projection, its record passed through `alter` first: the accepted call's
+record and receipts (its run-dependent byte lanes relative to the run), then
+the refused call's verdict. -/
+def projectionRunWith (alter : IntentRecord → IntentRecord) :
+    Option (List NativeAcceptedFixtureProjection.Line) := do
+  let ⟨signed, run⟩ ← firstRun
   let reason ← refusedRun
   pure (projectAccepted config.deployment run.command
-      (IntentRecord.ofIntent (run.accepted.dataIntent run.shape)) (receiptSubjects run.accepted) ++
+      (alter (IntentRecord.ofIntent (run.accepted.dataIntent run.shape))) (receiptSubjects run.accepted)
+      (signedBytes run.ground.authority.domain config.profile.semantics signed)
+      (recordLegs run.ground.view (IntentRecord.ofIntent (run.accepted.dataIntent run.shape))) ++
     projectRefused (reasonName (reprStr reason)))
+
+/-- The re-run's projection. -/
+def projectionRun : Option (List NativeAcceptedFixtureProjection.Line) := projectionRunWith id
 
 /-- **The re-run means what the driver asked for.**  The projection of the
 accepted call's record (signer, signature checks, written cells by kind and role,
@@ -264,6 +282,17 @@ exactly the hand-written authority.  A regeneration that changes what the
 invocation records turns this red until the authority is changed in its own
 reviewed commit. -/
 theorem first_projection : projectionRun = some authority := by native_decide
+
+/-- `record` with one charge lane a byte over its measured value. -/
+def bumped (lane : Theory.ResourceCost.Lane) (record : IntentRecord) : IntentRecord :=
+  { record with exactCharge := fun other =>
+      if other = lane then record.exactCharge other + 1 else record.exactCharge other }
+
+/-- **Teeth of the relational storage line.** The authority states the storage lane as its
+relation to the run (`event + legs`), not as a number; a record whose storage is one byte off
+that relation is refused. -/
+theorem storage_off_by_one_refused :
+    projectionRunWith (bumped .storageBytes) ≠ some authority := by native_decide
 
 /-- **The same admission refuses `r01` with the Host's reason.** -/
 theorem refused_admission : isObjectiveSource refusedRun = true := by native_decide
@@ -312,6 +341,7 @@ theorem refused_call_unbound : ¬ NativeBinding firstAccepted firstShape refused
 
 /-! Each pin re-runs every oracle its theorem rests on (the first admission alone is
 ~40 s of evaluation), which exhausts the default heartbeat budget of one command. -/
+#assert_compiled front_end_current
 set_option maxHeartbeats 4000000 in
 #assert_compiled first_accepted
 set_option maxHeartbeats 4000000 in
@@ -321,6 +351,8 @@ set_option maxHeartbeats 4000000 in
 #assert_axioms rekeyed_commandBytes
 set_option maxHeartbeats 4000000 in
 #assert_compiled refused_admission
+set_option maxHeartbeats 4000000 in
+#assert_compiled storage_off_by_one_refused
 set_option maxHeartbeats 4000000 in
 #assert_compiled first_projection
 set_option maxHeartbeats 4000000 in

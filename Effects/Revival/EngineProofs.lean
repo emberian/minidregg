@@ -165,16 +165,27 @@ theorem enginePremise : EnginePremise := by
 theorem toyDispatchA5 :
     dispatch toyPole 0 (StreamCodec.nat.encode 5) () toyEmpty =
       .ok (Store.set toyEmpty ⟨false, ()⟩ (some (5 : Nat))) := by
-  simp [dispatch, toyPole, decode_encode_op, Handler.fire, Handler.admits, toyEntry,
+  simp [dispatch, ToySubstrate, toyPole, decode_encode_op, Handler.fire, Handler.admits, toyEntry,
     EffectSpec.exec, entryASpec, toyWrite, toyEmpty, EffectSpec.InFrame, Substrate.footprint,
     Substrate.run, storeSubstrate, Op.Enabled, Op.apply, Store.Fresh, toyField,
     Op.writeAddress?, Op.address, Except.map]
 
 theorem toyDispatchBfalse :
     dispatch toyPole 1 (StreamCodec.bool.encode false) () toyEmpty = .error (.outOfFrame 1) := by
-  simp [dispatch, toyPole, List.lookup, decode_encode_op, Handler.fire, Handler.admits, toyEntry,
+  simp [dispatch, ToySubstrate, toyPole, List.lookup, decode_encode_op, Handler.fire, Handler.admits, toyEntry,
     EffectSpec.exec, entryBSpec, toyWrite, toyEmpty, EffectSpec.InFrame, Substrate.footprint,
     storeSubstrate, toyField, Op.writeAddress?, Op.address, Except.map]
+
+theorem freshnessGate : FreshnessGate := by
+  have decoded : entryASpec.opStream.toLawful.decode (StreamCodec.nat.encode 5) = some 5 :=
+    entryASpec.opStream.toLawful.decode_encode 5
+  refine ⟨?_, ?_⟩
+  · simp [dispatch, List.lookup, decoded, Handler.fire, Handler.admits, staleToyEntry, toyEntry]
+  · rw [toyDispatchA5]
+    simp [dispatch, ToySubstrate, List.lookup, decode_encode_op, Handler.fire, Handler.admits, staleToyEntry,
+      toyEntry, EffectSpec.exec, entryASpec, toyWrite, toyEmpty, EffectSpec.InFrame,
+      Substrate.footprint, Substrate.run, storeSubstrate, Op.Enabled, Op.apply, Store.Fresh,
+      toyField, Op.writeAddress?, Op.address, Except.map]
 
 theorem engineSatisfiable : EngineSatisfiable :=
   ⟨engineKeystone Unit ToyStore toyPole enginePremise, toyDispatchA5, toyDispatchBfalse⟩
@@ -188,7 +199,7 @@ theorem engineTeeth : EngineTeeth := by
       (h.agreement 0 (toyEntry entryASpec) rfl (5 : Nat) () toyEmpty).trans
         (honest.agreement 0 (toyEntry entryASpec) rfl (5 : Nat) () toyEmpty).symm
     rw [toyDispatchA5] at agree
-    simp [dispatch, toyGhostPole, decode_encode_op, Handler.fire, Handler.admits, toyEntry,
+    simp [dispatch, ToySubstrate, toyGhostPole, decode_encode_op, Handler.fire, Handler.admits, toyEntry,
       EffectSpec.exec, entryASpec, ghostASpec, toyWrite, toyEmpty, EffectSpec.InFrame,
       Substrate.footprint, Substrate.run, storeSubstrate, Op.Enabled, Op.apply, Store.Fresh,
       toyField, Op.writeAddress?, Op.address, Except.map] at agree
@@ -206,7 +217,7 @@ theorem engineTeeth : EngineTeeth := by
       (h.agreement 1 (toyEntry entryBSpec) rfl false () toyEmpty).trans
         (honest.agreement 1 (toyEntry entryBSpec) rfl false () toyEmpty).symm
     rw [toyDispatchBfalse] at agree
-    simp [dispatchUnframed, toyPole, List.lookup, decode_encode_op, toyEntry, Handler.admits,
+    simp [dispatchUnframed, ToySubstrate, toyPole, List.lookup, decode_encode_op, toyEntry, Handler.admits,
       entryBSpec, toyWrite, toyEmpty, Substrate.run, storeSubstrate, Op.Enabled, Op.apply,
       Store.Fresh] at agree
   · intro h
@@ -276,13 +287,14 @@ theorem entryA_lawful : (toyEntry entryASpec).Lawful := by
 
 theorem completenessSatisfiable : CompletenessSatisfiable := by
   refine ⟨entryA_lawful, ?_⟩
-  simp [dispatch, List.lookup, decode_encode_op, Handler.fire, Handler.admits, toyEntry, EffectSpec.exec,
+  simp [dispatch, ToySubstrate, List.lookup, decode_encode_op, Handler.fire, Handler.admits, toyEntry, EffectSpec.exec,
     entryASpec, toyRefusalName, Except.map]
 
+set_option backward.isDefEq.respectTransparency false in
 theorem completenessTeeth : CompletenessTeeth := by
   intro h
   have frame := (h.2 () false toyEmpty [.allocate false () 1]
-    (by simp [toyEntry, entryBSpec, toyWrite, toyEmpty]; rfl)).1
+    (by simp [toyEntry, entryBSpec, toyWrite, toyEmpty])).1
   have written := frame ⟨false, ()⟩ (by decide) rfl
   exact absurd written (by decide)
 
@@ -300,7 +312,7 @@ theorem toyGhostDispatch5 :
     dispatch toyGhostPole 0 (StreamCodec.nat.encode 5) () toyEmpty ≠
       .ok (Store.set toyEmpty ⟨false, ()⟩ (some (5 : Nat))) := by
   intro agree
-  simp [dispatch, toyGhostPole, decode_encode_op, Handler.fire, Handler.admits, toyEntry,
+  simp [dispatch, ToySubstrate, toyGhostPole, decode_encode_op, Handler.fire, Handler.admits, toyEntry,
     EffectSpec.exec, entryASpec, ghostASpec, toyWrite, toyEmpty, EffectSpec.InFrame,
     Substrate.footprint, Substrate.run, storeSubstrate, Op.Enabled, Op.apply, Store.Fresh,
     toyField, Op.writeAddress?, Op.address, Except.map] at agree
@@ -319,7 +331,7 @@ theorem oneSourceSatisfiable : OneSourceSatisfiable := by
   funext code bytes ctx cell
   unfold composeDispatch
   cases found : toyPole.lookup code with
-  | none => simp [dispatch, found]
+  | none => simp [dispatch, ToySubstrate, found]
   | some e => rfl
 
 theorem oneSourceTeeth : OneSourceTeeth := by
@@ -427,5 +439,6 @@ theorem prefixTeeth : PrefixTeeth := by
 #assert_axioms completenessTeeth
 #assert_axioms completenessPremise
 #assert_axioms materialize_logical
+#assert_axioms freshnessGate
 
 end Minidregg.Effects.Revival

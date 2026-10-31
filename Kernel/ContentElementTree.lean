@@ -580,6 +580,7 @@ theorem DocumentTree.set_other {store : ContentStore} {document : DocumentId}
   tree.congr (elementAt_set_other store key value notElements)
     (rootOf_set_other store document key value notDocuments)
 
+set_option backward.isDefEq.respectTransparency false in
 theorem genesis_tree (document : DocumentId) : DocumentTree initialStore document := by
   have empty : elementAt initialStore = fun _ => none := rfl
   constructor
@@ -876,6 +877,7 @@ theorem editElementStep_tree {operation : OperationId} {document : DocumentId}
 
 /-! ## Every admitted state is a document tree -/
 
+set_option backward.isDefEq.respectTransparency false in
 theorem step_tree (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
     (context : Context) {progress next : Progress} {action : Action}
     (tree : DocumentTree progress.1 document)
@@ -1528,6 +1530,7 @@ theorem editElement_requires_grant (author : PrincipalRef) (operation : Operatio
 
 /-! ## A transclusion placed at line N -/
 
+set_option backward.isDefEq.respectTransparency false in
 /-- The exit row, in the kernel: in a flat document, the command "transclude,
 then move the transclusion's embed to position `index` of the root" puts the
 transclusion at line `index` of the document order, and that line is the

@@ -308,7 +308,9 @@ noncomputable def ofSoundness {checkpoint : BoundCheckpoint}
   nativeBound := by
     have native := Classical.choose_spec sound oracle.saltBudget
       oracle.queryBudget delta deltaInterior oracle.prover
-    simpa [ExtractionPlan.NativeFalseAccept, ExtractionPlan.ofSoundness] using native
+    have hsimpa := native
+    simp [ExtractionPlan.NativeFalseAccept, ExtractionPlan.ofSoundness] at hsimpa ⊢
+    exact hsimpa
 
 /-- Exact uniform realization transports the exact native price to the
 constructed lane's intrinsic predicate. -/

@@ -1,7 +1,7 @@
 /-
-# `Effects/Revival/ContentProofs.lean` — `ContentComplete`, PROVED
+# `Kernel/EffectsRevival/ContentProofs.lean` — `ContentComplete`, PROVED
 
-The content declaration's own obligation (`Effects/Revival/Statements.lean`, audited):
+The content declaration's own obligation (`Kernel/EffectsRevival/Statements.lean`, audited):
 every content command the source lowering admits writes only fields in its declared frame
 (`contentActionFrame`, action by action), never the blinding, and its emitted descriptor
 followed by the kernel's blinding rotation replays.  The frame half is a syntactic
@@ -12,7 +12,7 @@ write touches the blinding.
 -/
 module
 
-public import Effects.Revival.Statements
+public import Kernel.EffectsRevival.Statements
 public import Effects.Revival.EngineProofs
 public import Theory.AssertAxioms
 
@@ -43,6 +43,11 @@ open Minidregg.Theory.Store
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Kernel
 open Minidregg.Kernel.ContentResource (Progress)
+
+/-- `throw` in `Except` is `.error`; under Lean 4.35's instance transparency `simp` no longer
+unfolds the `MonadExceptOf` instance on its own. -/
+@[local simp] private theorem except_throw {ε α : Type _} (e : ε) :
+    (throw e : Except ε α) = .error e := rfl
 
 set_option autoImplicit false
 
@@ -427,6 +432,7 @@ theorem store_run_validFrom {L : Layout.{0, 0, 0}} :
       simp only [Substrate.run, stepped]
       exact store_run_validFrom ps _ rest
 
+set_option backward.isDefEq.respectTransparency false in
 theorem store_footprint_mem {L : Layout.{0, 0, 0}} :
     ∀ (ps : List (Store.Op L)) (loc : Address L), loc ∈ (storeSubstrate L).footprint ps →
       ∃ op ∈ ps, op.writeAddress? = some loc
@@ -595,6 +601,7 @@ theorem computeTarget_content_header (ctx : LiveCtx) (command : ContentResource.
       result
     cases result <;> rfl
 
+set_option backward.isDefEq.respectTransparency false in
 theorem contentAgreement : ContentAgreement contentSpec := by
   intro ctx command pre observe epoch roster
   refine ⟨?_, ?_, ?_, ?_, ?_⟩
@@ -620,7 +627,6 @@ theorem contentAgreement : ContentAgreement contentSpec := by
     by_cases empty : command.actions.isEmpty
     · have refused : contentSpec.sem ctx command pre.logical = .error .emptyActions := by
         simp [contentSpec, contentSem, empty]
-        rfl
       have prepared : ContentResource.prepareCell ⟨ctx.command.subject, ctx.kind, ctx.capability⟩
           (DeclaredResourceController.contentOperation ctx.snapshot ctx.semantics ctx.command)
           (ContentResource.documentOf ctx.target)
@@ -647,7 +653,6 @@ theorem contentAgreement : ContentAgreement contentSpec := by
       | error reason =>
         have refused : contentSpec.sem ctx command pre.logical = .error reason := by
           simp [contentSpec, contentSem, empty, ran, Except.map]
-          rfl
         have prepared : ContentResource.prepareCell ⟨ctx.command.subject, ctx.kind, ctx.capability⟩
             (DeclaredResourceController.contentOperation ctx.snapshot ctx.semantics ctx.command)
             (ContentResource.documentOf ctx.target)
@@ -676,7 +681,6 @@ theorem contentAgreement : ContentAgreement contentSpec := by
       | ok progress =>
         have emitted : contentSpec.sem ctx command pre.logical = .ok progress.2 := by
           simp [contentSpec, contentSem, empty, ran, Except.map]
-          rfl
         obtain ⟨prepared, preparedOk⟩ := ContentResource.prepareCell_ok_of_run _ _ _ _ pre command
           progress nonempty ran
         have sameProgress : prepared.progress = progress := by
@@ -825,6 +829,7 @@ theorem blindedCell_law :
 def sampleHostCtx : HostCtx :=
   hostCtxOf sampleCtx sampleDeployment contentSpec.version (cellOf blindedStore).root none none none
 
+set_option backward.isDefEq.respectTransparency false in
 /-- The host dispatch at the blinded cell: the derived executor's post, packed. -/
 theorem hostDispatch_blinded : ∃ post,
     EffectSpec.exec contentSpec 1 sampleCtx sampleLinkCommand blindedStore = .ok post ∧
@@ -848,7 +853,6 @@ theorem hostDispatch_blinded : ∃ post,
     simp only [DeclaredResourceController.selectTarget, hostTarget, sampleHostCtx, hostCtxOf]
     have object : sampleCtx.kind = .object := rfl
     rw [if_pos object, if_pos blindedCell_law]
-    rfl
   unfold hostTargetDispatch
   rw [if_neg (by decide), decoded]
   simp only

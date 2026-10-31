@@ -250,7 +250,7 @@ theorem ServedDirectory.load_eq {store : StoreIdentity} {served : State store}
 bytes equal the held state's, otherwise the bytes decoded. -/
 def decodeServedRowFrom {earlier : StoreIdentity} {before : State earlier} (held : ServedDirectory before)
     (identifier : Nat) (bytes : List UInt8) : Option (LifecycleImage registry) :=
-  if before.canonicalBytes ⟨identifier⟩ == bytes then
+  if bytesBEq (before.canonicalBytes ⟨identifier⟩) bytes then
     some (LifecycleImage.view registry held.directory identifier)
   else (LifecycleImage.codec registry).decode bytes
 
@@ -262,7 +262,7 @@ theorem decodeServedRowFrom_eq {earlier : StoreIdentity} {before : State earlier
   next same =>
     have exact : LifecycleImage.bytes registry
         (LifecycleImage.view registry held.directory identifier) = bytes :=
-      (held.bytes_exact identifier).trans (beq_iff_eq.mp same)
+      (held.bytes_exact identifier).trans (bytesBEq_iff.mp same)
     rw [← exact]
     exact (LifecycleImage.decode_encode registry _).symm
   next => rfl
@@ -360,8 +360,9 @@ cell's bytes are unchanged, otherwise the bytes decoded (`loadServedAuthorityFro
 def loadServedAuthorityFrom {deployment : CanonicalCellRegistry.Deployment} {earlier store : StoreIdentity}
     {before : State earlier} (held : ServedAuthority deployment before) (served : State store) :
     Option (ServedAuthority deployment served) :=
-  if same : served.canonicalBytes (cellIdOf deployment) == before.canonicalBytes (cellIdOf deployment) then
-    some ⟨held.cell, held.valid, (beq_iff_eq.mp same).trans held.observed⟩
+  if same : bytesBEq (served.canonicalBytes (cellIdOf deployment))
+      (before.canonicalBytes (cellIdOf deployment)) then
+    some ⟨held.cell, held.valid, (bytesBEq_iff.mp same).trans held.observed⟩
   else loadServedAuthority deployment served
 
 theorem loadServedAuthorityFrom_eq {deployment : CanonicalCellRegistry.Deployment}

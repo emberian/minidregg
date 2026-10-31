@@ -5,7 +5,7 @@ The private-witness turn HIDES (`Assurance/PrivateTurn`) but does not yet SOUNDL
 that needs an arithmetization — the note-opening / nullifier / membership relations as
 CONSTRAINTS. **The derived-path law (and the AIR-in-Lean tripwire): constraints are NOT
 hand-authored — they come out of the compiler, or the compiler grows the vocabulary.** This
-file is the first rung: an arithmetization DSL as a `Compiler.Signature`, its executor reading
+file is the first rung: an arithmetization DSL as a `Theory.Signature`, its executor reading
 and its circuit reading BOTH as folds of one algebra, so `circuit ⟺ executor` is FREE by
 initiality (`agree_by_initiality`, N3) — drift is not "avoided", it is impossible by
 construction. breadstuffs' Rust AIRs (`*_air.rs`) are the DEBT this replaces; nothing is ported.
@@ -15,7 +15,7 @@ construction. breadstuffs' Rust AIRs (`*_air.rs`) are the DEBT this replaces; no
 hand-recursion; `eval_agrees_exec` proves them equal on EVERY term by initiality, with zero
 induction at the use site. A constraint "the emitted circuit accepts the assignment" is, by that
 theorem, exactly "the executor's relation holds" — the arithmetization means what the semantics
-say, not by audit but by the one induction spent once in `Compiler/Signature.fold_unique`.
+say, not by audit but by the one induction spent once in `Theory/Signature.fold_unique`.
 
 N3 respected: `AirOp`'s payloads are SYNTACTIC (a field element `c : F`, a variable index) —
 countable, not opaque `σ → Bool` closures — so the second (circuit) reading is faithful, exactly
@@ -30,7 +30,7 @@ is a drift-free fold + a first gadget), not the note-spend.
 -/
 module
 
-public import Compiler.Signature
+public import Theory.Signature
 public import Mathlib.Algebra.Field.Basic
 public import Mathlib.Data.ZMod.Basic
 public import Mathlib.FieldTheory.Finite.Basic
@@ -70,8 +70,8 @@ inductive AirOp (F : Type u) (Idx : Type u)
   | mul
 
 /-- The arithmetization signature: `const`/`var` are leaves (empty arity), `add`/`mul` are
-binary (`Bool`-indexed), matching `Compiler/Signature`'s container convention. -/
-def AirSig (F : Type u) (Idx : Type u) : Signature where
+binary (`Bool`-indexed), matching `Theory/Signature`'s container convention. -/
+@[reducible] def AirSig (F : Type u) (Idx : Type u) : Signature where
   Op := AirOp F Idx
   ar := fun s => match s with
     | .const _ | .var _ => Empty

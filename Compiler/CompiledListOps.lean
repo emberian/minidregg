@@ -88,7 +88,7 @@ theorem rowTable_get? {β : Type} : ∀ (rows : List (Nat × β)) (id : Nat), (r
 
 def usedSet (keys : List Nat) : Finset Nat :=
   let seen : Std.HashSet Nat := keys.foldl (fun seen key => seen.insert key) ∅
-  ⟨(seen.toList : Multiset Nat), by simpa using seen.distinct_toList⟩
+  ⟨(seen.toList : Multiset Nat), Multiset.coe_nodup.mpr (seen.distinct_toList.imp fun h => by simpa using h)⟩
 
 theorem mem_usedSet (keys : List Nat) (key : Nat) : key ∈ usedSet keys ↔ key ∈ keys := by
   suffices h : ∀ (seen : Std.HashSet Nat), key ∈ keys.foldl (fun seen key => seen.insert key) seen ↔ key ∈ keys ∨ key ∈ seen by

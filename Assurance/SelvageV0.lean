@@ -407,6 +407,7 @@ def ms₁ : Fin ch₁.length → FlatIx w₁ → ZMod 5 := fun _ => u₁
 
 def γbase₁ : ℕ → ZMod 5 := fun _ => 1
 
+set_option backward.isDefEq.respectTransparency false in
 /-- The erasure-decoding domain: the two coordinates embedded as `{0, 1}`. -/
 def dom₁ : FlatIx w₁ ↪ ZMod 5 :=
   ⟨Sum.elim (fun _ => 4) (fun p => ((p.2 : ℕ) : ZMod 5)), by decide⟩

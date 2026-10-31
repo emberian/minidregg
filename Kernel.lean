@@ -87,6 +87,7 @@ import Kernel.NativeHostServed -- KN2 2b-1: a validated served state (no history
 import Kernel.NativeHostLight -- KN2 2b-1: the validated light opening a session serves ported operations from
 import Kernel.NativeThinConsent  -- thin consent: what a member signs without replaying is what commits (opened_display_is_commit), lying Hosts refused by name
 import Kernel.ContentCommutingAppend  -- appends to one document commute: a commuting content command is computed at the cell it meets (statements; the ruling of 2026-10-28)
+import Kernel.ContentCommutingAppendProofs  -- the commuting-append statements PROVED: the content arm reads the planned root only for commands that do not commute; kept pin, exact exemption, the marker spent, replay refused, the blinded witness and two appenders from one observation
 import Kernel.NativeHostSession
 import Kernel.NativeReserveContinuity
 import Kernel.NativeHostGenesis
@@ -184,3 +185,16 @@ import Kernel.Contracts.Futures
 import Kernel.Contracts.Intents
 import Kernel.Contracts.Refinements
 import Kernel.SubjectRate
+import Kernel.ReceiptEventHiding  -- K-RECEIPT-HIDE: a receipt cannot be linked to its hidden command (statement, teeth, hybrid reduction)
+import Kernel.BlindedCellHiding  -- the private-cells hiding statements: transcript hiding, complete openings, per-operation log cost
+import Kernel.MoveEffect  -- the derivation engine's first declaration: the kernel move as an EffectSpec, derived end-to-end (term, executor, descriptor, laws free by initiality); satisfiable + teeth witnesses on k0 (ghost reading ≠ derived, tampered descriptor ≠ effect, move_conserves inherited)
+import Kernel.EffectsRevival.Statements  -- the widened declaration (Substrate, EffectSpec, Handler, Registry, dispatch) and its keystones STATED: EngineKeystone, CompletenessKeystone, LiveKeystone (ContentAgreement + ContentComplete), HostKeystone (the migration gate, known false today); docs/EFFECTS-REVIVAL.md; the generic engine stays in Effects (Effects.Revival.Engine); these keystones over the deployed kernel are its consumers
+import Kernel.EffectsRevival.ContentProofs  -- ContentComplete PROVED: every content command writes only its declared fields (contentActionFrame, per action), never the blinding, and its descriptor plus the rotation replays
+import Kernel.EffectsRevival.ActivityStatements  -- an activity effect refuses at two levels, STATED (TwoLevels on any yield judgment; today's commitYield the satisfiable pole, the collapsed judgment the teeth); migration step 2's gate
+import Kernel.EffectsRevival.ActivityProofs  -- the two refusal levels PROVED of today's commitYield, with the premise inhabitant (a transfer to the purse, refused `reserved`) and the collapsed judgment refuted
+import Kernel.EffectsRevival.HostTeethProofs  -- HostTeeth PROVED: the twin half by noTwin, the ghost half at a blinded cell (the dispatch's post blinding is a ratchet step, the ghost's unchanged), kernel-checked throughout (ratchet_moves, a cSHAKE256 fact, by decide +kernel)
+import Kernel.EffectsRevival.PrepareProofs  -- PrepareFactors contentSpec PROVED: the deployed prepareTarget of a content target (post packed, refusals named) IS the content handler's registry dispatch followed by the payload-blind genericChecks; the migration commit's gate
+import Kernel.EffectsRevival.CommutingProofs  -- commuting appends through the declaration: a line over a moved root lands at the blinded cell (HostMovedRootAccepted), commutes is fixed from both sides (ContentCommuteTeeth), and CommutingPrepare
+import Kernel.PrivateCellScope  -- a reader's scope is a bounded union of visibility-class prefixes of the private index (body covers its atoms)
+import Kernel.PrivateCellView  -- a reader's class openings of the private index answer exactly its narrowPacked view, or a scoped collision
+import Kernel.PrivateCellReceiver  -- the private cell's receiving state machine: gated store, kept index, one insert or erase walk per write, kept root = private root

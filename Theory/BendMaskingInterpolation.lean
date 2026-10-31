@@ -79,15 +79,19 @@ theorem interpolate_coeff_fixed (queries : Finset F) (automorphism : F ≃+* F)
         simpa using Lagrange.eval_interpolate_at_node values Function.injective_id.injOn (closed point member)
       rw [atPoint, atImage]
       exact equivariant point member)
-  simpa only [Polynomial.coeff_map] using congrArg (fun p : F[X] => p.coeff index) fixed
+  have hsimpa := congrArg (fun p : F[X] => p.coeff index) fixed
+  simp only [Polynomial.coeff_map] at hsimpa ⊢
+  exact hsimpa
 
 /-- A coefficient-fixed polynomial has equivariant evaluations. -/
 theorem eval_equivariant_of_map_eq (automorphism : F ≃+* F)
     (polynomial : F[X]) (fixed : polynomial.map automorphism.toRingHom = polynomial)
     (point : F) :
     polynomial.eval (automorphism point) = automorphism (polynomial.eval point) := by
-  simpa only [fixed] using
+  have hsimpa :=
     (Polynomial.eval_map_apply (p := polynomial) automorphism.toRingHom point)
+  simp only [fixed] at hsimpa ⊢
+  exact hsimpa
 
 /-- Constructive observation coupling with an offset whose coefficients lie in
 an automorphism's fixed field. This is the needed descent shape for a Frobenius-

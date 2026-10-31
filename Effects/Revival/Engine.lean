@@ -3,15 +3,15 @@
 engine and completeness keystones, STATED
 
 §1-§5 of the statements (`docs/EFFECTS-REVIVAL.md`).  Candidate-side but kernel-free: it
-imports only `Theory.Store`, `Theory.TypedAuthorization` and the stream codecs, so it and its
+imports only `Theory.Store`, `Theory.TypedAuthorization` and the stream codecs (`Theory.StreamCodec`), so it and its
 proofs build on a small closure.  The live keystones over the deployed controller are in
-`Effects.Revival.Statements`, which imports this file.
+`Kernel.EffectsRevival.Statements`, which imports this file.
 -/
 module
 
 public import Theory.Store
 public import Theory.TypedAuthorization
-public import Compiler.Tower256ConcreteBackend
+public import Theory.StreamCodec
 
 @[expose] public section
 

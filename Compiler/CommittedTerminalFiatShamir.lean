@@ -79,7 +79,8 @@ def Ext6L.equivFn : Ext6L ≃ (Fin 6 → BabyBear) where
 instance : Fintype Ext6L := Fintype.ofEquiv (Fin 6 → BabyBear) Ext6L.equivFn.symm
 
 theorem card_ext6L : Fintype.card Ext6L = babyBearP ^ 6 := by
-  rw [Fintype.card_congr Ext6L.equivFn, Fintype.card_fun, ZMod.card, Fintype.card_fin]
+  rw [Fintype.card_eq_nat_card, Nat.card_congr Ext6L.equivFn, Nat.card_fun, Nat.card_zmod,
+    Nat.card_eq_fintype_card (α := Fin 6), Fintype.card_fin]
 
 /-- Injective (`readExt6_injective`) between types of the same cardinality. -/
 theorem readExt6_bijective : Function.Bijective readExt6 :=
@@ -204,6 +205,7 @@ theorem eq_of_fracHamming_lt {A : Type} {n : Nat} (hn : 0 < n) (u v : Fin n → 
   rw [div_lt_div_iff_of_pos_right hnpos] at h
   have hcard : Nat.card {i : Fin n // u i ≠ v i} < 1 := by exact_mod_cast h
   have hzero : Nat.card {i : Fin n // u i ≠ v i} = 0 := by omega
+  classical
   rw [Nat.card_eq_fintype_card, Fintype.card_eq_zero_iff] at hzero
   funext i
   by_contra hne
@@ -291,6 +293,7 @@ theorem stageOk_ofFull (y : Fin n → BabyBear) (πs : Fin (m + 1) → RoundMsg)
   exact Iff.rfl
 
 open Classical in
+set_option backward.isDefEq.respectTransparency false in
 /-- **The knowledge state function** of the gate reduction: the root recommits and `StageOk`
 holds at the completed rounds; the pending prover message is ignored (so prover moves are
 trivially monotone). -/
@@ -534,6 +537,7 @@ noncomputable def gateErr (i : Fin (m + 1)) : ℝ :=
   else 1 / Fintype.card Ext6Q
 
 open Classical in
+set_option backward.isDefEq.respectTransparency false in
 /-- **[CT-fiat-shamir-lanes] the RBR instance** (Def 4.2) of the gate reduction: the identity
 round extractor (`W = Unit`), the state function above, and the per-round errors discharged by
 `stage_bad_zero` and `stage_bad_succ`. -/
@@ -551,8 +555,8 @@ noncomputable def gateRbr (hEnc : ∀ wv k, encFor wv k = encNat k) (hn : 0 < n)
         ¬ StageOk d encFor st.y rs ∧ StageOk d encFor st.y (rs ++ [(π, ρ)]) := by
       rintro ρ ⟨w, h1, h2⟩
       have h1' : decide (commit st.y = st.x ∧ StageOk d encFor st.y rs) = false := h1
-      have h2' : decide (commit st.y = st.x ∧ StageOk d encFor st.y (rs ++ [(π, ρ)])) = true := h2
       rw [decide_eq_false_iff_not] at h1'
+      have h2' : decide (commit st.y = st.x ∧ StageOk d encFor st.y (rs ++ [(π, ρ)])) = true := h2
       rw [decide_eq_true_iff] at h2'
       exact ⟨fun h => h1' ⟨h2'.1, h⟩, h2'.2⟩
     refine le_trans (uniformProb_mono hmono) ?_
@@ -914,6 +918,7 @@ theorem getD_ofFn_succ {α : Type} (f : Fin (m + 1) → α) (i : Fin (m + 1)) (d
     (List.ofFn f).getD i.val dflt = f i := by
   rw [List.getD_eq_getElem _ _ (by simp [i.isLt]), List.getElem_ofFn]
 
+set_option backward.isDefEq.respectTransparency false in
 /-- The carried receipt's designated queries (`SrOutput.query`) ARE prefix queries of its
 message list. -/
 theorem output_query_eq (rc : FsReceipt Root n m) (i : Fin (m + 1)) :

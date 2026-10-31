@@ -712,7 +712,7 @@ theorem no_factoryAuthorization_of_wrong_schema_kind
 /-- info: 'Minidregg.Theory.ResourceBirth.retired_birth_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.ResourceBirth.retired_birth_refused
 
-/-- info: 'Minidregg.Theory.ResourceBirth.no_factoryAuthorization_of_positive_self_fee' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.ResourceBirth.no_factoryAuthorization_of_positive_self_fee' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.ResourceBirth.no_factoryAuthorization_of_positive_self_fee
 
 end Minidregg.Theory.ResourceBirth

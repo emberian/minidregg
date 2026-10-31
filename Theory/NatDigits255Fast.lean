@@ -1,5 +1,5 @@
 /-
-# Compiler.NatDigits255Fast -- base-255 digits on machine words, proved equal to `Nat.digits 255`
+# Theory.NatDigits255Fast -- base-255 digits on machine words, proved equal to `Nat.digits 255`
 
 The stream codec writes a natural as its base-255 digits (`Nat.digits 255`)
 followed by a terminator byte.  `Nat.digits` divides the whole number by 255
@@ -11,7 +11,9 @@ root it computes.
 one big-number division per chunk, and writes each chunk's seven digits with
 `UInt64` arithmetic.  `digitsBytes_eq` proves it equal to
 `(Nat.digits 255 n).map UInt8.ofNat` for every `n`; the stream codec attaches
-it with `@[csimp]`.
+it with `@[csimp]` (`Theory/StreamCodec.lean`). Candidate-independent (Mathlib only), so it
+lives in `Theory/`; the namespace stays `Minidregg.Compiler.NatDigits255Fast` until the
+namespace-rename follow-up.
 -/
 
 module

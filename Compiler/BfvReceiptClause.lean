@@ -250,7 +250,7 @@ theorem Admitted.every_exact_integer_equation {manifest : Manifest}
 #guard_msgs (whitespace := lax) in #print axioms AcceptedToken.every_exact_integer_equation
 /-- info: 'Minidregg.Compiler.BfvReceiptClause.bfvClausePin_unassigned' does not depend on any axioms -/
 #guard_msgs (whitespace := lax) in #print axioms bfvClausePin_unassigned
-/-- info: 'Minidregg.Compiler.BfvReceiptClause.lookup_register' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Compiler.BfvReceiptClause.lookup_register' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms lookup_register
 /-- info: 'Minidregg.Compiler.BfvReceiptClause.Admitted.every_exact_integer_equation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Admitted.every_exact_integer_equation
