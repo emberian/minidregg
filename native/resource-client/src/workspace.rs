@@ -412,37 +412,14 @@ fn recheck_commitment(root: &Path, value: &Value) -> Result<()> {
     let socket = SOCKET.get().ok_or("workspace has no socket to check its key commitment over")?;
     let key = member_path(value, "key")?;
     let daily = ed25519_dalek::SigningKey::from_bytes(&*crate::fsio::read_seed(&key)?).verifying_key().to_bytes();
-    // A subject whose commitment the Host showed to be this workspace's own next key can change
-    // it only by a rotation that next key signs, so once seen for this exact subject, daily key,
-    // next key and deployment it is not asked again. A subject that commits to no next key can
-    // still adopt one with its current key alone, so it is asked every time.
-    let seen = match &commitment {
-        crate::key_rotation::Commitment::Mine(next) => Some(json!({
-            "subject": member(value, "subject")?,
-            "daily": hex(&daily),
-            "next": hex(next),
-            "config": member(value, "config")?,
-            "socket": socket.to_string_lossy(),
-            "hostSha256": value.get("hostSha256").cloned().unwrap_or(Value::Null),
-        })),
-        crate::key_rotation::Commitment::Without => None,
-    };
-    let marker = root.join("commitment-seen.json");
-    let known = seen.is_some() && bounded_json(&marker).ok() == seen;
-    if !known {
-        let enrolled = crate::key_rotation::check_commitment(
-            &workspace_host(value)?,
-            socket,
-            &member_path(value, "config")?,
-            member(value, "subject")?,
-            &daily,
-            &commitment,
-        )?;
-        if let (Some(_), Some(seen)) = (enrolled, &seen) {
-            let bytes = serde_json::to_vec(seen).map_err(|error| error.to_string())?;
-            crate::fsio::replace_private(&marker, &bytes)?;
-        }
-    }
+    crate::key_rotation::check_commitment(
+        &workspace_host(value)?,
+        socket,
+        &member_path(value, "config")?,
+        member(value, "subject")?,
+        &daily,
+        &commitment,
+    )?;
     CHECKED.lock().map_err(|_| "commitment check lock poisoned")?.push(root.to_path_buf());
     Ok(())
 }
