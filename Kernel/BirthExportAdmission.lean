@@ -3,6 +3,7 @@ The old factory law remains the authorizer. A newborn's own local component is
 not an export root and is never self-evaluated by this gate. -/
 module
 
+public import Compiler.ServedBasis
 public import Compiler.PhysicalLawResolution
 public import Compiler.WorldKindLawDependencies
 public import Compiler.CanonicalRuntimeProfileCore
@@ -40,12 +41,12 @@ open Minidregg.Theory.LawComposition
 open Minidregg.Compiler
 open Minidregg.Compiler.CanonicalPolicyAdmission
 open Minidregg.Kernel.DurableDataIntent
+open Minidregg.Compiler.ServedBasis (Ground)
 
 set_option autoImplicit false
 
 abbrev Registry := CanonicalCellRegistry.registry
 abbrev Deployment := CanonicalCellRegistry.Deployment
-abbrev Durable := DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes
 
 /-- The receiving runtime must bind this projection contract in its v6 semantics. -/
 def projectionContract : List UInt8 := Minidregg.Theory.LawComposition.birthProjectionContract
@@ -108,40 +109,36 @@ def neutralItems (deployment : Deployment) (directory : CellRegistry.Directory N
 variable {F : Type} [Field F]
 
 structure ItemChecked (profile : PolicyCompilerProfile F) (deployment : Deployment)
-    (pins : FactoryPins) (durable : Durable)
-    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
-    (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
+    (pins : FactoryPins) (ground : Ground deployment)
     (factoryRoot : Digest) (height : Height) (descriptor : Descriptor Registry)
     (clock : ClockCell.Clock) (item : BirthItem Registry) where
   private mk ::
   dependencies : WorldKindLawDependencies.Dependencies
-  dependenciesExact : WorldKindLawDependencies.loadBirth deployment directory.directory item =
+  dependenciesExact : WorldKindLawDependencies.loadBirth deployment ground.directory item =
     some dependencies
-  law : PhysicalLawResolution.GuardedRoots authority.snapshot directory.directory profile.semantics
+  law : PhysicalLawResolution.GuardedRoots ground.authority ground.directory profile.semantics
     (roots item dependencies)
   witness : CompiledPolicyWitness F
   addressExact : witness.address = ComposedPolicyAdmission.closureDigest law.graph.resolved
-  oldExact : witness.oldState = view pins authority.snapshot.authState factoryRoot height descriptor clock item false
-  newExact : witness.newState = view pins authority.snapshot.authState factoryRoot height descriptor clock item true
+  oldExact : witness.oldState = view pins ground.authority.authState factoryRoot height descriptor clock item false
+  newExact : witness.newState = view pins ground.authority.authState factoryRoot height descriptor clock item true
   accepted : ∃ equality : DecidableEq F,
     @compiledLawAccepts F _ equality profile (ResolvedLawCompilation.predicate law.graph.resolved) witness = true
 
 def checkItem [DecidableEq F] (profile : PolicyCompilerProfile F) (deployment : Deployment)
-    (pins : FactoryPins) (durable : Durable)
-    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
-    (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
+    (pins : FactoryPins) (ground : Ground deployment)
     (factoryRoot : Digest) (height : Height) (descriptor : Descriptor Registry)
     (clock : ClockCell.Clock) (item : BirthItem Registry) :
-    Option (ItemChecked profile deployment pins durable directory authority factoryRoot height descriptor clock item) := do
-  match dependenciesExact : WorldKindLawDependencies.loadBirth deployment directory.directory item with
+    Option (ItemChecked profile deployment pins ground factoryRoot height descriptor clock item) := do
+  match dependenciesExact : WorldKindLawDependencies.loadBirth deployment ground.directory item with
   | none => none
   | some dependencies => do
-      let law ← PhysicalLawResolution.loadRoots authority.snapshot directory.directory profile.semantics
+      let law ← PhysicalLawResolution.loadRoots ground.authority ground.directory profile.semantics
         (roots item dependencies) PhysicalLawResolution.resolutionBudget
       let witness := ResolvedLawCompilation.witness profile.compiler law.graph.resolved
         (ComposedPolicyAdmission.closureDigest law.graph.resolved)
-        (view pins authority.snapshot.authState factoryRoot height descriptor clock item false)
-        (view pins authority.snapshot.authState factoryRoot height descriptor clock item true)
+        (view pins ground.authority.authState factoryRoot height descriptor clock item false)
+        (view pins ground.authority.authState factoryRoot height descriptor clock item true)
       if accepted : compiledLawAccepts profile (ResolvedLawCompilation.predicate law.graph.resolved) witness = true then
         some ⟨dependencies, dependenciesExact, law, witness, rfl, rfl, rfl, inferInstance, accepted⟩
       else none
@@ -150,39 +147,33 @@ def checkItem [DecidableEq F] (profile : PolicyCompilerProfile F) (deployment : 
 exact item in the signed descriptor, including duplicate entries later refused
 by the existing allocator. -/
 inductive ItemsChecked (profile : PolicyCompilerProfile F) (deployment : Deployment)
-    (pins : FactoryPins) (durable : Durable)
-    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
-    (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
+    (pins : FactoryPins) (ground : Ground deployment)
     (factoryRoot : Digest) (height : Height) (descriptor : Descriptor Registry)
     (clock : ClockCell.Clock) : List (BirthItem Registry) → Type
-  | nil : ItemsChecked profile deployment pins durable directory authority factoryRoot height descriptor clock []
+  | nil : ItemsChecked profile deployment pins ground factoryRoot height descriptor clock []
   | cons {item rest} :
-      ItemChecked profile deployment pins durable directory authority factoryRoot height descriptor clock item →
-      ItemsChecked profile deployment pins durable directory authority factoryRoot height descriptor clock rest →
-      ItemsChecked profile deployment pins durable directory authority factoryRoot height descriptor clock (item :: rest)
+      ItemChecked profile deployment pins ground factoryRoot height descriptor clock item →
+      ItemsChecked profile deployment pins ground factoryRoot height descriptor clock rest →
+      ItemsChecked profile deployment pins ground factoryRoot height descriptor clock (item :: rest)
 
 def checkItems [DecidableEq F] (profile : PolicyCompilerProfile F) (deployment : Deployment)
-    (pins : FactoryPins) (durable : Durable)
-    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
-    (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
+    (pins : FactoryPins) (ground : Ground deployment)
     (factoryRoot : Digest) (height : Height) (descriptor : Descriptor Registry)
     (clock : ClockCell.Clock) : (items : List (BirthItem Registry)) →
-    Option (ItemsChecked profile deployment pins durable directory authority factoryRoot height descriptor clock items)
+    Option (ItemsChecked profile deployment pins ground factoryRoot height descriptor clock items)
   | [] => some .nil
   | item :: rest => do
-      let head ← checkItem profile deployment pins durable directory authority factoryRoot height descriptor clock item
-      let tail ← checkItems profile deployment pins durable directory authority factoryRoot height descriptor clock rest
+      let head ← checkItem profile deployment pins ground factoryRoot height descriptor clock item
+      let tail ← checkItems profile deployment pins ground factoryRoot height descriptor clock rest
       some (.cons head tail)
 
 theorem ItemsChecked.item {profile : PolicyCompilerProfile F} {deployment : Deployment}
-    {pins : FactoryPins} {durable : Durable}
-    {directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
-    {authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot}
+    {pins : FactoryPins} {ground : Ground deployment}
     {factoryRoot : Digest} {height : Height} {descriptor : Descriptor Registry}
     {clock : ClockCell.Clock} {items : List (BirthItem Registry)}
-    (checked : ItemsChecked profile deployment pins durable directory authority factoryRoot height descriptor clock items)
+    (checked : ItemsChecked profile deployment pins ground factoryRoot height descriptor clock items)
     {item : BirthItem Registry} (member : item ∈ items) :
-    Nonempty (ItemChecked profile deployment pins durable directory authority factoryRoot height descriptor clock item) := by
+    Nonempty (ItemChecked profile deployment pins ground factoryRoot height descriptor clock item) := by
   induction checked with
   | nil => simp at member
   | cons head tail ih =>
@@ -192,12 +183,10 @@ theorem ItemsChecked.item {profile : PolicyCompilerProfile F} {deployment : Depl
       · exact ih rest
 
 def ItemsChecked.guards {profile : PolicyCompilerProfile F} {deployment : Deployment}
-    {pins : FactoryPins} {durable : Durable}
-    {directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
-    {authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot}
+    {pins : FactoryPins} {ground : Ground deployment}
     {factoryRoot : Digest} {height : Height} {descriptor : Descriptor Registry}
     {clock : ClockCell.Clock} {items : List (BirthItem Registry)} :
-    ItemsChecked profile deployment pins durable directory authority factoryRoot height descriptor clock items → List ReadGuard
+    ItemsChecked profile deployment pins ground factoryRoot height descriptor clock items → List ReadGuard
   | .nil => []
   | .cons head tail =>
       ((head.law.sourceGuards ++ head.dependencies.readGuards).map fun pair => ⟨⟨pair.1⟩, pair.2⟩) ++
@@ -205,50 +194,42 @@ def ItemsChecked.guards {profile : PolicyCompilerProfile F} {deployment : Deploy
       -- lifecycle observations of every selected policy resource too.
       (head.law.graph.sources.map fun node =>
         let id := node.source.key.policyId.value
-        ⟨⟨id⟩, durable.snapshot.model.roots ⟨id⟩⟩) ++ tail.guards
+        ⟨⟨id⟩, ground.view.model.roots ⟨id⟩⟩) ++ tail.guards
 
 structure Evaluated (profile : PolicyCompilerProfile F) (deployment : Deployment)
-    (pins : FactoryPins) (durable : Durable)
-    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
-    (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
+    (pins : FactoryPins) (ground : Ground deployment)
     (factoryRoot : Digest) (height : Height) (descriptor : Descriptor Registry) where
   private mk ::
-  clock : ClockCellDomain.Loaded deployment durable.snapshot
-  items : ItemsChecked profile deployment pins durable directory authority factoryRoot height descriptor clock.clock
-    (rootedItems deployment directory.directory descriptor.births)
+  clock : ClockCellDomain.Loaded deployment ground.view
+  items : ItemsChecked profile deployment pins ground factoryRoot height descriptor clock.clock
+    (rootedItems deployment ground.directory descriptor.births)
   guardsExact : ∀ guard ∈ clock.readGuard :: items.guards,
-    guard.expectedRoot = durable.snapshot.model.roots guard.cellId
+    guard.expectedRoot = ground.view.model.roots guard.cellId
 theorem Evaluated.items_judged {profile : PolicyCompilerProfile F} {deployment : Deployment}
-    {pins : FactoryPins} {durable : Durable}
-    {directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
-    {authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot}
+    {pins : FactoryPins} {ground : Ground deployment}
     {factoryRoot : Digest} {height : Height} {descriptor : Descriptor Registry}
-    (evaluated : Evaluated profile deployment pins durable directory authority factoryRoot height descriptor)
+    (evaluated : Evaluated profile deployment pins ground factoryRoot height descriptor)
     {item : BirthItem Registry}
-    (member : item ∈ rootedItems deployment directory.directory descriptor.births) :
-    Nonempty (ItemChecked profile deployment pins durable directory authority factoryRoot height
+    (member : item ∈ rootedItems deployment ground.directory descriptor.births) :
+    Nonempty (ItemChecked profile deployment pins ground factoryRoot height
       descriptor evaluated.clock.clock item) :=
   evaluated.items.item member
 
 def Evaluated.readGuards {profile : PolicyCompilerProfile F} {deployment : Deployment}
-    {pins : FactoryPins} {durable : Durable}
-    {directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
-    {authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot}
+    {pins : FactoryPins} {ground : Ground deployment}
     {factoryRoot : Digest} {height : Height} {descriptor : Descriptor Registry}
-    (checked : Evaluated profile deployment pins durable directory authority factoryRoot height descriptor) : List ReadGuard :=
+    (checked : Evaluated profile deployment pins ground factoryRoot height descriptor) : List ReadGuard :=
   checked.clock.readGuard :: checked.items.guards
 
 def checkEvaluated [DecidableEq F] (profile : PolicyCompilerProfile F) (deployment : Deployment)
-    (pins : FactoryPins) (durable : Durable)
-    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
-    (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
+    (pins : FactoryPins) (ground : Ground deployment)
     (factoryRoot : Digest) (height : Height) (descriptor : Descriptor Registry) :
-    Option (Evaluated profile deployment pins durable directory authority factoryRoot height descriptor) := do
-  let clock ← ClockCellDomain.load deployment durable.snapshot
-  let items ← checkItems profile deployment pins durable directory authority factoryRoot height descriptor clock.clock
-    (rootedItems deployment directory.directory descriptor.births)
+    Option (Evaluated profile deployment pins ground factoryRoot height descriptor) := do
+  let clock ← ClockCellDomain.load deployment ground.view
+  let items ← checkItems profile deployment pins ground factoryRoot height descriptor clock.clock
+    (rootedItems deployment ground.directory descriptor.births)
   if exact : ∀ guard ∈ clock.readGuard :: items.guards,
-      guard.expectedRoot = durable.snapshot.model.roots guard.cellId then
+      guard.expectedRoot = ground.view.model.roots guard.cellId then
     some ⟨clock, items, exact⟩
   else none
 
@@ -297,36 +278,30 @@ its structural read guards and NO law.  A neutral item is admitted by nothing
 here: the receiver requires the admitted factory step to name it.  There is no
 all-neutral branch and no neutral item evaluated against an empty root list. -/
 structure Checked (profile : PolicyCompilerProfile F) (deployment : Deployment)
-    (pins : FactoryPins) (durable : Durable)
-    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
-    (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
+    (pins : FactoryPins) (ground : Ground deployment)
     (factoryRoot : Digest) (height : Height) (descriptor : Descriptor Registry) where
   private mk ::
-  neutral : NeutralItems deployment directory.directory
-    (neutralItems deployment directory.directory descriptor.births)
+  neutral : NeutralItems deployment ground.directory
+    (neutralItems deployment ground.directory descriptor.births)
   neutralGuardsExact : ∀ guard ∈ neutral.guards,
-    guard.expectedRoot = durable.snapshot.model.roots guard.cellId
+    guard.expectedRoot = ground.view.model.roots guard.cellId
   /-- `none` exactly when no item is rooted: a clockless all-neutral birth reads no clock. -/
-  rooted : Option (Evaluated profile deployment pins durable directory authority factoryRoot height descriptor)
-  rootedPresent : rooted.isSome = !(rootedItems deployment directory.directory descriptor.births).isEmpty
+  rooted : Option (Evaluated profile deployment pins ground factoryRoot height descriptor)
+  rootedPresent : rooted.isSome = !(rootedItems deployment ground.directory descriptor.births).isEmpty
 
 def Checked.readGuards {profile : PolicyCompilerProfile F} {deployment : Deployment}
-    {pins : FactoryPins} {durable : Durable}
-    {directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
-    {authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot}
+    {pins : FactoryPins} {ground : Ground deployment}
     {factoryRoot : Digest} {height : Height} {descriptor : Descriptor Registry}
-    (checked : Checked profile deployment pins durable directory authority factoryRoot height descriptor) :
+    (checked : Checked profile deployment pins ground factoryRoot height descriptor) :
     List ReadGuard :=
   checked.neutral.guards ++ (checked.rooted.map Evaluated.readGuards).getD []
 
 theorem Checked.guardsExact {profile : PolicyCompilerProfile F} {deployment : Deployment}
-    {pins : FactoryPins} {durable : Durable}
-    {directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
-    {authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot}
+    {pins : FactoryPins} {ground : Ground deployment}
     {factoryRoot : Digest} {height : Height} {descriptor : Descriptor Registry}
-    (checked : Checked profile deployment pins durable directory authority factoryRoot height descriptor)
+    (checked : Checked profile deployment pins ground factoryRoot height descriptor)
     (guard : ReadGuard) (member : guard ∈ checked.readGuards) :
-    guard.expectedRoot = durable.snapshot.model.roots guard.cellId := by
+    guard.expectedRoot = ground.view.model.roots guard.cellId := by
   rcases List.mem_append.mp member with neutral | rooted
   · exact checked.neutralGuardsExact guard neutral
   · cases present : checked.rooted with
@@ -336,18 +311,16 @@ theorem Checked.guardsExact {profile : PolicyCompilerProfile F} {deployment : De
         exact evaluated.guardsExact guard rooted
 
 def check [DecidableEq F] (profile : PolicyCompilerProfile F) (deployment : Deployment)
-    (pins : FactoryPins) (durable : Durable)
-    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
-    (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
+    (pins : FactoryPins) (ground : Ground deployment)
     (factoryRoot : Digest) (height : Height) (descriptor : Descriptor Registry) :
-    Option (Checked profile deployment pins durable directory authority factoryRoot height descriptor) := do
-  let neutral ← checkNeutralItems deployment directory.directory
-    (neutralItems deployment directory.directory descriptor.births)
-  if exact : ∀ guard ∈ neutral.guards, guard.expectedRoot = durable.snapshot.model.roots guard.cellId then
-    if empty : (rootedItems deployment directory.directory descriptor.births).isEmpty then
+    Option (Checked profile deployment pins ground factoryRoot height descriptor) := do
+  let neutral ← checkNeutralItems deployment ground.directory
+    (neutralItems deployment ground.directory descriptor.births)
+  if exact : ∀ guard ∈ neutral.guards, guard.expectedRoot = ground.view.model.roots guard.cellId then
+    if empty : (rootedItems deployment ground.directory descriptor.births).isEmpty then
       some ⟨neutral, exact, none, by simp [empty]⟩
     else
-      let evaluated ← checkEvaluated profile deployment pins durable directory authority factoryRoot
+      let evaluated ← checkEvaluated profile deployment pins ground factoryRoot
         height descriptor
       some ⟨neutral, exact, some evaluated, by simp [empty]⟩
   else none
@@ -356,23 +329,21 @@ def check [DecidableEq F] (profile : PolicyCompilerProfile F) (deployment : Depl
 descriptor that is not neutral has a checked compiled witness of its resolved
 export law, at the clock the check loaded. -/
 theorem Checked.rooted_judged {profile : PolicyCompilerProfile F} {deployment : Deployment}
-    {pins : FactoryPins} {durable : Durable}
-    {directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
-    {authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot}
+    {pins : FactoryPins} {ground : Ground deployment}
     {factoryRoot : Digest} {height : Height} {descriptor : Descriptor Registry}
-    (checked : Checked profile deployment pins durable directory authority factoryRoot height descriptor)
+    (checked : Checked profile deployment pins ground factoryRoot height descriptor)
     {item : BirthItem Registry} (member : item ∈ descriptor.births)
-    (notNeutral : isNeutral deployment directory.directory item = false) :
+    (notNeutral : isNeutral deployment ground.directory item = false) :
     ∃ clock : ClockCell.Clock,
-      Nonempty (ItemChecked profile deployment pins durable directory authority factoryRoot height
+      Nonempty (ItemChecked profile deployment pins ground factoryRoot height
         descriptor clock item) := by
-  have rootedMember : item ∈ rootedItems deployment directory.directory descriptor.births :=
+  have rootedMember : item ∈ rootedItems deployment ground.directory descriptor.births :=
     List.mem_filter.mpr ⟨member, by simp [notNeutral]⟩
   cases present : checked.rooted with
   | none =>
       have := checked.rootedPresent
       rw [present] at this
-      have empty : (rootedItems deployment directory.directory descriptor.births).isEmpty = true := by
+      have empty : (rootedItems deployment ground.directory descriptor.births).isEmpty = true := by
         simpa using this.symm
       simp [List.isEmpty_iff] at empty
       rw [empty] at rootedMember
@@ -389,15 +360,13 @@ theorem room_root_not_empty (item : BirthItem Registry)
 /-- Acceptance retains the actual conjunction's verdict, not merely a public
 local diagnostic that could hide an inherited refusal. -/
 theorem ItemChecked.effective_law {profile : PolicyCompilerProfile F} {deployment : Deployment}
-    {pins : FactoryPins} {durable : Durable}
-    {directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
-    {authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot}
+    {pins : FactoryPins} {ground : Ground deployment}
     {factoryRoot : Digest} {height : Height} {descriptor : Descriptor Registry}
     {clock : ClockCell.Clock} {item : BirthItem Registry}
-    (checked : ItemChecked profile deployment pins durable directory authority factoryRoot height descriptor clock item) :
+    (checked : ItemChecked profile deployment pins ground factoryRoot height descriptor clock item) :
     Minidregg.Pred.eval (ResolvedLawCompilation.predicate checked.law.graph.resolved)
-      (view pins authority.snapshot.authState factoryRoot height descriptor clock item false)
-      (view pins authority.snapshot.authState factoryRoot height descriptor clock item true) = true := by
+      (view pins ground.authority.authState factoryRoot height descriptor clock item false)
+      (view pins ground.authority.authState factoryRoot height descriptor clock item true) = true := by
   obtain ⟨equality, accepted⟩ := checked.accepted
   letI : DecidableEq F := equality
   have sound := compiledLawAccepts_sound profile _ checked.witness accepted

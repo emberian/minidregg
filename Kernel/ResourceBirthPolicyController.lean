@@ -356,6 +356,7 @@ open Minidregg.Compiler.CredentialAuthorityPolicyRegistry
 open Minidregg.Compiler.ResourceBirthCodec
 open Minidregg.Kernel.MultiCellHyperedge
 open Minidregg.Theory.CellState
+open Minidregg.Compiler.ServedBasis (Ground)
 
 abbrev Registry := CanonicalCellRegistry.registry
 abbrev Deployment := CanonicalCellRegistry.Deployment
@@ -404,26 +405,26 @@ def templateAt (template : CanonicalRuntimeProfile.FactoryTemplate)
     (record : PlatformCellLayout.Platform) :
     (templateAt template record).lifetime = record.lifetime := rfl
 
-/-- The platform record `durable` holds at `deployment`'s platform cell. -/
-def platformRecordAt (deployment : Deployment) (durable : Durable) :
+/-- The platform record a snapshot holds at `deployment`'s platform cell. -/
+def platformRecordAt (deployment : Deployment) (snapshot : DurableDataIntent.DataSnapshot ResourceBirthCodec.rootBytes) :
     Option PlatformCellLayout.Platform :=
-  PlatformCellDomain.recordOn deployment durable.snapshot
+  PlatformCellDomain.recordOn deployment snapshot
 
-/-- The factory template a birth prepared against `durable` is bound by
+/-- The factory template a birth prepared against a ground is bound by (at its view)
 (`Pending.templateExact`): `templateAt` of that image's platform record. -/
 def birthTemplate {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
-    (deployment : Deployment) (durable : Durable) :
+    (deployment : Deployment) (snapshot : DurableDataIntent.DataSnapshot ResourceBirthCodec.rootBytes) :
     Option CanonicalRuntimeProfile.FactoryTemplate :=
-  (platformRecordAt deployment durable).map (templateAt profile.template)
+  (platformRecordAt deployment snapshot).map (templateAt profile.template)
 
 section Receiving
 
 variable {F : Type} [Field F] {profile : CanonicalRuntimeProfile.Profile F}
-    {deployment : Deployment} {pins : FactoryPins} {durable : Durable}
+    {deployment : Deployment} {pins : FactoryPins} {ground : Ground deployment}
     {descriptor : Descriptor Registry}
 
-def oldAuthority (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor) : AuthState :=
-  prepared.authority.snapshot.authState
+def oldAuthority (prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor) : AuthState :=
+  ground.authority.authState
 
 /-- The first factory issues exactly one ordinary owner grant and one separate
 policy-control grant per newborn. Sharing is a later authorized delegation,
@@ -1053,7 +1054,7 @@ info: 'Minidregg.Kernel.ResourceBirthPolicyController.Concrete.rootGrantShape_wi
 /-- Request metadata is entirely source-derived except the receiver's trusted
 height. That height is a service input, not asserted to be a committed clock.
 Each account's policy selector is its actual source account id. -/
-def resourceContexts (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
+def resourceContexts (prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor)
     (height : Height) (source : Descriptor Registry) (position : Nat) :
     CanonicalResourceEffect.RequestContext :=
   let operation := source.resourceBatch.operations[position]?
@@ -1069,7 +1070,7 @@ def resourceContexts (prepared : PreparedBirth profile.compilerProfile deploymen
     policyEpoch := (oldAuthority prepared).policyEpoch policyId
     policyRevision := (oldAuthority prepared).policyRevision policyId }
 
-def layout (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor) : CellLayout (Legs descriptor) where
+def layout (prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor) : CellLayout (Legs descriptor) where
   storeLayout
     | .factory => EffectDeclaration.effectLayout
     | .book => CanonicalResourceKernel.layout
@@ -1087,7 +1088,7 @@ def layout (prepared : PreparedBirth profile.compilerProfile deployment pins dur
     | .authority => ⟨deployment.authorityCellId⟩
     | .allocation index => ⟨(creation descriptor index).cellId⟩
 
-def rawLeg (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor) (height : Height)
+def rawLeg (prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor) (height : Height)
     (source : Source descriptor) : (incidence : Legs descriptor) →
       CandidateLegData (layout prepared) incidence
   | .factory =>
@@ -1108,24 +1109,24 @@ def rawLeg (prepared : PreparedBirth profile.compilerProfile deployment pins dur
           CanonicalResourceKernel.logicalBook post = source.val.resourceBatch.apply
             (CanonicalResourceKernel.logicalBook prepared.book.payload.logical) }
   | .authority =>
-      { pre := prepared.authority.snapshot.cell
-        patch := ResourceBirthAuthority.patch prepared.authority.snapshot.cell source.val
+      { pre := ground.authority.cell
+        patch := ResourceBirthAuthority.patch ground.authority.cell source.val
         -- `ResourceBirthAuthority.request` at the snapshot's held projection (`authStateExact`):
         -- the generic `authState` would rebuild it (its revoked and parent sets deduplicated
         -- over the whole authority store) for every leg built.
         request := ⟨.object, factoryRequest pins
           CanonicalCellRegistry.sourceEncoding (oldAuthority prepared)
-          prepared.authority.snapshot.cell.root height source.val⟩
+          ground.authority.cell.root height source.val⟩
         Postcondition := ResourceBirthAuthority.Postcondition source.val }
   | .allocation index =>
-      { pre := ResourceBirthController.allocationPre prepared.directory.directory (creation descriptor index)
+      { pre := ResourceBirthController.allocationPre ground.directory (creation descriptor index)
         patch := ResourceBirthController.allocationPatch (creation descriptor index)
         request := ⟨.object, ResourceBirthController.allocationRequest pins
-          CanonicalCellRegistry.sourceEncoding (oldAuthority prepared) prepared.directory.directory
+          CanonicalCellRegistry.sourceEncoding (oldAuthority prepared) ground.directory
           (creation descriptor index) height source.val⟩
         Postcondition := fun post => post = LifecycleSlot.state Registry (.live (creation descriptor index).cell) }
 
-def bindFamily (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor) (height : Height)
+def bindFamily (prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor) (height : Height)
     (source : Source descriptor) (portals : Legs descriptor → Portal) :
     (incidence : Legs descriptor) → SemanticLegBinding (rawLeg prepared height source incidence)
   | .factory =>
@@ -1146,22 +1147,22 @@ def bindFamily (prepared : PreparedBirth profile.compilerProfile deployment pins
   | .authority =>
       { Nullifier := Nat
         family := ResourceBirthAuthority.family pins CanonicalCellRegistry.sourceEncoding
-          prepared.authority.snapshot.cell height
+          ground.authority.cell height
         declaration := source.val, outcome := ()
         preExact := rfl
         requestExact := by
-          simp only [rawLeg, oldAuthority, prepared.authority.snapshot.authStateExact]; rfl
+          simp only [rawLeg, oldAuthority, ground.authority.authStateExact]; rfl
         effectsExact := rfl, patchExact := rfl
         postconditionExact := fun _ => Iff.rfl }
   | .allocation index =>
       { Nullifier := Nat
         family := ResourceBirthController.allocationFamily pins CanonicalCellRegistry.sourceEncoding
-          (oldAuthority prepared) prepared.directory.directory (creation descriptor index) height
+          (oldAuthority prepared) ground.directory (creation descriptor index) height
         declaration := source.val, outcome := ()
         preExact := rfl, requestExact := rfl, effectsExact := rfl, patchExact := rfl
         postconditionExact := fun _ => Iff.rfl }
 
-def plan (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor) (height : Height) :
+def plan (prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor) (height : Height) :
     PreparationPlan (layout prepared) (Source descriptor) where
   leg := rawLeg prepared height
   jointDigest := fun source => CanonicalCellRegistry.sourceEncoding.effectsDigest source.val
@@ -1170,24 +1171,24 @@ def plan (prepared : PreparedBirth profile.compilerProfile deployment pins durab
 
 /-- Every allocated identity was fresh in the loaded directory: the allocator
 accepted the whole descriptor. -/
-theorem allocationFresh (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
+theorem allocationFresh (prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor)
     (index : Fin descriptor.createRequests.length) :
-    LifecycleImage.view Registry prepared.directory.directory (creation descriptor index).cellId = .fresh :=
+    LifecycleImage.view Registry ground.directory (creation descriptor index).cellId = .fresh :=
   prepared.allocated.fresh_pre (creation descriptor index) (List.get_mem _ _)
 
-theorem validated (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor) (height : Height) :
+theorem validated (prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor) (height : Height) :
     (incidence : Legs descriptor) → ValidatedPatch ((layout prepared).materializer incidence)
       (rawLeg prepared height ⟨descriptor, rfl⟩ incidence).pre
       (rawLeg prepared height ⟨descriptor, rfl⟩ incidence).request.2.preStateRoot
       (rawLeg prepared height ⟨descriptor, rfl⟩ incidence).patch
   | .factory => factoryValidated prepared.factory.payload
   | .book => prepared.resources.validated
-  | .authority => ResourceBirthAuthority.validated prepared.authority.snapshot.cell descriptor
+  | .authority => ResourceBirthAuthority.validated ground.authority.cell descriptor
       prepared.grants.mode
   | .allocation index => ResourceBirthController.allocationValidated
-      prepared.directory.directory (creation descriptor index) (allocationFresh prepared index)
+      ground.directory (creation descriptor index) (allocationFresh prepared index)
 
-theorem postconditions (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor) (height : Height) :
+theorem postconditions (prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor) (height : Height) :
     ∀ incidence, (rawLeg prepared height ⟨descriptor, rfl⟩ incidence).Postcondition
       (validated prepared height incidence).apply.logical := by
   intro incidence
@@ -1199,12 +1200,12 @@ theorem postconditions (prepared : PreparedBirth profile.compilerProfile deploym
   | authority => exact prepared.grants.mode.postcondition
   | allocation index =>
       exact ResourceBirthController.allocation_post_exact
-        prepared.directory.directory (creation descriptor index) (allocationFresh prepared index)
+        ground.directory (creation descriptor index) (allocationFresh prepared index)
 
 /-- This finite check verifies the real deployment/catalogue/allocation IDs.
 It is not a proof supplied by the requester or a presumed hash-injectivity
 law. All new identities were also checked by the permanent allocator. -/
-def prepareTuple (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor) (height : Height)
+def prepareTuple (prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor) (height : Height)
     (primary : Legs descriptor) : Option (PreparedTuple (plan prepared height)) :=
   if distinct : Function.Injective (layout prepared).cellId then
     some
@@ -1235,7 +1236,7 @@ theorem userCommandBytes_auxiliary_independent (source : Descriptor Registry)
 conservation and exact candidate validation, but is not an oracle accessible to
 user predicates. Factory laws see only their own resource; authority and
 physical allocation state never enter this programmable projection. -/
-def policyResourceSlots (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
+def policyResourceSlots (prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor)
     (wanted : PackedEffectRequest)
     (logical : (incidence : Legs descriptor) → Store ((layout prepared).storeLayout incidence)) :
     List (String × Int) :=
@@ -1253,11 +1254,11 @@ def policyResourceSlots (prepared : PreparedBirth profile.compilerProfile deploy
 /-- State-dependent input is restricted to the governing resource's cut.
 The source descriptor still binds all proposed effects, while no account law
 can inspect another balance via the observable accept/refuse result. -/
-def projectForRequest (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor) (_height : Height)
+def projectForRequest (prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor) (_height : Height)
     (wanted : PackedEffectRequest) (source : Source descriptor)
     (logical : (incidence : Legs descriptor) → Store ((layout prepared).storeLayout incidence)) :
     Minidregg.Pred.State :=
-  let header := WorldKindLawDependencies.targetSelectorSlots prepared.directory.directory
+  let header := WorldKindLawDependencies.targetSelectorSlots ground.directory
     wanted.2.target.value ++ CanonicalRuntimeProfile.requestSlots wanted.2 ++
     [ ("request/creator", Int.ofNat source.val.creator.value)
 
@@ -1272,7 +1273,7 @@ every other account, authority entry, factory field, or allocation cannot
 change a source account's policy view. Roots in the signed request remain
 explicit public commitments, not a hiding claim. -/
 theorem account_projection_noninterference
-    (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
+    (prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor)
     (height : Height) (wanted : Request .account) (source : Source descriptor)
     (left right : (incidence : Legs descriptor) → Store ((layout prepared).storeLayout incidence))
     (same : ∀ asset,
@@ -1286,7 +1287,7 @@ theorem account_projection_noninterference
   simp only [projectForRequest, policyResourceSlots, cut]
 
 theorem account_policy_verdict_noninterference
-    (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
+    (prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor)
     (height : Height) (wanted : Request .account) (source : Source descriptor)
     (leftOld rightOld leftNew rightNew :
       (incidence : Legs descriptor) → Store ((layout prepared).storeLayout incidence))
@@ -1312,17 +1313,17 @@ theorem account_policy_verdict_noninterference
 /-- info: 'Minidregg.Kernel.ResourceBirthPolicyController.Concrete.account_policy_verdict_noninterference' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms account_policy_verdict_noninterference
 
-def project (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
+def project (prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor)
     (height : Height) (primary : Legs descriptor) (source : Source descriptor)
     (logical : (incidence : Legs descriptor) → Store ((layout prepared).storeLayout incidence)) :
     Minidregg.Pred.State :=
   projectForRequest prepared height (rawLeg prepared height source primary).request source logical
 
-def step (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor) (height : Height)
+def step (prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor) (height : Height)
     (tuple : PreparedTuple (plan prepared height)) : PolicyStepContext :=
   PolicyStepContext.ofPreparedTuple (project prepared height tuple.primary) profile.semantics tuple
 
-theorem step_actual_states (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
+theorem step_actual_states (prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor)
     (height : Height) (tuple : PreparedTuple (plan prepared height)) :
     (step prepared height tuple).oldState = project prepared height tuple.primary tuple.source tuple.logicalPre ∧
       (step prepared height tuple).newState = project prepared height tuple.primary tuple.source tuple.logicalPost :=
@@ -1332,7 +1333,7 @@ theorem step_actual_states (prepared : PreparedBirth profile.compilerProfile dep
 that policy on its source-selected view of the actual pre/post tuple. This rules out
 supplying a convenient witness state beside a different allocation or Book. -/
 theorem selected_policy_evaluates_actual_tuple [DecidableEq F]
-    (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor) (height : Height)
+    (prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor) (height : Height)
     (tuple : PreparedTuple (plan prepared height))
     {config : CanonicalPolicyConfig F} {kind : ResourceKind} {request : Request kind}
     {witness : CompiledPolicyWitness F}
@@ -1348,7 +1349,7 @@ theorem selected_policy_evaluates_actual_tuple [DecidableEq F]
 /-- Final family construction and full mode authorization cannot alter a
 single selected predicate slot evaluated beforehand. -/
 theorem accepted_policy_view_exact
-    (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor) (height : Height)
+    (prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor) (height : Height)
     (tuple : PreparedTuple (plan prepared height)) (portals : Legs descriptor → Portal)
     (apex : Digest) (evidence : tuple.AdmissionEvidence portals) :
     project prepared height tuple.primary tuple.source
@@ -1417,7 +1418,7 @@ def branchPrimary : Branch descriptor → Legs descriptor
   | .source _ => .book
 
 def branchRequest
-    (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
+    (prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor)
     (height : Height) : Branch descriptor → PackedEffectRequest
   | .source index => ⟨.account, CanonicalResourceEffect.batchSourceRequest
       CanonicalCellRegistry.sourceEncoding prepared.book.payload
@@ -1429,37 +1430,37 @@ def branchRequest
 /-- Canonical wire equality is the actual branch discriminator. No digest
 injectivity assumption or caller-selected source/context mapping is used. -/
 def branchIdentity
-    (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
+    (prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor)
     (height : Height) (branch : Branch descriptor) :=
   AuthorizationDeclaration.encodeRequest (branchRequest prepared height branch)
 
 structure Pending
-    (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
+    (prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor)
     (height : Height) : Type where
   checked : Checked pins CanonicalCellRegistry.sourceEncoding (oldAuthority prepared) descriptor
   method : FactoryMethod
   /-- The platform record of the image the birth is prepared against. -/
   record : PlatformCellLayout.Platform
-  recordExact : platformRecordAt deployment durable = some record
+  recordExact : platformRecordAt deployment ground.view = some record
   /-- The factory pins carry the record's creation tariff: the birth is priced from it. -/
   priced : pins.tariff = record.creation
   templateBound : MethodTemplateBound method (templateAt profile.template record)
     (oldAuthority prepared) height descriptor
-  bornLineage : BornLineage (placementLineage prepared.authority.snapshot.cell) descriptor
+  bornLineage : BornLineage (placementLineage ground.authority.cell) descriptor
   cellIdsDistinct : Function.Injective (layout prepared).cellId
   requestsDistinct : Function.Injective (branchIdentity prepared height)
 
 /-- The factory template a pending birth is bound by: `templateAt` of its record. -/
 def Pending.template
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} (pending : Pending prepared height) :
     CanonicalRuntimeProfile.FactoryTemplate :=
   templateAt profile.template pending.record
 
 theorem Pending.templateExact
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} (pending : Pending prepared height) :
-    birthTemplate profile deployment durable = some pending.template := by
+    birthTemplate profile deployment ground.view = some pending.template := by
   unfold birthTemplate
   rw [pending.recordExact]
   rfl
@@ -1467,9 +1468,9 @@ theorem Pending.templateExact
 /-- Teeth: no birth is pending against a record whose creation tariff its pins do not carry.
 `preparePending` refuses it as `platformStale`. -/
 theorem pending_stale_empty
-    (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
+    (prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor)
     (height : Height) (record : PlatformCellLayout.Platform)
-    (recorded : platformRecordAt deployment durable = some record)
+    (recorded : platformRecordAt deployment ground.view = some record)
     (stale : pins.tariff ≠ record.creation) : IsEmpty (Pending prepared height) :=
   ⟨fun pending => by
     have same := pending.recordExact
@@ -1479,10 +1480,10 @@ theorem pending_stale_empty
     exact stale pending.priced⟩
 
 def preparePending
-    (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
+    (prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor)
     (height : Height) (method : FactoryMethod := .ordinary) : Except Reject (Pending prepared height) := do
   let checked ← check pins CanonicalCellRegistry.sourceEncoding (oldAuthority prepared) descriptor
-  match recorded : platformRecordAt deployment durable with
+  match recorded : platformRecordAt deployment ground.view with
   | none => .error .platformUnavailable
   | some record =>
     let priced ← require (pins.tariff = record.creation) .platformStale
@@ -1496,7 +1497,7 @@ def preparePending
       | lifetimeGrant => exact require (LifetimeGrantTemplateBound template
           (oldAuthority prepared) height descriptor) .grantTemplate
     let templateBound ← templateCheck
-    let bornLineage ← require (BornLineage (placementLineage prepared.authority.snapshot.cell)
+    let bornLineage ← require (BornLineage (placementLineage ground.authority.cell)
       descriptor) .roomLineage
     letI : Decidable (Function.Injective (branchIdentity prepared height)) :=
       decidable_of_iff
@@ -1513,9 +1514,9 @@ def preparePending
 /-- The stale case is refused by name (law 10): past the factory checks, a record whose
 creation tariff the pins do not carry is refused `platformStale`, never another reason. -/
 theorem preparePending_stale
-    (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
+    (prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor)
     (height : Height) (method : FactoryMethod) (record : PlatformCellLayout.Platform)
-    (recorded : platformRecordAt deployment durable = some record)
+    (recorded : platformRecordAt deployment ground.view = some record)
     (stale : pins.tariff ≠ record.creation)
     (checked : PLift (Checked pins CanonicalCellRegistry.sourceEncoding (oldAuthority prepared)
       descriptor))
@@ -1536,7 +1537,7 @@ theorem preparePending_stale
 #assert_axioms pending_stale_empty preparePending_stale
 
 def Pending.tuple
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} (pending : Pending prepared height) (primary : Legs descriptor) :
     PreparedTuple (plan prepared height) where
   source := ⟨descriptor, rfl⟩
@@ -1549,40 +1550,40 @@ def Pending.tuple
 /-- Both the source bytes and their read guard come from the complete original
 physical directory. An arbitrary host-side blob map cannot enter this receiver. -/
 def payloadStore
-    (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor) :
+    (prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor) :
     Minidregg.Kernel.CanonicalPolicyRegistry.PayloadStore :=
-  ⟨CanonicalCellRegistry.fetchPolicySource deployment.domain prepared.directory.directory⟩
+  ⟨CanonicalCellRegistry.fetchPolicySource deployment.domain ground.directory⟩
 
 /-- Select the already prepared pre-cell without constructing an unrelated
 signed request merely to project `rawLeg.pre`. -/
 def policyPreCell
-    (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor) :
+    (prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor) :
     (incidence : Legs descriptor) → Materialized ((layout prepared).materializer incidence)
   | .factory => prepared.factory.payload
   | .book => prepared.book.payload
-  | .authority => prepared.authority.snapshot.cell
-  | .allocation index => ResourceBirthController.allocationPre prepared.directory.directory
+  | .authority => ground.authority.cell
+  | .allocation index => ResourceBirthController.allocationPre ground.directory
       (creation descriptor index)
 
 /-- These are the same actual candidate posts, obtained without constructing
 the raw leg's request or its descriptor commitments. -/
 def policyPostState
-    (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor) :
+    (prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor) :
     (incidence : Legs descriptor) → Store ((layout prepared).storeLayout incidence)
   | .factory => prepared.factory.payload.logical
   | .book => prepared.resources.post.logical
-  | .authority => (ResourceBirthAuthority.post prepared.authority.snapshot.cell descriptor
+  | .authority => (ResourceBirthAuthority.post ground.authority.cell descriptor
       prepared.grants.mode).logical
   | .allocation index => LifecycleSlot.state Registry (.live (creation descriptor index).cell)
 
 theorem Pending.policyPreCell_exact
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} (pending : Pending prepared height) (primary incidence : Legs descriptor) :
     policyPreCell prepared incidence = (pending.tuple primary).pre incidence := by
   cases incidence <;> rfl
 
 theorem Pending.policyPostState_exact
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} (pending : Pending prepared height) (primary incidence : Legs descriptor) :
     policyPostState prepared incidence = (pending.tuple primary).logicalPost incidence := by
   cases incidence with
@@ -1590,11 +1591,11 @@ theorem Pending.policyPostState_exact
   | book => rfl
   | authority => rfl
   | allocation index =>
-      exact (ResourceBirthController.allocation_post_exact prepared.directory.directory
+      exact (ResourceBirthController.allocation_post_exact ground.directory
         (creation descriptor index) (allocationFresh prepared index)).symm
 
 def Pending.branchStep
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} (pending : Pending prepared height) (branch : Branch descriptor) :
     PolicyStepContext :=
   let wanted := branchRequest prepared height branch
@@ -1607,7 +1608,7 @@ def Pending.branchStep
 /-- The optimized selectors retain the complete original prepared-tuple
 context, including the exact old/post policy states, effects, and pre-root. -/
 theorem Pending.branchStep_prepared_exact
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} (pending : Pending prepared height) (branch : Branch descriptor) :
     pending.branchStep branch =
   PolicyStepContext.ofPreparedTuple
@@ -1623,34 +1624,34 @@ theorem Pending.branchStep_prepared_exact
 /-- Structural selection uses the actual old governing target, including
 factory-authorized allocation and authority branches. -/
 def Pending.branchDependencies
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} (_pending : Pending prepared height) (branch : Branch descriptor) :
     Option WorldKindLawDependencies.Dependencies :=
-  WorldKindLawDependencies.loadTarget deployment prepared.directory.directory
+  WorldKindLawDependencies.loadTarget deployment ground.directory
     (branchRequest prepared height branch).2.target.value
 
 /-- NativeHostContext/Genesis align the factory policy id with the factory
 resource id. The v6 composed receiver intentionally refuses generic pins that
 select a distinct governing policy; it never substitutes a newborn local law. -/
 def Pending.branchConfig [DecidableEq F]
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} (pending : Pending prepared height) (branch : Branch descriptor) :
     ComposedPolicyAdmission.Config F :=
-  PhysicalLawResolution.config profile.compilerProfile prepared.authority.snapshot
-    prepared.directory.directory
-    (sourcePortal prepared.authority.snapshot descriptor.authorityNullifier)
+  PhysicalLawResolution.config profile.compilerProfile ground.authority
+    ground.directory
+    (sourcePortal ground.authority descriptor.authorityNullifier)
     (pending.branchStep branch) (branchRequest prepared height branch).2.target.value
     (((pending.branchDependencies branch).map (·.additional)).getD [])
 
 /-- Failure to load the old target or any selected current/historical policy
 source refuses the branch. No missing structural root becomes an empty law. -/
 def Pending.branchReadGuards
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} (pending : Pending prepared height) (branch : Branch descriptor) :
     Option (List (Nat × Digest)) := do
   let structural ← pending.branchDependencies branch
-  let law ← PhysicalLawResolution.readGuards prepared.authority.snapshot
-    prepared.directory.directory profile.semantics
+  let law ← PhysicalLawResolution.readGuards ground.authority
+    ground.directory profile.semantics
     (branchRequest prepared height branch).2.target.value structural.additional
   some (structural.readGuards ++ law)
 
@@ -1658,10 +1659,10 @@ def Pending.branchReadGuards
 policy witness adds an exact source-enumerated branch; each branch delegates
 to the existing canonical compiler gate on its own full request and joint view. -/
 def Pending.portal [DecidableEq F]
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} (pending : Pending prepared height) : Portal :=
-  let base := domainPortal prepared.authority.snapshot
-    (sourcePortal prepared.authority.snapshot descriptor.authorityNullifier)
+  let base := domainPortal ground.authority
+    (sourcePortal ground.authority descriptor.authorityNullifier)
   { base with
     PolicyWitness := Branch descriptor × ComposedPolicyAdmission.Witness F
     policyAddress := fun witness => witness.2.compiled.address
@@ -1674,7 +1675,7 @@ def Pending.portal [DecidableEq F]
 In particular, changing cost, target, verb, pre-root or source arguments cannot
 reuse the fee branch for a different funding authorization. -/
 theorem Pending.dispatched_request_exact [DecidableEq F]
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} (pending : Pending prepared height)
     {kind : ResourceKind} (request : Request kind) (address : Digest)
     (witness : pending.portal.PolicyWitness)
@@ -1689,7 +1690,7 @@ theorem Pending.dispatched_request_exact [DecidableEq F]
   · exact checks.2
 
 theorem Pending.no_other_branch [DecidableEq F]
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} (pending : Pending prepared height)
     (branch other : Branch descriptor) (different : branch ≠ other)
     (address : Digest) (compiled : ComposedPolicyAdmission.Witness F) :
@@ -1706,7 +1707,7 @@ theorem Pending.no_other_branch [DecidableEq F]
 receipt, membership, issuer and revocation check is retained at the identical
 actual request and old authority state. -/
 def Pending.liftEvidence [DecidableEq F]
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} (pending : Pending prepared height) (branch : Branch descriptor)
     {kind : ResourceKind} {request : Request kind}
     (evidence : Evidence (pending.branchConfig branch).portal
@@ -1724,7 +1725,7 @@ def Pending.liftEvidence [DecidableEq F]
         membershipVerified issuerVerified selfRevocationVerified ancestorVerified channelVerified
 
 def Pending.liftAuthorization [DecidableEq F]
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} (pending : Pending prepared height) (branch : Branch descriptor)
     (authorized : Authorized (pending.branchConfig branch).portal (oldAuthority prepared)
       (branchRequest prepared height branch).2) :
@@ -1758,12 +1759,12 @@ def branchRequiresCapability : Branch descriptor → Bool
   | _ => false
 
 structure BranchAccepted [DecidableEq F]
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} (pending : Pending prepared height) (branch : Branch descriptor) : Type where
   credential : BranchCredential
-  receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
+  receipt : CredentialSignatureAdmission.CheckedSignature ground.authority
   envelopeExact : receipt.envelopeBytes = credential.envelope
-  source : CanonicalCellRegistry.LoadedPolicySource deployment.domain prepared.directory.directory
+  source : CanonicalCellRegistry.LoadedPolicySource deployment.domain ground.directory
     ((oldAuthority prepared).policyAddress (branchRequest prepared height branch).2.policyId
       (branchRequest prepared height branch).2.policyRevision)
   /-- Retain the already selected source's exact physical guard. Reconstructing
@@ -1773,7 +1774,7 @@ structure BranchAccepted [DecidableEq F]
   lawGuards : List (Nat × Digest)
   lawGuardsExact : pending.branchReadGuards branch = some lawGuards
   lawGuardsBound : ∀ guard ∈ lawGuards,
-    guard.2 = durable.snapshot.model.roots ⟨guard.1⟩
+    guard.2 = ground.view.model.roots ⟨guard.1⟩
   authorization : Authorized pending.portal (oldAuthority prepared)
     (branchRequest prepared height branch).2
   modeBound : branchRequiresCapability branch = true →
@@ -1799,7 +1800,7 @@ as `policyUnsupported`, `policyInputRange`, `policyCastAlias`), and only then th
 own verdict through `law.admit` (refused as `policyRejected`). The authorization is
 `law.admit`'s, unchanged. -/
 def Pending.judgeBranch [DecidableEq F]
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} (pending : Pending prepared height) (branch : Branch descriptor)
     (evidence : Evidence (pending.branchConfig branch).portal (oldAuthority prepared)
       (branchRequest prepared height branch).2) :
@@ -1834,10 +1835,10 @@ def Pending.judgeBranch [DecidableEq F]
   else .error .policyUnavailable
 
 def Pending.admitBranch [DecidableEq F]
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} (pending : Pending prepared height) (branch : Branch descriptor)
     (credential : BranchCredential)
-    (receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot) :
+    (receipt : CredentialSignatureAdmission.CheckedSignature ground.authority) :
     Except Reject { accepted : BranchAccepted pending branch // accepted.credential = credential } := do
   let envelopeExact ← require (receipt.envelopeBytes = credential.envelope) .credentialShape
   let wanted := branchRequest prepared height branch
@@ -1847,9 +1848,9 @@ def Pending.admitBranch [DecidableEq F]
     | none => .error .policySourceUnavailable
     | some guards => .ok (⟨guards, exact⟩ : { guards // pending.branchReadGuards branch = some guards })
   let guardsBound ← require
-    (∀ guard ∈ guards.val, guard.2 = durable.snapshot.model.roots ⟨guard.1⟩) .policySourceUnavailable
+    (∀ guard ∈ guards.val, guard.2 = ground.view.model.roots ⟨guard.1⟩) .policySourceUnavailable
   let source ← match CanonicalCellRegistry.loadPolicySource deployment.domain
-      prepared.directory.directory (old.policyAddress wanted.2.policyId wanted.2.policyRevision) with
+      ground.directory (old.policyAddress wanted.2.policyId wanted.2.policyRevision) with
     | none => .error .policySourceUnavailable
     | some loaded => .ok loaded
   let evidence : Evidence config.portal old wanted.2 ←
@@ -1894,7 +1895,7 @@ snapshot, evaluates true on `pending.branchStep branch`: the step whose new
 state carries the newborn slots (`ResourceBirthController.Concrete.newbornSlots`).
 So the factory law of an accepted birth had every `birth/<id>` in front of it. -/
 theorem BranchAccepted.law_admits_step [DecidableEq F]
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} {pending : Pending prepared height} {branch : Branch descriptor}
     (accepted : BranchAccepted pending branch) :
     ∃ graph : PolicyComponentResolution.LoadedGraph (pending.branchConfig branch).snapshot
@@ -2011,7 +2012,7 @@ theorem planVerdict_of_verifies [DecidableEq F] {config : ComposedPolicyAdmissio
 the branch's law resolved, and (binding, support, range and cast having passed) the law
 evaluates false on the branch's step. -/
 theorem Pending.judgeBranch_policyRejected [DecidableEq F]
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} (pending : Pending prepared height) (branch : Branch descriptor)
     (evidence : Evidence (pending.branchConfig branch).portal (oldAuthority prepared)
       (branchRequest prepared height branch).2)
@@ -2058,10 +2059,10 @@ theorem Pending.judgeBranch_policyRejected [DecidableEq F]
 /-- **`admitBranch` answers `policyRejected` only from its policy judgement**: every earlier
 refusal (envelope, source, guards, evidence) and the mode check name other constructors. -/
 theorem Pending.admitBranch_policyRejected [DecidableEq F]
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} (pending : Pending prepared height) (branch : Branch descriptor)
     (credential : BranchCredential)
-    (receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot)
+    (receipt : CredentialSignatureAdmission.CheckedSignature ground.authority)
     (rejected : pending.admitBranch branch credential receipt = .error .policyRejected) :
     ∃ evidence, pending.judgeBranch branch evidence = .error .policyRejected := by
   unfold Pending.admitBranch at rejected
@@ -2075,7 +2076,7 @@ theorem Pending.admitBranch_policyRejected [DecidableEq F]
 /-- **An accepted branch passed the plan verdict**: the law its configuration resolves had
 the compiler's three verdicts and evaluated true on the branch's step. -/
 theorem BranchAccepted.planVerdict_true [DecidableEq F]
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} {pending : Pending prepared height} {branch : Branch descriptor}
     (accepted : BranchAccepted pending branch)
     (law : ComposedPolicyAdmission.PreparedLaw (pending.branchConfig branch)) :
@@ -2101,7 +2102,7 @@ theorem planVerdict_witnessed_false [DecidableEq F] {config : ComposedPolicyAdmi
 
 /-- **No accepted branch resolves a law with a `witnessed` leaf.** -/
 theorem BranchAccepted.no_witnessed [DecidableEq F]
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} {pending : Pending prepared height} {branch : Branch descriptor}
     (accepted : BranchAccepted pending branch)
     (law : ComposedPolicyAdmission.PreparedLaw (pending.branchConfig branch)) :
@@ -2116,7 +2117,7 @@ theorem BranchAccepted.no_witnessed [DecidableEq F]
 `not (witnessed vk)`) is never judged admitted. It is refused before the law is read
 (`policyUnavailable`, `policyBinding`) or, past binding, by name as `policyUnsupported`. -/
 theorem Pending.judgeBranch_witnessed [DecidableEq F]
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} (pending : Pending prepared height) (branch : Branch descriptor)
     (evidence : Evidence (pending.branchConfig branch).portal (oldAuthority prepared)
       (branchRequest prepared height branch).2)
@@ -2147,11 +2148,11 @@ theorem Pending.judgeBranch_witnessed [DecidableEq F]
 #assert_axioms planVerdict_witnessed_false BranchAccepted.no_witnessed Pending.judgeBranch_witnessed
 
 def Pending.admitBranchNative [DecidableEq F]
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} (pending : Pending prepared height) (branch : Branch descriptor)
     (native : CredentialSignatureIO.NativeConfig) (credential : BranchCredential) :
     IO (Except Reject { accepted : BranchAccepted pending branch // accepted.credential = credential }) := do
-  match ← CredentialSignatureAdmission.verifyNative native prepared.authority.snapshot
+  match ← CredentialSignatureAdmission.verifyNative native ground.authority
       descriptor.authorityNullifier (branchRequest prepared height branch).2 credential.envelope with
   | .error reason => return .error (.nativeSignature reason)
   | .ok receipt => return pending.admitBranch branch credential receipt
@@ -2160,7 +2161,7 @@ def Pending.admitBranchNative [DecidableEq F]
 actual outer storage root. Physical snapshot correspondence comes from the
 prepared command's complete `LoadedDirectory`. -/
 theorem BranchAccepted.source_capability_required [DecidableEq F]
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} {pending : Pending prepared height}
     {position : Fin descriptor.resourceBatch.operations.length}
     (accepted : BranchAccepted pending (.source position)) :
@@ -2168,14 +2169,14 @@ theorem BranchAccepted.source_capability_required [DecidableEq F]
   accepted.modeBound rfl
 
 def BranchAccepted.readGuard [DecidableEq F]
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} {pending : Pending prepared height} {branch : Branch descriptor}
     (accepted : BranchAccepted pending branch) := accepted.sourceGuard
 
 /-- Retaining the guard changes no dependency, physical root, or branch
 selection: it is exactly the value derived during this admission. -/
 theorem BranchAccepted.readGuard_eq_source [DecidableEq F]
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} {pending : Pending prepared height} {branch : Branch descriptor}
     (accepted : BranchAccepted pending branch) :
     accepted.readGuard = accepted.source.readGuard := accepted.sourceGuardExact
@@ -2365,7 +2366,7 @@ def CredentialBundle.forBranch (bundle : CredentialBundle) : Branch descriptor �
   | .source index => bundle.sources[index.val]?
 
 structure AdmittedBundle [DecidableEq F]
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} (pending : Pending prepared height) (bundle : CredentialBundle) : Type where
   branches : (branch : Branch descriptor) → BranchAccepted pending branch
   inputsExact : ∀ branch, bundle.forBranch branch = some (branches branch).credential
@@ -2413,7 +2414,7 @@ private def sequenceFin {E : Type} : {n : Nat} → {A : Fin n → Type} →
           | .ok tail => return .ok (directFinCases head tail)
 
 def Pending.admitBundleNative [DecidableEq F]
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} (pending : Pending prepared height)
     (native : CredentialSignatureIO.NativeConfig) (bundle : CredentialBundle) :
     IO (Except Reject (AdmittedBundle pending bundle)) := do
@@ -2476,7 +2477,7 @@ def Pending.admitBundleNative [DecidableEq F]
 source descriptor plus its exact birth incidence. It is not an ordinary write
 request or a capability minted from the nominated owner identity. -/
 def ownerConsentRequest
-    (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
+    (prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor)
     (height : Height) (position : Fin descriptor.births.length) : PackedEffectRequest :=
   let item := descriptor.births.get position
   ⟨item.resourceKind, {
@@ -2501,29 +2502,29 @@ def ownerConsentRequest
     cost := 0 }⟩
 
 structure OwnerConsent
-    (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
+    (prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor)
     (height : Height) (position : Fin descriptor.births.length) (envelope : List UInt8) : Type where
-  receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
+  receipt : CredentialSignatureAdmission.CheckedSignature ground.authority
   envelopeExact : receipt.envelopeBytes = envelope
-  verified : CredentialSignatureAdmission.verifySignature prepared.authority.snapshot
+  verified : CredentialSignatureAdmission.verifySignature ground.authority
     descriptor.authorityNullifier (ownerConsentRequest prepared height position).2 receipt = true
 
 structure ReserveOwnerConsents
-    (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
+    (prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor)
     (height : Height) (envelopes : List (List UInt8)) : Type where
   lengthExact : envelopes.length = descriptor.births.length
   owners : (position : Fin descriptor.births.length) →
     OwnerConsent prepared height position (envelopes[position.val]?.getD [])
 
 def OwnerConsents
-    (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
+    (prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor)
     (height : Height) (envelopes : Option (List (List UInt8))) : Type :=
   match envelopes with
   | none => Unit
   | some owners => ReserveOwnerConsents prepared height owners
 
 def verifyOwnerConsentsNative
-    (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
+    (prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor)
     (height : Height) (native : CredentialSignatureIO.NativeConfig)
     (envelopes : Option (List (List UInt8))) :
     IO (Except Reject (OwnerConsents prepared height envelopes)) :=
@@ -2534,7 +2535,7 @@ def verifyOwnerConsentsNative
         let action := fun (position : Fin descriptor.births.length) => do
           let envelope := owners[position.val]?.getD []
           let wanted := ownerConsentRequest prepared height position
-          match ← CredentialSignatureAdmission.verifyNative native prepared.authority.snapshot
+          match ← CredentialSignatureAdmission.verifyNative native ground.authority
               descriptor.authorityNullifier wanted.2 envelope with
           | .error reason => return .error (.nativeSignature reason)
           | .ok receipt =>
@@ -2542,7 +2543,7 @@ def verifyOwnerConsentsNative
               | .error reason => return .error reason
               | .ok envelopeExact =>
                   match require (CredentialSignatureAdmission.verifySignature
-                      prepared.authority.snapshot descriptor.authorityNullifier wanted.2 receipt = true)
+                      ground.authority descriptor.authorityNullifier wanted.2 receipt = true)
                       .signature with
                   | .error reason => return .error reason
                   | .ok verified =>
@@ -2554,7 +2555,7 @@ def verifyOwnerConsentsNative
       else return .error .credentialShape
 
 theorem OwnerConsent.request_exact
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} {position : Fin descriptor.births.length} {envelope : List UInt8}
     (consent : OwnerConsent prepared height position envelope) :
     consent.receipt.request = ownerConsentRequest prepared height position ∧
@@ -2562,13 +2563,13 @@ theorem OwnerConsent.request_exact
   CredentialSignatureAdmission.verified_request_exact _ _ _ _ consent.verified
 
 theorem OwnerConsent.current_owner_key
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} {position : Fin descriptor.births.length} {envelope : List UInt8}
     (consent : OwnerConsent prepared height position envelope) :
-    CredentialAuthorityState.currentSigningKey prepared.authority.snapshot.logical
+    CredentialAuthorityState.currentSigningKey ground.authority.logical
       (descriptor.births.get position).owner = some consent.receipt.prepared.controller.key := by
   have current := CredentialSignatureAdmission.checked_key_from_same_snapshot
-    prepared.authority.snapshot consent.receipt
+    ground.authority consent.receipt
   have subjectExact : consent.receipt.request.2.subject =
       (descriptor.births.get position).owner :=
     congrArg (fun wanted : PackedEffectRequest => wanted.2.subject) consent.request_exact.1
@@ -2576,10 +2577,10 @@ theorem OwnerConsent.current_owner_key
   exact current
 
 theorem OwnerConsent.current_owner_key_live
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} {position : Fin descriptor.births.length} {envelope : List UInt8}
     (consent : OwnerConsent prepared height position envelope) :
-    CredentialAuthorityState.keyStanding prepared.authority.snapshot.cell
+    CredentialAuthorityState.keyStanding ground.authority.cell
       (CredentialAuthorityState.signingKeyRevocation consent.receipt.prepared.controller.key) = .live := by
   rw [consent.receipt.prepared.keyExact]
   exact consent.receipt.prepared.source.standing
@@ -2589,10 +2590,10 @@ supplying portals, successful Booleans, policy contexts or a prepared state.
 The constructor below is reached only after the fixed whole-bundle verifier. -/
 structure AcceptedBirth [DecidableEq F]
     (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployment) (pins : FactoryPins)
-    (durable : Durable) (height : Height) : Type where
+    (ground : Ground deployment) (height : Height) : Type where
   private mk ::
   ingress : DecodedIngress
-  prepared : PreparedBirth profile.compilerProfile deployment pins durable ingress.descriptor
+  prepared : PreparedBirth profile.compilerProfile deployment pins ground ingress.descriptor
   pending : Pending prepared height
   methodExact : pending.method = ingress.method
   ownerConsents : OwnerConsents prepared height ingress.ownerConsentEnvelopes
@@ -2606,13 +2607,12 @@ structure AcceptedBirth [DecidableEq F]
 has no replay bypass or source-state reconstruction from a historical receipt. -/
 def admitDecodedNative [DecidableEq F]
     (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployment) (pins : FactoryPins)
-    (native : CredentialSignatureIO.NativeConfig) (durable : Durable)
-    (held : ResourceBirthController.Concrete.Held deployment durable) (height : Height)
+    (native : CredentialSignatureIO.NativeConfig) (ground : Ground deployment) (height : Height)
     (ingress : DecodedIngress) (sourced : List (Nat × PackedCell Registry) := []) :
-    IO (Except Reject (AcceptedBirth profile deployment pins durable height)) := do
+    IO (Except Reject (AcceptedBirth profile deployment pins ground height)) := do
   match ResourceBirthController.Concrete.prepareBirth profile.compilerProfile
       profile.disabledEvaluators deployment pins
-      durable held ingress.descriptor height sourced with
+      ground ingress.descriptor height sourced with
   | .error reason => return .error (.preparation reason)
   | .ok prepared =>
       match preparePending prepared height ingress.method with
@@ -2636,24 +2636,23 @@ def admitDecodedNative [DecidableEq F]
 
 def admitNative [DecidableEq F]
     (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployment) (pins : FactoryPins)
-    (native : CredentialSignatureIO.NativeConfig) (durable : Durable) (height : Height)
-    (bytes : List UInt8) : IO (Except Reject (AcceptedBirth profile deployment pins durable height)) :=
+    (native : CredentialSignatureIO.NativeConfig) (ground : Ground deployment) (height : Height)
+    (bytes : List UInt8) : IO (Except Reject (AcceptedBirth profile deployment pins ground height)) :=
   match decodeIngress bytes with
   | none => pure (.error .malformedIngress)
-  | some ingress => admitDecodedNative profile deployment pins native durable
-      (ResourceBirthController.Concrete.Held.load deployment durable) height ingress
+  | some ingress => admitDecodedNative profile deployment pins native ground height ingress
 
 end Receiving
 
 variable {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F}
-    {deployment : Deployment} {pins : FactoryPins} {durable : Durable}
+    {deployment : Deployment} {pins : FactoryPins} {ground : Ground deployment}
 
 def AcceptedBirth.branches {height : Height}
-    (accepted : AcceptedBirth profile deployment pins durable height) := accepted.admitted.branches
+    (accepted : AcceptedBirth profile deployment pins ground height) := accepted.admitted.branches
 
 theorem AcceptedBirth.native_ingress_exact {height : Height}
-    (accepted : AcceptedBirth profile deployment pins durable height)
+    (accepted : AcceptedBirth profile deployment pins ground height)
     (branch : Branch accepted.ingress.descriptor) :
     ∃ credential,
       accepted.ingress.ingress.credentials.forBranch branch = some credential ∧
@@ -2664,7 +2663,7 @@ theorem AcceptedBirth.native_ingress_exact {height : Height}
 /-- The admitted factory branch's step: the step the factory law judged, whose
 new state names every newborn of the descriptor. -/
 def AcceptedBirth.factoryStep {height : Height}
-    (accepted : AcceptedBirth profile deployment pins durable height) :
+    (accepted : AcceptedBirth profile deployment pins ground height) :
     CanonicalPolicyAdmission.PolicyStepContext :=
   accepted.pending.branchStep .factory
 
@@ -2674,7 +2673,7 @@ the factory's committed law, resolved at the loaded snapshot, accepts that very
 step.  A newborn with no export root is admitted by no other law, so this is its
 judgement: an authorizer that read its id and its whole post image. -/
 theorem AcceptedBirth.births_named {height : Height}
-    (accepted : AcceptedBirth profile deployment pins durable height) :
+    (accepted : AcceptedBirth profile deployment pins ground height) :
     (∀ write ∈ accepted.prepared.writes, ResourceBirthController.Concrete.bornIn write = true →
         ReceivingLaw.namesBirth accepted.factoryStep write = true) ∧
       ∃ graph : PolicyComponentResolution.LoadedGraph (accepted.pending.branchConfig .factory).snapshot
@@ -2693,21 +2692,21 @@ theorem AcceptedBirth.births_named {height : Height}
   ⟨accepted.named, (accepted.admitted.branches .factory).law_admits_step⟩
 
 def AcceptedBirth.descriptor {height : Height}
-    (accepted : AcceptedBirth profile deployment pins durable height) := accepted.ingress.descriptor
+    (accepted : AcceptedBirth profile deployment pins ground height) := accepted.ingress.descriptor
 
 /-- **An accepted birth is bound to its indices.** `pins` is `deployment`'s factory pin
-and `profile`'s compiler semantics pin; every write the birth commits expects `durable`'s
+and `profile`'s compiler semantics pin; every write the birth commits expects `ground`'s
 exact root; the descriptor obeys the ingress method's factory template over the loaded
-authority at `height`, that template being `durable`'s platform record's (`birthTemplate`:
+authority at `height`, that template being `ground`'s platform record's (`birthTemplate`:
 the record's owner budget and lifetime, the profile's issuer and birth slack); and every
 birth write is named by the admitted factory step. -/
 theorem AcceptedBirth.indexed {height : Height}
-    (accepted : AcceptedBirth profile deployment pins durable height) :
+    (accepted : AcceptedBirth profile deployment pins ground height) :
     ResourceBirthController.Concrete.PinsBound deployment pins ∧
       ResourceBirthController.Concrete.ProfileBound profile.compilerProfile pins ∧
       (∀ write ∈ accepted.prepared.writes,
-        write.expectedPre = durable.snapshot.model.roots write.cellId) ∧
-      (∃ template, birthTemplate profile deployment durable = some template ∧
+        write.expectedPre = ground.view.model.roots write.cellId) ∧
+      (∃ template, birthTemplate profile deployment ground.view = some template ∧
         MethodTemplateBound accepted.ingress.method template
           (oldAuthority accepted.prepared) height accepted.descriptor) ∧
       ResourceBirthController.Concrete.Named accepted.factoryStep accepted.prepared.writes := by
@@ -2721,7 +2720,7 @@ theorem AcceptedBirth.indexed {height : Height}
 /-- Extract the actually verified owner receipts retained by a reservation
 method ingress. No public receipt/flag can reconstruct these native tokens. -/
 def AcceptedBirth.reserveOwners {height : Height}
-    (accepted : AcceptedBirth profile deployment pins durable height)
+    (accepted : AcceptedBirth profile deployment pins ground height)
     (envelopes : List (List UInt8))
     (sourceExact : accepted.ingress.ownerConsentEnvelopes = some envelopes) :
     ReserveOwnerConsents accepted.prepared height envelopes := by
@@ -2732,9 +2731,9 @@ def AcceptedBirth.reserveOwners {height : Height}
 /-- Receiving admission, rather than an authored template claim, retains the
 source-selected reservation method shape over the actual installed descriptor. -/
 theorem AcceptedBirth.reserve_shape {height : Height}
-    (accepted : AcceptedBirth profile deployment pins durable height)
+    (accepted : AcceptedBirth profile deployment pins ground height)
     (method : accepted.ingress.method = .reserve) :
-    ∃ template, birthTemplate profile deployment durable = some template ∧
+    ∃ template, birthTemplate profile deployment ground.view = some template ∧
       ReserveTemplateBound template (oldAuthority accepted.prepared) height
         accepted.descriptor := by
   have shape := accepted.pending.templateBound
@@ -2748,30 +2747,30 @@ request on `R` (the gate ran at `admitDecodedNative`'s admission height, which
 it passes to `prepareBirth`). `R`'s law accepting it is the remaining conjunct
 of `PreparedBirth.birth_under_room_requires_grant`. -/
 theorem AcceptedBirth.birth_under_room_requires_grant {height : Height}
-    (accepted : AcceptedBirth profile deployment pins durable height)
+    (accepted : AcceptedBirth profile deployment pins ground height)
     {item : BirthItem Registry} (member : item ∈ accepted.descriptor.births)
     {room : Nat} (inRoom : item.parent = some room) :
     ∃ placement cap, item.placement = some placement ∧
-      RoomBirthGate.storedAt accepted.prepared.authority placement = some cap ∧
+      RoomBirthGate.storedAt ground placement = some cap ∧
       cap.holder.Covers accepted.descriptor.creator ∧
-      cap.Admissible accepted.prepared.authority.snapshot.authState
-        (RoomBirthGate.placeRequest pins accepted.prepared.authority.snapshot.authState
-          (RoomBirthGate.roomRoot accepted.prepared.directory.directory room) accepted.prepared.gateHeight
+      cap.Admissible ground.authority.authState
+        (RoomBirthGate.placeRequest pins ground.authority.authState
+          (RoomBirthGate.roomRoot ground.directory room) accepted.prepared.gateHeight
           accepted.descriptor room) :=
   let ⟨placement, cap, named, stored, holder, admissible, _⟩ :=
     accepted.prepared.birth_under_room_requires_grant member inRoom
   ⟨placement, cap, named, stored, holder, admissible⟩
 
 def AcceptedBirth.tuple {height : Height}
-    (accepted : AcceptedBirth profile deployment pins durable height) :=
+    (accepted : AcceptedBirth profile deployment pins ground height) :=
   accepted.pending.tuple .factory
 
 def AcceptedBirth.portals {height : Height}
-    (accepted : AcceptedBirth profile deployment pins durable height) : Legs accepted.descriptor → Portal :=
+    (accepted : AcceptedBirth profile deployment pins ground height) : Legs accepted.descriptor → Portal :=
   fun _ => accepted.pending.portal
 
 def AcceptedBirth.admissionEvidence {height : Height}
-    (accepted : AcceptedBirth profile deployment pins durable height) :
+    (accepted : AcceptedBirth profile deployment pins ground height) :
     accepted.tuple.AdmissionEvidence accepted.portals where
   modes incidence := by
     cases incidence with
@@ -2797,20 +2796,20 @@ def AcceptedBirth.admissionEvidence {height : Height}
     cases incidence <;> trivial
 
 def AcceptedBirth.acceptedLegs {height : Height}
-    (accepted : AcceptedBirth profile deployment pins durable height) (apex : Digest) :=
+    (accepted : AcceptedBirth profile deployment pins ground height) (apex : Digest) :=
   accepted.tuple.accept accepted.portals apex accepted.admissionEvidence
 
 /-- Every logical post lowered by the final turn is the one the branch
 policies evaluated before any authorization was constructed. -/
 theorem AcceptedBirth.actual_posts_exact {height : Height}
-    (accepted : AcceptedBirth profile deployment pins durable height) (apex : Digest)
+    (accepted : AcceptedBirth profile deployment pins ground height) (apex : Digest)
     (incidence : Legs accepted.descriptor) :
     (accepted.tuple.toDeclaration accepted.portals apex).post
         (accepted.acceptedLegs apex) incidence = accepted.tuple.post incidence :=
   accepted.tuple.accepted_posts_exact accepted.portals apex accepted.admissionEvidence incidence
 
 def AcceptedBirth.sourceReadGuards {height : Height}
-    (accepted : AcceptedBirth profile deployment pins durable height) : List (Nat × Digest) :=
+    (accepted : AcceptedBirth profile deployment pins ground height) : List (Nat × Digest) :=
   (policyBranches accepted.descriptor.createRequests.length
     accepted.descriptor.resourceBatch.operations.length).flatMap fun branch =>
       (accepted.branches branch).lawGuards
@@ -2831,12 +2830,12 @@ variable {descriptor : Descriptor Registry}
 
 /-- The branch configuration's step is the branch's step (`PhysicalLawResolution.config`). -/
 theorem Pending.branchConfig_step
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} (pending : Pending prepared height) (branch : Branch descriptor) :
     (pending.branchConfig branch).step = pending.branchStep branch := rfl
 
 theorem Pending.branchConfig_profile
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} (pending : Pending prepared height) (branch : Branch descriptor) :
     (pending.branchConfig branch).profile = profile.compilerProfile := rfl
 
@@ -2844,7 +2843,7 @@ theorem Pending.branchConfig_profile
 cast-injective, and evaluated true) of the law the branch configuration resolves, on the
 branch's own step (`Pending.branchConfig_step`); `none` when no law resolves. -/
 def Pending.factoryVerdict
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} (pending : Pending prepared height) : Option Bool :=
   (pending.branchConfig .factory).resolve?.map fun law => planVerdict law
 
@@ -2852,7 +2851,7 @@ def Pending.factoryVerdict
 branch of the same Pending is accepted, whether the plan refused for the law's verdict, an
 unsupported law, an out-of-range input or a cast alias. -/
 def PlanRefusalSound : Prop :=
-  ∀ {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+  ∀ {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} (pending : Pending prepared height),
     pending.factoryVerdict = some false → IsEmpty (BranchAccepted pending .factory)
 
@@ -2860,9 +2859,9 @@ def PlanRefusalSound : Prop :=
 the factory law at admission: any refusal of that branch names another cause (signature,
 capability, epoch, a missing source, binding), never `policyRejected`. -/
 def PlanPassNotLawRefused : Prop :=
-  ∀ {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+  ∀ {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} (pending : Pending prepared height) (credential : BranchCredential)
-    (receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot),
+    (receipt : CredentialSignatureAdmission.CheckedSignature ground.authority),
     pending.factoryVerdict = some true →
       pending.admitBranch .factory credential receipt ≠ .error .policyRejected
 
@@ -2870,15 +2869,15 @@ def PlanPassNotLawRefused : Prop :=
 the same image: `policyRejected` from the factory branch means the plan verdict is
 `some false`, so `NativeHost.birthRefusal` would have named it. -/
 def LawRefusalDisclosed : Prop :=
-  ∀ {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+  ∀ {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} (pending : Pending prepared height) (credential : BranchCredential)
-    (receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot),
+    (receipt : CredentialSignatureAdmission.CheckedSignature ground.authority),
     pending.admitBranch .factory credential receipt = .error .policyRejected →
       pending.factoryVerdict = some false
 
 theorem planRefusalSound :
     PlanRefusalSound (profile := profile) (deployment := deployment) (pins := pins)
-      (durable := durable) (descriptor := descriptor) := by
+      (ground := ground) (descriptor := descriptor) := by
   intro prepared height pending verdict
   refine ⟨fun accepted => ?_⟩
   revert verdict
@@ -2897,7 +2896,7 @@ theorem planRefusalSound :
 
 theorem lawRefusalDisclosed :
     LawRefusalDisclosed (profile := profile) (deployment := deployment) (pins := pins)
-      (durable := durable) (descriptor := descriptor) := by
+      (ground := ground) (descriptor := descriptor) := by
   intro prepared height pending credential receipt rejected
   obtain ⟨evidence, judged⟩ := pending.admitBranch_policyRejected .factory credential receipt rejected
   obtain ⟨law, resolved, refused⟩ := pending.judgeBranch_policyRejected .factory evidence judged
@@ -2908,7 +2907,7 @@ theorem lawRefusalDisclosed :
 
 theorem planPassNotLawRefused :
     PlanPassNotLawRefused (profile := profile) (deployment := deployment) (pins := pins)
-      (durable := durable) (descriptor := descriptor) := by
+      (ground := ground) (descriptor := descriptor) := by
   intro prepared height pending credential receipt verdict rejected
   have disclosed := lawRefusalDisclosed pending credential receipt rejected
   rw [verdict] at disclosed
@@ -2920,7 +2919,7 @@ theorem planPassNotLawRefused :
 `some none` when no factory law resolves (admission then refuses `policyUnavailable`);
 `some (some law)` when the resolved law fails the plan verdict. -/
 def Pending.factoryRefusal
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} (pending : Pending prepared height) :
     Option (Option (ComposedPolicyAdmission.PreparedLaw (pending.branchConfig .factory))) :=
   (pending.branchConfig .factory).resolve?.elim (some none) fun law =>
@@ -2929,7 +2928,7 @@ def Pending.factoryRefusal
 /-- The plan passes exactly when the plan verdict is `some true`; with `planRefusalSound`
 and `planPassNotLawRefused`, what the plan says is what admission of the same image does. -/
 theorem Pending.factoryRefusal_eq_none_iff
-    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} (pending : Pending prepared height) :
     pending.factoryRefusal = none ↔ pending.factoryVerdict = some true := by
   unfold Pending.factoryRefusal Pending.factoryVerdict
@@ -2948,7 +2947,7 @@ theorem Pending.factoryRefusal_eq_none_iff
 step alone, so a plan and a submission can disagree only if the factory branch they judge
 changed (a law installed in between, or a moved step). -/
 theorem factoryVerdict_congr
-    {prepared₁ prepared₂ : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {prepared₁ prepared₂ : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} (p₁ : Pending prepared₁ height) (p₂ : Pending prepared₂ height)
     (sameLaw : (p₁.branchConfig .factory).resolve?.map (·.predicate) =
       (p₂.branchConfig .factory).resolve?.map (·.predicate))

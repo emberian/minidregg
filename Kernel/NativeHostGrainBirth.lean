@@ -50,30 +50,29 @@ def prepareLoaded (config : Config) (opened : Opened config)
   let source ← need "noncanonical grain-backed birth source"
     (sourceCodec.decode sourceBytes)
   let tariff ← need "grain-backed birth tariff: the image's platform record pins none"
-    (GrainResourceBirthAdmission.grainTariffAt config.deployment opened.durable)
+    (GrainResourceBirthAdmission.grainTariffAt config.deployment opened.durable.snapshot)
   let profile := config.profile
   let marker := GrainResourceBirthAdmission.useMarker profile config.deployment tariff source
   let height := logicalHeight config opened.durable
+  let ground : ServedBasis.Ground config.deployment := .ofLoaded opened.durable opened.directory opened.authority
   let draft ← (ResourceBirthController.Concrete.prepareGrainDraft profile.compilerProfile
-    profile.disabledEvaluators config.deployment opened.pins opened.durable
-    (ResourceBirthController.Concrete.Held.of opened.directory opened.authority) source.birth marker height).mapError
+    profile.disabledEvaluators config.deployment opened.pins ground source.birth marker height).mapError
       (fun reason => s!"grain-backed birth draft: {repr reason}")
   let source := source.withAuxiliaryCreates draft.descriptor.auxiliaryCreates
   let birth ← (GrainResourceBirthController.prepareSourceBirth profile.compilerProfile
-    profile.disabledEvaluators config.deployment opened.pins opened.durable
-    (ResourceBirthController.Concrete.Held.of opened.directory opened.authority) profile.semantics tariff source height).mapError
+    profile.disabledEvaluators config.deployment opened.pins ground profile.semantics tariff source height).mapError
       (fun reason => s!"grain-backed birth preparation: {repr reason}")
   let ambient : DeclaredResourceController.Ambient :=
     ⟨config.federation, height⟩
   let grain ← (GrainResourceBirthTransaction.prepareTargets profile config.deployment
-    opened.pins opened.durable ambient tariff source birth).mapError
+    opened.pins ground ambient tariff source birth).mapError
       (fun reason => s!"grain-backed target preparation: {repr reason}")
   let _pending ← (GrainResourceBirthAdmission.preparePending profile config.deployment
-    opened.pins opened.durable ambient tariff source birth grain).mapError
+    opened.pins ground ambient tariff source birth grain).mapError
       (fun reason => s!"grain-backed tuple preparation: {repr reason}")
   check (capabilities.length == source.birth.resourceBatch.operations.length)
     "grain-backed birth source capability count mismatch"
-  let snapshot := birth.prepared.pre.authority.snapshot
+  let snapshot := ground.authority
   let marker := GrainResourceBirthAdmission.useMarker profile config.deployment tariff source
   let branches ← (GrainResourceBirthAdmission.branches tariff source).mapM fun branch =>
     let label := branchLabel branch

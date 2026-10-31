@@ -107,6 +107,7 @@ def describe : ResourceBirthReceiver.Result → String
   | .rejected (.admission reason) => s!"refused admission {repr reason}"
   | .rejected .malformedIngress => "refused malformedIngress"
   | .rejected .transactionConflict => "refused transactionConflict"
+  | .rejected .undeclaredTransaction => "refused undeclaredTransaction"
   | .rejected (.durable reason) => s!"refused durable {repr reason}"
   | .contention => "contention"
   | .unavailable detail => s!"unavailable {detail}"
@@ -116,10 +117,10 @@ def describe : ResourceBirthReceiver.Result → String
 submit the one-birth descriptor through the real receiver; `inspect` sees the admitted
 birth (fresh admission on the same loaded image) before the durable submission. -/
 def submit (verifier signer storeBinary : System.FilePath) (factory : Minidregg.Pred.Pred)
-    (inspect : {pins : FactoryPins} → {durable : ResourceBirthController.Concrete.Durable} →
+    (inspect : {pins : FactoryPins} → {ground : Minidregg.Compiler.ServedBasis.Ground hostTemplate.deployment} →
       {height : Height} →
       ResourceBirthPolicyController.Concrete.AcceptedBirth profile hostTemplate.deployment pins
-        durable height → IO Unit) :
+        ground height → IO Unit) :
     IO (String × Bool) := do
   let (creatorPublic, _) ← sign signer 7 []
   let cfg := genesis creatorPublic factory
@@ -165,13 +166,12 @@ def submit (verifier signer storeBinary : System.FilePath) (factory : Minidregg.
     let some ingress := ResourceBirthPolicyController.Concrete.decodeIngress bytes
       | throw (IO.userError "assembled birth ingress does not decode")
     match ← ResourceBirthPolicyController.Concrete.admitDecodedNative profile host.deployment
-        opened.pins host.signature opened.durable (ResourceBirthController.Concrete.Held.of opened.directory opened.authority) height
+        opened.pins host.signature (.ofLoaded opened.durable opened.directory opened.authority) height
         ingress with
     | .ok accepted => inspect accepted
     | .error _ => pure ()
     let result ← ResourceBirthReceiver.receiveLoaded profile host.deployment opened.pins
-      host.signature transport opened.durable
-      (ResourceBirthController.Concrete.Held.of opened.directory opened.authority) height bytes
+      host.signature transport opened.durable opened.directory opened.authority height bytes
     pure (describe result, planRefused)
 
 /-- The receiver's naming check over a patch, by name. -/

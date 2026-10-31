@@ -270,7 +270,7 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
     (show Option Epoch from authority.snapshot.logical ⟨.subjectKeyEpoch, command.holder⟩).isSome = true
   /-- The platform record of the image: the observe grant's window and budget are its. -/
   record : PlatformCellLayout.Platform
-  recordExact : ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable =
+  recordExact : ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable.snapshot =
     some record
   candidate : Candidate
     (family deployment authority.snapshot profile.semantics ambient command)
@@ -287,7 +287,7 @@ theorem Prepared.sound {F : Type} [Field F] {deployment : Deployment}
       prepared.directory.directory.slots deployment.factoryId = .present prepared.factory.before ∧
       (show Option Epoch from
         prepared.authority.snapshot.logical ⟨.subjectKeyEpoch, command.holder⟩).isSome = true ∧
-      ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable =
+      ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable.snapshot =
         some prepared.record :=
   ⟨prepared.factory.rootExact, prepared.factory.present, prepared.holderEnrolled,
     prepared.recordExact⟩
@@ -303,13 +303,13 @@ def Prepared.template {F : Type} [Field F] {deployment : Deployment}
 /-- The image's platform record with its equation. -/
 private def recordOf (deployment : Deployment) (durable : Durable) :
     Option {record : PlatformCellLayout.Platform //
-      ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable = some record} :=
+      ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable.snapshot = some record} :=
   go _ rfl
 where
   go : (found : Option PlatformCellLayout.Platform) →
-      ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable = found →
+      ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable.snapshot = found →
       Option {record : PlatformCellLayout.Platform //
-        ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable = some record}
+        ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable.snapshot = some record}
     | none, _ => none
     | some record, recorded => some ⟨record, recorded⟩
 

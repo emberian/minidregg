@@ -98,12 +98,12 @@ born for the item is admissible. -/
 theorem accepted_kick_revokes_room_born_authority {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F}
     {deployment : CanonicalCellRegistry.Deployment} {pins : FactoryPins}
-    {durable : ResourceBirthController.Concrete.Durable} {height : Height}
-    (accepted : ResourceBirthPolicyController.Concrete.AcceptedBirth profile deployment pins durable height)
+    {ground : Minidregg.Compiler.ServedBasis.Ground deployment} {height : Height}
+    (accepted : ResourceBirthPolicyController.Concrete.AcceptedBirth profile deployment pins ground height)
     {item : BirthItem Registry} (member : item ∈ accepted.descriptor.births)
     {room : Nat} (inRoom : item.parent = some room) :
     ∃ placement cap, item.placement = some placement ∧
-      RoomBirthGate.storedAt accepted.prepared.authority placement = some cap ∧
+      RoomBirthGate.storedAt ground placement = some cap ∧
       cap.holder.Covers accepted.descriptor.creator ∧
       item.owner = accepted.descriptor.creator ∧
       ∀ grant ∈ accepted.descriptor.grants, grant.ForBirth item →

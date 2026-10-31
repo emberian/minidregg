@@ -59,10 +59,12 @@ structure IssuedEvidence (config : Config) where
   sourceExact :
     (∃ (pins : FactoryPins)
        (original : ResourceBirthController.Concrete.Durable)
+       (directory : CredentialAuthorityDomainReceiver.LoadedDirectory original)
+       (authority : CredentialAuthorityDomainReceiver.Loaded config.deployment original.snapshot)
        (height : Height)
        (ingress : ApplicationShareIssueSource.Ingress)
        (accepted : ApplicationShareIssueAdmission.Accepted config.profile config
-         pins original height ingress),
+         pins (.ofLoaded original directory authority) height ingress),
        spec = ingress.spec ∧
          ingressBytes = ApplicationShareIssueSource.ingressCodec.encode ingress ∧
          descriptor = accepted.birth.descriptor ∧
@@ -70,10 +72,12 @@ structure IssuedEvidence (config : Config) where
            (ApplicationShareIssueReceiver.intent accepted)) ∨
     (∃ (pins : FactoryPins)
        (original : ResourceBirthController.Concrete.Durable)
+       (directory : CredentialAuthorityDomainReceiver.LoadedDirectory original)
+       (authority : CredentialAuthorityDomainReceiver.Loaded config.deployment original.snapshot)
        (ambient : DeclaredResourceController.Ambient)
        (ingress : ApplicationShareIssueGrainSource.Ingress)
        (accepted : ApplicationShareIssueGrainAdmission.Accepted config.profile config
-         pins original ambient ingress),
+         pins (.ofLoaded original directory authority) ambient ingress),
        spec = ingress.spec ∧
          ingressBytes = ingress.canonicalBytes ∧
          descriptor = accepted.decoded.source.birth ∧
@@ -85,31 +89,36 @@ private native Accepted issue and exact equality of all recorded intent
 fields. The caller must separately prove chronological membership in an
 admitted replay prefix before using this evidence for a dispatch. -/
 def IssuedEvidence.fromAccepted (config : Config) (pins : FactoryPins)
-    (original : ResourceBirthController.Concrete.Durable) (height : Height)
+    (original : ResourceBirthController.Concrete.Durable)
+    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory original)
+    (authority : CredentialAuthorityDomainReceiver.Loaded config.deployment original.snapshot)
+    (height : Height)
     (ingress : ApplicationShareIssueSource.Ingress)
     (accepted : ApplicationShareIssueAdmission.Accepted config.profile config
-      pins original height ingress)
+      pins (.ofLoaded original directory authority) height ingress)
     (record : DurableReceiver.IntentRecord)
     (exact : record = DurableReceiver.IntentRecord.ofIntent
       (ApplicationShareIssueReceiver.intent accepted)) : IssuedEvidence config :=
   ⟨ingress.spec, ApplicationShareIssueSource.ingressCodec.encode ingress,
     accepted.birth.descriptor, record,
-    Or.inl ⟨pins, original, height, ingress, accepted, rfl, rfl, rfl, exact⟩⟩
+    Or.inl ⟨pins, original, directory, authority, height, ingress, accepted, rfl, rfl, rfl, exact⟩⟩
 
 /-- The grain-backed issue is a separate admitted source with its own event22
 and full joint birth intent. Its evidence is never constructed through the
 legacy event15 accepted type. -/
 def IssuedEvidence.fromGrainAccepted (config : Config) (pins : FactoryPins)
     (original : ResourceBirthController.Concrete.Durable)
+    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory original)
+    (authority : CredentialAuthorityDomainReceiver.Loaded config.deployment original.snapshot)
     (ambient : DeclaredResourceController.Ambient)
     (ingress : ApplicationShareIssueGrainSource.Ingress)
     (accepted : ApplicationShareIssueGrainAdmission.Accepted config.profile config
-      pins original ambient ingress)
+      pins (.ofLoaded original directory authority) ambient ingress)
     (record : DurableReceiver.IntentRecord)
     (exact : record = DurableReceiver.IntentRecord.ofIntent
       (ApplicationShareIssueGrainReceiver.intent accepted)) : IssuedEvidence config :=
   ⟨ingress.spec, ingress.canonicalBytes, accepted.decoded.source.birth, record,
-    Or.inr ⟨pins, original, ambient, ingress, accepted, rfl, rfl, rfl, exact⟩⟩
+    Or.inr ⟨pins, original, directory, authority, ambient, ingress, accepted, rfl, rfl, rfl, exact⟩⟩
 
 def IssuedEvidence.transactionId {config : Config} (issued : IssuedEvidence config) : Digest :=
   issued.descriptor.transactionId
@@ -120,8 +129,8 @@ def IssuedEvidence.eventId {config : Config} (issued : IssuedEvidence config) : 
 theorem IssuedEvidence.record_transaction {config : Config} (issued : IssuedEvidence config) :
     issued.record.transactionId = issued.transactionId := by
   rcases issued.sourceExact with
-    ⟨_, _, _, _, accepted, _, _, descriptorExact, recordExact⟩ |
-    ⟨_, _, _, _, accepted, _, _, descriptorExact, recordExact⟩
+    ⟨_, _, _, _, _, _, accepted, _, _, descriptorExact, recordExact⟩ |
+    ⟨_, _, _, _, _, _, accepted, _, _, descriptorExact, recordExact⟩
   · rw [recordExact]
     change (ApplicationShareIssueReceiver.intent accepted).transactionId =
       issued.descriptor.transactionId
@@ -136,8 +145,8 @@ theorem IssuedEvidence.record_transaction {config : Config} (issued : IssuedEvid
 theorem IssuedEvidence.record_event_bytes {config : Config} (issued : IssuedEvidence config) :
     issued.record.event.canonicalBytes = issued.ingressBytes := by
   rcases issued.sourceExact with
-    ⟨_, _, _, _, accepted, _, ingressExact, _, recordExact⟩ |
-    ⟨_, _, _, _, accepted, _, ingressExact, _, recordExact⟩
+    ⟨_, _, _, _, _, _, accepted, _, ingressExact, _, recordExact⟩ |
+    ⟨_, _, _, _, _, _, accepted, _, ingressExact, _, recordExact⟩
   · rw [recordExact, ingressExact]
     rfl
   · rw [recordExact, ingressExact]

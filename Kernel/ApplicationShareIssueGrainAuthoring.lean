@@ -130,7 +130,7 @@ def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
   let .ok ready := ApplicationShareIssueSource.prepare profile config request.spec
     | throw "grain-backed share source refused"
   let some record := ResourceBirthPolicyController.Concrete.platformRecordAt config.deployment
-      opened.durable
+      opened.durable.snapshot
     | throw "platform cell unavailable: the image holds no platform record to price a share ticket from"
   unless opened.pins.tariff == record.creation do
     throw "grain-backed share factory tariff differs from the platform record"
@@ -153,10 +153,11 @@ def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
       parentRoot := parentRoot
       parentBefore := parentBefore }
   let specialPins := opened.pins
+  let ground : Minidregg.Compiler.ServedBasis.Ground config.deployment :=
+    .ofLoaded opened.durable opened.directory opened.authority
   let marker := GrainResourceBirthAdmission.useMarker profile config.deployment tariff source
   let .ok draft := ResourceBirthController.Concrete.prepareGrainDraft
-      profile.compilerProfile profile.disabledEvaluators config.deployment specialPins opened.durable
-      (ResourceBirthController.Concrete.Held.of opened.directory opened.authority) birthDraft marker height
+      profile.compilerProfile profile.disabledEvaluators config.deployment specialPins ground birthDraft marker height
       ready.sourced
     | throw "grain-backed share birth preparation refused"
   let source := source.withAuxiliaryCreates draft.descriptor.auxiliaryCreates
@@ -165,25 +166,24 @@ def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
       CanonicalCellRegistry.sourceEncoding.codec.encode expected do
     throw "grain-backed share finalized birth differs from source"
   let .ok birth := GrainResourceBirthController.prepareSourceBirth
-      profile.compilerProfile profile.disabledEvaluators config.deployment specialPins opened.durable
-      (ResourceBirthController.Concrete.Held.of opened.directory opened.authority) profile.semantics tariff source height ready.sourced
+      profile.compilerProfile profile.disabledEvaluators config.deployment specialPins ground profile.semantics tariff source height ready.sourced
     | throw "grain-backed share birth preparation refused"
   let ambient : DeclaredResourceController.Ambient := ⟨config.federation, height⟩
   let .ok grain := GrainResourceBirthTransaction.prepareTargets profile
-      config.deployment specialPins opened.durable ambient tariff source birth
+      config.deployment specialPins ground ambient tariff source birth
     | throw "grain-backed share target preparation refused"
   let .ok _pending := GrainResourceBirthAdmission.preparePending profile
-      config.deployment specialPins opened.durable ambient tariff source birth grain
+      config.deployment specialPins ground ambient tariff source birth grain
     | throw "grain-backed share tuple preparation refused"
   unless request.sourceCapabilities.length == source.birth.resourceBatch.operations.length do
     throw "grain-backed share source capability count mismatch"
   let marker := GrainResourceBirthAdmission.useMarker profile config.deployment tariff source
   let branches ← (GrainResourceBirthAdmission.branches tariff source).mapM fun branch =>
     let label := NativeHostGrainBirth.branchLabel branch
-    slot birth.prepared.pre.authority.snapshot marker label.1 label.2
+    slot ground.authority marker label.1 label.2
       (GrainResourceBirthAdmission.branchRequest birth grain height branch)
   let observations ← (List.finRange (source.grainCommand tariff).targets.length).mapM
-    fun index => slot birth.prepared.pre.authority.snapshot marker 8 index.val
+    fun index => slot ground.authority marker 8 index.val
       ⟨(source.grainCommand tariff).targets[index].kind,
         GrainResourceBirthAdmission.readRequest birth grain index⟩
   let finalized := GrainResourceBirthHostCodec.finalizedCodec.encode
@@ -193,13 +193,12 @@ def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
     ⟨config.deployment.domain, profile.semantics,
       opened.durable.worldRoot, height,
       .birth finalized request.sourceCapabilities, branches ++ observations⟩
-  let context : ApplicationShareIssueDelegation.Context config.deployment :=
-    (Minidregg.Compiler.ServedBasis.Ground.full _ birth.prepared.pre.directory birth.prepared.pre.authority)
+  let context : ApplicationShareIssueDelegation.Context config.deployment := ground
   let .ok app := ApplicationShareIssueDelegation.prepare context profile
       config.federation height request.spec source.birth
     | throw "grain-backed share app preparation refused"
   let .ok header := CredentialSignatureAdmission.signingHeader
-      birth.prepared.pre.authority.snapshot
+      ground.authority
       (ApplicationShareIssueSource.issueMarker request.spec source.birth)
       ⟨.object, app.wanted⟩
     | throw "grain-backed share app signing key selection refused"

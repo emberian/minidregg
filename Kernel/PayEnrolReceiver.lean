@@ -475,13 +475,13 @@ factory template under it (`templateAt`: the record's owner budget and lifetime,
 profile's issuer and birth slack). -/
 def AmbientCurrent {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (durable : Durable) (ambient : Ambient) : Prop :=
-  ∃ record, ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable = some record ∧
+  ∃ record, ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable.snapshot = some record ∧
     ambient.tariff = record.creation ∧
     ambient.template = ResourceBirthPolicyController.Concrete.templateAt profile.template record
 
 def ambientCurrent {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (durable : Durable) (ambient : Ambient) : Bool :=
-  match ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable with
+  match ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable.snapshot with
   | none => false
   | some record => decide (ambient.tariff = record.creation) &&
       decide (ambient.template = ResourceBirthPolicyController.Concrete.templateAt profile.template record)
@@ -491,7 +491,7 @@ theorem ambientCurrent_iff {F : Type} [Field F] (deployment : Deployment)
     ambientCurrent deployment profile durable ambient = true ↔
       AmbientCurrent deployment profile durable ambient := by
   unfold ambientCurrent AmbientCurrent
-  cases ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable with
+  cases ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable.snapshot with
   | none => simp
   | some record => simp
 
@@ -654,7 +654,7 @@ structure EnrolLegs (directory : LoadedDirectory durable)
   descriptorExact : descriptor =
     { enrolDraft deployment profile ambient authority tariff price plan with
       auxiliaryCreates := descriptor.auxiliaryCreates }
-  grants : PreparedGrantBatch profile.compilerProfile deployment authority descriptor
+  grants : PreparedGrantBatch profile.compilerProfile deployment authority.snapshot descriptor
   auxiliaryExact : descriptor.auxiliaryCreates = grants.auxiliaryCreates
   initials : CanonicalCellRegistry.BirthsAdmissible deployment descriptor
   templateBound : ResourceBirthPolicyController.Concrete.TemplateBound ambient.template
@@ -691,10 +691,10 @@ def prepareEnrolLegs (directory : LoadedDirectory durable)
     Except Reject (EnrolLegs deployment profile ambient directory authority book tariff price plan) := do
   let base := enrolDraft deployment profile ambient authority tariff price plan
   let first ← requireSome .grantBatch
-    (prepareGrantBatch profile.compilerProfile deployment authority base)
+    (prepareGrantBatch profile.compilerProfile deployment authority.snapshot base)
   let descriptor : Descriptor Registry := { base with auxiliaryCreates := first.auxiliaryCreates }
   let grants ← requireSome .grantBatch
-    (prepareGrantBatch profile.compilerProfile deployment authority descriptor)
+    (prepareGrantBatch profile.compilerProfile deployment authority.snapshot descriptor)
   let aux ← require (ResourceBirthController.Concrete.sameCreates descriptor.auxiliaryCreates
     grants.auxiliaryCreates = true) .grantBatch
   let initials ← require (CanonicalCellRegistry.BirthsAdmissible deployment descriptor) .birthShape
@@ -952,7 +952,7 @@ def plan (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
   let factory ← requireSome .factoryUnavailable
     (ResourceBirthController.Concrete.observeCell deployment directory.directory
       deployment.factoryId .declaredObject)
-  match ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable with
+  match ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable.snapshot with
   | none => throw .platformUnavailable
   | some _ =>
   let current ← require (AmbientCurrent deployment profile durable ambient) .platformStale

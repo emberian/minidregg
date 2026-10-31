@@ -34,38 +34,37 @@ def patch (snapshot : CredentialAuthorityDomain.Snapshot)
     (descriptor : Descriptor CanonicalCellRegistry.registry) : Patch layout :=
   assignAll snapshot.logical (ResourceBirthAuthority.entries descriptor)
 
-/-- Both replay markers are checked unspent in the durable consumed set the
-OLD authority snapshot was loaded with; the batch is one patch of the cell. The checked birth grant template is retained
+/-- Both replay markers are checked unspent in the consumed set the OLD
+authority snapshot carries (a ground answers them only when it declares them:
+the controller refuses an undeclared marker before this); the batch is one patch of the cell. The checked birth grant template is retained
 separately for the eventual birth policy admission. -/
 structure Prepared {F : Type} [Field F]
-    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     (profile : CanonicalPolicyAdmission.PolicyCompilerProfile F)
     (deployment : CanonicalCellRegistry.Deployment)
-    (loaded : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
+    (authority : CredentialAuthorityDomain.Snapshot)
     (descriptor : Descriptor CanonicalCellRegistry.registry) (operationMarker : Nat) where
   private mk ::
   markersDistinct : descriptor.authorityNullifier ≠ operationMarker
   initialSources : PolicySourceCell.CheckedInitials deployment.domain profile
     descriptor.initialPolicies
-  birthReady : CredentialAuthorityDomainReceiver.BatchReady loaded.snapshot descriptor
-  operationMarkerFresh : loaded.snapshot.spent operationMarker = false
-  checked : CredentialAuthorityDomain.Prepared loaded.snapshot
-    (patch loaded.snapshot descriptor)
+  birthReady : CredentialAuthorityDomainReceiver.BatchReady authority descriptor
+  operationMarkerFresh : authority.spent operationMarker = false
+  checked : CredentialAuthorityDomain.Prepared authority
+    (patch authority descriptor)
 
 def prepare {F : Type} [Field F]
-    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     (profile : CanonicalPolicyAdmission.PolicyCompilerProfile F)
     (deployment : CanonicalCellRegistry.Deployment)
-    (loaded : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
+    (authority : CredentialAuthorityDomain.Snapshot)
     (descriptor : Descriptor CanonicalCellRegistry.registry) (operationMarker : Nat) :
-    Option (Prepared profile deployment loaded descriptor operationMarker) := do
+    Option (Prepared profile deployment authority descriptor operationMarker) := do
   if distinct : descriptor.authorityNullifier ≠ operationMarker then
     let initialSources ← PolicySourceCell.checkInitials deployment.domain profile
       descriptor.initialPolicies
-    if ready : CredentialAuthorityDomainReceiver.BatchReady loaded.snapshot descriptor then
-      if fresh : loaded.snapshot.spent operationMarker = false then
-        let checked ← CredentialAuthorityDomain.prepare loaded.snapshot
-          (patch loaded.snapshot descriptor)
+    if ready : CredentialAuthorityDomainReceiver.BatchReady authority descriptor then
+      if fresh : authority.spent operationMarker = false then
+        let checked ← CredentialAuthorityDomain.prepare authority
+          (patch authority descriptor)
         some ⟨distinct, initialSources, ready, fresh, checked⟩
       else none
     else none
@@ -74,46 +73,40 @@ def prepare {F : Type} [Field F]
 section Prepared
 
 variable {F : Type} [Field F]
-    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
     {deployment : CanonicalCellRegistry.Deployment}
-    {loaded : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot}
+    {authority : CredentialAuthorityDomain.Snapshot}
     {descriptor : Descriptor CanonicalCellRegistry.registry} {operationMarker : Nat}
 
 /-- The post authority cell of the combined patch. -/
-def Prepared.post (prepared : Prepared profile deployment loaded descriptor operationMarker) :
+def Prepared.post (prepared : Prepared profile deployment authority descriptor operationMarker) :
     CredentialAuthorityDomain.Cell :=
   prepared.checked.validated.apply
-
-/-- The one physical authority write. -/
-def Prepared.writes (prepared : Prepared profile deployment loaded descriptor operationMarker) :
-    List Kernel.DurableDataIntent.DataWrite :=
-  loaded.writes prepared.post
 
 /-- Authority allocates no cells; the only auxiliary creates are the birth's
 initial policy sources. -/
 def Prepared.auxiliaryCreates
-    (prepared : Prepared profile deployment loaded descriptor operationMarker) :
+    (prepared : Prepared profile deployment authority descriptor operationMarker) :
     List (CreateRequest (CellId := Nat) CanonicalCellRegistry.registry) :=
   CanonicalCellRegistry.initialSourceCreates deployment.domain prepared.initialSources.records
 
 theorem Prepared.post_logical
-    (prepared : Prepared profile deployment loaded descriptor operationMarker) :
+    (prepared : Prepared profile deployment authority descriptor operationMarker) :
     prepared.post.logical =
-      setAll loaded.snapshot.logical (ResourceBirthAuthority.entries descriptor) := by
-  change Patch.run loaded.snapshot.logical (patch loaded.snapshot descriptor) = _
+      setAll authority.logical (ResourceBirthAuthority.entries descriptor) := by
+  change Patch.run authority.logical (patch authority descriptor) = _
   rw [patch, run_assignAll]
 
 /-- **What a prepared grain-birth authority guarantees about its indices**: the birth's authority
-nullifier differs from `operationMarker`, `descriptor` is batch-ready at `loaded`'s authority
+nullifier differs from `operationMarker`, `descriptor` is batch-ready at the `authority`
 snapshot (slots and grant ids distinct, initial policies fresh, the authority nullifier unspent,
 every grant ready, parent rows absent), `operationMarker` is unspent there, and every initial policy
 decodes to a record satisfying `InitialFacts` for `deployment`'s domain and `profile`. -/
 theorem Prepared.sound
-    (prepared : Prepared profile deployment loaded descriptor operationMarker) :
+    (prepared : Prepared profile deployment authority descriptor operationMarker) :
     descriptor.authorityNullifier ≠ operationMarker ∧
-      CredentialAuthorityDomainReceiver.BatchReady loaded.snapshot descriptor ∧
-      loaded.snapshot.spent operationMarker = false ∧
+      CredentialAuthorityDomainReceiver.BatchReady authority descriptor ∧
+      authority.spent operationMarker = false ∧
       ∀ initial ∈ descriptor.initialPolicies, ∃ record,
         PolicyRecordCodec.decode initial.canonicalBytes = some record ∧
           PolicySourceCell.InitialFacts deployment.domain profile initial record :=

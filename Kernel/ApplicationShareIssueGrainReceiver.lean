@@ -50,7 +50,7 @@ attribute [local irreducible] NativeHost.Config.profile
 variable {F : Type} [Field F] [DecidableEq F]
 variable {profile : CanonicalRuntimeProfile.Profile F}
   {config : NativeHost.Config} {pins : FactoryPins}
-  {durable : ResourceBirthController.Concrete.Durable}
+  {ground : Minidregg.Compiler.ServedBasis.Ground config.deployment}
   {ambient : DeclaredResourceController.Ambient}
   {ingress : Ingress}
 
@@ -73,16 +73,16 @@ def nullifiers (domain : Digest) (ingress : Ingress)
     [CredentialAuthorityReplay.nullifier domain
       (ApplicationShareIssueSource.issueMarker ingress.spec grain.source.birth)]
 
-def writes (accepted : Accepted profile config pins durable ambient ingress) :
+def writes (accepted : Accepted profile config pins ground ambient ingress) :
     List DataWrite := GrainResourceBirthTransaction.writes accepted.birth accepted.grain
 
-def readGuards (accepted : Accepted profile config pins durable ambient ingress) :
+def readGuards (accepted : Accepted profile config pins ground ambient ingress) :
     List ReadGuard :=
   accepted.grainAccepted.readGuards ++
     ApplicationShareIssueDelegation.readGuards accepted.appPrepared
 
 theorem readGuards_readonly
-    (accepted : Accepted profile config pins durable ambient ingress)
+    (accepted : Accepted profile config pins ground ambient ingress)
     (guard : ReadGuard) (member : guard ∈ readGuards accepted) :
     guard.cellId ∉ (writes accepted).map DataWrite.cellId := by
   rcases List.mem_append.mp member with grain | app
@@ -90,20 +90,20 @@ theorem readGuards_readonly
   · exact accepted.appReadOnly guard app
 
 theorem readGuards_exact
-    (accepted : Accepted profile config pins durable ambient ingress)
+    (accepted : Accepted profile config pins ground ambient ingress)
     (guard : ReadGuard) (member : guard ∈ readGuards accepted) :
-    guard.expectedRoot = durable.snapshot.model.roots guard.cellId := by
+    guard.expectedRoot = ground.view.model.roots guard.cellId := by
   rcases List.mem_append.mp member with grain | app
   · exact accepted.grainAccepted.readGuards_exact guard grain
   · exact accepted.appChecked.guardsCurrent guard app
 
 theorem writes_roots_bound
-    (accepted : Accepted profile config pins durable ambient ingress) :
+    (accepted : Accepted profile config pins ground ambient ingress) :
     ∀ write ∈ writes accepted,
       rootBytes write.canonicalPostBytes = write.exactPost :=
   GrainResourceBirthTransaction.writes_roots_bound accepted.birth accepted.grain
 
-def charge (accepted : Accepted profile config pins durable ambient ingress) : Charge
+def charge (accepted : Accepted profile config pins ground ambient ingress) : Charge
   | .incidences => GrainResourceBirthReceiver.charge accepted.grainAccepted .incidences + 1
   | .turnBytes => GrainResourceBirthReceiver.charge accepted.grainAccepted .turnBytes +
       ingress.canonicalBytes.length
@@ -111,19 +111,19 @@ def charge (accepted : Accepted profile config pins durable ambient ingress) : C
   | .witnessBytes => GrainResourceBirthReceiver.charge accepted.grainAccepted .witnessBytes +
       ingress.appEnvelope.length
   | .proofWork => GrainResourceBirthReceiver.charge accepted.grainAccepted .proofWork + 1
-  | .storageBytes => DeployedCharge.storageCharge durable.snapshot (writes accepted) (event config.deployment.domain ingress)
+  | .storageBytes => DeployedCharge.storageCharge ground.view (writes accepted) (event config.deployment.domain ingress)
   | .sideEffectCount => GrainResourceBirthReceiver.charge accepted.grainAccepted .sideEffectCount + 1
   | .feeDebit => GrainResourceBirthReceiver.charge accepted.grainAccepted .feeDebit
   | .networkBytes | .leaseByteBlocks => 0
 
 theorem charge_fee_source_quoted
-    (accepted : Accepted profile config pins durable ambient ingress) :
+    (accepted : Accepted profile config pins ground ambient ingress) :
     charge accepted .feeDebit =
       accepted.decoded.source.birth.quotedFee accepted.grainAccepted.pending.record.creation := by
   change accepted.decoded.source.birth.fee.amount = _
   exact accepted.special_fee_bound
 
-def intent (accepted : Accepted profile config pins durable ambient ingress) :
+def intent (accepted : Accepted profile config pins ground ambient ingress) :
     DataIntent rootBytes where
   transactionId := accepted.decoded.source.birth.transactionId
   writes := writes accepted
@@ -136,14 +136,14 @@ def intent (accepted : Accepted profile config pins durable ambient ingress) :
   guardsReadOnly := readGuards_readonly accepted
 
 /-- The retained finite charge is exactly the specified charge, lane by lane. -/
-theorem intent_exactCharge (accepted : Accepted profile config pins durable ambient ingress) :
+theorem intent_exactCharge (accepted : Accepted profile config pins ground ambient ingress) :
     (intent accepted).exactCharge = charge accepted :=
   Minidregg.Theory.ResourceCost.Charge.materialize_eq _
 
 /-- **The committed births are named**: every write of the grain share issue that
 creates its cell -- the ticket with its initialized page included -- is named by the
 admitted grain factory step. -/
-theorem intent_births_named (accepted : Accepted profile config pins durable ambient ingress) :
+theorem intent_births_named (accepted : Accepted profile config pins ground ambient ingress) :
     ∀ write ∈ (intent accepted).writes, ResourceBirthController.Concrete.bornIn write = true →
       ReceivingLaw.namesBirth (accepted.grainAccepted.pending.branchStep (.inl .factory)) write = true :=
   accepted.grainAccepted.births_named.1
@@ -151,11 +151,11 @@ theorem intent_births_named (accepted : Accepted profile config pins durable amb
 #assert_axioms intent_births_named
 
 theorem intent_event_version
-    (accepted : Accepted profile config pins durable ambient ingress) :
+    (accepted : Accepted profile config pins ground ambient ingress) :
     (intent accepted).event.codecVersion = 22 := rfl
 
 theorem intent_retains_full_ingress
-    (accepted : Accepted profile config pins durable ambient ingress) :
+    (accepted : Accepted profile config pins ground ambient ingress) :
     (intent accepted).event.canonicalBytes = ingress.canonicalBytes := rfl
 
 structure Receipt where
@@ -202,14 +202,20 @@ def receiveLoaded (config : NativeHost.Config) (pins : FactoryPins)
     | return .rejected "noncanonical grain share issue ingress"
   let some grain := outer.decodeGrain
     | return .rejected "noncanonical grain-backed birth ingress"
-  let some tariff := GrainResourceBirthAdmission.grainTariffAt config.deployment durable
+  let some tariff := GrainResourceBirthAdmission.grainTariffAt config.deployment durable.snapshot
     | return .rejected "grain-backed tariff unavailable: the image's platform record pins none"
   match replay durable config.deployment.domain outer grain tariff with
   | some (.ok historical) => return .historical historical
   | some (.error reason) => return .rejected reason
   | none =>
+      -- The full shape's directory and authority, loaded once (this is a cold path).
+      let some directory := CredentialAuthorityDomainReceiver.loadDirectory durable
+        | return .rejected "grain-backed app share issue refused: directory unavailable"
+      let some authority := CredentialAuthorityDomainReceiver.loadDeployment config.deployment
+          durable.snapshot
+        | return .rejected "grain-backed app share issue refused: authority unavailable"
       match ← ApplicationShareIssueGrainAdmission.admitNative config.profile config pins
-          native durable ambient bytes with
+          native (.ofLoaded durable directory authority) ambient bytes with
       | .error reason => return .rejected reason
       | .ok ⟨acceptedIngress, accepted⟩ =>
           match ← DurableReceiverIO.receiveLoaded transport rootBytes durable

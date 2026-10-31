@@ -43,6 +43,7 @@ open Minidregg.Theory.CellRegistry
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Kernel
 open Minidregg.Compiler.Tower256ConcreteBackend
+open Minidregg.Compiler.ServedBasis (Ground)
 
 set_option autoImplicit false
 set_option maxHeartbeats 1000000
@@ -255,65 +256,69 @@ theorem tool_after_running (domain semantics : Digest) (tariff : Tariff) (source
 /-- One checked authority post for the birth grant batch and the tool
 operation marker, as one patch of the one authority cell. It is
 preparation only: current policy, capability, signature, factory and grain
-incidences still need admission over the same durable image. -/
+incidences still need admission over the same ground. -/
 structure PreparedSourceAuthority {F : Type} [Field F]
-    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     (profile : CanonicalPolicyAdmission.PolicyCompilerProfile F)
-    (deployment : CanonicalCellRegistry.Deployment)
-    (loaded : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
+    (deployment : CanonicalCellRegistry.Deployment) (ground : Ground deployment)
     (semantics : Digest) (tariff : Tariff) (source : Source) where
   private mk ::
-  shape : SourceShape loaded.snapshot.domain semantics tariff source
-  combined : GrainResourceBirthAuthority.Prepared profile deployment loaded
-    source.birth (DeclaredResourceController.operationMarker loaded.snapshot.domain semantics
+  shape : SourceShape ground.authority.domain semantics tariff source
+  /-- The ground answers the source-derived operation marker (its spent bit is read). -/
+  operationMarkerDeclared : ResourceBirthController.Concrete.MarkerDeclared ground
+    (DeclaredResourceController.operationMarker ground.authority.domain semantics
+      (source.grainCommand tariff))
+  combined : GrainResourceBirthAuthority.Prepared profile deployment ground.authority
+    source.birth (DeclaredResourceController.operationMarker ground.authority.domain semantics
       (source.grainCommand tariff))
 
 def prepareSourceAuthority {F : Type} [Field F]
-    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     (profile : CanonicalPolicyAdmission.PolicyCompilerProfile F)
-    (deployment : CanonicalCellRegistry.Deployment)
-    (loaded : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
+    (deployment : CanonicalCellRegistry.Deployment) (ground : Ground deployment)
     (semantics : Digest) (tariff : Tariff) (source : Source) :
-    Option (PreparedSourceAuthority profile deployment loaded semantics tariff source) := do
-  if shape : SourceShape loaded.snapshot.domain semantics tariff source then
-    let combined ← GrainResourceBirthAuthority.prepare profile deployment loaded
-      source.birth (DeclaredResourceController.operationMarker loaded.snapshot.domain semantics
-        (source.grainCommand tariff))
-    some ⟨shape, combined⟩
+    Option (PreparedSourceAuthority profile deployment ground semantics tariff source) := do
+  if shape : SourceShape ground.authority.domain semantics tariff source then
+    if declared : ResourceBirthController.Concrete.MarkerDeclared ground
+        (DeclaredResourceController.operationMarker ground.authority.domain semantics
+          (source.grainCommand tariff)) then
+      let combined ← GrainResourceBirthAuthority.prepare profile deployment ground.authority
+        source.birth (DeclaredResourceController.operationMarker ground.authority.domain semantics
+          (source.grainCommand tariff))
+      some ⟨shape, declared, combined⟩
+    else none
   else none
 
 /-- **What a prepared source authority guarantees about its indices**: `source` has the source
-shape at `loaded`'s domain for `semantics` and `tariff` (distinct unborn tool and parent tasks,
-reserved/running statuses, the tool's reservation covers `tariff.charge source.birth`, and the birth's
-authority nullifier differs from the source-derived operation marker); `source.birth` is batch-ready
-at `loaded`'s authority snapshot; that operation marker is unspent in the consumed set of the
-physical snapshot `durable` holds, read in `deployment`'s domain; and every initial policy decodes
-to a record satisfying `InitialFacts` for `deployment`'s domain and `profile`. -/
+shape at the ground's authority domain for `semantics` and `tariff` (distinct unborn tool and parent
+tasks, reserved/running statuses, the tool's reservation covers `tariff.charge source.birth`, and the
+birth's authority nullifier differs from the source-derived operation marker); `source.birth` is
+batch-ready at the ground's authority snapshot; that operation marker is declared by the ground and
+unspent in the consumed set of the ground's view, read in `deployment`'s domain; and every initial
+policy decodes to a record satisfying `InitialFacts` for `deployment`'s domain and `profile`. -/
 theorem PreparedSourceAuthority.sound {F : Type} [Field F]
-    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
-    {deployment : CanonicalCellRegistry.Deployment}
-    {loaded : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot}
+    {deployment : CanonicalCellRegistry.Deployment} {ground : Ground deployment}
     {semantics : Digest} {tariff : Tariff} {source : Source}
-    (prepared : PreparedSourceAuthority profile deployment loaded semantics tariff source) :
-    SourceShape loaded.snapshot.domain semantics tariff source ∧
-      CredentialAuthorityDomainReceiver.BatchReady loaded.snapshot source.birth ∧
-      CredentialAuthorityDomainReceiver.spentOf deployment.domain durable.snapshot
-        (DeclaredResourceController.operationMarker loaded.snapshot.domain semantics
+    (prepared : PreparedSourceAuthority profile deployment ground semantics tariff source) :
+    SourceShape ground.authority.domain semantics tariff source ∧
+      CredentialAuthorityDomainReceiver.BatchReady ground.authority source.birth ∧
+      ResourceBirthController.Concrete.MarkerDeclared ground
+        (DeclaredResourceController.operationMarker ground.authority.domain semantics
+          (source.grainCommand tariff)) ∧
+      CredentialAuthorityDomainReceiver.spentOf deployment.domain ground.view
+        (DeclaredResourceController.operationMarker ground.authority.domain semantics
           (source.grainCommand tariff)) = false ∧
       ∀ initial ∈ source.birth.initialPolicies, ∃ record,
         PolicyRecordCodec.decode initial.canonicalBytes = some record ∧
           PolicySourceCell.InitialFacts deployment.domain profile initial record := by
   obtain ⟨_, ready, fresh, initials⟩ := prepared.combined.sound
-  exact ⟨prepared.shape, ready, (congrFun loaded.spentExact _).symm.trans fresh, initials⟩
+  exact ⟨prepared.shape, ready, prepared.operationMarkerDeclared,
+    (congrFun ground.authoritySpent _).symm.trans fresh, initials⟩
 
 def PreparedSourceAuthority.auxiliaryCreates {F : Type} [Field F]
-    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
-    {deployment : CanonicalCellRegistry.Deployment}
-    {loaded : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot}
+    {deployment : CanonicalCellRegistry.Deployment} {ground : Ground deployment}
     {semantics : Digest} {tariff : Tariff} {source : Source}
-    (prepared : PreparedSourceAuthority profile deployment loaded semantics tariff source) :
+    (prepared : PreparedSourceAuthority profile deployment ground semantics tariff source) :
     List (CreateRequest (CellId := Nat) CanonicalCellRegistry.registry) :=
   prepared.combined.auxiliaryCreates
 
@@ -324,26 +329,25 @@ or current-law admission. -/
 structure PreparedSourceBirth {F : Type} [Field F]
     (profile : CanonicalPolicyAdmission.PolicyCompilerProfile F)
     (deployment : CanonicalCellRegistry.Deployment) (pins : FactoryPins)
-    (durable : ResourceBirthController.Concrete.Durable)
+    (ground : Ground deployment)
     (semantics : Digest) (tariff : Tariff) (source : Source) where
   private mk ::
   shape : SourceShape deployment.domain semantics tariff source
   prepared : ResourceBirthController.Concrete.PreparedGrainBirth profile deployment pins
-    durable source.birth (DeclaredResourceController.operationMarker deployment.domain semantics
+    ground source.birth (DeclaredResourceController.operationMarker deployment.domain semantics
       (source.grainCommand tariff))
 
 def prepareSourceBirth {F : Type} [Field F] [DecidableEq F]
     (profile : CanonicalPolicyAdmission.PolicyCompilerProfile F) (disabled : List Digest)
     (deployment : CanonicalCellRegistry.Deployment) (pins : FactoryPins)
-    (durable : ResourceBirthController.Concrete.Durable)
-    (held : ResourceBirthController.Concrete.Held deployment durable)
+    (ground : Ground deployment)
     (semantics : Digest) (tariff : Tariff) (source : Source) (height : Height)
     (sourced : List (Nat × PackedCell CanonicalCellRegistry.registry) := []) :
     Except ResourceBirthController.Concrete.PreparationReject
-      (PreparedSourceBirth profile deployment pins durable semantics tariff source) := do
+      (PreparedSourceBirth profile deployment pins ground semantics tariff source) := do
   if shape : SourceShape deployment.domain semantics tariff source then
     let prepared ← ResourceBirthController.Concrete.prepareGrainBirth profile disabled deployment
-      pins durable held source.birth
+      pins ground source.birth
       (DeclaredResourceController.operationMarker deployment.domain semantics
         (source.grainCommand tariff)) height sourced
     .ok ⟨shape, prepared⟩
@@ -352,42 +356,47 @@ def prepareSourceBirth {F : Type} [Field F] [DecidableEq F]
 /-- **What a prepared source birth guarantees about its indices**: `source` has the source shape at
 `deployment`'s domain for `semantics` and `tariff`; `pins` name `deployment`'s factory and domain and
 carry `profile`'s semantics; the birth's authority nullifier and the source-derived operation marker
-are both unspent in the consumed set of `durable`'s physical snapshot, read in `deployment`'s domain;
-and every initial policy decodes to a record satisfying `InitialFacts` for `deployment`'s domain and
-`profile`. -/
+are both declared by the ground and unspent in the consumed set of the ground's view, read in
+`deployment`'s domain; and every initial policy decodes to a record satisfying `InitialFacts` for
+`deployment`'s domain and `profile`. -/
 theorem PreparedSourceBirth.sound {F : Type} [Field F]
     {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
     {deployment : CanonicalCellRegistry.Deployment} {pins : FactoryPins}
-    {durable : ResourceBirthController.Concrete.Durable}
+    {ground : Ground deployment}
     {semantics : Digest} {tariff : Tariff} {source : Source}
-    (prepared : PreparedSourceBirth profile deployment pins durable semantics tariff source) :
+    (prepared : PreparedSourceBirth profile deployment pins ground semantics tariff source) :
     SourceShape deployment.domain semantics tariff source ∧
       ResourceBirthController.Concrete.PinsBound deployment pins ∧
       ResourceBirthController.Concrete.ProfileBound profile pins ∧
-      CredentialAuthorityDomainReceiver.spentOf deployment.domain durable.snapshot
+      ResourceBirthController.Concrete.MarkerDeclared ground source.birth.authorityNullifier ∧
+      ResourceBirthController.Concrete.MarkerDeclared ground
+        (DeclaredResourceController.operationMarker deployment.domain semantics
+          (source.grainCommand tariff)) ∧
+      CredentialAuthorityDomainReceiver.spentOf deployment.domain ground.view
         source.birth.authorityNullifier = false ∧
-      CredentialAuthorityDomainReceiver.spentOf deployment.domain durable.snapshot
+      CredentialAuthorityDomainReceiver.spentOf deployment.domain ground.view
         (DeclaredResourceController.operationMarker deployment.domain semantics
           (source.grainCommand tariff)) = false ∧
       ∀ initial ∈ source.birth.initialPolicies, ∃ record,
         PolicyRecordCodec.decode initial.canonicalBytes = some record ∧
           PolicySourceCell.InitialFacts deployment.domain profile initial record := by
   obtain ⟨_, ready, fresh, initials⟩ := prepared.prepared.authorityCombined.sound
-  have spent := prepared.prepared.pre.authority.spentExact
+  have spent := ground.authoritySpent
   exact ⟨prepared.shape, prepared.prepared.pre.pinsBound, prepared.prepared.pre.profileBound,
+    prepared.prepared.pre.markerDeclared, prepared.prepared.operationMarkerDeclared,
     (congrFun spent _).symm.trans ready.2.2.2.1, (congrFun spent _).symm.trans fresh, initials⟩
 
-/-- The birth's authority patch validated at the loaded cell's own root. -/
+/-- The birth's authority patch validated at the ground's authority cell's own root. -/
 def PreparedSourceBirth.authorityValidated {F : Type} [Field F]
     {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
     {deployment : CanonicalCellRegistry.Deployment} {pins : FactoryPins}
-    {durable : ResourceBirthController.Concrete.Durable}
+    {ground : Ground deployment}
     {semantics : Digest} {tariff : Tariff} {source : Source}
-    (prepared : PreparedSourceBirth profile deployment pins durable semantics tariff source) :
+    (prepared : PreparedSourceBirth profile deployment pins ground semantics tariff source) :
     CellState.ValidatedPatch CredentialAuthorityCell.materializer
-      prepared.prepared.pre.authority.snapshot.cell
-      prepared.prepared.pre.authority.snapshot.cell.root
-      (source.authorityPatch prepared.prepared.pre.authority.snapshot) := by
+      ground.authority.cell
+      ground.authority.cell.root
+      (source.authorityPatch ground.authority) := by
   exact prepared.prepared.authorityCombined.checked.validated
 
 end Minidregg.Compiler.GrainResourceBirthController

@@ -103,6 +103,7 @@ def describe : ResourceBirthReceiver.Result → String
   | .rejected (.admission reason) => s!"refused admission {repr reason}"
   | .rejected .malformedIngress => "refused malformedIngress"
   | .rejected .transactionConflict => "refused transactionConflict"
+  | .rejected .undeclaredTransaction => "refused undeclaredTransaction"
   | .rejected (.durable reason) => s!"refused durable {repr reason}"
   | .contention => "contention"
   | .unavailable detail => s!"unavailable {detail}"
@@ -155,7 +156,7 @@ def run (verifier signer storeBinary : System.FilePath) (mode : String) : IO Uni
       | throw (IO.userError "assembled reserve ingress does not decode")
     require "the reserve factory method" (ingress.method == .reserve)
     match ← ResourceBirthPolicyController.Concrete.admitDecodedNative profile host.deployment
-        opened.pins host.signature opened.durable (ResourceBirthController.Concrete.Held.of opened.directory opened.authority) height
+        opened.pins host.signature (.ofLoaded opened.durable opened.directory opened.authority) height
         ingress with
     | .error reason => IO.println s!"admission: refused {repr reason}"
     | .ok accepted =>
@@ -172,8 +173,7 @@ def run (verifier signer storeBinary : System.FilePath) (mode : String) : IO Uni
           IO.println s!"substituted post at {first.cellId.value}: {verdict}"
           require "substituted post refused by name" (verdict == s!"neutralBirthUnjudged {first.cellId.value}")
     let result ← ResourceBirthReceiver.receiveLoaded profile host.deployment opened.pins
-      host.signature transport opened.durable
-      (ResourceBirthController.Concrete.Held.of opened.directory opened.authority) height bytes
+      host.signature transport opened.durable opened.directory opened.authority height bytes
     let verdict := describe result
     IO.println s!"reserve submission: {verdict}"
     require s!"reserve birth commits (got {verdict})" (verdict == "committed")

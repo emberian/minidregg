@@ -97,7 +97,7 @@ This predicts no physical success and retains no future admission token: the
 assembled signed invocation must be admitted again after birth CAS/readback. -/
 def initializerPlanAfterBirth (config : NativeHost.Config)
     (opened : NativeHost.Opened config)
-    (accepted : AcceptedBirth config.profile config.deployment opened.pins opened.durable
+    (accepted : AcceptedBirth config.profile config.deployment opened.pins opened.ground
       (NativeHost.logicalHeight config opened.durable))
     (command : DeclaredResourceController.Command) : Except String NativeHostCodec.SigningPlan := do
   let intent := ResourceBirthReceiver.intent accepted

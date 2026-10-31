@@ -347,9 +347,9 @@ collision at the two descriptors, at the descriptor the headers sign:
 def DisplayIsCommitStatement : Prop :=
   ∀ {F : Type} [Field F] {profile : CanonicalRuntimeProfile.Profile F}
     {deployment : CanonicalCellRegistry.Deployment} {pins : FactoryPins}
-    {durable : ResourceBirthController.Concrete.Durable} {d : Descriptor Registry}
+    {ground : Minidregg.Compiler.ServedBasis.Ground deployment} {d : Descriptor Registry}
     (prepared : ResourceBirthController.Concrete.PreparedBirth profile.compilerProfile deployment
-      pins durable d)
+      pins ground d)
     (height : Height) (deployed : PublicPins) (author : BirthCoordinates → Option NativeObservationCodec.Intent)
     (wanted : NativeObservationCodec.Intent) (planBytes : List UInt8)
     (headers : List (List UInt8)) (shown : BirthDisplay) (signed : Descriptor Registry)
@@ -368,12 +368,12 @@ def DisplayIsCommitStatement : Prop :=
     CanonicalCellRegistry.sourceEncoding.codec.encode (userPart d) = shown.draft ∧
     d.auxiliaryCreates = prepared.grants.auxiliaryCreates ∧
     prepared.writes = ResourceBirthController.Concrete.planWrites deployment d
-      prepared.factory.payload prepared.book.payload prepared.resources.post prepared.grants.writes ∧
+      prepared.factory.payload prepared.book.payload prepared.resources.post (ground.authorityWrites prepared.grants.post) ∧
     ResourceBirthController.allocationWrites d =
       (userPart d).createRequests.map ResourceBirthController.birthWrite ++
         prepared.grants.auxiliaryCreates.map ResourceBirthController.birthWrite ∧
     prepared.grants.post.logical =
-      CredentialAuthorityEffects.setAll prepared.authority.snapshot.logical
+      CredentialAuthorityEffects.setAll ground.authority.logical
         (ResourceBirthAuthority.entries (userPart d)) ∧
     CanonicalResourceKernel.logicalBook prepared.resources.post.logical =
       (userPart d).resourceBatch.apply
@@ -385,9 +385,9 @@ signature the receiver admits for a branch of `d'` has a header thin consent did
 def SwapAfterConsentRefusedStatement : Prop :=
   ∀ {F : Type} [Field F] {profile : CanonicalRuntimeProfile.Profile F}
     {deployment : CanonicalCellRegistry.Deployment} {pins : FactoryPins}
-    {durable : ResourceBirthController.Concrete.Durable} {d' : Descriptor Registry}
+    {ground : Minidregg.Compiler.ServedBasis.Ground deployment} {d' : Descriptor Registry}
     (prepared : ResourceBirthController.Concrete.PreparedBirth profile.compilerProfile deployment
-      pins durable d')
+      pins ground d')
     (height : Height) (deployed : PublicPins) (author : BirthCoordinates → Option NativeObservationCodec.Intent)
     (wanted : NativeObservationCodec.Intent) (planBytes : List UInt8)
     (headers : List (List UInt8)) (shown : BirthDisplay) (signed : Descriptor Registry),
@@ -471,12 +471,12 @@ section Proofs
 
 variable {F : Type} [Field F] {profile : CanonicalRuntimeProfile.Profile F}
   {deployment : CanonicalCellRegistry.Deployment} {pins : FactoryPins}
-  {durable : ResourceBirthController.Concrete.Durable} {d : Descriptor Registry}
+  {ground : Minidregg.Compiler.ServedBasis.Ground deployment} {d : Descriptor Registry}
 
 /-- Every branch request of a birth carries the source effects digest of the whole descriptor. -/
 theorem branchRequest_effects
     (prepared : ResourceBirthController.Concrete.PreparedBirth profile.compilerProfile deployment
-      pins durable d) (height : Height) (branch : Branch d) :
+      pins ground d) (height : Height) (branch : Branch d) :
     (branchRequest prepared height branch).2.effectsDigest =
       CanonicalCellRegistry.sourceEncoding.effectsDigest d := by
   cases branch <;> rfl
@@ -619,7 +619,7 @@ theorem checkBirthThin_ok {deployed : PublicPins}
   · cases checked
 
 theorem display_is_commit : DisplayIsCommitStatement := by
-  intro F _ profile deployment pins durable d prepared height deployed author wanted planBytes
+  intro F _ profile deployment pins ground d prepared height deployed author wanted planBytes
     headers shown signed branch snapshot nullifier admitted bytes checked member decodedHeader
     decodedSigned
   obtain ⟨draft, plan, finalized, purpose, coordinatesExact, authored, _, _, decodedFinal,
@@ -642,7 +642,7 @@ theorem display_is_commit : DisplayIsCommitStatement := by
   · exact Or.inl ⟨same, effects.symm⟩
 
 theorem swap_after_consent_refused : SwapAfterConsentRefusedStatement := by
-  intro F _ profile deployment pins durable d' prepared height deployed author wanted planBytes
+  intro F _ profile deployment pins ground d' prepared height deployed author wanted planBytes
     headers shown signed checked decodedSigned differs
   by_cases collision : EffectsCollision signed d'
   · exact Or.inl collision
@@ -682,14 +682,14 @@ local notation "hostSlot" => Minidregg.Kernel.NativeHost.slot
 
 variable {F : Type} [Field F] {profile : CanonicalRuntimeProfile.Profile F}
   {deployment : CanonicalCellRegistry.Deployment} {pins : FactoryPins}
-  {durable : ResourceBirthController.Concrete.Durable} {d : Descriptor Registry}
+  {ground : Minidregg.Compiler.ServedBasis.Ground deployment} {d : Descriptor Registry}
 
 /-- **The member's derivation is the executor's request** up to the three authority coordinates
 (which `checkHeader` takes from the proposal) and the height and pre-root (which the plan frame
 zeroes), when the public pins are the executor's. -/
 theorem birthValues_exact
     (prepared : ResourceBirthController.Concrete.PreparedBirth profile.compilerProfile deployment
-      pins durable d) (height : Height) (branch : Branch d) (deployed : PublicPins)
+      pins ground d) (height : Height) (branch : Branch d) (deployed : PublicPins)
     (domain : deployed.domain = pins.domain) (semantics : deployed.semantics = pins.semantics)
     (federation : deployed.federation = pins.federation)
     (factory : (⟨deployed.factory⟩ : ResourceId .object) = pins.factory)
@@ -736,7 +736,7 @@ theorem signedRequest_requestBytes (request : AuthorizationDeclaration.SomeReque
 /-- **A slot the honest planner built passes `checkHeader`** against the member's derivation. -/
 theorem slot_checked
     (prepared : ResourceBirthController.Concrete.PreparedBirth profile.compilerProfile deployment
-      pins durable d) (height : Height) (branch : Branch d) (deployed : PublicPins)
+      pins ground d) (height : Height) (branch : Branch d) (deployed : PublicPins)
     (domain : deployed.domain = pins.domain) (semantics : deployed.semantics = pins.semantics)
     (federation : deployed.federation = pins.federation)
     (factory : (⟨deployed.factory⟩ : ResourceId .object) = pins.factory)
@@ -865,7 +865,7 @@ theorem publicPins_exact {config : NativeHost.Config} {durable' : ResourceBirthC
     {opened : NativeHost.Opened config} {descriptor : Descriptor Registry}
     (validated : NativeHost.validateLoaded config durable' = .ok opened)
     (prepared : ResourceBirthController.Concrete.PreparedBirth config.profile.compilerProfile
-      config.deployment opened.pins opened.durable descriptor) :
+      config.deployment opened.pins opened.ground descriptor) :
     (publicPins config).domain = opened.pins.domain ∧
       (publicPins config).semantics = opened.pins.semantics ∧
       (publicPins config).federation = opened.pins.federation ∧
@@ -890,8 +890,7 @@ theorem honest_plan_accepted : HonestPlanAcceptedStatement := by
     NativeHost.need, decodedDraft] at planned
   generalize NativeHost.logicalHeight config opened.durable = height at planned
   cases prep : ResourceBirthController.Concrete.prepareDraft config.profile.compilerProfile
-      config.profile.disabledEvaluators config.deployment opened.pins opened.durable
-      (ResourceBirthController.Concrete.Held.of opened.directory opened.authority) draft height with
+      config.profile.disabledEvaluators config.deployment opened.pins opened.ground draft height with
   | error reason => simp [prep, Except.mapError] at planned
   | ok prepared =>
   obtain ⟨domain, semantics, federation, factory, policy⟩ :=
@@ -903,21 +902,21 @@ theorem honest_plan_accepted : HonestPlanAcceptedStatement := by
   | error reason => simp [capabilityCount] at planned
   | ok counted =>
   simp only [capabilityCount] at planned
-  cases fac : hostSlot prepared.prepared.authority.snapshot prepared.descriptor.authorityNullifier 0 0
+  cases fac : hostSlot opened.authority.snapshot prepared.descriptor.authorityNullifier 0 0
       (branchRequest prepared.prepared height .factory) with
   | error reason => simp [fac] at planned
   | ok factorySlot =>
-  cases aut : hostSlot prepared.prepared.authority.snapshot prepared.descriptor.authorityNullifier 1 0
+  cases aut : hostSlot opened.authority.snapshot prepared.descriptor.authorityNullifier 1 0
       (branchRequest prepared.prepared height .authority) with
   | error reason => simp [fac, aut] at planned
   | ok authoritySlot =>
   cases alloc : (List.finRange prepared.descriptor.createRequests.length).mapM (fun index =>
-      hostSlot prepared.prepared.authority.snapshot prepared.descriptor.authorityNullifier 2 index.val
+      hostSlot opened.authority.snapshot prepared.descriptor.authorityNullifier 2 index.val
         (branchRequest prepared.prepared height (.allocation index))) with
   | error reason => simp [fac, aut, alloc] at planned
   | ok allocationSlots =>
   cases src : (List.finRange prepared.descriptor.resourceBatch.operations.length).mapM (fun index =>
-      hostSlot prepared.prepared.authority.snapshot prepared.descriptor.authorityNullifier 3 index.val
+      hostSlot opened.authority.snapshot prepared.descriptor.authorityNullifier 3 index.val
         (branchRequest prepared.prepared height (.source index))) with
   | error reason => simp [fac, aut, alloc, src] at planned
   | ok sourceSlots =>

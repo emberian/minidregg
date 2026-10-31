@@ -85,10 +85,10 @@ T3b. -/
 theorem shareIssue_birth_has_one_initial_policy {F : Type} [Field F] [DecidableEq F]
     {profile : Minidregg.Compiler.CanonicalRuntimeProfile.Profile F} {config : NativeHost.Config}
     {pins : Minidregg.Theory.ResourceBirth.FactoryPins}
-    {durable : ResourceBirthController.Concrete.Durable}
+    {ground : Minidregg.Compiler.ServedBasis.Ground config.deployment}
     {height : Minidregg.Theory.TypedAuthorization.Height}
     {ingress : ApplicationShareIssueSource.Ingress}
-    (accepted : ApplicationShareIssueAdmission.Accepted profile config pins durable height ingress) :
+    (accepted : ApplicationShareIssueAdmission.Accepted profile config pins ground height ingress) :
     accepted.birth.descriptor.initialPolicies.length = 1 := by
   rw [accepted.sourceDescriptor]
   rfl
@@ -96,10 +96,10 @@ theorem shareIssue_birth_has_one_initial_policy {F : Type} [Field F] [DecidableE
 theorem grainShareIssue_birth_has_one_initial_policy {F : Type} [Field F] [DecidableEq F]
     {profile : Minidregg.Compiler.CanonicalRuntimeProfile.Profile F} {config : NativeHost.Config}
     {pins : Minidregg.Theory.ResourceBirth.FactoryPins}
-    {durable : ResourceBirthController.Concrete.Durable}
+    {ground : Minidregg.Compiler.ServedBasis.Ground config.deployment}
     {ambient : DeclaredResourceController.Ambient}
     {ingress : ApplicationShareIssueGrainSource.Ingress}
-    (accepted : ApplicationShareIssueGrainAdmission.Accepted profile config pins durable ambient
+    (accepted : ApplicationShareIssueGrainAdmission.Accepted profile config pins ground ambient
       ingress) :
     accepted.decoded.source.birth.initialPolicies.length = 1 := by
   rw [accepted.sourceDescriptor]
@@ -108,10 +108,10 @@ theorem grainShareIssue_birth_has_one_initial_policy {F : Type} [Field F] [Decid
 theorem lifetimeGrantIssue_birth_has_one_initial_policy {F : Type} [Field F] [DecidableEq F]
     {profile : Minidregg.Compiler.CanonicalRuntimeProfile.Profile F} {config : NativeHost.Config}
     {pins : Minidregg.Theory.ResourceBirth.FactoryPins}
-    {durable : ResourceBirthController.Concrete.Durable}
+    {ground : Minidregg.Compiler.ServedBasis.Ground config.deployment}
     {height : Minidregg.Theory.TypedAuthorization.Height}
     {ingress : ApplicationAgentLifetimeGrantSource.Ingress}
-    (accepted : ApplicationAgentLifetimeGrantAdmission.Accepted profile config pins durable height
+    (accepted : ApplicationAgentLifetimeGrantAdmission.Accepted profile config pins ground height
       ingress) :
     accepted.birth.descriptor.initialPolicies.length = 1 := by
   rw [accepted.sourceDescriptor]

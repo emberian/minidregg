@@ -21,7 +21,9 @@ structure Issued (config : Config) (target : Durable) (index : Nat) where
   selection : VerifiedSelection config target index
   ingress : ApplicationShareIssueSource.Ingress
   accepted : ApplicationShareIssueAdmission.Accepted config.profile config
-    selection.selected.before.pins selection.selected.before.durable
+    selection.selected.before.pins
+    (.ofLoaded selection.selected.before.durable selection.selected.before.directory
+      selection.selected.before.authority)
     (logicalHeight config selection.selected.before.durable) ingress
   matched : recordMatches selection.selected.record
     (ApplicationShareIssueReceiver.intent accepted) = true
@@ -42,8 +44,8 @@ def select (config : Config) (target : Durable) (index : Nat) :
     | return .error "share issue selected native history refused"
   let before := selection.selected.before
   let .ok ⟨ingress, accepted⟩ ← ApplicationShareIssueAdmission.admitNative
-      config.profile config before.pins config.signature before.durable
-      (logicalHeight config before.durable)
+      config.profile config before.pins config.signature
+      (.ofLoaded before.durable before.directory before.authority) (logicalHeight config before.durable)
       selection.selected.record.event.canonicalBytes
     | return .error "share issue original admission refused"
   let intent := ApplicationShareIssueReceiver.intent accepted
@@ -76,7 +78,8 @@ def Issued.toEvidence {config : Config} {target : Durable} {index : Nat}
     ApplicationDispatchHistoricalCore.IssuedEvidence config :=
   ApplicationDispatchHistoricalCore.IssuedEvidence.fromAccepted config
     issued.selection.selected.before.pins
-    issued.selection.selected.before.durable
+    issued.selection.selected.before.durable issued.selection.selected.before.directory
+    issued.selection.selected.before.authority
     (logicalHeight config issued.selection.selected.before.durable)
     issued.ingress issued.accepted issued.selection.selected.record
     ((recordMatches_iff _ _).mp issued.matched)

@@ -43,7 +43,7 @@ set_option autoImplicit false
 variable {F : Type} [Field F] [DecidableEq F]
 variable {profile : CanonicalRuntimeProfile.Profile F}
 variable {config : NativeHost.Config} {pins : FactoryPins}
-variable {durable : ResourceBirthController.Concrete.Durable} {height : Height}
+variable {ground : Minidregg.Compiler.ServedBasis.Ground config.deployment} {height : Height}
 variable {ingress : ApplicationShareIssueSource.Ingress}
 
 /-- The complete canonical outer ingress, not a naked ticket payload, is the
@@ -61,42 +61,42 @@ def issueNullifier (domain : Digest) (ingress : ApplicationShareIssueSource.Ingr
     (descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry) : StableNullifier :=
   CredentialAuthorityReplay.nullifier domain (issueMarker ingress.spec descriptor)
 
-def readGuards (accepted : Accepted profile config pins durable height ingress) :
+def readGuards (accepted : Accepted profile config pins ground height ingress) :
     List ReadGuard :=
   ResourceBirthReceiver.readGuards accepted.birth ++
     ApplicationShareIssueDelegation.readGuards accepted.appPrepared
 
-theorem readGuards_readonly (accepted : Accepted profile config pins durable height ingress)
+theorem readGuards_readonly (accepted : Accepted profile config pins ground height ingress)
     (guard : ReadGuard) (member : guard ∈ readGuards accepted) :
     guard.cellId ∉ accepted.birth.prepared.writes.map DataWrite.cellId := by
   rcases List.mem_append.mp member with birth | app
   · exact ResourceBirthReceiver.readGuards_readonly accepted.birth guard birth
   · exact accepted.appReadOnly guard app
 
-theorem readGuards_exact (accepted : Accepted profile config pins durable height ingress)
+theorem readGuards_exact (accepted : Accepted profile config pins ground height ingress)
     (guard : ReadGuard) (member : guard ∈ readGuards accepted) :
-    guard.expectedRoot = durable.snapshot.model.roots guard.cellId := by
+    guard.expectedRoot = ground.view.model.roots guard.cellId := by
   rcases List.mem_append.mp member with birth | app
   · exact ResourceBirthReceiver.readGuards_exact accepted.birth guard birth
   · exact accepted.appChecked.guardsCurrent guard app
 
 /-- The writes the issue commits: `finalWrites`, the admitted birth's own; its
 naming check ran over exactly these (`Accepted.named`). -/
-def writes (accepted : Accepted profile config pins durable height ingress) :
+def writes (accepted : Accepted profile config pins ground height ingress) :
     List DataWrite := finalWrites accepted.birth
 
-theorem writes_unique (accepted : Accepted profile config pins durable height ingress) :
+theorem writes_unique (accepted : Accepted profile config pins ground height ingress) :
     ((writes accepted).map DataWrite.cellId).Nodup :=
   accepted.birth.prepared.writesUnique
 
 theorem compositeGuards_readonly
-    (accepted : Accepted profile config pins durable height ingress)
+    (accepted : Accepted profile config pins ground height ingress)
     (guard : ReadGuard) (member : guard ∈ readGuards accepted) :
     guard.cellId ∉ (writes accepted).map DataWrite.cellId :=
   readGuards_readonly accepted guard member
 
 theorem composite_roots_bound
-    (accepted : Accepted profile config pins durable height ingress)
+    (accepted : Accepted profile config pins ground height ingress)
     (write : DataWrite) (member : write ∈ writes accepted) :
     ResourceBirthCodec.rootBytes write.canonicalPostBytes = write.exactPost :=
   accepted.birth.prepared.write_roots_bound write member
@@ -106,7 +106,7 @@ ticket cell, so turn bytes count it), the extra signed app authority check, the
 complete outer ingress and the app read guard; storage is the World's storage of
 this intent (its writes and its retained event).  The accepted birth fee remains
 the only Book debit. -/
-def charge (accepted : Accepted profile config pins durable height ingress) : Charge
+def charge (accepted : Accepted profile config pins ground height ingress) : Charge
   | .incidences => ResourceBirthReceiver.charge accepted.birth .incidences + 1
   | .turnBytes => ResourceBirthReceiver.charge accepted.birth .turnBytes +
       (ingressCodec.encode ingress).length
@@ -114,15 +114,15 @@ def charge (accepted : Accepted profile config pins durable height ingress) : Ch
   | .witnessBytes => ResourceBirthReceiver.charge accepted.birth .witnessBytes +
       ingress.appEnvelope.length
   | .proofWork => ResourceBirthReceiver.charge accepted.birth .proofWork + 1
-  | .storageBytes => DeployedCharge.storageCharge durable.snapshot (writes accepted) (event config.deployment.domain ingress)
+  | .storageBytes => DeployedCharge.storageCharge ground.view (writes accepted) (event config.deployment.domain ingress)
   | .sideEffectCount => ResourceBirthReceiver.charge accepted.birth .sideEffectCount + 1
   | .feeDebit => ResourceBirthReceiver.charge accepted.birth .feeDebit
   | .networkBytes | .leaseByteBlocks => 0
 
-theorem charge_fee_exact (accepted : Accepted profile config pins durable height ingress) :
+theorem charge_fee_exact (accepted : Accepted profile config pins ground height ingress) :
     charge accepted .feeDebit = accepted.birth.descriptor.fee.amount := rfl
 
-theorem charge_fee_source_quoted (accepted : Accepted profile config pins durable height ingress) :
+theorem charge_fee_source_quoted (accepted : Accepted profile config pins ground height ingress) :
     charge accepted .feeDebit =
       accepted.birth.descriptor.quotedFee accepted.birth.pending.record.creation := by
   rw [charge_fee_exact]
@@ -134,7 +134,7 @@ ordinary resource birth. Both prior-image admissions were checked at the same
 authority guards and the full-image CAS fence current policy/grant state. The
 newborn owner/control grants go to the issuer; a participant still needs an
 actual native observe delegation before dispatch can use its ticket selector. -/
-def intent (accepted : Accepted profile config pins durable height ingress) :
+def intent (accepted : Accepted profile config pins ground height ingress) :
     DataIntent ResourceBirthCodec.rootBytes where
   transactionId := accepted.birth.descriptor.transactionId
   writes := writes accepted
@@ -149,24 +149,24 @@ def intent (accepted : Accepted profile config pins durable height ingress) :
   guardsReadOnly := compositeGuards_readonly accepted
 
 /-- The retained finite charge is exactly the specified charge, lane by lane. -/
-theorem intent_exactCharge (accepted : Accepted profile config pins durable height ingress) :
+theorem intent_exactCharge (accepted : Accepted profile config pins ground height ingress) :
     (intent accepted).exactCharge = charge accepted :=
   Minidregg.Theory.ResourceCost.Charge.materialize_eq _
 
 /-- **The committed births are named**: every write of the intent that creates
 its cell -- the initialized content cell included -- is named by the step the
 factory law admitted.  The intent commits exactly `finalWrites`. -/
-theorem intent_births_named (accepted : Accepted profile config pins durable height ingress) :
+theorem intent_births_named (accepted : Accepted profile config pins ground height ingress) :
     ∀ write ∈ (intent accepted).writes, ResourceBirthController.Concrete.bornIn write = true →
       ReceivingLaw.namesBirth accepted.birth.factoryStep write = true :=
   accepted.named
 
 #assert_axioms intent_births_named
 
-theorem intent_event_version (accepted : Accepted profile config pins durable height ingress) :
+theorem intent_event_version (accepted : Accepted profile config pins ground height ingress) :
     (intent accepted).event.codecVersion = 15 := rfl
 
-theorem intent_retains_outer (accepted : Accepted profile config pins durable height ingress) :
+theorem intent_retains_outer (accepted : Accepted profile config pins ground height ingress) :
     (intent accepted).event.canonicalBytes = ingressCodec.encode ingress := rfl
 
 structure Receipt where
@@ -221,8 +221,14 @@ def receiveLoaded (config : NativeHost.Config) (pins : FactoryPins)
   | some (.ok historical) => return .historical historical
   | some (.error reason) => return .rejected reason
   | none =>
+      -- The full shape's directory and authority, loaded once (this is a cold path).
+      let some directory := CredentialAuthorityDomainReceiver.loadDirectory durable
+        | return .rejected "app share issue refused: directory unavailable"
+      let some authority := CredentialAuthorityDomainReceiver.loadDeployment config.deployment
+          durable.snapshot
+        | return .rejected "app share issue refused: authority unavailable"
       match ← ApplicationShareIssueAdmission.admitNative config.profile config pins
-          native durable height bytes with
+          native (.ofLoaded durable directory authority) height bytes with
       | .error reason => return .rejected reason
       | .ok ⟨acceptedIngress, accepted⟩ =>
           match ← DurableReceiverIO.receiveLoaded transport ResourceBirthCodec.rootBytes

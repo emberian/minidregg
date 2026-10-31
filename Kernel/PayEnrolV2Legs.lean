@@ -192,7 +192,7 @@ template are the image's platform record's (`PayEnrolReceiver.AmbientCurrent`). 
 def requireCurrent {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (durable : Durable) (ambient : Ambient) :
     Except Reject (PLift (PayEnrolReceiver.AmbientCurrent deployment profile durable ambient)) :=
-  match ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable with
+  match ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable.snapshot with
   | none => .error .platformUnavailable
   | some _ => require (PayEnrolReceiver.AmbientCurrent deployment profile durable ambient) .platformStale
 
@@ -255,7 +255,7 @@ structure EnrolLegs (directory : LoadedDirectory durable)
   descriptorExact : descriptor =
     { enrolDraft deployment profile ambient authority input with
       auxiliaryCreates := descriptor.auxiliaryCreates }
-  grants : PreparedGrantBatch profile.compilerProfile deployment authority descriptor
+  grants : PreparedGrantBatch profile.compilerProfile deployment authority.snapshot descriptor
   auxiliaryExact : descriptor.auxiliaryCreates = grants.auxiliaryCreates
   initials : CanonicalCellRegistry.BirthsAdmissible deployment descriptor
   templateBound : ResourceBirthPolicyController.Concrete.TemplateBound ambient.template
@@ -301,10 +301,10 @@ def prepareEnrolLegs (directory : LoadedDirectory durable)
   let base := enrolDraft deployment profile ambient authority input
   let fee ← require (input.economic.consumption.birthFee = base.fee.amount) .birthFee
   let first ← requireSome .grantBatch
-    (prepareGrantBatch profile.compilerProfile deployment authority base)
+    (prepareGrantBatch profile.compilerProfile deployment authority.snapshot base)
   let descriptor : Descriptor Registry := { base with auxiliaryCreates := first.auxiliaryCreates }
   let grants ← requireSome .grantBatch
-    (prepareGrantBatch profile.compilerProfile deployment authority descriptor)
+    (prepareGrantBatch profile.compilerProfile deployment authority.snapshot descriptor)
   let aux ← require (ResourceBirthController.Concrete.sameCreates descriptor.auxiliaryCreates
     grants.auxiliaryCreates = true) .grantBatch
   let initials ← require (CanonicalCellRegistry.BirthsAdmissible deployment descriptor) .birthShape

@@ -90,7 +90,7 @@ def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
   let .ok ready := ApplicationShareIssueSource.prepare profile config spec
     | throw "share ticket source refused"
   let some record := ResourceBirthPolicyController.Concrete.platformRecordAt config.deployment
-      opened.durable
+      opened.durable.snapshot
     | throw "platform cell unavailable: the image holds no platform record to price a share ticket from"
   if opened.pins.tariff != record.creation then
     throw "share ticket factory tariff differs from the platform record"
@@ -98,7 +98,7 @@ def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
     opened.authority.snapshot.authState height payer funding
   let .ok prepared := ResourceBirthController.Concrete.prepareDraft
     profile.compilerProfile profile.disabledEvaluators config.deployment opened.pins
-      opened.durable (ResourceBirthController.Concrete.Held.of opened.directory opened.authority) draft height ready.sourced
+      (.ofLoaded opened.durable opened.directory opened.authority) draft height ready.sourced
     | throw "share ticket birth preparation refused"
   let expected := { draft with auxiliaryCreates := prepared.prepared.grants.auxiliaryCreates }
   if CanonicalCellRegistry.sourceEncoding.codec.encode prepared.descriptor !=
@@ -113,7 +113,7 @@ def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
     let wanted := ResourceBirthPolicyController.Concrete.branchRequest (profile := profile)
       prepared.prepared height branch
     let .ok header := CredentialSignatureAdmission.signingHeader
-        prepared.prepared.authority.snapshot prepared.descriptor.authorityNullifier wanted
+        opened.authority.snapshot prepared.descriptor.authorityNullifier wanted
       | throw "share ticket birth signing key selection refused"
     pure (⟨role, index, CredentialSignedEnvelopeController.headerCodec.encode header⟩ : SigningSlot)
   let factory ← birthSlot 0 0 .factory
@@ -129,13 +129,13 @@ def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
         sourceCapabilities,
       factory :: authority :: allocations ++ sources⟩
   let context : ApplicationShareIssueDelegation.Context config.deployment :=
-    (Minidregg.Compiler.ServedBasis.Ground.full _ prepared.prepared.directory prepared.prepared.authority)
+    (.ofLoaded opened.durable opened.directory opened.authority)
   let .ok app := ApplicationShareIssueDelegation.prepare context profile
     config.federation height spec prepared.descriptor
     | throw "share ticket app preparation refused"
   let wanted : PackedEffectRequest := ⟨.object, app.wanted⟩
   let .ok header := CredentialSignatureAdmission.signingHeader
-      prepared.prepared.authority.snapshot
+      opened.authority.snapshot
       (ApplicationShareIssueSource.issueMarker spec prepared.descriptor) wanted
     | throw "share ticket app signing key selection refused"
   pure ⟨⟨spec, payer, funding, sourceCapabilities⟩, birth,
