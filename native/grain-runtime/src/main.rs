@@ -13928,10 +13928,17 @@ impl Runtime {
         let mut forward = |request: Value| -> Value {
             let reply = typed_applications::raw_arguments(&attachments, &request)
                 .and_then(|mapped| self.foreground_application_api(&mapped, input, true));
-            match reply {
+            let reply_value = match reply {
                 Ok(value) => value,
                 Err(error) => json!({"isError":true,"text":error}),
+            };
+            // A typed executor only keeps the class of a failed reply; the text is the one account of
+            // why a prepared request never produced a definite Host frame.
+            if reply_value["isError"].as_bool() != Some(false) {
+                eprintln!("grain-runtime: foreground typed {name} request failed: {}",
+                    reply_value["text"].as_str().unwrap_or("").chars().take(600).collect::<String>());
             }
+            reply_value
         };
         Ok(if qualify {
             typed_applications::qualify_tool(entry, &payload, &mut forward)
