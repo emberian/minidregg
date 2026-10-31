@@ -63,8 +63,11 @@ the helper read, write, chown or delete anything outside the volume.
 (`DREGG/SPK-VAR-CUSTODY/v1+projdir`, below) names the deployment, host, resource, volume id,
 uid, quota, **project id**, filesystem type and the **directory inode and path**; at launch the
 resident compares its open `/var` descriptor against the path (device and inode) and against the
-witness's inode, project id and inherit flag. A directory that was replaced, moved, or re-projected
-does not match. The witness is root-written, 0644, root-owned ancestors, fresh within 120 s.
+witness's inode, and requires `statfs` of it to report a size below its parent filesystem's and within
+the class bound (an inherit-project directory reports its project limit). The resident runs as the
+operator and cannot open the app-private directory to read the project id itself; the helper, as root,
+set and verified it, and the inode pin means a replaced or moved directory does not match. A directory
+re-projected to a looser limit changes the reported size and is refused. The witness is root-written, 0644, root-owned ancestors, fresh within 120 s.
 
 **G5 Clean teardown.** `destroy` removes the tree (descriptor-relative, no-follow), then clears
 the project limit, then removes the registration and witness, in an order such that a crash
@@ -93,7 +96,7 @@ asks it. One code path chooses: the registry's optional `custodianSocket` names 
 the helper does everything itself as above (hbox, plain installs).
 
 `spk-host volume-custodian ROOT SOCKET UID_BASE UID_LIMIT SOCKET_GID`, unit
-`deploy/spk-host/mini-volume-custodian.service`. `ROOT` is a host directory on ext4/xfs with
+`deploy/spk-host/mini-volume-custodian.service` (a template: `deploy/spk-host/install-volume-custodian` writes the literal ROOT into it, since systemd does not expand environment variables in `ReadWritePaths=`). `ROOT` is a host directory on ext4/xfs with
 `prjquota`; its volumes are `ROOT/vars/<id>`, where `<id>` is `<store>-<resource>`. The container
 sees `ROOT/vars` bound at `GRAINS_ROOT/vars`. The container's uid space starts at `UID_BASE` on the
 host (the container's root), `UID_LIMIT` wide; a request names the grain's uid inside the container
@@ -131,7 +134,7 @@ What stays in the container: the registration, the witness, import into the dire
 export. The helper's `verify` re-reads the project from the directory (any namespace can) and the
 limits from `usage`, and compares them exactly as before. Not guaranteed: a compromised container
 root can still ask the custodian to destroy any volume it can name, and can write a witness; the
-resident re-checks the project id and size from the directory it holds open at every launch.
+resident re-checks the directory's inode and reported size at every launch.
 
 ## What it does not guarantee
 

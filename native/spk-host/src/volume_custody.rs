@@ -165,7 +165,9 @@ impl VolumeWitness {
         Ok(())
     }
 
-    /// The open `/var` carries the attested project, with inheritance: the kernel's own record
+    /// For a descriptor opened for reading (the helper's own attestation check; the resident's O_PATH
+    /// descriptor onto the app-private directory cannot be asked for its project). The open `/var`
+    /// carries the attested project, with inheritance: the kernel's own record
     /// that this directory's blocks and inodes are charged to the bounded project.
     pub(crate) fn compare_open_project(&self, persistent_var_fd: RawFd) -> io::Result<()> {
         let (project, inherit) = crate::os::var_project(persistent_var_fd)?;

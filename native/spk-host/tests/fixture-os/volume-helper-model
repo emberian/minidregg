@@ -7,7 +7,7 @@
 # src/fixture_os.rs answers as a bounded project directory. The registration and
 # witness bytes are the real helper's, field for field.
 set -euo pipefail
-usage() { echo 'usage: spk-var-volume --root GRAINS_ROOT create STORE RESOURCE APP_UID SIZE_MIB VOLUME_HEX | attest STORE RESOURCE' >&2; exit 2; }
+usage() { echo 'usage: volume-helper-model --root GRAINS_ROOT create STORE RESOURCE APP_UID SIZE_MIB VOLUME_HEX | attest STORE RESOURCE' >&2; exit 2; }
 fos=$(cd -- "$(dirname -- "$0")" && pwd)
 (( $# >= 5 )) && [[ $1 == --root ]] || usage
 root=$2
