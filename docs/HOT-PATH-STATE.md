@@ -252,8 +252,7 @@ to `/ci/hpc`. Profiles: `/ci/hpc/fby` (run.sh, `--symfs`). The native Host build
    - **Driver.** `hbox:/ci/hpc/sn/run.sh` brings up a fresh world from a candidate
      (`newparticipant-acceptance.sh`). Then run `mini shell --socket W/public/mini.sock --host H
      --config W/deployment/pinned-config.json --workspace W/sponsor --home HOME --line "story new N
-     --from tale"` with `MINI_TRACE`. World `/ci/hpc/sn/b1` is still up: stop it by its
-     `w/public/server.pid` and `scripts/spk-platform/stop-residents.sh /ci/hpc/sn/b1`. The residents'
+     --from tale"` with `MINI_TRACE`. World `/ci/hpc/sn/b1` is torn down (server and its two residents stopped by PID file). The residents'
      anchors live in `~/.mini/consent-anchors` because MINI_CONSENT_ANCHOR_DIR was unset.
    - **Before** (eca98bde7 + the lane's Host, fresh world, hbox load 9-17): 62-70 s. Of that, the
      Host's own calls were 4.5 s. One line (`room bind`, 3.9 s) used 0.25 s of CPU across client,
@@ -323,8 +322,13 @@ to `/ci/hpc`. Profiles: `/ci/hpc/fby` (run.sh, `--symfs`). The native Host build
    - **Theirs (KeptCell).** `Theory/CellStateAux.lean` (`AuxCache`), `Materialized.carried` (a Thunk,
      moved by `Carried.run` with one `set` per writing op), and `Kernel/PrivateCellMaterializer.aux`.
      The root becomes `outerRoot ctxKind mask (trie digest)`, so a write costs one trie walk and one
-     hash. Content and the declared kinds switch to it. We asked them (10-31) to switch, with mask `[]`,
-     eventHistory, authority, resourceBook and policySource too, because those grow with history.
+     hash. **Scope (root's ruling, 10-31; private cells a8da2b953507b402b):** FORMAT switches only
+     the unblinded kinds that grow (eventHistory, authority, resourceBook, policySource) to the trie
+     root with mask `[]`. Content and the declared kinds keep the salted ratchet root until a ZK
+     selective opening exists. That is a later epoch (b) with a second genesis, because plain trie
+     reveals would expose unsalted subtree digests. The content-cell root and flatness stay a
+     published red until (b). The order is iteration speed's seam 1, then their FORMAT sha, then
+     row 11 rebased onto it.
    - **Ours, in the batch.** (a) Per-entry persistence: entries go through StoreCodec entries instead of
      one encoded blob per cell write (whole-cell encode is 31% of late submit CPU). Row 11: the
      checkpoint carries the session indexes and the walk certificates that read the state at their
