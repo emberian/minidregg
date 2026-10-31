@@ -242,14 +242,18 @@ restart, `story new`, the first walk-family request after a restart.
 
 ## Next (successor: start here)
 
-State (2026-10-31, ac53c05fe796e4294, the live hot-path): lane `lane/hot-path-cold`. Sent: through
-a55855f18 (batch 6; 8b4ed6a40 is in batch 5). Integrator aba0beaa578594e92; private cells
-a8da2b953507b402b; exorcism a31f4ba5028d24a92 (owns the Host's READ ops 144/5/4 and
-ContentResource.project's encode, fromEntriesCached re-keying, loadPolicy, storedCapabilityDigest);
-perf-client a8d456c6e773efbb8 (owns the consent provider, `Loaded.write`'s post encode, the per-guard
-`writes` pattern in every receiver except the DRC, and World.admit's pin root / WorldCompact).
-Ember 10-31: per sha, lane-check of the changed files plus one targeted measurement on a hotpatched
-world; no gates; pool trees at swarm-build 28G or less.
+State (2026-10-31, ac53c05fe796e4294, the live hot-path): lane `lane/hot-path-cold`. Sent: a55855f18 (staging,
+batch 7) and 6d744e25f (= 05a38ff4e + docs; batch 8: the law check on its own witness decides `Pred.eval`).
+Integrator aec6914709d96f496 (replaced aba0beaa578594e92); private cells a8da2b953507b402b; exorcism
+a6ad40ce192354deb (Host READ ops 144/5/4, loadPolicy, challenge); perf-client a778bbda6509944a5 (consent
+provider, `Loaded.write`, per-guard writes in receivers, World.admit pins, representsCheck's membership);
+retained-mode a13f0c9ab4513b2d7 (L0: `Store` as a tree-backed map, then the authority projection as a
+maintained node); perf-apps a25df305cfd551d8b (EtherCalc dispatch captures). Pool tree t7 is held
+(`lane-tree renew hot-path`); next native build with iter-speed's `scripts/pipeline/native-loop hot-path
+<base candidate> <label>` (~7 min) once on staging, not build7.sh (~48 min).
+Next, in order: (1) the birth plan on the light ground (below, O(cells) directory decodes per birth);
+(2) ember's read-path GET contract (statement first, (a)-(e) below) with group commit judged against the
+dispatch profile; (3) row 11 + Book wiring for FORMAT; (4) the session refresh term.
 
 Tools on hbox: pool trees (`. /home/hbox/pool/pool.env; LANE_POOL_NO_WARM=1 lane-tree acquire
 hot-path origin/lane/hot-path-cold`, release when done). Native Host: `/ci/hpc/nb/build7.sh` (resets
