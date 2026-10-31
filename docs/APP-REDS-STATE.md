@@ -98,201 +98,52 @@ unquoted `for w in $alt`, so `[--json]` was a glob that matched a one-letter fil
 and turned `apps list [--json]` into `apps list j`. Globbing is now off around the split (ad58a4b9e). Reproduced
 the glob in bash; not re-run through the whole JWF step.
 
-## Since the four reds (2026-10-30 evening): what is landed, what is owed
+## Since the four reds (present state, 2026-10-31; one document, both instances folded)
 
-Landed on `lane/app-reds` (shas in order): 111985198 volumes are project-quota directories, not loop images
-(deploy/spk-host/VOLUMES.md); d786b5d2c the host-side volume custodian (`spk-host volume-custodian`, versioned
-`MINI-VOLUME/1` line grammar, statement C1 to C6) and 28be1c40c app uid floor 10000 for a custodian world;
-6be1c1ea7 + b1c30a598 the root-side controller-tool accepts `mini_app_<name>` typed tools (controller-world.py
-pin moved in install-user-world) and the vars-backing bind in install-user-world; f72223652 apps-e2e grant bound
-50000 (E7: the birth was refused no-grant at 1000); 35f008d3d bend refusals name the package already published and
-the response-type rule (G1, G2 partly); 45091c14e the intake spool directory is an operator input.
+Landed on `lane/app-reds` (and in staging e1a32a07d unless noted):
+- Volumes are project-quota directories, not loop images (111985198, deploy/spk-host/VOLUMES.md), with a
+  host-side custodian for user-namespaced containers (d786b5d2c; `spk-host volume-custodian`, `MINI-VOLUME/1`
+  line grammar, statements C1 to C6; app uid floor 10000 for a custodian world, 28be1c40c; unit template with
+  the literal ROOT written by `install-volume-custodian`).
+- Resident /var check (486f0196f, identical in content to 3eceeb77d): the resident runs as the operator and
+  holds the app-private 0700 directory only as an O_PATH descriptor, so the project ioctl failed (EBADF) and a
+  read reopen failed (EACCES): "resident bootstrap refused: Permission denied". `os::var_filesystem` compares
+  `fstatvfs` of the volume with its parent (a project-limited directory reports its limit); the witness pins the
+  inode. Evidence: EtherCalc through the full launch 3/3 on hbox (/ci/ar-ec/qualification-8).
+- Root-side `controller-tool` accepts `mini_app_<name>` typed tools; controller-world.py is pinned by sha in
+  install-user-world (move both together): 6be1c1ea7, b1c30a598. The `vars-backing` bind and the `ingest-scratch`
+  directory are in install-user-world (b1c30a598, 45091c14e).
+- Intake spool is an operator input (45091c14e): broker config `ingestScratch`, `spk-ingest --scratch`,
+  `spk-host materialize --scratch`. Free-space need on the SPK store drops by one decoded bound.
+- `grain install` reports signedAppId/signedAppVersion (c730fd3ea): the values go in `signed-identity.json`
+  beside `qualification.json`, never in it (resident_service and install_v3 read it with deny_unknown_fields;
+  tests in both). Before this every real market install was refused appIdMismatch.
+- apps-e2e grant bound 50000 and funding 20000 (f72223652, E7); bend refusal hints (35f008d3d); `responseType`
+  in the publication JSON and printed by `bend publish` (32a7f0fc0, Lean: needs the next host build).
 
-hbox state I set up (not in git): `/tank/lanes/vars-backing.img` (24 GB sparse ext4, project quota) loop-mounted at
-`/var/lib/mini-vars-backing`, named by `/etc/mini-spk-volumes/vars-backing`; the mount is not in fstab, so a reboot
-loses it and `install-user-world` then refuses by name. `/tank/mini-ingest` (root:root 0755) named by
-`/etc/mini-spk-volumes/ingest-scratch`: each world's intake spools to `/tank/mini-ingest/<store>`; /tank is the HDD
-mirror, so ingest through it is slower; candidates built before 45091c14e ignore the file.
+hbox state outside git (root host changes, not reboot-persistent):
+- ONE prjquota backing: `/tank/lanes/vars-backing.img` (24 GB sparse ext4 -O quota,project) loop-mounted
+  `prjquota` at `/var/lib/mini-vars-backing`, named by `/etc/mini-spk-volumes/vars-backing`. After a reboot,
+  `sudo mount -o loop,prjquota /tank/lanes/vars-backing.img /var/lib/mini-vars-backing`, or world installs
+  refuse by name. (The sibling's duplicate `/var/lib/mini-spk-vars-backing` from `/tank/mini-spk-vars-backing.img`
+  was empty; unmounted, detached and removed.)
+- `/tank/mini-ingest` (root:root 0755) named by `/etc/mini-spk-volumes/ingest-scratch`: each world's intake
+  spools to `/tank/mini-ingest/<store>`. /tank is the HDD mirror, so ingest through it is slower; candidates
+  built before 45091c14e ignore the file.
 
-Diagnosed: the Davros control run's `controller-worker-prepare` refusal was my `grain-runtime` copy at mode 0775
-under hbox's umask 0002 (custody wants it unwritable by group); `/ci/hb-data/run.sh` installs it 0555. The next
-failure was the root-side tool whitelist (fixed above). gate14's j14 `insufficient scratch workspace` was hbox's
-root disk (36 GB free against the operator-appliance profile's 20 GiB decoded bound), not a layout or version
-mismatch.
+Diagnosed: the Davros control run's `controller-worker-prepare` refusal was my `grain-runtime` copy at mode
+0775 under hbox's umask 0002 (custody wants it unwritable by group); the next failures were the root-side tool
+whitelist (fixed above) and then the resident /var check (fixed above). gate14's j14 `insufficient scratch
+workspace` was hbox's root disk (36 GB free against the operator-appliance profile's 20 GiB decoded bound).
+A hard-linked copy of integ/src/.lake is never a build tree: lake writes traces and setup.json in place (I
+poisoned two files that way, ObjectivePackageAuthor.setup.json and .trace; the integrator removes them); use
+the lane pool (/home/hbox/pool, `lane-tree`, LANE_POOL_NO_WARM=1 while integ builds). Two instances must not
+rsync into one hbox src directory; use /tank/lanes/<own>/src.
 
-Owed: the live Hummingbird run (the foreground typed/_qualify tools are built and unit-tested; the rerun needs a
-current candidate, the old one was swept), then WBO and Scrumblr; `op66-plan` for EtherCalc and Etherpad on the demo
-world (waits for infra's rebuilt forge world, with the retained plan kept); E3 and E4 (why-clause and guard-rejection
-rendering, Lean/Host side, no owner); the G2 slot response type query; E7's live rerun on the explorer's side.
-
-Hazard: another process edited this worktree (resident `/var` check: os.rs, resident_launch.rs, volume_custody.rs,
-the fixture rename, the custodian unit template) and left it uncommitted; I did not take it.
-
-
-## Handoff from the retired sibling instance (a17f4172949caca14, 486f0196f on lane/app-reds-b), verbatim
-
-### app-reds lane: state (2026-10-30)
-
-Lane `lane/app-reds`, worktree `/Users/ember/dev/minidregg-lanes/app-reds`, based on origin/main `c7aa7e8c4`
-(local `main` was 1,632 commits behind origin; `lane/spk-fresh` is an ancestor of origin/main).
-hbox run area `/ci/ar-ot` (bin = candidate f34b0309 copies, src = this worktree); every world torn down
-(`removal_assertions=0`).
-
-## 1. OwnTracks write: FIXED by repackaging (qualified 3/3)
-
-Cause (traced in the fork, mnutt/owntracks-recorder ba4d72ef = ot-recorder 0.6.9): `http.c field()` replaces
-`u`/`d`/`user`/`device` with the raw `X-Sandstorm-Username` header, which Sandstorm percent-encodes
-(`Grain%20owner`). The write path reduces user and device to a storage name in `util.c ut_lower` (every
-non-alphanumeric byte becomes `-`, so `grain-20owner`); `last_users` and the friends list look the raw
-lowercased header up unreduced (`grain%20owner`). A recipe cannot fix it: the header overrides every query
-parameter on every route. Fix: `apps/packages/owntracks/patches/0001-sandstorm-identity-one-storage-name.patch`
-percent-decodes the header and reduces it with the one `storage_name` rule that `ut_lower` now also calls, so
-write and lookup name one principal. Mini's display name and routing identity are untouched.
-
-New package (our key, apiPath "/", Debian 13, built from the pinned codeload tarball, patch applied at build):
-app `1zzj5zrt8f0vwf5q1rmm09fff9y9684mcq79me6kmjrks1acfmqh`, package `779a8d94e36bf3d481c432100ecc61ad`, version
-`0.6.9-1`; key `~/.dregg-secrets/spk-keys/owntracks.key`; forge build dir `/srv/spk-build/owntracks`. The build
-smoke (chroot, uid 65534) writes and reads back for `Grain%20owner` and shows a second user does not see it.
-Qualified on hbox, attempt 1 in `/ci/ar-ot/qualification-1/rows.tsv`: lifecycle PASS 43 s; POST /pub then
-GET /api/0/last returns this run's timestamp, descriptor lists api and web; forged Sandstorm identity headers
-refused. OwnTracks is in the local market index fixture; it is not in FEATURED (it never was).
-
-## 2. Hummingbird: native conversation qualification (controller side BUILT; live run OWED)
-
-`featured-qualify.sh` -> `binding.py` drives only http and ddp, so `protocol: conversation` returns
-`binding-protocol-unsupported`; DEMO-PATH-STATE says not to add a second Python interpreter, and none was added.
-What was missing was the controller's receiving end for the shell: `mini app-interface --action call|qualify`
-sends `grain-runtime tool SOCKET hard ID mini_app_<alias>[_<op>|_qualify]`, but `foreground_tool` dispatched only
-`mini_application_api` and the Oracle tools. Now (grain-runtime `main.rs`, `typed_applications.rs`,
-`application_api_tools.rs`):
-
-- `mini_app_*` names are operator-foreground tools when a typed attachment owns them (the attachment's bound tools
-  and the hidden `mini_app_<alias>_qualify`); preflight checks the attachment, the declaration digest the shell sends
-  (`_miniInterfaceDigest`, stripped before validation) and the route's Host pin and recorded birth (the route check is
-  now one helper, `preflight_application_route`, shared with `mini_application_api`).
-- `foreground_typed_application` runs the SDK executor (`call_tool`, or the new `qualify_tool` over
-  `Declaration::qualify`) inside the controller; each request it prepares re-enters `foreground_application_api`: one
-  fresh admission and settlement apiece, as the Hermes worker's `__mini_typed_http_raw` path does. A lost reply is
-  uncertain and never replayed. Trusted context (operation id, time, rendezvous seed) is the controller's; the
-  operator's `runId` may not shadow it.
-- The controller's application-API method list gained `CONVERSATION` (the Host's lifetime wire already accepts it and
-  validates the descriptor body against `protocol/hosted-conversation.json`).
-
-Tests (filtered): `typed_applications` 15 pass on the Mac and on hbox, including the WBO conversation declaration
-qualified end to end through the real `raw_arguments` and `parse_input`, and the foreground name, digest and context
-checks. The `foreground` filter on hbox: 62 pass, 8 `birth_refusal` tests fail; they drive a scripted
-`controlled-mini` through the birth-refusal producer, never reach the typed code, and also fail on the Mac with the
-child exiting 3. I did not baseline them (no stash); treat them as the standing birth_refusal environment red until
-someone shows otherwise.
-
-OWED, not claimed: the live receiving-path run. It needs a Hermes controller world with Hummingbird attached as a
-typed application (the apps-agents j14-apps journey, `docs/APPS-AGENTS-STATE.md`), a rebuilt `grain-runtime`, then
-`mini app-interface --action qualify --declaration apps/interfaces/hummingbird.json --attachment hb ...` with its
-native receipts and the correlated socket hit retained. Unproven there: that the Host's lifetime reserve plan accepts
-the CONVERSATION method code end to end, and the reply shape of a hosted frame batch through `http-v3`. Once that run
-exists the same command qualifies the WBO and Scrumblr declarations.
-
-## 3. deploy/spk-host/tests/test_controller_world.py: environment AND stale tests, all fixed
-
-hbox login umask is 0002; the tests create fixture directories under the operator home and custody refuses
-group-writable ancestors, so 7 of the 8 errors were the environment. The test now sets its own umask 022
-(restored by cleanup). The other 3 (1 error, 2 failures) fail on the Mac too and were stale tests behind
-deliberate code: (a) `copy_worker_tree` inventories (and refuses links) before creating the destination, so
-the test asserts no destination instead of an empty one; (b) `check_app_allocation` moves a taken START to the
-next free aligned range (f8243aba9), so the tombstone test asserts the move and adds the exhausted-delegation
-refusal; (c) the operator proxy runs on `ProtectHome=tmpfs` (bind of the upstream directory), which the sibling
-test already asserted. Result on hbox: 86 tests OK. On the Mac one error remains, `socket.SO_PEERCRED`
-(Linux only).
-
-## 4. FEATURED
-
-- WBO repointed: FEATURED now names `j4jvn386...` (package `d3b06718...`, the qualified wbo-r2 build); it and
-  OwnTracks are added to `native/resource-client/tests/fixtures/fresh-local-index-2026-10-29.json`
-  (regenerated with `deploy/market/fresh-index.py`; the 20 existing entries are byte-identical).
-  `apps/interfaces/wbo.json` rewritten for WBO 2.18.26 (the 1.20 wire was `getboard`/string tools; 2.18 joins by
-  `board&baselineSeq=0`, numeric create mutation with clientMutationId, acknowledged by a `mutation` broadcast,
-  saved export is SVG). `scrumblr.json` had the same staleness (declared eio3 at `socket.io/`; the package
-  serves engine.io 4 at `/socketio`) and is corrected. The native fixture tests in
-  `native/mini-sdk/tests/app_interface_knowledge.rs` were red on origin/main (old package ids) and now pass.
-  Neither conversation declaration can be live-qualified until item 2 closes.
-- Mercurial, Perplexity Sudoku, 3D Blockstack: typed declarations written (`apps/interfaces/mercurial.json`,
-  `perplexity-sudoku.json`, `blockstack-3d.json`); their recipes' write rows now run through them. Qualified live on hbox (`/ci/ar-ot`, worlds down,
-  `removal_assertions=0`): Perplexity Sudoku 3/3 (typed new/save/read through the declaration, descriptor api+web,
-  forged identity refused); 3D Blockstack 3/3 (typed submit/best; the app answers JSON as text/html, so
-  `score.best` decodes as text); Mercurial 3/3 (typed read-only `repo.summary` of the empty repo via
-  `row.py call`, because the typed qualify gate refuses a declaration with no write, as for Datasette; then the
-  hg-wire push read back through raw-file and rev, descriptor api+web). The Mercurial push driver and recipe
-  (`apps/packages/mercurial/qualify*`) were only on the hbox lane before; they are now in the repo.
-
-## Scout's parity red (JWF 1/72, "without a face: apps(apps list j)"): FIXED
-
-Not a missing face: `/verb/apps` renders its leaves. `jweb-frontend.sh` split each usage alternative with an
-unquoted `for w in $alt`, so `[--json]` was a glob that matched a one-letter file named `j` in the working directory
-and turned `apps list [--json]` into `apps list j`. Globbing is now off around the split (ad58a4b9e). Reproduced
-the glob in bash; not re-run through the whole JWF step.
-
-## Since the four reds (2026-10-30 evening): what is landed, what is owed
-
-Landed on `lane/app-reds` (shas in order): 111985198 volumes are project-quota directories, not loop images
-(deploy/spk-host/VOLUMES.md); d786b5d2c the host-side volume custodian (`spk-host volume-custodian`, versioned
-`MINI-VOLUME/1` line grammar, statement C1 to C6) and 28be1c40c app uid floor 10000 for a custodian world;
-6be1c1ea7 + b1c30a598 the root-side controller-tool accepts `mini_app_<name>` typed tools (controller-world.py
-pin moved in install-user-world) and the vars-backing bind in install-user-world; f72223652 apps-e2e grant bound
-50000 (E7: the birth was refused no-grant at 1000); 35f008d3d bend refusals name the package already published and
-the response-type rule (G1, G2 partly); 45091c14e the intake spool directory is an operator input.
-
-hbox state I set up (not in git): `/tank/lanes/vars-backing.img` (24 GB sparse ext4, project quota) loop-mounted at
-`/var/lib/mini-vars-backing`, named by `/etc/mini-spk-volumes/vars-backing`; the mount is not in fstab, so a reboot
-loses it and `install-user-world` then refuses by name. `/tank/mini-ingest` (root:root 0755) named by
-`/etc/mini-spk-volumes/ingest-scratch`: each world's intake spools to `/tank/mini-ingest/<store>`; /tank is the HDD
-mirror, so ingest through it is slower; candidates built before 45091c14e ignore the file.
-
-Diagnosed: the Davros control run's `controller-worker-prepare` refusal was my `grain-runtime` copy at mode 0775
-under hbox's umask 0002 (custody wants it unwritable by group); `/ci/hb-data/run.sh` installs it 0555. The next
-failure was the root-side tool whitelist (fixed above). gate14's j14 `insufficient scratch workspace` was hbox's
-root disk (36 GB free against the operator-appliance profile's 20 GiB decoded bound), not a layout or version
-mismatch.
-
-Owed: the live Hummingbird run (the foreground typed/_qualify tools are built and unit-tested; the rerun needs a
-current candidate, the old one was swept), then WBO and Scrumblr; `op66-plan` for EtherCalc and Etherpad on the demo
-world (waits for infra's rebuilt forge world, with the retained plan kept); E3 and E4 (why-clause and guard-rejection
-rendering, Lean/Host side, no owner); the G2 slot response type query; E7's live rerun on the explorer's side.
-
-Hazard: another process edited this worktree (resident `/var` check: os.rs, resident_launch.rs, volume_custody.rs,
-the fixture rename, the custodian unit template) and left it uncommitted; I did not take it.
-
-## Volume helper and resident /var (handed to ad85d40779880420c; lane/app-reds-b, 2026-10-31)
-
-Present state, from the app-reds instance retired at this point.
-
-- Volume helper: per-grain directory under a project quota (deploy/spk-host/VOLUMES.md), plus the
-  custodian for user-namespaced containers (committed by the post-distill instance) and the
-  `vars-backing` hook in install-user-world: /etc/mini-spk-volumes/vars-backing names a prjquota-mounted
-  directory; each world's `vars` is a bind mount of <backing>/<store>, unmounted on remove.
-- hbox prjquota backing (root host change, not reboot-persistent): 20 GiB sparse file
-  /tank/mini-spk-vars-backing.img, ext4 `-O quota,project`, loop-mounted `prjquota` at
-  /var/lib/mini-spk-vars-backing; /etc/mini-spk-volumes/vars-backing contains that path (so every new
-  hbox world's volumes live there). Remove the file to stop using it.
-- Resident /var check (this commit): the resident runs as the operator and cannot open the app-private
-  0700 directory. `os::var_filesystem` therefore compares fstatvfs of the volume with its parent (a
-  project-limited directory reports its limit) and no longer reads the project id; the witness pins the
-  inode (compare_open_mount). project_of re-opens through /proc/self/fd for callers that can read.
-  The refusal now also names the user namespace case (/proc/self/uid_map not the identity map).
-- Custodian unit: deploy/spk-host/mini-volume-custodian.service is a template (@ROOT@); install with
-  deploy/spk-host/install-volume-custodian [ENV_FILE] [UNIT_DIR].
-- Fixture model renamed volume-helper-model (scripts/spk-platform/fixture-v4.sh updated).
-- Physical test fixed: physical_create_attest_and_resident_checks_agree uses the real `vars` parent.
-
-Evidence (hbox): EtherCalc through the full launch with this build, 3/3 PASS (lifecycle incl. START,
-typed write/read-back, forged identity refused), world torn down removal_assertions=0:
-/ci/ar-ec/qualification-8/rows.tsv, log /ci/ar-ec/q8.log, bins /ci/ar-ec/bin (built from
-/tank/lanes/app-reds-b/src, target /tank/lanes/app-reds-b/target). Physical receiver on a disposable
-prjquota ext4: seven volume_dir physical tests and the cgroup death test pass; 31 filtered unit tests
-pass. Pitfall met: two instances rsyncing into one hbox src dir mix builds (run 7 failed on an extra
-`signedAppId` field that way); use a private directory per instance.
-
-Still open on this lane: op66-plan for EtherCalc/Etherpad on the demo world (package-specific; same
-package passes on hbox), the live Hummingbird run and WBO/Scrumblr live qualification (grain-runtime
-foreground typed/_qualify tool is built, 24de79349 era), Davros control run 2
-(controller-worker-prepare), the controller boot ordering and recovery, the Hermes worker root's
-interpreter (built for 3.12, box has 3.13), explorer E3/E4/E7.
+Owed: Davros j14 through app-start on a live world with the resident fix (hbox /ci/hb-dav-7, running) and then
+the live Hummingbird run, WBO and Scrumblr qualification (the foreground typed/_qualify tools are built and
+unit-tested; the old candidate was swept, so use a current one); `op66-plan` for EtherCalc and Etherpad on the
+demo world (waits for infra's rebuilt forge world, with the retained plan kept); E3 and E4 (why-clause and
+guard-rejection rendering, Lean/Host, no owner); the decider-side half of G2 (a pending await's record view has
+no program type, so only the publisher sees the response type); the Hermes worker root's interpreter (built for
+3.12, the box has 3.13); the controller boot ordering and recovery.
