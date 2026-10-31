@@ -178,19 +178,38 @@ items 1 to 4 below done; astra round 8):
   `admitted_of_storeFits` discharging `admitted`.
 * Locality wording: bounded by the reveal's stop depth.
 
+**Increment 5, the receiving state machine** (`Kernel/PrivateCellReceiver.lean`, astra round 9
+applied):
+* `KeptCell`: params (protocol, cell, layout, size bound, the wire's `Blinding`), accepted
+  version, gated store (`FitStore`), kept index with `holds`, mask bytes held directly (`mask_eq`).
+  Every constructor passes the gate: `birth` runs `admit` on the whole store (`birth_refuses`),
+  `write` checks the one address (`write_refuses`), so no receiving path exists without it.
+* `write`: refuses the blinding address (`write_refuses_blinding`: the mask moves only by
+  `accept`); a value is one `Cache.insert`, a removal one `Cache.erase` (`write_none_index`).
+* `accept`: one accepted version: the supplied mask and the next version, then the patch, for a
+  no-op too (`accept_spec`). Mask freshness and secrecy are the host's custody obligation, an
+  argument here.
+* `root` / `root_eq`: the outer commitment (cSHAKE256 under `DREGG/PRIVATE-CELL/OUTER/v1` over the
+  state-derived context, the held mask, the kept digest) equals `privateRoot`, with no rebuild and
+  no store lookup.
+
 **Owed, in order:**
-1. **The receiver calls `admit`** on its birth, import and write paths (refusing the write). Not on
-   today's declared admission: `Action.admissionCheck` is the source of the derived AIR
-   (`Compiler/DeclaredActionAir.lean`) and of the native binding's acceptance theorems, so a
-   kernel-wide bound needs a native mirror and a regenerated circuit. It lands with the receiver,
-   whose admission is new anyway. Until then the flat receivers serve the full `Visible` view, so
-   no reader sees less.
-2. **A Store write path that calls `Cache.erase`**, with the receiver.
-3. The opening relation in the compiler's vocabulary (compiler-emitted AIR; grow the compiler
+1. **The cell representation carries `KeptCell`**: `Materialized.rootCache := KeptCell.root`,
+   `rootExact` by `root_eq` and a materializer whose `rootOf` is `privateRoot` (context made
+   explicit in the specification: `rootOf : Store → Root` cannot see the accepted version), patch
+   application through `accept` with no rematerialization, export bytes lazy.
+2. **The registry and native-host switch** for content and the declared kinds: a root-format change
+   (fresh genesis, fixture re-record in the same sha), codec epoch ordered with the hot-path lane
+   (a86738fc1dfae6429 answered 10-31: no overlap with Materialized, CellState, PersistedCodecTags or snapshots; private cells go first; it reports before touching a format). The receiver's acceptance theorems cite `admit`; **no receiver
+   path ships without it** (the agreed ordering: not on today's `Action.admissionCheck`, the source
+   of `DeclaredActionAir` and the native binding's acceptance theorems).
+3. **Insert metered**: `Trie.insert` backs the world root's hot path (`Kernel/WorldRootCache`), so
+   the oracle walk enters as a proved `@[csimp]` equality, not a rewrite of the compiled walk.
+4. Retention of accepted versions for retries and historical reads; path collisions are refused or
+   counted (the `7 L + 3` erase bound needs injective live paths).
+5. The opening relation in the compiler's vocabulary (compiler-emitted AIR; grow the compiler
    where it lacks a trie-path or cSHAKE gadget), not a hand-written circuit.
-4. The receiver: new materializer version beside the old one until a fresh genesis, with its
-   fixture re-record in the same sha; codec epoch agreed with the hot-path successor.
-5. Flatness: gate10/gate12 flatness-submit.
+6. Flatness: gate10/gate12 flatness-submit.
 
 **Linear paths seen** (each blocks flatness independently): flat `rootPreimage`
 (44 + 32E bytes per write, `StoreCodec`), whole-view `items` in `StoreHiding.view` and

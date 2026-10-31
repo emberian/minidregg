@@ -197,3 +197,4 @@ import Kernel.EffectsRevival.PrepareProofs  -- PrepareFactors contentSpec PROVED
 import Kernel.EffectsRevival.CommutingProofs  -- commuting appends through the declaration: a line over a moved root lands at the blinded cell (HostMovedRootAccepted), commutes is fixed from both sides (ContentCommuteTeeth), and CommutingPrepare
 import Kernel.PrivateCellScope  -- a reader's scope is a bounded union of visibility-class prefixes of the private index (body covers its atoms)
 import Kernel.PrivateCellView  -- a reader's class openings of the private index answer exactly its narrowPacked view, or a scoped collision
+import Kernel.PrivateCellReceiver  -- the private cell's receiving state machine: gated store, kept index, one insert or erase walk per write, kept root = private root
