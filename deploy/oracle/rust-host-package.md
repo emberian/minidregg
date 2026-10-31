@@ -109,8 +109,31 @@ pinned Linux rootfs, alongside the already required Engine Python environment;
 there is no new separate clingo shared-library installation step. Check the
 actual selected executables inside that rootfs before signing.
 
-Pin the new `STAGE.json` digest, then use the existing `pack`, `verify-package`,
-operator import and shared-data publication commands in `README.md`. The Rust
+Pin the new `STAGE.json` digest. This combined runtime exceeds the standard
+aggregate package budget: select the operator profile explicitly for signing,
+independent inspection and the operator-owned import configuration. The packer
+default remains `standard-v1`. Both profiles retain the individual member limit
+below 512 MiB, exact hashes, signing identity and no-overwrite publication.
+
+```sh
+"$PACKER" pack "$NEW_STAGE" "$REVIEWED_STAGE_SHA256" "$PRIVATE_KEY" "$NEW_RUNTIME_SPK" \
+  --profile operator-appliance-v1
+python3 -B deploy/oracle/stage.py verify-package \
+  --stage "$NEW_STAGE" --stage-sha256 "$REVIEWED_STAGE_SHA256" \
+  --inspector "$INSPECTOR" --inspector-sha256 "$INSPECTOR_SHA256" \
+  --package "$NEW_RUNTIME_SPK" --scratch "$PROTECTED_DISK_SCRATCH" \
+  --profile operator-appliance-v1 --out "$NEW_POST_PACK_RECEIPT"
+```
+
+The operator profile reuses Mini's existing 8 GiB raw and 20 GiB decoded limits;
+the packer's receipt records the selected profile. Mini's operator-owned broker
+configuration must select `importProfile: "operator-appliance-v1"`. A package or
+caller cannot select that broker policy. The packer buffers member bytes,
+archive and compressed output in memory, so assembly needs a dedicated machine
+with enough memory for several copies of the actual closure; the format ceiling
+is not a promise that a small host can pack the largest admitted archive.
+Use the remaining operator import and shared-data publication commands in
+`README.md`. The Rust
 payload must contain a Linux x86-64 host and matching external artifacts; the
 Linux rootfs still needs the production Engine's Python dependency closure.
 Signing needs the operator's existing private key, the Linux packer and independent
