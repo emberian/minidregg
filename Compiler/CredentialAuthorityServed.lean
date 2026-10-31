@@ -201,8 +201,9 @@ theorem ServedAuthority.snapshotOn_eq {deployment : CanonicalCellRegistry.Deploy
     authority.snapshotOn footprint =
       CredentialAuthorityDomain.Snapshot.ofCell deployment.domain served.height
         (spentOf deployment.domain (served.viewAt footprint)) authority.cell := by
-  unfold snapshotOn CredentialAuthorityDomain.Snapshot.ofCell
-  rw [authority.authStateExact]
+  obtain ⟨cell, valid, observed, authState, exact⟩ := authority
+  subst exact
+  rfl
 
 /-- The light authority over a view is the full authority load of that view,
 up to the clock: the full shape's clock (`clockOf`, its history length) is its
@@ -352,10 +353,10 @@ theorem ServedAuthority.unique {deployment : CanonicalCellRegistry.Deployment} {
     have decoded := congrArg decodeCell (left.observed.symm.trans right.observed)
     rw [decodeCell_bytes, decodeCell_bytes] at decoded
     exact Option.some.inj decoded
-  cases left
-  cases right
+  obtain ⟨leftCell, _, _, leftState, leftExact⟩ := left
+  obtain ⟨rightCell, _, _, rightState, rightExact⟩ := right
   simp only at same
-  subst same
+  subst same leftExact rightExact
   rfl
 
 /-- Loading a state that has an authority yields that authority. -/
@@ -377,7 +378,8 @@ def loadServedAuthorityFrom {deployment : CanonicalCellRegistry.Deployment} {ear
     Option (ServedAuthority deployment served) :=
   if same : bytesBEq (served.canonicalBytes (cellIdOf deployment))
       (before.canonicalBytes (cellIdOf deployment)) then
-    some ⟨held.cell, held.valid, (bytesBEq_iff.mp same).trans held.observed⟩
+    some ⟨held.cell, held.valid, (bytesBEq_iff.mp same).trans held.observed,
+      held.authState, held.authStateExact⟩
   else loadServedAuthority deployment served
 
 theorem loadServedAuthorityFrom_eq {deployment : CanonicalCellRegistry.Deployment}
