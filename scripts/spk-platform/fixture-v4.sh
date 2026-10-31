@@ -236,7 +236,7 @@ for name in minidregg-host mini minidregg-client-consent minidregg-link-sqlite-s
 done
 env -u MINI_FIXTURE_OS "$BIN/spk-host" fixture-systemctl daemon-reload 2>/dev/null &&
   fail "spk-host answers fixture-systemctl without MINI_FIXTURE_OS" || :
-for helper in spk-ingest spk-var-volume; do
+for helper in spk-ingest volume-helper-model; do
   install -m 755 "$REPO/native/spk-host/tests/fixture-os/$helper" "$FOS/$helper"
 done
 printf '#!/bin/sh\nexec %s fixture-systemctl "$@"\n' "$BIN/spk-host" >"$FOS/systemctl"
@@ -247,7 +247,7 @@ printf 'deployment_id=%s\nhost_id=%s\n' "$(digest fixture-v4-deployment)" "$(dig
 chmod 600 "$FOS/host-identity"
 jq -n --arg grains "$GRAINS" --arg spkRoot "$SPKROOT" --arg user "$(id -un)" \
   --arg spk "$BIN/spk-host" --arg sha "$(sha256sum "$BIN/spk-host" | cut -c1-64)" \
-  --arg ingest "$FOS/spk-ingest" --arg volume "$FOS/spk-var-volume" '
+  --arg ingest "$FOS/spk-ingest" --arg volume "$FOS/volume-helper-model" '
   {protocol:"mini-spk-broker-config-v1",grainsRoot:$grains,spkRoot:$spkRoot,
    brokerSocket:($grains + "/broker.sock"),operatorUser:$user,unitPrefix:"mini",
    spkHost:$spk,spkHostSha256:$sha,ingestHelper:$ingest,volumeHelper:$volume,
