@@ -158,8 +158,16 @@ pub(crate) fn submit_fresh_once(
     write_new(attempt_dir, "op76-frame-v3.bin", &outer)?;
     let frame = source_payload(&outer, crate::host_operations::AGENT_LIFETIME_DISPATCH_SUBMIT)?;
     if !frame.starts_with(COMMITTED) || frame.len() <= COMMITTED.len() {
-        return Err(refused(
-            "op76 did not return fresh lifetime committed permit",
+        // Name what op76 did return when it is a Host outcome (a refusal such as tail-bound), so the
+        // operator log says why instead of one fixed sentence. Diagnostic only.
+        let why = crate::agent_api_lifetime_paid_native_v3::outcome_words(operator, attempt_dir, "op76", &outer)
+            .ok()
+            .flatten()
+            .map(|words| format!(": {words}"))
+            .unwrap_or_default();
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("op76 did not return fresh lifetime committed permit{why}"),
         ));
     }
     let frame = frame.to_vec();

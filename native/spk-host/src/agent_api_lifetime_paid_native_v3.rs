@@ -40,23 +40,31 @@ fn retained_source_payload(
     write_new(directory, &format!("{name}.frame"), frame)?;
     match source_payload(frame, opcode) {
         Ok(payload) => Ok(payload.to_vec()),
-        Err(error) => {
-            use crate::host_operations::{RESPONSE_HOST_OUTCOME, RESPONSE_NO_RECORD};
-            use crate::lifecycle_receipt_lookup::OUTCOME_TAG;
-            use crate::lifecycle_v3_native::framed_payload;
-            let outcome = framed_payload("lifetime planning outcome", frame, RESPONSE_NO_RECORD, OUTCOME_TAG)
-                .or_else(|_| framed_payload("lifetime planning outcome", frame, RESPONSE_HOST_OUTCOME, OUTCOME_TAG));
-            if let Ok(payload) = outcome {
-                let path = write_new(directory, &format!("{name}-outcome.bin"), payload)?;
-                let bytes = operator.tool("inspect", "outcome", &path,
-                    &directory.join(format!("{name}-outcome.json")))?;
-                let view: Value = serde_json::from_slice(&bytes)?;
-                return Err(io::Error::new(io::ErrorKind::InvalidData,
-                    format!("lifetime paid op{opcode}: {}", crate::dispatch_fence::refusal_words(&view))));
-            }
-            Err(error)
-        }
+        Err(error) => match outcome_words(operator, directory, name, frame)? {
+            Some(words) => Err(io::Error::new(io::ErrorKind::InvalidData, format!("lifetime paid op{opcode}: {words}"))),
+            None => Err(error),
+        },
     }
+}
+
+/// The refusal words of a Host outcome frame (a no-record or Host outcome), read through the Host's own
+/// outcome inspection; `None` when the frame is not an outcome. Diagnostic only: it decides nothing.
+pub(crate) fn outcome_words(
+    operator: &PrivateOperator,
+    directory: &Path,
+    name: &str,
+    frame: &[u8],
+) -> io::Result<Option<String>> {
+    use crate::host_operations::{RESPONSE_HOST_OUTCOME, RESPONSE_NO_RECORD};
+    use crate::lifecycle_receipt_lookup::OUTCOME_TAG;
+    use crate::lifecycle_v3_native::framed_payload;
+    let outcome = framed_payload("lifetime planning outcome", frame, RESPONSE_NO_RECORD, OUTCOME_TAG)
+        .or_else(|_| framed_payload("lifetime planning outcome", frame, RESPONSE_HOST_OUTCOME, OUTCOME_TAG));
+    let Ok(payload) = outcome else { return Ok(None) };
+    let path = write_new(directory, &format!("{name}-outcome.bin"), payload)?;
+    let bytes = operator.tool("inspect", "outcome", &path, &directory.join(format!("{name}-outcome.json")))?;
+    let view: Value = serde_json::from_slice(&bytes)?;
+    Ok(Some(crate::dispatch_fence::refusal_words(&view)))
 }
 
 fn pair(left: &[u8], right: &[u8]) -> io::Result<Vec<u8>> {
