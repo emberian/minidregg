@@ -5303,6 +5303,16 @@ def verifyStart (config : Config) {store : DurableHistory.StoreIdentity}
     | some (.error failure) => return .error failure
     | some (.ok verified) => extendVerified config reader verified target
 
+/-- `verifyStart` over the Store's own chained open: the walk's target is the open itself, so
+neither a second full open (`loadChained` again) nor the whole-prefix comparison of
+`extendVerified` is paid. -/
+def verifyStartChained (config : Config) {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader rootBytes store) (chained : DurableReceiverIO.Chained rootBytes)
+    (timing : AuditTiming.Handle := none) : IO (Except Failure (Verified config chained.loaded)) := do
+  match ← verifyFrom config reader chained timing with
+  | none => verifyLoaded config reader chained.loaded timing
+  | some result => return result
+
 end Minidregg.Kernel.NativeHostReplay
 
 /-- info: 'Minidregg.Kernel.NativeHostReplay.AdmittedReplay.append' depends on axioms: [propext, Classical.choice, Quot.sound] -/
