@@ -21,7 +21,7 @@ try:
                 m.st_mode & 0o7022 == 0 and 0 < m.st_size <= 262144):
             raise ValueError('controller setup companion custody refused')
         code = source.read(262145)
-    if hashlib.sha256(code).hexdigest() != '62a56065c499bae3eb78e422f256fa6becf1961c38f0370e75dbeb37100ed5f0':
+    if hashlib.sha256(code).hexdigest() != '3d3409431e0d4152a623ac057fcbdd13c77b5639b8fef09b5cb741c0aa23953d':
         raise ValueError('controller setup companion code pin differs')
 except (OSError, ValueError) as error:
     sys.exit(str(error))
@@ -71,6 +71,23 @@ safe_root_dir() {
 safe_root_dir "$registry_dir"
 safe_root_dir /var/lib/mini-spk-worlds
 safe_root_dir /usr/local/libexec
+# A host whose /var/lib/mini-spk-worlds is not on a project-quota filesystem (a plain ext4 root, a
+# container's overlay) names a dedicated prjquota-mounted directory in the root-owned one-line file
+# $registry_dir/vars-backing. Each world's `vars` is then a bind mount of $backing/<store>, so the
+# helper's volumes (deploy/spk-host/VOLUMES.md) live on that filesystem while every other path of the
+# world stays where it is. Absent the file, `vars` is a plain directory of the grains root.
+vars_backing=
+if [[ -e $registry_dir/vars-backing ]]; then
+  [[ -f $registry_dir/vars-backing && ! -L $registry_dir/vars-backing && $(stat -c '%u:%a' "$registry_dir/vars-backing") == 0:644 ]] \
+    || { echo 'vars-backing custody refused' >&2; exit 1; }
+  vars_backing=$(<"$registry_dir/vars-backing")
+  [[ $vars_backing == /* && $vars_backing != *$'\n'* ]] && safe_root_dir "$vars_backing" \
+    && /usr/bin/mountpoint -q -- "$vars_backing" || { echo "vars-backing $vars_backing is not an absolute mountpoint under root custody" >&2; exit 1; }
+fi
+release_vars() { # STORE: unmount the world's bind mount and drop its backing directory (empty by then)
+  if /usr/bin/mountpoint -q -- "$root/vars"; then umount -- "$root/vars"; fi
+  if [[ -n $vars_backing && -d $vars_backing/$1 ]]; then rmdir -- "$vars_backing/$1"; fi
+}
 if [[ $action == remove ]]; then
   [[ ! -e $root/controller && ! -L $root/controller ]] || {
     echo 'root cleanup refuses allocated controller; use controller-remove first' >&2; exit 1;
@@ -91,6 +108,7 @@ if [[ $action == remove ]]; then
     done <"$root/bwrap-acl-grants"
   fi
   rm -f "$rule" "$registry"
+  release_vars "$store"
   rm -rf -- "$root"
   operator_kept=0
   for registered in "$registry_dir"/*.json; do
@@ -145,6 +163,7 @@ rollback() {
     grep -vx "$op_uid" "$operator_grants" >"$operator_grants.new" || true; mv -f "$operator_grants.new" "$operator_grants"
   fi
   rm -f "$rule" "$registry"
+  release_vars "$store" || true
   rm -rf -- "$root"
   [[ $created_helper == 0 ]] || rm -f "$helper"
   exit "$result"
@@ -162,6 +181,12 @@ install -d -o root -g root -m 755 "$root" "$root/attest"
 install -d -o root -g root -m 700 "$root/volumes" "$root/volume-custody"
 install -o root -g root -m 600 /dev/null "$root/volume-custody/verbs.lock"
 install -d -o root -g root -m 711 "$root/vars"
+if [[ -n $vars_backing ]]; then
+  install -d -o root -g root -m 711 "$vars_backing/$store"
+  mount --bind -- "$vars_backing/$store" "$root/vars"
+  # The bind shows the backing filesystem's type: refuse here, by name, rather than at the first volume.
+  case $(stat -f -c '%T' "$root/vars") in ext2/ext3|ext4|xfs) ;; *) echo "vars-backing $vars_backing is not ext4 or xfs" >&2; exit 1;; esac
+fi
 install -d -o "$op_uid" -g "$op_gid" -m 700 "$root/broker" "$root/$store" "$root/runtime-$store"
 install -d -o "$op_uid" -g "$op_gid" -m 755 "$root/spk" "$root/spk/packages"
 install -d -o "$op_uid" -g "$op_gid" -m 700 "$root/spk/inbox"
