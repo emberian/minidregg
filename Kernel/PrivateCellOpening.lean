@@ -58,7 +58,7 @@ open Minidregg.Kernel.PrivateCellReceiver (CustodyDecode bits)
 open Minidregg.Compiler.PrivateCellIndex (indexEntries valueBytes)
 open Minidregg.Compiler.PrivateCellRoot (privateRoot outerRoot outerCustomization kindCtx maskOf deployedDig hashedAddrBits
   addressHash addressCustomization nodeCustomization Path pathDig pathNodeBytes pathNodeBytes_injective contentBytes
-  contentBytes_injective contentDigest contentCustomization paths paths_length output_eq_of_digest_eq)
+  contentBytes_injective contentDigest contentCustomization paths paths_length output_eq_of_digest_eq Inner)
 open Minidregg.Compiler.Tower256ConcreteBackend (StreamCodec digestStream)
 open Minidregg.Theory.AuthTrie (NodeIn Reveal revealVerify lastVal revealFor canon mem_canon entries tree
   CollisionAmong reveal_sound reveal_complete revealFor_answer)
@@ -74,12 +74,12 @@ abbrev pathKey (a : Address (CanonicalCellRegistry.layout kind)) : Path :=
   ⟨paths wire (kindTag kind) a, paths_length wire (kindTag kind) a⟩
 
 /-- The canonical digest of a store's private index (inside the outer commitment). -/
-abbrev innerRoot (S : Store (CanonicalCellRegistry.layout kind)) : Digest :=
+abbrev innerRoot (S : Store (CanonicalCellRegistry.layout kind)) : Inner :=
   Theory.AuthTrie.root (deployedDig wire (kindTag kind)) (bits wire) 516 (indexEntries wire S)
 
 /-- The index's path-keyed image: each canonical entry as its path and its content digest. Every
 key and value has a fixed size. -/
-def imageEntries (S : Store (CanonicalCellRegistry.layout kind)) : List (Path × Digest) :=
+def imageEntries (S : Store (CanonicalCellRegistry.layout kind)) : List (Path × Inner) :=
   (canon (indexEntries wire S)).map fun kv => (pathKey wire kv.1, contentDigest wire kv.1 kv.2)
 
 theorem entries_image (S : Store (CanonicalCellRegistry.layout kind)) :
@@ -95,7 +95,7 @@ theorem innerRoot_image (S : Store (CanonicalCellRegistry.layout kind)) :
     rfl (fun _ _ => rfl) (fun _ _ => rfl)]
   rfl
 
-theorem mem_imageEntries {S : Store (CanonicalCellRegistry.layout kind)} {k : Path} {d : Digest} :
+theorem mem_imageEntries {S : Store (CanonicalCellRegistry.layout kind)} {k : Path} {d : Inner} :
     (k, d) ∈ imageEntries wire S ↔
       ∃ a vb, lastVal (indexEntries wire S) a = some vb ∧ k = pathKey wire a ∧ d = contentDigest wire a vb := by
   simp only [imageEntries, List.mem_map, Prod.mk.injEq]
@@ -121,11 +121,11 @@ one reveal of the path-keyed image per reader prefix. Every sibling, key and val
 fixed size: an early-stop terminal is a path and a content digest, never a hidden value. -/
 structure Witness where
   mask : List UInt8
-  inner : Digest
-  reveals : List Bool → Reveal Path Digest Digest
+  inner : Inner
+  reveals : List Bool → Reveal Path Inner Inner
 
 /-- An address and value of a store, as the image pair a reveal answers. -/
-def ImagePair (V : Store (CanonicalCellRegistry.layout kind)) (k : Path) (d : Digest) : Prop :=
+def ImagePair (V : Store (CanonicalCellRegistry.layout kind)) (k : Path) (d : Inner) : Prop :=
   ∃ a value, V a = some value ∧ k = pathKey wire a ∧ d = contentDigest wire a (valueBytes wire a value)
 
 /-- The reveals answer exactly the view's image: a pair is answered at some reader prefix iff it
@@ -163,7 +163,7 @@ def AddressCollisionOf (S : Store (CanonicalCellRegistry.layout kind)) : Prop :=
 the walked path and selected subtree of the image's canonical tree, the reveal's climb and member
 tree) whose distinct node bytes collide under the node customization. -/
 def NodeCollisionOf (S : Store (CanonicalCellRegistry.layout kind)) (fields : Option (Finset CellField))
-    (reveals : List Bool → Reveal Path Digest Digest) : Prop :=
+    (reveals : List Bool → Reveal Path Inner Inner) : Prop :=
   ∃ p ∈ readerPrefixes fields, ∃ x y,
     Theory.AuthTrie.revealNodes pathDig Subtype.val 516 (entries Subtype.val (imageEntries wire S)) p (reveals p) x ∧
     Theory.AuthTrie.revealNodes pathDig Subtype.val 516 (entries Subtype.val (imageEntries wire S)) p (reveals p) y ∧
@@ -191,9 +191,8 @@ def DeployedCollision (S : Store (CanonicalCellRegistry.layout kind)) (st : Stat
     OuterCollisionOf wire S w
 
 /-- The bytes the outer commitment hashes: the context, the mask and the index digest. -/
-def outerBytes (mask : List UInt8) (inner : Digest) : List UInt8 :=
-  (StreamCodec.product (StreamCodec.list StreamCodec.byte)
-    (StreamCodec.product (StreamCodec.list StreamCodec.byte) digestStream)).encode (kindCtx wire, mask, inner)
+def outerBytes (mask : List UInt8) (inner : Inner) : List UInt8 :=
+  Compiler.PrivateCellRoot.outerInput (kindCtx wire) mask inner
 
 /-- An outer collision is a cSHAKE256 collision under the outer customization on two distinct
 byte strings. -/
@@ -203,9 +202,44 @@ theorem outerCollision_is_hash {S : Store (CanonicalCellRegistry.layout kind)} {
       Sp800185Cshake256.hash outerCustomization (outerBytes wire w.mask w.inner) =
         Sp800185Cshake256.hash outerCustomization (outerBytes wire (maskOf wire S) (innerRoot wire S)) := by
   refine ⟨fun same => collision.1 ?_, output_eq_of_digest_eq collision.2⟩
-  have := StoreCodec.streamEncode_injective _ same
-  simp only [Prod.mk.injEq, true_and] at this
-  rw [this.1, this.2]
+  obtain ⟨-, hmask, hinner⟩ := Compiler.PrivateCellRoot.outerInput_injective same
+  rw [hmask, hinner]
+
+/-! ## The public shape under the framed custody decode -/
+
+open Minidregg.Kernel.PrivateCellReceiver (framedDecode custodyBytes custodyFrame framedDecode_iff custodyBytes_split)
+
+theorem list_byte_encode (bytes : List UInt8) :
+    (StreamCodec.list StreamCodec.byte).encode bytes = StreamCodec.nat.encode bytes.length ++ bytes := by
+  simp only [StreamCodec.list]
+  congr 1
+  induction bytes with
+  | nil => rfl
+  | cons b bs ih =>
+    show StreamCodec.byte.encode b ++ StreamCodec.encodeMany StreamCodec.byte bs = b :: bs
+    rw [ih]; rfl
+
+/-- The public frame of a cell's outer input: the kind's context, the mask's length, and the
+custody frame of the cell and version. -/
+def outerFrame (cell : List UInt8) (v : Nat) : List UInt8 :=
+  (StreamCodec.list StreamCodec.byte).encode (kindCtx wire) ++
+    StreamCodec.nat.encode ((custodyFrame cell v).length + 32) ++ custodyFrame cell v
+
+/-- **The outer input has a public shape**: under the framed custody decode, an accepted
+witness's outer input is the public frame of the statement's cell and version, then the 32
+secret octets, then the index digest's 32 bytes. Only those 64 octets are private. -/
+theorem framed_outerBytes {st : Statement (kind := kind)} {w : Witness}
+    (holds : OpeningRel wire framedDecode st w) :
+    ∃ s : Fin (256 ^ 32), w.mask = custodyBytes st.cell st.version s ∧
+      outerBytes wire w.mask w.inner =
+        outerFrame wire st.cell st.version ++ ((Minidregg.Compiler.Tower256ConcreteBackend.fixedStream 32).encode s ++ w.inner.bytes) := by
+  obtain ⟨-, ⟨secret, decoded⟩, -⟩ := holds
+  obtain ⟨s, -, hmask⟩ := (framedDecode_iff _ _ _ _).mp decoded
+  refine ⟨s, hmask, ?_⟩
+  have hlen : ((Minidregg.Compiler.Tower256ConcreteBackend.fixedStream 32).encode s).length = 32 :=
+    Minidregg.Compiler.Tower256ConcreteBackend.fixedStream_encode_length _ _
+  simp only [outerBytes, Compiler.PrivateCellRoot.outerInput, StreamCodec.product, outerFrame, hmask,
+    custodyBytes_split, list_byte_encode, List.length_append, hlen, List.append_assoc]
 
 /-! ## Exactness and completeness -/
 
@@ -215,7 +249,7 @@ entries. -/
 theorem imageUnion_iff (selected : CanonicalCellRegistry.wire? kind = some wire)
     (S : Store (CanonicalCellRegistry.layout kind)) (fields : Option (Finset CellField))
     (admitted : ∀ a, S a ≠ none → PrivateCellScope.addressFits 256 kind a = true)
-    (reveals : List Bool → Reveal Path Digest Digest)
+    (reveals : List Bool → Reveal Path Inner Inner)
     (answers : ∀ p ∈ readerPrefixes fields, ∀ k d, (k, d) ∈ (reveals p).answer Subtype.val p ↔
       (k, d) ∈ imageEntries wire S ∧ k.1.take p.length = p) :
     ∀ k d, (∃ p ∈ readerPrefixes fields, (k, d) ∈ (reveals p).answer Subtype.val p) ↔
@@ -255,7 +289,7 @@ theorem view_eq_of_images {fields : Option (Finset CellField)} {V S : Store (Can
         by_cases bytes : contentBytes wire a (valueBytes wire a x) = contentBytes wire a' (valueBytes wire a' y)
         · obtain ⟨rfl, values⟩ := contentBytes_injective wire bytes
           rw [hy, StoreCodec.streamEncode_injective _ values]
-        · exact absurd ⟨a, x, a', y, hV, live_of_filterKeys hy, bytes, output_eq_of_digest_eq digests⟩ collision
+        · exact absurd ⟨a, x, a', y, hV, live_of_filterKeys hy, bytes, digests⟩ collision
     | none =>
         cases hS : Minidregg.Theory.SparseMap.filterKeys (Visible fields kind) S a with
         | none => rfl
@@ -264,7 +298,7 @@ theorem view_eq_of_images {fields : Option (Finset CellField)} {V S : Store (Can
             by_cases bytes : contentBytes wire a'' (valueBytes wire a'' x) = contentBytes wire a (valueBytes wire a y)
             · obtain ⟨rfl, _⟩ := contentBytes_injective wire bytes
               rw [hV] at hx; cases hx
-            · exact absurd ⟨a'', x, a, y, hx, live_of_filterKeys hS, bytes, output_eq_of_digest_eq digests.symm⟩ collision
+            · exact absurd ⟨a'', x, a, y, hx, live_of_filterKeys hS, bytes, digests.symm⟩ collision
 
 /-- **The relation is exact against the committed store.** A statement whose root is the private
 root of a gated store, with a witness in the relation, answers exactly that store's view and names
@@ -299,7 +333,7 @@ theorem openingRel_exact (selected : CanonicalCellRegistry.wire? kind = some wir
       Subtype.val 516 (entries Subtype.val (imageEntries wire S)) p (w.reveals p))
   · obtain ⟨p, member, x, y, hx, hy, ne, digest⟩ := node
     exact Or.inr (Or.inr (Or.inl ⟨p, member, x, y, hx, hy, fun bytes => ne (pathNodeBytes_injective bytes),
-      output_eq_of_digest_eq digest⟩))
+      digest⟩))
   push_neg at node
   have exactAnswers : ∀ p ∈ readerPrefixes st.fields, ∀ k d, (k, d) ∈ (w.reveals p).answer Subtype.val p ↔
       (k, d) ∈ imageEntries wire S ∧ k.1.take p.length = p :=
@@ -351,5 +385,6 @@ theorem honest_rel (selected : CanonicalCellRegistry.wire? kind = some wire) (de
 #assert_axioms openingRel_exact
 #assert_axioms honest_rel
 #assert_axioms outerCollision_is_hash
+#assert_axioms framed_outerBytes
 
 end Minidregg.Kernel.PrivateCellOpening

@@ -307,10 +307,10 @@ plus one path, padded to the public key-bit length `L`. -/
 
 /-- The published commitment of one accepted cell version: one outer hash over
 the version context, a fresh mask and the private trie root. -/
-def maskedTrieCommitment {K V D Context Mask : Type} [DecidableEq K]
+def maskedTrieCommitment {K V D Context Mask R : Type} [DecidableEq K]
     (dig : Minidregg.Theory.AuthTrie.NodeIn K V D → D) (bitsOf : K → List Bool) (L : Nat)
-    (outer : Context → Mask → D → D) (context : Context) (mask : Mask)
-    (entries : List (K × V)) : D :=
+    (outer : Context → Mask → D → R) (context : Context) (mask : Mask)
+    (entries : List (K × V)) : R :=
   outer context mask (Minidregg.Theory.AuthTrie.root dig bitsOf L entries)
 
 section MaskedTrie
@@ -318,7 +318,7 @@ section MaskedTrie
 open Minidregg.Theory.AuthTrie (NodeIn root lastVal CollisionAmong TreeNode ClimbNode entries canon)
 open Minidregg.Theory.AuthTrie.Cache (PathsInjective build root_lastVal_eq)
 
-variable {K V D Context Mask : Type} [DecidableEq K] [DecidableEq V] [DecidableEq D]
+variable {K V D Context Mask R : Type} [DecidableEq K] [DecidableEq V] [DecidableEq D]
 
 /-- The nodes one binding comparison hashes: the canonical tree over `entries`
 and the climb of the honest opening of `k` built from `entries'`. A collision
@@ -343,7 +343,7 @@ injective `outer` and an injective `dig` (`AuthTrie.spelled`) only the second
 remains with no collision, so lists with different last values must commit
 differently. -/
 def MaskedTrieBinding (dig : NodeIn K V D → D) (bitsOf : K → List Bool) (L : Nat)
-    (outer : Context → Mask → D → D) : Prop :=
+    (outer : Context → Mask → D → R) : Prop :=
   ∀ (lengths : ∀ k, (bitsOf k).length = L) context mask mask' (entries' entries'' : List (K × V)),
     PathsInjective bitsOf entries' → PathsInjective bitsOf entries'' →
     maskedTrieCommitment dig bitsOf L outer context mask entries' =
@@ -353,7 +353,7 @@ def MaskedTrieBinding (dig : NodeIn K V D → D) (bitsOf : K → List Bool) (L :
         CollisionAmong dig (bindingNodes dig bitsOf L lengths entries' entries'' k)
 
 theorem maskedTrieBinding_holds (dig : NodeIn K V D → D) (bitsOf : K → List Bool) (L : Nat)
-    (outer : Context → Mask → D → D) : MaskedTrieBinding dig bitsOf L outer := by
+    (outer : Context → Mask → D → R) : MaskedTrieBinding dig bitsOf L outer := by
   intro lengths context mask mask' entries' entries'' inj inj' _
   by_cases same : (mask, root dig bitsOf L entries') = (mask', root dig bitsOf L entries'')
   · right

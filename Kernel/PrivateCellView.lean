@@ -393,7 +393,7 @@ not local. -/
 theorem viewOpeningExact_deployed {wire : StoreCodec.Wire (CanonicalCellRegistry.layout kind)}
     (selected : CanonicalCellRegistry.wire? kind = some wire) (store : Store (CanonicalCellRegistry.layout kind))
     (fields : Option (Finset CellField))
-    (reveals : List Bool → Reveal (Address (CanonicalCellRegistry.layout kind)) (List UInt8) Digest)
+    (reveals : List Bool → Reveal (Address (CanonicalCellRegistry.layout kind)) (List UInt8) Compiler.PrivateCellRoot.Inner)
     (admitted : ∀ a, store a ≠ none → addressFits 256 kind a = true)
     (accepted : ∀ p ∈ readerPrefixes fields,
       revealVerify (deployedDig wire (kindTag kind)) (keyBits (hashedAddrBits wire 256 addressHash)) (260 + 256)

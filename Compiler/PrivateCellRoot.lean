@@ -8,8 +8,10 @@ address but the blinding, each value as its value bytes), keyed by a 260-bit cla
 by 256 bits of cSHAKE256 of the address's canonical bytes (`paths`). Each node is hashed by
 cSHAKE256 over the bytes of its path-keyed image (`deployedDig = pathDig ∘ nodeImage`): a leaf is
 its 65 packed path bytes and its content digest (cSHAKE256 under `DREGG/PRIVATE-CELL/CONTENT/v1`
-over the framed address bytes and value bytes), a fixed 98 bytes, so a reveal of the image never
-carries a hidden value of unbounded size; `DigestCollision` / `deployedDig_collision`: two
+over the framed address bytes and value bytes). Inner digests are cSHAKE256 outputs framed as
+their 32 bytes (`Inner`), so every node is a fixed size per variant (empty 1, branch 65, leaf 98:
+`pathNodeBytes_length`) and the outer input's length depends only on the context and the mask
+(`outerInput`): neither a hidden value nor a hidden digest changes a hash input's length; `DigestCollision` / `deployedDig_collision`: two
 distinct nodes with one digest are a cSHAKE256 collision on distinct node or content bytes. The root is one outer cSHAKE256 over the kind-level
 context (`kindCtx`: the protocol version and the wire's frame), the blinding bytes (`maskOf`; `[]`
 for an unblinded wire) and the index digest (`privateRoot`).
@@ -97,8 +99,12 @@ theorem nodeBytesWith_injective {D : Type} (child : StreamCodec D) {a b : NodeIn
           rw [this.1, this.2]
 
 def addressCustomization : List UInt8 := "DREGG/PRIVATE-CELL/ADDRESS/v1".toUTF8.toList
-def nodeCustomization : List UInt8 := "DREGG/PRIVATE-CELL/NODE/v1".toUTF8.toList
-def outerCustomization : List UInt8 := "DREGG/PRIVATE-CELL/OUTER/v1".toUTF8.toList
+def nodeCustomization : List UInt8 := "DREGG/PRIVATE-CELL/NODE/v2".toUTF8.toList
+def outerCustomization : List UInt8 := "DREGG/PRIVATE-CELL/OUTER/v2".toUTF8.toList
+
+/-- An inner digest of the private index: a cSHAKE256 output, exactly 32 bytes, framed as
+those bytes (never as a variable-length natural, whose length would depend on the value). -/
+abbrev Inner := Sp800185Cshake256.Output
 
 /-- The address hash: the 256 bits of cSHAKE256 over the bytes. -/
 def addressHash (bytes : List UInt8) : List Bool :=
@@ -160,8 +166,8 @@ theorem contentBytes_injective {a a' : Address L} {v v' : List UInt8}
   exact ⟨(StoreCodec.streamEncode_injective _ bytes).symm, rest.symm⟩
 
 /-- A leaf's content digest: cSHAKE256 under the content customization over its content bytes. -/
-def contentDigest (a : Address L) (v : List UInt8) : Digest :=
-  (Sp800185Cshake256.hash contentCustomization (contentBytes W a v)).digest
+def contentDigest (a : Address L) (v : List UInt8) : Inner :=
+  Sp800185Cshake256.hash contentCustomization (contentBytes W a v)
 
 /-- Eight bits, most significant first, as one byte. -/
 def packByte8 (bits : List Bool) : UInt8 :=
@@ -218,12 +224,17 @@ abbrev Path := {p : List Bool // p.length = 516}
 
 /-- What a path-keyed node digest hashes: a tag byte, then a leaf's 65 packed path bytes and
 its content digest (fixed size), or a branch's two child digests. -/
-def pathNodeBytes : NodeIn Path Digest Digest → List UInt8
+def pathNodeBytes : NodeIn Path Inner Inner → List UInt8
   | .empty => [2]
-  | .leaf p d => 0 :: (packPath p.1 ++ digestStream.encode d)
-  | .branch l r => 1 :: (StreamCodec.product digestStream digestStream).encode (l, r)
+  | .leaf p d => 0 :: (packPath p.1 ++ d.bytes)
+  | .branch l r => 1 :: (l.bytes ++ r.bytes)
 
-theorem pathNodeBytes_injective {x y : NodeIn Path Digest Digest} (same : pathNodeBytes x = pathNodeBytes y) :
+/-- Every node's bytes have a fixed length per variant: empty 1, branch 65, leaf 98. -/
+theorem pathNodeBytes_length (x : NodeIn Path Inner Inner) :
+    (pathNodeBytes x).length = match x with | .empty => 1 | .branch _ _ => 65 | .leaf _ _ => 98 := by
+  cases x <;> simp [pathNodeBytes, packPath_length, Sp800185Cshake256.Output.length_exact]
+
+theorem pathNodeBytes_injective {x y : NodeIn Path Inner Inner} (same : pathNodeBytes x = pathNodeBytes y) :
     x = y := by
   cases x with
   | empty => cases y <;> simp_all [pathNodeBytes]
@@ -234,24 +245,23 @@ theorem pathNodeBytes_injective {x y : NodeIn Path Digest Digest} (same : pathNo
       | leaf p' d' =>
           simp only [pathNodeBytes, List.cons.injEq, true_and] at same
           obtain ⟨paths, digests⟩ := List.append_inj same (by rw [packPath_length, packPath_length])
-          rw [Subtype.ext (packPath_injective p.2 p'.2 paths), StoreCodec.streamEncode_injective _ digests]
+          rw [Subtype.ext (packPath_injective p.2 p'.2 paths), output_eq digests]
   | branch l r =>
       cases y with
       | empty => simp [pathNodeBytes] at same
       | leaf _ _ => simp [pathNodeBytes] at same
       | branch l' r' =>
           simp only [pathNodeBytes, List.cons.injEq, true_and] at same
-          have := StoreCodec.streamEncode_injective _ same
-          simp only [Prod.mk.injEq] at this
-          rw [this.1, this.2]
+          obtain ⟨left, right⟩ := List.append_inj same (by rw [l.length_exact, l'.length_exact])
+          rw [output_eq left, output_eq right]
 
 /-- The path-keyed node digest: cSHAKE256 under the node customization over its bytes. -/
-def pathDig (node : NodeIn Path Digest Digest) : Digest :=
-  (Sp800185Cshake256.hash nodeCustomization (pathNodeBytes node)).digest
+def pathDig (node : NodeIn Path Inner Inner) : Inner :=
+  Sp800185Cshake256.hash nodeCustomization (pathNodeBytes node)
 
 /-- An index node's image: its address replaced by its path, its value bytes by its content
 digest. -/
-def nodeImage : NodeIn (Address L) (List UInt8) Digest → NodeIn Path Digest Digest
+def nodeImage : NodeIn (Address L) (List UInt8) Inner → NodeIn Path Inner Inner
   | .empty => .empty
   | .leaf a v => .leaf ⟨paths W T a, paths_length W T a⟩ (contentDigest W a v)
   | .branch l r => .branch l r
@@ -259,12 +269,12 @@ def nodeImage : NodeIn (Address L) (List UInt8) Digest → NodeIn Path Digest Di
 /-- **The deployed node digest**: the path-keyed digest of the node's image. Every leaf hashes a
 fixed 98 bytes (tag, packed path, content digest), so an early-stop reveal carries no hidden
 payload of unbounded size. -/
-def deployedDig (node : NodeIn (Address L) (List UInt8) Digest) : Digest := pathDig (nodeImage W T node)
+def deployedDig (node : NodeIn (Address L) (List UInt8) Inner) : Inner := pathDig (nodeImage W T node)
 
 /-- **A collision of the deployed digest**, as a collision of cSHAKE256 on distinct inputs: two
 distinct node byte strings under the node customization, or two leaves whose distinct content
 bytes collide under the content customization. -/
-def DigestCollision (x y : NodeIn (Address L) (List UInt8) Digest) : Prop :=
+def DigestCollision (x y : NodeIn (Address L) (List UInt8) Inner) : Prop :=
   (pathNodeBytes (nodeImage W T x) ≠ pathNodeBytes (nodeImage W T y) ∧
       Sp800185Cshake256.hash nodeCustomization (pathNodeBytes (nodeImage W T x)) =
         Sp800185Cshake256.hash nodeCustomization (pathNodeBytes (nodeImage W T y))) ∨
@@ -273,7 +283,7 @@ def DigestCollision (x y : NodeIn (Address L) (List UInt8) Digest) : Prop :=
         Sp800185Cshake256.hash contentCustomization (contentBytes W a' v')
 
 /-- Two distinct index nodes with one deployed digest are a `DigestCollision`. -/
-theorem deployedDig_collision {x y : NodeIn (Address L) (List UInt8) Digest} (ne : x ≠ y)
+theorem deployedDig_collision {x y : NodeIn (Address L) (List UInt8) Inner} (ne : x ≠ y)
     (same : deployedDig W T x = deployedDig W T y) : DigestCollision W T x y := by
   by_cases bytes : pathNodeBytes (nodeImage W T x) = pathNodeBytes (nodeImage W T y)
   · right
@@ -287,21 +297,40 @@ theorem deployedDig_collision {x y : NodeIn (Address L) (List UInt8) Digest} (ne
         | branch _ _ => simp [nodeImage] at images
         | leaf a' v' =>
             simp only [nodeImage, NodeIn.leaf.injEq] at images
-            refine ⟨a, v, a', v', rfl, rfl, fun content => ne ?_, output_eq_of_digest_eq images.2⟩
+            refine ⟨a, v, a', v', rfl, rfl, fun content => ne ?_, images.2⟩
             obtain ⟨rfl, rfl⟩ := contentBytes_injective W content
             rfl
-  · exact Or.inl ⟨bytes, output_eq_of_digest_eq same⟩
+  · exact Or.inl ⟨bytes, same⟩
 
 /-- A store's kept private index. -/
 abbrev Index := Theory.AuthTrie.Cache (deployedDig W T) (paths W T) 516
 
 /-! ## The root -/
 
+/-- What the outer commitment hashes: the context and the mask as framed byte lists, then the
+index digest's 32 bytes. Its length is a function of the context's and the mask's lengths. -/
+def outerInput (ctx mask : List UInt8) (inner : Inner) : List UInt8 :=
+  (StreamCodec.product (StreamCodec.list StreamCodec.byte) (StreamCodec.list StreamCodec.byte)).encode
+    (ctx, mask) ++ inner.bytes
+
+theorem outerInput_injective {ctx mask ctx' mask' : List UInt8} {inner inner' : Inner}
+    (same : outerInput ctx mask inner = outerInput ctx' mask' inner') :
+    ctx = ctx' ∧ mask = mask' ∧ inner = inner' := by
+  simp only [outerInput] at same
+  have hlen : (StreamCodec.product (StreamCodec.list StreamCodec.byte) (StreamCodec.list StreamCodec.byte)).encode
+      (ctx, mask) = (StreamCodec.product (StreamCodec.list StreamCodec.byte) (StreamCodec.list StreamCodec.byte)).encode
+      (ctx', mask') := by
+    have := congrArg List.length same
+    simp only [List.length_append, inner.length_exact, inner'.length_exact] at this
+    exact (List.append_inj same (by omega)).1
+  have pair := StoreCodec.streamEncode_injective _ hlen
+  simp only [Prod.mk.injEq] at pair
+  rw [hlen] at same
+  exact ⟨pair.1, pair.2, output_eq (List.append_cancel_left same)⟩
+
 /-- The outer commitment: cSHAKE256 over the context, the mask and the index digest. -/
-def outerRoot (ctx mask : List UInt8) (inner : Digest) : Digest :=
-  (Sp800185Cshake256.hash outerCustomization
-    ((StreamCodec.product (StreamCodec.list StreamCodec.byte)
-      (StreamCodec.product (StreamCodec.list StreamCodec.byte) digestStream)).encode (ctx, mask, inner))).digest
+def outerRoot (ctx mask : List UInt8) (inner : Inner) : Digest :=
+  (Sp800185Cshake256.hash outerCustomization (outerInput ctx mask inner)).digest
 
 /-- The private-cell protocol version, bound into every kind's context. -/
 def protocolVersion : Nat := 1
