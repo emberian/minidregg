@@ -9,9 +9,17 @@ retired-agent hook names the live integrator to anyone who messages the old id).
 integrator; the integrator merges onto `integration/staging`, cuts batch candidates on hbox, gates them, moves main to
 gated candidates and names candidates to infra and the explorer.
 
-## Now (2026-10-31 06:00 EDT)
+## Now (2026-10-31 07:40 EDT)
 
-- **main = 7978ddfdd** = gated batch 3 a4cb65af3 merged with main's two deploy/oracle commits (394806588, 135d3c9e7).
+- **main = 83e926874** = gated batch 4 b9450147f merged with main 7978ddfdd.
+- **Batch 4 b9450147f: GATE GREEN, the rehearsal-3 candidate.** hbox tour 73/73, enrol, composed; forge composed c-b945-d1 all
+  phases; j14-apps PASS with the deploy-script hotpatch HARNESS=9fdef19bd (bwrap ACL 11a4f4ac6: controller uid gets its own
+  execute entry on /usr/local/libexec/mini-grain-bwrap, app-range entries claimed per world; grant_acl stops at the world
+  root c76dbe0c7; gate15 = gate14 + j14 socket parent 711; /ci is 711). Umbrellas all green; fixtures 5c00cc4f3 merged.
+  Flatness: submit_cpu 106 -> 380 (3.6x), propose_cpu 4.05x; walls and get PASS.
+- **Batch 5 1c151fce4 BUILDING** (07:29, integ-build6): exorcism, module-cost, hot-path authority, app-reds route/teardown/ACL.
+- Known leak: residents started by j14-oracle application hooks' query step outlive the run (settings under
+  step/oracle/application/hooks/*/002-query); app-reds owns the fix; the integrator stops them by exact PID after each j14.
 - **Batch 3 a4cb65af3: GATE GREEN.** Forge distinct composed c-a4cb-d2 PASSES every phase (rooms, churn, documents,
   apps, connector, residents, restart, store-restart); hbox gate13 tour 73/73, enrol, j14-apps PASS (5 rows); umbrellas
   green except TokenCensus (ConsentAnchor L1 witness, fixed in batch 4). Fixtures re-recorded d546395a9 (merged). It is
@@ -102,7 +110,8 @@ Every Lean-statement sha gets an audit round from a4d9a6f4cba4855ca before it ri
 | be4ef7510 | GATE GREEN (rehearsal 3 original ship) |
 | a4cb65af3 | GATE GREEN (batch 3); main's base; fallback ship |
 | eca98bde7-resvar2(-zai) | overlays of batch 2 with the resident /var fix (and Z.AI); forge demo build |
-| b9450147f | BUILDING (batch 4; rehearsal-3 candidate if green) |
+| b9450147f | GATE GREEN (batch 4, with deploy hotpatch 9fdef19bd): rehearsal-3 candidate; main's base |
+| 1c151fce4 | BUILDING (batch 5) |
 
 ## Open reds and owners
 
