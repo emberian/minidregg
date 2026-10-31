@@ -51,8 +51,9 @@ theorem patch_frame (store : PayCell.PayStore) (clock : ClockCell.Clock)
     (outside : address ≠ PayCell.computeActivationAddress) :
     Patch.run store (patch clock legacyThroughDay history) address = store address := by
   apply Patch.run_frame
-  simpa [patch, Patch.writeFootprint, Op.writeAddress?, PayCell.computeActivationAddress]
-    using outside
+  have hsimpa := outside
+  simp [patch, Patch.writeFootprint, Op.writeAddress?, PayCell.computeActivationAddress] at hsimpa ⊢
+  exact hsimpa
 
 inductive Reject where
   | legacyDayNotClosed

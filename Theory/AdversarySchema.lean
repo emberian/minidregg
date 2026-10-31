@@ -16,7 +16,7 @@ Changes from the ancestor: namespace (`Metatheory.Adversary` → `Minidregg.Theo
 explicit `universe u v`; axiom pins are `#guard_msgs` over `#print axioms` with the
 ancestor's exact output.
 -/
-import Mathlib.Logic.IsEmpty.Basic
+import Mathlib.Basic.IsEmpty.Basic
 
 namespace Minidregg.Theory.Adversary
 

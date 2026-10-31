@@ -6,7 +6,7 @@ public import Effects.Revival.HostedConversation
 @[expose] public section
 namespace Minidregg.Effects.Revival.HostedConversation
 structure Binding where
-  app subject session appGeneration sessionGeneration : Nat
+  (app subject session appGeneration sessionGeneration : Nat)
   deriving DecidableEq
 structure Intent where
   binding : Binding
