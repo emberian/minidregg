@@ -119,7 +119,8 @@ fn app_card(app: &Value, writes: bool, level: u8) -> String {
     let name = text("name");
     let mark = escape(&app["name"].as_str().unwrap_or("?").chars().next().unwrap_or('?').to_string());
     let state = escape(app["verdict"]["state"].as_str().unwrap_or("unchecked"));
-    let reason = escape(app["verdict"]["reason"].as_str().unwrap_or("No additional verdict details reported."));
+    // What the verdict means for the member, and what they can still do (`apps::verdict_says`).
+    let reason = escape(app["verdict"]["says"].as_str().or(app["verdict"]["reason"].as_str()).unwrap_or("No additional verdict details reported."));
     let categories = app["categories"].as_array().into_iter().flatten().filter_map(Value::as_str)
         .map(|c| format!("<span class=\"category\">{}</span>", escape(c))).collect::<String>();
     let install = if writes {
