@@ -1192,6 +1192,7 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 action => flags.extend([flag("action", action), flag("name", p.arg(0))]),
             }
             if p.has("--lose-reply-once") { flags.push(flag("lose-reply-once", "true")); }
+            if p.has("--again") { flags.push(flag("again", "true")); }
             for (name, value) in &p.flags {
                 if let Some(value) = value { flags.push(flag(&name[2..], value.clone())); }
             }
