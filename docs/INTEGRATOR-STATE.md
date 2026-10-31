@@ -126,11 +126,12 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 
 ## Reports owed
 
-- To root: batch 8 READY and its gate15 verdict (when it lands), in the integrator's next return.
+- To root: batch 8 READY and its gate15 verdict (when it lands), in the integrator's next return. Also: the install trust-boundary ruling (root may overrule).
 - Batch 8 gate15 verdict to infra, explorer, perf-apps; any red to its owner with a signature.
 
 ## Reports sent (do not resend)
 
+- 10-31 12:35: perf-apps: keep the broker parse, no reorder (ruling).
 - 10-31 12:25: app-reds: integrator runs the codec overlay, criterion, /tank note. perf-apps 106b73251 merged; op66 to
   hot-path. Exorcist a97dba51f72535cb9: 2344400ac merged (23cf6bdd3).
 - 10-31 12:15: app-reds: codec experiment ack, batch 8 j14 = H1b, c-acc7cf-hp2 down.
@@ -199,6 +200,9 @@ Every Lean-statement sha gets an audit round from a4d9a6f4cba4855ca before it ri
   needs the next cut, but Rust fixes may be overlaid onto a candidate copy to test between cuts. No single-fix cuts.
 - **Stale leftovers**: our own fleet's leftover processes may be stopped by exact PID after reading each command line
   (root, relaying ember, 10-30); everything else needs a PID file or ember's word.
+- **Install trust boundary** (integrator, 10-31 12:35, flagged to root): the root broker's independent SPK parse/verify
+  (1.9 s) stays; `grain install` is not reordered to publish before qualification ("refused before any effect" holds).
+  Cheaper root-side parsing is welcome; trusting an operator-side verification record is not.
 - Flatness (law 17) is reported, never gating. No rehearsal ships until ember says; then only a fully green gate with no
   demo-path product red.
 - Split tenancy: one shared consent resident and one shared codec Host per box are approved. Egress gateway and Oracle7: held.
