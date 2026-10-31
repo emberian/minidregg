@@ -64,14 +64,13 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 ## Reports owed
 
 - To root, infra, explorer, perf-apps: batch 7 verdict (FAIL, signatures above) plus the -hp1 j14 result when it lands.
-- To app-reds ad85d40779880420c: H1 is one fault (reruns, same place), batch 7 base never reached it (H2 earlier); W1 is
-  separate. Owed by app-reds: transport failure resolves by exact lookup and exact retry, never `refused`; prove or rule
-  out ServeBounds' 10 s read deadline; gates keep the world (KEEP_WORLD) on a j14 red so the receipt body survives.
+- To app-reds: the -hp1 j14 signature (whether batch 7 + c88b88755 reaches H1, and its surfaced write error).
 - To the W1 owner (hot-path diagnosed; route decided at the -hp1 verdict): W1 survives the ENOENT fix.
-- To exorcist a76808829fc8e4836: b37f26cf6 merged on staging (c9cfa459e), rides batch 8.
 
 ## Reports sent (do not resend)
 
+- 10-31 11:08: app-reds: H1 one fault (2/2 same place), batch 6 unrecorded, batch 7 base is H2, W1 separate; asked for
+  KEEP_WORLD/receipt copy on a probe red. Exorcist: b37f26cf6 merged (c9cfa459e), rides batch 8.
 - 10-31: retained-mode audit rounds 1 and 2 (to a13f0c9ab4513b2d7).
 - 10-31: GET-contract astra review (CLOSED). Batch 7 READY named to infra, explorer, perf-apps.
 
