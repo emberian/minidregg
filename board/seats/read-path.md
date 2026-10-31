@@ -1,7 +1,8 @@
 # Seat: read-path
 
 Agent: a97dba51f72535cb9 (the exorcist, distilled once)
-Worktree: /Users/ember/dev/minidregg-lanes/exorcism (detached on `main`; commits push to `main`)
+Worktree: /Users/ember/dev/minidregg-lanes/exorcism (detached on `main`; commits push to `main`); Lean checks in
+persvati:/home/ember/mdpool/lanes/read-path (packages shared with the seed; `export PATH=$HOME/.elan/bin:$PATH`)
 Owns: The Host's read and query ops (op 4 challenge, op 5 signed read, the read half of op 144), the codec
 resident and its read inspections, the client's read path (`Flow::query`, `query_retained`, `signed_view`,
 `read_scratch`, the read file bus `mini_sdk::attempt`), `doc show` and `doc history` rendering.
@@ -42,6 +43,9 @@ rounds, and move measurement to persvati's standing world when it exists.
   runs over it; `Local` is bytes; read-path codec inspections are `inspect_bytes`. Per read: openat 53 to 16,
   write 30 to 4, unlink 15 to 0, linkat 13 to 0; resident CPU 3.5-4.4 to 2.6-3.9 ms.
 - dde0f4463: a fresh memory attempt asks the disk nothing (statx 57 to 44 per read).
+- a128a7497: signature admission hands the controller its state and registry as values (`prepareDecoded`,
+  `@[csimp] prepare_eq_fast`), the envelope decoded once, `registryDigest` seven bytes per big multiplication
+  (`@[csimp] registryDigest_eq_fast`); checked on persvati (three modules), not yet measured.
 - 143caf2fc: op 5 works out each grant's selection, request and header once (`GrantPlan`, `challengePlanned`,
   `challengePlanned_exact`); measurement pending (native-loop overlay on batch 9, /ci/exo/lean/nl1.log).
 - 697d8dd4f: `doc show` leaves an identical seen/NAME.json in place (its rename was 9% of the resident on ZFS).
@@ -58,15 +62,8 @@ rounds, and move measurement to persvati's standing world when it exists.
   /home/hbox/lanes/integ/candidates/997905c0bc9c85086324d02c46abeeab3273f6e2. Then two scratch worlds, before
   (batch 9) and after (the overlay), Host CPU per `doc show` alternated. Moves to persvati once build-loop
   announces it.
-- Written, not yet checked, one batch for one native build (dregg-build2 or persvati, whichever build-loop
-  announces first); patches in /private/tmp/claude-501/-Users-ember-dev-minidregg/01a192eb-6b7b-70ef-8cad-095d745dabe5/scratchpad/:
-  `registry-digest.patch` (`registryFoldFast`, `@[csimp] registryDigest_eq_fast`, value-identical) and
-  `prepare-fast.patch` (the controller's `prepareDecoded` with `prepare_decoded`/`prepare_encoded`; the Compiler's
-  `prepareFast`, `@[csimp] prepare_eq_fast`: the envelope decoded once, the state and registry handed as values,
-  not encoded and decoded back; `CheckedSignature` unchanged). They stack. Check: `lake build
-  Kernel.CredentialSignedEnvelopeController Compiler.CredentialSignatureAdmission
-  Assurance.CredentialSignedEnvelopeEndpoint`, then the native build with 143caf2fc, measured against an unchanged
-  base (Host CPU per `doc show`, alternated worlds).
+- a128a7497 and 143caf2fc await one native Host build (dregg-build2 when build-loop announces it) and a
+  measurement of Host CPU per `doc show` against an unchanged base, alternated worlds.
 - hbox trash to clear when hbox returns (root's word): stop w6 and w7 by their PID files and remove them (0.6 G
   each; keep w8), and /home/hbox/lanes/exorcism's Rust target (9.1 G total clone; the pool tree replaces it once
   nothing uncommitted is left there).
