@@ -44,10 +44,10 @@ descriptor.matchesManifest (descriptor.valid: package, 1..64 create commands, co
 manifest.valid: interface ids unique, schemas valid); packageDigest = descriptor.root; imageIdentity = descriptor's;
 volume = volumeId domain app; start binding for START. Facts: descriptor and manifest conjuncts are the same bytes
 that pass on hbox, so the world-dependent ones are phase (app cell not at 0) and the three-resource distinctness.
-Next: split the throw into the failing conjunct's name (Host-only diagnostic, message text only; the decision stays
-`Ingress.shape`) and read it from one install on a world; needs a Lean box to check.
+Done (90fba62e4): shapeClause names the failing conjunct in the refusal text; lane-check clean on bb2. Next: read the
+named clause from one install on a world.
 
 ## Open
 1. Rerun Scrumblr, then Hummingbird and WBO qualify; `mini apps install` measurement on a main-built world.
-2. The op66 conjunct-naming diagnostic above (Lean; unbuilt).
+2. Read the op66 shape clause from one install (diagnostic landed 90fba62e4).
 3. E3/E4, E7, decider side of G2 (host-execution owns Host-turn costs of app create: a0fee5643746e520c).
