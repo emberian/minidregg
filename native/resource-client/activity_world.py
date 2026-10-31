@@ -684,7 +684,8 @@ def demo_economy():
 
     A run is a COMPLETED tally (BEND_ANSWERS answers, then its deadline): `tallyRunCost` is what it consumes,
     `tallyRunReserve` what an account must hold to start one (the purse plus the birth; the unspent purse returns at
-    the end). The grant must complete GRANT_RUNS runs one after another; `concurrentRuns` is how many it holds at once."""
+    the end). The grant must complete GRANT_RUNS runs one after another; `concurrentRuns` is how many it holds at once.
+    A run completes without the member: past its deadline the door's tick delivers the timeout (`bend settle`)."""
     t = {k: int(v) for k, v in TARIFF.items()}
     birth = t['base'] + t['sourceTicks'] * BEND_TICKS + t['replayBytes'] * TALLY_QUOTE['replayBytes'] + t['coreBytes'] * TALLY_QUOTE['coreBytes']
     delivers = BEND_ANSWERS + 1

@@ -613,8 +613,9 @@ fn finish_run(bend: &Bend, name: &str, meta: &Value, transaction: &str, lead: &s
     }
     let registry = bend.ws.root.join("bend").join("objects");
     crate::fsio::ensure_private_dir_all(&registry)?;
-    let _ = crate::fsio::retain_json(&registry.join(format!("{}.json", workspace::ref_file(&object_ref))),
-        &json!({"bend": name, "pin": pin, "object": object, "transaction": transaction, "record": record_cell}));
+    // The object's newest birth is the row (a later run on the same object replaces an ended one's).
+    let row = json!({"bend": name, "pin": pin, "object": object, "transaction": transaction, "record": record_cell});
+    let _ = crate::fsio::replace_private(&registry.join(format!("{}.json", workspace::ref_file(&object_ref))), &row_bytes(&row));
     println!("{line}");
     Ok(())
 }
@@ -706,23 +707,129 @@ fn deliver_cmd(bend: &Bend, mut args: Args) -> Result<()> {
     let view = activity::view(&bend.ws, &json!({"objects": [&object], "births": [{"object": &object, "transaction": &transaction}]}))?;
     // Nothing to deliver (not awaiting; the await not yet decided nor past its deadline) is the Host's
     // view refusing, by name: a refusal ending, not a client error.
-    let (record, await_id) = match deliverable(&view) { Ok(found) => found, Err(e) => return ending(e) };
-    let (payer, payer_cap) = bend.payer(account.as_deref())?;
+    let found = match deliverable(&view) { Ok(found) => found, Err(e) => return ending(e) };
+    match deliver_turn(bend, &object, &transaction, found, account.as_deref())? {
+        Delivery::Refused(e) => ending(e),
+        Delivery::Submitted(name, meta, Err(e)) => ending_for(&name, repeated(&meta, e)),
+        Delivery::Submitted(name, meta, Ok(d)) => report(bend, &name, &meta, None, "bend deliver", d),
+    }
+}
+
+/// A delivery's turn: refused before anything was signed (the quote), or submitted under its fixed
+/// attempt name with its meta and the Host's decision (or the client's error).
+enum Delivery {
+    Refused(String),
+    Submitted(String, Value, Result<Decided>),
+}
+
+/// One deliver turn for the awaiting `(record, await)` of OBJECT's birth TRANSACTION, paid from my account.
+fn deliver_turn(bend: &Bend, object: &str, transaction: &str, (record, await_id): (String, String), account: Option<&str>) -> Result<Delivery> {
+    let (payer, payer_cap) = bend.payer(account)?;
     let mut turn = json!({"kind": "deliver", "record": record, "await": await_id, "account": payer, "accountCapability": payer_cap});
     // The resumed segment runs over the stored checkpoint: when it needs more heap than the
     // escrowed envelope carries, the deliverer adds the difference (`heapUncovered`; priced,
     // paid by me). The Host's read-only quote is the kernel's own `ResumeTail.needed`.
     let quoted = activity::view(&bend.ws, &json!({"quotes": [{"record": &record, "await": &await_id}]}))?;
-    let extra = match extra_heap(&quoted, &record, &await_id) { Ok(extra) => extra, Err(e) => return ending(e) };
+    let extra = match extra_heap(&quoted, &record, &await_id) { Ok(extra) => extra, Err(e) => return Ok(Delivery::Refused(e)) };
     if let Some(heap) = extra {
         turn["extra"] = extra_envelope(heap);
     }
     let name = deliver_name(&await_id);
     let meta = json!({"kind": "deliver", "object": object, "transaction": transaction, "await": await_id});
-    match bend.submit(&name, "deliver", &turn, &meta, false) {
-        Err(e) => ending_for(&name, repeated(&meta, e)),
-        Ok((d, _)) => report(bend, &name, &meta, None, "bend deliver", d),
+    let decided = bend.submit(&name, "deliver", &turn, &meta, false).map(|(d, _)| d);
+    Ok(Delivery::Submitted(name, meta, decided))
+}
+
+/// The registry rows: (reference, bend, object, transaction), from `bend/objects/*.json` (an
+/// admitted `bend run` writes one per object).
+pub(crate) fn registry(root: &Path) -> Vec<(String, String, String, String)> {
+    let mut rows: Vec<_> = fs::read_dir(root.join("bend").join("objects"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .take(256)
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().strip_suffix(".json")?.to_owned();
+            let v: Value = serde_json::from_slice(&fs::read(e.path()).ok()?).ok()?;
+            let s = |k: &str| v[k].as_str().map(str::to_owned);
+            Some((name, s("bend").unwrap_or_default(), s("object")?, s("transaction")?))
+        })
+        .collect();
+    rows.sort();
+    rows
+}
+
+/// The await of a view that is past its deadline: `(record, await)` when the activity awaits and the
+/// height the next turn is judged at is beyond the deadline, so a delivery settles it now (`timedOut`, or
+/// the decider's answer if the slot was decided in time). `None` while it may still be answered, or when
+/// nothing awaits.
+fn overdue(view: &Value) -> Option<(String, String)> {
+    let record = view.pointer("/births/0/record").and_then(Value::as_str)?;
+    let phase = cell_of(view, record)?.pointer("/record/phase")?;
+    if phase.get("kind").and_then(Value::as_str) != Some("awaiting") {
+        return None;
     }
+    let deadline: u128 = phase.pointer("/await/deadline")?.as_str()?.parse().ok()?;
+    let height: u128 = view.get("height")?.as_str()?.parse().ok()?;
+    (height > deadline).then(|| Some((record.to_owned(), phase.pointer("/await/id")?.as_str()?.to_owned()))).flatten()
+}
+
+fn row_bytes(row: &Value) -> Vec<u8> {
+    let mut bytes = serde_json::to_vec_pretty(row).expect("JSON values serialise");
+    bytes.push(b'\n');
+    bytes
+}
+
+/// The view's height when the birth's activity is over (its record retired, or ended or faulted), so a
+/// settle never reads it again; `None` while it awaits.
+fn ended(view: &Value) -> Option<String> {
+    let record = view.pointer("/births/0/record").and_then(Value::as_str)?;
+    let kind = cell_of(view, record).and_then(|c| c.pointer("/record/phase/kind")).and_then(Value::as_str);
+    (kind != Some("awaiting")).then(|| view.get("height").and_then(Value::as_str).unwrap_or("?").to_owned())
+}
+
+/// `bend settle [--account REF]`: deliver every activity this workspace ran (`bend/objects/`) whose await
+/// is past its deadline, so a run reaches its end and its purse returns without anyone typing
+/// `bend deliver`; one line per activity. The door's tick runs it for every enrolled member
+/// (`mini-door-process`), so a tally nobody delivers still completes at its deadline.
+fn settle_cmd(bend: &Bend, mut args: Args) -> Result<()> {
+    let account = opt(&mut args, "account")?;
+    args.finish()?;
+    let mut settled = 0;
+    let rows = bend.ws.root.join("bend").join("objects");
+    for (name, _, object, transaction) in registry(&bend.ws.root) {
+        if decimal_arg(&object, "OBJECT").is_err() || decimal_arg(&transaction, "TRANSACTION").is_err() {
+            continue;
+        }
+        // An activity seen ended is never read again: a settle costs one view per LIVE activity, not per run ever made.
+        let file = rows.join(format!("{}.json", workspace::ref_file(&name)));
+        let Ok(mut row) = fs::read(&file).map_err(|e| e.to_string()).and_then(|b| serde_json::from_slice::<Value>(&b).map_err(|e| e.to_string())) else { continue };
+        if row.get("ended").is_some() {
+            continue;
+        }
+        let view = match activity::view(&bend.ws, &json!({"objects": [&object], "births": [{"object": &object, "transaction": &transaction}]})) {
+            Ok(view) => view,
+            Err(e) => { eprintln!("{name}: not read: {e}"); continue; }
+        };
+        if let Some(height) = ended(&view) {
+            row["ended"] = json!(height);
+            let _ = crate::fsio::replace_private(&file, &row_bytes(&row));
+            continue;
+        }
+        let Some(found) = overdue(&view) else { continue };
+        match deliver_turn(bend, &object, &transaction, found, account.as_deref()) {
+            Ok(Delivery::Submitted(_, _, Ok(Decided::Admitted { height, receipt, .. }))) => {
+                settled += 1;
+                println!("settled {name}: delivered past its deadline at height {height}, receipt {receipt}");
+            }
+            Ok(Delivery::Submitted(_, meta, Ok(Decided::Refused(r)))) => eprintln!("{name}: delivery refused: {r}{}", refusal_hint(&meta, &r)),
+            Ok(Delivery::Submitted(_, _, Ok(Decided::Undecided(r)))) => eprintln!("{name}: delivery undecided: {r}; `bend settle` again retries it"),
+            Ok(Delivery::Submitted(_, meta, Err(e))) => eprintln!("{name}: {}", repeated(&meta, e)),
+            Ok(Delivery::Refused(e)) | Err(e) => eprintln!("{name}: {e}"),
+        }
+    }
+    println!("bend settle: {settled} delivered");
+    Ok(())
 }
 
 /// The record cell and the await id of an activity that is awaiting, from its public view.
@@ -803,9 +910,10 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         "await" => await_cmd(&bend, args),
         "answer" => answer_cmd(&bend, args),
         "deliver" => deliver_cmd(&bend, args),
+        "settle" => settle_cmd(&bend, args),
         "lookup" => lookup_cmd(&bend, args, false),
         "retry" => lookup_cmd(&bend, args, true),
-        _ => Err("bend --action must be publish, run, show, await, answer, lookup or retry".into()),
+        _ => Err("bend --action must be publish, run, show, await, answer, deliver, settle, lookup or retry".into()),
     }
 }
 
@@ -825,6 +933,21 @@ mod tests {
         let e = extra_envelope(18);
         assert_eq!(e.as_object().unwrap().len(), ENVELOPE_KEYS.len());
         assert_eq!((e["heap"].as_str(), e["stack"].as_str()), (Some("18"), Some("0")));
+    }
+
+    #[test]
+    fn only_an_await_past_its_deadline_is_settled() {
+        let view = |kind: &str, height: &str| json!({"height": height, "births":[{"object":"7","transaction":"9","record":"41"}],
+            "cells":[{"cell":"41","record":{"phase":{"kind":kind,"await":{"id":"55","deadline":"90","yieldedAt":"86",
+                "source":{"kind":"reply","slot":"66","decider":"8"}}}}}]});
+        assert_eq!(overdue(&view("awaiting", "91")), Some(("41".to_owned(), "55".to_owned())), "the next turn is judged past the deadline");
+        assert_eq!(overdue(&view("awaiting", "90")), None, "at the deadline the decider may still answer");
+        assert_eq!(overdue(&view("awaiting", "87")), None);
+        assert_eq!(overdue(&view("done", "200")), None, "an ended activity is not delivered again");
+        assert_eq!(overdue(&json!({"height":"5","births":[{"record":"41"}],"cells":[]})), None, "a retired record: nothing awaits");
+        assert_eq!(ended(&view("awaiting", "91")), None);
+        assert_eq!(ended(&view("done", "200")).as_deref(), Some("200"));
+        assert_eq!(ended(&json!({"height":"5","births":[{"record":"41"}],"cells":[]})).as_deref(), Some("5"), "a retired record is over");
     }
 
     #[test]

@@ -14,23 +14,7 @@ fn decimal(text: &str) -> bool {
     !text.is_empty() && text.len() <= 80 && text.bytes().all(|b| b.is_ascii_digit()) && (text == "0" || !text.starts_with('0'))
 }
 
-/// The registry rows: (reference, bend, object, transaction), from `bend/objects/*.json`.
-fn registry(root: &std::path::Path) -> Vec<(String, String, String, String)> {
-    let mut rows: Vec<_> = fs::read_dir(root.join("bend").join("objects"))
-        .into_iter()
-        .flatten()
-        .flatten()
-        .take(256)
-        .filter_map(|e| {
-            let name = e.file_name().to_string_lossy().strip_suffix(".json")?.to_owned();
-            let v: Value = serde_json::from_slice(&fs::read(e.path()).ok()?).ok()?;
-            let s = |k: &str| v[k].as_str().map(str::to_owned);
-            Some((name, s("bend").unwrap_or_default(), s("object")?, s("transaction")?))
-        })
-        .collect();
-    rows.sort();
-    rows
-}
+use crate::bend::registry;
 
 pub(super) fn index(site: &Site) -> Page {
     let mut rows = String::new();

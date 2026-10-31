@@ -26,6 +26,9 @@ use serde_json::{json, Value};
 
 const DOOR_USER: &str = "mini-door";
 /// The read bound a house publication is delegated under: the public reader's (`deploy/demo-seed`).
+/// How often each member's overdue bend awaits are delivered (`settle_bends`): a few minutes past a
+/// deadline the purse is home.
+const SETTLE_EVERY_S: u64 = 300;
 const PUBLIC_READ_MAX_COST: &str = include_str!("../../../../deploy/demo-seed/public-read-max-cost");
 const DISCORD_USER: &str = "mini-discord";
 const TENANT_GROUP: &str = "mini-sessions";
@@ -1349,6 +1352,38 @@ impl<O: BoxOps> Processor<O> {
         Ok(())
     }
 
+    /// A bend run nobody delivers would hold its purse forever: the deadline is a height, and an activity
+    /// moves only by a turn. Every SETTLE_EVERY_S, each enrolled member who has run a bend (a
+    /// `workspace/bend/objects` row) runs `bend settle` as themselves: every await past its deadline is
+    /// delivered (`timedOut`, or the answer decided in time), so the run ends and its purse returns to the
+    /// member who paid it. At most `perRun` members a tick, the longest unsettled first.
+    fn settle_bends(&mut self) -> Result<(), String> {
+        let now = self.now;
+        let mut due: Vec<(u64, Value)> = self.requests().into_iter()
+            .filter(|r| r["phase"] == "enrolled")
+            .filter(|r| now.saturating_sub(r["bendSettled"].as_u64().unwrap_or(0)) >= SETTLE_EVERY_S)
+            .filter(|r| {
+                let name = r["name"].as_str().unwrap_or("");
+                !name.is_empty() && std::fs::read_dir(self.p.home(name).join("workspace/bend/objects")).is_ok_and(|mut d| d.next().is_some())
+            })
+            .map(|r| (r["bendSettled"].as_u64().unwrap_or(0), r))
+            .collect();
+        due.sort_by_key(|(at, _)| *at);
+        for (_, mut r) in due.into_iter().take(self.cfg.per_run) {
+            let name = r["name"].as_str().unwrap_or("").to_owned();
+            let ran = self.ops.tenant_line(&name, "bend settle");
+            if !ran.ok {
+                self.say(format!("request {}: bend settle: {}", r["id"].as_str().unwrap_or(""), ran.why()));
+            }
+            for line in ran.stdout.lines().filter(|l| l.starts_with("settled ")) {
+                self.say(format!("request {}: {line}", r["id"].as_str().unwrap_or("")));
+            }
+            r["bendSettled"] = json!(now);
+            self.save(&mut r)?;
+        }
+        Ok(())
+    }
+
     fn join_place(&mut self, key: &str, place: &StoryConfig, world: &str, name: &str, r: &mut Value) -> Result<(), String> {
         let verb = if key == "story" { "story" } else { "chat" };
         let file = format!("{}-invite.json", place.name);
@@ -1388,6 +1423,7 @@ impl<O: BoxOps> Processor<O> {
         self.welcome("story")?;
         self.welcome("room")?;
         self.hand_publications()?;
+        self.settle_bends()?;
         self.apply_links()?;
         self.door_state()
     }
@@ -1681,6 +1717,26 @@ mod tests {
         assert_eq!(DoorConfig::load(&cfg).unwrap().room.map(|s| (s.author, s.name)), Some(("box".into(), "lobby".into())));
         std::fs::write(&cfg, r#"{"version":1,"room":{"founder":"box","name":"Lobby!"}}"#).unwrap();
         assert!(DoorConfig::load(&cfg).unwrap_err().contains("room is"));
+    }
+
+    #[test]
+    fn a_member_who_ran_a_bend_is_settled_every_few_minutes_and_nobody_else_is() {
+        let mut w = world("settle", false);
+        let (a, b) = (join("alice", KEY, Route::Free, false), join("bob", KEY2, Route::Free, false));
+        submit(&w, &a);
+        submit(&w, &b);
+        run(&mut w);
+        std::fs::create_dir_all(w.p.home("alice").join("workspace/bend/objects")).unwrap();
+        std::fs::write(w.p.home("alice").join("workspace/bend/objects/t1.json"), "{}").unwrap();
+        let settles = |w: &Processor<Fake>, who: &str| w.ops.calls.borrow().iter().filter(|c| **c == format!("{who}: bend settle")).count();
+        run(&mut w);
+        assert_eq!((settles(&w, "alice"), settles(&w, "bob")), (1, 0), "only a member with a bend row: {:?}", w.ops.calls.borrow());
+        w.now += SETTLE_EVERY_S - 1;
+        run(&mut w);
+        assert_eq!(settles(&w, "alice"), 1, "not again within the interval");
+        w.now += 1;
+        run(&mut w);
+        assert_eq!(settles(&w, "alice"), 2);
     }
 
     #[test]
