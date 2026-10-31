@@ -265,8 +265,9 @@ The Host runs on P-cores: read the `cpu_core` section of perf report, not the fi
 **App pages (perf-apps a25df305cfd551d8b, batch 6, EtherCalc on hbox): every grain HTTP request is
 one durable dispatch turn, ~210 ms in the resident of which 150-180 ms is the Host SUBMIT.** A first
 page with 17 assets is ~18 turns, 8.5 s serial; ten concurrent requests answer after 2.8 s (one write
-at a time). Levers, in order: profile the dispatch submit on batch 7; group commit (several pending
-dispatches admitted in one turn, statement first); and the question whether a static-asset GET needs a
+at a time). Levers, in order: profile the dispatch submit (perf-apps captures a Host profile on its world);
+group commit only pays if the turn is not CPU-bound (ten concurrent requests at 2.8 s is ~280 ms of
+serial Host work each, so the CPU per turn is the lever, not the fsync, which exorcism removed); and the question whether a static-asset GET needs a
 durable turn at all (asked of perf-apps; else root). Details: docs/PERF-APPS.md on lane/perf-apps.
 
 **Per-story growth (root's item, 10-31).** 8 stories on one world, Host CPU: eca98bde-hp-auth2 1.04 →
