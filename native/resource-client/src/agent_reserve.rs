@@ -42,7 +42,12 @@ pub(super) fn retain_generated(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// The pure verbs go to this process's codec session (`client_consent::pure_source`); anything
+/// else runs the selected image.
 pub(super) fn source(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<()> {
+    if crate::client_consent::pure_source(host, config, arguments)? {
+        return Ok(());
+    }
     let output = Command::new(host)
         .arg(config)
         .args(arguments)

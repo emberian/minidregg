@@ -11,10 +11,15 @@ const FORMAT: &str = "minidregg-application-share-issue-custody-v1";
 
 // The operator socket admits only the private checked share operations.
 // Source-authored request/signature codecs and read-only presentation run
-// against the same pinned Host executable directly; routing them through the
-// process-global SOCKET would tunnel public author/inspect op7/8/9 into the
-// operator service and be refused before the checked op32 plan.
+// against the same pinned Host image locally, never through the process-global
+// SOCKET (that would tunnel public author/inspect op7/8/9 into the operator
+// service and be refused before the checked op32 plan): the pure verbs go to
+// this process's storeless codec session (`client_consent::codec_process`, the
+// same frames every other client verb uses), anything else runs the image.
 pub(super) fn source_process(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<()> {
+    if crate::client_consent::pure_source(host, config, arguments)? {
+        return Ok(());
+    }
     let output = Command::new(host)
         .arg(config)
         .args(arguments)
@@ -605,23 +610,28 @@ mod tests {
             .mode(0o700)
             .create(&directory)
             .unwrap();
-        let script = directory.join("fake-host.sh");
-        let authored = directory.join("authored.bin");
-        fs::write(
-            &script,
-            "test \"$1\" = author && printf source-owned >\"$2\"\n",
-        )
-        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        // The pure verbs reach the pinned image's local codec session, never the socket.
+        let _codec = crate::client_consent::codec_test_lock();
+        let host = directory.join("fake-host.sh");
+        let config = directory.join("config.json");
+        fs::write(&config, b"{}\n").unwrap();
+        fs::write(&host, format!("#!/bin/sh\nset -eu\ncase \"$2\" in\n{}  *) exit 9 ;;\nesac\n",
+            crate::client_consent::codec_loop_arm(r#"test "$kind" = probe && printf '{"source":"owned"}' > "$out""#))).unwrap();
+        fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();
+        let input = directory.join("input.bin");
+        fs::write(&input, b"x").unwrap();
+        let inspected = directory.join("inspected.json");
         let unavailable_socket = directory.join("unavailable.sock");
         SOCKET.set(unavailable_socket.clone()).unwrap();
         assert_eq!(SOCKET.get(), Some(&unavailable_socket));
         source_process(
-            Path::new("/bin/sh"),
-            &script,
-            &[OsStr::new("author"), authored.as_os_str()],
+            &host,
+            &config,
+            &[OsStr::new("inspect"), OsStr::new("probe"), input.as_os_str(), inspected.as_os_str()],
         )
         .unwrap();
-        assert_eq!(fs::read(authored).unwrap(), b"source-owned");
+        assert_eq!(fs::read(&inspected).unwrap(), br#"{"source":"owned"}"#);
         fs::remove_dir_all(directory).unwrap();
     }
 
