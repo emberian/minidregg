@@ -28,7 +28,10 @@ namespace Minidregg.Pred
 mutual
   /-- The slots a law reads, on either side of the step. `witnessed` reads none of its
   own (its oracle is an argument); `hashEq` reads the cell slot, its values, the blinder
-  and the commit. -/
+  and the commit. NOT a read set for a discharging oracle: `evalWith_frame` holds only
+  for an oracle that ignores the states (`failClosed`, the policy path's `eval`), so a
+  projection restricted to `reads` must not run ahead of a third-party discharger that
+  reads old/new (`Pred.Leaf`'s `leafWith`); such a caller adds the oracle's own read set. -/
   def Pred.reads : Pred → List Slot
     | .eq s _ => [s]
     | .le s _ => [s]
@@ -186,6 +189,16 @@ read set is load-bearing, not a vacuous bound. -/
 theorem restrict_needs_reads :
     eval (.eq "a" 1) (State.restrict [] ⟨[("a", 1)]⟩) (State.restrict [] ⟨[("a", 1)]⟩) = false ∧
       eval (.eq "a" 1) ⟨[("a", 1)]⟩ ⟨[("a", 1)]⟩ = true := by
+  decide
+
+/-- **Teeth, every read counts**: for a two-slot law, dropping either one of its reads
+flips the verdict. -/
+theorem restrict_needs_each_read :
+    eval (.eqSlots "a" "b") ⟨[("a", 1), ("b", 1)]⟩ ⟨[("a", 1), ("b", 1)]⟩ = true ∧
+      eval (.eqSlots "a" "b") (State.restrict ["a"] ⟨[("a", 1), ("b", 1)]⟩)
+        (State.restrict ["a"] ⟨[("a", 1), ("b", 1)]⟩) = false ∧
+      eval (.eqSlots "a" "b") (State.restrict ["b"] ⟨[("a", 1), ("b", 1)]⟩)
+        (State.restrict ["b"] ⟨[("a", 1), ("b", 1)]⟩) = false := by
   decide
 
 end Minidregg.Pred

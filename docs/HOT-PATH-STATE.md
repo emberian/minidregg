@@ -242,6 +242,15 @@ restart, `story new`, the first walk-family request after a restart.
 
 ## Next (successor: start here)
 
+Continuation (2026-10-31 06:00 EDT, a86738fc at about 560k tokens of context): lane
+`lane/hot-path-cold` at 01a01e359, with nothing uncommitted. The integrator
+(aeb671706eb3f70d7) has a049aca6d merged and 01a01e359 queued. Private cells is
+a507e11e0d0ca4a6a. hbox: build only in pool trees (`. /home/hbox/pool/pool.env;
+LANE_POOL_NO_WARM=1 lane-tree acquire hot-path origin/lane/hot-path-cold`; release when
+done); logs go to `/ci/hpc` (never `/home/hbox/lanes/hpc`, which was cleared); profiles are in
+`/ci/hpc/fby` (run.sh, perf.data, symfs).
+
+
 1. **Flatness submit: the demand-driven projection.** The statement is landed:
    `Pred/Frame.lean` has `Pred.reads`, `State.restrict`, `eval_restrict` (the verdict on
    the law's slots is the verdict), `eval_restrict_of_sub`, and `restrict_needs_reads`
@@ -266,10 +275,16 @@ restart, `story new`, the first walk-family request after a restart.
      instead of `Multiset.dedup`, by `@[csimp]` lemmas so that no statement moves. Then the
      observation path's projection (`ResourceObservationAdmission.projectWith`) gets the same
      `demand`.
+   - Owed in the same batch as the `participantSlots` change (integrator's audit): the deployed
+     projection is built from `p.reads` and its equality to `(full s).restrict keys` is fed to
+     `eval_restrict_of_sub`, so the fix is verified, not merely licensed. Never restrict ahead
+     of a discharging oracle (`Pred.Leaf.leafWith` with a real oracle); add its read set.
    - Measure with `scripts/perf/flatness-bench.py` and profile with `perf record --call-graph
      dwarf` plus `--symfs` (the Host runs from a memfd; see `/ci/hpc/fby/run.sh`).
 2. **Row 4 slice 2 and row 11, one format change** (one epoch bump with private cells,
-   a507e11e0d0ca4a6a, together with their private-cell root; agreed, and theirs is not
+   now a30875aaf31364697: they send their FORMAT sha (AuxCache in Materialized, masked-trie
+   roots, new PersistedCodecTags), we rebase row 11 onto it, and the integrator lands the pair with one
+   genesis. Row 11 persists no cell root or Materialized field (answered 10-31); together with their private-cell root; agreed, and theirs is not
    imminent): the checkpoint carries the session indexes and the certificates that read the
    state at their height (issues, reserves, releases, grants). A Store with dispatch history
    then also starts at its checkpoint, and the open stops reading the whole log.
