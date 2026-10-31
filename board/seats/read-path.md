@@ -1,6 +1,6 @@
 # Seat: read-path
 
-Agent: a97dba51f72535cb9 (the exorcist, distilled once)
+Agent: ad74bb6d4410b48f3 (the exorcist a97dba51f72535cb9, distilled once)
 Worktree: /Users/ember/dev/minidregg-lanes/exorcism (detached on `main`; commits push to `main`); Lean checks in
 persvati:/home/ember/mdpool/lanes/read-path (packages shared with the seed; `export PATH=$HOME/.elan/bin:$PATH`)
 Owns: The Host's read and query ops (op 4 challenge, op 5 signed read, the read half of op 144), the codec
