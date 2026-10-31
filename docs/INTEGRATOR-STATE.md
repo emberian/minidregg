@@ -36,6 +36,9 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   retained-mode a9b54e85e4a194b91 sends a sha labelled SHARED-INTERFACE. Auditor's items owed before L0: toDFinsupp 0 = 0
   as an equation, an ofDFinsupp inverse, one optionZero instance, a toList code-order lemma for encode, one key
   DecidableEq.
+- **Staging 507155c77 (batch 9 so far)**: exorcist 975491262 (bc17cef1b + 7e6850892 `inspect view-resource-document`: a
+  doc page in one codec frame, client and codec from one candidate; 253d0bc26 read-scratch pruning; its own copy of the
+  admitOwn fix, identical to dc61016cb).
 - Awaited: perf-client 36612f028 + 6a088183f (Store-open represents decision) after its overlay measurement; hot-path
   92828ff96 (birth plan directory decode) after lane-check; infra's forge composed of batch 7 (after its batch 4 rebuild).
 - **CLOSED: GET read-path contract** (ember ruled (c)+(d); hot-path owns it statement-first). Never re-run or re-report.
@@ -84,6 +87,7 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 
 ## Reports sent (do not resend)
 
+- 10-31 11:35: exorcist: 975491262 merged (507155c77), batch 9; fix already in batch 8. hot-path: a5e757016 in batch 8.
 - 10-31 11:28: -hp2 result to app-reds (H1b signature, kept worlds), infra, explorer, perf-apps.
 - 10-31 12:30: staging Lean red routed to hot-path a0fee5643746e520c; ack to perf-client.
 - 10-31 12:10: W1 cause to infra; hot-path 6d744e25f merged + audit requested (auditor); ack to hot-path
