@@ -2,7 +2,7 @@
 
 Present-state table, rewritten whole at each batch. Lane `lane/explorer`. Subject: candidate
 be4ef7510 (hbox `/home/hbox/lanes/integ/candidates/be4ef751074ca28c7d306c2f2bcf61cda03893c8`),
-explored as test members only. Batch 10, 2026-10-31.
+explored as test members only. Batch 11, 2026-10-31.
 
 ## Worlds (all on hbox, all mine; torn down when the lane ends)
 
@@ -138,6 +138,18 @@ Worlds x1, x2, xw1, xweb and the e2e workers are down (x1's down listed one surv
 | `story new --from tale` | 19.9 s | 27.7 and 46.3 s at low height, 41 s at about 1100 (not improved; per-submit cost, hot-path row 12 still open) |
 
 Batch 3 (a4cb65af): `bend settle` works. After run, answer and deliver (spent 152,223), `bend settle` delivered the past-deadline tally (phase none, `total=7`) and refunded 60,885, net 91,338 per tally; a second `settle` and another member's `settle` say `0 delivered`. Apps (apps-e2e, world-up and harness from the candidate's own source.tar): the signed-identity fix works, so the install gets past ingest and create; NEW RED at START: `spk-host: grain refused: application has no route; grain route must bind at least one entrance` (evidence `/ci/xe2e10/install-0dp7...json`). Second install in the same run: birth refused `resourceBatch` because the harness funding of 20,000 covers one (`MEMBER_FUNDING=40000` is the knob). Hacker Slides' real download is refused upstream (`http-526`), so only Simple Todos could be seeded.
+
+
+### Batch 3 multi-member pass and the route-before-START fix (hbox)
+
+| item | result |
+|---|---|
+| web flows (a4cb65af) | `doc new`, append, re-POST (replay then 409 for other text), `/bend`, `/room` (rooms only), `/receipts`: all fine. H4 wording not checkable (scratch world has no market index). |
+| restart mid-activity then `bend settle` | works: 2 tallies, one answered, restart between answer and deliver, settle delivered both past deadline (r1 total=7, r2 total=0), net 152,232 for the pair. |
+| `reports` from two members | each filer sees their own report with the build sha; a non-filer sees nothing. |
+| H3 hermes wording | untestable without a resident (scratch says `there is no Hermes in hroom`); needs the forge world. |
+| apps with `mini` built from app-reds 6043dccd0 (route bound before START), `MEMBER_FUNDING=40000` | NEXT RED: install state `routing`: `the owner's route is not bound yet: .../mini query: refused: no-grant: this key holds no grant covering this target and operation (phase observation)`. The worker's route-binding step issues an observation query the member's key has no grant for. Evidence `/ci/xe2e11/install-0dp7...json`, `/ci/x4log/e2e11.out`. Owner: app-reds. |
+| leaked processes | after `world-down.sh /ci/xw9` returned `removal_assertions=0`, five processes of the world were still running with parent 1 and no PID file (`mini codec-resident`, `minidregg-host ... codec`, `mini consent-resident`, `minidregg-client-consent`, `minidregg-link-sqlite-store serve`). world-down does not stop client-side residents spawned by the harness's workspaces. Not killed (no PID file); reported. |
 
 ## Exercised and held
 
