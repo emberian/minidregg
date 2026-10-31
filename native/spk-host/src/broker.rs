@@ -31,6 +31,10 @@ mod home_visibility;
 #[path = "broker_volume_custody.rs"]
 mod volume_custody;
 
+#[path = "broker_volume_dir.rs"]
+mod volume_dir;
+pub(crate) use volume_dir::{export_image_bytes, Registration, Volume};
+
 const MAX_REQUEST: u64 = 16 * 1024;
 const MAX_CONFIG: u64 = 64 * 1024;
 
@@ -545,7 +549,7 @@ fn open_operator_file(root: &Path, rel: &[&str], operator_uid: u32) -> io::Resul
 }
 
 /// `/etc/minidregg/spk/host-identity`: root 0600, two lines; the same file
-/// `spk-var-volume` writes into every witness.
+/// the volume helper writes into every witness.
 
 fn systemctl(args: &[&str]) -> io::Result<String> {
     let output = crate::os::systemctl()

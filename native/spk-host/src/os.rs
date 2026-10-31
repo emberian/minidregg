@@ -10,13 +10,13 @@ pub(crate) use minidregg_compatible_upgrade_custody::root_owner;
 pub(crate) use crate::fixture_os::{
     app_owner, cgroup_events, child_assume_app_identity, drop_to_identity,
     holds_exactly_identity,
-    pid_cgroup, runtime_units, self_cgroup, systemctl, var_filesystem,
+    pid_cgroup, runtime_units, self_cgroup, systemctl, var_filesystem, var_project,
 };
 #[cfg(not(feature = "fixture-os"))]
 pub(crate) use real::{
     app_owner, cgroup_events, child_assume_app_identity, drop_to_identity,
     holds_exactly_identity,
-    pid_cgroup, runtime_units, self_cgroup, systemctl, var_filesystem,
+    pid_cgroup, runtime_units, self_cgroup, systemctl, var_filesystem, var_project,
 };
 
 #[cfg(not(feature = "fixture-os"))]
@@ -91,26 +91,21 @@ mod real {
     }
 
     /// The persistent `/var` at `path` (held open as `var_fd`, its parent as
-    /// `parent_fd`): whether it is a filesystem mounted apart from its parent,
-    /// and that filesystem's total bytes.
+    /// `parent_fd`): whether it is bounded by a project quota (a project id with the
+    /// inherit flag, so everything below it is charged to the project), and the
+    /// size `statfs` reports for it, which for such a directory is the project limit.
     pub(crate) fn var_filesystem(
         _path: &Path,
-        parent_fd: RawFd,
+        _parent_fd: RawFd,
         var_fd: RawFd,
     ) -> io::Result<(bool, u128)> {
-        let stat = |fd: RawFd| -> io::Result<libc::stat> {
-            let mut stat = unsafe { std::mem::zeroed::<libc::stat>() };
-            if unsafe { libc::fstat(fd, &mut stat) } != 0 {
-                return Err(io::Error::last_os_error());
-            }
-            Ok(stat)
-        };
-        let separate = stat(parent_fd)?.st_dev != stat(var_fd)?.st_dev;
-        let mut volume = unsafe { std::mem::zeroed::<libc::statvfs>() };
-        if unsafe { libc::fstatvfs(var_fd, &mut volume) } != 0 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok((separate, (volume.f_blocks as u128) * (volume.f_frsize as u128)))
+        let (project, inherit) = crate::volume_quota::project_of(var_fd)?;
+        Ok((project != 0 && inherit, crate::volume_quota::reported_bytes(var_fd)?))
+    }
+
+    /// The project id and inherit flag of the open `/var`.
+    pub(crate) fn var_project(var_fd: RawFd) -> io::Result<(u32, bool)> {
+        crate::volume_quota::project_of(var_fd)
     }
 
     fn capability_sets_zero() -> io::Result<bool> {

@@ -207,7 +207,7 @@ if [[ $mode == full ]]; then
     registry=/etc/mini-spk-volumes/${stores[$index]}.json
     payload=$(jq -c '{verb:"volumes-status",store:.store,deploymentId:.deploymentId,volumesRoot:(.grainsRoot+"/volumes")}' "$registry")
     sudo -n -- "$helper" "$payload" >"$run/volume-status-$index.json" 2>>"$run/volume-helper.log"
-    jq -e --arg store "${stores[$index]}" '.protocol=="mini-spk-volumes-status-v1" and .store==$store and (.volumes|length)==2 and all(.volumes[]; .mounted and .settled and .request.store==$store)' "$run/volume-status-$index.json" >/dev/null
+    jq -e --arg store "${stores[$index]}" '.protocol=="mini-spk-volumes-status-v1" and .store==$store and (.volumes|length)==2 and all(.volumes[]; .present and .settled and .request.store==$store)' "$run/volume-status-$index.json" >/dev/null
   done
   # Live copy is the original filesystem freeze/copy/thaw transaction.
   sudo -n -- "$helper" "$(jq -c '.verb="freeze"' "${roots[0]}/broker/volume-9101.json")" >>"$run/volume-helper.log" 2>&1
@@ -221,7 +221,7 @@ else
   # Re-create of an exact registered volume must remount, never allocate again.
   sudo -n -- "$helper" "$(jq -c . "${roots[0]}/broker/volume-9101.json")" >>"$run/volume-helper.log" 2>&1
   sudo -n -- "$helper" "$(jq -c '.verb="freeze"' "${roots[0]}/broker/volume-9101.json")" >>"$run/volume-helper.log" 2>&1
-  echo 'PASS isolated mounted ext4/freeze/export receiving (SPK lifecycle unqualified)' | tee -a "$run/result.log"
+  echo 'PASS isolated project-quota directories/freeze/export receiving (SPK lifecycle unqualified)' | tee -a "$run/result.log"
 fi
 # Both modes retain the cross-world mutation's receiving evidence.
 "$here/plant-helper-cross-world-volume.sh" "$helper" "${roots[0]}/broker/volume-9101.json" "/etc/mini-spk-volumes/${stores[1]}.json" "$run/cross-world-plant"
