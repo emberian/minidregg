@@ -116,6 +116,11 @@ Native fixtures red, as on main); 324 pin sets changed within propext/Classical.
 `backward.isDefEq.respectTransparency false`; final sha off main 929eac696 after Kimi's review. Held: proofs (re-record from
 the bump candidate instead), private cells, hot-path 2dfa8372e. Staging's unbuilt hot-path batches 1-3 merge after the bump.
 The bump's hbox build waits for the disk to be cleared; build it alone, first.
+FINAL bump sha cdb399b477ea76e8f8f50e956623f58b5b3412ec (one commit on main 929eac696; Kimi: no statement changes beyond
+two meaning-preserving ones, no sorry/axiom, only native_decide added is the self-test). When writes resume: run
+`bash -c './integ-build4.sh cdb399b47; ./umbrella-minidregg.sh cdb399b47'` alone (toolchain change: whole-tree rebuild,
+raise MEM if hbox is quiet), move main to it on a green host stage, then merge main into staging (hot-path 1-3 recompile
+under 4.35; iteration speed is checking those seven files together on the Mac), lift HOLD LEAN.
 
 The bump comes as one sha off main. On its "HOLD LEAN" message, hold every other Lean landing (proofs batches) until
 the bump's candidate is READY; then they rebase. Rust-only and harness landings keep flowing. Build the bump alone.
