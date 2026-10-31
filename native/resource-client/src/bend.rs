@@ -680,12 +680,23 @@ fn show(bend: &Bend, mut args: Args) -> Result<()> {
     if let Some(k) = known {
         let record_cell = k.get("record").and_then(Value::as_str).unwrap_or_default();
         let purse = activity::view(&bend.ws, &json!({"accounts": [record_cell]}))?;
-        let phase = cell_of(&view, record_cell).and_then(|c| c.pointer("/record/phase")).map(|p| p.to_string()).unwrap_or_else(|| "?".into());
+        let phase = phase_text(cell_of(&view, record_cell), k.get("ended").and_then(Value::as_str));
         println!("  bend {}: activity record {record_cell}, purse {}, phase {phase}",
             k.get("bend").and_then(Value::as_str).unwrap_or("?"),
             balance(&purse, record_cell).map(|b| b.to_string()).unwrap_or_else(|| "?".into()));
     }
     Ok(())
+}
+
+/// What `bend show` says of an activity's phase: the record's own phase while it is retained (awaiting
+/// with its await, or how it ended), and, once the turn that ended it retired the record (no phase is
+/// left to read), that it ended and where its purse went.
+fn phase_text(cell: Option<&Value>, ended_at: Option<&str>) -> String {
+    match cell.and_then(|c| c.pointer("/record/phase")) {
+        Some(phase) => phase.to_string(),
+        None => format!("ended{}: its record is retired and its purse returned to the payer",
+            ended_at.map(|h| format!(" (seen at height {h})")).unwrap_or_default()),
+    }
 }
 
 // ------------------------------------------------------------------ await / answer
@@ -1022,6 +1033,18 @@ mod tests {
         let mut ended_first = first.clone();
         mark_ended(&mut ended_first, "100", "9");
         assert!(next_row(Some(&ended_first), json!({"transaction": "200"})).get("earlier").is_none(), "an ended run is not carried");
+    }
+
+    #[test]
+    fn an_ended_activity_reads_as_ended_not_as_a_question_mark() {
+        let awaiting = json!({"cell": "41", "record": {"phase": {"kind": "awaiting", "await": {"id": "55"}}}});
+        assert!(phase_text(Some(&awaiting), None).contains("\"awaiting\""));
+        let retired = json!({"cell": "41", "kind": "retired"});
+        for cell in [Some(&retired), None] {
+            let t = phase_text(cell, Some("47"));
+            assert!(t.starts_with("ended (seen at height 47): its record is retired") && !t.contains('?'), "{t}");
+        }
+        assert_eq!(phase_text(None, None), "ended: its record is retired and its purse returned to the payer");
     }
 
     #[test]
