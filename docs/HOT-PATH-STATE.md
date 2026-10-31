@@ -372,6 +372,14 @@ to `/ci/hpc`. Profiles: `/ci/hpc/fby` (run.sh, `--symfs`). The native Host build
      .resourceBook = some bookWire`, `materializer .resourceBook := PrivateCellRoot.materializer
      bookWire (untagged _)`). It changes the cell layout: FORMAT (a) if ready before private cells'
      sha, else the next epoch.
+     Shape: (1) move `Book`, `Operation`, `Admission` and the Batch algebra out of
+     `Theory/CanonicalResourceKernel` into a base module (same namespace, so consumers keep their names);
+     the entries module imports the base, and the kernel imports both and takes `Entries.layout`.
+     (2) `Operation.patch`/`Batch.patch` become the entry patches; `logicalBook` becomes the represented
+     book (a spec, O(book), never on the hot path), with `Represents store (logicalBook store)` under "no
+     stored zero". (3) Runtime reads (`balance`, admission) go through `balanceAt`/`EntryAdmission`.
+     (4) The registry wire and materializer. The saved pool patch `t2-hot-path-20261031T093457Z` is the
+     entries module as committed; drop it.
 
 3. Rows 3, 8, 16, 17, 19, 20. Measurements on the batch-2 candidate: a fresh member's first
    read, a fresh provider at two heights, restart, `story new`, and the first walk-family
