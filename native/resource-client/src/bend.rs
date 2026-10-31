@@ -381,7 +381,18 @@ fn lose_flag(args: &mut Args) -> Result<bool> {
 fn report(bend: &Bend, name: &str, meta: &Value, transaction: Option<String>, lead: &str, d: Decided) -> Result<()> {
     let m = |k: &str| meta.get(k).and_then(Value::as_str).unwrap_or("?").to_owned();
     match d {
-        Decided::Refused(r) => ending(format!("refused: {r}")),
+        Decided::Refused(r) => {
+            let hint = match m("kind").as_str() {
+                // A second publish of the same source names the same artifact and package, so the Host
+                // sees a replay of an admitted transaction identity.
+                "publish" if r.contains("transaction identity conflict") => format!(
+                    " (this package is already published: artifact {} package {}; `bend run` it)", m("artifactId"), m("packageId")),
+                "resolve" if r.contains("responseType") => " (the reply's DATA does not have the shape this slot's ask declared; \
+                    answer with exactly the response type the asking program names, or {\"refused\": REASON})".to_owned(),
+                _ => String::new(),
+            };
+            ending(format!("refused: {r}{hint}"))
+        }
         Decided::Undecided(r) => ending_for(name, format!("undecided: {r}")),
         Decided::Admitted { height, root, receipt, how } => match m("kind").as_str() {
             "publish" => {
