@@ -4216,7 +4216,7 @@ fn complete_birth(
     program_cell: Option<&str>,
     room_template: Option<&str>,
 ) -> Result<Value> {
-    complete_member(root, name_value, 0, source, receipt, reservation, program_cell, room_template)
+    complete_member(root, name_value, None, source, receipt, reservation, program_cell, room_template)
 }
 
 /// A group birth's member `index` as a lone birth's reservation: its three roles under
@@ -4231,12 +4231,13 @@ fn group_member(reservation: &participant_namespace::Reservation, index: usize) 
         record_path: reservation.record_path.clone() })
 }
 
-/// Retain the reference of resource `index` of a confirmed birth (`reservation` holds that
-/// resource's roles under their bare labels).
+/// Retain the reference of resource `member` (0 for a lone birth) of a confirmed birth
+/// (`reservation` holds that resource's roles under their bare labels). A group member's
+/// provenance names its index, the `.I` of its roles in the shared reservation record.
 fn complete_member(
     root: &Path,
     name_value: &str,
-    index: usize,
+    member_index: Option<usize>,
     source: &Value,
     receipt: &Value,
     reservation: &participant_namespace::Reservation,
@@ -4247,7 +4248,7 @@ fn complete_member(
     let parts = birth
         .get("resources")
         .and_then(Value::as_array)
-        .and_then(|values| values.get(index))
+        .and_then(|values| values.get(member_index.unwrap_or(0)))
         .ok_or("retained birth source lacks resource")?;
     // A Nock program is born at its content address: the Host derives its
     // target, so the reservation holds only the two capability identifiers.
@@ -4277,6 +4278,9 @@ fn complete_member(
         "operationCapability":owner,"controlCapability":control,
         "provenance":{"birthReceipt":receipt,"reservationDigest":reservation.request_digest,
             "reservationRecord":reservation.record_path},"authority":"hint-only"});
+    if let Some(index) = member_index {
+        value["provenance"]["member"] = json!(index);
+    }
     if let Some(template) = room_template {
         value["room"] = json!(template);
     }
@@ -5130,7 +5134,7 @@ fn create_group(root: &Path, workspace: &Value, group: &str, members_path: &Path
     let pairs: Vec<(&str, &BirthShape<'_>)> = held.iter().map(|m| m.name.as_str()).zip(shapes.iter()).collect();
     let (source, receipt, reservation) = birth_members(root, workspace, group, &pairs, true)?;
     for (index, m) in held.iter().enumerate() {
-        let mut born = complete_member(root, &m.name, index, &source, &receipt, &group_member(&reservation, index)?, None, None)?;
+        let mut born = complete_member(root, &m.name, Some(index), &source, &receipt, &group_member(&reservation, index)?, None, None)?;
         if let Some(parent) = &m.sealed_in {
             born["sealedIn"] = json!(parent);
             roomkey::rewrite_reference(root, &m.name, &born)?;
