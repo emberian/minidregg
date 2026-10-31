@@ -222,6 +222,9 @@ impl Runtime {
                 Ok(value)
             }
             Err(error) => {
+                // The failure text is the only account of why a write never reached the Host; recovery
+                // keeps just the operation's exact status, so the controller journal names it here.
+                eprintln!("grain-runtime: room write {op} ({name}) failed: {}", error.chars().take(600).collect::<String>());
                 // A reset before the Host held the write leaves it not-submitted: submit the retained call
                 // once more before the lookup that records the decision, so a transport blip costs a retry
                 // and never the reply. A resubmit that fails too is named and the lookup still decides.
