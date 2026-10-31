@@ -611,6 +611,9 @@ inductive Reject where
   | objectiveUsage
   | observationRequired | observationRejected | clockUnavailable
   | streamTopic | streamPayload
+  /-- A stream append's `ref` names an entry of the same stream at or beyond its head: a
+  reference points back at an existing entry, never at one still in flight. -/
+  | streamRef
   | worldKind | kindDefinition
   | computeFunding
   | computeBudget (reason : RunComputeBudgetDomain.Reject)
@@ -824,7 +827,8 @@ def computeTarget (snapshot : AuthoritySnapshot)
         if version != StreamCell.commandVersion then throw .unsupportedVersion
         -- An append is computed at the stream cell it meets: it pins no root. Its entry goes
         -- at that cell's head, its channel is admitted at that cell (`DomainEpoch.admitAppend`),
-        -- and nothing in the signed request names the head (`Kernel.StreamCommutingAppend`).
+        -- and nothing in the signed request names the head
+        -- (`StreamResource.append_planned_root_irrelevant`).
         if !decide (request.topic.length ≤ StreamCell.maxTopicBytes) then throw .streamTopic
         if !decide (request.payload.length ≤ StreamCell.maxPayloadBytes) then throw .streamPayload
         match DomainEpoch.admitAppend pre.logical command.subject request with
@@ -833,6 +837,7 @@ def computeTarget (snapshot : AuthoritySnapshot)
         let some head := StreamCell.headOf pre.logical | throw .wrongRole
         -- A fleet topic's head is appended only by the fleet receiver.
         if head.binding != .room then throw .wrongRole
+        if request.ref.any (fun r => r.1 == id && head.count < r.2) then throw .streamRef
         pure ((StreamCell.headWriteOp head (StreamCell.appendEntry id head
           (streamRecord snapshot semantics ambient command request))).apply pre.logical)
     | read => exact do
