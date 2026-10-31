@@ -9,45 +9,44 @@ retired-agent hook names the live integrator to anyone who messages the old id).
 integrator; the integrator merges onto `integration/staging`, cuts batch candidates on hbox, gates them, moves main to
 gated candidates and names candidates to infra and the explorer.
 
-## Now (2026-10-31 10:36 EDT)
+## Re-orienting (root, 10-31 10:50)
 
-- **ember (10-31 09:10, via root): no rehearsal cut until she says.** Make the system as good as it can be: keep batching,
-  gate once per batch, keep the newest green candidate as the fallback. Priorities: repair Hermes (batch 5's j14
-  "Hermes sent no reply to the ask: refused" is app-reds' top item), efficiency everywhere, every red fixed, never worked
-  around. Shared consent resident under split tenancy APPROVED (perf-client). Egress gateway and Oracle7 integration HELD.
-  No new build box: hbox and forge only.
-- **main = 83e926874** = gated batch 4 b9450147f + main 7978ddfdd. **Batch 4 is the green fallback** (hbox tour 73/73,
-  enrol, composed; forge composed c-b945-d1 all phases; j14 with deploy hotpatch 9fdef19bd; umbrellas green).
-- **Batch 5 1c151fce4: gate15 FAIL** on j14-apps: "Hermes sent no reply to the ask: refused" (also on overlay
-  1c151fce4-resid -hp1). Cause narrowed by app-reds: the controller's final-delivery mini_say is paid (op g98) but never
-  submitted (lookup `not-submitted`), and the write error was dropped; c88b88755 (batch 7) now surfaces it as writeError.
-  Forge composed c-1c15-d1 PASSES every phase (residents, restart included). Umbrella-tree on batch 5: rc=0, 0 reds
-  (TokenCensus fixed); its fixture re-record eb5cf8f8a is merged (staging 72ad281c5).
-- **Batch 6 74e1cfa10: READY 09:31** (host 2,165 s, of which 1,471 s idle behind batch 5's umbrella seats: fixed by
-  iter-speed 0f67c94b7, batch 7). gate15 (PID file $I/gate-74e1.pid) so far: enrol PASS, tour 73/73, hbox composed rooms/
-  churn/documents/apps/connector PASS, residents UNKNOWN on hbox (forge decides), j14-apps FAIL with the same Hermes
-  final-say refusal as batch 5. Umbrella-tree running in umbrella-src. Exorcist measured it against batch 5: signed read
-  wall 42 -> 32 ms, operator CPU 27.8 -> 15.0 ms. perf-apps: EtherCalc create-to-first-page 53 s (256 s on 10-29), warm GET
-  340 ms, of which ~170 ms is the SUBMIT Host turn (hot-path's).
-- **CLOSED: GET read-path contract: astra reviewed, ember ruled (c)+(d), hot-path owns.** Never re-run astra on it or
-  report it again. (Ruling: prepaid reserved credit per liable payer; declared per-route eligibility. Hot-path
-  a6c4a1532687a4fdb, statement-first, after group commit; not a batch item until keystones and witnesses exist.)
-- **Batch 6 gate15 verdict FAIL (10:00)**: enrol, tour 73/73, hbox composed rooms/churn/documents/apps/connector PASS;
-  residents UNKNOWN (forge decides); j14-apps FAIL with batch 5's Hermes final-say refusal; flatness-submit FAIL,
-  flatness-get PASS. Its umbrella-tree is running in umbrella-src (PID file $I/umbrella-src.pid).
-- **Batch 7 acc7cfa03: READY 10:29 (host 1,666 s beside batch 6's umbrella: the seat-weights fix worked; batch 6 took 2,165 s).** gate15 launched 10:30 (PID file $I/gate-acc7.pid); its composed phase failed at once because gate15 defaults EDGE_REV=4ea511d and that dregg-infra rev had not been extracted on hbox (my error; extracted 10:34), so composed reruns as SUF=-c2 PHASES=composed (PID file $I/gate-acc7-c2.pid); forge composed queued by infra after its batch-4 rebuild; named to infra, explorer, perf-apps. Also carries perf-client a1c70ef29 (consent provider reads the Store once per command; birth
-  authority leg at the held authState; attempt index; audit sound, frame 233 now means "re-check owed"). Earlier contents: resident final writeError c88b88755, demo-reds 58c17b1de, perf-client f95edc7bf +
-  b34173dad (candidate ssh wrapper) + 394039fb1 (one shared codec Host per box under split tenancy), apps-e2e 78a20cb56,
-  perf-apps b2 05c2b208b, hot-path a55855f18, perf-client 5415aecf7, iter-speed Mathlib import trim ee7a25ca7 (Host.Main 3,930 -> 2,895 modules; Pratt certificate for mersenne127P_prime; audit sound, pins only shrank), app-reds c0a49c8d7 (an argument object keyed `path` is an argument: Davros qualify's declaration-invalid), iter-speed seat weights 0f67c94b7, perf-apps docs a7511c500; app-reds ecf4b917d merged as superseded by staging's 6cae27559 (staging ddc2e8863).
-- **Staging (batch 8 so far)**: iter-speed 7800d3199 (a lane rebuilds its native host in place; the RSS table accumulates in logs/), iter-speed tower split 0eab28db7 (audit sound: 12 decls moved verbatim, pins only shrank), exorcist 47b7cb2e1 + c763e3ead (policy loads one encode per record; signed read loads the law graph once; audit sound; whole-tree build owed = batch 8), perf-client 783b460cb (MINI_TRACE consent/codec frames), perf-client b6 (frame 233 = re-check owed in the protocol registry; per-deployment ID index, settings and workspace read once per file identity; `doc new` statx 1,063 -> 505).
-- **FORMAT batch (later, one genesis, after iter-speed's seam 1)**: hot-path row 11 + Book entries migration +
-  private-cells FORMAT (a) (eventHistory, authority to the trie root, mask []) + KeptCell Aux cache + fixture re-record.
-- Explorer on batch 5 vs 4: fsyncs 0; 128-ref credit 6.9 s -> 0.35 s; idle catch-up 61 s -> 0.36 s; first read after
-  restart 19 s -> 0.24 s; say 0.55 s warm; doc-append grows with history (1.8 s at 13 entries, 6.2 s at 303: hot-path).
-- Forge demo (infra): grain world green through the host custodian; infra holds its rebuild until batch-5's forge composed
-  ends and waits for host load < 2 before starting the Hermes controller. Wedged lobby state saved at
-  dregg-forge:/root/wedges/lobby-wedge-b4.tar for demo-reds.
-- hbox: / 69 GB free (09:18, after the explorer removed 16 GB of its own /ci scratch).
+After any context clear, the ONLY sources of what is pending are this file and COMMANDS.log. Never send a report because
+a scratchpad or task-output file exists. Send only what "Reports owed" below lists, and move it to "Reports sent" in the
+same step. Closed items are never re-reported.
+
+## Now (2026-10-31 10:52 EDT)
+
+- **ember (10-31 09:10, via root): no rehearsal cut until she says.** Keep batching, gate once per batch, keep the newest
+  green candidate as the fallback. Priorities: repair Hermes, efficiency everywhere, every red fixed, never worked around.
+- **main = 83e926874** = gated batch 4 b9450147f + main 7978ddfdd. **Batch 4 is the green fallback.**
+- Batch 5 1c151fce4 and batch 6 74e1cfa10: gate15 FAIL on j14 (Hermes final-say refused; app-reds narrowing, c88b88755 in
+  batch 7 surfaces the write error). Forge composed on batch 5 passed every phase.
+- **Batch 7 acc7cfa03: READY 10:29** (host 1,666 s beside batch 6's umbrella; seat-weights fix worked). gate15 (PID file
+  $I/gate-acc7.pid): enrol PASS, tour 73/73. j14-apps FAIL: mini cannot create owner-workspace/attempt-index/by-intent/
+  (ENOENT; perf-client aa24acaf8). Composed rerun -c2 ($I/gate-acc7-c2.pid): rooms/churn/documents/restart pass, the rest
+  blocked by "metered workroom not ready", same cause. Fix b940b3f50 (perf-client) merged on staging; mini rebuilt and
+  overlaid as **candidates/acc7cfa03-attidx** (both copies of mini replaced; hotpatch-candidate.sh fixed to replace every
+  copy by digest). Queued: gate15 PHASES="j14 composed" SUF=-hp1 on it, launching when both acc7 gates exit
+  ($I/hp-attidx.pid waits; then $I/gate-acc7-attidx.pid). Forge composed of batch 7 queued by infra.
+- **Staging dc0b7c935 (batch 8 so far)**: iter-speed 7800d3199 + 697db7664 (native-loop: a lane's Lean change reaches a
+  native candidate in ~8 min), tower split 0eab28db7, exorcist 47b7cb2e1 + c763e3ead, perf-client 783b460cb + b6 +
+  b940b3f50, retained-mode 675a80745 (Theory/Retained.lean, statement + witnesses; audit round owed) + 1d4ff4efb (docs).
+  Batch 8 is the whole-tree build these owe.
+- **Next shared-interface change: retained-mode L0** (Theory.Store's Store becomes a persistent extensional tree map,
+  ~66 files, WorldCompact deleted): its own cut with one whole-tree build; FORMAT (private cells (a), hot-path row 11,
+  Book entries) rebases onto it.
+- **CLOSED: GET read-path contract.** Astra reviewed, ember ruled; hot-path a6c4a1532687a4fdb owns it statement-first. Never
+  re-run or re-report.
+- hbox: / 59 GB free (10:42).
+
+## Reports owed
+
+- Batch 7 gate verdict and the -hp1 hotpatch result (to root, infra, explorer, perf-apps), when they land.
+
+## Reports sent (do not resend)
+
+- 10-31: GET-contract astra review (many times, by mistake; CLOSED). Batch 7 READY named to infra, explorer, perf-apps.
 
 ## Lanes (route only to the newest id; distilled lanes' old ids are retired)
 
@@ -127,7 +126,8 @@ Every Lean-statement sha gets an audit round from a4d9a6f4cba4855ca before it ri
 | b9450147f | GATE GREEN (batch 4, with deploy hotpatch 9fdef19bd): rehearsal-3 candidate; main's base |
 | 1c151fce4 | READY (batch 5); gate15 FAIL: j14 `refused` ask, residents for forge |
 | 74e1cfa10 | READY (batch 6); gate15 FAIL: j14 Hermes final-say refusal, residents for forge |
-| acc7cfa03 | READY (batch 7); gate15 running |
+| acc7cfa03 | READY (batch 7); gate15: tour 73/73, enrol PASS; j14 FAIL (attempt-index ENOENT) |
+| acc7cfa03-attidx | overlay: batch 7 + mini from b940b3f50; gate15 -hp1 j14+composed queued |
 | 1c151fce4-resid | overlay: batch 5 + spk-host crate from 40efdcff9 (resource id any non-zero u64); gate15 -hp1: j14 same `refused` red |
 
 ## Open reds and owners
