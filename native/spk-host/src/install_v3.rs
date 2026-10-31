@@ -42,13 +42,6 @@ const MAX_QUALIFICATION: u64 = 16 * 1024;
 struct QualifiedLaunch {
     protocol: String,
     raw_sha256: String,
-    /// The signed identity the qualification read; the install reports it, nothing here decides on it.
-    #[serde(default)]
-    #[allow(dead_code)]
-    signed_app_id: Option<String>,
-    #[serde(default)]
-    #[allow(dead_code)]
-    signed_app_version: Option<String>,
     package_root: String,
     launch_root: String,
     launch_canonical_sha256: String,
@@ -674,6 +667,15 @@ pub(super) fn preflight_complete(config: &InstallConfig) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_qualification_an_install_writes_is_accepted_by_this_strict_reader() {
+        let digests = vec!["33".to_owned(), "44".to_owned()];
+        let written = crate::launch_descriptor_native::qualification_json(&"a".repeat(64), "11", "22", &"b".repeat(64), &digests, "55");
+        // deny_unknown_fields: a field the install adds to qualification.json breaks resident START.
+        let read: QualifiedLaunch = serde_json::from_value(written).expect("the written qualification parses");
+        assert_eq!(read.create_count, "2");
+    }
     use crate::descriptor_native::SourceDescriptor;
     use crate::dispatch_native::write_new;
     use std::os::unix::fs::DirBuilderExt;
@@ -869,8 +871,6 @@ mod tests {
         let qualification = QualifiedLaunch {
             protocol: "mini-spk-launch-qualified-v2".into(),
             raw_sha256: "a".repeat(64),
-            signed_app_id: None,
-            signed_app_version: None,
             package_root: "11".into(),
             launch_root: "22".into(),
             launch_canonical_sha256: super::super::hex(&Sha256::digest(&launch.canonical)),
