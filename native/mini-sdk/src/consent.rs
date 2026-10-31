@@ -464,6 +464,18 @@ struct Resident {
     ended: bool,
 }
 
+/// Make this single-threaded process its starter's grandchild before it serves: the starter
+/// (`resident_connection`) reaps the exit 0 and waits for the socket, so a resident is never a
+/// long-lived client's child (a zombie at its idle exit, the wrong parent for the controller's
+/// codec proof). True in the process that goes on to serve.
+pub fn daemonize() -> Result<bool> {
+    match unsafe { libc::fork() } {
+        -1 => Err(format!("resident fork: {}", io::Error::last_os_error()).into()),
+        0 => Ok(true),
+        _ => Ok(false),
+    }
+}
+
 /// Hold one provider for this binding and serve its frames on the binding's socket in `dir`
 /// until the provider ends or no frame arrives for `idle`. Exits at once (Ok) when another
 /// resident provider holds the binding.
@@ -533,7 +545,10 @@ pub fn serve_resident_kind(kind: ResidentKind, dir: &Path, executable: PathBuf, 
                         return Ok(());
                     }
                 }
-                std::thread::sleep(std::time::Duration::from_millis(5));
+                // Wait on the listener itself: a connection is accepted the moment it arrives,
+                // and an idle resident wakes once a second for the checks above.
+                let mut ready = libc::pollfd { fd: listener.as_raw_fd(), events: libc::POLLIN, revents: 0 };
+                unsafe { libc::poll(&mut ready, 1, 1000) };
             }
             Err(e) => return Err(format!("{} accept: {e}", kind.name()).into()),
         }

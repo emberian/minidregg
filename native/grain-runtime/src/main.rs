@@ -2877,6 +2877,29 @@ fn inspected_pre_submit_refusal(config: &Config, attempt: &Path) -> Result<Optio
     Ok(Some(value))
 }
 
+/// One storeless codec frame (`Host.Main.pureCodec`, ops 7-11) to this user's
+/// resident codec Host for the controller's pinned Host and settings, started
+/// as the exact supervisor the quiescence proof admits (`cgroup_stop`). The
+/// answer is the body; a refusal is reported with the Host's own decoding.
+fn codec_frame(config: &Config, operation: u8, payload: &[u8]) -> Result<Vec<u8>> {
+    static CODEC: Mutex<mini_sdk::local::Codec> = Mutex::new(mini_sdk::local::Codec::new());
+    let environment = std::env::var_os("MINI_LOCAL_HOST");
+    let host = mini_sdk::host_selection::select_semantic_host(None, environment.as_deref(), &config.host)
+        .map_err(|e| e.to_string())?;
+    let mut codec = CODEC.lock().map_err(|_| "codec lock poisoned")?;
+    codec
+        .frame_with(&host, &config.host_config, operation, payload, &|executable, settings, settings_bytes| {
+            let mut launch = Command::new(&config.mini);
+            launch.arg("codec-resident").arg("--host").arg(&executable).arg("--settings").arg(settings);
+            mini_sdk::consent::connect_resident_kind(mini_sdk::consent::ResidentKind::Codec, &executable, settings_bytes, launch)
+        })
+        .map_err(|error| match error {
+            mini_sdk::local::CodecError::Failed(reason) => reason,
+            mini_sdk::local::CodecError::Refused { decoded, .. } => format!("the codec refused: {}",
+                decoded.map(|v| v.to_string()).unwrap_or_else(|| "undecoded".into())),
+        })
+}
+
 fn valid_workspace_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 64
@@ -6353,28 +6376,16 @@ impl Runtime {
         {
             return Err("lifetime ingress differs from exact source paid plan".into());
         }
-        let committed_arg = committed_path.to_str().ok_or("lifetime frame path UTF-8")?;
-        let committed_view_arg = committed_view_path
-            .to_str()
-            .ok_or("lifetime committed inspection path UTF-8")?;
-        let mut inspect_committed = Command::new(host);
-        inspect_committed.args([
-            config,
-            "inspect",
-            "application-agent-lifetime-dispatch-committed",
-            committed_arg,
-            committed_view_arg,
-        ]);
-        let inspected = self
-            .custody_gate
-            .run_capture(&self.cancelled, &mut inspect_committed)
+        // The pure inspection is one frame to the resident codec Host (the
+        // controller's one stateless codec pair), not a fresh Host process.
+        let inspected = codec_frame(&self.config, mini_sdk::host_operations::INSPECT,
+            &mini_sdk::local::kind("application-agent-lifetime-dispatch-committed", &committed)
+                .map_err(|e| e.to_string())?)
             .map_err(|error| format!("lifetime committed source inspection: {error}"))?;
-        if !inspected.status.success() {
-            return Err(format!(
-                "lifetime committed source inspection refused: {}",
-                inspected.status
-            ));
+        if inspected.len() > 2_097_152 {
+            return Err("lifetime committed inspection exceeds its bound".into());
         }
+        write_new(&committed_view_path, &inspected)?;
         let committed_view: Value =
             serde_json::from_slice(&bounded_regular_file(&committed_view_path, 2_097_152)?)
                 .map_err(|error| format!("lifetime committed inspection JSON: {error}"))?;

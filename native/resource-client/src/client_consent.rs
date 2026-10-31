@@ -116,6 +116,7 @@ pub(crate) fn drop_dead_session(slot:&mut Option<Consent>,lifeline:&mut Option<c
 /// `MINI_CONSENT_IDLE_S` (600) seconds.
 pub(crate) fn resident(executable:PathBuf,settings:PathBuf)->Result<()> {
     let idle=resident_idle("MINI_CONSENT_IDLE_S");
+    if !mini_sdk::consent::daemonize()? { return Ok(()); }
     Ok(mini_sdk::consent::serve_resident(&mini_sdk::consent::private_anchor_dir()?,executable,settings,idle)?)
 }
 /// `mini codec-resident --host EXECUTABLE --settings SETTINGS` (HOT-PATH 2a): hold ONE storeless
@@ -127,6 +128,7 @@ pub(crate) fn resident(executable:PathBuf,settings:PathBuf)->Result<()> {
 /// semantic Host (`pure_host`), never the serving Store's.
 pub(crate) fn codec_resident(executable:PathBuf,settings:PathBuf)->Result<()> {
     let idle=resident_idle("MINI_CODEC_IDLE_S");
+    if !mini_sdk::consent::daemonize()? { return Ok(()); }
     Ok(mini_sdk::consent::serve_resident_kind(ResidentKind::Codec,&mini_sdk::consent::private_anchor_dir()?,executable,settings,idle)?)
 }
 
