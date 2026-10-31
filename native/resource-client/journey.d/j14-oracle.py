@@ -78,6 +78,12 @@ class Journey:
         # A separate fresh private root avoids sharing controller traversal ACLs
         # with another preserved world (including /run/user/UID).
         socket_parent=Path(os.environ.get('J14_ORACLE_SOCKET_PARENT','/build/lanes'))
+        # The socket directory is the controller world's root; the ACL grant stops there, so its parent
+        # lies above the root and only needs to be traversable (--x) for the controller uid. Add that
+        # traverse bit (never read or write) to a parent this user owns, so no caller needs operator prep.
+        parent_stat=socket_parent.stat()
+        if parent_stat.st_uid==os.getuid() and stat.S_IMODE(parent_stat.st_mode)&0o011!=0o011:
+            socket_parent.chmod(stat.S_IMODE(parent_stat.st_mode)|0o011)
         self.sockets=socket_parent/('j14-o7-s-'+secrets.token_hex(4));self.sockets.mkdir(mode=0o700)
         self.bins=Path(need('J14_ORACLE_BIN'))
         self.mini=need('MINI');self.host=need('HOST');self.runtime=need('GRAIN_RUNTIME')
