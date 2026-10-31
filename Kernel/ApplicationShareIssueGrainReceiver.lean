@@ -143,7 +143,7 @@ theorem intent_exactCharge (accepted : Accepted profile config pins ground ambie
 /-- **The committed births are named**: every write of the grain share issue that
 creates its cell -- the ticket with its initialized page included -- is named by the
 admitted grain factory step. -/
-theorem intent_births_named (accepted : Accepted profile config pins durable ambient ingress) :
+theorem intent_births_named (accepted : Accepted profile config pins ground ambient ingress) :
     ∀ write ∈ (intent accepted).writes, ResourceBirthController.Concrete.bornIn write = true →
       ReceivingLaw.namesBirth (accepted.grainAccepted.pending.branchStep (.inl .factory)) write = true :=
   accepted.grainAccepted.births_named.1
@@ -151,11 +151,11 @@ theorem intent_births_named (accepted : Accepted profile config pins durable amb
 #assert_axioms intent_births_named
 
 theorem intent_event_version
-    (accepted : Accepted profile config pins durable ambient ingress) :
+    (accepted : Accepted profile config pins ground ambient ingress) :
     (intent accepted).event.codecVersion = 22 := rfl
 
 theorem intent_retains_full_ingress
-    (accepted : Accepted profile config pins durable ambient ingress) :
+    (accepted : Accepted profile config pins ground ambient ingress) :
     (intent accepted).event.canonicalBytes = ingress.canonicalBytes := rfl
 
 structure Receipt where

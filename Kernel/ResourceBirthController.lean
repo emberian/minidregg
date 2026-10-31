@@ -507,36 +507,36 @@ instance parentsPresentDecidable (deployment : Deployment) (directory : Director
 
 /-- The rooms a birth names, read at their exact old roots: the commit refuses
 if a room changed or was retired after preparation. -/
-def parentGuards (ground : Ground deployment) (descriptor : Descriptor Registry) : List ReadGuard :=
+def parentGuards {deployment : Deployment} (ground : Ground deployment) (descriptor : Descriptor Registry) : List ReadGuard :=
   (descriptor.parentRows.map Prod.snd).dedup.map fun room =>
     { cellId := ⟨room⟩, expectedRoot := ground.view.model.roots ⟨room⟩ }
 
-theorem parentGuards_exact (ground : Ground deployment) (descriptor : Descriptor Registry)
+theorem parentGuards_exact {deployment : Deployment} (ground : Ground deployment) (descriptor : Descriptor Registry)
     (guard : ReadGuard) (member : guard ∈ parentGuards ground descriptor) :
     guard.expectedRoot = ground.view.model.roots guard.cellId := by
   simp only [parentGuards, List.mem_map] at member
   obtain ⟨room, _, rfl⟩ := member
   rfl
 
-theorem parentGuards_cover (ground : Ground deployment) (descriptor : Descriptor Registry)
+theorem parentGuards_cover {deployment : Deployment} (ground : Ground deployment) (descriptor : Descriptor Registry)
     {row : Nat × Nat} (member : row ∈ descriptor.parentRows) :
     ∃ guard ∈ parentGuards ground descriptor, guard.cellId = ⟨row.2⟩ :=
   ⟨_, List.mem_map.mpr ⟨row.2, List.mem_dedup.mpr (List.mem_map.mpr ⟨row, member, rfl⟩), rfl⟩, rfl⟩
 
 /-- Kind-definition bytes are observed once, at the same durable snapshot as
 birth preparation, and remain a physical CAS dependency through commit. -/
-def kindGuards (ground : Ground deployment) (descriptor : Descriptor Registry) : List ReadGuard :=
+def kindGuards {deployment : Deployment} (ground : Ground deployment) (descriptor : Descriptor Registry) : List ReadGuard :=
   (descriptor.births.filterMap fun item =>
     CanonicalCellRegistry.instanceKind item.create.cell).map fun kind =>
       ⟨⟨kind⟩, ground.view.model.roots ⟨kind⟩⟩
 
-theorem kindGuards_exact (ground : Ground deployment) (descriptor : Descriptor Registry)
+theorem kindGuards_exact {deployment : Deployment} (ground : Ground deployment) (descriptor : Descriptor Registry)
     (guard : ReadGuard) (member : guard ∈ kindGuards ground descriptor) :
     guard.expectedRoot = ground.view.model.roots guard.cellId := by
   obtain ⟨kind, _, rfl⟩ := List.mem_map.mp member
   rfl
 
-theorem kindGuards_cover (ground : Ground deployment) (descriptor : Descriptor Registry)
+theorem kindGuards_cover {deployment : Deployment} (ground : Ground deployment) (descriptor : Descriptor Registry)
     {item : BirthItem Registry} (member : item ∈ descriptor.births)
     {kind : Nat} (selected : CanonicalCellRegistry.instanceKind item.create.cell = some kind) :
     ∃ guard ∈ kindGuards ground descriptor, guard.cellId = ⟨kind⟩ :=
