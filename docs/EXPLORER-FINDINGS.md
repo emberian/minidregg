@@ -2,7 +2,7 @@
 
 Present-state table, rewritten whole at each batch. Lane `lane/explorer`. Subject: candidate
 be4ef7510 (hbox `/home/hbox/lanes/integ/candidates/be4ef751074ca28c7d306c2f2bcf61cda03893c8`),
-explored as test members only. Batch 13, 2026-10-31.
+explored as test members only. Batch 14, 2026-10-31.
 
 ## Worlds (all on hbox, all mine; torn down when the lane ends)
 
@@ -175,6 +175,31 @@ Batch 3 (a4cb65af): `bend settle` works. After run, answer and deliver (spent 15
 | I4 | Reads no longer leave an attempt tree: `credit` x3 left `attempts/` at 47 entries before and after; `read-journal.tsv` exists. `history` takes 16 ms, `history all` 15 ms (48 lines). Good. |
 | I5 | No resets: a 120-write mixed burst across three members printed no failure lines, no `reset`, no `broken pipe`. (H1b is Hermes-only; not reproducible here.) |
 | I6 | Timings (multiplexed ssh, b8, height 250): plain ssh `help` 165-171 ms vs 11 ms multiplexed; `credit` 20-57 ms; `say` 94-231 ms (first 231); `tail` 133-138; `doc new` 1.0 s; `chat new` 2.6 s; `create` 0.8 s; `story new` 5.6 s; certify 5.9 s at height 250. Not different from b7 for writes. |
+
+
+### Concurrency probe on b8 (dc61016cb): which concurrent writes conflict
+
+Racing separate ssh connections, fresh scratch world, hbox:
+
+| race | admitted | refusals |
+|---|---|---|
+| 1 member, 6 x `doc new` (different names) | 6 of 6 | none |
+| 2 members, 3 x `doc new` each | 6 of 6 | none |
+| 1 member, 6 x `chat new` (different names) | 6 of 6 | none (8.7 s wall) |
+| 2 members, 3 x `chat new` each | 6 of 6 | none (18 s wall) |
+| 1 member, 6 x `create object` | 6 of 6 | none |
+| 2 members, 3 x `create object` each | 6 of 6 | none |
+| 1 member, 6 x `say` (same room) | **1 of 6** | 3 x `target N moved since the plan was signed (stale-target)`, 2 x `declared-resource-controller: stale-target` |
+| 2 members, 3 x `say` each (same room) | **3 of 6** | the same two stale-target reasons |
+| 6 sequential `say` from one member | 6 of 6 | none |
+
+So creates of new cells commute; only `say` into the same room conflicts, and it conflicts with itself within one
+member (the member's own stream cell: one admitted per member would give 2, I saw 3, so two members may also
+collide on a shared room target; the probe cannot tell the two apart). The same member's concurrent `say`s fail
+because every write plans against the stream cell's current state and the second plan is stale when the first
+admits. Appends to a stream should commute (retry on stale-target inside the resident, or admit append against
+the latest state). My `doc append` row only proposed (no submit), so it says nothing about append conflicts on
+one document: untested.
 
 ## Exercised and held
 
