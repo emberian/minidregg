@@ -61,9 +61,7 @@ fn exact(path: &Path, expected: &str, length: Option<usize>) -> Result<Vec<u8>> 
 fn retain(path: &Path, value: &impl Serialize) -> Result<()> {
     let bytes = serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?;
     retain_exact_private(path, &bytes, LIMIT)?;
-    File::open(path.parent().ok_or("delivery artifact parent absent")?)
-        .and_then(|f| f.sync_all())
-        .map_err(|e| e.to_string())
+    Ok(())
 }
 
 /// Bounded final response, not a generic provider transcript parser. Empty
@@ -1414,7 +1412,7 @@ mod tests {
         let first = rt
             .finish_delivery(&record, &record.arguments(7), resolution.clone())
             .unwrap();
-        // Simulate the journal bytes left by a crash after receipt fsync but
+        // Simulate the journal bytes left by a crash after receipt write but
         // before clearing its marker; no native subprocess is needed on retry.
         rt.journal.resident_delivery = pending;
         rt.save().unwrap();

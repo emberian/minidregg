@@ -75,7 +75,6 @@ pub mod lean_codec;
 #[cfg(feature = "native")]
 pub mod operator;
 #[cfg(feature = "native")]
-pub mod phase;
 #[cfg(feature = "native")]
 pub mod store;
 

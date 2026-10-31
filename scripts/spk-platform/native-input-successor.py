@@ -21,10 +21,7 @@ def durable(path,value):
         require(not path.is_symlink() and path.read_bytes()==data,"retained native successor bytes differ")
         return
     fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
-    with os.fdopen(fd,"wb") as out:out.write(data);out.flush();os.fsync(out.fileno())
-    fd=os.open(path.parent,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
-    try:os.fsync(fd)
-    finally:os.close(fd)
+    with os.fdopen(fd,"wb") as out:out.write(data);out.flush()
 def source_change(old,new):
     changed={k for k in set(old)|set(new) if old.get(k)!=new.get(k)}
     require(changed and changed<=CHANGED,"native successor changes application, authority, participant or Store coordinates")
@@ -119,9 +116,6 @@ def adopt(adapter,old_path,target_path,reason):
             # receipts, step outcomes, resources, keys and journal files remain.
             temp=root/f".native-fixture-{index:02d}.json"
             durable(temp,after);os.replace(temp,root/"fixture.json")
-            fd=os.open(root,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
-            try:os.fsync(fd)
-            finally:os.close(fd)
         record={"protocol":"mini-spk-native-input-successor-v1","previousSha256":sha(previous),
             "request":str(request),"requestSha256":sha(request),"profile":str(profile),
             "profileSha256":sha(profile),"status":"native profile lineage consumed; app admission remains current-law gated"}

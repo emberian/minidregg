@@ -38,9 +38,8 @@ pub(super) fn retain_generated(path: &Path) -> Result<()> {
         return Err("source-generated reserve evidence is not an owner file".into());
     }
     file.set_permissions(fs::Permissions::from_mode(0o600))
-        .and_then(|()| file.sync_all())
         .map_err(|error| format!("cannot durably restrict {}: {error}", path.display()))?;
-    sync_directory_ancestors(parent)
+    Ok(())
 }
 
 pub(super) fn source(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<()> {
@@ -152,7 +151,7 @@ struct Pin {
 }
 
 fn pinned(directory: &Path) -> Result<Pin> {
-    crate::fsio::ensure_private_dir_durable(directory)?;
+    crate::fsio::ensure_private_dir(directory)?;
     let pin: Value = serde_json::from_slice(&private_bytes(&directory.join("pin.json"), 4096)?)
         .map_err(|error| format!("invalid agent reserve pin: {error}"))?;
     if field(&pin, "format")? != FORMAT {
@@ -233,7 +232,6 @@ pub(super) fn plan(
     let config_bytes = bounded(&config, 65_536)?;
     let host_sha = host_image_sha256(&host)?;
     crate::fsio::create_private_dir(&directory)?;
-    sync_directory_ancestors(&directory)?;
     create_private(&directory.join("source.json"), &source_bytes)?;
     create_private(&directory.join("config.json"), &config_bytes)?;
     let request_path = directory.join("request.bin");
@@ -263,7 +261,6 @@ pub(super) fn plan(
     }
     let frame = session_invoke(&host, &operator_socket, &config, mini_sdk::host_operations::AGENT_RESERVE_PLAN, &request)?;
     create_private(&directory.join("plan.frame"), &frame)?;
-    sync_directory_ancestors(&directory)?;
     let plan_bytes = expect_reply(&frame, mini_sdk::host_operations::AGENT_RESERVE_PLAN)?;
     let plan_path = directory.join("plan.bin");
     create_private(&plan_path, plan_bytes)?;
@@ -537,11 +534,9 @@ pub(super) fn seal(directory: &Path, approval_json: &Path) -> Result<()> {
     pair.extend_from_slice(&signatures_bytes);
     let frame = session_invoke(&pin.host, &pin.operator_socket, &pin.config, mini_sdk::host_operations::AGENT_RESERVE_ASSEMBLE, &pair)?;
     create_private(&directory.join("assembly.frame"), &frame)?;
-    sync_directory_ancestors(&directory)?;
     same_pin(&directory, &pin)?;
     let call = expect_reply(&frame, mini_sdk::host_operations::AGENT_RESERVE_ASSEMBLE)?;
     create_private(&directory.join("call.bin"), call)?;
-    sync_retained_call(&directory, &directory.join("call.bin"))?;
     retain_json(
         &directory.join("seal.json"),
         &json!({"format":FORMAT,"requestSha256":digest(&pin.request),
@@ -575,7 +570,6 @@ fn outcome(directory: &Path, stem: &str, frame: &[u8], operation: u8, pin: &Pin)
     let bytes = expect_reply(frame, operation)?;
     let binary = directory.join(format!("{stem}.outcome.bin"));
     create_private(&binary, bytes)?;
-    sync_directory_ancestors(directory)?;
     source_inspect(
         &pin.host,
         &pin.config,
@@ -600,7 +594,6 @@ pub(super) fn submit(directory: &Path) -> Result<()> {
     let frame = session_invoke(&pin.host, &pin.public_socket, &pin.config, mini_sdk::host_operations::SUBMIT, &call)
         .map_err(|error| format!("agent reserve op2 uncertain; use exact lookup: {error}"))?;
     create_private(&directory.join("submit.frame"), &frame)?;
-    sync_directory_ancestors(&directory)?;
     same_pin(&directory, &pin)?;
     let result = outcome(&directory, "submit", &frame, mini_sdk::host_operations::SUBMIT, &pin)?;
     same_pin(&directory, &pin)?;
@@ -640,7 +633,6 @@ pub(super) fn lookup(directory: &Path) -> Result<()> {
     )?;
     let frame = session_invoke(&pin.host, &pin.public_socket, &pin.config, mini_sdk::host_operations::LOOKUP, &call)?;
     create_private(&directory.join(format!("{stem}.frame")), &frame)?;
-    sync_directory_ancestors(&directory)?;
     same_pin(&directory, &pin)?;
     let result = outcome(&directory, &stem, &frame, mini_sdk::host_operations::LOOKUP, &pin)?;
     same_pin(&directory, &pin)?;

@@ -168,13 +168,6 @@ impl OfflineSourceHost {
             return Err(invalid("offline source output identity or bound refused"));
         }
         file.set_permissions(fs::Permissions::from_mode(0o600))?;
-        file.sync_all()?;
-        File::open(
-            output
-                .parent()
-                .ok_or_else(|| invalid("source output parent absent"))?,
-        )?
-        .sync_all()?;
         let mut bytes = Vec::new();
         file.by_ref()
             .take(output_bound + 1)
@@ -438,7 +431,6 @@ mod tests {
                 .open(path)
                 .unwrap();
             file.write_all(bytes).unwrap();
-            file.sync_all().unwrap();
         }
         fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();
         let source = OfflineSourceHost {

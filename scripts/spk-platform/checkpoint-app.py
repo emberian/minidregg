@@ -21,10 +21,6 @@ def require(ok,why):
     if not ok:raise RuntimeError(why)
 def load(path):return json.loads(Path(path).read_text())
 def sha(path):return hashlib.sha256(Path(path).read_bytes()).hexdigest()
-def sync_parent(path):
-    parent=os.open(path.parent,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
-    try:os.fsync(parent)
-    finally:os.close(parent)
 def private_file(path):
     meta=path.lstat();require(stat.S_ISREG(meta.st_mode) and meta.st_uid==os.getuid() and meta.st_nlink==1 and not meta.st_mode&0o077,'checkpoint file custody differs')
     return path
@@ -36,15 +32,14 @@ def private_directory(path):
 def save(path,value):
     encoded=(json.dumps(value,sort_keys=True,indent=2)+'\n').encode()
     if path.exists() or path.is_symlink():
-        require(private_file(path).read_bytes()==encoded,'checkpoint retry differs');sync_parent(path);return
+        require(private_file(path).read_bytes()==encoded,'checkpoint retry differs');return
     temporary=path.parent/('.'+path.name+'.stage-'+secrets.token_hex(8))
     fd=os.open(temporary,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
-    with os.fdopen(fd,'wb') as out:out.write(encoded);out.flush();os.fsync(out.fileno())
+    with os.fdopen(fd,'wb') as out:out.write(encoded);out.flush()
     # Operator callbacks are serialized by the root checkpoint runner. Refuse
     # conflicting existing final bytes; a private interrupted stage is retained.
     require(not path.exists() and not path.is_symlink(),'checkpoint path appeared')
     os.rename(temporary,path)
-    sync_parent(path)
 def root_config(path):
     path=Path(path);require(path.is_absolute() and '..' not in path.parts,'canonical config path required')
     for item in [path,*path.parents]:

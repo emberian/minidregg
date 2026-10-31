@@ -223,7 +223,7 @@ pub(crate) fn compact(journal: &Journal, state: &Path, workspaces: &[&Path], hom
     }
     let mut file = fs::OpenOptions::new().create(true).append(true).mode(0o600).open(state.join(HISTORY))
         .map_err(|e| format!("history: {e}"))?;
-    file.write_all(&bytes).and_then(|_| file.sync_all()).map_err(|e| format!("history: {e}"))?;
+    file.write_all(&bytes).map_err(|e| format!("history: {e}"))?;
     // A crash between the append and the removals repeats the same lines on
     // the next pass; the records are identical, so a reader takes the first.
     for path in doomed { remove(&path)?; }

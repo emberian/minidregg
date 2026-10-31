@@ -1356,19 +1356,17 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
         .open(path)
         .map_err(|e| format!("provider spool create: {e}"))?;
     file.write_all(bytes)
-        .and_then(|_| file.sync_all())
-        .map_err(|e| format!("provider spool sync: {e}"))
+        .map_err(|e| format!("provider spool write: {e}"))
 }
 
 fn create_private(path: &Path) -> Result<(), String> {
-    let file = OpenOptions::new()
+    OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(0o600)
         .open(path)
         .map_err(|e| format!("provider spool create: {e}"))?;
-    file.sync_all()
-        .map_err(|e| format!("provider spool sync: {e}"))
+    Ok(())
 }
 
 fn read_bounded(path: &Path, bound: usize) -> Result<Vec<u8>, String> {
@@ -1548,11 +1546,6 @@ fn forward(
     if let Err(reason) = write_private(&request_path, exact_body)
         .and_then(|_| create_private(&spool.body))
         .and_then(|_| create_private(&spool.headers))
-        .and_then(|_| {
-            File::open(&config.private_dir)
-                .and_then(|f| f.sync_all())
-                .map_err(|e| e.to_string())
-        })
     {
         return ProviderOutcome::refused(reason);
     }
@@ -1683,15 +1676,6 @@ fn forward_once(
         Ok(body) => body,
         Err(reason) => return ProviderOutcome::uncertain(Malformed, Vec::new(), reason),
     };
-    for path in [&spool.body, &spool.headers, &config.private_dir] {
-        if let Err(error) = File::open(path).and_then(|file| file.sync_all()) {
-            return ProviderOutcome::uncertain(
-                Malformed,
-                partial_body,
-                format!("provider response spool sync: {error}"),
-            );
-        }
-    }
     if !complete {
         // No headers: upstream never answered within the broker's deadline
         // (or the connection dropped). Headers but incomplete: a truncated reply.
@@ -1706,7 +1690,7 @@ fn forward_once(
             ProviderOutcome::uncertain(Malformed, partial_body, "truncated provider reply")
         };
     }
-    // A complete, fsynced reply stays Received even when the prompt lease
+    // A complete reply stays Received even when the prompt lease
     // ended meanwhile (H3): the controller quotes it from the retained bytes.
     let headers = match read_bounded(&spool.headers, MAX_RESPONSE_HEADER) {
         Ok(headers) => headers,

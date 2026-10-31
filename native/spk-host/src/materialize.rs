@@ -102,10 +102,6 @@ fn write_tree(
     Ok(())
 }
 
-fn sync_directory(path: &Path) -> io::Result<()> {
-    File::open(&path).ctx("open", &path)?.sync_all()
-}
-
 fn cleanup_staging(path: &Path) {
     fn make_removable(path: &Path) -> io::Result<()> {
         let metadata = fs::symlink_metadata(&path).ctx("inspect", &path)?;
@@ -242,25 +238,14 @@ pub fn materialize_spk_with_profile(
     app_uid: u32,
     profile: ImportProfile,
 ) -> io::Result<InstalledPackage> {
-    materialize_with_barrier(package, store, app_uid, profile, sync_staging_filesystem)
+    materialize_staged(package, store, app_uid, profile)
 }
 
-/// Supported Linux hosts are 5.8+: syncfs both waits for the filesystem's I/O
-/// and reports writeback errors since this descriptor was opened. An unrelated
-/// filesystem error also refuses publication; it is never silently ignored.
-fn sync_staging_filesystem(stage: &File) -> io::Result<()> {
-    if unsafe { libc::syncfs(stage.as_raw_fd()) } != 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(())
-}
-
-fn materialize_with_barrier(
+fn materialize_staged(
     package: &Path,
     store: &Path,
     app_uid: u32,
     profile: ImportProfile,
-    barrier: impl FnOnce(&File) -> io::Result<()>,
 ) -> io::Result<InstalledPackage> {
     let _protected_store = open_protected_directory(store, app_uid, false)?;
     let limits = profile.limits();
@@ -294,11 +279,6 @@ fn materialize_with_barrier(
     let stage = store.join(format!(".spk-stage-{}-{nonce}", std::process::id()));
     fs::DirBuilder::new().mode(0o700).create(&stage)?;
     let installed: io::Result<()> = (|| {
-        // Retain before the first staged write: opening after writeback could
-        // miss an earlier error in syncfs's per-open-file error cursor.
-        let stage_file = OpenOptions::new().read(true)
-            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
-            .open(&stage).ctx("open durability anchor", &stage)?;
         let root = stage.join("root");
         fs::DirBuilder::new().mode(0o700).create(&root)?;
         let mut directories = vec![root.clone()];
@@ -341,17 +321,7 @@ fn materialize_with_barrier(
             fs::set_permissions(&directory, fs::Permissions::from_mode(IMAGE_DIRECTORY_MODE)).ctx("set permissions", &directory)?;
         }
         fs::set_permissions(&stage, fs::Permissions::from_mode(0o555)).ctx("set permissions", &stage)?;
-        // Every content write, symlink and permission change is complete while
-        // this stage is still private. Linux syncfs has fsync-every-file
-        // durability without serializing thousands of separate disk flushes.
-        // The descriptor predates all staged writes, retaining their error
-        // cursor. A failure here prevents rename; cleanup touches only stage.
-        barrier(&stage_file)?;
         publish_no_replace(&stage, &final_dir)?;
-        // The stage data is durable before its name becomes visible. Persist
-        // that namespace transition separately. As before, a post-rename sync
-        // error leaves the immutable image present and is returned to custody.
-        sync_directory(store)?;
         Ok(())
     })();
     if installed.is_err() {
@@ -453,50 +423,6 @@ fn retained_import_profile(image_dir: &Path) -> io::Result<ImportProfile> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn materialization_barrier_error_prevents_publication_after_sealing() {
-        let home = std::env::var_os("HOME").expect("protected home required");
-        let scratch = PathBuf::from(home).join(format!(".spk-barrier-test-{}-{}",
-            std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
-        fs::DirBuilder::new().mode(0o700).create(&scratch).unwrap();
-        struct Cleanup(PathBuf);
-        impl Drop for Cleanup {
-            fn drop(&mut self) { cleanup_staging(&self.0); }
-        }
-        let _cleanup = Cleanup(scratch.clone());
-        let package = scratch.join("input.spk");
-        let bytes = sandstorm_package::SpkBuilder::new()
-            .manifest_json(r#"{"app_id":"ignored","app_title":"barrier","app_version":1,"continue_command":{"argv":["/app"]}}"#)
-            .file(sandstorm_package::File::executable("app", b"durable fixture".to_vec()))
-            .pack(&ed25519_dalek::SigningKey::from_bytes(&[7;32]));
-        fs::write(&package, &bytes).unwrap();
-        let called = std::cell::Cell::new(false);
-        let outcome = materialize_with_barrier(&package, &scratch,
-            unsafe { libc::geteuid() }.wrapping_add(1), ImportProfile::Standard, |fd| {
-                called.set(true);
-                assert_eq!(fd.metadata()?.permissions().mode() & 0o777, 0o555);
-                let stages = fs::read_dir(&scratch)?.filter_map(Result::ok)
-                    .filter(|e| e.file_name().to_string_lossy().starts_with(".spk-stage-"))
-                    .map(|e| e.path()).collect::<Vec<_>>();
-                assert_eq!(stages.len(), 1);
-                let stage = &stages[0];
-                assert_eq!(fs::metadata(stage)?.ino(), fd.metadata()?.ino());
-                assert_eq!(fs::read(stage.join("root/app"))?, b"durable fixture");
-                assert_eq!(fs::read(stage.join("package.spk"))?, bytes);
-                assert!(stage.join("manifest.json").is_file());
-                assert!(stage.join("import-policy.json").is_file());
-                assert!(!fs::read_dir(&scratch)?.filter_map(Result::ok)
-                    .any(|e| e.file_name().to_string_lossy().starts_with("sha256-")));
-                Err(io::Error::from_raw_os_error(libc::EIO))
-            });
-        assert!(called.get(), "publication must consult the sealed-stage barrier");
-        assert_eq!(outcome.err().expect("barrier EIO must refuse publication").raw_os_error(), Some(libc::EIO));
-        assert!(!fs::read_dir(&scratch).unwrap().filter_map(Result::ok)
-            .any(|e| e.file_name().to_string_lossy().starts_with("sha256-")
-                || e.file_name().to_string_lossy().starts_with(".spk-stage-")),
-            "failed barrier must leave neither published image nor private staging");
-    }
 
     #[test]
     fn materialized_profile_survives_wake_and_archive_cannot_choose_it() {

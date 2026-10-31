@@ -63,15 +63,8 @@ def write(path, data):
         os.chmod(path, 0o600)
         out.write(data)
         out.flush()
-        os.fsync(out.fileno())
 
 
-def sync(directory):
-    fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
 
 
 def narrowed(value):
@@ -155,7 +148,6 @@ def publish(path, before, after):
     else:
         write(temporary, after)
     os.replace(temporary, path)
-    sync(Path(path).parent)
 
 
 def adopt_mini(previous, upgrade, journal, status):
@@ -266,7 +258,6 @@ class Repair:
             write(self.out / "after-attachment.json", updated)
             write(self.out / "after-contract.json", updated["contract"])
         write(self.out / "plan.json", {"pins": {str(p): digest(raw(p)) for p in paths}, "app": allocation["app"]})
-        sync(self.out)
 
     def command(self, label, args):
         marker = self.out / (label + ".command.json")
@@ -274,7 +265,7 @@ class Repair:
             require(read(marker) == list(map(str, args)), "retained native argv differs")
             require((self.out / (label + ".exit.json")).exists(), "native invocation interrupted; inspect retained evidence, do not resend")
         else:
-            write(marker, list(map(str, args))); sync(self.out)
+            write(marker, list(map(str, args)))
             with (self.out / (label + ".stdout")).open("xb") as stdout, (self.out / (label + ".stderr")).open("xb") as stderr:
                 result = subprocess.run(list(map(str, args)), stdout=stdout, stderr=stderr, timeout=2400)
             write(self.out / (label + ".exit.json"), {"exitCode": result.returncode})
@@ -312,7 +303,6 @@ class Repair:
         target = self.out / "after-registered-agent-route.json"
         if not target.exists(): write(target, after)
         require(read(target) == after, "retained successor publication changed")
-        sync(self.out)
         publish(self.root / "registered-agent-route.json", raw(self.out / "before-registered-agent-route.json"), raw(target))
         if "contract" in c:
             publish(Path(c["contract"]), raw(self.out / "before-contract.json"), raw(self.out / "after-contract.json"))
@@ -322,7 +312,6 @@ class Repair:
             write(complete, {"protocol": "mini-application-payer-successor-complete-v1", "app": self.plan["app"],
                 "previous": old["registration"]["name"], "successor": c["successorName"],
                 "grantChanged": False, "sessionChanged": False, "next": "native START then session/controller enrollment"})
-        sync(self.out)
         return complete
 
 

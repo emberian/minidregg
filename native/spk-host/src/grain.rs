@@ -116,18 +116,13 @@ fn derived_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
         .custom_flags(libc::O_NOFOLLOW)
         .open(&temp).ctx("open", &temp)?;
     file.write_all(bytes)?;
-    file.sync_all()?;
     fs::rename(&temp, path).ctx("rename", &temp)?;
-    File::open(parent).ctx("open", parent)?.sync_all()
+    Ok(())
 }
 
 fn private_directory(path: &Path) -> io::Result<()> {
     match DirBuilder::new().mode(0o700).create(path) {
-        Ok(()) => {
-            if let Some(parent) = path.parent() {
-                File::open(parent).ctx("open", parent)?.sync_all()?;
-            }
-        }
+        Ok(()) => {}
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
         Err(error) => return Err(error),
     }
@@ -499,9 +494,8 @@ fn stage_package(host: &Host, spk: &Path) -> io::Result<(String, PathBuf, PathBu
             if copy_package_bounded(spk, &mut staged, maximum)? != raw_sha256 {
                 return Err(invalid("SPK changed while staging"));
             }
-            staged.sync_all()?;
             fs::rename(&temp, &copy).ctx("rename", &temp)?;
-            File::open(&dir).ctx("open", &dir)?.sync_all()
+            Ok(())
         })();
         if copied.is_err() { let _ = fs::remove_file(&temp).ctx("remove", &temp); }
         copied?;
@@ -1137,7 +1131,6 @@ fn start_inner(host: &Host, app: &str, prepare_only: bool) -> io::Result<Value> 
                     random.iter().map(|b| format!("{b:02x}")).collect::<String>()
                 )),
             ).ctx("rename", &descriptor)?;
-            File::open(&dir).ctx("open", &dir)?.sync_all()?;
         }
     }
     let latest = runs

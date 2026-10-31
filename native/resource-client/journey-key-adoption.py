@@ -57,7 +57,6 @@ def main():
         with target.open('xb') as output:
             output.write(body)
             output.flush()
-            os.fsync(output.fileno())
     def save_json(name, value):
         save(name, (json.dumps(value, indent=2) + '\n').encode())
     def passed(name):
@@ -66,7 +65,6 @@ def main():
         with (evidence / 'rows.json').open('w') as output:
             json.dump(rows, output, indent=2)
             output.flush()
-            os.fsync(output.fileno())
     def cli(name, *arguments, success=True):
         result = subprocess.run([str(mini), *map(str, arguments)], capture_output=True)
         save(name + '.stdout', result.stdout)

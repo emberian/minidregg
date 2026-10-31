@@ -118,7 +118,6 @@ impl Runtime {
         let id=provider_profile::random_token()?;
         let value=preparation(&self.config,&self.config_path,&id,sha)?;
         write_new(&preparation_path(&self.config,&id),&serde_json::to_vec_pretty(&value).map_err(|e|e.to_string())?)?;
-        File::open(&self.config.state_dir).and_then(|f|f.sync_all()).map_err(|e|e.to_string())?;
         Ok(value)
     }
     pub(crate) fn retained_preparation(&self,id:&str,sha:&str)->Result<(Value,String)> {
@@ -139,7 +138,7 @@ impl Runtime {
         // and its first possible native effect. Re-presenting entered IDs fails.
         let value=json!({"type":"mini-resident-prompt-entered-v1","preparation":prepared,"preparationSha256":hash});
         write_new(&entered_path(&self.config,id),&serde_json::to_vec_pretty(&value).map_err(|e|e.to_string())?)?;
-        File::open(&self.config.state_dir).and_then(|f|f.sync_all()).map_err(|e|e.to_string())
+        Ok(())
     }
     pub(crate) fn record_resident_preadmission_refusal(&self,id:&str,sha:&str,prompt:&str,reason:&str)->Result<()> {
         // Called only when the source preflight fails, before entering Hermes
@@ -158,7 +157,7 @@ impl Runtime {
         let value=serde_json::to_value(proof).map_err(|e|e.to_string())?;
         let value=check_refusal(&self.config,&self.config_path,id,sha,value)?;
         retain_exact_private(&refusal_path(&self.config,id),&serde_json::to_vec_pretty(&value).map_err(|e|e.to_string())?,65_536)?;
-        File::open(&self.config.state_dir).and_then(|f|f.sync_all()).map_err(|e|e.to_string())
+        Ok(())
     }
     pub(crate) fn resident_admission(&self,id:&str,sha:&str)->Result<Value> {
         if !resident_origin::valid_digest(id) || !resident_origin::valid_digest(sha) {return Err("invalid resident admission identity".into());}

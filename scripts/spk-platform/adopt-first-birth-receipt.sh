@@ -89,9 +89,6 @@ jq -n --arg action "$D" --arg attempt "$A" \
      {source:($action+"/submit.json"),target:($attempt+"/retry-0002.json"),sha256:$submitJsonSha256},
      {source:($action+"/lookup-after-submit.bin"),target:($attempt+"/retry-0003.bin"),sha256:$lookupBinarySha256},
      {source:($action+"/lookup-after-submit.json"),target:($attempt+"/retry-0003.json"),sha256:$lookupJsonSha256}]}' >"$P/provenance.json"
-sync -f "$P/provenance.json"
-sync -f "$P"
-sync -f "$D"
 cp "$D/submit.bin" "$P/stage-retry-0002.bin"
 cp "$D/submit.json" "$P/stage-retry-0002.json"
 cp "$D/lookup-after-submit.bin" "$P/stage-retry-0003.bin"
@@ -104,21 +101,14 @@ for target in retry-0002.bin retry-0002.json retry-0003.bin retry-0003.json; do
     retry-0003.json) source="$D/lookup-after-submit.json" ;;
   esac
   [ "$(sha "$P/stage-$target")" = "$(sha "$source")" ] || fail "private copy differs: $target"
-  sync -f "$P/stage-$target"
 done
-sync -f "$P"
 # Each link is atomic and fails if a retry name appeared. The stage copies are
 # independent of the protected original response files and remain as evidence.
 ln "$P/stage-retry-0002.bin" "$A/retry-0002.bin"
 ln "$P/stage-retry-0002.json" "$A/retry-0002.json"
 ln "$P/stage-retry-0003.bin" "$A/retry-0003.bin"
 ln "$P/stage-retry-0003.json" "$A/retry-0003.json"
-for target in retry-0002.bin retry-0002.json retry-0003.bin retry-0003.json; do sync -f "$A/$target"; done
-sync -f "$A"
 sha256sum "$A/retry-0002.bin" "$A/retry-0002.json" \
   "$A/retry-0003.bin" "$A/retry-0003.json" >"$P/target-sha256.txt"
-sync -f "$P/target-sha256.txt"
 printf '%s\n' 'four exact original-attempt retry names adopted; outcome.json untouched' >"$P/complete.txt"
-sync -f "$P/complete.txt"
-sync -f "$P"
 printf '%s\n' "$P/complete.txt"

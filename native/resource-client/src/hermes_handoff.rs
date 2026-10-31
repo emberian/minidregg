@@ -583,9 +583,6 @@ pub(crate) fn seal_dismiss(ws: &Value, out: &Path, origin: &Path) -> Result<()> 
         }
     }
     crate::chat::put_json(&target, &bundle)?;
-    fs::File::open(out)
-        .and_then(|f| f.sync_all())
-        .map_err(|e| e.to_string())?;
     Ok(())
 }
 fn check_dismissal(root: &Path, inbox: &Path, task: &str) -> Result<Value> {
@@ -919,13 +916,7 @@ fn publish(inbox: &Path, bundle: &Value) -> Result<Value> {
         &stage.join("ready.json"),
         &serde_json::to_vec(&ready).map_err(|e| e.to_string())?,
     )?;
-    fs::File::open(&stage)
-        .and_then(|f| f.sync_all())
-        .map_err(|e| e.to_string())?;
     fs::rename(&stage, inbox).map_err(|e| format!("atomic handoff publication refused: {e}"))?;
-    fs::File::open(parent)
-        .and_then(|f| f.sync_all())
-        .map_err(|e| e.to_string())?;
     Ok(json!({"type":"mini-hermes-dispatch-v1","id":id,"inbox":inbox,"replayed":false}))
 }
 pub(crate) fn run(mut args: Args) -> Result<()> {

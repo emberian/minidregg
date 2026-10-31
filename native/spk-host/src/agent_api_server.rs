@@ -92,7 +92,6 @@ fn remove_stale_socket(path: &Path, expected_uid: u32) -> io::Result<Option<fs::
             return Err(invalid("agent stale socket changed"));
         }
         fs::remove_file(path)?;
-        File::open(path.parent().ok_or_else(|| invalid("agent socket parent absent"))?)?.sync_all()?;
     }
     Ok(old)
 }

@@ -92,7 +92,6 @@ fn record(state: &Path, request: &Request, status: &str, evidence: Value) -> Res
     if status!="completed" && request.started.is_none() {receipt["modelRequests"]=json!(0);}
     let name=state.join(format!("request-{}-{}.json",digest(&request.identity)?,status));
     retain_exact_private(&name,&serde_json::to_vec_pretty(&receipt).map_err(|e|e.to_string())?,1_048_576)?;
-    File::open(state).and_then(|f|f.sync_all()).map_err(|e|e.to_string())?;
     println!("{receipt}");
     owe(state,request,status,&terminal_text(status,&evidence))
 }

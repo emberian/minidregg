@@ -186,7 +186,7 @@ mod tests {
 
 /// Publish complete bytes under the held parent descriptor. Existing symlink or
 /// special-file records refuse; rename never follows a leaf that changes later.
-/// The previous record remains intact until the replacement is fsynced.
+/// The previous record remains intact until the replacement is written.
 pub(crate) fn replace(root: &Path, path: &Path, bytes: &[u8]) -> Result<(), String> {
     use std::io::Write;
     let (directory, name) = parent(root, path)?;
@@ -205,12 +205,12 @@ pub(crate) fn replace(root: &Path, path: &Path, bytes: &[u8]) -> Result<(), Stri
         libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC, 0o600) };
     if fd < 0 { return Err(std::io::Error::last_os_error().to_string()); }
     let mut file = unsafe { File::from_raw_fd(fd) };
-    let result = file.write_all(bytes).and_then(|()| file.sync_all()).map_err(|e| e.to_string())
+    let result = file.write_all(bytes).map_err(|e| e.to_string())
         .and_then(|()| {
             if unsafe { libc::renameat(directory.as_raw_fd(), temporary.as_ptr(), directory.as_raw_fd(), name.as_ptr()) } != 0 {
                 return Err(std::io::Error::last_os_error().to_string());
             }
-            directory.sync_all().map_err(|e| e.to_string())
+            Ok(())
         });
     // This name was created exclusively by this call; no foreign cleanup.
     if result.is_err() { unsafe { libc::unlinkat(directory.as_raw_fd(), temporary.as_ptr(), 0); } }

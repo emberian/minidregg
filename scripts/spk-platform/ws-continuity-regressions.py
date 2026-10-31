@@ -334,13 +334,6 @@ class Regressions:
         require(not final.exists() and not final.is_symlink() and not pending.exists() and not pending.is_symlink(), 'selected seal path already exists')
         # This is a diagnostic fault, not fabricated authority. create_new preserves all custody.
         save(final,{'protocol':'mini-spk-test-seal-collision-v1','request':str(request_path),'fixture':str(f.path)})
-        with open(final,'rb') as fd:
-            os.fsync(fd.fileno())
-        directory_fd = os.open(seal_dir,os.O_RDONLY|os.O_DIRECTORY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
         collider_hash = sha(final)
         rc,_,error = f.run([f.m['spkHost']['path'],'grain','register-route','--socket',journal/'route-control.sock','--request',request_path],okay=False)
         require(rc != 0, 'collision unexpectedly registered route')

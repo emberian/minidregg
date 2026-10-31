@@ -185,11 +185,6 @@ pub(crate) fn run(template: &Path, operator_policy: &Path, output: &Path) -> Res
     let complete = json!({"type":"mini-provider-provision-complete-v1","intent":intent,"source":evidence,"tariff":tariff_pin,"ownerAuthority":owner_proof.evidence(),"grantAuthority":grant_proof});
     atomic_json(&complete_path, &complete)?;
     write_new(output, &config_bytes)?;
-    if let Some(parent) = output.parent() {
-        File::open(parent)
-            .and_then(|f| f.sync_all())
-            .map_err(|e| format!("controller publication sync: {e}"))?;
-    }
     Ok(
         json!({"type":"mini-provider-provisioned-v1","controller":output,"existing":false,
         "choiceSha256":choice.digest(),"provider":choice.provider,"model":choice.model,

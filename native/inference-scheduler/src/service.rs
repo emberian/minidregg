@@ -99,9 +99,6 @@ impl Service {
             Ok(()) => {
                 fs::set_permissions(&archive, fs::Permissions::from_mode(0o700))
                     .map_err(|e| e.to_string())?;
-                File::open(directory)
-                    .and_then(|dir| dir.sync_all())
-                    .map_err(|e| e.to_string())?;
             }
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(error) => return Err(error.to_string()),
@@ -252,11 +249,7 @@ impl Service {
                     .open(&temporary)
                     .map_err(|e| e.to_string())?;
                 file.write_all(&bytes).map_err(|e| e.to_string())?;
-                file.sync_all().map_err(|e| e.to_string())?;
                 fs::rename(&temporary, archive.join(&id)).map_err(|e| e.to_string())?;
-                File::open(&archive)
-                    .and_then(|dir| dir.sync_all())
-                    .map_err(|e| e.to_string())?;
                 self.receipts += 1;
                 self.receipt_bytes += bytes.len() as u64;
                 self.drained_receipts += usize::from(matches!(
@@ -292,11 +285,8 @@ impl Service {
             .map_err(|e| e.to_string())?;
         serde_json::to_writer(&mut file, state).map_err(|e| e.to_string())?;
         file.write_all(b"\n").map_err(|e| e.to_string())?;
-        file.sync_all().map_err(|e| e.to_string())?;
         fs::rename(&temporary, self.directory.join("state.json")).map_err(|e| e.to_string())?;
-        File::open(&self.directory)
-            .and_then(|dir| dir.sync_all())
-            .map_err(|e| e.to_string())
+        Ok(())
     }
 
     pub fn execute(&mut self, uid: u32, command: Command, now: u64) -> Result<crate::core::Job> {
@@ -315,7 +305,7 @@ impl Service {
         if registration.uid != uid {
             return Err("controller peer uid differs from registration".into());
         }
-        // Apply to a candidate. No acknowledgement or in-memory admission before fsync.
+        // Apply to a candidate. No acknowledgement or in-memory admission before write.
         let mut next = self.core.clone();
         next.schedule(&self.config, now)?;
         // Load only the addressed exact terminal receipt. Archive history never
@@ -483,7 +473,7 @@ impl Service {
         let listener = UnixListener::bind(socket_path).map_err(|e| e.to_string())?;
         fs::set_permissions(socket_path, fs::Permissions::from_mode(0o600))
             .map_err(|e| e.to_string())?;
-        // One owner serializes allocation and fsync. Frames are small and local;
+        // One owner serializes allocation and write. Frames are small and local;
         // per-frame timeout bounds an abandoned caller, no per-request thread swarm.
         for stream in listener.incoming() {
             let mut stream = stream.map_err(|e| e.to_string())?;

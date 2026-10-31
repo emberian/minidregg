@@ -611,7 +611,6 @@ pub(crate) fn rotate_key(mut args: Args) -> Result<()> {
     }
     if state["phase"] == "preparing" && named.is_none() {
         workspace::private::keyring_remember(&ws.key, &epoch.to_string())?;
-        custody::sync_parent(&workspace::private::enc_ring_path(&ws.key))?;
     }
     if !ingress_path.exists() {
         if state["phase"] != "preparing" {

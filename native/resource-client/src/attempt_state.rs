@@ -1,18 +1,13 @@
 //! `mini attempt-state --attempt DIR [--file NAME]`: an attempt's retained state as JSON, read
-//! locally (no socket, no Host). Scripts read this instead of the attempt's files: the custody
-//! record (`seal.record`, `mini_sdk::phase`) is authoritative for every file it names, and a cache
-//! it names may be missing or torn after a crash until a reader repairs it. This verb repairs the
-//! whole directory from the record first (`phase::repair_dir`), then reads the answers through the
-//! SDK's one history (`store::AttemptDir::history`: `outcome.json`, then `retry-N.json` in numeric
+//! locally (no socket, no Host). It reads the answers through the SDK's one history (`store::AttemptDir::history`: `outcome.json`, then `retry-N.json` in numeric
 //! order) and its one standing rule (`custody::standing`).
 //!
 //! Output (`--file` absent): `{"type":"minidregg-attempt-state-v1","class":"answered","attempt",
-//! "sealed","call","repaired","outcome","retries":[{"file","outcome"}],"last","standing"}`;
+//! "call","outcome","retries":[{"file","outcome"}],"last","standing"}`;
 //! `outcome` is `outcome.json`'s value or null, `last` the newest answer or null, `standing` one of
 //! confirmed | charged | refused | pending. With `--file outcome.json` or `--file retry-NNNN.json`
 //! the verb prints exactly that answer's JSON (what `jq ... DIR/outcome.json` read before), exit 1
-//! when it is absent. An answer file that does not parse is corruption (answers keep their own
-//! fsync, phase invariant 4): exit 1 naming it, never a guess.
+//! when it is absent. An answer file that does not parse: exit 1 naming it, never a guess.
 use std::path::Path;
 
 use serde_json::{json, Value};
@@ -29,7 +24,6 @@ pub(crate) fn state(dir: &Path) -> Result<Value> {
     if !dir.is_dir() {
         return Err(format!("attempt-state: no attempt directory at {}", dir.display()));
     }
-    let repaired = mini_sdk::phase::repair_dir(dir).map_err(String::from)?;
     let attempt = mini_sdk::store::AttemptDir(dir.to_path_buf());
     let outcome = mini_sdk::store::read_json(&dir.join("outcome.json"))
         .map_err(|e| format!("attempt-state: outcome.json: {e}"))?;
@@ -51,9 +45,7 @@ pub(crate) fn state(dir: &Path) -> Result<Value> {
         "type": "minidregg-attempt-state-v1",
         "class": "answered",
         "attempt": dir,
-        "sealed": dir.join(mini_sdk::phase::RECORD).is_file(),
         "call": dir.join("call.bin").is_file(),
-        "repaired": repaired,
         "outcome": outcome,
         "retries": retries,
         "last": history.last().cloned(),
@@ -95,24 +87,21 @@ mod tests {
         p
     }
 
-    fn sealed_attempt(tag: &str) -> std::path::PathBuf {
+    fn retained_attempt(tag: &str) -> std::path::PathBuf {
         let dir = scratch(tag);
         fs::write(dir.join("intent.json"), br#"{"action":"invoke","object":"7"}"#).unwrap();
         fs::write(dir.join("call.bin"), b"exact call bytes").unwrap();
-        mini_sdk::phase::seal(&dir).unwrap();
         dir
     }
 
     #[test]
-    fn attempt_state_reads_a_sealed_decided_attempt() {
-        let dir = sealed_attempt("decided");
+    fn attempt_state_reads_a_decided_attempt() {
+        let dir = retained_attempt("decided");
         fs::write(dir.join("outcome.json"), br#"{"type":"refused","phase":"admit","detail":"stale","reason":"stale-root"}"#).unwrap();
         fs::write(dir.join("retry-0001.json"), br#"{"type":"confirmed","confirmation":"installed","transactionId":"9","acceptedCount":"12"}"#).unwrap();
         let state = state(&dir).unwrap();
         assert_eq!(state["class"], "answered");
-        assert_eq!(state["sealed"], true);
         assert_eq!(state["call"], true);
-        assert_eq!(state["repaired"], 0);
         assert_eq!(state["outcome"]["phase"], "admit");
         assert_eq!(state["retries"][0]["file"], "retry-0001.json");
         assert_eq!(state["last"]["acceptedCount"], "12");
@@ -121,23 +110,8 @@ mod tests {
     }
 
     #[test]
-    fn attempt_state_repairs_a_torn_cache_from_the_record() {
-        let dir = sealed_attempt("torn");
-        let intact = fs::read(dir.join("intent.json")).unwrap();
-        fs::write(dir.join("intent.json"), &intact[..7]).unwrap();
-        fs::remove_file(dir.join("call.bin")).unwrap();
-        let state = state(&dir).unwrap();
-        assert_eq!(state["repaired"], 2);
-        assert_eq!(state["call"], true);
-        assert_eq!(state["standing"], "pending");
-        assert!(state["outcome"].is_null());
-        assert_eq!(fs::read(dir.join("intent.json")).unwrap(), intact);
-        fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[test]
     fn attempt_state_names_a_corrupt_answer() {
-        let dir = sealed_attempt("corrupt");
+        let dir = retained_attempt("corrupt");
         fs::write(dir.join("outcome.json"), b"{\"type\":\"conf").unwrap();
         let error = state(&dir).unwrap_err();
         assert!(error.contains("outcome.json"), "{error}");

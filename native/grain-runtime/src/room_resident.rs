@@ -374,8 +374,6 @@ pub(crate) fn initialize(controller: &Path, state: &Path) -> Result<()> {
             return Err("another resident driver owns this room".into());
         }
         atomic_json(&state.join("resident.json"), &serde_json::to_value(ResidentState::default()).map_err(|e|e.to_string())?)?;
-        File::open(state).and_then(|f|f.sync_all()).map_err(|e|e.to_string())?;
-        File::open(&config.state_dir).and_then(|f|f.sync_all()).map_err(|e|e.to_string())?;
     }
     let guard = quiescence::ResidentGuard::acquire(&config, Some(state))?;
     let _: ResidentState = serde_json::from_slice(guard.bytes()?).map_err(|e|format!("resident journal: {e}"))?;

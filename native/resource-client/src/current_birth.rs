@@ -2,8 +2,7 @@
 //! complete canonical intent; this client only retains its exact bytes before
 //! the ordinary `mini submit --intent-kind binary` custody path may dispatch.
 use crate::{
-    copy_new, create_private, hex, host_image_sha256, session_invoke, sync_directory_ancestors,
-    Result,
+    copy_new, create_private, hex, host_image_sha256, session_invoke, Result,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -146,7 +145,6 @@ pub(crate) fn author(
             &serde_json::to_vec_pretty(&manifest).map_err(|e| e.to_string())?,
         )?;
     }
-    sync_directory_ancestors(directory)?;
     if directory.join("reply.frame").exists() {
         let intent = retained_intent(directory, route)?;
         println!("{}", intent.display());
@@ -166,10 +164,8 @@ pub(crate) fn author(
     };
     let frame = session_invoke(host, socket, &retained_config, route.operation(), &payload)?;
     create_private(&directory.join("reply.frame"), &frame)?;
-    sync_directory_ancestors(directory)?;
     let bytes = intent_from_frame(route, &frame)?;
     create_private(&directory.join("intent.bin"), bytes)?;
-    sync_directory_ancestors(directory)?;
     println!("{}", directory.join("intent.bin").display());
     Ok(())
 }
@@ -211,7 +207,6 @@ pub(crate) fn retained_intent(directory: &Path, route: Route) -> Result<std::pat
         }
     } else {
         create_private(&path, exact)?;
-        sync_directory_ancestors(directory)?;
     }
     Ok(path)
 }

@@ -361,11 +361,6 @@ pub(crate) fn retire(directory: &Path, number: u32, keep: &[&str]) -> Result<Pat
         fs::rename(directory.join(&name), target.join(&name))
             .map_err(|error| format!("cannot retire {}: {error}", directory.join(&name).display()))?;
     }
-    for synced in [directory, &target] {
-        fs::File::open(synced)
-            .and_then(|handle| handle.sync_all())
-            .map_err(|error| error.to_string())?;
-    }
     Ok(target)
 }
 

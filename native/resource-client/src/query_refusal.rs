@@ -66,7 +66,7 @@ pub(crate) fn retain(
         &attempt.join("query-refusal.json"),
         &serde_json::to_vec_pretty(&marker).map_err(|e| e.to_string())?,
     )?;
-    super::sync_directory_ancestors(attempt)
+    Ok(())
 }
 
 #[cfg(test)]

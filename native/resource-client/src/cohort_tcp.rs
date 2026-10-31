@@ -13,7 +13,6 @@ use chacha20poly1305::{
 };
 use sha2::{Digest, Sha256};
 use std::{
-    fs::File,
     io::{Read, Write},
     net::{TcpListener, TcpStream},
     path::{Path, PathBuf},
@@ -143,7 +142,7 @@ fn read_record(records: &Path, epoch: u64, capacity: usize) -> Result<Option<Vec
     let record = records.join(format!("epoch-{epoch}.record"));
     if record.exists() {
         // The immutable file can become visible between hard-link publication
-        // and its directory fsync. Only the post-fsync availability token permits
+        // and its directory write. Only the post-write availability token permits
         // consumption. Losing that token on crash loses availability, not the
         // original source journal or authority, and never creates another effect.
         let ready = records.join(format!("epoch-{epoch}.adopted"));
@@ -261,13 +260,7 @@ fn adopt(_root: &Path, output: &Path, _p: &Profile, epoch: u64, plain: &[u8]) ->
         if read_private(&record, plain.len())? != plain {
             return Err("changed retained link identity; preserve existing obligation".into());
         }
-        // Exact readback alone does not attest a prior uncertain directory fsync.
-        File::open(&record)
-            .and_then(|f| f.sync_all())
-            .map_err(|e| e.to_string())?;
-        File::open(output)
-            .and_then(|f| f.sync_all())
-            .map_err(|e| e.to_string())?;
+        // Exact readback alone does not attest a prior uncertain directory write.
     } else {
         persist(&record, plain)?;
     }
@@ -810,7 +803,7 @@ fn receive(
         .set_read_timeout(Some(Duration::from_millis(p.tick / 2)))
         .map_err(|e| e.to_string())?;
     // Durable adoption owns its independent bounded queue; no consumer sees a
-    // record before fsync. Disk work cannot stall the fixed receive clock.
+    // record before write. Disk work cannot stall the fixed receive clock.
     let (tx, rx) = std::sync::mpsc::sync_channel::<(u64, Vec<u8>)>(count);
     thread::scope(|scope| {
         let writer = scope.spawn(move || -> Result<()> {
@@ -945,7 +938,7 @@ fn private_fault(root: &Path, epoch: u64, error: &str) -> Result<()> {
     }
     persist(&path, error.as_bytes())
 }
-// The source helper has already fsynced its immutable canonical output before
+// The source helper has already written its immutable canonical output before
 // returning these exact bytes. This alias is readiness only: no second journal,
 // receipt or durability claim. Crash loss is repaired from the source cache only
 // for future epochs; released epochs remain fenced by the public profile.

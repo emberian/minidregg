@@ -2608,7 +2608,6 @@ fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
         .open(path)
         .map_err(|e| format!("{}: {e}", path.display()))?;
     file.write_all(bytes)
-        .and_then(|_| file.sync_all())
         .map_err(|e| format!("{}: {e}", path.display()))
 }
 
@@ -17990,7 +17989,7 @@ fn record_unit_cpu(state_dir: &Path, unit: &str) -> Result<()> {
     let mut file = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temporary)
         .map_err(|e| format!("cpu record: {e}"))?;
     file.write_all(format!("mini-grain-cpu-v1 {}\n", nsec.div_ceil(1000)).as_bytes())
-        .and_then(|_| file.sync_all()).map_err(|e| format!("cpu record: {e}"))?;
+        .map_err(|e| format!("cpu record: {e}"))?;
     fs::rename(&temporary, &path).map_err(|e| format!("cpu record: {e}"))
 }
 

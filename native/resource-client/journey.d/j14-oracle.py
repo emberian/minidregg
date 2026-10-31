@@ -348,7 +348,7 @@ class Journey:
             if Journey.private_metadata_bytes(path)!=data:raise ValueError('retained transport evidence changed')
             return
         fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
-        with os.fdopen(fd,'wb') as out:out.write(data);out.flush();os.fsync(out.fileno())
+        with os.fdopen(fd,'wb') as out:out.write(data);out.flush()
 
     def prepare_operator_relocation(self):
         selected=os.environ.get('J14_ORACLE_OPERATOR_RELOCATION')
@@ -431,9 +431,6 @@ class Journey:
             plan={'protocol':'mini-j14-operator-transport-transition-v1','request':request,'files':rows}
             self.retain_transport_bytes(plan_path,(json.dumps(plan,indent=2)+'\n').encode())
         # Persist the whole transition before replacing the first metadata file.
-        directory=os.open(archive,os.O_RDONLY)
-        try:os.fsync(directory)
-        finally:os.close(directory)
         for row in plan['files']:
             path=Path(row['path']);before=self.private_metadata_bytes(Path(row['before']));after=self.private_metadata_bytes(Path(row['after']))
             if hashlib.sha256(before).hexdigest()!=row['beforeSha256'] or hashlib.sha256(after).hexdigest()!=row['afterSha256']:
@@ -443,9 +440,6 @@ class Journey:
             if current!=before:raise ValueError('transport metadata changed outside retained transition')
             temporary=path.with_name(path.name+'.operator-transport-next')
             self.retain_transport_bytes(temporary,after);os.replace(temporary,path)
-            directory=os.open(path.parent,os.O_RDONLY)
-            try:os.fsync(directory)
-            finally:os.close(directory)
         self.c['operatorSocket']=new
         self.c['operatorTransportTransition']=str(plan_path)
         self.operator_relocation=request
@@ -624,7 +618,7 @@ class Journey:
                 value['socket']=new;after=(json.dumps(value,indent=2)+'\n').encode()
                 previous=archive/f'{index:02d}-before.json';successor=archive/f'{index:02d}-after.json'
                 for target,data in [(previous,before),(successor,after)]:
-                    with target.open('xb') as out:out.write(data);out.flush();os.fsync(out.fileno())
+                    with target.open('xb') as out:out.write(data);out.flush()
                 write(record,{'workspace':str(path),'before':str(previous),'after':str(successor),
                     'beforeSha256':sha(previous),'afterSha256':sha(successor),'oldSocket':str(old),'newSocket':new,
                     'oldConfig':str(old_config),'oldConfigSha256':sha(old_config),'newConfigSha256':sha(self.c['hostConfig'])})
@@ -632,11 +626,8 @@ class Journey:
             if current==after:continue
             if current!=before:raise ValueError('workspace changed outside retained routing transition')
             temporary=path.with_name('workspace.transport-next.json')
-            with temporary.open('xb') as out:out.write(after);out.flush();os.fsync(out.fileno())
+            with temporary.open('xb') as out:out.write(after);out.flush()
             os.replace(temporary,path)
-            directory=os.open(path.parent,os.O_RDONLY)
-            try:os.fsync(directory)
-            finally:os.close(directory)
 
     def prepare_platform(self):
         # The resident broker checks a concrete inventory for any home paths.

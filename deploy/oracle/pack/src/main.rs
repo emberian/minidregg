@@ -73,7 +73,6 @@ fn keygen(path: &Path) -> Result<()> {
         .mode(0o600)
         .open(path)?;
     out.write_all(&seed)?;
-    out.sync_all()?;
     let signing = SigningKey::from_bytes(&seed);
     println!(
         "{}",
@@ -258,7 +257,6 @@ fn pack(stage: &Path, stage_sha: &str, private_key: &Path, output: &Path) -> Res
     let mut temporary =
         tempfile::NamedTempFile::new_in(output.parent().ok_or("output needs parent")?)?;
     temporary.write_all(&bytes)?;
-    temporary.as_file().sync_all()?;
     temporary.persist_noclobber(output)?;
     println!(
         "{}",

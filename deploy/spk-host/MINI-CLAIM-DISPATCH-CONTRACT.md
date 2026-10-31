@@ -11,11 +11,11 @@ Lean admits every request; Rust holds the physical fd 3 and the evidence.
 3. `dispatch_fence::admit_new_call`: at most 8 undecided calls per generation
    journal (one op 35 lookup of the oldest per new call; settled attempts keep
    markers only, at most 256 retained).
-4. A fresh fsynced operation ID, then author (op 36 plan, custodial signatures,
+4. A fresh operation ID, then author (op 36 plan, custodial signatures,
    op 37 assembly) under `dispatch-op-<N>/`. A refused plan or assembly keeps
    its frame and helper stderr as refusal evidence; nothing was submitted.
 5. `submit-requested.json` and `submit-active.json` are written (create-new,
-   fsynced) before op 34, or op 164 for a route sealed to an admitted binding.
+   written) before op 34, or op 164 for a route sealed to an admitted binding.
    The same attempt can never be submitted twice.
 6. Only Lean's fresh committed permit is inspected (`inspect
    application-dispatch-committed`), matched against the request, recorded

@@ -157,7 +157,7 @@ struct Retained {
 }
 
 fn retained(directory: &Path, socket_override: Option<&Path>) -> Result<Retained> {
-    crate::fsio::ensure_private_dir_durable(directory)?;
+    crate::fsio::ensure_private_dir(directory)?;
     let pin_bytes = bounded(&directory.join("pin.json"), 65_536)?;
     let pin: Value = serde_json::from_slice(&pin_bytes).map_err(|e| e.to_string())?;
     if member(&pin, "format")? != FORMAT {
@@ -207,7 +207,6 @@ fn outcome_at(
     let binary = directory.join(format!("{name}.outcome.bin"));
     let presentation = directory.join(format!("{name}.outcome.json"));
     create_private(&binary, body)?;
-    sync_directory_ancestors(directory)?;
     source_inspect(
         &state.host,
         &state.config,
@@ -292,10 +291,9 @@ fn retained_outcome_bytes(directory: &Path, stem: &str) -> Result<Option<PathBuf
             return Err("retained share issue outcome differs from exact Host reply frame".into());
         }
     } else {
-        // The frame is synced before extraction. Reconstruct the sole possible
+        // The frame is written before extraction. Reconstruct the sole possible
         // canonical outcome after a crash in that narrow interval.
         create_private(&binary, &frame[1..])?;
-        sync_directory_ancestors(directory)?;
     }
     Ok(Some(binary))
 }
@@ -389,7 +387,6 @@ pub(super) fn submit(directory: &Path, socket: Option<&Path>) -> Result<()> {
     )
     .map_err(|e| format!("share issue submit uncertain; exact ingress retained: {e}"))?;
     create_private(&directory.join("submit.frame"), &frame)?;
-    sync_directory_ancestors(&directory)?;
     let outcome = outcome_at(&directory, "submit", &frame, mini_sdk::host_operations::APPLICATION_SHARE_ISSUE_SUBMIT, &state)?;
     confirmed(&outcome)?;
     historical_anchor(&directory, &state, 0)?;
@@ -436,7 +433,6 @@ pub(super) fn lookup(directory: &Path, socket: Option<&Path>) -> Result<()> {
         &state.ingress,
     )?;
     create_private(&directory.join(format!("{stem}.frame")), &frame)?;
-    sync_directory_ancestors(&directory)?;
     let outcome = outcome_at(&directory, &stem, &frame, mini_sdk::host_operations::APPLICATION_SHARE_ISSUE_LOOKUP, &state)?;
     confirmed(&outcome)?;
     historical_anchor(&directory, &state, index + 1)?;
@@ -475,7 +471,6 @@ pub(super) fn prepare(
     let approval: Value = serde_json::from_slice(&approval_bytes)
         .map_err(|e| format!("invalid share issue approval: {e}"))?;
     crate::fsio::create_private_dir(&directory)?;
-    sync_directory_ancestors(&directory)?;
     create_private(&directory.join("request.json"), &source)?;
     create_private(&directory.join("approval.json"), &approval_bytes)?;
     create_private(&directory.join("config.json"), &initial_config)?;
@@ -490,7 +485,6 @@ pub(super) fn prepare(
             request_bin.as_os_str(),
         ],
     )?;
-    sync_retained_call(&directory, &request_bin)?;
     let request = bounded(&request_bin, REQUEST_LIMIT)?;
     let inspected_request = source_inspect(
         &host,
@@ -508,7 +502,6 @@ pub(super) fn prepare(
     let frame = session_invoke(&host, &operator_socket, &config, mini_sdk::host_operations::APPLICATION_SHARE_ISSUE_PLAN, &request)?;
     check_inputs()?;
     create_private(&directory.join("plan.frame"), &frame)?;
-    sync_directory_ancestors(&directory)?;
     let plan = expect_reply(&frame, mini_sdk::host_operations::APPLICATION_SHARE_ISSUE_PLAN)?;
     let plan_path = directory.join("plan.bin");
     create_private(&plan_path, plan)?;

@@ -277,11 +277,8 @@ class World:
         self.state["serial"] = self.serial
         with tempfile.NamedTemporaryFile(mode="w", prefix=".runtime-", dir=self.root, delete=False) as retained:
             json.dump(self.state, retained, indent=2)
-            retained.write("\n"); retained.flush(); os.fsync(retained.fileno())
+            retained.write("\n"); retained.flush()
         os.replace(retained.name, self.root / "runtime.json")
-        directory = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY)
-        try: os.fsync(directory)
-        finally: os.close(directory)
 
     def run(self, label, argv, env=None):
         argv = [str(value) for value in argv]

@@ -573,7 +573,7 @@ impl KeyRecord {
         Ok(spec)
     }
 }
-/// Load the custody wrap key, creating it (temp + fsync + rename) when this is
+/// Load the custody wrap key, creating it (temp + rename) when this is
 /// a brand-new custody. An existing journal with a missing wrap key is refused
 /// by the journal replay (the seeds cannot be unwrapped), never regenerated.
 fn load_or_create_wrap(path: &std::path::Path) -> Result<zeroize::Zeroizing<[u8; 32]>> {
@@ -603,9 +603,7 @@ fn load_or_create_wrap(path: &std::path::Path) -> Result<zeroize::Zeroizing<[u8;
         .mode(0o600)
         .open(&tmp)?;
     f.write_all(&*k)?;
-    f.sync_all()?;
     std::fs::rename(&tmp, &wrap_path)?;
-    File::open(wrap_path.parent().ok_or_else(|| bad("wrap key parent"))?)?.sync_all()?;
     Ok(k)
 }
 impl RecipientKeyCustody {
@@ -633,7 +631,7 @@ impl RecipientKeyCustody {
             wal_id: id,
         })
     }
-    /// Generate on the designated endpoint, fsync/read back before publishing
+    /// Generate on the designated endpoint, write/read back before publishing
     /// the public enrollment candidate. The source must separately admit it.
     /// Generation does not make the epoch current: that is `adopt_current`.
     pub fn generate_epoch(&mut self, epoch: Nat) -> Result<KeyRecord> {

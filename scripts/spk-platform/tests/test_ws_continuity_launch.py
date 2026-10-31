@@ -6,7 +6,6 @@ import json
 import os
 from pathlib import Path
 import pwd
-import stat
 import tarfile
 import tempfile
 import unittest
@@ -120,14 +119,6 @@ class CustodyTests(unittest.TestCase):
                 m.operator_custody(alias/'browser.token',root,os.getuid(),'file')
             with self.assertRaisesRegex(RuntimeError,'escapes'):
                 m.operator_custody(token,root/'other',os.getuid(),'file')
-
-    def test_override_request_save_syncs_file_and_parent(self):
-        with tempfile.TemporaryDirectory() as temp:
-            kinds=[];original=os.fsync
-            def synced(fd): kinds.append(stat.S_ISDIR(os.fstat(fd).st_mode));original(fd)
-            with patch.object(m.os,'fsync',side_effect=synced):
-                m.save(Path(temp)/'override-request.json',{'arguments':['exact','pins']})
-            self.assertEqual(kinds,[False,True])
 
 
 if __name__=='__main__': unittest.main()

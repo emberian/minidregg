@@ -258,7 +258,7 @@ impl Runtime {
         if let Some(socket) = &cfg.host_socket {
             args.extend(["--socket", socket.to_str().ok_or("socket UTF8")?]);
         }
-        // Mini fsyncs call.bin and its directory before sending any submit.
+        // Mini writes call.bin and its directory before sending any submit.
         // On interruption the updated pending record still owns this exact call.
         self.command_output(&cfg.mini, &args)?;
         Ok(true)

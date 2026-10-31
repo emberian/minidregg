@@ -52,7 +52,6 @@ class Route:
         # Private diagnostics exclude credentials/prepared bodies; NOT a Mini permit journal.
         self.journal.write(json.dumps(request, separators=(',', ':')) + '\n')
         self.journal.flush()
-        os.fsync(self.journal.fileno())
 
     def cookie_values(self, path=''):
         if not self.retain_app_cookies:

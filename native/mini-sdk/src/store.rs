@@ -1,4 +1,4 @@
-//! Filesystem custody: owner-private directories, fsync-then-rename JSON records under an
+//! Filesystem custody: owner-private directories, rename JSON records under an
 //! exclusive lease, and the retained attempt-directory layout `resource-client` already writes
 //! (`call.bin`, `outcome.json`, `retry-NNNN.{bin,json,transport.json}`).
 use std::fs;
@@ -13,14 +13,14 @@ use crate::{Error, Result};
 
 const MAX_RECORD: u64 = 16 * 1024 * 1024;
 
-/// Write `value` to `path` durably: a unique 0600 sibling, fsync, rename, fsync the directory.
+/// Write `value` to `path` durably: a unique 0600 sibling, rename.
 pub fn atomic_json(path: &Path, value: &Value) -> Result<()> {
     let bytes = serde_json::to_vec(value).map_err(|e| e.to_string())?;
     durable::replace(path, &bytes, Perm::Private).map_err(|e| e.to_string().into())
 }
 
 /// Write a record that may exist only ONCE with these exact contents: absent, it is written
-/// durably (as [`atomic_json`]); present and equal, it is re-synced and accepted (an interrupted
+/// durably (as [`atomic_json`]); present and equal, it is compared and accepted (an interrupted
 /// writer's retry); present and different, it refuses. A phase marker is retained this way, so a
 /// retry can never silently replace what a crashed run decided.
 pub fn write_once(path: &Path, value: &Value) -> Result<()> {
@@ -94,13 +94,12 @@ fn retry_index(name: &str) -> Option<(u64, bool)> {
 }
 
 impl AttemptDir {
-    /// Retain the exact call: complete-or-absent (staged, fsynced, linked into place), then fsync
+    /// Retain the exact call: complete-or-absent (staged, linked into place), then write
     /// every ancestor directory. A transmission must never precede a durable call and its
     /// pathname, and a crash can never leave a truncated `call.bin` to be resent.
     pub fn seal_call(&self, call: &[u8]) -> Result<PathBuf> {
         let path = self.0.join("call.bin");
         durable::create_new(&path, call, Perm::Private).map_err(|e| format!("cannot retain exact call {}: {e}", path.display()))?;
-        durable::sync_ancestors(&self.0).map_err(|e| e.to_string())?;
         Ok(path)
     }
 

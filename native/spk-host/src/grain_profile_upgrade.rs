@@ -414,9 +414,7 @@ pub(super) fn rebind(old_path: &Path, admission_path: &Path) -> io::Result<Value
         .custom_flags(libc::O_NOFOLLOW)
         .open(&temp).ctx("open", &temp)?;
     file.write_all(&serde_json::to_vec_pretty(&selection)?)?;
-    file.sync_all()?;
     fs::rename(&temp, &pointer).ctx("rename", &temp)?;
-    File::open(&old.state_root).ctx("open", &old.state_root)?.sync_all()?;
     Ok(
         json!({"protocol":"mini-spk-profile-rebind-v1","store":store(&next)?,"previousProfile":old_path,
         "profile":next_path,"profileSha256":selection.sha256,"admission":admission_path,"activeProfile":pointer}),

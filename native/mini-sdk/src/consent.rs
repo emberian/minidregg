@@ -1131,12 +1131,12 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// A crash at every durable stage of retaining a new anchor leaves either the previous anchor
+    /// A kill at every stage of retaining a new anchor leaves either the previous anchor
     /// or the new one, whole, under the same binding. Both are admissible offers.
     #[test]
     fn retained_anchor_survives_a_crash_at_every_stage() {
         use crate::durable::Stage;
-        for stage in [Stage::MidWrite, Stage::BeforeFileSync, Stage::BeforeCommit, Stage::AfterCommit, Stage::AfterDirectorySync] {
+        for stage in [Stage::MidWrite, Stage::BeforeCommit, Stage::AfterCommit] {
             let dir = stub_dir("anchor-crash");
             let provider = opcode_stub(&dir, b"NEW-ANCHOR");
             let settings = dir.join("consent.json");
@@ -1150,7 +1150,7 @@ mod tests {
             retain_anchor_with(&mut session, &mut |at| if at == stage { Err(io::Error::other("crash")) } else { Ok(()) });
             drop(session);
             let survived = read_anchor(&path, &binding).unwrap().unwrap();
-            if matches!(stage, Stage::MidWrite | Stage::BeforeFileSync | Stage::BeforeCommit) {
+            if matches!(stage, Stage::MidWrite | Stage::BeforeCommit) {
                 assert_eq!(survived, b"OLD-ANCHOR", "{stage:?}");
             } else {
                 assert_eq!(survived, b"NEW-ANCHOR", "{stage:?}");

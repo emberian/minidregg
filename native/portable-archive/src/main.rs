@@ -1,13 +1,13 @@
 //! Physical-only operator experiment/helper. Inputs do not grant installation,
 //! overwrite, private share export or participant authority.
 use minidregg_portable_archive::{self as archive, durable_file,FileManifest};
-use std::fs::{File,OpenOptions};
+use std::fs::OpenOptions;
 use std::io::{self,Read,Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 fn write_exact(path:&Path,bytes:&[u8])->io::Result<()> {
     match OpenOptions::new().write(true).create_new(true).mode(0o600).open(path) {
-        Ok(mut file)=>{file.write_all(bytes)?;file.sync_all()?;File::open(path.parent().ok_or_else(||io::Error::other("parent absent"))?)?.sync_all()?;}
+        Ok(mut file)=>{file.write_all(bytes)?;}
         Err(error) if error.kind()==io::ErrorKind::AlreadyExists=>{
             let mut file=durable_file::private_file(path)?;
             if file.metadata()?.len()!=bytes.len() as u64 {return Err(io::Error::other("retained output differs"));}

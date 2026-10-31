@@ -133,12 +133,9 @@ pub fn install_worker_profile(
         .open(&tmp)
         .map_err(|e| format!("Hermes profile temp: {e}"))?;
     file.write_all(text.as_bytes())
-        .and_then(|_| file.sync_all())
         .map_err(|e| format!("Hermes profile sync: {e}"))?;
     fs::rename(&tmp, &config).map_err(|e| format!("Hermes profile replace: {e}"))?;
-    File::open(home)
-        .and_then(|directory| directory.sync_all())
-        .map_err(|e| format!("Hermes profile directory sync: {e}"))
+    Ok(())
 }
 
 #[cfg(test)]

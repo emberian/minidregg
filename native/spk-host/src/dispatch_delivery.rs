@@ -169,7 +169,7 @@ impl ResidentHuman<'_> {
             None => None,
         };
         // The caller cannot choose or replay an operation ID. Even an
-        // authoring refusal consumes this fsynced number across restarts.
+        // authoring refusal consumes this number across restarts.
         let operation_id = self.journal.allocate_dispatch_operation()?;
         trace.mark("allocate-operation");
         let attempt_dir = attempt_parent.join(format!("dispatch-op-{operation_id}"));

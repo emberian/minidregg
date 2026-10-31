@@ -7,8 +7,7 @@ use serde_json::Value;
 use std::path::Path;
 
 use super::{
-    create_private, print_json, private_consumer_attempt, session_invoke, sync_directory_ancestors,
-    transport, Result,
+    create_private, print_json, private_consumer_attempt, session_invoke, transport, Result,
 };
 
 const MAX_METADATA: usize = 4096;
@@ -182,7 +181,6 @@ pub(crate) fn meter(
     create_private(&directory.join("metadata.json"), &metadata_bytes)?;
     create_private(&directory.join("request.bin"), &request_bytes)?;
     create_private(&directory.join("response.bin"), &response_bytes)?;
-    sync_directory_ancestors(directory)?;
 
     let mut payload = Vec::with_capacity(total - 1);
     payload.extend_from_slice(&(metadata_bytes.len() as u32).to_le_bytes());
@@ -192,7 +190,6 @@ pub(crate) fn meter(
     payload.extend_from_slice(&response_bytes);
     let frame = session_invoke(host, socket, &retained_config, mini_sdk::host_operations::PROVIDER_USAGE_QUOTE, &payload)?;
     create_private(&directory.join("reply.frame"), &frame)?;
-    sync_directory_ancestors(directory)?;
     match frame.first() {
         Some(19) => {
             let value: Value = serde_json::from_slice(&frame[1..]).map_err(|error| {
@@ -200,7 +197,6 @@ pub(crate) fn meter(
             })?;
             quoted_report(&value, &expected_provider)?;
             create_private(&directory.join("meter.json"), &frame[1..])?;
-            sync_directory_ancestors(directory)?;
             print_json(&value)
         }
         Some(&(crate::RESPONSE_HOST_OUTCOME | crate::RESPONSE_NO_RECORD)) => {
@@ -209,7 +205,6 @@ pub(crate) fn meter(
                 create_private(&directory.join("refusal.json"), &frame[1..])?;
                 print_json(&value)?;
             }
-            sync_directory_ancestors(directory)?;
             Err("Host refused provider metering; complete reply retained".into())
         }
         _ => Err("unexpected provider metering reply operation; complete frame retained".into()),

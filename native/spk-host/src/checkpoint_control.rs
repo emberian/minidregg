@@ -49,13 +49,7 @@ fn retained(path: &Path) -> io::Result<Vec<u8>> {
 }
 fn publish(path: &Path, bytes: &[u8]) -> io::Result<()> {
     match retained(path) {
-        Ok(old) if old == bytes => {
-            return File::open(
-                path.parent()
-                    .ok_or_else(|| invalid("checkpoint parent absent"))?,
-            )?
-            .sync_all()
-        }
+        Ok(old) if old == bytes => return Ok(()),
         Ok(_) => return Err(invalid("checkpoint retry differs")),
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => return Err(error),
@@ -179,12 +173,6 @@ impl CheckpointControl {
                     if prior.request != pause_request || retained(&resumed)? != bytes {
                         return Err(invalid("checkpoint completed resume identity differs"));
                     }
-                    File::open(
-                        self.pause_path
-                            .parent()
-                            .ok_or_else(|| invalid("checkpoint parent absent"))?,
-                    )?
-                    .sync_all()?;
                     return Ok(checkpoint_reply("resumed", &prior));
                 }
                 Ok(_) => {}
@@ -228,12 +216,6 @@ impl CheckpointControl {
             // crash in this gap keeps the app fenced until this exact retry.
             publish(&path, &bytes)?;
             fs::remove_file(&self.pause_path).ctx("remove", &self.pause_path)?;
-            File::open(
-                self.pause_path
-                    .parent()
-                    .ok_or_else(|| invalid("checkpoint parent absent"))?,
-            )?
-            .sync_all()?;
         }
         Ok(checkpoint_reply(
             if request.action == "pause" {

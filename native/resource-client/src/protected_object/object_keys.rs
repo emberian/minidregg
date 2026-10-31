@@ -386,7 +386,7 @@ impl Store {
             row.get("intentJson").map(|intent|mini_sdk::hex::decode(intent.as_str().ok_or("invalid staged intent JSON")?).map_err(|e| e.0)).transpose()?))
     }
     /// Bind the Host-authored command once, without changing its staged JSON,
-    /// key, manifest or operation identity. Publication follows this fsync.
+    /// key, manifest or operation identity. Publication follows this write.
     pub(crate) fn bind_epoch_command(&mut self,operation:&[u8;32],command:&[u8])->Result<()> {
         if command.is_empty() {return Err("empty epoch command".into());}
         let (_,old)=self.pending_epoch(operation)?;

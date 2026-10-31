@@ -14,7 +14,7 @@
 //! its stream, once per attach).
 //!
 //! The controller's discipline is M5's, journaled line by line (`journal.jsonl`,
-//! fsynced before the act it records):
+//! written before the act it records):
 //! - `send K` before a provider request leaves, `recv K` after the reply; a
 //!   `send` without its `recv` at restart is ABANDONED, never resent (the
 //!   provider's own log is the count);
@@ -178,7 +178,7 @@ impl Journal {
             .append(true)
             .open(&self.path)
             .map_err(|e| format!("{}: {e}", self.path.display()))?;
-        file.write_all(&line).and_then(|_| file.sync_all()).map_err(|e| e.to_string())?;
+        file.write_all(&line).map_err(|e| e.to_string())?;
         self.apply(&value);
         println!("{}", String::from_utf8_lossy(&line).trim_end());
         Ok(())

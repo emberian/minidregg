@@ -58,7 +58,6 @@ pub(crate) fn submit(host: &Path, config: &Path, request: &Path, intent_nonce: &
     encode_signatures(host, &retained_config, &signing, headers, &signatures_json, &signatures_bin)?;
     let call = directory.join("call.bin");
     host_files(host, &retained_config, &[Path::new("assemble"), &plan_bin, &signatures_bin, &call])?;
-    sync_retained_call(directory, &call)?;
     if prepare_only {
         return Ok(());
     }

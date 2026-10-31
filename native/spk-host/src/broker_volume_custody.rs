@@ -83,7 +83,7 @@ impl Dir {
     fn unlink(&self,name:&str)->io::Result<()>{
         let c=component(name)?;
         if unsafe{libc::unlinkat(self.0.as_raw_fd(),c.as_ptr(),0)}!=0{return Err(io::Error::last_os_error())}
-        self.0.sync_all()
+        Ok(())
     }
     fn lock(&self)->io::Result<File>{
         let name=component(".freeze.lock")?;
@@ -144,7 +144,7 @@ impl Frozen {
             mount_dev:meta.dev(),mount_ino:meta.ino()};
         let leaf=format!("{name}.json");
         let mut file=dir.create(&leaf)?;
-        file.write_all(&serde_json::to_vec(&pending)?)?;file.sync_all()?;dir.0.sync_all()?;
+        file.write_all(&serde_json::to_vec(&pending)?)?;
         if let Err(error)=freeze_ioctl(mount.as_raw_fd(),FIFREEZE){
             // Known refusal did not acquire our freeze; never thaw another
             // caller's busy filesystem. Ambiguous errors keep the intent.
@@ -257,7 +257,7 @@ pub(super) fn export(root:&Path,store:&str,app:&str,uid:u32,gid:u32)->io::Result
     let freeze_started=std::time::Instant::now();
     let frozen=Frozen::begin(root,&name,true)?;
     let copied=(||->io::Result<String>{
-        sparse_copy(&mut source,&mut out)?;out.sync_all()?;
+        sparse_copy(&mut source,&mut out)?;
         out.seek(SeekFrom::Start(0))?;file_sha256(&mut out)
     })();
     if let Some(guard)=frozen{guard.finish()?}
@@ -267,7 +267,6 @@ pub(super) fn export(root:&Path,store:&str,app:&str,uid:u32,gid:u32)->io::Result
     let fsck=inspect_copy("/usr/sbin/e2fsck",&["-fn"],&out)?;
     let listing=inspect_copy("/usr/sbin/debugfs",&["-R","ls -l /"],&out)?;
     change_owner(&out,uid,gid)?;
-    out.sync_all()?;exports.0.sync_all()?;
     exports.same_leaf(&leaf,&out)?;
     Ok(json!({"image":root.join(store).join("exports").join(leaf),"sha256":hash,
         "bytes":out.metadata()?.len().to_string(),"frozenMs":frozen_ms.to_string(),"e2fsck":if fsck.status.success(){"clean"}else{"errors"},
@@ -350,13 +349,11 @@ mod tests {
     fn volume_custody_failed_thaw_preserves_durable_repair_obligation(){
         let scratch=Scratch::new();let dir=scratch.dir();
         let mut pending=dir.create("frozen.json").unwrap();pending.write_all(b"exact retained filesystem").unwrap();
-        pending.sync_all().unwrap();dir.0.sync_all().unwrap();
         assert!(clear_pending(&dir,"frozen.json",||Err(io::Error::from_raw_os_error(libc::EIO))).is_err());
         assert_eq!(fs::read(scratch.0.join("frozen.json")).unwrap(),b"exact retained filesystem");
         clear_pending(&dir,"frozen.json",||Ok(())).unwrap();
         assert!(!scratch.0.join("frozen.json").exists());
         let mut before_freeze=dir.create("before-freeze.json").unwrap();before_freeze.write_all(b"durable before ioctl").unwrap();
-        before_freeze.sync_all().unwrap();dir.0.sync_all().unwrap();
         clear_pending(&dir,"before-freeze.json",||Err(io::Error::from_raw_os_error(libc::EINVAL))).unwrap();
         assert!(!scratch.0.join("before-freeze.json").exists());
     }
@@ -380,9 +377,9 @@ mod tests {
         let root=physical_receiving_root();assert_eq!(std::env::var("MINI_VOLUME_CUSTODY_WORKER").unwrap(),"yes");
         let _guard=Frozen::begin(&root,"1111111111111111-990010",true).unwrap().expect("actual mounted filesystem");
         let mut partial=OpenOptions::new().write(true).create_new(true).mode(0o600).open(root.join("partial-copy.ext4")).unwrap();
-        partial.write_all(&vec![7u8;128*1024]).unwrap();partial.sync_all().unwrap();
+        partial.write_all(&vec![7u8;128*1024]).unwrap();
         let mut ready=OpenOptions::new().write(true).create_new(true).mode(0o600).open(root.join("broker/worker-ready")).unwrap();
-        ready.write_all(b"frozen and partial output durable").unwrap();ready.sync_all().unwrap();
+        ready.write_all(b"frozen and partial output durable").unwrap();
         loop{std::thread::sleep(Duration::from_millis(100));}
     }
     #[test]

@@ -436,7 +436,7 @@ fn chown(path: &Path, uid: u32, gid: u32) -> Result<(), String> {
     Ok(())
 }
 
-/// Temp file, fsync, rename, fsync the directory.
+/// Temp file, write, rename, write the directory.
 /// 32 random bytes as 43 base64url characters: the token shape `mini-web-spawn` accepts.
 fn web_login_code() -> Result<String, String> {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
@@ -483,10 +483,10 @@ fn write_atomic(path: &Path, bytes: &[u8], mode: u32) -> Result<(), String> {
     let _ = std::fs::remove_file(&tmp);
     let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(mode).custom_flags(libc::O_NOFOLLOW)
         .open(&tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
-    f.write_all(bytes).and_then(|_| f.sync_all()).map_err(|e| format!("{}: {e}", tmp.display()))?;
+    f.write_all(bytes).map_err(|e| format!("{}: {e}", tmp.display()))?;
     std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode)).map_err(|e| e.to_string())?;
     std::fs::rename(&tmp, path).map_err(|e| format!("{}: {e}", path.display()))?;
-    std::fs::File::open(dir).and_then(|d| d.sync_all()).map_err(|e| e.to_string())
+    Ok(())
 }
 
 fn read_json(path: &Path) -> Option<Value> {
@@ -717,8 +717,8 @@ impl<O: BoxOps> Processor<O> {
         })
     }
 
-    /// Strike the code for this request: the file is rewritten whole and atomically (temp, fsync,
-    /// rename), BEFORE the request's first world effect, so a code never admits two people. Striking
+    /// Strike the code for this request: the file is rewritten whole and atomically (temp,
+ rename), BEFORE the request's first world effect, so a code never admits two people. Striking
     /// again for the same request is a no-op.
     fn strike_invite(&self, serial: u32, name: &str, request: &str) -> Result<(), String> {
         let mut lines = self.load_codes()?;

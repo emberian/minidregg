@@ -721,7 +721,7 @@ fn failed_start_projection(
 /// Deliberately absent from ordinary release builds (feature
 /// `integration-qualification`): the failed-START fixture. An operator-owned
 /// 0600 `qualification-fail-spawn-v1` in an app's directory makes that app's
-/// NEXT exact unit ExecStart fail after its Entered fsync and before any child
+/// NEXT exact unit ExecStart fail after its Entered write and before any child
 /// exists: the claimed, childless START (phase 9) that Mini's
 /// `reconcileFailedStart` recovers. The trigger moves into the generation it
 /// failed, so it fails exactly one START and stays as evidence.
@@ -744,14 +744,12 @@ pub(crate) fn qualification_refuse_spawn(journal: &Path) -> io::Result<()> {
         return Err(invalid("qualification trigger identity refused"));
     }
     fs::rename(&trigger, journal.join("qualification-fail-spawn-consumed-v1")).ctx("rename", &trigger)?;
-    File::open(&app_dir).ctx("open", &app_dir)?.sync_all()?;
-    File::open(&journal).ctx("open", &journal)?.sync_all()?;
     Err(io::Error::other(
         "qualification: unit ExecStart refused after Entered (failed-START fixture)",
     ))
 }
 
-/// Complete temp bytes are fsynced, renamed, then their parent is fsynced.
+/// Complete temp bytes are renamed into place.
 /// Callers hold their custody lock and have validated any replacement identity.
 pub(crate) fn atomic_write_locked(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let directory=path.parent().ok_or_else(|| invalid("atomic custody parent absent"))?;
@@ -759,7 +757,7 @@ pub(crate) fn atomic_write_locked(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let temporary=directory.join(format!(".record-{}-{nonce}.tmp",std::process::id()));
     let mut file=OpenOptions::new().write(true).create_new(true).mode(0o600).custom_flags(libc::O_NOFOLLOW).open(&temporary).ctx("open", &temporary)?;
     let result=(|| {
-        file.write_all(bytes)?;file.sync_all()?;fs::rename(&temporary,path).ctx("rename", &temporary)?;File::open(&directory).ctx("open", &directory)?.sync_all()
+        file.write_all(bytes)?;fs::rename(&temporary,path).ctx("rename", &temporary)?;Ok(())
     })();
     if result.is_err() { let _=fs::remove_file(&temporary).ctx("remove", &temporary); }
     result
@@ -1097,8 +1095,6 @@ impl Journal {
                     .mode(0o600).custom_flags(libc::O_NOFOLLOW)
                     .open(&path).ctx("create", &path)?;
                 file.write_all(b"1\n")?;
-                file.sync_all()?;
-                File::open(&self.directory).ctx("open", &self.directory)?.sync_all()?;
                 1
             }
             Err(error) => return Err(error),
@@ -1110,7 +1106,7 @@ impl Journal {
     }
 
     /// Reserve a physical operation number before native authoring. The
-    /// counter is advanced and fsynced under the app lock, so a crash may
+    /// counter is advanced under the app lock, so a crash may
     /// skip a number but can never reuse one after it was handed to a caller.
     pub(crate) fn allocate_dispatch_operation(&self) -> io::Result<String> {
         self.with_lock(|this| {
@@ -1129,8 +1125,6 @@ impl Journal {
                 .custom_flags(libc::O_NOFOLLOW)
                 .open(&allocated).ctx("open", &allocated)?;
             writeln!(marker, "{next}")?;
-            marker.sync_all()?;
-            File::open(&this.directory).ctx("open", &this.directory)?.sync_all()?;
             let nonce = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map_err(|_| invalid("clock before epoch"))?
@@ -1146,9 +1140,8 @@ impl Journal {
                 .open(&temporary).ctx("open", &temporary)?;
             let result = (|| {
                 writeln!(file, "{following}")?;
-                file.sync_all()?;
                 fs::rename(&temporary, &path).ctx("rename", &temporary)?;
-                File::open(&this.directory).ctx("open", &this.directory)?.sync_all()
+                Ok(())
             })();
             if result.is_err() {
                 let _ = fs::remove_file(&temporary).ctx("remove", &temporary);
@@ -1176,8 +1169,7 @@ impl Journal {
             .custom_flags(libc::O_NOFOLLOW)
             .open(self.dispatch_permit_path(identity)).ctx("open", &(self.dispatch_permit_path(identity)))?;
         file.write_all(permit)?;
-        file.sync_all()?;
-        File::open(&self.directory).ctx("open", &self.directory)?.sync_all()
+        Ok(())
     }
 
     fn verify_dispatch_permit_unlocked(&self, identity: &DispatchIdentity) -> io::Result<()> {
@@ -1220,8 +1212,7 @@ impl Journal {
             .custom_flags(libc::O_NOFOLLOW)
             .open(self.active_dispatch_path()).ctx("open", &(self.active_dispatch_path()))?;
         file.write_all(&bytes)?;
-        file.sync_all()?;
-        File::open(&self.directory).ctx("open", &self.directory)?.sync_all()
+        Ok(())
     }
 
     fn read_active_dispatch_unlocked(&self) -> io::Result<DispatchIdentity> {
@@ -1253,7 +1244,7 @@ impl Journal {
             return Err(invalid("active dispatch marker coordinate drift"));
         }
         fs::remove_file(self.active_dispatch_path()).ctx("remove", &(self.active_dispatch_path()))?;
-        File::open(&self.directory).ctx("open", &self.directory)?.sync_all()
+        Ok(())
     }
 
     fn read_dispatch_unlocked(&self, identity: &DispatchIdentity) -> io::Result<DispatchTombstone> {
@@ -1305,8 +1296,7 @@ impl Journal {
                 .custom_flags(libc::O_NOFOLLOW)
                 .open(&path).ctx("open", &path)?;
             file.write_all(&bytes)?;
-            file.sync_all()?;
-            return File::open(&self.directory).ctx("open", &self.directory)?.sync_all();
+            return Ok(());
         }
         let old = self.read_dispatch_unlocked(&tombstone.identity)?;
         if !matches!(
@@ -1332,9 +1322,8 @@ impl Journal {
             .open(&temporary).ctx("open", &temporary)?;
         let result = (|| {
             file.write_all(&bytes)?;
-            file.sync_all()?;
             fs::rename(&temporary, path).ctx("rename", &temporary)?;
-            File::open(&self.directory).ctx("open", &self.directory)?.sync_all()
+            Ok(())
         })();
         if result.is_err() {
             let _ = fs::remove_file(&temporary).ctx("remove", &temporary);
@@ -1345,7 +1334,7 @@ impl Journal {
     /// Durable one-shot transition before invoking fd3. The caller must have
     /// captured and checked the exact fresh native permit, but this journal
     /// never interprets that authority. Creating the terminally unique file
-    /// first means a crash during the following record fsync cannot rearm it.
+    /// first means a crash during the following record write cannot rearm it.
     pub(crate) fn request_dispatch(
         &self,
         identity: DispatchIdentity,
@@ -1440,7 +1429,7 @@ impl Journal {
 
     /// Finish an exact response already proven settled by the controller's
     /// read-only native settlement inspection. This is idempotent across a
-    /// crash between the Delivered tombstone, record, and active-marker fsyncs.
+    /// crash between the Delivered tombstone, record, and active-marker writes.
     /// It cannot establish settlement by itself or authorize another send.
     pub(crate) fn finish_dispatch_recovered(
         &self,
@@ -1649,7 +1638,7 @@ impl Journal {
 
     /// Called as the exact service ExecStart, not as an out-of-unit preflight.
     /// The bounded fork/exec handshake occurs under the same lock as the
-    /// Entered and Running fsyncs. On a Running write failure, the direct child
+    /// Entered and Running write. On a Running write failure, the direct child
     /// is killed and reaped before releasing the lock. The journal remains
     /// uncertain and never grants an automatic retry.
     pub(crate) fn enter_and_spawn(
@@ -1722,7 +1711,7 @@ impl Journal {
             if record.phase == Phase::Stopped {
                 return Ok(None);
             }
-            // The fsynced active marker and DeliveryRequested tombstone already
+            // The written active marker and DeliveryRequested tombstone already
             // preserve uncertainty. Do not make physical stop depend on an
             // additional tombstone rewrite that could fail before unit kill.
             record.phase = Phase::Fenced;
@@ -1772,7 +1761,7 @@ impl Journal {
         )
     }
 
-    /// Resume only an already-fsynced Fenced STOP for the same source-selected
+    /// Resume only an Fenced STOP for the same source-selected
     /// incarnation. A historical receipt or marker can never fence Running.
     pub(crate) fn resume_fenced_stop_manager_checked(
         &self,
@@ -1863,7 +1852,7 @@ impl Journal {
             expected.matches(&record)?;
             verify_volume()?;
             if require_fenced && record.phase != Phase::Fenced {
-                return Err(invalid("STOP recovery requires fsynced Fenced journal"));
+                return Err(invalid("STOP recovery requires a Fenced journal"));
             }
             if !matches!(record.phase, Phase::Running | Phase::Fenced) {
                 return Err(invalid("STOP requires Running or Fenced journal"));
@@ -1893,7 +1882,7 @@ impl Journal {
                 this.write_unlocked(&record)?;
             }
             // On recovery, a prior stop may have succeeded before the final
-            // fsync. A complete exact post-stop audit retires Fenced without
+            // write. A complete exact post-stop audit retires Fenced without
             // another manager command. Otherwise verify the same incarnation
             // again, then invoke the manager while retaining the lock.
             if let Ok(audit) = inspect(&record) {
@@ -2082,7 +2071,7 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_operation_ids_are_fsynced_and_never_reused_after_reopen() {
+    fn dispatch_operation_ids_are_never_reused_after_reopen() {
         let path = scratch();
         let journal = Journal::open(&path).unwrap();
         assert_eq!(journal.allocate_dispatch_operation().unwrap(), "1");
@@ -2710,7 +2699,7 @@ mod tests {
     }
 
     #[test]
-    fn crash_after_active_marker_fsync_blocks_new_dispatch() {
+    fn crash_after_active_marker_blocks_new_dispatch() {
         let (path, journal, _) = running_journal();
         journal
             .with_lock(|this| this.create_active_dispatch_unlocked(&dispatch_identity('5')))
@@ -3279,7 +3268,7 @@ mod tests {
     }
 
     #[test]
-    fn running_fsync_failure_aborts_spawn_before_unlock() {
+    fn running_write_failure_aborts_spawn_before_unlock() {
         let path = scratch();
         let journal = Journal::open(&path).unwrap();
         let identity = begin();
@@ -3292,7 +3281,7 @@ mod tests {
                 &identity,
                 &instance(),
                 || Ok(MockChild { pid: 457, aborted }),
-                |_, _| Err(invalid("injected Running fsync failure"))
+                |_, _| Err(invalid("injected Running write failure"))
             )
             .is_err());
         assert!(observed.load(Ordering::SeqCst));

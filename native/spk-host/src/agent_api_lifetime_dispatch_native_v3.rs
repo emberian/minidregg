@@ -71,12 +71,7 @@ impl FreshLifetimePermitV3 {
             return Err(refused("lifetime active marker changed before settlement"));
         }
         fs::remove_file(&self.active_marker).ctx("remove", &self.active_marker)?;
-        File::open(
-            self.active_marker
-                .parent()
-                .ok_or_else(|| refused("lifetime marker parent absent"))?,
-        )?
-        .sync_all()
+        Ok(())
     }
 }
 
@@ -118,7 +113,7 @@ pub(crate) fn clear_retained_active_after_settlement(attempt_dir: &Path) -> io::
         return Err(refused("retained lifetime active marker bytes drift"));
     }
     fs::remove_file(&path).ctx("remove", &path)?;
-    File::open(&parent).ctx("open", &parent)?.sync_all()
+    Ok(())
 }
 
 pub(crate) fn submit_fresh_once(
@@ -153,10 +148,8 @@ pub(crate) fn submit_fresh_once(
         .mode(0o600)
         .open(&active_marker).ctx("open", &active_marker)?;
     active.write_all(&marker_bytes)?;
-    active.sync_all()?;
     let metadata = active.metadata()?;
     let active_identity = (metadata.dev(), metadata.ino());
-    File::open(&parent).ctx("open", &parent)?.sync_all()?;
     if cancelled.load(Ordering::Acquire) {
         // No op76 call has begun. Keep the attempt as terminal for this ID.
         return Err(refused("lifetime caller cancelled before op76"));

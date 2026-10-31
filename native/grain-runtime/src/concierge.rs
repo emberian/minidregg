@@ -369,7 +369,7 @@ impl Journal {
             .append(true)
             .open(&self.path)
             .map_err(|e| format!("{}: {e}", self.path.display()))?;
-        file.write_all(&line).and_then(|_| file.sync_all()).map_err(|e| e.to_string())?;
+        file.write_all(&line).map_err(|e| e.to_string())?;
         Ok(())
     }
 }
@@ -744,7 +744,7 @@ fn deliver_window(outbox: &Path, homes: &Path, room: &str, subject: &str) -> Res
         use std::os::unix::fs::OpenOptionsExt;
         let mut file = OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&staged)
             .map_err(|e| format!("{}: {e}", staged.display()))?;
-        file.write_all(&bytes).and_then(|_| file.sync_all()).map_err(|e| e.to_string())?;
+        file.write_all(&bytes).map_err(|e| e.to_string())?;
     }
     fs::rename(&staged, &target).map_err(|e| format!("{}: {e}", target.display()))
 }

@@ -63,9 +63,6 @@ fn apply(directory:&Path,journal:&Value,mut step:impl FnMut(usize)->Result<()>)-
             if current!=file["before"] { return Err("paid custody changed since admitted transition; retain evidence".into()); }
             publish(&path,&file["after"])?;
         }
-        // Replay may discover a rename completed before its directory fsync.
-        File::open(path.parent().ok_or("paid publication parent missing")?).map_err(|e|e.to_string())?
-            .sync_all().map_err(|e|e.to_string())?;
         step(index)?;
     }
     Ok(())

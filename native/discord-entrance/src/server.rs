@@ -1,5 +1,5 @@
 //! Signed Discord commands enter the same roster-bound Mini shell as SSH.
-//! Custody is synced before deferral and before execution. A completed duplicate
+//! Custody is written before deferral and before execution. A completed duplicate
 //! returns retained output; an interrupted started command is UNKNOWN and never
 //! auto-runs again. Native `lookup`/operation recovery decides semantic outcomes.
 //! Session mutexes serialize execution (they do not guarantee arrival order).
@@ -170,7 +170,7 @@ pub struct Job {
     line: String,
     record: Record,
     /// The custody value to retain before running; saved only AFTER the deferral is on the
-    /// wire, so no fsync stands between Discord's signed request and its 3 s deadline (a missed
+    /// wire, so no write stands between Discord's signed request and its 3 s deadline (a missed
     /// deadline made the user re-issue the line under a new interaction id: a double run).
     accept: Option<Value>,
     world_page: Option<usize>,

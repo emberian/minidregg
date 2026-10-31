@@ -165,7 +165,6 @@ fn corrupt_header_and_torn_database_fail_opaquely() {
             let mut file = OpenOptions::new().write(true).open(&database_path).unwrap();
             file.seek(SeekFrom::Start(0)).unwrap();
             file.write_all(&[0; 32]).unwrap();
-            file.sync_all().unwrap();
         } else {
             let length = fs::metadata(&database_path).unwrap().len();
             OpenOptions::new()

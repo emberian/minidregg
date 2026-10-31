@@ -99,8 +99,8 @@ fn ensure_private_dir(path: &Path, label: &str) -> Result<(), String> {
     }
 }
 
-/// Replace `path` with `bytes` atomically: a fresh 0600 sibling, fsync,
-/// rename, fsync the directory.
+/// Replace `path` with `bytes` atomically: a fresh 0600 sibling,
+/// rename.
 fn replace_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let parent = path.parent().ok_or("record path has no parent")?;
     let name = path
@@ -116,12 +116,9 @@ fn replace_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
         .open(&temporary)
         .map_err(|e| format!("credential record write: {e}"))?;
     file.write_all(bytes)
-        .and_then(|_| file.sync_all())
         .map_err(|e| format!("credential record write: {e}"))?;
     fs::rename(&temporary, path).map_err(|e| format!("credential record rename: {e}"))?;
-    File::open(parent)
-        .and_then(|d| d.sync_all())
-        .map_err(|e| format!("credential directory sync: {e}"))
+    Ok(())
 }
 
 // One provider-wide lock orders key replacement, grant changes, revocation
@@ -463,9 +460,6 @@ impl CredentialStore {
                         Err(e) => return Err(format!("credential revoke: {e}")),
                     }
                 }
-                File::open(&dir)
-                    .and_then(|d| d.sync_all())
-                    .map_err(|e| format!("credential directory sync: {e}"))?;
                 Ok(removed)
             }
         }

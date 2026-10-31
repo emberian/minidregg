@@ -70,7 +70,7 @@ recovered by exact lookup of the SAME call bytes (Host op 3), never by a new non
 ## 3. Attempt custody: one state machine
 
 ```text
-Drafted ─prepare─► Prepared{intent,plan,headers sha} ─sign─► Sealed{call sha, fsynced}
+Drafted ─prepare─► Prepared{intent,plan,headers sha} ─sign─► Sealed{call sha}
 Sealed ─transmit─► Confirmed(Receipt) | Refused(reason) | Uncertain
 Uncertain ─lookup(same call)─► Confirmed | Refused | Uncertain        (never resubmit-as-new)
 Refused | NeverSent ─next_attempt─► Drafted(attempt+1, fresh command nonce)
@@ -79,7 +79,7 @@ Refused | NeverSent ─next_attempt─► Drafted(attempt+1, fresh command nonce
 `confirmation ∈ {installed, replayed, recoveredAfterUncertainResponse}` all mean Confirmed
 (READ `workspace.rs` `retained_attempt_outcome`). "Newest explicit refusal wins unless any
 confirmation exists" is kept exactly. Storage is a trait: the native store writes the existing
-attempt-directory layout (`call.bin`, `outcome.json`, `retry-*`), owner-private, fsync then
+attempt-directory layout (`call.bin`, `outcome.json`, `retry-*`), owner-private, then
 rename; the browser store is extension storage. External delivery (a Discord webhook post) uses
 the same machine with `Uncertain` resolvable only by operator-supplied destination evidence —
 destination custody is not Mini custody (DISCORD-WORLD-ENTRANCE).

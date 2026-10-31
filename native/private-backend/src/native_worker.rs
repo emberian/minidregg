@@ -549,13 +549,11 @@ mod tests {
             .open(&path)
             .unwrap();
         file.write_all(&bytes).unwrap();
-        file.sync_all().unwrap();
         assert_eq!(Config::load(&path).unwrap().encode().unwrap(), bytes);
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
         assert!(Config::load(&path).is_err());
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
         file.write_all(&[0]).unwrap();
-        file.sync_all().unwrap();
         assert!(Config::load(&path).is_err());
     }
     #[test]

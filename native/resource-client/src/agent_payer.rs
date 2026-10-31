@@ -82,7 +82,6 @@ pub(super) fn sign(inputs: Inputs<'_>) -> Result<()> {
     let selected_host_sha = host_image_sha256(&host)?;
     let selected_config = bounded(&config, 65_536)?;
     crate::fsio::create_private_dir(&directory)?;
-    sync_directory_ancestors(&directory)?;
     let original = payer_anchor(&reserve_attempt, &directory)?;
     private_socket(&operator_socket)?;
     if host != original.host
@@ -124,7 +123,6 @@ pub(super) fn sign(inputs: Inputs<'_>) -> Result<()> {
     )?;
     let fresh_frame = session_invoke(&host, &operator_socket, &config, mini_sdk::host_operations::AGENT_PAID_DISPATCH_PLAN, &expected)?;
     create_private(&directory.join("fresh-paid-plan.frame"), &fresh_frame)?;
-    sync_directory_ancestors(&directory)?;
     exact_current_plan(&fresh_frame, &plan)?;
     let paid = source_inspect(
         &host,
@@ -196,7 +194,6 @@ pub(super) fn sign(inputs: Inputs<'_>) -> Result<()> {
         "signatures":signatures,
     });
     retain_json(&directory.join("payer-signatures.json"), &result)?;
-    sync_directory_ancestors(&directory)?;
     print_json(&result)
 }
 

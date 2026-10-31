@@ -381,11 +381,6 @@ pub(crate) mod tests {
                     .open(path)
                     .unwrap();
                 f.write_all(bytes).unwrap();
-                f.sync_all().unwrap();
-                std::fs::File::open(path.parent().unwrap())
-                    .unwrap()
-                    .sync_all()
-                    .unwrap();
                 assert_eq!(fs::read(path).unwrap(), bytes);
             }
             let mut canonical = vec![];

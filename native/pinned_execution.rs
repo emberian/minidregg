@@ -209,7 +209,6 @@ mod tests {
             .open(&image)
             .unwrap();
         file.write_all(&original).unwrap();
-        file.sync_all().unwrap();
         (root, image, original)
     }
     #[test]

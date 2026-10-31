@@ -36,7 +36,6 @@ fn retain(path: &Path, bytes: &[u8]) -> Result<(), String> {
         .open(path)
         .map_err(|e| format!("create {}: {e}", path.display()))?;
     file.write_all(bytes)
-        .and_then(|()| file.sync_all())
         .map_err(|e| format!("retain {}: {e}", path.display()))
 }
 

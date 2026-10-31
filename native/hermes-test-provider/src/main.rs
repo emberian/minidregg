@@ -536,7 +536,7 @@ fn persist_receipt_projection(path: &Path, projection: &Value) -> Result<(), Str
     match OpenOptions::new().write(true).create_new(true).mode(0o600).open(path) {
         Ok(mut file) => {
             file.write_all(&bytes).map_err(|e| e.to_string())?;
-            file.sync_all().map_err(|e| e.to_string())
+            Ok(())
         }
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
             if fs::metadata(path).map_err(|e| e.to_string())?.len() > 4096 {

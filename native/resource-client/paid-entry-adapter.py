@@ -43,13 +43,8 @@ def save(path, value):
     require(not path.exists(), 'evidence already exists: ' + str(path))
     with tempfile.NamedTemporaryFile(mode='w', dir=path.parent, prefix='.paid-', delete=False) as file:
         json.dump(value, file, indent=2); file.write('\n')
-        file.flush(); os.fsync(file.fileno())
+        file.flush()
     os.replace(file.name, path)
-    directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        os.fsync(directory)
-    finally:
-        os.close(directory)
 
 
 def natural(value, name, bound=2**256):

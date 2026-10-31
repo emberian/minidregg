@@ -114,22 +114,10 @@ def write_new(path, data, uid=0, gid=0, mode=0o600):
         with os.fdopen(os.dup(fd), 'wb') as out:
             out.write(data)
             out.flush()
-        os.fsync(fd)
     finally:
         os.close(fd)
-    d = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-    try:
-        os.fsync(d)
-    finally:
-        os.close(d)
 
 
-def sync_directory(path):
-    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
 
 
 def publish_exact(path, data, uid=0, gid=0, mode=0o600, bound=65536):
@@ -143,12 +131,6 @@ def publish_exact(path, data, uid=0, gid=0, mode=0o600, bound=65536):
     if path.exists() or path.is_symlink():
         require(read_file(path, uid, maximum, allow_empty=not data, required_mode=mode) == data,
                 'exact publication final bytes differ')
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-        sync_directory(path.parent)
         return
     temporary = path.with_name('.' + path.name + '-publishing')
     if not temporary.exists() and not temporary.is_symlink():
@@ -168,7 +150,6 @@ def publish_exact(path, data, uid=0, gid=0, mode=0o600, bound=65536):
                 written = os.write(fd, data[offset:offset + 65536])
                 require(written > 0, 'exact publication made no progress')
                 offset += written
-            os.fsync(fd)
         finally:
             os.close(fd)
     require(read_file(temporary, uid, maximum, allow_empty=not data, required_mode=mode) == data,
@@ -177,7 +158,6 @@ def publish_exact(path, data, uid=0, gid=0, mode=0o600, bound=65536):
     # a single writer under the lifecycle lock. Preserve any unexpected final.
     require(not path.exists() and not path.is_symlink(), 'exact publication final appeared during write')
     os.replace(temporary, path)
-    sync_directory(path.parent)
 
 
 def mkdir(path, uid=0, gid=0, mode=0o700):
@@ -1067,7 +1047,6 @@ def transfer_birth_tree(root, before_uid, uid, gid):
             require(fingerprint(m) == expected and fingerprint(path.lstat()) == expected, 'birth transfer path changed')
             os.fchown(fd, uid, gid)
             os.fchmod(fd, 0o700 if stat.S_ISDIR(m.st_mode) else 0o600)
-            os.fsync(fd)
         finally:
             os.close(fd)
 
@@ -1404,7 +1383,6 @@ def replace_root_record(path, data, mode):
     temporary = path.with_name('.' + path.name + '-storage-next')
     publish_exact(temporary, data, mode=mode)
     os.replace(temporary, path)
-    sync_directory(path.parent)
 
 
 def consent_storage_upgrade(store, helper):
@@ -1536,7 +1514,6 @@ def controller_binary_upgrade(store, helper, source_arg, binary_name):
         temporary = path.with_name('.' + binary_name + '-' + source_sha + '-next')
         publish_exact(temporary, source, owner, group, mode, 256 * 1024 * 1024)
         os.replace(temporary, path)
-        sync_directory(path.parent)
     replace_root_record(stage_path, archives['newStage'], 0o600)
     checked_units(base, r)
     return {'store': store, label + 'Upgrade': str(intent_path), label + 'Sha256': source_sha,
@@ -2032,7 +2009,6 @@ def config_update(store, helper, source_arg):
     pending = root / '.controller-next.json'
     publish_exact(pending, data, r['uid'], r['gid'], bound=524288)
     os.replace(pending, worker_config(r))
-    sync_directory(root)
     return {'store': store, 'configurationSha256': sha(data), 'previousSha256': intent['previousSha256'],
             'publication': str(intent_path), 'replayed': old == data}
 
@@ -2482,7 +2458,7 @@ def upgrade_public_listener(store, helper, binary_arg, old_sha, new_sha):
                 'listener is outside exact upgrade states')
         temporary = directory / ('.mini-' + new_sha + '-next')
         publish_exact(temporary,data,mode=0o555,bound=256*1024*1024)
-        os.replace(temporary,binary); sync_directory(directory)
+        os.replace(temporary,binary)
         replace_root_record(record_path,retained['newRecord'],0o600)
         public_listener_record(base,stage,r,public)
     return {**controller_status(store,helper),'publicListenerUpgrade':str(intent_path)}
@@ -2502,7 +2478,6 @@ def public_listener_teardown(base, stage, r):
         require(read_file(pin, r['operatorUid'], 128, required_mode=0o600) == listener_pin(r),
                 'public listener pin changed during teardown')
         pin.unlink()
-        sync_directory(pin.parent)
 
 
 def remove(store, helper):

@@ -263,7 +263,7 @@ impl StopTarget {
         Ok(bytes)
     }
 
-    /// This private marker is fsynced before any future manager fence. The
+    /// This private marker is written before any future manager fence. The
     /// caller has to retain the exact source plan/claim/BEGIN artifacts too;
     /// their SHA-256 values are pinned here for crash recovery.
     fn persist_marker(&self, attempt_dir: &Path) -> io::Result<PathBuf> {

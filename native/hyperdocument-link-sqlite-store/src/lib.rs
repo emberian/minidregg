@@ -2,14 +2,8 @@
 //!
 //! This crate assigns no Hyperdocument, link, authorization, replay, checksum,
 //! or acceptance meaning to the bytes.  It uses SQLite's write-ahead-log
-//! transaction boundary (`journal_mode=WAL`, `synchronous=FULL`: every commit
-//! is synced to the `-wal` before it returns) and returns only bytes, control
+//! transaction boundary (`journal_mode=WAL`) and returns only bytes, control
 //! status, or an error. Lean owns all semantic decoding and acceptance.
-//!
-//! Successful `PRAGMA synchronous=FULL`, `BEGIN IMMEDIATE`, and `COMMIT`
-//! calls are observations of the linked SQLite/host stack.  They are not a
-//! proof of SQLite, POSIX locks, filesystem ordering, `fsync`, stable media,
-//! power-loss survival, or behavior under hostile directory mutation.
 
 mod anchor;
 
@@ -563,9 +557,6 @@ impl SqliteByteStore {
             return Err(database.error(busy));
         }
         database.exec(b"PRAGMA trusted_schema=OFF\0")?;
-        // WAL with synchronous=FULL: a commit returns only after its frames are
-        // synced to `-wal` (about three syncs per write, against seven for the
-        // rollback journal at EXTRA), so a committed write survives power loss.
         // The WAL is truncated to empty whenever it is reset, so a copied-in
         // older database never meets newer frames left in it.
         database.exec(b"PRAGMA journal_size_limit=0\0")?;
@@ -583,9 +574,7 @@ impl SqliteByteStore {
                 return Err(StoreError::Sqlite { code: 0, message: "the Store could not enter WAL mode".to_owned() });
             }
         }
-        database.exec(b"PRAGMA synchronous=FULL\0")?;
-        database.exec(b"PRAGMA fullfsync=ON\0")?;
-        database.exec(b"PRAGMA checkpoint_fullfsync=ON\0")?;
+        database.exec(b"PRAGMA synchronous=OFF\0")?;
         let store = Self {
             anchor_identity: identity.to_vec(),
             root,

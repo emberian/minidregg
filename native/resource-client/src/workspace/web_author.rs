@@ -315,7 +315,7 @@ pub(crate) fn lookup(root: &Path, workspace: &Value, name: &str, id: &str) -> Re
         }
     };
     if session["type"] == SESSION_TYPE && !call_exists {
-        // The client fsyncs call.bin before invoking submit. A stopped writer
+        // The client writes call.bin before invoking submit. A stopped writer
         // with no call never crossed that boundary. Never synthesize a retry.
         let result = dir.join("pre-submit-stopped.json");
         if !result.exists() {

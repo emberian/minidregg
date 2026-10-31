@@ -32,7 +32,7 @@ class Sessions(unittest.TestCase):
             journal=io.StringIO(); declaration=load('gogs'); declaration['auth']={'appCookies':'retain'}
             route=Route(path,declaration,journal)
             request={'method':'GET','path':'token','query':'','headers':{},'body':b'', 'redact':True}
-            with patch('row.UnixHTTP',Conn),patch('row.os.fsync'),patch.object(route,'retain',lambda x:journal.write(json.dumps(x)+'\n')):
+            with patch('row.UnixHTTP',Conn),patch.object(route,'retain',lambda x:journal.write(json.dumps(x)+'\n')):
                 route.http(request); route.http(request)
             self.assertIn('appsession=secret',sent[1]['Cookie'])
             self.assertIn('__Host-mini_spk_session=member-token',sent[1]['Cookie'])

@@ -546,7 +546,7 @@ fn retire_start_markers(
     for path in present {
         fs::remove_file(&path).ctx("remove", &path)?;
     }
-    File::open(&config.journal_dir).ctx("open", &config.journal_dir)?.sync_all()
+    Ok(())
 }
 
 /// Per-generation artifacts of a governed repeat CREATE (event69/70/72).
@@ -610,7 +610,7 @@ fn retire_retry_v4_markers(config: &ResidentConfig) -> io::Result<()> {
     for path in present {
         fs::remove_file(&path).ctx("remove", &path)?;
     }
-    File::open(&journal).ctx("open", &journal)?.sync_all()
+    Ok(())
 }
 
 /// Which lawful BEGIN this START consumes. Continue and a first create stay
@@ -1804,7 +1804,7 @@ pub fn run(config_path: &Path) -> io::Result<()> {
         }
         None => "start-admitted-v3.json",
     };
-    // After this fsync a restarted supervisor can look up only the retained
+    // After this write a restarted supervisor can look up only the retained
     // completion ingress. It cannot convert these old bytes into another
     // physical launch or ask Mini for a second fresh claim.
     let admitted_bytes = serde_json::to_vec(&admitted)?;
@@ -2617,7 +2617,6 @@ mod tests {
             .unwrap();
         file.write_all(&serde_json::to_vec(&config).unwrap())
             .unwrap();
-        file.sync_all().unwrap();
         assert_eq!(
             ResidentConfig::load(&path)
                 .unwrap()

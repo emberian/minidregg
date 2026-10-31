@@ -232,7 +232,7 @@ struct Plan {
 
 fn create_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let mut f = OpenOptions::new().write(true).create_new(true).mode(0o600).custom_flags(libc::O_NOFOLLOW).open(path).map_err(|e| format!("spool: {e}"))?;
-    f.write_all(bytes).and_then(|_| f.sync_all()).map_err(|e| format!("spool: {e}"))
+    f.write_all(bytes).map_err(|e| format!("spool: {e}"))
 }
 
 fn read_bounded(path: &Path, bound: usize) -> Result<Vec<u8>, String> {

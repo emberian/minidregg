@@ -350,7 +350,7 @@ impl Worker {
         }
         let result =
             fsio::replace_private(&self.anchor, &anchor_bytes(&self.binding, Some(&anchor)))
-                .and_then(|_| fsio::sync_parent(&self.anchor));
+                ;
         if result.is_err() {
             self.failed = true
         }
@@ -406,9 +406,7 @@ impl Worker {
                     return Err("consent anchor without binding".into());
                 }
                 fsio::create_private(&marker, &binding)?;
-                fsio::sync_parent(&marker)?;
                 fsio::create_private(&anchor, &anchor_bytes(&binding, None))?;
-                fsio::sync_parent(&anchor)?;
                 None
             }
             Err(e) => return Err(e.to_string()),

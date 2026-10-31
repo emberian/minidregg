@@ -1158,7 +1158,7 @@ mod tests {
         let mut store=Store::open(&state,crate::read_secret(&key).unwrap().to_bytes()).unwrap();
         store.stage_epoch(&audience.anchor,&operation,&prepared,command).unwrap();
         drop(store);
-        // The process died after journal fsync, before either outward artifact.
+        // The process died after journal write, before either outward artifact.
         let phase=root.join("protected-documents/phase");
         super::super::make_private_dir(&phase).unwrap();
         let reopened=custody(&root).unwrap();

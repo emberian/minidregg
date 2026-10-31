@@ -131,7 +131,7 @@ fn blob(out: &mut Vec<u8>, b: &[u8]) {
     out.extend_from_slice(b);
 }
 
-/// Exclusive single-writer journal. Every acknowledged append is fsynced.
+/// Exclusive single-writer journal. Every acknowledged append is written.
 struct Journal {
     path: PathBuf,
     file: File,
@@ -153,11 +153,6 @@ fn lock_for(path: &Path) -> Result<File, Error> {
     Ok(lock)
 }
 
-fn sync_parent(path: &Path) -> Result<(), Error> {
-    let dir = path.parent().ok_or("journal without parent")?;
-    File::open(dir)?.sync_all()?;
-    Ok(())
-}
 
 impl Journal {
     /// Open after the Lean reader decoded `observed` bytes, of which `valid`
@@ -175,7 +170,6 @@ impl Journal {
         }
         if valid < observed {
             file.set_len(valid)?;
-            file.sync_all()?;
         }
         Ok(Journal { path: path.to_path_buf(), file, _lock: lock, length: valid, poisoned: false })
     }
@@ -189,16 +183,14 @@ impl Journal {
             .mode(0o600)
             .open(path)?;
         file.write_all(bytes)?;
-        file.sync_all()?;
-        sync_parent(path)?;
         Ok(Journal { path: path.to_path_buf(), file, _lock: lock, length: bytes.len() as u64, poisoned: false })
     }
 
     /// Checkpoint: atomically replace the whole image if its length is still
-    /// `expected`. The new image is written and fsynced beside the journal,
+    /// `expected`. The new image is written beside the journal,
     /// the replaced image is kept as `<journal>.upto-<length>` (a hard link:
     /// the previous segment of the input history), then the new image is
-    /// renamed over the journal and the directory fsynced. The writer lock is
+    /// renamed over the journal and the directory written. The writer lock is
     /// held throughout. Any failure after the link poisons the session.
     fn replace(&mut self, expected: u64, image: &[u8]) -> Result<bool, Error> {
         if self.poisoned {
@@ -217,7 +209,6 @@ impl Journal {
             .mode(0o600)
             .open(&staged)?;
         file.write_all(image)?;
-        file.sync_all()?;
         let mut segment = self.path.clone().into_os_string();
         segment.push(format!(".upto-{}", self.length));
         let segment = PathBuf::from(segment);
@@ -226,8 +217,7 @@ impl Journal {
         }
         let result = (|| -> io::Result<()> {
             fs::rename(&staged, &self.path)?;
-            let dir = self.path.parent().ok_or_else(|| io::Error::other("journal without parent"))?;
-            File::open(dir)?.sync_all()
+            Ok(())
         })();
         if let Err(e) = result {
             self.poisoned = true;
@@ -251,7 +241,7 @@ impl Journal {
         let result = (|| -> io::Result<()> {
             self.file.seek(SeekFrom::Start(self.length))?;
             self.file.write_all(frame)?;
-            self.file.sync_data()
+            Ok(())
         })();
         if let Err(e) = result {
             self.poisoned = true;

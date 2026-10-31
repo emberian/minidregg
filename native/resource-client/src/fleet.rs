@@ -9,7 +9,7 @@
 use crate::workspace::{self, ImportInput, InitIdentity};
 use crate::{
     absolute, decode_hex, hex, path, print_json, read_secret, session_invoke,
-    sync_directory_ancestors, transport, Args, Result, SOCKET,
+    transport, Args, Result, SOCKET,
 };
 use ed25519_dalek::Signer;
 use serde_json::{json, Value};
@@ -77,7 +77,7 @@ fn retain_json(path: &Path, value: &Value) -> Result<()> {
 
 fn retain(path: &Path, bytes: &[u8]) -> Result<()> {
     crate::fsio::retain_exact(path, bytes, || format!("retained fleet artifact changed: {}", path.display()))?;
-    sync_directory_ancestors(path.parent().ok_or("fleet artifact lacks parent")?)
+    Ok(())
 }
 
 
@@ -334,7 +334,7 @@ fn observation_stale() -> bool {
 /// How many times a turn is re-planned after the Host reports contention.
 const MAX_REPLANS: usize = 8;
 
-/// A caller operation is an immutable, fsynced pointer into the existing
+/// A caller operation is an immutable pointer into the existing
 /// attempt store, not another submission journal. Creation wins exactly once.
 /// A second invocation may look up this attempt but must never submit again.
 pub(crate) fn operation_record(
@@ -356,9 +356,8 @@ pub(crate) fn operation_record(
     let (attempt, nonce) = workspace::new_attempt(&root)?;
     let value = json!({"type":"minidregg-exact-operation-v1","kind":kind,
         "identity":identity,"binding":binding,"attempt":attempt,"nonce":nonce});
-    // create_new, file fsync and parent fsync: concurrent callers cannot both win.
+    // create_new, file write and parent write: concurrent callers cannot both win.
     crate::create_private(&path, &serde_json::to_vec_pretty(&value).map_err(|e| e.to_string())?)?;
-    sync_directory_ancestors(path.parent().ok_or("operation record has no parent")?)?;
     Ok((value, true))
 }
 
@@ -693,7 +692,6 @@ fn journal_attempt(journal: &Path, directory: &Path) -> Result<()> {
         .open(journal)
         .map_err(|error| format!("{}: {error}", journal.display()))?;
     file.write_all(line.as_bytes())
-        .and_then(|_| file.sync_all())
         .map_err(|error| format!("{}: {error}", journal.display()))
 }
 

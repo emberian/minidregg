@@ -163,7 +163,7 @@ pub(crate) fn atomic_json(path: &Path, value: &Value, expected: Option<&Value>) 
     if path.exists() {
         let prior=bounded_json(path)?;
         if prior == *value {
-            return File::open(parent).and_then(|f|f.sync_all()).map_err(|e|e.to_string());
+            return Ok(());
         }
         if expected != Some(&prior) {
             return Err(format!("retained JSON differs from exact request: {}",path.display()));
@@ -175,7 +175,7 @@ pub(crate) fn atomic_json(path: &Path, value: &Value, expected: Option<&Value>) 
 }
 
 /// Immutable exact retries and expected-prior durable replacements. The
-/// existing per-record CAS lock closes interruption after rename and fsync.
+/// existing per-record CAS lock closes interruption after rename and write.
 pub(crate) fn publish_retained_json(path: &Path, value: &Value, expected: Option<&Value>) -> Result<()> {
     atomic_json(path, value, expected)
 }
@@ -936,7 +936,6 @@ fn read_journal(root: &Path, height: &str, outcome: &str, now: &str, name: &str)
     if fs::metadata(&path).map(|meta| meta.len() >= READ_JOURNAL_LIMIT).unwrap_or(false) {
         fs::rename(&path, root.join(format!("{READ_JOURNAL}.1")))
             .map_err(|error| format!("cannot rotate {}: {error}", path.display()))?;
-        crate::fsio::sync_parent(&path)?;
     }
     let unix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -4466,9 +4465,6 @@ fn retire_attempt_dir(attempt: &Path) -> Result<PathBuf> {
         }
     };
     fs::rename(attempt, &retired).map_err(|error| error.to_string())?;
-    File::open(attempt.parent().ok_or("birth attempt lacks parent")?)
-        .and_then(|directory| directory.sync_all())
-        .map_err(|error| error.to_string())?;
     Ok(retired)
 }
 
@@ -6042,7 +6038,6 @@ fn doc_push(root: &Path, workspace: &Value, name: &str, file: &Path, proposal_id
     } else {
         let retired = root.join("seen").join(format!(".{}.pushed.{}", ref_file(name), random_nonce()?));
         fs::rename(seen_path(root, name)?, &retired).map_err(|error| format!("cannot retire the seen record: {error}"))?;
-        crate::fsio::sync_parent(&retired)?;
         println!("doc push {name}: admitted; at height {height} {name} also holds others' changes: doc pull {name} before your next push");
     }
     Ok(())

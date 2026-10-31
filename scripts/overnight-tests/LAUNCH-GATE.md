@@ -17,9 +17,9 @@ launch-gate run ABS_STATE_DIR mini-grain-tTASK-oOP -- /usr/bin/bwrap ...
 ```
 
 The per-operation `UNIT.gate` is a private regular file. `init` creates and
-fsyncs `armed`; `run`, as the transient service's ExecStart/MainPID, takes an
-exclusive `flock`, requires `armed`, fsyncs `started`, releases the lock, then
-execs the worker command. `fence` takes the same lock and fsyncs terminal
+writes `armed`; `run`, as the transient service's ExecStart/MainPID, takes an
+exclusive `flock`, requires `armed`, writes `started`, releases the lock, then
+execs the worker command. `fence` takes the same lock and writes terminal
 `fenced`; it can create the file if the controller died before `init`. Neither
 `init` nor `run` can rearm or launch after `fence`.
 

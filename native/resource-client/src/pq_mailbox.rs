@@ -1044,7 +1044,7 @@ pub(crate) fn live_mailbox(
     if output.exists() {
         return Err("live mailbox orphan output without admitted input".into());
     }
-    // One fsynced immutable record binds profile, exact authenticated input and
+    // One immutable record binds profile, exact authenticated input and
     // consumed receiver fence before any physical gateway offer/fetch.
     persist(&claimed, &admission)?;
     let mut replies = Vec::with_capacity(width);

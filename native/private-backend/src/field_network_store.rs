@@ -129,7 +129,7 @@ fn identity<R: FieldRuntime>(initial: &[u8]) -> Vec<u8> {
 }
 impl<R: FieldRuntime> RuntimeStore<R> {
     /// Takes an actual fully burned/typed Engine. Original private initialization
-    /// is fsynced before any protocol effect/outbox is returned. Existing files
+    /// is written before any protocol effect/outbox is returned. Existing files
     /// refuse; crash recovery uses reopen rather than regenerating material.
     pub fn create(path: &Path, state: R) -> Result<Self> {
         let guard = custody::lock(&path.with_extension("initial.lock"))?;

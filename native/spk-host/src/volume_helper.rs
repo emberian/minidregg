@@ -275,7 +275,7 @@ pub fn execute(bytes: &[u8]) -> io::Result<Value> {
                 if source.metadata()?.len()!=request.size_mib*1024*1024 { return Err(refuse("volume-helper: import size refused")); }
                 let target=root.join("volumes").join(format!(".import-{name}"));
                 let mut out=OpenOptions::new().write(true).create_new(true).mode(0o600).open(&target).ctx("open", &target)?;
-                io::copy(&mut source,&mut out)?;out.sync_all()?;
+                io::copy(&mut source,&mut out)?;
                 let mut input=File::open(&target).ctx("open", &target)?;
                 let mut hash=Sha256::new();
                 let mut buffer=[0u8;65536];

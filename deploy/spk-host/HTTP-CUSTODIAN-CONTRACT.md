@@ -117,7 +117,7 @@ wrong kind is refused (`:700-745`). The browser first visits
 `/__mini/bootstrap` (a form with no prefilled token), POSTs the 64-hex bootstrap
 token with same-origin headers and no credentials, and receives the cookie
 (Secure, HttpOnly, SameSite=Strict, Path=/) on a 303. `bootstrap.used` is
-fsynced before the cookie is sent, and a second bootstrap is refused
+written before the cookie is sent, and a second bootstrap is refused
 (`:1410-1481`). Tokens authenticate use of this route's custodian only; they
 grant no Mini permission. The code has no token expiry or rotation.
 

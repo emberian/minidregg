@@ -61,7 +61,7 @@ fn write_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
         .mode(0o600)
         .open(&path).ctx("open", &path)?;
     file.write_all(bytes)?;
-    file.sync_all()
+    Ok(())
 }
 
 /// Lay out `OUT/{var.ext4, manifest.json, manifest.sig}` from the broker's
@@ -181,7 +181,6 @@ pub(crate) fn verify_import(
         let temp = imports.join(format!(".{image_sha}.tmp"));
         let _ = fs::remove_file(&temp).ctx("remove", &temp);
         fs::copy(dir.join("var.ext4"), &temp).ctx("copy", &(dir.join("var.ext4")))?;
-        File::open(&temp).ctx("open", &temp)?.sync_all()?;
         fs::rename(&temp, &staged).ctx("rename", &temp)?;
     }
     if sha256_file(&staged)? != image_sha {
@@ -268,7 +267,6 @@ fn retain_exact(dir: &Path, name: &str, bytes: &[u8]) -> io::Result<std::path::P
         }
         Err(e) => return Err(e),
     }
-    File::open(&dir).ctx("open", &dir)?.sync_all()?;
     Ok(path)
 }
 
@@ -326,7 +324,7 @@ pub(crate) fn reconcile_failed_start(
     }
     let directory = journal.join("failed-start-recovery-v1");
     match DirBuilder::new().mode(0o700).create(&directory) {
-        Ok(()) => File::open(&journal).ctx("open", &journal)?.sync_all()?,
+        Ok(()) => {}
         Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
             crate::dispatch_native::private_dir(&directory)?
         }

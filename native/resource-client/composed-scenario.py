@@ -136,7 +136,6 @@ def save(path, value):
     with open(temporary, "w") as stream:
         stream.write(json.dumps(value, indent=2) + "\n")
         stream.flush()
-        os.fsync(stream.fileno())
     os.replace(temporary, path)
 
 

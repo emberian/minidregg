@@ -156,7 +156,7 @@ since genesis (97 s per replica on the 00f711 evidence copy). Now:
   image restores to the same state, so the in-memory image is installed without
   replaying anything (pinned axioms).
 - The writer helper's OP_REPLACE swaps the file atomically, length-checked
-  under the writer lock (staged file, fsync, rename, directory fsync), and keeps
+  under the writer lock (staged file, rename), and keeps
   the replaced image as `agreement.log.upto-<length>` (a hard link). A standing
   replica checkpoints every 1024 deltas (`checkpointEvery`), and a writable open
   that had to replay at least as many checkpoints at once.
@@ -270,7 +270,7 @@ other opcode fails closed; it cannot fall through to another mutation family.
 The matched Host must use the actual same consensus-profile genesis and source
 store. This wrapper does not authorize changing an existing world's profile.
 
-The bridge retains and fsyncs the original call before invoking the native
+The bridge retains the original call before invoking the native
 consumer. It takes response bytes only from that consumer's bounded private
 outcome file. A process timeout closes the client connection and retains the call;
 there is no automatic second semantic dispatch. Exact lookup/retry uses the

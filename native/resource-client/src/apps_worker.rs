@@ -62,7 +62,6 @@ fn write_json(path: &Path, value: &Value) -> Result<()> {
     let _ = fs::remove_file(&temp);
     let mut file = fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temp).map_err(|e| format!("{}: {e}", temp.display()))?;
     file.write_all(&bytes).map_err(|e| e.to_string())?;
-    file.sync_all().map_err(|e| e.to_string())?;
     fs::rename(&temp, path).map_err(|e| e.to_string())
 }
 

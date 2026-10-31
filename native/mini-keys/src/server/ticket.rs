@@ -1,6 +1,6 @@
 //! Durable provider tickets and the forward journal.
 //!
-//! A ticket is written to disk (`SPOOL/tickets/ID.json`, broker 0600, fsynced
+//! A ticket is written to disk (`SPOOL/tickets/ID.json`, broker 0600
 //! file and directory) BEFORE the day's call is counted, and it never holds the
 //! bearer: `provider-forward` unseals the namespace's secret itself. So:
 //!
@@ -24,7 +24,7 @@ use crate::credentials::Owner;
 use crate::wire;
 use serde_json::{json, Value};
 use std::collections::HashSet;
-use std::fs::{File, OpenOptions};
+use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
@@ -197,12 +197,11 @@ impl Tickets {
     fn write_durable(&self, name: &Path, bytes: &[u8]) -> Result<(), String> {
         let tmp = name.with_extension("tmp");
         let _ = std::fs::remove_file(&tmp);
-        let result = (|| {
+        let result = (|| -> std::io::Result<()> {
             let mut f = OpenOptions::new().write(true).create_new(true).mode(0o600).custom_flags(libc::O_NOFOLLOW).open(&tmp)?;
             f.write_all(bytes)?;
-            f.sync_all()?;
             std::fs::rename(&tmp, name)?;
-            File::open(&self.dir)?.sync_all()
+            Ok(())
         })();
         result.map_err(|e| {
             let _ = std::fs::remove_file(&tmp);

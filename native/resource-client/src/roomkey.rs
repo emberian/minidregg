@@ -1922,7 +1922,6 @@ impl RetainedReleaseDraft {
             let mut draft_ring = Keyring::default();
             draft_ring.insert(&spec.room, key);
             private::save_cache(&directory.join("draft-key.cache"), passphrase, &draft_ring)?;
-            fs::File::open(&directory).and_then(|file| file.sync_all()).map_err(|error| error.to_string())?;
             let encrypted = fs::read(directory.join("draft-key.cache")).map_err(|error| error.to_string())?;
             manifest["encryptedKeyCommitmentHex"] = json!(hex(&lineage_digest(&[b"DREGG/PRIVATE-ROOM-DRAFT-CACHE/v1", &encrypted])));
         }

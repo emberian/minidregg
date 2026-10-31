@@ -6,7 +6,7 @@ The resident cohort mailbox uses it; the original blocking CLI remains available
 
 An offer runs the existing public envelope gate, reserves an immutable class
 slot, and persists the original recovery capability and exact request through
-the existing fsynced Journal. Only then can it report physical `Accepted`.
+the existing Journal. Only then can it report physical `Accepted`.
 Application, control, and repair have separate native workers. Workers publish
 a dispatch claim before the original native exchange and retain its exact reply.
 Startup resumes unclaimed requests. A claim without a reply never authorizes

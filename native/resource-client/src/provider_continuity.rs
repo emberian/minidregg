@@ -352,7 +352,7 @@ pub(crate) fn retain_rejection(directory: &Path, intent: &Path) -> Result<()> {
         &directory.join("provider-continuity-rejection.json"),
         &bytes,
     )?;
-    sync_directory_ancestors(directory)
+    Ok(())
 }
 
 fn descriptor_payload(descriptor: &Value, evidence: &Path) -> Result<Vec<u8>> {
@@ -400,7 +400,6 @@ pub(crate) fn guard(
     let descriptor = strict_descriptor(&bytes)?;
     let payload = descriptor_payload(&descriptor, &evidence)?;
     create_private(&evidence.join("request.bin"), &payload)?;
-    sync_directory_ancestors(&evidence)?;
     let frame = session_invoke(host, socket, config, mini_sdk::host_operations::PROVIDER_CONTINUITY, &payload)?;
     create_private(&evidence.join("reply.frame"), &frame)?;
     if frame.first() != Some(&17) {
@@ -427,7 +426,6 @@ pub(crate) fn guard(
     }
     let pinned = inspect(host, config, "plan", plan_bin, plan_json)?;
     verify_pinned(original, &pinned)?;
-    sync_retained_call(directory, plan_bin)?;
     Ok(pinned)
 }
 
@@ -526,7 +524,6 @@ fn protect_native_evidence(path: &Path) -> Result<()> {
         return Err("native resolution evidence changed while opening".into());
     }
     file.set_permissions(fs::Permissions::from_mode(0o600))
-        .and_then(|()| file.sync_all())
         .map_err(|e| e.to_string())
 }
 fn inspect_private(
@@ -598,7 +595,6 @@ fn finish_resolution(directory: &Path, report: &Value) -> Result<()> {
     let mut bytes = serde_json::to_vec_pretty(report).map_err(|e| e.to_string())?;
     bytes.push(b'\n');
     create_private(&directory.join("resolution.json"), &bytes)?;
-    sync_directory_ancestors(directory)?;
     print_json(report)
 }
 

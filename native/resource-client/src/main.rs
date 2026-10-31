@@ -16,7 +16,7 @@ mod app_interface;
 mod attempt_state;
 mod bounds;
 mod fsio;
-pub(crate) use fsio::{copy_new, create_private, create_public, read_secret, retain_json, sync_directory_ancestors};
+pub(crate) use fsio::{copy_new, create_private, create_public, read_secret, retain_json};
 #[cfg(unix)]
 mod agent_lifetime_grant;
 mod trace;
@@ -1567,14 +1567,6 @@ fn create_dir(path: &Path) -> Result<()> {
     fs::create_dir(path).map_err(|error| format!("cannot create {}: {error}", path.display()))
 }
 
-/// The native host may write call.bin without syncing it. A successful
-/// external submit must never precede a durable exact call and its pathname.
-fn sync_retained_call(directory: &Path, call: &Path) -> Result<()> {
-    File::open(call)
-        .and_then(|file| mini_sdk::durable::sync_file(&file))
-        .map_err(|error| format!("cannot sync exact call {}: {error}", call.display()))?;
-    sync_directory_ancestors(directory)
-}
 
 fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
     create_public(path, bytes)
@@ -2067,9 +2059,6 @@ fn submit_once(
 ) -> Result<()> {
     #[cfg(unix)]
     let continuity = receipt_continuity::begin_attempt(directory)?;
-    // Until the seal every file of this attempt is a cache of its seal record: staged and linked
-    // without its own fsync (`mini_sdk::phase`). The seal ends the scope; so does any early return.
-    let _caches = mini_sdk::phase::CacheScope::enter(directory)?;
     let retained_intent = directory.join(if intent_kind == OsStr::new("binary") {
         "intent-source.bin"
     } else {
@@ -2105,10 +2094,6 @@ fn submit_once(
         (plan_bin.clone(), plan_json.clone())
     };
     let presentation = flow.present(&prepared_bin, &prepared_json)?;
-    if provider_continuity.is_some() {
-        sync_retained_call(directory, &prepared_bin)?;
-        sync_retained_call(directory, &prepared_json)?;
-    }
     #[cfg(unix)]
     if let Some(descriptor) = provider_continuity {
         if let Err(error) = provider_continuity::guard(
@@ -2560,14 +2545,10 @@ fn retry(directory: &Path, mode: &str, direct: bool) -> Result<()> {
     if !matches!(mode, "submit" | "lookup") {
         return Err("--mode must be submit or lookup".to_owned());
     }
-    // A retained attempt's caches are checked against its seal record before anything (this
-    // process, a one-shot Host, the transport) reads them (`mini_sdk::phase`, invariant 3).
-    mini_sdk::phase::repair_dir(directory)?;
     let call = directory.join("call.bin");
     if !call.is_file() {
         return Err(format!("attempt has no retained {}", call.display()));
     }
-    sync_retained_call(directory, &call)?;
     #[cfg(unix)]
     if let Some(outcome) = receipt_continuity::carry::retry_lookup(directory, mode, direct)? {
         return print_confirmed_outcome(&outcome);
@@ -2668,7 +2649,6 @@ fn continuity(
     let retained_config = private_consumer_attempt(host, config, directory, "continuity")?;
     create_private(&directory.join("call.bin"), &call_bytes)?;
     create_private(&directory.join("outcome.bin"), &outcome_bytes)?;
-    sync_directory_ancestors(directory)?;
     let payload = provider_continuity::request_payload(&call_bytes, &outcome_bytes, None, false)?;
     let frame = session_invoke(host, socket, &retained_config, mini_sdk::host_operations::PROVIDER_CONTINUITY, &payload)?;
     write_new(&directory.join("reply.frame"), &frame)?;
@@ -2777,13 +2757,7 @@ fn run(mut args: Args) -> Result<()> {
         }
         #[cfg(unix)]
         "workspace" => {
-            // One `mini workspace` action publishes 30-40 custody files; their directory fsyncs
-            // are coalesced to the barriers (every Host request, and here before exit), each file
-            // still complete or absent (`mini_sdk::durable`).
-            mini_sdk::durable::defer_directory_syncs();
-            let result = workspace::run(args);
-            let barrier = transport::durability_barrier();
-            result.and(barrier)
+            workspace::run(args)
         }
         #[cfg(unix)]
         "app-interface" => app_interface::run(args),

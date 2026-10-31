@@ -379,9 +379,7 @@ impl RegistrationPublisher<'_> {
             .directory
             .join(format!("{}.json", self.request.registration_nonce_hex));
         fs::hard_link(&pending, &final_path).ctx("link", &pending)?;
-        File::open(self.directory).ctx("open", &self.directory)?.sync_all()?;
         fs::remove_file(&pending).ctx("remove", &pending)?;
-        File::open(self.directory).ctx("open", &self.directory)?.sync_all()?;
         self.published = Some(reply.clone());
         Ok(())
     }
@@ -404,7 +402,6 @@ impl RouteControl {
         if !seals_directory.exists() {
             use std::os::unix::fs::DirBuilderExt;
             fs::DirBuilder::new().mode(0o700).create(&seals_directory)?;
-            File::open(&directory).ctx("open", &directory)?.sync_all()?;
         }
         let lock = OpenOptions::new()
             .read(true)
@@ -856,7 +853,7 @@ mod tests {
             let mut reply = reply(request);
             reply.route_index = 0;
             publisher.publish(&reply, &fixture_binding(request), "web")?;
-            // Model death after fsynced publication and before the memory update.
+            // Model death after written publication and before the memory update.
             Err(invalid("simulated interruption before memory publication"))
         });
         assert!(result.is_err());

@@ -1,7 +1,7 @@
 //! Physical candidate IDs shared by controllers of one deployment. A reservation
 //! is neither a grant nor evidence of birth: the current Lean admission path
 //! remains the authority for every proposed resource and capability.
-use crate::{create_private, hex, sync_directory_ancestors, transport, Result};
+use crate::{create_private, hex, transport, Result};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -56,7 +56,7 @@ fn private_root(root: &Path) -> Result<()> {
     if !root.is_absolute() {
         return Err("namespace root must be absolute".into());
     }
-    crate::fsio::ensure_private_dir_durable(root)
+    crate::fsio::ensure_private_dir(root)
 }
 
 fn lock(root: &Path) -> Result<transport::ServiceLock> {
@@ -271,7 +271,6 @@ pub(crate) fn reserve(
             }
             create_private(&staged, &bytes).map_err(|error| format!("cannot stage namespace record: {error}"))?;
             fs::rename(&staged, &path).map_err(|error| format!("cannot rekey namespace record: {error}"))?;
-            sync_directory_ancestors(root)?;
             return Ok(Reservation {
                 request_digest,
                 ids: parse_ids(&rekeyed, roles)?,
@@ -297,7 +296,6 @@ pub(crate) fn reserve(
     let mut bytes = serde_json::to_vec_pretty(&saved).map_err(|error| error.to_string())?;
     bytes.push(b'\n');
     create_private(&path, &bytes).map_err(|error| format!("cannot publish namespace record: {error}"))?;
-    sync_directory_ancestors(root)?;
     Ok(Reservation {
         request_digest,
         ids,
@@ -419,7 +417,6 @@ pub(crate) fn bind_attempt(
     bytes.push(b'\n');
     create_private(&path, &bytes)
         .map_err(|error| format!("cannot publish namespace attempt binding: {error}"))?;
-    sync_directory_ancestors(root)?;
     Ok(AttemptBinding {
         attempt_path,
         source_sha256: source_sha.to_owned(),
@@ -484,7 +481,6 @@ pub(crate) fn release_attempt(
     };
     fs::rename(&path, &retained)
         .map_err(|error| format!("cannot release namespace attempt binding: {error}"))?;
-    sync_directory_ancestors(root)?;
     Ok(Some(retained))
 }
 

@@ -920,13 +920,6 @@ impl<W: Write + AsRawFd> Write for DeadlinePipeWrite<'_, W> {
     }
 }
 
-/// Before any byte reaches a Host: every custody name this process committed is durable
-/// (`mini_sdk::durable::flush_directory_syncs`; a no-op unless the process defers directory syncs).
-/// A request whose preceding custody cannot be made durable is never sent.
-pub(crate) fn durability_barrier() -> Result<(), String> {
-    mini_sdk::durable::flush_directory_syncs().map_err(|e| format!("cannot make custody durable before the Host request: {e}"))
-}
-
 /// An upgraded worker requires the executable image actually serving the
 /// socket to match its durable host pin. Version 2 is mandatory on this path:
 /// an older service rejects the envelope before it can forward the request.
@@ -990,7 +983,6 @@ pub(crate) fn invoke_pinned_deadline(
     frame.extend_from_slice(&expected);
     frame.push(operation);
     frame.extend_from_slice(payload);
-    durability_barrier()?;
     let started = Instant::now();
     let mut stream = connect_unix_deadline(socket, deadline)
         .map_err(|e| format!("cannot connect within deadline: {e}"))?;
@@ -1182,7 +1174,6 @@ fn invoke_inner(
     frame.extend_from_slice(expected_host_sha256);
     frame.push(operation);
     frame.extend_from_slice(payload);
-    durability_barrier()?;
     let started = std::time::Instant::now();
     if mini_sdk::operator::lose_reply_armed(operation) {
         // The lost-reply switch (`submit ID --lose-reply-once`, DEMO-EXPERIENCE A11): write the
@@ -1190,7 +1181,6 @@ fn invoke_inner(
         // attempt stays retained as uncertain; `lookup`/`retry` ask for the same decided outcome.
         std::env::remove_var(mini_sdk::operator::LOSE_REPLY_ENV);
         if let Endpoint::Unix(path) = endpoint(socket)? {
-            durability_barrier()?;
             let mut stream = UnixStream::connect(path).map_err(|e| format!("cannot connect to {}: {e}", path.display()))?;
             write_frame(&mut stream, &frame).map_err(|e| format!("uncertain host request write: {e}"))?;
             await_unread_reply(&stream, Instant::now() + Duration::from_secs(120));
@@ -1242,7 +1232,6 @@ fn await_unread_reply(stream: &UnixStream, deadline: Instant) {
 const LOST_REPLY: &str = "uncertain host response: reply deliberately not read (--lose-reply-once); the Host decided as it would, so look up or retry the exact retained call";
 
 pub(crate) fn exchange_unix(socket: &Path, frame: &[u8]) -> Result<Vec<u8>, String> {
-    durability_barrier()?;
     let expected_peer = crate::operator_peer::before_connect(socket)?;
     let mut stream = UnixStream::connect(socket)
         .map_err(|e| format!("cannot connect to {}: {e}", socket.display()))?;

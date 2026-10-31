@@ -57,7 +57,7 @@ not permission to publish the retained values.
 
 `sh2t_id_store::Store` journals full dealer polynomials and random seed, received
 canonical wire messages, opening/reconstruction/dispute source events and entire
-recursive outboxes. Transactional clone plus fsync precedes publication. Reopen
+recursive outboxes. Transactional clone precedes publication. Reopen
 recomputes exact child contexts and compares every recorded outbox. Identical
 dealer retries replay retained packets; changed inputs refuse. Identity binds the
 original Generation, party and profile. The owner-private WAL assumes honest

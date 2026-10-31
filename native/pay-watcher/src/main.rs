@@ -94,25 +94,12 @@ fn write_atomic(dir: &Path, name: &str, bytes: &[u8]) -> Result<(), String> {
     let dest = dir.join(name);
     let mut file = std::fs::File::create(&tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
     file.write_all(bytes)
-        .and_then(|_| file.sync_all())
         .map_err(|e| format!("{}: {e}", tmp.display()))?;
     std::fs::rename(&tmp, &dest).map_err(|e| format!("{}: {e}", dest.display()))?;
-    sync_dir(dir)
-}
-
-fn sync_dir(dir: &Path) -> Result<(), String> {
-    std::fs::File::open(dir).and_then(|f| f.sync_all())
-        .map_err(|e| format!("sync {}: {e}", dir.display()))
-}
-
-fn sync_ancestors(dir: &Path) -> Result<(), String> {
-    let mut path = Some(std::fs::canonicalize(dir).map_err(|e| e.to_string())?);
-    while let Some(dir) = path {
-        sync_dir(&dir)?;
-        path = dir.parent().map(Path::to_path_buf);
-    }
     Ok(())
 }
+
+
 
 fn config_identity(cfg: &Config) -> Value {
     json!({"mint":cfg.asset.mint.to_vec(),"tokenProgram":cfg.asset.token_program.to_vec(),
@@ -155,7 +142,6 @@ fn read_tick(path: &Path) -> Result<Value, String> {
 fn next_tick_id(out: &Path) -> Result<String, String> {
     let archive = out.join("ticks");
     std::fs::create_dir_all(&archive).map_err(|e| e.to_string())?;
-    sync_dir(out)?;
     let mut highest = 0;
     // A quarantined tick keeps its ID: the next one never reuses it.
     for dir in [archive, out.join("quarantine")] {
@@ -217,8 +203,6 @@ fn acknowledge_tick(out: &Path, id: &str) -> Result<ExitCode, String> {
     if value["id"] != id { return Err("acknowledgement names a different pending tick".into()); }
     if destination.exists() { return Err("tick archive collision; preserving both records".into()); }
     std::fs::rename(&pending, &destination).map_err(|e| e.to_string())?;
-    sync_dir(&archive)?;
-    sync_dir(out)?;
     println!("archived tick={id}");
     Ok(ExitCode::SUCCESS)
 }
@@ -244,7 +228,6 @@ fn quarantine_tick(out: &Path, id: &str, reason: &str) -> Result<ExitCode, Strin
         "tick":value});
     write_atomic(&dir, &name, &serde_json::to_vec_pretty(&record).map_err(|e| e.to_string())?)?;
     std::fs::remove_file(&pending).map_err(|e| e.to_string())?;
-    sync_dir(out)?;
     println!("quarantined tick={id}");
     Ok(ExitCode::SUCCESS)
 }
@@ -319,7 +302,6 @@ fn real_main() -> Result<ExitCode, String> {
         let bytes = serde_json::to_vec_pretty(&tick).map_err(|e| e.to_string())?;
         if bytes.len() > 64 * 1024 * 1024 { return Err("durable tick exceeds 64 MiB; cursor not advanced".into()); }
         write_atomic(&args.out, "pending.json", &bytes)?;
-        sync_ancestors(&args.out)?;
         return publish_tick(&args.out, &cfg, &tick);
     }
     write_atomic(&args.out, "observations.json", &report.observations_json())?;

@@ -216,7 +216,6 @@ pub(crate) fn app_output(path: &Path) -> io::Result<(OwnedFd, AppOutput)> {
                     summary.discarded, APP_OUTPUT_MAX_BYTES
                 )?;
             }
-            file.sync_all()?;
             Ok(summary)
         })?;
     Ok((writer, AppOutput { pump }))

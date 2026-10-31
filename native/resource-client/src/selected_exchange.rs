@@ -58,7 +58,7 @@ fn put_json(path: &Path, value: &Value) -> Result<()> {
     let mut bytes = serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?;
     bytes.push(b'\n');
     create_private(path, &bytes)?;
-    sync_directory_ancestors(path.parent().ok_or("exchange output has no parent")?)
+    Ok(())
 }
 
 fn host(config: &Value) -> Result<PathBuf> {
@@ -416,7 +416,6 @@ fn receive_transport(config: &Value, state: &Path) -> Result<()> {
     let transport = state.join("transport");
     if !transport.exists() {
         crate::fsio::create_private_dir(&transport)?;
-        sync_directory_ancestors(state)?;
     }
     crate::fsio::check_private_dir(&transport)?;
     if !transport.join("selected").exists() {
@@ -456,7 +455,6 @@ fn receive_transport(config: &Value, state: &Path) -> Result<()> {
             .ok_or("legacy poll has no name")?
             .to_string_lossy();
         create_private(&transport.join("selected"), name.as_bytes())?;
-        sync_directory_ancestors(&transport)?;
     }
     if !transport.join("retrieval.json").exists() {
         let name = String::from_utf8(crate::fsio::read_bounded(&transport.join("selected"), 32)?)
@@ -625,7 +623,6 @@ pub(super) fn run(phase: &str, contract: &Path, state: &Path) -> Result<()> {
             return Err("selected exchange state already exists".into());
         }
         crate::fsio::create_private_dir(&state)?;
-        sync_directory_ancestors(&state)?;
         let _owner = transport::service_lock(&state.join("selected-exchange.lock"))?;
         pin(&contract, &config, &state, true)?;
         prepare(&config, &state)

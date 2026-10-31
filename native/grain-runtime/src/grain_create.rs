@@ -673,7 +673,7 @@ fn init_workspace(spec: &Spec, key: &Key, dir: &Path) -> Result<()> {
 fn write_private_new(path: &Path, bytes: &[u8]) -> Result<()> {
     let mut file = OpenOptions::new().write(true).create_new(true).mode(0o600).open(path)
         .map_err(|e| format!("{}: {e}", path.display()))?;
-    file.write_all(bytes).and_then(|_| file.sync_all()).map_err(|e| format!("{}: {e}", path.display()))
+    file.write_all(bytes).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// The owner delegates RECIPIENT observe+mutate on the parent (its witness).

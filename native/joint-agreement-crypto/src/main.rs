@@ -21,7 +21,6 @@ fn fresh(p: &Path, b: &[u8]) -> Result<(), Error> {
         .mode(0o600)
         .open(p)?;
     f.write_all(b)?;
-    f.sync_all()?;
     Ok(())
 }
 pub(crate) fn mac(key: &[u8], body: &[u8]) -> Result<Vec<u8>, Error> {

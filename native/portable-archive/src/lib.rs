@@ -7,7 +7,7 @@ use durable_file::private_file;
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::Path;
@@ -36,7 +36,7 @@ fn owned_directory(root:&Path)->io::Result<()> {
 }
 pub fn initialize(root:&Path)->io::Result<()> {
     use std::os::unix::fs::DirBuilderExt;
-    if !root.exists() { fs::DirBuilder::new().mode(0o700).create(root)?; File::open(root.parent().ok_or_else(||invalid("archive parent absent"))?)?.sync_all()?; }
+    if !root.exists() { fs::DirBuilder::new().mode(0o700).create(root)?; }
     owned_directory(root)
 }
 fn exact_chunk(root:&Path,chunk:&Chunk)->io::Result<Vec<u8>> {
@@ -76,8 +76,8 @@ fn retain_chunk(root:&Path,bytes:&[u8])->io::Result<Chunk> {
     let mut nonce=[0u8;16];getrandom::getrandom(&mut nonce).map_err(|e|io::Error::other(e.to_string()))?;
     let staging=root.join(format!(".chunk-{}",hex::encode(nonce)));
     let mut output=OpenOptions::new().write(true).create_new(true).mode(0o600).open(&staging)?;
-    output.write_all(bytes)?; output.sync_all()?;
-    fs::rename(&staging,&target)?; File::open(root)?.sync_all()?;
+    output.write_all(bytes)?;
+    fs::rename(&staging,&target)?;
     exact_chunk(root,&chunk)?; Ok(chunk)
 }
 /// Capture under the EXISTING source pause/driver lock. Double-reading catches
@@ -139,7 +139,6 @@ pub fn restore_new(root:&Path,manifest:&FileManifest,target:&Path)->io::Result<(
     let mut aggregate=Sha256::new();
     for chunk in &manifest.chunks {let bytes=exact_chunk(root,chunk)?;aggregate.update(&bytes);output.write_all(&bytes)?;}
     if hex::encode(aggregate.finalize())!=manifest.sha256 {return Err(invalid("restored artifact aggregate differs"));}
-    output.sync_all()?;File::open(target.parent().ok_or_else(||invalid("restore parent absent"))?)?.sync_all()?;
     let mut checked=private_file(target)?;let mut h=Sha256::new();let mut buffer=[0u8;CHUNK_BYTES];
     loop {let n=checked.read(&mut buffer)?;if n==0 {break;}h.update(&buffer[..n]);}
     if checked.metadata()?.len()!=manifest.bytes || hex::encode(h.finalize())!=manifest.sha256 {return Err(invalid("restore readback differs"));}Ok(())
@@ -148,7 +147,7 @@ pub fn restore_new(root:&Path,manifest:&FileManifest,target:&Path)->io::Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn file(path:&Path,bytes:&[u8]) {let mut f=OpenOptions::new().write(true).create_new(true).mode(0o600).open(path).unwrap();f.write_all(bytes).unwrap();f.sync_all().unwrap();}
+    fn file(path:&Path,bytes:&[u8]) {let mut f=OpenOptions::new().write(true).create_new(true).mode(0o600).open(path).unwrap();f.write_all(bytes).unwrap();}
     #[test]
     fn repair_offline_source_and_bounded_cross_chunk_retrieval() {
         let d=tempfile::tempdir().unwrap();let source=d.path().join("full");

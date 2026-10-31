@@ -202,7 +202,6 @@ impl Session {
             let retained = self.record.join("bootstrap-metadata.json");
             if !retained.exists() {
                 retain_json(&retained, &metadata)?;
-                sync_directory_ancestors(&self.record)?;
             }
             self.metadata_checked = true;
         }
@@ -303,10 +302,6 @@ impl Backend for Session {
                 serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())?;
             validate_plan_profile(&value, &profile)?;
         }
-        sync_retained_call(
-            output.parent().ok_or("inspection output parent missing")?,
-            output,
-        )?;
         Ok(value)
     }
 }
@@ -460,8 +455,7 @@ fn inspect_unique<B: Backend>(
     // Use the common retained-evidence allocator, including for repeated lookup inspections.
     let (_, output) = next_retry(dir)?;
     let value = backend.inspect(kind, input, &output)?;
-    // Real inspect persists its source rendering; test backends follow the same contract.
-    sync_directory_ancestors(dir)?;
+    // Real inspect persists its source rendering;
     Ok(value)
 }
 
@@ -481,7 +475,6 @@ fn exchange_outcome<B: Backend>(
                 &json!({"type":"claimTransportUncertain","operation":operation,
                 "detail":error,"recovery":"exact lookup only"}),
             )?;
-            sync_directory_ancestors(dir)?;
             return Err(
                 "claim reply unavailable; retained operation permits exact lookup only".into(),
             );
@@ -489,7 +482,6 @@ fn exchange_outcome<B: Backend>(
     };
     let body = frame_body(&frame, operation, 8192)?;
     create_private(&binary, body)?;
-    sync_directory_ancestors(dir)?;
     let outcome = backend.inspect("outcome", &binary, &json_path)?;
     Decision::source(outcome, expected)
 }
@@ -607,7 +599,6 @@ where
     }
     // Atomic reservation prevents concurrent callers from signing/submitting twice.
     workspace::make_private_dir(dir)?;
-    sync_directory_ancestors(dir)?;
     create_private(&dir.join("config.json"), config)?;
     initialize(dir)?;
     create_private(&dir.join("command.bin"), command)?;
@@ -675,7 +666,6 @@ where
     // This immutable durable record arms exactly one initial submit. A crash
     // immediately after it, even before the send, is lookup-only recovery.
     retain_json(&dir.join("operation.json"), &record)?;
-    sync_retained_call(dir, &dir.join("ingress.bin"))?;
     exchange_outcome(backend, dir, mini_sdk::host_operations::PAY_CLAIM_SUBMIT, ingress, &expected)
 }
 
@@ -857,9 +847,7 @@ fn run_quote(mut args: Args) -> Result<()> {
     // Publish the sidecar before its command. A crash never leaves an apparently
     // complete unsigned command without the retained terms and origin.
     retain_json(&sidecar, &summary)?;
-    sync_directory_ancestors(sidecar.parent().ok_or("quote output parent missing")?)?;
     create_private(&output, &canonical)?;
-    sync_retained_call(&record, &output)?;
     println!(
         "{}",
         serde_json::to_string_pretty(&summary).map_err(|e| e.to_string())?

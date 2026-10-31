@@ -35,11 +35,8 @@ def sha(path):
 
 
 def save(path,value,mode=0o600):
-    with open(path,'x') as out: json.dump(value,out,indent=2);out.write('\n');out.flush();os.fsync(out.fileno())
+    with open(path,'x') as out: json.dump(value,out,indent=2);out.write('\n');out.flush()
     os.chmod(path,mode)
-    fd=os.open(Path(path).parent,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
-    try: os.fsync(fd)
-    finally: os.close(fd)
 
 
 def directory(path,mode=0o755):
@@ -277,7 +274,7 @@ class Driver:
         destination=Path(self.input['root'])/'browser-access.json'
         value=dict(protocol='mini-spk-browser-access-v1',app=f['app'],generation=f['generation'],delegates=access,
              browserStatus='pending actual browser edit, sharing/access change and persistence qualification')
-        writer="import os,sys; os.umask(0o077); fd=os.open(sys.argv[1],os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600); f=os.fdopen(fd,'w'); f.write(sys.argv[2]+'\\n'); f.flush(); os.fsync(f.fileno()); f.close()"
+        writer="import os,sys; os.umask(0o077); fd=os.open(sys.argv[1],os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600); f=os.fdopen(fd,'w'); f.write(sys.argv[2]+'\\n'); f.flush(); f.close()"
         self.run_command(['/usr/bin/python3','-c',writer,str(destination),json.dumps(value)],operator=True,timeout=30)
         operator_custody(destination,Path(self.input['root']),uid,'file')
         return str(destination)

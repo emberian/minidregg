@@ -73,7 +73,7 @@ pub struct PrivateOutput {
     invalid_result: bool,
 }
 impl PrivateOutput {
-    /// PUBLIC context/shape/recipient preflight, one-use reservation + fsync and
+    /// PUBLIC context/shape/recipient preflight, one-use reservation + write and
     /// actual anchor readback precede the completed output's FIRST share getter.
     /// Native must separately authorize exact descriptor/current recipient/funds.
     pub fn reserve(

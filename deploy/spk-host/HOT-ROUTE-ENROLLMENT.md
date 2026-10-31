@@ -72,8 +72,8 @@ generation. Existing accepted sockets and stable route indices remain intact.
 Before changing a binding, listener registry or success cache, the resident
 publishes an owner-private record under the generation journal's `route-seals/`.
 It retains the exact request, reply and full source-admitted binding. Publication
-writes and fsyncs a new pending file, creates the final name without replacing
-an existing file, fsyncs the directory, removes the pending name and fsyncs
+writes a new pending file, creates the final name without replacing
+an existing file and removes the pending name
 again. In-memory changes follow that publication. Any failed publication or
 post-publication error ends the resident instead of continuing with an unbound
 route. Final records are immutable and partial pending records are retained.

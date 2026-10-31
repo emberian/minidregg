@@ -49,35 +49,7 @@ impl From<ReadError> for String {
 }
 
 /// Read the regular file at `path`, which must hold `min..=limit` bytes.
-///
-/// A file named by a `seal.record` beside it is a cache of that record ([`crate::phase`],
-/// invariant 3): it is checked against the record and, if it is absent, torn or out of bounds,
-/// repaired from the record before its bytes are returned. A file no record names is read as it
-/// is.
 pub fn read_regular(path: &Path, min: usize, limit: usize) -> Result<Vec<u8>, ReadError> {
-    let repaired = |bytes: Vec<u8>| -> Result<Vec<u8>, ReadError> {
-        if bytes.len() < min || bytes.len() > limit {
-            return Err(ReadError { path: path.to_owned(), kind: ReadErrorKind::Size { min, limit } });
-        }
-        Ok(bytes)
-    };
-    let record_error = |e: crate::Error| ReadError { path: path.to_owned(), kind: ReadErrorKind::Io(io::Error::other(e.0)) };
-    match read_exact_file(path, min, limit) {
-        Ok(bytes) => match crate::phase::repair_file(path, Some(&bytes)).map_err(record_error)? {
-            Some(record) => repaired(record),
-            None => Ok(bytes),
-        },
-        Err(e) if matches!(e.kind, ReadErrorKind::NotRegular) => Err(e),
-        Err(e) => match crate::phase::repair_file(path, None) {
-            Ok(Some(record)) => repaired(record),
-            Ok(None) => Err(e),
-            Err(record) => Err(record_error(record)),
-        },
-    }
-}
-
-/// [`read_regular`] without the record check: the file as it is on disk.
-fn read_exact_file(path: &Path, min: usize, limit: usize) -> Result<Vec<u8>, ReadError> {
     let fail = |kind| ReadError { path: path.to_owned(), kind };
     let mut file = OpenOptions::new()
         .read(true)

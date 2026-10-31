@@ -84,7 +84,6 @@ pub(crate) fn install(
         workspace::random_nonce()?
     ));
     workspace::make_private_dir(&scratch)?;
-    directory(&custody)?.sync_all().map_err(fail)?;
     let request =
         json!({"oldIdentity":old.identity,"sourceCapsulePath":capsule,"sourceCapsulePins":pins});
     save(&scratch, "request.json", &request)?;
@@ -112,7 +111,7 @@ pub(crate) fn install(
     registered_capsule(&custody, &authority, &capsule)?;
     let pin = json!({"type":PIN_TYPE,"verifier":executable,"verifierSha256":expected_sha256,
         "identity":old.identity,"sourceCapsulePath":capsule,"sourceCapsulePins":pins});
-    // Marker first: a crash before pin fsync disables carry until explicit
+    // Marker first: a crash before pin write disables carry until explicit
     // reinstall, rather than allowing fallback to a different executable.
     let mut manifest = workspace.clone();
     manifest["receiptCarryVerifier"] = json!(PIN_TYPE);

@@ -49,10 +49,6 @@ fn directory(path: &Path) -> Result<()> {
     // A prior process may have died after mkdir but before its parent sync.
     // Re-entry must durably retain that directory entry before a journal commit.
     File::open(path)
-        .and_then(|f| f.sync_all())
-        .map_err(|e| e.to_string())?;
-    File::open(path.parent().ok_or("enrollment directory has no parent")?)
-        .and_then(|f| f.sync_all())
         .map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -724,9 +720,6 @@ pub(crate) fn run(config_path: &Path, request_path: &Path) -> Result<Value> {
     let mut record = json!({"protocol":PROTOCOL,"requestSha256":id,"beforeSha256":sha256_bytes(&source_bytes)?,"afterSha256":sha256_bytes(&after_bytes)?});
     if let Some(proof)=&consumed { record["consumedResidentOrigin"]=proof.0.clone(); }
     retain(&record_path, &bytes(&record)?)?;
-    File::open(&record_dir)
-        .and_then(|f| f.sync_all())
-        .map_err(|e| e.to_string())?;
     // Re-read both public coordinates immediately before the sole atomic commit.
     if private(config_path, 1_048_576)? != target_bytes
         || private(&journal_path, JOURNAL_LIMIT)? != current_bytes
