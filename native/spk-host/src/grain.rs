@@ -989,6 +989,44 @@ fn unit_active(unit: &str) -> io::Result<String> {
     unit_property(unit, "ActiveState")
 }
 
+/// Directories whose entries a wait watches (inotify): `wait` returns when any of them gains,
+/// loses or finishes writing an entry, or after the bound. Without inotify (or for a directory
+/// that does not exist yet) it is a plain sleep of the bound; the caller re-checks either way.
+struct DirWatch(Option<std::os::fd::OwnedFd>);
+
+impl DirWatch {
+    fn new(dirs: &[PathBuf]) -> Self {
+        use std::os::fd::FromRawFd;
+        use std::os::unix::ffi::OsStrExt;
+        let fd = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };
+        if fd < 0 {
+            return Self(None);
+        }
+        let owned = unsafe { std::os::fd::OwnedFd::from_raw_fd(fd) };
+        let mask = libc::IN_CREATE | libc::IN_MOVED_TO | libc::IN_CLOSE_WRITE | libc::IN_DELETE;
+        for dir in dirs {
+            if let Ok(path) = std::ffi::CString::new(dir.as_os_str().as_bytes()) {
+                unsafe { libc::inotify_add_watch(fd, path.as_ptr(), mask) };
+            }
+        }
+        Self(Some(owned))
+    }
+
+    fn wait(&self, bound: Duration) {
+        use std::os::fd::AsRawFd;
+        let Some(fd) = &self.0 else {
+            std::thread::sleep(bound);
+            return;
+        };
+        let mut poll = libc::pollfd { fd: fd.as_raw_fd(), events: libc::POLLIN, revents: 0 };
+        let millis = i32::try_from(bound.as_millis()).unwrap_or(i32::MAX);
+        if unsafe { libc::poll(&mut poll, 1, millis) } > 0 {
+            let mut events = [0u8; 4096];
+            while unsafe { libc::read(fd.as_raw_fd(), events.as_mut_ptr().cast(), events.len()) } > 0 {}
+        }
+    }
+}
+
 /// Consecutive unreadable polls (500 ms apart) the START wait absorbs before it gives
 /// up on the user manager: one minute.
 const MAX_UNREADABLE_POLLS: u32 = 120;
@@ -1240,6 +1278,15 @@ fn start_inner(host: &Host, app: &str, prepare_only: bool) -> io::Result<Value> 
         }
     }
     let mut unreadable = 0u32;
+    // The completion record and the route sockets appear in these directories: a change there
+    // ends the wait at once; the unit's state is still read every 500 ms.
+    let mut watched = vec![journal.clone()];
+    watched.extend(entrances.iter().filter_map(|route| route.get("directory").and_then(Value::as_str)).map(PathBuf::from));
+    watched.extend(agents.iter().filter_map(|agent| agent.get("socket").and_then(Value::as_str))
+        .filter_map(|socket| Path::new(socket).parent().map(Path::to_path_buf)));
+    let watch = DirWatch::new(&watched);
+    const PROBE_EVERY: Duration = Duration::from_millis(500);
+    let mut next_probe = Instant::now();
     let completed = loop {
         // Re-read each turn: the lane is fixed only once the resident retains
         // its admitted marker (a recovered create retries under v4).
@@ -1255,11 +1302,18 @@ fn start_inner(host: &Host, app: &str, prepare_only: bool) -> io::Result<Value> 
         if exists(&completed)? && sockets_ready && agents_ready {
             break completed;
         }
+        // The resident writes its journal throughout a START: an entry that is not the
+        // completion re-checks the files above, and the unit is still read every 500 ms only.
+        let now = Instant::now();
+        if now < next_probe {
+            watch.wait(next_probe - now);
+            continue;
+        }
+        next_probe = now + PROBE_EVERY;
         // The 2026-10-27 HakyllCMS row failed here at 125 s with an empty state while its
         // resident was alive until the world was torn down (a START takes 140-630 s): an
         // unreadable state is not a stopped unit.
         let Some(state) = judge_poll(&unit, unit_probe(&unit, "ActiveState")?, &mut unreadable)? else {
-            std::thread::sleep(Duration::from_millis(500));
             continue;
         };
         if !matches!(state.as_str(), "active" | "activating") {
@@ -1273,7 +1327,6 @@ fn start_inner(host: &Host, app: &str, prepare_only: bool) -> io::Result<Value> 
                 START_WAIT.as_secs()
             )));
         }
-        std::thread::sleep(Duration::from_millis(500));
     };
     Ok(json!({
         "protocol":"mini-spk-grain-start-v1",
