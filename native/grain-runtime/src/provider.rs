@@ -291,6 +291,15 @@ enum GatewayListener {
     Unix(UnixListener),
 }
 
+impl std::os::fd::AsRawFd for GatewayListener {
+    fn as_raw_fd(&self) -> std::os::fd::RawFd {
+        match self {
+            Self::Tcp(listener) => listener.as_raw_fd(),
+            Self::Unix(listener) => listener.as_raw_fd(),
+        }
+    }
+}
+
 impl GatewayListener {
     fn accept(&self) -> io::Result<GatewayStream> {
         match self {
@@ -575,7 +584,7 @@ impl GatewayEndpoint {
                         });
                     }
                     Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                        thread::sleep(Duration::from_millis(20));
+                        mini_sdk::private::wait_readable(std::os::fd::AsRawFd::as_raw_fd(&listener), std::time::Duration::from_millis(20));
                     }
                     Err(_) => break,
                 }

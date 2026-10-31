@@ -777,7 +777,7 @@ fn accept_enrolled(
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                thread::sleep(Duration::from_millis(1))
+                mini_sdk::private::wait_readable(std::os::fd::AsRawFd::as_raw_fd(listener), std::time::Duration::from_millis(1))
             }
             Err(e) => return Err(format!("public listener fault: {e}")),
         }
