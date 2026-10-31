@@ -24,7 +24,7 @@ gated candidates and names candidates to infra and the explorer.
   Known for it: perf-apps saw a START crash loop ("attestation resource outside supported profile", 20-digit member-
   namespace resource ids): fixed 40efdcff9 (staging 4ab22bf78). If j14/apps go red on that, overlay the spk-host crate
   from 4ab22bf78 onto 1c151fce4 (lane-build.sh overlay) and rerun j14 + composed with gate15.
-- **Batch 6 (staging 4ab22bf78+)**: the resource-id fix and whatever lands. Cut it when batch 5's gate and umbrella are
+- **Batch 6 (staging 1e339d769+)**: the resource-id fix, exorcism 16f2d046f (reverts the commitment-seen cache) and whatever lands. Cut it when batch 5's gate and umbrella are
   in and enough has accumulated (minimal-checks ruling: cuts spaced out to accumulate perf work).
 - **FORMAT batch (later, one genesis, after iter-speed's seam 1)**: hot-path row 11 (checkpoint carries session indexes;
   Store epoch) + Book entries migration (~50 consumers) + private-cells FORMAT (a): eventHistory and authority to the trie
@@ -38,9 +38,8 @@ gated candidates and names candidates to infra and the explorer.
 - Flatness (reported, never gating): batch 3 submit_cpu 202 -> 1180 ms; batch 4 106 -> 380. CONSENT-STORE (batch 2+)
   measured by the explorer: first signed read 20.7 s -> 0.5-0.8 s flat in height; restart+read 26 s -> 5.6 s; certify
   ~6 s per 256 tail.
-- hbox: / 47 GB free (08:03). Host state app-reds added: /var/lib/mini-vars-backing (loop prjquota ext4 from
-  /tank/lanes/vars-backing.img, NOT in fstab: after reboot `sudo mount -o loop,prjquota /tank/lanes/vars-backing.img
-  /var/lib/mini-vars-backing`), /etc/mini-spk-volumes/{vars-backing,ingest-scratch}, /tank/mini-ingest.
+- hbox: / 48 GB free (08:15). Host state app-reds added: /var/lib/mini-vars-backing (loop prjquota ext4, NOT in fstab;
+  image moving off /tank), /etc/mini-spk-volumes/{vars-backing,ingest-scratch}.
 
 ## Lanes (route only to the newest id; distilled lanes' old ids are retired)
 
@@ -62,6 +61,10 @@ Every Lean-statement sha gets an audit round from a4d9a6f4cba4855ca before it ri
 
 ## Rulings in force
 
+- **No /tank** (ember via root, 10-31 08:15): nothing uses /tank on hbox. Free disk only by removing old trash (retired
+  trees after their checkpoint, lanes' finished /ci scratch, superseded candidates and gate roots); the 40 GB early-warning
+  sweep line asks lanes to clear scratch. Gates now lock /home/hbox/lanes/world-up.lock and run playwright from $I/pw.
+  Owed by app-reds: vars-backing image and ingest scratch off /tank, store-sweep.sh's lock path.
 - **Minimal checks** (ember, 10-31, after the gates went green): per iteration only the narrowest check that shows the
   change worked (lane-check of changed files plus one targeted measurement or row); full gates (gate13/15, forge composed,
   umbrellas) once per batch cut; cuts spaced out to accumulate perf work; hotpatched measurement worlds are the inner loop;
@@ -107,6 +110,7 @@ Every Lean-statement sha gets an audit round from a4d9a6f4cba4855ca before it ri
 | eca98bde7-resvar2(-zai) | overlays of batch 2 with the resident /var fix (and Z.AI); forge demo build |
 | b9450147f | GATE GREEN (batch 4, with deploy hotpatch 9fdef19bd): rehearsal-3 candidate; main's base |
 | 1c151fce4 | READY (batch 5); gate13 running |
+| 1c151fce4-resid | overlay: batch 5 + spk-host crate from 40efdcff9 (resource id any non-zero u64), for perf-apps' START loop |
 
 ## Open reds and owners
 
