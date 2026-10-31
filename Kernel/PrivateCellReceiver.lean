@@ -514,14 +514,16 @@ theorem idealFn_window {window : List Nat} (distinct : window.Nodup) (t : Fin (f
   simp only [idealFn, mem, dif_pos]
   exact congrArg _ (Fin.ext (distinct.idxOf_getElem i i.isLt))
 
-/-- A test of a mask function that evaluates it at at most `q` versions. -/
-def QueryTest (q : Nat) (test : (Nat → Fin (m + 1)) → Bool) : Prop :=
-  ∃ vs : List Nat, vs.length ≤ q ∧ ∃ g : List (Fin (m + 1)) → Bool, test = fun f => g (vs.map f)
+/-- A test of a mask function that evaluates it at at most `q` versions of the
+window (the game's queries; off the window the ideal is not defined as uniform). -/
+def QueryTest (window : List Nat) (q : Nat) (test : (Nat → Fin (m + 1)) → Bool) : Prop :=
+  ∃ vs : List Nat, (∀ v ∈ vs, v ∈ window) ∧ vs.length ≤ q ∧
+    ∃ g : List (Fin (m + 1)) → Bool, test = fun f => g (vs.map f)
 
-/-- A meaningful budget admits every `q`-query evaluation test (the receipt
-keystone's `BudgetAdmitsPublicHash`, for masks). -/
-def BudgetAdmitsQueries (q : Nat) (budgeted : ((Nat → Fin (m + 1)) → Bool) → Prop) : Prop :=
-  ∀ test, QueryTest m q test → budgeted test
+/-- A meaningful budget admits every `q`-query evaluation test on the window (the
+receipt keystone's `BudgetAdmitsPublicHash`, for masks). -/
+def BudgetAdmitsQueries (window : List Nat) (q : Nat) (budgeted : ((Nat → Fin (m + 1)) → Bool) → Prop) : Prop :=
+  ∀ test, QueryTest m window q test → budgeted test
 
 /-- The two halves of a joint tape: the key draw and the ideal function draw. -/
 abbrev split {keys window : Nat} (t : Fin (keys * window)) : Fin keys × Fin window := finProdFinEquiv.symm t
@@ -533,7 +535,7 @@ uniformly from `keys`, outside every view) from the ideal by more than
 `num/den`. -/
 def CustodyPrf (q keys num den : Nat) (window : List Nat) (keyed : Fin keys → Nat → Fin (m + 1))
     (budgeted : ((Nat → Fin (m + 1)) → Bool) → Prop) : Prop :=
-  2 ≤ q ∧ BudgetAdmitsQueries m q budgeted ∧
+  2 ≤ q ∧ BudgetAdmitsQueries m window q budgeted ∧
     ∀ test, budgeted test →
       GapAtMost (keys * funs m window) num den
         (fun t => test (keyed (split t).1)) (fun t => test (idealFn m window (split t).2))
@@ -542,7 +544,7 @@ def CustodyPrf (q keys num den : Nat) (window : List Nat) (keyed : Fin keys → 
 all functions on the window (its key is the function) meets the game at gap 0,
 against every budget. -/
 theorem enumeration_satisfies {q den : Nat} (window : List Nat) (two : 2 ≤ q) (denominator : 0 < den)
-    (budgeted : ((Nat → Fin (m + 1)) → Bool) → Prop) (admits : BudgetAdmitsQueries m q budgeted) :
+    (budgeted : ((Nat → Fin (m + 1)) → Bool) → Prop) (admits : BudgetAdmitsQueries m window q budgeted) :
     CustodyPrf m q (funs m window) 0 den window (idealFn m window) budgeted := by
   refine ⟨two, admits, fun test _ => ?_⟩
   have positive : 0 < funs m window * funs m window := Nat.mul_pos (Nat.pow_pos (Nat.succ_pos _))
@@ -564,13 +566,13 @@ abbrev window12 : List Nat := [1, 2]
 /-- The test "the masks of versions 1 and 2 agree". -/
 def equalTest (f : Nat → Fin 2) : Bool := f 1 == f 2
 
-theorem equalTest_query : QueryTest 1 2 equalTest :=
-  ⟨[1, 2], le_rfl, fun l => l[0]? == l[1]?, by funext f; simp [equalTest]⟩
+theorem equalTest_query : QueryTest 1 window12 2 equalTest :=
+  ⟨[1, 2], fun _ h => h, le_rfl, fun l => l[0]? == l[1]?, by funext f; simp [equalTest]⟩
 
 /-- **Teeth**: a constant custody function fails the game at gap `1/4`, against
 the meaningful budget of all two-query tests. -/
 theorem constant_refuted :
-    ¬ CustodyPrf 1 2 1 1 4 window12 (fun _ _ => 0) (QueryTest 1 2) := by
+    ¬ CustodyPrf 1 2 1 1 4 window12 (fun _ _ => 0) (QueryTest 1 window12 2) := by
   rintro ⟨_, _, game⟩
   obtain ⟨_, _, bound, _⟩ := game equalTest equalTest_query
   revert bound
@@ -612,47 +614,251 @@ theorem fork_shares_mask {cell left right : KeptCell wire} {patchL patchR : List
 
 end KeptCell
 
+/-! ## Twins: one store and one patch list, only the key varying -/
+
+namespace KeptCell
+
+variable {wire}
+
+/-- Two cells with the same public parameters, version and kept index: they
+differ at most in the custody function and the mask. -/
+def Twin (c₁ c₂ : KeptCell wire) : Prop :=
+  c₁.params.protocol = c₂.params.protocol ∧ c₁.params.cell = c₂.params.cell ∧
+    c₁.params.layout = c₂.params.layout ∧ c₁.params.sizeBound = c₂.params.sizeBound ∧
+    c₁.version = c₂.version ∧ c₁.index = c₂.index
+
+theorem Twin.ctx {c₁ c₂ : KeptCell wire} (twin : Twin c₁ c₂) : c₁.ctx = c₂.ctx := by
+  obtain ⟨hp, hc, hl, hs, hv, _⟩ := twin
+  unfold KeptCell.ctx ctxBytes
+  rw [hp, hc, hl, hs, hv]
+
+theorem Twin.symm {c₁ c₂ : KeptCell wire} (twin : Twin c₁ c₂) : Twin c₂ c₁ := by
+  obtain ⟨tp, tc, tl, ts, tv, ti⟩ := twin
+  exact ⟨tp.symm, tc.symm, tl.symm, ts.symm, tv.symm, ti.symm⟩
+
+theorem twins_symm : ∀ {cs₁ cs₂ : List (KeptCell wire)}, List.Forall₂ Twin cs₁ cs₂ → List.Forall₂ Twin cs₂ cs₁
+  | _, _, .nil => .nil
+  | _, _, .cons twin rest => .cons twin.symm (twins_symm rest)
+
+theorem twins_versions : ∀ {cs₁ cs₂ : List (KeptCell wire)}, List.Forall₂ Twin cs₁ cs₂ →
+    cs₁.map KeptCell.version = cs₂.map KeptCell.version
+  | _, _, .nil => rfl
+  | _, _, .cons twin rest => by simp only [List.map_cons, twin.2.2.2.2.1, twins_versions rest]
+
+/-- **A twin's root is a function of its mask**: the context and index digest are shared. -/
+theorem Twin.root {c₁ c₂ : KeptCell wire} (twin : Twin c₁ c₂) :
+    c₁.root = outerRoot c₂.ctx c₁.mask c₂.index.digest := by
+  rw [KeptCell.root, twin.ctx, twin.2.2.2.2.2]
+
+/-- The index after one data write: a function of the old index. -/
+def indexStep (index : Index wire) (a : Address (CanonicalCellRegistry.layout kind))
+    (v : Option ((CanonicalCellRegistry.layout kind).Value a.1)) : Index wire :=
+  match v with
+  | some x => index.insert (bits_length wire) a (valueBytes wire a x)
+  | none => index.erase a
+
+theorem write_index {cell cell' : KeptCell wire} {a : Address (CanonicalCellRegistry.layout kind)}
+    {v : Option ((CanonicalCellRegistry.layout kind).Value a.1)} (accepted : cell.write a v = some cell') :
+    cell'.index = indexStep cell.index a v := by
+  unfold write at accepted
+  by_cases fits : addressFits 256 kind a = true
+  · rw [dif_pos fits] at accepted
+    by_cases blind : some a = wire.blinding
+    · rw [dif_pos blind] at accepted; cases accepted
+    · rw [dif_neg blind] at accepted
+      cases v <;> (cases accepted; rfl)
+  · rw [dif_neg fits] at accepted; cases accepted
+
+theorem write_twin {c₁ c₂ d₁ : KeptCell wire} (twin : Twin c₁ c₂) {a : Address (CanonicalCellRegistry.layout kind)}
+    {v : Option ((CanonicalCellRegistry.layout kind).Value a.1)} (accepted : c₁.write a v = some d₁) :
+    ∃ d₂, c₂.write a v = some d₂ ∧ Twin d₁ d₂ := by
+  have ok := (writeAll_isSome_iff c₁ [⟨a, v⟩]).mp (by simp [writeAll, accepted])
+  obtain ⟨fits, blind⟩ := ok ⟨a, v⟩ (List.mem_singleton_self _)
+  obtain ⟨d₂, step⟩ := Option.isSome_iff_exists.mp (write_accepts c₂ fits blind v)
+  obtain ⟨_, _, hv₁, hp₁⟩ := write_store accepted
+  obtain ⟨_, _, hv₂, hp₂⟩ := write_store step
+  obtain ⟨tp, tc, tl, ts, tv, ti⟩ := twin
+  refine ⟨d₂, step, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  · rw [hp₁, hp₂]; exact tp
+  · rw [hp₁, hp₂]; exact tc
+  · rw [hp₁, hp₂]; exact tl
+  · rw [hp₁, hp₂]; exact ts
+  · rw [hv₁, hv₂]; exact tv
+  · rw [write_index accepted, write_index step, ti]
+
+theorem writeAll_twin : ∀ {c₁ c₂ d₁ : KeptCell wire} {patch : List (Write (kind := kind))},
+    Twin c₁ c₂ → writeAll c₁ patch = some d₁ → ∃ d₂, writeAll c₂ patch = some d₂ ∧ Twin d₁ d₂
+  | _, c₂, _, [], twin, accepted => by cases accepted; exact ⟨c₂, rfl, twin⟩
+  | c₁, c₂, d₁, w :: rest, twin, accepted => by
+      simp only [writeAll, Option.bind_eq_some_iff] at accepted ⊢
+      obtain ⟨next₁, step₁, tail₁⟩ := accepted
+      obtain ⟨next₂, step₂, twinNext⟩ := write_twin twin step₁
+      obtain ⟨d₂, tail₂, twinD⟩ := writeAll_twin twinNext tail₁
+      exact ⟨d₂, ⟨next₂, step₂, tail₂⟩, twinD⟩
+
+theorem setMask_twin {c₁ c₂ : KeptCell wire} (twin : Twin c₁ c₂) (version : Nat) :
+    Twin (c₁.setMask version) (c₂.setMask version) := by
+  obtain ⟨tp, tc, tl, ts, _, ti⟩ := twin
+  exact ⟨tp, tc, tl, ts, rfl, ti⟩
+
+theorem accept_twin {c₁ c₂ d₁ : KeptCell wire} {patch : List (Write (kind := kind))} (twin : Twin c₁ c₂)
+    (accepted : c₁.accept patch = some d₁) : ∃ d₂, c₂.accept patch = some d₂ ∧ Twin d₁ d₂ := by
+  unfold accept at accepted ⊢
+  have tv : c₁.version = c₂.version := twin.2.2.2.2.1
+  rw [tv] at accepted
+  exact writeAll_twin (setMask_twin twin _) accepted
+
+end KeptCell
+
+/-- **One cell's run**: birth from `store`, then one accepted version per patch,
+newest first. -/
+def run (params : Params wire) (store : Store (CanonicalCellRegistry.layout kind)) :
+    List (List (KeptCell.Write (kind := kind))) → Option (List (KeptCell wire))
+  | [] => (birth wire params store).map fun cell => [cell]
+  | patch :: older => (run params store older).bind fun cells =>
+      match cells with
+      | cell :: _ => (cell.accept patch).map fun next => next :: cells
+      | [] => none
+
+theorem run_history {params : Params wire} {store : Store (CanonicalCellRegistry.layout kind)} :
+    ∀ {patches : List (List (KeptCell.Write (kind := kind)))} {cells : List (KeptCell wire)},
+      run wire params store patches = some cells → History wire cells
+  | [], cells, ran => by
+      obtain ⟨cell, born, rfl⟩ := Option.map_eq_some_iff.mp ran
+      exact History.birth born
+  | patch :: older, cells, ran => by
+      simp only [run, Option.bind_eq_some_iff] at ran
+      obtain ⟨earlier, ranOlder, finish⟩ := ran
+      match earlier, finish with
+      | cell :: rest, finish =>
+          obtain ⟨next, accepted, rfl⟩ := Option.map_eq_some_iff.mp finish
+          exact History.accept (run_history ranOlder) accepted
+
+/-- Every cell of a run carries the run's parameters. -/
+theorem run_params {params : Params wire} {store : Store (CanonicalCellRegistry.layout kind)} :
+    ∀ {patches : List (List (KeptCell.Write (kind := kind)))} {cells : List (KeptCell wire)},
+      run wire params store patches = some cells → ∀ c ∈ cells, c.params = params
+  | [], cells, ran => by
+      obtain ⟨cell, born, rfl⟩ := Option.map_eq_some_iff.mp ran
+      intro c member
+      rw [List.mem_singleton.mp member]
+      unfold birth at born
+      split at born
+      · obtain ⟨_, _, rfl⟩ := Option.map_eq_some_iff.mp born; rfl
+      · cases born
+  | patch :: older, cells, ran => by
+      simp only [run, Option.bind_eq_some_iff] at ran
+      obtain ⟨earlier, ranOlder, finish⟩ := ran
+      match earlier, finish with
+      | cell :: rest, finish =>
+          obtain ⟨next, accepted, rfl⟩ := Option.map_eq_some_iff.mp finish
+          intro c member
+          rcases List.mem_cons.mp member with same | member
+          · rw [same, (KeptCell.accept_spec accepted).2.1]
+            exact run_params ranOlder cell (List.mem_cons_self ..)
+          · exact run_params ranOlder c member
+
+/-- Birth's twin: the same store under another custody function. -/
+theorem birth_twin {p₁ p₂ : Params wire} (same : p₁.protocol = p₂.protocol ∧ p₁.cell = p₂.cell ∧
+      p₁.layout = p₂.layout ∧ p₁.sizeBound = p₂.sizeBound ∧ p₁.blinding = p₂.blinding)
+    {store : Store (CanonicalCellRegistry.layout kind)} {c₁ : KeptCell wire} (born : birth wire p₁ store = some c₁) :
+    ∃ c₂, birth wire p₂ store = some c₂ ∧ KeptCell.Twin c₁ c₂ := by
+  obtain ⟨sp, sc, sl, ss, sb⟩ := same
+  unfold birth at born ⊢
+  split at born
+  · rename_i unmasked
+    rw [if_pos (sb ▸ unmasked)]
+    obtain ⟨fit, admitted, rfl⟩ := Option.map_eq_some_iff.mp born
+    exact ⟨KeptCell.setMask ⟨p₂, 0, fit, Theory.AuthTrie.Cache.build (bits_length wire) (indexEntries wire fit.store),
+        Theory.AuthTrie.Cache.build_holds (bits_length wire) _, maskOf wire fit.store, rfl⟩ 0,
+      by rw [admitted]; rfl, sp, sc, sl, ss, rfl, rfl⟩
+  · cases born
+
+/-- **Runs under two custody functions are twins**, cell by cell. -/
+theorem run_twin {p₁ p₂ : Params wire} (same : p₁.protocol = p₂.protocol ∧ p₁.cell = p₂.cell ∧
+      p₁.layout = p₂.layout ∧ p₁.sizeBound = p₂.sizeBound ∧ p₁.blinding = p₂.blinding)
+    {store : Store (CanonicalCellRegistry.layout kind)} :
+    ∀ {patches : List (List (KeptCell.Write (kind := kind)))} {cells₁ : List (KeptCell wire)},
+      run wire p₁ store patches = some cells₁ →
+        ∃ cells₂, run wire p₂ store patches = some cells₂ ∧ List.Forall₂ KeptCell.Twin cells₁ cells₂
+  | [], cells₁, ran => by
+      obtain ⟨c₁, born, rfl⟩ := Option.map_eq_some_iff.mp ran
+      obtain ⟨c₂, born₂, twin⟩ := birth_twin wire same born
+      exact ⟨[c₂], by simp [run, born₂], List.Forall₂.cons twin List.Forall₂.nil⟩
+  | patch :: older, cells₁, ran => by
+      simp only [run, Option.bind_eq_some_iff] at ran
+      obtain ⟨earlier₁, ranOlder, finish⟩ := ran
+      obtain ⟨earlier₂, ranOlder₂, twins⟩ := run_twin same ranOlder
+      match earlier₁, earlier₂, finish, twins with
+      | c₁ :: rest₁, c₂ :: rest₂, finish, .cons twin restTwins =>
+          obtain ⟨next₁, accepted, rfl⟩ := Option.map_eq_some_iff.mp finish
+          obtain ⟨next₂, accepted₂, twinNext⟩ := KeptCell.accept_twin twin accepted
+          exact ⟨next₂ :: c₂ :: rest₂, by simp [run, ranOlder₂, accepted₂],
+            List.Forall₂.cons twinNext (List.Forall₂.cons twin restTwins)⟩
+
+/-- **The published transcript factors through the masks**: under twins, the
+roots are the shared skeleton's outer roots over each run's own masks. -/
+theorem roots_factor {cells₁ cells₂ : List (KeptCell wire)} (twins : List.Forall₂ KeptCell.Twin cells₁ cells₂) :
+    cells₁.map KeptCell.root =
+      List.zipWith (fun c mask => outerRoot c.ctx mask c.index.digest) cells₂ (cells₁.map KeptCell.mask) := by
+  induction twins with
+  | nil => rfl
+  | cons twin _ ih => simp only [List.map_cons, List.zipWith_cons_cons, ih, twin.root]
+
 /-- **The receiver's PRF hop** (`BlindedCellHidingDraft.HybridReduction`'s first
-antecedent at `fNum/den := num/den`). Histories are a function of the key tape:
-at key `k` the cells' custody function is the keyed one, through the host's mask
-encoding, and every key yields the same versions. The real hybrid runs the game
-on the masks the history at the tape's key publishes; the uniform hybrid runs it
-on the ideal function's masks at those versions, which (by
-`custodyInputs_distinct`: the versions are distinct) are independent uniform
-masks, the tape's own tuple. Forks are excluded by `AtMostOneSuccessor`. -/
+antecedent at `fNum/den := num/den`). One birth store and one patch list; the
+custody function alone varies with the key tape (`paramsOf k`: the base
+parameters with `prf := sample ∘ keyed k`). The real hybrid runs the game on the
+whole published transcript, the roots of the run at the tape's key; the uniform
+hybrid on the same roots over the ideal function's masks at the run's versions
+(`roots_factor`: the transcript is the shared skeleton over the masks). Those
+versions are distinct (`custodyInputs_distinct`), so the uniform masks are the
+tape's own independent tuple (`idealFn_window`). -/
 theorem receiver_prf_hop {m q keys num den : Nat} {Strategy : Type}
     (keyed : Fin keys → Nat → Fin (m + 1)) (budgetedPrf : ((Nat → Fin (m + 1)) → Bool) → Prop)
-    (versions : List Nat) (prf : CustodyPrf m q keys num den versions keyed budgetedPrf)
+    (base : Params wire) (sample : Fin (m + 1) → (CanonicalCellRegistry.layout kind).Value base.blinding.space)
     (encodeMask : Fin (m + 1) → List UInt8)
-    (cellsOf : Fin keys → List (KeptCell wire)) (histories : ∀ k, History wire (cellsOf k))
-    (single : ∀ k, AtMostOneSuccessor wire (· ∈ cellsOf k))
-    (sameVersions : ∀ k, (cellsOf k).map KeptCell.version = versions)
-    (tie : ∀ k, ∀ c ∈ cellsOf k, ∀ v,
-      (wire.valueStream c.params.blinding.space).encode (c.params.prf v) = encodeMask (keyed k v))
-    (short : versions.length ≤ q)
-    (game : Strategy → Bool → List (List UInt8) → Bool) (legal budgeted : Strategy → Prop) :
-    (∀ a, legal a → budgeted a → ∀ b,
-      GapAtMost (keys * funs m versions) num den
-        (fun t => game a b ((cellsOf (split t).1).map KeptCell.mask))
-        (fun t => game a b (versions.map fun v => encodeMask (idealFn m versions (split t).2 v)))) ∧
-      (∀ _k : Fin keys, versions.Nodup ∧ ∀ (t : Fin (funs m versions)) (i : Fin versions.length),
-        idealFn m versions t versions[i] = finFunctionFinEquiv.symm t i) := by
-  have published : ∀ k, (cellsOf k).map KeptCell.mask = versions.map fun v => encodeMask (keyed k v) := by
-    intro k
-    obtain ⟨_, masks⟩ := (histories k).custodyInputs_distinct
-    rw [← sameVersions k, List.map_map]
+    (encodes : ∀ x, (wire.valueStream base.blinding.space).encode (sample x) = encodeMask x)
+    (store : Store (CanonicalCellRegistry.layout kind)) (patches : List (List (KeptCell.Write (kind := kind))))
+    (k₀ : Fin keys) (skeleton : List (KeptCell wire))
+    (ran : run wire { base with prf := fun v => sample (keyed k₀ v) } store patches = some skeleton)
+    (prf : CustodyPrf m q keys num den (skeleton.map KeptCell.version) keyed budgetedPrf)
+    (short : skeleton.length ≤ q)
+    (game : Strategy → Bool → List Digest → Bool) (legal budgeted : Strategy → Prop) :
+    (∀ k, ∃ cells, run wire { base with prf := fun v => sample (keyed k v) } store patches = some cells ∧
+        cells.map KeptCell.root = List.zipWith (fun c mask => outerRoot c.ctx mask c.index.digest) skeleton
+          ((skeleton.map KeptCell.version).map fun v => encodeMask (keyed k v))) ∧
+      (∀ a, legal a → budgeted a → ∀ b,
+        GapAtMost (keys * funs m (skeleton.map KeptCell.version)) num den
+          (fun t => game a b (List.zipWith (fun c mask => outerRoot c.ctx mask c.index.digest) skeleton
+            ((skeleton.map KeptCell.version).map fun v => encodeMask (keyed (split t).1 v))))
+          (fun t => game a b (List.zipWith (fun c mask => outerRoot c.ctx mask c.index.digest) skeleton
+            ((skeleton.map KeptCell.version).map fun v =>
+              encodeMask (idealFn m (skeleton.map KeptCell.version) (split t).2 v))))) ∧
+      (skeleton.map KeptCell.version).Nodup ∧
+      ∀ (t : Fin (funs m (skeleton.map KeptCell.version))) (i : Fin (skeleton.map KeptCell.version).length),
+        idealFn m (skeleton.map KeptCell.version) t (skeleton.map KeptCell.version)[i] = finFunctionFinEquiv.symm t i := by
+  have distinct := (run_history wire ran).custodyInputs_distinct.1
+  refine ⟨fun k => ?_, fun a _ _ b => ?_, distinct, fun t i => Custody.idealFn_window m distinct t i⟩
+  · obtain ⟨cells, ranK, twins⟩ := run_twin wire (p₁ := { base with prf := fun v => sample (keyed k₀ v) })
+      (p₂ := { base with prf := fun v => sample (keyed k v) }) ⟨rfl, rfl, rfl, rfl, rfl⟩ ran
+    refine ⟨cells, ranK, ?_⟩
+    rw [roots_factor wire (KeptCell.twins_symm twins)]
+    congr 1
+    obtain ⟨_, masks⟩ := (run_history wire ranK).custodyInputs_distinct
+    rw [KeptCell.twins_versions twins, List.map_map]
     refine List.map_congr_left fun c member => ?_
-    rw [masks c member, tie k c member]
-    rfl
-  refine ⟨fun a _ _ b => ?_, fun k => ?_⟩
-  · have admitted := prf.2.1 (fun f => game a b (versions.map fun v => encodeMask (f v)))
-      ⟨versions, short, fun l => game a b (l.map encodeMask), by funext f; simp [List.map_map, Function.comp_def]⟩
-    have gap := prf.2.2 _ admitted
-    simpa only [published] using gap
-  · have distinct : versions.Nodup := by
-      rw [← sameVersions k]; exact (histories k).custodyInputs_distinct.1
-    exact ⟨distinct, fun t i => Custody.idealFn_window m distinct t i⟩
-
+    rw [masks c member]
+    have key : ∀ q : Params wire, q = { base with prf := fun v => sample (keyed k v) } →
+        (wire.valueStream q.blinding.space).encode (q.prf c.version) = encodeMask (keyed k c.version) := by
+      rintro q rfl; exact encodes _
+    exact key _ (run_params wire ranK c member)
+  · have admitted := prf.2.1 (fun f => game a b (List.zipWith (fun c mask => outerRoot c.ctx mask c.index.digest)
+        skeleton ((skeleton.map KeptCell.version).map fun v => encodeMask (f v))))
+      ⟨skeleton.map KeptCell.version, fun _ h => h, by simpa using short,
+        fun l => game a b (List.zipWith (fun c mask => outerRoot c.ctx mask c.index.digest) skeleton
+          (l.map encodeMask)), by funext f; simp [List.map_map, Function.comp_def]⟩
+    exact prf.2.2 _ admitted
 
 #assert_axioms KeptCell.root_eq
 #assert_axioms birth_refuses
@@ -672,6 +878,8 @@ theorem receiver_prf_hop {m q keys num den : Nat} {Strategy : Type}
 #assert_axioms Custody.enumeration_satisfies
 #assert_axioms Custody.idealFn_window
 #assert_axioms receiver_prf_hop
+#assert_axioms run_twin
+#assert_axioms roots_factor
 #assert_axioms History.atMostOneSuccessor
 #assert_axioms KeptCell.fork_shares_mask
 
