@@ -115,7 +115,10 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   say into one room conflicts (6 parallel from 1 member: 1/6; 3+3 from 2: 3/6; sequential 6/6).
   CAUSE + FIX (hot-path a9e738baf, staging 33106c33d, batch 9): computeTarget's append arm pinned the author's stream
   head (`append_same_stream_serialises`, deleted); now the append lands at the met head
-  (`append_planned_root_irrelevant`); different members never conflicted. Audit requested (theorem deleted); explorer
+  (`append_planned_root_irrelevant`); different members never conflicted. Audit SOUND (admitAppend refuses at the met
+  cell; nullifier covers exact resubmits; topic-head theorem strictly stronger). Owed by hot-path: drop the unused
+  `fresh` premises in DomainEpochStream, fix the citation of nonexistent Kernel.StreamCommutingAppend, and record the
+  client contract (pipelined same-author says and self-predicted refs do not keep plan order). Explorer
   reruns 16-parallel-say + own-order row on batch 9.
 - **P1, mini panics on a closed stdout** (explorer, world-up once `mode=closed … has no mini shell`; 0/40 reruns):
   `mini --help | grep -q` under pipefail; mini exit 101. Owners: perf-client a778bbda6509944a5 (quiet exit on EPIPE,
