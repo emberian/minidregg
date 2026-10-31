@@ -666,6 +666,7 @@ mod tests {
         assert!(check_install_pin(Some("hash"), "hash", true).is_ok());
         let config = BrokerConfig {
             import_profile: None,
+            ingest_scratch: None,
             resident_home_read_only_paths: Vec::new(),
             protocol: "mini-spk-broker-config-v3".into(),
             store: "0123456789abcdef".into(),

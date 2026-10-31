@@ -219,6 +219,10 @@ pub struct BrokerConfig {
     /// Operator-selected physical intake budget; never accepted in an Ingest request.
     #[serde(default)]
     pub import_profile: Option<String>,
+    /// Operator-selected directory for the intake's raw and decoded spools, on a disk with room for
+    /// the profile's decoded bound (absent: the SPK store itself). Never accepted from a request.
+    #[serde(default)]
+    pub ingest_scratch: Option<PathBuf>,
     pub volume_helper: PathBuf,
     pub app_uids: Vec<u32>,
     #[serde(default)]
@@ -268,7 +272,7 @@ fn validate_world_package_namespace(store: &str, world: &Path, packages: Option<
     Ok(())
 }
 
-fn ingest_arguments(root: Option<&Path>, host: &Path, host_sha: &str, inbox: &Path, uid: u32, profile: crate::materialize::ImportProfile) -> io::Result<Vec<String>> {
+fn ingest_arguments(root: Option<&Path>, host: &Path, host_sha: &str, inbox: &Path, uid: u32, profile: crate::materialize::ImportProfile, scratch: Option<&Path>) -> io::Result<Vec<String>> {
     let (_,expected_inbox)=spk_namespace_paths(root)?;
     if inbox.parent()!=Some(expected_inbox.as_path()) {
         return Err(invalid("ingest package is outside selected SPK inbox"));
@@ -279,6 +283,14 @@ fn ingest_arguments(root: Option<&Path>, host: &Path, host_sha: &str, inbox: &Pa
     }
     if profile != crate::materialize::ImportProfile::Standard {
         args.extend(["--import-profile".to_owned(), profile.as_str().to_owned()]);
+    }
+    if let Some(scratch)=scratch {
+        let text=scratch.to_str().ok_or_else(||invalid("ingest scratch path"))?;
+        if !scratch.is_absolute() || text.contains("//") || text.contains("/../") || text.contains("/./") || text.ends_with('/')
+            || !text.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b,b'/'|b'_'|b'-'|b'.')) {
+            return Err(invalid("ingest scratch must be a simple canonical absolute directory"));
+        }
+        args.extend(["--scratch".to_owned(), text.to_owned()]);
     }
     args.extend([host.to_str().ok_or_else(||invalid("Host path"))?.to_owned(),host_sha.to_owned(),
         inbox.to_str().ok_or_else(||invalid("inbox path"))?.to_owned(),uid.to_string()]);
@@ -1029,7 +1041,7 @@ impl Broker {
                     }
                     fs::rename(&temp, &inbox).ctx("rename", &temp)?;
                     let arguments=ingest_arguments(self.config.spk_root.as_deref(),&runtime.spk_host,
-                        &runtime.spk_host_sha256,&inbox,placement.app_uid,profile)?;
+                        &runtime.spk_host_sha256,&inbox,placement.app_uid,profile,self.config.ingest_scratch.as_deref())?;
                     let borrowed=arguments.iter().map(String::as_str).collect::<Vec<_>>();
                     helper(&self.config.ingest_helper,&borrowed)?;
                 }
@@ -1375,7 +1387,7 @@ mod tests {
     #[test]
     fn spk_namespace_refuses_missing_world_namespace() {
         assert!(spk_namespace_paths(None).is_err());
-        assert!(ingest_arguments(None,Path::new("/operator/spk-host"),"hash",Path::new("/var/lib/minidregg/spk/inbox/grain-package.spk"),165536,crate::materialize::ImportProfile::Standard).is_err());
+        assert!(ingest_arguments(None,Path::new("/operator/spk-host"),"hash",Path::new("/var/lib/minidregg/spk/inbox/grain-package.spk"),165536,crate::materialize::ImportProfile::Standard,None).is_err());
     }
 
     #[test]
@@ -1385,11 +1397,11 @@ mod tests {
         assert_eq!(packages,root.join("packages"));
         assert_eq!(inbox,root.join("inbox"));
         let args=ingest_arguments(Some(root),Path::new("/root/candidate/spk-host"),"hash",
-            &inbox.join("grain-package.spk"),64010,crate::materialize::ImportProfile::Standard).unwrap();
+            &inbox.join("grain-package.spk"),64010,crate::materialize::ImportProfile::Standard,None).unwrap();
         assert_eq!(&args[..2],["--root","/var/lib/mini-bigstep-hbox-r2/spk"]);
         assert_eq!(args[4],"/var/lib/mini-bigstep-hbox-r2/spk/inbox/grain-package.spk");
         assert!(ingest_arguments(Some(root),Path::new("/root/spk-host"),"hash",
-            Path::new("/var/lib/minidregg/spk/inbox/package.spk"),64010,crate::materialize::ImportProfile::Standard).is_err());
+            Path::new("/var/lib/minidregg/spk/inbox/package.spk"),64010,crate::materialize::ImportProfile::Standard,None).is_err());
     }
 
     #[test]
@@ -1439,12 +1451,26 @@ mod tests {
         let root = Path::new("/var/lib/mini-spk-worlds/0123456789abcdef/spk");
         let package = root.join("inbox/package.spk");
         let args = ingest_arguments(Some(root), Path::new("/operator/spk-host"), "pin",
-            &package, 64010, crate::materialize::ImportProfile::OperatorAppliance).unwrap();
+            &package, 64010, crate::materialize::ImportProfile::OperatorAppliance, None).unwrap();
         assert_eq!(&args[2..4], ["--import-profile", "operator-appliance-v1"]);
         assert_eq!(args[4], "/operator/spk-host");
         assert_eq!(args[6], package.to_str().unwrap());
         assert_eq!(args[7], "64010");
         assert!("unlimited".parse::<crate::materialize::ImportProfile>().is_err());
+    }
+
+    #[test]
+    fn operator_ingest_scratch_is_a_canonical_absolute_option_before_the_host() {
+        let root = Path::new("/var/lib/mini-spk-worlds/0123456789abcdef/spk");
+        let package = root.join("inbox/package.spk");
+        let scratch = Path::new("/var/lib/mini-ingest/0123456789abcdef");
+        let args = ingest_arguments(Some(root), Path::new("/operator/spk-host"), "pin", &package, 64010,
+            crate::materialize::ImportProfile::OperatorAppliance, Some(scratch)).unwrap();
+        assert_eq!(&args[2..6], ["--import-profile", "operator-appliance-v1", "--scratch", "/var/lib/mini-ingest/0123456789abcdef"]);
+        for bad in ["relative/dir", "/a//b", "/a/../b", "/a/b/", "/a b"] {
+            assert!(ingest_arguments(Some(root), Path::new("/operator/spk-host"), "pin", &package, 64010,
+                crate::materialize::ImportProfile::Standard, Some(Path::new(bad))).is_err(), "{bad}");
+        }
     }
 
     #[test]
