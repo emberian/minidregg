@@ -264,7 +264,9 @@ pub fn resolve(x: &Value, args: &Value, context: &Value, results: &Value) -> Res
                     )
                 )));
             }
-            if let Some(p) = o.get("path") {
+            // Path parts are an array; an object under `path` is an ordinary argument that is
+            // named path (Davros qualification args are `{"path": ...}`).
+            if let Some(p) = o.get("path").filter(|p| p.is_array()) {
                 return Ok(json!(path(p, args)?));
             }
         }
