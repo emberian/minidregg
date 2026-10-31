@@ -21,15 +21,33 @@ Quest: Hermes final say (H1b), the START reds, the refusal-clause sweep, live Hu
 - Unsealed attempt named (78f7ef896); hermes root entrypoint names a python minor mismatch (pins.json pythonVersion);
   j14-apps qualify skips the Davros probe and the foreground API wrapper logs why a call ended undecided (08340bac9).
 
-## Live qualification (in progress)
-- Overlay candidate from main (lane-build overlay over batch 9 997905c0b: mini, grain-runtime, spk-host roles) in
-  hbox /home/hbox/lanes/app-reds-cont/lane/ov; runner ar-j14run2.sh CAND SUF DECL ALIAS ROLE SPK (j14-apps qualify).
-- Scrumblr (spk from forge /srv/spk-build/scrumblr/out, role 0): world, attach reach qualify; the foreground
-  qualify ends native-outcome-unknown, application API attempt phase uncertain, no cause recorded (log added in
-  08340bac9). Next: rerun with that log. WBO spk is not on the forge; build it from apps/packages/wbo/build.sh.
-  Hummingbird has no package in apps/packages (needs a repackage with apiPath).
+## Packages for the live runs (no world needed; done)
+- WBO: already built and qualified (wbo-r2, package d3b06718..., forge /var/lib/spk-fresh/apps/wbo-r2/out/wbo.spk).
+- Scrumblr: forge /srv/spk-build/scrumblr/out/scrumblr-0.5-1.spk (package 57fa8aab..., apiPath "/").
+- Hummingbird: repackaged with apiPath "/" (23ad753b7; apps/packages/hummingbird, forge
+  /srv/spk-build/hummingbird/out/hummingbird-0.4.1-api.spk, app 434g078h..., package c7287dfb...); declaration repointed.
+- Copies of all three: this session's scratchpad .../scratchpad/spk/{wbo,scrumblr,hummingbird}.spk (ship to the new box).
+
+## Live qualification (blocked on a grain world; hbox is down, dregg-build2 pending)
+- Runner (hbox only so far): /home/hbox/lanes/app-reds-cont/ar-j14run2.sh CAND SUF DECL ALIAS ROLE SPK, over an overlay
+  candidate (lane-build overlay of main's mini/grain-runtime/spk-host roles on a batch candidate). Aliases/roles:
+  Scrumblr sb/0, Hummingbird hb/1 (manager), WBO per its declaration.
+- Scrumblr qualify ended native-outcome-unknown (app API attempt uncertain, cause unlogged then; 08340bac9 logs it).
+  Rerun first on dregg-build2 once grain worlds work there.
+
+## op66-plan refusal (read, no world)
+`launch BEGIN authorization, descriptor or action shape refused` is the single throw at
+Host/ApplicationLifecycleLaunchBeginAuthoring.lean:260 for `Ingress.shape` (Kernel/ApplicationLifecycleBeginV3Ingress.lean):
+operationId = derived authorization id; Source.valid (app, packageManifest, snapshotManifest pairwise distinct;
+before.phase = requiredPhase, install 0; generation/versions >= 0; image and process identity 1..256 bytes);
+descriptor.matchesManifest (descriptor.valid: package, 1..64 create commands, continue command, <= 1 MiB;
+manifest.valid: interface ids unique, schemas valid); packageDigest = descriptor.root; imageIdentity = descriptor's;
+volume = volumeId domain app; start binding for START. Facts: descriptor and manifest conjuncts are the same bytes
+that pass on hbox, so the world-dependent ones are phase (app cell not at 0) and the three-resource distinctness.
+Next: split the throw into the failing conjunct's name (Host-only diagnostic, message text only; the decision stays
+`Ingress.shape`) and read it from one install on a world; needs a Lean box to check.
 
 ## Open
-1. WBO and Hummingbird packages, then their qualify; `mini apps install` measurement on a main-built world.
-2. E3/E4, E7, decider side of G2, op66-plan for EtherCalc/Etherpad on the demo world (host-execution owns the
-   Host-turn costs of app create: a0fee5643746e520c).
+1. Rerun Scrumblr, then Hummingbird and WBO qualify; `mini apps install` measurement on a main-built world.
+2. The op66 conjunct-naming diagnostic above (Lean; unbuilt).
+3. E3/E4, E7, decider side of G2 (host-execution owns Host-turn costs of app create: a0fee5643746e520c).
