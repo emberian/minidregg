@@ -43,9 +43,13 @@ box; seam 1 (codec tags) landed; the hot-swap command; keep making the Lean buil
 - 3ef7de9ac: umbrella-tree starts with `9>&-`. It had inherited build.lock, so round 960da1d8 stopped and published six
   "did not run" reds. A held lock (integ-build rc 75) now defers the round, with nothing published. REDS.md has an owner
   column, and a composed red is one row per failed phase. The gate's edge is dregg-infra 3ddd90f (the per-world
-  certifier for composed residents; integ/dregg-infra-3ddd90f). The builder now running on hbox (pid 1557758) predates
-  3ef7de9ac: integ-build comes from the tip, but the builder's own defer and owner changes need a restart, and
-  builder.pid named its launch wrapper, so it is left running (builder-run.sh now writes its own pid).
+  certifier for composed residents; integ/dregg-infra-3ddd90f).
+- f1d2d3bbb: the builder starts every child with `8>&-`. The round subshell, the gate and its rerun had inherited
+  builder.lock, so integ-build, the umbrella tree and a kept gate world's `mini line-resident` (/ci/c-9dc9c1) held it
+  after the builder stopped. Builder 1557758 (pre-3ef7de9ac) stopped 18:03 EDT at the root's word; last-built reset to
+  9dc9c138 (960da1d8 and 60f43c43 only deferred), so the tip gets a real round. integ/relaunch-builder.sh (pid file
+  relaunch-builder.pid) waits for the 9dc9c138 umbrellas (1685491), stops c-9dc9c1's residents with its own
+  stop-residents.sh, then starts builder-run.sh (which writes builder.pid itself); each step is in COMMANDS.log.
 - green is 83e926874 (batch 4) until a live round passes. The first live hbox round rewrites REDS.md whole.
 
 ### Seam 1 (codec tags): on main (f2002e589)
