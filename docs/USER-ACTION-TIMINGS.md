@@ -257,6 +257,46 @@ are with the coordinator. Client side: `deploy/shell/FRIENDS.md` now shows the C
 - retained-mode inventory (a13f0c9ab4513b2d7): `export world`/app-export/backup/restore, carry, fn consumer, consensus and source-agreement readers, as migration targets (carry/fn/consensus: still 0 measurements).
 - Measure first, owner after: Discord bridge and pay-watcher (forge only), door/enrol (forge), `market`/`board`/`jobs`/`tariff`/`pay`/`key` verbs (above; no owner named yet), `/search`, inference scheduler, agent session overlay.
 
+## Batch 7 (acc7cfa03) against batch 4: the full table again, ssh multiplexed
+
+Same driver (`~/xp/tm7.sh`: ControlMaster ssh, so the ~165 ms handshake is excluded; the b4 columns still
+include it, so subtract ~165 ms from every b4 ssh number to compare). Fresh = height 54-158, aged = 531-636,
+hbox load 9-12. ms, cold / warm (median of 3).
+
+| action | b4 fresh warm | b7 fresh cold/warm | b4 aged warm | b7 aged cold/warm | grows (b7) |
+|---|---|---|---|---|---|
+| first signed read, new member | 543 | 38 | 629 | 206 | no |
+| later signed read (`credit`, 128 refs for aged) | 650 | 33 | 6,933 | 551 / 166 | slightly |
+| chat say | 1,103 | 132 / 165 | 1,674 | 138 / 393 | modest |
+| tail -n 5 | 2,065 | 80 / 81 | 2,603 | 352 / 217 | modest |
+| doc new | 2,850 | 820 / 905 | 4,016 | 1,391 / 1,228 | yes |
+| doc append (propose) / submit / show | 1,155 / 1,063 / 515 | 48 / 124 / 55 | 993 / 1,073 / 449 | 44 / 130 / 43 | no |
+| chat new | 7,665 | 2,124 / 2,052 | 11,820 | 3,860 / 3,532 | yes |
+| chat invite + join | 21,039 | 3,708 / 4,986 | 21,337 | 5,947 / 7,499 | yes |
+| create object | 2,779 | 602 / 849 | 2,956 | 1,067 / 1,417 | yes |
+| delegate propose / submit / publish / import | 919 / 1,829 / 272 / 415 | 53 / 389 / 20 / 46 | 1,311 / 2,199 / 450 / 416 | 70 / 610 / 19 / 133 | submit yes |
+| pay status account | 1,178 | 32 | 707 | 88 / 39 | no |
+| bend publish / run | 919 / 1,762 | 374 / 428 | 6,361 / 10,229 | 188* / 823 / 865 | run ~2x |
+| bend await / answer / deliver | broken in b4 | 24 / 61 / 349 | broken | 30 / 90 / 210-673 / 484 | deliver slightly |
+| bend settle | 266 | 22 | 5,846 | 1,658 | **yes** (22 -> 1,658) |
+| story new (tale) | 28,273 | 3,431 | 44,881 | 5,911 | yes |
+| web read pages | 5-7 (invalid run) | 8-15 | 13-16 | 10-35 (`/apps` cold 272) | no |
+| web GET `/doc/NAME` cold | - | 1,641 / 73 | - | **18,999** / 129 | **yes (cold body)** |
+| web POST doc/new / append | 6,500-7,700 | 1,057 / 1,779, 270 / 490 | - | 2,011 / 2,059, 296 / 410 | modest |
+| public GET / anonymous | 26 | 13 / 8 | 26 | 22 / 12 | no |
+| certify (256 tail) | 2,345 | **4,910** | 25,146 | **21,302** | **yes** |
+| restart (wall) / first read | 2,508 / 605 | 2,070 / 213 | 12,548 / 18,956 | 5,948 / 423 | wall yes |
+
+\* aged `bend publish` was a duplicate publish (rc 1 conflict), so its timing is a refusal. bend `answer` rc 3
+and `revoke` rc 1 rows are driver artefacts (answering the same slot repeatedly; revoking an object with no
+grant); their times are refusal times, not successes.
+
+What is still far from the bar after batch 7 (warm, multiplexed, so wall time ~ server work):
+- **Certify: 4.9 s fresh, 21.3 s at height 636.** Unchanged in character from b4 (25 s) and halts writes. Still O(history).
+- **Cold web body: a first `GET /doc/NAME` after height 600 took 19 s** (1.6 s fresh) — the per-member web body spawn plus its first read. Warm it is 73-129 ms.
+- **Writes**: `chat new` 2-4 s, `chat invite + join` 4-7.5 s, `create object` 0.6-1.4 s, `doc new` 0.8-1.4 s, `story new` 3.4-5.9 s, `delegate submit` 0.4-1.0 s, `bend run` 0.4-0.9 s. All still 100x to 1000x the 1 ms bar and growing with history.
+- **Reads** are now 30-80 ms for the cheap ones (credit 33, tail 81, doc show 38-55, pay status 32-39), 30-80x the bar. `bend settle` grows 22 ms to 1.7 s.
+
 ## Open items
 
 - Re-run on a quiet box (no other tenants) to get honest fsync cost; with 697 fsyncs even at 0.1 ms the
