@@ -571,13 +571,12 @@ refuses the turn as `guardFailed c i`. -/
 def pinCheck (w : World R TxId D) (t : Turn R TxId Ev D) : Option Reject :=
   pinCheckFrom H w 0 t.pins
 
-/-- The T1 checks, each a named refusal of something the store guards would
-also refuse (or, for the pins, the charge rule and the window, something no
-store guard sees): the pins first (`pinCheck`, the one staleness refusal),
-distinct nullifiers, the height window, unspent nullifiers, the charge rule
-(storage lane = patch bytes), the charge within the meter. -/
-def turnCheck (w : World R TxId D) (t : Turn R TxId Ev D) (height : Nat) : Option Reject :=
-  match pinCheck H w t with
+/-- `turnCheck` given the pins' verdict, so a caller that already holds every
+pinned cell's digest (the executed snapshot's own bytes) need not re-encode the
+cells to judge them (`admit_eq_admitPinned`, `pinCheckFromBy_congr`). -/
+def turnCheckPinned (pins : Option Reject) (w : World R TxId D) (t : Turn R TxId Ev D) (height : Nat) :
+    Option Reject :=
+  match pins with
   | some r => some r
   | none =>
     if ¬ t.nullifiers.Nodup then some .duplicateNullifier
@@ -587,6 +586,14 @@ def turnCheck (w : World R TxId D) (t : Turn R TxId Ev D) (height : Nat) : Optio
     else if t.charge .storageBytes ≠ patchBytes H t then some .chargeMismatch
     else if Charge.fundedCheck t.charge w.meter = false then some .overAllowance
     else none
+
+/-- The T1 checks, each a named refusal of something the store guards would
+also refuse (or, for the pins, the charge rule and the window, something no
+store guard sees): the pins first (`pinCheck`, the one staleness refusal),
+distinct nullifiers, the height window, unspent nullifiers, the charge rule
+(storage lane = patch bytes), the charge within the meter. -/
+def turnCheck (w : World R TxId D) (t : Turn R TxId Ev D) (height : Nat) : Option Reject :=
+  turnCheckPinned H (pinCheck H w t) w t height
 
 /-- A create's room, if it names one, is a present cell. -/
 def roomPresent (cells : Cells R) : Option CellId → Bool
@@ -702,6 +709,68 @@ def World.admit (w : World R TxId D) (t : Turn R TxId Ev D) : Except Reject (Wor
             match applyCells w.cells t with
             | .error r => .error r
             | .ok cells => .ok ⟨cells, Patch.run w.system (sysPatch H t height logRoot w.meter)⟩
+
+/-- `admit` given the pins' verdict (`admit_eq_admitPinned`): the executable form
+for a caller that reads every pinned cell's digest from somewhere it already
+holds, not by re-encoding the World's cell (`WorldTrack.advance` reads the
+executed snapshot's bytes). Every other check is `admit`'s, word for word. -/
+def World.admitPinned (pins : Option Reject) (w : World R TxId D) (t : Turn R TxId Ev D) :
+    Except Reject (World R TxId D) :=
+  if t.legs.isEmpty ∧ t.creates.isEmpty ∧ t.retires.isEmpty ∧ t.pins.isEmpty then .error .emptyTurn
+  else if ¬ (t.legs.map Leg.cell).Nodup then .error .duplicateLegCell
+  else if ¬ (t.creates.map Prod.fst).Nodup then .error .duplicateCreate
+  else if ¬ t.retires.Nodup then .error .duplicateRetire
+  else if ¬ AbsentShaped t then .error .invalidAbsenceGuard
+  else
+    match w.head with
+    | none => .error .noHead
+    | some (height, logRoot) =>
+        if (w.journal t.txId).isSome then .error .replayedTransaction
+        else match turnCheckPinned H pins w t height with
+        | some r => .error r
+        | none =>
+          if let some reason := absentCheck w t then .error reason else
+          if ¬ Patch.ValidFrom w.system (sysPatch H t height logRoot w.meter) then
+            .error .retiredIdentifier
+          else
+            match applyCells w.cells t with
+            | .error r => .error r
+            | .ok cells => .ok ⟨cells, Patch.run w.system (sysPatch H t height logRoot w.meter)⟩
+
+/-- `admit` is `admitPinned` at its own pin verdict. -/
+theorem admit_eq_admitPinned (w : World R TxId D) (t : Turn R TxId Ev D) :
+    World.admit H w t = World.admitPinned H (pinCheck H w t) w t := rfl
+
+/-- The first failing pin of a list whose head sits at index `i`, each pin
+judged by `fails`. -/
+def pinCheckFromBy (fails : CellId × D → Bool) : Nat → List (CellId × D) → Option Reject
+  | _, [] => none
+  | i, p :: ps => if fails p then some (.guardFailed p.1 i) else pinCheckFromBy fails (i + 1) ps
+
+theorem pinCheckFrom_eq_by (w : World R TxId D) :
+    ∀ (i : Nat) (ps : List (CellId × D)), pinCheckFrom H w i ps = pinCheckFromBy (pinFails H w) i ps
+  | _, [] => rfl
+  | i, p :: ps => by
+      simp only [pinCheckFrom, pinCheckFromBy, pinCheckFrom_eq_by w (i + 1) ps]
+
+/-- Two judges that agree on every pin give the same verdict. -/
+theorem pinCheckFromBy_congr {f g : CellId × D → Bool} :
+    ∀ {i : Nat} {ps : List (CellId × D)}, (∀ p ∈ ps, f p = g p) →
+      pinCheckFromBy f i ps = pinCheckFromBy g i ps
+  | _, [], _ => rfl
+  | i, p :: ps, agree => by
+      simp only [pinCheckFromBy, agree p List.mem_cons_self,
+        pinCheckFromBy_congr (i := i + 1) fun q m => agree q (List.mem_cons_of_mem p m)]
+
+/-- **The pins judged elsewhere**: a judge that agrees with `pinFails` on every
+pin of the turn admits exactly as `admit` does. -/
+theorem admitPinned_by_eq {fails : CellId × D → Bool} (w : World R TxId D) (t : Turn R TxId Ev D)
+    (agree : ∀ p ∈ t.pins, fails p = pinFails H w p) :
+    World.admitPinned H (pinCheckFromBy fails 0 t.pins) w t = World.admit H w t := by
+  have verdict : pinCheckFromBy fails 0 t.pins = pinCheck H w t :=
+    (pinCheckFromBy_congr agree).trans (pinCheckFrom_eq_by H w 0 t.pins).symm
+  rw [verdict]
+  exact (admit_eq_admitPinned H w t).symm
 
 /-- `step` is `admit` with the reason forgotten. -/
 def World.step (w : World R TxId D) (t : Turn R TxId Ev D) : Option (World R TxId D) :=
@@ -2204,7 +2273,7 @@ theorem turnCheck_eq_none_iff {w : World R TxId D} {t : Turn R TxId Ev D} {heigh
       (∀ n ∈ t.nullifiers, w.spent n = none) ∧
       t.charge .storageBytes = patchBytes H t ∧
       t.charge ≤ w.meter := by
-  unfold turnCheck
+  unfold turnCheck turnCheckPinned
   cases hp : pinCheck H w t with
   | some r =>
       have : ¬ ∀ p ∈ t.pins, w.retired p.1 = none ∧ H.cellDigest (w.cells p.1) = p.2 :=
@@ -2249,7 +2318,7 @@ theorem admit_pin_refused {w : World R TxId D} {t : Turn R TxId Ev D} {height : 
       obtain ⟨c, i, rfl⟩ := pinCheck_some H hp
       refine ⟨c, i, ?_⟩
       have hk : turnCheck H w t height = some (.guardFailed c i) := by
-        unfold turnCheck; rw [hp]
+        unfold turnCheck turnCheckPinned; rw [hp]
       unfold World.admit
       rw [if_neg hE, if_neg (not_not.mpr hL), if_neg (not_not.mpr hC), if_neg (not_not.mpr hR),
         if_neg (not_not.mpr hA)]
