@@ -18,11 +18,18 @@ Quest: Hermes final say (H1b), the START reds, the refusal-clause sweep, live Hu
   a reply is malformed; room write and foreground executor journal why a write/request failed.
 - Branches lane/app-reds*, lane/perf-apps deleted (all content on main; 40cb4aa59 deliberately dropped).
 
+- Unsealed attempt named (78f7ef896); hermes root entrypoint names a python minor mismatch (pins.json pythonVersion);
+  j14-apps qualify skips the Davros probe and the foreground API wrapper logs why a call ended undecided (08340bac9).
+
+## Live qualification (in progress)
+- Overlay candidate from main (lane-build overlay over batch 9 997905c0b: mini, grain-runtime, spk-host roles) in
+  hbox /home/hbox/lanes/app-reds-cont/lane/ov; runner ar-j14run2.sh CAND SUF DECL ALIAS ROLE SPK (j14-apps qualify).
+- Scrumblr (spk from forge /srv/spk-build/scrumblr/out, role 0): world, attach reach qualify; the foreground
+  qualify ends native-outcome-unknown, application API attempt phase uncertain, no cause recorded (log added in
+  08340bac9). Next: rerun with that log. WBO spk is not on the forge; build it from apps/packages/wbo/build.sh.
+  Hummingbird has no package in apps/packages (needs a repackage with apiPath).
+
 ## Open
-1. Unsealed attempt: `retry --mode submit` on an attempt with no call.bin fails ("attempt has no retained ...");
-   resubmit_unsubmitted_write should name it (never sealed: author again). Rare once the consent bound is fixed.
-2. Live Hummingbird conversation run, then WBO and Scrumblr (typed_applications foreground, built, unrun).
-3. E3/E4, E7, decider side of G2, Hermes worker interpreter (venv symlinks /usr/bin/python3.12; box has 3.13),
-   op66-plan for EtherCalc/Etherpad on the demo world.
-4. perf-apps continuation (docs/PERF-APPS.md): measure `mini apps install` end to end and the first page now that
-   the START fixes are on main; Host-turn costs of app create go to host-execution (a0fee5643746e520c).
+1. WBO and Hummingbird packages, then their qualify; `mini apps install` measurement on a main-built world.
+2. E3/E4, E7, decider side of G2, op66-plan for EtherCalc/Etherpad on the demo world (host-execution owns the
+   Host-turn costs of app create: a0fee5643746e520c).
