@@ -94,7 +94,9 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   say's precondition should not pin the room head. Client re-plan is a safety net only.
 - **P1, mini panics on a closed stdout** (explorer, world-up once `mode=closed … has no mini shell`; 0/40 reruns):
   `mini --help | grep -q` under pipefail; mini exit 101. Owners: perf-client a778bbda6509944a5 (quiet exit on EPIPE,
-  whole client family), infra (probe reads usage into a variable).
+  whole client family; owed), infra (FIXED dregg-infra fbb7648: render-authorized-keys.sh and ship.sh read usage into a
+  variable; syntax-checked only). Move gate15's EDGE_REV default to fbb7648 after batch 8's gate and dc61016cb-h1b -hp1
+  exit (never mid-gate): extract `git -C /Users/ember/dev/dregg-infra archive fbb7648 edge` to $I/dregg-infra-fbb7648.
 - **H2, attempt-index ENOENT** (batch 7 base): stage j14 worker, `controller-run grain-runtime create` rc=1, ENOENT on
   owner-workspace/attempt-index/by-intent/. Never reached the probe. Distinct from H1. Fix b940b3f50; -hp1 decides.
 - **W1, metered workroom not ready** (batch 7 base -c2 and -hp1): stage composed-inputs, `composed-inputs: the metered
