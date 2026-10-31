@@ -64,6 +64,13 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   directory row; ordinary birth plan prepared once instead of ~4 decodes; Held.eq_load, Loaded.load_eq; audit
   SOUND: stale directory is a type error; four RoomBirthGateAdmission theorems gained an implicit `held`, each
   equivalent to the old via Held.load + eq_load). Before: `doc new` Host CPU 621 ms -> 1000 ms after 500 says (law 17); after-numbers awaited.
+- **Private-cells FORMAT (a): WIP, NOT READY** (7e190a2d6 on lane/private-cells; never merge until labelled READY):
+  eventHistory and authority on the private root (Compiler/PrivateCellRoot.lean), Kernel twins deleted; whole tree red
+  in consumers pinning the salted roots (CredentialAuthorityPolicyRegistry, CanonicalCellRegistry, ContentResource,
+  Assurance/DeployedCredentialLifecycle, Assurance/HyperdocumentLinkPageDurableWeld). Astra round 13: no vacuity; owes a
+  binding reduction for the private root. Rebases onto retained-mode's SHARED-INTERFACE (L0) sha when it arrives.
+  Meanwhile private-cells starts the compiler-emitted ZK selective opening (epoch (b) prerequisite), statement first.
+  It removed /home/hbox/lanes/private-cells (20G) and builds in pool t1.
 - Awaited: infra's forge composed of batch 7 (after its batch 4 rebuild).
 - **CLOSED: GET read-path contract** (ember ruled (c)+(d); hot-path owns it statement-first). Never re-run or re-report.
 - hbox: / 57 GB free (11:25).
