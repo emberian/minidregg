@@ -103,6 +103,7 @@ def describe : ResourceBirthReceiver.Result → String
   | .rejected (.admission reason) => s!"refused admission {repr reason}"
   | .rejected .malformedIngress => "refused malformedIngress"
   | .rejected .transactionConflict => "refused transactionConflict"
+  | .rejected .undeclaredTransaction => "refused undeclaredTransaction"
   | .rejected (.durable reason) => s!"refused durable {repr reason}"
   | .contention => "contention"
   | .unavailable detail => s!"unavailable {detail}"
