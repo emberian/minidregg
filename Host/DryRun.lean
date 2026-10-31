@@ -174,15 +174,8 @@ theorem submit_storage_irrelevant (t : DurableReceiverIO.Transport)
   have same : (light.restorage storage).basisVia t = light.basisVia t :=
     funext (NativeHostLight.Light.basisVia_restorage t light storage)
   cases call
-  case invoke signed =>
-    have stale : NativeHost.staleOutcome { config with storage } (opened.restorage storage) =
-        NativeHost.staleOutcome config opened := funext fun _ => funext fun _ => rfl
-    simp only [NativeHost.submitLoadedVia]
-    rw [same, stale]
-    rfl
-  all_goals first
-    | rfl
-    | (simp only [NativeHost.submitLoadedVia]; rw [same]; rfl)
+  case birth bytes => rfl
+  all_goals (simp only [NativeHost.submitLoadedVia, NativeHost.submitLightVia]; rw [same]; rfl)
 
 /-- **The served submission and the dry run are one program.** Op 2 runs
 `submitLoadedWith`, which is `submitLoadedVia` over the Store's transport; the dry

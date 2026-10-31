@@ -1203,9 +1203,10 @@ def profileDescription (config : NativeHost.Config)
 /-- The deployment's description on the loaded image. A grain birth is offered while that
 image's platform record prices it (`record.grainBirth`), the same record the grain receiver
 reads (`GrainResourceBirthAdmission.grainTariffAt`). -/
-def descriptionLoaded (config : NativeHost.Config) (opened : NativeHost.Opened config) :
+def descriptionOn (config : NativeHost.Config)
+    (snapshot : Minidregg.Kernel.DurableDataIntent.DataSnapshot ResourceBirthCodec.rootBytes) :
     Lean.Json := Id.run do
-  let grainBirth := ((PlatformCellDomain.recordOn config.deployment opened.durable.snapshot).bind
+  let grainBirth := ((PlatformCellDomain.recordOn config.deployment snapshot).bind
     (·.grainBirth)).isSome
   let n := fun value : Nat => toJson (toString value)
   return Lean.Json.mkObj
@@ -1224,6 +1225,9 @@ def descriptionLoaded (config : NativeHost.Config) (opened : NativeHost.Opened c
      ("nockFSync", n config.nockFSync),
      ("jointInvocation", toJson true), ("typedContent", toJson true),
      ("authorizedQueries", toJson true), ("delegation", toJson true)]
+
+def descriptionLoaded (config : NativeHost.Config) (opened : NativeHost.Opened config) : Lean.Json :=
+  descriptionOn config opened.durable.snapshot
 
 def description (config : NativeHost.Config) : IO Lean.Json := do
   let opened ← IO.ofExcept (← NativeHost.openExisting config)
@@ -1525,10 +1529,40 @@ def sessionSetWalked {config : NativeHost.Config}
   if let some current ← state.get then
     state.set (some (← current.rememberReadbackVia old readback))
 
+/-- The full image of the already refreshed session (`NativeHostSession.materialize`):
+the one it holds, or the Store opened in full now and kept. Only operations not yet
+ported to the light opening ask for it. -/
+def sessionFull (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config))) :
+    IO (NativeHost.Opened config) := do
+  let some current ← state.get
+    | throw (IO.userError "native host session invalidated")
+  match ← NativeHostSession.materialize config current with
+  | .error detail =>
+      state.set none
+      throw (IO.userError detail)
+  | .ok (next, opened) =>
+      state.set (some next)
+      return opened
+
+/-- A light receive's own readback (`DurableServed.Received.appended`: the record it appended,
+read back exactly and verified at the new head) becomes the session's light opening
+(`Light.adopt`), so the next refresh finds the head current instead of reading, verifying and
+re-executing the entry the Host itself just wrote. Where it does not validate, the session keeps
+its opening and the next refresh reads the entry. -/
+def sessionAdopt (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (opening : Minidregg.Compiler.DurableServed.Opening ResourceBirthCodec.rootBytes) : IO Unit := do
+  if let some current ← state.get then
+    if opening.head.height = current.light.opening.head.height + 1 then
+      if let .ok light := current.light.adopt opening then
+        state.set (some { current with light })
+
 def sessionOpened (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config))) :
     IO (NativeHost.Opened config) := do
-  return (← sessionCurrent config state).opened
+  let _ ← sessionCurrent config state
+  sessionFull config state
 
 /-- The live directory, for the Nock program reads (ops 131-137): the session's
 held one (`LoadedDirectory.load_eq`: it is what `loadDirectory` would return),
@@ -1558,9 +1592,9 @@ def sessionConfirmed (config : NativeHost.Config)
     IO NativeHostCodec.Outcome := do
   try
     let t0 ← IO.monoMsNow
-    let opened ← sessionOpened config state
+    let light := (← sessionCurrent config state).light
     phaseTrace "confirm refresh" t0
-    match ← NativeHost.historicalReceiptVia config opened transactionId eventId with
+    match ← NativeHost.historicalReceiptLight config light transactionId eventId with
     | .error refusal => return .unavailable refusal.detail.toUTF8.toList
     | .ok none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
     | .ok (some receipt) => return .confirmed kind receipt
@@ -2400,13 +2434,15 @@ def dispatchSession (config : NativeHost.Config)
   match operation with
   | 0 =>
       unless payload.isEmpty do throw (RequestRefusal.malformed "describe does not accept a payload")
-      let opened ← sessionOpened config state
-      return (0, (descriptionLoaded config opened).compress.toUTF8.toList)
+      -- The platform record's cell bytes, read off the served state.
+      let light := (← sessionCurrent config state).light
+      let served ← IO.ofExcept (← light.basis ⟨[], []⟩)
+      return (0, (descriptionOn config served.view).compress.toUTF8.toList)
   | 1 =>
       let t0 ← IO.monoMsNow
       let session ← sessionCurrent config state
       phaseTrace "op1 refresh" t0
-      match ← NativeHost.prepareAuthorizedLoaded config session.opened session.light payload with
+      match ← NativeHost.prepareAuthorizedSession config (sessionFull config state) session.light payload with
       | .ok plan => return (1, signingPlanCodec.encode plan)
       | .error detail => return (255, refusalFrame "prepare" detail)
   | 2 | 3 => fnDispatch operation payload
@@ -2419,7 +2455,7 @@ def dispatchSession (config : NativeHost.Config)
   | 5 =>
       let t0 ← IO.monoMsNow
       let current ← sessionCurrent config state
-      let opened := current.opened
+      let opened ← sessionFull config state
       ReceiptContinuity.remember config opened.durable
       phaseTrace "op5 refresh" t0
       match ← NativeObservationOpeningCache.queryWireLoaded config opened current.openingCache payload with
@@ -2456,7 +2492,7 @@ def dispatchSession (config : NativeHost.Config)
       let (observation, signaturesBytes) ← splitPair payload
       let signatures ← decodeSignatures signaturesBytes
       let session ← sessionCurrent config state
-      match ← DryRun.dryRunLoaded config session.opened session.light observation signatures with
+      match ← DryRun.dryRunLoaded config (← sessionFull config state) session.light observation signatures with
       | .admitted plan => return (130, signingPlanCodec.encode plan)
       | .stopped outcome => return (255, outcomeCodec.encode outcome)
   | 150 =>
@@ -3104,11 +3140,23 @@ cold open). The session first reads any suffix its refresh has not seen; a faile
 seal loses nothing (the log is complete), and `sealHead` stays the operator verb. -/
 def sealSession (config : NativeHost.Config) (session : NativeHostSession.Session config) : IO Unit := do
   let .ok current ← NativeHostSession.refresh config session | return
-  let loaded := current.durable
-  if loaded.height = 0 then return
-  let .ok key ← config.transport.key | return
-  let .ok indexRoot ← loaded.headIndexRoot config.transport key | return
-  discard <| DurableReceiverIO.storeCheckpoint config.transport ResourceBirthCodec.rootBytes loaded indexRoot
+  match current.full with
+  | some opened =>
+      let loaded := opened.durable
+      if loaded.height = 0 then return
+      let .ok key ← config.transport.key | return
+      let .ok indexRoot ← loaded.headIndexRoot config.transport key | return
+      discard <| DurableReceiverIO.storeCheckpoint config.transport ResourceBirthCodec.rootBytes loaded indexRoot
+  | none =>
+      -- The light opening's own head: its chain, frontier and index root (MAC-verified, its
+      -- head tag's), the served state and the World it advanced per append.
+      let opening := current.light.opening
+      let height := opening.served.height
+      if height = 0 ∨ height = opening.baseHeight then return
+      let sealed := DurableCheckpointCodec.sealAt opening.store.key height opening.served.chain
+        opening.head.frontier opening.head.indexRoot opening.served.checkpointState
+        (opening.world.map (·.system)) opening.served.worldRoot
+      discard <| config.transport.putCheckpoint height (DurableCheckpointCodec.checkpointFrame.encode sealed)
 
 partial def serveSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
@@ -4379,14 +4427,14 @@ def sessionCarriedWalked (config : NativeHost.Config)
     (carried : IO.Ref (Option (CarriedNativeHostSession.Walked config)))
     (settings : Settings) : IO (CarriedNativeHostSession.Walked config) := do
   try
-    let current ← sessionCurrent config state
+    let opened ← sessionOpened config state
     let result ← match ← carried.get with
-      | some prior => CarriedNativeHostSession.refresh config prior current.opened.durable
+      | some prior => CarriedNativeHostSession.refresh config prior opened.durable
       | none => do
           let registry ← loadCarryRegistry settings
           let custody ← IO.ofExcept (← RetainedSegmentInspection.validate config
-            current.opened.durable registry)
-          CarriedNativeHostSession.start config current.opened.durable custody
+            opened.durable registry)
+          CarriedNativeHostSession.start config opened.durable custody
     let walked ← IO.ofExcept result
     carried.set (some walked)
     return walked
@@ -7293,8 +7341,9 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                                     "wire".toUTF8.toList "noncanonical native host call".toUTF8.toList,
                                     NativeHost.Disclosure.uniform)
                                 | some call =>
-                                  NativeHost.submitDisclosedWith pinnedConfig session.opened session.light call
-                                    (sessionConfirmed pinnedConfig state)
+                                  NativeHost.submitDisclosedSession pinnedConfig (sessionFull pinnedConfig state)
+                                    session.light call
+                                    (sessionConfirmed pinnedConfig state) (sessionAdopt pinnedConfig state)
                               NativeHost.logOperatorRefusal result.1
                               return (2, outcomeCodec.encode (NativeHost.disclose result))
                             else
@@ -9285,11 +9334,11 @@ def runCommandSelectedReleaseSourcePlan (_arguments : List String) (_configPath 
   | [packetPath, capabilityText, specPath,
           headerPath, rootPath] =>
           withPinnedSignature config fun pinnedConfig => do
-            let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
+            let opened ← IO.ofExcept (← NativeHost.openExisting pinnedConfig)
             let packet ← readBoundedBytes packetPath maxFrame
             let capability ← IO.ofExcept (exactDecimal "delegate capability" capabilityText)
             let plan ← IO.ofExcept (FnSelectiveReleaseSourceAuthoring.planLoaded
-              pinnedConfig session.opened packet ⟨capability⟩)
+              pinnedConfig opened packet ⟨capability⟩)
             writeBytes specPath plan.specBytes
             writeBytes headerPath plan.headerBytes
             IO.FS.writeFile rootPath (toString plan.sourceRoot.value ++ "\n")
@@ -9335,12 +9384,12 @@ def runCommandSelectedReleasePrepare (_arguments : List String) (_configPath _co
   -- Selection-only: this emits a candidate preimage, not publication authority.
   | [input, output] =>
           withPinnedSignature config fun pinnedConfig => do
-            let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
+            let opened ← IO.ofExcept (← NativeHost.openExisting pinnedConfig)
             let sourceBytes ← readBoundedBytes input maxFrame
             let some source := String.fromUTF8? sourceBytes.toByteArray
               | throw (IO.userError "selected-release request is not UTF-8")
             let selected ← IO.ofExcept
-              (← FnSelectiveReleaseAuthoring.prepareJsonLoaded pinnedConfig session.opened source)
+              (← FnSelectiveReleaseAuthoring.prepareJsonLoaded pinnedConfig opened source)
             writeBytes output selected.preimage
             pure 0
   | _ => throw (IO.userError usage)

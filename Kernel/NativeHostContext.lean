@@ -155,16 +155,27 @@ def Config.Inputs.invocationParameters (config : Config.Inputs) : List UInt8 :=
 def Config.Inputs.profile (config : Config.Inputs) :=
   NativeHostProfile.profile config.template config.invocationParameters config.disabledEvaluators
 
-/-- A configuration carries its derived profile, deferred and computed at most
-once per configuration value. `profileExact` binds it to all source inputs. -/
+/-- The identity the Store's durable anchor is enrolled and read under, from the inputs. -/
+def Config.Inputs.anchorIdentity (config : Config.Inputs) : String :=
+  s!"domain:{config.deployment.domain.value};semantics:{config.profile.semantics.value};seed:{config.expectedSeed.value}"
+
+/-- A configuration carries its derived profile and anchor identity, deferred and
+computed at most once per configuration value. `profileExact` and `anchorExact` bind
+them to all source inputs. -/
+
 structure Config extends Config.Inputs where
   profileCache : Thunk (CanonicalRuntimeProfile.Profile NativeHostProfile.Field)
   profileExact : profileCache.get = toInputs.profile
+  /-- The anchor identity, rendered at most once per configuration value (every request's
+  transport names it; rendering it is three decimal conversions of 256-bit numbers). -/
+  anchorCache : Thunk String
+  anchorExact : anchorCache.get = toInputs.anchorIdentity
 
-/-- Construct a configuration and its exact profile cache together. -/
+/-- Construct a configuration and its exact caches together. -/
 def Config.ofInputs (inputs : Config.Inputs) : Config :=
   let profile := Thunk.mk fun _ => inputs.profile
-  ⟨inputs, profile, rfl⟩
+  let anchor := Thunk.mk fun _ => inputs.anchorIdentity
+  ⟨inputs, profile, rfl, anchor, rfl⟩
 
 def Config.grainBirthTariffValue (config : Config) :
     Except String GrainResourceBirthController.Tariff := do
@@ -338,7 +349,18 @@ def Config.otherFacetGate (config : Config) (own : ControlFacet)
 spelling: the Host's transport uses it, and `describe` prints it
 (`storeAnchorIdentity`) so a script reading the Store never re-derives it. -/
 def Config.anchorIdentity (config : Config) : String :=
-  s!"domain:{config.deployment.domain.value};semantics:{config.profile.semantics.value};seed:{config.expectedSeed.value}"
+  config.toInputs.anchorIdentity
+
+/-- The anchor identity as compiled code reads it: rendered once per configuration value. -/
+def Config.anchorIdentityCached (config : Config) : String :=
+  config.anchorCache.get
+
+@[csimp] theorem Config.anchorIdentity_eq_cached :
+    @Config.anchorIdentity = @Config.anchorIdentityCached := by
+  funext config
+  exact config.anchorExact.symm
+
+#assert_axioms Config.anchorIdentity_eq_cached
 
 /-- **Every facet but the kernel activity's own runs the ordinary gate.** A
 source transition any other facet admits writes no protected activity

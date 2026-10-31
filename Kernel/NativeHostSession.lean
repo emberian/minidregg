@@ -1,11 +1,13 @@
 /-
-One process-local resumed tip. `start` opens the Store the ordinary way — MAC'd
-checkpoint plus suffix replay (`DurableReceiverIO.load`) — and validates it.
-`refresh` asks the store for entries after the session's head: none means the
-tip is current; new entries must continue the log chain, each carry a verifying
-tag, and replay through the shared executor (`DurableReceiverIO.extendFrom`).
-The advanced image is validated incrementally against the session's
-(`validateLoadedFrom`, equal to `validateLoaded`); requests read the session's
+One process-local resumed tip. `start` opens the light opening only: the MAC'd
+checkpoint and the records after it (`DurableServed.openHead`), never the whole
+log (KN2 stage 2b). `refresh` reads the entries after the session's head: none
+means the tip is current; new entries must continue the log chain, each carry a
+verifying tag, and replay through the shared executor (`Opening.extend`).
+An operation not yet ported to the light opening asks for the full verified
+materialization (`materialize`: the Store opened in full, `openExisting`); the
+session keeps it and extends it with every later refresh (`extendFrom`, then
+`validateLoadedFrom`, equal to `validateLoaded`), so requests read the session's
 `Opened`, never recompute its directory.
 A failed read, a shrunk log or a refused entry poisons the session.
 
@@ -56,33 +58,39 @@ structure Walked (config : Config) where
   verified : NativeHostReplay.Verified config target
 
 structure Session (config : Config) where
-  opened : Opened config
+  /-- The full verified materialization (KN2 stage 2a), opened only when an operation
+  not yet ported to the light opening asks for it (`materialize`), then kept and
+  refreshed with the session. A session that serves only ported operations never
+  opens it: its start and refresh read the light opening alone. -/
+  full : Option (Opened config) := none
   openingCache : IO.Ref NativeObservationOpeningCache.Cache
   walked : Option (Walked config) := none
-  /-- The light opening of the same Store (KN2): the ported operations are served
-  from it (`NativeHost.submitRevokeLight`); refreshed with the full opening. -/
+  /-- The light opening of the Store (KN2): the ported operations are served from it
+  (`NativeHost.submitRevokeLight`); every request refreshes it. -/
   light : NativeHostLight.Light config
 
-/-- There is one process-local current image: the validated opening. Keeping a
-second stored `durable` allowed exact readback adoption to move the semantic
-walk while leaving the physical refresh predecessor behind. -/
-def Session.durable {config : Config} (session : Session config) : Durable :=
-  session.opened.durable
+/-- The full image, where this session has opened it. There is at most one
+process-local full image: exact readback adoption replaces it, never a second
+stored `durable` beside it (that let a readback move the semantic walk while
+leaving the physical refresh predecessor behind). -/
+def Session.durable? {config : Config} (session : Session config) : Option Durable :=
+  session.full.map (·.durable)
 
 /-- Adopt only a receiver's exact CAS readback whose complete predecessor is
-still this session's validated image. The already checked successor replaces
-both the current opening and its admitted chronology; the next request still
-calls `refresh` to read any concurrent suffix and current authority.
+still this session's validated full image. The already checked successor
+replaces both the full opening and its admitted chronology; the next request
+still calls `refresh` to read any concurrent suffix and current authority.
 
-A delayed historical readback cannot move a newer session backward. Candidates,
-ordinary confirmations and uncertain responses do not supply this witness. -/
+A delayed historical readback cannot move a newer session backward, and a
+session that holds no full image adopts none. Candidates, ordinary
+confirmations and uncertain responses do not supply this witness. -/
 def Session.rememberReadback {config : Config} (session : Session config)
     {store : DurableHistory.StoreIdentity} (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)
     {oldTarget : Durable} (old : NativeHostReplay.Verified config oldTarget)
     (readback : NativeHostReplay.ExactReadback config old) : Session config :=
-  if session.durable.image = old.opened.durable.image then
+  if session.durable?.map (·.image) = some old.opened.durable.image then
     { session with
-      opened := readback.after
+      full := some readback.after
       walked := some ⟨NativeHostReplay.exactCandidate old readback.derived readback.ready readback.tag,
         NativeHostReplay.extendExact reader old readback⟩ }
   else session
@@ -104,8 +112,8 @@ theorem Session.rememberReadback_opened {config : Config} (session : Session con
     {store : DurableHistory.StoreIdentity} (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)
     {oldTarget : Durable} (old : NativeHostReplay.Verified config oldTarget)
     (readback : NativeHostReplay.ExactReadback config old)
-    (current : session.durable.image = old.opened.durable.image) :
-    (session.rememberReadback reader old readback).opened = readback.after := by
+    (current : session.durable?.map (·.image) = some old.opened.durable.image) :
+    (session.rememberReadback reader old readback).full = some readback.after := by
   simp only [Session.rememberReadback, if_pos current]
 
 /-- The adoption is the exact receiver-created canonical successor, rather
@@ -114,20 +122,21 @@ theorem Session.rememberReadback_image {config : Config} (session : Session conf
     {store : DurableHistory.StoreIdentity} (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)
     {oldTarget : Durable} (old : NativeHostReplay.Verified config oldTarget)
     (readback : NativeHostReplay.ExactReadback config old)
-    (current : session.durable.image = old.opened.durable.image) :
-    (session.rememberReadback reader old readback).durable.image =
-      (NativeHostReplay.exactCandidate old readback.derived readback.ready readback.tag).image := by
-  unfold Session.durable
+    (current : session.durable?.map (·.image) = some old.opened.durable.image) :
+    (session.rememberReadback reader old readback).durable?.map (·.image) =
+      some (NativeHostReplay.exactCandidate old readback.derived readback.ready readback.tag).image := by
+  unfold Session.durable?
   rw [Session.rememberReadback_opened session reader old readback current]
-  exact (NativeHostReplay.extendExact reader old readback).image_exact
+  exact congrArg some (NativeHostReplay.extendExact reader old readback).image_exact
 
-/-- Every stale/forked predecessor leaves the entire newer session intact,
-including current authority, chronology, and exact-byte opening cache. -/
+/-- Every stale/forked predecessor, and a session holding no full image, leaves the
+entire session intact, including current authority, chronology, and exact-byte
+opening cache. -/
 theorem Session.rememberReadback_stale {config : Config} (session : Session config)
     {store : DurableHistory.StoreIdentity} (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)
     {oldTarget : Durable} (old : NativeHostReplay.Verified config oldTarget)
     (readback : NativeHostReplay.ExactReadback config old)
-    (stale : session.durable.image ≠ old.opened.durable.image) :
+    (stale : session.durable?.map (·.image) ≠ some old.opened.durable.image) :
     session.rememberReadback reader old readback = session := by
   simp only [Session.rememberReadback, if_neg stale]
 
@@ -136,13 +145,17 @@ readback adoption. This regression ranges over every admitted readback. -/
 theorem Session.rememberReadback_newer {config : Config} (session : Session config)
     {store : DurableHistory.StoreIdentity} (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)
     {oldTarget : Durable} (old : NativeHostReplay.Verified config oldTarget)
-    (readback : NativeHostReplay.ExactReadback config old)
-    (newer : old.opened.durable.height < session.durable.height) :
+    (readback : NativeHostReplay.ExactReadback config old) {durable : Durable}
+    (held : session.durable? = some durable)
+    (newer : old.opened.durable.height < durable.height) :
     session.rememberReadback reader old readback = session := by
   apply Session.rememberReadback_stale
   intro same
-  have heights := congrArg (fun image : DurableReceiver.Image => image.accepted.length) same
+  rw [held] at same
+  have heights := congrArg (fun image : DurableReceiver.Image => image.accepted.length)
+    (Option.some.inj same)
   simp only [DurableReceiverIO.Loaded.height_eq] at newer
+  simp only at heights
   omega
 
 /-- Rendering facts remain representation-only; all per-query scope/current
@@ -171,38 +184,48 @@ theorem Session.rememberReadback_openingCache {config : Config} (session : Sessi
 /-- info: 'Minidregg.Kernel.NativeHostSession.Session.rememberReadback_openingCache' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Session.rememberReadback_openingCache
 
+/-- A session opens the light opening only: the checkpoint and the records after it
+(`DurableServed.openHead`), never the whole log. -/
 def start (config : Config) : IO (Except String (Session config)) := do
-  match ← openExisting config with
+  match ← NativeHostLight.start config with
   | .error detail => return .error detail
-  | .ok opened =>
-      match ← NativeHostLight.start config with
-      | .error detail => return .error detail
-      | .ok light =>
-          let cache ← IO.mkRef ([] : NativeObservationOpeningCache.Cache)
-          return .ok ⟨opened, cache, none, light⟩
+  | .ok light =>
+      let cache ← IO.mkRef ([] : NativeObservationOpeningCache.Cache)
+      return .ok { openingCache := cache, light }
 
+/-- The light opening is refreshed on every request (`Light.refresh`: the entries
+another writer appended, verified as the open verifies them). The full image, where
+the session holds one, is extended by the same entries and validated incrementally
+(`validateLoadedFrom`, equal to `validateLoaded`). -/
 def refresh (config : Config) (session : Session config) :
     IO (Except String (Session config)) := do
+  let light ← match ← session.light.refresh with
+    | .error detail => return .error detail
+    | .ok light => pure light
+  let some opened := session.full
+    | return .ok { session with light }
   match ← DurableReceiverIO.extendFrom config.transport ResourceBirthCodec.rootBytes
-      session.durable with
+      opened.durable with
   | .error detail => return .error detail
   | .ok ⟨durable, _⟩ =>
-      -- Nothing new on the Store's log, and the light opening is at the same head:
-      -- the Store is not read a second time to learn it.
-      if durable.height = session.durable.height ∧
-          session.light.opening.head.height = session.durable.height then
-        return .ok session
-      -- The light opening reads the same new entries, verified as its open verifies them.
-      let light ← match ← session.light.refresh with
-        | .error detail => return .error detail
-        | .ok light => pure light
-      if durable.height = session.durable.height then
+      if durable.height = opened.durable.height then
         return .ok { session with light }
       -- `validateLoadedFrom_eq`: the full validation, re-decoding and
       -- re-checking only the cells whose bytes the new records moved.
-      match validateLoadedFrom config session.opened durable with
+      match validateLoadedFrom config opened durable with
       | .error detail => return .error detail
-      | .ok opened => return .ok { session with opened, light }
+      | .ok opened => return .ok { session with full := some opened, light }
+
+/-- The full image of an already refreshed session: the one it holds, or the Store
+opened in full now (`openExisting`) and kept. -/
+def materialize (config : Config) (session : Session config) :
+    IO (Except String (Session config × Opened config)) := do
+  match session.full with
+  | some opened => return .ok (session, opened)
+  | none =>
+      match ← openExisting config with
+      | .error detail => return .error detail
+      | .ok opened => return .ok ({ session with full := some opened }, opened)
 
 /-- The one semantic refresh routine. A retained exact tip extends only the
 new authenticated suffix; a first provenance read starts at pinned genesis. -/
@@ -226,22 +249,28 @@ private def walkPhysical (config : Config) (prior : Option (Walked config))
           return .error s!"semantic history refused at entry {failure.index}: {failure.detail}"
       | .ok verified => return .ok ⟨physical, verified⟩
 
-/-- The walk for an already physically refreshed session. -/
+/-- The walk for an already physically refreshed session: over its full image, the
+Store opened in full when it holds none. -/
 def walked (config : Config) (session : Session config) :
-    IO (Except String (Walked config)) :=
-  walkPhysical config session.walked session.durable
+    IO (Except String (Walked config)) := do
+  match session.full with
+  | some opened => walkPhysical config session.walked opened.durable
+  | none =>
+      match ← DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes with
+      | .error detail => return .error detail
+      | .ok physical => walkPhysical config session.walked physical
 
 /-- Retain one admitted current opening and chronology together. -/
 def Session.retainWalked {config : Config} (session : Session config)
     (current : Walked config) : Session config :=
-  { session with opened := current.verified.opened, walked := some current }
+  { session with full := some current.verified.opened, walked := some current }
 
 /-- The retained opening is the complete physical target image checked by
 semantic replay, including all source, authority and history records. -/
 theorem Session.retainWalked_image {config : Config} (session : Session config)
     (current : Walked config) :
-    (session.retainWalked current).durable.image = current.target.image :=
-  current.verified.image_exact
+    (session.retainWalked current).durable?.map (·.image) = some current.target.image :=
+  congrArg some current.verified.image_exact
 
 /-- info: 'Minidregg.Kernel.NativeHostSession.Session.retainWalked_image' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Session.retainWalked_image
@@ -278,10 +307,16 @@ def refreshWalked (config : Config) (session : Session config) :
         | .ok verified =>
             let current : Walked config := ⟨physical, verified⟩
             return .ok (session.retainWalked current, current)
-  let physical ← match ← DurableReceiverIO.extendFrom config.transport
-      ResourceBirthCodec.rootBytes session.durable with
-    | .error detail => return .error detail
-    | .ok ⟨physical, _⟩ => pure physical
+  let physical ← match session.full with
+    | some opened =>
+        match ← DurableReceiverIO.extendFrom config.transport ResourceBirthCodec.rootBytes
+            opened.durable with
+        | .error detail => return .error detail
+        | .ok ⟨physical, _⟩ => pure physical
+    | none =>
+        match ← DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes with
+        | .error detail => return .error detail
+        | .ok physical => pure physical
   let retained ← walkPhysical config session.walked physical
   match retained with
   | .error detail => return .error detail
