@@ -480,6 +480,34 @@ theorem compiledLawAccepts_sound {F : Type} [Field F] [DecidableEq F]
   rcases accepted with ⟨⟨⟨supported, ranges⟩, casts⟩, lowered⟩
   exact lower_sound profile.compiler profile.admissible casts supported ranges lowered
 
+/-- On the witness the compiler itself generates (`wit`), acceptance of the lowered system
+is the predicate's verdict under the three input guards (`lower_sound`, `lower_complete`):
+a checker holding its own states need not evaluate the circuit. -/
+theorem compiledLawAccepts_generated {F : Type} [Field F] [DecidableEq F]
+    (profile : PolicyCompilerProfile F) (predicate : Pred) (address : Digest)
+    (oldState newState : State) :
+    compiledLawAccepts profile predicate
+        ⟨address, oldState, newState, wit profile.compiler predicate oldState newState⟩ =
+      (supported profile.compiler predicate &&
+        inputsInRange profile.compiler predicate oldState newState &&
+        decide (castInjOn F (intsOf predicate oldState newState)) &&
+        Minidregg.Pred.eval predicate oldState newState) := by
+  unfold compiledLawAccepts
+  dsimp only
+  cases hs : supported profile.compiler predicate <;> simp only [Bool.false_and, Bool.true_and]
+  cases hr : inputsInRange profile.compiler predicate oldState newState <;>
+    simp only [Bool.false_and, Bool.true_and]
+  by_cases hc : castInjOn F (intsOf predicate oldState newState)
+  · simp only [hc, decide_true, Bool.true_and]
+    cases he : Minidregg.Pred.eval predicate oldState newState
+    · rw [decide_eq_false_iff_not]
+      intro accepts
+      have := lower_sound profile.compiler profile.admissible hc hs hr accepts
+      rw [he] at this; cases this
+    · rw [decide_eq_true_iff]
+      exact lower_complete profile.compiler profile.admissible hc hs hr he
+  · simp [hc]
+
 /-- The exact conjunction checked by the policy gate.  In particular, the
 verdict is acceptance of `PredCompile.lower`, not a second hand-written mirror
 of the predicate evaluator. -/

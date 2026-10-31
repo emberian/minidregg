@@ -93,6 +93,20 @@ journal fence 8 ms; the app's own answer a few ms. With ten requests in flight, 
 in the resident's queue. The first page is therefore about (assets + 1) times the SUBMIT turn: the lever
 is the Host's per-dispatch turn (hot-path) or several dispatches in one turn, not spk-host.
 
+### Batch 7 against batch 6, back to back (Host profiles for hot-path)
+
+| measure | batch 7 `acc7cfa03` | batch 6 `74e1cfa10` |
+|---|---|---|
+| first page, 18 sequential requests | 4.15 s | 8.86 s |
+| warm GET median (min to max) | 216 ms (151 to 559) | 427 ms (194 to 812) |
+| 10 concurrent GET / | 2.64 s | 2.70 s |
+| Host CPU samples for the same workload (perf -F 999) | 8,704 | 13,647 |
+
+Wall times swing about 2x with hbox load; the sample count does not, and says about 36% less Host CPU
+per page on batch 7 (hot-path's submit-path fixes). The captures are `hbox:/ci/pa-prof7` and
+`/ci/pa-prof6b` (driver `prof.sh`). Ember ruled on the GET read-path contract; hot-path owns it,
+statement first, with group commit for concurrent dispatches.
+
 ## Batch 2: before and after (EtherCalc, batch 5 + 40efdcff9 + batch 1, hbox)
 
 | measure | before (batch 1) | after |

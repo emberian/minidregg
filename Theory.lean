@@ -14,6 +14,7 @@ import Theory.IndexedProgram  -- indexed free programs with response-dependent t
 import Theory.GuardedAdvice  -- eager hole shape, typed late advice, total verification, and durable replay refusal
 import Theory.ReactiveReceipt  -- authoritative receipt deltas, dependency-local reactive projections, atomic rejection, and witness-cursor snapshots
 import Theory.ReactiveController  -- Lean-owned guarded-hole/reactive control derives Pending/Reject/CommitIntent from data-only host observations; physical CAS remains external
+import Theory.SparseMap  -- the leaf representation: a persistent extensional finite map (ExtDTreeMap over injective List Nat key codes), O(log n) get/set, DFinsupp as a spec view
 import Theory.Store  -- the one typed sparse store and guarded patch: layouts with ROM/RAM/append-only disciplines, `run` as the free-monoid action, prefix validity, syntactic footprints, and the one frame law
 import Theory.StoreNormalize  -- the normal form of a guarded patch: fuse each operation with the next at its address, keep every guard that can fail; under validity the write footprint is exactly the changed addresses
 import Theory.CellState  -- canonical cells over `Theory.Store`: materialization with the root a function of the logical store, and validated patches (quoted pre-root + prefix validity)
@@ -35,6 +36,7 @@ import Theory.FiniteTapeGap  -- distinguishing gaps over finite equally likely t
 import Theory.AuthTrieReveal  -- honest reveals verify; the kept trie serves them in walked depth plus answer
 import Theory.PrivateCellTrie  -- statements the compressed trie owes before it carries a blinded cell: erase, complete class openings with scoped collisions
 import Theory.CellStateAux  -- a cell's persistent auxiliary structure: carried beside the store, followed per write, the root read from it
+import Theory.Retained  -- retained mode: a derived value is maintained, never recomputed; one theorem (maintained = recomputation after any admitted run and across checkpoint/restore), the chain rule, the generic red-green memo node
 import Theory.AuthMapCellRoot  -- AuthMap's world level instantiated at `cellRoot := Materializer.rootOf`: materialized cell roots open at the world root, world soundness names the cell store, a validated patch moves the world root along one path
 import Theory.PlanBinding  -- a plan binds (address, value) reads, not a cell root: admission refuses footprintStale only when a read address moved; whole-cell footprint = root binding under the pair carrier; no-TOCTOU; independent plans admitted in both orders and commute; openings at the cell root under the world root, and why signed openings would re-bind the root
 import Theory.CellSlot  -- stable heterogeneous absent/present slots, canonical payload decoding, and monotone identifiers make creation and retirement first-class transitions

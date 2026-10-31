@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# scripts/pipeline/native-loop -- the inner loop of a Lean change that must reach a native Host: rebuild the
+# Host and its consent companion incrementally in a lane's pooled tree, then overlay them onto a candidate.
+#
+#   scripts/pipeline/native-loop LANE BASE_CANDIDATE LABEL      (from inside the lane's pooled tree)
+#
+# Measured on hbox 2026-10-31 (one def added to Kernel/NativeHostReplay, 130 modules downstream): host 290 s,
+# consent 179 s, overlay 14 s, edit -> candidate 483 s; the fresh-tree build this replaces took about 48 min.
+# What makes it incremental, all kept per lane under $LANE_POOL_ROOT/lanes/LANE (LANE_DIR):
+#   - the tree's .lake stays warm between runs (hold the lease: `lane-tree renew LANE`; release undoes `native`);
+#   - `lane-tree native LANE` runs once (the tree's own package copy), never per build;
+#   - lane-build.sh keeps one previous output generation and the lane's RSS table (seat weights);
+#   - MINIDREGG_NATIVE_OBJECT_CACHE (the box's, keyed by C content and path) reuses every unchanged object.
+# The candidate is LANE_DIR/candidates/<12-hex id> (lane-build.sh overlay: whole host+consent family re-pinned
+# in manifest.json, SHA256SUMS and provenance.json .overlay); a gate phase stands a world up from it.
+# Commit first: lane-build refuses a tree with uncommitted tracked changes. Run it detached with a PID file.
+set -euo pipefail
+lane=${1:?LANE}; base=${2:?BASE_CANDIDATE}; label=${3:?LABEL}
+. "${LANE_POOL_ENV:-$HOME/pool/pool.env}"
+pool_tree=$("$LANE_POOL_ROOT/bin/lane-tree" status | awk -v l="$lane" '$2 == l { print $1 }')
+[ -n "$pool_tree" ] || { echo "native-loop: $lane holds no pooled tree (lane-tree acquire $lane REF)" >&2; exit 64; }
+t=$LANE_POOL_ROOT/$pool_tree
+[ "$(pwd -P)" = "$(cd "$t" && pwd -P)" ] || { echo "native-loop: run from $t" >&2; exit 64; }
+export LANE_DIR=$LANE_POOL_ROOT/lanes/$lane
+mkdir -p "$LANE_DIR"; ln -sfn "$t" "$LANE_DIR/src"
+[ -d .lake/packages ] && [ ! -L .lake/packages ] || "$LANE_POOL_ROOT/bin/lane-tree" native "$lane" >/dev/null
+"$LANE_POOL_ROOT/bin/lane-tree" renew "$lane"
+export MINIDREGG_NATIVE_OBJECT_CACHE=${MINIDREGG_NATIVE_OBJECT_CACHE:-$LANE_POOL_ROOT/object-cache} \
+  MINIDREGG_LEAN_SEAT_ROOT=${MINIDREGG_LEAN_SEAT_ROOT:-$LANE_DIR/seats} MINIDREGG_LEAN_SEATS=${MINIDREGG_LEAN_SEATS:-8} \
+  MINIDREGG_NATIVE_JOBS=${MINIDREGG_NATIVE_JOBS:-8} SWARM_MEM_MAX=${SWARM_MEM_MAX:-40G}
+wrap=(); command -v swarm-build >/dev/null && wrap=(swarm-build)
+step() { local n=$1 t0; shift; t0=$(date +%s)
+  "$@" > "$LANE_DIR/logs-$n.txt" 2>&1 || { echo "native-loop: $n failed; tail of $LANE_DIR/logs-$n.txt:" >&2; tail -30 "$LANE_DIR/logs-$n.txt" >&2; exit 1; }
+  echo "native-loop: $n $(( $(date +%s) - t0 )) s"; }
+t0=$(date +%s)
+step host "${wrap[@]}" deploy/candidate/lane-build.sh host
+step consent "${wrap[@]}" deploy/candidate/lane-build.sh consent
+step overlay deploy/candidate/lane-build.sh overlay "$base" "$LANE_DIR/candidates" "$label" host consent
+echo "native-loop: $(jq -r .candidate "$LANE_DIR/logs/overlay-$label.json") in $(( $(date +%s) - t0 )) s"
