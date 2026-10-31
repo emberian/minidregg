@@ -270,6 +270,18 @@ group commit only pays if the turn is not CPU-bound (ten concurrent requests at 
 serial Host work each, so the CPU per turn is the lever, not the fsync, which exorcism removed); and the question whether a static-asset GET needs a
 durable turn at all (asked of perf-apps; else root). Details: docs/PERF-APPS.md on lane/perf-apps.
 
+**Birth plan grows with cells (batch 7, perf-client's `doc new` at heights 0/250/520, hbox:/ci/pc/w7-520.perf.data,
+summary /ci/hpc/sn/w7.all.txt).** Birth op1 85 → 100 → 161 ms, op2 298 → 180 → 314 ms; says add a stream-entry
+cell each, so the directory grows. Inclusive at 520: `LifecycleImage.rawDecode` 22.5% (`DirectoryImage.decodeRows`
+15%), session refresh 14%. The birth plan runs on the FULL shape: `NativeHost.prepareLoaded` and
+`birthRefusal` call `ResourceBirthController.Concrete.prepareDraft … opened.durable`, which decodes the whole
+directory (`CredentialAuthorityDomainReceiver.loadDirectory durable`) and the authority
+(`loadDeployment`), then `prepareBirth` → `preparePreAuthority` decodes both again: about four O(cells)
+directory decodes per birth plan, none incremental (the served path's `loadServedDirectoryFrom` decodes only
+changed rows). Fix: the birth plan prepares against the session's light ground (`Ground.ofBasis`, as submit
+does), or at least threads one decoded directory/authority through prepareDraft → prepareBirth. Also
+`decodeServedFrom`'s `(rows.map Prod.fst).Nodup` is a quadratic list check per served load.
+
 **Dispatch turn profile (batch 6 74e1cfa10, EtherCalc first page + 20 warm + 10 concurrent GETs;
 hbox:/ci/pa-prof/dispatch.perf.data, symfs /ci/hpc/sn/symfs6, summary /ci/hpc/sn/disp.all.txt; warm
 GET 161 ms median).** Inclusive, cpu_core: `dispatchApplicationSubmitSession` 47%;
