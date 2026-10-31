@@ -203,6 +203,9 @@ def empty : SparseMap K V := ⟨∅⟩
 
 instance : EmptyCollection (SparseMap K V) := ⟨empty⟩
 
+/-- The empty map is the zero (the stores' `0`). -/
+instance : Zero (SparseMap K V) := ⟨empty⟩
+
 /-- The value at a key, if present. -/
 @[inline] def get? (m : SparseMap K V) (a : K) : Option (V a) := m.tree.get? (CachedKey.of a)
 
@@ -220,6 +223,9 @@ def set (m : SparseMap K V) (a : K) : Option (V a) → SparseMap K V
   Std.ExtDTreeMap.get?_empty
 
 @[simp] theorem coe_apply (m : SparseMap K V) (a : K) : m a = m.get? a := rfl
+
+@[simp] theorem zero_apply (a : K) : (0 : SparseMap K V).get? a = none :=
+  Std.ExtDTreeMap.get?_empty
 
 theorem ext_tree {m₁ m₂ : SparseMap K V} (h : m₁.tree = m₂.tree) : m₁ = m₂ := by
   cases m₁; cases m₂; cases h; rfl
@@ -366,6 +372,32 @@ def toDFinsupp [DecidableEq K] (m : SparseMap K V) : Π₀ a : K, Option (V a) :
 @[simp] theorem toDFinsupp_apply [DecidableEq K] (m : SparseMap K V) (a : K) :
     m.toDFinsupp a = m a := rfl
 
+/-- Transport: `set` is `DFinsupp.update` under the specification view. -/
+theorem toDFinsupp_set [DecidableEq K] (m : SparseMap K V) (a : K) (v : Option (V a)) :
+    (m.set a v).toDFinsupp = m.toDFinsupp.update a v := by
+  apply DFinsupp.ext
+  intro b
+  rw [DFinsupp.coe_update, toDFinsupp_apply]
+  have view : (⇑m.toDFinsupp : (a : K) → Option (V a)) = ⇑m := funext (toDFinsupp_apply m)
+  rw [view, ← coe_set]
+
+/-- Transport: the support is the specification view's support (`≠ none` is `≠ 0`). -/
+theorem toDFinsupp_support [DecidableEq K] [∀ a, DecidableEq (V a)] (m : SparseMap K V) :
+    m.toDFinsupp.support = m.support := by
+  ext a
+  rw [DFinsupp.mem_support_iff, mem_support_iff, toDFinsupp_apply]
+  rfl
+
+@[simp] theorem toDFinsupp_zero [DecidableEq K] (a : K) : (0 : SparseMap K V).toDFinsupp a = none :=
+  zero_apply a
+
+/-- Transport: the specification view loses nothing. -/
+theorem toDFinsupp_injective [DecidableEq K] : Function.Injective (toDFinsupp (K := K) (V := V)) := by
+  intro m₁ m₂ h
+  refine ext fun a => ?_
+  have := DFunLike.congr_fun h a
+  simpa only [toDFinsupp_apply] using this
+
 /-! ### Decidable equality -/
 
 instance [∀ a, DecidableEq (V a)] : DecidableEq (SparseMap K V) := fun m₁ m₂ =>
@@ -408,5 +440,35 @@ end SparseMap.Example
 #assert_axioms SparseMap.mem_toList
 #assert_axioms SparseMap.filter_apply
 #assert_axioms SparseMap.Example.histories_agree
+
+#assert_axioms StoreKey.frame_append_inj
+#assert_axioms StoreKey.code_inj
+#assert_axioms StoreKey.listCode_injective
+#assert_axioms CachedKey.of_value
+#assert_axioms CachedKey.eq_of_code_eq
+#assert_axioms CachedKey.eq_of
+#assert_axioms SparseMap.get?_empty
+#assert_axioms SparseMap.emptyc_apply
+#assert_axioms SparseMap.coe_apply
+#assert_axioms SparseMap.zero_apply
+#assert_axioms SparseMap.ext_tree
+#assert_axioms SparseMap.ext_iff'
+#assert_axioms SparseMap.cmp_of_ne
+#assert_axioms SparseMap.set_apply
+#assert_axioms SparseMap.set_set
+#assert_axioms SparseMap.set_self
+#assert_axioms SparseMap.set_comm
+#assert_axioms SparseMap.mem_keys
+#assert_axioms SparseMap.nodup_keys
+#assert_axioms SparseMap.not_mem_support_iff
+#assert_axioms SparseMap.toDFinsupp_apply
+#assert_axioms SparseMap.toDFinsupp_set
+#assert_axioms SparseMap.toDFinsupp_support
+#assert_axioms SparseMap.toDFinsupp_zero
+#assert_axioms SparseMap.toDFinsupp_injective
+#assert_axioms SparseMap.Example.lookup_false
+#assert_axioms SparseMap.Example.lookup_true
+#assert_axioms SparseMap.Example.lookup_absent
+#assert_axioms SparseMap.Example.erase_differs
 
 end Minidregg.Theory

@@ -45,9 +45,10 @@ measurement (hot-path's 8-story run, `hbox:/ci/hpc/sn/g2.s{2,8}.all.txt`, Host C
   fill a memo), `advance` per delta, `init` at genesis.
 * **`Node D In Out`** (open over an input view): a read declares the input queries it needs given its
   representation (`readProbes`, none on a memo hit) and sees only their answers; an update declares probes
-  from the delta alone (pre- or post-delta) and sees only theirs. `ReadBounded` / `ProbeBounded` are the
-  per-instance budgets `c + k · size`. What a step may READ is bounded; its CPU is measured (the flatness
-  bench), never self-reported.
+  from the delta alone (pre- or post-delta) and sees only theirs. `ReadFootprintBounded` /
+  `ProbeFootprintBounded` bound the declared input footprint `c + k · size`, not cost: a shadow-state node
+  (`Rep := Store`, recomputing per read) has a zero footprint. Cost is gated by the flatness bench (law 17);
+  a per-node cost statement over an instrumented interpreter (as `PrivateCellTrie.EraseCost`) is owed.
 * **The keystone**: `Maintained.maintained_eq_recompute`: after any admitted run, from any representation
   holding at its start, the maintained answer is the recomputation's answer at the final state.
   `checkpoint_restore_from`: restore any held representation from its checkpoint and advance over the
@@ -237,13 +238,61 @@ generated nodes are D1 (query view) and I1 (linear fold).
 
 ## 8. Continuation (start here)
 
-State (2026-10-31): `lane/retained` on staging `6c66d5144`; `675a80745` adds `Theory/Retained.lean`
-(statement, proofs and witnesses complete, astra round 1 applied, checked with lean 4.35 on the Mac against
-`/Users/ember/dev/minidregg-lanes/iter-speed-land/.lake` read-only via `LEAN_PATH`). Astra's review:
-`/private/tmp/claude-501/-Users-ember-dev-minidregg/01a18fa5-51c4-7992-906c-97cb89814dae/scratchpad/retained/astra-review-1.txt`.
+**Landed (staging, batch 8):** `675a80745` `Theory/Retained.lean`; `1d4ff4efb` this document; `62aa5fcf8`
+footprint renames, 35 pins, `Theory/SparseMap.lean`; `05bffae27` SparseMap transport lemmas
+(`toDFinsupp_set/support/zero/injective`), `Zero` instance, 37 pins. Integrator audits round 1 and 2
+closed. Integrator is now aec6914709d96f496 (aba0beaa578594e92 retired).
 
-Next: L0 (§5). Design reviewed by astra before the first build; then `Theory/Store.lean` on the Mac
-(elaborate per file), the repairs in dependency order, one hbox pool-tree build of the umbrella
-(`. /home/hbox/pool/pool.env; lane-tree acquire retained origin/lane/retained`, `swarm-build`), then the
-native Host and `grow2.sh` before/after. Coordination: hot-path rebases row 11 onto L0; private cells'
-FORMAT (a) rebases onto L0 (their sha is not ahead of it).
+**L0 in progress: branch `lane/retained-l0`** (staging merged at `f566153b1`, then the WIP commit
+"Theory.Store over SparseMap"). `Theory/Store.lean` is switched (`Store L := SparseMap (Address L) …`,
+`Layout` gains instance-implicit `namespaceCode`/`keyCode : StoreKey …`, `Store.ext`, `coe_set`; the
+example layout gets a `StoreKey Namespace` from `ctorIdx`); it, `Theory/CellStateAux`, `Theory/CellState`
+and `Theory/Retained` elaborate unchanged over the tree (Retained's `decide` witnesses included).
+Astra round 2 (`scratch/l0/astra-review-2.txt`) approved the type replacement with these terms: keep
+`toDFinsupp` as the spec view; keep `StoreCodec.sortedSupport`'s wire order (tree order is not wire order);
+injective `List Nat` codes accept countability as a real restriction (World's `TxId`/`D`).
+
+**Method (the Mac, no lake):** `scratch/l0/lc.sh FILE` elaborates one file with lake's options
+(`-R . -Dcompiler.relaxedMetaCheck=true -Dbackward.proofsInPublic=true -Dbackward.privateInPublic=true`) and
+writes its olean into a symlink mirror of `/Users/ember/dev/minidregg-lanes/iter-speed-land/.lake/build/lib/lean`
+(read only) at `<scratchpad>/retained/olean`, LEAN_PATH in `<scratchpad>/leanpath2`. `scratch/l0/topo.py
+Theory.Store` lists the 1,090 dependents in topological order (`scratch/l0/l0-order.txt`, 44 in Theory);
+`scratch/l0/runwave.sh LIST LOG` compiles a list in order and logs RED/OK per file. Theory-wave 1
+(`scratch/l0/w-theory.log`): 8 of 42 green; the reds have four root causes, every other red is a cascade:
+1. **StoreKey instances for key types**: `Theory/EffectDeclaration` (`StateKey`), `Theory/CredentialAuthorityState`
+   (`AuthorityPlane` and its keys `CapabilityId`, `IssuerId`, `PolicyId`, `PolicyRevision`, `SubjectId`,
+   `Epoch`, `RevocationKey`), `Theory/CanonicalResourceKernel` (`Field`), and in Kernel/Compiler about
+   twenty more (`Namespace.Key` families of ClockCell, PayCell, PayCellLegacyV4, PlatformCellLayout,
+   SystemCell; StoreCodecBook `Space`; HyperdocumentCell `IndexSpace`; World `SysKey TxId D`;
+   `VersionEventId`; `Hyperdocument.Key`; `Digest`). **Decision: do not hand-write ~30 instances; grow
+   the vocabulary** (law 11): a `deriving StoreKey` handler (`Theory/DeriveStoreKey.lean`) emitting
+   `code a := ctorIdx :: frame(code field₁) ++ …` together with a prefix decoder, and injectivity from
+   `decode_code` by `cases a <;> simp [decode_code]`, so each key type adds `StoreKey` to its `deriving`
+   clause. Dependent `Namespace.Key space` families take a one-line `match` instance like their `keyDecEq`.
+2. **`DFinsupp.ext` on stores** (`Theory/CellStateWitness` :56 :190, `Theory/PlanBinding` :464): use `Store.ext`.
+3. **`DFinsupp.update` / `Π₀` on stores** (`Theory/StoreNormalize` :68 states `update_update` over
+   `DFinsupp.update s …`): restate over `Store.set` (`SparseMap.set_set`, `set_comm`, `set_self` exist).
+4. **`DFinsupp.mem_support_iff` / `0` vs `none`** (`Theory/StoreFootprint` :32-33, `Theory/PlanBinding`
+   :292 :332): `SparseMap.mem_support_iff` (reads `≠ none`), `toDFinsupp_support` to transport.
+Then the Compiler/Kernel/Assurance/Host waves (1,046 files) on hbox in a pool tree
+(`. /home/hbox/pool/pool.env; lane-tree acquire retained origin/lane/retained-l0`, `swarm-build lake build`,
+LEAN_NUM_THREADS per pool.env), reading every red of one run together (COORDINATION §4: design the whole
+fix set, one build per batch). Known Compiler-side work: `Compiler/FiniteDependentMapCodec` and
+`FiniteDependentMapCachedOrdering` build stores as `Π₀` (they become `SparseMap` builders; `supportCached`
+becomes `keys` sorted by the wire key); `Compiler/WorldCompact.lean` and `compactEvery` are deleted;
+World's `Cells R := Π₀ _ : CellId, Option (Cell R)` becomes `SparseMap CellId (fun _ => Cell R)`;
+private cells' `Compiler/PrivateCellRoot` (two `simp [Store.set]` unfolds), the narrowed view's
+`DFinsupp.filter` (`ResourceObservationAdmission.narrowStore`, `Kernel/PrivateCellView`,
+`Kernel/PrivateCellReceiver` 1274-1330 → `SparseMap.filter`/`filter_apply`), `Compiler/PrivateCellIndex`;
+perf-client's `Kernel/DeployedRepresentsCheck` iterates `w.system.support` (switch to `keys`; perf-client
+told). Send the sha to the integrator labelled SHARED-INTERFACE (its own cut, one whole-tree build), with
+`scripts/check-import-boundary.sh` green and a `grow2.sh` before number.
+
+**Measurement owed:** `hbox:/ci/hpc/sn/grow2.sh` (8 sequential `story new`, Host CPU per story, perf of
+stories 2 and 8) on the candidate before L0 and on the L0 candidate; the after is `Store.set`/`DFinsupp.update`
+gone from the profile and a flat 2 → 8 slope. Then `scripts/perf/flatness-bench.py` submit ratio, and certify
+at two heights (hot-path owns certify; same table).
+
+**Handed to this lane, after L0 (§3 rows):** R1 the op 4 → op 5 challenge (exorcist), R3 the
+planner/deriver prepared-write node (perf-client), I4/I5 and §3.6 (coordinator). The lint (§7) is designed,
+not built.
