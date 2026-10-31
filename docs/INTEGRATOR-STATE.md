@@ -4,8 +4,8 @@ Present-state record of the integration lane, rewritten whole when its shape cha
 `hbox:/home/hbox/lanes/integ/COMMANDS.log` (every build stage, gate verdict, sweep, world teardown and process stop, one
 line each). History is in this file's git history.
 
-The integrator is the session distilled 10-31 06:00 from agent aeb671706eb3f70d7 (retired; the cv retired-agent hook
-names the live integrator to anyone who messages the old id). Lanes send shas, READY, reds and handoffs to the
+The integrator is agent **aba0beaa578594e92**, distilled 10-31 06:00 from aeb671706eb3f70d7 (retired; the cv
+retired-agent hook names the live integrator to anyone who messages the old id). Lanes send shas, READY, reds and handoffs to the
 integrator; the integrator merges onto `integration/staging`, cuts batch candidates on hbox, gates them, moves main to
 gated candidates and names candidates to infra and the explorer.
 
