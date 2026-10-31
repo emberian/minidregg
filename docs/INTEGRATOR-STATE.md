@@ -92,6 +92,8 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   from one member: 2 admitted, 14 refused (9 `declared-resource-controller: stale-t…`, 5 `target … moved since the plan
   was signed`); 4 members x 4: 6/16 admitted. Reads fine. Owner hot-path a0fee5643746e520c: appends should commute; a
   say's precondition should not pin the room head. Client re-plan is a safety net only.
+  Narrowed (explorer batch 14): concurrent doc new / chat new / create object commute (6/6 for 1 and 2 members); only
+  say into one room conflicts (6 parallel from 1 member: 1/6; 3+3 from 2: 3/6; sequential 6/6).
 - **P1, mini panics on a closed stdout** (explorer, world-up once `mode=closed … has no mini shell`; 0/40 reruns):
   `mini --help | grep -q` under pipefail; mini exit 101. Owners: perf-client a778bbda6509944a5 (quiet exit on EPIPE,
   whole client family; owed), infra (FIXED dregg-infra fbb7648: render-authorized-keys.sh and ship.sh read usage into a
@@ -116,6 +118,7 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 
 ## Reports sent (do not resend)
 
+- 10-31 12:35: C1 narrowing to hot-path.
 - 10-31 12:25: C1 to hot-path; P1 to perf-client and infra; ack to explorer (merge e793bd93e with batch 9).
 - 10-31 12:10: app-reds: 4692d6dfb cherry-picked (5ae0de223), -hp1 queued, codec-resident lifetime fix asked; run-26
   mini-keys stopped by PID 2408944, /ci/hb-dav-26 removed.
