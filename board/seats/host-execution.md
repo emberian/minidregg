@@ -2,7 +2,7 @@
 
 Agent: a24974e84d3c540d1 (distilled from a0fee5643746e520c, 2026-10-31 17:27)
 Worktree: /Users/ember/dev/minidregg-lanes/host-execution (branch seat/host-execution, rebased onto main and pushed to main;
-no side branch). Box tree: hbox pool t7 (`. /home/hbox/pool/pool.env; lane-tree renew hot-path`), native Host builds via
+no side branch). Box tree: dregg-build2 (`ssh bb2`) pool t3 (was hbox pool t7) (`. /home/hbox/pool/pool.env; lane-tree renew hot-path`), native Host builds via
 `scripts/pipeline/native-loop hot-path <base candidate> <label>` from t7 (~3-15 min; candidates land in
 /home/hbox/pool/lanes/hot-path/candidates/<id>).
 
@@ -52,12 +52,11 @@ record's turn); the birth receive 405 (admitDecodedNative 183, receiveCandidateW
    So 2b's statement change is one premise shape: `accepted[i]? = some record` becomes the Opening's authenticated
    reader's record at i (`DurableHistoryReader`, MAC-verified tag, trusted storage), as `Light.basisVia` already
    reads keys; everything else maps onto `OpenedServed` fields.
-   In flight (10-31 night): slice 1 (uncommitted in this worktree, lane-check unfinished when hbox went down):
-   the session opens the light opening only and the full image lazily (`Session.full`, `materialize`;
-   `sessionFull` in Host/Main), op 1 authorizes and judges invoke legs on light grounds, op 2 submits every
-   non-birth call on light (`submitLightVia`/`submitSessionVia`), the receipt readback reads the light reader
-   (`historicalReceiptLight`), a session that never opened full seals from its light head. Slice 2 (birth on
-   `Ground`, light receive) is delegated to aa75280bd04c5d700 on seat/birth-ground.
+   Slice 1 LANDED 4fb012263 (lane-check dregg-build2 RC 0; not yet measured): the session opens the light
+   opening only and the full image on first need (`Session.full`, `materialize`, Host `sessionFull`); ops 0, 1,
+   2 (all but births) and the receipt readback on light; own appends adopted (`sessionAdopt`); anchor identity
+   cached per config. Still full: births (slice 2, delegated to aa75280bd04c5d700 on seat/birth-ground), ops 4/5
+   (asked read-path who takes them), the walk families (`sessionWalked`), fn/carried ops.
    (a) inventory what each `Opened` consumer reads (directory, authority, pins, seed/logStart exactness, the image's
    accepted records for historical receipts and walks); (b) give `OpenedServed` the missing fields as maintained
    values; (c) retype receivers family by family (birth first: `Held.of` already isolates it to directory +
