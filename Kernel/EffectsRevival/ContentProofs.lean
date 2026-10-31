@@ -1,7 +1,7 @@
 /-
-# `Effects/Revival/ContentProofs.lean` — `ContentComplete`, PROVED
+# `Kernel/EffectsRevival/ContentProofs.lean` — `ContentComplete`, PROVED
 
-The content declaration's own obligation (`Effects/Revival/Statements.lean`, audited):
+The content declaration's own obligation (`Kernel/EffectsRevival/Statements.lean`, audited):
 every content command the source lowering admits writes only fields in its declared frame
 (`contentActionFrame`, action by action), never the blinding, and its emitted descriptor
 followed by the kernel's blinding rotation replays.  The frame half is a syntactic
@@ -12,7 +12,7 @@ write touches the blinding.
 -/
 module
 
-public import Effects.Revival.Statements
+public import Kernel.EffectsRevival.Statements
 public import Effects.Revival.EngineProofs
 public import Theory.AssertAxioms
 

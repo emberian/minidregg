@@ -1,13 +1,11 @@
 /-
 # Effects — the open handler registry (ATLAS §7).
+
+The derivation engine: Kernel and Compiler consume what it derives, so it imports only
+Mathlib, Lean core and Theory (`scripts/check-import-boundary.sh`). Its keystones over the
+deployed kernel (the content, prepare, host-teeth, commuting and activity proofs) and its
+first declaration (`moveEffect`) are consumers and live under `Kernel/` (`Kernel.lean`).
 -/
 import Effects.Placeholder  -- carve marker: the REMAINING registry carve — full declaration vocabulary (view/touched/guard AST/δ/authority, floor obligations as proof fields), the open registry + dispatch, the weld to the emit path, frame/reject teeth, the witness generator — [EFFECT-registry]
-import Effects.EffectSpec  -- the DERIVATION ENGINE's first declaration: EffectSpec (Op + State + sem) → derive : DerivedEffect (term + executor + descriptor, laws as PROOF FIELDS) — executor-equality (derived_agrees/executor_unique) + descriptor-faithfulness (descriptor_faithful) FREE by initiality (Compiler.Signature REUSED, zero induction at use sites); moveEffect (Kernel.move, the conservation spine) derived end-to-end with satisfiable+teeth witnesses on k0 (ghost reading ≠ derived, tampered descriptor ≠ effect, move_conserves inherited)
-import Effects.Revival.Statements  -- the widened declaration (Substrate, EffectSpec, Handler, Registry, dispatch) and its keystones STATED: EngineKeystone, CompletenessKeystone, LiveKeystone (ContentAgreement + ContentComplete), HostKeystone (the migration gate, known false today); docs/EFFECTS-REVIVAL.md; supersedes Effects.EffectSpec at the first migration commit
+import Effects.EffectSpec  -- the DERIVATION ENGINE: EffectSpec (Op + State + sem) → derive : DerivedEffect (term + executor + descriptor, laws as PROOF FIELDS) — executor-equality (derived_agrees/executor_unique) + descriptor-faithfulness (descriptor_faithful) FREE by initiality (Theory.Signature REUSED, zero induction at use sites); its first declaration, moveEffect over Kernel.move, is a consumer: Kernel/MoveEffect.lean
 import Effects.Revival.EngineProofs  -- the engine and completeness keystones PROVED, with every satisfiable/teeth/premise witness of the two-entry pole (kernel-free closure)
-import Effects.Revival.ContentProofs  -- ContentComplete PROVED: every content command writes only its declared fields (contentActionFrame, per action), never the blinding, and its descriptor plus the rotation replays
-import Effects.Revival.ActivityStatements  -- an activity effect refuses at two levels, STATED (TwoLevels on any yield judgment; today's commitYield the satisfiable pole, the collapsed judgment the teeth); migration step 2's gate
-import Effects.Revival.ActivityProofs  -- the two refusal levels PROVED of today's commitYield, with the premise inhabitant (a transfer to the purse, refused `reserved`) and the collapsed judgment refuted
-import Effects.Revival.HostTeethProofs  -- HostTeeth PROVED: the twin half by noTwin, the ghost half at a blinded cell (the dispatch's post blinding is a ratchet step, the ghost's unchanged), kernel-checked throughout (ratchet_moves, a cSHAKE256 fact, by decide +kernel)
-import Effects.Revival.PrepareProofs  -- PrepareFactors contentSpec PROVED: the deployed prepareTarget of a content target (post packed, refusals named) IS the content handler's registry dispatch followed by the payload-blind genericChecks; the migration commit's gate
-import Effects.Revival.CommutingProofs  -- commuting appends through the declaration: a line over a moved root lands at the blinded cell (HostMovedRootAccepted), commutes is fixed from both sides (ContentCommuteTeeth), and CommutingPrepare

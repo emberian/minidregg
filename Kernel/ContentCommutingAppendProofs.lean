@@ -3,7 +3,7 @@
 
 The statements and their ATLAS fields are in `Kernel.ContentCommutingAppend`; this file
 proves all of them.  `CommutingPrepare`'s accepting pole over the Effects declaration,
-`HostMovedRootAccepted`, is proved in `Effects.Revival.CommutingProofs`.
+`HostMovedRootAccepted`, is proved in `Kernel.EffectsRevival.CommutingProofs`.
 -/
 module
 
