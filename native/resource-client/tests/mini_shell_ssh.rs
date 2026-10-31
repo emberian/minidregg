@@ -7,6 +7,11 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+/// Writing an executable while another test thread forks leaves the write descriptor open in that
+/// child until it execs, and exec of the file then fails with ETXTBSY. Every write of a file a
+/// test executes, and every spawn, holds this lock.
+static FORK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 struct World {
     root: PathBuf,
 }
@@ -19,6 +24,7 @@ impl Drop for World {
 
 impl World {
     fn new(name: &str) -> World {
+        let _fork = FORK.lock().unwrap_or_else(|e| e.into_inner());
         let root = std::env::temp_dir().join(format!("mssh-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("lib")).unwrap();
@@ -28,11 +34,16 @@ impl World {
         fs::copy(env!("CARGO_BIN_EXE_mini-line"), root.join("lib/mini-shell-ssh")).unwrap();
         fs::write(root.join("lib/motd.txt"), "welcome\n\n").unwrap();
         fs::write(root.join("lib/notice.txt"), "re-genesis").unwrap();
-        World::script(&root.join("bin/mini"), "[ \"$1\" = line-resident ] && exit 1\nprintf '%s\\n' \"$@\"\necho --env--\nenv | grep '^MINI_' | sort\nexit 0\n");
+        World::write_script(&root.join("bin/mini"), "[ \"$1\" = line-resident ] && exit 1\nprintf '%s\\n' \"$@\"\necho --env--\nenv | grep '^MINI_' | sort\nexit 0\n");
         World { root }
     }
 
     fn script(path: &Path, body: &str) {
+        let _fork = FORK.lock().unwrap_or_else(|e| e.into_inner());
+        World::write_script(path, body);
+    }
+
+    fn write_script(path: &Path, body: &str) {
         fs::write(path, format!("#!/bin/sh\n{body}")).unwrap();
         fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
     }
@@ -55,8 +66,12 @@ impl World {
         if let Some(line) = line {
             command.env("SSH_ORIGINAL_COMMAND", line);
         }
-        command.envs(env.iter().copied());
-        command.output().unwrap()
+        command.envs(env.iter().copied()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
+        let child = {
+            let _fork = FORK.lock().unwrap_or_else(|e| e.into_inner());
+            command.spawn().unwrap()
+        };
+        child.wait_with_output().unwrap()
     }
 
     /// The stand-in's arguments and its `MINI_*` environment.
