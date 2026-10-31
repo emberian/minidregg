@@ -215,6 +215,25 @@ applied):
   no store lookup.
 
 **Owed, in order:**
+00. **Round-8 audit of `receiver_prf_hop`** (staging e46f16dcd; QueryTest, run, run_twin, Twin,
+   roots_factor judged sound), required before the Draft move:
+   - **Transcript = roots plus openings.** Define the published transcript as the run's roots and
+     the reveals a reader receives (key-independent: twins share the whole kept index, so the reveals
+     of `revealFor` over equal indexes are equal); prove it factors through the masks like
+     `roots_factor`.
+   - **Host obligation beside custody:** store bytes, the blinding value included, never reach a
+     view. Posting or archiving durable record bytes (the `Kernel/FnArchive.lean` caveat in
+     `ReceiptEventHiding`) puts the mask in the view and voids `CustodyPrf`'s premise. Name it as a
+     Prop and carry it.
+   - **Adaptivity.** Today `store` and `patches` are fixed outside `∀ a b`, so both worlds and every
+     strategy see one transcript (non-adaptive). Required, preferably (b): an adaptive run where
+     patch `i` is a function of the strategy, the world bit and the roots before `i`; prove the
+     roots are a function of the mask tuple at the fixed versions, so the same admitted `QueryTest`
+     applies. (a) is the fallback: `storeOf`/`patchesOf : Strategy → Bool → …`, each `(a, b)` with
+     its own skeleton, scope recorded as non-adaptive. Either way the window must not depend on `b`
+     (equal patch counts across worlds: versions are `0 … n`).
+   - When the hop is linked to the deployed host, "the host publishes exactly one run" becomes a
+     premise (`AtMostOneSuccessor` over the host's accepted set).
 0. **The hiding goals out of the Draft namespace** (`Kernel/BlindedCellHiding.lean`), statement
    first, with `CustodyPrf` as the PRF premise of `StandardModelHidingGoal` / `HybridReduction`'s
    first hop and `AtMostOneSuccessor` as the fork premise.
