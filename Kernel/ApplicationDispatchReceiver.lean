@@ -295,8 +295,7 @@ def receiveAdmitted (config : Config) {target : Durable}
     (constraint : Option RouteConstraint)
     (refusal : RefusalAtTip config old ingress) : IO (Result config) := do
   let derived := admitted.toDerived
-  if old.opened.durable.image.accepted.findIdx?
-      (fun record => record.transactionId == derived.intent.transactionId) != none then
+  if old.opened.durable.firstIndex derived.intent.transactionId != none then
     return .rejected "dispatch transaction identity already used"
   if constraint.isSome && !(constraint.all (routeMatches config admitted)) then
     return .noRecordRefused refusal

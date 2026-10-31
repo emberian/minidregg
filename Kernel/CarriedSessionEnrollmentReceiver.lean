@@ -33,8 +33,7 @@ def lookupVerified {config : Config} {anchor : Opened config} {target : Durable}
     Option (Except String Receipt) := do
   let some tx := transaction config ingress
     | some (.error "noncanonical enrollment signed command")
-  let some index := verified.opened.durable.image.accepted.findIdx?
-      (fun record => record.transactionId == tx)
+  let some index := verified.opened.durable.firstIndex (tx)
     | none
   let some record := verified.opened.durable.image.accepted[index]?
     | some (.error "enrollment original record unavailable")

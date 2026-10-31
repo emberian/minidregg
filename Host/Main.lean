@@ -6833,9 +6833,11 @@ def runCommandObjectiveQuote (_arguments : List String) (_configPath _command : 
           let some nonce := intentNonce.toNat?
             | throw (IO.userError "intent nonce must be canonical decimal")
           unless toString nonce == intentNonce do throw (IO.userError "intent nonce must be canonical decimal")
-          let walked ← IO.ofExcept (← NativeHostSession.startWalked config)
+          -- The quote reads the validated opening only: the checkpoint + suffix open, not a
+          -- genesis re-admission walk (law 17; the admission of the invocation checks it all).
+          let opened ← IO.ofExcept (← NativeHost.openExisting config)
           writeJson outputPath (← IO.ofExcept
-            (← Minidregg.Host.ObjectiveInvocationQuote.quoteBytes config walked.verified.opened bytes nonce))
+            (← Minidregg.Host.ObjectiveInvocationQuote.quoteBytes config opened bytes nonce))
           pure 0
   | _ => throw (IO.userError usage)
 
@@ -6946,9 +6948,9 @@ def runCommandPayClaimStatus (_arguments : List String) (_configPath _command : 
           let some text := String.fromUTF8? bytes.toByteArray
             | throw (IO.userError "paid status JSON is not UTF-8")
           let source ← IO.ofExcept (Minidregg.Host.Json.parse text)
-          let walked ← IO.ofExcept (← NativeHostSession.startWalked config)
+          let opened ← IO.ofExcept (← NativeHost.openExisting config)
           writeJson output (← IO.ofExcept
-            (Minidregg.Host.PayClaims.statusLoadedJson config walked.verified.opened source))
+            (Minidregg.Host.PayClaims.statusLoadedJson config opened source))
           pure 0
   | _ => throw (IO.userError usage)
 

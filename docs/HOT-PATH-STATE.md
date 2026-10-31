@@ -1,16 +1,60 @@
-# HOT-PATH state — 2026-10-30, hot-path successor (Opus, agent a86738fc)
+# HOT-PATH state — 2026-10-31, hot-path successor (Opus, agent a86738fc)
 
 Law 17: a fixed-size operation may cost at most O(log n) in accumulated history
 and state, or O(changed · log n) for a multi-entry change. Full exports must be
-charged for their output. K-HIDE-ROTATE stays. Ember approved trusting sealed
-snapshots on our own filesystem (the Host already opens from its MAC'd checkpoint).
+charged for their output; audits (`audit`, `store-audit`, `pay-claim-audit`) are
+genesis replays by design. K-HIDE-ROTATE stays.
 
-Branch `lane/hot-path-cold` (Mac worktree `/Users/ember/dev/minidregg-lanes/hot-path-cold`;
-hbox warm tree `/home/hbox/lanes/hpc/src`, packages hard-linked from the integrator's,
-native outputs `/home/hbox/lanes/hpc/{native-out,consent-out,artifacts}`; hbox scratch
-`/ci/hpc`, where `x1s/` is a copy of the explorer's x1 Store at head 769).
+**Threat model (ember, 2026-10-31):** "We trust the storage device. That isn't
+'operator trust', that's just the threat model we're working within. … we DO NOT
+need validity proofs." So every open, provider start and walk resumes from the
+Store's MAC-verified checkpoint plus the suffix; what is checked is every record
+after the snapshot. CONSENT-OWN is retired, replaced by CONSENT-STORE
+(Kernel/ConsentAnchor.lean). Anchors bind to the consent statement epoch and the
+settings, not the executable, so they survive ships.
 
-## The restart / certify / story reds: what they are
+Branch `lane/hot-path-cold`, on the Lean 4.35 bump cdb399b47 (Mac worktree
+`/Users/ember/dev/minidregg-lanes/hot-path-cold`). hbox: `/home/hbox/lanes/hpc/src`
+is a 4.30 tree (the old-base measurement variant `measure/hpc-oldbase`, which opens
+x1's be4ef7510-epoch Store); a 4.35 tree is seeded from the integrator's after its bump
+build. hbox scratch `/ci/hpc` (`x1s/` = a copy of x1's Store at head 769).
+Integrator: aeb671706eb3f70d7.
+
+## The genesis / full-history sweep (law 17), in rank order
+
+From the sweep of 2026-10-31 (agent abda12fb71c02d194, read-only; file:line on the
+tree at that date). H = log height, k = entries returned. Status: **fixed** (on the
+lane, check status in the next section), *open*, or audit (by design).
+
+| # | Path | Cost | Reached by | Fix | Status |
+|---|---|---|---|---|---|
+| 1 | `objective-quote` → `startWalked` → `verifyLoaded` (Host/Main) | O(H) open + O(H) re-admission | every Objective invocation | the checkpoint+suffix opening (`openExisting`); the quote reads only `.opened` | **fixed** |
+| 2 | `since` view: `sinceFrom` over all of `accepted` (NativeObservationController) | O(H) decodes per query | every signed `since` | `sinceView` starts at the first record above `after` (`sinceFrom_skip`, `sinceView_eq`); a `drop` pointer walk remains | **fixed** (decode cost); the walk needs an indexed record store |
+| 3 | `tail` view: `streamPayload` `accepted.find?` per entry | O(k·H) compares | every stream tail (chat, scenes) | TxIndex + indexed records | *open* (needs an indexed record store) |
+| 4 | `sessionWalked` / `startWalked` → `verifyLoaded` (NativeHostSession) | O(H) re-admission | first walk-provenance request per Host process; every per-verb Host | walk from the Store checkpoint (CONSENT-STORE's anchored basis for the walk families) | *open*: the walk's certificate lists (Prior*) are minted only by genesis admission; restate them over trusted storage |
+| 5 | `refreshWalked` → `extendVerified` prefix encode+compare | O(H) per growth | every walk-provenance request after an append | extend the retained walk from its own target with `extendFrom`'s append proof (`extendVerifiedAppended`) | **fixed** |
+| 6 | `*Lookup` `findIdx?` + `receipts[index]?` (receipts = `toList`) | O(H) | every `*-lookup`, readback confirm | `Loaded.firstIndex` (TxIndex, `firstIndex_eq`) + `Verified.receiptAt` (`receiptAt_eq`) | **fixed** (the `accepted[index]?` list walk remains) |
+| 7 | receiver idempotency `findIdx? … != none` | O(H) per submit | these families' submits | `Loaded.firstIndex` | **fixed** |
+| 8 | Fn scans (FnSelectedPollReleaseLink, FnOriginOutbox, FnConsumerProgress, FnCatalogOwnRProgress, FnReplyConsumption) | O(H) | Fn poll/ACK/consume | index at admission | *open* |
+| 9 | `inspect-stop-claim`, `selected-release-fn-ack`, `fn-empty-page-ack`: `load` + `verifyLoaded` | O(H) | per command | as #4 | *open* |
+| 10 | `pay-claim-status` (startWalked) | O(H) | per command | `openExisting` | **fixed**; `pay-claim-audit` and `diagnose-completion` stay audits |
+| 11 | every one-shot Host verb: `start` → `loadChained` reads every entry, MACs every tag, decodes every record, rebuilds six indexes | O(H) per process | every Host process (the CLI spawns one per verb unless `--socket`) | checkpoint carries the indexes; read checkpoint + suffix only | *open* (the biggest constant left) |
+| 12 | `story new`: ~22 separate submissions | 22 × per-write | each `story new` | batch the template's invokes; per-write cost (rows 11, 13) | *open* |
+| 13 | consent fallbacks: `verifyInitial` / `refresh` suffix failure and `upgrade` (`Basis.full?`) → genesis `verifyLoaded` | O(H) | rare suffix failures; ops 236/224 once per provider | as #4 | *open* |
+| 14 | `atPrefixFrom` from the seed when no kept checkpoint ≤ height | O(height) | `at` reads below the open base | nearest retained checkpoint ≤ height | *open* |
+| 15 | `audit`, `store-audit`, `pay-claim-audit` | O(H) | operator / `mini pay --action audit` | audits by design; keep them out of routine flows | audit |
+| 16 | FnEvidence `verifyBytes` → `loadImage` (whole package prefix) | O(H) | `verify-evidence`, grain-origin, portable-verify-fn | checkpoint + suffix packages | *open* |
+| 17 | JointSourcePrefixValidation (`loadImage` + `verifyLoaded` per proposal) | O(H)/block, O(H²) total | consensus proposals | validate the block suffix over the retained tip | *open* |
+| 18 | GenericSimplexParticipant `reloadSource`: `load` + `extendVerified` | O(H) | after a lost reply / CAS conflict | `extendFrom` + `extendVerifiedAppended` | *open* |
+| 19 | CarriedSegment `buildTarget` → `loadImage` | O(H) | carry receive/plan | resume from the source checkpoint | *open* |
+| 20 | `retainedDispatchReceipt` `accepted.any`; RetainedSegmentInspection `findIdx?` by event bytes | O(H_src) | carried-registry dispatch | index by event-bytes digest | *open* |
+
+Consent (CONSENT-STORE, sweep rows 13 partly): a provider start is the Store's
+checkpoint + the suffix (no genesis fold); catch-up is O(records since the client last
+looked), each natively admitted (~30 ms at head ~1,000).
+
+## Diagnosis that started this (2026-10-30, be4ef7510, x1 world on hbox)
+
 
 Measured on hbox against the explorer's x1 world (be4ef7510, heads 769 to 1,000).
 
@@ -38,49 +82,16 @@ Per admitted record, the genesis audit's own timing (`MINI_AUDIT_TIMING=1`, x1s,
 admission (event-v3) ~17 ms flat, advance ~6-9 ms flat, post-validation **grew 5 → 17.5 ms
 with height** on be4ef7510.
 
-## Landed on lane/hot-path-cold
 
-| sha | what | measured |
+## Landed / on the lane
+
+| sha (on cdb399b47) | what | measured / checked |
 |---|---|---|
-| b881aeb85 (was dbe692893) | `bytesBEq`: whole-cell byte comparisons (cellsLawfulFrom, decodeRowFrom, loadDeploymentFromAt, the served twins) by object identity first. `==` on `List UInt8` is `List.beq`, which `listDecEq`'s csimp never reached, so every advance walked every cell's bytes. `bytesBEq_eq` keeps every `_eq` statement. | genesis audit at 769: 38.3 → 32.6 s; post-validation flat 4.4-4.9 ms per record at every height (was 5 → 17.5) |
-| 29f81ea1d (was d78ee272b) | a consent provider's own bases (`retainOwn` -> `ownOfGenesis`, after every admission) read cells off the cached enumeration (`ConsentAnchor.headState`, `headState_eq` is `rfl`) instead of `State.ofSnapshot`, whose `Image.cellIds` flattens and dedups every write of the log: 68% of the provider's CPU per write (dwarf call graphs of the sponsor's resident). | sponsor shell write (doc append + submit) through a copied workspace, x1 near head 1,000: 2.6 s → 1.65 s each, flat over 6 writes |
-| 24a14656f | `OwnBase.state : Thunk State`: own bases re-minted per admission no longer materialize every cell (16% of the provider's CPU per write after d78ee272b); `ownBaseOf` forces only the base a past read resumes from. Also `scripts/consent/own-base-plant.lean` compiles again (still stops at `invalid bootstrap seed` when run: its fixture seed is stale). | built (host + consent) on main 7d90da717; measurement pending (the new epoch cannot open x1; the old-base variant build was stopped by the disk pause) |
-| 2dfa8372e | **UNCHECKED** (written during the hbox disk pause). The Host's clean end sealed via `sealHead`, a second complete cold open of the Store (3.6 s at 769 idle); `mini serve` dies on SIGTERM, so the journey's 10 s grace for the Host child was overrun on a loaded box: JDV row 140 red on be4ef7510 ("Host child outlived its server"), 13 demo steps shadowed. `sealSession` refreshes and seals the held opening. | lane-check of Host/Main owed |
-
-Checked: lane-check of every changed file and its direct importers on hbox; native Host and
-consent built at d78ee272b (`lane-build.sh host`, `consent`, EXIT 0).
-
-After both, a shell write's CPU splits about evenly between the codec resident (JSON hex
-rendering, ByteArray/List marshalling; flat profile) and the consent provider (cell-table
-lookups with big-Nat keys; flat); the serving Host is ~3%. A retained anchor is bound to the
-exact consent executable and settings, so **every candidate upgrade makes every client's next
-provider walk from genesis** (48 s at head ~1,000 with the new binary vs 9.2 s resuming): one
-more reason for option 1 below to carry across binaries of the same Store epoch.
-
-## Open, in order
-
-1. **Consent cold start** (ruling requested from root, 10-30): option 1 = the provider seals
-   its own state under a client key in its anchor directory and resumes from it (keeps
-   CONSENT-OWN; draft statement in the session scratchpad `hpc-consent-sealed-statement.md`;
-   statement to the auditor first; Rust frames in mini-sdk consent.rs); option 2 = resume
-   from the Store's MAC'd checkpoint (retires CONSENT-OWN: a weakening, needs explicit approval).
-1b. **Anchors across a ship** (for the root, with item 1). `mini_sdk::local::binding` hashes the
-   provider's path, inode, size and mtimes with the settings bytes, so even a byte-identical
-   re-install voids every client's anchor, and every ship makes each client's next provider
-   walk from genesis. Choices: (a) bind to the bytes' sha256 plus settings: as sound as today,
-   but it hashes a ~170 MB provider on every command and saves only same-path re-installs
-   (each candidate installs under its own path): not worth it; (b) bind to the Store epoch, the factory template and the
-   settings (not to `receiverSemanticsFrom`, which hashes the compiled manifest and moves every
-   ship): an anchor admitted by any provider of the same epoch and template is then trusted.
-   That is a new trust premise (an older provider's admission stands until the next epoch), and
-   it needs an explicit rule. `mini consent-full-ready` remains the full re-verification.
-2. **Per-record admission** (~17 ms event-v3, ~140 ms each event-v2): profile with call graphs
-   (frame pointers are absent; dwarf perf of the whole audit captured only start-up).
-3. **Consent catch-up is O(records since the client last looked)** for every client: N
-   members' residents each re-admit every record. Design question for ember/council.
-4. **story new**: fewer submissions (the index edits, binds and links are 8 of 22) and the
-   per-line client overhead.
-5. The whole-cell write path (inventory below); blinded-cell re-salting is private cells'.
+| f352c9c10 | `bytesBEq`: whole-cell byte comparisons by object identity first | genesis audit at 769: 38.3 → 32.6 s; post-validation flat 4.4-4.9 ms/record (was 5 → 17.5); on staging |
+| 470fb79c9, bd1c8fc40 | own-base cost fixes (cached cells; `Thunk` state) | write 2.6 → 1.65 s; **superseded** by 9925241bd (own bases deleted) |
+| 1a4f3a623 | the Host's clean end seals the held session (no second cold open; JDV row 140) | check on the 4.35 tree owed |
+| 9925241bd | CONSENT-STORE: providers start from the Store's checkpoint; anchors survive ships (`anchor_binding`) | mini-sdk consent tests 11/11 on the Mac; Lean check on the 4.35 tree owed |
+| (next) | sweep rows 1, 2, 5, 6, 7, 10 | Lean check owed |
 
 ## Remaining accumulated-size costs (source inventory)
 

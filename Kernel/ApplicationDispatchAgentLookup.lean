@@ -33,8 +33,7 @@ def lookupVerified {config : Config} {target : Durable}
     selection ingress.dispatch.parent
   let transactionId := DeclaredResourceController.transactionId
     ingress.dispatch.dispatch.domain ingress.dispatch.dispatch.semantics command
-  let some index := verified.opened.durable.image.accepted.findIdx?
-      (fun record => record.transactionId == transactionId)
+  let some index := verified.opened.durable.firstIndex (transactionId)
     | .ok none
   let some record := verified.opened.durable.image.accepted[index]?
     | .error .nativeHistoryUnavailable

@@ -39,8 +39,7 @@ def lookupVerified {config : Config} {anchor : Opened config} {target : Durable}
       signedCommand then throw .malformed
   let transactionId := DeclaredResourceController.transactionId ingress.dispatch.domain
     ingress.dispatch.semantics signedCommand
-  let some index := verified.opened.durable.image.accepted.findIdx?
-      (fun record => record.transactionId == transactionId)
+  let some index := verified.opened.durable.firstIndex (transactionId)
     | return none
   let some record := verified.opened.durable.image.accepted[index]?
     | throw .nativeHistoryUnavailable
@@ -246,8 +245,7 @@ private def receiveAdmitted {config : Config} {anchor : Opened config} {target :
     IO (Result config anchor) := do
   if constraint.isSome && !(constraint.all (routeMatches admitted)) then
     return .noRecordRefused refusal
-  if old.opened.durable.image.accepted.findIdx?
-      (fun record => record.transactionId == admitted.intent.transactionId) != none then
+  if old.opened.durable.firstIndex admitted.intent.transactionId != none then
     return .rejected "dispatch pre-CAS request refused"
   let (freshCasWinner, result) ← DurableReceiverIO.receiveLoadedDetailedWithFresh
     config.transport rootBytes old.opened.durable admitted.intent
