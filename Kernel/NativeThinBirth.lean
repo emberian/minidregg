@@ -885,9 +885,14 @@ theorem honest_plan_accepted : HonestPlanAcceptedStatement := by
   intro config durable' opened author wanted draftBytes capabilities draft plan validated purpose
     grain decodedDraft canonical authored planned
   unfold NativeHost.prepareLoaded NativeHost.prepareOrdinaryBirth NativeHost.ordinaryBirthSlots
-    at planned
+    NativeHost.prepareOrdinaryBirthOn NativeHost.ordinaryBirthSlotsOn at planned
+  -- The full shape's ground reads the opened image's height, authority and world root.
+  have groundHeight : config.genesisHeight + opened.ground.height =
+      NativeHost.logicalHeight config opened.durable := rfl
+  have groundAuthority : opened.ground.authority = opened.authority.snapshot := rfl
+  have groundRoot : opened.ground.worldRoot = opened.durable.worldRoot := rfl
   simp only [grain, Option.isSome_none, Bool.false_eq_true, if_false, bind, Except.bind,
-    NativeHost.need, decodedDraft] at planned
+    NativeHost.need, decodedDraft, groundHeight, groundAuthority, groundRoot] at planned
   generalize NativeHost.logicalHeight config opened.durable = height at planned
   cases prep : ResourceBirthController.Concrete.prepareDraft config.profile.compilerProfile
       config.profile.disabledEvaluators config.deployment opened.pins opened.ground draft height with

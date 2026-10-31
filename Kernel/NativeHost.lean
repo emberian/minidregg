@@ -168,6 +168,7 @@ theorem durableRefusal_tailBound (head certified bound : Nat) :
 private def birthRejection : ResourceBirthReceiver.Reject → String
   | .malformedIngress => "malformed ingress"
   | .transactionConflict => "transaction identity conflict"
+  | .undeclaredTransaction => "transaction identity undeclared"
   | .admission reason => s!"admission: {repr reason}"
   | .durable (.tailBound head certified bound) => s!"head {head} certified {certified} bound {bound}"
   | .durable reason => s!"durable: {repr reason}"
@@ -182,10 +183,12 @@ private def grainBirthRejection : GrainResourceBirthReceiver.Reject → String
   | .tariffUnavailable => "grain birth tariff unavailable"
   | .grainPreparation _ => "grain preparation refused"
   | .durable _ => "durable refused"
+  | .undeclaredTransaction => "transaction identity undeclared"
 
 private def birthReason : ResourceBirthReceiver.Reject → RefusalReason
   | .malformedIngress => .malformed
   | .transactionConflict => .conflict
+  | .undeclaredTransaction => .operationRejected
   | .admission _ => .operationRejected
   | .durable (.tailBound ..) => .tailBound
   | .durable (.overBound ..) => .overBound
@@ -335,32 +338,46 @@ def prepareInvokeOn (config : Config) (ground : ServedBasis.Ground config.deploy
   pure ⟨config.deployment.domain, profile.semantics, ground.worldRoot, height, .invoke bytes,
     targets ++ observations ++ [authority]⟩
 
-/-- An ordinary birth draft prepared on the opened image at its logical height, reading the
-directory and authority the opened image holds (`Held.of`): no directory row and no authority
-cell is decoded for it. -/
+/-- The keys an ordinary birth plan reads from the history: the draft's transaction id and
+its replay marker's nullifier (`ResourceBirthReceiver.birthKeys` of the ingress it becomes). -/
+def birthPlanKeys (config : Config) (descriptor : Descriptor CanonicalCellRegistry.registry) :
+    DurableView.Keys :=
+  ⟨[descriptor.transactionId],
+    [ResourceBirthReceiver.birthNullifier config.deployment.domain descriptor.authorityNullifier]⟩
+
+/-- An ordinary birth draft prepared on a ground at its logical height, reading the directory
+and authority the ground holds: no directory row and no authority cell is decoded for it. -/
+def prepareOrdinaryBirthOn (config : Config) (ground : ServedBasis.Ground config.deployment)
+    (pins : FactoryPins) (descriptor : Descriptor CanonicalCellRegistry.registry) :
+    Except ResourceBirthController.Concrete.PreparationReject
+      (ResourceBirthController.Concrete.PreparedDraft config.profile.compilerProfile
+        config.deployment pins ground descriptor) :=
+  ResourceBirthController.Concrete.prepareDraft config.profile.compilerProfile
+    config.profile.disabledEvaluators config.deployment pins ground
+    descriptor (config.genesisHeight + ground.height)
+
+/-- `prepareOrdinaryBirthOn` the opened image's full-shape ground (`Opened.ground`). -/
 def prepareOrdinaryBirth (config : Config) (opened : Opened config)
     (descriptor : Descriptor CanonicalCellRegistry.registry) :
     Except ResourceBirthController.Concrete.PreparationReject
       (ResourceBirthController.Concrete.PreparedDraft config.profile.compilerProfile
-        config.deployment opened.pins opened.durable descriptor) :=
-  ResourceBirthController.Concrete.prepareDraft config.profile.compilerProfile
-    config.profile.disabledEvaluators config.deployment opened.pins opened.durable
-    (ResourceBirthController.Concrete.Held.of opened.directory opened.authority) descriptor (logicalHeight config opened.durable)
+        config.deployment opened.pins opened.ground descriptor) :=
+  prepareOrdinaryBirthOn config opened.ground opened.pins descriptor
 
 /-- The finalized draft and signing slots of a prepared ordinary birth: the factory, the
 authority, one per allocation and one per resource source. -/
-def ordinaryBirthSlots (config : Config) (opened : Opened config)
-    {descriptor : Descriptor CanonicalCellRegistry.registry}
+def ordinaryBirthSlotsOn (config : Config) (ground : ServedBasis.Ground config.deployment)
+    {pins : FactoryPins} {descriptor : Descriptor CanonicalCellRegistry.registry}
     (prepared : ResourceBirthController.Concrete.PreparedDraft config.profile.compilerProfile
-      config.deployment opened.pins opened.durable descriptor)
+      config.deployment pins ground descriptor)
     (capabilities : List CapabilityId) : Except String (Draft × List SigningSlot) := do
-  let height := logicalHeight config opened.durable
+  let height := config.genesisHeight + ground.height
   let profile := config.profile
   check (capabilities.length == prepared.descriptor.resourceBatch.operations.length)
     "birth source capability count mismatch"
   let forBranch := fun (role index : Nat)
       (branch : ResourceBirthPolicyController.Concrete.Branch prepared.descriptor) =>
-    slot prepared.prepared.authority.snapshot prepared.descriptor.authorityNullifier role index
+    slot ground.authority prepared.descriptor.authorityNullifier role index
       (ResourceBirthPolicyController.Concrete.branchRequest (profile := profile)
         prepared.prepared height branch)
   let factory ← forBranch 0 0 .factory
@@ -371,6 +388,13 @@ def ordinaryBirthSlots (config : Config) (opened : Opened config)
     (fun index => forBranch 3 index.val (.source index))
   pure (.birth (CanonicalCellRegistry.sourceEncoding.codec.encode prepared.descriptor) capabilities,
     factory :: authority :: allocations ++ sources)
+
+def ordinaryBirthSlots (config : Config) (opened : Opened config)
+    {descriptor : Descriptor CanonicalCellRegistry.registry}
+    (prepared : ResourceBirthController.Concrete.PreparedDraft config.profile.compilerProfile
+      config.deployment opened.pins opened.ground descriptor)
+    (capabilities : List CapabilityId) : Except String (Draft × List SigningSlot) :=
+  ordinaryBirthSlotsOn config opened.ground prepared capabilities
 
 def prepareLoaded (config : Config) (opened : Opened config) (draft : Draft) :
     Except String SigningPlan := do
@@ -897,20 +921,27 @@ def invokeRefusal (config : Config) (opened : Opened config)
 
 /-- The plan-time verdict on a prepared ordinary birth: its pending admission at the image's
 logical height, then the factory branch's law verdict (`Pending.factoryRefusal`). -/
-def preparedBirthRefusal (config : Config) (opened : Opened config)
+def preparedBirthRefusalOn (config : Config) (ground : ServedBasis.Ground config.deployment)
     (grants : List NativeObservationCodec.GrantRef)
-    {descriptor : Descriptor CanonicalCellRegistry.registry}
+    {pins : FactoryPins} {descriptor : Descriptor CanonicalCellRegistry.registry}
     (prepared : ResourceBirthController.Concrete.PreparedDraft config.profile.compilerProfile
-      config.deployment opened.pins opened.durable descriptor) : Option Refusal :=
+      config.deployment pins ground descriptor) : Option Refusal :=
   match ResourceBirthPolicyController.Concrete.preparePending
-      (profile := config.profile) prepared.prepared (logicalHeight config opened.durable) with
+      (profile := config.profile) prepared.prepared (config.genesisHeight + ground.height) with
   | .error reason => some ⟨.operationRejected, s!"birth admission: {repr reason}", none⟩
   | .ok pending =>
       match pending.factoryRefusal with
       | none => none
       | some none => some ⟨.operationRejected, "birth factory law unavailable", none⟩
       | some (some law) => some (ComposedLawDiagnostics.publicRefusal
-          (grantFields config opened grants config.deployment.factoryId) law)
+          (grantFieldsOn config ground grants config.deployment.factoryId) law)
+
+def preparedBirthRefusal (config : Config) (opened : Opened config)
+    (grants : List NativeObservationCodec.GrantRef)
+    {descriptor : Descriptor CanonicalCellRegistry.registry}
+    (prepared : ResourceBirthController.Concrete.PreparedDraft config.profile.compilerProfile
+      config.deployment opened.pins opened.ground descriptor) : Option Refusal :=
+  preparedBirthRefusalOn config opened.ground grants prepared
 
 /-- An ordinary birth's factory law, judged on the signed observation's channel at plan time,
 as `invokeRefusal` judges an invocation's target laws. A grain-backed (application) birth is
@@ -940,19 +971,25 @@ def birthRefusal (config : Config) (opened : Opened config)
 (`preparedBirthRefusal`, as `birthRefusal` judges) and the signing slots
 (`ordinaryBirthSlots`, as `prepareLoaded` plans) both read the same preparation. Its refusals
 and its plan are `birthRefusal`'s and `prepareLoaded`'s on the same draft. -/
+def prepareOrdinaryBirthAuthorizedOn (config : Config) (ground : ServedBasis.Ground config.deployment)
+    (pins : FactoryPins) (grants : List NativeObservationCodec.GrantRef)
+    (descriptor : Descriptor CanonicalCellRegistry.registry)
+    (capabilities : List CapabilityId) : Except Refusal SigningPlan := do
+  let prepared ← (prepareOrdinaryBirthOn config ground pins descriptor).mapError
+    fun reason => ⟨.operationRejected, s!"birth preparation: {repr reason}", none⟩
+  if let some refusal := preparedBirthRefusalOn config ground grants prepared then
+    throw refusal
+  let (finalized, slots) ← (ordinaryBirthSlotsOn config ground prepared capabilities).mapError
+    fun detail => ⟨.operationRejected, detail, none⟩
+  pure ⟨config.deployment.domain, config.profile.semantics, ground.worldRoot,
+    config.genesisHeight + ground.height, finalized, slots⟩
+
 def prepareOrdinaryBirthAuthorized (config : Config) (opened : Opened config)
     (grants : List NativeObservationCodec.GrantRef) (bytes : List UInt8)
     (capabilities : List CapabilityId) : Except Refusal SigningPlan := do
   let some descriptor := CanonicalCellRegistry.sourceEncoding.codec.decode bytes
     | throw ⟨.operationRejected, "noncanonical birth draft", none⟩
-  let prepared ← (prepareOrdinaryBirth config opened descriptor).mapError
-    fun reason => ⟨.operationRejected, s!"birth preparation: {repr reason}", none⟩
-  if let some refusal := preparedBirthRefusal config opened grants prepared then
-    throw refusal
-  let (finalized, slots) ← (ordinaryBirthSlots config opened prepared capabilities).mapError
-    fun detail => ⟨.operationRejected, detail, none⟩
-  pure ⟨config.deployment.domain, config.profile.semantics, opened.durable.worldRoot,
-    logicalHeight config opened.durable, finalized, slots⟩
+  prepareOrdinaryBirthAuthorizedOn config opened.ground opened.pins grants descriptor capabilities
 
 /-- Only an ordinary birth is judged here; every other draft passes to its own diagnosis. -/
 theorem birthRefusal_only_birth (config : Config) (opened : Opened config)
@@ -1012,8 +1049,14 @@ def prepareAuthorizedSession (config : Config) (full : IO (Opened config))
           -- An ordinary birth is prepared once for both its verdict and its plan.
           if let .birth birthBytes capabilities := draft then
             if (GrainResourceBirthHostCodec.sourceCodec.decode birthBytes).isNone then
-              return prepareOrdinaryBirthAuthorized config (← full) signed.challenge.intent.grants
-                birthBytes capabilities
+              -- Prepared on the light ground of a basis declaring its transaction id and marker.
+              let some descriptor := CanonicalCellRegistry.sourceEncoding.codec.decode birthBytes
+                | return .error ⟨.operationRejected, "noncanonical birth draft", none⟩
+              match ← light.basis (birthPlanKeys config descriptor) with
+              | .error detail => return .error ⟨.operationRejected, detail, none⟩
+              | .ok basis =>
+                  return prepareOrdinaryBirthAuthorizedOn config (.ofBasis basis) light.opened.pins
+                    signed.challenge.intent.grants descriptor capabilities
           match draft with
               | .revoke revokeBytes =>
                   -- The revocation's marker is read from the authenticated history (its basis).
@@ -3380,90 +3423,65 @@ def submitInvokeLight {F : Type} [Field F] [DecidableEq F] (transport : DurableR
               | .unavailable detail => return .unavailable detail.toUTF8.toList)
             ObjectiveBendAuthenticatedInputs.oracle
 
-/-- A birth's submission on the full shape (not yet ported to the light opening):
-an application (grain-backed) birth through `GrainResourceBirthReceiver`, an ordinary
-one through `ResourceBirthReceiver`, both reading the opened image's held directory and
-authority (`Held.of`). -/
-def submitBirthVia (transport : DurableReceiverIO.Transport) (config : Config)
-    (opened : Opened config) (bytes : List UInt8)
+/-- A birth's submission on the light opening: its keys (`birthKeys`, or `grainKeys` for an
+application birth) read from the authenticated history into a basis, the replay verdict and
+the admission on that basis's ground, the commit by `DurableServed.receiveServed`. The
+factory pins are the served state's (`OpenedServed.pins`). -/
+def submitBirthLight (transport : DurableReceiverIO.Transport) (config : Config)
+    (light : NativeHostLight.Light config) (bytes : List UInt8)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) : IO Outcome := do
-  let height := logicalHeight config opened.durable
   if (GrainResourceBirthPolicyController.decodeIngress bytes).isSome then
-    let tariff := GrainResourceBirthAdmission.grainTariffAt config.deployment opened.durable
-    let ambient : DeclaredResourceController.Ambient := ⟨config.federation, height⟩
-    match ← GrainResourceBirthReceiver.receiveLoaded config.profile config.deployment
-        opened.pins tariff ambient config.signature transport
-        opened.durable (ResourceBirthController.Concrete.Held.of opened.directory opened.authority) bytes with
+    match ← GrainResourceBirthReceiver.receiveServed config.profile config.deployment light.opened.pins
+        config.federation config.genesisHeight config.signature transport light.opening
+        (light.basisVia transport) bytes with
     | .historical receipt => return ← confirm .replayed receipt.transactionId receipt.eventId
     | .confirmed kind receipt => return ← confirm kind receipt.transactionId receipt.eventId
     | .rejected reason => return refused .operationRejected "grain-birth" (grainBirthRejection reason)
     | .contention => return .contention
     | .unavailable detail => return .unavailable detail.toUTF8.toList
     | .uncertain detail => return .uncertain detail.toUTF8.toList
-  match ← ResourceBirthReceiver.receiveLoaded config.profile config.deployment opened.pins
-      config.signature transport opened.durable (ResourceBirthController.Concrete.Held.of opened.directory opened.authority) height
-      bytes with
+  match ← ResourceBirthReceiver.receiveServed config.profile config.deployment light.opened.pins
+      config.signature transport config.genesisHeight light.opening (light.basisVia transport) bytes with
   | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused (birthReason reason) "birth" (birthRejection reason)
   | .contention => return .contention
   | .unavailable detail => return .unavailable detail.toUTF8.toList
   | .uncertain detail => return .uncertain detail.toUTF8.toList
 
-/-- The submission of every call ported to the light opening (all but a birth, which is
-`none`): its basis read from the authenticated history, its admission on that basis's
-ground, its commit by `DurableServed.receiveServed`. -/
+/-- The submission of every call, on the light opening: its basis read from the
+authenticated history, its admission on that basis's ground, its commit by
+`DurableServed.receiveServed`. -/
 def submitLightVia (transport : DurableReceiverIO.Transport) (config : Config)
     (light : NativeHostLight.Light config) (call : SignedCall)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome)
-    (adopt : DurableServed.Opening ResourceBirthCodec.rootBytes → IO Unit := fun _ => pure ()) : Option (IO Outcome) :=
+    (adopt : DurableServed.Opening ResourceBirthCodec.rootBytes → IO Unit := fun _ => pure ()) : IO Outcome :=
   match call with
-  | .renounce bytes => some do
+  | .renounce bytes => do
       return (← submitRenounceLight transport config.deployment config.profile.semantics config.federation
         config.genesisHeight config.signature light.opening (light.basisVia transport) bytes confirm adopt).1
-  | .revoke bytes => some <|
+  | .revoke bytes =>
       submitRevokeLight transport config.deployment config.profile config.federation config.genesisHeight
         config.signature light.opening (light.basisVia transport) bytes confirm adopt
-  | .delegate bytes => some <|
+  | .delegate bytes =>
       submitDelegateLight transport config.deployment config.profile config.federation config.genesisHeight
         config.signature light.opening (light.basisVia transport) bytes confirm adopt
-  | .birth _ => none
-  | .install bytes => some <|
+  | .birth bytes => submitBirthLight transport config light bytes confirm
+  | .install bytes =>
       submitInstallLight transport config.deployment config.profile config.federation config.genesisHeight
         config.signature light.opening (light.basisVia transport) bytes confirm adopt
-  | .invoke signed => some <|
+  | .invoke signed =>
       submitInvokeLight transport config.deployment config.profile config.federation config.genesisHeight
         config.signature config.nockFSync (staleOutcome config) light.opening (light.basisVia transport)
         signed confirm adopt
 
 /-- The submission path, over the Store writer it is handed. The served path
 passes `config.transport` (`submitLoadedWith`); the dry run (`Host.DryRun`,
-op 130) passes a writer that never appends, so both run this one program. -/
+op 130) passes a writer that never appends, so both run this one program. Every call
+is submitted on the light opening; the opened full image is not read. -/
 def submitLoadedVia (transport : DurableReceiverIO.Transport) (config : Config)
-    (opened : Opened config) (light : NativeHostLight.Light config) (call : SignedCall)
+    (_opened : Opened config) (light : NativeHostLight.Light config) (call : SignedCall)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) : IO Outcome :=
-  match call with
-  | .birth bytes => submitBirthVia transport config opened bytes confirm
-  | call => (submitLightVia transport config light call confirm).getD
-      (return refused .malformed "wire" "unported native host call")
-
-/-- The session's submission: a call ported to the light opening never opens the full
-image; a birth asks for it (`full`, the session's `materialize`). -/
-def submitSessionVia (transport : DurableReceiverIO.Transport) (config : Config)
-    (full : IO (Opened config)) (light : NativeHostLight.Light config) (call : SignedCall)
-    (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome)
-    (adopt : DurableServed.Opening ResourceBirthCodec.rootBytes → IO Unit := fun _ => pure ()) : IO Outcome :=
-  match call with
-  | .birth bytes => do submitBirthVia transport config (← full) bytes confirm
-  | call => (submitLightVia transport config light call confirm adopt).getD
-      (return refused .malformed "wire" "unported native host call")
-
-/-- With the full image already held, the session's submission is the submission. -/
-theorem submitSessionVia_pure (transport : DurableReceiverIO.Transport) (config : Config)
-    (opened : Opened config) (light : NativeHostLight.Light config) (call : SignedCall)
-    (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) :
-    submitSessionVia transport config (pure opened) light call confirm =
-      submitLoadedVia transport config opened light call confirm := by
-  cases call <;> first | rfl | simp [submitSessionVia, submitLoadedVia]
+  submitLightVia transport config light call confirm
 
 def submitLoadedWith (config : Config) (opened : Opened config) (light : NativeHostLight.Light config)
     (call : SignedCall)
@@ -3560,7 +3578,7 @@ def invokeDisclosure : Outcome → Outcome × Disclosure
 
 /-- The one signed-submission path: a renounce is disclosed by its own rule,
 every other call uniformly. -/
-def submitDisclosedSession (config : Config) (full : IO (Opened config))
+def submitDisclosedSession (config : Config)
     (light : NativeHostLight.Light config) (call : SignedCall)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome)
     (adopt : DurableServed.Opening ResourceBirthCodec.rootBytes → IO Unit := fun _ => pure ()) :
@@ -3569,15 +3587,16 @@ def submitDisclosedSession (config : Config) (full : IO (Opened config))
   | .renounce bytes =>
       submitRenounceLight config.transport config.deployment config.profile.semantics config.federation
         config.genesisHeight config.signature light.opening light.basis bytes confirm adopt
-  | .invoke _ => return invokeDisclosure (← submitSessionVia config.transport config full light call confirm adopt)
-  | _ => return (← submitSessionVia config.transport config full light call confirm adopt, .uniform)
+  | .invoke _ => return invokeDisclosure (← submitLightVia config.transport config light call confirm adopt)
+  | _ => return (← submitLightVia config.transport config light call confirm adopt, .uniform)
 
 /-- `submitDisclosedSession` with the full image already held. -/
 def submitDisclosedWith (config : Config) (opened : Opened config) (light : NativeHostLight.Light config)
     (call : SignedCall)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) :
     IO (Outcome × Disclosure) :=
-  submitDisclosedSession config (pure opened) light call confirm
+  let _ := opened
+  submitDisclosedSession config light call confirm
 
 def submit (config : Config) (bytes : List UInt8) : IO Outcome := do
   let result ← match callCodec.decode bytes with
@@ -3630,10 +3649,11 @@ def lookupLoaded (config : Config) (opened : Opened config) (call : SignedCall) 
   | .birth bytes =>
       match GrainResourceBirthPolicyController.decodeIngress bytes with
       | some ingress =>
-          match GrainResourceBirthReceiver.replay opened.durable ingress with
-          | none => .absent
-          | some (.error _) => refused .conflict "replay" "transaction identity conflict"
-          | some (.ok receipt) => finish receipt.transactionId receipt.eventId
+          match GrainResourceBirthReceiver.replay opened.ground ingress with
+          | .fresh => .absent
+          | .undeclared => refused .operationRejected "replay" "transaction identity undeclared"
+          | .conflict => refused .conflict "replay" "transaction identity conflict"
+          | .original receipt => finish receipt.transactionId receipt.eventId
       | none =>
           if bytes.take 7 = GrainResourceBirthPolicyController.ingressFrame.take 7 then
             refused .malformed "grain-birth" "noncanonical ingress"
@@ -3641,10 +3661,11 @@ def lookupLoaded (config : Config) (opened : Opened config) (call : SignedCall) 
             match ResourceBirthPolicyController.Concrete.decodeIngress bytes with
             | none => refused .malformed "birth" "noncanonical ingress"
             | some ingress =>
-                match ResourceBirthReceiver.replay config.deployment.domain opened.durable ingress with
-                | none => .absent
-                | some (.error _) => refused .conflict "replay" "transaction identity conflict"
-                | some (.ok receipt) => finish receipt.transactionId receipt.eventId
+                match ResourceBirthReceiver.replay config.deployment.domain opened.ground ingress with
+                | .fresh => .absent
+                | .undeclared => refused .operationRejected "replay" "transaction identity undeclared"
+                | .conflict => refused .conflict "replay" "transaction identity conflict"
+                | .original receipt => finish receipt.transactionId receipt.eventId
   | .install bytes =>
       match PolicyInstallReceiver.decodeIngress bytes with
       | none => refused .malformed "install" "noncanonical ingress"
@@ -3671,7 +3692,7 @@ theorem lookupLoaded_composite_exact (config : Config) (opened : Opened config)
     (bytes : List UInt8) (ingress : GrainResourceBirthPolicyController.DecodedIngress)
     (receipt : GrainResourceBirthReceiver.Receipt) (historical : NativeHostCodec.Receipt)
     (decoded : GrainResourceBirthPolicyController.decodeIngress bytes = some ingress)
-    (replayed : GrainResourceBirthReceiver.replay opened.durable ingress = some (.ok receipt))
+    (replayed : GrainResourceBirthReceiver.replay opened.ground ingress = .original receipt)
     (selected : historicalReceipt config opened.durable receipt.transactionId receipt.eventId =
       some historical) :
     lookupLoaded config opened (.birth bytes) = .confirmed .replayed historical := by
@@ -3680,15 +3701,14 @@ theorem lookupLoaded_composite_exact (config : Config) (opened : Opened config)
 theorem lookupLoaded_composite_absent (config : Config) (opened : Opened config)
     (bytes : List UInt8) (ingress : GrainResourceBirthPolicyController.DecodedIngress)
     (decoded : GrainResourceBirthPolicyController.decodeIngress bytes = some ingress)
-    (absent : GrainResourceBirthReceiver.replay opened.durable ingress = none) :
+    (absent : GrainResourceBirthReceiver.replay opened.ground ingress = .fresh) :
     lookupLoaded config opened (.birth bytes) = .absent := by
   simp [lookupLoaded, decoded, absent]
 
 theorem lookupLoaded_composite_conflict (config : Config) (opened : Opened config)
     (bytes : List UInt8) (ingress : GrainResourceBirthPolicyController.DecodedIngress)
-    (reason : GrainResourceBirthReceiver.Reject)
     (decoded : GrainResourceBirthPolicyController.decodeIngress bytes = some ingress)
-    (conflict : GrainResourceBirthReceiver.replay opened.durable ingress = some (.error reason)) :
+    (conflict : GrainResourceBirthReceiver.replay opened.ground ingress = .conflict) :
     lookupLoaded config opened (.birth bytes) =
       refused .conflict "replay" "transaction identity conflict" := by
   simp [lookupLoaded, decoded, conflict]

@@ -7351,8 +7351,7 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                                     "wire".toUTF8.toList "noncanonical native host call".toUTF8.toList,
                                     NativeHost.Disclosure.uniform)
                                 | some call =>
-                                  NativeHost.submitDisclosedSession pinnedConfig (sessionFull pinnedConfig state)
-                                    session.light call
+                                  NativeHost.submitDisclosedSession pinnedConfig session.light call
                                     (sessionConfirmed pinnedConfig state) (sessionAdopt pinnedConfig state)
                               NativeHost.logOperatorRefusal result.1
                               return (2, outcomeCodec.encode (NativeHost.disclose result))

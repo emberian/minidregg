@@ -173,9 +173,7 @@ theorem submit_storage_irrelevant (t : DurableReceiverIO.Transport)
   -- which does not depend on the Store paths (`Light.basisVia_restorage`).
   have same : (light.restorage storage).basisVia t = light.basisVia t :=
     funext (NativeHostLight.Light.basisVia_restorage t light storage)
-  cases call
-  case birth bytes => rfl
-  all_goals (simp only [NativeHost.submitLoadedVia, NativeHost.submitLightVia]; rw [same]; rfl)
+  cases call <;> (simp only [NativeHost.submitLoadedVia, NativeHost.submitLightVia, NativeHost.submitBirthLight]; rw [same]; rfl)
 
 /-- **The served submission and the dry run are one program.** Op 2 runs
 `submitLoadedWith`, which is `submitLoadedVia` over the Store's transport; the dry
