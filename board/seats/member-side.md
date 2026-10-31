@@ -9,7 +9,7 @@ hbox leftovers from the predecessor: t8 released; the w8 world and its residents
 hbox:/ci/pc (1.9 GB, the predecessor's scratch) is left in place for ember to decide.
 Measurement world: persvati /home/ember/mdpool/lanes/rpw/rf (2 members, port 22800, PID files in it; up by
 /home/ember/mdpool/rp/up.sh) on overlay /home/ember/mdpool/lanes/cand/93b31c1c33d6 (main 27f85e89 host+consent on
-76511e768bbc; carries 43995c7f2, 76511e768, 86c9dbddb; not f28cd8457).
+76511e768bbc; carries 43995c7f2, 76511e768, 86c9dbddb and f28cd8457; the clients and codec are 76511e768bbc's).
 
 Owns: the client (`native/resource-client`: shell, workspace, chat, web body `src/web`), `mini-line`, the ssh wrapper
 (`deploy/shell/mini-shell-ssh`), `mini-web-spawn`, `native/mini-sdk` consent/residents, `native/mini-session-env`,
