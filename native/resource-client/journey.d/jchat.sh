@@ -25,8 +25,8 @@ set -u
 umask 077
 : "${JOURNEY_STEP_DIR:?}" "${MINI:?}" "${HOST:?}" "${CONFIG:?}" "${SOCKET:?}" "${SPONSOR_WS:?}" "${JOURNEY_WORLD:?}"
 SH=${SHELL_BIN:-}; [ -n "$SH" ] || SH=$MINI
-HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
-WRAPPER=$(CDPATH='' cd -- "$HERE/../../../deploy/shell" && pwd)/mini-shell-ssh
+# The ssh forced command, as the box installs it: the candidate's mini-line beside the client.
+WRAPPER=${SH%/*}/mini-line
 SD=$JOURNEY_STEP_DIR
 H=$SD/h; WS=$SD/w; L=$SD/log
 mkdir -p -m 700 "$H" "$WS" "$L"

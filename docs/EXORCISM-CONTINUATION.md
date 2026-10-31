@@ -117,22 +117,55 @@ docs/HOT-PATH-STATE.md). This lane has not built one.
   file into `mini-line`), then the in-process file bus (the query path passes paths between
   `author`/`inspect`/`host_files`; bytes would remove the remaining scratch writes).
 
-## Next: the codec's double view render (root: yes, batch with 47b7cb2e1 + c763e3ead)
+## Codec double render: done (bc17cef1b + 7e6850892), measured with the read-path Lean fixes
 
-Per `doc show` the codec resident renders the same view twice: `inspect view-resource`
-(Host/Json.lean `resourceJson` via `contentCellJson`, used by the client for the K-NARROW-HIDE
-check and the entries) and `inspect view-document` (`documentJson`: the client sends the same
-view bytes back hex-encoded inside JSON, `pageOfView` decodes them again, `pageJson` renders
-again), plus one more `view-document` per transcluded source for its line numbers
-(workspace.rs `render(bin, &[])`). In the batch 6 profile: resourceJson 23%, documentJson 23%,
-PackedCell.decodePayload 15% of the codec's busy time. Two routes, not exclusive:
-1. one inspection kind that answers the resource view and its document rendering together (the
-   client asks once; Json.lean decodes once and renders the content once);
-2. `view-document` taking the view bytes as a binary frame (no hex-in-JSON), and the client's
-   per-source line-number render folded into the host's.
-Both are Lean (Host/Json.lean) plus the client's callers in workspace.rs (`signed_view` users that
-then call `render`). Build through `scripts/pipeline/native-loop` (about 7 min; base
-acc7cfa03fac56b2261ce3bd1ec5ad1693ce281f) together with 47b7cb2e1 and c763e3ead.
+`inspect view-resource-document` (Host/Json.lean `resourceJsonOf`/`documentOf`, one decode) answers
+a current page's resource view and its document together; `workspace::signed_page` asks for it and
+`rendered_document` renders again only against source pages. Built through native-loop on
+acc7cfa03 (overlay `/home/hbox/pool/lanes/exorcism/candidates/acf55bf9d552`, 1275 s) with
+47b7cb2e1 + c763e3ead (+ the admitOwn follow-up 975491262). Scratch worlds /ci/exo/w7 (batch 7)
+and /ci/exo/w8 (the overlay), 100 `doc show` each, alternated, hbox load 22-25:
+
+| per read | w7 batch 7 | w8, batch 7 client | w8, lane client |
+|---|---|---|---|
+| wall | 35.5 / 30.0 ms | 31.0 / 27.5 ms | 28.5 / 24.0 ms |
+| operator CPU (Host + Store) | 14.6 / 13.0 ms | 12.6 / 11.8 ms | 12.6 / 11.4 ms |
+| codec CPU | 4.0 / 3.8 ms | 4.2 / 3.5 ms | 3.2 / 2.9 ms |
+| consent CPU | 1.8 / 1.5 ms | 1.8 / 1.5 ms | 1.7 / 1.5 ms |
+
+## The ssh wrapper is the binary: done (3822c09f2 + d843f2ef6), infra e29997d
+
+`bin/mini-line` takes the forced command's six absolute arguments and does everything the bash
+wrapper did; deploy/shell/mini-shell-ssh is deleted. Infra e29997d installs the candidate's
+bin/mini-line as /usr/local/lib/mini/mini-shell-ssh on every ship and in jworld-scratch; infra keeps
+its own edge/mini/shell/mini-shell-ssh only for candidates without mini-line (batch 4, batch 7) and
+deletes it once batch 8 is the demo baseline. One rule changed against the old lane copy: the
+anchors default to $home/.mini/consent-anchors whenever MINI_CONSENT_ANCHOR_DIR is unset (infra's
+F1 fix), not only when HOME is unset. Tests: tests/mini_shell_ssh.rs (6; 30 consecutive runs green
+on hbox after the ETXTBSY lock); the python launcher/provision/stage tests green on hbox.
+
+Measured on /ci/exo/w8 (batch 7 overlay world), member-1, 8 alternated rounds of 60 each, hbox
+load 20-27, client CPU = wrapper + mini-line + the driver's own per-iteration fork (residents not
+counted). Median (minimum):
+
+| per op | bash wrapper + old mini-line | mini-line as the wrapper |
+|---|---|---|
+| `whoami` wall | 4.86 (3.77) ms | 2.46 (1.67) ms |
+| `whoami` client CPU | 4.60 ms | 2.16 ms |
+| `doc show` wall | 23.0 (14.8) ms | 18.9 (12.0) ms |
+| `doc show` client CPU | 5.12 ms | 2.71 ms |
+
+Driver: /ci/exo/wr.sh WORLD N ROUNDS (before bins /ci/exo/before-ssh, after /ci/exo/after-ssh).
+
+Open twin found on the way (not this lane's surface, told perf-client): mini-web-spawn's
+`delegated_consent_env` re-derives the wrapper's delegated-consent selection.
+
+## Next: what is left of a `doc show`
+
+- The in-process file bus for reads: the query path passes paths between `author`/`inspect`/
+  `host_files`; bytes would remove the remaining scratch writes.
+- Host ops about 8 ms (op 144 1.1, op 4 1.4, op 5 5.7: `checkGrants`, the recomputed challenge,
+  `loadPolicy`; the read-path Lean fixes are written, see above), the resident's own work about 4 ms.
 
 ## Other open items
 

@@ -12,7 +12,7 @@
 #
 # Also required: PAY_WATCHER_BIN (default native/pay-watcher/target/release/pay-watcher);
 # INFRA_EDGE = a copy of dregg-infra `edge/mini` (render-authorized-keys.sh, mini-closed,
-# shell/{render-shell-key,mini-socket-proxy,mini-shell-ssh}), used read-only; python3 with
+# shell/{render-shell-key,mini-socket-proxy}), used read-only; mini-line beside MINI; python3 with
 # PyNaCl (an attacker's memo is built without our client); ssh-keygen; jq.
 #
 # No real Solana: every transfer is a fixture endpoint pair built with P1b's generator
@@ -34,7 +34,7 @@ for tool in python3 jq ssh-keygen xxd flock; do
 done
 python3 -c 'import nacl.signing' 2>/dev/null || { echo "jpay-e4: PyNaCl is required" >&2; exit 2; }
 [ -x "$PAY_WATCHER_BIN" ] || { echo "J-PAY-E4 FAIL setup: pay-watcher binary missing at $PAY_WATCHER_BIN" >&2; exit 1; }
-for f in render-authorized-keys.sh mini-closed shell/render-shell-key shell/mini-socket-proxy shell/mini-shell-ssh; do
+for f in render-authorized-keys.sh mini-closed shell/render-shell-key shell/mini-socket-proxy; do
   [ -f "$INFRA_EDGE/$f" ] || { echo "jpay-e4: INFRA_EDGE lacks $f" >&2; exit 2; }
 done
 DIR="$JOURNEY_STEP_DIR/jpay-e4"
@@ -375,9 +375,10 @@ os.symlink(R, path("root"))
 LIB, NODE, CUR = f"{R}/usr/local/lib/mini", f"{R}/var/lib/mini/store/node", f"{R}/var/lib/mini/candidate/current"
 for d in (f"{R}/etc/mini", f"{LIB}/infra/friends", f"{NODE}/public", f"{NODE}/deployment", f"{CUR}/bin"):
     os.makedirs(d, exist_ok=True)
-for rel in ("render-authorized-keys.sh", "mini-closed", "shell/render-shell-key", "shell/mini-socket-proxy",
-            "shell/mini-shell-ssh"):
+for rel in ("render-authorized-keys.sh", "mini-closed", "shell/render-shell-key", "shell/mini-socket-proxy"):
     shutil.copyfile(os.path.join(EDGE, rel), f"{LIB}/{os.path.basename(rel)}"); os.chmod(f"{LIB}/{os.path.basename(rel)}", 0o755)
+# The ssh forced command is the candidate's mini-line, installed under the name the keys name.
+shutil.copyfile(os.path.join(os.path.dirname(MINI), "mini-line"), f"{LIB}/mini-shell-ssh"); os.chmod(f"{LIB}/mini-shell-ssh", 0o755)
 os.symlink(MINI, f"{CUR}/bin/mini"); os.symlink(HOST, f"{CUR}/bin/minidregg-host")
 open(f"{NODE}/state.json", "w").write("{}")
 shutil.copyfile(CONFIG, f"{NODE}/deployment/pinned-config.json")

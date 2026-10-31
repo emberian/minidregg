@@ -39,9 +39,12 @@ command -v jq >/dev/null || { echo 'jq is required' >&2; exit 66; }
 SSHD=$(command -v sshd || echo /usr/sbin/sshd)
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 REPO=$(CDPATH='' cd -- "$HERE/../.." && pwd)
-WRAPPER_SRC=$REPO/deploy/shell/mini-shell-ssh
+# The ssh forced command is the candidate's mini-line, built beside mini (installed on a box as
+# /usr/local/lib/mini/mini-shell-ssh).
+WRAPPER_SRC=${MINI_SRC%/*}/mini-line
 RENDER=$REPO/deploy/shell/render-shell-key
-[[ -x $WRAPPER_SRC && -x $RENDER ]] || { echo 'deploy/shell scripts missing' >&2; exit 66; }
+[[ -x $WRAPPER_SRC ]] || { echo "no mini-line beside $MINI_SRC" >&2; exit 66; }
+[[ -x $RENDER ]] || { echo 'deploy/shell/render-shell-key missing' >&2; exit 66; }
 if ss -ltn 2>/dev/null | awk '{print $4}' | grep -q ":$PORT\$"; then
   echo "port $PORT is in use" >&2
   exit 69

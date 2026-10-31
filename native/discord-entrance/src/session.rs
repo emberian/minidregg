@@ -13,7 +13,7 @@
 //! the forced command itself, as before.
 //!
 //! The entrance does not re-derive `mini shell`'s environment. It runs
-//! `deploy/shell/mini-shell-ssh MINI HOST CONFIG SOCKET WORKSPACE HOME` with the line in
+//! `mini-shell-ssh MINI HOST CONFIG SOCKET WORKSPACE HOME` (the candidate's `mini-line`) with the line in
 //! `SSH_ORIGINAL_COMMAND` (so the line is one argument to `mini shell --line`, never parsed
 //! by a system shell) and an otherwise empty environment. WORKSPACE and HOME come from the
 //! session NAME by `render-authorized-keys.sh`'s rule: HOME is `SESSIONS/NAME`; WORKSPACE is

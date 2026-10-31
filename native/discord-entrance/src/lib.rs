@@ -4,7 +4,7 @@
 //! gateway websocket, no long-lived connection). This crate is that endpoint. A Discord user
 //! is mapped by a root-owned roster to one Mini session NAME, and the slash command's one
 //! string option is handed, as one argument, to the same forced command the ssh entrance
-//! uses (`deploy/shell/mini-shell-ssh`, via `SSH_ORIGINAL_COMMAND`). `/mini-world` renders
+//! uses (`mini-shell-ssh`, the candidate's `mini-line`, via `SSH_ORIGINAL_COMMAND`). `/mini-world` renders
 //! the common native member projection; `/mini-status` retrieves actor-bound transport custody.
 //! The session's workspace
 //! and home are derived from NAME exactly as `render-authorized-keys.sh` derives them; the

@@ -51,7 +51,7 @@ printf 'n\tstep\twho\tline\texpect\trc\tverdict\tnote\n' >"$TABLE"
 N=0; FAILED=0; FIRST_FAIL=""
 
 # dana is the split-tenancy member: HOME is a session dir and the workspace sits
-# beneath it, as deploy/shell/mini-shell-ssh passes them (--workspace
+# beneath it, as the ssh forced command (mini-shell-ssh) passes them (--workspace
 # SESSIONS/NAME/workspace --home SESSIONS/NAME); the others keep sibling dirs.
 ws_of() {
   case "$1" in sponsor) echo "$SPONSOR_WS" ;; dana) echo "$H/dana/workspace" ;; *) echo "$WS/$1" ;; esac

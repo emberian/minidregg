@@ -163,6 +163,12 @@ def root_layout(plan):
     return root, root / name
 
 
+def launcher_source(source, manifest, renderer):
+    """The bytes an SSH launcher must equal: the candidate's own forced command (bin/mini-line) for
+    mini-shell-ssh, the source tree's credential launcher for mini-shell-ssh-credentials."""
+    return simple(manifest["miniLine"]) if renderer == "mini-shell-ssh" else source / "deploy/shell" / renderer
+
+
 def validate(plan, published=True):
     require(plan["type"] == "mini-platform-provision-v1", "unknown provisioning plan")
     root, _ = root_layout(plan)
@@ -170,10 +176,12 @@ def validate(plan, published=True):
     manifest_path = simple(plan["manifest"])
     require(digest(manifest_path) == plan["manifestSha256"], "manifest changed")
     manifest = load(manifest_path)
-    for role in ("mini", "host", "store", "verifier"):
+    # miniLine is the ssh forced command (bin/mini-line, installed as mini-shell-ssh).
+    for role in ("mini", "miniLine", "host", "store", "verifier"):
+        require(role in manifest and role in manifest["sha256"], "candidate missing role: " + role)
         executable = simple(manifest[role])
         require(os.access(executable, os.X_OK) and digest(executable) == manifest["sha256"][role], "candidate binary changed: " + role)
-    for path in (source / "scripts/workroom/provision.sh", source / "deploy/shell/mini-shell-ssh", source / "deploy/shell/render-shell-key"):
+    for path in (source / "scripts/workroom/provision.sh", source / "deploy/shell/render-shell-key"):
         require(path.is_file(), "missing source recipe: " + str(path))
     if "sshLauncher" in plan:
         launcher = plan["sshLauncher"]
@@ -183,7 +191,7 @@ def validate(plan, published=True):
         path = simple(launcher["path"])
         require(Path(launcher["path"]).absolute() == path, "SSH launcher must be canonical")
         require(path.is_file() and os.access(path, os.X_OK)
-                and digest(path) == launcher["sha256"] == digest(source / "deploy/shell" / renderer),
+                and digest(path) == launcher["sha256"] == digest(launcher_source(source, manifest, renderer)),
                 "SSH launcher differs from the pinned source renderer")
         for parent in (path, *path.parents):
             metadata = parent.stat()
@@ -430,8 +438,8 @@ def start(plan):
                   lifecycleManagement={"managementSubject": 8, "managementKeyId": 8008})
     save(root / "operator-policy.json", policy)
     recipe = source / "scripts/workroom/provision.sh"
-    source_pins = {str(path): digest(path) for path in (recipe, source / "deploy/shell/render-shell-key", source / "deploy/shell/mini-shell-ssh", Path(__file__))}
-    ssh_launcher = simple(plan["sshLauncher"]["path"]) if "sshLauncher" in plan else source / "deploy/shell/mini-shell-ssh"
+    source_pins = {str(path): digest(path) for path in (recipe, source / "deploy/shell/render-shell-key", simple(manifest["miniLine"]), Path(__file__))}
+    ssh_launcher = simple(plan["sshLauncher"]["path"]) if "sshLauncher" in plan else simple(manifest["miniLine"])
     source_pins[str(ssh_launcher)] = digest(ssh_launcher)
     save(root / "source-pins.json", source_pins)
     env = dict(os.environ, MINI=manifest["mini"], STORE_BINARY=manifest["store"], SIGNATURE_BINARY=manifest["verifier"],

@@ -144,6 +144,13 @@ home; the connecting friend chooses none of them.
 restrict,pty,command="/ABS/mini-shell-ssh /ABS/mini /ABS/host /ABS/pinned-config.json /ABS/public/mini.sock /ABS/homes/NAME/workspace /ABS/homes/NAME" ssh-ed25519 AAAA... friend
 ```
 
+`mini-shell-ssh` is the candidate's `bin/mini-line`, installed as a root-owned
+copy under that name (on the box, `/usr/local/lib/mini/mini-shell-ssh`, with the
+`motd.txt` an interactive login prints beside it). It reads the box's
+`/etc/mini/session-*` settings once, holds the member's call slot (two at once, a
+third is refused with exit 75) and hands a one-verb line to the member's resident
+shell; it never runs a system shell.
+
 `render-shell-key WRAPPER MINI HOST CONFIG SOCKET WORKSPACE HOME FRIEND.pub`
 prints that line after checking the paths and the key; it installs nothing.
 `restrict` removes forwarding and agent access; `pty` is re-allowed so that

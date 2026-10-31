@@ -19,10 +19,10 @@ class ProvisioningContract(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix='platform-contract-')
         self.root = Path(self.temp.name)
         source = self.root / 'source'
-        for relative in ('scripts/workroom/provision.sh', 'deploy/shell/mini-shell-ssh', 'deploy/shell/render-shell-key'):
+        for relative in ('scripts/workroom/provision.sh', 'deploy/shell/render-shell-key'):
             path=source / relative;path.parent.mkdir(parents=True,exist_ok=True);path.write_text('WORKROOM_OPERATOR_POLICY\n')
         binary=self.root/'binary';binary.write_text('contract fixture, never launched');binary.chmod(0o700)
-        manifest={role:str(binary) for role in ('mini','host','store','verifier','payWatcher')}
+        manifest={role:str(binary) for role in ('mini','miniLine','host','store','verifier','payWatcher')}
         manifest['sha256']={role:p.digest(binary) for role in manifest}
         p.save(self.root/'manifest.json',manifest)
         self.plan={'type':'mini-platform-provision-v1','root':str(self.root/'world'),'sourceRepo':str(source),
@@ -58,16 +58,21 @@ class ProvisioningContract(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'nodeDirectory'):p.validate(dict(self.plan,nodeDirectory=name))
         self.assertFalse(Path(self.plan['root']).exists())
     def test_selected_ssh_launcher_requires_exact_source_and_root_custody(self):
+        # The mini-shell-ssh renderer's bytes are the candidate's own forced command (miniLine).
         executable=Path('/usr/bin/true').resolve()
-        source=Path(self.plan['sourceRepo'])/'deploy/shell/mini-shell-ssh'
-        source.write_bytes(executable.read_bytes())
-        plan=dict(self.plan,sshLauncher={'path':str(executable),'sha256':p.digest(executable)})
+        line=self.root/'mini-line';line.write_bytes(executable.read_bytes());line.chmod(0o700)
+        def with_line(path):
+            manifest=p.load(self.root/'manifest.json');manifest['miniLine']=str(path);manifest['sha256']['miniLine']=p.digest(path)
+            selected=self.root/('manifest-'+path.name+'.json');p.save(selected,manifest)
+            return dict(self.plan,manifest=str(selected),manifestSha256=p.digest(selected),
+                        sshLauncher={'path':str(executable),'sha256':p.digest(executable)})
+        plan=with_line(line)
         p.validate(plan)
         copied=self.root/'launcher';copied.write_bytes(executable.read_bytes());copied.chmod(0o700)
         with self.assertRaisesRegex(ValueError,'root-owned custody'):
             p.validate(dict(plan,sshLauncher={'path':str(copied),'sha256':p.digest(copied)}))
-        source.write_text('changed source')
-        with self.assertRaisesRegex(ValueError,'pinned source renderer'):p.validate(plan)
+        other=self.root/'other-line';other.write_text('another candidate');other.chmod(0o700)
+        with self.assertRaisesRegex(ValueError,'pinned source renderer'):p.validate(with_line(other))
     def test_opt_in_credential_launcher_pins_its_explicit_source_renderer(self):
         executable=Path('/usr/bin/true').resolve()
         source=Path(self.plan['sourceRepo'])/'deploy/shell/mini-shell-ssh-credentials'
