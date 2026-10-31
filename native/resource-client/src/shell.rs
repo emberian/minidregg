@@ -2316,6 +2316,19 @@ fn history(session: &Session, all: bool, newest: Option<usize>) {
             }
         }
     }
+    // Signed reads keep one journal line each (`read-journal.tsv`, rotated at 1 MiB), not an attempt.
+    if all {
+        for journal in ["read-journal.tsv.1", "read-journal.tsv"] {
+            let Ok(text) = fs::read_to_string(session.workspace.join(journal)) else { continue };
+            for line in text.lines() {
+                let cells: Vec<&str> = line.split('\t').collect();
+                if let [unix, height, "read", outcome, _, name] = cells[..] {
+                    let at = std::time::UNIX_EPOCH + std::time::Duration::from_secs(unix.parse().unwrap_or(0));
+                    rows.push((at, format!("read\t{name}\tsigned read, {outcome} at height {height}")));
+                }
+            }
+        }
+    }
     if let Ok(entries) = fs::read_dir(session.home.join("enroll")) {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
