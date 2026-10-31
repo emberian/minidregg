@@ -69,7 +69,8 @@ open Minidregg.Theory.AuthTrie (NodeIn Reveal revealVerify root lastVal canon me
 open Minidregg.Theory.AuthTrie.Cache (PathsInjective wf_canon)
 open Minidregg.Compiler.PrivateCellIndex (indexEntries valueBytes indexExact)
 open Minidregg.Compiler.PrivateCellRoot (hashedAddrBits hashedAddrBits_length nodeBytesWith nodeBytesWith_injective
-  addressCustomization nodeCustomization addressHash addressHash_length deployedDig untaggedClass)
+  addressCustomization nodeCustomization addressHash addressHash_length deployedDig untaggedClass
+  DigestCollision deployedDig_collision output_eq output_eq_of_digest_eq)
 
 /-- **The wire's exclusion is the registry's blinding.** -/
 theorem isBlinding_iff {kind : CanonicalCellRegistry.Kind} {wire : StoreCodec.Wire (CanonicalCellRegistry.layout kind)}
@@ -159,26 +160,20 @@ theorem readerPrefixes_short (fields : Option (Finset CellField)) :
       obtain ⟨outer, inNamed, rfl⟩ := member
       exact opens_length_le (bitCode 256) outer (Finset.mem_filter.mp inNamed).2
 
-/-- **The union of a reader's class answers is its view**: when every prefix's
-answer is exactly the index's live pairs under that prefix, the pairs answered
-at some reader prefix are exactly the visible entries' value bytes. The step
-`viewOpeningExact` takes after excluding collisions, and honest completeness
-takes from `revealFor_answer`. -/
-theorem unionAnswers_exact {wire : StoreCodec.Wire (CanonicalCellRegistry.layout kind)}
-    (selected : CanonicalCellRegistry.wire? kind = some wire) {D : Type}
-    {addrBits : Address (CanonicalCellRegistry.layout kind) → List Bool}
+/-- **A reader's prefixes select exactly its view**: a pair of the index is live under some
+reader prefix iff it is a visible entry with its value bytes. -/
+theorem prefixed_iff {wire : StoreCodec.Wire (CanonicalCellRegistry.layout kind)}
+    (selected : CanonicalCellRegistry.wire? kind = some wire)
+    (addrBits : Address (CanonicalCellRegistry.layout kind) → List Bool)
     (store : Store (CanonicalCellRegistry.layout kind)) (fields : Option (Finset CellField))
-    (reveals : List Bool → Reveal (Address (CanonicalCellRegistry.layout kind)) (List UInt8) D)
-    (admitted : ∀ a, store a ≠ none → addressFits 256 kind a = true)
-    (answers : ∀ p ∈ readerPrefixes fields, ∀ a v, (a, v) ∈ (reveals p).answer (keyBits addrBits) p ↔
-      lastVal (indexEntries wire store) a = some v ∧ (keyBits addrBits a).take p.length = p) :
-    ∀ a v, (∃ p ∈ readerPrefixes fields, (a, v) ∈ (reveals p).answer (keyBits addrBits) p) ↔
+    (admitted : ∀ a, store a ≠ none → addressFits 256 kind a = true) :
+    ∀ a v, (∃ p ∈ readerPrefixes fields,
+        lastVal (indexEntries wire store) a = some v ∧ (keyBits addrBits a).take p.length = p) ↔
       ∃ value, Minidregg.Theory.SparseMap.filterKeys (Visible fields kind) store a = some value ∧ v = valueBytes wire a value := by
   intro a v
   have live := indexExact wire store a
   constructor
-  · rintro ⟨p, member, answered⟩
-    obtain ⟨found, prefixed⟩ := (answers p member a v).mp answered
+  · rintro ⟨p, member, found, prefixed⟩
     rw [live] at found
     split_ifs at found with blind
     obtain ⟨value, present, rfl⟩ := Option.map_eq_some_iff.mp found
@@ -201,13 +196,32 @@ theorem unionAnswers_exact {wire : StoreCodec.Wire (CanonicalCellRegistry.layout
       have selects := (scopeSelectsPath (bitCode 256) kind (fitScope 256 fields) a (addrBits a)
         (fitScope_fits 256 fields) fits notBlinding).mp ((visible_fitScope 256 fields kind a fits).mpr visible)
       obtain ⟨p, member, prefixed⟩ := selects
-      refine ⟨p, member, (answers p member a _).mpr ⟨?_, (List.prefix_iff_eq_take.mp prefixed).symm⟩⟩
+      refine ⟨p, member, ?_, (List.prefix_iff_eq_take.mp prefixed).symm⟩
       rw [live, if_neg (fun blind => by
         have := (isBlinding_iff selected a).mpr blind
         rw [notBlinding] at this; cases this), present]
       rfl
     · rw [Minidregg.Theory.SparseMap.filterKeys_apply_neg _ visible] at present
       cases present
+
+/-- **The union of a reader's class answers is its view**: when every prefix's
+answer is exactly the index's live pairs under that prefix, the pairs answered
+at some reader prefix are exactly the visible entries' value bytes. The step
+`viewOpeningExact` takes after excluding collisions, and honest completeness
+takes from `revealFor_answer`. -/
+theorem unionAnswers_exact {wire : StoreCodec.Wire (CanonicalCellRegistry.layout kind)}
+    (selected : CanonicalCellRegistry.wire? kind = some wire) {D : Type}
+    {addrBits : Address (CanonicalCellRegistry.layout kind) → List Bool}
+    (store : Store (CanonicalCellRegistry.layout kind)) (fields : Option (Finset CellField))
+    (reveals : List Bool → Reveal (Address (CanonicalCellRegistry.layout kind)) (List UInt8) D)
+    (admitted : ∀ a, store a ≠ none → addressFits 256 kind a = true)
+    (answers : ∀ p ∈ readerPrefixes fields, ∀ a v, (a, v) ∈ (reveals p).answer (keyBits addrBits) p ↔
+      lastVal (indexEntries wire store) a = some v ∧ (keyBits addrBits a).take p.length = p) :
+    ∀ a v, (∃ p ∈ readerPrefixes fields, (a, v) ∈ (reveals p).answer (keyBits addrBits) p) ↔
+      ∃ value, Minidregg.Theory.SparseMap.filterKeys (Visible fields kind) store a = some value ∧ v = valueBytes wire a value := by
+  intro a v
+  rw [← prefixed_iff selected addrBits store fields admitted a v]
+  exact exists_congr fun p => and_congr_right fun member => answers p member a v
 
 theorem viewOpeningExact {wire : StoreCodec.Wire (CanonicalCellRegistry.layout kind)}
     (selected : CanonicalCellRegistry.wire? kind = some wire) : ViewOpeningExact kind wire := by
@@ -350,22 +364,30 @@ theorem viewOpeningExact_hashed {wire : StoreCodec.Wire (CanonicalCellRegistry.l
 
 open Minidregg.Compiler.Tower256ConcreteBackend (StreamCodec digestStream)
 
-theorem output_eq {o₁ o₂ : Sp800185Cshake256.Output} (same : o₁.bytes = o₂.bytes) : o₁ = o₂ := by
-  cases o₁; cases o₂; simp only at same; subst same; rfl
-
-theorem output_eq_of_digest_eq {o₁ o₂ : Sp800185Cshake256.Output} (same : o₁.digest = o₂.digest) : o₁ = o₂ := by
-  apply output_eq
-  have bytesEq := congrArg Sp800185Cshake256.digestBytesLE same
-  simp only [Sp800185Cshake256.Output.digest] at bytesEq
-  rwa [Sp800185Cshake256.digestBytesLE_digestOfBytesLE _ o₁.length_exact,
-    Sp800185Cshake256.digestBytesLE_digestOfBytesLE _ o₂.length_exact] at bytesEq
+/-- An address collision at the deployed 256-bit address hash is a cSHAKE256 collision under the
+address customization on the distinct canonical bytes of two live addresses. -/
+theorem addressCollision_deployed {V : Type} {wire : StoreCodec.Wire (CanonicalCellRegistry.layout kind)}
+    {es : List (Address (CanonicalCellRegistry.layout kind) × V)}
+    (collides : AddressCollision (hashedAddrBits wire 256 addressHash) es) :
+    ∃ a a', (lastVal es a).isSome ∧ (lastVal es a').isSome ∧
+      (StoreCodec.addressStream wire).encode a ≠ (StoreCodec.addressStream wire).encode a' ∧
+      Sp800185Cshake256.hash addressCustomization ((StoreCodec.addressStream wire).encode a) =
+        Sp800185Cshake256.hash addressCustomization ((StoreCodec.addressStream wire).encode a') := by
+  obtain ⟨a, a', la, la', differ, same⟩ := addressCollision_is_hash collides
+  refine ⟨a, a', la, la', differ, output_eq (WorldRoot.bytesBits_injective ?_)⟩
+  have trunc : ∀ bytes, (addressHash bytes ++ List.replicate 256 false).take 256 = addressHash bytes := by
+    intro bytes
+    rw [List.take_append_of_le_length (by rw [addressHash_length]),
+      List.take_of_length_le (by rw [addressHash_length])]
+  rw [trunc, trunc] at same
+  exact same
 
 /-- **The deployed seam.** At the receiver's address hash (`addressHash`, 256
 bits) and node digest (`deployedDig`), a verifying reveal family answers exactly
 the reader's view, or cSHAKE256 under the address customization collides on the
 distinct canonical bytes of two of this store's live addresses, or cSHAKE256
-under the node customization collides on the distinct bytes of two nodes of one
-reveal's scope. The address alternative ranges over every live address of the
+a `DigestCollision` between two distinct nodes of one reveal's scope (node bytes under the
+node customization, or two leaves' content bytes under the content customization). The address alternative ranges over every live address of the
 store, not only the reader's classes: an over-approximation, conservative but
 not local. -/
 theorem viewOpeningExact_deployed {wire : StoreCodec.Wire (CanonicalCellRegistry.layout kind)}
@@ -374,8 +396,8 @@ theorem viewOpeningExact_deployed {wire : StoreCodec.Wire (CanonicalCellRegistry
     (reveals : List Bool → Reveal (Address (CanonicalCellRegistry.layout kind)) (List UInt8) Digest)
     (admitted : ∀ a, store a ≠ none → addressFits 256 kind a = true)
     (accepted : ∀ p ∈ readerPrefixes fields,
-      revealVerify (deployedDig wire) (keyBits (hashedAddrBits wire 256 addressHash)) (260 + 256)
-        (root (deployedDig wire) (keyBits (hashedAddrBits wire 256 addressHash)) (260 + 256) (indexEntries wire store))
+      revealVerify (deployedDig wire (kindTag kind)) (keyBits (hashedAddrBits wire 256 addressHash)) (260 + 256)
+        (root (deployedDig wire (kindTag kind)) (keyBits (hashedAddrBits wire 256 addressHash)) (260 + 256) (indexEntries wire store))
         p (reveals p) = true) :
     (∀ a v, (∃ p ∈ readerPrefixes fields, (a, v) ∈ (reveals p).answer (keyBits (hashedAddrBits wire 256 addressHash)) p) ↔
         ∃ value, Minidregg.Theory.SparseMap.filterKeys (Visible fields kind) store a = some value ∧ v = valueBytes wire a value) ∨
@@ -384,14 +406,12 @@ theorem viewOpeningExact_deployed {wire : StoreCodec.Wire (CanonicalCellRegistry
         Sp800185Cshake256.hash addressCustomization ((StoreCodec.addressStream wire).encode a) =
           Sp800185Cshake256.hash addressCustomization ((StoreCodec.addressStream wire).encode a')) ∨
       ∃ p ∈ readerPrefixes fields, ∃ x y,
-        Theory.PrivateCellTrie.revealNodes (deployedDig wire) (keyBits (hashedAddrBits wire 256 addressHash)) (260 + 256)
+        Theory.PrivateCellTrie.revealNodes (deployedDig wire (kindTag kind)) (keyBits (hashedAddrBits wire 256 addressHash)) (260 + 256)
           (indexEntries wire store) p (reveals p) x ∧
-        Theory.PrivateCellTrie.revealNodes (deployedDig wire) (keyBits (hashedAddrBits wire 256 addressHash)) (260 + 256)
+        Theory.PrivateCellTrie.revealNodes (deployedDig wire (kindTag kind)) (keyBits (hashedAddrBits wire 256 addressHash)) (260 + 256)
           (indexEntries wire store) p (reveals p) y ∧
-        nodeBytesWith wire digestStream x ≠ nodeBytesWith wire digestStream y ∧
-        Sp800185Cshake256.hash nodeCustomization (nodeBytesWith wire digestStream x) =
-          Sp800185Cshake256.hash nodeCustomization (nodeBytesWith wire digestStream y) := by
-  rcases viewOpeningExact_hashed selected (deployedDig wire) 256 addressHash store fields reveals admitted accepted
+        DigestCollision wire (kindTag kind) x y := by
+  rcases viewOpeningExact_hashed selected (deployedDig wire (kindTag kind)) 256 addressHash store fields reveals admitted accepted
       with answered | ⟨a, a', la, la', differ, same⟩ | ⟨p, member, x, y, hx, hy, ne, same⟩
   · exact Or.inl answered
   · refine Or.inr (Or.inl ⟨a, a', la, la', differ, output_eq (WorldRoot.bytesBits_injective ?_)⟩)
@@ -401,8 +421,7 @@ theorem viewOpeningExact_deployed {wire : StoreCodec.Wire (CanonicalCellRegistry
         List.take_of_length_le (by rw [addressHash_length])]
     rw [trunc, trunc] at same
     exact same
-  · exact Or.inr (Or.inr ⟨p, member, x, y, hx, hy,
-      fun eq => ne (nodeBytesWith_injective wire digestStream eq), output_eq_of_digest_eq same⟩)
+  · exact Or.inr (Or.inr ⟨p, member, x, y, hx, hy, deployedDig_collision wire (kindTag kind) ne same⟩)
 
 /-! ## A concrete opening: both collision branches refuted -/
 
@@ -601,10 +620,12 @@ end Witness
 #assert_axioms pathsInjective_or
 #assert_axioms viewOpeningExact
 #assert_axioms honest_accepted
+#assert_axioms prefixed_iff
 #assert_axioms unionAnswers_exact
 #assert_axioms honest_answers
 #assert_axioms addressCollision_is_hash
 #assert_axioms viewOpeningExact_hashed
+#assert_axioms addressCollision_deployed
 #assert_axioms viewOpeningExact_deployed
 #assert_axioms admitted_of_storeFits
 #assert_axioms admit_refuses

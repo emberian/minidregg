@@ -135,7 +135,7 @@ abbrev privateRoot (ctx : List UInt8) (store : Store (CanonicalCellRegistry.layo
 
 theorem privateRoot_eq_commitment (ctx : List UInt8) (store : Store (CanonicalCellRegistry.layout kind)) :
     privateRoot wire ctx store =
-      BlindedCellHiding.maskedTrieCommitment (deployedDig wire) (bits wire) 516 outerRoot ctx (maskOf wire store)
+      BlindedCellHiding.maskedTrieCommitment (deployedDig wire (kindTag kind)) (bits wire) 516 outerRoot ctx (maskOf wire store)
         (indexEntries wire store) := rfl
 
 /-- A gated store with its kept index, mask, parameters and accepted version. -/

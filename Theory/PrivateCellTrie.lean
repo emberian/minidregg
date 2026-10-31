@@ -319,7 +319,59 @@ theorem other_class_refused :
 
 end Witness
 
+/-! ## Images: relabelling keys and values leaves the tree's digest -/
+
+section Image
+
+variable {K' V' : Type}
+
+/-- An entry's image: its key and value relabelled, its remaining path kept. -/
+def entryImage (f : K → K') (g : K → V → V') (e : AuthTrie.Entry K V) : AuthTrie.Entry K' V' :=
+  (f e.1, e.2.1, g e.1 e.2.2)
+
+theorem strip_image (f : K → K') (g : K → V → V') (b : Bool) :
+    ∀ es : List (AuthTrie.Entry K V),
+      AuthTrie.strip b (es.map (entryImage f g)) = (AuthTrie.strip b es).map (entryImage f g)
+  | [] => rfl
+  | ⟨k, [], v⟩ :: es => by
+      simp only [List.map_cons, AuthTrie.strip, entryImage, List.filterMap_cons] at *
+      exact strip_image f g b es
+  | ⟨k, bit :: rest, v⟩ :: es => by
+      have ih := strip_image f g b es
+      simp only [AuthTrie.strip] at ih
+      by_cases h : bit = b <;> simp [AuthTrie.strip, entryImage, List.filterMap_cons, h, ih]
+
+/-- **The tree is natural in its labels**: a digest that agrees on empty nodes, on branches and
+on each leaf's image computes the same tree over the image entries. No condition on clashes:
+the canonical tree reads keys only through the leaf digest. -/
+theorem tree_image (dig : NodeIn K V D → D) (dig' : NodeIn K' V' D → D) (f : K → K') (g : K → V → V')
+    (empty : dig' .empty = dig .empty) (leaf : ∀ k v, dig' (.leaf (f k) (g k v)) = dig (.leaf k v))
+    (branch : ∀ l r, dig' (.branch l r) = dig (.branch l r)) :
+    ∀ (n : Nat) (es : List (AuthTrie.Entry K V)), tree dig' n (es.map (entryImage f g)) = tree dig n es
+  | _, [] => by simp [tree, empty]
+  | _, [e] => by simp [tree, entryImage, leaf]
+  | 0, _ :: _ :: _ => by simp [tree, empty]
+  | n + 1, e₁ :: e₂ :: rest => by
+      have sf := strip_image f g false (e₁ :: e₂ :: rest)
+      have st := strip_image f g true (e₁ :: e₂ :: rest)
+      simp only [List.map_cons] at sf st
+      simp only [List.map_cons, tree, sf, st, tree_image dig dig' f g empty leaf branch n, branch]
+
+/-- An image keeps the entries' remaining paths, so their well-formedness. -/
+theorem wf_image (f : K → K') (g : K → V → V') {n : Nat} {es : List (AuthTrie.Entry K V)}
+    (wf : AuthTrie.WF n es) : AuthTrie.WF n (es.map (entryImage f g)) := by
+  obtain ⟨lengths, nodup⟩ := wf
+  refine ⟨fun e member => ?_, ?_⟩
+  · obtain ⟨e', inner, rfl⟩ := List.mem_map.mp member
+    exact lengths e' inner
+  · rw [List.map_map]
+    exact nodup
+
+end Image
+
 #assert_axioms erase_correct
+#assert_axioms tree_image
+#assert_axioms wf_image
 #assert_axioms erase_cost
 #assert_axioms classRevealComplete
 #assert_axioms Witness.erase_collapses
