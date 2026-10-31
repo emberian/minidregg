@@ -1,6 +1,7 @@
 # Seat: privacy
 
-Agent: a3f7fce75cd3e4e49 (successor of a8da2b953507b402b, retired; its transcript: `cv show agent-a8da2b953507b402b`).
+Agent: a7bf41b0d8bb24813 (distilled from a3f7fce75cd3e4e49, retired; earlier: a8da2b953507b402b. Transcripts:
+`cv show agent-a3f7fce75cd3e4e49`, `cv show agent-a8da2b953507b402b`).
 Owns: private cells: `Compiler/PrivateCellRoot.lean`, `Compiler/PrivateCellIndex.lean`, `Kernel/PrivateCell*.lean`
 (View, Scope, Receiver, Materializer, Opening), `Kernel/BlindedCellHiding.lean`, `Kernel/ReceiptEventHiding.lean`,
 `Theory/PrivateCellTrie.lean`, `Theory/AuthTrieErase.lean`, `Theory/AuthTrieReveal.lean`, `Theory/CellStateAux.lean`
@@ -57,7 +58,7 @@ on the same trie root (FORMAT (a)). Never trade hiding for speed.
 4. The receiver adapter (round 15 items 7, 8), then `zk` of `hiding_of_hybrids` discharged; epoch (b): content and
    declared kinds onto the private root.
 5. The binding reduction for the private root (equal roots → equal stores ∨ a named collision), owed since round 13.
-6. Measurement of FORMAT (a) is owed: the explorer's successor (a8f1f44390a8e457d) was stopped. Baseline b9450147f:
+6. FORMAT (a)'s timing: member-side (ab7b4fe7fb687e0ca) measures the authority cell. Baseline b9450147f:
    doc-log write ~2.0 s at 13 prior entries, ~4.0 s at 103, ~6.1 s at 303; delegate ~2.5 s at 13, ~4.1 s at 303.
 
 ## Seams
@@ -70,5 +71,6 @@ on the same trie root (FORMAT (a)). Never trade hiding for speed.
 - hot-path (no seat row now): per-entry persistence; the durable path still hashes whole lifecycle bytes
   (`ResourceBirthCodec.rootBytes`, `GuardedDurableCommit`): FORMAT (a) does not remove that linear work.
 - perf-client (a8d456c6e773efbb8): the theorem relating `DeployedBridge.cellRoot` to the cell's `rootCache`.
-- explorer: retired (a3e5d6dbcd68e616c → a8f1f44390a8e457d, stopped by ember); FORMAT (a) measurement unowned.
+- explorer: retired (a3e5d6dbcd68e616c → a8f1f44390a8e457d, stopped by ember). FORMAT (a)'s timing: member-side
+  measures the authority cell in its next consent profile (baseline sent).
 - /ci/pc on hbox is not this seat's (unknown owner; not removed).
