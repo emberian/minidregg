@@ -270,6 +270,33 @@ group commit only pays if the turn is not CPU-bound (ten concurrent requests at 
 serial Host work each, so the CPU per turn is the lever, not the fsync, which exorcism removed); and the question whether a static-asset GET needs a
 durable turn at all (asked of perf-apps; else root). Details: docs/PERF-APPS.md on lane/perf-apps.
 
+**Dispatch turn profile (batch 6 74e1cfa10, EtherCalc first page + 20 warm + 10 concurrent GETs;
+hbox:/ci/pa-prof/dispatch.perf.data, symfs /ci/hpc/sn/symfs6, summary /ci/hpc/sn/disp.all.txt; warm
+GET 161 ms median).** Inclusive, cpu_core: `dispatchApplicationSubmitSession` 47%;
+`receiveVerifiedWith` 41% → `admitDispatchAt` 29% → `checkCurrent` 29% (DRC admit 9%, the dispatch's
+read check `checkRead` → `ResourceObservationAdmission.check` 17%); the compiled-law check 15-19%
+(`compiledLawAcceptsFast` → `witnessFast`/`witIndexed` → `evalAlg` 19%, `systemAccepts` 14%);
+`loadPolicy` 12% (policy record re-encode + digest; exorcism's); `Loaded.extend` 14% (World.admit
+pinCheck → `DeployedBridge.cellRoot` 7%; perf-client's); encode 28% across all of it.
+The compiled-law term is waste on the Host: `lower_complete` + `compiledLawAccepts_sound` make the
+generated witness's acceptance exactly `supported && inputsInRange && castInjOn && Pred.eval`
+(`PreparedLaw.verifies_iff_eval`), so the Host can decide `Pred.eval` and never build `wit`. The catch:
+`Authorized.policyWitness` (Theory/TypedAuthorization) stores the witness, and Lean is strict, so the
+witness must become lazy (a `Thunk` in `CompiledPolicyWitness.auxiliary`, or the authorization holding
+the witness's inputs) before the check can skip it. Statement-first; it touches the PolicyWitness type.
+
+**Ember's ruling (10-31, via root): read-path GETs approved with astra's changes**
+(review: /private/tmp/claude-501/-Users-ember-dev-minidregg/01a18fa5-51c4-7992-906c-97cb89814dae/scratchpad/astra-get.txt):
+(a) a versioned read permit; (b) the linearization point with a tip check before handoff, bound to
+request, Store, generation and incarnation; (c) reserved credit per liable payer, aggregated across
+sessions and residents (a write reserves, reads draw down, service stops when it runs out until
+settlement; crash-safe settlement, refunds, settlement after revocation, price-version binding; Lean
+owns tariff and ceilings); (d) eligibility declared per route in the installed authenticated
+declaration, none eligible by default, no auto-retry for being a GET; (e) law 17 across refresh,
+accounting and queues. Statement first. Order: group commit and cheaper durable turns first (they help
+every write), then the read-path contract; our repackaged apps then declare static assets and safe GETs
+eligible. Land through the integrator in batches.
+
 **Per-story growth (root's item, 10-31).** 8 stories on one world, Host CPU: eca98bde-hp-auth2 1.04 →
 2.83 s (2.72x); eca98bde-hp-auth3 (a55855f18's Host) 1.50 → 2.51 s (1.67x, load 14-16 against 8-9).
 Fixed: `Ground.authority` rebuilt `Snapshot.ofCell`/`authStateOf` about 15 times per invocation
