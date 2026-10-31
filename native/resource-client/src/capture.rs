@@ -97,6 +97,10 @@ pub(crate) fn command(command: &str, flags: &[(&str, OsString)]) -> std::io::Res
 /// `mini ARGV...` in this process, parsed as `main` parses its own arguments.
 /// With `sink`, stdout and stderr go to those files as they are printed and come back empty.
 pub(crate) fn argv(raw: Vec<OsString>, sink: Option<(File, File)>) -> std::io::Result<(u8, Vec<u8>, Vec<u8>)> {
+    // A resident's command is a whole command: it checks its workspace's key commitment afresh
+    // (`workspace::forget_commitment_checks`). A composing verb's in-process steps (`command`)
+    // stay inside one command and share its check.
+    crate::workspace::forget_commitment_checks();
     ended(|| crate::Args::parse_from(raw), sink)
 }
 
@@ -260,6 +264,16 @@ pub(crate) fn serve() -> crate::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A resident's command never inherits "checked" from the one before it: a rotation or
+    /// revocation by another holder in between is caught by the next command's own check.
+    #[test]
+    fn a_resident_command_checks_the_key_commitment_afresh() {
+        crate::workspace::note_commitment_checked_for_test(std::path::Path::new("/w"));
+        assert!(crate::workspace::commitment_checked_for_test(std::path::Path::new("/w")));
+        let _ = argv(vec![OsString::from("--help")], None).unwrap();
+        assert!(!crate::workspace::commitment_checked_for_test(std::path::Path::new("/w")));
+    }
 
     /// A resident (`line-resident`) runs a member's line with the member's descriptors as its
     /// streams. A reader that left ends that line with 141, and the resident keeps serving.
