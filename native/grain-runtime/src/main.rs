@@ -3731,6 +3731,9 @@ struct Runtime {
     signal_lock: Arc<Mutex<()>>,
     cancelled: Arc<AtomicBool>,
     custody_gate: Arc<custody_gate::CustodyGate>,
+    /// `command_capture`'s Mini commands: one resident client, never cancelled
+    /// by hard EOF (those children ran to their end or their deadline).
+    native_gate: custody_gate::CustodyGate,
     /// Set when the last `command_output` child exited with a status and
     /// every holder of its output pipes closed them: the sender is reaped.
     custody_exit_reaped: AtomicBool,
@@ -6855,10 +6858,14 @@ impl Runtime {
         };
         let process_first_operation_id = journal.next_operation_id;
         // The test runtimes' `mini` are one-shot scripts; the resident gate has its own tests.
+        // Every Mini command through the custody gate set umask 0o077; command_capture's inherited it.
         #[cfg(not(test))]
-        let custody_gate = Arc::new(custody_gate::CustodyGate::with_resident(&config.mini));
+        let (custody_gate, native_gate) = (
+            Arc::new(custody_gate::CustodyGate::with_resident(&config.mini, Some(0o077))),
+            custody_gate::CustodyGate::with_resident(&config.mini, None),
+        );
         #[cfg(test)]
-        let custody_gate = Arc::new(custody_gate::CustodyGate::new());
+        let (custody_gate, native_gate) = (Arc::new(custody_gate::CustodyGate::new()), custody_gate::CustodyGate::new());
         let mut rt = Self {
             config,
             config_path,
@@ -6871,6 +6878,7 @@ impl Runtime {
             signal_lock: Arc::new(Mutex::new(())),
             cancelled: Arc::new(AtomicBool::new(false)),
             custody_gate,
+            native_gate,
             custody_exit_reaped: AtomicBool::new(false),
             application_api_send_gate: Arc::new(application_api_tools::ForwardSendGate::new()),
             completion_phase: Arc::new(AtomicU8::new(PHASE_IDLE)),
@@ -7586,14 +7594,31 @@ impl Runtime {
     }
     fn command_capture(&self, program: &Path, args: &[&str]) -> Result<std::process::Output> {
         self.custody_exit_reaped.store(false, Ordering::SeqCst);
-        let output = deadline::output(Command::new(program).args(args), self.native_work_limit()?).map_err(|e| {
+        let mut command = Command::new(program);
+        command.args(args);
+        let output = if self.native_gate.has_resident() && program == self.config.mini {
+            // A frame to the resident client; at the deadline it is killed with its group and reaped.
+            self.native_gate
+                .run_capture_until(&AtomicBool::new(false), &mut command, self.native_work_limit()?)
+                .map_err(|error| match error {
+                    custody_gate::CustodyError::Uncertain(e) => {
+                        if e.kind() == std::io::ErrorKind::TimedOut {
+                            self.custody_exit_reaped.store(true, Ordering::SeqCst);
+                        }
+                        deadline::describe(&program.display().to_string(), e)
+                    }
+                    custody_gate::CustodyError::BeforeSpawn => format!("{}: not started", program.display()),
+                })?
+        } else {
+        deadline::output(&mut command, self.native_work_limit()?).map_err(|e| {
             // At the deadline deadline::wait killed the child's whole process
             // group and reaped the leader: the sender is stopped too.
             if e.kind() == std::io::ErrorKind::TimedOut {
                 self.custody_exit_reaped.store(true, Ordering::SeqCst);
             }
             deadline::describe(&program.display().to_string(), e)
-        })?;
+        })?
+        };
         if !output.status.success() {
             // deadline::output returned a status and both pipes at EOF: the
             // child is reaped and no descendant still holds its output.

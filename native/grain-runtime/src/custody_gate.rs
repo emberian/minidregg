@@ -28,6 +28,9 @@ pub struct CustodyGate {
     /// The `mini` whose commands run as frames to one resident `mini
     /// command-resident` instead of one child each (`run_resident`).
     resident_program: Option<PathBuf>,
+    /// The umask the resident runs with, as the one-shot children it replaces
+    /// set it; None inherits this process's.
+    resident_umask: Option<libc::mode_t>,
     resident: Mutex<Option<Resident>>,
 }
 
@@ -74,8 +77,12 @@ impl CustodyGate {
 
     /// A gate whose commands for `mini` (with no environment or directory of
     /// their own) run in one resident client process.
-    pub fn with_resident(mini: &Path) -> Self {
-        Self { resident_program: Some(mini.to_path_buf()), ..Self::default() }
+    pub fn with_resident(mini: &Path, umask: Option<libc::mode_t>) -> Self {
+        Self { resident_program: Some(mini.to_path_buf()), resident_umask: umask, ..Self::default() }
+    }
+
+    pub fn has_resident(&self) -> bool {
+        self.resident_program.is_some()
     }
 
     fn routes(&self, command: &Command) -> bool {
@@ -130,6 +137,36 @@ impl CustodyGate {
             *resident = None;
         }
         Ok(Some(pid))
+    }
+
+    /// End an idle resident: its input closes, it exits at the frame
+    /// boundary and is reaped (killed after two seconds). A busy one refuses.
+    /// The physical quiescence proof admits no effect-capable client process.
+    pub fn retire(&self) -> io::Result<()> {
+        let mut resident = self
+            .resident
+            .lock()
+            .map_err(|_| io::Error::other("Mini custody gate poisoned"))?;
+        let Some(running) = resident.take() else { return Ok(()) };
+        if running.busy {
+            *resident = Some(running);
+            return Err(io::Error::other("Mini resident client has an outstanding command"));
+        }
+        let Resident { mut child, requests, .. } = running;
+        drop(requests);
+        let start = Instant::now();
+        while child.try_wait()?.is_none() {
+            if start.elapsed() >= Duration::from_secs(2) {
+                unsafe {
+                    libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL);
+                }
+                let _ = child.kill();
+                child.wait()?;
+                break;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        Ok(())
     }
 
     fn resident_busy(&self) -> io::Result<bool> {
@@ -359,12 +396,13 @@ impl CustodyGate {
                 let mut spawn = Command::new(mini);
                 spawn.arg("command-resident").process_group(0)
                     .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit());
-                // Every Mini command through this gate ran with this umask.
-                unsafe {
-                    spawn.pre_exec(|| {
-                        libc::umask(0o077);
-                        Ok(())
-                    });
+                if let Some(mask) = self.resident_umask {
+                    unsafe {
+                        spawn.pre_exec(move || {
+                            libc::umask(mask);
+                            Ok(())
+                        });
+                    }
                 }
                 let mut child = spawn.spawn()?;
                 let requests = child.stdin.take().ok_or_else(|| io::Error::other("resident stdin was not piped"))?;
@@ -680,7 +718,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("custody-resident-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let mini = fake_resident(&dir);
-        let gate = Arc::new(CustodyGate::with_resident(&mini));
+        let gate = Arc::new(CustodyGate::with_resident(&mini, Some(0o077)));
         let cancelled = Arc::new(AtomicBool::new(false));
         let run = |args: &[&str]| {
             let mut command = Command::new(&mini);
@@ -714,6 +752,9 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(10));
         let third = run(&["again"]).unwrap();
         assert_ne!(third.stderr, first.stderr, "a fresh resident after cancel");
+        gate.retire().unwrap();
+        let pid: i32 = String::from_utf8(third.stderr).unwrap().parse().unwrap();
+        assert_ne!(unsafe { libc::kill(pid, 0) }, 0, "a retired resident is gone");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
