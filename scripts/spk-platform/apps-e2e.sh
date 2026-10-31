@@ -40,6 +40,14 @@ FIXTURE=${APPS_E2E_INDEX:-$repo/native/resource-client/tests/fixtures/sandstorm-
 CLASS=${APPS_E2E_CLASS:-S} ATTEMPTS=${APPS_E2E_ATTEMPTS:-20} GET_PATH=${APPS_E2E_GET_PATH:-/}
 [[ ! -e $out ]] || { echo "fresh OUT_DIR required" >&2; exit 2; }
 mkdir -m 700 "$out"
+# The consent and codec residents this run's `mini` calls start keep their anchors and PID files in
+# OUT/a, and stop_residents ends them at exit: their settings live under OUT, which world-down never
+# touches, so nothing would otherwise stop them.
+export MINI_CONSENT_ANCHOR_DIR="$out/a"; mkdir -m 700 "$MINI_CONSENT_ANCHOR_DIR"
+stop_worker() { [ -f "$out/worker.pid" ] && kill "$(cat "$out/worker.pid")" 2>/dev/null; rm -f "$out/worker.pid"; }
+stop_residents() { bash "$here/stop-residents.sh" "$out" >&2; rm -f "$out"/ws-*/attempts/*/config.json; }
+cleanup() { stop_worker; stop_residents; }
+trap cleanup EXIT
 rows=0 fails=0
 row() { rows=$((rows + 1)); if [ "$2" = 1 ]; then printf 'PASS\t%s\t%s\n' "$1" "$3"; else fails=$((fails + 1)); printf 'FAIL\t%s\t%s\n' "$1" "$3"; fi; }
 verdict() { local v="J-APPS-E2E PASS $rows/$rows"; [ "$fails" = 0 ] || v="J-APPS-E2E FAIL $fails/$rows"; echo "$v"; echo "$v" >&2; [ "$fails" = 0 ]; }
@@ -189,8 +197,6 @@ nohup "$MINI" apps-worker --state "$out/state" --world "$out/apps-world.json" --
 echo $! >"$out/worker.pid"
 for _ in $(seq 1 50); do [ -S "$out/worker.sock" ] && break; sleep 0.1; done
 row "the worker serves its member socket" "$([ -S "$out/worker.sock" ] && echo 1 || echo 0)" "pid $(cat "$out/worker.pid")"
-stop_worker() { [ -f "$out/worker.pid" ] && kill "$(cat "$out/worker.pid")" 2>/dev/null; rm -f "$out/worker.pid"; }
-trap stop_worker EXIT
 
 # ---- restart then write (APPS_E2E_RESTART=1, Hacker Slides) ---------------------------------------
 # The worker enrols the owner's route after every START (apps_worker.rs World::enroll), so a member
