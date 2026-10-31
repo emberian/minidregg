@@ -9,11 +9,18 @@ Quest: composed confinement Stage A then B; root-unit review; keep the forge dem
   the repair left it without a seeded lobby (members step is not idempotent: "feedback-me.json File exists"). Next: ONE fresh rebuild
   from `green` (`dregg-infra edge/demo/workhorse/forge-baseline` then `rebuild-world CANDIDATE_DIR PRETTY_HERMES SEED_OVERLAY`, ZAI=1).
   The Discord alert is OFF on the box and in the frame (DEMO_ALERT=on re-enables; CHECKLIST says re-enable at the next rehearsal).
+- (hbox is down: every hbox path in dregg-infra scripts was repointed to bb2 in 6d4d1fb.)
 - forge composed (the builder's row, run through me): `composed-sync CAND EDGE` then `composed-gate SRC8 CAND12 TAG` on the composed machine.
   Verdicts: batch 4 b9450147f, batch 5 1c151fce, a4cb65af3: all PASS. acc7cfa03 (batch 7): apps FAIL (apps:sheet same-Store app).
   dc61016cb (batch 8): documents FAIL (documents:protected, no stderr, evidence c-dc61-d1/.../0117-d), apps/connector/residents/restart PASS, store-restart blocked.
   Kept worlds of those two runs are down. Never run composed and a demo ship together on forge (fn user's ACL2 builds already hold load ~5).
 - Disk: composed machine root 79% (47 of 59 GB), /ci/run holds 33 GB of old gate evidence (c-4159-*, c-f34b-*, ...). Root: tell me which to delete; I have not.
+
+## dregg-infra homes (2026-10-31, after hbox died)
+- Canonical `origin` = dregg-anchor:/srv/git/dregg-infra.git (fetch). Second copy: dregg-build2 `build@bb2:~/git/dregg-infra.git`. `git push origin` pushes BOTH (two pushurls).
+  All 17 local branches and tags were pushed to both; main and demo-vm verified identical on local, anchor and bb2 (6d4d1fb / 0ef191b). hbox:/srv/git/dregg-infra.git is dead; nothing points at it.
+- No git checkouts of dregg-infra exist on forge or bb2 (they hold copies of edge/ only: bb2:~/dregg-infra-edge, refreshed by tar from the Mac).
+- The build box is dregg-build2 (`ssh bb2`, user build): candidates /srv/integ/candidates/<sha>, forge composed via bb2:~/composed-sync + `ssh composed-box` (key ~/.ssh/composed_gate_id, restricted on forge).
 
 ## Landed (dregg-infra main)
 demo-custodian (host-side volume custodian wiring), demo-grain-world custodian mode (+overlay installer fd8de031a), demo-proc-visible unit, hroot-python312,
