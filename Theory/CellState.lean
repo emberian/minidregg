@@ -16,6 +16,7 @@ application satisfies is `Store.Patch.run_frame` itself.
 module
 
 public import Theory.Store
+public import Theory.CellStateAux
 public import Theory.ReactiveController
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
@@ -55,6 +56,10 @@ changing `rootOf`'s type. -/
 structure Materializer (L : Layout.{u, v, w}) (Root : Type y) where
   codec : LawfulCodec (Store L)
   rootBytes : List UInt8 → Root
+  /-- The persistent structure a cell carries beside its store (`Theory.CellStateAux`): flat
+  (nothing kept, the root from the bytes) unless the kind keeps one. -/
+  aux : CellStateAux.AuxCache (fun store => rootBytes (codec.encode store)) :=
+    CellStateAux.AuxCache.flat _
 
 /-- The root of a logical store. -/
 def Materializer.rootOf {L : Layout.{u, v, w}} {Root : Type y}
@@ -73,7 +78,11 @@ structure Materialized {L : Layout.{u, v, w}} {Root : Type y}
   logical : Store L
   bytesCache : Thunk (List UInt8)
   bytesExact : bytesCache.get = M.codec.encode logical
+  carried : CellStateAux.Carried M.aux logical
   rootCache : Thunk Root
+  /-- The one root law: whatever the cache reads (the carried structure's root, or the
+  fallback hash of the bytes when it reads none), it is the materializer's root of the
+  logical store, so the fallback is never a second, unchecked root. -/
   rootExact : rootCache.get = M.rootOf logical
 
 /-- The one constructor for canonical cells: the root hashes the cached
@@ -81,7 +90,10 @@ bytes, so a cell is encoded at most once. -/
 def materialize {L : Layout.{u, v, w}} {Root : Type y} (M : Materializer L Root)
     (logical : Store L) : Materialized M :=
   let bytes : Thunk (List UInt8) := Thunk.mk fun _ => M.codec.encode logical
-  ⟨logical, bytes, rfl, Thunk.mk fun _ => M.rootBytes bytes.get, rfl⟩
+  let carried : CellStateAux.Carried M.aux logical := Trunc.mk (M.aux.build logical)
+  ⟨logical, bytes, rfl, carried,
+    Thunk.mk fun _ => CellStateAux.Carried.rootOr M.aux carried (Thunk.mk fun _ => M.rootBytes bytes.get),
+    CellStateAux.rootOr_eq M.aux carried _ rfl⟩
 
 /-- Canonical bytes are projected from the packaged logical store. -/
 def Materialized.bytes {L : Layout.{u, v, w}} {Root : Type y}
@@ -142,9 +154,10 @@ theorem Materialized.root_encoding_coherent {L : Layout.{u, v, w}} {Root : Type 
 @[ext] theorem Materialized.ext {L : Layout.{u, v, w}} {Root : Type y}
     {M : Materializer L Root} {left right : Materialized M}
     (h : left.logical = right.logical) : left = right := by
-  obtain ⟨logical, ⟨leftBytes⟩, leftBytesExact, ⟨leftRoot⟩, leftExact⟩ := left
-  obtain ⟨_, ⟨rightBytes⟩, rightBytesExact, ⟨rightRoot⟩, rightExact⟩ := right
+  obtain ⟨logical, ⟨leftBytes⟩, leftBytesExact, leftCarried, ⟨leftRoot⟩, leftExact⟩ := left
+  obtain ⟨_, ⟨rightBytes⟩, rightBytesExact, rightCarried, ⟨rightRoot⟩, rightExact⟩ := right
   cases h
+  cases Subsingleton.elim leftCarried rightCarried
   -- A `Unit → α` is determined by its value at `()` definitionally (eta), so
   -- no function extensionality is needed.
   have sameBytes : leftBytes = rightBytes :=
@@ -162,8 +175,10 @@ def materializeCanonical {L : Layout.{u, v, w}} {Root : Type y} (M : Materialize
     (bytes : List UInt8) (logical : Store L) (canonical : M.codec.encode logical = bytes) :
     Materialized M :=
   let cached : Thunk (List UInt8) := Thunk.pure bytes
-  ⟨logical, cached, canonical.symm, Thunk.mk fun _ => M.rootBytes cached.get,
-    congrArg M.rootBytes canonical.symm⟩
+  let carried : CellStateAux.Carried M.aux logical := Trunc.mk (M.aux.build logical)
+  ⟨logical, cached, canonical.symm, carried,
+    Thunk.mk fun _ => CellStateAux.Carried.rootOr M.aux carried (Thunk.mk fun _ => M.rootBytes cached.get),
+    CellStateAux.rootOr_eq M.aux carried _ (congrArg M.rootBytes canonical.symm)⟩
 
 theorem materializeCanonical_eq {L : Layout.{u, v, w}} {Root : Type y} (M : Materializer L Root)
     (bytes : List UInt8) (logical : Store L) (canonical : M.codec.encode logical = bytes) :
@@ -255,12 +270,26 @@ def validate {L : Layout.{u, v, w}} {Root : Type y} [DecidableEq Root]
     .rejected .stalePreRoot
 
 /-- Application exists only on the validated type: run the patch on the
-logical pre-store and rematerialize. -/
+logical pre-store; the carried structure follows the patch (`Carried.run`, one
+`set` per writing operation, never a rebuild) and the root is read from it. -/
 def ValidatedPatch.apply {L : Layout.{u, v, w}} {Root : Type y}
     {M : Materializer L Root} {pre : Materialized M} {expectedPreRoot : Root}
     {patch : Patch L} (_validated : ValidatedPatch M pre expectedPreRoot patch) :
     Materialized M :=
-  materialize M (Patch.run pre.logical patch)
+  let logical := Patch.run pre.logical patch
+  let bytes : Thunk (List UInt8) := Thunk.mk fun _ => M.codec.encode logical
+  let carried : CellStateAux.Carried M.aux logical := CellStateAux.Carried.run M.aux patch pre.carried
+  ⟨logical, bytes, rfl, carried,
+    Thunk.mk fun _ => CellStateAux.Carried.rootOr M.aux carried (Thunk.mk fun _ => M.rootBytes bytes.get),
+    CellStateAux.rootOr_eq M.aux carried _ rfl⟩
+
+/-- Application is the materialization of the run store (`Materialized.ext`): the carried
+structure is the only thing that differs, and it is a subsingleton. -/
+theorem ValidatedPatch.apply_eq_materialize {L : Layout.{u, v, w}} {Root : Type y}
+    {M : Materializer L Root} {pre : Materialized M} {expectedPreRoot : Root}
+    {patch : Patch L} (validated : ValidatedPatch M pre expectedPreRoot patch) :
+    validated.apply = materialize M (Patch.run pre.logical patch) :=
+  Materialized.ext rfl
 
 @[simp] theorem ValidatedPatch.apply_logical {L : Layout.{u, v, w}} {Root : Type y}
     {M : Materializer L Root} {pre : Materialized M} {expectedPreRoot : Root}
@@ -402,6 +431,6 @@ structure IntentBinding
 
 /-- info: 'Minidregg.Theory.CellState.PairBindingPremise.root_ne' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms PairBindingPremise.root_ne
-/-- info: 'Minidregg.Theory.CellState.Collision.bytes_ne' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Theory.CellState.Collision.bytes_ne' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Collision.bytes_ne
 end Minidregg.Theory.CellState

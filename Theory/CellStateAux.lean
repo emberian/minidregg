@@ -38,7 +38,7 @@ cost statement.
 -/
 module
 
-public import Theory.CellState
+public import Theory.Store
 import Theory.AssertAxioms
 
 @[expose] public section
@@ -47,7 +47,6 @@ namespace Minidregg.Theory.CellStateAux
 
 open Minidregg.Theory
 open Minidregg.Theory.Store
-open Minidregg.Theory.CellState
 
 set_option autoImplicit false
 
@@ -134,6 +133,16 @@ carried structure, falling back to the specification, is the specification's roo
 def RootFromCarried (C : AuxCache spec) : Prop :=
   ∀ (s : Store L) (carried : Carried C s), Carried.rootOr C carried (Thunk.mk fun _ => spec s) = spec s
 
+theorem rootOr_eq (C : AuxCache spec) {s : Store L} (carried : Carried C s) (fallback : Thunk Root)
+    (exact : fallback.get = spec s) : Carried.rootOr C carried fallback = spec s := by
+  induction carried using Trunc.ind with
+  | _ a =>
+    unfold Carried.rootOr Carried.root?
+    simp only [Trunc.lift_mk]
+    cases h : C.root? a.1 with
+    | none => exact exact
+    | some r => exact C.root?_sound a.2 h
+
 theorem rootFromCarried (C : AuxCache spec) : RootFromCarried C := by
   intro s carried
   induction carried using Trunc.ind with
@@ -179,6 +188,7 @@ theorem stale_root_refuted (C : AuxCache spec) {a : C.Aux} {s : Store L} (addres
     False :=
   moved ((C.root?_sound (C.set_holds address value h) (stale.trans old)).symm.trans (C.root?_sound h old))
 
+#assert_axioms rootOr_eq
 #assert_axioms rootFromCarried
 #assert_axioms constant_root_refuted
 #assert_axioms flat_not_available
