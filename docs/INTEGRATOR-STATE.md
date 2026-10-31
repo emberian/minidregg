@@ -4,54 +4,76 @@ Present-state record of the integration lane, rewritten whole when its shape cha
 `hbox:/home/hbox/lanes/integ/COMMANDS.log` (every build stage, gate verdict, sweep, world teardown and process stop, one
 line each). History is in this file's git history.
 
-The integrator is agent **aba0beaa578594e92**, distilled 10-31 06:00 from aeb671706eb3f70d7 (retired; the cv
-retired-agent hook names the live integrator to anyone who messages the old id). Lanes send shas, READY, reds and handoffs to the
-integrator; the integrator merges onto `integration/staging`, cuts batch candidates on hbox, gates them, moves main to
-gated candidates and names candidates to infra and the explorer.
+The integrator is agent **aec6914709d96f496** (fresh 10-31 10:55, replacing aba0beaa578594e92, retired by `cv retire`;
+the hook names the live integrator to anyone who messages an old id). Lanes send shas, READY, reds and handoffs to the
+integrator; the integrator merges onto `integration/staging`, cuts batch candidates on hbox, gates them once per batch,
+moves main to gated candidates and names candidates to infra and the explorer.
 
 ## Re-orienting (root, 10-31 10:50)
 
 After any context clear, the ONLY sources of what is pending are this file and COMMANDS.log. Never send a report because
-a scratchpad or task-output file exists. Send only what "Reports owed" below lists, and move it to "Reports sent" in the
-same step. Closed items are never re-reported.
+a scratchpad or task-output file exists. Send only what "Reports owed" lists, and move it to "Reports sent" in the same
+step. Closed items are never re-reported. Report to root on events only (READY, gate verdicts, reds, decisions needed).
 
-## Now (2026-10-31 10:52 EDT)
+## Now (2026-10-31 11:05 EDT)
 
-- **ember (10-31 09:10, via root): no rehearsal cut until she says.** Keep batching, gate once per batch, keep the newest
-  green candidate as the fallback. Priorities: repair Hermes, efficiency everywhere, every red fixed, never worked around.
+- **ember (10-31): no rehearsal cut until she says.** Make the system excellent: Hermes repaired, efficiency everywhere,
+  every red fixed (never worked around). ~1 ms warm per action is the direction, not a gate. Law 17 holds.
 - **main = 83e926874** = gated batch 4 b9450147f + main 7978ddfdd. **Batch 4 is the green fallback.**
-- Batch 5 1c151fce4 and batch 6 74e1cfa10: gate15 FAIL on j14 (Hermes final-say refused; app-reds narrowing, c88b88755 in
-  batch 7 surfaces the write error). Forge composed on batch 5 passed every phase.
-- **Batch 7 acc7cfa03: READY 10:29** (host 1,666 s beside batch 6's umbrella; seat-weights fix worked). gate15 (PID file
-  $I/gate-acc7.pid): enrol PASS, tour 73/73. j14-apps FAIL: mini cannot create owner-workspace/attempt-index/by-intent/
-  (ENOENT; perf-client aa24acaf8). Composed rerun -c2 ($I/gate-acc7-c2.pid): rooms/churn/documents/restart pass, the rest
-  blocked by "metered workroom not ready" (hot-path: management subject 8 lacks the sponsor-born task's grant;
-  suspected downstream of the ENOENT; if -hp1 still refuses, route to the apps-worker/workroom owner). Fix b940b3f50 (perf-client) merged on staging; mini rebuilt and
-  overlaid as **candidates/acc7cfa03-attidx** (both copies of mini replaced; hotpatch-candidate.sh fixed to replace every
-  copy by digest). Queued: gate15 PHASES="j14 composed" SUF=-hp1 on it, launching when both acc7 gates exit
-  ($I/hp-attidx.pid waits; then $I/gate-acc7-attidx.pid). Forge composed of batch 7 queued by infra.
-- **Staging 48cea3caf (batch 8 so far; boundary table: Theory may import Std, for SparseMap)**: iter-speed 7800d3199 + 697db7664 (native-loop: a lane's Lean change reaches a
-  native candidate in ~8 min), tower split 0eab28db7, exorcist 47b7cb2e1 + c763e3ead, perf-client 783b460cb + b6 +
-  b940b3f50, retained-mode 62aa5fcf8 (footprint-bound renames, all 35 pins, Theory/SparseMap.lean = L0's foundation; round-2 audit sent 10:55: sound; transport lemmas, one optionZero and all pins owed before L0) over 675a80745 (Theory/Retained.lean; audit sent 10:47: correctness sound, cost budgets do not exclude recompute, no Host-shaped node yet, pins owed) + 1d4ff4efb (docs).
-  Batch 8 is the whole-tree build these owe.
-- **Next shared-interface change: retained-mode L0** (Theory.Store's Store becomes a persistent extensional tree map,
-  ~66 files, WorldCompact deleted): its own cut with one whole-tree build; FORMAT (private cells (a), hot-path row 11,
-  Book entries) rebases onto it.
-- **CLOSED: GET read-path contract.** Astra reviewed, ember ruled; hot-path a6c4a1532687a4fdb owns it statement-first. Never
-  re-run or re-report.
-- **Hermes final-say red (batches 5-7 j14 `refused`)**: app-reds run 24 found the cause class: the controller's final
-  `mini_say` got ECONNRESET from the operator-v2 socket and was recorded as `refused`. Owed (app-reds): a transport
-  failure resolves by exact lookup and exact retry, never `refused`; and prove or rule out ServeBounds' 10 s read deadline.
-- hbox: / 60 GB free (10:55).
+- **Batch 7 acc7cfa03: gate15 verdict FAIL (10:55).** enrol PASS, tour 73/73; j14 FAIL at worker/finish_worker:
+  `controller-run grain-runtime create` rc=1, mini cannot create owner-workspace/attempt-index/by-intent/ (ENOENT;
+  perf-client aa24acaf8, fixed b940b3f50); composed (-c2 after my predecessor's harness-extract launch error) blocked by
+  "the metered workroom is not ready"; flatness submit FAIL / get PASS (published, never gating).
+- **acc7cfa03-attidx -hp1** (batch 7 + mini from b940b3f50, HARNESS=49a717ef2, PHASES "j14 composed"; PID file
+  $I/gate-acc7-attidx.pid; integrator waiter armed): composed FAIL again 10:57 with the SAME "metered workroom is not
+  ready" refusal, so that refusal is NOT downstream of the attempt-index ENOENT: it is its own fault (hot-path's diagnosis:
+  management subject 8 lacks the sponsor-born task's grant). j14 still running.
+- Batch 6 74e1cfa10 umbrella-tree rc=0 reds=0 (10:57); fixture-regen/74e1cfa10719 merged on staging (790eb04a3).
+- **Staging 790eb04a3 (batch 8 material)**: iter-speed 7800d3199 + 697db7664, tower split 0eab28db7, exorcist 47b7cb2e1
+  + c763e3ead + **b37f26cf6** (A: ssh lines run in a per-member `mini line-resident` via new bin `mini-line`, role
+  miniLine, which every mini overlay must also carry; B: signed reads keep one journal line, no attempt tree; doc show
+  wall min 17.4 -> 13.7 ms), perf-client 783b460cb + b6 + b940b3f50 (+ fb6f024a8 via exorcism), retained-mode 62aa5fcf8
+  over 675a80745 + 1d4ff4efb, boundary 48cea3caf (Theory may import Std), batch 6 fixtures. Batch 8 cut owes the
+  whole-tree build of these.
+- **Next shared-interface change: retained-mode L0** (Store as a persistent extensional tree map, ~66 files,
+  WorldCompact deleted): its own cut with one whole-tree build; FORMAT rebases onto it. Round-2 audit owed items before
+  L0: transport lemmas, one optionZero, pin all SparseMap theorems.
+- **CLOSED: GET read-path contract** (ember ruled (c) prepaid per-payer reservations, (d) per-route declared eligibility;
+  hot-path owns it statement-first). Never re-run or re-report.
+- hbox: / 57 GB free (11:00).
+
+## Failure signatures (every red: stage, refusal/error text, first divergence; reruns? same place?)
+
+- **H1, Hermes ungranted-ask final say `refused`** (batch 5 1c151fce4 and its overlay 1c151fce4-resid -hp1): stage j14
+  probe, first `task_turn('refused', ...)` (the UNGRANTED Davros put; the label is the probe's name, not the outcome).
+  Error: `ValueError: Hermes sent no reply to the ask: refused`. First divergence: the resident run completes (op 47,
+  provider attempts 49/69/89, model text correctly names `typed-apps-not-granted`, `resident-completed`), then the final
+  delivery outcome is `{"status":"refused","type":"mini-resident-request-outcome-v1"}` with receipt
+  `controller/home/grain/state/resident-final-refused-0000000000000047.json`; no say reaches the transcript. Service logs
+  carry no error text (the receipt's body was in the torn-down world). Reruns: yes (2/2). Same place: yes, identical
+  op id and outcome across a spk-host overlay. One fault. Cause class (app-reds run 24): the final `mini_say` got
+  ECONNRESET from the operator-v2 socket and was recorded as `refused`. c88b88755 (batch 7) surfaces the write error.
+- Batch 6 74e1cfa10 j14: `FAIL rc=1`; its world /ci/j-74e1cf was swept, so its signature is unrecorded: not counted as H1.
+- **H2, attempt-index ENOENT** (batch 7 base): stage j14 worker, `controller-run grain-runtime create` rc=1, ENOENT on
+  owner-workspace/attempt-index/by-intent/. Never reached the probe. Distinct from H1. Fix b940b3f50; -hp1 decides.
+- **W1, metered workroom not ready** (batch 7 base -c2 and -hp1): stage composed-inputs, `composed-inputs: the metered
+  workroom is not ready`. Reruns: yes; same place: yes, with and without the ENOENT fix. One fault, independent of H2.
+- **R1, residents room-summon UNKNOWN** on hbox composed (every batch since 2): hbox cannot judge residents; forge
+  composed does (batch 5 forge PASS). Standing, not a candidate red.
 
 ## Reports owed
 
-- Batch 7 gate verdict and the -hp1 hotpatch result (to root, infra, explorer, perf-apps), when they land.
+- To root, infra, explorer, perf-apps: batch 7 verdict (FAIL, signatures above) plus the -hp1 j14 result when it lands.
+- To app-reds ad85d40779880420c: H1 is one fault (reruns, same place), batch 7 base never reached it (H2 earlier); W1 is
+  separate. Owed by app-reds: transport failure resolves by exact lookup and exact retry, never `refused`; prove or rule
+  out ServeBounds' 10 s read deadline; gates keep the world (KEEP_WORLD) on a j14 red so the receipt body survives.
+- To the W1 owner (hot-path diagnosed; route decided at the -hp1 verdict): W1 survives the ENOENT fix.
+- To exorcist a76808829fc8e4836: b37f26cf6 merged on staging (c9cfa459e), rides batch 8.
 
 ## Reports sent (do not resend)
 
-- 10-31: retained-mode audit rounds 1 and 2 (to a13f0c9ab4513b2d7; round 2: transport lemmas, one optionZero, pin all SparseMap theorems).
-- 10-31: GET-contract astra review (many times, by mistake; CLOSED). Batch 7 READY named to infra, explorer, perf-apps.
+- 10-31: retained-mode audit rounds 1 and 2 (to a13f0c9ab4513b2d7).
+- 10-31: GET-contract astra review (CLOSED). Batch 7 READY named to infra, explorer, perf-apps.
 
 ## Lanes (route only to the newest id; distilled lanes' old ids are retired)
 
@@ -129,11 +151,11 @@ Every Lean-statement sha gets an audit round from a4d9a6f4cba4855ca before it ri
 | a4cb65af3 | GATE GREEN (batch 3); main's base; fallback ship |
 | eca98bde7-resvar2(-zai) | overlays of batch 2 with the resident /var fix (and Z.AI); forge demo build |
 | b9450147f | GATE GREEN (batch 4, with deploy hotpatch 9fdef19bd): rehearsal-3 candidate; main's base |
-| 1c151fce4 | READY (batch 5); gate15 FAIL: j14 `refused` ask, residents for forge |
-| 74e1cfa10 | READY (batch 6); gate15 FAIL: j14 Hermes final-say refusal, residents for forge |
-| acc7cfa03 | READY (batch 7); gate15: tour 73/73, enrol PASS; j14 FAIL (attempt-index ENOENT) |
-| acc7cfa03-attidx | overlay: batch 7 + mini from b940b3f50; gate15 -hp1 j14+composed queued |
-| 1c151fce4-resid | overlay: batch 5 + spk-host crate from 40efdcff9 (resource id any non-zero u64); gate15 -hp1: j14 same `refused` red |
+| 1c151fce4 | READY (batch 5); gate15 FAIL: j14 H1; forge composed PASS |
+| 74e1cfa10 | READY (batch 6); gate15 FAIL: j14 rc=1 (signature unrecorded, world swept); umbrella-tree reds=0 |
+| acc7cfa03 | READY (batch 7); gate15 FAIL: tour 73/73, enrol PASS; j14 H2; composed W1 |
+| acc7cfa03-attidx | overlay: batch 7 + mini from b940b3f50; gate15 -hp1: composed W1 again; j14 running |
+| 1c151fce4-resid | overlay: batch 5 + spk-host crate from 40efdcff9; gate15 -hp1: j14 H1 again (same op, same outcome) |
 
 ## Open reds and owners
 
