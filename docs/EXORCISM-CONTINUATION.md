@@ -133,23 +133,39 @@ and /ci/exo/w8 (the overlay), 100 `doc show` each, alternated, hbox load 22-25:
 | codec CPU | 4.0 / 3.8 ms | 4.2 / 3.5 ms | 3.2 / 2.9 ms |
 | consent CPU | 1.8 / 1.5 ms | 1.8 / 1.5 ms | 1.7 / 1.5 ms |
 
-## Next: the ssh wrapper in Rust (agreed with perf-client a778bbda6509944a5)
+## The ssh wrapper is the binary: done (3822c09f2 + d843f2ef6), infra e29997d
 
-`mini-line` takes the wrapper's six absolute arguments and does all it does; the candidate's
-bin/mini-line is installed AT /usr/local/lib/mini/mini-shell-ssh (a root-owned copy), so no
-authorized_keys line changes; deploy/shell/mini-shell-ssh is deleted (no twin). Measured: bash
-wrapper + mini-line 2.7 ms CPU / 3.3 ms wall for `whoami`, mini-line alone 0.75 ms / 1.2 ms.
-Invariants (perf-client): every /etc/mini file read once (session-consent thin|full,
-session-residents, session-codec); HOME/consent/peer.pins with the sha256 fallback; the HOME-less
-MINI_CONSENT_ANCHOR_DIR fallback ($home/.mini/consent-anchors); umask 077; `--call-slots
-$home/.call-slots`; motd.txt and notice.txt from argv[0]'s directory on interactive login only;
-exit codes 64 (usage, non-absolute), 66 (mini not executable), 78 (bad /etc/mini file or pins);
-SSH_ORIGINAL_COMMAND verbatim to `--line`, never a shell. Callers to move to the binary: about 24
-journeys and scripts under native/resource-client (they `install` deploy/shell/mini-shell-ssh),
-deploy/demo-seed/seed.sh, deploy/door/infra/mini-session-run, native/discord-entrance
-(mini-door-process), native/mini-web-spawn, platform-provision.py / platform-stage-root.py, and
-infra's edge/mini/install.sh:234 plus jworld-scratch.sh:279 (coordinate with infra
-aa72653a8ce442178).
+`bin/mini-line` takes the forced command's six absolute arguments and does everything the bash
+wrapper did; deploy/shell/mini-shell-ssh is deleted. Infra e29997d installs the candidate's
+bin/mini-line as /usr/local/lib/mini/mini-shell-ssh on every ship and in jworld-scratch; infra keeps
+its own edge/mini/shell/mini-shell-ssh only for candidates without mini-line (batch 4, batch 7) and
+deletes it once batch 8 is the demo baseline. One rule changed against the old lane copy: the
+anchors default to $home/.mini/consent-anchors whenever MINI_CONSENT_ANCHOR_DIR is unset (infra's
+F1 fix), not only when HOME is unset. Tests: tests/mini_shell_ssh.rs (6; 30 consecutive runs green
+on hbox after the ETXTBSY lock); the python launcher/provision/stage tests green on hbox.
+
+Measured on /ci/exo/w8 (batch 7 overlay world), member-1, 8 alternated rounds of 60 each, hbox
+load 20-27, client CPU = wrapper + mini-line + the driver's own per-iteration fork (residents not
+counted). Median (minimum):
+
+| per op | bash wrapper + old mini-line | mini-line as the wrapper |
+|---|---|---|
+| `whoami` wall | 4.86 (3.77) ms | 2.46 (1.67) ms |
+| `whoami` client CPU | 4.60 ms | 2.16 ms |
+| `doc show` wall | 23.0 (14.8) ms | 18.9 (12.0) ms |
+| `doc show` client CPU | 5.12 ms | 2.71 ms |
+
+Driver: /ci/exo/wr.sh WORLD N ROUNDS (before bins /ci/exo/before-ssh, after /ci/exo/after-ssh).
+
+Open twin found on the way (not this lane's surface, told perf-client): mini-web-spawn's
+`delegated_consent_env` re-derives the wrapper's delegated-consent selection.
+
+## Next: what is left of a `doc show`
+
+- The in-process file bus for reads: the query path passes paths between `author`/`inspect`/
+  `host_files`; bytes would remove the remaining scratch writes.
+- Host ops about 8 ms (op 144 1.1, op 4 1.4, op 5 5.7: `checkGrants`, the recomputed challenge,
+  `loadPolicy`; the read-path Lean fixes are written, see above), the resident's own work about 4 ms.
 
 ## Other open items
 
