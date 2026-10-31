@@ -154,16 +154,16 @@ pub(super) fn decode_hex(value: &str) -> Result<Vec<u8>> {
     mini_sdk::hex::decode(value).map_err(|e| e.0)
 }
 
-fn expect_reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
+/// A Host reply to `operation`: its body; a Host outcome (no record, never forwarded, undecided) is
+/// named by its status, anything else is an invalid frame. `what` names the caller's flow.
+pub(super) fn host_reply<'a>(frame: &'a [u8], operation: u8, what: &str) -> Result<&'a [u8]> {
     match frame {
         [marker, ..] if outcome_status(*marker).is_some() => Err(format!(
-            "agent reserve Host op{operation} outcome ({}); frame retained",
+            "{what} Host op{operation} outcome ({}); frame retained",
             outcome_status(*marker).unwrap_or_default()
         )),
         [actual, body @ ..] if *actual == operation && !body.is_empty() => Ok(body),
-        _ => Err(format!(
-            "agent reserve op{operation} returned an invalid frame"
-        )),
+        _ => Err(format!("{what} op{operation} returned an invalid frame")),
     }
 }
 
@@ -321,7 +321,7 @@ pub(super) fn plan(
     }
     let frame = session_invoke(&host, &operator_socket, &config, mini_sdk::host_operations::AGENT_RESERVE_PLAN, &request)?;
     create_private(&directory.join("plan.frame"), &frame)?;
-    let plan_bytes = expect_reply(&frame, mini_sdk::host_operations::AGENT_RESERVE_PLAN)?;
+    let plan_bytes = host_reply(&frame, mini_sdk::host_operations::AGENT_RESERVE_PLAN, "agent reserve")?;
     let plan_path = directory.join("plan.bin");
     create_private(&plan_path, plan_bytes)?;
     let inspection = source_inspect(
@@ -595,7 +595,7 @@ pub(super) fn seal(directory: &Path, approval_json: &Path) -> Result<()> {
     let frame = session_invoke(&pin.host, &pin.operator_socket, &pin.config, mini_sdk::host_operations::AGENT_RESERVE_ASSEMBLE, &pair)?;
     create_private(&directory.join("assembly.frame"), &frame)?;
     same_pin(&directory, &pin)?;
-    let call = expect_reply(&frame, mini_sdk::host_operations::AGENT_RESERVE_ASSEMBLE)?;
+    let call = host_reply(&frame, mini_sdk::host_operations::AGENT_RESERVE_ASSEMBLE, "agent reserve")?;
     create_private(&directory.join("call.bin"), call)?;
     retain_json(
         &directory.join("seal.json"),
@@ -627,7 +627,7 @@ fn sealed(directory: &Path) -> Result<(Pin, Vec<u8>)> {
 }
 
 fn outcome(directory: &Path, stem: &str, frame: &[u8], operation: u8, pin: &Pin) -> Result<Value> {
-    let bytes = expect_reply(frame, operation)?;
+    let bytes = host_reply(frame, operation, "agent reserve")?;
     let binary = directory.join(format!("{stem}.outcome.bin"));
     create_private(&binary, bytes)?;
     source_inspect(

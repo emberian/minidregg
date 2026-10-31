@@ -27,16 +27,6 @@ const LOOKUP_OPERATION: u8 = mini_sdk::host_operations::AGENT_LIFETIME_GRANT_LOO
 const REQUEST_ROUTE: &str = "application-agent-lifetime-grant-request";
 const PLAN_ROUTE: &str = "application-agent-lifetime-grant-plan";
 
-fn expect_reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
-    match frame {
-        [marker, ..] if super::agent_reserve::outcome_status(*marker).is_some() => Err(format!(
-            "grant Host op{operation} outcome ({}); frame retained",
-            super::agent_reserve::outcome_status(*marker).unwrap_or_default()
-        )),
-        [actual, body @ ..] if *actual == operation && !body.is_empty() => Ok(body),
-        _ => Err(format!("grant op{operation} returned an invalid frame")),
-    }
-}
 
 
 fn preceding(value: &str) -> Result<String> {
@@ -182,7 +172,7 @@ pub(crate) fn grant_plan(
     }
     let frame = session_invoke(&host, &operator_socket, &config, PLAN_OPERATION, &request)?;
     create_private(&directory.join("plan.frame"), &frame)?;
-    let plan_bytes = expect_reply(&frame, PLAN_OPERATION)?;
+    let plan_bytes = super::agent_reserve::host_reply(&frame, PLAN_OPERATION, "grant")?;
     let plan_path = directory.join("plan.bin");
     create_private(&plan_path, plan_bytes)?;
     let inspection = source_inspect(
@@ -362,7 +352,7 @@ fn outcome(
     operation: u8,
     pinned: &Pin,
 ) -> Result<Value> {
-    let bytes = expect_reply(frame, operation)?;
+    let bytes = super::agent_reserve::host_reply(frame, operation, "grant")?;
     let binary = directory.join(format!("{stem}.outcome.bin"));
     create_private(&binary, bytes)?;
     source_inspect(
@@ -603,7 +593,7 @@ pub(crate) fn inspect_accepted(host: &Path, config: &Path, socket: &Path,
     let call = private_bytes(ingress, REQUEST_LIMIT)?;
     let operation = mini_sdk::host_operations::AGENT_LIFETIME_GRANT_INSPECT;
     let frame = session_invoke(host, socket, config, operation, &call)?;
-    let body = expect_reply(&frame, operation)?;
+    let body = super::agent_reserve::host_reply(&frame, operation, "grant")?;
     if body.len() > 2 * 1024 * 1024 {
         return Err("accepted grant inspection exceeds JSON budget".into());
     }

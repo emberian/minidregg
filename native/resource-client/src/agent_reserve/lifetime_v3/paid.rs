@@ -239,7 +239,7 @@ pub(crate) fn lifetime_paid_plan(reserve: &Path, grant: &Path, directory: &Path)
         &request,
     )?;
     create_private(&directory.join("plan.frame"), &frame)?;
-    let plan = expect_reply(&frame, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_PLAN)?;
+    let plan = host_reply(&frame, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_PLAN, "agent lifetime dispatch")?;
     create_private(&directory.join("plan.bin"), plan)?;
     let inspection = source_inspect(
         &original.host,
@@ -562,7 +562,7 @@ pub(crate) fn lifetime_paid_seal(directory: &Path, approval_json: &Path) -> Resu
     )?;
     create_private(&directory.join("assembly.frame"), &frame)?;
     same_paid_pin(&directory, &pinned)?;
-    let ingress = expect_reply(&frame, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_ASSEMBLE)?;
+    let ingress = host_reply(&frame, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_ASSEMBLE, "agent lifetime dispatch")?;
     create_private(&directory.join("ingress.bin"), ingress)?;
     create_private(&directory.join("approval.json"), &approval_bytes)?;
     retain_json(
@@ -674,7 +674,7 @@ pub(crate) fn lifetime_paid_submit(directory: &Path) -> Result<()> {
     })?;
     create_private(&directory.join("submit.frame"), &frame)?;
     same_paid_pin(&directory, &pinned)?;
-    let committed = expect_reply(&frame, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_SUBMIT)?;
+    let committed = host_reply(&frame, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_SUBMIT, "agent lifetime dispatch")?;
     create_private(&directory.join("committed.bin"), committed)?;
     let inspection = source_inspect(
         &pinned.original.host,
@@ -733,7 +733,7 @@ pub(crate) fn lifetime_paid_lookup(directory: &Path) -> Result<()> {
     )?;
     create_private(&directory.join(format!("{stem}.frame")), &frame)?;
     same_paid_pin(&directory, &pinned)?;
-    let outcome_bytes = expect_reply(&frame, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_LOOKUP)?;
+    let outcome_bytes = host_reply(&frame, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_LOOKUP, "agent lifetime dispatch")?;
     create_private(
         &directory.join(format!("{stem}.outcome.bin")),
         outcome_bytes,
