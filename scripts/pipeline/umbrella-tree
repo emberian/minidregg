@@ -94,6 +94,7 @@ done
 touch "$TREE/.lake/sync.stamp"
 python3 "$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/warm-link" "$SRC/.lake/build" "$TREE/.lake/build"
 src_at || pipeline_die "$SRC moved off ${SHA:0:12} during the sync; rerun"
+[ -z "${UMBRELLA_SYNCED:-}" ] || touch "$UMBRELLA_SYNCED"   # the caller may free SRC now
 
 # 5. the umbrella
 mkdir -p "$OUT"

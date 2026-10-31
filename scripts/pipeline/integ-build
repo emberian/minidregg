@@ -2,7 +2,7 @@
 # scripts/pipeline/integ-build SHA -- the builder's build of SHA in the warm integration tree $BUILDER_ROOT/src
 # (was hbox's box-local integ-build6.sh; now in the repo so any build box runs the same stages).
 #   prime-cargo (the --offline stages' crates) -> rust-check -> host -> consent -> rust -> pack -> candidates/<sha>/READY, then umbrella-tree (a second warm
-#   tree, no lock on src) and the fixture rerecord.
+#   tree; src is freed for the next build once it has synced) and the fixture rerecord.
 # Every stage under swarm-build; stage lines `stage NAME rc=N Ns` go to $BUILDER_ROOT/COMMANDS.log (the builder
 # reads them). One build per tree: build.lock. Stops below 25 GB free.
 # Box knobs (env): BUILDER_ROOT (default /srv/integ), SEATS (MINIDREGG_LEAN_SEATS, default 16), JOBS (native jobs, 8),
@@ -39,20 +39,28 @@ date -Is > "$C/READY" && say "READY $C"
 # candidates: keep the newest 6 (and green's, if present)
 green=$(git rev-parse -q --verify origin/green 2>/dev/null || true)
 ls -1dt "$I"/candidates/*/ 2>/dev/null | tail -n +7 | while read -r d; do [ "$(basename "$d")" = "$green" ] || rm -rf "$d"; done
-exec 9>&-   # src is free for the next build once the umbrella tree has synced; umbrella-tree takes no lock on src
+# The umbrellas. This build keeps build.lock (src) until the umbrella tree has synced from src, then frees src:
+# the builder starts the next tip's build while these umbrellas run. One umbrella tree, so a previous tip's
+# umbrellas finish first (that wait holds src, the only queueing left). Stage lines here carry the sha
+# (`stage umbrella-tree SHA12 rc=N`): they land after the next build's lines in COMMANDS.log.
+s12=${SHA:0:12}; U=$I/logs/umbrella-tree-$s12.log; synced=$I/logs/umbrella-synced-$s12; rm -f "$synced"
+while [ -d "$I/umbrella-src.lock" ] && kill -0 "$(cat "$I/umbrella-src.pid" 2>/dev/null)" 2>/dev/null; do sleep 20; done
 t=$(date +%s)
-MINIDREGG_LEAN_SEATS=${UMBRELLA_SEATS:-4} SWARM_MEM_MAX=${UMBRELLA_MEM:-32G} \
-  scripts/pipeline/umbrella-tree --src "$src" --tree "$I/umbrella-src" --out "$I/umbrella-tree-out" "$SHA" > "$I/logs/umbrella-tree.log" 2>&1
-say "stage umbrella-tree rc=$? $(( $(date +%s) - t ))s"
+MINIDREGG_LEAN_SEATS=${UMBRELLA_SEATS:-4} SWARM_MEM_MAX=${UMBRELLA_MEM:-32G} UMBRELLA_SYNCED=$synced \
+  scripts/pipeline/umbrella-tree --src "$src" --tree "$I/umbrella-src" --out "$I/umbrella-tree-out" "$SHA" > "$U" 2>&1 &
+upid=$!
+while kill -0 $upid 2>/dev/null && [ ! -f "$synced" ]; do sleep 5; done
+exec 9>&-; touch "$synced"   # src is free (also when umbrella-tree stopped before its sync)
+wait $upid; say "stage umbrella-tree $s12 rc=$? $(( $(date +%s) - t ))s"
 # The fixtures follow the Objective front end and the codec (scripts/native-accepted-fixture/rerecord.sh), run in
 # the umbrella tree where the Fixtures oleans are: "unchanged" (0), "recorded fixture-regen/<sha12> <commit>"
 # (0; pushed for review), "authority-differs <diff>" (4: a person's reviewed commit), 1 = a step failed.
 if [ -x "$I/umbrella-src/scripts/native-accepted-fixture/rerecord.sh" ]; then
   R=$I/rerecord/${SHA:0:12}-$(date +%s); mkdir -p "$I/rerecord"; t=$(date +%s)
   ( cd "$I/umbrella-src" && MINIDREGG_LEAN_SEATS=${UMBRELLA_SEATS:-4} SWARM_MEM_MAX=${UMBRELLA_MEM:-32G} \
-    swarm-build scripts/native-accepted-fixture/rerecord.sh "$C" "$R" ) > "$I/logs/rerecord.log" 2>&1; rc=$?
-  last=$(tail -n1 "$I/logs/rerecord.log")
-  say "stage rerecord rc=$rc $(( $(date +%s) - t ))s: $last"
+    swarm-build scripts/native-accepted-fixture/rerecord.sh "$C" "$R" ) > "$I/logs/rerecord-$s12.log" 2>&1; rc=$?
+  last=$(tail -n1 "$I/logs/rerecord-$s12.log")
+  say "stage rerecord $s12 rc=$rc $(( $(date +%s) - t ))s: $last"
   case "$last" in recorded\ fixture-regen/*) b=$(echo "$last" | cut -d' ' -f2)
     git -C "$I/umbrella-src" push -q origin "$b" && say "rerecord pushed $b" ;; esac
 fi
