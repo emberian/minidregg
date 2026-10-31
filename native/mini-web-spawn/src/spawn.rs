@@ -166,6 +166,9 @@ impl BoxLayout {
     /// Whose publication each house name is, written by the operator (`welcome house`,
     /// `operations box`). Absent: every house name is reserved for nobody.
     pub fn house_publications_file(&self) -> PathBuf { self.p("/etc/mini/house-publications") }
+    /// The box's shared codec Host socket (`mini serve-codec`), one absolute path; absent: each
+    /// member runs its own codec Host.
+    pub fn session_codec_file(&self) -> PathBuf { self.p("/etc/mini/session-codec") }
 }
 
 pub enum Layout {
@@ -357,7 +360,18 @@ impl Spawner {
     /// consent selection itself (`delegated_consent_env`), as the wrapper exports it for a shell.
     pub fn body(&self, member: &Member, unit: &str, listener: &OwnedFd) -> Result<u32, String> {
         let (mini, host, config, socket, _wrapper) = self.paths();
-        let env = delegated_consent_env(&mini, &host, &config, &member.home)?;
+        let mut env = delegated_consent_env(&mini, &host, &config, &member.home)?;
+        // The box's shared codec Host, as the ssh wrapper selects it (`/etc/mini/session-codec`).
+        if let Layout::Box(layout) = &self.layout {
+            if let Ok(line) = fs::read_to_string(layout.session_codec_file()) {
+                let socket = line.trim();
+                if !Path::new(socket).is_absolute() {
+                    return Err("/etc/mini/session-codec must name an absolute socket".into());
+                }
+                env.push(("MINI_CODEC_SOCKET", socket.to_owned()));
+                env.push(("MINI_CODEC_PEER_UID", "0".into()));
+            }
+        }
         let mut command = self.command(member, unit, &env);
         command.arg(mini).arg("web").arg("--body").arg("--listen-fd").arg("3")
             .arg("--dir").arg(&member.workspace).arg("--home").arg(&member.home)

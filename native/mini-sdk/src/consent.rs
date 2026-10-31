@@ -610,10 +610,17 @@ fn socket_is(path: &Path, identity: (u64, u64)) -> bool {
 /// frame starts a new resident.
 fn serve_connection(kind: ResidentKind, stream: std::os::unix::net::UnixStream, shared: &Mutex<Resident>,
     last: &Mutex<std::time::Instant>, ended: &std::sync::atomic::AtomicBool) {
+    serve_connection_from(kind, stream, shared, last, ended, false)
+}
+
+/// [`serve_connection`]; `any_peer` (the box's codec service only) accepts a peer of any uid:
+/// who may connect is the listener's own file permissions.
+fn serve_connection_from(kind: ResidentKind, stream: std::os::unix::net::UnixStream, shared: &Mutex<Resident>,
+    last: &Mutex<std::time::Instant>, ended: &std::sync::atomic::AtomicBool, any_peer: bool) {
     if stream.set_nonblocking(false).is_err() {
         return;
     }
-    if crate::private::peer_uid(&stream).ok() != Some(unsafe { libc::geteuid() }) {
+    if !any_peer && crate::private::peer_uid(&stream).ok() != Some(unsafe { libc::geteuid() }) {
         return;
     }
     let (mut input, mut output) = match stream.try_clone() {
@@ -840,6 +847,71 @@ impl Consent {
             .map_err(|e| Error(e.to_string()))?;
         Ok(headers(&self.call(crate::host_operations::CONSENT_OBJECTIVE, &pair(intent_bin, &pair(&selection, plan)?)?)?)?)
     }
+}
+
+/// The box's shared codec Host's greeting: this tag, the SHA-256 of the Host image it runs, and
+/// the SHA-256 of the settings bytes it runs under. A client compares it with its own pins before
+/// it sends a frame ([`connect_codec_service`]).
+pub const CODEC_SERVICE_TAG: &[u8] = b"MINI-CODEC-SERVICE/v1\0";
+
+/// The greeting of a codec service running `image_sha256` under `settings_bytes`.
+pub fn codec_service_hello(image_sha256: &[u8; 32], settings_bytes: &[u8]) -> Vec<u8> {
+    use sha2::Digest;
+    [CODEC_SERVICE_TAG, image_sha256.as_slice(), sha2::Sha256::digest(settings_bytes).as_slice()].concat()
+}
+
+/// **The box's shared codec Host** (split tenancy: every member is its own account, so a member's
+/// resident codec Host was one ~85 MB Lean image per member). ONE storeless `HOST SETTINGS codec`
+/// child serves every connection on `listener`, one frame at a time, exactly as a member's resident
+/// codec does (the codec is a pure function of the frame and holds no state, so sharing it changes
+/// no reply; `Host.Main.pureCodec`). Each connection first receives [`codec_service_hello`] for the
+/// image and settings, so a client that pinned another image or other settings refuses before it
+/// sends a frame. Any peer uid is served: the listener's own permissions (its directory's group) say
+/// who may connect. Runs until the child ends.
+pub fn serve_codec_service(listener: std::os::unix::net::UnixListener, executable: PathBuf, settings: PathBuf,
+    image_sha256: [u8; 32]) -> Result<()> {
+    use std::sync::{atomic::AtomicBool, Arc};
+    let settings_bytes = settings_bytes(&settings)?;
+    let hello = codec_service_hello(&image_sha256, &settings_bytes);
+    let session = Session::spawn(executable, &settings, settings_bytes, "codec", "shared codec Host")?;
+    let shared = Arc::new(Mutex::new(Resident { session, ended: false }));
+    let last = Arc::new(Mutex::new(std::time::Instant::now()));
+    let ended = Arc::new(AtomicBool::new(false));
+    listener.set_nonblocking(false).map_err(|e| e.to_string())?;
+    for stream in listener.incoming() {
+        if ended.load(std::sync::atomic::Ordering::Acquire) {
+            return Err("the shared codec Host ended".into());
+        }
+        let Ok(mut stream) = stream else { continue };
+        let (shared, last, ended, hello) = (shared.clone(), last.clone(), ended.clone(), hello.clone());
+        std::thread::spawn(move || {
+            if stream.write_all(&hello).is_ok() {
+                serve_connection_from(ResidentKind::Codec, stream, &shared, &last, &ended, true);
+            }
+        });
+    }
+    Ok(())
+}
+
+/// A session with the box's shared codec Host at `socket`: the listener must be `peer_uid`'s (the
+/// operator's, or 0 for a systemd-activated one) and must greet with exactly `expected`
+/// ([`codec_service_hello`] of this client's own pins), or nothing is sent.
+pub fn connect_codec_service(socket: &Path, peer_uid: u32, expected: &[u8], executable: PathBuf,
+    settings_bytes: Vec<u8>) -> Result<Session> {
+    let mut stream = std::os::unix::net::UnixStream::connect(socket)
+        .map_err(|e| format!("shared codec Host {}: {e}", socket.display()))?;
+    if crate::private::peer_uid(&stream).map_err(|e| e.to_string())? != peer_uid {
+        return Err("shared codec Host listener is not the selected peer".into());
+    }
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(30))).map_err(|e| e.to_string())?;
+    let mut greeting = vec![0u8; expected.len()];
+    stream.read_exact(&mut greeting).map_err(|e| format!("shared codec Host greeting: {e}"))?;
+    if greeting != expected {
+        return Err("shared codec Host runs another image or other settings than this client pinned".into());
+    }
+    stream.set_read_timeout(None).map_err(|e| e.to_string())?;
+    let input = stream.try_clone().map_err(|e| e.to_string())?;
+    Ok(Session::over(Box::new(input), Box::new(stream), executable, settings_bytes))
 }
 
 #[cfg(test)]
@@ -1260,6 +1332,37 @@ mod tests {
         assert!(daemon.is_finished(), "a superseded binding ends its resident");
         daemon.join().unwrap().unwrap();
         assert!(!socket.exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The box's shared codec Host serves any connection that accepts its greeting, with one child,
+    /// and a client whose pins differ from the greeting refuses before it sends a frame.
+    #[test]
+    fn shared_codec_service_greets_with_its_pins_and_serves_every_connection() {
+        let dir = PathBuf::from(format!("/tmp/mcx-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir(&dir).unwrap();
+        let host = crate::local::fake::codec_stub(&dir);
+        fs::write(dir.join("reply"), framed(b"\x07ok")).unwrap();
+        let settings = dir.join("settings.json");
+        fs::write(&settings, b"{}").unwrap();
+        let socket = dir.join("codec.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let image = [7u8; 32];
+        let (h, s) = (host.clone(), settings.clone());
+        std::thread::spawn(move || serve_codec_service(listener, h, s, image));
+        let me = unsafe { libc::geteuid() };
+        let expected = codec_service_hello(&image, b"{}");
+        for _ in 0..2 {
+            let mut session = connect_codec_service(&socket, me, &expected, host.clone(), b"{}".to_vec()).unwrap();
+            assert_eq!(round_trip(&mut session, crate::host_operations::AUTHOR, b"intent").unwrap(), b"ok");
+        }
+        assert_eq!(fs::read_to_string(dir.join("starts")).unwrap().lines().count(), 1, "one child for every connection");
+        let other = codec_service_hello(&[8u8; 32], b"{}");
+        assert!(connect_codec_service(&socket, me, &other, host.clone(), b"{}".to_vec()).is_err(), "another image refuses");
+        let settings_other = codec_service_hello(&image, b"{\"x\":1}");
+        assert!(connect_codec_service(&socket, me, &settings_other, host.clone(), b"{}".to_vec()).is_err(), "other settings refuse");
+        assert!(connect_codec_service(&socket, me + 1, &expected, host.clone(), b"{}".to_vec()).is_err(), "another listener owner refuses");
         let _ = fs::remove_dir_all(&dir);
     }
 

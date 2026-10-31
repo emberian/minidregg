@@ -969,6 +969,10 @@ usage:
                          operations and the status action only; resident clients pin MINI_OPERATOR_PEER_UID
   mini serve-agent-operator-proxy --socket CONTROLLER-PRIVATE-SOCKET --upstream PRIVATE --config CONFIG.json --controller-uid UID
                          requires one systemd-activated listener; controller clients pin --operator-peer-uid
+  mini serve-codec --socket SHARED-SOCKET --host HOST --config CONFIG.json
+                         the box's shared codec Host for every member account (split tenancy); requires one
+                         systemd-activated listener; clients select it with MINI_CODEC_SOCKET/_PEER_UID and
+                         refuse unless it greets with their own Host image and settings digests
   mini serve-controller-consent --socket CLIENT-PRIVATE-SOCKET --consent PROVIDER --config CONFIG.json --anchors PRIVATE-DIR --consent-sha256 HEX --config-sha256 HEX --controller-uid UID [--idle-seconds N]
                          delegated full consent for one client UID that cannot read the Store (a controller, a
                          split-tenancy member); requires one systemd-activated listener; keeps its warm verifier
@@ -2998,6 +3002,19 @@ fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             let socket = SOCKET.get().ok_or("serve-agent-operator-proxy requires --socket")?;
             public_proxy::serve_agent_activated(socket, &upstream, &config, uid)
+        }
+        #[cfg(target_os = "linux")]
+        "serve-codec" => {
+            // The box's shared codec Host (split tenancy): one storeless codec child for every
+            // member account, on the systemd-activated listener at fd 3 (`--socket` names it).
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            args.finish()?;
+            let socket = SOCKET.get().ok_or("serve-codec requires --socket")?;
+            let listener = unsafe { <std::os::unix::net::UnixListener as std::os::fd::FromRawFd>::from_raw_fd(3) };
+            public_proxy::validate_activated_listener(&listener, socket)?;
+            let image: [u8; 32] = mini_sdk::hex::decode_fixed(&host_image_sha256(&host)?).map_err(|_| "Host image digest is not 32 bytes")?;
+            Ok(mini_sdk::consent::serve_codec_service(listener, host, config, image)?)
         }
         #[cfg(target_os = "linux")]
         "serve-controller-consent" => {
