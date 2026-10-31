@@ -585,10 +585,13 @@ fn host_image_identity(metadata: &fs::Metadata) -> HostImageIdentity {
     )
 }
 
-/// The digest of the selected Host image, hashed once per file identity per
-/// process. The identity is read from the open handle, before and after the
-/// hash; a file that changed while it was hashed is refused, and a later call
-/// that sees a different identity hashes again.
+/// The digest of the selected Host image, hashed once per file identity. The
+/// identity is read from the open handle, before and after the hash; a file that
+/// changed while it was hashed is refused, and a later call that sees a different
+/// identity hashes again. A digest outlives the process that hashed it in the
+/// owner-private resident directory (`host_digest_record`), under the same
+/// identity, so a `mini` process per verb does not re-read ~180 MB (a chat `tail`
+/// spent 170 of its 186 ms of CPU here); `--verify-host` still hashes.
 ///
 /// A remote client has no Host image: its Host is named by an empty path and known only by the digest
 /// it pinned, which every v2 envelope carries and the box's socket checks.
@@ -635,6 +638,16 @@ fn host_image_sha256(host: &Path) -> Result<String> {
     {
         return Ok(sha.clone());
     }
+    let record = host_digest_record(host, &identity);
+    if !verify_host() {
+        if let Some(sha) = record.as_deref().and_then(read_host_digest) {
+            if pinned.is_none_or(|pin| pin == &sha) {
+                cache.retain(|(path, _, _)| path != host);
+                cache.push((host.to_path_buf(), identity, sha.clone()));
+                return Ok(sha);
+            }
+        }
+    }
     let mut digest = sha2::Sha256::new();
     let mut buffer = [0u8; 64 * 1024];
     loop {
@@ -664,7 +677,43 @@ fn host_image_sha256(host: &Path) -> Result<String> {
     }
     cache.retain(|(path, _, _)| path != host);
     cache.push((host.to_path_buf(), identity, sha.clone()));
+    if let Some(record) = record {
+        // Best effort: a digest that cannot be kept is hashed again by the next process.
+        let _ = mini_sdk::durable::replace(&record, format!("{sha}\n").as_bytes(), mini_sdk::durable::Perm::Private);
+    }
     Ok(sha)
+}
+
+/// Where the digest of the Host image at `host` with `identity` is kept between processes:
+/// `h-<first 16 bytes of SHA-256(path, identity)>.sha256` in the owner-private resident
+/// directory (`mini_sdk::consent::private_anchor_dir`, where the consent and codec residents
+/// keyed by the same file identity live). None without one (no $HOME and no
+/// MINI_CONSENT_ANCHOR_DIR): that process hashes.
+#[cfg(unix)]
+fn host_digest_record(host: &Path, identity: &HostImageIdentity) -> Option<PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+    let dir = mini_sdk::consent::private_anchor_dir().ok()?;
+    let (dev, ino, size, mtime, mtime_nsec, ctime, ctime_nsec) = *identity;
+    let mut key = sha2::Sha256::new();
+    key.update(b"MINI-HOST-IMAGE-DIGEST/v1\0");
+    key.update((host.as_os_str().len() as u64).to_le_bytes());
+    key.update(host.as_os_str().as_bytes());
+    for value in [dev, ino, size] {
+        key.update(value.to_le_bytes());
+    }
+    for value in [mtime, mtime_nsec, ctime, ctime_nsec] {
+        key.update(value.to_le_bytes());
+    }
+    Some(dir.join(format!("h-{}.sha256", hex(&key.finalize()[..16]))))
+}
+
+/// A kept digest: an owner-private regular file holding exactly 64 lowercase hex digits and a newline.
+#[cfg(unix)]
+fn read_host_digest(record: &Path) -> Option<String> {
+    mini_sdk::private::check_file(record).ok()?;
+    let bytes = fs::read(record).ok()?;
+    let text = std::str::from_utf8(bytes.strip_suffix(b"\n")?).ok()?;
+    (text.len() == 64 && mini_sdk::hex::is_lower(text)).then(|| text.to_owned())
 }
 
 /// Whether this process hashes a pinned Host image anyway (`mini --verify-host ...`, MINI_VERIFY_HOST=1).
