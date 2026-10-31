@@ -35,7 +35,7 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   miniLine, which every mini overlay must also carry; B: signed reads keep one journal line, no attempt tree; doc show
   wall min 17.4 -> 13.7 ms), perf-client 783b460cb + b6 + b940b3f50 (+ fb6f024a8 via exorcism), retained-mode 62aa5fcf8
   over 675a80745 + 1d4ff4efb, + 05bffae27/7f42f6445 (round-2 answers: SparseMap transport lemmas, Zero, 37 pins;
-  round-3 audit SOUND: injective over the full type, 37/37 pinned, none vacuous), boundary 48cea3caf (Theory may import Std), batch 6 fixtures. Batch 8 cut owes the
+  round-3 audit SOUND: injective over the full type, 37/37 pinned, none vacuous), perf-apps 546a551fd (docs: batch 7 vs 6, Host CPU samples 8,704 vs 13,647), boundary 48cea3caf (Theory may import Std), batch 6 fixtures. Batch 8 cut owes the
   whole-tree build of these.
 - **Next shared-interface change: retained-mode L0** (Store as a persistent extensional tree map, ~66 files,
   WorldCompact deleted): its own cut with one whole-tree build; FORMAT rebases onto it. lane/retained-l0 is WIP
