@@ -54,6 +54,7 @@ module
 
 public import Pred.Core
 public import Pred.HashEq
+public import Pred.Frame
 public import Compiler.PredOrderGadget
 public import Mathlib.Data.List.Dedup
 public import Std.Data.HashSet
@@ -293,6 +294,54 @@ def inputsInRangeFast (profile : CompilerProfile) (p : Pred) (old new : State) :
 @[csimp] theorem inputsInRange_eq_fast : @inputsInRange = @inputsInRangeFast := by
   funext profile p old new
   exact (inputsInRangeIndexed_eq profile p old new).symm
+
+mutual
+/-- **The range check reads only the law's slots** (`Pred.Frame`): states agreeing on
+`p.reads` on both sides get the same answer. -/
+theorem inputsInRange_frame (profile : CompilerProfile) :
+    ∀ (p : Pred) {old new old' new' : State},
+      State.AgreeOn p.reads old old' → State.AgreeOn p.reads new new' →
+      inputsInRange profile p old new = inputsInRange profile p old' new'
+  | .le s v, _, _, _, _, _, n => by
+      cases h : profile.order <;> simp only [inputsInRange, h, intOf, n s (by simp [Pred.reads])] <;> rfl
+  | .monotone s, _, _, _, _, o, n => by
+      cases h : profile.order <;>
+        simp only [inputsInRange, h, intOf, o s (by simp [Pred.reads]), n s (by simp [Pred.reads])] <;> rfl
+  | .leSlots a b, _, _, _, _, _, n => by
+      cases h : profile.order <;>
+        simp only [inputsInRange, h, intOf, n a (by simp [Pred.reads]), n b (by simp [Pred.reads])] <;> rfl
+  | .leSlotsOff a b c, _, _, _, _, _, n => by
+      cases h : profile.order <;>
+        simp only [inputsInRange, h, intOf, n a (by simp [Pred.reads]), n b (by simp [Pred.reads])] <;> rfl
+  | .not q, _, _, _, _, o, n => by
+      simp only [inputsInRange]; exact inputsInRange_frame profile q o n
+  | .allL ps, _, _, _, _, o, n => by
+      simp only [inputsInRange]; exact inputsInRangeL_frame profile ps o n
+  | .anyL ps, _, _, _, _, o, n => by
+      simp only [inputsInRange]; exact inputsInRangeL_frame profile ps o n
+  | .eq _ _, _, _, _, _, _, _ | .memberOf _ _, _, _, _, _, _, _ | .writeOnce _, _, _, _, _, _, _
+  | .eqSlots _ _, _, _, _, _, _, _ | .sumEq _ _, _, _, _, _, _, _ | .witnessed _, _, _, _, _, _, _
+  | .hashEq _ _ _, _, _, _, _, _, _ | .ran _, _, _, _, _, _, _ => by simp only [inputsInRange]
+
+theorem inputsInRangeL_frame (profile : CompilerProfile) :
+    ∀ (ps : PredList) {old new old' new' : State},
+      State.AgreeOn ps.reads old old' → State.AgreeOn ps.reads new new' →
+      inputsInRangeL profile ps old new = inputsInRangeL profile ps old' new'
+  | .nil, _, _, _, _, _, _ => rfl
+  | .cons q rest, _, _, _, _, o, n => by
+      simp only [inputsInRangeL,
+        inputsInRange_frame profile q (o.mono fun k member => by simp [PredList.reads, member])
+          (n.mono fun k member => by simp [PredList.reads, member]),
+        inputsInRangeL_frame profile rest (o.mono fun k member => by simp [PredList.reads, member])
+          (n.mono fun k member => by simp [PredList.reads, member])]
+end
+
+/-- The range check on the law's slots is the range check. -/
+theorem inputsInRange_restrict (profile : CompilerProfile) (p : Pred) (old new : State) :
+    inputsInRange profile p (old.restrict p.reads) (new.restrict p.reads) =
+      inputsInRange profile p old new :=
+  inputsInRange_frame profile p (State.agreeOn_restrict p.reads old)
+    (State.agreeOn_restrict p.reads new)
 
 /-! ## §1. Wires — the step pinned on input wires, prover witnesses on path-addressed aux. -/
 
