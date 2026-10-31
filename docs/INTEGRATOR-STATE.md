@@ -9,46 +9,34 @@ retired-agent hook names the live integrator to anyone who messages the old id).
 integrator; the integrator merges onto `integration/staging`, cuts batch candidates on hbox, gates them, moves main to
 gated candidates and names candidates to infra and the explorer.
 
-## Now (2026-10-31 09:05 EDT)
+## Now (2026-10-31 09:15 EDT)
 
-- **main = 83e926874** = gated batch 4 b9450147f merged with main 7978ddfdd.
-- **Batch 4 b9450147f: GATE GREEN, the rehearsal-3 candidate.** hbox tour 73/73, enrol, composed; forge composed c-b945-d1
-  all phases; j14-apps PASS with the deploy-script hotpatch HARNESS=9fdef19bd (bwrap ACL 11a4f4ac6: the controller uid gets
-  its own execute entry on /usr/local/libexec/mini-grain-bwrap, app-range entries claimed per world; grant_acl stops at the
-  world root c76dbe0c7; gate15 = gate14 + j14 socket parent 711; /ci is 711). Umbrellas all green; fixtures 5c00cc4f3
-  merged. Flatness: submit_cpu 106 -> 380 (3.6x), propose_cpu 4.05x; walls and get PASS.
-- **Batch 5 1c151fce4: READY 07:52, gate15 FAIL** (host 1,005 s, consent 150 s, rust 191 s). enrol PASS, tour 73/73,
-  hbox composed rooms/churn/documents/apps/connector PASS, residents UNKNOWN (forge decides); flatness-get PASS,
-  flatness-submit FAIL. **j14-apps FAIL: "Hermes sent no reply to the ask: refused"**, reproduced on overlay
-  1c151fce4-resid (spk-host crate from 40efdcff9) at -hp1 (/ci/j-1c151f-hp1/journey.log), so the resource-id crash is not
-  its cause. app-reds owns it (Davros run 18 reads the final mini_say outcome). Batch 5's umbrella-tree and rerecord are
-  still running in umbrella-src (PID 2698823); the -hp1 gate PID 3240123 is finishing; Mac waiter b4013oi9a covers both.
-- **Batch 6 74e1cfa10: BUILDING since 08:51** (integ-build6, PID file $I/build-b6.pid; waits for batch 5's umbrella lock
-  before its own umbrella). Carries perf-apps b1 23738a4ce, refusal clauses 5c4f73459, the resource-id fix, apps-e2e
-  request-file fix f1255b4b3, exorcism (fsync removal 16f2d046f, Store calls carry files in the frame v2 8b49bf1e2/fe77ab521,
-  019f2e56f), perf-client through 59dd7ded4 + residents end when storageRoot goes. Exorcist measures row 8 on it.
-- 09:10: app-reds' dead PID/log files in the pool root broke lane-tree acquire (trees() glob); moved to pool/saved/app-reds-t5-files; iter-speed fixes the glob. Mac waiter bmoenr3gf on batch 6 READY/failure.
-- **Batch 7 (staging ad66df5f1+)**: c88b88755 resident final keeps writeError, demo-reds 58c17b1de (lobby preflight
-  retry on a busy box; audited reconcile verbs resolve pending attempts), perf-client f95edc7bf (client derives candidate id
-  from its path) and b34173dad (candidate shell wrapper with the deployed wrapper's features, two processes; infra installs it from batch 7, keeps its own on batch 6), apps-e2e 78a20cb56; hot-path a55855f18 and perf-client 5415aecf7 once their statement audits clear.
-  Mac waiter b3njtgrq2 on batch 6 READY/failure (batch 5's umbrella chain still runs, PID 2230439).
-- Explorer on batch 5 (vs batch 4): fsyncs 0 everywhere; 128-ref credit 6.9 s -> 0.3-0.4 s; idle catch-up 61 s -> 0.36 s;
-  first read after restart 19 s -> 0.24 s; story new ~14 s; say 0.55 s warm; restart 11.7 s; execve per verb 13 -> 22 and
-  say syscalls 4,535 -> 12,031 (perf-client owns). Doc-append grows with history (1.8 s at 13 entries, 6.2 s at 303).
-- **FORMAT batch (later, one genesis, after iter-speed's seam 1)**: hot-path row 11 (checkpoint carries session indexes;
-  Store epoch) + Book entries migration (~50 consumers) + private-cells FORMAT (a): eventHistory and authority to the trie
-  root with mask [] (root ruling: blinded content and declared kinds keep the salted ratchet until the compiler-emitted ZK
-  selective opening exists; that is epoch (b), a second genesis) + KeptCell Aux cache + fixture re-record. Label FORMAT.
-- **Batch 3 a4cb65af3: GATE GREEN** (forge composed c-a4cb-d2 every phase; hbox tour, enrol, j14). Fallback ship.
-- **Forge demo** (infra): grain world GREEN through the host custodian; EtherCalc + reveal.js accepted. Keys: ember
-  approved the OpenRouter pool key and Z.AI GLM (glm-5.3-flash default), relayed by root. Infra keeps a wait-for-Store
-  drop-in until cb3bc4f85 ships. Infra unblocked quotactl/quotactl_fd in forge's composed nspawn seccomp (not yet in any
-  repo script: infra records it).
-- Flatness (reported, never gating): batch 3 submit_cpu 202 -> 1180 ms; batch 4 106 -> 380. CONSENT-STORE (batch 2+)
-  measured by the explorer: first signed read 20.7 s -> 0.5-0.8 s flat in height; restart+read 26 s -> 5.6 s; certify
-  ~6 s per 256 tail.
-- hbox: / 47 GB free (08:30). Host state app-reds added: /var/lib/mini-vars-backing (loop of /tank/lanes/vars-backing.img,
-  prjquota ext4, NOT in fstab), /etc/mini-spk-volumes/{vars-backing,ingest-scratch} (ingest scratch /tank/mini-ingest).
+- **ember (10-31 09:10, via root): no rehearsal cut until she says.** Make the system as good as it can be: keep batching,
+  gate once per batch, keep the newest green candidate as the fallback. Priorities: repair Hermes (batch 5's j14
+  "Hermes sent no reply to the ask: refused" is app-reds' top item), efficiency everywhere, every red fixed, never worked
+  around. Shared consent resident under split tenancy APPROVED (perf-client). Egress gateway and Oracle7 integration HELD.
+  No new build box: hbox and forge only.
+- **main = 83e926874** = gated batch 4 b9450147f + main 7978ddfdd. **Batch 4 is the green fallback** (hbox tour 73/73,
+  enrol, composed; forge composed c-b945-d1 all phases; j14 with deploy hotpatch 9fdef19bd; umbrellas green).
+- **Batch 5 1c151fce4: gate15 FAIL** on j14-apps: "Hermes sent no reply to the ask: refused" (also on overlay
+  1c151fce4-resid -hp1). Cause narrowed by app-reds: the controller's final-delivery mini_say is paid (op g98) but never
+  submitted (lookup `not-submitted`), and the write error was dropped; c88b88755 (batch 7) now surfaces it as writeError.
+  Forge composed decides residents; hbox residents UNKNOWN.
+- **Batch 6 74e1cfa10: BUILDING since 08:51** (integ-build6, PID file $I/build-b6.pid; batch 5's umbrella chain still in
+  $I/build.pid). Carries perf-apps b1, refusal clauses, resource-id fix, apps-e2e request file, exorcism (no fsync; Store
+  frame v2 8b49bf1e2/fe77ab521; 019f2e56f), perf-client residents end when storageRoot goes. Mac waiter b373o0z52.
+  On READY: gate15; name it to the explorer, exorcist (row 8 measurement), perf-apps (first page / per request), infra.
+- **Batch 7 (staging a8b9d5765)**: resident final writeError c88b88755, demo-reds 58c17b1de, perf-client f95edc7bf +
+  b34173dad (candidate ssh wrapper) + 394039fb1 (one shared codec Host per box under split tenancy), apps-e2e 78a20cb56,
+  perf-apps b2 05c2b208b, hot-path a55855f18, perf-client 5415aecf7.
+- **FORMAT batch (later, one genesis, after iter-speed's seam 1)**: hot-path row 11 + Book entries migration +
+  private-cells FORMAT (a) (eventHistory, authority to the trie root, mask []) + KeptCell Aux cache + fixture re-record.
+- Explorer on batch 5 vs 4: fsyncs 0; 128-ref credit 6.9 s -> 0.35 s; idle catch-up 61 s -> 0.36 s; first read after
+  restart 19 s -> 0.24 s; say 0.55 s warm; doc-append grows with history (1.8 s at 13 entries, 6.2 s at 303: hot-path).
+- Forge demo (infra): grain world green through the host custodian; infra holds its rebuild until batch-5's forge composed
+  ends and waits for host load < 2 before starting the Hermes controller. Wedged lobby state saved at
+  dregg-forge:/root/wedges/lobby-wedge-b4.tar for demo-reds.
+- hbox: / 56 GB free (09:10).
 
 ## Lanes (route only to the newest id; distilled lanes' old ids are retired)
 
@@ -88,7 +76,10 @@ Every Lean-statement sha gets an audit round from a4d9a6f4cba4855ca before it ri
   needs the next cut, but Rust fixes may be overlaid onto a candidate copy to test between cuts. No single-fix cuts.
 - **Stale leftovers**: our own fleet's leftover processes may be stopped by exact PID after reading each command line
   (root, relaying ember, 10-30); everything else needs a PID file or ember's word.
-- Flatness (law 17) is reported, never gating. Rehearse only a fully green gate with no demo-path product red.
+- Flatness (law 17) is reported, never gating. No rehearsal ships until ember says; then only a fully green gate with no
+  demo-path product red.
+- Split tenancy: one shared consent resident and one shared codec Host per box are approved. Egress gateway and Oracle7: held.
+- No new build box (ember): hbox and forge only.
 
 ## Build, gate and sweep (hbox, as user hbox, /home/hbox/lanes/integ = $I)
 
