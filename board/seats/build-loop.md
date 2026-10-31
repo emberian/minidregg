@@ -30,9 +30,15 @@ box; seam 1 (codec tags) landed; the hot-swap command; keep making the Lean buil
 - The box holds no GitHub write key: lanes push from the Mac (or `git fetch ssh://bb2/srv/pool/tN HEAD`). The builder
   needs one to publish REDS.md and move `green`; until then it runs with BUILDER_DRY=1.
 - Disk: everything under /srv. integ-build keeps one generation of old outputs and 6 candidates (plus green's).
-- Not yet: the gate (gate15.sh, hbox-local, lost with hbox: tour, composed on forge, enrol-resume, j14, flatness). A
-  round without it reports "gate: not run here", and green does not move. Not yet either: SPK/grain-world root setup
-  (after the pool, per root).
+- The gate runs here: scripts/pipeline/gate (408962f1d) with BUILDER_ROOT=/srv/integ, GATE_RUNS=/srv/integ/ci,
+  WORLD_UP_LOCK=/srv/worlds/world-up.lock (inputs staged in /srv/integ: dregg-infra-e29997d, pw, j14-hroot, j14-data,
+  j14-secrets, spk-cache). First run at 76511e768: all phases ran; every red is the consent-provider exit 86c9dbddb fixes.
+  The builder runs as /srv/integ/builder-run.sh (those knobs, BUILDER_DRY=1, main's builder). Not yet: SPK/grain-world
+  root setup (after the pool, per root).
+- The shared packages are read-only; lake replays write missing .hash files, so the pool once refused six Mathlib
+  replays (EACCES). Fixed 19:57 by one writable `lake build Mathlib ...` over the shared copy, then re-locked
+  (~/mlhash.sh): run it again after any package re-seed.
+- hbox b9450147f candidate: copying to /srv/integ/candidates/b9450147f571b6e3f9dffd6ed649024137ad8a0a (the hbox uplink is slow, ~100 KB/s); not usable until this row says it is complete.
 
 ### The builder
 - `scripts/pipeline/builder`: per new main tip, `scripts/pipeline/integ-build` (now in the repo: rust-check, host,
