@@ -19,6 +19,11 @@
 - FORMAT (a): trie roots for unblinded growing kinds (eventHistory, authority); blinded kinds wait for the ZK
   selective opening (epoch b). Book entries become their own store addresses.
 - KeptCell: the Materialized Aux cache (option b).
+- Hashes: cSHAKE256 (SP 800-185, Keccak) for roots, cell digests and kernels; KMAC256 for keyed uses. BLAKE3 only where an
+  outside format fixes it (SDK profile key derivation, fn's wire grammar, Bread's Turn::hash). No algebraic hash
+  (Poseidon2) for roots: every write would pay it natively, and an opening must verify against the root, so the root's
+  hash fixes the circuit. The ZK opening is a boolean proof system (MPC-in-the-head) over Keccak, where its only
+  nonlinearity (chi) is cheap; to make openings faster, change the proof system, not the root hash.
 - Cold first read and restart are the full Store open, O(height) (~4.3 ms per record). They go away only with KN2
   stage 2b: host-execution retypes the Host session and NativeHostReplay's admission over the light `Opening`;
   read-path then ports ClientConsentCore/ConsentAnchor. No constant-factor trims inside the full open.
