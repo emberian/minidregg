@@ -1323,3 +1323,30 @@ keystone's premise has no content inhabitant, and the commuting relaxation, conf
 `.content` arm, cannot reach it. Commuting appends are consented only through the full-peer provider. The
 contention lane may merge as far as thin consent is concerned. Owed only if content ever gains a thin arm:
 the commuting variant, in that same commit. The other three thirtieth-pass points stand.
+
+## 2026-10-28, thirty-first pass: share-issue plan window (lane/un-share-window-statement-2 d08d8c1b0, statements)
+
+**Verdict: the shape is right. Revise before proofs, one item blocking.**
+
+The relaxation is honest. `PlannedWithinWindow` accepts the signed descriptor iff it is the rebuild at some
+plan height `p ≤ h < p + lifetime`. `lemma_plan_height_determined` makes that `p` unique (`notBefore := p`).
+`strict_implies_window` keeps every old admission. The expiry and altered-byte teeth are general. Both the
+rebuild and the window read the same submit-time `record`/`authority`, so an install or an epoch move between
+plan and submit makes the rebuild differ and the issue stale, never mixed.
+
+1. **Blocking: settle `prepareSourceBirth`'s height.** `admitNative:117` calls
+   `GrainResourceBirthController.prepareSourceBirth … ambient.height`. If the submit height reaches what the
+   birth *commits* (a grant window, a birth height) while the signed descriptor carries `p`, then the
+   committed object differs from the signed one. That is a soundness gap, not just liveness. State it as a
+   lemma before proving anything: either `prepareSourceBirth`'s height reaches no committed or
+   descriptor-bound field, or it is passed `p`, with the committed windows equal to the signed ones.
+2. **Derive the future-plan teeth.** `pole_refuses_future_plan` assumes that every `q ≤ h` rebuilds
+   differently from `p`, which `lemma_plan_height_determined` already gives (since `q ≤ h < p`). Drop the
+   premise and derive it, so the teeth are unconditional.
+3. **The satisfiable pole of the replacement field.** `pole_admits_after_one_tick` covers only the descriptor
+   leg, and `premise_inhabited` only asks that a ready ticket with `lifetime > 1` exist. Owed: a
+   witness of `AcceptedWindowFields` itself, including the delegation leg's `Prepared … p` with a `Checked`
+   envelope. It comes from the same fixture family as item 7, over a recorded transcript.
+4. **Location.** These are `scratch/` Props over the admission's types. Move them beside `Accepted` in the
+   admission module when the field replaces the strict ones, or they are a parallel statement nothing
+   instantiates (law 5).
