@@ -7,6 +7,10 @@ Worktrees: Mac /Users/ember/dev/minidregg-lanes/perf-client (detached on `main`)
 (`ssh bb2`, `lane-tree acquire member-side origin/main`, `scripts/pipeline/lane-check`; push from the Mac);
 persvati is the quiet measurement box. hbox is down: when it returns, pool tree t8 is still leased as
 `perf-client` (release it), and hbox:/ci/pc (1.9 GB) with the w8 world (PID files in w8/pid) is mine to stop.
+Measurement world: persvati /home/ember/mdpool/lanes/rpw/rf (2 members, port 22800, PID files in it; up by
+/home/ember/mdpool/rp/up.sh) on overlay /home/ember/mdpool/lanes/cand/93b31c1c33d6 (= bb2
+/srv/pool/lanes/member-side/candidates/93b31c1c33d6, built by native-loop in bb2 pool tree t1, leased native as
+`member-side`: release when done). bb2 ~/ms holds my world script copy (world rf taken down).
 
 Owns: the client (`native/resource-client`: shell, workspace, chat, web body `src/web`), `mini-line`, the ssh wrapper
 (`deploy/shell/mini-shell-ssh`), `mini-web-spawn`, `native/mini-sdk` consent/residents, `native/mini-session-env`,
@@ -51,8 +55,9 @@ resident footprint (a few MB per member), web pages.
   Whole tree green on persvati (10,408 jobs). By reading: projection O(cell) -> O(1), revocation check O(log n).
 - Red fixed (86c9dbddb): ed875b899's untracked refresh made `Loaded.replay` refuse every new record ("durable log
   is not a turn log: a verification walk carries no World"), so the provider died mid-consent and j14-apps
-  `mini apps bootstrap` refused on 76511e768. `replay` now refuses only a held -> lost track. Lean green; first
-  end-to-end run is apps-hermes' rerun on dregg-build2 /srv/worlds/j-sb1 (afb920b22b17049cd told).
+  `mini apps bootstrap` refused on 76511e768. `replay` now refuses only a held -> lost track. Confirmed end to end
+  on overlay 93b31c1c33d6 (main 27f85e89 on 76511e768bbc): read-path's persvati up.sh UP-RC=0 and a 5-member bb2
+  world enrol and bootstrap, consent logs clean; told read-path, build-loop, host-execution, apps-hermes, root.
 
 ## Numbers
 - hbox, noisy; batch 8 against batch 7, interleaved: `doc new` 476 vs 614 ms wall (Host 254 vs 346 ms, consent
@@ -65,7 +70,7 @@ resident footprint (a few MB per member), web pages.
   236 of 2,466 samples (9.6%) of a batch-8 provider's `doc new`. There is no end-to-end after-number yet (see Next 1).
 
 ## Next (in order)
-1. Confirm 86c9dbddb end to end (apps-hermes' bootstrap rerun). Then measure on the first main candidate (build-loop sends its path; measure on persvati): a provider's `doc new`
+1. Measure on the first main candidate (build-loop sends its path; measure on persvati): a provider's `doc new`
    catch-up profile and wall, against the batch-8 numbers above. That is the after-number for rows 16 and 19,
    43995c7f2 (codec order check) and 76511e768 (projection). Expect no `planeKeys`/`supportFast`/`WorldTrack`
    frames; the roots come from FORMAT (a)'s kept index (f28cd8457).
