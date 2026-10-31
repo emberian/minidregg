@@ -121,7 +121,10 @@ to 7):
 * **Receipt joint witness** (`Kernel/ReceiptEventHiding.lean`): `DeployedRandomized`, the
   signer's randomness on four tapes, constant view, budget exactly the query-bounded public-hash
   tests (`AnyPublicHash`): `IdealReplacement` by `idealReplacement_of_injective` and
-  `deployed_receiptHiding` at gap 1/2; `leaked_tape_refuted` (teeth). The public signer is
+  `deployed_receiptHiding` at gap 1/2, inhabitation at `q < T` only (a four-query reader
+separates the worlds; cite it with this caveat); `leaked_tape_refuted` (teeth). The reduction
+and the ideal-replacement lemmas carry `#assert_axioms` (standard three), so no soundness or
+hiding proof can cite the native facts. The public signer is
   refuted unconditionally (`public_signer_refuted_always`). Distinctness of concrete cSHAKE ids
   is a compiled-evaluation fact (`native_decide` over the pure-Lean fast path, the kernel cannot
   evaluate Keccak), pinned with `#guard_msgs` on `#print axioms` (precedent:
@@ -132,19 +135,44 @@ to 7):
   `card fields` prefixes, one for a full scope), and the concrete `bitCode` of width `4 + W`
   (satisfiable), with teeth.
 
+**Increment 3** (the integrator's re-audit of increment 2, staging 35737eac4: nothing vacuous;
+items 1 to 4 below done; astra round 8):
+* **One erase walk** (`Theory/AuthTrieErase.lean`): the oracle walk (`Layer`, `Ops`, `joinM`,
+  `clashM`, `finishM`, `eraseM`) comes first; `Trie.join`, `Trie.clashOf` and `Trie.erase` are
+  `joinM`, `clashM` and `eraseM` at the identity handler (`trieOps`, monad `Id`), their cases are
+  lemmas (`join_eq`, `clashOf_eq`, `erase_branch`, `erase_stop`, `erase_empty`, `erase_leaf`,
+  `erase_clash`). The cache's erase and the metered heap program are one walk at two handlers.
+  `Trie.reveal` / `walkReveal` are still two implementations; no cost is claimed for either.
+* **Width** (`Kernel/PrivateCellScope.lean`): `keyFits` / `addressFits`, the private index's
+  admission check (a declared key's digests below `2^256`; content atoms and streams always fit at
+  `W >= 64`, `fits_of_addressFits`); `fitScope` cuts a reader's scope to fitting fields without
+  changing a fitting address's visibility (`visible_fitScope`); `scopeSelectsVisible_checked` at
+  `bitCode 256`. Teeth: `Witness.slot_overflow_shares_tag`, `Witness.overflow_refused`.
+* **The seam** (`Kernel/PrivateCellView.lean`): `isBlinding_iff` (the wire's exclusion is
+  `isBlinding`); `viewOpeningExact`: verifying reveals at a reader's cut prefixes answer exactly
+  `DFinsupp.filter (Visible fields kind) store` (narrowPacked's store) as value bytes, or two
+  distinct live addresses on one key path, or a collision in a reveal's `revealNodes`;
+  `viewOpeningExact_hashed`: at the receiver's address path (`hashedAddrBits`, a truncated hash of
+  the canonical address bytes) the index collision is a collision of that hash on distinct bytes
+  among this store's live addresses (`addressCollision_is_hash`, by the address codec's
+  injectivity). `honest_accepted` inhabits the premise.
+* **Reveal locality** (`Theory/AuthTrieRange.lean`): `climb_digest_sound` concludes with the
+  walk's `PathNode`s (one per walked bit plus one), and `revealNodes`' store side is those path
+  nodes plus the selected subtree (`revealNodes_store_treeNode`: inside the canonical tree). A
+  collision elsewhere in the store no longer discharges a reveal.
+
 **Owed, in order:**
-1. Reveal locality: store-side collision scope restricted to the authentication path plus the
-   selected subtree (audit item (e)).
-2. Fitting for declared kinds: a slot is `.slot field.value` with an unbounded `Digest`, so
-   admission must bound it below `2^W`; the address-path half of the keys (`ClassKeys.address`
-   from the canonical address bytes, injective before hashing), and `PathsInjective` from it.
-3. The composed opening: class openings over `indexEntries` under the masked root, the
-   reader's view as their union (`narrowPacked`).
-4. The opening relation in the compiler's vocabulary (compiler-emitted AIR; grow the compiler
+1. **Witness for the seam** (astra round 8): a registry wire, an admitted nonempty store with two
+   visible entries, another class and the blinding, distinct live paths, a free node digest:
+   exact answers, refusal of withheld or altered visible values; `body`/`atomsOf`, full and empty
+   scopes, an overflowing named field.
+2. **Admission enforced:** `addressFits` has no caller yet; the receiver's birth, import and write
+   paths must refuse a key failing it, and preserve it across updates.
+3. The opening relation in the compiler's vocabulary (compiler-emitted AIR; grow the compiler
    where it lacks a trie-path or cSHAKE gadget), not a hand-written circuit.
-5. The receiver: new materializer version beside the old one until a fresh genesis, with its
+4. The receiver: new materializer version beside the old one until a fresh genesis, with its
    fixture re-record in the same sha; codec epoch agreed with the hot-path successor.
-6. Flatness: gate10/gate12 flatness-submit.
+5. Flatness: gate10/gate12 flatness-submit.
 
 **Linear paths seen** (each blocks flatness independently): flat `rootPreimage`
 (44 + 32E bytes per write, `StoreCodec`), whole-view `items` in `StoreHiding.view` and
@@ -162,7 +190,8 @@ scanning the accepted log, `historicalReceipt`'s `findIdx?` (cached variant exis
   `/home/hbox/lanes/private-cells/logs/`. Before READY, verify each committed `.lean` file equals
   the hbox copy (`git show HEAD:f | ssh hbox cmp - …`).
 * **Landing.** Integrator is aeb671706eb3f70d7: send a sha whose parent is the integrator's
-  batch or main, with the full build result. Codec or event-id batches carry their own
+  batch or staging (never main), stacked on the lane's previous unlanded commits, with the full
+  build result. Codec or event-id batches carry their own
   fixture re-record. Before the new cell format, agree the codec epoch with hot-path
   a86738fc1dfae6429.
 * **Review practice.** Statement first; codex astra (`codex exec -m gpt-6-astra -s read-only -C

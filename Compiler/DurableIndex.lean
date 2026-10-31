@@ -209,8 +209,8 @@ theorem lookup_sound (kvs : List (IndexKey × List UInt8)) (wf : WF 520 (entries
 /-- **A verified reveal answers exactly the members under its prefix** — none
 omitted (so an empty answer is a verified absence of the whole family member
 set), none forged — or a cSHAKE256 collision between the node bytes of two
-nodes of this comparison's finite scope (the canonical tree, the reveal's climb, the
-revealed members' tree: `Theory.AuthTrie.revealNodes`). -/
+nodes of this comparison's finite scope (the walk's path and the selected subtree,
+the reveal's climb, the revealed members' tree: `Theory.AuthTrie.revealNodes`). -/
 theorem reveal_sound (kvs : List (IndexKey × List UInt8)) (wf : WF 520 (entries bitsOf kvs))
     (p : List Bool) (reveal : Theory.AuthTrie.Reveal IndexKey (List UInt8) Digest)
     (accepted : Theory.AuthTrie.revealVerify dig bitsOf 520 (rootOf kvs) p reveal = true) :

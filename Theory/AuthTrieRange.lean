@@ -11,12 +11,16 @@ reveal can.
   same key/value pairs, or two distinct nodes of the two trees share a digest.
 * `climb_digest_sound` — a digest that climbs, with a sibling for every walked
   bit, to the canonical root is the canonical root of the entries under the
-  walked prefix, or two distinct nodes of the tree and the climb share a digest.
+  walked prefix, or two distinct nodes of the walk's path (`PathNode`, at most one
+  per walked bit plus one) and the climb share a digest.
 * `revealVerify` / `reveal_sound` — a verifying reveal for prefix `p` answers
   exactly the key/value pairs whose key path starts with `p`: nothing omitted,
   nothing forged, or two distinct nodes of this comparison's finite scope
-  (`revealNodes`) share a digest. No premise about the reveal
-  or the Store's rows.
+  (`revealNodes`) share a digest. The scope is local: the walk's path and the
+  selected subtree on the store side (`revealNodes_store_treeNode`: both inside
+  the canonical tree), the reveal's climb and members on the other. A collision
+  elsewhere in the store does not discharge it. No premise about the reveal or
+  the Store's rows.
 * `reveal_complete` — the honest reveal verifies.
 * Decided poles: an honest reveal is accepted; one that omits a member, forges a
   value, or adds a non-member is refused.
@@ -215,15 +219,30 @@ theorem treeNode_select : ∀ (q : List Bool) (n : Nat) (es : List (Entry K V)) 
       simp only [select, List.length_cons, Nat.add_sub_add_right] at h
       exact TreeNode.child _ _ b _ (treeNode_select q m (strip b es) x (by simpa using long) h)
 
+/-- The store-side nodes of one walk: the canonical node at each prefix of
+`bits`, from the root down to the subtree the walk stops at. At most
+`bits.length + 1` of them. -/
+inductive PathNode : Nat → List (Entry K V) → List Bool → NodeIn K V D → Prop
+  | here (n : Nat) (es : List (Entry K V)) (bits : List Bool) : PathNode n es bits (treeNode dig n es)
+  | down (m : Nat) (es : List (Entry K V)) (b : Bool) (bits : List Bool) (x : NodeIn K V D) :
+      PathNode m (strip b es) bits x → PathNode (m + 1) es (b :: bits) x
+
+/-- A path node is a node of the canonical tree. -/
+theorem PathNode.treeNode {n : Nat} {es : List (Entry K V)} {bits : List Bool} {x : NodeIn K V D}
+    (h : PathNode dig n es bits x) : TreeNode dig n es x := by
+  induction h with
+  | here n es _ => exact TreeNode.root n es
+  | down m es b _ x _ ih => exact TreeNode.child m es b x ih
+
 /-- **Digest climb soundness.** A digest that climbs, with one sibling per walked
 bit, to the canonical root is the canonical root of the entries under the walked
-prefix, or two distinct nodes among the canonical tree's and the climb's share a
-digest. -/
+prefix, or two distinct nodes among the walk's path nodes and the climb's share
+a digest. -/
 theorem climb_digest_sound : ∀ (n : Nat) (es : List (Entry K V)) (bits : List Bool) (siblings : List D)
     (below : D), WF n es → siblings.length = bits.length → bits.length ≤ n →
       climb dig bits siblings below = tree dig n es →
       below = tree dig (n - bits.length) (select bits es) ∨
-        CollisionAmong dig (fun x => TreeNode dig n es x ∨ ClimbDigestNode dig below bits siblings x)
+        CollisionAmong dig (fun x => PathNode dig n es bits x ∨ ClimbDigestNode dig below bits siblings x)
   | n, es, [], [], below, _, _, _, climbed => by
       left; simpa [climb, select] using climbed
   | _, _, [], _ :: _, _, _, same, _, _ => by simp at same
@@ -235,7 +254,7 @@ theorem climb_digest_sound : ∀ (n : Nat) (es : List (Entry K V)) (bits : List 
       | 0, _, _ => simp at long
       | m + 1, [], _ =>
           right
-          have root := TreeNode.root (dig := dig) (m + 1) ([] : List (Entry K V))
+          have root := PathNode.here (dig := dig) (m + 1) ([] : List (Entry K V)) (b :: bits)
           rw [treeNode_nil] at root
           cases b
           · exact ⟨.branch (climb dig bits siblings below) s, .empty,
@@ -244,7 +263,7 @@ theorem climb_digest_sound : ∀ (n : Nat) (es : List (Entry K V)) (bits : List 
               Or.inr (ClimbDigestNode.right _ _ _), Or.inl root, by simp, by simpa [tree] using climbed⟩
       | m + 1, [e], _ =>
           right
-          have root := TreeNode.root (dig := dig) (m + 1) [e]
+          have root := PathNode.here (dig := dig) (m + 1) [e] (b :: bits)
           rw [treeNode_single] at root
           cases b
           · exact ⟨.branch (climb dig bits siblings below) s, .leaf e.1 e.2.2,
@@ -258,15 +277,15 @@ theorem climb_digest_sound : ∀ (n : Nat) (es : List (Entry K V)) (bits : List 
           rw [rootEq] at climbed
           have long' : bits.length ≤ m := by simpa using long
           have sub : m + 1 - (bits.length + 1) = m - bits.length := by omega
-          have root := TreeNode.root (dig := dig) (m + 1) (a :: c :: rest)
+          have root := PathNode.here (dig := dig) (m + 1) (a :: c :: rest) (b :: bits)
           simp only [treeNode] at root
-          have lift : ∀ (bb : Bool) (x : NodeIn K V D),
-              (TreeNode dig m (strip bb (a :: c :: rest)) x ∨ ClimbDigestNode dig below bits siblings x) →
-              (TreeNode dig (m + 1) (a :: c :: rest) x ∨
+          have lift : ∀ (x : NodeIn K V D),
+              (PathNode dig m (strip b (a :: c :: rest)) bits x ∨ ClimbDigestNode dig below bits siblings x) →
+              (PathNode dig (m + 1) (a :: c :: rest) (b :: bits) x ∨
                 ClimbDigestNode dig below (b :: bits) (s :: siblings) x) := by
-            intro bb x hx
+            intro x hx
             rcases hx with hx | hx
-            · exact Or.inl (TreeNode.child _ _ bb _ hx)
+            · exact Or.inl (PathNode.down _ _ b _ _ hx)
             · exact Or.inr (ClimbDigestNode.deeper _ _ _ _ _ hx)
           simp only [List.length_cons, sub, select]
           cases b with
@@ -276,7 +295,7 @@ theorem climb_digest_sound : ∀ (n : Nat) (es : List (Entry K V)) (bits : List 
                   .branch (tree dig m (strip false (a :: c :: rest))) (tree dig m (strip true (a :: c :: rest)))
               · simp only [NodeIn.branch.injEq] at agree
                 exact (climb_digest_sound m _ bits siblings below (strip_wf m false _ wf) same long'
-                  agree.1).imp_right (CollisionAmong.mono dig (lift false))
+                  agree.1).imp_right (CollisionAmong.mono dig lift)
               · exact Or.inr ⟨_, _, Or.inr (ClimbDigestNode.left _ _ _), Or.inl root, agree, climbed⟩
           | true =>
               simp only [ite_true] at climbed
@@ -284,7 +303,7 @@ theorem climb_digest_sound : ∀ (n : Nat) (es : List (Entry K V)) (bits : List 
                   .branch (tree dig m (strip false (a :: c :: rest))) (tree dig m (strip true (a :: c :: rest)))
               · simp only [NodeIn.branch.injEq] at agree
                 exact (climb_digest_sound m _ bits siblings below (strip_wf m true _ wf) same long'
-                  agree.2).imp_right (CollisionAmong.mono dig (lift true))
+                  agree.2).imp_right (CollisionAmong.mono dig lift)
               · exact Or.inr ⟨_, _, Or.inr (ClimbDigestNode.right _ _ _), Or.inl root, agree, climbed⟩
 
 /-- A reveal: the siblings of the walk to depth `siblings.length` along the
@@ -315,21 +334,35 @@ def revealVerify (bitsOf : K → List Bool) (L : Nat) (root : D) (p : List Bool)
 def Reveal.answer (bitsOf : K → List Bool) (p : List Bool) (reveal : Reveal K V D) : List (K × V) :=
   reveal.members.filter fun kv => decide ((bitsOf kv.1).take p.length = p)
 
-/-- A finite comparison scope containing the nodes one reveal comparison hashes:
-the canonical tree over `es`, the reveal's climb from the revealed subtree to the
-root, and the canonical tree of the revealed members below the stop depth. Fixed
-by `es` and the reveal. It over-approximates the nodes actually hashed
-(`TreeNode.child` also descends beneath singleton leaves), and it still admits a
-collision elsewhere in the same store; restricting the store side to the
-authentication path and the selected subtree is the stronger locality. -/
+/-- The finite comparison scope of one reveal: on the store side, the walk's
+path nodes down to the stop depth and the canonical subtree selected there; on
+the reveal side, its climb from the revealed subtree to the root and the
+canonical tree of its revealed members below the stop depth. Fixed by `es` and
+the reveal, and local: a collision elsewhere in the store is outside it. It
+over-approximates the nodes actually hashed (`TreeNode.child` also descends
+beneath singleton leaves). -/
 def revealNodes (bitsOf : K → List Bool) (L : Nat) (es : List (Entry K V)) (p : List Bool)
     (reveal : Reveal K V D) : NodeIn K V D → Prop := fun x =>
-  TreeNode dig L es x ∨
+  PathNode dig L es (p.take reveal.siblings.length) x ∨
+    TreeNode dig (L - reveal.siblings.length) (select (p.take reveal.siblings.length) es) x ∨
     ClimbDigestNode dig (tree dig (L - reveal.siblings.length)
       (Reveal.entriesBelow bitsOf reveal.siblings.length reveal.members))
       (p.take reveal.siblings.length) reveal.siblings x ∨
     TreeNode dig (L - reveal.siblings.length)
       (Reveal.entriesBelow bitsOf reveal.siblings.length reveal.members) x
+
+/-- The store side of a reveal's scope is inside the canonical tree. -/
+theorem revealNodes_store_treeNode {bitsOf : K → List Bool} {L : Nat} {es : List (Entry K V)} {p : List Bool}
+    {reveal : Reveal K V D} (short : reveal.siblings.length ≤ p.length) (withinL : reveal.siblings.length ≤ L)
+    {x : NodeIn K V D}
+    (h : PathNode dig L es (p.take reveal.siblings.length) x ∨
+      TreeNode dig (L - reveal.siblings.length) (select (p.take reveal.siblings.length) es) x) :
+    TreeNode dig L es x := by
+  have takeLen : (p.take reveal.siblings.length).length = reveal.siblings.length := by
+    rw [List.length_take]; exact Nat.min_eq_left short
+  rcases h with h | h
+  · exact h.treeNode
+  · exact treeNode_select dig _ L es x (by rw [takeLen]; exact withinL) (by rw [takeLen]; exact h)
 
 /-- **Reveal soundness.** Over the canonical root of `kvs` (full paths of length
 `L`), a verifying reveal for `p` answers EXACTLY the pairs of `kvs` whose key
@@ -392,14 +425,12 @@ theorem reveal_sound (bitsOf : K → List Bool) (L : Nat) (lengths : ∀ k, (bit
         exact ⟨this ▸ kvMem, pre⟩
     · refine Or.inr (CollisionAmong.mono dig (fun x hx => ?_) collision)
       rcases hx with hx | hx
-      · exact Or.inr (Or.inr hx)
-      · refine Or.inl (treeNode_select dig (p.take depth) L _ x (by rw [takeLen]; omega) ?_)
-        rw [takeLen]
-        exact hx
+      · exact Or.inr (Or.inr (Or.inr hx))
+      · exact Or.inr (Or.inl hx)
   · refine Or.inr (CollisionAmong.mono dig (fun x hx => ?_) collision)
     rcases hx with hx | hx
     · exact Or.inl hx
-    · exact Or.inr (Or.inl hx)
+    · exact Or.inr (Or.inr (Or.inl hx))
 
 /-- The honest walk for a reveal: down the prefix while the subtree has two or more
 entries, one sibling per step; the entries of the subtree where it stops. -/
@@ -473,6 +504,7 @@ end RangePoles
 #assert_axioms select_wf
 #assert_axioms tree_injective
 #assert_axioms climb_digest_sound
+#assert_axioms revealNodes_store_treeNode
 #assert_axioms reveal_sound
 #assert_axioms RangePoles.honest_verified
 #assert_axioms RangePoles.honest_answer

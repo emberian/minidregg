@@ -339,7 +339,8 @@ keystone is refuted for it at every bound (`public_signer_refuted_always`).
 **The keystone inhabited at the deployed shape** (`DeployedRandomized`): the same
 commands with the signer's randomness on four tapes and a constant view, against
 exactly the query-bounded public-hash tests, `IdealReplacement` included
-(`deployed_receiptHiding`, gap `1/2`); a view leaking the tape refutes it
+(`deployed_receiptHiding`, gap `1/2`, inhabitation at `q < T` only: a
+four-query reader separates the worlds); a view leaking the tape refutes it
 (`leaked_tape_refuted`). The cSHAKE instance against the counted random-oracle
 reader model stays the follow-up statement. -/
 
@@ -597,7 +598,9 @@ theorem randomized_ids_injective : ∀ world, Function.Injective (challenge.even
   exact decided world a b same
 
 /-- **The keystone, inhabited at the deployed shape**: gap `1/2`, one query,
-the budget exactly the public-hash tests. -/
+the budget exactly the public-hash tests. Inhabitation at `q < T` only: with four
+tapes, a four-query reader hashes every candidate ingress of one world and
+separates the worlds, so this says nothing about readers with `q ≥ T`. -/
 theorem deployed_receiptHiding :
     DeclaredReceiptHiding 4 1 (1 + 1) 4 challenge (AnyPublicHash 1) :=
   declaredReceiptHiding_of_idealReplacement challenge (by decide) Nat.one_pos

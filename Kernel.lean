@@ -196,3 +196,4 @@ import Kernel.EffectsRevival.HostTeethProofs  -- HostTeeth PROVED: the twin half
 import Kernel.EffectsRevival.PrepareProofs  -- PrepareFactors contentSpec PROVED: the deployed prepareTarget of a content target (post packed, refusals named) IS the content handler's registry dispatch followed by the payload-blind genericChecks; the migration commit's gate
 import Kernel.EffectsRevival.CommutingProofs  -- commuting appends through the declaration: a line over a moved root lands at the blinded cell (HostMovedRootAccepted), commutes is fixed from both sides (ContentCommuteTeeth), and CommutingPrepare
 import Kernel.PrivateCellScope  -- a reader's scope is a bounded union of visibility-class prefixes of the private index (body covers its atoms)
+import Kernel.PrivateCellView  -- a reader's class openings of the private index answer exactly its narrowPacked view, or a scoped collision
