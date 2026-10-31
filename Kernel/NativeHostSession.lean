@@ -68,6 +68,8 @@ structure Session (config : Config) where
   /-- The light opening of the Store (KN2): the ported operations are served from it
   (`NativeHost.submitRevokeLight`); every request refreshes it. -/
   light : NativeHostLight.Light config
+  /-- Op 4's basis and planned challenges over `light` (`Observed`); none after `light` moves. -/
+  observed : Option (NativeHost.Observed config light) := none
 
 /-- The full image, where this session has opened it. There is at most one
 process-local full image: exact readback adoption replaces it, never a second
@@ -199,22 +201,26 @@ the session holds one, is extended by the same entries and validated incremental
 (`validateLoadedFrom`, equal to `validateLoaded`). -/
 def refresh (config : Config) (session : Session config) :
     IO (Except String (Session config)) := do
-  let light ← match ← session.light.refresh with
+  let fresh ← match ← session.light.refresh with
     | .error detail => return .error detail
     | .ok light => pure light
+  -- At the same head `Light.refresh` returns the held light opening itself, so the session keeps
+  -- it and what it keeps over it (`observed`); a moved head keeps nothing over the old one.
+  let session := if fresh.opening.head.height = session.light.opening.head.height then session
+    else { session with light := fresh, observed := none }
   let some opened := session.full
-    | return .ok { session with light }
+    | return .ok session
   match ← DurableReceiverIO.extendFrom config.transport ResourceBirthCodec.rootBytes
       opened.durable with
   | .error detail => return .error detail
   | .ok ⟨durable, _⟩ =>
       if durable.height = opened.durable.height then
-        return .ok { session with light }
+        return .ok session
       -- `validateLoadedFrom_eq`: the full validation, re-decoding and
       -- re-checking only the cells whose bytes the new records moved.
       match validateLoadedFrom config opened durable with
       | .error detail => return .error detail
-      | .ok opened => return .ok { session with full := some opened, light }
+      | .ok opened => return .ok { session with full := some opened }
 
 /-- The full image of an already refreshed session: the one it holds, or the Store
 opened in full now (`openExisting`) and kept. -/

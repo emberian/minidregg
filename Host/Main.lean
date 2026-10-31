@@ -1557,7 +1557,7 @@ def sessionAdopt (config : NativeHost.Config)
   if let some current ← state.get then
     if opening.head.height = current.light.opening.head.height + 1 then
       if let .ok light := current.light.adopt opening then
-        state.set (some { current with light })
+        state.set (some { current with light, observed := none })
 
 /-- The receipt-continuity witness of the light opening's head (`ReceiptContinuity.current` of the
 full image at the same head: its height, world root, log chain and the system slot's siblings off
@@ -2459,7 +2459,10 @@ def dispatchSession (config : NativeHost.Config)
   | 4 =>
       let session ← sessionCurrent config state
       rememberLight config session.light
-      match ← NativeHost.challengeWireLight config session.light payload with
+      let (answer, observed) ← NativeHost.challengeWireLight config session.light session.observed payload
+      -- Op 5 over this same light opening reads what op 4 planned instead of planning it again (R1).
+      state.set (some { session with observed })
+      match answer with
       | .ok challenges => return (4, challenges)
       | .error detail => return (255, refusalFrame "observation" detail)
   | 5 =>
@@ -2467,8 +2470,8 @@ def dispatchSession (config : NativeHost.Config)
       let current ← sessionCurrent config state
       rememberLight config current.light
       phaseTrace "op5 refresh" t0
-      match ← NativeObservationOpeningCache.queryWireLight config current.light (sessionFull config state)
-          current.openingCache payload with
+      match ← NativeObservationOpeningCache.queryWireLight config current.light current.observed
+          (sessionFull config state) current.openingCache payload with
       | .ok view => return (5, view)
       | .error detail => return (255, refusalFrame "observation" detail)
   | 6 =>
