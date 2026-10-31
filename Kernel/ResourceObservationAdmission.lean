@@ -403,7 +403,7 @@ theorem authorizeChecked_capability_reason
     (reason : RefusalReason)
     (refused : capabilityEvidenceChecked prepared signature = .error reason) :
     authorizeChecked prepared signature = .error (.of reason) := by
-  simp only [authorizeChecked, ComposedPolicyAdmission.PreparedLaw.admit_eq, refused]
+  simp only [authorizeChecked, ComposedPolicyAdmission.PreparedLaw.admitOwn, ComposedPolicyAdmission.PreparedLaw.admit_eq, refused]
 
 set_option backward.isDefEq.respectTransparency false in
 /-- With admissible capability evidence and a resolved committed law whose order
@@ -433,7 +433,7 @@ theorem authorizeChecked_lawDenied
     committed.head.committed.record.localComponent.guarded (step prepared).oldState (step prepared).newState).mpr inRange
   have noAlias := (castAlias_none_iff F (intsOf committed.head.committed.record.localComponent.guarded
     (step prepared).oldState (step prepared).newState)).mpr castExact
-  simp only [authorizeChecked, ComposedPolicyAdmission.PreparedLaw.admit_eq, supplied, resolved, denied,
+  simp only [authorizeChecked, ComposedPolicyAdmission.PreparedLaw.admitOwn, ComposedPolicyAdmission.PreparedLaw.admit_eq, supplied, resolved, denied,
     ComposedLawDiagnostics.publicRefusal, ComposedLawDiagnostics.localRefusal]
   simp only [policyConfig, PhysicalLawResolution.config, none_, noAlias]
 
@@ -460,7 +460,7 @@ theorem authorizeChecked_castAlias
     authorizeChecked prepared signature = .error (Refusal.castAliasFor (readerFields context kind capability) x y) := by
   have none_ := (LawLeaf.ofRange_none_iff profile.compilerProfile.compiler
     committed.head.committed.record.localComponent.guarded (step prepared).oldState (step prepared).newState).mpr inRange
-  simp only [authorizeChecked, ComposedPolicyAdmission.PreparedLaw.admit_eq, supplied, resolved, denied,
+  simp only [authorizeChecked, ComposedPolicyAdmission.PreparedLaw.admitOwn, ComposedPolicyAdmission.PreparedLaw.admit_eq, supplied, resolved, denied,
     ComposedLawDiagnostics.publicRefusal, ComposedLawDiagnostics.localRefusal]
   simp only [policyConfig, PhysicalLawResolution.config, none_, alias_]
 
@@ -483,7 +483,7 @@ theorem authorizeChecked_lawInputRange
     (out : LawLeaf.ofRange profile.compilerProfile.compiler committed.head.committed.record.localComponent.guarded
       (step prepared).oldState (step prepared).newState = some leaf) :
     authorizeChecked prepared signature = .error (Refusal.lawInputRangeFor (readerFields context kind capability) leaf) := by
-  simp only [authorizeChecked, ComposedPolicyAdmission.PreparedLaw.admit_eq, supplied, resolved, denied,
+  simp only [authorizeChecked, ComposedPolicyAdmission.PreparedLaw.admitOwn, ComposedPolicyAdmission.PreparedLaw.admit_eq, supplied, resolved, denied,
     ComposedLawDiagnostics.publicRefusal, ComposedLawDiagnostics.localRefusal]
   simp only [policyConfig, PhysicalLawResolution.config, out]
 
@@ -500,7 +500,7 @@ theorem authorizeChecked_leaf_fails
     (refused : authorizeChecked prepared signature = .error (Refusal.lawDenied (some leaf))) :
     committed.head.committed.record.localComponent.guarded.subterm leaf.path = some leaf.clause ∧
       Minidregg.Pred.eval leaf.clause (step prepared).oldState (step prepared).newState = false := by
-  simp only [authorizeChecked, ComposedPolicyAdmission.PreparedLaw.admit_eq, supplied, resolved,
+  simp only [authorizeChecked, ComposedPolicyAdmission.PreparedLaw.admitOwn, ComposedPolicyAdmission.PreparedLaw.admit_eq, supplied, resolved,
     ComposedLawDiagnostics.publicRefusal, ComposedLawDiagnostics.localRefusal] at refused
   split at refused
   · split at refused
@@ -532,7 +532,7 @@ theorem authorizeChecked_admitted
       (.policy wanted.policyId wanted.policyRevision)
       prepared.epochExact prepared.revisionExact = some authorized) :
     authorizeChecked prepared signature = .ok authorized := by
-  simp only [authorizeChecked, ComposedPolicyAdmission.PreparedLaw.admit_eq, supplied, resolved, accepted]
+  simp only [authorizeChecked, ComposedPolicyAdmission.PreparedLaw.admitOwn, ComposedPolicyAdmission.PreparedLaw.admit_eq, supplied, resolved, accepted]
 
 attribute [irreducible] portal
 
@@ -736,7 +736,7 @@ theorem authorize_names_stored
           (evidence := evidence) (by simpa only [capabilityEvidenceChecked] using supplied)
         obtain ⟨stored, read, identity⟩ := named
         refine ⟨stored, read, ?_⟩
-        rw [ComposedPolicyAdmission.PreparedLaw.admit_eq] at admitted
+        rw [ComposedPolicyAdmission.PreparedLaw.admitOwn, ComposedPolicyAdmission.PreparedLaw.admit_eq] at admitted
         rw [ComposedPolicyAdmission.admit_preserves_evidence (policyConfig prepared) wanted
           evidence committed.witness (.policy wanted.policyId wanted.policyRevision)
           prepared.epochExact prepared.revisionExact admitted]

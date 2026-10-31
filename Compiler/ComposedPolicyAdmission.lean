@@ -381,13 +381,26 @@ def PreparedLaw.admitOwnFast {F : Type} [Field F] [DecidableEq F]
     (fun _ => law.verifiesOwnFast request)
     ((law.verifiesOwnFast_eq request).trans (law.verifies_eq request law.witness))
 
+private theorem admitWithCheck_congr {F : Type} [Field F] [DecidableEq F]
+    (config : Config F) {kind : ResourceKind} (request : Request kind)
+    (evidence : Evidence config.portal config.snapshot.authState request)
+    (witness : Witness F) (membership : config.portal.MembershipWitness)
+    (epochExact : request.policyEpoch = config.snapshot.authState.policyEpoch request.policyId)
+    (revisionExact : request.policyRevision = config.snapshot.authState.policyRevision request.policyId)
+    (check check' : Unit → Bool) (checkExact : check () = config.verifies request witness)
+    (checkExact' : check' () = config.verifies request witness) (same : check = check') :
+    admitWithCheck config request evidence witness membership epochExact revisionExact check checkExact =
+      admitWithCheck config request evidence witness membership epochExact revisionExact check' checkExact' := by
+  subst same
+  rfl
+
 @[csimp] theorem PreparedLaw.admitOwn_eq_fast :
     @PreparedLaw.admitOwn = @PreparedLaw.admitOwnFast := by
   funext F _ _ config law kind request evidence membership epochExact revisionExact
-  unfold PreparedLaw.admitOwn PreparedLaw.admitOwnFast PreparedLaw.admit
-  congr 1
-  funext _
-  exact (law.verifiesOwnFast_eq request).symm
+  exact admitWithCheck_congr config request evidence law.witness membership epochExact revisionExact
+    _ _ (law.verifies_eq request law.witness)
+    ((law.verifiesOwnFast_eq request).trans (law.verifies_eq request law.witness))
+    (funext fun _ => (law.verifiesOwnFast_eq request).symm)
 
 /-! ## Authorization with the law's verdict left to the Receiver -/
 
