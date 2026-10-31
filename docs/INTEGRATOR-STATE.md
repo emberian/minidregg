@@ -35,7 +35,9 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   miniLine, which every mini overlay must also carry; B: signed reads keep one journal line, no attempt tree; doc show
   wall min 17.4 -> 13.7 ms), perf-client 783b460cb + b6 + b940b3f50 (+ fb6f024a8 via exorcism), retained-mode 62aa5fcf8
   over 675a80745 + 1d4ff4efb, + 05bffae27/7f42f6445 (round-2 answers: SparseMap transport lemmas, Zero, 37 pins;
-  round-3 audit SOUND: injective over the full type, 37/37 pinned, none vacuous), perf-apps 546a551fd (docs: batch 7 vs 6, Host CPU samples 8,704 vs 13,647), boundary 48cea3caf (Theory may import Std), batch 6 fixtures. Batch 8 cut owes the
+  round-3 audit SOUND: injective over the full type, 37/37 pinned, none vacuous), app-reds H1 ccdaf98b3 + faeb1ff0b (not-submitted is its own resolution at every site; 23 filtered tests
+  pass), hot-path 6d744e25f (5cb39c5fe + 05a38ff4e: law check on its own witness decides Pred.eval, csimp; audit
+  requested), perf-apps 546a551fd (docs: batch 7 vs 6, Host CPU samples 8,704 vs 13,647), boundary 48cea3caf (Theory may import Std), batch 6 fixtures. Batch 8 cut owes the
   whole-tree build of these.
 - **Next shared-interface change: retained-mode L0** (Store as a persistent extensional tree map, ~66 files,
   WorldCompact deleted): its own cut with one whole-tree build; FORMAT rebases onto it. lane/retained-l0 is WIP
@@ -68,20 +70,26 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   owner-workspace/attempt-index/by-intent/. Never reached the probe. Distinct from H1. Fix b940b3f50; -hp1 decides.
 - **W1, metered workroom not ready** (batch 7 base -c2 and -hp1): stage composed-inputs, `composed-inputs: the metered
   workroom is not ready`. Reruns: yes; same place: yes, with and without the ENOENT fix. One fault, independent of H2.
-  Not in batches 4-6 (their composed reached apps/connector): entered with batch 7 material. Owner: hot-path
-  a6c4a1532687a4fdb (holds the diagnosis: management subject 8 lacks the sponsor-born task's grant).
+  CAUSE (hot-path): a gate pin, not the candidate. gate15.sh defaults EDGE_REV=4ea511d; batches 4-6 composed ran on
+  dregg-infra 69c17a3. 4ea511d's jworld-scratch.sh apps-bootstrap dropped the JWORLD_MANAGEMENT=distinct branch (tasks
+  born as subject 7), while workroom-ready.sh signs as subject 8 -> no-grant. Routed to infra aa72653a8ce442178
+  (restore the branch, name the rev gates pin). Gates pass EDGE_REV=69c17a3 until infra names one.
 - **R1, residents room-summon UNKNOWN** on hbox composed (every batch since 2): hbox cannot judge residents; forge
   composed does (batch 5 forge PASS). Standing, not a candidate red.
 
 ## Reports owed
 
-- To root: batch 7 verdict and signatures (in the integrator's next return).
-- When app-reds sends the H1 resolution rework: review, merge to staging, overlay grain-runtime onto acc7cfa03-attidx,
-  gate15 PHASES=j14 SUF=-hp2 KEEP_WORLD=1.
-- Infra's forge composed verdict on batch 7 (W1 on forge?) is awaited, not owed.
+- To root: batch 7 verdict, H1 fix merged, W1 = infra pin (in the integrator's next return).
+- When -hp2 lands ($I/hp-h1.pid waits for -hp1, builds grain-runtime from staging in hp-wt, overlays
+  acc7cfa03-attidx -> acc7cfa03-h1, launches gate15 PHASES="j14 composed" EDGE_REV=69c17a3 KEEP_WORLD=1 SUF=-hp2,
+  PID file $I/gate-acc7-h1.pid): verdict to root, infra, explorer, perf-apps; signature + kept world /ci/j-acc7cf-hp2 to
+  app-reds (reset cause, ServeBounds 10 s deadline).
+- Awaited (not owed): infra's forge composed of batch 7 and its dregg-infra rev; auditor on hot-path 05a38ff4e.
 
 ## Reports sent (do not resend)
 
+- 10-31 12:10: W1 cause to infra; hot-path 6d744e25f merged + audit requested (auditor); ack to hot-path
+  a0fee5643746e520c; app-reds faeb1ff0b merged, -hp2 queued.
 - 10-31 11:50: batch 7 verdict FAIL (H2, H1, W1) to infra, explorer, perf-apps; -hp1 j14 = H1 signature to app-reds;
   W1 routed to hot-path a6c4a1532687a4fdb.
 - 10-31 11:45: app-reds: ccdaf98b3 sent back (not-submitted as its own resolution at every resolution match; tests).
@@ -96,7 +104,7 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 
 | lane | agent | owns now |
 |---|---|---|
-| hot-path | a6c4a1532687a4fdb (ac53c05fe796e4294 retired) | law-17 perf queue: flatness, `story new`, row 11, Book entries migration (FORMAT) |
+| hot-path | a0fee5643746e520c (a6c4a1532687a4fdb, ac53c05fe796e4294 retired) | law-17 perf queue: flatness, `story new`, row 11, Book entries migration (FORMAT) |
 | app-reds | ad85d40779880420c | apps installs on forge/hbox, op66-plan, Hummingbird/WBO/Scrumblr live qualification, Davros control run, E3/E4, G2 decider-side type, controller boot ordering, Hermes worker root interpreter |
 | private cells | a8da2b953507b402b | FORMAT (a); then the compiler-emitted ZK selective opening; decode pin to CanonicalCellRegistry.custodyDecode with (b) |
 | iteration speed | a6c58cb72b0764dbb | seam 1 (codec tags / Store epoch, lands before or with FORMAT), lane pool /home/hbox/pool, lane-tree, hot-swap overlay tool |
