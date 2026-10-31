@@ -288,28 +288,52 @@ applied):
    (their joint view factorization), mask substitution preserving context and index in
    `ServesWithin`.
    **Done (whole tree green):** `Materializer.aux` (default `flat`), `Materialized.carried`,
-   `materialize`/`materializeCanonical` build it (eager: a private kind pays one bulk build per
-   materialization from bytes, on open), `ValidatedPatch.apply` follows the patch by `Carried.run`
+   `materialize`/`materializeCanonical` defer it (`carried` is a `Thunk`: built on a cell's first
+   root read, so an open from bytes whose root is never read builds nothing; a patch follows the
+   pre-cell's structure, forcing it once if it was never read), `ValidatedPatch.apply` follows the
+   patch by `Carried.run`
    and reads the root by `Carried.rootOr` (fallback a `Thunk`, forced only for flat kinds);
    `apply_eq_materialize`. Consumers repaired by `apply_eq_materialize ▸` / `Materialized.ext`;
-   axiom pins gained `Classical.choice, Quot.sound` (Trunc). `Kernel/PrivateCellMaterializer.lean`:
+   axiom pins gained `Quot.sound` (Trunc's subsingleton) and `Classical.choice`, which comes from
+   `Store.set` (`DFinsupp.update`, classical decidability), referenced by `AuxCache.set_holds`'s
+   type and so by every constant mentioning `AuxCache` (`#print axioms`: `Store.Store` is
+   `[propext]`, `Store.set` and `AuxCache` are the standard three). `Kernel/PrivateCellMaterializer.lean`:
    the private instance (`Kept` = index + blinding bytes; `keptSet`; `keptRoot_eq`;
    `rootAvailable` at every store; `set_index`; bulk build by `Cache.buildNodup`, no
    canonicalization, astra round 12). **Not switched on:** the registry still selects the flat
    materializers.
+   **The seam (round 16):** `ctxBytes` is kind-level (protocol, layout, size bound): the cell's
+   identity and version left the context for the blinding value. `CustodyCodec params` (the
+   blinding value of version `v` decodes exactly to `(cell, v, secret v)`; `λ` is `secret`'s
+   entropy only); `CustodyCodec.bytes_ne`, `constant_refuted` (teeth), `History.custodyBytes_nodup`
+   (a history's outer-hash mask arguments are pairwise distinct: no birthday term).
+   `KeptCell.accept_composite` (the store is the old one under the receiver's custody write, then
+   the patch; caller writes at the blinding address refused by `accept_isSome_iff`).
+   `PrivateCellMaterializer.keptCell_root` (`KeptCell.root` is the materializer's read at the
+   kind-level context, by `rfl`) and `keptCell_holds`: the hiding results now describe the root the
+   materializer computes. Owed: a concrete `CustodyCodec` (the registry's encoding).
    **Next (the FORMAT switch), from astra round 12 and the integrator's round-15 conditions:**
-   factor the instance below `CanonicalCellRegistry` (it imports the registry today); the
-   canonical injective encoding of `(cell id, version, mask)` in the blinding value with an exact
-   decode (the version inside equals the accepted version); the receiver inserts the custody op
-   from `prf (version + 1)` into the validated patch, patches still refused at the blinding
-   address (`accept_spec` / `accept_isSome_iff` restated over the composite patch); `rootBytes`
-   with `agree` for the private kinds; the receiver's hiding proofs bridged to the new context
-   split (kind-level `ctx`, per-cell context in the blinding bytes; λ = the mask's entropy only);
+   factor the instance below `CanonicalCellRegistry` (it imports the registry today); a concrete
+   `CustodyCodec` for the registry's blinding spaces; the cell-level validated patch carrying the
+   receiver's custody op (the `Store.Patch` form of `accept_composite`); `rootBytes` with `agree`
+   for the private kinds;
    receipt/event hiding over the new preimage; insert as a heap program through the compiled
    walk. Linear paths outside the
    aux, to note at the flatness bench: `Store.set` is `DFinsupp.update` (lookups can traverse
    update history); validation runs the patch and application runs it again; whole-cell
    `canonicalPostBytes` per durable write.
+   **FORMAT scope** (hot-path a8e4317c9e1574ca5, law 17): switch content and the declared kinds
+   (masked), and with mask `[]` every kind whose cell grows with history: eventHistory,
+   authority, resourceBook, policySource (stream entries and nockProgram are written once and
+   stay flat). resourceBook and policySource have no `StoreCodec` wire (`CanonicalCellRegistry.wire?`
+   is `none`), so the instance must be generalized off `Wire` for them. Hot-path does per-entry
+   persistence in the same FORMAT batch, and lands separately before it: held `Materialized`
+   across ops (no decode), one shared patch run for validation and apply, `Store.set` over a
+   persistent map behind a csimp.
+   **Tags and epoch:** iteration speed's seam 1 (lane/seam1-epoch) lands first: named tags in
+   `Compiler/PersistedCodecTags/Core.lean` (imported by the modules naming them), census tags in
+   `Compiler/PersistedCodecTags.lean`. The `DREGG/PRIVATE-CELL/*` tags go in Core if named, else
+   in the census file; the FORMAT sha rebases onto seam 1.
    **FORMAT pairing** agreed with hot-path aa2905fee8ef847d1 (recorded in its
    `docs/HOT-PATH-STATE.md`, "Next" item 2): one epoch bump; I send the FORMAT sha to the hot-path
    address, row 11 rebases onto it, the integrator lands the pair with one genesis and one fixture

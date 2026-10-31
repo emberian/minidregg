@@ -119,11 +119,24 @@ structure Params where
   blinding : StoreCodec.Blinding wire
   prf : Nat → (CanonicalCellRegistry.layout kind).Value blinding.space
 
-/-- The context of one accepted version. -/
-def ctxBytes (params : Params wire) (version : Nat) : List UInt8 :=
+/-- The kind-level context: protocol, layout and size bound. The cell's identity and accepted
+version are not here: they are in the blinding value, which the receiver writes per accepted
+version (`CustodyCodec`), so the root is a function of the store
+(`Kernel.PrivateCellMaterializer`) and the per-version separation of outer-hash inputs comes
+from the custody value's exact decode (`History.custodyBytes_nodup`), not from a context. -/
+def ctxBytes (params : Params wire) : List UInt8 :=
   (StreamCodec.product StreamCodec.nat (StreamCodec.product (StreamCodec.list StreamCodec.byte)
-    (StreamCodec.product (StreamCodec.list StreamCodec.byte) (StreamCodec.product StreamCodec.nat StreamCodec.nat)))).encode
-    (params.protocol, params.cell, params.layout, version, params.sizeBound)
+    StreamCodec.nat)).encode (params.protocol, params.layout, params.sizeBound)
+
+/-- **The custody encoding** of a cell's parameters: the blinding value of version `v`
+(`params.prf v`) carries the cell's identity, the version and the secret mask bytes, with an
+exact decode. Only `secret` bears entropy: the identity and version are public, so the hiding
+argument's `λ` is the entropy of `secret v` alone. -/
+structure CustodyCodec (params : Params wire) where
+  secret : Nat → List UInt8
+  decode : List UInt8 → Option (List UInt8 × Nat × List UInt8)
+  exact : ∀ v, decode ((wire.valueStream params.blinding.space).encode (params.prf v)) =
+    some (params.cell, v, secret v)
 
 /-- The cell's mask: its blinding value's bytes (none: the empty mask). -/
 def maskOf (store : Store (CanonicalCellRegistry.layout kind)) : List UInt8 :=
@@ -150,7 +163,7 @@ namespace KeptCell
 variable {wire}
 
 /-- The context of the cell's current accepted version. -/
-def ctx (cell : KeptCell wire) : List UInt8 := ctxBytes wire cell.params cell.version
+def ctx (cell : KeptCell wire) : List UInt8 := ctxBytes wire cell.params
 
 /-- The root from the kept digest and the held mask: no rebuild, no store lookup. -/
 def root (cell : KeptCell wire) : Digest := outerRoot cell.ctx cell.mask cell.index.digest
@@ -439,12 +452,22 @@ theorem accept_spec {cell cell' : KeptCell wire} {patch : List (Write (kind := k
       cell'.mask = (wire.valueStream cell.params.blinding.space).encode (cell.params.prf (cell.version + 1)) ∧
       cell'.fit.store = applyPatch
         (cell.fit.store.set cell.params.blinding.address (some (cell.params.prf (cell.version + 1)))) patch ∧
-      cell'.root = privateRoot wire (ctxBytes wire cell.params (cell.version + 1)) cell'.fit.store := by
+      cell'.root = privateRoot wire (ctxBytes wire cell.params) cell'.fit.store := by
   unfold accept at accepted
   obtain ⟨hp, hv, hm⟩ := writeAll_params accepted
   refine ⟨hv, hp, hm, writeAll_store accepted, ?_⟩
   rw [root_eq]
   simp only [ctx, hp, hv, setMask]
+
+/-- **Acceptance as one composite patch**: the store an accepted version holds is the old store
+under the custody write of version `version + 1` followed by the caller's patch. The custody
+write is the receiver's (from `prf`), never the caller's: every caller write at the blinding
+address is refused (`accept_isSome_iff`). -/
+theorem accept_composite {cell cell' : KeptCell wire} {patch : List (Write (kind := kind))}
+    (accepted : cell.accept patch = some cell') :
+    cell'.fit.store = applyPatch cell.fit.store
+      (⟨cell.params.blinding.address, some (cell.params.prf (cell.version + 1))⟩ :: patch) :=
+  (accept_spec accepted).2.2.2.1
 
 theorem accept_isSome_iff (cell : KeptCell wire) (patch : List (Write (kind := kind))) :
     (cell.accept patch).isSome ↔ ∀ w ∈ patch, addressFits 256 kind w.1 = true ∧ ¬ some w.1 = wire.blinding :=
@@ -500,6 +523,38 @@ theorem History.custodyInputs_distinct {cells : List (KeptCell wire)} (history :
   obtain ⟨masks, chain⟩ := history.spec
   exact ⟨List.pairwise_map.mpr (chain.imp fun h => Nat.ne_of_gt h.1), masks⟩
 
+
+/-- **Custody bytes never repeat under one codec**: two versions' blinding bytes differ, by the
+exact decode, whatever the secret masks are (a repeated mask does not repeat an outer-hash
+input). -/
+theorem CustodyCodec.bytes_ne {params : Params wire} (codec : CustodyCodec wire params) {v w : Nat}
+    (ne : v ≠ w) : (wire.valueStream params.blinding.space).encode (params.prf v) ≠
+      (wire.valueStream params.blinding.space).encode (params.prf w) := fun same => by
+  have := (codec.exact v).symm.trans (same ▸ codec.exact w)
+  exact ne (Prod.mk.inj (Prod.mk.inj (Option.some.inj this)).2).1
+
+/-- Teeth: a constant custody value has no custody codec once two versions exist. -/
+theorem CustodyCodec.constant_refuted {params : Params wire}
+    (constant : ∀ v, params.prf v = params.prf 0) : CustodyCodec wire params → False :=
+  fun codec => CustodyCodec.bytes_ne wire codec (v := 0) (w := 1) (by decide) (by rw [constant 1])
+
+/-- **The outer-hash inputs of a history are pairwise distinct** under a custody codec of its
+parameters: every version's blinding bytes (the mask argument of the outer hash) differ. This is
+what replaces a per-version context; no birthday term enters. -/
+theorem History.custodyBytes_nodup {cells : List (KeptCell wire)} (history : History wire cells)
+    {params : Params wire} (codec : CustodyCodec wire params) (same : ∀ c ∈ cells, c.params = params) :
+    (cells.map KeptCell.mask).Nodup := by
+  obtain ⟨versions, masks⟩ := history.custodyInputs_distinct
+  rw [List.nodup_map_iff_inj_on (List.Nodup.of_map _ versions)]
+  intro c hc d hd equal
+  by_contra differ
+  have hv : c.version ≠ d.version := fun hv => differ (List.inj_on_of_nodup_map versions hc hd hv)
+  rw [masks c hc, masks d hd] at equal
+  have key : ∀ q₁ q₂ : Params wire, q₁ = params → q₂ = params → ∀ v w,
+      (wire.valueStream q₁.blinding.space).encode (q₁.prf v) =
+        (wire.valueStream q₂.blinding.space).encode (q₂.prf w) → v = w := by
+    rintro q₁ q₂ rfl rfl v w eq; by_contra ne; exact CustodyCodec.bytes_ne wire codec ne eq
+  exact hv (key _ _ (same c hc) (same d hd) _ _ equal)
 
 /-! ## The custody PRF and the receiver's PRF term -/
 
@@ -706,9 +761,9 @@ def Twin (c₁ c₂ : KeptCell wire) : Prop :=
     c₁.version = c₂.version ∧ c₁.index = c₂.index
 
 theorem Twin.ctx {c₁ c₂ : KeptCell wire} (twin : Twin c₁ c₂) : c₁.ctx = c₂.ctx := by
-  obtain ⟨hp, hc, hl, hs, hv, _⟩ := twin
+  obtain ⟨hp, _, hl, hs, _, _⟩ := twin
   unfold KeptCell.ctx ctxBytes
-  rw [hp, hc, hl, hs, hv]
+  rw [hp, hl, hs]
 
 theorem Twin.symm {c₁ c₂ : KeptCell wire} (twin : Twin c₁ c₂) : Twin c₂ c₁ := by
   obtain ⟨tp, tc, tl, ts, tv, ti⟩ := twin
@@ -1809,5 +1864,9 @@ end Concrete
 #assert_axioms PublishesRun.atMostOneSuccessor
 #assert_axioms History.atMostOneSuccessor
 #assert_axioms KeptCell.fork_shares_mask
+#assert_axioms CustodyCodec.bytes_ne
+#assert_axioms CustodyCodec.constant_refuted
+#assert_axioms History.custodyBytes_nodup
+#assert_axioms KeptCell.accept_composite
 
 end Minidregg.Kernel.PrivateCellReceiver
