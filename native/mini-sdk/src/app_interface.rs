@@ -182,6 +182,18 @@ fn path(parts: &Value, args: &Value) -> Result<String> {
     }
     Ok(out)
 }
+/// A step's `args` is an object of named bindings: each MEMBER is resolved, never the object
+/// itself, because a one-member object such as `{"path": ...}` would otherwise read as the `path`
+/// binding form (Davros's `directory.create` step failed qualification with declaration-invalid).
+fn resolve_members(args: &Value, context: &Value, results: &Value) -> Result<Value> {
+    let Some(members) = args.as_object() else { return resolve(args, &json!({}), context, results) };
+    let mut out = serde_json::Map::new();
+    for (name, binding) in members {
+        out.insert(name.clone(), resolve(binding, &json!({}), context, results)?);
+    }
+    Ok(Value::Object(out))
+}
+
 /// Resolve the closed data-binding vocabulary; no ambient host paths or identity.
 pub fn resolve(x: &Value, args: &Value, context: &Value, results: &Value) -> Result<Value> {
     if let Some(o) = x.as_object() {
@@ -1431,7 +1443,7 @@ impl Declaration {
             }
             for step in steps {
                 let name = string(&step["op"])?;
-                let args = resolve(&step["args"], &json!({}), context, &results)?;
+                let args = resolve_members(&step["args"], context, &results)?;
                 let (attempts, interval, retry) = if let Some(wait) = step.get("await") {
                     if self.operation(name)?["write"] != false {
                         return Err(refuse("declaration-mutating-await"));
