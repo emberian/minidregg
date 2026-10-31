@@ -58,9 +58,15 @@ rounds, and move measurement to persvati's standing world when it exists.
   /home/hbox/lanes/integ/candidates/997905c0bc9c85086324d02c46abeeab3273f6e2. Then two scratch worlds, before
   (batch 9) and after (the overlay), Host CPU per `doc show` alternated. Moves to persvati once build-loop
   announces it.
-- Written, not yet checked (patch /private/tmp/claude-501/-Users-ember-dev-minidregg/01a192eb-6b7b-70ef-8cad-095d745dabe5/scratchpad/registry-digest.patch): `registryDigest` seven bytes per big multiplication
-  (`registryFoldFast`, `@[csimp] registryDigest_eq_fast`, value-identical), Kernel/CredentialSignedEnvelopeController.lean.
-  Check with `lake build Kernel.CredentialSignedEnvelopeController` on a pool tree before it lands.
+- Written, not yet checked, one batch for one native build (dregg-build2 or persvati, whichever build-loop
+  announces first); patches in /private/tmp/claude-501/-Users-ember-dev-minidregg/01a192eb-6b7b-70ef-8cad-095d745dabe5/scratchpad/:
+  `registry-digest.patch` (`registryFoldFast`, `@[csimp] registryDigest_eq_fast`, value-identical) and
+  `prepare-fast.patch` (the controller's `prepareDecoded` with `prepare_decoded`/`prepare_encoded`; the Compiler's
+  `prepareFast`, `@[csimp] prepare_eq_fast`: the envelope decoded once, the state and registry handed as values,
+  not encoded and decoded back; `CheckedSignature` unchanged). They stack. Check: `lake build
+  Kernel.CredentialSignedEnvelopeController Compiler.CredentialSignatureAdmission
+  Assurance.CredentialSignedEnvelopeEndpoint`, then the native build with 143caf2fc, measured against an unchanged
+  base (Host CPU per `doc show`, alternated worlds).
 - hbox trash to clear when hbox returns (root's word): stop w6 and w7 by their PID files and remove them (0.6 G
   each; keep w8), and /home/hbox/lanes/exorcism's Rust target (9.1 G total clone; the pool tree replaces it once
   nothing uncommitted is left there).
