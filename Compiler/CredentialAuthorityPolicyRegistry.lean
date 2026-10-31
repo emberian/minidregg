@@ -138,7 +138,9 @@ def loadPolicy (snapshot : Snapshot) (store : PayloadStore)
               if policyIdExact : record.policyId = policyId then
                 if revisionExact : record.version = revision then
                   if domainExact : record.domain = snapshot.domain then
-                    if addressExact : policyRecordDigest record = address then
+                    -- The fetched bytes are the record's canonical encoding, so its digest is
+                    -- their hash: no second encode.
+                    if addressBytes : policyHashBytes bytes = address then
                       some
                         { committed := ⟨address, record⟩
                           current := current
@@ -146,7 +148,9 @@ def loadPolicy (snapshot : Snapshot) (store : PayloadStore)
                           policyIdExact := policyIdExact
                           revisionExact := revisionExact
                           domainExact := domainExact
-                          addressExact := addressExact
+                          addressExact := by
+                            rw [policyRecordDigest, policyRecordCodec_canonical decoded]
+                            exact addressBytes
                           fetched := by
                             have canonical := policyRecordCodec_canonical decoded
                             simpa only [canonical] using fetched }
