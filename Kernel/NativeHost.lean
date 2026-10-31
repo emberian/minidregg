@@ -3492,11 +3492,13 @@ the admission on that basis's ground, the commit by `DurableServed.receiveServed
 factory pins are the served state's (`OpenedServed.pins`). -/
 def submitBirthLight (transport : DurableReceiverIO.Transport) (config : Config)
     (light : NativeHostLight.Light config) (bytes : List UInt8)
-    (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) : IO Outcome := do
+    (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome)
+    (adopt : DurableServed.Opening ResourceBirthCodec.rootBytes → IO Unit := fun _ => pure ()) :
+    IO Outcome := do
   if (GrainResourceBirthPolicyController.decodeIngress bytes).isSome then
     match ← GrainResourceBirthReceiver.receiveServed config.profile config.deployment light.opened.pins
         config.federation config.genesisHeight config.signature transport light.opening
-        (light.basisVia transport) bytes with
+        (light.basisVia transport) bytes adopt with
     | .historical receipt => return ← confirm .replayed receipt.transactionId receipt.eventId
     | .confirmed kind receipt => return ← confirm kind receipt.transactionId receipt.eventId
     | .rejected reason => return refused .operationRejected "grain-birth" (grainBirthRejection reason)
@@ -3504,7 +3506,8 @@ def submitBirthLight (transport : DurableReceiverIO.Transport) (config : Config)
     | .unavailable detail => return .unavailable detail.toUTF8.toList
     | .uncertain detail => return .uncertain detail.toUTF8.toList
   match ← ResourceBirthReceiver.receiveServed config.profile config.deployment light.opened.pins
-      config.signature transport config.genesisHeight light.opening (light.basisVia transport) bytes with
+      config.signature transport config.genesisHeight light.opening (light.basisVia transport) bytes
+      adopt with
   | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused (birthReason reason) "birth" (birthRejection reason)
   | .contention => return .contention
@@ -3528,7 +3531,7 @@ def submitLightVia (transport : DurableReceiverIO.Transport) (config : Config)
   | .delegate bytes =>
       submitDelegateLight transport config.deployment config.profile config.federation config.genesisHeight
         config.signature light.opening (light.basisVia transport) bytes confirm adopt
-  | .birth bytes => submitBirthLight transport config light bytes confirm
+  | .birth bytes => submitBirthLight transport config light bytes confirm adopt
   | .install bytes =>
       submitInstallLight transport config.deployment config.profile config.federation config.genesisHeight
         config.signature light.opening (light.basisVia transport) bytes confirm adopt

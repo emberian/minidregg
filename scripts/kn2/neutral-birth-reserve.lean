@@ -64,7 +64,7 @@ def sign (binary : System.FilePath) (seed : Nat) (frame : List UInt8) :
 
 def tariff : CreationTariff := ⟨0, 0, 0, 0, 99, 0⟩
 
-def hostTemplate : NativeHost.Config where
+def hostTemplate : NativeHost.Config := NativeHost.Config.ofInputs {
   deployment := ⟨⟨8500⟩, 10, 11, 12⟩
   federation := ⟨9⟩
   template := ⟨⟨5⟩, 100000, 10000, 64⟩
@@ -72,7 +72,7 @@ def hostTemplate : NativeHost.Config where
   genesisHeight := 10
   expectedSeed := ⟨0⟩
   storage := { binary := "unused", root := "unused", key := "unused", checkpointEvery := 16 }
-  signature := ⟨"unused"⟩
+  signature := ⟨"unused"⟩ }
 
 def profile := hostTemplate.profile
 
@@ -96,6 +96,12 @@ def genesis (creatorKey ownerKey : List UInt8) (factory : Minidregg.Pred.Pred) :
   clockGenesisNow := 0
   clockMaxStepSeconds := 300
   issuanceCap := 1000000000000000
+  payControlCapabilityId := ⟨47⟩
+  clockControlCapabilityId := ⟨48⟩
+  platformGrainBirth := none
+  platformCustodianKey := none
+  platformOwnerBudget := 100000
+  platformLifetime := 10000
 
 
 def describe : ResourceBirthReceiver.Result → String
@@ -125,8 +131,8 @@ def run (verifier signer storeBinary : System.FilePath) (mode : String) : IO Uni
     IO.FS.writeBinFile (directory / "key") ((List.range 32).map (fun i => UInt8.ofNat (i * 7 + 3))).toByteArray
     let storage : DurableReceiverIO.NativeConfig :=
       { binary := storeBinary, root := directory / "store", key := directory / "key", checkpointEvery := 16 }
-    let host : NativeHost.Config :=
-      { hostTemplate with
+    let host : NativeHost.Config := NativeHost.Config.ofInputs
+      { hostTemplate.toInputs with
         expectedSeed := NativeHost.seedIdentity built.seed
         storage := storage
         signature := ⟨verifier⟩ }

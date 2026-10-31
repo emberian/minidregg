@@ -6,9 +6,9 @@ means the tip is current; new entries must continue the log chain, each carry a
 verifying tag, and replay through the shared executor (`Opening.extend`).
 An operation not yet ported to the light opening asks for the full verified
 materialization (`materialize`: the Store opened in full, `openExisting`); the
-session keeps it and extends it with every later refresh (`extendFrom`, then
-`validateLoadedFrom`, equal to `validateLoaded`), so requests read the session's
-`Opened`, never recompute its directory.
+session keeps it and extends it to the head only when an operation asks for it again
+(`extendFrom`, then `validateLoadedFrom`, equal to `validateLoaded`), so requests read the
+session's `Opened`, never recompute its directory, and ported requests never extend it.
 A failed read, a shrunk log or a refused entry poisons the session.
 
 The walk-provenance families (application lifecycle, dispatch, grain session
@@ -60,7 +60,7 @@ structure Walked (config : Config) where
 structure Session (config : Config) where
   /-- The full verified materialization (KN2 stage 2a), opened only when an operation
   not yet ported to the light opening asks for it (`materialize`), then kept and
-  refreshed with the session. A session that serves only ported operations never
+  brought to the head by the next `materialize`. A session that serves only ported operations never
   opens it: its start and refresh read the light opening alone. -/
   full : Option (Opened config) := none
   openingCache : IO.Ref NativeObservationOpeningCache.Cache
@@ -196,9 +196,10 @@ def start (config : Config) : IO (Except String (Session config)) := do
       return .ok { openingCache := cache, light }
 
 /-- The light opening is refreshed on every request (`Light.refresh`: the entries
-another writer appended, verified as the open verifies them). The full image, where
-the session holds one, is extended by the same entries and validated incrementally
-(`validateLoadedFrom`, equal to `validateLoaded`). -/
+another writer appended, verified as the open verifies them). The full image, where the
+session holds one, is NOT: it is brought to the head only when an operation asks for it
+(`materialize`), so a session whose ported requests dominate pays nothing per request for
+having once opened it. -/
 def refresh (config : Config) (session : Session config) :
     IO (Except String (Session config)) := do
   let fresh ← match ← session.light.refresh with
@@ -206,28 +207,25 @@ def refresh (config : Config) (session : Session config) :
     | .ok light => pure light
   -- At the same head `Light.refresh` returns the held light opening itself, so the session keeps
   -- it and what it keeps over it (`observed`); a moved head keeps nothing over the old one.
-  let session := if fresh.opening.head.height = session.light.opening.head.height then session
-    else { session with light := fresh, observed := none }
-  let some opened := session.full
-    | return .ok session
-  match ← DurableReceiverIO.extendFrom config.transport ResourceBirthCodec.rootBytes
-      opened.durable with
-  | .error detail => return .error detail
-  | .ok ⟨durable, _⟩ =>
-      if durable.height = opened.durable.height then
-        return .ok session
-      -- `validateLoadedFrom_eq`: the full validation, re-decoding and
-      -- re-checking only the cells whose bytes the new records moved.
-      match validateLoadedFrom config opened durable with
-      | .error detail => return .error detail
-      | .ok opened => return .ok { session with full := some opened }
+  return .ok (if fresh.opening.head.height = session.light.opening.head.height then session
+    else { session with light := fresh, observed := none })
 
-/-- The full image of an already refreshed session: the one it holds, or the Store
+/-- The full image of a session, at the Store's head: the one it holds, extended by the
+entries appended since it was last asked for (`extendFrom`, then `validateLoadedFrom`,
+equal to `validateLoaded`, re-checking only the cells the new records moved), or the Store
 opened in full now (`openExisting`) and kept. -/
 def materialize (config : Config) (session : Session config) :
     IO (Except String (Session config × Opened config)) := do
   match session.full with
-  | some opened => return .ok (session, opened)
+  | some opened =>
+      match ← DurableReceiverIO.extendFrom config.transport ResourceBirthCodec.rootBytes
+          opened.durable with
+      | .error detail => return .error detail
+      | .ok ⟨durable, _⟩ =>
+          if durable.height = opened.durable.height then return .ok (session, opened)
+          match validateLoadedFrom config opened durable with
+          | .error detail => return .error detail
+          | .ok opened => return .ok ({ session with full := some opened }, opened)
   | none =>
       match ← openExisting config with
       | .error detail => return .error detail
