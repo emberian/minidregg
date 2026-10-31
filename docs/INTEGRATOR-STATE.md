@@ -64,6 +64,14 @@ door stranger/invite/lobby, public cold/first/warm; https://demo.dregg.online/ =
   installs through launch on hbox j14-apps, so compare the demo worker's draft). Etherpad's opcode mismatch was world state.
   /doc/welcome 404 publicly because the seed stops at the installs. Infra fixed: frame apt-get update before
   dbus-user-session.
+- DESIGN BLOCKER (needs ember): grain installs cannot complete in the forge demo container. The spk volume helper makes
+  each grain's /var a loop-mounted ext4 image under /var/lib/mini-spk-worlds and attests the backing fs UUID; the demo
+  container (nspawn, user-namespaced) has no loop-control, refuses loop mounts in a userns, and its root ext4 has no UUID.
+  Davros passed launch BEGIN and died at "volume-helper verb=Create ... volume create refused". Options (infra): (1) a
+  non-userns demo container like the composed one (accepted by ember only for a gate-only container), (2) a small
+  dedicated VM (SPEND RULE: ember's yes), (3) a volume-helper change in minidregg (bind-mounted directory on a UUID'd
+  host ext4 + project quotas instead of loop images). op66-plan (EtherCalc, Etherpad; not Davros) is package-specific
+  and stays with app-reds.
 Ruling: deploy-script fixes keep be4ef7510's verdicts (no composed rerun); a Rust fix means a new cut.
 The restart `continuous` red was the resident's own output document moving its maintenance revision; be4ef7510's
 maintenance_fingerprint leaves out documents the resident writes.
