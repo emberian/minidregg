@@ -1,13 +1,13 @@
 # Seat: build-loop
 
-Agent: a6c58cb72b0764dbb (ex iteration-speed lane; inherits the retired integrator's mechanical role)
+Agent: a4141abe7297fdc4b (successor of a6c58cb72b0764dbb, retired; `cv show agent-a6c58cb72b0764dbb` for its history)
 Owns: build scripts (`scripts/build-native-host.sh`, `deploy/candidate/{lane-build.sh,package.py,lib.sh}`), the
 pool (`scripts/pipeline/{lane-tree,warm-link,umbrella-tree,native-loop}`), the builder (`scripts/pipeline/{builder,integ-build}`)
 and `board/REDS.md`, the `green` ref, the build box hbox and its pool, the persvati pool, import seams, outside PRs (akapug).
 Quest: hbox as the build box with the live unattended builder on `main`; persvati as the quiet measurement
 box; seam 1 (codec tags) landed; the hot-swap command; keep making the Lean build and the native inner loop faster.
 
-## State (2026-10-31 21:15Z, present tense)
+## State (2026-10-31 22:50Z, present tense)
 
 ### hbox: the build box again (ember 10-31 evening: obend has dregg-build2)
 - The builder runs here live: /home/hbox/lanes/integ/builder-run.sh (PID builder.pid there) fetches main's
@@ -44,12 +44,15 @@ box; seam 1 (codec tags) landed; the hot-swap command; keep making the Lean buil
   "did not run" reds. A held lock (integ-build rc 75) now defers the round, with nothing published. REDS.md has an owner
   column, and a composed red is one row per failed phase. The gate's edge is dregg-infra 3ddd90f (the per-world
   certifier for composed residents; integ/dregg-infra-3ddd90f).
-- f1d2d3bbb: the builder starts every child with `8>&-`. The round subshell, the gate and its rerun had inherited
-  builder.lock, so integ-build, the umbrella tree and a kept gate world's `mini line-resident` (/ci/c-9dc9c1) held it
-  after the builder stopped. Builder 1557758 (pre-3ef7de9ac) stopped 18:03 EDT at the root's word; last-built reset to
-  9dc9c138 (960da1d8 and 60f43c43 only deferred), so the tip gets a real round. integ/relaunch-builder.sh (pid file
-  relaunch-builder.pid) waits for the 9dc9c138 umbrellas (1685491), stops c-9dc9c1's residents with its own
-  stop-residents.sh, then starts builder-run.sh (which writes builder.pid itself); each step is in COMMANDS.log.
+- f1d2d3bbb: the builder starts every child with `8>&-`. Before it, the round subshell, the gate and its rerun
+  inherited builder.lock, so a kept gate world's residents held it after the builder stopped. The relaunch script
+  (integ/relaunch-builder.sh, one-shot, done) stopped c-9dc9c1's anchored residents, but builder.lock was still held
+  by a call-slot `mini line-resident` (1711035, sessions/ember/.call-slots/r1-*.pid): scripts/spk-platform/
+  stop-residents.sh stops only RUN/a anchors, never call-slot residents. Stopped by its own PID file 18:37 EDT; the
+  builder relaunched 18:38 EDT as pid 2375112 (builder.pid), first round 4b750eb67. New residents no longer inherit fd 8.
+- Fixture rerecord: each round whose Host moved event ids reds Fixtures.NativeAcceptedFixture/NativeDocWriteFixture
+  and pushes `fixture-regen/<sha>`; a seat lands it by cherry-pick (64c34e22b for 9dc9c138). Proposed to root: the
+  builder lands its own regen commit on main by path (the two *Data.lean files), so this red stops being a ritual.
 - green is 83e926874 (batch 4) until a live round passes. The first live hbox round rewrites REDS.md whole.
 
 ### Seam 1 (codec tags): on main (f2002e589)
@@ -87,6 +90,13 @@ box; seam 1 (codec tags) landed; the hot-swap command; keep making the Lean buil
 ### persvati (`ssh persvati-remote`, ember's machine): quiet measurement box
 - /home/ember/mdpool: a 4-tree pool at 43995c7f (793 warm modules). Measurement only; no lane builds.
 
+
+### Outside PRs (akapug)
+- Landed 10-31: #5 (capture test stdout lock, d9f333dbf) and #4 (fleet-sign join binds the selected socket before
+  key/enrollment/funding; ported onto main, ae98da48b); both closed with a comment. #16, #14, #7: superseded and closed.
+- #18 (simplex prepared jump): open, answered 10-31 17:28Z with five items; item 1 (does the catch-up jump enter the
+  deployed agreement step now?) is a decision for root/ember. Yes: items 2-5 (logMagic 5, drop the Fabric-bound
+  script, drop the ResearchWip hunk, rebase onto Lean 4.35) before merge. No: say so on the PR.
 
 ## Seams needed
 - infra (aa72653a8ce442178): the kept-world rebind tool; ship.sh accepting `.overlay.id`; the gate's forge half from dregg-build2.
