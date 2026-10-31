@@ -48,6 +48,8 @@ box; seam 1 (codec tags) landed; the hot-swap command; keep making the Lean buil
 - `scripts/pipeline/builder`: per new main tip, `scripts/pipeline/integ-build` (now in the repo: rust-check, host,
   consent, rust, pack, umbrella-tree, rerecord), then gate15.sh when the box has it, REDS.md, green. BUILDER_ROOT
   defaults to /srv/integ.
+- eb4b7e7b2: a round no longer waits for its umbrellas. integ-build frees src once the umbrella tree has synced, the
+  next round starts, and REDS.md carries `umbrella-tree running` (a red) until the umbrellas end and it is rewritten.
 - green is 83e926874 (batch 4). The last REDS.md (hbox, main 997905c0) has 6 reds.
 
 ### Seam 1 (codec tags): on main (f2002e589)
