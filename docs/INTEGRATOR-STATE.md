@@ -9,7 +9,7 @@ retired-agent hook names the live integrator to anyone who messages the old id).
 integrator; the integrator merges onto `integration/staging`, cuts batch candidates on hbox, gates them, moves main to
 gated candidates and names candidates to infra and the explorer.
 
-## Now (2026-10-31 08:45 EDT; batch 6 list current at 08:50)
+## Now (2026-10-31 09:05 EDT)
 
 - **main = 83e926874** = gated batch 4 b9450147f merged with main 7978ddfdd.
 - **Batch 4 b9450147f: GATE GREEN, the rehearsal-3 candidate.** hbox tour 73/73, enrol, composed; forge composed c-b945-d1
@@ -30,8 +30,8 @@ gated candidates and names candidates to infra and the explorer.
 - 09:10: app-reds' dead PID/log files in the pool root broke lane-tree acquire (trees() glob); moved to pool/saved/app-reds-t5-files; iter-speed fixes the glob. Mac waiter bmoenr3gf on batch 6 READY/failure.
 - **Batch 7 (staging ad66df5f1+)**: c88b88755 resident final keeps writeError, demo-reds 58c17b1de (lobby preflight
   retry on a busy box; audited reconcile verbs resolve pending attempts), perf-client f95edc7bf (client derives candidate id
-  from its path), apps-e2e 78a20cb56; hot-path a55855f18 and perf-client 5415aecf7 once their statement audits clear.
-  Mac waiter bwl7dvakp on batch 6 READY/failure (batch 5's umbrella chain still runs, PID 2230439).
+  from its path) and b34173dad (candidate shell wrapper with the deployed wrapper's features, two processes; infra installs it from batch 7, keeps its own on batch 6), apps-e2e 78a20cb56; hot-path a55855f18 and perf-client 5415aecf7 once their statement audits clear.
+  Mac waiter b3njtgrq2 on batch 6 READY/failure (batch 5's umbrella chain still runs, PID 2230439).
 - Explorer on batch 5 (vs batch 4): fsyncs 0 everywhere; 128-ref credit 6.9 s -> 0.3-0.4 s; idle catch-up 61 s -> 0.36 s;
   first read after restart 19 s -> 0.24 s; story new ~14 s; say 0.55 s warm; restart 11.7 s; execve per verb 13 -> 22 and
   say syscalls 4,535 -> 12,031 (perf-client owns). Doc-append grows with history (1.8 s at 13 entries, 6.2 s at 303).
