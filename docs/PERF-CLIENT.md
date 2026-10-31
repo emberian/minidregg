@@ -75,6 +75,21 @@ re-derives and re-executes its own just-admitted birth (~350 ms); its plan conse
 executor, so there is no execution to reuse byte for byte, and sharing would mean carrying the planner's
 prepared kernel values into the deriver. Decided after batch 7 (its authority-leg fix lands in that walk).
 
+## Where a verb's client time goes now (batch-6 world, `doc new`, `strace -c -w`)
+
+Of ~0.9 s of client syscall time, 93% is waiting on the Host and consent sockets (poll 565 ms, recvfrom 280 ms).
+Every filesystem call together is ~20 ms. The attempt's own files (staged temp, link, unlink; ~30 for the two
+writes) are ~3 ms, and each mkdir takes 30 to 80 us. So an attempt is not merged into one file: the saving is
+~3 ms, and merging would rewrite the custody format and its crash ordering, which a dozen readers depend on.
+
+The shell path's floor is the ssh handshake: `help` takes 181 to 216 ms over a fresh connection, 15 to 16 ms over a
+multiplexed one, and 122 ms with classical curve25519 key exchange instead of OpenSSH 9.7's post-quantum default.
+FRIENDS.md shows the ControlMaster lines (bf1c9ccf3). The server's key exchange is ember's decision and infra's sshd.
+
+Consent catch-up of `say` records (batch-6 provider, 60 records in 2.15 s, ~36 ms each): the World pin
+re-encode is 27% (batch 7, row 9), the second Store read 11.7% (batch 8, row 12), the Store helper's reply 12.5%,
+decoding records 9.4%, and the kernel walk ~20% (the DRC authority leg is 9%, hot-path's).
+
 ## Landed
 
 Batch 1 (f883af161, staging merged in; staging d24b3e761, batch 6): rows 1, 2, 4, 8 (single tenancy).
