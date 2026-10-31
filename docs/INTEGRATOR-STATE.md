@@ -20,17 +20,19 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 - **ember (10-31): no rehearsal cut until she says.** Make the system excellent: Hermes repaired, efficiency everywhere,
   every red fixed (never worked around). ~1 ms warm per action is the direction, not a gate. Law 17 holds.
 - **main = 83e926874** = gated batch 4 b9450147f + main 7978ddfdd. **Batch 4 is the green fallback.**
-- **Batch 8 dc61016cb: BUILD running** (launched 11:26, PID 2286225 in $I/build.pid and build-b8.pid; integrator waiter
-  armed on READY). Carries: exorcist b37f26cf6 (resident shell `mini-line`, role miniLine; read scratch), retained
+- **Batch 8 dc61016cb: READY 11:57** (host 1,496 s; ships bin/mini-line). gate15 full running ($I/gate-dc61.pid,
+  integrator waiter armed); umbrella-tree follows in umbrella-src.
+  Measured (perf-apps, EtherCalc, back to back vs batch 7): Host CPU samples 7,919 -> 3,210 (-60%); first page
+  2.43 -> 1.79 s; warm GET median 173 -> 82 ms; 10 concurrent GETs 2.98 -> 0.79 s; create-to-page 26 s unchanged
+  (perf-apps' next target). Carries: exorcist b37f26cf6 (resident shell `mini-line`, role miniLine; read scratch), retained
   05bffae27/7f42f6445 (SparseMap, audit sound), hot-path 5cb39c5fe/05a38ff4e + a5e757016 (cherry-picked as dc61016cb:
   fixes the staging Lean red, authorizeWith on admitOwn; Pred.eval law check, audit sound), app-reds H1a
   ccdaf98b3/faeb1ff0b, iter-speed 7800d3199/697db7664, tower split 0eab28db7, exorcist 47b7cb2e1/c763e3ead, perf-client
   783b460cb/b6/b940b3f50, retained 62aa5fcf8/675a80745/1d4ff4efb, boundary 48cea3caf, batch 6 fixtures, perf-apps
-  546a551fd (docs). At READY: gate15 full (EDGE_REV default now 69c17a3); name to infra, explorer, perf-apps.
+  546a551fd (docs). Named READY to infra, explorer, perf-apps.
 - **Batch 7 acc7cfa03: FAIL** (H2, H1, W1). Overlay **acc7cfa03-h1** (batch 7 + mini b940b3f50 + grain-runtime from
   a371cf4a5) -hp2 11:23: hbox composed rooms/churn/documents/apps/connector PASS (W1 gone), residents = R1 standing;
-  j14 FAIL on H1b (below). KEPT worlds for app-reds: /ci/c-acc7cf-hp2/w (composed; down: world-down.sh
-  /ci/c-acc7cf-hp2/inputs then jworld-scratch.sh down) and /ci/j-acc7cf-hp2 (j14). Take down when app-reds says.
+  j14 FAIL on H1b (below). /ci/c-acc7cf-hp2 taken down (12:15); /ci/j-acc7cf-hp2 kept until app-reds says.
 - Batch 6 74e1cfa10 umbrella-tree reds=0; batch 7 umbrella-tree running in umbrella-src.
 - **Next shared-interface change: retained-mode L0**: its own cut. lane/retained-l0 is WIP: NEVER merge until
   retained-mode a9b54e85e4a194b91 sends a sha labelled SHARED-INTERFACE. Auditor's items owed before L0: toDFinsupp 0 = 0
@@ -38,11 +40,21 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   DecidableEq.
 - **Staging 507155c77 (batch 9 so far)**: exorcist 975491262 (bc17cef1b + 7e6850892 `inspect view-resource-document`: a
   doc page in one codec frame, client and codec from one candidate; 253d0bc26 read-scratch pruning; its own copy of the
-  admitOwn fix, identical to dc61016cb).
+  admitOwn fix, identical to dc61016cb). Measured (overlay acf55bf9d552 vs batch 7, 100 doc show x2, load 22-25):
+  Host+Store CPU -9..14%, codec CPU -17..24%, wall 35.5/30.0 -> 28.5/24.0 ms. Exorcist keeps /ci/exo/w7, w8 (~560 MB each).
+  + exorcist 2344400ac (3822c09f2: the ssh forced command is bin/mini-line; deploy/shell/mini-shell-ssh deleted; pairs
+  with dregg-infra e29997d; touches 5 shell journeys, jchat, jpriv2, jpay-e4, jweb-frontend, jfeedback, row m4, discord
+  native-world, platform-provision/stage: batch 9's gate is their first run; on a red row check mini-line beside the
+  row's mini first. whoami 4.86 -> 2.46 ms, doc show 23.0 -> 18.9 ms).
+  + perf-apps 106b73251 (spk-host: one SPK verification per file per process, prepare 2.5 -> 0.013 s; Host pin per
+  inode, qualification 3.0 -> 1.4 s; create-to-page profile: op66 3.3-6.3 s largest, sent to hot-path).
   + perf-client 36612f028/6a088183f (Store open's represents decision linear via hash sets, @[csimp]
   representsCheck_eq_fast; first read after idle 20.8 s -> 3.9 s at height ~920; audit SOUND: unconditional funext csimp, hash sets over Nat).
-- Awaited: hot-path
-  92828ff96 (birth plan directory decode) after lane-check; infra's forge composed of batch 7 (after its batch 4 rebuild).
+  + hot-path 92828ff96/d7c55dfa0 (birth preparation takes Held directory/authority: callers with an Opened decode no
+  directory row; ordinary birth plan prepared once instead of ~4 decodes; Held.eq_load, Loaded.load_eq; audit
+  SOUND: stale directory is a type error; four RoomBirthGateAdmission theorems gained an implicit `held`, each
+  equivalent to the old via Held.load + eq_load). Before: `doc new` Host CPU 621 ms -> 1000 ms after 500 says (law 17); after-numbers awaited.
+- Awaited: infra's forge composed of batch 7 (after its batch 4 rebuild).
 - **CLOSED: GET read-path contract** (ember ruled (c)+(d); hot-path owns it statement-first). Never re-run or re-report.
 - hbox: / 57 GB free (11:25).
 
@@ -70,9 +82,36 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   H1a (false `refused`) FIXED by faeb1ff0b. Path: resident -> public proxy participant.sock -> private/operator-v2.sock;
   no server-side log line. Owed by app-reds ad85d40779880420c: (a) the reset's cause (proxy, ServeBounds 10 s read
   deadline, operator drop); (b) who performs the exact retry of a never-submitted final.
+  (b) FIXED 4692d6dfb, cherry-picked alone as 5ae0de223 (lane/app-reds-h1b carries the dropped 40cb4aa59: never merge
+  that branch): after a failed mini_say the exact lookup runs; not-submitted -> `mini retry --mode submit` once. Live
+  check: hp-h1b.sh ($I/hp-h1b.pid) overlays grain-runtime onto dc61016cb as dc61016cb-h1b, then gate15 j14 -hp1
+  KEEP_WORLD=1 after batch 8's gate ($I/gate-dc61-h1b.pid). (a) NOT found: run-26 strace of the proxy and operator-v2
+  saw every exchange complete, no ECONNRESET/EPIPE. Prime suspect (same fault as D1): grain-runtime's codec_frame
+  ignores MINI_CODEC_RESIDENT=0 and forks `mini codec-resident` inside short-lived controller-* commands; the resident
+  dies with that tree, leaving a stale pid+socket. Asked app-reds to fix at the cause (honour the switch, or a detached
+  owned resident with dead-resident detection) and prove it.
+  Batch 8 dc61016cb gate15 j14 (12:03): H1b again, identical stderr (5/5). app-reds' candidate cause fix 58f0bad2b
+  (lane/app-reds-codec: grain-runtime honours MINI_CODEC_RESIDENT=0) is being proven on overlay dc61016cb-codec
+  before merge; app-reds notes the failing 0099 did not start its own codec resident. The integrator runs it:
+  hp-codec.sh ($I/hp-codec.pid) builds grain-runtime from 58f0bad2b (includes 5ae0de223) in hp-wt, overlays dc61016cb ->
+  dc61016cb-codec, then gate15 j14 -hp1 KEEP_WORLD after batch 8's gate ($I/gate-dc61-codec.pid); hp-h1b.sh stopped by its
+  PID file (superseded). Theory holds only if the final say succeeds AND the journal shows no not-submitted/resubmit.
+  app-reds removed its /tank build output (77 MB) and builds under /ci or the pool.
 - **D1, forge demo rebuild (batch 4) `members` step**: `sage` provision failed `local native codec: local process
   request failed: Broken pipe`; downstream apps-bootstrap/reenroll/grain world/seed/door red as consequences. Reruns:
   pending (infra repair after the batch 7 forge composed). Same class as H1b (a local transport drop): app-reds told.
+- **C1, concurrent says refused** (explorer, batch 8, EXPLORER-FINDINGS e793bd93e on lane/explorer): 16 parallel `say`
+  from one member: 2 admitted, 14 refused (9 `declared-resource-controller: stale-t…`, 5 `target … moved since the plan
+  was signed`); 4 members x 4: 6/16 admitted. Reads fine. Owner hot-path a0fee5643746e520c: appends should commute; a
+  say's precondition should not pin the room head. Client re-plan is a safety net only.
+  Narrowed (explorer batch 14): concurrent doc new / chat new / create object commute (6/6 for 1 and 2 members); only
+  say into one room conflicts (6 parallel from 1 member: 1/6; 3+3 from 2: 3/6; sequential 6/6).
+- **P1, mini panics on a closed stdout** (explorer, world-up once `mode=closed … has no mini shell`; 0/40 reruns):
+  `mini --help | grep -q` under pipefail; mini exit 101. Owners: perf-client a778bbda6509944a5 (quiet exit on EPIPE,
+  whole client family; owed), infra (FIXED dregg-infra fbb7648: render-authorized-keys.sh and ship.sh read usage into a
+  variable; syntax-checked only). Move gate15's EDGE_REV default to e29997d (contains fbb7648, and installs the
+  candidate's mini-line wrapper; extracted at $I/dregg-infra-e29997d) after batch 8's gate and dc61016cb-codec -hp1 exit
+  (never mid-gate), before batch 9 gates.
 - **H2, attempt-index ENOENT** (batch 7 base): stage j14 worker, `controller-run grain-runtime create` rc=1, ENOENT on
   owner-workspace/attempt-index/by-intent/. Never reached the probe. Distinct from H1. Fix b940b3f50; -hp1 decides.
 - **W1, metered workroom not ready** (batch 7 base -c2 and -hp1): stage composed-inputs, `composed-inputs: the metered
@@ -87,11 +126,21 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 
 ## Reports owed
 
-- To root: -hp2 result (H1a fixed, H1b open, W1 gone) and batch 8 launch, in the integrator's next return.
-- Batch 8 READY: name to infra, explorer, perf-apps (perf-apps' EtherCalc capture is the after-measurement); launch gate15.
+- To root: batch 8 READY and its gate15 verdict (when it lands), in the integrator's next return. Also: the install trust-boundary ruling (root may overrule).
+- Batch 8 gate15 verdict to infra, explorer, perf-apps; any red to its owner with a signature.
 
 ## Reports sent (do not resend)
 
+- 10-31 12:35: perf-apps: keep the broker parse, no reorder (ruling).
+- 10-31 12:25: app-reds: integrator runs the codec overlay, criterion, /tank note. perf-apps 106b73251 merged; op66 to
+  hot-path. Exorcist a97dba51f72535cb9: 2344400ac merged (23cf6bdd3).
+- 10-31 12:15: app-reds: codec experiment ack, batch 8 j14 = H1b, c-acc7cf-hp2 down.
+- 10-31 12:35: C1 narrowing to hot-path.
+- 10-31 12:25: C1 to hot-path; P1 to perf-client and infra; ack to explorer (merge e793bd93e with batch 9).
+- 10-31 12:10: app-reds: 4692d6dfb cherry-picked (5ae0de223), -hp1 queued, codec-resident lifetime fix asked; run-26
+  mini-keys stopped by PID 2408944, /ci/hb-dav-26 removed.
+- 10-31 12:00: batch 8 READY named to infra (mini-line ships), explorer, perf-apps.
+- 10-31 12:05: hot-path d7c55dfa0 merged (6640356b5); audit requested.
 - 10-31 11:55: perf-client 6a088183f merged (45f0ed263), audit requested from a4d9a6f4cba4855ca.
 - 10-31 11:50: app-reds: D1 (codec Broken pipe on forge batch 4) as a second transport-drop sighting.
 - 10-31 11:35: exorcist: 975491262 merged (507155c77), batch 9; fix already in batch 8. hot-path: a5e757016 in batch 8.
@@ -119,7 +168,7 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 | iteration speed | a6c58cb72b0764dbb | seam 1 (codec tags / Store epoch, lands before or with FORMAT), lane pool /home/hbox/pool, lane-tree, hot-swap overlay tool |
 | explorer | a3e5d6dbcd68e616c | multi-member exploration of each READY candidate; docs/EXPLORER-FINDINGS.md on lane/explorer |
 | infra | aa72653a8ce442178 | forge demo container, forge composed (judges residents/restart), dregg-infra (ship.sh, world-down finding) |
-| exorcist | a76808829fc8e4836 (a6ad40ce192354deb, a31f4ba5028d24a92 retired) | no fsync anywhere (lane/exorcism); filtered set `nextest -E 'test(durable) \| test(anchor) \| test(signing_wire) \| test(attempt_state) \| test(receipt_continuity)'` |
+| exorcist | a97dba51f72535cb9 (a76808829fc8e4836, a6ad40ce192354deb, a31f4ba5028d24a92 retired) | no fsync anywhere (lane/exorcism); filtered set `nextest -E 'test(durable) \| test(anchor) \| test(signing_wire) \| test(attempt_state) \| test(receipt_continuity)'` |
 | perf-apps | a25df305cfd551d8b | apps install, grain HTTP path, typed-tool path (perf) |
 | perf-client | a778bbda6509944a5 (a8d456c6e773efbb8 retired) | client, consent provider per-record cost, web page loads, idle cold start (perf) |
 | retained-mode | a9b54e85e4a194b91 (a13f0c9ab4513b2d7 retired) | incremental-computation architecture: a Lean incremental node with one generic "maintained = recomputed" theorem, the Host's derived structures as maintained nodes persisted in checkpoints, emission from Effects/, a lint for whole-state functions on per-request paths, one hot path migrated end to end |
@@ -151,6 +200,9 @@ Every Lean-statement sha gets an audit round from a4d9a6f4cba4855ca before it ri
   needs the next cut, but Rust fixes may be overlaid onto a candidate copy to test between cuts. No single-fix cuts.
 - **Stale leftovers**: our own fleet's leftover processes may be stopped by exact PID after reading each command line
   (root, relaying ember, 10-30); everything else needs a PID file or ember's word.
+- **Install trust boundary** (integrator, 10-31 12:35, flagged to root): the root broker's independent SPK parse/verify
+  (1.9 s) stays; `grain install` is not reordered to publish before qualification ("refused before any effect" holds).
+  Cheaper root-side parsing is welcome; trusting an operator-side verification record is not.
 - Flatness (law 17) is reported, never gating. No rehearsal ships until ember says; then only a fully green gate with no
   demo-path product red.
 - Split tenancy: one shared consent resident and one shared codec Host per box are approved. Egress gateway and Oracle7: held.

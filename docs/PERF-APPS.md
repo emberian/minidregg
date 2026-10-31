@@ -107,6 +107,33 @@ per page on batch 7 (hot-path's submit-path fixes). The captures are `hbox:/ci/p
 `/ci/pa-prof6b` (driver `prof.sh`). Ember ruled on the GET read-path contract; hot-path owns it,
 statement first, with group commit for concurrent dispatches.
 
+## Create to first page (featured-qualify EtherCalc, batch 8 `dc61016cb`): where the 26 s goes
+
+From the process tree (bpftrace) and the install journal's file times, on a quiet moment (load about 12):
+
+| step | seconds | owner |
+|---|---|---|
+| member's application birth (`mini submit`) | 1.1 | hot-path (Host turn) |
+| `spk-host grain install`, of which: | 12.4 to 14.5 | |
+| . stage and copy the package | 0.1 | |
+| . qualification: the first full SPK verify (xz, SHA-512, ed25519) | 2.4 | spk-host (needed once) |
+| . qualification steps: 5 one-shot Host helper processes, the 180 MB Host image hashed before and after each | 2.7 | **batch 3: 1.4** |
+| . placement | 0.9 | |
+| . INSTALL prepare: a second full verify of the same staged file in the same process | 1.9 | **batch 3: 0.01** |
+| . op66, the BEGIN plan | 3.3 (5.4 to 6.3 under load 27) | hot-path (d7c55dfa0, Held directory, batch 9) |
+| . claim | 0.2 | |
+| . broker ingest: materialize parses the SPK again and extracts it | 1.9 | kept: root's independent verification of an operator-owned input (integrator's ruling); only a cheaper parse on the root side may take it |
+| . completion | about 0.8 | |
+| `spk-host grain route` (session birth, ticket, share issue) | 4.5 | Host turns plus `mini` processes in the journey harness |
+| `spk-host grain start` | 2.3 | resident START (BEGIN, claim, completion) |
+| `mini session-enrollment-plan` and enrolment | 4.1 | Host turns |
+| the page | 0.2 | |
+
+The dominant single term is op66 (hot-path's). Batch 3 takes the two install terms that were spk-host
+redoing work in hand (about 4 s of CPU). Back to back under load 27 the wall time did not show it (op66
+and materialize swung by 1 to 2 s each), but the phases did: qualification steps 3.0 s to 1.4 s, the
+prepare verify 2.5 s to 0.013 s.
+
 ## Batch 2: before and after (EtherCalc, batch 5 + 40efdcff9 + batch 1, hbox)
 
 | measure | before (batch 1) | after |
@@ -130,27 +157,28 @@ statement first, with group commit for concurrent dispatches.
 
 ## Continuation (for whoever picks this lane up)
 
-State: batch 1 (`23738a4ce`) is merged on staging as `cfe5c24d5` and rides batch 6. Batch 2 is measured
-(table above) and goes to batch 7. The worker still runs five one-shot `minidregg-host author`/`inspect`
-processes of its own during an install (0.06 to 0.21 s each, from a path other than the share and agent
-custody); find their caller and give it the codec session.
+State: batch 1 (`23738a4ce`), batch 2 (`05c2b208b`) and batch 3 (`106b73251`) are merged on staging
+(batches 6, 7 and 9). The create-to-page profile above is current for batch 8.
 
-Next steps, in order:
-1. How to measure a change: build into `/home/hbox/lanes/perf-apps/target`, copy into an own-bin dir,
-   `up.sh W OWN` (worlds live in `/ci/pa-*`, never `/tank` or `/home`; remove a torn-down world's
-   `/ci/pa-W` before reusing the name), then `run.sh eW W e2e <app id>` against a baseline world, and
-   compare with `cmp.sh eW W` and the worker's `route-*` work files.
-2. When app-reds lands the START fixes (route socket path over SUN_LEN for 20-digit app ids; enrollment
-   lookup "agent reserve custody lacks confirmation"), measure the first page and per-request latency:
-   time repeated authenticated GETs over the route socket (`curl --unix-socket .../http.sock -w
-   %{time_total}`), and split a request in the resident journal (`tool-timing` lines plus the attempt
-   directory's file times: PLAN, ASSEMBLE, SUBMIT, inspect committed).
-3. Open items from the table: the per-request Host round trips (four Host calls per GET, served one at a
-   time by the resident and by the operator socket's single Host thread, hot-path's for the Host side);
-   the client's member turn at install (about 10 Host writes, hot-path's).
+Rulings: the broker's second SPK parse stays (root-side verification of an operator-owned input), and
+`grain install` is not reordered ("refused before any effect" stands; root may overrule). Every grain
+GET being a durable dispatch turn is hot-path's (ember ruled the read-path contract; hot-path owns it,
+statement first, plus group commit).
 
-Tools on hbox (`/home/hbox/lanes/perf-apps`): `up.sh WORLD OWN_BIN`, `run.sh NAME WORLD fq|e2e ARGS`,
-`trace-start.sh NAME` (bpftrace exec/fork/exit of uid 1000 and root into NAME.proc, PID in
-NAME.trace.pid, stop with `sudo -n kill $(cat NAME.trace.pid)`), `tree.py PROC ROOT_PID MIN_S` (the
-process tree with durations), `cmp.sh RUN WORLD`. Tear worlds down with `world-down.sh /ci/pa-W`. Pool
-tree: `. /home/hbox/pool/pool.env; lane-tree acquire perf-apps <ref>`, release when done.
+Next, in order:
+1. When app-reds lands the START fixes (route socket path over SUN_LEN for 20-digit app ids; enrolment
+   "agent reserve custody lacks confirmation"), measure `mini apps install` end to end and the first page
+   through the apps worker's own route (`run.sh eX X e2e <app id>`, `cmp.sh`, `page.sh` on the route).
+2. The root-side parse, if its 1.9 s is wanted: make `minidregg_spk_package_stream::verify` one pass
+   (hash the decoded stream as it is decoded instead of re-reading the decoded temp file; no raw temp copy
+   when the input is already a private file). The xz decode itself stays; measure the split first.
+3. The worker still starts five one-shot `minidregg-host author`/`inspect` processes of its own during an
+   install (0.06 to 0.21 s each, before the residents start): find the caller and give it the codec session.
+4. Re-measure the page after hot-path's group commit and read-path work (`prof.sh`).
+
+Tools on hbox (`/home/hbox/lanes/perf-apps`): `upN.sh WORLD OWN_BIN` (N = the candidate's batch; worlds in
+`/ci/pa-*`, never `/tank` or `/home`), `runN.sh NAME WORLD fq|e2e ARGS`, `prof.sh`-style capture scripts
+(world, featured-qualify, perf on the operator Host, `page.sh`), `ctp.sh` (create-to-page timelines),
+`trace-start.sh`, `tree.py`, `cmp.sh`. Copy candidate binaries with `chmod u+w` before overwriting them
+(they are 0555). Tear worlds down with `world-down.sh /ci/pa-W` and remove the run root after. Pool tree:
+`. /home/hbox/pool/pool.env; lane-tree acquire perf-apps <ref>`, release when done.

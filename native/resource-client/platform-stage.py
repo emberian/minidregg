@@ -44,11 +44,11 @@ def candidate(manifest_path, expected, source):
     need(sha(manifest_path) == expected, "selected manifest changed")
     value = read(manifest_path)
     need(re.fullmatch(r"[0-9a-f]{40}", value["sourceCommit"]) is not None, "full source commit required")
-    for role in ("mini", "host", "store", "verifier", "spkHost", "spkBroker", "browserProxy", "bwrap", "grainRuntime"):
+    for role in ("mini", "miniLine", "host", "store", "verifier", "spkHost", "spkBroker", "browserProxy", "bwrap", "grainRuntime"):
         need(role in value and role in value["sha256"], "candidate missing role: " + role)
         path = absolute(value[role])
         need(path.is_file() and sha(path) == value["sha256"][role], "candidate role changed: " + role)
-    for relative in ("native/resource-client/paid-entry-adapter.py", "deploy/shell/mini-shell-ssh",
+    for relative in ("native/resource-client/paid-entry-adapter.py", "deploy/shell/mini-shell-ssh-credentials",
                      "testing/journeys/shared-resident-fixture-acp",
                      "testing/journeys/shared-resident-fixture-provider.py"):
         need((source / relative).is_file(), "source recipe absent: " + relative)

@@ -53,6 +53,11 @@ fn read_private(path: &Path, bound: u64) -> io::Result<Vec<u8>> {
 }
 
 impl OfflineSourceHost {
+    /// The pinned Host image is verified once per inode in this process (`verified_image`: the
+    /// path must still name the hashed inode with the same size, mode, owner and both times, or it
+    /// is hashed again); the small config is read and hashed every time. A qualification checks
+    /// the pin before and after each of its steps: hashing the 180 MB image each time cost about
+    /// 0.15 s per check, a dozen per qualification.
     fn check_pin(&self) -> io::Result<()> {
         let named = fs::symlink_metadata(&self.host).ctx("inspect", &self.host)?;
         if !self.host.is_absolute()
@@ -62,29 +67,13 @@ impl OfflineSourceHost {
         {
             return Err(invalid("offline Mini Host image identity refused"));
         }
-        let mut host = OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_NOFOLLOW)
-            .open(&self.host).ctx("open", &self.host)?;
-        let opened = host.metadata()?;
-        if !opened.is_file() || (named.dev(), named.ino()) != (opened.dev(), opened.ino()) {
-            return Err(invalid("offline Mini Host image changed before hash"));
-        }
-        let mut digest = Sha256::new();
-        let mut chunk = [0u8; 64 * 1024];
-        loop {
-            let count = host.read(&mut chunk)?;
-            if count == 0 {
-                break;
-            }
-            digest.update(&chunk[..count]);
-        }
-        if self.host_sha256 != hex(&digest.finalize())
-            || self.config_sha256
-                != hex(&Sha256::digest(crate::dispatch_native::read_pinned_input(
-                    &self.config,
-                    MAX_SOURCE_CONFIG as usize,
-                )?))
+        crate::dispatch_native::verified_image(&self.host, &self.host_sha256)
+            .map_err(|_| invalid("offline Mini Host/config SHA-256 pin drift"))?;
+        if self.config_sha256
+            != hex(&Sha256::digest(crate::dispatch_native::read_pinned_input(
+                &self.config,
+                MAX_SOURCE_CONFIG as usize,
+            )?))
         {
             return Err(invalid("offline Mini Host/config SHA-256 pin drift"));
         }
@@ -489,6 +478,15 @@ mod tests {
             b"original"
         );
         let second = root.join("second.bin");
+        // The image is verified once per inode; a rewrite of it is hashed again and refused.
+        let image = fs::read(&source.host).unwrap();
+        let mode = fs::metadata(&source.host).unwrap().permissions();
+        fs::write(&source.host, [image.as_slice(), b"# drift\n"].concat()).unwrap();
+        fs::set_permissions(&source.host, mode).unwrap();
+        assert!(source.check_pin().is_err());
+        fs::write(&source.host, &image).unwrap();
+        fs::set_permissions(&source.host, fs::metadata(&source.host).unwrap().permissions()).unwrap();
+        assert!(source.check_pin().is_ok());
         fs::write(&source.config, b"{\"changed\":true}").unwrap();
         assert!(source
             .run_step(
