@@ -4,21 +4,17 @@ Agent: the iter-speed lane (2026-10-31). Order of work, from ember: step 0 the L
 second tree (integrator's ask), then (1) interface seams, (2) lane-tree warm pool, (3) hot-swap. Integrator:
 aeb671706eb3f70d7 (send shas there). Hot path: a86738fc1dfae6429. Private cells: a74ad8d84ada5627a.
 
-## Step 0: Lean v4.30.0 -> v4.35.0: final, building on hbox
+## Step 0: Lean v4.30.0 -> v4.35.0: LANDED
 
-- `cdb399b47` on `origin/lane/iter-speed` (FROZEN: one commit on main 929eac696; the commit message lists the
-  324 pin changes, the 187 scoped respectTransparency options, the decide replacements, the native_decide
-  self-test, the `alias` rename). Kimi review clean. Mac: whole closure green except the two Native fixtures
-  that are red on main itself (private-cells codec change; the proofs lane re-records them).
-- HOLD LEAN in force. The integrator builds cdb399b47 ALONE in hbox integ/src (started 22:03 10-30; Mathlib
-  rebuilds on 4.35 there, so the host stage is long), moves main to it on a green host stage, lifts HOLD LEAN,
-  then cuts the batch `integ/batch-435` (bump + staging + import-boundary refactor + hot-path snapshot batch).
-- The Mac tree `/Users/ember/dev/minidregg-lanes/iter-speed-land` is LENT to the integrator's import-boundary
-  sub-agent (branch lane/import-boundary there, a build running). Do not switch branches or build there until
-  the integrator releases it. Commit this lane's work by plumbing (a temporary GIT_INDEX_FILE), never through
-  that tree's index.
-- What 4.35 broke and the fixes: in the bump's commit message (and the previous version of this file on
-  lane/iter-speed).
+- main = `cdb399b47` (bump READY on hbox 23:54 10-30; the integrator moved main and lifted HOLD LEAN). The
+  integrator's batch `integ/batch-435` (bump + staging + import-boundary + hot-path) follows.
+- ResearchWip (outside the bump's closure check) under 4.35: `edad15301` on `origin/lane/iter-speed-hosted`
+  (16 files fixed, statements unchanged). Still red there and NOT from the bump (API rot, for their owners):
+  Kernel/RoomReleaseCurrent, Kernel/JointReservationFunding, Compiler/PortableJointCustodyIO (pre-date the DRC
+  verified-ground refactor 2b9956c53/efbac239d) and Compiler/PrivateCircuitAllocationFast.stream_ext (false
+  as stated since StreamCodec gained data fields in 58b3ae509).
+- The Mac tree `/Users/ember/dev/minidregg-lanes/iter-speed-land` is back with this lane; the seam-1 sub-agent
+  works there on `lane/seam1-epoch`. Commit other work by plumbing (a temporary GIT_INDEX_FILE).
 
 ## Umbrella stage in a second tree: done, wired in
 
@@ -35,20 +31,19 @@ aeb671706eb3f70d7 (send shas there). Hot path: a86738fc1dfae6429. Private cells:
   modules rebuilt because the source tree held outputs of 7 staged files, caught by Lake). Disk, own inodes:
   packages 37 MB, build 1.57 GB, mini-kernels target 59 MB. hbox steady state: 1-2 GB, never a second 12 GB.
 
-## Lane pool (lane-tree): fixed; hbox pool next
+## Lane pool (lane-tree): LIVE on hbox
 
-- `scripts/pipeline/lane-tree` (7143777f0): the empty-lookup acquire bug fixed (held_by returned its last
-  test's status under set -e); an empty pool says so; init writes pool.env, resolves the --reference repo
-  absolutely, warms every tree by warm-link; `LANE_POOL_WARM` (acquire links a main-current tree's newer
-  outputs into the tree it hands out) and `lane-tree warm`; macOS (python flock, shasum, clonefile copies,
-  symlinked packages by target, `$HOME/pool/pool.env`). Tested on the Mac against a scratch pool.
-- hbox NVMe pool: tools staged in `/home/hbox/pool-tools/` (lane-tree, warm-link, init-pool.sh). Run
-  `/home/hbox/pool-tools/init-pool.sh` (as hbox; PID file /home/hbox/pool-init.pid) once COMMANDS.log shows
-  `MINIDREGG umbrella cdb399b477ea rc=`: pool `/home/hbox/pool` (t1..t3, repo.git, packages-<key> real copy
-  7.8 GB read-only, lake-cache, LANE_POOL_WARM=/home/hbox/lanes/integ/src). This is the ONE read of integ/src
-  in that window: tell the integrator "clear" when it ends (it holds its batch build until then), and tell hot
-  path (it will `lane-tree acquire hot-path origin/lane/hot-path-cold`).
-- Mac pool: after the integrator releases iter-speed-land (it is the only built 4.35 Mac tree).
+- `scripts/pipeline/lane-tree` + `warm-link` on `origin/lane/iter-speed-tools` (latest 2261c5faa): empty-lookup
+  acquire bug fixed, init writes pool.env, every tree warmed by warm-link, LANE_POOL_WARM, `warm`, `tripwire`
+  (also run by release), macOS support, partial-clone seeds get a partial pool repo.
+- hbox pool `/home/hbox/pool` (created 2026-10-31 00:0x): pool.env, bin/{lane-tree,warm-link}, repo.git
+  (blob:none clone of GitHub; integ/src is itself a partial clone), packages-3a3779933df4 (7.4 GB real copy,
+  read-only; verified by `lake build --no-build` Mathlib Batteries Aesop Qq Host.Main before copying),
+  lake-cache, t1..t3 (each warmed from integ/src at cdb399b47: 1,375 modules, 175 MB own inodes),
+  LANE_POOL_WARM=/home/hbox/lanes/integ/src. Init took 29 s after the 24 s packages copy. hbox / 34 GB free after.
+- Use: `. /home/hbox/pool/pool.env; t=$(/home/hbox/pool/bin/lane-tree acquire LANE REF)`; `lane-tree release
+  LANE`. Never acquire while a build runs in integ/src (acquire reads it). Hot path takes the first tree.
+- Mac pool: not yet (the only built Mac tree is in use by the seam-1 sub-agent).
 
 ## Seam 1 (next): the codec registry and the Store epoch
 
