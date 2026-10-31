@@ -23,6 +23,7 @@ shared with the Rust tests.
 
 import Compiler.EmitSerialize
 import Mathlib.FieldTheory.KummerExtension
+import Mathlib.FieldTheory.Finite.Basic
 
 namespace Minidregg.Compiler
 

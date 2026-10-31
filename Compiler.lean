@@ -66,6 +66,7 @@ import Compiler.BinaryTower256Profile -- inhabits the Tower256 controller profil
 import Compiler.Tower256NativeByteBoundary -- arbitrary native Tower256 compute returns bytes only; Lean's exact Fan--Paar decoder plus a reflected Lean checker are the sole path to an accepted semantic value
 import Compiler.Tower256CshakeMerkleBinding -- exact framed leaf/node XOF collision event; accepted unequal openings at one root/index reduce to a collision, with exact-depth paths and cryptographic event price left explicit
 import Compiler.Tower256ConcreteBackend -- one shared Tower256/cSHAKE/Merkle backend with exact Lean codecs and domain pins; CR/ROM remain explicit
+import Compiler.Tower256Backend -- the profile-bound half: backend : Backend (binaryTower 8) and its exact-projection theorems
 import Compiler.Tower256LogupControllerPlan -- four LogUp roots before round challenge, additive checkpoint before query challenge, exact Merkle openings, opaque fallible Tower work, and reflected Lean final semantics
 import Compiler.Tower256LogupAcceptedRun -- every verified execution of that exact plan retains its reflected statement and four-root prefix, yielding indexed evaluation from explicit PCS/CR/ROM judgments
 import Compiler.Tower256LogupClauseDispatch -- extension-local clause-404 dispatch turns exactly two keyed opaque byte replies into the existing Lean-verified execution; base V1 remains empty

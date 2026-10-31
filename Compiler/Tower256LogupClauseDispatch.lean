@@ -21,7 +21,7 @@ PCS/sampled-decider soundness, CR/ROM pricing, the common-game join, and a
 -/
 
 import Compiler.DialectClauseDispatch
-import Compiler.Tower256ConcreteBackend
+import Compiler.Tower256Backend
 import Compiler.Tower256LogupAcceptedRun
 
 namespace Minidregg.Compiler.Tower256LogupClauseDispatch

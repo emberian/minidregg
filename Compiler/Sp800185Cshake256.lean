@@ -20,6 +20,7 @@ module
 public import Theory.Bignum
 public import Compiler.Tower256CshakeMerkleController
 public import Theory.Sp800185Cshake256Core
+public import Mathlib.Data.Nat.Digits.Defs
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr

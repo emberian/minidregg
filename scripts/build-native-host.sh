@@ -83,7 +83,8 @@ Environment:
   MINIDREGG_NATIVE_JOBS=N          concurrent C compiler processes (positive integer; default: 2)
   MINIDREGG_LEAN_THREADS=N         threads in each Lean process (positive integer; default: 2)
   MINIDREGG_LEAN_UNRECORDED_WEIGHT=N  seats a module with no recorded peak RSS takes (default: a third of the
-                                   seats); the previous build's table in the output directory is merged in
+                                   seats); deploy/candidate/lane-build.sh passes its lane's accumulated table
+                                   in MINIDREGG_LEAN_RSS_FROM
   MINIDREGG_LAKE_THREADS=N         Lake's worker threads, i.e. how many modules it runs at once before the
                                    seats bound them (default: 2 x MINIDREGG_LEAN_SEATS, at least 4)
   MINIDREGG_NATIVE_LAKE_CC=PATH    optional bounded compiler wrapper for Lake C jobs
@@ -1498,9 +1499,6 @@ rss_sources=()
 if [[ -f "$root/scripts/pipeline/lean-module-rss.tsv" ]]; then rss_sources+=("$root/scripts/pipeline/lean-module-rss.tsv"); fi
 IFS=: read -r -a extra_rss <<< "${MINIDREGG_LEAN_RSS_FROM:-}"
 for f in ${extra_rss[@]+"${extra_rss[@]}"}; do [[ -z "$f" ]] && continue; [[ -f "$f" ]] || { printf 'MINIDREGG_LEAN_RSS_FROM: no table %s\n' "$f" >&2; exit 64; }; rss_sources+=("$f"); done
-# The previous build into this output directory measured every module it compiled (an integration tree reuses
-# native-out): its table weighs the modules the committed table does not know yet.
-if [[ -s "$output_dir/lean-module-rss.tsv" ]]; then cp "$output_dir/lean-module-rss.tsv" "$output_dir/lean-module-rss.prev.tsv"; rss_sources+=("$output_dir/lean-module-rss.prev.tsv"); fi
 # Unrecorded modules: a third of the seats by default (12 seats: 4 x seat_kib, above the 17 GB Pay modules).
 unrecorded_weight=${MINIDREGG_LEAN_UNRECORDED_WEIGHT:-$(( (lean_seats + 2) / 3 ))}
 case "$unrecorded_weight" in [1-9]|[1-9][0-9]) ;; *) printf 'MINIDREGG_LEAN_UNRECORDED_WEIGHT must be a positive integer\n' >&2; exit 64 ;; esac

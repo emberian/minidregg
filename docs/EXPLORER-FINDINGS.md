@@ -2,7 +2,7 @@
 
 Present-state table, rewritten whole at each batch. Lane `lane/explorer`. Subject: candidate
 be4ef7510 (hbox `/home/hbox/lanes/integ/candidates/be4ef751074ca28c7d306c2f2bcf61cda03893c8`),
-explored as test members only. Batch 11, 2026-10-31.
+explored as test members only. Batch 12, 2026-10-31.
 
 ## Worlds (all on hbox, all mine; torn down when the lane ends)
 
@@ -150,6 +150,19 @@ Batch 3 (a4cb65af): `bend settle` works. After run, answer and deliver (spent 15
 | H3 hermes wording | untestable without a resident (scratch says `there is no Hermes in hroom`); needs the forge world. |
 | apps with `mini` built from app-reds 6043dccd0 (route bound before START), `MEMBER_FUNDING=40000` | NEXT RED: install state `routing`: `the owner's route is not bound yet: .../mini query: refused: no-grant: this key holds no grant covering this target and operation (phase observation)`. The worker's route-binding step issues an observation query the member's key has no grant for. Evidence `/ci/xe2e11/install-0dp7...json`, `/ci/x4log/e2e11.out`. Owner: app-reds. |
 | leaked processes | after `world-down.sh /ci/xw9` returned `removal_assertions=0`, five processes of the world were still running with parent 1 and no PID file (`mini codec-resident`, `minidregg-host ... codec`, `mini consent-resident`, `minidregg-client-consent`, `minidregg-link-sqlite-store serve`). world-down does not stop client-side residents spawned by the harness's workspaces. Not killed (no PID file); reported. The settings files these residents name still exist (`/ci/xw9/w/store/base/workroom/deployment/pinned-config.json`, `/ci/xe2e11/ws-controller/provisions/member9/observe/g0001/config.json`; `/ci/xw9` itself is still on disk), so demo-reds' self-exit (settings file or socket gone) does not apply and this is not a red for it. The red is that world-down leaves the world directory and its client residents behind. The integrator stopped all five by exact PID after reading their command lines (its COMMANDS.log); the world-down leak goes to dregg-infra. |
+
+
+### Batch 6 (74e1cfa10) re-explore (hbox, load 9-15)
+
+| item | result |
+|---|---|
+| refusal clause naming | PARTIAL. A stale-value guard refusal now names its clause: `why w2` prints `phase: prepare` and `clause: invocation preparation: declared-resource-controller: scalar: ... guard-rejected 0` (E4 improved; still not "your expected value 1 was stale, field is 9"). The story `go 3` out of order (E3) still prints `failing the whole law: all [...] ... reads no single slot ... no change passes it`; the tale's clause 4 "needs key" is NOT named. |
+| warm latency | credit 211-256 ms; say 399-506 ms (b4: 650 ms / 1,100 ms). |
+| warm `say` MINI_TRACE (client 272 ms total) | `mini workspace propose` 71 ms (host op144 1.3, op4 1.8, op5 11.5), `mini workspace submit` 200 ms of which host **op2 = 163 ms**, op1 22 ms. The client's own overhead is about 0 beyond those; 60% of a `say` is the Host's op2 (the admit/commit call). |
+| doc-append growth, certify before each sample | 13 entries 1.0-1.1 s; 103 entries 2.1-2.4 s; 303 entries 3.4-3.8 s (b4: 1.8-2.2 / 3.8-4.1 / 6.0-6.3 s). Faster, still growing with history. |
+| object create | 2.1 s then 1.3 s; `story new` 7.0 s (b5 14 s, b4 28-45 s). |
+| apps-e2e, two installs, 40,000 funding | Simple Todos: past ingest, create, route; START now fails `spk-host: grain refused: UNRESOLVED: .../host/apps/<id>/g2 is uncertain (START attempted without a completion record); reconcile it before another START`. The harness retried START after a first attempt left no completion record; the first START's own failure is not visible in the install detail. Etherpad: birth admitted, download refused upstream (`http-526`), so nothing beyond fetching. Run took 1243 s. Owner: app-reds. |
+| residents after teardown | the batch's resident pid files exist (`/ci/xa6w/w/a/c-*.pid`, `r-*.pid`), but after `world-down.sh /ci/xa6w` a `mini codec-resident` (3981220) and its `minidregg-host codec` (3981221) kept running 20+ minutes; neither pid appears in any pid file (the c-/r- files name dead pids), and their settings file under `/ci/xa6w` still exists, so self-exit does not fire. Left running, reported. |
 
 ## Exercised and held
 

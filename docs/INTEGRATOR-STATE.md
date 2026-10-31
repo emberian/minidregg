@@ -9,7 +9,7 @@ retired-agent hook names the live integrator to anyone who messages the old id).
 integrator; the integrator merges onto `integration/staging`, cuts batch candidates on hbox, gates them, moves main to
 gated candidates and names candidates to infra and the explorer.
 
-## Now (2026-10-31 10:00 EDT)
+## Now (2026-10-31 10:36 EDT)
 
 - **ember (10-31 09:10, via root): no rehearsal cut until she says.** Make the system as good as it can be: keep batching,
   gate once per batch, keep the newest green candidate as the fallback. Priorities: repair Hermes (batch 5's j14
@@ -29,15 +29,17 @@ gated candidates and names candidates to infra and the explorer.
   final-say refusal as batch 5. Umbrella-tree running in umbrella-src. Exorcist measured it against batch 5: signed read
   wall 42 -> 32 ms, operator CPU 27.8 -> 15.0 ms. perf-apps: EtherCalc create-to-first-page 53 s (256 s on 10-29), warm GET
   340 ms, of which ~170 ms is the SUBMIT Host turn (hot-path's).
-- **Read-path GET contract**: codex astra NEEDS-CHANGE (scratchpad astra-get.txt). ember ruled: prepaid reserved credit per
-  liable payer, and declared per-route eligibility. Hot-path a6c4a1532687a4fdb owns it as a statement-first lane with a design
-  doc, after group commit and cheaper durable turns; not a batch item until its keystones and witnesses exist.
-- **Batch 7 acc7cfa03: BUILDING** since 09:57 (integ-build6, PID file $I/build-b7.pid; overlaps batch 6's umbrella-tree,
-  the first test of the seat-weights fix). Also carries perf-client a1c70ef29 (consent provider reads the Store once per command; birth
+- **CLOSED: GET read-path contract: astra reviewed, ember ruled (c)+(d), hot-path owns.** Never re-run astra on it or
+  report it again. (Ruling: prepaid reserved credit per liable payer; declared per-route eligibility. Hot-path
+  a6c4a1532687a4fdb, statement-first, after group commit; not a batch item until keystones and witnesses exist.)
+- **Batch 6 gate15 verdict FAIL (10:00)**: enrol, tour 73/73, hbox composed rooms/churn/documents/apps/connector PASS;
+  residents UNKNOWN (forge decides); j14-apps FAIL with batch 5's Hermes final-say refusal; flatness-submit FAIL,
+  flatness-get PASS. Its umbrella-tree is running in umbrella-src (PID file $I/umbrella-src.pid).
+- **Batch 7 acc7cfa03: READY 10:29 (host 1,666 s beside batch 6's umbrella: the seat-weights fix worked; batch 6 took 2,165 s).** gate15 launched 10:30 (PID file $I/gate-acc7.pid); its composed phase failed at once because gate15 defaults EDGE_REV=4ea511d and that dregg-infra rev had not been extracted on hbox (my error; extracted 10:34), so composed reruns as SUF=-c2 PHASES=composed (PID file $I/gate-acc7-c2.pid); forge composed queued by infra after its batch-4 rebuild; named to infra, explorer, perf-apps. Also carries perf-client a1c70ef29 (consent provider reads the Store once per command; birth
   authority leg at the held authState; attempt index; audit sound, frame 233 now means "re-check owed"). Earlier contents: resident final writeError c88b88755, demo-reds 58c17b1de, perf-client f95edc7bf +
   b34173dad (candidate ssh wrapper) + 394039fb1 (one shared codec Host per box under split tenancy), apps-e2e 78a20cb56,
   perf-apps b2 05c2b208b, hot-path a55855f18, perf-client 5415aecf7, iter-speed Mathlib import trim ee7a25ca7 (Host.Main 3,930 -> 2,895 modules; Pratt certificate for mersenne127P_prime; audit sound, pins only shrank), app-reds c0a49c8d7 (an argument object keyed `path` is an argument: Davros qualify's declaration-invalid), iter-speed seat weights 0f67c94b7, perf-apps docs a7511c500; app-reds ecf4b917d merged as superseded by staging's 6cae27559 (staging ddc2e8863).
-- **Staging aa38a8b1e (batch 8 so far)**: exorcist 47b7cb2e1 + c763e3ead (policy loads one encode per record; signed read loads the law graph once; audit running), perf-client 783b460cb (MINI_TRACE consent/codec frames), perf-client b6 (frame 233 = re-check owed in the protocol registry; per-deployment ID index, settings and workspace read once per file identity; `doc new` statx 1,063 -> 505).
+- **Staging (batch 8 so far)**: iter-speed 7800d3199 (a lane rebuilds its native host in place; the RSS table accumulates in logs/), iter-speed tower split 0eab28db7 (audit sound: 12 decls moved verbatim, pins only shrank), exorcist 47b7cb2e1 + c763e3ead (policy loads one encode per record; signed read loads the law graph once; audit sound; whole-tree build owed = batch 8), perf-client 783b460cb (MINI_TRACE consent/codec frames), perf-client b6 (frame 233 = re-check owed in the protocol registry; per-deployment ID index, settings and workspace read once per file identity; `doc new` statx 1,063 -> 505).
 - **FORMAT batch (later, one genesis, after iter-speed's seam 1)**: hot-path row 11 + Book entries migration +
   private-cells FORMAT (a) (eventHistory, authority to the trie root, mask []) + KeptCell Aux cache + fixture re-record.
 - Explorer on batch 5 vs 4: fsyncs 0; 128-ref credit 6.9 s -> 0.35 s; idle catch-up 61 s -> 0.36 s; first read after
@@ -77,6 +79,9 @@ Every Lean-statement sha gets an audit round from a4d9a6f4cba4855ca before it ri
   change worked (lane-check of changed files plus one targeted measurement or row); full gates (gate13/15, forge composed,
   umbrellas) once per batch cut; cuts spaced out to accumulate perf work; hotpatched measurement worlds are the inner loop;
   freed hbox time goes to perf builds and measurements. Batch 4 stays the green fallback and rehearsal candidate.
+- **Retained mode** (root, 10-31): every lane brief that touches state carries the line "a derived value is maintained,
+  never recomputed; writing f(state) on a hot path means you owe its update rule." retained-mode a13f0c9ab4513b2d7 owns the
+  architecture.
 - **Import boundary**: Effects is the generator Kernel and Compiler consume; Effects sits below Kernel/Compiler, may import
   Theory and Lean core, never Kernel/Compiler/Host. Landed (b7bf3a8b2; table green, no cycle).
 - **Consent**: no validity proofs; we trust the storage device; providers resume from a sealed snapshot; anchors survive
@@ -121,6 +126,8 @@ Every Lean-statement sha gets an audit round from a4d9a6f4cba4855ca before it ri
 | eca98bde7-resvar2(-zai) | overlays of batch 2 with the resident /var fix (and Z.AI); forge demo build |
 | b9450147f | GATE GREEN (batch 4, with deploy hotpatch 9fdef19bd): rehearsal-3 candidate; main's base |
 | 1c151fce4 | READY (batch 5); gate15 FAIL: j14 `refused` ask, residents for forge |
+| 74e1cfa10 | READY (batch 6); gate15 FAIL: j14 Hermes final-say refusal, residents for forge |
+| acc7cfa03 | READY (batch 7); gate15 running |
 | 1c151fce4-resid | overlay: batch 5 + spk-host crate from 40efdcff9 (resource id any non-zero u64); gate15 -hp1: j14 same `refused` red |
 
 ## Open reds and owners
