@@ -65,6 +65,7 @@ scope is "linear subsystem (add gates + root pin) retired with the proven bound"
 -/
 import Compiler.AirFlatten
 import Selvage.SumcheckReduction
+import Mathlib.Tactic.LinearCombination
 
 namespace Minidregg.Assurance
 
