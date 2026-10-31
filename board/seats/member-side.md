@@ -2,15 +2,14 @@
 
 Agent: ab7b4fe7fb687e0ca (fresh seat 2026-10-31 evening, from this file; predecessor a778bbda6509944a5, `cv show` for detail).
 Worktrees: Mac /Users/ember/dev/minidregg-lanes/perf-client (detached on `main`); persvati
-/home/ember/mdpool/lanes/member-side (detached; .lake/packages links to the seed's; warm at 76511e768; build script
-/home/ember/mdpool/lanes/ms-build.sh TARGETS, PID ms-build.pid, log ms-build.log). Builds move to dregg-build2
-(`ssh bb2`, `lane-tree acquire member-side origin/main`, `scripts/pipeline/lane-check`; push from the Mac);
-persvati is the quiet measurement box. hbox is down: when it returns, pool tree t8 is still leased as
-`perf-client` (release it), and hbox:/ci/pc (1.9 GB) with the w8 world (PID files in w8/pid) is mine to stop.
+/home/ember/mdpool/lanes/member-side (warm Lean tree; build script /home/ember/mdpool/lanes/ms-build.sh TARGETS, PID
+ms-build.pid). Builds: hbox pool (`lane-tree acquire member-side origin/main`, swarm-build; hbox / ~41 GB free, keep
+it small). dregg-build2 is obend's now: nothing of mine is left there (t1 released, ~/ms removed).
+hbox leftovers from the predecessor: t8 released; the w8 world and its residents stopped by their PID files;
+hbox:/ci/pc (1.9 GB, the predecessor's scratch) is left in place for ember to decide.
 Measurement world: persvati /home/ember/mdpool/lanes/rpw/rf (2 members, port 22800, PID files in it; up by
-/home/ember/mdpool/rp/up.sh) on overlay /home/ember/mdpool/lanes/cand/93b31c1c33d6 (= bb2
-/srv/pool/lanes/member-side/candidates/93b31c1c33d6, built by native-loop in bb2 pool tree t1, leased native as
-`member-side`: release when done). bb2 ~/ms holds my world script copy (world rf taken down).
+/home/ember/mdpool/rp/up.sh) on overlay /home/ember/mdpool/lanes/cand/93b31c1c33d6 (main 27f85e89 host+consent on
+76511e768bbc; carries 43995c7f2, 76511e768, 86c9dbddb; not f28cd8457).
 
 Owns: the client (`native/resource-client`: shell, workspace, chat, web body `src/web`), `mini-line`, the ssh wrapper
 (`deploy/shell/mini-shell-ssh`), `mini-web-spawn`, `native/mini-sdk` consent/residents, `native/mini-session-env`,
