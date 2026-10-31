@@ -70,8 +70,15 @@ door stranger/invite/lobby, public cold/first/warm; https://demo.dregg.online/ =
   Davros passed launch BEGIN and died at "volume-helper verb=Create ... volume create refused". Options (infra): (1) a
   non-userns demo container like the composed one (accepted by ember only for a gate-only container), (2) a small
   dedicated VM (SPEND RULE: ember's yes), (3) a volume-helper change in minidregg (bind-mounted directory on a UUID'd
-  host ext4 + project quotas instead of loop images). op66-plan (EtherCalc, Etherpad; not Davros) is package-specific
+  host ext4 + project quotas instead of loop images). Helper interface (infra): /usr/local/libexec/
+  mini-spk-volume-helper-<STORE> (install-user-world, from $C/bin/mini-spk-volume-helper) via one sudoers rule for
+  mini-core; execs `spk-var-volume --root GRAINS_ROOT create|create-from|verify|attest ...`; images in
+  GRAINS_ROOT/vars/<STORE>-<resource>; loop-mounts ext4 nosuid,nodev; attests the backing fs UUID (collect_witness).
+  A no-loop variant needs quota-bounded directories on a UUID'd fs and a changed attest/witness. op66-plan (EtherCalc, Etherpad; not Davros) is package-specific
   and stays with app-reds.
+- Hermes (d) judged on the final world: controller, dispatch, resident GREEN; `ask lobby` admitted (5.7 s, one re-plan)
+  and lands, but no reply: mini-grain-resident@9872001 joins the lobby then exits 1 with "resident source preparation
+  refused before dispatch: controller service is unavailable" (4 repros). Routed to app-reds a17f4172949caca14.
 Ruling: deploy-script fixes keep be4ef7510's verdicts (no composed rerun); a Rust fix means a new cut.
 The restart `continuous` red was the resident's own output document moving its maintenance revision; be4ef7510's
 maintenance_fingerprint leaves out documents the resident writes.
