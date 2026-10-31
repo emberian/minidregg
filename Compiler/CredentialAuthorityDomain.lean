@@ -121,7 +121,16 @@ private theorem parentKeyAt_disjoint (a b : Address CredentialAuthorityState.lay
 
 /-- `authStateOf` with the revoked set and the parent support read off `supportFast`. -/
 def authStateOfFast (cell : Cell) : AuthState :=
-  { CredentialAuthorityState.authState cell with
+  -- Every field spelled out: `{ authState cell with … }` would build `authState cell` whole
+  -- (its slow `revoked` and `parent` included) before replacing them.
+  { capabilityRoot := cell.root
+    revocationRoot := cell.root
+    policyRoot := cell.root
+    policyAddress := policyAddressAt cell
+    issuerEpoch := issuerEpochAt cell
+    policyEpoch := policyEpochAt cell
+    policyRevision := policyRevisionAt cell
+    subjectKeyEpoch := subjectKeyEpochAt cell
     revoked := planeKeys revokedKeyAt revokedKeyAt_disjoint (supportFast cell.logical)
     parent :=
       { parentOf := fun c => cell.logical ⟨.parent, c⟩
