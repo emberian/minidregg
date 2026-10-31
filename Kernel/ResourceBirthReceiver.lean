@@ -714,6 +714,7 @@ def receiveLoaded
     (deployment : CanonicalCellRegistry.Deployment) (pins : FactoryPins)
     (native : CredentialSignatureIO.NativeConfig) (transport : DurableReceiverIO.Transport)
     (durable : ResourceBirthController.Concrete.Durable)
+    (held : ResourceBirthController.Concrete.Held deployment durable)
     (height : Height) (bytes : List UInt8) : IO Result := do
   match decodeIngress bytes with
   | none => return .rejected .malformedIngress
@@ -722,7 +723,7 @@ def receiveLoaded
       | some (.ok recorded) => return .confirmed .replayed recorded
       | some (.error reason) => return .rejected reason
       | none =>
-          match ← admitDecodedNative profile deployment pins native durable height ingress with
+          match ← admitDecodedNative profile deployment pins native durable held height ingress with
           | .error reason => return .rejected (.admission reason)
           | .ok accepted =>
               match ← DurableReceiverIO.receiveLoaded transport rootBytes durable (intent accepted) with
@@ -747,6 +748,8 @@ def receive
   | some _ =>
       match ← DurableReceiverIO.load transport rootBytes with
       | .error detail => return .unavailable detail
-      | .ok durable => receiveLoaded profile deployment pins native transport durable height bytes
+      | .ok durable =>
+          receiveLoaded profile deployment pins native transport durable
+            (ResourceBirthController.Concrete.Held.load deployment durable) height bytes
 
 end Minidregg.Kernel.ResourceBirthReceiver

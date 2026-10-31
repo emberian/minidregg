@@ -113,8 +113,8 @@ def admitNative (profile : CanonicalRuntimeProfile.Profile F)
   let some tariff := GrainResourceBirthAdmission.grainTariffAt config.deployment durable
     | return .error (refusedAt "grain tariff")
   let .ok birth := GrainResourceBirthController.prepareSourceBirth
-      profile.compilerProfile profile.disabledEvaluators config.deployment pins durable profile.semantics
-      tariff decoded.source ambient.height sourceReady.sourced | return .error (refusedAt "source birth prepare")
+      profile.compilerProfile profile.disabledEvaluators config.deployment pins durable
+      (ResourceBirthController.Concrete.Held.load config.deployment durable) profile.semantics tariff decoded.source ambient.height sourceReady.sourced | return .error (refusedAt "source birth prepare")
   let .ok grain := GrainResourceBirthTransaction.prepareTargets profile
       config.deployment pins durable ambient tariff decoded.source birth
     | return .error (refusedAt "birth targets prepare")
