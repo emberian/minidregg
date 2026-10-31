@@ -1700,6 +1700,64 @@ theorem plain_refuted {num den : Nat} (small : num < den) (budgeted : (setting p
   simp only [Option.some.injEq, List.cons.injEq] at same
   exact absurd same.1 (by decide)
 
+/-- The same deployment with the custody function the ideal one on the window
+(one key per function `{0, 1} → Fin 2`, masks `0` or `1`): `CustodyPrf` holds at
+gap `0` (`enumeration_satisfies`), so the PRF premise is inhabited jointly with
+every other non-cryptographic one. -/
+def idealSetting {Item : Type} (serve : Serve W Item) : HidingSetting W 1 (funs 1 (List.range 2)) Item (List Item) where
+  keyed := idealFn 1 (List.range 2)
+  base := base
+  sample := fun x => (x.val : Int)
+  encodeMask := fun x => (W.valueStream base.blinding.space).encode (x.val : Int)
+  encodes := fun _ => rfl
+  serve := serve
+  view := fun cells => cells.map (KeptCell.served serve)
+  g := id
+  factors := fun _ => rfl
+  rounds := 1
+  fields := Witness.slot1
+
+/-- **Joint premise inhabitation** at one setting: the custody PRF (gap 0
+against every test: the ideal function is the enumeration, so the hop is
+exact), a key, the bound's side conditions at `λ = 1`,
+`queries = 0`, `versions = rounds + 1 = 2`, a budget admitting every
+distinguisher, and the pair attack's birth, hidden patches, differing effects,
+legality and hidden difference. -/
+theorem jointPremises_inhabited {den : Nat} (denominator : 0 < den) :
+    CustodyPrf 1 (funs 1 (List.range 2)) 0 den (idealSetting (rootServe W)).window (idealSetting (rootServe W)).keyed
+        (fun _ => True) ∧
+      0 < funs 1 (List.range 2) ∧ (0 : Nat) < 2 ^ 1 ∧
+      2 * (0 + 0) * (2 ^ 1 - 0) + 2 * 2 * 0 * den < den * (2 ^ 1 - 0) ∧
+      BlindedCellHiding.BudgetMeaningful (fun _ => True) (idealSetting (rootServe W)).Distinguisher ∧
+      (birth W (idealSetting (rootServe W)).base S).isSome ∧
+      HiddenPatch W (idealSetting (rootServe W)).fields p₀ ∧ HiddenPatch W (idealSetting (rootServe W)).fields p₁ ∧
+      ∀ masks₀, (idealSetting (rootServe W)).Legal ((idealSetting (rootServe W)).pairAttack S bornS p₀ p₁ masks₀) ∧
+        (idealSetting (rootServe W)).HiddenDiff ((idealSetting (rootServe W)).pairAttack S bornS p₀ p₁ masks₀) :=
+  ⟨Custody.enumeration_satisfies 1 (List.range 2) denominator _ ⟨fun _ _ _ _ _ => ⟨trivial, trivial⟩, fun _ _ _ => trivial⟩,
+    Nat.pow_pos (Nat.succ_pos _), by decide, by simp; omega, fun _ _ => trivial, bornS, hidden₀, hidden₁,
+    fun masks₀ => ⟨(idealSetting (rootServe W)).pairAttack_legal S bornS hidden₀ hidden₁ masks₀,
+      (idealSetting (rootServe W)).pairAttack_hiddenDiff S bornS hidden₀ hidden₁ differ masks₀⟩⟩
+
+/-- **What stays open** at that setting: the three hybrids. Given them,
+`RatchetHidingGoal` of `real` follows, every other premise (the PRF and its
+reduction obligation included, the budget being every test) supplied by
+`jointPremises_inhabited`. -/
+theorem idealGoal_of_open {den : Nat} (denominator : 0 < den)
+    (simulated ideal : (idealSetting (rootServe W)).Strategy → Bool → Fin (idealSetting (rootServe W)).tapes → Bool)
+    (zk : ∀ a, (idealSetting (rootServe W)).Legal a → True → ∀ b,
+      GapAtMost (idealSetting (rootServe W)).tapes 0 den ((idealSetting (rootServe W)).uniform a b) (simulated a b))
+    (rom : ∀ a, (idealSetting (rootServe W)).Legal a → True → ∀ b,
+      GapAtMost (idealSetting (rootServe W)).tapes (2 * 0) (2 ^ 1 - 0) (simulated a b) (ideal a b))
+    (identical : ∀ a, (idealSetting (rootServe W)).Legal a → True →
+      GapAtMost (idealSetting (rootServe W)).tapes 0 1 (ideal a false) (ideal a true)) (masks₀ : List (List UInt8)) :
+    BlindedCellHiding.RatchetHidingGoal (idealSetting (rootServe W)).tapes 1 2 0 0 0 den (idealSetting (rootServe W)).real
+      (idealSetting (rootServe W)).Legal (fun _ => True) (idealSetting (rootServe W)).HiddenDiff
+      (idealSetting (rootServe W)).Distinguisher := by
+  obtain ⟨prf, someKey, below, small, meaningful, _⟩ := jointPremises_inhabited denominator
+  exact (idealSetting (rootServe W)).hidingGoal_of_hybrids (num := 0) (zNum := 0) (lambda := 1) (versions := 2)
+    (queries := 0) _ (fun _ => True) prf (fun _ _ _ _ => trivial) someKey denominator below small meaningful S bornS p₀ p₁ hidden₀
+    hidden₁ differ masks₀ simulated ideal zk rom identical
+
 end Concrete
 
 #assert_axioms KeptCell.root_eq
@@ -1733,6 +1791,8 @@ end Concrete
 #assert_axioms single_hidden
 #assert_axioms Concrete.goalPremises_inhabited
 #assert_axioms Concrete.plain_refuted
+#assert_axioms Concrete.jointPremises_inhabited
+#assert_axioms Concrete.idealGoal_of_open
 #assert_axioms Custody.shift_passes_equality
 #assert_axioms Custody.shift_passes_points
 #assert_axioms arun_srun
