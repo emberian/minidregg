@@ -43,6 +43,9 @@
 #   - never sync sources into a tree while a build runs in it (a build keys its cache entries by the
 #     inputs it hashed at start: tonight's 92 poisoned cache entries came from exactly that);
 #   - lake never runs as root; lane-check is never wrapped in closure-lock (it takes the lock itself).
+# The whole script is one { } block, parsed before it runs: a deploy that rewrites this file under a running
+# lane-tree (native takes minutes) would otherwise make bash read the new bytes at the old offset.
+{
 set -euo pipefail
 PIPELINE_PROG=lane-tree
 here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
@@ -248,3 +251,5 @@ case ${1:-} in
     done ;;
   *) sed -n 2,12p "$0" >&2; exit 2 ;;
 esac
+exit 0
+}
