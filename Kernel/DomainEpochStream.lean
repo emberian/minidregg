@@ -34,7 +34,7 @@ theorem computeTarget_channel_refused (kind : ResourceKind) (id : Nat) (capabili
     (version : Nat) (root : Digest) (request : StreamCell.Append)
     (observe : Option CapabilityId)
     (pre : TargetCell ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩)
-    (object : kind = .object) (current : version = StreamCell.commandVersion) (fresh : root = pre.root)
+    (object : kind = .object) (current : version = StreamCell.commandVersion)
     (topic : request.topic.length ≤ StreamCell.maxTopicBytes)
     (payload : request.payload.length ≤ StreamCell.maxPayloadBytes)
     {reason : DomainEpoch.Refusal}
@@ -42,7 +42,7 @@ theorem computeTarget_channel_refused (kind : ResourceKind) (id : Nat) (capabili
     computeTarget snapshot semantics ambient command
         ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩ pre = .error (.channel reason) := by
   subst object current
-  simp [computeTarget, fresh, topic, payload, refused]
+  simp [computeTarget, topic, payload, refused]
   rfl
 
 /-- The admitting pole: when the law admits, the append computes the stream's one new position. -/
@@ -50,18 +50,19 @@ theorem computeTarget_channel_admitted (kind : ResourceKind) (id : Nat) (capabil
     (version : Nat) (root : Digest) (request : StreamCell.Append)
     (observe : Option CapabilityId)
     (pre : TargetCell ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩)
-    (object : kind = .object) (current : version = StreamCell.commandVersion) (fresh : root = pre.root)
+    (object : kind = .object) (current : version = StreamCell.commandVersion)
     (topic : request.topic.length ≤ StreamCell.maxTopicBytes)
     (payload : request.payload.length ≤ StreamCell.maxPayloadBytes)
     (admitted : DomainEpoch.admitAppend pre.logical command.subject request = .ok ())
     (head : StreamCell.Head) (loaded : StreamCell.headOf pre.logical = some head)
-    (room : head.binding = .room) :
+    (room : head.binding = .room)
+    (refBehind : request.ref.any (fun r => r.1 == id && head.count < r.2) = false) :
     computeTarget snapshot semantics ambient command
         ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩ pre =
       .ok ((StreamCell.headWriteOp head (StreamCell.appendEntry id head
         (streamRecord snapshot semantics ambient command request))).apply pre.logical) := by
   subst object current
-  simp [computeTarget, fresh, topic, payload, admitted, loaded, room]
+  simp [computeTarget, topic, payload, admitted, loaded, room, refBehind]
   rfl
 
 /-- A well-formed record fits the stream's payload bound (the largest class has `E = 64`: 2,095 bytes). -/
@@ -85,9 +86,9 @@ variable (id : Nat) (capability : CapabilityId) (observe : Option CapabilityId)
   (r : DomainEpoch.EpochRecord)
   (root : Digest)
   (pre : TargetCell ⟨.object, id, capability, StreamCell.commandVersion, root, .append (DomainEpoch.recordAppend r), observe, audienceEpoch, audienceRoster⟩)
-  (fresh : root = pre.root)
+ 
   {p : DomainEpoch.Prev} (last : DomainEpoch.prevOf pre.logical = .ok (some p))
-include fresh last
+include last
 
 /-- The kernel refuses a gap (epoch `prev + 2` or more) `Reject.channel .epochGap`. -/
 theorem kernel_gap_refused (wf : r.WellFormed) (dom : r.domain = p.domain)
@@ -95,7 +96,7 @@ theorem kernel_gap_refused (wf : r.WellFormed) (dom : r.domain = p.domain)
     computeTarget snapshot semantics ambient command
         ⟨.object, id, capability, StreamCell.commandVersion, root, .append (DomainEpoch.recordAppend r), observe, audienceEpoch, audienceRoster⟩ pre =
       .error (.channel .epochGap) :=
-  computeTarget_channel_refused snapshot semantics ambient command _ _ _ _ _ _ _ pre rfl rfl fresh
+  computeTarget_channel_refused snapshot semantics ambient command _ _ _ _ _ _ _ pre rfl rfl
     (recordAppend_topic_fits r) (wellFormed_payload_fits wf)
     (by rw [DomainEpoch.admitAppend_record _ _ _ _ last]; exact DomainEpoch.gap_refused wf dom gap)
 
@@ -105,7 +106,7 @@ theorem kernel_out_of_order_refused (wf : r.WellFormed) (dom : r.domain = p.doma
     computeTarget snapshot semantics ambient command
         ⟨.object, id, capability, StreamCell.commandVersion, root, .append (DomainEpoch.recordAppend r), observe, audienceEpoch, audienceRoster⟩ pre =
       .error (.channel .epochNotAfter) :=
-  computeTarget_channel_refused snapshot semantics ambient command _ _ _ _ _ _ _ pre rfl rfl fresh
+  computeTarget_channel_refused snapshot semantics ambient command _ _ _ _ _ _ _ pre rfl rfl
     (recordAppend_topic_fits r) (wellFormed_payload_fits wf)
     (by rw [DomainEpoch.admitAppend_record _ _ _ _ last]; exact DomainEpoch.out_of_order_refused wf dom notAfter)
 
@@ -114,7 +115,7 @@ theorem kernel_foreign_domain_refused (wf : r.WellFormed) (dom : r.domain ≠ p.
     computeTarget snapshot semantics ambient command
         ⟨.object, id, capability, StreamCell.commandVersion, root, .append (DomainEpoch.recordAppend r), observe, audienceEpoch, audienceRoster⟩ pre =
       .error (.channel .foreignDomain) :=
-  computeTarget_channel_refused snapshot semantics ambient command _ _ _ _ _ _ _ pre rfl rfl fresh
+  computeTarget_channel_refused snapshot semantics ambient command _ _ _ _ _ _ _ pre rfl rfl
     (recordAppend_topic_fits r) (wellFormed_payload_fits wf)
     (by rw [DomainEpoch.admitAppend_record _ _ _ _ last]; exact DomainEpoch.foreign_domain_refused wf dom)
 
@@ -124,7 +125,7 @@ theorem kernel_foreign_author_refused (wf : r.WellFormed) (dom : r.domain = p.do
     computeTarget snapshot semantics ambient command
         ⟨.object, id, capability, StreamCell.commandVersion, root, .append (DomainEpoch.recordAppend r), observe, audienceEpoch, audienceRoster⟩ pre =
       .error (.channel .foreignAuthor) :=
-  computeTarget_channel_refused snapshot semantics ambient command _ _ _ _ _ _ _ pre rfl rfl fresh
+  computeTarget_channel_refused snapshot semantics ambient command _ _ _ _ _ _ _ pre rfl rfl
     (recordAppend_topic_fits r) (wellFormed_payload_fits wf)
     (by rw [DomainEpoch.admitAppend_record _ _ _ _ last]; exact DomainEpoch.foreign_author_refused wf dom next foreign)
 
@@ -135,7 +136,7 @@ theorem kernel_root_count_refused {P : Minidregg.Theory.Channel.Profile}
     computeTarget snapshot semantics ambient command
         ⟨.object, id, capability, StreamCell.commandVersion, root, .append (DomainEpoch.recordAppend r), observe, audienceEpoch, audienceRoster⟩ pre =
       .error (.channel .rootCount) :=
-  computeTarget_channel_refused snapshot semantics ambient command _ _ _ _ _ _ _ pre rfl rfl fresh
+  computeTarget_channel_refused snapshot semantics ambient command _ _ _ _ _ _ _ pre rfl rfl
     (recordAppend_topic_fits r) fits
     (by rw [DomainEpoch.admitAppend_record _ _ _ _ last]; exact DomainEpoch.root_count_refused cls count _)
 
@@ -148,10 +149,10 @@ theorem kernel_next_admitted (wf : r.WellFormed) (dom : r.domain = p.domain)
         ⟨.object, id, capability, StreamCell.commandVersion, root, .append (DomainEpoch.recordAppend r), observe, audienceEpoch, audienceRoster⟩ pre =
       .ok ((StreamCell.headWriteOp head (StreamCell.appendEntry id head
         (streamRecord snapshot semantics ambient command (DomainEpoch.recordAppend r)))).apply pre.logical) :=
-  computeTarget_channel_admitted snapshot semantics ambient command _ _ _ _ _ _ _ pre rfl rfl fresh
+  computeTarget_channel_admitted snapshot semantics ambient command _ _ _ _ _ _ _ pre rfl rfl
     (recordAppend_topic_fits r) (wellFormed_payload_fits wf)
     (by rw [DomainEpoch.admitAppend_record _ _ _ _ last]; exact DomainEpoch.next_record_admitted wf dom next seq)
-    head loaded room
+    head loaded room rfl
 
 end Record
 

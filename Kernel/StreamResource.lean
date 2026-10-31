@@ -138,6 +138,27 @@ theorem append_planned_root_irrelevant (kind : ResourceKind) (id : Nat)
         ⟨kind, id, capability, version, root', .append request, observe, audienceEpoch, audienceRoster⟩ pre :=
   rfl
 
+/-- **`append_ref_ahead_refused`.** An append whose `ref` names an entry of its own
+stream at or beyond the head it meets is refused `streamRef`: a reference points back at
+a landed entry, never at one still in flight (since appends commute, a predicted sequence
+could otherwise land on another entry). -/
+theorem append_ref_ahead_refused (kind : ResourceKind) (id : Nat) (capability : CapabilityId)
+    (version : Nat) (root : Digest) (request : StreamCell.Append) (observe : Option CapabilityId)
+    {audienceEpoch : Option Nat} {audienceRoster : Option ObjectAudienceRoster.Roster}
+    (pre : TargetCell ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩)
+    (object : kind = .object) (current : version = StreamCell.commandVersion)
+    (topicOk : request.topic.length ≤ StreamCell.maxTopicBytes)
+    (payloadOk : request.payload.length ≤ StreamCell.maxPayloadBytes)
+    (channel : DomainEpoch.admitAppend pre.logical command.subject request = .ok ())
+    (head : StreamCell.Head) (loaded : StreamCell.headOf pre.logical = some head)
+    (room : head.binding = .room) (sequence : Nat) (named : request.ref = some (id, sequence))
+    (ahead : head.count < sequence) :
+    computeTarget snapshot semantics ambient command
+        ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩ pre = .error .streamRef := by
+  subst object current
+  simp [computeTarget, topicOk, payloadOk, channel, loaded, room, named, ahead]
+  rfl
+
 /-- One target's computed outcome at a directory: load its own cell, select
 its role, compute.  These are `prepareTarget`'s cell reads; the remaining
 read is the target's own (immutable) policy source. -/
@@ -211,6 +232,8 @@ info: 'Minidregg.Kernel.StreamResource.authorLaw_refuses_other_writer' depends o
 #guard_msgs (whitespace := lax) in #print axioms room_append_refuses_topic_head
 /-- info: 'Minidregg.Kernel.StreamResource.append_planned_root_irrelevant' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms append_planned_root_irrelevant
+/-- info: 'Minidregg.Kernel.StreamResource.append_ref_ahead_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms append_ref_ahead_refused
 /-- info: 'Minidregg.Kernel.StreamResource.prepareTarget_outcome' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms prepareTarget_outcome
 /-- info: 'Minidregg.Kernel.StreamResource.append_admits_disjoint_authors' depends on axioms: [propext, Classical.choice, Quot.sound] -/

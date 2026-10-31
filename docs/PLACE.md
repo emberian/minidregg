@@ -73,7 +73,12 @@ the speaker's own stream, never writes to another member's stream. Because each 
 only their own stream, appends by different authors never stale each other
 (`append_admits_disjoint_authors`); and an append is computed at the head it meets, never at
 its planned root (`append_planned_root_irrelevant`), so parallel appends to one stream all land,
-in admission order.
+in admission order. **Client contract:** an author's own order is guaranteed only when each say
+waits for the previous one's commit; says in flight together (parallel or pipelined) may land in
+either order. A `ref` is not validated by the kernel (it is projected as policy slots only), so a
+client must never predict the sequence of its own in-flight entry for a `ref`. An exact resubmit
+of a signed append whose first attempt committed is refused by the operation marker's nullifier:
+that refusal means "already landed".
 
 (a) Who may write a stream is a law installed at birth (`StreamResource.authorLaw`): every
 `mutate` or `append` must be signed by the author (`authorLaw_refuses_other_writer`,
