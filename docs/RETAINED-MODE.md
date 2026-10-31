@@ -241,61 +241,26 @@ generated nodes are D1 (query view) and I1 (linear fold).
 
 ## 8. Continuation (start here)
 
-**Landed (staging, batch 8):** `675a80745` `Theory/Retained.lean`; `1d4ff4efb` this document; `62aa5fcf8`
-footprint renames, 35 pins, `Theory/SparseMap.lean`; `05bffae27` SparseMap transport lemmas
-(`toDFinsupp_set/support/zero/injective`), `Zero` instance, 37 pins. Integrator audits round 1 and 2
-closed. Integrator is now aec6914709d96f496 (aba0beaa578594e92 retired).
+The seat's live row is `board/seats/store-retained.md` on main; this section is the design-side state.
 
-**L0 in progress: branch `lane/retained-l0`** (staging merged at `f566153b1`, then the WIP commit
-"Theory.Store over SparseMap"). `Theory/Store.lean` is switched (`Store L := SparseMap (Address L) …`,
-`Layout` gains instance-implicit `namespaceCode`/`keyCode : StoreKey …`, `Store.ext`, `coe_set`; the
-example layout gets a `StoreKey Namespace` from `ctorIdx`); it, `Theory/CellStateAux`, `Theory/CellState`
-and `Theory/Retained` elaborate unchanged over the tree (Retained's `decide` witnesses included).
-Astra round 2 (`scratch/l0/astra-review-2.txt`) approved the type replacement with these terms: keep
-`toDFinsupp` as the spec view; keep `StoreCodec.sortedSupport`'s wire order (tree order is not wire order);
-injective `List Nat` codes accept countability as a real restriction (World's `TxId`/`D`).
+**Landed on main:** `675a80745` `Theory/Retained.lean`; `1d4ff4efb` this document; `62aa5fcf8` +
+`05bffae27` `Theory/SparseMap.lean` with transport lemmas; **`802ba8c69` L0**: `Store L` and the World's
+`Cells R` are `SparseMap` trees (every lookup and `set` O(log n)); `Compiler/WorldCompact.lean` and
+`compactEvery` deleted; `deriving StoreKey` (`Theory/DeriveStoreKey.lean`) gives every layout's key types
+their codes; the cached-support twins collapsed into the tree's support. Whole tree green on hbox (10404
+jobs).
 
-**Method (the Mac, no lake):** `scratch/l0/lc.sh FILE` elaborates one file with lake's options
-(`-R . -Dcompiler.relaxedMetaCheck=true -Dbackward.proofsInPublic=true -Dbackward.privateInPublic=true`) and
-writes its olean into a symlink mirror of `/Users/ember/dev/minidregg-lanes/iter-speed-land/.lake/build/lib/lean`
-(read only) at `<scratchpad>/retained/olean`, LEAN_PATH in `<scratchpad>/leanpath2`. `scratch/l0/topo.py
-Theory.Store` lists the 1,090 dependents in topological order (`scratch/l0/l0-order.txt`, 44 in Theory);
-`scratch/l0/runwave.sh LIST LOG` compiles a list in order and logs RED/OK per file. Theory-wave 1
-(`scratch/l0/w-theory.log`): 8 of 42 green; the reds have four root causes, every other red is a cascade:
-1. **StoreKey instances for key types**: `Theory/EffectDeclaration` (`StateKey`), `Theory/CredentialAuthorityState`
-   (`AuthorityPlane` and its keys `CapabilityId`, `IssuerId`, `PolicyId`, `PolicyRevision`, `SubjectId`,
-   `Epoch`, `RevocationKey`), `Theory/CanonicalResourceKernel` (`Field`), and in Kernel/Compiler about
-   twenty more (`Namespace.Key` families of ClockCell, PayCell, PayCellLegacyV4, PlatformCellLayout,
-   SystemCell; StoreCodecBook `Space`; HyperdocumentCell `IndexSpace`; World `SysKey TxId D`;
-   `VersionEventId`; `Hyperdocument.Key`; `Digest`). **Decision: do not hand-write ~30 instances; grow
-   the vocabulary** (law 11): a `deriving StoreKey` handler (`Theory/DeriveStoreKey.lean`) emitting
-   `code a := ctorIdx :: frame(code field₁) ++ …` together with a prefix decoder, and injectivity from
-   `decode_code` by `cases a <;> simp [decode_code]`, so each key type adds `StoreKey` to its `deriving`
-   clause. Dependent `Namespace.Key space` families take a one-line `match` instance like their `keyDecEq`.
-2. **`DFinsupp.ext` on stores** (`Theory/CellStateWitness` :56 :190, `Theory/PlanBinding` :464): use `Store.ext`.
-3. **`DFinsupp.update` / `Π₀` on stores** (`Theory/StoreNormalize` :68 states `update_update` over
-   `DFinsupp.update s …`): restate over `Store.set` (`SparseMap.set_set`, `set_comm`, `set_self` exist).
-4. **`DFinsupp.mem_support_iff` / `0` vs `none`** (`Theory/StoreFootprint` :32-33, `Theory/PlanBinding`
-   :292 :332): `SparseMap.mem_support_iff` (reads `≠ none`), `toDFinsupp_support` to transport.
-Then the Compiler/Kernel/Assurance/Host waves (1,046 files) on hbox in a pool tree
-(`. /home/hbox/pool/pool.env; lane-tree acquire retained origin/lane/retained-l0`, `swarm-build lake build`,
-LEAN_NUM_THREADS per pool.env), reading every red of one run together (COORDINATION §4: design the whole
-fix set, one build per batch). Known Compiler-side work: `Compiler/FiniteDependentMapCodec` and
-`FiniteDependentMapCachedOrdering` build stores as `Π₀` (they become `SparseMap` builders; `supportCached`
-becomes `keys` sorted by the wire key); `Compiler/WorldCompact.lean` and `compactEvery` are deleted;
-World's `Cells R := Π₀ _ : CellId, Option (Cell R)` becomes `SparseMap CellId (fun _ => Cell R)`;
-private cells' `Compiler/PrivateCellRoot` (two `simp [Store.set]` unfolds), the narrowed view's
-`DFinsupp.filter` (`ResourceObservationAdmission.narrowStore`, `Kernel/PrivateCellView`,
-`Kernel/PrivateCellReceiver` 1274-1330 → `SparseMap.filter`/`filter_apply`), `Compiler/PrivateCellIndex`;
-perf-client's `Kernel/DeployedRepresentsCheck` iterates `w.system.support` (switch to `keys`; perf-client
-told). Send the sha to the integrator labelled SHARED-INTERFACE (its own cut, one whole-tree build), with
-`scripts/check-import-boundary.sh` green and a `grow2.sh` before number.
+**L0 lessons, for the next shared-interface change:** `SparseMap.set` is one `alter` with no case split on
+the value at its head, so `set` terms unify argument by argument (an insert/erase match left `?v` stuck and
+broke `_`-argument elaboration downstream). A section's `[DecidableEq D]` that mentions World needs
+`[StoreKey D]`; defs that do not use it omit it (csimp lemmas then need `omit … in`). The repair loop that
+worked: one whole-tree `lake build` on a pool tree, a log-driven fixer for the mechanical classes (ext,
+support lemmas, `.update`, binders, axiom pins only for files with no other error, edited bottom-up), and
+`lake env lean` on the box for the few manual files; 17 builds from first switch to green.
 
-**Measurement owed:** `hbox:/ci/hpc/sn/grow2.sh` (8 sequential `story new`, Host CPU per story, perf of
-stories 2 and 8) on the candidate before L0 and on the L0 candidate; the after is `Store.set`/`DFinsupp.update`
-gone from the profile and a flat 2 → 8 slope. Then `scripts/perf/flatness-bench.py` submit ratio, and certify
-at two heights (hot-path owns certify; same table).
+**Measurement owed:** native Host before (candidate `997905c0b`) and after (its L0 overlay), `grow2.sh`
+(8 sequential `story new`, Host CPU per story, perf of stories 2 and 8); the after is `DFinsupp.update`
+gone from the profile and a flatter 2 → 8 slope.
 
-**Handed to this lane, after L0 (§3 rows):** R1 the op 4 → op 5 challenge (exorcist), R3 the
-planner/deriver prepared-write node (perf-client), I4/I5 and §3.6 (coordinator). The lint (§7) is designed,
-not built.
+**Next nodes (§3-4 order):** R1 the op 4 → op 5 challenge; R3 the planner/deriver prepared write; I4/I5
+Fn and carry scans; export/backup; the client refs index; the lint (§7). R6 and R7 are host-execution's.
