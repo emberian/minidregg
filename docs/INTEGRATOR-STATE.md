@@ -9,7 +9,7 @@ retired-agent hook names the live integrator to anyone who messages the old id).
 integrator; the integrator merges onto `integration/staging`, cuts batch candidates on hbox, gates them, moves main to
 gated candidates and names candidates to infra and the explorer.
 
-## Now (2026-10-31 09:55 EDT)
+## Now (2026-10-31 10:00 EDT)
 
 - **ember (10-31 09:10, via root): no rehearsal cut until she says.** Make the system as good as it can be: keep batching,
   gate once per batch, keep the newest green candidate as the fallback. Priorities: repair Hermes (batch 5's j14
@@ -29,9 +29,12 @@ gated candidates and names candidates to infra and the explorer.
   final-say refusal as batch 5. Umbrella-tree running in umbrella-src. Exorcist measured it against batch 5: signed read
   wall 42 -> 32 ms, operator CPU 27.8 -> 15.0 ms. perf-apps: EtherCalc create-to-first-page 53 s (256 s on 10-29), warm GET
   340 ms, of which ~170 ms is the SUBMIT Host turn (hot-path's).
-- **Read-path GET contract** (root's question to ember): codex astra NEEDS-CHANGE, sent to root 09:50 (scratchpad
-  astra-get.txt). The deciding finding: per-session deferred debt is unsound as payment; it needs reserved payer-level credit.
-- **Batch 7 (staging b1bbe2369)**: resident final writeError c88b88755, demo-reds 58c17b1de, perf-client f95edc7bf +
+- **Read-path GET contract**: codex astra NEEDS-CHANGE (scratchpad astra-get.txt). ember ruled: prepaid reserved credit per
+  liable payer, and declared per-route eligibility. Hot-path a6c4a1532687a4fdb owns it as a statement-first lane with a design
+  doc, after group commit and cheaper durable turns; not a batch item until its keystones and witnesses exist.
+- **Batch 7 acc7cfa03: BUILDING** since 09:57 (integ-build6, PID file $I/build-b7.pid; overlaps batch 6's umbrella-tree,
+  the first test of the seat-weights fix). Also carries perf-client a1c70ef29 (consent provider reads the Store once per command; birth
+  authority leg at the held authState; attempt index; audit sound, frame 233 now means "re-check owed"). Earlier contents: resident final writeError c88b88755, demo-reds 58c17b1de, perf-client f95edc7bf +
   b34173dad (candidate ssh wrapper) + 394039fb1 (one shared codec Host per box under split tenancy), apps-e2e 78a20cb56,
   perf-apps b2 05c2b208b, hot-path a55855f18, perf-client 5415aecf7, iter-speed Mathlib import trim ee7a25ca7 (Host.Main 3,930 -> 2,895 modules; Pratt certificate for mersenne127P_prime; audit sound, pins only shrank), app-reds c0a49c8d7 (an argument object keyed `path` is an argument: Davros qualify's declaration-invalid), iter-speed seat weights 0f67c94b7, perf-apps docs a7511c500; app-reds ecf4b917d merged as superseded by staging's 6cae27559 (staging ddc2e8863).
 - **FORMAT batch (later, one genesis, after iter-speed's seam 1)**: hot-path row 11 + Book entries migration +
