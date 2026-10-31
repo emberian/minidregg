@@ -1444,6 +1444,36 @@ fn signed_view_unchecked(
     reference: &Value,
     view: &str,
 ) -> Result<(Value, Value, PathBuf)> {
+    signed_view_inspected(root, workspace, reference, view, None)
+}
+
+/// A content page's current read and its document rendering with no source pages, from one
+/// codec frame (`view-resource-document`): (the resource view, the document, the challenge,
+/// the signed observation). A shared name's opened read renders the document separately.
+pub(crate) fn signed_page(
+    root: &Path,
+    workspace: &Value,
+    reference: &Value,
+) -> Result<(Value, Option<Value>, Value, PathBuf)> {
+    if reference.get("sharedName").is_some() {
+        let (view, challenge, signed) = signed_view(root, workspace, reference, "resource")?;
+        return Ok((view, None, challenge, signed));
+    }
+    let ticket = receipt_continuity::begin(root, workspace)?;
+    let (both, challenge, signed) =
+        signed_view_inspected(root, workspace, reference, "resource", Some("view-resource-document"))?;
+    receipt_continuity::finish(root, workspace, ticket, &challenge, ContinuityMode::Ordinary)?;
+    let document = Some(both["document"].clone()).filter(|d| !d.is_null());
+    Ok((both["resource"].clone(), document, challenge, signed))
+}
+
+fn signed_view_inspected(
+    root: &Path,
+    workspace: &Value,
+    reference: &Value,
+    view: &str,
+    inspection: Option<&str>,
+) -> Result<(Value, Value, PathBuf)> {
     if reference.get("sharedName").is_some() {
         let purpose = json!({"type":"query","kind":member(reference,"kind")?,
             "target":member(reference,"target")?,"view":view});
@@ -1463,7 +1493,9 @@ fn signed_view_unchecked(
         &source,
         &serde_json::to_vec(&intent).map_err(|error| error.to_string())?,
     )?;
-    let inspection = if view == "capability" {
+    let inspection = if let Some(inspection) = inspection {
+        inspection.to_owned()
+    } else if view == "capability" {
         format!("view-{}-capability", member(reference, "kind")?)
     } else {
         format!("view-{view}")
@@ -1846,14 +1878,14 @@ pub(crate) fn rendered_document(
     let host_ref = reference(root, host_name)?;
     // The host page: current, or `at` a past height under the grant as it stood
     // then (the Host refuses the read otherwise; that refusal is the answer).
-    let (host_view, host_bin) = match at {
+    let (host_view, host_document, host_bin) = match at {
         None => {
-            let (view, _, signed) = signed_view(root, workspace, &host_ref, "resource")?;
-            (view, signed.with_file_name("view.bin"))
+            let (view, document, _, signed) = signed_page(root, workspace, &host_ref)?;
+            (view, document, signed.with_file_name("view.bin"))
         }
         Some(height) => {
             let (view, bin) = signed_at(root, workspace, &host_ref, height)?;
-            (view["resource"].clone(), bin)
+            (view["resource"].clone(), None, bin)
         }
     };
     let host_attempt = host_bin
@@ -1947,7 +1979,11 @@ pub(crate) fn rendered_document(
             &attempt.join("transclusions.json"),
         )
     };
-    let mut current = render(&host_bin, &sources)?;
+    // With no source pages the codec already rendered the page with the read.
+    let mut current = match host_document {
+        Some(document) if sources.is_empty() => document,
+        _ => render(&host_bin, &sources)?,
+    };
     // Each readable source placed in its own order, so a transclusion's header
     // names the source lines it covers.  A source cell with no document has no
     // lines to name; its header says `?`.
