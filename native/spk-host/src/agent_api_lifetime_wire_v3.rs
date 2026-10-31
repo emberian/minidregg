@@ -115,7 +115,12 @@ impl Request {
                         method.as_str(),
                         "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE"
                     ) || crate::host_operations::dav_method(method) || method == crate::hosted_conversation::METHOD)
-                    || minidregg_signed_api_path::route("/", path).is_err()
+                    || (if method == crate::hosted_conversation::METHOD {
+                        minidregg_signed_api_path::conversation_route("/", path)
+                    } else {
+                        minidregg_signed_api_path::route("/", path)
+                    })
+                    .is_err()
                     || query.len() > 8192
                     || query.contains('#')
                     || !control_free(query)
@@ -248,6 +253,26 @@ mod tests {
         let mut wrong = dispatch.clone();
         wrong["bindingSha256"] = json!("A".repeat(64));
         assert!(Request::parse(&serde_json::to_vec(&wrong).unwrap()).is_err());
+    }
+
+    #[test]
+    fn a_conversation_request_may_name_the_apps_trailing_slash_endpoint_and_no_other_method_may() {
+        let open = json!({"op":"open","channel":"mini-0123","protocol":"socket.io-eio4","maxFrames":64,"maxBytes":65536,"deadlineMs":30000,"version":1});
+        let body_hex: String = serde_json::to_vec(&open).unwrap().iter().map(|b| format!("{b:02x}")).collect();
+        for path in ["socketio/", "socket.io/", "api/kernels/", "websocket"] {
+            let request = json!({"type":"dispatch-v3","protocol":PROTOCOL,"operationId":"9","bindingSha256":"a".repeat(64),
+                "method":"CONVERSATION","path":path,"query":"EIO=4&transport=websocket",
+                "headers":[{"name":"content-type","value":"application/json"}],"bodyHex":body_hex});
+            assert!(Request::parse(&serde_json::to_vec(&request).unwrap()).is_ok(), "{path}");
+        }
+        for path in ["socketio//", "/socketio/", "a//b/"] {
+            let request = json!({"type":"dispatch-v3","protocol":PROTOCOL,"operationId":"9","bindingSha256":"a".repeat(64),
+                "method":"CONVERSATION","path":path,"query":"","headers":[],"bodyHex":body_hex});
+            assert!(Request::parse(&serde_json::to_vec(&request).unwrap()).is_err(), "{path}");
+        }
+        let get = json!({"type":"dispatch-v3","protocol":PROTOCOL,"operationId":"9","bindingSha256":"a".repeat(64),
+            "method":"GET","path":"socketio/","query":"","headers":[],"bodyHex":""});
+        assert!(Request::parse(&serde_json::to_vec(&get).unwrap()).is_err(), "an ordinary method keeps the canonical route");
     }
 
     #[test]

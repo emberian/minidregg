@@ -181,8 +181,16 @@ impl HostedRoute {
         match self { Self::Api { .. } => "api", Self::Web { .. } => "web" }
     }
     pub(crate) fn project_path(&self, path: &str) -> io::Result<String> {
+        self.project_path_for("", path)
+    }
+    /// The same projection for a request of `method`: a hosted CONVERSATION path may end in one `/`
+    /// (the app's own websocket URL, carried byte-exact); every other method keeps `route`.
+    pub(crate) fn project_path_for(&self, method: &str, path: &str) -> io::Result<String> {
         self.validate()?;
         match self {
+            Self::Api { signed_prefix } if method == crate::hosted_conversation::METHOD => {
+                minidregg_signed_api_path::conversation_route(signed_prefix, path).map_err(refused)
+            }
             Self::Api { signed_prefix } => minidregg_signed_api_path::route(signed_prefix, path).map_err(refused),
             Self::Web { .. } => {
                 // This is the same exact relative grammar used for browser entrance
@@ -672,6 +680,10 @@ mod tests {
         assert_eq!(web_bytes["route"]["kind"], "web");
         assert_ne!(legacy.fingerprint().unwrap(), web.fingerprint().unwrap());
         assert_eq!(web.route.as_ref().unwrap().project_path("websocket").unwrap(), "websocket");
+        let api = HostedRoute::Api { signed_prefix: "/".into() };
+        assert_eq!(api.project_path_for("CONVERSATION", "socketio/").unwrap(), "socketio/");
+        assert!(api.project_path_for("GET", "socketio/").is_err());
+        assert!(api.project_path_for("CONVERSATION", "socketio//").is_err());
         web.protocol = legacy.protocol;
         assert!(web.validate().is_err());
         for origin in ["http://friend.example.test", "https://elsewhere/a", "https://friend.example.test/"] {

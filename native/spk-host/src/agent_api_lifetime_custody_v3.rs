@@ -335,7 +335,10 @@ impl LifetimeCustodyV3 {
             "operationId":operation_id,
             "methodHex":hex(method.as_bytes()),
             "pathHex":hex(match &self.route {
-                Some(route) => route.project_path(path)?,
+                Some(route) => route.project_path_for(method, path)?,
+                None if method == crate::hosted_conversation::METHOD => {
+                    minidregg_signed_api_path::conversation_route(signed_api_path, path).map_err(refused)?
+                }
                 None => minidregg_signed_api_path::route(signed_api_path, path).map_err(refused)?,
             }.as_bytes()),
             "queryHex":hex(query.as_bytes()),

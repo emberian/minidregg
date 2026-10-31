@@ -139,6 +139,9 @@ pub(crate) fn app_route_path(http: &HttpProjection<'_>) -> io::Result<(String, S
         .unwrap_or((http.path_and_query, ""));
     let app_path = match http.route {
         Route::Browser => minidregg_signed_api_path::browser_route(path).map_err(invalid)?,
+        Route::Api { signed_path } if http.method == crate::hosted_conversation::METHOD => {
+            minidregg_signed_api_path::conversation_route(signed_path, path).map_err(invalid)?
+        }
         Route::Api { signed_path } => {
             minidregg_signed_api_path::route(signed_path, path).map_err(invalid)?
         }

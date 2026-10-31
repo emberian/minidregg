@@ -77,6 +77,25 @@ pub fn route(prefix: &str, relative: &str) -> Result<String, &'static str> {
     Ok(result)
 }
 
+/// The route of a hosted CONVERSATION request: `route`, except that the relative path may end in one
+/// `/`. The path is the app's own URL for its websocket endpoint and is carried byte-exact: socket.io
+/// (engine.io's `addTrailingSlash`) only upgrades `/socketio/...`, so `socketio/` and `socketio` are
+/// different endpoints. Nothing else loosens: no leading slash, no empty segment, so `a//` is refused.
+pub fn conversation_route(prefix: &str, relative: &str) -> Result<String, &'static str> {
+    match relative.strip_suffix('/') {
+        Some(base) if !base.is_empty() => {
+            let mut routed = route(prefix, base)?;
+            routed.push('/');
+            if routed.len() > MAX_RELATIVE_PATH {
+                return Err("routed API path exceeds native bound");
+            }
+            Ok(routed)
+        }
+        Some(_) => Err("relative API path is not canonical"),
+        None => route(prefix, relative),
+    }
+}
+
 /// A member's WebSession route carries no signed prefix: the model path is the exact
 /// canonical relative browser path (no leading slash, no query or fragment, no repair or
 /// decoding), the Host's `app_route_path` rule for a browser target. Bounded like `route`.
@@ -215,5 +234,20 @@ mod exact_prefix_tests {
         assert!(checked_prefix("/api%2f/").is_err());
         assert!(!is_under("/api/", "api/%2e%2e/secret"));
         assert!(!is_under("/api/", "api/a%2fb"));
+    }
+
+    #[test]
+    fn a_conversation_path_may_end_in_one_slash_and_nothing_else_loosens() {
+        assert_eq!(conversation_route("/", "socketio/"), Ok("socketio/".into()));
+        assert_eq!(conversation_route("/", "socket.io/"), Ok("socket.io/".into()));
+        assert_eq!(conversation_route("/", "api/kernels/"), Ok("api/kernels/".into()));
+        assert_eq!(conversation_route("/", "websocket"), Ok("websocket".into()));
+        assert_eq!(conversation_route("/", ""), Ok("".into()));
+        assert_eq!(conversation_route("/repo.git/", "info/"), Ok("repo.git/info/".into()));
+        for bad in ["/", "//", "a//", "/a/", "a//b/", "./", "../", "a/./", "a b/"] {
+            assert!(conversation_route("/", bad).is_err(), "{bad}");
+        }
+        // The ordinary route is unchanged: a trailing slash stays refused there.
+        assert!(route("/", "socketio/").is_err());
     }
 }

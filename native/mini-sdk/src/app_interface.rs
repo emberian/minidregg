@@ -180,21 +180,7 @@ fn path(parts: &Value, args: &Value) -> Result<String> {
             });
         }
     }
-    route_path(out)
-}
-/// A declaration names a route path canonically, without a trailing slash: one trailing `/` is
-/// normalized away (`socketio/` and `socket.io/` mean `socketio` and `socket.io`), more than one is
-/// ambiguous and refused by name. The Host's route grammar (`signed_api_path::route`) refuses a
-/// trailing slash, so a declaration that kept it was admitted by the controller and refused one hop
-/// later as an uncertain outcome.
-fn route_path(mut path: String) -> Result<String> {
-    if path.ends_with('/') {
-        path.pop();
-        if path.ends_with('/') {
-            return Err(refuse("path-invalid"));
-        }
-    }
-    Ok(path)
+    Ok(out)
 }
 /// A step's `args` is an object of named bindings: each MEMBER is resolved, never the object
 /// itself, because a one-member object such as `{"path": ...}` would otherwise read as the `path`
@@ -1859,24 +1845,4 @@ fn utc_iso(ms: u64) -> Result<String> {
         seconds % 60,
         ms % 1000
     ))
-}
-
-#[cfg(test)]
-mod route_path_tests {
-    use super::*;
-    use serde_json::json;
-    #[test]
-    fn a_declaration_route_path_loses_one_trailing_slash_and_refuses_an_ambiguous_one() {
-        let args = json!({});
-        assert_eq!(path(&json!(["socketio/"]), &args).unwrap(), "socketio");
-        assert_eq!(path(&json!(["socket.io/"]), &args).unwrap(), "socket.io");
-        assert_eq!(path(&json!(["api/kernels/"]), &args).unwrap(), "api/kernels");
-        assert_eq!(path(&json!(["socket.io"]), &args).unwrap(), "socket.io");
-        assert_eq!(path(&json!([""]), &args).unwrap(), "");
-        assert_eq!(path(&json!(["/"]), &args).unwrap(), "");
-        assert!(path(&json!(["socket.io//"]), &args).is_err());
-        assert!(path(&json!(["api//kernels/"]), &args).is_ok(), "interior grammar is the Host's, not this rule's");
-        // Parts join before the rule applies: a templated tail keeps the declaration's slash out.
-        assert_eq!(path(&json!(["rooms/", {"arg":"r","encoding":"segment"}, "/"]), &json!({"r":"a"})).unwrap(), "rooms/a");
-    }
 }
