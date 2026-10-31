@@ -21,7 +21,10 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   every red fixed (never worked around). ~1 ms warm per action is the direction, not a gate. Law 17 holds.
 - **main = 83e926874** = gated batch 4 b9450147f + main 7978ddfdd. **Batch 4 is the green fallback.**
 - **Batch 8 dc61016cb: READY 11:57** (host 1,496 s; ships bin/mini-line). gate15 full running ($I/gate-dc61.pid,
-  integrator waiter armed); umbrella-tree follows in umbrella-src. Carries: exorcist b37f26cf6 (resident shell `mini-line`, role miniLine; read scratch), retained
+  integrator waiter armed); umbrella-tree follows in umbrella-src.
+  Measured (perf-apps, EtherCalc, back to back vs batch 7): Host CPU samples 7,919 -> 3,210 (-60%); first page
+  2.43 -> 1.79 s; warm GET median 173 -> 82 ms; 10 concurrent GETs 2.98 -> 0.79 s; create-to-page 26 s unchanged
+  (perf-apps' next target). Carries: exorcist b37f26cf6 (resident shell `mini-line`, role miniLine; read scratch), retained
   05bffae27/7f42f6445 (SparseMap, audit sound), hot-path 5cb39c5fe/05a38ff4e + a5e757016 (cherry-picked as dc61016cb:
   fixes the staging Lean red, authorizeWith on admitOwn; Pred.eval law check, audit sound), app-reds H1a
   ccdaf98b3/faeb1ff0b, iter-speed 7800d3199/697db7664, tower split 0eab28db7, exorcist 47b7cb2e1/c763e3ead, perf-client
