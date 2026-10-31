@@ -171,7 +171,10 @@ fn used_ids(root: &Path, deployment: &str) -> Result<BTreeSet<String>> {
 /// (or one existence check for a probe) instead of reading every reservation record, which grow
 /// with every birth (law 17). A namespace whose records predate the index is indexed once, under
 /// the namespace lock, through the full read (`used_ids`, which also refuses an unsupported or
-/// colliding record); `complete` records that it was.
+/// colliding record); `complete` records that it was. Scope of that check: a record edited by
+/// hand AFTER the index was built is not re-read by each reservation, so a collision written that
+/// way is not refused here. IDs `reserve` writes cannot collide (each is claimed with an exclusive
+/// create), and the Host's admission remains the authority on every identity.
 fn id_index(root: &Path, deployment: &str) -> Result<PathBuf> {
     let index = root.join("ids").join(hex(&Sha256::digest(deployment.as_bytes())));
     if !index.join("complete").is_file() {
