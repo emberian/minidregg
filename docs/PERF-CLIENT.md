@@ -70,8 +70,18 @@ Batch 4 (a36d8bdfa with 394039fb1): row 8 under split tenancy (opt-in: units fro
 
 Client syscalls per verb, for the record: a warm ssh `say` is 2,365 syscalls for the whole client tree
 (wrapper included). The explorer's 12,031 on batch 5 counted the residents that `strace -f` followed for
-~600 s. `refuse_rerun` (every submit) stat'ed every retained attempt's intent copy to refuse a rerun of the
-same intent; aa24acaf8 reads an attempt index instead (`attempt-index/by-intent/SHA256/ATTEMPT`, written
-where `main.rs` retains the intent copy, before a call can be sealed; existing attempts indexed once): a
-`doc new` at 474 attempts makes 569 `statx` instead of 1,063 (2,035 filesystem syscalls instead of 2,515). Remaining small client items: the attempt's `config.json` re-read once per Host call (36 opens per
+~600 s. Client filesystem syscalls of one `doc new` (member-1, 474 attempts, 101 namespace reservations; `strace -f`
+of the wrapper and `mini`, residents already warm):
+
+| client | statx | openat | all traced fs calls | what scaled with history |
+|---|---|---|---|---|
+| batch 6 `mini` (b7) | 1,063 | 523 | 2,515 | `refuse_rerun` stat'ed every attempt's intent copy; `participant_namespace::used_ids` read every reservation record (50 opens), on every reservation and dry-run probe |
+| aa24acaf8 attempt index | 569 | 531 | 2,035 | the reservation records |
+| c4ef61d37 namespace ID index, settings by identity; c9f64c275 workspace by identity | 505 | 447 | ~2,550 (reads and closes included) | nothing |
+
+What remains is constant per verb, not per record: ~300 `fstat` of descriptors the custody-checked reads
+open (each retained file read is open, fstat, read, close), 58 identity `statx` of the Host image (one per
+Host or codec frame), and the attempt's own files (each written through `mini_sdk::durable::staged`: temp,
+write, link, unlink). `workspace.json` is opened 2 times instead of 11, the consent and codec settings once
+per identity instead of twice per frame. Remaining small client items: the attempt's `config.json` re-read once per Host call (36 opens per
 `say`), ~490 `statx` from the private-directory checks per load.
