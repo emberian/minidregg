@@ -38,56 +38,27 @@ record's turn); the birth receive 405 (admitDecodedNative 183, receiveCandidateW
 /ci/hpc/bp/w`). persvati has no standing world yet (build-loop's).
 
 ## Next (my order)
-1. KN2 stage 2b (root ruling 10-31): `NativeHostSession.start`/`refresh` and NativeHostReplay's admission (`Verified`,
-   `DispatchAt`, `SuffixVerified`, every receiver typed over `Opened`/full `Loaded`) retyped over the light
-   `Opening`/`OpenedServed` (Kernel/NativeHostLight.lean, Compiler/DurableServed.lean). It removes the O(height) full
-   open (read-path measured ~4.3 ms per record: 1,100 ms full vs 125 ms light at head 256) from restart and the
-   cold first read, AND the doubled per-request refresh (one view instead of two), so the planned
-   "one derived turn shared by both views" memo is NOT built (2b deletes the second view). Scope: ~135
-   `opened.durable` uses in Kernel/NativeHost.lean, ~259 in NativeHostReplay.lean, 25 in Host/Main.lean. Order:
-   Inventory done (10-31): NativeHostReplay reads the full image 89x, 81 of them the provenance premise
-   `present : opened.durable.image.accepted[i]? = some record` (issue, reserve, grant, lifecycle evidence at an
-   index); the rest are height/base/baseHeight/logStart/snapshot/extend/prepare. NativeHost: `durable.snapshot` 11x
-   (cell bytes, roots: `OpenedServed.served` has them), `image.accepted` 4x, links/index 2x each. Host/Main: 6.
-   So 2b's statement change is one premise shape: `accepted[i]? = some record` becomes the Opening's authenticated
-   reader's record at i (`DurableHistoryReader`, MAC-verified tag, trusted storage), as `Light.basisVia` already
-   reads keys; everything else maps onto `OpenedServed` fields.
-   Slice 1 LANDED 4fb012263: the session opens the light opening only, the full image on first need
-   (`Session.full`, `materialize`, Host `sessionFull`); ops 0, 1, 2 and the receipt readback on light; own
-   appends adopted (`sessionAdopt`); anchor identity cached per config.
-   Slice 2 LANDED 95c09a2ac (with seat/birth-ground d9b2aa15a, the birth chain on `Ground`): births planned
-   (`birthPlanKeys`, `prepareOrdinaryBirthAuthorizedOn`) and submitted (`submitBirthLight`) on light.
-   Still full: ops 4/5 (read-path ad74bb6d4410b48f3 ports them onto a light Ground), the walk families
-   (`sessionWalked`), fn/carried ops, op 130 dry run.
-   Round 3 LANDED 1aebf0ac0: refresh never extends a held full image (`materialize` does, on demand); births
-   adopt their readback. Round 4 LANDED (on main by 2e85f5676): ops 144 (key status, every say), 173 (certify
-   view), 91 (doc new's birth intent) on the light served state (`sessionServed`).
-   Measuring on persvati (/home/ember/mdpool/hx: up.sh, grow.sh, pcm.py, restart.sh; candidates copied there and
-   relocated). persvati has perf_event_paranoid=4 (no profiling); hbox has perf. `MINIDREGG_HOST_TRACE=1` in the
-   world's env prints per-op ms into W/log/store.log ("op N"): a say is ops 4,4,5,1,2,144; a doc new adds 91, 173.
-   (a) inventory what each `Opened` consumer reads (directory, authority, pins, seed/logStart exactness, the image's
-   accepted records for historical receipts and walks); (b) give `OpenedServed` the missing fields as maintained
-   values; (c) retype receivers family by family (birth first: `Held.of` already isolates it to directory +
-   authority); (d) delete the full `Loaded` from the session. Seam with read-path (ad74bb6d4410b48f3): it ports
-   ClientConsentCore/ConsentAnchor onto `Opening`; I don't move `Opening`'s signatures without telling it. Rides
-   store-retained's L0 (a9b54e85e4a194b91).
-2. (i) a write carries its decoded post beside its bytes (`decode bytes = some post`), so the receive and the light
-   adopt never decode the Host's own post (ruled ours by retained-mode).
-3. App-create turns: op66 BEGIN plan (3-6 s), route (4.5 s), enrolment (4.1 s), START (2.3 s): read and trace each
-   (perf-apps' timelines ctpH/ctpI were deleted 10-31; regenerate with a70a7655df79c4335's ctp.sh on a current candidate).
-4. GET read-path contract: draft (not elaborated) at
-   /private/tmp/claude-501/-Users-ember-dev-minidregg/01a192eb-6b7b-70ef-8cad-095d745dabe5/scratchpad/ApplicationReadPermit.lean.draft;
-   astra's NEEDS-CHANGE review at
-   /private/tmp/claude-501/-Users-ember-dev-minidregg/01a18fa5-51c4-7992-906c-97cb89814dae/scratchpad/done/astra-readpermit-review.md
-   (route selector `app.interfaceId`; v3 manifest read clause in the model now, with an accepting witness; replay
-   keyed by `ApplicationDispatchIngress.keyDigest` with a signed read-domain attempt and validity window; R5
-   handoff at most once; R8 `journaled ≤ actual ≤ journaled + slack`; reservation custody invariant; payer an
-   authorized funding scope, issuer as the default sponsor).
-5. Owed from audits: a decided witness for `append_ref_ahead_refused` (head count 1: ref (id,2) refused, (id,1) not),
-   docstring scope for ref 0 and cross-stream refs; the positive pipeline statement (two appends planned from one
-   read both admit, either order).
-6. Row 11: likely unnecessary for the Host after 2b (the light opening already starts at the checkpoint); decide
-   after 2b's inventory. The FORMAT trie roots stay with private cells.
+Numbers (persvati, fresh jworld, Host CPU median, 0 -> 500 member says): slice-1-only 76511e768+fix: doc new
+214 -> 248 ms, say 27 -> 46; main 2e85f5676 (slices 2-4 + others' R6(i) etc.): doc new 114 -> 141, say 24 -> 37.
+Profile at 500 (hbox, world /home/hbox/hx/w/p4 on 430c4f577a31; scripts /home/hbox/hx/{say,doc}.script.txt,
+`python3 /home/hbox/hx/incl.py FILE REGEX`): say 32% and doc new ~25% are `DataSnapshot.install`'s canonicalBytes
+closure chain (Served.advance nests one closure per append since the session opened; base reads are list scans,
+`State.snapshot`): O(cells + appends) per read, the law-17 growth. doc new: encode (`encodeViaWriter`) ~20%, trie
+build ~12% (store-retained/privacy), checkpoint seal 5%.
+1. The served state as a persistent map (bytes/roots/available), advanced per write, `DataSnapshot` built from it
+   with an exactness equation (asked store-retained a9b54e85e4a194b91 whether it is theirs: DataSnapshot,
+   State.snapshot, DurableServed.Served/advance/viewAt).
+2. KN2 2b remainder: the walk families (`sessionWalked`, NativeHostReplay `Verified` over the light opening; the 81
+   `accepted[i]?` premises become Reader reads; one-shot `startWalked` loads the Store in full twice); fn/carried
+   ops; op 130 dry run; the per-family receivers that still take `opened` (share-issue, selected release, fn).
+3. App-create turns (op66 BEGIN, route, enrolment, START): mostly the walk families (2).
+4. GET read-path contract (draft + astra review paths below).
+5. Owed from audits: `append_ref_ahead_refused` decided witness; ref-0/cross-stream scope docstring; positive
+   pipeline statement for two appends planned from one read.
+6. Ruled for apps-hermes (afb920b22b17049cd): a lifetime paid plan's re-check compares the signed parts, not the
+   image coordinates (paid.rs:350); theirs to implement.
+GET contract draft: /private/tmp/claude-501/-Users-ember-dev-minidregg/01a192eb-6b7b-70ef-8cad-095d745dabe5/scratchpad/ApplicationReadPermit.lean.draft;
+astra review: /private/tmp/claude-501/-Users-ember-dev-minidregg/01a18fa5-51c4-7992-906c-97cb89814dae/scratchpad/done/astra-readpermit-review.md.
 
 ## Seams
 - store-retained (a9b54e85e4a194b91): L0 on lane/retained-l0 (SparseMap Store/World); after L0 the encode side is mine
