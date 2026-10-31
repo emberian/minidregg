@@ -27,7 +27,7 @@ LANE_DIR=${LANE_DIR:?LANE_DIR=/abs/path/of/the/lane}
 [[ $LANE_DIR = /* ]] || { echo "lane-build: LANE_DIR must be absolute" >&2; exit 64; }
 step=${1:?host|consent|umbrellas|rust-check|rust|pack}; shift
 src=$LANE_DIR/src
-[ -d "$src/.git" ] || { echo "lane-build: $src is not a clone" >&2; exit 64; }
+[ -e "$src/.git" ] || { echo "lane-build: $src is not a clone" >&2; exit 64; }   # a worktree (lane-tree) has a .git file
 mkdir -p "$LANE_DIR/artifacts" "$LANE_DIR/cycle" "$LANE_DIR/logs"
 cd "$src"
 native() {  # OUTPUT_DIR BINARY [builder args...]

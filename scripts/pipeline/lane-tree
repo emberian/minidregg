@@ -6,6 +6,10 @@
 #   lane-tree release LANE         save the tree's uncommitted diff (if any) and free it
 #   lane-tree renew LANE|TREE      extend the lease (lane-check calls this for the tree it checks)
 #   lane-tree status               every tree: holder, lease age, HEAD, dirty or not
+#   lane-tree native LANE|TREE     for a native build (build-native-host.sh): the tree's packages become its own
+#                                  hard-linked copy of the shared ones (writable directories, small files lake
+#                                  rewrites unshared; the shared inodes are read-only, so nothing reaches them),
+#                                  and the independent-snapshot marker is set. Costs MBs plus what the link adds
 #   lane-tree tripwire LANE|TREE   report files shared with the warm source but written in place since the
 #                                  warm (release runs it too); the pool's packages are a read-only real copy
 #   lane-tree gc                   free every lease older than LANE_POOL_TTL_H hours (default 12), diff saved
@@ -135,12 +139,32 @@ case ${1:-} in
     save_diff "$t" "released by $lane"
     # a free tree is a clean tree: the work is in saved/ (above), never handed to the next holder
     git -C "$t" checkout -q -f HEAD && git -C "$t" clean -q -fd -e .lake
+    # a native tree goes back to the shared packages (its own copy holds only links and its own builds)
+    if [ -d "$t/.lake/packages" ] && [ ! -L "$t/.lake/packages" ]; then
+      rm -rf "$t/.lake/packages"; ln -sfn "$LANE_POOL_PACKAGES" "$t/.lake/packages"; rm -f "$t/.minidregg-native-snapshot"
+    fi
     rm -f "$leases/$(basename "$t")"; echo "released $t" ;;
   renew)
     lane=${2:?LANE or TREE}; lock
     if [ -d "$lane" ]; then t=$(cd "$lane" && pwd -P); [ -f "$leases/$(basename "$t")" ] || exit 0
     else t=$(held_by "$lane"); [ -n "$t" ] || exit 0; fi
     awk -v n="$(now)" 'BEGIN{FS=OFS="\t"} {$2=n; print}' "$leases/$(basename "$t")" > "$leases/.r" && mv "$leases/.r" "$leases/$(basename "$t")" ;;
+  native)
+    x=${2:?LANE or TREE}
+    if [ -d "$x" ]; then t=$(cd "$x" && pwd -P); else t=$(held_by "$x"); [ -n "$t" ] || die "$x holds no tree"; fi
+    if [ -L "$t/.lake/packages" ]; then
+      src=$(readlink -f "$t/.lake/packages"); s=$(now)
+      cp -al "$src" "$t/.lake/packages.native"
+      find "$t/.lake/packages.native" -type d -exec chmod u+w {} +
+      ( cd "$t/.lake/packages.native" && find . \( -path '*/.git/objects' -prune \) -o -type f \( \
+          -path './*/.git/*' -o -name '*.trace' -o -name '*.hash' -o -name '*.json' -o -name 'lakefile.olean*' \
+          -o -name 'lake-manifest.json' -o -name 'lean-toolchain' \) -print0 |
+        xargs -0 -r -n 256 bash -c 'for f; do cp -p -- "$f" "$f.lt.tmp" && chmod u+w "$f.lt.tmp" && mv -f -- "$f.lt.tmp" "$f"; done' _ )
+      rm "$t/.lake/packages"; mv "$t/.lake/packages.native" "$t/.lake/packages"
+      echo "lane-tree: $t/.lake/packages is now its own linked copy ($(( $(now) - s )) s)" >&2
+    fi
+    touch "$t/.minidregg-native-snapshot"
+    echo "$t" ;;
   tripwire)
     x=${2:?LANE or TREE}
     if [ -d "$x" ]; then t=$(cd "$x" && pwd -P); else t=$(held_by "$x"); [ -n "$t" ] || die "$x holds no tree"; fi
