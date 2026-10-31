@@ -1,20 +1,32 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `4b750eb674ff` (builder: REDS.md for 9dc9c138cb32 (8 red)). Round finished 2026-10-31T23:21Z.
-green: `83e926874e38`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-4b750eb6`.
+Tip: `78f347a6af51` (builder: REDS.md for 4b750eb674ff (6 red)). Round finished 2026-10-31T23:23Z.
+green: `83e926874e38`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-78f347a6`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
-| umbrella-tree | running | - | no | build-loop | the umbrellas have not finished; this file is rewritten when they do |
-| gate:flatness-submit | flatness-submit FAIL | not rerun | yes | host-execution, store-retained | rc=2; /ci/f-4b750e/submit.log |
-| gate:flatness-get | flatness-get FAIL | not rerun | no | read-path | rc=1; /ci/f-4b750e/get.log |
-| gate:flatness-run | flatness-run FAIL | not rerun | yes | host-execution, store-retained | exit=1; /home/hbox/lanes/integ/gate-4b750eb6/flatness.log |
-| gate:composed:residents | composed residents fail | not rerun | yes | member-side, infra | fail: residents: WAITING root canonical provider custody publication absent: /ci/c-4b750e/ |
-| gate:composed:restart | composed restart blocked | not rerun | yes | host-execution | blocked: prerequisite residents has not passed |
+| host | rc=1 see /home/hbox/lanes/integ/logs/host.log | - | no | suspects' owners | /home/hbox/lanes/integ/logs/host.log |
+| consent | did not run | - | no | suspects' owners | an earlier stage stopped the build |
+| rust | did not run | - | no | suspects' owners | an earlier stage stopped the build |
+| pack | did not run | - | no | suspects' owners | an earlier stage stopped the build |
+| umbrella-tree | did not run | - | no | build-loop | an earlier stage stopped the build |
 
-Suspect commits since green (`git log 83e926874e38..4b750eb674ff`), newest first; owners are the seats whose
+Suspect commits since green (`git log 83e926874e38..78f347a6af51`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `78f347a6` builder: REDS.md for 4b750eb674ff (6 red)
+- `142d5b99` board: apps-hermes row: referer sender and twins, image-free plan currency, new seat id (owner: apps-hermes)
+- `7acbdd87` plans stay valid across a moved image: currency is compared modulo each signing plan's root and heig (owner: apps-hermes, member-side)
+- `8bfffe59` referer: the senders reduce it to a same-origin path; every twin checks Lean's value rule (owner: apps-hermes, build-loop, member-side)
+- `1b0f7cb2` board: apps-hermes row: certifier was a harness bug; payer-plan ruling and referer status (owner: apps-hermes)
+- `7ac9217f` dispatch admission: `referer` is an ordinary header, admitted only as a same-origin path (statement 
+- `15f9987f` builder: land its own fixture rerecord on main (root's ruling) (owner: build-loop)
+- `842bc749` Merge remote-tracking branch 'origin/main' into seat/host-execution
+- `8facc1e7` board: host-execution row: measured slices, law-17 cause, next order (owner: host-execution)
+- `520e33d2` board: build-loop row: new seat a4141abe7297fdc4b; builder relaunched; akapug #4 and #5 landed (owner: build-loop)
+- `64c34e22` fixtures: native runs re-recorded from candidate 9dc9c138cb32 (accepted stale, doc-write stale)
+- `ae98da48` fleet-sign join: bind the selected socket before any key, enrollment or funding (PR #4) (owner: member-side)
+- `d9f333db` capture test: hold the stdout lock so libtest's result lines stay out of the capture (owner: member-side)
 - `4b750eb6` builder: REDS.md for 9dc9c138cb32 (8 red)
 - `dbe87447` Merge remote-tracking branch 'origin/main' into seat/host-execution
 - `7eca2241` board: host-execution row: rounds 3 and 4, persvati measuring, hbox tree (owner: host-execution)
@@ -42,16 +54,3 @@ Suspect commits since green (`git log 83e926874e38..4b750eb674ff`), newest first
 - `cc93292e` board: apps-hermes row: trailing-slash and channel-id fixes landed; Scrumblr now fails in the app's  (owner: apps-hermes)
 - `acfab457` board: member-side row: the measurement overlay carries f28cd8457
 - `e2d7800e` board: privacy row, builds back on hbox; bb2 t4 released
-- `ca0fc018` board: member-side row: boxes after build-loop moved builds back to hbox
-- `64ebbb5c` board: infra seat, back on hbox
-- `f39379b6` build-loop: minidregg builds on hbox again (obend has dregg-build2); the builder is live there (owner: build-loop)
-- `9dc9c138` conversations: a channel id fits the Host's 64-character identifier shape
-- `0edb4f26` board: privacy row, the opening circuit cost and the backend decision (astra round 18)
-- `d807ddc9` board: privacy row, root format v2 and the custody shape landed; the authority rebuild routed
-- `fbb425cc` Merge remote-tracking branch 'origin/main' into seat/host-execution
-- `cf989744` Merge remote-tracking branch 'origin/main' into seat/host-execution
-- `1aebf0ac` host-execution: the session's full image is brought to the head only when asked; a birth adopts its  (owner: build-loop, host-execution)
-- `a4b37cd2` declarations: a route path loses one trailing slash and refuses an ambiguous one by name
-- `cf368e4f` privacy: fixed-width inner digests and framed custody bytes; a public outer shape (owner: privacy, read-path)
-- `3dcc5991` board: apps-hermes row: Scrumblr qualify reaches the call; the Host refuses the trailing-slash conve (owner: apps-hermes)
-- `56344846` GrantPlan's constructor is public: no guarantee rests on who builds one (owner: apps-hermes)
