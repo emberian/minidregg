@@ -49,6 +49,10 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   with dregg-infra e29997d; touches 5 shell journeys, jchat, jpriv2, jpay-e4, jweb-frontend, jfeedback, row m4, discord
   native-world, platform-provision/stage: batch 9's gate is their first run; on a red row check mini-line beside the
   row's mini first. whoami 4.86 -> 2.46 ms, doc show 23.0 -> 18.9 ms).
+  + hot-path a9e738baf (C1: stream append at the met head). Birth plan measured: `doc new` Host CPU 621/1000 ms (batch
+  7, 0/500 says) -> 186/557 ms (batch 8 + birth plan); growth ~+370 ms in both = the per-request session refresh
+  (35% at 500: WorldTrack.advance / deltaOf decode of the Host's own post). hot-path takes refresh before op66 (law 17),
+  with retained-mode.
   + perf-apps 106b73251 (spk-host: one SPK verification per file per process, prepare 2.5 -> 0.013 s; Host pin per
   inode, qualification 3.0 -> 1.4 s; create-to-page profile: op66 3.3-6.3 s largest, sent to hot-path).
   + perf-client 36612f028/6a088183f (Store open's represents decision linear via hash sets, @[csimp]
@@ -109,6 +113,10 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   say's precondition should not pin the room head. Client re-plan is a safety net only.
   Narrowed (explorer batch 14): concurrent doc new / chat new / create object commute (6/6 for 1 and 2 members); only
   say into one room conflicts (6 parallel from 1 member: 1/6; 3+3 from 2: 3/6; sequential 6/6).
+  CAUSE + FIX (hot-path a9e738baf, staging 33106c33d, batch 9): computeTarget's append arm pinned the author's stream
+  head (`append_same_stream_serialises`, deleted); now the append lands at the met head
+  (`append_planned_root_irrelevant`); different members never conflicted. Audit requested (theorem deleted); explorer
+  reruns 16-parallel-say + own-order row on batch 9.
 - **P1, mini panics on a closed stdout** (explorer, world-up once `mode=closed … has no mini shell`; 0/40 reruns):
   `mini --help | grep -q` under pipefail; mini exit 101. Owners: perf-client a778bbda6509944a5 (quiet exit on EPIPE,
   FIXED for resource-client by af0dcfb18 (own print! macros; a closed stdout ends the command 141, residents keep
@@ -137,6 +145,7 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 
 ## Reports sent (do not resend)
 
+- 10-31 12:55: C1 a9e738baf merged; auditor round requested; hot-path: refresh first; explorer: rerun on batch 9.
 - 10-31 12:45: perf-client: af0dcfb18 merged; shared crate for the other binaries.
 - 10-31 12:35: perf-apps: keep the broker parse, no reorder (ruling).
 - 10-31 12:25: app-reds: integrator runs the codec overlay, criterion, /tank note. perf-apps 106b73251 merged; op66 to
