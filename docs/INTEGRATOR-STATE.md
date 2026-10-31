@@ -63,7 +63,9 @@ gated candidates and names candidates to infra and the explorer.
 | iteration speed | a6c58cb72b0764dbb | seam 1 (codec tags / Store epoch, lands before or with FORMAT), lane pool /home/hbox/pool, lane-tree, hot-swap overlay tool |
 | explorer | a3e5d6dbcd68e616c | multi-member exploration of each READY candidate; docs/EXPLORER-FINDINGS.md on lane/explorer |
 | infra | aa72653a8ce442178 | forge demo container, forge composed (judges residents/restart), dregg-infra (ship.sh, world-down finding) |
-| exorcist | a31f4ba5028d24a92 | no fsync anywhere (lane/exorcism); filtered set `nextest -E 'test(durable) \| test(anchor) \| test(signing_wire) \| test(attempt_state) \| test(receipt_continuity)'` |
+| exorcist | a6ad40ce192354deb (a31f4ba5028d24a92 retired) | no fsync anywhere (lane/exorcism); filtered set `nextest -E 'test(durable) \| test(anchor) \| test(signing_wire) \| test(attempt_state) \| test(receipt_continuity)'` |
+| perf-apps | a25df305cfd551d8b | apps install, grain HTTP path, typed-tool path (perf) |
+| perf-client | a8d456c6e773efbb8 | client, consent provider per-record cost, web page loads, idle cold start (perf) |
 | demo-reds (sub-Opus of the integrator) | a64c387f3e638aa63 | bend/web/door/Hermes product reds as routed |
 | statement auditor (sub-Opus of the integrator) | a4d9a6f4cba4855ca | read-only adversarial audit of each lane's top-level statements, one round per merged sha |
 
@@ -71,6 +73,10 @@ Every Lean-statement sha gets an audit round from a4d9a6f4cba4855ca before it ri
 
 ## Rulings in force
 
+- **Minimal checks** (ember, 10-31, after the gates went green): per iteration only the narrowest check that shows the
+  change worked (lane-check of changed files plus one targeted measurement or row); full gates (gate13/15, forge composed,
+  umbrellas) once per batch cut; cuts spaced out to accumulate perf work; hotpatched measurement worlds are the inner loop;
+  freed hbox time goes to perf builds and measurements. Batch 4 stays the green fallback and rehearsal candidate.
 - **Import boundary**: Effects is the generator Kernel and Compiler consume; Effects sits below Kernel/Compiler, may import
   Theory and Lean core, never Kernel/Compiler/Host. Landed (b7bf3a8b2; table green, no cycle).
 - **Consent**: no validity proofs; we trust the storage device; providers resume from a sealed snapshot; anchors survive
