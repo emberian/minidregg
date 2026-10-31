@@ -244,7 +244,7 @@ restart, `story new`, the first walk-family request after a restart.
 
 State (2026-10-31, continuation written at ~490k tokens by ac53c05fe796e4294, the live hot-path per
 root): lane `lane/hot-path-cold`. Sent and merged: through c6ff16f55 (in batch 4). On the lane, not
-yet sent: 4fb1a0e17 (authority projection, below). The integrator is aeb671706eb3f70d7; private
+yet sent: e7489b9aa (4fb1a0e17 is merged for batch 5). The integrator is aba0beaa578594e92; private
 cells is a8da2b953507b402b; exorcism (the fsync class) is a9252a07cf889741c. On hbox build only in
 pool trees (`. /home/hbox/pool/pool.env; LANE_POOL_NO_WARM=1 lane-tree acquire hot-path
 origin/lane/hot-path-cold`; `lane-tree native hot-path` before a native build; release when done).
@@ -259,15 +259,32 @@ Root's order (10-31): (1) row 11 + the Book layout implementation, as hot-path's
 with private cells; (2) cut the per-submit cost; (3) the remaining sweep rows (3, 8, 16, 17, 19, 20,
 14).
 
-- **Per-submit (item 2), in progress.** Host profile across 3 `story new` (fresh world,
-  `/ci/hpc/sn/b3.perf.data`): births 33% (encode 34% overall: `encodeViaWriter`, whole-cell
-  `StoreCodec.encode` 9%), `CredentialAuthorityState.authState` 15% (`revokedKeys`/`parentKeys` =
-  `DFinsupp.support` + `biUnion` dedup, O(n²) in the authority store, per invocation). 4fb1a0e17 cuts the
-  latter (`authStateOfFast`, `@[csimp] authStateOf_eq_fast`); its closure check and native build were
-  started by `/ci/hpc/nb/both2.sh` (PID file `/ci/hpc/nb/both2.pid`). Then: hotpatch eca98bde-hp-slots2
-  with the new Host, rerun `/ci/hpc/sn/prof.sh` (adjust R and the candidate), compare. Next targets in
-  the same profile: `DeclaredResourceController.readGuards`/`targetWrite` filter scans (8%), the birth
-  descriptor's encode (`framedDescriptorCodec`, 10%).
+- **Ember's bar (10-31):** "on a modern nvme machine there's not really an excuse for anything to take
+  substantially over 1ms." Aim for about 1 ms of Host work per action. A warm submit, read or open in
+  the hundreds of ms is two to three orders of magnitude off, not nearly done.
+- **Per-submit (item 2).** The Host profile across 3 `story new` runs (fresh world,
+  `/ci/hpc/sn/b3.perf.data`, symfs `/ci/hpc/sn/symfs3`): births 33%, encode 34% overall
+  (`encodeViaWriter`; whole-cell `StoreCodec.encode` 9%; the birth descriptor's
+  `framedDescriptorCodec` 10%), `CredentialAuthorityState.authState` 15%, and
+  `DeclaredResourceController.readGuards`/`targetWrite` filter scans 8%.
+  - **4fb1a0e17 + e7489b9aa** build `authStateOf` with the revoked set and parent support read off the
+    cached sorted support (`authStateOfFast`, `@[csimp] authStateOf_eq_fast`). 4fb1a0e17 alone did
+    nothing at runtime: `{ authState cell with … }` builds the whole slow struct first. A/B on a
+    fresh world, 4 sequential `story new`, Host CPU per story (`/ci/hpc/sn/ab.sh`): before
+    (eca98bde-hp-slots2) 1.14 / 1.45 / 1.82 / 2.32 s, after (eca98bde-hp-auth2) 0.93 / 1.14 / 1.39 /
+    1.59 s. That is 18-31% less, but each story still costs about 0.2 s more than the last (law 17).
+    Find what grows next with a profile of the 4th story against the 1st.
+  - **Exorcism's per-op numbers (a31f4ba5028d24a92, after its accept-loop fix f6b1d7b60):** with a
+    resident client, `doc show` 11.8 ms and `key-status` 8.6 ms. Host op 144 (key status) 4-5 ms,
+    op 5 (signed read) 6 ms, op 4 (challenge) 1-2 ms (`MINIDREGG_HOST_TRACE`). Each is several times
+    the 1 ms bar.
+  - **Rules learned:** stop a world (server and residents, by their PID files) BEFORE deleting its
+    directory. The native build refuses existing `artifacts` and `native-out`, so `rm -rf
+    /ci/hpc/nb/{native-out,cycle,artifacts}` before `/ci/hpc/nb/build.sh`, and check
+    `binary_sha256` before you hotpatch. It also refuses uncommitted tracked changes in the tree, so
+    reset the pool tree to the pushed commit first. The pool tree needs an untracked
+    `deploy/candidate/lane-build-pool.sh` (lane-build.sh with `-e` for `-d` on `.git`) until
+    iter-speed's fix (b7be1a95f on lane/iter-speed-tools) is on main; remove it before release.
 - **Row 11 (item 1), design not started in code.** `DurableReceiverIO.loadChained` reads every entry,
   MACs every tag, decodes every record and rebuilds six indexes, because `Loaded` holds
   `image.accepted` (every record, a List) and each index is stated as a function of it
