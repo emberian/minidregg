@@ -31,6 +31,13 @@ REGISTRY = Path('/etc/mini-spk-volumes')
 UNITS = Path('/etc/systemd/system')
 HISTORY = Path('/var/lib/mini-spk-controller-history')
 TOOLS = {'mini_create_application_session', 'mini_oracle_discover', 'mini_oracle_call', 'mini_grain_status'}
+# A typed application attachment's tools (and its hidden qualify tool): the controller checks that the
+# attachment, its declaration digest and its route exist before it runs anything.
+TYPED_TOOL = re.compile('mini_app_[a-z0-9][a-z0-9_]{0,63}')
+
+
+def allowed_tool(name):
+    return name in TOOLS or TYPED_TOOL.fullmatch(name) is not None
 FILES = {'controller.json': 524288, 'host-config.json': 1048576,
          **{f'custody/{role}.key': 32 for role in ('controller', 'tool', 'dispatch', 'provider')},
          'state/shared-app-refs/app-birth.bin': 1048576,
@@ -2076,7 +2083,7 @@ def tool(store, helper, verb, request_id, extra):
     require(re.fullmatch('[0-9a-f]{32}', request_id), 'request ID must be 32 lowercase hex')
     home = Path(r['home']); runtime = str(base / 'bin/grain-runtime'); socket = str(worker_state(r) / 'control.sock')
     if verb == 'tool':
-        require(len(extra) == 2 and extra[0] in TOOLS, 'unsupported controller tool')
+        require(len(extra) == 2 and allowed_tool(extra[0]), 'unsupported controller tool')
         data = read_file(canonical(extra[1]), r['operatorUid'], 262144)
         require(isinstance(json.loads(data), dict), 'tool arguments must be an object')
         path = home / 'tool-requests' / (request_id + '.args.json')

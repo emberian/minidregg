@@ -679,6 +679,12 @@ class ControllerWorldTests(unittest.TestCase):
             with self.assertRaises(ValueError): c.preserve_consent_state(self.root, r)
         self.assertIsNone(c.preserve_consent_state(self.root, self.record()))
 
+    def test_typed_application_tools_are_allowed_by_name_and_nothing_else(self):
+        for ok in ('mini_app_dav', 'mini_app_dav_qualify', 'mini_app_wbo_board_get', 'mini_grain_status'):
+            self.assertTrue(c.allowed_tool(ok), ok)
+        for bad in ('mini_app_', 'mini_app_Dav', 'mini_app_../x', 'mini_app_dav qualify', 'mini_application_api', 'mini_apps', 'sh', ''):
+            self.assertFalse(c.allowed_tool(bad), bad)
+
     def test_tool_uses_owned_exclusive_regular_request_file(self):
         r = self.record(); (self.root / 'tool-requests').mkdir(mode=0o700)
         args = self.file('arguments.json', b'{"family":"oracle-session"}')
