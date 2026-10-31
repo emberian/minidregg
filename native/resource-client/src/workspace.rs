@@ -2141,9 +2141,13 @@ fn move_line(document: &Value, from: usize, to: usize) -> Result<Vec<Value>> {
 
 /// One content command on NAME, proposed and submitted.
 fn submit_content(root: &Path, workspace: &Value, name: &str, actions: Vec<Value>, label: &str) -> Result<()> {
+    submit_request(root, workspace, &json!({"type":"minidregg-workspace-proposal-v1","action":"invoke","targets":[
+        {"name":name,"payload":{"type":"content","actions":actions}}]}), label)
+}
+
+/// Propose and submit one workspace request under a fresh `LABEL-NONCE` proposal id.
+fn submit_request(root: &Path, workspace: &Value, request: &Value, label: &str) -> Result<()> {
     let id = random_nonce()?;
-    let request = json!({"type":"minidregg-workspace-proposal-v1","action":"invoke","targets":[
-        {"name":name,"payload":{"type":"content","actions":actions}}]});
     let proposal_id = format!("{label}-{id}");
     let request_path = root.join("sources").join(format!("{proposal_id}.json"));
     create_private(
@@ -4212,11 +4216,38 @@ fn complete_birth(
     program_cell: Option<&str>,
     room_template: Option<&str>,
 ) -> Result<Value> {
+    complete_member(root, name_value, 0, source, receipt, reservation, program_cell, room_template)
+}
+
+/// A group birth's member `index` as a lone birth's reservation: its three roles under
+/// their bare labels, the group's record and digest.
+fn group_member(reservation: &participant_namespace::Reservation, index: usize) -> Result<participant_namespace::Reservation> {
+    let mut ids = std::collections::BTreeMap::new();
+    for role in ["target", "ownerCapability", "controlCapability"] {
+        let id = reservation.ids.get(&member_role(true, index, role)).ok_or("group reservation lacks a member role")?;
+        ids.insert(role.to_owned(), id.clone());
+    }
+    Ok(participant_namespace::Reservation { request_digest: reservation.request_digest.clone(), ids,
+        record_path: reservation.record_path.clone() })
+}
+
+/// Retain the reference of resource `index` of a confirmed birth (`reservation` holds that
+/// resource's roles under their bare labels).
+fn complete_member(
+    root: &Path,
+    name_value: &str,
+    index: usize,
+    source: &Value,
+    receipt: &Value,
+    reservation: &participant_namespace::Reservation,
+    program_cell: Option<&str>,
+    room_template: Option<&str>,
+) -> Result<Value> {
     let birth = source.get("birth").ok_or("retained birth source absent")?;
     let parts = birth
         .get("resources")
         .and_then(Value::as_array)
-        .and_then(|values| values.first())
+        .and_then(|values| values.get(index))
         .ok_or("retained birth source lacks resource")?;
     // A Nock program is born at its content address: the Host derives its
     // target, so the reservation holds only the two capability identifiers.
@@ -4572,24 +4603,55 @@ fn birth(
     name_value: &str,
     shape: &BirthShape<'_>,
 ) -> Result<(Value, Value, participant_namespace::Reservation)> {
+    birth_members(root, workspace, name_value, &[(name_value, shape)], false)
+}
+
+/// The namespace role label of member `index`'s `role` in a birth: the bare role for a lone
+/// birth, `role.INDEX` for a group (`birth_members`).
+fn member_role(group: bool, index: usize, role: &str) -> String {
+    if group { format!("{role}.{index}") } else { role.to_owned() }
+}
+
+/// Reserve, author and submit ONE birth of every member, under the workspace name
+/// `name_value` (a lone resource's own name, or a group's): one Host decision for all of
+/// them. A group reserves `target.I`, `ownerCapability.I`, `controlCapability.I` per member
+/// in one namespace record; `group_member` reads one member back out of it. A group
+/// member is a plain object resource: no program, world or funding.
+fn birth_members(
+    root: &Path,
+    workspace: &Value,
+    name_value: &str,
+    members: &[(&str, &BirthShape<'_>)],
+    group: bool,
+) -> Result<(Value, Value, participant_namespace::Reservation)> {
     validate_ref_name(name_value)?;
+    if members.is_empty() || members.len() > 16 || (!group && members.len() != 1) {
+        return Err("a birth is one resource, or a group of 1..16".into());
+    }
+    if group && members.iter().any(|(_, shape)| shape.program.is_some() || shape.world.is_some() || shape.funding.is_some()) {
+        return Err("a group birth's members are plain resources: no program, world or funding".into());
+    }
+    let shape = members[0].1;
     // `--in ROOM`: the new resource is born in the room a workspace reference
     // names. The Host refuses a room that is not a present resource cell.
     // The creator's placing capability is the room reference's operation
     // capability (its observe capability when it holds no other): the Host's
     // birth gate requires it to cover the room with `place` (or `mutate`), held
     // by the creator, and the room's law to accept the placement.
-    let room = match shape.room {
-        Some(room_ref) => {
-            let placement = room_ref
-                .get("operationCapability")
-                .and_then(Value::as_str)
-                .map_or_else(|| member(&room_ref, "observeCapability"), Ok)?
-                .to_string();
-            Some((member(&room_ref, "target")?.to_string(), placement))
-        }
-        None => None,
+    let room_of = |shape: &BirthShape<'_>| -> Result<Option<(String, String)>> {
+        Ok(match shape.room {
+            Some(room_ref) => {
+                let placement = room_ref
+                    .get("operationCapability")
+                    .and_then(Value::as_str)
+                    .map_or_else(|| member(&room_ref, "observeCapability"), Ok)?
+                    .to_string();
+                Some((member(&room_ref, "target")?.to_string(), placement))
+            }
+            None => None,
+        })
     };
+    for (_, shape) in members {
     if !matches!(shape.storage, "content" | "declared" | "stream" | "nock" | "world-kind" | "world-instance") {
         return Err("supported storage is content, declared, stream, nock, world-kind or world-instance".into());
     }
@@ -4604,14 +4666,15 @@ fn birth(
     if matches!(shape.storage, "world-kind" | "world-instance") != shape.world.is_some() {
         return Err("world storage requires source definition or signed kind selection".into());
     }
-    let program = shape.program.clone();
-    match (shape.storage, &program) {
+    match (shape.storage, &shape.program) {
         ("nock", None) => return Err("nock storage requires --program".into()),
         (storage, Some(_)) if storage != "nock" => {
             return Err("--program is only for nock storage".into())
         }
         _ => {}
     }
+    }
+    let program = shape.program.clone();
     let context_path = member_path(workspace, "birthContext")?;
     let namespace_root = namespace_root(root, workspace)?;
     let context = bounded_json(&context_path)?;
@@ -4621,23 +4684,32 @@ fn birth(
     let request_path = root
         .join("sources")
         .join(format!("create-{}.request.json", ref_file(name_value)));
-    let mut requested_core = json!({"type":"minidregg-workspace-create-request-v2",
-        "name":name_value,"kind":shape.kind,"storage":shape.storage,"owner":shape.owner,
-        "funding":shape.funding,"predicate":shape.predicate,"context":context,
-        "subject":member(workspace,"subject")?});
-    if let Some((room, placement)) = &room {
-        requested_core["room"] = json!(room);
-        requested_core["placement"] = json!(placement);
+    let mut cores = Vec::new();
+    for (member_name, shape) in members {
+        let mut requested_core = json!({"type":"minidregg-workspace-create-request-v2",
+            "name":member_name,"kind":shape.kind,"storage":shape.storage,"owner":shape.owner,
+            "funding":shape.funding,"predicate":shape.predicate,"context":context,
+            "subject":member(workspace,"subject")?});
+        if let Some((room, placement)) = room_of(shape)? {
+            requested_core["room"] = json!(room);
+            requested_core["placement"] = json!(placement);
+        }
+        if let Some((hex, _)) = &shape.program {
+            requested_core["programSha256"] = json!(format!("{:x}", Sha256::digest(hex.as_bytes())));
+        }
+        if let Some(fields) = &shape.fields {
+            put_fields(&mut requested_core, fields);
+        }
+        if let Some(world) = &shape.world {
+            requested_core["world"] = world.clone();
+        }
+        cores.push(requested_core);
     }
-    if let Some((hex, _)) = &program {
-        requested_core["programSha256"] = json!(format!("{:x}", Sha256::digest(hex.as_bytes())));
-    }
-    if let Some(fields) = &shape.fields {
-        put_fields(&mut requested_core, fields);
-    }
-    if let Some(world) = &shape.world {
-        requested_core["world"] = world.clone();
-    }
+    let requested_core = if group {
+        json!({"type":"minidregg-workspace-create-group-v1","name":name_value,"members":cores})
+    } else {
+        cores.pop().ok_or("birth has no member")?
+    };
     let request = if request_path.exists() {
         let saved = bounded_json(&request_path)?;
         let nonce = member(&saved, "nonce")?;
@@ -4656,22 +4728,13 @@ fn birth(
         requested
     };
     let stable_request = serde_json::to_vec(&request).map_err(|error| error.to_string())?;
-    let mut roles = vec![
-        Role {
-            label: "target".into(),
-            kind: IdKind::Resource,
-        },
-        Role {
-            label: "ownerCapability".into(),
-            kind: IdKind::Capability,
-        },
-        Role {
-            label: "controlCapability".into(),
-            kind: IdKind::Capability,
-        },
-    ];
-    if program.is_some() {
-        roles.remove(0);
+    let mut roles = Vec::new();
+    for index in 0..members.len() {
+        if program.is_none() {
+            roles.push(Role { label: member_role(group, index, "target"), kind: IdKind::Resource });
+        }
+        roles.push(Role { label: member_role(group, index, "ownerCapability"), kind: IdKind::Capability });
+        roles.push(Role { label: member_role(group, index, "controlCapability"), kind: IdKind::Capability });
     }
     let reservation = participant_namespace::reserve(
         &namespace_root,
@@ -4724,54 +4787,57 @@ fn birth(
         .join("sources")
         .join(format!("create-{}.json", ref_file(name_value)));
     let nonce = member(&request, "nonce")?;
-    let resource = match &program {
-        Some((hex, _)) => json!({"kind":shape.kind,"storage":shape.storage,"program":hex,
-            "owner":shape.owner,
-            "ownerCapability":reservation.ids["ownerCapability"],
-            "controlCapability":reservation.ids["controlCapability"],
-            "predicate":shape.predicate}),
-        None => json!({"kind":shape.kind,"storage":shape.storage,
-            "target":reservation.ids["target"],"owner":shape.owner,
-            "ownerCapability":reservation.ids["ownerCapability"],
-            "controlCapability":reservation.ids["controlCapability"],
-            "predicate":shape.predicate}),
-    };
-    // K-NARROW-HIDE: a declared or content cell is born blinded, with a
-    // blinding this workspace's key derives for this cell id, so its owner
-    // recomputes every salt and no reader of a subset of fields holds an
-    // unsalted commitment to the rest.
-    let mut resource = resource;
-    if let Some(world) = &shape.world {
-        for (key, value) in world.as_object().ok_or("world birth source must be an object")? {
-            resource[key] = value.clone();
+    let mut resources = Vec::new();
+    for (index, (_, shape)) in members.iter().enumerate() {
+        let id = |role: &str| reservation.ids[&member_role(group, index, role)].clone();
+        let mut resource = match &program {
+            Some((hex, _)) => json!({"kind":shape.kind,"storage":shape.storage,"program":hex,
+                "owner":shape.owner,
+                "ownerCapability":id("ownerCapability"),
+                "controlCapability":id("controlCapability"),
+                "predicate":shape.predicate}),
+            None => json!({"kind":shape.kind,"storage":shape.storage,
+                "target":id("target"),"owner":shape.owner,
+                "ownerCapability":id("ownerCapability"),
+                "controlCapability":id("controlCapability"),
+                "predicate":shape.predicate}),
+        };
+        if let Some(world) = &shape.world {
+            for (key, value) in world.as_object().ok_or("world birth source must be an object")? {
+                resource[key] = value.clone();
+            }
+            if shape.storage == "world-kind" {
+                resource["definition"] = world_kind::definition(&resource["definition"], Some(&id("target")))?;
+            }
         }
-        if shape.storage == "world-kind" {
-            resource["definition"] = world_kind::definition(&resource["definition"], Some(&reservation.ids["target"]))?;
+        // K-NARROW-HIDE: a declared or content cell is born blinded, with a
+        // blinding this workspace's key derives for this cell id, so its owner
+        // recomputes every salt and no reader of a subset of fields holds an
+        // unsalted commitment to the rest.
+        if matches!(shape.storage, "declared" | "content" | "grain") && program.is_none() {
+            let seed = crate::fsio::read_seed(&member_path(workspace, "key")?)?;
+            resource["blinding"] = json!(crate::hiding::cell_blinding(
+                &crate::hiding::blinding_key(&seed),
+                &id("target")
+            )?);
         }
+        // K-FIELD-CLOSURE: a declared cell names the fields it may hold.
+        if let Some(fields) = &shape.fields {
+            put_fields(&mut resource, fields);
+        }
+        if let Some((room, placement)) = room_of(shape)? {
+            resource["room"] = json!(room);
+            resource["placement"] = json!(placement);
+        }
+        resources.push(resource);
     }
-    if matches!(shape.storage, "declared" | "content" | "grain") && program.is_none() {
-        let seed = crate::fsio::read_seed(&member_path(workspace, "key")?)?;
-        let target = reservation.ids["target"].as_str();
-        resource["blinding"] = json!(crate::hiding::cell_blinding(
-            &crate::hiding::blinding_key(&seed),
-            target
-        )?);
-    }
-    // K-FIELD-CLOSURE: a declared cell names the fields it may hold.
-    if let Some(fields) = &shape.fields {
-        put_fields(&mut resource, fields);
-    }
-    let mut expected_source = json!({"subject":member(workspace,"subject")?,"nonce":nonce,
+    let expected_source = json!({"subject":member(workspace,"subject")?,"nonce":nonce,
             "birth":{"genesis":context["genesis"],"template":context["template"],
                 "creator":member(workspace,"subject")?,"nonce":nonce,
-                "resources":[resource],
+                "resources":resources,
                 "sourceCapabilities":source_capabilities,
                 "funding":funding,"feePayer":context["feePayer"]},
             "grants":context["grants"]});
-    if let Some((room, placement)) = &room {
-        expected_source["birth"]["resources"][0]["room"] = json!(room);
-        expected_source["birth"]["resources"][0]["placement"] = json!(placement);
-    }
     let source = if source_path.exists() {
         let saved = bounded_json_limit(&source_path, MAX_PROGRAM_SOURCE)?;
         if saved != expected_source {
@@ -4787,15 +4853,18 @@ fn birth(
     };
     let parts = source["birth"]["resources"]
         .as_array()
-        .and_then(|values| values.first())
-        .ok_or("retained birth source lacks resource")?;
-    for role in ["target", "ownerCapability", "controlCapability"] {
-        if role == "target" && program.is_some() {
-            continue;
-        }
-        if parts.get(role).and_then(Value::as_str) != reservation.ids.get(role).map(String::as_str)
-        {
-            return Err("retained birth source differs from namespace reservation".into());
+        .filter(|values| values.len() == members.len())
+        .ok_or("retained birth source lacks its resources")?;
+    for (index, part) in parts.iter().enumerate() {
+        for role in ["target", "ownerCapability", "controlCapability"] {
+            if role == "target" && program.is_some() {
+                continue;
+            }
+            if part.get(role).and_then(Value::as_str)
+                != reservation.ids.get(&member_role(group, index, role)).map(String::as_str)
+            {
+                return Err("retained birth source differs from namespace reservation".into());
+            }
         }
     }
     let socket = SOCKET
@@ -5023,6 +5092,57 @@ fn create_with_template(
         roomkey::found(root, workspace, name_value)?;
     }
     Ok(())
+}
+
+/// `create-group`: every resource a members file names, born in ONE Host decision
+/// (`birth_members`), each retained under its own name; then one invoke that gives every
+/// `"document": true` member its document (`createDocument`, as `doc-new` does). A
+/// template's run of `doc new` / `create` lines is this (`shell::grouped_births`).
+/// The file: `{"members":[{"name","storage","predicate":PATH,"in"?,"fields"?,"document"?}]}`.
+fn create_group(root: &Path, workspace: &Value, group: &str, members_path: &Path) -> Result<()> {
+    let file = bounded_json(members_path)?;
+    let listed = file.get("members").and_then(Value::as_array).ok_or("create-group needs members")?;
+    struct Member { name: String, storage: String, predicate: Value, parent: Option<Value>,
+        sealed_in: Option<String>, fields: Option<Value>, document: bool }
+    let mut held = Vec::new();
+    for entry in listed {
+        let name = member(entry, "name")?.to_owned();
+        validate_ref_name(&name)?;
+        let room = entry.get("in").and_then(Value::as_str);
+        let parent = room.map(|parent| reference(root, parent)).transpose()?;
+        let sealed_in = match (room, &parent) {
+            (Some(room), Some(resolved)) if resolved.get("private").is_some() => Some(room.to_owned()),
+            _ => None,
+        };
+        held.push(Member {
+            storage: member(entry, "storage")?.to_owned(),
+            predicate: bounded_json(Path::new(member(entry, "predicate")?))?,
+            fields: entry.get("fields").and_then(Value::as_str).map(parse_fields).transpose()?,
+            document: entry.get("document").and_then(Value::as_bool).unwrap_or(false),
+            name, parent, sealed_in,
+        });
+    }
+    let subject = member(workspace, "subject")?.to_owned();
+    let shapes: Vec<BirthShape<'_>> = held.iter().map(|m| BirthShape {
+        kind: "object", storage: &m.storage, owner: &subject, predicate: &m.predicate,
+        funding: None, room: m.parent.as_ref(), program: None, fields: m.fields.clone(), world: None,
+    }).collect();
+    let pairs: Vec<(&str, &BirthShape<'_>)> = held.iter().map(|m| m.name.as_str()).zip(shapes.iter()).collect();
+    let (source, receipt, reservation) = birth_members(root, workspace, group, &pairs, true)?;
+    for (index, m) in held.iter().enumerate() {
+        let mut born = complete_member(root, &m.name, index, &source, &receipt, &group_member(&reservation, index)?, None, None)?;
+        if let Some(parent) = &m.sealed_in {
+            born["sealedIn"] = json!(parent);
+            roomkey::rewrite_reference(root, &m.name, &born)?;
+        }
+    }
+    let targets = held.iter().filter(|m| m.document).map(|m| Ok(json!({"name":m.name,"payload":{"type":"content",
+        "actions":[{"type":"createDocument","rootElement":random_nonce()?,"schema":"0"}]}})))
+        .collect::<Result<Vec<_>>>()?;
+    if targets.is_empty() {
+        return Ok(());
+    }
+    submit_request(root, workspace, &json!({"type":"minidregg-workspace-proposal-v1","action":"invoke","targets":targets}), "document")
 }
 
 /// `doc-new`: a content cell and its document in one verb: the birth, then
@@ -5432,9 +5552,10 @@ fn document_actions(
             "append" => &["type", "text"],
             "edit" => &["type", "line", "text"],
             "link" => &["type", "to", "relation"],
+            "name" => &["type", "name", "to"],
             "annotate" => &["type", "line", "text"],
             "push" => &["type", "bytes"],
-            _ => return Err("document action must be append, edit, annotate, link or push".into()),
+            _ => return Err("document action must be append, edit, annotate, link, name or push".into()),
         };
         if obj.len() != keys.len() || keys.iter().any(|key| !obj.contains_key(*key)) {
             return Err(format!("document action {} has unexpected fields", member(action, "type")?));
@@ -5521,6 +5642,17 @@ fn document_actions(
                 let id = member(&target_ref, "target")?;
                 json!({"type":"link","link":random_nonce()?,"source":null,
                     "target":{"type":"document","id":id},"relation":relation})
+            }
+            "name" => {
+                // A room index's shared name (`room bind`'s link, `shared_names::target`),
+                // written straight into this index document; the index law judges it.
+                let leaf = member(action, "name")?;
+                if leaf == "index" {
+                    return Err("index is the reserved room map name".into());
+                }
+                let target_ref = reference(root, member(action, "to")?)?;
+                json!({"type":"link","link":random_nonce()?,"source":null,"relation":"0",
+                    "target":shared_names::target(leaf, member(&target_ref, "kind")?, member(&target_ref, "target")?)?})
             }
             _ => unreachable!("document action tags were checked"),
         });
@@ -7116,6 +7248,12 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             let name = os_string(args.required("name")?, "document name")?;
             args.finish()?;
             protected_document::protect_empty(&root, &workspace, &name)
+        }
+        "create-group" => {
+            let name = os_string(args.required("name")?, "group name")?;
+            let members = path(args.required("members")?);
+            args.finish()?;
+            create_group(&root, &workspace, &name, &members)
         }
         "doc-new" => {
             let name = os_string(args.required("name")?, "document name")?;

@@ -242,40 +242,32 @@ restart, `story new`, the first walk-family request after a restart.
 
 ## Next (successor: start here)
 
-State (2026-10-31): lane `lane/hot-path-cold` at the slot-fix batch (sent to the integrator). The integrator is aeb671706eb3f70d7 and routes hot-path to this agent; private cells is
-a30875aaf31364697. On hbox, build only in pool trees (`. /home/hbox/pool/pool.env;
+State (2026-10-31): lane `lane/hot-path-cold` (agent ac53c05fe796e4294, the live hot-path per root). The integrator is aeb671706eb3f70d7; private cells is
+a8da2b953507b402b; exorcism (the fsync class) is a9252a07cf889741c. On hbox, build only in pool trees (`. /home/hbox/pool/pool.env;
 LANE_POOL_NO_WARM=1 lane-tree acquire hot-path origin/lane/hot-path-cold`, release when done). Logs go
 to `/ci/hpc`. Profiles: `/ci/hpc/fby` (run.sh, `--symfs`). The native Host build driver is
 `/ci/hpc/nb/build.sh` (deploy/candidate/lane-build.sh host, LANE_DIR=/ci/hpc/nb).
 
-0. **`story new` under 1 s (root, 10-31: ahead of everything except the FORMAT batch).**
-   - **Driver.** `hbox:/ci/hpc/sn/run.sh` brings up a fresh world from a candidate
-     (`newparticipant-acceptance.sh`). Then run `mini shell --socket W/public/mini.sock --host H
-     --config W/deployment/pinned-config.json --workspace W/sponsor --home HOME --line "story new N
-     --from tale"` with `MINI_TRACE`. World `/ci/hpc/sn/b1` is torn down (server and its two residents stopped by PID file). The residents'
-     anchors live in `~/.mini/consent-anchors` because MINI_CONSENT_ANCHOR_DIR was unset.
-   - **Before** (eca98bde7 + the lane's Host, fresh world, hbox load 9-17): 62-70 s. Of that, the
-     Host's own calls were 4.5 s. One line (`room bind`, 3.9 s) used 0.25 s of CPU across client,
-     Host and residents, and issued 207 fsyncs totalling 4.0 s.
-   - **efbec07fb** (signed reads sealed after their answer, `mini_sdk::phase` invariant 5; the shell
-     defers directory syncs): one line 1.0 s (67 fsyncs); `story new` 19-22 s.
-   - **What remains.** There are 17 Host decisions. Submit (op2) averages 460 ms on a loaded box,
-     totalling 7.9 s; propose (op1) totals 1.7 s and op5 1.5 s. The client's remaining ~11 s is about
-     0.6 s per decision.
-   - **Next: fold the template into about 3 decisions.**
-     - (i) One birth descriptor for every cell born in the room after the room's own birth.
-       `ResourceBirth.Descriptor.births` is already a list; the client's `workspace::birth` builds
-       one resource. A `birth_many` reserves each name's ids through `participant_namespace::reserve`
-       and retains each ref after the receipt. The room's own birth stays separate: the Host refuses
-       placement in a room that is not yet a present cell.
-     - (ii) One invoke for every write: the `createDocument` of each document (now a second
-       decision inside each `doc new`), the coalesced edits, and `room bind`/`room index`. These are
-       `workspace --action shared-name`, one decision each; find what they write and fold them into
-       the same multi-target invoke.
-     - (iii) The story's table and map, in the same birth and the same invoke.
-     - (iv) Per-decision client cost: count fsyncs per proposal and per submit again (67 per line
-       now).
-     - (v) Host submit at 460 ms on a tiny history: profile op2 on a quiet moment.
+0. **`story new`: 4 Host decisions (3a0fb5e0c, cb2b8e642; on the lane, not yet sent).**
+   - **What runs.** The room's birth, then ONE birth of every cell born in it (`workspace
+     create-group`, `birth_members`: one namespace record with `target.I`/`ownerCapability.I`/
+     `controlCapability.I` per member, each retained under its own name), ONE invoke of every
+     document's `createDocument`, and ONE proposal of the pointer (`room index` on a room the
+     template founded is the pointer's `create`), the map's line and links, the shared names
+     (`room bind` into the template's index is a document `name` action, lowering to
+     `shared_names`' bind link) and, for a story, the table's rows and the map's link to it. The
+     shell's template runner does the folding (`grouped_births`, `TemplateRooms`, `coalescible`);
+     `story new` adds its table to the template's lines (`shell::run_template_with`).
+     workroom and social fold the same way.
+   - **Measured** (eca98bde7-hp-slots2 Host + the lane's client, fresh world, hbox load ~15): 4
+     submits (was 17); 9.8-15.5 s wall (was 62-70 s), of which the Host's calls are 3.7-6.3 s.
+     Read back: `room resolve`, `doc show` and `doc links` show the names, map, links and table.
+   - **What remains.** The client's own work between decisions: 32 op4 and 28 op5 calls (signed
+     reads) per story, and the client's fsyncs, which the exorcism lane (a9252a07cf889741c) removes
+     as a class (efbec07fb, my read-seal change, is withdrawn by b7d21a587 on its word). Then
+     profile op2 on a quiet box.
+   - **Driver.** `hbox:/ci/hpc/sn/run.sh` (a fresh world from a candidate; `MINI=` selects the shell's
+     client; the home must be 0700). Worlds `/ci/hpc/sn/b1`, `b2` are torn down.
 
 1. **Flatness submit: the demanded projection. Landed on the lane (545f80874 and f7da550af); measured.**
    - **Measured** (scripts/perf/flatness-bench.py, 130 ops, eca98bde7 with the lane's Host, hbox
@@ -324,9 +316,8 @@ to `/ci/hpc`. Profiles: `/ci/hpc/fby` (run.sh, `--symfs`). The native Host build
      The root becomes `outerRoot ctxKind mask (trie digest)`, so a write costs one trie walk and one
      hash. **Scope (root's ruling, 10-31; private cells a8da2b953507b402b):** FORMAT (a) switches only
      eventHistory and authority to the trie root with mask `[]`. resourceBook holds the whole Book as
-     one value at one address, so a trie changes nothing for it. Its per-write cost stays linear in
-     the Book until the Book's entries become store addresses: a CanonicalResourceKernel layout
-     redesign, a hot-path row with no owner yet. policySource is written once. Content and the declared kinds keep the salted ratchet root until a ZK
+     one value at one address, so a trie changes nothing for it; its entries become store addresses
+     (item 2b). policySource is written once. Content and the declared kinds keep the salted ratchet root until a ZK
      selective opening exists. That is a later epoch (b) with a second genesis, because plain trie
      reveals would expose unsalted subtree digests. The content-cell root and flatness stay a
      published red until (b). The order is iteration speed's seam 1, then their FORMAT sha, then
@@ -361,6 +352,17 @@ to `/ci/hpc`. Profiles: `/ci/hpc/fby` (run.sh, `--symfs`). The native Host build
        1,100, under load. Not improved. The coalescing (18 submits, not 22) is in, but each sequential
        submit costs about 2 s on a loaded box. The fix is one proposal and one submit for the whole
        template: a multi-step room-birth plan, which is a design item. `chat new` 4.8 s (was 3.0).
+2b. **The account book as store entries (root, 10-31).** `Theory/CanonicalResourceBookEntries.lean`
+   (5d45f87df, statement, lane-check RC 0): four RAM namespaces (account, balance, lease, floor);
+   `Represents`, `represents_unique` (teeth), `represents_empty` (satisfiable); `operationPatch`;
+   `patch_writeFootprint_subset` / `_card_le` (an operation writes at most 3 addresses, whatever the
+   book's size); the keystone `PatchStatement` (valid, and the result represents `operation.apply
+   book`), stated, to be proved after the statement audit. Then the migration: `bookAddress`,
+   `logicalBook`, `bookPatch` and `CanonicalResourceKernel.layout` are replaced (about 50 consumer
+   files, 361 uses), so the cell layout changes: it rides FORMAT (a) if proved and migrated before
+   private cells' sha, the next epoch otherwise. The Batch layer (registrations, deregistrations)
+   needs the same per-entry patch for account entries.
+
 3. Rows 3, 8, 16, 17, 19, 20. Measurements on the batch-2 candidate: a fresh member's first
    read, a fresh provider at two heights, restart, `story new`, and the first walk-family
    request after a restart. flatness-get waits on app-reds' resident `/var` fix.
