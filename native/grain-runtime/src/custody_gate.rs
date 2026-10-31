@@ -215,7 +215,8 @@ impl CustodyGate {
         after_spawn: impl FnOnce(u32),
     ) -> Result<Output, CustodyError> {
         if self.routes(command) {
-            return self.run_resident(cancelled, command, limit, before_check, after_spawn);
+            let arguments: Vec<&OsStr> = command.get_args().collect();
+            return self.run_resident(cancelled, &arguments, &[], limit, before_check, after_spawn);
         }
         let (mut stdout, mut stderr) = {
             let mut slot = self
@@ -355,23 +356,40 @@ impl CustodyGate {
     /// resource-client `capture::serve`). Crossing the spawn boundary is
     /// writing the request: after it, every failure is `Uncertain` and the
     /// resident is killed with its group, exactly as a one-shot child is.
+    /// `mini ARGUMENTS` with `input` as its standard input, as a frame to the
+    /// resident client. The gate must have one (`with_resident`).
+    pub fn run_frame(
+        &self,
+        cancelled: &AtomicBool,
+        arguments: &[&OsStr],
+        input: &[u8],
+        limit: Duration,
+    ) -> Result<Output, CustodyError> {
+        if self.resident_program.is_none() {
+            return Err(io::Error::other("this custody gate has no resident client").into());
+        }
+        self.run_resident(cancelled, arguments, input, limit, || {}, |_| {})
+    }
+
     fn run_resident(
         &self,
         cancelled: &AtomicBool,
-        command: &Command,
+        arguments: &[&OsStr],
+        input: &[u8],
         limit: Duration,
         before_check: impl FnOnce(),
         after_spawn: impl FnOnce(u32),
     ) -> Result<Output, CustodyError> {
+        use std::os::unix::ffi::OsStrExt;
         let started = Instant::now();
         let mut frame = Vec::new();
-        let arguments: Vec<&OsStr> = command.get_args().collect();
         frame.extend_from_slice(&(arguments.len() as u32).to_be_bytes());
-        for argument in &arguments {
-            use std::os::unix::ffi::OsStrExt;
+        for argument in arguments {
             frame.extend_from_slice(&(argument.len() as u32).to_be_bytes());
             frame.extend_from_slice(argument.as_bytes());
         }
+        frame.extend_from_slice(&(input.len() as u32).to_be_bytes());
+        frame.extend_from_slice(input);
         let (mut replies, pid) = {
             let slot = self
                 .child
@@ -704,8 +722,9 @@ mod tests {
             "  h=r.read(4)\n",
             "  if not h: break\n",
             "  a=[r.read(struct.unpack('>I',r.read(4))[0]) for _ in range(struct.unpack('>I',h)[0])]\n",
+            "  i=r.read(struct.unpack('>I',r.read(4))[0])\n",
             "  if a==[b'hang']: time.sleep(60)\n",
-            "  o=b' '.join(a); e=str(os.getpid()).encode()\n",
+            "  o=b' '.join(a)+i; e=str(os.getpid()).encode()\n",
             "  w.write(bytes([3])+struct.pack('>I',len(o))+o+struct.pack('>I',len(e))+e); w.flush()\n",
         )).unwrap();
         use std::os::unix::fs::PermissionsExt;
@@ -732,6 +751,9 @@ mod tests {
         assert_eq!(second.stdout, b"workspace --action read --name x");
         assert_eq!(first.stderr, second.stderr, "one resident process answered both");
         assert!(gate.is_idle());
+        let fed = gate.run_frame(&cancelled, &[OsStr::new("tail"), OsStr::new("-")], b" <stdin>", Duration::from_secs(10)).unwrap();
+        assert_eq!(fed.stdout, b"tail - <stdin>");
+        assert_eq!(fed.stderr, first.stderr);
         // A command with its own environment is a one-shot child, not a frame.
         let mut own = Command::new("/bin/echo");
         own.arg("alone");

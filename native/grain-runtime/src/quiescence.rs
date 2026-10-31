@@ -552,6 +552,7 @@ impl Runtime {
         // resident clients end first: they are effect-capable processes.
         self.custody_gate.retire().map_err(|e| format!("resident client: {e}"))?;
         self.native_gate.retire().map_err(|e| format!("resident client: {e}"))?;
+        crate::resource_tools::retire_room_residents()?;
         cgroup_stop::prove_quiescent_controller(&self.config)?;
         if self.current_pgid.load(Ordering::SeqCst) != 0 {
             return Err("controller retains an owned process group".into());

@@ -117,9 +117,10 @@ fn ended(args: impl FnOnce() -> crate::Result<crate::Args>) -> std::io::Result<(
 /// that re-reads its workspace, re-pins its Host and reconnects its residents.
 ///
 /// Descriptor 0 carries requests and 1 carries replies; both are moved aside
-/// at start, so a command reading standard input reads nothing and what is
-/// printed between commands goes to standard error. A request is a u32 count
-/// of arguments, each a u32 length and its bytes (big-endian). A reply is the
+/// at start, so what is printed between commands goes to standard error. A
+/// request is a u32 count of arguments, each a u32 length and its bytes, then
+/// the command's standard input as a u32 length and its bytes (big-endian);
+/// the command reads exactly those bytes, then end of file. A reply is the
 /// exit code (one byte), then stdout and stderr, each a u32 length and bytes.
 /// End of input between requests ends the process.
 #[cfg(unix)]
@@ -168,8 +169,35 @@ pub(crate) fn serve() -> crate::Result<()> {
             requests.read_exact(&mut bytes).map_err(|e| e.to_string())?;
             raw.push(OsString::from_vec(bytes));
         }
+        let length = word(&mut requests).map_err(|e| e.to_string())?.ok_or("command-resident: truncated request")? as usize;
+        if total + length > BYTES_MAX {
+            return Err("command-resident: request exceeds 4 MiB".into());
+        }
+        let mut input = anonymous().map_err(|e| e.to_string())?;
+        std::io::copy(&mut (&mut requests).take(length as u64), &mut input).map_err(|e| e.to_string())?;
+        input.seek(SeekFrom::Start(0)).map_err(|e| e.to_string())?;
+        if unsafe { libc::dup2(input.as_raw_fd(), 0) } < 0 {
+            return Err(std::io::Error::last_os_error().to_string());
+        }
         crate::VERIFY_HOST.store(false, std::sync::atomic::Ordering::Relaxed);
-        let (code, stdout, stderr) = argv(raw).map_err(|e| e.to_string())?;
+        let ran = argv(raw);
+        // Standard input is /dev/null again, and what the process's reader
+        // buffered from this command's input is dropped, never the next one's.
+        if unsafe { libc::dup2(null.as_raw_fd(), 0) } < 0 {
+            return Err(std::io::Error::last_os_error().to_string());
+        }
+        {
+            use std::io::BufRead;
+            let mut stdin = std::io::stdin().lock();
+            loop {
+                let buffered = stdin.fill_buf().map(<[u8]>::len).unwrap_or(0);
+                if buffered == 0 {
+                    break;
+                }
+                stdin.consume(buffered);
+            }
+        }
+        let (code, stdout, stderr) = ran.map_err(|e| e.to_string())?;
         let mut reply = Vec::with_capacity(9 + stdout.len() + stderr.len());
         reply.push(code);
         for stream in [&stdout, &stderr] {
