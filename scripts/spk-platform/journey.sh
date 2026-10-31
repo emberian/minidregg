@@ -421,18 +421,19 @@ case "$ACTION" in
       fail "root-published volume witness absent"
     witness_before=$(stat -c '%d:%i:%s:%Y:%Z' "$witness")
     witness_sha=$(sha "$witness")
-    [ "$(wc -l <"$witness")" -eq 13 ] || fail "volume witness length differs"
+    [ "$(wc -l <"$witness")" -eq 11 ] || fail "volume witness length differs"
     quota=$((size_mib * 1048576))
-    [ "$(sed -n '1p' "$witness")" = 'DREGG/SPK-VAR-CUSTODY/v1' ] &&
+    [ "$(sed -n '1p' "$witness")" = 'DREGG/SPK-VAR-CUSTODY/v1+projdir' ] &&
       [ "$(sed -n '2p' "$witness")" = "deployment_id=$deployment" ] &&
       [ "$(sed -n '3p' "$witness")" = "host_id=$host_id" ] &&
       [ "$(sed -n '4p' "$witness")" = 'resource=8401' ] &&
       [ "$(sed -n '5p' "$witness")" = "volume_id=$source_id" ] &&
       [ "$(sed -n '6p' "$witness")" = "app_uid=$uid" ] &&
       [ "$(sed -n '7p' "$witness")" = "quota_bytes=$quota" ] &&
-      [ "$(sed -n '8p' "$witness")" = 'backing=/var/lib/minidregg/spk/images/8401.ext4' ] &&
-      [ "$(sed -n '11p' "$witness")" = "backing_size=$quota" ] &&
-      [ "$(sed -n '13p' "$witness")" = 'mount=/var/lib/minidregg/spk/vars/8401' ] ||
+      [[ $(sed -n '8p' "$witness") =~ ^project_id=[1-9][0-9]{9}$ ]] &&
+      [[ $(sed -n '9p' "$witness") =~ ^fs_type=(ext4|xfs)$ ]] &&
+      [ "$(sed -n '10p' "$witness")" = "directory_inode=$(stat -c %i /var/lib/minidregg/spk/vars/8401)" ] &&
+      [ "$(sed -n '11p' "$witness")" = 'directory=/var/lib/minidregg/spk/vars/8401' ] ||
       fail "volume witness differs from source INSTALL/physical quota"
     claim_readonly adopt-volume
     jq -n --arg install "$install_dir" --arg prepared "$(sha "$prepared")" \

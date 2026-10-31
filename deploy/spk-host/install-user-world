@@ -78,8 +78,10 @@ if [[ $action == remove ]]; then
   [[ -f $registry && ! -L $registry && $(stat -c '%u:%a' "$registry") == 0:644 ]] || { echo 'root cleanup registry custody refused' >&2; exit 1; }
   [[ $(jq -er .store "$registry") == "$store" && $(jq -er .helper "$registry") == "$helper" ]] || exit 1
   op_uid=$(jq -er .operatorUid "$registry")
-  if findmnt -rn -o TARGET | awk -v root="$root/" 'index($0,root)==1 {found=1} END {exit !found}'; then
-    echo 'root cleanup refuses mounted world; use helper unmount first' >&2; exit 1
+  # A volume is a project-quota directory with kernel limits: removing the tree alone would leave
+  # the limits behind, so every volume is destroyed through the helper first (world-down does).
+  if compgen -G "$root/volumes/*.conf" >/dev/null; then
+    echo 'root cleanup refuses a world with registered volumes; destroy them through the helper first' >&2; exit 1
   fi
   revoked=
   if [[ -f $root/bwrap-acl-grants ]]; then

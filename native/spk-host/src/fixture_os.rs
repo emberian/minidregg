@@ -165,6 +165,15 @@ pub(crate) fn var_filesystem(
     }
 }
 
+/// The project of the open `/var`: the fixture helper registers it beside the mount.
+pub(crate) fn var_project(var_fd: std::os::fd::RawFd) -> io::Result<(u32, bool)> {
+    let path = fs::read_link(format!("/proc/self/fd/{var_fd}"))?;
+    let name = path.file_name().and_then(|name| name.to_str()).ok_or_else(|| invalid("fixture mount name"))?;
+    let text = fs::read_to_string(root()?.join("mounts").join(name))?;
+    let project = text.lines().find_map(|line| line.strip_prefix("project=")).and_then(|v| v.parse::<u32>().ok());
+    Ok((project.ok_or_else(|| invalid("fixture project absent"))?, true))
+}
+
 /// The principal cannot switch accounts: the drop is the part an unprivileged
 /// process can make (no_new_privs, not dumpable), and the identity a role
 /// holds is the account its unit names, by name.

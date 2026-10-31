@@ -45,8 +45,8 @@ grain, exact volume path, registered namespace uid, volume id and quota
 root-owned registry (`/etc/mini-spk-volumes/STORE.json`, written by
 `install-user-world`) selects all paths; a request whose path differs refuses,
 and a caller whose `SUDO_UID` is not the registered operator refuses
-(`volume_helper.rs:125-128`). Freeze is one retained freeze/copy/thaw
-transaction with a durable repair obligation on process loss
+(`volume_helper.rs:125-128`). Freeze is one retained quiesce (cgroup freeze of the
+grain's resident units)/copy/thaw transaction with a durable repair obligation on process loss
 (`volume_helper.rs:189-190,297-300`). Each exec logs its caller uid
 (`volume_helper.rs:201,256`). The broker checks each current incarnation and its
 settled pause before checkpoint copying.
@@ -57,5 +57,5 @@ Its acceptance phase uses sudo solely for the helper and standard uid mapping;
 both brokers and residents run as the operator named by `MINI_OPERATOR_UID`
 (default 1001). EXIT teardown removes scratch
 registries, sudoers files and the scratch helper and asserts removal.
-`custody` mode exercises only physical ext4/freeze/cross-world refusal; it is
+`custody` mode exercises only physical project-quota directory/freeze/cross-world refusal; it is
 not an SPK lifecycle qualification.

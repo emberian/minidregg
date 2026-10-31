@@ -205,6 +205,13 @@ fn prompt(config: &crate::Config, config_path: &Path, prepared: &Value, journal:
                 if frame["outcome"]!="completed" && drain_preadmission_refusal(config,config_path,journal,state)? {
                     return Ok(false);
                 }
+                // The controller attaches the origin only to a prompt it admitted for this identity. A
+                // prompt that failed before that (the model route, the provider, the worker) carries none,
+                // and the origin check would report that absence instead of the failure. Name the failure.
+                if frame["outcome"]!="completed" && frame["residentOrigin"].is_null() {
+                    return Err(format!("resident prompt ended {} (activity {}, reviewNeeded {}) before the controller recorded a source prompt origin; the controller journal names the cause, nothing is replayed",
+                        frame["outcome"],frame["activity"],frame["reviewNeeded"]));
+                }
                 validate_resident_origin(&frame, &resident_prompt_id, &prompt_sha256)?;
                 let mut completion = frame.clone();
                 completion["residentPendingSha256"] = json!(sha256_bytes(

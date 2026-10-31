@@ -19,7 +19,7 @@ admits through sudoers; the broker's own endpoint is described in
 | `mini-spk-broker@STORE.service` | operator, systemd **user** unit | one JSON line per connection on `WORLD/runtime-STORE/broker.sock` (operator-owned 0600, peer uid = operator); the verbs are the `Request` enum in `native/spk-host/src/broker.rs`; renders the per-generation resident unit (the `Request::InstallUnit` arm of `Broker::handle`), the app's slice under its class slice (`Request::SetCgroup`; the class slices are `render_static`'s) and its hardening drop-in (`hardening` in `broker_home.rs`) |
 | `mini-spk-s<store>-a<app>-g<gen>.service` | operator, user unit | `spk-host resident-bootstrap`: bwrap creates a user namespace, `newuidmap`/`newgidmap` map exactly {operator, app} into it, the resident joins it, forks the launch worker as the app, drops every capability, and serves the app's routes |
 | the app | the broker-placed app uid inside that namespace | bubblewrap with the floor below; fd 3 is its Cap'n Proto bridge |
-| `mini-spk-volume-helper` | root, via sudoers | creates, attests and mounts the app's preallocated ext4 `/var` |
+| `mini-spk-volume-helper` | root, via sudoers | creates, bounds (project quota), attests, captures and destroys the app's `/var` directory; see `VOLUMES.md` |
 
 The resident unit keeps `NoNewPrivileges=no` because the setuid mapping
 helpers must run; for the same reason it cannot take `ProtectSystem`,
@@ -111,11 +111,13 @@ the operator broker's config) and a SHA-pinned host
 executable. The unit sets `NoNewPrivileges` and those caps only: it is not
 network- or filesystem-confined. A killed unit is not an installed package. The
 parser verifies the signature, archive hash and manifest, refuses escaping
-names, and publishes a read-only image by no-replace rename. `spk-var-volume`
-(called only through the helper) creates a class-sized ext4 image, mounts it,
-and publishes the `DREGG/SPK-VAR-CUSTODY/v1` witness the resident checks
-against the Mini-selected volume before launch. Imported images are parsed in
-userspace by e2fsprogs as the app uid and never mounted from operator bytes.
+names, and publishes a read-only image by no-replace rename. The volume helper
+(`broker_volume_dir.rs`, called only through the one-shot helper; the statement of what it
+guarantees is `VOLUMES.md`) makes the app's `/var` a directory on an ext4 or xfs with project
+quotas, whose project limit is the class size, and publishes the
+`DREGG/SPK-VAR-CUSTODY/v1+projdir` witness the resident checks against the Mini-selected volume
+before launch. There is no loop device, image or filesystem UUID. Imported images are parsed in
+userspace by e2fsprogs as the app uid and never mounted.
 
 Size classes are `broker::CLASSES` (S/M/L memory, CPU, tasks, IO weight,
 `/var` size, WebSocket caps); they are operator policy until a Lean

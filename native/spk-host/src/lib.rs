@@ -132,6 +132,8 @@ mod spawn_gate;
 #[cfg(target_os = "linux")]
 mod volume_custody;
 #[cfg(target_os = "linux")]
+mod volume_quota;
+#[cfg(target_os = "linux")]
 mod web_socket;
 #[cfg(target_os = "linux")]
 mod stream_continuity;

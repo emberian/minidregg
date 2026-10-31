@@ -1,14 +1,15 @@
 //! Root volume copies retain every directory/file handle. A durable freeze
-//! intent precedes FIFREEZE; startup takes the same lock and reconciles only
-//! that exact filesystem. No path-based chown, destination reopen or thaw.
+//! intent precedes the cgroup freeze of the grain's processes; startup takes
+//! the same lock and thaws exactly the cgroups the intent names. No path-based
+//! chown, destination reopen or thaw. (The volume is a quota directory, not a
+//! filesystem of its own, so there is no filesystem to freeze: G6 of
+//! deploy/spk-host/VOLUMES.md.)
 use crate::io_context::IoContext;
 use super::*;
 use std::io::{Seek,SeekFrom};
 use std::os::unix::process::CommandExt;
 
-const FIFREEZE:libc::c_ulong=0xc0045877;
-const FITHAW:libc::c_ulong=0xc0045878;
-struct Dir(File);
+pub(super) struct Dir(pub(super) File);
 fn component(name:&str)->io::Result<CString>{
     if name.is_empty() || matches!(name,"."|"..") || name.contains('/') {
         return Err(invalid("volume custody component refused"));
@@ -16,7 +17,7 @@ fn component(name:&str)->io::Result<CString>{
     CString::new(name).map_err(|_|invalid("NUL volume component"))
 }
 impl Dir {
-    fn absolute(path:&Path,allowed:&[u32])->io::Result<Self>{
+    pub(super) fn absolute(path:&Path,allowed:&[u32])->io::Result<Self>{
         if !path.is_absolute(){return Err(invalid("volume custody absolute directory required"))}
         let mut dir=Self(File::open("/").ctx("open", &"/")?);
         for part in path.components().skip(1) {
@@ -26,7 +27,7 @@ impl Dir {
         }
         Ok(dir)
     }
-    fn directory(&self,name:&str,allowed:&[u32])->io::Result<Self>{
+    pub(super) fn directory(&self,name:&str,allowed:&[u32])->io::Result<Self>{
         let name=component(name)?;
         let fd=unsafe{libc::openat(self.0.as_raw_fd(),name.as_ptr(),libc::O_RDONLY|libc::O_DIRECTORY|libc::O_NOFOLLOW|libc::O_CLOEXEC)};
         if fd<0{return Err(io::Error::last_os_error())}
@@ -59,7 +60,7 @@ impl Dir {
         }
         Ok(f)
     }
-    fn read_root(&self,name:&str)->io::Result<File>{
+    pub(super) fn read_root(&self,name:&str)->io::Result<File>{
         let c=component(name)?;
         let fd=unsafe{libc::openat(self.0.as_raw_fd(),c.as_ptr(),libc::O_RDONLY|libc::O_NOFOLLOW|libc::O_CLOEXEC|libc::O_NONBLOCK)};
         if fd<0{return Err(io::Error::last_os_error())}
@@ -119,47 +120,105 @@ fn root_volume_uid(root:&Path,name:&str)->io::Result<u32>{
     if uid<100{return Err(invalid("registered volume UID privileged"))}
     Ok(uid)
 }
-fn freeze_ioctl(fd:i32,operation:libc::c_ulong)->io::Result<()>{
-    if unsafe{libc::ioctl(fd,operation,0)}==0{return Ok(())}
-    Err(io::Error::last_os_error())
+const CGROUP_ROOT:&str="/sys/fs/cgroup";
+fn cgroup_path_ok(path:&Path)->bool{
+    path.starts_with(CGROUP_ROOT) && path.components().all(|c|!matches!(c,std::path::Component::ParentDir|std::path::Component::CurDir))
+}
+fn group_unit_name(store:&str,app:&str,name:&str)->bool{
+    let prefix=format!("mini-spk-s{store}-a{app}-g");
+    name.strip_prefix(&prefix).and_then(|r|r.strip_suffix(".service")).is_some_and(decimal)
+}
+/// The cgroups of the grain's resident units in the operator's user manager.
+fn grain_groups(base:&Path,store:&str,app:&str)->io::Result<Vec<PathBuf>>{
+    fn visit(dir:&Path,depth:usize,store:&str,app:&str,out:&mut Vec<PathBuf>)->io::Result<()>{
+        let entries=match fs::read_dir(dir){Ok(e)=>e,Err(e) if e.kind()==io::ErrorKind::NotFound=>return Ok(()),Err(e)=>return Err(e)};
+        for entry in entries{
+            let entry=entry?;
+            if !entry.file_type()?.is_dir(){continue}
+            let name=entry.file_name().to_string_lossy().into_owned();
+            if group_unit_name(store,app,&name){out.push(entry.path());continue}
+            if depth<8 && (name.ends_with(".slice") || name.ends_with(".service")) {visit(&entry.path(),depth+1,store,app,out)?}
+        }
+        Ok(())
+    }
+    let mut out=Vec::new();visit(base,0,store,app,&mut out)?;out.sort();Ok(out)
+}
+fn write_freeze(group:&Path,value:&str)->io::Result<()>{
+    let file=group.join("cgroup.freeze");
+    fs::write(&file,value).ctx("write",&file)
+}
+fn frozen_state(group:&Path)->io::Result<bool>{
+    let events=group.join("cgroup.events");
+    let text=fs::read_to_string(&events).ctx("read",&events)?;
+    Ok(text.lines().any(|l|l=="frozen 1"))
+}
+/// Whether a live process of `uid` sits outside every group in `groups` (a process the freeze
+/// would not hold). `/proc` is read as root, so none is hidden.
+fn unfrozen_process_of(uid:u32,groups:&[PathBuf])->io::Result<Option<u32>>{
+    for entry in fs::read_dir("/proc").ctx("list","/proc")?{
+        let entry=entry?;
+        let Some(pid)=entry.file_name().to_str().and_then(|n|n.parse::<u32>().ok()) else{continue};
+        let Ok(status)=fs::read_to_string(entry.path().join("status")) else{continue};
+        let real=status.lines().find_map(|l|l.strip_prefix("Uid:")).and_then(|l|l.split_whitespace().next()).and_then(|n|n.parse::<u32>().ok());
+        let zombie=status.lines().any(|l|l.starts_with("State:") && l.contains("Z"));
+        if real!=Some(uid) || zombie{continue}
+        let Ok(cg)=fs::read_to_string(entry.path().join("cgroup")) else{continue};
+        let held=cg.lines().filter_map(|l|l.strip_prefix("0::")).any(|p|{
+            let full=Path::new(CGROUP_ROOT).join(p.trim_start_matches('/'));
+            groups.iter().any(|g|full.starts_with(g))
+        });
+        if !held{return Ok(Some(pid))}
+    }
+    Ok(None)
 }
 #[derive(Serialize,Deserialize)]
 #[serde(rename_all="camelCase",deny_unknown_fields)]
-struct Pending {protocol:String,name:String,mount_dev:u64,mount_ino:u64}
-struct Frozen {dir:Dir,mount:File,name:String,_lock:File,finished:bool}
+struct Pending {protocol:String,name:String,groups:Vec<String>}
+struct Frozen {dir:Dir,groups:Vec<PathBuf>,name:String,_lock:File,finished:bool}
 impl Frozen {
-    fn begin(root:&Path,name:&str,required:bool)->io::Result<Option<Self>>{
+    /// Freeze the grain's running processes (none when it is stopped). `cgroups` is the
+    /// operator manager's cgroup directory.
+    fn begin(root:&Path,store:&str,app:&str,operator_uid:u32,cgroups:&Path)->io::Result<Self>{
+        let name=volume_name(store,app);
         let grains=Dir::absolute(root,&[0])?;
-        let vars=grains.directory("vars",&[0])?;
-        let mount=vars.directory(name,&[0,root_volume_uid(root,name)?])?.0;
-        if mount.metadata()?.dev()==vars.0.metadata()?.dev(){
-            if required{return Err(invalid("registered volume is not a distinct mounted filesystem"))}
-            return Ok(None)
-        }
+        let app_uid=root_volume_uid(root,&name)?;
         let dir=grains.directory("volume-custody",&[0])?.create_dir("freezes")?;
         let lock=dir.lock()?;
-        recover_locked(root,&dir)?;
-        let meta=mount.metadata()?;
-        let pending=Pending{protocol:"mini-spk-freeze-pending-v1".into(),name:name.into(),
-            mount_dev:meta.dev(),mount_ino:meta.ino()};
+        recover_locked(&dir)?;
+        let _=operator_uid;
+        let groups=grain_groups(cgroups,store,app)?;
+        let pending=Pending{protocol:"mini-spk-freeze-pending-v2".into(),name:name.clone(),
+            groups:groups.iter().map(|g|g.to_string_lossy().into_owned()).collect()};
         let leaf=format!("{name}.json");
         let mut file=dir.create(&leaf)?;
         file.write_all(&serde_json::to_vec(&pending)?)?;file.sync_all()?;dir.0.sync_all()?;
-        if let Err(error)=freeze_ioctl(mount.as_raw_fd(),FIFREEZE){
-            // Known refusal did not acquire our freeze; never thaw another
-            // caller's busy filesystem. Ambiguous errors keep the intent.
-            if matches!(error.raw_os_error(),Some(libc::EBUSY)|Some(libc::EINVAL)){
-                dir.unlink(&leaf)?;
+        let this=Self{dir,groups,name:leaf,_lock:lock,finished:false};
+        let held=(||->io::Result<()>{
+            for g in &this.groups{write_freeze(g,"1")?}
+            let deadline=std::time::Instant::now()+Duration::from_secs(10);
+            for g in &this.groups{
+                while !frozen_state(g)?{
+                    if std::time::Instant::now()>deadline{return Err(invalid("grain cgroup did not freeze in time"))}
+                    std::thread::sleep(Duration::from_millis(5));
+                }
             }
+            if let Some(pid)=unfrozen_process_of(app_uid,&this.groups)?{
+                return Err(invalid(format!("process {pid} of the grain's uid is outside the frozen cgroups; the capture would not be consistent")));
+            }
+            Ok(())
+        })();
+        if let Err(error)=held{
+            // Our freeze never completed: thaw what we froze and drop the intent.
+            let _=this.thaw();
             return Err(error)
         }
-        Ok(Some(Self{dir,mount,name:leaf,_lock:lock,finished:false}))
+        Ok(this)
     }
     fn finish(mut self)->io::Result<()>{
         self.thaw()?;self.finished=true;Ok(())
     }
     fn thaw(&self)->io::Result<()>{
-        clear_pending(&self.dir,&self.name,||freeze_ioctl(self.mount.as_raw_fd(),FITHAW))
+        clear_pending(&self.dir,&self.name,||thaw_groups(&self.groups))
     }
 }
 impl Drop for Frozen {
@@ -167,35 +226,40 @@ impl Drop for Frozen {
         if !self.finished{let _=self.thaw();} // SIGKILL retains intent for startup.
     }
 }
-// Called only after exact mount identity validation while holding freeze custody.
-// An unsuccessful thaw never erases the durable repair obligation.
-fn clear_pending(dir:&Dir,leaf:&str,thaw:impl FnOnce()->io::Result<()>)->io::Result<()>{
-    match thaw(){
-        Ok(())=>{},
-        Err(e) if e.raw_os_error()==Some(libc::EINVAL)=>{},
-        Err(e)=>return Err(e),
+fn thaw_groups(groups:&[PathBuf])->io::Result<()>{
+    for g in groups{
+        if !cgroup_path_ok(g){return Err(invalid("freeze intent names a path outside the cgroup tree"))}
+        match write_freeze(g,"0"){
+            Ok(())=>{},
+            Err(e) if e.kind()==io::ErrorKind::NotFound=>{}, // the group is gone: nothing is frozen
+            Err(e)=>return Err(e),
+        }
     }
+    Ok(())
+}
+// Called while holding freeze custody. An unsuccessful thaw never erases the
+// durable repair obligation.
+fn clear_pending(dir:&Dir,leaf:&str,thaw:impl FnOnce()->io::Result<()>)->io::Result<()>{
+    thaw()?;
     dir.unlink(leaf)
 }
-fn recover_locked(root:&Path,dir:&Dir)->io::Result<()>{
+fn recover_locked(dir:&Dir)->io::Result<()>{
     let listing=PathBuf::from(format!("/proc/self/fd/{}",dir.0.as_raw_fd()));
     for entry in fs::read_dir(&listing).ctx("list", &listing)?{
         let leaf=entry?.file_name().to_string_lossy().into_owned();
         if leaf==".freeze.lock"{continue}
         if !leaf.ends_with(".json"){return Err(invalid("unknown freeze custody artifact"))}
         let file=dir.read_root(&leaf)?;
-        if file.metadata()?.len()>4096{return Err(invalid("freeze intent exceeds bound"))}
+        if file.metadata()?.len()>65536{return Err(invalid("freeze intent exceeds bound"))}
         let p:Pending=serde_json::from_reader(file)?;
         let (store,app)=p.name.split_once('-').ok_or_else(||invalid("freeze coordinate"))?;
-        if p.protocol!="mini-spk-freeze-pending-v1" || !store_key(store) || !decimal(app)
+        if p.protocol!="mini-spk-freeze-pending-v2" || !store_key(store) || !decimal(app)
             || leaf!=format!("{}.json",p.name){return Err(invalid("freeze intent coordinate refused"))}
-        let grains=Dir::absolute(root,&[0])?;
-        let mount=grains.directory("vars",&[0])?.directory(&p.name,&[0,root_volume_uid(root,&p.name)?])?.0;
-        let m=mount.metadata()?;
-        if m.dev()!=p.mount_dev || m.ino()!=p.mount_ino {
-            return Err(invalid("pending freeze filesystem changed; no unrelated mount thawed"));
+        let groups:Vec<PathBuf>=p.groups.iter().map(PathBuf::from).collect();
+        if groups.iter().any(|g|!cgroup_path_ok(g)||g.file_name().and_then(|n|n.to_str()).is_none_or(|n|!group_unit_name(store,app,n))){
+            return Err(invalid("freeze intent names a group that is not this grain's unit"))
         }
-        clear_pending(dir,&leaf,||freeze_ioctl(mount.as_raw_fd(),FITHAW))?;
+        clear_pending(dir,&leaf,||thaw_groups(&groups))?;
     }
     Ok(())
 }
@@ -203,7 +267,7 @@ pub(super) fn recover(root:&Path)->io::Result<()>{
     let grains=Dir::absolute(root,&[0])?;
     let dir=grains.directory("volume-custody",&[0])?.create_dir("freezes")?;
     let _lock=dir.lock()?;
-    recover_locked(root,&dir)
+    recover_locked(&dir)
 }
 fn sparse_copy(source:&mut File,out:&mut File)->io::Result<()>{
     let length=source.metadata()?.len();out.set_len(length)?;
@@ -233,6 +297,49 @@ fn sparse_copy(source:&mut File,out:&mut File)->io::Result<()>{
     }
     Ok(())
 }
+/// The operator manager's cgroup directory, where a grain's resident units live.
+fn operator_cgroups(operator_uid:u32)->PathBuf{
+    PathBuf::from(format!("{CGROUP_ROOT}/user.slice/user-{operator_uid}.slice/user@{operator_uid}.service"))
+}
+/// Build the export image of a quiesced volume: an ext4 image of its tree, made by `mke2fs -d`
+/// as the grain's uid with no privilege (symlinks stay links, nothing is followed), into a stage
+/// the grain's uid owns. Returns the open image.
+fn build_image(root:&Path,name:&str,app_uid:u32,size_mib:u64)->io::Result<(File,String)>{
+    let vars=Dir::absolute(root,&[0])?.directory("vars",&[0])?;
+    let stage_name=format!(".export-{name}");
+    let c=component(&stage_name)?;
+    if unsafe{libc::mkdirat(vars.0.as_raw_fd(),c.as_ptr(),0o700)}!=0{return Err(io::Error::last_os_error())}
+    let built=(||->io::Result<File>{
+        let stage=vars.directory(&stage_name,&[unsafe{libc::geteuid()}])?;
+        change_owner(&stage.0,app_uid,app_uid)?;
+        let image=stage.create("image.ext4")?;
+        image.set_len(super::volume_dir::export_image_bytes(size_mib))?;
+        change_owner(&image,app_uid,app_uid)?;
+        let uid=app_uid.to_string();
+        let tree=root.join("vars").join(name);
+        let stage_path=root.join("vars").join(&stage_name);
+        let output=Command::new("/usr/bin/setpriv")
+            .args([&format!("--reuid={uid}"),&format!("--regid={uid}"),"--clear-groups","--no-new-privs","--inh-caps=-all","--bounding-set=-all","--","/usr/sbin/mke2fs"])
+            .args(["-q","-t","ext4","-F","-d"]).arg(&tree).arg("image.ext4")
+            .current_dir(&stage_path).env_clear().env("PATH","/usr/sbin:/usr/bin:/sbin:/bin").stdin(Stdio::null()).output()?;
+        if !output.status.success(){
+            return Err(invalid(format!("volume export image build failed: {}",String::from_utf8_lossy(&output.stderr).trim())))
+        }
+        Ok(image)
+    })();
+    Ok((built.map_err(|e|{ let _=remove_stage(&vars,&stage_name); e})?,stage_name))
+}
+fn remove_stage(vars:&Dir,stage_name:&str)->io::Result<()>{
+    let c=component(stage_name)?;
+    // The stage is the grain uid's; it is opened by descriptor, never by owner expectation.
+    let fd=unsafe{libc::openat(vars.0.as_raw_fd(),c.as_ptr(),libc::O_RDONLY|libc::O_DIRECTORY|libc::O_NOFOLLOW|libc::O_CLOEXEC)};
+    if fd>=0{
+        let stage=unsafe{File::from_raw_fd(fd)};
+        super::volume_dir::remove_contents(stage.as_raw_fd())?;
+    }
+    if unsafe{libc::unlinkat(vars.0.as_raw_fd(),c.as_ptr(),libc::AT_REMOVEDIR)}!=0{return Err(io::Error::last_os_error())}
+    Ok(())
+}
 pub(super) fn export(root:&Path,store:&str,app:&str,uid:u32,gid:u32)->io::Result<Value>{
     let grains=Dir::absolute(root,&[0])?;
     let op=grains.directory(store,&[uid])?;
@@ -248,19 +355,26 @@ pub(super) fn export(root:&Path,store:&str,app:&str,uid:u32,gid:u32)->io::Result
         return Err(invalid("exports directory must remain private"));
     }
     let name=volume_name(store,app);
-    let source_name=format!("{name}.ext4");
-    let volumes=grains.directory("volumes",&[0])?;
-    let mut source=volumes.read_root(&source_name)?;
+    let registered=super::volume_dir::capture_target(root,&name)?;
     let stamp=SystemTime::now().duration_since(UNIX_EPOCH).map_err(|_|invalid("clock"))?.as_nanos();
     let leaf=format!("{app}-{stamp}.ext4");
     let mut out=exports.create(&leaf)?;
     let freeze_started=std::time::Instant::now();
-    let frozen=Frozen::begin(root,&name,true)?;
+    let frozen=Frozen::begin(root,store,app,uid,&operator_cgroups(uid))?;
     let copied=(||->io::Result<String>{
-        sparse_copy(&mut source,&mut out)?;out.sync_all()?;
-        out.seek(SeekFrom::Start(0))?;file_sha256(&mut out)
+        let before=super::volume_dir::fingerprint(registered.dir.as_raw_fd())?;
+        let (mut image,stage_name)=build_image(root,&name,registered.app_uid,registered.size_mib)?;
+        let result=(||->io::Result<String>{
+            let after=super::volume_dir::fingerprint(registered.dir.as_raw_fd())?;
+            if before!=after{return Err(invalid("volume tree changed during capture"))}
+            sparse_copy(&mut image,&mut out)?;out.sync_all()?;
+            out.seek(SeekFrom::Start(0))?;file_sha256(&mut out)
+        })();
+        let vars=Dir::absolute(root,&[0])?.directory("vars",&[0])?;
+        let _=remove_stage(&vars,&stage_name);
+        result
     })();
-    if let Some(guard)=frozen{guard.finish()?}
+    frozen.finish()?;
     let frozen_ms=freeze_started.elapsed().as_millis();
     let hash=copied?;
     exports.same_leaf(&leaf,&out)?;
@@ -355,10 +469,6 @@ mod tests {
         assert_eq!(fs::read(scratch.0.join("frozen.json")).unwrap(),b"exact retained filesystem");
         clear_pending(&dir,"frozen.json",||Ok(())).unwrap();
         assert!(!scratch.0.join("frozen.json").exists());
-        let mut before_freeze=dir.create("before-freeze.json").unwrap();before_freeze.write_all(b"durable before ioctl").unwrap();
-        before_freeze.sync_all().unwrap();dir.0.sync_all().unwrap();
-        clear_pending(&dir,"before-freeze.json",||Err(io::Error::from_raw_os_error(libc::EINVAL))).unwrap();
-        assert!(!scratch.0.join("before-freeze.json").exists());
     }
     #[test]
     fn volume_custody_live_capture_lock_refuses_competing_recovery(){
@@ -368,49 +478,66 @@ mod tests {
     }
 
     fn physical_receiving_root()->PathBuf {
-        assert_eq!(unsafe{libc::geteuid()},0,"explicit root disposable-filesystem receiver only");
-        let root=PathBuf::from(std::env::var_os("MINI_VOLUME_CUSTODY_RECEIVING_ROOT").expect("explicit owned receiving root"));
-        assert!(root.to_string_lossy().starts_with("/var/lib/mini-spk-custody-receiving-"));
-        let dir=Dir::absolute(&root,&[0]).unwrap();assert_eq!(dir.0.metadata().unwrap().mode()&0o777,0o700);
+        assert_eq!(unsafe{libc::geteuid()},0,"explicit root disposable receiver only");
+        let root=PathBuf::from(std::env::var_os("MINI_VOLUME_QUOTA_ROOT").expect("explicit owned grains root"));
+        assert!(root.to_string_lossy().starts_with("/var/lib/mini-spk-volume-test-"));
         root
     }
+    const PHYS_STORE:&str="1111111111111111";
+    const PHYS_APP:&str="990010";
+    const PHYS_UID:u32=64010;
     #[test]
-    #[ignore = "explicit disposable root loop filesystem worker; only launched by receiving parent"]
+    #[ignore = "explicit disposable root cgroup worker; only launched by receiving parent"]
     fn volume_custody_physical_freeze_worker(){
         let root=physical_receiving_root();assert_eq!(std::env::var("MINI_VOLUME_CUSTODY_WORKER").unwrap(),"yes");
-        let _guard=Frozen::begin(&root,"1111111111111111-990010",true).unwrap().expect("actual mounted filesystem");
-        let mut partial=OpenOptions::new().write(true).create_new(true).mode(0o600).open(root.join("partial-copy.ext4")).unwrap();
-        partial.write_all(&vec![7u8;128*1024]).unwrap();partial.sync_all().unwrap();
-        let mut ready=OpenOptions::new().write(true).create_new(true).mode(0o600).open(root.join("broker/worker-ready")).unwrap();
-        ready.write_all(b"frozen and partial output durable").unwrap();ready.sync_all().unwrap();
+        let _guard=Frozen::begin(&root,PHYS_STORE,PHYS_APP,0,Path::new(CGROUP_ROOT)).unwrap();
+        let mut ready=OpenOptions::new().write(true).create_new(true).mode(0o600).open(root.join("worker-ready")).unwrap();
+        ready.write_all(b"frozen and intent durable").unwrap();ready.sync_all().unwrap();
         loop{std::thread::sleep(Duration::from_millis(100));}
     }
     #[test]
-    #[ignore = "explicit root-only disposable loop filesystem; actual SIGKILL/freeze recovery qualification"]
-    fn volume_custody_physical_process_death_reconciles_exact_mount(){
-        let root=physical_receiving_root();recover(&root).unwrap();
-        struct Worker {child:std::process::Child,root:PathBuf}
-        impl Drop for Worker {fn drop(&mut self){let _=self.child.kill();let _=self.child.wait();let _=recover(&self.root);}}
-        let child=Command::new(std::env::current_exe().unwrap())
+    #[ignore = "explicit root-only cgroup2 host; actual SIGKILL/freeze recovery qualification"]
+    fn volume_custody_physical_process_death_thaws_exact_cgroup(){
+        let root=physical_receiving_root();
+        let (dep,host,vid)=("a".repeat(64),"b".repeat(64),"d".repeat(64));
+        let volume=super::volume_dir::Volume{root:&root,store:PHYS_STORE,grain:PHYS_APP,app_uid:PHYS_UID,size_mib:64,volume_id:&vid,deployment_id:&dep,host_id:&host};
+        volume.create(None).unwrap();
+        fs::create_dir_all(root.join("volume-custody")).unwrap();
+        let group=Path::new(CGROUP_ROOT).join(format!("mini-spk-s{PHYS_STORE}-a{PHYS_APP}-g1.service"));
+        fs::create_dir(&group).unwrap();
+        use std::os::unix::process::CommandExt;
+        let sleeper=Command::new("/usr/bin/sleep").arg("1000").uid(PHYS_UID).gid(PHYS_UID).spawn().unwrap();
+        fs::write(group.join("cgroup.procs"),sleeper.id().to_string()).unwrap();
+        struct Cleanup{group:PathBuf,sleeper:std::process::Child,worker:Option<std::process::Child>}
+        impl Drop for Cleanup{fn drop(&mut self){
+            if let Some(w)=self.worker.as_mut(){let _=w.kill();let _=w.wait();}
+            let _=fs::write(self.group.join("cgroup.freeze"),"0");
+            let _=self.sleeper.kill();let _=self.sleeper.wait();
+            for _ in 0..50{ if fs::remove_dir(&self.group).is_ok(){break} std::thread::sleep(Duration::from_millis(20)); }
+        }}
+        let mut cleanup=Cleanup{group:group.clone(),sleeper,worker:None};
+        cleanup.worker=Some(Command::new(std::env::current_exe().unwrap())
             .args(["--exact","broker::volume_custody::tests::volume_custody_physical_freeze_worker","--ignored","--nocapture"])
-            .env("MINI_VOLUME_CUSTODY_WORKER","yes").env("MINI_VOLUME_CUSTODY_RECEIVING_ROOT",&root).spawn().unwrap();
-        let mut worker=Worker{child,root:root.clone()};
-        let ready=root.join("broker/worker-ready");let deadline=std::time::Instant::now()+Duration::from_secs(5);
+            .env("MINI_VOLUME_CUSTODY_WORKER","yes").spawn().unwrap());
+        let ready=root.join("worker-ready");let _=fs::remove_file(&ready);let deadline=std::time::Instant::now()+Duration::from_secs(10);
         while !ready.exists(){
-            assert!(worker.child.try_wait().unwrap().is_none(),"freeze worker exited before ready");
+            assert!(cleanup.worker.as_mut().unwrap().try_wait().unwrap().is_none(),"freeze worker exited before ready");
             assert!(std::time::Instant::now()<deadline,"bounded freeze worker readiness");
             std::thread::sleep(Duration::from_millis(10));
         }
-        let intent=root.join("volume-custody/freezes/1111111111111111-990010.json");assert!(intent.is_file());
-        worker.child.kill().unwrap();let status=worker.child.wait().unwrap();
+        let intent=root.join(format!("volume-custody/freezes/{PHYS_STORE}-{PHYS_APP}.json"));assert!(intent.is_file());
+        assert!(fs::read_to_string(group.join("cgroup.events")).unwrap().contains("frozen 1"));
+        let mut worker=cleanup.worker.take().unwrap();
+        worker.kill().unwrap();let status=worker.wait().unwrap();
         use std::os::unix::process::ExitStatusExt;assert_eq!(status.signal(),Some(libc::SIGKILL));
         assert!(intent.is_file(),"SIGKILL must retain durable freeze obligation");
-        assert!(!root.join("grains-backup.json").exists(),"partial output is not a completed backup");
+        assert!(fs::read_to_string(group.join("cgroup.events")).unwrap().contains("frozen 1"),"the grain stays frozen until recovery");
         recover(&root).unwrap();assert!(!intent.exists());
-        let status=Command::new("/usr/bin/timeout").args(["3","/usr/bin/touch"])
-            .arg(root.join("vars/1111111111111111-990010/after-recovery")).status().unwrap();
-        assert!(status.success(),"actual filesystem remained frozen after recovery");
-        assert_eq!(fs::metadata(root.join("partial-copy.ext4")).unwrap().len(),128*1024);
+        let deadline=std::time::Instant::now()+Duration::from_secs(5);
+        while fs::read_to_string(group.join("cgroup.events")).unwrap().contains("frozen 1"){
+            assert!(std::time::Instant::now()<deadline,"recovery thawed exactly the named cgroup");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        volume.destroy().unwrap();
     }
-
 }
