@@ -30,24 +30,26 @@ pub(super) fn select(
         &delegation.snapshot_capability,
         &delegation.snapshot_observe_capability,
     ];
-    if delegation.protocol != "mini-spk-grain-lifecycle-delegation-v1"
-        || delegation.app_owner != owner
-        || delegation.management_subject != manager
-        || !decimal(&delegation.app_owner)
-        || !decimal(&delegation.management_subject)
-        || !capabilities.iter().all(|v| decimal(v) && v.as_str() != "0")
-        || s.app != admitted.app
-        || s.package_manifest != admitted.package_manifest
-        || s.snapshot_manifest != admitted.snapshot_manifest
-        || s.app_capability == admitted.app_capability
-        || s.package_capability == admitted.package_capability
-        || s.app_capability == s.package_capability
-        || s.app_capability == delegation.snapshot_capability
-        || s.package_capability == delegation.snapshot_capability
-    {
+    let checks: [(&str, bool); 12] = [
+        ("protocol", delegation.protocol == "mini-spk-grain-lifecycle-delegation-v1"),
+        ("appOwner differs from the app's owner", delegation.app_owner == owner),
+        ("managementSubject differs from the host manager", delegation.management_subject == manager),
+        ("appOwner is not decimal", decimal(&delegation.app_owner)),
+        ("managementSubject is not decimal", decimal(&delegation.management_subject)),
+        ("a snapshot capability is not a nonzero decimal", capabilities.iter().all(|v| decimal(v) && v.as_str() != "0")),
+        ("selector.app differs from the admitted birth", s.app == admitted.app),
+        ("selector.packageManifest differs from the admitted birth", s.package_manifest == admitted.package_manifest),
+        ("selector.snapshotManifest differs from the admitted birth", s.snapshot_manifest == admitted.snapshot_manifest),
+        ("selector capabilities repeat the admitted birth's",
+            s.app_capability != admitted.app_capability && s.package_capability != admitted.package_capability),
+        ("app and package capabilities are the same", s.app_capability != s.package_capability),
+        ("a lifecycle capability is the snapshot capability",
+            s.app_capability != delegation.snapshot_capability && s.package_capability != delegation.snapshot_capability),
+    ];
+    if let Some((why, _)) = checks.iter().find(|(_, ok)| !ok) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "lifecycle delegation differs from application birth or host manager",
+            format!("lifecycle delegation differs from application birth or host manager: {why}"),
         ));
     }
     Ok(delegation.selector)
