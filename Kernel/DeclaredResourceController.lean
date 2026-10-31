@@ -833,6 +833,48 @@ theorem policyConfigFromStep_exact [DecidableEq F]
     policyConfigFromStep prepared incidence (step prepared tuple incidence) =
       policyConfig prepared tuple incidence := rfl
 
+/-- The leg's step on the full projection (`step_prepared_exact`: `step` is this, cut to `legKeys`). -/
+abbrev fullStep (prepared : PreparedInvocation deployment profile ambient ground command)
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) : PolicyStepContext :=
+  PolicyStepContext.ofPreparedTuple (project prepared incidence) profile.semantics
+    { tuple with primary := incidence }
+
+/-- Any graph the leg's configuration loads is the one `legKeys` reads. -/
+theorem legKeys_loaded [DecidableEq F]
+    (prepared : PreparedInvocation deployment profile ambient ground command)
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command)
+    (graph : PolicyComponentResolution.LoadedGraph (policyConfig prepared tuple incidence).snapshot
+      (policyConfig prepared tuple incidence).store (policyConfig prepared tuple incidence).profile.semantics
+      (policyConfig prepared tuple incidence).target (policyConfig prepared tuple incidence).additional)
+    (loaded : PolicyComponentResolution.loadTarget (policyConfig prepared tuple incidence).snapshot
+      (policyConfig prepared tuple incidence).store (policyConfig prepared tuple incidence).profile.semantics
+      (policyConfig prepared tuple incidence).target (policyConfig prepared tuple incidence).resolutionBudget
+      (policyConfig prepared tuple incidence).additional = .ok graph) :
+    legKeys prepared incidence = (ResolvedLawCompilation.predicate graph.resolved).reads := by
+  unfold legKeys PhysicalLawResolution.targetPredicate? PhysicalLawResolution.predicateOf?
+  simp only [policyConfig, policyConfigFromStep, PhysicalLawResolution.targetConfig,
+    PhysicalLawResolution.config] at loaded
+  rw [loaded]
+  rfl
+
+/-- **A loaded law's verdict on the leg's step is its verdict on the full step**. -/
+theorem step_eval_loaded [DecidableEq F]
+    (prepared : PreparedInvocation deployment profile ambient ground command)
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command)
+    (graph : PolicyComponentResolution.LoadedGraph (policyConfig prepared tuple incidence).snapshot
+      (policyConfig prepared tuple incidence).store (policyConfig prepared tuple incidence).profile.semantics
+      (policyConfig prepared tuple incidence).target (policyConfig prepared tuple incidence).additional)
+    (loaded : PolicyComponentResolution.loadTarget (policyConfig prepared tuple incidence).snapshot
+      (policyConfig prepared tuple incidence).store (policyConfig prepared tuple incidence).profile.semantics
+      (policyConfig prepared tuple incidence).target (policyConfig prepared tuple incidence).resolutionBudget
+      (policyConfig prepared tuple incidence).additional = .ok graph) :
+    Minidregg.Pred.eval (ResolvedLawCompilation.predicate graph.resolved)
+        (step prepared tuple incidence).oldState (step prepared tuple incidence).newState =
+      Minidregg.Pred.eval (ResolvedLawCompilation.predicate graph.resolved)
+        (fullStep prepared tuple incidence).oldState (fullStep prepared tuple incidence).newState := by
+  rw [step_prepared_exact, legKeys_loaded prepared tuple incidence graph loaded]
+  exact Minidregg.Pred.eval_restrict _ _ _
+
 /-- The cut is to the reads of exactly the law the leg's configuration resolves. -/
 theorem legKeys_exact [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient ground command)

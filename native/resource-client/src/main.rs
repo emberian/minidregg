@@ -2294,10 +2294,21 @@ fn query_retained(
     create_dir(directory)?;
     replan::replan(
         "signed read",
-        || query_once(host, config, intent, intent_kind, key, inspection_kind, directory),
+        || sealed_read(directory, || query_once(host, config, intent, intent_kind, key, inspection_kind, directory)),
         replan::stale_root,
         |number| replan::retire_attempt(directory, number),
     )
+}
+
+/// One signed read's attempt as caches of per-directory seal records written after its answer
+/// (`mini_sdk::phase`, invariant 5): a read has no effect to retry exactly, so its custody files
+/// need one durable record each directory, not one fsync each. An error leaves the attempt
+/// unsealed, and an unsealed attempt is never reused.
+fn sealed_read<T>(directory: &Path, read: impl FnOnce() -> Result<T>) -> Result<T> {
+    let _caches = mini_sdk::phase::CacheScope::enter_tree(directory)?;
+    let value = read()?;
+    mini_sdk::phase::seal_tree(directory)?;
+    Ok(value)
 }
 
 fn query_once(
@@ -2389,7 +2400,7 @@ fn query_batch_retained(
     }
     create_dir(directory)?;
     replan::replan("signed read batch",
-        || query_batch_once(host, config, intents, key, directory),
+        || sealed_read(directory, || query_batch_once(host, config, intents, key, directory)),
         replan::stale_root, |n| replan::retire_attempt(directory, n))
 }
 

@@ -27,6 +27,13 @@
 //!    (`outcome.*`, `retry-*`) are written after transmission and keep their own fsync: a torn
 //!    answer would read as corruption, not as "look it up".
 //!
+//! 5. A signed READ's attempt (a query, a batch of queries) has no effect to retry exactly, so it
+//!    is sealed after its answer rather than before its call: [`CacheScope::enter_tree`] makes
+//!    every file under the attempt directory (its per-query children included) a cache, and
+//!    [`seal_tree`] then records each child directory and the attempt directory, one record each.
+//!    A crash before that leaves an unsealed read attempt, which is never reused (invariant 4);
+//!    the next command reads again.
+//!
 //! Format: `MINI-ATTEMPT-SEAL/v1\n`, one JSON index line
 //! `{"files":[{"name","length","sha256"}...]}\n`, then the files' bytes concatenated in index order.
 use std::cell::RefCell;
@@ -48,7 +55,8 @@ const INDEX_MAX: usize = 64 * 1024;
 const FILE_MAX: usize = 12_102_760;
 
 thread_local! {
-    static SCOPE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+    /// The scope's directory, and whether files in its subdirectories are caches too.
+    static SCOPE: RefCell<Option<(PathBuf, bool)>> = const { RefCell::new(None) };
 }
 
 /// While alive, files created directly in `dir` on this thread are caches (invariant 2): staged
@@ -58,7 +66,15 @@ pub struct CacheScope(());
 impl CacheScope {
     pub fn enter(dir: &Path) -> Result<Self> {
         let dir = std::path::absolute(dir).map_err(|e| Error(e.to_string()))?;
-        SCOPE.with(|s| *s.borrow_mut() = Some(dir));
+        SCOPE.with(|s| *s.borrow_mut() = Some((dir, false)));
+        Ok(CacheScope(()))
+    }
+
+    /// A read attempt's scope (invariant 5): every file under `dir`, at any depth, is a cache
+    /// until [`seal_tree`].
+    pub fn enter_tree(dir: &Path) -> Result<Self> {
+        let dir = std::path::absolute(dir).map_err(|e| Error(e.to_string()))?;
+        SCOPE.with(|s| *s.borrow_mut() = Some((dir, true)));
         Ok(CacheScope(()))
     }
 
@@ -82,8 +98,13 @@ pub(crate) fn is_cache(path: &Path) -> bool {
         return false;
     }
     SCOPE.with(|s| {
-        s.borrow().as_ref().is_some_and(|dir| {
-            std::path::absolute(path).ok().and_then(|p| p.parent().map(Path::to_path_buf)).as_deref() == Some(dir.as_path())
+        s.borrow().as_ref().is_some_and(|(dir, tree)| {
+            let parent = std::path::absolute(path).ok().and_then(|p| p.parent().map(Path::to_path_buf));
+            match parent {
+                Some(parent) if *tree => parent.starts_with(dir),
+                Some(parent) => parent == *dir,
+                None => false,
+            }
         })
     })
 }
@@ -95,6 +116,14 @@ fn sha256_hex(bytes: &[u8]) -> String {
 /// Write `dir/seal.record` over every regular file directly in `dir` (invariant 1). Refuses if a
 /// record is already there.
 pub fn seal(dir: &Path) -> Result<()> {
+    let sealed = seal_one(dir);
+    // From the seal on nothing is a cache: the answer files keep their own fsync (invariant 4).
+    CacheScope::end();
+    sealed
+}
+
+/// One directory's record, the scope left as it is.
+fn seal_one(dir: &Path) -> Result<()> {
     let mut names: Vec<String> = Vec::new();
     for entry in fs::read_dir(dir).map_err(|e| Error(format!("{}: {e}", dir.display())))? {
         let entry = entry.map_err(|e| Error(e.to_string()))?;
@@ -118,9 +147,36 @@ pub fn seal(dir: &Path) -> Result<()> {
     record.extend(serde_json::to_vec(&json!({"files": index})).map_err(|e| Error(e.to_string()))?);
     record.push(b'\n');
     record.extend(payload);
-    let sealed = durable::create_new(&dir.join(RECORD), &record, Perm::Private)
-        .map_err(|e| Error(format!("cannot seal {}: {e}", dir.display())));
-    // From the seal on nothing is a cache: the answer files keep their own fsync (invariant 4).
+    durable::create_new(&dir.join(RECORD), &record, Perm::Private)
+        .map_err(|e| Error(format!("cannot seal {}: {e}", dir.display())))
+}
+
+/// Invariant 5: seal every subdirectory of a read attempt (deepest first), then the attempt
+/// directory itself; each gets its own record over the regular files directly in it. Ends the
+/// scope.
+pub fn seal_tree(dir: &Path) -> Result<()> {
+    fn subdirs(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
+        for entry in fs::read_dir(dir).map_err(|e| Error(format!("{}: {e}", dir.display())))? {
+            let entry = entry.map_err(|e| Error(e.to_string()))?;
+            let name = entry.file_name();
+            if name.to_str().is_some_and(|n| n.starts_with('.')) {
+                continue;
+            }
+            if entry.file_type().map_err(|e| Error(e.to_string()))?.is_dir() {
+                subdirs(&entry.path(), out)?;
+                out.push(entry.path());
+            }
+        }
+        Ok(())
+    }
+    let mut children = Vec::new();
+    subdirs(dir, &mut children)?;
+    let sealed = (|| {
+        for child in &children {
+            seal_one(child)?;
+        }
+        seal_one(dir)
+    })();
     CacheScope::end();
     sealed
 }
@@ -294,6 +350,28 @@ mod tests {
         assert!(sealed > before, "the record is fsynced");
         durable::create_new(&dir.join("outcome.json"), b"{}", Perm::Umask).unwrap();
         assert!(durable::fsyncs() > sealed, "the seal ended the scope: answers are synced");
+        drop(scope);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    /// A read attempt's tree scope: files in the attempt and its children skip their fsync,
+    /// `seal_tree` records each directory, and a torn child cache is repaired from its own record.
+    #[test]
+    fn a_read_attempt_tree_is_cached_then_sealed_per_directory() {
+        let dir = scratch("tree");
+        let scope = CacheScope::enter_tree(&dir).unwrap();
+        fs::create_dir(dir.join("0")).unwrap();
+        let before = durable::fsyncs();
+        durable::create_new(&dir.join("config.json"), b"CONFIG", Perm::Umask).unwrap();
+        durable::create_new(&dir.join("0").join("view.bin"), b"VIEW", Perm::Umask).unwrap();
+        assert_eq!(durable::fsyncs(), before, "every file under the attempt is a cache");
+        seal_tree(&dir).unwrap();
+        assert!(dir.join("0").join(RECORD).is_file() && dir.join(RECORD).is_file());
+        fs::write(dir.join("0").join("view.bin"), b"").unwrap();
+        assert_eq!(crate::fsread::read_regular(&dir.join("0").join("view.bin"), 1, 100).unwrap(), b"VIEW");
+        let after = durable::fsyncs();
+        durable::create_new(&dir.join("late.json"), b"{}", Perm::Umask).unwrap();
+        assert!(durable::fsyncs() > after, "the seal ended the scope");
         drop(scope);
         let _ = fs::remove_dir_all(dir);
     }
