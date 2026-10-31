@@ -97,7 +97,10 @@ tripwire() {    # TREE: a file still shared with the warm source but written aft
   find "$1/.lake/build" -type f -links +1 -newer "$1/.lake/warm.stamp" 2>/dev/null |
     sed "s|^|lane-tree: RED shared-inode-written-in-place |" >&2 || true; }
 now() { date +%s; }
-trees() { ls -d "$LANE_POOL_ROOT"/t[0-9]* 2>/dev/null | sort -V || true; }
+trees() {      # the pool's worktrees t1..tN only: a file such as t5-ar.pid in the pool root is not a tree
+  local d; for d in "$LANE_POOL_ROOT"/t[0-9]*; do
+    case ${d##*/} in t[0-9]|t[0-9][0-9]|t[0-9][0-9][0-9]) [ -d "$d" ] && [ -e "$d/.git" ] && echo "$d" ;; esac
+  done | sort -V; }
 holder() { [ -f "$leases/$(basename "$1")" ] && cut -f1 "$leases/$(basename "$1")" || true; }
 lease_age_h() { local f=$leases/$(basename "$1"); [ -f "$f" ] && echo $(( ($(now) - $(cut -f2 "$f")) / 3600 )) || echo -; }
 held_by() { local t; for t in $(trees); do [ "$(holder "$t")" = "$1" ] && { echo "$t"; return 0; }; done; return 0; }
