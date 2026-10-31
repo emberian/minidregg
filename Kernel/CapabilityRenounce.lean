@@ -396,8 +396,9 @@ def writes {prepared : Prepared deployment semantics ambient ground command}
 
 def readGuards {prepared : Prepared deployment semantics ambient ground command}
     (accepted : Accepted prepared envelope) : List ReadGuard :=
+  let written := (writes accepted).map DataWrite.cellId
   ground.authorityReadGuards.filter fun guard =>
-    guard.cellId ∉ (writes accepted).map DataWrite.cellId
+    guard.cellId ∉ written
 
 def PhysicalShape {prepared : Prepared deployment semantics ambient ground command}
     (accepted : Accepted prepared envelope) : Prop :=

@@ -500,7 +500,7 @@ pub(crate) fn serve(
     settings: [u8; 32],
     controller: u32,
     anchors: &Path,
-    idle: Duration,
+    idle: Option<Duration>,
 ) -> Result<()> {
     if controller == 0 || controller == mini_sdk::private::euid() {
         return Err("consent requires distinct non-root controller UID".into());
@@ -524,11 +524,10 @@ pub(crate) fn serve(
     let worker = Arc::new(Mutex::new(Worker::start(
         executable, config, &pins, anchors,
     )?));
-    // Idle exit, as the member-side consent resident has (`mini_sdk::consent::RESIDENT_IDLE_S`):
-    // with no connection open and none for `idle`, the service ends and its verifier with it.
-    // Socket activation starts it again on the next connection, from the retained frontier
-    // (`Worker::retain` after every admission), so one worker per hosted member holds memory
-    // only while that member signs.
+    // The worker keeps its warm verifier, as the member-side consent resident does: no idle exit
+    // unless `--idle-seconds` asks for one (`idle` Some). Socket activation would start it again on
+    // the next connection from the retained frontier, but that start is a provider launch and a
+    // Store admission the member waits for.
     listener.set_nonblocking(true).map_err(|e| e.to_string())?;
     let active = Arc::new(AtomicUsize::new(0));
     let last = Arc::new(Mutex::new(Instant::now()));
@@ -537,10 +536,11 @@ pub(crate) fn serve(
             Ok((stream, _)) => stream,
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                 let quiet = last.lock().map(|t| t.elapsed()).unwrap_or_default();
-                if active.load(Ordering::Acquire) == 0 && quiet > idle {
+                if active.load(Ordering::Acquire) == 0 && idle.is_some_and(|idle| quiet > idle) {
                     return Ok(());
                 }
-                std::thread::sleep(Duration::from_millis(20));
+                // Wait on the listener itself: a connection is served the moment it arrives.
+                mini_sdk::private::wait_readable(listener.as_raw_fd(), Duration::from_secs(1));
                 continue;
             }
             Err(e) => return Err(e.to_string()),

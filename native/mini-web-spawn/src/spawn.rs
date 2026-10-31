@@ -47,6 +47,10 @@ pub struct DevConfig {
     pub front_doc: Option<String>,
     /// Which member's publication each house name is (`housePublications`: NAME -> member).
     pub house_publications: BTreeMap<String, String>,
+    /// One resident directory for every session (`residents`): the dev layout runs every member as
+    /// this one account, so they share ONE consent provider and ONE codec Host
+    /// (`MINI_CONSENT_ANCHOR_DIR`, as `/etc/mini/session-residents` does for the ssh wrapper).
+    pub residents: Option<PathBuf>,
 }
 
 /// A front-page document name as the body accepts it: a workspace reference name (1-64 of
@@ -128,7 +132,12 @@ impl DevConfig {
         let house_publications = v["housePublications"].as_object().map(|map| {
             map.iter().filter_map(|(name, member)| house_entry(name, member.as_str()?)).collect()
         }).unwrap_or_default();
-        Ok(DevConfig { mini: abs("mini")?, host: abs("host")?, config: abs("config")?, socket: abs("socket")?, wrapper: abs("wrapper")?, sessions, public, public_subject, front_doc, house_publications })
+        let residents = match v["residents"].as_str() {
+            None => None,
+            Some(dir) if Path::new(dir).is_absolute() => Some(PathBuf::from(dir)),
+            Some(_) => return Err("dev config: residents must be absolute".into()),
+        };
+        Ok(DevConfig { mini: abs("mini")?, host: abs("host")?, config: abs("config")?, socket: abs("socket")?, wrapper: abs("wrapper")?, sessions, public, public_subject, front_doc, house_publications, residents })
     }
 }
 
@@ -291,6 +300,9 @@ impl Spawner {
             ]);
         }
         argv.extend(["env".into(), "-i".into(), "PATH=/usr/bin:/bin".into(), "LANG=C.UTF-8".into(), format!("HOME={}", member.home.display())]);
+        if let Layout::Dev(DevConfig { residents: Some(dir), .. }) = &self.layout {
+            argv.push(format!("MINI_CONSENT_ANCHOR_DIR={}", dir.display()));
+        }
         for (k, v) in env {
             argv.push(format!("{k}={v}"));
         }

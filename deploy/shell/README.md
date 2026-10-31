@@ -106,8 +106,9 @@ sits in the member's own 0700 directory. The member's session selects it with
 `MINI_CONSENT_SHA256` (the provider) and `MINI_CONSENT_CONFIG_SHA256` (the pinned config),
 alongside the three variables above. The client refuses a peer, provider or config that differs
 from these pins before it sends a frame. The member gains no read access: what comes back is the
-consent answer for its own request. The service ends after `--idle-seconds` (600) with no
-connection and restarts from its retained frontier on the next connection. The unit pair is the
+consent answer for its own request. The service keeps its warm verifier between connections
+(with `--idle-seconds N` it ends after N quiet seconds and restarts from its retained frontier on
+the next connection, paying a provider start and a Store admission). The unit pair is the
 one `deploy/spk-host/controller-world.py` renders for controllers.
 
 The sponsor's side, in their (hosted) shell (grammar: `ENROLL` and `PROVISION` in `native/resource-client/src/shell_grammar.rs`):

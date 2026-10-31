@@ -228,8 +228,9 @@ def derive (config : Config) (opened : Opened config) (request : Request) :
       match ← checkAudiences prepared with
       | .error reason => return .error s!"final audience check refused: {repr reason}"
       | .ok audience =>
+      let written := (writes prepared).map DataWrite.cellId
       let guards := admissionGuards prepared audience ++ selection.core.guards.filter fun guard =>
-        decide (guard.cellId ∉ (writes prepared).map DataWrite.cellId)
+        decide (guard.cellId ∉ written)
       let unsigned : StableEvent :=
         ⟨3, opened.ground.authority.domain,
           effectsDigest opened.ground.authority.domain config.profile.semantics command,

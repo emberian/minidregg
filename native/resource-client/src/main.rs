@@ -595,10 +595,13 @@ fn host_image_identity(metadata: &fs::Metadata) -> HostImageIdentity {
     )
 }
 
-/// The digest of the selected Host image, hashed once per file identity per
-/// process. The identity is read from the open handle, before and after the
-/// hash; a file that changed while it was hashed is refused, and a later call
-/// that sees a different identity hashes again.
+/// The digest of the selected Host image, hashed once per file identity. The
+/// identity is read from the open handle, before and after the hash; a file that
+/// changed while it was hashed is refused, and a later call that sees a different
+/// identity hashes again. A digest outlives the process that hashed it in the
+/// owner-private resident directory (`host_digest_record`), under the same
+/// identity, so a `mini` process per verb does not re-read ~180 MB (a chat `tail`
+/// spent 170 of its 186 ms of CPU here); `--verify-host` still hashes.
 ///
 /// A remote client has no Host image: its Host is named by an empty path and known only by the digest
 /// it pinned, which every v2 envelope carries and the box's socket checks.
@@ -645,6 +648,16 @@ fn host_image_sha256(host: &Path) -> Result<String> {
     {
         return Ok(sha.clone());
     }
+    let record = host_digest_record(host, &identity);
+    if !verify_host() {
+        if let Some(sha) = record.as_deref().and_then(read_host_digest) {
+            if pinned.is_none_or(|pin| pin == &sha) {
+                cache.retain(|(path, _, _)| path != host);
+                cache.push((host.to_path_buf(), identity, sha.clone()));
+                return Ok(sha);
+            }
+        }
+    }
     let mut digest = sha2::Sha256::new();
     let mut buffer = [0u8; 64 * 1024];
     loop {
@@ -674,7 +687,43 @@ fn host_image_sha256(host: &Path) -> Result<String> {
     }
     cache.retain(|(path, _, _)| path != host);
     cache.push((host.to_path_buf(), identity, sha.clone()));
+    if let Some(record) = record {
+        // Best effort: a digest that cannot be kept is hashed again by the next process.
+        let _ = mini_sdk::durable::replace(&record, format!("{sha}\n").as_bytes(), mini_sdk::durable::Perm::Private);
+    }
     Ok(sha)
+}
+
+/// Where the digest of the Host image at `host` with `identity` is kept between processes:
+/// `h-<first 16 bytes of SHA-256(path, identity)>.sha256` in the owner-private resident
+/// directory (`mini_sdk::consent::private_anchor_dir`, where the consent and codec residents
+/// keyed by the same file identity live). None without one (no $HOME and no
+/// MINI_CONSENT_ANCHOR_DIR): that process hashes.
+#[cfg(unix)]
+fn host_digest_record(host: &Path, identity: &HostImageIdentity) -> Option<PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+    let dir = mini_sdk::consent::private_anchor_dir().ok()?;
+    let (dev, ino, size, mtime, mtime_nsec, ctime, ctime_nsec) = *identity;
+    let mut key = sha2::Sha256::new();
+    key.update(b"MINI-HOST-IMAGE-DIGEST/v1\0");
+    key.update((host.as_os_str().len() as u64).to_le_bytes());
+    key.update(host.as_os_str().as_bytes());
+    for value in [dev, ino, size] {
+        key.update(value.to_le_bytes());
+    }
+    for value in [mtime, mtime_nsec, ctime, ctime_nsec] {
+        key.update(value.to_le_bytes());
+    }
+    Some(dir.join(format!("h-{}.sha256", hex(&key.finalize()[..16]))))
+}
+
+/// A kept digest: an owner-private regular file holding exactly 64 lowercase hex digits and a newline.
+#[cfg(unix)]
+fn read_host_digest(record: &Path) -> Option<String> {
+    mini_sdk::private::check_file(record).ok()?;
+    let bytes = fs::read(record).ok()?;
+    let text = std::str::from_utf8(bytes.strip_suffix(b"\n")?).ok()?;
+    (text.len() == 64 && mini_sdk::hex::is_lower(text)).then(|| text.to_owned())
 }
 
 /// Whether this process hashes a pinned Host image anyway (`mini --verify-host ...`, MINI_VERIFY_HOST=1).
@@ -920,10 +969,10 @@ usage:
                          operations and the status action only; resident clients pin MINI_OPERATOR_PEER_UID
   mini serve-agent-operator-proxy --socket CONTROLLER-PRIVATE-SOCKET --upstream PRIVATE --config CONFIG.json --controller-uid UID
                          requires one systemd-activated listener; controller clients pin --operator-peer-uid
-  mini serve-controller-consent --socket CLIENT-PRIVATE-SOCKET --consent PROVIDER --config CONFIG.json --anchors PRIVATE-DIR --consent-sha256 HEX --config-sha256 HEX --controller-uid UID [--idle-seconds 600]
+  mini serve-controller-consent --socket CLIENT-PRIVATE-SOCKET --consent PROVIDER --config CONFIG.json --anchors PRIVATE-DIR --consent-sha256 HEX --config-sha256 HEX --controller-uid UID [--idle-seconds N]
                          delegated full consent for one client UID that cannot read the Store (a controller, a
-                         split-tenancy member); requires one systemd-activated listener; ends after --idle-seconds
-                         with no connection; clients pin MINI_CONSENT_SOCKET/_PEER_UID/_SHA256/_CONFIG_SHA256
+                         split-tenancy member); requires one systemd-activated listener; keeps its warm verifier
+                         (with --idle-seconds N, ends after N seconds with no connection); clients pin MINI_CONSENT_SOCKET/_PEER_UID/_SHA256/_CONFIG_SHA256
   mini serve-public-proxy --socket PUBLIC --upstream PRIVATE --config CONFIG.json [--socket-gid GID | --controller-uid UID]
                          --socket-gid: the public socket's directory may be group GID, mode 0710/0750
                          (never group-writable, never other-accessible); the socket becomes 0660 GID
@@ -2958,15 +3007,16 @@ fn run(mut args: Args) -> Result<()> {
             let image = consent_proxy::digest(args.required("consent-sha256")?.to_str().ok_or("consent digest must be UTF-8")?)?;
             let settings = consent_proxy::digest(args.required("config-sha256")?.to_str().ok_or("config digest must be UTF-8")?)?;
             let uid = args.required("controller-uid")?.to_str().and_then(|n|n.parse::<u32>().ok()).ok_or("controller UID must be a decimal u32")?;
-            // Seconds with no connection before the service ends (socket activation restarts it).
+            // Seconds with no connection before the service ends (socket activation restarts it);
+            // without the flag it keeps its warm verifier.
             let idle = match args.optional("idle-seconds") {
-                Some(v) => v.to_str().and_then(|n| n.parse::<u64>().ok()).filter(|n| *n > 0)
-                    .ok_or("idle seconds must be a positive decimal")?,
-                None => mini_sdk::consent::RESIDENT_IDLE_S,
+                Some(v) => Some(v.to_str().and_then(|n| n.parse::<u64>().ok()).filter(|n| *n > 0)
+                    .ok_or("idle seconds must be a positive decimal")?),
+                None => None,
             };
             args.finish()?;
             let socket = SOCKET.get().ok_or("serve-controller-consent requires --socket")?;
-            consent_proxy::serve(socket,&consent,&config,image,settings,uid,&anchors,std::time::Duration::from_secs(idle))
+            consent_proxy::serve(socket,&consent,&config,image,settings,uid,&anchors,idle.map(std::time::Duration::from_secs))
         }
         #[cfg(unix)]
         "operator-status" | "drain-operator" => {

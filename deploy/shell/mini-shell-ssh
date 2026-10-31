@@ -19,6 +19,17 @@ done
 mini=$1 host=$2 config=$3 socket=$4 workspace=$5 home=$6
 [[ -x $mini ]] || { echo 'mini client is not executable' >&2; exit 66; }
 umask 077
+# Single tenancy (every hosted session runs as one account against the box's one pinned config):
+# /etc/mini/session-residents (root 0644, one absolute path to a directory that account owns, 0700)
+# gives every session the same resident directory, so the box runs ONE consent provider and ONE
+# codec Host for all of them instead of one each (`mini_sdk::consent::serve_resident_kind`). Absent:
+# each session's residents live under its own HOME. Never set it under split tenancy: there each
+# member is its own account and its residents are its own. Read by the shell itself (no process).
+if [[ -r /etc/mini/session-residents ]]; then
+  read -r residents </etc/mini/session-residents || true
+  [[ ${residents-} == /* ]] || { echo 'mini-shell-ssh: /etc/mini/session-residents must name an absolute directory' >&2; exit 78; }
+  export MINI_CONSENT_ANCHOR_DIR=$residents
+fi
 # At most two calls per member at once; `mini shell --call-slots` holds one of two locks in the
 # member's home for the call's life and refuses the third by name (exit 75).
 args=(shell --socket "$socket" --host "$host" --config "$config"
