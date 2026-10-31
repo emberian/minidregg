@@ -43,7 +43,8 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   representsCheck_eq_fast; first read after idle 20.8 s -> 3.9 s at height ~920; audit SOUND: unconditional funext csimp, hash sets over Nat).
   + hot-path 92828ff96/d7c55dfa0 (birth preparation takes Held directory/authority: callers with an Opened decode no
   directory row; ordinary birth plan prepared once instead of ~4 decodes; Held.eq_load, Loaded.load_eq; audit
-  requested). Before: `doc new` Host CPU 621 ms -> 1000 ms after 500 says (law 17); after-numbers awaited.
+  SOUND: stale directory is a type error; four RoomBirthGateAdmission theorems gained an implicit `held`, each
+  equivalent to the old via Held.load + eq_load). Before: `doc new` Host CPU 621 ms -> 1000 ms after 500 says (law 17); after-numbers awaited.
 - Awaited: infra's forge composed of batch 7 (after its batch 4 rebuild).
 - **CLOSED: GET read-path contract** (ember ruled (c)+(d); hot-path owns it statement-first). Never re-run or re-report.
 - hbox: / 57 GB free (11:25).
