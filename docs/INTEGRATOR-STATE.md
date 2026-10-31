@@ -25,7 +25,8 @@ same step. Closed items are never re-reported.
 - **Batch 7 acc7cfa03: READY 10:29** (host 1,666 s beside batch 6's umbrella; seat-weights fix worked). gate15 (PID file
   $I/gate-acc7.pid): enrol PASS, tour 73/73. j14-apps FAIL: mini cannot create owner-workspace/attempt-index/by-intent/
   (ENOENT; perf-client aa24acaf8). Composed rerun -c2 ($I/gate-acc7-c2.pid): rooms/churn/documents/restart pass, the rest
-  blocked by "metered workroom not ready", same cause. Fix b940b3f50 (perf-client) merged on staging; mini rebuilt and
+  blocked by "metered workroom not ready" (hot-path: management subject 8 lacks the sponsor-born task's grant;
+  suspected downstream of the ENOENT; if -hp1 still refuses, route to the apps-worker/workroom owner). Fix b940b3f50 (perf-client) merged on staging; mini rebuilt and
   overlaid as **candidates/acc7cfa03-attidx** (both copies of mini replaced; hotpatch-candidate.sh fixed to replace every
   copy by digest). Queued: gate15 PHASES="j14 composed" SUF=-hp1 on it, launching when both acc7 gates exit
   ($I/hp-attidx.pid waits; then $I/gate-acc7-attidx.pid). Forge composed of batch 7 queued by infra.
