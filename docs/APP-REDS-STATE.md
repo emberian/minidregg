@@ -140,10 +140,36 @@ poisoned two files that way, ObjectivePackageAuthor.setup.json and .trace; the i
 the lane pool (/home/hbox/pool, `lane-tree`, LANE_POOL_NO_WARM=1 while integ builds). Two instances must not
 rsync into one hbox src directory; use /tank/lanes/<own>/src.
 
-Owed: Davros j14 through app-start on a live world with the resident fix (hbox /ci/hb-dav-7, running) and then
-the live Hummingbird run, WBO and Scrumblr qualification (the foreground typed/_qualify tools are built and
-unit-tested; the old candidate was swept, so use a current one); `op66-plan` for EtherCalc and Etherpad on the
-demo world (waits for infra's rebuilt forge world, with the retained plan kept); E3 and E4 (why-clause and
-guard-rejection rendering, Lean/Host, no owner); the decider-side half of G2 (a pending await's record view has
-no program type, so only the publisher sees the response type); the Hermes worker root's interpreter (built for
-3.12, the box has 3.13); the controller boot ordering and recovery.
+## Continuation (2026-10-31, written by the instance at its context limit)
+
+On staging already (do not redo): 40efdcff9 (any non-zero u64 resource id), c88b88755 and 4692d6dfb as 5ae0de223
+(a final say that never reached the Host is retried, a Host refusal stays terminal), c0a49c8d7, 78a20cb56,
+5c4f73459 (refusal clauses), 6cae27559 (gogs fixtures, supersedes ecf4b917d).
+
+Open, in order:
+1. H1b cause. `lane/app-reds-codec` 58f0bad2b (grain-runtime codec honours MINI_CODEC_RESIDENT=0) is not on
+   staging; the integrator overlays it as dc61016cb-codec and judges it by the criterion: the final say succeeds
+   AND the controller journal shows no not-submitted resolution or resubmit for the say's write. Land it by
+   sha once that gate says so. A resident daemon forked inside a short-lived controller command is a lifetime
+   bug whatever the trace shows: either honour the switch, or start it detached with its own PID file and a
+   client that detects a dead pid+socket and restarts it.
+2. START fixes the coordinator names: the route socket path over SUN_LEN once app ids are 20 digits, and
+   "agent reserve custody lacks confirmation" (native/resource-client/src/agent_reserve.rs field()). Neither is on
+   any branch of this lane (checked: lane/app-reds*, origin/lane/app-reds*); the work was not committed or is
+   lost. Reproduce from perf-apps' apps-install and app-route measurements (hbox /tank/lanes/perf-apps), then
+   fix each by reading the code path: staging has f7f23fb46 (bound route socket paths) and the `confirmation`
+   readers at grain-runtime main.rs:1814, :4107, :7007.
+3. Refusal-clause sweep, second half. 5c4f73459 landed the first. Uncommitted in worktree app-reds-2 (not
+   committed, Lean builds failed at Host/Json.lean:4448 `hexJson` type, Host/ApplicationDispatchReady.lean:73
+   `stopped` type): clause names through Host JSON and InspectRender, plus journey rows j12/j12w/j14/jdisclose/
+   jpay6. Statement-first: say in the sha message if any refusal type changes. Build in the lane pool
+   (/home/hbox/pool/bin/lane-tree acquire app-reds origin/integration/staging, LANE_POOL_NO_WARM=1, swarm-build
+   at 24G or less); keep PID files and logs in your own tree or /ci/<you>, never the pool root.
+4. Live Hummingbird run, then WBO and Scrumblr, on a current ready candidate via gate12's j14apps().
+5. E3/E4 (why names the clause; guard rejection detail as hex) fold into item 3; E7 is the world-up/harness
+   question; the decider-side half of G2; the Hermes worker interpreter (built 3.12, box has 3.13); op66-plan
+   for EtherCalc and Etherpad on the demo world after infra's rebuild (keep the retained plan).
+6. Remove /tank/lanes/app-reds/target-rel (integrator rule: no new data on /tank).
+
+Uncommitted edits in worktree app-reds (volume custody, os.rs, jdisclose, main.rs) are not this lane's.
+Base new work on origin/integration/staging (branch lane/app-reds-cont).
