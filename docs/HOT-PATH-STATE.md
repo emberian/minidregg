@@ -274,6 +274,10 @@ re-running `writes` per guard. What still grows (story 2 → 8 on auth3):
 2. The session's per-request refresh (`sessionConfirmed` → `NativeHostSession.refresh` →
    `Loaded.extend`/`WorldTrack.advance`/`WorldCompact`): +190 ms.
 3. Whole-cell encodes of growing cells (authority post root, directory decode): FORMAT (a) + row 11.
+Cold consent provider (exorcist, batch 5, height 26): `verifyInitial` decodes the whole checkpoint
+(172 KB) and replays, ~0.6 s CPU, even with a retained anchor; that is the O(state) open row 11 shares
+(lazy cell decode at open: a checkpoint whose cells stay bytes until read). Paid once per world start
+or binding change now that residents do not idle out (perf-client 86428a2f1).
 Other reports: op66 (lifecycle BEGIN plan) 8.6 s in an app install, a pre-checkpoint certificate
 walk, row 4 slice 2 (FORMAT); doc append O(history) (event-log cell, FORMAT (a)); restart wall
 11.7 s at 491 (row 11).
