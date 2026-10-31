@@ -58,7 +58,7 @@ rounds, and move measurement to persvati's standing world when it exists.
   /home/hbox/lanes/integ/candidates/997905c0bc9c85086324d02c46abeeab3273f6e2. Then two scratch worlds, before
   (batch 9) and after (the overlay), Host CPU per `doc show` alternated. Moves to persvati once build-loop
   announces it.
-- Written, not yet checked (uncommitted in the worktree): `registryDigest` seven bytes per big multiplication
+- Written, not yet checked (patch /private/tmp/claude-501/-Users-ember-dev-minidregg/01a192eb-6b7b-70ef-8cad-095d745dabe5/scratchpad/registry-digest.patch): `registryDigest` seven bytes per big multiplication
   (`registryFoldFast`, `@[csimp] registryDigest_eq_fast`, value-identical), Kernel/CredentialSignedEnvelopeController.lean.
   Check with `lake build Kernel.CredentialSignedEnvelopeController` on a pool tree before it lands.
 - hbox trash to clear when hbox returns (root's word): stop w6 and w7 by their PID files and remove them (0.6 G
