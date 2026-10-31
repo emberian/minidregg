@@ -45,9 +45,10 @@ measurement (hot-path's 8-story run, `hbox:/ci/hpc/sn/g2.s{2,8}.all.txt`, Host C
   fill a memo), `advance` per delta, `init` at genesis.
 * **`Node D In Out`** (open over an input view): a read declares the input queries it needs given its
   representation (`readProbes`, none on a memo hit) and sees only their answers; an update declares probes
-  from the delta alone (pre- or post-delta) and sees only theirs. `ReadBounded` / `ProbeBounded` are the
-  per-instance budgets `c + k · size`. What a step may READ is bounded; its CPU is measured (the flatness
-  bench), never self-reported.
+  from the delta alone (pre- or post-delta) and sees only theirs. `ReadFootprintBounded` /
+  `ProbeFootprintBounded` bound the declared input footprint `c + k · size`, not cost: a shadow-state node
+  (`Rep := Store`, recomputing per read) has a zero footprint. Cost is gated by the flatness bench (law 17);
+  a per-node cost statement over an instrumented interpreter (as `PrivateCellTrie.EraseCost`) is owed.
 * **The keystone**: `Maintained.maintained_eq_recompute`: after any admitted run, from any representation
   holding at its start, the maintained answer is the recomputation's answer at the final state.
   `checkpoint_restore_from`: restore any held representation from its checkpoint and advance over the
