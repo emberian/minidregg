@@ -435,7 +435,7 @@ theorem loadServedAuthorityHeld_other {deployment : CanonicalCellRegistry.Deploy
     (post : HeldCell) (served : State store)
     (other : served.canonicalBytes (cellIdOf deployment) ≠ post.bytes) :
     loadServedAuthorityHeld prior (some post) served = loadServedAuthorityFrom prior served := by
-  unfold loadServedAuthorityHeld
+  dsimp only [loadServedAuthorityHeld]
   rw [dif_neg (fun same => other (bytesBEq_iff.mp same))]
 
 /-- Satisfiable: a held cell whose bytes are the served ones is the loaded cell. -/
@@ -444,7 +444,7 @@ theorem loadServedAuthorityHeld_taken {deployment : CanonicalCellRegistry.Deploy
     (post : HeldCell) (served : State store)
     (same : served.canonicalBytes (cellIdOf deployment) = post.bytes) :
     ((loadServedAuthorityHeld prior (some post) served).map (·.cell)) = some post.cell := by
-  unfold loadServedAuthorityHeld
+  dsimp only [loadServedAuthorityHeld]
   rw [dif_pos (bytesBEq_iff.mpr same)]
   rfl
 
