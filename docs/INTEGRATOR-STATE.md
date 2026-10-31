@@ -23,8 +23,15 @@ gated candidates and names candidates to infra and the explorer.
   1c151fce4-resid (spk-host crate from 40efdcff9) at -hp1 (/ci/j-1c151f-hp1/journey.log), so the resource-id crash is not
   its cause. app-reds owns it (Davros run 18 reads the final mini_say outcome). Batch 5's umbrella-tree and rerecord are
   still running in umbrella-src (PID 2698823); the -hp1 gate PID 3240123 is finishing; Mac waiter b4013oi9a covers both.
-- **Batch 6 (staging cfe5c24d5+)**: perf-apps b1 23738a4ce, app-reds' refusal clauses 5c4f73459, the resource-id fix, apps-e2e request-file fix f1255b4b3 (78a20cb56), exorcism 16f2d046f, 8b49bf1e2/fe77ab521 (Store calls carry files in the frame, v2; Host and helper from one build) 019f2e56f, perf-client f883af161 + tip 59dd7ded4 (readGuards once per call, chargeWith, Host-image digest cache, residents end with world/child/binding instead of idling out, single tenancy; audit round on chargeWith), and whatever lands. Staging db074a736 (residents also end when their storageRoot is removed: the explorer's world-down finding). Cut it when batch 5's gate and umbrella are
-  in and enough has accumulated (minimal-checks ruling: cuts spaced out to accumulate perf work).
+- **Batch 6 74e1cfa10: BUILDING since 08:51** (integ-build6, PID file $I/build-b6.pid; waits for batch 5's umbrella lock
+  before its own umbrella). Carries perf-apps b1 23738a4ce, refusal clauses 5c4f73459, the resource-id fix, apps-e2e
+  request-file fix f1255b4b3, exorcism (fsync removal 16f2d046f, Store calls carry files in the frame v2 8b49bf1e2/fe77ab521,
+  019f2e56f), perf-client through 59dd7ded4 + residents end when storageRoot goes. Exorcist measures row 8 on it.
+- **Batch 7 (staging 227451d8c+)**: hot-path a55855f18 (authority projection once per served state; issuerCheck csimp;
+  DRC guard hoist), perf-client 5415aecf7 (pins judged from the executed snapshot's bytes). Both in statement audit.
+- Explorer on batch 5 (vs batch 4): fsyncs 0 everywhere; 128-ref credit 6.9 s -> 0.3-0.4 s; idle catch-up 61 s -> 0.36 s;
+  first read after restart 19 s -> 0.24 s; story new ~14 s; say 0.55 s warm; restart 11.7 s; execve per verb 13 -> 22 and
+  say syscalls 4,535 -> 12,031 (perf-client owns). Doc-append grows with history (1.8 s at 13 entries, 6.2 s at 303).
 - **FORMAT batch (later, one genesis, after iter-speed's seam 1)**: hot-path row 11 (checkpoint carries session indexes;
   Store epoch) + Book entries migration (~50 consumers) + private-cells FORMAT (a): eventHistory and authority to the trie
   root with mask [] (root ruling: blinded content and declared kinds keep the salted ratchet until the compiler-emitted ZK
