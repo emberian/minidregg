@@ -67,7 +67,12 @@ if [ -z "$pool_env" ] && [ "${1:-}" = init ]; then
       [ -n "${!v:-}" ] && printf 'export %s=%q\n' "$v" "${!v}"; done
     # No Lake artifact cache in pool trees: with it on, lake also caches the read-only shared packages'
     # artifacts and fails on every package module (EACCES, hbox 2026-10-31). Warmth comes from warm-link.
-    echo 'export LAKE_ARTIFACT_CACHE=false'; } > "$LANE_POOL_ROOT/pool.env"
+    echo 'export LAKE_ARTIFACT_CACHE=false'
+    # A plain `lake build` runs one compiler per worker of Lake's thread pool, LEAN_NUM_THREADS of them
+    # (default: every core). On a 24-core box that OOM'd a 24G cgroup (module-cost, 2026-10-31); 4 keeps a
+    # plain build inside such a cap (p90 module 2.1 GB, the Pay modules 17 GB). Seated builds
+    # (build-native-host.sh) set their own and are bounded by seats; a lane with a larger cap raises it.
+    echo 'export LEAN_NUM_THREADS=${LEAN_NUM_THREADS:-4}'; } > "$LANE_POOL_ROOT/pool.env"
   pool_env=$LANE_POOL_ROOT/pool.env
   echo "lane-tree: wrote $pool_env"
 fi
