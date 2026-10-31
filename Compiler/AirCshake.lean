@@ -8,13 +8,18 @@ multi-rate padding tail) depends only on the public data, so it enters as consta
 
 * `padded`, `padded_length`, `blocks`: the padded message and its block count, functions of
   the public data and the input; `cshake_eq`: the digest is the squeeze of its absorption.
-* `spongeSystem cust len inputW trace`: per block `k`, an XOR row (`trace k 0` is the state
-  so far XOR the block's bits) and `permSystem (trace k)`.
+* `skip`, `midstate`, `padded_midstate`: the blocks wholly inside the public customization
+  prefix are absorbed once from public data; the circuit starts from that constant state.
+* `spongeSystem cust len inputW trace`: per block `k` past the prefix, an XOR row (`trace k 0`
+  is the state so far XOR the block's bits) and `permSystem (trace k)`.
 * `sponge_sound`: an accepted assignment whose input wires read `input` (`ReadsBytes`) has
   the last row reading the absorption; `cshake_sound`: its first 256 bits are the digest.
 * `sponge_complete`: on an injective layout disjoint from the input wires, `spongeAsg`
   accepts and leaves every wire off the layout alone.
-* `spongeSystem_length`: `blocks · 40000` constraints.
+* `spongeSystem_length`: `(blocks − skip) · 40000` constraints. Measured (`EmitShare.cse` of
+  the emitted round): 12 480 gates per round, of them 1 600 AND and 10 880 XOR, 1 600 zero
+  checks; so 38 400 AND per permutation. A 98-byte leaf under a nonempty customization is one
+  permutation.
 -/
 module
 
@@ -157,6 +162,44 @@ theorem block_getD (msg : List UInt8) (k m : Nat) (hm : m < rateBytes) :
     (block msg k).getD m 0 = msg.getD (k * rateBytes + m) 0 := by
   simp [block, List.getD_eq_getElem?_getD, List.getElem?_take, hm, List.getElem?_drop]
 
+/-! ### The public midstate
+
+A nonempty customization's prefix is `bytepad`ded to whole blocks of public bytes. Those blocks
+are absorbed once, from public data, into `midstate`; the circuit starts there. -/
+
+/-- The leading blocks wholly inside the public customization prefix. -/
+def skip (cust : List UInt8) : Nat := (prefixOf cust).length / rateBytes
+
+/-- The public state after the prefix blocks. -/
+def midstate (cust : List UInt8) : State := stAfter (prefixOf cust) (skip cust)
+
+theorem skip_lt (cust : List UInt8) (len : Nat) : skip cust < blocks cust len := by
+  simp only [skip, blocks, paddedLen, framedLen, rateBytes]
+  omega
+
+theorem block_append (l₁ l₂ : List UInt8) (b : Nat) (h : (b + 1) * rateBytes ≤ l₁.length) :
+    block (l₁ ++ l₂) b = block l₁ b := by
+  apply List.ext_getElem?
+  intro m
+  simp only [block, List.getElem?_take, List.getElem?_drop]
+  split
+  · rename_i hm
+    rw [List.getElem?_append_left (by simp only [rateBytes] at h hm ⊢; rw [Nat.add_mul] at h; omega)]
+  · rfl
+
+theorem stAfter_append (l₁ l₂ : List UInt8) (k : Nat) (h : k * rateBytes ≤ l₁.length) :
+    stAfter (l₁ ++ l₂) k = stAfter l₁ k := by
+  induction k with
+  | zero => simp only [stAfter, List.range'_zero, List.foldl_nil]
+  | succ k ih =>
+    rw [stAfter_succ, stAfter_succ,
+      ih (by simp only [rateBytes] at h ⊢; rw [Nat.add_mul] at h; omega), block_append _ _ _ h]
+
+theorem padded_midstate (cust input : List UInt8) :
+    stAfter (padded cust input) (skip cust) = midstate cust := by
+  rw [padded_eq, List.append_assoc, midstate]
+  exact stAfter_append _ _ _ (Nat.div_mul_le_self _ _)
+
 theorem bitsOf_zeroState (t : Fin 25) (z : Fin 64) : bitsOf zeroState t z = false := by
   unfold bitsOf
   rw [show zeroState.getD t zeroLane = zeroLane from by simp [zeroState, Array.getD]]
@@ -209,9 +252,10 @@ theorem eval_byteBitT (cust : List UInt8) (inputW : Nat → Fin 8 → Idx) (asg 
 variable (cust : List UInt8) (len : Nat) (inputW : Nat → Fin 8 → Idx)
   (trace : Nat → Fin 25 → Fin 25 → Fin 64 → Idx)
 
-/-- The state before block `k`: zero, or the last row of block `k - 1`. -/
+/-- The state before block `k`: the public midstate for the first circuit block, else the last
+row of block `k - 1`. -/
 def prevT (k : Nat) (t : Fin 25) (z : Fin 64) : T (Idx := Idx) :=
-  if k = 0 then cst 0 else vr (trace (k - 1) 24 t z)
+  if k = skip cust then cst (toF (bitsOf (midstate cust) t z)) else vr (trace (k - 1) 24 t z)
 
 /-- Bit `(t, z)` of block `k`: a padded byte bit in the rate lanes, zero in the capacity. -/
 def blockT (k : Nat) (t : Fin 25) (z : Fin 64) : T (Idx := Idx) :=
@@ -222,14 +266,15 @@ def blockT (k : Nat) (t : Fin 25) (z : Fin 64) : T (Idx := Idx) :=
 /-- Block `k`'s XOR row: `trace k 0 ⊕ prev ⊕ block ≐ 0`, 1600 linear constraints. -/
 def xorRow (k : Nat) : ConstraintSystem F2 Idx :=
   (List.finRange 25).flatMap fun t => (List.finRange 64).map fun z =>
-    add' (add' (vr (trace k 0 t z)) (prevT trace k t z)) (blockT cust len inputW k t z)
+    add' (add' (vr (trace k 0 t z)) (prevT cust trace k t z)) (blockT cust len inputW k t z)
 
-/-- **cSHAKE256 at a public length**: per block, its XOR row and the permutation. -/
+/-- **cSHAKE256 at a public length**: per block past the prefix, its XOR row and the permutation. -/
 def spongeSystem : ConstraintSystem F2 Idx :=
-  (List.range (blocks cust len)).flatMap fun k => xorRow cust len inputW trace k ++ permSystem (trace k)
+  (List.range' (skip cust) (blocks cust len - skip cust)).flatMap fun k =>
+    xorRow cust len inputW trace k ++ permSystem (trace k)
 
 theorem spongeSystem_length :
-    (spongeSystem cust len inputW trace).length = blocks cust len * 40000 := by
+    (spongeSystem cust len inputW trace).length = (blocks cust len - skip cust) * 40000 := by
   simp [spongeSystem, xorRow, List.length_flatMap, permSystem_length, List.sum_replicate]
 
 private theorem f2_three (a b c : F2) : a + b + c = 0 ↔ a = b + c := by
@@ -238,7 +283,7 @@ private theorem f2_three (a b c : F2) : a + b + c = 0 ↔ a = b + c := by
 /-- The XOR row accepts iff its row is the previous state XOR the block. -/
 theorem xorRow_accepts (asg : Idx → F2) (k : Nat) :
     systemAccepts asg (xorRow cust len inputW trace k) ↔
-      ∀ t z, asg (trace k 0 t z) = eval asg (prevT trace k t z) + eval asg (blockT cust len inputW k t z) := by
+      ∀ t z, asg (trace k 0 t z) = eval asg (prevT cust trace k t z) + eval asg (blockT cust len inputW k t z) := by
   simp only [systemAccepts, xorRow, List.mem_flatMap, List.mem_map, List.mem_finRange, true_and,
     forall_exists_index]
   constructor
@@ -270,17 +315,19 @@ private theorem reads_of (asg : Idx → F2) (w : Fin 25 → Fin 64 → Idx) (st 
   cases bitsOf st t z <;> decide
 
 theorem accepts_block (asg : Idx → F2) (accepted : systemAccepts asg (spongeSystem cust len inputW trace))
-    (k : Nat) (hk : k < blocks cust len) :
+    (k : Nat) (lo : skip cust ≤ k) (hk : k < blocks cust len) :
     systemAccepts asg (xorRow cust len inputW trace k) ∧ systemAccepts asg (permSystem (trace k)) :=
-  ⟨fun c hc => accepted c (List.mem_flatMap.mpr ⟨k, List.mem_range.mpr hk, List.mem_append_left _ hc⟩),
-   fun c hc => accepted c (List.mem_flatMap.mpr ⟨k, List.mem_range.mpr hk, List.mem_append_right _ hc⟩)⟩
+  have hmem : k ∈ List.range' (skip cust) (blocks cust len - skip cust) :=
+    List.mem_range'_1.mpr ⟨lo, by omega⟩
+  ⟨fun c hc => accepted c (List.mem_flatMap.mpr ⟨k, hmem, List.mem_append_left _ hc⟩),
+   fun c hc => accepted c (List.mem_flatMap.mpr ⟨k, hmem, List.mem_append_right _ hc⟩)⟩
 
 /-- One block: an accepted XOR row over the state after `k` blocks, then an accepted
 permutation, reads the state after `k + 1` blocks. -/
 theorem block_step (asg : Idx → F2) (input : List UInt8) (reads : ReadsBytes asg inputW input) (k : Nat)
     (accX : systemAccepts asg (xorRow cust input.length inputW trace k))
     (accP : systemAccepts asg (permSystem (trace k)))
-    (prev : ∀ t z, eval asg (prevT trace k t z) = toF (bitsOf (stAfter (padded cust input) k) t z)) :
+    (prev : ∀ t z, eval asg (prevT cust trace k t z) = toF (bitsOf (stAfter (padded cust input) k) t z)) :
     Reads asg (trace k 0) (xorRateBlock (stAfter (padded cust input) k) (block (padded cust input) k)) ∧
       Reads asg (trace k 24) (stAfter (padded cust input) (k + 1)) := by
   have hx : Reads asg (trace k 0)
@@ -293,14 +340,15 @@ theorem block_step (asg : Idx → F2) (input : List UInt8) (reads : ReadsBytes a
   rw [stAfter_succ]
   exact (perm_sound asg (trace k) _ hx accP).2
 
-theorem prev_reads (asg : Idx → F2) (msg : List UInt8) (k : Nat)
-    (earlier : k ≠ 0 → Reads asg (trace (k - 1) 24) (stAfter msg k)) (t : Fin 25) (z : Fin 64) :
-    eval asg (prevT trace k t z) = toF (bitsOf (stAfter msg k) t z) := by
+theorem prev_reads (asg : Idx → F2) (input : List UInt8) (k : Nat)
+    (earlier : k ≠ skip cust → Reads asg (trace (k - 1) 24) (stAfter (padded cust input) k))
+    (t : Fin 25) (z : Fin 64) :
+    eval asg (prevT cust trace k t z) = toF (bitsOf (stAfter (padded cust input) k) t z) := by
   simp only [prevT]
   split
   · rename_i h
     subst h
-    rw [eval_cst, stAfter_zero, bitsOf_zeroState]; rfl
+    rw [eval_cst, padded_midstate]
   · rename_i h
     rw [eval_vr, ← toF_rb asg (trace (k - 1) 24) t z, earlier h]
 
@@ -308,19 +356,21 @@ theorem prev_reads (asg : Idx → F2) (msg : List UInt8) (k : Nat)
 reading the state after `k + 1` blocks. -/
 theorem sponge_sound (asg : Idx → F2) (input : List UInt8) (reads : ReadsBytes asg inputW input)
     (accepted : systemAccepts asg (spongeSystem cust input.length inputW trace)) :
-    ∀ k < blocks cust input.length, Reads asg (trace k 24) (stAfter (padded cust input) (k + 1)) := by
-  intro k
-  induction k with
-  | zero =>
+    ∀ k, skip cust ≤ k → k < blocks cust input.length →
+      Reads asg (trace k 24) (stAfter (padded cust input) (k + 1)) := by
+  intro k lo
+  induction k, lo using Nat.le_induction with
+  | base =>
     intro hk
-    obtain ⟨accX, accP⟩ := accepts_block cust _ inputW trace asg accepted 0 hk
-    exact (block_step cust inputW trace asg input reads 0 accX accP
-      (prev_reads trace asg _ 0 (fun h => absurd rfl h))).2
-  | succ k ih =>
+    obtain ⟨accX, accP⟩ := accepts_block cust _ inputW trace asg accepted _ le_rfl hk
+    exact (block_step cust inputW trace asg input reads _ accX accP
+      (prev_reads cust trace asg input _ (fun h => absurd rfl h))).2
+  | succ k lo ih =>
     intro hk
-    obtain ⟨accX, accP⟩ := accepts_block cust _ inputW trace asg accepted (k + 1) hk
+    obtain ⟨accX, accP⟩ := accepts_block cust _ inputW trace asg accepted (k + 1) (by omega) hk
     exact (block_step cust inputW trace asg input reads (k + 1) accX accP
-      (prev_reads trace asg _ (k + 1) fun _ => ih (by omega))).2
+      (prev_reads cust trace asg input (k + 1) fun _ => by
+        rw [Nat.add_sub_cancel]; exact ih (by omega))).2
 
 theorem absorb_full (cust input : List UInt8) :
     absorbPadded (padded cust input) = stAfter (padded cust input) (blocks cust input.length) := by
@@ -334,7 +384,9 @@ theorem cshake_sound (asg : Idx → F2) (input : List UInt8) (reads : ReadsBytes
     rb asg (trace (blocks cust input.length - 1) 24) ⟨i / 8, by omega⟩ ⟨8 * (i % 8) + j.val, by omega⟩ =
       ((cshake256Bytes cust input).getD i 0).toNat.testBit j := by
   have hpos := blocks_pos cust input.length
-  have last := sponge_sound cust inputW trace asg input reads accepted _ (by omega : blocks cust input.length - 1 < _)
+  have hlo := skip_lt cust input.length
+  have last := sponge_sound cust inputW trace asg input reads accepted _ (by omega)
+    (by omega : blocks cust input.length - 1 < _)
   rw [Nat.sub_add_cancel hpos] at last
   rw [cshake_eq, absorb_full, squeeze_bit _ _ hi, last]
 
@@ -347,13 +399,18 @@ variable [DecidableEq Idx]
 /-- A layout position: block, row, lane, bit. -/
 abbrev Key := Nat × Fin 25 × Fin 25 × Fin 64
 
-/-- Every layout position of `nb` blocks. -/
-def keys (nb : Nat) : List Key :=
-  (List.range nb).flatMap fun k => (List.finRange 25).flatMap fun r =>
+/-- Every layout position of blocks `lo ≤ k < nb`. -/
+def keys (lo nb : Nat) : List Key :=
+  (List.range' lo (nb - lo)).flatMap fun k => (List.finRange 25).flatMap fun r =>
     (List.finRange 25).flatMap fun t => (List.finRange 64).map fun z => (k, r, t, z)
 
-theorem mem_keys (nb k : Nat) (r t : Fin 25) (z : Fin 64) : (k, r, t, z) ∈ keys nb ↔ k < nb := by
-  simp [keys]
+theorem mem_keys (lo nb k : Nat) (r t : Fin 25) (z : Fin 64) :
+    (k, r, t, z) ∈ keys lo nb ↔ lo ≤ k ∧ k < nb := by
+  simp only [keys, List.mem_flatMap, List.mem_range'_1, List.mem_finRange, List.mem_map, true_and,
+    Prod.mk.injEq]
+  constructor
+  · rintro ⟨k', ⟨h1, h2⟩, _, _, _, rfl, rfl, rfl, rfl⟩; omega
+  · rintro ⟨h1, h2⟩; exact ⟨k, ⟨h1, by omega⟩, r, t, z, rfl, rfl, rfl, rfl⟩
 
 def wireOf (x : Key) : Idx := trace x.1 x.2.1 x.2.2.1 x.2.2.2
 
@@ -394,27 +451,28 @@ def specRow (msg : List UInt8) (k : Nat) (r : Fin 25) : State :=
 
 /-- **The canonical sponge assignment**: every layout wire carries its specification bit. -/
 def spongeAsg (asg : Idx → F2) (input : List UInt8) : Idx → F2 :=
-  fill (keys (blocks cust input.length)) (wireOf trace)
+  fill (keys (skip cust) (blocks cust input.length)) (wireOf trace)
     (fun x => toF (bitsOf (specRow (padded cust input) x.1 x.2.1) x.2.2.1 x.2.2.2)) asg
 
 /-- **Complete**: on a layout injective over its blocks and disjoint from the input wires, an
 assignment whose input row reads `input` becomes an accepted sponge by `spongeAsg`, which keeps
 every wire off the layout (the input row among them). -/
 theorem sponge_complete (asg : Idx → F2) (input : List UInt8) (reads : ReadsBytes asg inputW input)
-    (inj : ∀ x ∈ keys (blocks cust input.length), ∀ y ∈ keys (blocks cust input.length),
+    (inj : ∀ x ∈ keys (skip cust) (blocks cust input.length), ∀ y ∈ keys (skip cust) (blocks cust input.length),
       wireOf trace x = wireOf trace y → x = y)
-    (disjoint : ∀ p < input.length, ∀ j : Fin 8, ∀ x ∈ keys (blocks cust input.length),
+    (disjoint : ∀ p < input.length, ∀ j : Fin 8, ∀ x ∈ keys (skip cust) (blocks cust input.length),
       wireOf trace x ≠ inputW p j) :
     systemAccepts (spongeAsg cust trace asg input) (spongeSystem cust input.length inputW trace) ∧
-      ∀ i, (∀ x ∈ keys (blocks cust input.length), wireOf trace x ≠ i) →
+      ∀ i, (∀ x ∈ keys (skip cust) (blocks cust input.length), wireOf trace x ≠ i) →
         spongeAsg cust trace asg input i = asg i := by
   set A := spongeAsg cust trace asg input with hA
   set msg := padded cust input
-  have rows : ∀ k < blocks cust input.length, ∀ r : Fin 25, Reads A (trace k r) (specRow msg k r) := by
-    intro k hk r
+  have rows : ∀ k, skip cust ≤ k → k < blocks cust input.length → ∀ r : Fin 25,
+      Reads A (trace k r) (specRow msg k r) := by
+    intro k lo hk r
     apply reads_of
     intro t z
-    exact fill_hit _ (wireOf trace) _ asg inj (k, r, t, z) ((mem_keys _ _ _ _ _).mpr hk)
+    exact fill_hit _ (wireOf trace) _ asg inj (k, r, t, z) ((mem_keys _ _ _ _ _ _).mpr ⟨lo, hk⟩)
   have reads' : ReadsBytes A inputW input := by
     intro p hp j
     rw [hA, spongeAsg, fill_miss _ _ _ _ _ (fun x hx => disjoint p hp j x hx)]
@@ -422,21 +480,22 @@ theorem sponge_complete (asg : Idx → F2) (input : List UInt8) (reads : ReadsBy
   refine ⟨?_, fun i off => fill_miss _ _ _ _ _ off⟩
   intro c hc
   obtain ⟨k, hk, hc⟩ := List.mem_flatMap.mp hc
-  have hk : k < blocks cust input.length := List.mem_range.mp hk
+  obtain ⟨lo, hk⟩ := List.mem_range'_1.mp hk
+  have hk : k < blocks cust input.length := by omega
   rcases List.mem_append.mp hc with hx | hp
   · refine (xorRow_accepts cust input.length inputW trace A k).mpr (fun t z => ?_) c hx
-    have earlier : k ≠ 0 → Reads A (trace (k - 1) 24) (stAfter msg k) := by
+    have earlier : k ≠ skip cust → Reads A (trace (k - 1) 24) (stAfter msg k) := by
       intro hk0
-      have := rows (k - 1) (by omega) 24
+      have := rows (k - 1) (by omega) (by omega) 24
       rwa [specRow, show ((24 : Fin 25) : Nat) = 24 from rfl, after_full, ← stAfter_succ,
-        Nat.sub_add_cancel (Nat.pos_of_ne_zero hk0)] at this
-    rw [prev_reads trace A msg k earlier, eval_blockT cust inputW A input reads', ← toF_xor,
-      ← xorRateBlock_bit, ← toF_rb A (trace k 0) t z, rows k hk 0]
+        Nat.sub_add_cancel (by omega)] at this
+    rw [prev_reads cust trace A input k earlier, eval_blockT cust inputW A input reads', ← toF_xor,
+      ← xorRateBlock_bit, ← toF_rb A (trace k 0) t z, rows k lo hk 0]
     rfl
   · refine (perm_accepts A (trace k)).mpr (fun r => ?_) c hp
-    rw [rows k hk r.succ, rows k hk r.castSucc]
+    rw [rows k lo hk r.succ, rows k lo hk r.castSucc]
     funext t z
-    simp only [specRow, Fin.val_succ, Fin.coe_castSucc, after_succ]
+    simp only [specRow, Fin.val_succ, Fin.val_castSucc, after_succ]
     exact roundB_spec _ _ t z
 
 end Complete
@@ -451,5 +510,6 @@ end Complete
 #assert_axioms sponge_sound
 #assert_axioms cshake_sound
 #assert_axioms sponge_complete
+#assert_axioms padded_midstate
 
 end Minidregg.Compiler.AirCshake
