@@ -597,11 +597,30 @@ def create(store, helper):
     return finish_create(registry, base, namespace)
 
 
+PROFILED_BWRAP = Path('/usr/local/libexec/mini-grain-bwrap')
+
+
+def bwrap_acl(identity, grant):
+    # The controller's user manager runs the worker's launch-gate, which execs the profiled bwrap
+    # (root:group 0750 + per-uid entries). The controller identity is outside every app range, so it
+    # needs its own execute entry, added here and revoked with the controller. A controller uid is
+    # never reused or shared (permanent reservation, excluded from app ranges), so no refcount.
+    if not (PROFILED_BWRAP.exists() or PROFILED_BWRAP.is_symlink()):
+        return
+    m = PROFILED_BWRAP.lstat()
+    require(stat.S_ISREG(m.st_mode) and m.st_uid == 0, 'profiled bwrap custody refused')
+    if grant:
+        run(['/usr/bin/setfacl', '-m', f'u:{identity}:r-x', '--', str(PROFILED_BWRAP)])
+    else:
+        run(['/usr/bin/setfacl', '-x', f'u:{identity}', '--', str(PROFILED_BWRAP)])
+
+
 def finish_create(registry, base, namespace):
     store, name, identity = namespace['store'], namespace['account'], namespace['controllerUid']
     a = pwd.getpwnam(name)
     require((a.pw_uid, a.pw_gid) == (identity, identity) and a.pw_uid not in [0, registry['operatorUid'], *registry['appUids']], 'allocated controller UID/GID collision')
     require(not any(g.gr_mem and name in g.gr_mem for g in grp.getgrall()), 'controller supplemental groups refused')
+    bwrap_acl(a.pw_uid, True)
     mkdir(base / 'home', a.pw_uid, a.pw_gid)
     mkdir(base / 'listener', registry['operatorUid'], registry['operatorGid'])
     mkdir(base / 'reverse', a.pw_uid, a.pw_gid, 0o711)
@@ -2579,6 +2598,7 @@ def remove(store, helper):
     if r.get('workerTask'):
         run(['/usr/bin/loginctl', 'disable-linger', r['name']])
     run(['/usr/sbin/userdel', r['name']])
+    bwrap_acl(r['uid'], False)
     try:
         group = grp.getgrnam(r['name'])
     except KeyError:

@@ -1720,6 +1720,37 @@ class ControllerWorldTests(unittest.TestCase):
                 self.assertEqual(repeated['previousSha256'],c.sha(old))
                 self.assertEqual((base/'configs'/(c.sha(old)+'.json')).read_bytes(),old)
 
+    def test_controller_bwrap_grant_is_added_with_the_controller_and_revoked_with_it(self):
+        calls=[]
+        saved=(c.PROFILED_BWRAP,c.run)
+        bwrap=Path(str(self.root))/'mini-grain-bwrap'
+        try:
+            c.PROFILED_BWRAP=bwrap;c.run=lambda argv,**kw:calls.append(argv)
+            c.bwrap_acl(100084,True)   # no profiled bwrap on this host: nothing to grant
+            self.assertEqual(calls,[])
+            bwrap.write_bytes(b'x')
+            with patch.object(Path,'lstat',return_value=SimpleNamespace(st_mode=stat.S_IFREG|0o750,st_uid=0)):
+                c.bwrap_acl(100084,True);c.bwrap_acl(100084,False)
+        finally:c.PROFILED_BWRAP,c.run=saved
+        self.assertEqual(calls,[['/usr/bin/setfacl','-m','u:100084:r-x','--',str(bwrap)],
+                                ['/usr/bin/setfacl','-x','u:100084','--',str(bwrap)]])
+
+    def test_app_range_bwrap_grants_are_claimed_per_world_and_handed_over_not_stripped(self):
+        installer=(Path(__file__).parents[1]/'install-user-world').read_text()
+        block=installer.split('# BEGIN bwrap-claims\n')[1].split('# END bwrap-claims')[0]
+        top=Path(str(self.root))/'worlds';fake=Path(str(self.root))/'fakebin';fake.mkdir();top.mkdir()
+        acl=Path(str(self.root))/'acl';acl.write_text('')
+        (fake/'setfacl').write_text('#!/bin/bash\nif [ "$1" = -x ]; then grep -vx "${2#u:}" %s > %s.n; mv %s.n %s; fi\n'%((acl,)*4));(fake/'setfacl').chmod(0o755)
+        for w,uids in (('a',[1,2,3]),('b',[3,4])):
+            (top/w).mkdir();(top/w/'bwrap-acl-claims').write_text(''.join('%d\n'%u for u in uids))
+        (top/'a'/'bwrap-acl-grants').write_text('1\n2\n3\n');(top/'b'/'bwrap-acl-grants').write_text('4\n')
+        acl.write_text('1\n2\n3\n4\n')
+        script='set -e\nprofiled_bwrap=/x\nrevoked=\nMINI_SPK_WORLDS_ROOT=%s\n%s\nwhile read -r u; do bwrap_release "$u" %s/a; done < %s/a/bwrap-acl-grants\necho "$revoked"\n'%(top,block,top,top)
+        out=subprocess.run(['/bin/bash','-c',script],env={'PATH':f'{fake}:/usr/bin:/bin'},capture_output=True,text=True,check=True).stdout
+        self.assertEqual(out.strip(),'1,2,')                       # uid 3 is still claimed by b
+        self.assertEqual(acl.read_text().split(),['3','4'])
+        self.assertEqual((top/'b'/'bwrap-acl-grants').read_text().split(),['4','3'])   # b now owns it
+
 
 if __name__ == '__main__':
     unittest.main()
