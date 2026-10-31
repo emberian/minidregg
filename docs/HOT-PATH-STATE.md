@@ -300,8 +300,14 @@ to `/ci/hpc`. Profiles: `/ci/hpc/fby` (run.sh, `--symfs`). The native Host build
      checkpoint carries the session indexes and the walk certificates that read the state at their
      height (issues, reserves, releases, grants), so the open stops reading the whole log.
    - **Ours, before the batch (no format change).**
-     - (b) The Host session keeps each cell's `Materialized` across ops instead of decoding it again
-       (decode is 13%).
+     - (b) The decode (13%) is attributed (perf script over `/ci/hpc/fbs/perf.data`, 304 decode samples).
+       111 are `TurnOfIntent.deltaOf`, which runs `C.decode w.canonicalPostBytes` (via
+       `DeployedBridge.decodeCell`) on every write's post bytes, which the Host has just encoded from
+       the `Materialized` it holds. That is an encode-then-decode round trip per write. The fix is for
+       the write to carry its decoded post with `decode bytes = some post` (a non-persisted field, as
+       `carried` is for `Materialized`), with `deltaOf` reading it behind a `@[csimp]`. The rest are
+       `LinkIndex.liveLinksFull`, `CredentialAuthorityDomainReceiver.decodeRowsFrom` and
+       `physicalPostLawDecidable`, about 11 samples each.
      - (c) Validation and apply share one patch run.
      - (d) `Store.set` reads stop walking DFinsupp update history: a persistent map underneath, behind
        a `@[csimp]`, with no statement change (12%).
