@@ -77,7 +77,9 @@ init_ws controller 7 "$WR/controller.key" "$(context 7 54 41)"; row "controller 
 # The member is funded the way the door funds one (dregg-infra mini-reenroll): the sponsor (the
 # factory's controller, 7) provisions a funded account for the holder through the factory and
 # hands it the birth context; the member's own account pays for its app births.
-MEMBER_FUNDING=${MEMBER_FUNDING:-1000}
+# The grant bound and the funding the door gives (deploy/market/INSTALL.md): the metered birth charges
+# more than 1000 under the delegated tool task, so a 1000 bound is refused no-grant at the birth.
+MEMBER_FUNDING=${MEMBER_FUNDING:-20000}
 gsrc=$RUN/store/base/workroom/deployment/genesis-source.json
 mini workspace --action import --dir "$out/ws-controller" --name factory --kind object --target "$(jq -er .factoryId "$gsrc")" \
   --observe-capability 54 --control-capability "$(jq -er .factoryControllerCapability "$gsrc")" >"$out/import-factory.out" 2>&1
@@ -156,7 +158,7 @@ if [ "${APPS_E2E_BOOTSTRAP:-0}" != 1 ]; then
 fi
 delegate() { # WORKSPACE REF
   local ws=$1 ref=$2 id=apps-$2-member
-  printf '{"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"%s","recipient":"9","verbs":["observe","mutate"],"maxCost":"%s"}\n' "$ref" "${APPS_MAX:-1000}" >"$out/delegate-$ref.json"
+  printf '{"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"%s","recipient":"9","verbs":["observe","mutate"],"maxCost":"%s"}\n' "$ref" "${APPS_MAX:-50000}" >"$out/delegate-$ref.json"
   mini workspace --action propose --dir "$ws" --request "$out/delegate-$ref.json" --proposal-id "$id" >"$out/propose-$ref.out" 2>&1 || return 1
   mini workspace --action submit --dir "$ws" --intent "$ws/proposals/$id/intent.json" --attempt "$ws/attempts/$id" >"$out/submit-$ref.out" 2>&1 || return 1
   mini workspace --action publish-delegation --dir "$ws" --proposal-id "$id" --attempt "$ws/attempts/$id" >"$out/publish-$ref.out" 2>&1 || return 1
