@@ -9,6 +9,7 @@ rendering. Nothing here opens a Store or reads anything but its input.
 module
 
 public import Host.InspectViews
+public import Host.RefusalText
 public import Kernel.NativeHost
 public import Lean.Data.Json
 
@@ -377,14 +378,16 @@ def explain (outcome : Outcome) : List String × List (String × Json) :=
       -- The controller's own words: its phase and the `Reject` it returned, which the frame
       -- carries to this requester already (`explain_reads_only_the_refusal` is for the others).
       ([s!"refused: operation-rejected: {RefusalReason.operationRejected.describe}",
-        s!"  phase: {frameText phase}", s!"  detail: {frameText detail}"],
-       [("reason", "operation-rejected"), ("phase", frameText phase), ("detail", frameText detail)])
+        s!"  phase: {frameText phase}", s!"  clause: {Minidregg.Host.RefusalText.render (frameText detail)}",
+        s!"  detail: {frameText detail}"],
+       [("reason", "operation-rejected"), ("phase", frameText phase),
+        ("clause", Minidregg.Host.RefusalText.render (frameText detail)), ("detail", frameText detail)])
   | .refused reason _ _ none =>
       ([s!"refused: {reason.name}: {reason.describe}"], [("reason", reason.name)])
   | .confirmed _ receipt => ([s!"not refused: confirmed at height {receipt.acceptedCount}"], [("reason", .null)])
   | .charged _ receipt causeBytes =>
       let cause := match ObjectiveActivityReceiver.rejectCodec.decode causeBytes with
-        | some typed => reprStr typed
+        | some typed => Minidregg.Host.RefusalText.render (reprStr typed)
         | none => s!"invalid canonical cause {hexText causeBytes}"
       ([s!"charged failure at height {receipt.acceptedCount}: {cause}"],
        [("reason", "charged"), ("cause", cause)])

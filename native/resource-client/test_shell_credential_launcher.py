@@ -51,57 +51,27 @@ class CredentialLauncherTests(unittest.TestCase):
         result=subprocess.run([str(copied),*self.args],env=dict(os.environ,SSH_ORIGINAL_COMMAND="mini-provider-credentials-v1"),capture_output=True,text=True)
         self.assertEqual(result.returncode,64)
         self.assertEqual(result.stdout,"")
-@unittest.skipUnless(shutil.which("flock"), "mini-shell-ssh needs flock (util-linux)")
 class CallSlotTests(unittest.TestCase):
-    """At most two calls per member at once; the third is refused by name; a slot is the call's, not its children's."""
+    """The wrapper execs the client with the member's call slots (`mini shell --call-slots`)."""
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(prefix="call-slots-")
         self.addCleanup(self.temp.cleanup)
         root=Path(self.temp.name)
         self.wrapper=root/"mini-shell-ssh";shutil.copyfile(Path(__file__).resolve().parents[2]/"deploy/shell/mini-shell-ssh",self.wrapper);self.wrapper.chmod(0o755)
         self.home=root/"home";self.home.mkdir()
-        # The fake client: `hold N` waits until release-N exists; `spawn` leaves a child running past its own exit.
+        # The fake client prints its arguments.
         self.mini=root/"mini"
-        self.mini.write_text("""#!/usr/bin/env bash
-line=${@: -1}
-case $line in
-  hold*) touch "$HOLDS/started-${line#hold }"; while [ ! -e "$HOLDS/release-${line#hold }" ]; do sleep 0.05; done ;;
-  spawn) setsid sleep 30 </dev/null >/dev/null 2>&1 & echo $! > "$HOLDS/child.pid" ;;
-esac
-echo "ran $line"
-""");self.mini.chmod(0o755)
-        self.holds=root/"holds";self.holds.mkdir()
-        self.env=dict(os.environ,HOLDS=str(self.holds))
-    def call(self,line,wait=True):
+        self.mini.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\"\n")
+        self.mini.chmod(0o755)
+        self.env=dict(os.environ)
+    def call(self,line):
         argv=[str(self.wrapper),str(self.mini),"/host","/config","/socket","/workspace",str(self.home)]
-        env=dict(self.env,SSH_ORIGINAL_COMMAND=line)
-        if wait:return subprocess.run(argv,env=env,capture_output=True,text=True,timeout=30)
-        return subprocess.Popen(argv,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
-    def started(self,n):
-        for _ in range(400):
-            if (self.holds/f"started-{n}").exists():return
-            import time;time.sleep(0.05)
-        self.fail(f"call {n} never started")
-    def test_third_concurrent_call_is_refused_by_name_and_a_freed_slot_serves_again(self):
-        a=self.call("hold 1",wait=False);self.started(1)
-        b=self.call("hold 2",wait=False);self.started(2)
-        third=self.call("read shared")
-        self.assertEqual(third.returncode,75,third.stderr)
-        self.assertIn("two calls already running for this member",third.stderr)
-        self.assertNotIn("ran",third.stdout)
-        (self.holds/"release-1").touch();self.assertEqual(a.wait(30),0)
-        again=self.call("read shared")
-        self.assertEqual((again.returncode,again.stdout.strip()),(0,"ran read shared"),again.stderr)
-        (self.holds/"release-2").touch();self.assertEqual(b.wait(30),0)
-    def test_a_child_outliving_the_call_holds_no_slot(self):
-        spawned=self.call("spawn");self.assertEqual(spawned.returncode,0,spawned.stderr)
-        child=int((self.holds/"child.pid").read_text())
-        try:
-            for line in ("read a","read b","read c"):
-                result=self.call(line)
-                self.assertEqual(result.returncode,0,result.stderr)
-        finally:
-            os.kill(child,15)  # the PID this test's own fake client recorded
+        return subprocess.run(argv,env=dict(self.env,SSH_ORIGINAL_COMMAND=line),capture_output=True,text=True,timeout=30)
+    def test_the_line_and_the_call_slots_reach_the_client(self):
+        result=self.call("read shared")
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(result.stdout.splitlines(),["shell","--socket","/socket","--host","/host","--config","/config",
+            "--workspace","/workspace","--home",str(self.home),"--call-slots",f"{self.home}/.call-slots","--line","read shared"])
     def test_the_client_exit_code_passes_through(self):
         failing=Path(self.temp.name)/"mini-fail";failing.write_text("#!/bin/sh\nexit 3\n");failing.chmod(0o755)
         result=subprocess.run([str(self.wrapper),str(failing),"/h","/c","/s","/w",str(self.home)],env=dict(self.env,SSH_ORIGINAL_COMMAND="x"),capture_output=True,text=True)

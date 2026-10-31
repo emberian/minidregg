@@ -475,6 +475,14 @@ pub(crate) fn refusal_line(outcome: &Value) -> Option<String> {
             ));
         }
     }
+    // The Host reduces a controller's typed `Reject` to the clause path it names
+    // (`Host.RefusalText.render`: `guard-rejected 0`); the committed detail stays in the
+    // outcome JSON. A Host that sends no `clause` is answered with the detail as before.
+    let detail = outcome
+        .get("clause")
+        .and_then(Value::as_str)
+        .filter(|clause| !clause.is_empty() && !clause.chars().any(char::is_control))
+        .map_or(detail, str::to_owned);
     let hint = refusal_hint(&detail);
     Some(format!(
         "refused: {reason}: {detail} (phase {}){hint}",
@@ -488,7 +496,9 @@ pub(crate) fn refusal_line(outcome: &Value) -> Option<String> {
 /// epochs, a fresh child id, an unspent nullifier); most often the authority
 /// has moved since, and the cure is a new proposal.
 fn refusal_hint(detail: &str) -> &'static str {
-    if detail.contains("CapabilityDelegationController.Reject.descent") {
+    if detail.contains("CapabilityDelegationController.Reject.descent")
+        || detail.contains("capability-delegation-controller: descent")
+    {
         "\n  hint: this delegation was authored against the authority as it stood then; it has moved since \
          (or the proposal was already used). Propose it again under a new ID and submit that."
     } else {
@@ -4206,6 +4216,13 @@ mod tests {
         assert_eq!(
             refusal_line(&nested).unwrap(),
             "refused: operation-rejected: invocation preparation: A.Reject.scalar (B.Reject.pageMutation (C.RejectReason.overflow)) (phase prepare)"
+        );
+        // A Host that names the clause: the line carries it, the committed detail stays in the JSON.
+        let clause = json!({"type":"refused","reason":"operation-rejected","phase":hex(b"prepare"),
+            "clause":"declared-resource-scalar: guard-rejected 0","detail":hex(b"DeclaredResourceScalar.Reject.guardRejected 0")});
+        assert_eq!(
+            refusal_line(&clause).unwrap(),
+            "refused: operation-rejected: declared-resource-scalar: guard-rejected 0 (phase prepare)"
         );
         let escape = json!({"type":"refused","reason":"malformed","phase":hex(b"x"),"detail":hex(b"a\x1b[2Jb")});
         assert!(refusal_line(&escape).unwrap().starts_with("refused: malformed: hex "));

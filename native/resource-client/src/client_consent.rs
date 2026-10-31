@@ -298,6 +298,23 @@ pub(crate) fn codec_process(host:&Path,config:&Path,args:&[&OsStr])->Result<Outp
     #[cfg(not(unix))] {Err("local native consent codecs currently require Unix".into())}
 }
 
+/// A source custody wrapper's detached Host verb (`HOST CONFIG VERB ...`), answered by this
+/// process's codec session when the verb is a pure one (`author`, `inspect`, `signatures`): the
+/// same frame the detached verb computes, without a Host process per call. The destination is
+/// replaced, as the detached verb's write replaced it. `false`: not a pure verb; the caller runs
+/// the image.
+pub(crate) fn pure_source(host:&Path,config:&Path,args:&[&OsStr])->Result<bool> {
+    let pure=args.first().and_then(|word|word.to_str()).is_some_and(|verb|matches!(verb,"author"|"inspect"|"signatures"));
+    if !pure {return Ok(false);}
+    if let Some(destination)=args.last().map(Path::new) {
+        match fs::symlink_metadata(destination) {
+            Ok(meta) if meta.file_type().is_file() => fs::remove_file(destination).map_err(|e|format!("cannot replace {}: {e}",destination.display()))?,
+            _ => {}
+        }
+    }
+    codec_process(host,config,args).map(|_|true)
+}
+
 /// Local producer for wrappers retaining native session frames themselves.
 /// Existing retained frames must be compared with this local derivation before
 /// reuse; the frame's original remote origin is not consent authority.
