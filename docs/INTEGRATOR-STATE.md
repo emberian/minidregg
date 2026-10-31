@@ -89,6 +89,7 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 
 ## Reports sent (do not resend)
 
+- 10-31 12:30: staging Lean red routed to hot-path a0fee5643746e520c; ack to perf-client.
 - 10-31 12:10: W1 cause to infra; hot-path 6d744e25f merged + audit requested (auditor); ack to hot-path
   a0fee5643746e520c; app-reds faeb1ff0b merged, -hp2 queued.
 - 10-31 11:50: batch 7 verdict FAIL (H2, H1, W1) to infra, explorer, perf-apps; -hp1 j14 = H1 signature to app-reds;
@@ -185,6 +186,9 @@ Every Lean-statement sha gets an audit round from a4d9a6f4cba4855ca before it ri
 
 ## Open reds and owners
 
+- **Staging Lean red (blocks batch 8 cut)**: Kernel/ResourceObservationAdmission.lean:515:33 `simp` made no progress
+  (Authorized type mismatch, implicit transparency); `authorizeChecked_eq_fast` (:532) on sorryAx. From hot-path 05a38ff4e
+  (merged 7dd554d78); found by perf-client (pool t8). Owner: hot-path a0fee5643746e520c, fix forward.
 - TokenCensus ConsentAnchor L1 witness: fixed b70a547c8 (batch 4), confirm in batch 4's umbrella.
 - Flatness submit/get (law 17): hot-path; content-cell flatness stays a published red until private-cells (b).
 - Etherpad install on forge: 0aa00c3e0 (batch 4); recheck on a fresh world. op66-plan: app-reds.
