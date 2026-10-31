@@ -24,11 +24,12 @@ gated candidates and names candidates to infra and the explorer.
   residents UNKNOWN (forge composed decides); j14-apps FAIL: the room-refusal ask got no Hermes reply ("Hermes sent no
   reply to the ask: refused", /ci/j-1c151f/journey.log). Suspected cause: perf-apps' START crash loop ("attestation
   resource outside supported profile", 20-digit member-namespace resource ids), fixed 40efdcff9.
-  **Next, armed** (hbox `$I/hp-resid.sh` PID 3123406 waits on gate15's PID; Mac waiter b7x6t0xs9 wakes the integrator when the -hp1 run exits; the gate started 08:26 as PID 3240123): when gate15 exits, gate15 runs on overlay
-  **1c151fce4-resid** (batch 5 + the spk-host crate from 40efdcff9) with PHASES="j14 composed", HARNESS=staging tip,
-  SUF=-hp1 (PID in gate-1c15-resid-hp1.pid, log logs/gate-1c15-resid-hp1.log). If j14 is still red there, the
-  journey's step dir names the cause; route it to app-reds. Then ask infra for forge composed on the green one.
-- **Batch 6 (staging 1e339d769+)**: the resource-id fix, exorcism 16f2d046f (reverts the commitment-seen cache) and whatever lands. Cut it when batch 5's gate and umbrella are
+  **Running**: gate15 on overlay **1c151fce4-resid** (batch 5 + spk-host crate from 40efdcff9), PHASES="j14 composed",
+  SUF=-hp1, PID in gate-1c15-resid-hp1.pid (Mac waiter bmk5rq363). Known red it will likely show: app-reds' Davros run 17
+  traced the j14 "refused" probe to Hermes's final `mini_say` resolving `refused` / lookup `not-submitted` with exit 0
+  (reply text correct, never delivered); app-reds owns it (run 18 captures the room-operations record). Forge composed
+  decides residents.
+- **Batch 6 (staging cc55a3e56+)**: the resource-id fix, exorcism 16f2d046f, 8b49bf1e2/fe77ab521 (Store calls carry files in the frame, v2; Host and helper from one build) and 019f2e56f and whatever lands. Cut it when batch 5's gate and umbrella are
   in and enough has accumulated (minimal-checks ruling: cuts spaced out to accumulate perf work).
 - **FORMAT batch (later, one genesis, after iter-speed's seam 1)**: hot-path row 11 (checkpoint carries session indexes;
   Store epoch) + Book entries migration (~50 consumers) + private-cells FORMAT (a): eventHistory and authority to the trie
