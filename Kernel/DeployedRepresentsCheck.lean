@@ -243,9 +243,9 @@ def allSupport {K : Type} [DecidableEq K] {V : K → Type} (fields : Π₀ key :
       apply decide_eq_decide.mpr
       constructor
       · intro holds key _ present
-        exact holds key ((left.2 key).resolve_right (by intro none; simp [none] at present)) present
+        exact holds key ((left.2 key).resolve_right (by intro none; have absent : fields key = Option.none := none; rw [absent] at present; cases present)) present
       · intro holds key _ present
-        exact holds key ((right.2 key).resolve_right (by intro none; simp [none] at present)) present)
+        exact holds key ((right.2 key).resolve_right (by intro none; have absent : fields key = Option.none := none; rw [absent] at present; cases present)) present)
 
 theorem allSupport_eq {K : Type} [DecidableEq K] {V : K → Type} (fields : Π₀ key : K, Option (V key))
     (p : K → Bool) :
@@ -262,7 +262,7 @@ theorem allSupport_eq {K : Type} [DecidableEq K] {V : K → Type} (fields : Π�
       cases h : fields key with
       | none => exact absurd h this
       | some _ => rfl
-    exact holds key ((support.2 key).resolve_right (by intro none; simp [none] at present)) present
+    exact holds key ((support.2 key).resolve_right (by intro none; have absent : fields key = Option.none := none; rw [absent] at present; cases present)) present
   · intro holds key _ present
     exact holds key (DFinsupp.mem_support_iff.mpr (by
       intro none; rw [none] at present; cases present))
@@ -271,7 +271,7 @@ theorem allSupport_eq {K : Type} [DecidableEq K] {V : K → Type} (fields : Π�
 theorem hashSet_contains_ofList (l : List Nat) (n : Nat) :
     (Std.HashSet.ofList l).contains n = decide (n ∈ l) := by
   rw [Std.HashSet.contains_ofList]
-  simp [List.contains]
+  exact Bool.eq_iff_iff.mpr (by simp)
 
 theorem digest_mem_values (l : List Theory.TypedAuthorization.Digest) (d : Theory.TypedAuthorization.Digest) :
     decide (d.value ∈ l.map (·.value)) = decide (d ∈ l) := by
@@ -279,7 +279,11 @@ theorem digest_mem_values (l : List Theory.TypedAuthorization.Digest) (d : Theor
   constructor
   · intro member
     obtain ⟨e, inl, same⟩ := List.mem_map.mp member
-    have : e = d := by cases e; cases d; simp_all
+    have : e = d := by
+      cases e; cases d
+      simp only at same
+      subst same
+      rfl
     exact this ▸ inl
   · intro member
     exact List.mem_map.mpr ⟨d, member, rfl⟩
@@ -323,7 +327,7 @@ def representsCheckFast {rootBytes : List UInt8 → Theory.TypedAuthorization.Di
 @[csimp] theorem representsCheck_eq_fast : @representsCheck = @representsCheckFast := by
   funext rootBytes image snap w
   unfold representsCheck representsCheckFast
-  simp only [allSupport_eq, hashSet_contains_ofList, rowOkSet_eq]
+  simp only [allSupport_eq, hashSet_contains_ofList, rowOkSet_eq, decide_eq_true_eq]
 
 #assert_axioms representsCheck_eq_fast
 
