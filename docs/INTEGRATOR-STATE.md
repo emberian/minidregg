@@ -5,27 +5,39 @@ Present-state record of the integration lane, rewritten whole when its shape cha
 line each). History (the 10-30 rehearsal-3 smoke, the hbox disk pause, the Hermes and apps diagnoses) is in this file's
 git history (e5dfc3ddb and earlier).
 
-## Now (2026-10-31 01:00 EDT)
+## Now (2026-10-31 02:45 EDT)
 
-- main = cdb399b47 (Lean v4.35.0 bump, landed 23:52; HOLD LEAN lifted).
-- **Batch candidate 35737eac4 READY 00:43** (integ-build5; host 2,498 s). gate13: tour 73/73 PASS, enrol PASS, hbox composed
-  rooms/churn/documents/store-restart pass; RED j14-apps + composed apps:sheet = "grains root is on ext4 without project
-  quota": 111985198 left the vars-backing bind out of deploy/spk-host/install-user-world (app-reds fix b1c30a598 + the
-  controller-world pin 6be1c1ea7); connector/residents/restart blocked behind apps; flatness-submit FAIL (submit_cpu
-  100 -> 847 ms over history 3..103), flatness-get failed to run (reported to hot-path; never a gate). Hotpatch rerun
-  running: gate14 (HARNESS overlays scripts + deploy/spk-host) HARNESS=8431fd33f SUF=-hp1 PHASES="composed j14".
-  umbrella-tree (umbrella-src, first run, long) then rerecord run after READY. Infra runs forge distinct composed
-  c-3573-d1 and wired the custodian (demo-volume-custodian.service) for the demo VM from this candidate.
-- **Staging (next batch) e46f16dcd+**: hot-path consent snapshot batch 54bd71d53/7d96bba7e (CONSENT-STORE, JDV fix, sweep
-  rows 1/2/5/6/7/10/12/18; supersedes 470fb79c9/bd1c8fc40), private-cells receiver + custody PRF rounds (b076a4806 ..
-  c130fd188, audited each round), app-reds b1c30a598/6be1c1ea7/f72223652 (apps-e2e grant bound 50000), demo-reds
-  8ff7c7da3 (door hands house publications to members; member `reports`), explorer batches 6-7. FORMAT change coming:
-  hot-path row 11 (checkpoint carries session indexes; Store epoch bump) shares ONE epoch bump with private-cells' root
-  switch: one batch, one genesis, fixture re-record.
-- Rehearsal 3 stays on be4ef7510 on forge (fresh world up; Hermes ask refused no-credential: the OpenRouter pool key is
-  ember's decision, raised to root).
-- hbox disk: 42 GB free at 00:50 (pool 12 GB, umbrella-src ~10 GB). sweep.sh now also removes candidates beyond the
-  newest 3 READY (+ keep list).
+- main = cdb399b47 (Lean v4.35.0 bump). Candidates kept: be4ef7510 (forge ship), cdb399b47, 35737eac4 (batch 1),
+  eca98bde7 (batch 2), 7d90da717.
+- **Batch 1 35737eac4**: tour 73/73, enrol PASS; apps red (vars-backing bind missing, then hbox disk); umbrella-tree
+  (first second-tree run, 5,457 s): every umbrella green except the two stale Native fixtures, which rerecord
+  re-recorded (fixture-regen/35737eac4863 fa6c6dbf7, data only; merged into staging 1ad2c5c7c).
+- **Batch 2 eca98bde7 READY 02:22** (hot-path CONSENT-STORE, private-cells receiver+custody, app-reds vars-backing +
+  controller pin, demo-reds door publications/reports/bend settle/--again). gate13 FAIL: tour 73/73, enrol, composed
+  rooms/churn/documents/store-restart PASS; j14-apps installs now, then app-start "resident unit ... failed before START"
+  (resident can't open the app-private /var to read its project id: a17f4172949caca14's fix on lane/app-reds-b, not
+  landed); composed apps same class; flatness submit_cpu 116 -> 874 ms (participantSlots, hot-path next); flatness-get
+  blocked on residents. Its umbrella-tree is running in umbrella-src (then rerecord). Infra reruns forge composed
+  c-eca9-d1 (worlds image fixed for prjquota) and queues the fresh demo ship on eca98bde7 through the custodian.
+- **Next cut waits for a17f's resident fix.** Staging also holds: ingest scratch input 45091c14e (hbox
+  /etc/mini-spk-volumes/ingest-scratch -> /tank/mini-ingest), signed-identity c730fd3ea (supersedes 5f5e99324, which
+  broke resident start's strict reader), bend responseType 32a7f0fc0 (Lean), web-body lifeline + resident self-exit
+  4928d9a77, bend show ended 2c23a33a5, H3/H4 59677eb57, hot-path rows 4/9/13 + consent option A a049aca6d + Pred.Frame
+  01a01e359/79a8c4c2c, private-cells hiding goals through 99e3309d1 + KeptCell design fc5548bf3, lane-tree fixes.
+- FORMAT batch (later, one genesis): hot-path row 11 (checkpoint carries session indexes; Store epoch) + private-cells
+  KeptCell option (b) (Aux cache in Materialized; Theory/CellStateAux.lean statement 18e049691 audited sound, conditions
+  sent) + the fixture re-record.
+- hbox disk 72 GB free (02:24) after the root-approved sweep (hpc, hot-path, scout, hp-codex, hb-dav-1..3, old source
+  tars, gate worlds; all logged). Host-level state app-reds added on hbox: /var/lib/mini-vars-backing (loop prjquota ext4
+  from /tank/lanes/vars-backing.img, NOT in fstab: after reboot `sudo mount -o loop,prjquota /tank/lanes/vars-backing.img
+  /var/lib/mini-vars-backing`), /etc/mini-spk-volumes/{vars-backing,ingest-scratch}, /tank/mini-ingest.
+- Hard-link hazard (twice tonight): never `cp -al` a .lake that another tree builds in (lake writes .trace and
+  setup.json in place). Lanes build in the lane pool (/home/hbox/pool, lane-tree; LANE_POOL_NO_WARM=1 while integ builds;
+  pool.env sets LAKE_ARTIFACT_CACHE=false) or their own unshared trees.
+- integ-build5 overlap: build5 releases build.lock at READY, so a second build can start while the first's umbrella-tree
+  runs; the second's umbrella-tree then finds TREE.lock held. Launch the next build only after "stage rerecord" of the
+  previous one, or run its umbrella-tree by hand after.
+- Rehearsal 3 stays on be4ef7510 on forge. Hermes ask needs the OpenRouter pool key (ember's decision).
 
 ## Lanes (send shas; name every new candidate to infra and the explorer)
 
@@ -33,7 +45,7 @@ The session was pruned 10-30 evening; the root re-adopted the veteran lanes with
 
 | lane | agent | owns |
 |---|---|---|
-| hot-path | aa2905fee8ef847d1 (distilled; owns flatness reds; rows 4/9/13 at the shared seam; row 11 FORMAT with private cells: one batch, one genesis) | consent snapshot resume (provider starts from the Store checkpoint, admits the suffix; anchors survive ships; deletes CONSENT-OWN own-base, superseding staging batches 2-3) + JDV fix 1a4f3a623 (was 2dfa8372e), ONE sha on cdb399b47; the law-17 perf queue |
+| hot-path | aa2905fee8ef847d1 / a8e4317c9e1574ca5 (distilled; owns flatness reds; rows 4/9/13 at the shared seam; row 11 FORMAT with private cells: one batch, one genesis) | consent snapshot resume (provider starts from the Store checkpoint, admits the suffix; anchors survive ships; deletes CONSENT-OWN own-base, superseding staging batches 2-3) + JDV fix 1a4f3a623 (was 2dfa8372e), ONE sha on cdb399b47; the law-17 perf queue |
 | infra (fresh) | aa72653a8ce442178 | Firecracker (or similar) lite VM inside the forge demo host, then the fresh ship; forge composed container |
 | app-reds | ad85d40779880420c (volume/custodian/apps; a17f4172949caca14 on resident /var checks, Hermes items) | the no-loop volume helper (bind-mounted directory + project quotas, the real fix), then op66-plan and the rest |
 | private cells | a30875aaf31364697 (distilled; KeptCell option (b) Aux cache in Materialized, statement first with astra, pool tree, FORMAT batch with hot-path row 11, one genesis) | O(log n) blinded-cell hiding (docs/RATCHET-LOG-DESIGN.md) |
