@@ -60,6 +60,8 @@ done
 if [[ -d $GRAINS_ROOT/controller ]]; then
   sudo -n -- "$installer" controller-remove "$STORE" "$HELPER" >>"$run/controller-cleanup.log" 2>&1 || rc=1
 fi
+# Custodian mode bound the custodian'"'"'s vars directory over the world'"'"'s: let it go before the world directory is removed.
+if mountpoint -q "$GRAINS_ROOT/vars" 2>/dev/null; then sudo -n -- umount "$GRAINS_ROOT/vars" >>"$run/root-cleanup.log" 2>&1 || rc=1; fi
 if [[ -f /etc/mini-spk-volumes/$STORE.json ]]; then sudo -n -- "$installer" remove "$STORE" "$HELPER" >>"$run/root-cleanup.log" 2>&1 || rc=1; fi
 rm -f "$units/mini-spk-broker@$STORE.service"
 while read -r unit; do [[ -z $unit ]] || rm -f "$units/$unit"; done < <(find "$units" -maxdepth 1 -type f \( -name "*s$STORE*" -o -name "mini-spk-supervisor@$STORE-*.service" \) -printf '%f\n')

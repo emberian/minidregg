@@ -109,12 +109,20 @@ spk_host=$(jq -er .spkHost "$out/manifest.json") spk_host_sha=$(jq -er .sha256.s
 install -m 755 "$repo/deploy/spk-host/spk-ingest" "$out/bin/spk-ingest"
 runid=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
 helper=/usr/local/libexec/mini-spk-volume-helper-$runid
+# A user-namespaced container (dregg-infra's composed machine, Stage B) keeps its volumes behind a host-side custodian:
+# CUSTODIAN_SOCKET (or the root-owned one-line file /etc/mini-composed-custodian) names its socket, the grains' app uids lie
+# inside the container's own 0..65535 range, and the custodian's host directory is bound over the world's `vars`.
+custodian=${CUSTODIAN_SOCKET:-$(cat /etc/mini-composed-custodian 2>/dev/null || true)}
 start=$(awk -F: -v user="$op_name" '$1==user && $3>=32 {print $2;exit}' /etc/subuid)
 [[ $start =~ ^[0-9]+$ ]] || refuse "no /etc/subuid range for $op_name"
 deployment=$(jq -r '.deployment // .domain' "$genesis" | sha256sum | cut -d ' ' -f1)
 hostid=$(sha256sum /etc/machine-id | cut -d ' ' -f1)
 printf 'ROOT SETUP BEGIN store=%s\n' "$store" | tee -a "$out/root-setup.log"
-sudo -n -- "$repo/deploy/spk-host/install-user-world" install "$out/bin/mini-spk-volume-helper" "$helper" "$store" "$deployment" "$hostid" "$op_uid" "$start" 16 >>"$out/root-setup.log" 2>&1
+sudo -n -- "$repo/deploy/spk-host/install-user-world" install "$out/bin/mini-spk-volume-helper" "$helper" "$store" "$deployment" "$hostid" "$op_uid" "$start" 16 ${custodian:+"$custodian"} >>"$out/root-setup.log" 2>&1
+if [[ -n $custodian ]]; then
+  [[ -d /var/lib/composed-vars ]] || refuse "custodian mode: /var/lib/composed-vars (the custodian's vars directory) is not bound in"
+  sudo -n -- mount --bind /var/lib/composed-vars "$grains/vars" || refuse "custodian mode: cannot bind the custodian's vars over $grains/vars"
+fi
 printf 'ROOT SETUP store=%s helper=%s\n' "$store" "$helper" | tee -a "$out/root-setup.log"
 # The teardown locator world-down.sh reads: `world-down.sh OUT_DIR` stops this Store's grain units and
 # broker, destroys its volumes through the helper and removes the root registry, sudoers rule, helper
