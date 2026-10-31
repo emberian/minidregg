@@ -375,7 +375,10 @@ def charge {height : Height}
 
 /-- `charge` over writes and read guards the caller has already computed: the
 admitted constructor evaluates the birth's writes and guards once and every
-lane reads them (`chargeWith_self`). -/
+lane reads them (`chargeWith_self`). It carries no premise that its arguments
+ARE the birth's own writes and guards: its one caller, `materializedIntent`,
+passes exactly `accepted.prepared.writes` and `readGuards accepted`, and any
+other caller must prove the same (`chargeWith_self`) before its charge counts. -/
 def chargeWith {height : Height}
     (accepted : AcceptedBirth profile deployment pins durable height)
     (writes : List DataWrite) (guards : List ReadGuard) : Charge
