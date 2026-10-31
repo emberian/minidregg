@@ -14,12 +14,10 @@ on the same trie root (FORMAT (a)). Never trade hiding for speed.
 ## Worktrees and boxes
 - Mac: `/Users/ember/dev/minidregg-lanes/privacy` (branch `seat/privacy`, tracks `main`; commit by path, `git pull
   --rebase origin main`, `git push origin HEAD:main`).
-- Builds: dregg-build2 (`ssh bb2`), pool tree t4 leased to `privacy` (`lane-tree acquire privacy origin/main`;
-  release with `lane-tree release privacy`). Its origin is a mirror that can lag GitHub: after a push, check the
-  tree has the commit, or rsync the changed files. Logs and PID files in `~/privacy-logs/` (`lcN.sh`, `bN.sh`).
-  Whole tree: `SWARM_MEM_MAX=28G swarm-build lake build Theory Kernel Compiler Assurance Minidregg Host`. On bb2 six
-  Mathlib replays fail with "permission denied" (read-only shared packages; build-loop told); every project module
-  still builds. hbox t1 (lease `private-cells`) and persvati `/home/ember/mdpool/lanes/privacy` exist but are idle.
+- Builds: hbox's pool (dregg-build2 now belongs to obend; t4 there is released, its copy of main saved in
+  /srv/pool/saved). `ssh hbox`, `t=$(lane-tree acquire privacy origin/main); cd $t`, rsync edited files in,
+  `scripts/pipeline/lane-check FILE...` under swarm-build; `lane-tree release privacy` when done. Build scripts
+  `exec` the build so the PID file names it. Measure on persvati.
 - Reviews: codex astra as peer via the native binary (the Homebrew node `codex` is broken):
   `/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex
   exec -m gpt-6-astra -s read-only -C <worktree> "<prompt>"`, nohup with a PID file in the scratchpad.
