@@ -4792,8 +4792,6 @@ private def rootOpeningJson (opening : NativeObservationController.OpeningView) 
       | .inl opened => .mkObj [("salt", hexJson opened.salt), ("entry", hexJson opened.entry)]
       | .inr leaf => .mkObj [("leaf", hexJson leaf)])]
 
-/-- `cell.root` is the cell's own root (the view's leading digest); the
-entries are the cell as the reader's scope narrows it. -/
 /-- A resource view's packed cell, decoded once for every rendering of it. -/
 private def resourcePacked (value : NativeObservationController.ResourceView) :
     Result (Minidregg.Theory.CellRegistry.PackedCell CanonicalCellRegistry.registry) :=
@@ -4801,6 +4799,8 @@ private def resourcePacked (value : NativeObservationController.ResourceView) :
   | some packed => pure packed
   | none => failAt "view-resource.cell" "noncanonical packed cell"
 
+/-- `cell.root` is the cell's own root (the view's leading digest); the
+entries are the cell as the reader's scope narrows it. -/
 private def resourceJsonOf (value : NativeObservationController.ResourceView)
     (packed : Minidregg.Theory.CellRegistry.PackedCell CanonicalCellRegistry.registry) :
     Result Lean.Json := do
