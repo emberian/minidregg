@@ -52,11 +52,16 @@ record's turn); the birth receive 405 (admitDecodedNative 183, receiveCandidateW
    So 2b's statement change is one premise shape: `accepted[i]? = some record` becomes the Opening's authenticated
    reader's record at i (`DurableHistoryReader`, MAC-verified tag, trusted storage), as `Light.basisVia` already
    reads keys; everything else maps onto `OpenedServed` fields.
-   Slice 1 LANDED 4fb012263 (lane-check dregg-build2 RC 0; not yet measured): the session opens the light
-   opening only and the full image on first need (`Session.full`, `materialize`, Host `sessionFull`); ops 0, 1,
-   2 (all but births) and the receipt readback on light; own appends adopted (`sessionAdopt`); anchor identity
-   cached per config. Still full: births (slice 2, delegated to aa75280bd04c5d700 on seat/birth-ground), ops 4/5
-   (read-path ad74bb6d4410b48f3 ports them onto a light Ground), the walk families (`sessionWalked`), fn/carried ops.
+   Slice 1 LANDED 4fb012263: the session opens the light opening only, the full image on first need
+   (`Session.full`, `materialize`, Host `sessionFull`); ops 0, 1, 2 and the receipt readback on light; own
+   appends adopted (`sessionAdopt`); anchor identity cached per config.
+   Slice 2 LANDED 95c09a2ac (with seat/birth-ground d9b2aa15a, the birth chain on `Ground`): births planned
+   (`birthPlanKeys`, `prepareOrdinaryBirthAuthorizedOn`) and submitted (`submitBirthLight`) on light.
+   Still full: ops 4/5 (read-path ad74bb6d4410b48f3 ports them onto a light Ground), the walk families
+   (`sessionWalked`), fn/carried ops, op 130 dry run.
+   Measuring: native-loop of main on bb2 t3 against base /srv/integ/candidates/76511e768…, tooling in bb2
+   ~/hx (up.sh, grow.sh, pcm.py). BLOCKED: worlds from 76511e768 don't come up (consent resident dies,
+   "durable log is not a turn log: a verification walk carries no World"; ed875b899), routed to member-side.
    (a) inventory what each `Opened` consumer reads (directory, authority, pins, seed/logStart exactness, the image's
    accepted records for historical receipts and walks); (b) give `OpenedServed` the missing fields as maintained
    values; (c) retype receivers family by family (birth first: `Held.of` already isolates it to directory +
