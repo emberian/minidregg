@@ -75,6 +75,10 @@ class Journey:
         self.lock_root()
         self.logs=self.root/'commands';self.logs.mkdir()
         self.own_anchors()
+        # The consent and codec residents a `mini` call starts leave no pid file and outlive this run; let
+        # them end by their own idle bound a minute after the last frame (default 600 s) instead of
+        # lingering, because they can only be stopped by PID.
+        for name in ('MINI_CONSENT_IDLE_S','MINI_CODEC_IDLE_S'):os.environ.setdefault(name,'60')
         self.processes=[];self.daemons=[];self.counter=0;self.controller=False
         # A separate fresh private root avoids sharing controller traversal ACLs
         # with another preserved world (including /run/user/UID).

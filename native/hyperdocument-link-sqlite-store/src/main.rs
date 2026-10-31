@@ -11,7 +11,37 @@ use std::io::{self, Read, Write};
 use std::path::Path;
 use std::process::ExitCode;
 
+/// A `serve` request's files held in memory (frame v2, `NativeCoprocess.outputMem`): a path
+/// argument `mem:NAME` reads the request's blob NAME, and a write to `mem:NAME` becomes a reply
+/// blob, so a Store call makes no temporary directory and no file round trip. Any other path is
+/// the file system, as in a one-shot call.
+#[derive(Default)]
+struct Memory {
+    inputs: Vec<(Vec<u8>, Vec<u8>)>,
+    outputs: Vec<(Vec<u8>, Vec<u8>)>,
+}
+
+thread_local! {
+    static MEMORY: std::cell::RefCell<Option<Memory>> = const { std::cell::RefCell::new(None) };
+}
+
+fn memory_name(path: &Path) -> Option<Vec<u8>> {
+    use std::os::unix::ffi::OsStrExt;
+    path.as_os_str().as_bytes().strip_prefix(b"mem:").map(<[u8]>::to_vec)
+}
+
 fn read_input(path: &Path) -> Result<Vec<u8>, StoreError> {
+    if let Some(name) = memory_name(path) {
+        let found = MEMORY.with(|memory| {
+            memory.borrow().as_ref().and_then(|memory| {
+                memory.inputs.iter().find(|(n, _)| *n == name).map(|(_, bytes)| bytes.clone())
+            })
+        });
+        if let Some(bytes) = found {
+            return Ok(bytes);
+        }
+        return Err(StoreError::InvalidPath);
+    }
     let file = File::open(path)?;
     let mut bytes = Vec::new();
     file.take((MAX_RECORD_BYTES + 1) as u64)
@@ -23,6 +53,20 @@ fn read_input(path: &Path) -> Result<Vec<u8>, StoreError> {
         });
     }
     Ok(bytes)
+}
+
+fn write_output(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> Result<(), StoreError> {
+    if let Some(name) = memory_name(path.as_ref()) {
+        let held = MEMORY.with(|memory| {
+            memory.borrow_mut().as_mut().map(|memory| {
+                memory.outputs.retain(|(n, _)| *n != name);
+                memory.outputs.push((name, bytes.as_ref().to_vec()));
+            })
+        });
+        return held.ok_or(StoreError::InvalidPath);
+    }
+    fs::write(path, bytes)?;
+    Ok(())
 }
 
 const USAGE: &str = "usage:\n  minidregg-link-sqlite-store read ROOT\n  minidregg-link-sqlite-store read-to ROOT OUTPUT\n  minidregg-link-sqlite-store publish ROOT INPUT\n  minidregg-link-sqlite-store cas ROOT EXPECTED|- INPUT\n  minidregg-link-sqlite-store database-path ROOT\n  minidregg-link-sqlite-store durable-anchor-enroll ROOT\n  minidregg-link-sqlite-store durable-init ROOT SEED\n  minidregg-link-sqlite-store durable-read ROOT FROM 0|1|2 OUTPUT\n  minidregg-link-sqlite-store durable-history ROOT REQUEST OUTPUT\n  minidregg-link-sqlite-store durable-seed ROOT OUTPUT\n  minidregg-link-sqlite-store durable-append ROOT HEIGHT RECORD TAG NODES\n  minidregg-link-sqlite-store durable-checkpoint ROOT HEIGHT INPUT\n  minidregg-link-sqlite-store durable-checkpoint-at ROOT HEIGHT OUTPUT\n  minidregg-link-sqlite-store journal-read ROOT FROM OUTPUT\n  minidregg-link-sqlite-store journal-append ROOT SEQ RECORD TAG\n  minidregg-link-sqlite-store serve";
@@ -107,7 +151,7 @@ fn run(mut arguments: Vec<std::ffi::OsString>, out: &mut Vec<u8>) -> Result<(), 
         ("read-to", [root, output]) => {
             let store = open(root, &identity)?;
             let bytes = store.read()?;
-            fs::write(output, bytes)?;
+            write_output(output, bytes)?;
         }
         ("cas", [root, expected, input]) => {
             let store = open(root, &identity)?;
@@ -144,19 +188,19 @@ fn run(mut arguments: Vec<std::ffi::OsString>, out: &mut Vec<u8>) -> Result<(), 
                 Some("2") => store.durable_read_from_checkpoint()?,
                 _ => return Err(Failure::Usage),
             };
-            fs::write(output, encode_durable_read(&read))?;
+            write_output(output, encode_durable_read(&read))?;
         }
         ("durable-history", [root, request, output]) => {
             let (at, heights, nodes) = decode_history_request(&read_input(Path::new(request))?)?;
             let store = open(root, &identity)?;
-            fs::write(
+            write_output(
                 output,
                 encode_history_read(&store.durable_history(at, &heights, &nodes)?),
             )?;
         }
         ("durable-seed", [root, output]) => {
             let store = open(root, &identity)?;
-            fs::write(output, store.durable_seed_bytes()?)?;
+            write_output(output, store.durable_seed_bytes()?)?;
         }
         ("durable-append", [root, height, record, tag, nodes]) => {
             let height = parse_height(height)?;
@@ -174,7 +218,7 @@ fn run(mut arguments: Vec<std::ffi::OsString>, out: &mut Vec<u8>) -> Result<(), 
         ("journal-read", [root, from, output]) => {
             let from = parse_height(from)?;
             let store = open(root, &identity)?;
-            fs::write(output, encode_journal_read(&store.journal_read(from)?))?;
+            write_output(output, encode_journal_read(&store.journal_read(from)?))?;
         }
         ("journal-append", [root, seq, record, tag]) => {
             let seq = parse_height(seq)?;
@@ -202,7 +246,7 @@ fn run(mut arguments: Vec<std::ffi::OsString>, out: &mut Vec<u8>) -> Result<(), 
                     bytes.extend_from_slice(&checkpoint);
                 }
             }
-            fs::write(output, bytes)?;
+            write_output(output, bytes)?;
         }
         ("durable-checkpoint", [root, height, input]) => {
             let height = parse_height(height)?;
@@ -267,6 +311,11 @@ fn serve() -> ExitCode {
     use std::os::unix::ffi::OsStringExt;
     const MAX_ARGS: usize = 64;
     const REPLY_TAG: &[u8; 8] = b"MDCOPRC1";
+    const REPLY_TAG_MEMORY: &[u8; 8] = b"MDCOPRC2";
+    const MEMORY_MARK: u32 = u32::MAX;
+    const MAX_BLOBS: usize = 8;
+    const MAX_NAME_BYTES: usize = 256;
+    const MAX_BLOB_BYTES: u64 = 64 * 1024 * 1024;
     const MAX_ARG_BYTES: usize = 64 * 1024;
     let mut input = BufReader::new(io::stdin().lock());
     let mut output = BufWriter::new(io::stdout().lock());
@@ -276,6 +325,46 @@ fn serve() -> ExitCode {
             Ok(()) => {}
             Err(error) if error.kind() == ErrorKind::UnexpectedEof => return ExitCode::SUCCESS,
             Err(_) => return ExitCode::FAILURE,
+        }
+        // Frame v2 (`MEMORY_MARK`): `u32 count, (u32 len, name, u64 len, bytes)*` input blobs
+        // precede the argv, and the reply (`REPLY_TAG_MEMORY`) appends the blobs written.
+        let memory = u32::from_be_bytes(word) == MEMORY_MARK;
+        if memory {
+            let mut inputs = Vec::new();
+            if input.read_exact(&mut word).is_err() {
+                return ExitCode::FAILURE;
+            }
+            let blobs = u32::from_be_bytes(word) as usize;
+            if blobs > MAX_BLOBS {
+                return ExitCode::FAILURE;
+            }
+            for _ in 0..blobs {
+                if input.read_exact(&mut word).is_err() {
+                    return ExitCode::FAILURE;
+                }
+                let length = u32::from_be_bytes(word) as usize;
+                if length > MAX_NAME_BYTES {
+                    return ExitCode::FAILURE;
+                }
+                let mut name = vec![0u8; length];
+                let mut long = [0u8; 8];
+                if input.read_exact(&mut name).is_err() || input.read_exact(&mut long).is_err() {
+                    return ExitCode::FAILURE;
+                }
+                let length = u64::from_be_bytes(long);
+                if length > MAX_BLOB_BYTES {
+                    return ExitCode::FAILURE;
+                }
+                let mut bytes = vec![0u8; length as usize];
+                if input.read_exact(&mut bytes).is_err() {
+                    return ExitCode::FAILURE;
+                }
+                inputs.push((name, bytes));
+            }
+            MEMORY.with(|held| *held.borrow_mut() = Some(Memory { inputs, outputs: Vec::new() }));
+            if input.read_exact(&mut word).is_err() {
+                return ExitCode::FAILURE;
+            }
         }
         let count = u32::from_be_bytes(word) as usize;
         if count == 0 || count > MAX_ARGS {
@@ -302,13 +391,28 @@ fn serve() -> ExitCode {
         }
         let (code, stdout, stderr) = std::panic::catch_unwind(|| invoke(arguments))
             .unwrap_or_else(|_| (101, Vec::new(), b"sqlite-store error: panicked\n".to_vec()));
+        let written_blobs = MEMORY.with(|held| held.borrow_mut().take()).map(|memory| memory.outputs);
         let written = output
-            .write_all(REPLY_TAG)
+            .write_all(if memory { REPLY_TAG_MEMORY } else { REPLY_TAG })
             .and_then(|()| output.write_all(&code.to_be_bytes()))
             .and_then(|()| output.write_all(&(stdout.len() as u64).to_be_bytes()))
             .and_then(|()| output.write_all(&stdout))
             .and_then(|()| output.write_all(&(stderr.len() as u64).to_be_bytes()))
             .and_then(|()| output.write_all(&stderr))
+            .and_then(|()| {
+                if !memory {
+                    return Ok(());
+                }
+                let blobs = written_blobs.unwrap_or_default();
+                output.write_all(&(blobs.len() as u32).to_be_bytes())?;
+                for (name, bytes) in &blobs {
+                    output.write_all(&(name.len() as u32).to_be_bytes())?;
+                    output.write_all(name)?;
+                    output.write_all(&(bytes.len() as u64).to_be_bytes())?;
+                    output.write_all(bytes)?;
+                }
+                Ok(())
+            })
             .and_then(|()| output.flush());
         if written.is_err() {
             return ExitCode::FAILURE;

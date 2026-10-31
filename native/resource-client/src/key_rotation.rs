@@ -239,7 +239,7 @@ pub(crate) fn check_commitment(
         return Ok(None);
     };
     let flag = |name: &str| view.get(name).and_then(Value::as_bool);
-    if flag("currentRevoked").ok_or("key status lacks currentRevoked")? {
+    if flag("currentRevoked") == Some(true) {
         return Err(format!("refused: subject {subject}'s current key is revoked; nothing can be built on this subject"));
     }
     let prerotated = flag("prerotated").ok_or("key status lacks prerotated")?;
