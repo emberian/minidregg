@@ -84,40 +84,23 @@ open Minidregg.Theory.AuthTrie (NodeIn root lastVal lastVal_snoc)
 open Minidregg.Theory.AuthTrie.Cache (Holds)
 open Minidregg.Compiler.PrivateCellIndex (indexEntries valueBytes indexExact indexIgnoresBlinding)
 open Minidregg.Compiler.Tower256ConcreteBackend (StreamCodec digestStream)
+open Minidregg.Compiler.PrivateCellRoot (outerRoot outerCustomization protocolVersion kindCtx maskOf hashedAddrBits addressHash deployedDig
+  lastVal_index_set_some lastVal_index_set_none maskOf_set_other)
 
 variable {kind : CanonicalCellRegistry.Kind} (wire : StoreCodec.Wire (CanonicalCellRegistry.layout kind))
 
-/-- The deployed key path of a private index. -/
-def bits : Address (CanonicalCellRegistry.layout kind) → List Bool := keyBits (hashedAddrBits wire 256 addressHash)
+/-- The deployed key path of a private index: the kind's class tag, then 256 hashed address
+bits (`Compiler.PrivateCellRoot.paths` at `kindTag`). -/
+abbrev bits : Address (CanonicalCellRegistry.layout kind) → List Bool :=
+  Compiler.PrivateCellRoot.paths wire (kindTag kind)
+
+theorem bits_eq_keyBits : bits wire = keyBits (hashedAddrBits wire 256 addressHash) := rfl
 
 theorem bits_length (a : Address (CanonicalCellRegistry.layout kind)) : (bits wire a).length = 516 :=
-  keyBits_length (hashedAddrBits_length wire 256 addressHash) a
+  Compiler.PrivateCellRoot.paths_length wire (kindTag kind) a
 
 /-- The kept private index of a cell. -/
-abbrev Index := Theory.AuthTrie.Cache (deployedDig wire) (bits wire) 516
-
-def outerCustomization : List UInt8 := "DREGG/PRIVATE-CELL/OUTER/v1".toUTF8.toList
-
-/-- The outer commitment: cSHAKE256 over the context, the mask and the index digest. -/
-def outerRoot (ctx mask : List UInt8) (inner : Digest) : Digest :=
-  (Sp800185Cshake256.hash outerCustomization
-    ((StreamCodec.product (StreamCodec.list StreamCodec.byte)
-      (StreamCodec.product (StreamCodec.list StreamCodec.byte) digestStream)).encode (ctx, mask, inner))).digest
-
-/-- The private-cell protocol version, bound into every kind's context. -/
-def protocolVersion : Nat := 1
-
-/-- **The kind-level context**: the protocol version and the wire's frame (magic, store version
-and layout digest). A function of the wire alone, so every cell of a kind has it by
-construction: no parameter set can carry another (round 18, context uniformity). The cell's
-identity and accepted version are not here: they are in the blinding value, which the receiver
-writes per accepted version (`CustodyCodec`), so the root is a function of the store
-(`Kernel.PrivateCellMaterializer`), and the separation of outer-hash inputs across versions and
-cells comes from the custody value's kind-level decode (`History.custodyBytes_nodup`,
-`CustodyCodec.cross_cell`), not from a context. -/
-def kindCtx : List UInt8 :=
-  (StreamCodec.product StreamCodec.nat (StreamCodec.list StreamCodec.byte)).encode
-    (protocolVersion, StoreCodec.frame wire)
+abbrev Index := Compiler.PrivateCellRoot.Index wire (kindTag kind)
 
 /-- The cell's fixed parameters: its identity, the registry's selection of the wire, the wire's
 blinding address, and the custody function of this cell: the custody value of accepted version
@@ -144,15 +127,16 @@ structure CustodyCodec (decode : CustodyDecode) (params : Params wire) where
   exact : ∀ v, decode ((wire.valueStream params.blinding.space).encode (params.prf v)) =
     some (params.cell, v, secret v)
 
-/-- The cell's mask: its blinding value's bytes (none: the empty mask). -/
-def maskOf (store : Store (CanonicalCellRegistry.layout kind)) : List UInt8 :=
-  (StoreCodec.blindingKey wire store).getD []
+/-- **The private root (specification)**: `Compiler.PrivateCellRoot.privateRoot` at the kind's
+tag; it is `BlindedCellHiding.maskedTrieCommitment` itself (`privateRoot_eq_commitment`: one
+commitment definition). -/
+abbrev privateRoot (ctx : List UInt8) (store : Store (CanonicalCellRegistry.layout kind)) : Digest :=
+  Compiler.PrivateCellRoot.privateRoot wire (kindTag kind) ctx store
 
-/-- **The private root (specification)**: the outer commitment over the mask and
-the canonical root of the store's index, computed from the whole store. -/
-def privateRoot (ctx : List UInt8) (store : Store (CanonicalCellRegistry.layout kind)) : Digest :=
-  BlindedCellHiding.maskedTrieCommitment (deployedDig wire) (bits wire) 516 outerRoot ctx (maskOf wire store)
-    (indexEntries wire store)
+theorem privateRoot_eq_commitment (ctx : List UInt8) (store : Store (CanonicalCellRegistry.layout kind)) :
+    privateRoot wire ctx store =
+      BlindedCellHiding.maskedTrieCommitment (deployedDig wire) (bits wire) 516 outerRoot ctx (maskOf wire store)
+        (indexEntries wire store) := rfl
 
 /-- A gated store with its kept index, mask, parameters and accepted version. -/
 structure KeptCell where
@@ -176,7 +160,7 @@ def root (cell : KeptCell wire) : Digest := outerRoot cell.ctx cell.mask cell.in
 
 /-- **The kept root is the private root** under the cell's own context. -/
 theorem root_eq (cell : KeptCell wire) : cell.root = privateRoot wire cell.ctx cell.fit.store := by
-  rw [root, privateRoot, BlindedCellHiding.maskedTrieCommitment, Theory.AuthTrie.Cache.digest_eq cell.holds,
+  rw [root, privateRoot, Compiler.PrivateCellRoot.privateRoot, Theory.AuthTrie.Cache.digest_eq cell.holds,
     cell.mask_eq]
 
 end KeptCell
@@ -199,45 +183,10 @@ theorem storeFits_set {store : Store (CanonicalCellRegistry.layout kind)} (gate 
   · rw [Store.set_ne store a v b same] at live
     exact admitted_of_storeFits gate b live
 
-/-- The index after setting a non-blinding address: the old entries, then the new one. -/
-theorem lastVal_index_set_some (store : Store (CanonicalCellRegistry.layout kind))
-    {a : Address (CanonicalCellRegistry.layout kind)} (blind : ¬ some a = wire.blinding)
-    (x : (CanonicalCellRegistry.layout kind).Value a.1) (k : Address (CanonicalCellRegistry.layout kind)) :
-    lastVal (indexEntries wire (store.set a (some x))) k =
-      lastVal (indexEntries wire store ++ [(a, valueBytes wire a x)]) k := by
-  rw [lastVal_snoc, indexExact, indexExact]
-  by_cases same : a = k
-  · subst same
-    simp [blind]
-  · have ne : k ≠ a := fun h => same h.symm
-    simp only [same, if_false, Store.set_ne store a (some x) k ne]
-
-/-- The index after removing a non-blinding address: the key dropped. -/
-theorem lastVal_index_set_none (store : Store (CanonicalCellRegistry.layout kind))
-    {a : Address (CanonicalCellRegistry.layout kind)} (blind : ¬ some a = wire.blinding)
-    (k : Address (CanonicalCellRegistry.layout kind)) :
-    lastVal (indexEntries wire (store.set a none)) k =
-      lastVal (Theory.AuthTrie.Trie.dropKey a (indexEntries wire store)) k := by
-  rw [Theory.AuthTrie.lastVal_dropKey, indexExact, indexExact]
-  by_cases same : k = a
-  · subst same
-    simp
-  · simp only [same, if_false, Store.set_ne store a none k same]
-
 theorem maskOf_set_blinding (B : StoreCodec.Blinding wire) (store : Store (CanonicalCellRegistry.layout kind))
     (m : (CanonicalCellRegistry.layout kind).Value B.space) :
     maskOf wire (store.set B.address (some m)) = (wire.valueStream B.space).encode m := by
   simp [maskOf, StoreCodec.Blinding.blindingKey_eq B, StoreCodec.Blinding.address]
-
-theorem maskOf_set_other {store : Store (CanonicalCellRegistry.layout kind)} {a : Address (CanonicalCellRegistry.layout kind)}
-    (blind : ¬ some a = wire.blinding) (v : Option ((CanonicalCellRegistry.layout kind).Value a.1)) :
-    maskOf wire (store.set a v) = maskOf wire store := by
-  unfold maskOf StoreCodec.blindingKey
-  cases h : wire.blinding with
-  | none => rfl
-  | some b =>
-      have ne : b ≠ a := fun same => blind (by rw [h, same])
-      simp [Store.set_ne store a v b ne]
 
 /-- **The registry's blinding address passes the gate**: for a declared kind it
 is `StateKey.blinding`, which carries no digest; every other kind's addresses
@@ -850,12 +799,10 @@ theorem Twin.root {c₁ c₂ : KeptCell wire} (twin : Twin c₁ c₂) :
     c₁.root = outerRoot c₂.ctx c₁.mask c₂.index.digest := by
   rw [KeptCell.root, twin.ctx, twin.2.2]
 
-/-- The index after one data write: a function of the old index. -/
-def indexStep (index : Index wire) (a : Address (CanonicalCellRegistry.layout kind))
+/-- The index after one data write: a function of the old index (one insert or one erase). -/
+abbrev indexStep (index : Index wire) (a : Address (CanonicalCellRegistry.layout kind))
     (v : Option ((CanonicalCellRegistry.layout kind).Value a.1)) : Index wire :=
-  match v with
-  | some x => index.insert (bits_length wire) a (valueBytes wire a x)
-  | none => index.erase a
+  Compiler.PrivateCellRoot.indexStep wire (kindTag kind) index a v
 
 theorem write_index {cell cell' : KeptCell wire} {a : Address (CanonicalCellRegistry.layout kind)}
     {v : Option ((CanonicalCellRegistry.layout kind).Value a.1)} (accepted : cell.write a v = some cell') :
@@ -1861,8 +1808,12 @@ theorem readNat_custody (c : List UInt8) (u z : Nat) :
       some (custodyNat c u z) :=
   congrArg (Option.map Int.toNat) ((W.valueStream DeclaredEffectCell.blinding.space).toLawful.decode_encode _)
 
-/-- The ideal setting's secret bytes. -/
-def secretBytes (x : Nat) : List UInt8 := [UInt8.ofNat x]
+/-- The secret's bytes: the natural's stream encoding, injective at every width
+(`secretBytes_injective`). -/
+def secretBytes (x : Nat) : List UInt8 := StreamCodec.nat.encode x
+
+theorem secretBytes_injective : Function.Injective secretBytes :=
+  fun _ _ same => StoreCodec.streamEncode_injective _ same
 
 /-- The declared wire's kind-level custody decode. -/
 def declaredDecode : CustodyDecode := natDecode readNat secretBytes
@@ -1988,6 +1939,7 @@ end Concrete
 #assert_axioms cellOfCode_cellCode
 #assert_axioms natDecode_custodyNat
 #assert_axioms Concrete.declared_cross_cell
+#assert_axioms Concrete.secretBytes_injective
 #assert_axioms KeptCell.accept_composite
 
 end Minidregg.Kernel.PrivateCellReceiver

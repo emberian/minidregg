@@ -51,6 +51,7 @@ public import Kernel.PrivateCellScope
 public import Compiler.PrivateCellIndex
 public import Theory.PrivateCellTrie
 public import Kernel.WorldRoot
+public import Compiler.PrivateCellRoot
 
 @[expose] public section
 
@@ -67,6 +68,8 @@ open Minidregg.Theory.AuthTrie (NodeIn Reveal revealVerify root lastVal canon me
   reveal_sound revealFor reveal_complete)
 open Minidregg.Theory.AuthTrie.Cache (PathsInjective wf_canon)
 open Minidregg.Compiler.PrivateCellIndex (indexEntries valueBytes indexExact)
+open Minidregg.Compiler.PrivateCellRoot (hashedAddrBits hashedAddrBits_length nodeBytesWith nodeBytesWith_injective
+  addressCustomization nodeCustomization addressHash addressHash_length deployedDig untaggedClass)
 
 /-- **The wire's exclusion is the registry's blinding.** -/
 theorem isBlinding_iff {kind : CanonicalCellRegistry.Kind} {wire : StoreCodec.Wire (CanonicalCellRegistry.layout kind)}
@@ -81,6 +84,26 @@ variable {kind : CanonicalCellRegistry.Kind}
 def keyBits (addrBits : Address (CanonicalCellRegistry.layout kind) → List Bool)
     (address : Address (CanonicalCellRegistry.layout kind)) : List Bool :=
   (bitCode 256).tag (fieldOf kind address) ++ addrBits address
+
+/-- The class tag of an address with no field is `Compiler.PrivateCellRoot.untaggedClass`. -/
+theorem untagged_eq : (bitCode 256).tag none = untaggedClass := by
+  have zero : bitsW 256 0 = List.replicate 256 false := by
+    unfold bitsW
+    have : (Nat.testBit 0) = fun _ => false := funext Nat.zero_testBit
+    rw [this, List.map_const', List.length_range]
+  show family none ++ detail 256 none = untaggedClass
+  rw [show detail 256 none = false :: bitsW 256 0 from rfl, zero]
+  rfl
+
+/-- The private index tag of a registry kind: its address's field class. -/
+def kindTag (kind : CanonicalCellRegistry.Kind) : Compiler.PrivateCellRoot.KeyTag (CanonicalCellRegistry.layout kind) :=
+  ⟨fun a => (bitCode 256).tag (fieldOf kind a), fun a => bitTag_length 256 _⟩
+
+/-- A kind whose addresses carry no field has the untagged key paths. -/
+theorem kindTag_untagged {kind : CanonicalCellRegistry.Kind} (none : ∀ a, fieldOf kind a = none) :
+    (kindTag kind).tag = (Compiler.PrivateCellRoot.untagged _).tag := by
+  funext a
+  simp only [kindTag, Compiler.PrivateCellRoot.untagged, none a, untagged_eq]
 
 /-- Two distinct live addresses of the index on one key path (one class tag and
 one path below it). -/
@@ -246,18 +269,6 @@ theorem admit_refuses {wire : StoreCodec.Wire (CanonicalCellRegistry.layout kind
 
 /-! ## The receiver's address path: a hash of the canonical address bytes -/
 
-/-- The address path of the receiver: the first `A` bits of a hash of the
-address's canonical bytes (`StoreCodec.addressStream`), the hash any function
-to bit lists. -/
-def hashedAddrBits (wire : StoreCodec.Wire (CanonicalCellRegistry.layout kind)) (A : Nat)
-    (hash : List UInt8 → List Bool) (address : Address (CanonicalCellRegistry.layout kind)) : List Bool :=
-  ((hash ((StoreCodec.addressStream wire).encode address)) ++ List.replicate A false).take A
-
-theorem hashedAddrBits_length (wire : StoreCodec.Wire (CanonicalCellRegistry.layout kind)) (A : Nat)
-    (hash : List UInt8 → List Bool) (address : Address (CanonicalCellRegistry.layout kind)) :
-    (hashedAddrBits wire A hash address).length = A := by
-  simp [hashedAddrBits]
-
 /-- **The index's collision is the hash's.** Two distinct live addresses on one
 key path have distinct canonical bytes (the address codec is injective) whose
 truncated hashes agree: a collision of the truncated hash among this store's live
@@ -305,56 +316,6 @@ theorem viewOpeningExact_hashed {wire : StoreCodec.Wire (CanonicalCellRegistry.l
 /-! ## At the deployed shape: cSHAKE256 nodes and address hashes -/
 
 open Minidregg.Compiler.Tower256ConcreteBackend (StreamCodec digestStream)
-
-/-- What a node digest hashes: a tag byte, then a leaf's canonical address bytes
-and value bytes, or a branch's two child digests under `child`. -/
-def nodeBytesWith (wire : StoreCodec.Wire (CanonicalCellRegistry.layout kind)) {D : Type} (child : StreamCodec D) :
-    NodeIn (Address (CanonicalCellRegistry.layout kind)) (List UInt8) D → List UInt8
-  | .empty => [2]
-  | .leaf a v => 0 :: ((StoreCodec.addressStream wire).encode a ++ v)
-  | .branch l r => 1 :: (StreamCodec.product child child).encode (l, r)
-
-theorem nodeBytesWith_injective (wire : StoreCodec.Wire (CanonicalCellRegistry.layout kind)) {D : Type}
-    (child : StreamCodec D) {a b : NodeIn (Address (CanonicalCellRegistry.layout kind)) (List UInt8) D}
-    (same : nodeBytesWith wire child a = nodeBytesWith wire child b) : a = b := by
-  cases a with
-  | empty => cases b <;> simp_all [nodeBytesWith]
-  | leaf k v =>
-      cases b with
-      | empty => simp [nodeBytesWith] at same
-      | branch _ _ => simp [nodeBytesWith] at same
-      | leaf k' v' =>
-          simp only [nodeBytesWith, List.cons.injEq, true_and] at same
-          have decoded := (StoreCodec.addressStream wire).decodePrefix_encode k v
-          rw [same, (StoreCodec.addressStream wire).decodePrefix_encode k' v'] at decoded
-          have := (Prod.mk.inj (Option.some.inj decoded))
-          rw [this.1, this.2]
-  | branch l r =>
-      cases b with
-      | empty => simp [nodeBytesWith] at same
-      | leaf _ _ => simp [nodeBytesWith] at same
-      | branch l' r' =>
-          simp only [nodeBytesWith, List.cons.injEq, true_and] at same
-          have decoded := (StreamCodec.product child child).decodePrefix_encode (l, r) []
-          rw [same, (StreamCodec.product child child).decodePrefix_encode (l', r') []] at decoded
-          have := (Prod.mk.inj (Option.some.inj decoded)).1
-          simp only [Prod.mk.injEq] at this
-          rw [this.1, this.2]
-
-def addressCustomization : List UInt8 := "DREGG/PRIVATE-CELL/ADDRESS/v1".toUTF8.toList
-def nodeCustomization : List UInt8 := "DREGG/PRIVATE-CELL/NODE/v1".toUTF8.toList
-
-/-- The receiver's address hash: the 256 bits of cSHAKE256 over the bytes. -/
-def addressHash (bytes : List UInt8) : List Bool :=
-  WorldRoot.bytesBits (Sp800185Cshake256.hash addressCustomization bytes).bytes
-
-theorem addressHash_length (bytes : List UInt8) : (addressHash bytes).length = 256 := by
-  simp [addressHash, WorldRoot.bytesBits_length, (Sp800185Cshake256.hash _ _).length_exact]
-
-/-- The receiver's node digest: cSHAKE256 over the node bytes. -/
-def deployedDig (wire : StoreCodec.Wire (CanonicalCellRegistry.layout kind))
-    (node : NodeIn (Address (CanonicalCellRegistry.layout kind)) (List UInt8) Digest) : Digest :=
-  (Sp800185Cshake256.hash nodeCustomization (nodeBytesWith wire digestStream node)).digest
 
 theorem output_eq {o₁ o₂ : Sp800185Cshake256.Output} (same : o₁.bytes = o₂.bytes) : o₁ = o₂ := by
   cases o₁; cases o₂; simp only at same; subst same; rfl
