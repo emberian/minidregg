@@ -15,38 +15,31 @@ After any context clear, the ONLY sources of what is pending are this file and C
 a scratchpad or task-output file exists. Send only what "Reports owed" lists, and move it to "Reports sent" in the same
 step. Closed items are never re-reported. Report to root on events only (READY, gate verdicts, reds, decisions needed).
 
-## Now (2026-10-31 11:05 EDT)
+## Now (2026-10-31 11:30 EDT)
 
 - **ember (10-31): no rehearsal cut until she says.** Make the system excellent: Hermes repaired, efficiency everywhere,
   every red fixed (never worked around). ~1 ms warm per action is the direction, not a gate. Law 17 holds.
 - **main = 83e926874** = gated batch 4 b9450147f + main 7978ddfdd. **Batch 4 is the green fallback.**
-- **Batch 7 acc7cfa03: gate15 verdict FAIL (10:55).** enrol PASS, tour 73/73; j14 FAIL at worker/finish_worker:
-  `controller-run grain-runtime create` rc=1, mini cannot create owner-workspace/attempt-index/by-intent/ (ENOENT;
-  perf-client aa24acaf8, fixed b940b3f50); composed (-c2 after my predecessor's harness-extract launch error) blocked by
-  "the metered workroom is not ready"; flatness submit FAIL / get PASS (published, never gating).
-- **acc7cfa03-attidx -hp1** (batch 7 + mini from b940b3f50, HARNESS=49a717ef2, PHASES "j14 composed"; PID file
-  $I/gate-acc7-attidx.pid; integrator waiter armed): composed FAIL again 10:57 with the SAME "metered workroom is not
-  ready" refusal, so that refusal is NOT downstream of the attempt-index ENOENT: it is its own fault (W1). j14 FAIL
-  11:02: H1 (op 47; journal: op 98 mini_say paid, write lookup not-submitted mapped to refused). Gate verdict FAIL
-  in substance; flatness phase still finishing (waiter armed).
-- Batch 6 74e1cfa10 umbrella-tree rc=0 reds=0 (10:57); fixture-regen/74e1cfa10719 merged on staging (790eb04a3).
-- **Staging 790eb04a3 (batch 8 material)**: iter-speed 7800d3199 + 697db7664, tower split 0eab28db7, exorcist 47b7cb2e1
-  + c763e3ead + **b37f26cf6** (A: ssh lines run in a per-member `mini line-resident` via new bin `mini-line`, role
-  miniLine, which every mini overlay must also carry; B: signed reads keep one journal line, no attempt tree; doc show
-  wall min 17.4 -> 13.7 ms), perf-client 783b460cb + b6 + b940b3f50 (+ fb6f024a8 via exorcism), retained-mode 62aa5fcf8
-  over 675a80745 + 1d4ff4efb, + 05bffae27/7f42f6445 (round-2 answers: SparseMap transport lemmas, Zero, 37 pins;
-  round-3 audit SOUND: injective over the full type, 37/37 pinned, none vacuous), app-reds H1 ccdaf98b3 + faeb1ff0b (not-submitted is its own resolution at every site; 23 filtered tests
-  pass), hot-path 6d744e25f (5cb39c5fe + 05a38ff4e: law check on its own witness decides Pred.eval, csimp; audit SOUND:
-  admitOwn hard-wires law.witness, no external caller of admit with another witness), perf-apps 546a551fd (docs: batch 7 vs 6, Host CPU samples 8,704 vs 13,647), boundary 48cea3caf (Theory may import Std), batch 6 fixtures. Batch 8 cut owes the
-  whole-tree build of these.
-- **Next shared-interface change: retained-mode L0** (Store as a persistent extensional tree map, ~66 files,
-  WorldCompact deleted): its own cut with one whole-tree build; FORMAT rebases onto it. lane/retained-l0 is WIP
-  (94cd7ceca, Theory wave 8/42): NEVER merge until retained-mode sends a sha labelled SHARED-INTERFACE.
-  Audit items owed before L0 (sent to the lane by the auditor): toDFinsupp 0 = 0 as an equation, an ofDFinsupp
-  inverse, one optionZero instance (two global remain), a toList code-order lemma for encode, one key DecidableEq.
-- **CLOSED: GET read-path contract** (ember ruled (c) prepaid per-payer reservations, (d) per-route declared eligibility;
-  hot-path owns it statement-first). Never re-run or re-report.
-- hbox: / 57 GB free (11:00).
+- **Batch 8 dc61016cb: BUILD running** (launched 11:26, PID 2286225 in $I/build.pid and build-b8.pid; integrator waiter
+  armed on READY). Carries: exorcist b37f26cf6 (resident shell `mini-line`, role miniLine; read scratch), retained
+  05bffae27/7f42f6445 (SparseMap, audit sound), hot-path 5cb39c5fe/05a38ff4e + a5e757016 (cherry-picked as dc61016cb:
+  fixes the staging Lean red, authorizeWith on admitOwn; Pred.eval law check, audit sound), app-reds H1a
+  ccdaf98b3/faeb1ff0b, iter-speed 7800d3199/697db7664, tower split 0eab28db7, exorcist 47b7cb2e1/c763e3ead, perf-client
+  783b460cb/b6/b940b3f50, retained 62aa5fcf8/675a80745/1d4ff4efb, boundary 48cea3caf, batch 6 fixtures, perf-apps
+  546a551fd (docs). At READY: gate15 full (EDGE_REV default now 69c17a3); name to infra, explorer, perf-apps.
+- **Batch 7 acc7cfa03: FAIL** (H2, H1, W1). Overlay **acc7cfa03-h1** (batch 7 + mini b940b3f50 + grain-runtime from
+  a371cf4a5) -hp2 11:23: hbox composed rooms/churn/documents/apps/connector PASS (W1 gone), residents = R1 standing;
+  j14 FAIL on H1b (below). KEPT worlds for app-reds: /ci/c-acc7cf-hp2/w (composed; down: world-down.sh
+  /ci/c-acc7cf-hp2/inputs then jworld-scratch.sh down) and /ci/j-acc7cf-hp2 (j14). Take down when app-reds says.
+- Batch 6 74e1cfa10 umbrella-tree reds=0; batch 7 umbrella-tree running in umbrella-src.
+- **Next shared-interface change: retained-mode L0**: its own cut. lane/retained-l0 is WIP: NEVER merge until
+  retained-mode a9b54e85e4a194b91 sends a sha labelled SHARED-INTERFACE. Auditor's items owed before L0: toDFinsupp 0 = 0
+  as an equation, an ofDFinsupp inverse, one optionZero instance, a toList code-order lemma for encode, one key
+  DecidableEq.
+- Awaited: perf-client 36612f028 + 6a088183f (Store-open represents decision) after its overlay measurement; hot-path
+  92828ff96 (birth plan directory decode) after lane-check; infra's forge composed of batch 7 (after its batch 4 rebuild).
+- **CLOSED: GET read-path contract** (ember ruled (c)+(d); hot-path owns it statement-first). Never re-run or re-report.
+- hbox: / 57 GB free (11:25).
 
 ## Failure signatures (every red: stage, refusal/error text, first divergence; reruns? same place?)
 
@@ -66,6 +59,12 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   exact lookup non-terminal after a reset (a retry loop). Asked for the fix at the lookup (not-submitted distinct, Host
   refusal stays terminal, two tests). The reset's own cause (ServeBounds 10 s deadline?) stays open; run 25 times it.
 - Batch 6 74e1cfa10 j14: `FAIL rc=1`; its world /ci/j-74e1cf was swept, so its signature is unrecorded: not counted as H1.
+- **H1b, operator connection reset on the final say** (acc7cfa03-h1 -hp2, 4/4 counting H1's runs): stage j14 probe,
+  `0099-controller-run` exit 1: `room resident: error: final write was never submitted: no terminal outcome; retain the
+  exact source operation for an exact retry; the room write failed first: error: Connection reset by peer (os error 104)`.
+  H1a (false `refused`) FIXED by faeb1ff0b. Path: resident -> public proxy participant.sock -> private/operator-v2.sock;
+  no server-side log line. Owed by app-reds ad85d40779880420c: (a) the reset's cause (proxy, ServeBounds 10 s read
+  deadline, operator drop); (b) who performs the exact retry of a never-submitted final.
 - **H2, attempt-index ENOENT** (batch 7 base): stage j14 worker, `controller-run grain-runtime create` rc=1, ENOENT on
   owner-workspace/attempt-index/by-intent/. Never reached the probe. Distinct from H1. Fix b940b3f50; -hp1 decides.
 - **W1, metered workroom not ready** (batch 7 base -c2 and -hp1): stage composed-inputs, `composed-inputs: the metered
@@ -74,21 +73,18 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   dregg-infra 69c17a3. 4ea511d's jworld-scratch.sh apps-bootstrap dropped the JWORLD_MANAGEMENT=distinct branch (tasks
   born as subject 7), while workroom-ready.sh signs as subject 8 -> no-grant. Routed to infra aa72653a8ce442178
   Infra: 4ea511d is an ANCESTOR of 69c17a3 (stale pin; main kept the branch; forge syncs main so never saw W1).
-  FIXED: gate15.sh default EDGE_REV=69c17a3 (12:15). Gates pin a sha; infra sends a newer one when wanted.
+  FIXED: gate15.sh default EDGE_REV=69c17a3 (11:09); -hp2 confirmed (apps, connector PASS). Gates pin a sha; infra sends a newer one when wanted.
 - **R1, residents room-summon UNKNOWN** on hbox composed (every batch since 2): hbox cannot judge residents; forge
   composed does (batch 5 forge PASS). Standing, not a candidate red.
 
 ## Reports owed
 
-- To root: batch 7 verdict, H1 fix merged, W1 = infra pin (in the integrator's next return).
-- When -hp2 lands ($I/hp-h1.pid waits for -hp1, builds grain-runtime from staging in hp-wt, overlays
-  acc7cfa03-attidx -> acc7cfa03-h1, launches gate15 PHASES="j14 composed" EDGE_REV=69c17a3 KEEP_WORLD=1 SUF=-hp2,
-  PID file $I/gate-acc7-h1.pid): verdict to root, infra, explorer, perf-apps; signature + kept world /ci/j-acc7cf-hp2 to
-  app-reds (reset cause, ServeBounds 10 s deadline).
-- Awaited (not owed): infra's forge composed of batch 7.
+- To root: -hp2 result (H1a fixed, H1b open, W1 gone) and batch 8 launch, in the integrator's next return.
+- Batch 8 READY: name to infra, explorer, perf-apps (perf-apps' EtherCalc capture is the after-measurement); launch gate15.
 
 ## Reports sent (do not resend)
 
+- 10-31 11:28: -hp2 result to app-reds (H1b signature, kept worlds), infra, explorer, perf-apps.
 - 10-31 12:30: staging Lean red routed to hot-path a0fee5643746e520c; ack to perf-client.
 - 10-31 12:10: W1 cause to infra; hot-path 6d744e25f merged + audit requested (auditor); ack to hot-path
   a0fee5643746e520c; app-reds faeb1ff0b merged, -hp2 queued.
@@ -186,7 +182,7 @@ Every Lean-statement sha gets an audit round from a4d9a6f4cba4855ca before it ri
 
 ## Open reds and owners
 
-- **Staging Lean red (blocks batch 8 cut)**: Kernel/ResourceObservationAdmission.lean:515:33 `simp` made no progress
+- FIXED a5e757016 (dc61016cb), confirm in batch 8's build: staging Lean red: Kernel/ResourceObservationAdmission.lean:515:33 `simp` made no progress
   (Authorized type mismatch, implicit transparency); `authorizeChecked_eq_fast` (:532) on sorryAx. From hot-path 05a38ff4e
   (merged 7dd554d78); found by perf-client (pool t8). Owner: hot-path a0fee5643746e520c, fix forward.
 - TokenCensus ConsentAnchor L1 witness: fixed b70a547c8 (batch 4), confirm in batch 4's umbrella.
