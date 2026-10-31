@@ -1450,6 +1450,25 @@ def checkProgram (E : Evaluator) (program : NockProgramCodec.Program)
       | .ok view =>
         (Door.checkPoke E.toMachine d program door view claim writes).map (Run.Verdict.erase E.toMachine)
 
+/-- `checkClaim` past the claimed program's load, on its evaluator's resolution, which it
+takes as an argument: a proof that unfolds a match on `Run.resolve …` has the kernel
+reduce the registry search, which evaluates each entry's id (a closed cSHAKE256, Keccak
+round by round, about 30 s per proof). -/
+def checkResolved (resolved : Except Run.Refusal Evaluator) (domain : Digest)
+    (directory : Directory Nat Registry) (ambient : Ambient) (command : Command)
+    (pre : (i : Fin command.targets.length) → Store command.targets[i].layout)
+    (claim : Run.RunClaim) (program : NockProgramCodec.Program) (validatedFundingIndex : Option Nat) :
+    Except Run.Refusal CheckedRun :=
+  match resolved with
+  | .error reason => .error reason
+  | .ok E => do
+    let libraries ← program.abi.libraries.mapM fun library =>
+      Run.require .libraryUnknown (CanonicalCellRegistry.loadProgram domain directory library)
+    if !Run.librariesAgree program libraries then throw .libraryEvaluator
+    let writes ← Run.require .writeNotInOutput (commandWrites command pre claim.programId validatedFundingIndex)
+    let verdict ← checkProgram E program libraries ambient command pre claim writes validatedFundingIndex
+    pure ⟨claim, E.id, program.abi.fuel, verdict⟩
+
 /-- Load the claimed program, resolve its evaluator against the compiled-in registry
 (less what the operator disabled), load its libraries (on the same evaluator), and
 re-execute it against the loaded pre-states (`checkProgram`). -/
@@ -1461,15 +1480,8 @@ def checkClaim (disabled : List Digest) (domain : Digest) (directory : Directory
   match CanonicalCellRegistry.loadProgram domain directory claim.programId with
   | none => .error .programUnknown
   | some program =>
-    match Run.resolve disabled program.evaluator with
-    | .error reason => .error reason
-    | .ok E => do
-      let libraries ← program.abi.libraries.mapM fun library =>
-        Run.require .libraryUnknown (CanonicalCellRegistry.loadProgram domain directory library)
-      if !Run.librariesAgree program libraries then throw .libraryEvaluator
-      let writes ← Run.require .writeNotInOutput (commandWrites command pre claim.programId validatedFundingIndex)
-      let verdict ← checkProgram E program libraries ambient command pre claim writes validatedFundingIndex
-      pure ⟨claim, E.id, program.abi.fuel, verdict⟩
+    checkResolved (Run.resolve disabled program.evaluator) domain directory ambient command pre claim
+      program validatedFundingIndex
 
 /-- No claim: nothing to check. A claim: `checkClaim`, its refusal named `run`. -/
 def checkCommandRun (disabled : List Digest) (domain : Digest) (directory : Directory Nat Registry)
@@ -1966,7 +1978,7 @@ theorem checkClaim_sound {disabled : List Digest} {domain : Digest}
     | error e => rw [hres] at accepted; cases accepted
     | ok E =>
       rw [hres] at accepted
-      simp only [bind, Except.bind, pure, Except.pure] at accepted
+      simp only [checkResolved, bind, Except.bind, pure, Except.pure] at accepted
       cases hlibs : program.abi.libraries.mapM (fun library => Run.require .libraryUnknown
           (CanonicalCellRegistry.loadProgram domain directory library)) with
       | error e => rw [hlibs] at accepted; cases accepted
@@ -2007,6 +2019,7 @@ theorem checkClaim_unknownEvaluator {disabled : List Digest} {domain : Digest}
   rw [stored]
   simp only
   rw [Run.resolve_unknown absent]
+  rfl
 
 /-- **`checkCommandRun_sound`**: a checked run in a prepared invocation is the
 command's own claim, accepted by `checkClaim`. -/

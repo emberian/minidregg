@@ -1789,13 +1789,45 @@ mod tests {
         assert!(select_read(&reads, &json!({"name":90})).is_err());
     }
 
+    /// The room tools ARE the spec table (no list kept beside it), and metering is structural: every
+    /// spec is exactly one of a write tool (ROOM_WRITE_TOOLS, the only names the resident pays a room
+    /// turn for, which the unmetered read path refuses) or a read tool (the read path handles it, and
+    /// it has no write arm). A tool added to the table without a side fails here.
     #[test]
-    fn room_tools_are_seven_and_writes_are_metered() {
+    fn room_tools_are_the_spec_table_and_every_write_is_metered() {
+        use std::os::unix::fs::PermissionsExt;
         let names: Vec<String> = super::room_tool_specs().iter().map(|s| s["name"].as_str().unwrap().to_owned()).collect();
-        assert_eq!(names, ["mini_room_ls", "mini_room_status", "mini_stream_tail", "mini_say", "mini_doc_context", "mini_doc_show", "mini_doc_link", "mini_doc_review", "mini_doc_append"]);
+        let mut unique = names.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), names.len(), "each tool is named once: {names:?}");
         for write in super::ROOM_WRITE_TOOLS {
-            assert!(names.iter().any(|n| n == write));
+            assert!(names.iter().any(|n| n == write), "{write} is metered but not offered");
         }
+        let root = std::env::temp_dir().join(format!("mini-room-sides-{}-{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir(&root).unwrap();
+        let mini = root.join("mini");
+        let ran = root.join("ran.txt");
+        fs::write(&mini, format!("#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\nexit 7\n", ran.display())).unwrap();
+        fs::set_permissions(&mini, fs::Permissions::from_mode(0o700)).unwrap();
+        let config = RoomToolsConfig { restrict_tools:true, mini, host:"/unused".into(), host_config:"/unused".into(), socket:"/unused".into(), workspace:root.join("workspace"), home:root.join("home"), room:"lab".into(), account:Some("lab-hermes".into()) };
+        let tools = RoomTools { config:&config };
+        for name in &names {
+            let read = tools.read(name, &json!({}));
+            let not_read = matches!(&read, Err(e) if e == &format!("{name} is not a room read tool"));
+            if super::ROOM_WRITE_TOOLS.contains(&name.as_str()) {
+                assert!(not_read, "{name} writes, so the unmetered read path must refuse it: {read:?}");
+            } else {
+                assert!(!not_read, "{name} is offered and not metered, so it must be a read tool");
+                let write = tools.write("op1", name, &json!({}), &mut |_| {});
+                assert!(matches!(&write, Err(e) if e == &format!("{name} is not a room write tool")),
+                    "{name} is not metered, so it must have no write arm: {write:?}");
+            }
+        }
+        // No read ever spends: nothing a read tool ran names an operation record (the write's payment proof).
+        let lines = fs::read_to_string(&ran).unwrap_or_default();
+        assert!(!lines.contains("--operation-record") && !lines.contains("pay"), "{lines}");
+        let _ = fs::remove_dir_all(&root);
         // The seams are not offered.
         assert!(!super::is_room_tool("mini_doc_quote") && !super::is_room_tool("mini_doc_history"));
         // No tool takes a room, a capability or a proposal id from the model.

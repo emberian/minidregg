@@ -505,6 +505,58 @@ class ControllerWorldTests(unittest.TestCase):
         c.run(['/usr/bin/setfacl', '--restore=-'], input=(f'# file: {p}\n' + entry['before']).encode())
         self.assertEqual(c.acl_text(p), before)
 
+    def home_is_prepared(self):
+        # The operator's home above the fixture stays out of scope; only the fixture tree is asserted.
+        real = c.traversable
+        patcher = patch.object(c, 'traversable', side_effect=lambda p, uid: True if self.root not in (p, *p.parents) else real(p, uid))
+        patcher.start(); self.addCleanup(patcher.stop)
+
+    def two_worlds(self, shared_mode):
+        self.home_is_prepared()
+        shared = self.root / 'shared'; shared.mkdir(); shared.chmod(shared_mode); self.root.chmod(0o711)
+        worlds = []
+        for name in ('w1', 'w2'):
+            socket_dir = shared / name / 'sockets'
+            socket_dir.mkdir(parents=True)
+            (shared / name).chmod(0o711); socket_dir.chmod(0o700)
+            public = socket_dir / 'participant.sock'; public.write_bytes(b''); public.chmod(0o600)
+            worlds.append(public)
+        return shared, worlds
+
+    def test_grants_never_reach_above_the_world_root(self):
+        shared, (one, two) = self.two_worlds(0o711)
+        with patch.object(c, 'acl_text', return_value='user::rwx\ngroup::--x\nother::--x\n'):
+            for public, uid in ((one, 4001), (two, 4002)):
+                paths = [p for p, _ in c.acl_grants(public, uid, c.WORLDS / 'ffffffffffffffff')]
+                self.assertEqual(paths, [public.parent, public])
+                self.assertNotIn(shared, paths)
+
+    def test_a_private_ancestor_above_the_root_is_refused_by_name(self):
+        shared, (one, _) = self.two_worlds(0o700)
+        with patch.object(c, 'acl_text', return_value='user::rwx\ngroup::---\nother::---\n'):
+            with self.assertRaisesRegex(ValueError, f'ancestry {shared} above the world root.*uid 4001'):
+                c.acl_grants(one, 4001, c.WORLDS / 'ffffffffffffffff')
+        with patch.object(c, 'acl_text', return_value='user::rwx\nuser:4001:--x\ngroup::---\nmask::--x\nother::---\n'):
+            self.assertEqual(c.acl_grants(one, 4001, c.WORLDS / 'ffffffffffffffff')[-1][0], one)
+
+    @unittest.skipUnless(shutil.which('getfacl') and shutil.which('setfacl'), 'Linux ACL utilities required')
+    def test_two_worlds_under_one_parent_grant_and_tear_down_in_either_order(self):
+        other = 999 if self.uid != 999 else 998
+        for grant_order, restore_order in (((0, 1), (0, 1)), ((0, 1), (1, 0)), ((1, 0), (0, 1)), ((1, 0), (1, 0))):
+            with self.subTest(grant=grant_order, restore=restore_order):
+                shared, worlds = self.two_worlds(0o711)
+                before = c.acl_text(shared)
+                entries = {}
+                for i in grant_order:
+                    uid = other - i
+                    entries[i] = [c.grant_acl(p, uid, perm, self.uid) for p, perm in c.acl_grants(worlds[i], uid, c.WORLDS / 'ffffffffffffffff')]
+                    self.assertEqual(c.acl_text(shared), before)
+                for i in restore_order:
+                    for entry in reversed(entries[i]):
+                        c.run(['/usr/bin/setfacl', '--restore=-'], input=(f'# file: {entry["path"]}\n' + entry['before']).encode())
+                    self.assertEqual(c.acl_text(shared), before)
+                shutil.rmtree(shared)
+
     def test_controller_shared_lock_excludes_lifecycle_mutation(self):
         p = self.file('lock')
         with open(p, 'rb') as call, open(p, 'rb') as change:
@@ -1667,6 +1719,37 @@ class ControllerWorldTests(unittest.TestCase):
                 self.assertTrue(repeated['replayed'])
                 self.assertEqual(repeated['previousSha256'],c.sha(old))
                 self.assertEqual((base/'configs'/(c.sha(old)+'.json')).read_bytes(),old)
+
+    def test_controller_bwrap_grant_is_added_with_the_controller_and_revoked_with_it(self):
+        calls=[]
+        saved=(c.PROFILED_BWRAP,c.run)
+        bwrap=Path(str(self.root))/'mini-grain-bwrap'
+        try:
+            c.PROFILED_BWRAP=bwrap;c.run=lambda argv,**kw:calls.append(argv)
+            c.bwrap_acl(100084,True)   # no profiled bwrap on this host: nothing to grant
+            self.assertEqual(calls,[])
+            bwrap.write_bytes(b'x')
+            with patch.object(Path,'lstat',return_value=SimpleNamespace(st_mode=stat.S_IFREG|0o750,st_uid=0)):
+                c.bwrap_acl(100084,True);c.bwrap_acl(100084,False)
+        finally:c.PROFILED_BWRAP,c.run=saved
+        self.assertEqual(calls,[['/usr/bin/setfacl','-m','u:100084:r-x','--',str(bwrap)],
+                                ['/usr/bin/setfacl','-x','u:100084','--',str(bwrap)]])
+
+    def test_app_range_bwrap_grants_are_claimed_per_world_and_handed_over_not_stripped(self):
+        installer=(Path(__file__).parents[1]/'install-user-world').read_text()
+        block=installer.split('# BEGIN bwrap-claims\n')[1].split('# END bwrap-claims')[0]
+        top=Path(str(self.root))/'worlds';fake=Path(str(self.root))/'fakebin';fake.mkdir();top.mkdir()
+        acl=Path(str(self.root))/'acl';acl.write_text('')
+        (fake/'setfacl').write_text('#!/bin/bash\nif [ "$1" = -x ]; then grep -vx "${2#u:}" %s > %s.n; mv %s.n %s; fi\n'%((acl,)*4));(fake/'setfacl').chmod(0o755)
+        for w,uids in (('a',[1,2,3]),('b',[3,4])):
+            (top/w).mkdir();(top/w/'bwrap-acl-claims').write_text(''.join('%d\n'%u for u in uids))
+        (top/'a'/'bwrap-acl-grants').write_text('1\n2\n3\n');(top/'b'/'bwrap-acl-grants').write_text('4\n')
+        acl.write_text('1\n2\n3\n4\n')
+        script='set -e\nprofiled_bwrap=/x\nrevoked=\nMINI_SPK_WORLDS_ROOT=%s\n%s\nwhile read -r u; do bwrap_release "$u" %s/a; done < %s/a/bwrap-acl-grants\necho "$revoked"\n'%(top,block,top,top)
+        out=subprocess.run(['/bin/bash','-c',script],env={'PATH':f'{fake}:/usr/bin:/bin'},capture_output=True,text=True,check=True).stdout
+        self.assertEqual(out.strip(),'1,2,')                       # uid 3 is still claimed by b
+        self.assertEqual(acl.read_text().split(),['3','4'])
+        self.assertEqual((top/'b'/'bwrap-acl-grants').read_text().split(),['4','3'])   # b now owns it
 
 
 if __name__ == '__main__':

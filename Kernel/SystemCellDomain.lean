@@ -64,12 +64,19 @@ def cellRoot (cell : SystemCell.Cell) : Digest :=
 non-canonical bytes are refused. -/
 def decodeCell (bytes : List UInt8) : Option SystemCell.Cell := TailBound.decodeCell bytes
 
-theorem decodeCell_bytes (cell : SystemCell.Cell) : decodeCell (cellBytes cell) = some cell := by
-  unfold decodeCell TailBound.decodeCell cellBytes
-  rw [show LifecycleImage.bytes registry (.live (packedCell cell)) =
-      (LifecycleImage.codec registry).encode (.live (packedCell cell)) from rfl,
-    LifecycleImage.decode_encode]
-  rfl
+/-- `decodeCell` on any bytes that decode to this live cell. Proved at a variable `bytes`:
+unfolding `decodeCell` at the concrete `cellBytes cell` has the kernel run the decoder on
+those bytes, which evaluates the Store layout digest (a closed cSHAKE256, Keccak round by
+round), more than two minutes. -/
+theorem decodeCell_of_decode {bytes : List UInt8} {cell : SystemCell.Cell}
+    (decoded : (LifecycleImage.codec registry).decode bytes = some (.live (packedCell cell))) :
+    decodeCell bytes = some cell := by
+  unfold decodeCell TailBound.decodeCell; rw [decoded]; rfl
+
+theorem decodeCell_bytes (cell : SystemCell.Cell) : decodeCell (cellBytes cell) = some cell :=
+  decodeCell_of_decode (show (LifecycleImage.codec registry).decode
+    ((LifecycleImage.codec registry).encode (.live (packedCell cell))) = _ from
+      LifecycleImage.decode_encode _ _)
 
 theorem decodeCell_canonical {bytes : List UInt8} {cell : SystemCell.Cell}
     (decoded : decodeCell bytes = some cell) : cellBytes cell = bytes := by

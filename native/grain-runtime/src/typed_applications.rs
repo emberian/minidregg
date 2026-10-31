@@ -540,6 +540,17 @@ mod tests {
     }
 
     #[test]
+    fn a_verified_http_frame_parses_and_the_model_presentation_is_native_reply_malformed() {
+        let frame = json!({"type":"http-v3","status":200,"headers":[{"name":"content-type","value":"text/plain"}],"bodyHex":"6869"});
+        let ok = native_reply(&json!({"isError":false,"text":frame.to_string()})).unwrap_or_else(|e| panic!("{}", e.name));
+        assert_eq!(ok.status, 200);
+        // present_lifetime_http's text for a model is not a frame: the failure mode of a non-raw call.
+        let presented = native_reply(&json!({"isError":false,"text":"HTTP 200 text/plain\n\nhi"}));
+        let refusal = presented.err().expect("presentation is not a frame");
+        assert_eq!((refusal.name.as_str(), refusal.uncertain), ("native-reply-malformed", true));
+    }
+
+    #[test]
     fn a_write_whose_reply_is_lost_is_uncertain_and_never_replayed() {
         let dav = entry("dav", DAVROS);
         let pins = pins(&[&dav]);

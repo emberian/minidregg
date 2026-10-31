@@ -597,11 +597,30 @@ def create(store, helper):
     return finish_create(registry, base, namespace)
 
 
+PROFILED_BWRAP = Path('/usr/local/libexec/mini-grain-bwrap')
+
+
+def bwrap_acl(identity, grant):
+    # The controller's user manager runs the worker's launch-gate, which execs the profiled bwrap
+    # (root:group 0750 + per-uid entries). The controller identity is outside every app range, so it
+    # needs its own execute entry, added here and revoked with the controller. A controller uid is
+    # never reused or shared (permanent reservation, excluded from app ranges), so no refcount.
+    if not (PROFILED_BWRAP.exists() or PROFILED_BWRAP.is_symlink()):
+        return
+    m = PROFILED_BWRAP.lstat()
+    require(stat.S_ISREG(m.st_mode) and m.st_uid == 0, 'profiled bwrap custody refused')
+    if grant:
+        run(['/usr/bin/setfacl', '-m', f'u:{identity}:r-x', '--', str(PROFILED_BWRAP)])
+    else:
+        run(['/usr/bin/setfacl', '-x', f'u:{identity}', '--', str(PROFILED_BWRAP)])
+
+
 def finish_create(registry, base, namespace):
     store, name, identity = namespace['store'], namespace['account'], namespace['controllerUid']
     a = pwd.getpwnam(name)
     require((a.pw_uid, a.pw_gid) == (identity, identity) and a.pw_uid not in [0, registry['operatorUid'], *registry['appUids']], 'allocated controller UID/GID collision')
     require(not any(g.gr_mem and name in g.gr_mem for g in grp.getgrall()), 'controller supplemental groups refused')
+    bwrap_acl(a.pw_uid, True)
     mkdir(base / 'home', a.pw_uid, a.pw_gid)
     mkdir(base / 'listener', registry['operatorUid'], registry['operatorGid'])
     mkdir(base / 'reverse', a.pw_uid, a.pw_gid, 0o711)
@@ -763,6 +782,44 @@ def grant_acl(path, uid, permission, operator, receipt_path=None):
     if receipt_path is not None:
         write_new(receipt_path.with_suffix('.after.json'), encoded(entry))
     return entry
+
+
+def world_root(public, store_root):
+    """The owner-controlled boundary: the Store's own tree when the public endpoint lies in it,
+    otherwise the directory that holds the endpoint. Nothing above it is this world's to change."""
+    return store_root if store_root in public.parents else public.parent
+
+
+def traversable(path, uid):
+    """Search permission for UID on a directory without any change: the other bit, or an existing
+    user entry for UID that grants x under the mask."""
+    m = metadata(path)
+    if m.st_mode & 0o001:
+        return True
+    mask = 'rwx'
+    text = acl_text(path).splitlines()
+    for line in text:
+        if line.startswith('mask::'):
+            mask = line.split('::', 1)[1]
+    return any(line.startswith(f'user:{uid}:') and 'x' in line.split(':')[2] and 'x' in mask for line in text)
+
+
+def acl_grants(public, uid, store_root):
+    """(path, permission) pairs the controller needs: traversal of private ancestors and access to the
+    public socket. Above the world root an ancestor must already be traversable (refused by name
+    otherwise): worlds share those directories, and a grant there makes the next world refuse the
+    first one's entry and lets teardown order matter. At and below the root the grant is made."""
+    root = world_root(public, store_root)
+    grants = []
+    for p in reversed((public.parent, *public.parent.parents)):
+        inside = p == root or root in p.parents
+        if inside:
+            if not metadata(p).st_mode & 0o001:
+                grants.append((p, '--x'))
+        else:
+            require(traversable(p, uid), f'public socket ancestry {p} above the world root {root} is not '
+                    f'traversable (--x) for controller uid {uid}; operator preparation required')
+    return grants + [(public, '-w-')]
 
 
 def worker_layout(r):
@@ -1282,8 +1339,7 @@ def stage(store, helper, bundle_arg, bins_arg, upstream_arg, public_arg, worker=
     put(base / 'proxy/config.json', data['host-config.json'], op, registry['operatorGid'])
     # Only traversal of private ancestors and access to the PUBLIC socket. The
     # operator's private listener and Store files receive no controller ACL.
-    paths = [p for p in reversed((public.parent, *public.parent.parents)) if not metadata(p).st_mode & 0o001]
-    for p, perm in [(p, '--x') for p in paths] + [(public, '-w-')]:
+    for p, perm in acl_grants(public, r['uid'], WORLDS / store):
         pending['acl'].append(grant_acl(p, r['uid'], perm, op, base / f'acl-{len(pending["acl"]) + 1:03}.json'))
     if has_consent(r):
         # The authorized public-listener traversal ACL may change mode-mask
@@ -2542,6 +2598,7 @@ def remove(store, helper):
     if r.get('workerTask'):
         run(['/usr/bin/loginctl', 'disable-linger', r['name']])
     run(['/usr/sbin/userdel', r['name']])
+    bwrap_acl(r['uid'], False)
     try:
         group = grp.getgrnam(r['name'])
     except KeyError:
