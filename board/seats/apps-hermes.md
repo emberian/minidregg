@@ -1,6 +1,6 @@
 # Seat: apps-hermes
 
-Agent: a33e42314aa08ab3a (carries app-reds and perf-apps; hbox work area /home/hbox/lanes/app-reds-cont)
+Agent: afb920b22b17049cd (distilled from a33e42314aa08ab3a, retired) (carries app-reds and perf-apps; hbox work area /home/hbox/lanes/app-reds-cont)
 Owns: grain-runtime, spk-host, the apps worker, Hermes controller and gateway, refusal rendering
 Quest: Hermes final say (H1b), the START reds, the refusal-clause sweep, live Hummingbird/WBO/Scrumblr
 
