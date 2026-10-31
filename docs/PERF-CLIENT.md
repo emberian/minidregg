@@ -59,6 +59,22 @@ path adds to it.
 Memory method: `smaps_rollup` Pss and Private over the resident processes (`consent-resident`,
 `codec-resident`, the provider, the codec Host) of this world (`/ci/pc/mem.sh`).
 
+## A `doc new`, call by call (MINI_TRACE, batch-6 world hbox:/ci/pc/w6, load ~24)
+
+Two writes (the birth, then the document): 12 Host calls, 26 codec frames, 10 consent frames.
+
+| height | Host | op1 plan (birth, doc) ms | op2 submit (birth, doc) ms | own birth catch-up (consent) | codec frames | another member's catch-up of both |
+|---|---|---|---|---|---|---|
+| 250 | 1.07 s | 264, 39 | 414, 299 | 347 ms | 19 ms | 417 ms |
+| 520 | 1.34 s | 344, 43 | 609, 283 | 372 ms | 19 ms | 434 ms |
+
+The codec frames cost 19 ms in all, so batching them is not worth a protocol change. Consent per record is
+flat with height. The birth's Host op1/op2 grows (+30%/+47% over 270 heights): sent to hot-path. On batch 4 at
+height ~500 the same own-birth catch-up was 1,289 ms and op2 1.7 s per write. The member's provider still
+re-derives and re-executes its own just-admitted birth (~350 ms); its plan consent ran the planner, not the
+executor, so there is no execution to reuse byte for byte, and sharing would mean carrying the planner's
+prepared kernel values into the deriver. Decided after batch 7 (its authority-leg fix lands in that walk).
+
 ## Landed
 
 Batch 1 (f883af161, staging merged in; staging d24b3e761, batch 6): rows 1, 2, 4, 8 (single tenancy).
