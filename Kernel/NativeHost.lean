@@ -615,75 +615,88 @@ verdict on its intent signature. Only an authenticated request reaches the chall
 reads the intent's targets; from there only commitments and explicitly public
 request/key/policy coordinates escape, and a refusal names only a `preAuthentication`
 reason. -/
-def challengeAnswer (config : Config) (opened : Opened config)
+def challengeAnswerOn (config : Config) (ground : ServedBasis.Ground config.deployment)
     (intent : NativeObservationCodec.Intent) (intentSignature : List UInt8)
     (key : Except Refusal (List UInt8)) (verdict : Except CredentialSignatureIO.Error Bool) :
     Except Refusal NativeObservationCodec.Challenge :=
   match NativeObservationController.authenticated key verdict with
   | .error refusal => .error refusal
   | .ok () =>
-      (NativeObservationController.challenge (observationContext config opened)
+      (NativeObservationController.challenge ground
         config.profile config.federation config.genesisHeight intent intentSignature).mapError
           NativeObservationController.preAuthentication
+
+/-- `challengeAnswerOn` over the full shape's ground of an opened image. -/
+def challengeAnswer (config : Config) (opened : Opened config)
+    (intent : NativeObservationCodec.Intent) (intentSignature : List UInt8)
+    (key : Except Refusal (List UInt8)) (verdict : Except CredentialSignatureIO.Error Bool) :
+    Except Refusal NativeObservationCodec.Challenge :=
+  challengeAnswerOn config (observationContext config opened) intent intentSignature key verdict
 
 /-- Op 4. The request is the intent's bytes and the subject's signature over them. The
 Host decodes the intent, selects the subject's current key, and verifies the signature;
 nothing about the intent's targets is read until that succeeds (FIX-DISCLOSE). -/
-def challengeLoaded (config : Config) (opened : Opened config)
+def challengeOn (config : Config) (ground : ServedBasis.Ground config.deployment)
     (intentBytes intentSignature : List UInt8) :
     IO (Except Refusal NativeObservationCodec.Challenge) := do
   let some intent := NativeObservationCodec.intentCodec.decode intentBytes
     | return .error (.of .malformed)
-  let key := NativeObservationController.intentKey (observationContext config opened) intent.subject
+  let key := NativeObservationController.intentKey ground intent.subject
   let verdict ← NativeObservationController.intentVerdict config.signature key intent intentSignature
-  return challengeAnswer config opened intent intentSignature key verdict
+  return challengeAnswerOn config ground intent intentSignature key verdict
+
+/-- `challengeOn` over the full shape's ground of an opened image. -/
+def challengeLoaded (config : Config) (opened : Opened config)
+    (intentBytes intentSignature : List UInt8) :
+    IO (Except Refusal NativeObservationCodec.Challenge) :=
+  challengeOn config (observationContext config opened) intentBytes intentSignature
 
 /-- **One path before authentication.** Op 4 is: decode, select the subject's key, ask the
 native verifier about the intent signature (`intentVerdict`, which is handed the key, the
 intent's bytes and the signature, and nothing of the Store's directory), then answer. -/
-theorem challengeLoaded_authenticates_first (config : Config) (opened : Opened config)
+theorem challengeOn_authenticates_first (config : Config) (ground : ServedBasis.Ground config.deployment)
     (intentBytes intentSignature : List UInt8) :
-    challengeLoaded config opened intentBytes intentSignature =
+    challengeOn config ground intentBytes intentSignature =
       (match NativeObservationCodec.intentCodec.decode intentBytes with
       | none => pure (.error (.of .malformed))
       | some intent => do
           let verdict ← NativeObservationController.intentVerdict config.signature
-            (NativeObservationController.intentKey (observationContext config opened) intent.subject)
+            (NativeObservationController.intentKey ground intent.subject)
             intent intentSignature
-          pure (challengeAnswer config opened intent intentSignature
-            (NativeObservationController.intentKey (observationContext config opened) intent.subject)
+          pure (challengeAnswerOn config ground intent intentSignature
+            (NativeObservationController.intentKey ground intent.subject)
             verdict)) := by
-  unfold challengeLoaded
+  unfold challengeOn
   cases NativeObservationCodec.intentCodec.decode intentBytes <;> rfl
 
 /-- **`unenrolled_response_independent_of_target`.** A request whose intent signature does
 not verify under the subject's current key -- a key that was never enrolled naming an
 enrolled subject, or any wrong key -- gets the same answer whatever its intent names:
 present or absent targets, any capability numbers, any purpose. With
-`challengeLoaded_authenticates_first`, the answer is computed on the one path that reads
+`challengeOn_authenticates_first`, the answer is computed on the one path that reads
 only the subject's key. -/
-theorem unenrolled_response_independent_of_target (config : Config) (opened : Opened config)
+theorem unenrolled_response_independent_of_target (config : Config) (ground : ServedBasis.Ground config.deployment)
     (left right : NativeObservationCodec.Intent) (leftSignature rightSignature : List UInt8)
     (subject : left.subject = right.subject)
     (leftVerdict rightVerdict : Except CredentialSignatureIO.Error Bool)
     (leftFails : leftVerdict ≠ .ok true) (rightFails : rightVerdict ≠ .ok true) :
-    challengeAnswer config opened left leftSignature
-        (NativeObservationController.intentKey (observationContext config opened) left.subject)
+    challengeAnswerOn config ground left leftSignature
+        (NativeObservationController.intentKey ground left.subject)
         leftVerdict =
-      challengeAnswer config opened right rightSignature
-        (NativeObservationController.intentKey (observationContext config opened) right.subject)
+      challengeAnswerOn config ground right rightSignature
+        (NativeObservationController.intentKey ground right.subject)
         rightVerdict := by
   have same : NativeObservationController.authenticated
-        (NativeObservationController.intentKey (observationContext config opened) left.subject)
+        (NativeObservationController.intentKey ground left.subject)
         leftVerdict =
       NativeObservationController.authenticated
-        (NativeObservationController.intentKey (observationContext config opened) right.subject)
+        (NativeObservationController.intentKey ground right.subject)
         rightVerdict := by
     rw [subject]
     exact NativeObservationController.authenticated_unverified _ _ _ leftFails rightFails
-  unfold challengeAnswer
+  unfold challengeAnswerOn
   cases refused : NativeObservationController.authenticated
-      (NativeObservationController.intentKey (observationContext config opened) right.subject)
+      (NativeObservationController.intentKey ground right.subject)
       rightVerdict with
   | ok value =>
       exact absurd refused fun admitted =>
@@ -691,26 +704,26 @@ theorem unenrolled_response_independent_of_target (config : Config) (opened : Op
   | error refusal => rw [same, refused]
 
 /-- The accepting pole: an authenticated request reaches the challenge exactly as before. -/
-theorem authenticated_reaches_challenge (config : Config) (opened : Opened config)
+theorem authenticated_reaches_challenge (config : Config) (ground : ServedBasis.Ground config.deployment)
     (intent : NativeObservationCodec.Intent) (intentSignature publicKey : List UInt8) :
-    challengeAnswer config opened intent intentSignature (.ok publicKey) (.ok true) =
-      (NativeObservationController.challenge (observationContext config opened)
+    challengeAnswerOn config ground intent intentSignature (.ok publicKey) (.ok true) =
+      (NativeObservationController.challenge ground
         config.profile config.federation config.genesisHeight intent intentSignature).mapError
           NativeObservationController.preAuthentication := rfl
 
 /-- An answer's refusal is an unauthenticated one (`unknownKey`, `badSignature`), a
 `preAuthentication` reason, or `malformed` for bytes that do not decode. -/
-theorem challengeAnswer_public (config : Config) (opened : Opened config)
+theorem challengeAnswer_public (config : Config) (ground : ServedBasis.Ground config.deployment)
     (intent : NativeObservationCodec.Intent) (intentSignature : List UInt8)
     (verdict : Except CredentialSignatureIO.Error Bool) (refusal : Refusal)
-    (refused : challengeAnswer config opened intent intentSignature
-      (NativeObservationController.intentKey (observationContext config opened) intent.subject)
+    (refused : challengeAnswerOn config ground intent intentSignature
+      (NativeObservationController.intentKey ground intent.subject)
       verdict = .error refusal) :
     refusal = .of .unknownKey ∨ refusal = .of .badSignature ∨
       ∃ inner, refusal = NativeObservationController.preAuthentication inner := by
-  unfold challengeAnswer at refused
+  unfold challengeAnswerOn at refused
   cases gate : NativeObservationController.authenticated
-      (NativeObservationController.intentKey (observationContext config opened) intent.subject)
+      (NativeObservationController.intentKey ground intent.subject)
       verdict with
   | error reason =>
       rw [gate] at refused
@@ -720,7 +733,7 @@ theorem challengeAnswer_public (config : Config) (opened : Opened config)
       · exact Or.inr (Or.inl bad)
   | ok value =>
       rw [gate] at refused
-      cases decided : NativeObservationController.challenge (observationContext config opened)
+      cases decided : NativeObservationController.challenge ground
           config.profile config.federation config.genesisHeight intent intentSignature with
       | error inner =>
           rw [decided] at refused
@@ -830,11 +843,15 @@ def challengeRequestParts (payload : List UInt8) : Option (List UInt8 × List UI
     else none
 
 /-- Op 4 on an opened image: split the request, then `challengeLoaded`. -/
-def challengeRequestLoaded (config : Config) (opened : Opened config) (payload : List UInt8) :
-    IO (Except Refusal NativeObservationCodec.Challenge) :=
+def challengeRequestOn (config : Config) (ground : ServedBasis.Ground config.deployment)
+    (payload : List UInt8) : IO (Except Refusal NativeObservationCodec.Challenge) :=
   match challengeRequestParts payload with
   | none => pure (.error (.of .malformed))
-  | some (intentBytes, intentSignature) => challengeLoaded config opened intentBytes intentSignature
+  | some (intentBytes, intentSignature) => challengeOn config ground intentBytes intentSignature
+
+def challengeRequestLoaded (config : Config) (opened : Opened config) (payload : List UInt8) :
+    IO (Except Refusal NativeObservationCodec.Challenge) :=
+  challengeRequestOn config (observationContext config opened) payload
 
 /-- Op 4, one-shot. -/
 def challengeRequest (config : Config) (payload : List UInt8) :
@@ -1106,7 +1123,7 @@ def query (config : Config) (bytes : List UInt8) : IO (Except Refusal (List UInt
 /-- Map ordinary intent authentication and challenge creation over one opened
 image. No target is read before that singleton's intent authentication. A
 refusal discards the entire collection. -/
-def challengeBatchLoaded (config : Config) (opened : Opened config)
+def challengeBatchOn (config : Config) (ground : ServedBasis.Ground config.deployment)
     (bytes : List UInt8) : IO (Except Refusal (List UInt8)) := do
   unless bytes.length ≤ NativeObservationCodec.maxBatchBytes do
     return .error (.of .malformed)
@@ -1120,13 +1137,17 @@ def challengeBatchLoaded (config : Config) (opened : Opened config)
     let some intent := NativeObservationCodec.intentCodec.decode intentBytes
       | return .error (.of .malformed)
     let .query _ := intent.purpose | return .error (.of .malformed)
-    match ← challengeRequestLoaded config opened request with
+    match ← challengeRequestOn config ground request with
     | .error refusal => return .error refusal
     | .ok challenge =>
         challenges := challenges ++ [NativeObservationCodec.challengeCodec.encode challenge]
   let encoded := NativeObservationCodec.batchCodec.encode challenges
   if encoded.length ≤ NativeObservationCodec.maxBatchBytes then return .ok encoded
   else return .error (.of .malformed)
+
+def challengeBatchLoaded (config : Config) (opened : Opened config)
+    (bytes : List UInt8) : IO (Except Refusal (List UInt8)) :=
+  challengeBatchOn config (observationContext config opened) bytes
 
 /-- Every answer invokes ordinary current observation admission against the
 same opened image. It never reopens between elements, releases partial results,
@@ -1147,13 +1168,26 @@ def queryBatchLoaded (config : Config) (opened : Opened config)
   if encoded.length ≤ NativeObservationCodec.maxBatchBytes then return .ok encoded
   else return .error (.of .malformed)
 
-def challengeWireLoaded (config : Config) (opened : Opened config)
+def challengeWireOn (config : Config) (ground : ServedBasis.Ground config.deployment)
     (bytes : List UInt8) : IO (Except Refusal (List UInt8)) := do
   if NativeObservationCodec.isBatch bytes then
-    challengeBatchLoaded config opened bytes
+    challengeBatchOn config ground bytes
   else
-    return (← challengeRequestLoaded config opened bytes).map
+    return (← challengeRequestOn config ground bytes).map
       NativeObservationCodec.challengeCodec.encode
+
+def challengeWireLoaded (config : Config) (opened : Opened config)
+    (bytes : List UInt8) : IO (Except Refusal (List UInt8)) :=
+  challengeWireOn config (observationContext config opened) bytes
+
+/-- Op 4 on the session's light opening: the challenge is computed on the served state (a basis
+declaring nothing: the challenge reads the directory, the authority cell and the clock cell, no
+journal, marker or nullifier). -/
+def challengeWireLight (config : Config) (light : NativeHostLight.Light config)
+    (bytes : List UInt8) : IO (Except Refusal (List UInt8)) := do
+  match ← light.basis ⟨[], []⟩ with
+  | .error detail => return .error ⟨.operationRejected, detail, none⟩
+  | .ok served => challengeWireOn config (.ofBasis served) bytes
 
 def queryWireLoaded (config : Config) (opened : Opened config)
     (bytes : List UInt8) : IO (Except Refusal (List UInt8)) :=

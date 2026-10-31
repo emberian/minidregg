@@ -84,12 +84,14 @@ challenge need not replay history if the clock ticked in between. Bounded and
 non-authoritative: every response is still cryptographically checked. -/
 initialize recent : IO.Ref (List (Identity × RootWitness)) ← IO.mkRef []
 
-def remember (config : NativeHost.Config) (loaded : NativeHost.Durable) : IO Unit := do
-  let value := current loaded
+def rememberWitness (config : NativeHost.Config) (value : RootWitness) : IO Unit := do
   let identity := identityOf config
   recent.modify fun entries =>
     ((identity, value) :: entries.filter (fun entry =>
       !(entry.1 == identity && entry.2.point == value.point))).take 64
+
+def remember (config : NativeHost.Config) (loaded : NativeHost.Durable) : IO Unit :=
+  rememberWitness config (current loaded)
 
 /-- The root witness of an authentic past state: the same world-root entries
 normal receiving serves (the system slot with the height and the log chain

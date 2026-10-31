@@ -1559,6 +1559,15 @@ def sessionAdopt (config : NativeHost.Config)
       if let .ok light := current.light.adopt opening then
         state.set (some { current with light })
 
+/-- The receipt-continuity witness of the light opening's head (`ReceiptContinuity.current` of the
+full image at the same head: its height, world root, log chain and the system slot's siblings off
+the same root cache). -/
+def rememberLight (config : NativeHost.Config) (light : NativeHostLight.Light config) : IO Unit :=
+  let opening := light.opening
+  ReceiptContinuity.rememberWitness config
+    ⟨⟨opening.served.height, opening.served.worldRoot⟩, opening.served.chain,
+      ReceiptContinuity.systemSiblings opening.roots⟩
+
 def sessionOpened (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config))) :
     IO (NativeHost.Opened config) := do
@@ -2448,18 +2457,18 @@ def dispatchSession (config : NativeHost.Config)
       | .error detail => return (255, refusalFrame "prepare" detail)
   | 2 | 3 => fnDispatch operation payload
   | 4 =>
-      let opened ← sessionOpened config state
-      ReceiptContinuity.remember config opened.durable
-      match ← NativeHost.challengeWireLoaded config opened payload with
+      let session ← sessionCurrent config state
+      rememberLight config session.light
+      match ← NativeHost.challengeWireLight config session.light payload with
       | .ok challenges => return (4, challenges)
       | .error detail => return (255, refusalFrame "observation" detail)
   | 5 =>
       let t0 ← IO.monoMsNow
       let current ← sessionCurrent config state
-      let opened ← sessionFull config state
-      ReceiptContinuity.remember config opened.durable
+      rememberLight config current.light
       phaseTrace "op5 refresh" t0
-      match ← NativeObservationOpeningCache.queryWireLoaded config opened current.openingCache payload with
+      match ← NativeObservationOpeningCache.queryWireLight config current.light (sessionFull config state)
+          current.openingCache payload with
       | .ok view => return (5, view)
       | .error detail => return (255, refusalFrame "observation" detail)
   | 6 =>

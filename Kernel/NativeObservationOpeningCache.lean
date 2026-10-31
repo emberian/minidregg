@@ -83,6 +83,28 @@ theorem resourceViewUsing_exact (opening : OpeningProvider)
       resourceView fields packed balances quote := by
   simp only [resourceViewUsing, resourceView, (opening fields packed).property]
 
+/-- The answer to a current resource read (`.resource`, `.resourceScope`): the granted cell and
+its account cut, read off the authorization alone (no history). -/
+def resourceAnswer {deployment : CanonicalCellRegistry.Deployment} {F : Type} [Field F] [DecidableEq F]
+    {context : Context deployment} {profile : CanonicalRuntimeProfile.Profile F}
+    {federation : FederationId} {genesisHeight : Nat} {intent : Intent}
+    (accepted : AuthorizedIntent context profile federation genesisHeight intent)
+    (opening : OpeningProvider) (query : Query) :
+    Except RefusalReason (List UInt8) := do
+  if present : 0 < intent.grants.length then
+    let grant := intent.grants.get ⟨0, present⟩
+    let checked := accepted.grants ⟨0, present⟩
+    let some stored := CredentialAuthorityState.readCapability context.authority.cell
+      grant.kind grant.capability | throw .malformed
+    let view := resourceViewUsing opening stored.head.scope.fields
+      checked.selected.packed checked.selected.accountBalances
+      (if query.kind = .account then
+        RunComputeView.load deployment context.view intent.subject else none)
+    if query.view == .resource then pure (resourceViewCodec.encode view)
+    else pure (resourceScopeViewCodec.encode
+      (grant.kind, grant.capability.value, stored.head.scope.fields, view))
+  else throw .malformed
+
 /-- Only resource rendering differs. All non-resource views use the original
 controller, including at-height authority. The equality below checks this seam. -/
 def queryResultUsing {deployment : CanonicalCellRegistry.Deployment} {F : Type} [Field F] [DecidableEq F]
@@ -94,20 +116,7 @@ def queryResultUsing {deployment : CanonicalCellRegistry.Deployment} {F : Type} 
     Except RefusalReason (List UInt8) := do
   let .query query := intent.purpose | throw .malformed
   match query.view with
-  | .resource | .resourceScope =>
-      if present : 0 < intent.grants.length then
-        let grant := intent.grants.get ⟨0, present⟩
-        let checked := accepted.grants ⟨0, present⟩
-        let some stored := CredentialAuthorityState.readCapability context.authority.cell
-          grant.kind grant.capability | throw .malformed
-        let view := resourceViewUsing opening stored.head.scope.fields
-          checked.selected.packed checked.selected.accountBalances
-          (if query.kind = .account then
-            RunComputeView.load deployment context.view intent.subject else none)
-        if query.view == .resource then pure (resourceViewCodec.encode view)
-        else pure (resourceScopeViewCodec.encode
-          (grant.kind, grant.capability.value, stored.head.scope.fields, view))
-      else throw .malformed
+  | .resource | .resourceScope => resourceAnswer accepted opening query
   | _ => accepted.queryResult history bound kept
 
 theorem queryResultUsing_exact {deployment : CanonicalCellRegistry.Deployment} {F : Type} [Field F] [DecidableEq F]
@@ -121,7 +130,8 @@ theorem queryResultUsing_exact {deployment : CanonicalCellRegistry.Deployment} {
   | prepare preparation => simp [queryResultUsing, AuthorizedIntent.queryResult, purpose]
   | query query =>
       cases view : query.view <;>
-        simp [queryResultUsing, AuthorizedIntent.queryResult, purpose, view, resourceViewUsing_exact] <;> rfl
+        simp [queryResultUsing, resourceAnswer, AuthorizedIntent.queryResult, purpose, view,
+          resourceViewUsing_exact] <;> rfl
 
 /-- Cached data remain private to the native Host. Every possible scope is
 certified against the exact old opening, rather than retaining a reader view. -/
@@ -237,6 +247,35 @@ def queryWireLoaded (config : NativeHost.Config) (opened : NativeHost.Opened con
   let encoded := NativeObservationCodec.batchCodec.encode views
   if encoded.length ≤ NativeObservationCodec.maxBatchBytes then return .ok encoded
   else return .error (.of .malformed)
+
+
+/-- Op 5 for a current resource read on the session's light opening: authorization on the served
+state (a basis declaring nothing; `authorize` reads no journal, marker or nullifier) and the
+answer off the authorization (`resourceAnswer`). Any other read (a history, an `at h`) and a
+batch are answered on the full image, opened on first need (`full`). -/
+def queryWireLight (config : NativeHost.Config) (light : NativeHostLight.Light config)
+    (full : IO (NativeHost.Opened config)) (cache : IO.Ref Cache) (bytes : List UInt8) :
+    IO (Except Refusal (List UInt8)) := do
+  if NativeObservationCodec.isBatch bytes then return ← queryWireLoaded config (← full) cache bytes
+  let some signed := NativeObservationCodec.signedCodec.decode bytes
+    | return .error (.of .malformed)
+  let .query query := signed.challenge.intent.purpose
+    | return ← queryLoaded config (← full) cache bytes
+  unless query.view == .resource || query.view == .resourceScope do
+    return ← queryLoaded config (← full) cache bytes
+  let served ← match ← light.basis ⟨[], []⟩ with
+    | .error detail => return .error ⟨.operationRejected, detail, none⟩
+    | .ok served => pure served
+  match ← NativeObservationController.authorize config.signature (.ofBasis served) config.profile
+      config.federation config.genesisHeight signed with
+  | .error refusal => return .error refusal
+  | .ok token =>
+      if present : 0 < signed.challenge.intent.grants.length then
+        let packed := (token.grants ⟨0, present⟩).selected.packed
+        cache.modify (fun old => retain old packed)
+      match resourceAnswer token (provider (← cache.get)) query with
+      | .ok view => return .ok view
+      | .error reason => return .error (.of reason)
 
 #assert_axioms resourceViewUsing_exact
 #assert_axioms queryResultUsing_exact
