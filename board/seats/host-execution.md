@@ -56,7 +56,7 @@ record's turn); the birth receive 405 (admitDecodedNative 183, receiveCandidateW
    opening only and the full image on first need (`Session.full`, `materialize`, Host `sessionFull`); ops 0, 1,
    2 (all but births) and the receipt readback on light; own appends adopted (`sessionAdopt`); anchor identity
    cached per config. Still full: births (slice 2, delegated to aa75280bd04c5d700 on seat/birth-ground), ops 4/5
-   (asked read-path who takes them), the walk families (`sessionWalked`), fn/carried ops.
+   (read-path ad74bb6d4410b48f3 ports them onto a light Ground), the walk families (`sessionWalked`), fn/carried ops.
    (a) inventory what each `Opened` consumer reads (directory, authority, pins, seed/logStart exactness, the image's
    accepted records for historical receipts and walks); (b) give `OpenedServed` the missing fields as maintained
    values; (c) retype receivers family by family (birth first: `Held.of` already isolates it to directory +
