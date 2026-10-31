@@ -8,10 +8,10 @@ git history (e5dfc3ddb and earlier).
 ## Now (2026-10-30 22:10 EDT; ember's 10-31 word)
 
 - hbox has disk again (ember cleared approved trees: 57 GB, 69 GB after the first sweep). Writes resumed.
-- **The Lean v4.35.0 bump cdb399b47 is building ALONE on hbox** (launched 22:03: `integ-build4.sh cdb399b47;
+- **Bump LANDED: main = cdb399b47** (host stage rc=0 1,922 s after reseeding packages from private-cells' 4.35 tree; READY 23:54; HOLD LEAN lifted). Was: building ALONE on hbox (launched 22:03: `integ-build4.sh cdb399b47;
   umbrella-minidregg.sh cdb399b47`, SEATS=12 MEM=64G, PID in build.pid; whole-tree rebuild, 797-module closure).
   HOLD LEAN is in force until its host stage is green: then main moves to cdb399b47 and HOLD LEAN lifts.
-- **Next: ONE batch candidate** = staging (integ/batch-435 in the landing worktree), built with integ-build5.sh (umbrellas
+- **BATCH 35737eac4 BUILDING** (integ-build5, launched 23:58). It is staging (integ/batch-435 in the landing worktree), built with integ-build5.sh (umbrellas
   in the second warm tree umbrella-src after READY; rerecord from there). Contents on cdb399b47: staging's hot-path
   batch 1 + app-reds 5f22e6324/659301aa4/4bee4b608 + seed/hermes scripts; import-boundary b7bf3a8b2 (tier table green,
   no cycle; Compiler.Signature/NatDigits255Fast/StreamCodec nucleus -> Theory, Effects Revival keystones ->
@@ -92,9 +92,12 @@ person's Authority-Change commit).
   j14-secrets); runs under /ci. Never edit a gate script in place; number the next one. hbox composed cannot judge
   residents/restart (no root): infra's forge composed container does.
 - `sweep.sh [--dry]` (lane trash, ember 10-31): for every candidate two or more behind the newest READY one, removes
-  $I/gate-<sha8>* and /ci/{t,c,e,f,j}-<sha6>*, and old/ build outputs except the newest two sets. Skips shas in $I/keep
-  (now: be4ef7510, the ship) and any dir a live process names (logs SWEEP IN-USE; read those holders' command lines and
-  stop by exact PID only if they are our own stale leftovers). Never touches candidates/. Runs at the end of every gate13.
+  $I/gate-<sha8>* and /ci/{t,c,e,f,j}-<sha6>*; removes candidates/<sha> beyond the newest KEEP_CANDIDATES (3) READY; and
+  old/ build outputs except the newest two sets. Skips shas in $I/keep (be4ef7510 the forge ship, cdb399b47 the bump,
+  35737eac4 the batch) and anything a live process names (cmdline, cwd, exe, fds) or a /ci world's inputs name (logs SWEEP
+  IN-USE; read the holders' command lines and stop by exact PID only if they are our own stale leftovers). Logs sizes.
+  Runs at the end of every gate13. 10-31 00:00: 27 candidates + old/packages-430 = 22.8 GB; f34b0309 left (demo-path
+  leftovers still run its binaries).
 - Kept world teardown: the candidate's scripts/spk-platform/world-down.sh RUN/inputs, then
   dregg-infra-69c17a3/edge/mini/journey/jworld-scratch.sh down RUN/w (XDG_RUNTIME_DIR and DBUS set); log DOWN.
 - Mac landing worktree /Users/ember/dev/minidregg-lanes/integration-r2 (branch integ/batch-435; staging is pushed from
