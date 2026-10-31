@@ -9,7 +9,7 @@ retired-agent hook names the live integrator to anyone who messages the old id).
 integrator; the integrator merges onto `integration/staging`, cuts batch candidates on hbox, gates them, moves main to
 gated candidates and names candidates to infra and the explorer.
 
-## Now (2026-10-31 09:15 EDT)
+## Now (2026-10-31 09:20 EDT)
 
 - **ember (10-31 09:10, via root): no rehearsal cut until she says.** Make the system as good as it can be: keep batching,
   gate once per batch, keep the newest green candidate as the fallback. Priorities: repair Hermes (batch 5's j14
@@ -21,10 +21,11 @@ gated candidates and names candidates to infra and the explorer.
 - **Batch 5 1c151fce4: gate15 FAIL** on j14-apps: "Hermes sent no reply to the ask: refused" (also on overlay
   1c151fce4-resid -hp1). Cause narrowed by app-reds: the controller's final-delivery mini_say is paid (op g98) but never
   submitted (lookup `not-submitted`), and the write error was dropped; c88b88755 (batch 7) now surfaces it as writeError.
-  Forge composed decides residents; hbox residents UNKNOWN.
+  Forge composed c-1c15-d1 PASSES every phase (residents, restart included). Umbrella-tree on batch 5: rc=0, 0 reds
+  (TokenCensus fixed); its fixture re-record eb5cf8f8a is merged (staging 72ad281c5).
 - **Batch 6 74e1cfa10: BUILDING since 08:51** (integ-build6, PID file $I/build-b6.pid; batch 5's umbrella chain still in
   $I/build.pid). Carries perf-apps b1, refusal clauses, resource-id fix, apps-e2e request file, exorcism (no fsync; Store
-  frame v2 8b49bf1e2/fe77ab521; 019f2e56f), perf-client residents end when storageRoot goes. Mac waiter b373o0z52.
+  frame v2 8b49bf1e2/fe77ab521; 019f2e56f), perf-client residents end when storageRoot goes. Mac waiter busrjvxch (host stage running since 08:51).
   On READY: gate15; name it to the explorer, exorcist (row 8 measurement), perf-apps (first page / per request), infra.
 - **Batch 7 (staging a8b9d5765)**: resident final writeError c88b88755, demo-reds 58c17b1de, perf-client f95edc7bf +
   b34173dad (candidate ssh wrapper) + 394039fb1 (one shared codec Host per box under split tenancy), apps-e2e 78a20cb56,
@@ -36,7 +37,7 @@ gated candidates and names candidates to infra and the explorer.
 - Forge demo (infra): grain world green through the host custodian; infra holds its rebuild until batch-5's forge composed
   ends and waits for host load < 2 before starting the Hermes controller. Wedged lobby state saved at
   dregg-forge:/root/wedges/lobby-wedge-b4.tar for demo-reds.
-- hbox: / 56 GB free (09:10).
+- hbox: / 69 GB free (09:18, after the explorer removed 16 GB of its own /ci scratch).
 
 ## Lanes (route only to the newest id; distilled lanes' old ids are retired)
 
