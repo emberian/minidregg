@@ -25,20 +25,34 @@ Ember's bar: nothing on an NVMe machine should take substantially over 1 ms.
 
 | # | finding | measured cost | state |
 |---|---|---|---|
-| 1 | Every wake of an installed image (`verify_installed_spk`) re-verifies the whole SPK: copy to a temp file, xz-decode it to a second temp file, SHA-512, ed25519, parse the archive. It runs at install (about 3 times), at the route bind, at every START and STOP. | 2.7 to 4.3 s per call for EtherCalc (37 MB; 2.4 s CPU); more for Etherpad (64 MB) and Davros | fixed on the lane (below) |
+| 1 | Every wake of an installed image (`verify_installed_spk`) re-verifies the whole SPK: copy to a temp file, xz-decode it to a second temp file, SHA-512, ed25519, parse the archive. It runs at install (about 3 times), at the route bind, at every START and STOP. | 2.7 to 4.3 s per call for EtherCalc (37 MB; 2.4 s CPU); more for Etherpad (64 MB) and Davros | batch 1: 0.02 s |
 | 2 | The apps worker binds the owner's route through 13 `mini` subprocesses and 2 one-shot `minidregg-host` helper processes (`grain-share-issue-*` ran `HOST CONFIG author` and `inspect outcome` as processes). | 17.5 s wall; 0.3 s per helper process | helper processes fixed on the lane; in-process worker steps are next |
 | 3 | op66, the lifecycle BEGIN plan, takes 8.6 s on a fresh world (a history walk from genesis when a share/grant/reserve record sits below the checkpoint) | 8.6 s per INSTALL and per START | hot-path's (row 4 slice 2) |
 | 4 | Agent typed-tool custody (`agent_reserve`, `agent_payer`, `agent_lifetime_grant`) runs every author/inspect/signatures as a `minidregg-host` process | 5 to 8 processes per operation, 60 to 300 ms each | fixed on the lane |
-| 5 | `grain start` polls the resident's completion every 500 ms and spawns `systemctl --user show` per poll | up to 0.5 s added latency; 10 to 750 ms per poll | open |
+| 5 | `grain start` polled the resident's completion every 500 ms and spawned `systemctl --user show` per poll | up to 0.5 s added latency; 10 to 750 ms per poll | batch 1: inotify wake, the unit read at most every 500 ms |
 | 6 | Each grain HTTP request is a durable Mini turn (PLAN, ASSEMBLE, SUBMIT, and inspections); the resident dispatches one request at a time | not yet measured on a running grain (START was red until 40efdcff9) | next measurement |
-| 7 | `apps_worker` re-hashes the whole quarantined SPK on every install attempt and retry | about 0.1 s per 37 MB | small; open |
+| 7 | `apps_worker` read the whole quarantined SPK into memory and hashed it on every install attempt and retry | about 0.1 s per 37 MB, the SPK's size in memory | batch 1: streamed, kept per file identity |
 
 Already done before this lane, on batch 5: no fsync anywhere (exorcist); the hosting delegation's
 rounds run in-process, not as `mini workspace --action app-lifecycle` subprocesses (exorcist); spk-host's
 `author`/`inspect`/`signatures` go to the Host session instead of a process per call (about 1 ms each,
 `tool-timing ... session=1` in the resident journal).
 
-## Landed on the lane (before/after pending the measured run)
+## Batch 1: before and after (EtherCalc, batch 5 plus 40efdcff9, same box, back to back)
+
+| measure | before | after |
+|---|---|---|
+| one wake's image verification (`spk-host inspect-installed`, three runs) | 2.81 to 3.43 s (2.2 to 2.5 s CPU) | 0.02 to 0.03 s |
+| `spk-host grain install` (worker phase 2) | 39.5 s | 17.7 s |
+| `spk-host grain route` | 2.2 s | under 0.5 s |
+| `spk-host grain start` (to the resident's refusal, see the reds) | 8.9 s | 7.1 s |
+| worker install phase (request received to installed) | 40 s | 18 s |
+
+START still ends red on member-namespace ids (route socket path over SUN_LEN; enrollment lookup
+"agent reserve custody lacks confirmation"): app-reds has both, so the first page and the per-request
+path are measured after its fix.
+
+## What batch 1 changes
 
 - **The image's verified identity is retained at publication.** `materialize` writes
   `verified-identity.json` (0444, the manifest's custody) with the publishing parse's result: raw length
@@ -49,6 +63,9 @@ rounds run in-process, not as `mini workspace --action app-lifecycle` subprocess
   `retained_verified_identity_equals_reverification_and_binds_the_bytes` (the record's identity equals a
   fresh re-verification field for field; a one-byte rewrite of `package.spk` at the same length is
   refused; a 0644 record is refused).
+- **`grain start` wakes on its journal and route directories** (inotify), reading the unit's state at
+  most every 500 ms instead of sleeping 500 ms between checks.
+- **The worker's package digest** is streamed from the opened descriptor and kept per file identity.
 - **Source custody pure verbs go through the codec session.** `share_issue::source_process` and
   `agent_reserve::source` answer `author`, `inspect` and `signatures` through
   `client_consent::pure_source` (this process's codec session, the frame every other client verb
