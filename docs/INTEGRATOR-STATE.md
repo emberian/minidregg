@@ -53,6 +53,9 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   7, 0/500 says) -> 186/557 ms (batch 8 + birth plan); growth ~+370 ms in both = the per-request session refresh
   (35% at 500: WorldTrack.advance / deltaOf decode of the Host's own post). hot-path takes refresh before op66 (law 17),
   with retained-mode.
+  + hot-path 46ba70e43 (C1 follow-ups: `fresh` dropped; Reject.streamRef + append_ref_ahead_refused; PLACE.md client
+  contract; positive pipeline statement owed in batch 10) + 75d97b351 (@[csimp] ofCells_eq_fast: each written post
+  decoded once, not six times); audit requested.
   + perf-apps 4315513a7 (66ccd307a: launch qualification's six steps share one storeless codec child; Host processes
   6 -> 1, steps 1.63 -> 0.69 s; fallback twin DELETED by b59364ba5/a66d51f15: a lost child, out-of-turn answer or oversize input refuses the step
   by name; -91 lines).
@@ -162,6 +165,7 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 
 ## Reports sent (do not resend)
 
+- 10-31 13:20: hot-path 46ba70e43/75d97b351 merged (9540a646b); auditor round requested; private-cells ack.
 - 10-31 13:15: perf-client 096c881e5 merged; perf-apps b59364ba5 merged into batch 9.
 - 10-31 13:05: perf-apps a70a7655df79c4335: 4315513a7 merged; fallback twin note.
 - 10-31 12:55: C1 a9e738baf merged; auditor round requested; hot-path: refresh first; explorer: rerun on batch 9.
