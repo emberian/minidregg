@@ -121,7 +121,10 @@ to 7):
 * **Receipt joint witness** (`Kernel/ReceiptEventHiding.lean`): `DeployedRandomized`, the
   signer's randomness on four tapes, constant view, budget exactly the query-bounded public-hash
   tests (`AnyPublicHash`): `IdealReplacement` by `idealReplacement_of_injective` and
-  `deployed_receiptHiding` at gap 1/2; `leaked_tape_refuted` (teeth). The public signer is
+  `deployed_receiptHiding` at gap 1/2, inhabitation at `q < T` only (a four-query reader
+separates the worlds; cite it with this caveat); `leaked_tape_refuted` (teeth). The reduction
+and the ideal-replacement lemmas carry `#assert_axioms` (standard three), so no soundness or
+hiding proof can cite the native facts. The public signer is
   refuted unconditionally (`public_signer_refuted_always`). Distinctness of concrete cSHAKE ids
   is a compiled-evaluation fact (`native_decide` over the pure-Lean fast path, the kernel cannot
   evaluate Keccak), pinned with `#guard_msgs` on `#print axioms` (precedent:
@@ -132,19 +135,34 @@ to 7):
   `card fields` prefixes, one for a full scope), and the concrete `bitCode` of width `4 + W`
   (satisfiable), with teeth.
 
-**Owed, in order:**
-1. Reveal locality: store-side collision scope restricted to the authentication path plus the
-   selected subtree (audit item (e)).
-2. Fitting for declared kinds: a slot is `.slot field.value` with an unbounded `Digest`, so
-   admission must bound it below `2^W`; the address-path half of the keys (`ClassKeys.address`
-   from the canonical address bytes, injective before hashing), and `PathsInjective` from it.
-3. The composed opening: class openings over `indexEntries` under the masked root, the
-   reader's view as their union (`narrowPacked`).
-4. The opening relation in the compiler's vocabulary (compiler-emitted AIR; grow the compiler
+**Owed, in order** (the integrator's re-audit of increment 2, staging 35737eac4: nothing
+vacuous; these required next):
+1. **Twin.** `Cache.erase` runs the pure `Trie.erase` (`Theory/AuthTrieErase.lean`, the
+   hand-written walk) while the metered walk is `eraseM`, linked only by `eraseM_sim`. Define
+   `Trie.erase` AS `eraseM` at an identity `Ops` instance (`N := Trie`, `load = layer`,
+   `store = ofLayer`, `hash = dig`, monad `Id`; the deleted `trieOps` and its `rfl` proofs of
+   `joinM_trieOps`/`clashM_trieOps`/`eraseM_trieOps` are in git at `e2f6da711^`), prove the old
+   pattern equations as lemmas (`erase_branch`, `erase_leaf`, ...), switch `erase_entries`,
+   `erase_inv`, `erase_noClash`, `finish_sim`, `eraseM_sim` to them, and delete the hand-written
+   walk. The Store write path must call this erase. Same route for `Trie.reveal` if its cost
+   is claimed.
+2. **Scope.** `ScopeSelectsVisible` excludes blinding addresses by a premise, not by the
+   prefixes; `Fits` excludes slots with `Digest ≥ 2^W`. Instantiate `bitCode` at the digest
+   width with a proof that every `fieldOf` parameter fits (declared slots: `field.value` of an
+   admitted `Digest`, needs an admission bound; content atoms: `atomLow < 2^64`).
+3. **Seam, ending in ONE theorem.** `Wire.blinding` is one arbitrary address, not
+   `CanonicalCellRegistry.isBlinding`, and the index is keyed by `Address`, not
+   `ClassKeys.bitsOf`. Required: a Kernel lemma that the canonical wire's blinding exclusion is
+   `isBlinding`; the address-path half of the keys (canonical address bytes, injective before
+   hashing, so `PathsInjective`); and one theorem: a class opening of the index equals the
+   `Visible` view (`narrowPacked`).
+4. Reveal locality: store-side collision scope restricted to the authentication path plus the
+   selected subtree.
+5. The opening relation in the compiler's vocabulary (compiler-emitted AIR; grow the compiler
    where it lacks a trie-path or cSHAKE gadget), not a hand-written circuit.
-5. The receiver: new materializer version beside the old one until a fresh genesis, with its
+6. The receiver: new materializer version beside the old one until a fresh genesis, with its
    fixture re-record in the same sha; codec epoch agreed with the hot-path successor.
-6. Flatness: gate10/gate12 flatness-submit.
+7. Flatness: gate10/gate12 flatness-submit.
 
 **Linear paths seen** (each blocks flatness independently): flat `rootPreimage`
 (44 + 32E bytes per write, `StoreCodec`), whole-view `items` in `StoreHiding.view` and
