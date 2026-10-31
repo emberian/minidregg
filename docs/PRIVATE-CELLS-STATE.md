@@ -220,24 +220,27 @@ scanning the accepted log, `historicalReceipt`'s `findIdx?` (cached variant exis
 ## Continuation (for a successor)
 
 * **Trees.** Mac worktree `~/dev/minidregg-lanes/private-cells` (branch `lane/private-cells`,
-  pushed to origin). hbox warm tree
-  `/home/hbox/lanes/private-cells/src` on Lean 4.35: sync edited files with rsync, iterate with
-  `swarm-build lake env lean <file>`, batch with `swarm-build lake build Theory Kernel Compiler
-  Minidregg Host` (about 10-40 min warm), logs and PID files under
-  `/home/hbox/lanes/private-cells/logs/`. Before READY, verify each committed `.lean` file equals
-  the hbox copy (`git show HEAD:f | ssh hbox cmp - …`).
-* **Landing.** Integrator is aeb671706eb3f70d7: send a sha whose parent is the integrator's
-  batch or staging (never main), stacked on the lane's previous unlanded commits, with the full
-  build result. Codec or event-id batches carry their own
-  fixture re-record. Before the new cell format, agree the codec epoch with hot-path
-  a86738fc1dfae6429.
+  pushed). hbox warm tree `/home/hbox/lanes/private-cells/src` on Lean 4.35: sync edited files with
+  rsync, iterate with `swarm-build lake env lean <file>` (seconds to minutes), batch with
+  `../b6.sh` (full `Theory Kernel Compiler Minidregg Host` plus the planted receipt test, about
+  10-40 min warm; log under `../logs/`, PID file beside it). Before READY, verify each committed
+  `.lean` file equals the hbox copy (`git show HEAD:f | ssh hbox cmp - …`).
+* **Landing.** Integrator aeb671706eb3f70d7: a sha stacked on the lane's last merged commit
+  (staging, never main), with the full build result. Merged so far: through bf2bfe84a; b076a4806
+  sent READY. Codec or root-format batches carry their own fixture re-record.
+* **Next increment** (owed item 1 then 2): a cell representation carrying `KeptCell` (read
+  `Theory/CellState.lean` `Materialized`/`materialize`/patch application near line 263, and the
+  hot-path note: checkpoints persist the State and roots are recomputed on open by
+  `openSealedWith`/`RootCache`), then the registry switch (`Compiler/CanonicalCellRegistry.lean`
+  `materializer`/`wire?`; layering: `fieldOf` is Kernel, the registry is Compiler, so the private
+  materializer is selected in Kernel or `fieldOf` moves down). Tell hot-path a86738fc1dfae6429
+  before that sha lands.
 * **Review practice.** Statement first; codex astra (`codex exec -m gpt-6-astra -s read-only -C
-  <worktree> "<prompt>"`) as peer on each statement and on proofs' claims; Kimi via the integrator
-  for non-vacuity. Every round so far found real defects: apply them, never weaken.
-* **hbox packages.** The tree's `.lake/packages` were seeded by hard links; lake's trace,
-  hash and setup files were unshared on 10-31 (oleans still shared).
-* **Lessons.** A cost Prop over a polymorphic operation is fakeable (noncomputable type-case);
-  make the operation a program whose operations an interpreter charges. Scoped collisions (never a global `Collision` disjunct); a counted-cost Prop over
-  a returned `Nat` is only meaningful for an operation whose count is its own execution; quantify
-  constants before the size parameters; budgets need a positive query bound and must not admit
-  unbounded enumeration; a witness at the wire shape is not an admitted invocation.
+  <worktree> "<prompt>"`) as peer on each statement and proof claim; Kimi via the integrator for
+  non-vacuity. Every round so far found real defects: apply them, never weaken.
+* **Lessons.** Scoped collisions, never a global `Collision` disjunct; collision disjuncts must be
+  stated at deployed parameters (an abstract hash or width makes them free); a cost Prop over a
+  polymorphic operation is fakeable, so make the operation a program an interpreter charges;
+  quantify constants before the size parameters and the types; budgets need a positive query
+  bound; a witness at the wire shape is not an admitted invocation; `Action.admissionCheck` feeds
+  a derived AIR and the native binding, so admission bounds go on new receivers, not there.
