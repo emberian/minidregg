@@ -1,7 +1,7 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `ef2a21c94a3c` (builder: REDS.md for 78f347a6af51 (5 red)). Round finished 2026-10-31T23:24Z.
-green: `83e926874e38`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-ef2a21c9`.
+Tip: `920a4a31412c` (Merge remote-tracking branch 'origin/main' into seat/host-execution). Round finished 2026-10-31T23:49Z.
+green: `83e926874e38`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-920a4a31`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
@@ -11,9 +11,14 @@ green: `83e926874e38`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/
 | pack | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
 | umbrella-tree | did not run | - | yes | build-loop | an earlier stage stopped the build |
 
-Suspect commits since green (`git log 83e926874e38..ef2a21c94a3c`), newest first; owners are the seats whose
+Suspect commits since green (`git log 83e926874e38..920a4a31412c`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `920a4a31` Merge remote-tracking branch 'origin/main' into seat/host-execution
+- `d0d40855` host-execution: a first walk opens the Store in full once
+- `29a754fe` board: privacy row, FORMAT (a) timing measured: per-write cost still grows; cause and routing
+- `6c584257` board: member-side row: persvati doc new numbers, law 17 red
+- `c50c4f77` builder: REDS.md for ef2a21c94a3c (5 red)
 - `ef2a21c9` builder: REDS.md for 78f347a6af51 (5 red)
 - `a2363bbb` board: member-side row after 22cac1ee0
 - `22cac1ee` client: one Host reply check names every outcome; the grain recovery test drives the codec session (owner: member-side)
@@ -49,8 +54,3 @@ Suspect commits since green (`git log 83e926874e38..ef2a21c94a3c`), newest first
 - `7de8305d` builder: REDS.md for 960da1d8d9a8 (6 red)
 - `960da1d8` builder: REDS.md for 9dc9c138cb32 (4 red)
 - `4c6c3676` board: privacy row, the held authority cell landed (store-retained)
-- `c3a46c03` board: store-retained row: R6(i) held authority cell landed (bdfa9428c, c3a28038a); boxes are hbox t (owner: store-retained)
-- `c3a28038` R6(i): the held-cell teeth and satisfiable lemmas reduce the match before the dite rewrite
-- `bdfa9428` R6(i) authority: a light write hands the session its authority post-cell; adopt takes it without a d (owner: host-execution)
-- `e46759f4` conversation paths: the controller's reserve projection admits the trailing slash too (owner: apps-hermes)
-- `1c670cee` conversation paths: the Host carries the app's own endpoint byte-exact, one trailing slash included  (owner: apps-hermes, read-path)
