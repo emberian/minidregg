@@ -137,8 +137,7 @@ theorem rootOr_eq (C : AuxCache spec) {s : Store L} (carried : Carried C s) (fal
     (exact : fallback.get = spec s) : Carried.rootOr C carried fallback = spec s := by
   induction carried using Trunc.ind with
   | _ a =>
-    unfold Carried.rootOr Carried.root?
-    simp only [Trunc.lift_mk]
+    show (match C.root? a.1 with | some r => r | none => fallback.get) = spec s
     cases h : C.root? a.1 with
     | none => exact exact
     | some r => exact C.root?_sound a.2 h

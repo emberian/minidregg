@@ -157,9 +157,22 @@ theorem set_index (ctx : List UInt8)
   unfold keptSet
   by_cases blind : some a = wire.blinding <;> simp [blind]
 
+/-- **The seam**: the receiver's kept root is this structure's read at the kind-level context,
+so the hiding results (stated over `KeptCell.root`, `Serve` over `(ctx, mask, index)`) describe
+the root the materializer computes. -/
+theorem keptCell_root (cell : KeptCell wire) :
+    cell.root = keptRoot wire (ctxBytes wire cell.params) ⟨cell.index, cell.mask⟩ :=
+  rfl
+
+/-- And a kept cell's carried structure holds of its store. -/
+theorem keptCell_holds (cell : KeptCell wire) : KeptHolds wire ⟨cell.index, cell.mask⟩ cell.fit.store :=
+  ⟨cell.holds, cell.mask_eq.symm⟩
+
 #assert_axioms keptSet_holds
 #assert_axioms keptRoot_eq
 #assert_axioms rootAvailable
+#assert_axioms keptCell_root
+#assert_axioms keptCell_holds
 #assert_axioms set_index
 
 end Minidregg.Kernel.PrivateCellMaterializer

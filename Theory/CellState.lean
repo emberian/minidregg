@@ -78,7 +78,10 @@ structure Materialized {L : Layout.{u, v, w}} {Root : Type y}
   logical : Store L
   bytesCache : Thunk (List UInt8)
   bytesExact : bytesCache.get = M.codec.encode logical
-  carried : CellStateAux.Carried M.aux logical
+  /-- The persistent structure, deferred: built on the first root read of a cell
+  materialized from a store or bytes, and followed by a patch only when the pre-cell's was
+  forced, so a cell whose root is never read never builds it. -/
+  carried : Thunk (CellStateAux.Carried M.aux logical)
   rootCache : Thunk Root
   /-- The one root law: whatever the cache reads (the carried structure's root, or the
   fallback hash of the bytes when it reads none), it is the materializer's root of the
@@ -90,10 +93,10 @@ bytes, so a cell is encoded at most once. -/
 def materialize {L : Layout.{u, v, w}} {Root : Type y} (M : Materializer L Root)
     (logical : Store L) : Materialized M :=
   let bytes : Thunk (List UInt8) := Thunk.mk fun _ => M.codec.encode logical
-  let carried : CellStateAux.Carried M.aux logical := Trunc.mk (M.aux.build logical)
+  let carried : Thunk (CellStateAux.Carried M.aux logical) := Thunk.mk fun _ => Trunc.mk (M.aux.build logical)
   ⟨logical, bytes, rfl, carried,
-    Thunk.mk fun _ => CellStateAux.Carried.rootOr M.aux carried (Thunk.mk fun _ => M.rootBytes bytes.get),
-    CellStateAux.rootOr_eq M.aux carried _ rfl⟩
+    Thunk.mk fun _ => CellStateAux.Carried.rootOr M.aux carried.get (Thunk.mk fun _ => M.rootBytes bytes.get),
+    CellStateAux.rootOr_eq M.aux carried.get _ rfl⟩
 
 /-- Canonical bytes are projected from the packaged logical store. -/
 def Materialized.bytes {L : Layout.{u, v, w}} {Root : Type y}
@@ -154,10 +157,12 @@ theorem Materialized.root_encoding_coherent {L : Layout.{u, v, w}} {Root : Type 
 @[ext] theorem Materialized.ext {L : Layout.{u, v, w}} {Root : Type y}
     {M : Materializer L Root} {left right : Materialized M}
     (h : left.logical = right.logical) : left = right := by
-  obtain ⟨logical, ⟨leftBytes⟩, leftBytesExact, leftCarried, ⟨leftRoot⟩, leftExact⟩ := left
-  obtain ⟨_, ⟨rightBytes⟩, rightBytesExact, rightCarried, ⟨rightRoot⟩, rightExact⟩ := right
+  obtain ⟨logical, ⟨leftBytes⟩, leftBytesExact, ⟨leftCarried⟩, ⟨leftRoot⟩, leftExact⟩ := left
+  obtain ⟨_, ⟨rightBytes⟩, rightBytesExact, ⟨rightCarried⟩, ⟨rightRoot⟩, rightExact⟩ := right
   cases h
-  cases Subsingleton.elim leftCarried rightCarried
+  have sameCarried : leftCarried = rightCarried :=
+    congrArg (fun value (_ : Unit) => value) (Subsingleton.elim (leftCarried ()) (rightCarried ()))
+  cases sameCarried
   -- A `Unit → α` is determined by its value at `()` definitionally (eta), so
   -- no function extensionality is needed.
   have sameBytes : leftBytes = rightBytes :=
@@ -175,10 +180,10 @@ def materializeCanonical {L : Layout.{u, v, w}} {Root : Type y} (M : Materialize
     (bytes : List UInt8) (logical : Store L) (canonical : M.codec.encode logical = bytes) :
     Materialized M :=
   let cached : Thunk (List UInt8) := Thunk.pure bytes
-  let carried : CellStateAux.Carried M.aux logical := Trunc.mk (M.aux.build logical)
+  let carried : Thunk (CellStateAux.Carried M.aux logical) := Thunk.mk fun _ => Trunc.mk (M.aux.build logical)
   ⟨logical, cached, canonical.symm, carried,
-    Thunk.mk fun _ => CellStateAux.Carried.rootOr M.aux carried (Thunk.mk fun _ => M.rootBytes cached.get),
-    CellStateAux.rootOr_eq M.aux carried _ (congrArg M.rootBytes canonical.symm)⟩
+    Thunk.mk fun _ => CellStateAux.Carried.rootOr M.aux carried.get (Thunk.mk fun _ => M.rootBytes cached.get),
+    CellStateAux.rootOr_eq M.aux carried.get _ (congrArg M.rootBytes canonical.symm)⟩
 
 theorem materializeCanonical_eq {L : Layout.{u, v, w}} {Root : Type y} (M : Materializer L Root)
     (bytes : List UInt8) (logical : Store L) (canonical : M.codec.encode logical = bytes) :
@@ -278,10 +283,11 @@ def ValidatedPatch.apply {L : Layout.{u, v, w}} {Root : Type y}
     Materialized M :=
   let logical := Patch.run pre.logical patch
   let bytes : Thunk (List UInt8) := Thunk.mk fun _ => M.codec.encode logical
-  let carried : CellStateAux.Carried M.aux logical := CellStateAux.Carried.run M.aux patch pre.carried
+  let carried : Thunk (CellStateAux.Carried M.aux logical) :=
+    Thunk.mk fun _ => CellStateAux.Carried.run M.aux patch pre.carried.get
   ⟨logical, bytes, rfl, carried,
-    Thunk.mk fun _ => CellStateAux.Carried.rootOr M.aux carried (Thunk.mk fun _ => M.rootBytes bytes.get),
-    CellStateAux.rootOr_eq M.aux carried _ rfl⟩
+    Thunk.mk fun _ => CellStateAux.Carried.rootOr M.aux carried.get (Thunk.mk fun _ => M.rootBytes bytes.get),
+    CellStateAux.rootOr_eq M.aux carried.get _ rfl⟩
 
 /-- Application is the materialization of the run store (`Materialized.ext`): the carried
 structure is the only thing that differs, and it is a subsingleton. -/
