@@ -798,3 +798,26 @@ fn a_one_member_args_object_named_path_is_not_the_path_binding_form() {
     });
     assert_eq!(first, Some(("MKCOL".into(), "dav/run1".into())), "{:?}", e.outcome);
 }
+
+#[test]
+fn a_declared_referer_is_signed_only_as_a_same_origin_path() {
+    // Hummingbird's tracked url is its beacon's referer, so the declaration types it as a path.
+    let hb = Declaration::load(include_bytes!("../../../apps/interfaces/hummingbird.json")).unwrap();
+    let full = hb.prepare("analytics.record", &json!({"url":"https://grain.test/a","event":"view"}), &json!({}));
+    assert_eq!(full.unwrap_err().name, "input-schema");
+    let path = hb.prepare("analytics.record", &json!({"url":"/a","event":"view"}), &json!({}));
+    assert_ne!(path.unwrap_err().name, "input-schema");
+    // Any binding's referer: a path is signed as given (fragment dropped), any other value is dropped.
+    let mut v: serde_json::Value =
+        serde_json::from_slice(include_bytes!("../../../apps/interfaces/gogs.json")).unwrap();
+    v["operations"]["page.visit"] = json!({"description":"visit","input":{"type":"object","properties":{"r":{"type":"string"}},"required":["r"],"additionalProperties":false},"output":{},"write":false,
+        "binding":{"protocol":"http","method":"GET","path":["page"],"headers":{"referer":{"arg":"r"}},"decode":"status","status":[200]}});
+    let d = Declaration::load(&serde_json::to_vec(&v).unwrap()).unwrap();
+    let referer = |r: &str| {
+        d.prepare("page.visit", &json!({"r":r}), &json!({})).unwrap().ordered_headers.into_iter()
+            .find(|(k, _)| k == "referer").map(|(_, v)| v)
+    };
+    assert_eq!(referer("/a/b?x#f").as_deref(), Some("/a/b?x"));
+    assert_eq!(referer("https://grain.test/a"), None);
+    assert_eq!(referer("//grain.test/a"), None);
+}

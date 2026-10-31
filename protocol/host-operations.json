@@ -2757,7 +2757,8 @@
     "oc-checksum",
     "oc-chunk-offset",
     "oc-lazyops",
-    "content-encoding"
+    "content-encoding",
+    "referer"
   ],
   "dav_methods": [
     "PROPFIND",

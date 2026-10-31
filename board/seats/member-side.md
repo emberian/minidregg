@@ -57,8 +57,20 @@ resident footprint (a few MB per member), web pages.
   `mini apps bootstrap` refused on 76511e768. `replay` now refuses only a held -> lost track. Confirmed end to end
   on overlay 93b31c1c33d6 (main 27f85e89 on 76511e768bbc): read-path's persvati up.sh UP-RC=0 and a 5-member bb2
   world enrol and bootstrap, consent logs clean; told read-path, build-loop, host-execution, apps-hermes, root.
+- One Host reply check for the client's custody flows (22cac1ee0): `agent_reserve::host_reply(frame, op, what)` names
+  every outcome (no record, never forwarded, undecided), replacing four copies; apps-hermes' 7acbdd878 read. The grain
+  share recovery test ported to the codec session (stale since 3983f0787). `activity.rs`/`checkpoint.rs` keep their
+  own checks (they print the outcome body's text).
 
 ## Numbers
+- persvati 2026-10-31 evening, world rpw/rf (overlay 93b31c1c33d6: main 27f85e89 host+consent incl. 43995c7f2,
+  76511e768, 86c9dbddb, f28cd8457; certifier running), member-1 `doc new`, blocks of 10 back to back (wall / Host /
+  consent ms medians): 326/174/118, 378/215/134, 487/303/465 (outlier), 514/349/221, 580/375/186, 685/477/196,
+  then 764/480/236, 805/540/239. `credit` 11 ms wall. LAW 17 RED: per-write cost grows with history, Host 3x and
+  consent 2x over ~80 writes; store flat ~10 ms. Sent to host-execution (Host) and privacy (consent).
+  Consent self time (perf, 2,415 samples; Lean frames do not unwind, self time only): dec_ref 10%, alloc 9.3%,
+  mi_free 6%, keccak 5.7%, octetsOnto 5.4%, AuthTrie.strip 4.3%, cSHAKE pushList 1.2%, PrivateCellRoot hashing.
+  No batch-8 baseline on persvati: the dc61016cb-codec world fails at sponsor-ssh under the current world script.
 - hbox, noisy; batch 8 against batch 7, interleaved: `doc new` 476 vs 614 ms wall (Host 254 vs 346 ms, consent
   160 vs 219 ms CPU). Warm `credit` 17 ms, `doc show` 20 ms. Of `credit`'s 10 ms when run directly: ~4 ms process start
   plus workspace load, three Host round trips, one codec frame, one consent frame. Warm ssh `say` makes 2,365
@@ -69,7 +81,9 @@ resident footprint (a few MB per member), web pages.
   236 of 2,466 samples (9.6%) of a batch-8 provider's `doc new`. There is no end-to-end after-number yet (see Next 1).
 
 ## Next (in order)
-1. Measure on the first main candidate (build-loop sends its path; measure on persvati): a provider's `doc new`
+1. LAW 17 (consent's half): find what grows per record on the provider's walk (trie/hash work suggests cells
+   decoded from bytes rebuild their trie; ask privacy whether the walk's post cell is patched or decoded). Then
+   measure on the first main candidate (build-loop sends its path; measure on persvati): a provider's `doc new`
    catch-up profile and wall, against the batch-8 numbers above. That is the after-number for rows 16 and 19,
    43995c7f2 (codec order check) and 76511e768 (projection). Expect no `planeKeys`/`supportFast`/`WorldTrack`
    frames; the roots come from FORMAT (a)'s kept index (f28cd8457).

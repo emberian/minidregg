@@ -140,17 +140,6 @@ fn check_intended_selectors(approval: &Value, plan: &Value) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn expect_reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
-    match frame {
-        [mini_sdk::host_operations::RESPONSE_HOST_OUTCOME, ..] => Err(format!(
-            "share issue Host refused op{operation}; frame retained"
-        )),
-        [actual, body @ ..] if *actual == operation && !body.is_empty() => Ok(body),
-        _ => Err(format!(
-            "share issue op{operation} returned an invalid frame"
-        )),
-    }
-}
 
 pub(super) use crate::fsio::retain_json;
 
@@ -208,7 +197,7 @@ fn outcome_at(
     operation: u8,
     state: &Retained,
 ) -> Result<Value> {
-    let body = expect_reply(frame, operation)?;
+    let body = super::agent_reserve::host_reply(frame, operation, "share issue")?;
     let binary = directory.join(format!("{name}.outcome.bin"));
     let presentation = directory.join(format!("{name}.outcome.json"));
     create_private(&binary, body)?;
@@ -507,7 +496,7 @@ pub(super) fn prepare(
     let frame = session_invoke(&host, &operator_socket, &config, mini_sdk::host_operations::APPLICATION_SHARE_ISSUE_PLAN, &request)?;
     check_inputs()?;
     create_private(&directory.join("plan.frame"), &frame)?;
-    let plan = expect_reply(&frame, mini_sdk::host_operations::APPLICATION_SHARE_ISSUE_PLAN)?;
+    let plan = super::agent_reserve::host_reply(&frame, mini_sdk::host_operations::APPLICATION_SHARE_ISSUE_PLAN, "share issue")?;
     let plan_path = directory.join("plan.bin");
     create_private(&plan_path, plan)?;
     let inspected_plan = source_inspect(
@@ -569,7 +558,7 @@ pub(super) fn prepare(
     let assembled_frame = session_invoke(&host, &operator_socket, &config, mini_sdk::host_operations::APPLICATION_SHARE_ISSUE_ASSEMBLE, &assembly)?;
     check_inputs()?;
     create_private(&directory.join("assembly.frame"), &assembled_frame)?;
-    let ingress = expect_reply(&assembled_frame, mini_sdk::host_operations::APPLICATION_SHARE_ISSUE_ASSEMBLE)?;
+    let ingress = super::agent_reserve::host_reply(&assembled_frame, mini_sdk::host_operations::APPLICATION_SHARE_ISSUE_ASSEMBLE, "share issue")?;
     create_private(&directory.join("ingress.bin"), ingress)?;
     let pin = json!({"format":FORMAT,"host":utf8_path(&host)?,
         "hostSha256":initial_host_sha,"config":utf8_path(&config)?,

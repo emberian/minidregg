@@ -27,6 +27,30 @@ for d in native-out consent-out artifacts fixtures; do [ ! -e "$I/$d" ] || mv "$
 ls -1dt "$I"/old/* 2>/dev/null | tail -n +5 | xargs -r rm -rf
 stage() { local n=$1 t; shift; t=$(date +%s); swarm-build deploy/candidate/lane-build.sh "$@" > "$I/logs/$n.log" 2>&1; local rc=$?
   say "stage $n rc=$rc $(( $(date +%s) - t ))s"; return $rc; }
+# land_regen BRANCH: the builder lands its own fixture rerecord on main (RULINGS, 10-31): by path, only the two
+# fixture data files, as a fast-forward of origin/main, never forced, and never when any commit since SHA touched
+# those files (a person's change, or a newer round's regen, wins; the branch stays pushed for review).
+g() { git -C "$I/umbrella-src" "$@"; }
+land_regen() {
+  local b=$1 files="Fixtures/NativeAcceptedFixtureData.lean Fixtures/NativeDocWriteFixtureData.lean"
+  local idx=$I/rerecord/land.index i c tree f
+  [ -z "$(g diff --name-only "$SHA" "$b" -- . ':!Fixtures/NativeAcceptedFixtureData.lean' ':!Fixtures/NativeDocWriteFixtureData.lean')" ] ||
+    { say "rerecord not landed: $b changes more than the two fixture data files"; return 1; }
+  for i in 1 2 3 4 5; do
+    g fetch -q origin main || { sleep 5; continue; }
+    [ -z "$(g log --format=%h "$SHA..origin/main" -- $files)" ] ||
+      { say "rerecord not landed: a commit since ${SHA:0:12} touched the fixture data ($b stays for review)"; return 0; }
+    GIT_INDEX_FILE=$idx g read-tree origin/main
+    for f in $files; do GIT_INDEX_FILE=$idx g update-index --add --cacheinfo "100644,$(g rev-parse "$b:$f"),$f"; done
+    tree=$(GIT_INDEX_FILE=$idx g write-tree)
+    [ "$tree" != "$(g rev-parse origin/main^{tree})" ] || { say "rerecord: main already carries $b's data"; return 0; }
+    c=$({ g log -1 --format=%B "$b"; printf '\nLanded on main by the builder (%s).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n' "$b"; } |
+        g -c commit.gpgsign=false -c user.name="minidregg builder" -c user.email=builder@dregg.invalid commit-tree "$tree" -p origin/main)
+    g push -q origin "$c:refs/heads/main" && { say "rerecord landed ${c:0:12} on main ($b)"; return 0; }
+    sleep 5
+  done
+  say "rerecord not landed: push of $b to main failed after 5 tries"; return 1
+}
 t=$(date +%s); scripts/pipeline/prime-cargo "$src" > "$I/logs/prime-cargo.log" 2>&1; rc=$?; say "stage prime-cargo rc=$rc $(( $(date +%s) - t ))s"
 [ $rc = 0 ] || exit 9
 stage rust-check rust-check || exit 10
@@ -55,7 +79,7 @@ exec 9>&-; touch "$synced"   # src is free (also when umbrella-tree stopped befo
 wait $upid; say "stage umbrella-tree $s12 rc=$? $(( $(date +%s) - t ))s"
 # The fixtures follow the Objective front end and the codec (scripts/native-accepted-fixture/rerecord.sh), run in
 # the umbrella tree where the Fixtures oleans are: "unchanged" (0), "recorded fixture-regen/<sha12> <commit>"
-# (0; pushed for review), "authority-differs <diff>" (4: a person's reviewed commit), 1 = a step failed.
+# (0; pushed, then landed on main by land_regen), "authority-differs <diff>" (4: a person's reviewed commit), 1 = a step failed.
 if [ -x "$I/umbrella-src/scripts/native-accepted-fixture/rerecord.sh" ]; then
   R=$I/rerecord/${SHA:0:12}-$(date +%s); mkdir -p "$I/rerecord"; t=$(date +%s)
   ( cd "$I/umbrella-src" && MINIDREGG_LEAN_SEATS=${UMBRELLA_SEATS:-4} SWARM_MEM_MAX=${UMBRELLA_MEM:-32G} \
@@ -63,5 +87,6 @@ if [ -x "$I/umbrella-src/scripts/native-accepted-fixture/rerecord.sh" ]; then
   last=$(tail -n1 "$I/logs/rerecord-$s12.log")
   say "stage rerecord $s12 rc=$rc $(( $(date +%s) - t ))s: $last"
   case "$last" in recorded\ fixture-regen/*) b=$(echo "$last" | cut -d' ' -f2)
-    git -C "$I/umbrella-src" push -q origin "$b" && say "rerecord pushed $b" ;; esac
+    git -C "$I/umbrella-src" push -q origin "$b" && say "rerecord pushed $b"
+    [ -n "${BUILDER_DRY:-}" ] || land_regen "$b" ;; esac
 fi

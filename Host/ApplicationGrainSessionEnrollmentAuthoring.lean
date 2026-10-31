@@ -11,6 +11,7 @@ public import Kernel.ApplicationGrainSessionEnrollmentSource
 public import Kernel.ApplicationGrainSessionEnrollmentConstruction
 public import Kernel.ApplicationDispatchAdmission
 public import Kernel.NativeHost
+public import Kernel.SigningPlanImage
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr
@@ -85,6 +86,25 @@ def planCodec : LawfulCodec Plan :=
   NativeHostCodec.framed
     "DREGG/APPLICATION/SESSION-ENROLLMENT-PLAN/v1".toUTF8.toList
     planStream
+
+/-- The plan modulo the image its invocation was read at (`SigningPlanImage.imageFree`). The observed
+cell roots (app, manifest, ticket), the old atom and the issue receipt stay: an unrelated append
+moves the image, never these. -/
+def Plan.imageFree (plan : Plan) : Plan :=
+  { plan with invocation := Minidregg.Kernel.SigningPlanImage.imageFree plan.invocation }
+
+/-- Equal projections fix every field but the invocation's image, and the invocation up to it. -/
+theorem Plan.imageFree_eq_fixes {p q : Plan} (h : p.imageFree = q.imageFree) :
+    p.request = q.request ∧ p.enrollment = q.enrollment ∧ p.issueReceipt = q.issueReceipt ∧
+    p.appRoot = q.appRoot ∧ p.manifestRoot = q.manifestRoot ∧ p.ticketRoot = q.ticketRoot ∧
+    p.previous = q.previous ∧ p.observationSlots = q.observationSlots ∧
+    Minidregg.Kernel.SigningPlanImage.imageFree p.invocation =
+      Minidregg.Kernel.SigningPlanImage.imageFree q.invocation :=
+  ⟨congrArg (fun x => x.request) h, congrArg (fun x => x.enrollment) h,
+   congrArg (fun x => x.issueReceipt) h, congrArg (fun x => x.appRoot) h,
+   congrArg (fun x => x.manifestRoot) h, congrArg (fun x => x.ticketRoot) h,
+   congrArg (fun x => x.previous) h, congrArg (fun x => x.observationSlots) h,
+   congrArg (fun x => x.invocation) h⟩
 
 private def cellAt (config : Config) (opened : Opened config) (resource : Nat) :
     Option (PackedCell CanonicalCellRegistry.registry) :=
@@ -356,15 +376,16 @@ def assemble (plan : Plan) (signatures : List (List UInt8)) :
   | _ => throw "session enrollment observation list mismatch"
 
 /-- A detached plan is reselected against a freshly verified tip before
-signatures are packaged. Equality covers old atom, all current roots,
-original issue receipt and every signing header. -/
+signatures are packaged. Equality modulo the image (`Plan.imageFree`) covers the
+old atom, the observed cell roots, the original issue receipt and every signing
+header; `fresh`, read at this tip, is what is assembled. -/
 def assembleCurrent (config : Config) {target : Durable}
     (verified : NativeHostReplay.Verified config target)
     (plan : Plan) (signatures : List (List UInt8)) :
     Except String (List UInt8) := do
   let fresh ← prepareVerified config verified plan.request
-  if planCodec.encode fresh != planCodec.encode plan then
-    throw "session enrollment plan no longer current"
+  if planCodec.encode fresh.imageFree != planCodec.encode plan.imageFree then
+    throw "session enrollment plan no longer current (a signed slot, root or receipt changed)"
   assemble fresh signatures
 
 
@@ -375,8 +396,8 @@ def assembleCurrentCarried (config : Config) (opened : Opened config)
     (plan : Plan) (signatures : List (List UInt8)) :
     ExceptT String IO (List UInt8) := do
   let fresh ← prepareCarried config opened custody plan.request
-  if planCodec.encode fresh != planCodec.encode plan then
-    throw "carried session enrollment plan no longer current"
+  if planCodec.encode fresh.imageFree != planCodec.encode plan.imageFree then
+    throw "carried session enrollment plan no longer current (a signed slot, root or receipt changed)"
   assemble fresh signatures
 
 
@@ -385,8 +406,8 @@ def assembleCurrentSuffix (config : Config) {anchor : Opened config} {target : D
     (plan : Plan) (signatures : List (List UInt8)) :
     ExceptT String IO (List UInt8) := do
   let fresh ← prepareSuffix config verified plan.request
-  if planCodec.encode fresh != planCodec.encode plan then
-    throw "session enrollment plan no longer current in carried service"
+  if planCodec.encode fresh.imageFree != planCodec.encode plan.imageFree then
+    throw "session enrollment plan no longer current in carried service (a signed slot, root or receipt changed)"
   assemble fresh signatures
 
 end Minidregg.Host.ApplicationGrainSessionEnrollmentAuthoring

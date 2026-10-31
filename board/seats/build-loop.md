@@ -50,9 +50,11 @@ box; seam 1 (codec tags) landed; the hot-swap command; keep making the Lean buil
   by a call-slot `mini line-resident` (1711035, sessions/ember/.call-slots/r1-*.pid): scripts/spk-platform/
   stop-residents.sh stops only RUN/a anchors, never call-slot residents. Stopped by its own PID file 18:37 EDT; the
   builder relaunched 18:38 EDT as pid 2375112 (builder.pid), first round 4b750eb67. New residents no longer inherit fd 8.
-- Fixture rerecord: each round whose Host moved event ids reds Fixtures.NativeAcceptedFixture/NativeDocWriteFixture
-  and pushes `fixture-regen/<sha>`; a seat lands it by cherry-pick (64c34e22b for 9dc9c138). Proposed to root: the
-  builder lands its own regen commit on main by path (the two *Data.lean files), so this red stops being a ritual.
+- Fixture rerecord (root's ruling 10-31, RULINGS): integ-build's `land_regen` lands the rerecord on main itself, as a
+  fast-forward of origin/main carrying only Fixtures/NativeAcceptedFixtureData.lean and NativeDocWriteFixtureData.lean
+  from `fixture-regen/<sha>` (still pushed), never forced. It refuses a regen that changes any other path and stands
+  down when any commit since the recorded tip touched those files. Tested on a scratch origin (land; out-of-scope
+  refused; no double land; human edit wins). Live from the first round built on a tip that carries it.
 - green is 83e926874 (batch 4) until a live round passes. The first live hbox round rewrites REDS.md whole.
 
 ### Seam 1 (codec tags): on main (f2002e589)
@@ -95,7 +97,7 @@ box; seam 1 (codec tags) landed; the hot-swap command; keep making the Lean buil
 - Landed 10-31: #5 (capture test stdout lock, d9f333dbf) and #4 (fleet-sign join binds the selected socket before
   key/enrollment/funding; ported onto main, ae98da48b); both closed with a comment. #16, #14, #7: superseded and closed.
 - #18 (simplex prepared jump): open, answered 10-31 17:28Z with five items; item 1 (does the catch-up jump enter the
-  deployed agreement step now?) is a decision for root/ember. Yes: items 2-5 (logMagic 5, drop the Fabric-bound
+  deployed agreement step now?) is with ember via root (10-31). Yes: items 2-5 (logMagic 5, drop the Fabric-bound
   script, drop the ResearchWip hunk, rebase onto Lean 4.35) before merge. No: say so on the PR.
 
 ## Seams needed

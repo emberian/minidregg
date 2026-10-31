@@ -563,8 +563,12 @@ impl PrivateOperator {
         {
             return Err(invalid("Mini Host helper input identity or size refused"));
         }
+        let session_began = Instant::now();
         if let Some(bytes) = self.tool_in_session(command, kind, input, output, deadline)? {
-            eprintln!("spk-host: tool-timing {command} {kind} pin_ms={pin_ms} session=1");
+            eprintln!(
+                "spk-host: tool-timing {command} {kind} pin_ms={pin_ms} session=1 ms={}",
+                session_began.elapsed().as_millis()
+            );
             return Ok(bytes);
         }
         let mut process = Command::new(executable.path());
@@ -727,6 +731,7 @@ impl PrivateOperator {
         payload: &[u8],
         deadline: Instant,
     ) -> io::Result<Vec<u8>> {
+        let began = Instant::now();
         let config = self.check_pin()?;
         if Instant::now() >= deadline {
             return Err(invalid("Mini operator deadline"));
@@ -789,6 +794,8 @@ impl PrivateOperator {
         if reply[4] != operation && !marked && !dispatch_reply {
             return Err(invalid("Mini operator reply opcode mismatch"));
         }
+        // One line per Host turn: the per-op split of a hosted conversation's cost is read from these.
+        eprintln!("spk-host: op-timing op{operation} reply={} ms={}", reply[4], began.elapsed().as_millis());
         Ok(reply)
     }
 }

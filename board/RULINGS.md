@@ -33,5 +33,7 @@
   at $50) serves only non-GLM models.
 - Confine even our own code: composed gate container to least privilege (Stage A, then user-namespaced with the
   custodian), every root unit reviewed. Demo Discord alert off until the next rehearsal.
+- The builder lands its own fixture rerecord on main: by path, only the two fixture *Data.lean files, as a
+  fast-forward of origin/main, never forced, never over a commit to those files since the recorded tip (10-31).
 - Held: egress gateway; Oracle7 integration (its branches stay, unmerged). No new build box; persvati is available
   (stay within ~80 GB).

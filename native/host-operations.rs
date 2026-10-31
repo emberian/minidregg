@@ -456,9 +456,40 @@ pub const CONSENT_THIN_BIRTH_PLAN: u8 = 235;
 pub const CONSENT_FRAMES: &[u8] = &[CONSENT_FULL_READY, CONSENT_INTENT, CONSENT_OBSERVATION, CONSENT_PLAN, CONSENT_OPERATOR_PLAN, CONSENT_POSSESSION, CONSENT_OBJECTIVE, CONSENT_ANCHOR_OFFER, CONSENT_ANCHOR_ADMITTED, CONSENT_THIN_INTENT, CONSENT_THIN_OBSERVATION, CONSENT_THIN_PLAN, CONSENT_STORE_RECHECK, CONSENT_THIN_BIRTH_INTENT, CONSENT_THIN_BIRTH_PLAN];
 
 // Kernel/ApplicationDispatchAdmission.lean ordinaryHeaderName: the signed ordinary request headers.
-pub const ORDINARY_HEADER_NAMES: &[&str] = &["cookie", "accept", "accept-encoding", "content-type", "user-agent", "if-match", "if-none-match", "x-requested-with", "x-csrftoken", "x-csrf-token", "oc-total-length", "oc-chunk-size", "x-oc-mtime", "oc-fileid", "oc-chunked", "oc-checksum", "oc-chunk-offset", "oc-lazyops", "content-encoding"];
+pub const ORDINARY_HEADER_NAMES: &[&str] = &["cookie", "accept", "accept-encoding", "content-type", "user-agent", "if-match", "if-none-match", "x-requested-with", "x-csrftoken", "x-csrf-token", "oc-total-length", "oc-chunk-size", "x-oc-mtime", "oc-fileid", "oc-chunked", "oc-checksum", "oc-chunk-offset", "oc-lazyops", "content-encoding", "referer"];
 pub fn ordinary_header_name(name: &str) -> bool {
     ORDINARY_HEADER_NAMES.contains(&name)
+}
+// Kernel/ApplicationDispatchAdmission.lean refererValueOk: a signed referer is a path of the grain's own origin.
+pub fn referer_value_ok(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.first() == Some(&b'/') && bytes.get(1) != Some(&b'/') && !bytes.contains(&b'\\')
+}
+// Kernel/ApplicationDispatchAdmission.lean ordinaryHeaderOk: by name, and a referer also by value.
+pub fn ordinary_header_ok(name: &str, value: &str) -> bool {
+    ordinary_header_name(name) && (name != "referer" || referer_value_ok(value))
+}
+/// The sender's reduction of a referer before signing: a path passes; an absolute http(s) URL whose
+/// authority is `authority` (the grain's own origin) becomes its path and query; anything else is
+/// dropped (None), never refused. Every Some satisfies referer_value_ok.
+pub fn same_origin_referer(value: &str, authority: Option<&str>) -> Option<String> {
+    let value = value.split('#').next().unwrap_or_default();
+    if referer_value_ok(value) {
+        return Some(value.to_owned());
+    }
+    let rest = ["https://", "http://"].iter().find_map(|scheme| {
+        value.get(..scheme.len()).filter(|p| p.eq_ignore_ascii_case(scheme)).map(|_| &value[scheme.len()..])
+    })?;
+    let end = rest.find(['/', '?']).unwrap_or(rest.len());
+    if !authority.is_some_and(|a| !a.is_empty() && rest[..end].eq_ignore_ascii_case(a)) {
+        return None;
+    }
+    let path = match &rest[end..] {
+        "" => "/".to_owned(),
+        tail if tail.starts_with('?') => format!("/{tail}"),
+        tail => tail.to_owned(),
+    };
+    referer_value_ok(&path).then_some(path)
 }
 
 // Kernel/ApplicationDispatchAdmission.lean davMethod: the WebSession DAV calls, each an exchange.

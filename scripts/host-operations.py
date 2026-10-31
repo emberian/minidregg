@@ -410,6 +410,37 @@ def generated(data):
     lines += ["", "// Kernel/ApplicationDispatchAdmission.lean ordinaryHeaderName: the signed ordinary request headers.",
               "pub const ORDINARY_HEADER_NAMES: &[&str] = &[" + ", ".join(json.dumps(h) for h in data["ordinary_headers"]) + "];",
               "pub fn ordinary_header_name(name: &str) -> bool {", "    ORDINARY_HEADER_NAMES.contains(&name)", "}",
+              "// Kernel/ApplicationDispatchAdmission.lean refererValueOk: a signed referer is a path of the grain's own origin.",
+              "pub fn referer_value_ok(value: &str) -> bool {",
+              "    let bytes = value.as_bytes();",
+              "    bytes.first() == Some(&b'/') && bytes.get(1) != Some(&b'/') && !bytes.contains(&b'\\\\')",
+              "}",
+              "// Kernel/ApplicationDispatchAdmission.lean ordinaryHeaderOk: by name, and a referer also by value.",
+              "pub fn ordinary_header_ok(name: &str, value: &str) -> bool {",
+              "    ordinary_header_name(name) && (name != \"referer\" || referer_value_ok(value))",
+              "}",
+              "/// The sender's reduction of a referer before signing: a path passes; an absolute http(s) URL whose",
+              "/// authority is `authority` (the grain's own origin) becomes its path and query; anything else is",
+              "/// dropped (None), never refused. Every Some satisfies referer_value_ok.",
+              "pub fn same_origin_referer(value: &str, authority: Option<&str>) -> Option<String> {",
+              "    let value = value.split('#').next().unwrap_or_default();",
+              "    if referer_value_ok(value) {",
+              "        return Some(value.to_owned());",
+              "    }",
+              "    let rest = [\"https://\", \"http://\"].iter().find_map(|scheme| {",
+              "        value.get(..scheme.len()).filter(|p| p.eq_ignore_ascii_case(scheme)).map(|_| &value[scheme.len()..])",
+              "    })?;",
+              "    let end = rest.find(['/', '?']).unwrap_or(rest.len());",
+              "    if !authority.is_some_and(|a| !a.is_empty() && rest[..end].eq_ignore_ascii_case(a)) {",
+              "        return None;",
+              "    }",
+              "    let path = match &rest[end..] {",
+              "        \"\" => \"/\".to_owned(),",
+              "        tail if tail.starts_with('?') => format!(\"/{tail}\"),",
+              "        tail => tail.to_owned(),",
+              "    };",
+              "    referer_value_ok(&path).then_some(path)",
+              "}",
               "", "// Kernel/ApplicationDispatchAdmission.lean davMethod: the WebSession DAV calls, each an exchange.",
               "pub const DAV_METHODS: &[&str] = &[" + ", ".join(json.dumps(h) for h in data["dav_methods"]) + "];",
               "pub fn dav_method(name: &str) -> bool {", "    DAV_METHODS.contains(&name)", "}",
@@ -544,6 +575,8 @@ def lean_consent_frames(root):
     return found
 
 LEAN_HEADERS = Path("Kernel/ApplicationDispatchAdmission.lean")
+# The Lean body the generated referer_value_ok mirrors byte for byte (47 = '/', 92 = '\\').
+LEAN_REFERER = "def refererValueOk (value : List UInt8) : Bool :=\n  value.head? == some 47 && (value.drop 1).head? != some 47 && !value.contains 92\n"
 LEAN_CONSENT = Path("Host/ClientConsentCore.lean")
 HOST_MAIN = Path("Host/Main.lean")
 TRANSPORT = Path("native/resource-client/src/transport.rs")
@@ -578,6 +611,7 @@ def check(root, check_generated=True):
         values = selector_codes(matches[0], symbols)
         require(values == [symbols[binding["operation"]]], f"client constant drift: {binding['path']}:{binding['constant']} expected {binding['operation']}")
     require(lean_ordinary_headers(root) == data["ordinary_headers"], "ordinary_headers differ from Kernel/ApplicationDispatchAdmission.lean ordinaryHeaderName (order included)")
+    require(LEAN_REFERER in (root / LEAN_HEADERS).read_text(), "Kernel/ApplicationDispatchAdmission.lean refererValueOk changed: update its Rust twin referer_value_ok (generated here) and LEAN_REFERER")
     require(lean_string_list(root, "davMethod") == data["dav_methods"], "dav_methods differ from Kernel/ApplicationDispatchAdmission.lean davMethod (order included)")
     require(lean_string_list(root, "davHeaderName") == data["dav_headers"], "dav_headers differ from Kernel/ApplicationDispatchAdmission.lean davHeaderName (order included)")
     frames = {e["code"] for e in data["consent_frames"]}

@@ -7,6 +7,10 @@
 mod bridge_config;
 mod permission_schema;
 mod protocol;
+/// The generated Host wire vocabulary (scripts/host-operations.py); this crate reads its header twins.
+#[allow(dead_code)]
+#[path = "../../host-operations.rs"]
+mod host_operations;
 mod web;
 pub use bridge_config::{decode_bridge_config, default_bridge_config_bytes, BridgeConfig};
 pub use permission_schema::{permission_schema_source, permission_schema_source_bytes};

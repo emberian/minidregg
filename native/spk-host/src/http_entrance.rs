@@ -502,6 +502,7 @@ fn parse_head(head: &[u8]) -> io::Result<(ReceivedRequest, Framing)> {
     let mut chunked = false;
     let mut expect_continue = false;
     let mut ordinary_headers = Vec::new();
+    let mut referer = None;
     let mut dav_headers = Vec::new();
     let mut export_capture = None;
     for line in lines {
@@ -530,6 +531,7 @@ fn parse_head(head: &[u8]) -> io::Result<(ReceivedRequest, Framing)> {
         match name.as_str() {
             "host" => host = Some(value),
             "origin" => origin = Some(value),
+            "referer" => referer = Some(value),
             "authorization" => authorization = Some(value),
             "cookie" => cookie = Some(value),
             "sec-fetch-site" => fetch_site = Some(value),
@@ -575,6 +577,11 @@ fn parse_head(head: &[u8]) -> io::Result<(ReceivedRequest, Framing)> {
         }
     }
     let host = host.ok_or_else(|| refuse("missing HTTP Host"))?;
+    // A referer is signed only as a path of this grain's own origin (Lean refererValueOk); a
+    // cross-origin one could leak a capability URL, so it is dropped, never refused.
+    if let Some(path) = referer.and_then(|r| crate::host_operations::same_origin_referer(&r, Some(&host))) {
+        ordinary_headers.push(("referer".to_owned(), path));
+    }
     if chunked && body_len.is_some() {
         return Err(refuse("HTTP content length with chunked transfer encoding"));
     }
@@ -2287,6 +2294,26 @@ mod tests {
         assert!(parsed("COPY /dav/a HTTP/1.1\r\nHost: friend.example.test\r\nContent-Length: 1\r\n\r\nx").is_err());
         assert!(parsed("OPTIONS /dav HTTP/1.1\r\nHost: friend.example.test\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n").is_err());
         assert!(parsed("ACL /dav HTTP/1.1\r\nHost: friend.example.test\r\n\r\n").is_err());
+    }
+
+    #[test]
+    fn a_browser_referer_is_signed_only_as_a_same_origin_path() {
+        let referer = |line: &str| {
+            parsed(&format!("GET /page HTTP/1.1\r\nReferer: {line}\r\nHost: friend.example.test\r\n\r\n"))
+                .unwrap()
+                .ordinary_headers
+                .into_iter()
+                .find(|(name, _)| name == "referer")
+                .map(|(_, value)| value)
+        };
+        assert_eq!(referer("https://friend.example.test/a/b?x=1#frag").as_deref(), Some("/a/b?x=1"));
+        assert_eq!(referer("https://FRIEND.example.test").as_deref(), Some("/"));
+        assert_eq!(referer("https://friend.example.test?q").as_deref(), Some("/?q"));
+        assert_eq!(referer("https://other.example/a"), None);
+        assert_eq!(referer("https://friend.example.test.evil/a"), None);
+        assert_eq!(referer("https://u@friend.example.test/a"), None);
+        assert_eq!(referer("https://friend.example.test//x"), None);
+        assert_eq!(referer("javascript:alert(1)"), None);
     }
 
     #[test]

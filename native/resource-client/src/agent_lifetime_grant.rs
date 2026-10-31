@@ -27,13 +27,6 @@ const LOOKUP_OPERATION: u8 = mini_sdk::host_operations::AGENT_LIFETIME_GRANT_LOO
 const REQUEST_ROUTE: &str = "application-agent-lifetime-grant-request";
 const PLAN_ROUTE: &str = "application-agent-lifetime-grant-plan";
 
-fn expect_reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
-    match frame {
-        [mini_sdk::host_operations::RESPONSE_HOST_OUTCOME, ..] => Err(format!("grant Host refused op{operation}; frame retained")),
-        [actual, body @ ..] if *actual == operation && !body.is_empty() => Ok(body),
-        _ => Err(format!("grant op{operation} returned an invalid frame")),
-    }
-}
 
 
 fn preceding(value: &str) -> Result<String> {
@@ -179,7 +172,7 @@ pub(crate) fn grant_plan(
     }
     let frame = session_invoke(&host, &operator_socket, &config, PLAN_OPERATION, &request)?;
     create_private(&directory.join("plan.frame"), &frame)?;
-    let plan_bytes = expect_reply(&frame, PLAN_OPERATION)?;
+    let plan_bytes = super::agent_reserve::host_reply(&frame, PLAN_OPERATION, "grant")?;
     let plan_path = directory.join("plan.bin");
     create_private(&plan_path, plan_bytes)?;
     let inspection = source_inspect(
@@ -311,7 +304,15 @@ pub(crate) fn grant_seal(directory: &Path, approval_json: &Path) -> Result<()> {
     )?;
     create_private(&directory.join("assembly.frame"), &frame)?;
     same_pin(&directory, &pinned)?;
-    let call = expect_reply(&frame, ASSEMBLE_OPERATION)?;
+    let call = super::agent_reserve::reply_or_outcome(
+        &pinned.host,
+        &pinned.config,
+        &directory,
+        "assembly",
+        &frame,
+        ASSEMBLE_OPERATION,
+        "grant",
+    )?;
     create_private(&directory.join("call.bin"), call)?;
     retain_json(
         &directory.join("seal.json"),
@@ -351,7 +352,7 @@ fn outcome(
     operation: u8,
     pinned: &Pin,
 ) -> Result<Value> {
-    let bytes = expect_reply(frame, operation)?;
+    let bytes = super::agent_reserve::host_reply(frame, operation, "grant")?;
     let binary = directory.join(format!("{stem}.outcome.bin"));
     create_private(&binary, bytes)?;
     source_inspect(
@@ -592,7 +593,7 @@ pub(crate) fn inspect_accepted(host: &Path, config: &Path, socket: &Path,
     let call = private_bytes(ingress, REQUEST_LIMIT)?;
     let operation = mini_sdk::host_operations::AGENT_LIFETIME_GRANT_INSPECT;
     let frame = session_invoke(host, socket, config, operation, &call)?;
-    let body = expect_reply(&frame, operation)?;
+    let body = super::agent_reserve::host_reply(&frame, operation, "grant")?;
     if body.len() > 2 * 1024 * 1024 {
         return Err("accepted grant inspection exceeds JSON budget".into());
     }

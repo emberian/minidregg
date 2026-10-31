@@ -73,8 +73,14 @@ lowering into Air only where useful, never as a second compiler for the opening.
    resistance and lower typical depth, but a public cap needs completeness under adversarial insertions and
    changes roots (a new root-format version, never a reinterpretation of NODE/v2).
 7. The binding reduction for the private root (equal roots → equal stores ∨ a named collision).
-8. FORMAT (a)'s timing: member-side (ab7b4fe7fb687e0ca) measures the authority cell. Baseline b9450147f:
-   doc-log write ~2.0 s at 13 prior entries, ~4.0 s at 103, ~6.1 s at 303; delegate ~2.5 s at 13, ~4.1 s at 303.
+8. FORMAT (a)'s timing, measured by member-side on persvati (world at 27f85e89, which includes f28cd8457):
+   the claim fails as deployed. Over about 80 `doc new` writes, consent CPU per write goes 118 → 240 ms and Host CPU
+   174 → 540 ms, with `AuthTrie.strip` (whole-trie build) and keccak on top. Cause: cells are decoded from bytes per
+   write and rebuilt by `keptBuild`; O(delta·516) holds only for cells patched from a held, forced pre-cell.
+   Fixes are outside this layer: the consent walk holds and patches its cells (member-side); the Host's writers
+   adopt the held post-cell as the birth path does (store-retained, bdfa9428c); or the index is persisted beside
+   the bytes (hot-path). Re-measure against the baseline once they land: b9450147f doc-log write ~2.0 s at 13
+   prior entries, ~6.1 s at 303.
 
 ## Seams
 - store-retained (a9b54e85e4a194b91): L0's Store (landed 802ba8c69); narrowed views are `SparseMap.filterKeys`.

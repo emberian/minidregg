@@ -140,7 +140,45 @@ def ordinaryHeaderName (name : List UInt8) : Bool :=
     "if-match", "if-none-match", "x-requested-with", "x-csrftoken",
     "x-csrf-token", "oc-total-length", "oc-chunk-size", "x-oc-mtime",
     "oc-fileid", "oc-chunked", "oc-checksum", "oc-chunk-offset",
-    "oc-lazyops", "content-encoding"] : List String).any (fun allowed => name == allowed.toUTF8.toList)
+    "oc-lazyops", "content-encoding", "referer"] : List String).any (fun allowed => name == allowed.toUTF8.toList)
+
+/-- A `referer` a signed request may carry is the path of a page of the grain's own origin and nothing else:
+it starts with one `/` (not `//`, which is a network-path reference naming another origin) and has no
+backslash. A cross-origin referer can leak a capability URL (Sandstorm strips it for that reason), so the
+sender reduces a same-origin one to its path and drops any other; a signed request that still carries a
+non-path referer is refused here. -/
+def refererValueOk (value : List UInt8) : Bool :=
+  value.head? == some 47 && (value.drop 1).head? != some 47 && !value.contains 92
+
+/-- An ordinary header is admitted by name, and a `referer` additionally by value. -/
+def ordinaryHeaderOk (name value : List UInt8) : Bool :=
+  ordinaryHeaderName name && (name != "referer".toUTF8.toList || refererValueOk value)
+
+theorem referer_is_ordinary : ordinaryHeaderName "referer".toUTF8.toList = true := by
+  decide +kernel
+
+/-- Teeth: a same-origin path is admitted; an absolute URL, a network-path reference, a path with a
+backslash and the empty value are each refused. -/
+theorem referer_value_path_only :
+    refererValueOk "/page?x=1".toUTF8.toList = true ∧
+    refererValueOk "https://other.example/page".toUTF8.toList = false ∧
+    refererValueOk "//other.example/page".toUTF8.toList = false ∧
+    refererValueOk "/a\\b".toUTF8.toList = false ∧
+    refererValueOk [] = false := by
+  decide +kernel
+
+theorem ordinaryHeaderOk_referer_cross_origin_refused :
+    ordinaryHeaderOk "referer".toUTF8.toList "https://other.example/".toUTF8.toList = false := by
+  decide +kernel
+
+/-- Off `referer` the value adds nothing: `ordinaryHeaderOk` is the name check. -/
+theorem ordinaryHeaderOk_of_other (name value : List UInt8)
+    (h : name ≠ "referer".toUTF8.toList) :
+    ordinaryHeaderOk name value = ordinaryHeaderName name := by
+  have hne : (name != "referer".toUTF8.toList) = true := bne_iff_ne.mpr h
+  unfold ordinaryHeaderOk
+  rw [hne]
+  simp
 
 def cleanTransportText (bytes : List UInt8) : Bool :=
   (String.fromUTF8? bytes.toByteArray).isSome &&
@@ -225,7 +263,7 @@ def requestSafeFor (streamedOpen : Bool) (request : ApplicationDispatchCodec.Req
     cleanTransportText request.path && cleanTransportText request.query &&
     request.headers.all (fun header =>
       !header.generated &&
-      (ordinaryHeaderName header.name ||
+      (ordinaryHeaderOk header.name header.value ||
         (streamed request && header.name == webSocketProtocolHeader) ||
         (davMethod request.method &&
           Effects.Revival.HostedDav.headerAllowed request.method header.name header.value)) &&
@@ -279,7 +317,7 @@ the same Boolean with the DAV disjuncts erased. -/
 theorem dav_header_needs_dav_method (open_ : Bool) (request : ApplicationDispatchCodec.Request)
     (hdav : davMethod request.method = false)
     (header : ApplicationDispatchCodec.Header) (mem : header ∈ request.headers)
-    (hname : ordinaryHeaderName header.name = false)
+    (hname : ordinaryHeaderOk header.name header.value = false)
     (hproto : streamed request = false ∨ header.name ≠ webSocketProtocolHeader) :
     requestSafeFor open_ request = false := by
   simp only [requestSafeFor, hdav, Bool.false_and, Bool.or_false]

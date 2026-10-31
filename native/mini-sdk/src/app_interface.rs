@@ -663,6 +663,13 @@ impl Declaration {
             {
                 return Err(refuse("app-cookie-reserved"));
             }
+            if lower == "referer" {
+                // Reduced before signing: a same-origin path passes, any other value is dropped.
+                if let Some(path) = crate::host_operations::same_origin_referer(s, None) {
+                    ordered_headers.push((k.clone(), path));
+                }
+                continue;
+            }
             ordered_headers.push((k.clone(), s.into()));
         }
         let q = resolve(b.get("query").unwrap_or(&empty), args, context, results)?;
