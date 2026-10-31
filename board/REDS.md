@@ -12,7 +12,7 @@ green: `83e926874e38` (batch 4; this round's builder had no origin/green and pri
 | gate:j14-apps | j14-apps FAIL | not rerun | yes | rc=1; /ci/j-997905/journey.log |
 | gate:composed | composed FAIL | not rerun | yes | rooms=pass; churn=pass; documents=pass; apps=pass; connector=pass; residents=fail: residents: REFUSED prepoll-filler-070 refused with status 3; retained 00194-prepoll-; restart=blocked: prerequisite residents has not passed; store-restart=fail: store-restart:world: mini-health: unhealthy — remaini |
 
-Suspect commits since `c849687da03b`, the tip~20 (`git log c849687da03b..997905c0bc9c`; the next round counts from green), newest first; owners are the seats whose
+Suspect commits, newest first. This round listed `c849687da03b..997905c0bc9c` (the tip~20, from the green-fetch bug); green is `83e926874e38` (batch 4), and the next round counts from it; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
 - `997905c0` docs: INTEGRATOR-STATE.md: D2 fixed on staging, resubmit finding
