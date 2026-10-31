@@ -7,12 +7,16 @@ payload is `Payload.append`: the target's patch is one guarded write of the
 head's one address (`append_footprint`) and the record is one fresh entry cell
 at `entryCellId target (count + 1)` (`append_entry_at_next`,
 `DeclaredResourceController.entryWrites`); neither reads or rewrites an earlier
-entry.  The plan binds the head's own root and the author's authority footprint
-(wave-c's `Theory.PlanBinding`); it reads nothing room-wide, so K authors
-writing K streams never stale each other (`append_admits_disjoint_authors`),
-while two appends planned from one read of ONE stream serialise: the second is
-refused `staleTarget` (`append_same_stream_serialises`), and at the head its
-write is no longer enabled (`StreamCell.same_head_refused`).  A fleet topic's
+entry.  The append is computed at the head cell it meets: its planned root is not
+read (`append_planned_root_irrelevant`), so appends to ONE stream commute too. Each
+lands at the head its admission meets (`append_entry_at_next`), and two appends
+planned from one read of the stream both land, in admission order (2026-10-31: 16
+parallel `say`s by one member admitted 2; the pin was the only conflict). The head's
+own write stays guarded at the value admission read (`StreamCell.same_head_refused`),
+so the Host's commit serialises them; replay stays the operation marker's nullifier.
+The plan binds the author's authority footprint (`Theory.PlanBinding`) and reads
+nothing room-wide, so K authors writing K streams never stale each other either
+(`append_admits_disjoint_authors`).  A fleet topic's
 head is not a room stream: an `append` target naming one is refused
 `wrongRole` (`room_append_refuses_topic_head`).
 
@@ -108,7 +112,6 @@ theorem room_append_refuses_topic_head (kind : ResourceKind) (id : Nat) (capabil
     {audienceEpoch : Option Nat} {audienceRoster : Option ObjectAudienceRoster.Roster}
     (pre : TargetCell ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩)
     (object : kind = .object) (current : version = StreamCell.commandVersion)
-    (unmoved : root = pre.root)
     (topicOk : request.topic.length ≤ StreamCell.maxTopicBytes)
     (payloadOk : request.payload.length ≤ StreamCell.maxPayloadBytes)
     (head : StreamCell.Head) (loaded : StreamCell.headOf pre.logical = some head)
@@ -117,23 +120,22 @@ theorem room_append_refuses_topic_head (kind : ResourceKind) (id : Nat) (capabil
     computeTarget snapshot semantics ambient command
         ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩ pre = .error .wrongRole := by
   subst object current
-  simp [computeTarget, ← unmoved, topicOk, payloadOk, channel, loaded, fleet]
+  simp [computeTarget, topicOk, payloadOk, channel, loaded, fleet]
   rfl
 
-/-- **`append_same_stream_serialises`.** An append planned against a stream
-root that has since moved is refused `staleTarget`.  Two appends planned from
-one read of one stream: the first moves the root, so the second refuses (and
-`StreamCell.same_head_refused`: its head write is no longer enabled). -/
-theorem append_same_stream_serialises (kind : ResourceKind) (id : Nat) (capability : CapabilityId)
-    (version : Nat) (root : Digest) (request : StreamCell.Append) (observe : Option CapabilityId)
+/-- **`append_planned_root_irrelevant`.** An append's outcome (its post, or its named
+refusal) is the same whatever stream root its plan observed: the arm reads the cell it
+meets, never the planned root. Two appends planned from one read of one stream both
+compute at the head each admission meets. -/
+theorem append_planned_root_irrelevant (kind : ResourceKind) (id : Nat)
+    (capability : CapabilityId) (version : Nat) (root root' : Digest) (request : StreamCell.Append)
+    (observe : Option CapabilityId)
     {audienceEpoch : Option Nat} {audienceRoster : Option ObjectAudienceRoster.Roster}
-    (pre : TargetCell ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩)
-    (object : kind = .object) (current : version = StreamCell.commandVersion)
-    (moved : root ≠ pre.root) :
+    (pre : TargetCell ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩) :
     computeTarget snapshot semantics ambient command
-        ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩ pre = .error .staleTarget := by
-  subst object current
-  simp [computeTarget, moved]
+        ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩ pre =
+      computeTarget snapshot semantics ambient command
+        ⟨kind, id, capability, version, root', .append request, observe, audienceEpoch, audienceRoster⟩ pre :=
   rfl
 
 /-- One target's computed outcome at a directory: load its own cell, select
@@ -207,8 +209,8 @@ info: 'Minidregg.Kernel.StreamResource.authorLaw_refuses_other_writer' depends o
 #guard_msgs (whitespace := lax) in #print axioms append_entry_at_next
 /-- info: 'Minidregg.Kernel.StreamResource.room_append_refuses_topic_head' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms room_append_refuses_topic_head
-/-- info: 'Minidregg.Kernel.StreamResource.append_same_stream_serialises' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms append_same_stream_serialises
+/-- info: 'Minidregg.Kernel.StreamResource.append_planned_root_irrelevant' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms append_planned_root_irrelevant
 /-- info: 'Minidregg.Kernel.StreamResource.prepareTarget_outcome' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms prepareTarget_outcome
 /-- info: 'Minidregg.Kernel.StreamResource.append_admits_disjoint_authors' depends on axioms: [propext, Classical.choice, Quot.sound] -/

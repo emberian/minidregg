@@ -822,7 +822,9 @@ def computeTarget (snapshot : AuthoritySnapshot)
     | append request => exact do
         if kind != .object then throw .wrongRole
         if version != StreamCell.commandVersion then throw .unsupportedVersion
-        if root != pre.root then throw .staleTarget
+        -- An append is computed at the stream cell it meets: it pins no root. Its entry goes
+        -- at that cell's head, its channel is admitted at that cell (`DomainEpoch.admitAppend`),
+        -- and nothing in the signed request names the head (`Kernel.StreamCommutingAppend`).
         if !decide (request.topic.length ≤ StreamCell.maxTopicBytes) then throw .streamTopic
         if !decide (request.payload.length ≤ StreamCell.maxPayloadBytes) then throw .streamPayload
         match DomainEpoch.admitAppend pre.logical command.subject request with
