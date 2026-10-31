@@ -268,6 +268,29 @@ instance (left right : Entry L) : Decidable (AddressLT W left right) :=
   decidable_of_iff (FiniteDependentMapCachedOrdering.lexLt (addressKey W left.1) (addressKey W right.1) = true)
     (FiniteDependentMapCachedOrdering.lexLt_iff _ _)
 
+/-- Strict byte order along `items` after an entry whose address key is `previous`; each
+address is encoded once, and the walk stops at the first pair out of order. -/
+def chainAfter (previous : List Nat) : List (Entry L) → Bool
+  | [] => true
+  | entry :: rest =>
+      let key := addressKey W entry.1
+      FiniteDependentMapCachedOrdering.lexLt previous key && chainAfter key rest
+
+theorem chainAfter_iff (first : Entry L) (rest : List (Entry L)) :
+    chainAfter W (addressKey W first.1) rest = true ↔ List.IsChain (AddressLT W) (first :: rest) := by
+  induction rest generalizing first with
+  | nil => simp [chainAfter]
+  | cons next rest ih =>
+      rw [chainAfter, Bool.and_eq_true, FiniteDependentMapCachedOrdering.lexLt_iff, ih,
+        List.isChain_cons_cons]
+      rfl
+
+/-- The payload's order check (`chainAfter_iff`); the generic chain instance encodes both
+addresses of every adjacent pair. -/
+instance (priority := high) isChainDecidable : DecidablePred (List.IsChain (AddressLT W))
+  | [] => isTrue List.IsChain.nil
+  | first :: rest => decidable_of_iff _ (chainAfter_iff W first rest)
+
 end Wire
 
 /-! ## Sorted support and reconstruction -/
