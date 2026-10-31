@@ -487,10 +487,15 @@ pub fn serve_resident(dir: &Path, executable: PathBuf, settings: PathBuf, idle: 
 ///
 /// A resident keeps its warm state: with `idle` None (every member's resident) it never idles
 /// out, so a member who comes back after an hour pays no provider start and no Store admission
-/// from the retained anchor. It ends when its child ends, when its world is torn down (its
-/// settings file removed, its socket unlinked or replaced), or when its binding is superseded:
-/// the executable at its path (a `candidate/current` repointed by a ship) or the settings bytes
-/// changed, so no client can select this binding again. `Some(idle)` adds the idle exit.
+/// from the retained anchor. It ends when its child ends, when its socket is unlinked or replaced
+/// (its directory removed with its world), or when its binding is superseded: another file at its
+/// executable path (a `candidate/current` repointed by a ship) or other bytes at its settings path,
+/// so no client can select this binding again. `Some(idle)` adds the idle exit.
+///
+/// Every client whose executable and settings bytes agree computes the same binding, so a box that
+/// gives its hosted members one resident directory (`MINI_CONSENT_ANCHOR_DIR`; they run as one
+/// account and their settings are the box's pinned config) runs ONE consent provider and ONE codec
+/// Host for all of them.
 pub fn serve_resident_kind(kind: ResidentKind, dir: &Path, executable: PathBuf, settings: PathBuf, idle: Option<std::time::Duration>) -> Result<()> {
     use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
     use std::os::unix::io::AsRawFd;
@@ -509,6 +514,7 @@ pub fn serve_resident_kind(kind: ResidentKind, dir: &Path, executable: PathBuf, 
     let (socket, _socket_directory) = resident_socket(kind, dir, &binding)?;
     crate::private::clear_stale_socket(&socket)?;
     let executable_path = executable.clone();
+    let executable_started = fs::metadata(&executable_path).map_err(|e| format!("{}: {e}", executable_path.display()))?;
     let session = kind.start(dir, executable, &settings, settings_bytes)?;
     let listener = std::os::unix::net::UnixListener::bind(&socket)
         .map_err(|e| format!("{} socket {}: {e}", kind.name(), socket.display()))?;
@@ -542,13 +548,13 @@ pub fn serve_resident_kind(kind: ResidentKind, dir: &Path, executable: PathBuf, 
                 if active.load(Ordering::Acquire) == 0 && idle.is_some_and(|idle| quiet > idle) {
                     return Ok(());
                 }
-                // Its world torn down (the settings file it was started for removed), its socket unlinked or
-                // replaced, or its binding superseded (another executable at its path, other settings bytes):
+                // Its world torn down (its directory and socket removed), its socket unlinked or replaced, or
+                // its binding superseded (another executable at its path, other bytes at its settings path):
                 // no client can bind it or reach it again, so it ends now.
                 if looked.elapsed() >= std::time::Duration::from_secs(1) {
                     looked = std::time::Instant::now();
-                    if !socket_is(&socket, _files.identity) || fs::symlink_metadata(&settings).is_err()
-                        || active.load(Ordering::Acquire) == 0 && superseded(&executable_path, &settings, &binding)
+                    if !socket_is(&socket, _files.identity)
+                        || active.load(Ordering::Acquire) == 0 && superseded(&executable_path, &executable_started, &settings, &binding)
                     {
                         return Ok(());
                     }
@@ -563,12 +569,21 @@ pub fn serve_resident_kind(kind: ResidentKind, dir: &Path, executable: PathBuf, 
     }
 }
 
-/// The binding a client would compute now for this executable path and settings file differs
-/// from the one this resident serves (or cannot be computed: the file is gone).
-fn superseded(executable: &Path, settings: &Path, serving: &[u8; 32]) -> bool {
-    match settings_bytes(settings).and_then(|bytes| binding(executable, &bytes)) {
-        Ok(current) => &current != serving,
-        Err(_) => true,
+/// The binding a client would compute now differs from the one this resident serves: another
+/// file at its executable path (a ship repointing `candidate/current`, or the file removed), or
+/// other bytes at the settings path it was started with. A settings path that no longer exists
+/// supersedes nothing: residents shared by a box's members are often started from an attempt's
+/// copy of the settings, and retiring that attempt leaves every client's binding as it was.
+fn superseded(executable: &Path, started: &std::fs::Metadata, settings: &Path, serving: &[u8; 32]) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let identity = |m: &std::fs::Metadata| (m.dev(), m.ino(), m.size(), m.mtime(), m.mtime_nsec(), m.ctime(), m.ctime_nsec());
+    match fs::metadata(executable) {
+        Ok(now) if identity(&now) == identity(started) => {}
+        _ => return true,
+    }
+    match fs::symlink_metadata(settings) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => false,
+        _ => settings_bytes(settings).and_then(|bytes| binding(executable, &bytes)).map_or(true, |now| &now != serving),
     }
 }
 
