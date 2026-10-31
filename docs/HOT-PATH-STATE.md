@@ -242,17 +242,39 @@ restart, `story new`, the first walk-family request after a restart.
 
 ## Next (successor: start here)
 
-1. **Flatness submit**: project only the slots the law reads (above). Needs a `Pred` read-set
-   frame theorem (eval, `inputsInRange`, the circuit witness); then `bytesSlots` of the whole
-   cell disappears from every projection that does not name `resource/bytes/*`.
-2. **Row 4 slice 2 and row 11, one format change** (one epoch bump with private cells'
-   private-cell root, agreed; theirs is not imminent): the checkpoint carries the session
-   indexes and the certificates that read state at their height (issues, reserves, releases,
-   grants), so a Store with dispatch history also starts at its checkpoint, and the open stops
-   reading the whole log.
-3. Rows 3, 8, 16, 17, 19, 20; flatness-get on 35737eac4 failed before measuring (empty
-   get.log; its world logs were removed with the gate root), so rerun
-   `scripts/perf/flatness-route.sh` on the next candidate in a kept root.
+1. **Flatness submit: the demand-driven projection.** The statement is landed:
+   `Pred/Frame.lean` has `Pred.reads`, `State.restrict`, `eval_restrict` (the verdict on
+   the law's slots is the verdict), `eval_restrict_of_sub`, and `restrict_needs_reads`
+   (teeth). What follows, at the one seam (`CanonicalPolicyAdmission.PolicyStepContext`):
+   - A projection carries both forms: `full : Store L → State`, plus `demand : List Slot →
+     Store L → State` with `demand keys s = (full s).restrict keys`. Contexts are built with
+     `demand law.predicate.reads`, and theorems about the context recover their
+     `project`-stated forms through `eval_restrict`. Before changing `ofCandidate`/
+     `ofPreparedTuple`, also state the same frame for `PredCompile.inputsInRange`, and for
+     the circuit assignment if the compiled verdict reads the state (`ComposedPolicyAdmission`
+     relates the compiled verdict to `Pred.eval` under `rangesExact`).
+   - The builders, compositional. `restrict` distributes over `++` (`List.filter_append`).
+     `bytesSlotsFor keys stem bytes` parses the demanded `stem/<i>` names and reads those
+     bytes, and is proved equal to `(bytesSlots stem 0 bytes).restrict keys` (canonical
+     `toString` round trip; `filter` keeps index order). `jointSlots` strips its
+     `joint/target/{id}/` and `joint/index/{i}/` prefixes the same way. The `content/*`
+     summaries in `ContentResource.project` become demanded entries, so an unread summary is
+     never computed.
+   - In the same pass: `support.card`, `elementCount`, `contentPayloadBytes` and `changedIn`
+     through `FiniteDependentMapCachedOrdering.supportCached` (`supportCached_eq`, sort-based)
+     instead of `Multiset.dedup`, by `@[csimp]` lemmas so that no statement moves. Then the
+     observation path's projection (`ResourceObservationAdmission.projectWith`) gets the same
+     `demand`.
+   - Measure with `scripts/perf/flatness-bench.py` and profile with `perf record --call-graph
+     dwarf` plus `--symfs` (the Host runs from a memfd; see `/ci/hpc/fby/run.sh`).
+2. **Row 4 slice 2 and row 11, one format change** (one epoch bump with private cells,
+   a507e11e0d0ca4a6a, together with their private-cell root; agreed, and theirs is not
+   imminent): the checkpoint carries the session indexes and the certificates that read the
+   state at their height (issues, reserves, releases, grants). A Store with dispatch history
+   then also starts at its checkpoint, and the open stops reading the whole log.
+3. Rows 3, 8, 16, 17, 19, 20. Measurements on the batch-2 candidate: a fresh member's first
+   read, a fresh provider at two heights, restart, `story new`, and the first walk-family
+   request after a restart. flatness-get waits on app-reds' resident `/var` fix.
 
 ## Remaining accumulated-size costs (source inventory)
 
