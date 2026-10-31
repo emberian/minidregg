@@ -34,6 +34,9 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   + branch-reconcile a6ae854de00e3e12e batch 1 (43dd641f7: share-issue window statement elaborated in scratch/ + AUDIT
   31st pass; ROUTE-LATENCY-STATE rewrite; Kernel/FnConsumerFrontier{Proofs,Scenario}.lean rescued and imported in
   Kernel.lean, so batch 10's whole-tree build covers the umbrella; docs/BRANCH-RECONCILE.md verdict table).
+  + exorcist 5dcd02eef (56d65ae3c: mini_sdk::attempt::Attempt, signed reads keep files in memory; cross-crate refactor of
+  flow/CliHost/query_retained/signed_view/client_consent; warm doc show openat 53 -> 16, writes 30 -> 4, CPU -10..25%).
+  If a batch 10 row reds: first look for a refusal record or attempt file missing from a read's directory.
 - **Batch 8 dc61016cb: gate15 FAIL**: enrol PASS, tour 73/73; j14 = H1b; composed (-c2 after my port collision):
   rooms/churn/apps/connector PASS, documents FAIL (D2), residents R1; flatness get FAIL then PASS on -c2 (load). Lesson:
   a KEEP_WORLD composed world holds port 22640; take it down before the next composed gate.
@@ -193,6 +196,7 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 
 ## Reports sent (do not resend)
 
+- 10-31 14:10: exorcist 5dcd02eef merged (batch 10).
 - 10-31 14:05: branch-reconcile: batch 1 43dd641f7 merged.
 - 10-31 14:00: perf-client 042f2a0c1 merged (batch 10).
 - 10-31 13:55: perf-client d035d8250 merged (batch 10).
