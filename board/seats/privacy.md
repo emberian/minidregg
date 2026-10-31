@@ -51,17 +51,29 @@ lowering into Air only where useful, never as a second compiler for the opening.
    (above). A bounded-length variant only if a private hash input turns out variable (none does now).
 2. Done: the custody size contract (cf368e4fb). Owed at epoch (b): blinded kinds' blinding space as bytes with
    `framedDecode`, and the receiver's setting moved to it.
-3. The opening system per public shape (capacities per prefix; private stopping depth, occupancy and node tags):
-   node hash inputs are variant-sized (empty 1 byte, branch 65, leaf 98), so private variants need selection or
-   bounded-length hashing; the public view's content digests may be verifier preprocessing if their binding to
-   the encoded view is proved. `Witness.reveals` is a function: serialize the selected prefixes and prove
-   reconstruction preserves `OpeningRel`. Sound and complete against `OpeningRel` through the codec.
-4. The ZKBoo seam (round 17 item 3): an evaluator derived from the emitted SSA whose outputs are the residuals,
-   every zero check preserved; deterministic gate evaluation, uniqueness only for retained outputs after CSE.
-   `OracleGame.System` picks circuits by statement bit length: shape-indexed instances or one padded circuit.
-5. The backend: MPC-in-the-head over that circuit as an OracleGame `System` (straight-line extraction from the
-   logged commitment preimages, one stateful simulator).
-6. The receiver adapter (round 15 items 7, 8), then `zk` of `hiding_of_hybrids`; epoch (b).
+3. The opening system per public shape, as an Air system over bits (backend-independent). Astra round 18 checklist:
+   `0 ≤ d ≤ |p|` with the stop depth private (a public stop depth leaks hidden occupancy); occupancy and the
+   early terminal's membership under `p.take d` and its filtered answer under `p`; full-depth distinct paths and
+   exact binding to the public view (whose class subtree root the verifier computes natively); selection among
+   the constant empty digest, a leaf hash and the public subtree root without exposing the variant; canonical
+   packing of the 516-bit path; the outer hash over its public frame (one or more permutations by alignment).
+   Serialize the selected reveals and prove reconstruction preserves `OpeningRel`. Cost: a field-scoped prefix pads
+   to `|p| = 260` node hashes, about 10M AND. Root-preserving savings first: `.code` and `.annotations` reader
+   prefixes reduced to their 3-bit family (prove the scope equivalence), redundant prefixes normalized, one
+   multiproof climb for shared ancestors.
+4. The backend (decided, round 18): a SUCCINCT zero-knowledge argument, not MPC-in-the-head. ZKBoo/KKW stay a
+   reference backend only (proof size linear in AND: hundreds of MB here). The repo's committed/FRI/sumcheck stack
+   is not yet a private argument (`CommittedTerminalFiatShamir` hashes the full word into the statement, `W = Unit`),
+   and it is odd-characteristic: the Air system over `ZMod 2` needs a proved Boolean lowering (bitness, AND `xy`, XOR
+   `x + y - 2xy`) or a binary-field protocol. Needed: a hiding polynomial commitment, ZK sumcheck, authenticated
+   queries, terminal linkage, composed straight-line extraction and a bounded simulator, instantiated in
+   `Theory/OracleGame.lean`'s contract with full domain separation and one shared oracle. This is cross-layer:
+   coordinate with the committed-terminal stack's owner before building.
+5. The receiver adapter (round 15 items 7, 8), then `zk` of `hiding_of_hybrids`; epoch (b) (blinded kinds' blinding
+   space as bytes with `framedDecode`).
+6. Path compression (optional, round 18 item 1): Patricia nodes over full-width hashed parameters keep collision
+   resistance and lower typical depth, but a public cap needs completeness under adversarial insertions and
+   changes roots (a new root-format version, never a reinterpretation of NODE/v2).
 7. The binding reduction for the private root (equal roots → equal stores ∨ a named collision).
 8. FORMAT (a)'s timing: member-side (ab7b4fe7fb687e0ca) measures the authority cell. Baseline b9450147f:
    doc-log write ~2.0 s at 13 prior entries, ~4.0 s at 103, ~6.1 s at 303; delegate ~2.5 s at 13, ~4.1 s at 303.
