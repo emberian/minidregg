@@ -107,6 +107,33 @@ per page on batch 7 (hot-path's submit-path fixes). The captures are `hbox:/ci/p
 `/ci/pa-prof6b` (driver `prof.sh`). Ember ruled on the GET read-path contract; hot-path owns it,
 statement first, with group commit for concurrent dispatches.
 
+## Create to first page (featured-qualify EtherCalc, batch 8 `dc61016cb`): where the 26 s goes
+
+From the process tree (bpftrace) and the install journal's file times, on a quiet moment (load about 12):
+
+| step | seconds | owner |
+|---|---|---|
+| member's application birth (`mini submit`) | 1.1 | hot-path (Host turn) |
+| `spk-host grain install`, of which: | 12.4 to 14.5 | |
+| . stage and copy the package | 0.1 | |
+| . qualification: the first full SPK verify (xz, SHA-512, ed25519) | 2.4 | spk-host (needed once) |
+| . qualification steps: 5 one-shot Host helper processes, the 180 MB Host image hashed before and after each | 2.7 | **batch 3: 1.4** |
+| . placement | 0.9 | |
+| . INSTALL prepare: a second full verify of the same staged file in the same process | 1.9 | **batch 3: 0.01** |
+| . op66, the BEGIN plan | 3.3 (5.4 to 6.3 under load 27) | hot-path (d7c55dfa0, Held directory, batch 9) |
+| . claim | 0.2 | |
+| . broker ingest: materialize parses the SPK again and extracts it | 1.9 | spk-host (the second first-parse; next) |
+| . completion | about 0.8 | |
+| `spk-host grain route` (session birth, ticket, share issue) | 4.5 | Host turns plus `mini` processes in the journey harness |
+| `spk-host grain start` | 2.3 | resident START (BEGIN, claim, completion) |
+| `mini session-enrollment-plan` and enrolment | 4.1 | Host turns |
+| the page | 0.2 | |
+
+The dominant single term is op66 (hot-path's). Batch 3 takes the two install terms that were spk-host
+redoing work in hand (about 4 s of CPU). Back to back under load 27 the wall time did not show it (op66
+and materialize swung by 1 to 2 s each), but the phases did: qualification steps 3.0 s to 1.4 s, the
+prepare verify 2.5 s to 0.013 s.
+
 ## Batch 2: before and after (EtherCalc, batch 5 + 40efdcff9 + batch 1, hbox)
 
 | measure | before (batch 1) | after |
