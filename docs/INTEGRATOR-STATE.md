@@ -54,7 +54,8 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   (35% at 500: WorldTrack.advance / deltaOf decode of the Host's own post). hot-path takes refresh before op66 (law 17),
   with retained-mode.
   + perf-apps 4315513a7 (66ccd307a: launch qualification's six steps share one storeless codec child; Host processes
-  6 -> 1, steps 1.63 -> 0.69 s; detached-verb fallback = a twin path, asked to delete or justify after batch 9).
+  6 -> 1, steps 1.63 -> 0.69 s; fallback twin DELETED by b59364ba5/a66d51f15: a lost child, out-of-turn answer or oversize input refuses the step
+  by name; -91 lines).
   + perf-apps 106b73251 (spk-host: one SPK verification per file per process, prepare 2.5 -> 0.013 s; Host pin per
   inode, qualification 3.0 -> 1.4 s; create-to-page profile: op66 3.3-6.3 s largest, sent to hot-path).
   + perf-client 36612f028/6a088183f (Store open's represents decision linear via hash sets, @[csimp]
@@ -128,7 +129,8 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 - **P1, mini panics on a closed stdout** (explorer, world-up once `mode=closed … has no mini shell`; 0/40 reruns):
   `mini --help | grep -q` under pipefail; mini exit 101. Owners: perf-client a778bbda6509944a5 (quiet exit on EPIPE,
   FIXED for resource-client by af0dcfb18 (own print! macros; a closed stdout ends the command 141, residents keep
-  serving; rides batch 9); other client binaries owed via one shared crate), infra (FIXED dregg-infra fbb7648: render-authorized-keys.sh and ship.sh read usage into a
+  serving; rides batch 9); other client binaries: DONE by lane/perf-client-streams 096c881e5, one crate native/mini-streams for every client
+  binary, resource-client's streams.rs deleted; batch 9), infra (FIXED dregg-infra fbb7648: render-authorized-keys.sh and ship.sh read usage into a
   variable; syntax-checked only). Move gate15's EDGE_REV default to e29997d (contains fbb7648, and installs the
   candidate's mini-line wrapper; extracted at $I/dregg-infra-e29997d) after batch 8's gate and dc61016cb-codec -hp1 exit
   (never mid-gate), before batch 9 gates.
@@ -153,6 +155,7 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 
 ## Reports sent (do not resend)
 
+- 10-31 13:15: perf-client 096c881e5 merged; perf-apps b59364ba5 merged into batch 9.
 - 10-31 13:05: perf-apps a70a7655df79c4335: 4315513a7 merged; fallback twin note.
 - 10-31 12:55: C1 a9e738baf merged; auditor round requested; hot-path: refresh first; explorer: rerun on batch 9.
 - 10-31 12:45: perf-client: af0dcfb18 merged; shared crate for the other binaries.
