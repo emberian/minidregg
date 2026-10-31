@@ -9,7 +9,7 @@ retired-agent hook names the live integrator to anyone who messages the old id).
 integrator; the integrator merges onto `integration/staging`, cuts batch candidates on hbox, gates them, moves main to
 gated candidates and names candidates to infra and the explorer.
 
-## Now (2026-10-31 08:10 EDT)
+## Now (2026-10-31 08:35 EDT)
 
 - **main = 83e926874** = gated batch 4 b9450147f merged with main 7978ddfdd.
 - **Batch 4 b9450147f: GATE GREEN, the rehearsal-3 candidate.** hbox tour 73/73, enrol, composed; forge composed c-b945-d1
@@ -19,13 +19,15 @@ gated candidates and names candidates to infra and the explorer.
   merged. Flatness: submit_cpu 106 -> 380 (3.6x), propose_cpu 4.05x; walls and get PASS.
 - **Batch 5 1c151fce4: READY 07:52** (host stage 1,005 s, the lake-threads fix's first measured cut; consent 150 s, rust
   191 s). Contents: exorcism 4f7972a62 (no fsync anywhere), module-cost, hot-path authority snapshot 4fb1a0e17, app-reds
-  route/teardown/ACL, batch 4 fixtures. **gate15 running** (PID in gate-1c15.pid; started 07:53 under the home lock path,
-  so its remaining world-ups are not serialised against lanes): enrol PASS, tour 73/73 PASS; hbox composed residents
-  UNKNOWN (forge composed decides); j14-apps FAIL: "Hermes sent no reply to the ask: refused" (/ci/j-1c151f/journey.log).
-  Waiter armed on `GATE 1c151fce verdict`.
-  Known for it: perf-apps saw a START crash loop ("attestation resource outside supported profile", 20-digit member-
-  namespace resource ids): fixed 40efdcff9 (staging 4ab22bf78). If j14/apps go red on that, overlay the spk-host crate
-  from 4ab22bf78 onto 1c151fce4 (lane-build.sh overlay) and rerun j14 + composed with gate15.
+  route/teardown/ACL, batch 4 fixtures. **gate15 running** (PID 2738976 in gate-1c15.pid; started 07:53 under the home
+  lock path, so its remaining world-ups are not serialised against lanes): enrol PASS, tour 73/73 PASS; hbox composed
+  residents UNKNOWN (forge composed decides); j14-apps FAIL: the room-refusal ask got no Hermes reply ("Hermes sent no
+  reply to the ask: refused", /ci/j-1c151f/journey.log). Suspected cause: perf-apps' START crash loop ("attestation
+  resource outside supported profile", 20-digit member-namespace resource ids), fixed 40efdcff9.
+  **Next, armed** (hbox `$I/hp-resid.sh`, Mac waiter bji00dcor): when gate15 exits, gate15 runs on overlay
+  **1c151fce4-resid** (batch 5 + the spk-host crate from 40efdcff9) with PHASES="j14 composed", HARNESS=staging tip,
+  SUF=-hp1 (PID in gate-1c15-resid-hp1.pid, log logs/gate-1c15-resid-hp1.log). If j14 is still red there, the
+  journey's step dir names the cause; route it to app-reds. Then ask infra for forge composed on the green one.
 - **Batch 6 (staging 1e339d769+)**: the resource-id fix, exorcism 16f2d046f (reverts the commitment-seen cache) and whatever lands. Cut it when batch 5's gate and umbrella are
   in and enough has accumulated (minimal-checks ruling: cuts spaced out to accumulate perf work).
 - **FORMAT batch (later, one genesis, after iter-speed's seam 1)**: hot-path row 11 (checkpoint carries session indexes;
@@ -112,8 +114,8 @@ Every Lean-statement sha gets an audit round from a4d9a6f4cba4855ca before it ri
 | a4cb65af3 | GATE GREEN (batch 3); main's base; fallback ship |
 | eca98bde7-resvar2(-zai) | overlays of batch 2 with the resident /var fix (and Z.AI); forge demo build |
 | b9450147f | GATE GREEN (batch 4, with deploy hotpatch 9fdef19bd): rehearsal-3 candidate; main's base |
-| 1c151fce4 | READY (batch 5); gate13 running |
-| 1c151fce4-resid | overlay: batch 5 + spk-host crate from 40efdcff9 (resource id any non-zero u64), for perf-apps' START loop |
+| 1c151fce4 | READY (batch 5); gate15 running, j14 red |
+| 1c151fce4-resid | overlay: batch 5 + spk-host crate from 40efdcff9 (resource id any non-zero u64); gate15 -hp1 queued after batch 5's gate |
 
 ## Open reds and owners
 
