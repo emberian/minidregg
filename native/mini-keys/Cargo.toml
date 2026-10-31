@@ -23,6 +23,7 @@ default = ["server"]
 server = ["dep:serde"]
 
 [dependencies]
+minidregg-mini-streams = { path = "../mini-streams" }
 libc = "=0.2.189"
 serde_json = { version = "=1.0.151", features = ["arbitrary_precision"] }
 ring = "=0.17.14"

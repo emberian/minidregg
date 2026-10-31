@@ -28,6 +28,10 @@
 //! the credential parsers in [`credentials`] (the sealed store itself needs
 //! `server`).
 
+// print!/println!/eprint!/eprintln!: a closed standard output ends the command with 141, never a
+// panic (`mini_streams`).
+#[macro_use]
+extern crate mini_streams;
 pub mod client;
 pub mod credentials;
 pub mod peer;

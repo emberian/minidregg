@@ -114,14 +114,14 @@ fn ended(args: impl FnOnce() -> crate::Result<crate::Args>, sink: Option<(File, 
         // A closed standard output ends this command (status 141, nothing more printed), never
         // the process serving it (`streams`).
         let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| args().and_then(crate::run)));
-        let closed = matches!(&caught, Err(payload) if crate::streams::is_closed(&**payload));
+        let closed = matches!(&caught, Err(payload) if mini_streams::is_closed(&**payload));
         let parsed = caught.unwrap_or_else(|_| Err("the client panicked; see the message above".into()));
         let status = crate::swap_exit_status(outer);
         let _ = crate::take_line_refusal();
         if closed {
             let _ = crate::take_command_ending();
             let _ = crate::take_host_decision();
-            return crate::MainEnding { code: crate::streams::CLOSED, stdout: String::new(), stderr: String::new() };
+            return crate::MainEnding { code: mini_streams::CLOSED, stdout: String::new(), stderr: String::new() };
         }
         crate::main_ending(parsed, status)
     })?;
@@ -129,7 +129,7 @@ fn ended(args: impl FnOnce() -> crate::Result<crate::Args>, sink: Option<(File, 
     if named {
         let broken = |error: &std::io::Error| error.kind() == std::io::ErrorKind::BrokenPipe;
         match out.write_all(ending.stdout.as_bytes()) {
-            Err(error) if broken(&error) => return Ok((crate::streams::CLOSED, Vec::new(), Vec::new())),
+            Err(error) if broken(&error) => return Ok((mini_streams::CLOSED, Vec::new(), Vec::new())),
             other => other?,
         }
         match err.write_all(ending.stderr.as_bytes()) {
@@ -271,7 +271,7 @@ mod tests {
         drop(read);
         let raw = vec![OsString::from("--help")];
         let (code, _, _) = argv(raw, Some((write, anonymous().unwrap()))).unwrap();
-        assert_eq!(code, crate::streams::CLOSED);
+        assert_eq!(code, mini_streams::CLOSED);
         // Printed output (not the ending) on a closed stdout unwinds to the same end.
         let mut ends = [0i32; 2];
         assert_eq!(unsafe { libc::pipe(ends.as_mut_ptr()) }, 0);
@@ -279,7 +279,7 @@ mod tests {
         drop(read);
         let (_, write, _) = streams_into(write, anonymous().unwrap(), || {
             let caught = std::panic::catch_unwind(|| println!("to nobody"));
-            assert!(matches!(&caught, Err(payload) if crate::streams::is_closed(&**payload)));
+            assert!(matches!(&caught, Err(payload) if mini_streams::is_closed(&**payload)));
         }).unwrap();
         drop(write);
     }

@@ -15,6 +15,7 @@ name = "grain-provider-bridge"
 path = "src/provider_bridge.rs"
 
 [dependencies]
+minidregg-mini-streams = { path = "../mini-streams" }
 libc = "=0.2.189"
 # The one wire: Host operation bytes and reply markers (mini_sdk::host_operations, generated from Lean).
 mini-sdk = { package = "minidregg-mini-sdk", path = "../mini-sdk", features = ["native"] }

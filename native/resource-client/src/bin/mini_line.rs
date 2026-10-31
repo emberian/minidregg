@@ -25,11 +25,9 @@
 //! share one. Anything that keeps a resident from being used execs `mini shell ... --call-slots
 //! DIR --line LINE`, which takes the slot itself. An interactive login prints the motd and the
 //! re-genesis notice beside this program, then execs `mini shell`.
-// A closed standard error drops the message instead of panicking (`streams`, shared with `mini`).
-#[allow(dead_code)]
+// A closed standard error drops the message instead of panicking (`mini_streams`).
 #[macro_use]
-#[path = "../streams.rs"]
-mod streams;
+extern crate mini_streams;
 use std::ffi::{OsStr, OsString};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};

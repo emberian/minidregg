@@ -11,9 +11,9 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-// First: its print!/println!/eprint!/eprintln! shadow std's in every module below.
+// Its print!/println!/eprint!/eprintln! shadow std's in every module (`mini_streams`).
 #[macro_use]
-mod streams;
+extern crate mini_streams;
 #[cfg(unix)]
 mod app_interface;
 mod attempt_state;
@@ -3136,7 +3136,7 @@ fn run(mut args: Args) -> Result<()> {
             let config = path(args.required("config")?);
             args.finish()?;
             let output = process(&host, &config, &[OsStr::new("audit")])?;
-            streams::out()
+            mini_streams::out()
                 .write_all(&output.stdout)
                 .map_err(|e| format!("cannot print host output: {e}"))
         }
@@ -3146,7 +3146,7 @@ fn run(mut args: Args) -> Result<()> {
             let config = path(args.required("config")?);
             args.finish()?;
             let output = process(&host, &config, &[command.as_os_str()])?;
-            streams::out()
+            mini_streams::out()
                 .write_all(&output.stdout)
                 .map_err(|e| format!("cannot print host output: {e}"))
         }
@@ -3932,17 +3932,17 @@ fn main() -> ExitCode {
     // (`streams`).
     let parsed = match std::panic::catch_unwind(main_parsed) {
         Ok(parsed) => parsed,
-        Err(payload) if streams::is_closed(&*payload) => {
+        Err(payload) if mini_streams::is_closed(&*payload) => {
             read_scratch::clear();
-            return ExitCode::from(streams::CLOSED);
+            return ExitCode::from(mini_streams::CLOSED);
         }
         Err(payload) => std::panic::resume_unwind(payload),
     };
     let ending = main_ending(parsed, EXIT_STATUS.load(Ordering::Relaxed));
     read_scratch::clear();
     if let Err(payload) = std::panic::catch_unwind(|| print!("{}", ending.stdout)) {
-        if streams::is_closed(&*payload) {
-            return ExitCode::from(streams::CLOSED);
+        if mini_streams::is_closed(&*payload) {
+            return ExitCode::from(mini_streams::CLOSED);
         }
         std::panic::resume_unwind(payload);
     }

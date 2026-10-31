@@ -1,4 +1,8 @@
 //! Operator-only local publication/audit utility. Never accepts network URLs.
+// print!/println!/eprint!/eprintln!: a closed standard output ends the command with 141, never a
+// panic (`mini_streams`).
+#[macro_use]
+extern crate mini_streams;
 #[cfg(target_os = "linux")]
 fn run() -> std::io::Result<()> {
     use minidregg_spk_host::shared_data;
@@ -37,14 +41,21 @@ fn run() -> std::io::Result<()> {
 }
 
 #[cfg(target_os = "linux")]
-fn main() {
+fn run_main() {
     if let Err(error) = run() {
         eprintln!("spk-data-publish: {error}");
         std::process::exit(1);
     }
 }
 #[cfg(not(target_os = "linux"))]
-fn main() {
+fn run_main() {
     eprintln!("spk-data-publish requires Linux");
     std::process::exit(1);
+}
+
+fn main() -> std::process::ExitCode {
+    mini_streams::guard(|| {
+        run_main();
+        std::process::ExitCode::SUCCESS
+    })
 }

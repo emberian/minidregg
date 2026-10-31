@@ -19,6 +19,7 @@ integration-qualification = []
 fixture-os = ["minidregg-compatible-upgrade-custody/fixture-os"]
 
 [dependencies]
+minidregg-mini-streams = { path = "../mini-streams" }
 minidregg-compatible-upgrade-custody = { path = "../compatible-upgrade-custody" }
 libc = "=0.2.189"
 serde = { version = "=1.0.229", features = ["derive"] }

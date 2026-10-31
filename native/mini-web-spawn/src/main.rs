@@ -11,6 +11,10 @@
 //! Under systemd the socket may be inherited (`LISTEN_FDS=1`, mini-web-spawn.socket). A body or
 //! shell this helper started is stopped by the pid in the session record, and only that.
 
+// print!/println!/eprint!/eprintln!: a closed standard output ends the command with 141, never a
+// panic (`mini_streams`).
+#[macro_use]
+extern crate mini_streams;
 use std::fs;
 use std::io::{Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
@@ -59,7 +63,7 @@ const WARM_TRIES: u32 = 5;
 /// The warming request waits longer than the gateway's 120 s: it is the one meant to be slow.
 const WARM_DEADLINE: Duration = Duration::from_secs(600);
 
-fn main() {
+fn run_main() {
     if let Err(error) = run() {
         eprintln!("mini-web-spawn: {error}");
         std::process::exit(1);
@@ -539,3 +543,9 @@ fn alive(pid: u32) -> bool {
     unsafe { libc::kill(pid as i32, 0) == 0 }
 }
 
+fn main() -> std::process::ExitCode {
+    mini_streams::guard(|| {
+        run_main();
+        std::process::ExitCode::SUCCESS
+    })
+}

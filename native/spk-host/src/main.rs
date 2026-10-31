@@ -1,5 +1,9 @@
+// print!/println!/eprint!/eprintln!: a closed standard output ends the command with 141, never a
+// panic (`mini_streams`).
+#[macro_use]
+extern crate mini_streams;
 #[cfg(target_os = "linux")]
-fn main() {
+fn run_main() {
     use minidregg_spk_host::launch_descriptor_native::qualify_launch;
     use minidregg_spk_host::materialize::{
         materialize_spk_with_scratch, qualify_bridge_spk_with_profile, signed_schema_source,
@@ -313,7 +317,14 @@ fn main() {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn main() {
+fn run_main() {
     eprintln!("spk-host is Linux-only");
     std::process::exit(2);
+}
+
+fn main() -> std::process::ExitCode {
+    mini_streams::guard(|| {
+        run_main();
+        std::process::ExitCode::SUCCESS
+    })
 }

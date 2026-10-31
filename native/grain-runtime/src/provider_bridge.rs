@@ -1,5 +1,9 @@
 //! Worker-local HTTP bridge. The worker has a private network namespace and
 //! receives only a bind-mounted controller Unix socket, never provider egress.
+// print!/println!/eprint!/eprintln!: a closed standard output ends the command with 141, never a
+// panic (`mini_streams`).
+#[macro_use]
+extern crate mini_streams;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
@@ -262,7 +266,7 @@ fn run() -> Result<i32, String> {
     }
 }
 
-fn main() {
+fn run_main() {
     match run() {
         Ok(code) => std::process::exit(code),
         Err(error) => {
@@ -293,4 +297,11 @@ mod tests {
             assert!(read_message(&mut invalid, MAX_REQUEST, deadline, MessageKind::Request).is_err());
         }
     }
+}
+
+fn main() -> std::process::ExitCode {
+    mini_streams::guard(|| {
+        run_main();
+        std::process::ExitCode::SUCCESS
+    })
 }

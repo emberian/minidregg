@@ -11,6 +11,10 @@
 //!       the operator's pool key (root)
 //!   mini-keys namespace --config BROKER_CONFIG --subject N --public-key HEX
 //!       public namespace metadata for the root namespace helper; reads no key
+// print!/println!/eprint!/eprintln!: a closed standard output ends the command with 141, never a
+// panic (`mini_streams`).
+#[macro_use]
+extern crate mini_streams;
 use mini_keys::client::{Broker, CLIENT_CONFIG};
 use mini_keys::server::{self, credentials, Config};
 use mini_keys::{peer, wire};
@@ -129,7 +133,7 @@ fn read_secret(source: &str) -> String {
     secret.expose().to_owned()
 }
 
-fn main() {
+fn run_main() {
     let mut argv: Vec<String> = std::env::args().skip(1).collect();
     if argv.is_empty() {
         fail("usage: mini-keys serve|relay|hello|pool|namespace ... (see the source header)");
@@ -199,4 +203,11 @@ fn main() {
         }
         _ => fail(format!("unknown verb {verb}")),
     }
+}
+
+fn main() -> std::process::ExitCode {
+    mini_streams::guard(|| {
+        run_main();
+        std::process::ExitCode::SUCCESS
+    })
 }

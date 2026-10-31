@@ -1,5 +1,9 @@
 //! Physical controller for one Mini agent-grain task. Semantic admission is
 //! exclusively a signed call to the native Lean host through `mini`.
+// print!/println!/eprint!/eprintln!: a closed standard output ends the command with 141, never a
+// panic (`mini_streams`).
+#[macro_use]
+extern crate mini_streams;
 mod journal_io;
 mod deadline;
 #[cfg(test)]
@@ -18777,7 +18781,7 @@ fn clear_stale_control_socket(path: &Path) -> Result<()> {
     }
 }
 
-fn main() -> ExitCode {
+fn run_main() -> ExitCode {
     let args: Vec<_> = std::env::args_os().collect();
     if args.len() >= 2 && args[1] == "application-enroll" {
         if args.len() != 5 || args[2] != "stopped" {
@@ -21213,4 +21217,8 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
         );
         fs::remove_dir_all(root).unwrap();
     }
+}
+
+fn main() -> ExitCode {
+    mini_streams::guard(run_main)
 }
