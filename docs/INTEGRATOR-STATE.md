@@ -36,8 +36,8 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   wall min 17.4 -> 13.7 ms), perf-client 783b460cb + b6 + b940b3f50 (+ fb6f024a8 via exorcism), retained-mode 62aa5fcf8
   over 675a80745 + 1d4ff4efb, + 05bffae27/7f42f6445 (round-2 answers: SparseMap transport lemmas, Zero, 37 pins;
   round-3 audit SOUND: injective over the full type, 37/37 pinned, none vacuous), app-reds H1 ccdaf98b3 + faeb1ff0b (not-submitted is its own resolution at every site; 23 filtered tests
-  pass), hot-path 6d744e25f (5cb39c5fe + 05a38ff4e: law check on its own witness decides Pred.eval, csimp; audit
-  requested), perf-apps 546a551fd (docs: batch 7 vs 6, Host CPU samples 8,704 vs 13,647), boundary 48cea3caf (Theory may import Std), batch 6 fixtures. Batch 8 cut owes the
+  pass), hot-path 6d744e25f (5cb39c5fe + 05a38ff4e: law check on its own witness decides Pred.eval, csimp; audit SOUND:
+  admitOwn hard-wires law.witness, no external caller of admit with another witness), perf-apps 546a551fd (docs: batch 7 vs 6, Host CPU samples 8,704 vs 13,647), boundary 48cea3caf (Theory may import Std), batch 6 fixtures. Batch 8 cut owes the
   whole-tree build of these.
 - **Next shared-interface change: retained-mode L0** (Store as a persistent extensional tree map, ~66 files,
   WorldCompact deleted): its own cut with one whole-tree build; FORMAT rebases onto it. lane/retained-l0 is WIP
@@ -73,7 +73,8 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   CAUSE (hot-path): a gate pin, not the candidate. gate15.sh defaults EDGE_REV=4ea511d; batches 4-6 composed ran on
   dregg-infra 69c17a3. 4ea511d's jworld-scratch.sh apps-bootstrap dropped the JWORLD_MANAGEMENT=distinct branch (tasks
   born as subject 7), while workroom-ready.sh signs as subject 8 -> no-grant. Routed to infra aa72653a8ce442178
-  (restore the branch, name the rev gates pin). Gates pass EDGE_REV=69c17a3 until infra names one.
+  Infra: 4ea511d is an ANCESTOR of 69c17a3 (stale pin; main kept the branch; forge syncs main so never saw W1).
+  FIXED: gate15.sh default EDGE_REV=69c17a3 (12:15). Gates pin a sha; infra sends a newer one when wanted.
 - **R1, residents room-summon UNKNOWN** on hbox composed (every batch since 2): hbox cannot judge residents; forge
   composed does (batch 5 forge PASS). Standing, not a candidate red.
 
@@ -84,7 +85,7 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   acc7cfa03-attidx -> acc7cfa03-h1, launches gate15 PHASES="j14 composed" EDGE_REV=69c17a3 KEEP_WORLD=1 SUF=-hp2,
   PID file $I/gate-acc7-h1.pid): verdict to root, infra, explorer, perf-apps; signature + kept world /ci/j-acc7cf-hp2 to
   app-reds (reset cause, ServeBounds 10 s deadline).
-- Awaited (not owed): infra's forge composed of batch 7 and its dregg-infra rev; auditor on hot-path 05a38ff4e.
+- Awaited (not owed): infra's forge composed of batch 7.
 
 ## Reports sent (do not resend)
 
