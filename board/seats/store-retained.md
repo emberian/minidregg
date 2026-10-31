@@ -21,18 +21,30 @@ Quest: derived values maintained by delta, never recomputed per request; the wid
 - 03c8af2c0 RETAINED-MODE continuation; earlier 675a80745 Retained, 62aa5fcf8/05bffae27 SparseMap.
 
 ## Numbers
-- Before (hot-path's g2, pre-L0): `story new` Host CPU 1.50 s (story 2) → 2.51 s (story 8); DFinsupp.update under
-  Store.set 3.9 % → 24 % + 9 % of Host CPU.
-- After: not measured. The native Host overlay of 802ba8c69 on candidate 997905c0b was building on hbox t4
-  (/home/hbox/pool/t4-retained/native.pid) when hbox went down; it reruns on persvati when build-loop announces
-  per-seat pool trees (`scripts/pipeline/native-loop retained <base candidate> l0`, then grow2.sh with C at the base
-  and at the overlay).
+L0 before/after, `grow2r.sh` (hot-path's grow2.sh parameterised; 8 sequential `story new` in one fresh world, Host
+CPU per story from /proc, perf of stories 2 and 8), hbox t4 2026-10-31 16:00-16:16, logs in /home/hbox/pool/t4-retained/
+(gb = before, ga = after). hbox is a shared box, so these are CPU seconds, not wall timings.
+
+| Host CPU per `story new` | s1 | s2 | s4 | s6 | s8 | s1 → s8 |
+|---|---|---|---|---|---|---|
+| before: candidate 997905c0b | 590 ms | 630 | 730 | 880 | 1200 | +610 ms (2.0x) |
+| after: same candidate, L0 Host (802ba8c69 overlay) | 500 ms | 550 | 600 | 640 | 700 | +200 ms (1.4x) |
+
+- Profile, story 8, inclusive: `DFinsupp.update` under `Store.set` 24.7 % + 10.8 % and `Function.update` 13.5 % before;
+  gone after (`SparseMap.set` 1.1 %, tree balance 0.6 %). `sortedSupport` 4.8 % → 1.0 %, `StoreCodec.encode` 4.2 % → 3.3 %.
+- The after ran with the base candidate's consent provider: the overlay's own provider carried ed875b899's
+  refresh defect (`durable log is not a turn log: a verification walk carries no World`, every story rc=1), which
+  main fixed in 86c9dbddb. Not an L0 defect.
+- What still grows (after, story 8): the signed read, `queryLoaded` 34 %, `authorizeAuthenticated` 28 %, `checkGrant`
+  23.5 %, `capabilityEvidenceChecked` 19.6 %, cSHAKE256 14 %; `NativeHostSession.refresh` 14.3 % (10.3 % at story 2).
+  The first is R1's target.
 
 ## Next
-1. On persvati: native L0 overlay, grow2.sh before and after; record here. hbox is down (2026-10-31 night).
-2. Tree order = wire order for StoreCodec (drop encode's sort) if the encode side (host-execution) wants it.
-3. Inventory (RETAINED-MODE §3-4): R1 op4→op5 challenge node, R3 planner/deriver prepared write, I4/I5 Fn and
-   carry scans, export/backup, client refs index; the lint (§7).
+1. R1 (op 4 → op 5 challenge retained; WIP a42237ca7 on branch l0-land, rebased onto 8cbe36d62): check, overlay,
+   grow2r after; the read's `checkGrant`/cSHAKE share is the number to move.
+2. Then `NativeHostSession.refresh` (still grows story 2 → 8); R3 planner/deriver prepared write; I4/I5 Fn and carry
+   scans; export/backup; client refs index; the lint (§7).
+3. Tree order = wire order for StoreCodec (drop encode's sort) if host-execution wants it.
 
 ## Seams
 - host-execution (a24974e84d3c540d1): R6 carried decoded post / one turn per record; R7 sealed World (with read-path
