@@ -9,7 +9,7 @@ retired-agent hook names the live integrator to anyone who messages the old id).
 integrator; the integrator merges onto `integration/staging`, cuts batch candidates on hbox, gates them, moves main to
 gated candidates and names candidates to infra and the explorer.
 
-## Now (2026-10-31 08:35 EDT)
+## Now (2026-10-31 08:45 EDT)
 
 - **main = 83e926874** = gated batch 4 b9450147f merged with main 7978ddfdd.
 - **Batch 4 b9450147f: GATE GREEN, the rehearsal-3 candidate.** hbox tour 73/73, enrol, composed; forge composed c-b945-d1
@@ -24,7 +24,7 @@ gated candidates and names candidates to infra and the explorer.
   residents UNKNOWN (forge composed decides); j14-apps FAIL: the room-refusal ask got no Hermes reply ("Hermes sent no
   reply to the ask: refused", /ci/j-1c151f/journey.log). Suspected cause: perf-apps' START crash loop ("attestation
   resource outside supported profile", 20-digit member-namespace resource ids), fixed 40efdcff9.
-  **Next, armed** (hbox `$I/hp-resid.sh`, Mac waiter bji00dcor): when gate15 exits, gate15 runs on overlay
+  **Next, armed** (hbox `$I/hp-resid.sh` PID 3123406 waits on gate15's PID; Mac waiter b7g59aui0 wakes the integrator when the -hp1 run exits): when gate15 exits, gate15 runs on overlay
   **1c151fce4-resid** (batch 5 + the spk-host crate from 40efdcff9) with PHASES="j14 composed", HARNESS=staging tip,
   SUF=-hp1 (PID in gate-1c15-resid-hp1.pid, log logs/gate-1c15-resid-hp1.log). If j14 is still red there, the
   journey's step dir names the cause; route it to app-reds. Then ask infra for forge composed on the green one.
