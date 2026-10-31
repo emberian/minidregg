@@ -1159,7 +1159,7 @@ Selvage.Depth	3.7	2334528	0
 Theory.IntegerFingerprint	1.8	2299188	0
 Selvage.FiatShamir	2.7	2211760	0
 Pred.CoordinationDial	2.6	2191220	0
-Compiler.NatDigits255Fast	1.5	2173424	0
+Theory.NatDigits255Fast	1.5	2173424	0
 Theory.Confluence	1.9	2165728	0
 Theory.Finality	1.7	2162988	0
 Kernel.HyperedgeTier	1.4	2158040	0
@@ -1178,7 +1178,7 @@ Effects.EffectSpec	1.5	2018520	0
 Kernel.IrreversibleEffectSettlement	3.5	2013600	0
 Compiler.DialectBundle	1.6	2008820	0
 Compiler.DistributiveLaw	1.7	2003240	0
-Compiler.Signature	1.4	1994740	0
+Theory.Signature	1.4	1994740	0
 Effects	1.2	1986072	0
 Selvage.HeteroComposition	1.3	1982840	0
 Theory.NockCost.Shape	1.3	1976548	0

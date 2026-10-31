@@ -1,7 +1,7 @@
 /-
-# `Effects/Revival/PrepareProofs.lean` — `PrepareFactors contentSpec`, PROVED
+# `Kernel/EffectsRevival/PrepareProofs.lean` — `PrepareFactors contentSpec`, PROVED
 
-`Effects/Revival/Statements.lean` §8 (audited, pass 27): for a content target whose slot is
+`Kernel/EffectsRevival/Statements.lean` §8 (audited, pass 27): for a content target whose slot is
 present, the deployed per-target preparation `ResourceTransaction.prepareTarget` (its post
 packed, its refusals named) IS the registry dispatch of the content handler followed by
 `genericChecks` (the final-post law, the policy source, the audience), which never sees the
@@ -10,7 +10,7 @@ payload.  Today this is a theorem about the hand arm; at the migration commit it
 -/
 module
 
-public import Effects.Revival.ContentProofs
+public import Kernel.EffectsRevival.ContentProofs
 public import Theory.AssertAxioms
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).

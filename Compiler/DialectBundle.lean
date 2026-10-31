@@ -18,7 +18,7 @@ algorithm.  `SemanticFingerprint` stores digest words behind a payload-type phan
 index; a deployment dialect may interpret those words using its versioned canonical
 hash scheme.  No Breadstuffs IR or port representation is imported.
 -/
-import Compiler.Signature
+import Theory.Signature
 
 namespace Minidregg.Compiler
 

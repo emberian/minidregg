@@ -115,3 +115,5 @@ import Theory.ObjectiveBendDemandDataBudget  -- executable witnesses for remaini
 import Theory.ObjectiveBendDemandCollect  -- collection of the demand heap at a yield: trace from the roots, compact, rename (B4/T5; behaviour theorem in ObjectiveProofs)
 import Theory.ObjectiveBendDemandCapacity
 import Theory.ObjectiveBendExtensions
+import Theory.Signature    -- N3: abstract signatures, Term (= WType), fold_unique, agree_by_initiality, the syntactic-leaves-forced obligation
+import Theory.StreamCodec  -- the compact streaming-codec nucleus: prefix-decodable byte codecs with their laws (compact naturals over NatDigits255Fast, sequences, products, sums, tags, fixed-width streams, digests, bytesStream); re-exported by Compiler.Tower256ConcreteBackend

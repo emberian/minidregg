@@ -1,14 +1,14 @@
 /-
-# `Effects/Revival/CommutingProofs.lean` — commuting appends through the declaration
+# `Kernel/EffectsRevival/CommutingProofs.lean` — commuting appends through the declaration
 
-Proves `HostMovedRootAccepted` and `ContentCommuteTeeth` (`Effects.Revival.Statements`) over
+Proves `HostMovedRootAccepted` and `ContentCommuteTeeth` (`Kernel.EffectsRevival.Statements`) over
 the blinded sample cell of `ContentProofs`, and `Kernel.ContentCommutingAppend.CommutingPrepare`
 (the receiver-level statement), whose accepting pole `HostMovedRootAccepted` is.
 -/
 module
 
-public import Effects.Revival.ContentProofs
-public import Effects.Revival.PrepareProofs
+public import Kernel.EffectsRevival.ContentProofs
+public import Kernel.EffectsRevival.PrepareProofs
 public import Kernel.ContentCommutingAppendProofs
 public import Theory.AssertAxioms
 

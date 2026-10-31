@@ -25,7 +25,7 @@ than re-derives:
 
 ## The N3 constraint, and what it forced
 
-`Compiler/Signature.lean`'s `[N3-converse]` (`opaqueConflation_proved`) proves by
+`Theory/Signature.lean`'s `[N3-converse]` (`opaqueConflation_proved`) proves by
 Cantor that a signature whose constructor payloads are **semantic objects**
 admits no faithful compositional second reading into any countable target. The
 consequence here is not cosmetic: **no operation in this vocabulary carries tensor

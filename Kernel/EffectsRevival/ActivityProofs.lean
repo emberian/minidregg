@@ -1,14 +1,14 @@
 /-
-# `Effects/Revival/ActivityProofs.lean` — the two refusal levels, PROVED of today's kernel
+# `Kernel/EffectsRevival/ActivityProofs.lean` — the two refusal levels, PROVED of today's kernel
 
-`Effects/Revival/ActivityStatements.lean` (audited, pass 28): today's `commitYield` keeps the
+`Kernel/EffectsRevival/ActivityStatements.lean` (audited, pass 28): today's `commitYield` keeps the
 two levels (`twoLevelsSatisfiable`), an effect-level refusal exists (`twoLevelsPremise`: a
 transfer to the activity's own purse, refused `reserved`), and the collapsed judgment does not
 keep them (`twoLevelsTeeth`).
 -/
 module
 
-public import Effects.Revival.ActivityStatements
+public import Kernel.EffectsRevival.ActivityStatements
 public import Theory.AssertAxioms
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
