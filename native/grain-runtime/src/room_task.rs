@@ -222,7 +222,12 @@ impl Runtime {
                 Ok(value)
             }
             Err(error) => {
+                // A reset before the Host held the write leaves it not-submitted: submit the retained call
+                // once more before the lookup that records the decision, so a transport blip costs a retry
+                // and never the reply. A resubmit that fails too is named and the lookup still decides.
+                let resubmit = if name == "mini_say" { tools.resubmit_unsubmitted_write(&op) } else { None };
                 let recovery = self.recover_room();
+                let error = match resubmit { Some(Err(why)) => format!("{error}; {why}"), _ => error };
                 Err(match recovery { Ok(()) => error, Err(uncertain) => format!("{error}; {uncertain}") })
             }
         }
