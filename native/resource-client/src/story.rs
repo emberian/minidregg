@@ -769,10 +769,6 @@ fn run_inner(session: &Session, line: Line) -> Result<(), Done> {
 
 /// The story's table: a document in the story's room (born with its document,
 /// since its rows are appended lines).
-fn create_document(session: &Session, name: &str, law: &Value, room: &str) -> Result<Value, Done> {
-    crate::chat::create_document(session, name, law, Some(room))
-}
-
 fn install(session: &Session, name: &str, law: &Value) -> Result<(), Done> {
     propose_submit(
         session,
@@ -789,29 +785,33 @@ fn story_new(session: &Session, name: &str, from: &str, gm: Option<String>) -> R
     let text = source(session, from)?;
     let table = table_of(&rows(&text)).map_err(|e| usage(format!("the table refuses: {e}")))?;
     let author = me(session)?;
-    let (code, _) = crate::shell::line(session, &format!("room new {name} --template story"));
-    if code != EXIT_OK {
-        return Err((code, format!("story {name}: the room template stopped; nothing after it was done\n")));
+    // The table is born with the room's other cells, and its rows and the map's link to it ride
+    // the room's one coalesced proposal (`shell::run_template_with`): the whole story is the
+    // room template's four Host decisions.
+    let requests = session.home.join("requests");
+    let law_file = format!("story-{name}-table-law.json");
+    let rows_file = format!("story-{name}-table.json");
+    crate::chat::put_json(&requests.join(&law_file), &table_open_law(&author)).map_err(error)?;
+    let actions: Vec<Value> = rows(&text).iter().map(|r| json!({"type":"append","text":r})).collect();
+    crate::chat::put_json(&requests.join(&rows_file), &json!({"type":"minidregg-workspace-proposal-v1","action":"invoke",
+        "targets":[{"name":format!("{name}/table"),"payload":{"type":"document","actions":actions}},
+            {"name":format!("{name}/index"),"payload":{"type":"document",
+                "actions":[{"type":"link","to":format!("{name}/table"),"relation":"0"}]}}]})).map_err(error)?;
+    let born = |line: &str| line.starts_with(&format!("doc new {name}/")) || line.starts_with(&format!("create {name}/"));
+    let ran = crate::shell::run_template_with(session, &format!("room new {name} --template story"), |lines| {
+        let at = lines.iter().rposition(|(_, line)| born(line)).map_or(lines.len(), |last| last + 1);
+        lines.insert(at, (0, format!("doc new {name}/table @{law_file} --in {name}")));
+        lines.push((0, format!("propose {name}-table @{rows_file}")));
+        lines.push((0, format!("submit {name}-table")));
+    }).map_err(usage)?;
+    if ran.0 != EXIT_OK {
+        return Err((ran.0, format!("story {name}: the room template stopped; nothing after it was done\n")));
     }
     let gm = gm.unwrap_or_else(|| author.clone());
     if gm != author {
         install(session, &format!("{name}/scenes"), &scenes_law(&gm))?;
     }
-    let table_ref = create_document(session, &format!("{name}/table"), &table_open_law(&author), name)?;
-    let actions: Vec<Value> = rows(&text).iter().map(|r| json!({"type":"append","text":r})).collect();
-    propose_submit(
-        session,
-        "table",
-        &json!({"type":"minidregg-workspace-proposal-v1","action":"invoke",
-            "targets":[{"name":format!("{name}/table"),"payload":{"type":"document","actions":actions}}]}),
-    )?;
-    propose_submit(
-        session,
-        "map",
-        &json!({"type":"minidregg-workspace-proposal-v1","action":"invoke",
-            "targets":[{"name":format!("{name}/index"),"payload":{"type":"document",
-                "actions":[{"type":"link","to":format!("{name}/table"),"relation":"0"}]}}]}),
-    )?;
+    let table_ref = reference(session, &format!("{name}/table")).map_err(error)?;
     let room = reference(session, name).map_err(error)?;
     let scenes = reference(session, &format!("{name}/scenes")).map_err(error)?;
     put_json(

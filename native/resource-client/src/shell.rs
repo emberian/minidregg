@@ -403,6 +403,25 @@ fn grouped_births(session: &Session, lines: &[(usize, String)]) -> Option<(usize
     }))
 }
 
+/// Run the template `line` plans (`room new NAME --template T`) with lines a caller adds
+/// (`extend`), each planned first as a template line is: `story new` births its table with the
+/// room's other cells and writes its rows and map link in the room's one coalesced proposal.
+pub(crate) fn run_template_with(session: &Session, line: &str, extend: impl FnOnce(&mut Vec<(usize, String)>))
+    -> std::result::Result<(i32, bool), String> {
+    let Plan::Template { label, mut lines } = plan(session, line)? else {
+        return Err(format!("{line} is not a template"));
+    };
+    extend(&mut lines);
+    for (number, text) in &lines {
+        match plan(session, text) {
+            Err(why) => return Err(format!("template {label} line {number}: {text}\n  {why}")),
+            Ok(Plan::Template { .. }) => return Err(format!("template {label} line {number}: {text}\n  a template line may not apply a template")),
+            Ok(_) => {}
+        }
+    }
+    Ok(run_template(session, &label, &lines))
+}
+
 /// Run a template's lines as the session's own typed lines, in order. The
 /// first line that does not end `Done` stops the rest; the lines before it
 /// stand (each was its own Host decision), and stderr names the line.
