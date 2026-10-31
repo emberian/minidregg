@@ -777,3 +777,20 @@ fn generic_absolute_deadline_bounds_open_and_forbids_cleanup_after_mutation() {
     assert!(error.uncertain);
     assert_eq!(e.receipts.len(), 2);
 }
+
+/// A qualification step whose `args` has one member named like a binding form (`{"path": ...}`,
+/// Davros's directory.create) is an object of bindings, never the `path` form: the first step must
+/// reach the dispatcher (it was refused declaration-invalid before it did).
+#[test]
+fn a_one_member_args_object_named_path_is_not_the_path_binding_form() {
+    use mini_sdk::app_interface::NativeReply;
+    let d = Declaration::load(include_bytes!("../../../apps/interfaces/davros.json")).unwrap();
+    let mut b = binding();
+    b.package_id = d.package_id.clone();
+    let mut first: Option<(String, String)> = None;
+    let e = d.qualify(&json!({"runId":"run1"}), &b, |_, p| {
+        first.get_or_insert((p.method.clone(), p.path.clone()));
+        Ok(NativeReply { status: 201, headers: vec![], body: vec![], receipt: json!({"native":1}) })
+    });
+    assert_eq!(first, Some(("MKCOL".into(), "dav/run1".into())), "{:?}", e.outcome);
+}
