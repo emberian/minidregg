@@ -95,6 +95,8 @@ import Kernel.FnEvidence
 import Kernel.FnConsumerOperation
 import Kernel.FnConsumerOperationProofs
 import Kernel.FnConsumerProgress
+import Kernel.FnConsumerFrontierProofs
+import Kernel.FnConsumerFrontierScenario
 import Kernel.FnPortableSource
 import Kernel.FnReplyConsumption
 import Kernel.FnArchive
