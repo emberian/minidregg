@@ -56,8 +56,6 @@ use crate::{Error, Result};
 /// Custody framing of a retained anchor: this tag, the 32-byte binding, then the provider's bytes.
 const ANCHOR_TAG: &[u8] = b"MINI-CONSENT-ANCHOR-CUSTODY/v1\n";
 const ANCHOR_CAP: u64 = 4096;
-/// A resident provider with no frame for this long ends.
-pub const RESIDENT_IDLE_S: u64 = 600;
 
 /// `Kernel.NativeClientConsent.staleObservationTag`: the provider's refusal of an observation
 /// challenge that answers this exact retained intent and signature at another source height than
@@ -477,17 +475,23 @@ pub fn daemonize() -> Result<bool> {
 }
 
 /// Hold one provider for this binding and serve its frames on the binding's socket in `dir`
-/// until the provider ends or no frame arrives for `idle`. Exits at once (Ok) when another
-/// resident provider holds the binding.
-pub fn serve_resident(dir: &Path, executable: PathBuf, settings: PathBuf, idle: std::time::Duration) -> Result<()> {
+/// until the provider ends, the binding is superseded, or (`Some(idle)` only) no frame arrives
+/// for `idle`. Exits at once (Ok) when another resident provider holds the binding.
+pub fn serve_resident(dir: &Path, executable: PathBuf, settings: PathBuf, idle: Option<std::time::Duration>) -> Result<()> {
     serve_resident_kind(ResidentKind::Consent, dir, executable, settings, idle)
 }
 
 /// Hold one child of `kind` for this binding (a consent provider, or the storeless codec Host)
 /// and serve its frames on the binding's socket in `dir`, one frame at a time across every
-/// connection, until the child ends or no frame arrives for `idle`. Exits at once (Ok) when
-/// another resident of this kind holds the binding.
-pub fn serve_resident_kind(kind: ResidentKind, dir: &Path, executable: PathBuf, settings: PathBuf, idle: std::time::Duration) -> Result<()> {
+/// connection. Exits at once (Ok) when another resident of this kind holds the binding.
+///
+/// A resident keeps its warm state: with `idle` None (every member's resident) it never idles
+/// out, so a member who comes back after an hour pays no provider start and no Store admission
+/// from the retained anchor. It ends when its child ends, when its world is torn down (its
+/// settings file removed, its socket unlinked or replaced), or when its binding is superseded:
+/// the executable at its path (a `candidate/current` repointed by a ship) or the settings bytes
+/// changed, so no client can select this binding again. `Some(idle)` adds the idle exit.
+pub fn serve_resident_kind(kind: ResidentKind, dir: &Path, executable: PathBuf, settings: PathBuf, idle: Option<std::time::Duration>) -> Result<()> {
     use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
     use std::os::unix::io::AsRawFd;
     use std::sync::{atomic::{AtomicBool, AtomicUsize, Ordering}, Arc};
@@ -504,6 +508,7 @@ pub fn serve_resident_kind(kind: ResidentKind, dir: &Path, executable: PathBuf, 
     }
     let (socket, _socket_directory) = resident_socket(kind, dir, &binding)?;
     crate::private::clear_stale_socket(&socket)?;
+    let executable_path = executable.clone();
     let session = kind.start(dir, executable, &settings, settings_bytes)?;
     let listener = std::os::unix::net::UnixListener::bind(&socket)
         .map_err(|e| format!("{} socket {}: {e}", kind.name(), socket.display()))?;
@@ -534,14 +539,17 @@ pub fn serve_resident_kind(kind: ResidentKind, dir: &Path, executable: PathBuf, 
             }
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                 let quiet = last.lock().map(|t| t.elapsed()).unwrap_or_default();
-                if active.load(Ordering::Acquire) == 0 && quiet > idle {
+                if active.load(Ordering::Acquire) == 0 && idle.is_some_and(|idle| quiet > idle) {
                     return Ok(());
                 }
-                // Its world torn down (the settings file it was started for removed), or its socket unlinked or
-                // replaced: no client can bind it or reach it again, so it ends now, not at its idle deadline.
+                // Its world torn down (the settings file it was started for removed), its socket unlinked or
+                // replaced, or its binding superseded (another executable at its path, other settings bytes):
+                // no client can bind it or reach it again, so it ends now.
                 if looked.elapsed() >= std::time::Duration::from_secs(1) {
                     looked = std::time::Instant::now();
-                    if !socket_is(&socket, _files.identity) || fs::symlink_metadata(&settings).is_err() {
+                    if !socket_is(&socket, _files.identity) || fs::symlink_metadata(&settings).is_err()
+                        || active.load(Ordering::Acquire) == 0 && superseded(&executable_path, &settings, &binding)
+                    {
                         return Ok(());
                     }
                 }
@@ -552,6 +560,15 @@ pub fn serve_resident_kind(kind: ResidentKind, dir: &Path, executable: PathBuf, 
             }
             Err(e) => return Err(format!("{} accept: {e}", kind.name()).into()),
         }
+    }
+}
+
+/// The binding a client would compute now for this executable path and settings file differs
+/// from the one this resident serves (or cannot be computed: the file is gone).
+fn superseded(executable: &Path, settings: &Path, serving: &[u8; 32]) -> bool {
+    match settings_bytes(settings).and_then(|bytes| binding(executable, &bytes)) {
+        Ok(current) => &current != serving,
+        Err(_) => true,
     }
 }
 
@@ -1094,7 +1111,7 @@ mod tests {
         let (socket, _socket_directory) = resident_socket(ResidentKind::Consent, &anchors, &binding).unwrap();
         assert!(socket.as_os_str().len() < 100);
         let (a, p, s) = (anchors.clone(), provider.clone(), settings.clone());
-        let daemon = std::thread::spawn(move || serve_resident(&a, p, s, std::time::Duration::from_millis(400)));
+        let daemon = std::thread::spawn(move || serve_resident(&a, p, s, Some(std::time::Duration::from_millis(400))));
         let connect = || {
             for _ in 0..2000 {
                 if let Ok(stream) = resident_stream(&socket) {
@@ -1150,7 +1167,7 @@ mod tests {
         assert!(socket.as_os_str().len() < 100);
         assert_ne!(socket, resident_file(ResidentKind::Consent, &anchors, &binding, "sock"), "the codec socket is not the consent socket");
         let (a, h, s) = (anchors.clone(), host.clone(), settings.clone());
-        let daemon = std::thread::spawn(move || serve_resident_kind(ResidentKind::Codec, &a, h, s, std::time::Duration::from_millis(400)));
+        let daemon = std::thread::spawn(move || serve_resident_kind(ResidentKind::Codec, &a, h, s, Some(std::time::Duration::from_millis(400))));
         let connect = || {
             for _ in 0..2000 {
                 if let Ok(stream) = resident_stream(&socket) {
@@ -1174,6 +1191,52 @@ mod tests {
         drop(second);
         daemon.join().unwrap().unwrap();
         assert!(!socket.exists() && !resident_file(ResidentKind::Codec, &anchors, &binding, "pid").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A resident without an idle exit keeps serving while its binding is current and ends once
+    /// its settings bytes change (a ship or a re-pinned config supersedes the binding).
+    #[test]
+    fn a_resident_without_idle_exit_ends_when_its_binding_is_superseded() {
+        let dir = PathBuf::from(format!("/tmp/mcs-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir(&dir).unwrap();
+        let host = crate::local::fake::codec_stub(&dir);
+        fs::write(dir.join("reply-1"), framed(b"\x07ok")).unwrap();
+        fs::write(dir.join("reply"), framed(b"\xff unexpected frame")).unwrap();
+        let settings = dir.join("settings.json");
+        fs::write(&settings, b"{}").unwrap();
+        let anchors = dir.join("anchors");
+        fs::create_dir(&anchors).unwrap();
+        fs::set_permissions(&anchors, fs::Permissions::from_mode(0o700)).unwrap();
+        let binding = binding(&host, b"{}").unwrap();
+        let (socket, _socket_directory) = resident_socket(ResidentKind::Codec, &anchors, &binding).unwrap();
+        let (a, h, s) = (anchors.clone(), host.clone(), settings.clone());
+        let daemon = std::thread::spawn(move || serve_resident_kind(ResidentKind::Codec, &a, h, s, None));
+        let mut session = (|| {
+            for _ in 0..2000 {
+                if let Ok(stream) = resident_stream(&socket) {
+                    let input = stream.try_clone().unwrap();
+                    return Session::over(Box::new(input), Box::new(stream), host.clone(), b"{}".to_vec());
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            panic!("resident never listened");
+        })();
+        assert_eq!(round_trip(&mut session, crate::host_operations::AUTHOR, b"intent").unwrap(), b"ok");
+        drop(session);
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        assert!(!daemon.is_finished(), "a current binding with no idle exit stays resident");
+        fs::write(&settings, b"{\"moved\":1}").unwrap();
+        for _ in 0..60 {
+            if daemon.is_finished() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        assert!(daemon.is_finished(), "a superseded binding ends its resident");
+        daemon.join().unwrap().unwrap();
+        assert!(!socket.exists());
         let _ = fs::remove_dir_all(&dir);
     }
 

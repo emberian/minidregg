@@ -42,9 +42,11 @@ fn resident_enabled()->bool { !cfg!(test) && std::env::var("MINI_CONSENT_RESIDEN
 /// `pure_host` binding for every `mini` process of this user instead of one 159 MB Lean image per
 /// process. `MINI_CODEC_RESIDENT=0` keeps the per-process child.
 fn codec_resident_enabled()->bool { !cfg!(test) && std::env::var("MINI_CODEC_RESIDENT").as_deref()!=Ok("0") }
-/// A resident with no frame for `$variable` seconds (default `RESIDENT_IDLE_S`, 600) ends.
-fn resident_idle(variable:&str)->std::time::Duration {
-    std::time::Duration::from_secs(std::env::var(variable).ok().and_then(|v|v.parse().ok()).unwrap_or(mini_sdk::consent::RESIDENT_IDLE_S))
+/// A resident keeps its warm state and does not idle out (`mini_sdk::consent::serve_resident_kind`:
+/// it ends with its world, its child, or a superseded binding). `$variable` seconds, when set, add
+/// an idle exit for a box that wants one.
+fn resident_idle(variable:&str)->Option<std::time::Duration> {
+    std::env::var(variable).ok().and_then(|v|v.parse().ok()).filter(|n:&u64|*n>0).map(std::time::Duration::from_secs)
 }
 
 /// The selected consent provider of this process, started (or reached as this binding's resident
@@ -112,8 +114,8 @@ pub(crate) fn drop_dead_session(slot:&mut Option<Consent>,lifeline:&mut Option<c
 }
 
 /// `mini consent-resident --consent EXECUTABLE --settings SETTINGS`: hold one provider for this
-/// binding and serve its frames until the provider ends or no frame arrives for
-/// `MINI_CONSENT_IDLE_S` (600) seconds.
+/// binding and serve its frames until the provider ends, its world is torn down or its binding is
+/// superseded (with `MINI_CONSENT_IDLE_S` set, also after that many idle seconds).
 pub(crate) fn resident(executable:PathBuf,settings:PathBuf)->Result<()> {
     let idle=resident_idle("MINI_CONSENT_IDLE_S");
     if !mini_sdk::consent::daemonize()? { return Ok(()); }
@@ -122,7 +124,8 @@ pub(crate) fn resident(executable:PathBuf,settings:PathBuf)->Result<()> {
 /// `mini codec-resident --host EXECUTABLE --settings SETTINGS` (HOT-PATH 2a): hold ONE storeless
 /// codec Host (`HOST SETTINGS codec`, `Host.Main.serveCodec`) for this binding and serve every
 /// `mini` process's codec frames (7-11) on the binding's socket, one frame at a time, until the
-/// Host ends or no frame arrives for `MINI_CODEC_IDLE_S` (600) seconds. The codec is pure and
+/// Host ends, its world is torn down or its binding is superseded (with `MINI_CODEC_IDLE_S` set,
+/// also after that many idle seconds). The codec is pure and
 /// holds no state between frames, so sharing one across processes changes no reply; it removes
 /// one 159 MB Lean image start per `mini` process. The image is the client's own selected
 /// semantic Host (`pure_host`), never the serving Store's.
