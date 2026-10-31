@@ -160,6 +160,19 @@ Driver: /ci/exo/wr.sh WORLD N ROUNDS (before bins /ci/exo/before-ssh, after /ci/
 Open twin found on the way (not this lane's surface, told perf-client): mini-web-spawn's
 `delegated_consent_env` re-derives the wrapper's delegated-consent selection.
 
+## Reference names read only when asked: done (478f170ab)
+
+`doc show` read every WORKSPACE/refs file twice per read (`rendered_document` and `read_rendered`
+each built the target-to-name map). The renderer now asks a lazy `WorkspaceNames`, shared by both
+renderings of one read: a page that names nothing reads no reference, one that names something
+reads them once. Resident CPU per `doc show` on /ci/exo/w8 (`/ci/exo/rc.sh N ROUNDS DIR...`, three
+alternated rounds): member-1 with 13 references 2.3 / 2.3 ms (no difference at that size); with 500
+extra references 13.4-15.0 ms before, 2.8-3.2 ms after. Still O(references) for a page with a link
+or a transclusion: a maintained target-to-name index is retained-mode work (told a9b54e85e4a194b91).
+
+At low load (16-20) a warm `whoami` through the binary wrapper is 1.1-1.3 ms wall
+(/ci/exo/wr2.sh with BDIR/ADIR).
+
 ## Next: what is left of a `doc show`
 
 - The in-process file bus for reads: the query path passes paths between `author`/`inspect`/

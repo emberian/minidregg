@@ -29,7 +29,7 @@ pub struct View<'a> {
     /// The host cell's signed `entries` (annotations, atoms with their kind).
     pub entries: &'a [Value],
     /// Cell or document id -> the name this workspace knows it by.
-    pub names: &'a BTreeMap<String, String>,
+    pub names: &'a dyn NameSource,
     /// Source cell -> (atom id -> its live line number in this reader's own
     /// current read of that source).  Absent when the reader holds no read.
     pub sources: &'a BTreeMap<String, BTreeMap<String, usize>>,
@@ -133,12 +133,43 @@ pub enum SharedName {
     Invalid { link: String, reason: String },
 }
 
-/// The name this reader knows cell/document `id` by, else `doc:<id>`.
-pub fn name_of(names: &BTreeMap<String, String>, id: &str) -> String {
-    names.get(id).cloned().unwrap_or_else(|| format!("doc:{id}"))
+/// Where a rendering finds the name a reader knows a cell or document by.
+pub trait NameSource {
+    fn name(&self, id: &str) -> Option<String>;
 }
 
-fn link_target(names: &BTreeMap<String, String>, mark: &Value) -> Option<String> {
+impl NameSource for BTreeMap<String, String> {
+    fn name(&self, id: &str) -> Option<String> {
+        self.get(id).cloned()
+    }
+}
+
+/// A workspace's names for reference targets (`workspace::reference_names`, over WORKSPACE/refs),
+/// read at the first lookup and kept for the rest of the rendering: a document that links,
+/// references and transcludes nothing reads no reference file.
+pub struct WorkspaceNames {
+    root: std::path::PathBuf,
+    names: std::cell::OnceCell<BTreeMap<String, String>>,
+}
+
+impl WorkspaceNames {
+    pub fn of(root: &std::path::Path) -> WorkspaceNames {
+        WorkspaceNames { root: root.to_owned(), names: std::cell::OnceCell::new() }
+    }
+}
+
+impl NameSource for WorkspaceNames {
+    fn name(&self, id: &str) -> Option<String> {
+        self.names.get_or_init(|| crate::workspace::reference_names(&self.root)).get(id).cloned()
+    }
+}
+
+/// The name this reader knows cell/document `id` by, else `doc:<id>`.
+pub fn name_of(names: &dyn NameSource, id: &str) -> String {
+    names.name(id).unwrap_or_else(|| format!("doc:{id}"))
+}
+
+fn link_target(names: &dyn NameSource, mark: &Value) -> Option<String> {
     if mark["linkLive"] == false {
         return None;
     }
@@ -152,7 +183,7 @@ fn link_target(names: &BTreeMap<String, String>, mark: &Value) -> Option<String>
 }
 
 /// The decorations of one row's live marks, innermost first.
-pub fn decos(names: &BTreeMap<String, String>, marks: &Value, depth: usize) -> Vec<Deco> {
+pub fn decos(names: &dyn NameSource, marks: &Value, depth: usize) -> Vec<Deco> {
     let Some(marks) = marks.as_array() else {
         return Vec::new();
     };
@@ -236,7 +267,7 @@ fn annotation_of(view: &View, entry: &Value) -> Annotation {
 /// The one-line header and lines of one rendered transclusion item, or the
 /// placeholder when this reader's own reads do not cover its source.
 pub fn transcluded(
-    names: &BTreeMap<String, String>,
+    names: &dyn NameSource,
     sources: &BTreeMap<String, BTreeMap<String, usize>>,
     item: &Value,
 ) -> Transcluded {

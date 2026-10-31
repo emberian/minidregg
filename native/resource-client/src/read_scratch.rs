@@ -134,15 +134,28 @@ pub(crate) fn source(attempt: &Path, name: &str) -> PathBuf {
 
 /// A refused read is kept: its directory moves into `root/attempts` whole.
 pub(crate) fn keep(root: &Path, attempt: &Path) {
-    let Some(name) = attempt.file_name() else { return };
-    if !attempt.is_dir() {
-        return;
+    if attempt.is_dir() {
+        let _ = retain(root, attempt);
     }
-    let target = root.join("attempts").join(name);
-    if fs::rename(attempt, &target).is_ok() {
-        return;
+}
+
+/// A read whose directory becomes a write's custody record (a protected document's enrollment
+/// phase is retained beside its observation, and recovery finds it there) moves into
+/// `root/attempts` whole; returns where it now is.
+pub(crate) fn retain(root: &Path, attempt: &Path) -> Result<PathBuf> {
+    let name = attempt.file_name().ok_or("read has no directory name")?;
+    let attempts = root.join("attempts");
+    if let Err(e) = fs::DirBuilder::new().mode(0o700).create(&attempts) {
+        if e.kind() != std::io::ErrorKind::AlreadyExists {
+            return Err(format!("{}: {e}", attempts.display()));
+        }
     }
-    let _ = copy_tree(attempt, &target).map(|()| fs::remove_dir_all(attempt));
+    let target = attempts.join(name);
+    if fs::rename(attempt, &target).is_err() {
+        copy_tree(attempt, &target).map_err(|e| format!("cannot retain {} as {}: {e}", attempt.display(), target.display()))?;
+        let _ = fs::remove_dir_all(attempt);
+    }
+    Ok(target)
 }
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
@@ -194,6 +207,20 @@ mod tests {
         assert!(root.join("attempts").join(last.file_name().unwrap()).join("query-refusal.json").is_file());
         super::clear();
         assert!(!dir.exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_retained_read_lives_in_the_workspace() {
+        let root = std::env::temp_dir().join(format!("read-retain-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let (attempt, _) = super::attempt(&root).unwrap();
+        std::fs::create_dir(&attempt).unwrap();
+        std::fs::write(attempt.join("signed-observation.bin"), b"signed").unwrap();
+        let kept = super::retain(&root, &attempt).unwrap();
+        assert!(kept.starts_with(root.join("attempts")), "{}", kept.display());
+        assert_eq!(std::fs::read(kept.join("signed-observation.bin")).unwrap(), b"signed");
+        assert!(!attempt.exists(), "the read left the process's scratch, which a one-shot command removes");
         let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -327,3 +327,24 @@ fn unknown_sealed_atom_schema_never_becomes_unauthenticated_text() {
     assert!(rendered.text().contains("unsupported encrypted schema"));
     assert!(!rendered.text().contains("secret"));
 }
+
+#[test]
+fn a_workspace_is_asked_for_names_only_by_a_page_that_names_something() {
+    let root = std::env::temp_dir().join(format!("render-names-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("refs")).unwrap();
+    std::fs::write(root.join("refs/notes.json"), br#"{"type":"minidregg-participant-reference-v1","name":"notes","kind":"object","target":"78","observeCapability":"8101","operationCapability":"8101","controlCapability":"8102"}"#).unwrap();
+    let sources = BTreeMap::new();
+    // K12M's lines carry formatting marks and no link: its rendering never reads WORKSPACE/refs.
+    let plain = WorkspaceNames::of(&root);
+    render(&View { document: &fixture("k12m"), entries: &[], names: &plain, sources: &sources, me: "7" }).unwrap();
+    assert!(plain.names.get().is_none(), "a page naming nothing reads no reference");
+    // A live link to 78 asks once, and the name is this workspace's.
+    let mut linked = fixture("k12m");
+    linked["order"][0]["marks"] = json!([{"kind":"link","fresh":true,"linkLive":true,"target":{"type":"document","id":"78"}}]);
+    let names = WorkspaceNames::of(&root);
+    let rendered = render(&View { document: &linked, entries: &[], names: &names, sources: &sources, me: "7" }).unwrap();
+    assert!(names.names.get().is_some());
+    assert_eq!(text::line_notation(&rendered.lines[0]), "[one](→ notes)");
+    let _ = std::fs::remove_dir_all(&root);
+}

@@ -496,7 +496,11 @@ fn continue_enrollment(root:&std::path::Path,workspace:&Value,name:&str,stage:&V
         "grants":[{"kind":"object","target":target,"capability":super::member(&reference,"observeCapability")?}]});
     let request_path=home.join("enrollment-request.json");retain_json(&request_path,&request)?;
     let (_,_,signed)=super::signed_view(root,workspace,&reference,"resource")?;
-    let phase_root=signed.parent().ok_or("missing phase observation")?;
+    // The phase is custody and lives beside its observation (`phaseDirectory`, which recovery
+    // resolves inside this workspace), so the read leaves the process's scratch for attempts/.
+    let phase_root=crate::read_scratch::retain(root,signed.parent().ok_or("missing phase observation")?)?;
+    let signed=phase_root.join("signed-observation.bin");
+    let phase_root=phase_root.as_path();
     let source_path=phase_root.join("protected-audience.json");
     crate::host_files(&host,&config,&[Path::new("object-audience"),&signed,&source_path])?;
     let source=super::bounded_json(&source_path)?;
