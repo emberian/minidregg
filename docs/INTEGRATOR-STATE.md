@@ -96,7 +96,7 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   hp-codec.sh ($I/hp-codec.pid) builds grain-runtime from 58f0bad2b (includes 5ae0de223) in hp-wt, overlays dc61016cb ->
   dc61016cb-codec, then gate15 j14 -hp1 KEEP_WORLD after batch 8's gate ($I/gate-dc61-codec.pid); hp-h1b.sh stopped by its
   PID file (superseded). Theory holds only if the final say succeeds AND the journal shows no not-submitted/resubmit.
-  app-reds' release build sits on /tank/lanes/app-reds/target-rel (asked to remove; no new data on /tank).
+  app-reds removed its /tank build output (77 MB) and builds under /ci or the pool.
 - **D1, forge demo rebuild (batch 4) `members` step**: `sage` provision failed `local native codec: local process
   request failed: Broken pipe`; downstream apps-bootstrap/reenroll/grain world/seed/door red as consequences. Reruns:
   pending (infra repair after the batch 7 forge composed). Same class as H1b (a local transport drop): app-reds told.
