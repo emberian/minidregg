@@ -342,6 +342,19 @@ applied):
    between them cost `O(k)` walks at the first read and retain `k` closures until then. Every
    accepted version's root is read at publication today, so the chain stays one long; a host that
    stops reading roots per version must force the carried structure per version.
+   **Round 18, required in FORMAT** (integrator; Serve/PublicMeta and keyedCodec judged sound):
+   1. *Context uniformity as a construction, not a premise.* `keptCell_root_of_kind` takes
+      `ofKind`. Add a smart constructor `Params.ofKind` fixing protocol, layout and size bound
+      from the kind or wire, with `ctxBytes (Params.ofKind …) = kindCtx` by `rfl` (or birth
+      carries the proof), and have the registry build parameters only through it.
+   2. *Cross-cell separation.* `CustodyCodec.exact`'s decode is chosen per parameters, so a decode
+      returning the constant `params.cell` passes without the bytes carrying the cell
+      (`keyedCodec` does; `idealSetting`'s `Nat.pair v x` has no cell id). Two cells of one kind at
+      one version with one secret then share outer-hash inputs: a birthday term. Fix by a
+      kind-level decode (fixed by the wire, not the parameters) over a custody value that carries
+      an injective cell code, with the cross-cell lemma `p.cell ≠ q.cell → enc (p.prf v) ≠
+      enc (q.prf w)`; or state the birthday term in `rom`'s bound. Prefer the first, and rework
+      `idealSetting`'s custody value to `Nat.pair (cellCode) (Nat.pair v x)`.
    **Tags and epoch:** iteration speed's seam 1 (lane/seam1-epoch) lands first: named tags in
    `Compiler/PersistedCodecTags/Core.lean` (imported by the modules naming them), census tags in
    `Compiler/PersistedCodecTags.lean`. The `DREGG/PRIVATE-CELL/*` tags go in Core if named, else
