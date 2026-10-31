@@ -626,6 +626,32 @@ def challengeAnswerOn (config : Config) (ground : ServedBasis.Ground config.depl
         config.profile config.federation config.genesisHeight intent intentSignature).mapError
           NativeObservationController.preAuthentication
 
+/-- `challengeAnswerOn`, with what op 5 keeps of the challenge: the planned challenge and its
+equation (`NativeObservationController.challengeRetained`). -/
+def challengeAnswerOnRetained (config : Config) (ground : ServedBasis.Ground config.deployment)
+    (intent : NativeObservationCodec.Intent) (intentSignature : List UInt8)
+    (key : Except Refusal (List UInt8)) (verdict : Except CredentialSignatureIO.Error Bool) :
+    Except Refusal NativeObservationCodec.Challenge ×
+      Option (NativeObservationController.RetainedChallenge ground
+        config.profile config.federation config.genesisHeight) :=
+  match NativeObservationController.authenticated key verdict with
+  | .error refusal => (.error refusal, none)
+  | .ok () =>
+      let (answer, kept) := NativeObservationController.challengeRetained ground
+        config.profile config.federation config.genesisHeight intent intentSignature
+      (answer.mapError NativeObservationController.preAuthentication, kept)
+
+/-- The answer op 4 sends is `challengeAnswerOn`'s. -/
+theorem challengeAnswerOnRetained_fst (config : Config) (ground : ServedBasis.Ground config.deployment)
+    (intent : NativeObservationCodec.Intent) (intentSignature : List UInt8)
+    (key : Except Refusal (List UInt8)) (verdict : Except CredentialSignatureIO.Error Bool) :
+    (challengeAnswerOnRetained config ground intent intentSignature key verdict).1 =
+      challengeAnswerOn config ground intent intentSignature key verdict := by
+  unfold challengeAnswerOnRetained challengeAnswerOn
+  cases NativeObservationController.authenticated key verdict with
+  | error refusal => rfl
+  | ok unit => simp only [← NativeObservationController.challengeRetained_fst]
+
 /-- `challengeAnswerOn` over the full shape's ground of an opened image. -/
 def challengeAnswer (config : Config) (opened : Opened config)
     (intent : NativeObservationCodec.Intent) (intentSignature : List UInt8)
@@ -638,32 +664,36 @@ Host decodes the intent, selects the subject's current key, and verifies the sig
 nothing about the intent's targets is read until that succeeds (FIX-DISCLOSE). -/
 def challengeOn (config : Config) (ground : ServedBasis.Ground config.deployment)
     (intentBytes intentSignature : List UInt8) :
-    IO (Except Refusal NativeObservationCodec.Challenge) := do
+    IO (Except Refusal NativeObservationCodec.Challenge ×
+      Option (NativeObservationController.RetainedChallenge ground
+        config.profile config.federation config.genesisHeight)) := do
   let some intent := NativeObservationCodec.intentCodec.decode intentBytes
-    | return .error (.of .malformed)
+    | return (.error (.of .malformed), none)
   let key := NativeObservationController.intentKey ground intent.subject
   let verdict ← NativeObservationController.intentVerdict config.signature key intent intentSignature
-  return challengeAnswerOn config ground intent intentSignature key verdict
+  return challengeAnswerOnRetained config ground intent intentSignature key verdict
 
 /-- `challengeOn` over the full shape's ground of an opened image. -/
 def challengeLoaded (config : Config) (opened : Opened config)
     (intentBytes intentSignature : List UInt8) :
     IO (Except Refusal NativeObservationCodec.Challenge) :=
-  challengeOn config (observationContext config opened) intentBytes intentSignature
+  Prod.fst <$> challengeOn config (observationContext config opened) intentBytes intentSignature
 
 /-- **One path before authentication.** Op 4 is: decode, select the subject's key, ask the
 native verifier about the intent signature (`intentVerdict`, which is handed the key, the
-intent's bytes and the signature, and nothing of the Store's directory), then answer. -/
+intent's bytes and the signature, and nothing of the Store's directory), then answer
+(`challengeAnswerOnRetained`, whose answer is `challengeAnswerOn`'s:
+`challengeAnswerOnRetained_fst`). -/
 theorem challengeOn_authenticates_first (config : Config) (ground : ServedBasis.Ground config.deployment)
     (intentBytes intentSignature : List UInt8) :
     challengeOn config ground intentBytes intentSignature =
       (match NativeObservationCodec.intentCodec.decode intentBytes with
-      | none => pure (.error (.of .malformed))
+      | none => pure (.error (.of .malformed), none)
       | some intent => do
           let verdict ← NativeObservationController.intentVerdict config.signature
             (NativeObservationController.intentKey ground intent.subject)
             intent intentSignature
-          pure (challengeAnswerOn config ground intent intentSignature
+          pure (challengeAnswerOnRetained config ground intent intentSignature
             (NativeObservationController.intentKey ground intent.subject)
             verdict)) := by
   unfold challengeOn
@@ -842,16 +872,18 @@ def challengeRequestParts (payload : List UInt8) : Option (List UInt8 × List UI
     if width ≤ payload.length - 4 then some ((payload.drop 4).take width, payload.drop (4 + width))
     else none
 
-/-- Op 4 on an opened image: split the request, then `challengeLoaded`. -/
+/-- Op 4 on a ground, one request: split it, then `challengeOn`. -/
 def challengeRequestOn (config : Config) (ground : ServedBasis.Ground config.deployment)
-    (payload : List UInt8) : IO (Except Refusal NativeObservationCodec.Challenge) :=
+    (payload : List UInt8) : IO (Except Refusal NativeObservationCodec.Challenge ×
+      Option (NativeObservationController.RetainedChallenge ground
+        config.profile config.federation config.genesisHeight)) :=
   match challengeRequestParts payload with
-  | none => pure (.error (.of .malformed))
+  | none => pure (.error (.of .malformed), none)
   | some (intentBytes, intentSignature) => challengeOn config ground intentBytes intentSignature
 
 def challengeRequestLoaded (config : Config) (opened : Opened config) (payload : List UInt8) :
     IO (Except Refusal NativeObservationCodec.Challenge) :=
-  challengeRequestOn config (observationContext config opened) payload
+  Prod.fst <$> challengeRequestOn config (observationContext config opened) payload
 
 /-- Op 4, one-shot. -/
 def challengeRequest (config : Config) (payload : List UInt8) :
@@ -1124,26 +1156,35 @@ def query (config : Config) (bytes : List UInt8) : IO (Except Refusal (List UInt
 image. No target is read before that singleton's intent authentication. A
 refusal discards the entire collection. -/
 def challengeBatchOn (config : Config) (ground : ServedBasis.Ground config.deployment)
-    (bytes : List UInt8) : IO (Except Refusal (List UInt8)) := do
+    (bytes : List UInt8) : IO (Except Refusal (List UInt8) ×
+      NativeObservationController.RetainedChallenges ground
+        config.profile config.federation config.genesisHeight) := do
   unless bytes.length ≤ NativeObservationCodec.maxBatchBytes do
-    return .error (.of .malformed)
+    return (.error (.of .malformed), [])
   let some requests := NativeObservationCodec.batchCodec.decode bytes
-    | return .error (.of .malformed)
-  unless NativeObservationCodec.validBatch requests do return .error (.of .malformed)
+    | return (.error (.of .malformed), [])
+  unless NativeObservationCodec.validBatch requests do return (.error (.of .malformed), [])
   let mut challenges : List (List UInt8) := []
+  let mut kept : NativeObservationController.RetainedChallenges ground
+    config.profile config.federation config.genesisHeight := []
   for request in requests do
     let some (intentBytes, _) := challengeRequestParts request
-      | return .error (.of .malformed)
+      | return (.error (.of .malformed), [])
     let some intent := NativeObservationCodec.intentCodec.decode intentBytes
-      | return .error (.of .malformed)
-    let .query _ := intent.purpose | return .error (.of .malformed)
+      | return (.error (.of .malformed), [])
+    let .query _ := intent.purpose | return (.error (.of .malformed), [])
     match ← challengeRequestOn config ground request with
-    | .error refusal => return .error refusal
-    | .ok challenge =>
+    | (.error refusal, _) => return (.error refusal, [])
+    | (.ok challenge, entry) =>
         challenges := challenges ++ [NativeObservationCodec.challengeCodec.encode challenge]
+        kept := kept.keepAll entry.toList
   let encoded := NativeObservationCodec.batchCodec.encode challenges
-  if encoded.length ≤ NativeObservationCodec.maxBatchBytes then return .ok encoded
-  else return .error (.of .malformed)
+  if encoded.length ≤ NativeObservationCodec.maxBatchBytes then return (.ok encoded, kept)
+  else return (.error (.of .malformed), [])
+
+def challengeBatchLoaded (config : Config) (opened : Opened config)
+    (bytes : List UInt8) : IO (Except Refusal (List UInt8)) :=
+  Prod.fst <$> challengeBatchOn config (observationContext config opened) bytes
 
 def challengeBatchLoaded (config : Config) (opened : Opened config)
     (bytes : List UInt8) : IO (Except Refusal (List UInt8)) :=
@@ -1168,26 +1209,52 @@ def queryBatchLoaded (config : Config) (opened : Opened config)
   if encoded.length ≤ NativeObservationCodec.maxBatchBytes then return .ok encoded
   else return .error (.of .malformed)
 
+/-- Op 4 on a ground, with the challenges it planned there for op 5. -/
 def challengeWireOn (config : Config) (ground : ServedBasis.Ground config.deployment)
-    (bytes : List UInt8) : IO (Except Refusal (List UInt8)) := do
+    (bytes : List UInt8) : IO (Except Refusal (List UInt8) ×
+      NativeObservationController.RetainedChallenges ground
+        config.profile config.federation config.genesisHeight) := do
   if NativeObservationCodec.isBatch bytes then
     challengeBatchOn config ground bytes
   else
-    return (← challengeRequestOn config ground bytes).map
-      NativeObservationCodec.challengeCodec.encode
+    let (answer, entry) ← challengeRequestOn config ground bytes
+    return (answer.map NativeObservationCodec.challengeCodec.encode, entry.toList)
 
 def challengeWireLoaded (config : Config) (opened : Opened config)
     (bytes : List UInt8) : IO (Except Refusal (List UInt8)) :=
-  challengeWireOn config (observationContext config opened) bytes
+  Prod.fst <$> challengeWireOn config (observationContext config opened) bytes
+
+/-- What a session keeps over its light opening for signed reads (inventory R1,
+docs/RETAINED-MODE.md): op 4's basis (a basis declaring nothing: the challenge reads the
+directory, the authority cell and the clock cell, no journal, marker or nullifier) and the
+challenges op 4 planned on it, for the op 5 that answers them. Typed by the light opening, so a
+session whose light opening moves keeps none of it. -/
+structure Observed (config : Config) (light : NativeHostLight.Light config) where
+  basis : ServedBasis.Basis config.deployment light.opening.store
+  challenges : NativeObservationController.RetainedChallenges (.ofBasis basis)
+    config.profile config.federation config.genesisHeight
+
+/-- The held basis, or a fresh one read from the light opening. -/
+def Observed.orFresh {config : Config} {light : NativeHostLight.Light config} :
+    Option (Observed config light) → IO (Except String (Observed config light))
+  | some held => pure (.ok held)
+  | none => do
+      match ← light.basis ⟨[], []⟩ with
+      | .error detail => return .error detail
+      | .ok basis => return .ok ⟨basis, []⟩
 
 /-- Op 4 on the session's light opening: the challenge is computed on the served state (a basis
 declaring nothing: the challenge reads the directory, the authority cell and the clock cell, no
-journal, marker or nullifier). -/
+journal, marker or nullifier), and the session keeps that basis and the planned challenges for the
+op 5 that answers them (R1). The answer is `challengeWireOn`'s on the basis's ground. -/
 def challengeWireLight (config : Config) (light : NativeHostLight.Light config)
-    (bytes : List UInt8) : IO (Except Refusal (List UInt8)) := do
-  match ← light.basis ⟨[], []⟩ with
-  | .error detail => return .error ⟨.operationRejected, detail, none⟩
-  | .ok served => challengeWireOn config (.ofBasis served) bytes
+    (observed : Option (Observed config light)) (bytes : List UInt8) :
+    IO (Except Refusal (List UInt8) × Option (Observed config light)) := do
+  match ← Observed.orFresh observed with
+  | .error detail => return (.error ⟨.operationRejected, detail, none⟩, observed)
+  | .ok held =>
+      let (answer, kept) ← challengeWireOn config (.ofBasis held.basis) bytes
+      return (answer, some ⟨held.basis, held.challenges.keepAll kept⟩)
 
 def queryWireLoaded (config : Config) (opened : Opened config)
     (bytes : List UInt8) : IO (Except Refusal (List UInt8)) :=

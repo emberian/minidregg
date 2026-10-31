@@ -803,19 +803,23 @@ theorem challengeMismatch_same_root (expected supplied : Challenge)
 refused against the current world root; no grant means no successful footprint; no
 callback can mint a read token. Before the header signatures verify only
 `preAuthentication` reasons are named. Reached only through `authorize`, after the
-intent signature verified (`authenticated`). -/
-def authorizeAuthenticated {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
+intent signature verified (`authenticated`). This form takes op 5's planned challenge
+already computed, with its equation (`authorizeAuthenticatedFrom_eq`). -/
+def authorizeAuthenticatedFrom {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
     (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
-    (federation : FederationId) (genesisHeight : Nat) (signed : Signed) :
+    (federation : FederationId) (genesisHeight : Nat) (signed : Signed)
+    (result : Except Refusal (Challenge ×
+      Planned context profile federation genesisHeight signed.challenge.intent signed.challenge.intent.grants))
+    (exact : challengePlanned context profile federation genesisHeight signed.challenge.intent
+      signed.challenge.intentSignature = result) :
     m (Except Refusal (AuthorizedIntent context profile federation genesisHeight signed.challenge.intent)) := do
   let intent := signed.challenge.intent
-  match planned : challengePlanned context profile federation genesisHeight intent
-      signed.challenge.intentSignature with
+  match planned : result with
   | .error reason => return .error (preAuthentication reason)
   | .ok (expected, plans) =>
       have derived : challenge context profile federation genesisHeight intent
           signed.challenge.intentSignature = .ok expected := by
-        rw [← challengePlanned_exact, planned]; rfl
+        rw [← challengePlanned_exact, exact, planned]; rfl
       if same : expected = signed.challenge then
         if footprint : footprintExact context intent = .ok () then
           match ← checkGrantsPlanned native context profile federation genesisHeight intent intent.grants plans
@@ -825,6 +829,116 @@ def authorizeAuthenticated {m : Type → Type} [Monad m] (native : CredentialSig
                 derived.trans (congrArg Except.ok same), footprint, grants⟩
         else return .error (preAuthentication (.of .malformed))
       else return .error (challengeMismatch expected signed.challenge)
+
+/-- The authorization of an AUTHENTICATED signed observation: stale challenges are
+refused against the current world root; no grant means no successful footprint; no
+callback can mint a read token. Before the header signatures verify only
+`preAuthentication` reasons are named. Reached only through `authorize`, after the
+intent signature verified (`authenticated`). -/
+def authorizeAuthenticated {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
+    (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (federation : FederationId) (genesisHeight : Nat) (signed : Signed) :
+    m (Except Refusal (AuthorizedIntent context profile federation genesisHeight signed.challenge.intent)) :=
+  authorizeAuthenticatedFrom native context profile federation genesisHeight signed _ rfl
+
+/-- Any result equal to the planned challenge authorizes exactly as computing it does. -/
+theorem authorizeAuthenticatedFrom_eq {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
+    (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (federation : FederationId) (genesisHeight : Nat) (signed : Signed)
+    (result : Except Refusal (Challenge ×
+      Planned context profile federation genesisHeight signed.challenge.intent signed.challenge.intent.grants))
+    (exact : challengePlanned context profile federation genesisHeight signed.challenge.intent
+      signed.challenge.intentSignature = result) :
+    authorizeAuthenticatedFrom native context profile federation genesisHeight signed result exact =
+      authorizeAuthenticated native context profile federation genesisHeight signed := by
+  subst exact; rfl
+
+/-- One op 4 challenge kept for op 5 (inventory R1, docs/RETAINED-MODE.md): the intent, the
+subject's signature over it, and the planned challenge op 4 computed, with its equation. It is
+indexed by the context it was computed in, so it is offered only to a read over that same
+context: a session whose opening moves starts with no retained challenges. -/
+structure RetainedChallenge (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (federation : FederationId) (genesisHeight : Nat) where
+  intent : Intent
+  intentSignature : List UInt8
+  planned : Challenge × Planned context profile federation genesisHeight intent intent.grants
+  exact : challengePlanned context profile federation genesisHeight intent intentSignature = .ok planned
+
+/-- The retained challenges of one context, newest first, at most `retainedBound`. -/
+abbrev RetainedChallenges (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (federation : FederationId) (genesisHeight : Nat) :=
+  List (RetainedChallenge context profile federation genesisHeight)
+
+/-- The most challenges a context keeps: a reader's op 4 is answered by its op 5 a moment later,
+so a short window suffices, and a lookup stays a constant. -/
+def retainedBound : Nat := 32
+
+/-- Keep one more; the oldest beyond the bound is dropped. -/
+def RetainedChallenges.keep {context : Context deployment} {profile : CanonicalRuntimeProfile.Profile F}
+    {federation : FederationId} {genesisHeight : Nat}
+    (held : RetainedChallenges context profile federation genesisHeight)
+    (entry : RetainedChallenge context profile federation genesisHeight) :
+    RetainedChallenges context profile federation genesisHeight :=
+  (entry :: held).take retainedBound
+
+/-- Keep several, newest first. -/
+def RetainedChallenges.keepAll {context : Context deployment} {profile : CanonicalRuntimeProfile.Profile F}
+    {federation : FederationId} {genesisHeight : Nat}
+    (held fresh : RetainedChallenges context profile federation genesisHeight) :
+    RetainedChallenges context profile federation genesisHeight :=
+  (fresh ++ held).take retainedBound
+
+/-- The retained planned challenge of exactly this intent and signature, with its equation. -/
+def RetainedChallenges.find {context : Context deployment} {profile : CanonicalRuntimeProfile.Profile F}
+    {federation : FederationId} {genesisHeight : Nat} (intent : Intent) (intentSignature : List UInt8) :
+    RetainedChallenges context profile federation genesisHeight →
+      Option { planned : Challenge × Planned context profile federation genesisHeight intent intent.grants //
+        challengePlanned context profile federation genesisHeight intent intentSignature = .ok planned }
+  | [] => none
+  | entry :: rest =>
+      if same : entry.intent = intent ∧ entry.intentSignature = intentSignature then
+        some (by obtain ⟨i, s⟩ := same; subst i; subst s; exact ⟨entry.planned, entry.exact⟩)
+      else RetainedChallenges.find intent intentSignature rest
+
+/-- Op 4's challenge, with what op 5 keeps of it: the planned challenge and its equation. -/
+def challengeRetained (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (federation : FederationId) (genesisHeight : Nat) (intent : Intent) (intentSignature : List UInt8) :
+    Except Refusal Challenge × Option (RetainedChallenge context profile federation genesisHeight) :=
+  match exact : challengePlanned context profile federation genesisHeight intent intentSignature with
+  | .error reason => (.error reason, none)
+  | .ok planned => (.ok planned.1, some ⟨intent, intentSignature, planned, exact⟩)
+
+/-- The challenge op 4 sends is `challenge`'s. -/
+theorem challengeRetained_fst (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (federation : FederationId) (genesisHeight : Nat) (intent : Intent) (intentSignature : List UInt8) :
+    (challengeRetained context profile federation genesisHeight intent intentSignature).1 =
+      challenge context profile federation genesisHeight intent intentSignature := by
+  unfold challengeRetained
+  rw [← challengePlanned_exact]
+  split <;> rename_i planned <;> simp [planned, Except.map]
+
+/-- `authorizeAuthenticated` reading op 4's retained challenge when there is one. -/
+def authorizeAuthenticatedRetained {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
+    (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (federation : FederationId) (genesisHeight : Nat)
+    (held : RetainedChallenges context profile federation genesisHeight) (signed : Signed) :
+    m (Except Refusal (AuthorizedIntent context profile federation genesisHeight signed.challenge.intent)) :=
+  match held.find signed.challenge.intent signed.challenge.intentSignature with
+  | some ⟨planned, exact⟩ =>
+      authorizeAuthenticatedFrom native context profile federation genesisHeight signed (.ok planned) exact
+  | none => authorizeAuthenticated native context profile federation genesisHeight signed
+
+/-- **A retained challenge authorizes exactly as recomputing it does**, whatever is retained. -/
+theorem authorizeAuthenticatedRetained_eq {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
+    (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (federation : FederationId) (genesisHeight : Nat)
+    (held : RetainedChallenges context profile federation genesisHeight) (signed : Signed) :
+    authorizeAuthenticatedRetained native context profile federation genesisHeight held signed =
+      authorizeAuthenticated native context profile federation genesisHeight signed := by
+  unfold authorizeAuthenticatedRetained
+  split
+  · exact authorizeAuthenticatedFrom_eq _ _ _ _ _ _ _ _
+  · rfl
 
 /-- **Every signed observation authenticates before it reads a target.** The intent
 signature the challenge carries is checked against the subject's current key
@@ -839,6 +953,28 @@ def authorize {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Orac
   match authenticated key verdict with
   | .error refusal => return .error refusal
   | .ok () => authorizeAuthenticated native context profile federation genesisHeight signed
+
+/-- `authorize` reading op 4's retained challenge when there is one. -/
+def authorizeRetained {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
+    (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (federation : FederationId) (genesisHeight : Nat)
+    (held : RetainedChallenges context profile federation genesisHeight) (signed : Signed) :
+    m (Except Refusal (AuthorizedIntent context profile federation genesisHeight signed.challenge.intent)) := do
+  let key := intentKey context signed.challenge.intent.subject
+  let verdict ← intentVerdict native key signed.challenge.intent signed.challenge.intentSignature
+  match authenticated key verdict with
+  | .error refusal => return .error refusal
+  | .ok () => authorizeAuthenticatedRetained native context profile federation genesisHeight held signed
+
+/-- **Retention changes no answer**: op 5 over retained challenges is `authorize`, refusal for
+refusal; the intent signature is still verified on every read. -/
+theorem authorizeRetained_eq {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
+    (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (federation : FederationId) (genesisHeight : Nat)
+    (held : RetainedChallenges context profile federation genesisHeight) (signed : Signed) :
+    authorizeRetained native context profile federation genesisHeight held signed =
+      authorize native context profile federation genesisHeight signed := by
+  simp only [authorizeRetained, authorize, authorizeAuthenticatedRetained_eq]
 
 /-- The signed path is the authentication, then the target-reading authorization. -/
 theorem authorize_authenticates_first {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)

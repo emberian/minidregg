@@ -254,6 +254,7 @@ state (a basis declaring nothing; `authorize` reads no journal, marker or nullif
 answer off the authorization (`resourceAnswer`). Any other read (a history, an `at h`) and a
 batch are answered on the full image, opened on first need (`full`). -/
 def queryWireLight (config : NativeHost.Config) (light : NativeHostLight.Light config)
+    (observed : Option (NativeHost.Observed config light))
     (full : IO (NativeHost.Opened config)) (cache : IO.Ref Cache) (bytes : List UInt8) :
     IO (Except Refusal (List UInt8)) := do
   if NativeObservationCodec.isBatch bytes then return ← queryWireLoaded config (← full) cache bytes
@@ -263,11 +264,13 @@ def queryWireLight (config : NativeHost.Config) (light : NativeHostLight.Light c
     | return ← queryLoaded config (← full) cache bytes
   unless query.view == .resource || query.view == .resourceScope do
     return ← queryLoaded config (← full) cache bytes
-  let served ← match ← light.basis ⟨[], []⟩ with
+  -- Op 4's basis and planned challenge over this light opening, when it left them
+  -- (`authorizeRetained_eq`: the same answer as `authorize` on a fresh basis's ground).
+  let held ← match ← NativeHost.Observed.orFresh observed with
     | .error detail => return .error ⟨.operationRejected, detail, none⟩
-    | .ok served => pure served
-  match ← NativeObservationController.authorize config.signature (.ofBasis served) config.profile
-      config.federation config.genesisHeight signed with
+    | .ok held => pure held
+  match ← NativeObservationController.authorizeRetained config.signature (.ofBasis held.basis)
+      config.profile config.federation config.genesisHeight held.challenges signed with
   | .error refusal => return .error refusal
   | .ok token =>
       if present : 0 < signed.challenge.intent.grants.length then
