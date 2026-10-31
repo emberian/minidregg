@@ -629,14 +629,32 @@ point marginal is uniform and no mask repeats, yet one disclosed mask reveals
 all the others. -/
 def shift (k : Fin (m + 1)) (v : Nat) : Fin (m + 1) := k + ⟨v % (m + 1), Nat.mod_lt _ (Nat.succ_pos _)⟩
 
-/-- **Teeth**: the successor test separates a keyed shift from the ideal at gap
-`1/2`, so the `1/4` bound fails. -/
+/-- **Teeth**: at `m = 2` a keyed shift passes the `1/2` bound against every
+equality test (gap `1/3`, `shift_passes_equality`) and every point test (gap
+`0`, `shift_passes_points`), and fails it against the successor test (gap
+`2/3`), which alone refutes it. -/
 theorem shift_refuted :
-    ¬ CustodyPrf 1 2 1 4 window12 (shift 1) (namedBudget 1 window12) := by
+    ¬ CustodyPrf 2 3 1 2 window12 (shift 2) (namedBudget 2 window12) := by
   rintro ⟨_, game⟩
-  obtain ⟨_, _, bound, _⟩ := game (succTest 1 1 2) (Or.inl ⟨1, by simp, 2, by simp, by decide, Or.inr rfl⟩)
+  obtain ⟨_, _, bound, _⟩ := game (succTest 2 1 2) (Or.inl ⟨1, by simp, 2, by simp, by decide, Or.inr rfl⟩)
   revert bound
   decide
+
+theorem shift_passes_equality :
+    ∀ v ∈ window12, ∀ w ∈ window12, v ≠ w →
+      GapAtMost (3 * funs 2 window12) 1 2 (fun t => equalityTest 2 v w (shift 2 (split t).1))
+        (fun t => equalityTest 2 v w (idealFn 2 window12 (split t).2)) := by
+  intro v hv w hw ne
+  simp only [window12, List.mem_cons, List.not_mem_nil, or_false] at hv hw
+  rcases hv with rfl | rfl <;> rcases hw with rfl | rfl <;> first | exact absurd rfl ne | (unfold GapAtMost; decide)
+
+theorem shift_passes_points :
+    ∀ v ∈ window12, ∀ c : Fin 3,
+      GapAtMost (3 * funs 2 window12) 0 1 (fun t => pointTest 2 v c (shift 2 (split t).1))
+        (fun t => pointTest 2 v c (idealFn 2 window12 (split t).2)) := by
+  intro v hv c
+  simp only [window12, List.mem_cons, List.not_mem_nil, or_false] at hv
+  rcases hv with rfl | rfl <;> revert c <;> unfold GapAtMost <;> decide
 
 end Custody
 
@@ -1122,11 +1140,20 @@ theorem receiver_prf_hop_view {m keys num den : Nat} {Strategy Item View : Type}
 
 /-! ## The hiding goal at the receiver -/
 
+/-- **An attack**: the two candidate worlds' birth store and adaptive patch
+choices (a world is `false` or `true`), and the attacker's own decision on the
+view. The decision never sees the world bit; it is all the attacker outputs. -/
+structure Attack (base : Params wire) (Item View : Type) where
+  store : Bool → Store (CanonicalCellRegistry.layout kind)
+  next : Bool → List Item → List (KeptCell.Write (kind := kind))
+  decide : Option View → Bool
+  born : ∀ b, (birth wire base (store b)).isSome
+
 /-- **One deployment of the receiver's hiding game**: the custody function and
 its mask encoding, what is served and the reader's view through it (`g`,
-`factors`: the `ViewThroughServe` witness), and the adaptive strategy's choices
-of birth store and patches. -/
-structure HidingSetting (m keys : Nat) (Strategy Item View : Type) where
+`factors`: the `ViewThroughServe` witness), and the number of rounds. The
+attacks are `Attack base Item View`. -/
+structure HidingSetting (m keys : Nat) (Item View : Type) where
   keyed : Fin keys → Nat → Fin (m + 1)
   base : Params wire
   sample : Fin (m + 1) → (CanonicalCellRegistry.layout kind).Value base.blinding.space
@@ -1137,14 +1164,13 @@ structure HidingSetting (m keys : Nat) (Strategy Item View : Type) where
   g : List Item → View
   factors : ∀ cells, view cells = g (cells.map (KeptCell.served serve))
   rounds : Nat
-  store : Strategy → Bool → Store (CanonicalCellRegistry.layout kind)
-  next : Strategy → Bool → List Item → List (KeptCell.Write (kind := kind))
-  born : ∀ a b, (birth wire base (store a b)).isSome
-  game : Strategy → Bool → Option View → Bool
 
 namespace HidingSetting
 
-variable {wire} {m keys : Nat} {Strategy Item View : Type} (setting : HidingSetting wire m keys Strategy Item View)
+variable {wire} {m keys : Nat} {Item View : Type} (setting : HidingSetting wire m keys Item View)
+
+/-- The attacks of this deployment. -/
+abbrev Strategy := Attack wire setting.base Item View
 
 /-- The window of versions a run of `rounds` rounds uses. -/
 abbrev window : List Nat := List.range (setting.rounds + 1)
@@ -1152,39 +1178,41 @@ abbrev window : List Nat := List.range (setting.rounds + 1)
 /-- The joint tape: the custody key and the ideal function. -/
 abbrev tapes : Nat := keys * funs m setting.window
 
-/-- **The real experiment**: the game on the reader's view of the adaptive run
-under the tape's custody key. This is the `run` of the hiding goal. -/
-def real (a : Strategy) (b : Bool) (t : Fin setting.tapes) : Bool :=
-  setting.game a b ((arun wire setting.serve (keyedParams wire setting.base setting.sample setting.keyed (split t).1)
-    (setting.store a b) (setting.next a b) setting.rounds).map setting.view)
+/-- **The real experiment**: the attacker's decision on the reader's view of the
+adaptive run in world `b`, under the tape's custody key. This is the `run` of
+the hiding goal. -/
+def real (a : setting.Strategy) (b : Bool) (t : Fin setting.tapes) : Bool :=
+  a.decide ((arun wire setting.serve (keyedParams wire setting.base setting.sample setting.keyed (split t).1)
+    (a.store b) (a.next b) setting.rounds).map setting.view)
 
-/-- **The uniform experiment**: the same game over the ideal function's masks. -/
-def uniform (a : Strategy) (b : Bool) (t : Fin setting.tapes) : Bool :=
-  setting.game a b ((transcript wire setting.serve setting.base (setting.store a b) (setting.next a b)
+/-- **The uniform experiment**: the same decision over the ideal function's masks. -/
+def uniform (a : setting.Strategy) (b : Bool) (t : Fin setting.tapes) : Bool :=
+  a.decide ((transcript wire setting.serve setting.base (a.store b) (a.next b)
     (maskList setting.encodeMask setting.rounds (idealFn m setting.window (split t).2)) setting.rounds).map setting.g)
 
-/-- The composed distinguisher of the PRF reduction for one strategy and world. -/
-def composed (a : Strategy) (b : Bool) (f : Nat → Fin (m + 1)) : Bool :=
-  setting.game a b ((transcript wire setting.serve setting.base (setting.store a b) (setting.next a b)
+/-- The composed distinguisher of the PRF reduction for one attack and world. -/
+def composed (a : setting.Strategy) (b : Bool) (f : Nat → Fin (m + 1)) : Bool :=
+  a.decide ((transcript wire setting.serve setting.base (a.store b) (a.next b)
     (maskList setting.encodeMask setting.rounds f) setting.rounds).map setting.g)
 
-/-- **The receiver's blinded-cell hiding** (`BlindedCellHiding.TranscriptHiding`
+/-- **The receiver's hiding from the hybrids** (`BlindedCellHiding.TranscriptHiding`
 of `real` at the hybrid composition's bound). The PRF hop is discharged here
 (`receiver_prf_hop_view`) from `CustodyPrf` and the reduction's efficiency
-obligation; what stays open, as named premises, is the rest of the declared
-hybrid order: `zk`, the uniform-mask experiment against one with simulated
-openings (`ServesWithin` is the deterministic case after simulation); `rom`,
-that experiment against the ideal one with independent uniform roots (the
-mask-guessing coupling, which needs `ServesWithin` and a high-entropy mask
-encoding); and `identical`, that the ideal experiment does not depend on the
-world bit. Forks are excluded by the run itself (one chain, `PublishesRun` at
-the host). -/
+obligation. The rest of the declared order stays as named open premises, which
+jointly say "hiding with uniform masks": `zk`, the uniform-mask experiment
+against one with simulated openings (`ServesWithin` is the deterministic case
+after simulation); `rom`, that experiment against the ideal one with
+independent uniform roots (the mask-guessing coupling, which needs
+`ServesWithin`; `lambda` is the mask encoding's entropy in bits, and at the
+use `versions = rounds + 1`); `identical`, that the ideal experiment does not
+depend on the world. Forks are excluded by the run itself (one chain;
+`PublishesRun` at the host). -/
 theorem hiding_of_hybrids {num den lambda versions queries zNum : Nat}
-    (budgetedPrf : ((Nat → Fin (m + 1)) → Bool) → Prop) (legal budgeted : Strategy → Prop)
+    (budgetedPrf : ((Nat → Fin (m + 1)) → Bool) → Prop) (legal budgeted : setting.Strategy → Prop)
     (prf : CustodyPrf m keys num den setting.window setting.keyed budgetedPrf)
     (reduction : ∀ a, legal a → budgeted a → ∀ b, budgetedPrf (setting.composed a b))
     (someKey : 0 < keys) (denominator : 0 < den) (below : queries < 2 ^ lambda)
-    (simulated ideal : Strategy → Bool → Fin setting.tapes → Bool)
+    (simulated ideal : setting.Strategy → Bool → Fin setting.tapes → Bool)
     (zk : ∀ a, legal a → budgeted a → ∀ b, GapAtMost setting.tapes zNum den (setting.uniform a b) (simulated a b))
     (rom : ∀ a, legal a → budgeted a → ∀ b,
       GapAtMost setting.tapes (versions * queries) (2 ^ lambda - queries) (simulated a b) (ideal a b))
@@ -1194,33 +1222,72 @@ theorem hiding_of_hybrids {num den lambda versions queries zNum : Nat}
       (den * (2 ^ lambda - queries)) setting.real legal budgeted := by
   have positive : 0 < setting.tapes := Nat.mul_pos someKey (Nat.pow_pos (Nat.succ_pos _))
   have hop := receiver_prf_hop_view wire setting.keyed budgetedPrf setting.base setting.sample setting.encodeMask
-    setting.encodes setting.serve setting.view setting.g setting.factors setting.rounds setting.store setting.next
-    setting.born prf setting.game legal budgeted reduction
+    setting.encodes setting.serve setting.view setting.g setting.factors setting.rounds
+    (fun (a : setting.Strategy) b => a.store b) (fun a b => a.next b) (fun a b => a.born b) prf
+    (fun a _ v => a.decide v) legal budgeted reduction
   exact BlindedCellHiding.hybridReduction_holds setting.tapes lambda versions queries num zNum den setting.real
     setting.uniform simulated ideal legal budgeted positive denominator below
     (fun a la ba b => ⟨hop a la ba b, zk a la ba b, rom a la ba b⟩) identical
 
-/-- **The receiver's hiding goal** (`BlindedCellHiding.RatchetHidingGoal` of
-`real`): the hybrids above, plus a bound below one, a budget admitting the named
-distinguishers, and a legal budgeted distinguisher with a genuine hidden
-difference. Those last two are the goal's own non-vacuity and stay to be
-supplied by concrete attack strategies of this game. -/
-theorem hidingGoal_of_hybrids {num den lambda versions queries zNum : Nat}
-    (budgetedPrf : ((Nat → Fin (m + 1)) → Bool) → Prop) (legal budgeted hiddenDiff distinguisher : Strategy → Prop)
+/-! ### The goal's distinguishers and hidden choice, concretely -/
+
+/-- **The decoy-membership test**: is the view one of the candidate views? (A
+reader holding the views the other world would produce with exposed masks
+recognises them.) -/
+def decoyTest [DecidableEq View] (decoys : List (Option View)) (v : Option View) : Bool := decoys.contains v
+
+/-- The goal's distinguishers: attacks deciding by a decoy-membership test with
+at least one decoy. -/
+def Distinguisher [DecidableEq View] (a : setting.Strategy) : Prop :=
+  ∃ decoys : List (Option View), decoys ≠ [] ∧ a.decide = decoyTest decoys
+
+/-- The goal's hidden difference: the two worlds' patches differ. -/
+def HiddenDiff (a : setting.Strategy) : Prop := ∃ items, a.next false items ≠ a.next true items
+
+/-- **A concrete challenge**: one birth store, patch `p₀` in world `false` and
+`p₁` in world `true` at every round, decided by a decoy test. -/
+def pairAttack [DecidableEq View] (s : Store (CanonicalCellRegistry.layout kind)) (bornS : (birth wire setting.base s).isSome)
+    (p₀ p₁ : List (KeptCell.Write (kind := kind))) (decoys : List (Option View)) : setting.Strategy :=
+  ⟨fun _ => s, fun b _ => if b then p₁ else p₀, decoyTest decoys, fun _ => bornS⟩
+
+theorem pairAttack_distinguisher [DecidableEq View] {s : Store (CanonicalCellRegistry.layout kind)}
+    {bornS : (birth wire setting.base s).isSome} {p₀ p₁ : List (KeptCell.Write (kind := kind))}
+    {decoys : List (Option View)} (someDecoy : decoys ≠ []) :
+    setting.Distinguisher (setting.pairAttack s bornS p₀ p₁ decoys) :=
+  ⟨decoys, someDecoy, rfl⟩
+
+theorem pairAttack_hiddenDiff [DecidableEq View] {s : Store (CanonicalCellRegistry.layout kind)}
+    {bornS : (birth wire setting.base s).isSome} {p₀ p₁ : List (KeptCell.Write (kind := kind))}
+    {decoys : List (Option View)} (distinct : p₀ ≠ p₁) :
+    setting.HiddenDiff (setting.pairAttack s bornS p₀ p₁ decoys) :=
+  ⟨[], by simpa [pairAttack] using distinct⟩
+
+/-- **The receiver's hiding goal from the hybrids** (`BlindedCellHiding.RatchetHidingGoal`
+of `real`), its distinguishers the decoy-membership attacks and its hidden
+difference differing patches. The budget must admit every decoy attack, and the
+hidden-choice witness is the concrete `pairAttack` with distinct patches and a
+decoy, whose legality under the same-leakage rule is the one thing assumed of it.
+The hybrids `zk`, `rom`, `identical` stay open, as in `hiding_of_hybrids`. -/
+theorem hidingGoal_of_hybrids [DecidableEq View] {num den lambda versions queries zNum : Nat}
+    (budgetedPrf : ((Nat → Fin (m + 1)) → Bool) → Prop) (legal budgeted : setting.Strategy → Prop)
     (prf : CustodyPrf m keys num den setting.window setting.keyed budgetedPrf)
     (reduction : ∀ a, legal a → budgeted a → ∀ b, budgetedPrf (setting.composed a b))
     (someKey : 0 < keys) (denominator : 0 < den) (below : queries < 2 ^ lambda)
     (small : 2 * (num + zNum) * (2 ^ lambda - queries) + 2 * versions * queries * den < den * (2 ^ lambda - queries))
-    (meaningful : BlindedCellHiding.BudgetMeaningful budgeted distinguisher)
-    (hidden : BlindedCellHiding.HasHiddenChoice legal distinguisher hiddenDiff)
-    (simulated ideal : Strategy → Bool → Fin setting.tapes → Bool)
+    (meaningful : BlindedCellHiding.BudgetMeaningful budgeted setting.Distinguisher)
+    (s : Store (CanonicalCellRegistry.layout kind)) (bornS : (birth wire setting.base s).isSome)
+    (p₀ p₁ : List (KeptCell.Write (kind := kind))) (distinct : p₀ ≠ p₁)
+    (decoys : List (Option View)) (someDecoy : decoys ≠ [])
+    (legalPair : legal (setting.pairAttack s bornS p₀ p₁ decoys))
+    (simulated ideal : setting.Strategy → Bool → Fin setting.tapes → Bool)
     (zk : ∀ a, legal a → budgeted a → ∀ b, GapAtMost setting.tapes zNum den (setting.uniform a b) (simulated a b))
     (rom : ∀ a, legal a → budgeted a → ∀ b,
       GapAtMost setting.tapes (versions * queries) (2 ^ lambda - queries) (simulated a b) (ideal a b))
     (identical : ∀ a, legal a → budgeted a → GapAtMost setting.tapes 0 1 (ideal a false) (ideal a true)) :
     BlindedCellHiding.RatchetHidingGoal setting.tapes lambda versions queries num zNum den setting.real legal
-      budgeted hiddenDiff distinguisher :=
-  ⟨denominator, below, small, meaningful, hidden,
+      budgeted setting.HiddenDiff setting.Distinguisher :=
+  ⟨denominator, below, small, meaningful,
+    ⟨_, legalPair, setting.pairAttack_distinguisher someDecoy, setting.pairAttack_hiddenDiff distinct⟩,
     setting.hiding_of_hybrids budgetedPrf legal budgeted prf reduction someKey denominator below simulated ideal zk
       rom identical⟩
 
@@ -1247,6 +1314,9 @@ end HidingSetting
 #assert_axioms receiver_prf_hop_view
 #assert_axioms HidingSetting.hiding_of_hybrids
 #assert_axioms HidingSetting.hidingGoal_of_hybrids
+#assert_axioms HidingSetting.pairAttack_hiddenDiff
+#assert_axioms Custody.shift_passes_equality
+#assert_axioms Custody.shift_passes_points
 #assert_axioms arun_srun
 #assert_axioms recoverable_refuted
 #assert_axioms maskServe_refuted

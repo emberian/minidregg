@@ -199,8 +199,9 @@ applied):
   these, nothing more, and Lean does not tie it to efficiency; admitting every evaluation test made
   the premise statistical, exhaustive key search included); honest pole `enumeration_satisfies`,
   teeth `constant_refuted` (equality), `counter_refuted` (a public counter passes every equality test
-  and fails a point test) and `shift_refuted` (a keyed shift has uniform marginals and fails the
-  successor test), all against `namedBudget`.
+  and fails a point test) and `shift_refuted` (at `m = 2` a keyed shift passes every equality and
+  point test, `shift_passes_equality` / `shift_passes_points`, and fails only the successor test),
+  all against `namedBudget`.
   Round 8 (answered with astra round 10): what is published is a `Serve` (a function of a version's
   context, mask and kept index: roots, deterministic openings; a randomized opening at each fixed
   coin assignment). `ViewThroughServe`: a reader's view is a function of the served items.
@@ -230,19 +231,22 @@ applied):
   no store lookup.
 
 **Owed, in order:**
-0. **Done: the hiding goals at the receiver.** `Kernel/BlindedCellHiding.lean` is the statement
-   module (namespace `BlindedCellHiding`, no longer Draft). `HidingSetting` (one deployment: custody
-   function and mask encoding, `Serve`, the view with its factorization `g`, the adaptive strategy's
-   store and patches); `real` (the game on the view of the keyed run) is the hiding goal's `run`.
-   `hiding_of_hybrids`: `TranscriptHiding` of `real` at the composition's bound, the PRF hop
-   discharged (`receiver_prf_hop_view`); open premises `zk` (uniform against simulated openings),
-   `rom` (simulated against independent uniform roots: needs `ServesWithin` and a high-entropy mask
-   encoding) and `identical` (the ideal is world-independent). `hidingGoal_of_hybrids`:
-   `RatchetHidingGoal` of `real` given also the bound below one, `BudgetMeaningful` and
-   `HasHiddenChoice`, which still want concrete attack strategies of this game. Still owed in the
-   hiding argument: the ZK hybrid over an independent coin tape, the ROM coupling, a concrete
-   distinguisher and hidden-choice witness, the host corollary over the accepted set and its
-   observable event trace (`PublishesRun`).
+0. **The hiding goal stated at the receiver; NOT proved.** `Kernel/BlindedCellHiding.lean` is the
+   statement module (namespace `BlindedCellHiding`). `Attack`: an attack's two candidate worlds'
+   birth store and adaptive patches, and its own `decide` on the view (it never sees the world bit).
+   `HidingSetting` (custody function and mask encoding, `Serve`, the view with its factorization
+   `g`, rounds); `real` (the attack's decision on the view of the keyed run in world `b`) is the
+   goal's `run`. `hiding_of_hybrids`: `TranscriptHiding` of `real` FROM the open hybrids; the PRF hop
+   is discharged (`receiver_prf_hop_view`); `zk`, `rom`, `identical` are open premises that jointly
+   say "hiding with uniform masks" (`lambda` is the mask encoding's entropy, `versions = rounds + 1`
+   at the use). `hidingGoal_of_hybrids`: `RatchetHidingGoal` of `real` from the same hybrids, its
+   distinguishers the decoy-membership attacks (`Distinguisher`: `decide` is `decoyTest` with a
+   decoy), its hidden difference differing patches (`HiddenDiff`), the witness the concrete
+   `pairAttack` (one store, patches `p₀ ≠ p₁`, a decoy test), assumed only legal. Round 11 found the
+   previous form vacuous (a caller-chosen `game` reading the world bit, caller-labelled
+   distinguishers). Owed in the hiding argument: the ZK hybrid over an independent coin tape, the ROM
+   coupling, `identical` for the deployed service, a concrete leakage model for `legal`, the host
+   corollary over the accepted set and its observable event trace (`PublishesRun`).
 1. **The cell representation carries `KeptCell`**: `Materialized.rootCache := KeptCell.root`,
    `rootExact` by `root_eq` and a materializer whose `rootOf` is `privateRoot` (context made
    explicit in the specification: `rootOf : Store → Root` cannot see the accepted version), patch
