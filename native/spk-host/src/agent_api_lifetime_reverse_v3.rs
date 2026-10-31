@@ -22,6 +22,44 @@ fn refused(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
 }
 
+/// The controller's named refusal of a reverse request (`{"type":"refused","detail":...}`), carried as the
+/// source of an `io::Error` so the caller can tell a definite refusal from a transport failure.
+#[derive(Debug)]
+pub(crate) struct ControllerRefusal(pub String);
+
+impl std::fmt::Display for ControllerRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "controller refused: {}", self.0)
+    }
+}
+
+impl std::error::Error for ControllerRefusal {}
+
+impl ControllerRefusal {
+    /// The refusal detail of an error from `controller_reply`, bounded and free of control characters.
+    pub(crate) fn of(error: &io::Error) -> Option<&str> {
+        error.get_ref()?.downcast_ref::<ControllerRefusal>().map(|refusal| refusal.0.as_str())
+    }
+}
+
+/// Decode one controller reply as `T`. A `refused` reply has its own shape (type and detail, no
+/// attempt fields): decoding it as the success type reported "unknown field `detail`" and turned a named
+/// refusal into an unexplained failure, so it is recognised first.
+fn controller_reply<T: serde::de::DeserializeOwned>(response: Value) -> io::Result<T> {
+    if response.get("type").and_then(Value::as_str) == Some("refused") {
+        let detail: String = response
+            .get("detail")
+            .and_then(Value::as_str)
+            .unwrap_or("no detail")
+            .chars()
+            .filter(|c| !c.is_control())
+            .take(200)
+            .collect();
+        return Err(io::Error::new(io::ErrorKind::Other, ControllerRefusal(detail)));
+    }
+    Ok(serde_json::from_value(response)?)
+}
+
 fn index_precedes_count(index: &str, count: &str) -> bool {
     if !decimal(index) || !decimal(count) {
         return false;
@@ -298,7 +336,7 @@ impl LifetimeReverseClient {
             cancelled,
             deadline,
         )?;
-        let reply: SendMarkedReply = serde_json::from_value(response)?;
+        let reply: SendMarkedReply = controller_reply(response)?;
         if reply.kind != "dispatch-send-marked-v3"
             || reply.attempt_id != reserve.attempt_id
             || reply.binding_sha256 != reserve.binding_sha256
@@ -335,7 +373,7 @@ impl LifetimeReverseClient {
             cancelled,
             deadline,
         )?;
-        let reply: SettledReply = serde_json::from_value(response)?;
+        let reply: SettledReply = controller_reply(response)?;
         if reply.kind != "dispatch-settled-v1"
             || reply.attempt_id != reserve.attempt_id
             || reply.response_sha256 != response_sha256
@@ -371,7 +409,7 @@ impl LifetimeReverseClient {
             cancelled,
             deadline,
         )?;
-        let reply: PayerReply = serde_json::from_value(response)?;
+        let reply: PayerReply = controller_reply(response)?;
         if reply.kind != "payer-signatures-v3"
             || reply.attempt_id != reserve.attempt_id
             || reply.binding_sha256 != reserve.binding_sha256
@@ -469,7 +507,7 @@ impl LifetimeReverseClient {
             worker_wall_seconds,
             ..
         } = input;
-        let reply: ReservedReply = serde_json::from_value(reply)?;
+        let reply: ReservedReply = controller_reply(reply)?;
         if reply.kind != "dispatch-reserved-v3"
             || reply.http_operation_id != forward_operation_id
             || reply.binding_sha256 != binding.fingerprint()?
@@ -580,6 +618,23 @@ impl LifetimeReverseClient {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_controller_refusal_is_named_not_decoded_as_the_success_shape() {
+        let refusal = json!({"type":"refused","detail":"relative API path is not canonical\u{7}"});
+        let error = controller_reply::<ReservedReply>(refusal.clone()).unwrap_err();
+        assert_eq!(ControllerRefusal::of(&error), Some("relative API path is not canonical"));
+        for decode in [
+            controller_reply::<SendMarkedReply>(refusal.clone()).map(|_| ()),
+            controller_reply::<SettledReply>(refusal.clone()).map(|_| ()),
+            controller_reply::<PayerReply>(refusal).map(|_| ()),
+        ] {
+            assert!(ControllerRefusal::of(&decode.unwrap_err()).is_some());
+        }
+        // A malformed non-refusal stays an ordinary decode error, not a refusal.
+        let error = controller_reply::<ReservedReply>(json!({"type":"dispatch-reserved-v3","detail":"x"})).unwrap_err();
+        assert!(ControllerRefusal::of(&error).is_none());
+    }
+
     use super::*;
     use std::fs::{self, DirBuilder};
     use std::io::{Read, Write};

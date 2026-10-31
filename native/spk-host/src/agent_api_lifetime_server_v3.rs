@@ -261,7 +261,7 @@ impl ResidentLifetimeAgent<'_> {
         let (fixed_request, decoded_http) = self
             .custody
             .fixed_reserve_request(&request, self.signed_api_path)?;
-        let reserve = self.reverse.reserve_once(
+        let reserve = match self.reverse.reserve_once(
             ReserveV3Input {
                 operator: self.operator,
                 binding: &binding,
@@ -273,7 +273,24 @@ impl ResidentLifetimeAgent<'_> {
                 worker_wall_seconds: self.controller_worker_wall_seconds,
             },
             cancelled,
-        )?;
+        ) {
+            Ok(reserve) => reserve,
+            // Before a reserve nothing was spent and no operation fingerprint exists: the controller's own
+            // named refusal of the request is definite, and the caller gets it by name (law 10) instead of
+            // a closed socket read as an uncertain outcome.
+            Err(error) => match crate::agent_api_lifetime_reverse_v3::ControllerRefusal::of(&error) {
+                Some(detail) => {
+                    return Ok(Reply::RefusedV3 {
+                        protocol: wire::PROTOCOL.into(),
+                        operation_id: operation_id.clone(),
+                        binding_sha256: binding_sha256.clone(),
+                        operation_fingerprint: None,
+                        code: detail.to_owned(),
+                    })
+                }
+                None => return Err(error),
+            },
+        };
         write_new(
             &client_dir,
             "source-verified-v3.json",

@@ -47,10 +47,11 @@ s12=${SHA:0:12}; U=$I/logs/umbrella-tree-$s12.log; synced=$I/logs/umbrella-synce
 while [ -d "$I/umbrella-src.lock" ] && kill -0 "$(cat "$I/umbrella-src.pid" 2>/dev/null)" 2>/dev/null; do sleep 20; done
 t=$(date +%s)
 MINIDREGG_LEAN_SEATS=${UMBRELLA_SEATS:-4} SWARM_MEM_MAX=${UMBRELLA_MEM:-32G} UMBRELLA_SYNCED=$synced \
-  scripts/pipeline/umbrella-tree --src "$src" --tree "$I/umbrella-src" --out "$I/umbrella-tree-out" "$SHA" > "$U" 2>&1 &
+  scripts/pipeline/umbrella-tree --src "$src" --tree "$I/umbrella-src" --out "$I/umbrella-tree-out" "$SHA" > "$U" 2>&1 9>&- &
 upid=$!
 while kill -0 $upid 2>/dev/null && [ ! -f "$synced" ]; do sleep 5; done
-exec 9>&-; touch "$synced"   # src is free (also when umbrella-tree stopped before its sync)
+exec 9>&-; touch "$synced"   # src is free (also when umbrella-tree stopped before its sync); the umbrella tree
+# never had fd 9 (`9>&-` above): a child holding it kept build.lock until the umbrellas ended (10-31 round 960da1d8)
 wait $upid; say "stage umbrella-tree $s12 rc=$? $(( $(date +%s) - t ))s"
 # The fixtures follow the Objective front end and the codec (scripts/native-accepted-fixture/rerecord.sh), run in
 # the umbrella tree where the Fixtures oleans are: "unchanged" (0), "recorded fixture-regen/<sha12> <commit>"

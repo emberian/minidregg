@@ -66,8 +66,15 @@ rounds, and move measurement to persvati's standing world when it exists.
   /home/hbox/lanes/integ/candidates/997905c0bc9c85086324d02c46abeeab3273f6e2. Then two scratch worlds, before
   (batch 9) and after (the overlay), Host CPU per `doc show` alternated. Moves to persvati once build-loop
   announces it.
-- a128a7497, 143caf2fc and 8cbe36d62 await one native Host build (dregg-build2 when build-loop announces it) and a
-  measurement of Host CPU per `doc show` against an unchanged base, alternated worlds.
+- Measured 2026-10-31 on persvati (quiet), three worlds from one source (main 27f85e89 + 86c9dbddb on candidate
+  76511e768): `before3` (a128a7497, 143caf2fc, 8cbe36d62 reverted), `nolight` (8cbe36d62 reverted), `after`.
+  Warm `doc show` of member-1, 2 runs of 6 alternated rounds of 300 (/home/ember/mdpool/rp/hc.sh; Host CPU from
+  /proc, 10 ms ticks): Host CPU per read before3 1.71 / 1.55 ms, nolight 1.33 / 1.35, after 1.54 / 1.30. So the
+  signature-admission and op 5 plan commits take about 0.3 ms (18%) of Host CPU per read; the light port is
+  within noise on a warm read (its gain is the first read after a start, not measurable at this world's height:
+  restart.sh's own health read already pays it). End to end 11.3 ms wall per `doc show` including the driver's
+  own process starts; the other world processes (resident, consent, codec) about 4.1 ms CPU.
+  Worlds: persvati /home/ember/mdpool/rp/w/{before3,nolight,after} (ports 22703, 22704, 22702).
 - hbox trash to clear when hbox returns (root's word): stop w6 and w7 by their PID files and remove them (0.6 G
   each; keep w8), and /home/hbox/lanes/exorcism's Rust target (9.1 G total clone; the pool tree replaces it once
   nothing uncommitted is left there).

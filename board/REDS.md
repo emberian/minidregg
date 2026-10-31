@@ -1,20 +1,23 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `960da1d8d9a8` (builder: REDS.md for 9dc9c138cb32 (4 red)). Round finished 2026-10-31T21:53Z.
-green: `83e926874e38`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-960da1d8`.
+Tip: `60f43c435020` (board: apps-hermes row: Scrumblr qualifies; WBO tail-bound and Hummingbird referer header ). Round finished 2026-10-31T21:59Z.
+green: `83e926874e38`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-60f43c43`.
 
 | stage | signature | reruns? | same place as last round? | detail |
 |---|---|---|---|---|
-| rust-check | did not run | - | no | an earlier stage stopped the build |
-| host | did not run | - | no | an earlier stage stopped the build |
-| consent | did not run | - | no | an earlier stage stopped the build |
-| rust | did not run | - | no | an earlier stage stopped the build |
-| pack | did not run | - | no | an earlier stage stopped the build |
-| umbrella-tree | did not run | - | no | an earlier stage stopped the build |
+| rust-check | did not run | - | yes | an earlier stage stopped the build |
+| host | did not run | - | yes | an earlier stage stopped the build |
+| consent | did not run | - | yes | an earlier stage stopped the build |
+| rust | did not run | - | yes | an earlier stage stopped the build |
+| pack | did not run | - | yes | an earlier stage stopped the build |
+| umbrella-tree | did not run | - | yes | an earlier stage stopped the build |
 
-Suspect commits since green (`git log 83e926874e38..960da1d8d9a8`), newest first; owners are the seats whose
+Suspect commits since green (`git log 83e926874e38..60f43c435020`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `60f43c43` board: apps-hermes row: Scrumblr qualifies; WBO tail-bound and Hummingbird referer header named (owner: apps-hermes)
+- `eac80ad0` application attachment: a package that declares no roles attaches with roleId none or allAccess (owner: build-loop)
+- `7de8305d` builder: REDS.md for 960da1d8d9a8 (6 red)
 - `960da1d8` builder: REDS.md for 9dc9c138cb32 (4 red)
 - `4c6c3676` board: privacy row, the held authority cell landed (store-retained)
 - `c3a46c03` board: store-retained row: R6(i) held authority cell landed (bdfa9428c, c3a28038a); boxes are hbox t (owner: store-retained)
@@ -52,6 +55,3 @@ Suspect commits since green (`git log 83e926874e38..960da1d8d9a8`), newest first
 - `aaec61fc` privacy: cSHAKE256 at a public input length as an Air system over ZMod 2
 - `0a9c7e7c` board: privacy row, the Keccak permutation landed; substrate and next steps from astra round 17
 - `81afc702` privacy: Keccak-f[1600] as an Air constraint system over ZMod 2
-- `d4972329` native-loop, lane-tree: find pool.env from LANE_POOL_ROOT and /srv/pool too (owner: build-loop)
-- `2fef8ab0` Merge remote-tracking branch 'origin/main' into seat/host-execution
-- `dadd9a46` board: host-execution row: slice 2 landed; measurement blocked on consent red (owner: host-execution)
