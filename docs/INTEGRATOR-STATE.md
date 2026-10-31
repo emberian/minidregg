@@ -155,7 +155,7 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   and broken in worktree app-reds-2. Successor owed by root.
 - **D2, protected doc phase outside workspace** (batch 8 composed -c2, documents:protected row 3 `owner: doc protect
   pd-paper`): `error: phase must remain inside participant workspace` after `workspace attempt: …/attempts/0000…-0`;
-  adapter out/err empty. 1 occurrence; world /ci/c-dc6101-c2/w kept up (gate default? check). Batches 4-7 passed.
+  adapter out/err empty. 1 occurrence; world torn down by the gate; evidence under /ci/c-dc6101-c2/composed/state. Batches 4-7 passed.
   Routed to exorcist a97dba51f72535cb9 (read scratch 7dd2f7eda suspect), with the resubmit attempt signature.
 - **H2, attempt-index ENOENT** (batch 7 base): stage j14 worker, `controller-run grain-runtime create` rc=1, ENOENT on
   owner-workspace/attempt-index/by-intent/. Never reached the probe. Distinct from H1. Fix b940b3f50; -hp1 decides.
