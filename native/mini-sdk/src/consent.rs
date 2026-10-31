@@ -506,6 +506,7 @@ pub fn serve_resident_kind(kind: ResidentKind, dir: &Path, executable: PathBuf, 
     let last = Arc::new(Mutex::new(std::time::Instant::now()));
     let active = Arc::new(AtomicUsize::new(0));
     let ended = Arc::new(AtomicBool::new(false));
+    let mut looked = std::time::Instant::now();
     loop {
         if ended.load(Ordering::Acquire) {
             return Ok(());
@@ -524,11 +525,25 @@ pub fn serve_resident_kind(kind: ResidentKind, dir: &Path, executable: PathBuf, 
                 if active.load(Ordering::Acquire) == 0 && quiet > idle {
                     return Ok(());
                 }
+                // Its world torn down (the settings file it was started for removed), or its socket unlinked or
+                // replaced: no client can bind it or reach it again, so it ends now, not at its idle deadline.
+                if looked.elapsed() >= std::time::Duration::from_secs(1) {
+                    looked = std::time::Instant::now();
+                    if !socket_is(&socket, _files.identity) || fs::symlink_metadata(&settings).is_err() {
+                        return Ok(());
+                    }
+                }
                 std::thread::sleep(std::time::Duration::from_millis(5));
             }
             Err(e) => return Err(format!("{} accept: {e}", kind.name()).into()),
         }
     }
+}
+
+/// The socket at `path` is still the one this resident bound (device and inode).
+fn socket_is(path: &Path, identity: (u64, u64)) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    fs::symlink_metadata(path).is_ok_and(|m| (m.dev(), m.ino()) == identity)
 }
 
 /// One client connection: frames in, the child's answers out, one frame at a time across all
@@ -956,6 +971,27 @@ mod tests {
         round_trip(&mut session, crate::host_operations::CONSENT_INTENT, b"intent").unwrap();
         drop(session);
         assert_eq!(opcodes(&dir), vec![220]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_resident_whose_socket_is_unlinked_sees_it_is_unreachable() {
+        use std::os::unix::fs::MetadataExt;
+        // A short directory: the macOS temp dir is longer than a socket address allows.
+        let dir = PathBuf::from(format!("/tmp/mcs-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir(&dir).unwrap();
+        let path = dir.join("r.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        let meta = fs::symlink_metadata(&path).unwrap();
+        let identity = (meta.dev(), meta.ino());
+        assert!(socket_is(&path, identity));
+        fs::remove_file(&path).unwrap();
+        assert!(!socket_is(&path, identity), "unlinked (its world torn down)");
+        drop(listener);
+        let again = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        assert!(!socket_is(&path, identity), "another node at the same path is not this resident's");
+        drop(again);
         let _ = fs::remove_dir_all(&dir);
     }
 
