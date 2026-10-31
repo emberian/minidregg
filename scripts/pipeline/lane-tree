@@ -3,6 +3,9 @@
 #
 #   lane-tree acquire LANE [REF]   lease a pooled tree for LANE, check REF out in it (default origin/main),
 #                                  print its path. Re-acquiring a LANE that holds a tree returns the same tree.
+#                                  Every tree leased: it waits (LANE_POOL_WAIT_S, default 3600 s; 0 = fail at once).
+#                                  A lease not renewed for LANE_POOL_TTL_H hours (default 12) is expired: acquire
+#                                  takes it (diff saved) and gc frees it
 #   lane-tree release LANE         save the tree's uncommitted diff (if any) and free it
 #   lane-tree renew LANE|TREE      extend the lease (lane-check calls this for the tree it checks)
 #   lane-tree status               every tree: holder, lease age, HEAD, dirty or not
@@ -69,14 +72,15 @@ if [ -z "$pool_env" ] && [ "${1:-}" = init ]; then
   echo "lane-tree: wrote $pool_env"
 fi
 : "${LANE_POOL_ROOT:?no pool.env on this box (lane-tree init creates one)}"
-TTL_H=${LANE_POOL_TTL_H:-12}
+TTL_H=${LANE_POOL_TTL_H:-12}   # a lease's age is since acquire or its last renew
 leases=$LANE_POOL_ROOT/leases; saved=$LANE_POOL_ROOT/saved
 mkdir -p "$leases" "$saved"
 exec 8>"$LANE_POOL_ROOT/pool.lock"
 # flock(1) where it exists; elsewhere (macOS) the same flock(2) on fd 8 from python: the lock belongs to the
 # open file description this shell holds, so it outlives the helper process.
-if command -v flock >/dev/null 2>&1; then lock() { flock 8; }
-else lock() { python3 -c 'import fcntl; fcntl.flock(8, fcntl.LOCK_EX)' 8>&8; }; fi
+if command -v flock >/dev/null 2>&1; then lock() { flock 8; }; unlock() { flock -u 8; }
+else lock() { python3 -c 'import fcntl; fcntl.flock(8, fcntl.LOCK_EX)' 8>&8; }
+  unlock() { python3 -c 'import fcntl; fcntl.flock(8, fcntl.LOCK_UN)' 8>&8; }; fi
 sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi; }
 clone_dir() {   # SRC DST: a real copy, by reflink/clonefile where the filesystem has it
   cp -a --reflink=auto "$1" "$2" 2>/dev/null || cp -Rpc "$1" "$2" 2>/dev/null || cp -Rp "$1" "$2"; }
@@ -108,12 +112,22 @@ case ${1:-} in
     t=$(held_by "$lane")
     if [ -z "$t" ]; then
       [ -n "$(trees)" ] || die "the pool at $LANE_POOL_ROOT has no trees (lane-tree init SEED N)"
-      # a free tree, else the oldest expired lease; the least recently used first
-      for c in $(ls -tr -d $(trees)); do
-        h=$(holder "$c"); a=$(lease_age_h "$c")
-        if [ -z "$h" ] || { [ "$a" != - ] && [ "$a" -ge "$TTL_H" ]; }; then t=$c; break; fi
+      # a free tree, else the oldest expired lease; the least recently used first. None: wait (the lock
+      # released) up to LANE_POOL_WAIT_S seconds (default 3600; 0 fails at once), re-checking every 15 s.
+      waited=0
+      while :; do
+        for c in $(ls -tr -d $(trees)); do
+          h=$(holder "$c"); a=$(lease_age_h "$c")
+          if [ -z "$h" ] || { [ "$a" != - ] && [ "$a" -ge "$TTL_H" ]; }; then t=$c; break; fi
+        done
+        [ -z "$t" ] || break
+        [ "$waited" -lt "${LANE_POOL_WAIT_S:-3600}" ] \
+          || die "no free tree after ${waited} s: $("$0" status 2>/dev/null | tr '\n' ';') (lane-tree init SEED N grows the pool)"
+        [ "$waited" != 0 ] || printf 'lane-tree: every tree is leased; %s waits for one (LANE_POOL_WAIT_S=%s)\n' "$lane" "${LANE_POOL_WAIT_S:-3600}" >&2
+        unlock; sleep 15; waited=$((waited + 15)); lock
+        t=$(held_by "$lane")   # another acquire for this lane may have won meanwhile
+        [ -z "$t" ] || break
       done
-      [ -n "$t" ] || die "no free tree: $("$0" status 2>/dev/null | tr '\n' ';') (wait, or gc expired leases)"
       [ -z "$(holder "$t")" ] || save_diff "$t" "lease of $(holder "$t") expired; taken by $lane"
     fi
     printf '%s\t%s\t%s\n' "$lane" "$(now)" "$ref" > "$leases/$(basename "$t")"
