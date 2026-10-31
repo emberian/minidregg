@@ -46,10 +46,15 @@ const BASE: u128 = 1;
 const TICK_RATE: u128 = 1;
 const REPLAY_RATE: u128 = 6;
 const CORE_RATE: u128 = 2;
-/// The source ticks a bend's birth declares (`activity_world.TICKS`) and the multiple of its price the
-/// default deposit reserves: the pair of envelopes the first await escrows (resume and timeout: the Host quoted 63,392 for the pair at 30,443 a price, so 2 prices fall short) and one more price (`activity_world.BEND_PURSE_PRICES`). A larger purse is `--deposit N`; a program that awaits again needs one.
+/// The source ticks a bend's birth declares (`activity_world.BEND_TICKS`) and the multiple of its price the
+/// default deposit reserves (`activity_world.BEND_PURSE_PRICES`, whose comment carries the measurement). Every leg
+/// declares the same envelope, so every resume costs the purse one price; every yield must leave the await's pair
+/// (two prices) and the record's storage deposit in it. The default carries `ANSWERS` delivered replies through to
+/// the activity's end: the pair, one price per answer, and one price that covers the storage deposit (2,568 for the
+/// Tally). A program that is answered more often needs `--deposit N`; the unspent purse returns when it ends.
 const TICKS: u128 = 300;
-const DEPOSIT_PRICES: u128 = 3;
+const ANSWERS: u128 = 1;
+const DEPOSIT_PRICES: u128 = ANSWERS + 3;
 /// The declared state type `{total: Nat}` (the checker's type JSON) `Tally` and its siblings keep.
 const TOTAL_STATE: &str = r#"{"tag":"field","name":"total","member":{"tag":"natural"},"tail":{"tag":"emptyRow"}}"#;
 
@@ -148,20 +153,31 @@ fn data_text(v: &Value) -> String {
 /// How the Host decided a submitted turn.
 #[derive(Debug, PartialEq)]
 enum Decided {
-    /// Admitted: height, world root, receipt (transaction, event), how it confirmed.
+    /// Admitted: the height the turn was judged at (`judged_height`), world root, receipt (transaction, event),
+    /// how it confirmed.
     Admitted { height: String, root: String, receipt: String, how: String },
     Refused(String),
     Undecided(String),
 }
 
-fn decided(outcome: &Value) -> Decided {
+/// The logical height a turn was judged at, from its receipt's accepted count: the Host's clock is
+/// `genesisHeight + |accepted|` (`NativeHost.logicalHeight`), a turn is judged at the height before it is
+/// appended, so the receipt of the k-th accepted turn reads `genesisHeight + k - 1`. It is the clock an await's
+/// `yieldedAt` and `deadline` and the view's `height` are on (the view's height is the one the NEXT turn is judged
+/// at), so a receipt, `bend await` and `bend show` print one scale.
+fn judged_height(genesis: u128, accepted: &str) -> String {
+    accepted.parse::<u128>().ok().and_then(|k| genesis.checked_add(k.checked_sub(1)?)).map(|h| h.to_string())
+        .unwrap_or_else(|| "?".into())
+}
+
+fn decided(outcome: &Value, genesis: u128) -> Decided {
     let s = |k: &str| outcome.get(k).and_then(Value::as_str).unwrap_or("?").to_owned();
     if let Some(line) = crate::charged_line(outcome) {
         return Decided::Refused(line);
     }
     match outcome.get("type").and_then(Value::as_str) {
         Some("confirmed") => Decided::Admitted {
-            height: s("acceptedCount"),
+            height: judged_height(genesis, &s("acceptedCount")),
             root: s("worldRoot"),
             receipt: format!("tx {} event {}", s("transactionId"), s("eventId")),
             how: s("confirmation"),
@@ -221,13 +237,23 @@ fn ending_for(name: &str, error: String) -> Result<()> {
 struct Bend {
     ws: Ws,
     pin: Value,
+    /// The deployment's `genesisHeight` (its pinned config): receipts print heights on the Host's logical clock.
+    genesis: u128,
 }
 
 impl Bend {
     fn open(root: PathBuf) -> Result<Self> {
         let bytes = fs::read(root.join("workspace.json")).map_err(|e| format!("bend: cannot read workspace.json: {e}"))?;
         let pin: Value = serde_json::from_slice(&bytes).map_err(|e| format!("bend: invalid workspace.json: {e}"))?;
-        Ok(Self { ws: activity::ws(root)?, pin })
+        let ws = activity::ws(root)?;
+        let config: Value = serde_json::from_slice(&fs::read(&ws.config).map_err(|e| format!("bend: cannot read {}: {e}", ws.config.display()))?)
+            .map_err(|e| format!("bend: {}: {e}", ws.config.display()))?;
+        let genesis = match &config["genesisHeight"] {
+            Value::Number(n) => n.as_u64().map(u128::from),
+            Value::String(t) => t.parse().ok(),
+            _ => None,
+        }.ok_or_else(|| format!("bend: {} names no genesisHeight", ws.config.display()))?;
+        Ok(Self { ws, pin, genesis })
     }
 
     fn dir(&self, name: &str) -> PathBuf {
@@ -276,7 +302,7 @@ impl Bend {
         let outcome = activity::submit(&self.ws, turn, &out, false, None, false);
         std::env::remove_var(mini_sdk::operator::LOSE_REPLY_ENV);
         let outcome = outcome?;
-        Ok((decided(&outcome), outcome))
+        Ok((decided(&outcome, self.genesis), outcome))
     }
 
     /// The newest attempt of NAME that reached an ingress: (its directory, its meta).
@@ -376,12 +402,37 @@ fn lose_flag(args: &mut Args) -> Result<bool> {
     Ok(opt(args, "lose-reply-once")?.as_deref() == Some("true"))
 }
 
+/// What the shell adds to a Host refusal of an attempt described by `meta`, when the Host's words are true but
+/// do not say what happened (an exact repeat of an admitted turn is `transaction identity conflict`).
+fn refusal_hint(meta: &Value, r: &str) -> String {
+    let m = |k: &str| meta.get(k).and_then(Value::as_str).unwrap_or("?").to_owned();
+    match m("kind").as_str() {
+        // A second publish of the same source names the same artifact and package, so the Host
+        // sees a replay of an admitted transaction identity.
+        "publish" if r.contains("transaction identity conflict") => format!(
+            " (this package is already published: artifact {} package {}; `bend run` it)", m("artifactId"), m("packageId")),
+        "resolve" if r.contains("responseType") => " (the reply's DATA does not have the shape this slot's ask declared; \
+            answer with exactly the response type the asking program names, or {\"refused\": REASON})".to_owned(),
+        // The same answer to the same slot (a retry after a restart or a lost reply, typed again) is the
+        // same transaction identity under a fresh ingress: the slot was already decided by it.
+        "resolve" if r.contains("transaction identity conflict") => format!(
+            " (slot {} is already answered with this answer; nothing changed: `bend deliver` resumes the activity)", m("slot")),
+        // The same delivery of the same await: the await was already delivered and spent.
+        "deliver" if r.contains("transaction identity conflict") => format!(
+            " (await {} is already delivered; nothing changed: `bend await` shows where the activity is now)", m("await")),
+        _ => String::new(),
+    }
+}
+
 /// Print the Host's decision on an attempt described by `meta`, or record its refusal / undecided ending.
 /// `lead` names the verb (`bend publish`, `bend lookup`, `bend retry`).
 fn report(bend: &Bend, name: &str, meta: &Value, transaction: Option<String>, lead: &str, d: Decided) -> Result<()> {
     let m = |k: &str| meta.get(k).and_then(Value::as_str).unwrap_or("?").to_owned();
     match d {
-        Decided::Refused(r) => ending(format!("refused: {r}")),
+        Decided::Refused(r) => {
+            let hint = refusal_hint(meta, &r);
+            ending(format!("refused: {r}{hint}"))
+        }
         Decided::Undecided(r) => ending_for(name, format!("undecided: {r}")),
         Decided::Admitted { height, root, receipt, how } => match m("kind").as_str() {
             "publish" => {
@@ -434,7 +485,7 @@ fn lookup_cmd(bend: &Bend, mut args: Args, retry: bool) -> Result<()> {
         Ok(o) => o,
         Err(e) => return ending_for(&name, e),
     };
-    let d = decided(&outcome);
+    let d = decided(&outcome, bend.genesis);
     let transaction = if matches!(d, Decided::Admitted { .. }) && meta.get("kind").and_then(Value::as_str) == Some("run") { Some(transaction_of(bend, &dir)?) } else { None };
     report(bend, &name, &meta, transaction, if retry { "bend retry" } else { "bend lookup" }, d)
 }
@@ -595,7 +646,8 @@ fn decimal_arg(value: &str, what: &str) -> Result<()> {
 }
 
 /// `bend await OBJECT TRANSACTION`: the activity that birth made, as one JSON line (the read a
-/// resident's `mini_pending_awaits` is built on). Absent record: phase `none`.
+/// resident's `mini_pending_awaits` is built on). Absent record: phase `none`. Its `height` is the view's: the
+/// height the next turn is judged at, the clock of `deadline` and of every receipt's height (`judged_height`).
 fn await_cmd(bend: &Bend, mut args: Args) -> Result<()> {
     let object = text(&mut args, "object")?;
     let transaction = text(&mut args, "transaction")?;
@@ -775,7 +827,7 @@ mod tests {
         let refused = json!({"type":"refused","refusal":"operation-rejected: pastDeadline"});
         fs::write(dir.join("outcome.json"), refused.to_string()).unwrap();
         assert_eq!(retained_decision(&dir), Some(refused.clone()));
-        assert!(matches!(decided(&refused), Decided::Refused(_)));
+        assert!(matches!(decided(&refused, 10), Decided::Refused(_)));
         // An undecided answer is not a decision: the Host is asked.
         fs::write(dir.join("outcome.json"), json!({"type":"undecided"}).to_string()).unwrap();
         assert!(retained_decision(&dir).is_none());
@@ -826,12 +878,29 @@ mod tests {
     }
 
     #[test]
+    fn an_exact_repeat_is_named_for_what_happened() {
+        let conflict = "conflict: transaction identity conflict (phase replay)";
+        let h = refusal_hint(&json!({"kind": "resolve", "slot": "5551"}), conflict);
+        assert!(h.contains("slot 5551 is already answered") && h.contains("`bend deliver`"), "{h}");
+        let h = refusal_hint(&json!({"kind": "deliver", "await": "55"}), conflict);
+        assert!(h.contains("await 55 is already delivered"), "{h}");
+        let h = refusal_hint(&json!({"kind": "publish", "artifactId": "1", "packageId": "2"}), conflict);
+        assert!(h.contains("already published: artifact 1 package 2"), "{h}");
+        assert!(refusal_hint(&json!({"kind": "resolve", "slot": "5551"}), "notDecider").is_empty(), "other refusals keep the Host's words alone");
+        assert!(refusal_hint(&json!({"kind": "run"}), conflict).is_empty());
+    }
+
+    #[test]
     fn the_hosts_outcomes_are_decided_by_name() {
         let ok = json!({"type": "confirmed", "confirmation": "installed", "transactionId": "7", "eventId": "9", "acceptedCount": "12", "worldRoot": "55"});
-        assert_eq!(decided(&ok), Decided::Admitted { height: "12".into(), root: "55".into(), receipt: "tx 7 event 9".into(), how: "installed".into() });
+        // the 12th accepted turn of a world born at height 10 was judged at height 21 (the view then reads 22)
+        assert_eq!(decided(&ok, 10), Decided::Admitted { height: "21".into(), root: "55".into(), receipt: "tx 7 event 9".into(), how: "installed".into() });
+        assert_eq!(judged_height(0, "1"), "0");
+        assert_eq!(judged_height(10, "0"), "?", "no turn is the 0th");
+        assert_eq!(judged_height(10, "x"), "?");
         let no = json!({"type": "refused", "reason": "notObjectHolder", "phase": "", "detail": ""});
-        assert!(matches!(decided(&no), Decided::Refused(m) if m.starts_with("notObjectHolder")));
-        assert!(matches!(decided(&json!({"type": "uncertain"})), Decided::Undecided(_)));
+        assert!(matches!(decided(&no, 10), Decided::Refused(m) if m.starts_with("notObjectHolder")));
+        assert!(matches!(decided(&json!({"type": "uncertain"}), 10), Decided::Undecided(_)));
     }
 
     #[test]
@@ -913,6 +982,7 @@ mod tests {
         assert!(world.contains(&format!("'replayBytes': '{REPLAY_RATE}'")) && world.contains(&format!("'coreBytes': '{CORE_RATE}'")));
         assert!(world.contains(&format!("'base': '{BASE}', 'typeFuel': '0', 'sourceTicks': '{TICK_RATE}'")));
         assert!(world.contains(&format!("BEND_TICKS = {TICKS}")) && world.contains(&format!("BEND_PURSE_PRICES = {DEPOSIT_PRICES}")));
+        assert!(world.contains(&format!("BEND_ANSWERS = {ANSWERS}")));
         for k in ENVELOPE_KEYS {
             assert!(world.contains(&format!("'{k}':")), "{k} is not an envelope member of activity_world.MAXIMUM");
         }

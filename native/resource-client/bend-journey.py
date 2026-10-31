@@ -13,8 +13,12 @@ the activity route (Host ops 7 author / 210 plan / 211 assemble / 212 submit / 2
   bend-run       `bend run tally counter`: the object is created pinning Tally and born under a full
                  envelope; the Host's outcome line names height, world root and receipt; the object's
                  declared state read back through the VIEW (not the shell's line) is Tally's `{total: 0}`;
-                 the activity's purse holds the deposit the line states, which is three envelope prices (the first await's pair and slack) as
-                 activity_world prices them; the member's account paid at least that
+                 the activity's purse holds the deposit the line states, which is BEND_PURSE_PRICES envelope prices as
+                 activity_world prices them (the await's pair, one per answer, the storage slack); the account paid at least that
+  bend-full-tally the default purse completes a tally: `bend await` names the slot, the decider's `bend answer` and the
+                 `bend deliver` resume it (total 7, a new await), other turns pass the deadline, the timed-out
+                 `bend deliver` ends it and the purse returns; the run consumed activity_world's tallyRunCost; every
+                 receipt's height is on the clock `bend await` and the deadline use
   bend-show      `bend show counter`: the public view agrees with the view this driver reads
   bend-refusal   `bend publish bad @Bad.obend` with a malformed source: refused (exit 3) by the Host's
                  front end, named, nothing submitted (no attempt directory, the judged height unchanged)
@@ -61,8 +65,9 @@ try:
         rc, out, err = shell('publish', 'bend publish tally @Tally.obend --entry tally')
         w.check('publish-admitted', rc == 0 and out.startswith('admitted: bend publish tally'), {'rc': rc, 'out': out, 'err': err[-300:]})
         m = re.search(r'height (\d+), world root (\d+), receipt tx (\d+) event (\d+)', out)
-        # the line's height is the Host's accepted count (the receipt's), not the view's ledger height
+        # the line's height is the height the turn was judged at, the view's clock (the view after it is one more)
         w.check('publish-line-names-height-root-receipt', m is not None and int(m.group(1)) > 0, {'line': out})
+        w.check('publish-height-is-the-views-clock', m is not None and int(m.group(1)) + 1 == height('height-after-publish'), {'line': out})
         published_at = int(m.group(1)) if m else 0
         publication = json.loads((w.sponsor / 'bend' / 'tally' / 'out' / 'publication.json').read_text())
         pin = publication['artifactId']
@@ -89,7 +94,7 @@ try:
             height_n, root, tx, event, state, purse, deposit, was, now, charge = m.groups()
             w.check('run-is-admitted-after-the-publish', int(height_n) > published_at, {'publish': published_at, 'run': height_n})
             w.check('line-state-is-the-tallys', state == '{total=0}', state)
-            w.check('deposit-is-the-first-await-and-slack', int(deposit) == AW.BEND_PURSE_PRICES * BPRICE, {'line': deposit, 'world': AW.BEND_PURSE_PRICES * BPRICE})
+            w.check('deposit-carries-the-default-answers', int(deposit) == AW.BEND_PURSE_PRICES * BPRICE, {'line': deposit, 'world': AW.BEND_PURSE_PRICES * BPRICE})
             w.check('purse-holds-the-deposit', 0 < int(purse) <= int(deposit), {'purse': purse, 'deposit': deposit})
             w.check('account-paid-at-least-the-deposit', int(charge) >= int(deposit) and int(was) - int(now) == int(charge),
                     {'was': was, 'now': now, 'charge': charge, 'deposit': deposit})
@@ -120,6 +125,46 @@ try:
     with w.group('bend-show'):
         rc, out, err = shell('show', 'bend show counter')
         w.check('show-reads-the-object', rc == 0 and 'state {total=0}' in out and f'pin {pin}' in out and 'purse' in out, {'rc': rc, 'out': out, 'err': err[-300:]})
+
+    with w.group('bend-full-tally'):
+        # BEND_ANSWERS answers through the default purse, then the deadline: the run COMPLETES (the demo grant's unit)
+        reg = json.loads((w.sponsor / 'bend' / 'objects' / 'counter.json').read_text())
+        obj, tx = reg['object'], reg['transaction']
+        acct = lambda label: w.balance(w.view(label, {'accounts': [w.SPONSOR_ACCOUNT]}), w.SPONSOR_ACCOUNT)
+        before_answers = acct('account-before-answers')
+        (home / 'requests' / 'seven.json').write_text(json.dumps({'reply': {'tag': 'record', 'fields': [
+            {'name': 'amount', 'value': {'tag': 'natural', 'value': '7'}}]}}))
+        (home / 'requests' / 'seven.json').chmod(0o600)
+        for n in range(AW.BEND_ANSWERS):
+            rc, out, err = shell(f'await-{n}', f'bend await {obj} {tx}')
+            aw = json.loads(out) if rc == 0 else {}
+            w.check(f'await-{n}-names-the-slot-on-the-views-clock', aw.get('phase') == 'awaiting' and aw.get('slot')
+                    and int(aw['height']) == height(f'height-at-await-{n}') and int(aw['height']) <= int(aw['deadline']), {'rc': rc, 'out': out[:400], 'err': err[-300:]})
+            rc, out, err = shell(f'answer-{n}', f'bend answer {aw.get("slot")} @seven.json')
+            m = re.search(r'height (\d+),', out)
+            w.check(f'answer-{n}-admitted-at-or-before-the-deadline', rc == 0 and m is not None and int(m.group(1)) <= int(aw.get('deadline', -1)),
+                    {'rc': rc, 'out': out[:300], 'err': err[-300:], 'deadline': aw.get('deadline')})
+            rc, out, err = shell(f'deliver-{n}', f'bend deliver {obj} {tx}')
+            w.check(f'deliver-{n}-resumes-under-the-default-purse', rc == 0 and out.startswith('admitted: bend deliver'), {'rc': rc, 'out': out[:300], 'err': err[-400:]})
+            s = w.state('counter', f'counter-after-answer-{n}', tx)
+            w.check(f'answer-{n}-added', w.total_of(s) == 7 * (n + 1) and bool(w.await_of(s)), {'state': s['state'], 'phase': s['record'].get('phase')})
+        deadline = int(w.await_of(s)['deadline'])
+        pad = 0
+        while height(f'height-pad-{pad}') <= deadline and pad < 16:
+            shell(f'pad-{pad}', f'create pad-{pad} content open')
+            pad += 1
+        rc, out, err = shell('deliver-timeout', f'bend deliver {obj} {tx}')
+        w.check('timed-out-deliver-ends-the-tally', rc == 0 and out.startswith('admitted: bend deliver'), {'rc': rc, 'out': out[:300], 'err': err[-400:]})
+        v = w.view('counter-after-end', {'births': [{'object': obj, 'transaction': tx}], 'accounts': [reg['record']]})
+        phase = w.cell_of(v, reg['record']).get('record', {}).get('phase') or {}
+        purse = next((int(b['balance']) for b in v.get('balances', []) if b.get('account') == reg['record']), 0)
+        w.check('ended-record-and-empty-purse', phase.get('kind') != 'awaiting' and purse == 0, {'purse': purse, 'phase': phase})
+        # the purse paid one price per answered resume and one for the timed-out end, and returned the rest; the
+        # account paid only the answer, deliver and pad turns' own fees on top (a few units each)
+        refund = acct('account-after-end') - before_answers
+        expect = (AW.BEND_PURSE_PRICES - AW.BEND_ANSWERS - 1) * BPRICE
+        w.check('purse-paid-one-price-per-leg-and-returned-the-rest', expect - 64 * (pad + 2 * AW.BEND_ANSWERS + 1) <= refund <= expect,
+                {'refund': refund, 'expected': expect, 'pads': pad, 'runCost': AW.demo_economy()['tallyRunCost']})
 
     with w.group('bend-lost-reply'):
         # the shell's lost-reply switch reaches the activity path: the birth is written, its answer never read
