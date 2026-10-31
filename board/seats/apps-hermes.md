@@ -35,15 +35,20 @@ Quest: Hermes final say (H1b), the START reds, the refusal-clause sweep, live Hu
   Commits: 1c670cee5, e46759f4e, plus the attachment roleId change below.
 - SCRUMBLR QUALIFY PASSES (hbox run sbB): write a card, read it back through a fresh socket.io client; rows typed-attachment and
   native-qualification-sb. Declaration status can move from prototype-unqualified once the owner decides how it is recorded.
-- WBO (runs wbA, wbB): attach needed roleId allAccess (the package declares no roles; script change landed). The qualify then
-  fails: "settle refused by Mini: tail-bound: head 257 certified 0 bound 256; certify (mini checkpoint) to resume", after
-  "lifetime agent operation 663 failed: op76 did not return fresh lifetime committed permit". The journey world reaches 256 uncertified
-  records inside WBO's conversation (one op per frame). Not chased: is the first failure the op76 permit, with the tail bound a
-  consequence, or does the qualify simply outrun an uncheckpointed world? Next: run WBO with a `mini checkpoint` before it, and read op76.
+- WBO (runs wbA..wbE): attach needs roleId allAccess (landed). The qualify fails at op 783 / controller-tool step 95 with
+  "settle refused by Mini: tail-bound: head ~289 certified 32 bound 256". Law-10 fix landed (147b98259): the Host's decode of
+  the controller's refusal ("unknown field `detail`") hid the real refusal behind an uncertain outcome; a refusal at the reserve step
+  is now Reply::RefusedV3 with the detail. a1e69615f makes op76's refusal sentence carry the Host outcome's words when the reply is
+  an outcome; in run wbE it printed no words, so the op76 reply is not a framed outcome and "op76 permit" stays unexplained
+  (hypothesis: the same tail-bound, not proven). Certifier: /home/hbox/lanes/app-reds-cont/ar-cert.sh SUF loops
+  `mini checkpoint --action certify --min-tail 16` on the journey world; it certifies (head 35 certified 32) and then stops
+  returning once the qualify's conversation begins (37 calls, none after), so the tail grows to ~289 with nothing certified.
+  Next: find why the certify call blocks (Host operator socket held by the hosted conversation?), compare with the standing world's
+  certifier (scripts/spk-platform/world-certifier.sh), and read op76-frame-v3.bin (kept in the world's attempt dir while it runs).
 - Hummingbird (run hbA, role 1): attach and the first socket.io steps pass; the beacon GET sends `referer` and the controller refuses
   "application API header is outside native ordinary-header profile". The header list is closed in Host/HostOperations.lean
   (ordinaryHeaderNames), Kernel/ApplicationDispatchAdmission.lean:140, native/spk-rpc/src/web.rs and grain-runtime
-  application_api_tools ORDINARY_HEADERS. Adding `referer` is a Lean-closure change (the tracking pixel uses it); decision owed.
+  application_api_tools ORDINARY_HEADERS. Root's ruling: admit `referer` only as a same-origin path-only value (same grain origin: pass the path; otherwise drop it silently, never refuse). Statement first in ApplicationDispatchAdmission and HostOperations, then spk-rpc web.rs and grain-runtime ORDINARY_HEADERS. Not started.
 - Runner on hbox: /home/hbox/lanes/app-reds-cont/ar-cycle.sh SUF DECL ALIAS ROLE SPK (pool tree t2 to origin/main, rust roles, overlay on
   candidate 9dc9c138c, ar-hrun.sh run); overlays under lane/ov2; packages in spk/; evidence /ci/j-{sbB,wbA,wbB,hbA}.
 
