@@ -179,12 +179,14 @@ items 1 to 4 below done; astra round 8):
 * Locality wording: bounded by the reveal's stop depth.
 
 **Owed, in order:**
-1. **The receiver calls `admit`** on its birth, import and write paths (refusing the write). Not on
+1. **The receiver calls `admit`** on its birth, import and write paths, refusing the write. Agreed
+   ordering with the integrator (10-31): the bound goes on the receiver's own new admission when
+   the receiver lands, and the receiver's acceptance theorems cite `admit`. It does not go on
    today's declared admission: `Action.admissionCheck` is the source of the derived AIR
    (`Compiler/DeclaredActionAir.lean`) and of the native binding's acceptance theorems, so a
-   kernel-wide bound needs a native mirror and a regenerated circuit. It lands with the receiver,
-   whose admission is new anyway. Until then the flat receivers serve the full `Visible` view, so
-   no reader sees less.
+   kernel-wide bound would need a regenerated circuit and a native mirror. **Condition: no receiver
+   path ships without `admit`.** Until the receiver lands, the flat receivers serve the full
+   `Visible` view, so no reader sees less.
 2. **A Store write path that calls `Cache.erase`**, with the receiver.
 3. The opening relation in the compiler's vocabulary (compiler-emitted AIR; grow the compiler
    where it lacks a trie-path or cSHAKE gadget), not a hand-written circuit.
