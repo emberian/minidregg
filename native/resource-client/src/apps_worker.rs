@@ -743,18 +743,9 @@ impl Worker {
         // The grain's record is the grain lock's: phases 3 and 4 wait for a member verb on it to end.
         let grain_lock = self.grain_lock(&grain);
         let _grain = grain_lock.lock().unwrap_or_else(|p| p.into_inner());
-        // Phase 3: START.
-        if retained["phases"]["start"].get("state") != Some(&json!("running")) {
-            match self.world.start(&installed.app) {
-                Ok(Lifecycle::Done) => retained["phases"]["start"] = json!({"state":"running","at":now()}),
-                Ok(Lifecycle::Undecided(detail)) => {
-                    retained["phases"]["start"] = json!({"state":"starting","at":now()});
-                    return undecided("starting", detail, &retry);
-                }
-                Err(error) => return undecided("starting", format!("START did not complete: {error}; nothing is repeated"), &retry),
-            }
-        }
-        // Phase 4: the owner's route on the grain's own origin.
+        // Phase 3: the owner's route on the grain's own origin. `spk-host grain start` refuses an
+        // application that has no entrance bound (grain.rs), so the route comes before START; its
+        // enrollment against the serving generation is after it.
         let mut record = self.grain_record(&grain).ok().flatten().unwrap_or_else(|| json!({
             "protocol":"mini-apps-grain-v1","grain":grain,"app":installed.app,"owner":member,"appId":retained["appId"],
             "packageId":package_id,"rawSha256":installed.raw_sha256,"appVersion":installed.app_version,
@@ -766,11 +757,25 @@ impl Worker {
             match self.bind_route(&work, &installed.app, &member, &host) {
                 Ok(bound) => {
                     record["routes"][member.as_str()] = route_json(&bound, &member);
+                    if let Err(e) = write_json(&grain_file(&self.state, &grain), &record) {
+                        return undecided("stateUnavailable", e, &retry);
+                    }
                 }
                 Err(error) => {
                     let _ = write_json(&grain_file(&self.state, &grain), &record);
                     return undecided("routing", format!("the owner's route is not bound yet: {error}"), &retry);
                 }
+            }
+        }
+        // Phase 4: START.
+        if retained["phases"]["start"].get("state") != Some(&json!("running")) {
+            match self.world.start(&installed.app) {
+                Ok(Lifecycle::Done) => retained["phases"]["start"] = json!({"state":"running","at":now()}),
+                Ok(Lifecycle::Undecided(detail)) => {
+                    retained["phases"]["start"] = json!({"state":"starting","at":now()});
+                    return undecided("starting", detail, &retry);
+                }
+                Err(error) => return undecided("starting", format!("START did not complete: {error}; nothing is repeated"), &retry),
             }
         }
         record["state"] = json!("running");
