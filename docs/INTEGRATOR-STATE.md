@@ -27,9 +27,9 @@ gated candidates and names candidates to infra and the explorer.
   $I/build.pid). Carries perf-apps b1, refusal clauses, resource-id fix, apps-e2e request file, exorcism (no fsync; Store
   frame v2 8b49bf1e2/fe77ab521; 019f2e56f), perf-client residents end when storageRoot goes. Mac waiter busrjvxch (host stage running since 08:51).
   On READY: gate15; name it to the explorer, exorcist (row 8 measurement), perf-apps (first page / per request), infra.
-- **Batch 7 (staging a8b9d5765)**: resident final writeError c88b88755, demo-reds 58c17b1de, perf-client f95edc7bf +
+- **Batch 7 (staging b1bbe2369)**: resident final writeError c88b88755, demo-reds 58c17b1de, perf-client f95edc7bf +
   b34173dad (candidate ssh wrapper) + 394039fb1 (one shared codec Host per box under split tenancy), apps-e2e 78a20cb56,
-  perf-apps b2 05c2b208b, hot-path a55855f18, perf-client 5415aecf7.
+  perf-apps b2 05c2b208b, hot-path a55855f18, perf-client 5415aecf7, iter-speed Mathlib import trim ee7a25ca7 (Host.Main 3,930 -> 2,895 modules; Pratt certificate for mersenne127P_prime, audit round).
 - **FORMAT batch (later, one genesis, after iter-speed's seam 1)**: hot-path row 11 + Book entries migration +
   private-cells FORMAT (a) (eventHistory, authority to the trie root, mask []) + KeptCell Aux cache + fixture re-record.
 - Explorer on batch 5 vs 4: fsyncs 0; 128-ref credit 6.9 s -> 0.35 s; idle catch-up 61 s -> 0.36 s; first read after
