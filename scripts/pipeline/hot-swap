@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# scripts/pipeline/hot-swap -- swap this lane's rebuilt roles into a kept world, without a new candidate cut.
+#
+#   LANE_DIR=/abs/lane scripts/pipeline/hot-swap --state STATE [--hermes-root ROOT] [--into PARENT] LABEL ROLE...
+#
+# STATE is a kept world's Store state (run.sh init made it; state.json names the candidate it runs). In order:
+#   1. the overlay: `lane-build.sh overlay BASE PARENT LABEL ROLE...`, BASE = the candidate STATE runs now,
+#      PARENT = BASE's parent directory unless --into. The overlay is a new candidate directory (its id is
+#      12 hex), BASE's files hard-linked, ROLE's binaries this lane's builds, and every pin re-emitted
+#      (manifest.json, SHA256SUMS, provenance.json .overlay: base, sources, roles). PARENT must be on BASE's
+#      filesystem (the links), never a second disk;
+#   2. the Store stops (BASE's `run.sh stop`, which signals only the PID its own `start` recorded; a Store a
+#      unit supervises is refused: stop the unit first, and start it after);
+#   3. `run.sh upgrade` rebinds the stopped Store to the overlay's manifest: storageBinary, signatureBinary
+#      and the Host pin move together, the Store and its semantic configuration stay. A Store restarted on
+#      a swapped binary without this refuses it (sha256 against the old manifest: rehearsal-3 crash loop);
+#   4. with --hermes-root, when grainRuntime or grainProviderBridge is swapped, the Hermes runtime root is
+#      re-pinned to the overlay (`deploy/hermes/build-runtime-root --rebind ROOT OVERLAY`);
+#   5. the Store starts on the overlay (`run.sh start`) and STATE/hot-swaps.jsonl gains one line: time,
+#      from, to (both candidate ids), label, roles, this lane's commit;
+#   6. it prints the overlay directory. Rerunning one phase is the caller's next command, against it.
+# Build the roles first (lane-build.sh host / rust --crate C). Any failed step stops the swap; after step 2
+# the Store stays stopped and the world is still bound to BASE, so `BASE/run.sh start --state STATE` resumes it.
+set -euo pipefail
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
+repo=$(cd "$here/../.." && pwd -P)
+die() { echo "hot-swap: $*" >&2; exit 1; }
+state="" root="" parent=""
+while [ $# -gt 0 ]; do
+  case $1 in
+    --state) state=$2; shift 2 ;;
+    --hermes-root) root=$2; shift 2 ;;
+    --into) parent=$2; shift 2 ;;
+    --) shift; break ;;
+    -*) die "unknown option $1" ;;
+    *) break ;;
+  esac
+done
+[ -n "$state" ] && [ $# -ge 2 ] || { sed -n '4p' "$0" >&2; exit 64; }
+: "${LANE_DIR:?LANE_DIR: the lane whose artifacts are swapped in}"
+label=$1; shift
+STATE=$(CDPATH='' cd -- "$state" && pwd -P)
+jq -e '.type == "minidregg-candidate-state-v1"' "$STATE/state.json" >/dev/null || die "$STATE is not a candidate state"
+base=$(dirname -- "$(jq -er .manifest "$STATE/state.json")")
+[ -x "$base/run.sh" ] || die "$base (STATE's candidate) has no run.sh"
+[ -n "$parent" ] || parent=$(dirname -- "$base")
+[ "$(stat -c %d "$parent" 2>/dev/null || stat -f %d "$parent")" = "$(stat -c %d "$base" 2>/dev/null || stat -f %d "$base")" ] \
+  || die "--into $parent is not on $base's filesystem (an overlay hard-links its base)"
+from=$(basename -- "$base")
+
+# 1. the overlay
+log=$LANE_DIR/logs/hot-swap-$label.log; mkdir -p "$LANE_DIR/logs"
+(cd "$repo" && deploy/candidate/lane-build.sh overlay "$base" "$parent" "$label" "$@") >"$log" 2>&1 \
+  || { tail -20 "$log" >&2; die "overlay failed (log $log); the world is untouched"; }
+out=$(jq -er .candidate "$LANE_DIR/logs/overlay-$label.json")
+[ -f "$out/manifest.json" ] || die "overlay $out has no manifest.json"
+
+# 2.-3. stop, rebind
+"$base/run.sh" stop --state "$STATE" || die "the Store did not stop; nothing changed"   # a no-op when it is not running
+"$out/run.sh" upgrade --manifest "$out/manifest.json" --state "$STATE" \
+  || die "upgrade refused; the Store is stopped and still bound to $from: $base/run.sh start --state $STATE"
+
+# 4. the Hermes root
+if [ -n "$root" ]; then
+  if printf '%s\n' "$@" | grep -qxE 'grainRuntime|hermes|grainProviderBridge'; then
+    "$repo/deploy/hermes/build-runtime-root" --rebind "$root" "$out" || die "Hermes root rebind failed; the Store is stopped, bound to $out"
+  fi
+fi
+
+# 5. start, record
+"$out/run.sh" start --state "$STATE" || die "the Store did not start on $out (logs: $STATE/logs/serve.log)"
+jq -cn --arg time "$(date -u +%FT%TZ)" --arg from "$from" --arg to "$(basename -- "$out")" --arg label "$label" \
+  --arg commit "$(git -C "$repo" rev-parse HEAD)" --args '{time: $time, from: $from, to: $to, label: $label,
+  commit: $commit, roles: $ARGS.positional}' "$@" >>"$STATE/hot-swaps.jsonl"
+echo "$out"

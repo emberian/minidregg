@@ -145,6 +145,26 @@ theorem revealFor_answer (bitsOf : K → List Bool) (L : Nat) (kvs : List (K × 
     rw [← under, List.take_append_drop]
     exact List.mem_map.mpr ⟨(k, v), mem, rfl⟩
 
+/-- **The honest walk stops early only at one leaf or none**: on a prefix no longer than the
+remaining depth, a walk with fewer siblings than prefix bits stopped at a subtree of at most one
+entry. A bounded opening carries at most one terminal member per prefix that it stops above. -/
+theorem walkReveal_short_stop : ∀ (n : Nat) (es : List (Entry K V)) (p : List Bool), p.length ≤ n →
+    (walkReveal dig n es p).1.length < p.length → (walkReveal dig n es p).2.length ≤ 1
+  | _, es, [], _, short => by simp at short
+  | _, [], _ :: _, _, _ => by simp [walkReveal]
+  | _, [e], _ :: _, _, _ => by simp [walkReveal]
+  | 0, _ :: _ :: _, _ :: _, depth, _ => by simp at depth
+  | n + 1, e₁ :: e₂ :: rest, b :: p, depth, short => by
+      simp only [walkReveal, List.length_cons] at short ⊢
+      exact walkReveal_short_stop n _ p (by simp at depth; omega) (by omega)
+
+/-- The honest reveal is bounded: fewer siblings than prefix bits means at most one member. -/
+theorem revealFor_shaped (bitsOf : K → List Bool) (L : Nat) (kvs : List (K × V)) (p : List Bool)
+    (short : p.length ≤ L) (early : (revealFor dig bitsOf L kvs p).siblings.length < p.length) :
+    (revealFor dig bitsOf L kvs p).members.length ≤ 1 := by
+  simp only [revealFor, List.length_map] at early ⊢
+  exact walkReveal_short_stop dig L _ p short early
+
 end Complete
 
 /-! ## The reveal read off the kept trie -/
@@ -273,6 +293,8 @@ end Cache
 end Kept
 
 #assert_axioms reveal_complete
+#assert_axioms walkReveal_short_stop
+#assert_axioms revealFor_shaped
 #assert_axioms Trie.reveal_walk
 #assert_axioms Cache.reveal_eq
 #assert_axioms Cache.reveal_verifies

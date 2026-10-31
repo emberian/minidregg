@@ -144,7 +144,7 @@ structure Entry where
 
 set_option backward.isDefEq.respectTransparency false in
 def Entry.prepare (packed : PackedCell CanonicalCellRegistry.registry) : Entry :=
-  match selected : CanonicalCellRegistry.wire? packed.kind with
+  match selected : CanonicalCellRegistry.saltedWire? packed.kind with
   | none => ⟨packed, PackedCell.bytes _ packed, rfl,
       fun _ => ([], []), by intro fields; simp [openingView, selected]⟩
   | some wire =>

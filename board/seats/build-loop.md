@@ -63,16 +63,19 @@ box; seam 1 (codec tags) landed; the hot-swap command; keep making the Lean buil
 ### Hot-swap
 - `lane-build.sh overlay BASE PARENT LABEL ROLE...` / `package.py --overlay` (on main): an overlay candidate, whole
   build families only, named by a 12-hex id, every pin re-emitted.
-- `scripts/pipeline/hot-swap --state STATE [--hermes-root ROOT] LABEL ROLE...` (origin/lane/hot-swap, written, not
-  yet run): overlay on BASE's filesystem (the candidate STATE runs), `run.sh stop`, `run.sh upgrade` to the overlay
-  manifest, the Hermes root `--rebind` when grainRuntime/grainProviderBridge move, `run.sh start`, one line in
-  STATE/hot-swaps.jsonl. Tested on the first dregg-build2 candidate's world, then it lands. A unit-supervised Store
-  is stopped and started by its unit (infra's kept-world tooling).
+- `LANE_DIR=LANE scripts/pipeline/hot-swap --state STATE [--hermes-root ROOT] LABEL ROLE...` (on main): overlay on
+  BASE's filesystem (the candidate STATE runs), `run.sh stop`, `run.sh upgrade` to the overlay manifest, the Hermes
+  root `--rebind` when grainRuntime/grainProviderBridge move, `run.sh start`, one line in STATE/hot-swaps.jsonl. A
+  unit-supervised Store is refused (stop and start it by its unit: infra's kept-world tooling).
+- Run on dregg-build2 2026-10-31 19:40: world /srv/worlds/hotswap-test on 76511e768bbc, grain-runtime rebuilt in
+  /srv/lanes/hotswap (`lane-build.sh rust --crate grain-runtime`, 55 s), swapped as overlay 5ae41015cd71
+  (grainRuntime + grainProviderBridge; SHA256SUMS clean; provenance .overlay names base, roles and source tar; Hermes
+  root /srv/hermes/root-76511e768bbc rebound). Stop to serving again: 8 s. Overlay own disk 141 MB, the rest links.
 
 ### persvati (`ssh persvati-remote`, ember's machine): quiet measurement box
 - /home/ember/mdpool: a 4-tree pool at 43995c7f (793 warm modules). Measurement only; no lane builds.
 
-### hbox: down (ssh times out since about 18:00)
+### hbox: back (a network outage, not a crash); secondary build box
 - Its builder, integ tree, pool t1..t8 and the box-local gate15.sh are unreachable.
 
 ## Seams needed

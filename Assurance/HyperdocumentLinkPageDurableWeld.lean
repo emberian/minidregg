@@ -198,8 +198,9 @@ theorem contentPostRoot_exact :
   StoreCodec.materializer_rootOf _ _
 
 theorem eventPostRoot_exact :
-    eventPostCell.root = StoreCodec.saltedRoot HyperdocumentCell.eventWire eventPostStore :=
-  StoreCodec.materializer_rootOf _ _
+    eventPostCell.root = PrivateCellRoot.privateRoot HyperdocumentCell.eventWire (PrivateCellRoot.untagged _)
+      (PrivateCellRoot.kindCtx HyperdocumentCell.eventWire) eventPostStore :=
+  PrivateCellRoot.materializer_rootOf _ _ _
 
 /-- CONFESSED `native_decide`: the content and event layout digests differ.
 They are cSHAKE256 outputs, which the kernel does not evaluate; the compiled
@@ -227,7 +228,7 @@ def rootBytes (bytes : List UInt8) : Digest :=
   if (HyperdocumentCell.contentMaterializer.codec.decode bytes).isSome then
     StoreCodec.rootBytes HyperdocumentCell.contentWire bytes
   else if (HyperdocumentCell.eventMaterializer.codec.decode bytes).isSome then
-    StoreCodec.rootBytes HyperdocumentCell.eventWire bytes
+    PrivateCellRoot.rootBytes HyperdocumentCell.eventWire (PrivateCellRoot.untagged _) bytes
   else authorityRootBytes bytes
 
 /-- Stated against the materialized root, for a variable store: a concrete
@@ -252,7 +253,7 @@ canonical decoder (and the cSHAKE256 layout digest inside it). -/
     exact refused
   rw [if_neg (by simp [notContent]),
     if_pos (by rw [HyperdocumentCell.eventMaterializer.codec.decode_encode]; rfl)]
-  exact (StoreCodec.rootOf_eq_rootBytes HyperdocumentCell.eventWire store).symm
+  rfl
 
 @[simp] theorem contentPreRoot_bound :
     rootBytes contentPreBytes = contentPreCell.root :=

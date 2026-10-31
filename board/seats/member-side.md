@@ -49,6 +49,10 @@ resident footprint (a few MB per member), web pages.
   fuel-structural walk up the chain (`walk_iff`; kernel `decide` still reduces it); `authStateOfFast`/csimp/
   `planeKeys` deleted. Statements kept (covers lemmas take any finite cover: stronger). Host-execution reviewed.
   Whole tree green on persvati (10,408 jobs). By reading: projection O(cell) -> O(1), revocation check O(log n).
+- Red fixed (86c9dbddb): ed875b899's untracked refresh made `Loaded.replay` refuse every new record ("durable log
+  is not a turn log: a verification walk carries no World"), so the provider died mid-consent and j14-apps
+  `mini apps bootstrap` refused on 76511e768. `replay` now refuses only a held -> lost track. Lean green; first
+  end-to-end run is apps-hermes' rerun on dregg-build2 /srv/worlds/j-sb1 (afb920b22b17049cd told).
 
 ## Numbers
 - hbox, noisy; batch 8 against batch 7, interleaved: `doc new` 476 vs 614 ms wall (Host 254 vs 346 ms, consent
@@ -61,18 +65,21 @@ resident footprint (a few MB per member), web pages.
   236 of 2,466 samples (9.6%) of a batch-8 provider's `doc new`. There is no end-to-end after-number yet (see Next 1).
 
 ## Next (in order)
-1. Measure on the first main candidate (build-loop sends its path; measure on persvati): a provider's `doc new`
+1. Confirm 86c9dbddb end to end (apps-hermes' bootstrap rerun). Then measure on the first main candidate (build-loop sends its path; measure on persvati): a provider's `doc new`
    catch-up profile and wall, against the batch-8 numbers above. That is the after-number for rows 16 and 19,
    43995c7f2 (codec order check) and 76511e768 (projection). Expect no `planeKeys`/`supportFast`/`WorldTrack`
-   frames; the roots (`rootCached`, flat aux: decode + whole salted tree per root read) remain until FORMAT (a).
+   frames; the roots come from FORMAT (a)'s kept index (f28cd8457).
 2. Consent per record, retained mode, my side of the split with host-execution (a24974e84d3c540d1): the
    per-record re-projection sites, `CandidateLawResolution.validateRecords` (one post-cell `ofCell`),
    `validateLoadedFrom`, `NativeClientConsent.checkIntentPlan`, the walk's record advance in NativeHostReplay.
    With the projection O(1) these matter only for what the profile still shows. Theirs: the birth chain over
    `ServedBasis.Ground`, including `preparePreAuthority`. Diffs go to them before landing.
-3. The authority root: privacy's FORMAT (a) (a3f7fce75cd3e4e49) moves the authority materializer onto
-   `PrivateCellRoot.materializer` with a kept index, so a patched post cell's root is O(delta x 516), never from
-   bytes. They send the sha; then confirm on the profile.
+3. The authority root: done by privacy's FORMAT (a), f28cd8457 (authority materializer on the kept private index;
+   a patched cell's root O(delta x 516)). Confirm on the profile that `rootCached` no longer hashes whole cells,
+   and send privacy (a7bf41b0d8bb24813) the numbers or a red. Its claim to refute: a root read on the provider's walk
+   is flat in history. Its pre-(a) baseline (explorer, b9450147f hotpatch): authority delegate ~2.5 s at 13 prior
+   entries, ~4.1 s at 303; doc-log write ~2.0 s at 13, ~6.1 s at 303. A residual linear term in the durable path
+   (`ResourceBirthCodec.rootBytes`, `GuardedDurableCommit`) is per-entry persistence, not the root.
 4. Footprint: the shared consent provider ~66 MB anon and flat; per-member increment at 1 and 5 members once infra's
    split units are rendered; then cut the shared base (codec ~12 MB, provider).
 5. Web and per-verb constants: `/keys` 60 to 75 ms is the Host's key-status op; read-path owns the read file bus
@@ -88,7 +95,7 @@ resident footprint (a few MB per member), web pages.
 - read-path (a97dba51f72535cb9): takes the consent provider's start (`verifyInitial`, `resume`) off the full Store
   open onto `DurableServed.openHead`. I told it nothing of mine is in flight in ClientConsentCore/ConsentAnchor;
   keep one Store read per command (5517f6f57) and no World on the walk.
-- privacy / private cells (a3f7fce75cd3e4e49; FORMAT (a) owns the authority root): the `DeployedBridge.cellRoot` = materialized root theorem, for row 9's
+- privacy / private cells (a7bf41b0d8bb24813; FORMAT (a) owns the authority root): the `DeployedBridge.cellRoot` = materialized root theorem, for row 9's
   O(log n) judge.
 - store-retained (a9b54e85e4a194b91): L0 makes the World's cells SparseMap trees (supersedes WorldCompact, row 9b); it
   ports `allSupport` itself; the map codec's sortedness check. Told: the provider needs no sealed World (only the

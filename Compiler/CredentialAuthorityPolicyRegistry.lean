@@ -945,8 +945,10 @@ def policyStore : Store.Store layout :=
 no focused encoding or second synthetic cell for its projection. -/
 def authorityMaterializer := CredentialAuthorityCell.materializer
 
-/-- The authority wire's byte-level root (the salted store root). -/
-abbrev authorityRootBytes : List UInt8 → Digest := StoreCodec.rootBytes CredentialAuthorityCell.wire
+/-- The authority wire's byte-level root: the private root of the store the bytes denote
+(FORMAT (a)). -/
+abbrev authorityRootBytes : List UInt8 → Digest :=
+  PrivateCellRoot.rootBytes CredentialAuthorityCell.wire (PrivateCellRoot.untagged _)
 
 def authorityCell : RegistryCell authorityMaterializer :=
   CellState.materialize authorityMaterializer policyStore

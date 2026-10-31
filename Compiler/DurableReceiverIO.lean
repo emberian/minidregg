@@ -386,9 +386,11 @@ def Loaded.replay {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes
       | some intent =>
           match loaded.prepare intent with
           | .inl ready =>
-              match (loaded.extend ready).track with
-              | .lost reason => .error s!"durable log is not a turn log: {reason}"
-              | .held _ _ =>
+              -- A tracked walk refuses the record whose turn loses its World; an untracked walk
+              -- (`Loaded.untracked`, a consent provider's) has no World to lose.
+              match loaded.track, (loaded.extend ready).track with
+              | .held _ _, .lost reason => .error s!"durable log is not a turn log: {reason}"
+              | _, _ =>
               match (loaded.extend ready).replay rest with
               | .error message => .error message
               | .ok ⟨next, imaged, started⟩ =>

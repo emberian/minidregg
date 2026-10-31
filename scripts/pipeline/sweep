@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# scripts/pipeline/sweep [--dry]: the build box's lane trash sweep (was hbox's sweep.sh; ember 2026-10-31: sweep often).
+# Box knobs (env; defaults hbox's): BUILDER_ROOT (/home/hbox/lanes/integ), GATE_RUNS (/ci), KEEP_CANDIDATES (3).
+# Removes, for every candidate two or more behind the newest READY one (order = READY mtime):
+#   gate run roots  $I/gate-<sha8>*            (gate12's harness tree + verdicts)
+#   gate worlds     $GATE_RUNS/{t,c,e,f,j}-<sha6>*    (tour, composed, enrol, flatness, j14 worlds)
+# for every candidate KEEP_CANDIDATES (default 3) or more behind: the candidate itself, $I/candidates/<sha>
+# and set-aside build outputs in $I/old except the newest two sets.
+# Never removes: a candidate listed in $I/keep (one sha prefix per line: the ship, a kept world in use),
+# a directory any live process names in its command line, cwd or open files (reported IN-USE, never killed),
+# a candidate whose binaries a live process runs or a gate world's inputs name. Logs SWEEP lines (with sizes) to COMMANDS.log.
+set -u
+I=${BUILDER_ROOT:-/home/hbox/lanes/integ}; R=${GATE_RUNS:-/ci}; LOG=$I/COMMANDS.log; DRY=${1:-}
+say(){ echo "$(date -Is) $*" >> $LOG; echo "$*"; }
+keep=$(grep -v '^#' $I/keep 2>/dev/null | tr -d ' ' | grep . || true)
+kept(){ local s=$1 k; for k in $keep; do case $s in $k*) return 0;; esac; done; return 1; }
+# every path live processes hold (cmdline words, cwd, fd targets), once
+held=$(for p in /proc/[0-9]*; do tr '\0' '\n' < $p/cmdline 2>/dev/null; readlink $p/cwd 2>/dev/null; ls -l $p/fd 2>/dev/null | awk '{print $NF}'; done | grep -E "^($R|$I)/" | sort -u)
+# candidate paths the gate worlds' recorded inputs name (a kept world runs from its candidate)
+worldrefs=$(grep -rhoE "$I/candidates/[0-9a-f]{40}" $R/*/inputs $R/*/w/WORLD-IDENTITY.json $R/*/cand 2>/dev/null | sort -u || true)
+inuse(){ printf '%s\n' "$held" | grep -q "^$1\(/\|\$\)"; }
+# an overlay candidate (lane-build.sh overlay: provenance.json has .overlay; its 12-hex id is not a commit) is never swept here
+overlay(){ python3 -c 'import json,sys; sys.exit(0 if "overlay" in json.load(open(sys.argv[1])) else 1)' "$I/candidates/$1/provenance.json" 2>/dev/null; }
+mapfile -t ready < <(ls -t $I/candidates/*/READY 2>/dev/null | xargs -r -n1 dirname | xargs -r -n1 basename)
+# Only cut candidates (40-hex names) are ever swept; a hotpatch copy (NAME with a suffix, hotpatch-candidate.sh) is
+# its maker's to remove. A stale candidate's gate roots are left when its sha8/sha6 prefix is shared with any
+# candidate that is kept, newer, or a hotpatch copy (gate roots are named by prefix only; 10-31 a hotpatch copy
+# eca98bde-hp-slots swept batch 2's gate roots by prefix).
+protected=$( { printf '%s\n' "${ready[@]:0:2}"; printf '%s\n' $keep; for c in $(ls $I/candidates); do if ! [[ $c =~ ^[0-9a-f]{40}$ ]] || overlay $c; then echo $c; fi; done; } | cut -c1-6 | sort -u)
+shielded(){ printf '%s\n' "$protected" | grep -qx "${1:0:6}"; }
+n=0; freed=0
+for ((i=2; i<${#ready[@]}; i++)); do
+  s=${ready[$i]}; kept $s && continue
+  [[ $s =~ ^[0-9a-f]{40}$ ]] || continue; overlay $s && continue
+  shielded $s && { say "SWEEP shielded ${s:0:9}: its prefix is shared with a kept or newer candidate (gate roots left)"; continue; }
+  for d in $I/gate-${s:0:8}* $R/t-${s:0:6}* $R/c-${s:0:6}* $R/e-${s:0:6}* $R/f-${s:0:6}* $R/j-${s:0:6}*; do
+    [ -d "$d" ] || continue
+    if inuse "$d"; then say "SWEEP IN-USE $d (left; read the holders' cmdlines before any stop)"; continue; fi
+    k=$(du -sk "$d" 2>/dev/null | cut -f1)
+    if [ "$DRY" = --dry ]; then echo "would remove $d (${k}K)"; continue; fi
+    rm -rf "$d" 2>/dev/null; if [ -e "$d" ]; then say "SWEEP LEFT $d (rm refused; owner or mount)"; else n=$((n+1)); freed=$((freed+k)); fi
+  done
+done
+# superseded candidates: keep the newest KEEP_CANDIDATES READY ones, the keep list, and any in use
+for ((i=${KEEP_CANDIDATES:-3}; i<${#ready[@]}; i++)); do
+  s=${ready[$i]}; kept $s && continue; [[ $s =~ ^[0-9a-f]{40}$ ]] || continue; overlay $s && continue; d=$I/candidates/$s
+  if inuse "$d" || printf '%s\n' "$worldrefs" | grep -q "candidates/$s"; then say "SWEEP IN-USE $d (a live process or a gate world names it; left)"; continue; fi
+  k=$(du -sk "$d" | cut -f1)
+  if [ "$DRY" = --dry ]; then echo "would remove $d (${k}K)"; continue; fi
+  rm -rf "$d" && { n=$((n+1)); freed=$((freed+k)); say "SWEEP candidate ${s:0:9} $((k/1024)) MB"; }
+done
+# set-aside build outputs: keep the two newest timestamps
+mapfile -t ts < <(ls $I/old 2>/dev/null | sed -n 's/.*\.\([0-9]\{10\}\)$/\1/p' | sort -urn)
+for t in "${ts[@]:2}"; do for d in $I/old/*.$t; do
+  [ -e "$d" ] || continue; k=$(du -sk "$d" | cut -f1)
+  if [ "$DRY" = --dry ]; then echo "would remove $d (${k}K)"; continue; fi
+  rm -rf "$d" && { n=$((n+1)); freed=$((freed+k)); }
+done; done
+[ "$DRY" = --dry ] || say "SWEEP removed $n dirs, $((freed/1024)) MB (newest READY ${ready[0]:0:9}; keep: $(echo $keep | tr '\n' ' '))"
+# Early warning (root, 10-31): below 40 GB free on / the integrator asks lanes to clear their scratch before
+# integ-build's 25 GB floor blocks a cut. Logged as DISK WARN; the integrator reads COMMANDS.log after each gate.
+free_gb=$(df -BG --output=avail / | tail -1 | tr -dc 0-9)
+if [ "$DRY" != --dry ] && [ "$free_gb" -lt 40 ]; then say "DISK WARN / has ${free_gb} GB free (< 40): ask lanes to clear their gate-world scratch; integ-build refuses below 25"; fi

@@ -475,11 +475,45 @@ def wire? : (kind : Kind) → Option (StoreCodec.Wire (layout kind))
   | .platform => some Kernel.PlatformCellLayout.wire
   | .resourceBook | .policySource | .nockProgram | .objectiveActivity | .seat => none
 
-/-- A kind with a store wire is materialized by it, so its cell root is that
+/-- The store wire of every kind rooted by its wire's SALTED root (the flat
+`StoreCodec.materializer`): every kind with a wire except those rooted privately. -/
+def saltedWire? : (kind : Kind) → Option (StoreCodec.Wire (layout kind))
+  | .eventHistory | .authority => none
+  | kind => wire? kind
+
+/-- The store wire of every kind rooted by its wire's PRIVATE root
+(`Compiler.PrivateCellRoot.materializer`, FORMAT (a)): the unblinded kinds that grow with
+history. Every kind with a wire is exactly one of salted or private. -/
+def privateWire? : (kind : Kind) → Option (StoreCodec.Wire (layout kind))
+  | .eventHistory => some HyperdocumentCell.eventWire
+  | .authority => some CredentialAuthorityCell.wire
+  | _ => none
+
+theorem wire_salted_or_private (kind : Kind) :
+    wire? kind = (saltedWire? kind).or (privateWire? kind) ∧
+      ((saltedWire? kind).isSome → privateWire? kind = none) := by
+  cases kind <;> simp [wire?, saltedWire?, privateWire?]
+
+/-- A kind with a salted wire is materialized by it, so its cell root is that
 wire's salted root. -/
 theorem materializer_of_wire {kind : Kind} {wire : StoreCodec.Wire (layout kind)}
-    (selected : wire? kind = some wire) : materializer kind = StoreCodec.materializer wire := by
-  cases kind <;> simp [wire?] at selected <;> subst selected <;> rfl
+    (selected : saltedWire? kind = some wire) : materializer kind = StoreCodec.materializer wire := by
+  cases kind <;> simp [saltedWire?, wire?] at selected <;> subst selected <;> rfl
+
+/-- A kind with a private wire is materialized by its private root. -/
+theorem materializer_of_privateWire {kind : Kind} {wire : StoreCodec.Wire (layout kind)}
+    (selected : privateWire? kind = some wire) :
+    materializer kind = PrivateCellRoot.materializer wire (PrivateCellRoot.untagged _) := by
+  cases kind <;> simp [privateWire?] at selected <;> subst selected <;> rfl
+
+/-- **The root law of the private kinds**: the root of every store of an event log or an
+authority cell is its private root at the wire's context. -/
+theorem privateWire_rootOf {kind : Kind} {wire : StoreCodec.Wire (layout kind)}
+    (selected : privateWire? kind = some wire) (store : Store.Store (layout kind)) :
+    (materializer kind).rootOf store =
+      PrivateCellRoot.privateRoot wire (PrivateCellRoot.untagged _) (PrivateCellRoot.kindCtx wire) store := by
+  rw [materializer_of_privateWire selected]
+  exact PrivateCellRoot.materializer_rootOf _ _ _
 
 /-- Whether a cell holds its hiding key. -/
 def blinded : (kind : Kind) → Store (layout kind) → Bool
