@@ -97,6 +97,26 @@ docs/HOT-PATH-STATE.md). This lane has not built one.
   bytes), `challengeJson` 10%, GMP `Nat` churn throughout `StreamCodec`. Lean; batch onto a
   Host build.
 
+## Landed on the lane after batch 8's shas (decisions A and B, root 2026-10-31)
+
+- 4336fd84d + 50de20db5 + def44636b, A: `mini-line` and `mini line-resident`. The ssh wrapper
+  execs `mini-line`, which holds the call slot and passes the line and its three descriptors
+  (SCM_RIGHTS) to the resident for that slot (two per member, keyed by mini's identity, the
+  arguments, MINI_*/HOME/PATH and the umask). The candidate ships `bin/mini-line` (role miniLine,
+  family with mini). On /ci/exo/w6: client CPU 6.2 to 2.2 ms per `doc show`, `whoami` wall 3.4 to
+  2.5 ms (the bash wrapper's own start is now most of it).
+- 7dd2f7eda, B: `read_scratch`. Reads and codec inspections work in a per-process directory on
+  /dev/shm or XDG_RUNTIME_DIR (newest 64 kept, removed at a one-shot command's end); a refused read
+  moves into attempts/; one read-journal line per read, listed by `history all`. A `doc show` used
+  to add 3 attempt directories and 1.5 source files; now none.
+- End to end on /ci/exo/w6, 40 `doc show` each, alternated: wall median 23.8 / 24.2 ms before,
+  20.6 / 23.1 ms after; minimum 17.4-17.9 ms before, 13.7-16.0 ms after. Of what is left: Host
+  ops about 8 ms, codec 3.5 ms, consent 1.9 ms, the resident's own work 3.5-4 ms, the bash
+  wrapper about 2 ms.
+- Next on the client: the wrapper itself in Rust (its `read`s of /etc/mini files and the pins
+  file into `mini-line`), then the in-process file bus (the query path passes paths between
+  `author`/`inspect`/`host_files`; bytes would remove the remaining scratch writes).
+
 ## Other open items
 
 - The client's attempt-file bus: about 60 openat per signed read (it writes each step and reads it
