@@ -1,10 +1,10 @@
 # Seat: store-retained
 
 Agent: a9b54e85e4a194b91 (formerly a13f0c9ab4513b2d7; about 425K tokens at 2026-10-31 night; tell root at ~500K)
-Worktrees: /Users/ember/dev/minidregg-lanes/retained (on main via branch l0-land; no side branch);
-/Users/ember/dev/minidregg-lanes/store-retained (main, board edits). Boxes: dregg-build2 (`ssh bb2`, `lane-tree acquire retained origin/main`;
-lane-check per file; push into the tree from the Mac, the box cannot fetch new branches); hbox t4 for grow2r
-measurements (logs and PID files in /home/hbox/pool/t4-retained/).
+Worktrees: /Users/ember/dev/minidregg-lanes/retained (lands on main; WIP rides `wip/retained-*` on origin);
+/Users/ember/dev/minidregg-lanes/store-retained (main, board edits). Box: hbox pool tree t4 (lease `retained`):
+`git fetch origin <branch>` there, `scripts/pipeline/lane-check FILE` per file; logs and PID files in
+/home/hbox/pool/t4-retained/. Measurement on persvati. bb2 belongs to obend (t7 released).
 
 Owns: the leaf layer and retained mode. Theory/Retained.lean (maintained answer = recomputation after any admitted
 run and across checkpoint/restore; chain rule; generic red-green memo node), Theory/SparseMap.lean (persistent
@@ -42,12 +42,16 @@ CPU per story from /proc, perf of stories 2 and 8), hbox t4 2026-10-31 16:00-16:
 
 ## Next
 1. R1 landed (49cf4f2d2): op 5 authorizes from the challenge op 4 planned over the same light opening
-   (`authorizeRetained_eq`). Its number comes from read-path's overlay measurement (with 143caf2fc, a128a7497,
-   8cbe36d62) on the builder's next candidate after 86c9dbddb.
-2. `NativeHostSession.refresh`: still grows story 2 → 8 after L0 (10.3 % → 14.3 % of Host CPU); read where the
-   per-request advance does work proportional to the opening, and make it a node.
-3. R3 planner/deriver prepared write; I4/I5 Fn and carry scans; export/backup; client refs index; the lint (§7).
-4. Tree order = wire order for StoreCodec (drop encode's sort) if host-execution wants it.
+   (`authorizeRetained_eq`). R6(i) landed (bdfa9428c, c3a28038a): a light birth hands the session its authority
+   post-cell (`HeldCell`, `loadServedAuthorityHeld`, `_eq`/`_taken`/`_other`), so `Light.adopt` neither decodes
+   the cell nor rebuilds its private trie (privacy/host-execution measured 14 % of `doc new` there). Numbers for
+   both come from host-execution's and read-path's measurements on the builder's next candidate.
+2. The rest of R6(i): the other writers pass `none` (grain birth's `admitOn` sees only its intent); the directory's
+   moved-row decode and the post encode (the wire-order encode node, item 4).
+3. Session refresh: main reshaped it (light opening per request, full image only on `materialize`), so the L0-era
+   "refresh grows 10.3 → 14.3 %" is stale; re-profile story 2 vs 8 on the next candidate before designing a node.
+4. Tree order = wire order for StoreCodec (drop encode's sort).
+5. R3 planner/deriver prepared write; I4/I5 Fn and carry scans; export/backup; client refs index; the lint (§7).
 
 ## Seams
 - host-execution (a24974e84d3c540d1): R6 carried decoded post / one turn per record; R7 sealed World (with read-path
