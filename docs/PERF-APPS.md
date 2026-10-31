@@ -72,3 +72,51 @@ path are measured after its fix.
   already uses), never through the operator socket, as before.
 </content>
 </invoke>
+
+## Batch 2: before and after (EtherCalc, batch 5 + 40efdcff9 + batch 1, hbox)
+
+| measure | before (batch 1) | after |
+|---|---|---|
+| the worker's owner-route bind (first to last `route-member` work file) | 13 s (17.5 s on batch 5) | 9 s |
+| `mini` processes the worker started in one install | 95 | 2 (`mini client-resident`, kept) |
+
+## What batch 2 changes
+
+- **The apps worker's client commands run in two resident `mini client-resident` processes**
+  (`native/resource-client/src/client_resident.rs`), not a `mini` process per command: the channel is a
+  socketpair handed over as stdin (moved off fd 0, which becomes /dev/null), each request a JSON argv,
+  each reply the exit code plus stdout and stderr from `capture::argv` on the resident's one thread. One
+  resident is pinned to the public socket (`query`, `submit`, `current-session-intent`), one serves the
+  commands that name the operator socket themselves (share issue, session enrollment). A lost reply is
+  an error, never re-sent; the next command starts a fresh resident.
+- **`transport::host_image_sha256` keeps one digest per file identity** (device, inode, length,
+  mtime, ctime; checked on the path and the opened descriptor, before and after hashing). The 180 MB
+  Host image was hashed about 0.1 s per pin check, several times per custody operation (agent_payer
+  four times per paid dispatch).
+
+## Continuation (for whoever picks this lane up)
+
+State: batch 1 (`23738a4ce`) is merged on staging as `cfe5c24d5` and rides batch 6. Batch 2 is measured
+(table above) and goes to batch 7. The worker still runs five one-shot `minidregg-host author`/`inspect`
+processes of its own during an install (0.06 to 0.21 s each, from a path other than the share and agent
+custody); find their caller and give it the codec session.
+
+Next steps, in order:
+1. How to measure a change: build into `/home/hbox/lanes/perf-apps/target`, copy into an own-bin dir,
+   `up.sh W OWN` (worlds live in `/ci/pa-*`, never `/tank` or `/home`; remove a torn-down world's
+   `/ci/pa-W` before reusing the name), then `run.sh eW W e2e <app id>` against a baseline world, and
+   compare with `cmp.sh eW W` and the worker's `route-*` work files.
+2. When app-reds lands the START fixes (route socket path over SUN_LEN for 20-digit app ids; enrollment
+   lookup "agent reserve custody lacks confirmation"), measure the first page and per-request latency:
+   time repeated authenticated GETs over the route socket (`curl --unix-socket .../http.sock -w
+   %{time_total}`), and split a request in the resident journal (`tool-timing` lines plus the attempt
+   directory's file times: PLAN, ASSEMBLE, SUBMIT, inspect committed).
+3. Open items from the table: the per-request Host round trips (four Host calls per GET, served one at a
+   time by the resident and by the operator socket's single Host thread, hot-path's for the Host side);
+   the client's member turn at install (about 10 Host writes, hot-path's).
+
+Tools on hbox (`/home/hbox/lanes/perf-apps`): `up.sh WORLD OWN_BIN`, `run.sh NAME WORLD fq|e2e ARGS`,
+`trace-start.sh NAME` (bpftrace exec/fork/exit of uid 1000 and root into NAME.proc, PID in
+NAME.trace.pid, stop with `sudo -n kill $(cat NAME.trace.pid)`), `tree.py PROC ROOT_PID MIN_S` (the
+process tree with durations), `cmp.sh RUN WORLD`. Tear worlds down with `world-down.sh /ci/pa-W`. Pool
+tree: `. /home/hbox/pool/pool.env; lane-tree acquire perf-apps <ref>`, release when done.
