@@ -117,7 +117,9 @@ fn with_consent<T>(host: &Path, config: &Path, frame: impl FnOnce(&mut Consent) 
         let anchors=mini_sdk::consent::anchor_dir()?;
         *slot=Some(Consent(mini_sdk::consent::start(&anchors,executable,&settings,settings_bytes)?));
     }
+    let started=std::time::Instant::now();
     let answer=frame(slot.as_mut().unwrap());
+    crate::trace::record("consent","frame",0,0,started);
     // A request that met a dead provider connection is undecided: it is never replayed here, and the
     // next request opens a fresh connection (the socket-activated unit's, or a new resident's).
     let lost=answer.is_err()&&drop_dead_session(&mut slot,&mut lifeline);
@@ -360,6 +362,13 @@ pub(crate) fn codec_frame(host:&Path,config:&Path,operation:u8,payload:&[u8])->R
 /// frame (`inspect outcome`), the decision is noted as the Host's, and the client never decodes
 /// it itself.
 fn local_frame(host:&Path,config:&Path,operation:u8,payload:&[u8])->Result<Vec<u8>> {
+    let started=std::time::Instant::now();
+    let answer=local_frame_untraced(host,config,operation,payload);
+    crate::trace::record("codec",&format!("op{operation}"),payload.len(),answer.as_ref().map_or(0,|a|a.len()),started);
+    answer
+}
+
+fn local_frame_untraced(host:&Path,config:&Path,operation:u8,payload:&[u8])->Result<Vec<u8>> {
     let executable=pure_host(host)?;
     let settings=PINS.get().map(|pins|pins.config.clone())
         .or_else(||std::env::var_os("MINI_CONSENT_CONFIG").map(PathBuf::from))
