@@ -55,6 +55,9 @@ ROLES = {
     "host": "minidregg-host",
     "consent": "minidregg-client-consent",
     "mini": "mini",
+    # The ssh forced command's line client (deploy/shell/mini-shell-ssh): hands a line to the
+    # member's resident shell (`mini line-resident`); built with mini, from the same crate.
+    "miniLine": "mini-line",
     "store": "minidregg-link-sqlite-store",
     "verifier": "minidregg-credential-signature-verifier",
     "grainRuntime": "grain-runtime",
@@ -85,7 +88,7 @@ ROLES = {
 # The Rust roles, role -> crate (the binary is ROLES[role]). The ONE list both builders read
 # (`package.py --rust-roles`): build.sh and lane-build.sh each kept their own copy, and the lane
 # copy silently lacked mini-keys and mini-spk-broker. host and consent are Lean roles.
-RUST_ROLES = (("mini", "resource-client"), ("store", "hyperdocument-link-sqlite-store"),
+RUST_ROLES = (("mini", "resource-client"), ("miniLine", "resource-client"), ("store", "hyperdocument-link-sqlite-store"),
               ("verifier", "credential-signature-verifier"), ("grainRuntime", "grain-runtime"),
               ("grainProviderBridge", "grain-runtime"), ("inferenceScheduler", "inference-scheduler"),
               ("spkHost", "spk-host"), ("spkBrowserProxy", "spk-host"), ("spkBroker", "spk-host"),
