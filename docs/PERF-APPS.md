@@ -160,7 +160,7 @@ prepare verify 2.5 s to 0.013 s.
 `qualify_launch` ran author and inspect for the permission schema, the package identity and the launch
 descriptor as six `HOST CONFIG author|inspect` processes, each starting the 180 MB Lean image, polled every
 25 ms. They now go to one storeless `HOST CONFIG codec` child (frames 7 and 8, no Store, no socket), with
-the detached verb as the fallback when no child answers. Back to back on hbox (batch 8 plus batch 3,
+no second path: a child that cannot start or ends without answering refuses the step by name, and a step's frame is bounded by the Host frame (batch 5 deleted the detached-verb fallback). Back to back on hbox (batch 8 plus batch 3,
 EtherCalc via featured-qualify, load 17 to 34 with an integrator gate running beside it):
 
 | measure | before (I) | after (J) |
@@ -173,7 +173,7 @@ EtherCalc via featured-qualify, load 17 to 34 with an integrator gate running be
 ## Continuation (for whoever picks this lane up)
 
 State: batch 1 (`23738a4ce`), batch 2 (`05c2b208b`) and batch 3 (`106b73251`) are merged on staging
-(batches 6, 7 and 9); batch 4 (one codec child per qualification) is cut on `lane/perf-apps-b5`. The create-to-page profile above is current for batch 8.
+(batches 6, 7 and 9); batch 4 (`4315513a7`, one codec child per qualification) rides batch 9; batch 5 (the fallback deleted) is cut on `lane/perf-apps-b6`. The create-to-page profile above is current for batch 8.
 
 Rulings: the broker's second SPK parse stays (root-side verification of an operator-owned input), and
 `grain install` is not reordered ("refused before any effect" stands; root may overrule). Every grain
