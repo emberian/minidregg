@@ -27,7 +27,8 @@ gated candidates and names candidates to infra and the explorer.
   before its own umbrella). Carries perf-apps b1 23738a4ce, refusal clauses 5c4f73459, the resource-id fix, apps-e2e
   request-file fix f1255b4b3, exorcism (fsync removal 16f2d046f, Store calls carry files in the frame v2 8b49bf1e2/fe77ab521,
   019f2e56f), perf-client through 59dd7ded4 + residents end when storageRoot goes. Exorcist measures row 8 on it.
-- **Batch 7 (staging 227451d8c+)**: hot-path a55855f18 (authority projection once per served state; issuerCheck csimp;
+- 09:10: app-reds' dead PID/log files in the pool root broke lane-tree acquire (trees() glob); moved to pool/saved/app-reds-t5-files; iter-speed fixes the glob. Mac waiter bmoenr3gf on batch 6 READY/failure.
+- **Batch 7 (staging 148a20a8f+; adds c88b88755 resident final writeError)**: hot-path a55855f18 (authority projection once per served state; issuerCheck csimp;
   DRC guard hoist), perf-client 5415aecf7 (pins judged from the executed snapshot's bytes). Both in statement audit.
 - Explorer on batch 5 (vs batch 4): fsyncs 0 everywhere; 128-ref credit 6.9 s -> 0.3-0.4 s; idle catch-up 61 s -> 0.36 s;
   first read after restart 19 s -> 0.24 s; story new ~14 s; say 0.55 s warm; restart 11.7 s; execve per verb 13 -> 22 and
