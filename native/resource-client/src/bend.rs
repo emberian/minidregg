@@ -400,7 +400,10 @@ fn publish(bend: &Bend, mut args: Args) -> Result<()> {
     let hex = |file: &str| fs::read(out.join(file)).map(|b| mini_sdk::hex::encode(&b)).map_err(|e| format!("bend: {file}: {e}"));
     let (payer, payer_cap) = bend.payer(account.as_deref())?;
     let turn = publish_turn(&hex("artifact.bin")?, &hex("package.bin")?, &payer, &payer_cap);
-    let meta = json!({"kind": "publish", "bend": name, "artifactId": artifact_id, "packageId": package_id});
+    // What a decider's reply to this program's asks must look like (the Host's front end read it from
+    // the checked type; empty when the entry is no activity).
+    let response_type = publication.get("responseType").and_then(Value::as_str).unwrap_or("").to_owned();
+    let meta = json!({"kind": "publish", "bend": name, "artifactId": artifact_id, "packageId": package_id, "responseType": response_type});
     match bend.submit(&name, "publish", &turn, &meta, lose).map(|(d, _)| d) {
         Err(e) => ending_for(&name, e),
         Ok(decided) => report(bend, &name, &meta, None, "bend publish", decided),
@@ -480,6 +483,10 @@ fn report(bend: &Bend, name: &str, meta: &Value, transaction: Option<String>, le
         Decided::Admitted { height, root, receipt, how } => match m("kind").as_str() {
             "publish" => {
                 println!("admitted: {lead} {name} ({how}): artifact {} package {}, height {height}, world root {root}, receipt {receipt}", m("artifactId"), m("packageId"));
+                let response_type = meta.get("responseType").and_then(Value::as_str).unwrap_or("");
+                if !response_type.is_empty() {
+                    println!("  a reply to {name}'s asks is {{\"reply\": DATA}} with DATA of type {response_type}");
+                }
                 Ok(())
             }
             "run" => {
