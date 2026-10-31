@@ -245,13 +245,14 @@ restart, `story new`, the first walk-family request after a restart.
 1. **Flatness submit: the demand-driven projection.** The statement is landed:
    `Pred/Frame.lean` has `Pred.reads`, `State.restrict`, `eval_restrict` (the verdict on
    the law's slots is the verdict), `eval_restrict_of_sub`, and `restrict_needs_reads`
-   (teeth). What follows, at the one seam (`CanonicalPolicyAdmission.PolicyStepContext`):
+   (teeth); `PredCompile.inputsInRange_frame` / `inputsInRange_restrict` state the same of
+   the range check. What follows, at the one seam (`CanonicalPolicyAdmission.PolicyStepContext`):
    - A projection carries both forms: `full : Store L → State`, plus `demand : List Slot →
      Store L → State` with `demand keys s = (full s).restrict keys`. Contexts are built with
      `demand law.predicate.reads`, and theorems about the context recover their
-     `project`-stated forms through `eval_restrict`. Before changing `ofCandidate`/
-     `ofPreparedTuple`, also state the same frame for `PredCompile.inputsInRange`, and for
-     the circuit assignment if the compiled verdict reads the state (`ComposedPolicyAdmission`
+     `project`-stated forms through `eval_restrict` / `inputsInRange_restrict`. Before
+     changing `ofCandidate`/`ofPreparedTuple`, state the frame for the circuit assignment
+     too, if the compiled verdict reads the state (`ComposedPolicyAdmission`
      relates the compiled verdict to `Pred.eval` under `rangesExact`).
    - The builders, compositional. `restrict` distributes over `++` (`List.filter_append`).
      `bytesSlotsFor keys stem bytes` parses the demanded `stem/<i>` names and reads those
