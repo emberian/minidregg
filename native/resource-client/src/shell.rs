@@ -256,38 +256,151 @@ fn document_request(session: &Session, text: &str) -> Option<(String, Value)> {
     plain.then(|| (flag_value("proposal-id"), request)).and_then(|(id, request)| Some((id?, request)))
 }
 
-/// A run of template lines that are document proposals each followed at once by its own
-/// `submit`: one proposal of all their actions (per target, in line order; at most 16 per
-/// target, `document_actions`' bound), proposed under the first id and submitted once.
-/// The run is one Host decision instead of one per pair; `None` when fewer than two pairs
-/// line up or a target would exceed the bound.
-fn coalesced_documents(session: &Session, lines: &[(usize, String)]) -> Option<(usize, String, Value)> {
-    let mut at = 0;
-    let mut first: Option<String> = None;
-    let mut targets: Vec<(String, Vec<Value>)> = Vec::new();
-    while at + 1 < lines.len() {
-        let Some((id, request)) = document_request(session, &lines[at].1) else { break };
-        if lines[at + 1].1.split_whitespace().collect::<Vec<_>>() != ["submit", id.as_str()] {
-            break;
-        }
-        for target in request["targets"].as_array().into_iter().flatten() {
-            let name = target["name"].as_str()?.to_owned();
-            let actions = target.pointer("/payload/actions")?.as_array()?.clone();
-            match targets.iter_mut().find(|(held, _)| *held == name) {
-                Some((_, held)) => held.extend(actions),
-                None => targets.push((name, actions)),
+/// What a template knows of its own rooms while it runs: the rooms its `room new` lines
+/// found, and each room's index as its `room index` line names it.
+struct TemplateRooms {
+    born: Vec<String>,
+    index: Vec<(String, String)>,
+}
+
+impl TemplateRooms {
+    fn of(lines: &[(usize, String)]) -> Self {
+        let mut rooms = TemplateRooms { born: Vec::new(), index: Vec::new() };
+        for (_, line) in lines {
+            let words: Vec<&str> = line.split_whitespace().collect();
+            match words.as_slice() {
+                ["room", "new", room, ..] => rooms.born.push((*room).to_owned()),
+                ["room", "index", _, room, doc] => rooms.index.push(((*room).to_owned(), (*doc).to_owned())),
+                _ => {}
             }
         }
-        first.get_or_insert(id);
-        at += 2;
+        rooms
     }
-    if at < 4 || targets.iter().any(|(_, actions)| actions.len() > 16) {
+    fn index_of(&self, room: &str) -> Option<&str> {
+        self.index.iter().find(|(held, _)| held == room).map(|(_, doc)| doc.as_str())
+    }
+}
+
+/// One step of a coalesced run: its proposal id, how many lines it spans, and the
+/// targets it writes (name, payload type, actions).
+type Step = (String, usize, Vec<(String, String, Vec<Value>)>);
+
+/// A template line (or a document proposal and its `submit`) as targets one proposal can
+/// carry: a plain document proposal submitted at once; `room index` on a room the template
+/// founded (the room's pointer `create`d, as `shared_names` does for a room with none);
+/// `room bind` into the index the template attached (a document `name` action on it,
+/// `shared_names`' bind link). `None` for anything else.
+fn coalescible(session: &Session, rooms: &TemplateRooms, lines: &[(usize, String)]) -> Option<Step> {
+    let words: Vec<&str> = lines.first()?.1.split_whitespace().collect();
+    match words.as_slice() {
+        ["room", "index", id, room, doc] if rooms.born.iter().any(|born| born == room) => {
+            let index = crate::workspace::reference(&session.workspace, doc).ok()?;
+            let action = json!({"type":"create","key":{"type":"object","field":crate::workspace::shared_names::INDEX_FIELD},
+                "value":index.get("target")?.as_str()?});
+            return Some(((*id).to_owned(), 1, vec![((*room).to_owned(), "scalar".into(), vec![action])]));
+        }
+        ["room", "bind", id, room, name, to] => {
+            let index = rooms.index_of(room)?;
+            let action = json!({"type":"name","name":name,"to":to});
+            return Some(((*id).to_owned(), 1, vec![(index.to_owned(), "document".into(), vec![action])]));
+        }
+        _ => {}
+    }
+    let (id, request) = document_request(session, &lines[0].1)?;
+    if lines.get(1)?.1.split_whitespace().collect::<Vec<_>>() != ["submit", id.as_str()] {
+        return None;
+    }
+    let mut targets = Vec::new();
+    for target in request["targets"].as_array()? {
+        targets.push((target["name"].as_str()?.to_owned(), "document".to_owned(),
+            target.pointer("/payload/actions")?.as_array()?.clone()));
+    }
+    Some((id, 2, targets))
+}
+
+/// A run of coalescible template lines (`coalescible`): one proposal of all their actions
+/// (per target, in line order; at most 16 actions per target and 16 targets, the
+/// proposal's bounds), proposed under the first step's id and submitted once. The run is
+/// one Host decision instead of one per step; `None` when fewer than two steps line up.
+fn coalesced_documents(session: &Session, rooms: &TemplateRooms, lines: &[(usize, String)]) -> Option<(usize, String, Value)> {
+    let mut at = 0;
+    let mut steps = 0;
+    let mut first: Option<String> = None;
+    let mut targets: Vec<(String, String, Vec<Value>)> = Vec::new();
+    while at < lines.len() {
+        let Some((id, span, written)) = coalescible(session, rooms, &lines[at..]) else { break };
+        let mut merged = targets.clone();
+        let mut fits = true;
+        for (name, kind, actions) in written {
+            match merged.iter_mut().find(|(held, _, _)| *held == name) {
+                Some((_, held_kind, held)) if *held_kind == kind => held.extend(actions),
+                // One target carries one payload type.
+                Some(_) => fits = false,
+                None => merged.push((name, kind, actions)),
+            }
+        }
+        if !fits || merged.len() > 16 || merged.iter().any(|(_, _, actions)| actions.len() > 16) {
+            break;
+        }
+        targets = merged;
+        first.get_or_insert(id);
+        at += span;
+        steps += 1;
+    }
+    if steps < 2 {
         return None;
     }
     let targets: Vec<Value> = targets.into_iter()
-        .map(|(name, actions)| json!({"name": name, "payload": {"type": "document", "actions": actions}}))
+        .map(|(name, kind, actions)| json!({"name": name, "payload": {"type": kind, "actions": actions}}))
         .collect();
     Some((at, first?, json!({"type":"minidregg-workspace-proposal-v1","action":"invoke","targets":targets})))
+}
+
+/// A run of template lines that each birth one plain resource (`doc new`, `create` without
+/// `--owner`), all in the same room: one `workspace create-group` of all of them, one Host
+/// decision for the births and one for the documents (`workspace::create_group`). `None`
+/// when fewer than two such lines line up.
+fn grouped_births(session: &Session, lines: &[(usize, String)]) -> Option<(usize, Plan)> {
+    let mut members = Vec::new();
+    let mut writes = Vec::new();
+    let mut room: Option<Option<String>> = None;
+    for (_, text) in lines.iter().take(16) {
+        let Ok(Plan::Client { command, flags, writes: written }) = plan(session, text) else { break };
+        let value = |name: &str| flags.iter().find(|(key, _)| key == name).map(|(_, v)| v.to_string_lossy().into_owned());
+        let action = value("action");
+        let plain = command == "workspace"
+            && matches!(action.as_deref(), Some("doc-new" | "create"))
+            && flags.iter().all(|(key, _)| matches!(key.as_str(), "action" | "dir" | "name" | "storage" | "predicate" | "in" | "fields"));
+        let within = value("in");
+        if !plain || room.as_ref().is_some_and(|held| *held != within) {
+            break;
+        }
+        room = Some(within.clone());
+        let document = action.as_deref() == Some("doc-new");
+        let mut entry = json!({"name": value("name")?, "storage": if document { "content".to_owned() } else { value("storage")? },
+            "predicate": value("predicate")?, "document": document});
+        if let Some(within) = within {
+            entry["in"] = json!(within);
+        }
+        if let Some(fields) = value("fields") {
+            entry["fields"] = json!(fields);
+        }
+        members.push(entry);
+        writes.extend(written);
+    }
+    if members.len() < 2 {
+        return None;
+    }
+    let first = members[0]["name"].as_str()?.to_owned();
+    let path = session.home.join("requests").join(format!("create-group-{}.json", ref_file(&first)));
+    writes.push(request_file(path.clone(), &json!({"members": members})));
+    let count = members.len();
+    Some((count, Plan::Client {
+        command: "workspace".into(),
+        flags: vec![flag("action", "create-group"), flag("dir", session.workspace.clone()),
+            flag("name", format!("{first}-births")), flag("members", path)],
+        writes,
+    }))
 }
 
 /// Run a template's lines as the session's own typed lines, in order. The
@@ -298,9 +411,27 @@ fn coalesced_documents(session: &Session, lines: &[(usize, String)]) -> Option<(
 /// that builds a room's index costs one Host decision for its edits, not one per line.
 fn run_template(session: &Session, label: &str, lines: &[(usize, String)]) -> (i32, bool) {
     let total = lines.len();
+    let rooms = TemplateRooms::of(lines);
     let mut index = 0;
     while index < lines.len() {
-        if let Some((count, id, request)) = coalesced_documents(session, &lines[index..]) {
+        if let Some((count, plan)) = grouped_births(session, &lines[index..]) {
+            let numbers: Vec<String> = lines[index..index + count].iter().map(|(n, _)| n.to_string()).collect();
+            eprintln!("{label} {}-{}/{total} (lines {}): one birth of {count} resources",
+                index + 1, index + count, numbers.join(","));
+            let ending = execute(session, plan);
+            if !matches!(ending, Ending::Done) {
+                let (code, text) = render(&ending);
+                if !text.is_empty() {
+                    eprint!("{text}");
+                }
+                eprintln!("template {label} stopped at lines {}: the grouped birth\n  lines after it were not run; the {index} line(s) before it stand",
+                    numbers.join(","));
+                return (code, true);
+            }
+            index += count;
+            continue;
+        }
+        if let Some((count, id, request)) = coalesced_documents(session, &rooms, &lines[index..]) {
             let numbers: Vec<String> = lines[index..index + count].iter().map(|(n, _)| n.to_string()).collect();
             eprintln!("{label} {}-{}/{total} (lines {}): one proposal of {} document edits, submitted once",
                 index + 1, index + count, numbers.join(","), count / 2);
@@ -2765,6 +2896,46 @@ mod tests {
             host: PathBuf::from("/bin/host"),
             config: PathBuf::from("/c.json"),
         }
+    }
+
+    /// A template's run of births is ONE `create-group` plan of every member, in line order,
+    /// documents marked; a line with `--owner`, another room, or a non-birth ends the run.
+    #[test]
+    fn a_templates_run_of_births_is_one_group_birth() {
+        let home = std::env::temp_dir().join(format!("mini-group-births-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let s = Session { home: home.clone(), ..session() };
+        let lines: Vec<(usize, String)> = [
+            "doc new r/index draft --in r", "doc new r/chapters note --in r", "create r/scenes stream open --in r",
+            "room index r-map-index r r/index",
+        ].iter().enumerate().map(|(n, l)| (n + 1, l.to_string())).collect();
+        let (count, plan) = grouped_births(&s, &lines).expect("a group");
+        assert_eq!(count, 3);
+        let Plan::Client { command, flags, writes } = plan else { panic!("not a client plan") };
+        assert_eq!(command, "workspace");
+        assert!(flags.iter().any(|(k, v)| k == "action" && v == "create-group"));
+        assert!(flags.iter().any(|(k, v)| k == "name" && v == "r/index-births"));
+        let members: Value = serde_json::from_slice(&writes.last().unwrap().1).unwrap();
+        let names: Vec<&str> = members["members"].as_array().unwrap().iter().map(|m| m["name"].as_str().unwrap()).collect();
+        assert_eq!(names, ["r/index", "r/chapters", "r/scenes"]);
+        let documents: Vec<bool> = members["members"].as_array().unwrap().iter().map(|m| m["document"].as_bool().unwrap()).collect();
+        assert_eq!(documents, [true, true, false]);
+        assert_eq!(members["members"][2]["storage"], "stream");
+        assert_eq!(writes.len(), 4, "each member's law file and the members file");
+        assert!(grouped_births(&s, &lines[2..]).is_none(), "one birth is no group");
+        let other: Vec<(usize, String)> = ["doc new r/a draft --in r", "doc new q/b draft --in q"]
+            .iter().enumerate().map(|(n, l)| (n + 1, l.to_string())).collect();
+        assert!(grouped_births(&s, &other).is_none(), "births in two rooms are not one group");
+        let rooms = TemplateRooms::of(&[(1, "room new r --law open".into()), (2, "room index r-map-index r r/index".into())]);
+        assert_eq!(rooms.born, ["r"]);
+        assert_eq!(rooms.index_of("r"), Some("r/index"));
+        let bind = coalescible(&s, &rooms, &[(1, "room bind r-name-a r a r/a".into())]).expect("a bind into the template's index");
+        assert_eq!(bind.2, vec![("r/index".to_owned(), "document".to_owned(), vec![json!({"type":"name","name":"a","to":"r/a"})])]);
+        assert!(coalescible(&s, &TemplateRooms::of(&[]), &[(1, "room bind r-name-a r a r/a".into())]).is_none(),
+            "a bind into a room the template did not index is its own line");
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]

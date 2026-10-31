@@ -10,7 +10,6 @@ room new $ROOM --law open
 
 # The map: everyone reads it, only you write it, and it only grows.
 doc new $ROOM/index 'any [ not (verb == write), all [ subject == $ME, slot "content/atom-edits" == 0, slot "content/tombstones" == 0, slot "content/names/unique" == 1 ] ]' --in $ROOM
-room index $ROOM-map-index $ROOM $ROOM/index
 
 # The chapters, as written: no line edited, none struck.
 doc new $ROOM/chapters note --in $ROOM
@@ -22,8 +21,9 @@ create $ROOM/scenes stream 'any [ not (verb in {write, append}), subject == $ME 
 # Who is in it: a draft anyone holding write in the room edits.
 doc new $ROOM/cast draft --in $ROOM
 
-# The map's line and its links, and chapters -> cast: consecutive edits, each submitted
-# at once, run as ONE proposal and one submission (a template's coalesced edits).
+# The map is the room's index; its pointer, the map's lines and links, and the shared
+# names are ONE proposal and one submission (a template's coalesced edits).
+room index $ROOM-map-index $ROOM $ROOM/index
 doc append $ROOM-map $ROOM/index 'story $ROOM: chapters only grow, scenes is where it is told, cast is who is in it'
 submit $ROOM-map
 doc link $ROOM-map-chapters $ROOM/index $ROOM/chapters
