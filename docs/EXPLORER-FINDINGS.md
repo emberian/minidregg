@@ -2,7 +2,7 @@
 
 Present-state table, rewritten whole at each batch. Lane `lane/explorer`. Subject: candidate
 be4ef7510 (hbox `/home/hbox/lanes/integ/candidates/be4ef751074ca28c7d306c2f2bcf61cda03893c8`),
-explored as test members only. Batch 1, 2026-10-30.
+explored as test members only. Batch 4, 2026-10-30.
 
 ## Worlds (all on hbox, all mine; torn down when the lane ends)
 
@@ -33,6 +33,45 @@ verb line as ONE quoted argument or `say hello --in room` becomes the text "hell
 | E10 | story/room templates are slow | `story new tl --from tale` took 19.9 s (19 template lines, one submit each); `chat new` 3.0 s, `chat invite` 2.4 s, first `credit` 2.0 s; warm single writes 0.5 s | x1 | law 17 candidate: batch the template's lines into one proposal | n/a |
 | E11 | restart | `restart.sh` 9.6 s wall; first signed read afterwards 8.0-8.6 s at height 160-190 | x1 | measure the replay against height (law 17) | n/a |
 
+
+## Status after routing
+
+E1: infra says the shipped world pins the policy (670 hex) and door funding 1,225,000 (confirmed: a forge test member holds 1,224,993). Closed for the demo. E2: `mini-certify.timer` active on the forge, `mini-alert` now alarms at remaining < 96. Closed. E5, E6, E9: fixed on origin/lane/app-reds 0c176891e (E6 not yet re-checked in x1). E8: not a defect (installed on demo-dry). E3, E4: no owner (Lean/Host rendering). E7: untaken. E10, E11 and certify: integrator perf queue. Scaling: first read after restart 8 s at head 190, 23.4 s at head 769 (O(n) in history); certify at a fixed 256 tail 16.9 / 32.2 / 12.2 s at heads 257 / ~512 / ~768 (noisy, no trend).
+
+## Forge pass (demo-dry, be4ef7510 world, taken down by infra for a rebuild)
+
+Test members dw-10302104 and dw-10302056 only, driven by `/root/explorer/dm USER 'verb'` (runuser plus the box's mini-shell-ssh; deleted with the world).
+
+| id | repro | owner |
+|---|---|---|
+| F1 | Hosted accounts have passwd home `/var/lib/mini` (root 0755). Running `mini-shell-ssh` as `mini-s-NAME` with HOME as sshd would set it, any write (`credit`, `say`) fails `/var/lib/mini/.mini/consent-anchors: Permission denied`. With HOME set to the session home it works (my hotpatch in `dm`). NOT verified over a real sshd login: needs a real ssh member to confirm or clear. | infra |
+| F2 | The lobby's first line says "Start with the document called welcome", but `doc show welcome` as a member fails `cannot read .../refs/welcome.json`; a stranger holds no `welcome` reference. | infra/seed, door |
+| F3 | Under load average 10 (installs running): first `say` 12.5 s and 44.8 s, `tail -n 3` 11.4 s; warm `say` 2.0 s, `tail` 1.7 s (hbox is 0.5 s). | integrator perf |
+| F1 status | fixed by infra (mini-shell-ssh puts consent anchors in the session home); confirmed in code, member `say` works | infra |
+| F4 | `ask lobby ...` -> `there is no Hermes in lobby` (infra already knows; summon blocked). | infra |
+
+
+## Rebuilt forge world (be4ef7510, fresh genesis), test members dw-10302208 and dw-10302219
+
+| id | repro | owner |
+|---|---|---|
+| F5 | First action of an idle session is very slow: `credit` 37.8 s (with `signed read batch: the observed source changed before the plan landed; observing again (re-plan 1)`), first `say` 29.8 s; later `say` 2.1-2.3 s, `tail` 2.3 s with two app installs ingesting (load 4 to 7). Re-time on a quiet box. | infra, integrator perf |
+| F2 | still open: member `doc show welcome` fails, public /doc/welcome is 200. | seed/door grants |
+| F6 | `ask lobby hello` is admitted (`#10 unacknowledged`) but no reply arrives: `mini-grain-resident@9872001` is `failed`. Infra knows (resident exits while installs ingest; restart pending). | infra |
+
+Held: tale story with two players on the forge (key gate refuses `take key`/`go 3` out of order, GM narration shown on `look`); `chat new/invite/join/say/tail` between two members (writes 2.0-2.4 s warm, `chat new` 13 s, `doc new` 6.2 s under load); public pages from outside (/ 2.0 s steady, /doc/welcome 1.6 s, /tour /verb /story 0.5-0.7 s, /apps 1.3 s, 404s 0.5 s). Probe artefact: curl to the public URL from inside demo-dry hangs, use an outside probe.
+
+
+## hbox world x3 (be4ef7510, demo params + objectiveInvocation, funding 1,225,000)
+
+Worlds x1, x2, xw1, xweb and the e2e workers are down (x1's down listed one survivor that had already exited). x3 is up: `/ci/xp-log/m3 MEMBER 'verb'`, down with `jworld-scratch.sh down /ci/x3/w`.
+
+| id | repro | owner |
+|---|---|---|
+| G0 | E1 confirmed closed in a scratch world: with the policy pinned and funding 1,225,000, `bend publish` then `bend run tally` are admitted in under 1 s; one run costs 121,779 (10 runs fit the grant). A repeated identical `bend run` is refused with the exact-retry guard (`--again true`). | n/a |
+| G1 | A second member publishing the identical `Tally.obend` (`bend publish tally @Tally.obend --entry tally`) is refused `conflict: transaction identity conflict (phase replay)`; the package is already on the chain, yet the member then runs it fine. The refusal should say the package is already published. | kernel/shell refusal rendering |
+| G2 | `bend answer SLOT @file` by the decider with a wrong reply shape is refused `Refusal.responseType "reply"`; a non-decider is refused `notDecider` (good, by name). The decider message does not say what shape the slot wants. Await deadlines are heights (62 against a current 61): on a busy world the window can pass between `await` and `answer`. | shell/bend docs |
+
 ## Exercised and held
 
 Three members in one chat room (`chat new/invite/join/enter`, 45 concurrent says all admitted,
@@ -46,6 +85,5 @@ members; document limits are all named except E9.
 
 ## Not yet reached
 
-Apps beyond the install attempt (E7), Hermes in a story or room, the forge `demo` container (infra
-has not reported it up), the public reader over app-made documents, the door and enrol path on the
+Apps beyond the install attempt (E7), Hermes in a story or room (blocked on the forge), the public reader over app-made documents, the door and enrol path on the
 real stack.
