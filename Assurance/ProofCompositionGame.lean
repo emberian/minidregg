@@ -21,6 +21,7 @@ domain-separated query.  This shape can host LogUp, history/WARP folds,
 additive FRI, and query sampling as phases of one transcript.
 -/
 
+import Mathlib.Tactic.DeriveFintype
 import Compiler.AuthenticatedColumnLogupBridge
 import Compiler.AdditiveFriReceiptClause
 import Selvage.OracleLogLinkedTwoPhaseSoundness

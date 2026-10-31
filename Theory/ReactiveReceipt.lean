@@ -15,7 +15,10 @@ renderers, and proof systems remain separate interpreters of this core.
 module
 
 public import Mathlib.Data.Finset.Empty
-public import Mathlib.Tactic
+public import Mathlib.Tactic.Common
+public import Mathlib.Tactic.FinCases
+public import Mathlib.Data.Finset.Lattice.Basic
+public import Mathlib.Data.Fintype.Basic
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr

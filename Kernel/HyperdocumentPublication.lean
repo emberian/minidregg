@@ -12,6 +12,7 @@ and handler evidence indexed by both exact accepted effects.
 persistence and cryptographic joint binding.  This module does not infer those
 facts from logical acceptance.
 -/
+import Mathlib.Tactic.DeriveFintype
 import Kernel.HyperdocumentVersionEffects
 import Kernel.MultiCellHyperedge
 
