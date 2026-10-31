@@ -189,10 +189,13 @@ applied):
 * `accept`: one accepted version: the next version and its mask `Params.prf (version + 1)`, then
   the patch in order, for a no-op too; no caller supplies a mask (fourth-round audit).
   `accept_spec` gives the resulting store exactly; `accept_isSome_iff`: accepted exactly when every
-  write fits and avoids the blinding. `History.masks_fresh`: across a cell's history the custody
-  function is evaluated at pairwise distinct versions, the receiver's discharge of the fresh-mask
-  premise under a PRF assumption on `Params.prf` (a host custody key independent of every disclosed
-  value).
+  write fits and avoids the blinding. `History.custodyInputs_distinct`: across a cell's history the
+  custody function is evaluated at pairwise distinct versions (inputs only: a constant function
+  passes it). Freshness is the named premise `Custody.CustodyPrf` (the PRF game over the custody key
+  as a tape; satisfiable `identity_satisfies`, teeth `constant_refuted`), composed in
+  `receiver_prf_term` into the hybrid argument's PRF hop. Forks: `AtMostOneSuccessor` is the host's
+  obligation (a persisted version counter, a retry returning the stored successor); a history meets
+  it, and `fork_shares_mask` shows two accepts from one cell share a mask.
 * `birth` refuses a store already holding a mask (`birth_refuses_masked`: imports are never
   silently re-masked) and accepts any other gated store (`birth_accepts`); `blinding_fits` proves
   the registry's blinding address passes the gate, so no caller supplies that either.
@@ -202,6 +205,9 @@ applied):
   no store lookup.
 
 **Owed, in order:**
+0. **The hiding goals out of the Draft namespace** (`Kernel/BlindedCellHiding.lean`), statement
+   first, with `CustodyPrf` as the PRF premise of `StandardModelHidingGoal` / `HybridReduction`'s
+   first hop and `AtMostOneSuccessor` as the fork premise.
 1. **The cell representation carries `KeptCell`**: `Materialized.rootCache := KeptCell.root`,
    `rootExact` by `root_eq` and a materializer whose `rootOf` is `privateRoot` (context made
    explicit in the specification: `rootOf : Store → Root` cannot see the accepted version), patch

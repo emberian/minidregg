@@ -25,11 +25,12 @@ outer commitment over the context, the mask and the index digest.
   `prf (version + 1)` set at the blinding address, then the patch's writes in
   order, for a no-op patch too (`accept_spec`: the resulting store exactly;
   `accept_isSome_iff`: accepted exactly when every write fits and avoids the
-  blinding). No caller supplies a mask. `History.masks_fresh`: across a cell's
-  history the custody function is evaluated at pairwise distinct versions, the
-  receiver's discharge of the fresh-mask premise under a PRF assumption on
-  `Params.prf` (the host's custody obligation: a key independent of every
-  disclosed value).
+  blinding). No caller supplies a mask. `History.custodyInputs_distinct`: across
+  a cell's history the custody function is evaluated at pairwise distinct
+  versions. Freshness is the named premise `Custody.CustodyPrf` (teeth:
+  `Custody.constant_refuted`), composed with the distinct inputs in
+  `receiver_prf_term`, the hybrid argument's PRF hop. Forks are the host's
+  obligation `AtMostOneSuccessor` (a history meets it; `fork_shares_mask` is why).
 * `root` / `root_eq`: the outer commitment from the kept digest and the held
   mask, under the context derived from the cell's state (`ctxOf`: protocol,
   cell, layout, accepted version, size bound), equals `privateRoot`, the
@@ -91,7 +92,8 @@ bytes, public size bound, the registry's selection of the wire, the wire's
 blinding address, and the custody mask function of this cell: the mask of
 accepted version `v` is `prf v`. The host instantiates `prf` as a PRF under a
 key independent of every disclosed value; the receiver only ever evaluates it
-at strictly increasing versions (`History.masks_fresh`). -/
+at strictly increasing versions (`History.custodyInputs_distinct`); its PRF
+security is the named premise `CustodyPrf`. -/
 structure Params where
   protocol : Nat
   cell : List UInt8
@@ -472,16 +474,108 @@ theorem History.spec : ∀ {cells : List (KeptCell wire)}, History wire cells �
         · obtain ⟨lt, same⟩ := (List.pairwise_cons.mp chain).1 c member
           exact ⟨by omega, hp.trans same⟩
 
-/-- **Masks are fresh**: the custody function is evaluated at pairwise distinct
-versions across a history, each version's mask being its own evaluation. This
-is the receiver's discharge of the hiding argument's fresh-mask premise: under a
-PRF at distinct inputs, the masks are jointly indistinguishable from independent
-uniform ones (the PRF term of docs/RATCHET-LOG-DESIGN.md §4). -/
-theorem History.masks_fresh {cells : List (KeptCell wire)} (history : History wire cells) :
+/-- **Distinct custody inputs**: across a history the custody function is
+evaluated at pairwise distinct versions, each version's mask being its own
+evaluation. This alone does not make masks fresh (a constant function passes
+it); freshness is `CustodyPrf` of the function, composed in `receiver_prf_term`. -/
+theorem History.custodyInputs_distinct {cells : List (KeptCell wire)} (history : History wire cells) :
     (cells.map KeptCell.version).Nodup ∧
       ∀ c ∈ cells, c.mask = (wire.valueStream c.params.blinding.space).encode (c.params.prf c.version) := by
   obtain ⟨masks, chain⟩ := history.spec
   exact ⟨List.pairwise_map.mpr (chain.imp fun h => Nat.ne_of_gt h.1), masks⟩
+
+
+/-! ## The custody PRF and the receiver's PRF term -/
+
+open Minidregg.Theory.FiniteTapeGap (GapAtMost)
+
+namespace Custody
+
+/-- **The custody PRF game**: over `tapes` equally likely draws of the custody
+key (`keyed`) or of an ideal function (`ideal`), no budgeted test of the
+function separates the two by more than `num/den`. The key is a tape, so it is
+outside every reader's view; the test sees the function only through its
+values. -/
+def CustodyPrf {M : Type} (tapes num den : Nat) (keyed ideal : Fin tapes → Nat → M)
+    (budgeted : ((Nat → M) → Bool) → Prop) : Prop :=
+  ∀ test, budgeted test → GapAtMost tapes num den (fun t => test (keyed t)) (fun t => test (ideal t))
+
+/-- Satisfiable: the ideal function against itself, at gap zero. -/
+theorem identity_satisfies {M : Type} {tapes den : Nat} (positive : 0 < tapes) (denominator : 0 < den)
+    (ideal : Fin tapes → Nat → M) (budgeted : ((Nat → M) → Bool) → Prop) :
+    CustodyPrf tapes 0 den ideal ideal budgeted :=
+  fun _ _ => ⟨positive, denominator, by simp, by simp⟩
+
+/-- All four functions on `{1, 2}` into `Bool` (zero elsewhere). -/
+def idealFour (t : Fin 4) (n : Nat) : Bool :=
+  if n = 1 then t.val % 2 = 1 else if n = 2 then t.val / 2 = 1 else false
+
+/-- The test "the masks of versions 1 and 2 agree". -/
+def equalTest (f : Nat → Bool) : Bool := f 1 == f 2
+
+/-- **Teeth**: a constant custody function fails the game at any gap below
+one half against the test that compares two versions' masks. -/
+theorem constant_refuted :
+    ¬ CustodyPrf 4 1 4 (fun _ _ => false) idealFour (fun test => test = equalTest) := by
+  intro prf
+  obtain ⟨_, _, bound, _⟩ := prf equalTest rfl
+  revert bound
+  decide
+
+end Custody
+
+open Custody (CustodyPrf)
+
+/-- **The receiver's PRF term.** A history's custody inputs are pairwise
+distinct and each version holds its own evaluation; and for a game that reads
+the masks only through the custody function, `CustodyPrf` of that function
+gives the hybrid argument's first hop (`BlindedCellHidingDraft.HybridReduction`,
+real masks against an ideal function, gap `fNum/den := num/den`). At the
+distinct inputs the history supplies, the ideal function's values are what the
+uniform hybrid samples. -/
+theorem receiver_prf_term {M Strategy : Type} {cells : List (KeptCell wire)} (history : History wire cells)
+    (tapes num den : Nat) (keyed ideal : Fin tapes → Nat → M) (budgetedPrf : ((Nat → M) → Bool) → Prop)
+    (prf : CustodyPrf tapes num den keyed ideal budgetedPrf)
+    (game : Strategy → Bool → (Nat → M) → Bool) (legal budgeted : Strategy → Prop)
+    (reduces : ∀ a, legal a → budgeted a → ∀ b, budgetedPrf (game a b)) :
+    (cells.map KeptCell.version).Nodup ∧
+      (∀ c ∈ cells, c.mask = (wire.valueStream c.params.blinding.space).encode (c.params.prf c.version)) ∧
+      ∀ a, legal a → budgeted a → ∀ b,
+        GapAtMost tapes num den (fun t => game a b (keyed t)) (fun t => game a b (ideal t)) := by
+  obtain ⟨distinct, masks⟩ := history.custodyInputs_distinct
+  exact ⟨distinct, masks, fun a isLegal isBudgeted b => prf _ (reduces a isLegal isBudgeted b)⟩
+
+/-! ## Forks: one accepted successor per version -/
+
+/-- **At most one accepted successor per version**: among the host's accepted
+cells, one parameter set and one version name one cell. A host that accepts
+twice from one version publishes two stores under one mask; this is the host's
+obligation (a persisted version counter, a retry returning the stored
+successor), stated here so the hiding argument can take it as a premise. -/
+def AtMostOneSuccessor (accepted : KeptCell wire → Prop) : Prop :=
+  ∀ c c', accepted c → accepted c' → c.params = c'.params → c.version = c'.version → c = c'
+
+/-- A single history meets it. -/
+theorem History.atMostOneSuccessor {cells : List (KeptCell wire)} (history : History wire cells) :
+    AtMostOneSuccessor wire (· ∈ cells) := by
+  intro c c' hc hc' _ same
+  obtain ⟨distinct, _⟩ := history.custodyInputs_distinct
+  exact List.inj_on_of_nodup_map distinct hc hc' same
+
+namespace KeptCell
+
+variable {wire}
+
+/-- **Why it is an obligation**: two accepts from one cell share the version and
+the mask, whatever their patches. -/
+theorem fork_shares_mask {cell left right : KeptCell wire} {patchL patchR : List (Write (kind := kind))}
+    (acceptedL : cell.accept patchL = some left) (acceptedR : cell.accept patchR = some right) :
+    left.version = right.version ∧ left.mask = right.mask := by
+  obtain ⟨hvL, _, hmL, _, _⟩ := accept_spec acceptedL
+  obtain ⟨hvR, _, hmR, _, _⟩ := accept_spec acceptedR
+  exact ⟨hvL.trans hvR.symm, hmL.trans hmR.symm⟩
+
+end KeptCell
 
 #assert_axioms KeptCell.root_eq
 #assert_axioms birth_refuses
@@ -496,6 +590,11 @@ theorem History.masks_fresh {cells : List (KeptCell wire)} (history : History wi
 #assert_axioms blinding_fits
 #assert_axioms birth_accepts
 #assert_axioms birth_refuses_masked
-#assert_axioms History.masks_fresh
+#assert_axioms History.custodyInputs_distinct
+#assert_axioms Custody.constant_refuted
+#assert_axioms Custody.identity_satisfies
+#assert_axioms receiver_prf_term
+#assert_axioms History.atMostOneSuccessor
+#assert_axioms KeptCell.fork_shares_mask
 
 end Minidregg.Kernel.PrivateCellReceiver
