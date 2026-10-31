@@ -1,5 +1,5 @@
 /-
-# Theory.AuthTrieReveal — honest reveals verify (the spec `revealFor`; the kept trie's `Trie.reveal` equality owed)
+# Theory.AuthTrieReveal — honest reveals verify, and the kept trie serves them
 
 `Theory.AuthTrieRange.reveal_sound` says what a verifying reveal answers. This
 module supplies the other half and the operation that serves it:
@@ -10,14 +10,20 @@ module supplies the other half and the operation that serves it:
   the canonical root of a store with distinct paths of length `L`, and answers
   exactly the store's pairs under the prefix (with `reveal_sound`, the answer of
   every verifying reveal is that one, up to a scoped collision).
-* `Trie.reveal` (its equality with `revealFor`, `Cache.reveal_eq`, is owed): the same reveal read off the kept trie, one
-  sibling digest per walked branch and the stopped subtree's entries, so its work
-  is the walked depth plus the answer, never the store.
+* `Trie.reveal`: the same reveal read off the kept trie: one cached sibling
+  digest per walked branch, then the stopped subtree's entries, listed by
+  `Trie.entries` (work about that subtree's size times its height). It touches
+  the walked path and the stopped subtree only; the subtree is the answer
+  under a full-length prefix, and can be the whole store under a short one. `Cache.reveal_eq`: its siblings are the
+  honest reveal's and its members a permutation of them; `Cache.reveal_verifies`:
+  it verifies against the cache's logical root (verification is invariant under
+  permuting members, `revealVerify_perm`).
 -/
 module
 
 public import Theory.AuthTrieRange
 public import Theory.AuthTrieCache
+public import Theory.AssertAxioms
 
 @[expose] public section
 
@@ -156,5 +162,119 @@ def reveal : List Bool → Trie K V D → List D × List (K × V)
   | _, t => ([], t.entries.map fun e => (e.1, e.2.2))
 
 end Trie
+
+
+section Kept
+
+variable {K V D : Type} [DecidableEq K] [DecidableEq V] [DecidableEq D]
+variable (dig : NodeIn K V D → D)
+
+omit [DecidableEq K] [DecidableEq V] [DecidableEq D] in
+/-- **The kept trie's reveal is the honest walk**: the same siblings, and the
+members up to order. -/
+theorem Trie.reveal_walk : ∀ (n : Nat) (t : Trie K V D) (es : List (Entry K V)) (p : List Bool),
+    Trie.Inv dig n t → t.entries.Perm es →
+      (Trie.reveal dig p t).1 = (walkReveal dig n es p).1 ∧
+        (Trie.reveal dig p t).2.Perm ((walkReveal dig n es p).2.map fun e => (e.1, e.2.2))
+  | n, t, es, [], _, h => by
+      have served : Trie.reveal dig [] t = ([], t.entries.map fun e => (e.1, e.2.2)) := by
+        cases t <;> rfl
+      rw [served]
+      exact ⟨by simp [walkReveal], by simpa [walkReveal] using h.map (fun e => (e.1, e.2.2))⟩
+  | n, .empty, es, _ :: _, _, h => by
+      simp only [Trie.entries] at h
+      obtain rfl := h.nil_eq
+      cases n <;> exact ⟨rfl, List.Perm.refl _⟩
+  | n, .leaf d rest k v, es, _ :: _, _, h => by
+      simp only [Trie.entries] at h
+      obtain rfl := List.perm_singleton.mp h.symm
+      cases n <;> exact ⟨rfl, List.Perm.refl _⟩
+  | 0, .clash kvs, es, b :: p, inv, h => by
+      have two : 2 ≤ es.length := by
+        have := h.length_eq
+        simp only [Trie.Inv] at inv
+        simp only [Trie.entries, List.length_map] at this
+        omega
+      match es, two with
+      | a :: c :: rest, _ => exact ⟨rfl, h.map _⟩
+  | _ + 1, .clash _, _, _ :: _, inv, _ => by simp [Trie.Inv] at inv
+  | 0, .branch .., _, _ :: _, inv, _ => by simp [Trie.Inv] at inv
+  | n + 1, .branch d l r, es, b :: p, inv, h => by
+      obtain ⟨il, ir, _, twoLR⟩ := inv
+      have two : 2 ≤ es.length := by
+        have := h.length_eq
+        simp only [Trie.entries, List.length_append, List.length_map] at this
+        omega
+      match es, two, h with
+      | a :: c :: rest, _, h =>
+        cases b with
+        | false =>
+            have hl : l.entries.Perm (strip false (a :: c :: rest)) := by
+              have := strip_perm false h
+              rwa [Trie.entries, Trie.strip_false_branch] at this
+            have hr : r.entries.Perm (strip true (a :: c :: rest)) := by
+              have := strip_perm true h
+              rwa [Trie.entries, Trie.strip_true_branch] at this
+            obtain ⟨s, m⟩ := Trie.reveal_walk n l _ p il hl
+            refine ⟨?_, m⟩
+            simp only [Trie.reveal, walkReveal, Bool.false_eq_true, ite_false, Bool.not_false, s]
+            rw [Trie.digest_eq dig n r ir, tree_perm dig n hr]
+        | true =>
+            have hl : l.entries.Perm (strip false (a :: c :: rest)) := by
+              have := strip_perm false h
+              rwa [Trie.entries, Trie.strip_false_branch] at this
+            have hr : r.entries.Perm (strip true (a :: c :: rest)) := by
+              have := strip_perm true h
+              rwa [Trie.entries, Trie.strip_true_branch] at this
+            obtain ⟨s, m⟩ := Trie.reveal_walk n r _ p ir hr
+            refine ⟨?_, m⟩
+            simp only [Trie.reveal, walkReveal, ite_true, Bool.not_true, s]
+            rw [Trie.digest_eq dig n l il, tree_perm dig n hl]
+
+/-- Verification does not depend on the order of the revealed members. -/
+theorem revealVerify_perm (bitsOf : K → List Bool) (L : Nat) (root : D) (p : List Bool)
+    {r r' : Reveal K V D} (hs : r.siblings = r'.siblings) (h : r.members.Perm r'.members) :
+    revealVerify dig bitsOf L root p r = revealVerify dig bitsOf L root p r' := by
+  rw [Bool.eq_iff_iff]
+  simp only [revealVerify, Bool.and_eq_true, decide_eq_true_eq, List.all_eq_true, Reveal.entriesBelow, hs]
+  rw [tree_perm dig _ (h.map (fun kv => (kv.1, (bitsOf kv.1).drop r'.siblings.length, kv.2))),
+    (h.map (fun kv => (bitsOf kv.1).drop r'.siblings.length)).nodup_iff]
+  simp only [h.mem_iff]
+  constructor
+  · rintro ⟨rest, climbed⟩
+    exact ⟨rest, decide_eq_true climbed⟩
+  · rintro ⟨rest, climbed⟩
+    exact ⟨rest, of_decide_eq_true climbed⟩
+
+namespace Cache
+
+variable {dig} {bitsOf : K → List Bool} {L : Nat}
+
+omit [DecidableEq V] [DecidableEq D] in
+/-- **`Cache.reveal_eq`**: the reveal served by the kept trie has the honest
+reveal's siblings and, up to order, its members. -/
+theorem reveal_eq {cache : Cache dig bitsOf L} {es : List (K × V)} (h : cache.Holds es) (p : List Bool) :
+    (Trie.reveal dig p cache.trie).1 = (revealFor dig bitsOf L (canon es) p).siblings ∧
+      (Trie.reveal dig p cache.trie).2.Perm (revealFor dig bitsOf L (canon es) p).members :=
+  Trie.reveal_walk dig L cache.trie _ p cache.inv h
+
+/-- **The served reveal verifies** against the cache's logical root. -/
+theorem reveal_verifies {cache : Cache dig bitsOf L} {es : List (K × V)} (h : cache.Holds es)
+    (lengths : ∀ k, (bitsOf k).length = L) (inj : PathsInjective bitsOf es) (p : List Bool)
+    (short : p.length ≤ L) :
+    revealVerify dig bitsOf L (root dig bitsOf L es) p
+      ⟨(Trie.reveal dig p cache.trie).1, (Trie.reveal dig p cache.trie).2⟩ = true := by
+  obtain ⟨s, m⟩ := reveal_eq h p
+  have honest := reveal_complete dig bitsOf L lengths (canon es) (wf_canon lengths inj) p short
+  exact (revealVerify_perm dig bitsOf L _ p (r' := revealFor dig bitsOf L (canon es) p) s m).trans honest
+
+end Cache
+
+end Kept
+
+#assert_axioms reveal_complete
+#assert_axioms Trie.reveal_walk
+#assert_axioms Cache.reveal_eq
+#assert_axioms Cache.reveal_verifies
 
 end Minidregg.Theory.AuthTrie

@@ -91,65 +91,60 @@ tree-shape invariant from binding. Owed before it can carry cells (astra round 2
   would expose a leaf of another class;
 * **index collisions**: admission preserves `PathsInjective` or counts them.
 
-**Increment 1, proved** (on the Lean 4.35 bump `cdb399b47`; two astra rounds on the proofs):
-* `Theory/AuthTrieErase.lean`: `Trie.eraseCounted` walks once, re-joins each level (a lone
-  leaf rises without rehashing), and counts the work: visits, every digest evaluation
-  (`joinCost`, the empty-child digests a fresh branch reads included) and clash entries.
-  `erase_correct`, and `erase_cost` at `4 * L + 1` on injective live paths, constants chosen
-  before `L` (astra: constants after `L` could hide a rebuild). `EraseCost` constrains the
-  returned count only, so the claim is about this operation's own instrumented count;
-  allocations are O(1) per visit and not separately counted.
-* `Theory/AuthTrieRange.lean`: `tree_injective`, `climb_digest_sound` and `reveal_sound` now
-  conclude with a collision AMONG `revealNodes` (a finite comparison scope, over-approximating
-  the nodes hashed), not the vacuous global `Collision`; `Compiler/DurableIndex.reveal_sound`
-  follows.
-* `Theory/AuthTrieReveal.lean`: `reveal_complete` (the honest reveal verifies); `Trie.reveal`
-  reads it off the kept trie in walked depth plus answer (its equality `Cache.reveal_eq` owed).
-* `Theory/PrivateCellTrie.lean`: `classRevealComplete`, `erase_correct`, `erase_cost`.
-* `Kernel/ReceiptEventHiding.lean`: the challenge carries the native envelope shape
-  (`Challenge.envelope_decodes`); `DeployedShape.wire_shape_inhabited` (renamed: wire shape only, not premise inhabitation) covers every keystone
-  premise but `IdealReplacement` at that shape (a syntactic challenge, not an admitted
-  invocation: version, target envelopes and header binding are admission's); the refutations
-  take ingress reconstructible from the reader's view.
+**Increment 1, proved** (on the Lean 4.35 bump `cdb399b47`; on staging): trie erase,
+scoped reveal soundness (`revealNodes`, a finite comparison scope, not the vacuous global
+`Collision`), `reveal_complete`, `classRevealComplete`, the receipt wire shape.
 
-**Owed** (astra round 3): the Store adapter (namespace-qualified address, canonical value
-bytes, layout binding; `StoreCodec.fromEntries` is first-wins, the trie last-wins); the
-projection target is `Visible`/`narrowPacked`, NOT `narrowStore` (which keeps blinding under
-full scope), and the private index omits the blinding entry (mask custody separate); scope
-coverage equals a bounded prefix union (`body` covers every `atomsOf low`); multi-class,
-overwrite and deletion witnesses; store-side collision locality (authentication path plus
-selected subtree); `Cache.reveal_eq`.
+**Increment 2, proved** (the integrator's audit of increment 1, items (a) to (d); astra rounds 5
+to 7):
+* **Store adapter** (`Compiler/PrivateCellIndex.lean`): a `Store` is a finite map, so first- vs
+  last-wins is a property of entry lists only; the adapter reads canonical entries (distinct
+  addresses). `indexExact` (last value at every address = the value bytes; none at the
+  blinding address), `indexBindsData`, `indexIgnoresBlinding`. Scope: canonical-list binding at
+  one fixed wire; that the wire's exclusion is `isBlinding` is the Kernel instantiation's.
+* **Erase cost the operation cannot fake** (`Theory/AuthTrieErase.lean`, `EraseCost` in
+  `Theory/PrivateCellTrie.lean`): the erase is a heap program (`Prog`: hash, load, store as
+  constructors; handles are heap indices) interpreted by `run`, one per operation and a clash
+  load charged its size. `EraseCost` fixes its constants before the key, value and digest
+  types, the digest function and `L`, and quantifies over every heap representing the cache's
+  trie: the result handle represents the erase, and the interpreter's count is at most
+  `perBit * L + fixed` on injective live paths. `eraseM_sim`, `erase_cost` at `7L + 3`. Scope:
+  abstract operations on a constant-access heap; pure computation between operations is not
+  metered. Astra rounds 6 and 7 refuted two weaker forms (a monad-polymorphic erase can type-case
+  on the monad; constants after the key type absorb a finite key space).
+* **`Cache.reveal_eq`** (`Theory/AuthTrieReveal.lean`): the kept trie's reveal has the honest
+  siblings and its members up to order; `revealVerify_perm`; `Cache.reveal_verifies`.
+* **Two-class teeth** (`PrivateCellTrie.Witness`): 3-bit keys in two classes over a free
+  (injective) digest, so `ClassRevealComplete`'s premises hold and its collision escape is
+  impossible (`class_opening_exact`); honest opening verifies, cross-class, withheld and
+  other-class reveals refused.
+* **Receipt joint witness** (`Kernel/ReceiptEventHiding.lean`): `DeployedRandomized`, the
+  signer's randomness on four tapes, constant view, budget exactly the query-bounded public-hash
+  tests (`AnyPublicHash`): `IdealReplacement` by `idealReplacement_of_injective` and
+  `deployed_receiptHiding` at gap 1/2; `leaked_tape_refuted` (teeth). The public signer is
+  refuted unconditionally (`public_signer_refuted_always`). Distinctness of concrete cSHAKE ids
+  is a compiled-evaluation fact (`native_decide` over the pure-Lean fast path, the kernel cannot
+  evaluate Keccak), pinned with `#guard_msgs` on `#print axioms` (precedent:
+  `Kernel/NativeHostStoreIdentity.lean`, `Theory/Sp800185Cshake256Conformance.lean`).
+* **Scope selection** (`Kernel/PrivateCellScope.lean`, item 2): `ClassCode` (a fixed-width class
+  prefix code; `body` opens its family prefix, covering every `atomsOf`), `scopeSelectsVisible`
+  and `scopeSelectsPath` (a reader's `Visible` set is exactly the addresses under one of at most
+  `card fields` prefixes, one for a full scope), and the concrete `bitCode` of width `4 + W`
+  (satisfiable), with teeth.
 
-**Increment 2, started** (`Compiler/PrivateCellIndex.lean`, statements, elaborate on hbox,
-not yet reviewed): semantics decided: a `Store` is a finite map with no history, so first- vs
-last-wins is a property of entry LISTS only; the adapter reads canonical entries (distinct
-addresses, `entries_keys`), where both conventions agree, and the trie's last-wins is the
-update convention. `indexEntries` omits the blinding address. `IndexExact` (last value at
-every address = the store's value bytes; none at blinding) and `IndexBindsData` (equal
-indexes agree off the blinding; teeth: stores differing only in blinding share an index).
-
-**Required by the integrator's audit of increment 1** (nothing vacuous; these next):
-(a) a joint witness including `IdealReplacement` at the deployed shape (>= 2 tapes, signer
-randomness and key on the tape, budget = the query-bounded `PublicHashTest` class), and
-`public_signer_refuted` unconditional (discharge `distinct`); (b) `EraseCost` must make faking
-impossible: erase over a `dig` oracle in a counting monad (or a fixed cost semantics), the cost
-over the handler's count; the Store adapter must carry the bound before any deployed-cost claim;
-(c) the two-class teeth witness for `ClassRevealComplete`; (d) `Cache.reveal_eq`; (e) reveal
-locality to the path plus selected subtree (known, kept listed).
-
-**Next increments** (in order, batched onto dd0e6efbd as the coordinator asked):
-1. Prove `IndexExact` / `IndexBindsData` (lastVal over a map/filter of a key-distinct list;
-   value codecs injective by `streamEncode_injective`). Then item 2: `ClassKeys` over
-   `indexEntries` whose class prefix selects exactly `Visible`/`narrowPacked`
-   (`Kernel/ResourceObservationAdmission.lean` ~696-870: `body` covers every `atomsOf low`,
-   annotations combine links/marks/annotations); state as a bounded union of prefixes.
-   Item 3: witnesses with an injective digest (`AuthTrie.spelled`-like but multi-class K/V):
-   cross-class refusal, overwrite, deletion. Item 4: the opening relation from the compiler.
-2. The opening relation in the compiler's vocabulary (compiler-emitted AIR; grow the
-   compiler where it lacks a trie-path or cSHAKE gadget), not a hand-written circuit.
-3. The receiver: new materializer version beside the old one until a fresh genesis, with its
-   fixture re-record in the same sha; coordinate the codec epoch with the hot-path successor.
-4. Flatness: gate10/gate12 flatness-submit.
+**Owed, in order:**
+1. Reveal locality: store-side collision scope restricted to the authentication path plus the
+   selected subtree (audit item (e)).
+2. Fitting for declared kinds: a slot is `.slot field.value` with an unbounded `Digest`, so
+   admission must bound it below `2^W`; the address-path half of the keys (`ClassKeys.address`
+   from the canonical address bytes, injective before hashing), and `PathsInjective` from it.
+3. The composed opening: class openings over `indexEntries` under the masked root, the
+   reader's view as their union (`narrowPacked`).
+4. The opening relation in the compiler's vocabulary (compiler-emitted AIR; grow the compiler
+   where it lacks a trie-path or cSHAKE gadget), not a hand-written circuit.
+5. The receiver: new materializer version beside the old one until a fresh genesis, with its
+   fixture re-record in the same sha; codec epoch agreed with the hot-path successor.
+6. Flatness: gate10/gate12 flatness-submit.
 
 **Linear paths seen** (each blocks flatness independently): flat `rootPreimage`
 (44 + 32E bytes per write, `StoreCodec`), whole-view `items` in `StoreHiding.view` and
@@ -160,21 +155,23 @@ scanning the accepted log, `historicalReceipt`'s `findIdx?` (cached variant exis
 ## Continuation (for a successor)
 
 * **Trees.** Mac worktree `~/dev/minidregg-lanes/private-cells` (branch `lane/private-cells`,
-  pushed to origin; HEAD dd0e6efbd plus increment-2 work). hbox warm tree
+  pushed to origin). hbox warm tree
   `/home/hbox/lanes/private-cells/src` on Lean 4.35: sync edited files with rsync, iterate with
   `swarm-build lake env lean <file>`, batch with `swarm-build lake build Theory Kernel Compiler
   Minidregg Host` (about 10-40 min warm), logs and PID files under
   `/home/hbox/lanes/private-cells/logs/`. Before READY, verify each committed `.lean` file equals
   the hbox copy (`git show HEAD:f | ssh hbox cmp - …`).
 * **Landing.** Integrator is aeb671706eb3f70d7: send a sha whose parent is the integrator's
-  batch or main, with the full build result. dd0e6efbd is merged on staging (e89557587); an
-  adversarial statement audit of it is running there. Codec or event-id batches carry their own
+  batch or main, with the full build result. Codec or event-id batches carry their own
   fixture re-record. Before the new cell format, agree the codec epoch with hot-path
   a86738fc1dfae6429.
 * **Review practice.** Statement first; codex astra (`codex exec -m gpt-6-astra -s read-only -C
   <worktree> "<prompt>"`) as peer on each statement and on proofs' claims; Kimi via the integrator
   for non-vacuity. Every round so far found real defects: apply them, never weaken.
-* **Lessons.** Scoped collisions (never a global `Collision` disjunct); a counted-cost Prop over
+* **hbox packages.** The tree's `.lake/packages` were seeded by hard links; lake's trace,
+  hash and setup files were unshared on 10-31 (oleans still shared).
+* **Lessons.** A cost Prop over a polymorphic operation is fakeable (noncomputable type-case);
+  make the operation a program whose operations an interpreter charges. Scoped collisions (never a global `Collision` disjunct); a counted-cost Prop over
   a returned `Nat` is only meaningful for an operation whose count is its own execution; quantify
   constants before the size parameters; budgets need a positive query bound and must not admit
   unbounded enumeration; a witness at the wire shape is not an admitted invocation.
