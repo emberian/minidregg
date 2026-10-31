@@ -50,7 +50,7 @@ outer commitment over the context, the mask and the index digest.
   mask, under the context derived from the cell's state (`ctxOf`: protocol,
   cell, layout, accepted version, size bound), equals `privateRoot`, the
   specification over the whole store, which is
-  `BlindedCellHidingDraft.maskedTrieCommitment` itself (one commitment
+  `BlindedCellHiding.maskedTrieCommitment` itself (one commitment
   definition).
 * `blinding_fits`: the registry's blinding address passes the gate.
 
@@ -132,7 +132,7 @@ def maskOf (store : Store (CanonicalCellRegistry.layout kind)) : List UInt8 :=
 /-- **The private root (specification)**: the outer commitment over the mask and
 the canonical root of the store's index, computed from the whole store. -/
 def privateRoot (ctx : List UInt8) (store : Store (CanonicalCellRegistry.layout kind)) : Digest :=
-  BlindedCellHidingDraft.maskedTrieCommitment (deployedDig wire) (bits wire) 516 outerRoot ctx (maskOf wire store)
+  BlindedCellHiding.maskedTrieCommitment (deployedDig wire) (bits wire) 516 outerRoot ctx (maskOf wire store)
     (indexEntries wire store)
 
 /-- A gated store with its kept index, mask, parameters and accepted version. -/
@@ -157,7 +157,7 @@ def root (cell : KeptCell wire) : Digest := outerRoot cell.ctx cell.mask cell.in
 
 /-- **The kept root is the private root** under the cell's own context. -/
 theorem root_eq (cell : KeptCell wire) : cell.root = privateRoot wire cell.ctx cell.fit.store := by
-  rw [root, privateRoot, BlindedCellHidingDraft.maskedTrieCommitment, Theory.AuthTrie.Cache.digest_eq cell.holds,
+  rw [root, privateRoot, BlindedCellHiding.maskedTrieCommitment, Theory.AuthTrie.Cache.digest_eq cell.holds,
     cell.mask_eq]
 
 end KeptCell
@@ -1026,7 +1026,7 @@ def maskList {m : Nat} (encodeMask : Fin (m + 1) → List UInt8) (rounds : Nat) 
     List (List UInt8) :=
   (List.range (rounds + 1)).map fun v => encodeMask (f v)
 
-/-- **The receiver's PRF hop** (`BlindedCellHidingDraft.HybridReduction`'s first
+/-- **The receiver's PRF hop** (`BlindedCellHiding.HybridReduction`'s first
 antecedent at `fNum/den := num/den`), against an adaptive strategy. Each
 strategy and world bit choose the birth store and, round by round, the next
 patch from the items served so far; the custody function alone varies with the
@@ -1120,6 +1120,112 @@ theorem receiver_prf_hop_view {m keys num den : Nat} {Strategy Item View : Type}
   simp only [viewed]
   exact hop
 
+/-! ## The hiding goal at the receiver -/
+
+/-- **One deployment of the receiver's hiding game**: the custody function and
+its mask encoding, what is served and the reader's view through it (`g`,
+`factors`: the `ViewThroughServe` witness), and the adaptive strategy's choices
+of birth store and patches. -/
+structure HidingSetting (m keys : Nat) (Strategy Item View : Type) where
+  keyed : Fin keys → Nat → Fin (m + 1)
+  base : Params wire
+  sample : Fin (m + 1) → (CanonicalCellRegistry.layout kind).Value base.blinding.space
+  encodeMask : Fin (m + 1) → List UInt8
+  encodes : ∀ x, (wire.valueStream base.blinding.space).encode (sample x) = encodeMask x
+  serve : Serve wire Item
+  view : List (KeptCell wire) → View
+  g : List Item → View
+  factors : ∀ cells, view cells = g (cells.map (KeptCell.served serve))
+  rounds : Nat
+  store : Strategy → Bool → Store (CanonicalCellRegistry.layout kind)
+  next : Strategy → Bool → List Item → List (KeptCell.Write (kind := kind))
+  born : ∀ a b, (birth wire base (store a b)).isSome
+  game : Strategy → Bool → Option View → Bool
+
+namespace HidingSetting
+
+variable {wire} {m keys : Nat} {Strategy Item View : Type} (setting : HidingSetting wire m keys Strategy Item View)
+
+/-- The window of versions a run of `rounds` rounds uses. -/
+abbrev window : List Nat := List.range (setting.rounds + 1)
+
+/-- The joint tape: the custody key and the ideal function. -/
+abbrev tapes : Nat := keys * funs m setting.window
+
+/-- **The real experiment**: the game on the reader's view of the adaptive run
+under the tape's custody key. This is the `run` of the hiding goal. -/
+def real (a : Strategy) (b : Bool) (t : Fin setting.tapes) : Bool :=
+  setting.game a b ((arun wire setting.serve (keyedParams wire setting.base setting.sample setting.keyed (split t).1)
+    (setting.store a b) (setting.next a b) setting.rounds).map setting.view)
+
+/-- **The uniform experiment**: the same game over the ideal function's masks. -/
+def uniform (a : Strategy) (b : Bool) (t : Fin setting.tapes) : Bool :=
+  setting.game a b ((transcript wire setting.serve setting.base (setting.store a b) (setting.next a b)
+    (maskList setting.encodeMask setting.rounds (idealFn m setting.window (split t).2)) setting.rounds).map setting.g)
+
+/-- The composed distinguisher of the PRF reduction for one strategy and world. -/
+def composed (a : Strategy) (b : Bool) (f : Nat → Fin (m + 1)) : Bool :=
+  setting.game a b ((transcript wire setting.serve setting.base (setting.store a b) (setting.next a b)
+    (maskList setting.encodeMask setting.rounds f) setting.rounds).map setting.g)
+
+/-- **The receiver's blinded-cell hiding** (`BlindedCellHiding.TranscriptHiding`
+of `real` at the hybrid composition's bound). The PRF hop is discharged here
+(`receiver_prf_hop_view`) from `CustodyPrf` and the reduction's efficiency
+obligation; what stays open, as named premises, is the rest of the declared
+hybrid order: `zk`, the uniform-mask experiment against one with simulated
+openings (`ServesWithin` is the deterministic case after simulation); `rom`,
+that experiment against the ideal one with independent uniform roots (the
+mask-guessing coupling, which needs `ServesWithin` and a high-entropy mask
+encoding); and `identical`, that the ideal experiment does not depend on the
+world bit. Forks are excluded by the run itself (one chain, `PublishesRun` at
+the host). -/
+theorem hiding_of_hybrids {num den lambda versions queries zNum : Nat}
+    (budgetedPrf : ((Nat → Fin (m + 1)) → Bool) → Prop) (legal budgeted : Strategy → Prop)
+    (prf : CustodyPrf m keys num den setting.window setting.keyed budgetedPrf)
+    (reduction : ∀ a, legal a → budgeted a → ∀ b, budgetedPrf (setting.composed a b))
+    (someKey : 0 < keys) (denominator : 0 < den) (below : queries < 2 ^ lambda)
+    (simulated ideal : Strategy → Bool → Fin setting.tapes → Bool)
+    (zk : ∀ a, legal a → budgeted a → ∀ b, GapAtMost setting.tapes zNum den (setting.uniform a b) (simulated a b))
+    (rom : ∀ a, legal a → budgeted a → ∀ b,
+      GapAtMost setting.tapes (versions * queries) (2 ^ lambda - queries) (simulated a b) (ideal a b))
+    (identical : ∀ a, legal a → budgeted a → GapAtMost setting.tapes 0 1 (ideal a false) (ideal a true)) :
+    BlindedCellHiding.TranscriptHiding setting.tapes
+      (2 * (num + zNum) * (2 ^ lambda - queries) + 2 * versions * queries * den)
+      (den * (2 ^ lambda - queries)) setting.real legal budgeted := by
+  have positive : 0 < setting.tapes := Nat.mul_pos someKey (Nat.pow_pos (Nat.succ_pos _))
+  have hop := receiver_prf_hop_view wire setting.keyed budgetedPrf setting.base setting.sample setting.encodeMask
+    setting.encodes setting.serve setting.view setting.g setting.factors setting.rounds setting.store setting.next
+    setting.born prf setting.game legal budgeted reduction
+  exact BlindedCellHiding.hybridReduction_holds setting.tapes lambda versions queries num zNum den setting.real
+    setting.uniform simulated ideal legal budgeted positive denominator below
+    (fun a la ba b => ⟨hop a la ba b, zk a la ba b, rom a la ba b⟩) identical
+
+/-- **The receiver's hiding goal** (`BlindedCellHiding.RatchetHidingGoal` of
+`real`): the hybrids above, plus a bound below one, a budget admitting the named
+distinguishers, and a legal budgeted distinguisher with a genuine hidden
+difference. Those last two are the goal's own non-vacuity and stay to be
+supplied by concrete attack strategies of this game. -/
+theorem hidingGoal_of_hybrids {num den lambda versions queries zNum : Nat}
+    (budgetedPrf : ((Nat → Fin (m + 1)) → Bool) → Prop) (legal budgeted hiddenDiff distinguisher : Strategy → Prop)
+    (prf : CustodyPrf m keys num den setting.window setting.keyed budgetedPrf)
+    (reduction : ∀ a, legal a → budgeted a → ∀ b, budgetedPrf (setting.composed a b))
+    (someKey : 0 < keys) (denominator : 0 < den) (below : queries < 2 ^ lambda)
+    (small : 2 * (num + zNum) * (2 ^ lambda - queries) + 2 * versions * queries * den < den * (2 ^ lambda - queries))
+    (meaningful : BlindedCellHiding.BudgetMeaningful budgeted distinguisher)
+    (hidden : BlindedCellHiding.HasHiddenChoice legal distinguisher hiddenDiff)
+    (simulated ideal : Strategy → Bool → Fin setting.tapes → Bool)
+    (zk : ∀ a, legal a → budgeted a → ∀ b, GapAtMost setting.tapes zNum den (setting.uniform a b) (simulated a b))
+    (rom : ∀ a, legal a → budgeted a → ∀ b,
+      GapAtMost setting.tapes (versions * queries) (2 ^ lambda - queries) (simulated a b) (ideal a b))
+    (identical : ∀ a, legal a → budgeted a → GapAtMost setting.tapes 0 1 (ideal a false) (ideal a true)) :
+    BlindedCellHiding.RatchetHidingGoal setting.tapes lambda versions queries num zNum den setting.real legal
+      budgeted hiddenDiff distinguisher :=
+  ⟨denominator, below, small, meaningful, hidden,
+    setting.hiding_of_hybrids budgetedPrf legal budgeted prf reduction someKey denominator below simulated ideal zk
+      rom identical⟩
+
+end HidingSetting
+
 #assert_axioms KeptCell.root_eq
 #assert_axioms birth_refuses
 #assert_axioms storeFits_set
@@ -1139,6 +1245,8 @@ theorem receiver_prf_hop_view {m keys num den : Nat} {Strategy Item View : Type}
 #assert_axioms Custody.idealFn_window
 #assert_axioms receiver_prf_hop
 #assert_axioms receiver_prf_hop_view
+#assert_axioms HidingSetting.hiding_of_hybrids
+#assert_axioms HidingSetting.hidingGoal_of_hybrids
 #assert_axioms arun_srun
 #assert_axioms recoverable_refuted
 #assert_axioms maskServe_refuted

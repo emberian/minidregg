@@ -186,7 +186,7 @@ import Kernel.Contracts.Intents
 import Kernel.Contracts.Refinements
 import Kernel.SubjectRate
 import Kernel.ReceiptEventHiding  -- K-RECEIPT-HIDE: a receipt cannot be linked to its hidden command (statement, teeth, hybrid reduction)
-import Kernel.BlindedCellHiding  -- the private-cells statement draft: transcript hiding, complete openings, per-operation log cost
+import Kernel.BlindedCellHiding  -- the private-cells hiding statements: transcript hiding, complete openings, per-operation log cost
 import Kernel.PrivateCellScope  -- a reader's scope is a bounded union of visibility-class prefixes of the private index (body covers its atoms)
 import Kernel.PrivateCellView  -- a reader's class openings of the private index answer exactly its narrowPacked view, or a scoped collision
 import Kernel.PrivateCellReceiver  -- the private cell's receiving state machine: gated store, kept index, one insert or erase walk per write, kept root = private root
