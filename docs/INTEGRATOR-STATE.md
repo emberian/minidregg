@@ -9,7 +9,7 @@ retired-agent hook names the live integrator to anyone who messages the old id).
 integrator; the integrator merges onto `integration/staging`, cuts batch candidates on hbox, gates them, moves main to
 gated candidates and names candidates to infra and the explorer.
 
-## Now (2026-10-31 10:35 EDT)
+## Now (2026-10-31 10:36 EDT)
 
 - **ember (10-31 09:10, via root): no rehearsal cut until she says.** Make the system as good as it can be: keep batching,
   gate once per batch, keep the newest green candidate as the fallback. Priorities: repair Hermes (batch 5's j14
@@ -35,7 +35,7 @@ gated candidates and names candidates to infra and the explorer.
 - **Batch 6 gate15 verdict FAIL (10:00)**: enrol, tour 73/73, hbox composed rooms/churn/documents/apps/connector PASS;
   residents UNKNOWN (forge decides); j14-apps FAIL with batch 5's Hermes final-say refusal; flatness-submit FAIL,
   flatness-get PASS. Its umbrella-tree is running in umbrella-src (PID file $I/umbrella-src.pid).
-- **Batch 7 acc7cfa03: READY 10:29 (host 1,666 s beside batch 6's umbrella: the seat-weights fix worked; batch 6 took 2,165 s).** gate15 launched 10:30 (PID file $I/gate-acc7.pid); forge composed queued by infra after its batch-4 rebuild; named to infra, explorer, perf-apps. Also carries perf-client a1c70ef29 (consent provider reads the Store once per command; birth
+- **Batch 7 acc7cfa03: READY 10:29 (host 1,666 s beside batch 6's umbrella: the seat-weights fix worked; batch 6 took 2,165 s).** gate15 launched 10:30 (PID file $I/gate-acc7.pid); its composed phase failed at once because gate15 defaults EDGE_REV=4ea511d and that dregg-infra rev had not been extracted on hbox (my error; extracted 10:34), so composed reruns as SUF=-c2 PHASES=composed (PID file $I/gate-acc7-c2.pid); forge composed queued by infra after its batch-4 rebuild; named to infra, explorer, perf-apps. Also carries perf-client a1c70ef29 (consent provider reads the Store once per command; birth
   authority leg at the held authState; attempt index; audit sound, frame 233 now means "re-check owed"). Earlier contents: resident final writeError c88b88755, demo-reds 58c17b1de, perf-client f95edc7bf +
   b34173dad (candidate ssh wrapper) + 394039fb1 (one shared codec Host per box under split tenancy), apps-e2e 78a20cb56,
   perf-apps b2 05c2b208b, hot-path a55855f18, perf-client 5415aecf7, iter-speed Mathlib import trim ee7a25ca7 (Host.Main 3,930 -> 2,895 modules; Pratt certificate for mersenne127P_prime; audit sound, pins only shrank), app-reds c0a49c8d7 (an argument object keyed `path` is an argument: Davros qualify's declaration-invalid), iter-speed seat weights 0f67c94b7, perf-apps docs a7511c500; app-reds ecf4b917d merged as superseded by staging's 6cae27559 (staging ddc2e8863).
