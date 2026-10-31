@@ -60,6 +60,7 @@ gated candidates and names candidates to infra and the explorer.
 | exorcist | a6ad40ce192354deb (a31f4ba5028d24a92 retired) | no fsync anywhere (lane/exorcism); filtered set `nextest -E 'test(durable) \| test(anchor) \| test(signing_wire) \| test(attempt_state) \| test(receipt_continuity)'` |
 | perf-apps | a25df305cfd551d8b | apps install, grain HTTP path, typed-tool path (perf) |
 | perf-client | a778bbda6509944a5 (a8d456c6e773efbb8 retired) | client, consent provider per-record cost, web page loads, idle cold start (perf) |
+| retained-mode | a13f0c9ab4513b2d7 | incremental-computation architecture: a Lean incremental node with one generic "maintained = recomputed" theorem, the Host's derived structures as maintained nodes persisted in checkpoints, emission from Effects/, a lint for whole-state functions on per-request paths, one hot path migrated end to end |
 | demo-reds (sub-Opus of the integrator) | a64c387f3e638aa63 | bend/web/door/Hermes product reds as routed |
 | statement auditor (sub-Opus of the integrator) | a4d9a6f4cba4855ca | read-only adversarial audit of each lane's top-level statements, one round per merged sha |
 
@@ -133,6 +134,8 @@ Every Lean-statement sha gets an audit round from a4d9a6f4cba4855ca before it ri
 - Deregistration's lease freshness ranges over every lease (index leases by account if frequent): hot-path.
 
 ## Rules
+
+Every lane brief that touches state carries this line (root, 10-31): "a derived value is maintained, never recomputed; writing f(state) on a hot path means you owe its update rule."
 
 Named-file commits with `git commit -F <file>`; never `git add -A` or `git stash`; filtered tests only; every detached
 job has a PID file and is stopped only by it; lake/git on hbox as hbox, never root; swarm-build caps summing under
