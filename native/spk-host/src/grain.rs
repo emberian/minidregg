@@ -735,6 +735,7 @@ fn install(
     };
     broker::class(class)?;
     let (raw_sha256, staged, qualification) = stage_package(host, spk)?;
+    let qualified_identity = read_json(&qualification)?;
     // An import is checked completely before any Mini effect: the exporter's
     // signature, the image bytes, the package and the class all bind.
     let imported = match import {
@@ -827,6 +828,8 @@ fn install(
         "class":placement.class,
         "imported":imported.as_ref().map(|i| i.record.clone()),
         "rawSha256":raw_sha256,
+        "signedAppId":qualified_identity.get("signedAppId"),
+        "signedAppVersion":qualified_identity.get("signedAppVersion"),
         "appUid":placement.app_uid,
         "volumeIdHex":volume_id,
         "installGeneration":prepared.pointer("/begin/processGeneration"),
