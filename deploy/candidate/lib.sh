@@ -54,7 +54,7 @@ candidate_resolve() {
     (.outputs | to_entries | all(
       (.key | test("^bin/([A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+$")) and
       (.value.sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
-      (.value.build.sourceTree == $p.source.tree) and
+      (.value.build.sourceTree as $t | [$p.source.tree, (($p.overlay.sources // {}) | .[].tree)] | any(. == $t)) and
       (.value.build.sourceTree | type == "string" and test("^[0-9a-f]{40}$")) and
       (.value.build.rustcVerbose | type == "string" and contains("commit-hash:")) and
       (.value.build.leanToolchain | type == "string" and length > 0) and
