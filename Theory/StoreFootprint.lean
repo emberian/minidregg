@@ -1,6 +1,7 @@
 /- One typed-store field footprint, shared by native and world-defined layouts. -/
 module
 
+public import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 public import Theory.Store
 public import Theory.TypedAuthorization
 

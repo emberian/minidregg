@@ -447,7 +447,7 @@ pub const CONSENT_THIN_INTENT: u8 = 230;
 pub const CONSENT_THIN_OBSERVATION: u8 = 231;
 // thin consent: the plan against the provider's command and the target views (232)
 pub const CONSENT_THIN_PLAN: u8 = 232;
-// re-check the Store before a connection's first frame (233, ConsentAnchor.recheckStore)
+// the Store re-check owed before a connection's first frame (233): answered at once, made by the next frame before it answers (ConsentAnchor.checkHeld); a 233 reply alone is not proof of Store freshness
 pub const CONSENT_STORE_RECHECK: u8 = 233;
 // thin consent: a birth intent against the deployed authoring of the member's own source (234, Kernel.NativeThinBirth)
 pub const CONSENT_THIN_BIRTH_INTENT: u8 = 234;

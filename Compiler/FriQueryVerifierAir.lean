@@ -171,9 +171,9 @@ theorem dividedFold_vacuous_of_charTwo [CharP F 2] {half : F}
     (hhalf : (2 : F) * half = 1) (P : Prop) : P :=
   absurd hhalf (no_half_of_charTwo half)
 
-/-- info: 'Minidregg.Compiler.no_half_of_charTwo' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.no_half_of_charTwo' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms no_half_of_charTwo
-/-- info: 'Minidregg.Compiler.dividedFold_vacuous_of_charTwo' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.dividedFold_vacuous_of_charTwo' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms dividedFold_vacuous_of_charTwo
 
 /-! ## §2. The checks as DSL terms — every constraint out of the compiler surface. -/

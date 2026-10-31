@@ -26,7 +26,7 @@ import Compiler.MinidreggV1ArithmeticWork
 import Compiler.DialectClauseDispatch
 import Compiler.Logup256ReceiptClause
 import Compiler.BfvReceiptClause
-import Compiler.Tower256ConcreteBackend
+import Compiler.Tower256Backend
 
 namespace Minidregg.Compiler.ComposableDeploymentManifest
 

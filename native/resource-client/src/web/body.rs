@@ -452,12 +452,16 @@ fn room(site: &Site, name: &str) -> Page {
     page
 }
 
+/// Attempts the receipts page lists, newest first; `history all` in the shell lists every one.
+const RECEIPTS_PAGE: usize = 50;
+
 fn receipts(site: &Site) -> Page {
     let mut body = String::from(
-        "<p>Every retained attempt of this workspace with its last Host outcome, as <code>history all</code> prints it. \
+        "<p>The newest retained attempts of this workspace with their last Host outcome, as <code>history all -n 50</code> prints them (<code>history all</code> lists every one). \
          Open an attempt to see the Host's receipt and refusal frame, ask again (<code>lookup</code>) or retry an undecided one (<code>retry</code>: exact, never a second write).</p>\n",
     );
-    match verb(site, &["history all".to_owned()]) {
+    // The newest page only: `history all -n` reads that many attempts, not every one retained.
+    match verb(site, &[format!("history all -n {RECEIPTS_PAGE}")]) {
         Some(ending) if ending.code == 0 => {
             let text = ending.text();
             let mut rows = String::new();

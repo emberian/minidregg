@@ -335,6 +335,43 @@ def prepareInvokeOn (config : Config) (ground : ServedBasis.Ground config.deploy
   pure ⟨config.deployment.domain, profile.semantics, ground.worldRoot, height, .invoke bytes,
     targets ++ observations ++ [authority]⟩
 
+/-- An ordinary birth draft prepared on the opened image at its logical height, reading the
+directory and authority the opened image holds (`Held.of`): no directory row and no authority
+cell is decoded for it. -/
+def prepareOrdinaryBirth (config : Config) (opened : Opened config)
+    (descriptor : Descriptor CanonicalCellRegistry.registry) :
+    Except ResourceBirthController.Concrete.PreparationReject
+      (ResourceBirthController.Concrete.PreparedDraft config.profile.compilerProfile
+        config.deployment opened.pins opened.durable descriptor) :=
+  ResourceBirthController.Concrete.prepareDraft config.profile.compilerProfile
+    config.profile.disabledEvaluators config.deployment opened.pins opened.durable
+    (ResourceBirthController.Concrete.Held.of opened.directory opened.authority) descriptor (logicalHeight config opened.durable)
+
+/-- The finalized draft and signing slots of a prepared ordinary birth: the factory, the
+authority, one per allocation and one per resource source. -/
+def ordinaryBirthSlots (config : Config) (opened : Opened config)
+    {descriptor : Descriptor CanonicalCellRegistry.registry}
+    (prepared : ResourceBirthController.Concrete.PreparedDraft config.profile.compilerProfile
+      config.deployment opened.pins opened.durable descriptor)
+    (capabilities : List CapabilityId) : Except String (Draft × List SigningSlot) := do
+  let height := logicalHeight config opened.durable
+  let profile := config.profile
+  check (capabilities.length == prepared.descriptor.resourceBatch.operations.length)
+    "birth source capability count mismatch"
+  let forBranch := fun (role index : Nat)
+      (branch : ResourceBirthPolicyController.Concrete.Branch prepared.descriptor) =>
+    slot prepared.prepared.authority.snapshot prepared.descriptor.authorityNullifier role index
+      (ResourceBirthPolicyController.Concrete.branchRequest (profile := profile)
+        prepared.prepared height branch)
+  let factory ← forBranch 0 0 .factory
+  let authority ← forBranch 1 0 .authority
+  let allocations ← (List.finRange prepared.descriptor.createRequests.length).mapM
+    (fun index => forBranch 2 index.val (.allocation index))
+  let sources ← (List.finRange prepared.descriptor.resourceBatch.operations.length).mapM
+    (fun index => forBranch 3 index.val (.source index))
+  pure (.birth (CanonicalCellRegistry.sourceEncoding.codec.encode prepared.descriptor) capabilities,
+    factory :: authority :: allocations ++ sources)
+
 def prepareLoaded (config : Config) (opened : Opened config) (draft : Draft) :
     Except String SigningPlan := do
   let height := logicalHeight config opened.durable
@@ -347,24 +384,9 @@ def prepareLoaded (config : Config) (opened : Opened config) (draft : Draft) :
         else do
           let descriptor ← need "noncanonical birth draft"
             (CanonicalCellRegistry.sourceEncoding.codec.decode bytes)
-          let prepared ← (ResourceBirthController.Concrete.prepareDraft profile.compilerProfile
-            profile.disabledEvaluators config.deployment opened.pins opened.durable descriptor height).mapError
+          let prepared ← (prepareOrdinaryBirth config opened descriptor).mapError
               (fun reason => s!"birth preparation: {repr reason}")
-          check (capabilities.length == prepared.descriptor.resourceBatch.operations.length)
-            "birth source capability count mismatch"
-          let forBranch := fun (role index : Nat)
-              (branch : ResourceBirthPolicyController.Concrete.Branch prepared.descriptor) =>
-            slot prepared.prepared.authority.snapshot prepared.descriptor.authorityNullifier role index
-              (ResourceBirthPolicyController.Concrete.branchRequest (profile := profile)
-                prepared.prepared height branch)
-          let factory ← forBranch 0 0 .factory
-          let authority ← forBranch 1 0 .authority
-          let allocations ← (List.finRange prepared.descriptor.createRequests.length).mapM
-            (fun index => forBranch 2 index.val (.allocation index))
-          let sources ← (List.finRange prepared.descriptor.resourceBatch.operations.length).mapM
-            (fun index => forBranch 3 index.val (.source index))
-          pure (.birth (CanonicalCellRegistry.sourceEncoding.codec.encode prepared.descriptor) capabilities,
-            factory :: authority :: allocations ++ sources)
+          ordinaryBirthSlots config opened prepared capabilities
     | .invoke bytes => do
         -- The full shape's plan (ratchet-listed: the consent provider's local re-derivation).
         -- The served Host plans an invocation on its light basis (`prepareAuthorizedLoaded`).
@@ -848,6 +870,23 @@ def invokeRefusal (config : Config) (opened : Opened config)
           legs.firstLawRefusal fieldsOf
   | _ => none
 
+/-- The plan-time verdict on a prepared ordinary birth: its pending admission at the image's
+logical height, then the factory branch's law verdict (`Pending.factoryRefusal`). -/
+def preparedBirthRefusal (config : Config) (opened : Opened config)
+    (grants : List NativeObservationCodec.GrantRef)
+    {descriptor : Descriptor CanonicalCellRegistry.registry}
+    (prepared : ResourceBirthController.Concrete.PreparedDraft config.profile.compilerProfile
+      config.deployment opened.pins opened.durable descriptor) : Option Refusal :=
+  match ResourceBirthPolicyController.Concrete.preparePending
+      (profile := config.profile) prepared.prepared (logicalHeight config opened.durable) with
+  | .error reason => some ⟨.operationRejected, s!"birth admission: {repr reason}", none⟩
+  | .ok pending =>
+      match pending.factoryRefusal with
+      | none => none
+      | some none => some ⟨.operationRejected, "birth factory law unavailable", none⟩
+      | some (some law) => some (ComposedLawDiagnostics.publicRefusal
+          (grantFields config opened grants config.deployment.factoryId) law)
+
 /-- An ordinary birth's factory law, judged on the signed observation's channel at plan time,
 as `invokeRefusal` judges an invocation's target laws. A grain-backed (application) birth is
 judged by its own preparation; an ordinary birth's factory law was otherwise met only at the
@@ -867,23 +906,28 @@ def birthRefusal (config : Config) (opened : Opened config)
       match CanonicalCellRegistry.sourceEncoding.codec.decode bytes with
       | none => some ⟨.operationRejected, "noncanonical birth draft", none⟩
       | some descriptor =>
-          let height := logicalHeight config opened.durable
-          match ResourceBirthController.Concrete.prepareDraft config.profile.compilerProfile
-              config.profile.disabledEvaluators config.deployment opened.pins opened.durable
-              descriptor height with
+          match prepareOrdinaryBirth config opened descriptor with
           | .error reason => some ⟨.operationRejected, s!"birth preparation: {repr reason}", none⟩
-          | .ok prepared =>
-              match ResourceBirthPolicyController.Concrete.preparePending
-                  (profile := config.profile) prepared.prepared height with
-              | .error reason =>
-                  some ⟨.operationRejected, s!"birth admission: {repr reason}", none⟩
-              | .ok pending =>
-                  match pending.factoryRefusal with
-                  | none => none
-                  | some none => some ⟨.operationRejected, "birth factory law unavailable", none⟩
-                  | some (some law) => some (ComposedLawDiagnostics.publicRefusal
-                      (grantFields config opened grants config.deployment.factoryId) law)
+          | .ok prepared => preparedBirthRefusal config opened grants prepared
   | _ => none
+
+/-- An ordinary birth's authorized plan, prepared ONCE: the plan-time verdict
+(`preparedBirthRefusal`, as `birthRefusal` judges) and the signing slots
+(`ordinaryBirthSlots`, as `prepareLoaded` plans) both read the same preparation. Its refusals
+and its plan are `birthRefusal`'s and `prepareLoaded`'s on the same draft. -/
+def prepareOrdinaryBirthAuthorized (config : Config) (opened : Opened config)
+    (grants : List NativeObservationCodec.GrantRef) (bytes : List UInt8)
+    (capabilities : List CapabilityId) : Except Refusal SigningPlan := do
+  let some descriptor := CanonicalCellRegistry.sourceEncoding.codec.decode bytes
+    | throw ⟨.operationRejected, "noncanonical birth draft", none⟩
+  let prepared ← (prepareOrdinaryBirth config opened descriptor).mapError
+    fun reason => ⟨.operationRejected, s!"birth preparation: {repr reason}", none⟩
+  if let some refusal := preparedBirthRefusal config opened grants prepared then
+    throw refusal
+  let (finalized, slots) ← (ordinaryBirthSlots config opened prepared capabilities).mapError
+    fun detail => ⟨.operationRejected, detail, none⟩
+  pure ⟨config.deployment.domain, config.profile.semantics, opened.durable.worldRoot,
+    logicalHeight config opened.durable, finalized, slots⟩
 
 /-- Only an ordinary birth is judged here; every other draft passes to its own diagnosis. -/
 theorem birthRefusal_only_birth (config : Config) (opened : Opened config)
@@ -935,8 +979,12 @@ def prepareAuthorizedLoaded (config : Config) (opened : Opened config) (light : 
       | .prepare draft =>
           if let some steps := draftOverSyncBudget config draft then
             return .error ⟨.operationRejected, overSyncBudgetDetail config.nockFSync steps, none⟩
-          match (invokeRefusal config opened signed.challenge.intent.grants draft).orElse
-              fun _ => birthRefusal config opened signed.challenge.intent.grants draft with
+          -- An ordinary birth is prepared once for both its verdict and its plan.
+          if let .birth birthBytes capabilities := draft then
+            if (GrainResourceBirthHostCodec.sourceCodec.decode birthBytes).isNone then
+              return prepareOrdinaryBirthAuthorized config opened signed.challenge.intent.grants
+                birthBytes capabilities
+          match invokeRefusal config opened signed.challenge.intent.grants draft with
           | some refusal => return .error refusal
           | none =>
               match draft with
@@ -3286,7 +3334,7 @@ def submitLoadedVia (transport : DurableReceiverIO.Transport) (config : Config)
         let ambient : DeclaredResourceController.Ambient := ⟨config.federation, height⟩
         match ← GrainResourceBirthReceiver.receiveLoaded config.profile config.deployment
             opened.pins tariff ambient config.signature transport
-            opened.durable bytes with
+            opened.durable (ResourceBirthController.Concrete.Held.of opened.directory opened.authority) bytes with
         | .historical receipt => return ← confirm .replayed receipt.transactionId receipt.eventId
         | .confirmed kind receipt => return ← confirm kind receipt.transactionId receipt.eventId
         | .rejected reason => return refused .operationRejected "grain-birth" (grainBirthRejection reason)
@@ -3294,7 +3342,8 @@ def submitLoadedVia (transport : DurableReceiverIO.Transport) (config : Config)
         | .unavailable detail => return .unavailable detail.toUTF8.toList
         | .uncertain detail => return .uncertain detail.toUTF8.toList
       match ← ResourceBirthReceiver.receiveLoaded config.profile config.deployment opened.pins
-          config.signature transport opened.durable height bytes with
+          config.signature transport opened.durable (ResourceBirthController.Concrete.Held.of opened.directory opened.authority) height
+          bytes with
       | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
       | .rejected reason => return refused (birthReason reason) "birth" (birthRejection reason)
       | .contention => return .contention

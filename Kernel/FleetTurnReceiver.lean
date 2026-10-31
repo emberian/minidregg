@@ -80,8 +80,9 @@ def sourceGuards (prepared : Prepared deployment profile tariff ambient durable 
 
 def readGuards (prepared : Prepared deployment profile tariff ambient durable command) :
     List ReadGuard :=
+  let written := (writes prepared).map DataWrite.cellId
   (sourceGuards prepared ++ prepared.authority.readGuards).filter fun guard =>
-    guard.cellId ∉ (writes prepared).map DataWrite.cellId
+    guard.cellId ∉ written
 
 def PhysicalShape (prepared : Prepared deployment profile tariff ambient durable command) : Prop :=
   ((writes prepared).map DataWrite.cellId).Nodup ∧

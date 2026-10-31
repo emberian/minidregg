@@ -107,7 +107,7 @@ impl Run<'_> {
             Ok(Err(line)) => Ok(verdict_of(Some(line))),
             Err(error) => Ok(format!("(not probed: {error})")),
             Ok(Ok(_)) => {
-                let (attempt, _) = new_attempt(self.root)?;
+                let (attempt, _) = crate::read_scratch::attempt(self.root)?;
                 dry_run(
                     &member_path(self.workspace, "host")?,
                     &member_path(self.workspace, "config")?,

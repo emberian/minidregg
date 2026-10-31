@@ -403,6 +403,55 @@ def Loaded.replay {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes
                     started⟩
           | .inr _ => .error "durable log suffix does not replay through the canonical executor"
 
+/-- `extendFrom` given the read it makes: `stored` holds the Store's head and its entries from
+`loaded.height + 1`. A caller that read from `loaded.height` (to compare the entry there,
+`ConsentAnchor.checkHeld`) passes that read with its first entry dropped. -/
+def extendStored (transport : Transport) (rootBytes : List UInt8 → Digest)
+    (loaded : Loaded rootBytes) (stored : Stored) : IO (Except String {next : Loaded rootBytes //
+      next.image.seed = loaded.image.seed ∧
+        next.image.accepted = loaded.image.accepted ++
+          next.image.accepted.drop loaded.image.accepted.length ∧
+        next.logStart = loaded.logStart}) := do
+  let key ← match ← transport.key with
+    | .error message => return .error message
+    | .ok key => pure key
+  let height := loaded.height
+  if stored.head = height then return .ok ⟨loaded, rfl, by simp, rfl⟩
+  if stored.head < height then return .error "durable log shrank beneath the session"
+  let records ← match decodeRecordsFrom (height + 1) stored.entries with
+    | .error message => return .error message
+    | .ok records => pure records
+  let chain := chainAfter loaded.chain records
+  if height + stored.entries.length ≠ stored.head then
+    return .error "durable log head does not match its entries"
+  if let .error message := verifyTags key height (chainPrefixes loaded.chain records)
+      (stored.entries.map (·.tag)) then
+    return .error message
+  -- Every new tag carries the frontier the accumulator reaches at its height.
+  if let some frontier := loaded.frontier then
+    if let .error message := walkFrontier height frontier
+        (stored.entries.zip ((chainPrefixes loaded.chain records).drop 1)) then
+      return .error message
+  match loaded.replay records with
+  | .error message => return .error message
+  | .ok ⟨current, imaged, started⟩ =>
+    have extended : current.image.seed = loaded.image.seed ∧
+        current.image.accepted = loaded.image.accepted ++
+          current.image.accepted.drop loaded.image.accepted.length ∧
+        current.logStart = loaded.logStart := by
+      rw [imaged]
+      exact ⟨rfl, by simp, started⟩
+    if current.chain ≠ chain then return .error "durable log chain mismatch"
+    -- Every new entry's stored root is the root its replay served.
+    let replayed := (current.rootLog.extract height current.rootLog.size).toList
+    if replayed ≠ stored.entries.map (fun entry =>
+        some ((trailerCarried entry.tag).map (·.root) |>.getD ⟨0⟩)) then
+      return .error "durable log root tag differs from the replayed root"
+    let current := { current with headTag := stored.entries.getLast?.map (·.tag) }
+    if current.height ≥ current.baseHeight + 2 * max 1 transport.checkpointEvery then
+      return .ok ⟨current.rebase, extended⟩
+    return .ok ⟨current, extended⟩
+
 /-- Extend a live loaded image by entries a concurrent writer appended after
 it: the chain must continue, every new entry's tag must verify, and every new
 record must be accepted by the shared executor in order. The result is the
@@ -415,49 +464,10 @@ def extendFrom (transport : Transport) (rootBytes : List UInt8 → Digest)
         next.image.accepted = loaded.image.accepted ++
           next.image.accepted.drop loaded.image.accepted.length ∧
         next.logStart = loaded.logStart}) := do
-  let key ← match ← transport.key with
-    | .error message => return .error message
-    | .ok key => pure key
-  let height := loaded.height
-  match ← transport.read (height + 1) false with
+  match ← transport.read (loaded.height + 1) false with
   | .error message => return .error message
   | .ok none => return .error "durable store is not initialized"
-  | .ok (some stored) =>
-      if stored.head = height then return .ok ⟨loaded, rfl, by simp, rfl⟩
-      if stored.head < height then return .error "durable log shrank beneath the session"
-      let records ← match decodeRecordsFrom (height + 1) stored.entries with
-        | .error message => return .error message
-        | .ok records => pure records
-      let chain := chainAfter loaded.chain records
-      if height + stored.entries.length ≠ stored.head then
-        return .error "durable log head does not match its entries"
-      if let .error message := verifyTags key height (chainPrefixes loaded.chain records)
-          (stored.entries.map (·.tag)) then
-        return .error message
-      -- Every new tag carries the frontier the accumulator reaches at its height.
-      if let some frontier := loaded.frontier then
-        if let .error message := walkFrontier height frontier
-            (stored.entries.zip ((chainPrefixes loaded.chain records).drop 1)) then
-          return .error message
-      match loaded.replay records with
-      | .error message => return .error message
-      | .ok ⟨current, imaged, started⟩ =>
-        have extended : current.image.seed = loaded.image.seed ∧
-            current.image.accepted = loaded.image.accepted ++
-              current.image.accepted.drop loaded.image.accepted.length ∧
-            current.logStart = loaded.logStart := by
-          rw [imaged]
-          exact ⟨rfl, by simp, started⟩
-        if current.chain ≠ chain then return .error "durable log chain mismatch"
-        -- Every new entry's stored root is the root its replay served.
-        let replayed := (current.rootLog.extract height current.rootLog.size).toList
-        if replayed ≠ stored.entries.map (fun entry =>
-            some ((trailerCarried entry.tag).map (·.root) |>.getD ⟨0⟩)) then
-          return .error "durable log root tag differs from the replayed root"
-        let current := { current with headTag := stored.entries.getLast?.map (·.tag) }
-        if current.height ≥ current.baseHeight + 2 * max 1 transport.checkpointEvery then
-          return .ok ⟨current.rebase, extended⟩
-        return .ok ⟨current, extended⟩
+  | .ok (some stored) => extendStored transport rootBytes loaded stored
 
 /-- Explicit bootstrap, separate from receipt acceptance. An existing different
 seed is never replaced; initialization is confirmed by a full `load`. -/

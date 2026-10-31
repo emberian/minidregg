@@ -383,9 +383,8 @@ def authorizeChecked (prepared : Prepared context profile wanted marker capabili
       match config.resolve? with
       | none => .error (Refusal.lawDenied none)
       | some committed =>
-          let witness := committed.witness
-          match committed.admit wanted
-              evidence witness (.policy wanted.policyId wanted.policyRevision)
+          match committed.admitOwn wanted
+              evidence (.policy wanted.policyId wanted.policyRevision)
               prepared.epochExact prepared.revisionExact with
           | none => .error (ComposedLawDiagnostics.publicRefusal
               (readerFields context kind capability) committed)
@@ -396,6 +395,141 @@ def authorize (prepared : Prepared context profile wanted marker capability cont
     Option (Authorized (portal prepared) context.authority.authState wanted) :=
   (authorizeChecked prepared signature).toOption
 
+/-! `authorizeChecked` with the committed law's graph loaded once: `keys` (through
+`PhysicalLawResolution.predicateOf?`) and `resolve?` each loaded it. -/
+
+/-- The graph `keys` and `(policyConfig prepared).resolve?` both load. -/
+def lawGraph (prepared : Prepared context profile wanted marker capability contextBytes) :=
+  PolicyComponentResolution.loadTarget context.authority
+    (PhysicalLawResolution.payloadStore context.authority context.directory)
+    profile.compilerProfile.semantics wanted.target.value PhysicalLawResolution.resolutionBudget
+    prepared.kindDependencies.additional
+
+/-- `keys` read off a loaded graph. -/
+def lawKeys (prepared : Prepared context profile wanted marker capability contextBytes)
+    (graph : type_of% (lawGraph prepared)) : List Minidregg.Pred.Slot :=
+  ((match graph with
+    | .ok loaded => some (ResolvedLawCompilation.predicate loaded.resolved)
+    | .error _ => none).map Minidregg.Pred.Pred.reads).getD []
+
+omit [DecidableEq F] in
+theorem lawKeys_exact (prepared : Prepared context profile wanted marker capability contextBytes) :
+    lawKeys prepared (lawGraph prepared) = keys prepared := by
+  unfold lawKeys keys PhysicalLawResolution.predicateOf? lawGraph
+  split <;> next exact => rw [exact]
+
+/-- `step` on given keys. -/
+def stepAt (prepared : Prepared context profile wanted marker capability contextBytes)
+    (keys : List Minidregg.Pred.Slot) : PolicyStepContext :=
+  PolicyStepContext.ofCandidate (projectFor keys prepared) profile.semantics
+    (readCandidate wanted prepared.observed.before.kind prepared.observed.before.payload prepared.observed.rootExact)
+
+/-- `policyConfig` on a given step. -/
+def policyConfigAt (prepared : Prepared context profile wanted marker capability contextBytes)
+    (step : PolicyStepContext) : ComposedPolicyAdmission.Config F :=
+  PhysicalLawResolution.config profile.compilerProfile context.authority context.directory
+    (sourceCapabilityPortal context.authority marker) step wanted.target.value
+    prepared.kindDependencies.additional
+
+/-- `config.resolve?` on its already loaded graph. -/
+def resolveWith (config : ComposedPolicyAdmission.Config F)
+    (graph : Except PolicyComponentResolution.Refusal
+      (PolicyComponentResolution.LoadedGraph config.snapshot config.store config.profile.semantics
+        config.target config.additional))
+    (exact : PolicyComponentResolution.loadTarget config.snapshot config.store
+      config.profile.semantics config.target config.resolutionBudget config.additional = graph) :
+    Option (ComposedPolicyAdmission.PreparedLaw config) :=
+  match headExact : loadPolicy config.snapshot config.store ⟨config.target⟩
+      (config.snapshot.authState.policyRevision ⟨config.target⟩) with
+  | none => none
+  | some head =>
+      match graph, exact with
+      | .error _, _ => none
+      | .ok loaded, exact => some ⟨head, headExact, loaded, exact⟩
+
+theorem resolve_eq_with (config : ComposedPolicyAdmission.Config F) :
+    config.resolve? = resolveWith config _ rfl := by
+  unfold ComposedPolicyAdmission.Config.resolve? resolveWith
+  split <;> split <;> (try split) <;> (try split) <;> (try simp_all)
+  -- the two loads of the head policy agree
+  all_goals
+    rename_i _ first _ _ _ second _ _ _ _ _ _
+    cases first.symm.trans second
+    simp_all
+
+set_option backward.isDefEq.respectTransparency false in
+/-- `authorizeChecked`'s body on a given step and loaded graph. -/
+def authorizeWith (prepared : Prepared context profile wanted marker capability contextBytes)
+    (step : PolicyStepContext) (graph : type_of% (lawGraph prepared))
+    (exact : lawGraph prepared = graph)
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority) :
+    Except Refusal (Authorized (policyConfigAt prepared step).portal context.authority.authState wanted) :=
+  match (policyConfigAt prepared step).capabilityEvidenceChecked wanted capability () signature ()
+      (fun _ => ()) with
+  | .error reason => .error (.of reason)
+  | .ok evidence =>
+      match resolveWith (policyConfigAt prepared step) graph exact with
+      | none => .error (Refusal.lawDenied none)
+      | some committed =>
+          match committed.admitOwn wanted
+              evidence (.policy wanted.policyId wanted.policyRevision)
+              prepared.epochExact prepared.revisionExact with
+          | none => .error (ComposedLawDiagnostics.publicRefusal
+              (readerFields context kind capability) committed)
+          | some authorized => .ok authorized
+
+/-- The result type of `authorizeWith` at the keys `keys`. -/
+abbrev AuthorizedAt (prepared : Prepared context profile wanted marker capability contextBytes)
+    (keys : List Minidregg.Pred.Slot) : Type :=
+  Except Refusal (Authorized (policyConfigAt prepared (stepAt prepared keys)).portal
+    context.authority.authState wanted)
+
+def authorizeCheckedFast (prepared : Prepared context profile wanted marker capability contextBytes)
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority) :
+    Except Refusal (Authorized (portal prepared) context.authority.authState wanted) :=
+  let graph := lawGraph prepared
+  cast (congrArg (AuthorizedAt prepared) (lawKeys_exact prepared))
+    (authorizeWith prepared (stepAt prepared (lawKeys prepared graph)) graph rfl signature)
+
+set_option backward.isDefEq.respectTransparency false in
+theorem authorizeChecked_eq_with
+    (prepared : Prepared context profile wanted marker capability contextBytes)
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority) :
+    authorizeChecked prepared signature =
+      authorizeWith prepared (step prepared) (lawGraph prepared) rfl signature := by
+  unfold authorizeChecked
+  dsimp only
+  rw [resolve_eq_with]
+  unfold authorizeWith capabilityEvidenceChecked
+  delta policyConfig policyConfigAt lawGraph
+  dsimp only [PhysicalLawResolution.config]
+  split
+  · next exact => simp only [exact]
+  · next evidence exact =>
+    simp only [exact]
+    split
+    · next resolved => simp only [resolved]
+    · next committed resolved =>
+      simp only [resolved]
+      split <;> next admitted => simp only [admitted]
+
+theorem authorizeWith_cast (prepared : Prepared context profile wanted marker capability contextBytes)
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority)
+    (keys' : List Minidregg.Pred.Slot) (exact : keys' = keys prepared) :
+    cast (congrArg (AuthorizedAt prepared) exact)
+        (authorizeWith prepared (stepAt prepared keys') (lawGraph prepared) rfl signature) =
+      authorizeWith prepared (step prepared) (lawGraph prepared) rfl signature := by
+  subst exact
+  rfl
+
+@[csimp] theorem authorizeChecked_eq_fast :
+    @authorizeChecked = @authorizeCheckedFast := by
+  funext
+  rw [authorizeChecked_eq_with]
+  exact (authorizeWith_cast _ _ _ (lawKeys_exact _)).symm
+
+#assert_axioms authorizeChecked_eq_fast
+
 /-- The signed requester is told the reason of the capability branch that
 decided its refusal, unchanged. -/
 theorem authorizeChecked_capability_reason
@@ -404,7 +538,7 @@ theorem authorizeChecked_capability_reason
     (reason : RefusalReason)
     (refused : capabilityEvidenceChecked prepared signature = .error reason) :
     authorizeChecked prepared signature = .error (.of reason) := by
-  simp only [authorizeChecked, ComposedPolicyAdmission.PreparedLaw.admit_eq, refused]
+  simp only [authorizeChecked, ComposedPolicyAdmission.PreparedLaw.admitOwn, ComposedPolicyAdmission.PreparedLaw.admit_eq, refused]
 
 set_option backward.isDefEq.respectTransparency false in
 /-- With admissible capability evidence and a resolved committed law whose order
@@ -434,7 +568,7 @@ theorem authorizeChecked_lawDenied
     committed.head.committed.record.localComponent.guarded (step prepared).oldState (step prepared).newState).mpr inRange
   have noAlias := (castAlias_none_iff F (intsOf committed.head.committed.record.localComponent.guarded
     (step prepared).oldState (step prepared).newState)).mpr castExact
-  simp only [authorizeChecked, ComposedPolicyAdmission.PreparedLaw.admit_eq, supplied, resolved, denied,
+  simp only [authorizeChecked, ComposedPolicyAdmission.PreparedLaw.admitOwn, ComposedPolicyAdmission.PreparedLaw.admit_eq, supplied, resolved, denied,
     ComposedLawDiagnostics.publicRefusal, ComposedLawDiagnostics.localRefusal]
   simp only [policyConfig, PhysicalLawResolution.config, none_, noAlias]
 
@@ -461,7 +595,7 @@ theorem authorizeChecked_castAlias
     authorizeChecked prepared signature = .error (Refusal.castAliasFor (readerFields context kind capability) x y) := by
   have none_ := (LawLeaf.ofRange_none_iff profile.compilerProfile.compiler
     committed.head.committed.record.localComponent.guarded (step prepared).oldState (step prepared).newState).mpr inRange
-  simp only [authorizeChecked, ComposedPolicyAdmission.PreparedLaw.admit_eq, supplied, resolved, denied,
+  simp only [authorizeChecked, ComposedPolicyAdmission.PreparedLaw.admitOwn, ComposedPolicyAdmission.PreparedLaw.admit_eq, supplied, resolved, denied,
     ComposedLawDiagnostics.publicRefusal, ComposedLawDiagnostics.localRefusal]
   simp only [policyConfig, PhysicalLawResolution.config, none_, alias_]
 
@@ -484,7 +618,7 @@ theorem authorizeChecked_lawInputRange
     (out : LawLeaf.ofRange profile.compilerProfile.compiler committed.head.committed.record.localComponent.guarded
       (step prepared).oldState (step prepared).newState = some leaf) :
     authorizeChecked prepared signature = .error (Refusal.lawInputRangeFor (readerFields context kind capability) leaf) := by
-  simp only [authorizeChecked, ComposedPolicyAdmission.PreparedLaw.admit_eq, supplied, resolved, denied,
+  simp only [authorizeChecked, ComposedPolicyAdmission.PreparedLaw.admitOwn, ComposedPolicyAdmission.PreparedLaw.admit_eq, supplied, resolved, denied,
     ComposedLawDiagnostics.publicRefusal, ComposedLawDiagnostics.localRefusal]
   simp only [policyConfig, PhysicalLawResolution.config, out]
 
@@ -501,7 +635,7 @@ theorem authorizeChecked_leaf_fails
     (refused : authorizeChecked prepared signature = .error (Refusal.lawDenied (some leaf))) :
     committed.head.committed.record.localComponent.guarded.subterm leaf.path = some leaf.clause ∧
       Minidregg.Pred.eval leaf.clause (step prepared).oldState (step prepared).newState = false := by
-  simp only [authorizeChecked, ComposedPolicyAdmission.PreparedLaw.admit_eq, supplied, resolved,
+  simp only [authorizeChecked, ComposedPolicyAdmission.PreparedLaw.admitOwn, ComposedPolicyAdmission.PreparedLaw.admit_eq, supplied, resolved,
     ComposedLawDiagnostics.publicRefusal, ComposedLawDiagnostics.localRefusal] at refused
   split at refused
   · split at refused
@@ -533,7 +667,7 @@ theorem authorizeChecked_admitted
       (.policy wanted.policyId wanted.policyRevision)
       prepared.epochExact prepared.revisionExact = some authorized) :
     authorizeChecked prepared signature = .ok authorized := by
-  simp only [authorizeChecked, ComposedPolicyAdmission.PreparedLaw.admit_eq, supplied, resolved, accepted]
+  simp only [authorizeChecked, ComposedPolicyAdmission.PreparedLaw.admitOwn, ComposedPolicyAdmission.PreparedLaw.admit_eq, supplied, resolved, accepted]
 
 attribute [irreducible] portal
 
@@ -737,7 +871,7 @@ theorem authorize_names_stored
           (evidence := evidence) (by simpa only [capabilityEvidenceChecked] using supplied)
         obtain ⟨stored, read, identity⟩ := named
         refine ⟨stored, read, ?_⟩
-        rw [ComposedPolicyAdmission.PreparedLaw.admit_eq] at admitted
+        rw [ComposedPolicyAdmission.PreparedLaw.admitOwn, ComposedPolicyAdmission.PreparedLaw.admit_eq] at admitted
         rw [ComposedPolicyAdmission.admit_preserves_evidence (policyConfig prepared) wanted
           evidence committed.witness (.policy wanted.policyId wanted.policyRevision)
           prepared.epochExact prepared.revisionExact admitted]

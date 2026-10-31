@@ -24,7 +24,7 @@ BabyBear limbs using the already-defined modulus and `toExt6` construction.
 
 import Compiler.EmitSerialize
 import Compiler.GateTraceRelationExt6
-import Compiler.Tower256ConcreteBackend
+import Compiler.Tower256Backend
 
 namespace Minidregg.Compiler.Ext6GateProofController
 

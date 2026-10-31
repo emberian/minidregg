@@ -222,7 +222,7 @@ of the Store's tag at its height, whose MAC it verified when it admitted that he
 (`DurableLogTags.verifyTags`). The re-check below reads the Store's entry AT that height (one
 `transport.read height`, no records before it) and compares the bytes.
 
-What it refuses exactly: a rollback (`recheckHeld_head`: the head is at or above the held
+What it refuses exactly: a rollback (`checkHeld_ok`: the head is at or above the held
 height). What it refuses up to a KMAC256 collision: a rewrite the Store re-tagged (a different
 chain is a different MAC input, so different bytes). What it defers: a rewrite that left the
 old tag in place is not seen here; every read of those records goes through the Reader, which
@@ -246,29 +246,28 @@ theorem trailer_eq_carried (key : DurableCheckpointCodec.MacKey) (height : Nat)
       DurableHistory.trailerStream.toLawful.encode (right, DurableHistory.tagMac key height right) := same
   exact congrArg Prod.fst (ResourceBirthCodec.lawful_encode_injective DurableHistory.trailerStream.toLawful encoded)
 
+/-- The judgement of the held re-check, as data: the Store's head and the tag of its entry at
+`height` (`none`: no entry there). Accepted exactly when the head has not fallen below the height
+and that entry carries the held tag. -/
+def checkHeld (height : Nat) (heldTag : List UInt8) (head : Nat) (first : Option (List UInt8)) :
+    Except String Unit :=
+  if head < height then
+    .error s!"the Store's head {head} is below the height {height} this provider admitted: the accepted history was rolled back"
+  else match first with
+    | none => .error s!"the Store carries no entry at the height {height} this provider admitted"
+    | some tag => if tag = heldTag then .ok ()
+      else .error s!"the Store's entry at height {height} no longer carries the tag this provider verified: the prefix this client admitted was rewritten or re-keyed"
+
 /-- The held re-check: the Store's entry at `height` still carries the exact tag this provider
-verified there, and the head has not fallen below it. -/
+verified there, and the head has not fallen below it. A provider about to extend its admission
+makes the same judgement on the read that extension needs anyway
+(`ClientConsentCore.refreshHeld`), with no read of its own. -/
 def recheckHeld (transport : DurableReceiverIO.Transport) (height : Nat) (heldTag : List UInt8) :
     IO (Except String Unit) := do
   match ← transport.read height false with
   | .error message => return .error message
   | .ok none => return .error "durable store is not initialized"
-  | .ok (some stored) =>
-      if stored.head < height then
-        return .error s!"the Store's head {stored.head} is below the height {height} this provider admitted: the accepted history was rolled back"
-      match stored.entries.head? with
-      | none => return .error s!"the Store carries no entry at the height {height} this provider admitted"
-      | some entry =>
-          if entry.tag = heldTag then return .ok ()
-          else return .error s!"the Store's entry at height {height} no longer carries the tag this provider verified: the prefix this client admitted was rewritten or re-keyed"
-
-/-- The judgement `recheckHeld` makes of what it read, as data: head, and the first entry's tag. -/
-def checkHeld (height : Nat) (heldTag : List UInt8) (head : Nat) (first : Option (List UInt8)) :
-    Except String Unit :=
-  if head < height then .error "rolled back"
-  else match first with
-    | none => .error "no entry"
-    | some tag => if tag = heldTag then .ok () else .error "rewritten"
+  | .ok (some stored) => return checkHeld height heldTag stored.head (stored.entries.head?.map (·.tag))
 
 /-- An accepted held re-check is a head at or above the held height carrying exactly the held tag. -/
 theorem checkHeld_ok {height : Nat} {heldTag : List UInt8} {head : Nat} {first : Option (List UInt8)}

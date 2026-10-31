@@ -44,13 +44,32 @@ fn operator_status_command(config:&Config)->Result<Command> {
 /// The native Mini control command proves the current owner-private transport
 /// role and response nonce. An operator path or stale mode file cannot do so.
 pub(crate) fn require_private_operator(config:&Config)->Result<Value> {
-    let mut command=operator_status_command(config)?;
-    let result=crate::deadline::output(&mut command,crate::deadline::NATIVE_CALL)
-        .map_err(|e|crate::deadline::describe("private operator preflight",e))?;
-    if !result.status.success() || result.stdout.len()>65_536 {
-        return Err(format!("private operator preflight refused: {}",String::from_utf8_lossy(&result.stderr).chars().take(2048).collect::<String>()));
+    let mut waits=OPERATOR_STATUS_BACKOFF.iter();
+    loop {
+        let mut command=operator_status_command(config)?;
+        let result=crate::deadline::output(&mut command,crate::deadline::NATIVE_CALL)
+            .map_err(|e|crate::deadline::describe("private operator preflight",e))?;
+        if result.status.success() && result.stdout.len()<=65_536 {
+            return checked_operator(config,&result.stdout);
+        }
+        let said=String::from_utf8_lossy(&result.stderr).chars().take(2048).collect::<String>();
+        match waits.next() {
+            // A status read is read-only: asking again is the same question. A busy box answers late
+            // (the operator's frame read deadline, a queue residence deadline), never wrongly.
+            Some(wait) if transient_operator_refusal(&said) => std::thread::sleep(*wait),
+            _ => return Err(format!("private operator preflight refused: {said}")),
+        }
     }
-    checked_operator(config,&result.stdout)
+}
+
+/// The pauses before asking the operator's status again after a transient refusal: about 15 s in
+/// all, inside the controller's start budget.
+const OPERATOR_STATUS_BACKOFF:[std::time::Duration;4]=[std::time::Duration::from_secs(1),std::time::Duration::from_secs(2),
+    std::time::Duration::from_secs(4),std::time::Duration::from_secs(8)];
+
+/// A refusal that says the box was too busy to answer in time, not that the operator is wrong.
+fn transient_operator_refusal(stderr:&str)->bool {
+    ["frame read deadline","queue residence deadline","busy:","contention","unavailable: the Host"].iter().any(|w|stderr.contains(w))
 }
 const PREPARED:&str="mini-resident-prompt-preparation-v1";
 #[derive(Serialize,Deserialize)]
@@ -191,6 +210,18 @@ impl Runtime {
         }
         require_private_operator(&self.config)?;
         response(&self.config,&self.config_path)
+    }
+}
+#[cfg(test)]
+mod transient_tests {
+    #[test]
+    fn only_a_busy_box_is_asked_again() {
+        assert!(super::transient_operator_refusal("error: refused: invalid socket frame: frame read deadline"));
+        assert!(super::transient_operator_refusal("busy: queue residence deadline (read resource of roster in lobby)"));
+        assert!(!super::transient_operator_refusal("controller requires serving private operator with exact Host/config pins"));
+        assert!(!super::transient_operator_refusal("error: no such socket"));
+        let total:u64=super::OPERATOR_STATUS_BACKOFF.iter().map(|d|d.as_secs()).sum();
+        assert!(total<=30,"the retries fit a controller start");
     }
 }
 #[cfg(test)]

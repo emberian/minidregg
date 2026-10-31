@@ -16,7 +16,7 @@ deployment and claims no hiding.
 -/
 import Compiler.EmitSerialize
 import Compiler.EmitShare
-import Compiler.Tower256ConcreteBackend
+import Compiler.Tower256Backend
 
 namespace Minidregg.Compiler.NoteSpendProofController
 

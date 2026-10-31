@@ -313,16 +313,20 @@ def verifyInitial (config : NativeHost.Config) (retained : Option ConsentAnchor.
   | .error failure => throw (IO.userError s!"consent prefix refused at {failure.index}: {failure.detail}")
   | .ok verified => pure ⟨target, .full verified⟩
 
-/-- Admit only the records the Store appended since `old` (`extendFrom`: the
+/-- Admit the records the Store appended since `old`, given their extension of `old` (`extendFrom`: the
 chain continues from the held one and every new tag verifies). A resident that
 lags by a checkpoint interval or more starts again where a fresh provider does,
 at the Store's checkpoint (`verifyInitial`): a quiet member's next command costs
 at most one interval of admissions, not every record since it last looked. An
 anchored basis whose suffix admission fails is re-admitted from the checkpoint
 walk (`verifyStart`). -/
-def refresh (config : NativeHost.Config) (old : Session config) : IO (Session config) := do
-  let ⟨target, seedExact, acceptedExact, logStartExact⟩ ← IO.ofExcept
-    (← DurableReceiverIO.extendFrom config.transport ResourceBirthCodec.rootBytes old.1)
+def refreshExtended (config : NativeHost.Config) (old : Session config)
+    (extended : Except String {next : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes //
+      next.image.seed = old.1.image.seed ∧
+        next.image.accepted = old.1.image.accepted ++
+          next.image.accepted.drop old.1.image.accepted.length ∧
+        next.logStart = old.1.logStart}) : IO (Session config) := do
+  let ⟨target, seedExact, acceptedExact, logStartExact⟩ ← IO.ofExcept extended
   if target.height = old.1.image.accepted.length then return old
   if 0 < config.transport.checkpointEvery &&
       old.1.image.accepted.length + config.transport.checkpointEvery ≤ target.height then
@@ -338,6 +342,28 @@ def refresh (config : NativeHost.Config) (old : Session config) : IO (Session co
           | .error failure =>
               throw (IO.userError s!"consent extension refused at {failure.index}: {failure.detail}")
           | .ok verified => pure ⟨target, .full verified⟩
+
+/-- `refreshExtended` over the Store's entries after the held height. -/
+def refresh (config : NativeHost.Config) (old : Session config) : IO (Session config) := do
+  refreshExtended config old (← DurableReceiverIO.extendFrom config.transport ResourceBirthCodec.rootBytes old.1)
+
+/-- The held re-check (frame 233, `ConsentAnchor.checkHeld`) made on the read `refresh` needs
+anyway: one Store read from the held height, its first entry judged against the held tag, the
+rest extending the admission (`DurableReceiverIO.extendStored`). `.error`: the re-check refused,
+and nothing was admitted. -/
+def refreshHeld (config : NativeHost.Config) (old : Session config) (heldTag : List UInt8) :
+    IO (Except String (Session config)) := do
+  let height := old.1.height
+  match ← config.transport.read height false with
+  | .error message => return .error message
+  | .ok none => return .error "durable store is not initialized"
+  | .ok (some stored) =>
+      if let .error detail := ConsentAnchor.checkHeld height heldTag stored.head
+          (stored.entries.head?.map (·.tag)) then
+        return .error detail
+      return .ok (← refreshExtended config old
+        (← DurableReceiverIO.extendStored config.transport ResourceBirthCodec.rootBytes old.1
+          { stored with entries := stored.entries.drop 1 }))
 
 /-- The full re-admission of the held target; an anchored session is
 re-admitted from genesis once and then held in full. -/
@@ -599,10 +625,26 @@ def objectiveHeaders (extraObjective : ExtraObjective) (settings : Settings)
     throw (IO.userError "source-derived Objective adapter returned invalid header count")
   pure (headersBytes headers)
 
+/-- The re-check frame 233 asks for, made now: O(1) against the tag this provider verified at its
+height (HOT-PATH 2f), the chain-from-genesis re-check only for an image that never saw its head
+tag. A refusal answers 255 and ends the provider. -/
+def recheckOrEnd (config : NativeHost.Config) (session : Session config) (output : IO.FS.Stream) :
+    IO Unit := do
+  let rechecked ← match session.1.headTag with
+    | some tag => ConsentAnchor.recheckHeld config.transport session.1.height tag
+    | none => ConsentAnchor.recheckStore config.transport session.2.anchor
+  if let .error detail := rechecked then
+    writeSessionFrame output 255 s!"consent refused: {detail}".toUTF8.toList
+    throw (IO.userError s!"consent refused: {detail}")
+
 /-- Frame 228 offers custody's retained anchor before the first admission;
 frame 229 returns the anchor of the current admission; frame 233 re-checks the
 Store against the held admission (a resident provider sends it once per client
-connection, `ConsentAnchor.recheckStore`). Possession (226) is a
+connection, immediately before that connection's first frame, `ConsentAnchor.recheckHeld`).
+A held admission with its head tag answers 233 at once and OWES the re-check (`owed`): the
+frame that follows makes it before it answers, on its own Store read when it admits
+(`refreshHeld`: one read for both), or as a read of its own (`recheckOrEnd`) when it does not.
+No answer that reads the admitted prefix is given before the re-check passes. Possession (226) is a
 function of the retained command and the configuration, and thin consent
 frames (230–232, 234, 235) read no Store: they admit nothing. This process serves no
 codec frames: the one pure codec implementation is the Host's storeless
@@ -611,7 +653,7 @@ once, then `refresh`); a failed admission terminates the provider, so no cached
 success survives an observed rollback, rewritten prefix, or failed suffix. -/
 partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjective) (settings : Settings)
     (config : NativeHost.Config) (retained : Option ConsentAnchor.Anchor)
-    (held : Option (Session config)) (input output : IO.FS.Stream) : IO Unit := do
+    (held : Option (Session config)) (owed : Bool) (input output : IO.FS.Stream) : IO Unit := do
   let first ← input.read 1
   if first.isEmpty then return
   let lengthWire ← readExactly input 4 first
@@ -620,62 +662,73 @@ partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjecti
   let body ← readExactly input length
   let operation := body[0]!
   let payload := body.toList.drop 1
-  if operation ≥ 230 && operation ≤ 232 || operation == 234 || operation == 235 || operation == 226 then
+  let isThin := operation ≥ 230 && operation ≤ 232 || operation == 234 || operation == 235 || operation == 226
+  let admits := !(isThin || operation == 236 && !payload.isEmpty || operation == 228 || operation == 233 ||
+    operation == 229)
+  if owed && !admits then
+    if let some session := held then recheckOrEnd config session output
+  let owed := owed && admits
+  if isThin then
     let answer ← try
         let reply ← if operation == 226 then possession config payload
           else do thin (← IO.ofExcept settings.providerRoutes) config operation payload
         pure (operation, reply)
       catch error => pure (255, error.toString.toUTF8.toList)
     writeSessionFrame output answer.1 answer.2
-    serve extraExpected extraObjective settings config retained held input output
+    serve extraExpected extraObjective settings config retained held owed input output
   else if operation == 236 && !payload.isEmpty then
     writeSessionFrame output 255 "full consent readiness requires empty input".toUTF8.toList
-    serve extraExpected extraObjective settings config retained held input output
+    serve extraExpected extraObjective settings config retained held owed input output
   else if operation == 228 then
     if held.isSome then
       writeSessionFrame output 255
         "a retained consent anchor is offered only before the first admission".toUTF8.toList
-      serve extraExpected extraObjective settings config retained held input output
+      serve extraExpected extraObjective settings config retained held owed input output
     else
       match ConsentAnchor.decode payload with
       | .error detail =>
           writeSessionFrame output 255 detail.toUTF8.toList
-          serve extraExpected extraObjective settings config retained held input output
+          serve extraExpected extraObjective settings config retained held owed input output
       | .ok anchor =>
           -- `none`: a record of another consent epoch, set aside (`ConsentAnchor.decode_other_epoch`);
           -- the first admission then starts from the Store's snapshot.
           writeSessionFrame output 228 []
-          serve extraExpected extraObjective settings config anchor held input output
+          serve extraExpected extraObjective settings config anchor held owed input output
   else if operation == 233 then
     -- A resident provider's per-connection re-check: the Store still carries
-    -- the prefix this provider admitted (`ConsentAnchor.recheckStore`). Before
-    -- any admission there is nothing to re-check: the first admission compares
-    -- the retained anchor itself. A refusal ends the provider.
+    -- the prefix this provider admitted. Before any admission there is nothing to
+    -- re-check: the first admission compares the retained anchor itself.
     match held with
-    | none => writeSessionFrame output 233 []
+    | none =>
+        writeSessionFrame output 233 []
+        serve extraExpected extraObjective settings config retained held false input output
     | some session =>
-        -- HOT-PATH 2f: O(1) against the tag this provider verified at its height; the
-        -- chain-from-genesis re-check only for an image that never saw its head tag.
-        let rechecked ← match session.1.headTag with
-          | some tag => ConsentAnchor.recheckHeld config.transport session.1.image.accepted.length tag
-          | none => ConsentAnchor.recheckStore config.transport session.2.anchor
-        match rechecked with
-        | .ok () => writeSessionFrame output 233 []
-        | .error detail =>
-            writeSessionFrame output 255 s!"consent refused: {detail}".toUTF8.toList
-            throw (IO.userError s!"consent refused: {detail}")
-    serve extraExpected extraObjective settings config retained held input output
+        if session.1.headTag.isSome then
+          writeSessionFrame output 233 []
+          serve extraExpected extraObjective settings config retained held true input output
+        else
+          recheckOrEnd config session output
+          writeSessionFrame output 233 []
+          serve extraExpected extraObjective settings config retained held false input output
   else if operation == 229 then
     match held with
     | none =>
         writeSessionFrame output 255 "no admitted prefix to anchor yet".toUTF8.toList
     | some session =>
         writeSessionFrame output 229 (ConsentAnchor.encode session.2.anchor)
-    serve extraExpected extraObjective settings config retained held input output
+    serve extraExpected extraObjective settings config retained held owed input output
   else
     let admitted ← match held with
       | none => verifyInitial config retained
-      | some session => refresh config session
+      | some session =>
+          match owed, session.1.headTag with
+          | true, some tag =>
+              match ← refreshHeld config session tag with
+              | .ok refreshed => pure refreshed
+              | .error detail =>
+                  writeSessionFrame output 255 s!"consent refused: {detail}".toUTF8.toList
+                  throw (IO.userError s!"consent refused: {detail}")
+          | _, _ => refresh config session
     let (full, updated) ← if operation == 236 || operation == 224 && specializedNeedsFull payload then do
         let (full, upgraded) ← upgrade config admitted
         pure (some full, upgraded)
@@ -690,7 +743,7 @@ partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjecti
         pure (operation, reply)
       catch error => pure (255, error.toString.toUTF8.toList)
     writeSessionFrame output answer.1 answer.2
-    serve extraExpected extraObjective settings config retained (some updated) input output
+    serve extraExpected extraObjective settings config retained (some updated) false input output
 
 def run (extraExpected : ExtraExpected) (arguments : List String)
     (extraObjective : ExtraObjective := refuseObjective) : IO UInt32 := do
@@ -701,7 +754,7 @@ def run (extraExpected : ExtraExpected) (arguments : List String)
   | [path, "stdio"] =>
       let settings ← loadSettings path
       withPinnedSignature settings.config fun config => do
-        serve extraExpected extraObjective settings config none none (← IO.getStdin) (← IO.getStdout)
+        serve extraExpected extraObjective settings config none none false (← IO.getStdin) (← IO.getStdout)
         pure 0
   | _ => throw (IO.userError "usage: minidregg-client-consent CONFIG stdio")
 end Minidregg.Host.ClientConsentCore

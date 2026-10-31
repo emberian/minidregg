@@ -138,7 +138,9 @@ def loadPolicy (snapshot : Snapshot) (store : PayloadStore)
               if policyIdExact : record.policyId = policyId then
                 if revisionExact : record.version = revision then
                   if domainExact : record.domain = snapshot.domain then
-                    if addressExact : policyRecordDigest record = address then
+                    -- The fetched bytes are the record's canonical encoding, so its digest is
+                    -- their hash: no second encode.
+                    if addressBytes : policyHashBytes bytes = address then
                       some
                         { committed := ⟨address, record⟩
                           current := current
@@ -146,7 +148,9 @@ def loadPolicy (snapshot : Snapshot) (store : PayloadStore)
                           policyIdExact := policyIdExact
                           revisionExact := revisionExact
                           domainExact := domainExact
-                          addressExact := addressExact
+                          addressExact := by
+                            rw [policyRecordDigest, policyRecordCodec_canonical decoded]
+                            exact addressBytes
                           fetched := by
                             have canonical := policyRecordCodec_canonical decoded
                             simpa only [canonical] using fetched }
@@ -278,6 +282,46 @@ def issuerCheck (snapshot : Snapshot) (issuer : IssuerId) (epoch : Epoch)
   decide (issuerEpochAt snapshot.cell issuer = epoch) &&
     decide (∃ address ∈ snapshot.logical.support,
       issuedAt snapshot issuer epoch commitment address = true)
+
+/-- `∃ key ∈ fields.support, p key`, decided over the map's own support multiset with its
+zero entries skipped: no `Multiset.toFinset`, whose deduplication is quadratic in the map. -/
+def existsSupport {K : Type} {V : K → Type} [DecidableEq K] [∀ key, Zero (V key)]
+    [∀ key, DecidableEq (V key)] (fields : Π₀ key : K, V key) (p : K → Bool) : Bool :=
+  fields.support'.lift (fun support => @decide (∃ key ∈ support.1, fields key ≠ 0 ∧ p key = true)
+      Multiset.decidableExistsMultiset)
+    (by
+      intro left right
+      apply decide_eq_decide.mpr
+      constructor
+      · rintro ⟨key, -, nonzero, holds⟩
+        exact ⟨key, (right.2 key).resolve_right nonzero, nonzero, holds⟩
+      · rintro ⟨key, -, nonzero, holds⟩
+        exact ⟨key, (left.2 key).resolve_right nonzero, nonzero, holds⟩)
+
+theorem existsSupport_eq {K : Type} {V : K → Type} [DecidableEq K] [∀ key, Zero (V key)]
+    [∀ key, DecidableEq (V key)] (fields : Π₀ key : K, V key) (p : K → Bool) :
+    existsSupport fields p = decide (∃ key ∈ fields.support, p key = true) := by
+  unfold existsSupport
+  refine Trunc.induction_on fields.support' ?_
+  intro support
+  simp only [Trunc.lift_mk]
+  apply decide_eq_decide.mpr
+  simp only [DFinsupp.mem_support_iff]
+  constructor
+  · rintro ⟨key, -, nonzero, holds⟩
+    exact ⟨key, nonzero, holds⟩
+  · rintro ⟨key, nonzero, holds⟩
+    exact ⟨key, (support.2 key).resolve_right nonzero, nonzero, holds⟩
+
+/-- `issuerCheck` as the Host evaluates it (`issuerCheck_eq_fast`). -/
+def issuerCheckFast (snapshot : Snapshot) (issuer : IssuerId) (epoch : Epoch)
+    (commitment : Digest) : Bool :=
+  decide (issuerEpochAt snapshot.cell issuer = epoch) &&
+    existsSupport snapshot.logical (issuedAt snapshot issuer epoch commitment)
+
+@[csimp] theorem issuerCheck_eq_fast : @issuerCheck = @issuerCheckFast := by
+  funext snapshot issuer epoch commitment
+  rw [issuerCheck, issuerCheckFast, existsSupport_eq]
 
 /-- Issuer acceptance names a stored capability of that issuer and epoch. -/
 theorem issuerCheck_sound (snapshot : Snapshot) (issuer : IssuerId) (epoch : Epoch)

@@ -161,7 +161,12 @@ fn native_reply(reply: &Value) -> std::result::Result<NativeReply, Refusal> {
                 uncertain: false,
             },
             Ok(v) if v["type"] == "uncertain-v3" => uncertain(&format!("native-uncertain-{}", v["phase"].as_str().unwrap_or("unnamed"))),
-            _ => uncertain("native-outcome-unknown"),
+            _ => {
+                // The name stays the one fixed spelling; the controller's journal keeps what the call returned.
+                let shown: String = text.chars().filter(|c| !c.is_control()).take(240).collect();
+                eprintln!("typed application call returned an unclassified error: {shown}");
+                uncertain("native-outcome-unknown")
+            }
         });
     }
     let frame: Value = serde_json::from_str(text).map_err(|_| uncertain("native-reply-malformed"))?;
@@ -431,6 +436,22 @@ mod tests {
     }
 
     const WBO: &str = include_str!("../../../apps/interfaces/wbo.json");
+
+    /// Davros qualification args are objects keyed `path`; the executor must resolve them as
+    /// arguments (not as path-part bindings) and prepare the first request.
+    #[test]
+    fn qualification_resolves_arguments_that_are_named_path() {
+        let dav = entry("dav", DAVROS);
+        let mut first: Option<Value> = None;
+        let mut forward = |request: Value| -> Value {
+            first.get_or_insert(request);
+            http(500, b"{}", "1")
+        };
+        let result = qualify_tool(&dav, &json!({"runId":"qb44d7585667c47f0"}), &mut forward);
+        assert!(!result["text"].as_str().unwrap().contains("declaration-invalid"), "{result}");
+        let request = first.expect("the first qualification step reaches the controller");
+        assert_eq!(request["operation"], "directory.create", "{request}");
+    }
 
     #[test]
     fn foreground_names_digest_and_qualification_context_are_checked() {

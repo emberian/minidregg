@@ -11,6 +11,7 @@ public import Kernel.PayStarterAllowance
 public import Host.BirthRuntimeProfile
 public import Host.CapabilityInspection
 public import Host.InspectRender
+public import Host.RefusalText
 public import Kernel.NativeHostGenesis
 public import Kernel.AgentGrain
 public import Kernel.ProviderRoute
@@ -375,6 +376,14 @@ def encodeHex (bytes : List UInt8) : String :=
 private def decimal (value : Nat) : Lean.Json := .str (toString value)
 private def signedDecimal (value : Int) : Lean.Json := .str (toString value)
 private def hexJson (value : List UInt8) : Lean.Json := .str (encodeHex value)
+
+/-- A controller's refusal carries its typed `Reject` as the detail; `clause` is that detail
+reduced to the constructor path it names (`Host.RefusalText.render`). The hex detail stays the
+committed bytes. -/
+private def controllerClause (reason : RefusalReason) (detail : List UInt8) : List (String × Lean.Json) :=
+  match reason, String.fromUTF8? (ByteArray.mk detail.toArray) with
+  | .operationRejected, some text => [("clause", .str (Minidregg.Host.RefusalText.render text))]
+  | _, _ => []
 
 private def tagged (path : String) (json : Lean.Json) : Result
     (String × Std.TreeMap.Raw String Lean.Json compare) := do
@@ -4426,7 +4435,7 @@ where
         | .replayed => "replayed"
       let cause : Lean.Json :=
         match ObjectiveActivityReceiver.rejectCodec.decode causeBytes with
-        | some typed => .str (reprStr typed)
+        | some typed => .str (Minidregg.Host.RefusalText.render (reprStr typed))
         | none => .null
       .mkObj [("type", "confirmed"), ("confirmation", confirmation),
         ("disposition", "charged"), ("cause", cause), ("causeCanonical", hexJson causeBytes),
@@ -4435,8 +4444,10 @@ where
   | .refused .tailBound phase detail none => .mkObj [("type", "refused"),
       ("reason", RefusalReason.tailBound.name), ("phase", hexJson phase), ("detail", hexJson detail),
       ("explain", .str s!"head/height <= certified/height + L fails: {(String.fromUTF8? (ByteArray.mk detail.toArray)).getD "?"}; certify (mini checkpoint) to resume")]
-  | .refused reason phase detail none => .mkObj [("type", "refused"), ("reason", reason.name),
-      ("phase", hexJson phase), ("detail", hexJson detail)]
+  | .refused reason phase detail none =>
+      let head : List (String × Lean.Json) := [("type", Lean.Json.str "refused"), ("reason", Lean.Json.str reason.name)]
+      let tail : List (String × Lean.Json) := [("phase", hexJson phase), ("detail", hexJson detail)]
+      .mkObj (head ++ tail ++ controllerClause reason detail)
   | .refused reason phase detail (some leaf) => .mkObj [("type", "refused"), ("reason", reason.name),
       ("phase", hexJson phase), ("detail", hexJson detail), ("leaf", lawLeafJson leaf),
       ("explain", .str (leaf.explain reason))]
@@ -4781,14 +4792,19 @@ private def rootOpeningJson (opening : NativeObservationController.OpeningView) 
       | .inl opened => .mkObj [("salt", hexJson opened.salt), ("entry", hexJson opened.entry)]
       | .inr leaf => .mkObj [("leaf", hexJson leaf)])]
 
+/-- A resource view's packed cell, decoded once for every rendering of it. -/
+private def resourcePacked (value : NativeObservationController.ResourceView) :
+    Result (Minidregg.Theory.CellRegistry.PackedCell CanonicalCellRegistry.registry) :=
+  match Minidregg.Theory.CellRegistry.PackedCell.decode CanonicalCellRegistry.registry value.2.1 with
+  | some packed => pure packed
+  | none => failAt "view-resource.cell" "noncanonical packed cell"
+
 /-- `cell.root` is the cell's own root (the view's leading digest); the
 entries are the cell as the reader's scope narrows it. -/
-private def resourceJson (value : NativeObservationController.ResourceView) : Result Lean.Json := do
+private def resourceJsonOf (value : NativeObservationController.ResourceView)
+    (packed : Minidregg.Theory.CellRegistry.PackedCell CanonicalCellRegistry.registry) :
+    Result Lean.Json := do
   let (root, bytes, balances, opening, computeQuote) := value
-  let packed ← match Minidregg.Theory.CellRegistry.PackedCell.decode
-      CanonicalCellRegistry.registry bytes with
-    | some packed => pure packed
-    | none => failAt "view-resource.cell" "noncanonical packed cell"
   let view ← match packed with
     | ⟨.content, payload⟩ => pure (contentCellJson root payload.logical)
     | ⟨.declaredObject, payload⟩ => pure (declaredCellJson root payload.logical)
@@ -4804,6 +4820,9 @@ private def resourceJson (value : NativeObservationController.ResourceView) : Re
        ("day", decimal quote.day), ("usedSteps", decimal quote.usedSteps),
        ("freeSteps", decimal quote.freeSteps), ("creditsPerStep", decimal quote.creditsPerStep),
        ("creditAsset", (quote.creditAsset.map decimal).getD .null)]).getD .null)]
+
+private def resourceJson (value : NativeObservationController.ResourceView) : Result Lean.Json := do
+  resourceJsonOf value (← resourcePacked value)
 
 private def wellCommandJson (command : RealmWellCodec.Command) : Lean.Json :=
   .mkObj [("type", "well-command-v1"), ("subject", decimal command.subject.value),
@@ -4984,26 +5003,10 @@ private def jsonInput (kind : String) (bytes : List UInt8) : Result Lean.Json :=
   match Lean.Json.parse text with
   | .ok json => pure json | .error message => failAt kind message
 
-/-- `view-document`: one page of the host document (`host`: a signed
-`view-resource` binary, or a signed `view-at` binary of the host at a past
-height) in the kernel's order, and every transclusion record of that page
-rendered by `ContentResource.renderTransclusion` against the source pages the
-reader itself obtained (`sources: [{"target": DEC, "view": HEX} | {"target":
-DEC, "at": HEX}]`). A transclusion whose source has no supplied live page
-renders `unavailable`, with its shape only. -/
-private def documentJson (bytes : List UInt8) : Result Lean.Json := do
-  let obj ← exactObject "$" ["host", "sources"] (← jsonInput "view-document" bytes)
-  let page ← pageOfView "$.host" (← decodeHex "$.host" (← field "$" "host" obj))
+/-- One page rendered against the supplied source pages (`view-document`'s body). -/
+private def documentOf (page : Option Nat × String × Option Digest × ContentResource.ContentStore)
+    (sources : List (Nat × ContentResource.ContentStore)) : Lean.Json :=
   let host := page.2.2.2
-  let sources ← list "$.sources" (fun path entry => do
-      let atHeight := (entry.getObjVal? "at").toOption.isSome
-      let key := if atHeight then "at" else "view"
-      let source ← exactObject path ["target", key] entry
-      let target ← nat (path ++ ".target") (← field path "target" source)
-      let read ← pageOfView (path ++ "." ++ key) (← decodeHex (path ++ "." ++ key) (← field path key source))
-      unless read.2.1 = "live" do
-        failAt (path ++ "." ++ key) "not a live content cell at that height"
-      pure (target, read.2.2.2)) (← field "$" "sources" obj)
   let rendered := (StoreCodec.entries HyperdocumentCell.contentWire host).filterMap fun entry =>
     match entry with
     | ⟨⟨.transclusions, identifier⟩, record⟩ =>
@@ -5025,8 +5028,30 @@ private def documentJson (bytes : List UInt8) : Result Lean.Json := do
                 ("opening", openingJson opening),
                 ("render", transclusionProjectionJson source opening record.reference.mode)]
     | _ => none
-  pure <| .mkObj ([("type", Lean.Json.str "document")] ++ pageJson page ++
+  .mkObj ([("type", Lean.Json.str "document")] ++ pageJson page ++
     [("transclusions", .arr rendered.toArray)])
+
+/-- `view-document`: one page of the host document (`host`: a signed
+`view-resource` binary, or a signed `view-at` binary of the host at a past
+height) in the kernel's order, and every transclusion record of that page
+rendered by `ContentResource.renderTransclusion` against the source pages the
+reader itself obtained (`sources: [{"target": DEC, "view": HEX} | {"target":
+DEC, "at": HEX}]`). A transclusion whose source has no supplied live page
+renders `unavailable`, with its shape only. -/
+private def documentJson (bytes : List UInt8) : Result Lean.Json := do
+  let obj ← exactObject "$" ["host", "sources"] (← jsonInput "view-document" bytes)
+  let page ← pageOfView "$.host" (← decodeHex "$.host" (← field "$" "host" obj))
+  let sources ← list "$.sources" (fun path entry => do
+      let atHeight := (entry.getObjVal? "at").toOption.isSome
+      let key := if atHeight then "at" else "view"
+      let source ← exactObject path ["target", key] entry
+      let target ← nat (path ++ ".target") (← field path "target" source)
+      let read ← pageOfView (path ++ "." ++ key) (← decodeHex (path ++ "." ++ key) (← field path key source))
+      unless read.2.1 = "live" do
+        failAt (path ++ "." ++ key) "not a live content cell at that height"
+      pure (target, read.2.2.2)) (← field "$" "sources" obj)
+  pure (documentOf page sources)
+
 
 /-- Compatibility spelling for quoted ranges. The atom-embed renderer was
 superseded by range transclusion: reuse the current document renderer and its
@@ -5567,6 +5592,16 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
   | "context-document" => ResidentContextInspection.document bytes
   | "context-support" => ResidentContextInspection.support bytes
   | "view-document" => documentJson bytes
+  -- `view-resource` and, for a content cell, the `view-document` of that page with no source
+  -- pages, from one decode: a reader's page is one frame, not two.
+  | "view-resource-document" => do
+      let value ← decoded "view-resource-document" NativeObservationController.resourceViewCodec bytes
+      let packed ← resourcePacked value
+      let document := match packed with
+        | ⟨.content, payload⟩ => documentOf (none, "live", some value.1, payload.logical) []
+        | _ => Lean.Json.null
+      pure <| .mkObj [("type", "resource-document"), ("resource", ← resourceJsonOf value packed),
+        ("document", document)]
   | "view-diff" => diffJson bytes
   | "view-history" => historyJson bytes
   | "view-marks" => do

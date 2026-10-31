@@ -33,7 +33,7 @@ module
 public import Theory.Signature
 public import Mathlib.Algebra.Field.Basic
 public import Mathlib.Data.ZMod.Basic
-public import Mathlib.FieldTheory.Finite.Basic
+public import Mathlib.Algebra.Field.ZMod
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr

@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self};
-use std::os::unix::fs::{PermissionsExt};
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -166,17 +166,60 @@ fn used_ids(root: &Path, deployment: &str) -> Result<BTreeSet<String>> {
     Ok(used)
 }
 
-/// A fresh random candidate ID not in `used` (inserted into it).
-fn fresh_id(used: &mut BTreeSet<String>) -> Result<String> {
+/// The ID index of one deployment in this namespace: `ids/SHA256(deployment)/ID`, one empty file
+/// per candidate ID its records hold, so a fresh ID is checked against them with one `create_new`
+/// (or one existence check for a probe) instead of reading every reservation record, which grow
+/// with every birth (law 17). A namespace whose records predate the index is indexed once, under
+/// the namespace lock, through the full read (`used_ids`, which also refuses an unsupported or
+/// colliding record); `complete` records that it was. Scope of that check: a record edited by
+/// hand AFTER the index was built is not re-read by each reservation, so a collision written that
+/// way is not refused here. IDs `reserve` writes cannot collide (each is claimed with an exclusive
+/// create), and the Host's admission remains the authority on every identity.
+fn id_index(root: &Path, deployment: &str) -> Result<PathBuf> {
+    let index = root.join("ids").join(hex(&Sha256::digest(deployment.as_bytes())));
+    if !index.join("complete").is_file() {
+        let used = used_ids(root, deployment)?;
+        crate::fsio::ensure_private_dir_all(&index)?;
+        for id in &used {
+            if let Err(error) = fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(index.join(id)) {
+                if error.kind() != std::io::ErrorKind::AlreadyExists {
+                    return Err(format!("namespace ID index: {error}"));
+                }
+            }
+        }
+        create_private(&index.join("complete"), b"").map_err(|error| format!("namespace ID index: {error}"))?;
+    }
+    Ok(index)
+}
+
+/// A fresh random candidate ID this deployment's index does not hold. `claim`: recorded in the
+/// index (created exclusively, so two draws never share one); otherwise only checked (a probe).
+fn fresh_indexed_id(index: &Path, claim: bool) -> Result<String> {
     for _ in 0..16 {
         let mut number = u64::from_be_bytes(crate::fsio::random()?);
         number |= 1u64 << 63;
         let id = number.to_string();
-        if used.insert(id.clone()) {
-            return Ok(id);
+        let path = index.join(&id);
+        if !claim {
+            if !path.exists() {
+                return Ok(id);
+            }
+            continue;
+        }
+        match fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path) {
+            Ok(_) => return Ok(id),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(format!("namespace ID index: {error}")),
         }
     }
     Err("namespace random ID collision budget exhausted".into())
+}
+
+/// A random candidate ID, for a namespace that holds no records yet.
+fn fresh_id_unrecorded() -> Result<String> {
+    let mut number = u64::from_be_bytes(crate::fsio::random()?);
+    number |= 1u64 << 63;
+    Ok(number.to_string())
 }
 
 /// A candidate ID for a DRY RUN: drawn exactly as `reserve` draws one (random, in the candidate
@@ -187,14 +230,12 @@ fn fresh_id(used: &mut BTreeSet<String>) -> Result<String> {
 /// bound to an attempt (`bind_attempt` takes a [`Reservation`], which this is not).
 pub(crate) fn probe_id(root: &Path, deployment: &str) -> Result<String> {
     checked_text("deployment", deployment)?;
-    let mut used = if root.exists() {
-        private_root(root)?;
-        let _guard = lock(root)?;
-        used_ids(root, deployment)?
-    } else {
-        BTreeSet::new()
-    };
-    fresh_id(&mut used)
+    if !root.exists() {
+        return fresh_id_unrecorded();
+    }
+    private_root(root)?;
+    let _guard = lock(root)?;
+    fresh_indexed_id(&id_index(root, deployment)?, false)
 }
 
 /// Reserve all IDs for one exact request. `fingerprint` is the caller's
@@ -235,7 +276,6 @@ pub(crate) fn reserve(
     let path = root.join(format!("request-{request_digest}.json"));
     let fingerprint_digest = hex(&Sha256::digest(fingerprint));
     let role_spec = role_json(roles);
-    let mut used = used_ids(root, deployment)?;
     if path.exists() {
         let saved = record(&path)?;
         if saved.get("deployment") != Some(&json!(deployment))
@@ -283,9 +323,10 @@ pub(crate) fn reserve(
             record_path: path,
         });
     }
+    let index = id_index(root, deployment)?;
     let mut ids = BTreeMap::new();
     for role in roles {
-        ids.insert(role.label.clone(), fresh_id(&mut used)?);
+        ids.insert(role.label.clone(), fresh_indexed_id(&index, true)?);
     }
     let saved = json!({
         "format":FORMAT,"deployment":deployment,"participant":participant,
@@ -863,6 +904,22 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    /// A fresh ID is never one the deployment's records hold, without reading those records.
+    #[test]
+    fn a_fresh_id_skips_every_indexed_id() {
+        let root = root();
+        let first = reserve(&root, "deployment-1", "alice", "one", b"source", &roles()).unwrap();
+        let index = id_index(&root, "deployment-1").unwrap();
+        for id in first.ids.values() {
+            assert!(index.join(id).is_file(), "reserved IDs are indexed");
+        }
+        assert!(!first.ids.values().any(|id| id == &probe_id(&root, "deployment-1").unwrap()));
+        let other = reserve(&root, "deployment-2", "alice", "one", b"source", &roles()).unwrap();
+        assert!(!id_index(&root, "deployment-1").unwrap().join(&other.ids["target"]).exists(),
+            "each deployment has its own index");
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn corrupt_collision_refuses_next_reservation() {
         let root = root();
@@ -871,6 +928,9 @@ mod tests {
         let mut altered = record(&b.record_path).unwrap();
         altered["ids"]["target"] = json!(a.ids["target"]);
         fs::write(&b.record_path, serde_json::to_vec(&altered).unwrap()).unwrap();
+        // The records are read whole when the ID index is built (a namespace written before the
+        // index existed); a reservation after that consults the index, never every record.
+        fs::remove_dir_all(root.join("ids")).unwrap();
         assert!(
             reserve(&root, "deployment-1", "carol", "one", b"source", &roles())
                 .unwrap_err()

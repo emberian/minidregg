@@ -343,6 +343,7 @@ fn validate_terminal_resolution(record:&FinalRecord,resolution:&Value)->Result<(
             let mut performed=resolution.clone();performed["result"]["resolution"]=json!("performed");
             validate_final_resolution(record,&performed)
         },
+        Some("not-submitted")=>Err("final write was never submitted: no terminal outcome; retain the exact source operation for an exact retry".into()),
         _=>Err("final effect is uncertain; retain exact source operation without replay".into()),
     }
 }
@@ -880,12 +881,16 @@ impl Runtime {
             .reply_entry_number = Some(request.reply_entry_number);
         self.save()?;
         let id = self.allocate_delivery_operation()?;
-        let attempt=self.room_call_with_id("mini_say", &arguments, Some(id));
+        let write_error=self.room_call_with_id("mini_say", &arguments, Some(id)).err();
         let resolution = match self.journal.room_resolutions.iter().find(|r|r["operationId"]==id.to_string()).cloned() {
             Some(exact)=>exact,
-            None=>return Err(attempt.err().unwrap_or_else(||"delivery exact room result absent".into())),
+            None=>return Err(write_error.unwrap_or_else(||"delivery exact room result absent".into())),
         };
-        self.finish_delivery(&record, &arguments, resolution)
+        // The write's own error is the cause of any refusal recorded for it: it travels with the result.
+        self.finish_delivery_with_cause(&record, &arguments, resolution, write_error.as_deref()).map_err(|error| match &write_error {
+            Some(cause)=>format!("{error}; the room write failed first: {cause}"),
+            None=>error,
+        })
     }
 
     fn allocate_delivery_operation(&mut self) -> Result<u64> {
@@ -911,15 +916,29 @@ impl Runtime {
         Ok(id)
     }
 
-    fn finish_delivery(
+    fn finish_delivery(&mut self, record: &FinalRecord, arguments: &Value, resolution: Value) -> Result<Value> {
+        self.finish_delivery_with_cause(record, arguments, resolution, None)
+    }
+
+    /// `cause` is the room write's own error when the write failed before its result was recorded;
+    /// it is kept in the retained receipt beside the resolution it explains.
+    fn finish_delivery_with_cause(
         &mut self,
         record: &FinalRecord,
         arguments: &Value,
         resolution: Value,
+        cause: Option<&str>,
     ) -> Result<Value> {
         validate_terminal_resolution(record,&resolution)?;
         let refused=resolution["result"]["resolution"]=="refused";
         if refused {
+            // A refusal the room client recorded because nothing was ever submitted is no verdict on the
+            // final: no write reached the Host. It is never turned into a terminal refusal here.
+            let basis=resolution["result"]["basis"].as_str().unwrap_or_default();
+            if matches!(basis,"not-submitted"|"payment-not-started"|"paid-but-write-not-started") {
+                return Err(format!("final delivery was not submitted ({basis}): no write reached the Host, so no terminal refusal is recorded; \
+                    the retained operation awaits an exact retry or an operator decision"));
+            }
             let allocated=self.journal.resident_delivery.as_ref().and_then(|p|p.operation_id).ok_or("refused final has no allocated source operation")?;
             if resolution["operationId"]!=allocated.to_string()
                 || !self.journal.room_resolutions.iter().any(|r|*r==resolution) {
@@ -931,6 +950,8 @@ impl Runtime {
         }
         let receipt = json!({"type":if refused {"mini-resident-final-refused-v1"} else {"mini-resident-delivered-v1"},"origin":record.origin,
             "planSha256":hash(&record)?,"result":resolution,"modelRequests":0,"textIsModelOutput":true});
+        let mut receipt = receipt;
+        if let Some(cause) = cause { receipt["writeError"] = json!(cause); }
         let done = self
             .config
             .state_dir
@@ -1487,6 +1508,33 @@ mod tests {
             let mut wrong=proof.clone(); *wrong.pointer_mut(pointer).unwrap()=json!("wrong");
             assert!(attach_native_reply_proof(&record,&resolution,&wrong,&operation).is_err(),"{pointer}");
         }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_final_that_was_never_submitted_is_no_terminal_refusal_and_a_write_error_stays_in_the_receipt() {
+        let (root,mut rt,record)=receiving_fixture("delivery-never-submitted");
+        rt.install_final(record.clone()).unwrap();rt.journal.resident_delivery.as_mut().unwrap().reply_entry_number=Some(7);
+        let id=rt.allocate_delivery_operation().unwrap();let mut resolution=performed(&record,id);
+        resolution["result"]=json!({"resolution":"refused","basis":"not-submitted","proposal":"p"});
+        rt.journal.room_resolutions.push(resolution.clone());
+        let error=rt.finish_delivery(&record,&record.arguments(7),resolution).unwrap_err();
+        assert!(error.contains("not-submitted") && error.contains("no terminal refusal"),"{error}");
+        assert!(rt.journal.resident_delivery.is_some());
+        assert!(!rt.config.state_dir.join("resident-final-refused-0000000000000001.json").exists());
+        let mut never=performed(&record,id);
+        never["result"]=json!({"resolution":"not-submitted","basis":"not-submitted","effect":"write"});
+        let error=rt.finish_delivery(&record,&record.arguments(7),never).unwrap_err();
+        assert!(error.contains("never submitted") && error.contains("exact retry"),"{error}");
+        assert!(rt.journal.resident_delivery.is_some());
+        let mut host=performed(&record,id);
+        host["result"]=json!({"resolution":"refused","basis":"exact-operation-record","notResent":true});
+        rt.journal.room_resolutions[0]=host.clone();
+        let receipt=rt.finish_delivery_with_cause(&record,&record.arguments(7),host,Some("error: Connection reset by peer (os error 104)")).unwrap();
+        // A Host refusal found by exact lookup stays terminal even when the write also met a reset.
+        assert_eq!(receipt["type"],"mini-resident-final-refused-v1");
+        assert_eq!(receipt["writeError"],"error: Connection reset by peer (os error 104)");
+        assert_eq!(rt.delivery_receipt(&record).unwrap().unwrap(),receipt);
         fs::remove_dir_all(root).unwrap();
     }
 

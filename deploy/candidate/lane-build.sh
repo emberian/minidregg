@@ -38,10 +38,25 @@ src=$LANE_DIR/src
 mkdir -p "$LANE_DIR/artifacts" "$LANE_DIR/cycle" "$LANE_DIR/logs"
 cd "$src"
 native() {  # OUTPUT_DIR BINARY [builder args...]
-  local out=$1 bin=$2; shift 2
+  local out=$1 bin=$2 rss=$LANE_DIR/logs/lean-module-rss.tsv rc=0; shift 2
+  # A rebuild in the same lane (the incremental loop): the builder refuses an existing output or binary, so
+  # the last ones move aside to *.prev (one generation kept: a companion or a comparison may read it).
+  if [ -e "$out" ] || [ -e "$bin" ]; then
+    rm -rf "$out.prev" "$bin.prev"
+    [ ! -e "$out" ] || mv "$out" "$out.prev"
+    [ ! -e "$bin" ] || mv "$bin" "$bin.prev"
+  fi
+  # Every module this lane has measured weighs its seats: logs/lean-module-rss.tsv accumulates (per module,
+  # the max peak RSS) over the lane's builds, so a module is unrecorded for one build at most.
+  [ ! -s "$rss" ] || export MINIDREGG_LEAN_RSS_FROM="${MINIDREGG_LEAN_RSS_FROM:+$MINIDREGG_LEAN_RSS_FROM:}$rss"
   MINIDREGG_NATIVE_JOBS=${MINIDREGG_NATIVE_JOBS:-2} MINIDREGG_LEAN_THREADS=${MINIDREGG_LEAN_THREADS:-2} \
     MINIDREGG_CYCLE_DIR="$LANE_DIR/cycle" LEAN_NUM_THREADS=2 \
-    scripts/build-native-host.sh "$@" --output "$out" --binary "$bin"
+    scripts/build-native-host.sh "$@" --output "$out" --binary "$bin" || rc=$?
+  if [ -s "$out/lean-module-rss.tsv" ]; then
+    awk -F '\t' 'BEGIN { OFS = "\t" } $0 !~ /^#/ && $3 ~ /^[0-9]+$/ { if (!($1 in r) || $3 > r[$1]) { r[$1] = $3; l[$1] = $0 } }
+      END { for (m in l) print l[m] }' ${rss:+$( [ -s "$rss" ] && echo "$rss")} "$out/lean-module-rss.tsv" | LC_ALL=C sort > "$rss.tmp" && mv "$rss.tmp" "$rss"
+  fi
+  return $rc
 }
 # The inputs a binary is compiled from. A commit that changes none of them (a script, a doc) does not
 # move what a build at an earlier commit produced; one that changes any of them does.

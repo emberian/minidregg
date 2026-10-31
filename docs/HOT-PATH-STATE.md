@@ -242,22 +242,101 @@ restart, `story new`, the first walk-family request after a restart.
 
 ## Next (successor: start here)
 
-State (2026-10-31, continuation written at ~490k tokens by ac53c05fe796e4294, the live hot-path per
-root): lane `lane/hot-path-cold`. Sent and merged: through c6ff16f55 (in batch 4). On the lane, not
-yet sent: e7489b9aa (4fb1a0e17 is merged for batch 5). The integrator is aba0beaa578594e92; private
-cells is a8da2b953507b402b; exorcism (the fsync class) is a9252a07cf889741c. On hbox build only in
-pool trees (`. /home/hbox/pool/pool.env; LANE_POOL_NO_WARM=1 lane-tree acquire hot-path
-origin/lane/hot-path-cold`; `lane-tree native hot-path` before a native build; release when done).
-Logs `/ci/hpc`. Native Host: `/ci/hpc/nb/build.sh` (deploy/candidate/lane-build.sh host,
-LANE_DIR=/ci/hpc/nb, src = the pool tree); `/ci/hpc/nb/both2.sh` = native convert + closure
-lane-check (`/ci/hpc/lcs20.log`) + build (`/ci/hpc/nb/host.log`). Hotpatch:
-`/home/hbox/lanes/integ/hotpatch-candidate.sh <base> <name> minidregg-host=/ci/hpc/nb/artifacts/minidregg-host`.
-Profiles: perf `--call-graph dwarf` on the `mini serve` child; symbolize with a symfs whose
-`memfd:mini-pinned-image (deleted)` links to the candidate's minidregg-host (`/ci/hpc/sn/symfs3`).
+State (2026-10-31, ac53c05fe796e4294, the live hot-path): lane `lane/hot-path-cold`. Sent: a55855f18 (staging,
+batch 7) and 6d744e25f (= 05a38ff4e + docs; batch 8: the law check on its own witness decides `Pred.eval`).
+Integrator aec6914709d96f496 (replaced aba0beaa578594e92); private cells a8da2b953507b402b; exorcism
+a6ad40ce192354deb (Host READ ops 144/5/4, loadPolicy, challenge); perf-client a778bbda6509944a5 (consent
+provider, `Loaded.write`, per-guard writes in receivers, World.admit pins, representsCheck's membership);
+retained-mode a13f0c9ab4513b2d7 (L0: `Store` as a tree-backed map, then the authority projection as a
+maintained node); perf-apps a25df305cfd551d8b (EtherCalc dispatch captures). Pool tree t7 is held
+(`lane-tree renew hot-path`); next native build with iter-speed's `scripts/pipeline/native-loop hot-path
+<base candidate> <label>` (~7 min) once on staging, not build7.sh (~48 min).
+Next, in order: (1) the birth plan on the light ground (below, O(cells) directory decodes per birth);
+(2) ember's read-path GET contract (statement first, (a)-(e) below) with group commit judged against the
+dispatch profile; (3) row 11 + Book wiring for FORMAT; (4) the session refresh term.
 
-Root's order (10-31): (1) row 11 + the Book layout implementation, as hot-path's part of FORMAT (a)
-with private cells; (2) cut the per-submit cost; (3) the remaining sweep rows (3, 8, 16, 17, 19, 20,
-14).
+Tools on hbox: pool trees (`. /home/hbox/pool/pool.env; LANE_POOL_NO_WARM=1 lane-tree acquire
+hot-path origin/lane/hot-path-cold`, release when done). Native Host: `/ci/hpc/nb/build7.sh` (resets
+t7 to the pushed head, `lane-tree native`, builds into `/ci/hpc/nb/artifacts`). Hotpatch:
+`/home/hbox/lanes/integ/hotpatch-candidate.sh <base> <name> minidregg-host=...`, then copy the Host
+into `bin/clients/x86_64-unknown-linux-gnu/` too and check SHA256SUMS. Growth measurement:
+`/ci/hpc/sn/grow2.sh` (one world, 8 sequential `story new`, perf of stories 2 and 8 into
+`g2.s{2,8}.perf.data`); symbolize with a symfs holding a COPY (never a symlink: cp -f follows it)
+of the candidate's minidregg-host named `memfd:mini-pinned-image (deleted)` (`/ci/hpc/sn/symfs5`);
+compare with `/ci/hpc/sn/cmp.py g2 <ms2> <ms8>`; attribute with `/ci/hpc/sn/who.py <perf script> <regex>`.
+The Host runs on P-cores: read the `cpu_core` section of perf report, not the first (`cpu_atom`).
+
+**App pages (perf-apps a25df305cfd551d8b, batch 6, EtherCalc on hbox): every grain HTTP request is
+one durable dispatch turn, ~210 ms in the resident of which 150-180 ms is the Host SUBMIT.** A first
+page with 17 assets is ~18 turns, 8.5 s serial; ten concurrent requests answer after 2.8 s (one write
+at a time). Levers, in order: profile the dispatch submit (perf-apps captures a Host profile on its world);
+group commit only pays if the turn is not CPU-bound (ten concurrent requests at 2.8 s is ~280 ms of
+serial Host work each, so the CPU per turn is the lever, not the fsync, which exorcism removed); and the question whether a static-asset GET needs a
+durable turn at all (asked of perf-apps; else root). Details: docs/PERF-APPS.md on lane/perf-apps.
+
+**Birth plan grows with cells (batch 7, perf-client's `doc new` at heights 0/250/520, hbox:/ci/pc/w7-520.perf.data,
+summary /ci/hpc/sn/w7.all.txt).** Birth op1 85 → 100 → 161 ms, op2 298 → 180 → 314 ms; says add a stream-entry
+cell each, so the directory grows. Inclusive at 520: `LifecycleImage.rawDecode` 22.5% (`DirectoryImage.decodeRows`
+15%), session refresh 14%. The birth plan runs on the FULL shape: `NativeHost.prepareLoaded` and
+`birthRefusal` call `ResourceBirthController.Concrete.prepareDraft … opened.durable`, which decodes the whole
+directory (`CredentialAuthorityDomainReceiver.loadDirectory durable`) and the authority
+(`loadDeployment`), then `prepareBirth` → `preparePreAuthority` decodes both again: about four O(cells)
+directory decodes per birth plan, none incremental (the served path's `loadServedDirectoryFrom` decodes only
+changed rows). Fix: the birth plan prepares against the session's light ground (`Ground.ofBasis`, as submit
+does), or at least threads one decoded directory/authority through prepareDraft → prepareBirth. Also
+`decodeServedFrom`'s `(rows.map Prod.fst).Nodup` is a quadratic list check per served load.
+
+**Dispatch turn profile (batch 6 74e1cfa10, EtherCalc first page + 20 warm + 10 concurrent GETs;
+hbox:/ci/pa-prof/dispatch.perf.data, symfs /ci/hpc/sn/symfs6, summary /ci/hpc/sn/disp.all.txt; warm
+GET 161 ms median).** Inclusive, cpu_core: `dispatchApplicationSubmitSession` 47%;
+`receiveVerifiedWith` 41% → `admitDispatchAt` 29% → `checkCurrent` 29% (DRC admit 9%, the dispatch's
+read check `checkRead` → `ResourceObservationAdmission.check` 17%); the compiled-law check 15-19%
+(`compiledLawAcceptsFast` → `witnessFast`/`witIndexed` → `evalAlg` 19%, `systemAccepts` 14%);
+`loadPolicy` 12% (policy record re-encode + digest; exorcism's); `Loaded.extend` 14% (World.admit
+pinCheck → `DeployedBridge.cellRoot` 7%; perf-client's); encode 28% across all of it.
+The compiled-law term is waste on the Host: `lower_complete` + `compiledLawAccepts_sound` make the
+generated witness's acceptance exactly `supported && inputsInRange && castInjOn && Pred.eval`
+(`PreparedLaw.verifies_iff_eval`), so the Host can decide `Pred.eval` and never build `wit`. The catch:
+`Authorized.policyWitness` (Theory/TypedAuthorization) stores the witness, and Lean is strict, so the
+witness must become lazy (a `Thunk` in `CompiledPolicyWitness.auxiliary`, or the authorization holding
+the witness's inputs) before the check can skip it. Statement-first; it touches the PolicyWitness type.
+
+**Ember's ruling (10-31, via root): read-path GETs approved with astra's changes**
+(review: /private/tmp/claude-501/-Users-ember-dev-minidregg/01a18fa5-51c4-7992-906c-97cb89814dae/scratchpad/astra-get.txt):
+(a) a versioned read permit; (b) the linearization point with a tip check before handoff, bound to
+request, Store, generation and incarnation; (c) reserved credit per liable payer, aggregated across
+sessions and residents (a write reserves, reads draw down, service stops when it runs out until
+settlement; crash-safe settlement, refunds, settlement after revocation, price-version binding; Lean
+owns tariff and ceilings); (d) eligibility declared per route in the installed authenticated
+declaration, none eligible by default, no auto-retry for being a GET; (e) law 17 across refresh,
+accounting and queues. Statement first. Order: group commit and cheaper durable turns first (they help
+every write), then the read-path contract; our repackaged apps then declare static assets and safe GETs
+eligible. Land through the integrator in batches.
+
+**Per-story growth (root's item, 10-31).** 8 stories on one world, Host CPU: eca98bde-hp-auth2 1.04 →
+2.83 s (2.72x); eca98bde-hp-auth3 (a55855f18's Host) 1.50 → 2.51 s (1.67x, load 14-16 against 8-9).
+Fixed: `Ground.authority` rebuilt `Snapshot.ofCell`/`authStateOf` about 15 times per invocation
+(now once per served state on `ServedAuthority`); `issuerCheck`'s quadratic support; DRC guard filters
+re-running `writes` per guard. What still grows (story 2 → 8 on auth3):
+1. A ~40-deep `Store.set` chain on post-stores (`Patch.run`/`setAll` of a birth's authority entries),
+   walked by every lookup of the post's encode (`Materialized.bytesCached` → `StoreCodec.encode`,
+   `sortedSupport`): +460 ms. Build the post without a chain (pre's entries merged with the patch into
+   `fromEntriesCached`), or better, per-entry persistence (FORMAT).
+2. The session's per-request refresh (`sessionConfirmed` → `NativeHostSession.refresh` →
+   `Loaded.extend`/`WorldTrack.advance`/`WorldCompact`): +190 ms.
+3. Whole-cell encodes of growing cells (authority post root, directory decode): FORMAT (a) + row 11.
+Cold consent provider (exorcist, batch 5, height 26): `verifyInitial` decodes the whole checkpoint
+(172 KB) and replays, ~0.6 s CPU, even with a retained anchor; that is the O(state) open row 11 shares
+(lazy cell decode at open: a checkpoint whose cells stay bytes until read). Paid once per world start
+or binding change now that residents do not idle out (perf-client 86428a2f1).
+Open, unowned: `Store.set` is `DFinsupp.update`, so every write leaves a closure layer; WorldCompact
+re-trees every cell every 32 heights (perf-client declined a touched-cells slice: WorldTrack.held would need a field) and post-stores
+carry ~40-deep chains into their encode. The real fix is a store whose update is an O(log n) tree
+insert behind a csimp (Theory.Store's representation, statements unchanged); hot-path's, after row 11;
+it also deletes WorldCompact.
+Other reports: op66 (lifecycle BEGIN plan) 8.6 s in an app install, a pre-checkpoint certificate
+walk, row 4 slice 2 (FORMAT); doc append O(history) (event-log cell, FORMAT (a)); restart wall
+11.7 s at 491 (row 11).
 
 - **Ember's bar (10-31):** "on a modern nvme machine there's not really an excuse for anything to take
   substantially over 1ms." Aim for about 1 ms of Host work per action. A warm submit, read or open in

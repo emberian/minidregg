@@ -867,6 +867,46 @@ def WorldTrack.world? {rootBytes : List UInt8 → Digest} {snapshot : DataSnapsh
   | .held w _ => some w
   | .lost _ => none
 
+/-- The deployed judge of a pin, read from the snapshot a held World represents: the
+cell retired, or its canonical bytes (which the executor already holds) not hashing
+to the asserted digest. It agrees with `World.pinFails` at a represented World
+(`snapPinFails_eq`), which re-encodes the World's own copy of the cell instead. -/
+def snapPinFails {rootBytes : List UInt8 → Digest} (snapshot : DataSnapshot rootBytes)
+    (w : HostRefinesWorld.DWorld) (p : Minidregg.Kernel.World.CellId × Digest) : Bool :=
+  (w.retired p.1).isSome || decide (ResourceBirthCodec.rootBytes (snapshot.canonicalBytes ⟨p.1⟩) ≠ p.2)
+
+/-- At a World the snapshot represents, the snapshot's judge is the World's. -/
+theorem snapPinFails_eq {rootBytes : List UInt8 → Digest} {snapshot : DataSnapshot rootBytes}
+    {height : Nat} {w : HostRefinesWorld.DWorld}
+    (rep : HostRefinesWorld.SnapRepresents DeployedBridge.bridge snapshot height w)
+    (p : Minidregg.Kernel.World.CellId × Digest) :
+    snapPinFails snapshot w p = Minidregg.Kernel.World.pinFails DeployedHistory.history w p := by
+  cases hr : w.retired p.1 with
+  | some _ =>
+      have fails : Minidregg.Kernel.World.pinFails DeployedHistory.history w p = true := by
+        cases hp : Minidregg.Kernel.World.pinFails DeployedHistory.history w p
+        · have := ((Minidregg.Kernel.World.pinFails_eq_false_iff DeployedHistory.history).1 hp).1
+          rw [hr] at this; cases this
+        · rfl
+      rw [fails]
+      simp [snapPinFails, hr]
+  | none =>
+      have live : DeployedBridge.bridge.codec.retires (snapshot.canonicalBytes ⟨p.1⟩) = false := by
+        have retired := rep.retired p.1
+        rw [hr] at retired
+        exact retired.symm
+      have root := DeployedHistory.deployed_pinCoherent _ _ (rep.cells p.1) live
+      rw [DeployedBridge.bridge_pin] at root
+      have holds : Minidregg.Kernel.World.pinFails DeployedHistory.history w p = false ↔
+          ResourceBirthCodec.rootBytes (snapshot.canonicalBytes ⟨p.1⟩) = p.2 := by
+        rw [Minidregg.Kernel.World.pinFails_eq_false_iff DeployedHistory.history, root]
+        simp [hr]
+      cases hp : Minidregg.Kernel.World.pinFails DeployedHistory.history w p
+      · simp [snapPinFails, hr, holds.1 hp]
+      · have differs : ResourceBirthCodec.rootBytes (snapshot.canonicalBytes ⟨p.1⟩) ≠ p.2 :=
+          fun same => by have := holds.2 same; rw [hp] at this; cases this
+        simp [snapPinFails, hr, differs]
+
 /-- **One accepted execution, one admitted turn.**  From a held World, derive the
 intent's turn against it, refuse it unless its charge is the intent's on every
 lane (the Host debits what the World debits), and admit it; the result
@@ -883,13 +923,18 @@ def WorldTrack.advance {rootBytes : List UInt8 → Digest} {snapshot next : Data
           match charged : DeployedCharge.mismatch t.charge intent.exactCharge with
           | some lane => .lost s!"height {height'}: the intent's charge is not its turn's: {repr lane}"
           | none =>
-          match admitted : Minidregg.Kernel.World.World.admit DeployedHistory.history w t with
+          -- The pins are judged from the snapshot's own bytes (`snapPinFails_eq`): the World's
+          -- copy of each pinned cell is never re-encoded for its digest.
+          match admitted : Minidregg.Kernel.World.World.admitPinned DeployedHistory.history
+              (Minidregg.Kernel.World.pinCheckFromBy (snapPinFails snapshot w) 0 t.pins) w t with
           | .error reason => .lost s!"height {height'}: the World refuses the turn: {repr reason}"
           | .ok w' => .held (WorldCompact.compactEvery height' w') (by
+              have admit := (Minidregg.Kernel.World.admitPinned_by_eq DeployedHistory.history w t
+                (fun p _ => snapPinFails_eq rep p)).symm.trans admitted
               rw [WorldCompact.compactEvery_eq, up]
               exact HostRefinesWorld.represents_of_admitted DeployedBridge.bridge
                 DeployedHistory.history rep derived (DeployedCharge.mismatch_none charged) executed
-                admitted)
+                admit)
 
 /-- **The append path refuses an intent charged other than its turn.**  From a
 held World, an intent whose derived turn's charge differs from its exact charge

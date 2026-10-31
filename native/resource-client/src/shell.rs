@@ -880,7 +880,7 @@ pub(crate) enum Plan {
     Template { label: String, lines: Vec<(usize, String)> },
     /// Local text for stdout.
     Text(String),
-    History { all: bool },
+    History { all: bool, newest: Option<usize> },
     Help(Option<String>),
     /// A chat verb (`crate::chat`): it composes several client operations.
     Chat(crate::chat::Line),
@@ -1431,7 +1431,11 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
         }
         "history" => {
             let p = crate::shell_grammar::parse(&crate::shell_grammar::HISTORY, &w)?;
-            Plan::History { all: p.opt(0).is_some() }
+            let newest = match p.flag("-n") {
+                Some(Some(n)) => Some(n.parse::<usize>().map_err(|_| format!("history: -n takes a count, not {n}"))?),
+                _ => None,
+            };
+            Plan::History { all: p.opt(0).is_some(), newest }
         }
         "keygen" => {
             let p = crate::shell_grammar::parse(&crate::shell_grammar::KEYGEN, &w)?;
@@ -2286,15 +2290,42 @@ fn attempt_status(dir: &Path) -> (bool, String) {
     (false, "incomplete (no call, no outcome)".into())
 }
 
-fn history(session: &Session, all: bool) {
+/// Retained evidence, oldest first. `newest`: only the newest N rows. An attempt's status reads
+/// its directory and outcome; the listing orders attempts by their directory's mtime first (one
+/// stat each), so a page of the newest N reads N attempts, not every one the workspace retains.
+fn history(session: &Session, all: bool, newest: Option<usize>) {
     let mut rows: Vec<(std::time::SystemTime, String)> = Vec::new();
     if let Ok(entries) = fs::read_dir(session.workspace.join("attempts")) {
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            let modified = entry.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
-            let (interesting, status) = attempt_status(&entry.path());
+        let mut attempts: Vec<(std::time::SystemTime, String, PathBuf)> = entries
+            .flatten()
+            .map(|entry| {
+                let modified = entry.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
+                (modified, entry.file_name().to_string_lossy().into_owned(), entry.path())
+            })
+            .collect();
+        attempts.sort_by(|a, b| b.cmp(a));
+        let mut kept = 0usize;
+        for (modified, name, path) in attempts {
+            if newest.is_some_and(|n| kept >= n) {
+                break;
+            }
+            let (interesting, status) = attempt_status(&path);
             if all || interesting {
                 rows.push((modified, format!("attempt\t{name}\t{status}")));
+                kept += 1;
+            }
+        }
+    }
+    // Signed reads keep one journal line each (`read-journal.tsv`, rotated at 1 MiB), not an attempt.
+    if all {
+        for journal in ["read-journal.tsv.1", "read-journal.tsv"] {
+            let Ok(text) = fs::read_to_string(session.workspace.join(journal)) else { continue };
+            for line in text.lines() {
+                let cells: Vec<&str> = line.split('\t').collect();
+                if let [unix, height, "read", outcome, _, name] = cells[..] {
+                    let at = std::time::UNIX_EPOCH + std::time::Duration::from_secs(unix.parse().unwrap_or(0));
+                    rows.push((at, format!("read\t{name}\tsigned read, {outcome} at height {height}")));
+                }
             }
         }
     }
@@ -2318,6 +2349,9 @@ fn history(session: &Session, all: bool) {
         }
     }
     rows.sort();
+    if let Some(n) = newest {
+        rows.drain(..rows.len().saturating_sub(n));
+    }
     println!("# local retained evidence, oldest first; authority: discovery-only");
     for (_, row) in rows {
         println!("{row}");
@@ -2519,8 +2553,8 @@ fn line_untraced(session: &Session, text: &str) -> (i32, bool) {
             print!("{}", help_text(topic.as_deref()));
             Ending::Done
         }
-        Ok(Plan::History { all }) => {
-            history(session, all);
+        Ok(Plan::History { all, newest }) => {
+            history(session, all, newest);
             Ending::Done
         }
         Ok(Plan::Inbox) => {

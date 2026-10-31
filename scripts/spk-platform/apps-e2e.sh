@@ -252,10 +252,12 @@ restart_rows() {
 # ---- the install, as the member -------------------------------------------------------------------
 export MINI_MARKET_INDEX=$FIXTURE MINI_MARKET_META=$out/meta MINI_APPS_VERDICTS=$out/verdicts MINI_APPS_WORKER_SOCKET=$out/worker.sock MINI_APPS_CONFIG=$out/apps.json
 install_app() { # APP-ID
-  local app=$1 attempt=1 outcome rid
+  local app=$1 attempt=1 outcome rid before
+  before=$(ls "$WS9/apps/requests/" 2>/dev/null | sort)
   outcome=$(mini apps install --dir "$WS9" --home "$HOME9" --app "$app" --class "$CLASS" --json 2>"$out/install-$app.err")
   rid=$(grep -oE 'request [0-9a-f]{32}' <<<"$outcome" | head -1 | cut -d' ' -f2)
-  [ -n "$rid" ] || rid=$(ls "$WS9/apps/requests/" 2>/dev/null | grep -E '^[0-9a-f]{32}\.json$' | tail -1 | cut -d. -f1)
+  # Only a request file this install created: an earlier app's request must never be taken for this one's.
+  [ -n "$rid" ] || rid=$(comm -13 <(printf '%s\n' "$before") <(ls "$WS9/apps/requests/" 2>/dev/null | sort) | grep -E '^[0-9a-f]{32}\.json$' | tail -1 | cut -d. -f1)
   # The worker answers a long install `pending` at once and runs it on its own thread: a read meanwhile is not held.
   if grep -q '"state": "pending"' <<<"$outcome"; then
     local t0 t1 during; t0=$(date +%s%N); during=$(mini apps list --dir "$WS9" --json 2>&1); t1=$(date +%s%N)

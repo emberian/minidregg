@@ -21,6 +21,7 @@ codec, rather than defining a second request wire format.
 -/
 module
 
+public import Mathlib.Logic.Equiv.List
 public import Mathlib.Logic.Encodable.Basic
 public import Theory.AuthorizationDeclaration
 

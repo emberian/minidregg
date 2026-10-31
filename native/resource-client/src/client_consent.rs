@@ -42,9 +42,41 @@ fn resident_enabled()->bool { !cfg!(test) && std::env::var("MINI_CONSENT_RESIDEN
 /// `pure_host` binding for every `mini` process of this user instead of one 159 MB Lean image per
 /// process. `MINI_CODEC_RESIDENT=0` keeps the per-process child.
 fn codec_resident_enabled()->bool { !cfg!(test) && std::env::var("MINI_CODEC_RESIDENT").as_deref()!=Ok("0") }
-/// A resident with no frame for `$variable` seconds (default `RESIDENT_IDLE_S`, 600) ends.
-fn resident_idle(variable:&str)->std::time::Duration {
-    std::time::Duration::from_secs(std::env::var(variable).ok().and_then(|v|v.parse().ok()).unwrap_or(mini_sdk::consent::RESIDENT_IDLE_S))
+/// A resident keeps its warm state and does not idle out (`mini_sdk::consent::serve_resident_kind`:
+/// it ends with its world, its child, or a superseded binding). `$variable` seconds, when set, add
+/// an idle exit for a box that wants one.
+/// The box's shared codec Host, when the session selects one: `MINI_CODEC_SOCKET` (absolute) and
+/// `MINI_CODEC_PEER_UID` (its listener's owner, 0 for a systemd-activated one), both or neither.
+fn codec_service()->Result<Option<(PathBuf,u32)>> {
+    match (std::env::var_os("MINI_CODEC_SOCKET"),std::env::var("MINI_CODEC_PEER_UID")) {
+        (None,Err(_))=>Ok(None),
+        (Some(socket),Ok(peer))=>{
+            let socket=PathBuf::from(socket);
+            if !socket.is_absolute(){return Err("MINI_CODEC_SOCKET must be absolute".into());}
+            Ok(Some((socket,peer.parse().map_err(|_|"MINI_CODEC_PEER_UID must be a decimal uid")?)))
+        }
+        _=>Err("the shared codec Host needs both MINI_CODEC_SOCKET and MINI_CODEC_PEER_UID".into()),
+    }
+}
+fn resident_idle(variable:&str)->Option<std::time::Duration> {
+    std::env::var(variable).ok().and_then(|v|v.parse().ok()).filter(|n:&u64|*n>0).map(std::time::Duration::from_secs)
+}
+
+/// The consent settings bytes, re-read only when the file's identity (device, inode, size, both
+/// times) differs from the last read in this process: every consent frame of a command names the
+/// same settings file, and a rewrite or replacement changes its identity.
+fn settings_bytes_by_identity(settings:&Path)->Result<Vec<u8>> {
+    use std::os::unix::fs::MetadataExt;
+    static SEEN:Mutex<Option<(PathBuf,[u64;7],Vec<u8>)>>=Mutex::new(None);
+    let meta=std::fs::symlink_metadata(settings).map_err(|e|format!("{}: {e}",settings.display()))?;
+    let identity=[meta.dev(),meta.ino(),meta.size(),meta.mtime() as u64,meta.mtime_nsec() as u64,meta.ctime() as u64,meta.ctime_nsec() as u64];
+    let mut seen=SEEN.lock().map_err(|_|"consent settings cache lock poisoned")?;
+    if let Some((path,id,bytes))=seen.as_ref() {
+        if path==settings&&*id==identity {return Ok(bytes.clone());}
+    }
+    let bytes=crate::fsio::read_bounded_or_empty(settings, CAP)?;
+    *seen=Some((settings.to_path_buf(),identity,bytes.clone()));
+    Ok(bytes)
 }
 
 /// The selected consent provider of this process, started (or reached as this binding's resident
@@ -58,7 +90,7 @@ fn with_consent<T>(host: &Path, config: &Path, frame: impl FnOnce(&mut Consent) 
     let settings=PINS.get().map(|pins|pins.config.clone()).or_else(||std::env::var_os("MINI_CONSENT_CONFIG").map(PathBuf::from))
         .unwrap_or_else(||config.to_path_buf());
     if !executable.is_absolute()||!settings.is_absolute() {return Err("local consent executable/settings must be absolute".into());}
-    let settings_bytes=crate::fsio::read_bounded_or_empty(&settings, CAP)?;
+    let settings_bytes=settings_bytes_by_identity(&settings)?;
     let delegated=match PINS.get(){Some(p)=>p.delegated.clone(),None=>crate::consent_proxy::Selection::from_env()?};
     if let Some(selected)=DELEGATED_SESSION.get(){
         if selected!=&delegated{return Err("consent transport selection changed within signing session".into());}
@@ -85,7 +117,9 @@ fn with_consent<T>(host: &Path, config: &Path, frame: impl FnOnce(&mut Consent) 
         let anchors=mini_sdk::consent::anchor_dir()?;
         *slot=Some(Consent(mini_sdk::consent::start(&anchors,executable,&settings,settings_bytes)?));
     }
+    let started=std::time::Instant::now();
     let answer=frame(slot.as_mut().unwrap());
+    crate::trace::record("consent","frame",0,0,started);
     // A request that met a dead provider connection is undecided: it is never replayed here, and the
     // next request opens a fresh connection (the socket-activated unit's, or a new resident's).
     let lost=answer.is_err()&&drop_dead_session(&mut slot,&mut lifeline);
@@ -112,8 +146,8 @@ pub(crate) fn drop_dead_session(slot:&mut Option<Consent>,lifeline:&mut Option<c
 }
 
 /// `mini consent-resident --consent EXECUTABLE --settings SETTINGS`: hold one provider for this
-/// binding and serve its frames until the provider ends or no frame arrives for
-/// `MINI_CONSENT_IDLE_S` (600) seconds.
+/// binding and serve its frames until the provider ends, its world is torn down or its binding is
+/// superseded (with `MINI_CONSENT_IDLE_S` set, also after that many idle seconds).
 pub(crate) fn resident(executable:PathBuf,settings:PathBuf)->Result<()> {
     let idle=resident_idle("MINI_CONSENT_IDLE_S");
     if !mini_sdk::consent::daemonize()? { return Ok(()); }
@@ -122,7 +156,8 @@ pub(crate) fn resident(executable:PathBuf,settings:PathBuf)->Result<()> {
 /// `mini codec-resident --host EXECUTABLE --settings SETTINGS` (HOT-PATH 2a): hold ONE storeless
 /// codec Host (`HOST SETTINGS codec`, `Host.Main.serveCodec`) for this binding and serve every
 /// `mini` process's codec frames (7-11) on the binding's socket, one frame at a time, until the
-/// Host ends or no frame arrives for `MINI_CODEC_IDLE_S` (600) seconds. The codec is pure and
+/// Host ends, its world is torn down or its binding is superseded (with `MINI_CODEC_IDLE_S` set,
+/// also after that many idle seconds). The codec is pure and
 /// holds no state between frames, so sharing one across processes changes no reply; it removes
 /// one 159 MB Lean image start per `mini` process. The image is the client's own selected
 /// semantic Host (`pure_host`), never the serving Store's.
@@ -327,12 +362,27 @@ pub(crate) fn codec_frame(host:&Path,config:&Path,operation:u8,payload:&[u8])->R
 /// frame (`inspect outcome`), the decision is noted as the Host's, and the client never decodes
 /// it itself.
 fn local_frame(host:&Path,config:&Path,operation:u8,payload:&[u8])->Result<Vec<u8>> {
+    let started=std::time::Instant::now();
+    let answer=local_frame_untraced(host,config,operation,payload);
+    crate::trace::record("codec",&format!("op{operation}"),payload.len(),answer.as_ref().map_or(0,|a|a.len()),started);
+    answer
+}
+
+fn local_frame_untraced(host:&Path,config:&Path,operation:u8,payload:&[u8])->Result<Vec<u8>> {
     let executable=pure_host(host)?;
     let settings=PINS.get().map(|pins|pins.config.clone())
         .or_else(||std::env::var_os("MINI_CONSENT_CONFIG").map(PathBuf::from))
         .unwrap_or_else(||config.to_path_buf());
     let mut codec=CODEC.lock().map_err(|_|"local codec lock poisoned")?;
-    let answer=if codec_resident_enabled() {
+    let answer=if let Some((socket,peer))=codec_service()? {
+        // The box's shared codec Host (split tenancy): it must greet with this client's own pins,
+        // the image digest (the workspace's, `host_image_sha256`) and the settings bytes' digest.
+        let image:[u8;32]=mini_sdk::hex::decode_fixed(&crate::host_image_sha256(&executable)?).map_err(|_|"Host image digest is not 32 bytes")?;
+        codec.frame_with(&executable,&settings,operation,payload,&|executable,_settings,settings_bytes|{
+            let expected=mini_sdk::consent::codec_service_hello(&image,&settings_bytes);
+            mini_sdk::consent::connect_codec_service(&socket,peer,&expected,executable,settings_bytes)
+        })
+    } else if codec_resident_enabled() {
         codec.frame_with(&executable,&settings,operation,payload,&|executable,settings,settings_bytes|{
             let mini=std::env::current_exe().map_err(|e|format!("{}: {e}",ResidentKind::Codec.name()))?;
             let mut launch=Command::new(mini);

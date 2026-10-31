@@ -237,11 +237,35 @@ pub enum CodecError {
 #[derive(Default)]
 pub struct Codec {
     slot: Option<([u8; 32], Session)>,
+    /// The settings and executable this process last bound, by file identity: a frame whose files
+    /// still have those identities reuses the bytes and the binding (one `statx` each), instead of
+    /// re-reading and re-hashing the settings twice per frame.
+    seen: Option<Seen>,
+}
+
+struct Seen {
+    settings: PathBuf,
+    settings_identity: FileIdentity,
+    settings_bytes: Vec<u8>,
+    executable: PathBuf,
+    executable_identity: FileIdentity,
+    binding: [u8; 32],
+}
+
+/// A file's identity as the binding reads it: device, inode, size and both times. A rewrite in
+/// place changes ctime; a replacement changes the inode.
+type FileIdentity = [u64; 7];
+
+fn file_identity(path: &Path) -> Result<FileIdentity> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = std::fs::symlink_metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok([meta.dev(), meta.ino(), meta.size(), meta.mtime() as u64, meta.mtime_nsec() as u64,
+        meta.ctime() as u64, meta.ctime_nsec() as u64])
 }
 
 impl Codec {
     pub const fn new() -> Self {
-        Codec { slot: None }
+        Codec { slot: None, seen: None }
     }
 
     /// Drop the child (the next frame starts a fresh one).
@@ -271,13 +295,24 @@ impl Codec {
         if !settings.is_absolute() {
             return Err(CodecError::Failed("local native settings must be absolute".into()));
         }
-        let settings_bytes = settings_bytes(settings).map_err(failed)?;
-        let binding = binding(executable, &settings_bytes).map_err(failed)?;
+        let settings_identity = file_identity(settings).map_err(failed)?;
+        let executable_identity = file_identity(executable).map_err(failed)?;
+        let fresh = self.seen.as_ref().is_none_or(|seen| seen.settings != settings
+            || seen.settings_identity != settings_identity || seen.executable != executable
+            || seen.executable_identity != executable_identity);
+        if fresh {
+            let settings_bytes = settings_bytes(settings).map_err(failed)?;
+            let binding = binding(executable, &settings_bytes).map_err(failed)?;
+            self.seen = Some(Seen { settings: settings.to_path_buf(), settings_identity, settings_bytes,
+                executable: executable.to_path_buf(), executable_identity, binding });
+        }
+        let seen = self.seen.as_ref().expect("bound above");
+        let binding = seen.binding;
         if self.slot.as_ref().is_some_and(|(bound, _)| bound != &binding) {
             self.slot = None;
         }
         if self.slot.is_none() {
-            let session = start(executable.to_path_buf(), settings, settings_bytes.clone()).map_err(failed)?;
+            let session = start(executable.to_path_buf(), settings, seen.settings_bytes.clone()).map_err(failed)?;
             self.slot = Some((binding, session));
         }
         let session = &mut self.slot.as_mut().expect("codec child").1;
@@ -288,8 +323,9 @@ impl Codec {
                 return Err(CodecError::Failed(format!("local native codec: {error}")));
             }
         };
-        if settings_bytes_now(settings).as_deref() != Some(settings_bytes.as_slice()) {
+        if file_identity(settings).ok() != Some(settings_identity) {
             self.slot = None;
+            self.seen = None;
             return Err(CodecError::Failed("local native settings changed during codec operation".into()));
         }
         if answer == operation {
@@ -342,10 +378,6 @@ impl Codec {
         let payload = pair(plan, signatures).map_err(|e| CodecError::Failed(e.0))?;
         self.frame(executable, settings, CALL_ASSEMBLE, &payload)
     }
-}
-
-fn settings_bytes_now(path: &Path) -> Option<Vec<u8>> {
-    settings_bytes(path).ok()
 }
 
 #[cfg(test)]

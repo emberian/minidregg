@@ -199,9 +199,10 @@ theorem platformGuards_exact (deployment : CanonicalCellRegistry.Deployment)
 is already a guarded write, it does not become a second read-only participant. -/
 def readGuards {height : Height}
     (accepted : AcceptedBirth profile deployment pins durable height) : List ReadGuard :=
+  let written := accepted.prepared.writes.map DataWrite.cellId
   accepted.prepared.readGuards ++
     (sourceReadGuards accepted ++ platformGuards deployment durable).filter fun guard =>
-      guard.cellId ∉ accepted.prepared.writes.map DataWrite.cellId
+      guard.cellId ∉ written
 
 set_option backward.isDefEq.respectTransparency false in
 private theorem branch_read_exact {height : Height}
@@ -372,6 +373,36 @@ def charge {height : Height}
   | .feeDebit => accepted.descriptor.fee.amount
   | .networkBytes | .leaseByteBlocks => 0
 
+/-- `charge` over writes and read guards the caller has already computed: the
+admitted constructor evaluates the birth's writes and guards once and every
+lane reads them (`chargeWith_self`). It carries no premise that its arguments
+ARE the birth's own writes and guards: its one caller, `materializedIntent`,
+passes exactly `accepted.prepared.writes` and `readGuards accepted`, and any
+other caller must prove the same (`chargeWith_self`) before its charge counts. -/
+def chargeWith {height : Height}
+    (accepted : AcceptedBirth profile deployment pins durable height)
+    (writes : List DataWrite) (guards : List ReadGuard) : Charge
+  | .incidences => 3 + accepted.descriptor.createRequests.length
+  | .turnBytes => accepted.ingress.bytes.length
+  | .memoryTouches => writes.length + guards.length
+  | .witnessBytes => (credentialBundleStream.encode accepted.ingress.ingress.credentials).length +
+      (match accepted.ingress.ownerConsentEnvelopes with
+       | none => 0
+       | some owners => ((StreamCodec.list bytesStream).encode owners).length)
+  | .proofWork => 2 + accepted.descriptor.createRequests.length +
+      accepted.descriptor.resourceBatch.operations.length +
+      (match accepted.ingress.ownerConsentEnvelopes with | none => 0 | some owners => owners.length)
+  | .storageBytes => DeployedCharge.storageCharge durable.snapshot writes (event deployment.domain accepted.ingress)
+  | .sideEffectCount => 1
+  | .feeDebit => accepted.descriptor.fee.amount
+  | .networkBytes | .leaseByteBlocks => 0
+
+theorem chargeWith_self {height : Height}
+    (accepted : AcceptedBirth profile deployment pins durable height) :
+    chargeWith accepted accepted.prepared.writes (readGuards accepted) = charge accepted := by
+  funext lane
+  cases lane <;> rfl
+
 theorem charge_fee {height : Height}
     (accepted : AcceptedBirth profile deployment pins durable height) :
     charge accepted .feeDebit = accepted.descriptor.fee.amount := rfl
@@ -393,22 +424,24 @@ def intent {height : Height}
 /-- The admitted constructor with its finite charge evaluated once. No
 receiver or encoder needs to retain and rerun charge-producing source work. -/
 def materializedIntent {height : Height}
-    (accepted : AcceptedBirth profile deployment pins durable height) : DataIntent rootBytes where
-  transactionId := accepted.descriptor.transactionId
-  writes := accepted.prepared.writes
-  readGuards := readGuards accepted
-  nullifiers := [birthNullifier deployment.domain accepted.descriptor.authorityNullifier]
-  exactCharge := (Charge.materialize (charge accepted)).toCharge
-  event := event deployment.domain accepted.ingress
-  subject := some accepted.descriptor.creator
-  postRootsBound := accepted.prepared.write_roots_bound
-  guardsReadOnly := readGuards_readonly accepted
+    (accepted : AcceptedBirth profile deployment pins durable height) : DataIntent rootBytes :=
+  let writes := accepted.prepared.writes
+  let guards := readGuards accepted
+  { transactionId := accepted.descriptor.transactionId
+    writes := writes
+    readGuards := guards
+    nullifiers := [birthNullifier deployment.domain accepted.descriptor.authorityNullifier]
+    exactCharge := (Charge.materialize (chargeWith accepted writes guards)).toCharge
+    event := event deployment.domain accepted.ingress
+    subject := some accepted.descriptor.creator
+    postRootsBound := accepted.prepared.write_roots_bound
+    guardsReadOnly := readGuards_readonly accepted }
 
 /-- Exact complete intent equality, including all roots, guards and charges. -/
 theorem materializedIntent_eq {height : Height}
     (accepted : AcceptedBirth profile deployment pins durable height) :
     materializedIntent accepted = intent accepted := by
-  simp only [materializedIntent, intent, Charge.materialize_eq]
+  simp only [materializedIntent, intent, Charge.materialize_eq, chargeWith_self]
 
 /-- The actual receiving and semantic-replay constructor uses finite values;
 the source definition remains the specification for all existing consumers. -/
@@ -681,6 +714,7 @@ def receiveLoaded
     (deployment : CanonicalCellRegistry.Deployment) (pins : FactoryPins)
     (native : CredentialSignatureIO.NativeConfig) (transport : DurableReceiverIO.Transport)
     (durable : ResourceBirthController.Concrete.Durable)
+    (held : ResourceBirthController.Concrete.Held deployment durable)
     (height : Height) (bytes : List UInt8) : IO Result := do
   match decodeIngress bytes with
   | none => return .rejected .malformedIngress
@@ -689,7 +723,7 @@ def receiveLoaded
       | some (.ok recorded) => return .confirmed .replayed recorded
       | some (.error reason) => return .rejected reason
       | none =>
-          match ← admitDecodedNative profile deployment pins native durable height ingress with
+          match ← admitDecodedNative profile deployment pins native durable held height ingress with
           | .error reason => return .rejected (.admission reason)
           | .ok accepted =>
               match ← DurableReceiverIO.receiveLoaded transport rootBytes durable (intent accepted) with
@@ -714,6 +748,8 @@ def receive
   | some _ =>
       match ← DurableReceiverIO.load transport rootBytes with
       | .error detail => return .unavailable detail
-      | .ok durable => receiveLoaded profile deployment pins native transport durable height bytes
+      | .ok durable =>
+          receiveLoaded profile deployment pins native transport durable
+            (ResourceBirthController.Concrete.Held.load deployment durable) height bytes
 
 end Minidregg.Kernel.ResourceBirthReceiver

@@ -57,6 +57,7 @@ public import Pred.HashEq
 public import Pred.Frame
 public import Compiler.PredOrderGadget
 public import Mathlib.Data.List.Dedup
+public import Mathlib.Tactic.LinearCombination
 public import Std.Data.HashSet
 public import Std.Data.HashMap
 

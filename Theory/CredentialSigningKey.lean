@@ -25,6 +25,8 @@ pre-rotation: it cannot rotate at all, exactly as before rotation existed.
 -/
 module
 
+public import Mathlib.Data.Countable.Basic
+public import Mathlib.Logic.Equiv.List
 public import Theory.TypedAuthorization
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).

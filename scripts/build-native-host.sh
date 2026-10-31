@@ -82,6 +82,9 @@ Environment:
   MINIDREGG_NATIVE_ALLOW_SHARED=1  permit a tree without the snapshot marker
   MINIDREGG_NATIVE_JOBS=N          concurrent C compiler processes (positive integer; default: 2)
   MINIDREGG_LEAN_THREADS=N         threads in each Lean process (positive integer; default: 2)
+  MINIDREGG_LEAN_UNRECORDED_WEIGHT=N  seats a module with no recorded peak RSS takes (default: a third of the
+                                   seats); deploy/candidate/lane-build.sh passes its lane's accumulated table
+                                   in MINIDREGG_LEAN_RSS_FROM
   MINIDREGG_LAKE_THREADS=N         Lake's worker threads, i.e. how many modules it runs at once before the
                                    seats bound them (default: 2 x MINIDREGG_LEAN_SEATS, at least 4)
   MINIDREGG_NATIVE_LAKE_CC=PATH    optional bounded compiler wrapper for Lake C jobs
@@ -1369,7 +1372,10 @@ source_file=-
 for arg in "$@"; do case "$arg" in *.lean) source_file=$arg ;; esac; done
 # Memory-weighted seats: this compiler takes WEIGHT of the host's MINIDREGG_LEAN_SEATS seats, read from
 # MINIDREGG_LEAN_SEAT_WEIGHTS (module<TAB>weight, written by build-native-host from recorded peak RSS).
-# A module with no row is heavy (all seats) until a build has measured it; a non-module invocation takes 1.
+# A module with no row takes MINIDREGG_LEAN_UNRECORDED_WEIGHT seats (a third of the build's seats, enough for
+# the heaviest recorded module) until a build has measured it; a non-module invocation takes 1. It took ALL
+# seats until 2026-10-31: in ticket order every later compiler waits behind it, and with another build holding
+# seats in the same host-wide root (an umbrella stage) batch 6's host stage compiled nothing for 1,471 s.
 module=-
 if [[ "$source_file" == *.lean ]]; then
   module=${source_file#"$MINIDREGG_LEAN_BUILD_ROOT"/}; module=${module#./}; module=${module%.lean}; module=${module//\//.}
@@ -1377,7 +1383,7 @@ fi
 weight=1
 if [[ "$module" != - ]]; then
   weight=$(awk -F '\t' -v m="$module" '$1 == m { print $2; exit }' "${MINIDREGG_LEAN_SEAT_WEIGHTS:-/dev/null}")
-  [[ -n "$weight" ]] || weight=$MINIDREGG_LEAN_SEATS
+  [[ -n "$weight" ]] || weight=${MINIDREGG_LEAN_UNRECORDED_WEIGHT:-$MINIDREGG_LEAN_SEATS}
 fi
 if (( weight > MINIDREGG_LEAN_SEATS )); then
   printf 'build-native-host: %s alone needs %s of %s Lean seats (its recorded peak RSS exceeds the memory cap): refusing\n' \
@@ -1493,6 +1499,10 @@ rss_sources=()
 if [[ -f "$root/scripts/pipeline/lean-module-rss.tsv" ]]; then rss_sources+=("$root/scripts/pipeline/lean-module-rss.tsv"); fi
 IFS=: read -r -a extra_rss <<< "${MINIDREGG_LEAN_RSS_FROM:-}"
 for f in ${extra_rss[@]+"${extra_rss[@]}"}; do [[ -z "$f" ]] && continue; [[ -f "$f" ]] || { printf 'MINIDREGG_LEAN_RSS_FROM: no table %s\n' "$f" >&2; exit 64; }; rss_sources+=("$f"); done
+# Unrecorded modules: a third of the seats by default (12 seats: 4 x seat_kib, above the 17 GB Pay modules).
+unrecorded_weight=${MINIDREGG_LEAN_UNRECORDED_WEIGHT:-$(( (lean_seats + 2) / 3 ))}
+case "$unrecorded_weight" in [1-9]|[1-9][0-9]) ;; *) printf 'MINIDREGG_LEAN_UNRECORDED_WEIGHT must be a positive integer\n' >&2; exit 64 ;; esac
+(( unrecorded_weight <= lean_seats )) || unrecorded_weight=$lean_seats
 # module<TAB>weight<TAB>maxrss_kib: per module the max recorded peak over every table; weight = ceil(rss / seat)
 awk -F '\t' -v seat="$seat_kib" '$0 !~ /^#/ && $3 ~ /^[0-9]+$/ { if ($3 > r[$1]) r[$1] = $3 }
   END { for (m in r) { w = int((r[m] + seat - 1) / seat); if (w < 1) w = 1; print m "\t" w "\t" r[m] } }' \
@@ -1506,8 +1516,8 @@ if [[ -n "$over" ]]; then
   printf 'build-native-host: over-cap modules (recorded peak RSS exceeds the %s KiB Lean memory cap, %s): each refuses by name if it must compile here:\n%s\n' \
     "$mem_cap_kib" "$mem_cap_from" "$over" | tee -a "$output_dir/build.log" >&2
 fi
-printf 'lean-seats memory-weighted: cap=%sKiB (%s) seats=%s seat=%sKiB; %s modules weighted from %s table(s), unrecorded modules take all %s seats\n' \
-  "$mem_cap_kib" "$mem_cap_from" "$lean_seats" "$seat_kib" "$(wc -l < "$seat_weights" | tr -d ' ')" "${#rss_sources[@]}" "$lean_seats" | tee -a "$output_dir/build.log"
+printf 'lean-seats memory-weighted: cap=%sKiB (%s) seats=%s seat=%sKiB; %s modules weighted from %s table(s), unrecorded modules take %s seats\n' \
+  "$mem_cap_kib" "$mem_cap_from" "$lean_seats" "$seat_kib" "$(wc -l < "$seat_weights" | tr -d ' ')" "${#rss_sources[@]}" "$unrecorded_weight" | tee -a "$output_dir/build.log"
 wrapper_log="$output_dir/lake-lean-wrapper.tsv"
 : > "$wrapper_log"
 lake_cc=${MINIDREGG_NATIVE_LAKE_CC:-$toolchain/bin/clang}
@@ -1530,6 +1540,7 @@ seated_lake() {
     MINIDREGG_LEAN_BUILD_ROOT="$root" \
     MINIDREGG_LEAN_RUSAGE="$wrapper_root/lean-rusage.py" \
     MINIDREGG_LEAN_SEAT_WEIGHTS="$seat_weights" \
+    MINIDREGG_LEAN_UNRECORDED_WEIGHT="$unrecorded_weight" \
     lake build "$@" > "$log" 2>&1
 }
 

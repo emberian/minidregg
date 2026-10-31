@@ -892,9 +892,10 @@ def policySourceGuards {F : Type} [Field F] [DecidableEq F]
       CheckedBranch pending branch (credentialFor signed branch))
     (observations : (index : DeclaredResourceController.TargetIndex (source.grainCommand tariff)) →
       ReadLeg birth grain index (observationEnvelope signed index)) : List ReadGuard :=
+  let written := (GrainResourceBirthTransaction.writes birth grain).map DataWrite.cellId
   ((policyDependencyPairs signed checked observations).eraseDups.map fun pair =>
     (⟨⟨pair.1⟩, pair.2⟩ : ReadGuard)).filter fun guard =>
-    guard.cellId ∉ (GrainResourceBirthTransaction.writes birth grain).map DataWrite.cellId
+    guard.cellId ∉ written
 
 theorem policyDependency_covered {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}

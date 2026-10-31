@@ -245,6 +245,7 @@ def receiveLoaded {F : Type} [Field F] [DecidableEq F]
     (tariff : Option Tariff) (ambient : Ambient)
     (native : CredentialSignatureIO.NativeConfig)
     (transport : DurableReceiverIO.Transport) (durable : Durable)
+    (held : ResourceBirthController.Concrete.Held deployment durable)
     (bytes : List UInt8) : IO Result := do
   match GrainResourceBirthPolicyController.decodeIngress bytes with
   | none => return .rejected .malformedIngress
@@ -257,7 +258,8 @@ def receiveLoaded {F : Type} [Field F] [DecidableEq F]
           let some tariff := tariff
             | return .rejected .tariffUnavailable
           match GrainResourceBirthController.prepareSourceBirth profile.compilerProfile
-              profile.disabledEvaluators deployment pins durable profile.semantics tariff source ambient.height with
+              profile.disabledEvaluators deployment pins durable held profile.semantics tariff source
+              ambient.height with
           | .error reason => return .rejected (.birthPreparation reason)
           | .ok birth =>
               match GrainResourceBirthTransaction.prepareTargets profile deployment pins
@@ -290,6 +292,6 @@ def receive {F : Type} [Field F] [DecidableEq F]
       | .error detail => return .unavailable detail
       | .ok durable =>
           return ← receiveLoaded profile deployment pins tariff ambient native
-            transport durable bytes
+            transport durable (ResourceBirthController.Concrete.Held.load deployment durable) bytes
 
 end Minidregg.Kernel.GrainResourceBirthReceiver

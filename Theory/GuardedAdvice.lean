@@ -17,6 +17,7 @@ No receipt format, runtime transport, or candidate proof system is chosen here.
 -/
 module
 
+public import Mathlib.Order.Basic
 public import Theory.IndexedProgram
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).

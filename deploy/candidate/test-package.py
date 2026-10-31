@@ -125,7 +125,7 @@ with tempfile.TemporaryDirectory(prefix="package-test-") as tmp:
         ).stdout.splitlines()) if crate == "spk-host"]
         rebuilt = tmp / "rebuilt"
         rebuilt.mkdir()
-        for role in spk + ["mini"]:
+        for role in spk + ["mini", "miniLine"]:
             (rebuilt / ROLE_FILES[role]).write_text(f"rebuilt {ROLE_FILES[role]} at B\n")
 
         def overlay(base, label, roles, archive_=archive_b):
@@ -140,7 +140,7 @@ with tempfile.TemporaryDirectory(prefix="package-test-") as tmp:
         check("an overlay that splits a build family is refused, naming the missing role",
               part.returncode != 0 and "spkBroker" in part.stderr
               and not any((tmp / "ovs").iterdir() if (tmp / "ovs").exists() else []), part.stderr)
-        ov = overlay(cand, "ov", spk + ["mini"])
+        ov = overlay(cand, "ov", spk + ["mini", "miniLine"])
         check("an overlay of the spk-host family and mini packages", ov.returncode == 0, ov.stderr)
         if ov.returncode == 0:
             o = ov.path
@@ -151,7 +151,7 @@ with tempfile.TemporaryDirectory(prefix="package-test-") as tmp:
             check("provenance .overlay names the base, the overlay source and each swapped role",
                   oprov["overlay"]["base"]["sha256"] == before["provenance.json"]
                   and commit_b in oprov["overlay"]["sources"]
-                  and sorted(oprov["overlay"]["roles"]) == sorted(spk + ["mini"])
+                  and sorted(oprov["overlay"]["roles"]) == sorted(spk + ["mini", "miniLine"])
                   and all(v["commit"] == commit_b for v in oprov["overlay"]["roles"].values()))
             check("swapped outputs carry the overlay tree, the others the base's",
                   oprov["outputs"]["bin/mini"]["build"]["sourceTree"] == oprov["overlay"]["sources"][commit_b]["tree"]
@@ -175,15 +175,15 @@ with tempfile.TemporaryDirectory(prefix="package-test-") as tmp:
             check("the overlay directory is its 12-hex id, recorded with the name in provenance",
                   re.fullmatch(r"[0-9a-f]{12}", o.name) is not None and oprov["overlay"]["id"] == o.name
                   and oprov["overlay"]["name"] == "ov")
-            dup = overlay(cand, "ov", spk + ["mini"])
+            dup = overlay(cand, "ov", spk + ["mini", "miniLine"])
             check("the same overlay (same label) again is refused by its id, and leaves nothing behind",
                   dup.returncode != 0 and ("already there" in dup.stderr and sorted(p.name for p in (tmp / "ovs").iterdir()) == [o.name]),
                   dup.stderr)
-            again = overlay(o, "ov2", ["mini"])
+            again = overlay(o, "ov2", ["mini", "miniLine"])
             o2prov = json.loads((again.path / "provenance.json").read_text()) if again.returncode == 0 else {}
             check("an overlay of an overlay keeps the earlier record and points at its direct base",
                   again.returncode == 0 and o2prov["overlay"]["base"]["provenance"] == str(o / "provenance.json")
-                  and sorted(o2prov["overlay"]["roles"]) == sorted(spk + ["mini"]), again.stderr)
+                  and sorted(o2prov["overlay"]["roles"]) == sorted(spk + ["mini", "miniLine"]), again.stderr)
             (o / "bin/mini").chmod(0o755)
             forged = dict(oprov, outputs=dict(oprov["outputs"]))
             forged["outputs"]["bin/mini"] = {"sha256": oprov["outputs"]["bin/mini"]["sha256"],

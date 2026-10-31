@@ -41,6 +41,18 @@ ssh -i ~/.ssh/mini mini-s-NAME@demo.dregg.online 'read notes'       # one verb; 
 ssh -T -i ~/.ssh/mini mini-s-NAME@demo.dregg.online < steps.mini    # a script, one verb per line
 ```
 
+each `ssh` line opens a new connection, and the handshake (key exchange and authentication) is most
+of a quick verb's time: about 180 ms on the box against 15 ms for the verb itself. running many
+one-verb lines, keep one connection open and reuse it, in `~/.ssh/config`:
+
+```
+Host demo.dregg.online
+  IdentityFile ~/.ssh/mini
+  ControlMaster auto
+  ControlPath ~/.ssh/cm-%C
+  ControlPersist 10m
+```
+
 the browser face is the same session: forms for the verbs and a terminal pane over a WebSocket
 running `mini shell` as your account (`deploy/web-frontend/INSTALL.md`, intro and §5). you land at
 `mini> ` already enrolled and initialized (the door ran `keygen` and `init`, `deploy/door/README.md`,

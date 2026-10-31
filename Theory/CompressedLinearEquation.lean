@@ -7,6 +7,8 @@ two natural-number masses, and a centered fixed-width limb word represents the s
 quotient without field wraparound.  The resulting balance equations are the form an
 unsigned limb/carry AIR can consume honestly.
 -/
+import Mathlib.Tactic.Linarith
+import Mathlib.Algebra.BigOperators.Fin
 import Theory.Bignum
 
 namespace Minidregg.Theory.CompressedLinearEquation

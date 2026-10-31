@@ -17049,6 +17049,12 @@ impl Runtime {
         if tool && self.journal.birth_operation.is_some() {
             return Err("resource birth has a durable no-dispatch or refused marker; settle it at zero through recover".into());
         }
+        if audited {
+            self.resolve_pending_attempts()?;
+        }
+        if self.journal.provider_hold.is_some() || self.journal.provider_attempt.is_some() {
+            return Err("the provider's held allowance is not settled yet: run `reconcile provider audited` first, then this".into());
+        }
         if self.child.is_some()
             || self.journal.child.is_some()
             || self.journal.pending.is_some()
@@ -17226,7 +17232,30 @@ impl Runtime {
     fn reconcile_provider_audited(&mut self) -> Result<()> {
         self.reconcile_provider_evidence(false)
     }
+    /// An operator's reconciliation first resolves every pending native attempt itself, as startup
+    /// recovery does (`retry_pending_slot`: the exact lookup, the exact retained call once more when the
+    /// lookup is absent, or retiring a settle the continuity gate refused before it was signed, under
+    /// the controller's stop proof). A pending attempt is therefore never a reason the operator's verb
+    /// refuses with no way forward: it is resolved, or the reason it cannot be is returned by name.
+    /// A live worker still refuses: nothing is resolved under it.
+    fn resolve_pending_attempts(&mut self) -> Result<()> {
+        if self.child.is_some() || self.journal.child.is_some() {
+            return Err("reconciliation needs the worker stopped first (a live worker holds the attempts)".into());
+        }
+        for (slot, label) in [(AuthoritySlot::Provider, "provider"), (AuthoritySlot::Parent, "parent"),
+            (AuthoritySlot::Tool, "tool"), (AuthoritySlot::Dispatch, "dispatch")] {
+            if let Some(pending) = self.journal.pending_for(slot).clone() {
+                self.retry_pending_slot(slot).map_err(|e| format!(
+                    "the pending {label} attempt {} ({}) could not be resolved: {e}", pending.operation_id, pending.operation))?;
+            }
+        }
+        Ok(())
+    }
+
     fn reconcile_provider_evidence(&mut self, automatic: bool) -> Result<()> {
+        if !automatic {
+            self.resolve_pending_attempts()?;
+        }
         if automatic {
             self.require_delivered_provider_response()?;
             if self.startup_recovery_active {
@@ -19982,6 +20011,26 @@ case '__SUBMIT__' in *confirmed*) exit 0 ;; *) echo "refused: stale: the authori
         assert!(matches!(runtime.journal.connection, Connection::Detached), "the confirmed disconnect proceeds");
         let entry = runtime.journal.reconciliation_log.iter().find(|e| e["action"] == "resubmit-absent-exact-call").unwrap();
         assert_eq!((entry["operationId"].as_str(), entry["result"].as_str()), (Some("19"), Some("confirmed")));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The operator's audited reconciliation resolves a pending native attempt itself before it
+    /// settles anything: an absent attempt no longer makes the verb refuse with no way forward.
+    #[test]
+    fn an_operator_reconciliation_resolves_the_pending_attempt_it_used_to_refuse_on() {
+        let (root, mut runtime, attempt) = absent_lookup_world("admin",
+            r#"{"type":"confirmed","confirmation":"installed","worldRoot":"300","transactionId":"11","eventId":"12","acceptedCount":"13"}"#);
+        let error = runtime.reconcile_hold(false, true).unwrap_err();
+        assert_ne!(error, "reconciliation requires no live worker or unresolved custody attempt");
+        assert_eq!(error, "no durable held allowance for this authority", "it got past the pending attempt: {error}");
+        assert!(runtime.journal.pending.is_none());
+        assert_eq!(fs::read_to_string(attempt.join("modes.log")).unwrap(), "lookup\nsubmit\n");
+        // A provider allowance still held is named with the verb that settles it.
+        runtime.journal.provider_attempt = None;
+        runtime.journal.provider_hold = Some(serde_json::from_value(serde_json::json!({"reserve":"1","charge":"0","beforeGeneration":"1",
+            "beforeTargetRoot":"1","reserveConfirmed":true,"reserveRefused":false})).unwrap());
+        let error = runtime.reconcile_hold(false, true).unwrap_err();
+        assert!(error.contains("run `reconcile provider audited` first"), "{error}");
         let _ = fs::remove_dir_all(&root);
     }
 

@@ -245,6 +245,14 @@ theorem Loaded.unique {deployment : CanonicalCellRegistry.Deployment}
 
 #assert_axioms Loaded.unique
 
+/-- **A held authority is what `loadDeployment` would recompute** on the same snapshot. -/
+theorem Loaded.load_eq {deployment : CanonicalCellRegistry.Deployment}
+    {physical : PhysicalSnapshot} (loaded : Loaded deployment physical) :
+    loadDeployment deployment physical = some loaded := by
+  obtain ⟨other, found, _⟩ :=
+    loadDeployment_exact deployment physical loaded.valid loaded.snapshot.cell loaded.observed
+  rw [found, Loaded.unique other loaded]
+
 /-- `==` on byte lists, object identity first. `==` on `List UInt8` is `List.beq`
 (`List.instBEq`), which `CompiledListOps.listDecEq`'s swap never reaches; the
 comparisons of whole cell images on every session advance (`loadDeploymentFromAt`,
@@ -331,13 +339,15 @@ theorem Loaded.readGuards_exact {deployment : CanonicalCellRegistry.Deployment} 
 /-! ## The one physical write of an authority update -/
 
 /-- The post cell, written at the pinned identifier and guarded at the loaded
-root of that same cell. -/
+root of that same cell. The post is encoded once: its root is the root of
+those same bytes (`cellRoot` unfolds to exactly that). -/
 def Loaded.write {deployment : CanonicalCellRegistry.Deployment} {physical : PhysicalSnapshot}
-    (_loaded : Loaded deployment physical) (post : CredentialAuthorityDomain.Cell) : DataWrite where
-  cellId := cellIdOf deployment
-  expectedPre := physical.model.roots (cellIdOf deployment)
-  exactPost := cellRoot post
-  canonicalPostBytes := cellBytes post
+    (_loaded : Loaded deployment physical) (post : CredentialAuthorityDomain.Cell) : DataWrite :=
+  let bytes := cellBytes post
+  { cellId := cellIdOf deployment
+    expectedPre := physical.model.roots (cellIdOf deployment)
+    exactPost := ResourceBirthCodec.rootBytes bytes
+    canonicalPostBytes := bytes }
 
 def Loaded.writes {deployment : CanonicalCellRegistry.Deployment} {physical : PhysicalSnapshot}
     (loaded : Loaded deployment physical) (post : CredentialAuthorityDomain.Cell) : List DataWrite :=

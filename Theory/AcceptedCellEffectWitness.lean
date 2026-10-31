@@ -30,6 +30,7 @@ parameters, with a permissive portal and a minimal layout.  It is not a claim
 about any deployed portal, layout, or effect family, and it proves nothing
 about privacy, cost, or physical settlement.
 -/
+import Mathlib.Basic.Logic.Lemmas
 import Theory.AcceptedCellEffect
 import Theory.CellStateWitness
 import Theory.TypedAuthorizationWitness
