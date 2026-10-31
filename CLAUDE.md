@@ -5,7 +5,8 @@ derived via logic-arithmetization compilers and (e)DSLs, nothing hand-written.
 The proof-native semantic computer.
 
 **Start with `HANDOFF.md`**, then the plan `docs/DEMO-PREFIX-2026-10-26.md` (the work
-and the public-opening contract) and **`docs/COORDINATION-2026-10-27.md` (how we work:
+and the public-opening contract) and **`board/README.md` (how we work now: `main` is the trunk, the board, owned seats, the builder; read
+`board/RULINGS.md` and your `board/seats/<seat>.md` next)** and `docs/COORDINATION-2026-10-27.md` (older:
 what we optimise, the gates and their verdicts, how a lane and the orchestrator work,
 the boxes, the cadence)**. `ATLAS.md` §6 carries the seventeen design laws.
 
