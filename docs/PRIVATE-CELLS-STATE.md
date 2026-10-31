@@ -194,12 +194,13 @@ applied):
   passes it). Freshness is the named premise `Custody.CustodyPrf` (round 6): the ideal fixed as the
   uniform function on the version window (`idealFn`, tapes enumerate all functions by
   `finFunctionFinEquiv`), the budget admitting every two-query evaluation test
-  (`BudgetAdmitsNamed`: the budget admits the named distinguishers, equality of two window
-  versions' masks and the one-query point tests; at a use it is the composed reduction tests plus
+  (`BudgetAdmitsNamed`: the budget admits the named distinguishers, equality and the successor
+  relation of two window versions' masks and the one-query point tests; at a use it is the composed reduction tests plus
   these, nothing more, and Lean does not tie it to efficiency; admitting every evaluation test made
   the premise statistical, exhaustive key search included); honest pole `enumeration_satisfies`,
-  teeth `constant_refuted` (equality) and `counter_refuted` (a public counter passes every equality
-  test and fails a point test), both against `namedBudget`.
+  teeth `constant_refuted` (equality), `counter_refuted` (a public counter passes every equality test
+  and fails a point test) and `shift_refuted` (a keyed shift has uniform marginals and fails the
+  successor test), all against `namedBudget`.
   Round 8 (answered with astra round 10): what is published is a `Serve` (a function of a version's
   context, mask and kept index: roots, deterministic openings; a randomized opening at each fixed
   coin assignment). `ViewThroughServe`: a reader's view is a function of the served items.

@@ -529,28 +529,39 @@ theorem idealFn_window {window : List Nat} (distinct : window.Nodup) (t : Fin (f
 /-- The test "the masks of versions `v` and `w` agree". -/
 def equalityTest (v w : Nat) (f : Nat → Fin (m + 1)) : Bool := f v == f w
 
+/-- The successor on masks, `x ↦ x + 1` mod `m + 1`. -/
+def succMask (x : Fin (m + 1)) : Fin (m + 1) := x + 1
+
+/-- The test "the mask of `w` is the successor of the mask of `v`": two queries,
+one efficient relation. -/
+def succTest (v w : Nat) (f : Nat → Fin (m + 1)) : Bool := f w == succMask m (f v)
+
 /-- The test "the mask of version `v` is `c`": one query, efficient. -/
 def pointTest (v : Nat) (c : Fin (m + 1)) (f : Nat → Fin (m + 1)) : Bool := f v == c
 
 /-- **The named distinguishers a meaningful budget admits**: equality of two
 distinct window versions' masks (a function repeating a mask fails against
-them) and the one-query point tests on the window (a function predictable at
-one version, such as a public counter, fails against them). The budget is
+them), the successor relation between two of them (a keyed shift, one disclosed
+mask revealing every other, fails against it) and the one-query point tests on
+the window (a function predictable at one version, such as a public counter,
+fails against them). The budget is
 meant as the efficiency class of the PRF assumption, and Lean does not tie it
 to efficiency: at a use it is the composed reduction tests plus these named
 distinguishers, nothing more. Admitting every evaluation test would admit
 exhaustive key search and make the premise statistical, which no short-key
 PRF meets. -/
 def BudgetAdmitsNamed (window : List Nat) (budgeted : ((Nat → Fin (m + 1)) → Bool) → Prop) : Prop :=
-  (∀ v ∈ window, ∀ w ∈ window, v ≠ w → budgeted (equalityTest m v w)) ∧
+  (∀ v ∈ window, ∀ w ∈ window, v ≠ w → budgeted (equalityTest m v w) ∧ budgeted (succTest m v w)) ∧
     ∀ v ∈ window, ∀ c, budgeted (pointTest m v c)
 
 /-- The budget of exactly the named distinguishers. -/
 def namedBudget (window : List Nat) (test : (Nat → Fin (m + 1)) → Bool) : Prop :=
-  (∃ v ∈ window, ∃ w ∈ window, v ≠ w ∧ test = equalityTest m v w) ∨ ∃ v ∈ window, ∃ c, test = pointTest m v c
+  (∃ v ∈ window, ∃ w ∈ window, v ≠ w ∧ (test = equalityTest m v w ∨ test = succTest m v w)) ∨
+    ∃ v ∈ window, ∃ c, test = pointTest m v c
 
 theorem namedBudget_admits (window : List Nat) : BudgetAdmitsNamed m window (namedBudget m window) :=
-  ⟨fun v hv w hw ne => Or.inl ⟨v, hv, w, hw, ne, rfl⟩, fun v hv c => Or.inr ⟨v, hv, c, rfl⟩⟩
+  ⟨fun v hv w hw ne => ⟨Or.inl ⟨v, hv, w, hw, ne, Or.inl rfl⟩, Or.inl ⟨v, hv, w, hw, ne, Or.inr rfl⟩⟩,
+    fun v hv c => Or.inr ⟨v, hv, c, rfl⟩⟩
 
 /-- The two halves of a joint tape: the key draw and the ideal function draw. -/
 abbrev split {keys window : Nat} (t : Fin (keys * window)) : Fin keys × Fin window := finProdFinEquiv.symm t
@@ -590,12 +601,13 @@ theorem enumeration_satisfies {den : Nat} (window : List Nat) (denominator : 0 <
 /-- All four functions on `{1, 2}` into `Fin 2`, as tape order gives them. -/
 abbrev window12 : List Nat := [1, 2]
 
-/-- **Teeth**: a constant custody function fails the game at gap `1/4`, against
-the budget of exactly the named distinguishers (by an equality test: gap 1/2). -/
+/-- **Teeth**: an equality test separates a constant custody function from the
+ideal at gap `1/2`, so the `1/4` bound fails, against the budget of exactly the
+named distinguishers. -/
 theorem constant_refuted :
     ¬ CustodyPrf 1 2 1 4 window12 (fun _ _ => 0) (namedBudget 1 window12) := by
   rintro ⟨_, game⟩
-  obtain ⟨_, _, bound, _⟩ := game (equalityTest 1 1 2) (Or.inl ⟨1, by simp, 2, by simp, by decide, rfl⟩)
+  obtain ⟨_, _, bound, _⟩ := game (equalityTest 1 1 2) (Or.inl ⟨1, by simp, 2, by simp, by decide, Or.inl rfl⟩)
   revert bound
   decide
 
@@ -603,12 +615,26 @@ theorem constant_refuted :
 def counter (keys : Nat) (_k : Fin keys) (v : Nat) : Fin (m + 1) := ⟨v % (m + 1), Nat.mod_lt _ (Nat.succ_pos _)⟩
 
 /-- **Teeth**: a public counter repeats no mask on `{1, 2}`, so it passes every
-equality test, and fails at gap `1/4` by the point test "version 1's mask is
-1" (gap `m/(m+1) = 1/2`). -/
+equality test; the point test "version 1's mask is 1" separates it from the
+ideal at gap `m/(m+1) = 1/2`, so the `1/4` bound fails. -/
 theorem counter_refuted :
     ¬ CustodyPrf 1 2 1 4 window12 (counter 1 2) (namedBudget 1 window12) := by
   rintro ⟨_, game⟩
   obtain ⟨_, _, bound, _⟩ := game (pointTest 1 1 1) (Or.inr ⟨1, by simp, 1, rfl⟩)
+  revert bound
+  decide
+
+/-- A keyed shift: the mask of version `v` is `k + v`, the key uniform. Every
+point marginal is uniform and no mask repeats, yet one disclosed mask reveals
+all the others. -/
+def shift (k : Fin (m + 1)) (v : Nat) : Fin (m + 1) := k + ⟨v % (m + 1), Nat.mod_lt _ (Nat.succ_pos _)⟩
+
+/-- **Teeth**: the successor test separates a keyed shift from the ideal at gap
+`1/2`, so the `1/4` bound fails. -/
+theorem shift_refuted :
+    ¬ CustodyPrf 1 2 1 4 window12 (shift 1) (namedBudget 1 window12) := by
+  rintro ⟨_, game⟩
+  obtain ⟨_, _, bound, _⟩ := game (succTest 1 1 2) (Or.inl ⟨1, by simp, 2, by simp, by decide, Or.inr rfl⟩)
   revert bound
   decide
 
@@ -1119,6 +1145,7 @@ theorem receiver_prf_hop_view {m keys num den : Nat} {Strategy Item View : Type}
 #assert_axioms rootServe_servesWithin
 #assert_axioms Custody.namedBudget_admits
 #assert_axioms Custody.counter_refuted
+#assert_axioms Custody.shift_refuted
 #assert_axioms roots_viewThroughServe
 #assert_axioms PublishesRun.atMostOneSuccessor
 #assert_axioms History.atMostOneSuccessor
