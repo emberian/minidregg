@@ -311,8 +311,20 @@ to `/ci/hpc`. Profiles: `/ci/hpc/fby` (run.sh, `--symfs`). The native Host build
      - (c) Validation and apply share one patch run.
      - (d) `Store.set` reads stop walking DFinsupp update history: a persistent map underneath, behind
        a `@[csimp]`, with no statement change (12%).
-   - **Measurements** of a fresh member's first read at two heights, restart, certify and `story new`
-     come from the explorer on eca98bde7-resvar2. The integrator asked them on 10-31.
+   - **Measured** (explorer, eca98bde7-resvar2 against be4ef7510, hbox at load 6-10; driver
+     `hbox:~/xp/m1.sh`, `~/xp/m2.sh`):
+     - **A fresh member's first signed read:** before, 20.7 s on the forge and about 2 s on hbox. After,
+       0.79 s at height 202 and 0.46 s at height 803. Flat.
+     - **Restart:** before, wall 9.6 s at height 190 and 26.0 s at 769. After, 5.1 s at 803. The first
+       read after restart went from 8.0-8.6 s at 190 and 23.4 s at 769 to 0.19-0.46 s at 803. Flat.
+     - **Certify at a 256 tail:** before, 16.9, 32.2 and 12.2 s. After, 0.8 s at 266, 6.5 s at about 515,
+       6.6 s at about 778, and 5.3 s after a quiet tail at about 1,100. eca98bde7 lacks consent option A
+       (62beac442, in a049aca6d), which caps a lagging provider at one checkpoint interval. Measure again
+       on the cut that carries it.
+     - **`story new --from tale`:** before, 19.9 s. After, 27.7-46.3 s at low height and 41 s at about
+       1,100, under load. Not improved. The coalescing (18 submits, not 22) is in, but each sequential
+       submit costs about 2 s on a loaded box. The fix is one proposal and one submit for the whole
+       template: a multi-step room-birth plan, which is a design item. `chat new` 4.8 s (was 3.0).
 3. Rows 3, 8, 16, 17, 19, 20. Measurements on the batch-2 candidate: a fresh member's first
    read, a fresh provider at two heights, restart, `story new`, and the first walk-family
    request after a restart. flatness-get waits on app-reds' resident `/var` fix.
