@@ -2,7 +2,7 @@
 
 Present-state table, rewritten whole at each batch. Lane `lane/explorer`. Subject: candidate
 be4ef7510 (hbox `/home/hbox/lanes/integ/candidates/be4ef751074ca28c7d306c2f2bcf61cda03893c8`),
-explored as test members only. Batch 7, 2026-10-30.
+explored as test members only. Batch 9, 2026-10-31.
 
 ## Worlds (all on hbox, all mine; torn down when the lane ends)
 
@@ -105,8 +105,27 @@ Worlds x1, x2, xw1, xweb and the e2e workers are down (x1's down listed one surv
 | G4 | fixed: receipts and `bend await` print one clock (run 57, await 58, answer 58, deliver 59, show 60). |
 | G6 | fixed: a form POST with the page's `attempt` token twice gives admit then a replay (one append); the same token with other text gives 409 `Already submitted`. A POST without a token still appends a new proposal (expected). |
 | H5 | fixed: `reports -n 3` as the filer shows the report with the build sha. |
-| E7 | NOT fixed: `world-up` plus `apps-e2e.sh` on 35737eac4 still fails the first install: `no-grant ... (phase prepare)` at the application birth (2/12 rows; evidence `/ci/xe2e4`, `/ci/x4log/a1.out` on hbox). Owner: app-reds / the volume-helper lane. |
+| E7 (superseded below) | was: `world-up` plus `apps-e2e.sh` on 35737eac4 still fails the first install: `no-grant ... (phase prepare)` at the application birth (2/12 rows; evidence `/ci/xe2e4`, `/ci/x4log/a1.out` on hbox). Owner: app-reds / the volume-helper lane. |
 | not re-tested | member `doc show welcome` (needs the door's tick; scratch world has no door). |
+
+
+### E7 re-run on 35737eac4 with scripts and deploy from staging beedc5de4 (hbox world-up + apps-e2e)
+
+| step | result |
+|---|---|
+| no-grant at the application birth | FIXED: the first install's tool reservation and birth are admitted (`birth admitted`), member spend 10,360 of 20,000; the delegation-cost fix works. |
+| install with an unseeded cache | `undecided: package ... is not in the quarantine yet` (no market fetcher runs in the harness; harness input, not product). |
+| install of the pinned EtherCalc from the shared cache | `packageIdMismatch`: the cached `ethercalc-<sha>.spk` hashes to 93bd2c29..., not the index's package id. Harness input. |
+| install of Simple Todos after seeding the cache with the real download (`mini-market-fetch fetch`, sha256 prefix equals packageId) | RED: `appIdMismatch: Simple Todos 5830d701... was refused by this box's ingest`; verdict file `/ci/xe2e7/verdicts/5830d70137cdae158118884da8790870.json` = `{reason: appIdMismatch, signedAppId: "", verdict: refused}`. An empty signedAppId means the ingest never produced a signed app id (it did not fail on a mismatch); likely the ingest unit or signature check failing on this box. Not diagnosed further. Owner: app-reds (spk-ingest / the worker's ingest stage). |
+| second app (Hacker Slides) in the same run | birth refused `resourceBatch` after the first install had spent 18,730 of 20,000: the harness's 20,000 funding covers one install. |
+
+
+### Hotpatch spk-host from 5f5e99324 and a load pass (35737eac4)
+
+| item | result |
+|---|---|
+| spk-host from 5f5e99324 | built on hbox in 1 min 8 s (`/ci/x4log/tgt/release/spk-host`), but two overlay attempts did not install it (read-only hard-linked copy; a failed script edit), so no live verdict; the integrator then superseded the commit (c730fd3ea) and asked to wait for the next cut. Worlds torn down by PID file. Harness lesson: overlaying one binary into a copy of `$C/bin` needs `rm -f` first, because the files are hard links with mode 555. |
+| load: 4 members x 25 `say` + 10 doc append/submit at once | 100 of 100 says and 10 of 10 doc appends admitted, wall 33.5 s (3.3 writes/s), `say` mean 1.27 s and max 3.0 s, doc submit mean 0.91 s, no refusals; the room tail and `doc show` are complete and in order. |
 
 ## Exercised and held
 
