@@ -2,7 +2,7 @@
 
 Present-state table, rewritten whole at each batch. Lane `lane/explorer`. Subject: candidate
 be4ef7510 (hbox `/home/hbox/lanes/integ/candidates/be4ef751074ca28c7d306c2f2bcf61cda03893c8`),
-explored as test members only. Batch 6, 2026-10-30.
+explored as test members only. Batch 7, 2026-10-30.
 
 ## Worlds (all on hbox, all mine; torn down when the lane ends)
 
@@ -94,6 +94,19 @@ Worlds x1, x2, xw1, xweb and the e2e workers are down (x1's down listed one surv
 | H4 | `apps search` lists every app as `[unverified; not swept]` with `typed tools: declaration-unavailable`, and `apps list` fails `appsWorkerUnavailable` until the worker is up (known). Fine for the known red, but the unswept label on all 22 adopted packages will read as broken to a stranger. | app-reds |
 | H5 | `reports -n 2` as the sender of a `feedback` report: `this session founded no feedback-NAME room`. The member who files feedback gets no way to read it back. | shell |
 | Public | / 2.4 s, /doc/welcome 1.7 s, /apps 1.3 s, /doc 0.7 s, /receipts 0.7 s, /tour /verb /story /healthz 0.5-0.7 s, /join 503 (held). | n/a |
+
+
+## Candidate 35737eac4 re-explored (hbox x4, funding 1,225,000, default purse)
+
+| id | result |
+|---|---|
+| G1 | fixed: the second publish says `this package is already published: artifact ... package ...; bend run it`. |
+| G3 | holds: a tally (run, answer, deliver) spends 152,223; after the deadline one more `bend deliver` ends it (phase none) and refunds 60,885, net about 91,338. Until that last deliver the purse stays locked (a user who never delivers keeps 60,885 tied up; the program does not end itself). 10 completed tallies fit the grant only if every one is finished that way (8 un-finished ones exhaust it). |
+| G4 | fixed: receipts and `bend await` print one clock (run 57, await 58, answer 58, deliver 59, show 60). |
+| G6 | fixed: a form POST with the page's `attempt` token twice gives admit then a replay (one append); the same token with other text gives 409 `Already submitted`. A POST without a token still appends a new proposal (expected). |
+| H5 | fixed: `reports -n 3` as the filer shows the report with the build sha. |
+| E7 | NOT fixed: `world-up` plus `apps-e2e.sh` on 35737eac4 still fails the first install: `no-grant ... (phase prepare)` at the application birth (2/12 rows; evidence `/ci/xe2e4`, `/ci/x4log/a1.out` on hbox). Owner: app-reds / the volume-helper lane. |
+| not re-tested | member `doc show welcome` (needs the door's tick; scratch world has no door). |
 
 ## Exercised and held
 
