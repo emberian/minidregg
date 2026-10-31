@@ -21,10 +21,12 @@ box; seam 1 (codec tags) landed; the hot-swap command; keep making the Lean buil
 - Pool /home/hbox/pool (t1..t9, packages-3a3779933df4 read-only, LAKE_ARTIFACT_CACHE=false). Lane recipe:
   `t=$(lane-tree acquire SEAT origin/BRANCH); cd $t; scripts/pipeline/lane-check FILE...`; native: `lane-tree native
   SEAT`, then `scripts/pipeline/native-loop SEAT BASE LABEL`; `lane-tree release SEAT` when done.
-- Disk: / is 455 GB with about 41 GB free (10-31 17:10). The sweep (main's scripts/pipeline/sweep) ran first: 1.5 GB.
-  integ-build stops below 25 GB. The rest is ember's to choose: integ 37 GB (candidates 16 GB, most listed in
-  integ/keep), /ci 40 GB of old gate worlds, lane clones perf-apps 7.8, iter-speed 7.4, infra 6.1, app-reds-cont 5.0 GB.
-  Keep worlds and builds sized to fit; no new data on /tank.
+- Disk: / is 455 GB with 78 GB free (10-31 17:55). Removed at the root's word (log integ/ci-rm.log): 52 old builder
+  and integrator gate worlds in /ci (22.4 GB; kept the current round 9dc9c1, every dir a running process names, and
+  apps-hermes' qualify worlds j-ar*/sb*/wb*/hbA), and the retired clones perf-apps (8.1 GB) and iter-speed (7.7 GB;
+  its pushed branch kept, the old toolchain diff in integ/saved-iter-speed-src.diff). app-reds-cont stays (apps-hermes
+  runs ar-cycle.sh from it). Still unowned in /ci: dp-*1029 (10-29, demo-path worlds, some still running). integ-build
+  stops below 25 GB; no new data on /tank.
 
 ### dregg-build2: obend's now; minidregg does not use it
 - Stopped 10-31 evening: the dry builder's round 997eba977 (pgid from builder.pid, mid-gate), its gate worlds (19, by
@@ -38,6 +40,12 @@ box; seam 1 (codec tags) landed; the hot-swap command; keep making the Lean buil
   is set by the box's builder-run.sh (hbox: /home/hbox/lanes/integ).
 - eb4b7e7b2: a round no longer waits for its umbrellas. integ-build frees src once the umbrella tree has synced, the
   next round starts, and REDS.md carries `umbrella-tree running` (a red) until the umbrellas end and it is rewritten.
+- 3ef7de9ac: umbrella-tree starts with `9>&-`. It had inherited build.lock, so round 960da1d8 stopped and published six
+  "did not run" reds. A held lock (integ-build rc 75) now defers the round, with nothing published. REDS.md has an owner
+  column, and a composed red is one row per failed phase. The gate's edge is dregg-infra 3ddd90f (the per-world
+  certifier for composed residents; integ/dregg-infra-3ddd90f). The builder now running on hbox (pid 1557758) predates
+  3ef7de9ac: integ-build comes from the tip, but the builder's own defer and owner changes need a restart, and
+  builder.pid named its launch wrapper, so it is left running (builder-run.sh now writes its own pid).
 - green is 83e926874 (batch 4) until a live round passes. The first live hbox round rewrites REDS.md whole.
 
 ### Seam 1 (codec tags): on main (f2002e589)
