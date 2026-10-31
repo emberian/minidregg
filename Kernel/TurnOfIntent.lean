@@ -1709,6 +1709,87 @@ theorem retires_written {B : Bridge R D} {H : History R TransactionId StableEven
   obtain ⟨k, s, md⟩ := mem_retiresOf.mp m
   rcases md with md | ⟨_, md⟩ <;> exact deltas_written md
 
+/-! ### `ofCells` as compiled: each write's post decoded once
+
+`ofCells` reads a write's delta in `writeRefusal`, then in `createsOf` and `legsOf` (each twice,
+once more through `chargeOf`) and in `retiresOf`: six decodes of the same post bytes per write
+on every derivation (the Host derives one per record on submit, light refresh and session
+refresh). `ofCellsFast` computes each write's delta once and reads every field off that list. -/
+
+/-- `writeRefusal` on an already computed delta. -/
+def refusalOfDelta (C : Codec R) (retired : CellId → Bool) (w : DataWrite)
+    (δ : Except Refusal (Delta R)) :
+    Option Refusal :=
+  if retired w.cellId.value then some (.retiredCell w.cellId.value) else
+  match δ with
+  | .error e => some e
+  | .ok δ => if δ.patchOk C then none else some (.notAPatch w.cellId.value)
+
+/-- The turn record over computed deltas: `turnOf` with each list built once. -/
+def turnOfDeltas (B : Bridge R D) (H : History R TransactionId StableEvent D)
+    (ds : List (CellId × Delta R)) (intent : DataIntent rootBytes) : DTurn R D :=
+  let creates := ds.filterMap fun d => d.2.create? d.1
+  let legs := ds.filterMap fun d => d.2.leg? B.codec d.1
+  { txId := intent.transactionId
+    creates := creates
+    legs := legs
+    retires := ds.filterMap fun d => d.2.retire? d.1
+    event := intent.event
+    nullifiers := intent.nullifiers.map B.key
+    charge := chargeOf H creates legs intent.event intent.exactCharge
+    subject := intent.subject
+    pins := pinsOf B intent
+    credit := intent.credit }
+
+theorem turnOf_eq_deltas (B : Bridge R D) (H : History R TransactionId StableEvent D)
+    (cells : CellId → Option (Cell R)) (intent : DataIntent rootBytes) :
+    turnOf B H cells intent = turnOfDeltas B H (deltas B.codec cells intent.writes) intent := rfl
+
+def ofCellsFast (B : Bridge R D) (H : History R TransactionId StableEvent D)
+    (cells : CellId → Option (Cell R)) (retired : CellId → Bool) (intent : DataIntent rootBytes) :
+    Except Refusal (DTurn R D) :=
+  let computed := intent.writes.map fun w => (w, deltaOf B.codec cells w)
+  match computed.findSome? (fun p => refusalOfDelta B.codec retired p.1 p.2) with
+  | some e => .error e
+  | none =>
+      match (guardIds intent.writes intent.readGuards).find? retired with
+      | some c => .error (.retiredCell c)
+      | none =>
+          let t := turnOfDeltas B H (computed.filterMap fun p =>
+            match p.2 with
+            | .ok δ => some (p.1.cellId.value, δ)
+            | .error _ => none) intent
+          if ¬ (writeIds intent.writes).Nodup then .error .duplicateWrite
+          else if ¬ (t.creates.map Prod.fst).Nodup then .error .duplicateWrite
+          else if ¬ t.retires.Nodup then .error .duplicateWrite
+          else if ¬ (t.legs.map Leg.cell).Nodup then .error .duplicateLeg
+          else if t.legs.isEmpty ∧ t.creates.isEmpty ∧ t.pins.isEmpty then .error .noEffect
+          else if storageOf H t.creates t.legs t.event > intent.exactCharge .storageBytes then
+            .error .storageAboveCharge
+          else .ok t
+
+omit [DecidableEq D] in
+theorem ofCells_eq_fast_apply (B : Bridge R D) (H : History R TransactionId StableEvent D)
+    (cells : CellId → Option (Cell R)) (retired : CellId → Bool) (intent : DataIntent rootBytes) :
+    ofCells B H cells retired intent = ofCellsFast B H cells retired intent := by
+  have refusals : (intent.writes.map fun w => (w, deltaOf B.codec cells w)).findSome?
+      (fun p => refusalOfDelta B.codec retired p.1 p.2) =
+      intent.writes.findSome? (writeRefusal B.codec cells retired) := by
+    rw [List.findSome?_map]
+    rfl
+  have computed : ((intent.writes.map fun w => (w, deltaOf B.codec cells w)).filterMap fun p =>
+      match p.2 with
+      | .ok δ => some (p.1.cellId.value, δ)
+      | .error _ => none) = deltas B.codec cells intent.writes := by
+    rw [List.filterMap_map]
+    rfl
+  unfold ofCells ofCellsFast
+  simp only [refusals, computed, ← turnOf_eq_deltas]
+
+@[csimp] theorem ofCells_eq_fast : @ofCells = @ofCellsFast := by
+  funext
+  exact ofCells_eq_fast_apply _ _ _ _ _
+
 end Derive
 
 /-! ## Axiom pins -/
