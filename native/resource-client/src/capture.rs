@@ -111,16 +111,31 @@ fn ended(args: impl FnOnce() -> crate::Result<crate::Args>, sink: Option<(File, 
         let _ = crate::take_host_decision();
         let _ = crate::take_line_refusal();
         let outer = crate::swap_exit_status(0);
-        let parsed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| args().and_then(crate::run)))
-            .unwrap_or_else(|_| Err("the client panicked; see the message above".into()));
+        // A closed standard output ends this command (status 141, nothing more printed), never
+        // the process serving it (`streams`).
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| args().and_then(crate::run)));
+        let closed = matches!(&caught, Err(payload) if crate::streams::is_closed(&**payload));
+        let parsed = caught.unwrap_or_else(|_| Err("the client panicked; see the message above".into()));
         let status = crate::swap_exit_status(outer);
         let _ = crate::take_line_refusal();
+        if closed {
+            let _ = crate::take_command_ending();
+            let _ = crate::take_host_decision();
+            return crate::MainEnding { code: crate::streams::CLOSED, stdout: String::new(), stderr: String::new() };
+        }
         crate::main_ending(parsed, status)
     })?;
     // `main` prints its ending after the command returned; so does this.
     if named {
-        out.write_all(ending.stdout.as_bytes())?;
-        err.write_all(ending.stderr.as_bytes())?;
+        let broken = |error: &std::io::Error| error.kind() == std::io::ErrorKind::BrokenPipe;
+        match out.write_all(ending.stdout.as_bytes()) {
+            Err(error) if broken(&error) => return Ok((crate::streams::CLOSED, Vec::new(), Vec::new())),
+            other => other?,
+        }
+        match err.write_all(ending.stderr.as_bytes()) {
+            Err(error) if broken(&error) => {}
+            other => other?,
+        }
         return Ok((ending.code, Vec::new(), Vec::new()));
     }
     let (mut stdout, mut stderr) = (contents(out), contents(err));
@@ -245,6 +260,29 @@ pub(crate) fn serve() -> crate::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A resident (`line-resident`) runs a member's line with the member's descriptors as its
+    /// streams. A reader that left ends that line with 141, and the resident keeps serving.
+    #[test]
+    fn a_closed_named_stdout_ends_the_command_not_the_process() {
+        let mut ends = [0i32; 2];
+        assert_eq!(unsafe { libc::pipe(ends.as_mut_ptr()) }, 0);
+        let (read, write) = unsafe { (OwnedFd::from_raw_fd(ends[0]), File::from_raw_fd(ends[1])) };
+        drop(read);
+        let raw = vec![OsString::from("--help")];
+        let (code, _, _) = argv(raw, Some((write, anonymous().unwrap()))).unwrap();
+        assert_eq!(code, crate::streams::CLOSED);
+        // Printed output (not the ending) on a closed stdout unwinds to the same end.
+        let mut ends = [0i32; 2];
+        assert_eq!(unsafe { libc::pipe(ends.as_mut_ptr()) }, 0);
+        let (read, write) = unsafe { (OwnedFd::from_raw_fd(ends[0]), File::from_raw_fd(ends[1])) };
+        drop(read);
+        let (_, write, _) = streams_into(write, anonymous().unwrap(), || {
+            let caught = std::panic::catch_unwind(|| println!("to nobody"));
+            assert!(matches!(&caught, Err(payload) if crate::streams::is_closed(&**payload)));
+        }).unwrap();
+        drop(write);
+    }
 
     #[test]
     fn captured_streams_never_reach_the_callers_descriptors_and_are_restored() {

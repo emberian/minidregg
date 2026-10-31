@@ -11,6 +11,9 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+// First: its print!/println!/eprint!/eprintln! shadow std's in every module below.
+#[macro_use]
+mod streams;
 #[cfg(unix)]
 mod app_interface;
 mod attempt_state;
@@ -3133,7 +3136,7 @@ fn run(mut args: Args) -> Result<()> {
             let config = path(args.required("config")?);
             args.finish()?;
             let output = process(&host, &config, &[OsStr::new("audit")])?;
-            io::stdout()
+            streams::out()
                 .write_all(&output.stdout)
                 .map_err(|e| format!("cannot print host output: {e}"))
         }
@@ -3143,7 +3146,7 @@ fn run(mut args: Args) -> Result<()> {
             let config = path(args.required("config")?);
             args.finish()?;
             let output = process(&host, &config, &[command.as_os_str()])?;
-            io::stdout()
+            streams::out()
                 .write_all(&output.stdout)
                 .map_err(|e| format!("cannot print host output: {e}"))
         }
@@ -3925,6 +3928,29 @@ fn run(mut args: Args) -> Result<()> {
 fn main() -> ExitCode {
     // Before any thread or child: no child inherits the key-cache passphrase.
     workspace::private::adopt_keycache_passphrase();
+    // A reader that closed standard output ends the command quietly with 141, never a panic
+    // (`streams`).
+    let parsed = match std::panic::catch_unwind(main_parsed) {
+        Ok(parsed) => parsed,
+        Err(payload) if streams::is_closed(&*payload) => {
+            read_scratch::clear();
+            return ExitCode::from(streams::CLOSED);
+        }
+        Err(payload) => std::panic::resume_unwind(payload),
+    };
+    let ending = main_ending(parsed, EXIT_STATUS.load(Ordering::Relaxed));
+    read_scratch::clear();
+    if let Err(payload) = std::panic::catch_unwind(|| print!("{}", ending.stdout)) {
+        if streams::is_closed(&*payload) {
+            return ExitCode::from(streams::CLOSED);
+        }
+        std::panic::resume_unwind(payload);
+    }
+    eprint!("{}", ending.stderr);
+    ExitCode::from(ending.code)
+}
+
+fn main_parsed() -> Result<()> {
     #[cfg(unix)]
     let parsed = match env::args_os().nth(1) {
         Some(command) if command == OsStr::new("fleet-sign") => {
@@ -3940,11 +3966,7 @@ fn main() -> ExitCode {
     };
     #[cfg(not(unix))]
     let parsed = Args::parse().and_then(run);
-    let ending = main_ending(parsed, EXIT_STATUS.load(Ordering::Relaxed));
-    read_scratch::clear();
-    print!("{}", ending.stdout);
-    eprint!("{}", ending.stderr);
-    ExitCode::from(ending.code)
+    parsed
 }
 
 /// How a command ends once it has run: the exit code and what is printed

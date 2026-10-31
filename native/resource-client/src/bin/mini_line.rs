@@ -13,6 +13,11 @@
 //! two sessions that would run differently never share one. Anything that keeps the resident from
 //! being used (no slot directory, a socket path too long, a resident that does not come up) execs
 //! `MINI ARG...` as before.
+// A closed standard error drops the message instead of panicking (`streams`, shared with `mini`).
+#[allow(dead_code)]
+#[macro_use]
+#[path = "../streams.rs"]
+mod streams;
 use std::ffi::{OsStr, OsString};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};

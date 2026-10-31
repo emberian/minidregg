@@ -2520,7 +2520,7 @@ fn doc_show(root: &Path, workspace: &Value, name: &str, at: Option<&str>, format
         let challenge = bounded_json(&read.attempt.join("challenge.json")).unwrap_or(Value::Null);
         retain_seen_value(root, name, &seen_read_value(name, &read, &challenge))?;
     }
-    let mut out = std::io::stdout().lock();
+    let mut out = crate::streams::out();
     let bytes = match format {
         ShowFormat::Text => rendered.text().into_bytes(),
         ShowFormat::Raw => rendered.raw(),
@@ -6036,7 +6036,7 @@ fn doc_read(root: &Path, workspace: &Value, name: &str) -> Result<Value> {
 fn doc_pull(root: &Path, workspace: &Value, name: &str) -> Result<()> {
     let seen = doc_read(root, workspace, name)?;
     let text = pull_text(&seen)?;
-    let mut out = std::io::stdout().lock();
+    let mut out = crate::streams::out();
     out.write_all(&text)
         .and_then(|()| out.flush())
         .map_err(|error| format!("cannot write the pulled document: {error}"))
