@@ -2,7 +2,7 @@
 
 Present-state table, rewritten whole at each batch. Lane `lane/explorer`. Subject: candidate
 be4ef7510 (hbox `/home/hbox/lanes/integ/candidates/be4ef751074ca28c7d306c2f2bcf61cda03893c8`),
-explored as test members only. Batch 9, 2026-10-31.
+explored as test members only. Batch 10, 2026-10-31.
 
 ## Worlds (all on hbox, all mine; torn down when the lane ends)
 
@@ -126,6 +126,18 @@ Worlds x1, x2, xw1, xweb and the e2e workers are down (x1's down listed one surv
 |---|---|
 | spk-host from 5f5e99324 | built on hbox in 1 min 8 s (`/ci/x4log/tgt/release/spk-host`), but two overlay attempts did not install it (read-only hard-linked copy; a failed script edit), so no live verdict; the integrator then superseded the commit (c730fd3ea) and asked to wait for the next cut. Worlds torn down by PID file. Harness lesson: overlaying one binary into a copy of `$C/bin` needs `rm -f` first, because the files are hard links with mode 555. |
 | load: 4 members x 25 `say` + 10 doc append/submit at once | 100 of 100 says and 10 of 10 doc appends admitted, wall 33.5 s (3.3 writes/s), `say` mean 1.27 s and max 3.0 s, doc submit mean 0.91 s, no refusals; the room tail and `doc show` are complete and in order. |
+
+
+### CONSENT-STORE "after" numbers (eca98bde7-resvar2) and batch 3 candidate a4cb65af
+
+| measure | before (be4ef7510) | after (eca98bde7-resvar2; hbox load 6-10) |
+|---|---|---|
+| fresh member's first signed read | 20.7 s forge, ~2 s hbox | 0.79 s at height 202, 0.46 s at 803 |
+| restart wall / first read after | 9.6 s, 8.0-8.6 s at h190; 26.0 s, 23.4 s at h769 | 5.1 s, 0.19-0.46 s at h803 (flat in height) |
+| certify a 256 tail | 16.9 / 32.2 / 12.2 s | 0.8 s at 266, then 5.3-6.6 s to height 1100 |
+| `story new --from tale` | 19.9 s | 27.7 and 46.3 s at low height, 41 s at about 1100 (not improved; per-submit cost, hot-path row 12 still open) |
+
+Batch 3 (a4cb65af): `bend settle` works. After run, answer and deliver (spent 152,223), `bend settle` delivered the past-deadline tally (phase none, `total=7`) and refunded 60,885, net 91,338 per tally; a second `settle` and another member's `settle` say `0 delivered`. Apps (apps-e2e, world-up and harness from the candidate's own source.tar): the signed-identity fix works, so the install gets past ingest and create; NEW RED at START: `spk-host: grain refused: application has no route; grain route must bind at least one entrance` (evidence `/ci/xe2e10/install-0dp7...json`). Second install in the same run: birth refused `resourceBatch` because the harness funding of 20,000 covers one (`MEMBER_FUNDING=40000` is the knob). Hacker Slides' real download is refused upstream (`http-526`), so only Simple Todos could be seeded.
 
 ## Exercised and held
 
