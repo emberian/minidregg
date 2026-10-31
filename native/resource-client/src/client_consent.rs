@@ -45,6 +45,19 @@ fn codec_resident_enabled()->bool { !cfg!(test) && std::env::var("MINI_CODEC_RES
 /// A resident keeps its warm state and does not idle out (`mini_sdk::consent::serve_resident_kind`:
 /// it ends with its world, its child, or a superseded binding). `$variable` seconds, when set, add
 /// an idle exit for a box that wants one.
+/// The box's shared codec Host, when the session selects one: `MINI_CODEC_SOCKET` (absolute) and
+/// `MINI_CODEC_PEER_UID` (its listener's owner, 0 for a systemd-activated one), both or neither.
+fn codec_service()->Result<Option<(PathBuf,u32)>> {
+    match (std::env::var_os("MINI_CODEC_SOCKET"),std::env::var("MINI_CODEC_PEER_UID")) {
+        (None,Err(_))=>Ok(None),
+        (Some(socket),Ok(peer))=>{
+            let socket=PathBuf::from(socket);
+            if !socket.is_absolute(){return Err("MINI_CODEC_SOCKET must be absolute".into());}
+            Ok(Some((socket,peer.parse().map_err(|_|"MINI_CODEC_PEER_UID must be a decimal uid")?)))
+        }
+        _=>Err("the shared codec Host needs both MINI_CODEC_SOCKET and MINI_CODEC_PEER_UID".into()),
+    }
+}
 fn resident_idle(variable:&str)->Option<std::time::Duration> {
     std::env::var(variable).ok().and_then(|v|v.parse().ok()).filter(|n:&u64|*n>0).map(std::time::Duration::from_secs)
 }
@@ -335,7 +348,15 @@ fn local_frame(host:&Path,config:&Path,operation:u8,payload:&[u8])->Result<Vec<u
         .or_else(||std::env::var_os("MINI_CONSENT_CONFIG").map(PathBuf::from))
         .unwrap_or_else(||config.to_path_buf());
     let mut codec=CODEC.lock().map_err(|_|"local codec lock poisoned")?;
-    let answer=if codec_resident_enabled() {
+    let answer=if let Some((socket,peer))=codec_service()? {
+        // The box's shared codec Host (split tenancy): it must greet with this client's own pins,
+        // the image digest (the workspace's, `host_image_sha256`) and the settings bytes' digest.
+        let image:[u8;32]=mini_sdk::hex::decode_fixed(&crate::host_image_sha256(&executable)?).map_err(|_|"Host image digest is not 32 bytes")?;
+        codec.frame_with(&executable,&settings,operation,payload,&|executable,_settings,settings_bytes|{
+            let expected=mini_sdk::consent::codec_service_hello(&image,&settings_bytes);
+            mini_sdk::consent::connect_codec_service(&socket,peer,&expected,executable,settings_bytes)
+        })
+    } else if codec_resident_enabled() {
         codec.frame_with(&executable,&settings,operation,payload,&|executable,settings,settings_bytes|{
             let mini=std::env::current_exe().map_err(|e|format!("{}: {e}",ResidentKind::Codec.name()))?;
             let mut launch=Command::new(mini);

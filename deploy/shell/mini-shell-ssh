@@ -76,6 +76,15 @@ if [[ -S $home/consent/peer.sock ]]; then
   fi
   export MINI_CONSENT_SHA256 MINI_CONSENT_CONFIG_SHA256
 fi
+# The box's shared codec Host (split tenancy): /etc/mini/session-codec (root 0644, one absolute
+# socket path, `mini serve-codec`'s systemd listener in a directory of the sessions' group). Every
+# member's codec frames go there instead of to a codec Host of its own; the client refuses unless it
+# greets with this session's own Host image and settings digests.
+if [[ -r /etc/mini/session-codec ]]; then
+  read -r codec_socket </etc/mini/session-codec || true
+  [[ ${codec_socket-} == /* ]] || { echo 'mini-shell-ssh: /etc/mini/session-codec must name an absolute socket' >&2; exit 78; }
+  export MINI_CODEC_SOCKET=$codec_socket MINI_CODEC_PEER_UID=0
+fi
 # At most two calls per member at once; `mini shell --call-slots` holds one of two locks in the
 # member's home for the call's life and refuses the third by name (exit 75). The client reads the
 # candidate it runs from off its own path (`chat.rs` `running_candidate`).
