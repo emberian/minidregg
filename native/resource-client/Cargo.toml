@@ -10,6 +10,10 @@ publish = false
 name = "mini"
 path = "src/main.rs"
 
+[[bin]]
+name = "mini-line"
+path = "src/bin/mini_line.rs"
+
 [dependencies]
 libc = "=0.2.189"
 # Client-general custody primitives: durable writes, flock, secret-file loading, hex, decimals.

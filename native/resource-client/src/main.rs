@@ -23,6 +23,8 @@ mod trace;
 #[cfg(unix)]
 mod capture;
 #[cfg(unix)]
+mod line_resident;
+#[cfg(unix)]
 mod client_resident;
 #[cfg(unix)]
 mod key_rotation;
@@ -3921,6 +3923,9 @@ fn main() -> ExitCode {
         }
         Some(command) if command == OsStr::new("command-resident") && env::args_os().len() == 2 => {
             capture::serve()
+        }
+        Some(command) if command == OsStr::new("line-resident") => {
+            line_resident::main_args().and_then(|(listen, config)| line_resident::serve(listen, config))
         }
         _ => Args::parse().and_then(run),
     };
