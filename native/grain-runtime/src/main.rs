@@ -13966,6 +13966,9 @@ impl Runtime {
                     if value.get("isError").and_then(Value::as_bool) == Some(true)
                         && self.journal.application_api_attempt.is_some()
                     {
+                        // The attempt stays retained; this is the one account of why it ended undecided.
+                        eprintln!("grain-runtime: foreground application API call failed: {}",
+                            value["text"].as_str().unwrap_or("").chars().filter(|c| !c.is_control()).take(600).collect::<String>());
                         return Err(
                             "application API outcome remains retained for read-only inspection".into(),
                         );

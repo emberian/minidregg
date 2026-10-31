@@ -314,7 +314,8 @@ def main():
     if until not in ORDER:raise SystemExit('J14_APPS_UNTIL must be one of '+','.join(ORDER))
     j=Apps();phase='init'
     try:
-        for phase in ORDER[:ORDER.index(until)+1]:
+        # The qualify run makes no LLM turn: the Davros probe (an ungranted put, then put and get) is not part of it.
+        for phase in [p for p in ORDER[:ORDER.index(until)+1] if not (until=='qualify' and p=='probe')]:
             getattr(j,phase)()
             write(j.root/('context-after-'+phase+'.json'),j.c)
             print('phase done',phase,flush=True)
