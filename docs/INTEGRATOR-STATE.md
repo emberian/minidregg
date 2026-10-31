@@ -42,6 +42,12 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   doc page in one codec frame, client and codec from one candidate; 253d0bc26 read-scratch pruning; its own copy of the
   admitOwn fix, identical to dc61016cb). Measured (overlay acf55bf9d552 vs batch 7, 100 doc show x2, load 22-25):
   Host+Store CPU -9..14%, codec CPU -17..24%, wall 35.5/30.0 -> 28.5/24.0 ms. Exorcist keeps /ci/exo/w7, w8 (~560 MB each).
+  + exorcist 2344400ac (3822c09f2: the ssh forced command is bin/mini-line; deploy/shell/mini-shell-ssh deleted; pairs
+  with dregg-infra e29997d; touches 5 shell journeys, jchat, jpriv2, jpay-e4, jweb-frontend, jfeedback, row m4, discord
+  native-world, platform-provision/stage: batch 9's gate is their first run; on a red row check mini-line beside the
+  row's mini first. whoami 4.86 -> 2.46 ms, doc show 23.0 -> 18.9 ms).
+  + perf-apps 106b73251 (spk-host: one SPK verification per file per process, prepare 2.5 -> 0.013 s; Host pin per
+  inode, qualification 3.0 -> 1.4 s; create-to-page profile: op66 3.3-6.3 s largest, sent to hot-path).
   + perf-client 36612f028/6a088183f (Store open's represents decision linear via hash sets, @[csimp]
   representsCheck_eq_fast; first read after idle 20.8 s -> 3.9 s at height ~920; audit SOUND: unconditional funext csimp, hash sets over Nat).
   + hot-path 92828ff96/d7c55dfa0 (birth preparation takes Held directory/authority: callers with an Opened decode no
@@ -86,7 +92,11 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   owned resident with dead-resident detection) and prove it.
   Batch 8 dc61016cb gate15 j14 (12:03): H1b again, identical stderr (5/5). app-reds' candidate cause fix 58f0bad2b
   (lane/app-reds-codec: grain-runtime honours MINI_CODEC_RESIDENT=0) is being proven on overlay dc61016cb-codec
-  (separate /ci root) before merge; app-reds notes the failing 0099 did not start its own codec resident.
+  before merge; app-reds notes the failing 0099 did not start its own codec resident. The integrator runs it:
+  hp-codec.sh ($I/hp-codec.pid) builds grain-runtime from 58f0bad2b (includes 5ae0de223) in hp-wt, overlays dc61016cb ->
+  dc61016cb-codec, then gate15 j14 -hp1 KEEP_WORLD after batch 8's gate ($I/gate-dc61-codec.pid); hp-h1b.sh stopped by its
+  PID file (superseded). Theory holds only if the final say succeeds AND the journal shows no not-submitted/resubmit.
+  app-reds' release build sits on /tank/lanes/app-reds/target-rel (asked to remove; no new data on /tank).
 - **D1, forge demo rebuild (batch 4) `members` step**: `sage` provision failed `local native codec: local process
   request failed: Broken pipe`; downstream apps-bootstrap/reenroll/grain world/seed/door red as consequences. Reruns:
   pending (infra repair after the batch 7 forge composed). Same class as H1b (a local transport drop): app-reds told.
@@ -99,8 +109,9 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 - **P1, mini panics on a closed stdout** (explorer, world-up once `mode=closed … has no mini shell`; 0/40 reruns):
   `mini --help | grep -q` under pipefail; mini exit 101. Owners: perf-client a778bbda6509944a5 (quiet exit on EPIPE,
   whole client family; owed), infra (FIXED dregg-infra fbb7648: render-authorized-keys.sh and ship.sh read usage into a
-  variable; syntax-checked only). Move gate15's EDGE_REV default to fbb7648 after batch 8's gate and dc61016cb-h1b -hp1
-  exit (never mid-gate): extract `git -C /Users/ember/dev/dregg-infra archive fbb7648 edge` to $I/dregg-infra-fbb7648.
+  variable; syntax-checked only). Move gate15's EDGE_REV default to e29997d (contains fbb7648, and installs the
+  candidate's mini-line wrapper; extracted at $I/dregg-infra-e29997d) after batch 8's gate and dc61016cb-codec -hp1 exit
+  (never mid-gate), before batch 9 gates.
 - **H2, attempt-index ENOENT** (batch 7 base): stage j14 worker, `controller-run grain-runtime create` rc=1, ENOENT on
   owner-workspace/attempt-index/by-intent/. Never reached the probe. Distinct from H1. Fix b940b3f50; -hp1 decides.
 - **W1, metered workroom not ready** (batch 7 base -c2 and -hp1): stage composed-inputs, `composed-inputs: the metered
@@ -120,6 +131,8 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 
 ## Reports sent (do not resend)
 
+- 10-31 12:25: app-reds: integrator runs the codec overlay, criterion, /tank note. perf-apps 106b73251 merged; op66 to
+  hot-path. Exorcist a97dba51f72535cb9: 2344400ac merged (23cf6bdd3).
 - 10-31 12:15: app-reds: codec experiment ack, batch 8 j14 = H1b, c-acc7cf-hp2 down.
 - 10-31 12:35: C1 narrowing to hot-path.
 - 10-31 12:25: C1 to hot-path; P1 to perf-client and infra; ack to explorer (merge e793bd93e with batch 9).
@@ -154,7 +167,7 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 | iteration speed | a6c58cb72b0764dbb | seam 1 (codec tags / Store epoch, lands before or with FORMAT), lane pool /home/hbox/pool, lane-tree, hot-swap overlay tool |
 | explorer | a3e5d6dbcd68e616c | multi-member exploration of each READY candidate; docs/EXPLORER-FINDINGS.md on lane/explorer |
 | infra | aa72653a8ce442178 | forge demo container, forge composed (judges residents/restart), dregg-infra (ship.sh, world-down finding) |
-| exorcist | a76808829fc8e4836 (a6ad40ce192354deb, a31f4ba5028d24a92 retired) | no fsync anywhere (lane/exorcism); filtered set `nextest -E 'test(durable) \| test(anchor) \| test(signing_wire) \| test(attempt_state) \| test(receipt_continuity)'` |
+| exorcist | a97dba51f72535cb9 (a76808829fc8e4836, a6ad40ce192354deb, a31f4ba5028d24a92 retired) | no fsync anywhere (lane/exorcism); filtered set `nextest -E 'test(durable) \| test(anchor) \| test(signing_wire) \| test(attempt_state) \| test(receipt_continuity)'` |
 | perf-apps | a25df305cfd551d8b | apps install, grain HTTP path, typed-tool path (perf) |
 | perf-client | a778bbda6509944a5 (a8d456c6e773efbb8 retired) | client, consent provider per-record cost, web page loads, idle cold start (perf) |
 | retained-mode | a9b54e85e4a194b91 (a13f0c9ab4513b2d7 retired) | incremental-computation architecture: a Lean incremental node with one generic "maintained = recomputed" theorem, the Host's derived structures as maintained nodes persisted in checkpoints, emission from Effects/, a lint for whole-state functions on per-request paths, one hot path migrated end to end |
