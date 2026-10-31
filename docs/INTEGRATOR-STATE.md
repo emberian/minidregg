@@ -37,6 +37,7 @@ gated candidates and names candidates to infra and the explorer.
   authority leg at the held authState; attempt index; audit sound, frame 233 now means "re-check owed"). Earlier contents: resident final writeError c88b88755, demo-reds 58c17b1de, perf-client f95edc7bf +
   b34173dad (candidate ssh wrapper) + 394039fb1 (one shared codec Host per box under split tenancy), apps-e2e 78a20cb56,
   perf-apps b2 05c2b208b, hot-path a55855f18, perf-client 5415aecf7, iter-speed Mathlib import trim ee7a25ca7 (Host.Main 3,930 -> 2,895 modules; Pratt certificate for mersenne127P_prime; audit sound, pins only shrank), app-reds c0a49c8d7 (an argument object keyed `path` is an argument: Davros qualify's declaration-invalid), iter-speed seat weights 0f67c94b7, perf-apps docs a7511c500; app-reds ecf4b917d merged as superseded by staging's 6cae27559 (staging ddc2e8863).
+- **Staging 3b7acd823 (batch 8 so far)**: perf-client b6 (frame 233 = re-check owed in the protocol registry; per-deployment ID index, settings and workspace read once per file identity; `doc new` statx 1,063 -> 505).
 - **FORMAT batch (later, one genesis, after iter-speed's seam 1)**: hot-path row 11 + Book entries migration +
   private-cells FORMAT (a) (eventHistory, authority to the trie root, mask []) + KeptCell Aux cache + fixture re-record.
 - Explorer on batch 5 vs 4: fsyncs 0; 128-ref credit 6.9 s -> 0.35 s; idle catch-up 61 s -> 0.36 s; first read after
