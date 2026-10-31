@@ -11,7 +11,7 @@
 set -u
 umask 022   # install-user-world refuses a group-writable controller-world.py (mode & 0o7022)
 I=${BUILDER_ROOT:-/home/hbox/lanes/integ}; SHA=${1:?}; C=$I/candidates/$SHA; S8=${SHA:0:8}; G=$I/gate-$S8${SUF:-}; LOG=$I/COMMANDS.log
-EDGE=${EDGE:-$I/dregg-infra-${EDGE_REV:-e29997d}/edge/mini}; R=${GATE_RUNS:-/ci}; LOCK=${WORLD_UP_LOCK:-/tank/lanes/world-up.lock}
+EDGE=${EDGE:-$I/dregg-infra-${EDGE_REV:-3ddd90f}/edge/mini}; R=${GATE_RUNS:-/ci}; LOCK=${WORLD_UP_LOCK:-/tank/lanes/world-up.lock}
 export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)} DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}
 export PATH=$HOME/.elan/bin:$HOME/.cargo/bin:/usr/local/bin:$PATH
 export PLAYWRIGHT_DIR=${PLAYWRIGHT_DIR:-$I/pw/node_modules}

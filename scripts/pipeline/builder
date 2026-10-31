@@ -47,6 +47,8 @@ round() {
   local build=$ST/integ-build; git -C "$REPO" show "$sha:scripts/pipeline/integ-build" > "$build" && chmod +x "$build"
   ( cd "$I" && BUILDER_ROOT=$I "$build" "$sha" > "$ST/build-$s8.out" 2>&1 ) & local bpid=$!; echo $bpid > "$ST/build.pid"
   while kill -0 $bpid 2>/dev/null && [ ! -f "$I/candidates/$sha/READY" ]; do sleep 30; done
+  # build.lock held (another build in src): not a round; the tip is tried again, nothing is published
+  if ! kill -0 $bpid 2>/dev/null; then wait $bpid; [ $? = 75 ] && { say "round ${sha:0:12} deferred: build.lock held"; return 75; }; fi
   # 2. the gate, beside the umbrellas
   local gpid=""
   # the gate and sweep run from a copy taken now: integ-build may check out the next tip in src while they run
@@ -74,6 +76,20 @@ round() {
   if kill -0 $bpid 2>/dev/null; then printf '%s %s %s %s\n' "$sha" "$bpid" "$G" "$rerun" > "$ST/pending"; fi
   say "round ${sha:0:12} done $(( $(date +%s) - t0 )) s: $(head -c 200 "$ST/summary-$s8.txt")"
 }
+
+red_owner() {  # STAGE: the seat a red goes to (board/seats/*.md); build stages go to the suspects' owners below
+  case $1 in
+    gate:flatness-submit|gate:flatness-run|gate:flatness-propose) echo "host-execution, store-retained" ;;
+    gate:flatness-get|gate:flatness-read*) echo "read-path" ;;
+    gate:flatness*) echo "store-retained" ;;
+    gate:composed:store-restart|gate:composed:restart) echo "host-execution" ;;
+    gate:composed:residents) echo "member-side, infra" ;;
+    gate:composed:apps|gate:j14*) echo "apps-hermes" ;;
+    gate:composed:*|gate:composed) echo "infra, member-side" ;;
+    gate:enrol*|gate:*) echo "member-side" ;;
+    umbrella|umbrella-tree|rerecord|gate) echo "build-loop" ;;
+    *) echo "suspects' owners" ;;
+  esac; }
 
 reds() {  # SHA GATE_DIR RERUN_DIR: write board/REDS.md and move green
   local sha=$1 G=$2 R=$3 s8=${1:0:8} out=$ST/REDS-${1:0:8}.md prev=$ST/last-signatures.tsv sig=$ST/signatures-${1:0:8}.tsv
@@ -103,7 +119,15 @@ reds() {  # SHA GATE_DIR RERUN_DIR: write board/REDS.md and move green
   if [ -s "$G/gate.json" ]; then
     awk -F'\t' '$2 == "FAIL" { print $1 "\t" $3 }' "$G/TOUR.tsv" "$G/flatness.tsv" "$G/j14.tsv" 2>/dev/null |
       while IFS=$'\t' read -r row detail; do add "gate:$row" "$row FAIL" "${detail:0:240}"; done
-    [ "$(jq -r .composed.verdict "$G/gate.json")" = PASS ] || add gate:composed "composed $(jq -r .composed.verdict "$G/gate.json")" "$(jq -r .composed.detail "$G/gate.json" | cut -c1-300)"
+    # composed: one row per phase that did not pass (the detail is `phase=verdict: why; phase=...`)
+    [ "$(jq -r .composed.verdict "$G/gate.json")" = PASS ] || jq -r .composed.detail "$G/gate.json" | python3 -c '
+import re, sys
+d = sys.stdin.read().strip(); parts = re.split(r"; (?=[a-z][a-z0-9-]*=)", d) if "=" in d else [d]
+for p in parts:
+    k, _, v = p.partition("=")
+    if not _: print("composed\tfail\t" + p[:300]); continue
+    if not v.startswith("pass"): print(k + "\t" + v.split(":")[0] + "\t" + v[:300])' |
+      while IFS=$'\t' read -r ph v d; do add "gate:composed:$ph" "composed $ph $v" "$d"; done
   elif [ -f "$I/candidates/$sha/READY" ] && [ ! -x "$I/src/scripts/pipeline/gate" ]; then add gate "not run here" "the tree has no scripts/pipeline/gate: green does not move"
   elif [ -f "$I/candidates/$sha/READY" ]; then add gate "no verdict" "$G/gate.json missing"
   fi
@@ -115,11 +139,11 @@ reds() {  # SHA GATE_DIR RERUN_DIR: write board/REDS.md and move green
     echo "green: $glabel. Builder: $(hostname) \`$I\`, logs \`$ST\`, gate \`$G\`."
     echo
     if [ "$n" = 0 ]; then echo "No reds: \`green\` moves to \`${sha:0:12}\`."; else
-      echo "| stage | signature | reruns? | same place as last round? | detail |"
-      echo "|---|---|---|---|---|"
+      echo "| stage | signature | reruns? | same place as last round? | owner | detail |"
+      echo "|---|---|---|---|---|---|"
       while IFS=$'\t' read -r st s d; do
         local again="-" same=no
-        case "$st" in gate:*) local row=${st#gate:}
+        case "$st" in gate:*) local row=${st#gate:}; row=${row%%:*}
           if [ -n "$R" ] && [ -s "$R/gate.json" ]; then
             if awk -F'\t' -v r="$row" '$1 == r && $2 == "FAIL"' "$R/TOUR.tsv" "$R/flatness.tsv" "$R/j14.tsv" 2>/dev/null | grep -q . ||
                { [ "$row" = composed ] && [ "$(jq -r .composed.verdict "$R/gate.json")" != PASS ]; }; then again="yes, red again"
@@ -127,7 +151,7 @@ reds() {  # SHA GATE_DIR RERUN_DIR: write board/REDS.md and move green
           else again="not rerun"; fi ;;
         esac
         grep -qF "$st	$s" "$pv" 2>/dev/null && same=yes
-        printf '| %s | %s | %s | %s | %s |\n' "$st" "${s//|//}" "$again" "$same" "${d//|//}"
+        printf '| %s | %s | %s | %s | %s | %s |\n' "$st" "${s//|//}" "$again" "$same" "$(red_owner "$st")" "${d//|//}"
       done < "$sig"
       echo
       echo "Suspect commits since green (\`git log ${green:0:12}..${sha:0:12}\`), newest first; owners are the seats whose"
@@ -196,6 +220,7 @@ while :; do
   if [ -n "$last" ] && [ -z "$want" ] && [ -z "$(git -C "$REPO" diff --name-only "$last" "$tip" -- . ':!board')" ]; then
     [ $once = 1 ] && exit 0; sleep "${BUILDER_POLL_S:-300}"; continue
   fi
-  round "$tip"; last=$tip; echo "$tip" > "$ST/last-built"
+  round "$tip"; [ $? = 75 ] && { sleep 120; continue; }
+  last=$tip; echo "$tip" > "$ST/last-built"
   [ $once = 1 ] && exit 0
 done
