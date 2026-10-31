@@ -19,6 +19,18 @@ done
 mini=$1 host=$2 config=$3 socket=$4 workspace=$5 home=$6
 [[ -x $mini ]] || { echo 'mini client is not executable' >&2; exit 66; }
 umask 077
+# Single tenancy (every hosted session runs as one account against the box's one pinned config):
+# /etc/mini/session-residents (root 0644, one absolute path to a directory that account owns, 0700)
+# gives every session the same resident directory, so the box runs ONE consent provider and ONE
+# codec Host for all of them instead of one each (`mini_sdk::consent::serve_resident_kind`). Absent:
+# each session's residents live under its own HOME. Never set it under split tenancy: there each
+# member is its own account and its residents are its own.
+residents=
+[ ! -r /etc/mini/session-residents ] || residents=$(tr -d '[:space:]' </etc/mini/session-residents)
+if [[ -n $residents ]]; then
+  [[ $residents == /* ]] || { echo 'mini-shell-ssh: /etc/mini/session-residents must name an absolute directory' >&2; exit 78; }
+  export MINI_CONSENT_ANCHOR_DIR=$residents
+fi
 # At most two calls per member at once. The Store serves every member from one queue, so one
 # member's flood of reads or `can` dry runs would queue everyone's (infra's abuse-limits review;
 # the per-subject request rate belongs in the Host). Each call holds one of two flock slots in the
