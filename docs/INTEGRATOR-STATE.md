@@ -40,7 +40,7 @@ gated candidates and names candidates to infra and the explorer.
   authority leg at the held authState; attempt index; audit sound, frame 233 now means "re-check owed"). Earlier contents: resident final writeError c88b88755, demo-reds 58c17b1de, perf-client f95edc7bf +
   b34173dad (candidate ssh wrapper) + 394039fb1 (one shared codec Host per box under split tenancy), apps-e2e 78a20cb56,
   perf-apps b2 05c2b208b, hot-path a55855f18, perf-client 5415aecf7, iter-speed Mathlib import trim ee7a25ca7 (Host.Main 3,930 -> 2,895 modules; Pratt certificate for mersenne127P_prime; audit sound, pins only shrank), app-reds c0a49c8d7 (an argument object keyed `path` is an argument: Davros qualify's declaration-invalid), iter-speed seat weights 0f67c94b7, perf-apps docs a7511c500; app-reds ecf4b917d merged as superseded by staging's 6cae27559 (staging ddc2e8863).
-- **Staging 6b64e533e (batch 8 so far)**: iter-speed tower split 0eab28db7 (audit sound: 12 decls moved verbatim, pins only shrank), exorcist 47b7cb2e1 + c763e3ead (policy loads one encode per record; signed read loads the law graph once; audit sound; whole-tree build owed = batch 8), perf-client 783b460cb (MINI_TRACE consent/codec frames), perf-client b6 (frame 233 = re-check owed in the protocol registry; per-deployment ID index, settings and workspace read once per file identity; `doc new` statx 1,063 -> 505).
+- **Staging (batch 8 so far)**: iter-speed 7800d3199 (a lane rebuilds its native host in place; the RSS table accumulates in logs/), iter-speed tower split 0eab28db7 (audit sound: 12 decls moved verbatim, pins only shrank), exorcist 47b7cb2e1 + c763e3ead (policy loads one encode per record; signed read loads the law graph once; audit sound; whole-tree build owed = batch 8), perf-client 783b460cb (MINI_TRACE consent/codec frames), perf-client b6 (frame 233 = re-check owed in the protocol registry; per-deployment ID index, settings and workspace read once per file identity; `doc new` statx 1,063 -> 505).
 - **FORMAT batch (later, one genesis, after iter-speed's seam 1)**: hot-path row 11 + Book entries migration +
   private-cells FORMAT (a) (eventHistory, authority to the trie root, mask []) + KeptCell Aux cache + fixture re-record.
 - Explorer on batch 5 vs 4: fsyncs 0; 128-ref credit 6.9 s -> 0.35 s; idle catch-up 61 s -> 0.36 s; first read after
@@ -80,6 +80,9 @@ Every Lean-statement sha gets an audit round from a4d9a6f4cba4855ca before it ri
   change worked (lane-check of changed files plus one targeted measurement or row); full gates (gate13/15, forge composed,
   umbrellas) once per batch cut; cuts spaced out to accumulate perf work; hotpatched measurement worlds are the inner loop;
   freed hbox time goes to perf builds and measurements. Batch 4 stays the green fallback and rehearsal candidate.
+- **Retained mode** (root, 10-31): every lane brief that touches state carries the line "a derived value is maintained,
+  never recomputed; writing f(state) on a hot path means you owe its update rule." retained-mode a13f0c9ab4513b2d7 owns the
+  architecture.
 - **Import boundary**: Effects is the generator Kernel and Compiler consume; Effects sits below Kernel/Compiler, may import
   Theory and Lean core, never Kernel/Compiler/Host. Landed (b7bf3a8b2; table green, no cycle).
 - **Consent**: no validity proofs; we trust the storage device; providers resume from a sealed snapshot; anchors survive
