@@ -208,6 +208,39 @@ private def startBinding (domain : Digest) (app : Nat)
   | .stop, some _ => throw "launch STOP cannot select a create action"
   | _, _ => throw "launch BEGIN authoring supports INSTALL, START or STOP only"
 
+/-- The first conjunct of `ApplicationLifecycleBeginV3Ingress.Ingress.shape` that fails, in words. Message
+text only: the refusal itself is still `unsigned.shape`, so this reads state the refusal already read and decides
+nothing. It exists so an operator log says which of the world-dependent conjuncts (the app cell's phase, the three
+resource ids) or the package-dependent ones refused, instead of one sentence for all of them. -/
+private def shapeClause (unsigned : ApplicationLifecycleBeginV3Ingress.Ingress) : String :=
+  let source := unsigned.base.source
+  let descriptor := unsigned.descriptor
+  if !(source.operationId == unsigned.authorizationOperationId) then
+    "the source operation id is not the derived authorization id"
+  else if source.app = source.packageManifest then "the app resource equals its package manifest resource"
+  else if source.app = source.snapshotManifest then "the app resource equals its snapshot manifest resource"
+  else if source.packageManifest = source.snapshotManifest then
+    "the package and snapshot manifest resources are the same"
+  else if source.before.phase ≠ source.kind.requiredPhase then
+    s!"the app cell is in phase {source.before.phase} but this action needs phase {source.kind.requiredPhase}"
+  else if source.processGeneration ≠ source.before.generation + 1 then
+    "the process generation is not the app cell generation plus one"
+  else if source.before.generation < 0 || source.before.packageVersion < 0 || source.before.snapshotVersion < 0 then
+    "the app cell carries a negative generation or version"
+  else if source.imageIdentity.isEmpty || source.imageIdentity.length > 256 then
+    "the image identity is empty or over 256 bytes"
+  else if source.processIdentity.isEmpty || source.processIdentity.length > 256 then
+    "the process identity is empty or over 256 bytes"
+  else if !descriptor.valid then "the signed launch descriptor is not valid"
+  else if !(ApplicationLifecycleBeginV3Ingress.prospectiveManifest unsigned).valid then
+    "the package interfaces repeat an id or carry an invalid schema"
+  else if !(source.packageDigest == descriptor.root) then "the source package digest is not the descriptor root"
+  else if !(source.imageIdentity == descriptor.package.imageIdentity) then
+    "the source image identity differs from the descriptor's"
+  else if !(unsigned.volume == ApplicationLifecycleLaunchBinding.volumeId unsigned.base.domain source.app) then
+    "the volume is not the app's derived volume id"
+  else "the START binding does not match the app, volume and descriptor"
+
 private def prepareSelectedVerified (config : Config) {target : Durable}
     (verified : NativeHostReplay.Verified config target) (pin : Pin)
     (request : Request) (descriptor : ApplicationSpkLaunchDescriptor.Descriptor)
@@ -258,7 +291,7 @@ private def prepareSelectedVerified (config : Config) {target : Durable}
          config.deployment.domain pin.app
        start := start } : ApplicationLifecycleBeginV3Ingress.Ingress).withAuthorizationId
   unless unsigned.shape do
-    throw "launch BEGIN authorization, descriptor or action shape refused"
+    throw s!"launch BEGIN authorization, descriptor or action shape refused: {shapeClause unsigned}"
   unless ApplicationLifecycleBeginV3Admission.markersCurrent opened.ground unsigned do
     throw "launch BEGIN first-attempt or created marker refuses action"
   unless ApplicationLifecycleBeginV3Admission.installedExact
