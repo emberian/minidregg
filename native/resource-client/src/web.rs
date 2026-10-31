@@ -843,22 +843,19 @@ impl Site {
             Ok(reference) => reference,
             Err(page) => return page,
         };
-        let index_view = |view: &str| -> std::result::Result<Option<Vec<Value>>, Page> {
-            if at.is_some() {
-                return Ok(None);
+        // The link index's two views of this document: one signed read batch, not two reads.
+        let (links, backlinks) = if at.is_some() {
+            (None, None)
+        } else {
+            let views = ["links".to_owned(), "backlinks".to_owned()];
+            match workspace::signed_views_mixed(&self.root, &self.workspace, &[reference.clone(), reference.clone()], &views) {
+                Ok(reads) if reads.len() == 2 => {
+                    let rows = |read: &(Value, Value, PathBuf)| read.0["rows"].as_array().cloned().unwrap_or_default();
+                    (Some(rows(&reads[0])), Some(rows(&reads[1])))
+                }
+                Ok(_) => return failure_page(&title, "signed read batch returned the wrong number of views"),
+                Err(error) => return failure_page(&title, &error),
             }
-            match self.read(&reference, view) {
-                Ok((value, _, _)) => Ok(Some(value["rows"].as_array().cloned().unwrap_or_default())),
-                Err(error) => Err(failure_page(&title, &error)),
-            }
-        };
-        let links = match index_view("links") {
-            Ok(rows) => rows,
-            Err(page) => return page,
-        };
-        let backlinks = match index_view("backlinks") {
-            Ok(rows) => rows,
-            Err(page) => return page,
         };
         let targets = self.targets();
         let names = |id: &str| {

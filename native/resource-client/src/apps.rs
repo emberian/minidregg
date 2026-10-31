@@ -1313,18 +1313,20 @@ fn delegate_share(root: &Path, ws: &Value, app_ref: &str, manager: &str, max_cos
 /// (`app delegate-lifecycle`, six ordinary proposals), run to completion;
 /// returns the management selector `spk-host grain install` consumes.
 pub(crate) fn delegate_lifecycle(root: &Path, name: &str, request_id: &str, manager: &str) -> Result<PathBuf> {
-    let mini = std::env::current_exe().map_err(|e| e.to_string())?;
+    // Each round is one `workspace --action app-lifecycle` run in this process, its output
+    // captured (`crate::capture::command`), as `chat::client` runs workspace actions.
     let run = |op: &str, with_names: bool| -> Result<Value> {
-        let mut command = std::process::Command::new(&mini);
-        command.args(["workspace", "--action", "app-lifecycle", "--dir"]).arg(root).args(["--request-id", request_id, "--op", op]);
+        let os = |v: &str| std::ffi::OsString::from(v);
+        let mut flags = vec![("action", os("app-lifecycle")), ("dir", root.as_os_str().to_owned()), ("request-id", os(request_id)), ("op", os(op))];
         if with_names {
-            command.args(["--name", name, "--package-name", &format!("{name}-package"), "--snapshot-name", &format!("{name}-snapshot"), "--manager", manager]);
+            flags.extend([("name", os(name)), ("package-name", os(&format!("{name}-package"))),
+                ("snapshot-name", os(&format!("{name}-snapshot"))), ("manager", os(manager))]);
         }
-        let output = command.output().map_err(|e| e.to_string())?;
-        if !output.status.success() {
-            return Err(format!("app delegate-lifecycle {op}: {}", String::from_utf8_lossy(&output.stderr).trim()));
+        let (code, stdout, stderr) = crate::capture::command("workspace", &flags).map_err(|e| e.to_string())?;
+        if code != 0 {
+            return Err(format!("app delegate-lifecycle {op}: {}", String::from_utf8_lossy(&stderr).trim()));
         }
-        Ok(serde_json::from_slice(&output.stdout).unwrap_or(Value::Null))
+        Ok(serde_json::from_slice(&stdout).unwrap_or(Value::Null))
     };
     let mut status = run("status", true)?;
     let mut rounds = 0;

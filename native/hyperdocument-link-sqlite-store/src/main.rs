@@ -46,6 +46,34 @@ impl From<std::io::Error> for Failure {
 }
 
 
+/// The open Store of `root` under `identity`: kept for the life of this process (a `serve`
+/// helper answers every request of its Host), reopened only when the database file at the root
+/// is no longer the inode it opened.
+fn open(root: &std::ffi::OsStr, identity: &[u8]) -> Result<std::rc::Rc<SqliteLinkStore>, StoreError> {
+    use std::os::unix::fs::MetadataExt;
+    thread_local! {
+        static OPEN: std::cell::RefCell<Vec<(std::ffi::OsString, Vec<u8>, (u64, u64), std::rc::Rc<SqliteLinkStore>)>> =
+            const { std::cell::RefCell::new(Vec::new()) };
+    }
+    let held = OPEN.with(|open| {
+        open.borrow().iter().find(|(r, i, _, _)| r.as_os_str() == root && i.as_slice() == identity)
+            .map(|(_, _, inode, store)| (*inode, store.clone()))
+    });
+    if let Some((inode, store)) = held {
+        if fs::metadata(store.database_path()).is_ok_and(|m| (m.dev(), m.ino()) == inode) {
+            return Ok(store);
+        }
+    }
+    let store = std::rc::Rc::new(SqliteLinkStore::open_with_identity(root, identity)?);
+    let meta = fs::metadata(store.database_path())?;
+    OPEN.with(|open| {
+        let mut open = open.borrow_mut();
+        open.retain(|(r, i, _, _)| !(r.as_os_str() == root && i.as_slice() == identity));
+        open.push((root.to_owned(), identity.to_vec(), (meta.dev(), meta.ino()), store.clone()));
+    });
+    Ok(store)
+}
+
 fn parse_height(value: &std::ffi::OsStr) -> Result<u64, StoreError> {
     value
         .to_str()
@@ -73,16 +101,16 @@ fn run(mut arguments: Vec<std::ffi::OsString>, out: &mut Vec<u8>) -> Result<(), 
     };
     match (command, &arguments[1..]) {
         ("read", [root]) => {
-            let store = SqliteLinkStore::open_with_identity(root, &identity)?;
+            let store = open(root, &identity)?;
             out.extend_from_slice(&store.read()?);
         }
         ("read-to", [root, output]) => {
-            let store = SqliteLinkStore::open_with_identity(root, &identity)?;
+            let store = open(root, &identity)?;
             let bytes = store.read()?;
             fs::write(output, bytes)?;
         }
         ("cas", [root, expected, input]) => {
-            let store = SqliteLinkStore::open_with_identity(root, &identity)?;
+            let store = open(root, &identity)?;
             let expected = if expected == "-" {
                 None
             } else {
@@ -94,21 +122,21 @@ fn run(mut arguments: Vec<std::ffi::OsString>, out: &mut Vec<u8>) -> Result<(), 
             )?;
         }
         ("publish", [root, input]) => {
-            let store = SqliteLinkStore::open_with_identity(root, &identity)?;
+            let store = open(root, &identity)?;
             writeln!(out, "{:?}", store.publish(&read_input(Path::new(input))?)?)?;
         }
         ("durable-anchor-enroll", [root]) => {
-            let store = SqliteLinkStore::open_with_identity(root, &identity)?;
+            let store = open(root, &identity)?;
             store.durable_anchor_enroll()?;
             writeln!(out, "Enrolled")?;
         }
         ("durable-init", [root, seed]) => {
-            let store = SqliteLinkStore::open_with_identity(root, &identity)?;
+            let store = open(root, &identity)?;
             writeln!(out, "{:?}", store.durable_init(&read_input(Path::new(seed))?)?)?;
         }
         ("durable-read", [root, from, with_base, output]) => {
             let from = parse_height(from)?;
-            let store = SqliteLinkStore::open_with_identity(root, &identity)?;
+            let store = open(root, &identity)?;
             let read = match with_base.to_str() {
                 Some("0") => store.durable_read(from, false)?,
                 Some("1") => store.durable_read(from, true)?,
@@ -120,19 +148,19 @@ fn run(mut arguments: Vec<std::ffi::OsString>, out: &mut Vec<u8>) -> Result<(), 
         }
         ("durable-history", [root, request, output]) => {
             let (at, heights, nodes) = decode_history_request(&read_input(Path::new(request))?)?;
-            let store = SqliteLinkStore::open_with_identity(root, &identity)?;
+            let store = open(root, &identity)?;
             fs::write(
                 output,
                 encode_history_read(&store.durable_history(at, &heights, &nodes)?),
             )?;
         }
         ("durable-seed", [root, output]) => {
-            let store = SqliteLinkStore::open_with_identity(root, &identity)?;
+            let store = open(root, &identity)?;
             fs::write(output, store.durable_seed_bytes()?)?;
         }
         ("durable-append", [root, height, record, tag, nodes]) => {
             let height = parse_height(height)?;
-            let store = SqliteLinkStore::open_with_identity(root, &identity)?;
+            let store = open(root, &identity)?;
             writeln!(out, 
                 "{:?}",
                 store.durable_append(
@@ -145,12 +173,12 @@ fn run(mut arguments: Vec<std::ffi::OsString>, out: &mut Vec<u8>) -> Result<(), 
         }
         ("journal-read", [root, from, output]) => {
             let from = parse_height(from)?;
-            let store = SqliteLinkStore::open_with_identity(root, &identity)?;
+            let store = open(root, &identity)?;
             fs::write(output, encode_journal_read(&store.journal_read(from)?))?;
         }
         ("journal-append", [root, seq, record, tag]) => {
             let seq = parse_height(seq)?;
-            let store = SqliteLinkStore::open_with_identity(root, &identity)?;
+            let store = open(root, &identity)?;
             writeln!(
                 out,
                 "{:?}",
@@ -163,7 +191,7 @@ fn run(mut arguments: Vec<std::ffi::OsString>, out: &mut Vec<u8>) -> Result<(), 
         }
         ("durable-checkpoint-at", [root, height, output]) => {
             let height = parse_height(height)?;
-            let store = SqliteLinkStore::open_with_identity(root, &identity)?;
+            let store = open(root, &identity)?;
             let mut bytes = Vec::new();
             match store.durable_checkpoint_at(height)? {
                 None => bytes.extend_from_slice(&0u64.to_be_bytes()),
@@ -178,11 +206,11 @@ fn run(mut arguments: Vec<std::ffi::OsString>, out: &mut Vec<u8>) -> Result<(), 
         }
         ("durable-checkpoint", [root, height, input]) => {
             let height = parse_height(height)?;
-            let store = SqliteLinkStore::open_with_identity(root, &identity)?;
+            let store = open(root, &identity)?;
             store.durable_checkpoint(height, &read_input(Path::new(input))?)?;
         }
         ("database-path", [root]) => {
-            let store = SqliteLinkStore::open_with_identity(root, &identity)?;
+            let store = open(root, &identity)?;
             writeln!(out, "{}", store.database_path().display())?;
         }
         _ => return Err(Failure::Usage),
