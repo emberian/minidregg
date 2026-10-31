@@ -242,14 +242,23 @@ restart, `story new`, the first walk-family request after a restart.
 
 ## Next (successor: start here)
 
-State (2026-10-31): lane `lane/hot-path-cold` at 545f80874, which is the slot fix, unmeasured and not yet
-sent. The integrator is aeb671706eb3f70d7 and routes hot-path to this agent; private cells is
+State (2026-10-31): lane `lane/hot-path-cold` at the slot-fix batch (sent to the integrator). The integrator is aeb671706eb3f70d7 and routes hot-path to this agent; private cells is
 a30875aaf31364697. On hbox, build only in pool trees (`. /home/hbox/pool/pool.env;
 LANE_POOL_NO_WARM=1 lane-tree acquire hot-path origin/lane/hot-path-cold`, release when done). Logs go
 to `/ci/hpc`. Profiles: `/ci/hpc/fby` (run.sh, `--symfs`). The native Host build driver is
 `/ci/hpc/nb/build.sh` (deploy/candidate/lane-build.sh host, LANE_DIR=/ci/hpc/nb).
 
-1. **Flatness submit: the demanded projection. Written (545f80874); measurement owed.**
+1. **Flatness submit: the demanded projection. Landed on the lane (545f80874 and f7da550af); measured.**
+   - **Measured** (scripts/perf/flatness-bench.py, 130 ops, eca98bde7 with the lane's Host, hbox
+     `/ci/hpc/fbs`). Late submit CPU went from 874 to 280-311 ms; propose CPU from 231 to 50-90 ms;
+     late submit wall from 953 to 436-463 ms. The CPU ratios are still 5.2-5.8x, which fails the 2x
+     bound.
+   - **What remains** (profile `/ci/hpc/fbs/perf.data`): O(cell) work per append. That is
+     `StoreCodec.encode` of the whole document cell (31%), its decode (13%), `Store.set` (12%), the
+     cell root (`physicalRoot`, 8%) and `contentLawDecidable` over the cached support (11%). The next
+     step is a document cell whose encoding, root and law check cost O(change · log n): chunked
+     content cells, or private cells' kept-index root (`Materialized.rootCache = KeptCell.root`)
+     extended to content. That is a format change, so it pairs with row 11's epoch bump.
    - **Shared seam.** `PolicyStepContext.restrict` and `PhysicalLawResolution.predicateOf?` /
      `targetPredicate?`, with `predicateOf?_law`, which reads the law's predicate off the same graph
      load as the resolution.
