@@ -94,7 +94,15 @@ fn record(state: &Path, request: &Request, status: &str, evidence: Value) -> Res
     retain_exact_private(&name,&serde_json::to_vec_pretty(&receipt).map_err(|e|e.to_string())?,1_048_576)?;
     File::open(state).and_then(|f|f.sync_all()).map_err(|e|e.to_string())?;
     println!("{receipt}");
-    owe(state,request,status,&terminal_text(status,&evidence))
+    owe(state,request,notice_status(status),&terminal_text(status,&evidence))
+}
+
+/// The request-status a terminal outcome is published as. A notice carries one of STATUSES (the
+/// client's `say --status`, and `hermes status`'s states); a turn that failed after admission (its
+/// model call refused: `no-credential`, a cap) is published as `refused`, its text naming why, so
+/// the asker's `hermes status` shows the reason instead of a request left `unacknowledged`.
+fn notice_status(status:&str)->&str {
+    if status=="failed-after-admission" {"refused"} else {status}
 }
 
 /// The request's native terminal receipt proves the resident consumed this
@@ -545,6 +553,19 @@ mod tests {
         assert!(terminal_text("failed-after-admission",&plain).ends_with("ask again"));
     }
 
+    #[test]fn a_refused_model_call_is_published_to_the_asker_by_name() {
+        let state=fixture("refused-call");let p=prepared(vec![entry("20",1)]);
+        select(&p,&state,Limits::default()).unwrap().unwrap();
+        let mut q=open(&state).unwrap();let r=q.selected.take().unwrap();
+        let failed=json!({"basis":"typed-prompt-outcome","outcome":{"refused":{"stage":"turn-failure",
+            "reason":"provider refused: {\"error\":{\"code\":\"no-credential\"}}"}}});
+        record(&state,&r,"failed-after-admission",failed).unwrap();
+        let last=notices(&state).unwrap().notices.pop().unwrap();
+        assert!(STATUSES.contains(&last.status.as_str()),"a status the room write accepts: {}",last.status);
+        assert_eq!((last.status.as_str(),last.state.as_str()),("refused","owed"));
+        assert_eq!(last.text,"failed: Hermes's model call was refused (no-credential); no reply was written");
+        fs::remove_dir_all(state).unwrap();
+    }
     #[test]fn fair_fifo_restart_and_bounded_admission() {
         let state=fixture("fair");let p=prepared((1..=12).map(|n|entry("20",n)).chain([entry("21",13),entry("21",14)]).collect());
         let first=select(&p,&state,Limits::default()).unwrap().unwrap();assert_eq!(first["recentMemberEntries"][0]["sequence"],1);
