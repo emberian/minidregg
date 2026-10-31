@@ -161,7 +161,12 @@ fn native_reply(reply: &Value) -> std::result::Result<NativeReply, Refusal> {
                 uncertain: false,
             },
             Ok(v) if v["type"] == "uncertain-v3" => uncertain(&format!("native-uncertain-{}", v["phase"].as_str().unwrap_or("unnamed"))),
-            _ => uncertain("native-outcome-unknown"),
+            _ => {
+                // The name stays the one fixed spelling; the controller's journal keeps what the call returned.
+                let shown: String = text.chars().filter(|c| !c.is_control()).take(240).collect();
+                eprintln!("typed application call returned an unclassified error: {shown}");
+                uncertain("native-outcome-unknown")
+            }
         });
     }
     let frame: Value = serde_json::from_str(text).map_err(|_| uncertain("native-reply-malformed"))?;
