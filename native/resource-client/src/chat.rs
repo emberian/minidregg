@@ -1649,19 +1649,31 @@ fn attempt_standing(session: &Session, id: &str) -> &'static str {
     }
 }
 
-/// `reports`: every report in every `feedback-NAME` room this session founded, by height.
+/// The rooms `reports` reads: every `feedback-NAME` room this session founded (the operator's), else the
+/// member's own `feedback` room, where `feedback` writes (a member reads back what they reported).
+fn report_rooms(mut founded: Vec<String>, has_own: bool) -> Result<Vec<String>, String> {
+    founded.sort();
+    if !founded.is_empty() {
+        return Ok(founded);
+    }
+    if has_own {
+        return Ok(vec![FEEDBACK_ROOM.to_owned()]);
+    }
+    Err(format!("this session holds no {FEEDBACK_ROOM} room and founded no {FEEDBACK_PREFIX}NAME room: \
+        the operator opens yours (its invitation arrives in HOME/inbox; `chat join {FEEDBACK_ROOM} INVITATION`)"))
+}
+
+/// `reports`: every report in every `feedback-NAME` room this session founded, by height; for a
+/// member, the reports in their own `feedback` room.
 fn reports(session: &Session, since: Option<u64>, count: usize, digest: bool, as_json: bool) -> Result<(), Done> {
-    let mut names_of_rooms: Vec<String> = fs::read_dir(chat_dir(session).join("rooms"))
+    let names_of_rooms: Vec<String> = fs::read_dir(chat_dir(session).join("rooms"))
         .map(|d| d.flatten().filter_map(|e| e.file_name().into_string().ok())
             .filter(|n| n.ends_with(".json") && !n.ends_with(".cache.json"))
             .map(|n| n.trim_end_matches(".json").to_owned())
             .filter(|n| n.starts_with(FEEDBACK_PREFIX))
             .collect())
         .unwrap_or_default();
-    names_of_rooms.sort();
-    if names_of_rooms.is_empty() {
-        return Err(usage(format!("this session founded no {FEEDBACK_PREFIX}NAME room (the operator's session reads reports)")));
-    }
+    let names_of_rooms = report_rooms(names_of_rooms, load_room(session, FEEDBACK_ROOM).is_ok()).map_err(usage)?;
     let names = names(session);
     let mut rows: Vec<(u64, String, String, Report)> = Vec::new();
     let mut unreadable = 0usize;
@@ -2850,6 +2862,13 @@ mod feedback_tests {
         let biggest = json!({"type":"feedback","text":"t".repeat(FEEDBACK_TEXT),"client":"mini 0.1.0","sha":"s".repeat(40),
             "from":"f".repeat(64),"standing":"not retained here","clause":"c".repeat(FEEDBACK_CLAUSE),"page":"p".repeat(FEEDBACK_PAGE),"via":"discord"});
         assert!(serde_json::to_string(&biggest).unwrap().len() <= MAX_PAYLOAD);
+    }
+
+    #[test]
+    fn reports_reads_where_feedback_writes() {
+        assert_eq!(report_rooms(vec!["feedback-bob".into(), "feedback-al".into()], true).unwrap(), ["feedback-al", "feedback-bob"], "the operator reads the rooms it founded");
+        assert_eq!(report_rooms(Vec::new(), true).unwrap(), [FEEDBACK_ROOM], "a member reads their own feedback room");
+        assert!(report_rooms(Vec::new(), false).unwrap_err().contains("holds no feedback room"));
     }
 
     /// The operator sees a report with its context, in the tail and in the digest's source.
