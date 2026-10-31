@@ -2,7 +2,7 @@
 
 Present-state table, rewritten whole at each batch. Lane `lane/explorer`. Subject: candidate
 be4ef7510 (hbox `/home/hbox/lanes/integ/candidates/be4ef751074ca28c7d306c2f2bcf61cda03893c8`),
-explored as test members only. Batch 8, 2026-10-31.
+explored as test members only. Batch 9, 2026-10-31.
 
 ## Worlds (all on hbox, all mine; torn down when the lane ends)
 
@@ -118,6 +118,14 @@ Worlds x1, x2, xw1, xweb and the e2e workers are down (x1's down listed one surv
 | install of the pinned EtherCalc from the shared cache | `packageIdMismatch`: the cached `ethercalc-<sha>.spk` hashes to 93bd2c29..., not the index's package id. Harness input. |
 | install of Simple Todos after seeding the cache with the real download (`mini-market-fetch fetch`, sha256 prefix equals packageId) | RED: `appIdMismatch: Simple Todos 5830d701... was refused by this box's ingest`; verdict file `/ci/xe2e7/verdicts/5830d70137cdae158118884da8790870.json` = `{reason: appIdMismatch, signedAppId: "", verdict: refused}`. An empty signedAppId means the ingest never produced a signed app id (it did not fail on a mismatch); likely the ingest unit or signature check failing on this box. Not diagnosed further. Owner: app-reds (spk-ingest / the worker's ingest stage). |
 | second app (Hacker Slides) in the same run | birth refused `resourceBatch` after the first install had spent 18,730 of 20,000: the harness's 20,000 funding covers one install. |
+
+
+### Hotpatch spk-host from 5f5e99324 and a load pass (35737eac4)
+
+| item | result |
+|---|---|
+| spk-host from 5f5e99324 | built on hbox in 1 min 8 s (`/ci/x4log/tgt/release/spk-host`), but two overlay attempts did not install it (read-only hard-linked copy; a failed script edit), so no live verdict; the integrator then superseded the commit (c730fd3ea) and asked to wait for the next cut. Worlds torn down by PID file. Harness lesson: overlaying one binary into a copy of `$C/bin` needs `rm -f` first, because the files are hard links with mode 555. |
+| load: 4 members x 25 `say` + 10 doc append/submit at once | 100 of 100 says and 10 of 10 doc appends admitted, wall 33.5 s (3.3 writes/s), `say` mean 1.27 s and max 3.0 s, doc submit mean 0.91 s, no refusals; the room tail and `doc show` are complete and in order. |
 
 ## Exercised and held
 
