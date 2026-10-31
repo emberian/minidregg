@@ -33,6 +33,7 @@ import Theory.AuthTrie  -- compressed authenticated binary trie: O(log n) openin
 import Theory.AuthTrieRange  -- subtree reveals: every member under a key prefix, soundness up to a node collision
 import Theory.AuthTrieCache  -- the compressed trie kept: inserts in O(depth), proved equal to the canonical root; honest openings verify
 import Theory.FiniteTapeGap  -- distinguishing gaps over finite equally likely tapes: triangle, rescaling, permutation invariance
+import Theory.OracleGame  -- proof systems in the random-oracle model: costed oracle circuits, query-bounded adversaries, knowledge soundness and adaptive multi-theorem zero knowledge
 import Theory.AuthTrieReveal  -- honest reveals verify; the kept trie serves them in walked depth plus answer
 import Theory.PrivateCellTrie  -- statements the compressed trie owes before it carries a blinded cell: erase, complete class openings with scoped collisions
 import Theory.CellStateAux  -- a cell's persistent auxiliary structure: carried beside the store, followed per write, the root read from it

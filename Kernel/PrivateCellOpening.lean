@@ -1,43 +1,40 @@
 /-
-# Kernel.PrivateCellOpening — the zero-knowledge complete selective opening (statement)
+# Kernel.PrivateCellOpening — the selective opening's relation, exact against the committed store
 
 Epoch (b)'s prerequisite (docs/RATCHET-LOG-DESIGN.md §3.2, §4 hybrid 2): a reader of a blinded
-cell under the private root receives `(root, scope, answer, π)`, where `π` proves in zero
-knowledge that `answer` is the COMPLETE projection of the committed store onto the scope. No
-sibling digest, path, mask or other-class entry reaches the reader: they stay in the witness.
+cell under the private root receives a statement (root, cell, version, scope, view) and a proof
+that the view is the COMPLETE projection of the committed store onto the scope. No sibling digest,
+path, mask or other-class entry reaches the reader: they stay in the witness.
 
-Statement first (no backend, no circuit yet). Three parts:
+This module fixes the relation the proof system will prove, so no backend chooses its meaning:
 
-* `EmittedOpening`: the circuit's acceptance relation means what the opening needs. Sound: an
-  accepted `(statement, circuit witness)` against a root that IS the private root of a gated
-  store `S` answers exactly `S`'s authorized projection, or exhibits a scoped node or outer-hash
-  collision. Complete: every gated store has an accepted witness for its exact projection, whose
-  size is at most `c₀ + c₁ (k + s + 1) 516` (k returned entries, s scope prefixes): a read does
-  not grow with the hidden part of the store. `accepts` is to be the compiler-emitted constraint
-  system's acceptance (`Compiler/Air`, grown with the hash vocabulary the node digest needs);
-  pinning `accepts` to a compiled system is the next statement, once that vocabulary is chosen.
-* `ProofSystem`, `Complete`, `SoundUpTo`, `MultiTheoremZK`: a non-interactive proof system with
-  fresh coins per proof, adaptive multi-theorem zero knowledge on true statements (the adversary
-  chooses each next statement and witness from the proofs so far; the simulator sees only the
-  statement), and soundness up to a named bad event (the backend's extraction/soundness error).
-* `SelectiveOpening`: a circuit and a backend for it; `selectiveOpening_exact` composes them: an
-  honest opening verifies, and an accepted one answers exactly the committed store's projection,
-  or the backend's bad event, or a scoped collision.
+* `Statement`, `Witness`, `OpeningRel`: the root is the outer commitment over the kind's context,
+  the witness's mask and index digest; the mask's kind-level custody decode names the statement's
+  cell and version; every reader prefix's reveal verifies against the index digest at depth 516;
+  the reveals answer exactly the view (a store, so its order and encoding are the wire's).
+* `DeployedCollision`: the comparison's collisions, each between inputs fixed by the store, the
+  scope and the witness: two live addresses of the store on one key path, two nodes of one
+  reveal's comparison scope, or the witness's outer input against the store's
+  (`outerCollision_is_hash`: a cSHAKE256 collision on distinct bytes).
+* `openingRel_exact` (sound): against the private root of a gated store, a witness in the relation
+  answers exactly the store's view and its custody cell and version, or a `DeployedCollision`.
+* `honest_rel` (complete): every gated store with distinct live key paths and a custody mask
+  decoding to its cell and version has its honest statement in the relation with `honestWitness`.
+  Completeness fails exactly on an address collision, which the receiver refuses at insert.
 
-ATLAS fields:
-* satisfiable: `Ideal.system` (proofs carry nothing, the verifier decides the relation) meets
-  `Complete`, `SoundUpTo` with no bad event and `MultiTheoremZK` at gap 0 (`Ideal.complete`,
-  `Ideal.sound`, `Ideal.zk`);
-* teeth: `reveal_refuted`: a system whose proof is its witness is not zero knowledge at any gap
-  below one half, against the two adversaries choosing between two witnesses of one statement;
-* premise inhabitation: `honest_statement`: every gated store's exact projection is a statement
-  of its root.
+ATLAS fields: satisfiable `honest_rel`; teeth `openingRel_exact` (a wrong view, cell or version
+needs a named collision); premise inhabitation `honest_rel`'s premises at the receiver's states.
+
+Next (astra rounds 14-15, docs in board/seats/privacy.md): the leaf format with fixed-size hidden
+payloads (an early-stop reveal must not carry a hidden value of unbounded size), the circuit pinned
+to an emitted gate system with its acceptance output and public length bounds, and the proof system
+in a shared ROM interpreter: query-bounded adversaries, one stateful simulator of bounded work,
+straight-line extraction from the prover's query log, and the receiver's randomized adapter that
+discharges `HidingSetting.hiding_of_hybrids`'s `zk` premise.
 -/
 module
 
-public import Kernel.PrivateCellView
-public import Compiler.PrivateCellRoot
-public import Theory.FiniteTapeGap
+public import Kernel.PrivateCellReceiver
 import Theory.AssertAxioms
 
 @[expose] public section
@@ -49,276 +46,177 @@ set_option autoImplicit false
 open Minidregg.Compiler
 open Minidregg.Theory.Store
 open Minidregg.Theory.TypedAuthorization (CellField Digest)
-open Minidregg.Theory.FiniteTapeGap (GapAtMost)
 open Minidregg.Kernel.ResourceObservationAdmission (Visible)
-open Minidregg.Kernel.PrivateCellView (kindTag storeFits)
-open Minidregg.Compiler.PrivateCellIndex (indexEntries)
-open Minidregg.Compiler.PrivateCellRoot (privateRoot kindCtx deployedDig paths)
+open Minidregg.Kernel.PrivateCellView (kindTag storeFits readerPrefixes keyBits viewOpeningExact_deployed
+  admitted_of_storeFits honest_accepted honest_answers)
+open Minidregg.Kernel.PrivateCellReceiver (CustodyDecode bits)
+open Minidregg.Compiler.PrivateCellIndex (indexEntries valueBytes)
+open Minidregg.Compiler.PrivateCellRoot (privateRoot outerRoot outerCustomization kindCtx maskOf deployedDig nodeBytesWith hashedAddrBits
+  hashedAddrBits_length addressHash addressCustomization nodeCustomization)
+open Minidregg.Compiler.Tower256ConcreteBackend (StreamCodec digestStream)
+open Minidregg.Theory.AuthTrie (Reveal revealVerify lastVal revealFor canon)
+open Minidregg.Theory.AuthTrie.Cache (PathsInjective)
 
-/-! ## A proof system and its properties -/
-
-/-- A non-interactive proof system whose prover draws its coins from a tape: proof `i` of a run
-reads `coins t i`, fresh per proof. -/
-structure ProofSystem (Stmt Wit Proof : Type) (tapes : Nat) where
-  prove : Stmt → Wit → Fin tapes → Nat → Proof
-  verify : Stmt → Proof → Bool
-
-/-- An adaptive adversary: the next statement and witness from the proofs so far (or stop), and
-a final decision on the proofs it saw. -/
-structure Adversary (Stmt Wit Proof : Type) where
-  next : List Proof → Option (Stmt × Wit)
-  decide : List Proof → Bool
-
-variable {Stmt Wit Proof : Type} {tapes : Nat}
-
-/-- The real run: up to `M` proofs, each on the adversary's next statement and witness. -/
-def runReal (sys : ProofSystem Stmt Wit Proof tapes) (A : Adversary Stmt Wit Proof) (t : Fin tapes) :
-    Nat → List Proof
-  | 0 => []
-  | M + 1 =>
-      let seen := runReal sys A t M
-      match A.next seen with
-      | some (x, w) => seen ++ [sys.prove x w t seen.length]
-      | none => seen
-
-/-- The simulated run: the simulator sees only each statement. -/
-def runSim (sim : Stmt → Fin tapes → Nat → Proof) (A : Adversary Stmt Wit Proof) (t : Fin tapes) :
-    Nat → List Proof
-  | 0 => []
-  | M + 1 =>
-      let seen := runSim sim A t M
-      match A.next seen with
-      | some (x, _) => seen ++ [sim x t seen.length]
-      | none => seen
-
-/-- An adversary asks only true statements. -/
-def AsksTrue (rel : Stmt → Wit → Prop) (A : Adversary Stmt Wit Proof) : Prop :=
-  ∀ seen x w, A.next seen = some (x, w) → rel x w
-
-/-- Honest proofs verify. -/
-def Complete (sys : ProofSystem Stmt Wit Proof tapes) (rel : Stmt → Wit → Prop) : Prop :=
-  ∀ x w t i, rel x w → sys.verify x (sys.prove x w t i) = true
-
-/-- An accepted proof is of a true statement, or the named bad event happened. -/
-def SoundUpTo (sys : ProofSystem Stmt Wit Proof tapes) (rel : Stmt → Wit → Prop)
-    (bad : Stmt → Proof → Prop) : Prop :=
-  ∀ x π, sys.verify x π = true → (∃ w, rel x w) ∨ bad x π
-
-/-- **Adaptive multi-theorem zero knowledge**: against every budgeted adversary asking at most
-`M` true statements, the real and simulated runs are within `num/den`. The simulator gets only
-statements; the budget is the efficiency class (the simulator and the reduction's cost live in it). -/
-def MultiTheoremZK (sys : ProofSystem Stmt Wit Proof tapes) (sim : Stmt → Fin tapes → Nat → Proof)
-    (rel : Stmt → Wit → Prop) (M num den : Nat) (budgeted : Adversary Stmt Wit Proof → Prop) : Prop :=
-  ∀ A, budgeted A → AsksTrue rel A →
-    GapAtMost tapes num den (fun t => A.decide (runReal sys A t M)) (fun t => A.decide (runSim sim A t M))
-
-/-! ## The deployed opening -/
+/-! ## The reference relation (fixed; no implementation chooses it) -/
 
 variable {kind : CanonicalCellRegistry.Kind} (wire : StoreCodec.Wire (CanonicalCellRegistry.layout kind))
 
-/-- What a reader holds: the root, its scope and the answer (each visible address with its
-value bytes, in canonical order). -/
+/-- The canonical digest of a store's private index (inside the outer commitment). -/
+abbrev innerRoot (S : Store (CanonicalCellRegistry.layout kind)) : Digest :=
+  Theory.AuthTrie.root (deployedDig wire) (bits wire) 516 (indexEntries wire S)
+
+/-- What a reader holds: the root, the cell and version it was published for, its scope, and
+the answer, the visible store itself (so the answer's order and encoding are the wire's). -/
 structure Statement where
   root : Digest
+  cell : List UInt8
+  version : Nat
   fields : Option (Finset CellField)
-  answer : List (Address (CanonicalCellRegistry.layout kind) × List UInt8)
+  view : Store (CanonicalCellRegistry.layout kind)
 
-/-- The authorized projection of a store: its visible entries as index entries. -/
-def projection (fields : Option (Finset CellField)) (store : Store (CanonicalCellRegistry.layout kind)) :
-    List (Address (CanonicalCellRegistry.layout kind) × List UInt8) :=
-  indexEntries wire (DFinsupp.filter (Visible fields kind) store)
+/-- What stays with the prover: the mask bytes, the index digest under the outer commitment,
+and one reveal per reader prefix (sibling digests and the members below the stop). -/
+structure Witness where
+  mask : List UInt8
+  inner : Digest
+  reveals : List Bool → Reveal (Address (CanonicalCellRegistry.layout kind)) (List UInt8) Digest
 
-/-- The number of scope prefixes a reader's scope opens. -/
-def scopePrefixes (fields : Option (Finset CellField)) : Nat :=
-  match fields with
-  | none => 1
-  | some named => named.card
+/-- The reveals answer exactly the statement's view: a pair is answered at some reader prefix
+iff it is a live address of the view with its value bytes. -/
+def Answers (st : Statement (kind := kind)) (w : Witness (kind := kind)) : Prop :=
+  ∀ a v, (∃ p ∈ readerPrefixes st.fields, (a, v) ∈ (w.reveals p).answer (bits wire) p) ↔
+    ∃ value, st.view a = some value ∧ v = valueBytes wire a value
 
-/-- A collision the circuit's soundness may exhibit: two distinct inputs of the node digest or
-of the outer hash with one output, among the nodes and outer inputs of this one comparison
-(the store's path nodes and the circuit's revealed nodes; never a global collision). -/
-def ScopedCollision (scope : Theory.AuthTrie.NodeIn (Address (CanonicalCellRegistry.layout kind)) (List UInt8) Digest → Prop)
-    (outerScope : List UInt8 × Digest → Prop) : Prop :=
-  Theory.AuthTrie.CollisionAmong (deployedDig wire) scope ∨
-    ∃ a b, a ≠ b ∧ outerScope a ∧ outerScope b ∧
-      Compiler.PrivateCellRoot.outerRoot (kindCtx wire) a.1 a.2 =
-        Compiler.PrivateCellRoot.outerRoot (kindCtx wire) b.1 b.2
+/-- **The opening relation.** The root is the outer commitment over the kind's context, the
+witness's mask and index digest; the mask's kind-level custody decode names the statement's cell
+and version (item 6: a relabelled version is refused unless the custody bytes say it); every
+reader prefix's reveal verifies against the index digest at depth 516; and the reveals answer
+exactly the view. -/
+def OpeningRel (decode : CustodyDecode) (st : Statement (kind := kind)) (w : Witness (kind := kind)) : Prop :=
+  st.root = outerRoot (kindCtx wire) w.mask w.inner ∧
+    (∃ secret, decode w.mask = some (st.cell, st.version, secret)) ∧
+    (∀ p ∈ readerPrefixes st.fields,
+      revealVerify (deployedDig wire) (bits wire) 516 w.inner p (w.reveals p) = true) ∧
+    Answers wire st w
 
-/-- **The emitted circuit means the opening.** `accepts` is the circuit's acceptance relation;
-`scopeOf` names, per store and accepted witness, the finite comparison scope a collision is
-drawn from. -/
-structure EmittedOpening {CWit : Type} (accepts : Statement (kind := kind) → CWit → Bool)
-    (witSize : CWit → Nat) (c₀ c₁ : Nat) where
-  scopeOf : Store (CanonicalCellRegistry.layout kind) → CWit →
-    (Theory.AuthTrie.NodeIn (Address (CanonicalCellRegistry.layout kind)) (List UInt8) Digest → Prop) ×
-      (List UInt8 × Digest → Prop)
-  /-- Sound: against the private root of a gated store, an accepted answer is that store's
-  exact projection, or a scoped collision. -/
-  sound : ∀ (st : Statement (kind := kind)) cw (S : Store (CanonicalCellRegistry.layout kind)),
-    storeFits wire S = true → st.root = privateRoot wire (kindTag kind) (kindCtx wire) S →
-    accepts st cw = true →
-      st.answer = projection wire st.fields S ∨ ScopedCollision wire (scopeOf S cw).1 (scopeOf S cw).2
-  /-- Complete, with a witness bounded by the answer and the scope, not by the store. -/
-  complete : ∀ (S : Store (CanonicalCellRegistry.layout kind)) fields,
-    storeFits wire S = true →
-    ∃ cw, accepts ⟨privateRoot wire (kindTag kind) (kindCtx wire) S, fields, projection wire fields S⟩ cw = true ∧
-      witSize cw ≤ c₀ + c₁ * ((projection wire fields S).length + scopePrefixes fields + 1) * 516
+/-- Two distinct live addresses of the store whose canonical bytes collide under the address
+customization of cSHAKE256 (two entries on one key path). -/
+def AddressCollisionOf (S : Store (CanonicalCellRegistry.layout kind)) : Prop :=
+  ∃ a a', (lastVal (indexEntries wire S) a).isSome ∧ (lastVal (indexEntries wire S) a').isSome ∧
+    (StoreCodec.addressStream wire).encode a ≠ (StoreCodec.addressStream wire).encode a' ∧
+    Sp800185Cshake256.hash addressCustomization ((StoreCodec.addressStream wire).encode a) =
+      Sp800185Cshake256.hash addressCustomization ((StoreCodec.addressStream wire).encode a')
 
-/-- The circuit relation the proof system proves. -/
-def circuitRel {CWit : Type} (accepts : Statement (kind := kind) → CWit → Bool) :
-    Statement (kind := kind) → CWit → Prop :=
-  fun st cw => accepts st cw = true
+/-- Two nodes of one reveal's comparison scope against the store (`PrivateCellTrie.revealNodes`:
+the store's walked path and selected subtree, the reveal's climb and member tree) whose distinct
+node bytes collide under the node customization. -/
+def NodeCollisionOf (S : Store (CanonicalCellRegistry.layout kind)) (fields : Option (Finset CellField))
+    (reveals : List Bool → Reveal (Address (CanonicalCellRegistry.layout kind)) (List UInt8) Digest) : Prop :=
+  ∃ p ∈ readerPrefixes fields, ∃ x y,
+    Theory.PrivateCellTrie.revealNodes (deployedDig wire) (keyBits (hashedAddrBits wire 256 addressHash)) (260 + 256)
+      (indexEntries wire S) p (reveals p) x ∧
+    Theory.PrivateCellTrie.revealNodes (deployedDig wire) (keyBits (hashedAddrBits wire 256 addressHash)) (260 + 256)
+      (indexEntries wire S) p (reveals p) y ∧
+    nodeBytesWith wire digestStream x ≠ nodeBytesWith wire digestStream y ∧
+    Sp800185Cshake256.hash nodeCustomization (nodeBytesWith wire digestStream x) =
+      Sp800185Cshake256.hash nodeCustomization (nodeBytesWith wire digestStream y)
 
-/-- **The selective opening**: an emitted circuit and a proof system for it, complete, sound up
-to its bad event and adaptively multi-theorem zero knowledge at `num/den` for `M` proofs. -/
-structure SelectiveOpening (M num den : Nat) where
-  CWit : Type
-  Proof : Type
-  tapes : Nat
-  accepts : Statement (kind := kind) → CWit → Bool
-  witSize : CWit → Nat
-  c₀ : Nat
-  c₁ : Nat
-  emitted : EmittedOpening wire accepts witSize c₀ c₁
-  system : ProofSystem (Statement (kind := kind)) CWit Proof tapes
-  simulator : Statement (kind := kind) → Fin tapes → Nat → Proof
-  bad : Statement (kind := kind) → Proof → Prop
-  budgeted : Adversary (Statement (kind := kind)) CWit Proof → Prop
-  complete : Complete system (circuitRel accepts)
-  sound : SoundUpTo system (circuitRel accepts) bad
-  zk : MultiTheoremZK system simulator (circuitRel accepts) M num den budgeted
+/-- The witness's outer input differs from the store's and commits to the same root: a collision
+of the outer commitment (cSHAKE256 under the outer customization over the injective encoding of
+context, mask and index digest) on these two inputs. -/
+def OuterCollisionOf (S : Store (CanonicalCellRegistry.layout kind)) (w : Witness (kind := kind)) : Prop :=
+  (w.mask, w.inner) ≠ (maskOf wire S, innerRoot wire S) ∧
+    outerRoot (kindCtx wire) w.mask w.inner = outerRoot (kindCtx wire) (maskOf wire S) (innerRoot wire S)
 
-/-- **The keystone**: an honest opening of a gated store verifies, and an accepted opening of a
-root that is the private root of a gated store answers exactly that store's projection, or the
-backend's bad event happened, or the circuit exhibits a scoped collision. -/
-theorem selectiveOpening_exact {M num den : Nat} (O : SelectiveOpening wire M num den)
-    (S : Store (CanonicalCellRegistry.layout kind)) (gate : storeFits wire S = true) :
-    (∀ fields, ∃ cw, ∀ t i,
-      O.system.verify ⟨privateRoot wire (kindTag kind) (kindCtx wire) S, fields, projection wire fields S⟩
-        (O.system.prove ⟨privateRoot wire (kindTag kind) (kindCtx wire) S, fields, projection wire fields S⟩ cw t i) = true) ∧
-    ∀ (st : Statement (kind := kind)) π, st.root = privateRoot wire (kindTag kind) (kindCtx wire) S →
-      O.system.verify st π = true →
-        st.answer = projection wire st.fields S ∨ O.bad st π ∨
-          ∃ cw, ScopedCollision wire (O.emitted.scopeOf S cw).1 (O.emitted.scopeOf S cw).2 := by
-  refine ⟨fun fields => ?_, fun st π root accepted => ?_⟩
-  · obtain ⟨cw, accepts, _⟩ := O.emitted.complete S fields gate
-    exact ⟨cw, fun t i => O.complete _ cw t i accepts⟩
-  · rcases O.sound st π accepted with ⟨cw, holds⟩ | bad
-    · rcases O.emitted.sound st cw S gate root holds with exact | collision
-      · exact Or.inl exact
-      · exact Or.inr (Or.inr ⟨cw, collision⟩)
-    · exact Or.inr (Or.inl bad)
+/-- **The comparison's collisions**, each between named inputs fixed by the store, the scope and
+the witness (items 1 and 2): no implementation chooses where a collision may be drawn from. -/
+def DeployedCollision (S : Store (CanonicalCellRegistry.layout kind)) (fields : Option (Finset CellField))
+    (w : Witness (kind := kind)) : Prop :=
+  AddressCollisionOf wire S ∨ NodeCollisionOf wire S fields w.reveals ∨ OuterCollisionOf wire S w
 
-/-- Premise inhabitation: every gated store's exact projection is a statement of its root, so
-`EmittedOpening.complete`'s instances exist. -/
-theorem honest_statement (S : Store (CanonicalCellRegistry.layout kind)) (fields : Option (Finset CellField)) :
-    (⟨privateRoot wire (kindTag kind) (kindCtx wire) S, fields, projection wire fields S⟩ : Statement (kind := kind)).answer =
-      projection wire fields S := rfl
+/-- The bytes the outer commitment hashes: the context, the mask and the index digest. -/
+def outerBytes (mask : List UInt8) (inner : Digest) : List UInt8 :=
+  (StreamCodec.product (StreamCodec.list StreamCodec.byte)
+    (StreamCodec.product (StreamCodec.list StreamCodec.byte) digestStream)).encode (kindCtx wire, mask, inner)
 
-/-! ## The ideal pole and the teeth -/
+/-- An outer collision is a cSHAKE256 collision under the outer customization on two distinct
+byte strings. -/
+theorem outerCollision_is_hash {S : Store (CanonicalCellRegistry.layout kind)} {w : Witness (kind := kind)}
+    (collision : OuterCollisionOf wire S w) :
+    outerBytes wire w.mask w.inner ≠ outerBytes wire (maskOf wire S) (innerRoot wire S) ∧
+      Sp800185Cshake256.hash outerCustomization (outerBytes wire w.mask w.inner) =
+        Sp800185Cshake256.hash outerCustomization (outerBytes wire (maskOf wire S) (innerRoot wire S)) := by
+  refine ⟨fun same => collision.1 ?_, Kernel.PrivateCellView.output_eq_of_digest_eq collision.2⟩
+  have := StoreCodec.streamEncode_injective _ same
+  simp only [Prod.mk.injEq, true_and] at this
+  rw [this.1, this.2]
 
-namespace Ideal
-
-variable {Stmt Wit : Type} (rel : Stmt → Wit → Prop)
-
-/-- Proofs carry nothing; the verifier decides the relation. -/
-noncomputable def system : ProofSystem Stmt Wit Unit 1 where
-  prove := fun _ _ _ _ => ()
-  verify := fun x _ => by classical exact decide (∃ w, rel x w)
-
-theorem complete : Complete (system rel) rel := by
-  intro x w t i h
-  simp only [system]
-  exact decide_eq_true ⟨w, h⟩
-
-theorem sound : SoundUpTo (system rel) rel (fun _ _ => False) := by
-  intro x π accepted
-  simp only [system, decide_eq_true_eq] at accepted
-  exact Or.inl accepted
-
-theorem runReal_eq_runSim (A : Adversary Stmt Wit Unit) (t : Fin 1) :
-    ∀ M, runReal (system rel) A t M = runSim (fun _ _ _ => ()) A t M
-  | 0 => rfl
-  | M + 1 => by
-      simp only [runReal, runSim, runReal_eq_runSim A t M]
-      cases A.next (runSim (fun _ _ _ => ()) A t M) with
+/-- Two views answering the same value bytes at every address are one store. -/
+theorem view_eq_of_bytes {V S : Store (CanonicalCellRegistry.layout kind)}
+    (same : ∀ a v, (∃ value, V a = some value ∧ v = valueBytes wire a value) ↔
+      ∃ value, S a = some value ∧ v = valueBytes wire a value) : V = S := by
+  refine DFinsupp.ext fun a => ?_
+  cases hV : V a with
+  | some x =>
+      obtain ⟨y, hy, bytes⟩ := (same a _).mp ⟨x, hV, rfl⟩
+      rw [hy, StoreCodec.streamEncode_injective _ bytes]
+  | none =>
+      cases hS : S a with
       | none => rfl
-      | some p => rfl
+      | some y =>
+          obtain ⟨x, hx, _⟩ := (same a _).mpr ⟨y, hS, rfl⟩
+          rw [hV] at hx; cases hx
 
-theorem zk (M den : Nat) (positive : 0 < den) (budgeted : Adversary Stmt Wit Unit → Prop) :
-    MultiTheoremZK (system rel) (fun _ _ _ => ()) rel M 0 den budgeted := by
-  intro A _ _
-  refine ⟨by decide, positive, ?_, ?_⟩ <;>
-    simp [runReal_eq_runSim rel A]
+/-- **The relation is exact against the committed store.** A statement whose root is the
+private root of a gated store, with a witness in the relation, answers exactly that store's
+view and names its custody cell and version, or the comparison exhibits one of the fixed
+collisions. Proved from `viewOpeningExact_deployed`. -/
+theorem openingRel_exact (selected : CanonicalCellRegistry.wire? kind = some wire) (decode : CustodyDecode)
+    (S : Store (CanonicalCellRegistry.layout kind)) (gate : storeFits wire S = true)
+    (st : Statement (kind := kind)) (w : Witness (kind := kind))
+    (root : st.root = privateRoot wire (kindTag kind) (kindCtx wire) S) (holds : OpeningRel wire decode st w) :
+    (st.view = DFinsupp.filter (Visible st.fields kind) S ∧
+        ∃ secret, decode (maskOf wire S) = some (st.cell, st.version, secret)) ∨
+      DeployedCollision wire S st.fields w := by
+  obtain ⟨outer, custody, verifies, answers⟩ := holds
+  by_cases same : (w.mask, w.inner) = (maskOf wire S, innerRoot wire S)
+  · obtain ⟨hm, hi⟩ := Prod.mk.inj same
+    rcases viewOpeningExact_deployed selected S st.fields w.reveals (admitted_of_storeFits gate)
+        (fun p member => by have := verifies p member; rw [hi] at this; exact this) with answered | address | node
+    · refine Or.inl ⟨view_eq_of_bytes wire fun a v => (answers a v).symm.trans (answered a v), ?_⟩
+      rw [← hm]; exact custody
+    · exact Or.inr (Or.inl address)
+    · exact Or.inr (Or.inr (Or.inl node))
+  · exact Or.inr (Or.inr (Or.inr ⟨same, outer.symm.trans root⟩))
 
-end Ideal
+/-- The honest statement of a store under a scope, for a cell and version. -/
+def honestStatement (S : Store (CanonicalCellRegistry.layout kind)) (fields : Option (Finset CellField))
+    (cell : List UInt8) (version : Nat) : Statement (kind := kind) :=
+  ⟨privateRoot wire (kindTag kind) (kindCtx wire) S, cell, version, fields, DFinsupp.filter (Visible fields kind) S⟩
 
-section Teeth
+/-- The honest witness: the store's mask and index digest, and the honest reveal of every prefix
+(`AuthTrie.revealFor`, served from the kept trie by `Trie.reveal`). -/
+def honestWitness (S : Store (CanonicalCellRegistry.layout kind)) : Witness (kind := kind) :=
+  ⟨maskOf wire S, innerRoot wire S, fun p =>
+    revealFor (deployedDig wire) (bits wire) 516 (canon (indexEntries wire S)) p⟩
 
-variable {Stmt Wit : Type} [DecidableEq Wit]
+/-- **Completeness of the relation**: every gated store whose live addresses lie on distinct key
+paths, under a custody mask that decodes to its cell and version, has the honest statement in the
+relation with the honest witness. The domain excludes stores with an address collision (whose
+index loses an entry), which the receiver refuses at insert. -/
+theorem honest_rel (selected : CanonicalCellRegistry.wire? kind = some wire) (decode : CustodyDecode)
+    (S : Store (CanonicalCellRegistry.layout kind)) (gate : storeFits wire S = true)
+    (inj : PathsInjective (bits wire) (indexEntries wire S)) (fields : Option (Finset CellField))
+    {cell : List UInt8} {version : Nat} {secret : List UInt8}
+    (custody : decode (maskOf wire S) = some (cell, version, secret)) :
+    OpeningRel wire decode (honestStatement wire S fields cell version) (honestWitness wire S) :=
+  ⟨rfl, ⟨secret, custody⟩, honest_accepted (deployedDig wire) (hashedAddrBits_length wire 256 addressHash) S fields inj,
+    fun a v => honest_answers selected (deployedDig wire) (hashedAddrBits wire 256 addressHash) 516 S fields
+      (admitted_of_storeFits gate) a v⟩
 
-theorem count_disjoint {α : Type} (p q : α → Bool) (disjoint : ∀ a, ¬ (p a = true ∧ q a = true)) :
-    ∀ l : List α, (l.map p).count true + (l.map q).count true ≤ l.length
-  | [] => by simp
-  | a :: l => by
-      have ih := count_disjoint p q disjoint l
-      have := disjoint a
-      cases hp : p a <;> cases hq : q a <;> simp_all [List.count_cons] <;> omega
-
-/-- The system whose proof is its witness. -/
-def revealSystem (verify : Stmt → Wit → Bool) (tapes : Nat) : ProofSystem Stmt Wit Wit tapes where
-  prove := fun _ w _ _ => w
-  verify := verify
-
-/-- The adversary asking `x` with witness `w` once, and accepting when the proof is `w`. -/
-def askOnce (x : Stmt) (w : Wit) : Adversary Stmt Wit Wit where
-  next := fun seen => if seen = [] then some (x, w) else none
-  decide := fun seen => seen == [w]
-
-/-- **Teeth**: a system that reveals its witness is not zero knowledge below one half, whenever
-one statement has two witnesses, against any budget admitting the two one-query adversaries. -/
-theorem reveal_refuted (rel : Stmt → Wit → Prop) (verify : Stmt → Wit → Bool) {tapes num den : Nat}
-    (x : Stmt) (w₁ w₂ : Wit) (distinct : w₁ ≠ w₂) (h₁ : rel x w₁) (h₂ : rel x w₂)
-    (budgeted : Adversary Stmt Wit Wit → Prop) (admits₁ : budgeted (askOnce x w₁))
-    (admits₂ : budgeted (askOnce x w₂)) (small : 2 * num < den)
-    (sim : Stmt → Fin tapes → Nat → Wit) :
-    ¬ MultiTheoremZK (revealSystem verify tapes) sim rel 1 num den budgeted := by
-  intro zk
-  have asks : ∀ w, rel x w → AsksTrue rel (askOnce x w) := fun w h seen x' w' next => by
-    simp only [askOnce] at next
-    split at next
-    · cases next; exact h
-    · cases next
-  have g₁ := zk _ admits₁ (asks w₁ h₁)
-  have g₂ := zk _ admits₂ (asks w₂ h₂)
-  have real : ∀ w, (fun t => (askOnce x w).decide (runReal (revealSystem verify tapes) (askOnce x w) t 1)) =
-      fun _ => true := fun w => by
-    funext t; simp [runReal, askOnce, revealSystem]
-  have simulated : ∀ w, (fun t => (askOnce x w).decide (runSim sim (askOnce x w) t 1)) =
-      fun t => (sim x t 0 == w) := fun w => by
-    funext t; simp [runSim, askOnce]
-  rw [real, simulated] at g₁ g₂
-  obtain ⟨positive, _, first, _⟩ := g₁
-  obtain ⟨_, _, second, _⟩ := g₂
-  have full : (List.ofFn fun (_ : Fin tapes) => true).count true = tapes := by
-    rw [List.ofFn_eq_map]; simp
-  rw [full] at first second
-  have split := count_disjoint (fun t => sim x t 0 == w₁) (fun t => sim x t 0 == w₂)
-    (fun t ⟨a, b⟩ => distinct (by simp at a b; exact a.symm.trans b)) (List.finRange tapes)
-  rw [← List.ofFn_eq_map, ← List.ofFn_eq_map, List.length_finRange] at split
-  have := Nat.mul_le_mul_right den split
-  have bound : 2 * (tapes * den) ≤ tapes * den + 2 * (num * tapes) := by nlinarith
-  have : tapes * den ≤ tapes * (2 * num) := by nlinarith
-  have := Nat.le_of_mul_le_mul_left this positive
-  omega
-
-end Teeth
-
-#assert_axioms selectiveOpening_exact
-#assert_axioms honest_statement
-#assert_axioms Ideal.complete
-#assert_axioms Ideal.sound
-#assert_axioms Ideal.zk
-#assert_axioms reveal_refuted
+#assert_axioms view_eq_of_bytes
+#assert_axioms openingRel_exact
+#assert_axioms honest_rel
+#assert_axioms outerCollision_is_hash
 
 end Minidregg.Kernel.PrivateCellOpening

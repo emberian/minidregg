@@ -65,7 +65,7 @@ open Minidregg.Theory.TypedAuthorization (CellField Digest)
 open Minidregg.Kernel.ResourceObservationAdmission
 open Minidregg.Kernel.PrivateCellScope
 open Minidregg.Theory.AuthTrie (NodeIn Reveal revealVerify root lastVal canon mem_canon CollisionAmong
-  reveal_sound revealFor reveal_complete)
+  reveal_sound revealFor reveal_complete revealFor_answer)
 open Minidregg.Theory.AuthTrie.Cache (PathsInjective wf_canon)
 open Minidregg.Compiler.PrivateCellIndex (indexEntries valueBytes indexExact)
 open Minidregg.Compiler.PrivateCellRoot (hashedAddrBits hashedAddrBits_length nodeBytesWith nodeBytesWith_injective
@@ -159,6 +159,56 @@ theorem readerPrefixes_short (fields : Option (Finset CellField)) :
       obtain ⟨outer, inNamed, rfl⟩ := member
       exact opens_length_le (bitCode 256) outer (Finset.mem_filter.mp inNamed).2
 
+/-- **The union of a reader's class answers is its view**: when every prefix's
+answer is exactly the index's live pairs under that prefix, the pairs answered
+at some reader prefix are exactly the visible entries' value bytes. The step
+`viewOpeningExact` takes after excluding collisions, and honest completeness
+takes from `revealFor_answer`. -/
+theorem unionAnswers_exact {wire : StoreCodec.Wire (CanonicalCellRegistry.layout kind)}
+    (selected : CanonicalCellRegistry.wire? kind = some wire) {D : Type}
+    {addrBits : Address (CanonicalCellRegistry.layout kind) → List Bool}
+    (store : Store (CanonicalCellRegistry.layout kind)) (fields : Option (Finset CellField))
+    (reveals : List Bool → Reveal (Address (CanonicalCellRegistry.layout kind)) (List UInt8) D)
+    (admitted : ∀ a, store a ≠ none → addressFits 256 kind a = true)
+    (answers : ∀ p ∈ readerPrefixes fields, ∀ a v, (a, v) ∈ (reveals p).answer (keyBits addrBits) p ↔
+      lastVal (indexEntries wire store) a = some v ∧ (keyBits addrBits a).take p.length = p) :
+    ∀ a v, (∃ p ∈ readerPrefixes fields, (a, v) ∈ (reveals p).answer (keyBits addrBits) p) ↔
+      ∃ value, DFinsupp.filter (Visible fields kind) store a = some value ∧ v = valueBytes wire a value := by
+  intro a v
+  have live := indexExact wire store a
+  constructor
+  · rintro ⟨p, member, answered⟩
+    obtain ⟨found, prefixed⟩ := (answers p member a v).mp answered
+    rw [live] at found
+    split_ifs at found with blind
+    obtain ⟨value, present, rfl⟩ := Option.map_eq_some_iff.mp found
+    have notBlinding : CanonicalCellRegistry.isBlinding kind a = false := by
+      cases h : CanonicalCellRegistry.isBlinding kind a
+      · rfl
+      · exact absurd ((isBlinding_iff selected a).mp h) blind
+    have fits := fits_of_addressFits (by decide) kind a (admitted a (by simp [present]))
+    have visible : Visible fields kind a := by
+      rw [← visible_fitScope 256 fields kind a fits,
+        scopeSelectsPath (bitCode 256) kind (fitScope 256 fields) a (addrBits a) (fitScope_fits 256 fields)
+          fits notBlinding]
+      exact ⟨p, member, List.prefix_iff_eq_take.mpr prefixed.symm⟩
+    exact ⟨value, by rw [DFinsupp.filter_apply_pos _ visible, present], rfl⟩
+  · rintro ⟨value, present, rfl⟩
+    by_cases visible : Visible fields kind a
+    · rw [DFinsupp.filter_apply_pos _ visible] at present
+      have fits := fits_of_addressFits (by decide) kind a (admitted a (by simp [present]))
+      have notBlinding := visible.2
+      have selects := (scopeSelectsPath (bitCode 256) kind (fitScope 256 fields) a (addrBits a)
+        (fitScope_fits 256 fields) fits notBlinding).mp ((visible_fitScope 256 fields kind a fits).mpr visible)
+      obtain ⟨p, member, prefixed⟩ := selects
+      refine ⟨p, member, (answers p member a _).mpr ⟨?_, (List.prefix_iff_eq_take.mp prefixed).symm⟩⟩
+      rw [live, if_neg (fun blind => by
+        have := (isBlinding_iff selected a).mpr blind
+        rw [notBlinding] at this; cases this), present]
+      rfl
+    · rw [DFinsupp.filter_apply_neg _ visible] at present
+      cases present
+
 theorem viewOpeningExact {wire : StoreCodec.Wire (CanonicalCellRegistry.layout kind)}
     (selected : CanonicalCellRegistry.wire? kind = some wire) : ViewOpeningExact kind wire := by
   intro D _ dig addrBits A lengths store fields reveals admitted accepted
@@ -175,40 +225,7 @@ theorem viewOpeningExact {wire : StoreCodec.Wire (CanonicalCellRegistry.layout k
             (wf_canon (keyBits_length lengths) inj) p (reveals p) (accepted p member) with same | collision
         · rw [same a v, mem_canon]
         · exact absurd collision (revealCollides p member)
-      intro a v
-      have live := indexExact wire store a
-      constructor
-      · rintro ⟨p, member, answered⟩
-        obtain ⟨found, prefixed⟩ := (answers p member a v).mp answered
-        rw [live] at found
-        split_ifs at found with blind
-        obtain ⟨value, present, rfl⟩ := Option.map_eq_some_iff.mp found
-        have notBlinding : CanonicalCellRegistry.isBlinding kind a = false := by
-          cases h : CanonicalCellRegistry.isBlinding kind a
-          · rfl
-          · exact absurd ((isBlinding_iff selected a).mp h) blind
-        have fits := fits_of_addressFits (by decide) kind a (admitted a (by simp [present]))
-        have visible : Visible fields kind a := by
-          rw [← visible_fitScope 256 fields kind a fits,
-            scopeSelectsPath (bitCode 256) kind (fitScope 256 fields) a (addrBits a) (fitScope_fits 256 fields)
-              fits notBlinding]
-          exact ⟨p, member, List.prefix_iff_eq_take.mpr prefixed.symm⟩
-        exact ⟨value, by rw [DFinsupp.filter_apply_pos _ visible, present], rfl⟩
-      · rintro ⟨value, present, rfl⟩
-        by_cases visible : Visible fields kind a
-        · rw [DFinsupp.filter_apply_pos _ visible] at present
-          have fits := fits_of_addressFits (by decide) kind a (admitted a (by simp [present]))
-          have notBlinding := visible.2
-          have selects := (scopeSelectsPath (bitCode 256) kind (fitScope 256 fields) a (addrBits a)
-            (fitScope_fits 256 fields) fits notBlinding).mp ((visible_fitScope 256 fields kind a fits).mpr visible)
-          obtain ⟨p, member, prefixed⟩ := selects
-          refine ⟨p, member, (answers p member a _).mpr ⟨?_, (List.prefix_iff_eq_take.mp prefixed).symm⟩⟩
-          rw [live, if_neg (fun blind => by
-            have := (isBlinding_iff selected a).mpr blind
-            rw [notBlinding] at this; cases this), present]
-          rfl
-        · rw [DFinsupp.filter_apply_neg _ visible] at present
-          cases present
+      exact unionAnswers_exact selected store fields reveals admitted answers
   · exact Or.inr (Or.inl collides)
 
 /-- **Premise inhabitation**: with distinct live paths, the honest reveals at a
@@ -224,6 +241,22 @@ theorem honest_accepted {wire : StoreCodec.Wire (CanonicalCellRegistry.layout ki
   intro p member
   exact reveal_complete dig (keyBits addrBits) (260 + A) (keyBits_length lengths) _
     (wf_canon (keyBits_length lengths) inj) p (by have := readerPrefixes_short fields p member; omega)
+
+
+/-- **Honest completeness of the view**: with distinct live paths, the honest
+reveals at a reader's prefixes answer exactly its view, with no collision
+alternative. -/
+theorem honest_answers {wire : StoreCodec.Wire (CanonicalCellRegistry.layout kind)}
+    (selected : CanonicalCellRegistry.wire? kind = some wire) {D : Type} [DecidableEq D]
+    (dig : NodeIn (Address (CanonicalCellRegistry.layout kind)) (List UInt8) D → D)
+    (addrBits : Address (CanonicalCellRegistry.layout kind) → List Bool) (L : Nat)
+    (store : Store (CanonicalCellRegistry.layout kind)) (fields : Option (Finset CellField))
+    (admitted : ∀ a, store a ≠ none → addressFits 256 kind a = true) :
+    ∀ a v, (∃ p ∈ readerPrefixes fields,
+        (a, v) ∈ (revealFor dig (keyBits addrBits) L (canon (indexEntries wire store)) p).answer (keyBits addrBits) p) ↔
+      ∃ value, DFinsupp.filter (Visible fields kind) store a = some value ∧ v = valueBytes wire a value :=
+  unionAnswers_exact selected store fields _ admitted fun _ _ a v => by
+    rw [revealFor_answer, mem_canon]
 
 
 
@@ -568,6 +601,8 @@ end Witness
 #assert_axioms pathsInjective_or
 #assert_axioms viewOpeningExact
 #assert_axioms honest_accepted
+#assert_axioms unionAnswers_exact
+#assert_axioms honest_answers
 #assert_axioms addressCollision_is_hash
 #assert_axioms viewOpeningExact_hashed
 #assert_axioms viewOpeningExact_deployed
