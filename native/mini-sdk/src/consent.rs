@@ -1221,7 +1221,7 @@ mod tests {
     /// its settings bytes change (a ship or a re-pinned config supersedes the binding).
     #[test]
     fn a_resident_without_idle_exit_ends_when_its_binding_is_superseded() {
-        let dir = PathBuf::from(format!("/tmp/mcs-{}", std::process::id()));
+        let dir = PathBuf::from(format!("/tmp/mcu-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir(&dir).unwrap();
         let host = crate::local::fake::codec_stub(&dir);
