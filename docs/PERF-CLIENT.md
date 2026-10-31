@@ -32,7 +32,8 @@ Staging 7fee25ff's `mini` (it carries the exorcist's batches) unless said otherw
 | 6 | `workspace::recheck_commitment` | one Host key-status round trip per `mini` process, before any verb | a verb process per ssh command makes "once per process" once per command | a missing-reference `doc show` still spends 30 ms of Host CPU at load 30 (op 144, 4 to 5 ms idle) | open (a security check; the Host op is the exorcist's) | open |
 | 7 | `shell.rs` `history` (web `/receipts`, `history all`) | reads every retained attempt directory per page | a page shows the newest few | O(attempts): 11 to 13 ms at ~40 attempts here, 45 to 68 ms at ~700 (explorer) | an attempt index, newest first | open |
 | 8 | resident footprint | each member's resident consent provider and codec Host do byte-identical work (one binding for every hosted member of a box) | one verifier per box serves them all | per member ~87 MB PSS (provider 56 to 90 MB private, growing with history; codec 12 MB); code pages (~150 MB) are shared once per box | single tenancy: one resident directory per box (`/etc/mini/session-residents`, dev config `residents`); split tenancy (the demo) HELD for ember's ruling on who verifies for a member | ae39dfeb4: 5 members 582 to 311 MB PSS, 5 to 2 providers (the sponsor's config is another binding) |
-| 9 | `Kernel.World` `World.admit` -> `pinCheck` -> `pinFails` -> `DeployedBridge.cellRoot`; `WorldCompact.compactEvery` | re-encodes a cell to compare its root on every record; compacts every cell of the World every 32 heights | the executed snapshot already holds each cell's root | 16% of a warm catch-up; compaction O(World) ~2% of hot-path's story profile and growing | next | next |
+| 9 | `Kernel.World` `World.admit` -> `pinCheck` -> `pinFails` -> `DeployedBridge.cellRoot` (in `WorldTrack.advance`) | re-encodes the World's own copy of every pinned cell (a fresh value after each write, its byte cache cold) to compare its root, per record | the executed snapshot already holds those cells' canonical bytes | 16% of a warm catch-up; the Host's append runs the same advance | pins judged from the snapshot's bytes (`snapPinFails`, proved equal at a represented World); `World.admitPinned` with `admit_eq_admitPinned` (rfl) | 5415aecf7: lane-check green; awaits a Host/consent build for the number |
+| 9b | `Compiler/WorldCompact.compactEvery` | rebuilds every cell's store and the cell map every 32 heights | only cells written since the last compaction changed | O(World) per 32 records (2% of hot-path's story profile, growing) | a World map without closure chains (each update O(log n)), or compaction of the cells written since the last one | open |
 | 10 | split tenancy: `mini-shell-ssh` (dregg-infra) and `mini-web-spawn` `delegated_consent_env` | `sha256sum` of the 194 MB consent provider and the config per ssh command / per body start | the worker already holds both digests | 176 ms per ssh command where `consent/peer.sock` exists | infra's wrapper | open |
 | 11 | world bring-up (`jworld-scratch.sh up`, dregg-infra) | 219 s for a five-member scratch world | | every measurement world and journey pays it | for whoever owns world bring-up | noted |
 
@@ -56,4 +57,7 @@ Memory method: `smaps_rollup` Pss and Private over the resident processes (`cons
 
 ## Landed
 
-Batch 1 (lane/perf-client 4a962d506, staging merged in): rows 1, 2, 4, 8 (single tenancy).
+Batch 1 (f883af161, staging merged in; staging d24b3e761, batch 6): rows 1, 2, 4, 8 (single tenancy).
+Follow-up 59dd7ded4 (staging db074a736, batch 6): a resident also ends when the Store its settings name
+(`storageRoot`) is removed (the explorer's world-down finding); `chargeWith`'s docstring names its caller's duty.
+Batch 2 (5415aecf7): row 9.
