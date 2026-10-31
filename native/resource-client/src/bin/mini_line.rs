@@ -32,8 +32,8 @@ use std::ffi::{OsStr, OsString};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
-use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt};
+use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -51,31 +51,7 @@ fn exec(mini: &OsStr, args: &[OsString]) -> ExitCode {
 /// The first line of a file the box's operator wrote, without surrounding blanks; `None` when it
 /// cannot be opened (absent or unreadable: the setting is not made). A file that opens but does
 /// not read is an empty line, which every caller refuses.
-fn first_line(path: &Path) -> Option<Vec<u8>> {
-    let mut bytes = Vec::new();
-    let _ = File::open(path).ok()?.take(4096).read_to_end(&mut bytes);
-    let line = bytes.split(|b| *b == b'\n').next().unwrap_or_default();
-    let blank = |b: &u8| *b == b' ' || *b == b'\t' || *b == b'\r';
-    let start = line.iter().position(|b| !blank(b)).unwrap_or(line.len());
-    let end = line.iter().rposition(|b| !blank(b)).map_or(start, |e| e + 1);
-    Some(line[start..end].to_vec())
-}
-
-fn absolute(bytes: &[u8]) -> Option<OsString> {
-    bytes.starts_with(b"/").then(|| OsString::from_vec(bytes.to_vec()))
-}
-
-fn is_digest(word: &[u8]) -> bool {
-    word.len() == 64 && word.iter().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(b))
-}
-
-fn sha256_file(path: &Path) -> Result<String, String> {
-    use sha2::Digest;
-    let mut file = File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let mut hasher = sha2::Sha256::new();
-    std::io::copy(&mut file, &mut hasher).map_err(|e| format!("{}: {e}", path.display()))?;
-    Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
-}
+use mini_session_env::{absolute, first_line};
 
 /// The session's environment from the box's settings, each read once. `Err` is the refusal (78).
 fn session_environment(mini: &Path, host: &OsStr, config: &OsStr, home: &Path) -> Result<(), String> {
@@ -106,46 +82,13 @@ fn session_environment(mini: &Path, host: &OsStr, config: &OsStr, home: &Path) -
     if std::env::var_os("MINI_CONSENT_ANCHOR_DIR").is_none() {
         std::env::set_var("MINI_CONSENT_ANCHOR_DIR", home.join(".mini/consent-anchors"));
     }
-    // Delegated full consent (split tenancy; mini-consent@NAME.socket, rendered per hosted
-    // member): a member's client cannot read the operator's Store to replay it, so it asks the
-    // operator's worker over HOME/consent/peer.sock. The client pins the listener (systemd's,
-    // uid 0), the consent executable and the pinned config by sha256; the worker computes the same
-    // pins from the same files. The ship renders both digests once into HOME/consent/peer.pins
-    // (root 0644, one line: `CONSENT_SHA256 CONFIG_SHA256`, 64 lowercase hex each), so no command
-    // hashes the 190 MB provider. A box without that file (shipped before it existed) hashes here.
-    let peer = home.join("consent/peer.sock");
-    if std::fs::metadata(&peer).is_ok_and(|m| m.file_type().is_socket()) {
-        let consent_host = mini.parent().unwrap_or(Path::new("/")).join("minidregg-client-consent");
-        let pins = home.join("consent/peer.pins");
-        let (consent, settings) = match first_line(&pins) {
-            Some(line) => {
-                let mut words = line.split(|b| *b == b' ' || *b == b'\t').filter(|w| !w.is_empty());
-                match (words.next(), words.next()) {
-                    (Some(a), Some(b)) if is_digest(a) && is_digest(b) => {
-                        (String::from_utf8_lossy(a).into_owned(), String::from_utf8_lossy(b).into_owned())
-                    }
-                    _ => return Err(format!("{} must hold two sha256 digests", pins.display())),
-                }
-            }
-            None => (sha256_file(&consent_host)?, sha256_file(Path::new(config))?),
-        };
-        std::env::set_var("MINI_CONSENT_SOCKET", &peer);
-        std::env::set_var("MINI_CONSENT_PEER_UID", "0");
-        // The client takes a durable consent selection only with all three of these beside it.
-        std::env::set_var("MINI_CONSENT_HOST", &consent_host);
-        std::env::set_var("MINI_LOCAL_HOST", host);
-        std::env::set_var("MINI_CONSENT_CONFIG", config);
-        std::env::set_var("MINI_CONSENT_SHA256", consent);
-        std::env::set_var("MINI_CONSENT_CONFIG_SHA256", settings);
+    // Delegated full consent and the box's shared codec Host (split tenancy), as the web body
+    // takes them (`mini_session_env`).
+    for (name, value) in mini_session_env::delegated_consent(mini, Path::new(host), Path::new(config), home)? {
+        std::env::set_var(name, value);
     }
-    // The box's shared codec Host (split tenancy): /etc/mini/session-codec (root 0644, one
-    // absolute socket path, `mini serve-codec`'s systemd listener in a directory of the sessions'
-    // group). Every member's codec frames go there; the client refuses unless it greets with this
-    // session's own Host image and settings digests.
-    if let Some(line) = first_line(Path::new("/etc/mini/session-codec")) {
-        let socket = absolute(&line).ok_or("/etc/mini/session-codec must name an absolute socket")?;
-        std::env::set_var("MINI_CODEC_SOCKET", socket);
-        std::env::set_var("MINI_CODEC_PEER_UID", "0");
+    for (name, value) in mini_session_env::shared_codec(Path::new("/etc/mini/session-codec"))? {
+        std::env::set_var(name, value);
     }
     Ok(())
 }

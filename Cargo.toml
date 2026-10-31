@@ -16,6 +16,7 @@ members = [
   "native/mini-keys",
   "native/mini-sdk",
   "native/mini-streams",
+  "native/mini-session-env",
   "native/compatible-upgrade-custody",
   "native/signed-api-path",
   "native/spk-rpc",

@@ -15,6 +15,7 @@ name = "mini-line"
 path = "src/bin/mini_line.rs"
 
 [dependencies]
+minidregg-mini-session-env = { path = "../mini-session-env" }
 minidregg-mini-streams = { path = "../mini-streams" }
 libc = "=0.2.189"
 # Client-general custody primitives: durable writes, flock, secret-file loading, hex, decimals.
