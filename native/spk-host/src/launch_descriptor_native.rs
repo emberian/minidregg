@@ -40,11 +40,162 @@ const SOURCE_CHILD_DEADLINE: Duration = Duration::from_secs(600);
 /// Pure offline Host author/inspect. `Host.Main` loads Settings but these two
 /// branches do not open or mutate the Store. This is distinct from the live
 /// socket-bound PrivateOperator used for lifecycle admission.
+///
+/// The steps of one qualification go to ONE storeless codec child (`HOST CONFIG codec`,
+/// `Host.Main.serveCodec`: frames 7 and 8 are the detached `author` and `inspect` verbs, it never
+/// opens a Store), started at the first step and ended with this value. A child that cannot be
+/// started or ends without answering leaves the step to the detached verb, as before; a step whose
+/// frame exceeds the codec bound is a detached verb too.
 pub(crate) struct OfflineSourceHost {
     pub host: PathBuf,
     pub host_sha256: String,
     pub config: PathBuf,
     pub config_sha256: String,
+    pub codec: std::sync::Mutex<CodecSlot>,
+}
+
+/// The qualification's codec child: not yet started, running, or unavailable (the detached verb
+/// answers every later step).
+#[derive(Default)]
+pub(crate) enum CodecSlot {
+    #[default]
+    Unstarted,
+    Running(CodecChild),
+    Unavailable,
+}
+
+/// The codec frame bound (`HOST_MAX_FRAME`): a length prefix counts the operation byte.
+const CODEC_FRAME_BOUND: usize = 12_102_760;
+
+pub(crate) struct CodecChild {
+    child: std::process::Child,
+    input: std::process::ChildStdin,
+    output: std::process::ChildStdout,
+}
+
+/// Why a codec exchange did not answer: the child is gone or misbehaved (the step falls back to
+/// the detached verb), or the deadline passed (the step fails, as a detached verb past it does).
+enum CodecFailure {
+    Lost,
+    Deadline,
+}
+
+impl CodecChild {
+    fn spawn(host: &Path, config: &Path) -> io::Result<Self> {
+        use std::os::fd::AsRawFd;
+        let mut child = Command::new(host)
+            .arg(config)
+            .arg("codec")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()?;
+        let (Some(input), Some(output)) = (child.stdin.take(), child.stdout.take()) else {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(invalid("offline codec pipes absent"));
+        };
+        for fd in [input.as_raw_fd(), output.as_raw_fd()] {
+            // Non-blocking, so every write and read is bounded by the step's deadline.
+            let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+            if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(io::Error::last_os_error());
+            }
+        }
+        Ok(CodecChild { child, input, output })
+    }
+
+    fn wait_ready(fd: i32, events: i16, deadline: Instant) -> Result<(), CodecFailure> {
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(CodecFailure::Deadline);
+            }
+            let mut poll = libc::pollfd { fd, events, revents: 0 };
+            let millis = remaining.as_millis().clamp(1, i32::MAX as u128) as i32;
+            match unsafe { libc::poll(&mut poll, 1, millis) } {
+                0 => continue,
+                n if n > 0 => return Ok(()),
+                _ if io::Error::last_os_error().kind() == io::ErrorKind::Interrupted => continue,
+                _ => return Err(CodecFailure::Lost),
+            }
+        }
+    }
+
+    fn write_all(&mut self, mut bytes: &[u8], deadline: Instant) -> Result<(), CodecFailure> {
+        use std::io::Write;
+        use std::os::fd::AsRawFd;
+        while !bytes.is_empty() {
+            Self::wait_ready(self.input.as_raw_fd(), libc::POLLOUT, deadline)?;
+            match self.input.write(bytes) {
+                Ok(0) => return Err(CodecFailure::Lost),
+                Ok(count) => bytes = &bytes[count..],
+                Err(error) if matches!(error.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted) => {}
+                Err(_) => return Err(CodecFailure::Lost),
+            }
+        }
+        Ok(())
+    }
+
+    fn read_exact(&mut self, bytes: &mut [u8], deadline: Instant) -> Result<(), CodecFailure> {
+        use std::os::fd::AsRawFd;
+        let mut received = 0;
+        while received < bytes.len() {
+            Self::wait_ready(self.output.as_raw_fd(), libc::POLLIN, deadline)?;
+            match self.output.read(&mut bytes[received..]) {
+                Ok(0) => return Err(CodecFailure::Lost),
+                Ok(count) => received += count,
+                Err(error) if matches!(error.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted) => {}
+                Err(_) => return Err(CodecFailure::Lost),
+            }
+        }
+        Ok(())
+    }
+
+    /// One frame out (`u32 LE length, operation, payload`), one frame in: the answering operation
+    /// and its body.
+    fn exchange(&mut self, operation: u8, payload: &[u8], deadline: Instant) -> Result<(u8, Vec<u8>), CodecFailure> {
+        let size = u32::try_from(payload.len() + 1).map_err(|_| CodecFailure::Lost)?;
+        let mut frame = Vec::with_capacity(payload.len() + 5);
+        frame.extend_from_slice(&size.to_le_bytes());
+        frame.push(operation);
+        frame.extend_from_slice(payload);
+        self.write_all(&frame, deadline)?;
+        let mut width = [0u8; 4];
+        self.read_exact(&mut width, deadline)?;
+        let size = u32::from_le_bytes(width) as usize;
+        if size == 0 || size > CODEC_FRAME_BOUND {
+            return Err(CodecFailure::Lost);
+        }
+        let mut answer = vec![0u8; size];
+        self.read_exact(&mut answer, deadline)?;
+        let body = answer.split_off(1);
+        Ok((answer[0], body))
+    }
+}
+
+impl Drop for CodecChild {
+    fn drop(&mut self) {
+        // A pure child holds nothing worth a goodbye: end it and reap it.
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// A codec step's answer, written where the detached verb would have written it: a new private
+/// file, never through a link.
+fn write_new_output(output: &Path, bytes: &[u8]) -> io::Result<()> {
+    use std::io::Write;
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(output)
+        .ctx("open", output)?;
+    file.write_all(bytes)
 }
 
 fn read_private(path: &Path, bound: u64) -> io::Result<Vec<u8>> {
@@ -103,6 +254,89 @@ impl OfflineSourceHost {
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => return Err(error),
         }
+        let deadline = Instant::now() + timeout;
+        if !self.codec_step(command, kind, &input_bytes, output, deadline)? {
+            self.detached_step(command, kind, input, output, deadline)?;
+        }
+        self.checked_output(command, input, limit, &input_bytes, output)
+    }
+
+    /// The step on this qualification's codec child. `false`: no child can answer it (none could
+    /// be started, the child ended without answering, or the frame exceeds the codec bound), and
+    /// the detached verb runs it. A refusal is the step's refusal; the deadline is the step's.
+    fn codec_step(
+        &self,
+        command: &str,
+        kind: &str,
+        input_bytes: &[u8],
+        output: &Path,
+        deadline: Instant,
+    ) -> io::Result<bool> {
+        use crate::host_operations::{AUTHOR, INSPECT, RESPONSE_HOST_OUTCOME, RESPONSE_NO_RECORD};
+        let operation = match command {
+            "author" => AUTHOR,
+            "inspect" => INSPECT,
+            _ => return Ok(false),
+        };
+        if kind.is_empty() || kind.len() > u16::MAX as usize
+            || 1 + 2 + kind.len() + input_bytes.len() > CODEC_FRAME_BOUND
+        {
+            return Ok(false);
+        }
+        let mut payload = Vec::with_capacity(2 + kind.len() + input_bytes.len());
+        payload.extend_from_slice(&(kind.len() as u16).to_le_bytes());
+        payload.extend_from_slice(kind.as_bytes());
+        payload.extend_from_slice(input_bytes);
+        let mut slot = self.codec.lock().map_err(|_| invalid("offline codec lock poisoned"))?;
+        if matches!(*slot, CodecSlot::Unstarted) {
+            *slot = match CodecChild::spawn(&self.host, &self.config) {
+                Ok(child) => CodecSlot::Running(child),
+                Err(_) => CodecSlot::Unavailable,
+            };
+        }
+        let CodecSlot::Running(child) = &mut *slot else {
+            return Ok(false);
+        };
+        match child.exchange(operation, &payload, deadline) {
+            Ok((answer, body)) if answer == operation => {
+                if body.is_empty() {
+                    *slot = CodecSlot::Unavailable;
+                    return Err(invalid("pinned offline Mini Host author/inspect refused"));
+                }
+                write_new_output(output, &body)?;
+                Ok(true)
+            }
+            Ok((answer, _)) if answer == RESPONSE_NO_RECORD || answer == RESPONSE_HOST_OUTCOME => {
+                Err(invalid("pinned offline Mini Host author/inspect refused"))
+            }
+            Ok(_) => {
+                // Answered out of turn: this child is not trusted with another frame.
+                *slot = CodecSlot::Unavailable;
+                Err(invalid("pinned offline Mini Host codec answered out of turn"))
+            }
+            Err(CodecFailure::Lost) => {
+                *slot = CodecSlot::Unavailable;
+                Ok(false)
+            }
+            Err(CodecFailure::Deadline) => {
+                *slot = CodecSlot::Unavailable;
+                Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "pinned offline Mini Host source deadline",
+                ))
+            }
+        }
+    }
+
+    /// The step as the detached `HOST CONFIG VERB KIND INPUT OUTPUT`, one process.
+    fn detached_step(
+        &self,
+        command: &str,
+        kind: &str,
+        input: &Path,
+        output: &Path,
+        deadline: Instant,
+    ) -> io::Result<()> {
         let mut child = Command::new(&self.host)
             .arg(&self.config)
             .arg(command)
@@ -113,7 +347,6 @@ impl OfflineSourceHost {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()?;
-        let deadline = Instant::now() + timeout;
         let status = loop {
             match child.try_wait() {
                 Ok(Some(status)) => break status,
@@ -136,6 +369,19 @@ impl OfflineSourceHost {
         if !status.success() {
             return Err(invalid("pinned offline Mini Host author/inspect refused"));
         }
+        Ok(())
+    }
+
+    /// The step's output as the next step reads it: one private regular file of this uid within
+    /// the bound, with the pin and the input unchanged since the step began.
+    fn checked_output(
+        &self,
+        command: &str,
+        input: &Path,
+        limit: u64,
+        input_bytes: &[u8],
+        output: &Path,
+    ) -> io::Result<Vec<u8>> {
         let mut file = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NOFOLLOW)
@@ -219,6 +465,7 @@ pub fn qualify_launch(config_path: &Path) -> io::Result<Value> {
         host_sha256: config.mini_host_sha256,
         config: config.mini_config,
         config_sha256: config.mini_config_sha256,
+        codec: Default::default(),
     };
     source_host.check_pin()?;
     let (package, _) = qualify_bridge_spk_with_profile(&config.source_spk, import_profile)?;
@@ -446,6 +693,7 @@ mod tests {
             config_sha256: hex(&Sha256::digest(fs::read(&config).unwrap())),
             host,
             config,
+            codec: Default::default(),
         };
         (root, source, input, output)
     }
@@ -537,6 +785,98 @@ mod tests {
             .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::TimedOut);
         assert!(started.elapsed() < Duration::from_secs(2));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A mock Host that speaks the codec loop: each frame `7|8, u16 kind length, kind, input`
+    /// is answered with the same operation and `kind:input`, except the kind `refuse`, answered
+    /// with the outcome marker 255. Every start appends its mode to `starts`.
+    fn codec_mock(root: &Path) -> String {
+        const MOCK: &str = r#"#!/usr/bin/env python3
+import sys, struct
+open(STARTS, 'a').write(sys.argv[2] + '\n')
+if sys.argv[2] != 'codec':
+    d = open(sys.argv[4], 'rb').read()
+    open(sys.argv[5], 'wb').write(sys.argv[3].encode() + b':' + d)
+    sys.exit(0)
+i, o = sys.stdin.buffer, sys.stdout.buffer
+while True:
+    h = i.read(4)
+    if len(h) < 4:
+        break
+    f = i.read(struct.unpack('<I', h)[0])
+    op = f[0]
+    n = struct.unpack('<H', f[1:3])[0]
+    k, d = f[3:3 + n], f[3 + n:]
+    a = bytes([255]) + b'refused' if k == b'refuse' else bytes([op]) + k + b':' + d
+    o.write(struct.pack('<I', len(a)) + a)
+    o.flush()
+"#;
+        MOCK.replace("STARTS", &format!("{:?}", root.join("starts").display().to_string()))
+    }
+
+    #[test]
+    fn offline_steps_share_one_codec_child_and_answer_as_the_detached_verb() {
+        let (root, source, input, _output) = offline_fixture("#!/bin/sh\nexit 1\n");
+        fs::write(&source.host, codec_mock(&root)).unwrap();
+        let source = OfflineSourceHost {
+            host_sha256: hex(&Sha256::digest(fs::read(&source.host).unwrap())),
+            ..source
+        };
+        let mut answers = Vec::new();
+        for (index, step) in [SourceStep::AuthorSchema, SourceStep::InspectSchema, SourceStep::AuthorLaunch]
+            .into_iter()
+            .enumerate()
+        {
+            let output = root.join(format!("out-{index}.bin"));
+            let (_, kind) = step.command_kind();
+            let bytes = source.run_step(step, &input, &output, Duration::from_secs(5)).unwrap();
+            assert_eq!(bytes, [kind.as_bytes(), b":original"].concat());
+            assert_eq!(fs::read(&output).unwrap(), bytes);
+            assert_eq!(fs::metadata(&output).unwrap().permissions().mode() & 0o777, 0o600);
+            answers.push(bytes);
+        }
+        // One codec child answered all three; no detached verb ran.
+        assert_eq!(fs::read_to_string(root.join("starts")).unwrap(), "codec\n");
+        // The detached verb's answer for the same step is the same bytes.
+        *source.codec.lock().unwrap() = CodecSlot::Unavailable;
+        let detached = source
+            .run_step(SourceStep::AuthorSchema, &input, &root.join("detached.bin"), Duration::from_secs(5))
+            .unwrap();
+        assert_eq!(detached, answers[0]);
+        assert_eq!(fs::read_to_string(root.join("starts")).unwrap(), "codec\nauthor\n");
+        drop(source);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn offline_codec_refusal_is_the_steps_refusal_and_a_lost_child_falls_back() {
+        let (root, source, input, _output) = offline_fixture("#!/bin/sh\nexit 1\n");
+        fs::write(&source.host, codec_mock(&root)).unwrap();
+        let source = OfflineSourceHost {
+            host_sha256: hex(&Sha256::digest(fs::read(&source.host).unwrap())),
+            ..source
+        };
+        let refused = root.join("refused.bin");
+        let error = source.codec_step("author", "refuse", b"x", &refused, Instant::now() + Duration::from_secs(5))
+            .unwrap_err();
+        assert!(error.to_string().contains("refused"), "{error}");
+        assert!(fs::symlink_metadata(&refused).is_err());
+        // The child that refused still serves the next step.
+        let output = root.join("after.bin");
+        source.run_step(SourceStep::InspectPackage, &input, &output, Duration::from_secs(5)).unwrap();
+        assert_eq!(fs::read_to_string(root.join("starts")).unwrap(), "codec\n");
+        // A child that ends without answering leaves the step to the detached verb.
+        if let CodecSlot::Running(child) = &mut *source.codec.lock().unwrap() {
+            let _ = child.child.kill();
+            let _ = child.child.wait();
+        }
+        let output = root.join("fallback.bin");
+        let bytes = source.run_step(SourceStep::AuthorPackage, &input, &output, Duration::from_secs(5)).unwrap();
+        assert_eq!(bytes, b"application-spk-package-identity:original");
+        assert_eq!(fs::read_to_string(root.join("starts")).unwrap(), "codec\nauthor\n");
+        assert!(matches!(*source.codec.lock().unwrap(), CodecSlot::Unavailable));
+        drop(source);
         fs::remove_dir_all(root).unwrap();
     }
 
