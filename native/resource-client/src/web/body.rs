@@ -622,7 +622,6 @@ fn publish_form(name: &str, subject: &str) -> String {
 fn import_inbox(site: &Site) {
     let Some(shell) = site.shell.as_ref() else { return };
     let Ok(entries) = fs::read_dir(shell.home.join("inbox")) else { return };
-    let Ok(exe) = std::env::current_exe() else { return };
     let held: Vec<String> = site
         .names()
         .iter()
@@ -657,16 +656,8 @@ fn import_inbox(site: &Site) {
                 }
             }
         }
-        let status = Command::new(&exe)
-            .arg("workspace").arg("--action").arg("import").arg("--dir").arg(&site.root).arg("--name").arg(&chosen).arg("--from-ref").arg(&file)
-            .env_clear().env("PATH", "/usr/bin:/bin").env("HOME", &shell.home)
-            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::inherit())
-            .status();
-        // The import's own refusal is on the inherited stderr above; this line says which hint it was.
-        match status {
-            Ok(status) if status.success() => {}
-            Ok(status) => eprintln!("mini web --body: inbox {} not imported as {chosen}: workspace import {status}", file.display()),
-            Err(error) => eprintln!("mini web --body: inbox {} not imported as {chosen}: {error}", file.display()),
+        if let Err(error) = workspace::import_delegated(&site.root, &site.workspace, &chosen, &file) {
+            eprintln!("mini web --body: inbox {} not imported as {chosen}: {error}", file.display());
         }
     }
 }
@@ -1048,25 +1039,16 @@ impl Ending {
     }
 }
 
-/// Plan one line as this member without running it (`mini shell --line L --plan`): the shell's
-/// parser and plan builder, no Host.
+/// Plan one line as this member without running it: the shell's parser and plan builder, in this
+/// process (`shell::plan_ending`, what `mini shell --line L --plan` prints), no Host.
 pub(super) fn plan_line(site: &Site, line: &str) -> Option<Ending> {
     let shell = site.shell.as_ref()?;
-    let exe = std::env::current_exe().ok()?;
     if line.bytes().any(|b| b.is_ascii_control()) {
         return Some(Ending { code: 2, stdout: String::new(), stderr: "usage: a form field contains a control character\n".into() });
     }
-    let mut command = Command::new(exe);
-    command.arg("shell");
-    if let Some(socket) = super::super::SOCKET.get() {
-        command.arg("--socket").arg(socket);
-    }
-    let output = command
-        .arg("--workspace").arg(&site.root).arg("--home").arg(&shell.home).arg("--host").arg(&shell.host).arg("--config").arg(&shell.config)
-        .arg("--line").arg(line).arg("--plan")
-        .env_clear().env("PATH", "/usr/bin:/bin").env("HOME", &shell.home)
-        .stdin(Stdio::null()).output().ok()?;
-    Some(Ending { code: output.status.code().unwrap_or(1), stdout: String::from_utf8_lossy(&output.stdout).into_owned(), stderr: String::from_utf8_lossy(&output.stderr).into_owned() })
+    let session = crate::shell::Session { workspace: site.root.clone(), home: shell.home.clone(), host: shell.host.clone(), config: shell.config.clone() };
+    let (code, stdout, stderr) = crate::shell::plan_ending(&session, line);
+    Some(Ending { code, stdout, stderr })
 }
 
 /// From 10 November 2026 (UTC) the member's front page points at the export.

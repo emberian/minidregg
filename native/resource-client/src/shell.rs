@@ -2257,6 +2257,18 @@ fn describe_plan(planned: &Plan) -> String {
     }
 }
 
+/// `--plan` for one line, run nothing: (exit code, stdout, stderr). The grammar accepted the words
+/// but the plan builder refused on a fact of this workspace (an open room given a private room's
+/// declaration, a template file that does not parse): exit 1, named as such. The grammar's own
+/// refusal: usage.
+pub(crate) fn plan_ending(session: &Session, text: &str) -> (i32, String, String) {
+    match plan(session, text) {
+        Ok(planned) => (EXIT_OK, format!("plan: {}\n", describe_plan(&planned)), String::new()),
+        Err(message) if grammar_accepts(text) => (EXIT_CLIENT, String::new(), format!("error: parsed, not plannable here: {message}\n")),
+        Err(message) => (EXIT_USAGE, String::new(), render(&Ending::Usage(message)).1),
+    }
+}
+
 /// Run one line; returns (exit code, keep going).
 pub(crate) fn line(session: &Session, text: &str) -> (i32, bool) {
     let started = std::time::Instant::now();
@@ -2603,23 +2615,10 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     let code = if let Some(one) = one {
         let text = one.into_string().map_err(|_| "--line must be UTF-8")?;
         if plan_only {
-            match plan(&session, &text) {
-                Ok(planned) => {
-                    println!("plan: {}", describe_plan(&planned));
-                    EXIT_OK
-                }
-                // The grammar accepted the words but the plan builder refused on a fact of this
-                // workspace (an open room given a private room's declaration, a template file
-                // that does not parse): exit 1, named as such. The grammar's own refusal: usage.
-                Err(message) if grammar_accepts(&text) => {
-                    eprintln!("error: parsed, not plannable here: {message}");
-                    EXIT_CLIENT
-                }
-                Err(message) => {
-                    eprint!("{}", render(&Ending::Usage(message)).1);
-                    EXIT_USAGE
-                }
-            }
+            let (code, out, err) = plan_ending(&session, &text);
+            print!("{out}");
+            eprint!("{err}");
+            code
         } else {
             line(&session, &text).0
         }
