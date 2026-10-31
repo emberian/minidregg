@@ -77,7 +77,9 @@ lowering into Air only where useful, never as a second compiler for the opening.
    the claim fails as deployed. Over about 80 `doc new` writes, consent CPU per write goes 118 → 240 ms and Host CPU
    174 → 540 ms, with `AuthTrie.strip` (whole-trie build) and keccak on top. Cause: cells are decoded from bytes per
    write and rebuilt by `keptBuild`; O(delta·516) holds only for cells patched from a held, forced pre-cell.
-   Fixes are outside this layer: the consent walk holds and patches its cells (member-side); the Host's writers
+   Fixes: member-side's a014ff501 (reviewed) adds `Materialized.relativeTo held decoded` to `Theory/CellState.lean`
+   (the held cell's index moved by `Carried.run` over `Patch.diff`; `relativeTo_eq`), used by `loadDeploymentFromAt`
+   on a walk, so hashing is O(changed · 516); decode and diff stay O(cell). Still open: the Host's writers
    adopt the held post-cell as the birth path does (store-retained, bdfa9428c); or the index is persisted beside
    the bytes (hot-path). Re-measure against the baseline once they land: b9450147f doc-log write ~2.0 s at 13
    prior entries, ~6.1 s at 303.
