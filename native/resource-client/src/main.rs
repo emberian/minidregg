@@ -2132,6 +2132,7 @@ fn submit_once(
         "intent.json"
     });
     copy_new(intent, &retained_intent)?;
+    workspace::index_retained_intent(directory, &fs::read(&retained_intent).map_err(|e| e.to_string())?)?;
     let retained_config = directory.join("config.json");
     copy_new(config, &retained_config)?;
     write_manifest(directory, host, &retained_config, "submit")?;
@@ -2251,6 +2252,7 @@ pub(crate) fn dry_run(
         "intent.json"
     });
     copy_new(intent, &retained_intent)?;
+    workspace::index_retained_intent(directory, &fs::read(&retained_intent).map_err(|e| e.to_string())?)?;
     let retained_config = directory.join("config.json");
     copy_new(config, &retained_config)?;
     write_manifest(directory, host, &retained_config, "dry-run")?;
@@ -2367,6 +2369,7 @@ fn query_once(
         "intent.json"
     });
     copy_new(intent, &retained_intent)?;
+    workspace::index_retained_intent(directory, &fs::read(&retained_intent).map_err(|e| e.to_string())?)?;
     let retained_config = directory.join("config.json");
     copy_new(config, &retained_config)?;
     write_manifest(directory, host, &retained_config, "query")?;

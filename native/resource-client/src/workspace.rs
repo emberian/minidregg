@@ -3723,17 +3723,90 @@ fn record_replan_reason(attempt: &Path, class: &str, decision: Option<&crate::Ho
     }
 }
 
+/// The retained intent copy of an attempt, by kind: its bytes identify the intent.
+const RETAINED_INTENTS: [&str; 2] = ["intent.json", "intent-source.bin"];
+
+/// The attempt index (`WORKSPACE/attempt-index/by-intent/SHA256/ATTEMPT`, empty files): which
+/// attempts retain an intent with these bytes, so a submission finds an earlier attempt of the
+/// same intent without reading every attempt the workspace retains (law 17). Every attempt that
+/// retains an intent copy is indexed when the copy is retained, before a call can be sealed in it
+/// (`index_retained_intent`, from the one retention in `main.rs`). `complete` records that the
+/// attempts retained before the index existed were indexed (once per workspace).
+fn attempt_index(root: &Path) -> PathBuf {
+    root.join("attempt-index").join("by-intent")
+}
+
+fn intent_key(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+fn index_entry(index: &Path, bytes: &[u8], attempt: &OsStr) -> Result<()> {
+    let bucket = index.join(intent_key(bytes));
+    crate::fsio::ensure_private_dir_all(&bucket)?;
+    match OpenOptions::new().write(true).create_new(true).mode(0o600).open(bucket.join(attempt)) {
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(error) => Err(format!("attempt index {}: {error}", bucket.display())),
+    }
+}
+
+/// Index an attempt directory under its present name (after a rename moved it aside).
+fn index_attempt_dir(attempt: &Path) -> Result<()> {
+    for retained in RETAINED_INTENTS {
+        if let Ok(bytes) = fs::read(attempt.join(retained)) {
+            index_retained_intent(attempt, &bytes)?;
+        }
+    }
+    Ok(())
+}
+
+/// Index the attempts retained before the index existed, then record that it was done.
+fn index_existing_attempts(root: &Path, index: &Path) -> Result<()> {
+    if let Ok(entries) = fs::read_dir(root.join("attempts")) {
+        for entry in entries.flatten() {
+            for retained in RETAINED_INTENTS {
+                if let Ok(bytes) = fs::read(entry.path().join(retained)) {
+                    index_entry(index, &bytes, &entry.file_name())?;
+                }
+            }
+        }
+    }
+    create_private(&index.join("complete"), b"").or_else(|error| {
+        if index.join("complete").is_file() { Ok(()) } else { Err(error) }
+    })
+}
+
+/// Record that `attempt` (a directory under `WORKSPACE/attempts`) retains an intent with these
+/// bytes. Attempts kept elsewhere (an app worker's own directories) are not submissions this
+/// workspace's rerun check reads.
+pub(crate) fn index_retained_intent(attempt: &Path, bytes: &[u8]) -> Result<()> {
+    let (Some(parent), Some(name)) = (attempt.parent(), attempt.file_name()) else { return Ok(()) };
+    if parent.file_name() != Some(OsStr::new("attempts")) {
+        return Ok(());
+    }
+    let Some(root) = parent.parent() else { return Ok(()) };
+    index_entry(&attempt_index(root), bytes, name)
+}
+
 /// A second submission of an intent that an earlier attempt of this workspace already holds is
 /// refused unless that attempt is decided as refused or never sealed a call: the attempt is the
 /// intent's record, and a rerun after a lost reply must look up its exact call, not author a second
 /// one (review §5.2 P4). The retained copy (`intent.json`, or `intent-source.bin` for binary
-/// intents) identifies it, byte for byte.
+/// intents) identifies it, byte for byte. The candidates come from the attempt index (the
+/// attempts retaining these bytes), each still compared byte for byte.
 fn refuse_rerun(root: &Path, source: &Path, kind: &str) -> Result<()> {
     let retained = if kind == "binary" { "intent-source.bin" } else { "intent.json" };
     let bytes = fs::read(source).map_err(|e| format!("cannot read {}: {e}", source.display()))?;
-    let Ok(entries) = fs::read_dir(root.join("attempts")) else { return Ok(()) };
+    if !root.join("attempts").is_dir() {
+        return Ok(());
+    }
+    let index = attempt_index(root);
+    if !index.join("complete").is_file() {
+        index_existing_attempts(root, &index)?;
+    }
+    let Ok(entries) = fs::read_dir(index.join(intent_key(&bytes))) else { return Ok(()) };
     for entry in entries.flatten() {
-        let attempt = entry.path();
+        let attempt = root.join("attempts").join(entry.file_name());
         let copy = attempt.join(retained);
         if !fs::metadata(&copy).is_ok_and(|m| m.len() == bytes.len() as u64) || fs::read(&copy).ok().as_deref() != Some(bytes.as_slice()) {
             continue;
@@ -4500,6 +4573,9 @@ fn retire_attempt_dir(attempt: &Path) -> Result<PathBuf> {
         }
     };
     fs::rename(attempt, &retired).map_err(|error| error.to_string())?;
+    // The retired attempt keeps its evidence, its intent copy included: the rerun check finds it
+    // under its new name.
+    index_attempt_dir(&retired)?;
     Ok(retired)
 }
 
@@ -7332,6 +7408,45 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    /// The rerun check reads the attempt index: an attempt retained before the index existed is
+    /// found through the one-time index of existing attempts, one retained after through its own
+    /// entry, and a retired (renamed) one under its new name; another intent is not refused.
+    #[test]
+    fn rerun_check_finds_sealed_attempts_through_the_index() {
+        let root = std::env::temp_dir().join(format!("mini-rerun-index-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let attempts = root.join("attempts");
+        fs::create_dir_all(&attempts).unwrap();
+        let seal = |name: &str, intent: &[u8]| {
+            let dir = attempts.join(name);
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("intent.json"), intent).unwrap();
+            fs::write(dir.join("call.bin"), b"exact call").unwrap();
+            dir
+        };
+        let source = |intent: &[u8]| {
+            let path = root.join("source.json");
+            fs::write(&path, intent).unwrap();
+            path
+        };
+        seal("a-old", b"{\"old\":1}");
+        let refused = refuse_rerun(&root, &source(b"{\"old\":1}"), "intent").unwrap_err();
+        assert!(refused.contains("a-old"), "{refused}");
+        assert!(attempt_index(&root).join("complete").is_file());
+        let fresh = seal("a-new", b"{\"new\":1}");
+        index_retained_intent(&fresh, b"{\"new\":1}").unwrap();
+        assert!(refuse_rerun(&root, &source(b"{\"new\":1}"), "intent").unwrap_err().contains("a-new"));
+        let retired = attempts.join("a-new.released-0001");
+        fs::rename(&fresh, &retired).unwrap();
+        index_attempt_dir(&retired).unwrap();
+        assert!(refuse_rerun(&root, &source(b"{\"new\":1}"), "intent").unwrap_err().contains("released"));
+        refuse_rerun(&root, &source(b"{\"other\":1}"), "intent").unwrap();
+        // Not indexed and retained after the one-time index: not seen (every retention indexes).
+        seal("a-unindexed", b"{\"u\":1}");
+        refuse_rerun(&root, &source(b"{\"u\":1}"), "intent").unwrap();
+        fs::remove_dir_all(&root).unwrap();
+    }
+
     /// A summoned program document (and every cell a verb appends lines to)
     /// must be born with its document: Bob's `doc show` and the resident's
     /// context read of the J14 room found none (the Host's "context source has
