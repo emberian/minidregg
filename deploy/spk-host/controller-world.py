@@ -765,6 +765,44 @@ def grant_acl(path, uid, permission, operator, receipt_path=None):
     return entry
 
 
+def world_root(public, store_root):
+    """The owner-controlled boundary: the Store's own tree when the public endpoint lies in it,
+    otherwise the directory that holds the endpoint. Nothing above it is this world's to change."""
+    return store_root if store_root in public.parents else public.parent
+
+
+def traversable(path, uid):
+    """Search permission for UID on a directory without any change: the other bit, or an existing
+    user entry for UID that grants x under the mask."""
+    m = metadata(path)
+    if m.st_mode & 0o001:
+        return True
+    mask = 'rwx'
+    text = acl_text(path).splitlines()
+    for line in text:
+        if line.startswith('mask::'):
+            mask = line.split('::', 1)[1]
+    return any(line.startswith(f'user:{uid}:') and 'x' in line.split(':')[2] and 'x' in mask for line in text)
+
+
+def acl_grants(public, uid, store_root):
+    """(path, permission) pairs the controller needs: traversal of private ancestors and access to the
+    public socket. Above the world root an ancestor must already be traversable (refused by name
+    otherwise): worlds share those directories, and a grant there makes the next world refuse the
+    first one's entry and lets teardown order matter. At and below the root the grant is made."""
+    root = world_root(public, store_root)
+    grants = []
+    for p in reversed((public.parent, *public.parent.parents)):
+        inside = p == root or root in p.parents
+        if inside:
+            if not metadata(p).st_mode & 0o001:
+                grants.append((p, '--x'))
+        else:
+            require(traversable(p, uid), f'public socket ancestry {p} above the world root {root} is not '
+                    f'traversable (--x) for controller uid {uid}; operator preparation required')
+    return grants + [(public, '-w-')]
+
+
 def worker_layout(r):
     home = Path(r['home'])
     return home / 'grain' if r.get('workerTask') else home
@@ -1282,8 +1320,7 @@ def stage(store, helper, bundle_arg, bins_arg, upstream_arg, public_arg, worker=
     put(base / 'proxy/config.json', data['host-config.json'], op, registry['operatorGid'])
     # Only traversal of private ancestors and access to the PUBLIC socket. The
     # operator's private listener and Store files receive no controller ACL.
-    paths = [p for p in reversed((public.parent, *public.parent.parents)) if not metadata(p).st_mode & 0o001]
-    for p, perm in [(p, '--x') for p in paths] + [(public, '-w-')]:
+    for p, perm in acl_grants(public, r['uid'], WORLDS / store):
         pending['acl'].append(grant_acl(p, r['uid'], perm, op, base / f'acl-{len(pending["acl"]) + 1:03}.json'))
     if has_consent(r):
         # The authorized public-listener traversal ACL may change mode-mask

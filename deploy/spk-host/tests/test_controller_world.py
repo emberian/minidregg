@@ -505,6 +505,58 @@ class ControllerWorldTests(unittest.TestCase):
         c.run(['/usr/bin/setfacl', '--restore=-'], input=(f'# file: {p}\n' + entry['before']).encode())
         self.assertEqual(c.acl_text(p), before)
 
+    def home_is_prepared(self):
+        # The operator's home above the fixture stays out of scope; only the fixture tree is asserted.
+        real = c.traversable
+        patcher = patch.object(c, 'traversable', side_effect=lambda p, uid: True if self.root not in (p, *p.parents) else real(p, uid))
+        patcher.start(); self.addCleanup(patcher.stop)
+
+    def two_worlds(self, shared_mode):
+        self.home_is_prepared()
+        shared = self.root / 'shared'; shared.mkdir(); shared.chmod(shared_mode); self.root.chmod(0o711)
+        worlds = []
+        for name in ('w1', 'w2'):
+            socket_dir = shared / name / 'sockets'
+            socket_dir.mkdir(parents=True)
+            (shared / name).chmod(0o711); socket_dir.chmod(0o700)
+            public = socket_dir / 'participant.sock'; public.write_bytes(b''); public.chmod(0o600)
+            worlds.append(public)
+        return shared, worlds
+
+    def test_grants_never_reach_above_the_world_root(self):
+        shared, (one, two) = self.two_worlds(0o711)
+        with patch.object(c, 'acl_text', return_value='user::rwx\ngroup::--x\nother::--x\n'):
+            for public, uid in ((one, 4001), (two, 4002)):
+                paths = [p for p, _ in c.acl_grants(public, uid, c.WORLDS / 'ffffffffffffffff')]
+                self.assertEqual(paths, [public.parent, public])
+                self.assertNotIn(shared, paths)
+
+    def test_a_private_ancestor_above_the_root_is_refused_by_name(self):
+        shared, (one, _) = self.two_worlds(0o700)
+        with patch.object(c, 'acl_text', return_value='user::rwx\ngroup::---\nother::---\n'):
+            with self.assertRaisesRegex(ValueError, f'ancestry {shared} above the world root.*uid 4001'):
+                c.acl_grants(one, 4001, c.WORLDS / 'ffffffffffffffff')
+        with patch.object(c, 'acl_text', return_value='user::rwx\nuser:4001:--x\ngroup::---\nmask::--x\nother::---\n'):
+            self.assertEqual(c.acl_grants(one, 4001, c.WORLDS / 'ffffffffffffffff')[-1][0], one)
+
+    @unittest.skipUnless(shutil.which('getfacl') and shutil.which('setfacl'), 'Linux ACL utilities required')
+    def test_two_worlds_under_one_parent_grant_and_tear_down_in_either_order(self):
+        other = 999 if self.uid != 999 else 998
+        for grant_order, restore_order in (((0, 1), (0, 1)), ((0, 1), (1, 0)), ((1, 0), (0, 1)), ((1, 0), (1, 0))):
+            with self.subTest(grant=grant_order, restore=restore_order):
+                shared, worlds = self.two_worlds(0o711)
+                before = c.acl_text(shared)
+                entries = {}
+                for i in grant_order:
+                    uid = other - i
+                    entries[i] = [c.grant_acl(p, uid, perm, self.uid) for p, perm in c.acl_grants(worlds[i], uid, c.WORLDS / 'ffffffffffffffff')]
+                    self.assertEqual(c.acl_text(shared), before)
+                for i in restore_order:
+                    for entry in reversed(entries[i]):
+                        c.run(['/usr/bin/setfacl', '--restore=-'], input=(f'# file: {entry["path"]}\n' + entry['before']).encode())
+                    self.assertEqual(c.acl_text(shared), before)
+                shutil.rmtree(shared)
+
     def test_controller_shared_lock_excludes_lifecycle_mutation(self):
         p = self.file('lock')
         with open(p, 'rb') as call, open(p, 'rb') as change:
