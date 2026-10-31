@@ -46,7 +46,7 @@ set_option autoImplicit false
 
 section Represent
 
-variable {R : Registry} {D : Type} [DecidableEq D]
+variable {R : Registry} {D : Type} [DecidableEq D] [Minidregg.Theory.StoreKey D]
 variable {rootBytes : List UInt8 → Theory.TypedAuthorization.Digest}
 
 /-- The held cells a deployed snapshot decodes to. -/

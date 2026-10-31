@@ -520,7 +520,7 @@ def programAt (state : Store layout) : Option Program := state programAddress
   cases program <;> simp [programAt, stateOfOption]
 
 theorem state_ext (state : Store layout) : state = stateOfOption (programAt state) := by
-  apply DFinsupp.ext
+  apply Minidregg.Theory.SparseMap.ext
   rintro ⟨⟨⟩, ⟨⟩⟩
   cases present : state programAddress with
   | none => simp [programAt, stateOfOption, present]

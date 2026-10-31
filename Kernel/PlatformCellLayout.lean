@@ -94,7 +94,7 @@ def Platform.valid (p : Platform) : Bool :=
 
 inductive Namespace
   | record | controller
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, Minidregg.Theory.StoreKey
 
 @[reducible] def Namespace.Key : Namespace → Type
   | .record => Unit
@@ -107,6 +107,10 @@ inductive Namespace
 instance Namespace.keyDecEq : (space : Namespace) → DecidableEq (Namespace.Key space)
   | .record => inferInstanceAs (DecidableEq Unit)
   | .controller => inferInstanceAs (DecidableEq Unit)
+
+instance Namespace.keyCode : (space : Namespace) → Minidregg.Theory.StoreKey (Namespace.Key space)
+  | .record => inferInstanceAs (Minidregg.Theory.StoreKey Unit)
+  | .controller => inferInstanceAs (Minidregg.Theory.StoreKey Unit)
 
 instance Namespace.valueDecEq : (space : Namespace) → DecidableEq (Namespace.Value space)
   | .record => inferInstanceAs (DecidableEq Platform)

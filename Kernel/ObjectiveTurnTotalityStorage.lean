@@ -60,7 +60,7 @@ theorem BlobKind.address_unique (k : BlobKind) (a : Address (deployedR.layout k.
 
 theorem BlobKind.rom_empty (k : BlobKind) (s : Store (deployedR.layout k.kind)) :
     romPart s = 0 := by
-  apply DFinsupp.ext
+  apply Minidregg.Theory.SparseMap.ext
   intro a
   cases k <;> rw [romPart_apply] <;> rfl
 
@@ -217,7 +217,7 @@ theorem state_eq_iff (k : BlobKind) (s : Store (deployedR.layout k.kind)) (v : k
   constructor
   · rintro rfl; simp [BlobKind.state]
   · intro h
-    apply DFinsupp.ext
+    apply Minidregg.Theory.SparseMap.ext
     intro a
     rw [k.address_unique a]
     simpa [BlobKind.state] using h
@@ -235,7 +235,7 @@ theorem post_shape_charge (c : CellId) {bytes : List UInt8} {d : Delta deployedR
       List.map_nil, List.sum_cons, List.sum_nil, Nat.add_zero, BlobKind.rom_empty,
       imageBytes_empty, deltaClass]
     rw [live_leg_bytes]
-    simp only [DFinsupp.zero_apply, reduceCtorEq, ↓reduceIte]
+    simp only [Minidregg.Theory.SparseMap.zero_apply, Minidregg.Theory.SparseMap.coe_apply, reduceCtorEq, ↓reduceIte]
     cases k <;> exact live_image_bytes _ _
   | change k s v =>
     simp only [deltaStorage, Delta.leg?, Delta.create?, Option.toList_some, Option.toList_none,
@@ -577,7 +577,7 @@ theorem accepted_book_image {pre : BookCell} {batch : Batch} (accepted : Accepte
       (.live ⟨.resourceBook, accepted.post⟩)) := by
   have state : accepted.post.logical =
       CanonicalResourcePageMaterializer.stateOfOption (some (batch.apply (logicalBook pre.logical))) := by
-    apply DFinsupp.ext
+    apply Minidregg.Theory.SparseMap.ext
     rintro ⟨ns, key⟩
     cases ns; cases key
     change (Patch.run pre.logical (bookPatch pre.logical _)) _ = _

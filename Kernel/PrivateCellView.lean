@@ -13,7 +13,7 @@ A reader under `fields` opens one reveal per prefix of its cut scope
 * `ViewOpeningExact` / `viewOpeningExact`: on a store the index admitted
   (`addressFits 256` at every live address), verifying reveals at those prefixes
   answer exactly the reader's view, the store `narrowPacked` hands it
-  (`DFinsupp.filter (Visible fields kind)`), each value as its value bytes; or two
+  (`Minidregg.Theory.SparseMap.filterKeys (Visible fields kind)`), each value as its value bytes; or two
   distinct live addresses share `addrBits` (the index's own collision, scoped to
   this store; at the receiver's `hashedAddrBits`, a collision of the truncated
   hash on distinct canonical address bytes, `viewOpeningExact_hashed`); or a
@@ -127,7 +127,7 @@ def ViewOpeningExact (kind : CanonicalCellRegistry.Kind) (wire : StoreCodec.Wire
         revealVerify dig (keyBits addrBits) (260 + A) (root dig (keyBits addrBits) (260 + A) (indexEntries wire store))
           p (reveals p) = true) →
       (∀ a v, (∃ p ∈ readerPrefixes fields, (a, v) ∈ (reveals p).answer (keyBits addrBits) p) ↔
-          ∃ value, DFinsupp.filter (Visible fields kind) store a = some value ∧ v = valueBytes wire a value) ∨
+          ∃ value, Minidregg.Theory.SparseMap.filterKeys (Visible fields kind) store a = some value ∧ v = valueBytes wire a value) ∨
         AddressCollision addrBits (indexEntries wire store) ∨
         ∃ p ∈ readerPrefixes fields, CollisionAmong dig
           (Theory.PrivateCellTrie.revealNodes dig (keyBits addrBits) (260 + A) (indexEntries wire store) p (reveals p))
@@ -173,7 +173,7 @@ theorem unionAnswers_exact {wire : StoreCodec.Wire (CanonicalCellRegistry.layout
     (answers : ∀ p ∈ readerPrefixes fields, ∀ a v, (a, v) ∈ (reveals p).answer (keyBits addrBits) p ↔
       lastVal (indexEntries wire store) a = some v ∧ (keyBits addrBits a).take p.length = p) :
     ∀ a v, (∃ p ∈ readerPrefixes fields, (a, v) ∈ (reveals p).answer (keyBits addrBits) p) ↔
-      ∃ value, DFinsupp.filter (Visible fields kind) store a = some value ∧ v = valueBytes wire a value := by
+      ∃ value, Minidregg.Theory.SparseMap.filterKeys (Visible fields kind) store a = some value ∧ v = valueBytes wire a value := by
   intro a v
   have live := indexExact wire store a
   constructor
@@ -192,10 +192,10 @@ theorem unionAnswers_exact {wire : StoreCodec.Wire (CanonicalCellRegistry.layout
         scopeSelectsPath (bitCode 256) kind (fitScope 256 fields) a (addrBits a) (fitScope_fits 256 fields)
           fits notBlinding]
       exact ⟨p, member, List.prefix_iff_eq_take.mpr prefixed.symm⟩
-    exact ⟨value, by rw [DFinsupp.filter_apply_pos _ visible, present], rfl⟩
+    exact ⟨value, by rw [Minidregg.Theory.SparseMap.filterKeys_apply_pos _ visible, present], rfl⟩
   · rintro ⟨value, present, rfl⟩
     by_cases visible : Visible fields kind a
-    · rw [DFinsupp.filter_apply_pos _ visible] at present
+    · rw [Minidregg.Theory.SparseMap.filterKeys_apply_pos _ visible] at present
       have fits := fits_of_addressFits (by decide) kind a (admitted a (by simp [present]))
       have notBlinding := visible.2
       have selects := (scopeSelectsPath (bitCode 256) kind (fitScope 256 fields) a (addrBits a)
@@ -206,7 +206,7 @@ theorem unionAnswers_exact {wire : StoreCodec.Wire (CanonicalCellRegistry.layout
         have := (isBlinding_iff selected a).mpr blind
         rw [notBlinding] at this; cases this), present]
       rfl
-    · rw [DFinsupp.filter_apply_neg _ visible] at present
+    · rw [Minidregg.Theory.SparseMap.filterKeys_apply_neg _ visible] at present
       cases present
 
 theorem viewOpeningExact {wire : StoreCodec.Wire (CanonicalCellRegistry.layout kind)}
@@ -254,7 +254,7 @@ theorem honest_answers {wire : StoreCodec.Wire (CanonicalCellRegistry.layout kin
     (admitted : ∀ a, store a ≠ none → addressFits 256 kind a = true) :
     ∀ a v, (∃ p ∈ readerPrefixes fields,
         (a, v) ∈ (revealFor dig (keyBits addrBits) L (canon (indexEntries wire store)) p).answer (keyBits addrBits) p) ↔
-      ∃ value, DFinsupp.filter (Visible fields kind) store a = some value ∧ v = valueBytes wire a value :=
+      ∃ value, Minidregg.Theory.SparseMap.filterKeys (Visible fields kind) store a = some value ∧ v = valueBytes wire a value :=
   unionAnswers_exact selected store fields _ admitted fun _ _ a v => by
     rw [revealFor_answer, mem_canon]
 
@@ -331,7 +331,7 @@ theorem viewOpeningExact_hashed {wire : StoreCodec.Wire (CanonicalCellRegistry.l
       revealVerify dig (keyBits (hashedAddrBits wire A hash)) (260 + A)
         (root dig (keyBits (hashedAddrBits wire A hash)) (260 + A) (indexEntries wire store)) p (reveals p) = true) :
     (∀ a v, (∃ p ∈ readerPrefixes fields, (a, v) ∈ (reveals p).answer (keyBits (hashedAddrBits wire A hash)) p) ↔
-        ∃ value, DFinsupp.filter (Visible fields kind) store a = some value ∧ v = valueBytes wire a value) ∨
+        ∃ value, Minidregg.Theory.SparseMap.filterKeys (Visible fields kind) store a = some value ∧ v = valueBytes wire a value) ∨
       (∃ a a', (lastVal (indexEntries wire store) a).isSome ∧ (lastVal (indexEntries wire store) a').isSome ∧
         (StoreCodec.addressStream wire).encode a ≠ (StoreCodec.addressStream wire).encode a' ∧
         (hash ((StoreCodec.addressStream wire).encode a) ++ List.replicate A false).take A =
@@ -378,7 +378,7 @@ theorem viewOpeningExact_deployed {wire : StoreCodec.Wire (CanonicalCellRegistry
         (root (deployedDig wire) (keyBits (hashedAddrBits wire 256 addressHash)) (260 + 256) (indexEntries wire store))
         p (reveals p) = true) :
     (∀ a v, (∃ p ∈ readerPrefixes fields, (a, v) ∈ (reveals p).answer (keyBits (hashedAddrBits wire 256 addressHash)) p) ↔
-        ∃ value, DFinsupp.filter (Visible fields kind) store a = some value ∧ v = valueBytes wire a value) ∨
+        ∃ value, Minidregg.Theory.SparseMap.filterKeys (Visible fields kind) store a = some value ∧ v = valueBytes wire a value) ∨
       (∃ a a', (lastVal (indexEntries wire store) a).isSome ∧ (lastVal (indexEntries wire store) a').isSome ∧
         (StoreCodec.addressStream wire).encode a ≠ (StoreCodec.addressStream wire).encode a' ∧
         Sp800185Cshake256.hash addressCustomization ((StoreCodec.addressStream wire).encode a) =
@@ -489,7 +489,7 @@ theorem exact (fields : Option (Finset CellField)) (reveals : List Bool → Reve
       revealVerify freeDig (keyBits addrBits) (260 + 2) (root freeDig (keyBits addrBits) (260 + 2) (indexEntries wire store))
         p (reveals p) = true) :
     ∀ a v, (∃ p ∈ readerPrefixes fields, (a, v) ∈ (reveals p).answer (keyBits addrBits) p) ↔
-      ∃ value, DFinsupp.filter (Visible fields .declaredObject) store a = some value ∧ v = valueBytes wire a value := by
+      ∃ value, Minidregg.Theory.SparseMap.filterKeys (Visible fields .declaredObject) store a = some value ∧ v = valueBytes wire a value := by
   rcases viewOpeningExact selected freeDig addrBits 2 addrBits_length store fields reveals admitted accepted
       with answered | ⟨a, a', differ, la, la', same⟩ | ⟨p, _, collision⟩
   · exact answered
@@ -521,7 +521,7 @@ theorem slot1_answers_a1 : ∃ p ∈ readerPrefixes slot1,
     (a1, valueBytes wire a1 (5 : Int)) ∈
       (revealFor freeDig (keyBits addrBits) (260 + 2) (canon (indexEntries wire store)) p).answer (keyBits addrBits) p :=
   (exact slot1 _ (honest slot1) a1 _).mpr
-    ⟨5, by rw [DFinsupp.filter_apply_pos _ (by decide), store_a1], rfl⟩
+    ⟨5, by rw [Minidregg.Theory.SparseMap.filterKeys_apply_pos _ (by decide), store_a1], rfl⟩
 
 /-- No verifying reveal family answers a reader of slot 1 with slot 2, the
 other class, the blinding, or an altered value of slot 1. -/
@@ -536,13 +536,13 @@ theorem slot1_refuses (reveals : List Bool → Reveal K (List UInt8) (List UInt8
   have ex := exact slot1 reveals accepted
   refine ⟨fun h => ?_, fun h => ?_, fun h => ?_, fun h => ?_⟩
   · obtain ⟨_, present, _⟩ := (ex a2 v).mp h
-    rw [DFinsupp.filter_apply_neg _ (by decide)] at present; cases present
+    rw [Minidregg.Theory.SparseMap.filterKeys_apply_neg _ (by decide)] at present; cases present
   · obtain ⟨_, present, _⟩ := (ex aCode v).mp h
-    rw [DFinsupp.filter_apply_neg _ (by decide)] at present; cases present
+    rw [Minidregg.Theory.SparseMap.filterKeys_apply_neg _ (by decide)] at present; cases present
   · obtain ⟨_, present, _⟩ := (ex aBlind v).mp h
-    rw [DFinsupp.filter_apply_neg _ (by decide)] at present; cases present
+    rw [Minidregg.Theory.SparseMap.filterKeys_apply_neg _ (by decide)] at present; cases present
   · obtain ⟨value, present, same⟩ := (ex a1 _).mp h
-    rw [DFinsupp.filter_apply_pos _ (by decide), store_a1] at present
+    rw [Minidregg.Theory.SparseMap.filterKeys_apply_pos _ (by decide), store_a1] at present
     cases present
     exact absurd (valueBytes_injective a1 same) (by decide)
 
@@ -555,10 +555,10 @@ theorem full_answers (reveals : List Bool → Reveal K (List UInt8) (List UInt8)
       (∃ p ∈ readerPrefixes none, (aCode, valueBytes wire aCode (1 : Int)) ∈ (reveals p).answer (keyBits addrBits) p) ∧
       ¬ ∃ p ∈ readerPrefixes none, (aBlind, v) ∈ (reveals p).answer (keyBits addrBits) p := by
   have ex := exact none reveals accepted
-  refine ⟨(ex a2 _).mpr ⟨7, by rw [DFinsupp.filter_apply_pos _ (by decide), store_a2], rfl⟩,
-    (ex aCode _).mpr ⟨1, by rw [DFinsupp.filter_apply_pos _ (by decide), store_aCode], rfl⟩, fun h => ?_⟩
+  refine ⟨(ex a2 _).mpr ⟨7, by rw [Minidregg.Theory.SparseMap.filterKeys_apply_pos _ (by decide), store_a2], rfl⟩,
+    (ex aCode _).mpr ⟨1, by rw [Minidregg.Theory.SparseMap.filterKeys_apply_pos _ (by decide), store_aCode], rfl⟩, fun h => ?_⟩
   obtain ⟨_, present, _⟩ := (ex aBlind v).mp h
-  rw [DFinsupp.filter_apply_neg _ (by decide)] at present; cases present
+  rw [Minidregg.Theory.SparseMap.filterKeys_apply_neg _ (by decide)] at present; cases present
 
 def overflow : Option (Finset CellField) := some {.slot (2 ^ 256 + 1)}
 
@@ -573,7 +573,7 @@ theorem overflow_answers_nothing (reveals : List Bool → Reveal K (List UInt8) 
   refine ⟨fun h => ?_, ?_⟩
   · obtain ⟨_, present, _⟩ := (exact overflow reveals accepted a v).mp h
     by_cases visible : Visible overflow .declaredObject a
-    · rw [DFinsupp.filter_apply_pos _ visible] at present
+    · rw [Minidregg.Theory.SparseMap.filterKeys_apply_pos _ visible] at present
       have live : store a ≠ none := by rw [present]; simp
       have fits := fits_of_addressFits (by decide) .declaredObject a (admitted a live)
       obtain ⟨kept, _⟩ := visible
@@ -588,7 +588,7 @@ theorem overflow_answers_nothing (reveals : List Bool → Reveal K (List UInt8) 
         rw [← eq] at big
         exact absurd big (Nat.not_lt.mpr (Nat.le_succ _))
       · simp [overflow] at kept
-    · rw [DFinsupp.filter_apply_neg _ visible] at present; cases present
+    · rw [Minidregg.Theory.SparseMap.filterKeys_apply_neg _ visible] at present; cases present
   · have low : ∀ i ∈ List.range 256, (2 ^ 256 + 1).testBit i = Nat.testBit 1 i := by
       intro i member
       exact Nat.testBit_two_pow_add_gt (List.mem_range.mp member) 1

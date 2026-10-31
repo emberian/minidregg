@@ -121,7 +121,7 @@ def payloadAt (state : Store (layout spec)) : Option (Payload spec) := state (pa
   cases payload <;> simp [payloadAt, stateOfOption]
 
 theorem state_ext (state : Store (layout spec)) : state = stateOfOption spec (payloadAt spec state) := by
-  apply DFinsupp.ext
+  apply Minidregg.Theory.SparseMap.ext
   rintro ⟨⟨⟩, ⟨⟩⟩
   cases present : state (payloadAddress spec) with
   | none => simp [payloadAt, stateOfOption, present]

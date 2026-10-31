@@ -120,9 +120,9 @@ theorem neutral_content_birth_admitted :
     CanonicalCellRegistry.UserInitial deployment 100 birth := by
   refine ⟨⟨⟨by decide, ?_⟩, ?_⟩, ?_⟩
   · intro left member
-    exact ((DFinsupp.mem_support_toFun _ _).mp member rfl).elim
+    exact (Minidregg.Theory.SparseMap.mem_support_iff.mp member rfl).elim
   · intro address member
-    exact ((DFinsupp.mem_support_toFun _ _).mp member rfl).elim
+    exact (Minidregg.Theory.SparseMap.mem_support_iff.mp member rfl).elim
   · unfold Kernel.ProtectedCell.reservedBase; decide
 
 set_option backward.isDefEq.respectTransparency false in
@@ -131,7 +131,7 @@ theorem authored_history_cannot_be_injected_at_birth :
       ⟨.content, CellState.materialize HyperdocumentCell.contentMaterializer created⟩ := by
   intro admitted
   have supported : (⟨.atoms, atom⟩ : Store.Address Hyperdocument.layout) ∈ created.support := by
-    rw [DFinsupp.mem_support_iff]
+    rw [Minidregg.Theory.SparseMap.mem_support_iff]
     change Hyperdocument.lookup created .atoms atom ≠ none
     rw [create_exact_bytes_and_provenance]
     simp

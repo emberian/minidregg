@@ -66,7 +66,7 @@ inductive Lane
   | sideEffectCount
   | feeDebit
   | leaseByteBlocks
-  deriving DecidableEq, Fintype, Repr
+  deriving DecidableEq, Fintype, Repr, StoreKey
 
 /-- Closed executable quantification over resource lanes.  Keeping this
 enumeration beside the inductive prevents a host-side metric registry. -/

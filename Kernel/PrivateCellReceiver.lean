@@ -1271,9 +1271,9 @@ structure HidingSetting (m keys : Nat) (Item View : Type) where
 theorem filter_set_invisible {fields : Option (Finset Minidregg.Theory.TypedAuthorization.CellField)}
     (S : Store (CanonicalCellRegistry.layout kind)) (a : Address (CanonicalCellRegistry.layout kind))
     (v : Option ((CanonicalCellRegistry.layout kind).Value a.1)) (hidden : ¬ Visible fields kind a) :
-    DFinsupp.filter (Visible fields kind) (S.set a v) = DFinsupp.filter (Visible fields kind) S := by
-  refine DFinsupp.ext fun b => ?_
-  simp only [DFinsupp.filter_apply]
+    Minidregg.Theory.SparseMap.filterKeys (Visible fields kind) (S.set a v) = Minidregg.Theory.SparseMap.filterKeys (Visible fields kind) S := by
+  refine Minidregg.Theory.SparseMap.ext fun b => ?_
+  simp only [Minidregg.Theory.SparseMap.filterKeys_apply]
   split
   · rename_i seen
     have ne : b ≠ a := fun h => hidden (h ▸ seen)
@@ -1283,10 +1283,10 @@ theorem filter_set_invisible {fields : Option (Finset Minidregg.Theory.TypedAuth
 theorem applyPatch_invisible {fields : Option (Finset Minidregg.Theory.TypedAuthorization.CellField)} :
     ∀ (S : Store (CanonicalCellRegistry.layout kind)) (patch : List (KeptCell.Write (kind := kind))),
       (∀ w ∈ patch, ¬ Visible fields kind w.1) →
-        DFinsupp.filter (Visible fields kind) (KeptCell.applyPatch S patch) = DFinsupp.filter (Visible fields kind) S
+        Minidregg.Theory.SparseMap.filterKeys (Visible fields kind) (KeptCell.applyPatch S patch) = Minidregg.Theory.SparseMap.filterKeys (Visible fields kind) S
   | _, [], _ => rfl
   | S, w :: rest, hidden => by
-      show DFinsupp.filter _ (KeptCell.applyPatch (S.set w.1 w.2) rest) = _
+      show Minidregg.Theory.SparseMap.filterKeys _ (KeptCell.applyPatch (S.set w.1 w.2) rest) = _
       rw [applyPatch_invisible _ rest (fun x hx => hidden x (List.mem_cons_of_mem _ hx)),
         filter_set_invisible S w.1 w.2 (hidden w (List.mem_cons_self ..))]
 
@@ -1322,7 +1322,7 @@ theorem hidden_run {Item : Type} (serve : Serve wire Item) (fields : Option (Fin
     {p : Params wire} {S : Store (CanonicalCellRegistry.layout kind)} (born : (birth wire p S).isSome)
     {patch : List (KeptCell.Write (kind := kind))} (hidden : HiddenPatch wire fields patch) :
     ∀ r, ∃ cells, arun wire serve p S (fun _ => patch) r = some cells ∧ cells.length = r + 1 ∧
-      ∀ c ∈ cells, DFinsupp.filter (Visible fields kind) c.fit.store = DFinsupp.filter (Visible fields kind) S
+      ∀ c ∈ cells, Minidregg.Theory.SparseMap.filterKeys (Visible fields kind) c.fit.store = Minidregg.Theory.SparseMap.filterKeys (Visible fields kind) S
   | 0 => by
       obtain ⟨c, hc⟩ := Option.isSome_iff_exists.mp born
       refine ⟨[c], by simp [arun, hc], rfl, ?_⟩
@@ -1349,7 +1349,7 @@ theorem single_differ (S : Store (CanonicalCellRegistry.layout kind)) (a : Addre
     {v₀ v₁ : (CanonicalCellRegistry.layout kind).Value a.1} (ne : v₀ ≠ v₁) :
     KeptCell.applyPatch S [⟨a, some v₀⟩] ≠ KeptCell.applyPatch S [⟨a, some v₁⟩] := by
   intro same
-  have := DFunLike.congr_fun same a
+  have := congrArg (fun s => Minidregg.Theory.SparseMap.get? s a) same
   simp only [KeptCell.applyPatch, List.foldl_cons, List.foldl_nil, Store.set_eq, Option.some.injEq] at this
   exact ne this
 
@@ -1407,7 +1407,7 @@ def worldView (a : setting.Strategy) (b : Bool) (masks : List (List UInt8)) : Op
 
 /-- The reader-authorized view of one version: `narrowPacked`'s store. -/
 def readerView (c : KeptCell wire) : Store (CanonicalCellRegistry.layout kind) :=
-  DFinsupp.filter (Visible setting.fields kind) c.fit.store
+  Minidregg.Theory.SparseMap.filterKeys (Visible setting.fields kind) c.fit.store
 
 /-- **The same-leakage rule** (`BlindedCellHiding.OnlineSameLeakage` at the
 receiver: the prefix is the round, the paired state the two worlds' runs, the
@@ -1473,7 +1473,7 @@ theorem pairAttack_legal [DecidableEq View] (S : Store (CanonicalCellRegistry.la
     simp [hc₂]
   have flat : ∀ {patch : List (KeptCell.Write (kind := kind))}, HiddenPatch wire setting.fields patch →
       (arun wire setting.serve (keyedParams wire setting.base setting.sample setting.keyed k) S (fun _ => patch) r).map
-        (·.map setting.readerView) = some (List.replicate (r + 1) (DFinsupp.filter (Visible setting.fields kind) S)) := by
+        (·.map setting.readerView) = some (List.replicate (r + 1) (Minidregg.Theory.SparseMap.filterKeys (Visible setting.fields kind) S)) := by
     intro patch hidden
     obtain ⟨cells, ha, len, views⟩ := hidden_run wire setting.serve setting.fields born hidden r
     rw [ha, Option.map_some, Option.some.injEq, List.eq_replicate_iff]

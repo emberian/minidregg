@@ -289,7 +289,7 @@ theorem holds_observe_iff (s₀ s : Store L) (as : List (Address L)) :
 theorem agreesOn_univ_iff (s₀ s : Store L) : AgreesOn Set.univ s₀ s ↔ s = s₀ := by
   constructor
   · intro h
-    exact DFinsupp.ext fun a => h a (Set.mem_univ a)
+    exact SparseMap.ext fun a => h a (Set.mem_univ a)
   · rintro rfl a _
     rfl
 
@@ -329,7 +329,7 @@ theorem footprint_extra_only_disjoint (rootOf : Store L → Root) {s₀ s : Stor
   refine ⟨?_, fun a moved mem => moved ((admit_ok_iff_unmoved h₀).1 admitted a mem)⟩
   by_contra none
   simp only [not_exists, not_not] at none
-  exact rootRefuses (by rw [DFinsupp.ext none])
+  exact rootRefuses (by rw [SparseMap.ext none])
 
 end WholeRoot
 
@@ -461,7 +461,7 @@ theorem independent_commute {p q : Plan L} {s : Store L} (ind : Independent p q)
   have hqp := holds_run_disjoint hq.1 p.patch ind.1
   obtain ⟨_, pAfterQ⟩ := no_toctou p.patch p.covers hp.1 hpq
   obtain ⟨_, qAfterP⟩ := no_toctou q.patch q.covers hq.1 hqp
-  apply DFinsupp.ext
+  apply SparseMap.ext
   intro a
   rw [qAfterP a, pAfterQ a]
   by_cases wp : a ∈ Patch.writeFootprint p.patch
@@ -678,9 +678,9 @@ end Opened
 
 /-! ## Axiom pins -/
 
-/-- info: 'Minidregg.Theory.PlanBinding.Footprint.admit_ok_iff' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.PlanBinding.Footprint.admit_ok_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Footprint.admit_ok_iff
-/-- info: 'Minidregg.Theory.PlanBinding.Footprint.admit_refusal_names_stale' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.PlanBinding.Footprint.admit_refusal_names_stale' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Footprint.admit_refusal_names_stale
 /-- info: 'Minidregg.Theory.PlanBinding.Footprint.unrelated_write_admits' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Footprint.unrelated_write_admits
@@ -688,9 +688,9 @@ end Opened
 #guard_msgs (whitespace := lax) in #print axioms Footprint.read_write_refuses
 /-- info: 'Minidregg.Theory.PlanBinding.Footprint.refusal_names_moved' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Footprint.refusal_names_moved
-/-- info: 'Minidregg.Theory.PlanBinding.whole_footprint_iff_root' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.PlanBinding.whole_footprint_iff_root' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms whole_footprint_iff_root
-/-- info: 'Minidregg.Theory.PlanBinding.root_admits_footprint' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.PlanBinding.root_admits_footprint' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms root_admits_footprint
 /-- info: 'Minidregg.Theory.PlanBinding.footprint_extra_only_disjoint' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms footprint_extra_only_disjoint

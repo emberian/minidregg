@@ -959,7 +959,7 @@ theorem opened_display_is_commit : OpenedDisplayIsCommitStatement := by
     · rw [← member]
       exact memberPatch_pre_independent command target _ _ reads
     · have same : cell.logical = prepared.pre.logical := by
-        apply DFinsupp.ext
+        apply Minidregg.Theory.SparseMap.ext
         intro address
         apply agrees address
         rintro ⟨position, entry, leaf, _, _, sealedAt⟩
@@ -1006,7 +1006,7 @@ theorem opened_view_refused : OpenedViewRefusedStatement := by
 
 theorem entries_filter {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L) (keep : Address L → Prop)
     [DecidablePred keep] (store : Store L) :
-    StoreCodec.entries wire (DFinsupp.filter keep store) =
+    StoreCodec.entries wire (Minidregg.Theory.SparseMap.filterKeys keep store) =
       (StoreCodec.entries wire store).filter fun entry => decide (keep entry.1) := by
   have ordered : ((StoreCodec.entries wire store).filter fun entry => decide (keep entry.1)).Pairwise
       (StoreCodec.AddressLT wire) :=
@@ -1016,10 +1016,10 @@ theorem entries_filter {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L) (keep :
     (entries_keys_nodup wire store).sublist (List.filter_sublist.map _)
   have same : StoreCodec.fromEntries
       ((StoreCodec.entries wire store).filter fun entry => decide (keep entry.1)) =
-      DFinsupp.filter keep store := by
-    apply DFinsupp.ext
+      Minidregg.Theory.SparseMap.filterKeys keep store := by
+    apply Minidregg.Theory.SparseMap.ext
     intro address
-    rw [DFinsupp.filter_apply]
+    rw [Minidregg.Theory.SparseMap.filterKeys_apply]
     by_cases kept : keep address
     · rw [if_pos kept]
       cases present : store address with
@@ -1068,7 +1068,7 @@ theorem honest_scalar_view_accepted : HonestScalarViewAcceptedStatement := by
   have opens := NativeObservationController.root_opens fields ⟨.declaredObject, payload⟩
     (wire := DeclaredEffectCell.wire) rfl
   have narrowedLogical : narrowed.logical =
-      DFinsupp.filter (ResourceObservationAdmission.Visible fields .declaredObject) payload.logical := by
+      Minidregg.Theory.SparseMap.filterKeys (ResourceObservationAdmission.Visible fields .declaredObject) payload.logical := by
     simp only [target, selectTarget, CanonicalCellRegistry.selectDeclared,
       ResourceObservationAdmission.narrowPacked] at selected
     split at selected
@@ -1188,7 +1188,7 @@ theorem honest_account_scalar_view_accepted : HonestAccountScalarViewAcceptedSta
   have opens := NativeObservationController.root_opens fields ⟨.accountMetadata, payload⟩
     (wire := DeclaredEffectCell.wire) rfl
   have narrowedLogical : narrowed.logical =
-      DFinsupp.filter (ResourceObservationAdmission.Visible fields .accountMetadata) payload.logical := by
+      Minidregg.Theory.SparseMap.filterKeys (ResourceObservationAdmission.Visible fields .accountMetadata) payload.logical := by
     simp only [target, selectTarget, CanonicalCellRegistry.selectDeclared,
       ResourceObservationAdmission.narrowPacked] at selected
     split at selected
@@ -1217,7 +1217,7 @@ theorem honest_world_view_accepted : HonestWorldViewAcceptedStatement := by
     (wire := WorldKindCell.instanceWire) rfl
   have all := visible_full (kind := .worldInstance) (fun _ => rfl)
   have narrowedLogical : narrowed.logical =
-      DFinsupp.filter (ResourceObservationAdmission.Visible none .worldInstance) payload.logical := by
+      Minidregg.Theory.SparseMap.filterKeys (ResourceObservationAdmission.Visible none .worldInstance) payload.logical := by
     simp only [target, selectTarget, ResourceObservationAdmission.narrowPacked] at selected
     split_ifs at selected
     rw [← Option.some.inj selected]
@@ -1251,7 +1251,7 @@ theorem honest_kind_definition_view_accepted : HonestKindDefinitionViewAcceptedS
     (wire := WorldKindCell.definitionWire) rfl
   have all := visible_full (kind := .worldKind) (fun _ => rfl)
   have narrowedLogical : narrowed.logical =
-      DFinsupp.filter (ResourceObservationAdmission.Visible none .worldKind) payload.logical := by
+      Minidregg.Theory.SparseMap.filterKeys (ResourceObservationAdmission.Visible none .worldKind) payload.logical := by
     simp only [target, selectTarget, ResourceObservationAdmission.narrowPacked] at selected
     split_ifs at selected
     rw [← Option.some.inj selected]
@@ -1284,7 +1284,7 @@ theorem honest_content_read_view_accepted : HonestContentReadViewAcceptedStateme
   have opens := NativeObservationController.root_opens fields ⟨.content, payload⟩
     (wire := HyperdocumentCell.contentWire) rfl
   have narrowedLogical : narrowed.logical =
-      DFinsupp.filter (ResourceObservationAdmission.Visible fields .content) payload.logical := by
+      Minidregg.Theory.SparseMap.filterKeys (ResourceObservationAdmission.Visible fields .content) payload.logical := by
     simp only [target, selectTarget, ResourceObservationAdmission.narrowPacked] at selected
     split_ifs at selected
     rw [← Option.some.inj selected]
@@ -1307,7 +1307,7 @@ theorem honest_kind_read_view_accepted : HonestKindReadViewAcceptedStatement := 
   have opens := NativeObservationController.root_opens fields ⟨.worldKind, payload⟩
     (wire := WorldKindCell.definitionWire) rfl
   have narrowedLogical : narrowed.logical =
-      DFinsupp.filter (ResourceObservationAdmission.Visible fields .worldKind) payload.logical := by
+      Minidregg.Theory.SparseMap.filterKeys (ResourceObservationAdmission.Visible fields .worldKind) payload.logical := by
     simp only [target, selectTarget, ResourceObservationAdmission.narrowPacked] at selected
     split_ifs at selected
     rw [← Option.some.inj selected]
@@ -1331,7 +1331,7 @@ theorem honest_content_stream_write_named : HonestContentStreamWriteNamedStateme
     have opens := NativeObservationController.root_opens fields ⟨.content, payload⟩
       (wire := HyperdocumentCell.contentWire) rfl
     have narrowedLogical : narrowed.logical =
-        DFinsupp.filter (ResourceObservationAdmission.Visible fields .content) payload.logical := by
+        Minidregg.Theory.SparseMap.filterKeys (ResourceObservationAdmission.Visible fields .content) payload.logical := by
       simp only [target, selectTarget, ResourceObservationAdmission.narrowPacked] at selected
       split_ifs at selected
       rw [← Option.some.inj selected]
@@ -1349,7 +1349,7 @@ theorem honest_content_stream_write_named : HonestContentStreamWriteNamedStateme
     have opens := NativeObservationController.root_opens fields ⟨.stream, payload⟩
       (wire := StreamCell.headWire) rfl
     have narrowedLogical : narrowed.logical =
-        DFinsupp.filter (ResourceObservationAdmission.Visible fields .stream) payload.logical := by
+        Minidregg.Theory.SparseMap.filterKeys (ResourceObservationAdmission.Visible fields .stream) payload.logical := by
       simp only [target, selectTarget, ResourceObservationAdmission.narrowPacked] at selected
       split_ifs at selected
       rw [← Option.some.inj selected]

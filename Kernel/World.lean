@@ -3,7 +3,7 @@
 
 docs/DATAMODEL.md §3.3/§3.9, step B2.  The kernel's durable state is one value:
 
-* `World` is a finite map of cells `Π₀ c : CellId, Option (Cell R)` together
+* `World` is a finite map of cells (`Minidregg.Theory.SparseMap CellId (fun _ => Cell R)`, a persistent tree) together
   with a distinguished **system cell**, itself a `Theory.Store` over a fixed
   layout with four namespaces: `journal : TxId ↦ (height, H(turn))`
   (append-only), `head : () ↦ (height, logRoot)` (RAM),
@@ -166,19 +166,18 @@ def RomOnly (s : Store L) : Prop := ∀ a, s a ≠ none → L.discipline a.1 = .
 
 instance romOnlyDecidable (s : Store L) : Decidable (RomOnly s) :=
   decidable_of_iff (∀ a ∈ s.support, L.discipline a.1 = .rom)
-    (forall_congr' fun _ => imp_congr_left DFinsupp.mem_support_iff)
+    (forall_congr' fun _ => imp_congr_left Minidregg.Theory.SparseMap.mem_support_iff)
 
 theorem romOnly_zero : RomOnly (0 : Store L) := fun _ h => absurd rfl h
 
 /-- The ROM part of a store: its entries at ROM addresses. -/
 def romPart (s : Store L) : Store L :=
-  DFinsupp.filter (fun a => L.discipline a.1 = .rom) s
+  s.filterKeys (fun a => L.discipline a.1 = .rom)
 
 theorem romPart_apply (s : Store L) (a : Address L) :
     romPart s a = if L.discipline a.1 = .rom then s a else none := by
   unfold romPart
-  rw [DFinsupp.filter_apply]
-  rfl
+  rw [Minidregg.Theory.SparseMap.filterKeys_apply]
 
 theorem romPart_romOnly (s : Store L) : RomOnly (romPart s) := by
   intro a h
@@ -188,7 +187,7 @@ theorem romPart_romOnly (s : Store L) : RomOnly (romPart s) := by
   · exact absurd rfl h
 
 theorem romPart_of_romOnly {s : Store L} (h : RomOnly s) : romPart s = s := by
-  apply DFinsupp.ext
+  apply Minidregg.Theory.SparseMap.ext
   intro a
   rw [romPart_apply]
   split
@@ -212,7 +211,7 @@ inductive SysSpace
   | parent
   | spent
   | allowance
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, Minidregg.Theory.StoreKey
 
 section System
 
@@ -247,7 +246,7 @@ def sysDiscipline : SysSpace → Discipline
   | .spent => .appendOnly
   | .allowance => .ram
 
-variable [DecidableEq TxId] [DecidableEq D]
+variable [DecidableEq TxId] [DecidableEq D] [Minidregg.Theory.StoreKey TxId] [Minidregg.Theory.StoreKey D]
 
 instance sysKeyDecEq : (s : SysSpace) → DecidableEq (SysKey TxId D s)
   | .journal => inferInstanceAs (DecidableEq TxId)
@@ -256,6 +255,14 @@ instance sysKeyDecEq : (s : SysSpace) → DecidableEq (SysKey TxId D s)
   | .parent => inferInstanceAs (DecidableEq Nat)
   | .spent => inferInstanceAs (DecidableEq D)
   | .allowance => inferInstanceAs (DecidableEq Lane)
+
+instance sysKeyCode : (s : SysSpace) → Minidregg.Theory.StoreKey (SysKey TxId D s)
+  | .journal => inferInstanceAs (Minidregg.Theory.StoreKey TxId)
+  | .head => inferInstanceAs (Minidregg.Theory.StoreKey Unit)
+  | .retired => inferInstanceAs (Minidregg.Theory.StoreKey Nat)
+  | .parent => inferInstanceAs (Minidregg.Theory.StoreKey Nat)
+  | .spent => inferInstanceAs (Minidregg.Theory.StoreKey D)
+  | .allowance => inferInstanceAs (Minidregg.Theory.StoreKey Lane)
 
 instance sysValueDecEq : (s : SysSpace) → DecidableEq (SysValue D s)
   | .journal => inferInstanceAs (DecidableEq (Nat × D))
@@ -279,16 +286,16 @@ end System
 /-! ## The world -/
 
 /-- The cell map. -/
-abbrev Cells (R : Registry) := Π₀ _ : CellId, Option (Cell R)
+abbrev Cells (R : Registry) := Minidregg.Theory.SparseMap CellId (fun _ => Cell R)
 
 /-- The world: the cell map and the system cell. -/
-structure World (R : Registry) (TxId D : Type) [DecidableEq TxId] [DecidableEq D] where
+structure World (R : Registry) (TxId D : Type) [DecidableEq TxId] [DecidableEq D] [Minidregg.Theory.StoreKey TxId] [Minidregg.Theory.StoreKey D] where
   cells : Cells R
   system : Store (sysLayout TxId D)
 
 namespace World
 
-variable {R : Registry} {TxId D : Type} [DecidableEq TxId] [DecidableEq D]
+variable {R : Registry} {TxId D : Type} [DecidableEq TxId] [DecidableEq D] [Minidregg.Theory.StoreKey TxId] [Minidregg.Theory.StoreKey D]
 
 /-- The journal entry of a transaction id. -/
 def journal (w : World R TxId D) (x : TxId) : Option (Nat × D) :=
@@ -332,10 +339,10 @@ theorem mem_parentKeys (s : Store (sysLayout TxId D)) (c : CellId) :
     cases space <;> simp [parentKeyAt] at contributes
     have same : c = key := contributes
     subst same
-    exact Option.isSome_iff_ne_none.mpr (DFinsupp.mem_support_iff.mp supported)
+    exact Option.isSome_iff_ne_none.mpr (Minidregg.Theory.SparseMap.mem_support_iff.mp supported)
   · intro present
     exact Finset.mem_biUnion.mpr ⟨⟨SysSpace.parent, c⟩,
-      DFinsupp.mem_support_iff.mpr (Option.isSome_iff_ne_none.mp present),
+      Minidregg.Theory.SparseMap.mem_support_iff.mpr (Option.isSome_iff_ne_none.mp present),
       Finset.mem_singleton_self c⟩
 
 /-- The system cell's parent projection, the parentage `under R` coverage is
@@ -498,7 +505,7 @@ def rejectOf {α : Type} : Except Reject α → Option Reject
 
 section Step
 
-variable {R : Registry} {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq D]
+variable {R : Registry} {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq D] [Minidregg.Theory.StoreKey TxId] [Minidregg.Theory.StoreKey D]
 variable (H : History R TxId Ev D)
 
 /-- The B2/K-ROOM system half of a turn: retired guards, the journal row, the
@@ -611,7 +618,7 @@ def applyCreates : Cells R → List (CellId × Cell R × Option CellId) → Exce
       | some _, _ => .error (.cellPresent c)
       | none, false => .error (.missingParent c (p.getD 0))
       | none, true =>
-          if RomOnly b.store then applyCreates (cells.update c (some b)) rest
+          if RomOnly b.store then applyCreates (cells.set c (some b)) rest
           else .error (.imageNotRom c)
 
 /-- Apply one leg: the cell is present at the leg's kind and the patch is
@@ -625,7 +632,7 @@ def applyLeg (cells : Cells R) (leg : Leg R) : Except Reject (Cells R) :=
       | some pre =>
           match Patch.firstDisabled? pre leg.patch with
           | some index => .error (.guardFailed leg.cell index)
-          | none => .ok (cells.update leg.cell (some ⟨leg.kind, Patch.run pre leg.patch⟩))
+          | none => .ok (cells.set leg.cell (some ⟨leg.kind, Patch.run pre leg.patch⟩))
 
 /-- Apply the legs in order. -/
 def applyLegs : Cells R → List (Leg R) → Except Reject (Cells R)
@@ -644,7 +651,7 @@ def applyRetires : Cells R → List CellId → Except Reject (Cells R)
       match cells c with
       | none => .error (.missingCell c)
       | some cell =>
-          if cell.store = 0 then applyRetires (cells.update c none) rest
+          if cell.store = 0 then applyRetires (cells.set c none) rest
           else .error (.retireNonEmpty c)
 
 /-- The cell half of a turn: creates, then legs, then retires. -/
@@ -804,7 +811,7 @@ end Step
 
 section Fold
 
-variable {R : Registry} {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq D]
+variable {R : Registry} {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq D] [Minidregg.Theory.StoreKey TxId] [Minidregg.Theory.StoreKey D]
 variable (H : History R TxId Ev D)
 
 @[simp] theorem fold_nil (g : World R TxId D) : fold H g [] = some g := rfl
@@ -870,16 +877,16 @@ end Fold
 
 section Decompose
 
-variable {R : Registry} {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq D]
+variable {R : Registry} {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq D] [Minidregg.Theory.StoreKey TxId] [Minidregg.Theory.StoreKey D]
 variable (H : History R TxId Ev D)
 
 theorem cells_update_self (cells : Cells R) (c : CellId) (v : Option (Cell R)) :
-    cells.update c v c = v := by
-  simp
+    cells.set c v c = v :=
+  Minidregg.Theory.SparseMap.set_eq cells c v
 
 theorem cells_update_ne (cells : Cells R) {c x : CellId} (v : Option (Cell R))
-    (h : x ≠ c) : cells.update c v x = cells x := by
-  simp [DFinsupp.coe_update, Function.update_of_ne h]
+    (h : x ≠ c) : cells.set c v x = cells x :=
+  Minidregg.Theory.SparseMap.set_ne cells c v x h
 
 theorem step_eq_some {w w' : World R TxId D} {t : Turn R TxId Ev D} :
     World.step H w t = some w' ↔ World.admit H w t = .ok w' := by
@@ -1166,7 +1173,7 @@ theorem applyLeg_ok {cells cells' : Cells R} {leg : Leg R}
     (h : applyLeg cells leg = .ok cells') :
     ∃ cell pre, cells leg.cell = some cell ∧ cell.storeAt leg.kind = some pre ∧
       Patch.ValidFrom pre leg.patch ∧
-      cells' = cells.update leg.cell (some ⟨leg.kind, Patch.run pre leg.patch⟩) := by
+      cells' = cells.set leg.cell (some ⟨leg.kind, Patch.run pre leg.patch⟩) := by
   unfold applyLeg at h
   split at h
   · cases h
@@ -1753,7 +1760,7 @@ end Decompose
 
 section StepLaws
 
-variable {R : Registry} {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq D]
+variable {R : Registry} {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq D] [Minidregg.Theory.StoreKey TxId] [Minidregg.Theory.StoreKey D]
 variable (H : History R TxId Ev D)
 
 /-- **Frame through `step` (§4.2).**  A cell a turn neither creates, writes,
@@ -2006,7 +2013,7 @@ end StepLaws
 
 section Journal
 
-variable {R : Registry} {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq D]
+variable {R : Registry} {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq D] [Minidregg.Theory.StoreKey TxId] [Minidregg.Theory.StoreKey D]
 variable (H : History R TxId Ev D)
 
 theorem step_head {w w' : World R TxId D} {t : Turn R TxId Ev D}
@@ -2217,7 +2224,7 @@ end Journal
 
 section TurnLaws
 
-variable {R : Registry} {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq D]
+variable {R : Registry} {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq D] [Minidregg.Theory.StoreKey TxId] [Minidregg.Theory.StoreKey D]
 variable (H : History R TxId Ev D)
 
 /-- A pin holds exactly when its cell is unretired and its slot has the
@@ -2466,12 +2473,12 @@ end TurnLaws
 
 section Checkpoints
 
-variable {R : Registry} {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq D]
+variable {R : Registry} {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq D] [Minidregg.Theory.StoreKey TxId] [Minidregg.Theory.StoreKey D]
 variable (H : History R TxId Ev D)
 
 /-- A world at a height with its root.  The root function is the caller's
 (C1: stage-F sorted hash; D1/E1: SMT). -/
-structure Checkpoint (R : Registry) (TxId D Root : Type) [DecidableEq TxId] [DecidableEq D] where
+structure Checkpoint (R : Registry) (TxId D Root : Type) [DecidableEq TxId] [DecidableEq D] [Minidregg.Theory.StoreKey TxId] [Minidregg.Theory.StoreKey D] where
   height : Nat
   world : World R TxId D
   root : Root
@@ -2770,7 +2777,7 @@ def honest : Checkpoint toyR Nat Nat (List (Option Nat) × Option (Nat × Nat)) 
 
 /-- The tampered world: cell 1's value replaced, head unchanged. -/
 def tamperedWorld : ToyWorld :=
-  { w1 with cells := w1.cells.update 1 (some ⟨false, (0 : Store toyLayout).set ⟨(), (0 : Nat)⟩ (some (99 : Nat))⟩) }
+  { w1 with cells := w1.cells.set 1 (some ⟨false, (0 : Store toyLayout).set ⟨(), (0 : Nat)⟩ (some (99 : Nat))⟩) }
 
 theorem w1_prefix : fold toyH g (log2.take 1) = some w1 := by
   have e : (fold toyH g [t0]).isSome = true := by decide +kernel
@@ -2807,7 +2814,7 @@ namespace RomExample
 inductive Space
   | code
   | heap
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, Minidregg.Theory.StoreKey
 
 /-- A ROM `code` namespace and a RAM `heap`, `Nat` keys and values. -/
 abbrev romLayout : Layout.{0, 0, 0} where
@@ -2900,7 +2907,7 @@ end RomExample
 
 /-! ## Axiom pins -/
 
-/-- info: 'Minidregg.Kernel.World.Cell.eq_of_storeAt' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Kernel.World.Cell.eq_of_storeAt' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Cell.eq_of_storeAt
 /-- info: 'Minidregg.Kernel.World.fold_cons' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms fold_cons
@@ -2946,9 +2953,9 @@ end RomExample
 #guard_msgs (whitespace := lax) in #print axioms op_apply_write
 /-- info: 'Minidregg.Kernel.World.op_apply_allocate' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms op_apply_allocate
-/-- info: 'Minidregg.Kernel.World.sys_space_ne' does not depend on any axioms -/
+/-- info: 'Minidregg.Kernel.World.sys_space_ne' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms sys_space_ne
-/-- info: 'Minidregg.Kernel.World.sys_key_ne' does not depend on any axioms -/
+/-- info: 'Minidregg.Kernel.World.sys_key_ne' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms sys_key_ne
 /-- info: 'Minidregg.Kernel.World.run_createReads' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms run_createReads

@@ -103,7 +103,7 @@ inductive Space
   | rows
   | log
   | source
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, Minidregg.Theory.StoreKey
 
 /-- Census layout: `Nat` keys, `Int` values (a Book row is a signed balance). -/
 @[reducible] def layout : Layout.{0, 0, 0} where
@@ -178,16 +178,16 @@ def cellOf (k : Kind) (rows : List (Nat × Int)) : Cell R :=
   ⟨k, rows.foldl (fun (s : Store layout) e => s.set ⟨Space.rows, e.1⟩ (some e.2)) 0⟩
 
 def cells0 : Cells R :=
-  (((((((((((((((((0 : Cells R).update cAuth (some (cellOf .authority [(1, 1)]))).update cRes
-    (some (cellOf .resource [(0, 10)]))).update cPolicy (some (cellOf .policy [(0, 1)]))).update
-    cBook (some (cellOf .book [(0, 100), (1, 0)]))).update cStream
-    (some (cellOf .stream []))).update cTicket (some (cellOf .ticket []))).update cLife
-    (some (cellOf .lifecycle [(0, 0)]))).update cGate (some (cellOf .gateway [(0, 1)]))).update
-    cClock (some (cellOf .clock [(0, 1000)]))).update cWell (some (cellOf .well [(0, 50)]))).update
-    cContent (some (cellOf .content []))).update cRoom (some (cellOf .resource []))).update
-    cPay (some (cellOf .pay [(0, 1)]))).update cSystem (some (cellOf .system [(0, 0)]))).update
-    cActivity (some (cellOf .activity [(0, 1)]))).update
-    cSeat (some (cellOf .seat [(0, 1)]))).update
+  (((((((((((((((((0 : Cells R).set cAuth (some (cellOf .authority [(1, 1)]))).set cRes
+    (some (cellOf .resource [(0, 10)]))).set cPolicy (some (cellOf .policy [(0, 1)]))).set
+    cBook (some (cellOf .book [(0, 100), (1, 0)]))).set cStream
+    (some (cellOf .stream []))).set cTicket (some (cellOf .ticket []))).set cLife
+    (some (cellOf .lifecycle [(0, 0)]))).set cGate (some (cellOf .gateway [(0, 1)]))).set
+    cClock (some (cellOf .clock [(0, 1000)]))).set cWell (some (cellOf .well [(0, 50)]))).set
+    cContent (some (cellOf .content []))).set cRoom (some (cellOf .resource []))).set
+    cPay (some (cellOf .pay [(0, 1)]))).set cSystem (some (cellOf .system [(0, 0)]))).set
+    cActivity (some (cellOf .activity [(0, 1)]))).set
+    cSeat (some (cellOf .seat [(0, 1)]))).set
     cPlatform (some (cellOf .platform [(0, 1)]))
 
 /-- The meter every lane starts with. -/
@@ -769,7 +769,7 @@ theorem run_postings_total (K : Finset Nat) :
 accepted turn's leg on an existing Book cell is a list of postings that
 balances over an account set `K`, the Book's total over `K` is the same
 after the turn as before. -/
-theorem step_conserves {TxId D : Type} [DecidableEq TxId] [DecidableEq D]
+theorem step_conserves {TxId D : Type} [DecidableEq TxId] [DecidableEq D] [Minidregg.Theory.StoreKey TxId] [Minidregg.Theory.StoreKey D]
     (H : History R TxId Unit D) {w w' : World R TxId D} {t : Turn R TxId Unit D}
     (h : World.step H w t = some w') (b : CellId) (ps : List Posting)
     (m : leg b .book (ps.map Posting.op) ∈ t.legs)

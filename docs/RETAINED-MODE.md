@@ -123,6 +123,8 @@ a778bbda6509944a5, exorcist a76808829fc8e4836, perf-apps a25df305cfd551d8b, reta
 | R3 | consent: the planner's prepared write vs the deriver's re-execution of the admitted record (perf-client 10-31: 347-372 ms of a 1.66 s `doc new`) | prepared twice from the same pre-state | node keyed by (pre-state height and head tag, intent bytes); consumed by the deriver when the admitted record matches, with "derived suffix = deriver's result at that pre-state" | retained-mode (handed over by perf-client) |
 | R4 | consent catch-up (`refresh` → `walkSuffix`), every member re-executes every record | O(records since last look) per member; option A rebases at the Store checkpoint | per box, one admitted state (option B); then R3 | perf-client / hot-path |
 | R5 | `PackedCell.decode` builds with `materialize`, dropping the Store's bytes | re-encode for `resourceViewUsing` | `materializeCanonical` (proved equal): the bytes are carried | exorcist |
+| R6 | session refresh: each new record's turn derived once per view (light, full) and again on receive, each decoding posts the Host just encoded (hot-path 10-31: 455 of 1,316 samples at 500 says) | derived 2-3 times per request | (i) the write carries its decoded post (a carried value with `decode bytes = some post`); (ii) one derived turn per record shared by both views (red-green memo keyed by record) | hot-path (a0fee5643746e520c) |
+| R7 | the open's World: represents re-decided at open | O(H) at open | the checkpoint seals the World beside the snapshot; `WorldTrack.advance` is its update rule | hot-path + perf-client |
 
 ### 3.5 Client and app side (already retained by hand; restate, do not regress)
 
@@ -131,6 +133,7 @@ a778bbda6509944a5, exorcist a76808829fc8e4836, perf-apps a25df305cfd551d8b, reta
 | Host image digest, workspace, settings, attempt index, namespace ID index (perf-client 60b0dbf20, aa24acaf8, c4ef61d37, c9f64c275) | kept by file identity: a memo keyed by (dev, inode, size, mtime) |
 | SPK verification of an installed image (perf-apps batch 1: 2.7-4.3 s → 0.02 s) | kept by file identity |
 | SQLite handle per root (exorcist b3b132f19), `RefIndex` in the web body | resident handle, kept index |
+| client reference names over WORKSPACE/refs (`workspace::reference_names`, `reference_for_target`, `sealed_room`) | built lazily once per read (exorcist 478f170ab: 13-15 → 3 ms per `doc show` at 500 refs); still O(references) when a page names a target. Owed: a maintained index keyed per file by (ino, size, mtime_ns, ctime_ns) from one getdents plus statx (a directory stamp misses in-place overwrites), never trusting a stamp younger than two clock ticks at fill time; other writers (journeys, grain-runtime, tests) need no cooperation |
 | resident clients, consent and codec residents (no idle exit) | resident processes are where retained state lives |
 
 These are the right shape and are all red-green memos whose dependency is a file identity. They become

@@ -205,14 +205,14 @@ def liftAuthorityValue : (plane : AuthorityPlane) → LegacyValue plane → plan
   | .parent, value => value
 
 def liftAuthority (store : Store authorityLayout) : Store CredentialAuthorityState.layout :=
-  store.mapRange (fun address value => value.map (liftAuthorityValue address.1))
-    (fun _ => rfl)
+  Minidregg.Theory.SparseMap.map (fun address value => liftAuthorityValue address.1 value) store
 
 /-- Every present source entry is lifted at the identical typed address;
 absence is preserved, including retired historical policy-address entries. -/
 @[simp] theorem liftAuthority_apply (store : Store authorityLayout)
     (address : Address authorityLayout) :
-    liftAuthority store address = (store address).map (liftAuthorityValue address.1) := rfl
+    liftAuthority store address = (store address).map (liftAuthorityValue address.1) :=
+  Minidregg.Theory.SparseMap.map_apply _ _ _
 
 theorem liftAuthority_absent (store : Store authorityLayout)
     (address : Address authorityLayout) (absent : store address = none) :

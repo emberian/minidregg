@@ -227,7 +227,7 @@ theorem twistContinuity_of_grandEquation
       unfold MemoryGrandEquation at eq
       rw [writeTuples_nil, readTuples_nil, add_zero, zero_add] at eq
       have hstore : pre = post := by
-        apply DFinsupp.ext
+        apply Minidregg.Theory.SparseMap.ext
         intro a
         by_cases hmem : a ∈ dom
         · exact (lookup_eq_of_auditTuples_eq eq hmem).symm

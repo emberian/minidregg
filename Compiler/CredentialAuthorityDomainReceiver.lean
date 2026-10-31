@@ -385,13 +385,13 @@ theorem write_of_planes {deployment : CanonicalCellRegistry.Deployment} {physica
     (loaded : Loaded deployment physical) (left right : CredentialAuthorityDomain.Cell)
     (planes : ∀ address, left.logical address = right.logical address) :
     loaded.write left = loaded.write right := by
-  have same : left = right := Materialized.ext (DFinsupp.ext planes)
+  have same : left = right := Materialized.ext (Minidregg.Theory.SparseMap.ext planes)
   rw [same]
 
 theorem cellRoot_of_planes (left right : CredentialAuthorityDomain.Cell)
     (planes : ∀ address, left.logical address = right.logical address) :
     cellRoot left = cellRoot right := by
-  rw [Materialized.ext (DFinsupp.ext planes)]
+  rw [Materialized.ext (Minidregg.Theory.SparseMap.ext planes)]
 
 theorem Loaded.writes_single {deployment : CanonicalCellRegistry.Deployment} {physical : PhysicalSnapshot}
     (loaded : Loaded deployment physical) (post : CredentialAuthorityDomain.Cell) :

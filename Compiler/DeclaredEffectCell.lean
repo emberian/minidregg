@@ -234,7 +234,7 @@ theorem objectFields_support_card (object : ResourceId .object) (size : Nat) :
       ((List.range size).map fun index =>
         (StateKey.objectField object ⟨index⟩).address).toFinset := by
     ext address
-    rw [DFinsupp.mem_support_toFun, List.mem_toFinset, ← objectEntry_addresses]
+    rw [Minidregg.Theory.SparseMap.mem_support_iff, List.mem_toFinset, ← objectEntry_addresses]
     exact (fromEntries_apply_eq_none_iff _ address).not.trans not_not
   rw [support, List.toFinset_card_of_nodup]
   · rw [List.length_map]
@@ -245,7 +245,7 @@ theorem objectFields_support_card (object : ResourceId .object) (size : Nat) :
 theorem objectFields_one_resource (object : ResourceId .object) (size : Nat)
     (address : Address effectLayout) (present : address ∈ (objectFields object size).support) :
     ∃ index < size, address = (StateKey.objectField object ⟨index⟩).address := by
-  rw [DFinsupp.mem_support_toFun] at present
+  rw [Minidregg.Theory.SparseMap.mem_support_iff] at present
   have listed : address ∈ ((List.range size).map (objectEntry object)).map Sigma.fst := by
     by_contra absent
     exact present ((fromEntries_apply_eq_none_iff _ address).mpr absent)

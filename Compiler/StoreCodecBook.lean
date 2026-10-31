@@ -41,7 +41,7 @@ inductive Space
   | balance
   | lease
   | floor
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, Minidregg.Theory.StoreKey
 
 @[reducible] def Space.Key : Space → Type
   | .account => AccountId
@@ -62,6 +62,12 @@ instance Space.keyDecEq : (space : Space) → DecidableEq (Space.Key space)
   | .balance => inferInstanceAs (DecidableEq (Nat × Nat))
   | .lease => inferInstanceAs (DecidableEq Nat)
   | .floor => inferInstanceAs (DecidableEq (Nat × Nat))
+
+instance Space.keyCode : (space : Space) → Minidregg.Theory.StoreKey (Space.Key space)
+  | .account => inferInstanceAs (Minidregg.Theory.StoreKey Nat)
+  | .balance => inferInstanceAs (Minidregg.Theory.StoreKey (Nat × Nat))
+  | .lease => inferInstanceAs (Minidregg.Theory.StoreKey Nat)
+  | .floor => inferInstanceAs (Minidregg.Theory.StoreKey (Nat × Nat))
 
 instance Space.valueDecEq : (space : Space) → DecidableEq (Space.Value space)
   | .account => inferInstanceAs (DecidableEq Unit)
@@ -148,13 +154,13 @@ def bookSupport (book : Book) : Finset (Address layout) :=
     book.leaseRecords.support.map leaseAddress ∪ book.floors.support.map floorAddress
 
 def bookStore (book : Book) : Store layout :=
-  DFinsupp.mk (bookSupport book) fun address => bookValue book address.1
+  Minidregg.Theory.SparseMap.ofFinset (bookSupport book) fun address => bookValue book address
 
 set_option backward.isDefEq.respectTransparency false in
 theorem bookStore_apply (book : Book) (address : Address layout) :
     (bookStore book) address = bookValue book address := by
   unfold bookStore
-  rw [DFinsupp.mk_apply]
+  rw [Minidregg.Theory.SparseMap.ofFinset_apply]
   split_ifs with member
   · rfl
   · rcases address with ⟨space, key⟩
@@ -206,22 +212,22 @@ def floorOf : Address layout → AccountId × AssetId
 def accountsOf (store : Store layout) : Π₀ _ : AccountId, Option Unit :=
   DFinsupp.comapDomain' (β := fun address : Address layout => Option (layout.Value address.1))
     (fun account : AccountId => (⟨Space.account, account⟩ : Address layout))
-    (h' := accountOf) (fun _ => rfl) store
+    (h' := accountOf) (fun _ => rfl) store.toDFinsupp
 
 def balancesOf (store : Store layout) : Π₀ _ : AccountId × AssetId, Option Int :=
   DFinsupp.comapDomain' (β := fun address : Address layout => Option (layout.Value address.1))
     (fun coordinate : AccountId × AssetId => (⟨Space.balance, coordinate⟩ : Address layout))
-    (h' := balanceOf) (fun _ => rfl) store
+    (h' := balanceOf) (fun _ => rfl) store.toDFinsupp
 
 def leasesOf (store : Store layout) : Π₀ _ : LeaseId, Option LeaseRecord :=
   DFinsupp.comapDomain' (β := fun address : Address layout => Option (layout.Value address.1))
     (fun lease : LeaseId => (⟨Space.lease, lease⟩ : Address layout))
-    (h' := leaseOf) (fun _ => rfl) store
+    (h' := leaseOf) (fun _ => rfl) store.toDFinsupp
 
 def floorsOf (store : Store layout) : Π₀ _ : AccountId × AssetId, Option Nat :=
   DFinsupp.comapDomain' (β := fun address : Address layout => Option (layout.Value address.1))
     (fun coordinate : AccountId × AssetId => (⟨Space.floor, coordinate⟩ : Address layout))
-    (h' := floorOf) (fun _ => rfl) store
+    (h' := floorOf) (fun _ => rfl) store.toDFinsupp
 
 /-- Read a store at the Book layout as a Book; absence of a balance or a floor
 is zero. -/

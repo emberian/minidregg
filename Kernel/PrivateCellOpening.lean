@@ -155,7 +155,7 @@ theorem outerCollision_is_hash {S : Store (CanonicalCellRegistry.layout kind)} {
 theorem view_eq_of_bytes {V S : Store (CanonicalCellRegistry.layout kind)}
     (same : ∀ a v, (∃ value, V a = some value ∧ v = valueBytes wire a value) ↔
       ∃ value, S a = some value ∧ v = valueBytes wire a value) : V = S := by
-  refine DFinsupp.ext fun a => ?_
+  refine Minidregg.Theory.SparseMap.ext fun a => ?_
   cases hV : V a with
   | some x =>
       obtain ⟨y, hy, bytes⟩ := (same a _).mp ⟨x, hV, rfl⟩
@@ -175,7 +175,7 @@ theorem openingRel_exact (selected : CanonicalCellRegistry.wire? kind = some wir
     (S : Store (CanonicalCellRegistry.layout kind)) (gate : storeFits wire S = true)
     (st : Statement (kind := kind)) (w : Witness (kind := kind))
     (root : st.root = privateRoot wire (kindTag kind) (kindCtx wire) S) (holds : OpeningRel wire decode st w) :
-    (st.view = DFinsupp.filter (Visible st.fields kind) S ∧
+    (st.view = Minidregg.Theory.SparseMap.filterKeys (Visible st.fields kind) S ∧
         ∃ secret, decode (maskOf wire S) = some (st.cell, st.version, secret)) ∨
       DeployedCollision wire S st.fields w := by
   obtain ⟨outer, custody, verifies, answers⟩ := holds
@@ -192,7 +192,7 @@ theorem openingRel_exact (selected : CanonicalCellRegistry.wire? kind = some wir
 /-- The honest statement of a store under a scope, for a cell and version. -/
 def honestStatement (S : Store (CanonicalCellRegistry.layout kind)) (fields : Option (Finset CellField))
     (cell : List UInt8) (version : Nat) : Statement (kind := kind) :=
-  ⟨privateRoot wire (kindTag kind) (kindCtx wire) S, cell, version, fields, DFinsupp.filter (Visible fields kind) S⟩
+  ⟨privateRoot wire (kindTag kind) (kindCtx wire) S, cell, version, fields, Minidregg.Theory.SparseMap.filterKeys (Visible fields kind) S⟩
 
 /-- The honest witness: the store's mask and index digest, and the honest reveal of every prefix
 (`AuthTrie.revealFor`, served from the kept trie by `Trie.reveal`). -/

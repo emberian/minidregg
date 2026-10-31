@@ -811,7 +811,7 @@ def sampleDeployment : DeclaredResourceController.Deployment := ⟨⟨0⟩, 1, 2
 theorem blindedStore_support (address : CAddr) (held : address ∈ blindedStore.support) :
     address = ⟨.blinding, ()⟩ := by
   by_contra other
-  rw [DFinsupp.mem_support_iff] at held
+  rw [Minidregg.Theory.SparseMap.mem_support_iff] at held
   exact held (by
     change Store.set (0 : ContentResource.ContentStore) ⟨.blinding, ()⟩ (some (⟨0⟩ : Digest)) address = _
     rw [Store.set_ne _ _ _ _ other]

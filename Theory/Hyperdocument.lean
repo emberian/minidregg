@@ -56,7 +56,7 @@ universe u
 version therefore requires an explicit new constructor and migration rule. -/
 inductive CodecVersion where
   | v1
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, StoreKey
 
 /-- Every semantic identifier class has a distinct preimage domain. -/
 inductive IdDomain where
@@ -72,7 +72,7 @@ inductive IdDomain where
   | annotation
   | versionEvent
   | operationIntent
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, StoreKey
 
 def CodecVersion.tag : CodecVersion -> UInt8
   | .v1 => 1
@@ -175,7 +175,7 @@ theorem preimage_encodings_disjoint
 type even though the digest carrier is shared. -/
 structure Identifier (version : CodecVersion) (domain : IdDomain) where
   digest : Digest
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, StoreKey
 
 /-- A deployment's digest operation.  There is intentionally no binding,
 injectivity, collision-resistance, or cryptographic-strength proof field. -/
@@ -466,12 +466,12 @@ instance FieldType.valueDecEq : (fieldType : FieldType) → DecidableEq fieldTyp
 inductive FieldOwner where
   | document (id : DocumentId)
   | element (id : ElementId)
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, StoreKey
 
 structure FieldKey where
   owner : FieldOwner
   name : Digest
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, StoreKey
 
 /-- Field values retain their type and merge declaration in canonical state. -/
 structure FieldRecord where
@@ -883,7 +883,7 @@ inductive Namespace where
   /-- The cell's hiding key (K-NARROW-HIDE): one entry, at key `()`, set at
   birth; no content action writes it and no reader receives it. -/
   | blinding
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, StoreKey
 
 def Key : Namespace -> Type
   | .documents => DocumentId
@@ -912,6 +912,9 @@ def Value : (space : Namespace) -> Type
   | .blinding => Digest
 
 instance keyDecidableEq (space : Namespace) : DecidableEq (Key space) := by
+  cases space <;> simp only [Key] <;> infer_instance
+
+instance keyStoreKey (space : Namespace) : StoreKey (Key space) := by
   cases space <;> simp only [Key] <;> infer_instance
 
 instance valueDecidableEq (space : Namespace) : DecidableEq (Value space) := by

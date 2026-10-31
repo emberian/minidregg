@@ -52,8 +52,7 @@ theorem resume_honest {seed : Seed} {pre suf : List IntentRecord} {state : State
   · simp
 
 /-- **The fold splits at any height**: folding `pre ++ suf` from a World at `height` is folding
-`pre`, then folding `suf` from the World reached at `height + pre.length` (the compaction cadence
-reads the absolute height, so both folds compact at the same heights). This is what lets the open
+`pre`, then folding `suf` from the World reached at `height + pre.length`. This is what lets the open
 fold only the suffix from a checkpoint's World. -/
 theorem foldRecords_append (w : HostRefinesWorld.DWorld) (height : Nat) (pre suf : List IntentRecord) :
     DurableReceiverIO.foldRecords rootBytes w height (pre ++ suf) =

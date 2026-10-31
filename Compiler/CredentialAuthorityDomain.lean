@@ -76,18 +76,14 @@ abbrev Cell := CredentialAuthorityCell.Cell
 def authStateOf (cell : Cell) : AuthState :=
   CredentialAuthorityState.authState cell
 
-/-- The authority store's support by the cached canonical-key sort (`supportCached_eq`), not
-`DFinsupp.support`'s quadratic dedup: the projection is built on every invocation's authority
-snapshot (`ServedBasis.authoritySnapshot`), and the store grows with every grant, revocation
-and parented birth. -/
+/-- The authority store's support: the tree's keys, no dedup (L0). -/
 def supportFast (logical : Store CredentialAuthorityState.layout) :
     Finset (Address CredentialAuthorityState.layout) :=
-  FiniteDependentMapCachedOrdering.supportCached (StoreCodec.addressKey CredentialAuthorityCell.wire)
-    (StoreCodec.addressKey_injective CredentialAuthorityCell.wire) logical
+  logical.support
 
 theorem supportFast_eq (logical : Store CredentialAuthorityState.layout) :
     supportFast logical = logical.support :=
-  FiniteDependentMapCachedOrdering.supportCached_eq _ _ _
+  rfl
 
 /-- One plane's keys, each address contributing at most one, distinct addresses distinct keys:
 their union is the multiset bind, with no dedup. -/

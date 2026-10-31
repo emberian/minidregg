@@ -97,7 +97,7 @@ def recordAt (state : Store layout) : Option PolicyRecord := state recordAddress
 
 theorem state_ext (state : Store layout) :
     state = stateOfOption (recordAt state) := by
-  apply DFinsupp.ext
+  apply Minidregg.Theory.SparseMap.ext
   rintro ⟨⟨⟩, ⟨⟩⟩
   cases present : state recordAddress with
   | none => simp [recordAt, stateOfOption, present]

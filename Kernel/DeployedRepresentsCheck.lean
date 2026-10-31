@@ -117,7 +117,7 @@ theorem lookupRecorded_isSome {C N E : Type} (x : TransactionId) :
 /-- A present system row is in the support. -/
 private theorem mem_support_of_isSome {a : Address (sysLayout TransactionId Theory.TypedAuthorization.Digest)}
     {w : DWorld} (h : (w.system a).isSome = true) : a ∈ w.system.support :=
-  DFinsupp.mem_support_iff.mpr (by intro z; rw [show w.system a = none from z] at h; cases h)
+  Minidregg.Theory.SparseMap.mem_support_iff.mpr (by intro z; rw [show w.system a = none from z] at h; cases h)
 
 /-- **`representsCheck_sound`.**  A resumed snapshot the check accepts against
 a World represents it at the image's height. -/
@@ -148,7 +148,7 @@ theorem representsCheck_sound {rootBytes : List UInt8 → Theory.TypedAuthorizat
     · rw [DurableCheckpoint.resume_outside_support rootBytes image bh st snap resumed _ m]
       have none : w.cells c = none := by
         by_contra present
-        have := cellsNamed c (DFinsupp.mem_support_iff.mpr present)
+        have := cellsNamed c (Minidregg.Theory.SparseMap.mem_support_iff.mpr present)
         obtain ⟨c', m', e⟩ := List.mem_map.mp this
         exact m (by cases c'; simp at e; subst e; exact m')
       have unretired : (w.retired c).isSome = false := by
@@ -226,46 +226,21 @@ theorem representsCheck_sound {rootBytes : List UInt8 → Theory.TypedAuthorizat
 
 /-! ## The decision as the Host evaluates it (`representsCheck_eq_fast`)
 
-`representsCheck` judged each system row by `List` membership in the image's transaction ids,
-nullifier keys and cell ids, and iterated `DFinsupp.support` (a deduplication over the whole
-map): with one journal row per transaction, quadratic in the log on every Store open. The
-evaluation below reads each list once into a hash set and iterates the map's own support
-multiset with its absent entries skipped. -/
+`representsCheck` judges each system row by `List` membership in the image's transaction ids,
+nullifier keys and cell ids: quadratic in the log on every Store open. The evaluation below reads
+each list once into a hash set and iterates the tree's keys (L0: no deduplication). -/
 
-/-- `∀ key ∈ fields.support, p key`, over an `Option`-valued map's own support multiset with its
-absent entries skipped: no `Multiset.toFinset`. -/
-def allSupport {K : Type} [DecidableEq K] {V : K → Type} (fields : Π₀ key : K, Option (V key))
-    (p : K → Bool) : Bool :=
-  fields.support'.lift (fun support => @decide (∀ key ∈ support.1, (fields key).isSome = true → p key = true)
-      Multiset.decidableForallMultiset)
-    (by
-      intro left right
-      apply decide_eq_decide.mpr
-      constructor
-      · intro holds key _ present
-        exact holds key ((left.2 key).resolve_right (by intro none; have absent : fields key = Option.none := none; rw [absent] at present; cases present)) present
-      · intro holds key _ present
-        exact holds key ((right.2 key).resolve_right (by intro none; have absent : fields key = Option.none := none; rw [absent] at present; cases present)) present)
+/-- `∀ key ∈ fields.support, p key`, over the tree's own key list. -/
+def allSupport {K : Type} [Minidregg.Theory.StoreKey K] {V : K → Type}
+    (fields : Minidregg.Theory.SparseMap K V) (p : K → Bool) : Bool :=
+  fields.keys.all p
 
-theorem allSupport_eq {K : Type} [DecidableEq K] {V : K → Type} (fields : Π₀ key : K, Option (V key))
-    (p : K → Bool) :
+theorem allSupport_eq {K : Type} [Minidregg.Theory.StoreKey K] {V : K → Type}
+    (fields : Minidregg.Theory.SparseMap K V) (p : K → Bool) :
     allSupport fields p = decide (∀ key ∈ fields.support, p key = true) := by
   unfold allSupport
-  refine Trunc.induction_on fields.support' ?_
-  intro support
-  simp only [Trunc.lift_mk]
-  apply decide_eq_decide.mpr
-  constructor
-  · intro holds key member
-    have present : (fields key).isSome = true := by
-      have := DFinsupp.mem_support_iff.mp member
-      cases h : fields key with
-      | none => exact absurd h this
-      | some _ => rfl
-    exact holds key ((support.2 key).resolve_right (by intro none; have absent : fields key = Option.none := none; rw [absent] at present; cases present)) present
-  · intro holds key _ present
-    exact holds key (DFinsupp.mem_support_iff.mpr (by
-      intro none; rw [none] at present; cases present))
+  rw [Bool.eq_iff_iff, List.all_eq_true, decide_eq_true_iff]
+  rfl
 
 /-- Membership in a list of naturals, read from a hash set built once. -/
 theorem hashSet_contains_ofList (l : List Nat) (n : Nat) :

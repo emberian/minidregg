@@ -287,9 +287,9 @@ theorem closed_preserved {cellId : Nat} {pre post : Store effectLayout}
     rw [sameDeclaration]
     by_cases changed : get (values objectValue pre) n = get (values objectValue post) n
     · have presentPost : post (StateKey.objectField ⟨objectValue⟩ ⟨n⟩).address ≠ none :=
-        (DFinsupp.mem_support_toFun _ _).mp member
+        Minidregg.Theory.SparseMap.mem_support_iff.mp member
       rw [← get_values, ← changed, get_values] at presentPost
-      exact preClosed _ ((DFinsupp.mem_support_toFun _ _).mpr presentPost) rfl
+      exact preClosed _ (Minidregg.Theory.SparseMap.mem_support_iff.mpr presentPost) rfl
     · exact (firstUndeclared_none_iff _ _ _).mp inside n changed
   | accountBalance _ _ => trivial
   | programCode _ => trivial

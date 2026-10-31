@@ -85,7 +85,7 @@ inductive Namespace
   | enrolment
   | sshIndex
   | journal
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, Minidregg.Theory.StoreKey
 
 /-- The finalized chain tip a pay observer reports at: the slot and its block
 time (unix s). It is the observer's claim about the chain, carried in its
@@ -210,6 +210,14 @@ instance Namespace.keyDecEq : (space : Namespace) → DecidableEq (Namespace.Key
   | .enrolment => inferInstanceAs (DecidableEq (List UInt8))
   | .sshIndex => inferInstanceAs (DecidableEq (List UInt8))
   | .journal => inferInstanceAs (DecidableEq (List UInt8))
+
+instance Namespace.keyCode : (space : Namespace) → Minidregg.Theory.StoreKey (Namespace.Key space)
+  | .tariff => inferInstanceAs (Minidregg.Theory.StoreKey Unit)
+  | .book => inferInstanceAs (Minidregg.Theory.StoreKey Nat)
+  | .assignment => inferInstanceAs (Minidregg.Theory.StoreKey Nat)
+  | .enrolment => inferInstanceAs (Minidregg.Theory.StoreKey (List UInt8))
+  | .sshIndex => inferInstanceAs (Minidregg.Theory.StoreKey (List UInt8))
+  | .journal => inferInstanceAs (Minidregg.Theory.StoreKey (List UInt8))
 
 instance Namespace.valueDecEq : (space : Namespace) → DecidableEq (Namespace.Value space)
   | .tariff => inferInstanceAs (DecidableEq FrozenTariff)

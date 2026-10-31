@@ -134,6 +134,14 @@ theorem materializer_nonempty_iff_countable {L : Layout.{0, 0, 0}}
     obtain ⟨codec⟩ := nonempty_lawfulCodec_of_countable (alpha := Store L)
     exact ⟨{ codec := codec, rootBytes := fun _ => Classical.arbitrary Root }⟩
 
+/-- A sparse map is countable when its values are: it is determined by its specification view
+(`SparseMap.toDFinsupp_injective`), and its keys are countable by their injective codes. -/
+instance sparseMap_countable {K : Type} [StoreKey K] {V : K → Type} [∀ a, Countable (V a)] :
+    Countable (SparseMap K V) := by
+  classical
+  haveI : Countable K := (StoreKey.injective (α := K)).countable
+  exact SparseMap.toDFinsupp_injective.countable
+
 /-- With countable namespaces, keys and values, the store is countable even
 when the key index is infinite. -/
 theorem sparse_store_countable {L : Layout.{0, 0, 0}}

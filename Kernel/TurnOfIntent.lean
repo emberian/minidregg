@@ -131,7 +131,7 @@ theorem enabled_of_distinct : ∀ {s : Store L} {p : Patch L}, (p.map Op.address
 theorem run_of_distinct : ∀ {s s' : Store L} {p : Patch L}, (p.map Op.address).Nodup →
     (∀ op ∈ p, op.apply s op.address = s' op.address) →
     (∀ b, (∀ op ∈ p, op.address ≠ b) → s b = s' b) → Patch.run s p = s'
-  | _, _, [], _, _, miss => DFinsupp.ext fun b => miss b (by simp)
+  | _, _, [], _, _, miss => Minidregg.Theory.SparseMap.ext fun b => miss b (by simp)
   | s, s', op :: rest, nd, hit, miss => by
       rw [List.map_cons, List.nodup_cons] at nd
       rw [Patch.run_cons]
@@ -593,7 +593,7 @@ theorem digestKey_injective : Function.Injective digestKey := by
 
 section Derive
 
-variable {R : Registry} {D : Type} [DecidableEq D]
+variable {R : Registry} {D : Type} [DecidableEq D] [Minidregg.Theory.StoreKey D]
 variable {rootBytes : List UInt8 → Theory.TypedAuthorization.Digest}
 
 /-- The turn type the deployed intents land in. -/
@@ -1078,7 +1078,7 @@ theorem applyCreates_exists : ∀ (cells : Cells R) (cs : List (CellId × Cell R
       obtain ⟨hp, hc, hrom⟩ := h (c, k, p) (by simp)
       simp only at hp hc hrom
       subst hp
-      obtain ⟨cells', h'⟩ := applyCreates_exists (cells.update c (some k)) rest nd.2
+      obtain ⟨cells', h'⟩ := applyCreates_exists (cells.set c (some k)) rest nd.2
         fun x hx => ⟨(h x (by simp [hx])).1, by
           rw [cells_update_ne _ _ (fun e => nd.1 (by
             simpa [← e] using List.mem_map_of_mem (f := Prod.fst) hx))]
@@ -1095,11 +1095,11 @@ theorem applyLegs_exists : ∀ (cells : Cells R) (legs : List (Leg R)), (legs.ma
       have hfd : Patch.firstDisabled? pre leg.patch = none :=
         (Patch.firstDisabled?_eq_none_iff _ _).2 hv
       have ha : applyLeg cells leg =
-          .ok (cells.update leg.cell (some ⟨leg.kind, Patch.run pre leg.patch⟩)) := by
+          .ok (cells.set leg.cell (some ⟨leg.kind, Patch.run pre leg.patch⟩)) := by
         unfold applyLeg
         simp only [hc, Cell.storeAt_self, hfd]
       obtain ⟨cells', h'⟩ := applyLegs_exists
-        (cells.update leg.cell (some ⟨leg.kind, Patch.run pre leg.patch⟩)) rest nd.2 fun l hl => by
+        (cells.set leg.cell (some ⟨leg.kind, Patch.run pre leg.patch⟩)) rest nd.2 fun l hl => by
         obtain ⟨p, hp, hv'⟩ := h l (by simp [hl])
         refine ⟨p, ?_, hv'⟩
         rw [cells_update_ne (c := leg.cell) (x := l.cell) _ _
@@ -1264,7 +1264,7 @@ theorem applyRetires_exists : ∀ (cells : Cells R) (rs : List CellId), rs.Nodup
   | cells, c :: rest, nd, h => by
       rw [List.nodup_cons] at nd
       obtain ⟨cell, hc, hz⟩ := h c (by simp)
-      obtain ⟨cells', h'⟩ := applyRetires_exists (cells.update c none) rest nd.2 fun x hx => by
+      obtain ⟨cells', h'⟩ := applyRetires_exists (cells.set c none) rest nd.2 fun x hx => by
         obtain ⟨cell', hc', hz'⟩ := h x (by simp [hx])
         exact ⟨cell', by rw [cells_update_ne _ _ (fun e => nd.1 (by rw [← e]; exact hx))]; exact hc', hz'⟩
       exact ⟨cells', by simp only [applyRetires, hc, hz, if_true]; exact h'⟩
@@ -1768,7 +1768,7 @@ def ofCellsFast (B : Bridge R D) (H : History R TransactionId StableEvent D)
             .error .storageAboveCharge
           else .ok t
 
-omit [DecidableEq D] in
+omit [DecidableEq D] [Minidregg.Theory.StoreKey D] in
 theorem ofCells_eq_fast_apply (B : Bridge R D) (H : History R TransactionId StableEvent D)
     (cells : CellId → Option (Cell R)) (retired : CellId → Bool) (intent : DataIntent rootBytes) :
     ofCells B H cells retired intent = ofCellsFast B H cells retired intent := by
@@ -1786,6 +1786,7 @@ theorem ofCells_eq_fast_apply (B : Bridge R D) (H : History R TransactionId Stab
   unfold ofCells ofCellsFast
   simp only [refusals, computed, ← turnOf_eq_deltas]
 
+omit [Minidregg.Theory.StoreKey D] in
 @[csimp] theorem ofCells_eq_fast : @ofCells = @ofCellsFast := by
   funext
   exact ofCells_eq_fast_apply _ _ _ _ _

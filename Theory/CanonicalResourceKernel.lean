@@ -326,7 +326,7 @@ theorem withinFloor_of_funded {book : Book} {operation : Operation}
 and no resource package whose authority could be forged independently. -/
 inductive Field
   | book
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, StoreKey
 
 deriving instance Countable for Field
 

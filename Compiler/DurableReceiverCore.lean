@@ -40,7 +40,6 @@ public import Kernel.DeployedCharge
 public import Kernel.TurnLog
 public import Kernel.DurableEngine
 public import Kernel.DurableEngineSuffix
-public import Compiler.WorldCompact
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr
@@ -928,10 +927,10 @@ def WorldTrack.advance {rootBytes : List UInt8 → Digest} {snapshot next : Data
           match admitted : Minidregg.Kernel.World.World.admitPinned DeployedHistory.history
               (Minidregg.Kernel.World.pinCheckFromBy (snapPinFails snapshot w) 0 t.pins) w t with
           | .error reason => .lost s!"height {height'}: the World refuses the turn: {repr reason}"
-          | .ok w' => .held (WorldCompact.compactEvery height' w') (by
+          | .ok w' => .held w' (by
               have admit := (Minidregg.Kernel.World.admitPinned_by_eq DeployedHistory.history w t
                 (fun p _ => snapPinFails_eq rep p)).symm.trans admitted
-              rw [WorldCompact.compactEvery_eq, up]
+              rw [up]
               exact HostRefinesWorld.represents_of_admitted DeployedBridge.bridge
                 DeployedHistory.history rep derived (DeployedCharge.mismatch_none charged) executed
                 admit)
@@ -1018,7 +1017,7 @@ def foldRecords (rootBytes : List UInt8 → Digest) :
               | none =>
               match Minidregg.Kernel.World.World.admit DeployedHistory.history w t with
               | .error reason => .error s!"height {height + 1}: the World refuses the turn: {repr reason}"
-              | .ok w' => foldRecords rootBytes (WorldCompact.compactEvery (height + 1) w') (height + 1) rest
+              | .ok w' => foldRecords rootBytes w' (height + 1) rest
 
 /-- The seed's genesis World (`TurnLog.genesisOfSeed`), or why it has none. -/
 def genesisWorld (seed : Seed) : Except String HostRefinesWorld.DWorld :=
@@ -1053,7 +1052,7 @@ def worldOfCheckpoint (state : State)
     (system : Minidregg.Theory.Store.Store Kernel.WorldSystemCodec.DSys) :
     Option HostRefinesWorld.DWorld :=
   (state.cells.foldlM (fun (cells : Minidregg.Kernel.World.Cells DeployedBridge.deployedR) entry =>
-      (DeployedBridge.decodeCell entry.2).map fun slot => DFinsupp.update cells entry.1.value slot)
+      (DeployedBridge.decodeCell entry.2).map fun slot => cells.set entry.1.value slot)
     0).map fun cells => ⟨cells, system⟩
 
 /-- A v4 checkpoint body's World: its system store beside its state's cells. -/

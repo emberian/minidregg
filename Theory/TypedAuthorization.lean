@@ -25,6 +25,8 @@ public import Mathlib.Data.Finset.Basic
 public import Mathlib.Tactic.Common
 public import Mathlib.Tactic.NormNum
 public import Mathlib.Data.Finset.Card
+public import Theory.SparseMap
+public meta import Theory.DeriveStoreKey
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr
@@ -49,15 +51,15 @@ namespace Minidregg.Theory.TypedAuthorization
 
 structure SubjectId where
   value : Nat
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, StoreKey
 
 structure IssuerId where
   value : Nat
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, StoreKey
 
 structure PolicyId where
   value : Nat
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, StoreKey
 
 structure FederationId where
   value : Nat
@@ -65,15 +67,15 @@ structure FederationId where
 
 structure CapabilityId where
   value : Nat
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, StoreKey
 
 structure ChannelId where
   value : Nat
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, StoreKey
 
 structure Digest where
   value : Nat
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, StoreKey
 
 abbrev Epoch := Nat
 /-- Source revision is independent of the revocable grant generation. -/
@@ -85,12 +87,12 @@ inductive ResourceKind where
   | object
   | account
   | program
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, StoreKey
 
 /-- An identifier whose resource kind is present in its type. -/
 structure ResourceId (_kind : ResourceKind) where
   value : Nat
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, StoreKey
 
 /-- Verbs are indexed by the kind on which they are meaningful.  A program
 installation cannot accidentally be presented as an account transfer. -/
@@ -913,7 +915,7 @@ inductive RevocationKey where
   (registered, revoked) lives in the authority cell's presence planes; the key
   record itself carries no revocation flag. -/
   | signingKey (subject : SubjectId) (epoch : Epoch)
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, StoreKey
 
 /-- The authorization-relevant projection of current state.  Epoch comparisons
 are exact equalities, never lower bounds and never optional. -/

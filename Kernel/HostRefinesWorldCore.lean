@@ -165,7 +165,7 @@ set_option autoImplicit false
 
 section CellCases
 
-variable {R : Registry} {TxId Ev D' : Type} [DecidableEq TxId] [DecidableEq D']
+variable {R : Registry} {TxId Ev D' : Type} [DecidableEq TxId] [Minidregg.Theory.StoreKey TxId] [DecidableEq D'] [Minidregg.Theory.StoreKey D']
 
 /-- **What one accepted step does to one cell**: nothing; retires it; runs a
 valid leg from the store it held (or from the ROM image a create of the turn
@@ -267,7 +267,7 @@ theorem birth_rom_image (H : History R TxId Ev D') {w w' : World R TxId D'}
       subst hs'
       refine ⟨room, ?_⟩
       have e : romPart (Patch.run pre leg.patch) = pre := by
-        apply DFinsupp.ext
+        apply Minidregg.Theory.SparseMap.ext
         intro a
         rw [romPart_apply]
         split
@@ -320,7 +320,7 @@ cell holding its record (`PolicyInstallReceiver.successorCreate`,
 ROM; since T3b a create carries its ROM image, so at any world with a head, a
 fresh transaction id, an absent unretired cell and the image's bytes funded,
 the birth is an accepted turn and the cell holds exactly the record. -/
-theorem policy_source_birth_is_turn {D' : Type} [DecidableEq D']
+theorem policy_source_birth_is_turn {D' : Type} [DecidableEq D'] [Minidregg.Theory.StoreKey D']
     (H : History deployedR TransactionId StableEvent D') {w : World deployedR TransactionId D'}
     {height : Nat} {logRoot : D'} (hh : w.head = some (height, logRoot))
     {x : TransactionId} (fresh : w.journal x = none) {c : CellId} (absent : w.cells c = none)
@@ -361,7 +361,7 @@ theorem policy_source_birth_is_turn {D' : Type} [DecidableEq D']
     | none => intro pos; exact absurd pos (lt_irrefl 0)
     | some a => intro _; rfl
   have hcells : applyCells w.cells (sourceBirth H x c record ev) =
-      .ok (w.cells.update c (some (sourceCell record))) := by
+      .ok (w.cells.set c (some (sourceCell record))) := by
     have rom : RomOnly (sourceCell record).store :=
       Minidregg.Kernel.DeployedBridge.policySource_romOnly _
     simp [applyCells, applyCreates, sourceBirth, absent, roomPresent, rom, applyLegs,
@@ -372,7 +372,7 @@ theorem policy_source_birth_is_turn {D' : Type} [DecidableEq D']
 /-- **The pole: the same record written into an EXISTING source cell has no
 turn.**  A policy-source cell holding `r` is, after any accepted turn, retired
 or still holding `r`: the record is ROM (`World.step_rom_preserved`). -/
-theorem policy_source_rewrite_has_no_turn {TxId Ev D' : Type} [DecidableEq TxId] [DecidableEq D']
+theorem policy_source_rewrite_has_no_turn {TxId Ev D' : Type} [DecidableEq TxId] [Minidregg.Theory.StoreKey TxId] [DecidableEq D'] [Minidregg.Theory.StoreKey D']
     (H : History deployedR TxId Ev D') {w w' : World deployedR TxId D'}
     {t : Turn deployedR TxId Ev D'} (h : World.step H w t = some w') {c : CellId}
     {r : Minidregg.Compiler.CanonicalPolicyAdmission.PolicyRecord}
@@ -398,7 +398,7 @@ theorem policy_source_rewrite_has_no_turn {TxId Ev D' : Type} [DecidableEq TxId]
 
 section Represent
 
-variable {R : Registry} {D : Type} [DecidableEq D]
+variable {R : Registry} {D : Type} [DecidableEq D] [Minidregg.Theory.StoreKey D]
 variable {rootBytes : List UInt8 → Theory.TypedAuthorization.Digest}
 
 
@@ -658,7 +658,7 @@ intent writes an absent cell with the canonical bytes of a policy-source cell
 `ofIntent` derives over the deployed bridge creates that cell born with the
 record.  Together with `Delta.create_patchOk` (a birth is never `notAPatch`)
 this is why install and the births are on no list. -/
-theorem ofIntent_policySource_birth {D' : Type} [DecidableEq D']
+theorem ofIntent_policySource_birth {D' : Type} [DecidableEq D'] [Minidregg.Theory.StoreKey D']
     {B : Bridge deployedR D'} (hcodec : B.codec = bridge.codec)
     {H : History deployedR TransactionId StableEvent D'} {w : World deployedR TransactionId D'}
     {intent : DataIntent Minidregg.Compiler.ResourceBirthCodec.rootBytes} {t : DTurn deployedR D'}
@@ -703,7 +703,7 @@ namespace Example
 inductive Space
   | log
   | heap
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, Minidregg.Theory.StoreKey
 
 /-- One append-only and one RAM address. -/
 @[reducible] def toyLayout : Layout.{0, 0, 0} where
@@ -768,7 +768,7 @@ def toySystem : Store (sysLayout TransactionId Nat) :=
 
 /-- Cell 0 holds `log = 1, heap = 5`. -/
 def w0 : World toyR TransactionId Nat :=
-  ⟨(0 : Cells toyR).update 0 (some (toyCell 1 5)), toySystem⟩
+  ⟨(0 : Cells toyR).set 0 (some (toyCell 1 5)), toySystem⟩
 
 def toyRoot (_ : List UInt8) : Theory.TypedAuthorization.Digest := ⟨0⟩
 
@@ -879,7 +879,7 @@ theorem toy_represents : SnapRepresents toyB toySnap 0 w0 := by
     · have : (⟨0⟩ : Theory.TypedAuthorization.Digest) ≠ ⟨c⟩ := fun h => e (by cases h; rfl)
       show toyDecode ((DurableReceiver.Seed.lookup [(⟨0⟩, [1, 5])] ⟨c⟩).getD []) = _
       simp only [DurableReceiver.Seed.lookup, this, if_false, Option.getD_none]
-      show some none = some (((0 : Cells toyR).update 0 (some (toyCell 1 5))) c)
+      show some none = some (((0 : Cells toyR).set 0 (some (toyCell 1 5))) c)
       rw [cells_update_ne _ _ e]
       rfl
   · show (toySystem ⟨SysSpace.spent, d⟩).isSome = true ↔ _

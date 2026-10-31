@@ -629,7 +629,7 @@ theorem DeclaredCellLaw.no_balance (kind : ResourceKind) (cellId : Nat)
     (account : ResourceId .account) (asset : Digest) :
     store (StateKey.accountBalance account asset).address = none := by
   by_contra present
-  exact law.1 _ (DFinsupp.mem_support_toFun _ _ |>.mpr present)
+  exact law.1 _ (Minidregg.Theory.SparseMap.mem_support_iff.mpr present)
 
 /-- **`declared_fields_admit_as_before`.** For a write from a lawful cell that
 leaves its declaration unchanged and changes only declared fields
@@ -784,14 +784,10 @@ private theorem allPresentEqualMultiset_iff {α : Type} [DecidableEq α]
 
 instance contentLawDecidable (store : Store Hyperdocument.layout) :
     Decidable (ContentLaw store) := by
-  -- The support by the cached canonical-key sort (`supportCached_eq`), not `Multiset.toFinset`'s
-  -- quadratic dedup: this check runs on every content read and write.
+  -- The support is the tree's keys (no dedup): this check runs on every content read and write.
   apply decidable_of_iff
-    (allPresentEqualMultiset ((FiniteDependentMapCachedOrdering.supportCached
-      (StoreCodec.addressKey HyperdocumentCell.contentWire)
-      (StoreCodec.addressKey_injective HyperdocumentCell.contentWire) store).val.map
+    (allPresentEqualMultiset (store.support.val.map
         (documentAt store)) = true)
-  rw [FiniteDependentMapCachedOrdering.supportCached_eq]
   symm
   unfold ContentLaw
   rw [allPresentEqualMultiset_iff]
@@ -841,18 +837,12 @@ def EventHistoryLaw (deployment : Deployment)
 instance eventHistoryLawDecidable (deployment : Deployment)
     (store : Store Kernel.HyperdocumentEventLog.Sparse.layout) :
     Decidable (EventHistoryLaw deployment store) := by
-  -- The support by the cached canonical-key sort, as in `contentLawDecidable`: the event log
-  -- grows by one record per document version, and this check runs on every append.
+  -- The support is the tree's keys, as in `contentLawDecidable`.
   apply decidable_of_iff
-    ((∀ address ∈ FiniteDependentMapCachedOrdering.supportCached
-        (StoreCodec.addressKey HyperdocumentCell.eventWire)
-        (StoreCodec.addressKey_injective HyperdocumentCell.eventWire) store,
+    ((∀ address ∈ store.support,
         EventValid deployment address.2 (store address)) ∧
-      allPresentEqualMultiset ((FiniteDependentMapCachedOrdering.supportCached
-        (StoreCodec.addressKey HyperdocumentCell.eventWire)
-        (StoreCodec.addressKey_injective HyperdocumentCell.eventWire) store).val.map fun address =>
+      allPresentEqualMultiset (store.support.val.map fun address =>
         (store address).map VersionEventRecord.document) = true)
-  rw [FiniteDependentMapCachedOrdering.supportCached_eq]
   symm
   unfold EventHistoryLaw
   constructor
@@ -874,10 +864,10 @@ instance eventHistoryLawDecidable (deployment : Deployment)
       ((store right).map VersionEventRecord.document)
       (Multiset.mem_map.mpr ⟨right, by simpa using rightSupport, rfl⟩)
     cases leftValue : store left with
-    | none => exact ((DFinsupp.mem_support_toFun _ _).mp leftSupport leftValue).elim
+    | none => exact (Minidregg.Theory.SparseMap.mem_support_iff.mp leftSupport leftValue).elim
     | some leftRecord =>
       cases rightValue : store right with
-      | none => exact ((DFinsupp.mem_support_toFun _ _).mp rightSupport rightValue).elim
+      | none => exact (Minidregg.Theory.SparseMap.mem_support_iff.mp rightSupport rightValue).elim
       | some rightRecord => simpa [leftValue, rightValue] using compared
 
 /-- **The domain restoration (S3 decision 1).**  An event record naming any
@@ -888,7 +878,7 @@ theorem foreign_domain_event_refused (deployment : Deployment)
     (present : store address = some record) (foreign : record.historyDomain ≠ deployment.domain) :
     ¬ EventHistoryLaw deployment store := by
   intro law
-  have valid := law.1 address (DFinsupp.mem_support_toFun _ _ |>.mpr (by rw [present]; intro same; cases same))
+  have valid := law.1 address (Minidregg.Theory.SparseMap.mem_support_iff.mpr (by rw [present]; intro same; cases same))
   rw [present] at valid
   exact foreign valid.1
 
@@ -1720,9 +1710,9 @@ def emptyContent : PackedCell registry :=
 theorem user_content_inhabited : UserInitial deployment 11 emptyContent := by
   refine ⟨⟨⟨by decide, ?_⟩, ?_⟩, ?_⟩
   · intro left member
-    exact ((DFinsupp.mem_support_toFun _ _).mp member rfl).elim
+    exact (Minidregg.Theory.SparseMap.mem_support_iff.mp member rfl).elim
   · intro address member
-    exact ((DFinsupp.mem_support_toFun _ _).mp member rfl).elim
+    exact (Minidregg.Theory.SparseMap.mem_support_iff.mp member rfl).elim
   · unfold Kernel.ProtectedCell.reservedBase; decide
 
 end Witness

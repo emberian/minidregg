@@ -66,7 +66,7 @@ set_option autoImplicit false
 
 inductive Namespace
   | system
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, Minidregg.Theory.StoreKey
 
 /-- The deployment's certified head and its tail bound. -/
 structure System where
@@ -83,6 +83,9 @@ structure System where
 
 instance Namespace.keyDecEq : (space : Namespace) → DecidableEq (Namespace.Key space)
   | .system => inferInstanceAs (DecidableEq Unit)
+
+instance Namespace.keyCode : (space : Namespace) → Minidregg.Theory.StoreKey (Namespace.Key space)
+  | .system => inferInstanceAs (Minidregg.Theory.StoreKey Unit)
 
 instance Namespace.valueDecEq : (space : Namespace) → DecidableEq (Namespace.Value space)
   | .system => inferInstanceAs (DecidableEq System)
@@ -233,7 +236,7 @@ def defaultTailBound : Nat := 64 * 4
 #guard_msgs (whitespace := lax) in #print axioms genesis_law
 /-- info: 'Minidregg.Kernel.SystemCell.genesis_system' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms genesis_system
-/-- info: 'Minidregg.Kernel.SystemCell.empty_unlawful' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.SystemCell.empty_unlawful' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms empty_unlawful
 
 end Minidregg.Kernel.SystemCell

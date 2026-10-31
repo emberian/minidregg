@@ -52,7 +52,7 @@ theorem elementCount_congr {store store' : ContentStore}
   rcases address with ⟨space, key⟩
   cases space
   case elements =>
-    simp only [Finset.mem_filter, DFinsupp.mem_support_iff]
+    simp only [Finset.mem_filter, Minidregg.Theory.SparseMap.mem_support_iff]
     rw [same key]
   all_goals simp
 
@@ -258,7 +258,7 @@ theorem mark_requires_grant (author : PrincipalRef) (operation : OperationId)
   apply Finset.card_pos.mpr
   refine ⟨⟨.marks, mark⟩, Finset.mem_filter.mpr ⟨?_, rfl, ?_⟩⟩
   · apply Finset.mem_union_right
-    apply DFinsupp.mem_support_iff.mpr
+    apply Minidregg.Theory.SparseMap.mem_support_iff.mpr
     intro zero
     have absent : (next.1 ⟨.marks, mark⟩ : Option MarkRecord) = none := zero
     rw [stored] at absent

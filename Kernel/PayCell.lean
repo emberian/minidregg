@@ -108,7 +108,7 @@ inductive Namespace
   | pendingOwnerHistory
   | computeUsage
   | computeActivation
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, Minidregg.Theory.StoreKey
 
 /-- The finalized chain tip a pay observer reports at: the slot and its block
 time (unix s). It is the observer's claim about the chain, carried in its
@@ -225,6 +225,21 @@ instance Namespace.keyDecEq : (space : Namespace) → DecidableEq (Namespace.Key
   | .chainTip => inferInstanceAs (DecidableEq Unit)
   | .computeUsage => inferInstanceAs (DecidableEq Nat)
   | .computeActivation => inferInstanceAs (DecidableEq Unit)
+
+instance Namespace.keyCode : (space : Namespace) → Minidregg.Theory.StoreKey (Namespace.Key space)
+  | .tariff => inferInstanceAs (Minidregg.Theory.StoreKey Unit)
+  | .book => inferInstanceAs (Minidregg.Theory.StoreKey Nat)
+  | .assignment => inferInstanceAs (Minidregg.Theory.StoreKey Nat)
+  | .enrolment => inferInstanceAs (Minidregg.Theory.StoreKey (List UInt8))
+  | .sshIndex => inferInstanceAs (Minidregg.Theory.StoreKey (List UInt8))
+  | .journal => inferInstanceAs (Minidregg.Theory.StoreKey (List UInt8))
+  | .claim => inferInstanceAs (Minidregg.Theory.StoreKey (List UInt8))
+  | .claimConsumption => inferInstanceAs (Minidregg.Theory.StoreKey (List UInt8))
+  | .pendingOwner => inferInstanceAs (Minidregg.Theory.StoreKey (List UInt8))
+  | .pendingOwnerHistory => inferInstanceAs (Minidregg.Theory.StoreKey (List UInt8 × Nat))
+  | .chainTip => inferInstanceAs (Minidregg.Theory.StoreKey Unit)
+  | .computeUsage => inferInstanceAs (Minidregg.Theory.StoreKey Nat)
+  | .computeActivation => inferInstanceAs (Minidregg.Theory.StoreKey Unit)
 
 instance Namespace.valueDecEq : (space : Namespace) → DecidableEq (Namespace.Value space)
   | .tariff => inferInstanceAs (DecidableEq Tariff)

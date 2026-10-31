@@ -11,8 +11,10 @@ them.
 * A `Layout` chooses namespaces, a key type and a value type per namespace, and
   a mutation discipline per namespace (ROM, RAM, append-only).  Addresses are
   `Σ n, Key n`.
-* A `Store` is `Π₀ a : Address L, Option (Value a.1)`.  `none` is absence and
-  is a value of the representation, never a default.
+* A `Store` is a `Theory.SparseMap` from addresses to present values (retained mode's leaf,
+  `docs/RETAINED-MODE.md` §5): a persistent extensional balanced tree, so a lookup or a `set` is
+  O(log n) and a write never leaves a closure behind.  `s a : Option (Value a.1)`; `none` is
+  absence, never a default.  `toDFinsupp` is the `Π₀` specification view.
 * An `Op` is `read a observed | write a before after | allocate a v | free a before`:
   every mutation names the exact value it expects to replace, and allocation
   requires absence.  `Patch L := List (Op L)` is the free monoid on operations.
@@ -21,12 +23,15 @@ them.
   derived from syntax.  The frame law `run_frame` is the one frame theorem the
   cell and transition layers use.
 
-Byte codecs, key order and roots are deliberately absent: they are
+Byte codecs, canonical (wire) key order and roots are deliberately absent: they are
 representations of a store, and live with the encoders (`Compiler/`) and the
-materializers (`Theory.CellState`).
+materializers (`Theory.CellState`).  The tree's own order is the layout's key codes
+(`StoreKey`), an implementation order with no meaning on the wire.
 -/
 module
 
+public import Theory.SparseMap
+public meta import Theory.DeriveStoreKey
 public import Mathlib.Data.DFinsupp.Defs
 public import Mathlib.Data.Finset.Basic
 public import Mathlib.Tactic.Common
@@ -80,8 +85,12 @@ structure Layout where
   [namespaceDecEq : DecidableEq Namespace]
   [keyDecEq : (space : Namespace) → DecidableEq (Key space)]
   [valueDecEq : (space : Namespace) → DecidableEq (Value space)]
+  /-- The injective key codes the store's tree is ordered by. -/
+  [namespaceCode : StoreKey Namespace]
+  [keyCode : (space : Namespace) → StoreKey (Key space)]
 
 attribute [instance] Layout.namespaceDecEq Layout.keyDecEq Layout.valueDecEq
+  Layout.namespaceCode Layout.keyCode
 
 /-- One typed address: a namespace and a key of that namespace. -/
 abbrev Address (L : Layout.{u, v, w}) := Σ space : L.Namespace, L.Key space
@@ -91,15 +100,13 @@ the one entry type: codecs (`StoreCodec.fromEntries`) and family patches
 (`CredentialAuthorityEffects.assignAll`) both consume it. -/
 abbrev Entry (L : Layout.{u, v, w}) := Σ address : Address L, L.Value address.1
 
-/-- `none` is the representation-level zero of a sparse typed map.  It means
-"address absent" and does not choose a semantic default. -/
-instance optionZero (α : Type w) : Zero (Option α) := ⟨none⟩
+/-- One store: a persistent extensional finite map from addresses to present values.
+Equality is extensional (`Store.ext`), so insertion order and overwritten history are not
+part of a store's identity. -/
+instance Address.storeKey (L : Layout.{u, v, w}) : StoreKey (Address L) :=
+  StoreKey.sigma L.Namespace L.Key
 
-/-- The one store.  Finite support is structural and equality is extensional,
-so insertion order and overwritten history are not part of a store's
-identity. -/
-abbrev Store (L : Layout.{u, v, w}) :=
-  Π₀ address : Address L, Option (L.Value address.1)
+abbrev Store (L : Layout.{u, v, w}) := SparseMap (Address L) (fun address => L.Value address.1)
 
 namespace Store
 
@@ -107,25 +114,34 @@ variable {L : Layout.{u, v, w}}
 
 @[simp] theorem zero_apply (address : Address L) :
     (0 : Store L) address = none :=
-  rfl
+  SparseMap.get?_empty address
 
 /-- Update one exact address.  `none` deallocates it. -/
 def set (store : Store L) (address : Address L)
     (value : Option (L.Value address.1)) : Store L :=
-  DFinsupp.update store address value
+  SparseMap.set store address value
 
 @[simp] theorem set_eq (store : Store L) (address : Address L)
     (value : Option (L.Value address.1)) :
-    store.set address value address = value := by
-  simp [set]
+    store.set address value address = value :=
+  SparseMap.set_eq store address value
 
 /-- Updating one address frames every distinct address. -/
-theorem set_ne (store : Store L) (address : Address L)
+@[simp] theorem set_ne (store : Store L) (address : Address L)
     (value : Option (L.Value address.1)) (other : Address L)
     (different : other ≠ address) :
-    store.set address value other = store other := by
-  change Function.update (⇑store) address value other = store other
-  rw [Function.update_of_ne different]
+    store.set address value other = store other :=
+  SparseMap.set_ne store address value other different
+
+/-- `set` is `Function.update` of the lookup function. -/
+theorem coe_set (store : Store L) (address : Address L) (value : Option (L.Value address.1)) :
+    ⇑(store.set address value) = Function.update (⇑store) address value :=
+  SparseMap.coe_set store address value
+
+/-- Stores with the same lookups are equal. -/
+@[ext] theorem ext {left right : Store L} (same : ∀ address, left address = right address) :
+    left = right :=
+  SparseMap.ext same
 
 /-- Allocation freshness is exactly absence. -/
 def Fresh (store : Store L) (address : Address L) : Prop :=
@@ -509,6 +525,10 @@ inductive Namespace
   | heap
   | log
   deriving DecidableEq, Repr
+
+instance : StoreKey Namespace :=
+  StoreKey.ofInjective Namespace.ctorIdx
+    (by intro a b h; cases a <;> cases b <;> first | rfl | exact absurd h (by decide))
 
 abbrev layout : Layout where
   Namespace := Namespace

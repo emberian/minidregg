@@ -1006,7 +1006,7 @@ instance keptDecidable {L : Layout.{0, 0, 0}} (fields : Option (Finset CellField
 /-- The store a reader under `fields` receives: every other address absent. -/
 def narrowStore {L : Layout.{0, 0, 0}} (fields : Option (Finset CellField))
     (field : Address L → Option CellField) (store : Store L) : Store L :=
-  DFinsupp.filter (Kept fields field) store
+  Minidregg.Theory.SparseMap.filterKeys (Kept fields field) store
 
 /-- **Observation returns only named fields.**  Every present address of the
 narrowed store is one the scope keeps. -/
@@ -1016,19 +1016,19 @@ theorem observe_returns_only_named_fields {L : Layout.{0, 0, 0}}
     (present : narrowStore fields field store address ≠ none) :
     Kept fields field address := by
   by_contra dropped
-  exact present (DFinsupp.filter_apply_neg store dropped)
+  exact present (Minidregg.Theory.SparseMap.filterKeys_apply_neg store dropped)
 
 /-- And every kept address is returned unchanged. -/
 theorem observe_returns_named_fields {L : Layout.{0, 0, 0}}
     {fields : Option (Finset CellField)} {field : Address L → Option CellField}
     (store : Store L) {address : Address L} (kept : Kept fields field address) :
     narrowStore fields field store address = store address :=
-  DFinsupp.filter_apply_pos store kept
+  Minidregg.Theory.SparseMap.filterKeys_apply_pos store kept
 
 /-- A scope naming every field reads the whole cell. -/
 theorem narrowStore_all {L : Layout.{0, 0, 0}} (field : Address L → Option CellField)
     (store : Store L) : narrowStore none field store = store := by
-  refine DFinsupp.ext fun address => observe_returns_named_fields store ?_
+  refine Minidregg.Theory.SparseMap.ext fun address => observe_returns_named_fields store ?_
   unfold Kept; split <;> trivial
 
 /-- Pole: a reviewer naming `annotations` keeps a content link and drops the
@@ -1041,7 +1041,7 @@ theorem reviewer_reads_annotations_not_body
       narrowStore (some {.annotations}) (fieldOf .content) store ⟨.atoms, atom⟩ = none :=
   ⟨observe_returns_named_fields store
       (show CellField.NamedBy (some {.annotations}) .annotations by decide),
-    DFinsupp.filter_apply_neg store
+    Minidregg.Theory.SparseMap.filterKeys_apply_neg store
       (show ¬ CellField.NamedBy (some {.annotations})
           (atomField (atomDigest atom)) from by
         rintro ⟨outer, member, covers⟩
@@ -1067,7 +1067,7 @@ theorem atoms_reader_sees_only_its_own_atoms (low : Nat) (atom : Hyperdocument.K
           (atomField (atomDigest atom)) from
         CellField.namedBy_of_mem (by simp only [atomField, ContentResource.atomLow, same, Finset.mem_singleton]))
   · intro other
-    exact DFinsupp.filter_apply_neg store
+    exact Minidregg.Theory.SparseMap.filterKeys_apply_neg store
       (show ¬ CellField.NamedBy (some {CellField.atomsOf low})
           (atomField (atomDigest atom)) from by
         rintro ⟨outer, member, covers⟩
@@ -1080,7 +1080,7 @@ theorem atoms_reader_sees_only_its_own_atoms (low : Nat) (atom : Hyperdocument.K
 theorem atoms_reader_sees_no_link (low : Nat) (link : Hyperdocument.Key .links)
     (store : Store (CanonicalCellRegistry.layout .content)) :
     narrowStore (some {CellField.atomsOf low}) (fieldOf .content) store ⟨.links, link⟩ = none :=
-  DFinsupp.filter_apply_neg store
+  Minidregg.Theory.SparseMap.filterKeys_apply_neg store
     (CellField.atomsOf_names_only_itself low (low + 1) (by omega)).2.2.2
 
 /-- Pole: a reader naming field 1 of a declared object keeps field 1 and not
@@ -1093,7 +1093,7 @@ theorem reader_reads_field_one_not_two (object : ResourceId .object)
         ⟨(), .objectField object ⟨2⟩⟩ = none :=
   ⟨observe_returns_named_fields store
       (show CellField.NamedBy (some {.slot 1}) (.slot 1) by decide),
-    DFinsupp.filter_apply_neg store
+    Minidregg.Theory.SparseMap.filterKeys_apply_neg store
       (show ¬ CellField.NamedBy (some {.slot 1}) (.slot 2) by decide)⟩
 
 /-- What a reader under `fields` is shown of a cell of `kind`: a kept address
@@ -1112,7 +1112,7 @@ set_option backward.isDefEq.respectTransparency false in
 fields, never the blinding. -/
 def narrowPacked (fields : Option (Finset CellField))
     (packed : PackedCell CanonicalCellRegistry.registry) : PackedCell CanonicalCellRegistry.registry :=
-  ⟨packed.kind, materialize _ (DFinsupp.filter (Visible fields packed.kind) packed.payload.logical)⟩
+  ⟨packed.kind, materialize _ (Minidregg.Theory.SparseMap.filterKeys (Visible fields packed.kind) packed.payload.logical)⟩
 
 set_option backward.isDefEq.respectTransparency false in
 /-- Every address a reader receives is one its scope keeps. -/
@@ -1122,7 +1122,7 @@ theorem narrowPacked_only_kept {fields : Option (Finset CellField)}
     (present : (narrowPacked fields packed).payload.logical address ≠ none) :
     Kept fields (fieldOf packed.kind) address := by
   by_contra dropped
-  exact present (DFinsupp.filter_apply_neg _ (fun visible => dropped visible.1))
+  exact present (Minidregg.Theory.SparseMap.filterKeys_apply_neg _ (fun visible => dropped visible.1))
 
 set_option backward.isDefEq.respectTransparency false in
 /-- No reader receives the hiding key. -/
@@ -1131,7 +1131,7 @@ theorem narrowPacked_erases_blinding (fields : Option (Finset CellField))
     {address : Address (CanonicalCellRegistry.layout packed.kind)}
     (key : CanonicalCellRegistry.isBlinding packed.kind address = true) :
     (narrowPacked fields packed).payload.logical address = none :=
-  DFinsupp.filter_apply_neg _ (fun visible => by simp [visible.2] at key)
+  Minidregg.Theory.SparseMap.filterKeys_apply_neg _ (fun visible => by simp [visible.2] at key)
 
 /-- An account cut as a reader under `fields` receives it: the `balance`
 coordinates the scope names. -/

@@ -45,7 +45,7 @@ inductive Field
   | balance
   | lease
   | floor
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, StoreKey
 
 /-- The key of each namespace. -/
 abbrev Field.Key : Field → Type
@@ -67,6 +67,12 @@ instance Field.keyDecEq : (field : Field) → DecidableEq field.Key
   | .balance => inferInstanceAs (DecidableEq (AccountId × AssetId))
   | .lease => inferInstanceAs (DecidableEq LeaseId)
   | .floor => inferInstanceAs (DecidableEq (AccountId × AssetId))
+
+instance Field.keyCode : (field : Field) → StoreKey field.Key
+  | .account => inferInstanceAs (StoreKey AccountId)
+  | .balance => inferInstanceAs (StoreKey (AccountId × AssetId))
+  | .lease => inferInstanceAs (StoreKey LeaseId)
+  | .floor => inferInstanceAs (StoreKey (AccountId × AssetId))
 
 instance Field.valueDecEq : (field : Field) → DecidableEq field.Value
   | .account => inferInstanceAs (DecidableEq Unit)
@@ -244,11 +250,8 @@ theorem setBalance_ne (store : Store layout) (c : AccountId × AssetId) (v : Opt
     setBalance store c v a = store a := Store.set_ne _ _ _ _ ne
 
 theorem set_self (store : Store layout) (address : Address layout) :
-    store.set address (store address) = store := by
-  refine DFinsupp.ext fun other => ?_
-  by_cases same : other = address
-  · subst same; exact Store.set_eq _ _ _
-  · exact Store.set_ne _ _ _ _ same
+    store.set address (store address) = store :=
+  SparseMap.set_self store address
 
 theorem entryPatch_run (store : Store layout) (address : Address layout)
     (value : Option (layout.Value address.1)) :

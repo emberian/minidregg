@@ -54,7 +54,7 @@ namespace Sparse
 
 inductive Namespace where
   | events
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, Minidregg.Theory.StoreKey
 
 @[reducible] def layout : Store.Layout.{0, 0, 0} where
   Namespace := Namespace
@@ -175,9 +175,9 @@ end Sparse
 #guard_msgs (whitespace := lax) in #print axioms Sparse.AcceptedAppend.post_contains
 /-- info: 'Minidregg.Kernel.HyperdocumentEventLog.Sparse.AcceptedAppend.duplicate_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Sparse.AcceptedAppend.duplicate_rejected
-/-- info: 'Minidregg.Kernel.HyperdocumentEventLog.Sparse.overwrite_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.HyperdocumentEventLog.Sparse.overwrite_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Sparse.overwrite_refused
-/-- info: 'Minidregg.Kernel.HyperdocumentEventLog.Sparse.remove_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.HyperdocumentEventLog.Sparse.remove_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Sparse.remove_refused
 
 end Minidregg.Kernel.HyperdocumentEventLog

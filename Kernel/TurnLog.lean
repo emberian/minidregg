@@ -99,7 +99,7 @@ def genesisOfSeed (seed : DurableReceiver.Seed) : Except GenesisRefusal DWorld :
     match decodeCell bytes with
     | none => throw (.undecodable id.value)
     | some slot =>
-      cells := DFinsupp.update cells id.value slot
+      cells := cells.set id.value slot
       if retiresCell bytes then retired := id.value :: retired
   return ⟨cells, retireRows (genesisSystem seed.available) retired.reverse⟩
 

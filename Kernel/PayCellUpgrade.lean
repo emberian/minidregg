@@ -270,7 +270,7 @@ private theorem legacy_row_everywhere (store : OldStore) (law : PayCellLegacyV4.
   · exact law.2 address member
   · have absent : store address = none := by
       have hsimpa := member
-      simp only [DFinsupp.mem_support_toFun, not_not] at hsimpa ⊢
+      simp only [Minidregg.Theory.SparseMap.mem_support_iff, not_not] at hsimpa ⊢
       exact hsimpa
     rcases address with ⟨space, key⟩
     cases space <;>

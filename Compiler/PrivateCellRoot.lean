@@ -222,7 +222,7 @@ theorem index_set_blind {store : Store L} {a : Address L} (blind : some a = W.bl
     (v : Option (L.Value a.1)) : indexEntries W (store.set a v) = indexEntries W store :=
   indexIgnoresBlinding W _ _ fun address other => by
     have : address ≠ a := fun same => other (same ▸ blind)
-    simp [Store.set, Function.update_of_ne this]
+    simp [Store.set, this]
 
 /-- The index after one data write: a function of the old index, one insert or one erase. -/
 def indexStep (index : Index W T) (a : Address L) (v : Option (L.Value a.1)) : Index W T :=

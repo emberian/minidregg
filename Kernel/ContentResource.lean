@@ -1873,14 +1873,12 @@ def project (before' after' : ContentStore) (command : Command) : List (String �
    ("content/atoms/low-min", touchedMin atomLow command),
    ("content/atoms/low-max", touchedMax atomLow command)]
 
-/-- The store's support by the cached canonical-key sort (`supportCached`), not `Multiset.toFinset`'s
-quadratic dedup. -/
+/-- The store's support: the tree's keys, no dedup (L0). -/
 def supportFast (store : ContentStore) : Finset Hyperdocument.Address :=
-  FiniteDependentMapCachedOrdering.supportCached (StoreCodec.addressKey HyperdocumentCell.contentWire)
-    (StoreCodec.addressKey_injective HyperdocumentCell.contentWire) store
+  store.support
 
 theorem supportFast_eq (store : ContentStore) : supportFast store = store.support :=
-  FiniteDependentMapCachedOrdering.supportCached_eq _ _ store
+  rfl
 
 def elementCountFast (store : ContentStore) : Nat :=
   ((supportFast store).filter fun address => address.1 = .elements).card
@@ -2172,7 +2170,7 @@ theorem edit_is_body_write (before : ContentStore) (atom : AtomId) (old new : At
     0 < bodyWrites before (before.set ⟨.atoms, atom⟩ (some new)) := by
   apply Finset.card_pos.mpr
   refine ⟨⟨.atoms, atom⟩, ?_⟩
-  simp only [changedIn, Finset.mem_filter, Finset.mem_union, DFinsupp.mem_support_iff]
+  simp only [changedIn, Finset.mem_filter, Finset.mem_union, Minidregg.Theory.SparseMap.mem_support_iff]
   refine ⟨Or.inl ?_, rfl, ?_⟩
   · rw [present]; exact Option.some_ne_none old
   · rw [Store.Store.set_eq, present]

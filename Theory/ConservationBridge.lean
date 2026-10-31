@@ -55,7 +55,7 @@ absence read as `0`. -/
 noncomputable def valueView (space : L.Namespace) [AddCommGroup (L.Value space)]
     (store : Store L) : L.Key space →₀ L.Value space :=
   (finsuppAddEquivDFinsupp (ι := L.Key space) (M := L.Value space)).symm
-    ((DFinsupp.comapDomain (Sigma.mk space) sigma_mk_injective store).mapRange
+    ((DFinsupp.comapDomain (Sigma.mk space) sigma_mk_injective store.toDFinsupp).mapRange
       (fun _ (o : Option (L.Value space)) => o.getD 0) (fun _ => rfl))
 
 @[simp] theorem valueView_apply (space : L.Namespace) [AddCommGroup (L.Value space)]

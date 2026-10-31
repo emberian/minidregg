@@ -72,7 +72,7 @@ inductive StateKey where
   such a tail: a member's rows are allocated on join, and nothing is reserved
   for members who never come. -/
   | fieldsFrom (object : ResourceId .object)
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, StoreKey
 
 /-- The declared-effect layout: one RAM namespace whose keys are the typed
 state keys and whose values are exact integers. -/

@@ -3,10 +3,10 @@
 
 Retained mode's leaf layer (`docs/RETAINED-MODE.md` §5, L0). A `SparseMap K V` is a finite map
 from keys to present values, held as a `Std.ExtDTreeMap` (a balanced tree, persistent by path
-copying, extensional: two maps with the same lookups are equal). Every `get?`, `set` (insert or
-erase) and `ext` is O(encode k + comparison · log n). It replaces `DFinsupp` as the runtime carrier
+copying, extensional: two maps with the same lookups are equal). Every `get?`, `set` (one `alter`:
+insert, overwrite or erase) and `ext` is O(encode k + comparison · log n). It replaces `DFinsupp` as the runtime carrier
 of `Theory.Store`'s stores and the World's cell map: a `DFinsupp.update` adds a closure layer per
-write, so lookups walked every write since the last re-tree (`Compiler/WorldCompact.lean`'s
+write, so lookups walked every write since the last re-tree (the deleted `Compiler/WorldCompact`'s
 header: 99 % of a 175 s open inside `Function.update`). `toDFinsupp` keeps the DFinsupp as a
 specification view (`toDFinsupp_apply`).
 
@@ -86,6 +86,14 @@ instance uint8 : StoreKey UInt8 where
   code b := [b.toNat]
   injective a b h := UInt8.toNat_inj.mp (by simpa using h)
 
+instance uint32 : StoreKey UInt32 where
+  code b := [b.toNat]
+  injective a b h := UInt32.toNat_inj.mp (by simpa using h)
+
+instance uint64 : StoreKey UInt64 where
+  code b := [b.toNat]
+  injective a b h := UInt64.toNat_inj.mp (by simpa using h)
+
 instance option (α : Type u) [StoreKey α] : StoreKey (Option α) where
   code
     | none => [0]
@@ -146,6 +154,30 @@ instance list (α : Type u) [StoreKey α] : StoreKey (List α) where
     StoreKey α where
   code a := code (f a)
   injective _ _ h := inj (injective h)
+
+/-- A constructor's code: its index, then each field's code framed. Self-delimiting, so
+injective in the fields (`frames_inj`). The `deriving StoreKey` handler emits exactly this. -/
+def frames : List (List Nat) → List Nat
+  | [] => []
+  | l :: rest => frame l ++ frames rest
+
+theorem frames_inj : ∀ {ls ms : List (List Nat)}, frames ls = frames ms → ls = ms
+  | [], [], _ => rfl
+  | [], m :: _, h => by simp [frames, frame] at h
+  | l :: _, [], h => by simp [frames, frame] at h
+  | l :: ls, m :: ms, h => by
+    obtain ⟨h₁, h₂⟩ := frame_append_inj h
+    rw [h₁, frames_inj h₂]
+
+@[simp] theorem frames_eq_iff {ls ms : List (List Nat)} : frames ls = frames ms ↔ ls = ms :=
+  ⟨frames_inj, fun h => h ▸ rfl⟩
+
+/-- An instance from a code and its injectivity (the deriving handler's target). -/
+@[instance_reducible] def ofCode {α : Type u} (c : α → List Nat) (inj : Function.Injective c) :
+    StoreKey α := ⟨c, inj⟩
+
+@[simp] theorem code_eq_iff {α : Type u} [StoreKey α] {a b : α} : code a = code b ↔ a = b :=
+  code_inj
 
 end StoreKey
 
@@ -211,10 +243,10 @@ instance : Zero (SparseMap K V) := ⟨empty⟩
 
 instance : CoeFun (SparseMap K V) (fun _ => (a : K) → Option (V a)) := ⟨get?⟩
 
-/-- Set one key: `some v` inserts or overwrites, `none` removes. -/
-def set (m : SparseMap K V) (a : K) : Option (V a) → SparseMap K V
-  | some v => ⟨m.tree.insert (CachedKey.of a) v⟩
-  | none => ⟨m.tree.erase (CachedKey.of a)⟩
+/-- Set one key: `some v` inserts or overwrites, `none` removes. One tree pass (`alter`), and
+no case split on the value at the head, so `set` terms unify argument by argument. -/
+def set (m : SparseMap K V) (a : K) (v : Option (V a)) : SparseMap K V :=
+  ⟨m.tree.alter (CachedKey.of a) fun _ => v⟩
 
 @[simp] theorem get?_empty (a : K) : (empty : SparseMap K V).get? a = none :=
   Std.ExtDTreeMap.get?_empty
@@ -241,26 +273,17 @@ theorem ext_tree {m₁ m₂ : SparseMap K V} (h : m₁.tree = m₂.tree) : m₁ 
 theorem ext_iff' {m₁ m₂ : SparseMap K V} : m₁ = m₂ ↔ ∀ a, m₁ a = m₂ a :=
   ⟨fun h _ => h ▸ rfl, ext⟩
 
-@[simp] theorem set_eq (m : SparseMap K V) (a : K) (v : Option (V a)) : m.set a v a = v := by
-  cases v with
-  | some v => exact Std.ExtDTreeMap.get?_insert_self
-  | none => exact Std.ExtDTreeMap.get?_erase_self
+@[simp] theorem set_eq (m : SparseMap K V) (a : K) (v : Option (V a)) : m.set a v a = v :=
+  Std.ExtDTreeMap.get?_alter_self
 
 theorem cmp_of_ne {a b : K} (ne : b ≠ a) :
     CachedKey.cmp (CachedKey.of a) (CachedKey.of b) ≠ .eq := by
   intro h
   exact ne (congrArg CachedKey.value (Std.LawfulEqCmp.eq_of_compare h)).symm
 
-theorem set_ne (m : SparseMap K V) (a : K) (v : Option (V a)) (b : K) (ne : b ≠ a) :
-    m.set a v b = m b := by
-  cases v with
-  | some v =>
-    show (m.tree.insert (CachedKey.of a) v).get? (CachedKey.of b) = m.tree.get? (CachedKey.of b)
-    exact Std.ExtDTreeMap.get?_insert.trans (dif_neg (cmp_of_ne ne))
-  | none =>
-    show (m.tree.erase (CachedKey.of a)).get? (CachedKey.of b) = m.tree.get? (CachedKey.of b)
-    rw [Std.ExtDTreeMap.get?_erase]
-    exact if_neg (cmp_of_ne ne)
+@[simp] theorem set_ne (m : SparseMap K V) (a : K) (v : Option (V a)) (b : K) (ne : b ≠ a) :
+    m.set a v b = m b :=
+  Std.ExtDTreeMap.get?_alter.trans (dif_neg (cmp_of_ne ne))
 
 theorem set_apply [DecidableEq K] (m : SparseMap K V) (a : K) (v : Option (V a)) (b : K) :
     m.set a v b = if h : b = a then h ▸ v else m b := by
@@ -329,11 +352,11 @@ theorem nodup_keys (m : SparseMap K V) : m.keys.Nodup := by
 /-- The support: the present keys, as a finset (no dedup: the keys are distinct). -/
 def support (m : SparseMap K V) : Finset K := ⟨m.keys, m.nodup_keys⟩
 
-@[simp] theorem mem_support_iff (m : SparseMap K V) (a : K) : a ∈ m.support ↔ m a ≠ none := by
+@[simp] theorem mem_support_iff {m : SparseMap K V} {a : K} : a ∈ m.support ↔ m a ≠ none := by
   show a ∈ m.keys ↔ _
   rw [mem_keys, Option.isSome_iff_ne_none]
 
-theorem not_mem_support_iff (m : SparseMap K V) (a : K) : a ∉ m.support ↔ m a = none := by
+theorem not_mem_support_iff {m : SparseMap K V} {a : K} : a ∉ m.support ↔ m a = none := by
   simp
 
 theorem mem_toList (m : SparseMap K V) (a : K) (v : V a) : ⟨a, v⟩ ∈ m.toList ↔ m a = some v := by
@@ -359,6 +382,34 @@ def filter (p : (a : K) → V a → Bool) (m : SparseMap K V) : SparseMap K V :=
 @[simp] theorem filter_apply (p : (a : K) → V a → Bool) (m : SparseMap K V) (a : K) :
     m.filter p a = (m a).filter (p a) :=
   Std.ExtDTreeMap.get?_filter
+
+/-- Each present value mapped by `f` (DFinsupp.mapRange's shape, key-dependent), one tree pass. -/
+def map {W : K → Type w} (f : (a : K) → V a → W a) (m : SparseMap K V) : SparseMap K W :=
+  ⟨m.tree.map fun k v => f k.value v⟩
+
+@[simp] theorem map_apply {W : K → Type w} (f : (a : K) → V a → W a) (m : SparseMap K V) (a : K) :
+    m.map f a = (m a).map (f a) := by
+  show (m.tree.map fun k v => f k.value v).get? (CachedKey.of a) = (m.tree.get? (CachedKey.of a)).map (f a)
+  rw [Std.ExtDTreeMap.get?_map]
+  rfl
+
+/-- The entries at keys satisfying `p` (DFinsupp.filter's shape: a predicate on keys). -/
+def filterKeys (p : K → Prop) [DecidablePred p] (m : SparseMap K V) : SparseMap K V :=
+  m.filter fun a _ => decide (p a)
+
+@[simp] theorem filterKeys_apply (p : K → Prop) [DecidablePred p] (m : SparseMap K V) (a : K) :
+    m.filterKeys p a = if p a then m a else none := by
+  unfold filterKeys
+  rw [filter_apply]
+  by_cases h : p a <;> cases m a <;> simp [h]
+
+theorem filterKeys_apply_pos {p : K → Prop} [DecidablePred p] (m : SparseMap K V) {a : K}
+    (h : p a) : m.filterKeys p a = m a := by
+  rw [filterKeys_apply, if_pos h]
+
+theorem filterKeys_apply_neg {p : K → Prop} [DecidablePred p] (m : SparseMap K V) {a : K}
+    (h : ¬p a) : m.filterKeys p a = none := by
+  rw [filterKeys_apply, if_neg h]
 
 /-! ### The specification view -/
 
@@ -397,6 +448,68 @@ theorem toDFinsupp_injective [DecidableEq K] : Function.Injective (toDFinsupp (K
   refine ext fun a => ?_
   have := DFunLike.congr_fun h a
   simpa only [toDFinsupp_apply] using this
+
+@[simp] theorem toDFinsupp_zero' [DecidableEq K] : (0 : SparseMap K V).toDFinsupp = 0 :=
+  DFinsupp.ext fun a => zero_apply a
+
+/-- Setting each listed key to `f`'s value: listed keys read `f`, others read the start. -/
+theorem foldl_set_apply [DecidableEq K] (f : (a : K) → Option (V a)) :
+    ∀ (l : List K) (m : SparseMap K V) (a : K),
+      (l.foldl (fun m b => m.set b (f b)) m) a = if a ∈ l then f a else m a
+  | [], m, a => by simp
+  | b :: l, m, a => by
+    rw [List.foldl_cons, foldl_set_apply f l, set_apply]
+    by_cases hl : a ∈ l
+    · simp [hl]
+    · by_cases hb : a = b
+      · subst hb; simp
+      · simp [hl, hb]
+
+/-- The map holding `f`'s values on the keys of a finite set (DFinsupp.mk's shape), one `set`
+per key. Computable: setting by `f` commutes, so the fold is independent of the set's order. -/
+def ofFinset [DecidableEq K] (s : Finset K) (f : (a : K) → Option (V a)) : SparseMap K V :=
+  Quot.liftOn s.val (fun l => l.foldl (fun m b => m.set b (f b)) empty) fun l₁ l₂ perm =>
+    ext fun a => by
+      rw [foldl_set_apply, foldl_set_apply]
+      have : a ∈ l₁ ↔ a ∈ l₂ := List.Perm.mem_iff perm
+      by_cases h : a ∈ l₁
+      · rw [if_pos h, if_pos (this.mp h)]
+      · rw [if_neg h, if_neg (mt this.mpr h)]
+
+@[simp] theorem ofFinset_apply [DecidableEq K] (s : Finset K) (f : (a : K) → Option (V a)) (a : K) :
+    ofFinset s f a = if a ∈ s then f a else none := by
+  obtain ⟨val, nodup⟩ := s
+  induction val using Quot.ind with
+  | mk l =>
+    change (l.foldl (fun m b => m.set b (f b)) empty) a = _
+    rw [foldl_set_apply]
+    rfl
+
+/-- The inverse view: the map holding a `DFinsupp`'s present values. Specification only (it reads
+the `DFinsupp`'s support through `Finset.toList`); runtime stores are built by `set`. -/
+noncomputable def ofDFinsupp [DecidableEq K] (f : Π₀ a : K, Option (V a)) : SparseMap K V := by
+  classical
+  exact f.support.toList.foldl (fun m b => m.set b (f b)) empty
+
+@[simp] theorem ofDFinsupp_apply [DecidableEq K] (f : Π₀ a : K, Option (V a)) (a : K) :
+    ofDFinsupp f a = f a := by
+  classical
+  unfold ofDFinsupp
+  rw [foldl_set_apply]
+  by_cases h : f a = none
+  · have : a ∉ f.support.toList := by
+      rw [Finset.mem_toList, DFinsupp.mem_support_iff, not_not]; exact h
+    rw [if_neg this, h]; rfl
+  · have : a ∈ f.support.toList := by
+      rw [Finset.mem_toList, DFinsupp.mem_support_iff]; exact h
+    rw [if_pos this]
+
+theorem toDFinsupp_ofDFinsupp [DecidableEq K] (f : Π₀ a : K, Option (V a)) :
+    (ofDFinsupp f).toDFinsupp = f :=
+  DFinsupp.ext fun a => by simp
+
+theorem ofDFinsupp_toDFinsupp [DecidableEq K] (m : SparseMap K V) : ofDFinsupp m.toDFinsupp = m :=
+  ext fun a => by simp
 
 /-! ### Decidable equality -/
 
@@ -437,6 +550,16 @@ end SparseMap.Example
 #assert_axioms SparseMap.set_ne
 #assert_axioms SparseMap.coe_set
 #assert_axioms SparseMap.mem_support_iff
+#assert_axioms SparseMap.filterKeys_apply
+#assert_axioms SparseMap.map_apply
+#assert_axioms SparseMap.ofFinset_apply
+#assert_axioms SparseMap.filterKeys_apply_pos
+#assert_axioms SparseMap.filterKeys_apply_neg
+#assert_axioms SparseMap.toDFinsupp_zero'
+#assert_axioms SparseMap.foldl_set_apply
+#assert_axioms SparseMap.ofDFinsupp_apply
+#assert_axioms SparseMap.toDFinsupp_ofDFinsupp
+#assert_axioms SparseMap.ofDFinsupp_toDFinsupp
 #assert_axioms SparseMap.mem_toList
 #assert_axioms SparseMap.filter_apply
 #assert_axioms SparseMap.Example.histories_agree
@@ -444,6 +567,9 @@ end SparseMap.Example
 #assert_axioms StoreKey.frame_append_inj
 #assert_axioms StoreKey.code_inj
 #assert_axioms StoreKey.listCode_injective
+#assert_axioms StoreKey.frames_inj
+#assert_axioms StoreKey.frames_eq_iff
+#assert_axioms StoreKey.code_eq_iff
 #assert_axioms CachedKey.of_value
 #assert_axioms CachedKey.eq_of_code_eq
 #assert_axioms CachedKey.eq_of

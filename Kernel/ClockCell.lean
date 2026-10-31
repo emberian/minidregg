@@ -64,7 +64,7 @@ set_option autoImplicit false
 
 inductive Namespace
   | clock | maxStepSeconds
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, Minidregg.Theory.StoreKey
 
 /-- The deployment clock: unix seconds and the last observed chain slot. -/
 structure Clock where
@@ -83,6 +83,10 @@ structure Clock where
 instance Namespace.keyDecEq : (space : Namespace) → DecidableEq (Namespace.Key space)
   | .clock => inferInstanceAs (DecidableEq Unit)
   | .maxStepSeconds => inferInstanceAs (DecidableEq Unit)
+
+instance Namespace.keyCode : (space : Namespace) → Minidregg.Theory.StoreKey (Namespace.Key space)
+  | .clock => inferInstanceAs (Minidregg.Theory.StoreKey Unit)
+  | .maxStepSeconds => inferInstanceAs (Minidregg.Theory.StoreKey Unit)
 
 instance Namespace.valueDecEq : (space : Namespace) → DecidableEq (Namespace.Value space)
   | .clock => inferInstanceAs (DecidableEq Clock)
@@ -243,7 +247,7 @@ theorem slot_back_not_advancing : advances ⟨100, 7⟩ ⟨200, 6⟩ = false := 
 #guard_msgs (whitespace := lax) in #print axioms genesis_law
 /-- info: 'Minidregg.Kernel.ClockCell.genesis_clock' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms genesis_clock
-/-- info: 'Minidregg.Kernel.ClockCell.empty_unlawful' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.ClockCell.empty_unlawful' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms empty_unlawful
 /-- info: 'Minidregg.Kernel.ClockCell.genesis_tick_advances' does not depend on any axioms -/
 #guard_msgs (whitespace := lax) in #print axioms genesis_tick_advances

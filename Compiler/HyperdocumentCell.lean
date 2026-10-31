@@ -489,7 +489,7 @@ theorem linksStore_support_card (size : Nat) : (linksStore size).support.card = 
       ((List.range size).map fun index =>
         (⟨.links, (⟨⟨index⟩⟩ : LinkId)⟩ : Store.Address Hyperdocument.layout)).toFinset := by
     ext address
-    rw [DFinsupp.mem_support_toFun, List.mem_toFinset, ← linkEntry_addresses]
+    rw [Minidregg.Theory.SparseMap.mem_support_iff, List.mem_toFinset, ← linkEntry_addresses]
     exact (fromEntries_apply_eq_none_iff _ address).not.trans not_not
   rw [support, List.toFinset_card_of_nodup]
   · rw [List.length_map]
@@ -607,7 +607,7 @@ inductive IndexSpace where
   | cursor
   | source
   | derived
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, Minidregg.Theory.StoreKey
 
 @[reducible] def IndexSpace.Key (capacity : Nat) : IndexSpace → Type
   | .checkpoints => Bool
@@ -627,6 +627,13 @@ instance IndexSpace.keyDecEq (capacity : Nat) :
   | .cursor => inferInstanceAs (DecidableEq Unit)
   | .source => inferInstanceAs (DecidableEq (Fin capacity))
   | .derived => inferInstanceAs (DecidableEq (Fin capacity))
+
+instance IndexSpace.keyCode (capacity : Nat) :
+    (space : IndexSpace) → Minidregg.Theory.StoreKey (IndexSpace.Key capacity space)
+  | .checkpoints => inferInstanceAs (Minidregg.Theory.StoreKey Bool)
+  | .cursor => inferInstanceAs (Minidregg.Theory.StoreKey Unit)
+  | .source => inferInstanceAs (Minidregg.Theory.StoreKey (Fin capacity))
+  | .derived => inferInstanceAs (Minidregg.Theory.StoreKey (Fin capacity))
 
 instance IndexSpace.valueDecEq : (space : IndexSpace) → DecidableEq (IndexSpace.Value space)
   | .checkpoints => inferInstanceAs (DecidableEq CausalCheckpoint)
@@ -757,12 +764,12 @@ def snapshotValue {capacity : Nat} (snapshot : Snapshot capacity) :
 value there (all index keys are finite). -/
 def storeOfSnapshot {capacity : Nat} (snapshot : Snapshot capacity) :
     Store.Store (indexLayout capacity) :=
-  DFinsupp.mk Finset.univ fun address => snapshotValue snapshot address.1
+  Minidregg.Theory.SparseMap.ofFinset Finset.univ fun address => snapshotValue snapshot address
 
 @[simp] theorem storeOfSnapshot_apply {capacity : Nat} (snapshot : Snapshot capacity)
     (address : Store.Address (indexLayout capacity)) :
     storeOfSnapshot snapshot address = snapshotValue snapshot address := by
-  simp [storeOfSnapshot, DFinsupp.mk_apply]
+  simp [storeOfSnapshot]
 
 /-- The semantic snapshot a store denotes, when its checkpoints and cursor are
 present. -/

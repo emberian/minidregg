@@ -65,13 +65,12 @@ variable {L : Layout.{u, v, w}}
 /-! ## One operation -/
 
 theorem update_update (s : Store L) (a : Address L) (x y : Option (L.Value a.1)) :
-    (DFinsupp.update s a x).update a y = DFinsupp.update s a y := by
-  apply DFinsupp.ext; intro b
-  simp only [DFinsupp.coe_update, Function.update_idem]
+    SparseMap.set (SparseMap.set s a x) a y = SparseMap.set s a y :=
+  SparseMap.set_set s a x y
 
 theorem update_of_eq (s : Store L) (a : Address L) (x : Option (L.Value a.1))
-    (h : s a = x) : DFinsupp.update s a x = s := by
-  rw [← h, DFinsupp.update_self]
+    (h : s a = x) : SparseMap.set s a x = s := by
+  rw [← h]; exact SparseMap.set_self s a
 
 /-- A write-back of its own guard value in a RAM namespace is that read guard. -/
 def tidy : Op L → Op L
@@ -145,9 +144,7 @@ theorem apply_comm (s : Store L) (x r : Op L) (ne : x.address ≠ r.address) :
     simp only [apply, Store.set] <;>
     first
     | rfl
-    | (apply DFinsupp.ext; intro b
-       simp only [DFinsupp.coe_update]
-       exact congrFun (Function.update_comm (Ne.symm ne) _ _ _) b)
+    | exact SparseMap.set_comm _ (Ne.symm ne) _ _
 
 theorem tidy_enabled_iff (s : Store L) (op : Op L) : op.tidy.Enabled s ↔ op.Enabled s := by
   cases op with
@@ -168,7 +165,7 @@ theorem tidy_apply (s : Store L) (op : Op L) (enabled : op.Enabled s) :
         rcases h with ⟨rfl, -⟩
         have := enabled.2
         simp only [apply, Store.set]
-        rw [← this, DFinsupp.update_self]
+        rw [← this]; exact (SparseMap.set_self s _).symm
       · rfl
   | _ => rfl
 
@@ -210,6 +207,7 @@ theorem fuse_spec {p q m : Op L} (fused : p.fuse q = some m) :
     first
     | (rw [update_update]; exact (update_of_eq _ _ _ ‹_›).symm)
     | simp only [update_update]
+    | exact (update_of_eq _ _ _ ‹_›).symm
 
 /-- Completeness of `fuse`: a modifying operation fuses with the next operation
 at its address whenever that operation's guard holds at the value it left. -/

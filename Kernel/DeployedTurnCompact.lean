@@ -84,7 +84,7 @@ private theorem applyChanges_go (s s' : Store L) :
       (∀ a, a ∉ l → t a = s' a) → (∀ a ∈ l, t a = s a) →
       applyChanges t (changesOf l s s') = s'
   | [], t, _, out, _ => by
-      apply DFinsupp.ext
+      apply Minidregg.Theory.SparseMap.ext
       intro a
       exact out a (by simp)
   | x :: rest, t, nd, out, inn => by

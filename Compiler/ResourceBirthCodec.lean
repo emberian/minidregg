@@ -534,7 +534,7 @@ def image (logical : Store (layout registry)) : LifecycleImage registry :=
 /-- Every store of the one-address layout is determined by its slot. -/
 theorem ext_slot {left right : Store (layout registry)}
     (same : left (slotAddress registry) = right (slotAddress registry)) : left = right := by
-  apply DFinsupp.ext
+  apply Minidregg.Theory.SparseMap.ext
   rintro ⟨⟨⟩, ⟨⟩⟩
   exact same
 

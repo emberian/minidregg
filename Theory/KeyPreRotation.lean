@@ -265,7 +265,7 @@ theorem post_eq (logical : Store layout) (current : KeyRecord) (rotation : Rotat
         revokedAddress]
   | some value =>
       simp only [List.append_nil, Patch.run, Op.apply]
-      apply DFinsupp.ext
+      apply SparseMap.ext
       intro address
       by_cases at_revoked : address = revokedAddress rotation.subject current.keyEpoch
       · subst at_revoked

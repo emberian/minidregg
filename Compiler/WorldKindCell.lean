@@ -101,7 +101,7 @@ def bindingStream : StreamCodec Binding :=
 inductive InstanceSpace where
   | descriptor
   | payload
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, Minidregg.Theory.StoreKey
 
 @[reducible] def InstanceSpace.Value : InstanceSpace → Type
   | .descriptor => Binding

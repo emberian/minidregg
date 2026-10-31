@@ -29,7 +29,7 @@ def payloadCell (role : ObjectiveActivityCell.Role) : Cell deployedR :=
 
 /-- Package cell 3 is present; object 1 and state 2 are fresh. -/
 def preWorld : World deployedR DurableDataIntent.TransactionId Digest :=
-  ⟨(0 : Cells deployedR).update 3 (some (payloadCell .package)), 0⟩
+  ⟨(0 : Cells deployedR).set 3 (some (payloadCell .package)), 0⟩
 
 /-- The receiver's exact storage model: the World's storage of the posts and the
 retained event, against the witness cells (`preWorld`'s). -/

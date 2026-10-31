@@ -217,7 +217,7 @@ def topicHeadCellId (stream : Digest) : Nat :=
 
 inductive HeadNamespace where
   | head
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, Minidregg.Theory.StoreKey
 
 abbrev headLayout : Layout.{0, 0, 0} where
   Namespace := HeadNamespace
@@ -311,7 +311,7 @@ instance headLawDecidable (cellId : Nat) (store : HeadStore) : Decidable (HeadLa
 
 inductive EntryNamespace where
   | entry
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, Minidregg.Theory.StoreKey
 
 abbrev entryLayout : Layout.{0, 0, 0} where
   Namespace := EntryNamespace

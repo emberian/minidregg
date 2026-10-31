@@ -53,7 +53,7 @@ def fieldOption (state : Store layout) : Option Bool := state sole
 
 theorem state_ext (state : Store layout) :
     state = stateOfOption (fieldOption state) := by
-  apply DFinsupp.ext
+  apply SparseMap.ext
   rintro ⟨⟨⟩, ⟨⟩⟩
   change state sole = stateOfOption (fieldOption state) sole
   cases present : state sole with
@@ -187,7 +187,7 @@ def stateB (bits : Bool × Bool) : Store layoutB :=
     (addressB true) (presentIf bits.2)
 
 theorem stateB_ext (state : Store layoutB) : state = stateB (bitsB state) := by
-  apply DFinsupp.ext
+  apply SparseMap.ext
   rintro ⟨⟨⟩, key⟩
   cases key
   · change state (addressB false) = stateB (bitsB state) (addressB false)
@@ -283,7 +283,7 @@ theorem layouts_differ :
 #guard_msgs (whitespace := lax) in #print axioms cellB_root
 /-- info: 'Minidregg.Theory.CellStateWitness.honestPatchB_accepted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms honestPatchB_accepted
-/-- info: 'Minidregg.Theory.CellStateWitness.layouts_differ' does not depend on any axioms -/
+/-- info: 'Minidregg.Theory.CellStateWitness.layouts_differ' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms layouts_differ
 
 end Minidregg.Theory.CellStateWitness

@@ -1172,7 +1172,7 @@ theorem chain_length_le {store : ContentStore} {path : List ElementId} (nodup : 
     intro entry member
     obtain ⟨element, inside, rfl⟩ := List.mem_map.mp (List.mem_toFinset.mp member)
     refine Finset.mem_filter.mpr ⟨?_, rfl⟩
-    apply DFinsupp.mem_support_iff.mpr
+    apply Minidregg.Theory.SparseMap.mem_support_iff.mpr
     intro zero
     have absent : elementAt store element = none := zero
     have := stored element inside
@@ -1229,7 +1229,7 @@ theorem documentOrder_flat {store : ContentStore} {document : DocumentId} {root 
     documentOrder store document = childrenOf store root := by
   have positive : 0 < elementCount store := by
     apply Finset.card_pos.mpr
-    refine ⟨⟨.elements, root⟩, Finset.mem_filter.mpr ⟨DFinsupp.mem_support_iff.mpr ?_, rfl⟩⟩
+    refine ⟨⟨.elements, root⟩, Finset.mem_filter.mpr ⟨Minidregg.Theory.SparseMap.mem_support_iff.mpr ?_, rfl⟩⟩
     intro zero
     have absent : elementAt store root = none := zero
     rw [absent] at present
@@ -1510,7 +1510,7 @@ theorem editElement_requires_grant (author : PrincipalRef) (operation : Operatio
   refine ⟨?_, ?_⟩
   · apply Finset.card_pos.mpr
     refine ⟨⟨.elements, edit.element⟩, ?_⟩
-    simp only [changedIn, Finset.mem_filter, Finset.mem_union, DFinsupp.mem_support_iff]
+    simp only [changedIn, Finset.mem_filter, Finset.mem_union, Minidregg.Theory.SparseMap.mem_support_iff]
     have pre : progress.1 ⟨.elements, edit.element⟩ = some before := found
     have post : next.1 ⟨.elements, edit.element⟩ = some after := written
     refine ⟨Or.inl ?_, rfl, ?_⟩

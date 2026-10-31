@@ -71,7 +71,7 @@ theorem fieldAt_injective {left right : Nat} (different : left ≠ right) :
 theorem covered_agree :
     narrowStore reader (fieldOf .declaredObject) after =
       narrowStore reader (fieldOf .declaredObject) before := by
-  apply DFinsupp.ext
+  apply Minidregg.Theory.SparseMap.ext
   intro address
   by_cases kept : Kept reader (fieldOf .declaredObject) address
   · rw [observe_returns_named_fields after kept, observe_returns_named_fields before kept]
@@ -80,7 +80,7 @@ theorem covered_agree :
       exact field_four_not_kept kept
     exact Store.set_ne before (fieldAt 4) _ address different
   · unfold narrowStore
-    rw [DFinsupp.filter_apply_neg _ kept, DFinsupp.filter_apply_neg _ kept]
+    rw [Minidregg.Theory.SparseMap.filterKeys_apply_neg _ kept, Minidregg.Theory.SparseMap.filterKeys_apply_neg _ kept]
 
 theorem pair_differs : after ≠ before := by
   intro same

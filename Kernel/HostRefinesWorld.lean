@@ -19,7 +19,7 @@ open Minidregg.Kernel.DeployedBridge (deployedR sourceCell)
 set_option autoImplicit false
 
 section Represent
-variable {R : Registry} {D : Type} [DecidableEq D]
+variable {R : Registry} {D : Type} [DecidableEq D] [Minidregg.Theory.StoreKey D]
 
 /-- **The clock offset (G-CLOCK, narrowed).**  Under `Represents`, the
 deployed logical height every receiver pins (`NativeHost.logicalHeight`) is the
@@ -37,7 +37,7 @@ end Represent
 
 section Admission
 
-variable {R : Registry} {D : Type} [DecidableEq D]
+variable {R : Registry} {D : Type} [DecidableEq D] [Minidregg.Theory.StoreKey D]
 
 /-- **`Turn.ofIntent` on the admitted object.**  `NativeAdmission config opened`
 is indexed by the `DataIntent` it admits: each of its 37 constructors carries

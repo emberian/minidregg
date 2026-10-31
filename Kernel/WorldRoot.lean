@@ -160,11 +160,11 @@ theorem bytesBits_injective : Function.Injective bytesBits := by
 
 section WorldRoot
 
-variable {R : Registry} {TxId D : Type} [DecidableEq TxId] [DecidableEq D]
+variable {R : Registry} {TxId D : Type} [DecidableEq TxId] [DecidableEq D] [Minidregg.Theory.StoreKey TxId] [Minidregg.Theory.StoreKey D]
 variable {V Dg : Type} [DecidableEq V] [DecidableEq Dg]
 
 /-- A slot's content: the system cell or a cell. -/
-inductive Slot (R : Registry) (TxId D : Type) [DecidableEq TxId] [DecidableEq D]
+inductive Slot (R : Registry) (TxId D : Type) [DecidableEq TxId] [DecidableEq D] [Minidregg.Theory.StoreKey TxId] [Minidregg.Theory.StoreKey D]
   | system (s : Store (sysLayout TxId D))
   | cell (c : Cell R)
 
@@ -194,8 +194,7 @@ def presentIds (w : World R TxId D) : List CellId := sortIds w.cells.support.val
 
 theorem mem_presentIds (w : World R TxId D) (c : CellId) :
     c ∈ presentIds w ↔ w.cells c ≠ none := by
-  rw [presentIds, mem_sortIds, Finset.mem_val, DFinsupp.mem_support_iff]
-  rfl
+  rw [presentIds, mem_sortIds, Finset.mem_val, Minidregg.Theory.SparseMap.mem_support_iff]
 
 /-- The world's entries: the system cell, then every present cell. -/
 def entries (w : World R TxId D) : List (Key × Slot R TxId D) :=
@@ -341,7 +340,7 @@ theorem world_ext {w w' : World R TxId D} (hc : ∀ c, w.cells c = w'.cells c)
   rcases w' with ⟨cells', system'⟩
   simp only at hc hs
   subst hs
-  have : cells = cells' := DFinsupp.ext hc
+  have : cells = cells' := Minidregg.Theory.SparseMap.ext hc
   subst this
   rfl
 

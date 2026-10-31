@@ -28,9 +28,9 @@ theorem mem_changed {L : Layout.{0, 0, 0}} {pre post : Store L} {address : Addre
   · intro different
     refine Finset.mem_filter.mpr ⟨?_, different⟩
     by_cases before : pre address = none
-    · exact Finset.mem_union_right _ (DFinsupp.mem_support_iff.mpr (by
+    · exact Finset.mem_union_right _ (SparseMap.mem_support_iff.mpr (by
         rw [before] at different; exact fun h => different h.symm))
-    · exact Finset.mem_union_left _ (DFinsupp.mem_support_iff.mpr before)
+    · exact Finset.mem_union_left _ (SparseMap.mem_support_iff.mpr before)
 
 /-- Any candidate set outside which nothing changed finds exactly the changed
 addresses. The controller's candidates are the patch's write footprint

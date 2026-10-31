@@ -76,7 +76,7 @@ theorem applyLeg_ofAccepted (cells : Cells R) (c : CellId)
       family request pre declaration outcome)
     (holds : cells c = some ⟨k, pre.logical⟩) :
     applyLeg cells (Leg.ofAccepted c accepted) =
-      .ok (cells.update c (some ⟨k, accepted.validated.apply.logical⟩)) := by
+      .ok (cells.set c (some ⟨k, accepted.validated.apply.logical⟩)) := by
   have hfd : Patch.firstDisabled? pre.logical (family.patch declaration outcome) = none :=
     (Patch.firstDisabled?_eq_none_iff _ _).2 accepted.validated.valid
   unfold applyLeg
@@ -89,7 +89,7 @@ is the validated post and its materialized root is
 `M.rootOf (run pre.logical (family.patch d o))`: the value the deleted
 `DurableCommitProtocol.Intent.ofAcceptedEffect_rootWrites` equated with the
 `RootWrite.exactPost` its intent carried, now read off the world. -/
-theorem step_ofAccepted_root {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq D]
+theorem step_ofAccepted_root {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq D] [Minidregg.Theory.StoreKey TxId] [Minidregg.Theory.StoreKey D]
     (H : History R TxId Ev D) {w w' : World R TxId D} {t : Turn R TxId Ev D}
     (h : World.step H w t = some w') (c : CellId)
     (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
@@ -111,7 +111,7 @@ theorem step_ofAccepted_root {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq 
 
 /-- The turn carrying one accepted leg at cell `c`, charged its storage bytes:
 the leg's and the retained event's. -/
-def singleTurn {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq D]
+def singleTurn {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq D] [Minidregg.Theory.StoreKey TxId] [Minidregg.Theory.StoreKey D]
     (H : History R TxId Ev D) (c : CellId) (x : TxId) (ev : Ev)
     (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
       family request pre declaration outcome) : Turn R TxId Ev D :=
@@ -122,7 +122,7 @@ def singleTurn {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq D]
 /-- Satisfiable pole at the seam: a one-leg turn carrying an accepted effect,
 charged its storage bytes, at a fresh id, a present head and a meter that
 funds the charge, is accepted by `step`, and installs the validated post. -/
-theorem step_single_accepted {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq D]
+theorem step_single_accepted {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq D] [Minidregg.Theory.StoreKey TxId] [Minidregg.Theory.StoreKey D]
     (H : History R TxId Ev D) (w : World R TxId D) (c : CellId) (x : TxId) (ev : Ev)
     (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
       family request pre declaration outcome)
@@ -134,7 +134,7 @@ theorem step_single_accepted {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq 
       w'.cells c = some ⟨k, accepted.validated.apply.logical⟩ := by
   let t : Turn R TxId Ev D := singleTurn H c x ev accepted
   have hcells : applyCells w.cells t =
-      .ok (w.cells.update c (some ⟨k, accepted.validated.apply.logical⟩)) := by
+      .ok (w.cells.set c (some ⟨k, accepted.validated.apply.logical⟩)) := by
     unfold applyCells
     simp only [t, singleTurn, applyCreates, applyLegs, applyLeg_ofAccepted w.cells c accepted holds,
       applyRetires]
@@ -169,7 +169,7 @@ end Accepted
 
 section Refinement
 
-variable {R : Registry} {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq D]
+variable {R : Registry} {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq D] [Minidregg.Theory.StoreKey TxId] [Minidregg.Theory.StoreKey D]
 variable (H : History R TxId Ev D)
 
 /-- A physical handler refines the fold only by a simulation indexed by its

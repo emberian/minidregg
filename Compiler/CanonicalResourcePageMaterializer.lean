@@ -183,7 +183,7 @@ def bookAt (state : Store CanonicalResourceKernel.layout) : Option Book :=
 
 theorem state_ext (state : Store CanonicalResourceKernel.layout) :
     state = stateOfOption (bookAt state) := by
-  apply DFinsupp.ext
+  apply Minidregg.Theory.SparseMap.ext
   rintro ⟨field, key⟩
   cases field
   cases key

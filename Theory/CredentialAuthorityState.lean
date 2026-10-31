@@ -82,7 +82,7 @@ inductive AuthorityPlane where
   born in. Written once, by the birth that creates `cell`, and never rewritten
   or removed, so `under R` coverage only grows. -/
   | parent
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, StoreKey
 
 /-- The key of each plane: the identifiers that name one record in it. -/
 @[reducible] def AuthorityPlane.Key : AuthorityPlane → Type
@@ -147,6 +147,18 @@ instance AuthorityPlane.valueDecEq : (plane : AuthorityPlane) → DecidableEq pl
   | .revoked => inferInstanceAs (DecidableEq Unit)
   | .registered => inferInstanceAs (DecidableEq Unit)
   | .parent => inferInstanceAs (DecidableEq Nat)
+
+instance AuthorityPlane.keyCode : (plane : AuthorityPlane) → StoreKey plane.Key
+  | .capability _ => inferInstanceAs (StoreKey CapabilityId)
+  | .issuerEpoch => inferInstanceAs (StoreKey IssuerId)
+  | .policyEpoch => inferInstanceAs (StoreKey PolicyId)
+  | .policyRevision => inferInstanceAs (StoreKey PolicyId)
+  | .policyAddress => inferInstanceAs (StoreKey (PolicyId × PolicyRevision))
+  | .subjectKeyEpoch => inferInstanceAs (StoreKey SubjectId)
+  | .subjectKey => inferInstanceAs (StoreKey (SubjectId × Epoch))
+  | .revoked => inferInstanceAs (StoreKey RevocationKey)
+  | .registered => inferInstanceAs (StoreKey RevocationKey)
+  | .parent => inferInstanceAs (StoreKey Nat)
 
 /-- The mutation discipline of each plane.  The revocation and registration
 planes are presence-only and append-only: once present, a key stays present
@@ -400,10 +412,10 @@ theorem mem_parentKeys_iff (logical : Store layout) (cell : Nat) :
     cases plane <;> simp [parentKeyAt] at contributes
     have same : cell = stored := contributes
     subst same
-    exact Option.isSome_iff_ne_none.mpr (DFinsupp.mem_support_iff.mp supported)
+    exact Option.isSome_iff_ne_none.mpr (SparseMap.mem_support_iff.mp supported)
   · intro present
     exact Finset.mem_biUnion.mpr ⟨⟨.parent, cell⟩,
-      DFinsupp.mem_support_iff.mpr (Option.isSome_iff_ne_none.mp present),
+      SparseMap.mem_support_iff.mpr (Option.isSome_iff_ne_none.mp present),
       Finset.mem_singleton_self cell⟩
 
 /-- The parent projection of one authority store: its `parent` plane, with
@@ -444,10 +456,10 @@ theorem mem_revokedKeys_iff (logical : Store layout) (key : RevocationKey) :
     cases plane <;> simp [revokedKeyAt] at contributes
     have same : key = stored := contributes
     subst same
-    exact Option.isSome_iff_ne_none.mpr (DFinsupp.mem_support_iff.mp supported)
+    exact Option.isSome_iff_ne_none.mpr (SparseMap.mem_support_iff.mp supported)
   · intro present
     exact Finset.mem_biUnion.mpr ⟨⟨.revoked, key⟩,
-      DFinsupp.mem_support_iff.mpr (Option.isSome_iff_ne_none.mp present),
+      SparseMap.mem_support_iff.mpr (Option.isSome_iff_ne_none.mp present),
       Finset.mem_singleton_self key⟩
 
 /-- The sole `AuthState` projection.  Capability and revocation witnesses use

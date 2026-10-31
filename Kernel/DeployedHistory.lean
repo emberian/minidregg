@@ -174,7 +174,7 @@ theorem imageBytes_empty (k : deployedR.Kind) : imageBytes ⟨k, 0⟩ = 0 := by
 
 /-- RAM payloads have no ROM birth image: allocation is charged exactly once. -/
 theorem objective_romPart_empty (s : Store ObjectiveActivityCell.layout) : romPart s = 0 := by
-  apply DFinsupp.ext
+  apply Minidregg.Theory.SparseMap.ext
   intro a
   rw [romPart_apply]
   rfl
