@@ -656,28 +656,41 @@ fn install(mut args: Args, paths: &Paths, as_json: bool, dir: Option<std::ffi::O
             if !(source.is_file() && receipt.is_file() && delegation.is_file()) {
                 let config = apps_config(&paths.config)?;
                 let ws = crate::workspace::load(&root)?;
-                let name = format!("app-{}", &id[..12]);
+                // The birth is named by the catalog application, not by this request: a retry after an
+                // attempt that stopped between the birth and the hosting delegation must resume that
+                // birth, not make a second one whose delegation is then filed beside the first one's
+                // source (the worker refuses such a pair: "lifecycle delegation differs from application
+                // birth"). The hosting delegation's request id follows the same rule.
+                let stem = &entry.app_id[..entry.app_id.len().min(12)];
+                let name = format!("app-{stem}");
                 let (born_source, born_receipt) = app_birth(&root, &ws, home.as_deref(), &name, &config)?;
                 crate::fsio::ensure_private_dir_all(&apps_dir.join("birth"))?;
                 source = apps_dir.join("birth").join("source.json");
                 receipt = apps_dir.join("birth").join("outcome.json");
+                // The three documents travel as one set for ONE birth. Files retained from another
+                // birth (a legacy attempt named by its request) are replaced, never mixed in.
+                let same_birth = retained_birth_is(&source, &receipt, &born_source);
                 for (file, value) in [(&source, &born_source), (&receipt, &born_receipt)] {
-                    if !file.exists() {
-                        crate::create_private(file, &serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?)?;
+                    if !same_birth || !file.exists() {
+                        crate::fsio::replace_private(file, &serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?)?;
                     }
                 }
-                let selector = delegate_lifecycle(&root, &name, &format!("apps-{}", &id[..12]), &config.management_subject)?;
+                let selector = delegate_lifecycle(&root, &name, &format!("apps-{stem}"), &config.management_subject)?;
+                let selector_doc: Value = serde_json::from_slice(&crate::fsio::read_bounded(&selector, 64 * 1024)?)
+                    .map_err(|e| format!("{}: {e}", selector.display()))?;
                 delegation = apps_dir.join("delegation.json");
-                if !delegation.exists() {
-                    fs::copy(&selector, &delegation).map_err(|e| format!("cannot retain the delegation: {e}"))?;
+                let delegation_current = delegation_names_app(&delegation, &selector_doc);
+                let delegation_stale = delegation.is_file() && !delegation_current;
+                if !delegation_current {
+                    crate::fsio::replace_private(&delegation, &serde_json::to_vec_pretty(&selector_doc).map_err(|e| e.to_string())?)?;
                 }
                 // The manager issues share tickets, so it must hold a delegate-capable child of the owner's
                 // app capability; the member delegates it now and the worker issues under it.
                 let share = apps_dir.join("share-delegation.json");
-                if !share.exists() {
+                if !share.exists() || !same_birth || delegation_stale {
                     let max = born_source.pointer("/applicationGrainBirth/applicationBirth/template/ownerBudget").and_then(Value::as_str).unwrap_or("100000").to_owned();
                     let child = delegate_share(&root, &ws, &name, &config.management_subject, &max)?;
-                    crate::create_private(&share, &serde_json::to_vec_pretty(&child).map_err(|e| e.to_string())?)?;
+                    crate::fsio::replace_private(&share, &serde_json::to_vec_pretty(&child).map_err(|e| e.to_string())?)?;
                 }
             }
             // The worker cannot read a member's 0700 home: the three documents travel
@@ -956,6 +969,22 @@ pub(crate) fn birth_peer(reference: &Value, view: &Value) -> Result<Value> {
 /// The op 30 source (`Host/Json.lean` `grainBirthIntentFrom "applicationGrainBirth" "applicationBirth"`,
 /// `applicationBirthContext`, `applicationSpec`): the member is creator, owner and fee payer; the
 /// nine ids come from the member's own namespace reservation.
+/// The retained source and receipt are the ones of this birth (same application ids).
+fn retained_birth_is(source: &Path, receipt: &Path, born_source: &Value) -> bool {
+    const APPLICATION: &str = "/applicationGrainBirth/applicationBirth/application";
+    source.is_file() && receipt.is_file()
+        && crate::workspace::bounded_json(source).ok().and_then(|v| v.pointer(APPLICATION).cloned())
+            == born_source.pointer(APPLICATION).cloned()
+        && born_source.pointer(APPLICATION).is_some()
+}
+
+/// The retained delegation selects the same application as the freshly completed one.
+fn delegation_names_app(delegation: &Path, selector_doc: &Value) -> bool {
+    let app = selector_doc.pointer("/selector/app");
+    delegation.is_file() && app.is_some()
+        && crate::workspace::bounded_json(delegation).ok().and_then(|v| v.pointer("/selector/app").cloned()).as_ref() == app
+}
+
 pub(crate) fn app_birth_source(subject: &str, nonce: &str, context: &Value, ids: &std::collections::BTreeMap<String, String>, tool: &Value, parent: &Value, tariff: &Value) -> Result<Value> {
     let id = |role: &str| -> Result<&str> { ids.get(role).map(String::as_str).ok_or_else(|| format!("reservation lacks {role}")) };
     let mut grants = context.get("grants").and_then(Value::as_array).cloned().ok_or("birth context lacks grants")?;
@@ -2003,6 +2032,24 @@ mod tests {
         assert_eq!(composite["applicationBirth"]["application"]["app"], "9001");
         assert_eq!(source["grants"].as_array().unwrap().len(), 4, "the context's grants plus the tool and parent grants");
         assert_eq!(source["grants"][2]["target"], "7902");
+    }
+
+    #[test]
+    fn retained_install_documents_must_belong_to_one_birth() {
+        let dir = scratch("one-birth");
+        let born = |app: &str| json!({"applicationGrainBirth":{"applicationBirth":{"application":{"app":app,"packageManifest":"2"}}}});
+        let (source, receipt, delegation) = (dir.join("source.json"), dir.join("outcome.json"), dir.join("delegation.json"));
+        assert!(!retained_birth_is(&source, &receipt, &born("11")), "nothing retained");
+        std::fs::write(&source, born("11").to_string()).unwrap();
+        std::fs::write(&receipt, "{}").unwrap();
+        assert!(retained_birth_is(&source, &receipt, &born("11")));
+        assert!(!retained_birth_is(&source, &receipt, &born("12")), "a retry that births again must not keep the first source");
+        let selector = |app: &str| json!({"selector":{"app":app}});
+        assert!(!delegation_names_app(&delegation, &selector("11")), "absent");
+        std::fs::write(&delegation, selector("11").to_string()).unwrap();
+        assert!(delegation_names_app(&delegation, &selector("11")));
+        assert!(!delegation_names_app(&delegation, &selector("12")), "a delegation for another birth is replaced");
+        assert!(!delegation_names_app(&delegation, &json!({})), "a selector without an app never matches");
     }
 
     #[test]
