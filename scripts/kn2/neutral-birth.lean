@@ -165,13 +165,13 @@ def submit (verifier signer storeBinary : System.FilePath) (factory : Minidregg.
     let some ingress := ResourceBirthPolicyController.Concrete.decodeIngress bytes
       | throw (IO.userError "assembled birth ingress does not decode")
     match ← ResourceBirthPolicyController.Concrete.admitDecodedNative profile host.deployment
-        opened.pins host.signature opened.durable (.of opened.directory opened.authority) height
+        opened.pins host.signature opened.durable (ResourceBirthController.Concrete.Held.of opened.directory opened.authority) height
         ingress with
     | .ok accepted => inspect accepted
     | .error _ => pure ()
     let result ← ResourceBirthReceiver.receiveLoaded profile host.deployment opened.pins
       host.signature transport opened.durable
-      (.of opened.directory opened.authority) height bytes
+      (ResourceBirthController.Concrete.Held.of opened.directory opened.authority) height bytes
     pure (describe result, planRefused)
 
 /-- The receiver's naming check over a patch, by name. -/

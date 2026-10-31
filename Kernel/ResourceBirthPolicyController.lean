@@ -2641,7 +2641,7 @@ def admitNative [DecidableEq F]
   match decodeIngress bytes with
   | none => pure (.error .malformedIngress)
   | some ingress => admitDecodedNative profile deployment pins native durable
-      (.load deployment durable) height ingress
+      (ResourceBirthController.Concrete.Held.load deployment durable) height ingress
 
 end Receiving
 

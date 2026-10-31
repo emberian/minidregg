@@ -98,7 +98,7 @@ def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
     opened.authority.snapshot.authState height payer funding
   let .ok prepared := ResourceBirthController.Concrete.prepareDraft
     profile.compilerProfile profile.disabledEvaluators config.deployment opened.pins
-      opened.durable (.of opened.directory opened.authority) draft height ready.sourced
+      opened.durable (ResourceBirthController.Concrete.Held.of opened.directory opened.authority) draft height ready.sourced
     | throw "share ticket birth preparation refused"
   let expected := { draft with auxiliaryCreates := prepared.prepared.grants.auxiliaryCreates }
   if CanonicalCellRegistry.sourceEncoding.codec.encode prepared.descriptor !=

@@ -56,12 +56,12 @@ def prepareLoaded (config : Config) (opened : Opened config)
   let height := logicalHeight config opened.durable
   let draft ← (ResourceBirthController.Concrete.prepareGrainDraft profile.compilerProfile
     profile.disabledEvaluators config.deployment opened.pins opened.durable
-    (.of opened.directory opened.authority) source.birth marker height).mapError
+    (ResourceBirthController.Concrete.Held.of opened.directory opened.authority) source.birth marker height).mapError
       (fun reason => s!"grain-backed birth draft: {repr reason}")
   let source := source.withAuxiliaryCreates draft.descriptor.auxiliaryCreates
   let birth ← (GrainResourceBirthController.prepareSourceBirth profile.compilerProfile
     profile.disabledEvaluators config.deployment opened.pins opened.durable
-    (.of opened.directory opened.authority) profile.semantics tariff source height).mapError
+    (ResourceBirthController.Concrete.Held.of opened.directory opened.authority) profile.semantics tariff source height).mapError
       (fun reason => s!"grain-backed birth preparation: {repr reason}")
   let ambient : DeclaredResourceController.Ambient :=
     ⟨config.federation, height⟩

@@ -156,7 +156,7 @@ def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
   let marker := GrainResourceBirthAdmission.useMarker profile config.deployment tariff source
   let .ok draft := ResourceBirthController.Concrete.prepareGrainDraft
       profile.compilerProfile profile.disabledEvaluators config.deployment specialPins opened.durable
-      (.of opened.directory opened.authority) birthDraft marker height
+      (ResourceBirthController.Concrete.Held.of opened.directory opened.authority) birthDraft marker height
       ready.sourced
     | throw "grain-backed share birth preparation refused"
   let source := source.withAuxiliaryCreates draft.descriptor.auxiliaryCreates
@@ -166,7 +166,7 @@ def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
     throw "grain-backed share finalized birth differs from source"
   let .ok birth := GrainResourceBirthController.prepareSourceBirth
       profile.compilerProfile profile.disabledEvaluators config.deployment specialPins opened.durable
-      (.of opened.directory opened.authority) profile.semantics tariff source height ready.sourced
+      (ResourceBirthController.Concrete.Held.of opened.directory opened.authority) profile.semantics tariff source height ready.sourced
     | throw "grain-backed share birth preparation refused"
   let ambient : DeclaredResourceController.Ambient := ⟨config.federation, height⟩
   let .ok grain := GrainResourceBirthTransaction.prepareTargets profile

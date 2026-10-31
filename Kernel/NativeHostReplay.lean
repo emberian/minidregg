@@ -2799,7 +2799,7 @@ private def derive (config : Config) (opened : Opened config)
         let source := ingress.source
         match GrainResourceBirthController.prepareSourceBirth config.profile.compilerProfile
             config.profile.disabledEvaluators config.deployment opened.pins opened.durable
-            (.of opened.directory opened.authority) config.profile.semantics tariff source height with
+            (ResourceBirthController.Concrete.Held.of opened.directory opened.authority) config.profile.semantics tariff source height with
         | .error reason => return .error s!"historical grain-backed birth preparation: {repr reason}"
         | .ok birth =>
             let ambient : DeclaredResourceController.Ambient := ⟨config.federation, height⟩
@@ -2817,7 +2817,7 @@ private def derive (config : Config) (opened : Opened config)
   match ResourceBirthPolicyController.Concrete.decodeIngress bytes with
   | some ingress =>
       match ← ResourceBirthPolicyController.Concrete.admitDecodedNative config.profile config.deployment
-          opened.pins config.signature opened.durable (.of opened.directory opened.authority) height
+          opened.pins config.signature opened.durable (ResourceBirthController.Concrete.Held.of opened.directory opened.authority) height
           ingress with
       | .error reason => return .error s!"birth admission refused: {repr reason}"
       | .ok accepted => return .ok (Derived.ofBirth accepted)

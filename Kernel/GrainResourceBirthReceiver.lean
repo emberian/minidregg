@@ -292,6 +292,6 @@ def receive {F : Type} [Field F] [DecidableEq F]
       | .error detail => return .unavailable detail
       | .ok durable =>
           return ← receiveLoaded profile deployment pins tariff ambient native
-            transport durable (.load deployment durable) bytes
+            transport durable (ResourceBirthController.Concrete.Held.load deployment durable) bytes
 
 end Minidregg.Kernel.GrainResourceBirthReceiver

@@ -84,7 +84,7 @@ def admitNative (profile : CanonicalRuntimeProfile.Profile F)
   let some decoded := ResourceBirthPolicyController.Concrete.decodeLifetimeGrantIngress
       ingress.birthIngress | return .error refused
   let .ok birth ← ResourceBirthPolicyController.Concrete.admitDecodedNative
-      profile config.deployment pins native durable (.load config.deployment durable) height decoded
+      profile config.deployment pins native durable (ResourceBirthController.Concrete.Held.load config.deployment durable) height decoded
       ready.sourced
       | return .error refused
   if birthBytes : birth.ingress.bytes = ingress.birthIngress then

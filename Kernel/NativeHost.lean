@@ -345,7 +345,7 @@ def prepareOrdinaryBirth (config : Config) (opened : Opened config)
         config.deployment opened.pins opened.durable descriptor) :=
   ResourceBirthController.Concrete.prepareDraft config.profile.compilerProfile
     config.profile.disabledEvaluators config.deployment opened.pins opened.durable
-    (.of opened.directory opened.authority) descriptor (logicalHeight config opened.durable)
+    (ResourceBirthController.Concrete.Held.of opened.directory opened.authority) descriptor (logicalHeight config opened.durable)
 
 /-- The finalized draft and signing slots of a prepared ordinary birth: the factory, the
 authority, one per allocation and one per resource source. -/
@@ -3334,7 +3334,7 @@ def submitLoadedVia (transport : DurableReceiverIO.Transport) (config : Config)
         let ambient : DeclaredResourceController.Ambient := ⟨config.federation, height⟩
         match ← GrainResourceBirthReceiver.receiveLoaded config.profile config.deployment
             opened.pins tariff ambient config.signature transport
-            opened.durable (.of opened.directory opened.authority) bytes with
+            opened.durable (ResourceBirthController.Concrete.Held.of opened.directory opened.authority) bytes with
         | .historical receipt => return ← confirm .replayed receipt.transactionId receipt.eventId
         | .confirmed kind receipt => return ← confirm kind receipt.transactionId receipt.eventId
         | .rejected reason => return refused .operationRejected "grain-birth" (grainBirthRejection reason)
@@ -3342,7 +3342,7 @@ def submitLoadedVia (transport : DurableReceiverIO.Transport) (config : Config)
         | .unavailable detail => return .unavailable detail.toUTF8.toList
         | .uncertain detail => return .uncertain detail.toUTF8.toList
       match ← ResourceBirthReceiver.receiveLoaded config.profile config.deployment opened.pins
-          config.signature transport opened.durable (.of opened.directory opened.authority) height
+          config.signature transport opened.durable (ResourceBirthController.Concrete.Held.of opened.directory opened.authority) height
           bytes with
       | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
       | .rejected reason => return refused (birthReason reason) "birth" (birthRejection reason)

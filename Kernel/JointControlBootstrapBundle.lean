@@ -155,7 +155,7 @@ def admit (config : Config) (opened : Opened config) (source : Source) :
     let some ingress := ResourceBirthPolicyController.Concrete.decodeIngress source.birthIngressBytes
       | return .error "noncanonical retained bootstrap birth"
     match ← ResourceBirthPolicyController.Concrete.admitDecodedNative config.profile config.deployment
-        opened.pins config.signature opened.durable (.of opened.directory opened.authority)
+        opened.pins config.signature opened.durable (ResourceBirthController.Concrete.Held.of opened.directory opened.authority)
         (logicalHeight config opened.durable) ingress with
     | .error reason => return .error s!"bootstrap birth current permission refused: {repr reason}"
     | .ok birth =>

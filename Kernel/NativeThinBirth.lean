@@ -891,7 +891,7 @@ theorem honest_plan_accepted : HonestPlanAcceptedStatement := by
   generalize NativeHost.logicalHeight config opened.durable = height at planned
   cases prep : ResourceBirthController.Concrete.prepareDraft config.profile.compilerProfile
       config.profile.disabledEvaluators config.deployment opened.pins opened.durable
-      (.of opened.directory opened.authority) draft height with
+      (ResourceBirthController.Concrete.Held.of opened.directory opened.authority) draft height with
   | error reason => simp [prep, Except.mapError] at planned
   | ok prepared =>
   obtain ⟨domain, semantics, federation, factory, policy⟩ :=

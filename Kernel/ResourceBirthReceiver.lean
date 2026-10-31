@@ -748,7 +748,8 @@ def receive
   | some _ =>
       match ← DurableReceiverIO.load transport rootBytes with
       | .error detail => return .unavailable detail
-      | .ok durable => receiveLoaded profile deployment pins native transport durable
-          (.load deployment durable) height bytes
+      | .ok durable =>
+          receiveLoaded profile deployment pins native transport durable
+            (ResourceBirthController.Concrete.Held.load deployment durable) height bytes
 
 end Minidregg.Kernel.ResourceBirthReceiver
