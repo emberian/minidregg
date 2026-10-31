@@ -249,7 +249,18 @@ applied):
    `HiddenPatch`es (invisible, fitting, non-blinding writes) whose effects differ is proved legal
    (`pairAttack_legal`, by `hidden_run`). Concretely `witness_hidden_write`: the slot-2 field of
    `PrivateCellView.Witness` is hidden from the slot-1 reader. Teeth `unmasked_refuted`: a service
-   that does not read the mask, with separated world views, refutes hiding below one. Rounds 11 and
+   that does not read the mask, with separated world views, refutes hiding below one. Round 13,
+   `Concrete` (the witness's declared cell, `DeclaredEffectCell.blinding`, an unmasked store holding
+   slot 1, worlds writing 5 or 7 at slot 2, a slot-1 reader, one round):
+   `goalPremises_inhabited` proves `bornS`, both hidden patches, `differ`, and so the pair's
+   legality and hidden difference; `plain_refuted`: with the plaintext service (`plainServe`, the
+   index's value at slot 2, mask unread) `TranscriptHiding` of `real` under `legal := Legal` fails at
+   every bound below one for every budget admitting the distinguishers, separation proved
+   (`plain_view`, via `indexExact` and `lookup_perm`). Not discharged: separation at the digest
+   service (`rootServe` without the mask) is a cSHAKE256 non-collision of two index digests; the
+   kernel cannot evaluate Keccak and the deployed digest reaches the Rust kernel, so no
+   `native_decide` instance is claimed. `Legal`'s docstring: what an opening reveals beyond
+   `Visible` is pushed into `zk`. Rounds 11 and
    12 found the earlier forms vacuous (a caller-chosen game reading the world bit; caller-labelled
    distinguishers; caller-chosen `legal`; decoys no run produces; syntactic hidden difference).
    Owed in the hiding argument: the ZK hybrid over an independent coin tape, the ROM

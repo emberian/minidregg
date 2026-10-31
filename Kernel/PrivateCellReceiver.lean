@@ -1329,7 +1329,10 @@ def readerView (c : KeptCell wire) : Store (CanonicalCellRegistry.layout kind) :
 receiver: the prefix is the round, the paired state the two worlds' runs, the
 release the reader's authorized view of every published version): under every
 custody key and at every round, the two worlds publish versions whose
-reader-authorized views agree, version by version. -/
+reader-authorized views agree, version by version. What an opening reveals
+beyond `Visible` (an honest reveal that stops early exposes nodes of other
+classes) is not in `readerView`: it is pushed into the `zk` hybrid, whose
+simulator sees only this leakage. -/
 def Legal (a : setting.Strategy) : Prop :=
   ∀ (k : Fin keys) r, r ≤ setting.rounds →
     (arun wire setting.serve (keyedParams wire setting.base setting.sample setting.keyed k) (a.store false)
@@ -1540,6 +1543,165 @@ theorem hidingGoal_of_hybrids [DecidableEq View] {num den lambda versions querie
 
 end HidingSetting
 
+/-! ## A concrete deployment: premise inhabitation and teeth
+
+The declared cell of `PrivateCellView.Witness` (wire `DeclaredEffectCell.wire`,
+blinding `DeclaredEffectCell.blinding`), a store holding slot 1 and no mask, a
+slot-1 reader, and worlds writing `5` or `7` at slot 2. -/
+
+namespace Concrete
+
+open Minidregg.Theory.AuthTrie (Entry lookup)
+
+/-- Lookup agrees on permuted key-distinct entry lists. -/
+theorem lookup_perm {K V : Type} [DecidableEq K] {l₁ l₂ : List (Entry K V)} (perm : l₁.Perm l₂)
+    (nd : (l₁.map (·.1)).Nodup) (k : K) : lookup l₁ k = lookup l₂ k := by
+  have char : ∀ {l : List (Entry K V)}, (l.map (·.1)).Nodup → ∀ v, lookup l k = some v ↔ ∃ b, (k, b, v) ∈ l := by
+    intro l nd v
+    unfold lookup
+    constructor
+    · intro h
+      obtain ⟨e, he, rfl⟩ := Option.map_eq_some_iff.mp h
+      have mem := List.mem_of_find?_eq_some he
+      have key : e.1 = k := by simpa using List.find?_some he
+      exact ⟨e.2.1, by rw [← key]; exact mem⟩
+    · rintro ⟨b, mem⟩
+      obtain ⟨e, he⟩ : ∃ e, l.find? (fun e => e.1 = k) = some e := by
+        cases h : l.find? (fun e => e.1 = k) with
+        | none => exact absurd (List.find?_eq_none.mp h _ mem) (by simp)
+        | some e => exact ⟨e, rfl⟩
+      have emem := List.mem_of_find?_eq_some he
+      have key : e.1 = k := by simpa using List.find?_some he
+      have same : e = (k, b, v) := List.inj_on_of_nodup_map nd emem mem key
+      rw [he, same]; rfl
+  have nd₂ : (l₂.map (·.1)).Nodup := (perm.map _).nodup_iff.mp nd
+  apply Option.ext
+  intro v
+  rw [char nd, char nd₂]
+  exact exists_congr fun b => perm.mem_iff
+
+abbrev W := Witness.wire
+
+/-- The base parameters: the declared cell's own blinding, masks `prf v = v`. -/
+def base : Params W where
+  protocol := 1
+  cell := []
+  layout := []
+  sizeBound := 0
+  selected := Witness.selected
+  blinding := DeclaredEffectCell.blinding
+  prf := fun v => Int.ofNat v
+
+/-- Slot 1 holds `5`; no mask. -/
+def S : Store (CanonicalCellRegistry.layout .declaredObject) := (0 : Store _).set Witness.a1 (some (5 : Int))
+
+def p₀ : List (KeptCell.Write (kind := .declaredObject)) := [⟨Witness.a2, some (5 : Int)⟩]
+def p₁ : List (KeptCell.Write (kind := .declaredObject)) := [⟨Witness.a2, some (7 : Int)⟩]
+
+theorem bornS : (birth W base S).isSome := by
+  have gate : storeFits W S = true := storeFits_of_forall W fun a live => by
+    by_cases h : a = Witness.a1
+    · subst h; decide
+    · exact absurd (by rw [S, Store.set_ne _ _ _ _ h]; rfl) live
+  have unmasked : S base.blinding.address = none := by
+    rw [S, Store.set_ne _ _ _ _ (by decide)]; rfl
+  obtain ⟨c, born, _⟩ := birth_accepts W base gate unmasked
+  simp [born]
+
+theorem hidden₀ : HiddenPatch W Witness.slot1 p₀ :=
+  single_hidden W Witness.slot1 (5 : Int) witness_hidden_write.1 witness_hidden_write.2.1 witness_hidden_write.2.2.1
+
+theorem hidden₁ : HiddenPatch W Witness.slot1 p₁ :=
+  single_hidden W Witness.slot1 (7 : Int) witness_hidden_write.1 witness_hidden_write.2.1 witness_hidden_write.2.2.1
+
+theorem differ : ∀ c : KeptCell W, birth W base S = some c →
+    KeptCell.applyPatch (c.fit.store.set c.params.blinding.address (some (c.params.prf (c.version + 1)))) p₀ ≠
+      KeptCell.applyPatch (c.fit.store.set c.params.blinding.address (some (c.params.prf (c.version + 1)))) p₁ :=
+  fun _ _ => single_differ _ _ (by decide : (5 : Int) ≠ 7)
+
+/-- A deployment over `base` at one round, a slot-1 reader, one key, and any service. -/
+def setting {Item : Type} (serve : Serve W Item) : HidingSetting W 0 1 Item (List Item) where
+  keyed := fun _ _ => 0
+  base := base
+  sample := fun _ => (0 : Int)
+  encodeMask := fun x => (W.valueStream base.blinding.space).encode (0 : Int)
+  encodes := fun _ => rfl
+  serve := serve
+  view := fun cells => cells.map (KeptCell.served serve)
+  g := id
+  factors := fun _ => rfl
+  rounds := 1
+  fields := Witness.slot1
+
+/-- **Premise inhabitation of `hidingGoal_of_hybrids`** at the root service: the
+store is born, both patches are hidden, their effects differ, and so the pair
+attack is legal with a hidden difference. -/
+theorem goalPremises_inhabited :
+    (birth W (setting (rootServe W)).base S).isSome ∧ HiddenPatch W (setting (rootServe W)).fields p₀ ∧
+      HiddenPatch W (setting (rootServe W)).fields p₁ ∧
+      (∀ c : KeptCell W, birth W (setting (rootServe W)).base S = some c →
+        KeptCell.applyPatch (c.fit.store.set c.params.blinding.address (some (c.params.prf (c.version + 1)))) p₀ ≠
+          KeptCell.applyPatch (c.fit.store.set c.params.blinding.address (some (c.params.prf (c.version + 1)))) p₁) ∧
+      ∀ masks₀, (setting (rootServe W)).Legal ((setting (rootServe W)).pairAttack S bornS p₀ p₁ masks₀) ∧
+        (setting (rootServe W)).HiddenDiff ((setting (rootServe W)).pairAttack S bornS p₀ p₁ masks₀) :=
+  ⟨bornS, hidden₀, hidden₁, differ, fun masks₀ =>
+    ⟨(setting (rootServe W)).pairAttack_legal S bornS hidden₀ hidden₁ masks₀,
+      (setting (rootServe W)).pairAttack_hiddenDiff S bornS hidden₀ hidden₁ differ masks₀⟩⟩
+
+/-- **The plaintext service**: the value bytes the kept index holds at slot 2,
+read off the trie's entries; it does not read the mask (the archive of a
+blinded cell's plaintext). -/
+def plainServe : Serve W (Option (List UInt8)) := fun _ _ index => lookup index.trie.entries Witness.a2
+
+theorem plain_of_holds {index : Index W} {store : Store (CanonicalCellRegistry.layout .declaredObject)}
+    (holds : index.Holds (indexEntries W store)) :
+    plainServe [] [] index = (store Witness.a2).map (valueBytes W Witness.a2) := by
+  show lookup index.trie.entries Witness.a2 = _
+  rw [lookup_perm holds index.nodup, Theory.AuthTrie.Cache.lookup_canon, indexExact W store Witness.a2,
+    if_neg witness_hidden_write.2.2.1]
+
+/-- The newest version's item in world `b` of the pair attack: slot 2's value bytes. -/
+theorem plain_view (v : Int) (masks : List (List UInt8)) :
+    ∃ rest, ((setting plainServe).worldView ⟨fun _ => S, fun _ _ => [⟨Witness.a2, some v⟩], fun _ => true, fun _ => bornS⟩
+      true masks) = some (some (valueBytes W Witness.a2 v) :: rest) := by
+  obtain ⟨c, hc⟩ := Option.isSome_iff_exists.mp bornS
+  have hidden : HiddenPatch W Witness.slot1 [⟨Witness.a2, some v⟩] :=
+    single_hidden W Witness.slot1 v witness_hidden_write.1 witness_hidden_write.2.1 witness_hidden_write.2.2.1
+  obtain ⟨n, hn⟩ := Option.isSome_iff_exists.mp
+    ((KeptCell.accept_isSome_iff c _).mpr fun w hw => ⟨(hidden w hw).2.1, (hidden w hw).2.2⟩)
+  have hs := (KeptCell.accept_spec hn).2.2.2.1
+  refine ⟨[substServed W plainServe masks c], ?_⟩
+  simp only [HidingSetting.worldView, transcript, setting, srun, hc, Option.map_some, Option.bind_some, hn,
+    Option.elim, id, List.map_cons, List.map_nil]
+  congr 2
+  show plainServe [] [] n.index = _
+  rw [plain_of_holds n.holds, hs]
+  simp [KeptCell.applyPatch]
+
+/-- **Teeth at the goal's own statement**: at the concrete deployment with the
+plaintext service, `TranscriptHiding` of `real` fails at every bound below one,
+with `legal := Legal` and any budget admitting the goal's distinguishers: the
+pair attack is legal, a distinguisher, and separates. -/
+theorem plain_refuted {num den : Nat} (small : num < den) (budgeted : (setting plainServe).Strategy → Prop)
+    (meaningful : BlindedCellHiding.BudgetMeaningful budgeted (setting plainServe).Distinguisher)
+    (masks₀ : List (List UInt8)) :
+    ¬ BlindedCellHiding.TranscriptHiding (setting plainServe).tapes num den (setting plainServe).real
+      (setting plainServe).Legal budgeted := by
+  let a := (setting plainServe).pairAttack S bornS p₀ p₁ masks₀
+  refine (setting plainServe).unmasked_refuted small (fun _ _ _ _ => rfl) _ budgeted a
+    ((setting plainServe).pairAttack_legal S bornS hidden₀ hidden₁ masks₀)
+    (meaningful a ((setting plainServe).pairAttack_distinguisher S bornS p₀ p₁ masks₀)) masks₀ rfl ?_
+  obtain ⟨r₀, h₀⟩ := plain_view 5 masks₀
+  obtain ⟨r₁, h₁⟩ := plain_view 7 masks₀
+  have v₀ : (setting plainServe).worldView a false masks₀ = some (some (valueBytes W Witness.a2 (5 : Int)) :: r₀) := h₀
+  have v₁ : (setting plainServe).worldView a true masks₀ = some (some (valueBytes W Witness.a2 (7 : Int)) :: r₁) := h₁
+  rw [v₀, v₁]
+  intro same
+  simp only [Option.some.injEq, List.cons.injEq] at same
+  exact absurd same.1 (by decide)
+
+end Concrete
+
 #assert_axioms KeptCell.root_eq
 #assert_axioms birth_refuses
 #assert_axioms storeFits_set
@@ -1569,6 +1731,8 @@ end HidingSetting
 #assert_axioms witness_hidden_write
 #assert_axioms single_differ
 #assert_axioms single_hidden
+#assert_axioms Concrete.goalPremises_inhabited
+#assert_axioms Concrete.plain_refuted
 #assert_axioms Custody.shift_passes_equality
 #assert_axioms Custody.shift_passes_points
 #assert_axioms arun_srun
