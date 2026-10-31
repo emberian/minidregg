@@ -28,6 +28,10 @@ pub(crate) struct Registry {
     pub app_uids: Vec<u32>,
     pub helper: PathBuf,
     pub helper_sha256: String,
+    /// Set when this helper runs in a user namespace: the host-side custodian that sets project ids
+    /// and quotas for it (broker_volume_custodian.rs).
+    #[serde(default)]
+    pub custodian_socket: Option<PathBuf>,
 }
 impl Registry {
     pub(crate) fn load(store: &str) -> io::Result<Self> {
@@ -209,6 +213,7 @@ fn volume_of<'a>(registry: &'a Registry, request: &'a Request) -> crate::broker:
     crate::broker::Volume {
         root: &registry.grains_root, store: &request.store, grain: &request.grain, app_uid: request.app_uid,
         size_mib: request.size_mib, volume_id: &request.volume_id, deployment_id: &registry.deployment_id, host_id: &registry.host_id,
+        custodian: registry.custodian_socket.as_deref(),
     }
 }
 pub fn execute(bytes: &[u8]) -> io::Result<Value> {
@@ -296,7 +301,7 @@ mod tests {
     use super::*;
     #[test]
     fn tenancy_helper_cross_world_path_refuses() {
-        let r=Registry { protocol:"mini-spk-volume-registry-v1".into(),store:"0123456789abcdef".into(),deployment_id:"a".repeat(64),host_id:"b".repeat(64),grains_root:"/var/lib/mini-spk-worlds/0123456789abcdef".into(),operator_uid:1001,operator_gid:1001,app_uids:vec![165536],helper:"/usr/local/libexec/mini-spk-volume-helper".into(),helper_sha256:"c".repeat(64) };
+        let r=Registry { protocol:"mini-spk-volume-registry-v1".into(),store:"0123456789abcdef".into(),deployment_id:"a".repeat(64),host_id:"b".repeat(64),grains_root:"/var/lib/mini-spk-worlds/0123456789abcdef".into(),operator_uid:1001,operator_gid:1001,app_uids:vec![165536],helper:"/usr/local/libexec/mini-spk-volume-helper".into(),helper_sha256:"c".repeat(64),custodian_socket:None };
         let mut q=Request {verb:Verb::Mount,store:r.store.clone(),deployment_id:r.deployment_id.clone(),grain:"9101".into(),volume_path:r.grains_root.join("vars/0123456789abcdef-9101"),app_uid:165536,size_mib:512,volume_id:"d".repeat(64),import_sha256:None};
         assert!(r.coordinates(&q).is_ok());
         q.volume_path="/var/lib/mini-spk-worlds/fedcba9876543210/vars/fedcba9876543210-9101".into();

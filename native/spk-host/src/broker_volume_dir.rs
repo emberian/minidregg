@@ -5,11 +5,12 @@
 use super::*;
 use super::volume_custody::Dir;
 use crate::volume_quota as quota;
+use super::volume_custodian as custodian;
 
 pub(crate) const TAG: &str = "DREGG/SPK-VAR-CUSTODY/v1+projdir";
 /// Project ids are drawn from [BASE, BASE + 2^28): clear of ids an operator uses by hand.
-const PROJECT_BASE: u32 = 1_000_000_000;
-const PROJECT_PROBES: u32 = 256;
+pub(super) const PROJECT_BASE: u32 = 1_000_000_000;
+pub(super) const PROJECT_PROBES: u32 = 256;
 const MAX_DEPTH: usize = 4096;
 
 /// Image bytes of an export of a `size_mib` volume: room for the ext4 metadata of a full volume.
@@ -22,14 +23,14 @@ fn refuse(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::PermissionDenied, message.into())
 }
 
-fn cstr(name: &str) -> io::Result<CString> {
+pub(super) fn cstr(name: &str) -> io::Result<CString> {
     if name.is_empty() || matches!(name, "." | "..") || name.contains('/') {
         return Err(invalid("volume component refused"));
     }
     CString::new(name).map_err(|_| invalid("NUL volume component"))
 }
 
-fn stat_at(dir: RawFd, name: &CStr) -> io::Result<Option<libc::stat>> {
+pub(super) fn stat_at(dir: RawFd, name: &CStr) -> io::Result<Option<libc::stat>> {
     let mut s = unsafe { std::mem::zeroed::<libc::stat>() };
     if unsafe { libc::fstatat(dir, name.as_ptr(), &mut s, libc::AT_SYMLINK_NOFOLLOW) } != 0 {
         let e = io::Error::last_os_error();
@@ -39,7 +40,7 @@ fn stat_at(dir: RawFd, name: &CStr) -> io::Result<Option<libc::stat>> {
     Ok(Some(s))
 }
 
-fn open_dir_at(dir: RawFd, name: &CStr) -> io::Result<File> {
+pub(super) fn open_dir_at(dir: RawFd, name: &CStr) -> io::Result<File> {
     let fd = unsafe { libc::openat(dir, name.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC) };
     if fd < 0 { return Err(io::Error::last_os_error()); }
     Ok(unsafe { File::from_raw_fd(fd) })
@@ -262,6 +263,9 @@ pub(crate) struct Volume<'a> {
     pub volume_id: &'a str,
     pub deployment_id: &'a str,
     pub host_id: &'a str,
+    /// The host-side custodian's socket when this helper runs inside a user namespace, where the
+    /// kernel will not let it set a project id or a quota. `None`: do it here (init namespace).
+    pub custodian: Option<&'a Path>,
 }
 
 /// What `verify` observed about the live directory.
@@ -272,7 +276,7 @@ pub(crate) struct Observed {
     pub path: PathBuf,
 }
 
-fn deterministic_project(name: &str, probe: u32) -> u32 {
+pub(super) fn deterministic_project(name: &str, probe: u32) -> u32 {
     let digest = Sha256::digest(format!("mini-spk-volume-project/v1\0{name}").as_bytes());
     let h = u32::from_be_bytes([digest[0], digest[1], digest[2], digest[3]]) & 0x0fff_ffff;
     PROJECT_BASE + (h.wrapping_add(probe)) % (1 << 28)
@@ -360,12 +364,12 @@ impl Volume<'_> {
         if m.dev() != s.st_dev as u64 || m.ino() != s.st_ino as u64 { return Err(refuse("volume-helper: volume directory switched")); }
         if m.uid() != self.app_uid || m.mode() & 0o7777 != 0o700 { return Err(refuse("volume-helper: volume directory owner or mode drift")); }
         if m.dev() != vars.0.metadata()?.dev() { return Err(refuse("volume-helper: volume directory is on another filesystem than vars")); }
-        let fs_type = quota::require_project_quota(dir.as_raw_fd())?;
+        let fs_type = self.require_quota_fs(dir.as_raw_fd())?;
         let (project, inherit) = quota::project_of(dir.as_raw_fd())?;
         if project != reg.project_id || !inherit {
             return Err(refuse(format!("volume-helper: volume project drift: directory has project {project} inherit={inherit}, registered {}", reg.project_id)));
         }
-        let limits = quota::get_quota(dir.as_raw_fd(), project)?;
+        let limits = self.limits_of(dir.as_raw_fd(), project)?;
         let bytes = self.quota_bytes();
         if limits.bhardlimit != bytes / 1024 || limits.bsoftlimit != bytes / 1024
             || limits.ihardlimit != bytes / quota::BYTES_PER_INODE || limits.isoftlimit != bytes / quota::BYTES_PER_INODE {
@@ -374,6 +378,28 @@ impl Volume<'_> {
         let reported = quota::reported_bytes(dir.as_raw_fd())?;
         if reported == 0 || reported > bytes as u128 { return Err(refuse("volume-helper: volume reports a size beyond its quota")); }
         Ok(Observed { project_id: project, fs_type, inode: m.ino(), path: self.path() })
+    }
+
+    /// The kernel's project-quota requirement for the filesystem under `fd`. With a custodian the
+    /// kernel-privileged checks are its (it refuses to start or to create without them); here only
+    /// the filesystem type, which any namespace can read.
+    fn require_quota_fs(&self, fd: RawFd) -> io::Result<&'static str> {
+        if self.custodian.is_none() { return quota::require_project_quota(fd); }
+        quota::fs_name(quota::fs_magic(fd)?).ok_or_else(|| refuse("volume-helper: grains root is not on ext4 or xfs"))
+    }
+
+    /// The project's limits as the kernel holds them: read here, or by the custodian when this
+    /// process cannot (`quotactl` needs the init user namespace).
+    fn limits_of(&self, fd: RawFd, project: u32) -> io::Result<quota::DqBlk> {
+        match self.custodian {
+            None => quota::get_quota(fd, project),
+            Some(socket) => {
+                let r = custodian::usage(socket, &self.name())?;
+                if r.get("project")? != project as u64 { return Err(refuse("volume-helper: custodian names another project")); }
+                Ok(quota::DqBlk { bhardlimit: r.get("bhard_kib")?, bsoftlimit: r.get("bsoft_kib")?,
+                    ihardlimit: r.get("ihard")?, isoftlimit: r.get("isoft")?, curspace: r.get("cur_bytes")?, curinodes: r.get("cur_inodes")?, ..quota::DqBlk::default() })
+            }
+        }
     }
 
     fn witness_text(&self, o: &Observed) -> String {
@@ -418,25 +444,34 @@ impl Volume<'_> {
     pub(crate) fn create(&self, import: Option<&Path>) -> io::Result<()> {
         if !(64..=16384).contains(&self.size_mib) { return Err(refuse("volume-helper: volume quota refused")); }
         let (_, volumes, vars, _) = self.layout(true)?;
-        quota::require_project_quota(vars.0.as_raw_fd())?;
+        self.require_quota_fs(vars.0.as_raw_fd())?;
         let name = self.name();
         let c = cstr(&name)?;
         if self.read_registration(&volumes)?.is_some() { return Err(refuse("volume-helper: volume registration already exists")); }
         if stat_at(vars.0.as_raw_fd(), &c)?.is_some() { return Err(refuse("volume-helper: volume directory already exists; refusing overwrite")); }
-        let _claim = self.claim_lock()?;
-        let project = self.claim_project(&vars)?;
+        let (project, _claim) = match self.custodian {
+            // The custodian makes the directory, bounds it, and hands it over owned by the grain.
+            Some(socket) => (custodian::create(socket, &name, self.size_mib, self.app_uid)?.get("project")? as u32, None),
+            None => { let lock = self.claim_lock()?; (self.claim_project(&vars)?, Some(lock)) }
+        };
         let made = std::cell::Cell::new(false);
         let limited = std::cell::Cell::new(false);
         let result = (|| -> io::Result<()> {
-            if unsafe { libc::mkdirat(vars.0.as_raw_fd(), c.as_ptr(), 0o700) } != 0 { return Err(io::Error::last_os_error()); }
-            made.set(true);
-            let dir = open_dir_at(vars.0.as_raw_fd(), &c)?;
-            if unsafe { libc::fchown(dir.as_raw_fd(), self.app_uid, self.app_uid) } != 0 { return Err(io::Error::last_os_error()); }
-            if unsafe { libc::fchmod(dir.as_raw_fd(), 0o700) } != 0 { return Err(io::Error::last_os_error()); }
-            quota::set_project(dir.as_raw_fd(), project)?;
-            limited.set(true);
-            let bytes = self.quota_bytes();
-            quota::set_limits(dir.as_raw_fd(), project, bytes, bytes / quota::BYTES_PER_INODE)?;
+            let dir = if self.custodian.is_some() {
+                made.set(true);
+                open_dir_at(vars.0.as_raw_fd(), &c)?
+            } else {
+                if unsafe { libc::mkdirat(vars.0.as_raw_fd(), c.as_ptr(), 0o700) } != 0 { return Err(io::Error::last_os_error()); }
+                made.set(true);
+                let dir = open_dir_at(vars.0.as_raw_fd(), &c)?;
+                if unsafe { libc::fchown(dir.as_raw_fd(), self.app_uid, self.app_uid) } != 0 { return Err(io::Error::last_os_error()); }
+                if unsafe { libc::fchmod(dir.as_raw_fd(), 0o700) } != 0 { return Err(io::Error::last_os_error()); }
+                quota::set_project(dir.as_raw_fd(), project)?;
+                limited.set(true);
+                let bytes = self.quota_bytes();
+                quota::set_limits(dir.as_raw_fd(), project, bytes, bytes / quota::BYTES_PER_INODE)?;
+                dir
+            };
             if let Some(image) = import {
                 self.import_tree(&vars, image)?;
                 // The copy carries the image root's owner and mode onto the directory: restore them.
@@ -451,7 +486,9 @@ impl Volume<'_> {
         if let Some(image) = import { let _ = fs::remove_file(image); }
         if result.is_err() {
             // The registration is written last: with none, nothing of this call may remain.
-            if made.get() {
+            if let Some(socket) = self.custodian {
+                let _ = custodian::destroy(socket, &name);
+            } else if made.get() {
                 if let Ok(dir) = open_dir_at(vars.0.as_raw_fd(), &c) {
                     let _ = remove_contents(dir.as_raw_fd());
                     if limited.get() { let _ = quota::clear_limits(dir.as_raw_fd(), project); }
@@ -541,7 +578,9 @@ impl Volume<'_> {
             Ok(())
         };
         ignore(unsafe { libc::unlinkat(attest.0.as_raw_fd(), cstr(&format!("{name}.witness"))?.as_ptr(), 0) })?;
-        match open_dir_at(vars.0.as_raw_fd(), &c) {
+        if let Some(socket) = self.custodian {
+            custodian::destroy(socket, &name)?;
+        } else { match open_dir_at(vars.0.as_raw_fd(), &c) {
             Ok(dir) => {
                 let m = dir.metadata()?;
                 if m.uid() != self.app_uid { return Err(refuse("volume-helper: destroy refuses a directory the grain does not own")); }
@@ -553,7 +592,7 @@ impl Volume<'_> {
             }
             Err(e) if e.raw_os_error() == Some(libc::ENOENT) => {}
             Err(_) => return Err(refuse("volume-helper: volume directory is not a plain directory")),
-        }
+        } }
         ignore(unsafe { libc::unlinkat(volumes.0.as_raw_fd(), cstr(&format!("{name}.conf"))?.as_ptr(), 0) })?;
         volumes.0.sync_all()
     }
@@ -666,7 +705,7 @@ mod tests {
         root
     }
     fn volume<'a>(root: &'a Path, grain: &'static str, uid: u32, mib: u64) -> Volume<'a> {
-        Volume { root, store: STORE, grain, app_uid: uid, size_mib: mib, volume_id: &"d".repeat(64).leak()[..], deployment_id: &"a".repeat(64).leak()[..], host_id: &"b".repeat(64).leak()[..] }
+        Volume { root, store: STORE, grain, app_uid: uid, size_mib: mib, volume_id: &"d".repeat(64).leak()[..], deployment_id: &"a".repeat(64).leak()[..], host_id: &"b".repeat(64).leak()[..], custodian: None }
     }
     fn as_app(uid: u32, script: &str) -> std::process::Output {
         Command::new("/usr/bin/setpriv").args([&format!("--reuid={uid}"), &format!("--regid={uid}"), "--clear-groups", "--", "/bin/sh", "-c", script])
@@ -856,6 +895,61 @@ mod tests {
         w.destroy().unwrap();
         fs::remove_dir_all(&src).unwrap();
         fs::remove_dir_all(&big).unwrap();
+    }
+
+    #[test]
+    #[ignore = "physical: root on a prjquota ext4 or xfs"]
+    fn physical_the_custodian_makes_bounds_reports_and_removes_and_the_helper_follows_it() {
+        let root = physical_root();
+        let socket = root.parent().unwrap().join("custodian.sock");
+        // Uid base 0: no shift on this rig; the range covers the test uids.
+        let custodian = super::super::volume_custodian::Custodian::open(&root, 0, 1_000_000).unwrap();
+        { let socket = socket.clone(); std::thread::spawn(move || { let _ = custodian.serve(&socket, 0); }); }
+        for _ in 0..100 { if socket.exists() { break; } std::thread::sleep(Duration::from_millis(50)); }
+        let ask = |line: &str| -> String {
+            let mut c = UnixStream::connect(&socket).unwrap();
+            c.write_all(format!("{line}\n").as_bytes()).unwrap();
+            let mut r = String::new();
+            BufReader::new(c).read_line(&mut r).unwrap();
+            r
+        };
+        let id = format!("{STORE}-9201");
+        // Refusals are named; none of them touched anything.
+        assert!(ask(&format!("MINI-VOLUME/1 usage {id}")).starts_with("REFUSED absent"));
+        assert!(ask(&format!("MINI-VOLUME/1 destroy {id}")).starts_with("OK removed=0"));
+        assert!(ask(&format!("MINI-VOLUME/1 create {id} 63 165536")).starts_with("REFUSED bad-size"));
+        assert!(ask(&format!("MINI-VOLUME/1 create {id} 64 0")).starts_with("REFUSED bad-request"));
+        assert!(ask(&format!("MINI-VOLUME/1 create {id} 64 2000000")).starts_with("REFUSED bad-uid"));
+        assert!(ask("MINI-VOLUME/1 create ../../etc-9 64 165536").starts_with("REFUSED bad-id"));
+        assert!(!root.join("vars").join(&id).exists());
+        // Created: bounded before it is handed out, owned by the grain, private.
+        let r = ask(&format!("MINI-VOLUME/1 create {id} 64 165536"));
+        assert!(r.starts_with("OK project="), "{r}");
+        assert!(ask(&format!("MINI-VOLUME/1 create {id} 64 165536")).starts_with("REFUSED exists"));
+        let path = root.join("vars").join(&id);
+        let m = fs::metadata(&path).unwrap();
+        assert_eq!((m.uid(), m.mode() & 0o7777), (165536, 0o700));
+        let u = ask(&format!("MINI-VOLUME/1 usage {id}"));
+        assert!(u.contains(&format!("bhard_kib={}", 64 * 1024)) && u.contains("uid=165536"), "{u}");
+        let full = as_app(165536, &format!("dd if=/dev/zero of={}/f bs=1M count=80 2>&1; true", path.display()));
+        assert!(String::from_utf8_lossy(&full.stdout).to_lowercase().contains("quota"), "{full:?}");
+        // A directory that is not a custodian volume is never touched by destroy or usage.
+        fs::create_dir(root.join("vars").join(format!("{STORE}-9202"))).unwrap();
+        assert!(ask(&format!("MINI-VOLUME/1 destroy {STORE}-9202")).starts_with("REFUSED not-a-volume"));
+        assert!(root.join("vars").join(format!("{STORE}-9202")).exists());
+        fs::remove_dir(root.join("vars").join(format!("{STORE}-9202"))).unwrap();
+        // The helper, pointed at the custodian, does what it does locally.
+        let mut v = volume(&root, "9203", 165537, 64);
+        v.custodian = Some(&socket);
+        v.create(None).unwrap();
+        v.attest().unwrap();
+        v.verify().unwrap();
+        v.destroy().unwrap();
+        assert!(!v.path().exists());
+        // Destroy is idempotent and leaves nothing: the name, and the project's limit.
+        assert!(ask(&format!("MINI-VOLUME/1 destroy {id}")).starts_with("OK removed=1"));
+        assert!(ask(&format!("MINI-VOLUME/1 destroy {id}")).starts_with("OK removed=0"));
+        assert!(!path.exists());
     }
 
     #[test]

@@ -110,6 +110,14 @@ fn main() {
         }
         return;
     }
+    if args.len() == 7 && args[1] == "volume-custodian" {
+        // volume-custodian ROOT SOCKET UID_BASE UID_LIMIT SOCKET_GID (deploy/spk-host/VOLUMES.md)
+        let n = |i: usize| args[i].parse::<u32>().unwrap_or_else(|_| { eprintln!("spk-host volume-custodian: {} is not a number", args[i]); std::process::exit(2) });
+        let served = minidregg_spk_host::broker::volume_custodian::Custodian::open(std::path::Path::new(&args[2]), n(4), n(5))
+            .and_then(|c| c.serve(std::path::Path::new(&args[3]), n(6)));
+        if let Err(error) = served { eprintln!("spk-host volume-custodian: {error}"); std::process::exit(1); }
+        return;
+    }
     if args.len() >= 4 && args[1] == "grain" {
         match minidregg_spk_host::grain::run(&args[2..]) {
             Ok(result) => {

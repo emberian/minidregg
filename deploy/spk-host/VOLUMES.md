@@ -84,6 +84,55 @@ grain's uid (`blkid`, `e2fsck -fn`, `debugfs rdump`); nothing is mounted from op
 (there is no mount at all). The copy lands inside the quota; a tree that does not fit fails with
 `EDQUOT` and the half-made volume is removed.
 
+## The custodian: when the helper cannot set a project id itself
+
+The kernel changes a project id and a quota limit only in the initial user namespace. A container
+run with a user namespace (`systemd-nspawn -U`) cannot, whatever it has bound. For that case the
+work the kernel reserves is done by a small root service on the host, and the helper in the container
+asks it. One code path chooses: the registry's optional `custodianSocket` names the socket; absent,
+the helper does everything itself as above (hbox, plain installs).
+
+`spk-host volume-custodian ROOT SOCKET UID_BASE UID_LIMIT SOCKET_GID`, unit
+`deploy/spk-host/mini-volume-custodian.service`. `ROOT` is a host directory on ext4/xfs with
+`prjquota`; its volumes are `ROOT/vars/<id>`, where `<id>` is `<store>-<resource>`. The container
+sees `ROOT/vars` bound at `GRAINS_ROOT/vars`. The container's uid space starts at `UID_BASE` on the
+host (the container's root), `UID_LIMIT` wide; a request names the grain's uid inside the container
+and the custodian adds the base.
+
+Request, one line, then one reply line (`MINI-VOLUME/1`, any other version is `bad-version`):
+
+```
+MINI-VOLUME/1 create <ID> <SIZE_MIB> <APP_UID>   ->  OK project=P bytes=B inodes=I
+MINI-VOLUME/1 usage <ID>                         ->  OK project= uid= inode= bhard_kib= bsoft_kib= ihard= isoft= cur_bytes= cur_inodes=
+MINI-VOLUME/1 destroy <ID>                       ->  OK removed=0|1
+                                                 or  REFUSED <name> <text>
+```
+
+**C1 It touches only its root.** Every path is `ROOT/vars/<ID>` reached by `openat` from a descriptor
+opened at start, `O_NOFOLLOW`; `<ID>` is two canonical fields (16 lower-case hex, a decimal), so it
+cannot hold a `/`, a `..` or any other byte. Nothing else from a caller reaches a path: the request
+has no path, no command and no uid outside `1..UID_LIMIT`.
+**C2 A request cannot name another grain's directory.** `usage` and `destroy` refuse (`not-a-volume`)
+any name that is not a plain directory on `vars`' filesystem, owned inside the container's uid range,
+carrying a custodian project id with inheritance. A directory the custodian did not make is never
+emptied or removed.
+**C3 Limits come first.** `create` makes the directory 0700 owned by root, sets its project id and
+hard block and inode limits (`SIZE_MIB`, 64..=16384, and `bytes/16384` inodes), and only then gives it
+to the grain's uid. A project id is claimed under one lock, from a deterministic probe sequence, and
+only if the kernel shows it unused. A failure removes everything the call made.
+**C4 Destroy is idempotent and leaves nothing.** Contents, then the limit, then the name, in that
+order; an absent volume answers `removed=0`; a destroy cut short is finished by running it again.
+**C5 Refusals are named:** `bad-version`, `bad-request`, `bad-id`, `bad-size`, `bad-uid`, `exists`,
+`absent`, `not-a-volume`, `no-project-id`, `kernel` (the OS error follows). The custodian refuses to
+start unless it is root in the initial user namespace and `ROOT` has project quota.
+**C6 Access** is the socket's mode 0660 and group `SOCKET_GID`; the directory holding it is 0755 root.
+
+What stays in the container: the registration, the witness, import into the directory, freeze and
+export. The helper's `verify` re-reads the project from the directory (any namespace can) and the
+limits from `usage`, and compares them exactly as before. Not guaranteed: a compromised container
+root can still ask the custodian to destroy any volume it can name, and can write a witness; the
+resident re-checks the project id and size from the directory it holds open at every launch.
+
 ## What it does not guarantee
 
 * Not a performance partition: grains share the host filesystem's journal and IO.
