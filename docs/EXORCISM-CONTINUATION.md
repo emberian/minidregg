@@ -44,6 +44,23 @@ Next candidates, in order of share: a verdict cache for `checkGrants` keyed by e
 the decoded bytes (`materializeCanonical`, already proved equal); `loadPolicy` keeping the decoded
 record next to the bytes it was decoded from.
 
+## Client side on batch 6 (perf stat over 30 warm `doc show`, world /ci/exo/w6)
+
+- With the deployed wrapper (dregg-infra's copy: `#!/usr/bin/env bash`, readlink, dirname x2,
+  basename per verb): 12.4 ms client CPU, 25.5 ms wall. With staging's wrapper (perf-client
+  b34173dad, batch 7): 6.5 ms, 18.5 ms. Infra installs the candidate's wrapper from batch 7 on.
+- What is left in `mini` (about 5.5 ms CPU, half of it kernel: exec, dynamic loading, page faults):
+  attempt-file writes (`durable::staged`) about 15%, reads about 4%.
+- So a warm one-shot read is about 18 ms: Host ops 8.2 ms (op 144 1.1, op 4 1.4, op 5 5.7), codec
+  3.5 ms CPU, consent 1.9 ms CPU, client 6.5 ms CPU.
+
+## Building a Host to measure a Lean change
+
+A native Host build takes about 48 minutes in a pool tree prepared with `lane-tree native`
+(hot-path's recipe: `/ci/hpc/nb/build7.sh`, tree t7, artifacts in `/ci/hpc/nb/artifacts`; hotpatch
+with `/home/hbox/lanes/integ/hotpatch-candidate.sh <base> <name> minidregg-host=...`, see
+docs/HOT-PATH-STATE.md). This lane has not built one.
+
 ## Other open items
 
 - The client's attempt-file bus: about 60 openat per signed read (it writes each step and reads it
