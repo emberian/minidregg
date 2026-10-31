@@ -3214,7 +3214,7 @@ def submitRenounceLight (transport : DurableReceiverIO.Transport)
     (basisOf : DurableView.Keys → IO (Except String (ServedBasis.Basis deployment opening.store)))
     (bytes : List UInt8)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome)
-    (adopt : DurableServed.Opening ResourceBirthCodec.rootBytes → IO Unit := fun _ => pure ()) :
+    (adopt : NativeHostLight.Adopt := fun _ _ => pure ()) :
     IO (Outcome × Disclosure) := do
   let domain := deployment.domain
   let some ingress := CapabilityRenounce.decodeIngress bytes
@@ -3239,7 +3239,7 @@ def submitRenounceLight (transport : DurableReceiverIO.Transport)
               match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes opening
                   (CapabilityRenounce.intent accepted) with
               | .appended kind next .. =>
-                  adopt next
+                  adopt next none
                   return (← confirm kind receipt.transactionId receipt.eventId, .uniform)
               | .replayed _ => return (← confirm .replayed receipt.transactionId receipt.eventId, .uniform)
               | .rejected reason => return (durableRefusal reason, .uniform)
@@ -3321,7 +3321,7 @@ def submitInstallLight {F : Type} [Field F] [DecidableEq F] (transport : Durable
     (basisOf : DurableView.Keys → IO (Except String (ServedBasis.Basis deployment opening.store)))
     (bytes : List UInt8)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome)
-    (adopt : DurableServed.Opening ResourceBirthCodec.rootBytes → IO Unit := fun _ => pure ()) : IO Outcome := do
+    (adopt : NativeHostLight.Adopt := fun _ _ => pure ()) : IO Outcome := do
   let domain := deployment.domain
   let some ingress := PolicyInstallReceiver.decodeIngress bytes
     | return refused .operationRejected "install" s!"{repr PolicyInstallReceiver.Reject.malformedIngress}"
@@ -3343,7 +3343,7 @@ def submitInstallLight {F : Type} [Field F] [DecidableEq F] (transport : Durable
               let receipt := PolicyInstallReceiver.receipt domain ingress
               match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes opening
                   (PolicyInstallReceiver.intent accepted) with
-              | .appended kind next .. => do adopt next; confirm kind receipt.transactionId receipt.eventId
+              | .appended kind next .. => do adopt next none; confirm kind receipt.transactionId receipt.eventId
               | .replayed _ => confirm .replayed receipt.transactionId receipt.eventId
               | .rejected reason => return durableRefusal reason
               | .contention => return .contention
@@ -3361,7 +3361,7 @@ def submitRevokeLight {F : Type} [Field F] [DecidableEq F] (transport : DurableR
     (basisOf : DurableView.Keys → IO (Except String (ServedBasis.Basis deployment opening.store)))
     (bytes : List UInt8)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome)
-    (adopt : DurableServed.Opening ResourceBirthCodec.rootBytes → IO Unit := fun _ => pure ()) : IO Outcome := do
+    (adopt : NativeHostLight.Adopt := fun _ _ => pure ()) : IO Outcome := do
   let domain := deployment.domain
   let semantics := profile.semantics
   let some ingress := CapabilityRevocationReceiver.decodeIngress bytes
@@ -3384,7 +3384,7 @@ def submitRevokeLight {F : Type} [Field F] [DecidableEq F] (transport : DurableR
               let receipt := CapabilityRevocationReceiver.receipt domain semantics ingress
               match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes opening
                   (CapabilityRevocationReceiver.intent accepted) with
-              | .appended kind next .. => do adopt next; confirm kind receipt.transactionId receipt.eventId
+              | .appended kind next .. => do adopt next none; confirm kind receipt.transactionId receipt.eventId
               | .replayed _ => confirm .replayed receipt.transactionId receipt.eventId
               | .rejected reason => return durableRefusal reason
               | .contention => return .contention
@@ -3402,7 +3402,7 @@ def submitDelegateLight {F : Type} [Field F] [DecidableEq F] (transport : Durabl
     (basisOf : DurableView.Keys → IO (Except String (ServedBasis.Basis deployment opening.store)))
     (bytes : List UInt8)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome)
-    (adopt : DurableServed.Opening ResourceBirthCodec.rootBytes → IO Unit := fun _ => pure ()) : IO Outcome := do
+    (adopt : NativeHostLight.Adopt := fun _ _ => pure ()) : IO Outcome := do
   let domain := deployment.domain
   let semantics := profile.semantics
   let some ingress := CapabilityDelegationReceiver.decodeIngress bytes
@@ -3425,7 +3425,7 @@ def submitDelegateLight {F : Type} [Field F] [DecidableEq F] (transport : Durabl
               let receipt := CapabilityDelegationReceiver.receipt domain semantics ingress
               match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes opening
                   (CapabilityDelegationReceiver.intent accepted) with
-              | .appended kind next .. => do adopt next; confirm kind receipt.transactionId receipt.eventId
+              | .appended kind next .. => do adopt next none; confirm kind receipt.transactionId receipt.eventId
               | .replayed _ => confirm .replayed receipt.transactionId receipt.eventId
               | .rejected reason => return durableRefusal reason
               | .contention => return .contention
@@ -3447,7 +3447,7 @@ def submitInvokeLight {F : Type} [Field F] [DecidableEq F] (transport : DurableR
     (basisOf : DurableView.Keys → IO (Except String (ServedBasis.Basis deployment opening.store)))
     (signed : DeclaredResourceController.SignedCommand)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome)
-    (adopt : DurableServed.Opening ResourceBirthCodec.rootBytes → IO Unit := fun _ => pure ()) : IO Outcome := do
+    (adopt : NativeHostLight.Adopt := fun _ _ => pure ()) : IO Outcome := do
   match DeclaredResourceController.commandCodec.decode signed.commandBytes with
   | none => return refused .malformed "invoke" "noncanonical command"
   | some command =>
@@ -3469,7 +3469,7 @@ def submitInvokeLight {F : Type} [Field F] [DecidableEq F] (transport : DurableR
               if (FnConsumerProgress.recognizedLegacyIntentAnyGateway? domain semantics intent).isSome then
                 return stale ground command .physicalPreparation
               match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes opening intent with
-              | .appended kind next .. => do adopt next; confirm kind transactionId eventId
+              | .appended kind next .. => do adopt next none; confirm kind transactionId eventId
               | .replayed _ => confirm .replayed transactionId eventId
               | .rejected (.durable .insufficientBudget) =>
                   return refused .operationRejected "durable"
@@ -3493,7 +3493,7 @@ factory pins are the served state's (`OpenedServed.pins`). -/
 def submitBirthLight (transport : DurableReceiverIO.Transport) (config : Config)
     (light : NativeHostLight.Light config) (bytes : List UInt8)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome)
-    (adopt : DurableServed.Opening ResourceBirthCodec.rootBytes → IO Unit := fun _ => pure ()) :
+    (adopt : NativeHostLight.Adopt := fun _ _ => pure ()) :
     IO Outcome := do
   if (GrainResourceBirthPolicyController.decodeIngress bytes).isSome then
     match ← GrainResourceBirthReceiver.receiveServed config.profile config.deployment light.opened.pins
@@ -3520,7 +3520,7 @@ authenticated history, its admission on that basis's ground, its commit by
 def submitLightVia (transport : DurableReceiverIO.Transport) (config : Config)
     (light : NativeHostLight.Light config) (call : SignedCall)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome)
-    (adopt : DurableServed.Opening ResourceBirthCodec.rootBytes → IO Unit := fun _ => pure ()) : IO Outcome :=
+    (adopt : NativeHostLight.Adopt := fun _ _ => pure ()) : IO Outcome :=
   match call with
   | .renounce bytes => do
       return (← submitRenounceLight transport config.deployment config.profile.semantics config.federation
@@ -3647,7 +3647,7 @@ every other call uniformly. -/
 def submitDisclosedSession (config : Config)
     (light : NativeHostLight.Light config) (call : SignedCall)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome)
-    (adopt : DurableServed.Opening ResourceBirthCodec.rootBytes → IO Unit := fun _ => pure ()) :
+    (adopt : NativeHostLight.Adopt := fun _ _ => pure ()) :
     IO (Outcome × Disclosure) := do
   match call with
   | .renounce bytes =>

@@ -317,29 +317,30 @@ private def priorServedGenesisEvidence {config : Config} {earlier store : StoreI
 
 /-- **Validation of a session's next served state, incrementally**: the
 directory decodes only rows whose bytes moved (`loadServedDirectoryFrom`), the
-authority cell is decoded only when its bytes moved (`loadServedAuthorityFrom`)
+authority cell is decoded only when its bytes moved and are not the post-cell the session's own
+write handed it (`loadServedAuthorityHeld`)
 and the cell law runs only on cells whose bytes moved (`cellsLawfulServedFrom`).
 The genesis checks are inherited when the seed and log start are unchanged.
 `validateServedFrom_eq`: it is `validateServed` -- the same result, the same refusal. -/
 def validateServedFrom (config : Config) {earlier store : StoreIdentity}
-    (prior : OpenedServed config earlier) (served : State store) :
+    (prior : OpenedServed config earlier) (served : State store) (held : Option HeldCell := none) :
     Except String (OpenedServed config store) :=
   let evidence := priorServedGenesisEvidence prior served
   validateServedWith config served (loadServedDirectoryFrom prior.directory served)
-    (loadServedAuthorityFrom prior.authority served) (cellsLawfulServedFrom config prior served)
+    (loadServedAuthorityHeld prior.authority held served) (cellsLawfulServedFrom config prior served)
     (cellsLawfulServedFrom_eq config prior served) evidence.1 evidence.2
 
 theorem validateServedFrom_eq (config : Config) {earlier store : StoreIdentity}
-    (prior : OpenedServed config earlier) (served : State store) :
-    validateServedFrom config prior served = validateServed config served :=
+    (prior : OpenedServed config earlier) (served : State store) (held : Option HeldCell := none) :
+    validateServedFrom config prior served held = validateServed config served :=
   validateServedWith_withExact_eq config served
     (loadServedDirectoryFrom prior.directory served)
-    (loadServedAuthorityFrom prior.authority served)
+    (loadServedAuthorityHeld prior.authority held served)
     (cellsLawfulServedFrom config prior served)
     (cellsLawfulServedFrom_eq config prior served)
     (priorServedGenesisEvidence prior served).1 (priorServedGenesisEvidence prior served).2
     (loadServedDirectoryFrom_eq prior.directory served)
-    (loadServedAuthorityFrom_eq prior.authority served)
+    (loadServedAuthorityHeld_eq prior.authority held served)
 
 #assert_axioms validateServedFrom_eq
 

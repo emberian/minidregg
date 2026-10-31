@@ -391,6 +391,67 @@ theorem loadServedAuthorityFrom_eq {deployment : CanonicalCellRegistry.Deploymen
   · exact (ServedAuthority.load_eq _).symm
   · rfl
 
+/-- An authority cell the Host itself wrote, beside the bytes it encoded it to: a write's
+post-cell (`ResourceBirthAuthority.post`, a patch applied to the pre-cell, so its kept trie
+follows the pre-cell's by the patch instead of being built). -/
+structure HeldCell where
+  cell : CredentialAuthorityDomain.Cell
+  bytes : List UInt8
+  exact : bytes = cellBytes cell
+
+/-- The held cell of a post-cell. -/
+def HeldCell.ofCell (cell : CredentialAuthorityDomain.Cell) : HeldCell := ⟨cell, cellBytes cell, rfl⟩
+
+/-- `loadServedAuthorityFrom` given the post-cell of the write that produced `served`: when
+the served authority bytes are that cell's, the cell is taken as it is, without decoding the
+bytes or rebuilding its trie; otherwise `loadServedAuthorityFrom`. `loadServedAuthorityHeld_eq`:
+it is `loadServedAuthority`. -/
+def loadServedAuthorityHeld {deployment : CanonicalCellRegistry.Deployment} {earlier store : StoreIdentity}
+    {before : State earlier} (prior : ServedAuthority deployment before) (held : Option HeldCell)
+    (served : State store) : Option (ServedAuthority deployment served) :=
+  match held with
+  | some post =>
+      if same : bytesBEq (served.canonicalBytes (cellIdOf deployment)) post.bytes then
+        some ⟨post.cell, prior.valid, (bytesBEq_iff.mp same).trans post.exact,
+          CredentialAuthorityDomain.authStateOf post.cell, rfl⟩
+      else loadServedAuthorityFrom prior served
+  | none => loadServedAuthorityFrom prior served
+
+theorem loadServedAuthorityHeld_eq {deployment : CanonicalCellRegistry.Deployment}
+    {earlier store : StoreIdentity} {before : State earlier} (prior : ServedAuthority deployment before)
+    (held : Option HeldCell) (served : State store) :
+    loadServedAuthorityHeld prior held served = loadServedAuthority deployment served := by
+  unfold loadServedAuthorityHeld
+  split
+  · split
+    · exact (ServedAuthority.load_eq _).symm
+    · exact loadServedAuthorityFrom_eq prior served
+  · exact loadServedAuthorityFrom_eq prior served
+
+/-- Teeth: a held cell whose bytes are not the served ones is not taken; the served bytes are
+decoded instead. -/
+theorem loadServedAuthorityHeld_other {deployment : CanonicalCellRegistry.Deployment}
+    {earlier store : StoreIdentity} {before : State earlier} (prior : ServedAuthority deployment before)
+    (post : HeldCell) (served : State store)
+    (other : served.canonicalBytes (cellIdOf deployment) ≠ post.bytes) :
+    loadServedAuthorityHeld prior (some post) served = loadServedAuthorityFrom prior served := by
+  unfold loadServedAuthorityHeld
+  rw [dif_neg (fun same => other (bytesBEq_iff.mp same))]
+
+/-- Satisfiable: a held cell whose bytes are the served ones is the loaded cell. -/
+theorem loadServedAuthorityHeld_taken {deployment : CanonicalCellRegistry.Deployment}
+    {earlier store : StoreIdentity} {before : State earlier} (prior : ServedAuthority deployment before)
+    (post : HeldCell) (served : State store)
+    (same : served.canonicalBytes (cellIdOf deployment) = post.bytes) :
+    ((loadServedAuthorityHeld prior (some post) served).map (·.cell)) = some post.cell := by
+  unfold loadServedAuthorityHeld
+  rw [dif_pos (bytesBEq_iff.mpr same)]
+  rfl
+
+#assert_axioms loadServedAuthorityHeld_eq
+#assert_axioms loadServedAuthorityHeld_other
+#assert_axioms loadServedAuthorityHeld_taken
+
 #assert_axioms ServedDirectory.bytes_exact
 #assert_axioms ServedDirectory.slots_eq_of_bytes
 #assert_axioms loadServedDirectory_ofLoaded

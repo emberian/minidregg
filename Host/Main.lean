@@ -1549,14 +1549,16 @@ def sessionFull (config : NativeHost.Config)
 /-- A light receive's own readback (`DurableServed.Received.appended`: the record it appended,
 read back exactly and verified at the new head) becomes the session's light opening
 (`Light.adopt`), so the next refresh finds the head current instead of reading, verifying and
-re-executing the entry the Host itself just wrote. Where it does not validate, the session keeps
+re-executing the entry the Host itself just wrote; the write's authority post-cell is taken as
+the served authority without a decode or a trie rebuild. Where it does not validate, the session keeps
 its opening and the next refresh reads the entry. -/
 def sessionAdopt (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
-    (opening : Minidregg.Compiler.DurableServed.Opening ResourceBirthCodec.rootBytes) : IO Unit := do
+    (opening : Minidregg.Compiler.DurableServed.Opening ResourceBirthCodec.rootBytes)
+    (held : Option Minidregg.Compiler.CredentialAuthorityServed.HeldCell) : IO Unit := do
   if let some current ← state.get then
     if opening.head.height = current.light.opening.head.height + 1 then
-      if let .ok light := current.light.adopt opening then
+      if let .ok light := current.light.adopt opening held then
         state.set (some { current with light, observed := none })
 
 /-- The receipt-continuity witness of the light opening's head (`ReceiptContinuity.current` of the

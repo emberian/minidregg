@@ -59,11 +59,12 @@ private def validated (config : Config) (opening : Opening ResourceBirthCodec.ro
 /-- `validated` for a later opening of a session: validated against the light
 opening it held (`validateServedFrom`, which is `validateServed`). -/
 private def validatedFrom {config : Config} (prior : Light config)
-    (opening : Opening ResourceBirthCodec.rootBytes) : Except String (Light config) :=
-  match checked : validateServedFrom config prior.opened opening.served with
+    (opening : Opening ResourceBirthCodec.rootBytes)
+    (held : Option CredentialAuthorityServed.HeldCell := none) : Except String (Light config) :=
+  match checked : validateServedFrom config prior.opened opening.served held with
   | .error detail => .error detail
   | .ok opened => .ok ⟨opening, opened,
-      validateServed_served ((validateServedFrom_eq config prior.opened opening.served).symm.trans checked)⟩
+      validateServed_served ((validateServedFrom_eq config prior.opened opening.served held).symm.trans checked)⟩
 
 /-- The light opening of the Store's head, validated for this deployment. -/
 def start (config : Config) : IO (Except String (Light config)) := do
@@ -85,10 +86,17 @@ def Light.restorage {config : Config} (light : Light config) (storage : DurableR
     Light { config with storage } :=
   ⟨light.opening, light.opened.restorage storage, light.same⟩
 
-/-- Adopt the opening a light receive returned (its record read back exactly). -/
-def Light.adopt {config : Config} (light : Light config) (opening : Opening ResourceBirthCodec.rootBytes) :
-    Except String (Light config) :=
-  validatedFrom light opening
+/-- Adopt the opening a light receive returned (its record read back exactly), given the
+authority post-cell the write encoded where it wrote that cell: taken as the served authority
+when the stored bytes are its bytes, so the Host never decodes the cell it just encoded nor
+rebuilds its trie (`loadServedAuthorityHeld`). -/
+def Light.adopt {config : Config} (light : Light config) (opening : Opening ResourceBirthCodec.rootBytes)
+    (held : Option CredentialAuthorityServed.HeldCell := none) : Except String (Light config) :=
+  validatedFrom light opening held
+
+/-- What a light receive hands the session: the opening it returned and the authority
+post-cell of its write, if it wrote the authority cell. -/
+abbrev Adopt := Opening ResourceBirthCodec.rootBytes → Option CredentialAuthorityServed.HeldCell → IO Unit
 
 /-- The basis of one request: the validated served state, the Store's head and
 the request's declared keys read from the authenticated history (through the
