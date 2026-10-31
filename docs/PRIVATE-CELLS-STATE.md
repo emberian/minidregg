@@ -107,7 +107,7 @@ tree-shape invariant from binding. Owed before it can carry cells (astra round 2
   reads it off the kept trie in walked depth plus answer (its equality `Cache.reveal_eq` owed).
 * `Theory/PrivateCellTrie.lean`: `classRevealComplete`, `erase_correct`, `erase_cost`.
 * `Kernel/ReceiptEventHiding.lean`: the challenge carries the native envelope shape
-  (`Challenge.envelope_decodes`); `DeployedShape.premises_inhabited` inhabits every keystone
+  (`Challenge.envelope_decodes`); `DeployedShape.wire_shape_inhabited` (renamed: wire shape only, not premise inhabitation) covers every keystone
   premise but `IdealReplacement` at that shape (a syntactic challenge, not an admitted
   invocation: version, target envelopes and header binding are admission's); the refutations
   take ingress reconstructible from the reader's view.
@@ -127,6 +127,15 @@ addresses, `entries_keys`), where both conventions agree, and the trie's last-wi
 update convention. `indexEntries` omits the blinding address. `IndexExact` (last value at
 every address = the store's value bytes; none at blinding) and `IndexBindsData` (equal
 indexes agree off the blinding; teeth: stores differing only in blinding share an index).
+
+**Required by the integrator's audit of increment 1** (nothing vacuous; these next):
+(a) a joint witness including `IdealReplacement` at the deployed shape (>= 2 tapes, signer
+randomness and key on the tape, budget = the query-bounded `PublicHashTest` class), and
+`public_signer_refuted` unconditional (discharge `distinct`); (b) `EraseCost` must make faking
+impossible: erase over a `dig` oracle in a counting monad (or a fixed cost semantics), the cost
+over the handler's count; the Store adapter must carry the bound before any deployed-cost claim;
+(c) the two-class teeth witness for `ClassRevealComplete`; (d) `Cache.reveal_eq`; (e) reveal
+locality to the path plus selected subtree (known, kept listed).
 
 **Next increments** (in order, batched onto dd0e6efbd as the coordinator asked):
 1. Prove `IndexExact` / `IndexBindsData` (lastVal over a map/filter of a key-distinct list;

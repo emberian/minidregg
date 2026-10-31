@@ -1,5 +1,5 @@
 /-
-# Theory.AuthTrieReveal — honest reveals verify, and the kept trie produces them
+# Theory.AuthTrieReveal — honest reveals verify (the spec `revealFor`; the kept trie's `Trie.reveal` equality owed)
 
 `Theory.AuthTrieRange.reveal_sound` says what a verifying reveal answers. This
 module supplies the other half and the operation that serves it:

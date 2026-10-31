@@ -118,7 +118,11 @@ def revealNodes (dig : NodeIn K V D → D) (bitsOf : K → List Bool) (L : Nat)
 /-- **Complete class opening target.** Over the canonical root of a store with
 injective live paths of public length `L`, a verifying reveal at class `c`'s tag
 answers exactly the live entries of class `c` (last value per key), or two
-distinct nodes among this comparison's nodes share a digest. -/
+distinct nodes of the scope `revealNodes` share a digest: the store's whole
+canonical tree, the reveal's climb and the revealed members' tree. The scope
+includes the whole store tree, so an unrelated collision in the store discharges
+every reveal; locality to the path and the selected subtree is owed, as is the
+two-class teeth witness (an injective toy digest refusing a cross-class reveal). -/
 def ClassRevealComplete {Class : Type} (dig : NodeIn K V D → D) (keys : ClassKeys K Class)
     (L : Nat) : Prop :=
   (∀ k, (keys.bitsOf k).length = L) →
