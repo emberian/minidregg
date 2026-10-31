@@ -52,6 +52,12 @@ record's turn); the birth receive 405 (admitDecodedNative 183, receiveCandidateW
    So 2b's statement change is one premise shape: `accepted[i]? = some record` becomes the Opening's authenticated
    reader's record at i (`DurableHistoryReader`, MAC-verified tag, trusted storage), as `Light.basisVia` already
    reads keys; everything else maps onto `OpenedServed` fields.
+   In flight (10-31 night): slice 1 (uncommitted in this worktree, lane-check unfinished when hbox went down):
+   the session opens the light opening only and the full image lazily (`Session.full`, `materialize`;
+   `sessionFull` in Host/Main), op 1 authorizes and judges invoke legs on light grounds, op 2 submits every
+   non-birth call on light (`submitLightVia`/`submitSessionVia`), the receipt readback reads the light reader
+   (`historicalReceiptLight`), a session that never opened full seals from its light head. Slice 2 (birth on
+   `Ground`, light receive) is delegated to aa75280bd04c5d700 on seat/birth-ground.
    (a) inventory what each `Opened` consumer reads (directory, authority, pins, seed/logStart exactness, the image's
    accepted records for historical receipts and walks); (b) give `OpenedServed` the missing fields as maintained
    values; (c) retype receivers family by family (birth first: `Held.of` already isolates it to directory +
