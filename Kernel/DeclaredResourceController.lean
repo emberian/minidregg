@@ -1812,8 +1812,9 @@ def domainGuards (prepared : PreparedInvocation deployment profile ambient groun
      | none => (prepared.compute.map RunComputeBudgetDomain.Prepared.readGuards).getD [])
 
 def readGuards (prepared : PreparedInvocation deployment profile ambient ground command) : List ReadGuard :=
-  sourceGuards prepared ++ (domainGuards prepared).filter fun guard =>
-    guard.cellId ∉ (writes prepared).map DataWrite.cellId
+  -- The written ids once per call, not once per guard (each `writes` encodes every target cell).
+  let written := (writes prepared).map DataWrite.cellId
+  sourceGuards prepared ++ (domainGuards prepared).filter fun guard => guard.cellId ∉ written
 
 def PhysicalShape (prepared : PreparedInvocation deployment profile ambient ground command) : Prop :=
   ((writes prepared).map DataWrite.cellId).Nodup ∧
@@ -1922,8 +1923,8 @@ theorem decodeSignedBytes_canonical {bytes : List UInt8} {ingress : SignedIngres
 /-- Complete guards before final execution/capacity admission. -/
 def admissionGuards [DecidableEq F] (prepared : PreparedInvocation deployment profile ambient ground command)
     (audience : AudienceChecks prepared) : List ReadGuard :=
-  readGuards prepared ++ (audienceGuards audience.targets).filter fun guard =>
-    guard.cellId ∉ (writes prepared).map DataWrite.cellId
+  let written := (writes prepared).map DataWrite.cellId
+  readGuards prepared ++ (audienceGuards audience.targets).filter fun guard => guard.cellId ∉ written
 
 /-- The event id of a declared invocation: a digest of the exact signed ingress
 (`signedBytes`, which carries the authority signature `withAcceptedOn`
