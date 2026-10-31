@@ -258,9 +258,15 @@ worked: one whole-tree `lake build` on a pool tree, a log-driven fixer for the m
 support lemmas, `.update`, binders, axiom pins only for files with no other error, edited bottom-up), and
 `lake env lean` on the box for the few manual files; 17 builds from first switch to green.
 
-**Measurement owed:** native Host before (candidate `997905c0b`) and after (its L0 overlay), `grow2.sh`
-(8 sequential `story new`, Host CPU per story, perf of stories 2 and 8); the after is `DFinsupp.update`
-gone from the profile and a flatter 2 → 8 slope.
+**L0 measured** (grow2r on hbox t4, base candidate 997905c0b vs its L0 Host overlay; CPU seconds from /proc):
+Host CPU per `story new` 590 → 1200 ms over stories 1 → 8 before, 500 → 700 ms after (slope +610 → +200 ms);
+`DFinsupp.update`/`Function.update` (49 % inclusive at story 8) gone, `SparseMap.set` 1.1 %. Table and caveats
+on the seat row. What still grows: the signed read (`checkGrant`, `capabilityEvidenceChecked`, cSHAKE256;
+read-path's next) and `NativeHostSession.refresh` (10 → 14 %).
 
-**Next nodes (§3-4 order):** R1 the op 4 → op 5 challenge; R3 the planner/deriver prepared write; I4/I5
+**R1 landed** (49cf4f2d2): op 4's planned challenges are kept beside the light opening (`NativeHost.Observed`,
+typed by the opening, dropped when the head moves) and op 5 authorizes from them (`authorizeRetained_eq`: the
+same answer as `authorize`; a miss recomputes on the current ground). Measured in read-path's overlay.
+
+**Next nodes (§3-4 order):** the session refresh (still growing after L0); R3 the planner/deriver prepared write; I4/I5
 Fn and carry scans; export/backup; the client refs index; the lint (§7). R6 and R7 are host-execution's.
