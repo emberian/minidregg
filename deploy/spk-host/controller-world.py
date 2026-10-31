@@ -225,14 +225,19 @@ def ident(value, subordinate=False):
 def registry_record(path):
     r = strict_json(read_file(path, 0, 65536, required_mode=0o644))
     keys = {'protocol', 'store', 'deploymentId', 'hostId', 'grainsRoot', 'operatorUid', 'operatorGid', 'appUids', 'helper', 'helperSha256'}
-    require(isinstance(r, dict) and set(r) == keys and r['protocol'] == 'mini-spk-volume-registry-v1', 'root world registry schema refused')
+    # `custodianSocket` marks a world behind a volume custodian (a user-namespaced container).
+    require(isinstance(r, dict) and set(r) - {'custodianSocket'} == keys and set(r) >= keys
+            and r['protocol'] == 'mini-spk-volume-registry-v1', 'root world registry schema refused')
+    require('custodianSocket' not in r or (isinstance(r['custodianSocket'], str)
+            and re.fullmatch(r'/[A-Za-z0-9._/-]+', r['custodianSocket']) and '..' not in r['custodianSocket']),
+            'world custodian socket malformed')
     require(isinstance(r['store'], str) and re.fullmatch('[0-9a-f]{16}', r['store'])
             and path.name == r['store'] + '.json' and r['grainsRoot'] == str(WORLDS / r['store']), 'world registry path differs')
     require(all(isinstance(r[k], str) and re.fullmatch('[0-9a-f]{64}', r[k]) for k in ('deploymentId', 'hostId', 'helperSha256'))
             and ident(r['operatorUid']) and ident(r['operatorGid']), 'world registry identity malformed')
     require(isinstance(r['helper'], str) and re.fullmatch(r'/usr/local/libexec/mini-spk-volume-helper(?:-[0-9a-f]{16})?', r['helper']), 'world helper path malformed')
     app = r['appUids']
-    require(isinstance(app, list) and 1 <= len(app) <= 64 and all(ident(i, True) for i in app)
+    require(isinstance(app, list) and 1 <= len(app) <= 64 and all(ident(i, 'custodianSocket' not in r) for i in app)
             and len(set(app)) == len(app) and not set(app) & {r['operatorUid'], r['operatorGid']}, 'world app identity set malformed')
     return r
 
@@ -393,11 +398,11 @@ def allocate_identity(operator_uid, account):
     raise ValueError('no unused controller identity in exclusive delegated UID/GID intersection')
 
 
-def check_app_allocation(store, helper, op_text, first_text, count_text):
+def check_app_allocation(store, helper, op_text, first_text, count_text, custodian=False):
     require(re.fullmatch('[0-9a-f]{16}', store) and re.fullmatch(r'/usr/local/libexec/mini-spk-volume-helper(?:-[0-9a-f]{16})?', helper), 'app allocation coordinates malformed')
     require(all(re.fullmatch('[1-9][0-9]*', s) for s in (op_text, first_text, count_text)), 'app allocation decimal malformed')
     operator, first, count = map(int, (op_text, first_text, count_text))
-    require(ident(operator) and ident(first, True) and 2 <= count <= 64 and first + count <= MAX_ID
+    require(ident(operator) and ident(first, not custodian) and 2 <= count <= 64 and first + count <= MAX_ID
             and str(operator) == os.environ.get('SUDO_UID', str(operator)), 'app allocation identity/bound refused')
     occupied = occupied_ids(); own, foreign = delegated(operator); accounts = nss_ids()
     def free(start):
@@ -2571,13 +2576,16 @@ def main(args):
     action, store, helper, *extra = args
     # Same global allocator lock as ordinary world setup; no nested installer call.
     if action == 'controller-check-app-allocation':
-        require(len(extra) == 3, 'app allocation check requires operator/start/count')
+        # A fourth word `custodian` is a world behind a volume custodian: its apps live in a user
+        # namespace whose uids start at 1, so the subordinate (65536) floor does not apply.
+        require(len(extra) in (3, 4) and (len(extra) == 3 or extra[3] == 'custodian'),
+                'app allocation check requires operator/start/count[/custodian]')
         held = os.fstat(8); named = os.stat('/run/mini-spk-world-install.lock', follow_symlinks=False)
         require(stat.S_ISREG(held.st_mode) and held.st_uid == 0 and held.st_nlink == 1
                 and not held.st_mode & 0o022 and (held.st_dev, held.st_ino) == (named.st_dev, named.st_ino),
                 'inherited global allocator lock differs')
         fcntl.flock(8, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        print(json.dumps(check_app_allocation(store, helper, *extra), sort_keys=True))
+        print(json.dumps(check_app_allocation(store, helper, *extra[:3], custodian=len(extra) == 4), sort_keys=True))
         return 0
     with open('/run/mini-spk-world-install.lock', 'a') as lock, contextlib.ExitStack() as held_locks:
         fcntl.flock(lock, fcntl.LOCK_EX)

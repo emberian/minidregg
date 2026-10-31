@@ -792,6 +792,28 @@ class ControllerWorldTests(unittest.TestCase):
              patch.object(c,'nss_ids',return_value=set()),patch.object(c,'nss_free',return_value=True),patch.dict(c.os.environ,{'SUDO_UID':'1000'}):
             with self.assertRaises(ValueError):c.check_app_allocation('cd'*8,'/usr/local/libexec/mini-spk-volume-helper','1000','100032','2')
 
+    def test_a_custodian_world_allocates_app_uids_inside_its_user_namespace(self):
+        helper='/usr/local/libexec/mini-spk-volume-helper'
+        with patch.object(c,'occupied_ids',return_value=set()),patch.object(c,'delegated',return_value=([(10000,20000)],[])), \
+             patch.object(c,'nss_ids',return_value=set()),patch.object(c,'nss_free',return_value=True),patch.dict(c.os.environ,{'SUDO_UID':'1000'}):
+            got=c.check_app_allocation('cd'*8,helper,'1000','10000','16',custodian=True)
+            self.assertEqual(got['appRangeChecked'],[10000,10016])
+            # Without the custodian the subordinate floor still refuses the same request.
+            with self.assertRaises(ValueError):c.check_app_allocation('cd'*8,helper,'1000','10000','16')
+        # The registry of such a world carries custodianSocket and app uids below 65536; without the
+        # socket the same uids are refused, and a malformed socket is refused.
+        base=self.registry_value()
+        base['appUids']=[10000,10001]
+        registry=self.root/'registry-c';registry.mkdir(mode=0o700)
+        path=registry/('ab'*8+'.json')
+        def load(value):
+            path.write_text(json.dumps(value))
+            with patch.object(c,'read_file',side_effect=lambda p,*a,**k:p.read_bytes()):
+                return c.registry_record(path)
+        with self.assertRaises(ValueError):load(base)
+        self.assertEqual(load({**base,'custodianSocket':'/run/mini-volumes/volume.sock'})['appUids'],[10000,10001])
+        with self.assertRaises(ValueError):load({**base,'custodianSocket':'/run/../etc/x'})
+
     def test_pending_allocation_without_reservation_refuses(self):
         registry=self.root/'registry';registry.mkdir();worlds=self.root/'worlds';worlds.mkdir()
         controller=worlds/('ab'*8)/'controller';controller.mkdir(parents=True)
