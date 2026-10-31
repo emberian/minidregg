@@ -68,9 +68,7 @@ fn signed_view_bytes(
     take_host_decision();
     match signed_view(root, workspace, reference, view) {
         Ok((_, _, signed)) => {
-            let attempt = signed.parent().ok_or("signed observation has no attempt")?;
-            let bytes = fs::read(attempt.join("view.bin"))
-                .map_err(|error| format!("cannot read the view: {error}"))?;
+            let bytes = signed.read("view.bin").map_err(|error| format!("cannot read the view: {}", error.0))?.into_owned();
             Ok(Ok(bytes))
         }
         Err(error) => match take_host_decision() {

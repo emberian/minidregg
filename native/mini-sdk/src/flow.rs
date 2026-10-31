@@ -19,9 +19,13 @@
 //!    local codec presents the answer. A lost reply is answered by looking up the SAME call
 //!    ([`crate::custody`]), never by a new one.
 //!
+//! A signed read is step 1 and then [`Flow::query`] (op 5, `view.bin`, presented as `view.json`).
+//!
 //! The steps are separate so a caller may interpose between them (the CLI's provider continuity
-//! guard sits between 2 and 4). Each step reads and writes only files of the attempt, so the
-//! directory is the custody record. The member's local side ([`Local`]: codec and consent) and
+//! guard sits between 2 and 4). Each step reads and writes only files of its
+//! [`crate::attempt::Attempt`]: on disk as each is made for a write, so the directory is the
+//! custody record; in memory for a read, written to the directory only when something needs a
+//! path (a one-shot Host, a refusal's record). The member's local side ([`Local`]: codec and consent) and
 //! the operator side ([`Operator`]) are traits: the CLI implements them over its process-wide
 //! codec child and consent provider and its pinned transport; [`Member`] implements them over
 //! this crate's own [`crate::local::Codec`], [`crate::consent::Consent`] and
@@ -32,38 +36,38 @@
 //! a command-line client whose member typed the command passes a release that accepts. Either
 //! way the headers are exactly those the local Lean consent provider returned for this intent and
 //! plan: nothing else is ever signed.
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use serde_json::Value;
 
-use crate::durable::{self, Perm};
+use crate::attempt::Attempt;
 use crate::signer::Signer;
 use crate::{Error, Result};
 
-/// Where the intent comes from.
+/// Where the intent comes from: a file of the attempt.
 pub enum Source<'a> {
-    /// Authoring source of this kind (e.g. `intent`), authored by the local codec into `intent.bin`.
-    Authored { kind: &'a str, path: &'a Path },
-    /// Canonical intent bytes, copied as `intent.bin`.
-    Binary(&'a Path),
+    /// Authoring source of this kind (e.g. `intent`) in the attempt file `name`, authored by the
+    /// local codec into `intent.bin`.
+    Authored { kind: &'a str, name: &'a str },
+    /// Canonical intent bytes in the attempt file `name`, kept as `intent.bin`.
+    Binary(&'a str),
 }
 
-/// The member's local processes, by file: the storeless codec (frames 7–11) and the consent
-/// provider. Each codec verb reads its inputs and writes its answer to `output`, a new file.
+/// The member's local processes: the storeless codec (frames 7–11) and the consent provider.
+/// Each codec verb takes its inputs' bytes and answers the output's bytes.
 pub trait Local {
-    fn author(&mut self, kind: &str, input: &Path, output: &Path) -> Result<()>;
-    /// Writes the presentation to `output` and returns it.
-    fn inspect(&mut self, kind: &str, input: &Path, output: &Path) -> Result<Value>;
-    fn signatures(&mut self, json: &Path, output: &Path) -> Result<()>;
-    fn observe_assemble(&mut self, challenge: &Path, signatures: &Path, output: &Path) -> Result<()>;
-    fn assemble(&mut self, plan: &Path, signatures: &Path, output: &Path) -> Result<()>;
-    /// Consent 220: `key` is the intent subject's current key. Returns the retained intent bytes
-    /// the provider confirmed unchanged.
-    fn consent_intent(&mut self, intent: &Path, key: &[u8]) -> Result<Vec<u8>>;
+    fn author(&mut self, kind: &str, input: &[u8]) -> Result<Vec<u8>>;
+    /// The presentation, as the codec's JSON bytes.
+    fn inspect(&mut self, kind: &str, input: &[u8]) -> Result<Vec<u8>>;
+    fn signatures(&mut self, json: &[u8]) -> Result<Vec<u8>>;
+    fn observe_assemble(&mut self, challenge: &[u8], signatures: &[u8]) -> Result<Vec<u8>>;
+    fn assemble(&mut self, plan: &[u8], signatures: &[u8]) -> Result<Vec<u8>>;
+    /// Consent 220: `key` is the intent subject's current key.
+    fn consent_intent(&mut self, intent: &[u8], key: &[u8]) -> Result<()>;
     /// Consent 221: the challenge headers this intent permits `key` to sign.
-    fn consent_observation(&mut self, intent: &Path, signature: &Path, challenge: &Path, key: &[u8]) -> Result<Vec<Vec<u8>>>;
+    fn consent_observation(&mut self, intent: &[u8], signature: &[u8], challenge: &[u8], key: &[u8]) -> Result<Vec<Vec<u8>>>;
     /// Consent 222: the plan headers this intent permits `key` to sign.
-    fn consent_plan(&mut self, intent: &Path, plan: &Path, key: &[u8]) -> Result<Vec<Vec<u8>>>;
+    fn consent_plan(&mut self, intent: &[u8], plan: &[u8], key: &[u8]) -> Result<Vec<Vec<u8>>>;
 }
 
 /// An operator request of the flow.
@@ -77,6 +81,8 @@ pub enum Request {
     Submit,
     /// Op 3: exact call → outcome, read-only.
     Lookup,
+    /// Op 5: signed observation → the observed view.
+    Query,
 }
 
 impl Request {
@@ -87,6 +93,7 @@ impl Request {
             Request::Prepare => "prepare",
             Request::Submit => "submit",
             Request::Lookup => "lookup",
+            Request::Query => "query",
         }
     }
     pub fn operation(self) -> u8 {
@@ -96,6 +103,7 @@ impl Request {
             Request::Prepare => op::AUTHORIZED_PREPARE,
             Request::Submit => op::SUBMIT,
             Request::Lookup => op::LOOKUP,
+            Request::Query => op::AUTHORIZED_QUERY,
         }
     }
 }
@@ -111,38 +119,40 @@ pub enum Answered {
     Outcome,
 }
 
-/// The serving Host, by file: `request` reads `inputs` and writes the answer to `output`, a new
-/// file, and says how it was framed. An uncertain or never-forwarded transmission is an error;
-/// what it means for the attempt is the caller's custody (a submit or lookup error leaves the
-/// retained call to be looked up). An implementation may also report a marker frame as an error
-/// it has already classified (the CLI's transport does).
+/// The serving Host: `request` takes the attempt files `inputs` and creates the answer as the
+/// attempt file `output`, and says how it was framed. It is given the attempt, not bytes, because
+/// a one-shot Host reads and writes files and a refusal is retained beside its request. An
+/// uncertain or never-forwarded transmission is an error; what it means for the attempt is the
+/// caller's custody (a submit or lookup error leaves the retained call to be looked up). An
+/// implementation may also report a marker frame as an error it has already classified (the
+/// CLI's transport does).
 pub trait Operator {
-    fn request(&mut self, request: Request, inputs: &[&Path], output: &Path) -> Result<Answered>;
+    fn request(&mut self, request: Request, attempt: &mut Attempt, inputs: &[&str], output: &str) -> Result<Answered>;
 }
 
 /// What [`Flow::seal`] would sign, shown to the caller's release before any key signs.
 pub struct Sealing<'a> {
-    pub intent_bin: &'a Path,
-    pub plan_bin: &'a Path,
+    pub intent: &'a [u8],
+    pub plan: &'a [u8],
     /// The ordered headers the consent provider returned for exactly this intent and plan.
     pub headers: &'a [Vec<u8>],
 }
 
-/// One attempt directory and the parties that act on it.
+/// One attempt and the parties that act on it.
 pub struct Flow<'a, H: Local + Operator + ?Sized> {
-    pub dir: &'a Path,
+    pub attempt: &'a mut Attempt,
     pub host: &'a mut H,
     pub signer: &'a dyn Signer,
 }
 
-fn create(path: &Path, bytes: &[u8]) -> Result<()> {
-    durable::create_new(path, bytes, Perm::Umask).map_err(|e| Error(format!("cannot create {}: {e}", path.display())))
+fn json_bytes(value: &Value) -> Result<Vec<u8>> {
+    let mut bytes = serde_json::to_vec_pretty(value).map_err(|e| Error(format!("cannot render JSON: {e}")))?;
+    bytes.push(b'\n');
+    Ok(bytes)
 }
 
-fn create_json(path: &Path, value: &Value) -> Result<()> {
-    let mut bytes = serde_json::to_vec_pretty(value).map_err(|e| Error(format!("cannot render {}: {e}", path.display())))?;
-    bytes.push(b'\n');
-    create(path, &bytes)
+fn parse(name: &str, bytes: &[u8]) -> Result<Value> {
+    serde_json::from_slice(bytes).map_err(|e| Error(format!("invalid host JSON {name}: {e}")))
 }
 
 /// The JSON list the Host's `signatures` codec (op 9) reads: each header signed, hex, in order.
@@ -152,96 +162,104 @@ pub fn signature_list(signer: &dyn Signer, headers: &[Vec<u8>]) -> Result<Value>
 
 
 impl<'a, H: Local + Operator + ?Sized> Flow<'a, H> {
-    fn path(&self, name: &str) -> PathBuf {
-        self.dir.join(name)
+    /// The local codec's presentation of the attempt file `input`, kept as `output`.
+    pub fn inspect(&mut self, kind: &str, input: &str, output: &str) -> Result<Value> {
+        let bytes = self.host.inspect(kind, &self.attempt.read(input)?)?;
+        self.attempt.create(output, &bytes)?;
+        parse(output, &bytes)
     }
 
-    /// Step 1: an authorized observation of `source`; returns `signed-observation.bin`.
-    pub fn observe(&mut self, source: Source<'_>) -> Result<PathBuf> {
-        let intent_bin = self.path("intent.bin");
-        let intent_signature = self.path("intent-signature.bin");
-        let challenge_bin = self.path("challenge.bin");
-        let challenge_json = self.path("challenge.json");
-        let signatures_json = self.path("observation-signatures.json");
-        let signatures_bin = self.path("observation-signatures.bin");
-        let signed = self.path("signed-observation.bin");
-        match source {
-            Source::Binary(path) => {
-                let mut input = std::fs::File::open(path).map_err(|e| Error(format!("cannot open {}: {e}", path.display())))?;
-                let length = input.metadata().ok().and_then(|m| usize::try_from(m.len()).ok());
-                durable::create_new_from(&intent_bin, &mut input, length, Perm::Umask, &mut |_| Ok(()))
-                    .map_err(|e| Error(format!("cannot copy {} to {}: {e}", path.display(), intent_bin.display())))?;
-            }
-            Source::Authored { kind, path } => {
-                if intent_bin.exists() {
-                    return Err(Error(format!("refusing to replace {}", intent_bin.display())));
+    /// Step 1: an authorized observation of `source`, kept as `signed-observation.bin`; returns
+    /// that name.
+    pub fn observe(&mut self, source: Source<'_>) -> Result<&'static str> {
+        let intent = match source {
+            Source::Binary(name) => self.attempt.read(name)?.into_owned(),
+            Source::Authored { kind, name } => {
+                if self.attempt.exists("intent.bin") {
+                    return Err(Error(format!("refusing to replace {}", self.attempt.dir().join("intent.bin").display())));
                 }
-                self.host.author(kind, path, &intent_bin)?;
+                let input = self.attempt.read(name)?.into_owned();
+                self.host.author(kind, &input)?
             }
-        }
+        };
+        self.attempt.create("intent.bin", &intent)?;
         // The local consent provider binds the retained intent and current subject to custody
         // before even the observation's first signature is released.
         let key = self.signer.public_key();
-        let intent = self.host.consent_intent(&intent_bin, &key)?;
-        create(&intent_signature, &self.signer.sign(&intent)?)?;
-        self.host.request(Request::Challenge, &[&intent_bin, &intent_signature], &challenge_bin)?;
-        self.host.inspect("challenge", &challenge_bin, &challenge_json)?;
-        let headers = self.host.consent_observation(&intent_bin, &intent_signature, &challenge_bin, &key)?;
-        create_json(&signatures_json, &signature_list(self.signer, &headers)?)?;
-        self.host.signatures(&signatures_json, &signatures_bin)?;
-        self.host.observe_assemble(&challenge_bin, &signatures_bin, &signed)?;
-        Ok(signed)
+        self.host.consent_intent(&intent, &key)?;
+        let signature = self.signer.sign(&intent)?;
+        self.attempt.create("intent-signature.bin", &signature)?;
+        self.host.request(Request::Challenge, self.attempt, &["intent.bin", "intent-signature.bin"], "challenge.bin")?;
+        let challenge = self.attempt.read("challenge.bin")?.into_owned();
+        let presented = self.host.inspect("challenge", &challenge)?;
+        self.attempt.create("challenge.json", &presented)?;
+        let headers = self.host.consent_observation(&intent, &signature, &challenge, &key)?;
+        let list = json_bytes(&signature_list(self.signer, &headers)?)?;
+        self.attempt.create("observation-signatures.json", &list)?;
+        let signatures = self.host.signatures(&list)?;
+        self.attempt.create("observation-signatures.bin", &signatures)?;
+        let signed = self.host.observe_assemble(&challenge, &signatures)?;
+        self.attempt.create("signed-observation.bin", &signed)?;
+        Ok("signed-observation.bin")
     }
 
-    /// Step 2: the operator's plan for `observation`, written to `plan.bin`; returns its path.
-    pub fn prepare(&mut self, observation: &Path) -> Result<PathBuf> {
-        let plan_bin = self.path("plan.bin");
-        self.host.request(Request::Prepare, &[observation], &plan_bin)?;
-        Ok(plan_bin)
+    /// A signed read: the Host's view of the attempt file `observation`, kept as `view.bin`, and
+    /// its presentation by `inspection`, kept as `view.json`.
+    pub fn query(&mut self, observation: &str, inspection: &str) -> Result<Value> {
+        self.host.request(Request::Query, self.attempt, &[observation], "view.bin")?;
+        self.inspect(inspection, "view.bin", "view.json")
     }
 
-    /// Step 3: the local codec's presentation of a plan, written to `plan_json`.
-    pub fn present(&mut self, plan_bin: &Path, plan_json: &Path) -> Result<Value> {
-        self.host.inspect("plan", plan_bin, plan_json)
+    /// Step 2: the operator's plan for `observation`, kept as `plan.bin`; returns its name.
+    pub fn prepare(&mut self, observation: &str) -> Result<&'static str> {
+        self.host.request(Request::Prepare, self.attempt, &[observation], "plan.bin")?;
+        Ok("plan.bin")
+    }
+
+    /// Step 3: the local codec's presentation of a plan, kept as `plan_json`.
+    pub fn present(&mut self, plan_bin: &str, plan_json: &str) -> Result<Value> {
+        self.inspect("plan", plan_bin, plan_json)
     }
 
     /// Step 4: sign the consented headers of `plan_bin` after `release` accepts them, assemble the
-    /// exact call into `call.bin`; returns its path.
-    pub fn seal(&mut self, plan_bin: &Path, release: &mut dyn FnMut(&Sealing<'_>) -> Result<()>) -> Result<PathBuf> {
-        let signatures_bin = self.sign(plan_bin, release)?;
-        let call = self.path("call.bin");
-        self.host.assemble(plan_bin, &signatures_bin, &call)?;
-        Ok(call)
+    /// exact call into `call.bin`; returns its name.
+    pub fn seal(&mut self, plan_bin: &str, release: &mut dyn FnMut(&Sealing<'_>) -> Result<()>) -> Result<&'static str> {
+        let signatures = self.sign(plan_bin, release)?;
+        let plan = self.attempt.read(plan_bin)?.into_owned();
+        let signatures = self.attempt.read(signatures)?.into_owned();
+        let call = self.host.assemble(&plan, &signatures)?;
+        self.attempt.create("call.bin", &call)?;
+        Ok("call.bin")
     }
 
     /// The signing half of [`Flow::seal`]: the consented headers of `plan_bin`, released and
-    /// signed into `transaction-signatures.{json,bin}`; returns the `.bin`. A caller that does not
-    /// assemble a call (a dry run, op 130) stops here.
-    pub fn sign(&mut self, plan_bin: &Path, release: &mut dyn FnMut(&Sealing<'_>) -> Result<()>) -> Result<PathBuf> {
-        let intent_bin = self.path("intent.bin");
-        let signatures_json = self.path("transaction-signatures.json");
-        let signatures_bin = self.path("transaction-signatures.bin");
-        let headers = self.host.consent_plan(&intent_bin, plan_bin, &self.signer.public_key())?;
+    /// signed into `transaction-signatures.{json,bin}`; returns the `.bin` name. A caller that
+    /// does not assemble a call (a dry run, op 130) stops here.
+    pub fn sign(&mut self, plan_bin: &str, release: &mut dyn FnMut(&Sealing<'_>) -> Result<()>) -> Result<&'static str> {
+        let intent = self.attempt.read("intent.bin")?.into_owned();
+        let plan = self.attempt.read(plan_bin)?.into_owned();
+        let headers = self.host.consent_plan(&intent, &plan, &self.signer.public_key())?;
         if headers.is_empty() {
             return Err("consent returned no headers; nothing to sign".into());
         }
-        release(&Sealing { intent_bin: &intent_bin, plan_bin, headers: &headers })?;
-        create_json(&signatures_json, &signature_list(self.signer, &headers)?)?;
-        self.host.signatures(&signatures_json, &signatures_bin)?;
-        Ok(signatures_bin)
+        release(&Sealing { intent: &intent, plan: &plan, headers: &headers })?;
+        let list = json_bytes(&signature_list(self.signer, &headers)?)?;
+        self.attempt.create("transaction-signatures.json", &list)?;
+        let signatures = self.host.signatures(&list)?;
+        self.attempt.create("transaction-signatures.bin", &signatures)?;
+        Ok("transaction-signatures.bin")
     }
 
-    /// Step 5: submit or look up the retained `call.bin`; the answer goes to `outcome_bin` and the
-    /// local codec's presentation of it to `outcome_json`. Returns the presentation and how the
-    /// Host framed it; [`Flow::transmission`] turns both into the attempt's
+    /// Step 5: submit or look up the retained `call.bin`; the answer is kept as `outcome_bin` and
+    /// the local codec's presentation of it as `outcome_json`. Returns the presentation and how
+    /// the Host framed it; [`Flow::transmission`] turns both into the attempt's
     /// [`crate::custody::Transmission`] (a 255 envelope is undecided whatever it decodes to).
-    pub fn transmit(&mut self, request: Request, outcome_bin: &Path, outcome_json: &Path) -> Result<(Value, Answered)> {
+    pub fn transmit(&mut self, request: Request, outcome_bin: &str, outcome_json: &str) -> Result<(Value, Answered)> {
         if !matches!(request, Request::Submit | Request::Lookup) {
             return Err("only an exact call is transmitted".into());
         }
-        let call = self.path("call.bin");
-        let answered = self.host.request(request, &[&call], outcome_bin)?;
-        Ok((self.host.inspect("outcome", outcome_bin, outcome_json)?, answered))
+        let answered = self.host.request(request, self.attempt, &["call.bin"], outcome_bin)?;
+        Ok((self.inspect("outcome", outcome_bin, outcome_json)?, answered))
     }
 
     /// The custody reading of a transmitted answer.
@@ -264,17 +282,11 @@ pub struct Member {
     pub operator: crate::operator::Operator,
 }
 
-fn read(path: &Path) -> Result<Vec<u8>> {
-    crate::fsread::read_regular(path, 0, crate::local::CAP).map_err(|e| Error(e.to_string()))
-}
 
 impl Member {
-    fn codec(&mut self, answer: std::result::Result<Vec<u8>, crate::local::CodecError>, output: &Path) -> Result<Vec<u8>> {
+    fn codec(&mut self, answer: std::result::Result<Vec<u8>, crate::local::CodecError>) -> Result<Vec<u8>> {
         match answer {
-            Ok(body) => {
-                create(output, &body)?;
-                Ok(body)
-            }
+            Ok(body) => Ok(body),
             Err(crate::local::CodecError::Refused { decoded, .. }) => Err(Error(format!("local codec refused: {}",
                 decoded.map_or_else(|| "undecoded".to_owned(), |v| v.to_string())))),
             Err(crate::local::CodecError::Failed(e)) => Err(Error(e)),
@@ -283,56 +295,54 @@ impl Member {
 }
 
 impl Local for Member {
-    fn author(&mut self, kind: &str, input: &Path, output: &Path) -> Result<()> {
-        let answer = self.codec.author(&self.image, &self.settings, kind, &read(input)?);
-        self.codec(answer, output).map(|_| ())
+    fn author(&mut self, kind: &str, input: &[u8]) -> Result<Vec<u8>> {
+        let answer = self.codec.author(&self.image, &self.settings, kind, input);
+        self.codec(answer)
     }
-    fn inspect(&mut self, kind: &str, input: &Path, output: &Path) -> Result<Value> {
-        let answer = self.codec.inspect(&self.image, &self.settings, kind, &read(input)?);
-        let body = self.codec(answer, output)?;
-        serde_json::from_slice(&body).map_err(|e| Error(format!("invalid host JSON {}: {e}", output.display())))
+    fn inspect(&mut self, kind: &str, input: &[u8]) -> Result<Vec<u8>> {
+        let answer = self.codec.inspect(&self.image, &self.settings, kind, input);
+        self.codec(answer)
     }
-    fn signatures(&mut self, json: &Path, output: &Path) -> Result<()> {
-        let answer = self.codec.signatures(&self.image, &self.settings, &read(json)?);
-        self.codec(answer, output).map(|_| ())
+    fn signatures(&mut self, json: &[u8]) -> Result<Vec<u8>> {
+        let answer = self.codec.signatures(&self.image, &self.settings, json);
+        self.codec(answer)
     }
-    fn observe_assemble(&mut self, challenge: &Path, signatures: &Path, output: &Path) -> Result<()> {
-        let answer = self.codec.observe_assemble(&self.image, &self.settings, &read(challenge)?, &read(signatures)?);
-        self.codec(answer, output).map(|_| ())
+    fn observe_assemble(&mut self, challenge: &[u8], signatures: &[u8]) -> Result<Vec<u8>> {
+        let answer = self.codec.observe_assemble(&self.image, &self.settings, challenge, signatures);
+        self.codec(answer)
     }
-    fn assemble(&mut self, plan: &Path, signatures: &Path, output: &Path) -> Result<()> {
-        let answer = self.codec.assemble(&self.image, &self.settings, &read(plan)?, &read(signatures)?);
-        self.codec(answer, output).map(|_| ())
+    fn assemble(&mut self, plan: &[u8], signatures: &[u8]) -> Result<Vec<u8>> {
+        let answer = self.codec.assemble(&self.image, &self.settings, plan, signatures);
+        self.codec(answer)
     }
-    fn consent_intent(&mut self, intent: &Path, key: &[u8]) -> Result<Vec<u8>> {
-        let bytes = read(intent)?;
-        self.consent.intent(&bytes, key, false)?;
-        Ok(bytes)
+    fn consent_intent(&mut self, intent: &[u8], key: &[u8]) -> Result<()> {
+        self.consent.intent(intent, key, false)?;
+        Ok(())
     }
-    fn consent_observation(&mut self, intent: &Path, signature: &Path, challenge: &Path, key: &[u8]) -> Result<Vec<Vec<u8>>> {
-        Ok(self.consent.observation(&read(intent)?, key, &read(signature)?, &read(challenge)?, false)?)
+    fn consent_observation(&mut self, intent: &[u8], signature: &[u8], challenge: &[u8], key: &[u8]) -> Result<Vec<Vec<u8>>> {
+        Ok(self.consent.observation(intent, key, signature, challenge, false)?)
     }
-    fn consent_plan(&mut self, intent: &Path, plan: &Path, key: &[u8]) -> Result<Vec<Vec<u8>>> {
-        Ok(self.consent.plan(&read(intent)?, key, &read(plan)?)?)
+    fn consent_plan(&mut self, intent: &[u8], plan: &[u8], key: &[u8]) -> Result<Vec<Vec<u8>>> {
+        Ok(self.consent.plan(intent, key, plan)?)
     }
 }
 
 impl Operator for Member {
-    fn request(&mut self, request: Request, inputs: &[&Path], output: &Path) -> Result<Answered> {
+    fn request(&mut self, request: Request, attempt: &mut Attempt, inputs: &[&str], output: &str) -> Result<Answered> {
         let payload = match (request, inputs) {
-            (Request::Challenge, [intent, signature]) => crate::local::pair(&read(intent)?, &read(signature)?)?,
-            (Request::Prepare | Request::Submit | Request::Lookup, [input]) => read(input)?,
+            (Request::Challenge, [intent, signature]) => crate::local::pair(&attempt.read(intent)?, &attempt.read(signature)?)?,
+            (Request::Prepare | Request::Submit | Request::Lookup | Request::Query, [input]) => attempt.read(input)?.into_owned(),
             _ => return Err(Error(format!("{} takes other inputs", request.verb()))),
         };
         match self.operator.call(request.operation(), &payload) {
-            Ok(crate::operator::Reply::Answer(body)) => create(output, &body).map(|_| Answered::Answer),
+            Ok(crate::operator::Reply::Answer(body)) => attempt.create(output, &body).map(|_| Answered::Answer),
             // A marker frame is an outcome too: retained for the local codec to decode; its class
             // is the marker's (`Reply::NoRecord` decided, `Reply::Outcome` undecided).
             Ok(crate::operator::Reply::NoRecord(body)) if matches!(request, Request::Submit | Request::Lookup) => {
-                create(output, &body).map(|_| Answered::NoRecord)
+                attempt.create(output, &body).map(|_| Answered::NoRecord)
             }
             Ok(crate::operator::Reply::Outcome(body)) if matches!(request, Request::Submit | Request::Lookup) => {
-                create(output, &body).map(|_| Answered::Outcome)
+                attempt.create(output, &body).map(|_| Answered::Outcome)
             }
             Ok(crate::operator::Reply::NoRecord(body)) => Err(Error(format!("host answered {} with no record; encoded outcome: {}",
                 request.verb(), crate::hex::encode(&body)))),

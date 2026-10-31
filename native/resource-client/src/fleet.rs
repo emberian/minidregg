@@ -143,7 +143,7 @@ pub(crate) fn account(agent: &Agent, name: &str) -> Result<Value> {
 pub(crate) fn observe(agent: &Agent, reference: &Value) -> Result<(Value, Vec<u8>)> {
     let (view, _, signed) =
         workspace::signed_view(&agent.root, &agent.workspace, reference, "resource")?;
-    let bytes = crate::agent_reserve::bounded(&signed, LIMIT)?;
+    let bytes = workspace::attempt_bytes(&signed, "signed-observation.bin", LIMIT)?;
     Ok((view, bytes))
 }
 

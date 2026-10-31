@@ -215,14 +215,16 @@ pub(crate) fn run(
         let catalog_dir = dir.join("catalog-observation");
         crate::create_dir(&catalog_dir)?;
         let catalog_intent = Path::new(text(&r, "catalogIntent")?);
-        let catalog = crate::authorize_observation(
+        let mut catalog_attempt = mini_sdk::attempt::Attempt::disk(&catalog_dir);
+        catalog_attempt.create("intent.json", &fs::read(catalog_intent).map_err(|e| format!("{}: {e}", catalog_intent.display()))?)?;
+        let catalog = catalog_dir.join(crate::authorize_observation(
             host,
             config,
-            catalog_intent,
+            &mut catalog_attempt,
+            "intent.json",
             OsStr::new("intent"),
             &crate::read_secret(writer)?,
-            &catalog_dir,
-        )?;
+        )?);
         let planned_state = dir.join("planned-audience.json");
         crate::write_json_new(&planned_state, &audience)?;
         let checked_path = dir.join("checked-roster.json");
@@ -236,7 +238,7 @@ pub(crate) fn run(
             &[
                 Path::new("object-audience-roster"),
                 &source_observation,
-                &catalog.signed,
+                &catalog,
                 &planned_state,
                 &roster_bin,
                 &checked_path,

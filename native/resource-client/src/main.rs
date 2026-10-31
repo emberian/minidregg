@@ -10,6 +10,7 @@ use std::process::{Command, ExitCode, Output};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
+use mini_sdk::attempt::Attempt;
 
 #[cfg(unix)]
 mod app_interface;
@@ -335,11 +336,10 @@ thread_local! {
 /// Record the signer of an observation about to be made. Only an intent that
 /// names its `subject` in JSON is recorded; a binary intent clears the record,
 /// so an older observation's signer is never blamed for a newer refusal.
-fn note_signer(host: &Path, config: &Path, intent: &Path, intent_kind: &OsStr, signing: &SigningKey) {
+fn note_signer(host: &Path, config: &Path, intent: &[u8], intent_kind: &OsStr, signing: &SigningKey) {
     let subject = (intent_kind != OsStr::new("binary"))
-        .then(|| fs::read(intent).ok())
+        .then(|| serde_json::from_slice::<Value>(intent).ok())
         .flatten()
-        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
         .and_then(|intent| intent.get("subject").and_then(Value::as_str).map(str::to_owned));
     SIGNER.with(|slot| {
         *slot.borrow_mut() = subject.map(|subject| SignerContext {
@@ -1537,20 +1537,9 @@ fn socket_process(
         let path = Path::new(path);
         fsio::read_bounded_or_empty(path, transport::HOST_MAX_FRAME)
     };
-    let pair = |first: Vec<u8>, second: Vec<u8>| -> Result<Vec<u8>> {
-        let length: u32 = first.len().try_into().map_err(|_| "host input too large")?;
-        let mut bytes = length.to_le_bytes().to_vec();
-        bytes.extend(first);
-        bytes.extend(second);
-        Ok(bytes)
-    };
+    let pair = |first: Vec<u8>, second: Vec<u8>| frame_pair(&first, &second);
     let kind_payload = |kind: &OsStr, input: Vec<u8>| -> Result<Vec<u8>> {
-        let kind = kind.to_str().ok_or("host kind must be UTF-8")?.as_bytes();
-        let length: u16 = kind.len().try_into().map_err(|_| "host kind too long")?;
-        let mut bytes = length.to_le_bytes().to_vec();
-        bytes.extend(kind);
-        bytes.extend(input);
-        Ok(bytes)
+        frame_kind(kind.to_str().ok_or("host kind must be UTF-8")?, &input)
     };
     let (operation, payload, destination) = match command {
         "describe" if arguments.len() == 1 => (0, vec![], None),
@@ -1592,15 +1581,7 @@ fn socket_process(
     };
     let reply = session_invoke(host, socket, config, operation, &payload)?;
     if is_outcome_frame(reply[0]) {
-        // Ask the same Host session to decode its own frame (op 8, `inspect
-        // outcome`). A failed decode leaves the decision undecoded; it is
-        // never reconstructed here. The class is the marker's (`is_refusal`).
-        let decoded = kind_payload(OsStr::new("outcome"), reply[1..].to_vec())
-            .and_then(|request| session_invoke(host, socket, config, mini_sdk::host_operations::INSPECT, &request))
-            .ok()
-            .filter(|inspected| inspected.first() == Some(&8))
-            .and_then(|inspected| serde_json::from_slice::<Value>(&inspected[1..]).ok());
-        return Err(host_outcome_frame(command, arguments, &payload, config, &reply, decoded)?);
+        return Err(socket_frame(host, socket, config, command, arguments, &payload, &reply)?);
     }
     if let Some(destination) = destination {
         write_new(Path::new(destination), &reply[1..])?;
@@ -1611,6 +1592,38 @@ fn socket_process(
         stdout: reply[1..].to_vec(),
         stderr: Vec::new(),
     })
+}
+
+/// `u32 LE len(first) ‖ first ‖ second`: a two-input Host frame.
+fn frame_pair(first: &[u8], second: &[u8]) -> Result<Vec<u8>> {
+    let length: u32 = first.len().try_into().map_err(|_| "host input too large")?;
+    let mut bytes = length.to_le_bytes().to_vec();
+    bytes.extend_from_slice(first);
+    bytes.extend_from_slice(second);
+    Ok(bytes)
+}
+
+/// `u16 LE len(kind) ‖ kind ‖ input`: the kind framing of author and inspect.
+fn frame_kind(kind: &str, input: &[u8]) -> Result<Vec<u8>> {
+    let length: u16 = kind.len().try_into().map_err(|_| "host kind too long")?;
+    let mut bytes = length.to_le_bytes().to_vec();
+    bytes.extend_from_slice(kind.as_bytes());
+    bytes.extend_from_slice(input);
+    Ok(bytes)
+}
+
+/// The session's marker frame `reply` to `command`: the same Host session decodes its own frame
+/// (op 8, `inspect outcome`; a failed decode leaves the decision undecoded, never reconstructed
+/// here; the class is the marker's, `is_refusal`), and the decision is noted and retained beside
+/// the request's files `arguments` name. Returns the message the request fails with.
+#[cfg(unix)]
+fn socket_frame(host: &Path, socket: &Path, config: &Path, command: &str, arguments: &[&OsStr], payload: &[u8], reply: &[u8]) -> Result<String> {
+    let decoded = frame_kind("outcome", &reply[1..])
+        .and_then(|request| session_invoke(host, socket, config, mini_sdk::host_operations::INSPECT, &request))
+        .ok()
+        .filter(|inspected| inspected.first() == Some(&8))
+        .and_then(|inspected| serde_json::from_slice::<Value>(&inspected[1..]).ok());
+    host_outcome_frame(command, arguments, payload, config, reply, decoded)
 }
 
 #[cfg(not(unix))]
@@ -1715,6 +1728,12 @@ fn author(host: &Path, config: &Path, kind: &OsStr, input: &Path, output: &Path)
         ],
     )?;
     Ok(())
+}
+
+/// The codec's `kind` presentation of `input`, from bytes to its JSON: one frame, no files.
+pub(crate) fn inspect_bytes(host: &Path, config: &Path, kind: &str, input: &[u8]) -> Result<Value> {
+    let bytes = codec_bytes(host, config, mini_sdk::host_operations::INSPECT, &frame_kind(kind, input)?)?;
+    serde_json::from_slice(&bytes).map_err(|error| format!("invalid host JSON ({kind}): {error}"))
 }
 
 pub(crate) fn inspect(host: &Path, config: &Path, kind: &str, input: &Path, output: &Path) -> Result<Value> {
@@ -1884,10 +1903,14 @@ fn sign_headers(signer: &dyn mini_sdk::signer::Signer, headers: &[Vec<u8>]) -> R
 }
 
 fn write_json_new(path: &Path, value: &Value) -> Result<()> {
-    let mut bytes = serde_json::to_vec_pretty(value)
-        .map_err(|error| format!("cannot render {}: {error}", path.display()))?;
+    write_new(path, &json_file_bytes(value)?)
+}
+
+/// A JSON file's bytes as the client writes them: pretty, one trailing newline.
+fn json_file_bytes(value: &Value) -> Result<Vec<u8>> {
+    let mut bytes = serde_json::to_vec_pretty(value).map_err(|error| format!("cannot render JSON: {error}"))?;
     bytes.push(b'\n');
-    write_new(path, &bytes)
+    Ok(bytes)
 }
 
 fn print_json(value: &Value) -> Result<()> {
@@ -1944,6 +1967,11 @@ fn encode_signatures(
 }
 
 fn write_manifest(directory: &Path, host: &Path, config: &Path, operation: &str) -> Result<()> {
+    write_json_new(&directory.join("attempt.json"), &attempt_manifest(host, config, operation)?)
+}
+
+/// An attempt's `attempt.json`: how it was run (the retained config, the Host, the transport).
+fn attempt_manifest(host: &Path, config: &Path, operation: &str) -> Result<Value> {
     let config = absolute(config)?;
     let mut manifest = json!({
         "format": "minidregg-resource-client-attempt-v1",
@@ -1965,7 +1993,7 @@ fn write_manifest(directory: &Path, host: &Path, config: &Path, operation: &str)
     if let Some(pins) = client_consent::configured_record()? {
         manifest["localConsent"] = pins;
     }
-    write_json_new(&directory.join("attempt.json"), &manifest)
+    Ok(manifest)
 }
 
 /// Select a private SSH transport credential without changing shared ssh config.
@@ -1996,52 +2024,88 @@ fn pin_remote_host(sha: &str) -> Result<()> {
     }
 }
 
-struct Observed {
-    signed: PathBuf,
-}
-
 /// The CLI's side of `mini_sdk::flow`: this process's codec child and consent provider
-/// (`client_consent`) and its transport (`process`: the pinned socket session, or a one-shot
-/// local Host). The order of steps, the signed bytes and the attempt layout are the SDK's.
+/// (`client_consent`) and its transport (the pinned socket session, or a one-shot local Host). The
+/// order of steps, the signed bytes and the attempt layout are the SDK's. `dir` is the attempt's
+/// directory, where thin consent keeps what it showed.
 pub(crate) struct CliHost<'a> {
     pub(crate) host: &'a Path,
     pub(crate) config: &'a Path,
+    pub(crate) dir: &'a Path,
+}
+
+/// A pure codec verb's answer: one frame to this process's codec session.
+fn codec_bytes(host: &Path, config: &Path, operation: u8, payload: &[u8]) -> Result<Vec<u8>> {
+    let frame = client_consent::codec_frame(host, config, operation, payload)?;
+    Ok(frame[1..].to_vec())
 }
 
 impl mini_sdk::flow::Local for CliHost<'_> {
-    fn author(&mut self, kind: &str, input: &Path, output: &Path) -> mini_sdk::Result<()> {
-        Ok(author(self.host, self.config, OsStr::new(kind), input, output)?)
+    fn author(&mut self, kind: &str, input: &[u8]) -> mini_sdk::Result<Vec<u8>> {
+        Ok(codec_bytes(self.host, self.config, mini_sdk::host_operations::AUTHOR, &frame_kind(kind, input)?)?)
     }
-    fn inspect(&mut self, kind: &str, input: &Path, output: &Path) -> mini_sdk::Result<Value> {
-        Ok(inspect(self.host, self.config, kind, input, output)?)
+    fn inspect(&mut self, kind: &str, input: &[u8]) -> mini_sdk::Result<Vec<u8>> {
+        Ok(codec_bytes(self.host, self.config, mini_sdk::host_operations::INSPECT, &frame_kind(kind, input)?)?)
     }
-    fn signatures(&mut self, json: &Path, output: &Path) -> mini_sdk::Result<()> {
-        Ok(host_files(self.host, self.config, &[Path::new("signatures"), json, output])?)
+    fn signatures(&mut self, json: &[u8]) -> mini_sdk::Result<Vec<u8>> {
+        Ok(codec_bytes(self.host, self.config, mini_sdk::host_operations::SIGNATURES, json)?)
     }
-    fn observe_assemble(&mut self, challenge: &Path, signatures: &Path, output: &Path) -> mini_sdk::Result<()> {
-        Ok(host_files(self.host, self.config, &[Path::new("observe-assemble"), challenge, signatures, output])?)
+    fn observe_assemble(&mut self, challenge: &[u8], signatures: &[u8]) -> mini_sdk::Result<Vec<u8>> {
+        Ok(codec_bytes(self.host, self.config, mini_sdk::host_operations::OBSERVATION_ASSEMBLE, &frame_pair(challenge, signatures)?)?)
     }
-    fn assemble(&mut self, plan: &Path, signatures: &Path, output: &Path) -> mini_sdk::Result<()> {
-        Ok(host_files(self.host, self.config, &[Path::new("assemble"), plan, signatures, output])?)
+    fn assemble(&mut self, plan: &[u8], signatures: &[u8]) -> mini_sdk::Result<Vec<u8>> {
+        Ok(codec_bytes(self.host, self.config, mini_sdk::host_operations::CALL_ASSEMBLE, &frame_pair(plan, signatures)?)?)
     }
-    fn consent_intent(&mut self, intent: &Path, key: &[u8]) -> mini_sdk::Result<Vec<u8>> {
+    fn consent_intent(&mut self, intent: &[u8], key: &[u8]) -> mini_sdk::Result<()> {
         Ok(client_consent::intent(self.host, self.config, intent, key)?)
     }
-    fn consent_observation(&mut self, intent: &Path, signature: &Path, challenge: &Path, key: &[u8]) -> mini_sdk::Result<Vec<Vec<u8>>> {
+    fn consent_observation(&mut self, intent: &[u8], signature: &[u8], challenge: &[u8], key: &[u8]) -> mini_sdk::Result<Vec<Vec<u8>>> {
         Ok(client_consent::observation(self.host, self.config, intent, signature, challenge, key)?)
     }
-    fn consent_plan(&mut self, intent: &Path, plan: &Path, key: &[u8]) -> mini_sdk::Result<Vec<Vec<u8>>> {
-        Ok(client_consent::plan(self.host, self.config, intent, plan, key)?)
+    fn consent_plan(&mut self, intent: &[u8], plan: &[u8], key: &[u8]) -> mini_sdk::Result<Vec<Vec<u8>>> {
+        Ok(client_consent::plan(self.host, self.config, intent, plan, key, self.dir)?)
     }
 }
 
 impl mini_sdk::flow::Operator for CliHost<'_> {
-    /// The transport turns a marker frame into an error it has already classified and noted
-    /// (`socket_process`, `HostDecision::is_refusal`), so what comes back here is an answer.
-    fn request(&mut self, request: mini_sdk::flow::Request, inputs: &[&Path], output: &Path) -> mini_sdk::Result<mini_sdk::flow::Answered> {
+    /// Over the pinned socket the request is bytes in and bytes out, and the attempt's files
+    /// reach its directory only when the Host answers with a marker frame (retained beside them,
+    /// `socket_frame`). A one-shot Host reads and writes the files themselves. Either transport
+    /// turns a marker frame into an error it has already classified and noted
+    /// (`HostDecision::is_refusal`), so what comes back here is an answer.
+    fn request(&mut self, request: mini_sdk::flow::Request, attempt: &mut mini_sdk::attempt::Attempt, inputs: &[&str], output: &str) -> mini_sdk::Result<mini_sdk::flow::Answered> {
+        #[cfg(unix)]
+        if let Some(socket) = SOCKET.get() {
+            let payload = match inputs {
+                [one] => attempt.read(one)?.into_owned(),
+                [first, second] => frame_pair(&attempt.read(first)?, &attempt.read(second)?)?,
+                _ => return Err(format!("{} takes one or two inputs", request.verb()).into()),
+            };
+            let reply = session_invoke(self.host, socket, self.config, request.operation(), &payload)?;
+            if is_outcome_frame(reply[0]) {
+                attempt.materialize()?;
+                let mut paths = Vec::new();
+                for input in inputs {
+                    paths.push(attempt.path(input)?.into_os_string());
+                }
+                paths.push(attempt.output(output)?.into_os_string());
+                let mut arguments = vec![OsStr::new(request.verb())];
+                arguments.extend(paths.iter().map(|p| p.as_os_str()));
+                // The refusal is retained against the attempt's own copy of the settings, as the
+                // read was made with (a read's ops use the pinned path, whose bytes it copied).
+                let config = if attempt.exists("config.json") { attempt.path("config.json")? } else { self.config.to_owned() };
+                return Err(socket_frame(self.host, socket, &config, request.verb(), &arguments, &payload, &reply)?.into());
+            }
+            attempt.create(output, &reply[1..])?;
+            return Ok(mini_sdk::flow::Answered::Answer);
+        }
+        let mut paths = Vec::new();
+        for input in inputs {
+            paths.push(attempt.path(input)?);
+        }
+        paths.push(attempt.output(output)?);
         let mut arguments = vec![Path::new(request.verb())];
-        arguments.extend_from_slice(inputs);
-        arguments.push(output);
+        arguments.extend(paths.iter().map(PathBuf::as_path));
         host_files(self.host, self.config, &arguments)?;
         Ok(mini_sdk::flow::Answered::Answer)
     }
@@ -2053,23 +2117,25 @@ fn command_release(_: &mini_sdk::flow::Sealing<'_>) -> mini_sdk::Result<()> {
     Ok(())
 }
 
+/// Step 1 of the flow over `attempt`, whose file `intent` is the intent source of `intent_kind`
+/// (`binary`: canonical bytes); returns the name of the signed observation.
 fn authorize_observation(
     host: &Path,
     config: &Path,
-    intent: &Path,
+    attempt: &mut Attempt,
+    intent: &str,
     intent_kind: &OsStr,
     signing: &SigningKey,
-    directory: &Path,
-) -> Result<Observed> {
-    note_signer(host, config, intent, intent_kind, signing);
+) -> Result<&'static str> {
+    note_signer(host, config, &attempt.read(intent)?, intent_kind, signing);
     let source = if intent_kind == OsStr::new("binary") {
         mini_sdk::flow::Source::Binary(intent)
     } else {
-        mini_sdk::flow::Source::Authored { kind: intent_kind.to_str().ok_or("intent kind must be UTF-8")?, path: intent }
+        mini_sdk::flow::Source::Authored { kind: intent_kind.to_str().ok_or("intent kind must be UTF-8")?, name: intent }
     };
-    let mut cli = CliHost { host, config };
-    let signed = mini_sdk::flow::Flow { dir: directory, host: &mut cli, signer: signing }.observe(source)?;
-    Ok(Observed { signed })
+    let dir = attempt.dir().to_owned();
+    let mut cli = CliHost { host, config, dir: &dir };
+    Ok(mini_sdk::flow::Flow { attempt, host: &mut cli, signer: signing }.observe(source)?)
 }
 
 /// Observe, prepare, sign, assemble and (unless `prepare_only`) submit one
@@ -2140,36 +2206,30 @@ fn submit_once(
     copy_new(config, &retained_config)?;
     write_manifest(directory, host, &retained_config, "submit")?;
     let signing = read_secret(key)?;
-    let observed = authorize_observation(
-        host,
-        &retained_config,
-        &retained_intent,
-        intent_kind,
-        &signing,
-        directory,
-    )?;
-    let mut cli = CliHost { host, config: &retained_config };
-    let mut flow = mini_sdk::flow::Flow { dir: directory, host: &mut cli, signer: &signing };
-    let plan_bin = flow.prepare(&observed.signed)?;
-    let plan_json = directory.join("plan.json");
+    let mut attempt = Attempt::disk(directory);
+    let intent_name = retained_name(intent_kind);
+    let observed = authorize_observation(host, &retained_config, &mut attempt, intent_name, intent_kind, &signing)?;
+    let mut cli = CliHost { host, config: &retained_config, dir: directory };
+    let mut flow = mini_sdk::flow::Flow { attempt: &mut attempt, host: &mut cli, signer: &signing };
+    let plan_bin = flow.prepare(observed)?;
+    let plan_json = "plan.json";
     let (prepared_bin, prepared_json) = if provider_continuity.is_some() {
         // Preserve the existing plan.bin prepare-refusal contract. Only a
         // successful prepare becomes the immutable original guarded plan.
-        let (original_bin, original_json) = (directory.join("original-plan.bin"), directory.join("original-plan.json"));
-        fs::hard_link(&plan_bin, &original_bin)
+        fs::hard_link(directory.join(plan_bin), directory.join("original-plan.bin"))
             .map_err(|e| format!("cannot retain original continuity plan: {e}"))?;
-        fs::remove_file(&plan_bin)
+        fs::remove_file(directory.join(plan_bin))
             .map_err(|e| format!("cannot move original continuity plan: {e}"))?;
-        (original_bin, original_json)
+        ("original-plan.bin", "original-plan.json")
     } else {
-        (plan_bin.clone(), plan_json.clone())
+        (plan_bin, plan_json)
     };
-    let presentation = flow.present(&prepared_bin, &prepared_json)?;
+    let presentation = flow.present(prepared_bin, prepared_json)?;
     #[cfg(unix)]
     if let Some(descriptor) = provider_continuity {
         if let Err(error) = provider_continuity::guard(
             host, &retained_config, descriptor, directory,
-            &prepared_bin, &presentation, &plan_bin, &plan_json,
+            &directory.join(prepared_bin), &presentation, &directory.join(plan_bin), &directory.join(plan_json),
         ) {
             let retained = provider_continuity::retain_rejection(directory, &retained_intent);
             // This return is the positive control-flow guarantee recorded
@@ -2185,15 +2245,11 @@ fn submit_once(
         let _ = presentation;
         return Err("provider continuity requires Unix sockets".into());
     }
-    flow.seal(&plan_bin, &mut command_release)?;
+    flow.seal(plan_bin, &mut command_release)?;
     if prepare_only {
         return Ok(());
     }
-    let (outcome, _answered) = flow.transmit(
-        mini_sdk::flow::Request::Submit,
-        &directory.join("outcome.bin"),
-        &directory.join("outcome.json"),
-    )?;
+    let (outcome, _answered) = flow.transmit(mini_sdk::flow::Request::Submit, "outcome.bin", "outcome.json")?;
     #[cfg(unix)]
     receipt_continuity::finish_attempt(continuity, &outcome, false)?;
     confirmed_outcome(&outcome, emit_outcome)
@@ -2261,33 +2317,30 @@ pub(crate) fn dry_run(
     write_manifest(directory, host, &retained_config, "dry-run")?;
     let signing = read_secret(key)?;
     take_host_decision();
-    let observed = match host_decided_keeping(authorize_observation(
-        host,
-        &retained_config,
-        &retained_intent,
-        intent_kind,
-        &signing,
-        directory,
-    ), &directory.join("refusal.frame"))? {
+    let mut attempt = Attempt::disk(directory);
+    let observed = match host_decided_keeping(
+        authorize_observation(host, &retained_config, &mut attempt, retained_name(intent_kind), intent_kind, &signing),
+        &directory.join("refusal.frame"),
+    )? {
         Ok(observed) => observed,
         Err(line) => return Ok(Some(line)),
     };
-    let mut cli = CliHost { host, config: &retained_config };
-    let mut flow = mini_sdk::flow::Flow { dir: directory, host: &mut cli, signer: &signing };
-    let plan_bin = match host_decided_keeping(flow.prepare(&observed.signed).map_err(String::from),
+    let mut cli = CliHost { host, config: &retained_config, dir: directory };
+    let mut flow = mini_sdk::flow::Flow { attempt: &mut attempt, host: &mut cli, signer: &signing };
+    let plan_bin = match host_decided_keeping(flow.prepare(observed).map_err(String::from),
         &directory.join("refusal.frame"))? {
         Ok(plan_bin) => plan_bin,
         Err(line) => return Ok(Some(line)),
     };
-    flow.present(&plan_bin, &directory.join("plan.json"))?;
-    let signatures_bin = flow.sign(&plan_bin, &mut command_release)?;
+    flow.present(plan_bin, "plan.json")?;
+    let signatures_bin = flow.sign(plan_bin, &mut command_release)?;
     match host_decided_keeping(host_files(
         host,
         &retained_config,
         &[
             Path::new("dry-run"),
-            &observed.signed,
-            &signatures_bin,
+            &directory.join(observed),
+            &directory.join(signatures_bin),
             &directory.join("dry-run-plan.bin"),
         ],
     ), &directory.join("refusal.frame"))? {
@@ -2337,18 +2390,24 @@ fn query_presentation_kind(view: &str, presentation: Option<&str>) -> Result<Str
     }
 }
 
-/// One signed read. A Host `stale-root` between the challenge and the query
-/// observes again (`replan`); a read commits nothing.
+/// The attempt file an intent source of `intent_kind` is kept as.
+fn retained_name(intent_kind: &OsStr) -> &'static str {
+    if intent_kind == OsStr::new("binary") { "intent-source.bin" } else { "intent.json" }
+}
+
+/// One signed read of the intent source `intent`, its working files in `directory`'s attempt
+/// (`mini_sdk::attempt::Attempt::memory`: they reach the directory only when the read fails). A
+/// Host `stale-root` between the challenge and the query observes again (`replan`); a read
+/// commits nothing. Returns the presentation and the attempt.
 fn query_retained(
     host: &Path,
     config: &Path,
-    intent: &Path,
+    intent: &[u8],
     intent_kind: &OsStr,
     key: &Path,
     inspection_kind: &str,
     directory: &Path,
-) -> Result<Value> {
-    create_dir(directory)?;
+) -> Result<(Value, Attempt)> {
     replan::replan(
         "signed read",
         || query_once(host, config, intent, intent_kind, key, inspection_kind, directory),
@@ -2360,47 +2419,36 @@ fn query_retained(
 fn query_once(
     host: &Path,
     config: &Path,
-    intent: &Path,
+    intent: &[u8],
     intent_kind: &OsStr,
     key: &Path,
     inspection_kind: &str,
     directory: &Path,
-) -> Result<Value> {
-    let retained_intent = directory.join(if intent_kind == OsStr::new("binary") {
-        "intent-source.bin"
-    } else {
-        "intent.json"
-    });
-    copy_new(intent, &retained_intent)?;
-    workspace::index_retained_intent(directory, &fs::read(&retained_intent).map_err(|e| e.to_string())?)?;
-    let retained_config = directory.join("config.json");
-    copy_new(config, &retained_config)?;
-    write_manifest(directory, host, &retained_config, "query")?;
-    let signing = read_secret(key)?;
-    let observed = authorize_observation(
-        host,
-        &retained_config,
-        &retained_intent,
-        intent_kind,
-        &signing,
-        directory,
-    )?;
-    let view_bin = directory.join("view.bin");
-    let view_json = directory.join("view.json");
-    host_files(
-        host,
-        &retained_config,
-        &[Path::new("query"), &observed.signed, &view_bin],
-    )?;
-    let presented = inspect(
-        host,
-        &retained_config,
-        inspection_kind,
-        &view_bin,
-        &view_json,
-    )?;
-    let presented = verify_query_presentation(presented, inspection_kind)?;
-    Ok(presented)
+) -> Result<(Value, Attempt)> {
+    let mut attempt = Attempt::memory(directory);
+    let read = (|| -> Result<Value> {
+        let retained = retained_name(intent_kind);
+        attempt.create(retained, intent)?;
+        workspace::index_retained_intent(directory, intent)?;
+        attempt.create("config.json", &fsio::read_bounded_or_empty(config, transport::HOST_MAX_FRAME)?)?;
+        let manifest = attempt_manifest(host, &directory.join("config.json"), "query")?;
+        attempt.create("attempt.json", &json_file_bytes(&manifest)?)?;
+        let signing = read_secret(key)?;
+        let observed = authorize_observation(host, config, &mut attempt, retained, intent_kind, &signing)?;
+        let mut cli = CliHost { host, config, dir: directory };
+        let presented = mini_sdk::flow::Flow { attempt: &mut attempt, host: &mut cli, signer: &signing }
+            .query(observed, inspection_kind)?;
+        verify_query_presentation(presented, inspection_kind)
+    })();
+    match read {
+        Ok(value) => Ok((value, attempt)),
+        Err(error) => {
+            // A failed read is evidence: its files go to its directory, where a refusal's record
+            // already sits beside them and `read_scratch::keep` finds them.
+            let _ = attempt.materialize();
+            Err(error)
+        }
+    }
 }
 
 fn verify_query_presentation(presented: Value, inspection_kind: &str) -> Result<Value> {
@@ -2496,7 +2544,8 @@ fn query_batch_once(
         copy_new(intent, &source)?;
         let binary = child.join("intent.bin");
         author(host, &retained_config, OsStr::new("intent"), &source, &binary)?;
-        let bytes = client_consent::intent(host, &retained_config, &binary, signing.verifying_key().as_bytes())?;
+        let bytes = fs::read(&binary).map_err(|e| format!("cannot read {}: {e}", binary.display()))?;
+        client_consent::intent(host, &retained_config, &bytes, signing.verifying_key().as_bytes())?;
         let signature = signing.sign(&bytes).to_bytes();
         write_new(&child.join("intent-signature.bin"), &signature)?;
         let width: u32 = bytes.len().try_into().map_err(|_| "batch intent too large")?;
@@ -2529,8 +2578,10 @@ fn query_batch_once(
             }
         }
         encode_signatures(host, &retained_config, &signing,
-            client_consent::observation(host, &retained_config, &child.join("intent.bin"),
-                &child.join("intent-signature.bin"), &binary, signing.verifying_key().as_bytes())?, &child.join("observation-signatures.json"),
+            client_consent::observation(host, &retained_config,
+                &fs::read(child.join("intent.bin")).map_err(|e| e.to_string())?,
+                &fs::read(child.join("intent-signature.bin")).map_err(|e| e.to_string())?,
+                challenge, signing.verifying_key().as_bytes())?, &child.join("observation-signatures.json"),
             &child.join("observation-signatures.bin"))?;
         let signed = child.join("signed-observation.bin");
         host_files(host, &retained_config, &[Path::new("observe-assemble"), &binary,
@@ -2565,15 +2616,12 @@ fn query(
     inspection_kind: &str,
     directory: &Path,
 ) -> Result<()> {
-    print_json(&query_retained(
-        host,
-        config,
-        intent,
-        intent_kind,
-        key,
-        inspection_kind,
-        directory,
-    )?)
+    let intent = fs::read(intent).map_err(|e| format!("cannot read {}: {e}", intent.display()))?;
+    create_dir(directory)?;
+    let (value, mut attempt) = query_retained(host, config, &intent, intent_kind, key, inspection_kind, directory)?;
+    // `mini query --dir` keeps its attempt: the directory is what the caller asked for.
+    attempt.materialize()?;
+    print_json(&value)
 }
 
 fn manifest_paths(directory: &Path) -> Result<(PathBuf, PathBuf, Option<PathBuf>)> {

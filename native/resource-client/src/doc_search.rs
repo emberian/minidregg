@@ -50,20 +50,12 @@ pub(crate) fn direct(
     reference: &Value,
 ) -> Result<(Value, Value, Rendered, usize)> {
     let (view, challenge, signed) = signed_view(root, workspace, reference, "resource")?;
-    let bin = fs::read(signed.with_file_name("view.bin")).map_err(|e| e.to_string())?;
-    let (attempt, _) = crate::read_scratch::attempt(root)?;
-    make_private_dir(&attempt)?;
-    let input = attempt.join("search-document-in.json");
-    create_private(
-        &input,
-        &serde_json::to_vec(&json!({"host":hex(&bin),"sources":[]})).map_err(|e| e.to_string())?,
-    )?;
-    let document = inspect(
+    let bin = signed.read("view.bin")?.into_owned();
+    let document = crate::inspect_bytes(
         &workspace_host(workspace)?,
         &member_path(workspace, "config")?,
         "view-document",
-        &input,
-        &attempt.join("search-document.json"),
+        &serde_json::to_vec(&json!({"host":hex(&bin),"sources":[]})).map_err(|e| e.to_string())?,
     )?;
     let display = opened_entries(root, workspace, reference, &view)?;
     let rendered = crate::render::render(&crate::render::View {

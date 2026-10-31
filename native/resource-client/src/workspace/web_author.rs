@@ -41,7 +41,7 @@ pub(crate) fn open(root: &Path, workspace: &Value, name: &str) -> Result<Edit> {
     validate_name(name)?;
     let (read, rendered) = read_rendered(root, workspace, name, None)?;
     content_page(&read.view, name)?;
-    let challenge = bounded_json(&read.attempt.join("challenge.json"))?;
+    let challenge = read.challenge.clone();
     let seen = seen_read_value(name, &read, &challenge);
     let text = String::from_utf8(pull_text(&seen)?).map_err(|_| {
         "this document contains non-UTF-8 text; use the byte-preserving CLI editor".to_owned()

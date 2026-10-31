@@ -741,12 +741,14 @@ pub(crate) fn signed_read(
     let path = |k| member_path(ws, k).map_err(error);
     let (host, config, key) = (path("host")?, path("config")?, path("key")?);
     // One signed read: `query_retained` re-signs a stale challenge itself (`replan.rs`).
-    let source = folder.join(format!("q-{nonce}.json"));
-    create_private(&source, &serde_json::to_vec(&intent).expect("JSON")).map_err(error)?;
     let dir = folder.join(format!("{label}.{nonce}"));
     let _ = crate::take_host_decision();
-    let result = crate::query_retained(&host, &config, &source, OsStr::new("intent"), &key, &format!("view-{view}"), &dir);
-    let _ = fs::remove_file(&source);
+    let result = crate::query_retained(&host, &config, &serde_json::to_vec(&intent).expect("JSON"), OsStr::new("intent"),
+        &key, &format!("view-{view}"), &dir)
+        .and_then(|(value, mut files)| {
+            files.materialize()?;
+            Ok(value)
+        });
     let ending = match &result {
         Ok(_) => None,
         Err(_) => crate::take_host_decision().as_ref().and_then(crate::host_ending),

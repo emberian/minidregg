@@ -631,8 +631,8 @@ pub(crate) fn signed_factory_observation(
         &input.directory.join("query.json"),
         &input.directory.join("query.bin"),
     )?;
-    let query_bytes = crate::client_consent::intent(input.host, input.config,
-        &input.directory.join("query.bin"), signing.verifying_key().as_bytes())?;
+    let query_bytes = fs::read(input.directory.join("query.bin")).map_err(|e| format!("cannot read enrollment intent: {e}"))?;
+    crate::client_consent::intent(input.host, input.config, &query_bytes, signing.verifying_key().as_bytes())?;
     let observation = input.directory.join("observation");
     match fs::DirBuilder::new().mode(0o700).create(&observation) {
         Ok(()) => (),
@@ -667,9 +667,9 @@ pub(crate) fn signed_factory_observation(
         &observation.join("challenge.bin"),
         &observation.join("challenge.json"),
     )?;
+    let challenge_bin = fs::read(observation.join("challenge.bin")).map_err(|e| format!("cannot read enrollment challenge: {e}"))?;
     let headers = crate::client_consent::observation(input.host, input.config,
-        &input.directory.join("query.bin"), &intent_signature_path,
-        &observation.join("challenge.bin"), signing.verifying_key().as_bytes())?;
+        &query_bytes, &intent_signature, &challenge_bin, signing.verifying_key().as_bytes())?;
     if headers.is_empty() {
         return Err("factory observation has no signing header".into());
     }

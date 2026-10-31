@@ -648,7 +648,7 @@ pub(crate) fn capture(root: &Path, workspace: &Value, binding: &Value, id: &str)
         signed_view(root, workspace, &refs["package"], "resource")?;
     let (task, task_challenge, _) = signed_view(root, workspace, &refs["task"], "resource")?;
     let read = rendered_document(root, workspace, member(binding, "document")?, None, None)?;
-    let challenge = bounded_json(&read.attempt.join("challenge.json"))?;
+    let challenge = read.challenge.clone();
     let seen = seen_read_value(member(binding, "document")?, &read, &challenge);
     // Refuse an unsupported document before making the physical app request.
     let _ = pull_text(&seen)?;
@@ -883,7 +883,7 @@ pub(crate) fn rebase(root: &Path, workspace: &Value, id: &str, next: &str) -> Re
     }
     let name = member(&v["binding"], "document")?;
     let read = rendered_document(root, workspace, name, None, None)?;
-    let challenge = bounded_json(&read.attempt.join("challenge.json"))?;
+    let challenge = read.challenge.clone();
     v["seen"] = seen_read_value(name, &read, &challenge);
     v["rebasedFrom"] = json!(id);
     let _ = push_actions(&v["seen"], &draft(&v)?)?;
