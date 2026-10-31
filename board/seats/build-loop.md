@@ -38,7 +38,11 @@ box; seam 1 (codec tags) landed; the hot-swap command; keep making the Lean buil
 - The shared packages are read-only; lake replays write missing .hash files, so the pool once refused six Mathlib
   replays (EACCES). Fixed 19:57 by one writable `lake build Mathlib ...` over the shared copy, then re-locked
   (~/mlhash.sh): run it again after any package re-seed.
-- hbox b9450147f candidate: copying to /srv/integ/candidates/b9450147f571b6e3f9dffd6ed649024137ad8a0a (the hbox uplink is slow, ~100 KB/s); not usable until this row says it is complete.
+- Candidate transfers: only by `scripts/pipeline/candidate-transfer SRC_HOST:DIR DST_HOST:DIR NAME` (a97b13c4a). It copies
+  into DST/.incoming-NAME, verifies SHA256SUMS (and fixtures/, and READY) on the destination, then renames into place, so
+  no reader of candidates/ ever sees a partial candidate. Never copy into candidates/NAME directly.
+- hbox b9450147f candidate: transferring that way (from the Mac, PID file in the build-loop scratchpad cand-copy.pid; hbox
+  uplink ~100 KB/s). It exists in /srv/integ/candidates only once complete and verified.
 
 ### The builder
 - `scripts/pipeline/builder`: per new main tip, `scripts/pipeline/integ-build` (now in the repo: rust-check, host,
