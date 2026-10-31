@@ -275,6 +275,10 @@ done); logs go to `/ci/hpc` (never `/home/hbox/lanes/hpc`, which was cleared); p
      instead of `Multiset.dedup`, by `@[csimp]` lemmas so that no statement moves. Then the
      observation path's projection (`ResourceObservationAdmission.projectWith`) gets the same
      `demand`.
+   - Owed in the same batch as the `participantSlots` change (integrator's audit): the deployed
+     projection is built from `p.reads` and its equality to `(full s).restrict keys` is fed to
+     `eval_restrict_of_sub`, so the fix is verified, not merely licensed. Never restrict ahead
+     of a discharging oracle (`Pred.Leaf.leafWith` with a real oracle); add its read set.
    - Measure with `scripts/perf/flatness-bench.py` and profile with `perf record --call-graph
      dwarf` plus `--symfs` (the Host runs from a memfd; see `/ci/hpc/fby/run.sh`).
 2. **Row 4 slice 2 and row 11, one format change** (one epoch bump with private cells,
