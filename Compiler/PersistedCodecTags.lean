@@ -1,8 +1,12 @@
-/- Persisted receiving identities and domain-separation labels. The manifest
-contributes to the Store epoch; implementation definition bodies do not. -/
+/- The census of persisted receiving identities and domain-separation labels: every
+identity no other module names (those live in `Compiler.PersistedCodecTags.Core`). The
+manifest, over both files, contributes to the Store epoch; implementation definition bodies
+do not. Only `Compiler.DurableCheckpointCodec` imports this file, privately, and reads it
+only in the unexposed body of `persistedCodecCorpus`, so an edit here changes no public
+interface beyond this file. -/
 module
 
-public import Compiler.PersistedCodecTagRegistry
+public import Compiler.PersistedCodecTags.Core
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr
@@ -24,7 +28,6 @@ meta import Compiler.PersistedCodecTagRegistry
 
 namespace Minidregg.Compiler.PersistedCodecTags
 
-@[persisted_codec_tag] abbrev clockWireVersion : Nat := 6
 
 @[persisted_codec_tag] abbrev certify_signed_v1 : String := "DREGG/CERTIFY/SIGNED/v2"
 @[persisted_codec_tag] abbrev resource_birth_commit_v1 : String := "DREGG.RESOURCE.BIRTH.COMMIT/v1"
@@ -52,7 +55,6 @@ namespace Minidregg.Compiler.PersistedCodecTags
 @[persisted_codec_tag] abbrev application_retry_create_completion_event_v4 : String := "DREGG/APPLICATION/RETRY-CREATE-COMPLETION-EVENT/v4"
 @[persisted_codec_tag] abbrev application_share_issue_event_v2 : String := "DREGG/APPLICATION/SHARE-ISSUE-EVENT/v2"
 @[persisted_codec_tag] abbrev pay_refill_v1 : String := "DREGG/PAY/REFILL/v1"
-@[persisted_codec_tag] abbrev world_root_v2 : String := "DREGG.WORLD-ROOT/v3"
 @[persisted_codec_tag] abbrev application_first_start_attempt_bytes_v1 : String := "DREGG/APPLICATION/FIRST-START-ATTEMPT-BYTES/v1"
 @[persisted_codec_tag] abbrev seat_instance_v1 : String := "DREGG/SEAT/INSTANCE/v1"
 @[persisted_codec_tag] abbrev channel_epoch_sig_v1 : String := "DREGG.CHANNEL.EPOCH-SIG/v1"
@@ -150,7 +152,6 @@ namespace Minidregg.Compiler.PersistedCodecTags
 @[persisted_codec_tag] abbrev seat_invitation_id_v1 : String := "DREGG/SEAT/INVITATION-ID/v1"
 @[persisted_codec_tag] abbrev application_retry_create_claim_event_v4 : String := "DREGG/APPLICATION/RETRY-CREATE-CLAIM-EVENT/v4"
 @[persisted_codec_tag] abbrev objective_activity_tx_publish_v1 : String := "DREGG/OBJECTIVE/ACTIVITY/TX/PUBLISH/v1"
-@[persisted_codec_tag] abbrev registry_loaded_and_final_store_cells_v17 : String := "DREGG.REGISTRY.LOADED-AND-FINAL.STORE-CELLS/v18"
 @[persisted_codec_tag] abbrev pay_self_enrol_args_v1 : String := "DREGG.PAY.SELF-ENROL.ARGS/v1"
 @[persisted_codec_tag] abbrev objective_activity_signed_v2 : String := "DREGG/OBJECTIVE/ACTIVITY/SIGNED/v2"
 @[persisted_codec_tag] abbrev objective_call_grant_args_v1 : String := "DREGG/OBJECTIVE/CALL/GRANT-ARGS/v1"
@@ -184,7 +185,6 @@ namespace Minidregg.Compiler.PersistedCodecTags
 @[persisted_codec_tag] abbrev fn_selective_release_key_v2 : String := "DREGG/FN/SELECTIVE-RELEASE-KEY/v2"
 @[persisted_codec_tag] abbrev participant_factory_observe : String := "DREGG/PARTICIPANT/FACTORY-OBSERVE/"
 @[persisted_codec_tag] abbrev application_dispatch_request_bind_v2 : String := "DREGG/APPLICATION/DISPATCH-REQUEST-BIND/v2"
-@[persisted_codec_tag] abbrev durable_checkpoint_byte_v4 : List UInt8 := "DREGG.DURABLE.CHECKPOINT".toUTF8.toList ++ [5]
 @[persisted_codec_tag] abbrev pay_self_enrol_subject_v1 : String := "DREGG.PAY.SELF-ENROL.SUBJECT/v1"
 @[persisted_codec_tag] abbrev fn_selective_ingress_v3 : String := "DREGG/FN/SELECTIVE-INGRESS/v3"
 @[persisted_codec_tag] abbrev well_signed_v1 : String := "DREGG/WELL/SIGNED/v1"
@@ -198,9 +198,7 @@ namespace Minidregg.Compiler.PersistedCodecTags
 @[persisted_codec_tag] abbrev capability_delegate_args_v1 : String := "DREGG.CAPABILITY.DELEGATE.ARGS/v1"
 @[persisted_codec_tag] abbrev seat_cell_id_v1 : String := "DREGG.SEAT.CELL.ID/v1"
 @[persisted_codec_tag] abbrev fn_selected_source_ingress_v1 : String := "DREGG/FN/SELECTED-SOURCE-INGRESS/v1"
-@[persisted_codec_tag] abbrev clock_v4 : String := s!"DREGG/CLOCK/v{clockWireVersion}"
 @[persisted_codec_tag] abbrev store_root_v2 : String := "DREGG.STORE.ROOT/v2"
-@[persisted_codec_tag] abbrev native_host_system_v1 : String := "DREGG.NATIVE-HOST.SYSTEM/v2"
 @[persisted_codec_tag] abbrev resource_invoke_args_v1 : String := "DREGG.RESOURCE.INVOKE.ARGS/v1"
 @[persisted_codec_tag] abbrev application_agent_dispatch_admission_ingress_v2 : String := "DREGG/APPLICATION/AGENT-DISPATCH-ADMISSION-INGRESS/v2"
 @[persisted_codec_tag] abbrev participant_key_enroll_next_possession_v1 : String := "DREGG/PARTICIPANT/KEY-ENROLL/NEXT-POSSESSION/v1"
@@ -240,7 +238,6 @@ namespace Minidregg.Compiler.PersistedCodecTags
 @[persisted_codec_tag] abbrev objective_activity_tx_abandon_v1 : String := "DREGG/OBJECTIVE/ACTIVITY/TX/ABANDON/v1"
 @[persisted_codec_tag] abbrev job_money_event_v1 : String := "DREGG.JOB.MONEY.EVENT/v1"
 @[persisted_codec_tag] abbrev joint_install_promise_request_v1 : String := "DREGG/JOINT/INSTALL-PROMISE/REQUEST/v1"
-@[persisted_codec_tag] abbrev durable_log_byte_v4 : List UInt8 := "DREGG.DURABLE.LOG".toUTF8.toList ++ [4]
 @[persisted_codec_tag] abbrev fn_selected_poll_coverage_v2 : String := "DREGG/FN/SELECTED-POLL-COVERAGE/v2"
 @[persisted_codec_tag] abbrev native_host_log_leaf_v1 : String := "DREGG/NATIVE-HOST/LOG-LEAF/v1"
 @[persisted_codec_tag] abbrev objective_bend_selected_declaration_v1 : String := "DREGG.OBJECTIVE-BEND.SELECTED-DECLARATION/v1"
@@ -281,7 +278,6 @@ namespace Minidregg.Compiler.PersistedCodecTags
 @[persisted_codec_tag] abbrev fn_consumer_namespace_transaction_v1 : String := "DREGG/FN/CONSUMER-NAMESPACE-TRANSACTION/v1"
 @[persisted_codec_tag] abbrev application_retry_create_begin_authorization_id_v4 : String := "DREGG/APPLICATION/RETRY-CREATE-BEGIN-AUTHORIZATION-ID/v4"
 @[persisted_codec_tag] abbrev native_host_observe_effect_v4 : String := "DREGG.NATIVE-HOST.OBSERVE-EFFECT/v4"
-@[persisted_codec_tag] abbrev native_host_log_tag_v4 : String := "DREGG/NATIVE-HOST/LOG-TAG/v5"
 @[persisted_codec_tag] abbrev application_lifecycle_begin_ingress_v1 : String := "DREGG/APPLICATION/LIFECYCLE-BEGIN-INGRESS/v1"
 @[persisted_codec_tag] abbrev fn_empty_poll_ingress_v2 : String := "DREGG/FN/EMPTY-POLL-INGRESS/v2"
 @[persisted_codec_tag] abbrev compute_fresh_genesis_v1 : String := "DREGG.COMPUTE.FRESH-GENESIS/v1"
@@ -329,7 +325,6 @@ namespace Minidregg.Compiler.PersistedCodecTags
 @[persisted_codec_tag] abbrev application_route_admission_challenge_v1 : String := "DREGG/APPLICATION/ROUTE-ADMISSION-CHALLENGE/v1"
 @[persisted_codec_tag] abbrev world_methods_byte_v1 : List UInt8 := "DREGG/WORLD/METHODS".toUTF8.toList ++ [1]
 @[persisted_codec_tag] abbrev policy_install_event_v1 : String := "DREGG.POLICY.INSTALL.EVENT/v1"
-@[persisted_codec_tag] abbrev prefix_native_host_log_tag : String := "DREGG/NATIVE-HOST/LOG-TAG"
 @[persisted_codec_tag] abbrev application_lifecycle_claim_committed_v1 : String := "DREGG/APPLICATION/LIFECYCLE-CLAIM-COMMITTED/v1"
 @[persisted_codec_tag] abbrev fn_consumer_namespace_ingress_v1 : String := "DREGG/FN/CONSUMER-NAMESPACE-INGRESS/v1"
 @[persisted_codec_tag] abbrev authority_nullifier_v1 : String := "DREGG.AUTHORITY.NULLIFIER/v1"
@@ -472,7 +467,6 @@ namespace Minidregg.Compiler.PersistedCodecTags
 @[persisted_codec_tag] abbrev native_host_link_view_v1 : String := "DREGG/NATIVE-HOST/LINK-VIEW/v1"
 @[persisted_codec_tag] abbrev objective_activity_tx_exhaust_v1 : String := "DREGG/OBJECTIVE/ACTIVITY/TX/EXHAUST/v1"
 @[persisted_codec_tag] abbrev run_compute_usage_v1 : String := "DREGG/RUN/COMPUTE-USAGE/v5"
-@[persisted_codec_tag] abbrev durable_seed : String := "DREGG.DURABLE.SEED"
 @[persisted_codec_tag] abbrev application_permission_schema_v1 : String := "DREGG/APPLICATION/PERMISSION-SCHEMA/v1"
 @[persisted_codec_tag] abbrev application_lifecycle_claim_key_v1 : String := "DREGG/APPLICATION/LIFECYCLE-CLAIM-KEY/v1"
 @[persisted_codec_tag] abbrev objective_answer_slot_name_v1 : String := "DREGG/OBJECTIVE/ANSWER-SLOT/NAME/v1"
@@ -631,7 +625,6 @@ namespace Minidregg.Compiler.PersistedCodecTags
 @[persisted_codec_tag] abbrev capability_delegate_byte_v2 : List UInt8 := capability_delegate.toUTF8.toList ++ [2]
 @[persisted_codec_tag] abbrev auth_plan_byte_v2 : List UInt8 := auth_plan.toUTF8.toList ++ [2]
 
-@[persisted_codec_tag] abbrev seedWireVersion : Nat := 6
 
 
 
@@ -645,7 +638,6 @@ namespace Minidregg.Compiler.PersistedCodecTags
 @[persisted_codec_tag] abbrev nativeprotocolframes_signedframe_c007c7c1 : String := "DREGG/NATIVE-HOST/OBSERVE-SIGNED/v10"
 @[persisted_codec_tag] abbrev nativeprotocolframes_ingressframe_70a174b6 : List UInt8 := "DREGG/POLICY/INSTALL/SIGNED-INGRESS".toUTF8.toList ++ [2]
 @[persisted_codec_tag] abbrev nativeprotocolframes_commandframe_c43cf00a : List UInt8 := "DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ [14]
-@[persisted_codec_tag] abbrev objectivebendfrontendidentity_manifestheader_a8a75167 : String := "DREGG/OBJECTIVE-BEND/FRONT-END/v2"
 @[persisted_codec_tag] abbrev fnconsumerprogresshistory_evidencecodec_3c80f283 : String := "DREGG/FN/EMPTY-PAGE-PROGRESS/v1"
 @[persisted_codec_tag] abbrev fnconsumerprogresshistory_progresshash_1068692f : String := "DREGG.FN.EMPTY-PAGE-PROGRESS/v1"
 @[persisted_codec_tag] abbrev nativehostcontext_config_runtimeparameters_df2ffead : String := "DREGG.NATIVE-HOST.PARAMETERS/v2"

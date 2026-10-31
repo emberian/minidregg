@@ -38,7 +38,7 @@ public import Theory.AuthMap
 public import Theory.AuthTrieCache
 public import Kernel.World
 public import Compiler.Tower256ConcreteBackend
-public import Compiler.PersistedCodecTags
+public import Compiler.PersistedCodecTags.Core
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr

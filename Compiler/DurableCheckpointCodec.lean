@@ -35,7 +35,10 @@ function; it is recomputed from the checkpoint's cells, never trusted.
 -/
 module
 
-public import Compiler.PersistedCodecTags
+public import Compiler.PersistedCodecTags.Core
+-- The census, privately: only `persistedCodecCorpus`'s unexposed body reads it, so a census
+-- edit changes no public interface of this module and rebuilds none of its importers.
+import Compiler.PersistedCodecTags
 public import Compiler.CanonicalCellRegistry
 public import Compiler.DurableReceiverCodec
 public import Compiler.Sp800185Cshake256
@@ -46,6 +49,7 @@ public import Kernel.WorldSystemCodec
 public import Theory.AssertAxioms
 public import Theory.AssertCompiled
 meta import Compiler.PersistedCodecTags
+meta import Compiler.PersistedCodecTags.Core
 meta import Compiler.CanonicalCellRegistry
 meta import Compiler.DurableReceiverCodec
 meta import Compiler.Sp800185Cshake256
@@ -187,8 +191,10 @@ def persistedCellDescriptors : List (Nat × Nat × Nat × List UInt8) :=
     pure (tag, schema.schemaId.value, schema.version, descriptor)
 
 /-- Canonical, length-prefixed receiving identities and actual cell layout
-descriptors. Implementation bodies and proof terms are not persisted formats. -/
-def persistedCodecCorpus : List UInt8 :=
+descriptors. Implementation bodies and proof terms are not persisted formats.
+Unexposed: its body is the only reader of the census (`Compiler.PersistedCodecTags`),
+which this module imports privately. -/
+@[no_expose] def persistedCodecCorpus : List UInt8 :=
   let entries := PersistedCodecTags.canonicalSet (PersistedCodecTags.entries.map (·.bytes))
   (StreamCodec.product (StreamCodec.list bytesStream)
     (StreamCodec.list (StreamCodec.product StreamCodec.nat

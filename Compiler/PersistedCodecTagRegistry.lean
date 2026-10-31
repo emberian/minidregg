@@ -27,7 +27,8 @@ def bytesLE : List UInt8 → List UInt8 → Bool
 def canonicalSet (values : List (List UInt8)) : List (List UInt8) :=
   values.eraseDups.mergeSort bytesLE
 
-elab "make_persisted_codec_manifest" : command => do
+/-- Every definition this module declares in the corpus namespace carries the tag. -/
+meta def checkTagged : CommandElabM Unit := do
   let env ← getEnv
   for (name, info) in env.constants.toList do
     if (env.getModuleIdxFor? name).isNone &&
@@ -35,6 +36,15 @@ elab "make_persisted_codec_manifest" : command => do
       if let .defnInfo _ := info then
         unless tagAttribute.hasTag env name do
           throwError m!"codec corpus declaration lacks @[persisted_codec_tag]: {name}"
+
+/-- The check alone, for a corpus file that is not the manifest's (the owner leaf). -/
+elab "check_persisted_codec_tags" : command => checkTagged
+
+/-- The manifest: every tagged identity in the environment (this module's and every
+imported corpus file's), ordered by name. -/
+elab "make_persisted_codec_manifest" : command => do
+  checkTagged
+  let env ← getEnv
   let names := (env.constants.toList.filterMap (fun (n, _) => if tagAttribute.hasTag env n then some n else none)).mergeSort (fun a b => a.toString ≤ b.toString)
   if names.isEmpty then throwError "persisted codec corpus must not be empty"
   let mut terms : Array (TSyntax `term) := #[]
