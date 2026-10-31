@@ -279,6 +279,15 @@ to `/ci/hpc`. Profiles: `/ci/hpc/fby` (run.sh, `--symfs`). The native Host build
    - **How to measure.** `scripts/perf/flatness-bench.py --bin <candidate bin with the new
      minidregg-host>`, built with `/home/hbox/lanes/integ/hotpatch-candidate.sh eca98bde… <name>
      minidregg-host=/ci/hpc/nb/artifacts/minidregg-host`.
+   - **Integrator's audit of 79a8c4c2c..08aa1b2f6 (sound). Owed in the next batch:**
+     - (1) `legKeys` and `keys` run `loadTarget` beside the configuration's own resolution, so the graph
+       loads twice per leg and per read. Thread the loaded graph through, or measure and record the cost.
+       The resolution does not show in the late profile.
+     - (2) A lemma that a missing `PreparedLaw` (empty `legKeys`) means the leg is refused, not admitted:
+       `resolve? = none → ∀ r, authorizeLeg … ≠ .ok r`, and the same for `authorizeChecked`.
+     - (3) `projectLazy`'s `lawStore` is eager. It is a `Store.set` (`DFinsupp.update`, O(1) to build),
+       but check it under item (d) below.
+     - Optional: a step-level clock corollary via `State.get_restrict`.
 2. **The one FORMAT batch: row 11, row 4 slice 2, and O(change) cells.** It is one epoch bump and one
    genesis. Private cells (a30875aaf31364697) send their FORMAT sha first, and we rebase onto it.
    - **Theirs (KeptCell).** `Theory/CellStateAux.lean` (`AuxCache`), `Materialized.carried` (a Thunk,
