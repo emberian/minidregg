@@ -49,7 +49,7 @@ gated candidates and names candidates to infra and the explorer.
 
 | lane | agent | owns now |
 |---|---|---|
-| hot-path | ac53c05fe796e4294 | law-17 perf queue: flatness, `story new`, row 11, Book entries migration (FORMAT) |
+| hot-path | a6c4a1532687a4fdb (ac53c05fe796e4294 retired) | law-17 perf queue: flatness, `story new`, row 11, Book entries migration (FORMAT) |
 | app-reds | ad85d40779880420c | apps installs on forge/hbox, op66-plan, Hummingbird/WBO/Scrumblr live qualification, Davros control run, E3/E4, G2 decider-side type, controller boot ordering, Hermes worker root interpreter |
 | private cells | a8da2b953507b402b | FORMAT (a); then the compiler-emitted ZK selective opening; decode pin to CanonicalCellRegistry.custodyDecode with (b) |
 | iteration speed | a6c58cb72b0764dbb | seam 1 (codec tags / Store epoch, lands before or with FORMAT), lane pool /home/hbox/pool, lane-tree, hot-swap overlay tool |
