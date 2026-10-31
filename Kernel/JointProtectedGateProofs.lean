@@ -49,9 +49,7 @@ theorem activity_exception_retains_joint {rootBytes : List UInt8 → TypedAuthor
       cases jointGate : JointControlFrame.ordinaryGate config.deployment.domain pin snapshot intent with
       | error reason =>
           simp [Config.sourceGate,layout,pinned,jointGate,ordinary] at admitted
-          change (Except.error (.durable .transactionConflict) : Except RejectReason Unit) = .ok () at admitted
-          cases admitted
-      | ok value => cases value
+      | ok value => cases value; rfl
 
 #assert_axioms invalid_layout_refuses
 #assert_axioms joint_exception_retains_activity

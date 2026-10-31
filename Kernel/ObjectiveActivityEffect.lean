@@ -385,6 +385,7 @@ theorem verdict : VerdictStatement := by
     unfold transferVerdict
     rw [if_neg (by rintro (h | h | h) <;> simp_all), if_pos closed]
 
+set_option backward.isDefEq.respectTransparency false in
 /-- How a yield commits a transfer Plan: by the verdict, at the settled await's reserve. -/
 theorem commitYield_transfer {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat} {checkpoint : Digest}
@@ -405,6 +406,7 @@ theorem commitYield_transfer {rootBytes : Bytes → Digest} {config : Config} {s
   simp only [effects, Bool.not_true, Bool.false_eq_true, if_false]
   rfl
 
+set_option backward.isDefEq.respectTransparency false in
 /-- How a yield commits a commit Plan: settled, with its write. -/
 theorem commitYield_commit {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat} {checkpoint : Digest}

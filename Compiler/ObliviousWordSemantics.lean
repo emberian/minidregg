@@ -66,7 +66,9 @@ theorem emitMux_extension (network : Network) (selector yes no : Nat) :
 theorem muxBit_extension (network : Network) (selector yes no : Nat) :
     Extension network ((muxBit selector yes no).run network).2 := by
   by_cases same : yes = no
-  · simpa [muxBit,same] using Extension.refl network
+  · have hsimpa := Extension.refl network
+    simp [muxBit,same] at hsimpa ⊢
+    exact hsimpa
   · simpa [muxBit,same] using emitMux_extension network selector yes no
 
 theorem muxBit_bound (network : Network) (selector yes no : Nat)
@@ -74,7 +76,9 @@ theorem muxBit_bound (network : Network) (selector yes no : Nat)
     let result := (muxBit selector yes no).run network
     result.1 < result.2.inputCount + result.2.gates.size := by
   by_cases same : yes = no
-  · simpa [muxBit,same] using yesBound
+  · have hsimpa := yesBound
+    simp [muxBit,same] at hsimpa ⊢
+    exact hsimpa
   · simp [muxBit,same,emitMux_run] <;> omega
 
 theorem muxBit_value (network : Network) (input : Array Bool) (selector yes no : Nat)
@@ -90,8 +94,10 @@ theorem muxBit_value (network : Network) (input : Array Bool) (selector yes no :
     simp only [muxBit, beq_self_eq_true, ↓reduceIte]
     change read network input no = if read network input selector then read network input no else read network input no
     split <;> rfl
-  · simpa [muxBit,same,read] using
+  · have hsimpa :=
       emitMux_value network input selector yes no shape selectorBound yesBound noBound
+    simp [muxBit,same,read] at hsimpa ⊢
+    exact hsimpa
 
 #assert_axioms Extension.refl
 #assert_axioms Extension.trans

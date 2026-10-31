@@ -53,14 +53,18 @@ theorem evaluateWires_forced (network : Network) (inputs : Array Bool)
           | .xor a b => xor (wires[a]?.getD false) (wires[b]?.getD false)
           | .and a b => wires[a]?.getD false && wires[b]?.getD false) =
         witness (network.inputCount + index.val) := by
-      simpa only [opValue] using sameOp.trans (graph _ member).symm
+      have hsimpa := sameOp.trans (graph _ member).symm
+      simp only [opValue] at hsimpa ⊢
+      exact hsimpa
     constructor
     · simp only [Array.size_push, invariant.1]
       omega
     · intro i hi
       by_cases last : i = wires.size
       · simp only [Array.getElem?_push, last, if_pos, Option.getD_some]
-        simpa only [invariant.1] using equation
+        have hsimpa := equation
+        simp only [invariant.1] at hsimpa ⊢
+        exact hsimpa
       · have earlier : i < network.inputCount + index.val := by omega
         simpa only [Array.getElem?_push, last, if_false] using invariant.2 i earlier
 

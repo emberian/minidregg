@@ -5,6 +5,7 @@ public import Effects.Revival.EngineProofs
 @[expose] public section
 namespace Minidregg.Effects.Revival.HostedLifecycle
 
+set_option backward.isDefEq.respectTransparency false in
  theorem framed : substrate.Framed := by
   intro primitive before after stepped loc outside
   cases loc
