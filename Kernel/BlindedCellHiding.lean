@@ -1,12 +1,14 @@
 /-
-Statement draft: docs/RATCHET-LOG-DESIGN.md, §§2–4 and 9. Imported by the
-Kernel umbrella so every statement elaborates and every pin is checked; no
-receiving path imports it.
+The blinded-cell hiding statements: docs/RATCHET-LOG-DESIGN.md, §§2–4 and 9.
+The receiver instantiates them in `Kernel.PrivateCellReceiver`
+(`HidingSetting.hiding_of_hybrids`: the PRF hop discharged by
+`receiver_prf_hop_view`, the zero-knowledge and root-replacement hybrids its
+named open premises).
 No axiom, sorry, crypto instance, or executable replacement is supplied. The
 declarations are Props except `hybridReduction_holds`, which proves that the
 hybrid composition's arithmetic holds for every instantiation (the open
-obligations are its antecedents). Function arguments specify an eventual model;
-they are not implementations or permission to treat arbitrary functions as live code.
+obligations are its antecedents), and `maskedTrieBinding_holds`. Function
+arguments specify a model; they are not implementations.
 
 Probability is exact finite counting, not an uninterpreted `Indistinguishable`.
 For bounded executions, enumerate equally likely random tapes with `Fin tapes`;
@@ -34,7 +36,7 @@ public import Init.Data.Nat.Log2
 
 @[expose] public section
 
-namespace Minidregg.Kernel.BlindedCellHidingDraft
+namespace Minidregg.Kernel.BlindedCellHiding
 
 set_option autoImplicit false
 
@@ -422,4 +424,4 @@ SATISFIABLE / TEETH / PREMISE-INHABITATION SKETCHES (not proved here)
    costs or a bound only on the root wrapper cannot serve as this witness.
 -/
 
-end Minidregg.Kernel.BlindedCellHidingDraft
+end Minidregg.Kernel.BlindedCellHiding

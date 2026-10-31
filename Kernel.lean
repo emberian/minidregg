@@ -186,7 +186,7 @@ import Kernel.Contracts.Intents
 import Kernel.Contracts.Refinements
 import Kernel.SubjectRate
 import Kernel.ReceiptEventHiding  -- K-RECEIPT-HIDE: a receipt cannot be linked to its hidden command (statement, teeth, hybrid reduction)
-import Kernel.BlindedCellHiding  -- the private-cells statement draft: transcript hiding, complete openings, per-operation log cost
+import Kernel.BlindedCellHiding  -- the private-cells hiding statements: transcript hiding, complete openings, per-operation log cost
 import Kernel.MoveEffect  -- the derivation engine's first declaration: the kernel move as an EffectSpec, derived end-to-end (term, executor, descriptor, laws free by initiality); satisfiable + teeth witnesses on k0 (ghost reading ≠ derived, tampered descriptor ≠ effect, move_conserves inherited)
 import Kernel.EffectsRevival.Statements  -- the widened declaration (Substrate, EffectSpec, Handler, Registry, dispatch) and its keystones STATED: EngineKeystone, CompletenessKeystone, LiveKeystone (ContentAgreement + ContentComplete), HostKeystone (the migration gate, known false today); docs/EFFECTS-REVIVAL.md; the generic engine stays in Effects (Effects.Revival.Engine); these keystones over the deployed kernel are its consumers
 import Kernel.EffectsRevival.ContentProofs  -- ContentComplete PROVED: every content command writes only its declared fields (contentActionFrame, per action), never the blinding, and its descriptor plus the rotation replays

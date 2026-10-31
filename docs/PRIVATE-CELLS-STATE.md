@@ -194,12 +194,13 @@ applied):
   passes it). Freshness is the named premise `Custody.CustodyPrf` (round 6): the ideal fixed as the
   uniform function on the version window (`idealFn`, tapes enumerate all functions by
   `finFunctionFinEquiv`), the budget admitting every two-query evaluation test
-  (`BudgetAdmitsNamed`: the budget admits the named distinguishers, equality of two window
-  versions' masks and the one-query point tests; at a use it is the composed reduction tests plus
+  (`BudgetAdmitsNamed`: the budget admits the named distinguishers, equality and the successor
+  relation of two window versions' masks and the one-query point tests; at a use it is the composed reduction tests plus
   these, nothing more, and Lean does not tie it to efficiency; admitting every evaluation test made
   the premise statistical, exhaustive key search included); honest pole `enumeration_satisfies`,
-  teeth `constant_refuted` (equality) and `counter_refuted` (a public counter passes every equality
-  test and fails a point test), both against `namedBudget`.
+  teeth `constant_refuted` (equality), `counter_refuted` (a public counter passes every equality test
+  and fails a point test) and `shift_refuted` (a keyed shift has uniform marginals and fails the
+  successor test), all against `namedBudget`.
   Round 8 (answered with astra round 10): what is published is a `Serve` (a function of a version's
   context, mask and kept index: roots, deterministic openings; a randomized opening at each fixed
   coin assignment). `ViewThroughServe`: a reader's view is a function of the served items.
@@ -223,21 +224,25 @@ applied):
 * `birth` refuses a store already holding a mask (`birth_refuses_masked`: imports are never
   silently re-masked) and accepts any other gated store (`birth_accepts`); `blinding_fits` proves
   the registry's blinding address passes the gate, so no caller supplies that either.
-* `privateRoot` is `BlindedCellHidingDraft.maskedTrieCommitment` itself: one commitment definition.
+* `privateRoot` is `BlindedCellHiding.maskedTrieCommitment` itself: one commitment definition.
 * `root` / `root_eq`: the outer commitment (cSHAKE256 under `DREGG/PRIVATE-CELL/OUTER/v1` over the
   state-derived context, the held mask, the kept digest) equals `privateRoot`, with no rebuild and
   no store lookup.
 
 **Owed, in order:**
-0. **The hiding goals out of the Draft namespace** (`Kernel/BlindedCellHiding.lean`), statement
-   first, with `CustodyPrf` as the PRF premise of `StandardModelHidingGoal` / `HybridReduction`'s
-   first hop (now `receiver_prf_hop`, adaptive), `PublishesRun` / `AtMostOneSuccessor` as the fork
-   premise, and `ViewThroughServe` / `ServesWithin` as the host's view premises. Hybrid order PRF,
-   then zero-knowledge simulation of openings (an independent coin tape, queries and proof
-   occurrences, then averaging; ZK does not give `ServesWithin` pointwise, only after simulation),
-   then root replacement under uniform masks (needs an encoding premise: `sample`/`encodeMask` give
-   high-entropy masks; the PRF hop holds for any encoding). The host corollary connects the actual
-   accepted set and its observable event trace to `arun` (`PublishesRun` alone is not enough).
+0. **Done: the hiding goals at the receiver.** `Kernel/BlindedCellHiding.lean` is the statement
+   module (namespace `BlindedCellHiding`, no longer Draft). `HidingSetting` (one deployment: custody
+   function and mask encoding, `Serve`, the view with its factorization `g`, the adaptive strategy's
+   store and patches); `real` (the game on the view of the keyed run) is the hiding goal's `run`.
+   `hiding_of_hybrids`: `TranscriptHiding` of `real` at the composition's bound, the PRF hop
+   discharged (`receiver_prf_hop_view`); open premises `zk` (uniform against simulated openings),
+   `rom` (simulated against independent uniform roots: needs `ServesWithin` and a high-entropy mask
+   encoding) and `identical` (the ideal is world-independent). `hidingGoal_of_hybrids`:
+   `RatchetHidingGoal` of `real` given also the bound below one, `BudgetMeaningful` and
+   `HasHiddenChoice`, which still want concrete attack strategies of this game. Still owed in the
+   hiding argument: the ZK hybrid over an independent coin tape, the ROM coupling, a concrete
+   distinguisher and hidden-choice witness, the host corollary over the accepted set and its
+   observable event trace (`PublishesRun`).
 1. **The cell representation carries `KeptCell`**: `Materialized.rootCache := KeptCell.root`,
    `rootExact` by `root_eq` and a materializer whose `rootOf` is `privateRoot` (context made
    explicit in the specification: `rootOf : Store → Root` cannot see the accepted version), patch
