@@ -293,6 +293,112 @@ fn serve_answers_in_process_and_the_production_binary_has_no_crash_verbs() {
     assert!(server.wait().unwrap().success());
 }
 
+fn serve_frame_memory(blobs: &[(&str, &[u8])], command: &[String]) -> Vec<u8> {
+    let mut out = u32::MAX.to_be_bytes().to_vec();
+    out.extend_from_slice(&(blobs.len() as u32).to_be_bytes());
+    for (name, bytes) in blobs {
+        out.extend_from_slice(&(name.len() as u32).to_be_bytes());
+        out.extend_from_slice(name.as_bytes());
+        out.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
+        out.extend_from_slice(bytes);
+    }
+    out.extend_from_slice(&serve_frame(command));
+    out
+}
+
+type MemoryReply = (u32, Vec<u8>, Vec<u8>, Vec<(Vec<u8>, Vec<u8>)>);
+
+fn serve_reply_memory(stream: &mut impl std::io::Read) -> MemoryReply {
+    let mut tag = [0u8; 8];
+    stream.read_exact(&mut tag).unwrap();
+    assert_eq!(&tag, b"MDCOPRC2", "a memory request's reply opens with the memory reply tag");
+    let mut word = [0u8; 4];
+    let mut long = [0u8; 8];
+    let mut field = |stream: &mut dyn std::io::Read| {
+        stream.read_exact(&mut long).unwrap();
+        let mut bytes = vec![0u8; u64::from_be_bytes(long) as usize];
+        stream.read_exact(&mut bytes).unwrap();
+        bytes
+    };
+    stream.read_exact(&mut word).unwrap();
+    let code = u32::from_be_bytes(word);
+    let (stdout, stderr) = (field(stream), field(stream));
+    stream.read_exact(&mut word).unwrap();
+    let mut blobs = Vec::new();
+    for _ in 0..u32::from_be_bytes(word) {
+        stream.read_exact(&mut word).unwrap();
+        let mut name = vec![0u8; u32::from_be_bytes(word) as usize];
+        stream.read_exact(&mut name).unwrap();
+        blobs.push((name, field(stream)));
+    }
+    (code, stdout, stderr, blobs)
+}
+
+/// A memory frame (`mem:NAME` paths) answers exactly as the file frame does: the same code,
+/// stdout and stderr, with the bytes the file call writes returned as a blob of that name, and
+/// no file written.
+#[test]
+fn a_memory_request_answers_as_the_file_request_does() {
+    use std::io::Write;
+    let dir = directory();
+    let (served, twin) = (dir.join("served"), dir.join("twin"));
+    let id = "domain:1;semantics:2;seed:3".to_owned();
+    for (name, bytes) in [("seed", &b"seed"[..]), ("record", b"record"), ("tag", b"tag")] {
+        fs::write(dir.join(name), bytes).unwrap();
+    }
+    fs::write(dir.join("nodes"), 0u64.to_be_bytes()).unwrap();
+    let nodes = 0u64.to_be_bytes();
+    let binary = env!("CARGO_BIN_EXE_minidregg-link-sqlite-store");
+    let mut server = Command::new(binary).arg("serve")
+        .stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).spawn().unwrap();
+    let mut input = server.stdin.take().unwrap();
+    let mut output = server.stdout.take().unwrap();
+    let call = |args: &[&str]| -> Vec<String> {
+        ["--anchor-identity", id.as_str()].iter().chain(args).map(|a| a.to_string()).collect()
+    };
+    let r = served.display().to_string();
+    let t = twin.display().to_string();
+    let path = |name: &str| dir.join(name).display().to_string();
+    let steps: Vec<(Vec<(&str, &[u8])>, Vec<String>, Vec<String>, Option<&str>)> = vec![
+        (vec![("seed", b"seed")], call(&["durable-init", &r, "mem:seed"]),
+            call(&["durable-init", &t, &path("seed")]), None),
+        (vec![("record", b"record"), ("tag", b"tag"), ("nodes", &nodes)],
+            call(&["durable-append", &r, "1", "mem:record", "mem:tag", "mem:nodes"]),
+            call(&["durable-append", &t, "1", &path("record"), &path("tag"), &path("nodes")]), None),
+        (vec![], call(&["durable-read", &r, "1", "1", "mem:read"]),
+            call(&["durable-read", &t, "1", "1", &path("twin-read")]), Some("twin-read")),
+        (vec![], call(&["durable-seed", &r, "mem:seed"]),
+            call(&["durable-seed", &t, &path("twin-seed")]), Some("twin-seed")),
+        (vec![], call(&["durable-read", &r, "1", "1", "mem:"]),
+            call(&["durable-read", &t, "1", "1", &path("twin-read2")]), Some("twin-read2")),
+    ];
+    for (blobs, served_call, twin_call, written) in steps {
+        input.write_all(&serve_frame_memory(&blobs, &served_call)).unwrap();
+        input.flush().unwrap();
+        let (code, stdout, stderr, out) = serve_reply_memory(&mut output);
+        let one_shot = Command::new(binary).args(&twin_call).output().unwrap();
+        assert_eq!(code, one_shot.status.code().unwrap() as u32, "{served_call:?}");
+        let text = |b: &[u8]| String::from_utf8_lossy(b).replace("twin", "served");
+        assert_eq!(text(&stdout), text(&one_shot.stdout), "{served_call:?}");
+        assert_eq!(text(&stderr), text(&one_shot.stderr), "{served_call:?}");
+        match written {
+            Some(file) => {
+                assert_eq!(out.len(), 1, "{served_call:?}");
+                assert_eq!(out[0].1, fs::read(dir.join(file)).unwrap(), "{served_call:?}");
+            }
+            None => assert!(out.is_empty(), "{served_call:?}"),
+        }
+    }
+    // A request without the memory mark still gets the file reply, and a `mem:` path outside a
+    // memory request is refused, not written.
+    input.write_all(&serve_frame(&call(&["durable-read", &r, "1", "1", "mem:read"]))).unwrap();
+    input.flush().unwrap();
+    assert_ne!(serve_reply(&mut output).0, 0);
+    assert!(!dir.join("mem:read").exists());
+    drop(input);
+    assert!(server.wait().unwrap().success());
+}
+
 /// A bound violation is not contention: the CLI exits 6 (Lean maps 4 to
 /// "reload and recompute", which would retry the same bytes forever).
 #[test]

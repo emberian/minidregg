@@ -176,6 +176,14 @@ def runNative (config : NativeConfig) (arguments : Array String) : IO IO.Process
     (if config.anchorIdentity.isEmpty then arguments
       else #["--anchor-identity", config.anchorIdentity] ++ arguments)
 
+/-- `runNative` with the call's files as blobs (`mem:NAME` arguments,
+`NativeCoprocess.outputMemory`): no temporary directory, no file round trip. -/
+def runNativeMemory (config : NativeConfig) (arguments : Array String)
+    (inputs : List (String × ByteArray)) : IO (IO.Process.Output × List (String × ByteArray)) :=
+  NativeCoprocess.outputMemory config.binary.toString
+    (if config.anchorIdentity.isEmpty then arguments
+      else #["--anchor-identity", config.anchorIdentity] ++ arguments) inputs
+
 def parseCasOutput (output : IO.Process.Output) : CasObservation :=
   if output.exitCode == 0 && output.stderr == "" then
     match output.stdout with
@@ -240,18 +248,16 @@ def parseStored (fromHeight : Nat) (withBase : Bool) (bytes : ByteArray) : Optio
 def NativeConfig.read (config : NativeConfig) (fromHeight : Nat) (withBase : Bool) :
     IO (Except String (Option Stored)) :=
   try
-    IO.FS.withTempDir fun directory => do
-      let path := directory / "read.bin"
-      let output ← runNative config #["durable-read", config.root.toString,
-        toString fromHeight, if withBase then "1" else "0", path.toString]
-      if output.exitCode == 0 && output.stdout == "" && output.stderr == "" then
-        match parseStored fromHeight withBase (← IO.FS.readBinFile path) with
-        | some stored => return .ok (some stored)
-        | none => return .error "native durable read malformed"
-      else if output.exitCode == 3 && output.stdout == "" then
-        return .ok none
-      else
-        return .error s!"native durable read failed (exit {output.exitCode}): {output.stderr}"
+    let (output, written) ← runNativeMemory config #["durable-read", config.root.toString,
+      toString fromHeight, if withBase then "1" else "0", "mem:read"] []
+    if output.exitCode == 0 && output.stdout == "" && output.stderr == "" then
+      match (written.lookup "read").bind (parseStored fromHeight withBase) with
+      | some stored => return .ok (some stored)
+      | none => return .error "native durable read malformed"
+    else if output.exitCode == 3 && output.stdout == "" then
+      return .ok none
+    else
+      return .error s!"native durable read failed (exit {output.exitCode}): {output.stderr}"
   catch error => pure (.error s!"native durable read unavailable: {error}")
 
 /-- `crashAt` is a lifecycle-test hook implemented by process exit inside the
@@ -269,49 +275,47 @@ def encodeNodes (nodes : List NodeWrite) : List UInt8 :=
 def NativeConfig.append (config : NativeConfig) (height : Nat) (entry : Entry)
     (nodes : List NodeWrite) (crashAt : Option String := none) : IO CasObservation :=
   try
-    IO.FS.withTempDir fun directory => do
-      let recordPath := directory / "record.bin"
-      let tagPath := directory / "tag.bin"
-      let nodesPath := directory / "nodes.bin"
-      IO.FS.writeBinFile recordPath entry.record.toByteArray
-      IO.FS.writeBinFile tagPath entry.tag.toByteArray
-      IO.FS.writeBinFile nodesPath (encodeNodes nodes).toByteArray
-      let arguments := match crashAt with
-        | none => #["durable-append", config.root.toString, toString height,
-            recordPath.toString, tagPath.toString, nodesPath.toString]
-        | some phase => #["durable-append-crash", config.root.toString, toString height,
-            recordPath.toString, tagPath.toString, nodesPath.toString, phase]
-      return parseCasOutput (← runNative config arguments)
+    let arguments := match crashAt with
+      | none => #["durable-append", config.root.toString, toString height,
+          "mem:record", "mem:tag", "mem:nodes"]
+      | some phase => #["durable-append-crash", config.root.toString, toString height,
+          "mem:record", "mem:tag", "mem:nodes", phase]
+    let (output, _) ← runNativeMemory config arguments
+      [("record", entry.record.toByteArray), ("tag", entry.tag.toByteArray),
+        ("nodes", (encodeNodes nodes).toByteArray)]
+    return parseCasOutput output
   catch error => pure (.uncertain s!"native append unavailable: {error}")
 
 def NativeConfig.putCheckpoint (config : NativeConfig) (height : Nat) (bytes : List UInt8) :
     IO (Except String Unit) :=
   try
-    IO.FS.withTempDir fun directory => do
-      let path := directory / "checkpoint.bin"
-      IO.FS.writeBinFile path bytes.toByteArray
-      let output ← runNative config #["durable-checkpoint", config.root.toString,
-        toString height, path.toString]
-      if output.exitCode == 0 && output.stderr == "" then return .ok ()
-      else return .error s!"native checkpoint write failed (exit {output.exitCode}): {output.stderr}"
+    let (output, _) ← runNativeMemory config #["durable-checkpoint", config.root.toString,
+      toString height, "mem:checkpoint"] [("checkpoint", bytes.toByteArray)]
+    if output.exitCode == 0 && output.stderr == "" then return .ok ()
+    else return .error s!"native checkpoint write failed (exit {output.exitCode}): {output.stderr}"
   catch error => pure (.error s!"native checkpoint unavailable: {error}")
 
 def NativeConfig.initialize (config : NativeConfig) (seedBytes : List UInt8) : IO CasObservation :=
   try
-    IO.FS.withTempDir fun directory => do
-      let path := directory / "seed.bin"
-      IO.FS.writeBinFile path seedBytes.toByteArray
-      return parseCasOutput (← runNative config #["durable-init", config.root.toString,
-        path.toString])
+    let (output, _) ← runNativeMemory config #["durable-init", config.root.toString, "mem:seed"]
+      [("seed", seedBytes.toByteArray)]
+    return parseCasOutput output
   catch error => pure (.uncertain s!"native initialize unavailable: {error}")
 
 /-- The key file must hold exactly 32 bytes. Its 0600 mode is checked by the
 bootstrap that created it and by the operator; Lean reads, never writes it. -/
+/-- The MAC keys this process has read, by file: a Store's key is written once at bootstrap,
+so it is read once per process, not on every Store call. -/
+initialize macKeys : IO.Ref (List (System.FilePath × MacKey)) ← IO.mkRef []
+
 def NativeConfig.readKey (config : NativeConfig) : IO (Except String MacKey) :=
   try
+    if let some key := (← macKeys.get).lookup config.key then return .ok key
     let bytes := (← IO.FS.readBinFile config.key).toList
     match MacKey.ofBytes? bytes with
-    | some key => return .ok key
+    | some key =>
+        macKeys.modify ((config.key, key) :: ·)
+        return .ok key
     | none => return .error "checkpoint MAC key must be exactly 32 bytes"
   catch error => pure (.error s!"checkpoint MAC key unavailable: {error}")
 
@@ -319,11 +323,13 @@ def NativeConfig.readKey (config : NativeConfig) : IO (Except String MacKey) :=
 installs a seed once and never replaces it). -/
 def NativeConfig.peekSeed (config : NativeConfig) : IO (Except String (Option (List UInt8))) :=
   try
-    IO.FS.withTempDir fun directory => do
-      let path := directory / "seed.bin"
-      let output ← runNative config #["durable-seed", config.root.toString, path.toString]
+    do
+      let (output, written) ← runNativeMemory config #["durable-seed", config.root.toString,
+        "mem:seed"] []
       if output.exitCode == 0 && output.stdout == "" && output.stderr == "" then
-        return .ok (some (← IO.FS.readBinFile path).toList)
+        match written.lookup "seed" with
+        | some bytes => return .ok (some bytes.toList)
+        | none => return .error "native durable seed read malformed"
       else if output.exitCode == 3 && output.stdout == "" then
         return .ok none
       else
@@ -371,14 +377,11 @@ def encodeHistoryRequest (request : HistoryRequest) : List UInt8 :=
 def NativeConfig.history (config : NativeConfig) (request : HistoryRequest) :
     IO (Except String HistoryRead) :=
   try
-    IO.FS.withTempDir fun directory => do
-      let requestPath := directory / "request.bin"
-      let path := directory / "history.bin"
-      IO.FS.writeBinFile requestPath (encodeHistoryRequest request).toByteArray
-      let output ← runNative config #["durable-history", config.root.toString,
-        requestPath.toString, path.toString]
+    do
+      let (output, written) ← runNativeMemory config #["durable-history", config.root.toString,
+        "mem:request", "mem:history"] [("request", (encodeHistoryRequest request).toByteArray)]
       if output.exitCode == 0 && output.stdout == "" && output.stderr == "" then
-        match parseHistory (← IO.FS.readBinFile path) with
+        match (written.lookup "history").bind parseHistory with
         | some read => return .ok read
         | none => return .error "native durable history read malformed"
       else return .error s!"native durable history read failed (exit {output.exitCode}): {output.stderr}"
@@ -396,11 +399,11 @@ def checkpointHeightOf (bytes : ByteArray) : Option (Option Nat) := do
 
 def NativeConfig.readFromCheckpoint (config : NativeConfig) : IO (Except String (Option Stored)) :=
   try
-    IO.FS.withTempDir fun directory => do
-      let path := directory / "read.bin"
-      let output ← runNative config #["durable-read", config.root.toString, "1", "2", path.toString]
+    do
+      let (output, written) ← runNativeMemory config #["durable-read", config.root.toString, "1", "2",
+        "mem:read"] []
       if output.exitCode == 0 && output.stdout == "" && output.stderr == "" then
-        let bytes ← IO.FS.readBinFile path
+        let bytes := (written.lookup "read").getD ByteArray.empty
         match checkpointHeightOf bytes with
         | none => return .error "native durable read malformed"
         | some checkpoint =>
@@ -416,12 +419,11 @@ def NativeConfig.readFromCheckpoint (config : NativeConfig) : IO (Except String 
 def NativeConfig.checkpointAt (config : NativeConfig) (height : Nat) :
     IO (Except String (Option StoredCheckpoint)) :=
   try
-    IO.FS.withTempDir fun directory => do
-      let path := directory / "checkpoint.bin"
-      let output ← runNative config #["durable-checkpoint-at", config.root.toString,
-        toString height, path.toString]
+    do
+      let (output, written) ← runNativeMemory config #["durable-checkpoint-at", config.root.toString,
+        toString height, "mem:checkpoint"] []
       if output.exitCode == 0 && output.stdout == "" && output.stderr == "" then
-        let bytes ← IO.FS.readBinFile path
+        let bytes := (written.lookup "checkpoint").getD ByteArray.empty
         match u64At bytes 0 with
         | some 0 => if bytes.size = 8 then return .ok none else return .error "native checkpoint read malformed"
         | some 1 =>

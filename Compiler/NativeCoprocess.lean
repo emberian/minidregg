@@ -147,6 +147,61 @@ def readReply (handle : IO.FS.Handle) : ExceptT Failure IO (IO.Process.Output ×
   let (stderr, reader) ← readText reader "stderr"
   return ({ exitCode := (beValue code).toUInt32, stdout, stderr }, reader.read)
 
+/-! ## Memory requests (frame v2)
+
+A request may carry its input files as named blobs and get the files it writes back the same
+way, so a call makes no temporary directory and no file round trip: the request opens with
+`memoryMark`, then `u32 count, (u32 len, name, u64 len, bytes)*`, then the argv frame; a path
+argument `mem:NAME` names a blob. The reply opens with `replyTagMemory` and appends the blobs
+written in the same shape. A helper that does not know the mark fails the exchange, which is
+reported like any other failed exchange. -/
+
+/-- The four bytes a memory request opens with (`u32` all ones: never an argc). -/
+def memoryMark : ByteArray := beBytes 4 0xFFFFFFFF
+
+/-- The first eight bytes of a memory request's reply (ASCII `MDCOPRC2`). -/
+def replyTagMemory : ByteArray := "MDCOPRC2".toUTF8
+
+/-- The most blobs a memory request or reply carries, and the longest blob name. -/
+def maxBlobs : Nat := 8
+def maxBlobName : Nat := 256
+
+/-- The request frame of one argv with its input blobs. -/
+def requestFrameMemory (blobs : List (String × ByteArray)) (args : Array String) : ByteArray :=
+  blobs.foldl (fun frame blob => frame ++ beBytes 4 blob.1.utf8ByteSize ++ blob.1.toUTF8 ++
+      beBytes 8 blob.2.size ++ blob.2)
+    (memoryMark ++ beBytes 4 blobs.length) ++ requestFrame args
+
+private def readBytes (reader : Reader) (field : String) : ExceptT Failure IO (ByteArray × Reader) := do
+  let (header, reader) ← readExact reader 8
+  let length := beValue header
+  if length > maxField then throw (.oversized field length)
+  readExact reader length
+
+/-- Parse one memory reply: the output and the blobs written, with the bytes read. -/
+def readReplyMemory (handle : IO.FS.Handle) :
+    ExceptT Failure IO ((IO.Process.Output × List (String × ByteArray)) × Nat) := do
+  let (tag, reader) ← readExact ⟨handle, 0⟩ replyTagMemory.size
+  if tag != replyTagMemory then throw (.untagged reader.read)
+  let (code, reader) ← readExact reader 4
+  let (stdout, reader) ← readText reader "stdout"
+  let (stderr, reader) ← readText reader "stderr"
+  let (count, reader) ← readExact reader 4
+  let count := beValue count
+  if count > maxBlobs then throw (.oversized "blob count" count)
+  let mut reader := reader
+  let mut blobs : List (String × ByteArray) := []
+  for _ in [0:count] do
+    let (length, next) ← readExact reader 4
+    let length := beValue length
+    if length > maxBlobName then throw (.oversized "blob name" length)
+    let (name, next) ← readExact next length
+    let some name := String.fromUTF8? name | throw (.notUtf8 "blob name")
+    let (bytes, next) ← readBytes next name
+    blobs := blobs ++ [(name, bytes)]
+    reader := next
+  return (({ exitCode := (beValue code).toUInt32, stdout, stderr }, blobs), reader.read)
+
 /-- Start `binary serve` through `launcher` (layers 1 and 2 of the module doc). -/
 def start (binary : String) : IO (Except Failure Helper) := do
   try
@@ -162,22 +217,23 @@ def start (binary : String) : IO (Except Failure Helper) := do
 the write fail (EPIPE); the reply pipe is read anyway, so such a helper is
 reported by what it sent (`closed 0` for one that never started), not by the
 race between its exit and the write. An IO error reading the pipe is `pipe`. -/
-private def exchange (helper : Helper) (args : Array String) :
-    IO (Except Failure (IO.Process.Output × Nat)) := do
+private def exchangeWith {α : Type} (helper : Helper) (frame : ByteArray)
+    (read : IO.FS.Handle → ExceptT Failure IO (α × Nat)) : IO (Except Failure (α × Nat)) := do
   let sent ← try
-      helper.stdin.write (requestFrame args)
+      helper.stdin.write frame
       helper.stdin.flush
       pure none
     catch error => pure (some s!"{error}")
-  let reply ← try (readReply helper.stdout).run
+  let reply ← try (read helper.stdout).run
     catch error => pure (.error (.pipe s!"{error}"))
   match sent, reply with
   | some detail, .ok _ => pure (.error (.pipe s!"the request was not sent ({detail}), yet a reply arrived"))
   | _, reply => pure reply
 
-/-- One exchange with `binary`'s `serve` helper (started on first use), with the
-reply bytes it read. A failed exchange kills and forgets the helper. -/
-def attempt (binary : String) (args : Array String) : IO (Except Failure (IO.Process.Output × Nat)) :=
+/-- One exchange of `frame` with `binary`'s `serve` helper (started on first use), read by
+`read`. A failed exchange kills and forgets the helper. -/
+def attemptWith {α : Type} (binary : String) (frame : ByteArray)
+    (read : IO.FS.Handle → ExceptT Failure IO (α × Nat)) : IO (Except Failure (α × Nat)) :=
   helpers.atomically do
     let running ← get
     let helper : Except Failure Helper ← match running.lookup binary with
@@ -189,7 +245,7 @@ def attempt (binary : String) (args : Array String) : IO (Except Failure (IO.Pro
     match helper with
     | .error failure => pure (Except.error failure)
     | .ok helper =>
-        let result ← exchange helper args
+        let result ← exchangeWith helper frame read
         if result matches .error _ then
           try
             helper.kill
@@ -198,10 +254,23 @@ def attempt (binary : String) (args : Array String) : IO (Except Failure (IO.Pro
           modify fun running => running.filter fun entry => entry.1 != binary
         pure result
 
+/-- One exchange with `binary`'s `serve` helper (started on first use), with the
+reply bytes it read. A failed exchange kills and forgets the helper. -/
+def attempt (binary : String) (args : Array String) : IO (Except Failure (IO.Process.Output × Nat)) :=
+  attemptWith binary (requestFrame args) readReply
+
 /-- `IO.Process.output { cmd := binary, args }`, run by `binary`'s own `serve`
 helper (started on first use). A failed exchange throws its `Failure` by name. -/
 def output (binary : String) (args : Array String) : IO IO.Process.Output := do
   match ← attempt binary args with
+  | .ok (result, _) => pure result
+  | .error failure => throw (IO.userError failure.render)
+
+/-- `output` with input files as blobs and the files written returned as blobs (`mem:NAME`
+paths; the memory requests section above). A failed exchange throws its `Failure` by name. -/
+def outputMemory (binary : String) (args : Array String) (inputs : List (String × ByteArray)) :
+    IO (IO.Process.Output × List (String × ByteArray)) := do
+  match ← attemptWith binary (requestFrameMemory inputs args) readReplyMemory with
   | .ok (result, _) => pure result
   | .error failure => throw (IO.userError failure.render)
 
