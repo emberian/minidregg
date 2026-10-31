@@ -118,7 +118,10 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   (`append_planned_root_irrelevant`); different members never conflicted. Audit SOUND (admitAppend refuses at the met
   cell; nullifier covers exact resubmits; topic-head theorem strictly stronger). Owed by hot-path: drop the unused
   `fresh` premises in DomainEpochStream, fix the citation of nonexistent Kernel.StreamCommutingAppend, and record the
-  client contract (pipelined same-author says and self-predicted refs do not keep plan order). Explorer
+  client contract (pipelined same-author says and self-predicted refs do not keep plan order) in docs/PLACE.md; refuse
+  references at or beyond the current head (the kernel never checks an append's reference); optionally a positive
+  statement that two appends planned from one read both land in either order. Resubmit after a moved head: checked by
+  the integrator, 5ae0de223's lookup decides after any resubmit error, so a replay refusal resolves as performed. Explorer
   reruns 16-parallel-say + own-order row on batch 9.
 - **P1, mini panics on a closed stdout** (explorer, world-up once `mode=closed … has no mini shell`; 0/40 reruns):
   `mini --help | grep -q` under pipefail; mini exit 101. Owners: perf-client a778bbda6509944a5 (quiet exit on EPIPE,
