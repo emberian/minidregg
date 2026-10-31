@@ -25,6 +25,8 @@ use minidregg_discord_entrance::now_s;
 use serde_json::{json, Value};
 
 const DOOR_USER: &str = "mini-door";
+/// The read bound a house publication is delegated under: the public reader's (`deploy/demo-seed`).
+const PUBLIC_READ_MAX_COST: &str = include_str!("../../../../deploy/demo-seed/public-read-max-cost");
 const DISCORD_USER: &str = "mini-discord";
 const TENANT_GROUP: &str = "mini-sessions";
 /// A stranger who never finishes paying: the request is closed after this long.
@@ -1231,24 +1233,127 @@ impl<O: BoxOps> Processor<O> {
         Ok(())
     }
 
+    /// The member's subject: retained on the request, else the member's own `whoami`.
+    fn subject_of(&self, name: &str, r: &Value) -> Result<String, String> {
+        let subject = match r["subject"].as_str() {
+            Some(s) => s.to_owned(),
+            None => {
+                let ran = self.ops.tenant_line(name, "whoami");
+                let v: Value = serde_json::from_str(ran.stdout.trim()).unwrap_or(Value::Null);
+                match v["subject"].as_str() {
+                    Some(s) if ran.ok => s.to_owned(),
+                    _ => return Err(format!("whoami: {}", ran.why())),
+                }
+            }
+        };
+        if subject.is_empty() || !subject.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(format!("the member's subject {subject:?} is not a decimal"));
+        }
+        Ok(subject)
+    }
+
+    /// The house publications (`/etc/mini/house-publications`, the file `mini-web-spawn` reads: one
+    /// `NAME MEMBER` per line, the document NAME the house member MEMBER publishes as the box's own,
+    /// the front page's `welcome` among them). A malformed line names nothing.
+    fn house_publications(&self) -> Vec<(String, String)> {
+        let word = |w: &str| !w.is_empty() && w.len() <= 64 && w.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-');
+        std::fs::read_to_string(self.p.etc().join("house-publications")).unwrap_or_default().lines().filter_map(|line| {
+            let mut words = line.split_whitespace();
+            match (words.next(), words.next(), words.next()) {
+                (Some(doc), Some(author), None) if word(doc) && word(author) => Some((doc.to_owned(), author.to_owned())),
+                _ => None,
+            }
+        }).collect()
+    }
+
+    /// Every enrolled member holds a reference to each house publication under its own name, once per
+    /// world, as the public reader does: the house member delegates `observe` on DOC to the member's
+    /// subject (`delegate ID DOC SUBJECT observe MAX`, MAX the public reader's read bound), submits and
+    /// publishes it (`submit ID`, `publish ID`), the recipient reference is handed to the member's
+    /// HOME/requests, and the member imports it (`import DOC @DOC-reference.json`). So `doc show welcome`
+    /// and `/doc/welcome` read the document the lobby points a newcomer to. Each step is recorded on the
+    /// request before the next; a rerun resumes (an undecided submit is the exact `retry ID`).
+    fn hand_publications(&mut self) -> Result<(), String> {
+        let publications = self.house_publications();
+        if publications.is_empty() {
+            return Ok(());
+        }
+        let Ok(world) = std::fs::read(self.p.config()).map(|config| world_id(&config, std::fs::read(self.p.node_state()).ok().as_deref())) else {
+            return Ok(());
+        };
+        let mut done = 0;
+        for mut r in self.requests() {
+            if done >= self.cfg.per_run {
+                break;
+            }
+            let name = r["name"].as_str().unwrap_or("").to_owned();
+            let owed: Vec<(String, String)> = publications.iter()
+                .filter(|(doc, author)| *author != name && !(r["publications"][doc.as_str()]["world"] == world.as_str() && r["publications"][doc.as_str()]["joined"] == true))
+                .cloned().collect();
+            if r["phase"] != "enrolled" || owed.is_empty() {
+                continue;
+            }
+            done += 1;
+            for (doc, author) in owed {
+                if let Err(e) = self.hand_publication(&doc, &author, &world, &name, &mut r) {
+                    self.say(format!("request {}: publication {doc}: {e}", r["id"].as_str().unwrap_or("")));
+                    r["publications"][doc.as_str()]["error"] = json!(e);
+                }
+                self.save(&mut r)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn hand_publication(&mut self, doc: &str, author: &str, world: &str, name: &str, r: &mut Value) -> Result<(), String> {
+        if !r["publications"].is_object() {
+            r["publications"] = json!({});
+        }
+        let subject = self.subject_of(name, r)?;
+        r["subject"] = json!(subject);
+        if r["publications"][doc]["world"] != world {
+            let id = format!("hp-{}", &sha256_hex(format!("minidregg-house-publication-v1\n{world}\n{doc}\n{subject}").as_bytes())[..16]);
+            r["publications"][doc] = json!({"world": world, "id": id, "from": author});
+            self.save(r)?;
+        }
+        let id = r["publications"][doc]["id"].as_str().ok_or("no publication id")?.to_owned();
+        let house = self.p.home(author).join("workspace");
+        if !house.join("proposals").join(&id).exists() {
+            let ran = self.ops.tenant_line(author, &format!("delegate {id} {doc} {subject} observe {}", PUBLIC_READ_MAX_COST.trim()));
+            if !ran.ok {
+                return Err(format!("delegate: {}", ran.why()));
+            }
+        }
+        let reference = house.join("proposals").join(&id).join("recipient-reference.json");
+        if !reference.is_file() {
+            // An attempt that already reached the Host is retried exactly (its retained bytes), never re-signed.
+            let line = if house.join("attempts").join(&id).exists() { format!("retry {id}") } else { format!("submit {id}") };
+            let ran = self.ops.tenant_line(author, &line);
+            if !ran.ok {
+                return Err(format!("{line}: {}", ran.why()));
+            }
+            let ran = self.ops.tenant_line(author, &format!("publish {id}"));
+            if !ran.ok {
+                return Err(format!("publish: {}", ran.why()));
+            }
+        }
+        let bytes = std::fs::read(&reference).map_err(|e| format!("{}: {e}", reference.display()))?;
+        let file = format!("{doc}-reference.json");
+        self.ops.give(name, &self.p.home(name).join("requests").join(&file), &bytes)?;
+        let ran = self.ops.tenant_line(name, &format!("import {doc} @{file}"));
+        if !ran.ok {
+            return Err(format!("import: {}", ran.why()));
+        }
+        r["publications"][doc] = json!({"world": world, "id": id, "from": author, "joined": true});
+        self.say(format!("request {} holds {doc} from {author}", r["id"].as_str().unwrap_or("")));
+        Ok(())
+    }
+
     fn join_place(&mut self, key: &str, place: &StoryConfig, world: &str, name: &str, r: &mut Value) -> Result<(), String> {
         let verb = if key == "story" { "story" } else { "chat" };
         let file = format!("{}-invite.json", place.name);
         if r[key]["invited"] != world {
-            let subject = match r["subject"].as_str() {
-                Some(s) => s.to_owned(),
-                None => {
-                    let ran = self.ops.tenant_line(name, "whoami");
-                    let v: Value = serde_json::from_str(ran.stdout.trim()).unwrap_or(Value::Null);
-                    match v["subject"].as_str() {
-                        Some(s) if ran.ok => s.to_owned(),
-                        _ => return Err(format!("whoami: {}", ran.why())),
-                    }
-                }
-            };
-            if subject.is_empty() || !subject.bytes().all(|b| b.is_ascii_digit()) {
-                return Err(format!("the member's subject {subject:?} is not a decimal"));
-            }
+            let subject = self.subject_of(name, r)?;
             let invite = if key == "story" {
                 format!("story invite {} {subject}", place.name)
             } else {
@@ -1282,6 +1387,7 @@ impl<O: BoxOps> Processor<O> {
         self.progress()?;
         self.welcome("story")?;
         self.welcome("room")?;
+        self.hand_publications()?;
         self.apply_links()?;
         self.door_state()
     }
@@ -1383,6 +1489,16 @@ mod tests {
                 let subject = rest.split(' ').next().unwrap_or("");
                 let invitation = json!({"type":"mini-chat-invitation-v1","room":"lobby","grant":{"recipient":subject}});
                 return Ran { ok: true, stdout: format!("invited {subject} to lobby; give them this line:\nchat join lobby {invitation}\n"), stderr: String::new() };
+            } else if let Some(id) = line.strip_prefix("delegate ").and_then(|r| r.split(' ').next()) {
+                std::fs::create_dir_all(home.join("workspace/proposals").join(id)).unwrap();
+            } else if let Some(id) = line.strip_prefix("submit ") {
+                std::fs::create_dir_all(home.join("workspace/attempts").join(id)).unwrap();
+            } else if let Some(id) = line.strip_prefix("publish ") {
+                if self.p.root.join("fail-publish").exists() {
+                    return Ran { ok: false, stdout: String::new(), stderr: "undecided: the Host did not answer".into() };
+                }
+                std::fs::write(home.join("workspace/proposals").join(id).join("recipient-reference.json"),
+                    json!({"type":"minidregg-delegated-reference-v1","target":"77","capability":"88","proposal":id}).to_string()).unwrap();
             } else if line.starts_with("story join ") && self.p.root.join("fail-story-join").exists() {
                 return Ran { ok: false, stdout: String::new(), stderr: "refused: the Host was busy".into() };
             }
@@ -1565,6 +1681,40 @@ mod tests {
         assert_eq!(DoorConfig::load(&cfg).unwrap().room.map(|s| (s.author, s.name)), Some(("box".into(), "lobby".into())));
         std::fs::write(&cfg, r#"{"version":1,"room":{"founder":"box","name":"Lobby!"}}"#).unwrap();
         assert!(DoorConfig::load(&cfg).unwrap_err().contains("room is"));
+    }
+
+    #[test]
+    fn every_enrolled_member_holds_the_house_publications_once_per_world() {
+        let mut w = world("pubs", false);
+        std::fs::create_dir_all(w.p.config().parent().unwrap()).unwrap();
+        std::fs::write(w.p.config(), b"world one").unwrap();
+        std::fs::write(w.p.etc().join("house-publications"), "welcome box\nbad line here\nhouse-rules box\n").unwrap();
+        std::fs::write(w.p.root.join("fail-publish"), b"").unwrap();
+        let r = join("alice", KEY, Route::Free, false);
+        submit(&w, &r);
+        run(&mut w);
+        let count = |w: &Processor<Fake>, prefix: &str| w.ops.calls.borrow().iter().filter(|c| c.starts_with(prefix)).count();
+        let s = read_json(&w.request_path(r.id())).unwrap();
+        assert!(s["publications"]["welcome"]["error"].as_str().unwrap().starts_with("publish:"), "{s}");
+        assert_eq!(count(&w, "alice: import"), 0, "nothing imported before the publication is decided");
+        // the next run resumes: the delegation is not made again, the submit that reached the Host is retried exactly
+        std::fs::remove_file(w.p.root.join("fail-publish")).unwrap();
+        run(&mut w);
+        run(&mut w);
+        let s = read_json(&w.request_path(r.id())).unwrap();
+        assert_eq!((s["publications"]["welcome"]["joined"].as_bool(), s["publications"]["house-rules"]["joined"].as_bool()), (Some(true), Some(true)), "{s}");
+        let id = s["publications"]["welcome"]["id"].as_str().unwrap().to_owned();
+        assert_eq!(count(&w, &format!("box: delegate {id} welcome 4100 observe {}", PUBLIC_READ_MAX_COST.trim())), 1);
+        assert_eq!((count(&w, &format!("box: submit {id}")), count(&w, &format!("box: retry {id}")), count(&w, &format!("box: publish {id}"))), (1, 1, 2));
+        assert_eq!(count(&w, "alice: import welcome @welcome-reference.json"), 1);
+        let given = std::fs::read_to_string(w.p.home("alice").join("requests/welcome-reference.json")).unwrap();
+        assert!(given.contains(&id), "the member is handed the house's recipient reference: {given}");
+        // a re-genesis is a new world: handed again under a new id
+        std::fs::write(w.p.node_state(), r#"{"createdUtc":"2026-11-01T00:00:00Z"}"#).unwrap();
+        run(&mut w);
+        let s = read_json(&w.request_path(r.id())).unwrap();
+        assert_ne!(s["publications"]["welcome"]["id"].as_str().unwrap(), id);
+        assert_eq!(count(&w, "alice: import welcome"), 2);
     }
 
     #[test]
