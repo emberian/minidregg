@@ -187,9 +187,14 @@ stay valid when a candidate directory is copied; the absolute role, client and
 provenance references in its manifest must be relocated together
 (`check-tamper.sh` does this for its copy).
 
-**Hot-swap overlays.** `lane-build.sh overlay BASE OUT ROLE...` (over `package.py --overlay`)
-makes OUT from a candidate BASE with ROLE's binaries rebuilt at the lane's commit, for testing
-between cuts; it is never a READY cut. A role's whole build family is swapped or the overlay is
+**Hot-swap overlays.** `lane-build.sh overlay BASE PARENT LABEL ROLE...` (over `package.py
+--overlay`) makes `PARENT/<id>` from a candidate BASE with ROLE's binaries rebuilt at the lane's
+commit, for testing between cuts; it is never a READY cut. `<id>` is 12 hex, the candidate id
+`ship.sh` takes: the first 12 hex of the SHA-256 of its `provenance.json` as canonical JSON
+(sorted keys, no spaces) without `.overlay.id`, `.builtUtc` and each role's `.overlaidUtc`.
+Provenance names files relative to the candidate, so the id does not depend on where it lives,
+and the same overlay with the same LABEL twice is one id (the second is refused). LABEL is
+`.overlay.name`. An overlay is told from a cut by `provenance.json .overlay`, never by its name. A role's whole build family is swapped or the overlay is
 refused (every role of one crate, or `host` with `consent`), since one crate's binaries from two
 commits fail at run time. Untouched files are hard links of BASE, which is never written. Every
 pin is re-emitted by the packager: `manifest.json` (paths relocated to OUT), `SHA256SUMS` (BASE's
