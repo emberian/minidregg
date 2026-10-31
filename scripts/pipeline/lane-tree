@@ -24,6 +24,7 @@
 #   LAKE_CACHE_DIR      the box's ONE Lake artifact cache; LAKE_ARTIFACT_CACHE=true for every pooled build
 #   LANE_POOL_WARM      optional: a built tree kept current at main (hbox: the integration tree); acquire
 #                       links its newer outputs into the tree it hands out, so a lane starts warm at main
+#                       (LANE_POOL_NO_WARM=1 in the caller's environment skips that while the source builds)
 #
 # Sharing over isolation (ember, 2026-10-28: "we'd rather risk accidental interference, which is easy to
 # converge"): trees are reused lane after lane and every build shares the box's artifact cache, so a lane
@@ -115,7 +116,8 @@ case ${1:-} in
       git -C "$t" checkout -q -f --detach "$ref" || die "cannot check out $ref"
       git -C "$t" clean -q -fd -e .lake
     fi
-    warm "$t" "${LANE_POOL_WARM:-}"
+    # LANE_POOL_NO_WARM=1: the warm source is mid-build (its outputs would be torn); take the tree as it is
+    [ "${LANE_POOL_NO_WARM:-0}" = 1 ] || warm "$t" "${LANE_POOL_WARM:-}"
     touch "$t"
     echo "$t" ;;
   warm)
