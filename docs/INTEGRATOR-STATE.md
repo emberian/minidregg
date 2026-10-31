@@ -9,7 +9,7 @@ retired-agent hook names the live integrator to anyone who messages the old id).
 integrator; the integrator merges onto `integration/staging`, cuts batch candidates on hbox, gates them, moves main to
 gated candidates and names candidates to infra and the explorer.
 
-## Now (2026-10-31 09:35 EDT)
+## Now (2026-10-31 09:55 EDT)
 
 - **ember (10-31 09:10, via root): no rehearsal cut until she says.** Make the system as good as it can be: keep batching,
   gate once per batch, keep the newest green candidate as the fallback. Priorities: repair Hermes (batch 5's j14
@@ -23,13 +23,17 @@ gated candidates and names candidates to infra and the explorer.
   submitted (lookup `not-submitted`), and the write error was dropped; c88b88755 (batch 7) now surfaces it as writeError.
   Forge composed c-1c15-d1 PASSES every phase (residents, restart included). Umbrella-tree on batch 5: rc=0, 0 reds
   (TokenCensus fixed); its fixture re-record eb5cf8f8a is merged (staging 72ad281c5).
-- **Batch 6 74e1cfa10: READY 09:31** (host 2,165 s; consent, rust, pack rc=0). gate15 running since 09:32 (PID file
-  $I/gate-74e1.pid); its umbrella-tree is running in umbrella-src. Named to the explorer, exorcist (row 8), perf-apps and
-  infra (forge composed). Carries perf-apps b1, refusal clauses, the resource-id fix, the apps-e2e request file, exorcism
-  (no fsync; Store frame v2 8b49bf1e2/fe77ab521; 019f2e56f), and perf-client (residents end when their storageRoot goes).
+- **Batch 6 74e1cfa10: READY 09:31** (host 2,165 s, of which 1,471 s idle behind batch 5's umbrella seats: fixed by
+  iter-speed 0f67c94b7, batch 7). gate15 (PID file $I/gate-74e1.pid) so far: enrol PASS, tour 73/73, hbox composed rooms/
+  churn/documents/apps/connector PASS, residents UNKNOWN on hbox (forge decides), j14-apps FAIL with the same Hermes
+  final-say refusal as batch 5. Umbrella-tree running in umbrella-src. Exorcist measured it against batch 5: signed read
+  wall 42 -> 32 ms, operator CPU 27.8 -> 15.0 ms. perf-apps: EtherCalc create-to-first-page 53 s (256 s on 10-29), warm GET
+  340 ms, of which ~170 ms is the SUBMIT Host turn (hot-path's).
+- **Read-path GET contract** (root's question to ember): codex astra NEEDS-CHANGE, sent to root 09:50 (scratchpad
+  astra-get.txt). The deciding finding: per-session deferred debt is unsound as payment; it needs reserved payer-level credit.
 - **Batch 7 (staging b1bbe2369)**: resident final writeError c88b88755, demo-reds 58c17b1de, perf-client f95edc7bf +
   b34173dad (candidate ssh wrapper) + 394039fb1 (one shared codec Host per box under split tenancy), apps-e2e 78a20cb56,
-  perf-apps b2 05c2b208b, hot-path a55855f18, perf-client 5415aecf7, iter-speed Mathlib import trim ee7a25ca7 (Host.Main 3,930 -> 2,895 modules; Pratt certificate for mersenne127P_prime; audit sound, pins only shrank), app-reds c0a49c8d7 (an argument object keyed `path` is an argument: Davros qualify's declaration-invalid).
+  perf-apps b2 05c2b208b, hot-path a55855f18, perf-client 5415aecf7, iter-speed Mathlib import trim ee7a25ca7 (Host.Main 3,930 -> 2,895 modules; Pratt certificate for mersenne127P_prime; audit sound, pins only shrank), app-reds c0a49c8d7 (an argument object keyed `path` is an argument: Davros qualify's declaration-invalid), iter-speed seat weights 0f67c94b7, perf-apps docs a7511c500; app-reds ecf4b917d merged as superseded by staging's 6cae27559 (staging ddc2e8863).
 - **FORMAT batch (later, one genesis, after iter-speed's seam 1)**: hot-path row 11 + Book entries migration +
   private-cells FORMAT (a) (eventHistory, authority to the trie root, mask []) + KeptCell Aux cache + fixture re-record.
 - Explorer on batch 5 vs 4: fsyncs 0; 128-ref credit 6.9 s -> 0.35 s; idle catch-up 61 s -> 0.36 s; first read after
