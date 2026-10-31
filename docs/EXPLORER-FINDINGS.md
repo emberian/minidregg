@@ -2,7 +2,7 @@
 
 Present-state table, rewritten whole at each batch. Lane `lane/explorer`. Subject: candidate
 be4ef7510 (hbox `/home/hbox/lanes/integ/candidates/be4ef751074ca28c7d306c2f2bcf61cda03893c8`),
-explored as test members only. Batch 4, 2026-10-30.
+explored as test members only. Batch 5, 2026-10-30.
 
 ## Worlds (all on hbox, all mine; torn down when the lane ends)
 
@@ -71,6 +71,17 @@ Worlds x1, x2, xw1, xweb and the e2e workers are down (x1's down listed one surv
 | G0 | E1 confirmed closed in a scratch world: with the policy pinned and funding 1,225,000, `bend publish` then `bend run tally` are admitted in under 1 s; one run costs 121,779 (10 runs fit the grant). A repeated identical `bend run` is refused with the exact-retry guard (`--again true`). | n/a |
 | G1 | A second member publishing the identical `Tally.obend` (`bend publish tally @Tally.obend --entry tally`) is refused `conflict: transaction identity conflict (phase replay)`; the package is already on the chain, yet the member then runs it fine. The refusal should say the package is already published. | kernel/shell refusal rendering |
 | G2 | `bend answer SLOT @file` by the decider with a wrong reply shape is refused `Refusal.responseType "reply"`; a non-decider is refused `notDecider` (good, by name). The decider message does not say what shape the slot wants. Await deadlines are heights (62 against a current 61): on a busy world the window can pass between `await` and `answer`. | shell/bend docs |
+
+
+### Bend happy path, restart in flight, web pass (x3)
+
+| id | repro | owner |
+|---|---|---|
+| G1, G2 | fixed on origin/lane/app-reds (hint text after the Host refusal); G2 does not name the slot's actual type (needs a Host query). | app-reds / Host |
+| G3 | Happy path proven: the `Tally` reply type is `Reply{amount: Nat}`, so the decider answers with `{"reply":{"tag":"record","fields":[{"name":"amount","value":{"tag":"natural","value":"7"}}]}}`, then `bend deliver OBJECT TX` resumes it (`total=7`, version 2, a new await). BUT with the default purse a `bend deliver` is refused `Refusal.awaitsFunding 60886 63454`: the first leg runs and answers, the resume cannot be funded. `bend run ... --deposit 200000` resumes fine. A default `bend run` cannot finish one answer; the demo's "10 runs" grant therefore buys 10 first legs, not 10 tallies. | bend defaults (`activity_world.py` policy, `bend run` default deposit) |
+| G4 | Two height scales: a run/answer/deliver receipt says height 86/87/88 while `bend await` in the same minute says height 96 and deadline 99 (about +10). The await window is `patience: 4`; on a busy world (two writers) `await` read height 78 against deadline 77 yet the answer was still admitted, so the printed heights are not the clock the deadline is judged in. Not shown too tight in practice, but unreadable. | shell `bend await` rendering |
+| G5 | Store restart with a `bend answer` in flight: the in-flight call gets a clean `cannot connect`; the retry after the restart is admitted once; a third try is `conflict: transaction identity conflict (phase replay)` (same unhelpful wording as G1 for a double answer). Nothing doubled. | refusal wording, app-reds |
+| G6 | Web as member (alice, bob over the dev helper): login 303, `/doc/new` 200 (8.7 s the first time), append 0.7 s, `/doc/webdoc` shows the text, `/bend` lists t1..t4 with their awaits, bob gets 404 for alice's doc (`no usable workspace reference`), anonymous `/doc/webdoc` 404. A re-posted append form appends again (no idempotency on a repeated form; two distinct proposals). `POST /verb/credit` without an alternative returns 400 `which alternative of the usage?`. | web (idempotent forms: decision) |
 
 ## Exercised and held
 
