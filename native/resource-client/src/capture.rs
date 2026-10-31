@@ -58,7 +58,12 @@ fn contents(mut file: File) -> Vec<u8> {
 
 /// Run `body` with stdout and stderr captured: (its value, stdout, stderr).
 pub(crate) fn streams<T>(body: impl FnOnce() -> T) -> std::io::Result<(T, Vec<u8>, Vec<u8>)> {
-    let (out, err) = (anonymous()?, anonymous()?);
+    let (value, out, err) = streams_into(anonymous()?, anonymous()?, body)?;
+    Ok((value, contents(out), contents(err)))
+}
+
+/// Run `body` with stdout and stderr pointed at `out` and `err`, which are handed back.
+fn streams_into<T>(out: File, err: File, body: impl FnOnce() -> T) -> std::io::Result<(T, File, File)> {
     let _ = std::io::stdout().flush();
     let saved_out = redirect(&out, 1)?;
     let saved_err = match redirect(&err, 2) {
@@ -73,7 +78,7 @@ pub(crate) fn streams<T>(body: impl FnOnce() -> T) -> std::io::Result<(T, Vec<u8
     let _ = std::io::stderr().flush();
     restore(&saved_err, 2);
     restore(&saved_out, 1);
-    Ok((value, contents(out), contents(err)))
+    Ok((value, out, err))
 }
 
 /// `mini COMMAND --NAME VALUE ...` in this process: its exit code, stdout and
@@ -86,16 +91,22 @@ pub(crate) fn command(command: &str, flags: &[(&str, OsString)]) -> std::io::Res
             .map(|(name, value)| (OsString::from(format!("--{name}")), value.clone()))
             .collect(),
     };
-    ended(|| Ok(args))
+    ended(|| Ok(args), None)
 }
 
 /// `mini ARGV...` in this process, parsed as `main` parses its own arguments.
-pub(crate) fn argv(raw: Vec<OsString>) -> std::io::Result<(u8, Vec<u8>, Vec<u8>)> {
-    ended(|| crate::Args::parse_from(raw))
+/// With `sink`, stdout and stderr go to those files as they are printed and come back empty.
+pub(crate) fn argv(raw: Vec<OsString>, sink: Option<(File, File)>) -> std::io::Result<(u8, Vec<u8>, Vec<u8>)> {
+    ended(|| crate::Args::parse_from(raw), sink)
 }
 
-fn ended(args: impl FnOnce() -> crate::Result<crate::Args>) -> std::io::Result<(u8, Vec<u8>, Vec<u8>)> {
-    let (ending, mut stdout, mut stderr) = streams(|| {
+fn ended(args: impl FnOnce() -> crate::Result<crate::Args>, sink: Option<(File, File)>) -> std::io::Result<(u8, Vec<u8>, Vec<u8>)> {
+    let named = sink.is_some();
+    let (out, err) = match sink {
+        Some(files) => files,
+        None => (anonymous()?, anonymous()?),
+    };
+    let (ending, mut out, mut err) = streams_into(out, err, || {
         let _ = crate::take_command_ending();
         let _ = crate::take_host_decision();
         let _ = crate::take_line_refusal();
@@ -107,6 +118,12 @@ fn ended(args: impl FnOnce() -> crate::Result<crate::Args>) -> std::io::Result<(
         crate::main_ending(parsed, status)
     })?;
     // `main` prints its ending after the command returned; so does this.
+    if named {
+        out.write_all(ending.stdout.as_bytes())?;
+        err.write_all(ending.stderr.as_bytes())?;
+        return Ok((ending.code, Vec::new(), Vec::new()));
+    }
+    let (mut stdout, mut stderr) = (contents(out), contents(err));
     stdout.extend_from_slice(ending.stdout.as_bytes());
     stderr.extend_from_slice(ending.stderr.as_bytes());
     Ok((ending.code, stdout, stderr))
@@ -116,13 +133,10 @@ fn ended(args: impl FnOnce() -> crate::Result<crate::Args>) -> std::io::Result<(
 /// caller (the Hermes controller), so each is a frame instead of a fresh `mini`
 /// that re-reads its workspace, re-pins its Host and reconnects its residents.
 ///
-/// Descriptor 0 carries requests and 1 carries replies; both are moved aside
-/// at start, so what is printed between commands goes to standard error. A
-/// request is a u32 count of arguments, each a u32 length and its bytes, then
-/// the command's standard input as a u32 length and its bytes (big-endian);
-/// the command reads exactly those bytes, then end of file. A reply is the
-/// exit code (one byte), then stdout and stderr, each a u32 length and bytes.
-/// End of input between requests ends the process.
+/// Descriptor 0 carries requests and 1 carries replies (`mini_sdk::command_resident`
+/// is the wire); both are moved aside at start, so what is printed between
+/// commands goes to standard error. A command reads exactly its request's
+/// input bytes, then end of file. End of input between requests ends the process.
 #[cfg(unix)]
 pub(crate) fn serve() -> crate::Result<()> {
     use std::os::unix::ffi::OsStringExt;
@@ -179,8 +193,28 @@ pub(crate) fn serve() -> crate::Result<()> {
         if unsafe { libc::dup2(input.as_raw_fd(), 0) } < 0 {
             return Err(std::io::Error::last_os_error().to_string());
         }
+        let mut sink = Vec::with_capacity(2);
+        for _ in 0..2 {
+            let length = word(&mut requests).map_err(|e| e.to_string())?.ok_or("command-resident: truncated request")? as usize;
+            if length > 4096 {
+                return Err("command-resident: output path exceeds 4096 bytes".into());
+            }
+            let mut bytes = vec![0u8; length];
+            requests.read_exact(&mut bytes).map_err(|e| e.to_string())?;
+            sink.push(OsString::from_vec(bytes));
+        }
+        let open = |path: &OsString| -> std::io::Result<File> {
+            use std::os::unix::fs::OpenOptionsExt;
+            std::fs::OpenOptions::new().append(true).create(true).mode(0o600)
+                .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC).open(path)
+        };
+        let sink = match (sink[0].is_empty(), sink[1].is_empty()) {
+            (true, true) => None,
+            (false, false) => Some((open(&sink[0]).map_err(|e| e.to_string())?, open(&sink[1]).map_err(|e| e.to_string())?)),
+            _ => return Err("command-resident: name both output files or neither".into()),
+        };
         crate::VERIFY_HOST.store(false, std::sync::atomic::Ordering::Relaxed);
-        let ran = argv(raw);
+        let ran = argv(raw, sink);
         // Standard input is /dev/null again, and what the process's reader
         // buffered from this command's input is dropped, never the next one's.
         if unsafe { libc::dup2(null.as_raw_fd(), 0) } < 0 {
