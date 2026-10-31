@@ -23,18 +23,21 @@ pub struct Attempt {
     dir: PathBuf,
     /// `None`: every file is on disk. `Some`: the bytes made here, and whether each is on disk yet.
     memory: Option<BTreeMap<String, (Vec<u8>, bool)>>,
+    /// Whether the directory may hold files this process did not make: it existed when the
+    /// attempt began, or a path was handed out. Until then a memory attempt asks the disk nothing.
+    shared: bool,
 }
 
 impl Attempt {
     /// Files created durably in `dir`, which exists.
     pub fn disk(dir: &Path) -> Attempt {
-        Attempt { dir: dir.to_owned(), memory: None }
+        Attempt { dir: dir.to_owned(), memory: None, shared: true }
     }
 
     /// Files kept in this process; `dir` (which need not exist) is where they are written when
     /// one is asked for by path.
     pub fn memory(dir: &Path) -> Attempt {
-        Attempt { dir: dir.to_owned(), memory: Some(BTreeMap::new()) }
+        Attempt { dir: dir.to_owned(), memory: Some(BTreeMap::new()), shared: dir.exists() }
     }
 
     pub fn dir(&self) -> &Path {
@@ -52,7 +55,7 @@ impl Attempt {
             None => durable::create_new(&path, bytes, Perm::Umask)
                 .map_err(|e| Error(format!("cannot create {}: {e}", path.display()))),
             Some(files) => {
-                if files.contains_key(name) || path.exists() {
+                if files.contains_key(name) || (self.shared && path.exists()) {
                     return Err(Error(format!("refusing to replace {}", path.display())));
                 }
                 files.insert(name.to_owned(), (bytes.to_vec(), false));
@@ -63,7 +66,7 @@ impl Attempt {
 
     /// Whether `name` exists.
     pub fn exists(&self, name: &str) -> bool {
-        self.memory.as_ref().is_some_and(|files| files.contains_key(name)) || self.dir.join(name).exists()
+        self.memory.as_ref().is_some_and(|files| files.contains_key(name)) || (self.shared && self.dir.join(name).exists())
     }
 
     /// The bytes of `name`: made here, or read from the directory.
@@ -71,12 +74,16 @@ impl Attempt {
         if let Some((bytes, _)) = self.memory.as_ref().and_then(|files| files.get(name)) {
             return Ok(Cow::Borrowed(bytes));
         }
+        if !self.shared {
+            return Err(Error(format!("{} was not made", self.dir.join(name).display())));
+        }
         crate::fsread::read_regular(&self.dir.join(name), 0, READ_LIMIT).map(Cow::Owned).map_err(|e| Error(e.to_string()))
     }
 
     /// `name` as a file in the directory, written there first when it was made in memory.
     pub fn path(&mut self, name: &str) -> Result<PathBuf> {
         let path = self.dir.join(name);
+        self.shared = true;
         if let Some(files) = &mut self.memory {
             if let Some((bytes, written)) = files.get_mut(name) {
                 if !*written {
@@ -92,6 +99,7 @@ impl Attempt {
 
     /// Where another process writes the new file `name`; the directory exists when this returns.
     pub fn output(&mut self, name: &str) -> Result<PathBuf> {
+        self.shared = true;
         if self.memory.is_some() {
             write_private_dir(&self.dir)?;
         }
@@ -100,6 +108,7 @@ impl Attempt {
 
     /// Every file of the attempt in its directory; returns the directory.
     pub fn materialize(&mut self) -> Result<&Path> {
+        self.shared = true;
         let names: Vec<String> = self.memory.as_ref().map(|files| files.keys().cloned().collect()).unwrap_or_default();
         if self.memory.is_some() {
             write_private_dir(&self.dir)?;

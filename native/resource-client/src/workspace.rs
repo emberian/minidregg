@@ -5673,10 +5673,17 @@ fn retain_seen_value(root: &Path, name: &str, value: &Value) -> Result<()> {
     }
     private_dir(&dir)?;
     let path = seen_path(root, name)?;
-    crate::fsio::replace_private(
-        &path,
-        &serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?,
-    )
+    let bytes = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
+    // A page read again at the same height and roots is the same snapshot: replacing it with its
+    // own bytes is a durable rename for nothing.
+    let private = fs::symlink_metadata(&path).is_ok_and(|meta| {
+        use std::os::unix::fs::MetadataExt;
+        meta.is_file() && meta.mode() & 0o077 == 0 && meta.uid() == unsafe { libc::geteuid() }
+    });
+    if private && crate::fsio::read_bounded(&path, MAX_SEEN as usize).is_ok_and(|held| held == bytes) {
+        return Ok(());
+    }
+    crate::fsio::replace_private(&path, &bytes)
 }
 
 fn text_argument(action: &Value) -> Result<String> {

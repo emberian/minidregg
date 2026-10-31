@@ -192,14 +192,30 @@ Twins still on files (not yet folded into `Flow::observe`): `query_batch_once` (
 enrollment observation in participant_enrollment.rs each hand-roll the observe step; chat keeps
 its newest read per label on disk (`chat::signed_read`, materialized on purpose).
 
+## After the bus: probes and the seen snapshot (dde0f4463, 697d8dd4f)
+
+A fresh memory attempt no longer probes its (nonexistent) directory per name (statx 57 to 44 per
+read), and `doc show` leaves seen/NAME.json alone when the snapshot is byte-identical (the durable
+rename was 9% of the resident's profile on ZFS). Resident task-clock per warm `doc show`
+(`/ci/exo/tc.sh`, perf stat, 4 alternated rounds of 150, load 9-19): before the bus 2.0-2.3 ms,
+bus 1.9-2.6 ms, bus + these 1.0-2.1 ms. At that load a warm `doc show` is 5.6-8.4 ms wall end
+to end (8.0-9.6 ms single runs), against 13.7-24 ms at load 22-27 earlier today: hbox load moves
+these numbers more than any one change; compare only alternated rounds.
+
+Install each hbox build into a NEW directory (/ci/exo/<name>-ssh/bin): `cp` onto a binary a
+resident runs fails with ETXTBSY, and onto one no resident runs it silently replaces it.
+
 ## Next: what is left of a `doc show`
 
-- statx 57 per read in the resident: `host_selection::select_semantic` stats the Host image on
-  every codec frame, and other per-op metadata checks. Find which are re-validating something
-  that cannot have changed within one command.
-- Host ops about 8 ms (op 144 1.1 once per resident until perf-client's d035d8250 makes it per
-  command again, op 4 2.2, op 5 5.1 at load 27): `checkGrants`, the recomputed challenge,
-  `loadPolicy`; the read-path Lean fixes are written, see above. Consent 2 x 1.2 ms (perf-client).
+- Host ops are most of the wall now: op 4 about 2.2 ms, op 5 about 5 ms at load 27 (less at
+  low load), op 144 once per command after perf-client's d035d8250. In op 5: `checkGrants`
+  (`capabilityEvidenceChecked`), the challenge recomputed inside op 5, `loadRoots`/`loadPolicy`,
+  `step`. Lean; needs a native Host build (native-loop, about 7 minutes in a pool tree).
+- Consent 2 x 1.2 ms per read (perf-client's).
+- Resident: statx 44 per read, most of them the pinned config (16) and the Host image (10)
+  re-checked per codec frame and session op within one command.
+- The twins on files: `query_batch_once` and participant_enrollment's observation hand-roll
+  `Flow::observe`; fold them onto `Flow` over a memory attempt.
 
 ## Other open items
 
