@@ -302,12 +302,12 @@ def NativeConfig.initialize (config : NativeConfig) (seedBytes : List UInt8) : I
     return parseCasOutput output
   catch error => pure (.uncertain s!"native initialize unavailable: {error}")
 
-/-- The key file must hold exactly 32 bytes. Its 0600 mode is checked by the
-bootstrap that created it and by the operator; Lean reads, never writes it. -/
 /-- The MAC keys this process has read, by file: a Store's key is written once at bootstrap,
 so it is read once per process, not on every Store call. -/
 initialize macKeys : IO.Ref (List (System.FilePath × MacKey)) ← IO.mkRef []
 
+/-- The key file must hold exactly 32 bytes. Its 0600 mode is checked by the
+bootstrap that created it and by the operator; Lean reads, never writes it. -/
 def NativeConfig.readKey (config : NativeConfig) : IO (Except String MacKey) :=
   try
     if let some key := (← macKeys.get).lookup config.key then return .ok key
