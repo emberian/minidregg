@@ -1717,9 +1717,11 @@ def idealSetting {Item : Type} (serve : Serve W Item) : HidingSetting W 1 (funs 
   rounds := 1
   fields := Witness.slot1
 
-/-- **Joint premise inhabitation** at one setting: the custody PRF (gap 0
-against every test: the ideal function is the enumeration, so the hop is
-exact), a key, the bound's side conditions at `λ = 1`,
+/-- **Joint premise inhabitation** at one setting, the random-function pole
+(not the deployed custody PRF): the custody function is the ideal one, so
+`CustodyPrf` holds at gap 0 against every test and the hop is exact. At a real
+PRF the budget is the efficiency class and `reduction` is the open
+concrete-security premise. Also a key, the bound's side conditions at `λ = 1`,
 `queries = 0`, `versions = rounds + 1 = 2`, a budget admitting every
 distinguisher, and the pair attack's birth, hidden patches, differing effects,
 legality and hidden difference. -/
@@ -1738,10 +1740,11 @@ theorem jointPremises_inhabited {den : Nat} (denominator : 0 < den) :
     fun masks₀ => ⟨(idealSetting (rootServe W)).pairAttack_legal S bornS hidden₀ hidden₁ masks₀,
       (idealSetting (rootServe W)).pairAttack_hiddenDiff S bornS hidden₀ hidden₁ differ masks₀⟩⟩
 
-/-- **What stays open** at that setting: the three hybrids. Given them,
-`RatchetHidingGoal` of `real` follows, every other premise (the PRF and its
-reduction obligation included, the budget being every test) supplied by
-`jointPremises_inhabited`. -/
+/-- **What stays open** at the random-function pole: the three hybrids. Given
+them, `RatchetHidingGoal` of `real` follows, every other premise supplied by
+`jointPremises_inhabited` (the reduction obligation is trivial only because the
+budget is every test, which the ideal custody function allows; at a real PRF
+`reduction` stays open as the concrete-security premise). -/
 theorem idealGoal_of_open {den : Nat} (denominator : 0 < den)
     (simulated ideal : (idealSetting (rootServe W)).Strategy → Bool → Fin (idealSetting (rootServe W)).tapes → Bool)
     (zk : ∀ a, (idealSetting (rootServe W)).Legal a → True → ∀ b,
