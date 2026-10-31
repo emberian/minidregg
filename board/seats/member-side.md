@@ -49,6 +49,10 @@ resident footprint (a few MB per member), web pages.
   fuel-structural walk up the chain (`walk_iff`; kernel `decide` still reduces it); `authStateOfFast`/csimp/
   `planeKeys` deleted. Statements kept (covers lemmas take any finite cover: stronger). Host-execution reviewed.
   Whole tree green on persvati (10,408 jobs). By reading: projection O(cell) -> O(1), revocation check O(log n).
+- Red fixed (86c9dbddb): ed875b899's untracked refresh made `Loaded.replay` refuse every new record ("durable log
+  is not a turn log: a verification walk carries no World"), so the provider died mid-consent and j14-apps
+  `mini apps bootstrap` refused on 76511e768. `replay` now refuses only a held -> lost track. Lean green; first
+  end-to-end run is apps-hermes' rerun on dregg-build2 /srv/worlds/j-sb1 (afb920b22b17049cd told).
 
 ## Numbers
 - hbox, noisy; batch 8 against batch 7, interleaved: `doc new` 476 vs 614 ms wall (Host 254 vs 346 ms, consent
@@ -61,7 +65,7 @@ resident footprint (a few MB per member), web pages.
   236 of 2,466 samples (9.6%) of a batch-8 provider's `doc new`. There is no end-to-end after-number yet (see Next 1).
 
 ## Next (in order)
-1. Measure on the first main candidate (build-loop sends its path; measure on persvati): a provider's `doc new`
+1. Confirm 86c9dbddb end to end (apps-hermes' bootstrap rerun). Then measure on the first main candidate (build-loop sends its path; measure on persvati): a provider's `doc new`
    catch-up profile and wall, against the batch-8 numbers above. That is the after-number for rows 16 and 19,
    43995c7f2 (codec order check) and 76511e768 (projection). Expect no `planeKeys`/`supportFast`/`WorldTrack`
    frames; the roots (`rootCached`, flat aux: decode + whole salted tree per root read) remain until FORMAT (a).
