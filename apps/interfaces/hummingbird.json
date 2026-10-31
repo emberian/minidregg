@@ -2,8 +2,8 @@
   "format": "mini-app-interface-v1",
   "name": "hummingbird",
   "interfaceVersion": 1,
-  "appId": "4mfserfc04wtcevvgn0jw27hvwfntmt8j468y3ma55kj8d5tj9kh",
-  "packageId": "9365130605f1998f3d4aea205d8768ae",
+  "appId": "434g078hse54h0tt189hsyp2stf7n7rap8uxwjf3dyq2zvymrx0h",
+  "packageId": "c7287dfbae2796cd283a32452d2395c7",
   "appVersion": "0.4.1",
   "status": "prototype-unqualified",
   "limits": {
@@ -197,10 +197,10 @@
     "kind": "member-session"
   },
   "sources": [
-    "package:9365130605f1998f3d4aea205d8768ae/opt/app/lib/tracker.js",
-    "package:9365130605f1998f3d4aea205d8768ae/opt/app/lib/dashboard.js",
-    "package:9365130605f1998f3d4aea205d8768ae/opt/app/lib/metric.js",
-    "package:9365130605f1998f3d4aea205d8768ae/opt/app/node_modules/socket.io/package.json"
+    "package:c7287dfbae2796cd283a32452d2395c7/opt/app/lib/tracker.js",
+    "package:c7287dfbae2796cd283a32452d2395c7/opt/app/lib/dashboard.js",
+    "package:c7287dfbae2796cd283a32452d2395c7/opt/app/lib/metric.js",
+    "package:c7287dfbae2796cd283a32452d2395c7/opt/app/node_modules/socket.io/package.json"
   ],
   "$defs": {}
 }
