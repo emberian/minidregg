@@ -278,7 +278,9 @@ done); logs go to `/ci/hpc` (never `/home/hbox/lanes/hpc`, which was cleared); p
    - Measure with `scripts/perf/flatness-bench.py` and profile with `perf record --call-graph
      dwarf` plus `--symfs` (the Host runs from a memfd; see `/ci/hpc/fby/run.sh`).
 2. **Row 4 slice 2 and row 11, one format change** (one epoch bump with private cells,
-   a507e11e0d0ca4a6a, together with their private-cell root; agreed, and theirs is not
+   now a30875aaf31364697: they send their FORMAT sha (AuxCache in Materialized, masked-trie
+   roots, new PersistedCodecTags), we rebase row 11 onto it, and the integrator lands the pair with one
+   genesis. Row 11 persists no cell root or Materialized field (answered 10-31); together with their private-cell root; agreed, and theirs is not
    imminent): the checkpoint carries the session indexes and the certificates that read the
    state at their height (issues, reserves, releases, grants). A Store with dispatch history
    then also starts at its checkpoint, and the open stops reading the whole log.
