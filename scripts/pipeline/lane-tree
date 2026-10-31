@@ -136,6 +136,7 @@ case ${1:-} in
     lane=${2:?LANE}; lock
     t=$(held_by "$lane"); [ -n "$t" ] || die "$lane holds no tree"
     tripwire "$t"
+    rm -f "$t/.minidregg-native-snapshot"   # lane-tree's own marker (native), never a lane's work
     save_diff "$t" "released by $lane"
     # a free tree is a clean tree: the work is in saved/ (above), never handed to the next holder
     git -C "$t" checkout -q -f HEAD && git -C "$t" clean -q -fd -e .lake
