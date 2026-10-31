@@ -19,6 +19,8 @@ module
 
 public import Compiler.Emit
 public import Theory.Bignum
+public import Mathlib.Tactic.LinearCombination
+public import Mathlib.Tactic.Linarith
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr

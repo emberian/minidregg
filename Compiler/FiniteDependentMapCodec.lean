@@ -12,6 +12,7 @@ module
 
 public import Compiler.Tower256ConcreteBackend
 public import Mathlib.Data.Finset.Sort
+public import Mathlib.Data.DFinsupp.Defs
 public import Std.Data.DTreeMap.Lemmas
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).

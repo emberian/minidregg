@@ -50,6 +50,8 @@ module
 public import Compiler.Air
 public import Mathlib.Algebra.BigOperators.Fin
 public import Mathlib.Data.Fin.VecNotation
+public import Mathlib.Tactic.Ring
+public import Mathlib.Tactic.NormNum
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr

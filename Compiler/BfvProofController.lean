@@ -20,7 +20,7 @@ file constructs no deployment and claims no arithmetic soundness, PCS,
 collision resistance, ROM, knowledge, privacy, or hiding theorem.
 -/
 import Compiler.BfvReceiptClause
-import Compiler.Tower256ConcreteBackend
+import Compiler.Tower256Backend
 
 namespace Minidregg.Compiler.BfvProofController
 
