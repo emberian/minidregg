@@ -97,3 +97,33 @@ Not a missing face: `/verb/apps` renders its leaves. `jweb-frontend.sh` split ea
 unquoted `for w in $alt`, so `[--json]` was a glob that matched a one-letter file named `j` in the working directory
 and turned `apps list [--json]` into `apps list j`. Globbing is now off around the split (ad58a4b9e). Reproduced
 the glob in bash; not re-run through the whole JWF step.
+
+## Since the four reds (2026-10-30 evening): what is landed, what is owed
+
+Landed on `lane/app-reds` (shas in order): 111985198 volumes are project-quota directories, not loop images
+(deploy/spk-host/VOLUMES.md); d786b5d2c the host-side volume custodian (`spk-host volume-custodian`, versioned
+`MINI-VOLUME/1` line grammar, statement C1 to C6) and 28be1c40c app uid floor 10000 for a custodian world;
+6be1c1ea7 + b1c30a598 the root-side controller-tool accepts `mini_app_<name>` typed tools (controller-world.py
+pin moved in install-user-world) and the vars-backing bind in install-user-world; f72223652 apps-e2e grant bound
+50000 (E7: the birth was refused no-grant at 1000); 35f008d3d bend refusals name the package already published and
+the response-type rule (G1, G2 partly); 45091c14e the intake spool directory is an operator input.
+
+hbox state I set up (not in git): `/tank/lanes/vars-backing.img` (24 GB sparse ext4, project quota) loop-mounted at
+`/var/lib/mini-vars-backing`, named by `/etc/mini-spk-volumes/vars-backing`; the mount is not in fstab, so a reboot
+loses it and `install-user-world` then refuses by name. `/tank/mini-ingest` (root:root 0755) named by
+`/etc/mini-spk-volumes/ingest-scratch`: each world's intake spools to `/tank/mini-ingest/<store>`; /tank is the HDD
+mirror, so ingest through it is slower; candidates built before 45091c14e ignore the file.
+
+Diagnosed: the Davros control run's `controller-worker-prepare` refusal was my `grain-runtime` copy at mode 0775
+under hbox's umask 0002 (custody wants it unwritable by group); `/ci/hb-data/run.sh` installs it 0555. The next
+failure was the root-side tool whitelist (fixed above). gate14's j14 `insufficient scratch workspace` was hbox's
+root disk (36 GB free against the operator-appliance profile's 20 GiB decoded bound), not a layout or version
+mismatch.
+
+Owed: the live Hummingbird run (the foreground typed/_qualify tools are built and unit-tested; the rerun needs a
+current candidate, the old one was swept), then WBO and Scrumblr; `op66-plan` for EtherCalc and Etherpad on the demo
+world (waits for infra's rebuilt forge world, with the retained plan kept); E3 and E4 (why-clause and guard-rejection
+rendering, Lean/Host side, no owner); the G2 slot response type query; E7's live rerun on the explorer's side.
+
+Hazard: another process edited this worktree (resident `/var` check: os.rs, resident_launch.rs, volume_custody.rs,
+the fixture rename, the custodian unit template) and left it uncommitted; I did not take it.
