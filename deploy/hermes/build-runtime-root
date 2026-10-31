@@ -53,9 +53,10 @@ write_pins() { # OUT
   jq -n --arg commit "$(cat "$out/source/.hermes-agent-commit")" --arg patch "$(cat "$out/source/.mini-patch-sha256")" \
     --arg pyproject "$(sha "$out/source/pyproject.toml")" --arg lock "$(sha "$out/source/uv.lock")" \
     --arg entry "$(sha "$out/hermes-acp")" --arg runtime "$(sha "$out/grain-runtime")" --arg bridge "$(sha "$out/grain-provider-bridge")" \
+    --arg python "$(sed -n 's/^version_info = \([0-9]*\.[0-9]*\).*/\1/p' "$out/venv/pyvenv.cfg")" \
     --arg manifest "$manifest" --arg manifestSha "$(sha "$manifest")" \
     '{type:"mini-hermes-runtime-root-v1",hermesAgentCommit:$commit,miniPatchSha256:$patch,pyprojectSha256:$pyproject,
-      uvLockSha256:$lock,hermesAcpSha256:$entry,grainRuntimeSha256:$runtime,grainProviderBridgeSha256:$bridge,
+      uvLockSha256:$lock,pythonVersion:$python,hermesAcpSha256:$entry,grainRuntimeSha256:$runtime,grainProviderBridgeSha256:$bridge,
       candidateManifest:$manifest,candidateManifestSha256:$manifestSha}' >"$out/pins.json.tmp"
   chmod 0644 "$out/pins.json.tmp"; mv "$out/pins.json.tmp" "$out/pins.json"
   cat "$out/pins.json"
@@ -98,6 +99,11 @@ cat >"$out/hermes-acp" <<'ENTRY'
 # `--mini-sandbox-tools=file,terminal,code_execution` (the controller's grant
 # for this prompt; docs/HERMES-TOOLS-2026-10-27.md) adds exactly those
 # built-in toolsets, running in /scratch, local backend, bounded per call.
+# The venv's packages sit under lib/python<major.minor>/ and its interpreter is the host's /usr/bin/python3, so a
+# root built for one minor version cannot run on a host with another: name that, not an ImportError.
+want=$(sed -n 's/^version_info = \([0-9]*\.[0-9]*\).*/\1/p' /agent/venv/pyvenv.cfg)
+have=$(/agent/venv/bin/python -c 'import sys;print("%d.%d" % sys.version_info[:2])' 2>/dev/null)
+[ -n "$want" ] && [ "$want" = "$have" ] || { echo "hermes-acp: the runtime root was built for python ${want:-?} and this host's python3 is ${have:-absent}; rebuild the root on a host with python ${want:-?}" >&2; exit 69; }
 export HOME=/workspace HERMES_HOME=/workspace/.hermes PYTHONPATH=/agent/source PYTHONDONTWRITEBYTECODE=1 \
   XDG_CACHE_HOME=/workspace/.cache XDG_CONFIG_HOME=/workspace/.config XDG_DATA_HOME=/workspace/.local/share \
   HERMES_DISABLE_LAZY_INSTALLS=1 HERMES_MINI_TOOL_CATALOGUE=1
