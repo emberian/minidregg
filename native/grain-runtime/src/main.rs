@@ -6854,6 +6854,11 @@ impl Runtime {
             j
         };
         let process_first_operation_id = journal.next_operation_id;
+        // The test runtimes' `mini` are one-shot scripts; the resident gate has its own tests.
+        #[cfg(not(test))]
+        let custody_gate = Arc::new(custody_gate::CustodyGate::with_resident(&config.mini));
+        #[cfg(test)]
+        let custody_gate = Arc::new(custody_gate::CustodyGate::new());
         let mut rt = Self {
             config,
             config_path,
@@ -6865,7 +6870,7 @@ impl Runtime {
             hard_connection: Arc::new(AtomicBool::new(false)),
             signal_lock: Arc::new(Mutex::new(())),
             cancelled: Arc::new(AtomicBool::new(false)),
-            custody_gate: Arc::new(custody_gate::CustodyGate::new()),
+            custody_gate,
             custody_exit_reaped: AtomicBool::new(false),
             application_api_send_gate: Arc::new(application_api_tools::ForwardSendGate::new()),
             completion_phase: Arc::new(AtomicU8::new(PHASE_IDLE)),

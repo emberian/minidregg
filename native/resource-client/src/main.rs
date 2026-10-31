@@ -2730,7 +2730,15 @@ fn run(mut args: Args) -> Result<()> {
         pin_remote_host(sha.to_str().ok_or("--host-sha256 must be UTF-8")?)?;
     }
     if let Some(socket) = &socket_argument {
-        let _ = SOCKET.set(path(socket.clone()));
+        // A process serving several commands (`capture`) pins one Host socket; another is refused.
+        let socket = path(socket.clone());
+        match SOCKET.get() {
+            Some(pinned) if pinned != &socket => return Err("Host socket differs from the one this process pinned".into()),
+            Some(_) => {}
+            None => {
+                let _ = SOCKET.set(socket);
+            }
+        }
     }
     #[cfg(unix)]
     if socket_argument.as_deref().is_some_and(|s| transport::is_remote(Path::new(s)))
@@ -3818,6 +3826,9 @@ fn main() -> ExitCode {
     let parsed = match env::args_os().nth(1) {
         Some(command) if command == OsStr::new("fleet-sign") => {
             fleet_sign::run(env::args_os().skip(2).collect())
+        }
+        Some(command) if command == OsStr::new("command-resident") && env::args_os().len() == 2 => {
+            capture::serve()
         }
         _ => Args::parse().and_then(run),
     };
