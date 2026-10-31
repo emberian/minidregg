@@ -104,6 +104,46 @@ def targetConfig {F : Type} [Field F] [DecidableEq F]
   config profile snapshot directory base step target
     ((WorldKindLawDependencies.loadTarget deployment directory target).map (·.additional) |>.getD [])
 
+/-- The committed law's predicate at `target` under the structural restrictions `additional`,
+read off the same graph load as `config`'s resolution, without a step: a receiving source cuts
+its projection to this law's reads before it builds the step (`predicateOf?_law`). -/
+def predicateOf? {F : Type} [Field F] (profile : PolicyCompilerProfile F)
+    (snapshot : Snapshot) (directory : Directory Nat CanonicalCellRegistry.registry) (target : Nat)
+    (additional : List PolicyRef) : Option Minidregg.Pred.Pred :=
+  match PolicyComponentResolution.loadTarget snapshot (payloadStore snapshot directory) profile.semantics
+      target resolutionBudget additional with
+  | .ok graph => some (ResolvedLawCompilation.predicate graph.resolved)
+  | .error _ => none
+
+/-- Every law `config` resolves, whatever its step and portal, is the one `predicateOf?` reads. -/
+theorem predicateOf?_law {F : Type} [Field F] [DecidableEq F] (profile : PolicyCompilerProfile F)
+    (snapshot : Snapshot) (directory : Directory Nat CanonicalCellRegistry.registry) (base : Portal)
+    (step : PolicyStepContext) (target : Nat) (additional : List PolicyRef)
+    (law : ComposedPolicyAdmission.PreparedLaw (config profile snapshot directory base step target additional)) :
+    predicateOf? profile snapshot directory target additional = some law.predicate := by
+  have loaded := law.graphExact
+  unfold predicateOf?
+  simp only [config] at loaded
+  rw [loaded]
+  rfl
+
+/-- `predicateOf?` at `targetConfig`'s structural restrictions. -/
+def targetPredicate? {F : Type} [Field F]
+    (deployment : CanonicalCellRegistry.Deployment) (profile : PolicyCompilerProfile F)
+    (snapshot : Snapshot) (directory : Directory Nat CanonicalCellRegistry.registry) (target : Nat) :
+    Option Minidregg.Pred.Pred :=
+  predicateOf? profile snapshot directory target
+    ((WorldKindLawDependencies.loadTarget deployment directory target).map (·.additional) |>.getD [])
+
+theorem targetPredicate?_law {F : Type} [Field F] [DecidableEq F]
+    (deployment : CanonicalCellRegistry.Deployment) (profile : PolicyCompilerProfile F)
+    (snapshot : Snapshot) (directory : Directory Nat CanonicalCellRegistry.registry) (base : Portal)
+    (step : PolicyStepContext) (target : Nat)
+    (law : ComposedPolicyAdmission.PreparedLaw
+      (targetConfig deployment profile snapshot directory base step target)) :
+    targetPredicate? deployment profile snapshot directory target = some law.predicate :=
+  predicateOf?_law profile snapshot directory base step target _ law
+
 /-- One law judgement: the resolved committed law of a configuration, with the compiler's verdicts
 on its step -- the compiler can lower the law (`supported`), every input the law reads is in range,
 and the field cast of those inputs is injective. These are exactly the premises under which the

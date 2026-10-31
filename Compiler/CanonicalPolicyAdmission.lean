@@ -213,6 +213,43 @@ theorem PolicyStepContext.ofPreparedTupleExact_eq
 /-- info: 'Minidregg.Compiler.CanonicalPolicyAdmission.PolicyStepContext.ofPreparedTupleExact_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms PolicyStepContext.ofPreparedTupleExact_eq
 
+/-- The same step with each projected state cut to `keys` (`Pred.State.restrict`); its roots,
+effect identity and semantics are the original's. A receiving source cuts to a superset of the
+committed law's reads, so the law's verdict is the original's (`Pred.eval_restrict_of_sub`). -/
+def PolicyStepContext.restrict (keys : List Minidregg.Pred.Slot) (context : PolicyStepContext) :
+    PolicyStepContext :=
+  ⟨context.preStateRoot, context.effectsDigest, context.semantics,
+    context.oldState.restrict keys, context.newState.restrict keys⟩
+
+/-- Cutting the projection is cutting the step: a receiving source may build only the demanded
+slots and still have exactly the original step's restriction. -/
+theorem PolicyStepContext.ofPreparedTupleExact_restrict
+    {Incidence : Type z}
+    {layout : Minidregg.Kernel.MultiCellHyperedge.CellLayout.{u, v, w, z} Incidence}
+    {Source : Type z}
+    {plan : Minidregg.Kernel.MultiCellHyperedge.PreparationPlan.{u, v, w, y, z} layout Source}
+    (keys : List Minidregg.Pred.Slot)
+    (project : Source →
+      ((incidence : Incidence) → Minidregg.Theory.Store.Store (layout.storeLayout incidence)) → State)
+    (semantics : Digest)
+    (prepared : Minidregg.Kernel.MultiCellHyperedge.PreparedTuple plan)
+    (pre : (incidence : Incidence) → Minidregg.Theory.CellState.Materialized (layout.materializer incidence))
+    (post : (incidence : Incidence) → Minidregg.Theory.Store.Store (layout.storeLayout incidence))
+    (preExact : ∀ incidence, pre incidence = prepared.pre incidence)
+    (postExact : ∀ incidence, post incidence = prepared.logicalPost incidence) :
+    ofPreparedTupleExact (fun source logical => (project source logical).restrict keys) semantics
+        prepared pre post preExact postExact =
+      (ofPreparedTupleExact project semantics prepared pre post preExact postExact).restrict keys :=
+  rfl
+
+theorem PolicyStepContext.restrict_roots (keys : List Minidregg.Pred.Slot) (context : PolicyStepContext) :
+    (context.restrict keys).preStateRoot = context.preStateRoot ∧
+      (context.restrict keys).effectsDigest = context.effectsDigest ∧
+      (context.restrict keys).semantics = context.semantics ∧
+      (context.restrict keys).oldState = context.oldState.restrict keys ∧
+      (context.restrict keys).newState = context.newState.restrict keys :=
+  ⟨rfl, rfl, rfl, rfl, rfl⟩
+
 theorem PolicyStepContext.prepared_tuple_exact
     {Incidence : Type z}
     {layout : Minidregg.Kernel.MultiCellHyperedge.CellLayout.{u, v, w, z} Incidence}
