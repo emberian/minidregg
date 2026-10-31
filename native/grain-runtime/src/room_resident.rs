@@ -328,18 +328,24 @@ fn close_refused_pending(config:&Config,journal:&mut ResidentState,state:&Path)-
 /// exact write record. Never an error for the driver: a notice that cannot be
 /// afforded is skipped, an undecided one is retried on a later pass, and no
 /// notice blocks or replaces a request's outcome.
+/// What an exact lookup after a failed notice step decides. Only a Host refusal skips the notice; a write
+/// the Host never received (`not-submitted`) is undecided and retried on a later pass, never skipped.
+fn notice_lookup_outcome(error: String, lookup: Result<Value>) -> resident_requests::Published {
+    match lookup {
+        Ok(lookup) if lookup["resolution"] == "performed" => resident_requests::Published::Done(lookup),
+        Ok(lookup) if lookup["resolution"] == "refused" =>
+            resident_requests::Published::Skipped(json!({"error":error,"lookup":lookup})),
+        Ok(lookup) => resident_requests::Published::Uncertain(format!("{error}; {}", lookup["resolution"])),
+        Err(lookup) => resident_requests::Published::Uncertain(format!("{error}; lookup {lookup}")),
+    }
+}
+
 fn publish_notices(room: &resource_tools::RoomToolsConfig, state: &Path) {
     let tools = resource_tools::RoomTools { config: room };
     let decided = |result: Result<Value>, op: &str, effect: &str| -> resident_requests::Published {
         match result {
             Ok(value) => resident_requests::Published::Done(value),
-            Err(error) => match tools.lookup_operation(op, effect) {
-                Ok(lookup) if lookup["resolution"] == "performed" => resident_requests::Published::Done(lookup),
-                Ok(lookup) if lookup["resolution"] == "refused" =>
-                    resident_requests::Published::Skipped(json!({"error":error,"lookup":lookup})),
-                Ok(lookup) => resident_requests::Published::Uncertain(format!("{error}; {}", lookup["resolution"])),
-                Err(lookup) => resident_requests::Published::Uncertain(format!("{error}; lookup {lookup}")),
-            },
+            Err(error) => notice_lookup_outcome(error, tools.lookup_operation(op, effect)),
         }
     };
     let outcome = resident_requests::publish_notices(state,
@@ -486,6 +492,16 @@ mod injection_tests;
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_notice_step_the_host_never_received_is_undecided_not_skipped() {
+        use resident_requests::Published;
+        let never = notice_lookup_outcome("reset".into(), Ok(json!({"resolution":"not-submitted","basis":"not-submitted"})));
+        assert!(matches!(never, Published::Uncertain(ref r) if r.contains("not-submitted")));
+        let refused = notice_lookup_outcome("no".into(), Ok(json!({"resolution":"refused","basis":"exact-operation-record"})));
+        assert!(matches!(refused, Published::Skipped(_)));
+        assert!(matches!(notice_lookup_outcome("x".into(), Ok(json!({"resolution":"performed"}))), Published::Done(_)));
+    }
+
     use super::*;
     #[test]
     fn resident_observation_height_does_not_trigger_another_paid_prompt() {
