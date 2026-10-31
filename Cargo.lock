@@ -935,6 +935,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "minidregg-mini-session-env"
+version = "0.1.0"
+dependencies = [
+ "sha2",
+]
+
+[[package]]
 name = "minidregg-mini-streams"
 version = "0.1.0"
 
@@ -955,6 +962,7 @@ name = "minidregg-mini-web-spawn"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "minidregg-mini-session-env",
  "minidregg-mini-streams",
  "serde_json",
  "sha2",
@@ -1020,6 +1028,7 @@ dependencies = [
  "libc",
  "minidregg-mini-keys",
  "minidregg-mini-sdk",
+ "minidregg-mini-session-env",
  "minidregg-mini-streams",
  "minidregg-pay-watcher",
  "ring",

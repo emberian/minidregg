@@ -357,21 +357,17 @@ impl Spawner {
 
     /// `mini web --body` as the member, serving the inherited listener on fd 3: the child's pid.
     /// The body is spawned directly, not through the wrapper, so it carries the member's delegated
-    /// consent selection itself (`delegated_consent_env`), as the wrapper exports it for a shell.
+    /// consent selection itself (`mini_session_env::delegated_consent`), as the wrapper exports it for a shell.
     pub fn body(&self, member: &Member, unit: &str, listener: &OwnedFd) -> Result<u32, String> {
         let (mini, host, config, socket, _wrapper) = self.paths();
-        let mut env = delegated_consent_env(&mini, &host, &config, &member.home)?;
-        // The box's shared codec Host, as the ssh wrapper selects it (`/etc/mini/session-codec`).
+        // The member's delegated consent and the box's shared codec Host, read as the ssh wrapper
+        // reads them (`mini_session_env`).
+        let mut selected = mini_session_env::delegated_consent(&mini, &host, &config, &member.home)?;
         if let Layout::Box(layout) = &self.layout {
-            if let Ok(line) = fs::read_to_string(layout.session_codec_file()) {
-                let socket = line.trim();
-                if !Path::new(socket).is_absolute() {
-                    return Err("/etc/mini/session-codec must name an absolute socket".into());
-                }
-                env.push(("MINI_CODEC_SOCKET", socket.to_owned()));
-                env.push(("MINI_CODEC_PEER_UID", "0".into()));
-            }
+            selected.extend(mini_session_env::shared_codec(&layout.session_codec_file())?);
         }
+        let env: Vec<(&str, String)> = selected.into_iter()
+            .map(|(name, value)| (name, value.to_string_lossy().into_owned())).collect();
         let mut command = self.command(member, unit, &env);
         command.arg(mini).arg("web").arg("--body").arg("--listen-fd").arg("3")
             .arg("--dir").arg(&member.workspace).arg("--home").arg(&member.home)
@@ -428,53 +424,6 @@ pub fn lifeline() -> Result<RawFd, String> {
         }
         Ok((fds[0], fds[1]))
     }).clone().map(|(read, _write)| read)
-}
-
-/// The delegated full consent selection for a member whose home holds `consent/peer.sock`.
-///
-/// Under split tenancy a member's account cannot read the operator's Store, so its full consent is
-/// answered by a socket-activated worker running as the Store operator (`mini
-/// serve-controller-consent`, the frame's mini-consent@NAME). The client takes that delegation only
-/// from these seven variables together: the listener (peer uid 0, because systemd creates it), the
-/// provider and config digests, and the three local consent paths. This is the same selection the
-/// frame's mini-shell-ssh exports for an ssh or browser shell. Without the socket (a box without
-/// delegation, a dev layout) it is empty and the body keeps the client's default.
-pub fn delegated_consent_env(mini: &Path, host: &Path, config: &Path, home: &Path)
-    -> Result<Vec<(&'static str, String)>, String> {
-    use sha2::{Digest, Sha256};
-    use std::os::unix::fs::FileTypeExt;
-    let socket = home.join("consent/peer.sock");
-    match fs::symlink_metadata(&socket) {
-        Ok(meta) if meta.file_type().is_socket() => {}
-        _ => return Ok(Vec::new()),
-    }
-    let consent = mini.with_file_name("minidregg-client-consent");
-    let digest = |path: &Path| -> Result<String, String> {
-        let bytes = fs::read(path).map_err(|e| format!("delegated consent: {}: {e}", path.display()))?;
-        Ok(Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect())
-    };
-    // The ship renders both digests once beside the socket (`consent/peer.pins`: one line,
-    // `CONSENT_SHA256 CONFIG_SHA256`), as the ssh wrapper reads them; without it, hash here.
-    let (consent_sha, config_sha) = match fs::read_to_string(home.join("consent/peer.pins")) {
-        Ok(line) => {
-            let hex = |s: &str| s.len() == 64 && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
-            let mut words = line.split_whitespace();
-            match (words.next(), words.next()) {
-                (Some(a), Some(b)) if hex(a) && hex(b) => (a.to_owned(), b.to_owned()),
-                _ => return Err("delegated consent: consent/peer.pins must hold two sha256 digests".into()),
-            }
-        }
-        Err(_) => (digest(&consent)?, digest(config)?),
-    };
-    Ok(vec![
-        ("MINI_CONSENT_SOCKET", socket.display().to_string()),
-        ("MINI_CONSENT_PEER_UID", "0".into()),
-        ("MINI_CONSENT_SHA256", consent_sha),
-        ("MINI_CONSENT_CONFIG_SHA256", config_sha),
-        ("MINI_LOCAL_HOST", host.display().to_string()),
-        ("MINI_CONSENT_HOST", consent.display().to_string()),
-        ("MINI_CONSENT_CONFIG", config.display().to_string()),
-    ])
 }
 
 /// A new pty: the master (close-on-exec) and the slave's path.
@@ -572,39 +521,6 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("mini-web-spawn-{}-{}", std::process::id(), crate::new_token().unwrap()));
         fs::create_dir_all(&dir).unwrap();
         dir
-    }
-
-    #[test]
-    fn delegated_consent_env_only_beside_a_consent_socket_and_pins_both_digests() {
-        use sha2::{Digest, Sha256};
-        // Short on purpose: the scratch binds a Unix socket, and macOS caps its path at 104 bytes.
-        let dir = std::env::temp_dir().join(format!("mws-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        let bin = dir.join("bin");
-        fs::create_dir_all(&bin).unwrap();
-        fs::write(bin.join("minidregg-client-consent"), b"provider").unwrap();
-        fs::write(dir.join("config.json"), b"{}").unwrap();
-        let (mini, host, config) = (bin.join("mini"), bin.join("minidregg-host"), dir.join("config.json"));
-        let home = dir.join("h");
-        fs::create_dir_all(home.join("consent")).unwrap();
-        assert!(delegated_consent_env(&mini, &host, &config, &home).unwrap().is_empty(), "no socket: no delegation");
-        fs::write(home.join("consent/peer.sock"), b"").unwrap();
-        assert!(delegated_consent_env(&mini, &host, &config, &home).unwrap().is_empty(), "a regular file is no socket");
-        fs::remove_file(home.join("consent/peer.sock")).unwrap();
-        let _listener = std::os::unix::net::UnixListener::bind(home.join("consent/peer.sock")).unwrap();
-        let env: BTreeMap<_, _> = delegated_consent_env(&mini, &host, &config, &home).unwrap().into_iter().collect();
-        let hex = |b: &[u8]| Sha256::digest(b).iter().map(|x| format!("{x:02x}")).collect::<String>();
-        assert_eq!(env.len(), 7);
-        assert_eq!(env["MINI_CONSENT_SOCKET"], home.join("consent/peer.sock").display().to_string());
-        assert_eq!(env["MINI_CONSENT_PEER_UID"], "0");
-        assert_eq!(env["MINI_CONSENT_SHA256"], hex(b"provider"));
-        assert_eq!(env["MINI_CONSENT_CONFIG_SHA256"], hex(b"{}"));
-        assert_eq!(env["MINI_LOCAL_HOST"], host.display().to_string());
-        assert_eq!(env["MINI_CONSENT_HOST"], bin.join("minidregg-client-consent").display().to_string());
-        assert_eq!(env["MINI_CONSENT_CONFIG"], config.display().to_string());
-        fs::remove_file(bin.join("minidregg-client-consent")).unwrap();
-        assert!(delegated_consent_env(&mini, &host, &config, &home).is_err(), "a socket without its provider refuses");
     }
 
     #[test]

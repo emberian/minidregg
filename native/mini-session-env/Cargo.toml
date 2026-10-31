@@ -1,0 +1,14 @@
+[package]
+name = "minidregg-mini-session-env"
+version = "0.1.0"
+edition = "2021"
+description = "A hosted member session's consent and codec selection from the box's files: one reading for the ssh wrapper (mini-line) and the web body (mini-web-spawn)."
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "mini_session_env"
+path = "src/lib.rs"
+
+[dependencies]
+sha2 = "=0.10.9"
