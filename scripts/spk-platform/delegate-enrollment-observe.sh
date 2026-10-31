@@ -203,7 +203,7 @@ if [ "$#" -eq 13 ] && [ "$1" = prepare ]; then
      child:$child,holder:$holder,hostSha256:$hostSha256,miniSha256:$miniSha256,
      configSha256:$configSha256,overlaySha256:$overlaySha256,
      callSha256:$callSha256,intentSha256:$intentSha256}' >"$attempt/pin.json"
-  chmod 600 "$attempt/pin.json"; sync -f "$attempt/pin.json" "$attempt/native/call.bin" "$attempt"
+  chmod 600 "$attempt/pin.json"
   echo "observe delegation prepared at $attempt; send once after review"
   exit 0
 fi
@@ -214,7 +214,7 @@ if [ "$#" -eq 2 ] && [ "$1" = send ]; then
     '{type:"mini-spk-enrollment-observe-send-v1",callSha256:$call}' >"$attempt/send-candidate.json"
   chmod 600 "$attempt/send-candidate.json"
   (set -C; cat "$attempt/send-candidate.json" >"$attempt/send-requested.json") || fail "send raced"
-  chmod 600 "$attempt/send-requested.json"; sync -f "$attempt/send-requested.json" "$attempt"
+  chmod 600 "$attempt/send-requested.json"
   "$mini" retry --attempt "$attempt/native" --mode submit --socket "$socket" ||
     fail "delegation uncertain; exact lookup only"
   echo "delegation sent; lookup exact receipt"
@@ -240,10 +240,9 @@ if [ "$#" -eq 2 ] && [ "$1" = lookup ]; then
       {type:"mini-spk-enrollment-observe-confirmed-v1",callSha256:$call,
        receipt:($o[0]|{transactionId,eventId,acceptedCount,imageBoundary})}' \
       >"$candidate"
-    chmod 600 "$candidate"; sync -f "$candidate"
+    chmod 600 "$candidate"
     ln "$candidate" "$attempt/confirmed.json" || fail "confirmed publication raced"
-    sync -f "$attempt/confirmed.json" "$attempt"
-    rm "$candidate"; sync -f "$attempt"
+    rm "$candidate"
   else
     private_file "$attempt/confirmed.json"
     jq -e --arg call "$(sha "$attempt/native/call.bin")" --slurpfile o "$latest" '
@@ -295,10 +294,8 @@ if [ "$#" -eq 2 ] && [ "$1" = lookup ]; then
       (.head.targets | index($resource) != null) and
       .head.verbs == ["observe"]' "$attempt/child-inspected-$suffix.json" >/dev/null ||
       fail "confirmed child grant differs"
-    sync -f "$attempt/child-inspected-$suffix.json"
     ln "$attempt/child-inspected-$suffix.json" "$attempt/child-inspected.json" ||
       fail "child readback publication raced"
-    sync -f "$attempt/child-inspected.json" "$attempt"
   fi
   private_file "$attempt/child-inspected.json"
   child=$(jq -er .child "$attempt/pin.json")

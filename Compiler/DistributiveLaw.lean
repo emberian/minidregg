@@ -3,7 +3,7 @@
 
 ## What this file is (KERNEL-NECESSITY §N4, designed in `docs/N4-DISTRIBUTIVE-LAW.md`)
 
-N3 (`Compiler/Signature.lean`) fixed the SYNTAX side: a polynomial signature `Σ`, its
+N3 (`Theory/Signature.lean`) fixed the SYNTAX side: a polynomial signature `Σ`, its
 initial algebra `Term S` (mathlib `WType`), and `fold_unique` — one induction. N4 adds the
 BEHAVIOUR side and the bridge between them. Over an abstract polynomial syntax functor `Σ`
 (a `Signature`) and an abstract polynomial behaviour functor `B` (a `PFunctor`, so that
@@ -41,18 +41,17 @@ N4 has no content at the sequential fragment; its content is the binary `join`, 
 ## Mathlib reuse (pin 1c2b90b / v4.30.0)
 
 `PFunctor` (`Obj`/`map`/`map_map`/`map_eq`/`fst_map`), `PFunctor.M` with `M.corec`,
-`M.dest`, `M.dest_corec`, `M.corec_unique`, `M.bisim`; from `Compiler.Signature`:
+`M.dest`, `M.dest_corec`, `M.corec_unique`, `M.bisim`; from `Theory.Signature`:
 `Signature`, `Term`, `Alg`, `fold`, `fold_mk`, `fold_unique`, `termAlg`. Mathlib at this pin
 has NO distributive law and NO bialgebra (`CategoryTheory/Distributive/` is distributive
 CATEGORIES; `RingTheory/Bialgebra/` is Hopf); `DistLaw`/`Bialgebra` are authored here.
 
 ## Residuals (prose tags, not stubs)
 
-  [N4-home]      This is candidate-independent content and belongs in `Theory/`, but
-     `Theory/` may import only Mathlib + Theory and the N3 engine (`fold`,
-     `fold_unique`) lives in `Compiler/Signature.lean`; re-deriving it in Theory would
-     be a twin. The move is relocating `Signature.lean` → `Theory/` (it imports Mathlib
-     only) and this file with it — an owner decision, not tonight's.
+  [N4-home]      This is candidate-independent content and belongs in `Theory/`. The N3
+     engine (`fold`, `fold_unique`) it builds on is already there (`Theory/Signature.lean`,
+     namespace still `Minidregg.Compiler`); this file imports only Mathlib and that
+     engine, so the remaining move is `git mv` of this file to `Theory/`.
   [N4-hyperedge-instance]  The kernel instance: `Kernel/Turn.lean`'s `Hyperedge` as the
      `ι`-ary joint shape over the Moore behaviour functor `Req → Obs × X` with cells as
      constants and the balance side-condition read off `Obs` (the half-edge must be
@@ -65,10 +64,10 @@ CATEGORIES; `RingTheory/Bialgebra/` is Hopf); `DistLaw`/`Bialgebra` are authored
 
 ## Boundary
 
-Imports Mathlib + `Compiler.Signature` only (Compiler may import Mathlib + Theory + Compiler).
+Imports Mathlib + `Theory.Signature` only.
 -/
 import Mathlib.Data.PFunctor.Univariate.M
-import Compiler.Signature
+import Theory.Signature
 
 namespace Minidregg.Compiler.DistributiveLaw
 

@@ -71,6 +71,7 @@ KEEP = set()
 PER_FILE = {
     "Compiler/Mersenne127.lean": ["import all Mathlib.NumberTheory.LucasLehmer"],
     "Kernel/GenericSimplex.lean": ["import all Init.Util"],
+    "Compiler/CredentialAuthorityDomainReceiver.lean": ["import all Init.Util"],
     "Host/CapacityJson.lean": ["import all Lean.Data.Json.Basic", "import all Init.Data.Nat.Bitwise.Basic",
                                "import all Init.Data.String.Search", "import all Init.Prelude",
                                "import Std.Data.TreeMap.Raw.Lemmas", "import Std.Data.String.ToNat"],

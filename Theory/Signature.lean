@@ -1,5 +1,5 @@
 /-
-# Compiler.Signature — N3 "one induction": initiality as LAW, over an abstract signature
+# Theory.Signature — N3 "one induction": initiality as LAW, over an abstract signature
 
 ## What this file is (KERNEL-NECESSITY §N3)
 
@@ -29,7 +29,10 @@ The one induction lives here, once (`fold_unique`, §4).
 
 ## Boundary
 
-Imports Mathlib only (Compiler may import Mathlib + Theory + Compiler).
+Imports Mathlib and `Theory.AxiomPin` only: candidate-independent, so it lives in `Theory/`
+(the Effects derivation engine, Compiler and Kernel all build on it). Its declarations keep
+their original namespace `Minidregg.Compiler` so every `open` downstream is unchanged; the
+namespace rename to `Minidregg.Theory` is a separate follow-up.
 -/
 module
 

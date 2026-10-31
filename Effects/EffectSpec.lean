@@ -1,10 +1,10 @@
 /-
-# `Effects/EffectSpec.lean` — the DERIVATION ENGINE's first declaration (ATLAS §7 keystone)
+# `Effects/EffectSpec.lean` — the DERIVATION ENGINE (ATLAS §7 keystone)
 
 **Substrate, said out loud: this file IS the derived path.** An `EffectSpec` is a
 DECLARATION — an operation vocabulary + its executor reading, nothing else. From that one
 declaration this file DERIVES (a) the IR term of an invocation, (b) the executor, (c) the
-first-order descriptor — all three as folds of `Compiler/Signature`'s initiality engine
+first-order descriptor — all three as folds of `Theory/Signature`'s initiality engine
 (REUSED, never re-derived) — and the laws come FREE: executor-equality by
 `agree_by_initiality` (any independent reading is FORCED to coincide — drift impossible by
 construction, exactly `Air`'s `eval_agrees_exec`), descriptor-faithfulness by the same
@@ -19,7 +19,7 @@ serializer, no per-effect proof anywhere — `derive` is a total function
   `State`, `sem : Op → State → State` (the declared reading of each op).
 * DERIVED IR: `sig` (the effect signature — one leaf `none` = done, one unary node per
   op — the free sequential effect IR), `Prog := Term sig` (mathlib `WType` via
-  `Compiler/Signature`), `derivedTerm o` (the invocation term).
+  `Theory/Signature`), `derivedTerm o` (the invocation term).
 * DERIVED executor: `derivedExecutor := fold execAlg`. `execHand` is an INDEPENDENT
   hand-recursion (the adversarial second implementation, the house pattern of `Air`'s
   `evalExec` / `Signature`'s `leafCount` — a witness, not a shipped twin);
@@ -34,43 +34,30 @@ serializer, no per-effect proof anywhere — `derive` is a total function
   the laws as PROOF FIELDS (the seed of the registry's packed-handler shape). A new
   effect is a DECLARATION; its artifacts and their theorems are a function application.
 
-## The first declaration — the kernel `move` as an effect
+## The first declaration and its keystone fields (ATLAS law 2)
 
-`moveEffect`: `Op := MoveArgs` (four scalars — `DecidableEq` + `Repr` + `Countable`, the
-N3-clean countable leaf alphabet, the exact opposite of `Signature.OpaqueSig`'s `2^ℵ₀`
-payloads), `sem := Kernel.move` (REUSED — the conservation spine). Derived end-to-end:
-the invocation term executes (balances computed on `Kernel.k0`, decided), the descriptor
-is literal data, conservation (`move_conserves`) rides the derived path unchanged, and
-the teeth bite (a ghost reading ≠ the derived executor; a tampered descriptor ≠ the
-effect).
-
-## Keystone fields (ATLAS law 2), BUILT
-
-* satisfiable — `derive moveEffect` exists and FIRES: the derived executor genuinely
-  moves balances on `k0` (decided); the compound program composes; `EffectSpec` is
-  premise-inhabited by a real declaration.
-* teeth — `ghost_not_derived` (a wrong reading differs from the derived executor,
-  witnessed) and `wrong_descriptor_not_effect` (a tampered opcode denotes a different
-  transformer); the agreement is non-vacuous: `execHand` is a genuinely independent
-  recursion and both readings compute.
+The first real declaration, the kernel's conserving `move` as an effect (`moveEffect`,
+`Op := MoveArgs`, `sem := Kernel.move`), is a CONSUMER of this engine and lives in
+`Kernel/MoveEffect.lean`: there `derive moveEffect` fires on `Kernel.k0` (satisfiable,
+premise-inhabited by a real declaration), and the teeth bite (`ghost_not_derived`: a wrong
+reading differs from the derived executor; `wrong_descriptor_not_effect`: a tampered opcode
+denotes a different transformer). The agreement is non-vacuous: `execHand` is a genuinely
+independent recursion and both readings compute.
 
 ## Boundary
 
-Effects is candidate-side: imports Mathlib + `Compiler.Signature` (the initiality
-engine) + `Kernel.State` (the first effect's semantics). `scripts/check-import-boundary.sh`
-constrains `Theory`/`Selvage` only — it stays green.
+Effects is the generator Kernel and Compiler consume, so it sits below them in the tier
+table (`scripts/check-import-boundary.sh`): this file imports Mathlib and `Theory.Signature`
+(the initiality engine) only, never Kernel, Compiler or Host.
 
 Residual: `[EFFECT-registry]` (§8) — the full declaration vocabulary, the open registry,
 the weld to the emit path, per-declaration frame/reject teeth, the witness generator.
-This lane proves the FIRST declaration derives.
 -/
-import Compiler.Signature
-import Kernel.State
-import Mathlib.Data.Countable.Basic
+import Theory.Signature
 
 namespace Minidregg.Effects
 
-open Minidregg.Compiler Minidregg.Kernel
+open Minidregg.Compiler
 
 /-! ## §1. `EffectSpec` — the declaration. -/
 
@@ -82,9 +69,9 @@ vocabulary — view/touched/guard AST/δ/authority demand, floor obligations as 
 fields — is the `[EFFECT-registry]` residual, §8.) -/
 structure EffectSpec : Type 1 where
   /-- Operation payloads — one value per invocable operation, parameters inside.
-  SYNTACTIC data (the concrete declaration below is `DecidableEq`+`Repr`+`Countable`):
+  SYNTACTIC data (the concrete `MoveArgs`, `Kernel/MoveEffect.lean`, is `DecidableEq`+`Repr`+`Countable`):
   opaque `State → _` payloads here would forfeit the faithful descriptor, by
-  `Compiler.Signature`'s `[N3-converse]`. -/
+  `Theory.Signature`'s `[N3-converse]`. -/
   Op : Type
   /-- The state the effect acts on. -/
   State : Type
@@ -97,7 +84,7 @@ namespace EffectSpec
 
 /-- The DERIVED effect signature: one leaf (`none` — the finished program) and one unary
 node per operation (`some o` — perform `o`, then the continuation). An `EffectSpec`'s IR
-is not designed, it is this instance of `Compiler.Signature`. -/
+is not designed, it is this instance of `Theory.Signature`. -/
 def sig (E : EffectSpec) : Signature where
   Op := Option E.Op
   ar := fun s => match s with
@@ -105,7 +92,7 @@ def sig (E : EffectSpec) : Signature where
     | some _ => Unit
 
 /-- **Effect programs** — the free term algebra over the derived signature (mathlib
-`WType` through `Compiler.Signature.Term`, REUSED). -/
+`WType` through `Theory.Signature.Term`, REUSED). -/
 abbrev Prog (E : EffectSpec) : Type := Term E.sig
 
 /-- The finished program (the `none` leaf). -/
@@ -158,7 +145,7 @@ theorem execHand_isFoldHom (E : EffectSpec) : IsFoldHom E.execAlg E.execHand := 
 /-- **`derived_agrees` — executor-equality BY INITIALITY.** The independent hand-recursed
 executor and the derived fold agree on EVERY program — `agree_by_initiality`, zero
 induction at the use site (the one induction was spent once, generically, in
-`Compiler.Signature.fold_unique`). Drift between "the spec's executor" and "an
+`Theory.Signature.fold_unique`). Drift between "the spec's executor" and "an
 implementation that reads ops the same way" is impossible by construction. -/
 theorem derived_agrees (E : EffectSpec) : E.execHand = E.derivedExecutor :=
   agree_by_initiality E.execAlg E.execHand E.derivedExecutor
@@ -181,7 +168,7 @@ def descAlg (E : EffectSpec) : Alg E.sig (List E.Op) := fun s =>
 
 /-- **`derivedDescriptor` — the descriptor, derived**: the fold of `descAlg`. A `List
 E.Op` — first-order, serializable data exactly when the declaration's `Op` is syntactic
-(the concrete `MoveArgs` below is `DecidableEq`+`Repr`+`Countable`; an opaque `Op` would
+(the concrete `MoveArgs` of `Kernel/MoveEffect.lean` is `DecidableEq`+`Repr`+`Countable`; an opaque `Op` would
 hit `[N3-converse]` and could not be read back faithfully). -/
 def derivedDescriptor (E : EffectSpec) : Prog E → List E.Op := fold E.descAlg
 
@@ -260,121 +247,6 @@ def derive (E : EffectSpec) : DerivedEffect E where
   exec_unique := E.executor_unique
   descriptor_faithful := E.descriptor_faithful
 
-/-! ## §6. The FIRST declaration — the kernel `move` as an effect. -/
-
-/-- The payload of one `move` invocation — four scalars, SYNTACTIC (comparable,
-renderable, countable). The N3-clean leaf alphabet: countable CODES, the exact opposite
-of `Compiler.Signature.OpaqueSig`'s `2^ℵ₀` function payloads. -/
-structure MoveArgs where
-  src : CellId
-  dst : CellId
-  asset : AssetId
-  δ : ℤ
-  deriving DecidableEq, Repr
-
-/-- `MoveArgs` is countable — the descriptor alphabet is genuinely syntax (the
-`[N3-converse]` requirement on leaves, exhibited, not asserted). -/
-instance : Countable MoveArgs :=
-  have h : Function.Injective (fun m : MoveArgs => (m.src, m.dst, m.asset, m.δ)) := by
-    intro a b hab
-    cases a; cases b; simpa using hab
-  h.countable
-
-/-- **The first real declaration** — the kernel's conserving ledger `move`
-(`Kernel.State.move`, REUSED — the conservation spine) as an effect. This record is the
-ENTIRE authored surface; term, executor, descriptor, and their laws are `derive`d. -/
-@[reducible] def moveEffect : EffectSpec where
-  Op := MoveArgs
-  State := KernelState
-  sem := fun m k => move k m.src m.dst m.asset m.δ
-
-/-- The derived IR term of one invocation: move 2 of asset 0 from cell 0 to cell 1. -/
-def moveTerm : EffectSpec.Prog moveEffect := moveEffect.derivedTerm ⟨0, 1, 0, 2⟩
-
-/-- A COMPOUND derived program: move 2 (0→1), then move 1 back (1→0). -/
-def moveProg : EffectSpec.Prog moveEffect :=
-  moveEffect.act ⟨0, 1, 0, 2⟩ (moveEffect.derivedTerm ⟨1, 0, 0, 1⟩)
-
-/-! ## §7. Keystone witnesses — the first effect DERIVES, FIRES, and BITES (on `k0`).
-
-`Kernel.k0` (REUSED): cells `{0, 1}` holding 5 and 3 of asset 0. Everything below is
-decided/computed against that literal state. -/
-
-/-- *Satisfiable / the engine fires*: the DERIVED executor of the DERIVED invocation term
-genuinely moves the ledger — cell 0 debited 5 → 3 … -/
-example : ((derive moveEffect).exec moveTerm k0).bal 0 0 = 3 := by decide
-
-/-- … cell 1 credited 3 → 5. The bundle's executor computes; the declaration ran. -/
-example : ((derive moveEffect).exec moveTerm k0).bal 1 0 = 5 := by decide
-
-/-- *Sequencing fires*: the compound program composes through the derived executor
-(5−2+1 = 4 and 3+2−1 = 4). -/
-example : (moveEffect.derivedExecutor moveProg k0).bal 0 0 = 4 ∧
-    (moveEffect.derivedExecutor moveProg k0).bal 1 0 = 4 := by
-  exact ⟨by decide, by decide⟩
-
-/-- *The agreement is about two readings that BOTH compute*: the independent
-hand-recursion reaches the same state — and not by coincidence, by `derived_agrees`. -/
-example : (moveEffect.execHand moveProg k0).bal 1 0 = 4 := by decide
-
-/-- *`derived_agrees` fires on the concrete effect*: the two readings coincide on the
-compound program — instantiated, not re-proved. -/
-example : moveEffect.execHand moveProg k0 = moveEffect.derivedExecutor moveProg k0 :=
-  congrFun (congrFun (EffectSpec.derived_agrees moveEffect) moveProg) k0
-
-/-- *Initiality PINS compound programs*: ANY per-op-respecting reading is forced to the
-derived value on `moveProg` — the collapse bites on non-atomic terms (the genuine content
-of `fold_unique`), zero induction here. -/
-example (f : EffectSpec.Prog moveEffect → KernelState → KernelState)
-    (hf : IsFoldHom moveEffect.execAlg f) : (f moveProg k0).bal 0 0 = 4 := by
-  rw [moveEffect.executor_unique f hf]
-  decide
-
-/-- *The kernel CONTRACT rides the derived path*: the derived invocation conserves the
-per-asset total — `move_conserves` (REUSED) applies verbatim because the derived
-executor of the derived term IS the kernel `move`, definitionally. Inherited, not
-re-proved — the factory-cell promise at n = 1. -/
-example : totalAsset (moveEffect.derivedExecutor moveTerm k0) 0 = totalAsset k0 0 := by
-  have h : moveEffect.derivedExecutor moveTerm k0 = move k0 0 1 0 2 := rfl
-  rw [h]
-  exact move_conserves k0 0 1 0 2 (by decide) (by decide)
-
-/-- *The descriptor is LITERAL first-order data*: the invocation serializes to its one
-opcode record; the compound program to its trace. Comparable (`DecidableEq`), renderable
-(`Repr`), countable — a consumer needs no Lean function to hold it. -/
-example : moveEffect.derivedDescriptor moveTerm = [⟨0, 1, 0, 2⟩] := rfl
-
-example : moveEffect.derivedDescriptor moveProg = [⟨0, 1, 0, 2⟩, ⟨1, 0, 0, 1⟩] := rfl
-
-/-- *Faithfulness fires on the concrete effect*: replaying the derived descriptor IS the
-derived executor on the compound program — `descriptor_faithful` instantiated. -/
-example : moveEffect.replay (moveEffect.derivedDescriptor moveProg)
-    = moveEffect.derivedExecutor moveProg :=
-  EffectSpec.descriptor_faithful_apply moveEffect moveProg
-
-/-- The WRONG reading — a fail-open "executor" that drops every operation. -/
-def ghostAlg : Alg moveEffect.sig (KernelState → KernelState) := fun _ _ => id
-
-/-- **Executor TEETH**: the ghost reading is NOT the derived executor — witnessed on the
-invocation at `k0` (cell 1 reads 3 under the ghost, 5 under the derived path). The
-agreement theorems are non-vacuous: a reading that mis-reads an op genuinely differs,
-and (by `executor_unique`'s contrapositive) the ghost is no fold-homomorphism of the
-declaration. -/
-theorem ghost_not_derived : fold ghostAlg ≠ moveEffect.derivedExecutor := fun h =>
-  absurd (congrArg (fun g => (g moveTerm k0).bal 1 0) h) (by decide)
-
-/-- **Descriptor TEETH**: a TAMPERED descriptor is not a rendering of the effect —
-altering the opcode's δ (3 for 2) replays to a DIFFERENT transformer than the derived
-executor (cell 1: 6 ≠ 5 at `k0`). The descriptor's content is load-bearing, not a label. -/
-theorem wrong_descriptor_not_effect :
-    moveEffect.replay [⟨0, 1, 0, 3⟩] ≠ moveEffect.derivedExecutor moveTerm := fun h =>
-  absurd (congrArg (fun g => (g k0).bal 1 0) h) (by decide)
-
-/-- …and the tampered descriptor is DISTINGUISHABLE as data (`DecidableEq`, decided) —
-wrong bytes are caught before replay ever runs. -/
-example : ([⟨0, 1, 0, 3⟩] : List MoveArgs) ≠ moveEffect.derivedDescriptor moveTerm := by
-  decide
-
 /-! ## §8. `[EFFECT-registry]` — the residual (named, not stubbed).
 
 This file proves the ENGINE at its first declaration. The OPEN REGISTRY it seeds — the
@@ -401,7 +273,7 @@ above; it is not claimed here. -/
 /-! ## §9. Axiom pins — exact-output, self-verifying (the build fails on drift).
 
 The engine theorems ride `fold_unique`'s one induction (`funext` ⇒ `Quot.sound`); the
-teeth are `decide`-computed. Kernel-clean throughout — the exact footprint is
+first declaration's teeth are pinned beside it (`Kernel/MoveEffect.lean`). Kernel-clean throughout — the exact footprint is
 `[Quot.sound]`, strictly inside the `{propext, Classical.choice, Quot.sound}` ceiling. -/
 
 /-- info: 'Minidregg.Effects.EffectSpec.derived_agrees' depends on axioms: [Quot.sound] -/
@@ -415,11 +287,5 @@ teeth are `decide`-computed. Kernel-clean throughout — the exact footprint is
 
 /-- info: 'Minidregg.Effects.derive' depends on axioms: [Quot.sound] -/
 #guard_msgs in #print axioms derive
-
-/-- info: 'Minidregg.Effects.ghost_not_derived' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs in #print axioms ghost_not_derived
-
-/-- info: 'Minidregg.Effects.wrong_descriptor_not_effect' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs in #print axioms wrong_descriptor_not_effect
 
 end Minidregg.Effects

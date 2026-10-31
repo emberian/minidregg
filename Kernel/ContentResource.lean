@@ -1873,6 +1873,93 @@ def project (before' after' : ContentStore) (command : Command) : List (String �
    ("content/atoms/low-min", touchedMin atomLow command),
    ("content/atoms/low-max", touchedMax atomLow command)]
 
+/-- The store's support by the cached canonical-key sort (`supportCached`), not `Multiset.toFinset`'s
+quadratic dedup. -/
+def supportFast (store : ContentStore) : Finset Hyperdocument.Address :=
+  FiniteDependentMapCachedOrdering.supportCached (StoreCodec.addressKey HyperdocumentCell.contentWire)
+    (StoreCodec.addressKey_injective HyperdocumentCell.contentWire) store
+
+theorem supportFast_eq (store : ContentStore) : supportFast store = store.support :=
+  FiniteDependentMapCachedOrdering.supportCached_eq _ _ store
+
+def elementCountFast (store : ContentStore) : Nat :=
+  ((supportFast store).filter fun address => address.1 = .elements).card
+
+@[csimp] theorem elementCount_eq_fast : @elementCount = @elementCountFast := by
+  funext store; simp only [elementCount, elementCountFast, supportFast_eq]
+
+def contentPayloadBytesFast (store : ContentStore) : Nat :=
+  (supportFast store).sum (payloadBytesAt store)
+
+@[csimp] theorem contentPayloadBytes_eq_fast : @contentPayloadBytes = @contentPayloadBytesFast := by
+  funext store; simp only [contentPayloadBytes, contentPayloadBytesFast, supportFast_eq]
+
+/-- `changedIn` with the union of the two supports deduplicated by the cached key tree. -/
+def changedInFast (field : Bool) (before after : ContentStore) : Finset Hyperdocument.Address :=
+  (FiniteDependentMapCachedOrdering.uniqueMultisetCached (StoreCodec.addressKey HyperdocumentCell.contentWire)
+      (StoreCodec.addressKey_injective HyperdocumentCell.contentWire)
+      ((supportFast before).val + (supportFast after).val)).filter
+    (fun address => annotationNamespace address.1 = field ∧ before address ≠ after address)
+
+@[csimp] theorem changedIn_eq_fast : @changedIn = @changedInFast := by
+  funext field before after
+  ext address
+  simp only [changedIn, changedInFast, Finset.mem_filter, Finset.mem_union,
+    FiniteDependentMapCachedOrdering.mem_uniqueMultisetCached, Multiset.mem_add, Finset.mem_val,
+    supportFast_eq]
+
+/-- `project` with each value deferred: a demanded projection forces only the named ones. -/
+def projectLazy (before' after' : ContentStore) (command : Command) : List (String × Thunk Int) :=
+  let before := lawStore before'
+  let after := lawStore after'
+  [("content/names/unique", Thunk.mk fun _ => if sharedNamesUnique after then 1 else 0),
+   ("content/bytes/before", Thunk.mk fun _ => contentBytes before),
+   ("content/bytes/after", Thunk.mk fun _ => contentBytes after),
+   ("content/bytes/delta", Thunk.mk fun _ => (contentBytes after : Int) - contentBytes before),
+   ("content/entries/before", Thunk.mk fun _ => (supportFast before).card),
+   ("content/entries/after", Thunk.mk fun _ => (supportFast after).card),
+   ("content/operations", Thunk.mk fun _ => command.actions.length),
+   ("content/payload-bytes/before", Thunk.mk fun _ => contentPayloadBytes before),
+   ("content/payload-bytes/after", Thunk.mk fun _ => contentPayloadBytes after),
+   ("content/document-creates", Thunk.mk fun _ => actionCount command 0),
+   ("content/atom-creates", Thunk.mk fun _ => actionCount command 1),
+   ("content/atom-edits", Thunk.mk fun _ => actionCount command 2),
+   ("content/links", Thunk.mk fun _ => actionCount command 3),
+   ("content/run-creates", Thunk.mk fun _ => actionCount command 4),
+   ("content/annotations", Thunk.mk fun _ => actionCount command 5),
+   ("content/transclusions", Thunk.mk fun _ => actionCount command 6),
+   ("content/element-edits", Thunk.mk fun _ => actionCount command 7),
+   ("content/container-creates", Thunk.mk fun _ => actionCount command 8),
+   ("content/unlinks", Thunk.mk fun _ => actionCount command 9),
+   ("content/marks", Thunk.mk fun _ => actionCount command 10),
+   ("content/unmarks", Thunk.mk fun _ => actionCount command 11),
+   ("content/run-inserts", Thunk.mk fun _ => actionCount command 14),
+   ("content/writes/body", Thunk.mk fun _ => bodyWrites before after),
+   ("content/writes/annotations", Thunk.mk fun _ => annotationWrites before after),
+   ("content/tombstones", Thunk.mk fun _ => (command.actions.filter fun action => match action with
+      | .editAtom edit => edit.tombstone
+      | _ => false).length),
+   ("content/atoms/high-min", Thunk.mk fun _ => touchedMin atomHigh command),
+   ("content/atoms/high-max", Thunk.mk fun _ => touchedMax atomHigh command),
+   ("content/atoms/low-min", Thunk.mk fun _ => touchedMin atomLow command),
+   ("content/atoms/low-max", Thunk.mk fun _ => touchedMax atomLow command)]
+
+theorem project_eq_lazy (before' after' : ContentStore) (command : Command) :
+    project before' after' command =
+      (projectLazy before' after' command).map fun slot => (slot.1, slot.2.get) := by
+  simp only [projectLazy, supportFast_eq]
+  rfl
+
+/-- The summaries a demand names, each computed only then. -/
+def projectDemand (want : String → Bool) (before' after' : ContentStore) (command : Command) :
+    List (String × Int) :=
+  ((projectLazy before' after' command).filter fun slot => want slot.1).map fun slot => (slot.1, slot.2.get)
+
+theorem projectDemand_eq (want : String → Bool) (before' after' : ContentStore) (command : Command) :
+    projectDemand want before' after' command = (project before' after' command).filter fun slot => want slot.1 := by
+  rw [project_eq_lazy, List.filter_map]
+  rfl
+
 /-- Maintenance requires the exact complete prior record and preserves every
 original provenance field and immutable ciphertext. Only key custody changes. -/
 theorem rewrapAnnotation_guarded_post (author : PrincipalRef) (operation : OperationId)

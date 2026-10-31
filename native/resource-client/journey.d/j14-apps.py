@@ -12,6 +12,14 @@ Derives from the J14_ORACLE driver (the native phases are shared). The differenc
 J14_APPS_UNTIL names the last phase to run (world, prepare_platform, prepare_application,
 worker, room, attach, probe). Extra env: J14_APPS_DECLARATION (apps/interfaces/davros.json),
 J14_APPS_MODEL, J14_APPS_POOL_KEY.
+
+Native qualification of any declaration (conversation protocols included): J14_APPS_ALIAS names the
+attachment (default dav), J14_APPS_ROLE the permission role the route's ticket holds (default 1, Davros's
+editor), and J14_APPS_UNTIL=qualify runs the phase after attach: the operator-foreground hidden tool
+mini_app_<alias>_qualify through the controller (the same fixed `controller-tool` IPC as `mini app-interface
+--action qualify`), with the declaration digest the attachment pins and a fresh runId. The qualification
+scenario's write and read-back each cross Mini admission and settlement; the result and the controller's
+exported application evidence are retained under the step directory. No LLM turn is made.
 """
 import base64, hashlib, http.client, importlib.util, json, os, shutil, socket, sys, time
 from pathlib import Path
@@ -19,7 +27,7 @@ HERE=Path(__file__).resolve().parent
 spec=importlib.util.spec_from_file_location('j14_oracle',HERE/'j14-oracle.py')
 m=importlib.util.module_from_spec(spec);sys.modules['j14_oracle']=m;spec.loader.exec_module(m)
 read,write,sha=m.read,m.write,m.sha
-ORDER=['world','prepare_platform','prepare_application','worker','room','attach','probe']
+ORDER=['world','prepare_platform','prepare_application','worker','room','attach','probe','qualify']
 POOL='pool'
 
 def declaration_digest(value):
@@ -36,9 +44,9 @@ class Apps(m.Journey):
         super().__init__()
         self.declaration_path=Path(os.environ['J14_APPS_DECLARATION']).resolve(strict=True)
         self.declaration=read(self.declaration_path)
-        self.alias='dav'
+        self.alias=os.environ.get('J14_APPS_ALIAS','dav')
         self.c['sizeClass']='M'
-        self.c['expectedHost']='dav-j14.localhost'
+        self.c['expectedHost']=self.alias+'-j14.localhost'
 
     def run(self,label,args,**kwargs):
         if label=='world':args=['flock','-o','/tank/lanes/world-up.lock',*args]
@@ -156,15 +164,37 @@ Do not call mini_say or perform unrelated index, digest, or document maintenance
     # ---- attachment: Davros, the api route, a typed attachment ---------------------------------
     def attach(self):
         d=self.declaration
-        self.c['expectedHost']='dav-j14.localhost'
+        a=self.alias
+        self.c['expectedHost']=a+'-j14.localhost'
         self.c['attachmentExtras']={
             # Davros's signed schema: role 0 is viewer; role 1 grants view/edit.
-            'roleId':'1',
-            'names':{'application':'dav-app','family':'dav-session','route':'dav-agent-v1','display':'Davros agent',
-                     'handle':'dav-agent','serviceProtocol':None,'applicationFamily':'oracle'},
+            'roleId':os.environ.get('J14_APPS_ROLE','1'),
+            'names':{'application':a+'-app','family':a+'-session','route':a+'-agent-v1','display':d['name']+' agent',
+                     'handle':a+'-agent','serviceProtocol':None,'applicationFamily':'oracle'},
             'typed':{'alias':self.alias,'declarationSource':str(self.declaration_path),
                      'declarationSha256':declaration_digest(d),'packageId':d['packageId']}}
         super().attach()
+
+    # ---- native qualification: the declaration's own scenario through the controller -----------
+    def qualify(self):
+        import secrets
+        d=self.declaration
+        request=secrets.token_hex(16)
+        args=self.root/'qualify-arguments.json'
+        write(args,{'context':{'runId':'q'+secrets.token_hex(8)},'_miniInterfaceDigest':declaration_digest(d)})
+        write(self.root/'qualify-request.json',{'requestId':request,'tool':'mini_app_'+self.alias+'_qualify','arguments':str(args)})
+        done=self.fixed('controller-tool',request,'mini_app_'+self.alias+'_qualify',args)
+        value=read(done)
+        result=value.get('result',{})
+        text=result.get('text','')
+        try:detail=json.loads(text)
+        except ValueError:detail={'raw':text[:400]}
+        verdict={'passed':value.get('type')=='tool-complete' and value.get('isError') is False and result.get('isError') is False,
+                 'requestId':request,'alias':self.alias,'packageId':d['packageId'],'detail':detail}
+        write(self.root/'qualify-result.json',verdict)
+        self.fixed('controller-tool-ack',request)
+        if not verdict['passed']:raise ValueError('native qualification failed: '+json.dumps(detail)[:500])
+        write(self.root/'result.json',{'passed':True,'rows':['typed-attachment','native-qualification-'+self.alias],'receipts':len(detail.get('nativeReceipts',[]))})
 
     # ---- probe -----------------------------------------------------------------------------
     def transcript(self):

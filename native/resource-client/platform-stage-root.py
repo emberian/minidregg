@@ -191,7 +191,7 @@ def stage(manifest,expected,frame,infra,pins,operator):
     allocator.chmod(0o755)
     put(dest/"source/deploy/shell/mini-shell-ssh",library/"mini-shell-ssh",0o755)
     put(dest/"source/deploy/shell/mini-shell-ssh-credentials",library/"mini-shell-ssh-credentials",0o755)
-    for helper in ("spk-ingest","spk-var-volume"):
+    for helper in ("spk-ingest",):
         put(dest/"source/deploy/spk-host"/helper,library/helper,0o755)
     (temporary/"etc/mini").mkdir(parents=True,mode=0o755)
     store=temporary/"var/lib/mini/store";store.mkdir(mode=0o700)

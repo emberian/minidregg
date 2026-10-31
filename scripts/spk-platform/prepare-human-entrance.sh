@@ -220,8 +220,5 @@ jq -n --arg app 8401 --arg subject "$SUBJECT" --arg session "$SESSION" \
    enrollmentObserveCapability:$policy[0].enrollmentObserveCapability,
    signers:$signers[0]}' >"$PROBE/dispatch.json"
 install -m 600 "$PROBE/dispatch.json" "$CUSTODY_STAGE/dispatch.json"
-sync -f "$CUSTODY_STAGE/dispatch.json"
-sync -f "$CUSTODY_STAGE"
 mv -T -- "$CUSTODY_STAGE" "$DIR"
-sync -f "${DIR%/*}"
 echo "human entrance staged at $DIR; private tokens remain in native files"

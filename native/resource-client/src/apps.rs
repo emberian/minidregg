@@ -401,6 +401,8 @@ pub(crate) fn suggested_class(raw_bytes: Option<u64>) -> &'static str {
 }
 
 pub(crate) fn entry_json(entry: &Entry, verdict: &Verdict) -> Value {
+    let mut interface = typed_interface(entry);
+    interface["says"] = json!(tools_says(interface["status"].as_str().unwrap_or("unavailable")));
     json!({
         "appId":entry.app_id,"packageId":entry.package_id,"name":entry.name,"version":entry.version,
         "interface":interfaces::summary(&entry.app_id, &entry.package_id),
@@ -409,11 +411,11 @@ pub(crate) fn entry_json(entry: &Entry, verdict: &Verdict) -> Value {
         "shortDescription":entry.short_description,"categories":entry.categories,"webLink":entry.web_link,
         "codeLink":entry.code_link,"packageUrl":package_url(entry),
         "verdict":{"state":verdict.state,"reason":verdict.reason,"rawBytes":verdict.raw_bytes,
-            "signedAppId":verdict.signed_app_id,"running":verdict.running},
+            "signedAppId":verdict.signed_app_id,"running":verdict.running,"says":verdict_says(verdict)},
         "suggestedClass":entry.pinned.as_ref().and_then(|p| p.class.as_deref()).unwrap_or_else(|| suggested_class(verdict.raw_bytes)),
         "pinned":entry.pinned.as_ref().map(|p| json!({"sha256":p.sha256,"packageUrl":p.package_url,"class":p.class})),
         "featured":featured(&entry.app_id).map(|rank| json!({"rank":rank})),
-        "typedInterface":typed_interface(entry),
+        "typedInterface":interface,
         "claims":"name, version, publisher and links are the index's claims; identity is the signed package's"
     })
 }
@@ -454,7 +456,7 @@ fn interface_summary(entry: &Entry) -> String {
     let interface = typed_interface(entry);
     match interface["tools"].as_array() {
         Some(tools) => format!("\n      {} typed tools; native attachment required", tools.len()),
-        None => format!("\n      typed tools: {}", interface["status"].as_str().unwrap_or("unavailable")),
+        None => format!("\n      {}", tools_says(interface["status"].as_str().unwrap_or("unavailable"))),
     }
 }
 fn print_interface(entry: &Entry) {
@@ -476,6 +478,30 @@ fn package_url(entry: &Entry) -> String {
         Some(Pinned { package_url: Some(url), .. }) => url.clone(),
         Some(_) => format!("file: adopted by the operator (mini-market-fetch adopt {} SHA256 FILE)", entry.package_id),
         None => format!("{PACKAGE_URL}{}", entry.package_id),
+    }
+}
+
+/// The verdict as a member reads it, with what they can do. `unverified` is not a fault: nothing on
+/// this box has parsed the package yet, and the install is what checks it (signature, signed app id,
+/// size) before anything runs, so it can be installed now. `refused` keeps its reason.
+pub(crate) fn verdict_says(verdict: &Verdict) -> String {
+    match verdict.state.as_str() {
+        "unverified" => "not checked on this box yet: installing it checks its signature and size first (`apps install`)".into(),
+        "refused" => format!("refused here{}: an install is refused the same way",
+            verdict.reason.as_deref().map(|r| format!(" ({r})")).unwrap_or_default()),
+        _ => verdict_line(verdict),
+    }
+}
+
+/// The typed-tools status as a member reads it: an app without a declaration is used through its
+/// own web page (an agent cannot call typed tools on it), never broken.
+pub(crate) fn tools_says(status: &str) -> String {
+    match status {
+        "declaration-unavailable" => "no typed tools declared: use it through its own page; agents cannot call it as tools".into(),
+        "package-mismatch" => "typed tools are declared for another version of this package, not this one".into(),
+        "declaration-invalid" => "its typed-tool declaration does not parse here; use it through its own page".into(),
+        "native-attachment-required" => "typed tools declared; an agent can call them once the app is installed and attached".into(),
+        other => other.to_owned(),
     }
 }
 
@@ -656,28 +682,41 @@ fn install(mut args: Args, paths: &Paths, as_json: bool, dir: Option<std::ffi::O
             if !(source.is_file() && receipt.is_file() && delegation.is_file()) {
                 let config = apps_config(&paths.config)?;
                 let ws = crate::workspace::load(&root)?;
-                let name = format!("app-{}", &id[..12]);
+                // The birth is named by the catalog application, not by this request: a retry after an
+                // attempt that stopped between the birth and the hosting delegation must resume that
+                // birth, not make a second one whose delegation is then filed beside the first one's
+                // source (the worker refuses such a pair: "lifecycle delegation differs from application
+                // birth"). The hosting delegation's request id follows the same rule.
+                let stem = &entry.app_id[..entry.app_id.len().min(12)];
+                let name = format!("app-{stem}");
                 let (born_source, born_receipt) = app_birth(&root, &ws, home.as_deref(), &name, &config)?;
                 crate::fsio::ensure_private_dir_all(&apps_dir.join("birth"))?;
                 source = apps_dir.join("birth").join("source.json");
                 receipt = apps_dir.join("birth").join("outcome.json");
+                // The three documents travel as one set for ONE birth. Files retained from another
+                // birth (a legacy attempt named by its request) are replaced, never mixed in.
+                let same_birth = retained_birth_is(&source, &receipt, &born_source);
                 for (file, value) in [(&source, &born_source), (&receipt, &born_receipt)] {
-                    if !file.exists() {
-                        crate::create_private(file, &serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?)?;
+                    if !same_birth || !file.exists() {
+                        crate::fsio::replace_private(file, &serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?)?;
                     }
                 }
-                let selector = delegate_lifecycle(&root, &name, &format!("apps-{}", &id[..12]), &config.management_subject)?;
+                let selector = delegate_lifecycle(&root, &name, &format!("apps-{stem}"), &config.management_subject)?;
+                let selector_doc: Value = serde_json::from_slice(&crate::fsio::read_bounded(&selector, 64 * 1024)?)
+                    .map_err(|e| format!("{}: {e}", selector.display()))?;
                 delegation = apps_dir.join("delegation.json");
-                if !delegation.exists() {
-                    fs::copy(&selector, &delegation).map_err(|e| format!("cannot retain the delegation: {e}"))?;
+                let delegation_current = delegation_names_app(&delegation, &selector_doc);
+                let delegation_stale = delegation.is_file() && !delegation_current;
+                if !delegation_current {
+                    crate::fsio::replace_private(&delegation, &serde_json::to_vec_pretty(&selector_doc).map_err(|e| e.to_string())?)?;
                 }
                 // The manager issues share tickets, so it must hold a delegate-capable child of the owner's
                 // app capability; the member delegates it now and the worker issues under it.
                 let share = apps_dir.join("share-delegation.json");
-                if !share.exists() {
+                if !share.exists() || !same_birth || delegation_stale {
                     let max = born_source.pointer("/applicationGrainBirth/applicationBirth/template/ownerBudget").and_then(Value::as_str).unwrap_or("100000").to_owned();
                     let child = delegate_share(&root, &ws, &name, &config.management_subject, &max)?;
-                    crate::create_private(&share, &serde_json::to_vec_pretty(&child).map_err(|e| e.to_string())?)?;
+                    crate::fsio::replace_private(&share, &serde_json::to_vec_pretty(&child).map_err(|e| e.to_string())?)?;
                 }
             }
             // The worker cannot read a member's 0700 home: the three documents travel
@@ -768,7 +807,7 @@ fn catalogue(action: &str, mut args: Args, paths: &Paths, as_json: bool) -> Resu
                     truncate(&e.version, 22),
                     truncate(&e.author, 24),
                     e.app_id,
-                    format!("{}; {}", verdict_line(&v), qualification::line(qualification.get(e))),
+                    format!("{}; {}", verdict_says(&v), qualification::line(qualification.get(e))),
                     interface_summary(e)
                 );
             }
@@ -956,6 +995,22 @@ pub(crate) fn birth_peer(reference: &Value, view: &Value) -> Result<Value> {
 /// The op 30 source (`Host/Json.lean` `grainBirthIntentFrom "applicationGrainBirth" "applicationBirth"`,
 /// `applicationBirthContext`, `applicationSpec`): the member is creator, owner and fee payer; the
 /// nine ids come from the member's own namespace reservation.
+/// The retained source and receipt are the ones of this birth (same application ids).
+fn retained_birth_is(source: &Path, receipt: &Path, born_source: &Value) -> bool {
+    const APPLICATION: &str = "/applicationGrainBirth/applicationBirth/application";
+    source.is_file() && receipt.is_file()
+        && crate::workspace::bounded_json(source).ok().and_then(|v| v.pointer(APPLICATION).cloned())
+            == born_source.pointer(APPLICATION).cloned()
+        && born_source.pointer(APPLICATION).is_some()
+}
+
+/// The retained delegation selects the same application as the freshly completed one.
+fn delegation_names_app(delegation: &Path, selector_doc: &Value) -> bool {
+    let app = selector_doc.pointer("/selector/app");
+    delegation.is_file() && app.is_some()
+        && crate::workspace::bounded_json(delegation).ok().and_then(|v| v.pointer("/selector/app").cloned()).as_ref() == app
+}
+
 pub(crate) fn app_birth_source(subject: &str, nonce: &str, context: &Value, ids: &std::collections::BTreeMap<String, String>, tool: &Value, parent: &Value, tariff: &Value) -> Result<Value> {
     let id = |role: &str| -> Result<&str> { ids.get(role).map(String::as_str).ok_or_else(|| format!("reservation lacks {role}")) };
     let mut grants = context.get("grants").and_then(Value::as_array).cloned().ok_or("birth context lacks grants")?;
@@ -1890,6 +1945,22 @@ mod tests {
     }
 
     #[test]
+    fn a_listing_says_what_each_state_means_and_what_a_member_can_do() {
+        let v = |state: &str, reason: Option<&str>| Verdict { state: state.into(), reason: reason.map(str::to_owned), raw_bytes: None, signed_app_id: None, running: 0 };
+        let fresh = verdict_says(&v("unverified", None));
+        assert!(fresh.contains("not checked on this box yet") && fresh.contains("`apps install`") && !fresh.contains("unverified"), "{fresh}");
+        assert_eq!(verdict_says(&v("refused", Some("sizeOverProfile"))), "refused here (sizeOverProfile): an install is refused the same way");
+        assert!(tools_says("declaration-unavailable").starts_with("no typed tools declared: use it through its own page"));
+        assert!(!tools_says("declaration-unavailable").contains("unavailable"), "the state reads as a choice, not a failure");
+        assert_eq!(qualification::line(None), "its lifecycle not yet tried on this box");
+        let entry = parse_index(include_bytes!("../tests/fixtures/sandstorm-index-2026-10-27.json")).unwrap().remove(0);
+        let shown = entry_json(&entry, &v("unverified", None));
+        assert_eq!(shown["verdict"]["state"], "unverified", "the JSON keeps the machine state");
+        assert!(shown["verdict"]["says"].as_str().unwrap().contains("installing it checks"));
+        assert!(shown["typedInterface"]["says"].as_str().is_some());
+    }
+
+    #[test]
     fn apps_verdict_defaults_to_unverified_and_reads_meta_and_ingest() {
         let dir = scratch("verdict");
         let meta = dir.join("meta");
@@ -2003,6 +2074,24 @@ mod tests {
         assert_eq!(composite["applicationBirth"]["application"]["app"], "9001");
         assert_eq!(source["grants"].as_array().unwrap().len(), 4, "the context's grants plus the tool and parent grants");
         assert_eq!(source["grants"][2]["target"], "7902");
+    }
+
+    #[test]
+    fn retained_install_documents_must_belong_to_one_birth() {
+        let dir = scratch("one-birth");
+        let born = |app: &str| json!({"applicationGrainBirth":{"applicationBirth":{"application":{"app":app,"packageManifest":"2"}}}});
+        let (source, receipt, delegation) = (dir.join("source.json"), dir.join("outcome.json"), dir.join("delegation.json"));
+        assert!(!retained_birth_is(&source, &receipt, &born("11")), "nothing retained");
+        std::fs::write(&source, born("11").to_string()).unwrap();
+        std::fs::write(&receipt, "{}").unwrap();
+        assert!(retained_birth_is(&source, &receipt, &born("11")));
+        assert!(!retained_birth_is(&source, &receipt, &born("12")), "a retry that births again must not keep the first source");
+        let selector = |app: &str| json!({"selector":{"app":app}});
+        assert!(!delegation_names_app(&delegation, &selector("11")), "absent");
+        std::fs::write(&delegation, selector("11").to_string()).unwrap();
+        assert!(delegation_names_app(&delegation, &selector("11")));
+        assert!(!delegation_names_app(&delegation, &selector("12")), "a delegation for another birth is replaced");
+        assert!(!delegation_names_app(&delegation, &json!({})), "a selector without an app never matches");
     }
 
     #[test]

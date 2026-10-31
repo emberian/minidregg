@@ -93,8 +93,6 @@ fn write_tree(
                 } else {
                     IMAGE_FILE_MODE
                 }))?;
-                // The private stage is flushed at one filesystem durability barrier
-                // before publication, rather than one HDD barrier per member.
             }
         }
     }
@@ -237,7 +235,20 @@ pub fn materialize_spk_with_profile(
     app_uid: u32,
     profile: ImportProfile,
 ) -> io::Result<InstalledPackage> {
-    materialize_staged(package, store, app_uid, profile)
+    materialize_spk_with_scratch(package, store, app_uid, profile, None)
+}
+
+/// As above, with the raw and decoded spools of the intake in `scratch` (an operator-owned
+/// protected directory on a disk with room for the profile's decoded bound) instead of in `store`.
+/// The image is still extracted and published inside `store`, so it must only hold the image.
+pub fn materialize_spk_with_scratch(
+    package: &Path,
+    store: &Path,
+    app_uid: u32,
+    profile: ImportProfile,
+    scratch: Option<&Path>,
+) -> io::Result<InstalledPackage> {
+    materialize_staged(package, store, app_uid, profile, scratch)
 }
 
 fn materialize_staged(
@@ -245,20 +256,21 @@ fn materialize_staged(
     store: &Path,
     app_uid: u32,
     profile: ImportProfile,
+    scratch: Option<&Path>,
 ) -> io::Result<InstalledPackage> {
     let _protected_store = open_protected_directory(store, app_uid, false)?;
+    let _protected_scratch = scratch.map(|dir| open_protected_directory(dir, app_uid, false)).transpose()?;
     let limits = profile.limits();
     let input_length = fs::symlink_metadata(&package).ctx("inspect", &package)?.len();
     // Simultaneous raw+decoded spools, extracted image, and retained compressed SPK.
-    // This is an available-space preflight, not a disk reservation.
-    stream::check_workspace(
-        store,
-        input_length
-            .saturating_mul(2)
-            .saturating_add(limits.decoded_bytes.saturating_mul(2)),
-        limits,
-    )?;
-    let spk = stream::verify(package, store, limits)?;
+    // This is an available-space preflight, not a disk reservation. With a separate scratch the
+    // spools (checked again inside `verify`) leave the store holding the image and the retained SPK.
+    let store_need = match scratch {
+        None => input_length.saturating_mul(2).saturating_add(limits.decoded_bytes.saturating_mul(2)),
+        Some(_) => input_length.saturating_mul(2).saturating_add(limits.decoded_bytes),
+    };
+    stream::check_workspace(store, store_need, limits)?;
+    let spk = stream::verify(package, scratch.unwrap_or(store), limits)?;
     let mut verified = verified_identity(&spk, PathBuf::new())?;
     let store_metadata = fs::symlink_metadata(&store).ctx("inspect", &store)?;
     if !store_metadata.is_dir() || store_metadata.file_type().is_symlink() {

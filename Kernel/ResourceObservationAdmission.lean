@@ -135,6 +135,20 @@ def resourceSlots (subject : SubjectId) (target : Nat) : (kind : CanonicalCellRe
   | .worldKind, logical => WorldKindProjection.definitionProject logical logical
   | _, _ => []
 
+/-- `resourceSlots` filtered by `want`, a content cell's summaries computed only when named. -/
+def resourceSlotsDemand (want : String → Bool) (subject : SubjectId) (target : Nat) :
+    (kind : CanonicalCellRegistry.Kind) → Store (CanonicalCellRegistry.layout kind) → List (String × Int)
+  | .content, logical => ContentResource.projectDemand want logical logical ⟨[]⟩
+  | kind, logical => (resourceSlots subject target kind logical).filter fun slot => want slot.1
+
+theorem resourceSlotsDemand_eq (want : String → Bool) (subject : SubjectId) (target : Nat)
+    (kind : CanonicalCellRegistry.Kind) (logical : Store (CanonicalCellRegistry.layout kind)) :
+    resourceSlotsDemand want subject target kind logical =
+      (resourceSlots subject target kind logical).filter fun slot => want slot.1 := by
+  cases kind <;> first
+    | exact ContentResource.projectDemand_eq want logical logical ⟨[]⟩
+    | rfl
+
 /-- The policy source store of a decoded directory. -/
 def sourceStoreOf (deployment : Deployment) (directory : Directory Nat Registry) :
     CanonicalPolicyRegistry.PayloadStore where
@@ -228,14 +242,104 @@ def project (prepared : Prepared context profile wanted marker capability contex
     (logical : Store (CanonicalCellRegistry.layout prepared.observed.before.kind)) : Minidregg.Pred.State :=
   projectWith prepared.clock.clock wanted contextBytes prepared.observed.before.kind prepared.accountBalances logical
 
-def step (prepared : Prepared context profile wanted marker capability contextBytes) : PolicyStepContext :=
+/-- The read's step on the full projection. -/
+def fullStep (prepared : Prepared context profile wanted marker capability contextBytes) : PolicyStepContext :=
   PolicyStepContext.ofCandidate (project prepared) profile.semantics
     (readCandidate wanted prepared.observed.before.kind prepared.observed.before.payload prepared.observed.rootExact)
+
+/-- The slots the read's committed law reads (`PhysicalLawResolution.predicateOf?`, the law
+`policyConfig` resolves: `keys_exact`); empty when none resolves, and then the read refuses
+`lawDenied` before any verdict. -/
+def keys (prepared : Prepared context profile wanted marker capability contextBytes) :
+    List Minidregg.Pred.Slot :=
+  ((PhysicalLawResolution.predicateOf? profile.compilerProfile context.authority context.directory
+      wanted.target.value prepared.kindDependencies.additional).map Minidregg.Pred.Pred.reads).getD []
+
+/-- The full projection cut to `keys` (the statement); `projectForDemand` computes it. -/
+def projectFor (keys : List Minidregg.Pred.Slot)
+    (prepared : Prepared context profile wanted marker capability contextBytes)
+    (logical : Store (CanonicalCellRegistry.layout prepared.observed.before.kind)) : Minidregg.Pred.State :=
+  (project prepared logical).restrict keys
+
+/-- `projectWith` cut to `keys`, a byte block (`context/`, `resource/`, `account/bytes`) encoded and a
+content summary computed only when a demanded name can be one of its slots. -/
+def projectWithDemand (keys : List Minidregg.Pred.Slot) (clock : Kernel.ClockCell.Clock) {kind : ResourceKind}
+    (wanted : Request kind) (contextBytes : List UInt8)
+    (physical : CanonicalCellRegistry.Kind) (accountBalances : List (Nat × Int))
+    (logical : Store (CanonicalCellRegistry.layout physical)) : Minidregg.Pred.State :=
+  (⟨Kernel.ClockCell.slots clock ++ [("target/storageKind", Int.ofNat physical.tag.toNat)] ++
+    CanonicalRuntimeProfile.requestSlots wanted ++
+    ResourceAuthorityProjection.bytesSlotsDemanded keys "context/bytes" (fun _ => contextBytes) ++
+    ResourceAuthorityProjection.bytesSlotsDemanded keys "resource/bytes"
+      (fun _ => (CanonicalCellRegistry.materializer physical).codec.encode logical) ++
+    ResourceAuthorityProjection.bytesSlotsDemanded keys "account/bytes"
+      (fun _ => CanonicalAccountView.balanceStream.encode accountBalances) ++
+    accountBalances.map (fun pair => (s!"account/balance/{pair.1}", pair.2)) ++
+    resourceSlotsDemand keys.contains wanted.subject wanted.target.value physical logical⟩ :
+      Minidregg.Pred.State).restrict keys
+
+theorem projectWithDemand_exact (keys : List Minidregg.Pred.Slot) (clock : Kernel.ClockCell.Clock)
+    {kind : ResourceKind} (wanted : Request kind) (contextBytes : List UInt8)
+    (physical : CanonicalCellRegistry.Kind) (accountBalances : List (Nat × Int))
+    (logical : Store (CanonicalCellRegistry.layout physical)) :
+    projectWithDemand keys clock wanted contextBytes physical accountBalances logical =
+      (projectWith clock wanted contextBytes physical accountBalances logical).restrict keys := by
+  simp only [projectWithDemand, projectWith, Minidregg.Pred.State.restrict,
+    List.filter_append, ResourceAuthorityProjection.bytesSlotsDemanded_restrict]
+  rw [resourceSlotsDemand_eq, List.filter_filter]
+  simp
+
+/-- What runs for a read (`projectWithDemand`). -/
+def projectForDemand (keys : List Minidregg.Pred.Slot)
+    (prepared : Prepared context profile wanted marker capability contextBytes)
+    (logical : Store (CanonicalCellRegistry.layout prepared.observed.before.kind)) : Minidregg.Pred.State :=
+  projectWithDemand keys prepared.clock.clock wanted contextBytes prepared.observed.before.kind
+    prepared.accountBalances logical
+
+omit [DecidableEq F] in
+theorem projectForDemand_exact (keys : List Minidregg.Pred.Slot)
+    (prepared : Prepared context profile wanted marker capability contextBytes)
+    (logical : Store (CanonicalCellRegistry.layout prepared.observed.before.kind)) :
+    projectForDemand keys prepared logical = projectFor keys prepared logical :=
+  projectWithDemand_exact _ _ _ _ _ _ _
+
+omit [DecidableEq F] in
+@[csimp] theorem projectFor_eq_demand : @projectFor = @projectForDemand := by
+  funext
+  exact (projectForDemand_exact _ _ _).symm
+
+/-- The read's policy step: the full projection cut to the slots its committed law reads, so its
+verdict is the verdict on `fullStep` (`step_eval_exact`). -/
+def step (prepared : Prepared context profile wanted marker capability contextBytes) : PolicyStepContext :=
+  PolicyStepContext.ofCandidate (projectFor (keys prepared) prepared) profile.semantics
+    (readCandidate wanted prepared.observed.before.kind prepared.observed.before.payload prepared.observed.rootExact)
+
+omit [DecidableEq F] in
+theorem step_exact (prepared : Prepared context profile wanted marker capability contextBytes) :
+    step prepared = (fullStep prepared).restrict (keys prepared) := rfl
 
 def policyConfig (prepared : Prepared context profile wanted marker capability contextBytes) : ComposedPolicyAdmission.Config F :=
   PhysicalLawResolution.config profile.compilerProfile context.authority context.directory
     (sourceCapabilityPortal context.authority marker) (step prepared) wanted.target.value
     prepared.kindDependencies.additional
+
+theorem keys_exact (prepared : Prepared context profile wanted marker capability contextBytes)
+    (law : ComposedPolicyAdmission.PreparedLaw (policyConfig prepared)) :
+    keys prepared = law.predicate.reads := by
+  unfold keys
+  rw [PhysicalLawResolution.predicateOf?_law profile.compilerProfile context.authority context.directory
+    _ _ _ _ law]
+  rfl
+
+/-- **The read's verdict is the verdict on the full projection** (`Pred.eval_restrict`). -/
+theorem step_eval_exact (prepared : Prepared context profile wanted marker capability contextBytes)
+    (law : ComposedPolicyAdmission.PreparedLaw (policyConfig prepared)) :
+    Minidregg.Pred.eval law.predicate (step prepared).oldState (step prepared).newState =
+      Minidregg.Pred.eval law.predicate (fullStep prepared).oldState (fullStep prepared).newState := by
+  rw [step_exact, keys_exact prepared law]
+  exact Minidregg.Pred.eval_restrict law.predicate _ _
+
+#assert_axioms step_eval_exact
 
 def portal (prepared : Prepared context profile wanted marker capability contextBytes) : Portal :=
   (policyConfig prepared).portal
@@ -464,12 +568,18 @@ theorem read_preserves_resource (prepared : Prepared context profile wanted mark
     prepared.observed.rootExact).postcondition
 
 omit [DecidableEq F] in
-theorem policy_views_equal (prepared : Prepared context profile wanted marker capability contextBytes) :
-    (step prepared).oldState = (step prepared).newState := by
+theorem policy_views_equal_full (prepared : Prepared context profile wanted marker capability contextBytes) :
+    (fullStep prepared).oldState = (fullStep prepared).newState := by
   change project prepared prepared.observed.before.payload.logical =
     project prepared (readCandidate wanted prepared.observed.before.kind prepared.observed.before.payload
       prepared.observed.rootExact).post.logical
   rw [read_preserves_resource]
+
+omit [DecidableEq F] in
+theorem policy_views_equal (prepared : Prepared context profile wanted marker capability contextBytes) :
+    (step prepared).oldState = (step prepared).newState := by
+  rw [step_exact]
+  exact congrArg (Minidregg.Pred.State.restrict (keys prepared)) (policy_views_equal_full prepared)
 
 omit [DecidableEq F] in
 theorem preparation_actual_root (prepared : Prepared context profile wanted marker capability contextBytes) :
@@ -512,11 +622,11 @@ theorem read_law_sees_clock (prepared : Prepared context profile wanted marker c
 /-- **`read_now_slot_exact`** (K-CLOCK's `now_slot_exact` on the read path):
 the law's old and new states both carry `clock/now` = the loaded clock's. -/
 theorem read_now_slot_exact (prepared : Prepared context profile wanted marker capability contextBytes) :
-    (step prepared).oldState.get "clock/now" = some (Int.ofNat prepared.clock.clock.now) ∧
-      (step prepared).newState.get "clock/now" = some (Int.ofNat prepared.clock.clock.now) ∧
+    (fullStep prepared).oldState.get "clock/now" = some (Int.ofNat prepared.clock.clock.now) ∧
+      (fullStep prepared).newState.get "clock/now" = some (Int.ofNat prepared.clock.clock.now) ∧
       Kernel.ClockCell.clockOf prepared.clock.cell.logical = some prepared.clock.clock := by
-  have views := policy_views_equal prepared
-  have old : (step prepared).oldState.get "clock/now" = some (Int.ofNat prepared.clock.clock.now) :=
+  have views := policy_views_equal_full prepared
+  have old : (fullStep prepared).oldState.get "clock/now" = some (Int.ofNat prepared.clock.clock.now) :=
     (read_law_sees_clock prepared prepared.observed.before.payload.logical).1
   exact ⟨old, views ▸ old, prepared.clock.clockExact⟩
 

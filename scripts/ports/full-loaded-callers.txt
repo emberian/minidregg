@@ -5,8 +5,6 @@
 # Approved diagnostic addition (ROOT 10-17): Host/WorldSim.lean, the HP-6 seeded sim comparing Host path
 # and follower over whole Worlds; reachable from no shipped executable (not in the closure of Host.Main
 # or Host.ClientConsentSession, checked with scripts/lean_imports.py).
-# Approved diagnostic addition (ROOT 10-17): scripts/consent/own-base-plant.lean, a planted-forgery
-# script; a standalone script, no library module, so in no shipped closure.
 # Includes the fleet head/incoming ops (Kernel/NativeHost.lean, cv 01a114aa-6780).
 Assurance/HyperdocumentLinkFramedRecovery.lean
 Fixtures/NativeAcceptedFixture.lean
@@ -79,4 +77,3 @@ scripts/probe-canonical-cell-registry.lean
 scripts/probe-native-host-genesis.lean
 scripts/probe-policy-source-cell.lean
 Host/WorldSim.lean
-scripts/consent/own-base-plant.lean

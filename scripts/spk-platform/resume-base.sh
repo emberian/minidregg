@@ -129,11 +129,6 @@ jq -n --arg originalHost "$ORIGINAL_HOST" --arg continuationHost "$HOST" \
   '{protocol:"mini-spk-gitweb-host-transition-v1",originalHost:$originalHost,
     originalSha256:$originalSha256,continuationHost:$continuationHost,
     continuationSha256:$continuationSha256}' >"$ACTION/host-transition.json"
-sync -f "$ACTION/adopted-birth-receipt-fields.json"
-sync -f "$ACTION/adopted-birth-receipt.json"
-sync -f "$ACTION/host-transition.json"
-sync -f "$ACTION"
-sync -f "$ROOT/continuations/gitweb-journey"
 sha256sum "$ATTEMPT/call.bin" "$ATTEMPT/config.json" "$SUBMIT_RECEIPT" \
   "$LOOKUP_RECEIPT" "$WORKROOM_SOURCE" "$APP_SOURCE" "$RUN_SOURCE" \
   "$ORIGINAL_HOST" "$HOST" "$MINI" "$STORE_BINARY" "$SIGNATURE_BINARY" "$SPK_HOST" \
@@ -159,8 +154,6 @@ RUNTIME_BASE="/run/user/$(id -u)"
   [ "$(stat -c '%u:%a' "$RUNTIME_BASE")" = "$(id -u):700" ] || exit 2
 SOCKET_DIR=$(mktemp -d "$RUNTIME_BASE/mini-r3w.XXXXXX")
 printf '%s\n' "$SOCKET_DIR" >"$ACTION_DIR/socket-dir.txt"
-sync -f "$ACTION_DIR/socket-dir.txt"
-sync -f "$ACTION_DIR"
 SOCKET="$SOCKET_DIR/host.sock"
 "$MINI" serve --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
   >"$ACTION_DIR/workroom-service.stdout" 2>"$ACTION_DIR/workroom-service.stderr" &
@@ -216,9 +209,6 @@ chmod 700 "$ACTION/"*-continuation.sh
 for generated in "$ACTION/"*-continuation.sh; do /bin/sh -n "$generated" || fail "generated continuation syntax refused"; done
 sha256sum "$ACTION/"*-continuation.sh >"$ACTION/generated-sha256.txt"
 sha256sum -c "$ACTION/input-sha256.txt" >"$ACTION/input-precheck.txt" || fail "input drift before continuation"
-for prepared in "$ACTION/"*-continuation.sh "$ACTION/input-sha256.txt" \
-    "$ACTION/generated-sha256.txt"; do sync -f "$prepared"; done
-sync -f "$ACTION"
 else
   protected_dir_chain "$ACTION"
   private_file "$ACTION/adopted-birth-receipt-fields.json"
@@ -248,14 +238,10 @@ mark_phase() {
   [ ! -e "$ACTION/$phase.started" ] && [ ! -L "$ACTION/$phase.started" ] ||
     fail "$phase already started without completion; reconcile retained attempts"
   printf '%s\n' started >"$ACTION/$phase.started"
-  sync -f "$ACTION/$phase.started"
-  sync -f "$ACTION"
 }
 complete_phase() {
   phase=$1
   printf '%s\n' complete >"$ACTION/$phase.completed"
-  sync -f "$ACTION/$phase.completed"
-  sync -f "$ACTION"
 }
 if [ -e "$ACTION/workroom.completed" ]; then
   test -s "$WORKROOM/agents/verified/birth-evidence.json" || fail "completed workroom evidence absent"
@@ -300,6 +286,4 @@ if [ -e "$ACTION/complete.txt" ]; then
     "$ACTION/complete.txt" || fail "final marker differs"
 else
   printf '%s\n' 'base continuation complete; original birth receipt adopted, no fresh bootstrap' >"$ACTION/complete.txt"
-  sync -f "$ACTION/complete.txt"
 fi
-sync -f "$ACTION"

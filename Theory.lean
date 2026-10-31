@@ -25,12 +25,16 @@ import Theory.ReactiveCellTransition  -- declaration-derived reactive control pl
 import Theory.CanonicalTransition  -- one canonical materialized post and proof-relevant typed delta unify ordinary and reactive prepared turns without a parallel store or caller-supplied roots
 import Theory.ResourceCost  -- Lean-owned multi-lane bounds/exact debits, checked word overflow, canonical-turn metering, atomic refusal, and additive composition
 import Theory.CanonicalResourceKernel  -- typed sparse asset/account nucleus: transfer, issuer-backed mint/burn, fees, and prepaid leases share one patch-derived conservation law
+import Theory.CanonicalResourceBookEntries  -- the account book as store entries: one entry per account, balance, lease and floor; an operation writes at most 3 (statement)
 import Theory.AuthMap  -- sparse Merkle map over hashed canonical key bytes: root a function of the logical map, O(depth) incremental root, openings; soundness under a pair-scoped collision carrier refuted at a length hash
 import Theory.LogAccumulator  -- Merkle mountain range over log heights: incremental frontier, completeness, collision-exhibiting soundness
 import Theory.AuthTrie  -- compressed authenticated binary trie: O(log n) openings, soundness up to a node collision
 import Theory.AuthTrieRange  -- subtree reveals: every member under a key prefix, soundness up to a node collision
 import Theory.AuthTrieCache  -- the compressed trie kept: inserts in O(depth), proved equal to the canonical root; honest openings verify
 import Theory.FiniteTapeGap  -- distinguishing gaps over finite equally likely tapes: triangle, rescaling, permutation invariance
+import Theory.AuthTrieReveal  -- honest reveals verify; the kept trie serves them in walked depth plus answer
+import Theory.PrivateCellTrie  -- statements the compressed trie owes before it carries a blinded cell: erase, complete class openings with scoped collisions
+import Theory.CellStateAux  -- a cell's persistent auxiliary structure: carried beside the store, followed per write, the root read from it
 import Theory.AuthMapCellRoot  -- AuthMap's world level instantiated at `cellRoot := Materializer.rootOf`: materialized cell roots open at the world root, world soundness names the cell store, a validated patch moves the world root along one path
 import Theory.PlanBinding  -- a plan binds (address, value) reads, not a cell root: admission refuses footprintStale only when a read address moved; whole-cell footprint = root binding under the pair carrier; no-TOCTOU; independent plans admitted in both orders and commute; openings at the cell root under the world root, and why signed openings would re-bind the root
 import Theory.CellSlot  -- stable heterogeneous absent/present slots, canonical payload decoding, and monotone identifiers make creation and retirement first-class transitions
@@ -115,3 +119,5 @@ import Theory.ObjectiveBendDemandDataBudget  -- executable witnesses for remaini
 import Theory.ObjectiveBendDemandCollect  -- collection of the demand heap at a yield: trace from the roots, compact, rename (B4/T5; behaviour theorem in ObjectiveProofs)
 import Theory.ObjectiveBendDemandCapacity
 import Theory.ObjectiveBendExtensions
+import Theory.Signature    -- N3: abstract signatures, Term (= WType), fold_unique, agree_by_initiality, the syntactic-leaves-forced obligation
+import Theory.StreamCodec  -- the compact streaming-codec nucleus: prefix-decodable byte codecs with their laws (compact naturals over NatDigits255Fast, sequences, products, sums, tags, fixed-width streams, digests, bytesStream); re-exported by Compiler.Tower256ConcreteBackend

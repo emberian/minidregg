@@ -35,7 +35,7 @@ pole can be stated without a simulator. Ported statements keep Bread's names; th
 Bread's reference kernel are replaced by named theorems.
 -/
 import Theory.Knowledge
-import Mathlib.Logic.Basic
+import Mathlib.Basic.Logic.Basic
 
 namespace Minidregg.Theory.Transferability
 
@@ -271,6 +271,7 @@ theorem dial_endpoints_distinct :
   ⟨⟨v0_convinced, fun h => vOther_unconvinced (h V.vOther)⟩,
     fun h => vOther_unconvinced (h V.vOther)⟩
 
+set_option backward.isDefEq.respectTransparency false in
 /-- The reference kernel satisfies DV receipt mode for `v0`: the premises of
 `DVReceiptMode.simulated_is_designated` are inhabited. -/
 theorem referenceReceiptMode : DVReceiptMode V Nat Nat Nat V.v0 where

@@ -1,7 +1,7 @@
 /-
-# `Effects/Revival/HostTeethProofs.lean` — `HostTeeth`, PROVED
+# `Kernel/EffectsRevival/HostTeethProofs.lean` — `HostTeeth`, PROVED
 
-`Effects/Revival/Statements.lean` §7 (audited): the host dispatch does not dispatch through a
+`Kernel/EffectsRevival/Statements.lean` §7 (audited): the host dispatch does not dispatch through a
 registry whose content handler drops the rotation, nor through one that keeps code 1 as a
 hand arm.
 
@@ -15,7 +15,7 @@ is kernel-checked.
 -/
 module
 
-public import Effects.Revival.ContentProofs
+public import Kernel.EffectsRevival.ContentProofs
 public import Theory.AssertAxioms
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).

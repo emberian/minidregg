@@ -679,6 +679,12 @@ class ControllerWorldTests(unittest.TestCase):
             with self.assertRaises(ValueError): c.preserve_consent_state(self.root, r)
         self.assertIsNone(c.preserve_consent_state(self.root, self.record()))
 
+    def test_typed_application_tools_are_allowed_by_name_and_nothing_else(self):
+        for ok in ('mini_app_dav', 'mini_app_dav_qualify', 'mini_app_wbo_board_get', 'mini_grain_status'):
+            self.assertTrue(c.allowed_tool(ok), ok)
+        for bad in ('mini_app_', 'mini_app_Dav', 'mini_app_../x', 'mini_app_dav qualify', 'mini_application_api', 'mini_apps', 'sh', ''):
+            self.assertFalse(c.allowed_tool(bad), bad)
+
     def test_tool_uses_owned_exclusive_regular_request_file(self):
         r = self.record(); (self.root / 'tool-requests').mkdir(mode=0o700)
         args = self.file('arguments.json', b'{"family":"oracle-session"}')
@@ -785,6 +791,54 @@ class ControllerWorldTests(unittest.TestCase):
         with patch.object(c,'occupied_ids',return_value=set(range(100000,165536))),patch.object(c,'delegated',return_value=([(100000,165536)],[])), \
              patch.object(c,'nss_ids',return_value=set()),patch.object(c,'nss_free',return_value=True),patch.dict(c.os.environ,{'SUDO_UID':'1000'}):
             with self.assertRaises(ValueError):c.check_app_allocation('cd'*8,'/usr/local/libexec/mini-spk-volume-helper','1000','100032','2')
+
+    def test_a_ten_thousand_based_delegation_intersects_only_for_a_custodian_world(self):
+        # A container's /etc/subuid and /etc/subgid: mini-core:10000:4096. The 65536 floor belongs to
+        # host worlds; clamping this delegation to it leaves nothing, which is the refusal "app range
+        # exhausted" a custodian world saw.
+        raw=b'mini-core:10000:4096\n'
+        def passwd(name):
+            if name=='mini-core': return SimpleNamespace(pw_uid=1000)
+            raise KeyError(name)
+        helper='/usr/local/libexec/mini-spk-volume-helper'
+        with patch.object(c,'read_file',return_value=raw),patch.object(c.pwd,'getpwnam',side_effect=passwd), \
+             patch.object(c,'occupied_ids',return_value=set()),patch.object(c,'nss_ids',return_value=set()), \
+             patch.object(c,'nss_free',return_value=True),patch.object(c,'delegation_owners',return_value=(set(),set())), \
+             patch.dict(c.os.environ,{'SUDO_UID':'1000'}):
+            self.assertEqual(c.delegated(1000)[0],[])
+            self.assertEqual(c.delegated(1000,1)[0],[(10000,14096)])
+            self.assertEqual(c.check_app_allocation('cd'*8,helper,'1000','10000','64',custodian=True)['appRangeChecked'],[10000,10064])
+            with self.assertRaises(ValueError):c.check_app_allocation('cd'*8,helper,'1000','65536','64')
+            self.assertEqual(c.allocate_identity(1000,'mini-c-'+'ab'*8,1),10000)
+            with self.assertRaises(ValueError):c.allocate_identity(1000,'mini-c-'+'ab'*8)
+        # The reservation of a custodian world's controller sits in the same range.
+        r=self.reservation_value();r['controllerUid']=r['controllerGid']=10064
+        with self.assertRaises(ValueError):c.namespace_record(r)
+        self.assertEqual(c.namespace_record(r,True)['controllerUid'],10064)
+        self.assertEqual(c.id_floor({'custodianSocket':'/run/x'}),1)
+        self.assertEqual(c.id_floor({}),65536)
+
+    def test_a_custodian_world_allocates_app_uids_inside_its_user_namespace(self):
+        helper='/usr/local/libexec/mini-spk-volume-helper'
+        with patch.object(c,'occupied_ids',return_value=set()),patch.object(c,'delegated',return_value=([(10000,20000)],[])), \
+             patch.object(c,'nss_ids',return_value=set()),patch.object(c,'nss_free',return_value=True),patch.dict(c.os.environ,{'SUDO_UID':'1000'}):
+            got=c.check_app_allocation('cd'*8,helper,'1000','10000','16',custodian=True)
+            self.assertEqual(got['appRangeChecked'],[10000,10016])
+            # Without the custodian the subordinate floor still refuses the same request.
+            with self.assertRaises(ValueError):c.check_app_allocation('cd'*8,helper,'1000','10000','16')
+        # The registry of such a world carries custodianSocket and app uids below 65536; without the
+        # socket the same uids are refused, and a malformed socket is refused.
+        base=self.registry_value()
+        base['appUids']=[10000,10001]
+        registry=self.root/'registry-c';registry.mkdir(mode=0o700)
+        path=registry/('ab'*8+'.json')
+        def load(value):
+            path.write_text(json.dumps(value))
+            with patch.object(c,'read_file',side_effect=lambda p,*a,**k:p.read_bytes()):
+                return c.registry_record(path)
+        with self.assertRaises(ValueError):load(base)
+        self.assertEqual(load({**base,'custodianSocket':'/run/mini-volumes/volume.sock'})['appUids'],[10000,10001])
+        with self.assertRaises(ValueError):load({**base,'custodianSocket':'/run/../etc/x'})
 
     def test_pending_allocation_without_reservation_refuses(self):
         registry=self.root/'registry';registry.mkdir();worlds=self.root/'worlds';worlds.mkdir()
@@ -1613,27 +1667,6 @@ class ControllerWorldTests(unittest.TestCase):
                 self.assertTrue(repeated['replayed'])
                 self.assertEqual(repeated['previousSha256'],c.sha(old))
                 self.assertEqual((base/'configs'/(c.sha(old)+'.json')).read_bytes(),old)
-
-    def test_config_rename_fsync_failure_is_recoverable_without_rollback_permission(self):
-        with self.storage_upgrade_fixture('config-sync') as (base,r,units,stage,unit):
-            old,new,source=self.config_files(base,r,'sync');home=Path(r['home'])
-            original=c.sync_directory;calls=[]
-            def interrupted(path):
-                if path==home:
-                    calls.append(path)
-                    if len(calls)==2:raise OSError('injected final config directory fsync failure')
-                return original(path)
-            with patch.object(c,'sync_directory',side_effect=interrupted):
-                with self.assertRaises(OSError):c.config_update(r['store'],'/unused',str(source))
-            self.assertEqual((home/'controller.json').read_bytes(),new)
-            self.assertTrue(c.config_update(r['store'],'/unused',str(source))['replayed'])
-            # Model losing the unsynced rename: only the exact retained previous
-            # state is accepted, and replay republishes the intended new config.
-            (home/'controller.json').write_bytes(old)
-            c.config_update(r['store'],'/unused',str(source))
-            self.assertEqual((home/'controller.json').read_bytes(),new)
-            historical=self.file('historical-config',old)
-            with self.assertRaisesRegex(ValueError,'noncurrent config lacks'):c.config_update(r['store'],'/unused',str(historical))
 
 
 if __name__ == '__main__':

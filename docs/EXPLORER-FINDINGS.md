@@ -2,7 +2,7 @@
 
 Present-state table, rewritten whole at each batch. Lane `lane/explorer`. Subject: candidate
 be4ef7510 (hbox `/home/hbox/lanes/integ/candidates/be4ef751074ca28c7d306c2f2bcf61cda03893c8`),
-explored as test members only. Batch 1, 2026-10-30.
+explored as test members only. Batch 11, 2026-10-31.
 
 ## Worlds (all on hbox, all mine; torn down when the lane ends)
 
@@ -33,6 +33,124 @@ verb line as ONE quoted argument or `say hello --in room` becomes the text "hell
 | E10 | story/room templates are slow | `story new tl --from tale` took 19.9 s (19 template lines, one submit each); `chat new` 3.0 s, `chat invite` 2.4 s, first `credit` 2.0 s; warm single writes 0.5 s | x1 | law 17 candidate: batch the template's lines into one proposal | n/a |
 | E11 | restart | `restart.sh` 9.6 s wall; first signed read afterwards 8.0-8.6 s at height 160-190 | x1 | measure the replay against height (law 17) | n/a |
 
+
+## Status after routing
+
+E1: infra says the shipped world pins the policy (670 hex) and door funding 1,225,000 (confirmed: a forge test member holds 1,224,993). Closed for the demo. E2: `mini-certify.timer` active on the forge, `mini-alert` now alarms at remaining < 96. Closed. E5, E6, E9: fixed on origin/lane/app-reds 0c176891e (E6 not yet re-checked in x1). E8: not a defect (installed on demo-dry). E3, E4: no owner (Lean/Host rendering). E7: untaken. E10, E11 and certify: integrator perf queue. Scaling: first read after restart 8 s at head 190, 23.4 s at head 769 (O(n) in history); certify at a fixed 256 tail 16.9 / 32.2 / 12.2 s at heads 257 / ~512 / ~768 (noisy, no trend).
+
+## Forge pass (demo-dry, be4ef7510 world, taken down by infra for a rebuild)
+
+Test members dw-10302104 and dw-10302056 only, driven by `/root/explorer/dm USER 'verb'` (runuser plus the box's mini-shell-ssh; deleted with the world).
+
+| id | repro | owner |
+|---|---|---|
+| F1 | Hosted accounts have passwd home `/var/lib/mini` (root 0755). Running `mini-shell-ssh` as `mini-s-NAME` with HOME as sshd would set it, any write (`credit`, `say`) fails `/var/lib/mini/.mini/consent-anchors: Permission denied`. With HOME set to the session home it works (my hotpatch in `dm`). NOT verified over a real sshd login: needs a real ssh member to confirm or clear. | infra |
+| F2 | The lobby's first line says "Start with the document called welcome", but `doc show welcome` as a member fails `cannot read .../refs/welcome.json`; a stranger holds no `welcome` reference. | infra/seed, door |
+| F3 | Under load average 10 (installs running): first `say` 12.5 s and 44.8 s, `tail -n 3` 11.4 s; warm `say` 2.0 s, `tail` 1.7 s (hbox is 0.5 s). | integrator perf |
+| F1 status | fixed by infra (mini-shell-ssh puts consent anchors in the session home); confirmed in code, member `say` works | infra |
+| F4 | `ask lobby ...` -> `there is no Hermes in lobby` (infra already knows; summon blocked). | infra |
+
+
+## Rebuilt forge world (be4ef7510, fresh genesis), test members dw-10302208 and dw-10302219
+
+| id | repro | owner |
+|---|---|---|
+| F5 | First action of an idle session is very slow: `credit` 37.8 s (with `signed read batch: the observed source changed before the plan landed; observing again (re-plan 1)`), first `say` 29.8 s; later `say` 2.1-2.3 s, `tail` 2.3 s with two app installs ingesting (load 4 to 7). Re-time on a quiet box. | infra, integrator perf |
+| F2 | still open: member `doc show welcome` fails, public /doc/welcome is 200. | seed/door grants |
+| F6 | `ask lobby hello` is admitted (`#10 unacknowledged`) but no reply arrives: `mini-grain-resident@9872001` is `failed`. Infra knows (resident exits while installs ingest; restart pending). | infra |
+
+Held: tale story with two players on the forge (key gate refuses `take key`/`go 3` out of order, GM narration shown on `look`); `chat new/invite/join/say/tail` between two members (writes 2.0-2.4 s warm, `chat new` 13 s, `doc new` 6.2 s under load); public pages from outside (/ 2.0 s steady, /doc/welcome 1.6 s, /tour /verb /story 0.5-0.7 s, /apps 1.3 s, 404s 0.5 s). Probe artefact: curl to the public URL from inside demo-dry hangs, use an outside probe.
+
+
+## hbox world x3 (be4ef7510, demo params + objectiveInvocation, funding 1,225,000)
+
+Worlds x1, x2, xw1, xweb and the e2e workers are down (x1's down listed one survivor that had already exited). x3 is up: `/ci/xp-log/m3 MEMBER 'verb'`, down with `jworld-scratch.sh down /ci/x3/w`.
+
+| id | repro | owner |
+|---|---|---|
+| G0 | E1 confirmed closed in a scratch world: with the policy pinned and funding 1,225,000, `bend publish` then `bend run tally` are admitted in under 1 s; one run costs 121,779 (10 runs fit the grant). A repeated identical `bend run` is refused with the exact-retry guard (`--again true`). | n/a |
+| G1 | A second member publishing the identical `Tally.obend` (`bend publish tally @Tally.obend --entry tally`) is refused `conflict: transaction identity conflict (phase replay)`; the package is already on the chain, yet the member then runs it fine. The refusal should say the package is already published. | kernel/shell refusal rendering |
+| G2 | `bend answer SLOT @file` by the decider with a wrong reply shape is refused `Refusal.responseType "reply"`; a non-decider is refused `notDecider` (good, by name). The decider message does not say what shape the slot wants. Await deadlines are heights (62 against a current 61): on a busy world the window can pass between `await` and `answer`. | shell/bend docs |
+
+
+### Bend happy path, restart in flight, web pass (x3)
+
+| id | repro | owner |
+|---|---|---|
+| G1, G2 | fixed on origin/lane/app-reds (hint text after the Host refusal); G2 does not name the slot's actual type (needs a Host query). | app-reds / Host |
+| G3 | Happy path proven: the `Tally` reply type is `Reply{amount: Nat}`, so the decider answers with `{"reply":{"tag":"record","fields":[{"name":"amount","value":{"tag":"natural","value":"7"}}]}}`, then `bend deliver OBJECT TX` resumes it (`total=7`, version 2, a new await). BUT with the default purse a `bend deliver` is refused `Refusal.awaitsFunding 60886 63454`: the first leg runs and answers, the resume cannot be funded. `bend run ... --deposit 200000` resumes fine. A default `bend run` cannot finish one answer; the demo's "10 runs" grant therefore buys 10 first legs, not 10 tallies. | bend defaults (`activity_world.py` policy, `bend run` default deposit) |
+| G4 | Two height scales: a run/answer/deliver receipt says height 86/87/88 while `bend await` in the same minute says height 96 and deadline 99 (about +10). The await window is `patience: 4`; on a busy world (two writers) `await` read height 78 against deadline 77 yet the answer was still admitted, so the printed heights are not the clock the deadline is judged in. Not shown too tight in practice, but unreadable. | shell `bend await` rendering |
+| G5 | Store restart with a `bend answer` in flight: the in-flight call gets a clean `cannot connect`; the retry after the restart is admitted once; a third try is `conflict: transaction identity conflict (phase replay)` (same unhelpful wording as G1 for a double answer). Nothing doubled. | refusal wording, app-reds |
+| G6 | Web as member (alice, bob over the dev helper): login 303, `/doc/new` 200 (8.7 s the first time), append 0.7 s, `/doc/webdoc` shows the text, `/bend` lists t1..t4 with their awaits, bob gets 404 for alice's doc (`no usable workspace reference`), anonymous `/doc/webdoc` 404. A re-posted append form appends again (no idempotency on a repeated form; two distinct proposals). `POST /verb/credit` without an alternative returns 400 `which alternative of the usage?`. | web (idempotent forms: decision) |
+
+
+## Reshipped forge world (be4ef7510, fresh), test member dw-10310244
+
+| id | observation | owner |
+|---|---|---|
+| H1 | F5 persists: the first signed read of a fresh session took 20.7 s (`credit`); the next `say` 1.3 s, `tail` 1.6 s; after an idle gap `say` 1.4 s and `credit` 1.5 s. Only the very first signed read of a new member is slow, which is the stranger's first minute. | infra/integrator perf |
+| H2 | Public `/doc/welcome` answers 200 (1.7 s) on this world, against the handed-over "404" known red: stale or fixed. Member-side `doc show welcome` (F2) still fails, no `welcome` ref. | seed/door grants |
+| H3 | `ask lobby ...` is admitted as a lobby turn ("said in lobby") and `hermes status lobby` prints only `#8 unacknowledged`; the member is never told why (`no-credential` is the cause, known). Whatever message ember's key decision ends up with, the asker needs a visible reason in the room. | Hermes dispatch (member-visible refusal) |
+| H4 | `apps search` lists every app as `[unverified; not swept]` with `typed tools: declaration-unavailable`, and `apps list` fails `appsWorkerUnavailable` until the worker is up (known). Fine for the known red, but the unswept label on all 22 adopted packages will read as broken to a stranger. | app-reds |
+| H5 | `reports -n 2` as the sender of a `feedback` report: `this session founded no feedback-NAME room`. The member who files feedback gets no way to read it back. | shell |
+| Public | / 2.4 s, /doc/welcome 1.7 s, /apps 1.3 s, /doc 0.7 s, /receipts 0.7 s, /tour /verb /story /healthz 0.5-0.7 s, /join 503 (held). | n/a |
+
+
+## Candidate 35737eac4 re-explored (hbox x4, funding 1,225,000, default purse)
+
+| id | result |
+|---|---|
+| G1 | fixed: the second publish says `this package is already published: artifact ... package ...; bend run it`. |
+| G3 | holds: a tally (run, answer, deliver) spends 152,223; after the deadline one more `bend deliver` ends it (phase none) and refunds 60,885, net about 91,338. Until that last deliver the purse stays locked (a user who never delivers keeps 60,885 tied up; the program does not end itself). 10 completed tallies fit the grant only if every one is finished that way (8 un-finished ones exhaust it). |
+| G4 | fixed: receipts and `bend await` print one clock (run 57, await 58, answer 58, deliver 59, show 60). |
+| G6 | fixed: a form POST with the page's `attempt` token twice gives admit then a replay (one append); the same token with other text gives 409 `Already submitted`. A POST without a token still appends a new proposal (expected). |
+| H5 | fixed: `reports -n 3` as the filer shows the report with the build sha. |
+| E7 (superseded below) | was: `world-up` plus `apps-e2e.sh` on 35737eac4 still fails the first install: `no-grant ... (phase prepare)` at the application birth (2/12 rows; evidence `/ci/xe2e4`, `/ci/x4log/a1.out` on hbox). Owner: app-reds / the volume-helper lane. |
+| not re-tested | member `doc show welcome` (needs the door's tick; scratch world has no door). |
+
+
+### E7 re-run on 35737eac4 with scripts and deploy from staging beedc5de4 (hbox world-up + apps-e2e)
+
+| step | result |
+|---|---|
+| no-grant at the application birth | FIXED: the first install's tool reservation and birth are admitted (`birth admitted`), member spend 10,360 of 20,000; the delegation-cost fix works. |
+| install with an unseeded cache | `undecided: package ... is not in the quarantine yet` (no market fetcher runs in the harness; harness input, not product). |
+| install of the pinned EtherCalc from the shared cache | `packageIdMismatch`: the cached `ethercalc-<sha>.spk` hashes to 93bd2c29..., not the index's package id. Harness input. |
+| install of Simple Todos after seeding the cache with the real download (`mini-market-fetch fetch`, sha256 prefix equals packageId) | RED: `appIdMismatch: Simple Todos 5830d701... was refused by this box's ingest`; verdict file `/ci/xe2e7/verdicts/5830d70137cdae158118884da8790870.json` = `{reason: appIdMismatch, signedAppId: "", verdict: refused}`. An empty signedAppId means the ingest never produced a signed app id (it did not fail on a mismatch); likely the ingest unit or signature check failing on this box. Not diagnosed further. Owner: app-reds (spk-ingest / the worker's ingest stage). |
+| second app (Hacker Slides) in the same run | birth refused `resourceBatch` after the first install had spent 18,730 of 20,000: the harness's 20,000 funding covers one install. |
+
+
+### Hotpatch spk-host from 5f5e99324 and a load pass (35737eac4)
+
+| item | result |
+|---|---|
+| spk-host from 5f5e99324 | built on hbox in 1 min 8 s (`/ci/x4log/tgt/release/spk-host`), but two overlay attempts did not install it (read-only hard-linked copy; a failed script edit), so no live verdict; the integrator then superseded the commit (c730fd3ea) and asked to wait for the next cut. Worlds torn down by PID file. Harness lesson: overlaying one binary into a copy of `$C/bin` needs `rm -f` first, because the files are hard links with mode 555. |
+| load: 4 members x 25 `say` + 10 doc append/submit at once | 100 of 100 says and 10 of 10 doc appends admitted, wall 33.5 s (3.3 writes/s), `say` mean 1.27 s and max 3.0 s, doc submit mean 0.91 s, no refusals; the room tail and `doc show` are complete and in order. |
+
+
+### CONSENT-STORE "after" numbers (eca98bde7-resvar2) and batch 3 candidate a4cb65af
+
+| measure | before (be4ef7510) | after (eca98bde7-resvar2; hbox load 6-10) |
+|---|---|---|
+| fresh member's first signed read | 20.7 s forge, ~2 s hbox | 0.79 s at height 202, 0.46 s at 803 |
+| restart wall / first read after | 9.6 s, 8.0-8.6 s at h190; 26.0 s, 23.4 s at h769 | 5.1 s, 0.19-0.46 s at h803 (flat in height) |
+| certify a 256 tail | 16.9 / 32.2 / 12.2 s | 0.8 s at 266, then 5.3-6.6 s to height 1100 |
+| `story new --from tale` | 19.9 s | 27.7 and 46.3 s at low height, 41 s at about 1100 (not improved; per-submit cost, hot-path row 12 still open) |
+
+Batch 3 (a4cb65af): `bend settle` works. After run, answer and deliver (spent 152,223), `bend settle` delivered the past-deadline tally (phase none, `total=7`) and refunded 60,885, net 91,338 per tally; a second `settle` and another member's `settle` say `0 delivered`. Apps (apps-e2e, world-up and harness from the candidate's own source.tar): the signed-identity fix works, so the install gets past ingest and create; NEW RED at START: `spk-host: grain refused: application has no route; grain route must bind at least one entrance` (evidence `/ci/xe2e10/install-0dp7...json`). Second install in the same run: birth refused `resourceBatch` because the harness funding of 20,000 covers one (`MEMBER_FUNDING=40000` is the knob). Hacker Slides' real download is refused upstream (`http-526`), so only Simple Todos could be seeded.
+
+
+### Batch 3 multi-member pass and the route-before-START fix (hbox)
+
+| item | result |
+|---|---|
+| web flows (a4cb65af) | `doc new`, append, re-POST (replay then 409 for other text), `/bend`, `/room` (rooms only), `/receipts`: all fine. H4 wording not checkable (scratch world has no market index). |
+| restart mid-activity then `bend settle` | works: 2 tallies, one answered, restart between answer and deliver, settle delivered both past deadline (r1 total=7, r2 total=0), net 152,232 for the pair. |
+| `reports` from two members | each filer sees their own report with the build sha; a non-filer sees nothing. |
+| H3 hermes wording | untestable without a resident (scratch says `there is no Hermes in hroom`); needs the forge world. |
+| apps with `mini` built from app-reds 6043dccd0 (route bound before START), `MEMBER_FUNDING=40000` | NEXT RED: install state `routing`: `the owner's route is not bound yet: .../mini query: refused: no-grant: this key holds no grant covering this target and operation (phase observation)`. The worker's route-binding step issues an observation query the member's key has no grant for. Evidence `/ci/xe2e11/install-0dp7...json`, `/ci/x4log/e2e11.out`. Owner: app-reds. |
+| leaked processes | after `world-down.sh /ci/xw9` returned `removal_assertions=0`, five processes of the world were still running with parent 1 and no PID file (`mini codec-resident`, `minidregg-host ... codec`, `mini consent-resident`, `minidregg-client-consent`, `minidregg-link-sqlite-store serve`). world-down does not stop client-side residents spawned by the harness's workspaces. Not killed (no PID file); reported. The settings files these residents name still exist (`/ci/xw9/w/store/base/workroom/deployment/pinned-config.json`, `/ci/xe2e11/ws-controller/provisions/member9/observe/g0001/config.json`; `/ci/xw9` itself is still on disk), so demo-reds' self-exit (settings file or socket gone) does not apply and this is not a red for it. The red is that world-down leaves the world directory and its client residents behind. Still running at the time of writing; stopping them is waiting on ember's word, because the standing rule is PID file or nothing. |
+
 ## Exercised and held
 
 Three members in one chat room (`chat new/invite/join/enter`, 45 concurrent says all admitted,
@@ -46,6 +164,5 @@ members; document limits are all named except E9.
 
 ## Not yet reached
 
-Apps beyond the install attempt (E7), Hermes in a story or room, the forge `demo` container (infra
-has not reported it up), the public reader over app-made documents, the door and enrol path on the
+Apps beyond the install attempt (E7), Hermes in a story or room (blocked on the forge), the public reader over app-made documents, the door and enrol path on the
 real stack.

@@ -221,7 +221,7 @@ private def walkPhysical (config : Config) (prior : Option (Walked config))
           return .error s!"semantic history refused at entry {failure.index}: {failure.detail}"
       | .ok verified => return .ok ⟨physical, verified⟩
   | none =>
-      match ← NativeHostReplay.verifyLoaded config reader physical with
+      match ← NativeHostReplay.verifyStart config reader physical with
       | .error failure =>
           return .error s!"semantic history refused at entry {failure.index}: {failure.detail}"
       | .ok verified => return .ok ⟨physical, verified⟩
@@ -258,6 +258,26 @@ its original height. With no new physical records, the existing exact walk is
 returned without reconstruction. -/
 def refreshWalked (config : Config) (session : Session config) :
     IO (Except String (Session config × Walked config)) := do
+  -- A retained walk reads only the entries after ITS target (`extendFrom`), and that read's
+  -- append proof extends it (`extendVerifiedAppended`): no re-encoding and comparison of the
+  -- whole accepted prefix (`extendVerified`, O(history) on every growth; law 17).
+  if let some held := session.walked then
+    match ← DurableReceiverIO.extendFrom config.transport ResourceBirthCodec.rootBytes held.target with
+    | .error detail => return .error detail
+    | .ok ⟨physical, seedExact, acceptedExact, _⟩ =>
+        if physical.height = held.target.height then
+          return .ok (session.retainWalked held, held)
+        let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf config.transport
+            ResourceBirthCodec.rootBytes physical with
+          | .error detail => return .error s!"semantic history reader: {detail}"
+          | .ok sealed => pure sealed
+        match ← NativeHostReplay.extendVerifiedAppended config reader held.verified physical
+            seedExact acceptedExact with
+        | .error failure =>
+            return .error s!"semantic history refused at entry {failure.index}: {failure.detail}"
+        | .ok verified =>
+            let current : Walked config := ⟨physical, verified⟩
+            return .ok (session.retainWalked current, current)
   let physical ← match ← DurableReceiverIO.extendFrom config.transport
       ResourceBirthCodec.rootBytes session.durable with
     | .error detail => return .error detail

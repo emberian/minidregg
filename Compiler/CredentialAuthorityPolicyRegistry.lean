@@ -1330,7 +1330,7 @@ theorem selected_pair_binding :
 
 /-- `authorityMaterializer` with a constant root. -/
 def constantRootMaterializer : CellState.Materializer layout Digest :=
-  { authorityMaterializer with rootBytes := fun _ => authorityMaterializer.rootBytes [] }
+  { codec := authorityMaterializer.codec, rootBytes := fun _ => authorityMaterializer.rootBytes [] }
 
 theorem constantRoot_pair_refused :
     ¬ CellState.PairBindingPremise constantRootMaterializer policyStore rotatedStore :=

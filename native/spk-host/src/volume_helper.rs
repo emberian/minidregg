@@ -28,7 +28,17 @@ pub(crate) struct Registry {
     pub app_uids: Vec<u32>,
     pub helper: PathBuf,
     pub helper_sha256: String,
+    /// Set when this helper runs in a user namespace: the host-side custodian that sets project ids
+    /// and quotas for it (broker_volume_custodian.rs).
+    #[serde(default)]
+    pub custodian_socket: Option<PathBuf>,
 }
+/// The lowest app uid a world may register. On a host the subordinate range (65536 up) keeps apps
+/// clear of every system account. A world behind a custodian lives in a user namespace whose own
+/// uids are 0..65535, so its apps sit above the system accounts there; the custodian refuses a uid
+/// outside the container's range by name (`bad-uid`).
+fn app_uid_floor(custodian: bool) -> u32 { if custodian { 10000 } else { 65536 } }
+
 impl Registry {
     pub(crate) fn load(store: &str) -> io::Result<Self> {
         if !store_key(store) { return Err(refuse("volume-helper: store id refused")); }
@@ -43,7 +53,7 @@ impl Registry {
         if result.protocol!="mini-spk-volume-registry-v1" || result.store!=store
             || !hex(&result.deployment_id) || !hex(&result.host_id)
             || result.operator_uid==0 || result.operator_gid==0 || result.app_uids.is_empty()
-            || result.app_uids.iter().any(|u| *u<65536 || *u==result.operator_uid)
+            || result.app_uids.iter().any(|u| *u<app_uid_floor(result.custodian_socket.is_some()) || *u==result.operator_uid)
             || result.app_uids.iter().collect::<std::collections::BTreeSet<_>>().len()!=result.app_uids.len()
             || result.grains_root!=Path::new("/var/lib/mini-spk-worlds").join(store)
         { return Err(refuse("volume-helper: registry shape refused")); }
@@ -108,7 +118,7 @@ pub(crate) struct VolumeStatus {
     pub request: Request,
     pub settled: bool,
     pub paused: bool,
-    pub mounted: bool,
+    pub present: bool,
 }
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all="camelCase", deny_unknown_fields)]
@@ -182,16 +192,15 @@ fn root_volume_status(registry: &Registry) -> io::Result<Vec<VolumeStatus>> {
         let meta=f.metadata()?;
         if !meta.is_file() || meta.uid()!=0 || meta.nlink()!=1 || meta.mode()&0o7777!=0o600 || meta.len()>4096 {return Err(refuse("volume-helper: registration custody refused"))}
         let mut text=String::new();f.take(4097).read_to_string(&mut text)?;
-        let field=|key:&str| text.lines().find_map(|line|line.strip_prefix(key)).ok_or_else(||refuse("volume-helper: registration field absent"));
-        let request=Request {verb:Verb::Mount,store:store.to_owned(),deployment_id:field("deployment_id=")?.to_owned(),grain:grain.to_owned(),
-            volume_path:registry.grains_root.join("vars").join(name),app_uid:field("app_uid=")?.parse().map_err(|_|refuse("volume-helper: registration uid refused"))?,
-            size_mib:field("size_mib=")?.parse().map_err(|_|refuse("volume-helper: registration quota refused"))?,volume_id:field("volume_id=")?.to_owned(),import_sha256:None};
-        registry.coordinates(&request)?;registration(registry,&request)?;
+        let reg=crate::broker::Registration::parse(&text)?;
+        let request=Request {verb:Verb::Mount,store:store.to_owned(),deployment_id:reg.deployment_id.clone(),grain:grain.to_owned(),
+            volume_path:registry.grains_root.join("vars").join(name),app_uid:reg.app_uid,size_mib:reg.size_mib,volume_id:reg.volume_id.clone(),import_sha256:None};
+        registry.coordinates(&request)?;volume_of(registry,&request).registered()?;
         let pending=registry.grains_root.join("volume-custody/freezes").join(format!("{name}.json"));
         let settled=match fs::symlink_metadata(pending) {Ok(meta)=>{if !meta.is_file() || meta.uid()!=0 || meta.nlink()!=1 || meta.mode()&0o7777!=0o600 {return Err(refuse("volume-helper: freeze obligation custody refused"))}false},Err(e) if e.kind()==io::ErrorKind::NotFound=>true,Err(e)=>return Err(e)};
-        let mounted=Command::new("/usr/bin/findmnt").args(["-n","-M"]).arg(&request.volume_path).env_clear().output()?.status.success();
+        let present=volume_of(registry,&request).present()?;
         let paused=paused(registry,&request)?;
-        volumes.push(VolumeStatus {request,settled,paused,mounted});
+        volumes.push(VolumeStatus {request,settled,paused,present});
         if volumes.len()>registry.app_uids.len() {return Err(refuse("volume-helper: volume inventory bound"))}
     }
     volumes.sort_by(|a,b|a.request.grain.cmp(&b.request.grain));
@@ -206,45 +215,12 @@ fn execute_status(bytes: &[u8]) -> io::Result<Value> {
     let _lock=verb_lock(&registry,true)?;
     Ok(serde_json::to_value(Status {protocol:"mini-spk-volumes-status-v1".into(),store:registry.store.clone(),volumes_root:request.volumes_root,volumes:root_volume_status(&registry)?})?)
 }
-fn run(program: &str, args: &[&str]) -> io::Result<String> {
-    let output=Command::new(program).args(args).env_clear().env("PATH","/usr/sbin:/usr/bin:/sbin:/bin")
-        .stdin(Stdio::null()).output()?;
-    if !output.status.success() { return Err(io::Error::other(format!("volume-helper: {}: {}",program,String::from_utf8_lossy(&output.stderr)))); }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
-}
-fn script(registry: &Registry, request: &Request, action: &str, import: Option<&Path>) -> io::Result<()> {
-    let mut args=vec!["--root".to_owned(),registry.grains_root.display().to_string(),action.to_owned(),request.store.clone(),request.grain.clone()];
-    if action!="attest" { args.extend([request.app_uid.to_string(),request.size_mib.to_string()]); }
-    if matches!(action,"create"|"create-from") { args.push(request.volume_id.clone()); }
-    if let Some(path)=import { args.push(path.display().to_string()); }
-    let output=Command::new("/bin/bash").arg("-c").arg(include_str!("../../../deploy/spk-host/spk-var-volume"))
-        .arg("mini-spk-volume-helper").args(args).env_clear().env("PATH","/usr/sbin:/usr/bin:/sbin:/bin")
-        .stdin(Stdio::null()).output()?;
-    if !output.status.success() { return Err(io::Error::other(format!("volume-helper: volume {} refused: {}",action,String::from_utf8_lossy(&output.stderr)))); }
-    Ok(())
-}
-fn registration(registry: &Registry, request: &Request) -> io::Result<()> {
-    let path=registry.grains_root.join("volumes").join(format!("{}.conf",volume_name(&request.store,&request.grain)));
-    let f=OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW|libc::O_CLOEXEC).open(&path).ctx("open", &path)?;
-    let m=f.metadata()?;
-    if !m.is_file() || m.uid()!=0 || m.nlink()!=1 || m.mode()&0o7777!=0o600 || m.len()>4096 { return Err(refuse("volume-helper: registration custody refused")); }
-    let mut text=String::new();f.take(4097).read_to_string(&mut text)?;
-    let expected=format!("app_uid={}\nsize_mib={}\ndeployment_id={}\nhost_id={}\nvolume_id={}\n",request.app_uid,request.size_mib,registry.deployment_id,registry.host_id,request.volume_id);
-    if text!=expected { return Err(refuse("volume-helper: exact registration differs from request")); }
-    Ok(())
-}
-fn mount_registered(registry: &Registry, request: &Request) -> io::Result<()> {
-    registration(registry, request)?;
-    // Never use an arbitrary path or backing image supplied by the operator.
-    let probe=Command::new("/usr/bin/findmnt").args(["-n","-M"]).arg(&request.volume_path).env_clear().output()?;
-    if !probe.status.success() {
-        let image=registry.grains_root.join("volumes").join(format!("{}.ext4",volume_name(&request.store,&request.grain)));
-        let meta=fs::symlink_metadata(&image).ctx("inspect", &image)?;
-        if !meta.is_file() || meta.uid()!=0 || meta.nlink()!=1 || meta.mode()&0o7777!=0o600 || meta.len()!=request.size_mib*1024*1024 { return Err(refuse("volume-helper: backing image custody refused")); }
-        run("/usr/bin/mount",&["-t","ext4","-o","loop,nosuid,nodev,noatime",image.to_str().ok_or_else(||refuse("image encoding"))?,request.volume_path.to_str().ok_or_else(||refuse("volume encoding"))?])?;
+fn volume_of<'a>(registry: &'a Registry, request: &'a Request) -> crate::broker::Volume<'a> {
+    crate::broker::Volume {
+        root: &registry.grains_root, store: &request.store, grain: &request.grain, app_uid: request.app_uid,
+        size_mib: request.size_mib, volume_id: &request.volume_id, deployment_id: &registry.deployment_id, host_id: &registry.host_id,
+        custodian: registry.custodian_socket.as_deref(),
     }
-    script(registry,request,"verify",None)?;
-    script(registry,request,"attest",None)
 }
 pub fn execute(bytes: &[u8]) -> io::Result<Value> {
     if bytes.len()>16384 { return Err(refuse("volume-helper: request bound")); }
@@ -262,17 +238,18 @@ pub fn execute(bytes: &[u8]) -> io::Result<Value> {
     let root=&registry.grains_root;
     let name=volume_name(&request.store,&request.grain);
     crate::broker::volume_recover(root)?;
+    let volume=volume_of(&registry,&request);
     match request.verb {
         Verb::Create => {
-            let config=root.join("volumes").join(format!("{name}.conf"));
-            if fs::symlink_metadata(&config).is_ok() {
-                mount_registered(&registry,&request)?;
+            if volume.registered().is_ok() {
+                // A repeated create is the mount: verify and attest what exists.
+                volume.attest()?;
                 return Ok(json!({"store":request.store,"grain":request.grain,"verb":request.verb,"volumePath":request.volume_path}));
             }
             let import=if let Some(sha)=&request.import_sha256 {
                 if !hex(sha) { return Err(refuse("volume-helper: import digest refused")); }
                 let mut source=crate::broker::volume_import(root,&request.store,sha,caller)?;
-                if source.metadata()?.len()!=request.size_mib*1024*1024 { return Err(refuse("volume-helper: import size refused")); }
+                if source.metadata()?.len()==0 || source.metadata()?.len()>crate::broker::export_image_bytes(request.size_mib) { return Err(refuse("volume-helper: import size refused")); }
                 let target=root.join("volumes").join(format!(".import-{name}"));
                 let mut out=OpenOptions::new().write(true).create_new(true).mode(0o600).open(&target).ctx("open", &target)?;
                 io::copy(&mut source,&mut out)?;
@@ -283,37 +260,23 @@ pub fn execute(bytes: &[u8]) -> io::Result<Value> {
                 if format!("{:x}",hash.finalize())!=*sha { fs::remove_file(&target).ctx("remove", &target)?;return Err(refuse("volume-helper: exact import digest differs")); }
                 Some(target)
             } else { None };
-            script(&registry,&request,if import.is_some(){"create-from"}else{"create"},import.as_deref())?;
-            script(&registry,&request,"attest",None)?;
+            volume.create(import.as_deref())?;
+            volume.attest()?;
         }
-        Verb::Mount => {
-            mount_registered(&registry,&request)?;
-        }
+        Verb::Mount => { volume.attest()?; }
         Verb::Unmount => {
-            registration(&registry,&request)?;
+            // Nothing is mounted: the volume is a directory. The verb verifies custody.
             crate::broker::volume_recover(root)?;
-            script(&registry,&request,"verify",None)?;
-            run("/usr/bin/umount",&[request.volume_path.to_str().ok_or_else(||refuse("volume encoding"))?])?;
+            volume.verify()?;
         }
         Verb::Freeze => {
-            registration(&registry,&request)?;
-            script(&registry,&request,"verify",None)?;
-            // Freeze/copy/thaw is one custody transaction. A lost exec reply
+            volume.verify()?;
+            // Quiesce/copy/thaw is one custody transaction. A lost exec reply
             // never licenses resubmitting an export; retain the exact artifact.
             return crate::broker::volume_export(root,&request.store,&request.grain,caller,registry.operator_gid);
         }
-        Verb::Thaw => { registration(&registry,&request)?;crate::broker::volume_recover(root)?; }
-        Verb::Destroy => {
-            registration(&registry,&request)?;
-            let mounted=Command::new("/usr/bin/findmnt").args(["-n","-M"]).arg(&request.volume_path).env_clear().output()?;
-            if mounted.status.success() { return Err(refuse("volume-helper: destroy requires unmounted volume")); }
-            let image=root.join("volumes").join(format!("{name}.ext4"));
-            if !run("/usr/sbin/losetup",&["-j",image.to_str().ok_or_else(||refuse("image encoding"))?])?.is_empty() { return Err(refuse("volume-helper: destroy refuses attached loop")); }
-            fs::remove_file(&image).ctx("remove", &image)?;
-            { let conf = root.join("volumes").join(format!("{name}.conf")); fs::remove_file(&conf).ctx("remove", &conf)?; }
-            { let witness = root.join("attest").join(format!("{name}.witness")); fs::remove_file(&witness).ctx("remove", &witness)?; }
-            fs::remove_dir(&request.volume_path).ctx("remove", &request.volume_path)?;
-        }
+        Verb::Thaw => { volume.registered()?;crate::broker::volume_recover(root)?; }
+        Verb::Destroy => { volume.destroy()?; }
     }
     Ok(json!({"store":request.store,"grain":request.grain,"verb":request.verb,"volumePath":request.volume_path}))
 }
@@ -341,10 +304,16 @@ pub(crate) fn volumes_status(helper:&Path,store:&str) -> io::Result<Vec<VolumeSt
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_custodian_world_may_register_app_uids_inside_a_user_namespace() {
+        assert_eq!(app_uid_floor(false), 65536);
+        assert!(app_uid_floor(true) > 1000 && app_uid_floor(true) < 65536);
+    }
+
     use super::*;
     #[test]
     fn tenancy_helper_cross_world_path_refuses() {
-        let r=Registry { protocol:"mini-spk-volume-registry-v1".into(),store:"0123456789abcdef".into(),deployment_id:"a".repeat(64),host_id:"b".repeat(64),grains_root:"/var/lib/mini-spk-worlds/0123456789abcdef".into(),operator_uid:1001,operator_gid:1001,app_uids:vec![165536],helper:"/usr/local/libexec/mini-spk-volume-helper".into(),helper_sha256:"c".repeat(64) };
+        let r=Registry { protocol:"mini-spk-volume-registry-v1".into(),store:"0123456789abcdef".into(),deployment_id:"a".repeat(64),host_id:"b".repeat(64),grains_root:"/var/lib/mini-spk-worlds/0123456789abcdef".into(),operator_uid:1001,operator_gid:1001,app_uids:vec![165536],helper:"/usr/local/libexec/mini-spk-volume-helper".into(),helper_sha256:"c".repeat(64),custodian_socket:None };
         let mut q=Request {verb:Verb::Mount,store:r.store.clone(),deployment_id:r.deployment_id.clone(),grain:"9101".into(),volume_path:r.grains_root.join("vars/0123456789abcdef-9101"),app_uid:165536,size_mib:512,volume_id:"d".repeat(64),import_sha256:None};
         assert!(r.coordinates(&q).is_ok());
         q.volume_path="/var/lib/mini-spk-worlds/fedcba9876543210/vars/fedcba9876543210-9101".into();

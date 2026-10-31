@@ -27,12 +27,11 @@ def verified {config : Config} {target : Durable}
     | .error .malformed
   let transactionId := DeclaredResourceController.transactionId ingress.domain
     ingress.semantics (ingress.source.command ingress.domain ingress.semantics)
-  let some index := tip.opened.durable.image.accepted.findIdx?
-      (fun record => record.transactionId == transactionId)
+  let some index := tip.opened.durable.firstIndex (transactionId)
     | .ok none
   let some record := tip.opened.durable.image.accepted[index]?
     | .error .nativeHistoryUnavailable
-  let some receipt := tip.receipts[index]?
+  let some receipt := tip.receiptAt index
     | .error .nativeHistoryUnavailable
   let event := ApplicationFailedStartRecoveryIngress.event ingress
   let reportNullifier := ApplicationFailedStartRecoveryIngress.stableNullifier ingress

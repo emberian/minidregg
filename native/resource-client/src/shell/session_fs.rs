@@ -65,8 +65,11 @@ pub(crate) fn read(root: &Path, path: &Path, limit: usize) -> Result<Vec<u8>, St
     if fd < 0 { return Err(format!("cannot open session file: {}", std::io::Error::last_os_error())); }
     let file = unsafe { File::from_raw_fd(fd) };
     let metadata = file.metadata().map_err(|e| e.to_string())?;
-    if !metadata.is_file() || metadata.len() > limit as u64 {
-        return Err("session input must be a bounded regular file".into());
+    if !metadata.is_file() {
+        return Err("session input must be a regular file".into());
+    }
+    if metadata.len() > limit as u64 {
+        return Err(format!("session input is {} bytes; the bound is {limit}", metadata.len()));
     }
     let mut bytes = Vec::new();
     file.take(limit as u64 + 1).read_to_end(&mut bytes).map_err(|e| e.to_string())?;

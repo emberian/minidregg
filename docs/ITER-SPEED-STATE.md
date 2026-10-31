@@ -1,74 +1,81 @@
 # Iteration-speed lane: state (present-state; rewrite whole, never append)
 
-Agent: the iter-speed lane (successor, 2026-10-30 evening). Order of work, from ember: step 0 the Lean bump,
-then (1) interface seams, (2) lane-tree warm pool, (3) hot-swap into a kept world. The integrator asked that,
-right after the bump, the umbrella stage get its own warm tree (item 2 first).
+Agent: the iter-speed lane (2026-10-31). Order of work, from ember: step 0 the Lean bump, then the umbrella
+second tree (integrator's ask), then (1) interface seams, (2) lane-tree warm pool, (3) hot-swap. Integrator:
+aeb671706eb3f70d7 (send shas there). Hot path: a86738fc1dfae6429. Private cells: a74ad8d84ada5627a.
 
-## Step 0: Lean v4.30.0 -> v4.35.0 (HOLD LEAN declared; waiting on the hbox build)
+## Step 0: Lean v4.30.0 -> v4.35.0: LANDED
 
-- Pins: `lean-toolchain` v4.35.0; Mathlib tag v4.35.0; deps by `lake update mathlib`; REPL pin v4.35.0 in
-  `scripts/pipeline/lean-ask-install-repl`. v4.35.0 is installed in both `~/.elan`s.
-- The bump is ONE commit on `origin/lane/iter-speed`, rebased on main 929eac696. Mac working tree:
-  `/Users/ember/dev/minidregg-lanes/iter-speed-land` (shared packages, Mathlib oleans by cache).
-- Mac result: the whole closure (`lake build Minidregg Fixtures ObjectiveProofs CensusChecks
-  +Host.Main:leanArts +Host.ClientConsentSession:leanArts`) builds, except `Fixtures/NativeAcceptedFixture` and
-  `Fixtures/NativeDocWriteFixture`. Both are red on main 7d90da717 itself, from the private-cells event-id/codec
-  change (integrator log hbox:/home/hbox/lanes/integ/umbrellas-out/20261030T214013Z). The proofs lane re-records
-  them. The bump also rotates the Objective front-end identity (below), so the accepted fixture needs one more
-  re-record, which integ-build4's rerecord stage produces on the bump candidate.
-- Integrator protocol: HOLD LEAN sent 10-30 evening. The integrator builds the bump alone on hbox. That build is
-  blocked while hbox `/` is at 95% (writes paused, awaiting ember). Kimi reviews the statement and pin diff
-  (`claude-kimi -p`, the prompt and output are in the session scratchpad `iter/kimi-*`).
-- What 4.35 broke, and the fixes used (statements unchanged throughout):
-  - `backward.isDefEq.respectTransparency` is on by default: terms whose types mention non-reducible type-level
-    defs no longer unify in instance search, `rw`, `simp`, `exact`. Real fixes where they exist: layouts and their
-    Key/Value families `@[reducible]` (35 attributes); explicit `have h : T := e` bridges; `subst` before `exact`;
-    simp lemmas (`DataIntent.erase_exactCharge`, `erase_credit`; a file-local `throw e = .error e` in
-    Effects/Revival/ContentProofs; `Candidate.intent` of `.ordinary` in Host/DryRun). Where only the old unifier works
-    (Mathlib's own `deriving Fintype`, classical `decide` in instances, dependent `rw`s), the declaration carries
-    `set_option backward.isDefEq.respectTransparency false in`. There are 187 of these, each on one declaration and
-    never file-wide, the same pattern Mathlib v4.35 uses in 1,470 files. One irreducible def needed it too:
-    `unseal portal in` for `authorize_names_stored` in Kernel/ResourceObservationAdmission.
-  - `throw` in `Except` no longer unfolds under `simp`; proofs that relied on it end with `rfl` or use the lemma.
-  - A `match` on a variable inside `do` no longer refines a dependent return type: the match moved outside the
-    `do` (ResourceBirthPolicyController, NativeObservationController.checkGrants, Host/Json and
-    Host/SourceAgreementJson `verb`).
-  - Module visibility: Batteries' derived `DecidableEq (Except ..)` is hidden, so `decide` on `Except` equalities
-    became `rfl`, or the file imports `Theory/ExceptDecidableEq.lean`. `String.compare` is hidden in
-    `Init.Data.Ord.String`, so Host/Json imports it `all`, the same pattern as its other `Init` imports. ZMod and
-    big-Nat `decide` became `decide +kernel` (34 sites). `open private ... from` is gone, replaced by
-    `import all Kernel.NativeHost` (NativeThinBirth).
-  - Removed core axioms `Lean.ofReduceBool`/`Lean.trustCompiler`: `Theory/AssertAxioms`, `Theory/AssertCompiled`,
-    and `scripts/module-hidden-bodies.sh` recognise native_decide by its `_native` auxiliary axiom only.
-    `TokenCensus/NativePinSelfTest.lean` plants a native_decide under a standard-three pin and must fail.
-  - API: `Std.Internal.Async.TCP` became `Std.Async.TCP` (Host/FnArchivePublisher); `String.trim` became
-    `trimAscii.toString`; `alias` is a keyword, so the local identifier in Compiler/ObjectiveBendElaborate became
-    `importAlias` (comments and messages keep "alias"; this rotates the Objective front-end identity). Also: the
-    Kummer lemma takes irreducibility over `AdjoinRoot`; `dvd_of_fraction_map_dvd_fraction_map` lost a premise;
-    `Finset.mem_antidiagonal` became `HasAntidiagonal.mem_antidiagonal`; `HashSet.distinct_toList` uses `==`;
-    `Mathlib.Util.MemoFix` is gone; `AddMonoidAlgebra` is a structure; `simp` no longer computes `List.length` of a
-    literal cons; norm_num primality of 31-bit primes needs `maxRecDepth 8192`.
-  - Slow modules: CommittedTerminalCompose and CommittedTerminalFiatShamir went through `Nat.card` (they took 45+
-    minutes after the bump). TokenCensus takes 1,818 s of the Mac umbrella run.
-  - Axiom pins: 324 pin sets changed, all within propext/Classical.choice/Quot.sound: 300 gained Classical.choice,
-    8 gained Classical.choice and Quot.sound, 3 gained Quot.sound, 8 lost Classical.choice, 4 lost Classical.choice
-    and Quot.sound, and 1 lost Quot.sound. 4.35 also wraps long axiom lists across lines, which `#guard_msgs`
-    compares, so pins print in the wrapped form.
-- Repair tooling (session scratchpad `iter/`): `round.sh N` (build, pin refresh, per-error autofix), `loop4.sh N`
-  (rounds until green, the two main-red fixtures excepted), `try.sh FILE` (elaborate one file with the lakefile's
-  options), `pins.py BASE` (pin changes, flagging non-standard axioms). Lesson: `guardfix.py` writes the pin text
-  verbatim, because 4.35's wrapping matters to `#guard_msgs`.
+- main = `cdb399b47` (bump READY on hbox 23:54 10-30; the integrator moved main and lifted HOLD LEAN). The
+  integrator's batch `integ/batch-435` (bump + staging + import-boundary + hot-path) follows.
+- ResearchWip (outside the bump's closure check) under 4.35: `edad15301` on `origin/lane/iter-speed-hosted`
+  (16 files fixed, statements unchanged). Still red there and NOT from the bump (API rot, for their owners):
+  Kernel/RoomReleaseCurrent, Kernel/JointReservationFunding, Compiler/PortableJointCustodyIO (pre-date the DRC
+  verified-ground refactor 2b9956c53/efbac239d) and Compiler/PrivateCircuitAllocationFast.stream_ext (false
+  as stated since StreamCodec gained data fields in 58b3ae509).
+- The Mac tree `/Users/ember/dev/minidregg-lanes/iter-speed-land` is back with this lane; the seam-1 sub-agent
+  works there on `lane/seam1-epoch`. Commit other work by plumbing (a temporary GIT_INDEX_FILE).
 
-## After the bump
+## Umbrella stage in a second tree: done, wired in
 
-1. Umbrella stage in a second warm tree (the integrator's 25-30 min umbrella stage holds the main tree's lock):
-   send the integrator the command.
-2. Seams (design `docs/BUILD-INVERSION-2026-10-28.md`): on main, StoreCodec has 537 Host-closure dependents,
-   Theory.Store 630, WorldRoot 443, PersistedCodecTags 478. Measure the recompile count of a representative edit
-   before and after each seam; continue only where it moves.
-3. lane-tree warm pool: fix the empty-path acquire bug; shared packages plus Lake cache; pools on hbox NVMe and the
-   Mac.
-4. Hot-swap (rebuild one crate or the Host, swap it into a kept world, rerun one phase). Integrator requirement: the
-   swap replaces the binary and re-pins it in the candidate's manifest.json, SHA256SUMS and the Hermes runtime root
-   (`deploy/hermes/build-runtime-root --rebind`) together, atomically, and records the overlay in provenance. A
-   Store restart otherwise crash-loops on the sha256 mismatch (seen on the rehearsal-3 world).
+- `scripts/pipeline/umbrella-tree SHA` on `origin/lane/iter-speed-tools` (2535ea2e1, then 7143777f0); the
+  integrator merged both into the batch (staging 5bad63e84) and calls it from hbox
+  `/home/hbox/lanes/integ/integ-build5.sh` after READY (SEATS 4, MEM 32G), then runs rerecord.sh in TREE.
+  TREE = `/home/hbox/lanes/integ/umbrella-src` (created by the first run, a git worktree of integ/src).
+- Mechanism: `scripts/pipeline/warm-link SRC/.lake/build DST/.lake/build`, per module newest trace wins;
+  outputs hard-linked, .trace/.hash copied, .setup.json never shared. Safe because Lean 4.35 and leanc write
+  .olean/.olean.private/.olean.server/.ilean/.ir/.ir.sig/.c/.o by rename(2) (measured: a rebuilt module's
+  outputs split, untouched ones stay shared); Lake writes .trace and .setup.json in place. Tripwire: a
+  multiply-linked file written after the sync is reported `RED shared-inode-written-in-place`.
+- Mac test at cdb399b47: only the two main-red fixtures red, no tripwire, 3,568 s (TokenCensus 1,859 s; 327
+  modules rebuilt because the source tree held outputs of 7 staged files, caught by Lake). Disk, own inodes:
+  packages 37 MB, build 1.57 GB, mini-kernels target 59 MB. hbox steady state: 1-2 GB, never a second 12 GB.
+
+## Lane pool (lane-tree): LIVE on hbox
+
+- `scripts/pipeline/lane-tree` + `warm-link` on `origin/lane/iter-speed-tools` (latest 2261c5faa): empty-lookup
+  acquire bug fixed, init writes pool.env, every tree warmed by warm-link, LANE_POOL_WARM, `warm`, `tripwire`
+  (also run by release), macOS support, partial-clone seeds get a partial pool repo.
+- hbox pool `/home/hbox/pool` (created 2026-10-31 00:0x): pool.env, bin/{lane-tree,warm-link}, repo.git
+  (blob:none clone of GitHub; integ/src is itself a partial clone), packages-3a3779933df4 (7.4 GB real copy,
+  read-only; verified by `lake build --no-build` Mathlib Batteries Aesop Qq Host.Main before copying),
+  lake-cache, t1..t3 (each warmed from integ/src at cdb399b47: 1,375 modules, 175 MB own inodes),
+  LANE_POOL_WARM=/home/hbox/lanes/integ/src. Init took 29 s after the 24 s packages copy. hbox / 34 GB free after.
+- Use: `. /home/hbox/pool/pool.env; t=$(/home/hbox/pool/bin/lane-tree acquire LANE REF)`; `lane-tree release
+  LANE`. Never acquire while a build runs in integ/src (acquire reads it). Hot path takes the first tree.
+- Mac pool: not yet (the only built Mac tree is in use by the seam-1 sub-agent).
+
+## Seam 1 (next): the codec registry and the Store epoch
+
+Measured on main 929eac696 (static import graph, `scratchpad/graph.py`; Lake rebuilds on the transitive
+closure, BUILD-INVERSION-2026-10-28.md):
+- `Compiler/PersistedCodecTags` is the most-edited high module (19 edits in 10 days); one edit rebuilds 671
+  modules (478 in the Host closure). It holds 657 tags; only 14 are referenced by name anywhere else: the 9
+  the epoch/checkpoint code uses (DurableCheckpointCodec), clockWireVersion and
+  registry_loaded_and_final_store_cells_v17 (CanonicalCellRegistry), clock_v4 (ClockCell), world_root_v2
+  (WorldRoot), the front-end manifest header (ObjectiveBendFrontEndIdentity). The other 643 are a census of
+  literals their consumers spell themselves; they matter only to the epoch's manifest.
+- The epoch: `StoreEpoch.current`/`persistedCodecCorpus` live in DurableCheckpointCodec (609 dependents). The
+  current-epoch definitions are used by: DurableReceiverCore (SeedEpoch.ofBytes, .refusal; 604 dependents),
+  DurableServed (seedFrame, SeedEpoch.ofBytes; 577), ConsentAnchor (19), Host.Main (12),
+  DurableFastForwardProofs (7), the two Fixtures and scripts.
+- Design: (a) the 14 named tags move to an owner leaf (still `@[persisted_codec_tag]` in the same namespace);
+  the 643-tag registry becomes the aggregate imported only by the epoch assembly; (b) DurableReceiverCore and
+  DurableServed take the epoch as data (a `StoreEpoch` in their config, using the existing `...For epoch`
+  forms), and one assembly module above them defines `StoreEpoch.current` and the current-epoch instances,
+  imported by Host.Main, ConsentAnchor, DurableFastForwardProofs and the Fixtures. Statements generalise
+  (ember 10-28: statements may change); the current-epoch theorems stay by name as instances.
+- Prediction: a census tag edit rebuilds ~27 modules (1 in the Host closure) instead of 671; an edit to one
+  of the 14 owner-leaf tags still rebuilds that tag's importers' closure. Measure before/after with a real
+  build in a pool tree (an edit to PersistedCodecTags, `lake build Host.Main`, count `Built` lines) before
+  starting, and continue only if the measured number moves as predicted.
+- Seams 2 and 3 (StoreCodec 763 dependents, Theory.Store 1,038, WorldRoot 618) wait for seam 1's number;
+  their edit rates are far lower (StoreCodec 8 edits in 10 days, Theory.Store and WorldRoot rare).
+
+## Hot-swap (after the seams)
+
+Rebuild one crate or the Host, swap it into a kept world, rerun one phase. Integrator requirement (rehearsal-3
+world): the swap replaces the binary and re-pins it in the candidate's manifest.json, SHA256SUMS and the
+Hermes runtime root (`deploy/hermes/build-runtime-root --rebind`) together, atomically, and records the
+overlay in provenance; otherwise the Store restart crash-loops on the sha256 check. Ember: hotpatched worlds
+between batch candidates.

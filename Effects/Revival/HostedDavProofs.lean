@@ -11,8 +11,8 @@ import all Init.Data.Array.Basic
 import all Init.Data.ByteArray.Basic
 @[expose] public section
 namespace Minidregg.Effects.Revival.HostedDav
-theorem satisfiable : Satisfiable := by decide +kernel
-theorem teeth : Teeth := by decide +kernel
+theorem satisfiable : Satisfiable := by unfold Satisfiable; decide +kernel
+theorem teeth : Teeth := by unfold Teeth; decide +kernel
 theorem premise : Premise := ⟨headerAllowed, fun _ _ _ => rfl⟩
 #assert_axioms satisfiable
 #assert_axioms teeth

@@ -187,6 +187,25 @@ stay valid when a candidate directory is copied; the absolute role, client and
 provenance references in its manifest must be relocated together
 (`check-tamper.sh` does this for its copy).
 
+**Hot-swap overlays.** `lane-build.sh overlay BASE PARENT LABEL ROLE...` (over `package.py
+--overlay`) makes `PARENT/<id>` from a candidate BASE with ROLE's binaries rebuilt at the lane's
+commit, for testing between cuts; it is never a READY cut. `<id>` is 12 hex, the candidate id
+`ship.sh` takes: the first 12 hex of the SHA-256 of its `provenance.json` as canonical JSON
+(sorted keys, no spaces) without `.overlay.id`, `.builtUtc` and each role's `.overlaidUtc`.
+Provenance names files relative to the candidate, so the id does not depend on where it lives,
+and the same overlay with the same LABEL twice is one id (the second is refused). LABEL is
+`.overlay.name`. An overlay is told from a cut by `provenance.json .overlay`, never by its name. A role's whole build family is swapped or the overlay is
+refused (every role of one crate, or `host` with `consent`), since one crate's binaries from two
+commits fail at run time. Untouched files are hard links of BASE, which is never written. Every
+pin is re-emitted by the packager: `manifest.json` (paths relocated to OUT), `SHA256SUMS` (BASE's
+list plus `overlay/COMMIT.source.tar`) and `provenance.json`, whose `.overlay` records `base`
+(provenance path, sha256, commit), `sources` (each overlay commit's tree, archive and toolchains)
+and `roles` (each swapped role's commit and sha256). A swapped output's build identity names its
+overlay commit's tree; `lib.sh` accepts an output tree only when it is the base's
+`.source.tree` or one of `.overlay.sources`. The operator scripts, `source.tar` and `world/` stay
+BASE's. A Hermes runtime root bound to BASE follows with `build-runtime-root --rebind ROOT OUT`
+when `grainRuntime` or `grainProviderBridge` is swapped.
+
 ### Reproducibility (M7)
 
 `native/resource-client/journey.d/m7.sh` compares every output against an
@@ -311,10 +330,10 @@ length` then `operation byte (or a marker) + payload`. Direct CLI use
 
 ## 4. Wire codecs
 
-All binary messages are Lean `StreamCodec` values (`Compiler/Tower256ConcreteBackend.lean`),
+All binary messages are Lean `StreamCodec` values (`Theory/StreamCodec.lean`),
 decoded strictly: a message is accepted only if re-encoding the decoded value gives
 back exactly the input bytes. A nat is little-endian base-255 digits (each 0..254)
-followed by byte `0xFF` (`encodeNat`, `Tower256ConcreteBackend.lean:778`); bytes,
+followed by byte `0xFF` (`encodeNat`, `Theory/StreamCodec.lean`); bytes,
 lists, products, sums and bool are defined beside it, and a framed message is an
 ASCII magic then the stream encoding.
 

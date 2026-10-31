@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# install-volume-custodian [ENV_FILE] [UNIT_DIR]: write mini-volume-custodian.service with the literal ROOT
+# of ENV_FILE (default /etc/mini-volume-custodian.env) into UNIT_DIR (default /etc/systemd/system).
+# systemd expands EnvironmentFile variables in ExecStart= only, not in ReadWritePaths= or
+# RequiresMountsFor=, so the template carries @ROOT@ there. Root only; run daemon-reload after.
+set -euo pipefail
+env_file=${1:-/etc/mini-volume-custodian.env} unit_dir=${2:-/etc/systemd/system}
+here=$(cd "$(dirname "$0")" && pwd)
+root=$(sed -n 's/^ROOT=//p' "$env_file" | head -1)
+[[ $root =~ ^/[A-Za-z0-9._/-]+$ && $root != *..* ]] || { echo "ROOT in $env_file is not a plain absolute path" >&2; exit 1; }
+install -d -m 755 "$unit_dir"
+sed "s|@ROOT@|$root|g" "$here/mini-volume-custodian.service" >"$unit_dir/mini-volume-custodian.service.new"
+chmod 644 "$unit_dir/mini-volume-custodian.service.new"
+mv -f "$unit_dir/mini-volume-custodian.service.new" "$unit_dir/mini-volume-custodian.service"
+echo "installed $unit_dir/mini-volume-custodian.service for ROOT=$root"

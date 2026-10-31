@@ -38,6 +38,13 @@ Transaction ids, nullifiers and authorization declarations are unchanged. New pe
 tags registered (`PersistedCodecTags`): this is a codec batch; the accepted fixture's
 event ids change. Old histories carry the old ids; a fresh genesis moves over.
 
+**Landed** on main as 7d90da717 (Kimi's review found that bound 0 admitted only
+the constant reader; fixed by `0 < queryBound` and `public_signature_refutes`).
+The Fixtures umbrella went red because the accepted fixtures carried the old event ids,
+and the proofs lane re-recorded them. **Rule for the next codec or event-id batch:**
+the fixture re-record goes in this lane's own sha, recorded from a candidate built
+from this tree.
+
 **Planted test**: `tests/lean/ReceiptEventLinking.lean` (run with
 `--load-dynlib=.lake/native/libmini_kernels_lean.so`).
 
@@ -84,16 +91,324 @@ tree-shape invariant from binding. Owed before it can carry cells (astra round 2
   would expose a leaf of another class;
 * **index collisions**: admission preserves `PathsInjective` or counts them.
 
-**Next increments** (in order):
-1. Trie delete; hierarchical class keys and the prefix-selection = `narrowStore` theorem;
-   the incremental cache path for `maskedTrieCommitment` (the bulk root is the spec only).
-2. The opening relation in the compiler's vocabulary (compiler-emitted AIR; grow the
-   compiler where it lacks a trie-path or cSHAKE gadget), not a hand-written circuit.
-3. The receiver: new materializer version beside the old one until a fresh genesis.
-4. Flatness: gate10/gate12 flatness-submit.
+**Increment 1, proved** (on the Lean 4.35 bump `cdb399b47`; on staging): trie erase,
+scoped reveal soundness (`revealNodes`, a finite comparison scope, not the vacuous global
+`Collision`), `reveal_complete`, `classRevealComplete`, the receipt wire shape.
+
+**Increment 2, proved** (the integrator's audit of increment 1, items (a) to (d); astra rounds 5
+to 7):
+* **Store adapter** (`Compiler/PrivateCellIndex.lean`): a `Store` is a finite map, so first- vs
+  last-wins is a property of entry lists only; the adapter reads canonical entries (distinct
+  addresses). `indexExact` (last value at every address = the value bytes; none at the
+  blinding address), `indexBindsData`, `indexIgnoresBlinding`. Scope: canonical-list binding at
+  one fixed wire; that the wire's exclusion is `isBlinding` is the Kernel instantiation's.
+* **Erase cost the operation cannot fake** (`Theory/AuthTrieErase.lean`, `EraseCost` in
+  `Theory/PrivateCellTrie.lean`): the erase is a heap program (`Prog`: hash, load, store as
+  constructors; handles are heap indices) interpreted by `run`, one per operation and a clash
+  load charged its size. `EraseCost` fixes its constants before the key, value and digest
+  types, the digest function and `L`, and quantifies over every heap representing the cache's
+  trie: the result handle represents the erase, and the interpreter's count is at most
+  `perBit * L + fixed` on injective live paths. `eraseM_sim`, `erase_cost` at `7L + 3`. Scope:
+  abstract operations on a constant-access heap; pure computation between operations is not
+  metered. Astra rounds 6 and 7 refuted two weaker forms (a monad-polymorphic erase can type-case
+  on the monad; constants after the key type absorb a finite key space).
+* **`Cache.reveal_eq`** (`Theory/AuthTrieReveal.lean`): the kept trie's reveal has the honest
+  siblings and its members up to order; `revealVerify_perm`; `Cache.reveal_verifies`.
+* **Two-class teeth** (`PrivateCellTrie.Witness`): 3-bit keys in two classes over a free
+  (injective) digest, so `ClassRevealComplete`'s premises hold and its collision escape is
+  impossible (`class_opening_exact`); honest opening verifies, cross-class, withheld and
+  other-class reveals refused.
+* **Receipt joint witness** (`Kernel/ReceiptEventHiding.lean`): `DeployedRandomized`, the
+  signer's randomness on four tapes, constant view, budget exactly the query-bounded public-hash
+  tests (`AnyPublicHash`): `IdealReplacement` by `idealReplacement_of_injective` and
+  `deployed_receiptHiding` at gap 1/2, inhabitation at `q < T` only (a four-query reader
+separates the worlds; cite it with this caveat); `leaked_tape_refuted` (teeth). The reduction
+and the ideal-replacement lemmas carry `#assert_axioms` (standard three), so no soundness or
+hiding proof can cite the native facts. The public signer is
+  refuted unconditionally (`public_signer_refuted_always`). Distinctness of concrete cSHAKE ids
+  is a compiled-evaluation fact (`native_decide` over the pure-Lean fast path, the kernel cannot
+  evaluate Keccak), pinned with `#guard_msgs` on `#print axioms` (precedent:
+  `Kernel/NativeHostStoreIdentity.lean`, `Theory/Sp800185Cshake256Conformance.lean`).
+* **Scope selection** (`Kernel/PrivateCellScope.lean`, item 2): `ClassCode` (a fixed-width class
+  prefix code; `body` opens its family prefix, covering every `atomsOf`), `scopeSelectsVisible`
+  and `scopeSelectsPath` (a reader's `Visible` set is exactly the addresses under one of at most
+  `card fields` prefixes, one for a full scope), and the concrete `bitCode` of width `4 + W`
+  (satisfiable), with teeth.
+
+**Increment 3** (the integrator's re-audit of increment 2, staging 35737eac4: nothing vacuous;
+items 1 to 4 below done; astra round 8):
+* **One erase walk** (`Theory/AuthTrieErase.lean`): the oracle walk (`Layer`, `Ops`, `joinM`,
+  `clashM`, `finishM`, `eraseM`) comes first; `Trie.join`, `Trie.clashOf` and `Trie.erase` are
+  `joinM`, `clashM` and `eraseM` at the identity handler (`trieOps`, monad `Id`), their cases are
+  lemmas (`join_eq`, `clashOf_eq`, `erase_branch`, `erase_stop`, `erase_empty`, `erase_leaf`,
+  `erase_clash`). The cache's erase and the metered heap program are one walk at two handlers.
+  `Trie.reveal` / `walkReveal` are still two implementations; no cost is claimed for either.
+* **Width** (`Kernel/PrivateCellScope.lean`): `keyFits` / `addressFits`, the private index's
+  admission check (a declared key's digests below `2^256`; content atoms and streams always fit at
+  `W >= 64`, `fits_of_addressFits`); `fitScope` cuts a reader's scope to fitting fields without
+  changing a fitting address's visibility (`visible_fitScope`); `scopeSelectsVisible_checked` at
+  `bitCode 256`. Teeth: `Witness.slot_overflow_shares_tag`, `Witness.overflow_refused`.
+* **The seam** (`Kernel/PrivateCellView.lean`): `isBlinding_iff` (the wire's exclusion is
+  `isBlinding`); `viewOpeningExact`: verifying reveals at a reader's cut prefixes answer exactly
+  `DFinsupp.filter (Visible fields kind) store` (narrowPacked's store) as value bytes, or two
+  distinct live addresses on one key path, or a collision in a reveal's `revealNodes`;
+  `viewOpeningExact_hashed`: at the receiver's address path (`hashedAddrBits`, a truncated hash of
+  the canonical address bytes) the index collision is a collision of that hash on distinct bytes
+  among this store's live addresses (`addressCollision_is_hash`, by the address codec's
+  injectivity). `honest_accepted` inhabits the premise.
+* **Reveal locality** (`Theory/AuthTrieRange.lean`): `climb_digest_sound` concludes with the
+  walk's `PathNode`s (one per walked bit plus one), and `revealNodes`' store side is those path
+  nodes plus the selected subtree (`revealNodes_store_treeNode`: inside the canonical tree). A
+  collision outside the walked path and the selected subtree no longer discharges a reveal; the
+  bound is the reveal's stop depth (at depth 0 the selected subtree is the whole store).
+
+**Increment 4** (the integrator's third-round audit of e2f6da711..b027ed235):
+* `viewOpeningExact_deployed` (`Kernel/PrivateCellView.lean`): at the receiver's real parameters
+  (`addressHash`, 256 bits of cSHAKE256 under `DREGG/PRIVATE-CELL/ADDRESS/v1`; `deployedDig`,
+  cSHAKE256 under `DREGG/PRIVATE-CELL/NODE/v1` over injective node bytes `nodeBytesWith`) each
+  collision alternative is a real cSHAKE256 collision on distinct inputs among this store's live
+  addresses or one reveal's scope. The address alternative ranges over every live address of the
+  store, not only the reader's classes (conservative, not local).
+* `Witness` there: a declared cell with two data fields, another class and the blinding, a free
+  injective node digest and an injective address path; both collision branches refuted
+  (`Witness.exact`), honest reveals verify, answers and refusals for a slot-1 reader, the full
+  scope, and an overflowing slot whose tag aliases slot 1 (answered nothing; such a store is
+  refused at the gate).
+* The gate: `storeFits`, `FitStore`, `admit` (refuses; `admit_refuses`), and
+  `admitted_of_storeFits` discharging `admitted`.
+* Locality wording: bounded by the reveal's stop depth.
+
+**Increment 5, the receiving state machine** (`Kernel/PrivateCellReceiver.lean`, astra round 9
+applied):
+* `KeptCell`: params (protocol, cell, layout, size bound, the wire's `Blinding`), accepted
+  version, gated store (`FitStore`), kept index with `holds`, mask bytes held directly (`mask_eq`).
+  Every constructor passes the gate: `birth` runs `admit` on the whole store (`birth_refuses`),
+  `write` checks the one address (`write_refuses`), so no receiving path exists without it.
+* `write`: refuses the blinding address (`write_refuses_blinding`: the mask moves only by
+  `accept`); a value is one `Cache.insert`, a removal one `Cache.erase` (`write_none_index`).
+* `accept`: one accepted version: the next version and its mask `Params.prf (version + 1)`, then
+  the patch in order, for a no-op too; no caller supplies a mask (fourth-round audit).
+  `accept_spec` gives the resulting store exactly; `accept_isSome_iff`: accepted exactly when every
+  write fits and avoids the blinding. `History.custodyInputs_distinct`: across a cell's history the
+  custody function is evaluated at pairwise distinct versions (inputs only: a constant function
+  passes it). Freshness is the named premise `Custody.CustodyPrf` (round 6): the ideal fixed as the
+  uniform function on the version window (`idealFn`, tapes enumerate all functions by
+  `finFunctionFinEquiv`), the budget admitting every two-query evaluation test
+  (`BudgetAdmitsNamed`: the budget admits the named distinguishers, equality and the successor
+  relation of two window versions' masks and the one-query point tests; at a use it is the composed reduction tests plus
+  these, nothing more, and Lean does not tie it to efficiency; admitting every evaluation test made
+  the premise statistical, exhaustive key search included); honest pole `enumeration_satisfies`,
+  teeth `constant_refuted` (equality), `counter_refuted` (a public counter passes every equality test
+  and fails a point test) and `shift_refuted` (at `m = 2` a keyed shift passes every equality and
+  point test, `shift_passes_equality` / `shift_passes_points`, and fails only the successor test),
+  all against `namedBudget`.
+  Round 8 (answered with astra round 10): what is published is a `Serve` (a function of a version's
+  context, mask and kept index: roots, deterministic openings; a randomized opening at each fixed
+  coin assignment). `ViewThroughServe`: a reader's view is a function of the served items.
+  `ServesWithin leak`: the items are a function of the context, the outer root and the index's
+  authorized leakage (the deterministic case of the hybrids after the PRF hop); teeth
+  `recoverable_refuted` / `maskServe_refuted`: a service from which the mask reads back, an archive
+  of store bytes included, is outside every leakage (pigeonhole on the 256-bit root). Index
+  exposure is excluded only distributionally (no pointwise refutation: equal roots of two indexes
+  are a cSHAKE256 collision). `arun` is the adaptive run (strategy and world bit choose the birth
+  store and each patch from the items served so far; a refused patch leaves the cell unchanged, and
+  refusal is a function of the patch alone); `arun_srun`: it is `srun`, the same run with masks
+  substituted, at the custody masks of versions `0 … rounds`, and every version is in that window
+  (it does not depend on the world bit). `receiver_prf_hop`: (i) every key's real transcript is
+  `transcript` of its masks, (ii) the keyed/ideal gap is `num/den` under `reduction` (the composed
+  distinguisher is in the PRF's efficiency class whenever the strategy is budgeted), (iii) the
+  ideal's masks on the window are the tape's own tuple; `receiver_prf_hop_view` carries it to a
+  view given its factorization `g` through the served items, with `reduction` for that `g` only. `PublishesRun` (the host's accepted set is exactly the run) gives
+  `AtMostOneSuccessor`; the host corollary must also connect the observable event trace. Forks: `AtMostOneSuccessor` is the host's
+  obligation (a persisted version counter, a retry returning the stored successor); a history meets
+  it, and `fork_shares_mask` shows two accepts from one cell share a mask.
+* `birth` refuses a store already holding a mask (`birth_refuses_masked`: imports are never
+  silently re-masked) and accepts any other gated store (`birth_accepts`); `blinding_fits` proves
+  the registry's blinding address passes the gate, so no caller supplies that either.
+* `privateRoot` is `BlindedCellHiding.maskedTrieCommitment` itself: one commitment definition.
+* `root` / `root_eq`: the outer commitment (cSHAKE256 under `DREGG/PRIVATE-CELL/OUTER/v1` over the
+  state-derived context, the held mask, the kept digest) equals `privateRoot`, with no rebuild and
+  no store lookup.
+
+**Owed, in order:**
+0. **The hiding goal stated at the receiver; NOT proved.** `Kernel/BlindedCellHiding.lean` is the
+   statement module (namespace `BlindedCellHiding`). `Attack`: an attack's two candidate worlds'
+   birth store and adaptive patches, and its own `decide` on the view (it never sees the world bit).
+   `HidingSetting` (custody function and mask encoding, `Serve`, the view with its factorization
+   `g`, rounds); `real` (the attack's decision on the view of the keyed run in world `b`) is the
+   goal's `run`. `hiding_of_hybrids`: `TranscriptHiding` of `real` FROM the open hybrids; the PRF hop
+   is discharged (`receiver_prf_hop_view`); `zk`, `rom`, `identical` are open premises that jointly
+   say "hiding with uniform masks" (`lambda` is the mask encoding's entropy, `versions = rounds + 1`
+   at the use). `hidingGoal_of_hybrids`: `RatchetHidingGoal` of `real` from the same hybrids, with
+   every non-vacuity witness concrete (round 12): `legal` is the setting's `Legal`, the same-leakage
+   rule (under every key and round, the two worlds publish versions whose reader-authorized views,
+   `narrowPacked`'s store under the setting's `fields`, agree version by version); the
+   distinguishers are decoy attacks on the other world (`Distinguisher`: `decide` is membership in
+   world `true`'s view under a fixed exposed mask list); the hidden difference compares the two
+   worlds' accepted effects (`HiddenDiff`, `effect`); the witness `pairAttack` with two
+   `HiddenPatch`es (invisible, fitting, non-blinding writes) whose effects differ is proved legal
+   (`pairAttack_legal`, by `hidden_run`). Concretely `witness_hidden_write`: the slot-2 field of
+   `PrivateCellView.Witness` is hidden from the slot-1 reader. Teeth `unmasked_refuted`: a service
+   that does not read the mask, with separated world views, refutes hiding below one. Round 13,
+   `Concrete` (the witness's declared cell, `DeclaredEffectCell.blinding`, an unmasked store holding
+   slot 1, worlds writing 5 or 7 at slot 2, a slot-1 reader, one round):
+   `goalPremises_inhabited` proves `bornS`, both hidden patches, `differ`, and so the pair's
+   legality and hidden difference; `plain_refuted`: with the plaintext service (`plainServe`, the
+   index's value at slot 2, mask unread) `TranscriptHiding` of `real` under `legal := Legal` fails at
+   every bound below one for every budget admitting the distinguishers, separation proved
+   (`plain_view`, via `indexExact` and `lookup_perm`). Not discharged: separation at the digest
+   service (`rootServe` without the mask) is a cSHAKE256 non-collision of two index digests; the
+   kernel cannot evaluate Keccak and the deployed digest reaches the Rust kernel, so no
+   `native_decide` instance is claimed. `Legal`'s docstring: what an opening reveals beyond
+   `Visible` is pushed into `zk`. Round 14: that setting is cryptographically degenerate (one key);
+   `idealSetting` is the same deployment with the custody function the ideal one on the window
+   (`keyed := idealFn`, keys = all functions `{0,1} → Fin 2`); `jointPremises_inhabited`: `CustodyPrf`
+   at gap 0 against every test (`enumeration_satisfies`), a key, the bound's side conditions, a
+   budget admitting the distinguishers, and the pair's birth, hidden patches, legality and hidden
+   difference, all at one setting. `idealGoal_of_open`: there `RatchetHidingGoal` of `real` follows
+   from `zk`, `rom` and `identical` alone. This is the random-function pole, not the deployed custody
+   PRF: the reduction obligation is trivial only against the all-tests budget the ideal function
+   allows; at a real PRF `reduction` is the open concrete-security premise. Rounds 11 and
+   12 found the earlier forms vacuous (a caller-chosen game reading the world bit; caller-labelled
+   distinguishers; caller-chosen `legal`; decoys no run produces; syntactic hidden difference).
+   Owed in the hiding argument: the ZK hybrid over an independent coin tape, the ROM
+   coupling, `identical` for the deployed service, the host corollary over the accepted set and its observable event trace (`PublishesRun`).
+1. **The cell representation carries a persistent structure** (root's ruling: option (b), the
+   auxiliary cache in `Materialized`). Statement: `Theory/CellStateAux.lean` (astra round 11
+   applied): `AuxCache spec` (total: `build` for every store, `set` follows `Store.set`; `root?`
+   with `root?_sound`, `root?_agree`), `Carried := Trunc {a // Holds a s}` (a subsingleton, so
+   `Materialized.ext` keeps its statement), `Carried.run` (one `set` per writing op, never
+   `build`), `RootFromCarried` (proved; fallback a `Thunk`), `RootAvailable` over admitted stores,
+   teeth `flat_not_available`, `stale_root_refuted`, `constant_root_refuted`. Decisions from the
+   review: the private instance is a TOTAL index plus the decoded context and mask, the gate and
+   custody outside it; acceptance is a logical patch whose custody op writes the blinding value,
+   which encodes `(cell id, version, mask)` injectively (context from the store: the root stays a
+   function of it, and distinct contexts separate outer-hash inputs with no birthday term; entropy
+   only from the mask). Owed with it: receipt/event hiding re-established over the new roots
+   (their joint view factorization), mask substitution preserving context and index in
+   `ServesWithin`.
+   **Done (whole tree green):** `Materializer.aux` (default `flat`), `Materialized.carried`,
+   `materialize`/`materializeCanonical` defer it (`carried` is a `Thunk`: built on a cell's first
+   root read, so an open from bytes whose root is never read builds nothing; a patch follows the
+   pre-cell's structure, forcing it once if it was never read), `ValidatedPatch.apply` follows the
+   patch by `Carried.run`
+   and reads the root by `Carried.rootOr` (fallback a `Thunk`, forced only for flat kinds);
+   `apply_eq_materialize`. Consumers repaired by `apply_eq_materialize ▸` / `Materialized.ext`;
+   axiom pins gained `Quot.sound` (Trunc's subsingleton) and `Classical.choice`, which comes from
+   `Store.set` (`DFinsupp.update`, classical decidability), referenced by `AuxCache.set_holds`'s
+   type and so by every constant mentioning `AuxCache` (`#print axioms`: `Store.Store` is
+   `[propext]`, `Store.set` and `AuxCache` are the standard three). `Kernel/PrivateCellMaterializer.lean`:
+   the private instance (`Kept` = index + blinding bytes; `keptSet`; `keptRoot_eq`;
+   `rootAvailable` at every store; `set_index`; bulk build by `Cache.buildNodup`, no
+   canonicalization, astra round 12). **Not switched on:** the registry still selects the flat
+   materializers.
+   **The seam (round 16):** `ctxBytes` is kind-level (protocol, layout, size bound): the cell's
+   identity and version left the context for the blinding value. `CustodyCodec params` (the
+   blinding value of version `v` decodes exactly to `(cell, v, secret v)`; `λ` is `secret`'s
+   entropy only); `CustodyCodec.bytes_ne`, `constant_refuted` (teeth), `History.custodyBytes_nodup`
+   (a history's outer-hash mask arguments are pairwise distinct: no birthday term).
+   `KeptCell.accept_composite` (the store is the old one under the receiver's custody write, then
+   the patch; caller writes at the blinding address refused by `accept_isSome_iff`).
+   `PrivateCellMaterializer.keptCell_root` (`KeptCell.root` is the materializer's read at the
+   kind-level context, by `rfl`) and `keptCell_holds`: the hiding results now describe the root the
+   materializer computes. Owed: a concrete `CustodyCodec` (the registry's encoding).
+   **Next (the FORMAT switch), from astra round 12 and the integrator's round-15 conditions:**
+   factor the instance below `CanonicalCellRegistry` (it imports the registry today); a concrete
+   `CustodyCodec` for the registry's blinding spaces; the cell-level validated patch carrying the
+   receiver's custody op (the `Store.Patch` form of `accept_composite`); `rootBytes` with `agree`
+   for the private kinds;
+   receipt/event hiding over the new preimage; insert as a heap program through the compiled
+   walk. Linear paths outside the
+   aux, to note at the flatness bench: `Store.set` is `DFinsupp.update` (lookups can traverse
+   update history); validation runs the patch and application runs it again; whole-cell
+   `canonicalPostBytes` per durable write.
+   **FORMAT scope** (hot-path a8e4317c9e1574ca5, law 17): switch content and the declared kinds
+   (masked), and with mask `[]` every kind whose cell grows with history: eventHistory,
+   authority, resourceBook, policySource (stream entries and nockProgram are written once and
+   stay flat). resourceBook and policySource have no `StoreCodec` wire (`CanonicalCellRegistry.wire?`
+   is `none`), so the instance must be generalized off `Wire` for them. Hot-path does per-entry
+   persistence in the same FORMAT batch, and lands separately before it: held `Materialized`
+   across ops (no decode), one shared patch run for validation and apply, `Store.set` over a
+   persistent map behind a csimp.
+   **Round 17:** `keptCell_root_of_kind` (a cell whose parameters carry the kind's context has
+   the kind materializer's root; the registry builds each kind's parameters from its constants,
+   and a history keeps one set). The hiding setting's custody value is version-dependent
+   (`sample v x`, `encodeMask v x`; the PRF hop runs over the secret `x`); `keyedCodec` and
+   `keyedCodec_of_injective` give a `CustodyCodec` of the keyed parameters under an exact (or
+   injective) custody encoding, and the ideal setting's custody value is `Nat.pair v x`
+   (`idealSetting_codec`). `Serve` takes the version's public metadata `(cell, version)`
+   (`PublicMeta`) and `ServesWithin`'s `S` may read it; no leakage is added.
+   **Cost note (law 17):** `ValidatedPatch.apply` chains thunks: `k` patches with no root read
+   between them cost `O(k)` walks at the first read and retain `k` closures until then. Every
+   accepted version's root is read at publication today, so the chain stays one long; a host that
+   stops reading roots per version must force the carried structure per version.
+   **Round 18, done** (on lane/private-cells, ahead of the FORMAT switch):
+   1. *Context uniformity by construction.* `Params` lost protocol, layout and size bound;
+      `kindCtx wire` (protocol version and the wire's frame) is the context of every cell of the
+      wire (`KeptCell.ctx` by definition, `Twin.ctx` by `rfl`), and `keptCell_root_of_kind` has no
+      premise about the cell.
+   2. *Cross-cell separation.* `CustodyCodec decode params` is indexed by a kind-level
+      `CustodyDecode`, so a decode cannot read the cell off the parameters.
+      `CustodyCodec.cross_cell` (different cells never share custody bytes under one decode),
+      `History.custodyBytes_disjoint` (no mask of one cell's history equals one of another's),
+      teeth `CustodyCodec.shared_bytes_refuted` (a custody value omitting the cell has no codecs
+      for two cells). Concrete: `custodyNat cell v x := Nat.pair (cellCode cell) (Nat.pair v x)`,
+      `natDecode` over a wire's natural reader, the declared wire's `declaredDecode`;
+      `idealSetting`'s custody value is `custodyNat base.cell v x` (`idealSetting_codec`), and
+      `declared_cross_cell`. `keyedCodec_of_injective` (a choice decode reading `base.cell` off the
+      parameters) is deleted.
+   **Tags and epoch:** iteration speed's seam 1 (lane/seam1-epoch) lands first: named tags in
+   `Compiler/PersistedCodecTags/Core.lean` (imported by the modules naming them), census tags in
+   `Compiler/PersistedCodecTags.lean`. The `DREGG/PRIVATE-CELL/*` tags go in Core if named, else
+   in the census file; the FORMAT sha rebases onto seam 1.
+   **FORMAT pairing** agreed with hot-path aa2905fee8ef847d1 (recorded in its
+   `docs/HOT-PATH-STATE.md`, "Next" item 2): one epoch bump; I send the FORMAT sha to the hot-path
+   address, row 11 rebases onto it, the integrator lands the pair with one genesis and one fixture
+   re-record. Row 11 persists no cell root or `Materialized` field; private indexes are rebuilt on
+   open.
+2. **The registry and native-host switch** for content and the declared kinds: a root-format change
+   (fresh genesis, fixture re-record in the same sha), codec epoch ordered with the hot-path lane
+   (a86738fc1dfae6429 answered 10-31: no overlap with Materialized, CellState, PersistedCodecTags or snapshots; private cells go first). Agreed with hot-path aa2905fee8ef847d1 (row 11, session indexes in the checkpoint): ONE epoch bump, one batch, one fresh genesis, one fixture re-record; when the root-switch sha is green, tell it, it rebases row 11 onto it, the pair goes to the integrator labelled FORMAT. If row 11 is ready well before, it does not wait. The receiver's acceptance theorems cite `admit`; **no receiver
+   path ships without it** (the agreed ordering: not on today's `Action.admissionCheck`, the source
+   of `DeclaredActionAir` and the native binding's acceptance theorems).
+3. **Insert metered**: `Trie.insert` backs the world root's hot path (`Kernel/WorldRootCache`), so
+   the oracle walk enters as a proved `@[csimp]` equality, not a rewrite of the compiled walk.
+4. Retention of accepted versions for retries and historical reads; path collisions are refused or
+   counted (the `7 L + 3` erase bound needs injective live paths).
+5. The opening relation in the compiler's vocabulary (compiler-emitted AIR; grow the compiler
+   where it lacks a trie-path or cSHAKE gadget), not a hand-written circuit.
+6. Flatness: gate10/gate12 flatness-submit.
 
 **Linear paths seen** (each blocks flatness independently): flat `rootPreimage`
 (44 + 32E bytes per write, `StoreCodec`), whole-view `items` in `StoreHiding.view` and
 `ResourceView`, `NativeThinConsent.checkOpened` recomputing the flat root, whole-cell
 serialization in `canonicalPostBytes` of every durable write, `streamPayload` and `since`
 scanning the accepted log, `historicalReceipt`'s `findIdx?` (cached variant exists).
+
+## Continuation (for a successor)
+
+* **Trees.** Mac worktree `~/dev/minidregg-lanes/private-cells` (branch `lane/private-cells`,
+  pushed). hbox warm tree `/home/hbox/lanes/private-cells/src` on Lean 4.35: sync edited files with
+  rsync, iterate with `swarm-build lake env lean <file>` (seconds to minutes), batch with
+  `../b6.sh` (full `Theory Kernel Compiler Minidregg Host` plus the planted receipt test, about
+  10-40 min warm; log under `../logs/`, PID file beside it). Before READY, verify each committed
+  `.lean` file equals the hbox copy (`git show HEAD:f | ssh hbox cmp - …`).
+* **Landing.** Integrator aeb671706eb3f70d7: a sha stacked on the lane's last merged commit
+  (staging, never main), with the full build result. Merged so far: through bf2bfe84a; b076a4806
+  sent READY. Codec or root-format batches carry their own fixture re-record.
+* **Next increment** (owed item 1 then 2): a cell representation carrying `KeptCell` (read
+  `Theory/CellState.lean` `Materialized`/`materialize`/patch application near line 263, and the
+  hot-path note: checkpoints persist the State and roots are recomputed on open by
+  `openSealedWith`/`RootCache`), then the registry switch (`Compiler/CanonicalCellRegistry.lean`
+  `materializer`/`wire?`; layering: `fieldOf` is Kernel, the registry is Compiler, so the private
+  materializer is selected in Kernel or `fieldOf` moves down). Tell hot-path a86738fc1dfae6429
+  before that sha lands.
+* **Review practice.** Statement first; codex astra (`codex exec -m gpt-6-astra -s read-only -C
+  <worktree> "<prompt>"`) as peer on each statement and proof claim; Kimi via the integrator for
+  non-vacuity. Every round so far found real defects: apply them, never weaken.
+* **Lessons.** Scoped collisions, never a global `Collision` disjunct; collision disjuncts must be
+  stated at deployed parameters (an abstract hash or width makes them free); a cost Prop over a
+  polymorphic operation is fakeable, so make the operation a program an interpreter charges;
+  quantify constants before the size parameters and the types; budgets need a positive query
+  bound; a witness at the wire shape is not an admitted invocation; `Action.admissionCheck` feeds
+  a derived AIR and the native binding, so admission bounds go on new receivers, not there.

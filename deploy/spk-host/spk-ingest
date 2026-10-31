@@ -2,13 +2,21 @@
 # Operator materialization in a bounded user unit; no host-root package parser.
 set -euo pipefail
 umask 077
-[[ $# -ge 2 && $1 == --root ]] || { echo 'usage: spk-ingest --root SPK_ROOT [--import-profile PROFILE] HOST HOST_SHA256 INBOX_SPK APP_UID' >&2; exit 2; }
+[[ $# -ge 2 && $1 == --root ]] || { echo 'usage: spk-ingest --root SPK_ROOT [--import-profile PROFILE] [--scratch DIR] HOST HOST_SHA256 INBOX_SPK APP_UID' >&2; exit 2; }
 base=$2
 shift 2
 profile=standard-v1
 if [[ ${1:-} == --import-profile ]]; then
   [[ $# -ge 2 ]] || exit 2
   profile=$2
+  shift 2
+fi
+# The operator's spool directory (broker config ingestScratch): a disk with room for the profile's
+# decoded bound, so the intake does not depend on the free space of the SPK store's filesystem.
+scratch=
+if [[ ${1:-} == --scratch ]]; then
+  [[ $# -ge 2 && $2 == /* && $2 != */ && $2 != *//* && $2 != */../* && $2 != */./* ]] || exit 2
+  scratch=$2
   shift 2
 fi
 [[ $# == 4 ]] || { echo 'SPK ingest expects HOST HOST_SHA256 INBOX_SPK APP_UID' >&2; exit 2; }
@@ -37,6 +45,10 @@ store_id=$(basename "$(dirname "$base")")
 read -r raw_limit file_limit seconds < <("$host_binary" import-limits "$profile" "$(stat -c '%s' "$package")") || exit 2
 [[ $raw_limit =~ ^[0-9]+$ && $file_limit =~ ^[0-9]+$ && $seconds =~ ^[0-9]+$ ]] || { echo 'SPK import limits unavailable' >&2; exit 2; }
 [[ $(stat -c '%u:%a' "$package") == "$EUID:600" && $(stat -c '%s' "$package") -le $raw_limit ]] || exit 2
+if [[ -n $scratch ]]; then
+  [[ $(realpath -m -- "$scratch") == "$scratch" && -d $scratch && ! -L $scratch && $(stat -c '%u:%a' "$scratch") == "$EUID:700" ]] || {
+    echo 'SPK ingest scratch must be a canonical operator-owned 0700 directory' >&2; exit 1; }
+fi
 for dir in "$base" "$base/inbox" "$base/packages"; do
   [[ -d $dir && ! -L $dir && $(stat -c '%u' "$dir") == "$EUID" ]] || { echo 'SPK namespace custody differs' >&2; exit 1; }
   (( (8#$(stat -c '%a' "$dir") & 8#022) == 0 )) || exit 2
@@ -59,7 +71,7 @@ unit=mini-spk-ingest-s$store_id-$$
 systemd-run --user --unit="$unit" --wait --pipe --collect -p Type=exec \
   -p NoNewPrivileges=yes -p MemoryMax=2G -p MemorySwapMax=0 -p CPUQuota=100% \
   -p TasksMax=16 -p RuntimeMaxSec="$seconds" -p LimitFSIZE="$file_limit" -p KillMode=control-group \
-  -- "$host_binary" materialize --import-profile "$profile" "$package" "$base/packages" "$app_uid"
+  -- "$host_binary" materialize --import-profile "$profile" ${scratch:+--scratch "$scratch"} "$package" "$base/packages" "$app_uid"
 installed=$base/packages/sha256-$input_sha
 [[ $(sha256sum "$package" | cut -d ' ' -f1) == "$input_sha" && -d $installed/root && ! -L $installed/root ]] || { echo 'ingest exact image differs' >&2; exit 1; }
 [[ $(sha256sum "$installed/package.spk" | cut -d ' ' -f1) == "$input_sha" ]] || exit 1

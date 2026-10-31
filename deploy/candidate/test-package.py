@@ -25,6 +25,7 @@ import io
 import os
 import shutil
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -109,6 +110,93 @@ with tempfile.TemporaryDirectory(prefix="package-test-") as tmp:
     done = package(roles_manifest(binaries, commit), "cand")
     check("full role set packages", done.returncode == 0, done.stderr)
     cand = tmp / "cand"
+    # 1a. a hot-swap overlay (package.py --overlay): a whole build family from a second commit
+    if done.returncode == 0:
+        before = {rel: sha(cand / rel) for rel in ("manifest.json", "provenance.json", "SHA256SUMS", "bin/mini")}
+        repo_b = tmp / "repo-b"  # a later commit, in its own clone: the tests below read repo's HEAD
+        git(tmp, "clone", "-q", str(repo), str(repo_b))
+        (repo_b / "Cargo.lock").write_text("stub Cargo.lock, overlay commit\n")
+        git(repo_b, "commit", "-q", "-am", "overlay")
+        commit_b = git(repo_b, "rev-parse", "HEAD").decode().strip()
+        archive_b = tmp / "source-b.tar"
+        archive_b.write_bytes(git(repo_b, "archive", "--format=tar", commit_b))
+        spk = [role for role, crate in (l.split()[:2] for l in subprocess.run(
+            [sys.executable, str(PACKAGE), "--rust-roles"], check=True, capture_output=True, text=True
+        ).stdout.splitlines()) if crate == "spk-host"]
+        rebuilt = tmp / "rebuilt"
+        rebuilt.mkdir()
+        for role in spk + ["mini"]:
+            (rebuilt / ROLE_FILES[role]).write_text(f"rebuilt {ROLE_FILES[role]} at B\n")
+
+        def overlay(base, label, roles, archive_=archive_b):
+            done_ = subprocess.run([sys.executable, str(PACKAGE), "--overlay", str(base), "--source-archive",
+                                    str(archive_), "--toolchains", str(toolchains), "--into", str(tmp / "ovs"),
+                                    "--name", label, *[f"--role={r}={rebuilt / ROLE_FILES[r]}" for r in roles]],
+                                   cwd=repo_b, capture_output=True, text=True)
+            done_.path = Path(json.loads(done_.stdout)["candidate"]) if done_.returncode == 0 else None
+            return done_
+
+        part = overlay(cand, "ov-part", ["spkHost"])
+        check("an overlay that splits a build family is refused, naming the missing role",
+              part.returncode != 0 and "spkBroker" in part.stderr
+              and not any((tmp / "ovs").iterdir() if (tmp / "ovs").exists() else []), part.stderr)
+        ov = overlay(cand, "ov", spk + ["mini"])
+        check("an overlay of the spk-host family and mini packages", ov.returncode == 0, ov.stderr)
+        if ov.returncode == 0:
+            o = ov.path
+            check("the base candidate is untouched",
+                  before == {rel: sha(cand / rel) for rel in before})
+            oprov = json.loads((o / "provenance.json").read_text())
+            oman = json.loads((o / "manifest.json").read_text())
+            check("provenance .overlay names the base, the overlay source and each swapped role",
+                  oprov["overlay"]["base"]["sha256"] == before["provenance.json"]
+                  and commit_b in oprov["overlay"]["sources"]
+                  and sorted(oprov["overlay"]["roles"]) == sorted(spk + ["mini"])
+                  and all(v["commit"] == commit_b for v in oprov["overlay"]["roles"].values()))
+            check("swapped outputs carry the overlay tree, the others the base's",
+                  oprov["outputs"]["bin/mini"]["build"]["sourceTree"] == oprov["overlay"]["sources"][commit_b]["tree"]
+                  and oprov["outputs"]["bin/minidregg-host"]["build"]["sourceTree"] == oprov["source"]["tree"]
+                  and oprov["overlay"]["sources"][commit_b]["tree"] != oprov["source"]["tree"])
+            check("manifest pins and paths are the overlay's",
+                  oman["mini"] == str(o / "bin/mini") and oman["sha256"]["mini"] == sha(o / "bin/mini")
+                  and oman["sha256"]["shell"] == sha(o / "bin/mini")
+                  and oman["candidate"] == str(o / "provenance.json")
+                  and oman["sha256"]["candidate"] == sha(o / "provenance.json") and oman["outputs"] == oprov["outputs"])
+            sums = dict((l.split("  ", 1)[1], l.split("  ", 1)[0]) for l in (o / "SHA256SUMS").read_text().splitlines())
+            check("overlay SHA256SUMS verifies and lists the overlay archive",
+                  all(sha(o / rel) == d for rel, d in sums.items()) and f"overlay/{commit_b}.source.tar" in sums)
+            check("the friend bundle's mini is the swapped mini, on a new inode",
+                  os.path.samefile(o / "bin/clients/x86_64-unknown-linux-gnu/mini", o / "bin/mini")
+                  and not os.path.samefile(o / "bin/mini", cand / "bin/mini")
+                  and oprov["clients"]["x86_64-unknown-linux-gnu"]["sha256"] == sha(o / "bin/mini"))
+            resolved = subprocess.run(["sh", "-eu", "-c", '. "$1"; candidate_resolve "$2"; candidate_verify_outputs "$2"',
+                                       "test", str(HERE / "lib.sh"), str(o / "manifest.json")], capture_output=True, text=True)
+            check("run.sh's candidate checks accept the overlay", resolved.returncode == 0, resolved.stderr)
+            check("the overlay directory is its 12-hex id, recorded with the name in provenance",
+                  re.fullmatch(r"[0-9a-f]{12}", o.name) is not None and oprov["overlay"]["id"] == o.name
+                  and oprov["overlay"]["name"] == "ov")
+            dup = overlay(cand, "ov", spk + ["mini"])
+            check("the same overlay (same label) again is refused by its id, and leaves nothing behind",
+                  dup.returncode != 0 and ("already there" in dup.stderr and sorted(p.name for p in (tmp / "ovs").iterdir()) == [o.name]),
+                  dup.stderr)
+            again = overlay(o, "ov2", ["mini"])
+            o2prov = json.loads((again.path / "provenance.json").read_text()) if again.returncode == 0 else {}
+            check("an overlay of an overlay keeps the earlier record and points at its direct base",
+                  again.returncode == 0 and o2prov["overlay"]["base"]["provenance"] == str(o / "provenance.json")
+                  and sorted(o2prov["overlay"]["roles"]) == sorted(spk + ["mini"]), again.stderr)
+            (o / "bin/mini").chmod(0o755)
+            forged = dict(oprov, outputs=dict(oprov["outputs"]))
+            forged["outputs"]["bin/mini"] = {"sha256": oprov["outputs"]["bin/mini"]["sha256"],
+                                             "build": dict(oprov["outputs"]["bin/mini"]["build"], sourceTree="f" * 40)}
+            fp = tmp / "forged-prov.json"
+            fp.write_text(json.dumps(forged))
+            fm = tmp / "forged-manifest.json"
+            fm.write_text(json.dumps(dict(oman, candidate=str(fp), outputs=forged["outputs"],
+                                          sha256=dict(oman["sha256"], candidate=sha(fp)))))
+            forged_r = subprocess.run(["sh", "-eu", "-c", '. "$1"; candidate_resolve "$2"',
+                                       "test", str(HERE / "lib.sh"), str(fm)], capture_output=True, text=True)
+            check("an output whose tree is neither the base's nor an overlay source's is refused",
+                  forged_r.returncode != 0 and "identity is incomplete" in forged_r.stderr, forged_r.stderr)
     if done.returncode == 0:
         prov = json.loads((cand / "provenance.json").read_text())
         consent = prov["binaries"].get("consent", {})

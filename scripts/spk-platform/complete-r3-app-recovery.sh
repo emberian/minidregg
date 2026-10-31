@@ -111,7 +111,6 @@ jq -e '.cell.grain == {task:"7902",generation:"1",status:"1",remaining:"25",rese
 # started and the new reconciliation artifacts explicit for review.
 jq -s '{type:"mini-spk-additional-session-births-v1",sessions:.}' \
   "$B/additional-sessions.jsonl" >"$B/additional-sessions.json"
-sync -f "$B/additional-sessions.json"
 jq -n --arg invocation "$INVOCATION" --arg storeSha256 "$(sha "$STORE")" \
   --arg scriptSha256 "$(sha "$P/application-attach-continuation.sh")" \
   --arg sessionsSha256 "$(sha "$B/additional-sessions.json")" \
@@ -122,16 +121,12 @@ jq -n --arg invocation "$INVOCATION" --arg storeSha256 "$(sha "$STORE")" \
    storeSha256:$storeSha256,scriptSha256:$scriptSha256,
    sessionsSha256:$sessionsSha256,finalSignedViewSha256:$finalViewSha256}' \
   >"$P/final-observation.json"
-sync -f "$P/final-observation.json"
 jq -n --arg recovery "$P" --arg observationSha256 "$(sha "$P/final-observation.json")" \
   --arg appSha256 "$(sha "$B/app-attempt/outcome.json")" \
   --arg sessionSha256 "$(sha "$B/session-attempt/outcome.json")" '
   {protocol:"mini-spk-r3-app-attach-recovery-v1",recovery:$recovery,
    observationSha256:$observationSha256,appSha256:$appSha256,
    sessionSha256:$sessionSha256}' >"$A/application-recovery-link.json"
-sync -f "$A/application-recovery-link.json"
 printf '%s\n' 'complete via app-recovery-0001 final observation; original unit failed assertion' \
   >"$A/application.completed"
-sync -f "$A/application.completed"
-sync -f "$A"; sync -f "$P"; sync -f "$B"
 printf '%s\n' "$A/application.completed"

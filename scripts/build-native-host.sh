@@ -82,6 +82,8 @@ Environment:
   MINIDREGG_NATIVE_ALLOW_SHARED=1  permit a tree without the snapshot marker
   MINIDREGG_NATIVE_JOBS=N          concurrent C compiler processes (positive integer; default: 2)
   MINIDREGG_LEAN_THREADS=N         threads in each Lean process (positive integer; default: 2)
+  MINIDREGG_LAKE_THREADS=N         Lake's worker threads, i.e. how many modules it runs at once before the
+                                   seats bound them (default: 2 x MINIDREGG_LEAN_SEATS, at least 4)
   MINIDREGG_NATIVE_LAKE_CC=PATH    optional bounded compiler wrapper for Lake C jobs
   MINIDREGG_CYCLE_DIR=DIR          evidence parent (default below /tmp)
   MINIDREGG_LEAN_SEAT_ROOT=DIR     host-wide compiler seats (default /tmp/minidregg-lean-seats)
@@ -363,6 +365,9 @@ cycle_dir=${MINIDREGG_CYCLE_DIR:-/tmp/minidregg-cycle-20260919}
 # Every candidate and scoped build on this host must use this same root.
 seat_root=${MINIDREGG_LEAN_SEAT_ROOT:-/tmp/minidregg-lean-seats}
 lean_seats=${MINIDREGG_LEAN_SEATS:-2}
+# Lake's worker threads = its compiler concurrency (the wrapper comment below); the seats bound it.
+lake_threads=${MINIDREGG_LAKE_THREADS:-$(( 2 * lean_seats > 4 ? 2 * lean_seats : 4 ))}
+case "$lake_threads" in [1-9]|[1-9][0-9]|[1-2][0-9][0-9]) ;; *) printf 'MINIDREGG_LAKE_THREADS must be a positive integer (<= 299)\n' >&2; exit 64 ;; esac
 case "$lean_seats" in [1-9]|[1-9][0-9]) ;; *) printf 'MINIDREGG_LEAN_SEATS must be a positive integer\n' >&2; exit 64 ;; esac
 mkdir -p "$seat_root" "$cycle_dir/build"
 seat_root=$(cd "$seat_root" && pwd -P)
@@ -398,8 +403,8 @@ seat_owners() {
 }
 
 start_epoch=$(date +%s)
-printf 'start_utc=%s\nroot=%s\nlean_threads=%s\nnative_jobs=%s\nseat_root=%s\nlean_seats=%s\n' \
-  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$root" "$lean_threads" "$native_jobs" "$seat_root" "$lean_seats" \
+printf 'start_utc=%s\nroot=%s\nlean_threads=%s\nlake_threads=%s\nnative_jobs=%s\nseat_root=%s\nlean_seats=%s\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$root" "$lean_threads" "$lake_threads" "$native_jobs" "$seat_root" "$lean_seats" \
   > "$output_dir/build.log"
 
 # `transImports` is a nonbuildable Lake facet: it parses source headers and
@@ -1300,11 +1305,15 @@ if [[ -n "$companion_output" ]]; then
 fi
 
 # --- the seated Lean wrapper: every Lake build below runs through it --------------------------
-# Lake (Lean 4.30) has no jobs flag: it starts one `lean` per ready module, so LEAN_NUM_THREADS alone
-# does not bound a build. Every Lake build of this script therefore runs with a fake sysroot whose
+# Lake has no jobs flag: each module job is a default-priority task on Lake's OWN Lean thread pool
+# (Lake/Build/Job/Monad.lean, BaseIO.asTask), and the task blocks its worker while its `lean` runs. So
+# Lake's LEAN_NUM_THREADS is the build's real compiler concurrency: it ran at the per-compiler 2 until
+# 2026-10-31 (batch 3: exactly 2 compilers for 86% of a 2,356 s Lean wall on 12 seats). Lake now gets
+# MINIDREGG_LAKE_THREADS workers (default 2 x seats, so seat waiters never starve ready modules) and
+# each compiler gets MINIDREGG_LEAN_THREADS through MINIDREGG_LEAN_COMPILER_THREADS. Every Lake build of this script therefore runs with a fake sysroot whose
 # bin/lean is a wrapper: it takes one of the host's MINIDREGG_LEAN_SEATS seats (an atomic mkdir under
 # MINIDREGG_LEAN_SEAT_ROOT, shared by every build on the host), runs the real compiler with
-# -j $LEAN_NUM_THREADS, logs START/END and releases the seat only after the compiler has exited.
+# -j $MINIDREGG_LEAN_COMPILER_THREADS, logs START/END and releases the seat only after the compiler has exited.
 # Lake runs the closure in parallel; the seats are the only bound on concurrent compilers. The fake
 # sysroot points every library back at the real immutable toolchain (so the outputs and Lake's traces
 # are the real compiler's: publish-artifacts' --umbrella step replays a tree plain Lake built).
@@ -1439,7 +1448,8 @@ trap 'forward_signal TERM' TERM
 line=$(printf 'START\t%s\t%s\t' "$(date +%s)" "$$"; printf '%q ' "$@")
 printf '%s\n' "$line" >> "$MINIDREGG_LEAN_WRAPPER_LOG"
 usage_file=$(mktemp "${TMPDIR:-/tmp}/lean-rusage.XXXXXX")
-python3 "$MINIDREGG_LEAN_RUSAGE" "$usage_file" "$MINIDREGG_REAL_LEAN" -j "$LEAN_NUM_THREADS" "$@" &
+LEAN_NUM_THREADS=$MINIDREGG_LEAN_COMPILER_THREADS \
+  python3 "$MINIDREGG_LEAN_RUSAGE" "$usage_file" "$MINIDREGG_REAL_LEAN" -j "$MINIDREGG_LEAN_COMPILER_THREADS" "$@" &
 child=$!
 # A trapped signal returns `wait` early while the compiler still runs: keep the seat until it exits.
 wait "$child"
@@ -1510,7 +1520,8 @@ seated_lake() {
     LEAN_SYSROOT="$wrapper_root" \
     LEAN_CC="$lake_cc" \
     LEAN_AR="$toolchain/bin/llvm-ar" \
-    LEAN_NUM_THREADS="$lean_threads" \
+    LEAN_NUM_THREADS="$lake_threads" \
+    MINIDREGG_LEAN_COMPILER_THREADS="$lean_threads" \
     MINIDREGG_REAL_LEAN="$toolchain/bin/lean" \
     MINIDREGG_LEAN_SEAT_ROOT="$seat_root" \
     MINIDREGG_LEAN_SEATS="$lean_seats" \
@@ -1632,7 +1643,7 @@ fi
 if [[ "$build_umbrella" == 1 ]]; then
   lake_gate_log="$output_dir/lake-build-$umbrella_tag.log"
   cat > "$output_dir/lake-build-$umbrella_tag.command.txt" <<EOF
-LAKE_OVERRIDE_LEAN=true LEAN_SYSROOT=$wrapper_root LEAN_NUM_THREADS=$lean_threads MINIDREGG_LEAN_SEATS=$lean_seats lake build $umbrella_target
+LAKE_OVERRIDE_LEAN=true LEAN_SYSROOT=$wrapper_root LEAN_NUM_THREADS=$lake_threads MINIDREGG_LEAN_COMPILER_THREADS=$lean_threads MINIDREGG_LEAN_SEATS=$lean_seats lake build $umbrella_target
 EOF
   gate_start=$(date +%s)
   printf 'lake-gate %s start\n' "$umbrella_target" | tee -a "$output_dir/build.log"
@@ -1656,7 +1667,7 @@ EOF
   # resulting C files feed the native link below without a duplicate source pass.
   host_gate_log="$output_dir/lake-build-Host.Main-leanArts.log"
   cat > "$output_dir/lake-build-Host.Main-leanArts.command.txt" <<EOF
-LAKE_OVERRIDE_LEAN=true LEAN_SYSROOT=$wrapper_root LEAN_NUM_THREADS=$lean_threads MINIDREGG_LEAN_SEATS=$lean_seats lake build +Host.Main:leanArts
+LAKE_OVERRIDE_LEAN=true LEAN_SYSROOT=$wrapper_root LEAN_NUM_THREADS=$lake_threads MINIDREGG_LEAN_COMPILER_THREADS=$lean_threads MINIDREGG_LEAN_SEATS=$lean_seats lake build +Host.Main:leanArts
 EOF
   gate_start=$(date +%s)
   printf 'lake-gate Host.Main:leanArts start\n' | tee -a "$output_dir/build.log"

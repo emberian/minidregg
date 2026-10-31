@@ -87,7 +87,6 @@ journalctl --user -u "$old_unit" --no-pager --output=cat |
 mkdir -m 700 "$P" || fail 'query recovery already claimed'
 sha256sum "$SOURCE" "$OLD/workroom.stderr" "$V/hermes-a-controller-intent.json" \
   "$V/hermes-a-controller.stdout" "$Q"/* "$V/born-views.jsonl" >"$P/retained-sha256.txt"
-sync -f "$P/retained-sha256.txt"
 # Archive exact first-query bytes separately before the aggregate file is
 # extended. Never move, rewrite, or delete the original query directory.
 mkdir -m 700 "$P/retained-query"
@@ -95,9 +94,6 @@ cp -p "$Q"/* "$P/retained-query/"
 cp -p "$V/hermes-a-controller-intent.json" "$V/hermes-a-controller.stdout" "$P/retained-query/"
 cp -p "$V/born-views.jsonl" "$P/retained-query/"
 sha256sum "$P/retained-query"/* >"$P/retained-query-sha256.txt"
-for file in "$P/retained-query"/*; do sync -f "$file"; done
-sync -f "$P/retained-query-sha256.txt"
-sync -f "$P/retained-query"
 # These are pure source inspection and JSON equality checks; no new signed query.
 "$HOST" "$W/deployment/pinned-config.json" inspect view-resource "$Q/view.bin" "$P/reinspected-view.json"
 jq -S . "$Q/view.json" >"$P/original-view-sorted.json"
@@ -127,21 +123,14 @@ awk '
 chmod 700 "$P/workroom-reuse-first-query.sh"
 /bin/sh -n "$P/workroom-reuse-first-query.sh" || fail 'recovery script syntax refused'
 sha256sum "$SOURCE" "$P/workroom-reuse-first-query.sh" >"$P/script-sha256.txt"
-sync -f "$P/workroom-reuse-first-query.sh"
-sync -f "$P/script-sha256.txt"
-sync -f "$P"
 [ "$(sha "$STORE")" = e5515e158fdfb03afdafc3951a3a73c2b779bac37eb8428a146c8244611e30e5 ] || fail 'Store changed before continuation'
 /bin/sh "$P/workroom-reuse-first-query.sh" "$W" "$HOST" "$MINI" \
   "$STORE_BINARY" "$SIGNATURE_BINARY" "$R/source-stage/agent-allocation.json" \
   "$A/adopted-birth-receipt.json" "$P" >"$P/workroom.stdout" 2>"$P/workroom.stderr"
 [ -s "$V/birth-evidence.json" ] || fail 'workroom signed evidence absent'
 sha256sum "$V/birth-evidence.json" "$P/workroom-reuse-first-query.sh" >"$P/success-sha256.txt"
-sync -f "$P/success-sha256.txt"
 jq -n --arg recovery "$P" --arg signedEvidenceSha256 "$(sha "$V/birth-evidence.json")" '
   {protocol:"mini-spk-r3-workroom-recovery-link-v1",recovery:$recovery,
    signedEvidenceSha256:$signedEvidenceSha256}' >"$A/workroom-recovery-link.json"
-sync -f "$A/workroom-recovery-link.json"
 printf '%s\n' 'complete via workroom-recovery-0002' >"$A/workroom.completed"
-sync -f "$A/workroom.completed"
-sync -f "$A"
 printf '%s\n' "$A/workroom.completed"

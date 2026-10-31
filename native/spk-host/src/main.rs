@@ -2,7 +2,7 @@
 fn main() {
     use minidregg_spk_host::launch_descriptor_native::qualify_launch;
     use minidregg_spk_host::materialize::{
-        materialize_spk_with_profile, qualify_bridge_spk_with_profile, signed_schema_source,
+        materialize_spk_with_scratch, qualify_bridge_spk_with_profile, signed_schema_source,
         verify_installed_spk, ImportProfile,
     };
     use serde_json::json;
@@ -36,6 +36,16 @@ fn main() {
                 std::process::exit(2);
             }
         };
+        args.drain(2..4);
+    }
+    // `materialize --import-profile P --scratch DIR ...`: the operator's spool directory (broker
+    // config `ingestScratch`); a package never chooses it.
+    let mut scratch: Option<std::path::PathBuf> = None;
+    if args.get(1).map(String::as_str) == Some("materialize") && args.get(2).map(String::as_str) == Some("--scratch") {
+        match args.get(3) {
+            Some(dir) if dir.starts_with('/') => scratch = Some(dir.into()),
+            _ => { eprintln!("spk-host: --scratch needs an absolute directory"); std::process::exit(2); }
+        }
         args.drain(2..4);
     }
     // The modeled unit manager of a fixture build (src/fixture_os.rs).
@@ -108,6 +118,14 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        return;
+    }
+    if args.len() == 7 && args[1] == "volume-custodian" {
+        // volume-custodian ROOT SOCKET UID_BASE UID_LIMIT SOCKET_GID (deploy/spk-host/VOLUMES.md)
+        let n = |i: usize| args[i].parse::<u32>().unwrap_or_else(|_| { eprintln!("spk-host volume-custodian: {} is not a number", args[i]); std::process::exit(2) });
+        let served = minidregg_spk_host::broker::volume_custodian::Custodian::open(std::path::Path::new(&args[2]), n(4), n(5))
+            .and_then(|c| c.serve(std::path::Path::new(&args[3]), n(6)));
+        if let Err(error) = served { eprintln!("spk-host volume-custodian: {error}"); std::process::exit(1); }
         return;
     }
     if args.len() >= 4 && args[1] == "grain" {
@@ -266,7 +284,7 @@ fn main() {
                 std::process::exit(2);
             }
         };
-        match materialize_spk_with_profile(Path::new(&args[2]), Path::new(&args[3]), uid, import_profile) {
+        match materialize_spk_with_scratch(Path::new(&args[2]), Path::new(&args[3]), uid, import_profile, scratch.as_deref()) {
             Ok(installed) => {
                 println!(
                     "installed={} spkSha256={} spkLength={} appId={} version={} signedManifestSha256={} signedBridgeConfigSha256={}",

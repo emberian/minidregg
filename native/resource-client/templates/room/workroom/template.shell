@@ -20,7 +20,6 @@ chat adopt $ROOM
 # The map. Everyone in the room may read it; only you write it, and it only
 # grows (no line edited, none struck). Its links are the room's map.
 doc new $ROOM/index 'any [ not (verb == write), all [ subject == $ME, slot "content/atom-edits" == 0, slot "content/tombstones" == 0, slot "content/names/unique" == 1 ] ]' --in $ROOM
-room index $ROOM-map-index $ROOM $ROOM/index
 
 # What the room says: a stream. An entry, once appended, stays (the store's own discipline).
 create $ROOM/wall stream open --in $ROOM
@@ -31,19 +30,19 @@ doc new $ROOM/notes draft --in $ROOM
 # A list that only grows.
 doc new $ROOM/tasks note --in $ROOM
 
-# The map's first line, and its links.
+# The map is the room's index; its pointer, the map's lines and links, and the shared
+# names are ONE proposal and one submission (a template's coalesced edits).
+room index $ROOM-map-index $ROOM $ROOM/index
 doc append $ROOM-map $ROOM/index 'workroom $ROOM: wall is what we say, notes is our draft, tasks only grows'
 submit $ROOM-map
 doc link $ROOM-map-wall $ROOM/index $ROOM/wall
 submit $ROOM-map-wall
-room bind $ROOM-name-wall $ROOM wall $ROOM/wall
 doc link $ROOM-map-notes $ROOM/index $ROOM/notes
 submit $ROOM-map-notes
-room bind $ROOM-name-notes $ROOM notes $ROOM/notes
 doc link $ROOM-map-tasks $ROOM/index $ROOM/tasks
 submit $ROOM-map-tasks
-room bind $ROOM-name-tasks $ROOM tasks $ROOM/tasks
-
-# And back: notes points at the map.
 doc link $ROOM-notes-map $ROOM/notes $ROOM/index
 submit $ROOM-notes-map
+room bind $ROOM-name-wall $ROOM wall $ROOM/wall
+room bind $ROOM-name-notes $ROOM notes $ROOM/notes
+room bind $ROOM-name-tasks $ROOM tasks $ROOM/tasks

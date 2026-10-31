@@ -304,10 +304,10 @@ pub(crate) fn verify_var_volume(path: &Path, var_fd: RawFd, max_bytes: u64, app_
     let parent_fd = open_protected_directory(parent, app_uid, false)?;
     let (separate, total) = crate::os::var_filesystem(path, parent_fd.as_raw_fd(), var_fd)?;
     if !separate {
-        return Err(invalid("persistent /var is not a separate mounted filesystem"));
+        return Err(invalid("persistent /var is not a project-quota directory"));
     }
     if total == 0 || total > max_bytes as u128 {
-        return Err(invalid("persistent /var filesystem exceeds configured cap"));
+        return Err(invalid("persistent /var quota exceeds configured cap"));
     }
     Ok(())
 }

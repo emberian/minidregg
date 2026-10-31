@@ -169,7 +169,7 @@ def plan(options, probe=True):
         "brokerSocket":str(grains / "broker.sock"),"spkRoot":str(frame/"spk"),"operatorUser":operator,"unitPrefix":prefix,
         "spkHost":sealed["spkHost"],"spkHostSha256":sealed["sha256"]["spkHost"],
         "ingestHelper":str(frame / "usr/local/lib/mini/spk-ingest"),
-        "volumeHelper":str(frame / "usr/local/lib/mini/spk-var-volume"),"appUids":options["appUids"]}
+        "volumeHelper":str(frame / "usr/local/libexec/mini-spk-volume-helper"),"appUids":options["appUids"]}
     return {"provision-plan.json":provision,"app-selection-template.json":selection,"broker-plan.json":broker,
         "stage-options.json":dict(options, operatorUid=uid),
         "receiving-plan.json":{"protocol":"mini-service-staging-receiving-v1",

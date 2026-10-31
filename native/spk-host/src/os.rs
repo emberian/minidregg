@@ -10,13 +10,13 @@ pub(crate) use minidregg_compatible_upgrade_custody::root_owner;
 pub(crate) use crate::fixture_os::{
     app_owner, cgroup_events, child_assume_app_identity, drop_to_identity,
     holds_exactly_identity,
-    pid_cgroup, runtime_units, self_cgroup, systemctl, var_filesystem,
+    pid_cgroup, runtime_units, self_cgroup, systemctl, var_filesystem, var_project,
 };
 #[cfg(not(feature = "fixture-os"))]
 pub(crate) use real::{
     app_owner, cgroup_events, child_assume_app_identity, drop_to_identity,
     holds_exactly_identity,
-    pid_cgroup, runtime_units, self_cgroup, systemctl, var_filesystem,
+    pid_cgroup, runtime_units, self_cgroup, systemctl, var_filesystem, var_project,
 };
 
 #[cfg(not(feature = "fixture-os"))]
@@ -90,27 +90,35 @@ mod real {
         )
     }
 
-    /// The persistent `/var` at `path` (held open as `var_fd`, its parent as
-    /// `parent_fd`): whether it is a filesystem mounted apart from its parent,
-    /// and that filesystem's total bytes.
+    /// The persistent `/var` at `path` (held open as `var_fd`, its parent as `parent_fd`, both
+    /// O_PATH descriptors): whether it is bounded by a project quota, and the size `statfs` reports
+    /// for it. A directory with the inherit flag under a project limit reports that limit as its
+    /// filesystem size, so it is bounded exactly when it reports less than its parent's filesystem.
+    /// (The project id itself is not read here: the resident runs as the operator, who cannot open
+    /// the app-private directory for the ioctl. The witness pins the directory's inode and the
+    /// helper, as root, set and verified its project.)
     pub(crate) fn var_filesystem(
         _path: &Path,
         parent_fd: RawFd,
         var_fd: RawFd,
     ) -> io::Result<(bool, u128)> {
-        let stat = |fd: RawFd| -> io::Result<libc::stat> {
-            let mut stat = unsafe { std::mem::zeroed::<libc::stat>() };
-            if unsafe { libc::fstat(fd, &mut stat) } != 0 {
-                return Err(io::Error::last_os_error());
-            }
-            Ok(stat)
-        };
-        let separate = stat(parent_fd)?.st_dev != stat(var_fd)?.st_dev;
-        let mut volume = unsafe { std::mem::zeroed::<libc::statvfs>() };
-        if unsafe { libc::fstatvfs(var_fd, &mut volume) } != 0 {
+        // The volume must be a directory of its parent's filesystem: a bind mount of another
+        // (smaller) filesystem at /var reports a small size too.
+        let (mut var_stat, mut parent_stat) = (unsafe { std::mem::zeroed::<libc::stat>() }, unsafe { std::mem::zeroed::<libc::stat>() });
+        if unsafe { libc::fstat(var_fd, &mut var_stat) } != 0 || unsafe { libc::fstat(parent_fd, &mut parent_stat) } != 0 {
             return Err(io::Error::last_os_error());
         }
-        Ok((separate, (volume.f_blocks as u128) * (volume.f_frsize as u128)))
+        if var_stat.st_dev != parent_stat.st_dev {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "persistent /var is on another filesystem than its parent"));
+        }
+        let var = crate::volume_quota::reported_bytes(var_fd)?;
+        let parent = crate::volume_quota::reported_bytes(parent_fd)?;
+        Ok((var < parent, var))
+    }
+
+    /// The project id and inherit flag of the open `/var`.
+    pub(crate) fn var_project(var_fd: RawFd) -> io::Result<(u32, bool)> {
+        crate::volume_quota::project_of(var_fd)
     }
 
     fn capability_sets_zero() -> io::Result<bool> {
@@ -197,5 +205,27 @@ mod real {
             }
         }
         libc::geteuid() == uid && libc::getegid() == gid
+    }
+}
+
+#[cfg(all(test, not(feature = "fixture-os"), target_os = "linux"))]
+mod var_filesystem_tests {
+    use std::os::fd::AsRawFd;
+
+    #[test]
+    fn a_volume_on_another_filesystem_than_its_parent_is_refused() {
+        let root = std::fs::File::open("/").unwrap();
+        // The same directory as its own parent is not bounded (it reports its parent's size).
+        let (bounded, size) = super::var_filesystem(std::path::Path::new("/"), root.as_raw_fd(), root.as_raw_fd()).unwrap();
+        assert!(!bounded && size > 0);
+        // tmpfs under a parent on another filesystem: refused by name, whatever size it reports.
+        if let Ok(shm) = std::fs::File::open("/dev/shm") {
+            let root_dev = std::os::unix::fs::MetadataExt::dev(&root.metadata().unwrap());
+            let shm_dev = std::os::unix::fs::MetadataExt::dev(&shm.metadata().unwrap());
+            if root_dev != shm_dev {
+                let refusal = super::var_filesystem(std::path::Path::new("/dev/shm"), root.as_raw_fd(), shm.as_raw_fd()).unwrap_err();
+                assert!(refusal.to_string().contains("another filesystem"), "{refusal}");
+            }
+        }
     }
 }

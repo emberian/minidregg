@@ -9,7 +9,7 @@ cost, explainer).
 
 ## Why syntactic-only — the N3 trap this file refuses
 
-`Compiler/Signature.lean` proves the converse of N3 (`N3_opaque_payloads_forbid_second_reading`,
+`Theory/Signature.lean` proves the converse of N3 (`N3_opaque_payloads_forbid_second_reading`,
 faces `OpaqueConflation` / `NoFaithfulSyntacticReading`): a signature whose leaves carry OPAQUE
 semantic payloads (`σ → Bool` closures) admits interpretations (`opaqueRun`) with **no faithful
 compositional second reading** into any countable/syntactic target — there are `2^ℵ₀` guard

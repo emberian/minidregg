@@ -2,7 +2,7 @@
 # The same explicit ROOT SETUP/ROOT CLEANUP entrypoint is used by deployment
 # and scratch acceptance. Runtime privilege is confined to the compiled helper.
 set -euo pipefail
-usage() { echo "usage: $0 install SOURCE_HELPER HELPER_PATH STORE DEPLOYMENT_HEX HOST_HEX OPERATOR_UID SUBUID_START COUNT | remove STORE HELPER_PATH" >&2; exit 2; }
+usage() { echo "usage: $0 install SOURCE_HELPER HELPER_PATH STORE DEPLOYMENT_HEX HOST_HEX OPERATOR_UID SUBUID_START COUNT [CUSTODIAN_SOCKET] | remove STORE HELPER_PATH" >&2; exit 2; }
 [[ $EUID == 0 ]] || { echo 'world install requires explicit root setup' >&2; exit 1; }
 [[ $# -ge 3 ]] || usage
 if [[ $1 == controller-* ]]; then
@@ -21,7 +21,7 @@ try:
                 m.st_mode & 0o7022 == 0 and 0 < m.st_size <= 262144):
             raise ValueError('controller setup companion custody refused')
         code = source.read(262145)
-    if hashlib.sha256(code).hexdigest() != '62a56065c499bae3eb78e422f256fa6becf1961c38f0370e75dbeb37100ed5f0':
+    if hashlib.sha256(code).hexdigest() != '11be548f03ce75c56187375cd189a0942c8389a85b088e7b0ddd05e0b6cf3046':
         raise ValueError('controller setup companion code pin differs')
 except (OSError, ValueError) as error:
     sys.exit(str(error))
@@ -35,8 +35,8 @@ for mapper in /usr/bin/newuidmap /usr/bin/newgidmap; do
 done
 action=$1
 if [[ $action == install ]]; then
-  [[ $# == 9 ]] || usage
-  source_helper=$2 helper=$3 store=$4 deployment=$5 host=$6 op_uid=$7 start=$8 count=$9
+  [[ $# == 9 || $# == 10 ]] || usage
+  source_helper=$2 helper=$3 store=$4 deployment=$5 host=$6 op_uid=$7 start=$8 count=$9 custodian_socket=${10:-}
 elif [[ $action == remove ]]; then
   [[ $# == 3 ]] || usage
   store=$2 helper=$3
@@ -71,6 +71,35 @@ safe_root_dir() {
 safe_root_dir "$registry_dir"
 safe_root_dir /var/lib/mini-spk-worlds
 safe_root_dir /usr/local/libexec
+# A host whose /var/lib/mini-spk-worlds is not on a project-quota filesystem (a plain ext4 root, a
+# container's overlay) names a dedicated prjquota-mounted directory in the root-owned one-line file
+# $registry_dir/vars-backing. Each world's `vars` is then a bind mount of $backing/<store>, so the
+# helper's volumes (deploy/spk-host/VOLUMES.md) live on that filesystem while every other path of the
+# world stays where it is. Absent the file, `vars` is a plain directory of the grains root.
+vars_backing=
+if [[ -e $registry_dir/vars-backing ]]; then
+  [[ -f $registry_dir/vars-backing && ! -L $registry_dir/vars-backing && $(stat -c '%u:%a' "$registry_dir/vars-backing") == 0:644 ]] \
+    || { echo 'vars-backing custody refused' >&2; exit 1; }
+  vars_backing=$(<"$registry_dir/vars-backing")
+  [[ $vars_backing == /* && $vars_backing != *$'\n'* ]] && safe_root_dir "$vars_backing" \
+    && /usr/bin/mountpoint -q -- "$vars_backing" || { echo "vars-backing $vars_backing is not an absolute mountpoint under root custody" >&2; exit 1; }
+fi
+# A host whose SPK store sits on a small disk names a scratch root for the intake spools in the root-owned
+# one-line file $registry_dir/ingest-scratch (the operator-appliance profile's decoded bound is 20 GiB).
+# Each world gets <root>/<store>, owned by its operator, 0700; the broker config's ingestScratch names it.
+ingest_scratch_root=
+if [[ -e $registry_dir/ingest-scratch ]]; then
+  [[ -f $registry_dir/ingest-scratch && ! -L $registry_dir/ingest-scratch && $(stat -c '%u:%a' "$registry_dir/ingest-scratch") == 0:644 ]] \
+    || { echo 'ingest-scratch custody refused' >&2; exit 1; }
+  ingest_scratch_root=$(<"$registry_dir/ingest-scratch")
+  [[ $ingest_scratch_root == /* && $ingest_scratch_root != *$'\n'* ]] && safe_root_dir "$ingest_scratch_root" \
+    || { echo "ingest-scratch $ingest_scratch_root is not an absolute directory under root custody" >&2; exit 1; }
+fi
+release_vars() { # STORE: unmount the world's bind mount and drop its backing directory (empty by then)
+  if /usr/bin/mountpoint -q -- "$root/vars"; then umount -- "$root/vars"; fi
+  if [[ -n $vars_backing && -d $vars_backing/$1 ]]; then rmdir -- "$vars_backing/$1"; fi
+  if [[ -n $ingest_scratch_root && -d $ingest_scratch_root/$1 && ! -L $ingest_scratch_root/$1 ]]; then rm -rf --one-file-system -- "$ingest_scratch_root/$1"; fi
+}
 if [[ $action == remove ]]; then
   [[ ! -e $root/controller && ! -L $root/controller ]] || {
     echo 'root cleanup refuses allocated controller; use controller-remove first' >&2; exit 1;
@@ -78,8 +107,10 @@ if [[ $action == remove ]]; then
   [[ -f $registry && ! -L $registry && $(stat -c '%u:%a' "$registry") == 0:644 ]] || { echo 'root cleanup registry custody refused' >&2; exit 1; }
   [[ $(jq -er .store "$registry") == "$store" && $(jq -er .helper "$registry") == "$helper" ]] || exit 1
   op_uid=$(jq -er .operatorUid "$registry")
-  if findmnt -rn -o TARGET | awk -v root="$root/" 'index($0,root)==1 {found=1} END {exit !found}'; then
-    echo 'root cleanup refuses mounted world; use helper unmount first' >&2; exit 1
+  # A volume is a project-quota directory with kernel limits: removing the tree alone would leave
+  # the limits behind, so every volume is destroyed through the helper first (world-down does).
+  if compgen -G "$root/volumes/*.conf" >/dev/null; then
+    echo 'root cleanup refuses a world with registered volumes; destroy them through the helper first' >&2; exit 1
   fi
   revoked=
   if [[ -f $root/bwrap-acl-grants ]]; then
@@ -89,6 +120,7 @@ if [[ $action == remove ]]; then
     done <"$root/bwrap-acl-grants"
   fi
   rm -f "$rule" "$registry"
+  release_vars "$store"
   rm -rf -- "$root"
   operator_kept=0
   for registered in "$registry_dir"/*.json; do
@@ -112,7 +144,14 @@ if [[ $action == remove ]]; then
   exit 0
 fi
 [[ $deployment =~ ^[0-9a-f]{64}$ && $host =~ ^[0-9a-f]{64}$ && $op_uid =~ ^[1-9][0-9]*$ && $start =~ ^[1-9][0-9]*$ && $count =~ ^[1-9][0-9]*$ ]] || usage
-(( start >= 65536 && count >= 2 && count <= 64 )) || usage
+# A world behind a volume custodian (a user-namespaced container, uids 0..65535) registers app uids
+# from inside that namespace and names the custodian's socket; any other world keeps the subordinate floor.
+if [[ -n $custodian_socket ]]; then
+  [[ $custodian_socket =~ ^/[A-Za-z0-9._/-]+$ && $custodian_socket != *..* && $custodian_socket != *//* ]] || usage
+  (( start >= 1 && count >= 2 && count <= 64 )) || usage
+else
+  (( start >= 65536 && count >= 2 && count <= 64 )) || usage
+fi
 [[ ! -e $registry && ! -L $registry && ! -e $rule && ! -e $root && ! -L $root ]] || { echo 'root setup refuses existing world' >&2; exit 1; }
 entry=$(getent passwd "$op_uid")
 op_user=${entry%%:*}
@@ -122,7 +161,7 @@ op_gid=$(printf '%s\n' "$entry" | cut -d: -f4)
 # reservation while inheriting this exact held global lock (fd8).
 # A START already taken by another world or a controller account moves to the next free
 # range of the delegation; the registry and the ROOT SETUP line carry the allocated one.
-allocation=$("$0" controller-check-app-allocation "$store" "$helper" "$op_uid" "$start" "$count")
+allocation=$("$0" controller-check-app-allocation "$store" "$helper" "$op_uid" "$start" "$count" ${custodian_socket:+custodian})
 printf '%s\n' "$allocation"
 [[ $allocation =~ \"appRangeChecked\":\ \[([0-9]+),\ ([0-9]+)\] ]] || { echo 'app allocation reply malformed' >&2; exit 1; }
 (( BASH_REMATCH[2] - BASH_REMATCH[1] == count )) || { echo 'app allocation count differs' >&2; exit 1; }
@@ -143,6 +182,7 @@ rollback() {
     grep -vx "$op_uid" "$operator_grants" >"$operator_grants.new" || true; mv -f "$operator_grants.new" "$operator_grants"
   fi
   rm -f "$rule" "$registry"
+  release_vars "$store" || true
   rm -rf -- "$root"
   [[ $created_helper == 0 ]] || rm -f "$helper"
   exit "$result"
@@ -160,9 +200,16 @@ install -d -o root -g root -m 755 "$root" "$root/attest"
 install -d -o root -g root -m 700 "$root/volumes" "$root/volume-custody"
 install -o root -g root -m 600 /dev/null "$root/volume-custody/verbs.lock"
 install -d -o root -g root -m 711 "$root/vars"
+if [[ -n $vars_backing ]]; then
+  install -d -o root -g root -m 711 "$vars_backing/$store"
+  mount --bind -- "$vars_backing/$store" "$root/vars"
+  # The bind shows the backing filesystem's type: refuse here, by name, rather than at the first volume.
+  case $(stat -f -c '%T' "$root/vars") in ext2/ext3|ext4|xfs) ;; *) echo "vars-backing $vars_backing is not ext4 or xfs" >&2; exit 1;; esac
+fi
 install -d -o "$op_uid" -g "$op_gid" -m 700 "$root/broker" "$root/$store" "$root/runtime-$store"
 install -d -o "$op_uid" -g "$op_gid" -m 755 "$root/spk" "$root/spk/packages"
 install -d -o "$op_uid" -g "$op_gid" -m 700 "$root/spk/inbox"
+[[ -z $ingest_scratch_root ]] || install -d -o "$op_uid" -g "$op_gid" -m 700 "$ingest_scratch_root/$store"
 if [[ -e $profiled_bwrap ]]; then
   [[ -f $profiled_bwrap && ! -L $profiled_bwrap && $(stat -c '%u' "$profiled_bwrap") == 0 ]] || { echo "root setup refuses $profiled_bwrap custody" >&2; exit 1; }
   install -o root -g root -m 600 /dev/null "$root/bwrap-acl-grants"
@@ -179,8 +226,8 @@ fi
 printf 'deployment_id=%s\nhost_id=%s\n' "$deployment" "$host" >"$root/host-identity"
 chmod 600 "$root/host-identity"
 jq -n --arg store "$store" --arg deployment "$deployment" --arg host "$host" --arg root "$root" --arg helper "$helper" --arg sha "$sha" \
-  --argjson uid "$op_uid" --argjson gid "$op_gid" --argjson start "$start" --argjson count "$count" \
-  '{protocol:"mini-spk-volume-registry-v1",store:$store,deploymentId:$deployment,hostId:$host,grainsRoot:$root,operatorUid:$uid,operatorGid:$gid,appUids:[range($start;$start+$count)],helper:$helper,helperSha256:$sha}' >"$registry"
+  --argjson uid "$op_uid" --argjson gid "$op_gid" --argjson start "$start" --argjson count "$count" --arg custodian "$custodian_socket" \
+  '{protocol:"mini-spk-volume-registry-v1",store:$store,deploymentId:$deployment,hostId:$host,grainsRoot:$root,operatorUid:$uid,operatorGid:$gid,appUids:[range($start;$start+$count)],helper:$helper,helperSha256:$sha} + (if $custodian == "" then {} else {custodianSocket:$custodian} end)' >"$registry"
 chmod 644 "$registry"
 # Numeric uid, precisely one binary. JSON decode and the registry enforce args.
 rule_tmp=$(mktemp /etc/sudoers.d/.mini-spk.XXXXXXXX)

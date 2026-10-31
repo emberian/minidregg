@@ -107,24 +107,6 @@ structure Spent {store : StoreIdentity} (head : Head store) (nullifier : StableN
   opens : DurableIndex.Opens head.indexRoot (DurableIndex.nullifierKey nullifier)
     (value.map DurableIndex.heightValue)
 
-/-- **A base its holder computed** (CONSENT-OWN): the state after `height`
-records that the holder itself folded from the seed, never one a Store key holder
-sealed. `fold` is the genesis fold (`Image.restore`) of records chaining from
-`logStart` to `chain`; a consent provider mints one from its own admitted image
-(`ConsentAnchor.Anchored.ownBase`), so `resume_sound`'s premises hold for it by
-construction. -/
-structure OwnBase (rootBytes : List UInt8 → Digest) where
-  seed : Seed
-  logStart : Digest
-  height : Nat
-  chain : Digest
-  state : State
-  fold : ∃ records : List IntentRecord, records.length = height ∧
-    chainAfter logStart records = chain ∧
-    ∃ snapshot : DataSnapshot rootBytes,
-      Minidregg.Kernel.DurableReceiver.Image.restore rootBytes (Minidregg.Kernel.DurableReceiver.Image.ofAccepted seed records) = some snapshot ∧
-      state = Minidregg.Kernel.DurableCheckpoint.State.ofSnapshot (Minidregg.Kernel.DurableReceiver.Image.ofAccepted seed records) snapshot
-
 /-- The state after `height` records, with what makes it authentic:
 * the base is the seed (height 0, the pinned genesis) or a checkpoint whose
   MAC verified under the head's key (`openSealed`), sitting on the log: the
@@ -140,9 +122,6 @@ structure StateAt (rootBytes : List UInt8 → Digest) (seed : Seed) {store : Sto
   baseAuthentic : (baseHeight = 0 ∧ baseState = State.ofSeed seed ∧ baseChain = store.logStart) ∨
     ((∃ bytes, ∃ body : DurableCheckpointCodec.Body, openSealed store.key rootBytes bytes = .ok body ∧
         body.height = baseHeight ∧ body.chain = baseChain ∧ body.state = baseState) ∧
-      ∃ base : Record head baseHeight, base.verified.chain = baseChain) ∨
-    ((∃ own : OwnBase rootBytes, own.seed = seed ∧ own.logStart = store.logStart ∧
-        own.height = baseHeight ∧ own.chain = baseChain ∧ own.state = baseState) ∧
       ∃ base : Record head baseHeight, base.verified.chain = baseChain)
   reads : List ((at_ : Nat) × Record head at_)
   heights : reads.map (·.1) = (List.range reads.length).map (baseHeight + · + 1)

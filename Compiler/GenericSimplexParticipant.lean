@@ -279,24 +279,29 @@ def certificateCandidates {context : Context} (prior : Restored context) : List 
 
 /-- Recover the actual authoritative source after a lost append reply or CAS
 conflict. The retained source is a `Verified` minted by native replay; the
-physical readback must extend it byte for byte (seed and every prior record:
-`extendVerified` refuses rollback or any rewritten record), and every new
+physical readback must extend it (`extendFrom`: the log chain continues from the
+retained one and every new tag verifies, so a rollback or a rewritten record
+refuses), and every new
 retained ingress is re-admitted at its original prefix. No engine flag or stale
 in-memory Source is promoted into a readback receipt. A genesis re-admission of
 the whole history is the operator `audit`, not a per-certificate cost. -/
 def reloadSource {config : SourceConfig} (p : Participant config) :
     IO (Participant config × String) := do
-  match ← Minidregg.Compiler.DurableReceiverIO.load config.physicalTransport
-      Minidregg.Compiler.ResourceBirthCodec.rootBytes with
+  -- Only the entries after the retained source are read (`extendFrom`: the chain continues
+  -- from it and every new tag verifies), and its append proof extends the retained proof
+  -- (`extendVerifiedAppended`): no full reload, no re-encoding of the whole prefix (law 17).
+  match ← Minidregg.Compiler.DurableReceiverIO.extendFrom config.physicalTransport
+      Minidregg.Compiler.ResourceBirthCodec.rootBytes p.source.target with
   | .error detail => return (p,"source reload: " ++ detail)
-  | .ok target =>
-    -- The extension's history reads go through the Reader of the Store just loaded
+  | .ok ⟨target, seedExact, acceptedExact, _⟩ =>
+    -- The extension's history reads go through the Reader of the Store just read
     -- (its MAC-bound head); an unavailable Reader is reported, never read as absent.
     match ← Minidregg.Compiler.DurableHistoryStore.readerOf config.physicalTransport
         Minidregg.Compiler.ResourceBirthCodec.rootBytes target with
     | .error detail => return (p,"source history reader: " ++ detail)
     | .ok ⟨_, reader⟩ =>
-    match ← Minidregg.Kernel.NativeHostReplay.extendVerified config reader p.source.verified target with
+    match ← Minidregg.Kernel.NativeHostReplay.extendVerifiedAppended config reader p.source.verified
+        target seedExact acceptedExact with
     | .error failure => return (p,"source replay: " ++ failure.detail)
     | .ok verified => return ({p with source := ⟨target,verified⟩},"source reloaded and verified")
 

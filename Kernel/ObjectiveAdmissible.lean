@@ -371,7 +371,7 @@ theorem refund_amount_ne (book : CanonicalResourceKernel.Book) (amount : Nat) :
   rw [refund_image_decodes, refund_image_decodes] at decoded
   have balance := congrArg (fun cell : ObjectiveActivity.BookCell =>
     (CanonicalResourceKernel.logicalBook cell.logical).balance 1 0) (Option.some.inj decoded)
-  simp [refundCell, CellState.materialize, CanonicalResourceKernel.logicalBook,
+  simp [refundCell, CellState.materialize_logical, CanonicalResourceKernel.logicalBook,
     CanonicalResourceKernel.Book.balance, CanonicalResourceKernel.Book.applyPosting,
     DFinsupp.single_apply] at balance
 

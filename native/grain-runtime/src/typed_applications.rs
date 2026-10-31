@@ -412,6 +412,24 @@ mod tests {
         }
     }
 
+    /// Arguments named `path` are arguments, not path templates: the Davros steps are `{"path": ...}` alone.
+    #[test]
+    fn qualification_resolves_single_path_arguments_and_runs_davros_end_to_end() {
+        let dav = entry("dav", DAVROS);
+        let pins = pins(&[&dav]);
+        let mut log = Vec::new();
+        let listing = br#"<?xml version="1.0"?><d:multistatus xmlns:d="DAV:"><d:response><d:href>/dav/qa1/moved.bin</d:href><d:propstat><d:prop><d:resourcetype/><d:getcontentlength>8</d:getcontentlength><d:getetag>"e"</d:getetag></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>"#;
+        let mut replies = vec![http(201, b"", "9"), http(201, b"", "10"), http(201, b"", "11"),
+            http(200, &[0, 255, b'a', b'g', b'e', b'n', b't', b'\n'], "12"), http(207, listing, "13")];
+        let mut forward = controller(&pins, &mut log, &mut replies);
+        let result = qualify_tool(&dav, &json!({"runId":"qa1"}), &mut forward);
+        drop(forward);
+        assert_eq!(result["isError"], false, "{result}");
+        let paths: Vec<_> = log.iter().map(|m| (m["method"].as_str().unwrap(), m["path"].as_str().unwrap())).collect();
+        assert_eq!(paths, [("MKCOL", "dav/qa1"), ("PUT", "dav/qa1/sample.bin"), ("MOVE", "dav/qa1/sample.bin"),
+            ("GET", "dav/qa1/moved.bin"), ("PROPFIND", "dav/qa1")]);
+    }
+
     const WBO: &str = include_str!("../../../apps/interfaces/wbo.json");
 
     #[test]

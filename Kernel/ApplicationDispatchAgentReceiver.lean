@@ -208,8 +208,7 @@ def receiveVerified (config : Config) {target : Durable}
   let some projection := ApplicationDispatchAgentProjection.ofAgentDispatchAt admitted
     | return .rejected "agent dispatch physical projection refused"
   let derived := admitted.toDerived
-  if old.opened.durable.image.accepted.findIdx?
-      (fun record => record.transactionId == derived.intent.transactionId) != none then
+  if old.opened.durable.firstIndex derived.intent.transactionId != none then
     return .rejected "agent dispatch transaction identity already used"
   let (freshCasWinner, result) ← DurableReceiverIO.receiveLoadedDetailedWithFresh config.transport
     ResourceBirthCodec.rootBytes old.opened.durable derived.intent

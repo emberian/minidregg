@@ -1613,6 +1613,33 @@ mod credential_tests {
     }
 
     #[test]
+    fn a_row_names_its_own_chat_path_and_nothing_else_on_the_host() {
+        // Z.AI's coding plan (deploy/hermes/README.md, the subscriber tier).
+        assert!(validate_endpoint("https://api.z.ai/api/coding/paas/v4/chat/completions").is_ok());
+        assert!(validate_endpoint("https://api.example/chat/completions").is_ok(), "no prefix");
+        for bad in [
+            "https://api.z.ai/api/coding/paas/v4/chat/completions/",
+            "https://api.z.ai/api/coding/paas/v4/chat/completions#x",
+            "https://api.z.ai/api/../v1/chat/completions",
+            "https://api.z.ai/api/./v1/chat/completions",
+            "https://api.z.ai/api//v1/chat/completions",
+            "https://api.z.ai/api/%2e%2e/chat/completions",
+            "https://api.z.ai/API/v1/chat/completions",
+            "https://api.z.ai/a/b/c/d/e/chat/completions",
+            "https://api.z.ai/api/coding/paas/v4/completions",
+            "https://api.z.ai/api/coding/paas/v4/chat/completionsx",
+            "https://api.z.ai/api/coding/paas/v4/embeddings",
+            "http://api.z.ai/api/coding/paas/v4/chat/completions",
+        ] {
+            assert!(validate_endpoint(bad).is_err(), "{bad}");
+        }
+        // The demo's shipped rows parse as a table (what `grain-runtime provider-table check` runs).
+        let rows: Value = serde_json::from_str(include_str!("../../../../deploy/hermes/demo/providers-zai-rows.json")).unwrap();
+        let table = serde_json::json!({"type": "mini-provider-table-v2", "providers": rows});
+        ProviderTable::parse(table.to_string().as_bytes()).expect("the zai rows are a valid provider table");
+    }
+
+    #[test]
     fn the_pool_spend_ceiling_refuses_before_the_provider_cap_is_reached() {
         let (_dir, store) = store();
         store.set(Namespace::Pool, "pool", &Secret::new("sk-POOL".into()).unwrap()).unwrap();

@@ -2919,6 +2919,19 @@ fn newest_new_retry(
     Ok(Some(value))
 }
 
+/// A retained lookup's outcome file says the Host holds no record of the exact call (`absent`).
+fn outcome_was_absent(outcome: &Path) -> bool {
+    fs::read(outcome).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .is_some_and(|v| v.get("type").and_then(Value::as_str) == Some("absent"))
+}
+
+/// The operator's audited reconciliation of a pending operation's slot (`admin ... 'reconcile ...'`).
+fn admin_slot_word(operation: &str) -> &'static str {
+    if operation.starts_with("tool") { "tool audited" }
+    else if operation.starts_with("dispatch") { "dispatch audited fixed|zero" }
+    else { "parent audited" }
+}
+
 fn next_retry_json(attempt: &Path) -> Result<PathBuf> {
     for index in 1..=9999 {
         let binary = attempt.join(format!("retry-{index:04}.bin"));
@@ -7530,6 +7543,39 @@ impl Runtime {
         }
         Ok(deadline::NATIVE_CALL)
     }
+    /// The exact lookup of a pending call found no record of it (`absent`: the Host never admitted
+    /// these bytes, e.g. the Store was not answering when the controller first sent them at boot).
+    /// Absence is not a refusal, so nothing is dropped: the retained signed call is submitted once
+    /// more, byte for byte (`retry --mode submit`). The Host admits an exact retry at most once and
+    /// answers a call it already holds with its original receipt, so this decides the call instead
+    /// of leaving the task fenced. A confirmation proceeds exactly as a confirmed lookup does; a
+    /// refusal or a second undecided answer is returned by name, with the operator verb that
+    /// resolves it. Returns the confirmed outcome's path.
+    fn resubmit_absent_call(&mut self, p: &Pending, lookup: &str) -> Result<PathBuf> {
+        let submitted = next_retry_json(&p.attempt)?;
+        let id = self.next_id()?;
+        let attempt = p.attempt.to_str().ok_or("attempt path UTF-8")?;
+        let socket = self.config.host_socket.clone();
+        let mut args = vec!["retry", "--attempt", attempt, "--mode", "submit"];
+        if let Some(socket) = &socket {
+            args.extend(["--socket", socket.to_str().ok_or("socket path UTF-8")?]);
+        }
+        let decided = self.command_output(&self.config.mini, &args);
+        self.journal.reconciliation_log.push(json!({
+            "decisionId":id.to_string(),"action":"resubmit-absent-exact-call",
+            "operationId":p.operation_id.to_string(),"operation":p.operation,"attempt":p.attempt,
+            "lookup":lookup,"outcome":submitted,
+            "result":match &decided { Ok(()) => "confirmed".to_owned(), Err(e) => e.clone() }
+        }));
+        self.save()?;
+        decided.map_err(|error| format!(
+            "{} {} was absent at the Host and its exact retained call, submitted once more, did not confirm: {error}; \
+             the attempt is {}; resolve it with `grain-runtime admin {} 'reconcile {}'`",
+            p.operation, p.operation_id, p.attempt.display(),
+            self.config.state_dir.join("admin.sock").display(), admin_slot_word(&p.operation)))?;
+        Ok(submitted)
+    }
+
     fn command_output(&self, program: &Path, args: &[&str]) -> Result<()> {
         self.command_capture(program, args).map(|_| ())
     }
@@ -13422,7 +13468,7 @@ impl Runtime {
             self.save()?;
             let result = if request.name == "mini_application_api" || oracle_tools::is_tool(&request.name) {
                 let arguments = self.application_tool_arguments(&request.name, &request.arguments)?;
-                self.foreground_application_api(&arguments, input)?
+                self.foreground_application_api(&arguments, input, false)?
             } else if typed_applications::is_foreground_name(&request.name) {
                 self.foreground_typed_application(&request.name, &request.arguments, input)?
             } else {
@@ -13823,7 +13869,7 @@ impl Runtime {
         let payload = typed_applications::foreground_arguments(entry, arguments, qualify)?;
         let mut forward = |request: Value| -> Value {
             let reply = typed_applications::raw_arguments(&attachments, &request)
-                .and_then(|mapped| self.foreground_application_api(&mapped, input));
+                .and_then(|mapped| self.foreground_application_api(&mapped, input, true));
             match reply {
                 Ok(value) => value,
                 Err(error) => json!({"isError":true,"text":error}),
@@ -13836,16 +13882,19 @@ impl Runtime {
         })
     }
 
+    /// `raw` asks for the verified Host frame itself (what a typed executor parses), not the
+    /// model presentation `mini_application_api` shows; it needs a lifetime route.
     fn foreground_application_api(
         &mut self,
         arguments: &Value,
         input: &Receiver<Input>,
+        raw: bool,
     ) -> Result<Value> {
         let operation_id = self.foreground_operation.ok_or("foreground API invocation absent")?;
         self.foreground_api_budget = Some(ForegroundApiBudget::new(operation_id));
         let result = (|| {
             let (reply, received) = mpsc::channel();
-            let mut active = Some(self.begin_application_api(arguments, reply, None, false)?);
+            let mut active = Some(self.begin_application_api(arguments, reply, None, raw)?);
             loop {
                 self.poll_application_api(&mut active)?;
                 if let Ok(value) = received.try_recv() {
@@ -17784,8 +17833,13 @@ impl Runtime {
                     // Generic lookup refusal is not evidence that an old call
                     // could never commit. Only the guarded resolver above has
                     // the additional exact-prefix and expired-call witness.
-                    self.command_output(&self.config.mini, &args)?;
-                    retry_result
+                    match self.command_output(&self.config.mini, &args) {
+                        Ok(()) => retry_result,
+                        Err(lookup) if outcome_was_absent(&retry_result) => {
+                            self.resubmit_absent_call(&p, &lookup)?
+                        }
+                        Err(lookup) => return Err(lookup),
+                    }
                 }
             };
             let provider_settlement = if slot == AuthoritySlot::Provider
@@ -17946,7 +18000,12 @@ fn prove_controller_unit(task: &str) -> Result<()> {
         ]), deadline::MANAGER_QUERY)
         .map_err(|e| deadline::describe("controller service proof", e))?;
     if !output.status.success() {
-        return Err("controller service is unavailable".into());
+        // `systemctl show` of a loaded unit succeeds; a failure here is the manager (D-Bus, the
+        // user manager under load, a missing runtime directory), not the unit. Name it.
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr: String = stderr.trim().chars().take(240).collect();
+        return Err(format!("controller service is unavailable: `systemctl show {unit}` {}{}",
+            output.status, if stderr.is_empty() { String::new() } else { format!(": {stderr}") }));
     }
     let source = String::from_utf8(output.stdout).map_err(|e| e.to_string())?;
     let main_pid = source
@@ -19823,6 +19882,78 @@ mod tests {
         fs::write(attempt.join("call.bin"), b"a call may have been dispatched").unwrap();
         assert!(inspected_pre_submit_refusal(&config, &attempt).is_err());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A controller started before the Store answered left a pending call whose exact lookup is
+    /// `absent`. Startup recovery submits the exact retained call once more (the Host admits an exact
+    /// retry once) and proceeds on its confirmation; a refusal of it is named with the operator verb,
+    /// never a silent fence.
+    fn absent_lookup_world(tag: &str, submit_answer: &str) -> (PathBuf, Runtime, PathBuf) {
+        let root = std::env::temp_dir().join(format!("grain-absent-{tag}-{}-{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir(&root).unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        let state = root.join("state");
+        fs::create_dir(&state).unwrap();
+        let attempt = state.join("attempt-0000000000000019");
+        fs::create_dir(&attempt).unwrap();
+        fs::write(attempt.join("call.bin"), b"retained signed call").unwrap();
+        let mini = root.join("controlled-mini");
+        let script = r#"#!/bin/sh
+set -eu
+[ "$1" = retry ] || exit 40
+attempt=$3
+mode=$5
+echo "$mode" >> "$attempt/modes.log"
+n=$(ls "$attempt" | grep -c '^retry-.*\.json$' || true)
+out=$(printf '%s/retry-%04d.json' "$attempt" $((n + 1)))
+if [ "$mode" = lookup ]; then
+  printf '%s\n' '{"type":"absent"}' > "$out"
+  echo "undecided: Host outcome absent; the effect is unknown, so do not repeat the operation: look up the exact retained call" >&2
+  exit 4
+fi
+printf '%s\n' '__SUBMIT__' > "$out"
+case '__SUBMIT__' in *confirmed*) exit 0 ;; *) echo "refused: stale: the authority root moved" >&2; exit 3 ;; esac
+"#.replace("__SUBMIT__", submit_answer);
+        fs::write(&mini, script).unwrap();
+        fs::set_permissions(&mini, fs::Permissions::from_mode(0o700)).unwrap();
+        let config = Config {
+            mini, host: root.join("host"), host_config: root.join("host-config.json"), host_socket: None,
+            startup_timeout_seconds: None, consent_full_readiness: None, control_socket: state.join("control.sock"),
+            custody_key: root.join("parent.key"), state_dir: state.clone(), cwd: root.clone(), task: "9872001".into(),
+            subject: "7".into(), capability: "71".into(), query_capability: "74".into(), policy_control_capability: None,
+            sandbox: None, foreground_tool: None, dispatch_task: None, tool_task: None, provider_task: None, commands: vec![],
+        };
+        let mut runtime = Runtime::open(config, root.join("config.json")).unwrap();
+        runtime.journal.connection = Connection::Hard;
+        runtime.journal.pending = Some(Pending { operation_id: 19, operation: "disconnect".into(), attempt: attempt.clone(), uncertain: true, publication: None });
+        runtime.save().unwrap();
+        (root, runtime, attempt)
+    }
+
+    #[test]
+    fn an_absent_pending_call_is_decided_by_its_exact_retained_bytes_not_fenced() {
+        let (root, mut runtime, attempt) = absent_lookup_world("ok",
+            r#"{"type":"confirmed","confirmation":"installed","worldRoot":"300","transactionId":"11","eventId":"12","acceptedCount":"13"}"#);
+        runtime.retry_pending_slot(AuthoritySlot::Parent).unwrap();
+        assert_eq!(fs::read_to_string(attempt.join("modes.log")).unwrap(), "lookup\nsubmit\n", "a lookup, then one exact resubmit");
+        assert!(runtime.journal.pending.is_none(), "the call is decided");
+        assert!(matches!(runtime.journal.connection, Connection::Detached), "the confirmed disconnect proceeds");
+        let entry = runtime.journal.reconciliation_log.iter().find(|e| e["action"] == "resubmit-absent-exact-call").unwrap();
+        assert_eq!((entry["operationId"].as_str(), entry["result"].as_str()), (Some("19"), Some("confirmed")));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_refused_resubmit_of_an_absent_call_is_named_with_the_operator_verb() {
+        let (root, mut runtime, attempt) = absent_lookup_world("refused",
+            r#"{"type":"refused","reason":"stale","phase":"","detail":""}"#);
+        let error = runtime.retry_pending_slot(AuthoritySlot::Parent).unwrap_err();
+        assert!(error.contains("disconnect 19 was absent at the Host") && error.contains("refused: stale")
+            && error.contains("'reconcile parent audited'") && error.contains("attempt-0000000000000019"), "{error}");
+        assert!(runtime.journal.pending.is_some(), "a refusal drops nothing: the operator decides");
+        assert_eq!(fs::read_to_string(attempt.join("modes.log")).unwrap(), "lookup\nsubmit\n", "resubmitted once, never looped");
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

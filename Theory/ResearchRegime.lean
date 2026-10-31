@@ -437,7 +437,11 @@ breadstuffs oleans). -/
 /-- info: 'Minidregg.Theory.ResearchRegime.communityCould_does_not_give_fundedChallenger' depends on axioms: [propext] -/
 #guard_msgs in #print axioms communityCould_does_not_give_fundedChallenger
 
-/-- info: 'Minidregg.Theory.ResearchRegime.fundedChallenger_satisfiable' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ResearchRegime.fundedChallenger_satisfiable' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in #print axioms fundedChallenger_satisfiable
 
 end Minidregg.Theory.ResearchRegime

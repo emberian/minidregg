@@ -217,6 +217,12 @@ fn room_rows(session: &Session, room: &str) -> Result<(Vec<RequestRow>, Vec<Stri
     Ok((rows, missing))
 }
 
+/// What `unacknowledged` means, said beside it: Hermes has written no status for the request in the
+/// room. A refusal of its model call (a missing credential, a cap) is written as `refused` with the
+/// reason once Hermes's turn ends, so a request that stays here was not taken up at all.
+const UNACKNOWLEDGED: &str = ": Hermes has written no status for it in this room yet (not queued, not started); \
+    a refused model call is shown here as refused, with its reason, when Hermes's turn ends";
+
 fn status(session: &Session, room: Option<String>) -> Result<(), Done> {
     let room = match room { Some(room) => room, None => chat::current_room(session).map_err(err)?.name };
     let (rows, missing) = room_rows(session, &room)?;
@@ -225,7 +231,8 @@ fn status(session: &Session, room: Option<String>) -> Result<(), Done> {
     }
     for row in &rows {
         let withdrawn = if row.withdrawn && !terminal(&row.status) { " (withdraw requested)" } else { "" };
-        let detail = if row.detail.is_empty() { String::new() } else { format!(": {}", row.detail) };
+        let detail = if !row.detail.is_empty() { format!(": {}", row.detail) }
+            else if row.status == "unacknowledged" { UNACKNOWLEDGED.to_owned() } else { String::new() };
         println!("#{} {}{withdrawn}{detail}", row.number, row.status);
     }
     for line in missing {

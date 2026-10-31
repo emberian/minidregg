@@ -50,12 +50,12 @@ theorem emitMux_value (network : Network) (inputs : Array Bool)
   simp only [Network.evaluateWires, Array.foldl_push]
   change (gateStep (gateStep (gateStep (network.evaluateWires inputs) (.xor yes no))
     (.and selector next)) (.xor no (next + 1)))[next + 2]?.getD false = _
-  simpa only [gateStep, Array.getElem?_push, Array.size_push, size, Nat.add_assoc, selectorDifferent,
-    yesDifferent, noDifferent, noDifferentNext, differentNext, if_false, if_true,
-    Option.getD_some, ↓reduceIte] using
+  have hsimpa :=
     (mux_boolean ((network.evaluateWires inputs)[selector]?.getD false)
       ((network.evaluateWires inputs)[yes]?.getD false)
       ((network.evaluateWires inputs)[no]?.getD false))
+  simp only [gateStep, Array.getElem?_push, Array.size_push, size, Nat.add_assoc, selectorDifferent, yesDifferent, noDifferent, noDifferentNext, differentNext, if_false, if_true, Option.getD_some, ↓reduceIte] at hsimpa ⊢
+  exact hsimpa
 
 /-- No previously existing wire is modified by the emitted mux. -/
 theorem emitMux_preserves (network : Network) (inputs : Array Bool)

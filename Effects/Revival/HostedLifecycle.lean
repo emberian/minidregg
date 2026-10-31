@@ -10,15 +10,15 @@ open Minidregg.Theory.TypedAuthorization
 
 structure Rule where
   name : String
-  code initial pending settled : Nat
+  (code initial pending settled : Nat)
   isolated : Bool
   deriving DecidableEq
 structure Operation where
-  phase command : Nat
-  id binding preimage : List UInt8
+  (phase command : Nat)
+  (id binding preimage : List UInt8)
   deriving DecidableEq
 structure Receipt where
-  id bytes : List UInt8
+  (id bytes : List UInt8)
   deriving DecidableEq
 structure State where
   status : Nat := 0
@@ -30,7 +30,7 @@ structure State where
   spent : List (List UInt8) := []
   deriving DecidableEq
 structure Context where
-  current retained budget acknowledged ended : Bool
+  (current retained budget acknowledged ended : Bool)
   response : List UInt8
 inductive Refusal where
   | unknown | current | preimage | budget | isolation | state | uncertain | intent | replay
@@ -55,7 +55,8 @@ def step (primitive : Primitive) (state : State) : Option State :=
   | .terminate => some {state with status := 2, ended := true, emitted := none}
   | .claim expected pending op =>
     if state.status = expected ∧ state.ended = false ∧ state.pending = none ∧ op.id ∉ state.spent then
-      some { state with status := pending, binding := op.binding, pending := some op,
+      some { state with
+        status := pending, binding := op.binding, pending := some op,
         emitted := none, spent := op.id :: state.spent }
     else none
   | .emit op =>

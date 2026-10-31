@@ -88,7 +88,7 @@ def validate (config : NativeHost.Config) (origin : Opened config) (expected : C
             | .error failure => return .retry failure
             | .ok checked =>
                 have pinnedAnchor : expected.instanceBytes = anchorBytes config.genesisHeight target.image.seed := by
-                  simpa only [imageExact] using anchorExact
+                  rw [imageExact]; exact anchorExact
                 return .accepted ⟨contextPinned,target,pinnedAnchor,recordsExact,checked⟩
           else return .rejected "source record frame roundtrip mismatch"
     else return .rejected "exact source genesis anchor mismatch"
