@@ -25,6 +25,7 @@ import io
 import os
 import shutil
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -127,19 +128,22 @@ with tempfile.TemporaryDirectory(prefix="package-test-") as tmp:
         for role in spk + ["mini"]:
             (rebuilt / ROLE_FILES[role]).write_text(f"rebuilt {ROLE_FILES[role]} at B\n")
 
-        def overlay(base, out, roles, archive_=archive_b):
-            return subprocess.run([sys.executable, str(PACKAGE), "--overlay", str(base), "--source-archive",
-                                   str(archive_), "--toolchains", str(toolchains), "--out", str(tmp / out),
-                                   *[f"--role={r}={rebuilt / ROLE_FILES[r]}" for r in roles]],
-                                  cwd=repo_b, capture_output=True, text=True)
+        def overlay(base, label, roles, archive_=archive_b):
+            done_ = subprocess.run([sys.executable, str(PACKAGE), "--overlay", str(base), "--source-archive",
+                                    str(archive_), "--toolchains", str(toolchains), "--into", str(tmp / "ovs"),
+                                    "--name", label, *[f"--role={r}={rebuilt / ROLE_FILES[r]}" for r in roles]],
+                                   cwd=repo_b, capture_output=True, text=True)
+            done_.path = Path(json.loads(done_.stdout)["candidate"]) if done_.returncode == 0 else None
+            return done_
 
         part = overlay(cand, "ov-part", ["spkHost"])
         check("an overlay that splits a build family is refused, naming the missing role",
-              part.returncode != 0 and "spkBroker" in part.stderr and not (tmp / "ov-part").exists(), part.stderr)
+              part.returncode != 0 and "spkBroker" in part.stderr
+              and not any((tmp / "ovs").iterdir() if (tmp / "ovs").exists() else []), part.stderr)
         ov = overlay(cand, "ov", spk + ["mini"])
         check("an overlay of the spk-host family and mini packages", ov.returncode == 0, ov.stderr)
         if ov.returncode == 0:
-            o = tmp / "ov"
+            o = ov.path
             check("the base candidate is untouched",
                   before == {rel: sha(cand / rel) for rel in before})
             oprov = json.loads((o / "provenance.json").read_text())
@@ -168,8 +172,15 @@ with tempfile.TemporaryDirectory(prefix="package-test-") as tmp:
             resolved = subprocess.run(["sh", "-eu", "-c", '. "$1"; candidate_resolve "$2"; candidate_verify_outputs "$2"',
                                        "test", str(HERE / "lib.sh"), str(o / "manifest.json")], capture_output=True, text=True)
             check("run.sh's candidate checks accept the overlay", resolved.returncode == 0, resolved.stderr)
+            check("the overlay directory is its 12-hex id, recorded with the name in provenance",
+                  re.fullmatch(r"[0-9a-f]{12}", o.name) is not None and oprov["overlay"]["id"] == o.name
+                  and oprov["overlay"]["name"] == "ov")
+            dup = overlay(cand, "ov", spk + ["mini"])
+            check("the same overlay (same label) again is refused by its id, and leaves nothing behind",
+                  dup.returncode != 0 and ("already there" in dup.stderr and sorted(p.name for p in (tmp / "ovs").iterdir()) == [o.name]),
+                  dup.stderr)
             again = overlay(o, "ov2", ["mini"])
-            o2prov = json.loads((tmp / "ov2" / "provenance.json").read_text()) if again.returncode == 0 else {}
+            o2prov = json.loads((again.path / "provenance.json").read_text()) if again.returncode == 0 else {}
             check("an overlay of an overlay keeps the earlier record and points at its direct base",
                   again.returncode == 0 and o2prov["overlay"]["base"]["provenance"] == str(o / "provenance.json")
                   and sorted(o2prov["overlay"]["roles"]) == sorted(spk + ["mini"]), again.stderr)

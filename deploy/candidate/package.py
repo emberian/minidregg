@@ -3,11 +3,13 @@
 
   package.py --roles ROLES.json --source-archive SOURCE.tar --out NEW_DIR [--toolchains T.json]
              [--host-build-manifest MANIFEST.txt] [--into-existing]
-  package.py --overlay BASE_DIR --role ROLE=BINARY... --source-archive B.tar --toolchains T.json --out NEW_DIR
-             [--host-build-manifest MANIFEST.txt]
-                                 a hot-swap candidate: BASE_DIR with whole build families of roles replaced
-                                 by binaries built from B.tar's commit (provenance.json .overlay says which),
-                                 every pin re-emitted; BASE_DIR is hard-linked, never written
+  package.py --overlay BASE_DIR --role ROLE=BINARY... --source-archive B.tar --toolchains T.json
+             --into PARENT_DIR --name LABEL [--host-build-manifest MANIFEST.txt]
+                                 a hot-swap candidate PARENT_DIR/<id>: BASE_DIR with whole build families of
+                                 roles replaced by binaries built from B.tar's commit, every pin re-emitted;
+                                 BASE_DIR is hard-linked, never written. provenance.json .overlay records name,
+                                 id, base, sources and roles; <id> is 12 hex (overlay_id: sha256 of the
+                                 provenance without id and stamps), the form ship.sh takes
   package.py --rust-roles        one line per Rust role: ROLE CRATE BINARY (the builders' list)
   package.py --fixture-roles     one line per journey fixture: ROLE CRATE BINARY (built beside, never shipped)
 
@@ -458,8 +460,29 @@ def replace_file(target, data_from=None, link_from=None, json_value=None):
     os.replace(tmp, target)
 
 
-def overlay(base, swaps, archive, toolchains, out, host_build_manifest):
-    """A new candidate: BASE with SWAPS (role -> built binary) from ARCHIVE's commit, re-pinned everywhere."""
+def overlay_id(prov):
+    """An overlay's 12-hex candidate id (ship.sh takes 12 hex): sha256 of its provenance.json content
+    without the id itself and the wall-clock stamps, canonical JSON. Path-independent (provenance names
+    files relative to the candidate), so the directory is named by it; the same overlay twice is one id."""
+    p = json.loads(json.dumps(prov))
+    p.pop("builtUtc", None)
+    p["overlay"].pop("id", None)
+    for r in p["overlay"]["roles"].values():
+        r.pop("overlaidUtc", None)
+    return hashlib.sha256(json.dumps(p, sort_keys=True, separators=(",", ":")).encode()).hexdigest()[:12]
+
+
+def overlay(base, swaps, archive, toolchains, parent, name, host_build_manifest):
+    """PARENT/<id>: BASE with SWAPS (role -> built binary) from ARCHIVE's commit, re-pinned everywhere."""
+    out = Path(parent).resolve() / f".overlay-{os.getpid()}"
+    try:
+        return _overlay(base, swaps, archive, toolchains, out, name, host_build_manifest)
+    finally:
+        if out.exists():
+            shutil.rmtree(out)
+
+
+def _overlay(base, swaps, archive, toolchains, out, name, host_build_manifest):
     base = Path(base).resolve()
     base_manifest = read(base / "manifest.json")
     if base_manifest.get("type") != "minidregg-candidate-manifest-v2":
@@ -488,11 +511,12 @@ def overlay(base, swaps, archive, toolchains, out, host_build_manifest):
         identity["flags"]["native"]["compileArgs"] = args.read_text()
         identity["flags"]["native"]["linkCommand"] = "leanc -o BINARY @OBJECT_RESPONSE_FILE"
         identity["flags"]["native"]["manifestSha256"] = sha(host_build_manifest)
-    out = Path(out)
-    if out.exists() or out.is_symlink():
-        die(f"refusing existing output: {out}")
-    out.mkdir(parents=True)
-    out = out.resolve()
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", name or ""):
+        die("--name: a short label (letters, digits, . _ -), recorded as provenance.json .overlay.name")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if out.exists():
+        shutil.rmtree(out)
+    out.mkdir()
     # 1. the base, hard-linked (the base is never written: every changed file below is a new inode)
     for root, dirs, files in os.walk(base):
         rel = Path(root).relative_to(base)
@@ -525,6 +549,7 @@ def overlay(base, swaps, archive, toolchains, out, host_build_manifest):
     if not otar.exists():
         shutil.copyfile(archive, otar)
     record = json.loads(json.dumps(base_prov.get("overlay") or {"sources": {}, "roles": {}}))
+    record["name"] = name
     record["base"] = {"provenance": str(base / "provenance.json"), "sha256": sha(base / "provenance.json"),
                       "commit": base_prov["source"]["commit"]}
     record["sources"][commit] = {"tree": identity["sourceTree"], "archive": str(otar.relative_to(out)),
@@ -546,6 +571,7 @@ def overlay(base, swaps, archive, toolchains, out, host_build_manifest):
         outputs[rel] = old if old and old["sha256"] == digest else {"sha256": digest, "build": identity}
     prov["outputs"] = outputs
     prov["builtUtc"] = stamp
+    prov["overlay"]["id"] = overlay_id(prov)
     replace_file(out / "provenance.json", json_value=prov)
     # 5. SHA256SUMS: the base's list, re-hashed, plus the overlay archive
     listed = [line.split("  ", 1)[1] for line in (base / "SHA256SUMS").read_text().splitlines() if "  " in line]
@@ -557,7 +583,13 @@ def overlay(base, swaps, archive, toolchains, out, host_build_manifest):
         for rel in listed:
             stream.write(f"{sha(out / rel)}  {rel}\n")
     os.replace(tmp, out / "SHA256SUMS")
-    # 6. manifest.json: the base's, relocated to OUT, re-pinned
+    # 6. the directory is the id (manifest.json's absolute paths name it, so it is written after the move)
+    final = out.parent / prov["overlay"]["id"]
+    if final.exists() or final.is_symlink():
+        die(f"{final} exists: the same overlay (same base, roles and bytes) is already there")
+    os.rename(out, final)
+    out = final
+    # 7. manifest.json: the base's, relocated to OUT, re-pinned
     prefix = str(base) + "/"
     manifest = {k: (str(out) + "/" + v[len(prefix):] if isinstance(v, str) and v.startswith(prefix) else v)
                 for k, v in base_manifest.items()}
@@ -576,7 +608,8 @@ def overlay(base, swaps, archive, toolchains, out, host_build_manifest):
     manifest["sha256"] = pins
     replace_file(out / "manifest.json", json_value=manifest)
     roles_from_manifest(manifest, f"{out}/manifest.json")  # every new pin is the bytes
-    print(json.dumps({"candidate": str(out), "base": str(base), "overlayCommit": commit,
+    print(json.dumps({"candidate": str(out), "id": prov["overlay"]["id"], "name": name, "base": str(base),
+                      "overlayCommit": commit,
                       "roles": {r: prov["binaries"][r]["sha256"] for r in sorted(swaps)},
                       "sha256sumsSha256": sha(out / "SHA256SUMS")}, indent=2))
 
@@ -585,12 +618,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--roles")
     parser.add_argument("--source-archive")
-    parser.add_argument("--out", required=True)
+    parser.add_argument("--out")
     parser.add_argument("--toolchains")
     parser.add_argument("--host-build-manifest")
     parser.add_argument("--into-existing", action="store_true")
     parser.add_argument("--overlay", metavar="BASE_CANDIDATE")
     parser.add_argument("--role", action="append", default=[], metavar="ROLE=BINARY")
+    parser.add_argument("--into", metavar="PARENT_DIR")
+    parser.add_argument("--name")
     if sys.argv[1:] == ["--rust-roles"]:
         for role, crate in RUST_ROLES:
             print(role, crate, ROLES[role], *([RUST_ROLE_FEATURES[role]] if role in RUST_ROLE_FEATURES else []))
@@ -605,8 +640,9 @@ def main():
     if a.overlay:
         if a.roles or a.into_existing:
             die("--overlay takes --role, not --roles or --into-existing")
-        if not (a.role and a.source_archive and a.toolchains):
-            die("--overlay needs --role ROLE=BINARY (one or more), --source-archive and --toolchains")
+        if not (a.role and a.source_archive and a.toolchains and a.into and a.name) or a.out:
+            die("--overlay needs --role ROLE=BINARY (one or more), --source-archive, --toolchains, --into PARENT_DIR "
+                "and --name LABEL (the candidate is PARENT_DIR/<12-hex id>), and no --out")
         swaps = {}
         for kv in a.role:
             role, sep, path = kv.partition("=")
@@ -614,10 +650,12 @@ def main():
                 die(f"--role {kv}: ROLE=BINARY with an existing BINARY")
             swaps[role] = Path(path).resolve()
         hbm = Path(a.host_build_manifest).resolve() if a.host_build_manifest else None
-        overlay(a.overlay, swaps, a.source_archive, read(a.toolchains), a.out, hbm)
+        overlay(a.overlay, swaps, a.source_archive, read(a.toolchains), a.into, a.name, hbm)
         return
     if not a.roles:
         die("--roles is required")
+    if not a.out:
+        die("--out is required")
     if not a.source_archive:
         die("--roles needs --source-archive")
     manifest = read(a.roles)

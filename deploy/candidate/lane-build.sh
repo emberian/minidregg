@@ -9,13 +9,13 @@
 #   LANE_DIR=/abs/lane  deploy/candidate/lane-build.sh rust-check                   (no Lean needed: `cargo check` of every rust role)
 #   LANE_DIR=/abs/lane  deploy/candidate/lane-build.sh rust [--crate CRATE]...    (--crate: only those crates' roles)
 #   LANE_DIR=/abs/lane  deploy/candidate/lane-build.sh pack OUT_DIR
-#   LANE_DIR=/abs/lane  deploy/candidate/lane-build.sh overlay BASE_CANDIDATE OUT_DIR ROLE...
+#   LANE_DIR=/abs/lane  deploy/candidate/lane-build.sh overlay BASE_CANDIDATE PARENT_DIR LABEL ROLE...
 #
-# overlay (hot-swap, ember 10-30: hotpatch worlds between batch candidates): OUT_DIR is BASE_CANDIDATE
-# with ROLE's binaries replaced by this lane's builds (package.py --overlay: whole build families only,
+# overlay (hot-swap, ember 10-30: hotpatch worlds between batch candidates): PARENT_DIR/<12-hex id>
+# (printed; LABEL is kept in provenance.json .overlay.name) is BASE_CANDIDATE with ROLE's binaries replaced by this lane's builds (package.py --overlay: whole build families only,
 # every pin re-emitted, provenance.json .overlay records base, commit and roles). Build them first:
 # `rust --crate CRATE` for Rust roles (seconds to minutes, warm), `host` and `consent` for the Lean pair.
-# The same clean-tree and compiled-inputs checks as pack. A gate then stands worlds up from OUT_DIR.
+# The same clean-tree and compiled-inputs checks as pack. A gate then stands worlds up from it.
 #
 # LANE_DIR holds the clone at LANE_DIR/src (a snapshot: `touch src/.minidregg-native-snapshot`); evidence
 # goes to LANE_DIR/{logs,cycle,native-out,consent-out}, binaries to LANE_DIR/artifacts. Run each step as
@@ -189,7 +189,8 @@ case $step in
       (cd "$OUT/fixtures" && sha256sum -- * >SHA256SUMS)
     fi ;;
   overlay)
-    base=${1:?overlay BASE_CANDIDATE OUT_DIR ROLE...}; OUT=${2:?overlay BASE_CANDIDATE OUT_DIR ROLE...}; shift 2
+    base=${1:?overlay BASE_CANDIDATE PARENT_DIR LABEL ROLE...}; parent=${2:?overlay BASE_CANDIDATE PARENT_DIR LABEL ROLE...}
+    label=${3:?overlay BASE_CANDIDATE PARENT_DIR LABEL ROLE...}; shift 3
     [ $# -gt 0 ] || { echo "lane-build: overlay names the roles it swaps" >&2; exit 64; }
     head=$(git rev-parse HEAD)
     [ -z "$(git status --porcelain --untracked-files=no)" ] || { echo "lane-build: tracked changes uncommitted" >&2; exit 1; }
@@ -215,7 +216,9 @@ case $step in
     git archive --format=tar "$head" >"$LANE_DIR/logs/source-$head.tar"
     toolchains_json "$head"
     python3 deploy/candidate/package.py --overlay "$base" "${swaps[@]}" --source-archive "$LANE_DIR/logs/source-$head.tar" \
-      --toolchains "$LANE_DIR/logs/toolchains-$head.json" --out "$OUT" "${hbm[@]}"
+      --toolchains "$LANE_DIR/logs/toolchains-$head.json" --into "$parent" --name "$label" "${hbm[@]}" \
+      | tee "$LANE_DIR/logs/overlay-$label.json"
+    OUT=$(jq -r .candidate "$LANE_DIR/logs/overlay-$label.json")
     # the base's journey fixtures, unchanged (they ride beside the candidate, never in its pins)
     if [ -d "$base/fixtures" ] && [ ! -e "$OUT/fixtures" ]; then cp -al "$base/fixtures" "$OUT/fixtures"; fi ;;
   *) echo "lane-build: unknown step $step" >&2; exit 64 ;;
