@@ -567,12 +567,16 @@ def rotationAssemble (plan : SubjectKeyRotation.SigningPlan)
     plan.domain plan.semantics command)) "rotation possession frame differs"
   pure (SubjectKeyRotation.ingressCodec.encode ⟨plan.commandBytes, possessionSignature⟩)
 
-/-- The current key status of `subject` as seen by the holder of `publicKey`. -/
-def keyStatusLoaded (config : Config) (opened : Opened config) (subject : SubjectId)
-    (publicKey : List UInt8) : Except String SubjectKeyRotation.Status := do
-  -- The opened image's own authority load, not a second encode and decode of the cell.
+/-- The current key status of `subject` as seen by the holder of `publicKey`, in an
+authority snapshot (the served state's own authority load: no encode or decode of the cell). -/
+def keyStatusOn (authority : CredentialAuthorityDomain.Snapshot) (subject : SubjectId)
+    (publicKey : List UInt8) : Except String SubjectKeyRotation.Status :=
   need "subject has no current signing key"
-    (SubjectKeyRotation.status opened.authority.snapshot.logical subject publicKey)
+    (SubjectKeyRotation.status authority.logical subject publicKey)
+
+def keyStatusLoaded (config : Config) (opened : Opened config) (subject : SubjectId)
+    (publicKey : List UInt8) : Except String SubjectKeyRotation.Status :=
+  keyStatusOn opened.authority.snapshot subject publicKey
 
 /-- Source-authored factory-observation provisioning plan on one verified
 image. The single slot is the sponsor's ordinary current-authority header for
@@ -3093,15 +3097,20 @@ def certifySubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened c
 /-- The public view of the system cell: its value, the roots a certify pins,
 and the head a certify would name now with that head's chain value.  The head
 and its chain are public (every receipt carries a height and a root). -/
-def certifyViewLoaded (config : Config) (opened : Opened config) :
+def certifyViewOn (config : Config) (view : DurableDataIntent.DataSnapshot ResourceBirthCodec.rootBytes)
+    (directory : Directory Nat CanonicalCellRegistry.registry)
+    (authority : CredentialAuthorityDomain.Snapshot) (height : Nat) (chain : Digest) :
     Except String SystemCellDomain.View := do
-  let system ← need "system cell unavailable"
-    (SystemCellDomain.load config.deployment opened.durable.snapshot)
-  let factoryRoot ← match opened.directory.directory.slots config.deployment.factoryId with
+  let system ← need "system cell unavailable" (SystemCellDomain.load config.deployment view)
+  let factoryRoot ← match directory.slots config.deployment.factoryId with
     | .present before => pure before.payload.root
     | .absent => .error "factory unavailable"
-  pure ⟨system.cell.root, opened.authority.snapshot.cell.root, factoryRoot, system.system,
-    opened.durable.height, opened.durable.chain⟩
+  pure ⟨system.cell.root, authority.cell.root, factoryRoot, system.system, height, chain⟩
+
+def certifyViewLoaded (config : Config) (opened : Opened config) :
+    Except String SystemCellDomain.View :=
+  certifyViewOn config opened.durable.snapshot opened.directory.directory opened.authority.snapshot
+    opened.durable.height opened.durable.chain
 /-- Who may read a submission's refusal. Every refusal is uniform
 (`publicSubmissionOutcome`) except a renounce's gate refusal, which exists only
 after the signer's signature verified (`CapabilityRenounce.HolderRefusal`) and

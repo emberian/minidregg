@@ -1570,6 +1570,15 @@ def rememberLight (config : NativeHost.Config) (light : NativeHostLight.Light co
     ⟨⟨opening.served.height, opening.served.worldRoot⟩, opening.served.chain,
       ReceiptContinuity.systemSiblings opening.roots⟩
 
+/-- The served state of the refreshed session, as a basis declaring no key: its cells,
+directory and authority (a read that consults no journal answer or marker). -/
+def sessionServed (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config))) :
+    IO ((store : Minidregg.Compiler.DurableHistory.StoreIdentity) ×
+      Minidregg.Compiler.ServedBasis.Basis config.deployment store) := do
+  let light := (← sessionCurrent config state).light
+  return ⟨_, ← IO.ofExcept (← light.basis ⟨[], []⟩)⟩
+
 def sessionOpened (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config))) :
     IO (NativeHost.Opened config) := do
@@ -7780,8 +7789,9 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                             let query ← IO.ofExcept (Minidregg.Host.Json.parse text)
                             let (subject, publicKey) ← IO.ofExcept
                               (Minidregg.Host.Json.subjectKeyStatusQuery query)
-                            let opened ← sessionOpened pinnedConfig state
-                            match NativeHost.keyStatusLoaded pinnedConfig opened ⟨subject⟩ publicKey with
+                            let ⟨_, served⟩ ← sessionServed pinnedConfig state
+                            match NativeHost.keyStatusOn (Minidregg.Compiler.ServedBasis.Ground.ofBasis served).authority
+                                ⟨subject⟩ publicKey with
                             | .error detail =>
                                 return ((255 : UInt8), failure .operationRejected "key-status" detail)
                             | .ok status =>
@@ -8013,8 +8023,10 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                             let outcome ← NativeHost.certifySubmitLoaded pinnedConfig (sessionConfirmed pinnedConfig state) opened payload
                             return ((172 : UInt8), outcomeCodec.encode outcome)
                         | 173 =>
-                            let opened ← sessionOpened pinnedConfig state
-                            let view ← IO.ofExcept (NativeHost.certifyViewLoaded pinnedConfig opened)
+                            let ⟨_, served⟩ ← sessionServed pinnedConfig state
+                            let view ← IO.ofExcept (NativeHost.certifyViewOn pinnedConfig served.view
+                              served.directory.directory (Minidregg.Compiler.ServedBasis.Ground.ofBasis served).authority
+                              served.served.height served.served.chain)
                             return ((173 : UInt8), CertifyReceiver.viewCodec.encode view)
                         | 210 | 211 | 212 | 213 | 214 | 215 | 216 | 217 | 218 | 219 =>
                             objectKernelOperation pinnedConfig state operation payload
@@ -8191,13 +8203,13 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                             unless payload.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "resource birth request exceeds host frame bound")
                             let (signedObservationBytes, sourceBytes) ← splitPair payload
-                            let opened ← sessionOpened pinnedConfig state
+                            let ⟨_, served⟩ ← sessionServed pinnedConfig state
                             let some source := String.fromUTF8? sourceBytes.toByteArray
                               | throw (IO.userError "resource birth request is not UTF-8")
                             let json ← IO.ofExcept (Minidregg.Host.Json.parse source)
                             let intent ← IO.ofExcept (←
-                              Minidregg.Host.CurrentResourceBirthAuthoring.intentLoadedAuthorized
-                                pinnedConfig opened signedObservationBytes json
+                              Minidregg.Host.CurrentResourceBirthAuthoring.intentAuthorizedOn
+                                pinnedConfig (.ofBasis served) signedObservationBytes json
                                 (← IO.ofExcept settings.providerRoutes))
                             unless intent.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "resource birth intent exceeds host frame bound")
