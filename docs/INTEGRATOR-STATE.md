@@ -38,7 +38,8 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   DecidableEq.
 - **Staging 507155c77 (batch 9 so far)**: exorcist 975491262 (bc17cef1b + 7e6850892 `inspect view-resource-document`: a
   doc page in one codec frame, client and codec from one candidate; 253d0bc26 read-scratch pruning; its own copy of the
-  admitOwn fix, identical to dc61016cb).
+  admitOwn fix, identical to dc61016cb). Measured (overlay acf55bf9d552 vs batch 7, 100 doc show x2, load 22-25):
+  Host+Store CPU -9..14%, codec CPU -17..24%, wall 35.5/30.0 -> 28.5/24.0 ms. Exorcist keeps /ci/exo/w7, w8 (~560 MB each).
   + perf-client 36612f028/6a088183f (Store open's represents decision linear via hash sets, @[csimp]
   representsCheck_eq_fast; first read after idle 20.8 s -> 3.9 s at height ~920; audit SOUND: unconditional funext csimp, hash sets over Nat).
   + hot-path 92828ff96/d7c55dfa0 (birth preparation takes Held directory/authority: callers with an Opened decode no
