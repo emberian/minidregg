@@ -91,25 +91,42 @@ tree-shape invariant from binding. Owed before it can carry cells (astra round 2
   would expose a leaf of another class;
 * **index collisions**: admission preserves `PathsInjective` or counts them.
 
-**Increment 1 statements** (`Theory/PrivateCellTrie.lean`, astra round 3 applied):
-`EraseCorrect` (a `Cache` erase keeps `Holds (dropKey k es)`), `EraseCost` (counted,
-`perBit * L + fixed` on injective live paths) and `ClassRevealComplete`
-(a verifying reveal at a class tag answers exactly that class's live entries, or a
-collision among the comparison's nodes `revealNodes`, scoped, unlike `reveal_sound`'s
-global `Collision`; astra: the answer is exact, `members` are not bounded, so bounded
-disclosure is the ZK opening's job). Owed from round 3: the Store adapter (namespace-
-qualified address, canonical value bytes, layout binding; `StoreCodec.fromEntries` is
-first-wins while the trie is last-wins); the projection target is `Visible`/`narrowPacked`,
-NOT `narrowStore` (which keeps blinding under full scope), and the private index omits the
-blinding entry (mask custody is separate); scope coverage equals a bounded prefix union
-(`body` must cover every `atomsOf low`); multi-class, overwrite and deletion witnesses.
+**Increment 1, proved** (on the Lean 4.35 bump `cdb399b47`; two astra rounds on the proofs):
+* `Theory/AuthTrieErase.lean`: `Trie.eraseCounted` walks once, re-joins each level (a lone
+  leaf rises without rehashing), and counts the work: visits, every digest evaluation
+  (`joinCost`, the empty-child digests a fresh branch reads included) and clash entries.
+  `erase_correct`, and `erase_cost` at `4 * L + 1` on injective live paths, constants chosen
+  before `L` (astra: constants after `L` could hide a rebuild). `EraseCost` constrains the
+  returned count only, so the claim is about this operation's own instrumented count;
+  allocations are O(1) per visit and not separately counted.
+* `Theory/AuthTrieRange.lean`: `tree_injective`, `climb_digest_sound` and `reveal_sound` now
+  conclude with a collision AMONG `revealNodes` (a finite comparison scope, over-approximating
+  the nodes hashed), not the vacuous global `Collision`; `Compiler/DurableIndex.reveal_sound`
+  follows.
+* `Theory/AuthTrieReveal.lean`: `reveal_complete` (the honest reveal verifies); `Trie.reveal`
+  reads it off the kept trie in walked depth plus answer (its equality `Cache.reveal_eq` owed).
+* `Theory/PrivateCellTrie.lean`: `classRevealComplete`, `erase_correct`, `erase_cost`.
+* `Kernel/ReceiptEventHiding.lean`: the challenge carries the native envelope shape
+  (`Challenge.envelope_decodes`); `DeployedShape.premises_inhabited` inhabits every keystone
+  premise but `IdealReplacement` at that shape (a syntactic challenge, not an admitted
+  invocation: version, target envelopes and header binding are admission's); the refutations
+  take ingress reconstructible from the reader's view.
+
+**Owed** (astra round 3): the Store adapter (namespace-qualified address, canonical value
+bytes, layout binding; `StoreCodec.fromEntries` is first-wins, the trie last-wins); the
+projection target is `Visible`/`narrowPacked`, NOT `narrowStore` (which keeps blinding under
+full scope), and the private index omits the blinding entry (mask custody separate); scope
+coverage equals a bounded prefix union (`body` covers every `atomsOf low`); multi-class,
+overwrite and deletion witnesses; store-side collision locality (authentication path plus
+selected subtree); `Cache.reveal_eq`.
 
 **Next increments** (in order):
-1. Prove the increment-1 statements: trie delete; hierarchical class keys and the prefix-selection = `narrowStore` theorem;
-   the incremental cache path for `maskedTrieCommitment` (the bulk root is the spec only).
+1. The Store adapter and the class-prefix = `Visible` theorem; `maskedTrieCommitment` over the
+   kept cache (the bulk root is the spec only).
 2. The opening relation in the compiler's vocabulary (compiler-emitted AIR; grow the
    compiler where it lacks a trie-path or cSHAKE gadget), not a hand-written circuit.
-3. The receiver: new materializer version beside the old one until a fresh genesis.
+3. The receiver: new materializer version beside the old one until a fresh genesis, with its
+   fixture re-record in the same sha; coordinate the codec epoch with the hot-path successor.
 4. Flatness: gate10/gate12 flatness-submit.
 
 **Linear paths seen** (each blocks flatness independently): flat `rootPreimage`

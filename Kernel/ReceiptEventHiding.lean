@@ -49,8 +49,15 @@ both premises.
 
 * Proved: the retired fingerprint is linkable (`legacy_receipt_links`), the
   hybrid reduction (`unlinkable_of_idealReplacement`), replay and idempotence
-  unchanged (`DeclaredResourceController.invocationEvent_eq_iff`), and the
-  ideal-model satisfiable and premise-inhabitation witnesses.
+  unchanged (`DeclaredResourceController.invocationEvent_eq_iff`), teeth on the
+  current code for ingress reconstructible from the view
+  (`public_signature_refutes`), the generic ideal-model consistency witness
+  (`pad_unlinkable_with_hidden_choice`), and inhabitation of every keystone
+  premise but `IdealReplacement` by a challenge at the native envelope shape
+  (`DeployedShape.premises_inhabited`: noncryptographic premises jointly
+  inhabited at the wire shape, not an admitted invocation).
+* Scope: unlinkability against the admitted reader class (see the keystone),
+  not yet computational hiding.
 * Open, and named: `IdealReplacement` for `eventIdOfSigned`, the cryptographic
   obligation. Its intended discharge is cSHAKE as a random oracle plus
   unforgeability of the credential signature scheme: a reader that queries the
@@ -145,19 +152,20 @@ theorem unlinkable_of_idealReplacement {View : Type} {tapes num den : Nat}
 #assert_axioms unlinkable_of_idealReplacement
 
 /-- **A public fingerprint is linkable.** If the event id each world publishes is
-a hash of bytes the reader can name, and the two hashes differ, the reader's
-one-query public-hash test separates the worlds with certainty: no gap below one
-holds, whatever the common view. -/
+a hash of bytes the reader can reconstruct from its view, and on every view the
+two worlds' hashes differ, the reader's one-query public-hash test separates the
+worlds with certainty: no gap below one holds. -/
 theorem fingerprint_links {View : Type} {tapes num den : Nat} (viewOf : Fin tapes → View)
-    (hash : List UInt8 → Digest) (named : Bool → List UInt8)
-    (distinct : hash (named false) ≠ hash (named true))
+    (hash : List UInt8 → Digest) (named : Bool → View → List UInt8)
+    (distinct : ∀ view, hash (named false view) ≠ hash (named true view))
     {budgeted : Reader View → Prop} (meaningful : BudgetAdmitsPublicHash 1 hash budgeted)
     (small : num < den) :
-    ¬ ReceiptUnlinkable tapes num den viewOf (fun world _ => hash (named world)) budgeted := by
+    ¬ ReceiptUnlinkable tapes num den viewOf (fun world tape => hash (named world (viewOf tape)))
+      budgeted := by
   intro unlinkable
-  have admitted := meaningful _ ⟨fun _ => [named false], fun _ => le_refl _, rfl⟩
-  exact not_gapAtMost_of_separating small (by simp) (fun _ => by simpa using distinct.symm)
-    (unlinkable _ admitted)
+  have admitted := meaningful _ ⟨fun view => [named false view], fun _ => le_refl _, rfl⟩
+  exact not_gapAtMost_of_separating small (by simp)
+    (fun tape => by simpa using (distinct (viewOf tape)).symm) (unlinkable _ admitted)
 
 #assert_axioms fingerprint_links
 
@@ -183,21 +191,26 @@ theorem legacy_receipt_links {View : Type} {tapes num den : Nat} (viewOf : Fin t
     (small : num < den) :
     ¬ ReceiptUnlinkable tapes num den viewOf
       (fun world _ => effectsDigest domain semantics (command world)) budgeted :=
-  fingerprint_links viewOf effectsHash (fun world => commandBytes domain semantics (command world))
-    distinct meaningful small
+  fingerprint_links viewOf effectsHash (fun world _ => commandBytes domain semantics (command world))
+    (fun _ => distinct) meaningful small
 
 #assert_axioms legacy_receipt_links
 
-/-- A legal receipt-linking challenge for declared invocations: one transaction
-identity, two different commands, a common reader view, and an honest signer
-whose authority envelope on tape `tape` is `sign tape` of the world's command
-bytes (the model of the credential envelope `withAcceptedOn` authenticates first;
-its secrecy is the crypto premise, not a field here). -/
+/-- A syntactic receipt-linking challenge for declared invocations: one
+transaction identity, two different commands, a common reader view, and an
+envelope producer whose authority envelope on tape `tape` is the canonical
+encoding of the envelope `sign tape` makes for the world's command bytes: a
+signed header and a 64-byte signature, the wire shape
+`CredentialSignatureAdmission.verifyNative` decodes (`Challenge.envelope_decodes`)
+and whose signature it checks. It is not an admitted invocation: the header's
+version, footprint and message binding, the target envelopes and the registry
+are admission's checks, not fields here, and the producer's secrecy is the crypto
+premise. -/
 structure Challenge (tapes : Nat) (View : Type) where
   domain : Digest
   semantics : Digest
   command : Bool → Command
-  sign : Fin tapes → List UInt8 → List UInt8
+  sign : Fin tapes → List UInt8 → CredentialSignedEnvelopeController.SignedEnvelope
   signedOf : Bool → Fin tapes → SignedCommand
   viewOf : Fin tapes → View
   sameTransaction : transactionId domain semantics (command false) =
@@ -205,9 +218,24 @@ structure Challenge (tapes : Nat) (View : Type) where
   hiddenDifference : command false ≠ command true
   signsCommand : ∀ world tape, (signedOf world tape).commandBytes = commandCodec.encode (command world)
   honestSigner : ∀ world tape,
-    (signedOf world tape).authorityEnvelope = sign tape (commandCodec.encode (command world))
-  /-- Native verification takes a 64-byte signature (`CredentialSignatureIO`). -/
-  signatureWidth : ∀ tape message, (sign tape message).length = 64
+    (signedOf world tape).authorityEnvelope =
+      CredentialSignedEnvelopeController.envelopeCodec.encode (sign tape (commandCodec.encode (command world)))
+  /-- Native verification checks the decoded envelope's 64-byte signature
+  (`CredentialSignatureIO`); the header beside it has no fixed width. -/
+  signatureWidth : ∀ tape message, (sign tape message).signature.length = 64
+
+/-- The native verifier's decode of a challenge's authority envelope is the
+signer's envelope (`CredentialSignedEnvelopeController.prepare` begins with this
+decode), with its 64-byte signature. -/
+theorem Challenge.envelope_decodes {tapes : Nat} {View : Type} (challenge : Challenge tapes View)
+    (world : Bool) (tape : Fin tapes) :
+    CredentialSignedEnvelopeController.envelopeCodec.decode (challenge.signedOf world tape).authorityEnvelope =
+        some (challenge.sign tape (commandCodec.encode (challenge.command world))) ∧
+      (challenge.sign tape (commandCodec.encode (challenge.command world))).signature.length = 64 := by
+  rw [challenge.honestSigner]
+  exact ⟨CredentialSignedEnvelopeController.envelopeCodec.decode_encode _, challenge.signatureWidth _ _⟩
+
+#assert_axioms Challenge.envelope_decodes
 
 /-- The event ids a challenge's receipts carry under the current code. -/
 def Challenge.eventIdOf {tapes : Nat} {View : Type} (challenge : Challenge tapes View)
@@ -220,9 +248,18 @@ one, a positive query bound (at bound 0 only the constant reader is a hash test,
 so the budget premises would admit a budget of that reader alone), and a budget
 that admits the reader's own hashing (both the retired effects hash and the
 current event hash), the receipts of the current code are unlinkable at
-`num/den` given the common view. `public_signature_refutes` is its teeth on the
-current code: a publicly computable signature makes it false at every admitted
-bound. -/
+`num/den`, given the common view, against the readers `budgeted` admits.
+
+Scope: this is security against the admitted reader class. The budget premises
+force only the public-hash tests into that class; a `budgeted` admitting nothing
+else (for instance at bound 1, with four distinct publicly enumerable ingress
+hashes over two tapes, where every admitted test has gap at most one half) can
+meet the statement although a two-entry lookup table, not a hash test,
+identifies the world. Computational hiding needs the counted reader model (the
+follow-up statement: the random oracle on the tape, readers bounded by query
+count) and a deployment-derived view. `public_signature_refutes` is the teeth on
+the current code: ingress the reader can reconstruct from its view makes the
+statement false at every admitted bound. -/
 def DeclaredReceiptHiding {View : Type} (tapes queryBound num den : Nat)
     (challenge : Challenge tapes View) (budgeted : Reader View → Prop) : Prop :=
   num < den ∧ 0 < queryBound ∧
@@ -251,25 +288,28 @@ theorem BudgetAdmitsPublicHash.one {View : Type} {queryBound : Nat} {hash : List
   rintro reader ⟨queries, short, rfl⟩
   exact admits _ ⟨queries, fun view => (short view).trans positive, rfl⟩
 
-/-- **Teeth on the current code.** If the signer's ingress is publicly computable
-(the same signed command on every tape, as with a constant public signature) and
-the two worlds' event ids differ, `DeclaredReceiptHiding` fails at every query
-bound and every gap: the reader hashes the left world's signed ingress. -/
+/-- **Teeth on the current code.** If the signer's ingress can be reconstructed
+from the reader's view (`signed world view`: a constant public signature, or a
+signature the view leaks) and on every view the two worlds' event ids differ,
+`DeclaredReceiptHiding` fails at every query bound and every gap: the reader
+hashes the left world's reconstructed ingress. -/
 theorem public_signature_refutes {View : Type} {tapes queryBound num den : Nat}
-    (challenge : Challenge tapes View) (signed : Bool → SignedCommand)
-    (computable : ∀ world tape, challenge.signedOf world tape = signed world)
-    (distinct : eventIdOfSigned (signedBytes challenge.domain challenge.semantics (signed false)) ≠
-      eventIdOfSigned (signedBytes challenge.domain challenge.semantics (signed true)))
+    (challenge : Challenge tapes View) (signed : Bool → View → SignedCommand)
+    (computable : ∀ world tape, challenge.signedOf world tape = signed world (challenge.viewOf tape))
+    (distinct : ∀ view,
+      eventIdOfSigned (signedBytes challenge.domain challenge.semantics (signed false view)) ≠
+        eventIdOfSigned (signedBytes challenge.domain challenge.semantics (signed true view)))
     (budgeted : Reader View → Prop) :
     ¬ DeclaredReceiptHiding tapes queryBound num den challenge budgeted := by
   rintro ⟨small, positive, _, current, unlinkable⟩
-  have computed : challenge.eventIdOf =
-      fun world _ => eventIdOfSigned (signedBytes challenge.domain challenge.semantics (signed world)) := by
+  have computed : challenge.eventIdOf = fun world tape =>
+      eventIdOfSigned (signedBytes challenge.domain challenge.semantics
+        (signed world (challenge.viewOf tape))) := by
     funext world tape
     simp [Challenge.eventIdOf, computable]
   rw [computed] at unlinkable
   exact fingerprint_links challenge.viewOf eventIdOfSigned
-    (fun world => signedBytes challenge.domain challenge.semantics (signed world))
+    (fun world view => signedBytes challenge.domain challenge.semantics (signed world view))
     distinct (current.one positive) small unlinkable
 
 #assert_axioms public_signature_refutes
@@ -283,10 +323,20 @@ worlds publish different ids), and an empty common view. Each world is the ideal
 (the identity) relabelled by a permutation of the tapes, so `IdealReplacement`
 holds at gap 0 for every reader whatsoever; the budget is everything, so it
 admits every public-hash test for any hash. This shows the obligation is
-consistent with a meaningful budget. It is an ideal privacy witness: it is NOT an
-inhabited `DeclaredReceiptHiding` for the cSHAKE instance, which needs the
-random-oracle model with the oracle on the tape and query-bounded readers (the
-follow-up statement). -/
+consistent with a meaningful budget. It is a generic ideal-model consistency
+witness: it supplies no `Challenge`, and it is NOT an inhabited
+`DeclaredReceiptHiding` for the cSHAKE instance, which needs the random-oracle
+model with the oracle on the tape and query-bounded readers (the follow-up
+statement).
+
+**Deployed-shape premise inhabitation** (`DeployedShape`): a `Challenge` at the
+native envelope shape (a canonically encoded header and 64-byte signature, one
+nonempty target list, two commands with one transaction identity differing in
+their signed family context) together with the remaining premises of
+`declaredReceiptHiding_of_idealReplacement` at query bound 1. The one premise it
+does not inhabit is `IdealReplacement` itself, the open cryptographic
+obligation; its signer is a constant public signature, so the same challenge is
+also an instance of `public_signature_refutes`. -/
 
 /-- The pad model's event ids. -/
 def padEventId (size : Nat) [NeZero size] (offset : Bool → Fin size) (world : Bool) (tape : Fin size) : Digest :=
@@ -326,8 +376,90 @@ theorem fingerprint_in_pad_model_links :
         (if world then [0] else []))
       (fun _ => True) :=
   fingerprint_links (fun _ => ()) (fun bytes => ⟨bytes.length⟩)
-    (fun world => if world then [0] else []) (by decide) (fun _ _ => trivial) Nat.one_pos
+    (fun world _ => if world then [0] else []) (fun _ => by decide) (fun _ _ => trivial) Nat.one_pos
 
 #assert_axioms fingerprint_in_pad_model_links
+
+namespace DeployedShape
+
+open Minidregg.Kernel.CredentialSignedEnvelopeController (SignedHeader SignedEnvelope envelopeCodec)
+
+def target : Target :=
+  { kind := .object, target := 0, capability := ⟨0⟩, schemaVersion := 0,
+    expectedTargetRoot := ⟨0⟩, payload := .scalar [] }
+
+/-- Two commands of one subject and nonce, differing in their signed family context. -/
+def command (world : Bool) : Command :=
+  { subject := ⟨1⟩, nonce := 0, targets := [target],
+    family := some ⟨.ordinary, [if world then 1 else 0]⟩ }
+
+def header (message : List UInt8) : SignedHeader :=
+  { codecVersion := CredentialSignedEnvelopeController.envelopeCodecVersion, footprint := [], validUntil := 0, keyId := 0, keyEpoch := 0,
+    algorithm := 0, domain := [], message := message, nullifier := 0 }
+
+/-- A signer at the native envelope shape (its signature is a constant). -/
+def sign (_ : Fin 1) (message : List UInt8) : SignedEnvelope := ⟨header message, List.replicate 64 0⟩
+
+/-- One target envelope for the one target, as `admitAuthority` counts them. -/
+def signedOf (world : Bool) (tape : Fin 1) : SignedCommand :=
+  ⟨commandCodec.encode (command world),
+    [envelopeCodec.encode (sign tape (commandCodec.encode (command world)))], [],
+    envelopeCodec.encode (sign tape (commandCodec.encode (command world)))⟩
+
+theorem sameTransaction : transactionId ⟨0⟩ ⟨0⟩ (command false) = transactionId ⟨0⟩ ⟨0⟩ (command true) := by
+  simp only [transactionId, operationMarker, command]
+
+theorem hiddenDifference : command false ≠ command true := by
+  intro same
+  have := congrArg Command.family same
+  simp [command] at this
+
+def challenge : Challenge 1 Unit where
+  domain := ⟨0⟩
+  semantics := ⟨0⟩
+  command := command
+  sign := sign
+  signedOf := signedOf
+  viewOf := fun _ => ()
+  sameTransaction := sameTransaction
+  hiddenDifference := hiddenDifference
+  signsCommand := fun _ _ => rfl
+  honestSigner := fun _ _ => rfl
+  signatureWidth := fun _ _ => rfl
+
+/-- **The noncryptographic premises are jointly inhabited, at the native wire
+shape**: the challenge above (nonempty targets, one target envelope per target,
+the current envelope codec version, its envelope decoding to a 64-byte
+signature), a gap below one, query bound 1, and a budget admitting every reader
+(so both public-hash classes). Shape only: no registry, ground or signature
+verdict is constructed, so this is not an admitted invocation. -/
+theorem premises_inhabited :
+    (∀ world tape, (challenge.command world).targets ≠ [] ∧
+      (challenge.signedOf world tape).targetEnvelopes.length = (challenge.command world).targets.length ∧
+      (challenge.sign tape (commandCodec.encode (challenge.command world))).header.codecVersion =
+        CredentialSignedEnvelopeController.envelopeCodecVersion ∧
+      envelopeCodec.decode (challenge.signedOf world tape).authorityEnvelope =
+        some (challenge.sign tape (commandCodec.encode (challenge.command world))) ∧
+      (challenge.sign tape (commandCodec.encode (challenge.command world))).signature.length = 64) ∧
+    0 + 0 < 1 ∧ 0 < 1 ∧
+    BudgetAdmitsPublicHash (View := Unit) 1 effectsHash (fun _ => True) ∧
+    BudgetAdmitsPublicHash (View := Unit) 1 eventIdOfSigned (fun _ => True) :=
+  ⟨fun world tape => ⟨by simp [challenge, command], rfl, rfl, challenge.envelope_decodes world tape⟩,
+    Nat.one_pos, Nat.one_pos, fun _ _ => trivial, fun _ _ => trivial⟩
+
+#assert_axioms premises_inhabited
+
+/-- Conditional public-signer refutation: if the two worlds' event ids differ, the
+keystone fails for this challenge at every bound. -/
+theorem public_signer_refuted {queryBound num den : Nat} (budgeted : Reader Unit → Prop)
+    (distinct : eventIdOfSigned (signedBytes ⟨0⟩ ⟨0⟩ (signedOf false 0)) ≠
+      eventIdOfSigned (signedBytes ⟨0⟩ ⟨0⟩ (signedOf true 0))) :
+    ¬ DeclaredReceiptHiding 1 queryBound num den challenge budgeted :=
+  public_signature_refutes challenge (fun world _ => signedOf world 0)
+    (fun world tape => by rw [Subsingleton.elim tape 0]; rfl) (fun _ => distinct) budgeted
+
+#assert_axioms public_signer_refuted
+
+end DeployedShape
 
 end Minidregg.Kernel.ReceiptEventHiding
