@@ -283,7 +283,8 @@ def issuerCheck (snapshot : Snapshot) (issuer : IssuerId) (epoch : Epoch)
 zero entries skipped: no `Multiset.toFinset`, whose deduplication is quadratic in the map. -/
 def existsSupport {K : Type} {V : K → Type} [DecidableEq K] [∀ key, Zero (V key)]
     [∀ key, DecidableEq (V key)] (fields : Π₀ key : K, V key) (p : K → Bool) : Bool :=
-  fields.support'.lift (fun support => decide (∃ key ∈ support.1, fields key ≠ 0 ∧ p key = true))
+  fields.support'.lift (fun support => @decide (∃ key ∈ support.1, fields key ≠ 0 ∧ p key = true)
+      Multiset.decidableExistsMultiset)
     (by
       intro left right
       apply decide_eq_decide.mpr
