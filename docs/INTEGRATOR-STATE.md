@@ -32,7 +32,7 @@ same step. Closed items are never re-reported.
   ($I/hp-attidx.pid waits; then $I/gate-acc7-attidx.pid). Forge composed of batch 7 queued by infra.
 - **Staging dc0b7c935 (batch 8 so far)**: iter-speed 7800d3199 + 697db7664 (native-loop: a lane's Lean change reaches a
   native candidate in ~8 min), tower split 0eab28db7, exorcist 47b7cb2e1 + c763e3ead, perf-client 783b460cb + b6 +
-  b940b3f50, retained-mode 675a80745 (Theory/Retained.lean, statement + witnesses; audit round owed) + 1d4ff4efb (docs).
+  b940b3f50, retained-mode 675a80745 (Theory/Retained.lean; audit sent 10:47: correctness sound, cost budgets do not exclude recompute, no Host-shaped node yet, pins owed) + 1d4ff4efb (docs).
   Batch 8 is the whole-tree build these owe.
 - **Next shared-interface change: retained-mode L0** (Theory.Store's Store becomes a persistent extensional tree map,
   ~66 files, WorldCompact deleted): its own cut with one whole-tree build; FORMAT (private cells (a), hot-path row 11,
@@ -47,6 +47,7 @@ same step. Closed items are never re-reported.
 
 ## Reports sent (do not resend)
 
+- 10-31: retained-mode audit round 1 (to a13f0c9ab4513b2d7).
 - 10-31: GET-contract astra review (many times, by mistake; CLOSED). Batch 7 READY named to infra, explorer, perf-apps.
 
 ## Lanes (route only to the newest id; distilled lanes' old ids are retired)
