@@ -20,6 +20,11 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 - **ember (10-31): no rehearsal cut until she says.** Make the system excellent: Hermes repaired, efficiency everywhere,
   every red fixed (never worked around). ~1 ms warm per action is the direction, not a gate. Law 17 holds.
 - **main = 83e926874** = gated batch 4 b9450147f + main 7978ddfdd. **Batch 4 is the green fallback.**
+- **Batch 9 997905c0b: BUILD running** (launched 12:35, PID 3311469 in $I/build.pid and build-b9.pid; integrator
+  waiter armed on READY). gate15 default EDGE_REV is now **e29997d** (12:35; needed for the mini-line ssh wrapper). At
+  READY: gate15 full; name to infra, explorer (C1 16-parallel-say + own-order rows), perf-apps, perf-client (consent
+  walk after-number when 619022904 lands); batch 8's verdict goes with it. Launch builds via $I/launch-build.sh SHA NOTE
+  (writes build.pid; a nested `ssh … &` held the session twice).
 - **Batch 8 dc61016cb: gate15 FAIL**: enrol PASS, tour 73/73; j14 = H1b; composed (-c2 after my port collision):
   rooms/churn/apps/connector PASS, documents FAIL (D2), residents R1; flatness get FAIL then PASS on -c2 (load). Lesson:
   a KEEP_WORLD composed world holds port 22640; take it down before the next composed gate.
@@ -142,9 +147,7 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   FIXED for resource-client by af0dcfb18 (own print! macros; a closed stdout ends the command 141, residents keep
   serving; rides batch 9); other client binaries: DONE by lane/perf-client-streams 096c881e5, one crate native/mini-streams for every client
   binary, resource-client's streams.rs deleted; batch 9), infra (FIXED dregg-infra fbb7648: render-authorized-keys.sh and ship.sh read usage into a
-  variable; syntax-checked only). Move gate15's EDGE_REV default to e29997d (contains fbb7648, and installs the
-  candidate's mini-line wrapper; extracted at $I/dregg-infra-e29997d) after batch 8's gate and dc61016cb-codec -hp1 exit
-  (never mid-gate), before batch 9 gates.
+  variable; syntax-checked only). gate15 default EDGE_REV moved to e29997d at 12:35 (no gate running).
 - **H1b codec theory REFUTED** (dc61016cb-codec -hp1, 12:19, 6/6 runs reset): with 58f0bad2b + 5ae0de223 the final say
   still met `Connection reset by peer (os error 104)`, and the exact resubmit failed: `exact resubmit exited 1: mini:
   attempt has no retained …/resource-workspace/attempts/a-28305585112542523315230084449262223697`. Two faults: the reset
