@@ -195,10 +195,15 @@ applied):
   uniform function on the version window (`idealFn`, tapes enumerate all functions by
   `finFunctionFinEquiv`), the budget admitting every two-query evaluation test
   (`BudgetAdmitsQueries`); honest pole `enumeration_satisfies`, teeth `constant_refuted`.
-  `receiver_prf_hop`: histories as a function of the key tape (`tie`: each cell's custody function
-  is the keyed one) give `HybridReduction`'s first antecedent at `num/den`, real = the game on the
-  published masks, uniform = on the ideal function's masks at the history's versions, which
-  `custodyInputs_distinct` makes the tape's own independent tuple (`idealFn_window`). Forks: `AtMostOneSuccessor` is the host's
+  Round 7: queries are restricted to the window (`QueryTest` over `vs ⊆ window`), so a real PRF can
+  meet the game. `receiver_prf_hop`: one birth store and one patch list, the custody function alone
+  varying with the key (`run`, `run_twin`: the runs are twins cell by cell, same public parameters,
+  versions and kept index); the published transcript (the run's roots) factors through the masks
+  over a shared skeleton (`roots_factor`); the gap between the transcript under the keyed function
+  and under the ideal is `num/den`; the versions are distinct and the ideal's masks at them are the
+  tape's own tuple (`idealFn_window`). `AtMostOneSuccessor` is not a premise of the hop: a run is one
+  chain (`History.atMostOneSuccessor`), and that the host publishes exactly its run stays the
+  host's obligation. Forks: `AtMostOneSuccessor` is the host's
   obligation (a persisted version counter, a retry returning the stored successor); a history meets
   it, and `fork_shares_mask` shows two accepts from one cell share a mask.
 * `birth` refuses a store already holding a mask (`birth_refuses_masked`: imports are never
