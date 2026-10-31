@@ -273,30 +273,33 @@ applied):
    distinguishers; caller-chosen `legal`; decoys no run produces; syntactic hidden difference).
    Owed in the hiding argument: the ZK hybrid over an independent coin tape, the ROM
    coupling, `identical` for the deployed service, the host corollary over the accepted set and its observable event trace (`PublishesRun`).
-1. **The cell representation carries `KeptCell`** (design, not started; decide before code). Two
-   obstructions found reading `Theory/CellState.lean` and `Compiler/CanonicalCellRegistry.lean`:
-   (i) `Materializer.rootOf store = rootBytes (codec.encode store)` and the registry has one
-   materializer per kind (`CanonicalCellRegistry.materializer`), so a root cannot see the cell's
-   identity or accepted version, both in `ctxBytes`; (ii) `Materialized` keeps only
-   `logical`, `bytesCache`, `rootCache`, so the kept index has no home and an O(log n) patch has
-   nothing to update. Proposed, to be stated first and reviewed by astra:
-   * **Context from the store alone.** Kind-level context (protocol, layout digest, size bound);
-     per-cell and per-version separation from the custody mask (PRF keyed per cell, evaluated at
-     the version). `rom` then gains a mask-collision term (birthday over published versions under
-     `2^λ`) in place of "contexts unique per version" (`MaskGuessBound`'s note): a statement change,
-     allowed. Alternative: reserved store addresses for cell id and version (a layout and codec
-     change). Prefer the first.
-   * **An auxiliary cache in `Materialized`.** Generalize `Materializer` with `Aux`, a relation
-     `auxHolds : Aux → Store L → Prop`, `auxRoot : Aux → Root` with `auxRoot_eq : auxHolds a s →
-     auxRoot a = rootOf s`; `Materialized` gains `aux : Aux` and `auxValid`. For flat kinds `Aux :=
-     Unit`. For private kinds `Aux := Index wire` with `auxHolds := Holds (indexEntries …)`,
-     `rootOf := privateRoot ∘ decode` (equal on encoded stores by codec lawfulness), and the patch
-     path updates `aux` by `Cache.insert` / `Cache.erase` (`KeptCell.write`), so `rootCache` reads
-     `outerRoot … aux.digest` with no rebuild. A relation, not an equality, because a kept trie is
-     not structurally the bulk build's.
-   * Then `KeptCell` becomes the private kinds' `Materialized` view, `materialize` for them is
-     `birth`, and patch application is `accept`. Every `Materialized` consumer (84 files) sees `Unit`
-     aux through a default; the whole tree builds once after.
+1. **The cell representation carries a persistent structure** (root's ruling: option (b), the
+   auxiliary cache in `Materialized`). Statement: `Theory/CellStateAux.lean` (astra round 11
+   applied): `AuxCache spec` (total: `build` for every store, `set` follows `Store.set`; `root?`
+   with `root?_sound`, `root?_agree`), `Carried := Trunc {a // Holds a s}` (a subsingleton, so
+   `Materialized.ext` keeps its statement), `Carried.run` (one `set` per writing op, never
+   `build`), `RootFromCarried` (proved; fallback a `Thunk`), `RootAvailable` over admitted stores,
+   teeth `flat_not_available`, `stale_root_refuted`, `constant_root_refuted`. Decisions from the
+   review: the private instance is a TOTAL index plus the decoded context and mask, the gate and
+   custody outside it; acceptance is a logical patch whose custody op writes the blinding value,
+   which encodes `(cell id, version, mask)` injectively (context from the store: the root stays a
+   function of it, and distinct contexts separate outer-hash inputs with no birthday term; entropy
+   only from the mask). Owed with it: receipt/event hiding re-established over the new roots
+   (their joint view factorization), mask substitution preserving context and index in
+   `ServesWithin`.
+   **Next code:** `Materializer` gains `aux : AuxCache (rootBytes ∘ codec.encode)` defaulting to
+   `flat`; `Materialized` gains `carried`; `materialize` uses `build`; `ValidatedPatch.apply` uses
+   `Carried.run`; `rootCache := Carried.rootOr carried ⟨bytes root⟩`. Then the private instance
+   and `RootAvailable` at `FitStore`; insert as a heap program through the same walk compiled code
+   runs (cost via the interpreter, path injectivity throughout the patch). Linear paths outside the
+   aux, to note at the flatness bench: `Store.set` is `DFinsupp.update` (lookups can traverse
+   update history); validation runs the patch and application runs it again; whole-cell
+   `canonicalPostBytes` per durable write.
+   **FORMAT pairing** agreed with hot-path aa2905fee8ef847d1 (recorded in its
+   `docs/HOT-PATH-STATE.md`, "Next" item 2): one epoch bump; I send the FORMAT sha to the hot-path
+   address, row 11 rebases onto it, the integrator lands the pair with one genesis and one fixture
+   re-record. Row 11 persists no cell root or `Materialized` field; private indexes are rebuilt on
+   open.
 2. **The registry and native-host switch** for content and the declared kinds: a root-format change
    (fresh genesis, fixture re-record in the same sha), codec epoch ordered with the hot-path lane
    (a86738fc1dfae6429 answered 10-31: no overlap with Materialized, CellState, PersistedCodecTags or snapshots; private cells go first). Agreed with hot-path aa2905fee8ef847d1 (row 11, session indexes in the checkpoint): ONE epoch bump, one batch, one fresh genesis, one fixture re-record; when the root-switch sha is green, tell it, it rebases row 11 onto it, the pair goes to the integrator labelled FORMAT. If row 11 is ready well before, it does not wait. The receiver's acceptance theorems cite `admit`; **no receiver
