@@ -17,7 +17,7 @@ path = "src/provider_bridge.rs"
 [dependencies]
 libc = "=0.2.189"
 # The one wire: Host operation bytes and reply markers (mini_sdk::host_operations, generated from Lean).
-mini-sdk = { package = "minidregg-mini-sdk", path = "../mini-sdk" }
+mini-sdk = { package = "minidregg-mini-sdk", path = "../mini-sdk", features = ["native"] }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.151"
 serde_yaml = "=0.9.34"
