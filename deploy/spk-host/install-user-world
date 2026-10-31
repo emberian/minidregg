@@ -84,9 +84,21 @@ if [[ -e $registry_dir/vars-backing ]]; then
   [[ $vars_backing == /* && $vars_backing != *$'\n'* ]] && safe_root_dir "$vars_backing" \
     && /usr/bin/mountpoint -q -- "$vars_backing" || { echo "vars-backing $vars_backing is not an absolute mountpoint under root custody" >&2; exit 1; }
 fi
+# A host whose SPK store sits on a small disk names a scratch root for the intake spools in the root-owned
+# one-line file $registry_dir/ingest-scratch (the operator-appliance profile's decoded bound is 20 GiB).
+# Each world gets <root>/<store>, owned by its operator, 0700; the broker config's ingestScratch names it.
+ingest_scratch_root=
+if [[ -e $registry_dir/ingest-scratch ]]; then
+  [[ -f $registry_dir/ingest-scratch && ! -L $registry_dir/ingest-scratch && $(stat -c '%u:%a' "$registry_dir/ingest-scratch") == 0:644 ]] \
+    || { echo 'ingest-scratch custody refused' >&2; exit 1; }
+  ingest_scratch_root=$(<"$registry_dir/ingest-scratch")
+  [[ $ingest_scratch_root == /* && $ingest_scratch_root != *$'\n'* ]] && safe_root_dir "$ingest_scratch_root" \
+    || { echo "ingest-scratch $ingest_scratch_root is not an absolute directory under root custody" >&2; exit 1; }
+fi
 release_vars() { # STORE: unmount the world's bind mount and drop its backing directory (empty by then)
   if /usr/bin/mountpoint -q -- "$root/vars"; then umount -- "$root/vars"; fi
   if [[ -n $vars_backing && -d $vars_backing/$1 ]]; then rmdir -- "$vars_backing/$1"; fi
+  if [[ -n $ingest_scratch_root && -d $ingest_scratch_root/$1 && ! -L $ingest_scratch_root/$1 ]]; then rm -rf --one-file-system -- "$ingest_scratch_root/$1"; fi
 }
 if [[ $action == remove ]]; then
   [[ ! -e $root/controller && ! -L $root/controller ]] || {
@@ -190,6 +202,7 @@ fi
 install -d -o "$op_uid" -g "$op_gid" -m 700 "$root/broker" "$root/$store" "$root/runtime-$store"
 install -d -o "$op_uid" -g "$op_gid" -m 755 "$root/spk" "$root/spk/packages"
 install -d -o "$op_uid" -g "$op_gid" -m 700 "$root/spk/inbox"
+[[ -z $ingest_scratch_root ]] || install -d -o "$op_uid" -g "$op_gid" -m 700 "$ingest_scratch_root/$store"
 if [[ -e $profiled_bwrap ]]; then
   [[ -f $profiled_bwrap && ! -L $profiled_bwrap && $(stat -c '%u' "$profiled_bwrap") == 0 ]] || { echo "root setup refuses $profiled_bwrap custody" >&2; exit 1; }
   install -o root -g root -m 600 /dev/null "$root/bwrap-acl-grants"

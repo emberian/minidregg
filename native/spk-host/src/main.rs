@@ -2,7 +2,7 @@
 fn main() {
     use minidregg_spk_host::launch_descriptor_native::qualify_launch;
     use minidregg_spk_host::materialize::{
-        materialize_spk_with_profile, qualify_bridge_spk_with_profile, signed_schema_source,
+        materialize_spk_with_scratch, qualify_bridge_spk_with_profile, signed_schema_source,
         verify_installed_spk, ImportProfile,
     };
     use serde_json::json;
@@ -36,6 +36,16 @@ fn main() {
                 std::process::exit(2);
             }
         };
+        args.drain(2..4);
+    }
+    // `materialize --import-profile P --scratch DIR ...`: the operator's spool directory (broker
+    // config `ingestScratch`); a package never chooses it.
+    let mut scratch: Option<std::path::PathBuf> = None;
+    if args.get(1).map(String::as_str) == Some("materialize") && args.get(2).map(String::as_str) == Some("--scratch") {
+        match args.get(3) {
+            Some(dir) if dir.starts_with('/') => scratch = Some(dir.into()),
+            _ => { eprintln!("spk-host: --scratch needs an absolute directory"); std::process::exit(2); }
+        }
         args.drain(2..4);
     }
     // The modeled unit manager of a fixture build (src/fixture_os.rs).
@@ -274,7 +284,7 @@ fn main() {
                 std::process::exit(2);
             }
         };
-        match materialize_spk_with_profile(Path::new(&args[2]), Path::new(&args[3]), uid, import_profile) {
+        match materialize_spk_with_scratch(Path::new(&args[2]), Path::new(&args[3]), uid, import_profile, scratch.as_deref()) {
             Ok(installed) => {
                 println!(
                     "installed={} spkSha256={} spkLength={} appId={} version={} signedManifestSha256={} signedBridgeConfigSha256={}",

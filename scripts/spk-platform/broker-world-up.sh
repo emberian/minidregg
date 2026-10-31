@@ -73,6 +73,14 @@ registry=/etc/mini-spk-volumes/$store.json
 # package's size (spk-host import-limits).
 import_profile=${MINI_IMPORT_PROFILE:-standard-v1}
 case $import_profile in standard-v1|market-large-v1|operator-appliance-v1) ;; *) echo "unknown MINI_IMPORT_PROFILE $import_profile" >&2; exit 2;; esac
+# A host whose SPK store sits on a small disk names a root-custodied scratch root in
+# /etc/mini-spk-volumes/ingest-scratch (one absolute path, root 0644): install-user-world makes
+# <root>/<store> for the operator, and this world's intake spools there (the profile's decoded bound
+# is 20 GiB for operator-appliance-v1). Absent: the SPK store itself.
+ingest_scratch=
+if [[ -e /etc/mini-spk-volumes/ingest-scratch ]]; then
+  ingest_scratch=$(</etc/mini-spk-volumes/ingest-scratch)/$store
+fi
 # Home visibility is an explicit bounded inventory; native broker custody
 # validation remains authoritative for every file and socket parent.
 if [[ -n ${MINI_RESIDENT_HOME_PATHS:-} ]]; then
@@ -82,8 +90,8 @@ else
   printf '[]\n' >"$run/resident-home-paths.json"
 fi
 jq -n --slurpfile homePaths "$run/resident-home-paths.json" --slurpfile registry "$registry" --arg binary "$bin/spk-host" --arg sha "$(sha256sum "$bin/spk-host" | cut -d ' ' -f1)" --arg ingest "$bin/spk-ingest" --arg op "$op_name" \
-  --arg bwrap "$bwrap" --arg bwrapSha "$(sha256sum "$bwrap" | cut -d ' ' -f1)" --arg importProfile "$import_profile" '
-  $registry[0] as $r | {protocol:"mini-spk-broker-config-v3",store:$r.store,grainsRoot:$r.grainsRoot,spkRoot:($r.grainsRoot+"/spk"),brokerSocket:($r.grainsRoot+"/runtime-"+$r.store+"/broker.sock"),operatorUser:$op,unitPrefix:"mini",spkHost:$binary,spkHostSha256:$sha,bwrap:$bwrap,bwrapSha256:$bwrapSha,ingestHelper:$ingest,volumeHelper:$r.helper,appUids:$r.appUids,residentHomeReadOnlyPaths:$homePaths[0],importProfile:$importProfile}' >"$root/broker/config.json"
+  --arg bwrap "$bwrap" --arg bwrapSha "$(sha256sum "$bwrap" | cut -d ' ' -f1)" --arg importProfile "$import_profile" --arg ingestScratch "$ingest_scratch" '
+  $registry[0] as $r | {protocol:"mini-spk-broker-config-v3",store:$r.store,grainsRoot:$r.grainsRoot,spkRoot:($r.grainsRoot+"/spk"),brokerSocket:($r.grainsRoot+"/runtime-"+$r.store+"/broker.sock"),operatorUser:$op,unitPrefix:"mini",spkHost:$binary,spkHostSha256:$sha,bwrap:$bwrap,bwrapSha256:$bwrapSha,ingestHelper:$ingest,volumeHelper:$r.helper,appUids:$r.appUids,residentHomeReadOnlyPaths:$homePaths[0],importProfile:$importProfile} + (if $ingestScratch == "" then {} else {ingestScratch:$ingestScratch} end)' >"$root/broker/config.json"
 chmod 600 "$root/broker/config.json"
 sed "s|%h/.local/libexec/mini-spk-broker|$bin/mini-spk-broker|" "$repo/deploy/spk-host/mini-spk-broker@.service" >"$units/mini-spk-broker@$store.service"
 systemctl --user daemon-reload
